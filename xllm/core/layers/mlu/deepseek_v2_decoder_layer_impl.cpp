@@ -98,6 +98,12 @@ void DeepseekV2DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
+void DeepseekV2DecoderLayerImpl::check_loaded() const {
+  if (moe_mlp_) {
+    moe_mlp_->check_loaded();
+  }
+}
+
 torch::Tensor DeepseekV2DecoderLayerImpl::forward(
     torch::Tensor& x,
     std::optional<torch::Tensor>& residual,

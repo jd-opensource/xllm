@@ -127,6 +127,12 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     norm_->load_state_dict(state_dict.get_dict_with_prefix("norm."));
   }
 
+  void check_loaded() const {
+    for (const auto& layer : layers_) {
+      layer->check_loaded();
+    }
+  }
+
   layer::WordEmbedding get_word_embedding() { return embed_tokens_; }
 
   void set_word_embedding(layer::WordEmbedding& word_embedding) {
@@ -171,6 +177,21 @@ class DeepseekV2ForCausalLMImpl
     CHECK(!FLAGS_enable_chunked_prefill)
         << "deepseek_v2 have not supported "
            "enable_chunked_prefill yet. Please disable it.";
+  }
+
+  void load_model(
+      std::unique_ptr<ModelLoader> loader,
+      std::string prefix = "model." /*llm model weight prefix*/) override {
+    for (const auto& state_dict : loader->get_state_dicts()) {
+      model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
+      if (tie_word_embeddings) {
+        lm_head_->load_state_dict(
+            state_dict->get_dict_with_prefix(prefix + "embed_tokens."));
+      } else {
+        lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
+      }
+    }
+    model_->check_loaded();
   }
 };
 TORCH_MODULE(DeepseekV2ForCausalLM);

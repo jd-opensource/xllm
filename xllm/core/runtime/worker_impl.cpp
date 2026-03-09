@@ -32,6 +32,8 @@ limitations under the License.
 
 #include <memory>
 #include <optional>
+#include <string>
+#include <unordered_map>
 #include <utility>
 
 #include "common/device_monitor.h"
@@ -774,6 +776,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
                             int32_t random_seed,
                             MasterStatus master_status) {
   // set same random seed for all worker
+  FLAGS_random_seed = random_seed;
   device_.set_seed(random_seed);
 
   auto model_loader = ModelLoader::create(model_weights_path);
@@ -806,15 +809,24 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   if (options_.enable_speculative_decode()) {
     args.num_speculative_tokens(options_.num_speculative_tokens());
     // When running speculative decoding, the draft worker reuses the same
-    // checkpoint as the target DeepSeek V3/V32 model. The draft worker needs
-    // to instantiate the MTP variant, so override the model_type here without
-    // mutating the original config.
+    // checkpoint as the target model. The draft worker needs to instantiate
+    // the MTP variant, so override the model_type here without mutating the
+    // original config.
     if (options_.num_speculative_tokens() == 0 &&
-        (args.model_type() == "deepseek_v3" ||
-         args.model_type() == "deepseek_v32")) {
-      LOG(INFO) << "Overriding draft model_type from " << args.model_type()
-                << " to deepseek_v3_mtp for speculative decoding";
-      args.model_type("deepseek_v3_mtp");
+        args.num_nextn_predict_layers() != 0) {
+      static const std::unordered_map<std::string, std::string>
+          kModelTypeToMtpType = {
+              {"deepseek_v3", "deepseek_v3_mtp"},
+              {"deepseek_v32", "deepseek_v3_mtp"},
+              {"glm_moe_dsa", "glm_moe_dsa_mtp"},
+          };
+      const std::string& current_type = args.model_type();
+      auto it = kModelTypeToMtpType.find(current_type);
+      if (it != kModelTypeToMtpType.end()) {
+        LOG(INFO) << "Overriding draft model_type from " << current_type
+                  << " to " << it->second << " for speculative decoding";
+        args.model_type(it->second);
+      }
     }
   }
 #endif
@@ -1006,9 +1018,10 @@ int64_t WorkerImpl::get_num_layers() const {
   if (is_spec_draft_) {
     // for MTP draft models, the number of layers is the number of nextn
     // predict layers
-    std::string model_type = context_.get_model_args().model_type();
-    if (model_type == "deepseek_v3_mtp") {
-      num_layers = context_.get_model_args().num_nextn_predict_layers();
+    int64_t num_nextn_predict_layers =
+        context_.get_model_args().num_nextn_predict_layers();
+    if (num_nextn_predict_layers > 0) {
+      return num_nextn_predict_layers;
     }
   }
 #endif
