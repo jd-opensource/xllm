@@ -19,6 +19,7 @@ limitations under the License.
 #include <c10/core/DeviceType.h>
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <vector>
 
 #include "batch_input_builder.h"
@@ -161,6 +162,32 @@ std::vector<Sequence*> Batch::get_sequences() {
   return result;
 }
 
+bool Batch::has_partial_finished_beam_group() const {
+  if (sequence_groups_.empty()) {
+    return false;
+  }
+
+  for (auto* seq_group : sequence_groups_) {
+    if (!seq_group->check_beam_search()) {
+      continue;
+    }
+
+    const auto& sequences = seq_group->sequences();
+    if (sequences.empty()) {
+      continue;
+    }
+
+    const size_t finished_cnt = static_cast<size_t>(
+        std::count_if(sequences.begin(), sequences.end(), [](const auto& seq) {
+          return seq->finished();
+        }));
+    if (finished_cnt > 0 && finished_cnt < sequences.size()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void Batch::refresh_sequences_from_groups() {
   if (sequence_groups_.empty()) {
     return;
@@ -287,7 +314,13 @@ RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
                             &args,
                             batch_forward_type_,
                             thread_pool);
-  return builder.build_raw_forward_input();
+  auto raw_input = builder.build_raw_forward_input();
+  if (has_partial_finished_beam_group()) {
+    // Beam-search kernel assumes fixed beam width per group. When only part of
+    // a group is active, fall back to software beam merge.
+    raw_input.acc_logprob_vec.clear();
+  }
+  return raw_input;
 }
 
 void Batch::process_sample_output(const RawForwardOutput& raw_output,
