@@ -43,7 +43,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
 
   bool init_model(const std::string& model_weights_path,
                   int32_t random_seed,
-                  int32_t master_status) override;
+                  MasterStatus master_status) override;
 
   bool init_model(ModelContext& context) override;
 

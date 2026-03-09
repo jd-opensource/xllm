@@ -53,7 +53,7 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
  public:
   bool init_model(const std::string& model_weights_path,
                   int32_t random_seed,
-                  int32_t master_status) override;
+                  MasterStatus master_status) override;
 
   bool allocate_kv_cache(
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;

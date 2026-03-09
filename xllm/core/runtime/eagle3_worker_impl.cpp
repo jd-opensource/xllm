@@ -55,7 +55,7 @@ Eagle3WorkerImpl::Eagle3WorkerImpl(const ParallelArgs& parallel_args,
 
 bool Eagle3WorkerImpl::init_model(const std::string& model_weights_path,
                                   int32_t random_seed,
-                                  int32_t master_status) {
+                                  MasterStatus master_status) {
   // Call parent's init_model first
   bool result =
       MTPWorkerImpl::init_model(model_weights_path, random_seed, master_status);

@@ -653,7 +653,7 @@ folly::SemiFuture<folly::Unit> WorkerImpl::process_group_test_async() {
 folly::SemiFuture<bool> WorkerImpl::init_model_async(
     const std::string& model_weights_path,
     int32_t random_seed,
-    int32_t master_status) {
+    MasterStatus master_status) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this,
@@ -669,13 +669,13 @@ folly::SemiFuture<bool> WorkerImpl::init_model_async(
   return future;
 }
 
-bool WorkerImpl::sleep(int32_t master_status) {
+bool WorkerImpl::sleep(MasterStatus master_status) {
   // The memory for kvcache and model weights from hbm is released by xtensor;
-  if (master_status == LIGHT_SLEEP) {
+  if (master_status == MasterStatus::LIGHT_SLEEP) {
     // only load model weights to host memory.
     auto model_loader = ModelLoader::create(model_weights_path_);
     model_->lazy_load_model(std::move(model_loader));
-  } else if (master_status == DEEP_SLEEP) {
+  } else if (master_status == MasterStatus::DEEP_SLEEP) {
     // only release model weights from host memory.
     model_->free_model_weights();
   }
@@ -759,9 +759,9 @@ bool WorkerImpl::wakeup(const WakeupOptions& options) {
     return false;
   }
 
-  if (options.master_status == LIGHT_SLEEP) {
+  if (options.master_status == MasterStatus::LIGHT_SLEEP) {
     model_->reload_model_weights();
-  } else if (options.master_status == DEEP_SLEEP) {
+  } else if (options.master_status == MasterStatus::DEEP_SLEEP) {
     auto model_loader = ModelLoader::create(model_weights_path_);
     model_->load_model(std::move(model_loader));
   }
@@ -772,7 +772,7 @@ bool WorkerImpl::wakeup(const WakeupOptions& options) {
 // initialize model, cache manager. async call
 bool WorkerImpl::init_model(const std::string& model_weights_path,
                             int32_t random_seed,
-                            int32_t master_status) {
+                            MasterStatus master_status) {
   // set same random seed for all worker
   device_.set_seed(random_seed);
 
@@ -847,9 +847,9 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
         std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
   }
 
-  if (master_status == WAKEUP) {
+  if (master_status == MasterStatus::WAKEUP) {
     this->load_model(std::move(model_loader));
-  } else if (master_status == LIGHT_SLEEP) {
+  } else if (master_status == MasterStatus::LIGHT_SLEEP) {
     this->lazy_load_model(std::move(model_loader));
   }
 

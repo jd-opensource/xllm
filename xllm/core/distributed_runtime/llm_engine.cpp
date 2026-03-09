@@ -132,7 +132,7 @@ void LLMEngine::process_group_test() {
 #endif
 }
 
-bool LLMEngine::init(int32_t master_status) {
+bool LLMEngine::init(MasterStatus master_status) {
   if (!init_model(master_status)) {
     LOG(ERROR) << "Failed to init model from: " << options_.model_path();
     return false;
@@ -154,9 +154,10 @@ bool LLMEngine::init(int32_t master_status) {
     LOG(INFO) << "Successfully initialized kv cache";
   }
 
-  // If master_status is not WAKEUP, put the model to sleep after initialization
+  // If master_status is not MasterStatus::WAKEUP, put the model to sleep after
+  // initialization
   // This allows KV cache allocation to complete first, then releases resources
-  if (FLAGS_enable_xtensor && master_status != WAKEUP) {
+  if (FLAGS_enable_xtensor && master_status != MasterStatus::WAKEUP) {
     const std::string& model_id = options_.model_id();
     if (!PageAllocator::get_instance().sleep_model(
             model_id, /*skip_weight_release=*/true)) {
@@ -171,7 +172,7 @@ bool LLMEngine::init(int32_t master_status) {
   return true;
 }
 
-bool LLMEngine::init_model(int32_t master_status) {
+bool LLMEngine::init_model(MasterStatus master_status) {
   const std::string& model_path = options_.model_path();
   auto model_loader = ModelLoader::create(model_path);
   LOG(INFO) << "Initializing model from: " << model_path;
@@ -267,15 +268,17 @@ bool LLMEngine::init_model(int32_t master_status) {
               << ", num_pages=" << num_pages
               << ", master_status=" << master_status;
 
-    if (master_status == WAKEUP) {
+    if (master_status == MasterStatus::WAKEUP) {
       // Consume physical pages for weights (global xtensor handles mapping)
       if (!page_allocator.alloc_weight_pages(model_id, num_pages)) {
         LOG(ERROR) << "Failed to allocate weight pages";
         return false;
       }
-      LOG(INFO) << "master_status=0 (WAKEUP): Allocated weight pages, "
-                   "will load to device";
-    } else if (master_status == LIGHT_SLEEP || master_status == DEEP_SLEEP) {
+      LOG(INFO)
+          << "master_status=0 (MasterStatus::WAKEUP): Allocated weight pages, "
+             "will load to device";
+    } else if (master_status == MasterStatus::LIGHT_SLEEP ||
+               master_status == MasterStatus::DEEP_SLEEP) {
       // Record num_pages for later wakeup
       page_allocator.set_weight_pages_count(model_id, num_pages);
       LOG(INFO) << "master_status=" << master_status
@@ -1119,7 +1122,7 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
   return batched_inputs;
 }
 
-bool LLMEngine::sleep(int32_t master_status) {
+bool LLMEngine::sleep(MasterStatus master_status) {
   // sleep/wakeup/fork_master requires FLAGS_enable_xtensor
   if (!FLAGS_enable_xtensor) {
     LOG(WARNING) << "sleep requires FLAGS_enable_xtensor to be enabled";

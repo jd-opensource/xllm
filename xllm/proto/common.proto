@@ -81,3 +81,9 @@ message CommUniqueId {
 message CommUniqueIdList {
   repeated CommUniqueId comm_unique_ids = 1;
 }
+
+enum MasterStatus {
+  WAKEUP = 0;
+  LIGHT_SLEEP = 1;
+  DEEP_SLEEP = 2;
+}

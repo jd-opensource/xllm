@@ -21,6 +21,7 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
+#include "common.pb.h"
 #include "nlohmann/json.hpp"
 #include "util/slice.h"
 
@@ -338,19 +339,73 @@ struct EplbInfo {
   int32_t update_layer_id = -1;
 };
 
-inline constexpr int REC_TOKEN_SIZE = 3;
+class MasterStatus {
+ public:
+  enum Value : int32_t {
+    WAKEUP = 0,
+    LIGHT_SLEEP = 1,
+    DEEP_SLEEP = 2,
+  };
 
-using RecTokenTriple = std::array<int32_t, REC_TOKEN_SIZE>;
+  constexpr MasterStatus(Value v) : value_(v) {}
+  constexpr MasterStatus(const xllm::proto::MasterStatus& status) {
+    switch (status) {
+      case xllm::proto::MasterStatus::WAKEUP:
+        value_ = WAKEUP;
+        break;
+      case xllm::proto::MasterStatus::LIGHT_SLEEP:
+        value_ = LIGHT_SLEEP;
+        break;
+      case xllm::proto::MasterStatus::DEEP_SLEEP:
+        value_ = DEEP_SLEEP;
+        break;
+      default:
+        LOG(FATAL) << "Unsupported master status: " << status;
+        value_ = WAKEUP;  // unreachable, suppress warning
+        break;
+    }
+  }
+
+  MasterStatus() = delete;
+
+  constexpr operator Value() const { return value_; }
+  explicit operator bool() = delete;
+
+  bool operator==(MasterStatus rhs) const { return value_ == rhs.value_; }
+  bool operator!=(MasterStatus rhs) const { return value_ != rhs.value_; }
+  bool operator==(Value rhs) const { return value_ == rhs; }
+  bool operator!=(Value rhs) const { return value_ != rhs; }
+
+  constexpr xllm::proto::MasterStatus to_proto() const {
+    switch (value_) {
+      case WAKEUP:
+        return xllm::proto::MasterStatus::WAKEUP;
+      case LIGHT_SLEEP:
+        return xllm::proto::MasterStatus::LIGHT_SLEEP;
+      case DEEP_SLEEP:
+        return xllm::proto::MasterStatus::DEEP_SLEEP;
+      default:
+        LOG(FATAL) << "Unsupported master status: " << value_;
+        return xllm::proto::MasterStatus::WAKEUP;  // unreachable, suppress
+                                                   // warning
+    }
+  }
+
+ private:
+  Value value_;
+};
 
 // Options for remote weight wakeup
 struct WakeupOptions {
-  int32_t master_status = 0;
+  MasterStatus master_status = MasterStatus::WAKEUP;
   std::vector<std::string> remote_addrs;
   // Each remote_addr has a list of weight segments to pull
   // Segments are ordered and should be concatenated at destination
   std::vector<std::vector<WeightSegment>> src_weight_segments;
 };
 
+inline constexpr int32_t REC_TOKEN_SIZE = 3;
+using RecTokenTriple = std::array<int32_t, REC_TOKEN_SIZE>;
 inline constexpr const char* LLM_REC_INPUT_TOKENS = "llm_rec_input_tokens";
 inline constexpr const char* LLM_REC_INPUT_INDICES = "llm_rec_input_indices";
 inline constexpr const char* LLM_REC_INPUT_EMBEDDING =

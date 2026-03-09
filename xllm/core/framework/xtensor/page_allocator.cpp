@@ -73,7 +73,7 @@ PageAllocator::~PageAllocator() {
 
 bool PageAllocator::register_model(const std::string& model_id,
                                    int64_t num_layers,
-                                   int32_t master_status) {
+                                   MasterStatus master_status) {
   std::lock_guard<std::mutex> lock(mtx_);
 
   CHECK(initialized_) << "PageAllocator not initialized";

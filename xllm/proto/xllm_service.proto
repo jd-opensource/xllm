@@ -24,7 +24,7 @@ message MasterInfos {
   string model_id = 1;
   string model_path = 2;
   string master_node_addr = 3;
-  int32 master_status = 4;
+  MasterStatus master_status = 4;
   repeated string remote_addrs = 5;
   int32 nnodes = 6;
   int32 dp_size = 7;

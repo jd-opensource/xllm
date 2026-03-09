@@ -54,7 +54,7 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(
 
 bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
                                        int32_t random_seed,
-                                       int32_t master_status) {
+                                       MasterStatus master_status) {
   // Base class only loads the target model.
   bool result = true;
   if (impl_->get_status() == WorkerImpl::Status::UNINITIALIZED) {

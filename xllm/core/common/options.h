@@ -230,7 +230,7 @@ class Options {
   // max concurrency for rec worker
   PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
 
-  PROPERTY(int32_t, master_status) = 0;
+  PROPERTY(MasterStatus, master_status) = MasterStatus::WAKEUP;
 };
 
 }  // namespace xllm

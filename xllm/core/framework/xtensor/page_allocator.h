@@ -29,6 +29,7 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
+#include "common/types.h"
 #include "virt_page.h"
 #include "xtensor.h"  // For offset_t type definition
 
@@ -88,7 +89,7 @@ class PageAllocator {
   // Returns true if registration successful
   bool register_model(const std::string& model_id,
                       int64_t num_layers,
-                      int32_t master_status);
+                      MasterStatus master_status);
 
   // Put a model to sleep:
   // - Release weight pages (via free_weight_pages)
@@ -157,7 +158,8 @@ class PageAllocator {
   // Get number of weight pages allocated for a model (not cleared on free)
   size_t get_weight_pages_allocated(const std::string& model_id) const;
 
-  // Set weight pages count (for LIGHT_SLEEP/DEEP_SLEEP mode without physical
+  // Set weight pages count (for
+  // MasterStatus::LIGHT_SLEEP/MasterStatus::DEEP_SLEEP mode without physical
   // allocation)
   void set_weight_pages_count(const std::string& model_id, size_t num_pages);
 

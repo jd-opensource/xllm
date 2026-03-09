@@ -50,7 +50,7 @@ class SpeculativeWorkerImpl : public WorkerImpl {
 
   bool init_model(const std::string& model_weights_path,
                   int32_t random_seed,
-                  int32_t master_status) override;
+                  MasterStatus master_status) override;
 
   void get_device_info(std::string& device_ip, uint16_t& port) override {
     impl_->get_device_info(device_ip, port);
