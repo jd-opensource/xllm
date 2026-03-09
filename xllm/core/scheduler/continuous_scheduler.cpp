@@ -38,6 +38,40 @@ limitations under the License.
 #include "util/utils.h"
 
 namespace xllm {
+namespace {
+
+size_t estimate_decode_extra_blocks(Sequence* sequence,
+                                    size_t updated_num_tokens,
+                                    size_t block_size) {
+  const size_t num_blocks = sequence->kv_state().num_kv_blocks();
+  const size_t num_blocks_needed =
+      (updated_num_tokens + block_size - 1) / block_size;
+  if (num_blocks_needed > num_blocks) {
+    return num_blocks_needed - num_blocks;
+  }
+
+  // Beam swap may still require one extra block when reusing source blocks.
+  if (sequence->check_beam_search() &&
+      !sequence->kv_state().src_blocks().empty() &&
+      sequence->kv_state().need_swap()) {
+    return 1;
+  }
+  return 0;
+}
+
+size_t get_sequence_free_blocks_for_rank(KVCacheManager* kv_cache_manager,
+                                         int32_t dp_rank) {
+  const auto free_blocks = kv_cache_manager->num_free_blocks();
+  if (free_blocks.empty()) {
+    return 0;
+  }
+  if (dp_rank >= 0 && static_cast<size_t>(dp_rank) < free_blocks.size()) {
+    return free_blocks[dp_rank];
+  }
+  return util::max(free_blocks);
+}
+
+}  // namespace
 
 ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
     : options_(options),
@@ -401,52 +435,155 @@ void ContinuousScheduler::handle_decode_requests(
     size_t allocated_tokens = 0;
     size_t allocated_seqs = 0;
     double allocated_estimate_latency = 0;
-    for (auto& sequence : request->sequences()) {
-      // skip finished sequence.
-      if (sequence->finished()) {
+
+    if (request->check_beam_search()) {
+      std::vector<Sequence*> active_sequences;
+      active_sequences.reserve(num_sequences);
+      for (auto& seq : request->sequences()) {
+        if (!seq->finished()) {
+          active_sequences.emplace_back(seq.get());
+        }
+      }
+      if (active_sequences.empty()) {
+        running_queue->pop_top();
         continue;
       }
-      // no budget left
-      double seq_estimate_latency = 0;
-      if (options_.enable_latency_aware_schedule()
-          // force not enabled on prefill node (only offline req decode here)
-          && !(options_.instance_role().has_value() &&
-               options_.instance_role().value() == InstanceRole::PREFILL)) {
-        seq_estimate_latency =
-            profile_manager_->predict_step_time(sequence.get(), false);
-        if (estimate_latency + allocated_estimate_latency +
-                seq_estimate_latency >
-            latency_budget) {
+
+      const size_t decode_step_tokens = min_speculative_tokens_required_ + 1;
+      if (decode_step_tokens * active_sequences.size() >
+              remaining_token_budget ||
+          active_sequences.size() > remaining_seq_budget) {
+        has_enough_budget = false;
+      }
+
+      if (has_enough_budget && options_.enable_latency_aware_schedule() &&
+          !(options_.instance_role().has_value() &&
+            options_.instance_role().value() == InstanceRole::PREFILL)) {
+        for (auto* sequence : active_sequences) {
+          const double seq_estimate_latency =
+              profile_manager_->predict_step_time(sequence, false);
+          if (estimate_latency + allocated_estimate_latency +
+                  seq_estimate_latency >
+              latency_budget) {
+            has_enough_budget = false;
+            break;
+          }
+          allocated_estimate_latency += seq_estimate_latency;
+        }
+      }
+
+      // Reset estimation value. It will be recomputed on successful allocation.
+      allocated_estimate_latency = 0.0;
+
+      if (has_enough_budget) {
+        const size_t block_size = kv_cache_manager_->block_size();
+        size_t needed_blocks = 0;
+        for (auto* sequence : active_sequences) {
+          const size_t updated_num_tokens =
+              sequence->num_tokens() + min_speculative_tokens_required_;
+          needed_blocks += estimate_decode_extra_blocks(
+              sequence, updated_num_tokens, block_size);
+        }
+
+        const int32_t dp_rank = active_sequences.front()->dp_rank();
+        const size_t free_blocks =
+            get_sequence_free_blocks_for_rank(kv_cache_manager_, dp_rank);
+        if (needed_blocks > free_blocks) {
+          has_enough_blocks = false;
+        }
+      }
+
+      if (has_enough_budget && has_enough_blocks) {
+        bool allocate_failed = false;
+        for (auto* sequence : active_sequences) {
+          const size_t updated_num_tokens =
+              sequence->num_tokens() + min_speculative_tokens_required_;
+          if (!kv_cache_manager_->allocate(sequence, updated_num_tokens)) {
+            allocate_failed = true;
+            break;
+          }
+          if (sequence->if_cache_block_for_prefill()) {
+            kv_cache_manager_->cache(sequence);
+          }
+          candidate_sequences.emplace_back(sequence);
+          candidate_token_budgets.emplace_back(decode_step_tokens);
+          allocated_tokens += decode_step_tokens;
+          allocated_seqs += 1;
+        }
+
+        if (allocate_failed) {
+          LOG(ERROR) << "Beam strict scheduling allocation failed. "
+                     << "request_id=" << request->request_id()
+                     << ", beam=" << request->check_beam_search();
+          // Fallback to full request deallocation to avoid inconsistent
+          // per-sequence states.
+          kv_cache_manager_->deallocate(request.get());
+          running_queue->pop_top();
+          request->set_preempted();
+          if (request->offline()) {
+            waiting_priority_queue_offline_.push(request);
+          } else {
+            waiting_priority_queue_.push(request);
+          }
+          continue;
+        }
+
+        if (options_.enable_latency_aware_schedule() &&
+            !(options_.instance_role().has_value() &&
+              options_.instance_role().value() == InstanceRole::PREFILL)) {
+          for (auto* sequence : candidate_sequences) {
+            allocated_estimate_latency +=
+                profile_manager_->predict_step_time(sequence, false);
+          }
+        }
+      }
+    } else {
+      for (auto& sequence : request->sequences()) {
+        if (sequence->finished()) {
+          continue;
+        }
+        // no budget left
+        double seq_estimate_latency = 0;
+        if (options_.enable_latency_aware_schedule()
+            // force not enabled on prefill node (only offline req decode here)
+            && !(options_.instance_role().has_value() &&
+                 options_.instance_role().value() == InstanceRole::PREFILL)) {
+          seq_estimate_latency =
+              profile_manager_->predict_step_time(sequence.get(), false);
+          if (estimate_latency + allocated_estimate_latency +
+                  seq_estimate_latency >
+              latency_budget) {
+            has_enough_budget = false;
+            break;
+          }
+        }
+        if (allocated_tokens + min_speculative_tokens_required_ >=
+                remaining_token_budget ||
+            allocated_seqs >= remaining_seq_budget) {
           has_enough_budget = false;
           break;
         }
-      }
-      if (allocated_tokens + min_speculative_tokens_required_ >=
-              remaining_token_budget ||
-          allocated_seqs >= remaining_seq_budget) {
-        has_enough_budget = false;
-        break;
-      }
-      // sequence token already appended
-      size_t updated_num_tokens =
-          sequence->num_tokens() + min_speculative_tokens_required_;
-      // no blocks left
-      if (!kv_cache_manager_->allocate(sequence.get(), updated_num_tokens)) {
-        has_enough_blocks = false;
-        break;
-      }
+        // sequence token already appended
+        size_t updated_num_tokens =
+            sequence->num_tokens() + min_speculative_tokens_required_;
+        // no blocks left
+        if (!kv_cache_manager_->allocate(sequence.get(), updated_num_tokens)) {
+          has_enough_blocks = false;
+          break;
+        }
 
-      if (sequence->if_cache_block_for_prefill()) {
-        kv_cache_manager_->cache(sequence.get());
-      }
+        if (sequence->if_cache_block_for_prefill()) {
+          kv_cache_manager_->cache(sequence.get());
+        }
 
-      // update the allocated tokens for the sequence
-      allocated_tokens += min_speculative_tokens_required_ + 1;
-      allocated_seqs += 1;
-      allocated_estimate_latency += seq_estimate_latency;
-      candidate_sequences.emplace_back(sequence.get());
-      candidate_token_budgets.emplace_back(min_speculative_tokens_required_ +
-                                           1);
+        // update the allocated tokens for the sequence
+        allocated_tokens += min_speculative_tokens_required_ + 1;
+        allocated_seqs += 1;
+        allocated_estimate_latency += seq_estimate_latency;
+        candidate_sequences.emplace_back(sequence.get());
+        candidate_token_budgets.emplace_back(min_speculative_tokens_required_ +
+                                             1);
+      }
     }
     CHECK(allocated_tokens <= remaining_token_budget);
     CHECK(allocated_seqs <= remaining_seq_budget);
