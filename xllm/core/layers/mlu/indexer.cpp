@@ -166,6 +166,10 @@ IndexerImpl::IndexerImpl(int64_t dim,
       head_dim_padded, torch::kFloat32, torch::kCPU, true);
   hadamard_matrix_ =
       hadamard_matrix_.to(options.device(), options.dtype().toScalarType());
+
+  // indexer config
+  // TODO: this part should be obtained via model config instead
+  q_rope_at_front_ = true;
 }
 
 torch::Tensor IndexerImpl::rotate_activation(
@@ -333,6 +337,8 @@ torch::Tensor IndexerImpl::preprocess_indexer_q_fused(
   q_params.cos = rotary_emb_->get_cos_cache();
   q_params.position_id = positions;
   q_params.quant_mode = "none";
+  q_params.interleaved = rotary_emb_->get_interleaved();
+  q_params.rope_at_front = q_rope_at_front_;
   kernel::fused_indexer_q(q_params);
   return output;
 }
@@ -358,6 +364,10 @@ torch::Tensor IndexerImpl::preprocess_indexer_k_fused(
   k_params.k_cache = k_cache;
   k_params.k_cache_scale = std::nullopt;
   k_params.hadamard_matrix = hadamard_matrix_;
+  k_params.interleaved = rotary_emb_->get_interleaved();
+  k_params.gamma = k_norm_->weight();
+  k_params.beta = k_norm_->bias();
+  k_params.eps = k_norm_->eps();
   kernel::fused_indexer_k(k_params);
   return head_weights;
 }

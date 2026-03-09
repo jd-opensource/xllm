@@ -722,7 +722,9 @@ void fused_indexer_q(FusedIndexerQParams& params) {
                        params.sin,
                        params.cos,
                        params.position_id,
-                       params.quant_mode);
+                       params.quant_mode,
+                       params.interleaved,
+                       params.rope_at_front);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -740,7 +742,11 @@ void fused_indexer_k(FusedIndexerKParams& params) {
                        params.head_weights,
                        params.k_cache,
                        params.k_cache_scale,
-                       params.hadamard_matrix);
+                       params.hadamard_matrix,
+                       params.interleaved,
+                       params.gamma,
+                       params.beta,
+                       params.eps);
 #else
   NOT_IMPLEMENTED();
 #endif
