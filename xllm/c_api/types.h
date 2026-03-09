@@ -241,13 +241,13 @@ typedef enum XLLM_CAPI_EXPORT XLLM_StatusCode {
  */
 typedef struct XLLM_CAPI_EXPORT XLLM_Usage {
   /** Number of tokens in the prompt */
-  uint32_t prompt_tokens;
+  int32_t prompt_tokens;
 
   /** Number of tokens in the generated completion */
-  uint32_t completion_tokens;
+  int32_t completion_tokens;
 
   /** Total tokens used (prompt + completion) */
-  uint32_t total_tokens;
+  int32_t total_tokens;
 } XLLM_Usage;
 
 /**

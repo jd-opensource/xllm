@@ -142,11 +142,9 @@ XLLM_Response build_success_response(const RequestOutput& output,
 
   if (output.usage.has_value()) {
     const auto& usage = output.usage.value();
-    response.usage.prompt_tokens =
-        static_cast<int32_t>(usage.num_prompt_tokens);
-    response.usage.completion_tokens =
-        static_cast<int32_t>(usage.num_generated_tokens);
-    response.usage.total_tokens = static_cast<int32_t>(usage.num_total_tokens);
+    response.usage.prompt_tokens = usage.num_prompt_tokens;
+    response.usage.completion_tokens = usage.num_generated_tokens;
+    response.usage.total_tokens = usage.num_total_tokens;
   }
 
   return response;
