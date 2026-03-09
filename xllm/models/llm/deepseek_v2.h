@@ -94,6 +94,8 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
       attn_metadata.plan_info->layer_id = i;
 #endif
       auto& layer = layers_[i];
+      prepare_decoder_layer_for_forward(i, layer, attn_metadata);
+
       hidden_states = layer(hidden_states,
                             residual,
                             positions,
@@ -130,6 +132,18 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   void set_word_embedding(layer::WordEmbedding& word_embedding) {
     embed_tokens_ = word_embedding;
   }
+
+ protected:
+  virtual void prepare_decoder_layer_for_forward(
+      size_t /*layer_id*/,
+      layer::DeepseekV2DecoderLayer& /*layer*/,
+      const layer::AttentionMetadata& /*attn_metadata*/) {}
+
+  layer::WordEmbedding& embed_mod() { return embed_tokens_; }
+
+  std::vector<layer::DeepseekV2DecoderLayer>& layers_ref() { return layers_; }
+
+  layer::RMSNorm& norm_mod() { return norm_; }
 
  private:
   torch::nn::ModuleList blocks_{nullptr};

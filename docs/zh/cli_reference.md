@@ -22,6 +22,7 @@ xLLM使用gflags来管理服务启动参数，具体的参数含义如下：
 | `max_tokens_per_batch` | `int32` | int32的最大值 |  | 每个step可计算的最大token数量 |  |
 | `max_seqs_per_batch` | `int32` | 256 |  | 每个step可计算的最大sequence数量 |  |
 | `enable_chunked_prefill` | `bool` | true | false | 是否开启chunked prefill |  |
+| `enable_prefill_sp` | `bool` | false | true | 是否开启 DeepSeek V3.2 仅 prefill 阶段的 sequence parallel | 仅当前分支的 `deepseek_v32` 生效；且暂时不支持 `enable_prefix_cache` 与 `enable_chunked_prefill` |
 | `enable_schedule_overlap` | `bool` | false | true | 是否开启异步调度 | [详情](./features/async_schedule.md) |
 | `enable_prefix_cache` | `bool` | true | false | 是否开启prefix cache（DeepSeek暂不支持） |  |
 | `communication_backend` | `string` | "hccl" | "lccl" | 通信操作采用的后端 |  |

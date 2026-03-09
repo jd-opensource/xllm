@@ -30,7 +30,6 @@ struct DeepseekV32SPSegment {
   int32_t req_idx = 0;
   int32_t rank = 0;
   int32_t q_tokens = 0;
-  int32_t q_offset = 0;
   int32_t k_len = 0;
   int32_t world_begin = 0;
 };
@@ -39,10 +38,11 @@ struct DeepseekV32SPCommPlan {
   std::vector<int32_t> tokens_per_rank;
   std::vector<int32_t> padded_tokens_per_rank;
   int32_t token_num_offset = 0;
+};
 
-  std::vector<int32_t> local_reorder_index_cpu;
+struct DeepseekV32SPRuntimeArtifacts {
+  DeepseekV32SPCommPlan comm_plan;
   std::vector<int32_t> gathered_reorder_index_cpu;
-  std::vector<int32_t> gathered_padded_reorder_index_cpu;
 };
 
 inline std::vector<int32_t> extract_prefill_seq_lens(
@@ -108,7 +108,6 @@ inline std::vector<DeepseekV32SPSegment> build_all_sp_segments(
       left_segment.req_idx = req_idx;
       left_segment.rank = rank;
       left_segment.q_tokens = left_token_num;
-      left_segment.q_offset = batch_left;
       left_segment.k_len =
           left_token_num == 0 ? 0 : batch_left + left_token_num;
       left_segment.world_begin = world_left;
@@ -118,7 +117,6 @@ inline std::vector<DeepseekV32SPSegment> build_all_sp_segments(
       right_segment.req_idx = req_idx;
       right_segment.rank = rank;
       right_segment.q_tokens = right_token_num;
-      right_segment.q_offset = batch_right - right_token_num;
       right_segment.k_len = right_token_num == 0 ? 0 : batch_right;
       right_segment.world_begin = world_right - right_token_num;
       segments.push_back(right_segment);
@@ -149,7 +147,7 @@ inline std::vector<DeepseekV32SPSegment> build_local_sp_segments(
   return segments;
 }
 
-inline DeepseekV32SPCommPlan build_zigzag_comm_plan(
+inline DeepseekV32SPRuntimeArtifacts build_sp_runtime_artifacts(
     int32_t curr_rank,
     int32_t world_size,
     const std::vector<DeepseekV32SPSegment>& all_segments,
@@ -157,51 +155,40 @@ inline DeepseekV32SPCommPlan build_zigzag_comm_plan(
   CHECK_GE(curr_rank, 0) << "curr_rank must be non-negative.";
   CHECK_LT(curr_rank, world_size) << "curr_rank out of range.";
 
-  DeepseekV32SPCommPlan plan;
-  plan.tokens_per_rank.assign(world_size, 0);
+  DeepseekV32SPRuntimeArtifacts artifacts;
+  auto& comm_plan = artifacts.comm_plan;
+  comm_plan.tokens_per_rank.assign(world_size, 0);
 
   std::vector<std::vector<int32_t>> per_rank_indices(world_size);
   for (const auto& segment : all_segments) {
+    comm_plan.tokens_per_rank[segment.rank] += segment.q_tokens;
     auto& rank_indices = per_rank_indices.at(segment.rank);
+    if (rank_indices.empty()) {
+      rank_indices.reserve(total_tokens / world_size + 1);
+    }
     for (int32_t i = 0; i < segment.q_tokens; ++i) {
       rank_indices.push_back(segment.world_begin + i);
     }
-    plan.tokens_per_rank[segment.rank] += segment.q_tokens;
-  }
-
-  plan.local_reorder_index_cpu = per_rank_indices.at(curr_rank);
-
-  for (const auto& rank_indices : per_rank_indices) {
-    plan.gathered_reorder_index_cpu.insert(
-        plan.gathered_reorder_index_cpu.end(),
-        rank_indices.begin(),
-        rank_indices.end());
   }
 
   const int32_t padded_token_num = *std::max_element(
-      plan.tokens_per_rank.begin(), plan.tokens_per_rank.end());
-  plan.padded_tokens_per_rank.assign(world_size, padded_token_num);
-  plan.gathered_padded_reorder_index_cpu.reserve(padded_token_num * world_size);
-  int32_t offset = 0;
-  for (int32_t rank = 0; rank < world_size; ++rank) {
-    const int32_t valid_token_num = plan.tokens_per_rank[rank];
-    plan.gathered_padded_reorder_index_cpu.insert(
-        plan.gathered_padded_reorder_index_cpu.end(),
-        plan.gathered_reorder_index_cpu.begin() + offset,
-        plan.gathered_reorder_index_cpu.begin() + offset + valid_token_num);
-    const int32_t pad_token_num = padded_token_num - valid_token_num;
-    plan.gathered_padded_reorder_index_cpu.insert(
-        plan.gathered_padded_reorder_index_cpu.end(),
-        pad_token_num,
-        total_tokens);
-    offset += valid_token_num;
-  }
-
-  plan.token_num_offset =
-      std::accumulate(plan.tokens_per_rank.begin(),
-                      plan.tokens_per_rank.begin() + curr_rank,
+      comm_plan.tokens_per_rank.begin(), comm_plan.tokens_per_rank.end());
+  comm_plan.padded_tokens_per_rank.assign(world_size, padded_token_num);
+  comm_plan.token_num_offset =
+      std::accumulate(comm_plan.tokens_per_rank.begin(),
+                      comm_plan.tokens_per_rank.begin() + curr_rank,
                       int32_t{0});
-  return plan;
+
+  artifacts.gathered_reorder_index_cpu.reserve(total_tokens);
+  for (const auto& rank_indices : per_rank_indices) {
+    artifacts.gathered_reorder_index_cpu.insert(
+        artifacts.gathered_reorder_index_cpu.end(),
+        rank_indices.begin(),
+        rank_indices.end());
+  }
+  CHECK_EQ(artifacts.gathered_reorder_index_cpu.size(), total_tokens)
+      << "gathered reorder index must cover all tokens.";
+  return artifacts;
 }
 
 }  // namespace xllm::layer::v32_sp

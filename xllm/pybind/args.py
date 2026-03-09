@@ -22,6 +22,7 @@ class ArgumentParser:
         self.parser.add_argument('--expert_parallel_degree', type=int, default=0, help='ep degree')
         self.parser.add_argument('--enable_mla', action='store_true', help='whether to enable multi-head latent attention.')
         self.parser.add_argument('--disable_chunked_prefill', action='store_true', help='Whether to disable chunked prefill.')
+        self.parser.add_argument('--enable_prefill_sp', action='store_true', help='Enable prefill-only sequence parallel.')
         self.parser.add_argument('--master_node_addr', type=str, default='', help='The master address for multi-node distributed serving(e.g. 10.18.1.1:9999).')
         self.parser.add_argument('--instance_role', type=str, default='DEFAULT', help='The role of instance(e.g. DEFAULT, PREFILL, DECODE, MIX).')
         self.parser.add_argument('--device_ip', type=str, default='', help='The device ip.')
