@@ -8,12 +8,14 @@ cc_library(
   HDRS
     block.h
     block_manager.h
+    embedding_manager.h
     block_manager_pool.h
     block_manager_impl.h
     concurrent_block_manager_impl.h
     hierarchy_block_manager_pool.h
   SRCS 
     block.cpp
+    embedding_manager.cpp
     block_manager_pool.cpp
     concurrent_block_manager_impl.cpp
     block_manager_impl.cpp
