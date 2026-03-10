@@ -114,7 +114,7 @@ DECLARE_int32(max_tokens_for_graph_mode);
 
 DECLARE_bool(enable_chunked_prefill);
 
-DECLARE_bool(prefill_use_sequence_parallel);
+DECLARE_bool(enable_prefill_sp);
 
 DECLARE_string(master_node_addr);
 

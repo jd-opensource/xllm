@@ -184,7 +184,7 @@ TEST(DeepseekV32SPUtilsTest,
 
 TEST(DeepseekV32SPUtilsTest,
      BuildDeepseekV32SPContextBuildsMetadataForCurrentRank) {
-  ScopedFlagValue enable_sp(FLAGS_prefill_use_sequence_parallel, true);
+  ScopedFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
   ScopedFlagValue world_size_flag(FLAGS_nnodes, 4);
 
   AttentionMetadata attn_metadata = make_prefill_metadata({4, 6, 11});
@@ -249,7 +249,7 @@ TEST(DeepseekV32SPUtilsTest,
 
 TEST(DeepseekV32SPUtilsTest,
      BuildDeepseekV32SPContextFallsBackWhenSeqShorterThanWorldSize) {
-  ScopedFlagValue enable_sp(FLAGS_prefill_use_sequence_parallel, true);
+  ScopedFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
   ScopedFlagValue nnodes_flag(FLAGS_nnodes, 2);
 
   AttentionMetadata attn_metadata = make_prefill_metadata({3});
@@ -263,7 +263,7 @@ TEST(DeepseekV32SPUtilsTest,
 }
 
 TEST(DeepseekV32SPUtilsTest, BuildSPMetadataTracksSegmentView) {
-  ScopedFlagValue enable_sp(FLAGS_prefill_use_sequence_parallel, true);
+  ScopedFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
   ScopedFlagValue world_size_flag(FLAGS_nnodes, 4);
 
   AttentionMetadata attn_metadata = make_prefill_metadata({4, 6, 11});
@@ -352,7 +352,7 @@ TEST(DeepseekV32SPUtilsTest, SliceLocalPackedUsesRankOffset) {
 
 TEST(DeepseekV32SPUtilsTest,
      BuildDeepseekV32SPContextReturnsNulloptWhenDisabled) {
-  ScopedFlagValue enable_sp(FLAGS_prefill_use_sequence_parallel, false);
+  ScopedFlagValue enable_sp(FLAGS_enable_prefill_sp, false);
   ScopedFlagValue world_size_flag(FLAGS_nnodes, 4);
 
   AttentionMetadata attn_metadata = make_prefill_metadata({8});
@@ -381,7 +381,7 @@ TEST(DeepseekV32SPUtilsTest, ReorderByIndexSlicesFirstDimension) {
 }
 
 TEST(DeepseekV32SPUtilsTest, RestoreGatheredToGlobalOrderWithoutPadding) {
-  ScopedFlagValue use_sp(FLAGS_prefill_use_sequence_parallel, true);
+  ScopedFlagValue use_sp(FLAGS_enable_prefill_sp, true);
   ScopedFlagValue nnodes(FLAGS_nnodes, 4);
 
   AttentionMetadata attn_metadata = make_prefill_metadata({16});
@@ -403,7 +403,7 @@ TEST(DeepseekV32SPUtilsTest, RestoreGatheredToGlobalOrderWithoutPadding) {
 }
 
 TEST(DeepseekV32SPUtilsTest, RestoreGatheredToGlobalOrderDropsPadding) {
-  ScopedFlagValue use_sp(FLAGS_prefill_use_sequence_parallel, true);
+  ScopedFlagValue use_sp(FLAGS_enable_prefill_sp, true);
   ScopedFlagValue nnodes(FLAGS_nnodes, 4);
 
   AttentionMetadata attn_metadata = make_prefill_metadata({10});
@@ -438,7 +438,7 @@ TEST(DeepseekV32SPUtilsTest, RestoreGatheredToGlobalOrderDropsPadding) {
 }
 
 TEST(DeepseekV32SPUtilsTest, AllGatherAcrossRanksRestoresGlobalOrder) {
-  ScopedFlagValue use_sp(FLAGS_prefill_use_sequence_parallel, true);
+  ScopedFlagValue use_sp(FLAGS_enable_prefill_sp, true);
   ScopedFlagValue nnodes(FLAGS_nnodes, 4);
 
   AttentionMetadata attn_metadata = make_prefill_metadata({10});
@@ -541,7 +541,7 @@ TEST(DeepseekV32SPUtilsTest, LaunchAndFinishGatherMatchBlockingGather) {
 }
 
 TEST(DeepseekV32SPUtilsTest, PaddedGatherRestoresGlobalOrder) {
-  ScopedFlagValue use_sp(FLAGS_prefill_use_sequence_parallel, true);
+  ScopedFlagValue use_sp(FLAGS_enable_prefill_sp, true);
   ScopedFlagValue nnodes(FLAGS_nnodes, 4);
 
   AttentionMetadata attn_metadata = make_prefill_metadata({10});

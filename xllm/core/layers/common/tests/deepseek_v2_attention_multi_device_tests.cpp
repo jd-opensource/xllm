@@ -282,7 +282,7 @@ torch::Tensor run_attention_decode_once(const ModelArgs& args,
                                         KVCache& kv_cache,
                                         bool enable_full_weight_path,
                                         bool enable_fused_mla_kernel) {
-  ScopedBoolFlagValue flag_guard(FLAGS_prefill_use_sequence_parallel,
+  ScopedBoolFlagValue flag_guard(FLAGS_enable_prefill_sp,
                                  enable_full_weight_path);
   OptimizationConfig optimization_config;
   optimization_config.enable_fused_mla_kernel = enable_fused_mla_kernel;
@@ -306,7 +306,7 @@ std::tuple<torch::Tensor, torch::Tensor> run_attention_prefill_once(
     KVCache& kv_cache,
     bool enable_full_weight_path,
     bool enable_fused_mla_kernel) {
-  ScopedBoolFlagValue flag_guard(FLAGS_prefill_use_sequence_parallel,
+  ScopedBoolFlagValue flag_guard(FLAGS_enable_prefill_sp,
                                  enable_full_weight_path);
   OptimizationConfig optimization_config;
   optimization_config.enable_fused_mla_kernel = enable_fused_mla_kernel;
@@ -443,6 +443,7 @@ int32_t run_attention_prefill_test_child(int32_t rank,
 
     ParallelArgs parallel_args(rank, world_size, process_group.get());
     parallel_args.tp_group_ = process_group.get();
+    parallel_args.sp_group_ = process_group.get();
 
     auto options = torch::TensorOptions()
                        .dtype(torch::kBFloat16)

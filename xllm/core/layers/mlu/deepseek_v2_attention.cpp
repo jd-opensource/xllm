@@ -51,7 +51,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
       v_head_dim_(args.v_head_dim()),
       eps_(args.rms_norm_eps()),
       interleaved_(true) {
-  use_full_replicated_attention_weights_ = FLAGS_prefill_use_sequence_parallel;
+  use_full_replicated_attention_weights_ = FLAGS_enable_prefill_sp;
   tp_rank_ = parallel_args.tp_group_->rank();
   const int64_t tp_size = parallel_args.tp_group_->world_size();
   tp_world_size_ = tp_size;

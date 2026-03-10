@@ -164,9 +164,9 @@ DEFINE_double(prefill_scheduling_memory_usage_threshold,
 
 DEFINE_bool(enable_chunked_prefill, true, "Whether to enable chunked prefill.");
 
-DEFINE_bool(prefill_use_sequence_parallel,
+DEFINE_bool(enable_prefill_sp,
             false,
-            "Whether to enable DeepSeek V3.2 prefill-only sequence parallel.");
+            "Whether to enable prefill-only sequence parallel.");
 
 DEFINE_int32(max_tokens_per_chunk_for_prefill,
              -1,

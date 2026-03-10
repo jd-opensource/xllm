@@ -65,8 +65,7 @@ inline std::optional<DeepseekV32SPContext> build_deepseek_v32_sp_context(
     int32_t world_size) {
   const bool is_prefill_phase =
       base_attn_metadata.is_prefill && !base_attn_metadata.is_chunked_prefill;
-  if (!FLAGS_prefill_use_sequence_parallel || !is_prefill_phase ||
-      world_size <= 1) {
+  if (!FLAGS_enable_prefill_sp || !is_prefill_phase || world_size <= 1) {
     return std::nullopt;
   }
 
