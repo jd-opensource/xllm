@@ -280,6 +280,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
 
   void prepare_multi_modal_data(ForwardInput& processed_inputs);
 
+  void initialize_xattention_workspace();
+
   std::vector<std::unique_ptr<RecWorkPipeline>> work_pipelines_;
 
   RecModelKind rec_model_kind_ = RecModelKind::kNone;

@@ -129,17 +129,7 @@ AttentionMetadata AttentionMetadataBuilder::build(
       attn_metadata.step_tensor = llmrec_params.current_round_tensor;
     }
 
-    const bool has_two_stage_cache_tensors =
-        llmrec_params.two_stage_shared_lse.defined() ||
-        llmrec_params.two_stage_shared_o.defined() ||
-        llmrec_params.two_stage_unshared_lse.defined() ||
-        llmrec_params.two_stage_unshared_o.defined() ||
-        llmrec_params.two_stage_q_cu_seq_lens_shared.defined() ||
-        llmrec_params.two_stage_paged_kv_indptr_expanded.defined() ||
-        llmrec_params.two_stage_paged_kv_indices_expanded.defined() ||
-        llmrec_params.two_stage_paged_kv_last_page_len_expanded.defined();
-
-    if (has_two_stage_cache_tensors) {
+    if (!FLAGS_enable_xattention_one_stage) {
 #if defined(USE_CUDA) || defined(USE_MUSA)
       attn_metadata.xattention_two_stage_decode_cache.emplace(
           XAttentionTwoStageDecodeCache{});

@@ -32,24 +32,6 @@ limitations under the License.
 namespace xllm::layer::test {
 namespace {
 
-class ScopedDecodeFlags {
- public:
-  ScopedDecodeFlags()
-      : old_enable_xattention_two_stage_decode_(
-            FLAGS_enable_xattention_two_stage_decode),
-        old_max_tokens_per_batch_(FLAGS_max_tokens_per_batch) {}
-
-  ~ScopedDecodeFlags() {
-    FLAGS_enable_xattention_two_stage_decode =
-        old_enable_xattention_two_stage_decode_;
-    FLAGS_max_tokens_per_batch = old_max_tokens_per_batch_;
-  }
-
- private:
-  bool old_enable_xattention_two_stage_decode_;
-  int32_t old_max_tokens_per_batch_;
-};
-
 struct DecodeTestInput {
   AttentionMetadata attn_metadata;
   torch::Tensor query;
@@ -215,7 +197,7 @@ class XAttentionDecodeCompareTest : public ::testing::Test {
   }
 
   torch::Tensor run_decode_once(DecodeTestInput& input, bool enable_two_stage) {
-    FLAGS_enable_xattention_two_stage_decode = enable_two_stage;
+    FLAGS_enable_xattention_one_stage = !enable_two_stage;
     FLAGS_max_tokens_per_batch = kSharedSeqLen;
 
     XAttentionImpl attention(
@@ -242,8 +224,6 @@ class XAttentionDecodeCompareTest : public ::testing::Test {
   void compare_single_and_two_stage(torch::ScalarType dtype,
                                     double atol,
                                     double rtol) {
-    ScopedDecodeFlags guard;
-
     constexpr int64_t kSeed = 20260303;
     torch::manual_seed(kSeed);
     torch::cuda::manual_seed_all(kSeed);

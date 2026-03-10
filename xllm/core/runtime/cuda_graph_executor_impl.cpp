@@ -381,9 +381,10 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
         .copy_(embedding, /*non_blocking=*/true);
   }
 
-  const bool enable_two_stage_decode =
-      FLAGS_enable_xattention_two_stage_decode &&
+  const bool is_decode_with_llmrec =
       params.batch_forward_type.is_decode() && params.has_llmrec_params();
+  const bool use_two_stage_decode =
+      !FLAGS_enable_xattention_one_stage && is_decode_with_llmrec;
   const int32_t head_dim = args_.head_dim();
   const int64_t n_heads = args_.n_heads();
   const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
@@ -408,7 +409,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
 
   bool use_tensor_core =
       xllm::kernel::cuda::should_use_tensor_core(dtype, n_heads, n_kv_heads);
-  if (enable_two_stage_decode) {
+  if (use_two_stage_decode) {
     if (params.q_seq_lens.defined() && params.q_seq_lens.numel() > 0) {
       const int64_t q_numel = params.q_seq_lens.numel();
       q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/q_numel)
@@ -434,10 +435,6 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
 
     // Update plan_info if attn_metadata exists and enable_cuda_graph is true.
     const auto& llmrec_params = *params.llmrec_params();
-    CHECK(attn_metadata->xattention_two_stage_decode_cache.has_value())
-        << "two-stage cache must be prepared in rec worker before "
-           "cuda graph update";
-
     auto cache = attn_metadata->xattention_two_stage_decode_cache.value();
     CHECK(cache.q_cu_seq_lens_shared.defined())
         << "q_cu_seq_lens_shared must be initialized in rec worker";

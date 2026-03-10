@@ -125,11 +125,6 @@ void XAttentionImpl::run_two_stage_decode(
   CHECK_EQ(total_beam % batch_size, 0)
       << "total_beam must be divisible by batch_size";
 
-  CHECK(attn_metadata.xattention_two_stage_decode_cache.has_value())
-      << "xattention_two_stage_decode_cache must be prepared before "
-         "run_two_stage_decode (expected from "
-         "RecWorkerImpl::prepare_input_for_current_round).";
-
   const auto& cache = attn_metadata.xattention_two_stage_decode_cache.value();
   CHECK(cache.shared_lse.defined() && cache.shared_o.defined() &&
         cache.unshared_lse.defined() && cache.unshared_o.defined())
@@ -413,10 +408,10 @@ void XAttentionImpl::decoder_forward(const AttentionMetadata& attn_metadata,
                                                 attn_metadata.unshared_k_cache,
                                                 attn_metadata.unshared_v_cache,
                                                 attn_metadata.step_tensor);
-  if (FLAGS_enable_xattention_two_stage_decode) {
-    run_two_stage_decode(attn_metadata, query, output);
-  } else {
+  if (FLAGS_enable_xattention_one_stage) {
     run_single_stage_decode(attn_metadata, key, query, output);
+  } else {
+    run_two_stage_decode(attn_metadata, query, output);
   }
 }
 

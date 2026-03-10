@@ -554,29 +554,31 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::allocate_kv_caches_related() {
           .unsqueeze(1);
   cached_current_round_tensor_ = torch::zeros({1}, int_options);
 
-  if (FLAGS_enable_xattention_two_stage_decode) {
-    const int64_t num_heads = runtime_.context->get_model_args().n_heads();
-    const int64_t max_total_beam =
-        static_cast<int64_t>(max_seqs_per_batch_) * beam_width_;
-    auto fp32_options =
-        torch::TensorOptions().dtype(torch::kFloat32).device(device);
-    cached_two_stage_shared_lse_ =
-        torch::zeros({max_total_beam, num_heads, 1}, fp32_options);
-    cached_two_stage_shared_o_ =
-        torch::zeros({max_total_beam, num_heads, head_dim}, kv_cache_options);
-    cached_two_stage_unshared_lse_ =
-        torch::zeros({max_total_beam, num_heads, 1}, fp32_options);
-    cached_two_stage_unshared_o_ =
-        torch::zeros({max_total_beam, num_heads, head_dim}, kv_cache_options);
-    cached_two_stage_q_cu_seq_lens_shared_ =
-        torch::zeros({max_seqs_per_batch_ + 1}, int_options);
-    cached_two_stage_paged_kv_indptr_expanded_ =
-        torch::zeros({max_total_beam + 1}, int_options);
-    cached_two_stage_paged_kv_indices_expanded_ =
-        torch::zeros({max_total_beam}, int_options);
-    cached_two_stage_paged_kv_last_page_len_expanded_ =
-        torch::zeros({max_total_beam}, int_options);
+  if (FLAGS_enable_xattention_one_stage) {
+    return;
   }
+
+  const int64_t num_heads = runtime_.context->get_model_args().n_heads();
+  const int64_t max_total_beam =
+      static_cast<int64_t>(max_seqs_per_batch_) * beam_width_;
+  auto fp32_options =
+      torch::TensorOptions().dtype(torch::kFloat32).device(device);
+  cached_two_stage_shared_lse_ =
+      torch::zeros({max_total_beam, num_heads, 1}, fp32_options);
+  cached_two_stage_shared_o_ =
+      torch::zeros({max_total_beam, num_heads, head_dim}, kv_cache_options);
+  cached_two_stage_unshared_lse_ =
+      torch::zeros({max_total_beam, num_heads, 1}, fp32_options);
+  cached_two_stage_unshared_o_ =
+      torch::zeros({max_total_beam, num_heads, head_dim}, kv_cache_options);
+  cached_two_stage_q_cu_seq_lens_shared_ =
+      torch::zeros({max_seqs_per_batch_ + 1}, int_options);
+  cached_two_stage_paged_kv_indptr_expanded_ =
+      torch::zeros({max_total_beam + 1}, int_options);
+  cached_two_stage_paged_kv_indices_expanded_ =
+      torch::zeros({max_total_beam}, int_options);
+  cached_two_stage_paged_kv_last_page_len_expanded_ =
+      torch::zeros({max_total_beam}, int_options);
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::
@@ -865,7 +867,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_two_stage_round_input(
 // TODO: implement prepare_two_stage_round_input for NPU
 #elif defined(USE_CUDA)
   auto& llm_rec_params = input.input_params.mutable_llmrec_params();
-  CHECK(FLAGS_enable_xattention_two_stage_decode)
+  CHECK_EQ(FLAGS_enable_xattention_one_stage, false)
       << "prepare_two_stage_round_input should only be called when "
          "two-stage decode is enabled";
 
@@ -966,16 +968,16 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_input_for_current_round(
 #if defined(USE_NPU)
 // TODO: implement prepare_input_for_current_round for NPU
 #elif defined(USE_CUDA)
-  if (FLAGS_enable_xattention_two_stage_decode) {
+  if (FLAGS_enable_xattention_one_stage) {
+    input.input_params.paged_kv_indices = results.paged_kv_indices;
+    input.input_params.paged_kv_indptr = results.paged_kv_indptr;
+    input.input_params.paged_kv_last_page_len = results.paged_kv_last_page_len;
+    input.input_params.num_sequences =
+        input.input_params.paged_kv_last_page_len.numel();
+  } else {
     prepare_two_stage_round_input(input, round, top_tokens, beam_tensors);
     return;
   }
-
-  input.input_params.paged_kv_indices = results.paged_kv_indices;
-  input.input_params.paged_kv_indptr = results.paged_kv_indptr;
-  input.input_params.paged_kv_last_page_len = results.paged_kv_last_page_len;
-  input.input_params.num_sequences =
-      input.input_params.paged_kv_last_page_len.numel();
 #endif
   // previous_step corresponds to the decode step that produced tokens for
   // this round.
@@ -1020,100 +1022,104 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::compute_next_round_input_async(
 #if defined(USE_NPU)
 // TODO: implement compute_next_round_input_async for NPU
 #elif defined(USE_CUDA)
-  if (FLAGS_enable_xattention_two_stage_decode) {
+  if (FLAGS_enable_xattention_one_stage) {
+    // Capture necessary data for async computation
+    auto full_kv_offsets = full_kv_cache_offsets_->full_kv_offsets;
+    auto full_kv_mask = full_kv_cache_offsets_->full_kv_mask;
+    auto full_kv_indices = full_kv_cache_offsets_->full_kv_indices;
+    auto unshared_full_kv_offsets = full_kv_cache_offsets_->unshared_offsets;
+    auto real_max_decode_step_ids = full_kv_cache_offsets_->max_decode_step_ids;
+    uint32_t unshared_kv_begin_offset = max_tokens_per_batch_;
+
+    // Launch async computation in thread pool (can overlap with GPU execution)
+    threadpool_.schedule([=, this, promise = std::move(promise)]() mutable {
+      auto device = runtime_.worker.device();
+      auto int32_device_options =
+          torch::TensorOptions().dtype(torch::kInt32).device(device);
+      // Protect CUDA graph capture from conflicting GPU work submitted on
+      // prepare_stream_ while capture is in progress. Use shared lock to allow
+      // multiple prepare operations to run concurrently, but prevent conflicts
+      // with capture operations. This mirrors the NPU DeviceCaptureLock usage
+      // in WorkerImpl::prepare_work_before_execute.
+      std::optional<std::shared_lock<std::shared_mutex>> lock_guard;
+      if (runtime_.worker.options_.enable_graph()) {
+        auto& replay_lock =
+            ::xllm::cuda::DeviceCaptureLock::get_instance().get_read_lock(
+                runtime_.worker.device_.index());
+        lock_guard.emplace(replay_lock);
+      }
+
+      c10::StreamGuard streamGuard =
+          runtime_.worker.prepare_stream_->set_stream_guard();
+      auto shared_kv_offsets = full_kv_offsets.slice(2, 0, max_token_per_req_)
+                                   .slice(0, 0, batch_size);
+
+      auto shared_kv_lens_each_batch = torch::diff(kv_seq_lens);
+
+      auto shared_kv_lens_each_batch_broadcast =
+          shared_kv_lens_each_batch.unsqueeze(1).unsqueeze(1);
+
+      auto shared_mask =
+          full_kv_mask.slice(2, 0, max_token_per_req_).slice(0, 0, batch_size);
+
+      shared_mask.copy_(shared_kv_offsets <
+                        shared_kv_lens_each_batch_broadcast);
+
+      auto kv_lens_batch_offsets = kv_seq_lens.slice(0, 0, -1);
+
+      auto kv_lens_batch_offsets_broadcast =
+          kv_lens_batch_offsets.unsqueeze(1).unsqueeze(1);
+
+      auto shared_kv_indices = full_kv_indices.slice(2, 0, max_token_per_req_)
+                                   .slice(0, 0, batch_size);
+
+      shared_kv_indices.copy_(kv_lens_batch_offsets_broadcast +
+                              shared_kv_offsets);
+
+      auto unshared_kv_offsets =
+          unshared_full_kv_offsets.slice(0, 0, batch_size);
+      int32_t unshared_kv_len = beam_width * max_decode_step;
+      auto unshared_kv_indices =
+          full_kv_indices
+              .slice(
+                  2, max_token_per_req_, max_token_per_req_ + unshared_kv_len)
+              .slice(0, 0, batch_size);
+      unshared_kv_indices.copy_(unshared_kv_offsets + unshared_kv_begin_offset);
+
+      auto unshared_mask =
+          full_kv_mask
+              .slice(
+                  2, max_token_per_req_, max_token_per_req_ + unshared_kv_len)
+              .slice(0, 0, batch_size);
+      auto real_max_decode_step_ids_slice =
+          real_max_decode_step_ids.slice(0, 0, batch_size);
+      unshared_mask.copy_(real_max_decode_step_ids_slice <= current_step);
+
+      unshared_kv_len = current_step + 1;
+
+      auto batch_beam_shared_kv_lens =
+          (shared_kv_lens_each_batch.unsqueeze(1).expand({-1, beam_width}) +
+           unshared_kv_len)
+              .flatten();
+      auto cumsum_result = torch::cumsum(batch_beam_shared_kv_lens, 0);
+      auto paged_kv_indptr =
+          torch::cat({torch::zeros({1}, int32_device_options),
+                      cumsum_result.to(int32_device_options)},
+                     0);
+      auto paged_kv_indices = full_kv_indices.masked_select(full_kv_mask);
+      auto paged_kv_last_page_len =
+          torch::ones({batch_size * beam_width}, int32_device_options);
+      runtime_.worker.prepare_stream_->synchronize();
+
+      NextRoundInputResults results;
+      results.paged_kv_indices = paged_kv_indices;
+      results.paged_kv_indptr = paged_kv_indptr;
+      results.paged_kv_last_page_len = paged_kv_last_page_len;
+      promise.setValue(results);
+    });
+  } else {
     promise.setValue(NextRoundInputResults{});
-    return future;
   }
-
-  // Capture necessary data for async computation
-  auto full_kv_offsets = full_kv_cache_offsets_->full_kv_offsets;
-  auto full_kv_mask = full_kv_cache_offsets_->full_kv_mask;
-  auto full_kv_indices = full_kv_cache_offsets_->full_kv_indices;
-  auto unshared_full_kv_offsets = full_kv_cache_offsets_->unshared_offsets;
-  auto real_max_decode_step_ids = full_kv_cache_offsets_->max_decode_step_ids;
-  uint32_t unshared_kv_begin_offset = max_tokens_per_batch_;
-
-  // Launch async computation in thread pool (can overlap with GPU execution)
-  threadpool_.schedule([=, this, promise = std::move(promise)]() mutable {
-    auto device = runtime_.worker.device();
-    auto int32_device_options =
-        torch::TensorOptions().dtype(torch::kInt32).device(device);
-    // Protect CUDA graph capture from conflicting GPU work submitted on
-    // prepare_stream_ while capture is in progress. Use shared lock to allow
-    // multiple prepare operations to run concurrently, but prevent conflicts
-    // with capture operations. This mirrors the NPU DeviceCaptureLock usage in
-    // WorkerImpl::prepare_work_before_execute.
-    std::optional<std::shared_lock<std::shared_mutex>> lock_guard;
-    if (runtime_.worker.options_.enable_graph()) {
-      auto& replay_lock =
-          ::xllm::cuda::DeviceCaptureLock::get_instance().get_read_lock(
-              runtime_.worker.device_.index());
-      lock_guard.emplace(replay_lock);
-    }
-
-    c10::StreamGuard streamGuard =
-        runtime_.worker.prepare_stream_->set_stream_guard();
-    auto shared_kv_offsets =
-        full_kv_offsets.slice(2, 0, max_token_per_req_).slice(0, 0, batch_size);
-
-    auto shared_kv_lens_each_batch = torch::diff(kv_seq_lens);
-
-    auto shared_kv_lens_each_batch_broadcast =
-        shared_kv_lens_each_batch.unsqueeze(1).unsqueeze(1);
-
-    auto shared_mask =
-        full_kv_mask.slice(2, 0, max_token_per_req_).slice(0, 0, batch_size);
-
-    shared_mask.copy_(shared_kv_offsets < shared_kv_lens_each_batch_broadcast);
-
-    auto kv_lens_batch_offsets = kv_seq_lens.slice(0, 0, -1);
-
-    auto kv_lens_batch_offsets_broadcast =
-        kv_lens_batch_offsets.unsqueeze(1).unsqueeze(1);
-
-    auto shared_kv_indices =
-        full_kv_indices.slice(2, 0, max_token_per_req_).slice(0, 0, batch_size);
-
-    shared_kv_indices.copy_(kv_lens_batch_offsets_broadcast +
-                            shared_kv_offsets);
-
-    auto unshared_kv_offsets = unshared_full_kv_offsets.slice(0, 0, batch_size);
-    int32_t unshared_kv_len = beam_width * max_decode_step;
-    auto unshared_kv_indices =
-        full_kv_indices
-            .slice(2, max_token_per_req_, max_token_per_req_ + unshared_kv_len)
-            .slice(0, 0, batch_size);
-    unshared_kv_indices.copy_(unshared_kv_offsets + unshared_kv_begin_offset);
-
-    auto unshared_mask =
-        full_kv_mask
-            .slice(2, max_token_per_req_, max_token_per_req_ + unshared_kv_len)
-            .slice(0, 0, batch_size);
-    auto real_max_decode_step_ids_slice =
-        real_max_decode_step_ids.slice(0, 0, batch_size);
-    unshared_mask.copy_(real_max_decode_step_ids_slice <= current_step);
-
-    unshared_kv_len = current_step + 1;
-
-    auto batch_beam_shared_kv_lens =
-        (shared_kv_lens_each_batch.unsqueeze(1).expand({-1, beam_width}) +
-         unshared_kv_len)
-            .flatten();
-    auto cumsum_result = torch::cumsum(batch_beam_shared_kv_lens, 0);
-    auto paged_kv_indptr = torch::cat({torch::zeros({1}, int32_device_options),
-                                       cumsum_result.to(int32_device_options)},
-                                      0);
-    auto paged_kv_indices = full_kv_indices.masked_select(full_kv_mask);
-    auto paged_kv_last_page_len =
-        torch::ones({batch_size * beam_width}, int32_device_options);
-    runtime_.worker.prepare_stream_->synchronize();
-
-    NextRoundInputResults results;
-    results.paged_kv_indices = paged_kv_indices;
-    results.paged_kv_indptr = paged_kv_indptr;
-    results.paged_kv_last_page_len = paged_kv_last_page_len;
-    promise.setValue(results);
-  });
 #endif
   return future;
 }
@@ -1208,16 +1214,21 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::FullKvCacheOffsets::FullKvCacheOffsets(
 // RecWorkerImpl Implementation
 // ============================================================
 
+void RecWorkerImpl::initialize_xattention_workspace() {
+#if defined(USE_CUDA)
+  if (FLAGS_enable_xattention_one_stage) {
+    return;
+  }
+  ::xllm::layer::xattention::XAttentionWorkspace::get_instance().initialize(
+      device_);
+#endif
+}
+
 RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
                              const torch::Device& device,
                              const runtime::Options& options)
     : LLMWorkerImpl(parallel_args, device, options) {
-#if defined(USE_CUDA)
-  if (FLAGS_enable_xattention_two_stage_decode) {
-    ::xllm::layer::xattention::XAttentionWorkspace::get_instance().initialize(
-        device_);
-  }
-#endif
+  initialize_xattention_workspace();
 
   if (!is_driver()) {
     return;
@@ -1229,10 +1240,7 @@ RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
 #if defined(USE_CUDA)
         ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
             .initialize(device_);
-        if (FLAGS_enable_xattention_two_stage_decode) {
-          ::xllm::layer::xattention::XAttentionWorkspace::get_instance()
-              .initialize(device_);
-        }
+        initialize_xattention_workspace();
 #endif
       });
 
