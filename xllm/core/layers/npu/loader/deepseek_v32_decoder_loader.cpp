@@ -18,6 +18,8 @@ limitations under the License.
 
 #include <iostream>
 
+#include "common/cp_runtime_check.h"
+
 namespace xllm {
 namespace layer {
 
@@ -336,6 +338,14 @@ DeekseekV32DecoderLoader::DeekseekV32DecoderLoader(
   ep_rank_ = parallel_args_.rank() / ep_local_tp_size_;
   start_expert_id_ = ep_rank_ * num_experts_per_partition_;
   end_expert_id_ = start_expert_id_ + num_experts_per_partition_ - 1;
+  cp_check::XLLM_CPCHK_CHECK_TP_CP_SHARD_CONFIG(
+      "DeekseekV32DecoderLoader::ctor",
+      parallel_args_.rank(),
+      parallel_args_.world_size(),
+      dp_size_,
+      cp_size_,
+      dp_local_tp_size_,
+      dp_local_tp_rank_);
   initialize_tensors(options);
   initialize_weight_tensors(options);
 }
@@ -750,6 +760,14 @@ void DeekseekV32DecoderLoader::set_kv_weight(const StateDict& state_dict,
     // mutable_tensor = get_sharded_tensor(state_dict, tensor_name, dim);
     correct_tensor_dtype(mutable_tensor, tensor_name);
   }
+  cp_check::XLLM_CPCHK_CHECK_KV_WEIGHT_SHAPE(
+      "DeekseekV32DecoderLoader::set_kv_weight",
+      mutable_tensor,
+      num_key_value_heads_,
+      dp_local_tp_size_,
+      qk_nope_head_dim_,
+      v_head_dim_,
+      kv_lora_rank_);
 
   torch::Tensor kv_b_proj_weight =
       mutable_tensor.reshape({num_key_value_heads_ / dp_local_tp_size_,

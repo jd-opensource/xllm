@@ -157,6 +157,7 @@ class NpuDeepseekV32DecoderLayerImpl : public BaseLayer {
   int32_t dp_local_tp_size_;
   int32_t dp_rank_;
   int32_t dp_local_tp_rank_;
+  int32_t cp_size_;
 
   float sm_scale_;
   int32_t num_speculative_tokens_ = 0;

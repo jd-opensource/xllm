@@ -30,14 +30,17 @@ void NpuWordEmbeddingImpl::param_from_args(
 
   if (parallel_args.world_size() > 1) {
     if (parallel_args.mapping_data().empty()) {
-      if (dp_size_ > 1) {
+      const bool use_local_tp = (dp_size_ > 1) || (cp_size_ > 1);
+      if (use_local_tp) {
         param.tensorParallelInfo.rank = dp_local_tp_rank_;
         param.tensorParallelInfo.worldSize = dp_local_tp_size_;
       } else {
         param.tensorParallelInfo.rank = parallel_args.rank();
         param.tensorParallelInfo.worldSize = parallel_args.world_size();
       }
-      param.tensorParallelInfo.commDomain = std::to_string(dp_rank_);
+      const int32_t tp_group_id =
+          use_local_tp ? (parallel_args.rank() / dp_local_tp_size_) : 0;
+      param.tensorParallelInfo.commDomain = std::to_string(tp_group_id);
       param.tensorParallelInfo.backend = FLAGS_communication_backend;
     } else {
       atb_speed::common::ParallelInfo parallelInfo =

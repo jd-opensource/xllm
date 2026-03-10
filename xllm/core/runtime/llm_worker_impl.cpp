@@ -25,6 +25,7 @@ limitations under the License.
 #include <optional>
 #include <utility>
 
+#include "common/cp_runtime_check.h"
 #include "common/device_monitor.h"
 #include "common/metrics.h"
 #include "common/types.h"
@@ -125,6 +126,11 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
 
   torch::Tensor logits;
   if (sampling_params.selected_token_idxes.defined()) {
+    cp_check::XLLM_CPCHK_CHECK_SELECTED_TOKEN_IDXES(
+        "LLMWorkerImpl::step_internal",
+        sampling_params.selected_token_idxes,
+        model_output.hidden_states.size(0),
+        "sampling_params.selected_token_idxes");
     logits = model_->logits(model_output.hidden_states,
                             sampling_params.selected_token_idxes);
   }

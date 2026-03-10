@@ -47,6 +47,17 @@ uint32_t get_sample_source_position(const SampleSlot& sample_slot) {
 
 }  // namespace
 
+namespace {
+
+inline uint32_t align_up(uint32_t value, uint32_t alignment) {
+  if (alignment == 0) {
+    return value;
+  }
+  return ((value + alignment - 1) / alignment) * alignment;
+}
+
+}  // namespace
+
 BatchInputBuilder::BatchInputBuilder(
     const std::vector<Sequence*>& sequences,
     const std::vector<uint32_t>& allowed_max_tokens,
@@ -56,6 +67,7 @@ BatchInputBuilder::BatchInputBuilder(
     const uint64_t batch_id,
     const ModelArgs* args,
     BatchForwardType batch_forward_type,
+    int32_t cp_size,
     ThreadPool* thread_pool)
     : sequences_(sequences),
       allowed_max_tokens_(allowed_max_tokens),
@@ -65,7 +77,8 @@ BatchInputBuilder::BatchInputBuilder(
       thread_pool_(thread_pool),
       num_sequences_(sequences.size()),
       swap_block_transfer_infos_(swap_block_transfer_infos),
-      batch_id_(batch_id) {
+      batch_id_(batch_id),
+      cp_size_(std::max(1, cp_size)) {
   // Reserve space for better performance
   state_.flatten_tokens_vec.reserve(1000);
   state_.flatten_positions_vec.reserve(1000);
@@ -273,7 +286,17 @@ void BatchInputBuilder::process_single_sequence(
   CHECK(allowed_max_tokens_[seq_index] > 0);
   const uint32_t q_seq_len =
       std::min(n_tokens - n_kv_cache_tokens, allowed_max_tokens_[seq_index]);
-  const uint32_t seq_len = q_seq_len + n_kv_cache_tokens;
+  uint32_t padded_q_seq_len = q_seq_len;
+  // Continuous scheduler can enlarge token budget for CP prefill padding.
+  // Keep physical q_len aligned to 2 * cp_size to match later cp_partition.
+  if (cp_size_ > 1 && !use_mrope_ && !FLAGS_enable_chunked_prefill &&
+      state.batch_forward_type.no_decode()) {
+    const uint32_t aligned_q_seq_len = align_up(q_seq_len, cp_size_ * 2);
+    padded_q_seq_len =
+        std::min(allowed_max_tokens_[seq_index], aligned_q_seq_len);
+  }
+  const uint32_t logical_seq_len = q_seq_len + n_kv_cache_tokens;
+  const uint32_t seq_len = padded_q_seq_len + n_kv_cache_tokens;
 
   // Validation
   CHECK_GE(sequence->kv_state().current_max_tokens_capacity(), seq_len);
@@ -287,23 +310,24 @@ void BatchInputBuilder::process_single_sequence(
 
   // Update state
   state.max_seq_len = std::max(state.max_seq_len, seq_len);
-  state.q_max_seq_len = std::max(state.q_max_seq_len, q_seq_len);
+  state.q_max_seq_len = std::max(state.q_max_seq_len, padded_q_seq_len);
   state.kv_cache_tokens_nums.emplace_back(n_kv_cache_tokens);
 #if defined(USE_NPU)
   state.seq_lens.push_back(seq_len);
-  state.q_seq_lens.push_back(q_seq_len);
+  state.q_seq_lens.push_back(padded_q_seq_len);
 #elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
   state.seq_lens.push_back(state.seq_lens.back() + seq_len);
-  state.q_seq_lens.push_back(state.q_seq_lens.back() + q_seq_len);
+  state.q_seq_lens.push_back(state.q_seq_lens.back() + padded_q_seq_len);
 #endif
   // Process tokens and positions
-  extract_tokens_and_positions(sequence, n_kv_cache_tokens, seq_len, state_ptr);
+  extract_tokens_and_positions(
+      sequence, n_kv_cache_tokens, logical_seq_len, seq_len, state_ptr);
 
   // Setup KV cache
   setup_kv_cache_info(sequence,
                       n_kv_cache_tokens,
                       seq_len,
-                      q_seq_len,
+                      padded_q_seq_len,
                       state_ptr,
                       write_block_ids_ptr);
 
@@ -316,7 +340,8 @@ void BatchInputBuilder::process_single_sequence(
 
 void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
                                                      uint32_t n_kv_cache_tokens,
-                                                     uint32_t seq_len,
+                                                     uint32_t logical_seq_len,
+                                                     uint32_t physical_seq_len,
                                                      BuilderState* state_ptr) {
   BuilderState& state = state_ptr ? *state_ptr : state_;
 
@@ -332,8 +357,8 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     state.mrope_positions_vec.emplace_back(helper.get_positions());
   }
 
-  // Process each token
-  for (uint32_t j = n_kv_cache_tokens; j < seq_len; ++j) {
+  // Process real tokens
+  for (uint32_t j = n_kv_cache_tokens; j < logical_seq_len; ++j) {
     state.flatten_tokens_vec.emplace_back(token_ids[j]);
 
     if (!use_mrope_) {
@@ -361,18 +386,28 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
       }
       handle_sampling_parameters(sequence, state_ptr);
       ++sample_slot_idx;
+  }
+
+  // Right padding for CP prefill: append physical tokens only for cache/layout.
+  if (physical_seq_len > logical_seq_len) {
+    const int32_t pad_token_id = args_ ? args_->pad_token_id() : 0;
+    for (uint32_t j = logical_seq_len; j < physical_seq_len; ++j) {
+      state.flatten_tokens_vec.emplace_back(pad_token_id);
+      if (!use_mrope_) {
+        state.flatten_positions_vec.push_back(static_cast<int32_t>(j));
+      }
     }
   }
 
   // Add extra token id
-  if (n_tokens == seq_len) {
+  if (n_tokens == logical_seq_len) {
     // last chunk of prefill and decode
     // add -1 as extra token id
     state.extra_token_ids.emplace_back(-1);
     state.embedding_ids.emplace_back(sequence->get_embedding_id());
     state.request_ids.emplace_back(sequence->request_id());
   } else {
-    state.extra_token_ids.emplace_back(token_ids[seq_len]);
+    state.extra_token_ids.emplace_back(token_ids[logical_seq_len]);
   }
 }
 
@@ -417,7 +452,7 @@ void BatchInputBuilder::setup_kv_cache_info(
   std::unordered_set<int32_t>& write_block_ids =
       write_block_ids_ptr ? *write_block_ids_ptr : write_block_ids_;
 
-  // update kv cache tokens num
+  // Keep logical KV progress unchanged by right-padding tokens.
   sequence->kv_state().incr_kv_cache_tokens_num(/*size=*/q_seq_len);
 
   const auto blocks = sequence->kv_state().kv_blocks();

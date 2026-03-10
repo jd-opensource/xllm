@@ -169,9 +169,11 @@ class LLMEngine : public Engine {
   int64_t n_local_linear_k_heads_ = 0;
 
   // common frequently used args
-  uint32_t dp_size_;
+  uint32_t dp_size_ = 1;
+  uint32_t cp_size_ = 1;
   uint32_t worker_clients_num_;
   uint32_t dp_local_tp_size_;
+  uint32_t dp_local_size_;
 
   // For multi-node serving
   // engine brpc server, all workers connect to engine_server_,

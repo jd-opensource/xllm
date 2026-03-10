@@ -17,11 +17,16 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 
+#include <algorithm>
 #include <boost/algorithm/string.hpp>
 #include <iostream>
+#include <numeric>
 #include <utility>
+#include <vector>
 
+#include "common/cp_runtime_check.h"
 #include "common/global_flags.h"
+#include "framework/model/npu_cp_prepare.h"
 #include "layers/common/rotary_embedding_util.h"
 
 namespace xllm {
@@ -209,8 +214,9 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
   end_expert_id_ = start_expert_id_ + num_experts_per_partition_ - 1;
 
   dp_size_ = parallel_args.dp_size();
-  dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
-  CHECK_EQ(parallel_args.world_size(), dp_size_ * dp_local_tp_size_);
+  cp_size_ = parallel_args.cp_size();
+  dp_local_tp_size_ = parallel_args.world_size() / (dp_size_ * cp_size_);
+  CHECK_EQ(parallel_args.world_size(), dp_size_ * dp_local_tp_size_ * cp_size_);
   dp_local_tp_rank_ = parallel_args.rank() % dp_local_tp_size_;
 
   param_from_args(
@@ -807,8 +813,9 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   // final_hidden_states_ = torch::zeros_like(x);
   int32_t input_idx = 0;
   auto& dp_ep_padding = input_params.dp_ep_padding_data;
+  auto& cp_inputs = input_params.cp_prefill_inputs;
 
-  if (dp_size_ <= 1 && ep_size_ <= 1) {
+  if (dp_size_ <= 1 && ep_size_ <= 1 || cp_size_ > 1) {
     dp_ep_padding.set_placeholder(tensor_placeholder_);
   }
   // set micro batch 0 input part
@@ -939,6 +946,28 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 31) =
         atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
   }
+
+  if (cp_size_ > 1 && is_prefill) {
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 32) =
+    atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_o_recover_idx);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 33) =
+    atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_kv_recover_idx);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 34) =
+    atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_load_balance_idx);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 35) =
+    atb_speed::Utils::AtTensor2Tensor(cp_inputs.k_gather_index_prev);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 36) =
+    atb_speed::Utils::AtTensor2Tensor(cp_inputs.k_gather_index_next);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 37) =
+    atb_speed::Utils::AtTensor2Tensor(cp_inputs.actual_seq_lengths_query_prev);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 38) =
+    atb_speed::Utils::AtTensor2Tensor(cp_inputs.actual_seq_lengths_query_next);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 39) =
+    atb_speed::Utils::AtTensor2Tensor(cp_inputs.actual_seq_lengths_key_prev);
+    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 40) =
+    atb_speed::Utils::AtTensor2Tensor(cp_inputs.actual_seq_lengths_key_next);
+  }
+
   node.variantPack.outTensors.at(0) = internal_tensor_;
 }
 

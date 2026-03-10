@@ -132,6 +132,8 @@ DECLARE_int32(dp_size);
 
 DECLARE_int32(ep_size);
 
+DECLARE_int32(cp_size);
+
 DECLARE_string(instance_role);
 
 DECLARE_string(kv_cache_transfer_type);

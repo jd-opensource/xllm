@@ -222,6 +222,8 @@ DEFINE_int32(dp_size, 1, "Data parallel size for MLA attention.");
 
 DEFINE_int32(ep_size, 1, "Expert parallel size for MoE model.");
 
+DEFINE_int32(cp_size, 1, "Context parallel size for DSA attention.");
+
 DEFINE_string(
     communication_backend,
     "hccl",

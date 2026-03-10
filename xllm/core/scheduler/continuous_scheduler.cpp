@@ -73,6 +73,33 @@ size_t get_sequence_free_blocks_for_rank(KVCacheManager* kv_cache_manager,
 
 }  // namespace
 
+namespace {
+
+inline size_t align_up(size_t value, size_t alignment) {
+  if (alignment == 0) {
+    return value;
+  }
+  return ((value + alignment - 1) / alignment) * alignment;
+}
+
+inline size_t maybe_align_cp_prefill_tokens(const Sequence* sequence,
+                                            size_t num_tokens,
+                                            int32_t cp_size) {
+  if (sequence == nullptr || cp_size <= 1 || num_tokens == 0) {
+    return num_tokens;
+  }
+  if (FLAGS_enable_chunked_prefill) {
+    return num_tokens;
+  }
+  if (!sequence->is_prefill_stage()) {
+    return num_tokens;
+  }
+  const size_t alignment = static_cast<size_t>(cp_size) * 2;
+  return align_up(num_tokens, alignment);
+}
+
+}  // namespace
+
 ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
     : options_(options),
       engine_(engine),
@@ -281,6 +308,10 @@ void ContinuousScheduler::handle_prefill_requests(
       // Currently overestimating the number of tokens actually processed when
       // enable prefix cache
       size_t num_tokens = prefill_sequence->num_need_compute_tokens();
+      num_tokens = maybe_align_cp_prefill_tokens(
+          prefill_sequence.get(), num_tokens, options_.cp_size());
+      const size_t target_num_tokens =
+          prefill_sequence->kv_cache_tokens_num() + num_tokens;
       if (remaining_token_budget < allocated_tokens + num_tokens ||
           remaining_seq_budget < allocated_seqs + 1) {
         can_schedule = false;
@@ -289,7 +320,8 @@ void ContinuousScheduler::handle_prefill_requests(
       }
 
       // preempt offline decode
-      if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
+      if (!kv_cache_manager_->allocate(prefill_sequence.get(),
+                                       target_num_tokens)) {
         can_schedule = false;
         if (options_.enable_online_preempt_offline() && !request->offline() &&
             !running_queue_offline_->empty()) {
@@ -300,7 +332,7 @@ void ContinuousScheduler::handle_prefill_requests(
           bool enough_to_evict =
               check_if_enough_to_evict(running_queue_offline_.get(),
                                        prefill_sequence.get(),
-                                       num_tokens,
+                                       target_num_tokens,
                                        num_request_to_evict);
           if (enough_to_evict) {
             for (size_t i = 0; i < num_request_to_evict; ++i) {
@@ -314,7 +346,8 @@ void ContinuousScheduler::handle_prefill_requests(
               request_to_preempt->set_preempted();
               waiting_priority_queue_offline_.push(request_to_preempt);
             }
-            if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
+            if (!kv_cache_manager_->allocate(prefill_sequence.get(),
+                                             target_num_tokens)) {
               LOG(ERROR) << "Should be able to allocate after preempting "
                          << num_request_to_evict
                          << " offline requests, but failed.";

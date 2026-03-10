@@ -122,6 +122,8 @@ class Options {
 
   PROPERTY(int32_t, dp_size) = 1;
 
+  PROPERTY(int32_t, cp_size) = 1;
+
   PROPERTY(int32_t, ep_size) = 1;
 
   PROPERTY(std::optional<std::string>, instance_name);

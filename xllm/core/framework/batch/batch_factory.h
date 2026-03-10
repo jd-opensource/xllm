@@ -22,8 +22,9 @@ namespace xllm {
 
 class BatchFactory {
  public:
-  static BatchFactory* get_instance(int32_t dp_size) {
-    static BatchFactory instance(dp_size);
+
+  static BatchFactory* get_instance(int32_t dp_size, int32_t cp_size = 1) {
+    static BatchFactory instance(dp_size, cp_size);
     return &instance;
   }
 
@@ -43,12 +44,13 @@ class BatchFactory {
           nullptr);
 
  private:
-  BatchFactory(int32_t dp_size) : dp_size_(dp_size) {}
+  BatchFactory(int32_t dp_size, int32_t cp_size) : dp_size_(dp_size), cp_size_(cp_size) {}
   ~BatchFactory() = default;
 
   DISALLOW_COPY_AND_ASSIGN(BatchFactory);
 
  private:
   int32_t dp_size_;
+  int32_t cp_size_;
 };
 }  // namespace xllm

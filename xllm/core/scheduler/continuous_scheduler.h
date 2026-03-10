@@ -56,11 +56,13 @@ class ContinuousScheduler : public Scheduler {
     // the number of speculative tokens per step
     PROPERTY(int32_t, num_speculative_tokens) = 0;
 
-    // the number of tp*dp nodes
+    // the number of tp*dp*cp nodes
     PROPERTY(int32_t, nnodes) = 1;
 
     // the number of speculative tokens per step
     PROPERTY(int32_t, dp_size) = 1;
+
+    PROPERTY(int32_t, cp_size) = 1;
 
     // enable disaggregated PD mode.
     PROPERTY(bool, enable_disagg_pd) = false;

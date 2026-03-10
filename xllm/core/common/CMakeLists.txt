@@ -6,6 +6,7 @@ cc_library(
     common
   HDRS
     constants.h
+    cp_runtime_check.h
     etcd_client.h
     global_flags.h
     instance_name.h

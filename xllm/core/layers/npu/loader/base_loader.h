@@ -91,6 +91,7 @@ class BaseLoader {
   int32_t dp_local_tp_size_;
   int32_t dp_rank_;
   int32_t dp_local_tp_rank_;
+  int32_t cp_size_;
 
   void set_weight(const StateDict& state_dict,
                   const std::string& tensor_name,

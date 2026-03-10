@@ -116,7 +116,7 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   }
 #endif
 
-  ParallelArgs parallel_args(global_rank, world_size, 1, nullptr, 1);
+  ParallelArgs parallel_args(global_rank, world_size, 1, 1, nullptr, 1);
   worker_server_ = std::make_unique<WorkerServer>(local_rank,
                                                   master_node_addr,
                                                   done_,

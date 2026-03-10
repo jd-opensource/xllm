@@ -106,6 +106,9 @@ struct Options {
   // Default set as 1 for non-MoE model.
   PROPERTY(int32_t, ep_size) = 1;
 
+  // Context parallelism size
+  PROPERTY(int32_t, cp_size) = 1;
+
   // enable enable_schedule_overlap to improve runtime execution efficiency.
   PROPERTY(bool, enable_schedule_overlap) = true;
 

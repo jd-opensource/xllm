@@ -30,12 +30,14 @@ limitations under the License.
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
 
+#include "common/cp_runtime_check.h"
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
@@ -125,9 +127,9 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
 
   // first worker is the driver
   driver_ = parallel_args.rank() == 0;
-  int32_t tp_size = parallel_args.world_size() / parallel_args.dp_size();
+  int32_t tp_size = parallel_args.world_size() / (parallel_args.dp_size() * parallel_args.cp_size());
   dp_driver_ =
-      parallel_args.dp_size() > 1 && parallel_args.rank() % tp_size == 0;
+      parallel_args.dp_size() > 1 && parallel_args.rank() % (tp_size * parallel_args.cp_size()) == 0;
 
   device_.set_device();
   device_.init_device_context();
@@ -546,7 +548,14 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   }
 #endif
   c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
-
+  if (parallel_args_.cp_size() > 1) {
+    processed_input.input_params.cp_prefill_inputs = 
+      prepare_cp_prefill_inputs(
+        parallel_args_.cp_size(),
+        processed_input.token_ids,
+        processed_input.positions,
+        processed_input.input_params.q_seq_lens);
+  }
   processed_input = input.to(device_, dtype_);
   auto& input_params = processed_input.input_params;
 
@@ -589,6 +598,8 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   }
 
   if (!context_.get_parallel_args().mapping_data().empty() &&
+      !(context_.get_parallel_args().cp_size() > 1)
+      &&
       (context_.get_parallel_args().dp_size() > 1 ||
        context_.get_parallel_args().ep_size() > 1)) {
     torch::Tensor token_size_per_dp_group =

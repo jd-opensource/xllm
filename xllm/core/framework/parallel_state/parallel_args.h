@@ -35,11 +35,13 @@ struct ParallelArgs {
   ParallelArgs(int32_t rank,
                int32_t world_size,
                int32_t dp_size,
+               int32_t cp_size,
                ProcessGroup* process_group,
                int32_t ep_size)
       : rank_(rank),
         world_size_(world_size),
         dp_size_(dp_size),
+        cp_size_(cp_size),
         process_group_(process_group),
         ep_size_(ep_size) {}
 
@@ -49,6 +51,7 @@ struct ParallelArgs {
                int32_t dp_size,
                ProcessGroup* process_group,
                int32_t ep_size,
+               int32_t cp_size,
                nlohmann::json mapping_data,
                atb_speed::base::Mapping mapping,
                std::string dispatchAndCombinecommDomain,
@@ -58,6 +61,7 @@ struct ParallelArgs {
         dp_size_(dp_size),
         process_group_(process_group),
         ep_size_(ep_size),
+        cp_size_(cp_size),
         mapping_data_(mapping_data),
         mapping_(mapping),
         dispatchAndCombinecommDomain_(dispatchAndCombinecommDomain),
@@ -84,6 +88,30 @@ struct ParallelArgs {
         dp_local_process_group_(dp_local_process_group),
         dp_size_(dp_size) {}
 
+  int32_t dp_rank() const {
+      return world_size() / (cp_size() * tp_size());
+  }
+
+  int32_t cp_rank() const {
+      return world_size() / (dp_size() * tp_size());
+  }
+
+  int32_t tp_rank() const {
+      return rank() % tp_size();
+  }
+
+  int32_t ep_rank() const {
+      return rank() / ep_size();
+  }
+
+  int32_t ep_tp_rank() const {
+      return rank() % ep_size();
+  }
+
+  int32_t tp_size() const {
+      return world_size() / (dp_size() * cp_size());
+  }
+
   // rank of current process
   PROPERTY(int32_t, rank) = 0;
 
@@ -95,6 +123,9 @@ struct ParallelArgs {
 
   // ep size
   PROPERTY(int32_t, ep_size) = 1;
+
+  // cp size
+  PROPERTY(int32_t, cp_size) = 1;
 
   // atb hccl mapping json data
   PROPERTY(nlohmann::json, mapping_data);

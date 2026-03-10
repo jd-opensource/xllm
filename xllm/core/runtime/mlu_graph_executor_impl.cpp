@@ -219,7 +219,8 @@ MluGraphExecutorImpl::MluGraphExecutorImpl(CausalLM* model,
 }
 
 ForwardInput MluGraphExecutorImpl::prepare_inputs(Batch& batch) {
-  return batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
+  return batch.prepare_forward_input(
+      options_.num_decoding_tokens(), 0, args_, options_.cp_size());
 }
 
 // Main execution method with graph optimization for decode phase

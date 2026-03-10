@@ -291,6 +291,7 @@ int run() {
       .nnodes(FLAGS_nnodes)
       .node_rank(FLAGS_node_rank)
       .dp_size(FLAGS_dp_size)
+      .cp_size(FLAGS_cp_size)
       .ep_size(FLAGS_ep_size)
       .instance_name(FLAGS_host + ":" + std::to_string(FLAGS_port))
       .enable_disagg_pd(FLAGS_enable_disagg_pd)

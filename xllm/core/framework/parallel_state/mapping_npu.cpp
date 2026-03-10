@@ -59,9 +59,9 @@ MappingNPU::MappingNPU(const std::string rank_table_file,
   get_tp_group(lm_head_tp_);
   get_dp_group(lm_head_dp_);
   get_tp_group(attn_inner_sp_);
-  get_tp_group(attn_cp_);
+  get_dp_group(attn_cp_);
 
-  attn_cp_.group_size_ = 1;
+  //attn_cp_.group_size_ = 1;
   // o_proj mixture of tp and dp
   if (ENV_enable_extra_o_proj_tp) {
     get_domain(attn_o_proj_tp_, attn_o_proj_dp_, 0);
@@ -78,6 +78,7 @@ MappingNPU::MappingNPU(const std::string rank_table_file,
   } else {
     get_domain(attn_tp_, attn_dp_, 0);
     get_domain(attn_dp_, attn_tp_, attn_dp_.group_size());
+    get_domain(attn_cp_, attn_tp_, attn_cp_.group_size());
   }
   get_domain(moe_tp_, moe_ep_, 2 * world_size_);
   get_domain(moe_ep_, moe_tp_, 2 * world_size_ + moe_ep_.group_size());
@@ -153,6 +154,12 @@ void MappingNPU::parse_parallel_info() {
   if (options_.sp_size() != -1) {
     attn_inner_sp_.group_size(options_.sp_size());
   }
+
+  // cp
+  if (options_.cp_size() != -1) {
+    attn_cp_.group_size(options_.cp_size());
+  }
+
   // word embed
   word_embed_tp_ = ParallelInfo(attn_tp_);
   word_embed_dp_ = ParallelInfo(attn_dp_);
@@ -179,13 +186,21 @@ void MappingNPU::validate() {
       << "World size should be multiple of the number of nodes. "
          "Please check `world_size` and `ranktablefile`.";
 
-  CHECK(attn_tp_.group_size() * attn_dp_.group_size() == world_size_)
+  /* TODO: Decouple the initialization processes of DP and CP, remove this constraint */
+  if (attn_cp_.group_size() > 1) {
+    CHECK(attn_dp_.group_size() == 1) << "DP size should be 1 if CP size > 1";
+  }
+
+  CHECK(attn_tp_.group_size() * attn_dp_.group_size() * attn_cp_.group_size() == world_size_)
       << "World size must equal to attention's dp_size * attention's tp_size. "
          "Attention's tp_size is " +
              std::to_string(attn_tp_.group_size()) +
              ". "
              "Attention's dp_size is " +
              std::to_string(attn_dp_.group_size()) +
+             ". "
+             "Attention's cp_size is " +
+             std::to_string(attn_cp_.group_size()) +
              ". "
              "World size is " +
              std::to_string(world_size_) +

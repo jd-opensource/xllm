@@ -41,9 +41,10 @@ BaseLayer::BaseLayer(const ModelContext& context)
   }
 
   dp_size_ = parallel_args_.dp_size();
-  dp_local_tp_size_ = parallel_args_.world_size() / dp_size_;
-  dp_rank_ = parallel_args_.rank() / dp_local_tp_size_;
-  CHECK_EQ(parallel_args_.world_size(), dp_size_ * dp_local_tp_size_);
+  cp_size_ = parallel_args_.cp_size();
+  dp_local_tp_size_ = parallel_args_.world_size() / (dp_size_ * cp_size_);
+  dp_rank_ = parallel_args_.rank() / (dp_local_tp_size_ * cp_size_);
+  CHECK_EQ(parallel_args_.world_size(), dp_size_ * dp_local_tp_size_ * cp_size_);
   dp_local_tp_rank_ = parallel_args_.rank() % dp_local_tp_size_;
 
   run_task_func_ = [this](const std::string& task_name,
