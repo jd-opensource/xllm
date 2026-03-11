@@ -340,10 +340,10 @@ torch::Tensor XTensor::to_torch_tensor(size_t offset,
 
   // PyTorch 2.7+: StorageImpl now takes DataPtr instead of raw allocator
   storage = fptr(c10::StorageImpl::use_byte_size_t(),
-                  c10::SymInt(tensor_nbytes),
-                  std::move(c10_data_ptr),
-                  allocator,
-                  true);
+                 c10::SymInt(tensor_nbytes),
+                 std::move(c10_data_ptr),
+                 allocator,
+                 true);
 
   tensor.set_(storage, 0, dims);
 
