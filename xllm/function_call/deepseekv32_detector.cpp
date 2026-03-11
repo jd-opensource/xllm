@@ -148,6 +148,28 @@ static bool ends_with_markdown_fence_prefix(const std::string& text) {
   return std::regex_search(text, kTrailingFencePrefixRegex);
 }
 
+static bool split_trailing_markdown_fence_prefix(const std::string& text,
+                                                 std::string* leading_text,
+                                                 std::string* trailing_fence) {
+  static const std::regex kTrailingFencePrefixRegex(
+      R"(^([\s\S]*?)((?:\r?\n)?```[^\n\r`]*\s*)$)",
+      std::regex_constants::ECMAScript);
+
+  std::smatch match;
+  if (!std::regex_match(text, match, kTrailingFencePrefixRegex) ||
+      match.size() < 3) {
+    return false;
+  }
+
+  if (leading_text != nullptr) {
+    *leading_text = match[1].str();
+  }
+  if (trailing_fence != nullptr) {
+    *trailing_fence = match[2].str();
+  }
+  return true;
+}
+
 static bool split_trailing_empty_markdown_fence_block(
     const std::string& text,
     std::string* leading_text,
@@ -680,6 +702,10 @@ StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
 
   bool ends_with_markdown_fence_hint =
       ends_with_markdown_fence_prefix(current_text_rstrip);
+  std::string text_before_fence_hint;
+  std::string trailing_fence_hint;
+  bool has_trailing_fence_hint = split_trailing_markdown_fence_prefix(
+      current_text, &text_before_fence_hint, &trailing_fence_hint);
 
   std::string text_before_empty_fence_block;
   std::string trailing_empty_fence_block;
@@ -741,6 +767,15 @@ StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
     }
 
     if (ends_with_markdown_fence_hint) {
+      if (has_trailing_fence_hint) {
+        buffer_ = trailing_fence_hint;
+        std::string leading_text =
+            sanitize_text_before_tool_block(text_before_fence_hint);
+        leading_text = trim_whitespace(leading_text);
+        if (!leading_text.empty()) {
+          return StreamingParseResult(leading_text, {});
+        }
+      }
       return StreamingParseResult("", {});
     }
 
