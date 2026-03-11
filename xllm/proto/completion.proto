@@ -115,6 +115,10 @@ message CompletionRequest {
 
   // xllm_service rpc addr(ip:rpc_port) that forwards this request.
   optional string source_xservice_addr = 38;
+
+  // request trace headers from client.
+  optional string x_request_id = 39;
+  optional string x_request_time = 40;
 }
 
 message LogProbs {

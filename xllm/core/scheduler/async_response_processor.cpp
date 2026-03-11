@@ -121,7 +121,6 @@ void AsyncResponseProcessor::batch_process_completed_requests(
           end_2_end_latency_milliseconds,
           static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
       if (request->finished() || request->cancelled()) {
-        // not log in prefill instance
         request->log_statistic(end_2_end_latency_seconds);
       }
 
