@@ -34,6 +34,7 @@ limitations under the License.
 #include "framework/request/request_params.h"
 #include "master.h"
 #include "scheduler/continuous_scheduler.h"
+#include "xllm/processors/feature_extractor.h"
 #include "xllm/processors/input_processor.h"
 
 namespace xllm {
@@ -108,6 +109,8 @@ class VLMMaster : public Master {
   std::unique_ptr<InputProcessor> input_processor_;
 
   std::unique_ptr<ImageProcessor> image_processor_;
+
+  std::unique_ptr<FeatureExtractor> feature_extractor_;
 
   // thread for moving forward the scheduler
   std::thread loop_thread_;
