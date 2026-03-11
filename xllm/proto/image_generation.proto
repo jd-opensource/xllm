@@ -46,6 +46,9 @@ message Input {
 
   // Control Image
   optional string control_image = 13;
+
+  // Condition Image
+  optional string condition_image = 14;
 }
 
 // Generation parameters container

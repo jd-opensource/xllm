@@ -30,6 +30,7 @@ limitations under the License.
 #include "core/common/metrics.h"
 #include "core/common/options.h"
 #include "core/common/types.h"
+#include "core/distributed_runtime/dit_master.h"
 #include "core/distributed_runtime/master.h"
 #include "core/framework/xtensor/global_xtensor.h"
 #include "core/framework/xtensor/options.h"
@@ -244,6 +245,10 @@ int run() {
       .node_rank(FLAGS_node_rank)
       .dp_size(FLAGS_dp_size)
       .ep_size(FLAGS_ep_size)
+      .dit_dp_size(FLAGS_dit_dp_size)
+      .dit_tp_size(FLAGS_dit_tp_size)
+      .dit_sp_size(FLAGS_dit_sp_size)
+      .dit_cfg_size(FLAGS_dit_cfg_size)
       .instance_name(FLAGS_host + ":" + std::to_string(FLAGS_port))
       .enable_disagg_pd(FLAGS_enable_disagg_pd)
       .enable_pd_ooc(FLAGS_enable_pd_ooc)
@@ -325,7 +330,11 @@ int run() {
   std::unique_ptr<Master> master;
   // working node
   if (options.node_rank() != 0) {
-    master = std::make_unique<LLMAssistantMaster>(options);
+    if (FLAGS_backend == "dit") {
+      master = std::make_unique<DiTAssistantMaster>(options);
+    } else {
+      master = std::make_unique<LLMAssistantMaster>(options);
+    }
   } else {
     if (FLAGS_random_seed < 0) {
       FLAGS_random_seed = std::random_device{}() % (1 << 30);

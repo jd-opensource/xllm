@@ -72,6 +72,7 @@ void WorkerService::step(ForwardInput& fwd_input,
                          torch::Tensor& top_logprobs,
                          torch::Tensor& embeddings,
                          std::vector<torch::Tensor>& mm_embeddings,
+                         std::vector<torch::Tensor>& dit_images,
                          torch::Tensor& expert_load_data,
                          int32_t& prepared_layer_id,
                          torch::Tensor& src_seq_idxes,
@@ -79,7 +80,6 @@ void WorkerService::step(ForwardInput& fwd_input,
                          torch::Tensor& out_logprobs) {
   // execute model
   auto future = worker_->step_async(fwd_input);
-
   if (!options_.enable_schedule_overlap()) {
     auto forward_outputs = std::move(future).get();
     // convert ForwardOutput to proto::ForwardOutput which contain Tokens.
@@ -88,6 +88,8 @@ void WorkerService::step(ForwardInput& fwd_input,
       const auto& sample_output = forward_outputs.value().sample_output;
       const auto& beam_search_output =
           forward_outputs.value().beam_search_output;
+      const auto& dit_forward_output =
+          forward_outputs.value().dit_forward_output;
       expert_load_data =
           safe_to(forward_outputs.value().expert_load_data, torch::kCPU, true);
       prepared_layer_id = forward_outputs.value().prepared_layer_id;
@@ -104,6 +106,12 @@ void WorkerService::step(ForwardInput& fwd_input,
         mm_embeddings.reserve(sample_output.mm_embeddings.size());
         for (auto mm_embedding : sample_output.mm_embeddings) {
           mm_embeddings.emplace_back(safe_to(mm_embedding, torch::kCPU, true));
+        }
+
+        dit_images.clear();
+        dit_images.reserve(dit_forward_output.tensors.size());
+        for (auto dit_image : dit_forward_output.tensors) {
+          dit_images.emplace_back(safe_to(dit_image, torch::kCPU, true));
         }
 
         // [num_seq]
@@ -174,6 +182,7 @@ void WorkerService::create_polling_shm_thread(
           torch::Tensor top_logprobs;
           torch::Tensor embeddings;
           std::vector<torch::Tensor> mm_embeddings;
+          std::vector<torch::Tensor> dit_images;
           torch::Tensor expert_load_data;
           int32_t prepared_layer_id = -1;
 
@@ -189,6 +198,7 @@ void WorkerService::create_polling_shm_thread(
                top_logprobs,
                embeddings,
                mm_embeddings,
+               dit_images,
                expert_load_data,
                prepared_layer_id,
                src_seq_idxes,
@@ -201,6 +211,7 @@ void WorkerService::create_polling_shm_thread(
                                                top_logprobs,
                                                embeddings,
                                                mm_embeddings,
+                                               dit_images,
                                                expert_load_data,
                                                prepared_layer_id,
                                                src_seq_idxes,
@@ -601,6 +612,7 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
         torch::Tensor top_logprobs;
         torch::Tensor embeddings;
         std::vector<torch::Tensor> mm_embeddings;
+        std::vector<torch::Tensor> dit_images;
         torch::Tensor expert_load_data;
         int32_t prepared_layer_id = -1;
         // beam search kernel output
@@ -615,6 +627,7 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
              top_logprobs,
              embeddings,
              mm_embeddings,
+             dit_images,
              expert_load_data,
              prepared_layer_id,
              src_seq_idxes,

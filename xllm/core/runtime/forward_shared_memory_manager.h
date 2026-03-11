@@ -15,6 +15,7 @@ limitations under the License.
 
 #include <stddef.h>
 
+#include "dit_forward_params.h"
 #include "forward_params.h"
 #include "params_utils.h"
 #include "util/shared_memory_manager.h"
@@ -106,6 +107,7 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
                         const torch::Tensor& top_logprobs,
                         const torch::Tensor& embeddings,
                         const std::vector<torch::Tensor>& mm_embeddings,
+                        const std::vector<torch::Tensor>& dit_images,
                         const torch::Tensor& expert_load_data,
                         int32_t prepared_layer_id,
                         const torch::Tensor& src_seq_idxes,
