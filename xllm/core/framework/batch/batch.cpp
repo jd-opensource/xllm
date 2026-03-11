@@ -242,7 +242,7 @@ void Batch::dp_balance_shuffle_seqs() {
 #endif
 }
 
-std::map<uint32_t, uint32_t> Batch::cal_seq_exchange_index(
+std::unordered_map<uint32_t, uint32_t> Batch::cal_seq_exchange_index(
     std::vector<uint32_t>& kv_cache_tokens_num) {
   const auto num_npu_cores = 24;  // npu cube core num
   const auto num_seqs = kv_cache_tokens_num.size();
@@ -286,7 +286,7 @@ std::map<uint32_t, uint32_t> Batch::cal_seq_exchange_index(
 
   // record the index map, first one is original index,
   // second one is the target index to be exchanged to
-  std::map<uint32_t, uint32_t> index_shift;
+  std::unordered_map<uint32_t, uint32_t> index_shift;
   // add base part data
   for (auto i = 0; i < num_npu_cores; ++i) {
     for (auto j = 0; j < base_per_core; ++j) {
