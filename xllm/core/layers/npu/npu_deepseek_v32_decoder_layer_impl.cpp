@@ -350,9 +350,8 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_attention_parameters(
   param.qkRopeHeadDim = args.qk_rope_head_dim();
   param.kvLoraRank = args.kv_lora_rank();
   param.softmaxScale = sm_scale_;
-  // not support in glm5moe
-  if (quantize_type_ == "w8a8_dynamic" && args.model_type() != "glm5_moe" &&
-      args.model_type() != "glm_moe_dsa") {
+  // not support in glm_moe_dsa
+  if (quantize_type_ == "w8a8_dynamic" && args.model_type() != "glm_moe_dsa") {
     param.enableMlaPreprocess = true;
   } else {
     param.enableMlaPreprocess = false;
