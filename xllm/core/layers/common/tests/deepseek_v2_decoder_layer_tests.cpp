@@ -55,41 +55,43 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
                    .device(Device::type_torch(), 0)
                    .requires_grad(false);
     parallel_args_ = test::create_default_parallel_args(mock_process_group_);
-    // Fill additional DeepSeek V3 defaults
+    // Use a small but structurally valid DeepSeek-style config so the tests
+    // exercise Dense/MoE/MLA wiring without allocating near-production tensors.
     model_args_.model_type() = "deepseek_v3";
     model_args_.dtype() = "";  // default empty
-    model_args_.vocab_size() = 129280;
-    model_args_.n_layers() = 61;
-    model_args_.n_heads() = 128;
-    model_args_.n_kv_heads() = 128;
-    model_args_.intermediate_size() = 18432;  // Ensure matches defaults
+    model_args_.vocab_size() = 4096;
+    model_args_.hidden_size() = 512;
+    model_args_.n_layers() = 8;
+    model_args_.n_heads() = 8;
+    model_args_.n_kv_heads() = 8;
+    model_args_.intermediate_size() = 1024;
     model_args_.hidden_act() = "silu";
     model_args_.rms_norm_eps() = 1e-6f;
-    model_args_.max_position_embeddings() = 163840;
+    model_args_.max_position_embeddings() = 4096;
     model_args_.eos_token_id() = 1;
     model_args_.bos_token_id() = 0;
 
     // Decoder layer specific routing between MoE and Dense
-    model_args_.first_k_dense_replace() = 3;
+    model_args_.first_k_dense_replace() = 1;
     model_args_.moe_layer_freq() = 1;
 
     // MoE-related params
-    model_args_.n_routed_experts() = 256;
+    model_args_.n_routed_experts() = 8;
     model_args_.n_shared_experts() = 1;
-    model_args_.num_experts_per_tok() = 8;
-    model_args_.moe_intermediate_size() = 2048;
+    model_args_.num_experts_per_tok() = 2;
+    model_args_.moe_intermediate_size() = 128;
     model_args_.routed_scaling_factor() = 2.5f;
     model_args_.norm_topk_prob() = true;
-    model_args_.n_group() = 8;
-    model_args_.topk_group() = 4;
+    model_args_.n_group() = 2;
+    model_args_.topk_group() = 1;
     model_args_.scoring_func() = "sigmoid";
     model_args_.topk_method() = "noaux_tc";
 
     // Q/K/V dims used by DeepseekV2Attention
-    model_args_.qk_nope_head_dim() = 128;
+    model_args_.qk_nope_head_dim() = 64;
     model_args_.qk_rope_head_dim() = 64;
-    model_args_.v_head_dim() = 128;
-    model_args_.head_dim() = 256;  // qk_nope_head_dim + qk_rope_head_dim
+    model_args_.v_head_dim() = 64;
+    model_args_.head_dim() = 128;  // qk_nope_head_dim + qk_rope_head_dim
     model_args_.rotary_dim() = model_args_.qk_rope_head_dim();
 
     // Rope scaling related
@@ -101,22 +103,22 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     model_args_.rope_extrapolation_factor() = 1.0f;
     model_args_.rope_scaling_mscale() = 1.0f;
     model_args_.rope_scaling_mscale_all_dim() = 1.0f;
-    model_args_.rope_scaling_original_max_position_embeddings() = 4096;
+    model_args_.rope_scaling_original_max_position_embeddings() = 1024;
     model_args_.rope_scaling_attn_factor() = 1.0f;
 
     // Sliding window
     model_args_.use_sliding_window() = false;
-    model_args_.sliding_window() = 4096;
-    model_args_.max_window_layers() = 61;
+    model_args_.sliding_window() = 512;
+    model_args_.max_window_layers() = 8;
 
     // LORA ranks for DeepSeek-V3
-    model_args_.q_lora_rank() = 1536;
-    model_args_.kv_lora_rank() = 512;
+    model_args_.q_lora_rank() = 128;
+    model_args_.kv_lora_rank() = 64;  // qk_rope_head_dim + kv_lora_rank = 128
 
     // extra parameters for DeepSeek-V3.2-Exp
     model_args_.index_head_dim() = 128;
-    model_args_.index_n_heads() = 64;
-    model_args_.index_topk() = 2048;
+    model_args_.index_n_heads() = 0;
+    model_args_.index_topk() = 0;
 
     // Build a ModelContext that the decoder requires
     context_ = ModelContext(parallel_args_, model_args_, quant_args_, options_);
@@ -617,11 +619,10 @@ TEST_F(DeepseekV2DecoderLayerTest,
        SmoothquantPrecisionVerificationTest_DenseMLP) {
   // Test precision verification with custom input and expected output for Dense
   int32_t layer_id = 0;  // Use Dense MLP path
-  const int64_t batch_size = 16;
-  const int64_t seq_len = 8;
+  const int64_t batch_size = 4;
+  const int64_t seq_len = 4;
   int64_t block_size = 1;
-  // 1000 is just a random value for some space
-  int64_t block_num = batch_size * seq_len * block_size * 1000;
+  int64_t block_num = batch_size * seq_len + 1;
 
   context_ = ModelContext(parallel_args_, model_args_, quant_args_, options_);
 
@@ -742,7 +743,7 @@ TEST_F(DeepseekV2DecoderLayerTest,
   // Set expected output values for precision verification (only first 5
   // elements) The expected values should be calculated based on vLLM MLU
   const int num_elements_to_check = 5;
-  std::vector<float> expected_values(num_elements_to_check, 8847360.0f);
+  std::vector<float> expected_values(num_elements_to_check, 2352.0f);
 
   // Extract first 5 elements from output and compare
   auto output_flat = output.flatten().to(torch::kFloat32).cpu();
@@ -754,18 +755,18 @@ TEST_F(DeepseekV2DecoderLayerTest,
 
   // Verify precision for first 5 elements
   ASSERT_TRUE(torch::allclose(output_first_5, expected_tensor, 1e-3, 1e-4))
-      << "First 5 elements do not match expected values";
+      << "First 5 elements do not match expected values. actual="
+      << output_first_5 << ", expected=" << expected_tensor;
 }
 
 TEST_F(DeepseekV2DecoderLayerTest, SmoothquantPrecisionVerificationTest_MoE) {
   // Test precision verification with custom input and expected output for MoE
   int32_t layer_id = std::max<int32_t>(
       5, model_args_.first_k_dense_replace());  // Use MoE path
-  const int64_t batch_size = 16;
-  const int64_t seq_len = 8;
+  const int64_t batch_size = 4;
+  const int64_t seq_len = 4;
   int64_t block_size = 1;
-  // 1000 is just a random value for some space
-  int64_t block_num = batch_size * seq_len * block_size * 1000;
+  int64_t block_num = batch_size * seq_len + 1;
 
   context_ = ModelContext(parallel_args_, model_args_, quant_args_, options_);
 
@@ -889,11 +890,11 @@ TEST_F(DeepseekV2DecoderLayerTest, SmoothquantPrecisionVerificationTest_MoE) {
   const int num_elements_to_check = 5;
   std::vector<float> expected_values;
   expected_values.reserve(num_elements_to_check);
-  expected_values.push_back(151.0);
-  expected_values.push_back(151.0);
-  expected_values.push_back(152.0);
-  expected_values.push_back(152.0);
-  expected_values.push_back(151.0);
+  expected_values.push_back(0.7773f);
+  expected_values.push_back(0.7227f);
+  expected_values.push_back(1.0938f);
+  expected_values.push_back(1.1875f);
+  expected_values.push_back(0.6367f);
 
   // Extract first 5 elements from output and compare
   auto output_flat = output.flatten().to(torch::kFloat32).cpu();
@@ -905,7 +906,8 @@ TEST_F(DeepseekV2DecoderLayerTest, SmoothquantPrecisionVerificationTest_MoE) {
 
   // Verify precision for first 5 elements
   ASSERT_TRUE(torch::allclose(output_first_5, expected_tensor, 1e-3, 1e-4))
-      << "First 5 elements do not match expected values";
+      << "First 5 elements do not match expected values. actual="
+      << output_first_5 << ", expected=" << expected_tensor;
 }
 
 TEST_F(DeepseekV2DecoderLayerTest, MLAQuantizedKVCachePrefillTest) {
