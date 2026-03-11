@@ -41,7 +41,7 @@ class NpuOneRecBlockLayerImpl final : public OneRecBlockLayer {
                         std::atomic<bool>* event_flag = nullptr) override;
 
  private:
-  torch::Device device_;
+  const torch::Device device_;
   bool is_decoder_ = false;
   int32_t layer_id_ = 0;
 };

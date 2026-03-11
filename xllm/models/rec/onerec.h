@@ -67,7 +67,7 @@ class OneRecModelImpl : public torch::nn::Module {
       return ModelOutput(hidden_states);
     }
 
-    auto cross_context = resolve_cross_context(onerec_params);
+    auto cross_context = get_cross_context_embedding(onerec_params);
     if (cross_context.defined()) {
       auto enriched_hidden_states =
           add_cross_context_bias(hidden_states, cross_context);
@@ -126,7 +126,7 @@ class OneRecModelImpl : public torch::nn::Module {
     return torch::Tensor();
   }
 
-  torch::Tensor resolve_cross_context(
+  torch::Tensor get_cross_context_embedding(
       const OneRecModelInputParams* onerec_params) const {
     if (onerec_params == nullptr) {
       return torch::Tensor();
