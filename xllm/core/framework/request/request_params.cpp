@@ -121,6 +121,12 @@ RequestParams::RequestParams(const proto::CompletionRequest& request,
   request_id = generate_completion_request_id();
   x_request_id = x_rid;
   x_request_time = x_rtime;
+  if (x_request_id.empty() && request.has_x_request_id()) {
+    x_request_id = request.x_request_id();
+  }
+  if (x_request_time.empty() && request.has_x_request_time()) {
+    x_request_time = request.x_request_time();
+  }
   if (request.has_offline()) {
     offline = request.offline();
   }
@@ -428,6 +434,12 @@ RequestParams::RequestParams(const proto::ChatRequest& request,
   request_id = generate_chat_request_id();
   x_request_id = x_rid;
   x_request_time = x_rtime;
+  if (x_request_id.empty() && request.has_x_request_id()) {
+    x_request_id = request.x_request_id();
+  }
+  if (x_request_time.empty() && request.has_x_request_time()) {
+    x_request_time = request.x_request_time();
+  }
 
   init_from_chat_request(*this, request);
 }
