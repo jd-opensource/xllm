@@ -15,15 +15,16 @@ limitations under the License.
 
 #include "rec_master.h"
 
+#include <absl/strings/str_join.h>
 #include <absl/time/time.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <pybind11/pybind11.h>
 #include <torch/torch.h>
 
-#include <limits>
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "common/macros.h"
 #include "common/metrics.h"
@@ -48,15 +49,12 @@ constexpr const char* kOneRecDecoderContextEmbeddingName =
     "decoder_context_embedding";
 
 std::string format_tensor_shape(const proto::InferInputTensor& tensor) {
-  std::string shape = "[";
+  std::vector<std::string> dims;
+  dims.reserve(tensor.shape_size());
   for (int i = 0; i < tensor.shape_size(); ++i) {
-    if (i > 0) {
-      shape.append(", ");
-    }
-    shape.append(std::to_string(tensor.shape(i)));
+    dims.emplace_back(std::to_string(tensor.shape(i)));
   }
-  shape.push_back(']');
-  return shape;
+  return "[" + absl::StrJoin(dims, ", ") + "]";
 }
 
 RecType get_rec_type(const ModelArgs& model_args) {
@@ -75,6 +73,7 @@ RecType get_rec_type(const ModelArgs& model_args) {
 bool process_onerec_inputs(
     const std::optional<std::vector<int>>& prompt_tokens,
     const std::optional<std::vector<proto::InferInputTensor>>& input_tensors,
+    const ModelArgs& model_args,
     std::vector<int32_t>* local_prompt_tokens,
     MMData* processed_mm_data,
     OutputCallback callback) {
@@ -149,21 +148,23 @@ bool process_onerec_inputs(
                                 format_tensor_shape(tensor));
         return false;
       }
-      if (len > std::numeric_limits<int64_t>::max() / hidden) {
-        CALLBACK_WITH_ERROR(
-            StatusCode::INVALID_ARGUMENT,
-            "OneRec input tensor '" + tensor_name + "' shape is too large");
+      if (hidden != model_args.hidden_size()) {
+        CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                            "OneRec input tensor '" + tensor_name +
+                                "' hidden size mismatch, expected " +
+                                std::to_string(model_args.hidden_size()) +
+                                ", got " + std::to_string(hidden));
         return false;
       }
 
-      const int64_t expected_numel = len * hidden;
       const int64_t actual_numel =
           static_cast<int64_t>(tensor.contents().fp32_contents_size());
-      if (expected_numel != actual_numel) {
+      if (actual_numel % hidden != 0 || actual_numel / hidden != len) {
         CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                             "OneRec input tensor '" + tensor_name +
                                 "' fp32 contents size mismatch, expected " +
-                                std::to_string(expected_numel) + ", got " +
+                                std::to_string(len) + " * " +
+                                std::to_string(hidden) + ", got " +
                                 std::to_string(actual_numel));
         return false;
       }
@@ -476,6 +477,7 @@ std::shared_ptr<Request> RecMaster::OneRecMasterPipeline::generate_request(
 
   if (!process_onerec_inputs(prompt_tokens,
                              input_tensors,
+                             master_.model_args_,
                              &local_prompt_tokens,
                              &processed_mm_data,
                              callback)) {
