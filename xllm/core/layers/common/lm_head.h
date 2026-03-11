@@ -20,13 +20,13 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class LmHead : public torch::nn::ModuleHolder<ColumnParallelLinearImpl> {
+class LmHead : public torch::nn::ModuleHolder<RowParallelLinearImpl> {
  public:
-  using torch::nn::ModuleHolder<ColumnParallelLinearImpl>::ModuleHolder;
-  using Impl __attribute__((__unused__)) = ColumnParallelLinearImpl;
+  using torch::nn::ModuleHolder<RowParallelLinearImpl>::ModuleHolder;
+  using Impl __attribute__((__unused__)) = RowParallelLinearImpl;
 
   LmHead(const ModelContext& context)
-      : ModuleHolder(std::make_shared<ColumnParallelLinearImpl>(context)) {}
+      : ModuleHolder(std::make_shared<RowParallelLinearImpl>(context)) {}
 };
 
 }  // namespace layer

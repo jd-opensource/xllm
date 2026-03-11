@@ -35,6 +35,7 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
   param.linearParallelParam.unpadInputs = true;
   param.linearParallelParam.fusionLinearParam.transposeType = 1;
   if (parallel_args.world_size() > 1) {
+    int32_t lm_head_tp_world_size = 1;
     if (parallel_args.mapping_data().empty()) {
       if (dp_size_ > 1) {
         param.linearParallelParam.tensorParallelInfo.rank = dp_local_tp_rank_;
@@ -46,16 +47,17 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
         param.linearParallelParam.tensorParallelInfo.worldSize =
             parallel_args.world_size();
       }
-      param.linearParallelParam.parallelType =
-          atb_speed::common::COLUMN_PARALLEL;
+      param.linearParallelParam.parallelType = atb_speed::common::ROW_PARALLEL;
       param.linearParallelParam.tensorParallelInfo.commDomain =
           std::to_string(dp_rank_);
-      param.linearParallelParam.tensorParallelInfo.backend = "lccl";
+      param.linearParallelParam.tensorParallelInfo.backend =
+          FLAGS_communication_backend;
+      lm_head_tp_world_size =
+          param.linearParallelParam.tensorParallelInfo.worldSize;
     } else {
-      param.linearParallelParam.parallelType =
-          atb_speed::common::COLUMN_PARALLEL;
+      param.linearParallelParam.parallelType = atb_speed::common::ROW_PARALLEL;
       atb_speed::common::ParallelInfo parallelInfo =
-          parallel_args.mapping().Get(atb_speed::base::ATTN_TP);
+          parallel_args.mapping().Get(atb_speed::base::LM_HEAD_TP);
       param.linearParallelParam.tensorParallelInfo.rank = parallelInfo.rank;
       param.linearParallelParam.tensorParallelInfo.worldSize =
           parallelInfo.rankIds.size();
@@ -64,7 +66,11 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
       parallelInfo.InitCommDomain(
           param.linearParallelParam.tensorParallelInfo.hcommInfo,
           param.linearParallelParam.tensorParallelInfo.commDomain);
+      lm_head_tp_world_size =
+          param.linearParallelParam.tensorParallelInfo.worldSize;
     }
+    param.hiddenSizePerAttentionHead =
+        args.hidden_size() / lm_head_tp_world_size;
   }
 }
 

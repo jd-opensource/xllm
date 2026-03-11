@@ -27,9 +27,9 @@ LmHeadLoader::LmHeadLoader(uint64_t weight_count, const ModelContext& context)
 void LmHeadLoader::load_state_dict(const StateDict& state_dict) {
   if (dp_size_ > 1) {
     set_weight(
-        state_dict, "weight", 0, 0, dp_local_tp_rank_, dp_local_tp_size_);
+        state_dict, "weight", 0, 1, dp_local_tp_rank_, dp_local_tp_size_);
   } else {
-    set_weight(state_dict, "weight", 0, 0);
+    set_weight(state_dict, "weight", 0, 1);
   }
 }
 
