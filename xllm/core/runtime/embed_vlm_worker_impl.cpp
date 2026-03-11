@@ -94,5 +94,5 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
 
   return output;
 }
-
+ret = device_.synchronize_default_stream();
 }  // namespace xllm
