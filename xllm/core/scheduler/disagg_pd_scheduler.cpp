@@ -24,6 +24,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/macros.h"
+#include "common/metrics.h"
 #include "disagg_pd.pb.h"
 #include "disagg_pd_scheduler.h"
 #include "distributed_runtime/engine.h"
@@ -269,6 +270,19 @@ void DisaggPDScheduler::start_rpc_server() {
 }
 
 void DisaggPDScheduler::step(const absl::Duration& timeout) {
+  // Update received_request_map_ size gauge (Decode instance)
+  {
+    std::lock_guard<std::mutex> lock(received_request_map_mutex_);
+    GAUGE_SET(disagg_pd_received_request_map_size,
+              static_cast<double>(received_request_map_.size()));
+  }
+  // Update linked instances count (P instance: linked D instances; D: linked P
+  // instances)
+  {
+    std::lock_guard<std::mutex> lock(linked_instances_mutex_);
+    GAUGE_SET(disagg_pd_linked_instances_count,
+              static_cast<double>(linked_instance_.size()));
+  }
   ContinuousScheduler::step(timeout);
   // send first generation token to decode instance
   if (options_.instance_role() != InstanceRole::DECODE && last_step_prefill_) {
@@ -285,10 +299,12 @@ bool DisaggPDScheduler::add_request(std::shared_ptr<Request>& request) {
   if (request->offline()) {
     // offline request, push to offline queue
     prefill_request_queue_offline_.enqueue(request);
+    COUNTER_PER_MINUTE_INC(disagg_pd_prefill_queue_offline_enqueue_total);
     return true;
   }
   // push and wait
   prefill_request_queue_.enqueue(request);
+  COUNTER_PER_MINUTE_INC(disagg_pd_prefill_queue_enqueue_total);
 
   return true;
 }
@@ -302,10 +318,15 @@ void DisaggPDScheduler::dispatch_requests() {
     // continue to wait for online request. This can avoid offline request
     // blocking online request for too long time.
     std::shared_ptr<Request> request;
-    if (!prefill_request_queue_.wait_dequeue_timed(request, timeout)) {
+    bool from_online =
+        prefill_request_queue_.wait_dequeue_timed(request, timeout);
+    if (!from_online) {
       if (!prefill_request_queue_offline_.try_dequeue(request)) {
         continue;
       }
+      COUNTER_PER_MINUTE_INC(disagg_pd_prefill_queue_offline_dequeue_total);
+    } else {
+      COUNTER_PER_MINUTE_INC(disagg_pd_prefill_queue_dequeue_total);
     }
 
     if (request == nullptr) {
@@ -423,9 +444,19 @@ void DisaggPDScheduler::dispatch_requests() {
     reqs.mutable_cluster_infos()->set_dp_size(options_.dp_size());
 
     // TODO: sync rpc here currently
+    const auto add_new_requests_start = absl::Now();
     brpc::Controller cntl;
     stub->AddNewRequests(&cntl, &reqs, &resps, nullptr);
+    int64_t add_new_requests_latency_us =
+        absl::ToInt64Microseconds(absl::Now() - add_new_requests_start);
+    HISTOGRAM_OBSERVE(disagg_pd_add_new_requests_latency_microseconds,
+                      add_new_requests_latency_us);
+    COUNTER_PER_MINUTE_INC(disagg_pd_add_new_requests_total);
+
     if (cntl.Failed()) {
+      COUNTER_PER_MINUTE_INC(disagg_pd_add_new_requests_fail_total);
+      MULTI_COUNTER_INC(disagg_pd_add_new_requests_fail_by_instance,
+                        selected_instance);
       LOG(ERROR) << "Failed to add new requests to decode instance : "
                  << selected_instance << ", error text : " << cntl.ErrorText();
       for (auto& request : requests) {
@@ -453,14 +484,20 @@ void DisaggPDScheduler::dispatch_requests() {
     }
     for (size_t i = 0; i < requests.size(); ++i) {
       if (resps.resps()[i].status_code() != 200) {
+        COUNTER_PER_MINUTE_INC(disagg_pd_add_new_requests_reject_total);
+        MULTI_COUNTER_INC(disagg_pd_add_new_requests_reject_by_instance,
+                          selected_instance);
         // push back to prefill_request_queue_
         if (requests[i]->offline()) {
           prefill_request_queue_offline_.enqueue(requests[i]);
+          COUNTER_PER_MINUTE_INC(disagg_pd_prefill_queue_offline_enqueue_total);
         } else {
           prefill_request_queue_.enqueue(requests[i]);
+          COUNTER_PER_MINUTE_INC(disagg_pd_prefill_queue_enqueue_total);
         }
 
       } else {
+        COUNTER_PER_MINUTE_INC(disagg_pd_add_new_requests_ok_total);
         for (auto& sequence : requests[i]->sequences()) {
           TransferKVInfo info;
           info.request_id = requests[i]->request_id();
@@ -593,11 +630,20 @@ void DisaggPDScheduler::prefill_send_first_generation() {
       }
 
       // TODO: Async call later
+      const auto first_gen_start = absl::Now();
       proto::Status resp;
       brpc::Controller cntl;
       stub->FirstGeneration(&cntl, &gens, &resp, nullptr);
+      int64_t first_gen_latency_us =
+          absl::ToInt64Microseconds(absl::Now() - first_gen_start);
+      HISTOGRAM_OBSERVE(disagg_pd_first_generation_latency_microseconds,
+                        first_gen_latency_us);
+      COUNTER_PER_MINUTE_INC(disagg_pd_first_generation_total);
 
       if (cntl.Failed() || !resp.ok()) {
+        COUNTER_PER_MINUTE_INC(disagg_pd_first_generation_fail_total);
+        MULTI_COUNTER_INC(disagg_pd_first_generation_fail_by_instance,
+                          request->state().decode_address);
         LOG(ERROR) << "Failed to send first generation to decode instance : "
                    << request->state().decode_address
                    << ", error text : " << cntl.ErrorText()
@@ -713,6 +759,7 @@ bool DisaggPDScheduler::decode_recv_first_generation(
     }
 
     int32_t dst_dp_rank = request->sequences()[0]->dp_rank();
+    const auto pull_start = absl::Now();
     engine_->pull_kv_blocks(src_dp_size,
                             src_dp_rank,
                             src_cluster_ids,
@@ -722,6 +769,8 @@ bool DisaggPDScheduler::decode_recv_first_generation(
                             src_block_ids,
                             dst_dp_rank,
                             dst_block_ids);
+    HISTOGRAM_OBSERVE(disagg_pd_pull_kv_cache_latency_microseconds,
+                      absl::ToInt64Microseconds(absl::Now() - pull_start));
   }
 
   request_queue_.write(request);
