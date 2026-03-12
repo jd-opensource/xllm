@@ -620,12 +620,14 @@ bool DisaggPDScheduler::decode_schedule(
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
 
-  // TODO: check request_id, duplicate ids are not allowed
   {
     std::lock_guard<std::mutex> lock(received_request_map_mutex_);
     if (received_request_map_.find(request->request_id()) !=
         received_request_map_.end()) {
-      LOG(FATAL) << "Decode receive same request_id from prefill.";
+      LOG(ERROR) << "Decode receive duplicate request_id from prefill: "
+                 << request->request_id();
+      kv_cache_manager_->deallocate(request.get());
+      return false;
     }
     received_request_map_[request->request_id()] = request;
     instance_to_received_requests_map_[prefill_instance_name].insert(
