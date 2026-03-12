@@ -471,8 +471,8 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::run_indexer_select_kernel(
   if (sp_meta != nullptr) {
     params.kv_cache_block_table = sp_meta->seg_block_table;
     params.cu_seq_q_lens = sp_meta->seg_q_cu_lens;
-    params.cu_seq_k_lens = sp_meta->seg_k_cu_lens;
-    params.k_context_lens = sp_meta->seg_k_lens;
+    params.cu_seq_k_lens = sp_meta->seg_suffix_k_cu_lens;
+    params.k_context_lens = sp_meta->seg_ctx_lens;
   } else {
     params.kv_cache_block_table = attn_metadata.block_table;
     params.cu_seq_q_lens = ctx.cu_seq_q_lens;

@@ -31,8 +31,8 @@ struct DeepseekV32SPMetadata {
   std::vector<int32_t> k_pack_lens_cpu;
 
   torch::Tensor seg_q_cu_lens;
-  torch::Tensor seg_k_cu_lens;
-  torch::Tensor seg_k_lens;
+  torch::Tensor seg_suffix_k_cu_lens;
+  torch::Tensor seg_ctx_lens;
   torch::Tensor seg_block_table;
 };
 
@@ -54,17 +54,17 @@ inline AttentionMetadata build_local_prefill_attention_metadata(
   const auto int32_options =
       torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
   std::vector<int32_t> seg_q_tokens;
-  std::vector<int32_t> seg_k_lens;
+  std::vector<int32_t> seg_suffix_k_lens;
   seg_q_tokens.reserve(segments.size());
-  seg_k_lens.reserve(segments.size());
+  seg_suffix_k_lens.reserve(segments.size());
 
   int32_t max_query_len = 0;
   int32_t max_seq_len = 0;
   for (const auto& segment : segments) {
     seg_q_tokens.push_back(segment.q_tokens);
-    seg_k_lens.push_back(segment.k_len);
+    seg_suffix_k_lens.push_back(segment.suffix_k_len);
     max_query_len = std::max(max_query_len, segment.q_tokens);
-    max_seq_len = std::max(max_seq_len, segment.k_len);
+    max_seq_len = std::max(max_seq_len, segment.suffix_k_len);
   }
 
   AttentionMetadata local_attn_metadata = base_attn_metadata;
@@ -72,9 +72,9 @@ inline AttentionMetadata build_local_prefill_attention_metadata(
   local_attn_metadata.q_cu_seq_lens =
       make_sp_prefix(seg_q_tokens, int32_options).to(device);
   local_attn_metadata.kv_cu_seq_lens =
-      make_sp_prefix(seg_k_lens, int32_options).to(device);
+      make_sp_prefix(seg_suffix_k_lens, int32_options).to(device);
   local_attn_metadata.kv_seq_lens =
-      torch::tensor(seg_k_lens, int32_options).to(device);
+      torch::tensor(seg_suffix_k_lens, int32_options).to(device);
   local_attn_metadata.max_query_len = max_query_len;
   local_attn_metadata.max_seq_len = max_seq_len;
   return local_attn_metadata;
@@ -83,7 +83,7 @@ inline AttentionMetadata build_local_prefill_attention_metadata(
 inline DeepseekV32SPMetadata build_sp_metadata(
     const AttentionMetadata& base_attn_metadata,
     const std::vector<DeepseekV32SPSegment>& segments,
-    const std::vector<int32_t>& seq_lens) {
+    const std::vector<int32_t>& q_seq_lens) {
   CHECK(base_attn_metadata.q_cu_seq_lens.defined())
       << "deepseek_v32 sequence parallel requires q_cu_seq_lens.";
   CHECK(base_attn_metadata.kv_seq_lens.defined())
@@ -91,35 +91,39 @@ inline DeepseekV32SPMetadata build_sp_metadata(
 
   DeepseekV32SPMetadata meta;
   std::vector<int32_t> req_offsets_cpu;
-  req_offsets_cpu.reserve(seq_lens.size());
+  req_offsets_cpu.reserve(q_seq_lens.size());
   int32_t req_offset = 0;
-  for (int32_t seq_len : seq_lens) {
+  for (int32_t q_seq_len : q_seq_lens) {
     req_offsets_cpu.push_back(req_offset);
-    req_offset += seq_len;
+    req_offset += q_seq_len;
   }
 
   auto q_cu_options = base_attn_metadata.q_cu_seq_lens.options();
   auto kv_seq_options = base_attn_metadata.kv_seq_lens.options();
   std::vector<int32_t> seg_q_tokens;
-  std::vector<int32_t> seg_k_lens_cpu;
+  std::vector<int32_t> seg_suffix_k_lens_cpu;
+  std::vector<int32_t> seg_ctx_lens_cpu;
   std::vector<int64_t> seg_to_req_cpu;
   seg_q_tokens.reserve(segments.size());
-  seg_k_lens_cpu.reserve(segments.size());
+  seg_suffix_k_lens_cpu.reserve(segments.size());
+  seg_ctx_lens_cpu.reserve(segments.size());
   seg_to_req_cpu.reserve(segments.size());
   meta.k_pack_starts_cpu.reserve(segments.size());
   meta.k_pack_lens_cpu.reserve(segments.size());
   for (const auto& segment : segments) {
     seg_q_tokens.push_back(segment.q_tokens);
-    seg_k_lens_cpu.push_back(segment.k_len);
+    seg_suffix_k_lens_cpu.push_back(segment.suffix_k_len);
+    seg_ctx_lens_cpu.push_back(segment.ctx_k_len);
     seg_to_req_cpu.push_back(segment.req_idx);
-    if (segment.k_len > 0) {
+    if (segment.suffix_k_len > 0) {
       meta.k_pack_starts_cpu.push_back(req_offsets_cpu[segment.req_idx]);
-      meta.k_pack_lens_cpu.push_back(segment.k_len);
+      meta.k_pack_lens_cpu.push_back(segment.suffix_k_len);
     }
   }
   meta.seg_q_cu_lens = make_sp_prefix(seg_q_tokens, q_cu_options);
-  meta.seg_k_cu_lens = make_sp_prefix(seg_k_lens_cpu, q_cu_options);
-  meta.seg_k_lens = torch::tensor(seg_k_lens_cpu, kv_seq_options);
+  meta.seg_suffix_k_cu_lens =
+      make_sp_prefix(seg_suffix_k_lens_cpu, q_cu_options);
+  meta.seg_ctx_lens = torch::tensor(seg_ctx_lens_cpu, kv_seq_options);
 
   if (base_attn_metadata.block_table.defined()) {
     auto seg_to_req_index =

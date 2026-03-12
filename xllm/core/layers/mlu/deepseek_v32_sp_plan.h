@@ -30,7 +30,8 @@ struct DeepseekV32SPSegment {
   int32_t req_idx = 0;
   int32_t rank = 0;
   int32_t q_tokens = 0;
-  int32_t k_len = 0;
+  int32_t suffix_k_len = 0;
+  int32_t ctx_k_len = 0;
   int32_t world_begin = 0;
 };
 
@@ -45,7 +46,7 @@ struct DeepseekV32SPRuntimeArtifacts {
   std::vector<int32_t> gathered_reorder_index_cpu;
 };
 
-inline std::vector<int32_t> extract_prefill_seq_lens(
+inline std::vector<int32_t> extract_q_seq_lens(
     const AttentionMetadata& attn_metadata) {
   CHECK(attn_metadata.q_cu_seq_lens.defined())
       << "deepseek_v32 sequence parallel requires q_cu_seq_lens.";
@@ -59,14 +60,37 @@ inline std::vector<int32_t> extract_prefill_seq_lens(
                                     .contiguous();
   const auto* q_cu_seq_lens_ptr = q_cu_seq_lens.data_ptr<int64_t>();
 
-  std::vector<int32_t> seq_lens;
-  seq_lens.reserve(q_cu_seq_lens.numel() - 1);
+  std::vector<int32_t> q_seq_lens;
+  q_seq_lens.reserve(q_cu_seq_lens.numel() - 1);
   for (int64_t i = 0; i < q_cu_seq_lens.numel() - 1; ++i) {
-    const int64_t seq_len = q_cu_seq_lens_ptr[i + 1] - q_cu_seq_lens_ptr[i];
-    CHECK_GE(seq_len, 0) << "q_cu_seq_lens must be non-decreasing.";
-    seq_lens.push_back(static_cast<int32_t>(seq_len));
+    const int64_t q_seq_len = q_cu_seq_lens_ptr[i + 1] - q_cu_seq_lens_ptr[i];
+    CHECK_GE(q_seq_len, 0) << "q_cu_seq_lens must be non-decreasing.";
+    q_seq_lens.push_back(static_cast<int32_t>(q_seq_len));
   }
-  return seq_lens;
+  return q_seq_lens;
+}
+
+inline std::vector<int32_t> extract_ctx_seq_lens(
+    const AttentionMetadata& attn_metadata) {
+  CHECK(attn_metadata.kv_seq_lens.defined())
+      << "deepseek_v32 sequence parallel requires kv_seq_lens.";
+  CHECK(attn_metadata.kv_seq_lens.dim() == 1)
+      << "deepseek_v32 sequence parallel expects 1D kv_seq_lens.";
+
+  torch::Tensor kv_seq_lens =
+      attn_metadata.kv_seq_lens.to(torch::kCPU).to(torch::kInt64).contiguous();
+  const auto* kv_seq_lens_ptr = kv_seq_lens.data_ptr<int64_t>();
+
+  std::vector<int32_t> ctx_seq_lens;
+  ctx_seq_lens.reserve(kv_seq_lens.numel());
+  for (int64_t i = 0; i < kv_seq_lens.numel(); ++i) {
+    const int64_t ctx_seq_len = kv_seq_lens_ptr[i];
+    CHECK_GE(ctx_seq_len, 0) << "kv_seq_lens must be non-negative.";
+    ctx_seq_lens.push_back(static_cast<int32_t>(ctx_seq_len));
+  }
+  CHECK_EQ(ctx_seq_lens.size(), attn_metadata.q_cu_seq_lens.numel() - 1)
+      << "kv_seq_lens size must match request count.";
+  return ctx_seq_lens;
 }
 
 inline std::vector<int32_t> split_tokens_evenly(int32_t token_num,
@@ -84,13 +108,20 @@ inline std::vector<int32_t> split_tokens_evenly(int32_t token_num,
 
 inline std::vector<DeepseekV32SPSegment> build_all_sp_segments(
     int32_t world_size,
-    const std::vector<int32_t>& seq_lens) {
+    const std::vector<int32_t>& q_seq_lens,
+    const std::vector<int32_t>& ctx_seq_lens) {
+  CHECK_EQ(q_seq_lens.size(), ctx_seq_lens.size())
+      << "q_seq_lens and ctx_seq_lens size mismatch.";
   std::vector<DeepseekV32SPSegment> segments;
-  segments.reserve(seq_lens.size() * world_size * 2);
+  segments.reserve(q_seq_lens.size() * world_size * 2);
 
   int32_t global_offset = 0;
-  for (int32_t req_idx = 0; req_idx < seq_lens.size(); ++req_idx) {
-    const int32_t token_num = seq_lens[req_idx];
+  for (int32_t req_idx = 0; req_idx < q_seq_lens.size(); ++req_idx) {
+    const int32_t token_num = q_seq_lens[req_idx];
+    const int32_t ctx_seq_len = ctx_seq_lens[req_idx];
+    CHECK_GE(ctx_seq_len, token_num)
+        << "ctx_seq_len must be greater than or equal to q_seq_len.";
+    const int32_t cached_prefix_len = ctx_seq_len - token_num;
     const std::vector<int32_t> split =
         split_tokens_evenly(token_num, world_size);
 
@@ -108,8 +139,9 @@ inline std::vector<DeepseekV32SPSegment> build_all_sp_segments(
       left_segment.req_idx = req_idx;
       left_segment.rank = rank;
       left_segment.q_tokens = left_token_num;
-      left_segment.k_len =
+      left_segment.suffix_k_len =
           left_token_num == 0 ? 0 : batch_left + left_token_num;
+      left_segment.ctx_k_len = cached_prefix_len + left_segment.suffix_k_len;
       left_segment.world_begin = world_left;
       segments.push_back(left_segment);
 
@@ -117,7 +149,8 @@ inline std::vector<DeepseekV32SPSegment> build_all_sp_segments(
       right_segment.req_idx = req_idx;
       right_segment.rank = rank;
       right_segment.q_tokens = right_token_num;
-      right_segment.k_len = right_token_num == 0 ? 0 : batch_right;
+      right_segment.suffix_k_len = right_token_num == 0 ? 0 : batch_right;
+      right_segment.ctx_k_len = cached_prefix_len + right_segment.suffix_k_len;
       right_segment.world_begin = world_right - right_token_num;
       segments.push_back(right_segment);
 

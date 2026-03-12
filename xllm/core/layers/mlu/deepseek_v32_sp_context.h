@@ -70,11 +70,13 @@ inline std::optional<DeepseekV32SPContext> build_deepseek_v32_sp_context(
   CHECK_GE(curr_rank, 0) << "curr_rank must be non-negative.";
   CHECK_LT(curr_rank, world_size) << "curr_rank must be less than world_size.";
 
-  const std::vector<int32_t> seq_lens =
-      extract_prefill_seq_lens(base_attn_metadata);
-  CHECK(!seq_lens.empty())
+  const std::vector<int32_t> q_seq_lens =
+      extract_q_seq_lens(base_attn_metadata);
+  const std::vector<int32_t> ctx_seq_lens =
+      extract_ctx_seq_lens(base_attn_metadata);
+  CHECK(!q_seq_lens.empty())
       << "deepseek_v32 sequence parallel requires non-empty prefill requests.";
-  for (int32_t seq_len : seq_lens) {
+  for (int32_t seq_len : q_seq_lens) {
     if (seq_len < world_size) {
       return std::nullopt;
     }
@@ -82,11 +84,12 @@ inline std::optional<DeepseekV32SPContext> build_deepseek_v32_sp_context(
 
   const int32_t total_tokens = static_cast<int32_t>(tokens.numel());
   CHECK_EQ(total_tokens,
-           std::accumulate(seq_lens.begin(), seq_lens.end(), int32_t{0}))
+           std::accumulate(q_seq_lens.begin(), q_seq_lens.end(), int32_t{0}))
       << "tokens.numel() must match total prefill tokens.";
 
   DeepseekV32SPContext context;
-  const auto all_segments = build_all_sp_segments(world_size, seq_lens);
+  const auto all_segments =
+      build_all_sp_segments(world_size, q_seq_lens, ctx_seq_lens);
   const auto local_segments = build_local_sp_segments(curr_rank, all_segments);
   const auto runtime_artifacts = build_sp_runtime_artifacts(
       curr_rank, world_size, all_segments, total_tokens);
@@ -94,7 +97,7 @@ inline std::optional<DeepseekV32SPContext> build_deepseek_v32_sp_context(
   context.local_attn_metadata = build_local_prefill_attention_metadata(
       base_attn_metadata, local_segments);
   context.sp_meta =
-      build_sp_metadata(base_attn_metadata, local_segments, seq_lens);
+      build_sp_metadata(base_attn_metadata, local_segments, q_seq_lens);
   context.total_tokens = total_tokens;
   context.rank = curr_rank;
   context.process_group = sp_group;
