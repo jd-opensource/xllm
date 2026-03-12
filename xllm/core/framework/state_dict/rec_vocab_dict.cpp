@@ -120,7 +120,8 @@ bool RecVocabDict::get_tokens_by_item(int64_t item_id,
   return true;
 }
 
-const std::set<int32_t>& RecVocabDict::get_next_tokens_by_prefix_tokens(
+const std::unordered_set<int32_t>&
+RecVocabDict::get_next_tokens_by_prefix_tokens(
     const Slice<int32_t>& prefix_token_ids) const {
   CHECK_EQ(initialized_, true);
   CHECK_LT(prefix_token_ids.size(), REC_TOKEN_SIZE);
@@ -128,7 +129,7 @@ const std::set<int32_t>& RecVocabDict::get_next_tokens_by_prefix_tokens(
   std::vector<int32_t> prefix_tokens_ids_vec = prefix_token_ids;
   auto iter = prefix_tokens_to_next_tokens_map_.find(prefix_tokens_ids_vec);
   if (iter == prefix_tokens_to_next_tokens_map_.end()) {
-    static std::set<int32_t> empty_set;
+    static std::unordered_set<int32_t> empty_set;
     return empty_set;
   }
 

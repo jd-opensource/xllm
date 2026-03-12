@@ -162,7 +162,7 @@ class DisaggPDScheduler : public ContinuousScheduler {
       received_request_map_;
   // prefill_instance_name -> set of request_ids.
   // Used for bulk cleanup when a prefill instance is unlinked.
-  std::unordered_map<std::string, std::set<std::string>>
+  std::unordered_map<std::string, std::unordered_set<std::string>>
       instance_to_received_requests_map_;
   // request_id -> prefill_instance_name.
   // Used to efficiently remove a request from
@@ -177,7 +177,7 @@ class DisaggPDScheduler : public ContinuousScheduler {
 
   // Lock for multi-threaded read-write linked instances
   std::mutex linked_instances_mutex_;
-  std::set<std::string> linked_instance_;
+  std::unordered_set<std::string> linked_instance_;
 
   std::string server_name_;
 };

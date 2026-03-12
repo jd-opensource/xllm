@@ -81,7 +81,7 @@ class RecVocabDict final {
    * the token triplets
    * @return  next token id list
    */
-  const std::set<int32_t>& get_next_tokens_by_prefix_tokens(
+  const std::unordered_set<int32_t>& get_next_tokens_by_prefix_tokens(
       const Slice<int32_t>& prefix_token_ids) const;
 
  private:
@@ -103,7 +103,7 @@ class RecVocabDict final {
   // Convert prifix tokens to next tokens map, key: prefix token id list, value:
   // next token id list
   std::unordered_map<std::vector<int32_t>,
-                     std::set<int32_t>,
+                     std::unordered_set<int32_t>,
                      boost::hash<std::vector<int32_t>>>
       prefix_tokens_to_next_tokens_map_;
 };

@@ -206,7 +206,7 @@ class PageAllocator {
     std::deque<int64_t> free_virt_page_list;  // Unmapped virtual pages
     std::deque<int64_t>
         reserved_virt_page_list;  // Mapped virtual pages ready for use
-    std::set<int64_t>
+    std::unordered_set<int64_t>
         allocated_virt_page_list;  // Mapped virtual pages in use by block mgr
   };
 

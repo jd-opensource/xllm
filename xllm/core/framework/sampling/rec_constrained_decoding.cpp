@@ -57,7 +57,7 @@ bool RecConstrainedDecoding::build_mask_cache() {
   Slice<int32_t> prefix_token_ids = {empty_token_ids.data(),
                                      empty_token_ids.size()};
 
-  const std::set<int32_t>& first_token_ids =
+  const std::unordered_set<int32_t>& first_token_ids =
       VersionSingleton<RecVocabDict>::GetInstance(
           std::to_string(model_version_))
           ->get_next_tokens_by_prefix_tokens(prefix_token_ids);
@@ -122,7 +122,7 @@ torch::Tensor RecConstrainedDecoding::generate_decode_mask(
     for (size_t token_idx = start_idx; token_idx < end_idx; ++token_idx) {
       Slice<int32_t> tokens_slice(generated_token_list[token_idx]);
 
-      const std::set<int32_t>& next_token_ids =
+      const std::unordered_set<int32_t>& next_token_ids =
           VersionSingleton<RecVocabDict>::GetInstance(
               std::to_string(model_version_))
               ->get_next_tokens_by_prefix_tokens(tokens_slice);

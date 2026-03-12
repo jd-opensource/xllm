@@ -441,7 +441,7 @@ class Qwen2_VisionTransformerImpl : public torch::nn::Module {
   int window_size_ = 0;
   int patch_size_ = 0;
   int spatial_merge_size_ = 0;
-  std::set<int> fullatt_block_indexes_;
+  std::unordered_set<int> fullatt_block_indexes_;
   int spatial_merge_unit_ = 0;
   // int mlp_ratio_ = 4;
 

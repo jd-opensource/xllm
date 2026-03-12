@@ -44,7 +44,7 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
 
   // parse device string
   const std::vector<std::string> device_strs = absl::StrSplit(device_str, ',');
-  std::set<torch::DeviceType> device_types;
+  std::unordered_set<torch::DeviceType> device_types;
   devices.reserve(device_strs.size());
   for (const auto& device_str : device_strs) {
     std::vector<std::string> parts = absl::StrSplit(device_str, ':');
