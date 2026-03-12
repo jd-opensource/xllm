@@ -54,15 +54,13 @@ torch::Tensor matmul(torch::Tensor a,
 
   bool use_gemv = true;
   const int64_t gemv_max_batch = 1;
-  const char* disable_infer_gemm_ex_str =
-      get_string_env("DISABLE_INFER_GEMM_EX");
-  std::string disable_infer_gemm_ex =
-      (disable_infer_gemm_ex_str == nullptr) ? "0" : disable_infer_gemm_ex_str;
+  const bool disable_infer_gemm_ex =
+      xllm::util::get_bool_env("DISABLE_INFER_GEMM_EX", false);
 
   use_gemv =
       use_gemv &&
       gemv_conditions(a, b, bias.value_or(at::Tensor()), gemv_max_batch) &&
-      (disable_infer_gemm_ex != "1") && (act_type == -1);
+      !disable_infer_gemm_ex && (act_type == -1);
 
   if (use_gemv) {
     output = infer::ixformer_linear_ex(a, b, bias, output);
