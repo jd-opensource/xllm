@@ -85,4 +85,6 @@ service XllmAPIService {
 
   rpc UnlinkD2D (D2DLinkRequest) returns (Status);
   rpc UnlinkD2DHttp (HttpRequest) returns (HttpResponse);
+
+  rpc LoggingHttp (HttpRequest) returns (HttpResponse);
 }; 
