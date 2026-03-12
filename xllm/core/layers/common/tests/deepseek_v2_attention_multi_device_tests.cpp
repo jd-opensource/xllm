@@ -25,6 +25,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
+#include "framework/batch/batch_forward_type.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
@@ -89,7 +90,8 @@ void check_tensors_close(const torch::Tensor& actual,
       << ", mean_diff=" << torch::mean(diff).item<float>();
 }
 
-ModelArgs create_attention_model_args(int64_t q_lora_rank = 0) {
+ModelArgs create_attention_model_args(int64_t q_lora_rank = 0,
+                                      bool enable_indexer = false) {
   ModelArgs args;
   args.model_type() = "deepseek_v32";
   args.hidden_size() = 256;
@@ -98,13 +100,13 @@ ModelArgs create_attention_model_args(int64_t q_lora_rank = 0) {
   args.rope_theta() = 10000.0f;
   args.rms_norm_eps() = 1e-6f;
   args.q_lora_rank() = q_lora_rank;
-  args.kv_lora_rank() = 128;
+  args.kv_lora_rank() = enable_indexer ? 256 : 128;
   args.qk_nope_head_dim() = 128;
   args.qk_rope_head_dim() = 64;
   args.v_head_dim() = 128;
-  args.index_n_heads() = 0;
-  args.index_head_dim() = 0;
-  args.index_topk() = 0;
+  args.index_n_heads() = enable_indexer ? 64 : 0;
+  args.index_head_dim() = enable_indexer ? 128 : 0;
+  args.index_topk() = enable_indexer ? 8 : 0;
   args.sliding_window() = 0;
   args.rope_scaling_rope_type() = "";
   args.rope_scaling_original_max_position_embeddings() = 128;
@@ -128,6 +130,8 @@ StateDict create_attention_state_dict(const ModelArgs& args,
   const int64_t v_head_dim = args.v_head_dim();
   const int64_t qk_head_dim = qk_nope_head_dim + qk_rope_head_dim;
   const int64_t q_lora_rank = args.q_lora_rank();
+  const int64_t index_n_heads = args.index_n_heads();
+  const int64_t index_head_dim = args.index_head_dim();
 
   std::unordered_map<std::string, torch::Tensor> weights;
   if (q_lora_rank > 0) {
@@ -222,6 +226,38 @@ StateDict create_attention_state_dict(const ModelArgs& args,
           .abs()
           .add_(0.25f);
 
+  if (index_n_heads > 0) {
+    weights["indexer.k_norm.bias"] =
+        seeded_tensor("attention_multi_device/indexer/k_norm/bias",
+                      {index_head_dim},
+                      torch::kFloat32,
+                      options.device())
+            .abs()
+            .add_(0.5f);
+    weights["indexer.k_norm.weight"] =
+        seeded_tensor("attention_multi_device/indexer/k_norm/weight",
+                      {index_head_dim},
+                      torch::kFloat32,
+                      options.device())
+            .abs()
+            .add_(0.5f);
+    weights["indexer.weights_proj.weight"] =
+        seeded_tensor("attention_multi_device/indexer/weights_proj/weight",
+                      {index_n_heads, hidden_size},
+                      torch::kBFloat16,
+                      options.device());
+    weights["indexer.wk.weight"] =
+        seeded_tensor("attention_multi_device/indexer/wk/weight",
+                      {index_head_dim, hidden_size},
+                      torch::kBFloat16,
+                      options.device());
+    weights["indexer.wq_b.weight"] =
+        seeded_tensor("attention_multi_device/indexer/wq_b/weight",
+                      {index_n_heads * index_head_dim, q_lora_rank},
+                      torch::kBFloat16,
+                      options.device());
+  }
+
   return StateDict(std::move(weights));
 }
 
@@ -262,6 +298,27 @@ AttentionMetadata create_prefill_metadata(const torch::TensorOptions& options,
   return metadata;
 }
 
+AttentionMetadata create_chunked_metadata(const torch::TensorOptions& options,
+                                          int32_t prefix_len,
+                                          int32_t chunk_len) {
+  AttentionMetadata metadata;
+  auto int_options = options.dtype(torch::kInt32);
+  const int32_t ctx_len = prefix_len + chunk_len;
+  metadata.q_cu_seq_lens = torch::tensor({0, chunk_len}, int_options);
+  metadata.kv_cu_seq_lens = torch::tensor({0, ctx_len}, int_options);
+  metadata.kv_seq_lens = torch::tensor({ctx_len}, int_options);
+  metadata.block_table = torch::zeros({1, 4}, int_options);
+  metadata.block_table[0][0] = 1;
+  metadata.slot_mapping = torch::arange(prefix_len, ctx_len, int_options);
+  metadata.max_query_len = chunk_len;
+  metadata.max_seq_len = ctx_len;
+  metadata.compute_dtype = "half";
+  metadata.is_prefill = false;
+  metadata.is_chunked_prefill = true;
+  metadata.is_dummy = false;
+  return metadata;
+}
+
 KVCache create_decode_kv_cache(const ModelArgs& args,
                                const torch::TensorOptions& options) {
   const int64_t cache_width = args.qk_rope_head_dim() + args.kv_lora_rank();
@@ -269,7 +326,14 @@ KVCache create_decode_kv_cache(const ModelArgs& args,
                                         {8, 1, FLAGS_block_size, cache_width},
                                         torch::kBFloat16,
                                         options.device());
-  return KVCache(k_cache, torch::Tensor(), torch::Tensor());
+  torch::Tensor index_cache = torch::Tensor();
+  if (args.index_head_dim() > 0) {
+    index_cache = seeded_tensor("attention_multi_device/index_cache",
+                                {8, 1, FLAGS_block_size, args.index_head_dim()},
+                                torch::kBFloat16,
+                                options.device());
+  }
+  return KVCache(k_cache, torch::Tensor(), index_cache);
 }
 
 torch::Tensor run_attention_decode_once(const ModelArgs& args,
@@ -305,7 +369,9 @@ std::tuple<torch::Tensor, torch::Tensor> run_attention_prefill_once(
     const torch::Tensor& hidden_states,
     KVCache& kv_cache,
     bool enable_full_weight_path,
-    bool enable_fused_mla_kernel) {
+    bool enable_fused_mla_kernel,
+    BatchForwardType batch_forward_type = BatchForwardType::PREFILL,
+    int32_t prefix_len = 0) {
   ScopedBoolFlagValue flag_guard(FLAGS_enable_prefill_sp,
                                  enable_full_weight_path);
   OptimizationConfig optimization_config;
@@ -314,25 +380,43 @@ std::tuple<torch::Tensor, torch::Tensor> run_attention_prefill_once(
   DeepseekV2Attention attention(
       args, quant_args, parallel_args, options, optimization_config);
   attention->load_state_dict(state_dict);
+  const int32_t token_num = static_cast<int32_t>(tokens.numel());
   AttentionMetadata metadata =
-      create_prefill_metadata(options, static_cast<int32_t>(tokens.numel()));
+      batch_forward_type.is_chunked_prefill()
+          ? create_chunked_metadata(options, prefix_len, token_num)
+          : create_prefill_metadata(options, token_num);
   std::optional<layer::v32_sp::DeepseekV32SPContext> sp_ctx;
-  if (enable_full_weight_path) {
+  torch::Tensor local_positions = positions;
+  torch::Tensor local_hidden_states = hidden_states;
+  if (enable_full_weight_path && args.index_n_heads() > 0) {
     ProcessGroup* sp_group = parallel_args.sp_group_ != nullptr
                                  ? parallel_args.sp_group_
                                  : parallel_args.process_group_;
     sp_ctx = layer::v32_sp::build_deepseek_v32_sp_context(
         metadata,
+        batch_forward_type,
         tokens,
         sp_group,
         parallel_args.rank(),
         parallel_args.world_size());
+    if (sp_ctx.has_value()) {
+      local_positions =
+          layer::v32_sp::reorder_to_local_shard(positions, sp_ctx.value());
+      local_hidden_states =
+          layer::v32_sp::reorder_to_local_shard(hidden_states, sp_ctx.value());
+    }
   }
-  torch::Tensor output = attention->forward(positions,
-                                            hidden_states,
+  torch::Tensor output = attention->forward(local_positions,
+                                            local_hidden_states,
                                             metadata,
                                             kv_cache,
                                             sp_ctx ? &sp_ctx.value() : nullptr);
+  if (sp_ctx.has_value()) {
+    output = layer::v32_sp::restore_gathered_to_global_order(
+        layer::v32_sp::all_gather_across_ranks(output, sp_ctx.value()),
+        sp_ctx.value(),
+        layer::v32_sp::GatheredTensorLayout::kPacked);
+  }
   return {output, kv_cache.get_k_cache().clone()};
 }
 
@@ -605,6 +689,221 @@ int32_t run_attention_prefill_fallback_test_child(int32_t rank,
   }
 }
 
+int32_t run_attention_chunked_test_child(int32_t rank,
+                                         int32_t world_size,
+                                         int32_t port,
+                                         const std::string& host) {
+  try {
+    const int32_t dev_count = xllm::Device::device_count();
+    if (dev_count < world_size) {
+      LOG(WARNING) << "Rank " << rank << ": insufficient devices. Skipping.";
+      return EXIT_CODE_SKIP;
+    }
+
+    FLAGS_enable_mla = true;
+    FLAGS_block_size = 16;
+    const int32_t device_index = rank % dev_count;
+    xllm::Device xllm_device(device_index);
+    xllm_device.set_device();
+    torch::Device device = xllm_device.unwrap();
+    auto process_group =
+        create_test_process_group(rank, world_size, port, host, device);
+    CHECK(process_group) << "Rank " << rank
+                         << ": failed to create process group";
+
+    ParallelArgs parallel_args(rank, world_size, process_group.get());
+    parallel_args.tp_group_ = process_group.get();
+    parallel_args.sp_group_ = process_group.get();
+
+    auto options = torch::TensorOptions()
+                       .dtype(torch::kBFloat16)
+                       .device(device)
+                       .requires_grad(false);
+    ModelArgs model_args = create_attention_model_args(/*q_lora_rank=*/64,
+                                                       /*enable_indexer=*/true);
+    QuantArgs quant_args = create_default_quant_args();
+    StateDict state_dict = create_attention_state_dict(model_args, options);
+
+    constexpr int32_t prefix_len = 8;
+    constexpr int32_t chunk1_len = 4;
+    constexpr int32_t chunk2_len = 4;
+    torch::Tensor prefix_tokens =
+        torch::arange(prefix_len, options.dtype(torch::kInt32).device(device));
+    torch::Tensor prefix_hidden_states =
+        seeded_tensor("attention_multi_device/chunked_prefix_hidden_states",
+                      {prefix_len, model_args.hidden_size()},
+                      torch::kBFloat16,
+                      device);
+    torch::Tensor prefix_positions =
+        torch::arange(prefix_len, options.dtype(torch::kInt32).device(device));
+
+    torch::Tensor chunk1_tokens =
+        torch::arange(prefix_len,
+                      prefix_len + chunk1_len,
+                      options.dtype(torch::kInt32).device(device));
+    torch::Tensor chunk1_hidden_states =
+        seeded_tensor("attention_multi_device/chunked_suffix1_hidden_states",
+                      {chunk1_len, model_args.hidden_size()},
+                      torch::kBFloat16,
+                      device);
+    torch::Tensor chunk1_positions =
+        torch::arange(prefix_len,
+                      prefix_len + chunk1_len,
+                      options.dtype(torch::kInt32).device(device));
+
+    torch::Tensor chunk2_tokens =
+        torch::arange(prefix_len + chunk1_len,
+                      prefix_len + chunk1_len + chunk2_len,
+                      options.dtype(torch::kInt32).device(device));
+    torch::Tensor chunk2_hidden_states =
+        seeded_tensor("attention_multi_device/chunked_suffix2_hidden_states",
+                      {chunk2_len, model_args.hidden_size()},
+                      torch::kBFloat16,
+                      device);
+    torch::Tensor chunk2_positions =
+        torch::arange(prefix_len + chunk1_len,
+                      prefix_len + chunk1_len + chunk2_len,
+                      options.dtype(torch::kInt32).device(device));
+
+    KVCache sharded_kv_cache = create_decode_kv_cache(model_args, options);
+    sharded_kv_cache.get_k_cache().zero_();
+    KVCache full_weight_kv_cache = create_decode_kv_cache(model_args, options);
+    full_weight_kv_cache.get_k_cache().zero_();
+
+    auto [sharded_prefix_output, sharded_prefix_k_cache] =
+        run_attention_prefill_once(model_args,
+                                   quant_args,
+                                   parallel_args,
+                                   options,
+                                   state_dict,
+                                   prefix_tokens,
+                                   prefix_positions,
+                                   prefix_hidden_states,
+                                   sharded_kv_cache,
+                                   false,
+                                   /*enable_fused_mla_kernel=*/false);
+    auto [full_prefix_output, full_prefix_k_cache] =
+        run_attention_prefill_once(model_args,
+                                   quant_args,
+                                   parallel_args,
+                                   options,
+                                   state_dict,
+                                   prefix_tokens,
+                                   prefix_positions,
+                                   prefix_hidden_states,
+                                   full_weight_kv_cache,
+                                   false,
+                                   /*enable_fused_mla_kernel=*/false);
+    check_tensors_close(sharded_prefix_output,
+                        full_prefix_output,
+                        /*rtol=*/1e-3,
+                        /*atol=*/1e-3,
+                        "DeepseekV2Attention chunked prefix output");
+    check_tensors_close(sharded_prefix_k_cache,
+                        full_prefix_k_cache,
+                        /*rtol=*/1e-3,
+                        /*atol=*/1e-3,
+                        "DeepseekV2Attention chunked prefix k_cache");
+
+    auto [sharded_output, sharded_k_cache] =
+        run_attention_prefill_once(model_args,
+                                   quant_args,
+                                   parallel_args,
+                                   options,
+                                   state_dict,
+                                   chunk1_tokens,
+                                   chunk1_positions,
+                                   chunk1_hidden_states,
+                                   sharded_kv_cache,
+                                   false,
+                                   /*enable_fused_mla_kernel=*/false,
+                                   BatchForwardType::CHUNKED_PREFILL,
+                                   prefix_len);
+    auto [full_weight_output, full_weight_k_cache] =
+        run_attention_prefill_once(model_args,
+                                   quant_args,
+                                   parallel_args,
+                                   options,
+                                   state_dict,
+                                   chunk1_tokens,
+                                   chunk1_positions,
+                                   chunk1_hidden_states,
+                                   full_weight_kv_cache,
+                                   true,
+                                   /*enable_fused_mla_kernel=*/false,
+                                   BatchForwardType::CHUNKED_PREFILL,
+                                   prefix_len);
+
+    xllm_device.synchronize_default_stream();
+    check_tensors_close(sharded_output,
+                        full_weight_output,
+                        /*rtol=*/1e-3,
+                        /*atol=*/1e-3,
+                        "DeepseekV2Attention chunked prefill output");
+    check_tensors_close(sharded_k_cache,
+                        full_weight_k_cache,
+                        /*rtol=*/1e-3,
+                        /*atol=*/1e-3,
+                        "DeepseekV2Attention chunked prefill k_cache");
+    check_tensors_close(sharded_kv_cache.get_index_cache(),
+                        full_weight_kv_cache.get_index_cache(),
+                        /*rtol=*/1e-3,
+                        /*atol=*/1e-3,
+                        "DeepseekV2Attention chunked prefill index_cache");
+
+    auto [sharded_second_output, sharded_second_k_cache] =
+        run_attention_prefill_once(model_args,
+                                   quant_args,
+                                   parallel_args,
+                                   options,
+                                   state_dict,
+                                   chunk2_tokens,
+                                   chunk2_positions,
+                                   chunk2_hidden_states,
+                                   sharded_kv_cache,
+                                   false,
+                                   /*enable_fused_mla_kernel=*/false,
+                                   BatchForwardType::CHUNKED_PREFILL,
+                                   prefix_len + chunk1_len);
+    auto [full_weight_second_output, full_weight_second_k_cache] =
+        run_attention_prefill_once(model_args,
+                                   quant_args,
+                                   parallel_args,
+                                   options,
+                                   state_dict,
+                                   chunk2_tokens,
+                                   chunk2_positions,
+                                   chunk2_hidden_states,
+                                   full_weight_kv_cache,
+                                   true,
+                                   /*enable_fused_mla_kernel=*/false,
+                                   BatchForwardType::CHUNKED_PREFILL,
+                                   prefix_len + chunk1_len);
+
+    xllm_device.synchronize_default_stream();
+    check_tensors_close(sharded_second_output,
+                        full_weight_second_output,
+                        /*rtol=*/1e-3,
+                        /*atol=*/1e-3,
+                        "DeepseekV2Attention second chunked prefill output");
+    check_tensors_close(sharded_second_k_cache,
+                        full_weight_second_k_cache,
+                        /*rtol=*/1e-3,
+                        /*atol=*/1e-3,
+                        "DeepseekV2Attention second chunked prefill k_cache");
+    check_tensors_close(
+        sharded_kv_cache.get_index_cache(),
+        full_weight_kv_cache.get_index_cache(),
+        /*rtol=*/1e-3,
+        /*atol=*/1e-3,
+        "DeepseekV2Attention second chunked prefill index_cache");
+    return 0;
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Rank " << rank << ": Exception: " << e.what();
+    return 1;
+  }
+}
+
 }  // namespace
 
 class AttentionMultiDeviceTest : public ::testing::Test {
@@ -745,6 +1044,47 @@ class AttentionMultiDeviceTest : public ::testing::Test {
     }
   }
 
+  void run_chunked_test() {
+    std::vector<pid_t> child_pids;
+    for (int32_t rank = 0; rank < world_size_; ++rank) {
+      pid_t pid = fork();
+      if (pid == 0) {
+        const int32_t exit_code =
+            run_attention_chunked_test_child(rank, world_size_, port_, host_);
+        _exit(exit_code);
+      } else if (pid > 0) {
+        child_pids.push_back(pid);
+      } else {
+        LOG(FATAL) << "Failed to fork rank " << rank;
+      }
+    }
+
+    bool any_failed = false;
+    bool any_skipped = false;
+    for (size_t i = 0; i < child_pids.size(); ++i) {
+      int32_t status;
+      waitpid(child_pids[i], &status, 0);
+      if (WIFEXITED(status)) {
+        const int32_t exit_code = WEXITSTATUS(status);
+        if (exit_code == EXIT_CODE_SKIP) {
+          any_skipped = true;
+        } else if (exit_code != 0) {
+          any_failed = true;
+          LOG(ERROR) << "Rank " << i << " failed with code " << exit_code;
+        }
+      } else {
+        any_failed = true;
+        LOG(ERROR) << "Rank " << i << " crashed (signal).";
+      }
+    }
+
+    if (any_skipped) {
+      GTEST_SKIP() << "Test skipped due to insufficient devices.";
+    } else {
+      ASSERT_FALSE(any_failed) << "Attention multi-device chunked test failed.";
+    }
+  }
+
   int32_t world_size_;
   int32_t port_;
   std::string host_;
@@ -764,6 +1104,10 @@ TEST_F(AttentionMultiDeviceTest, PrefillFullWeightMatchesShardedPath) {
 
 TEST_F(AttentionMultiDeviceTest, PrefillFullWeightFallbackMatchesShardedPath) {
   run_prefill_fallback_test();
+}
+
+TEST_F(AttentionMultiDeviceTest, ChunkedPrefillFullWeightMatchesShardedPath) {
+  run_chunked_test();
 }
 
 }  // namespace test

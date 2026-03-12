@@ -8,7 +8,10 @@
 #include <optional>
 
 #include "chunked_prefill_scheduler.h"
+#include "core/common/global_flags.h"
 #include "distributed_runtime/engine.h"
+#include "prefill_only_scheduler.h"
+#include "scheduler_factory.h"
 #include "util/utils.h"
 
 namespace xllm {
@@ -61,6 +64,19 @@ class FakeEngine : public Engine {
  private:
   std::unique_ptr<Tokenizer> fake_tokenizer_;
   std::unique_ptr<BlockManagerPool> fake_block_manager_;
+};
+
+class ScopedBoolFlagValue {
+ public:
+  ScopedBoolFlagValue(bool& flag, bool value) : flag_(flag), old_(flag) {
+    flag_ = value;
+  }
+
+  ~ScopedBoolFlagValue() { flag_ = old_; }
+
+ private:
+  bool& flag_;
+  bool old_;
 };
 
 ContinuousScheduler::Options create_scheduler_options(
@@ -189,7 +205,100 @@ void make_request_decode_ready(const std::shared_ptr<Request>& request) {
   }
 }
 
+void set_chunk_kv(const std::shared_ptr<Request>& request, size_t kv_tokens) {
+  for (auto& seq : request->sequences()) {
+    seq->kv_state().set_kv_cache_tokens_num(kv_tokens);
+  }
+}
+
 }  // namespace
+
+TEST(ContinuousSchedulerFactoryTest,
+     ChunkedPrefillWithoutSPUsesChunkedScheduler) {
+  ScopedBoolFlagValue enable_sp(FLAGS_enable_prefill_sp, false);
+  ContinuousScheduler::Options opt =
+      create_scheduler_options(10000, 256, 0, 1024, 1);
+  opt.enable_chunked_prefill() = true;
+
+  auto engine = std::make_unique<FakeEngine>(32, 32);
+  auto scheduler = create_continuous_scheduler(engine.get(), opt);
+
+  EXPECT_NE(dynamic_cast<ChunkedPrefillScheduler*>(scheduler.get()), nullptr);
+  EXPECT_EQ(dynamic_cast<PrefillOnlyScheduler*>(scheduler.get()), nullptr);
+}
+
+TEST(ContinuousSchedulerFactoryTest,
+     ChunkedPrefillWithSPUsesPrefillOnlyScheduler) {
+  ScopedBoolFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
+  ContinuousScheduler::Options opt =
+      create_scheduler_options(10000, 256, 0, 1024, 1);
+  opt.enable_chunked_prefill() = true;
+
+  auto engine = std::make_unique<FakeEngine>(32, 32);
+  auto scheduler = create_continuous_scheduler(engine.get(), opt);
+
+  EXPECT_NE(dynamic_cast<PrefillOnlyScheduler*>(scheduler.get()), nullptr);
+  EXPECT_EQ(dynamic_cast<ChunkedPrefillScheduler*>(scheduler.get()), nullptr);
+}
+
+TEST(ContinuousSchedulerFactoryTest,
+     ChunkedPrefillWithSPAndSpeculativeUsesPrefillOnlyScheduler) {
+  ScopedBoolFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
+  ContinuousScheduler::Options opt =
+      create_scheduler_options(10000, 256, 4, 1024, 1);
+  opt.enable_chunked_prefill() = true;
+
+  auto engine = std::make_unique<FakeEngine>(32, 32);
+  auto scheduler = create_continuous_scheduler(engine.get(), opt);
+
+  EXPECT_NE(dynamic_cast<PrefillOnlyScheduler*>(scheduler.get()), nullptr);
+  EXPECT_EQ(dynamic_cast<ChunkedPrefillScheduler*>(scheduler.get()), nullptr);
+}
+
+TEST(ContinuousSchedulerFactoryTest,
+     ChunkedPrefillWithSPDoesNotBuildMixedBatch) {
+  ScopedBoolFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
+  ContinuousScheduler::Options opt = create_scheduler_options(8, 8, 0, 4, 1);
+  opt.enable_chunked_prefill() = true;
+
+  auto engine = std::make_unique<FakeEngine>(32, 32);
+  auto scheduler = create_continuous_scheduler(engine.get(), opt);
+  auto* prefill_only = dynamic_cast<PrefillOnlyScheduler*>(scheduler.get());
+  ASSERT_NE(prefill_only, nullptr);
+
+  auto requests = generate_request({2, 10},
+                                   {8, 8},
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   30000);
+  for (auto& req : requests) {
+    prefill_only->add_request(req);
+  }
+
+  auto batches = prefill_only->prepare_batch_test();
+  ASSERT_EQ(batches.size(), 1);
+  ASSERT_EQ(batches[0].size(), 2);
+  const auto& allowed_max_tokens = batches[0].get_allowed_max_tokens();
+  ASSERT_EQ(allowed_max_tokens.size(), 2);
+
+  make_request_decode_ready(requests[0]);
+  set_chunk_kv(requests[1], allowed_max_tokens[1]);
+
+  batches = prefill_only->prepare_batch_test();
+  ASSERT_EQ(batches.size(), 1);
+  ASSERT_EQ(batches[0].size(), 1);
+
+  const auto forward_input =
+      batches[0].prepare_forward_input(1, 0, ModelArgs());
+  EXPECT_TRUE(
+      forward_input.input_params.batch_forward_type.is_chunked_prefill());
+  EXPECT_FALSE(forward_input.input_params.batch_forward_type.is_mixed());
+  EXPECT_EQ(forward_input.input_params.num_sequences, 1);
+  EXPECT_EQ(batches[0].get_allowed_max_tokens()[0],
+            opt.max_tokens_per_chunk_for_prefill());
+}
 
 // TEST-1:
 // test preempt

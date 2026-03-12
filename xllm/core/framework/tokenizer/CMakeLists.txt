@@ -25,6 +25,7 @@ cc_library(
   DEPS
     :common
     :sentencepiece
+    state_dict
     absl::flat_hash_map
     absl::strings
     glog::glog
@@ -42,4 +43,3 @@ cc_test(
     glog::glog
     GTest::gtest_main
 )
-
