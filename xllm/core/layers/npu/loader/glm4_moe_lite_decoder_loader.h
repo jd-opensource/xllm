@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#pragma once
+
 #include "base_loader.h"
 
 static const uint64_t WEIGHT_COUNT_PER_LAYER = 84;

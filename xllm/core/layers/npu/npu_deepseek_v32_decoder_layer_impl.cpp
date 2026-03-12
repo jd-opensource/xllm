@@ -27,6 +27,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "framework/model/npu_cp_prepare.h"
 #include "layers/common/rotary_embedding_util.h"
+#include "loader/deepseek_v32_decoder_manual_loader.h"
 
 namespace xllm {
 namespace layer {
@@ -223,21 +224,39 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
   param_from_args(
       decode_param_, model_args, parallel_args, /*is_prefill=*/false);
 
-  loader_ = std::make_unique<DeekseekV32DecoderLoader>(
-      WEIGHT_COUNT_PER_LAYER,
-      context,
-      layer_id_,
-      prefill_param_.firstKDenseReplace,
-      prefill_param_.numOfDeviceExperts,
-      prefill_param_.qkRopeHeadDim,
-      prefill_param_.numAttentionHeadsPerRank,
-      decode_param_.worldSize,
-      qk_nope_head_dim_,
-      kv_lora_rank_,
-      num_key_value_heads_,
-      v_head_dim_,
-      prefill_param_.isBF16,
-      decode_param_.isBF16);
+  if (FLAGS_enable_manual_loader) {
+    loader_ = std::make_unique<DeepseekV32DecoderManualLoader>(
+        WEIGHT_COUNT_PER_LAYER,
+        context,
+        layer_id_,
+        prefill_param_.firstKDenseReplace,
+        prefill_param_.numOfDeviceExperts,
+        prefill_param_.qkRopeHeadDim,
+        prefill_param_.numAttentionHeadsPerRank,
+        decode_param_.worldSize,
+        qk_nope_head_dim_,
+        kv_lora_rank_,
+        num_key_value_heads_,
+        v_head_dim_,
+        prefill_param_.isBF16,
+        decode_param_.isBF16);
+  } else {
+    loader_ = std::make_unique<DeekseekV32DecoderLoader>(
+        WEIGHT_COUNT_PER_LAYER,
+        context,
+        layer_id_,
+        prefill_param_.firstKDenseReplace,
+        prefill_param_.numOfDeviceExperts,
+        prefill_param_.qkRopeHeadDim,
+        prefill_param_.numAttentionHeadsPerRank,
+        decode_param_.worldSize,
+        qk_nope_head_dim_,
+        kv_lora_rank_,
+        num_key_value_heads_,
+        v_head_dim_,
+        prefill_param_.isBF16,
+        decode_param_.isBF16);
+  }
   initialize_tensors(options);
 }
 

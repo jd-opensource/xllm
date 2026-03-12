@@ -30,9 +30,6 @@ class Glm4DecoderLoader : public BaseLoader {
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
   void merge_loaded_weights() override;
-
- private:
-  at::Tensor at_placeholder_;
 };
 
 }  // namespace layer

@@ -24,54 +24,14 @@ limitations under the License.
 #include <torch_npu/csrc/libs/init_npu.h>
 
 #include "qwen3_vision_encoder_loader.h"
+#include "qwen_loader_constants.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
 
 namespace xllm {
 namespace layer {
 
-enum VisionEncoderLayerTensorId : int {
-  IN_INPUT_NORM_WEIGHT = 0,
-  IN_INPUT_NORM_BIAS,
-  IN_POST_NORM_WEIGHT,
-  IN_POST_NORM_BIAS,
-  IN_QKV_WEIGHT,
-  IN_QKV_BIAS,
-  IN_WATTENTION_OUT_WEIGHT,
-  IN_WATTENTION_OUT_BIAS,
-  IN_LINEAR_FC1_WEIGHT,
-  IN_LINEAR_FC1_BIAS,
-  IN_LINEAR_FC2_WEIGHT,
-  IN_LINEAR_FC2_BIAS,
-  IN_VISION_Q_WEIGHT,
-  IN_VISION_Q_BIAS,
-  IN_VISION_K_WEIGHT,
-  IN_VISION_K_BIAS,
-  IN_VISION_V_WEIGHT,
-  IN_VISION_V_BIAS
-};
-
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
-    {IN_INPUT_NORM_WEIGHT, "norm1.weight"},
-    {IN_INPUT_NORM_BIAS, "norm1.bias"},
-    {IN_POST_NORM_WEIGHT, "norm2.weight"},
-    {IN_POST_NORM_BIAS, "norm2.bias"},
-    {IN_QKV_WEIGHT, "attn.qkv.weight"},
-    {IN_QKV_BIAS, "attn.qkv.bias"},
-    {IN_WATTENTION_OUT_WEIGHT, "attn.proj.weight"},
-    {IN_WATTENTION_OUT_BIAS, "attn.proj.bias"},
-    {IN_LINEAR_FC1_WEIGHT, "mlp.linear_fc1.weight"},
-    {IN_LINEAR_FC1_BIAS, "mlp.linear_fc1.bias"},
-    {IN_LINEAR_FC2_WEIGHT, "mlp.linear_fc2.weight"},
-    {IN_LINEAR_FC2_BIAS, "mlp.linear_fc2.bias"}};
-
-// {weight,dim}
-static std::map<int, int> WEIGHT_SHARD = {
-    {IN_WATTENTION_OUT_WEIGHT, 1},
-    {IN_LINEAR_FC1_WEIGHT, 0},
-    {IN_LINEAR_FC1_BIAS, 0},
-    {IN_LINEAR_FC2_WEIGHT, 1},
-};
+using namespace qwen3_vision_encoder_constants;
 
 Qwen3VisionEncoderLoader::Qwen3VisionEncoderLoader(uint64_t weight_count,
                                                    const ModelContext& context)

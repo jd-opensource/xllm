@@ -24,254 +24,12 @@ limitations under the License.
 #include <unordered_map>
 
 #include "core/layers/npu/npu_glm4_moe_decoder_layer.h"
+#include "glm_moe_loader_constants.h"
 
 namespace xllm {
 namespace layer {
 
-enum DecoderLayerTensorId : int {
-  IN_INPUT_NORM_WEIGHT = 0,
-  IN_INPUT_NORM_BIAS = 1,
-  IN_INPUT_NORM_NEW_WEIGHT = 2,
-  IN_INPUT_NORM_NEW_BIAS = 3,
-
-  IN_QKV_WEIGHT_0 = 4,
-  IN_QKV_BIAS_0 = 5,
-  IN_QKV_DESCALE_0 = 6,
-  IN_QKV_OFFSET_0 = 7,
-  IN_QKV_SCALE_0 = 8,
-  IN_QKV_COMPRESS_IDX_0 = 9,
-
-  IN_QKV_WEIGHT_1 = 10,
-  IN_QKV_BIAS_1 = 11,
-  IN_QKV_DESCALE_1 = 12,
-  IN_QKV_OFFSET_1 = 13,
-  IN_QKV_SCALE_1 = 14,
-  IN_QKV_COMPRESS_IDX_1 = 15,
-
-  IN_QKV_WEIGHT_2 = 16,
-  IN_QKV_BIAS_2 = 17,
-  IN_QKV_DESCALE_2 = 18,
-  IN_QKV_OFFSET_2 = 19,
-  IN_QKV_SCALE_2 = 20,
-  IN_QKV_COMPRESS_IDX_2 = 21,
-
-  IN_QKV_DENSE_WEIGHT = 22,
-  IN_QKV_DENSE_BIAS = 23,
-  IN_QKV_DENSE_DESCALE = 24,
-  IN_QKV_DENSE_OFFSET = 25,
-  IN_QKV_DENSE_SCALE = 26,
-  IN_QKV_DENSE_COMPRESS_IDX = 27,
-
-  IN_POST_ATTN_NORM_WEIGHT = 28,
-  IN_POST_ATTN_NORM_BIAS = 29,
-  IN_POST_ATTN_NORM_NEW_WEIGHT = 30,
-  IN_POST_ATTN_NORM_NEW_BIAS = 31,
-
-  IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT = 32,
-  IN_MLP_GATEUP_BIAS_SHARED_EXPERT = 33,
-  IN_MLP_GATEUP_DESCALE_SHARED_EXPERT = 34,
-  IN_MLP_GATEUP_OFFSET_SHARED_EXPERT = 35,
-  IN_MLP_GATEUP_SCALE_SHARED_EXPERT = 36,
-  IN_MLP_GATEUP_COMPRESS_IDX_SHARED_EXPERT = 37,
-
-  IN_MLP_DOWN_WEIGHT_SHARED_EXPERT = 38,
-  IN_MLP_DOWN_BIAS_SHARED_EXPERT = 39,
-  IN_MLP_DOWN_DESCALE_SHARED_EXPERT = 40,
-  IN_MLP_DOWN_OFFSET_SHARED_EXPERT = 41,
-  IN_MLP_DOWN_SCALE_SHARED_EXPERT = 42,
-  IN_MLP_DOWN_COMPRESS_IDX_SHARED_EXPERT = 43,
-
-  IN_SHARED_EXPERT_GATE_WEIGHT = 44,
-  IN_SHARED_EXPERT_GATE_BIAS = 45,
-  IN_SHARED_EXPERT_GATE_DESCALE = 46,
-  IN_SHARED_EXPERT_GATE_OFFSET = 47,
-  IN_SHARED_EXPERT_GATE_SCALE = 48,
-  IN_SHARED_EXPERT_GATE_COMPRESS_IDX = 49,
-
-  BLOCK_SPARSE_MOE_GATE_WEIGHT = 50,
-  BLOCK_SPARSE_MOE_GATE_BIAS = 51,
-  BLOCK_SPARSE_MOE_GATE_DESCALE = 52,
-  BLOCK_SPARSE_MOE_GATE_OFFSET = 53,
-  BLOCK_SPARSE_MOE_GATE_SCALE = 54,
-  BLOCK_SPARSE_MOE_GATE_COMPRESS_IDX = 55,
-
-  IN_MLP_GATEUP_WEIGHT = 56,
-  IN_MLP_GATEUP_BIAS = 57,
-  IN_MLP_GATEUP_DESCALE = 58,
-  IN_MLP_GATEUP_OFFSET = 59,
-  IN_MLP_GATEUP_SCALE = 60,
-  IN_MLP_GATEUP_COMPRESS_IDX = 61,
-
-  IN_MLP_DOWN_WEIGHT = 62,
-  IN_MLP_DOWN_BIAS = 63,
-  IN_MLP_DOWN_DESCALE = 64,
-  IN_MLP_DOWN_OFFSET = 65,
-  IN_MLP_DOWN_SCALE = 66,
-  IN_MLP_DOWN_COMPRESS_IDX = 67,
-
-  Q_NORM_WEIGHT = 68,
-  K_NORM_WEIGHT = 69
-};
-
-static std::unordered_map<std::string, int> WEIGHT_MAPPING = {
-    {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
-
-    {"self_attn.q_proj.weight", IN_QKV_WEIGHT_0},
-    {"self_attn.q_proj.bias", IN_QKV_BIAS_0},
-
-    {"self_attn.k_proj.weight", IN_QKV_WEIGHT_1},
-    {"self_attn.k_proj.bias", IN_QKV_BIAS_1},
-
-    {"self_attn.v_proj.weight", IN_QKV_WEIGHT_2},
-    {"self_attn.v_proj.bias", IN_QKV_BIAS_2},
-
-    {"self_attn.o_proj.weight", IN_QKV_DENSE_WEIGHT},
-
-    {"post_attention_layernorm.weight", IN_POST_ATTN_NORM_WEIGHT},
-
-    // mlp or shared expert
-    {"mlp.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-
-    {"mlp.up_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-
-    {"mlp.down_proj.weight", IN_MLP_DOWN_WEIGHT_SHARED_EXPERT},
-
-    {"mlp.shared_experts.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-
-    {"mlp.shared_experts.up_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-
-    {"mlp.shared_experts.down_proj.weight", IN_MLP_DOWN_WEIGHT_SHARED_EXPERT},
-
-    // MoE Gate
-    {"mlp.gate.weight", BLOCK_SPARSE_MOE_GATE_WEIGHT},
-    {"mlp.gate.e_score_correction_bias", BLOCK_SPARSE_MOE_GATE_BIAS},
-
-    // Expert MLP - Gate/Up projections
-    {"gate_proj.weight", IN_MLP_GATEUP_WEIGHT},
-    {"up_proj.weight", IN_MLP_GATEUP_WEIGHT},
-
-    // Expert MLP - Down projection
-    {"down_proj.weight", IN_MLP_DOWN_WEIGHT},
-
-};
-
-static std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
-    {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
-    {"input_layernorm.bias", IN_INPUT_NORM_NEW_BIAS},
-
-    {"self_attn.q_proj.weight", IN_QKV_WEIGHT_0},
-    {"self_attn.q_proj.deq_scale", IN_QKV_DESCALE_0},
-    {"self_attn.q_proj.quant_bias", IN_QKV_BIAS_0},
-    {"self_attn.q_proj.input_offset", IN_QKV_OFFSET_0},
-    {"self_attn.q_proj.input_scale", IN_QKV_SCALE_0},
-
-    {"self_attn.k_proj.weight", IN_QKV_WEIGHT_1},
-    {"self_attn.k_proj.deq_scale", IN_QKV_DESCALE_1},
-    {"self_attn.k_proj.quant_bias", IN_QKV_BIAS_1},
-
-    {"self_attn.v_proj.weight", IN_QKV_WEIGHT_2},
-    {"self_attn.v_proj.deq_scale", IN_QKV_DESCALE_2},
-    {"self_attn.v_proj.quant_bias", IN_QKV_BIAS_2},
-
-    {"self_attn.o_proj.weight", IN_QKV_DENSE_WEIGHT},
-    {"self_attn.o_proj.quant_bias", IN_QKV_DENSE_BIAS},
-    {"self_attn.o_proj.deq_scale", IN_QKV_DENSE_DESCALE},
-    {"self_attn.o_proj.weight_offset", IN_QKV_DENSE_OFFSET},
-    {"self_attn.o_proj.weight_scale", IN_QKV_DENSE_SCALE},
-
-    {"post_attention_layernorm.weight", IN_POST_ATTN_NORM_WEIGHT},
-    {"post_attention_layernorm.bias", IN_POST_ATTN_NORM_NEW_BIAS},
-
-    // mlp
-    {"mlp.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.gate_proj.weight_offset", IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.gate_proj.weight_scale", IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
-
-    {"mlp.up_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.up_proj.weight_offset", IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.up_proj.weight_scale", IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
-
-    {"mlp.down_proj.weight", IN_MLP_DOWN_WEIGHT_SHARED_EXPERT},
-    {"mlp.down_proj.weight_offset", IN_MLP_DOWN_OFFSET_SHARED_EXPERT},
-    {"mlp.down_proj.weight_scale", IN_MLP_DOWN_SCALE_SHARED_EXPERT},
-
-    // shared expert
-    {"mlp.shared_experts.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.gate_proj.weight_offset",
-     IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.shared_experts.gate_proj.weight_scale",
-     IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
-
-    {"mlp.shared_experts.up_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.up_proj.weight_offset",
-     IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.shared_experts.up_proj.weight_scale",
-     IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
-
-    {"mlp.shared_experts.down_proj.weight", IN_MLP_DOWN_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.down_proj.weight_offset",
-     IN_MLP_DOWN_OFFSET_SHARED_EXPERT},
-    {"mlp.shared_experts.down_proj.weight_scale",
-     IN_MLP_DOWN_SCALE_SHARED_EXPERT},
-
-    // MoE Gate
-    {"mlp.gate.weight", BLOCK_SPARSE_MOE_GATE_WEIGHT},
-    {"mlp.gate.e_score_correction_bias", BLOCK_SPARSE_MOE_GATE_BIAS},
-
-    {"gate_proj.weight", IN_MLP_GATEUP_WEIGHT},
-    {"gate_proj.weight_offset", IN_MLP_GATEUP_OFFSET},
-    {"gate_proj.weight_scale", IN_MLP_GATEUP_SCALE},
-    {"up_proj.weight", IN_MLP_GATEUP_WEIGHT},
-    {"up_proj.weight_offset", IN_MLP_GATEUP_OFFSET},
-    {"up_proj.weight_scale", IN_MLP_GATEUP_SCALE},
-
-    {"down_proj.weight", IN_MLP_DOWN_WEIGHT},
-    {"down_proj.weight_offset", IN_MLP_DOWN_OFFSET},
-    {"down_proj.weight_scale", IN_MLP_DOWN_SCALE},
-};
-
-static const std::unordered_map<std::string, std::vector<int>>
-    SPECIAL_MULTI_ASSIGN_W8A8 = {
-        {"input_layernorm.weight",
-         {IN_INPUT_NORM_WEIGHT, IN_INPUT_NORM_NEW_WEIGHT}},
-        {"post_attention_layernorm.weight",
-         {IN_POST_ATTN_NORM_WEIGHT, IN_POST_ATTN_NORM_NEW_WEIGHT}},
-};
-
-static const std::map<int, int> WEIGHT_SHARD = {
-    {IN_QKV_WEIGHT_0, 0},
-    {IN_QKV_BIAS_0, 0},
-    {IN_QKV_WEIGHT_1, 0},
-    {IN_QKV_BIAS_1, 0},
-    {IN_QKV_WEIGHT_2, 0},
-    {IN_QKV_BIAS_2, 0},
-    {IN_QKV_DENSE_WEIGHT, 1},
-    {IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT, 0},
-    {IN_MLP_DOWN_WEIGHT_SHARED_EXPERT, 1},
-    {IN_MLP_GATEUP_WEIGHT, 0},
-    {IN_MLP_DOWN_WEIGHT, 1},
-};
-
-static const std::map<int, int> WEIGHT_SHARD_W8A8 = {
-    {IN_QKV_WEIGHT_0, 0},
-    {IN_QKV_BIAS_0, 0},
-    {IN_QKV_DESCALE_0, 0},
-    {IN_QKV_WEIGHT_1, 0},
-    {IN_QKV_BIAS_1, 0},
-    {IN_QKV_DESCALE_1, 0},
-    {IN_QKV_WEIGHT_2, 0},
-    {IN_QKV_BIAS_2, 0},
-    {IN_QKV_DESCALE_2, 0},
-    {IN_QKV_DENSE_WEIGHT, 1},
-    {IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT, 0},
-    {IN_MLP_GATEUP_OFFSET_SHARED_EXPERT, 0},
-    {IN_MLP_GATEUP_SCALE_SHARED_EXPERT, 0},
-    {IN_MLP_DOWN_WEIGHT_SHARED_EXPERT, 1},
-    {IN_MLP_GATEUP_WEIGHT, 0},
-    {IN_MLP_GATEUP_OFFSET, 0},
-    {IN_MLP_GATEUP_SCALE, 0},
-    {IN_MLP_DOWN_WEIGHT, 1},
-};
+using namespace glm4_moe_decoder_constants;
 
 Glm4MoeDecoderLoader::Glm4MoeDecoderLoader(
     uint64_t weight_count,
@@ -286,13 +44,15 @@ Glm4MoeDecoderLoader::Glm4MoeDecoderLoader(
   auto options = context.get_tensor_options();
 
   tensor_placeholder_ = torch::zeros({1}).to(options);
+  weight_mapping_ = WEIGHT_MAPPING;
+  weight_mapping_w8a8_ = WEIGHT_MAPPING_W8A8;
 
   if (model_args.use_qk_norm()) {
     weight_count_ = weight_count = 70;
-    WEIGHT_MAPPING_W8A8["self_attn.q_norm.weight"] = Q_NORM_WEIGHT;
-    WEIGHT_MAPPING_W8A8["self_attn.k_norm.weight"] = K_NORM_WEIGHT;
-    WEIGHT_MAPPING["self_attn.q_norm.weight"] = Q_NORM_WEIGHT;
-    WEIGHT_MAPPING["self_attn.k_norm.weight"] = K_NORM_WEIGHT;
+    weight_mapping_w8a8_["self_attn.q_norm.weight"] = Q_NORM_WEIGHT;
+    weight_mapping_w8a8_["self_attn.k_norm.weight"] = K_NORM_WEIGHT;
+    weight_mapping_["self_attn.q_norm.weight"] = Q_NORM_WEIGHT;
+    weight_mapping_["self_attn.k_norm.weight"] = K_NORM_WEIGHT;
   }
 
   at_weight_tensors_.resize(weight_count_);
@@ -361,7 +121,7 @@ void Glm4MoeDecoderLoader::load_state_dict(const StateDict& state_dict) {
 }
 
 void Glm4MoeDecoderLoader::verify_loaded_weights() const {
-  for (const auto& [name, index] : WEIGHT_MAPPING) {
+  for (const auto& [name, index] : weight_mapping_) {
     if (name == "down_proj.weight" || name == "gate_proj.weight" ||
         name == "up_proj.weight" || name == "mlp.gate.weight" ||
         name == "mlp.gate.e_score_correction_bias") {
@@ -459,8 +219,8 @@ void Glm4MoeDecoderLoader::process_expert_weights(const StateDict& state_dict,
 
   const std::string suffix = extract_endswith(name);
   const auto& weight_mapping = (quantize_type_.compare("w8a8_dynamic") == 0)
-                                   ? WEIGHT_MAPPING_W8A8
-                                   : WEIGHT_MAPPING;
+                                   ? weight_mapping_w8a8_
+                                   : weight_mapping_;
   const auto& shard_map = (quantize_type_.compare("w8a8_dynamic") == 0)
                               ? WEIGHT_SHARD_W8A8
                               : WEIGHT_SHARD;
@@ -486,8 +246,8 @@ void Glm4MoeDecoderLoader::process_shared_expert_weights(
     const torch::Tensor& tensor) {
   torch::Tensor tmp_tensor;
   const auto& weight_mapping = (quantize_type_.compare("w8a8_dynamic") == 0)
-                                   ? WEIGHT_MAPPING_W8A8
-                                   : WEIGHT_MAPPING;
+                                   ? weight_mapping_w8a8_
+                                   : weight_mapping_;
   const auto& shard_map = (quantize_type_.compare("w8a8_dynamic") == 0)
                               ? WEIGHT_SHARD_W8A8
                               : WEIGHT_SHARD;
@@ -515,8 +275,8 @@ void Glm4MoeDecoderLoader::process_mlp_common_weights(
     const std::string& name,
     const torch::Tensor& tensor) {
   const auto& weight_mapping = (quantize_type_.compare("w8a8_dynamic") == 0)
-                                   ? WEIGHT_MAPPING_W8A8
-                                   : WEIGHT_MAPPING;
+                                   ? weight_mapping_w8a8_
+                                   : weight_mapping_;
   const auto& shard_map = (quantize_type_.compare("w8a8_dynamic") == 0)
                               ? WEIGHT_SHARD_W8A8
                               : WEIGHT_SHARD;
@@ -545,8 +305,8 @@ void Glm4MoeDecoderLoader::process_general_weights(
     const std::string& name,
     const torch::Tensor& tensor) {
   const auto& weight_mapping = (quantize_type_.compare("w8a8_dynamic") == 0)
-                                   ? WEIGHT_MAPPING_W8A8
-                                   : WEIGHT_MAPPING;
+                                   ? weight_mapping_w8a8_
+                                   : weight_mapping_;
   const auto& shard_map = (quantize_type_.compare("w8a8_dynamic") == 0)
                               ? WEIGHT_SHARD_W8A8
                               : WEIGHT_SHARD;
@@ -609,11 +369,11 @@ torch::Tensor Glm4MoeDecoderLoader::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
     int dim,
-    int loacal_tp_rank,
+    int local_tp_rank,
     int local_tp_size) {
   if (local_tp_size > 1) {
     return state_dict.get_sharded_tensor(
-        name, dim, loacal_tp_rank, local_tp_size);
+        name, dim, local_tp_rank, local_tp_size);
   } else {
     return state_dict.get_tensor(name);
   }
