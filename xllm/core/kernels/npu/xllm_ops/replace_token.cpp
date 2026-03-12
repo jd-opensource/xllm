@@ -35,6 +35,13 @@ limitations under the License.
 
 namespace xllm::kernel::npu {
 
+// Used by schedule overlap on NPU.
+// This wrapper prepares the next decode-step input under the ACLNN update
+// rule.
+// Inputs:
+//   src: sampled tokens from the previous step.
+// Outputs:
+//   dst: current-step input token tensor, updated in place after replacement.
 void replace_token(torch::Tensor& dst, torch::Tensor& src) {
   check_tensor(dst, "dst", "replace_token");
   check_tensor(src, "src", "replace_token");

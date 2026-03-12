@@ -29,19 +29,23 @@ limitations under the License.
 
 #include "acl/acl.h"
 #include "aclnn_beam_search.h"
+#include "core/common/macros.h"
 #include "core/kernels/npu/utils.h"
 #include "xllm_ops_api.h"
 
-#define CHECK_ACL_SUCCESS(expr, msg) \
-  do {                               \
-    auto _ret = (expr);              \
-    if (_ret != ACL_SUCCESS) {       \
-      LOG(ERROR) << msg;             \
-      throw std::runtime_error(msg); \
-    }                                \
-  } while (0)
 namespace xllm::kernel::npu {
 
+// Used by the standard BeamSearcher sampling path on NPU.
+// This wrapper runs one regular beam-search update from the current beam
+// scores and candidate token scores.
+// Inputs:
+//   logprobs: accumulated scores for the current live beams.
+//   top_tokens: candidate token ids for this step.
+//   top_logprobs: candidate token scores for this step.
+// Outputs:
+//   src_seq_idxes: source beam selected for each new beam.
+//   out_logprobs: updated accumulated beam scores.
+//   out_tokens: chosen next token ids for the next sampling step.
 void beam_search(const torch::Tensor& logprobs,
                  const torch::Tensor& top_tokens,
                  const torch::Tensor& top_logprobs,

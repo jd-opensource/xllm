@@ -32,6 +32,7 @@ limitations under the License.
 #include "framework/request/rec_type.h"
 #include "master.h"  // For MasterStatus::WAKEUP constant
 #include "util/env_var.h"
+#include "util/net.h"
 #include "util/pretty_print.h"
 #include "util/timer.h"
 #include "util/utils.h"
@@ -524,8 +525,13 @@ bool RecEngine::OneRecEnginePipeline::init_model_workers(
     const std::string& model_path) {
   const auto& devices = engine_.options_.devices();
   if (devices.size() > 1) {
+#if defined(USE_NPU)
     engine_.process_groups_ =
         parallel_state::create_npu_process_groups(devices);
+#else
+    engine_.process_groups_ =
+        parallel_state::create_local_process_groups(devices, engine_.options_);
+#endif
   }
 
   engine_.workers_.clear();
@@ -735,9 +741,34 @@ bool RecEngine::RecMultiRoundEnginePipeline::init_model_workers(
   const auto& devices = engine_.options_.devices();
   const int32_t world_size = static_cast<int32_t>(devices.size());
 
-  // Always create process_groups (supports both single and multi-device)
+  // Single-card REC multi-round still needs a non-null tp_group_ during
+  // model/layer construction. For NPU, construct a real rank_size=1 backend
+  // process group here so process_group semantics stay strict without touching
+  // process_group.*. Multi-card NPU keeps the direct HCCL path.
+#if defined(USE_NPU)
+  if (world_size == 1) {
+    std::string host;
+    int port;
+    net::parse_host_port_from_addr(
+        engine_.options_.master_node_addr().value(), host, port);
+    engine_.process_groups_.clear();
+    engine_.process_groups_.emplace_back(create_process_group(
+        /*rank=*/0,
+        /*world_size=*/1,
+        /*rank_size=*/1,
+        /*port=*/port,
+        /*trans=*/false,
+        host,
+        /*group_name=*/"rec_single_local_pg",
+        devices[0]));
+  } else {
+    engine_.process_groups_ =
+        parallel_state::create_npu_process_groups(devices);
+  }
+#else
   engine_.process_groups_ =
       parallel_state::create_local_process_groups(devices, engine_.options_);
+#endif
 
   engine_.workers_.clear();
   WorkerType worker_type = WorkerType::REC;

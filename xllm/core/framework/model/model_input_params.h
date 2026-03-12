@@ -152,10 +152,13 @@ struct LlmRecMultiRoundParams {
   std::vector<torch::Tensor> full_v_caches;
   std::vector<torch::Tensor> unshared_k_caches;
   std::vector<torch::Tensor> unshared_v_caches;
+  std::vector<torch::Tensor> shared_k_caches;
+  std::vector<torch::Tensor> shared_v_caches;
   std::vector<torch::Tensor> decode_positions_tensor_list;
   // beam width for step-level decode
   int32_t batch_size = 0;
   int32_t beam_width = 1;
+  torch::Tensor beam_width_tensor;
   // current round for step-level decode
   torch::Tensor current_round_tensor;
   int32_t total_round = 0;
@@ -183,13 +186,24 @@ struct LlmRecMultiRoundParams {
     }
     result.unshared_k_caches.clear();
     result.unshared_v_caches.clear();
+    result.shared_k_caches.clear();
+    result.shared_v_caches.clear();
     for (const auto& t : unshared_k_caches) {
       result.unshared_k_caches.push_back(safe_to(t, device));
     }
     for (const auto& t : unshared_v_caches) {
       result.unshared_v_caches.push_back(safe_to(t, device));
     }
+    for (const auto& t : shared_k_caches) {
+      result.shared_k_caches.push_back(safe_to(t, device));
+    }
+    for (const auto& t : shared_v_caches) {
+      result.shared_v_caches.push_back(safe_to(t, device));
+    }
 
+    if (beam_width_tensor.defined()) {
+      result.beam_width_tensor = safe_to(beam_width_tensor, device, true);
+    }
     if (current_round_tensor.defined()) {
       result.current_round_tensor = safe_to(current_round_tensor, device, true);
     }
