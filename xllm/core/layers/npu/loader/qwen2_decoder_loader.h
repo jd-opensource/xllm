@@ -18,21 +18,24 @@ limitations under the License.
 #include <map>
 #include <vector>
 
-#include "core/layers/npu/npu_base_layer.h"
+#include "base_loader.h"
 
 namespace xllm {
 namespace layer {
 
 class Qwen2DecoderLoader : public BaseLoader {
  public:
-  Qwen2DecoderLoader(uint64_t weight_count, const ModelContext& context);
+  Qwen2DecoderLoader(uint64_t weight_count,
+                     const ModelContext& context,
+                     LoadMode mode = LoadMode::kEager);
 
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
-  void merge_loaded_weights() override;
 
  protected:
-  int device_id_;
+  void merge_host_at_weights() override;
+
+  int device_id_ = 0;
 };
 
 }  // namespace layer

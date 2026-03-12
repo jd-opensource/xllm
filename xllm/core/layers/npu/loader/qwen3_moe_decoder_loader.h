@@ -26,14 +26,18 @@ namespace layer {
 
 class Qwen3MoeDecoderLoader : public BaseLoader {
  public:
-  Qwen3MoeDecoderLoader(uint64_t weight_count, const ModelContext& context);
+  Qwen3MoeDecoderLoader(uint64_t weight_count,
+                        const ModelContext& context,
+                        LoadMode mode = LoadMode::kEager);
 
   void load_state_dict(const StateDict& state_dict) override;
+  void verify_loaded_weights() const override;
   void verify_loaded_weights(const std::string& prefix) const override;
-  void merge_loaded_weights() override;
-  void resize_experts_weights(int num_of_device_experts);
+  void resize_experts_weights(int num_of_device_experts) override;
 
  protected:
+  void merge_host_at_weights() override;
+
   std::string extract_endswith(const std::string& input);
 
   int extract_expert_index(const std::string& name);

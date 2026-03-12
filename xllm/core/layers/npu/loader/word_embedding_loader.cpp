@@ -18,21 +18,27 @@ namespace xllm {
 namespace layer {
 
 WordEmbeddingLoader::WordEmbeddingLoader(uint64_t weight_count,
-                                         const ModelContext& context)
-    : BaseLoader(weight_count, context) {}
+                                         const ModelContext& context,
+                                         LoadMode mode)
+    : BaseLoader(weight_count, context, mode) {}
 
 void WordEmbeddingLoader::load_state_dict(const StateDict& state_dict) {
   if (dp_size_ > 1 || cp_size_ > 1) {
-    set_weight(
-        state_dict, "weight", 0, 1, dp_local_tp_rank_, dp_local_tp_size_);
+    set_weight(state_dict,
+               "weight",
+               0,
+               1,
+               dp_local_tp_rank_,
+               dp_local_tp_size_,
+               load_to_host());
   } else {
-    set_weight(state_dict, "weight", 0, 1);
+    set_weight(state_dict, "weight", 0, 1, load_to_host());
   }
 }
 
 void WordEmbeddingLoader::verify_loaded_weights(
     const std::string& weight_str) const {
-  CHECK(at_weight_tensors_[0].sizes() != std::vector<int64_t>({1}))
+  CHECK(working_tensors()[0].sizes() != std::vector<int64_t>({1}))
       << "weight is not loaded for " << weight_str;
 }
 

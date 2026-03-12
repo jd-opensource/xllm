@@ -65,11 +65,10 @@ NpuWordEmbeddingImpl::NpuWordEmbeddingImpl(const ModelContext& context)
   atOutTensors_.resize(1);
   dtype_ = c10::typeMetaToScalarType(options.dtype());
 
-  if (FLAGS_enable_manual_loader) {
-    loader_ = std::make_unique<WordEmbeddingManualLoader>(1, context);
-  } else {
-    loader_ = std::make_unique<WordEmbeddingLoader>(1, context);
-  }
+  loader_ = std::make_unique<WordEmbeddingLoader>(
+      1,
+      context,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
 }
 
 int64_t NpuWordEmbeddingImpl::init_layer() {

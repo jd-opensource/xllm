@@ -29,7 +29,6 @@ limitations under the License.
 #include "atb/atb_infer.h"
 #include "framework/model/model_input_params.h"
 #include "loader/word_embedding_loader.h"
-#include "loader/word_embedding_manual_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"

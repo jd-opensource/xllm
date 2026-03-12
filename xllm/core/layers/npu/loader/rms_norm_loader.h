@@ -25,7 +25,9 @@ namespace layer {
 
 class RMSNormLoader : public BaseLoader {
  public:
-  RMSNormLoader(uint64_t weight_count, const ModelContext& context);
+  RMSNormLoader(uint64_t weight_count,
+                const ModelContext& context,
+                LoadMode mode = LoadMode::kEager);
 
   void load_state_dict(const StateDict& state_dict) override;
 
@@ -33,7 +35,6 @@ class RMSNormLoader : public BaseLoader {
 
  protected:
   int rank_id_;
-  torch::ScalarType dtype_;
 };
 
 }  // namespace layer

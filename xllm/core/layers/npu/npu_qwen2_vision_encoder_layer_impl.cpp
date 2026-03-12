@@ -21,6 +21,7 @@ limitations under the License.
 #include <iostream>
 #include <map>
 
+#include "common/global_flags.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
 #include "xllm_atb_layers/models/qwen3_vl/qwen3_vl_encoder.h"
@@ -63,8 +64,10 @@ NpuQwen2VisionEncoderLayerImpl::NpuQwen2VisionEncoderLayerImpl(
   device_id_ = options.device().index();
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
-  loader_ = std::make_unique<Qwen2VisionEncoderLoader>(WEIGHT_COUNT_PER_LAYER,
-                                                       context);
+  loader_ = std::make_unique<Qwen2VisionEncoderLoader>(
+      WEIGHT_COUNT_PER_LAYER,
+      context,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
 }
 
 void NpuQwen2VisionEncoderLayerImpl::merge_loaded_weights() {

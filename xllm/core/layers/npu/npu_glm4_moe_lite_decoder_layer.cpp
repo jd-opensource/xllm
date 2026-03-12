@@ -22,7 +22,6 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "layers/common/rotary_embedding_util.h"
-
 DECLARE_string(rank_tablefile);
 DECLARE_string(communication_backend);
 DECLARE_int32(expert_parallel_degree);
@@ -81,7 +80,8 @@ NpuGlm4MoeDecoderLiteImpl::NpuGlm4MoeDecoderLiteImpl(
       WEIGHT_COUNT_PER_LAYER,
       context,
       layer_id_,
-      prefill_param_.firstKDenseReplace);
+      prefill_param_.firstKDenseReplace,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
 
   initialize_tensors(options);
 }

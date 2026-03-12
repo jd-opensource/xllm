@@ -197,11 +197,11 @@ class JoyAILLMFlashModelImpl : public torch::nn::Module {
     }
   }
 
-  std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
-    std::vector<layer::BaseManualLoader*> loaders;
+  std::vector<layer::BaseLoader*> get_decoder_loaders() {
+    std::vector<layer::BaseLoader*> loaders;
     loaders.reserve(layers_.size());
     for (auto& layer : layers_) {
-      loaders.push_back(layer->get_manual_loader());
+      loaders.push_back(layer->get_loader());
     }
     return loaders;
   }

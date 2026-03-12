@@ -19,7 +19,11 @@ limitations under the License.
 #include <torch/torch.h>
 #include <torch_npu/torch_npu.h>
 
+#include <mutex>
 #include <nlohmann/json.hpp>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "base_loader.h"
 #include "framework/model/model_args.h"
@@ -36,10 +40,10 @@ class Glm4MoeDecoderLoader : public BaseLoader {
   Glm4MoeDecoderLoader(uint64_t weight_count,
                        const ModelContext& context,
                        int32_t layer_id,
-                       int32_t prefill_param_firstKDenseReplace);
+                       int32_t prefill_param_firstKDenseReplace,
+                       LoadMode mode = LoadMode::kEager);
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
-  void merge_loaded_weights() override;
 
   void resize_experts_weights(int num_of_device_experts) override;
 
@@ -65,11 +69,14 @@ class Glm4MoeDecoderLoader : public BaseLoader {
 
   std::unordered_map<std::string, torch::Tensor> shared_experts_weights_;
   std::unordered_map<std::string, std::vector<torch::Tensor>> experts_weights_;
+  std::unordered_map<std::string, int> weight_mapping_;
+  std::unordered_map<std::string, int> weight_mapping_w8a8_;
 
   std::mutex shared_experts_mutex_;
   std::mutex experts_mutex_;
 
-  torch::ScalarType dtype_;
+ protected:
+  void merge_host_at_weights() override;
 
   void process_expert_weights(const StateDict& state_dict,
                               const std::string& name,
@@ -110,8 +117,6 @@ class Glm4MoeDecoderLoader : public BaseLoader {
   torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts_up,
                                       std::vector<torch::Tensor>& experts_gate,
                                       bool transpose = false);
-
-  //   int64_t init_layer();
 
   int get_mapped_index(const std::string& name,
                        const std::unordered_map<std::string, int>& mapping);

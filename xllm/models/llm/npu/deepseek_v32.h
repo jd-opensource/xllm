@@ -76,9 +76,7 @@ class DeepseekV32DecoderLayerImpl : public torch::nn::Module {
     decoder_layer_->reload_weights_from_device();
   }
 
-  layer::BaseManualLoader* get_manual_loader() {
-    return decoder_layer_->get_manual_loader();
-  }
+  layer::BaseLoader* get_loader() { return decoder_layer_->get_loader(); }
 
   void refresh_rolling_weights() { decoder_layer_->refresh_rolling_weights(); }
 
@@ -280,11 +278,11 @@ class DeepseekV32ModelImpl : public torch::nn::Module {
     }
   }
 
-  std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
-    std::vector<layer::BaseManualLoader*> loaders;
+  std::vector<layer::BaseLoader*> get_decoder_loaders() {
+    std::vector<layer::BaseLoader*> loaders;
     loaders.reserve(layers_.size());
     for (auto& layer : layers_) {
-      loaders.push_back(layer->get_manual_loader());
+      loaders.push_back(layer->get_loader());
     }
     return loaders;
   }

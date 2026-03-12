@@ -17,303 +17,122 @@ limitations under the License.
 
 #include <set>
 
+#include "eagle3_loader_constants.h"
+
 namespace xllm {
 namespace layer {
 
-namespace {
-enum DecoderLayerTensorId : int {
-  IN_NORM_WEIGHT = 0,      // weight
-  IN_NORM_BIAS = 1,        // bias
-  IN_NORM_NEW_WEIGHT = 2,  // new weight
-  IN_NORM_NEW_BIAS = 3,    // new bias
-
-  IN_Q_WEIGHT = 4,    // weight
-  IN_Q_BIAS = 5,      // bias
-  IN_Q_DEQSCALE = 6,  // deq_scale
-  IN_Q_OFFSET = 7,    // offset
-  IN_Q_SCALE = 8,     // scale
-  IN_Q_COMPRESS_IDX = 9,
-
-  IN_K_WEIGHT = 10,    // weight
-  IN_K_BIAS = 11,      // bias
-  IN_K_DEQSCALE = 12,  // deq_scale
-  IN_K_OFFSET = 13,    // offset
-  IN_K_SCALE = 14,     // scale
-  IN_K_COMPRESS_IDX = 15,
-
-  IN_V_WEIGHT = 16,    // weight
-  IN_V_BIAS = 17,      // bias
-  IN_V_DEQSCALE = 18,  // deq_scale
-  IN_V_OFFSET = 19,    // offset
-  IN_V_SCALE = 20,     // scale
-  IN_V_COMPRESS_IDX = 21,
-
-  IN_ATTENTION_OUT_WEIGHT = 22,    // weight
-  IN_ATTENTION_OUT_BIAS = 23,      // bias
-  IN_ATTENTION_OUT_DEQSCALE = 24,  // deq_scale
-  IN_ATTENTION_OUT_OFFSET = 25,    // offset
-  IN_ATTENTION_OUT_SCALE = 26,     // scale
-  IN_ATTENTION_OUT_COMPRESS_IDX = 27,
-
-  IN_SELFOUT_NORM_WEIGHT = 28,      // weight
-  IN_SELFOUT_NORM_BIAS = 29,        // bias
-  IN_SELFOUT_NORM_NEW_WEIGHT = 30,  // new weight
-  IN_SELFOUT_NORM_NEW_BIAS = 31,    // new bias
-
-  IN_MLP_W2_WEIGHT = 32,    // weight
-  IN_MLP_W2_BIAS = 33,      // bias
-  IN_MLP_W2_DEQSCALE = 34,  // deq_scale
-  IN_MLP_W2_OFFSET = 35,    // offset
-  IN_MLP_W2_SCALE = 36,     // scale
-  IN_MLP_W2_COMPRESS_IDX = 37,
-
-  IN_MLP_W1_WEIGHT = 38,    // weight
-  IN_MLP_W1_BIAS = 39,      // bias
-  IN_MLP_W1_DEQSCALE = 40,  // deq_scale
-  IN_MLP_W1_OFFSET = 41,    // offset
-  IN_MLP_W1_SCALE = 42,     // scale
-  IN_MLP_W1_COMPRESS_IDX = 43,
-
-  IN_MLP_CPROJ_WEIGHT = 44,    // weight
-  IN_MLP_CPROJ_BIAS = 45,      // bias
-  IN_MLP_CPROJ_DEQSCALE = 46,  // deq_scale
-  IN_MLP_CPROJ_OFFSET = 47,    // offset
-  IN_MLP_CPROJ_SCALE = 48,     // scale
-  IN_MLP_CPROJ_COMPRESS_IDX = 49,
-
-  IN_HIDDEN_NORM_WEIGHT = 50,  // weight
-  IN_HIDDEN_NORM_BIAS = 51,    // bias
-};
-}  // namespace
-
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
-    {IN_NORM_WEIGHT, "input_layernorm.weight"},
-    {IN_HIDDEN_NORM_WEIGHT, "hidden_norm.weight"},
-    {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
-    {IN_K_WEIGHT, "self_attn.k_proj.weight"},
-    {IN_V_WEIGHT, "self_attn.v_proj.weight"},
-    {IN_ATTENTION_OUT_WEIGHT, "self_attn.o_proj.weight"},
-    {IN_SELFOUT_NORM_WEIGHT, "post_attention_layernorm.weight"},
-    {IN_MLP_W2_WEIGHT, "mlp.gate_proj.weight"},
-    {IN_MLP_W1_WEIGHT, "mlp.up_proj.weight"},
-    {IN_MLP_CPROJ_WEIGHT, "mlp.down_proj.weight"}};
-
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8 = {
-    {IN_NORM_WEIGHT, "input_layernorm.weight"},
-    {IN_HIDDEN_NORM_WEIGHT, "hidden_norm.weight"},
-    {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
-    {IN_Q_BIAS, "self_attn.q_proj.quant_bias"},
-    {IN_Q_DEQSCALE, "self_attn.q_proj.deq_scale"},
-    {IN_Q_OFFSET, "self_attn.q_proj.input_offset"},
-    {IN_Q_SCALE, "self_attn.q_proj.input_scale"},
-    {IN_K_WEIGHT, "self_attn.k_proj.weight"},
-    {IN_K_BIAS, "self_attn.k_proj.quant_bias"},
-    {IN_K_DEQSCALE, "self_attn.k_proj.deq_scale"},
-    {IN_K_OFFSET, "self_attn.k_proj.input_offset"},
-    {IN_K_SCALE, "self_attn.k_proj.input_scale"},
-    {IN_V_WEIGHT, "self_attn.v_proj.weight"},
-    {IN_V_BIAS, "self_attn.v_proj.quant_bias"},
-    {IN_V_DEQSCALE, "self_attn.v_proj.deq_scale"},
-    {IN_V_OFFSET, "self_attn.v_proj.input_offset"},
-    {IN_V_SCALE, "self_attn.v_proj.input_scale"},
-    {IN_ATTENTION_OUT_WEIGHT, "self_attn.o_proj.weight"},
-    {IN_ATTENTION_OUT_BIAS, "self_attn.o_proj.quant_bias"},
-    {IN_ATTENTION_OUT_DEQSCALE, "self_attn.o_proj.deq_scale"},
-    {IN_ATTENTION_OUT_OFFSET, "self_attn.o_proj.input_offset"},
-    {IN_ATTENTION_OUT_SCALE, "self_attn.o_proj.input_scale"},
-    {IN_SELFOUT_NORM_WEIGHT, "post_attention_layernorm.weight"},
-    {IN_MLP_W2_WEIGHT, "mlp.gate_proj.weight"},
-    {IN_MLP_W2_BIAS, "mlp.gate_proj.quant_bias"},
-    {IN_MLP_W2_DEQSCALE, "mlp.gate_proj.deq_scale"},
-    {IN_MLP_W2_OFFSET, "mlp.gate_proj.input_offset"},
-    {IN_MLP_W2_SCALE, "mlp.gate_proj.input_scale"},
-    {IN_MLP_W1_WEIGHT, "mlp.up_proj.weight"},
-    {IN_MLP_W1_BIAS, "mlp.up_proj.quant_bias"},
-    {IN_MLP_W1_DEQSCALE, "mlp.up_proj.deq_scale"},
-    {IN_MLP_W1_OFFSET, "mlp.up_proj.input_offset"},
-    {IN_MLP_W1_SCALE, "mlp.up_proj.input_scale"},
-    {IN_MLP_CPROJ_WEIGHT, "mlp.down_proj.weight"}};
-
-static std::map<int, int> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
-                                          {IN_K_WEIGHT, 0},
-                                          {IN_V_WEIGHT, 0},
-                                          {IN_ATTENTION_OUT_WEIGHT, 1},
-                                          {IN_MLP_W2_WEIGHT, 0},
-                                          {IN_MLP_W1_WEIGHT, 0},
-                                          {IN_MLP_CPROJ_WEIGHT, 1}};
-
-static std::map<int, int> WEIGHT_SHARD_W8A8 = {{IN_Q_WEIGHT, 0},
-                                               {IN_Q_BIAS, 0},
-                                               {IN_Q_DEQSCALE, 0},
-                                               {IN_K_WEIGHT, 0},
-                                               {IN_K_BIAS, 0},
-                                               {IN_K_DEQSCALE, 0},
-                                               {IN_V_WEIGHT, 0},
-                                               {IN_V_BIAS, 0},
-                                               {IN_V_DEQSCALE, 0},
-                                               {IN_ATTENTION_OUT_WEIGHT, 1},
-                                               {IN_MLP_W2_WEIGHT, 0},
-                                               {IN_MLP_W2_BIAS, 0},
-                                               {IN_MLP_W2_DEQSCALE, 0},
-                                               {IN_MLP_W1_WEIGHT, 0},
-                                               {IN_MLP_W1_BIAS, 0},
-                                               {IN_MLP_W1_DEQSCALE, 0},
-                                               {IN_MLP_CPROJ_WEIGHT, 1}};
+using namespace eagle3_decoder_constants;
 
 Eagle3DecoderLoader::Eagle3DecoderLoader(uint64_t weight_count,
-                                         const ModelContext& context)
-    : BaseLoader(weight_count, context) {
+                                         const ModelContext& context,
+                                         LoadMode mode)
+    : BaseLoader(weight_count, context, mode) {
   auto options = context.get_tensor_options();
   device_id_ = options.device().index();
 
-  for (int i = 0; i < weight_count; ++i) {
-    at_weight_tensors_[i] = torch::zeros({1}).to(options);
+  if (load_to_host()) {
+    auto host_options =
+        torch::TensorOptions().dtype(options.dtype()).device(torch::kCPU);
+    for (int i = 0; i < weight_count; ++i) {
+      working_tensors()[i] = torch::zeros({1}, host_options);
+    }
+  } else {
+    for (int i = 0; i < weight_count; ++i) {
+      working_tensors()[i] = torch::zeros({1}).to(options);
+    }
   }
 }
 
 void Eagle3DecoderLoader::load_state_dict(const StateDict& state_dict) {
+  const bool to_host = load_to_host();
+  auto& w = working_tensors();
   if (quantize_type_ == "w8a8") {
     for (const auto& [index, name] : WEIGHT_MAPPING_W8A8) {
       if (WEIGHT_SHARD_W8A8.find(index) != WEIGHT_SHARD_W8A8.end()) {
-        set_weight(state_dict, name, index, WEIGHT_SHARD_W8A8[index]);
+        set_weight(state_dict, name, index, WEIGHT_SHARD_W8A8[index], to_host);
       } else {
-        set_weight(state_dict, name, index);
+        set_weight(state_dict, name, index, to_host);
       }
     }
-    at_weight_tensors_[IN_NORM_BIAS] =
-        torch::zeros(at_weight_tensors_[IN_NORM_WEIGHT].sizes(),
-                     at_weight_tensors_[IN_NORM_WEIGHT].options())
-            .to(device_);
-
-    at_weight_tensors_[IN_HIDDEN_NORM_BIAS] =
-        torch::zeros(at_weight_tensors_[IN_HIDDEN_NORM_WEIGHT].sizes(),
-                     at_weight_tensors_[IN_HIDDEN_NORM_WEIGHT].options())
-            .to(device_);
-
-    at_weight_tensors_[IN_SELFOUT_NORM_BIAS] =
-        torch::zeros(at_weight_tensors_[IN_SELFOUT_NORM_WEIGHT].sizes(),
-                     at_weight_tensors_[IN_SELFOUT_NORM_WEIGHT].options())
-            .to(device_);
-
+    w[IN_NORM_BIAS] =
+        torch::zeros(w[IN_NORM_WEIGHT].sizes(), w[IN_NORM_WEIGHT].options());
+    w[IN_HIDDEN_NORM_BIAS] = torch::zeros(w[IN_HIDDEN_NORM_WEIGHT].sizes(),
+                                          w[IN_HIDDEN_NORM_WEIGHT].options());
+    w[IN_SELFOUT_NORM_BIAS] = torch::zeros(w[IN_SELFOUT_NORM_WEIGHT].sizes(),
+                                           w[IN_SELFOUT_NORM_WEIGHT].options());
     return;
   }
 
   for (const auto& [index, name] : WEIGHT_MAPPING) {
     if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
-      set_weight(state_dict, name, index, WEIGHT_SHARD[index]);
+      set_weight(state_dict, name, index, WEIGHT_SHARD[index], to_host);
     } else {
-      set_weight(state_dict, name, index);
+      set_weight(state_dict, name, index, to_host);
     }
   }
 }
 
-void Eagle3DecoderLoader::merge_loaded_weights() {
-  auto make_zero_like = [this](const torch::Tensor& ref) {
-    return torch::zeros(
-        {1}, torch::TensorOptions().dtype(ref.scalar_type()).device(device_));
-  };
+void Eagle3DecoderLoader::merge_host_at_weights() {
+  auto& w = working_tensors();
 
   if (quantize_type_ == "w8a8") {
-    at_weight_tensors_[IN_ATTENTION_OUT_DEQSCALE] =
-        at_weight_tensors_[IN_ATTENTION_OUT_DEQSCALE].to(torch::kFloat32);
-    at_weight_tensors_[IN_Q_DEQSCALE] =
-        torch::cat({at_weight_tensors_[IN_Q_DEQSCALE],
-                    at_weight_tensors_[IN_K_DEQSCALE],
-                    at_weight_tensors_[IN_V_DEQSCALE]},
-                   0)
+    w[IN_ATTENTION_OUT_DEQSCALE] =
+        w[IN_ATTENTION_OUT_DEQSCALE].to(torch::kFloat32);
+    w[IN_Q_DEQSCALE] =
+        torch::cat({w[IN_Q_DEQSCALE], w[IN_K_DEQSCALE], w[IN_V_DEQSCALE]}, 0)
             .to(torch::kFloat32);
-    at_weight_tensors_[IN_K_DEQSCALE] =
-        make_zero_like(at_weight_tensors_[IN_K_DEQSCALE]);
-    at_weight_tensors_[IN_V_DEQSCALE] =
-        make_zero_like(at_weight_tensors_[IN_V_DEQSCALE]);
-    at_weight_tensors_[IN_K_OFFSET] =
-        make_zero_like(at_weight_tensors_[IN_K_OFFSET]);
-    at_weight_tensors_[IN_V_OFFSET] =
-        make_zero_like(at_weight_tensors_[IN_V_OFFSET]);
-    at_weight_tensors_[IN_K_SCALE] =
-        make_zero_like(at_weight_tensors_[IN_K_SCALE]);
-    at_weight_tensors_[IN_V_SCALE] =
-        make_zero_like(at_weight_tensors_[IN_V_SCALE]);
-    at_weight_tensors_[IN_MLP_W2_BIAS] =
-        torch::cat({at_weight_tensors_[IN_MLP_W2_BIAS],
-                    at_weight_tensors_[IN_MLP_W1_BIAS]},
-                   0);
-    at_weight_tensors_[IN_MLP_W1_BIAS] =
-        make_zero_like(at_weight_tensors_[IN_MLP_W1_BIAS]);
-    at_weight_tensors_[IN_MLP_W2_DEQSCALE] =
-        torch::cat({at_weight_tensors_[IN_MLP_W2_DEQSCALE],
-                    at_weight_tensors_[IN_MLP_W1_DEQSCALE]},
-                   0)
+    w[IN_K_DEQSCALE] = zero_like_working(IN_K_DEQSCALE);
+    w[IN_V_DEQSCALE] = zero_like_working(IN_V_DEQSCALE);
+    w[IN_K_OFFSET] = zero_like_working(IN_K_OFFSET);
+    w[IN_V_OFFSET] = zero_like_working(IN_V_OFFSET);
+    w[IN_K_SCALE] = zero_like_working(IN_K_SCALE);
+    w[IN_V_SCALE] = zero_like_working(IN_V_SCALE);
+    w[IN_MLP_W2_BIAS] = torch::cat({w[IN_MLP_W2_BIAS], w[IN_MLP_W1_BIAS]}, 0);
+    w[IN_MLP_W1_BIAS] = zero_like_working(IN_MLP_W1_BIAS);
+    w[IN_MLP_W2_DEQSCALE] =
+        torch::cat({w[IN_MLP_W2_DEQSCALE], w[IN_MLP_W1_DEQSCALE]}, 0)
             .to(torch::kFloat32);
-    at_weight_tensors_[IN_MLP_W1_DEQSCALE] =
-        make_zero_like(at_weight_tensors_[IN_MLP_W1_DEQSCALE]);
-    at_weight_tensors_[IN_MLP_W1_OFFSET] =
-        make_zero_like(at_weight_tensors_[IN_MLP_W1_OFFSET]);
-    at_weight_tensors_[IN_MLP_W1_SCALE] =
-        make_zero_like(at_weight_tensors_[IN_MLP_W1_SCALE]);
-    at_weight_tensors_[IN_Q_OFFSET] =
-        at_weight_tensors_[IN_Q_OFFSET].to(torch::kInt8).to(device_);
-    at_weight_tensors_[IN_ATTENTION_OUT_OFFSET] =
-        at_weight_tensors_[IN_ATTENTION_OUT_OFFSET]
-            .to(torch::kInt8)
-            .to(device_);
-    at_weight_tensors_[IN_MLP_W2_OFFSET] =
-        at_weight_tensors_[IN_MLP_W2_OFFSET].to(torch::kInt8).to(device_);
+    w[IN_MLP_W1_DEQSCALE] = zero_like_working(IN_MLP_W1_DEQSCALE);
+    w[IN_MLP_W1_OFFSET] = zero_like_working(IN_MLP_W1_OFFSET);
+    w[IN_MLP_W1_SCALE] = zero_like_working(IN_MLP_W1_SCALE);
+    w[IN_Q_OFFSET] = w[IN_Q_OFFSET].to(torch::kInt8);
+    w[IN_ATTENTION_OUT_OFFSET] = w[IN_ATTENTION_OUT_OFFSET].to(torch::kInt8);
+    w[IN_MLP_W2_OFFSET] = w[IN_MLP_W2_OFFSET].to(torch::kInt8);
     if (device_id_ != 0) {
-      torch::Tensor original_tensor = at_weight_tensors_[IN_ATTENTION_OUT_BIAS];
-      auto shape = original_tensor.sizes();
-      auto dtype = original_tensor.dtype();
-      auto device = original_tensor.device();
-
-      at_weight_tensors_[IN_ATTENTION_OUT_BIAS] = torch::zeros(
-          shape, torch::TensorOptions().dtype(dtype).device(device));
+      auto original = w[IN_ATTENTION_OUT_BIAS];
+      w[IN_ATTENTION_OUT_BIAS] = torch::zeros(original.sizes(),
+                                              torch::TensorOptions()
+                                                  .dtype(original.dtype())
+                                                  .device(target_device()));
     }
   }
 
-  at_weight_tensors_[IN_Q_WEIGHT] =
-      torch::cat({at_weight_tensors_[IN_Q_WEIGHT],
-                  at_weight_tensors_[IN_K_WEIGHT],
-                  at_weight_tensors_[IN_V_WEIGHT]},
-                 0)
+  w[IN_Q_WEIGHT] =
+      torch::cat({w[IN_Q_WEIGHT], w[IN_K_WEIGHT], w[IN_V_WEIGHT]}, 0)
           .contiguous();
+  w[IN_K_WEIGHT] = zero_like_working(IN_K_WEIGHT);
+  w[IN_V_WEIGHT] = zero_like_working(IN_V_WEIGHT);
 
-  at_weight_tensors_[IN_K_WEIGHT] =
-      make_zero_like(at_weight_tensors_[IN_K_WEIGHT]);
-  at_weight_tensors_[IN_V_WEIGHT] =
-      make_zero_like(at_weight_tensors_[IN_V_WEIGHT]);
-
-  if (at_weight_tensors_[IN_Q_BIAS].sizes() != std::vector<int64_t>({1})) {
-    at_weight_tensors_[IN_Q_BIAS] = torch::cat({at_weight_tensors_[IN_Q_BIAS],
-                                                at_weight_tensors_[IN_K_BIAS],
-                                                at_weight_tensors_[IN_V_BIAS]},
-                                               0)
-                                        .contiguous();
-
-    at_weight_tensors_[IN_K_BIAS] =
-        make_zero_like(at_weight_tensors_[IN_K_BIAS]);
-    at_weight_tensors_[IN_V_BIAS] =
-        make_zero_like(at_weight_tensors_[IN_V_BIAS]);
+  if (w[IN_Q_BIAS].sizes() != std::vector<int64_t>({1})) {
+    w[IN_Q_BIAS] =
+        torch::cat({w[IN_Q_BIAS], w[IN_K_BIAS], w[IN_V_BIAS]}, 0).contiguous();
+    w[IN_K_BIAS] = zero_like_working(IN_K_BIAS);
+    w[IN_V_BIAS] = zero_like_working(IN_V_BIAS);
   }
 
-  TransposeType transpose_type =
-      check_transpose(at_weight_tensors_[IN_MLP_W2_WEIGHT]);
+  TransposeType transpose_type = check_transpose(w[IN_MLP_W2_WEIGHT]);
   if (transpose_type == TransposeType::TRANSPOSE) {
-    at_weight_tensors_[IN_MLP_W2_WEIGHT] =
-        torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
-                    at_weight_tensors_[IN_MLP_W1_WEIGHT]},
-                   0)
-            .contiguous();
+    w[IN_MLP_W2_WEIGHT] =
+        torch::cat({w[IN_MLP_W2_WEIGHT], w[IN_MLP_W1_WEIGHT]}, 0).contiguous();
   } else {
-    at_weight_tensors_[IN_MLP_W2_WEIGHT] =
-        torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
-                    at_weight_tensors_[IN_MLP_W1_WEIGHT]},
-                   0)
+    w[IN_MLP_W2_WEIGHT] =
+        torch::cat({w[IN_MLP_W2_WEIGHT], w[IN_MLP_W1_WEIGHT]}, 0)
             .transpose(0, 1)
             .contiguous();
   }
 
-  at_weight_tensors_[IN_MLP_W1_WEIGHT] =
-      make_zero_like(at_weight_tensors_[IN_MLP_W1_WEIGHT]);
+  w[IN_MLP_W1_WEIGHT] = zero_like_working(IN_MLP_W1_WEIGHT);
 }
 
 TransposeType Eagle3DecoderLoader::check_transpose(at::Tensor& tensor) {
@@ -329,7 +148,7 @@ TransposeType Eagle3DecoderLoader::check_transpose(at::Tensor& tensor) {
 
 void Eagle3DecoderLoader::verify_loaded_weights() const {
   for (const auto& [index, name] : WEIGHT_MAPPING) {
-    CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
+    CHECK(working_tensors()[index].sizes() != std::vector<int64_t>({1}))
         << "weight is not loaded for " << name;
   }
 }

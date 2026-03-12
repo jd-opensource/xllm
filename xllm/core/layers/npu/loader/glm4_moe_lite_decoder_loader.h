@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#pragma once
+
 #include "base_loader.h"
 
 static const uint64_t WEIGHT_COUNT_PER_LAYER = 84;
@@ -25,13 +27,15 @@ class Glm4MoeDecoderLiteLoader : public BaseLoader {
   Glm4MoeDecoderLiteLoader(uint64_t weight_count,
                            const ModelContext& context,
                            int32_t layer_id,
-                           int32_t prefill_param_firstKDenseReplace);
+                           int32_t prefill_param_firstKDenseReplace,
+                           LoadMode mode = LoadMode::kEager);
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
-  void merge_loaded_weights() override;
   void resize_experts_weights(int num_of_device_experts) override;
 
  protected:
+  void merge_host_at_weights() override;
+
   int32_t layer_id_;
   int32_t qk_nope_head_dim_;
   int32_t qk_rope_head_dim_;
@@ -113,8 +117,6 @@ class Glm4MoeDecoderLiteLoader : public BaseLoader {
   torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts_up,
                                       std::vector<torch::Tensor>& experts_gate,
                                       bool transpose = false);
-
-  //   int64_t init_layer();
 
   int get_mapped_index(const std::string& name,
                        const std::unordered_map<std::string, int>& mapping);

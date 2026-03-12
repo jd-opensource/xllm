@@ -25,14 +25,15 @@ namespace layer {
 
 class Glm4DecoderLoader : public BaseLoader {
  public:
-  Glm4DecoderLoader(uint64_t weight_count, const ModelContext& context);
+  Glm4DecoderLoader(uint64_t weight_count,
+                    const ModelContext& context,
+                    LoadMode mode = LoadMode::kEager);
 
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
-  void merge_loaded_weights() override;
 
- private:
-  at::Tensor at_placeholder_;
+ protected:
+  void merge_host_at_weights() override;
 };
 
 }  // namespace layer

@@ -27,6 +27,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "framework/model/npu_cp_prepare.h"
 #include "layers/common/rotary_embedding_util.h"
+#include "loader/deepseek_v32_decoder_loader.h"
 
 namespace xllm {
 namespace layer {
@@ -237,7 +238,8 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
       num_key_value_heads_,
       v_head_dim_,
       prefill_param_.isBF16,
-      decode_param_.isBF16);
+      decode_param_.isBF16,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
   initialize_tensors(options);
 }
 

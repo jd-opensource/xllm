@@ -50,6 +50,8 @@ class NpuGlm4VisionEncoderLayerImpl : public BaseLayer {
 
   ~NpuGlm4VisionEncoderLayerImpl() override = default;
 
+  void merge_loaded_weights() override;
+
   int64_t init_layer() override;
 
   torch::Tensor forward(torch::Tensor& x,

@@ -33,7 +33,7 @@ limitations under the License.
 #include "core/framework/model/model_traits.h"
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"
-#include "core/layers/npu/loader/base_manual_loader.h"
+#include "core/layers/npu/loader/base_loader.h"
 #include "core/layers/npu/loader/rolling_load_manager.h"
 #include "core/layers/npu/loader/rolling_weight_buffer.h"
 #include "core/layers/npu/npu_block_copy_impl.h"
@@ -113,8 +113,8 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
     decoder_layer_->reload_weights_from_device();
   }
 
-  virtual layer::BaseManualLoader* get_manual_loader() {
-    return decoder_layer_->get_manual_loader();
+  virtual layer::BaseLoader* get_loader() {
+    return decoder_layer_->get_loader();
   }
 
   virtual void refresh_rolling_weights() {
@@ -327,12 +327,12 @@ class LlmModelImplBase : public torch::nn::Module {
     norm_->merge_and_move_pinned_host();
   }
 
-  // Collect BaseManualLoader* from each decoder layer (in order)
-  virtual std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
-    std::vector<layer::BaseManualLoader*> loaders;
+  // Collect BaseLoader* from each decoder layer (in order)
+  virtual std::vector<layer::BaseLoader*> get_decoder_loaders() {
+    std::vector<layer::BaseLoader*> loaders;
     loaders.reserve(layers_.size());
     for (auto& l : layers_) {
-      loaders.push_back(l->get_manual_loader());
+      loaders.push_back(l->get_loader());
     }
     return loaders;
   }
@@ -545,7 +545,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     model_->set_npu_word_embedding(npu_word_embedding);
   }
 
-  virtual std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
+  virtual std::vector<layer::BaseLoader*> get_decoder_loaders() {
     return model_->get_decoder_loaders();
   }
 

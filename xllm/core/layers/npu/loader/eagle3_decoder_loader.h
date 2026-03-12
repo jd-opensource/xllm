@@ -25,13 +25,15 @@ namespace layer {
 
 class Eagle3DecoderLoader : public BaseLoader {
  public:
-  Eagle3DecoderLoader(uint64_t weight_count, const ModelContext& context);
+  Eagle3DecoderLoader(uint64_t weight_count,
+                      const ModelContext& context,
+                      LoadMode mode = LoadMode::kEager);
 
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
-  void merge_loaded_weights() override;
 
  protected:
+  void merge_host_at_weights() override;
   TransposeType check_transpose(at::Tensor& tensor);
   int device_id_;
 };

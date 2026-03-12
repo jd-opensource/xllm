@@ -25,14 +25,18 @@ namespace layer {
 
 class LlamaDecoderLoader : public BaseLoader {
  public:
-  LlamaDecoderLoader(uint64_t weight_count, const ModelContext& context);
+  LlamaDecoderLoader(uint64_t weight_count,
+                     const ModelContext& context,
+                     LoadMode mode = LoadMode::kEager);
 
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
-  void merge_loaded_weights() override;
 
-  bool enableAddNorm_;
-  int rank_id_;
+ protected:
+  void merge_host_at_weights() override;
+
+  bool enableAddNorm_ = false;
+  int rank_id_ = 0;
 };
 
 }  // namespace layer

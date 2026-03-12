@@ -110,11 +110,10 @@ NpuLmHeadImpl::NpuLmHeadImpl(const ModelContext& context) : BaseLayer(context) {
   torch_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(torch_placeholder_);
 
-  if (FLAGS_enable_manual_loader) {
-    loader_ = std::make_unique<LmHeadManualLoader>(1, context);
-  } else {
-    loader_ = std::make_unique<LmHeadLoader>(1, context);
-  }
+  loader_ = std::make_unique<LmHeadLoader>(
+      1,
+      context,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
 }
 
 int64_t NpuLmHeadImpl::init_layer() {

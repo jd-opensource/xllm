@@ -100,13 +100,10 @@ NpuEagle3DecoderLayerImpl::NpuEagle3DecoderLayerImpl(
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
   at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
-  if (FLAGS_enable_manual_loader) {
-    loader_ = std::make_unique<Eagle3DecoderManualLoader>(
-        WEIGHT_COUNT_PER_LAYER, context);
-  } else {
-    loader_ =
-        std::make_unique<Eagle3DecoderLoader>(WEIGHT_COUNT_PER_LAYER, context);
-  }
+  loader_ = std::make_unique<Eagle3DecoderLoader>(
+      WEIGHT_COUNT_PER_LAYER,
+      context,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
   initialize_quantization_parameters();
 }
 
