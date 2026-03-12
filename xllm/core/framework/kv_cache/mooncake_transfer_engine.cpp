@@ -419,6 +419,7 @@ bool MooncakeTransferEngine::move_memory_blocks(
   }
 
   std::vector<TransferRequest> entries;
+  entries.reserve(addr_ids.size() * merged_src_blocks.size() * 2);
   for (auto addr_id : addr_ids) {
     char* k_local_base = (char*)(local_segment_desc->buffers[addr_id].addr);
     char* k_remote_base = (char*)(remote_segment_desc->buffers[addr_id].addr);

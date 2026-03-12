@@ -65,6 +65,16 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
   std::vector<torch::Tensor> control_images;
   std::vector<torch::Tensor> latents;
   std::vector<torch::Tensor> masked_image_latents;
+  const auto batch_size = request_vec_.size();
+  prompt_embeds.reserve(batch_size);
+  pooled_prompt_embeds.reserve(batch_size);
+  negative_prompt_embeds.reserve(batch_size);
+  negative_pooled_prompt_embeds.reserve(batch_size);
+  images.reserve(batch_size);
+  mask_images.reserve(batch_size);
+  control_images.reserve(batch_size);
+  latents.reserve(batch_size);
+  masked_image_latents.reserve(batch_size);
   for (const auto& request : request_vec_) {
     const auto& generation_params = request->state().generation_params();
     if (input.generation_params != generation_params) {
