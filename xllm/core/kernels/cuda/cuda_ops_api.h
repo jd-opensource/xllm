@@ -81,6 +81,42 @@ void batch_prefill_with_optional_piecewise_capture(
     torch::Tensor output,
     std::optional<torch::Tensor>& output_lse);
 
+void batch_prefill_non_causal(
+    const std::string& uri,
+    ffi::Array<int64_t> plan_info,
+    torch::Tensor float_workspace_buffer,
+    torch::Tensor int_workspace_buffer,
+    torch::Tensor page_locked_int_workspace_buffer,
+    torch::Tensor query,
+    torch::Tensor key,
+    torch::Tensor value,
+    torch::Tensor q_cu_seq_lens,
+    torch::Tensor kv_cu_seq_lens,
+    int64_t window_left,
+    double sm_scale,
+    torch::Tensor output,
+    std::optional<torch::Tensor>& output_lse,
+    const std::optional<torch::Tensor>& mask = std::nullopt);
+
+void batch_chunked_prefill(
+    const std::string& uri,
+    ffi::Array<int64_t> plan_info,
+    torch::Tensor float_workspace_buffer,
+    torch::Tensor int_workspace_buffer,
+    torch::Tensor page_locked_int_workspace_buffer,
+    torch::Tensor query,
+    torch::Tensor k_cache,
+    torch::Tensor v_cache,
+    torch::Tensor paged_kv_indptr,
+    torch::Tensor paged_kv_indices,
+    torch::Tensor paged_kv_last_page_len,
+    int64_t window_left,
+    double sm_scale,
+    torch::Tensor output,
+    std::optional<torch::Tensor>& output_lse,
+    std::optional<torch::Tensor> qo_indptr = std::nullopt,
+    bool causal = true);
+
 void batch_decode(const std::string& uri,
                   ffi::Array<int64_t> plan_info,
                   torch::Tensor float_workspace_buffer,
@@ -133,6 +169,33 @@ std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
     const std::optional<torch::Tensor>& output = std::nullopt,
     const std::optional<torch::Tensor>& scale = std::nullopt);
 
+// ============================================================================
+// Fused RMSNorm + Static FP8 Quantization
+// ============================================================================
+// These functions combine RMSNorm and FP8 quantization to reduce memory
+// bandwidth by avoiding the intermediate write-back to global memory.
+
+// Fused RMSNorm + Static FP8 Quantization (without residual)
+// Combines RMSNorm normalization and FP8 quantization in a single kernel.
+// This is optimal for the first layer where no residual connection exists.
+void rms_norm_static_fp8_quant(
+    torch::Tensor& out,     // [..., hidden_size], FP8 output
+    torch::Tensor& input,   // [..., hidden_size], input tensor
+    torch::Tensor& weight,  // [hidden_size], RMSNorm weight
+    torch::Tensor& scale,   // [1], FP8 quantization scale
+    double epsilon);        // RMSNorm epsilon
+
+// Fused Add + RMSNorm + Static FP8 Quantization (with residual)
+// Combines residual addition, RMSNorm, and FP8 quantization in a single kernel.
+// The residual tensor is updated in-place with the sum of input and residual.
+void fused_add_rms_norm_static_fp8_quant(
+    torch::Tensor& out,       // [..., hidden_size], FP8 output
+    torch::Tensor& input,     // [..., hidden_size], input tensor
+    torch::Tensor& residual,  // [..., hidden_size], residual (updated in-place)
+    torch::Tensor& weight,    // [hidden_size], RMSNorm weight
+    torch::Tensor& scale,     // [1], FP8 quantization scale
+    double epsilon);          // RMSNorm epsilon
+
 // FP8 scaled matmul for W8A8 quantization using CUTLASS kernels
 // Performs: c = (a @ b.T) with scales applied
 torch::Tensor fp8_scaled_matmul(
@@ -177,4 +240,10 @@ void fused_qk_norm_rope(
     const torch::Tensor& position_ids  // Position IDs for RoPE [num_tokens]
 );
 
+std::tuple<torch::Tensor, torch::Tensor> moe_fused_topk(
+    torch::Tensor& gating_output,
+    int64_t topk,
+    bool renormalize,
+    const std::optional<torch::Tensor>& correction_bias,
+    const std::string& scoring_func);
 }  // namespace xllm::kernel::cuda

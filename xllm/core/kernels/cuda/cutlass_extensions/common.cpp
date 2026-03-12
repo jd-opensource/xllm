@@ -18,6 +18,10 @@
 
 #include "cutlass_extensions/common.hpp"
 
+#include <glog/logging.h>
+
+#include "core/platform/cuda/cuda_utils.h"
+
 namespace xllm {
 namespace kernel {
 namespace cuda {
@@ -30,6 +34,10 @@ int32_t get_sm_version_num() {
       &minor_capability, cudaDevAttrComputeCapabilityMinor, 0);
   int32_t version_num = major_capability * 10 + minor_capability;
   return version_num;
+}
+
+int32_t get_device_sm_count(int device) {
+  return xllm::cuda::get_device_sm_count(device);
 }
 
 }  // namespace cuda

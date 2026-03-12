@@ -70,8 +70,7 @@ VLMMaster::VLMMaster(const Options& options)
       .enable_service_routing(options_.enable_service_routing())
       .disable_ttft_profiling(options_.disable_ttft_profiling())
       .enable_forward_interruption(options_.enable_forward_interruption())
-      // TODO: support later for VLM.
-      .enable_schedule_overlap(false)
+      .enable_schedule_overlap(options_.enable_schedule_overlap())
       .server_idx(options_.server_idx());
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
 
@@ -381,7 +380,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
                          stream,
                          sp.echo,
                          sp.skip_special_tokens,
-                         false, /*enable_schedule_overlap*/
+                         options_.enable_schedule_overlap(),
                          callback,
                          nullptr);
   auto request = std::make_shared<Request>(sp.request_id,

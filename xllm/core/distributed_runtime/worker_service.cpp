@@ -234,8 +234,10 @@ void WorkerService::InitModel(::google::protobuf::RpcController* controller,
     brpc::ClosureGuard done_guard(done);
     auto model_weights_path = request->model_weights_path();
     auto random_seed = request->random_seed();
-    auto init_future = worker_->init_model_async(
-        model_weights_path, random_seed, request->master_status());
+    auto init_future =
+        worker_->init_model_async(model_weights_path,
+                                  random_seed,
+                                  MasterStatus(request->master_status()));
     bool status = std::move(init_future).get();
     if (!status) {
       response->set_ok(false);
@@ -545,7 +547,7 @@ void WorkerService::Sleep(::google::protobuf::RpcController* controller,
                           ::google::protobuf::Closure* done) {
   threadpool_->schedule([this, controller, req, resp, done]() mutable {
     brpc::ClosureGuard done_guard(done);
-    bool status = worker_->sleep(req->master_status());
+    bool status = worker_->sleep(MasterStatus(req->master_status()));
     resp->set_ok(status);
   });
 
@@ -559,7 +561,7 @@ void WorkerService::Wakeup(::google::protobuf::RpcController* controller,
   threadpool_->schedule([this, controller, req, resp, done]() mutable {
     brpc::ClosureGuard done_guard(done);
     WakeupOptions options;
-    options.master_status = req->master_status();
+    options.master_status = MasterStatus(req->master_status());
     options.remote_addrs.assign(req->remote_addrs().begin(),
                                 req->remote_addrs().end());
     // Unmarshal weight segments

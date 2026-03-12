@@ -98,7 +98,7 @@ uint32_t KVCacheStore::batch_put(
   slices.reserve(block_transfer_info.size());
   for (auto block_info : block_transfer_info) {
     std::string str_key(reinterpret_cast<const char*>(block_info.hash_key),
-                        MURMUR_HASH3_VALUE_LEN);
+                        XXH3_128BITS_HASH_VALUE_LEN);
 
     str_key.append(std::to_string(config_.tp_rank));
 
@@ -139,7 +139,7 @@ uint32_t KVCacheStore::batch_get(
   str_keys.reserve(block_transfer_info.size());
   for (auto block_info : block_transfer_info) {
     std::string str_key(reinterpret_cast<const char*>(block_info.hash_key),
-                        MURMUR_HASH3_VALUE_LEN);
+                        XXH3_128BITS_HASH_VALUE_LEN);
 
     str_key.append(std::to_string(config_.tp_rank));
     auto exist = client_ptr_->IsExist(str_key);

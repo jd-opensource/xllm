@@ -334,10 +334,26 @@ class QWen3Eagle3ForCausalLMImpl : public torch::nn::Module {
     return npu_lm_head_(hidden_states, seleted_idxes, 0);
   }
 
+  // hidden_states: [num_tokens, hidden_size]
+  // seleted_idxes: [num_tokens]
+  // returns: [num_seqs, hidden_size]
+  virtual torch::Tensor pooler(const torch::Tensor& hidden_states,
+                               const torch::Tensor& seleted_idxes) {
+    auto h = hidden_states;
+    if (seleted_idxes.defined()) {
+      h = h.index_select(/*dim=*/0, seleted_idxes);
+    }
+    return h;
+  }
+
   virtual void load_model(std::unique_ptr<ModelLoader> loader,
                           std::string prefix = "") {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      model_->load_state_dict(*state_dict);
+      auto sub_dict = state_dict->get_dict_with_prefix(prefix + "model.");
+      if (sub_dict.size() == 0) {
+        sub_dict = state_dict->get_dict_with_prefix(prefix);
+      }
+      model_->load_state_dict(sub_dict);
 
       if (!load_lm_head_from_target_) {
         if (tie_word_embeddings_) {
@@ -353,7 +369,11 @@ class QWen3Eagle3ForCausalLMImpl : public torch::nn::Module {
     // verify
     model_->verify_loaded_weights(prefix);
     if (!load_lm_head_from_target_) {
-      npu_lm_head_->verify_loaded_weights("lm_head.");
+      if (tie_word_embeddings_) {
+        npu_lm_head_->verify_loaded_weights(prefix + "embed_tokens.");
+      } else {
+        npu_lm_head_->verify_loaded_weights("lm_head.");
+      }
     }
     model_->merge_loaded_weights();
     if (!load_lm_head_from_target_) {

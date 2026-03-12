@@ -100,13 +100,20 @@ NpuEagle3DecoderLayerImpl::NpuEagle3DecoderLayerImpl(
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
   at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
-  loader_ = std::make_unique<Eagle3DecoderManualLoader>(WEIGHT_COUNT_PER_LAYER,
-                                                        context);
+  if (FLAGS_enable_xtensor) {
+    loader_ = std::make_unique<Eagle3DecoderManualLoader>(
+        WEIGHT_COUNT_PER_LAYER, context);
+  } else {
+    loader_ =
+        std::make_unique<Eagle3DecoderLoader>(WEIGHT_COUNT_PER_LAYER, context);
+  }
   initialize_quantization_parameters();
 }
 
 void NpuEagle3DecoderLayerImpl::initialize_linear_transpose_type() {
-  auto& at_host_weight_tensors = loader_->get_at_host_weight_tensors();
+  auto& at_host_weight_tensors = FLAGS_enable_xtensor
+                                     ? loader_->get_at_host_weight_tensors()
+                                     : loader_->get_at_weight_tensors();
   TransposeType transpose_type =
       check_transpose(at_host_weight_tensors[IN_MLP_W2_WEIGHT]);
   int transpose_value = static_cast<int>(transpose_type);

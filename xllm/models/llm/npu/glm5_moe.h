@@ -23,9 +23,9 @@ namespace xllm {
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
 
-class Glm5MoeModelImpl : public torch::nn::Module {
+class GlmMoeDsaModelImpl : public torch::nn::Module {
  public:
-  Glm5MoeModelImpl(const ModelContext& context)
+  GlmMoeDsaModelImpl(const ModelContext& context)
       : device_(context.get_tensor_options().device()) {
     auto options = context.get_tensor_options();
     auto model_args = context.get_model_args();
@@ -217,12 +217,12 @@ class Glm5MoeModelImpl : public torch::nn::Module {
   layer::AttentionMask attn_mask_;
   layer::NpuRMSNorm norm_{nullptr};
 };
-TORCH_MODULE(Glm5MoeModel);
+TORCH_MODULE(GlmMoeDsaModel);
 
-class Glm5MoeForCausalLMImpl : public LlmForCausalLMImplBase<Glm5MoeModel> {
+class GlmMoeDsaForCausalLMImpl : public LlmForCausalLMImplBase<GlmMoeDsaModel> {
  public:
-  Glm5MoeForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<Glm5MoeModel>(context),
+  GlmMoeDsaForCausalLMImpl(const ModelContext& context)
+      : LlmForCausalLMImplBase<GlmMoeDsaModel>(context),
         first_k_dense_replace_(
             context.get_model_args().first_k_dense_replace()) {}
 
@@ -239,24 +239,14 @@ class Glm5MoeForCausalLMImpl : public LlmForCausalLMImplBase<Glm5MoeModel> {
  private:
   int32_t first_k_dense_replace_;
 };
-TORCH_MODULE(Glm5MoeForCausalLM);
-
-using GlmMoeDsaForCausalLM = Glm5MoeForCausalLM;
+TORCH_MODULE(GlmMoeDsaForCausalLM);
 
 // register the causal model
-REGISTER_CAUSAL_MODEL(glm5_moe, Glm5MoeForCausalLM);
 REGISTER_CAUSAL_MODEL(glm_moe_dsa, GlmMoeDsaForCausalLM);
 
-REGISTER_MODEL_ARGS_LOADER(glm_moe_dsa,
-                           [](const JsonReader& json, ModelArgs* args) {
-                             auto loader = ModelRegistry::get_model_args_loader(
-                                 "glm5_moe");
-                             return loader != nullptr && loader(json, args);
-                           });
-
 // register the model args
-REGISTER_MODEL_ARGS(glm5_moe, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "glm5_moe");
+REGISTER_MODEL_ARGS(glm_moe_dsa, [&] {
+  LOAD_ARG_OR(model_type, "model_type", "glm_moe_dsa");
   LOAD_ARG_OR(dtype, "dtype", "");
   LOAD_ARG_OR(attention_bias, "attention_bias", false);
   LOAD_ARG_OR(attention_dropout, "attention_dropout", 0.0f);

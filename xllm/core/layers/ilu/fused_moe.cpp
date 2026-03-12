@@ -306,7 +306,7 @@ torch::Tensor FusedMoEImpl::select_experts(
   torch::Tensor reduce_weight;
   torch::Tensor expert_id;
   {
-    xllm::kernel::MoeActiveTopkParams moe_active_topk_params;
+    xllm::kernel::MoeFusedTopkParams moe_active_topk_params;
     moe_active_topk_params.input = router_logits_2d;
     moe_active_topk_params.topk = topk_;
     moe_active_topk_params.num_expert_group = num_expert_group_;

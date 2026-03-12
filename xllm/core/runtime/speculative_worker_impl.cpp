@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "spec_input_builder.h"
 #include "util/env_var.h"
 #include "util/slice.h"
 #include "util/timer.h"
@@ -31,112 +32,6 @@ namespace {
                   ? tensor_.repeat_interleave(/*repeats=*/repeats, /*dim=*/0) \
                   : tensor_;                                                  \
   } while (0)
-
-std::vector<int32_t> kv_cache_slots(int32_t pos_start,
-                                    int32_t offset,
-                                    const Slice<int32_t>& block_table_slice,
-                                    int32_t block_size) {
-  CHECK_GE(offset, 0) << "invalid offset=" << offset;
-  std::vector<int32_t> slots;
-  slots.reserve(offset);
-  for (int32_t i = pos_start; i < pos_start + offset; ++i) {
-    const int32_t block_id = block_table_slice[i / block_size];
-    const int32_t block_offset = i % block_size;
-    slots.push_back(block_id * block_size + block_offset);
-  }
-  return slots;
-}
-
-int32_t kv_cache_slot_id(int32_t position,
-                         const Slice<int32_t>& block_table_slice,
-                         int32_t block_size) {
-  const int32_t block_id = block_table_slice[position / block_size];
-  const int32_t block_offset = position % block_size;
-  return block_id * block_size + block_offset;
-}
-
-// Push cumulative sum to vector (used for cumulative format)
-void push_cumsum(std::vector<int32_t>& vec, int32_t len) {
-  if (vec.empty()) {
-    vec.emplace_back(0);
-  }
-  vec.emplace_back(vec.back() + len);
-}
-
-// Calculate actual kv_len based on platform type
-// For NPU: direct format - returns kv_seq_lens_slice[seq_id] + offset
-// For MLU/CUDA: cumulative format - returns the actual length increment
-int32_t calculate_kv_len(const Slice<int32_t>& kv_seq_lens_slice,
-                         int32_t seq_id,
-                         int32_t offset) {
-#if defined(USE_NPU)
-  return kv_seq_lens_slice[seq_id] + offset;
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
-    defined(USE_MUSA)
-  return kv_seq_lens_slice[seq_id + 1] - kv_seq_lens_slice[seq_id] + offset;
-#endif
-}
-
-// Append sequence length to vector based on platform type
-// For NPU: directly add the len value
-// For MLU/CUDA: add using cumulative format
-void append_seq_len(std::vector<int32_t>& vec, int32_t len) {
-#if defined(USE_NPU)
-  vec.emplace_back(len);
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_MUSA)
-  push_cumsum(vec, len);
-#endif
-}
-
-// Update kv_seq_lens_vec and kv_max_seq_len
-void update_kv_seq_lens_and_max(std::vector<int32_t>& kv_seq_lens_vec,
-                                int32_t kv_len,
-                                int32_t& kv_max_seq_len) {
-  // Update max (same logic for both platforms)
-  if (kv_len > kv_max_seq_len) {
-    kv_max_seq_len = kv_len;
-  }
-  // Update kv_seq_lens_vec
-  append_seq_len(kv_seq_lens_vec, kv_len);
-}
-
-// Batch expansion strategy for validation
-void batch_expansion_process_seq_lens(
-    std::vector<int32_t>& kv_seq_lens_vec,
-    std::vector<int32_t>& q_seq_lens_vec,
-    std::vector<std::vector<int32_t>>& block_tables_vec,
-    int32_t& kv_max_seq_len,
-    const Slice<int32_t>& kv_seq_lens_slice,
-    const Slice<int32_t>& block_table_slice,
-    int32_t seq_id,
-    int32_t position_offset,
-    int32_t num_val_tokens) {
-  for (int32_t offset = position_offset;
-       offset < num_val_tokens + position_offset;
-       ++offset) {
-    // Calculate kv length and update kv_seq_lens_vec and kv_max_seq_len
-    int32_t kv_len = calculate_kv_len(kv_seq_lens_slice, seq_id, offset);
-    update_kv_seq_lens_and_max(kv_seq_lens_vec, kv_len, kv_max_seq_len);
-    // Append sequence length of 1 to q_seq_lens_vec
-    //  for batch expansion strategy for validation
-    append_seq_len(q_seq_lens_vec, 1);
-    // Append block table to block_tables_vec
-    block_tables_vec.emplace_back(block_table_slice);
-  }
-}
-
-// Update kv_seq_lens_vec based on platform type
-// For NPU: directly add kv_seq_lens_slice[seq_id] + offset
-// For others: build cumulative format
-// Also updates kv_max_seq_len to track the maximum sequence length
-void update_kv_seq_lens_vec(std::vector<int32_t>& kv_seq_lens_vec,
-                            const Slice<int32_t>& kv_seq_lens_slice,
-                            int32_t seq_id,
-                            int32_t offset,
-                            int32_t& kv_max_seq_len) {
-  int32_t kv_len = calculate_kv_len(kv_seq_lens_slice, seq_id, offset);
-  update_kv_seq_lens_and_max(kv_seq_lens_vec, kv_len, kv_max_seq_len);
-}
 
 }  // namespace
 
@@ -159,7 +54,7 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(
 
 bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
                                        int32_t random_seed,
-                                       int32_t master_status) {
+                                       MasterStatus master_status) {
   // Base class only loads the target model.
   bool result = true;
   if (impl_->get_status() == WorkerImpl::Status::UNINITIALIZED) {
@@ -207,14 +102,13 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
 
   auto& input_params = new_inputs.input_params;
   const int32_t num_sequences = input_params.num_sequences;
-  int32_t block_size = options_.block_size();
+  const int32_t block_size = options_.block_size();
 
   torch::Tensor token_ids = safe_to(inputs.token_ids, torch::kCPU);
-  Slice<int32_t> tokens_ids_slice = {token_ids.data_ptr<int32_t>(),
-                                     static_cast<size_t>(token_ids.numel())};
   torch::Tensor positions = safe_to(inputs.positions, torch::kCPU);
-  Slice<int32_t> positions_slice = {positions.data_ptr<int32_t>(),
-                                    static_cast<size_t>(positions.numel())};
+  torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
+  auto view = specBuilder::make_decode_cpu_view(
+      token_ids, positions, block_tables, input_params.kv_seq_lens_vec);
   torch::Tensor last_token_ids = safe_to(
       last_step_output_.sample_output.next_tokens.flatten(), torch::kCPU);
   Slice<int64_t> last_tokens_ids_slice = {
@@ -228,89 +122,41 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
     last_step_decode_num = last_step_output_.sample_output.next_tokens.size(1);
   }
 
-  Slice<int32_t> kv_seq_lens_slice = input_params.kv_seq_lens_vec;
-  torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
+  specBuilder::DecodeBuildBuffers buf;
+  buf.out_token_ids.reserve(num_sequences);
+  buf.out_positions.reserve(num_sequences);
+  buf.out_kv_seq_lens.reserve(num_sequences);
+  buf.out_new_cache_slots.reserve(num_sequences);
 
-  std::vector<int32_t> new_token_ids;
-  std::vector<int32_t> new_positions;
-  std::vector<int32_t> kv_seq_lens_vec = {};
-  std::vector<int32_t> new_token_slot_ids;
-  new_token_ids.reserve(num_sequences);
-  new_positions.reserve(num_sequences);
-  kv_seq_lens_vec.reserve(num_sequences);
-  new_token_slot_ids.reserve(num_sequences);
-
-  // Initialize kv_max_seq_len to 0
-  int32_t kv_max_seq_len = 0;
-
-  // Process each sequence to get the correct token ID and position for the next
-  // step
   for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
-    int32_t postion_offset = 0;
-    int32_t last_step_token_id = 0;
-
-    // If the token ID is non-negative, it's a direct token ID (not a
-    // placeholder)
-    if (tokens_ids_slice[seq_id] >= 0) {
-      last_step_token_id = tokens_ids_slice[seq_id];
-    } else {
-      // Negative token IDs are placeholders that need to be resolved from
-      // last_step_output_ The absolute value minus 1 gives the index into the
-      // last step's output
-      int32_t last_step_index = -1 * tokens_ids_slice[seq_id] - 1;
-      last_step_index = last_step_index * last_step_decode_num;
-      postion_offset = -1;
-      for (int i = 0; i < last_step_decode_num; ++i) {
-        int32_t token_id = last_tokens_ids_slice[last_step_index + i];
-        if (token_id >= 0) {
-          last_step_token_id = token_id;
-          postion_offset += 1;
-        }
-      }
-    }
-
-    new_token_ids.emplace_back(last_step_token_id);
-    new_positions.emplace_back(positions_slice[seq_id] + postion_offset);
-    update_kv_seq_lens_vec(kv_seq_lens_vec,
-                           kv_seq_lens_slice,
-                           seq_id,
-                           postion_offset,
-                           kv_max_seq_len);
-
-    // Calculate the new cache slot ID based on the position offset
-    // This handles cases where we need to move to a different block
-    torch::Tensor block_table = block_tables[seq_id];
-    Slice<int32_t> block_table_slice = {
-        block_table.data_ptr<int32_t>(),
-        static_cast<size_t>(block_table.numel())};
-    new_token_slot_ids.emplace_back(
-        kv_cache_slot_id(new_positions.back(), block_table_slice, block_size));
+    specBuilder::append_decode_row_from_last_step(input_params,
+                                                  view,
+                                                  seq_id,
+                                                  view.token_ids[seq_id],
+                                                  last_tokens_ids_slice,
+                                                  last_step_decode_num,
+                                                  block_size,
+                                                  buf);
   }
 
-  CHECK_EQ(new_token_slot_ids.size(), new_token_ids.size())
+  CHECK_EQ(buf.out_new_cache_slots.size(), buf.out_token_ids.size())
       << "step-update kv slots/tokens mismatch";
-  CHECK_EQ(new_positions.size(), new_token_ids.size())
+  CHECK_EQ(buf.out_positions.size(), buf.out_token_ids.size())
       << "step-update positions/tokens mismatch";
 
   // Create new tensors with updated values
   torch::TensorOptions int_options = inputs.token_ids.options();
-  new_inputs.token_ids = torch::tensor(new_token_ids, int_options);
-  new_inputs.positions = torch::tensor(new_positions, int_options);
+  new_inputs.token_ids = torch::tensor(buf.out_token_ids, int_options);
+  new_inputs.positions = torch::tensor(buf.out_positions, int_options);
   // update the input_params
-  input_params.kv_max_seq_len = kv_max_seq_len;
-  input_params.kv_seq_lens_vec = std::move(kv_seq_lens_vec);
+  input_params.kv_max_seq_len = buf.kv_max_seq_len;
+  input_params.kv_seq_lens_vec = std::move(buf.out_kv_seq_lens);
   input_params.kv_seq_lens =
       torch::tensor(input_params.kv_seq_lens_vec, int_options);
-  // deepseek 3.2
-  std::vector<int32_t> q_cu_seq_lens_vec;
-  q_cu_seq_lens_vec.reserve(input_params.num_sequences);
-  int32_t cum_seq_len = 0;
-  for (int32_t i = 0; i < input_params.num_sequences; ++i) {
-    cum_seq_len += input_params.get_q_seq_len(i);
-    q_cu_seq_lens_vec.push_back(cum_seq_len);
-  }
-  input_params.q_cu_seq_lens = torch::tensor(q_cu_seq_lens_vec, torch::kInt);
-  input_params.new_cache_slots = torch::tensor(new_token_slot_ids, int_options);
+  input_params.q_cu_seq_lens =
+      specBuilder::build_q_cu_seq_lens_tensor(input_params);
+  input_params.new_cache_slots =
+      torch::tensor(buf.out_new_cache_slots, int_options);
 
   return new_inputs.to(device_, dtype_);
 }
@@ -349,98 +195,68 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   auto& input_params = validate_input.input_params;
   torch::TensorOptions int_options = validate_input.token_ids.options();
 
-  constexpr int32_t position_offset = 1;
   const int32_t num_speculative_tokens = options_.num_speculative_tokens();
   const int32_t num_sequences = input_params.num_sequences;
   const int32_t num_val_tokens = num_speculative_tokens + 1;
   const int32_t total_num_val_tokens = num_sequences * num_val_tokens;
   const int32_t block_size = options_.block_size();
 
-  std::vector<std::vector<int32_t>> draft_tokens;
-  draft_tokens.reserve(num_speculative_tokens);
-  for (int i = 0; i < num_speculative_tokens; ++i) {
-    draft_tokens.emplace_back(std::vector(num_sequences, -1 * (i + 1)));
+  torch::Tensor token_ids = safe_to(input.token_ids, torch::kCPU);
+  torch::Tensor positions = safe_to(input.positions, torch::kCPU);
+  torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
+  auto view = specBuilder::make_decode_cpu_view(
+      token_ids, positions, block_tables, input_params.kv_seq_lens_vec);
+  specBuilder::DecodeBuildBuffers buf;
+  buf.out_token_ids.reserve(total_num_val_tokens);
+  buf.out_positions.reserve(total_num_val_tokens);
+  buf.out_new_cache_slots.reserve(total_num_val_tokens);
+  if (!FLAGS_enable_atb_spec_kernel) {
+    buf.out_kv_seq_lens.reserve(total_num_val_tokens);
+    buf.out_q_seq_lens.reserve(total_num_val_tokens);
+    buf.out_block_tables.reserve(total_num_val_tokens);
   }
 
-  torch::Tensor token_ids = safe_to(input.token_ids, torch::kCPU);
-  Slice<int32_t> tokens_ids_slice = {token_ids.data_ptr<int32_t>(),
-                                     static_cast<size_t>(token_ids.numel())};
-  torch::Tensor positions = safe_to(input.positions, torch::kCPU);
-  Slice<int32_t> positions_slice = {positions.data_ptr<int32_t>(),
-                                    static_cast<size_t>(positions.numel())};
-  Slice<int32_t> kv_seq_lens_slice = input_params.kv_seq_lens_vec;
-  torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
-
-  std::vector<int32_t> new_token_ids;
-  std::vector<int32_t> new_positions;
-  new_token_ids.reserve(total_num_val_tokens);
-  new_positions.reserve(total_num_val_tokens);
-  std::vector<int32_t> kv_seq_lens_vec = {};
-  std::vector<int32_t> q_seq_lens_vec = {};
-  std::vector<int32_t> new_token_slot_ids;
-  std::vector<std::vector<int32_t>> block_tables_vec;
-
-  int32_t kv_max_seq_len = 0;
+  std::vector<int32_t> atb_kv_seq_lens_vec = {};
+  std::vector<int32_t> atb_q_seq_lens_vec = {};
+  int32_t atb_kv_max_seq_len = 0;
   for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
-    new_token_ids.emplace_back(tokens_ids_slice[seq_id]);
-    new_positions.emplace_back(positions_slice[seq_id] + position_offset);
-    for (int32_t j = 0; j < num_speculative_tokens; ++j) {
-      new_token_ids.emplace_back(draft_tokens[j][seq_id]);
-      new_positions.emplace_back(positions_slice[seq_id] + j + 1 +
-                                 position_offset);
-    }
-
-    torch::Tensor block_table = block_tables[seq_id];
-    Slice<int32_t> block_table_slice = {
-        block_table.data_ptr<int32_t>(),
-        static_cast<size_t>(block_table.numel())};
-
-    // process kv length and q length
-    if (FLAGS_enable_atb_spec_kernel) {
-      // expand the num of decode tokens for each batch in the batch for
-      // validation
-      kv_seq_lens_vec.emplace_back(kv_seq_lens_slice[seq_id] +
-                                   num_speculative_tokens + position_offset);
-      q_seq_lens_vec.emplace_back(num_val_tokens);
-      // update max for NPU: direct format, compare with new value
-      if (kv_seq_lens_vec.back() > kv_max_seq_len) {
-        kv_max_seq_len = kv_seq_lens_vec.back();
-      }
-    } else {
-      // expand the batch sizes for validation
-      //  and update max for MLU/CUDA: cumulative format, compare with new value
-      batch_expansion_process_seq_lens(kv_seq_lens_vec,
-                                       q_seq_lens_vec,
-                                       block_tables_vec,
-                                       kv_max_seq_len,
-                                       kv_seq_lens_slice,
-                                       block_table_slice,
-                                       seq_id,
-                                       position_offset,
-                                       num_val_tokens);
-    }
-
-    // process slot id
-    int32_t start_position = positions_slice[seq_id] + position_offset;
-    int32_t kv_len = calculate_kv_len(kv_seq_lens_slice, seq_id, /*offset=*/0);
-    CHECK_EQ(start_position, kv_len)
+    int32_t start_position = view.positions[seq_id];
+    int32_t kv_len =
+        specBuilder::calc_kv_len(view.kv_seq_lens, seq_id, /*offset=*/0);
+    CHECK_EQ(start_position + 1, kv_len)
         << "validate position/kv_len mismatch, seq_id=" << seq_id
         << ", start_position=" << start_position << ", kv_len=" << kv_len;
-    auto slot_ids = kv_cache_slots(start_position,
-                                   num_val_tokens,
-                                   block_table_slice,
-                                   options_.block_size());
-    new_token_slot_ids.insert(
-        new_token_slot_ids.end(), slot_ids.begin(), slot_ids.end());
+
+    for (int32_t val_idx = 0; val_idx < num_val_tokens; ++val_idx) {
+      specBuilder::RowSpec row;
+      row.seq_id = seq_id;
+      if (val_idx == 0) {
+        row.use_input_token = true;
+      } else {
+        row.token_id = -val_idx;
+      }
+      row.position_offset = val_idx;
+      row.append_kv_len = !FLAGS_enable_atb_spec_kernel;
+      row.append_q_len_one = !FLAGS_enable_atb_spec_kernel;
+      row.append_block_table = !FLAGS_enable_atb_spec_kernel;
+      specBuilder::append_decode_row(input_params, view, row, block_size, buf);
+    }
+
+    if (FLAGS_enable_atb_spec_kernel) {
+      const int32_t kv_len_after_validation = kv_len + num_speculative_tokens;
+      specBuilder::update_kv_seq_lens_and_max(
+          atb_kv_seq_lens_vec, kv_len_after_validation, atb_kv_max_seq_len);
+      specBuilder::append_seq_len_by_layout(atb_q_seq_lens_vec, num_val_tokens);
+    }
   }
 
-  CHECK_EQ(new_token_slot_ids.size(), new_token_ids.size())
+  CHECK_EQ(buf.out_new_cache_slots.size(), buf.out_token_ids.size())
       << "validate kv slots/tokens mismatch";
-  CHECK_EQ(new_positions.size(), new_token_ids.size())
+  CHECK_EQ(buf.out_positions.size(), buf.out_token_ids.size())
       << "validate positions/tokens mismatch";
 
-  validate_input.token_ids = torch::tensor(new_token_ids, int_options);
-  validate_input.positions = torch::tensor(new_positions, int_options);
+  validate_input.token_ids = torch::tensor(buf.out_token_ids, int_options);
+  validate_input.positions = torch::tensor(buf.out_positions, int_options);
   // update the input_params
   if (!FLAGS_enable_atb_spec_kernel) {
     input_params.num_sequences = total_num_val_tokens;
@@ -450,27 +266,30 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
     input_params.q_max_seq_len = num_val_tokens;
     input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
   }
-  input_params.q_seq_lens_vec = std::move(q_seq_lens_vec);
+  if (FLAGS_enable_atb_spec_kernel) {
+    input_params.q_seq_lens_vec = std::move(atb_q_seq_lens_vec);
+  } else {
+    input_params.q_seq_lens_vec = std::move(buf.out_q_seq_lens);
+  }
   input_params.q_seq_lens =
       torch::tensor(input_params.q_seq_lens_vec, int_options);
-  // deepseek 3.2
-  std::vector<int32_t> q_cu_seq_lens_vec;
-  q_cu_seq_lens_vec.reserve(input_params.num_sequences);
-  int32_t cum_seq_len = 0;
-  for (int32_t i = 0; i < input_params.num_sequences; ++i) {
-    cum_seq_len += input_params.get_q_seq_len(i);
-    q_cu_seq_lens_vec.push_back(cum_seq_len);
+  input_params.q_cu_seq_lens =
+      specBuilder::build_q_cu_seq_lens_tensor(input_params);
+  if (FLAGS_enable_atb_spec_kernel) {
+    input_params.kv_max_seq_len = atb_kv_max_seq_len;
+    input_params.kv_seq_lens_vec = std::move(atb_kv_seq_lens_vec);
+  } else {
+    input_params.kv_max_seq_len = buf.kv_max_seq_len;
+    input_params.kv_seq_lens_vec = std::move(buf.out_kv_seq_lens);
   }
-  input_params.q_cu_seq_lens = torch::tensor(q_cu_seq_lens_vec, torch::kInt);
-  input_params.kv_max_seq_len = kv_max_seq_len;
-  input_params.kv_seq_lens_vec = std::move(kv_seq_lens_vec);
   input_params.kv_seq_lens =
       torch::tensor(input_params.kv_seq_lens_vec, int_options);
-  input_params.new_cache_slots = torch::tensor(new_token_slot_ids, int_options);
+  input_params.new_cache_slots =
+      torch::tensor(buf.out_new_cache_slots, int_options);
   if (!FLAGS_enable_atb_spec_kernel) {
-    util::pad_2d_vector(block_tables_vec, /*pad_value=*/0);
+    util::pad_2d_vector(buf.out_block_tables, /*pad_value=*/0);
     input_params.block_tables =
-        create_2d_tensor(block_tables_vec, torch::kInt).to(device_);
+        create_2d_tensor(buf.out_block_tables, torch::kInt).to(device_);
   }
 
   // update the sampling_params

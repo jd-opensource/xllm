@@ -33,7 +33,7 @@ class SpeculativeEngine : public Engine {
 
   virtual ~SpeculativeEngine() = default;
 
-  bool init() override;
+  bool init(MasterStatus master_status) override;
 
   // step the engine forward
   ForwardOutput step(std::vector<Batch>& batch) override;

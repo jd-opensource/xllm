@@ -267,116 +267,116 @@ TEST(PrefixCacheTest, EvictOperation) {
   test_evict_operation(&block_manager, &prefix_cache, block_size);
 }
 
-TEST(HashUtilTest, MurmurHash3) {
+TEST(HashUtilTest, XXHash3) {
   {
     std::vector<int32_t> tokens_1 = {1, 2, 3, 4, 5};
-    uint8_t hash_value_1[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_1[XXH3_128BITS_HASH_VALUE_LEN];
 
     std::vector<int32_t> tokens_2 = {1, 2, 3, 4, 5};
-    uint8_t hash_value_2[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_2[XXH3_128BITS_HASH_VALUE_LEN];
 
-    murmur_hash3(nullptr, tokens_1, hash_value_1);
-    murmur_hash3(nullptr, tokens_2, hash_value_2);
+    xxh3_128bits_hash(nullptr, tokens_1, hash_value_1);
+    xxh3_128bits_hash(nullptr, tokens_2, hash_value_2);
 
     EXPECT_EQ(strncmp(reinterpret_cast<const char*>(hash_value_1),
                       reinterpret_cast<const char*>(hash_value_2),
-                      MURMUR_HASH3_VALUE_LEN),
+                      XXH3_128BITS_HASH_VALUE_LEN),
               0);
   }
 
   {
     std::vector<int32_t> tokens_1 = {1, 2, 3, 4, 5};
-    uint8_t hash_value_1[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_1[XXH3_128BITS_HASH_VALUE_LEN];
 
     std::vector<int32_t> tokens_2 = {1, 2, 3, 5, 4};
-    uint8_t hash_value_2[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_2[XXH3_128BITS_HASH_VALUE_LEN];
 
-    murmur_hash3(nullptr, tokens_1, hash_value_1);
-    murmur_hash3(nullptr, tokens_2, hash_value_2);
+    xxh3_128bits_hash(nullptr, tokens_1, hash_value_1);
+    xxh3_128bits_hash(nullptr, tokens_2, hash_value_2);
 
     EXPECT_NE(strncmp(reinterpret_cast<const char*>(hash_value_1),
                       reinterpret_cast<const char*>(hash_value_2),
-                      MURMUR_HASH3_VALUE_LEN),
+                      XXH3_128BITS_HASH_VALUE_LEN),
               0);
   }
 
   {
     std::vector<int32_t> tokens_1 = {1, 2, 3, 4, 5};
-    uint8_t hash_value_1[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_1[XXH3_128BITS_HASH_VALUE_LEN];
 
     std::vector<int32_t> tokens_2 = {2, 1, 3, 5, 4};
-    uint8_t hash_value_2[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_2[XXH3_128BITS_HASH_VALUE_LEN];
 
-    murmur_hash3(nullptr, tokens_1, hash_value_1);
-    murmur_hash3(nullptr, tokens_2, hash_value_2);
+    xxh3_128bits_hash(nullptr, tokens_1, hash_value_1);
+    xxh3_128bits_hash(nullptr, tokens_2, hash_value_2);
 
     EXPECT_NE(strncmp(reinterpret_cast<const char*>(hash_value_1),
                       reinterpret_cast<const char*>(hash_value_2),
-                      MURMUR_HASH3_VALUE_LEN),
+                      XXH3_128BITS_HASH_VALUE_LEN),
               0);
   }
 
   {
     std::vector<int32_t> tokens_1 = {1, 2, 3, 4, 5};
-    uint8_t hash_value_1[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_1[XXH3_128BITS_HASH_VALUE_LEN];
 
     std::vector<int32_t> tokens_2 = {2, 1, 3, 5, 4};
-    uint8_t hash_value_2[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_2[XXH3_128BITS_HASH_VALUE_LEN];
 
-    murmur_hash3(nullptr, tokens_1, hash_value_1);
-    murmur_hash3(nullptr, tokens_2, hash_value_2);
+    xxh3_128bits_hash(nullptr, tokens_1, hash_value_1);
+    xxh3_128bits_hash(nullptr, tokens_2, hash_value_2);
 
     EXPECT_NE(strncmp(reinterpret_cast<const char*>(hash_value_1),
                       reinterpret_cast<const char*>(hash_value_2),
-                      MURMUR_HASH3_VALUE_LEN),
+                      XXH3_128BITS_HASH_VALUE_LEN),
               0);
   }
 
   {
     std::vector<int32_t> tokens_1 = {1, 2, 3, 4, 5};
-    uint8_t hash_value_1[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_1[XXH3_128BITS_HASH_VALUE_LEN];
 
     std::vector<int32_t> tokens_2 = {1, 2, 3, 4};
-    uint8_t hash_value_2[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_2[XXH3_128BITS_HASH_VALUE_LEN];
 
-    murmur_hash3(nullptr, tokens_1, hash_value_1);
-    murmur_hash3(nullptr, tokens_2, hash_value_2);
+    xxh3_128bits_hash(nullptr, tokens_1, hash_value_1);
+    xxh3_128bits_hash(nullptr, tokens_2, hash_value_2);
 
     EXPECT_NE(strncmp(reinterpret_cast<const char*>(hash_value_1),
                       reinterpret_cast<const char*>(hash_value_2),
-                      MURMUR_HASH3_VALUE_LEN),
+                      XXH3_128BITS_HASH_VALUE_LEN),
               0);
   }
 
   {
     std::vector<int32_t> tokens_1 = {1, 2, 3, 4, 5};
-    uint8_t hash_value_1[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_1[XXH3_128BITS_HASH_VALUE_LEN];
 
     std::vector<int32_t> tokens_2 = {1, 2};
-    uint8_t hash_value_2[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_2[XXH3_128BITS_HASH_VALUE_LEN];
 
-    murmur_hash3(nullptr, tokens_1, hash_value_1);
-    murmur_hash3(nullptr, tokens_2, hash_value_2);
+    xxh3_128bits_hash(nullptr, tokens_1, hash_value_1);
+    xxh3_128bits_hash(nullptr, tokens_2, hash_value_2);
 
     EXPECT_NE(strncmp(reinterpret_cast<const char*>(hash_value_1),
                       reinterpret_cast<const char*>(hash_value_2),
-                      MURMUR_HASH3_VALUE_LEN),
+                      XXH3_128BITS_HASH_VALUE_LEN),
               0);
   }
 
   {
     std::vector<int32_t> tokens_1 = {1, 2, 3, 4, 5};
-    uint8_t hash_value_1[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_1[XXH3_128BITS_HASH_VALUE_LEN];
 
     std::vector<int32_t> tokens_2 = {1, 2, 3, 4, 5, 1, 2, 3, 4, 5};
-    uint8_t hash_value_2[MURMUR_HASH3_VALUE_LEN];
+    uint8_t hash_value_2[XXH3_128BITS_HASH_VALUE_LEN];
 
-    murmur_hash3(nullptr, tokens_1, hash_value_1);
-    murmur_hash3(nullptr, tokens_2, hash_value_2);
+    xxh3_128bits_hash(nullptr, tokens_1, hash_value_1);
+    xxh3_128bits_hash(nullptr, tokens_2, hash_value_2);
 
     EXPECT_NE(strncmp(reinterpret_cast<const char*>(hash_value_1),
                       reinterpret_cast<const char*>(hash_value_2),
-                      MURMUR_HASH3_VALUE_LEN),
+                      XXH3_128BITS_HASH_VALUE_LEN),
               0);
   }
 }

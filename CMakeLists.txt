@@ -225,6 +225,25 @@ else()
   project("xllm" LANGUAGES C CXX)
 endif()
 
+# ---------------------------------------------------------------------------
+# ARM architecture optimization (must be after project() so CXX is enabled).
+# -march=native lets the compiler use NEON, SVE, LSE atomics, crypto, etc.
+# that are available on the local CPU.  Fall back to armv8.2-a if the flag
+# is unsupported (cross-compilation scenario).
+# armv8.2-a+dotprod+crypto is good for Kunpeng 920, Neoverse N1, etc.
+# ---------------------------------------------------------------------------
+if(DEVICE_ARCH STREQUAL "ARM")
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag("-march=armv8.2-a+dotprod+crypto" HAS_MARCH_CUSTOMIZATION)
+   if(HAS_MARCH_CUSTOMIZATION)
+       add_compile_options(-march=armv8.2-a+dotprod+crypto)
+       message(STATUS "ARM: using -march=armv8.2-a+dotprod+crypto for optimal ISA")
+   else()
+        add_compile_options(-march=native) 
+        message(STATUS "ARM: using -march=native (cross-compile fallback)")
+   endif()
+endif()
+
 # find_package(CUDAToolkit REQUIRED)
 
 # setup CMake module path, defines path for include() and find_package()

@@ -39,9 +39,9 @@ inline size_t round_down(size_t n, size_t multiple) {
   return (n / multiple) * multiple;
 }
 
-void murmur_hash3(const uint8_t* pre_hash_value,
-                  const Slice<int32_t>& token_ids,
-                  uint8_t* hash_value);
+void xxh3_128bits_hash(const uint8_t* pre_hash_value,
+                       const Slice<int32_t>& token_ids,
+                       uint8_t* hash_value);
 
 class PrefixCache {
  public:
@@ -106,11 +106,11 @@ class PrefixCache {
   size_t insert(const Slice<int32_t>& token_ids,
                 std::vector<Block>& blocks,
                 size_t existed_shared_blocks_num,
-                std::vector<Murmur3Key>* insert_keys);
+                std::vector<XXH3Key>* insert_keys);
 
-  size_t insert(Slice<Block>& blocks, std::vector<Murmur3Key>* insert_keys);
+  size_t insert(Slice<Block>& blocks, std::vector<XXH3Key>* insert_keys);
 
-  size_t evict(size_t n_blocks, std::vector<Murmur3Key>* evict_keys);
+  size_t evict(size_t n_blocks, std::vector<XXH3Key>* evict_keys);
 
   struct Node {
     Block block;
@@ -205,7 +205,7 @@ class PrefixCache {
 
   std::atomic_bool exited_{false};
 
-  std::unordered_map<Murmur3Key, Node*, FixedStringKeyHash, FixedStringKeyEqual>
+  std::unordered_map<XXH3Key, Node*, FixedStringKeyHash, FixedStringKeyEqual>
       cached_blocks_;
 
   std::atomic<uint64_t> total_blocks_{0}, matched_blocks_{0};

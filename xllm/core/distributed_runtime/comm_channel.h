@@ -66,12 +66,12 @@ class CommChannel {
 
   virtual bool init_model(const std::string& model_weights_path,
                           int32_t random_seed,
-                          int32_t master_status);
+                          MasterStatus master_status);
 
   virtual bool init_model_async(const std::string& model_weights_path,
                                 int32_t random_seed,
                                 folly::Promise<bool>& promise,
-                                int32_t master_status);
+                                MasterStatus master_status);
 
   virtual bool estimate_kv_cache_capacity(int64_t& available_memory,
                                           int64_t& total_memory);
@@ -116,7 +116,7 @@ class CommChannel {
   // Check if the connection to worker is healthy
   virtual bool check_health();
 
-  virtual bool sleep(int32_t master_status);
+  virtual bool sleep(MasterStatus master_status);
 
   virtual bool wakeup(const WakeupOptions& options);
 

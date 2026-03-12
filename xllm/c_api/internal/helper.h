@@ -79,27 +79,6 @@ enum class InferenceType {
   REC_TOKENID_COMPLETIONS = 4,
 };
 
-#define XLLM_SET_FIELD_IF_NONZERO(DST, SRC, FIELD) \
-  do {                                             \
-    if ((SRC) != nullptr && (DST) != nullptr) {    \
-      if ((SRC)->FIELD != 0) {                     \
-        (DST)->FIELD = (SRC)->FIELD;               \
-      }                                            \
-    }                                              \
-  } while (0)
-
-#define XLLM_SET_FIELD_IF_NONEMPTY(DST, SRC, FIELD)              \
-  do {                                                           \
-    if ((SRC) != nullptr && (DST) != nullptr) {                  \
-      if ((SRC)->FIELD[0] != '\0') {                             \
-        strncpy((DST)->FIELD,                                    \
-                (const char*)(SRC)->FIELD,                       \
-                XLLM_META_STRING_FIELD_MAX_LEN - 1);             \
-        (DST)->FIELD[XLLM_META_STRING_FIELD_MAX_LEN - 1] = '\0'; \
-      }                                                          \
-    }                                                            \
-  } while (0)
-
 #define XLLM_SET_META_STRING_FIELD(DST, SRC_STR)                              \
   do {                                                                        \
     static_assert(sizeof(DST) > 1, "Destination buffer is too small");        \
@@ -161,6 +140,7 @@ XLLM_Response* handle_inference_request(
     InferenceType inference_type,
     const std::string& model_id,
     const InputType& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 
@@ -174,5 +154,14 @@ void xllm_free_response(XLLM_Response* resp);
  */
 std::string generate_request_id();
 
+torch::ScalarType xllm_dtype_to_torch_scalar_type(XLLM_DataType dtype);
+
+torch::Tensor convert_xllm_tensor_to_torch(const XLLM_Tensor& xllm_tensor);
+
+xllm::MMDataItem convert_xllm_mm_item_to_internal(
+    const XLLM_MM_Item& xllm_item);
+
+bool convert_xllm_mm_data_to_internal(const XLLM_MM_Data* mm_data,
+                                      xllm::MMData& internal_mm_data);
 }  // namespace helper
 }  // namespace xllm

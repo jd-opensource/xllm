@@ -57,6 +57,14 @@ class XAttentionImpl : public BaseAttentionImpl {
                        torch::Tensor& key,
                        torch::Tensor& value,
                        torch::Tensor& output);
+  void run_single_stage_decode(const AttentionMetadata& attn_metadata,
+                               const torch::Tensor& key,
+                               torch::Tensor& query,
+                               torch::Tensor& output);
+
+  void run_two_stage_decode(const AttentionMetadata& attn_metadata,
+                            torch::Tensor& query,
+                            torch::Tensor& output);
 };
 
 }  // namespace layer

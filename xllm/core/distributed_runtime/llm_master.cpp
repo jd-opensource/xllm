@@ -472,13 +472,9 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     std::optional<Call*> call,
     OutputCallback callback) {
   Timer timer;
-  std::optional<std::string> prompt;
-  if (sp.has_tools()) {
-    prompt = chat_template_->apply(messages, sp.tools, sp.chat_template_kwargs);
-  } else {
-    prompt = chat_template_->apply(messages, sp.chat_template_kwargs);
-  }
 
+  std::optional<std::string> prompt;
+  prompt = chat_template_->apply(messages, sp.tools, sp.chat_template_kwargs);
   if (!prompt.has_value()) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "Failed to construct prompt from messages",
@@ -486,6 +482,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     LOG(ERROR) << "Failed to construct prompt from messages";
     return nullptr;
   }
+
   COUNTER_ADD(chat_template_latency_seconds, timer.elapsed_seconds());
 
   return generate_request(

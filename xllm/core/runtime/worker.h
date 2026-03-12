@@ -22,7 +22,6 @@ limitations under the License.
 #include "common/types.h"
 #include "forward_params.h"
 #include "framework/model/causal_lm.h"
-#include "framework/model/embedding_lm.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/quant_args.h"
@@ -46,9 +45,9 @@ class Worker {
   // initialize model, cache manager. blocking call
   bool init_model(const std::string& model_weights_path,
                   int32_t random_seed,
-                  int32_t master_status);
+                  MasterStatus master_status);
 
-  bool sleep(int32_t master_status);
+  bool sleep(MasterStatus master_status);
 
   bool wakeup(const WakeupOptions& options);
 
@@ -92,7 +91,7 @@ class Worker {
   folly::SemiFuture<bool> init_model_async(
       const std::string& model_weights_path,
       int32_t random_seed,
-      int32_t master_status);
+      MasterStatus master_status);
 
   folly::SemiFuture<std::tuple<int64_t, int64_t>>
   estimate_kv_cache_capacity_async();

@@ -55,7 +55,7 @@ Eagle3WorkerImpl::Eagle3WorkerImpl(const ParallelArgs& parallel_args,
 
 bool Eagle3WorkerImpl::init_model(const std::string& model_weights_path,
                                   int32_t random_seed,
-                                  int32_t master_status) {
+                                  MasterStatus master_status) {
   // Call parent's init_model first
   bool result =
       MTPWorkerImpl::init_model(model_weights_path, random_seed, master_status);
@@ -89,19 +89,21 @@ int64_t Eagle3WorkerImpl::get_embedding_placeholder_size() {
   return 3 * target_hidden;
 }
 
-void Eagle3WorkerImpl::process_draft_output(ForwardOutput& draft_output) {
-  auto& output = draft_output.sample_output;
-  if (output.probs.defined()) {
-    auto selected_probs = output.probs
-                              .gather(
-                                  /*dim=*/-1, output.next_tokens.unsqueeze(-1))
-                              .squeeze(-1);
-    output.probs = selected_probs;  // [batch_size]
+void Eagle3WorkerImpl::process_draft_sample_output(
+    SampleOutput& sample_output) {
+  if (sample_output.probs.defined()) {
+    auto selected_probs =
+        sample_output.probs
+            .gather(
+                /*dim=*/-1, sample_output.next_tokens.unsqueeze(-1))
+            .squeeze(-1);
+    sample_output.probs = selected_probs;  // [batch_size]
   }
 
   // EAGLE-3 specific: map draft token IDs to target token IDs.
   if (hot_token_id_.defined()) {
-    output.next_tokens = hot_token_id_.index_select(0, output.next_tokens);
+    sample_output.next_tokens =
+        hot_token_id_.index_select(0, sample_output.next_tokens);
   }
 }
 

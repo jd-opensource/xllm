@@ -18,21 +18,23 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <algorithm>
-#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <vector>
 
 #include "common/device_monitor.h"
+#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "common/rec_model_utils.h"
 #include "common/types.h"
+#include "core/common/global_flags.h"
 #include "framework/model/model_input_params.h"
 #if defined(USE_CUDA)
 #include "kernels/cuda/cuda_ops_api.h"
 #include "kernels/cuda/xattention/xattention_ops_api.h"
 #include "layers/cuda/flashinfer_workspace.h"
+#include "layers/cuda/xattention_workspace.h"
 #include "platform/cuda/device_capture_lock.h"
 #endif
 #if defined(USE_NPU)
@@ -276,10 +278,6 @@ void RecWorkerImpl::LlmRecWorkPipeline::prepare_work_before_execute(
   runtime_.worker.prepare_multi_modal_data(processed_inputs);
 }
 
-// ============================================================
-// OneRecWorkPipeline Implementation
-// ============================================================
-
 ForwardInput RecWorkerImpl::OneRecWorkPipeline::prepare_inputs(Batch& batch) {
   ThreadPool* thread_pool =
       runtime_.worker.input_builder_thread_pool_
@@ -311,6 +309,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
     if (!rec_params.is_first_prefill) {
       ModelInputParams decoder_params = input_params;
       decoder_params.mutable_onerec_params().is_encoder_forward = false;
+      decoder_params.mutable_onerec_params().has_encoder_output =
+          rec_params.has_encoder_output;
       auto model_output = runtime_.executor->forward(input.token_ids,
                                                      input.positions,
                                                      runtime_.worker.kv_caches_,
@@ -330,22 +330,32 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
       ModelInputParams encoder_params = input_params;
       auto& mutable_onerec_params = encoder_params.mutable_onerec_params();
       mutable_onerec_params.is_encoder_forward = true;
+      mutable_onerec_params.is_hybrid_mode = has_sparse_embedding;
 
       torch::Tensor encoder_tokens;
       if (has_sparse_embedding) {
-        mutable_onerec_params.is_hybrid_mode = true;
         encoder_tokens = rec_params.encoder_sparse_embedding;
       } else {
+        mutable_onerec_params.is_hybrid_mode = false;
         encoder_tokens = rec_params.encoder_token_ids;
       }
 
-      runtime_.executor->forward(encoder_tokens,
-                                 rec_params.encoder_positions,
-                                 runtime_.worker.kv_caches_,
-                                 encoder_params);
+      auto encoder_output =
+          runtime_.executor->forward(encoder_tokens,
+                                     rec_params.encoder_positions,
+                                     runtime_.worker.kv_caches_,
+                                     encoder_params);
 
       ModelInputParams decoder_params = input_params;
-      decoder_params.mutable_onerec_params().is_encoder_forward = false;
+      auto& decoder_onerec_params = decoder_params.mutable_onerec_params();
+      decoder_onerec_params.is_encoder_forward = false;
+      decoder_onerec_params.has_encoder_output =
+          encoder_output.hidden_states.defined();
+      if (encoder_output.hidden_states.defined() &&
+          !decoder_onerec_params.decoder_context_embedding.defined()) {
+        decoder_onerec_params.decoder_context_embedding =
+            encoder_output.hidden_states;
+      }
       auto model_output = runtime_.executor->forward(input.token_ids,
                                                      input.positions,
                                                      runtime_.worker.kv_caches_,
@@ -355,6 +365,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
   } else {
     ModelInputParams decoder_params = input_params;
     decoder_params.mutable_onerec_params().is_encoder_forward = false;
+    decoder_params.mutable_onerec_params().has_encoder_output =
+        rec_params.has_encoder_output;
     auto model_output = runtime_.executor->forward(input.token_ids,
                                                    input.positions,
                                                    runtime_.worker.kv_caches_,
@@ -551,6 +563,32 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::allocate_kv_caches_related() {
       torch::arange(max_seqs_per_batch_ * beam_width_, int_options)
           .unsqueeze(1);
   cached_current_round_tensor_ = torch::zeros({1}, int_options);
+
+  if (FLAGS_enable_xattention_one_stage) {
+    return;
+  }
+
+  const int64_t num_heads = runtime_.context->get_model_args().n_heads();
+  const int64_t max_total_beam =
+      static_cast<int64_t>(max_seqs_per_batch_) * beam_width_;
+  auto fp32_options =
+      torch::TensorOptions().dtype(torch::kFloat32).device(device);
+  cached_two_stage_shared_lse_ =
+      torch::zeros({max_total_beam, num_heads, 1}, fp32_options);
+  cached_two_stage_shared_o_ =
+      torch::zeros({max_total_beam, num_heads, head_dim}, kv_cache_options);
+  cached_two_stage_unshared_lse_ =
+      torch::zeros({max_total_beam, num_heads, 1}, fp32_options);
+  cached_two_stage_unshared_o_ =
+      torch::zeros({max_total_beam, num_heads, head_dim}, kv_cache_options);
+  cached_two_stage_q_cu_seq_lens_shared_ =
+      torch::zeros({max_seqs_per_batch_ + 1}, int_options);
+  cached_two_stage_paged_kv_indptr_expanded_ =
+      torch::zeros({max_total_beam + 1}, int_options);
+  cached_two_stage_paged_kv_indices_expanded_ =
+      torch::zeros({max_total_beam}, int_options);
+  cached_two_stage_paged_kv_last_page_len_expanded_ =
+      torch::zeros({max_total_beam}, int_options);
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::
@@ -569,6 +607,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::
   int32_t total_round = step_meta->total_round;
   llm_rec_params.batch_size = batch_size;
   llm_rec_params.beam_width = beam_width;
+  llm_rec_params.total_round = total_round;
   const auto& shape = step_meta->full_kv_shape;
   CHECK(shape.size() == 3) << "the dims of full_kv_shape should be three.";
   int32_t full_kv_len = shape[0];
@@ -829,6 +868,107 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::build_final_output(
   output.beam_sequence_group = beam_tensors.sequence_group;
 }
 
+void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_two_stage_round_input(
+    ForwardInput& input,
+    int32_t round,
+    const torch::Tensor& top_tokens,
+    const BeamSearchTensors& beam_tensors) {
+#if defined(USE_NPU)
+// TODO: implement prepare_two_stage_round_input for NPU
+#elif defined(USE_CUDA)
+  auto& llm_rec_params = input.input_params.mutable_llmrec_params();
+  CHECK_EQ(FLAGS_enable_xattention_one_stage, false)
+      << "prepare_two_stage_round_input should only be called when "
+         "two-stage decode is enabled";
+
+  input.input_params.paged_kv_indices = torch::Tensor();
+  input.input_params.paged_kv_indptr = torch::Tensor();
+  input.input_params.paged_kv_last_page_len = torch::Tensor();
+  input.input_params.num_sequences =
+      llm_rec_params.batch_size *
+      std::max<int32_t>(llm_rec_params.beam_width, 1);
+
+  // previous_step corresponds to the decode step that produced tokens for
+  // this round.
+  const int32_t previous_step = round - 1;
+  if (previous_step == 0) {
+    // First decode step uses top_tokens from prefill.
+    if (top_tokens.defined()) {
+      input.token_ids = top_tokens.reshape({-1});
+    }
+  } else if (previous_step > 0) {
+    // Later steps use beam search output tokens.
+    input.token_ids = beam_tensors.out_token_ids.reshape({-1});
+  }
+
+  if (!llm_rec_params.decode_positions_tensor_list.empty() &&
+      previous_step >= 0 &&
+      previous_step < static_cast<int32_t>(
+                          llm_rec_params.decode_positions_tensor_list.size())) {
+    input.positions =
+        llm_rec_params.decode_positions_tensor_list[previous_step];
+  }
+
+  input.input_params.batch_forward_type = BatchForwardType(2);
+  input.input_params.input_embedding = torch::Tensor();
+  cached_current_round_tensor_.fill_(previous_step);
+  llm_rec_params.current_round_tensor = cached_current_round_tensor_;
+
+  const int32_t batch_size = std::max<int32_t>(llm_rec_params.batch_size, 0);
+  const int32_t beam_width = std::max<int32_t>(llm_rec_params.beam_width, 1);
+  const int64_t total_beam = static_cast<int64_t>(batch_size) * beam_width;
+
+  CHECK_LE(total_beam, cached_two_stage_shared_lse_.size(0))
+      << "two-stage cache total_beam overflow";
+  CHECK_LE(batch_size + 1, cached_two_stage_q_cu_seq_lens_shared_.size(0))
+      << "two-stage q_cu_seq_lens cache overflow";
+
+  llm_rec_params.two_stage_shared_lse =
+      cached_two_stage_shared_lse_.slice(0, 0, total_beam);
+  llm_rec_params.two_stage_shared_o =
+      cached_two_stage_shared_o_.slice(0, 0, total_beam);
+  llm_rec_params.two_stage_unshared_lse =
+      cached_two_stage_unshared_lse_.slice(0, 0, total_beam);
+  llm_rec_params.two_stage_unshared_o =
+      cached_two_stage_unshared_o_.slice(0, 0, total_beam);
+  llm_rec_params.two_stage_q_cu_seq_lens_shared =
+      cached_two_stage_q_cu_seq_lens_shared_.slice(0, 0, batch_size + 1);
+  llm_rec_params.two_stage_paged_kv_indptr_expanded =
+      cached_two_stage_paged_kv_indptr_expanded_.slice(0, 0, total_beam + 1);
+  llm_rec_params.two_stage_paged_kv_indices_expanded =
+      cached_two_stage_paged_kv_indices_expanded_.slice(0, 0, total_beam);
+  llm_rec_params.two_stage_paged_kv_last_page_len_expanded =
+      cached_two_stage_paged_kv_last_page_len_expanded_.slice(0, 0, total_beam);
+
+  auto int_options = torch::TensorOptions()
+                         .dtype(torch::kInt32)
+                         .device(runtime_.worker.device());
+  auto q_cu_seq_lens_values =
+      torch::arange(0, (batch_size + 1) * beam_width, beam_width, int_options);
+  llm_rec_params.two_stage_q_cu_seq_lens_shared.copy_(q_cu_seq_lens_values,
+                                                      /*non_blocking=*/true);
+
+  auto paged_kv_indptr_values = torch::arange(total_beam + 1, int_options);
+  llm_rec_params.two_stage_paged_kv_indptr_expanded.copy_(
+      paged_kv_indptr_values, /*non_blocking=*/true);
+
+  if (input.input_params.block_tables.defined() &&
+      input.input_params.block_tables.numel() >= total_beam) {
+    llm_rec_params.two_stage_paged_kv_indices_expanded.copy_(
+        input.input_params.block_tables.view({-1}).slice(0, 0, total_beam),
+        /*non_blocking=*/true);
+  } else {
+    auto paged_kv_indices_values = torch::arange(total_beam, int_options);
+    llm_rec_params.two_stage_paged_kv_indices_expanded.copy_(
+        paged_kv_indices_values, /*non_blocking=*/true);
+  }
+
+  llm_rec_params.two_stage_paged_kv_last_page_len_expanded.fill_(previous_step +
+                                                                 1);
+  input.input_params.attn_metadata = nullptr;
+#endif
+}
+
 void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_input_for_current_round(
     ForwardInput& input,
     const NextRoundInputResults& results,
@@ -838,11 +978,16 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_input_for_current_round(
 #if defined(USE_NPU)
 // TODO: implement prepare_input_for_current_round for NPU
 #elif defined(USE_CUDA)
-  input.input_params.paged_kv_indices = results.paged_kv_indices;
-  input.input_params.paged_kv_indptr = results.paged_kv_indptr;
-  input.input_params.paged_kv_last_page_len = results.paged_kv_last_page_len;
-  input.input_params.num_sequences =
-      input.input_params.paged_kv_last_page_len.numel();
+  if (FLAGS_enable_xattention_one_stage) {
+    input.input_params.paged_kv_indices = results.paged_kv_indices;
+    input.input_params.paged_kv_indptr = results.paged_kv_indptr;
+    input.input_params.paged_kv_last_page_len = results.paged_kv_last_page_len;
+    input.input_params.num_sequences =
+        input.input_params.paged_kv_last_page_len.numel();
+  } else {
+    prepare_two_stage_round_input(input, round, top_tokens, beam_tensors);
+    return;
+  }
 #endif
   // previous_step corresponds to the decode step that produced tokens for
   // this round.
@@ -887,95 +1032,104 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::compute_next_round_input_async(
 #if defined(USE_NPU)
 // TODO: implement compute_next_round_input_async for NPU
 #elif defined(USE_CUDA)
-  // Capture necessary data for async computation
-  auto full_kv_offsets = full_kv_cache_offsets_->full_kv_offsets;
-  auto full_kv_mask = full_kv_cache_offsets_->full_kv_mask;
-  auto full_kv_indices = full_kv_cache_offsets_->full_kv_indices;
-  auto unshared_full_kv_offsets = full_kv_cache_offsets_->unshared_offsets;
-  auto real_max_decode_step_ids = full_kv_cache_offsets_->max_decode_step_ids;
-  uint32_t unshared_kv_begin_offset = max_tokens_per_batch_;
+  if (FLAGS_enable_xattention_one_stage) {
+    // Capture necessary data for async computation
+    auto full_kv_offsets = full_kv_cache_offsets_->full_kv_offsets;
+    auto full_kv_mask = full_kv_cache_offsets_->full_kv_mask;
+    auto full_kv_indices = full_kv_cache_offsets_->full_kv_indices;
+    auto unshared_full_kv_offsets = full_kv_cache_offsets_->unshared_offsets;
+    auto real_max_decode_step_ids = full_kv_cache_offsets_->max_decode_step_ids;
+    uint32_t unshared_kv_begin_offset = max_tokens_per_batch_;
 
-  // Launch async computation in thread pool (can overlap with GPU execution)
-  threadpool_.schedule([=, this, promise = std::move(promise)]() mutable {
-    auto device = runtime_.worker.device();
-    auto int32_device_options =
-        torch::TensorOptions().dtype(torch::kInt32).device(device);
-    // Protect CUDA graph capture from conflicting GPU work submitted on
-    // prepare_stream_ while capture is in progress. Use shared lock to allow
-    // multiple prepare operations to run concurrently, but prevent conflicts
-    // with capture operations. This mirrors the NPU DeviceCaptureLock usage in
-    // WorkerImpl::prepare_work_before_execute.
-    std::optional<std::shared_lock<std::shared_mutex>> lock_guard;
-    if (runtime_.worker.options_.enable_graph()) {
-      auto& replay_lock =
-          ::xllm::cuda::DeviceCaptureLock::get_instance().get_read_lock(
-              runtime_.worker.device_.index());
-      lock_guard.emplace(replay_lock);
-    }
+    // Launch async computation in thread pool (can overlap with GPU execution)
+    threadpool_.schedule([=, this, promise = std::move(promise)]() mutable {
+      auto device = runtime_.worker.device();
+      auto int32_device_options =
+          torch::TensorOptions().dtype(torch::kInt32).device(device);
+      // Protect CUDA graph capture from conflicting GPU work submitted on
+      // prepare_stream_ while capture is in progress. Use shared lock to allow
+      // multiple prepare operations to run concurrently, but prevent conflicts
+      // with capture operations. This mirrors the NPU DeviceCaptureLock usage
+      // in WorkerImpl::prepare_work_before_execute.
+      std::optional<std::shared_lock<std::shared_mutex>> lock_guard;
+      if (runtime_.worker.options_.enable_graph()) {
+        auto& replay_lock =
+            ::xllm::cuda::DeviceCaptureLock::get_instance().get_read_lock(
+                runtime_.worker.device_.index());
+        lock_guard.emplace(replay_lock);
+      }
 
-    c10::StreamGuard streamGuard =
-        runtime_.worker.prepare_stream_->set_stream_guard();
-    auto shared_kv_offsets =
-        full_kv_offsets.slice(2, 0, max_token_per_req_).slice(0, 0, batch_size);
+      c10::StreamGuard streamGuard =
+          runtime_.worker.prepare_stream_->set_stream_guard();
+      auto shared_kv_offsets = full_kv_offsets.slice(2, 0, max_token_per_req_)
+                                   .slice(0, 0, batch_size);
 
-    auto shared_kv_lens_each_batch = torch::diff(kv_seq_lens);
+      auto shared_kv_lens_each_batch = torch::diff(kv_seq_lens);
 
-    auto shared_kv_lens_each_batch_broadcast =
-        shared_kv_lens_each_batch.unsqueeze(1).unsqueeze(1);
+      auto shared_kv_lens_each_batch_broadcast =
+          shared_kv_lens_each_batch.unsqueeze(1).unsqueeze(1);
 
-    auto shared_mask =
-        full_kv_mask.slice(2, 0, max_token_per_req_).slice(0, 0, batch_size);
+      auto shared_mask =
+          full_kv_mask.slice(2, 0, max_token_per_req_).slice(0, 0, batch_size);
 
-    shared_mask.copy_(shared_kv_offsets < shared_kv_lens_each_batch_broadcast);
+      shared_mask.copy_(shared_kv_offsets <
+                        shared_kv_lens_each_batch_broadcast);
 
-    auto kv_lens_batch_offsets = kv_seq_lens.slice(0, 0, -1);
+      auto kv_lens_batch_offsets = kv_seq_lens.slice(0, 0, -1);
 
-    auto kv_lens_batch_offsets_broadcast =
-        kv_lens_batch_offsets.unsqueeze(1).unsqueeze(1);
+      auto kv_lens_batch_offsets_broadcast =
+          kv_lens_batch_offsets.unsqueeze(1).unsqueeze(1);
 
-    auto shared_kv_indices =
-        full_kv_indices.slice(2, 0, max_token_per_req_).slice(0, 0, batch_size);
+      auto shared_kv_indices = full_kv_indices.slice(2, 0, max_token_per_req_)
+                                   .slice(0, 0, batch_size);
 
-    shared_kv_indices.copy_(kv_lens_batch_offsets_broadcast +
-                            shared_kv_offsets);
+      shared_kv_indices.copy_(kv_lens_batch_offsets_broadcast +
+                              shared_kv_offsets);
 
-    auto unshared_kv_offsets = unshared_full_kv_offsets.slice(0, 0, batch_size);
-    int32_t unshared_kv_len = beam_width * max_decode_step;
-    auto unshared_kv_indices =
-        full_kv_indices
-            .slice(2, max_token_per_req_, max_token_per_req_ + unshared_kv_len)
-            .slice(0, 0, batch_size);
-    unshared_kv_indices.copy_(unshared_kv_offsets + unshared_kv_begin_offset);
+      auto unshared_kv_offsets =
+          unshared_full_kv_offsets.slice(0, 0, batch_size);
+      int32_t unshared_kv_len = beam_width * max_decode_step;
+      auto unshared_kv_indices =
+          full_kv_indices
+              .slice(
+                  2, max_token_per_req_, max_token_per_req_ + unshared_kv_len)
+              .slice(0, 0, batch_size);
+      unshared_kv_indices.copy_(unshared_kv_offsets + unshared_kv_begin_offset);
 
-    auto unshared_mask =
-        full_kv_mask
-            .slice(2, max_token_per_req_, max_token_per_req_ + unshared_kv_len)
-            .slice(0, 0, batch_size);
-    auto real_max_decode_step_ids_slice =
-        real_max_decode_step_ids.slice(0, 0, batch_size);
-    unshared_mask.copy_(real_max_decode_step_ids_slice <= current_step);
+      auto unshared_mask =
+          full_kv_mask
+              .slice(
+                  2, max_token_per_req_, max_token_per_req_ + unshared_kv_len)
+              .slice(0, 0, batch_size);
+      auto real_max_decode_step_ids_slice =
+          real_max_decode_step_ids.slice(0, 0, batch_size);
+      unshared_mask.copy_(real_max_decode_step_ids_slice <= current_step);
 
-    unshared_kv_len = current_step + 1;
+      unshared_kv_len = current_step + 1;
 
-    auto batch_beam_shared_kv_lens =
-        (shared_kv_lens_each_batch.unsqueeze(1).expand({-1, beam_width}) +
-         unshared_kv_len)
-            .flatten();
-    auto cumsum_result = torch::cumsum(batch_beam_shared_kv_lens, 0);
-    auto paged_kv_indptr = torch::cat({torch::zeros({1}, int32_device_options),
-                                       cumsum_result.to(int32_device_options)},
-                                      0);
-    auto paged_kv_indices = full_kv_indices.masked_select(full_kv_mask);
-    auto paged_kv_last_page_len =
-        torch::ones({batch_size * beam_width}, int32_device_options);
-    runtime_.worker.prepare_stream_->synchronize();
+      auto batch_beam_shared_kv_lens =
+          (shared_kv_lens_each_batch.unsqueeze(1).expand({-1, beam_width}) +
+           unshared_kv_len)
+              .flatten();
+      auto cumsum_result = torch::cumsum(batch_beam_shared_kv_lens, 0);
+      auto paged_kv_indptr =
+          torch::cat({torch::zeros({1}, int32_device_options),
+                      cumsum_result.to(int32_device_options)},
+                     0);
+      auto paged_kv_indices = full_kv_indices.masked_select(full_kv_mask);
+      auto paged_kv_last_page_len =
+          torch::ones({batch_size * beam_width}, int32_device_options);
+      runtime_.worker.prepare_stream_->synchronize();
 
-    NextRoundInputResults results;
-    results.paged_kv_indices = paged_kv_indices;
-    results.paged_kv_indptr = paged_kv_indptr;
-    results.paged_kv_last_page_len = paged_kv_last_page_len;
-    promise.setValue(results);
-  });
+      NextRoundInputResults results;
+      results.paged_kv_indices = paged_kv_indices;
+      results.paged_kv_indptr = paged_kv_indptr;
+      results.paged_kv_last_page_len = paged_kv_last_page_len;
+      promise.setValue(results);
+    });
+  } else {
+    promise.setValue(NextRoundInputResults{});
+  }
 #endif
   return future;
 }
@@ -1070,10 +1224,22 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::FullKvCacheOffsets::FullKvCacheOffsets(
 // RecWorkerImpl Implementation
 // ============================================================
 
+void RecWorkerImpl::initialize_xattention_workspace() {
+#if defined(USE_CUDA)
+  if (FLAGS_enable_xattention_one_stage) {
+    return;
+  }
+  ::xllm::layer::xattention::XAttentionWorkspace::get_instance().initialize(
+      device_);
+#endif
+}
+
 RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
                              const torch::Device& device,
                              const runtime::Options& options)
     : LLMWorkerImpl(parallel_args, device, options) {
+  initialize_xattention_workspace();
+
   if (!is_driver()) {
     return;
   }
@@ -1084,6 +1250,7 @@ RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
 #if defined(USE_CUDA)
         ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
             .initialize(device_);
+        initialize_xattention_workspace();
 #endif
       });
 
@@ -1108,7 +1275,7 @@ RecWorkerImpl::~RecWorkerImpl() {
 
 bool RecWorkerImpl::init_model(const std::string& model_weights_path,
                                int32_t random_seed,
-                               int32_t master_status) {
+                               MasterStatus master_status) {
   if (!WorkerImpl::init_model(model_weights_path, random_seed, master_status)) {
     return false;
   }
@@ -1211,6 +1378,21 @@ void RecWorkerImpl::load_model(std::unique_ptr<ModelLoader> loader) {
   }
 
   LOG(INFO) << "Loaded weights for all " << work_pipelines_.size() << " models";
+}
+
+bool RecWorkerImpl::init_onerec_model(ModelContext& context) {
+  CHECK(model_ == nullptr) << "Model is already initialized.";
+  device_.set_device();
+
+  model_ = create_rec_model(context);
+  CHECK(model_ != nullptr) << "Failed to create rec model.";
+  model_executor_ = std::make_unique<Executor>(
+      model_.get(), context.get_model_args(), device_, options_);
+
+  if (FLAGS_enable_eplb) {
+    eplb_executor_ = std::make_unique<EplbExecutor>(model_.get(), device_);
+  }
+  return true;
 }
 
 ForwardInput RecWorkerImpl::prepare_inputs(Batch& batch) {

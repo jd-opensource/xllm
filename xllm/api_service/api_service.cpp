@@ -792,7 +792,7 @@ bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
   options.model_id() = model_id;
   options.master_node_addr() = request->master_node_addr();
   options.model_path() = request->model_path();
-  options.master_status() = request->master_status();
+  options.master_status() = MasterStatus(request->master_status());
 
   // Parse nnodes and dp_size (tp_size = nnodes / dp_size, computed by engine)
   if (request->nnodes() > 0) {
@@ -925,8 +925,9 @@ void APIService::SleepHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
-  if (req_pb->master_status() != LIGHT_SLEEP &&
-      req_pb->master_status() != DEEP_SLEEP) {
+  const auto req_master_status = MasterStatus(req_pb->master_status());
+  if (req_master_status != MasterStatus::LIGHT_SLEEP &&
+      req_master_status != MasterStatus::DEEP_SLEEP) {
     LOG(ERROR) << "Invalid sleep status: " << req_pb->master_status();
     ctrl->SetFailed("Invalid sleep status");
     return;
@@ -956,7 +957,7 @@ void APIService::SleepHttp(::google::protobuf::RpcController* controller,
   }
 
   auto master_status = master->get_master_status();
-  master->set_master_status(req_pb->master_status());
+  master->set_master_status(req_master_status);
   if (!master->sleep()) {
     master->set_master_status(master_status);
     LOG(ERROR) << "Failed to sleep model " << req_pb->model_id();
@@ -1050,7 +1051,7 @@ void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
-  master->set_master_status(WAKEUP);
+  master->set_master_status(MasterStatus::WAKEUP);
   // Success: return HTTP 200 with empty body
 }
 

@@ -17,7 +17,7 @@ message CommInfo {
 message InitModelRequest {
   string model_weights_path = 1;
   int32 random_seed = 2;
-  int32 master_status = 3;
+  MasterStatus master_status = 3;
 }
 
 message ActivationMemory {
@@ -40,11 +40,11 @@ message AllocateKVCacheRequest {
 }
 
 message SleepRequest {
-  int32 master_status = 1; 
+  MasterStatus master_status = 1;
 }
 
 message WakeupRequest {
-  int32 master_status = 1;
+  MasterStatus master_status = 1;
   repeated string remote_addrs = 2;
   // Per-remote-addr weight segments (index matches remote_addrs)
   // Each entry contains ordered segments to pull from that remote source

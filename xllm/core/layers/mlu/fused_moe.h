@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <utility>
+
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state/parallel_args.h"
@@ -25,17 +27,13 @@ limitations under the License.
 #include "framework/state_dict/utils.h"
 #include "layers/common/deep_ep.h"
 #include "layers/common/dense_mlp.h"
+#include "layers/common/fused_moe_base.h"
 #include "layers/mlu/moe_gate.h"
 #include "platform/device.h"
 #include "util/tensor_helper.h"
 
 namespace xllm {
 namespace layer {
-
-// MoE options not in ModelArgs; extend here as needed.
-struct FusedMoEArgs {
-  bool is_gated = true;
-};
 
 class FusedMoEImpl : public torch::nn::Module {
  public:
@@ -94,6 +92,9 @@ class FusedMoEImpl : public torch::nn::Module {
                              const torch::Tensor& hidden_states,
                              int64_t num_token_expand);
 
+  std::pair<torch::Tensor, std::optional<torch::List<int64_t>>>
+  prepare_group_gemm_weight_scale(const torch::Tensor& b_scale) const;
+
  private:
   int64_t num_total_experts_;
   int64_t topk_;
@@ -102,6 +103,8 @@ class FusedMoEImpl : public torch::nn::Module {
   bool is_gated_;
   std::string hidden_act_;
   bool is_smoothquant_;
+  int64_t moe_weight_bits_ = 8;
+  int64_t weight_pack_factor_ = 1;
 
   int64_t num_experts_per_rank_;
   int64_t start_expert_id_;

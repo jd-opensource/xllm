@@ -39,6 +39,7 @@ const OptionCategory kCommonOptions = {"COMMON OPTIONS",
                                         "max_tokens_per_batch",
                                         "max_seqs_per_batch",
                                         "enable_chunked_prefill",
+                                        "enable_prefill_sp",
                                         "enable_schedule_overlap",
                                         "enable_prefix_cache",
                                         "enable_shm",
@@ -91,7 +92,12 @@ const OptionCategory kXllmServiceOptions = {"XLLM-SERVICE OPTIONS",
 const OptionCategory kBeamSearchOptions = {"BEAM SEARCH OPTIONS",
                                            {"enable_beam_search_kernel",
                                             "enable_rec_fast_sampler",
-                                            "enable_topk_sorted"}};
+                                            "enable_topk_sorted",
+                                            "output_rec_logprobs"}};
+
+const OptionCategory kPrefixCacheOptions = {
+    "PREFIX CACHE OPTIONS",
+    {"enable_prefix_cache", "xxh3_128bits_seed"}};
 
 const OptionCategory kOtherOptions = {
     "OTHER OPTIONS",
@@ -112,6 +118,7 @@ const std::vector<OptionCategory> kOptionCategories = {
     kMtpOptions,
     kXllmServiceOptions,
     kBeamSearchOptions,
+    kPrefixCacheOptions,
     kOtherOptions};
 
 }  // namespace

@@ -87,14 +87,6 @@ RawForwardInput BatchInputBuilder::build_raw_forward_input() {
 }
 
 void BatchInputBuilder::process_sequences() {
-  // when speculative decoding, we need to build raw forward input
-  // of decode batch for MTP (Eagle).
-  is_mtp_decode_ = false;
-  if (state_.batch_forward_type.is_decode() &&
-      FLAGS_num_speculative_tokens > 0) {
-    is_mtp_decode_ = true;
-  }
-
   if (thread_pool_ && num_sequences_ >= thread_pool_->size()) {
     process_sequences_multithreaded();
   } else {
@@ -284,15 +276,14 @@ void BatchInputBuilder::process_single_sequence(
                          << allowed_max_tokens_[seq_index];
 
   // Update state
-  int32_t offset = is_mtp_decode_ ? -1 : 0;
-  state.max_seq_len = std::max(state.max_seq_len, seq_len + offset);
+  state.max_seq_len = std::max(state.max_seq_len, seq_len);
   state.q_max_seq_len = std::max(state.q_max_seq_len, q_seq_len);
   state.kv_cache_tokens_nums.emplace_back(n_kv_cache_tokens);
-#if defined(USE_NPU) || defined(USE_MUSA)
-  state.seq_lens.push_back(seq_len + offset);
+#if defined(USE_NPU)
+  state.seq_lens.push_back(seq_len);
   state.q_seq_lens.push_back(q_seq_len);
 #elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
-  state.seq_lens.push_back(state.seq_lens.back() + seq_len + offset);
+  state.seq_lens.push_back(state.seq_lens.back() + seq_len);
   state.q_seq_lens.push_back(state.q_seq_lens.back() + q_seq_len);
 #endif
   // Process tokens and positions
@@ -335,8 +326,7 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     state.flatten_tokens_vec.emplace_back(token_ids[j]);
 
     if (!use_mrope_) {
-      int32_t offset = is_mtp_decode_ ? -1 : 0;
-      state.flatten_positions_vec.push_back(static_cast<int32_t>(j + offset));
+      state.flatten_positions_vec.push_back(static_cast<int32_t>(j));
     }
 
     // Handle sampling for last tokens
@@ -404,9 +394,6 @@ void BatchInputBuilder::setup_kv_cache_info(
   // update kv cache tokens num
   sequence->kv_state().incr_kv_cache_tokens_num(/*size=*/q_seq_len);
 
-  int32_t offset = is_mtp_decode_ ? -1 : 0;
-  seq_len += offset;
-  n_kv_cache_tokens += offset;
   const auto blocks = sequence->kv_state().kv_blocks();
   const auto slot_ids =
       sequence->kv_state().kv_cache_slots(n_kv_cache_tokens, seq_len);

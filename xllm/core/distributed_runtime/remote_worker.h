@@ -23,7 +23,6 @@ limitations under the License.
 #include "common/macros.h"
 #include "common/types.h"
 #include "framework/model/causal_lm.h"
-#include "framework/model/embedding_lm.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/quant_args.h"
@@ -49,7 +48,7 @@ class RemoteWorker : public WorkerClient {
 
   virtual bool init_model(const std::string& model_weights_path,
                           int32_t random_seed,
-                          int32_t master_status) override;
+                          MasterStatus master_status) override;
 
   virtual std::tuple<int64_t, int64_t> estimate_kv_cache_capacity() override;
 
@@ -93,7 +92,7 @@ class RemoteWorker : public WorkerClient {
   virtual folly::SemiFuture<bool> init_model_async(
       const std::string& model_weights_path,
       int32_t random_seed,
-      int32_t master_status) override;
+      MasterStatus master_status) override;
 
   virtual folly::SemiFuture<std::tuple<int64_t, int64_t>>
   estimate_kv_cache_capacity_async() override;
@@ -149,7 +148,8 @@ class RemoteWorker : public WorkerClient {
   // Get worker global rank
   int32_t global_rank() const { return global_rank_; }
 
-  virtual folly::SemiFuture<bool> sleep_async(int32_t master_status) override;
+  virtual folly::SemiFuture<bool> sleep_async(
+      MasterStatus master_status) override;
 
   virtual folly::SemiFuture<bool> wakeup_async(
       const WakeupOptions& options) override;

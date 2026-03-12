@@ -41,7 +41,7 @@ Block::Block(const Block& other)
       size_(other.size_),
       ref_count_(other.ref_count_),
       manager_(other.manager_) {
-  memcpy(hash_value_, other.hash_value_, MURMUR_HASH3_VALUE_LEN);
+  memcpy(hash_value_, other.hash_value_, XXH3_128BITS_HASH_VALUE_LEN);
 
   // increase reference count
   inc_ref_count();
@@ -57,7 +57,7 @@ Block& Block::operator=(const Block& other) {
     manager_ = other.manager_;
     ref_count_ = other.ref_count_;
 
-    memcpy(hash_value_, other.hash_value_, MURMUR_HASH3_VALUE_LEN);
+    memcpy(hash_value_, other.hash_value_, XXH3_128BITS_HASH_VALUE_LEN);
 
     inc_ref_count();
   }
@@ -69,7 +69,7 @@ Block::Block(Block&& other) noexcept
       size_(other.size_),
       ref_count_(other.ref_count_),
       manager_(other.manager_) {
-  memcpy(hash_value_, other.hash_value_, MURMUR_HASH3_VALUE_LEN);
+  memcpy(hash_value_, other.hash_value_, XXH3_128BITS_HASH_VALUE_LEN);
 
   // reset other without adjusting the reference count
   other.id_ = -1;
@@ -87,7 +87,7 @@ Block& Block::operator=(Block&& other) noexcept {
     manager_ = other.manager_;
     ref_count_ = other.ref_count_;
 
-    memcpy(hash_value_, other.hash_value_, MURMUR_HASH3_VALUE_LEN);
+    memcpy(hash_value_, other.hash_value_, XXH3_128BITS_HASH_VALUE_LEN);
 
     other.id_ = -1;
     other.size_ = 0;

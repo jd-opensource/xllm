@@ -53,6 +53,7 @@ std::string Options::to_string() const {
      << ", expert_parallel_degree: " << expert_parallel_degree().value_or(0)
      << ", task_type: " << task_type() << ", enable_mla: " << enable_mla()
      << ", enable_chunked_prefill: " << enable_chunked_prefill()
+     << ", enable_prefill_sp: " << enable_prefill_sp()
      << ", master_node_addr: " << master_node_addr().value_or("null")
      << ", instance_role: " << instance_role().to_string()
      << ", device_ip: " << device_ip().value_or("null")

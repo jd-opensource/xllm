@@ -399,7 +399,7 @@ struct GroupGemmParams {
   std::optional<torch::Tensor> combine_idx;
 };
 
-struct MoeActiveTopkParams {
+struct MoeFusedTopkParams {
   // Input tensor.
   // Shape: [*, num_mask, num_expert] (e.g., [batch, num_mask, num_expert]).
   // Dtype: float32, float16, bfloat16.
@@ -1258,6 +1258,37 @@ struct StaticScaledFp8QuantParams {
   // Pre-computed scale factor. Shape: [1] or scalar.
   // Dtype: float32. Used for static quantization.
   torch::Tensor scale;
+};
+
+// Fused RMSNorm + Static FP8 Quantization Parameters
+// These fused operations combine RMSNorm and FP8 quantization to reduce memory
+// bandwidth by avoiding the intermediate write-back to global memory.
+
+// Fused RMSNorm + Static FP8 Quantization parameters (without residual)
+struct RmsNormStaticFp8QuantParams {
+  // Input tensor. Shape: [..., hidden_size]. Dtype: float16, bfloat16, float32.
+  torch::Tensor input;
+  // RMSNorm weight. Shape: [hidden_size]. Dtype: same as input.
+  torch::Tensor weight;
+  // FP8 quantization scale (pre-computed). Shape: [1]. Dtype: float32.
+  torch::Tensor scale;
+  // RMSNorm epsilon.
+  double epsilon;
+};
+
+// Fused Add + RMSNorm + Static FP8 Quantization parameters (with residual)
+struct FusedAddRmsNormStaticFp8QuantParams {
+  // Input tensor. Shape: [..., hidden_size]. Dtype: float16, bfloat16, float32.
+  torch::Tensor input;
+  // Residual tensor. Shape: [..., hidden_size]. Dtype: same as input.
+  // Updated in-place with: residual = input + residual
+  torch::Tensor residual;
+  // RMSNorm weight. Shape: [hidden_size]. Dtype: same as input.
+  torch::Tensor weight;
+  // FP8 quantization scale (pre-computed). Shape: [1]. Dtype: float32.
+  torch::Tensor scale;
+  // RMSNorm epsilon.
+  double epsilon;
 };
 
 }  // namespace xllm::kernel

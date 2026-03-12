@@ -25,7 +25,6 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "cuda.h"
-#include "cuda_utils.h"
 #include "topk_last_dim.cuh"
 
 // ensure half type is available (consistent with topk_last_dim.cuh)

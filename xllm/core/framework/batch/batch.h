@@ -129,7 +129,7 @@ class Batch {
     return allowed_max_tokens_;
   }
 
-  std::map<uint32_t, uint32_t> cal_seq_exchange_index_test(
+  std::unordered_map<uint32_t, uint32_t> cal_seq_exchange_index_test(
       std::vector<uint32_t>& kv_cache_tokens_num) {
     return cal_seq_exchange_index(kv_cache_tokens_num);
   }
@@ -147,8 +147,9 @@ class Batch {
                                  bool replace_fake_token);
 
   void process_beam_search();
+  bool has_partial_finished_beam_group() const;
 
-  std::map<uint32_t, uint32_t> cal_seq_exchange_index(
+  std::unordered_map<uint32_t, uint32_t> cal_seq_exchange_index(
       std::vector<uint32_t>& kv_cache_tokens_num);
 
   void dp_balance_shuffle_seqs();

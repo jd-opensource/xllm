@@ -33,7 +33,7 @@ class Engine {
 
   virtual bool init() { return true; };
 
-  virtual bool init(int32_t master_status) { return true; };
+  virtual bool init(MasterStatus master_status) { return true; };
 
   // execute model with batch input
   virtual ForwardOutput step(std::vector<Batch>& batch) = 0;
@@ -151,7 +151,7 @@ class Engine {
     return false;
   };
 
-  virtual bool sleep(int32_t master_status) {
+  virtual bool sleep(MasterStatus master_status) {
     LOG(FATAL) << " sleep is not implemented!";
     return false;
   };

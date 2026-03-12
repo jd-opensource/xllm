@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/common/rec_model_utils.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/qwen3_moe_decoder_layer.h"
 #include "llm_model_base.h"
@@ -130,8 +131,28 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
           apply_mrope(positions);
     }
 
+    const LlmRecMultiRoundParams* llmrec_params = nullptr;
+    if (is_rec_multi_round_mode() &&
+        modified_input_params.has_llmrec_params()) {
+      llmrec_params = modified_input_params.llmrec_params();
+      CHECK_EQ(llmrec_params->full_k_caches.size(), layers_.size())
+          << "Rec multi-round mode requires full_k_caches per layer.";
+      CHECK_EQ(llmrec_params->full_v_caches.size(), layers_.size())
+          << "Rec multi-round mode requires full_v_caches per layer.";
+      CHECK_EQ(llmrec_params->unshared_k_caches.size(), layers_.size())
+          << "Rec multi-round mode requires unshared_k_caches per layer.";
+      CHECK_EQ(llmrec_params->unshared_v_caches.size(), layers_.size())
+          << "Rec multi-round mode requires unshared_v_caches per layer.";
+    }
+
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
+      if (llmrec_params != nullptr) {
+        attn_metadata.full_k_cache = llmrec_params->full_k_caches[i];
+        attn_metadata.full_v_cache = llmrec_params->full_v_caches[i];
+        attn_metadata.unshared_k_cache = llmrec_params->unshared_k_caches[i];
+        attn_metadata.unshared_v_cache = llmrec_params->unshared_v_caches[i];
+      }
 #if defined(USE_CUDA) || defined(USE_MUSA)
       attn_metadata.plan_info->layer_id = i;
 #endif

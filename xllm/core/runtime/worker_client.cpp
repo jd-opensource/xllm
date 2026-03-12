@@ -34,7 +34,7 @@ namespace xllm {
 
 bool WorkerClient::init_model(const std::string& model_weights_path,
                               int32_t random_seed,
-                              int32_t master_status) {
+                              MasterStatus master_status) {
   return worker_->init_model(model_weights_path, random_seed, master_status);
 }
 
@@ -128,7 +128,7 @@ folly::SemiFuture<folly::Unit> WorkerClient::process_group_test_async() {
 folly::SemiFuture<bool> WorkerClient::init_model_async(
     const std::string& model_weights_path,
     int32_t random_seed,
-    int32_t master_status) {
+    MasterStatus master_status) {
   return worker_->init_model_async(
       model_weights_path, random_seed, master_status);
 }
@@ -179,7 +179,7 @@ void WorkerClient::transfer_kv_blocks(
   NOT_IMPLEMENTED();
 }
 
-folly::SemiFuture<bool> WorkerClient::sleep_async(int32_t master_status) {
+folly::SemiFuture<bool> WorkerClient::sleep_async(MasterStatus master_status) {
   LOG(FATAL) << "WorkerClient Method sleep is UnImplemented.";
 }
 

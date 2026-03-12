@@ -15,12 +15,14 @@ limitations under the License.
 
 #pragma once
 
+#include <glog/logging.h>
 #include <torch/torch.h>
 
 #include <string>
 #include <vector>
 
 #include "core/common/interruption_bus.h"
+#include "core/common/rec_model_utils.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -86,8 +88,28 @@ class LlmModelImplBase : public torch::nn::Module {
           apply_mrope(positions);
     }
 
+    const LlmRecMultiRoundParams* llmrec_params = nullptr;
+    if (is_rec_multi_round_mode() &&
+        modified_input_params.has_llmrec_params()) {
+      llmrec_params = modified_input_params.llmrec_params();
+      CHECK_EQ(llmrec_params->full_k_caches.size(), layers_.size())
+          << "Rec multi-round mode requires full_k_caches per layer.";
+      CHECK_EQ(llmrec_params->full_v_caches.size(), layers_.size())
+          << "Rec multi-round mode requires full_v_caches per layer.";
+      CHECK_EQ(llmrec_params->unshared_k_caches.size(), layers_.size())
+          << "Rec multi-round mode requires unshared_k_caches per layer.";
+      CHECK_EQ(llmrec_params->unshared_v_caches.size(), layers_.size())
+          << "Rec multi-round mode requires unshared_v_caches per layer.";
+    }
+
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
+      if (llmrec_params != nullptr) {
+        attn_metadata.full_k_cache = llmrec_params->full_k_caches[i];
+        attn_metadata.full_v_cache = llmrec_params->full_v_caches[i];
+        attn_metadata.unshared_k_cache = llmrec_params->unshared_k_caches[i];
+        attn_metadata.unshared_v_cache = llmrec_params->unshared_v_caches[i];
+      }
 #if defined(USE_CUDA) || defined(USE_MUSA)
       attn_metadata.plan_info->layer_id = i;
 #endif
@@ -175,11 +197,28 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     return lm_head_(h);
   }
 
+  // hidden_states: [num_tokens, hidden_size]
+  // seleted_idxes: [num_tokens]
+  // returns: [num_seqs, hidden_size]
+  virtual torch::Tensor pooler(const torch::Tensor& hidden_states,
+                               const torch::Tensor& seleted_idxes) {
+    auto h = hidden_states;
+    if (seleted_idxes.defined()) {
+      h = h.index_select(/*dim=*/0, seleted_idxes);
+    }
+    return h;
+  }
+
   virtual void load_model(
       std::unique_ptr<ModelLoader> loader,
       std::string prefix = "model." /*llm model weight prefix*/) {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
+      auto sub_dict = state_dict->get_dict_with_prefix(prefix);
+      if (sub_dict.size() == 0) {
+        sub_dict = state_dict->get_dict_with_prefix("");
+      }
+      model_->load_state_dict(sub_dict);
+
       if (tie_word_embeddings) {
         lm_head_->load_state_dict(
             state_dict->get_dict_with_prefix(prefix + "embed_tokens."));

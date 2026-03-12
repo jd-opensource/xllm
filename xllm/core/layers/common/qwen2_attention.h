@@ -42,6 +42,9 @@ class Qwen2AttentionImpl : public torch::nn::Module {
 
   void load_state_dict(const StateDict& state_dict);
 
+  // Get FP8 input scale from qkv_proj for fused RMSNorm+FP8 quantization
+  std::optional<torch::Tensor> get_fp8_input_scale() const;
+
  private:
   int64_t num_heads_;
   int64_t num_kv_heads_;

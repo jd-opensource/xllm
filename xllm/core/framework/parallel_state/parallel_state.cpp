@@ -27,6 +27,41 @@ limitations under the License.
 namespace xllm {
 namespace parallel_state {
 
+namespace {
+
+torch::Tensor assemble_gathered(
+    const std::vector<torch::Tensor>& gathered_tensors,
+    const std::vector<int32_t>& token_num_list) {
+  CHECK(!gathered_tensors.empty()) << "gathered_tensors must not be empty.";
+  CHECK_EQ(gathered_tensors.size(), token_num_list.size())
+      << "gathered_tensors size " << gathered_tensors.size()
+      << " does not match token_num_list size " << token_num_list.size();
+
+  int64_t total_tokens = xllm::util::sum(token_num_list);
+  auto out_shape = gathered_tensors.front().sizes().vec();
+  out_shape[0] = total_tokens;
+  torch::Tensor output =
+      torch::empty(out_shape, gathered_tensors.front().options());
+
+  int64_t offset = 0;
+  for (size_t i = 0; i < gathered_tensors.size(); ++i) {
+    const int32_t valid_tokens = token_num_list[i];
+    if (valid_tokens <= 0) {
+      continue;
+    }
+    CHECK_GE(gathered_tensors[i].size(0), valid_tokens)
+        << "sequence-parallel gather received fewer rows than expected: "
+        << "src_rank=" << i << ", gathered_rows=" << gathered_tensors[i].size(0)
+        << ", expected_rows=" << valid_tokens;
+    output.slice(0, offset, offset + valid_tokens)
+        .copy_(gathered_tensors[i].slice(0, 0, valid_tokens));
+    offset += valid_tokens;
+  }
+  return output;
+}
+
+}  // namespace
+
 std::optional<ParallelArgs> get_dp_attn_parallel_args(
     const ParallelArgs& parallel_args) {
   if (parallel_args.dp_size() <= 1) {
@@ -60,7 +95,6 @@ torch::Tensor gather(const torch::Tensor& input,
     return input;
   }
 
-  const int32_t rank = process_group->rank();
   std::vector<torch::Tensor> tensors(world_size);
   for (int64_t i = 0; i < world_size; ++i) {
     tensors[i] = torch::empty_like(input);
@@ -75,7 +109,6 @@ torch::Tensor gather(const torch::Tensor& input,
                      const std::vector<int32_t>& token_num_list) {
   if (!process_group) return input;
   const int32_t world_size = process_group->world_size();
-  const int32_t rank = process_group->rank();
   if (world_size == 1) return input;
 
   CHECK_EQ(token_num_list.size(), world_size)
@@ -91,48 +124,19 @@ torch::Tensor gather(const torch::Tensor& input,
   if (num_tokens_equal) {
     return gather(input, process_group, 0);
   }
+  return finish_gather(launch_gather(input, process_group, token_num_list));
+}
 
-  int32_t max_num_tokens = xllm::util::max(token_num_list);
-  auto options = input.options();
-  int32_t num_padding = max_num_tokens - token_num_list[rank];
-  torch::Tensor padded_input = input;
-  // pad local input if needed
-  if (num_padding > 0) {
-    std::vector<int64_t> pad = {0, 0, 0, num_padding};
-    // Explicitly calling kConstant and value of 0 ensures consistency across
-    // platforms and versions.
-    padded_input = torch::nn::functional::pad(
-        input, torch::nn::functional::PadFuncOptions(pad));
+torch::Tensor finish_gather(GatherAsyncCtx ctx) {
+  if (ctx.work.defined()) {
+    ctx.work->wait();
   }
-
-  // perform allgather
-  std::vector<torch::Tensor> gathered_tensors(world_size);
-  for (size_t i = 0; i < world_size; ++i)
-    gathered_tensors[i] = torch::empty_like(padded_input);
-  process_group->allgather(padded_input, gathered_tensors);
-
-  // zero-copy assembly (performance critical)
-  // directly allocate output tensor of the final size, avoiding huge
-  // intermediate tensors produced by cat.
-  int64_t total_tokens = xllm::util::sum(token_num_list);
-  auto out_shape = input.sizes().vec();
-  out_shape[0] = total_tokens;
-  torch::Tensor output = torch::empty(out_shape, options);
-
-  int64_t offset = 0;
-  for (size_t i = 0; i < world_size; ++i) {
-    int32_t valid_tokens = token_num_list[i];
-    if (valid_tokens > 0) {
-      // copy only the valid part of gathered_tensors[i] into the designated
-      // position in output. This avoids the inefficient process of cat followed
-      // by slice.
-      output.slice(0, offset, offset + valid_tokens)
-          .copy_(gathered_tensors[i].slice(0, 0, valid_tokens));
-      offset += valid_tokens;
+  if (ctx.shards.size() == 1 && ctx.token_num_list.size() == 1) {
+    if (ctx.shards.front().size(0) == ctx.token_num_list.front()) {
+      return ctx.shards.front();
     }
   }
-
-  return output;
+  return assemble_gathered(ctx.shards, ctx.token_num_list);
 }
 
 torch::Tensor all_gather_interleaved(const torch::Tensor& input,
@@ -141,7 +145,6 @@ torch::Tensor all_gather_interleaved(const torch::Tensor& input,
     return input;
   }
   const int32_t world_size = process_group->world_size();
-  const int32_t rank = process_group->rank();
   if (world_size == 1) {
     return input;
   }

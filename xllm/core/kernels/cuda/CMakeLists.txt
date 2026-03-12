@@ -24,20 +24,24 @@ set(CUDA_HEADER_FILES
   arch_condition.h
   attention_runner.h
   cuda_ops_api.h
-  cuda_utils.h
   cutlass_w8a8/c3x/cutlass_gemm_caller.cuh
   cutlass_w8a8/c3x/scaled_mm.cuh
+  cutlass_w8a8/c3x/sm120_fp8_kernel_configs.cuh
+  cutlass_w8a8/c3x/sm120_fp8_dispatch_policy.hpp
   cutlass_w8a8/c3x/scaled_mm_sm100_fp8_dispatch.cuh
   cutlass_w8a8/c3x/scaled_mm_sm120_fp8_dispatch.cuh
   cutlass_w8a8/c3x/scaled_mm_sm90_fp8_dispatch.cuh
   fp8_quant_utils.cuh
   global_capture_instance.h
-  moe_topk_funcs.cuh
   piecewise_graphs.h
   topk_last_dim.cuh
   type_convert.cuh
   utils.h
+  device_utils.cuh
   xattention/xattention_ops_api.h
+  moe/moe_topk.cuh
+  moe/moe_topk_sigmoid_kernels.cuh
+  moe/moe_topk_softmax_kernels.cuh
 )
 
 # Keep source list explicit to avoid accidentally compiling test files into cuda_kernels.
@@ -47,6 +51,7 @@ set(CUDA_SOURCE_FILES
   attention_runner.cpp
   batch_decode.cpp
   batch_prefill.cpp
+  batch_chunked_prefill.cpp
   cutlass_extensions/common.cpp
   cutlass_w8a8/c3x/scaled_mm_sm100_fp8.cu
   cutlass_w8a8/c3x/scaled_mm_sm120_fp8.cu
@@ -72,6 +77,7 @@ set(CUDA_SOURCE_FILES
   xattention/decoder_reshape_and_cache.cu
   xattention/lse_combine.cu
   xattention/prefill_reshape_and_cache.cu
+  moe/moe_fused_topk.cu
 )
 
 cc_library(
@@ -86,6 +92,18 @@ cc_library(
     torch
     :util
     :platform
+)
+
+cc_test(
+  NAME
+    activation_test
+  SRCS
+    activation_test.cpp
+  DEPS
+    :cuda_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
 )
 
 cc_test(
@@ -129,9 +147,9 @@ target_link_libraries(cache_select_test PRIVATE brpc)
 
 cc_test(
   NAME
-    moe_topk_funcs_test
+    moe_fused_topk_test
   SRCS
-    moe_topk_funcs_test.cu
+    moe/moe_topk_test.cu
   DEPS
     :cuda_kernels
     GTest::gtest_main
@@ -173,3 +191,27 @@ cc_test(
     glog::glog
 )
 target_link_libraries(fp8_quant_test PRIVATE brpc)
+
+# Keep CUDA benchmarks behind a plain CMake cache option instead of adding
+# another dedicated argument in `setup.py`.
+#
+# Why:
+# - `setup.py` already forwards arbitrary CMake definitions from the
+#   `CMAKE_ARGS` environment variable, so adding a new Python-side flag would
+#   duplicate the existing mechanism.
+# - Most normal builds do not need benchmark binaries, so the default stays
+#   `OFF` and users enable it only when they really want to build them.
+#
+# Simplest way to build benchmarks:
+# 1. From the repo root, run:
+#      CMAKE_ARGS="-DBUILD_CUDA_BENCHMARKS=ON" python setup.py build test
+# 2. This is enough: `build test` builds `all_tests`, and when
+#    `BUILD_CUDA_BENCHMARKS=ON` the benchmark binaries are added to
+#    `all_tests` as build dependencies.
+# 3. If the build directory was configured before with this option `OFF`, the
+#    old value is cached. Re-run the same command, or delete `CMakeCache.txt`
+#    / the build directory before rebuilding.
+option(BUILD_CUDA_BENCHMARKS "Build CUDA kernel benchmarks" OFF)
+if(BUILD_CUDA_BENCHMARKS)
+  add_subdirectory(benchmarks)
+endif()

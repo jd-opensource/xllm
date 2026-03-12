@@ -35,6 +35,7 @@ cc_library(
     mtp_worker_impl.h
     suffix_worker_impl.h
     eagle3_worker_impl.h
+    spec_input_builder.h
     forward_shared_memory_manager.h
   SRCS
     executor.cpp
@@ -61,6 +62,7 @@ cc_library(
     mtp_worker_impl.cpp
     suffix_worker_impl.cpp
     eagle3_worker_impl.cpp
+    spec_input_builder.cpp
     forward_shared_memory_manager.cpp
   DEPS
     torch
@@ -127,6 +129,19 @@ target_link_options(acl_graph_executor_test PRIVATE
   "${CMAKE_BINARY_DIR}/third_party/spdlog/libspdlog.a"
   "-Wl,--no-whole-archive")
 endif()
+
+cc_test(
+  NAME
+    spec_input_builder_test
+  SRCS
+    spec_input_builder_test.cpp
+    spec_input_builder.cpp
+  DEPS
+    torch
+    glog::glog
+    proto::xllm_proto
+    GTest::gtest_main
+)
 
 if(USE_MLU)
 cc_test(

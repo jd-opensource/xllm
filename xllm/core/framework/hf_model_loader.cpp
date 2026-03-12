@@ -40,6 +40,129 @@ limitations under the License.
 
 namespace xllm {
 
+namespace {
+
+bool validate_smoothquant_mixed_w4a8(const JsonReader& reader,
+                                     QuantArgs& quant_args,
+                                     bool only_expert_per_group) {
+  const auto expert_weight_precision =
+      reader.value<std::string>("quantization_config.expert_weight_precision");
+  const int64_t experts_weight_bits =
+      reader.value_or<int64_t>("quantization_config.experts_weight_bits", 0);
+
+  const bool is_w4a8 = (expert_weight_precision.has_value() &&
+                        boost::iequals(*expert_weight_precision, "int4")) ||
+                       experts_weight_bits == 4;
+  if (!is_w4a8) {
+    return true;
+  }
+
+  quant_args.moe_weight_bits() = 4;
+
+  if (!only_expert_per_group) {
+    LOG(ERROR) << "DeepSeek mixed W4A8 requires "
+                  "quantization_config.only_expert_per_group=true.";
+    return false;
+  }
+  if (quant_args.quant_method() != "smoothquant") {
+    LOG(ERROR) << "DeepSeek mixed W4A8 only supports "
+                  "quant_method=smoothquant.";
+    return false;
+  }
+  if (quant_args.bits() != 8) {
+    LOG(ERROR) << "DeepSeek mixed W4A8 requires quantization_config.bits=8, "
+               << "but got bits=" << quant_args.bits();
+    return false;
+  }
+
+  const auto weight_precision =
+      reader.value<std::string>("quantization_config.weight_precision");
+  if (weight_precision.has_value() &&
+      !boost::iequals(*weight_precision, "int8")) {
+    LOG(ERROR) << "DeepSeek mixed W4A8 requires weight_precision=int8, but got "
+               << *weight_precision;
+    return false;
+  }
+
+  const auto activation_precision =
+      reader.value<std::string>("quantization_config.activation_precision");
+  if (activation_precision.has_value() &&
+      !boost::iequals(*activation_precision, "int8")) {
+    LOG(ERROR)
+        << "DeepSeek mixed W4A8 requires activation_precision=int8, but got "
+        << *activation_precision;
+    return false;
+  }
+
+  const auto expert_activation_precision = reader.value<std::string>(
+      "quantization_config.expert_activation_precision");
+  if (expert_activation_precision.has_value() &&
+      !boost::iequals(*expert_activation_precision, "int8")) {
+    LOG(ERROR) << "DeepSeek mixed W4A8 requires "
+                  "expert_activation_precision=int8, but got "
+               << *expert_activation_precision;
+    return false;
+  }
+  return true;
+}
+
+}  // namespace
+
+bool load_quant_cfg(const JsonReader& reader, QuantArgs& quant_args) {
+  if (!reader.contains("quantization_config")) {
+    return true;
+  }
+
+  if (auto v = reader.value<std::string>("quantization_config.quant_method")) {
+    quant_args.quant_method() = v.value();
+  }
+  if (auto v = reader.value<int64_t>("quantization_config.bits")) {
+    quant_args.bits() = v.value();
+    quant_args.moe_weight_bits() = v.value();
+  }
+  if (auto v = reader.value<int64_t>("quantization_config.group_size")) {
+    quant_args.group_size() = v.value();
+  }
+  if (auto v = reader.value<bool>("quantization_config.desc_act")) {
+    quant_args.desc_act() = v.value();
+  }
+  if (auto v = reader.value<bool>("quantization_config.sym")) {
+    quant_args.is_sym() = v.value();
+  }
+  if (auto v =
+          reader.value<std::string>("quantization_config.activation_scheme")) {
+    std::string activation_scheme = v.value();
+    if (boost::iequals(activation_scheme, "static")) {
+      quant_args.activation_dynamic() = false;
+    } else if (boost::iequals(activation_scheme, "dynamic")) {
+      quant_args.activation_dynamic() = true;
+    } else {
+      LOG(ERROR) << "quantization_config.activation_scheme only support "
+                    "dynamic and static.";
+      return false;
+    }
+  }
+  if (auto v = reader.value<std::string>("quantization_config.fmt")) {
+    // TODO(liangzhiwei20): check fp8 quantization format
+    quant_args.fmt() = v.value();
+  }
+  if (reader.contains("quantization_config.weight_block_size")) {
+    const auto& data = reader.data();
+    quant_args.weight_block_size() =
+        data["quantization_config"]["weight_block_size"]
+            .get<std::vector<int64_t>>();
+  }
+
+  bool only_expert_per_group = false;
+  if (auto v =
+          reader.value<bool>("quantization_config.only_expert_per_group")) {
+    only_expert_per_group = v.value();
+  }
+
+  return validate_smoothquant_mixed_w4a8(
+      reader, quant_args, only_expert_per_group);
+}
+
 HFModelLoader::HFModelLoader(const std::string& model_weights_path)
     : model_weights_path_(model_weights_path) {
   CHECK(load_args(model_weights_path))
@@ -248,46 +371,8 @@ bool HFModelLoader::load_quant_args(const std::string& model_weights_path) {
     return false;
   }
 
-  if (reader.contains("quantization_config")) {
-    if (auto v =
-            reader.value<std::string>("quantization_config.quant_method")) {
-      quant_args_.quant_method() = v.value();
-    }
-    if (auto v = reader.value<int64_t>("quantization_config.bits")) {
-      quant_args_.bits() = v.value();
-    }
-    if (auto v = reader.value<int64_t>("quantization_config.group_size")) {
-      quant_args_.group_size() = v.value();
-    }
-    if (auto v = reader.value<bool>("quantization_config.desc_act")) {
-      quant_args_.desc_act() = v.value();
-    }
-    if (auto v = reader.value<bool>("quantization_config.sym")) {
-      quant_args_.is_sym() = v.value();
-    }
-    if (auto v = reader.value<std::string>(
-            "quantization_config.activation_scheme")) {
-      std::string activation_scheme = v.value();
-      if (boost::iequals(activation_scheme, "static")) {
-        quant_args_.activation_dynamic() = false;
-      } else if (boost::iequals(activation_scheme, "dynamic")) {
-        quant_args_.activation_dynamic() = true;
-      } else {
-        LOG(ERROR) << "quantization_config.activation_scheme only support "
-                      "dynamic and static.";
-        return false;
-      }
-    }
-    if (auto v = reader.value<std::string>("quantization_config.fmt")) {
-      // TODO(liangzhiwei20): check fp8 quantization format
-      quant_args_.fmt() = v.value();
-    }
-    if (reader.contains("quantization_config.weight_block_size")) {
-      const auto& data = reader.data();
-      quant_args_.weight_block_size() =
-          data["quantization_config"]["weight_block_size"]
-              .get<std::vector<int64_t>>();
-    }
+  if (!load_quant_cfg(reader, quant_args_)) {
+    return false;
   }
 
   // load quantization args for npu if exists

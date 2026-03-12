@@ -27,76 +27,64 @@ limitations under the License.
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 #include <cuda.h>
+
+#include "cuda/cuda_utils.h"
 #elif defined(USE_MUSA)
 #include <c10/musa/MUSAGuard.h>
 #include <musa.h>
 #endif
 
-namespace {
-#if defined(USE_CUDA)
-
-std::pair<int32_t, int32_t> get_compute_capability(int32_t device_id) {
-  cudaDeviceProp prop;
-  cudaError_t err = cudaGetDeviceProperties(&prop, device_id);
-  if (err != cudaSuccess) {
-    LOG(FATAL) << "Failed to get compute capability for device " << device_id;
-  }
-  return std::make_pair(prop.major, prop.minor);
-}
-
-int32_t get_cuda_version() {
-  int32_t version;
-  cudaError_t err = cudaRuntimeGetVersion(&version);
-  if (err != cudaSuccess) {
-    LOG(FATAL) << "Failed to get CUDA version!";
-  }
-  return version;
-}
-
-bool cuda_version_at_least(int32_t major, int32_t minor) {
-  int32_t version = get_cuda_version();
-  return version >= major * 1000 + minor * 10;
-}
-
-// Whether to enable Programmatic Dependent Launch (PDL). See
-// https://docs.nvidia.com/cuda/cuda-c-programming-guide/#programmatic-dependent-launch-and-synchronization
-// Only supported for >= sm90, and currently only for FA2, CUDA core, and
-// trtllm-gen decode.
-bool support_pdl(int32_t device_id) {
-  auto [major, minor] = get_compute_capability(device_id);
-  return major >= 9;
-}
-
-bool support_sm90a(int32_t device_id) {
-  auto [major, minor] = get_compute_capability(device_id);
-  return (major == 9) && cuda_version_at_least(12, 3);
-}
-#endif
-}  // namespace
-
 namespace xllm {
 
+int32_t Device::sm_count_ = 0;
 bool Device::enable_pdl_ = false;
 bool Device::support_sm90a_ = false;
+bool Device::support_sm100a_ = false;
+bool Device::support_sm100f_ = false;
+bool Device::support_sm120a_ = false;
 
 Device::Device(const torch::Device& device) : device_(device) {
 #if defined(USE_CUDA)
-  static bool enable_pdl = support_pdl(device.index());
+  static int32_t sm_count = cuda::get_device_sm_count(device.index());
+  sm_count_ = sm_count;
+
+  static bool enable_pdl = cuda::support_pdl(device.index());
   enable_pdl_ = enable_pdl;
 
-  static bool is_sm90a_supported = support_sm90a(device.index());
+  static bool is_sm90a_supported = cuda::support_sm90a(device.index());
   support_sm90a_ = is_sm90a_supported;
+
+  static bool is_sm100a_supported = cuda::support_sm100a(device.index());
+  support_sm100a_ = is_sm100a_supported;
+
+  static bool is_sm100f_supported = cuda::support_sm100f(device.index());
+  support_sm100f_ = is_sm100f_supported;
+
+  static bool is_sm120a_supported = cuda::support_sm120a(device.index());
+  support_sm120a_ = is_sm120a_supported;
 #endif
 }
 
 Device::Device(const int32_t device_index)
     : device_(torch::Device(type_torch(), device_index)) {
 #if defined(USE_CUDA)
-  static bool enable_pdl = support_pdl(device_index);
+  static int32_t sm_count = cuda::get_device_sm_count(device_index);
+  sm_count_ = sm_count;
+
+  static bool enable_pdl = cuda::support_pdl(device_index);
   enable_pdl_ = enable_pdl;
 
-  static bool is_sm90a_supported = support_sm90a(device_index);
+  static bool is_sm90a_supported = cuda::support_sm90a(device_index);
   support_sm90a_ = is_sm90a_supported;
+
+  static bool is_sm100a_supported = cuda::support_sm100a(device_index);
+  support_sm100a_ = is_sm100a_supported;
+
+  static bool is_sm100f_supported = cuda::support_sm100f(device_index);
+  support_sm100f_ = is_sm100f_supported;
+
+  static bool is_sm120a_supported = cuda::support_sm120a(device_index);
+  support_sm120a_ = is_sm120a_supported;
 #endif
 }
 
@@ -179,9 +167,17 @@ torch::DeviceType Device::type_torch() {
 #endif
 }
 
+int32_t Device::sm_count() { return sm_count_; }
+
 bool Device::is_enable_pdl() { return enable_pdl_; }
 
 bool Device::is_support_sm90a() { return support_sm90a_; }
+
+bool Device::is_support_sm100a() { return support_sm100a_; }
+
+bool Device::is_support_sm100f() { return support_sm100f_; }
+
+bool Device::is_support_sm120a() { return support_sm120a_; }
 
 // set device before get device mem
 Device::DeviceMem Device::get_device_mem() const {

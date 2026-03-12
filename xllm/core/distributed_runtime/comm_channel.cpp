@@ -231,12 +231,12 @@ bool CommChannel::unlink_d2d(const std::string& remote_addr) {
 
 bool CommChannel::init_model(const std::string& model_weights_path,
                              int32_t random_seed,
-                             int32_t master_status) {
+                             MasterStatus master_status) {
   proto::InitModelRequest request;
 
   request.set_model_weights_path(model_weights_path);
   request.set_random_seed(random_seed);
-  request.set_master_status(master_status);
+  request.set_master_status(master_status.to_proto());
   proto::Status response;
   brpc::Controller cntl;
   stub_->InitModel(&cntl, &request, &response, nullptr);
@@ -250,12 +250,12 @@ bool CommChannel::init_model(const std::string& model_weights_path,
 bool CommChannel::init_model_async(const std::string& model_weights_path,
                                    int32_t random_seed,
                                    folly::Promise<bool>& promise,
-                                   int32_t master_status) {
+                                   MasterStatus master_status) {
   proto::InitModelRequest request;
 
   request.set_model_weights_path(model_weights_path);
   request.set_random_seed(random_seed);
-  request.set_master_status(master_status);
+  request.set_master_status(master_status.to_proto());
   auto done = new InitModelClosure();
   done->promise = std::move(promise);
   stub_->InitModel(&done->cntl, &request, &done->response, done);
@@ -390,12 +390,12 @@ void CommChannel::transfer_kv_blocks(
   stub_->TransferBlocks(&cntl, &pb_block_transfer_info, &response, nullptr);
 }
 
-bool CommChannel::sleep(int32_t master_status) {
+bool CommChannel::sleep(MasterStatus master_status) {
   proto::SleepRequest req;
   proto::Status s;
   brpc::Controller cntl;
 
-  req.set_master_status(master_status);
+  req.set_master_status(master_status.to_proto());
   stub_->Sleep(&cntl, &req, &s, nullptr);
   if (cntl.Failed() || !s.ok()) {
     LOG(ERROR) << "Sleep failed: " << cntl.ErrorText();
@@ -409,7 +409,7 @@ bool CommChannel::wakeup(const WakeupOptions& options) {
   brpc::Controller cntl;
   proto::WakeupRequest req;
 
-  req.set_master_status(options.master_status);
+  req.set_master_status(options.master_status.to_proto());
   if (!options.remote_addrs.empty()) {
     req.mutable_remote_addrs()->Assign(options.remote_addrs.begin(),
                                        options.remote_addrs.end());

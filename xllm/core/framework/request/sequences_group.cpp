@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "sequences_group.h"
 
+#include <algorithm>
 #include <unordered_set>
 
 #include "common/global_flags.h"
@@ -188,121 +189,113 @@ void SequencesGroup::process_beam_search() {
     return;
   }
 
-  size_t beam_width = sequence_params_.sampling_param->beam_width;
-  size_t seq_size = sequences_.size();
-  size_t topk = sequence_params_.sampling_param->top_logprobs;
-  size_t num_candidates = topk * seq_size;
-
-  if (num_candidates <= beam_width || seq_size == 1) {
-    std::vector<std::unique_ptr<Sequence>> result;
-    result.reserve(num_candidates);
-
-    int32_t last_token_idx = sequences_[0]->num_tokens() - 1;
-    size_t k = std::min(topk, beam_width);
-    for (size_t i = 0; i < seq_size; i++) {
-      std::unique_ptr<Sequence>& seq = sequences_[i];
-      auto src_blocks = seq->kv_state().kv_blocks();
-      const auto& top_logprobs =
-          seq->logprob_state()->get_top_logprobs()[last_token_idx];
-      const auto& top_tokens =
-          seq->logprob_state()->get_top_tokens()[last_token_idx];
-      for (int idx = 0; idx < k; ++idx) {
-        result.emplace_back(std::make_unique<Sequence>(*(seq.get())));
-        Token new_token(top_tokens[idx]);
-        new_token.logprob = top_logprobs[idx];
-        result.back()->update_token(last_token_idx, new_token);
-        result.back()->kv_state().set_src_blocks(src_blocks,
-                                                 /*need_swap*/ idx != 0);
-      }
-    }
-    sequences_ = std::move(result);
+  if (sequences_.empty()) {
     return;
   }
 
+  const size_t beam_width = sequence_params_.sampling_param->beam_width;
+  const size_t topk =
+      std::max<size_t>(1, sequence_params_.sampling_param->top_logprobs);
+
   SimpleTopKOptimizerBeamCandidate topk_optimizer(beam_width);
-  int32_t last_token_idx = sequences_[0]->num_tokens() - 1;
+  auto add_self_candidate = [&](size_t seq_index, Sequence* seq) {
+    const auto token_ids = seq->tokens();
+    const auto& log_probs = seq->logprob_state()->get_logprobs();
+    const int32_t generated_tokens = seq->num_generated_tokens();
+    const float logprob_sum =
+        generated_tokens > 0 ? seq->get_average_logprob() * generated_tokens
+                             : 0.0f;
 
-  auto compute_candidates_for_sequence = [&](size_t i) {
-    std::unique_ptr<Sequence>& seq = sequences_[i];
-    int32_t num_generated_tokens = seq->num_generated_tokens();
+    BeamCandidate candidate;
+    candidate.seq_index = seq_index;
+    candidate.logprob_sum = logprob_sum;
+    candidate.token_ids = std::vector<int32_t>(token_ids);
+    candidate.logprobs = log_probs;
+    topk_optimizer.insert(std::move(candidate));
+  };
 
+  for (size_t i = 0; i < sequences_.size(); ++i) {
+    auto* seq = sequences_[i].get();
+    if (seq->finished()) {
+      // A finished beam should be kept as-is and no longer expanded.
+      add_self_candidate(i, seq);
+      continue;
+    }
+
+    if (seq->num_tokens() == 0) {
+      add_self_candidate(i, seq);
+      continue;
+    }
+
+    const int32_t num_generated_tokens = seq->num_generated_tokens();
+    const int32_t last_token_idx = seq->num_tokens() - 1;
     Slice<int32_t> token_ids = seq->tokens();
     const auto& log_probs = seq->logprob_state()->get_logprobs();
     const auto& top_logprobs =
         seq->logprob_state()->get_top_logprobs()[last_token_idx];
     const auto& top_tokens =
         seq->logprob_state()->get_top_tokens()[last_token_idx];
+    const size_t candidate_topk = std::min<size_t>(
+        topk, std::min(top_logprobs.size(), top_tokens.size()));
+    if (candidate_topk == 0) {
+      add_self_candidate(i, seq);
+      continue;
+    }
+
     float base_logprob =
         seq->get_average_logprob() * num_generated_tokens - top_logprobs[0];
-
-    for (int idx = 0; idx < topk; ++idx) {
+    for (size_t idx = 0; idx < candidate_topk; ++idx) {
       float new_logprob = base_logprob + top_logprobs[idx];
-
       if (!topk_optimizer.worthInserting(new_logprob)) {
         break;
       }
 
-      auto new_token_ids = std::vector<int32_t>(token_ids);
-      new_token_ids[last_token_idx] = top_tokens[idx];
-      auto new_log_probs = log_probs;
-      new_log_probs[last_token_idx] = top_logprobs[idx];
-
       BeamCandidate candidate;
       candidate.seq_index = i;
       candidate.logprob_sum = new_logprob;
-      candidate.token_ids = std::move(new_token_ids);
-      candidate.logprobs = std::move(new_log_probs);
+      candidate.token_ids = std::vector<int32_t>(token_ids);
+      candidate.logprobs = log_probs;
+      candidate.token_ids[last_token_idx] = top_tokens[idx];
+      candidate.logprobs[last_token_idx] = top_logprobs[idx];
       topk_optimizer.insert(std::move(candidate));
     }
-  };
-
-  for (size_t i = 0; i < seq_size; ++i) {
-    compute_candidates_for_sequence(i);
   }
 
-  // std::vector<BeamCandidate> candidates = topk_optimizer.getTopKMove();
   std::vector<BeamCandidate> candidates = topk_optimizer.getTopKSorted();
+  if (candidates.empty()) {
+    return;
+  }
 
-  if (candidates.empty()) return;
+  std::vector<std::unique_ptr<Sequence>> result;
+  result.reserve(std::min(beam_width, candidates.size()));
+  std::unordered_set<size_t> reused_src;
+  for (size_t i = 0; i < beam_width && i < candidates.size(); ++i) {
+    const BeamCandidate& c = candidates[i];
+    auto& src_seq = sequences_[c.seq_index];
+    auto next_seq = std::make_unique<Sequence>(*src_seq);
 
-  auto update_for_sequence = [&](size_t work_id, size_t num_tasks_pre) {
-    std::unordered_set<int32_t> seq_idx_set;
-    for (size_t i = 0; i < num_tasks_pre; ++i) {
-      size_t task_id = work_id * num_tasks_pre + i;
-      if (task_id >= beam_width) break;
-
-      const BeamCandidate& c = candidates[task_id];
-      auto& base_seq = sequences_[task_id];
-      auto& src_seq = sequences_[c.seq_index];
-
-      CHECK_EQ(base_seq->num_tokens(), c.token_ids.size());
-      for (size_t token_idx = base_seq->num_prompt_tokens();
-           token_idx < base_seq->num_tokens();
-           token_idx++) {
-        Token new_token(c.token_ids[token_idx]);
-        new_token.logprob = c.logprobs[token_idx].has_value()
-                                ? c.logprobs[token_idx].value()
-                                : 0;
-        base_seq->update_token(token_idx, new_token);
-      }
-
-      bool need_swap = false;
-      if (seq_idx_set.find(c.seq_index) != seq_idx_set.end()) {
-        need_swap = true;
-      } else {
-        seq_idx_set.insert(c.seq_index);
-      }
-
-      base_seq->logprob_state()->set_acc_logprob(c.logprob_sum);
-      base_seq->logprob_state()->set_last_acc_token_idx(base_seq->num_tokens());
-
-      auto src_blocks = src_seq->kv_state().kv_blocks();
-      base_seq->kv_state().set_src_blocks(src_blocks, need_swap);
+    CHECK_EQ(next_seq->num_tokens(), c.token_ids.size());
+    for (size_t token_idx = next_seq->num_prompt_tokens();
+         token_idx < next_seq->num_tokens();
+         ++token_idx) {
+      Token new_token(c.token_ids[token_idx]);
+      new_token.logprob = c.logprobs[token_idx].has_value()
+                              ? c.logprobs[token_idx].value()
+                              : 0.0f;
+      next_seq->update_token(token_idx, new_token);
     }
-  };
+    next_seq->logprob_state()->set_acc_logprob(c.logprob_sum);
+    next_seq->logprob_state()->set_last_acc_token_idx(next_seq->num_tokens());
 
-  CHECK_EQ(sequences_.size(), beam_width);
-  update_for_sequence(0, beam_width);
+    bool need_swap = !reused_src.insert(c.seq_index).second;
+    auto src_blocks = src_seq->kv_state().kv_blocks();
+    next_seq->kv_state().set_src_blocks(src_blocks, need_swap);
+    result.emplace_back(std::move(next_seq));
+  }
+
+  if (!result.empty()) {
+    sequences_ = std::move(result);
+  }
 }
 
 void SequencesGroup::finish() {
@@ -342,6 +335,21 @@ void SequencesGroup::generate_multi_round_output(
     out.text = tokenizer.decode(Slice<int32_t>{gen_ids.data(), gen_ids.size()},
                                 sequence_params_.skip_special_tokens);
     out.token_ids = std::move(gen_ids);
+    if (FLAGS_output_rec_logprobs && !out.token_ids.empty()) {
+      float beam_logprob = (b < last_lps.size()) ? last_lps[b] : -9999.0f;
+      out.logprobs.emplace();
+      auto append_logprob = [&](int32_t token_id) {
+        LogProb token_logprob;
+        token_logprob.token_id = token_id;
+        token_logprob.token = tokenizer.id_to_token(token_id);
+        token_logprob.logprob = beam_logprob;
+        out.logprobs->emplace_back(std::move(token_logprob));
+      };
+      out.logprobs->reserve(out.token_ids.size());
+      for (int32_t token_id : out.token_ids) {
+        append_logprob(token_id);
+      }
+    }
 
     auto fr = base.finish_reason().to_string();
     if (fr.has_value()) {

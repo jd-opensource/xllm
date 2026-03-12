@@ -45,21 +45,13 @@ class ProcessGroup {
   virtual ~ProcessGroup() = default;
 
   int32_t rank() const {
-#if defined(USE_NPU)
-    return rank_;
-#else
     CHECK(pg_ != nullptr) << "Process group is not initialized.";
     return pg_->getRank();
-#endif
   }
 
   int32_t world_size() const {
-#if defined(USE_NPU)
-    return world_size_;
-#else
     CHECK(pg_ != nullptr) << "Process group is not initialized.";
     return pg_->getSize();
-#endif
   }
 
   const torch::Device& device() const { return device_; }
@@ -71,6 +63,11 @@ class ProcessGroup {
   // allgather: gather tensors from all processes and concatenate them.
   virtual void allgather(const torch::Tensor& input,
                          std::vector<torch::Tensor>& outputs);
+
+  // allgather_async: enqueue allgather and return an async work handle.
+  virtual c10::intrusive_ptr<c10d::Work> allgather_async(
+      const torch::Tensor& input,
+      std::vector<torch::Tensor>& outputs);
 
   // reduce_scatter: reduce the input tensor across all processes, scatter the
   // reduced chunks to all processes so that each process gets one chunk of the

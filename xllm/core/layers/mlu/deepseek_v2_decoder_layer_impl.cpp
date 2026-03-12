@@ -109,13 +109,17 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
   bool enable_moe_all2all =
       enable_deep_ep_ && all_dp_ranks_are_decode(input_params);
   PaddingInfo pad_info;
+  torch::Tensor sp_post_attn_local;
 
   // Pre-attention norm
   residual = x;
   x = std::get<0>(input_norm_->forward(x));
 
   // Attention
-  x = attention_->forward(positions, x, attn_metadata, kv_cache);
+  x = attention_->forward(
+      positions, x, attn_metadata, kv_cache, sequence_parallel_context_);
+  const bool use_sp_output =
+      sequence_parallel_context_ != nullptr && attention_->can_use_sp();
 
   // we apply communcation here to avoid implicit communcation in deepseek
   // attention layer. for dp + ep, we will use reduce scatter here instead of
@@ -133,14 +137,18 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
       pad_info = pad_result.second;
       x = xllm::parallel_state::reduce_scatter(x, parallel_args_.tp_group_);
     }
+    residual = x;
+    x = std::get<0>(post_norm_->forward(x));
+  } else if (use_sp_output) {
+    sp_post_attn_local = x + residual.value();
+    x = std::get<0>(post_norm_->forward(sp_post_attn_local));
+    x = v32_sp::all_gather_across_ranks(x, *sequence_parallel_context_);
   } else {
     x = xllm::parallel_state::reduce(x, parallel_args_.tp_group_);
     x = x + residual.value();
+    residual = x;
+    x = std::get<0>(post_norm_->forward(x));
   }
-
-  // Post-attention norm
-  residual = x;
-  x = std::get<0>(post_norm_->forward(x));
 
   // MLP forward
   if (moe_mlp_) {
@@ -150,7 +158,12 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
   }
 
   // add up residual after mlp/moe
-  x = x + residual.value();
+  if (use_sp_output) {
+    x = v32_sp::slice_local_packed(x, *sequence_parallel_context_);
+    x = x + sp_post_attn_local;
+  } else {
+    x = x + residual.value();
+  }
 
   if (enable_moe_all2all && parallel_args_.tp_group_->world_size() > 1) {
     // unpadding the output after all gather if tp size > 1

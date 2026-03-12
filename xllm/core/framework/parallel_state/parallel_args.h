@@ -115,6 +115,11 @@ struct ParallelArgs {
   ProcessGroup* process_group_ = nullptr;
   ProcessGroup* dp_local_process_group_ = nullptr;
   ProcessGroup* tp_group_ = nullptr;
+  // Sequence-parallel communication group used by prefill attention.
+  // In the current implementation this aliases the TP group because SP uses
+  // the same rank set during prefill, but it remains a separate handle so the
+  // SP communication policy can evolve independently from TP.
+  ProcessGroup* sp_group_ = nullptr;
   ProcessGroup* moe_ep_group_ = nullptr;
   ProcessGroup* moe_tp_group_ = nullptr;
 };

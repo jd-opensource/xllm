@@ -187,7 +187,7 @@ inline size_t get_mm_item_size(const MMDataItem& mm_item) {
   total += type_size<uint32_t> * 2;
 
   // prefix_cache
-  total += MURMUR_HASH3_VALUE_LEN;
+  total += XXH3_128BITS_HASH_VALUE_LEN;
   total += type_size<uint32_t>;
 
   return total;
@@ -565,8 +565,8 @@ inline void write_mm_item(char*& buffer, const MMDataItem& item) {
   write_data(buffer, state.token_pos().length);
 
   // write prefix_cache
-  memcpy(buffer, state.prefix_cache().key.data, MURMUR_HASH3_VALUE_LEN);
-  buffer += MURMUR_HASH3_VALUE_LEN;
+  memcpy(buffer, state.prefix_cache().key.data, XXH3_128BITS_HASH_VALUE_LEN);
+  buffer += XXH3_128BITS_HASH_VALUE_LEN;
   write_data(buffer, state.prefix_cache().cached_token_num);
 }
 
@@ -967,10 +967,11 @@ inline void read_mm_item(const char*& buffer,
   read_data(buffer, state.mutable_token_pos().length, device_buffer);
 
   // read prefix_cache
-  std::memcpy(
-      state.mutable_prefix_cache().key.data, buffer, MURMUR_HASH3_VALUE_LEN);
-  buffer += MURMUR_HASH3_VALUE_LEN;
-  safe_advance_buffer(device_buffer, MURMUR_HASH3_VALUE_LEN);
+  std::memcpy(state.mutable_prefix_cache().key.data,
+              buffer,
+              XXH3_128BITS_HASH_VALUE_LEN);
+  buffer += XXH3_128BITS_HASH_VALUE_LEN;
+  safe_advance_buffer(device_buffer, XXH3_128BITS_HASH_VALUE_LEN);
   read_data(
       buffer, state.mutable_prefix_cache().cached_token_num, device_buffer);
 }

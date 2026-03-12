@@ -82,6 +82,8 @@ struct All2AllTestParams {
   int64_t batch_size;
   int64_t seq_len;
   bool is_smoothquant;
+  int64_t moe_weight_bits = 8;
+  int64_t group_size = 0;
   // Expected output stats (used when perform_precise_validation is true)
   double expected_min = 0.0;
   double expected_max = 0.0;
@@ -110,12 +112,14 @@ ModelArgs create_model_args(const All2AllTestParams& params) {
 }
 
 // Helper to create quant args
-QuantArgs create_quant_args(bool is_smoothquant) {
+QuantArgs create_quant_args(const All2AllTestParams& params) {
   QuantArgs args;
-  if (is_smoothquant) {
+  if (params.is_smoothquant) {
     args.quant_method() = "smoothquant";
     args.bits() = 8;
     args.activation_dynamic() = true;
+    args.moe_weight_bits() = params.moe_weight_bits;
+    args.group_size() = params.group_size;
   }
   return args;
 }
@@ -126,6 +130,9 @@ std::unordered_map<std::string, torch::Tensor> create_all2all_test_weights(
     int64_t hidden_size,
     int64_t intermediate_size,
     bool is_smoothquant,
+    int64_t moe_weight_bits,
+    int64_t group_size,
+    int64_t world_size,
     const torch::Device& device) {
   std::unordered_map<std::string, torch::Tensor> weight_dict;
 
@@ -134,7 +141,20 @@ std::unordered_map<std::string, torch::Tensor> create_all2all_test_weights(
     std::string seed_prefix =
         "fused_moe_all2all_tests.expert_" + std::to_string(expert_id);
 
-    if (is_smoothquant) {
+    if (is_smoothquant && moe_weight_bits == 4) {
+      CHECK_GT(group_size, 0);
+      CHECK_EQ(intermediate_size % world_size, 0);
+      const int64_t local_intermediate_size = intermediate_size / world_size;
+      test::append_w4a8_expert_weights(weight_dict,
+                                       expert_prefix,
+                                       seed_prefix,
+                                       hidden_size,
+                                       intermediate_size,
+                                       intermediate_size,
+                                       local_intermediate_size,
+                                       group_size,
+                                       device);
+    } else if (is_smoothquant) {
       // Create quantized weights using seeded tensors
       auto gate_weight_fp =
           test::seeded_tensor(seed_prefix + ".gate_proj",
@@ -264,7 +284,7 @@ int32_t run_all2all_basic_test_child(All2AllTestParams params) {
 
     // 6. Create model args and quant args
     ModelArgs model_args = create_model_args(params);
-    QuantArgs quant_args = create_quant_args(params.is_smoothquant);
+    QuantArgs quant_args = create_quant_args(params);
 
     // 7. Create FusedMoE
     FusedMoE fused_moe(FusedMoEImpl(model_args,
@@ -278,6 +298,9 @@ int32_t run_all2all_basic_test_child(All2AllTestParams params) {
                                                    params.hidden_size,
                                                    params.intermediate_size,
                                                    params.is_smoothquant,
+                                                   params.moe_weight_bits,
+                                                   params.group_size,
+                                                   params.world_size,
                                                    device);
     StateDict state_dict(weight_dict);
     fused_moe->load_state_dict(state_dict);
@@ -510,6 +533,29 @@ TEST_F(FusedMoEAll2AllMultiDeviceTest, SmoothQuantAll2AllPreciseValidation) {
         params.perform_precise_validation = true;
         return params;
       });
+}
+
+TEST_F(FusedMoEAll2AllMultiDeviceTest, W4A8All2AllSmoke) {
+  run_test_with_params(run_all2all_smoothquant_test_child,
+                       [](int32_t /*rank*/) {
+                         All2AllTestParams params;
+                         params.rank = 0;
+                         params.world_size = 2;
+                         params.port = 29505;
+                         params.host = "127.0.0.1";
+                         params.device_index = -1;
+                         params.hidden_size = 512;
+                         params.intermediate_size = 256;
+                         params.num_experts = 4;
+                         params.top_k = 2;
+                         params.batch_size = 2;
+                         params.seq_len = 4;
+                         params.is_smoothquant = true;
+                         params.moe_weight_bits = 4;
+                         params.group_size = 128;
+                         params.perform_precise_validation = false;
+                         return params;
+                       });
 }
 
 }  // namespace test

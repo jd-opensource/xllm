@@ -21,10 +21,10 @@ limitations under the License.
 
 namespace xllm {
 
-class Glm5MoeMtpModelImpl : public MtpModelImplBase<DeepseekV32DecoderLayer> {
+class GlmMoeDsaMtpModelImpl : public MtpModelImplBase<DeepseekV32DecoderLayer> {
  public:
-  Glm5MoeMtpModelImpl(const ModelContext& context)
-      : MtpModelImplBase<DeepseekV32DecoderLayer>("glm5_moe_mtp", context) {
+  GlmMoeDsaMtpModelImpl(const ModelContext& context)
+      : MtpModelImplBase<DeepseekV32DecoderLayer>("glm_moe_dsa_mtp", context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
@@ -40,21 +40,21 @@ class Glm5MoeMtpModelImpl : public MtpModelImplBase<DeepseekV32DecoderLayer> {
         options);
   }
 };
-TORCH_MODULE(Glm5MoeMtpModel);
+TORCH_MODULE(GlmMoeDsaMtpModel);
 
-class Glm5MoeMtpForCausalLMImpl
-    : public MtpForCausalLMImplBase<Glm5MoeMtpModel> {
+class GlmMoeDsaMtpForCausalLMImpl
+    : public MtpForCausalLMImplBase<GlmMoeDsaMtpModel> {
  public:
-  Glm5MoeMtpForCausalLMImpl(const ModelContext& context)
-      : MtpForCausalLMImplBase<Glm5MoeMtpModel>(context) {}
+  GlmMoeDsaMtpForCausalLMImpl(const ModelContext& context)
+      : MtpForCausalLMImplBase<GlmMoeDsaMtpModel>(context) {}
 };
-TORCH_MODULE(Glm5MoeMtpForCausalLM);
+TORCH_MODULE(GlmMoeDsaMtpForCausalLM);
 
 // register the causal model
-REGISTER_CAUSAL_MODEL(glm5_moe_mtp, Glm5MoeMtpForCausalLM);
+REGISTER_CAUSAL_MODEL(glm_moe_dsa_mtp, GlmMoeDsaMtpForCausalLM);
 
-REGISTER_MODEL_ARGS(glm5_moe_mtp, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "glm5_moe_mtp");
+REGISTER_MODEL_ARGS(glm_moe_dsa_mtp, [&] {
+  LOAD_ARG_OR(model_type, "model_type", "glm_moe_dsa_mtp");
   LOAD_ARG_OR(dtype, "dtype", "");
   LOAD_ARG_OR(attention_bias, "attention_bias", false);
   LOAD_ARG_OR(attention_dropout, "attention_dropout", 0.0f);

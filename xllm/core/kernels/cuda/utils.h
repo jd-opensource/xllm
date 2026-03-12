@@ -27,12 +27,29 @@ limitations under the License.
 
 #include <string>
 #include <tuple>
+#include <type_traits>
 
 #include "core/util/utils.h"
+
+#if defined(__CUDACC__) || defined(_NVHPC_CUDA)
+#define HOST_DEVICE_INLINE __host__ __device__ __forceinline__
+#define DEVICE_INLINE __device__ __forceinline__
+#define HOST_INLINE __host__ __forceinline__
+#else
+#define HOST_DEVICE_INLINE inline
+#define DEVICE_INLINE inline
+#define HOST_INLINE inline
+#endif
 
 namespace ffi = tvm::ffi;
 
 namespace xllm::kernel::cuda {
+
+template <typename T>
+HOST_DEVICE_INLINE constexpr std::enable_if_t<std::is_integral_v<T>, T>
+ceil_div(T a, T b) {
+  return (a + b - 1) / b;
+}
 
 // torch tensor is only on cpu
 torch::Tensor get_cache_buffer(const int32_t seq_len,

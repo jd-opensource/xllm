@@ -14,6 +14,7 @@ cc_library(
     vmm_api.h
     shared_vmm_allocator.h
     vmm_torch_allocator.h
+    $<$<BOOL:${USE_CUDA}>:cuda/cuda_utils.h>
   SRCS
     stream.cpp
     device.cpp

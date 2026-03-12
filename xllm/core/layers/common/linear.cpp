@@ -122,6 +122,14 @@ torch::Tensor load_max_input_scale(const StateDict& state_dict,
 // ============================================================================
 // Performs FP8 W8A8 quantized linear: input quantization + scaled matmul.
 // Consolidates repeated logic from Column/QKV/RowParallelLinear forward paths.
+//
+// Performance Optimization:
+// - If input is already FP8 (from fused RMSNorm+FP8 quantization), skip
+//   quantization step and use input_scale directly. This avoids redundant
+//   memory reads/writes.
+// - For non-FP8 inputs, quantization is performed based on input_scale:
+//   - input_scale provided: static quantization (faster, no absmax compute)
+//   - input_scale not provided: dynamic quantization (computes absmax)
 
 torch::Tensor fp8_linear_forward(
     const torch::Tensor& input,
@@ -130,17 +138,31 @@ torch::Tensor fp8_linear_forward(
     const std::optional<torch::Tensor>& input_scale,
     const std::optional<torch::Tensor>& bias,
     at::ScalarType output_dtype) {
-  // Flatten input to 2D for quantization
+  // Flatten input to 2D for matmul
   auto input_2d = input.view({-1, input.size(-1)});
 
-  // Quantize input to FP8 (static or dynamic based on input_scale presence)
-  xllm::kernel::Fp8ScaledQuantizeParams quantize_params;
-  quantize_params.input = input_2d;
-  quantize_params.output = std::nullopt;
-  quantize_params.scale = input_scale;
+  torch::Tensor quantized_input;
+  torch::Tensor a_scale;
 
-  auto [quantized_input, a_scale] =
-      xllm::kernel::fp8_scaled_quantize(quantize_params);
+  // Check if input is already FP8 quantized (from fused RMSNorm+FP8)
+  if (input.dtype() == torch::kFloat8_e4m3fn) {
+    // Input is already FP8, use directly (skip quantization)
+    // This is the fast path when using fused RMSNorm+FP8 quantization
+    CHECK(input_scale.has_value())
+        << "input_scale must be provided when input is already FP8";
+    quantized_input = input_2d;
+    a_scale = input_scale.value();
+  } else {
+    // Input is not FP8, perform quantization
+    // (static if input_scale provided, dynamic otherwise)
+    xllm::kernel::Fp8ScaledQuantizeParams quantize_params;
+    quantize_params.input = input_2d;
+    quantize_params.output = std::nullopt;
+    quantize_params.scale = input_scale;
+
+    std::tie(quantized_input, a_scale) =
+        xllm::kernel::fp8_scaled_quantize(quantize_params);
+  }
 
   // FP8 scaled matmul
   xllm::kernel::Fp8ScaledMatmulParams matmul_params;
@@ -176,7 +198,7 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
     const QuantArgs& quant_args,
     ProcessGroup* process_group,
     const torch::TensorOptions& options,
-    const FusedLinearExtraArgs& linear_extra_args)
+    const LinearExtraArgs& linear_extra_args)
     : gather_output_(gather_output),
       quant_args_(quant_args),
       process_group_(process_group),
@@ -184,10 +206,14 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
       linear_extra_args_(linear_extra_args) {
   rank_ = process_group_->rank();
   world_size_ = process_group_->world_size();
-  CHECK(out_features % world_size_ == 0)
+  const bool use_full_weight_storage =
+      linear_extra_args_.use_full_weight_storage;
+  weight_rank_ = use_full_weight_storage ? 0 : rank_;
+  weight_world_size_ = use_full_weight_storage ? 1 : world_size_;
+  CHECK(out_features % weight_world_size_ == 0)
       << "out_features " << out_features << " not divisible by world_size "
-      << world_size_;
-  const int64_t out_features_per_partition = out_features / world_size_;
+      << weight_world_size_;
+  const int64_t out_features_per_partition = out_features / weight_world_size_;
   // Note: torch.nn.functional.linear performs XA^T + b and as a result
   // we allocate the transpose.
   if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
@@ -243,13 +269,106 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
   }
 }
 
-torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
-  input = input.to(device_);
-  auto bias =
+ColumnParallelLinearImpl::WeightView ColumnParallelLinearImpl::get_w_view()
+    const {
+  WeightView weight_view;
+  weight_view.weight =
+      weight_.defined() ? std::optional<torch::Tensor>(weight_) : std::nullopt;
+  weight_view.qweight = qweight_.defined()
+                            ? std::optional<torch::Tensor>(qweight_)
+                            : std::nullopt;
+  weight_view.per_channel_scale =
+      per_channel_scale_.defined()
+          ? std::optional<torch::Tensor>(per_channel_scale_)
+          : std::nullopt;
+  weight_view.bias =
       bias_.defined() ? std::optional<torch::Tensor>(bias_) : std::nullopt;
+  return weight_view;
+}
+
+ColumnParallelLinearImpl::WeightView ColumnParallelLinearImpl::get_tp_view()
+    const {
+  CHECK(linear_extra_args_.use_full_weight_storage)
+      << "get_tp_view requires full-weight storage.";
+  const int64_t out_features =
+      quant_args_.quant_method() == kQuantMethodSmoothquant ? qweight_.size(0)
+                                                            : weight_.size(0);
+  CHECK_EQ(out_features % world_size_, 0)
+      << "full output features must be divisible by tp_world_size.";
+  const int64_t out_features_per_partition = out_features / world_size_;
+  const int64_t output_offset = rank_ * out_features_per_partition;
+
+  WeightView weight_view;
+  weight_view.weight = weight_.defined()
+                           ? std::optional<torch::Tensor>(weight_.narrow(
+                                 0, output_offset, out_features_per_partition))
+                           : std::nullopt;
+  weight_view.qweight = qweight_.defined()
+                            ? std::optional<torch::Tensor>(qweight_.narrow(
+                                  0, output_offset, out_features_per_partition))
+                            : std::nullopt;
+  weight_view.per_channel_scale =
+      per_channel_scale_.defined()
+          ? std::optional<torch::Tensor>(per_channel_scale_.narrow(
+                0, output_offset, out_features_per_partition))
+          : std::nullopt;
+  weight_view.bias = bias_.defined()
+                         ? std::optional<torch::Tensor>(bias_.narrow(
+                               0, output_offset, out_features_per_partition))
+                         : std::nullopt;
+  return weight_view;
+}
+
+torch::Tensor ColumnParallelLinearImpl::weight_tp() const {
+  if (!linear_extra_args_.use_full_weight_storage) {
+    return weight();
+  }
+  WeightView weight_view = get_tp_view();
+  if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
+    CHECK(weight_view.qweight.has_value());
+    return *weight_view.qweight;
+  }
+  CHECK(weight_view.weight.has_value());
+  return *weight_view.weight;
+}
+
+torch::Tensor ColumnParallelLinearImpl::per_channel_scale_tp() const {
+  if (!linear_extra_args_.use_full_weight_storage) {
+    return per_channel_scale();
+  }
+  WeightView weight_view = get_tp_view();
+  CHECK(weight_view.per_channel_scale.has_value());
+  return *weight_view.per_channel_scale;
+}
+
+torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input,
+                                                bool use_full_w) {
+  input = input.to(device_);
+  const bool has_full_w = linear_extra_args_.use_full_weight_storage;
+  CHECK(!use_full_w || has_full_w)
+      << "use_full_w requires full-weight storage.";
+  const bool use_tp_view = !has_full_w || !use_full_w;
+  auto output = forward_with_weight_view(
+      input, has_full_w && use_tp_view ? get_tp_view() : get_w_view());
+
+  if (world_size_ > 1 && gather_output_ && use_tp_view) {
+    output = xllm::parallel_state::gather(output, process_group_);
+  }
+  return output;
+}
+
+torch::Tensor ColumnParallelLinearImpl::forward_with_weight_view(
+    torch::Tensor input,
+    const WeightView& weight_view) {
+  auto bias = weight_view.bias;
 
   torch::Tensor output;
   if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
+    CHECK(weight_view.qweight.has_value())
+        << "qweight is required for smoothquant.";
+    CHECK(weight_view.per_channel_scale.has_value())
+        << "per_channel_scale is required for smoothquant.";
+
     torch::Tensor quantized_input;
     torch::Tensor input_scale;
 
@@ -271,13 +390,11 @@ torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
     std::tie(quantized_input, input_scale) =
         xllm::kernel::scaled_quantize(quantize_params);
 
-    // For SmoothQuant, use scaled_matmul with quantization parameters
-    // for now, we only support w8a8 quantization
     xllm::kernel::ScaledMatmulParams matmul_params;
     matmul_params.a = quantized_input;
-    matmul_params.b = qweight_;
+    matmul_params.b = *weight_view.qweight;
     matmul_params.a_scale = input_scale;
-    matmul_params.b_scale = per_channel_scale_;
+    matmul_params.b_scale = *weight_view.per_channel_scale;
     matmul_params.output_dtype = output_dtype_;
     matmul_params.bias = bias;
     matmul_params.c = std::nullopt;
@@ -303,24 +420,20 @@ torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
     output = fp8_linear_forward(
         input, weight_, weight_scale_, scale, bias, output_dtype_);
   } else {
-    // For unquantized case, use regular matmul
+    CHECK(weight_view.weight.has_value());
     xllm::kernel::MatmulParams matmul_params;
     matmul_params.a = input;
-    matmul_params.b = weight_;
+    matmul_params.b = *weight_view.weight;
     matmul_params.bias = bias;
     output = xllm::kernel::matmul(matmul_params);
-  }
-
-  if (world_size_ > 1 && gather_output_) {
-    output = xllm::parallel_state::gather(output, process_group_);
   }
   return output;
 }
 
 // load the weight from the checkpoint
 void ColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
-  const int64_t rank = rank_;
-  const int64_t world_size = world_size_;
+  const int64_t rank = weight_rank_;
+  const int64_t world_size = weight_world_size_;
 
   // load and merge the weights on dim 0
   // If quant_args_ indicates SmoothQuant, load qweight; otherwise, load
@@ -351,8 +464,8 @@ void ColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
 void ColumnParallelLinearImpl::load_state_dict(
     const StateDict& state_dict,
     const std::vector<std::string>& prefixes) {
-  const int64_t rank = rank_;
-  const int64_t world_size = world_size_;
+  const int64_t rank = weight_rank_;
+  const int64_t world_size = weight_world_size_;
 
   // load and merge the weights on dim 0
   // If quant_args_ indicates SmoothQuant, load qweight
@@ -429,6 +542,14 @@ void ColumnParallelLinearImpl::load_state_dict(
   if (bias_.defined()) {
     LOAD_FUSED_WEIGHT(bias, 0);
   }
+}
+
+std::optional<torch::Tensor> ColumnParallelLinearImpl::get_input_scale() const {
+  if (quant_args_.quant_method() == kQuantMethodFp8 &&
+      !quant_args_.activation_dynamic() && input_scale_.defined()) {
+    return input_scale_;
+  }
+  return std::nullopt;
 }
 
 QKVParallelLinearImpl::QKVParallelLinearImpl(
@@ -604,6 +725,15 @@ void QKVParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
+std::optional<torch::Tensor> QKVParallelLinearImpl::get_input_scale() const {
+  if (quant_args_.quant_method() == kQuantMethodFp8 &&
+      !quant_args_.activation_dynamic() && input_scale_.defined()) {
+    // input_scale_ is already reduced to per-tensor scale in load_state_dict.
+    return input_scale_;
+  }
+  return std::nullopt;
+}
+
 // Linear layer with row parallelism.
 RowParallelLinearImpl::RowParallelLinearImpl(
     int64_t in_features,
@@ -614,7 +744,7 @@ RowParallelLinearImpl::RowParallelLinearImpl(
     const QuantArgs& quant_args,
     ProcessGroup* process_group,
     const torch::TensorOptions& options,
-    const FusedLinearExtraArgs& linear_extra_args)
+    const LinearExtraArgs& linear_extra_args)
     : input_is_parallelized_(input_is_parallelized),
       enable_result_reduction_(enable_result_reduction),
       quant_args_(quant_args),
@@ -622,10 +752,14 @@ RowParallelLinearImpl::RowParallelLinearImpl(
       linear_extra_args_(linear_extra_args) {
   rank_ = process_group_->rank();
   world_size_ = process_group_->world_size();
-  CHECK(in_features % world_size_ == 0)
+  const bool use_full_weight_storage =
+      linear_extra_args_.use_full_weight_storage;
+  weight_rank_ = use_full_weight_storage ? 0 : rank_;
+  weight_world_size_ = use_full_weight_storage ? 1 : world_size_;
+  CHECK(in_features % weight_world_size_ == 0)
       << "in_features " << in_features << " not divisible by world_size "
-      << world_size_;
-  const int64_t in_features_per_partition = in_features / world_size_;
+      << weight_world_size_;
+  const int64_t in_features_per_partition = in_features / weight_world_size_;
   // Allocate the transpose since linear performs XA^T.
   if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
     qweight_ = register_parameter(
@@ -678,24 +812,128 @@ RowParallelLinearImpl::RowParallelLinearImpl(
   }
 }
 
-torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
-  if (!input_is_parallelized_) {
-    input = xllm::parallel_state::scatter(input, process_group_);
+RowParallelLinearImpl::WeightView RowParallelLinearImpl::get_w_view() const {
+  WeightView weight_view;
+  if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
+    weight_view.qweight = qweight_;
+    weight_view.per_channel_scale = per_channel_scale_;
+    weight_view.smooth = smooth_;
+  } else {
+    weight_view.weight = weight_;
   }
+  if (bias_.defined() && rank_ == 0) {
+    weight_view.bias = bias_;
+  }
+  return weight_view;
+}
 
-  auto bias = (bias_.defined() && rank_ == 0)
-                  ? std::optional<torch::Tensor>(bias_)
-                  : std::nullopt;
+void RowParallelLinearImpl::build_tp_cache() {
+  if (!linear_extra_args_.use_full_weight_storage) {
+    tp_cache_.reset();
+    return;
+  }
+  const int64_t in_features =
+      quant_args_.quant_method() == kQuantMethodSmoothquant ? qweight_.size(1)
+                                                            : weight_.size(1);
+  CHECK_EQ(in_features % world_size_, 0)
+      << "full input features must be divisible by current TP world size.";
+  const int64_t in_features_per_partition = in_features / world_size_;
+  const int64_t input_offset = rank_ * in_features_per_partition;
+
+  CachedTPSlices cached_slices;
+  if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
+    cached_slices.qweight =
+        qweight_.narrow(1, input_offset, in_features_per_partition)
+            .contiguous();
+    cached_slices.smooth =
+        smooth_.narrow(0, input_offset, in_features_per_partition).contiguous();
+  } else {
+    cached_slices.weight =
+        weight_.narrow(1, input_offset, in_features_per_partition).contiguous();
+  }
+  tp_cache_ = std::move(cached_slices);
+}
+
+const RowParallelLinearImpl::CachedTPSlices& RowParallelLinearImpl::tp_cache()
+    const {
+  CHECK(tp_cache_.has_value())
+      << "current-rank TP weight cache is not initialized";
+  return *tp_cache_;
+}
+
+RowParallelLinearImpl::WeightView RowParallelLinearImpl::get_tp_view() const {
+  CHECK(linear_extra_args_.use_full_weight_storage)
+      << "get_tp_view requires full-weight storage.";
+  WeightView weight_view;
+  const auto& cached_slices = tp_cache();
+  if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
+    weight_view.qweight = cached_slices.qweight;
+    weight_view.per_channel_scale = per_channel_scale_;
+    weight_view.smooth = cached_slices.smooth;
+  } else {
+    weight_view.weight = cached_slices.weight;
+  }
+  if (bias_.defined() && rank_ == 0) {
+    weight_view.bias = bias_;
+  }
+  return weight_view;
+}
+
+torch::Tensor RowParallelLinearImpl::get_tp_input(
+    torch::Tensor input,
+    const WeightView& weight_view) const {
+  if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
+    CHECK(weight_view.qweight.has_value())
+        << "qweight is required for smoothquant.";
+  }
+  const int64_t in_features =
+      quant_args_.quant_method() == kQuantMethodSmoothquant ? qweight_.size(1)
+                                                            : weight_.size(1);
+  const int64_t in_features_per_partition =
+      quant_args_.quant_method() == kQuantMethodSmoothquant
+          ? weight_view.qweight->size(1)
+          : weight_view.weight->size(1);
+  const int64_t input_offset = rank_ * in_features_per_partition;
+
+  torch::Tensor local_input;
+  if (input.size(-1) == in_features_per_partition) {
+    local_input = input;
+  } else {
+    CHECK_EQ(input.size(-1), in_features)
+        << "input width must match either one TP partition or the stored "
+           "full-weight width.";
+    local_input =
+        input.narrow(/*dim=*/-1, input_offset, in_features_per_partition);
+  }
+  local_input = local_input.contiguous();
+
+  if (input_is_parallelized_) {
+    CHECK_EQ(local_input.size(-1), in_features_per_partition)
+        << "parallelized input width must match one TP partition after "
+           "selecting the TP-local slice.";
+  }
+  return local_input;
+}
+
+torch::Tensor RowParallelLinearImpl::forward_with_weight_view(
+    torch::Tensor input,
+    const WeightView& weight_view) {
+  auto bias = weight_view.bias;
   torch::Tensor output;
   if (quant_args_.quant_method() == kQuantMethodSmoothquant) {
+    CHECK(weight_view.smooth.has_value())
+        << "smooth is required for smoothquant.";
+    CHECK(weight_view.qweight.has_value())
+        << "qweight is required for smoothquant.";
+    CHECK(weight_view.per_channel_scale.has_value())
+        << "per_channel_scale is required for smoothquant.";
+
     torch::Tensor quantized_input;
     torch::Tensor input_scale;
 
-    // Call scaled_quantize: quantizes input tensor with int8 in
-    // 'dynamic_per_token' mode
     xllm::kernel::ScaledQuantizeParams quantize_params;
     quantize_params.x = input;
-    quantize_params.smooth = smooth_;
+    quantize_params.smooth = *weight_view.smooth;
     quantize_params.zero = std::nullopt;
     quantize_params.token_count = std::nullopt;
     quantize_params.gather_index = std::nullopt;
@@ -709,12 +947,11 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
     std::tie(quantized_input, input_scale) =
         xllm::kernel::scaled_quantize(quantize_params);
 
-    // for now, we only support w8a8 quantization
     xllm::kernel::ScaledMatmulParams matmul_params;
     matmul_params.a = quantized_input;
-    matmul_params.b = qweight_;
+    matmul_params.b = *weight_view.qweight;
     matmul_params.a_scale = input_scale;
-    matmul_params.b_scale = per_channel_scale_;
+    matmul_params.b_scale = *weight_view.per_channel_scale;
     matmul_params.output_dtype = output_dtype_;
     matmul_params.bias = bias;
     matmul_params.c = std::nullopt;
@@ -740,9 +977,10 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
     output = fp8_linear_forward(
         input, weight_, weight_scale_, scale, bias, output_dtype_);
   } else {
+    CHECK(weight_view.weight.has_value());
     xllm::kernel::MatmulParams matmul_params;
     matmul_params.a = input;
-    matmul_params.b = weight_;
+    matmul_params.b = *weight_view.weight;
     matmul_params.bias = bias;
     output = xllm::kernel::matmul(matmul_params);
   }
@@ -752,10 +990,29 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
   return output;
 }
 
+torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input,
+                                             bool use_full_w) {
+  const bool has_full_w = linear_extra_args_.use_full_weight_storage;
+  CHECK(!use_full_w || has_full_w)
+      << "use_full_w requires full-weight storage.";
+  if (!has_full_w) {
+    if (!input_is_parallelized_) {
+      input = xllm::parallel_state::scatter(input, process_group_);
+    }
+    return forward_with_weight_view(std::move(input), get_w_view());
+  }
+  if (use_full_w) {
+    return forward_with_weight_view(std::move(input), get_w_view());
+  }
+  WeightView weight_view = get_tp_view();
+  return forward_with_weight_view(get_tp_input(std::move(input), weight_view),
+                                  weight_view);
+}
+
 // load the weight from the checkpoint
 void RowParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
-  const int64_t rank = rank_;
-  const int64_t world_size = world_size_;
+  const int64_t rank = weight_rank_;
+  const int64_t world_size = weight_world_size_;
 
   // If quant_args_ indicates SmoothQuant, load qweight; otherwise, load
   // normal weight.
@@ -778,6 +1035,7 @@ void RowParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
   if (bias_.defined()) {
     LOAD_WEIGHT(bias);
   }
+  build_tp_cache();
 }
 
 // Linear layer with row parallelism.

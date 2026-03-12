@@ -40,57 +40,27 @@ void batch_decode(const std::string& uri,
                   std::optional<torch::Tensor>& output_lse,
                   bool use_tensor_core,
                   std::optional<torch::Tensor> qo_indptr) {
-  VLOG(kGraphExecutorLogVerboseLevel) << "plan_info: " << plan_info;
-
   if (use_tensor_core) {
-    torch::Tensor qo_indptr_to_use;
-    if (qo_indptr.has_value()) {
-      // Use provided qo_indptr from attn_metadata
-      // TODO: consturct qo_indptr in CUDA graph execution
-      qo_indptr_to_use = qo_indptr.value();
-      VLOG(kGraphExecutorLogVerboseLevel)
-          << "use provided qo_indptr in CUDA graph execution";
-    } else {
-      // Create qo_indptr if not provided (backward compatibility)
-      const int64_t batch_size = paged_kv_last_page_len.size(0);
-      torch::Tensor qo_indptr_host =
-          get_cache_buffer(batch_size + 1, torch::kCPU);
-      qo_indptr_to_use = qo_indptr_host.to(torch::kCUDA);
-    }
-
-    torch::Tensor v_scale = torch::Tensor();
-    auto [scale_v_tensor, scale_v_scalar] = split_scale_param(v_scale);
-
-    get_function(uri, "paged_run")(
-        to_ffi_tensor(float_workspace_buffer),
-        to_ffi_tensor(int_workspace_buffer),
-        plan_info,
-        to_ffi_tensor(query),
-        to_ffi_tensor(k_cache),
-        to_ffi_tensor(v_cache),
-        to_ffi_tensor(qo_indptr_to_use),
-        to_ffi_tensor(paged_kv_indptr),
-        to_ffi_tensor(paged_kv_indices),
-        to_ffi_tensor(paged_kv_last_page_len),
-        to_ffi_tensor(output),
-        output_lse.has_value() ? to_ffi_tensor(output_lse.value())
-                               : ffi::Optional<ffi::Tensor>(),
-        /*mask_mode_code=*/0,  // NON_CAUSAL
-        /*kv_layout_code=*/0,  // NHD layout
-        window_left,
-        support_pdl(),
-        /*maybe_custom_mask=*/ffi::Optional<ffi::Tensor>(),
-        /*maybe_mask_indptr=*/ffi::Optional<ffi::Tensor>(),
-        /*maybe_alibi_slopes=*/ffi::Optional<ffi::Tensor>(),
-        /*maybe_prefix_len_ptr=*/ffi::Optional<ffi::Tensor>(),
-        /*maybe_token_pos_in_items_ptr=*/ffi::Optional<ffi::Tensor>(),
-        /*maybe_max_item_len_ptr=*/ffi::Optional<ffi::Tensor>(),
-        /*logits_soft_cap=*/0.0,
-        sm_scale,
-        /*rope_rcp_scale=*/1.0,
-        /*rope_rcp_theta=*/1.0 / 10000.0,
-        /*token_pos_in_items_len=*/0);
+    batch_chunked_prefill(uri,
+                          plan_info,
+                          float_workspace_buffer,
+                          int_workspace_buffer,
+                          page_locked_int_workspace_buffer,
+                          query,
+                          k_cache,
+                          v_cache,
+                          paged_kv_indptr,
+                          paged_kv_indices,
+                          paged_kv_last_page_len,
+                          window_left,
+                          sm_scale,
+                          output,
+                          output_lse,
+                          qo_indptr,
+                          /*causal=*/false);
   } else {
+    VLOG(kGraphExecutorLogVerboseLevel) << "plan_info: " << plan_info;
+
     get_function(uri, "run")(
         to_ffi_tensor(float_workspace_buffer),
         to_ffi_tensor(int_workspace_buffer),

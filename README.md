@@ -84,7 +84,7 @@ limitations under the License. -->
 | Hardware | Example | Remark          |
 | -------- | ------- | --------------- |
 | NPU      | A2, A3  | HDK Driver 25.2.0 + |
-| MLU      | MLU590  |                 |
+| MLU      |         |                 |
 | ILU      | BI150   |                 |
 | MUSA     | S5000   |                 |
 

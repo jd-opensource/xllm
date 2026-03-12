@@ -16,6 +16,7 @@ limitations under the License.
 #include "deepseekv32_detector.h"
 
 #include <algorithm>
+#include <cctype>
 #include <sstream>
 
 #include "base_format_detector.h"
@@ -53,6 +54,144 @@ DeepSeekV32Detector::DeepSeekV32Detector() : BaseFormatDetector() {
       std::regex_constants::ECMAScript);
 
   prefix_parameter_end_call_ = {"</", "｜DSML｜", "parameter"};
+
+  // Streaming: one regex that matches with or without closing tag (like Python
+  // r'<｜DSML｜invoke\s+name="([^"]+)"\s*>(.*?)(</｜DSML｜invoke>|$)')
+  streaming_invoke_regex_ = std::regex(
+      "<｜DSML｜invoke\\s+name=\"([^\"]+)\"\\s*>([\\s\\S]*?)(</"
+      "｜DSML｜invoke>|$)",
+      std::regex_constants::ECMAScript);
+}
+
+// Dump parameters to JSON string with sorted keys for stable prefix comparison
+// across streaming chunks (unordered_map iteration order is undefined).
+static std::string params_to_json_sorted(
+    const std::unordered_map<std::string, nlohmann::json>& params) {
+  std::vector<std::string> keys;
+  keys.reserve(params.size());
+  for (const auto& p : params) {
+    keys.push_back(p.first);
+  }
+  std::sort(keys.begin(), keys.end());
+  nlohmann::json j = nlohmann::json::object();
+  for (const auto& k : keys) {
+    j[k] = params.at(k);
+  }
+  return j.dump(-1, ' ', false, nlohmann::json::error_handler_t::ignore);
+}
+
+static std::string strip_trailing_markdown_fence(const std::string& text) {
+  static const std::regex kTrailingFenceRegex(R"((?:\r?\n)?```[^\n\r`]*\s*$)",
+                                              std::regex_constants::ECMAScript);
+  return std::regex_replace(text, kTrailingFenceRegex, "");
+}
+
+static std::string strip_leading_markdown_fence(const std::string& text) {
+  static const std::regex kLeadingFenceRegex(R"(^\s*```[^\n\r`]*\r?\n?)",
+                                             std::regex_constants::ECMAScript);
+  return std::regex_replace(text, kLeadingFenceRegex, "");
+}
+
+static std::string strip_trailing_json_hint(const std::string& text) {
+  static const std::regex kTrailingJsonHintRegex(
+      R"((?:\r?\n)\s*json\s*$)",
+      std::regex_constants::ECMAScript | std::regex_constants::icase);
+  return std::regex_replace(text, kTrailingJsonHintRegex, "");
+}
+
+static std::string strip_trailing_placeholder_punctuation(
+    const std::string& text) {
+  static const std::regex kTrailingPlaceholderPunctRegex(
+      R"((?:^|(?:\r?\n))\s*[、，,。\.·…]{2,}\s*$)",
+      std::regex_constants::ECMAScript);
+  return std::regex_replace(text, kTrailingPlaceholderPunctRegex, "");
+}
+
+static std::string strip_leading_placeholder_punctuation(
+    const std::string& text) {
+  static const std::regex kLeadingPlaceholderPunctRegex(
+      R"(^\s*[、，,。\.·…]{2,}(?:\r?\n)?\s*)",
+      std::regex_constants::ECMAScript);
+  return std::regex_replace(text, kLeadingPlaceholderPunctRegex, "");
+}
+
+static std::string trim_line_trailing_spaces(const std::string& text) {
+  static const std::regex kSpacesBeforeNewlineRegex(
+      R"([ \t]+(\r?\n))", std::regex_constants::ECMAScript);
+  static const std::regex kSpacesAtEndRegex(R"([ \t]+$)",
+                                            std::regex_constants::ECMAScript);
+
+  std::string trimmed =
+      std::regex_replace(text, kSpacesBeforeNewlineRegex, "$1");
+  return std::regex_replace(trimmed, kSpacesAtEndRegex, "");
+}
+
+static std::string sanitize_text_before_tool_block(const std::string& text) {
+  std::string sanitized = text;
+  while (true) {
+    std::string updated = strip_trailing_markdown_fence(sanitized);
+    updated = strip_trailing_json_hint(updated);
+    updated = strip_trailing_markdown_fence(updated);
+    updated = strip_trailing_placeholder_punctuation(updated);
+
+    if (updated == sanitized) {
+      break;
+    }
+    sanitized = updated;
+  }
+  return trim_line_trailing_spaces(sanitized);
+}
+
+static bool ends_with_markdown_fence_prefix(const std::string& text) {
+  static const std::regex kTrailingFencePrefixRegex(
+      R"((?:\r?\n)?```[^\n\r`]*\s*$)", std::regex_constants::ECMAScript);
+  return std::regex_search(text, kTrailingFencePrefixRegex);
+}
+
+static bool split_trailing_empty_markdown_fence_block(
+    const std::string& text,
+    std::string* leading_text,
+    std::string* trailing_fence_block) {
+  static const std::regex kTrailingEmptyFenceBlockRegex(
+      R"(^([\s\S]*?)(```[^\n\r`]*\r?\n(?:\s*\r?\n)*```)[ \t\r\n]*$)",
+      std::regex_constants::ECMAScript);
+
+  std::smatch match;
+  if (!std::regex_match(text, match, kTrailingEmptyFenceBlockRegex) ||
+      match.size() < 3) {
+    return false;
+  }
+
+  if (leading_text != nullptr) {
+    *leading_text = match[1].str();
+  }
+  if (trailing_fence_block != nullptr) {
+    *trailing_fence_block = match[2].str();
+  }
+  return true;
+}
+
+static size_t find_trailing_whitespace_start(const std::string& text) {
+  size_t idx = text.size();
+  while (idx > 0 &&
+         std::isspace(static_cast<unsigned char>(text[idx - 1])) != 0) {
+    --idx;
+  }
+  return idx;
+}
+
+static std::string normalize_deferred_whitespace(const std::string& text) {
+  if (text.empty()) {
+    return text;
+  }
+
+  bool has_newline = (text.find('\n') != std::string::npos ||
+                      text.find('\r') != std::string::npos);
+  if (has_newline) {
+    return "\n";
+  }
+
+  return " ";
 }
 
 std::string DeepSeekV32Detector::trim_whitespace(std::string_view str) const {
@@ -392,10 +531,10 @@ StreamingParseResult DeepSeekV32Detector::detect_and_parse(
 
   // Extract normal_text: before function_calls tag or before first invoke tag
   if (has_function_calls_tag) {
-    normal_text = text.substr(0, idx);
+    normal_text = sanitize_text_before_tool_block(text.substr(0, idx));
   } else if (has_invoke_tag) {
     size_t invoke_pos = text.find("<｜DSML｜invoke");
-    normal_text = text.substr(0, invoke_pos);
+    normal_text = sanitize_text_before_tool_block(text.substr(0, invoke_pos));
   } else {
     normal_text = text;
   }
@@ -485,7 +624,8 @@ StreamingParseResult DeepSeekV32Detector::detect_and_parse(
         size_t json_start = text.find('{');
         if (json_start != std::string::npos &&
             json_start < normal_text.length()) {
-          normal_text = text.substr(0, json_start);
+          normal_text =
+              sanitize_text_before_tool_block(text.substr(0, json_start));
           normal_text = trim_whitespace(normal_text);
         }
       }
@@ -502,6 +642,13 @@ StreamingParseResult DeepSeekV32Detector::detect_and_parse(
 StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
     const std::string& new_text,
     const std::vector<JsonTool>& tools) {
+  // Align with ds32_de.py behavior: do not force-flush buffered tail on
+  // empty delta. This avoids leaking trailing placeholder tokens/fences that
+  // can appear right before tool-call generation in streaming output.
+  if (new_text.empty()) {
+    return StreamingParseResult("", {});
+  }
+
   buffer_ += new_text;
   std::string current_text = buffer_;
 
@@ -528,15 +675,75 @@ StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
     }
   }
 
-  // Check for JSON format markers
-  bool potentially_json =
+  bool ends_with_open_brace =
+      (!current_text_rstrip.empty() && current_text_rstrip.back() == '{');
+
+  bool ends_with_markdown_fence_hint =
+      ends_with_markdown_fence_prefix(current_text_rstrip);
+
+  std::string text_before_empty_fence_block;
+  std::string trailing_empty_fence_block;
+  bool has_trailing_empty_fence_block =
+      split_trailing_empty_markdown_fence_block(current_text,
+                                                &text_before_empty_fence_block,
+                                                &trailing_empty_fence_block);
+
+  // Detect incomplete JSON block robustly (handles split key chunks like
+  // "tool_ca" + "lls"), so we don't flush partial JSON as normal text.
+  bool potentially_json_block = false;
+  size_t first_brace = current_text.find('{');
+  if (first_brace != std::string::npos) {
+    int brace_count = 0;
+    bool in_string = false;
+    bool escape_next = false;
+    for (size_t i = first_brace; i < current_text.length(); ++i) {
+      char c = current_text[i];
+      if (escape_next) {
+        escape_next = false;
+        continue;
+      }
+      if (c == '\\') {
+        escape_next = true;
+        continue;
+      }
+      if (c == '"') {
+        in_string = !in_string;
+        continue;
+      }
+      if (in_string) {
+        continue;
+      }
+      if (c == '{') {
+        brace_count++;
+      } else if (c == '}') {
+        brace_count--;
+      }
+    }
+    potentially_json_block = (brace_count > 0);
+  }
+
+  bool has_json_tool_calls =
       (current_text.find("\"tool_calls\"") != std::string::npos ||
-       current_text.find("'tool_calls'") != std::string::npos ||
-       current_text.find("tool_calls") != std::string::npos);
+       current_text.find("'tool_calls'") != std::string::npos);
 
   if (!has_tool_call(current_text) && !potentially_dsml && !ends_with_prefix &&
-      !potentially_json) {
-    buffer_.clear();
+      !has_json_tool_calls && !ends_with_open_brace &&
+      !potentially_json_block) {
+    if (has_trailing_empty_fence_block) {
+      buffer_ = trailing_empty_fence_block;
+      std::string leading_text =
+          sanitize_text_before_tool_block(text_before_empty_fence_block);
+      leading_text = trim_whitespace(leading_text);
+      if (!leading_text.empty()) {
+        return StreamingParseResult(leading_text, {});
+      }
+      return StreamingParseResult("", {});
+    }
+
+    if (ends_with_markdown_fence_hint) {
+      return StreamingParseResult("", {});
+    }
+
     // Remove any stray closing tags
     std::string output_text = current_text;
     size_t pos = 0;
@@ -548,6 +755,26 @@ StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
            std::string::npos) {
       output_text.erase(pos, invoke_end_token_.length());
     }
+
+    output_text = sanitize_text_before_tool_block(output_text);
+    output_text = strip_leading_markdown_fence(output_text);
+    output_text = strip_leading_placeholder_punctuation(output_text);
+
+    // Keep minimal trailing whitespace in buffer to preserve token boundaries
+    // across chunks without accumulating excessive blank lines/spaces.
+    size_t trailing_ws_start = find_trailing_whitespace_start(output_text);
+    if (trailing_ws_start < output_text.size()) {
+      std::string emit_text = output_text.substr(0, trailing_ws_start);
+      buffer_ =
+          normalize_deferred_whitespace(output_text.substr(trailing_ws_start));
+      if (!emit_text.empty()) {
+        return StreamingParseResult(emit_text, {});
+      }
+      return StreamingParseResult("", {});
+    }
+
+    buffer_.clear();
+
     return StreamingParseResult(output_text, {});
   }
 
@@ -559,102 +786,107 @@ StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
   std::vector<ToolCallItem> all_calls;
 
   try {
-    // Check if we have JSON format (simpler to handle in streaming)
-    bool has_json = (current_text.find("\"tool_calls\"") != std::string::npos ||
-                     current_text.find("'tool_calls'") != std::string::npos);
-    bool has_dsml = (current_text.find(bot_token_) != std::string::npos ||
-                     current_text.find("<｜DSML｜invoke") != std::string::npos);
-
-    // For JSON format, try to parse complete JSON
-    if (has_json && !has_dsml) {
-      // Try to find complete JSON structure
-      auto json_calls = this->parse_json_tool_calls(current_text, tools);
-      if (!json_calls.empty()) {
-        // Found complete JSON tool calls, clear buffer
+    // Handle JSON tool_calls format in streaming mode.
+    // Only trigger on quoted key to avoid treating ordinary prose as JSON.
+    // If incomplete, keep buffering and wait for more chunks.
+    if (has_json_tool_calls && !potentially_dsml) {
+      // If the JSON object has started but is not closed yet, do not parse
+      // the tool_calls array early. Parsing too early can leak raw JSON into
+      // normal_text and then emit a trailing '}' in a later chunk.
+      if (potentially_json_block) {
+        // Stream out leading prose before the JSON object as soon as possible,
+        // then keep only JSON in the buffer to continue incremental parsing.
         size_t json_start = current_text.find('{');
-        if (json_start != std::string::npos) {
-          size_t json_end = current_text.rfind('}');
-          if (json_end != std::string::npos && json_end > json_start) {
-            buffer_ = current_text.substr(0, json_start) +
-                      current_text.substr(json_end + 1);
+        if (json_start != std::string::npos && json_start > 0) {
+          std::string leading_text = sanitize_text_before_tool_block(
+              current_text.substr(0, json_start));
+          leading_text = trim_whitespace(leading_text);
+          buffer_ = current_text.substr(json_start);
+          if (!leading_text.empty()) {
+            return StreamingParseResult(leading_text, {});
           }
         }
-        return StreamingParseResult("", json_calls);
+        return StreamingParseResult("", {});
       }
-      // Incomplete JSON, wait for more
+
+      auto json_calls = this->parse_json_tool_calls(current_text, tools);
+      if (!json_calls.empty()) {
+        for (size_t i = 0; i < json_calls.size(); ++i) {
+          json_calls[i].tool_index = static_cast<int32_t>(i);
+        }
+
+        // Remove parsed JSON block from normal text
+        std::string normal_text = current_text;
+        size_t json_start = current_text.find('{');
+        if (json_start != std::string::npos) {
+          int brace_count = 0;
+          bool in_string = false;
+          bool escape_next = false;
+          size_t json_end = std::string::npos;
+
+          for (size_t i = json_start; i < current_text.length(); ++i) {
+            char c = current_text[i];
+            if (escape_next) {
+              escape_next = false;
+              continue;
+            }
+            if (c == '\\') {
+              escape_next = true;
+              continue;
+            }
+            if (c == '"') {
+              in_string = !in_string;
+              continue;
+            }
+            if (in_string) {
+              continue;
+            }
+            if (c == '{') {
+              brace_count++;
+            } else if (c == '}') {
+              brace_count--;
+              if (brace_count == 0) {
+                json_end = i;
+                break;
+              }
+            }
+          }
+
+          if (json_end != std::string::npos) {
+            std::string prefix = sanitize_text_before_tool_block(
+                current_text.substr(0, json_start));
+            std::string suffix =
+                strip_leading_markdown_fence(current_text.substr(json_end + 1));
+            normal_text = prefix + suffix;
+          }
+        }
+
+        buffer_.clear();
+        return StreamingParseResult(normal_text, json_calls);
+      }
+
+      // Incomplete JSON tool_calls block, wait for more chunks.
       return StreamingParseResult("", {});
     }
 
-    // Continue with DSML format parsing (original logic)
+    // Continue with DSML format parsing
     // Loop to handle multiple consecutive invoke blocks
     while (true) {
-      // Determine the search text and offset for matching
-      size_t function_calls_start = current_text.find(bot_token_);
-      std::string search_text_for_invoke;
-      size_t offset_in_current_text = 0;
-
-      if (function_calls_start != std::string::npos) {
-        // Has function_calls tag, search within its content
-        size_t content_start = function_calls_start + bot_token_.length();
-        search_text_for_invoke = current_text.substr(content_start);
-        offset_in_current_text = content_start;
-      } else {
-        // No function_calls tag, search for invoke directly
-        size_t first_invoke = current_text.find("<｜DSML｜invoke");
-        if (first_invoke != std::string::npos) {
-          search_text_for_invoke = current_text.substr(first_invoke);
-          offset_in_current_text = first_invoke;
-        } else {
-          // No invoke found, break
-          break;
-        }
-      }
-
       std::smatch invoke_match;
-      // For streaming, we need to check for both complete and incomplete
-      // invokes First try the complete regex (with closing tag)
+      // Use single regex that matches with or without closing tag (aligned with
+      // Python ds32_de.py: group 3 is "</｜DSML｜invoke>" or "" for
+      // end-of-string)
       bool has_match = std::regex_search(
-          search_text_for_invoke, invoke_match, invoke_regex_);
+          current_text, invoke_match, streaming_invoke_regex_);
 
-      // Check if we have a complete invoke by checking if the full match
-      // contains closing tag
-      bool is_tool_end = false;
-      if (has_match && invoke_match.size() >= 3) {
-        // Check if the full match contains the closing tag
-        std::string full_match = invoke_match[0].str();
-        is_tool_end =
-            (full_match.find("</｜DSML｜invoke>") != std::string::npos);
-      } else {
-        // No complete match, check for incomplete invoke (for streaming)
-        // Use a pattern that matches without requiring closing tag
-        std::regex incomplete_invoke_regex(
-            "<｜DSML｜invoke\\s+name=\"([^\"]+)\"\\s*>([\\s\\S]*)$",
-            std::regex_constants::ECMAScript);
-        if (std::regex_search(search_text_for_invoke,
-                              invoke_match,
-                              incomplete_invoke_regex)) {
-          has_match = true;
-          is_tool_end = false;
-        } else {
-          break;
-        }
-      }
-
-      if (!has_match || invoke_match.size() < 3) {
+      if (!has_match || invoke_match.size() < 4) {
         break;
       }
 
       std::string func_name = trim_whitespace(invoke_match[1].str());
       std::string invoke_content = invoke_match[2].str();
-
-      // If it's a complete invoke, remove the closing tag from content if
-      // present
-      if (is_tool_end) {
-        size_t closing_pos = invoke_content.find("</｜DSML｜invoke>");
-        if (closing_pos != std::string::npos) {
-          invoke_content = invoke_content.substr(0, closing_pos);
-        }
-      }
+      // Group 3 is either "</｜DSML｜invoke>" (complete) or "" (incomplete)
+      bool is_tool_end = !invoke_match[3].str().empty();
 
       // Initialize state if this is the first tool call
       if (current_tool_id_ == -1) {
@@ -684,7 +916,8 @@ StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
       // 2. Parse current parameters (partial or complete)
       auto current_params =
           parse_parameters_from_xml(invoke_content, !is_tool_end);
-      std::string current_args_json = nlohmann::json(current_params).dump();
+      // Use sorted-key dump so find_common_prefix is stable across chunks
+      std::string current_args_json = params_to_json_sorted(current_params);
 
       // 3. Calculate and send incremental arguments
       size_t sent_len = streamed_args_for_tool_[current_tool_id_].length();
@@ -724,31 +957,21 @@ StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
 
       // Check if tool call is complete (has closing tag)
       if (is_tool_end) {
-        // Calculate the actual position in current_text
-        // invoke_match.position() is relative to search_text_for_invoke
-        size_t match_start_in_search_text = invoke_match.position();
+        // Remove completed invoke and everything before it.
+        // This mirrors ds32_de.py behavior:
+        // self._buffer = current_text[invoke_match.end():]
         size_t match_length = invoke_match.length();
-        size_t actual_start_in_current_text =
-            offset_in_current_text + match_start_in_search_text;
-        size_t actual_end_in_current_text =
-            actual_start_in_current_text + match_length;
+        size_t match_end_in_current_text =
+            invoke_match.position() + match_length;
+        buffer_ = current_text.substr(match_end_in_current_text);
+        current_text = buffer_;
 
-        // Remove the completed tool call from buffer
-        buffer_ = current_text.substr(0, actual_start_in_current_text) +
-                  current_text.substr(actual_end_in_current_text);
-        current_text = buffer_;  // Update for next iteration
-
-        // Move to next tool call
         current_tool_id_++;
         current_tool_name_sent_ = false;
-
-        // Continue loop to check for more invoke blocks
         continue;
-      } else {
-        // Tool call not complete yet, don't return anything
-        // Wait for more chunks until we see </｜DSML｜invoke>
-        break;
       }
+      // Incomplete invoke: return streamed calls so far, wait for more chunks
+      break;
     }
 
     // No more invoke blocks found

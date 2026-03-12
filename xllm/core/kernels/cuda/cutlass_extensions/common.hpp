@@ -46,6 +46,9 @@ inline int get_cuda_max_shared_memory_per_block_opt_in(int const device) {
 
 int32_t get_sm_version_num();
 
+// Get the number of SMs (Streaming Multiprocessors) on a CUDA device.
+int32_t get_device_sm_count(int device);
+
 // Kernel wrapper to guard against compilation on unsupported architectures.
 // Reduces binary size by excluding code paths that won't be executed.
 template <typename Kernel>

@@ -797,7 +797,7 @@ bool block_transfer_info_to_proto(
     proto::BlockTransferInfo pb_cache;
     pb_cache.set_src_block_id(info.src_block_id);
     pb_cache.set_dst_block_id(info.dst_block_id);
-    pb_cache.set_hash_key(info.hash_key, MURMUR_HASH3_VALUE_LEN);
+    pb_cache.set_hash_key(info.hash_key, XXH3_128BITS_HASH_VALUE_LEN);
 
     *pb_block_transfer_info->mutable_transfer_infos()->Add() =
         std::move(pb_cache);

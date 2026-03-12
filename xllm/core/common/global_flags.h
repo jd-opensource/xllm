@@ -51,7 +51,7 @@ DECLARE_bool(enable_prefix_cache);
 
 DECLARE_bool(enable_cache_upload);
 
-DECLARE_uint32(murmur_hash3_seed);
+DECLARE_uint32(xxh3_128bits_seed);
 
 DECLARE_int32(max_tokens_per_batch);
 
@@ -113,6 +113,8 @@ DECLARE_bool(enable_graph_vmm_pool);
 DECLARE_int32(max_tokens_for_graph_mode);
 
 DECLARE_bool(enable_chunked_prefill);
+
+DECLARE_bool(enable_prefill_sp);
 
 DECLARE_string(master_node_addr);
 
@@ -239,6 +241,8 @@ DECLARE_bool(enable_rec_fast_sampler);
 
 DECLARE_bool(enable_topk_sorted);
 
+DECLARE_bool(output_rec_logprobs);
+
 // --- qwen3 reranker config ---
 DECLARE_bool(enable_qwen3_reranker);
 
@@ -279,6 +283,8 @@ DECLARE_bool(enable_constrained_decoding);
 DECLARE_int32(max_decode_rounds);
 
 DECLARE_int32(beam_width);
+
+DECLARE_bool(enable_xattention_one_stage);
 
 DECLARE_bool(use_audio_in_video);
 

@@ -65,7 +65,8 @@ class MMDataItem {
     if (!valid()) return std::nullopt;
 
     const auto& itor = data_.find(key);
-    return itor != data_.end() ? std::get<T>(itor->second) : std::nullopt;
+    return itor != data_.end() ? std::optional<T>(std::get<T>(itor->second))
+                               : std::nullopt;
   }
 
   template <typename T>

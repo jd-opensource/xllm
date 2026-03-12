@@ -93,6 +93,8 @@ std::vector<std::shared_ptr<Request>> generate_request(
     const std::vector<int32_t>& max_tokens,
     std::optional<std::vector<bool>> offlines,
     std::optional<std::vector<int32_t>> priorities,
+    std::optional<std::vector<int32_t>> ns,
+    std::optional<std::vector<int32_t>> beam_widths,
     int32_t max_context_len) {
   std::vector<std::shared_ptr<Request>> requests;
   EXPECT_TRUE(prompt_lens.size() == max_tokens.size());
@@ -113,10 +115,24 @@ std::vector<std::shared_ptr<Request>> generate_request(
         batch_size, static_cast<int32_t>(RequestPriority::NORMAL));
   }
 
+  std::vector<int32_t> n_vec;
+  std::vector<int32_t> beam_width_vec;
+  if (ns.has_value()) {
+    n_vec = *ns;
+  } else {
+    n_vec = std::vector<int32_t>(batch_size, 1);
+  }
+  if (beam_widths.has_value()) {
+    beam_width_vec = *beam_widths;
+  } else {
+    beam_width_vec = std::vector<int32_t>(batch_size, 0);
+  }
+
   for (size_t i = 0; i < batch_size; ++i) {
     std::vector<int32_t> prompt_token_ids;
     prompt_token_ids.resize(prompt_lens[i]);
     RequestSamplingParam sampling_param;
+    sampling_param.beam_width = beam_width_vec[i];
     SchedulerParam scheduler_param;
     scheduler_param.offline = offline_vec[i];
     scheduler_param.priority = static_cast<RequestPriority>(priority_vec[i]);
@@ -132,7 +148,7 @@ std::vector<std::shared_ptr<Request>> generate_request(
                            scheduler_param,
                            stopping_checker,
                            prompt_lens[i] + 30000,
-                           1,
+                           n_vec[i],
                            1,
                            false,
                            false,
@@ -165,6 +181,14 @@ void update_requests(std::vector<std::shared_ptr<Request>> requests) {
   }
 }
 
+void make_request_decode_ready(const std::shared_ptr<Request>& request) {
+  for (auto& seq : request->sequences()) {
+    seq->kv_state().set_kv_cache_tokens_num(seq->num_prompt_tokens());
+    Token token(1);
+    seq->append_token(token);
+  }
+}
+
 }  // namespace
 
 // TEST-1:
@@ -190,6 +214,8 @@ TEST(ContinuousSchedulerTest, OnDecodePreemptOffDecode) {
                                    {10, 10},
                                    std::vector<bool>{true, false},
                                    std::vector<int32_t>{2, 2},
+                                   std::nullopt,
+                                   std::nullopt,
                                    30000);
   running_requests = requests;
   for (auto req : requests) {
@@ -248,6 +274,8 @@ TEST(ContinuousSchedulerTest, OnPrefillPreemptOffDecode) {
                                      {10, 10},
                                      std::vector<bool>{true, true},
                                      std::vector<int32_t>{2, 2},
+                                     std::nullopt,
+                                     std::nullopt,
                                      30000);
     running_requests = requests;
     for (auto req : requests) {
@@ -269,6 +297,8 @@ TEST(ContinuousSchedulerTest, OnPrefillPreemptOffDecode) {
                                          {10},
                                          std::vector<bool>{false},
                                          std::vector<int32_t>{2},
+                                         std::nullopt,
+                                         std::nullopt,
                                          30000);  // use 3 blocks
     scheduler->add_request(new_requests[0]);
     batch = scheduler->prepare_batch_test();
@@ -298,6 +328,8 @@ TEST(ContinuousSchedulerTest, OnPrefillPreemptOffDecode) {
                                      {10, 10},
                                      std::vector<bool>{true, false},
                                      std::vector<int32_t>{2, 2},
+                                     std::nullopt,
+                                     std::nullopt,
                                      30000);
     running_requests = requests;
     for (auto req : requests) {
@@ -309,8 +341,13 @@ TEST(ContinuousSchedulerTest, OnPrefillPreemptOffDecode) {
     EXPECT_TRUE(util::max(block_manager_pool->num_free_blocks()) == 0);
     update_requests(running_requests);
 
-    auto new_requests = generate_request(
-        {200}, {10}, std::vector<bool>{false}, std::vector<int32_t>{2}, 30000);
+    auto new_requests = generate_request({200},
+                                         {10},
+                                         std::vector<bool>{false},
+                                         std::vector<int32_t>{2},
+                                         std::nullopt,
+                                         std::nullopt,
+                                         30000);
     scheduler->add_request(new_requests[0]);
     batch = scheduler->prepare_batch_test();
     // online is still waiting
@@ -344,6 +381,8 @@ TEST(ContinuousSchedulerTest, PrioritySchedule) {
                                    {10, 10, 10},
                                    std::vector<bool>{false, false, false},
                                    std::vector<int32_t>{3, 3, 2},
+                                   std::nullopt,
+                                   std::nullopt,
                                    30000);
   for (auto req : requests) {
     scheduler->add_request(req);
@@ -364,6 +403,8 @@ TEST(ContinuousSchedulerTest, PrioritySchedule) {
                                        {10},
                                        std::vector<bool>{false},
                                        std::vector<int32_t>{1},
+                                       std::nullopt,
+                                       std::nullopt,
                                        30000);  // use 1 blocks
   scheduler->add_request(new_requests[0]);
   batch = scheduler->prepare_batch_test();
@@ -384,6 +425,49 @@ TEST(ContinuousSchedulerTest, PrioritySchedule) {
 }
 
 // TEST-4:
+// beam strict mode should not partially schedule one request.
+TEST(ContinuousSchedulerTest, BeamStrictNoPartialScheduling) {
+  ContinuousScheduler::Options opt =
+      create_scheduler_options(2, 8, 0, 1024, 1, "fcfs");
+  auto engine = std::make_unique<FakeEngine>(64, 32);
+  auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+  EXPECT_TRUE(scheduler != nullptr);
+
+  auto req1 = generate_request({64},
+                               {10},
+                               std::nullopt,
+                               std::nullopt,
+                               std::vector<int32_t>{1},
+                               std::vector<int32_t>{0},
+                               30000)[0];
+  make_request_decode_ready(req1);
+
+  auto beam_req = generate_request({64},
+                                   {10},
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::vector<int32_t>{1},
+                                   std::vector<int32_t>{2},
+                                   30000)[0];
+  // Manually duplicate beam sequence to simulate a decoded beam group.
+  beam_req->sequences().emplace_back(
+      std::make_unique<Sequence>(*beam_req->sequences()[0]));
+  ASSERT_EQ(beam_req->sequences().size(), 2u);
+  make_request_decode_ready(beam_req);
+
+  scheduler->add_request(req1);
+  scheduler->add_request(beam_req);
+  auto batch = scheduler->prepare_batch_test();
+  ASSERT_EQ(batch.size(), 1u);
+  EXPECT_EQ(batch[0].size(), 1u);
+  EXPECT_EQ(batch[0][0], req1->sequences()[0].get());
+  EXPECT_EQ(scheduler->get_running_requests().size(), 1u);
+  EXPECT_EQ(scheduler->get_waiting_requests_num(), 0u);
+  EXPECT_NE(batch[0][0], beam_req->sequences()[0].get());
+  EXPECT_NE(batch[0][0], beam_req->sequences()[1].get());
+}
+
+// TEST-5:
 // test latency budget
 TEST(ContinuousSchedulerTest, LatencySchedule) {
   // block is enough
@@ -413,8 +497,13 @@ TEST(ContinuousSchedulerTest, LatencySchedule) {
   // fit y=0.5x^2+10x
   profile_manager->train_prefill_time_predictor(created_profile_data);
 
-  auto requests = generate_request(
-      {10, 10, 10}, {10, 10, 10}, std::nullopt, std::nullopt, 30000);
+  auto requests = generate_request({10, 10, 10},
+                                   {10, 10, 10},
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   30000);
   // check if time equation fits well
   EXPECT_TRUE(
       static_cast<int32_t>(std::round(profile_manager->predict_step_time(

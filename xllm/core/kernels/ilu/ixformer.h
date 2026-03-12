@@ -60,6 +60,18 @@ torch::Tensor xllm_paged_attention(
     bool use_sqrt_alibi,
     const std::optional<torch::Tensor>& sinks);
 
+torch::Tensor ixformer_linear(torch::Tensor& input,
+                              torch::Tensor& weight,
+                              int64_t act_type,
+                              const std::optional<torch::Tensor>& bias,
+                              const std::optional<torch::Tensor>& out,
+                              const std::optional<bool> persistent);
+
+torch::Tensor ixformer_linear_ex(torch::Tensor& input,
+                                 torch::Tensor& weight,
+                                 const c10::optional<torch::Tensor>& bias,
+                                 const c10::optional<torch::Tensor>& out);
+
 void xllm_reshape_and_cache(torch::Tensor& key,
                             torch::Tensor& value,
                             torch::Tensor& key_cache,

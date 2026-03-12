@@ -19,6 +19,14 @@ limitations under the License.
 
 namespace xllm {
 
+class TestableJinjaChatTemplate : public JinjaChatTemplate {
+ public:
+  TestableJinjaChatTemplate(const TokenizerArgs& args)
+      : JinjaChatTemplate(args) {}
+
+  using JinjaChatTemplate::apply;
+};
+
 TEST(JinjaChatTemplate, OpenChatModel) {
   // clang-format off
   const std::string template_str =
@@ -46,7 +54,7 @@ TEST(JinjaChatTemplate, OpenChatModel) {
   args.chat_template(template_str);
   args.bos_token("");
   args.eos_token("<|end_of_turn|>");
-  JinjaChatTemplate template_(args);
+  TestableJinjaChatTemplate template_(args);
   auto result = template_.apply(messages);
   ASSERT_TRUE(result.has_value());
 

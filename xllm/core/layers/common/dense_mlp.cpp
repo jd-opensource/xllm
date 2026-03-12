@@ -50,11 +50,11 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
   }
 
   // Determine extra args based on quantization mode
-  FusedLinearExtraArgs gate_up_proj_extra_args("none", false);
-  FusedLinearExtraArgs down_proj_extra_args("none", false);
+  LinearExtraArgs gate_up_proj_extra_args("none", false);
+  LinearExtraArgs down_proj_extra_args("none", false);
   if (is_smoothquant_) {
     // For per-token smoothquant, use specific args
-    down_proj_extra_args = FusedLinearExtraArgs(hidden_act_, is_gated_);
+    down_proj_extra_args = LinearExtraArgs(hidden_act_, is_gated_);
   }
 
   // 1. gate + up
@@ -123,6 +123,13 @@ void DenseMLPImpl::load_state_dict(const StateDict& state_dict,
         state_dict.get_dict_with_prefix(gate_up_name[0]));
   }
   down_proj_->load_state_dict(state_dict.get_dict_with_prefix(down_name));
+}
+
+std::optional<torch::Tensor> DenseMLPImpl::get_fp8_input_scale() const {
+  if (gate_up_proj_) {
+    return gate_up_proj_->get_input_scale();
+  }
+  return std::nullopt;
 }
 
 }  // namespace layer

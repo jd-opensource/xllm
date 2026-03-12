@@ -32,7 +32,7 @@ struct MMItemState {
   };
 
   struct PrefixCache {
-    Murmur3Key key;
+    XXH3Key key;
     uint32_t cached_token_num = 0;
   };
 

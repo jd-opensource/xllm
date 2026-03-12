@@ -37,14 +37,10 @@ class JinjaChatTemplate {
 
   std::optional<std::string> apply(
       const ChatMessages& messages,
-      const nlohmann::ordered_json& chat_template_kwargs) const;
-
-  std::optional<std::string> apply(
-      const ChatMessages& messages,
       const std::vector<xllm::JsonTool>& json_tools,
       const nlohmann::ordered_json& chat_template_kwargs) const;
 
-  // expose this function for testing
+ protected:
   // apply the template to the values in the json object
   std::optional<std::string> apply(nlohmann::ordered_json& messages) const;
 
@@ -53,7 +49,10 @@ class JinjaChatTemplate {
       const nlohmann::ordered_json& tools,
       const nlohmann::ordered_json& chat_template_kwargs) const;
 
- private:
+  std::optional<std::string> apply(
+      const ChatMessages& messages,
+      const nlohmann::ordered_json& chat_template_kwargs) const;
+
   nlohmann::ordered_json get_mm_content(const MMContentVec& vec) const;
 
  private:

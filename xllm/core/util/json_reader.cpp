@@ -38,6 +38,11 @@ bool JsonReader::parse(const std::string& json_file_path) {
   return true;
 }
 
+bool JsonReader::parse_text(const std::string& json_text) {
+  data_ = nlohmann::json::parse(json_text);
+  return true;
+}
+
 bool JsonReader::contains(const std::string& key) const {
   // slipt the key by '.' then traverse the json object
   std::vector<std::string> keys = absl::StrSplit(key, '.');

@@ -106,9 +106,6 @@ Master::Master(const Options& options, EngineType type)
   }
 
   if (type == EngineType::VLM) {
-    options_.enable_schedule_overlap(false);
-    LOG(WARNING) << "Force to disable schedule overlap for VLM model, not "
-                    "supported yet.";
     runtime::Options eng_options;
     eng_options.model_path(options_.model_path())
         .devices(devices)

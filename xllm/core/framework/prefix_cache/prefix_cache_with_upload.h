@@ -30,7 +30,7 @@ class PrefixCacheWithUpload final : public PrefixCache {
   virtual KvCacheEvent* get_upload_kvcache_events() override;
 
  private:
-  void save_event_async(const bool is_insert, std::vector<Murmur3Key>& keys);
+  void save_event_async(const bool is_insert, std::vector<XXH3Key>& keys);
 
  private:
   ThreadPool threadpool_;

@@ -56,3 +56,4 @@ cc_library(
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
 )
+

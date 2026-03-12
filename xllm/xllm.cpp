@@ -22,6 +22,7 @@ limitations under the License.
 #include <csignal>
 #include <filesystem>
 #include <memory>
+#include <unordered_set>
 
 #include "api_service/api_service.h"
 #include "core/common/global_flags.h"
@@ -54,8 +55,11 @@ static std::unordered_set<std::string> deepseek_like_model_set = {
     "deepseek_v32_mtp",
     "kimi_k2",
     "glm4_moe_lite",
-    "glm5_moe",
-    "glm_moe_dsa"};
+    "glm_moe_dsa",  // glm5 model type
+    "joyai_llm_flash"};
+
+static const std::unordered_set<std::string> prefill_sp_supported_model_set = {
+    "deepseek_v32"};
 
 void shutdown_handler(int signal) {
   // TODO: gracefully shutdown the server
@@ -116,6 +120,11 @@ std::string get_model_backend(const std::filesystem::path& model_path) {
 void validate_flags(const std::string& model_type) {
   if (FLAGS_backend.empty()) {
     LOG(FATAL) << "Model is not supported currently, model type: "
+               << model_type;
+  }
+  if (FLAGS_enable_prefill_sp &&
+      !prefill_sp_supported_model_set.contains(model_type)) {
+    LOG(FATAL) << "enable_prefill_sp is not supported for model_type="
                << model_type;
   }
 #if defined(USE_MLU)

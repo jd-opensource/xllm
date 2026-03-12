@@ -201,5 +201,12 @@ void Qwen2AttentionImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
+std::optional<torch::Tensor> Qwen2AttentionImpl::get_fp8_input_scale() const {
+  if (qkv_proj_) {
+    return qkv_proj_->get_input_scale();
+  }
+  return std::nullopt;
+}
+
 }  // namespace layer
 }  // namespace xllm

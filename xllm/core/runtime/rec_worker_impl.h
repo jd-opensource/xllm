@@ -43,11 +43,13 @@ class RecWorkerImpl : public LLMWorkerImpl {
 
   bool init_model(const std::string& model_weights_path,
                   int32_t random_seed,
-                  int32_t master_status) override;
+                  MasterStatus master_status) override;
 
   bool init_model(ModelContext& context) override;
 
   void load_model(std::unique_ptr<ModelLoader> loader) override;
+
+  bool init_onerec_model(ModelContext& context);
 
   ForwardInput prepare_inputs(Batch& batch) override;
 
@@ -206,6 +208,11 @@ class RecWorkerImpl : public LLMWorkerImpl {
                                          const torch::Tensor& top_tokens,
                                          const BeamSearchTensors& beam_tensors);
 
+    void prepare_two_stage_round_input(ForwardInput& input,
+                                       int32_t round,
+                                       const torch::Tensor& top_tokens,
+                                       const BeamSearchTensors& beam_tensors);
+
     // Consume async result for current round and schedule async computation for
     // next round.
     void prepare_round_input_and_schedule_next(
@@ -243,6 +250,14 @@ class RecWorkerImpl : public LLMWorkerImpl {
     std::vector<torch::Tensor> cached_full_v_caches_;
     torch::Tensor cached_naive_block_table_;
     torch::Tensor cached_current_round_tensor_;
+    torch::Tensor cached_two_stage_shared_lse_;
+    torch::Tensor cached_two_stage_shared_o_;
+    torch::Tensor cached_two_stage_unshared_lse_;
+    torch::Tensor cached_two_stage_unshared_o_;
+    torch::Tensor cached_two_stage_q_cu_seq_lens_shared_;
+    torch::Tensor cached_two_stage_paged_kv_indptr_expanded_;
+    torch::Tensor cached_two_stage_paged_kv_indices_expanded_;
+    torch::Tensor cached_two_stage_paged_kv_last_page_len_expanded_;
 
     std::unique_ptr<RecSampler> rec_sampler_;
 
@@ -266,6 +281,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
       const std::vector<int64_t>& input_indices);
 
   void prepare_multi_modal_data(ForwardInput& processed_inputs);
+
+  void initialize_xattention_workspace();
 
   std::vector<std::unique_ptr<RecWorkPipeline>> work_pipelines_;
 

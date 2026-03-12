@@ -88,11 +88,8 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
     {IN_NORM_WEIGHT, "input_layernorm.weight"},
     {IN_HIDDEN_NORM_WEIGHT, "hidden_norm.weight"},
     {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
-    {IN_Q_BIAS, "self_attn.q_proj.bias"},
     {IN_K_WEIGHT, "self_attn.k_proj.weight"},
-    {IN_K_BIAS, "self_attn.k_proj.bias"},
     {IN_V_WEIGHT, "self_attn.v_proj.weight"},
-    {IN_V_BIAS, "self_attn.v_proj.bias"},
     {IN_ATTENTION_OUT_WEIGHT, "self_attn.o_proj.weight"},
     {IN_SELFOUT_NORM_WEIGHT, "post_attention_layernorm.weight"},
     {IN_MLP_W2_WEIGHT, "mlp.gate_proj.weight"},
@@ -136,11 +133,8 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8 = {
     {IN_MLP_CPROJ_WEIGHT, "mlp.down_proj.weight"}};
 
 static std::map<int, int> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
-                                          {IN_Q_BIAS, 0},
                                           {IN_K_WEIGHT, 0},
-                                          {IN_K_BIAS, 0},
                                           {IN_V_WEIGHT, 0},
-                                          {IN_V_BIAS, 0},
                                           {IN_ATTENTION_OUT_WEIGHT, 1},
                                           {IN_MLP_W2_WEIGHT, 0},
                                           {IN_MLP_W1_WEIGHT, 0},

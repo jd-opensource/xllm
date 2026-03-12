@@ -250,11 +250,9 @@ void generate_chat_response(proto::ChatResponse& response,
   if (req_output.usage.has_value()) {
     const auto& usage = req_output.usage.value();
     auto* proto_usage = response.mutable_usage();
-    proto_usage->set_prompt_tokens(
-        static_cast<int32_t>(usage.num_prompt_tokens));
-    proto_usage->set_completion_tokens(
-        static_cast<int32_t>(usage.num_generated_tokens));
-    proto_usage->set_total_tokens(static_cast<int32_t>(usage.num_total_tokens));
+    proto_usage->set_prompt_tokens(usage.num_prompt_tokens);
+    proto_usage->set_completion_tokens(usage.num_generated_tokens);
+    proto_usage->set_total_tokens(usage.num_total_tokens);
   }
 }
 
@@ -591,10 +589,8 @@ bool send_delta_to_client(
     // Set usage information
     if (output.usage.has_value()) {
       auto* usage = message_delta.mutable_usage();
-      usage->set_input_tokens(
-          static_cast<int32_t>(output.usage.value().num_prompt_tokens));
-      usage->set_output_tokens(
-          static_cast<int32_t>(output.usage.value().num_generated_tokens));
+      usage->set_input_tokens(output.usage.value().num_prompt_tokens);
+      usage->set_output_tokens(output.usage.value().num_generated_tokens);
     } else {
       auto* usage = message_delta.mutable_usage();
       usage->set_input_tokens(0);

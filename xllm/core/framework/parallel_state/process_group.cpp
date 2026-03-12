@@ -82,10 +82,16 @@ void ProcessGroup::allreduce(torch::Tensor& input) {
 
 void ProcessGroup::allgather(const torch::Tensor& input,
                              std::vector<torch::Tensor>& outputs) {
+  allgather_async(input, outputs)->wait();
+}
+
+c10::intrusive_ptr<c10d::Work> ProcessGroup::allgather_async(
+    const torch::Tensor& input,
+    std::vector<torch::Tensor>& outputs) {
   CHECK(pg_ != nullptr) << "Process group is not initialized.";
   std::vector<torch::Tensor> input_tensors = {input};
   std::vector<std::vector<torch::Tensor>> output_tensors = {outputs};
-  pg_->allgather(output_tensors, input_tensors)->wait();
+  return pg_->allgather(output_tensors, input_tensors);
 }
 
 void ProcessGroup::reduce_scatter(const torch::Tensor& input,

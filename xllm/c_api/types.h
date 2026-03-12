@@ -103,6 +103,15 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
   /** Index ID for internal server ID (unique for multiple models/versions) */
   uint32_t server_idx;
 
+  /** Beam width for beam search decoding (1 for greedy search) */
+  uint32_t beam_width;
+
+  /** Maximum number of decode rounds for each inference request */
+  uint32_t max_decode_rounds;
+
+  /** Maximum number of tokens allowed per inference request */
+  uint32_t max_token_per_req;
+
   /** Maximum GPU memory utilization ratio for model inference */
   float max_memory_utilization;
 
@@ -120,6 +129,9 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
 
   /** Master address for multi-node distributed serving (e.g. 10.18.1.1:9999) */
   char master_node_addr[XLLM_META_STRING_FIELD_MAX_LEN];
+
+  /** XService server address (empty string = disable XService) */
+  char xservice_addr[XLLM_META_STRING_FIELD_MAX_LEN];
 
   /** Unique instance name for identification */
   char instance_name[XLLM_META_STRING_FIELD_MAX_LEN];
@@ -178,6 +190,7 @@ typedef struct XLLM_CAPI_EXPORT XLLM_RequestParams {
   /** Number of sequences to generate per prompt for top-n selection */
   uint32_t best_of;
 
+  /** SLO timeout in milliseconds (0 = unlimited) */
   int32_t ttlt_slo_ms;
 
   int32_t ttft_slo_ms;
@@ -241,13 +254,13 @@ typedef enum XLLM_CAPI_EXPORT XLLM_StatusCode {
  */
 typedef struct XLLM_CAPI_EXPORT XLLM_Usage {
   /** Number of tokens in the prompt */
-  uint32_t prompt_tokens;
+  int32_t prompt_tokens;
 
   /** Number of tokens in the generated completion */
-  uint32_t completion_tokens;
+  int32_t completion_tokens;
 
   /** Total tokens used (prompt + completion) */
-  uint32_t total_tokens;
+  int32_t total_tokens;
 } XLLM_Usage;
 
 /**
@@ -285,6 +298,12 @@ typedef struct XLLM_CAPI_EXPORT XLLM_Choice {
   /** Generated message for chatcompletions inference (NULL for Completion mode)
    */
   XLLM_ChatMessage* message;
+
+  /** Generated token ids */
+  int32_t* token_ids;
+
+  /** Generated token ids size */
+  size_t token_size;
 
   /** Token log probabilities */
   XLLM_LogProbs logprobs;
@@ -334,6 +353,208 @@ typedef struct XLLM_CAPI_EXPORT XLLM_Response {
   /** Token usage statistics for the request */
   XLLM_Usage usage;
 } XLLM_Response;
+
+/**
+ * @brief Enumeration of tensor data types
+ */
+typedef enum XLLM_CAPI_EXPORT XLLM_DataType {
+  XLLM_DTYPE_UNDEFINED = 0,
+  XLLM_DTYPE_FLOAT16 = 1,
+  XLLM_DTYPE_FLOAT32 = 2,
+  XLLM_DTYPE_FLOAT64 = 3,
+  XLLM_DTYPE_BFLOAT16 = 4,
+  XLLM_DTYPE_INT8 = 5,
+  XLLM_DTYPE_INT16 = 6,
+  XLLM_DTYPE_INT32 = 7,
+  XLLM_DTYPE_INT64 = 8,
+  XLLM_DTYPE_UINT8 = 9,
+  XLLM_DTYPE_UINT16 = 10,
+  XLLM_DTYPE_UINT32 = 11,
+  XLLM_DTYPE_UINT64 = 12,
+  XLLM_DTYPE_BOOL = 13,
+  XLLM_DTYPE_STRING = 14
+} XLLM_DataType;
+
+/**
+ * @brief Structure representing tensor dimensions (shape)
+ * @note Max supported rank is 8 (matches dim array length)
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_Dims {
+  /** Number of dimensions (0=scalar, 1=vector, ..., 8) */
+  int rank;
+
+  /** Size of each dimension (unused dims must be 0) */
+  int dim[8];
+} XLLM_Dims;
+
+/**
+ * @brief Core tensor structure for numerical computation
+ * @warning 1. data pointer is read-only, managed by external caller
+ *          2. dtype must match the actual type of data buffer
+ *          3. dims.rank must not exceed 8
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_Tensor {
+  /** Data type of tensor elements */
+  XLLM_DataType dtype;
+
+  /** Dimension information (shape) of the tensor */
+  XLLM_Dims dims;
+
+  /** Read-only pointer to tensor data buffer */
+  const void* data;
+} XLLM_Tensor;
+
+/**
+ * @brief Dynamic list of tensors (replaces C++ std::vector<XLLM_Tensor>)
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_Tensors {
+  XLLM_Tensor* entries;
+  size_t entries_size;
+} XLLM_Tensors;
+
+/**
+ * @brief Enumeration of multimodal data types (bitmask compatible)
+ * @note Each type is a bit flag (supports multiple types via type_mask)
+ */
+typedef enum XLLM_CAPI_EXPORT XLLM_MM_Type {
+  /** No multimodal type (invalid state) */
+  XLLM_MM_TYPE_NONE = 0,
+
+  /** Image modality (JPG/PNG/BMP) */
+  XLLM_MM_TYPE_IMAGE = 1 << 0,
+
+  /** Audio modality (WAV/MP3) */
+  XLLM_MM_TYPE_AUDIO = 1 << 1,
+
+  /** Video modality (H264/H265) */
+  XLLM_MM_TYPE_VIDEO = 1 << 2,
+
+  /** Text modality (tokenized text) */
+  XLLM_MM_TYPE_TEXT = 1 << 3,
+
+  /** Embedding modality (token embeddings) */
+  XLLM_MM_TYPE_EMBEDDING = 1 << 4
+} XLLM_MM_Type;
+
+/**
+ * @brief Multimodal value (variant type: single tensor or tensor list)
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_MM_Value {
+  /** Type flag: true=single tensor, false=tensor list */
+  bool is_single_tensor;
+
+  union {
+    /** Single tensor (valid if is_single_tensor=true) */
+    XLLM_Tensor tensor;
+
+    /** Tensor list (valid if is_single_tensor=false) */
+    XLLM_Tensors tensors;
+  } data;
+} XLLM_MM_Value;
+
+/**
+ * @brief Single entry in multimodal dictionary (key-value pair)
+ * @note 1. Key is fixed-length string (null-terminated if shorter than max len)
+ *       2. Key must be unique within a dictionary
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_MM_DictEntry {
+  /** Fixed-length key */
+  char key[XLLM_META_STRING_FIELD_MAX_LEN];
+
+  /** Value associated with the key */
+  XLLM_MM_Value value;
+} XLLM_MM_DictEntry;
+
+/**
+ * @brief Multimodal dictionary (array of key-value entries)
+ * @note 1. entries is a heap-allocated array (must be freed by caller)
+ *       2. entries_size = number of valid entries (no empty slots)
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_MM_Dict {
+  XLLM_MM_DictEntry* entries;
+  size_t entries_size;
+} XLLM_MM_Dict;
+
+/**
+ * @brief Token position information (offset + length) for multimodal data
+ * @note Used to map multimodal data to token positions in sequence
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_MM_TokenPos {
+  /** Start offset of tokens (0-based) */
+  uint32_t offset;
+
+  /** Number of tokens (must be >0 for valid position) */
+  uint32_t length;
+} XLLM_MM_TokenPos;
+
+/**
+ * @brief Base struct for multimodal metadata (to be extended by specific
+ * modalities)
+ * @note This is a placeholder for modality-specific metadata (e.g., image size,
+ * audio sample rate) Extend with union for image/audio/video metadata in
+ * production use
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_MM_Meta {
+  // Placeholder for future extension,
+  // e.g., XLLM_ImageMeta|XLLM_AudioMeta|XLLM_VideoMeta
+} XLLM_MM_Meta;
+
+/**
+ * @brief State information for a single multimodal item
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_MM_State {
+  /** Token position for multimodal data alignment */
+  XLLM_MM_TokenPos token_pos;
+} XLLM_MM_State;
+
+/**
+ * @brief Single multimodal data item (core unit of multimodal data)
+ * @note 1. type = modality type (image/audio/video/text/embedding)
+ *       2. data = numerical content (tensor/tensor list)
+ *       3. meta = modality-specific metadata (empty in base version)
+ *       4. state = token position and processing state
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_MM_Item {
+  /** Modality type (e.g., XLLM_MM_TYPE_EMBEDDING) */
+  XLLM_MM_Type type;
+
+  /** Core data (tensor/tensor list) */
+  XLLM_MM_Value data;
+
+  /** Modality-specific metadata (extendable) */
+  XLLM_MM_Meta meta;
+
+  /** Processing state and token position */
+  XLLM_MM_State state;
+} XLLM_MM_Item;
+
+/**
+ * @brief List of multimodal items (replaces C++ std::vector<XLLM_MM_Item>)
+ * @note 1. entries is a heap-allocated array (must be freed by caller)
+ *       2. entries_size = number of valid items (no empty slots)
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_MM_Items {
+  XLLM_MM_Item* entries;
+  size_t entries_size;
+} XLLM_MM_Items;
+
+/**
+ * @brief Core multimodal data container (supports list/dict storage)
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_MM_Data {
+  /** Bitmask of multimodal types (e.g., IMAGE | EMBEDDING) */
+  uint32_t type_mask;
+
+  /** Storage type: true=XLLM_MM_Dict, false=XLLM_MM_Items */
+  bool is_dict;
+  union {
+    /** Dict storage (valid if is_dict=true) */
+    XLLM_MM_Dict dict;
+
+    /** List storage (valid if is_dict=false) */
+    XLLM_MM_Items items;
+  } data;
+} XLLM_MM_Data;
 
 #ifdef __cplusplus
 }

@@ -142,6 +142,7 @@ ParallelArgs create_default_parallel_args(
 
   // Set tp_group_ for MLU environment
   parallel_args.tp_group_ = mock_process_group.get();
+  parallel_args.sp_group_ = mock_process_group.get();
 
   return parallel_args;
 }
@@ -268,6 +269,77 @@ torch::Tensor seeded_tensor(const std::string& key,
     return out_cpu.to(device);
   }
   return out_cpu;
+}
+
+void append_w4a8_expert_weights(
+    std::unordered_map<std::string, torch::Tensor>& weight_dict,
+    const std::string& expert_prefix,
+    const std::string& seed_prefix,
+    int64_t hidden_size,
+    int64_t gate_up_intermediate_size,
+    int64_t down_qweight_intermediate_size,
+    int64_t down_scale_intermediate_size,
+    int64_t group_size,
+    const torch::Device& device) {
+  CHECK_GT(group_size, 0);
+  CHECK_EQ(hidden_size % 2, 0);
+  CHECK_EQ(gate_up_intermediate_size % 2, 0);
+  CHECK_EQ(down_qweight_intermediate_size % 2, 0);
+  CHECK_EQ(hidden_size % group_size, 0);
+  CHECK_EQ(down_scale_intermediate_size % group_size, 0);
+
+  const int64_t hidden_packed = hidden_size / 2;
+  const int64_t down_packed = down_qweight_intermediate_size / 2;
+  const int64_t hidden_group_cols = hidden_size / group_size;
+  const int64_t down_group_cols = down_scale_intermediate_size / group_size;
+
+  auto gate_qweight = seeded_tensor(seed_prefix + ".gate_proj.qweight.w4",
+                                    {gate_up_intermediate_size, hidden_packed},
+                                    torch::kInt8,
+                                    device);
+  auto gate_scale =
+      seeded_tensor(seed_prefix + ".gate_proj.scale.w4",
+                    {gate_up_intermediate_size, hidden_group_cols},
+                    torch::kFloat32,
+                    device);
+  auto gate_smooth = seeded_tensor(seed_prefix + ".gate_proj.smooth",
+                                   {hidden_size},
+                                   torch::kFloat32,
+                                   device);
+
+  auto up_qweight = seeded_tensor(seed_prefix + ".up_proj.qweight.w4",
+                                  {gate_up_intermediate_size, hidden_packed},
+                                  torch::kInt8,
+                                  device);
+  auto up_scale = seeded_tensor(seed_prefix + ".up_proj.scale.w4",
+                                {gate_up_intermediate_size, hidden_group_cols},
+                                torch::kFloat32,
+                                device);
+
+  auto down_qweight = seeded_tensor(seed_prefix + ".down_proj.qweight.w4",
+                                    {hidden_size, down_packed},
+                                    torch::kInt8,
+                                    device);
+  auto down_scale = seeded_tensor(seed_prefix + ".down_proj.scale.w4",
+                                  {hidden_size, down_group_cols},
+                                  torch::kFloat32,
+                                  device);
+  auto down_smooth = seeded_tensor(seed_prefix + ".down_proj.smooth",
+                                   {gate_up_intermediate_size},
+                                   torch::kFloat32,
+                                   device);
+
+  weight_dict[expert_prefix + "gate_proj.qweight"] = gate_qweight;
+  weight_dict[expert_prefix + "gate_proj.per_channel_scale"] = gate_scale;
+  weight_dict[expert_prefix + "gate_proj.smooth"] = gate_smooth;
+
+  weight_dict[expert_prefix + "up_proj.qweight"] = up_qweight;
+  weight_dict[expert_prefix + "up_proj.per_channel_scale"] = up_scale;
+  weight_dict[expert_prefix + "up_proj.smooth"] = gate_smooth;
+
+  weight_dict[expert_prefix + "down_proj.qweight"] = down_qweight;
+  weight_dict[expert_prefix + "down_proj.per_channel_scale"] = down_scale;
+  weight_dict[expert_prefix + "down_proj.smooth"] = down_smooth;
 }
 
 }  // namespace test

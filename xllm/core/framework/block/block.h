@@ -64,10 +64,10 @@ class Block final {
   uint8_t* get_mutable_hash_value() { return hash_value_; }
 
   void set_hash_value(const uint8_t* hash_value) {
-    memcpy(hash_value_, hash_value, MURMUR_HASH3_VALUE_LEN);
+    memcpy(hash_value_, hash_value, XXH3_128BITS_HASH_VALUE_LEN);
   }
 
-  uint32_t get_hash_value_len() const { return MURMUR_HASH3_VALUE_LEN; }
+  uint32_t get_hash_value_len() const { return XXH3_128BITS_HASH_VALUE_LEN; }
 
  private:
   // increase reference count
@@ -88,7 +88,7 @@ class Block final {
   // manager that manages this block
   BlockManager* manager_ = nullptr;
 
-  uint8_t hash_value_[MURMUR_HASH3_VALUE_LEN];
+  uint8_t hash_value_[XXH3_128BITS_HASH_VALUE_LEN];
 };
 
 // equeal operator, mainly used for testing

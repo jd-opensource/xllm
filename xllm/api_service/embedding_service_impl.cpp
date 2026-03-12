@@ -70,11 +70,9 @@ bool send_result_to_client_brpc(std::shared_ptr<EmbeddingCall> call,
   if (req_output.usage.has_value()) {
     const auto& usage = req_output.usage.value();
     auto* proto_usage = response.mutable_usage();
-    proto_usage->set_prompt_tokens(
-        static_cast<int32_t>(usage.num_prompt_tokens));
-    proto_usage->set_completion_tokens(
-        static_cast<int32_t>(usage.num_generated_tokens));
-    proto_usage->set_total_tokens(static_cast<int32_t>(usage.num_total_tokens));
+    proto_usage->set_prompt_tokens(usage.num_prompt_tokens);
+    proto_usage->set_completion_tokens(usage.num_generated_tokens);
+    proto_usage->set_total_tokens(usage.num_total_tokens);
   }
 
   return call->write_and_finish(response, binary_payload);

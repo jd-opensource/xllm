@@ -47,7 +47,7 @@ torch::Tensor matmul(MatmulParams& params);
 torch::Tensor group_gemm(GroupGemmParams& params);
 
 std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
-    MoeActiveTopkParams& params);
+    MoeFusedTopkParams& params);
 
 std::vector<torch::Tensor> moe_gen_idx(MoeGenIdxParams& params);
 
@@ -111,5 +111,18 @@ torch::Tensor fp8_scaled_matmul(Fp8ScaledMatmulParams& params);
 // Static scaled FP8 quantization helper
 // Quantizes input tensor to FP8 using a pre-computed scale factor
 void static_scaled_fp8_quant(StaticScaledFp8QuantParams& params);
+
+// Fused RMSNorm + Static FP8 Quantization
+// These fused operations combine RMSNorm and FP8 quantization to reduce memory
+// bandwidth by avoiding the intermediate write-back to global memory.
+
+// Fused RMSNorm + Static FP8 Quantization
+// Returns: FP8 quantized output tensor
+torch::Tensor rms_norm_static_fp8_quant(RmsNormStaticFp8QuantParams& params);
+
+// Fused Add + RMSNorm + Static FP8 Quantization (with residual)
+// Returns: tuple of (FP8 quantized output, updated residual)
+std::tuple<torch::Tensor, torch::Tensor> fused_add_rms_norm_static_fp8_quant(
+    FusedAddRmsNormStaticFp8QuantParams& params);
 
 }  // namespace xllm::kernel

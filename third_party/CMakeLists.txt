@@ -18,6 +18,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
 endif()
 
 add_subdirectory(etcd_cpp_apiv3)
+add_subdirectory(xxHash)
 
 if(USE_NPU)
   add_subdirectory(spdlog)

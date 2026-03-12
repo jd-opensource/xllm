@@ -112,6 +112,8 @@ class Options {
 
   PROPERTY(bool, enable_chunked_prefill) = true;
 
+  PROPERTY(bool, enable_prefill_sp) = false;
+
   PROPERTY(std::optional<std::string>, master_node_addr);
 
   PROPERTY(int32_t, nnodes) = 1;
@@ -230,7 +232,7 @@ class Options {
   // max concurrency for rec worker
   PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
 
-  PROPERTY(int32_t, master_status) = 0;
+  PROPERTY(MasterStatus, master_status) = MasterStatus::WAKEUP;
 };
 
 }  // namespace xllm

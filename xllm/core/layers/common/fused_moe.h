@@ -24,15 +24,11 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
+#include "fused_moe_base.h"
 #include "linear.h"
 
 namespace xllm {
 namespace layer {
-
-// Must match layers/mlu/fused_moe.h and layers/ilu/fused_moe.h.
-struct FusedMoEArgs {
-  bool is_gated = true;
-};
 
 // FusedMoE common implementation - placeholder for unsupported backends
 // Actual implementation is in layers/mlu/fused_moe.h and layers/ilu/fused_moe.h

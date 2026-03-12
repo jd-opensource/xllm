@@ -14,10 +14,13 @@ limitations under the License.
 
 #include <glog/logging.h>
 #include <pthread.h>
+#include <torch/torch.h>
 
 #include <atomic>
 #include <string>
 
+#include "core/common/global_flags.h"
+#include "core/util/env_var.h"
 #include "core/util/uuid.h"
 
 namespace xllm {
@@ -71,66 +74,19 @@ void shutdown_log() {
 void set_init_options(BackendType backend_type,
                       const XLLM_InitOptions* init_options,
                       XLLM_InitOptions* xllm_init_options) {
-  if (backend_type == BackendType::LLM) {
-    memcpy(xllm_init_options,
-           &XLLM_INIT_LLM_OPTIONS_DEFAULT,
-           sizeof(XLLM_InitOptions));
-  } else if (backend_type == BackendType::REC) {
-    memcpy(xllm_init_options,
-           &XLLM_INIT_REC_OPTIONS_DEFAULT,
-           sizeof(XLLM_InitOptions));
-  }
-
   if (NULL == init_options) {
-    return;
+    if (backend_type == BackendType::LLM) {
+      memcpy(xllm_init_options,
+             &XLLM_INIT_LLM_OPTIONS_DEFAULT,
+             sizeof(XLLM_InitOptions));
+    } else if (backend_type == BackendType::REC) {
+      memcpy(xllm_init_options,
+             &XLLM_INIT_REC_OPTIONS_DEFAULT,
+             sizeof(XLLM_InitOptions));
+    }
+  } else {
+    memcpy(xllm_init_options, init_options, sizeof(XLLM_InitOptions));
   }
-
-  xllm_init_options->enable_mla = init_options->enable_mla;
-  xllm_init_options->enable_chunked_prefill =
-      init_options->enable_chunked_prefill;
-  xllm_init_options->enable_prefix_cache = init_options->enable_prefix_cache;
-  xllm_init_options->enable_disagg_pd = init_options->enable_disagg_pd;
-  xllm_init_options->enable_pd_ooc = init_options->enable_pd_ooc;
-  xllm_init_options->enable_schedule_overlap =
-      init_options->enable_schedule_overlap;
-  xllm_init_options->enable_shm = init_options->enable_shm;
-
-  XLLM_SET_FIELD_IF_NONZERO(
-      xllm_init_options, init_options, transfer_listen_port);
-  XLLM_SET_FIELD_IF_NONZERO(xllm_init_options, init_options, nnodes);
-  XLLM_SET_FIELD_IF_NONZERO(xllm_init_options, init_options, node_rank);
-  XLLM_SET_FIELD_IF_NONZERO(xllm_init_options, init_options, dp_size);
-  XLLM_SET_FIELD_IF_NONZERO(xllm_init_options, init_options, ep_size);
-  XLLM_SET_FIELD_IF_NONZERO(xllm_init_options, init_options, block_size);
-  XLLM_SET_FIELD_IF_NONZERO(xllm_init_options, init_options, max_cache_size);
-  XLLM_SET_FIELD_IF_NONZERO(
-      xllm_init_options, init_options, max_tokens_per_batch);
-  XLLM_SET_FIELD_IF_NONZERO(
-      xllm_init_options, init_options, max_seqs_per_batch);
-  XLLM_SET_FIELD_IF_NONZERO(
-      xllm_init_options, init_options, max_tokens_per_chunk_for_prefill);
-  XLLM_SET_FIELD_IF_NONZERO(
-      xllm_init_options, init_options, num_speculative_tokens);
-  XLLM_SET_FIELD_IF_NONZERO(
-      xllm_init_options, init_options, num_request_handling_threads);
-  XLLM_SET_FIELD_IF_NONZERO(
-      xllm_init_options, init_options, expert_parallel_degree);
-  XLLM_SET_FIELD_IF_NONZERO(xllm_init_options, init_options, server_idx);
-  XLLM_SET_FIELD_IF_NONZERO(
-      xllm_init_options, init_options, max_memory_utilization);
-
-  XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, task);
-  XLLM_SET_FIELD_IF_NONEMPTY(
-      xllm_init_options, init_options, communication_backend);
-  XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, instance_role);
-  XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, device_ip);
-  XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, master_node_addr);
-  XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, instance_name);
-  XLLM_SET_FIELD_IF_NONEMPTY(
-      xllm_init_options, init_options, kv_cache_transfer_mode);
-  XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, log_dir);
-  XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, draft_model);
-  XLLM_SET_FIELD_IF_NONEMPTY(xllm_init_options, init_options, draft_devices);
 
   return;
 }
@@ -139,51 +95,20 @@ void transfer_request_params(InferenceType inference_type,
                              const XLLM_RequestParams* request_params,
                              xllm::RequestParams* xllm_request_params) {
   XLLM_RequestParams final_request_params;
-  if (inference_type == InferenceType::LLM_COMPLETIONS ||
-      inference_type == InferenceType::LLM_CHAT_COMPLETIONS) {
-    memcpy(&final_request_params,
-           &XLLM_LLM_REQUEST_PARAMS_DEFAULT,
-           sizeof(XLLM_RequestParams));
-  } else if (inference_type == InferenceType::REC_COMPLETIONS ||
-             inference_type == InferenceType::REC_CHAT_COMPLETIONS) {
-    memcpy(&final_request_params,
-           &XLLM_REC_REQUEST_PARAMS_DEFAULT,
-           sizeof(XLLM_RequestParams));
-  }
-
-  if (nullptr != request_params) {
-    final_request_params.echo = request_params->echo;
-    final_request_params.offline = request_params->offline;
-    final_request_params.logprobs = request_params->logprobs;
-    final_request_params.ignore_eos = request_params->ignore_eos;
-
-    XLLM_SET_FIELD_IF_NONZERO(&final_request_params, request_params, n);
-    XLLM_SET_FIELD_IF_NONZERO(&final_request_params, request_params, best_of);
-    XLLM_SET_FIELD_IF_NONZERO(
-        &final_request_params, request_params, ttlt_slo_ms);
-    XLLM_SET_FIELD_IF_NONZERO(
-        &final_request_params, request_params, ttft_slo_ms);
-    XLLM_SET_FIELD_IF_NONZERO(
-        &final_request_params, request_params, tpot_slo_ms);
-    XLLM_SET_FIELD_IF_NONZERO(&final_request_params, request_params, top_k);
-    XLLM_SET_FIELD_IF_NONZERO(&final_request_params, request_params, top_p);
-    XLLM_SET_FIELD_IF_NONZERO(
-        &final_request_params, request_params, max_tokens);
-    XLLM_SET_FIELD_IF_NONZERO(
-        &final_request_params, request_params, frequency_penalty);
-    XLLM_SET_FIELD_IF_NONZERO(
-        &final_request_params, request_params, presence_penalty);
-    XLLM_SET_FIELD_IF_NONZERO(
-        &final_request_params, request_params, repetition_penalty);
-    XLLM_SET_FIELD_IF_NONZERO(
-        &final_request_params, request_params, beam_width);
-    XLLM_SET_FIELD_IF_NONZERO(
-        &final_request_params, request_params, top_logprobs);
-    XLLM_SET_FIELD_IF_NONZERO(
-        &final_request_params, request_params, temperature);
-
-    XLLM_SET_FIELD_IF_NONEMPTY(
-        &final_request_params, request_params, request_id);
+  if (nullptr == request_params) {
+    if (inference_type == InferenceType::LLM_COMPLETIONS ||
+        inference_type == InferenceType::LLM_CHAT_COMPLETIONS) {
+      memcpy(&final_request_params,
+             &XLLM_LLM_REQUEST_PARAMS_DEFAULT,
+             sizeof(XLLM_RequestParams));
+    } else if (inference_type == InferenceType::REC_COMPLETIONS ||
+               inference_type == InferenceType::REC_CHAT_COMPLETIONS) {
+      memcpy(&final_request_params,
+             &XLLM_REC_REQUEST_PARAMS_DEFAULT,
+             sizeof(XLLM_RequestParams));
+    }
+  } else {
+    memcpy(&final_request_params, request_params, sizeof(XLLM_RequestParams));
   }
 
   xllm_request_params->echo = final_request_params.echo;
@@ -192,9 +117,6 @@ void transfer_request_params(InferenceType inference_type,
   xllm_request_params->ignore_eos = final_request_params.ignore_eos;
 
   xllm_request_params->best_of = final_request_params.best_of;
-  xllm_request_params->ttlt_slo_ms = final_request_params.ttlt_slo_ms;
-  xllm_request_params->ttft_slo_ms = final_request_params.ttft_slo_ms;
-  xllm_request_params->tpot_slo_ms = final_request_params.tpot_slo_ms;
   xllm_request_params->top_k = final_request_params.top_k;
   xllm_request_params->top_p = final_request_params.top_p;
   xllm_request_params->n = final_request_params.n;
@@ -208,6 +130,9 @@ void transfer_request_params(InferenceType inference_type,
   xllm_request_params->top_logprobs = final_request_params.top_logprobs;
   xllm_request_params->temperature = final_request_params.temperature;
   xllm_request_params->request_id = final_request_params.request_id;
+  xllm_request_params->ttlt_slo_ms = final_request_params.ttlt_slo_ms;
+  xllm_request_params->ttft_slo_ms = final_request_params.ttft_slo_ms;
+  xllm_request_params->tpot_slo_ms = final_request_params.tpot_slo_ms;
 
   return;
 }
@@ -286,6 +211,15 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
                                  seq_output.finish_reason.value());
     }
 
+    if (seq_output.token_ids.size() > 0) {
+      choice.token_size = seq_output.token_ids.size();
+      choice.token_ids = new int32_t[choice.token_size];
+      CHECK(nullptr != choice.token_ids);
+      for (int j = 0; j < choice.token_size; j++) {
+        choice.token_ids[j] = seq_output.token_ids[j];
+      }
+    }
+
     if (seq_output.logprobs.has_value()) {
       choice.logprobs.entries_size = seq_output.logprobs.value().size();
       choice.logprobs.entries =
@@ -303,11 +237,9 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
 
   if (output.usage.has_value()) {
     const auto& usage = output.usage.value();
-    response->usage.prompt_tokens =
-        static_cast<int32_t>(usage.num_prompt_tokens);
-    response->usage.completion_tokens =
-        static_cast<int32_t>(usage.num_generated_tokens);
-    response->usage.total_tokens = static_cast<int32_t>(usage.num_total_tokens);
+    response->usage.prompt_tokens = usage.num_prompt_tokens;
+    response->usage.completion_tokens = usage.num_generated_tokens;
+    response->usage.total_tokens = usage.num_total_tokens;
   }
 
   return response;
@@ -319,6 +251,7 @@ XLLM_Response* handle_inference_request(
     InferenceType inference_type,
     const std::string& model_id,
     const InputType& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params) {
   CHECK(nullptr != handler);
@@ -361,8 +294,26 @@ XLLM_Response* handle_inference_request(
                                    const RequestOutput& req_output) -> bool {
       if (auto locked_promise = weak_promise.lock()) {
         try {
-          locked_promise->setValue(build_success_response(
-              inference_type, req_output, request_id, created_time, model_id));
+          if (req_output.status.has_value()) {
+            if (req_output.status.value().ok()) {
+              locked_promise->setValue(build_success_response(inference_type,
+                                                              req_output,
+                                                              request_id,
+                                                              created_time,
+                                                              model_id));
+            } else {
+              locked_promise->setValue(build_error_response(
+                  request_id,
+                  XLLM_StatusCode::kInternalError,
+                  "RequestOutput status is not ok, message: " +
+                      req_output.status.value().message()));
+            }
+          } else {
+            locked_promise->setValue(
+                build_error_response(request_id,
+                                     XLLM_StatusCode::kInternalError,
+                                     "RequestOutput status has no value"));
+          }
           return true;
         } catch (const std::exception& e) {
           LOG(ERROR) << "Build response failed: " << e.what();
@@ -383,8 +334,22 @@ XLLM_Response* handle_inference_request(
                                       on_request_complete);
     } else if constexpr (std::is_same_v<HandlerType, XLLM_REC_Handler>) {
       if constexpr (std::is_same_v<InputType, std::vector<int>>) {
-        handler->master->handle_request(
-            "", input, std::nullopt, xllm_request_params, on_request_complete);
+        if (nullptr != extra) {
+          xllm::MMData* mm_data =
+              dynamic_cast<xllm::MMData*>(static_cast<xllm::MMData*>(extra));
+          CHECK(nullptr != mm_data);
+
+          std::optional<xllm::MMData> opt_mm_data = std::move(*mm_data);
+          handler->master->handle_request(
+              input, opt_mm_data, xllm_request_params, on_request_complete);
+
+        } else {
+          handler->master->handle_request("",
+                                          input,
+                                          std::nullopt,
+                                          xllm_request_params,
+                                          on_request_complete);
+        }
       } else {
         handler->master->handle_request(input,
                                         std::nullopt,
@@ -449,6 +414,12 @@ void xllm_free_response(XLLM_Response* resp) {
         choice.message = nullptr;
       }
 
+      if (nullptr != choice.token_ids) {
+        delete[] choice.token_ids;
+        choice.token_ids = nullptr;
+        choice.token_size = 0;
+      }
+
       if (nullptr != choice.logprobs.entries) {
         delete[] choice.logprobs.entries;
         choice.logprobs.entries = nullptr;
@@ -466,12 +437,176 @@ void xllm_free_response(XLLM_Response* resp) {
   return;
 }
 
+torch::ScalarType xllm_dtype_to_torch_scalar_type(XLLM_DataType dtype) {
+  switch (dtype) {
+    case XLLM_DTYPE_UNDEFINED:
+      throw std::runtime_error(
+          "XLLM_DTYPE_UNDEFINED is not a valid dtype for tensor conversion");
+    case XLLM_DTYPE_FLOAT16:
+      return torch::kFloat16;
+    case XLLM_DTYPE_FLOAT32:
+      return torch::kFloat32;
+    case XLLM_DTYPE_FLOAT64:
+      return torch::kFloat64;
+    case XLLM_DTYPE_BFLOAT16:
+      return torch::kBFloat16;
+    case XLLM_DTYPE_INT8:
+      return torch::kInt8;
+    case XLLM_DTYPE_INT16:
+      return torch::kInt16;
+    case XLLM_DTYPE_INT32:
+      return torch::kInt32;
+    case XLLM_DTYPE_INT64:
+      return torch::kInt64;
+    case XLLM_DTYPE_BOOL:
+      return torch::kBool;
+    case XLLM_DTYPE_STRING:
+      throw std::runtime_error(
+          "String dtype is not supported for torch::Tensor");
+    default:
+      throw std::runtime_error("Unsupported XLLM_DataType: " +
+                               std::to_string(dtype));
+  }
+}
+
+torch::Tensor convert_xllm_tensor_to_torch(const XLLM_Tensor& xllm_tensor) {
+  if (xllm_tensor.data == nullptr) {
+    throw std::runtime_error("XLLM_Tensor data pointer is null");
+  }
+
+  torch::ScalarType scalar_type =
+      xllm_dtype_to_torch_scalar_type(xllm_tensor.dtype);
+
+  std::vector<int64_t> shape;
+  for (int i = 0; i < xllm_tensor.dims.rank; ++i) {
+    int dim = xllm_tensor.dims.dim[i];
+    if (dim > 0) {
+      shape.push_back(dim);
+    }
+  }
+
+  if (shape.empty()) {
+    throw std::runtime_error("XLLM_Tensor all dimensions are invalid value");
+  }
+
+  torch::Tensor tensor =
+      torch::from_blob(const_cast<void*>(xllm_tensor.data), shape, scalar_type)
+          .clone();
+
+  return tensor;
+}
+
+xllm::MMDataItem convert_xllm_mm_item_to_internal(
+    const XLLM_MM_Item& xllm_item) {
+  uint32_t xllm_type_val = static_cast<uint32_t>(xllm_item.type);
+  xllm::MMType::Value internal_val = xllm::MMType::NONE;
+
+  switch (xllm_type_val) {
+    case XLLM_MM_TYPE_EMBEDDING:
+      internal_val = xllm::MMType::EMBEDDING;
+      break;
+    case XLLM_MM_TYPE_IMAGE:
+      internal_val = xllm::MMType::IMAGE;
+      break;
+    case XLLM_MM_TYPE_VIDEO:
+      internal_val = xllm::MMType::VIDEO;
+      break;
+    case XLLM_MM_TYPE_AUDIO:
+      internal_val = xllm::MMType::AUDIO;
+      break;
+    case XLLM_MM_TYPE_NONE:
+      internal_val = xllm::MMType::NONE;
+      break;
+    default:
+      throw std::runtime_error(std::string("Unsupported XLLM_MM_Type: ") +
+                               std::to_string(xllm_type_val));
+  }
+
+  xllm::MMType item_type(internal_val);
+  xllm::MMDataItem internal_item(item_type);
+
+  xllm::MMItemState& state = internal_item.mutable_state();
+  xllm::MMItemState::TokenPos& token_pos = state.mutable_token_pos();
+  token_pos.offset = xllm_item.state.token_pos.offset;
+  token_pos.length = xllm_item.state.token_pos.length;
+
+  if (xllm_item.data.is_single_tensor) {
+    torch::Tensor tensor =
+        convert_xllm_tensor_to_torch(xllm_item.data.data.tensor);
+    internal_item.add("tensor", tensor);
+  } else {
+    std::vector<torch::Tensor> tensor_list;
+    const XLLM_Tensors& xllm_tensors = xllm_item.data.data.tensors;
+    for (size_t i = 0; i < xllm_tensors.entries_size; ++i) {
+      tensor_list.push_back(
+          convert_xllm_tensor_to_torch(xllm_tensors.entries[i]));
+    }
+    internal_item.add("tensor_list", tensor_list);
+  }
+
+  return internal_item;
+}
+
+bool convert_xllm_mm_data_to_internal(const XLLM_MM_Data* mm_data,
+                                      xllm::MMData& internal_mm_data) {
+  if (mm_data == nullptr || mm_data->type_mask == XLLM_MM_TYPE_NONE) {
+    return false;
+  }
+
+  xllm::MMType::Value internal_val =
+      static_cast<xllm::MMType::Value>(mm_data->type_mask);
+  xllm::MMType mm_type(internal_val);
+
+  if (mm_data->is_dict) {
+    const XLLM_MM_Dict& xllm_dict = mm_data->data.dict;
+    xllm::MMDict internal_dict;
+
+    for (size_t i = 0; i < xllm_dict.entries_size; ++i) {
+      const XLLM_MM_DictEntry& xllm_entry = xllm_dict.entries[i];
+      xllm::MMKey key(xllm_entry.key);
+
+      const XLLM_MM_Value& xllm_value = xllm_entry.value;
+      if (xllm_value.is_single_tensor) {
+        torch::Tensor tensor =
+            convert_xllm_tensor_to_torch(xllm_value.data.tensor);
+        internal_dict.insert({key, tensor});
+      } else {
+        std::vector<torch::Tensor> tensor_list;
+        const XLLM_Tensors& xllm_tensors = xllm_value.data.tensors;
+        for (size_t j = 0; j < xllm_tensors.entries_size; ++j) {
+          tensor_list.push_back(
+              convert_xllm_tensor_to_torch(xllm_tensors.entries[j]));
+        }
+        internal_dict.insert({key, tensor_list});
+      }
+    }
+
+    internal_mm_data.set<xllm::MMDict>(mm_type, internal_dict);
+  } else {
+    const XLLM_MM_Items& xllm_items = mm_data->data.items;
+    xllm::MMItemVec internal_item_vec;
+
+    for (size_t i = 0; i < xllm_items.entries_size; ++i) {
+      const XLLM_MM_Item& xllm_item = xllm_items.entries[i];
+
+      xllm::MMDataItem internal_item =
+          convert_xllm_mm_item_to_internal(xllm_item);
+      internal_item_vec.push_back(std::move(internal_item));
+    }
+
+    internal_mm_data.set<xllm::MMItemVec>(mm_type, internal_item_vec);
+  }
+
+  return true;
+}
+
 // 1. LLM Handler + const char* (text completions)
 template XLLM_Response* handle_inference_request<XLLM_LLM_Handler, const char*>(
     XLLM_LLM_Handler* handler,
     InferenceType inference_type,
     const std::string& model_id,
     const char* const& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 
@@ -482,6 +617,7 @@ handle_inference_request<XLLM_LLM_Handler, std::vector<xllm::Message>>(
     InferenceType inference_type,
     const std::string& model_id,
     const std::vector<xllm::Message>& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 
@@ -491,6 +627,7 @@ template XLLM_Response* handle_inference_request<XLLM_REC_Handler, const char*>(
     InferenceType inference_type,
     const std::string& model_id,
     const char* const& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 
@@ -501,6 +638,7 @@ handle_inference_request<XLLM_REC_Handler, std::vector<xllm::Message>>(
     InferenceType inference_type,
     const std::string& model_id,
     const std::vector<xllm::Message>& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 
@@ -511,6 +649,7 @@ handle_inference_request<XLLM_REC_Handler, std::vector<int>>(
     InferenceType inference_type,
     const std::string& model_id,
     const std::vector<int>& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 }  // namespace helper

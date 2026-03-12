@@ -34,6 +34,15 @@ namespace xllm {
 namespace layer {
 namespace test {
 
+class CompletedWork : public c10d::Work {
+ public:
+  CompletedWork() { finish(); }
+};
+
+inline c10::intrusive_ptr<c10d::Work> make_completed_work() {
+  return c10::make_intrusive<CompletedWork>();
+}
+
 // Mock Backend for testing - minimal implementation for tp=1 tests
 class MockBackend : public c10d::Backend {
  public:
@@ -44,7 +53,7 @@ class MockBackend : public c10d::Backend {
       std::vector<torch::Tensor>& tensors,
       const c10d::AllreduceOptions& opts = c10d::AllreduceOptions()) override {
     // Mock implementation - return a completed work
-    return c10::make_intrusive<c10d::Work>();
+    return make_completed_work();
   }
 
   c10::intrusive_ptr<c10d::Work> allgather(
@@ -52,31 +61,31 @@ class MockBackend : public c10d::Backend {
       std::vector<torch::Tensor>& inputTensors,
       const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {
     // Mock implementation - return a completed work
-    return c10::make_intrusive<c10d::Work>();
+    return make_completed_work();
   }
 
   c10::intrusive_ptr<c10d::Work> barrier(
       const c10d::BarrierOptions& opts = c10d::BarrierOptions()) override {
-    return c10::make_intrusive<c10d::Work>();
+    return make_completed_work();
   }
 
   c10::intrusive_ptr<c10d::Work> broadcast(
       std::vector<torch::Tensor>& tensors,
       const c10d::BroadcastOptions& opts = c10d::BroadcastOptions()) override {
-    return c10::make_intrusive<c10d::Work>();
+    return make_completed_work();
   }
 
   c10::intrusive_ptr<c10d::Work> reduce(
       std::vector<torch::Tensor>& tensors,
       const c10d::ReduceOptions& opts = c10d::ReduceOptions()) override {
-    return c10::make_intrusive<c10d::Work>();
+    return make_completed_work();
   }
 
   c10::intrusive_ptr<c10d::Work> allgather_coalesced(
       std::vector<std::vector<torch::Tensor>>& outputTensorLists,
       std::vector<torch::Tensor>& inputTensors,
       const c10d::AllgatherOptions& opts = c10d::AllgatherOptions()) override {
-    return c10::make_intrusive<c10d::Work>();
+    return make_completed_work();
   }
 
   c10::intrusive_ptr<c10d::Work> reduce_scatter(
@@ -84,7 +93,7 @@ class MockBackend : public c10d::Backend {
       std::vector<std::vector<torch::Tensor>>& inputTensors,
       const c10d::ReduceScatterOptions& opts =
           c10d::ReduceScatterOptions()) override {
-    return c10::make_intrusive<c10d::Work>();
+    return make_completed_work();
   }
 
   c10::intrusive_ptr<c10d::Work> alltoall_base(
@@ -93,32 +102,32 @@ class MockBackend : public c10d::Backend {
       std::vector<int64_t>& outputSplitSizes,
       std::vector<int64_t>& inputSplitSizes,
       const c10d::AllToAllOptions& opts = c10d::AllToAllOptions()) override {
-    return c10::make_intrusive<c10d::Work>();
+    return make_completed_work();
   }
 
   c10::intrusive_ptr<c10d::Work> alltoall(
       std::vector<torch::Tensor>& outputTensors,
       std::vector<torch::Tensor>& inputTensors,
       const c10d::AllToAllOptions& opts = c10d::AllToAllOptions()) override {
-    return c10::make_intrusive<c10d::Work>();
+    return make_completed_work();
   }
 
   c10::intrusive_ptr<c10d::Work> send(std::vector<torch::Tensor>& tensors,
                                       int dstRank,
                                       int tag) override {
-    return c10::make_intrusive<c10d::Work>();
+    return make_completed_work();
   }
 
   c10::intrusive_ptr<c10d::Work> recv(std::vector<torch::Tensor>& tensors,
                                       int srcRank,
                                       int tag) override {
-    return c10::make_intrusive<c10d::Work>();
+    return make_completed_work();
   }
 
   c10::intrusive_ptr<c10d::Work> recvAnysource(
       std::vector<torch::Tensor>& tensors,
       int tag) override {
-    return c10::make_intrusive<c10d::Work>();
+    return make_completed_work();
   }
 
   int64_t getRank() const { return rank_; }
@@ -156,6 +165,13 @@ class MockProcessGroup : public xllm::ProcessGroup {
     for (size_t i = 0; i < this->world_size(); ++i) {
       outputs[i] = input.clone();
     }
+  }
+
+  c10::intrusive_ptr<c10d::Work> allgather_async(
+      const torch::Tensor& input,
+      std::vector<torch::Tensor>& outputs) override {
+    allgather(input, outputs);
+    return make_completed_work();
   }
 };
 
@@ -202,6 +218,17 @@ torch::Tensor seeded_tensor(const std::string& key,
                             torch::IntArrayRef shape,
                             torch::ScalarType dtype = torch::kFloat,
                             torch::Device device = torch::Device(torch::kCPU));
+
+void append_w4a8_expert_weights(
+    std::unordered_map<std::string, torch::Tensor>& weight_dict,
+    const std::string& expert_prefix,
+    const std::string& seed_prefix,
+    int64_t hidden_size,
+    int64_t gate_up_intermediate_size,
+    int64_t down_qweight_intermediate_size,
+    int64_t down_scale_intermediate_size,
+    int64_t group_size,
+    const torch::Device& device);
 
 }  // namespace test
 }  // namespace layer

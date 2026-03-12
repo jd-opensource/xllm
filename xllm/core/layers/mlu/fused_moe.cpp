@@ -55,18 +55,24 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
     tp_pg_ = parallel_args.moe_tp_group_;
   }
 
-  // smoothquant check: If quant_method is not empty, only w8a8 smoothquant is
-  // supported
+  moe_weight_bits_ = quant_args.moe_weight_bits();
+  weight_pack_factor_ = (moe_weight_bits_ == 4 ? 2 : 1);
+
+  // smoothquant check: if quant_method is not empty, only smoothquant with
+  // A8 and expert W8/W4 is supported.
   if (!quant_args.quant_method().empty()) {
-    if (quant_args.quant_method() != "smoothquant" || quant_args.bits() != 8 ||
-        !quant_args.activation_dynamic()) {
-      LOG(FATAL) << "FusedMoE only supports w8a8 smoothquant quantization when "
-                    "quant_method is set. "
-                 << "Got quant_method=" << quant_args.quant_method()
-                 << ", bits=" << quant_args.bits()
-                 << ", activation_dynamic=" << quant_args.activation_dynamic();
+    if (quant_args.quant_method() != kQuantMethodSmoothquant ||
+        quant_args.bits() != 8 || !quant_args.activation_dynamic() ||
+        (moe_weight_bits_ != 8 && moe_weight_bits_ != 4)) {
+      LOG(FATAL)
+          << "FusedMoE only supports the current SmoothQuant MoE path with "
+             "non-expert bits=8, dynamic activation, and expert weight bits "
+             "in {4,8}. "
+          << "Got quant_method=" << quant_args.quant_method()
+          << ", bits=" << quant_args.bits()
+          << ", moe_weight_bits=" << moe_weight_bits_
+          << ", activation_dynamic=" << quant_args.activation_dynamic();
     }
-    // If confirmed as smoothquant w8a8, set is_smoothquant_ to true
     is_smoothquant_ = true;
   } else {
     is_smoothquant_ = false;
@@ -79,7 +85,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
     // so we will assume the max_token_num is limited to max_batch_size * (1+K)
     // K is the number of speculative tokens.
     int64_t dispatch_token_size;
-    if (quant_args.quant_method() == "smoothquant") {
+    if (quant_args.quant_method() == kQuantMethodSmoothquant) {
       // float32 is for the scale of the quantized input
       dispatch_token_size = hidden_size_ * get_dtype_size(torch::kInt8) +
                             get_dtype_size(torch::kFloat32);
@@ -172,19 +178,54 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   // create weight buffer
   const int64_t world_size = tp_pg_->world_size();
   int64_t local_intermediate_size = intermediate_size / world_size;
+  const bool is_groupwise_scale = quant_args_.group_size() > 0;
+  int64_t w13_scale_group_cols = 0;
+  int64_t w2_scale_group_cols = 0;
+  if (is_smoothquant_ && weight_pack_factor_ > 1) {
+    CHECK_EQ(hidden_size_ % weight_pack_factor_, 0)
+        << "hidden_size must be divisible by weight_pack_factor for W4 MoE. "
+        << "hidden_size=" << hidden_size_
+        << ", weight_pack_factor=" << weight_pack_factor_;
+    CHECK_EQ(local_intermediate_size % weight_pack_factor_, 0)
+        << "local_intermediate_size must be divisible by weight_pack_factor "
+           "for W4 MoE. local_intermediate_size="
+        << local_intermediate_size
+        << ", weight_pack_factor=" << weight_pack_factor_;
+  }
+  if (is_smoothquant_ && is_groupwise_scale) {
+    CHECK_GT(quant_args_.group_size(), 0)
+        << "group_size must be positive for group-wise smoothquant.";
+    CHECK_EQ(hidden_size_ % quant_args_.group_size(), 0)
+        << "hidden_size must be divisible by group_size for group-wise "
+           "smoothquant. hidden_size="
+        << hidden_size_ << ", group_size=" << quant_args_.group_size();
+    CHECK_EQ(local_intermediate_size % quant_args_.group_size(), 0)
+        << "local_intermediate_size must be divisible by group_size for "
+           "group-wise smoothquant. local_intermediate_size="
+        << local_intermediate_size
+        << ", group_size=" << quant_args_.group_size();
+    w13_scale_group_cols = hidden_size_ / quant_args_.group_size();
+    w2_scale_group_cols = local_intermediate_size / quant_args_.group_size();
+  }
   if (is_smoothquant_) {
+    // W4 expert qweight is stored as packed int4 in an int8 tensor container.
     auto quant_option = options_.dtype(torch::kInt8);
     auto fp_option = options_.dtype(torch::kFloat32);
-    w13_ = register_parameter(
-        "w13",
-        torch::empty(
-            {num_experts_per_rank_, local_intermediate_size * 2, hidden_size_},
-            quant_option),
-        false);
+    w13_ = register_parameter("w13",
+                              torch::empty({num_experts_per_rank_,
+                                            local_intermediate_size * 2,
+                                            hidden_size_ / weight_pack_factor_},
+                                           quant_option),
+                              false);
     w13_scale_ = register_parameter(
         "w13_scale",
-        torch::empty({num_experts_per_rank_, local_intermediate_size * 2},
-                     fp_option),
+        is_groupwise_scale
+            ? torch::empty({num_experts_per_rank_,
+                            local_intermediate_size * 2,
+                            w13_scale_group_cols},
+                           fp_option)
+            : torch::empty({num_experts_per_rank_, local_intermediate_size * 2},
+                           fp_option),
         false);
     // Note: We do not check enable_deep_ep_ here, since smooth quantization
     // information may be needed even when deep EP mode is disabled. This allows
@@ -195,13 +236,18 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
         false);
     w2_ = register_parameter(
         "w2",
-        torch::empty(
-            {num_experts_per_rank_, hidden_size_, local_intermediate_size},
-            quant_option),
+        torch::empty({num_experts_per_rank_,
+                      hidden_size_,
+                      local_intermediate_size / weight_pack_factor_},
+                     quant_option),
         false);
     w2_scale_ = register_parameter(
         "w2_scale",
-        torch::empty({num_experts_per_rank_, hidden_size_}, fp_option),
+        is_groupwise_scale
+            ? torch::empty(
+                  {num_experts_per_rank_, hidden_size_, w2_scale_group_cols},
+                  fp_option)
+            : torch::empty({num_experts_per_rank_, hidden_size_}, fp_option),
         false);
     act_smooth_ = register_parameter(
         "act_smooth",
@@ -223,6 +269,26 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
             options_),
         false);
   }
+}
+
+std::pair<torch::Tensor, std::optional<torch::List<int64_t>>>
+FusedMoEImpl::prepare_group_gemm_weight_scale(
+    const torch::Tensor& b_scale) const {
+  if (moe_weight_bits_ != 4 || b_scale.dim() != 3) {
+    return {b_scale, std::nullopt};
+  }
+
+  torch::List<int64_t> quant_flag;
+  const int64_t num_k_groups = b_scale.size(2);
+  const int64_t num_experts = b_scale.size(0);
+  for (int64_t expert_id = 0; expert_id < num_experts; ++expert_id) {
+    for (int64_t group_id = 0; group_id < num_k_groups; ++group_id) {
+      quant_flag.emplace_back(4);
+    }
+  }
+
+  // torch_mlu_ops quant_flag path expects b_scale as [group_cols, experts, n].
+  return {b_scale.permute({2, 0, 1}).contiguous(), quant_flag};
 }
 
 torch::Tensor FusedMoEImpl::create_group_gemm_output(
@@ -317,6 +383,25 @@ void FusedMoEImpl::load_experts(const StateDict& state_dict) {
   const int64_t num_total_experts = num_total_experts_;
   std::vector<std::string> prefixes = {"gate_proj.", "up_proj."};
   if (is_smoothquant_) {
+    if (moe_weight_bits_ == 4) {
+      for (int64_t idx = 0; idx < num_experts_per_rank_; ++idx) {
+        const std::string expert_prefix =
+            std::to_string(start_expert_id_ + idx) + ".";
+        for (const auto& proj : {"gate_proj.", "up_proj.", "down_proj."}) {
+          auto qweight_tensor =
+              state_dict.get_tensor(expert_prefix + proj + "qweight");
+          if (!qweight_tensor.defined()) {
+            continue;
+          }
+          CHECK_EQ(qweight_tensor.scalar_type(), torch::kInt8)
+              << "Expected int8 container tensor for int4 expert qweight at "
+              << (std::string(state_dict.prefix()) + expert_prefix + proj +
+                  "qweight")
+              << ", but got dtype " << qweight_tensor.scalar_type();
+        }
+      }
+    }
+
     LOAD_MOE_FUSED_WEIGHT("qweight", w1, w3, w13);
     LOAD_MOE_FUSED_WEIGHT("per_channel_scale", w1_scale, w3_scale, w13_scale);
     // When supporting DeepEP All2All mode,

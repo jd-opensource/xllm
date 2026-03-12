@@ -159,11 +159,11 @@ void DistManager::setup_multi_node_workers(
     LOG(FATAL) << "Unsupported " << model_backend << " in multi-node.";
   }
   // create local workers
-  for (size_t i = 0; i < devices.size(); ++i) {
+  for (int32_t i = 0; i < each_node_ranks; ++i) {
     // worldsize = 8
     // Node1: 0, 1, 2, 3
     // Node2: 0+4, 1+4, 2+4, 3+4
-    const int32_t rank = static_cast<int32_t>(i) + base_rank;
+    const int32_t rank = i + base_rank;
 
     // we use spawn process worker to launch a xllm instance
     // when start a offline inference task with multi-gpu/npu/mpu/...

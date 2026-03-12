@@ -215,9 +215,6 @@ RequestParams::RequestParams(const proto::CompletionRequest& request,
   // beam search
   if (request.has_beam_width()) {
     beam_width = request.beam_width();
-    if (beam_width > 1) {
-      ignore_eos = true;
-    }
   }
   if (request.has_add_special_tokens()) {
     add_special_tokens = request.add_special_tokens();
@@ -410,9 +407,6 @@ void init_from_chat_request(RequestParams& params, const ChatRequest& request) {
   // beam search
   if (request.has_beam_width()) {
     params.beam_width = request.beam_width();
-    if (params.beam_width > 1) {
-      params.ignore_eos = true;
-    }
   }
 
   if (request.has_add_special_tokens()) {

@@ -13,13 +13,13 @@ cc_library(
     dense_mlp.h
     linear.h
     word_embedding_impl.h
-    indexer.h
     deep_ep.h
     activation.h
     attention_metadata.h
     attention_metadata_builder.h
     dp_utils.h
     add_matmul.h
+    moe_fused_topk.h
   SRCS
     qwen2_attention.cpp
     qwen2_vision_attention.cpp
@@ -30,12 +30,12 @@ cc_library(
     dense_mlp.cpp
     linear.cpp
     word_embedding_impl.cpp
-    indexer.cpp
     deep_ep.cpp
     activation.cpp
     attention_metadata_builder.cpp
     dp_utils.cpp
     add_matmul.cpp
+    moe_fused_topk.cpp
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"

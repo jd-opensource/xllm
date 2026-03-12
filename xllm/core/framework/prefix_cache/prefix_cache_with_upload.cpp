@@ -34,7 +34,7 @@ PrefixCacheWithUpload::~PrefixCacheWithUpload() {
 size_t PrefixCacheWithUpload::insert(const Slice<int32_t>& token_ids,
                                      std::vector<Block>& blocks,
                                      size_t existed_shared_blocks_num) {
-  std::vector<Murmur3Key> insert_keys;
+  std::vector<XXH3Key> insert_keys;
   auto n_tokens = PrefixCache::insert(
       token_ids, blocks, existed_shared_blocks_num, &insert_keys);
   save_event_async(true, insert_keys);
@@ -47,21 +47,21 @@ size_t PrefixCacheWithUpload::insert(const std::vector<Block>& blocks) {
 }
 
 size_t PrefixCacheWithUpload::insert(Slice<Block>& blocks) {
-  std::vector<Murmur3Key> insert_keys;
+  std::vector<XXH3Key> insert_keys;
   auto n_tokens = PrefixCache::insert(blocks, &insert_keys);
   save_event_async(true, insert_keys);
   return n_tokens;
 }
 
 size_t PrefixCacheWithUpload::evict(size_t n_blocks) {
-  std::vector<Murmur3Key> evict_keys;
+  std::vector<XXH3Key> evict_keys;
   auto evict_count = PrefixCache::evict(n_blocks, &evict_keys);
   save_event_async(false, evict_keys);
   return evict_count;
 }
 
 void PrefixCacheWithUpload::save_event_async(const bool is_insert,
-                                             std::vector<Murmur3Key>& keys) {
+                                             std::vector<XXH3Key>& keys) {
   threadpool_.schedule([this, is_insert = is_insert, keys = std::move(keys)]() {
     std::lock_guard<std::mutex> lock(this->mutex_);
     auto front_ptr = this->db_kvcache_events_.get_front_value();

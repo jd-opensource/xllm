@@ -7,6 +7,7 @@ cc_test(
   SRCS
     dense_mlp_tests.cpp
     tests_utils.cpp
+    deepseek_v32_sp_utils_tests.cpp
     indexer_tests.cpp
     mla_tests.cpp
     deepseek_v2_decoder_layer_tests.cpp
@@ -14,6 +15,7 @@ cc_test(
     qwen2_vision_attention_tests.cpp
   DEPS
     :common_layers
+    :mlu_layers
     :parallel_state
     :model
     :model_context
@@ -78,6 +80,22 @@ cc_test(
     :parallel_state
     :model
     :model_context
+    :state_dict
+    GTest::gtest_main
+    torch
+    glog::glog
+)
+
+cc_test(
+  NAME
+    deepseek_v2_attention_multi_device_test
+  SRCS
+    deepseek_v2_attention_multi_device_tests.cpp
+    tests_utils.cpp
+  DEPS
+    :common_layers
+    :mlu_layers
+    :parallel_state
     :state_dict
     GTest::gtest_main
     torch

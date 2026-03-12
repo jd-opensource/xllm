@@ -53,7 +53,7 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
  public:
   bool init_model(const std::string& model_weights_path,
                   int32_t random_seed,
-                  int32_t master_status) override;
+                  MasterStatus master_status) override;
 
   bool allocate_kv_cache(
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
@@ -63,14 +63,32 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
 #endif
 
+  ForwardInput update_input_by_last_step_output(ForwardInput& inputs) override;
+
  protected:
   std::optional<ForwardOutput> step_prefill(const ForwardInput& input) override;
   std::optional<ForwardOutput> step_decode(const ForwardInput& inputs) override;
   std::optional<ForwardOutput> step_empty(const ForwardInput& inputs) override;
+  std::optional<ForwardOutput> step_decode_single(const ForwardInput& input);
+  std::optional<ForwardOutput> step_decode_multi_step(
+      const ForwardInput& input);
+
+  ForwardOutput prepare_last_output_for_decode(const ForwardInput& input);
+  void fill_validate_input_from_draft_outputs(
+      const std::vector<ForwardOutput>& draft_outputs,
+      ForwardInput& validate_input);
+  std::optional<ForwardOutput> run_validate(
+      const ForwardInput& input,
+      const std::vector<ForwardOutput>& draft_outputs,
+      ForwardInput& validate_input);
 
   virtual SampleOutput validate(const SamplingParameters& sampling_params,
                                 const std::vector<ForwardOutput>& draft_outputs,
                                 const ForwardOutput& target_output);
+
+  // Hook for algorithm-specific draft output post-processing during decode.
+  // Default MTP behavior may compress probs for validate.
+  virtual void process_draft_sample_output(SampleOutput& sample_output);
 
   SampleOutput validate(const SamplingParameters& sampling_params,
                         const torch::Tensor& draft_token_ids,
@@ -90,9 +108,6 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
                             ForwardInput& draft_inputs,
                             const int64_t offset,
                             const torch::Device device);
-
-  // Per-step processing for draft outputs before validation/cache.
-  virtual void process_draft_output(ForwardOutput& draft_output);
 
   // Build a 2-token-per-seq draft extend input in one batch.
   void prepare_draft_extend_inputs(const ForwardInput& base_input,

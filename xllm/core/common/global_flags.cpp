@@ -164,6 +164,10 @@ DEFINE_double(prefill_scheduling_memory_usage_threshold,
 
 DEFINE_bool(enable_chunked_prefill, true, "Whether to enable chunked prefill.");
 
+DEFINE_bool(enable_prefill_sp,
+            false,
+            "Whether to enable prefill-only sequence parallel.");
+
 DEFINE_int32(max_tokens_per_chunk_for_prefill,
              -1,
              "Max number of token per chunk in prefill stage.");
@@ -274,7 +278,7 @@ DEFINE_bool(enable_cache_upload,
             "Whether to upload cache info to service. This feature is only "
             "available when service routing is enabled.");
 
-DEFINE_uint32(murmur_hash3_seed, 1024, "Default Murmur Hash seed.");
+DEFINE_uint32(xxh3_128bits_seed, 1024, "Default XXH3 128-bits hash seed.");
 
 // --- serving on multi-nodes config ---
 
@@ -488,19 +492,27 @@ DEFINE_bool(enable_topk_sorted,
             true,
             "Whether to enable sorted output for topk.");
 
+DEFINE_bool(
+    output_rec_logprobs,
+    false,
+    "Whether to output rec multi-round token-aligned logprobs. "
+    "When enabled, missing per-token logprobs are filled with the final "
+    "beam logprob.");
+
 // --- reasoning parser config ---
 
-DEFINE_string(reasoning_parser,
-              "",
-              "Specify the reasoning parser for handling reasoning "
-              "interactions(e.g. auto, glm45, glm47, qwen3, deepseek-r1).");
+DEFINE_string(
+    reasoning_parser,
+    "",
+    "Specify the reasoning parser for handling reasoning "
+    "interactions(e.g. auto, glm45, glm47, glm5, qwen3, deepseek-r1).");
 
 // --- function call config ---
 
 DEFINE_string(tool_call_parser,
               "",
               "Specify the parser for handling tool-call interactions(e.g. "
-              "auto, qwen25, qwen3, kimi_k2, deepseekv3, glm45, glm47).");
+              "auto, qwen25, qwen3, kimi_k2, deepseekv3, glm45, glm47, glm5).");
 
 // --- qwen3 reranker config ---
 
@@ -604,3 +616,8 @@ DEFINE_int32(beam_width, 1, "Beam width for beam search.");
 DEFINE_int32(health_check_interval_ms,
              3000,
              "Worker health check interval in milliseconds.");
+
+DEFINE_bool(enable_xattention_one_stage,
+            false,
+            "Whether to force xattention one-stage decode for rec "
+            "multi-round mode.");

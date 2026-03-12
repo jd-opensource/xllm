@@ -25,17 +25,13 @@ limitations under the License.
 #include "framework/state_dict/utils.h"
 #include "layers/common/deep_ep.h"
 #include "layers/common/dense_mlp.h"
+#include "layers/common/fused_moe_base.h"
 #include "layers/common/linear.h"
 #include "platform/device.h"
 #include "util/tensor_helper.h"
 
 namespace xllm {
 namespace layer {
-
-// Must match layers/mlu/fused_moe.h and layers/common/fused_moe.h.
-struct FusedMoEArgs {
-  bool is_gated = true;
-};
 
 class FusedMoEImpl : public torch::nn::Module {
  public:

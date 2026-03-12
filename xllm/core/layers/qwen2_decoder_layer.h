@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <optional>
+#include <tuple>
 
 #include "common/dense_mlp.h"
 #include "common/qwen2_attention.h"
@@ -27,7 +28,6 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
-#include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 
 namespace xllm {
@@ -53,6 +53,12 @@ class Qwen2DecoderLayerImpl : public torch::nn::Module {
   RMSNorm post_norm_{nullptr};
 
   ParallelArgs parallel_args_;
+
+  std::tuple<torch::Tensor, std::optional<torch::Tensor>> apply_norm(
+      RMSNorm& norm,
+      torch::Tensor& input,
+      std::optional<torch::Tensor>& residual,
+      const std::optional<torch::Tensor>& fp8_scale);
 };
 TORCH_MODULE(Qwen2DecoderLayer);
 

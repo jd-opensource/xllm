@@ -50,12 +50,11 @@ DiTEngine::DiTEngine(const runtime::Options& options) : options_(options) {
   CHECK(!options_.enable_shm()) << "Dit can not support enable_shm currently.";
 
   // create workers
-  for (size_t i = 0; i < devices.size(); ++i) {
-    const int32_t rank = static_cast<int32_t>(i);
-    ProcessGroup* pg = world_size > 1 ? process_groups_[i].get() : nullptr;
+  for (int32_t rank = 0; rank < world_size; ++rank) {
+    ProcessGroup* pg = world_size > 1 ? process_groups_[rank].get() : nullptr;
     ParallelArgs parallel_args(rank, world_size, pg);
     workers_.emplace_back(
-        std::make_unique<DiTWorker>(parallel_args, devices[i], options_));
+        std::make_unique<DiTWorker>(parallel_args, devices[rank], options_));
   }
 
   if (workers_.size() > 1) {
