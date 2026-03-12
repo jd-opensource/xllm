@@ -34,9 +34,6 @@ inline std::optional<std::string> validate_deepseek_v32_sequence_parallel_flags(
   if (!FLAGS_enable_mla) {
     return "enable_prefill_sp requires enable_mla=true.";
   }
-  if (FLAGS_enable_prefix_cache) {
-    return "enable_prefill_sp does not support prefix cache.";
-  }
   if (FLAGS_enable_chunked_prefill) {
     return "enable_prefill_sp does not support chunked prefill.";
   }
