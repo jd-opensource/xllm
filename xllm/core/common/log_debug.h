@@ -56,7 +56,7 @@ class DebugLogStream {
 };
 
 #define LOG_DEBUG() \
-  if (VLOG_IS_ON(1)) DebugLogStream()
+  if (!VLOG_IS_ON(1)) (void)0; else DebugLogStream()
 
 // use like this:
 // LOG_DEBUG() << "test x-request-id: " << x_request_id_;
