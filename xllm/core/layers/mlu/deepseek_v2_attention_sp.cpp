@@ -44,6 +44,8 @@ torch::Tensor DeepseekV2AttentionImpl::forward_sp(
     bool is_prefill_or_chunked_prefill) {
   CHECK(enable_lighting_indexer_)
       << "deepseek_v32 sequence parallel requires lighting indexer.";
+  CHECK(is_prefill_or_chunked_prefill)
+      << "deepseek_v32 sequence parallel only supports prefill batches.";
   auto k_cache_scale = kv_cache.get_k_cache_scale();
   SPQRPreOut qr_pre = sp_qr_pre(hidden_states);
 

@@ -22,6 +22,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
+#include "framework/batch/batch_forward_type.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "layers/common/attention_metadata.h"
 #include "layers/common/tests/tests_utils.h"
@@ -92,7 +93,8 @@ class ScopedFlagValue {
 AttentionMetadata make_prefill_metadata(
     const std::vector<int32_t>& q_seq_lens,
     const std::vector<int32_t>& ctx_seq_lens = {},
-    const std::optional<torch::Tensor>& block_table = std::nullopt) {
+    const std::optional<torch::Tensor>& block_table = std::nullopt,
+    BatchForwardType batch_forward_type = BatchForwardType::PREFILL) {
   AttentionMetadata attn_metadata;
   std::vector<int32_t> q_cu_seq_lens = {0};
   int32_t total = 0;
@@ -109,8 +111,8 @@ AttentionMetadata make_prefill_metadata(
   if (block_table.has_value()) {
     attn_metadata.block_table = *block_table;
   }
-  attn_metadata.is_prefill = true;
-  attn_metadata.is_chunked_prefill = false;
+  attn_metadata.is_prefill = batch_forward_type.is_prefill();
+  attn_metadata.is_chunked_prefill = batch_forward_type.is_chunked_prefill();
   attn_metadata.is_dummy = false;
   return attn_metadata;
 }
@@ -247,8 +249,13 @@ TEST(DeepseekV32SPUtilsTest,
   torch::Tensor tokens =
       torch::arange(0, 21, torch::TensorOptions().dtype(torch::kInt32));
 
-  auto maybe_context = build_deepseek_v32_sp_context(
-      attn_metadata, tokens, reinterpret_cast<ProcessGroup*>(0x1), 1, 4);
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    1,
+                                    4);
 
   ASSERT_TRUE(maybe_context.has_value());
   const auto& context = maybe_context.value();
@@ -308,8 +315,62 @@ TEST(DeepseekV32SPUtilsTest,
   torch::Tensor tokens =
       torch::arange(0, 3, torch::TensorOptions().dtype(torch::kInt32));
 
-  auto maybe_context = build_deepseek_v32_sp_context(
-      attn_metadata, tokens, reinterpret_cast<ProcessGroup*>(0x1), 0, 4);
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    0,
+                                    4);
+
+  EXPECT_FALSE(maybe_context.has_value());
+}
+
+TEST(DeepseekV32SPUtilsTest,
+     BuildDeepseekV32SPContextAcceptsChunkedPrefillBatch) {
+  ScopedFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
+  ScopedFlagValue world_size_flag(FLAGS_nnodes, 4);
+
+  AttentionMetadata attn_metadata = make_prefill_metadata(
+      {4, 6}, {16, 22}, std::nullopt, BatchForwardType::CHUNKED_PREFILL);
+  torch::Tensor tokens =
+      torch::arange(0, 10, torch::TensorOptions().dtype(torch::kInt32));
+
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::CHUNKED_PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    1,
+                                    4);
+
+  ASSERT_TRUE(maybe_context.has_value());
+  const auto& context = maybe_context.value();
+  EXPECT_TRUE(
+      torch::equal(context.local_attn_metadata.kv_seq_lens,
+                   torch::tensor({2, 0, 2, 5},
+                                 torch::TensorOptions().dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(context.sp_meta.seg_ctx_lens,
+                   torch::tensor({14, 12, 18, 21},
+                                 torch::TensorOptions().dtype(torch::kInt32))));
+}
+
+TEST(DeepseekV32SPUtilsTest, BuildDeepseekV32SPContextRejectsMixedBatch) {
+  ScopedFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
+  ScopedFlagValue world_size_flag(FLAGS_nnodes, 4);
+
+  AttentionMetadata attn_metadata = make_prefill_metadata({4, 6}, {16, 22});
+  torch::Tensor tokens =
+      torch::arange(0, 10, torch::TensorOptions().dtype(torch::kInt32));
+
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::MIXED,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    1,
+                                    4);
 
   EXPECT_FALSE(maybe_context.has_value());
 }
@@ -325,13 +386,22 @@ TEST(DeepseekV32SPUtilsTest, BuildSPMetadataTracksSegmentView) {
   torch::Tensor tokens =
       torch::arange(0, 21, torch::TensorOptions().dtype(torch::kInt32));
 
-  auto maybe_context = build_deepseek_v32_sp_context(
-      attn_metadata, tokens, reinterpret_cast<ProcessGroup*>(0x1), 1, 4);
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    1,
+                                    4);
   ASSERT_TRUE(maybe_context.has_value());
   const auto& sp_meta = maybe_context->sp_meta;
 
   EXPECT_EQ(sp_meta.k_pack_starts_cpu, (std::vector<int32_t>{0, 4, 4, 10, 10}));
   EXPECT_EQ(sp_meta.k_pack_lens_cpu, (std::vector<int32_t>{2, 2, 5, 4, 10}));
+  EXPECT_EQ(sp_meta.k_ctx_pack_starts_cpu,
+            (std::vector<int32_t>{0, 0, 12, 12, 28, 28}));
+  EXPECT_EQ(sp_meta.k_ctx_pack_lens_cpu,
+            (std::vector<int32_t>{10, 8, 12, 15, 25, 31}));
   EXPECT_TRUE(
       torch::equal(sp_meta.seg_q_cu_lens,
                    torch::tensor({0, 1, 1, 2, 3, 5, 6},
@@ -339,6 +409,10 @@ TEST(DeepseekV32SPUtilsTest, BuildSPMetadataTracksSegmentView) {
   EXPECT_TRUE(
       torch::equal(sp_meta.seg_suffix_k_cu_lens,
                    torch::tensor({0, 2, 2, 4, 9, 13, 23},
+                                 torch::TensorOptions().dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(sp_meta.seg_ctx_cu_lens,
+                   torch::tensor({0, 10, 18, 30, 45, 70, 101},
                                  torch::TensorOptions().dtype(torch::kInt32))));
   EXPECT_TRUE(
       torch::equal(sp_meta.seg_ctx_lens,
@@ -370,6 +444,10 @@ TEST(DeepseekV32SPUtilsTest, BuildSPMetadataTracksPartialPrefixHit) {
   EXPECT_EQ(local_attn_metadata.max_seq_len, 5);
   EXPECT_EQ(sp_meta.k_pack_starts_cpu, (std::vector<int32_t>{0, 4, 4}));
   EXPECT_EQ(sp_meta.k_pack_lens_cpu, (std::vector<int32_t>{2, 2, 5}));
+  EXPECT_EQ(sp_meta.k_ctx_pack_starts_cpu,
+            (std::vector<int32_t>{0, 0, 16, 16}));
+  EXPECT_EQ(sp_meta.k_ctx_pack_lens_cpu,
+            (std::vector<int32_t>{14, 12, 18, 21}));
   EXPECT_TRUE(
       torch::equal(sp_meta.seg_ctx_lens,
                    torch::tensor({14, 12, 18, 21},
@@ -377,6 +455,76 @@ TEST(DeepseekV32SPUtilsTest, BuildSPMetadataTracksPartialPrefixHit) {
   EXPECT_TRUE(
       torch::equal(sp_meta.seg_suffix_k_cu_lens,
                    torch::tensor({0, 2, 2, 4, 9},
+                                 torch::TensorOptions().dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(sp_meta.seg_ctx_cu_lens,
+                   torch::tensor({0, 14, 26, 44, 65},
+                                 torch::TensorOptions().dtype(torch::kInt32))));
+}
+
+TEST(DeepseekV32SPUtilsTest,
+     BuildLocalPrefillMetadataKeepsSuffixOnlyLensForChunkedPrefill) {
+  AttentionMetadata attn_metadata = make_prefill_metadata(
+      {4, 6}, {16, 22}, std::nullopt, BatchForwardType::CHUNKED_PREFILL);
+  const auto all_segments = build_all_sp_segments(4, {4, 6}, {16, 22});
+  const auto local_segments = build_local_sp_segments(1, all_segments);
+  const auto local_attn_metadata =
+      build_local_prefill_attention_metadata(attn_metadata, local_segments);
+
+  EXPECT_TRUE(
+      torch::equal(local_attn_metadata.q_cu_seq_lens,
+                   torch::tensor({0, 1, 1, 2, 3},
+                                 torch::TensorOptions().dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(local_attn_metadata.kv_cu_seq_lens,
+                   torch::tensor({0, 2, 2, 4, 9},
+                                 torch::TensorOptions().dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(local_attn_metadata.kv_seq_lens,
+                   torch::tensor({2, 0, 2, 5},
+                                 torch::TensorOptions().dtype(torch::kInt32))));
+  EXPECT_EQ(local_attn_metadata.max_query_len, 1);
+  EXPECT_EQ(local_attn_metadata.max_seq_len, 5);
+  EXPECT_FALSE(
+      torch::equal(local_attn_metadata.kv_seq_lens,
+                   torch::tensor({14, 12, 18, 21},
+                                 torch::TensorOptions().dtype(torch::kInt32))));
+}
+
+TEST(DeepseekV32SPUtilsTest,
+     BuildSPMetadataKeepsChunkedBlockTableForIndexerSelect) {
+  AttentionMetadata attn_metadata = make_prefill_metadata(
+      {4, 6},
+      {16, 22},
+      make_block_table({{10, 11, 12, 13}, {20, 21, 22, 23}}),
+      BatchForwardType::CHUNKED_PREFILL);
+  const auto all_segments = build_all_sp_segments(4, {4, 6}, {16, 22});
+  const auto local_segments = build_local_sp_segments(1, all_segments);
+  const auto sp_meta = build_sp_metadata(attn_metadata, local_segments, {4, 6});
+
+  EXPECT_EQ(sp_meta.k_pack_lens_cpu, (std::vector<int32_t>{2, 2, 5}));
+  EXPECT_EQ(sp_meta.k_ctx_pack_starts_cpu,
+            (std::vector<int32_t>{0, 0, 16, 16}));
+  EXPECT_EQ(sp_meta.k_ctx_pack_lens_cpu,
+            (std::vector<int32_t>{14, 12, 18, 21}));
+  EXPECT_TRUE(
+      torch::equal(sp_meta.seg_suffix_k_cu_lens,
+                   torch::tensor({0, 2, 2, 4, 9},
+                                 torch::TensorOptions().dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(sp_meta.seg_ctx_cu_lens,
+                   torch::tensor({0, 14, 26, 44, 65},
+                                 torch::TensorOptions().dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(sp_meta.seg_ctx_lens,
+                   torch::tensor({14, 12, 18, 21},
+                                 torch::TensorOptions().dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(sp_meta.seg_block_table,
+                   torch::tensor({{10, 11, 12, 13},
+                                  {10, 11, 12, 13},
+                                  {20, 21, 22, 23},
+                                  {20, 21, 22, 23}},
                                  torch::TensorOptions().dtype(torch::kInt32))));
 }
 
@@ -389,8 +537,13 @@ TEST(DeepseekV32SPUtilsTest, BuildSPContextKeepsExactBlockRollbackLens) {
   torch::Tensor tokens =
       torch::arange(0, 12, torch::TensorOptions().dtype(torch::kInt32));
 
-  auto maybe_context = build_deepseek_v32_sp_context(
-      attn_metadata, tokens, reinterpret_cast<ProcessGroup*>(0x1), 0, 4);
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    0,
+                                    4);
 
   ASSERT_TRUE(maybe_context.has_value());
   const auto& context = maybe_context.value();
@@ -454,6 +607,31 @@ TEST(DeepseekV32SPUtilsTest, PackSPKForIndexerExpandsSegmentPrefixes) {
                     torch::TensorOptions().dtype(torch::kFloat32))));
 }
 
+TEST(DeepseekV32SPUtilsTest, PackSPCtxKExpandsSegmentContexts) {
+  DeepseekV32SPMetadata sp_meta;
+  sp_meta.k_ctx_pack_starts_cpu = {0, 0, 5};
+  sp_meta.k_ctx_pack_lens_cpu = {3, 5, 2};
+
+  torch::Tensor k_ctx =
+      torch::arange(0, 7, torch::TensorOptions().dtype(torch::kFloat32))
+          .view({7, 1});
+  torch::Tensor k_packed = pack_sp_ctx_k(k_ctx, sp_meta);
+
+  EXPECT_TRUE(torch::equal(
+      k_packed,
+      torch::tensor({{0.0f},
+                     {1.0f},
+                     {2.0f},
+                     {0.0f},
+                     {1.0f},
+                     {2.0f},
+                     {3.0f},
+                     {4.0f},
+                     {5.0f},
+                     {6.0f}},
+                    torch::TensorOptions().dtype(torch::kFloat32))));
+}
+
 TEST(DeepseekV32SPUtilsTest, SliceLocalPackedUsesRankOffset) {
   DeepseekV32SPContext context;
   context.rank = 1;
@@ -479,8 +657,13 @@ TEST(DeepseekV32SPUtilsTest,
   torch::Tensor tokens =
       torch::arange(0, 8, torch::TensorOptions().dtype(torch::kInt32));
 
-  auto maybe_context = build_deepseek_v32_sp_context(
-      attn_metadata, tokens, reinterpret_cast<ProcessGroup*>(0x1), 0, 4);
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    0,
+                                    4);
 
   EXPECT_FALSE(maybe_context.has_value());
 }
@@ -507,8 +690,13 @@ TEST(DeepseekV32SPUtilsTest, RestoreGatheredToGlobalOrderWithoutPadding) {
   AttentionMetadata attn_metadata = make_prefill_metadata({16});
   torch::Tensor tokens =
       torch::arange(0, 16, torch::TensorOptions().dtype(torch::kInt32));
-  auto maybe_context = build_deepseek_v32_sp_context(
-      attn_metadata, tokens, reinterpret_cast<ProcessGroup*>(0x1), 0, 4);
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    0,
+                                    4);
   ASSERT_TRUE(maybe_context.has_value());
   const auto& context = maybe_context.value();
 
@@ -529,8 +717,13 @@ TEST(DeepseekV32SPUtilsTest, RestoreGatheredToGlobalOrderDropsPadding) {
   AttentionMetadata attn_metadata = make_prefill_metadata({10});
   torch::Tensor tokens =
       torch::arange(0, 10, torch::TensorOptions().dtype(torch::kInt32));
-  auto maybe_context = build_deepseek_v32_sp_context(
-      attn_metadata, tokens, reinterpret_cast<ProcessGroup*>(0x1), 1, 4);
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    1,
+                                    4);
   ASSERT_TRUE(maybe_context.has_value());
   const auto& context = maybe_context.value();
 
@@ -571,8 +764,13 @@ TEST(DeepseekV32SPUtilsTest, AllGatherAcrossRanksRestoresGlobalOrder) {
   AttentionMetadata attn_metadata = make_prefill_metadata({10});
   torch::Tensor tokens =
       torch::arange(0, 10, torch::TensorOptions().dtype(torch::kInt32));
-  auto maybe_context = build_deepseek_v32_sp_context(
-      attn_metadata, tokens, reinterpret_cast<ProcessGroup*>(0x1), 1, 4);
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    1,
+                                    4);
   ASSERT_TRUE(maybe_context.has_value());
   auto context = maybe_context.value();
 
@@ -674,8 +872,13 @@ TEST(DeepseekV32SPUtilsTest, PaddedGatherRestoresGlobalOrder) {
   AttentionMetadata attn_metadata = make_prefill_metadata({10});
   torch::Tensor tokens =
       torch::arange(0, 10, torch::TensorOptions().dtype(torch::kInt32));
-  auto maybe_context = build_deepseek_v32_sp_context(
-      attn_metadata, tokens, reinterpret_cast<ProcessGroup*>(0x1), 1, 4);
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    1,
+                                    4);
   ASSERT_TRUE(maybe_context.has_value());
   auto context = maybe_context.value();
 

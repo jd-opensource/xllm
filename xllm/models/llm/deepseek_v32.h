@@ -34,9 +34,6 @@ inline std::optional<std::string> validate_deepseek_v32_sequence_parallel_flags(
   if (!FLAGS_enable_mla) {
     return "enable_prefill_sp requires enable_mla=true.";
   }
-  if (FLAGS_enable_chunked_prefill) {
-    return "enable_prefill_sp does not support chunked prefill.";
-  }
   if (FLAGS_nnodes <= 1) {
     return "enable_prefill_sp requires nnodes > 1.";
   }
@@ -70,9 +67,8 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
     }
     auto& attn_metadata = *modified_input_params.attn_metadata;
     std::optional<layer::v32_sp::DeepseekV32SPContext> sp_ctx;
-    const bool requested_sequence_parallel = FLAGS_enable_prefill_sp &&
-                                             attn_metadata.is_prefill &&
-                                             !attn_metadata.is_chunked_prefill;
+    const bool requested_sequence_parallel =
+        FLAGS_enable_prefill_sp && input_params.batch_forward_type.no_decode();
     if (requested_sequence_parallel) {
       if (sequence_parallel_group_ == nullptr) {
         CHECK_EQ(parallel_world_size_, 1)
@@ -80,6 +76,7 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
       } else if (sequence_parallel_group_->world_size() > 1) {
         sp_ctx = layer::v32_sp::build_deepseek_v32_sp_context(
             attn_metadata,
+            input_params.batch_forward_type,
             tokens,
             sequence_parallel_group_,
             sequence_parallel_group_->rank(),

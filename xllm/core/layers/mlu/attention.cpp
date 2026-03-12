@@ -214,11 +214,13 @@ void AttentionImpl::prefill_forward(
 
       // Use dequantized tensors for flash attention
       key = key_dequant;
-      value = value_dequant;
+      value = enable_mla_ ? key_dequant.slice(-1, 0, v_head_dim_).contiguous()
+                          : value_dequant;
     } else {
       // Non-quantized KV cache path - use directly
       key = k_cache;
-      value = v_cache.value();
+      value = enable_mla_ ? k_cache.slice(-1, 0, v_head_dim_).contiguous()
+                          : v_cache.value();
       block_tables = attn_metadata.block_table;
     }
   }
