@@ -522,6 +522,14 @@ def parse_arguments() -> dict[str, Any]:
         default='false',
         help='Whether to generate so or binary'
     )
+
+    parser.add_argument(
+        '--enable-ha',
+        type=str.lower,
+        choices=['true', 'false', '1', '0', 'yes', 'no', 'y', 'n', 'on', 'off'],
+        default='false',
+        help='Whether to enable Mooncake HA(high availability) build flags'
+    )
     
     parser.add_argument(
         '--test-name',
@@ -535,10 +543,12 @@ def parse_arguments() -> dict[str, Any]:
     sys.argv = [sys.argv[0]] + args.setup_args
     
     generate_so = args.generate_so.lower() in ('true', '1', 'yes', 'y', 'on')
+    enable_ha = args.enable_ha.lower() in ('true', '1', 'yes', 'y', 'on')
 
     return {
         'device': args.device,
         'generate_so': generate_so,
+        'enable_ha': enable_ha,
         'test_name': args.test_name,
     }
 
@@ -549,9 +559,10 @@ if __name__ == "__main__":
     device = config['device']
     if device == 'auto':
         device = get_device_type()
-    print(f"🚀 Build xllm with CPU arch: {arch} and target device: {device}")
+    enable_ha = config.get('enable_ha', False)
+    print(f"🚀 Build xllm with CPU arch: {arch}, target device: {device}, enable_ha: {enable_ha}")
 
-    pre_build()
+    pre_build(device, enable_ha)
 
     generate_so = config['generate_so']
     test_name = config.get('test_name')
