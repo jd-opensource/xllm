@@ -98,9 +98,9 @@ void DeepseekV2DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   }
 }
 
-void DeepseekV2DecoderLayerImpl::check_loaded() const {
+void DeepseekV2DecoderLayerImpl::verify_loaded_weights() const {
   if (moe_mlp_) {
-    moe_mlp_->check_loaded();
+    moe_mlp_->verify_loaded_weights();
   }
 }
 

@@ -401,7 +401,7 @@ void FusedMoEImpl::load_experts(const StateDict& state_dict) {
   }
 }
 
-void FusedMoEImpl::check_loaded() const {
+void FusedMoEImpl::verify_loaded_weights() const {
   if (!is_smoothquant_) {
     return;
   }

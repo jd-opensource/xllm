@@ -90,6 +90,10 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
     mtp_block_->load_state_dict(state_dict);
   }
 
+  virtual void verify_loaded_weights() const {
+    mtp_block_->verify_loaded_weights();
+  }
+
   virtual void prepare_expert_weight(int32_t layer_id,
                                      const std::vector<int32_t>& expert_ids) {
     return;
@@ -209,6 +213,12 @@ class MtpModelImplBase : public torch::nn::Module {
         norm_->load_state_dict(state_dict.get_dict_with_prefix(
             "layers." + std::to_string(layer_index) + ".shared_head.norm."));
       }
+    }
+  }
+
+  void verify_loaded_weights() const {
+    for (const auto& layer : mtp_layers_) {
+      layer->verify_loaded_weights();
     }
   }
 

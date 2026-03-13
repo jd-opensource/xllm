@@ -433,7 +433,7 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   //  the number of layers, and the draft engine is using the same model as the
   //  target engine.
   // so we need to override the number of layers for the draft engine.
-  if (options_.is_draft_engine() && args_.num_nextn_predict_layers() != 0) {
+  if (options_.is_draft_engine()) {
     kv_cache_cap.n_layers = args_.num_nextn_predict_layers();
   }
 #endif
