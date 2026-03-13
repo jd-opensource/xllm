@@ -705,10 +705,10 @@ ForwardOutput RecEngine::OneRecEnginePipeline::get_model_output(
   auto& sample_output = output.sample_output;
 
   if (sample_output.embeddings.defined()) {
-    sample_output.embeddings =
-        safe_to(sample_output.embeddings, torch::kCPU, true);
-    sample_output.embeddings =
-        safe_to(sample_output.embeddings, torch::kFloat32, true);
+    sample_output.embeddings = safe_to(
+        sample_output.embeddings,
+        torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32),
+        true);
   }
 
   if (sample_output.next_tokens.defined()) {
