@@ -303,10 +303,18 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
   CHECK(onerec_params != nullptr) << "OneRec requires rec_params.";
 
   const OneRecModelInputParams& rec_params = *onerec_params;
+  const bool has_decoder_context =
+      rec_params.decoder_context_embedding.defined();
+  const bool has_encoder_context =
+      rec_params.has_encoder_output || has_decoder_context;
 
   torch::Tensor hidden_states;
   if (rec_params.rec_stage == OneRecModelInputParams::RecStage::PREFILL) {
     if (!rec_params.is_first_prefill) {
+      if (!has_encoder_context) {
+        LOG(ERROR) << "OneRec prefill requires encoder context.";
+        return std::nullopt;
+      }
       ModelInputParams decoder_params = input_params;
       decoder_params.mutable_onerec_params().is_encoder_forward = false;
       decoder_params.mutable_onerec_params().has_encoder_output =
@@ -351,11 +359,14 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
       decoder_onerec_params.is_encoder_forward = false;
       decoder_onerec_params.has_encoder_output =
           encoder_output.hidden_states.defined();
-      if (encoder_output.hidden_states.defined() &&
-          !decoder_onerec_params.decoder_context_embedding.defined()) {
-        decoder_onerec_params.decoder_context_embedding =
-            encoder_output.hidden_states;
-      }
+      LOG(INFO) << "OneRecWorkPipeline::step decoder forward begin after "
+                   "encoder: decoder_context_shape="
+                << (decoder_onerec_params.decoder_context_embedding.defined()
+                        ? c10::str(decoder_onerec_params
+                                       .decoder_context_embedding.sizes())
+                        : "undefined")
+                << ", has_encoder_output="
+                << decoder_onerec_params.has_encoder_output;
       auto model_output = runtime_.executor->forward(input.token_ids,
                                                      input.positions,
                                                      runtime_.worker.kv_caches_,
@@ -363,6 +374,10 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
       hidden_states = model_output.hidden_states;
     }
   } else {
+    if (!has_encoder_context) {
+      LOG(ERROR) << "OneRec decode requires encoder context.";
+      return std::nullopt;
+    }
     ModelInputParams decoder_params = input_params;
     decoder_params.mutable_onerec_params().is_encoder_forward = false;
     decoder_params.mutable_onerec_params().has_encoder_output =
