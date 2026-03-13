@@ -15,7 +15,6 @@ limitations under the License.
 
 #pragma once
 
-#include <absl/strings/match.h>
 #include <torch/torch.h>
 #include <torch_npu/torch_npu.h>
 
@@ -186,27 +185,6 @@ class BaseLayer : public torch::nn::Module {
   virtual int64_t init_layer() { return 0; };
 
   virtual void run_task(std::string taskName, std::function<int()> task) const;
-
-  void set_weight(const StateDict& state_dict,
-                  const std::string& tensor_name,
-                  int weight_position,
-                  int dim);
-
-  void set_weight(const StateDict& state_dict,
-                  const std::string& tensor_name,
-                  int weight_position);
-
-  void set_weight(const StateDict& state_dict,
-                  const std::string& tensor_name,
-                  int weight_position,
-                  int dim,
-                  int rank,
-                  int world_size);
-
-  torch::Dtype string2dtype(const std::string& dtype_str);
-
-  void correct_tensor_dtype(torch::Tensor& tensor,
-                            const std::string& tensorName);
 
  protected:
   std::unique_ptr<BaseLoader> loader_ = nullptr;

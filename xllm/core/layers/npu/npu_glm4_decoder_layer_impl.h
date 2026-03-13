@@ -31,6 +31,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
+#include "loader/glm4_decoder_loader.h"
 #include "nlohmann/json.hpp"
 #include "npu_base_layer.h"
 #include "pytorch/adapter/utils/utils.h"
@@ -48,12 +49,6 @@ class NpuGlm4DecoderLayerImpl : public BaseLayer {
   explicit NpuGlm4DecoderLayerImpl(const ModelContext& context);
 
   ~NpuGlm4DecoderLayerImpl() override = default;
-
-  virtual void load_state_dict(const StateDict& state_dict) override;
-
-  virtual void verify_loaded_weights() const override;
-
-  virtual void merge_loaded_weights() override;
 
   virtual int64_t init_layer() override;
 
@@ -101,10 +96,6 @@ class NpuGlm4DecoderLayerImpl : public BaseLayer {
   at::Tensor decode_attn_mask_;
 
   at::Tensor at_placeholder_;
-
-  int device_id_;
-  int32_t layer_id_;
-  int rank_id_;
 };
 TORCH_MODULE(NpuGlm4DecoderLayer);
 
