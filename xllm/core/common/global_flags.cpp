@@ -501,11 +501,11 @@ DEFINE_bool(
 
 // --- reasoning parser config ---
 
-DEFINE_string(
-    reasoning_parser,
-    "",
-    "Specify the reasoning parser for handling reasoning "
-    "interactions(e.g. auto, glm45, glm47, glm5, qwen3, deepseek-r1).");
+DEFINE_string(reasoning_parser,
+              "",
+              "Specify the reasoning parser for handling reasoning "
+              "interactions(e.g. auto, glm45, glm47, glm5, qwen3, qwen35, "
+              "deepseek-r1).");
 
 // --- function call config ---
 
