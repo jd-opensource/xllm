@@ -69,6 +69,7 @@ void WorkerServer::create_server(
     WorkerType worker_type,
     std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
     std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
+  FLAGS_enable_prefill_sp = options.enable_prefill_sp();
   Device device(d);
   device.set_device();
   LOG(INFO) << "Create worker server with device: " << device.index();
@@ -156,6 +157,8 @@ void WorkerServer::create_spawn_server(int local_rank,
   const char* output_shm_size_ptr = output_shm_size_str.c_str();
   auto is_local_str = std::to_string(options.is_local());
   const char* is_local_ptr = is_local_str.c_str();
+  auto enable_prefill_sp_str = std::to_string(options.enable_prefill_sp());
+  const char* enable_prefill_sp_ptr = enable_prefill_sp_str.c_str();
   const char* worker_type_ptr = worker_type.to_string();
   std::string spawn_worker_bin_path =
       options.spawn_worker_path() + "/spawn_worker";
@@ -170,6 +173,7 @@ void WorkerServer::create_spawn_server(int local_rank,
                         block_size_ptr,
                         enable_shm_ptr,
                         is_local_ptr,
+                        enable_prefill_sp_ptr,
                         options.task_type().c_str(),
                         worker_type_ptr,
                         input_shm_size_ptr,

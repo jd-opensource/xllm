@@ -30,14 +30,15 @@ limitations under the License.
 // @block_size
 // @enable_shm
 // @is_local
+// @enable_prefill_sp
 // @task_type
 // @worker_type
 // @input_shm_size
 // @output_shm_size
 int main(int argc, char* argv[]) {
-  if (argc < 13) {
+  if (argc < 15) {
     LOG(ERROR)
-        << "Spwan worker process receive wrong args. Need 13 args, receive "
+        << "Spwan worker process receive wrong args. Need 15 args, receive "
         << argc;
     return 1;
   }
@@ -58,10 +59,11 @@ int main(int argc, char* argv[]) {
   int block_size = atoi(argv[7]);
   int enable_shm = atoi(argv[8]);
   int is_local = atoi(argv[9]);
-  std::string task_type = std::string(argv[10]);
-  std::string worker_type = std::string(argv[11]);
-  uint64_t input_shm_size = atoll(argv[12]);
-  uint64_t output_shm_size = atoll(argv[13]);
+  int enable_prefill_sp = atoi(argv[10]);
+  std::string task_type = std::string(argv[11]);
+  std::string worker_type = std::string(argv[12]);
+  uint64_t input_shm_size = atoll(argv[13]);
+  uint64_t output_shm_size = atoll(argv[14]);
 
   LOG(INFO) << "Spwan worker: "
             << "master_node_addr = " << master_node_addr
@@ -74,6 +76,7 @@ int main(int argc, char* argv[]) {
             << ", input_shm_size = " << input_shm_size
             << ", output_shm_size = " << output_shm_size
             << ", is_local = " << (is_local > 0)
+            << ", enable_prefill_sp = " << (enable_prefill_sp > 0)
             << ", task_type = " << task_type
             << ", worker_type = " << worker_type << "\n";
 
@@ -88,6 +91,7 @@ int main(int argc, char* argv[]) {
                                  input_shm_size,
                                  output_shm_size,
                                  is_local > 0,
+                                 enable_prefill_sp > 0,
                                  task_type,
                                  worker_type);
 

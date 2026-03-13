@@ -53,6 +53,7 @@ namespace xllm {
 Master::Master(const Options& options, EngineType type)
     : options_(options), master_status_(options.master_status()) {
   LOG(INFO) << "Master init options: " << options.to_string();
+  FLAGS_enable_prefill_sp = options_.enable_prefill_sp();
 
   // Allow brpc receive SIGTREM and SIGINT signal.
   brpc::FLAGS_graceful_quit_on_sigterm = true;
@@ -115,6 +116,7 @@ Master::Master(const Options& options, EngineType type)
         .max_memory_utilization(options.max_memory_utilization())
         .enable_prefix_cache(options.enable_prefix_cache())
         .task_type(options.task_type())
+        .enable_prefill_sp(options_.enable_prefill_sp())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())
@@ -175,6 +177,7 @@ Master::Master(const Options& options, EngineType type)
         .node_rank(options.node_rank())
         .dp_size(options.dp_size())
         .ep_size(options.ep_size())
+        .enable_prefill_sp(options_.enable_prefill_sp())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
         .max_tokens_per_chunk_for_prefill(
@@ -223,6 +226,7 @@ Master::Master(const Options& options, EngineType type)
         .node_rank(options_.node_rank())
         .dp_size(options_.dp_size())
         .ep_size(options_.ep_size())
+        .enable_prefill_sp(options_.enable_prefill_sp())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
         .max_tokens_per_chunk_for_prefill(
@@ -280,6 +284,7 @@ Master::Master(const Options& options, EngineType type)
         .node_rank(options_.node_rank())
         .dp_size(options_.dp_size())
         .ep_size(options_.ep_size())
+        .enable_prefill_sp(options_.enable_prefill_sp())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
         .beam_width(options_.beam_width())
         .max_tokens_per_batch(options_.max_tokens_per_batch())

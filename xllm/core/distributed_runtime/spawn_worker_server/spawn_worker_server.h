@@ -32,6 +32,7 @@ class SpawnWorkerServer final {
                              uint64_t input_shm_size,
                              uint64_t output_shm_size,
                              bool is_local,
+                             bool enable_prefill_sp,
                              const std::string& task_type,
                              const std::string& worker_type);
 
