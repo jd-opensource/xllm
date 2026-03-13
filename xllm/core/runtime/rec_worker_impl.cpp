@@ -362,9 +362,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
       LOG(INFO) << "OneRecWorkPipeline::step decoder forward begin after "
                    "encoder: decoder_context_shape="
                 << (decoder_onerec_params.decoder_context_embedding.defined()
-                        ? c10::str(
-                              decoder_onerec_params.decoder_context_embedding
-                                  .sizes())
+                        ? c10::str(decoder_onerec_params
+                                       .decoder_context_embedding.sizes())
                         : "undefined")
                 << ", has_encoder_output="
                 << decoder_onerec_params.has_encoder_output;

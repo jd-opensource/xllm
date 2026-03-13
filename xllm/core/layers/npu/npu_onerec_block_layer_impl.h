@@ -17,8 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include <cstdint>
 #include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <unordered_map>

@@ -560,8 +560,8 @@ class OneRecModelImpl : public torch::nn::Module {
         return ModelOutput();
       }
 
-      auto decoder_output =
-          decoder_(tokens, positions, kv_caches, input_params, cached_encoder_output);
+      auto decoder_output = decoder_(
+          tokens, positions, kv_caches, input_params, cached_encoder_output);
       return ModelOutput(decoder_output);
     }
 #endif

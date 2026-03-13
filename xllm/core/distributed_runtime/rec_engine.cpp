@@ -705,36 +705,29 @@ ForwardOutput RecEngine::OneRecEnginePipeline::get_model_output(
   auto& sample_output = output.sample_output;
 
   if (sample_output.embeddings.defined()) {
-    sample_output.embeddings = safe_to(sample_output.embeddings,
-                                       torch::kCPU,
-                                       true);
-    sample_output.embeddings = safe_to(sample_output.embeddings,
-                                       torch::kFloat32,
-                                       true);
+    sample_output.embeddings =
+        safe_to(sample_output.embeddings, torch::kCPU, true);
+    sample_output.embeddings =
+        safe_to(sample_output.embeddings, torch::kFloat32, true);
   }
 
   if (sample_output.next_tokens.defined()) {
-    sample_output.next_tokens = safe_to(sample_output.next_tokens,
-                                        torch::kCPU,
-                                        true);
+    sample_output.next_tokens =
+        safe_to(sample_output.next_tokens, torch::kCPU, true);
     if (sample_output.logprobs.defined()) {
-      sample_output.logprobs = safe_to(sample_output.logprobs,
-                                       torch::kCPU,
-                                       true);
+      sample_output.logprobs =
+          safe_to(sample_output.logprobs, torch::kCPU, true);
     }
     if (sample_output.top_tokens.defined()) {
-      sample_output.top_tokens = safe_to(sample_output.top_tokens,
-                                         torch::kCPU,
-                                         true);
+      sample_output.top_tokens =
+          safe_to(sample_output.top_tokens, torch::kCPU, true);
     }
     if (sample_output.top_logprobs.defined()) {
-      sample_output.top_logprobs = safe_to(sample_output.top_logprobs,
-                                           torch::kCPU,
-                                           true);
+      sample_output.top_logprobs =
+          safe_to(sample_output.top_logprobs, torch::kCPU, true);
     }
   }
   Device(engine_.workers_[0]->device()).synchronize_default_stream();
-
 
   return output;
 }

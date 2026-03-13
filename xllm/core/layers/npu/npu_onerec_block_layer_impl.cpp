@@ -15,10 +15,10 @@ limitations under the License.
 
 #include "npu_onerec_block_layer_impl.h"
 
-#include <algorithm>
 #include <glog/logging.h>
 #include <mstx/ms_tools_ext.h>
 
+#include <algorithm>
 #include <cstring>
 #include <map>
 #include <set>
@@ -295,8 +295,9 @@ get_onerec_decoder_moe_weight_mapping() {
   mapping.emplace("layer.2.ffn.shared_expert.gate.weight_offset",
                   IN_SHARED_EXPERT_GATE_OFFSET);
 
-  // Expert weights are handled by process_expert_weights()/merge_experts_weights
-  // to avoid ambiguous suffix matching and keep deterministic loading.
+  // Expert weights are handled by
+  // process_expert_weights()/merge_experts_weights to avoid ambiguous suffix
+  // matching and keep deterministic loading.
 
   return mapping;
 }
@@ -633,16 +634,14 @@ void NpuOneRecBlockLayerImpl::merge_loaded_weights() {
 
   LOG(INFO) << "OneRec BlockLayer merge_loaded_weights calling init_layer"
             << ", layer_role=" << (is_decoder_ ? "decoder" : "encoder")
-            << ", layer_id=" << layer_id_
-            << ", weight_count=" << weight_count;
+            << ", layer_id=" << layer_id_ << ", weight_count=" << weight_count;
   const int64_t init_status = init_layer();
   LOG(INFO) << "OneRec BlockLayer merge_loaded_weights init_layer returned"
             << ", layer_role=" << (is_decoder_ ? "decoder" : "encoder")
             << ", layer_id=" << layer_id_ << ", status=" << init_status;
   CHECK_EQ(init_status, atb::NO_ERROR)
       << "OneRec BlockLayer init_layer failed, layer_role="
-      << (is_decoder_ ? "decoder" : "encoder")
-      << ", layer_id=" << layer_id_;
+      << (is_decoder_ ? "decoder" : "encoder") << ", layer_id=" << layer_id_;
 }
 
 void NpuOneRecBlockLayerImpl::load_state_dict(const StateDict& state_dict) {
@@ -685,9 +684,10 @@ void NpuOneRecBlockLayerImpl::load_state_dict(const StateDict& state_dict) {
 
   std::vector<std::pair<std::string, int>> ordered_mapping(
       weight_mapping.begin(), weight_mapping.end());
-  std::sort(ordered_mapping.begin(),
-            ordered_mapping.end(),
-            [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+  std::sort(
+      ordered_mapping.begin(),
+      ordered_mapping.end(),
+      [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
   for (const auto& [name, index] : ordered_mapping) {
     const bool is_relative_bias = (index == IN_RELATIVE_ATTENTION_BIAS_WEIGHT);
     bool weight_exists = false;
@@ -729,8 +729,7 @@ int64_t NpuOneRecBlockLayerImpl::init_layer() {
     const int64_t decode_status = init_node(decode_node_, decode_param_);
     LOG(INFO) << "OneRec BlockLayer init_layer node returned"
               << ", node=decoder-decode"
-              << ", layer_id=" << layer_id_
-              << ", status=" << decode_status;
+              << ", layer_id=" << layer_id_ << ", status=" << decode_status;
     CHECK_OPERATION_STATUS_RETURN(decode_status);
   } else {
     LOG(INFO) << "OneRec BlockLayer init_layer skip decode node"
