@@ -70,7 +70,7 @@ void validate_flags(const std::string& model_type) {
 #if defined(USE_MLU)
   // TODO: support other block sizes in the future
   if (FLAGS_block_size != 16 && FLAGS_block_size != 1 &&
-      FLAGS_backend == "vllm") {
+      FLAGS_backend == "llm") {
     LOG(FATAL) << "Currently, block_size must be 16 for MLU backend, we will "
                   "support other block sizes in the future.";
   }
