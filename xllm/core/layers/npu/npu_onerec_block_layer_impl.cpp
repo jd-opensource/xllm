@@ -632,16 +632,17 @@ void NpuOneRecBlockLayerImpl::merge_loaded_weights() {
   }
 
   LOG(INFO) << "OneRec BlockLayer merge_loaded_weights calling init_layer"
-            << ", layer_role=" << GetLayerRole(is_decoder_)
+            << ", layer_role=" << (is_decoder_ ? "decoder" : "encoder")
             << ", layer_id=" << layer_id_
             << ", weight_count=" << weight_count;
   const int64_t init_status = init_layer();
   LOG(INFO) << "OneRec BlockLayer merge_loaded_weights init_layer returned"
-            << ", layer_role=" << GetLayerRole(is_decoder_)
+            << ", layer_role=" << (is_decoder_ ? "decoder" : "encoder")
             << ", layer_id=" << layer_id_ << ", status=" << init_status;
   CHECK_EQ(init_status, atb::NO_ERROR)
       << "OneRec BlockLayer init_layer failed, layer_role="
-      << GetLayerRole(is_decoder_) << ", layer_id=" << layer_id_;
+      << (is_decoder_ ? "decoder" : "encoder")
+      << ", layer_id=" << layer_id_;
 }
 
 void NpuOneRecBlockLayerImpl::load_state_dict(const StateDict& state_dict) {
@@ -721,21 +722,19 @@ int64_t NpuOneRecBlockLayerImpl::init_layer() {
                    "enable_rec_prefill_only is enabled"
                 << ", layer_id=" << layer_id_;
       LOG(INFO) << "OneRec BlockLayer init_layer success"
-                << ", layer_role=" << GetLayerRole(is_decoder_)
+                << ", layer_role=" << (is_decoder_ ? "decoder" : "encoder")
                 << ", layer_id=" << layer_id_ << ", status=" << atb::NO_ERROR;
       return atb::NO_ERROR;
     }
-    LogBlockLayerParam("OneRec BlockLayer init_layer decode plan",
-                       decode_param_);
     const int64_t decode_status = init_node(decode_node_, decode_param_);
     LOG(INFO) << "OneRec BlockLayer init_layer node returned"
-              << ", node=" << GetNodeRole(decode_param_)
+              << ", node=decoder-decode"
               << ", layer_id=" << layer_id_
               << ", status=" << decode_status;
     CHECK_OPERATION_STATUS_RETURN(decode_status);
   } else {
     LOG(INFO) << "OneRec BlockLayer init_layer skip decode node"
-              << ", layer_role=" << GetLayerRole(is_decoder_)
+              << ", layer_role=" << (is_decoder_ ? "decoder" : "encoder")
               << ", layer_id=" << layer_id_;
   }
   return atb::NO_ERROR;
