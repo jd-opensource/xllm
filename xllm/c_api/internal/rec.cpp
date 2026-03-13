@@ -125,9 +125,12 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
 
     FLAGS_enable_graph = true;
     FLAGS_rec_worker_max_concurrency = 2;
+    FLAGS_enable_rec_fast_sampler = true;
     FLAGS_enable_prefill_piecewise_graph = true;
+    FLAGS_enable_xattention_one_stage = false;
     FLAGS_enable_xattention_two_stage_decode = true;
     FLAGS_enable_graph_mode_decode_no_padding = true;
+    // FLAGS_enable_rec_prefill_only = true;
     FLAGS_enable_topk_sorted = false;
 
     options.enable_graph(FLAGS_enable_graph);
