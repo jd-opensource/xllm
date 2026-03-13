@@ -15,6 +15,72 @@ if(DEVICE_ARCH STREQUAL "ARM")
     set(RUST_TARGET aarch64-unknown-linux-gnu)
 endif()
 
+if(USE_CUDA)
+  # Production defaults: all TileLang/TVM artifacts are installed in /usr/local.
+  # These are cache variables so special deployments can override explicitly.
+  set(TVM_FFI_INCLUDE_DIR
+      "/usr/local/include"
+      CACHE PATH "Path to tvm-ffi include directory (should contain tvm/ffi)")
+  set(TVM_FFI_LIB_DIR
+      "/usr/local/lib"
+      CACHE PATH "Path to tvm-ffi library directory")
+  set(TVM_RUNTIME_LIB_DIR
+      "/usr/local/tilelang/lib"
+      CACHE PATH "Directory containing TVM runtime loader library (libtvm.so or libtvm_runtime.so)")
+  set(TVM_RUNTIME_LOADER_LIB "tvm"
+      CACHE STRING "Library name used to register TVM CUDA module loader")
+  set(TILELANG_LIB_DIR
+      "/usr/local/tilelang/lib"
+      CACHE PATH "Directory containing libtilelang.so")
+  set(TILELANG_LIB_NAME "tilelang"
+      CACHE STRING "Library name used to register TileLang runtime globals")
+
+  # Strict mode: any mismatch fails fast.
+  if(NOT EXISTS "${TVM_FFI_INCLUDE_DIR}/tvm/ffi/extra/module.h")
+    message(FATAL_ERROR
+            "TVM FFI header not found.\n"
+            "Expected: ${TVM_FFI_INCLUDE_DIR}/tvm/ffi/extra/module.h\n"
+            "Please set TVM_FFI_INCLUDE_DIR explicitly.")
+  endif()
+
+  if(NOT (EXISTS "${TVM_FFI_LIB_DIR}/libtvm_ffi.so" OR
+          EXISTS "${TVM_FFI_LIB_DIR}/libtvm_ffi.so.0"))
+    message(FATAL_ERROR
+            "TVM FFI library not found.\n"
+            "Expected: ${TVM_FFI_LIB_DIR}/libtvm_ffi.so (or .so.0)\n"
+            "If your distro installs to /usr/local/lib64, set TVM_FFI_LIB_DIR explicitly.")
+  endif()
+
+  if(NOT (EXISTS "${TVM_RUNTIME_LIB_DIR}/libtvm.so" OR
+          EXISTS "${TVM_RUNTIME_LIB_DIR}/libtvm.so.0" OR
+          EXISTS "${TVM_RUNTIME_LIB_DIR}/libtvm_runtime.so" OR
+          EXISTS "${TVM_RUNTIME_LIB_DIR}/libtvm_runtime.so.0"))
+    message(FATAL_ERROR
+            "TVM runtime library not found.\n"
+            "Expected one of:\n"
+            "  ${TVM_RUNTIME_LIB_DIR}/libtvm.so (or .so.0)\n"
+            "  ${TVM_RUNTIME_LIB_DIR}/libtvm_runtime.so (or .so.0)\n"
+            "Please set TVM_RUNTIME_LIB_DIR explicitly.")
+  endif()
+
+  include_directories(${TVM_FFI_INCLUDE_DIR})
+  link_directories(${TVM_FFI_LIB_DIR} ${TVM_RUNTIME_LIB_DIR})
+  if(NOT (EXISTS "${TILELANG_LIB_DIR}/libtilelang.so" OR
+          EXISTS "${TILELANG_LIB_DIR}/libtilelang.so.0"))
+    message(FATAL_ERROR
+            "TileLang runtime library not found.\n"
+            "Expected: ${TILELANG_LIB_DIR}/libtilelang.so (or .so.0)\n"
+            "Please set TILELANG_LIB_DIR explicitly.")
+  endif()
+  link_directories(${TILELANG_LIB_DIR})
+  message(STATUS "Using TVM_RUNTIME_LIB_DIR: ${TVM_RUNTIME_LIB_DIR}")
+  message(STATUS "Using TVM_RUNTIME_LOADER_LIB: ${TVM_RUNTIME_LOADER_LIB}")
+  message(STATUS "Using TVM_FFI_INCLUDE_DIR: ${TVM_FFI_INCLUDE_DIR}")
+  message(STATUS "Using TVM_FFI_LIB_DIR: ${TVM_FFI_LIB_DIR}")
+  message(STATUS "Using TILELANG_LIB_DIR: ${TILELANG_LIB_DIR}")
+  message(STATUS "Using TILELANG_LIB_NAME: ${TILELANG_LIB_NAME}")
+endif()
+
 if(USE_NPU)
   if(DEVICE_TYPE STREQUAL "USE_A3")
       add_compile_definitions(USE_A3) 
@@ -417,7 +483,6 @@ if(USE_MUSA)
   )
   string(REGEX MATCH "[^\n]*/include[^\n]*" tvm_ffi_INCLUDE_DIR "${tvm_ffi_INCLUDE_DIR}")
   string(REGEX MATCH "[^\n]*/lib[^\n]*" tvm_ffi_LIB_DIR "${tvm_ffi_LIB_DIR}")
-  
 
   include_directories(
       ${MUSA_INCLUDE_DIRS}
@@ -459,6 +524,20 @@ if(USE_CUDA)
     $ENV{PYTORCH_INSTALL_PATH}/lib
     $ENV{CUDA_TOOLKIT_ROOT_DIR}/lib64
   )
+
+  if(NOT EXISTS "${TVM_RUNTIME_LIB_DIR}")
+    message(FATAL_ERROR
+            "TVM runtime lib dir not found: ${TVM_RUNTIME_LIB_DIR}. "
+            "Please set TVM_RUNTIME_LIB_DIR explicitly.")
+  endif()
+  if(NOT EXISTS "${TILELANG_LIB_DIR}")
+    message(FATAL_ERROR
+            "TileLang lib dir not found: ${TILELANG_LIB_DIR}. "
+            "Please set TILELANG_LIB_DIR explicitly.")
+  endif()
+  link_directories(${TVM_RUNTIME_LIB_DIR} ${TILELANG_LIB_DIR})
+  message(STATUS "Using TVM runtime lib dir: ${TVM_RUNTIME_LIB_DIR}")
+  message(STATUS "Using TileLang lib dir: ${TILELANG_LIB_DIR}")
 
   set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -O3)
   # The following definitions must be undefined since half-precision operation is required.
