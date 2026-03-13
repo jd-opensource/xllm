@@ -18,17 +18,25 @@ limitations under the License.
 
 #include <absl/strings/match.h>
 #include <absl/strings/str_replace.h>
+#include <fcntl.h>
 #include <glog/logging.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <torch/torch.h>
+#include <unistd.h>
 
+#include <algorithm>
 #include <boost/algorithm/string.hpp>
+#include <cctype>
 #include <filesystem>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
 #include "core/common/rec_model_utils.h"
 #include "core/common/version_singleton.h"
 #include "core/framework/state_dict/rec_vocab_dict.h"
+#include "core/framework/state_dict/safetensors/safetensors.h"
 #include "core/framework/tokenizer/fast_tokenizer.h"
 #include "core/framework/tokenizer/rec_tokenizer.h"
 #include "core/framework/tokenizer/sentencepiece_tokenizer.h"
@@ -36,6 +44,7 @@ limitations under the License.
 #include "core/framework/tokenizer/tokenizer_factory.h"
 #include "core/util/blocking_counter.h"
 #include "core/util/json_reader.h"
+#include "core/util/scope_guard.h"
 #include "core/util/tensor_helper.h"
 #include "models/model_registry.h"
 
@@ -105,6 +114,147 @@ bool validate_smoothquant_mixed_w4a8(const JsonReader& reader,
     return false;
   }
   return true;
+}
+
+bool try_parse_layer_id_with_prefix(const std::string& tensor_name,
+                                    const std::string& prefix,
+                                    int64_t* layer_id) {
+  if (!absl::StartsWith(tensor_name, prefix) || layer_id == nullptr) {
+    return false;
+  }
+
+  const size_t begin = prefix.size();
+  if (begin >= tensor_name.size() ||
+      !std::isdigit(static_cast<unsigned char>(tensor_name[begin]))) {
+    return false;
+  }
+
+  int64_t value = 0;
+  size_t end = begin;
+  while (end < tensor_name.size() &&
+         std::isdigit(static_cast<unsigned char>(tensor_name[end]))) {
+    const int digit = tensor_name[end] - '0';
+    if (value > (std::numeric_limits<int64_t>::max() - digit) / 10) {
+      return false;
+    }
+    value = value * 10 + digit;
+    ++end;
+  }
+  if (end >= tensor_name.size() || tensor_name[end] != '.') {
+    return false;
+  }
+
+  *layer_id = value;
+  return true;
+}
+
+bool try_parse_layer_id(const std::string& tensor_name, int64_t* layer_id) {
+  static const std::vector<std::string> kLayerPrefixes = {
+      "model.layers.", "layers.", "transformer.layers."};
+  for (const auto& prefix : kLayerPrefixes) {
+    if (try_parse_layer_id_with_prefix(tensor_name, prefix, layer_id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+class ScopedMmap {
+ public:
+  ~ScopedMmap() {
+    if (mapped_addr_ != MAP_FAILED) {
+      munmap(mapped_addr_, mapped_size_);
+    }
+    if (fd_ >= 0) {
+      close(fd_);
+    }
+  }
+
+  bool map_read_only(const std::string& file_path) {
+    fd_ = open(file_path.c_str(), O_RDONLY);
+    if (fd_ < 0) {
+      PLOG(ERROR) << "Failed to open safetensors file: " << file_path;
+      return false;
+    }
+
+    struct stat sb;
+    if (fstat(fd_, &sb) != 0) {
+      PLOG(ERROR) << "Failed to stat safetensors file: " << file_path;
+      return false;
+    }
+    if (sb.st_size <= 0) {
+      LOG(ERROR) << "Safetensors file is empty: " << file_path;
+      return false;
+    }
+    mapped_size_ = static_cast<size_t>(sb.st_size);
+    mapped_addr_ = mmap(nullptr, mapped_size_, PROT_READ, MAP_PRIVATE, fd_, 0);
+    if (mapped_addr_ == MAP_FAILED) {
+      PLOG(ERROR) << "Failed to mmap safetensors file: " << file_path;
+      return false;
+    }
+    return true;
+  }
+
+  const uint8_t* data() const {
+    return static_cast<const uint8_t*>(mapped_addr_);
+  }
+
+  size_t size() const { return mapped_size_; }
+
+ private:
+  void* mapped_addr_ = MAP_FAILED;
+  size_t mapped_size_ = 0;
+  int fd_ = -1;
+};
+
+bool try_compute_tensor_nbytes(const View* tensor_view, int64_t* nbytes) {
+  if (tensor_view == nullptr || nbytes == nullptr) {
+    return false;
+  }
+
+  if (tensor_view->stop < tensor_view->start) {
+    return false;
+  }
+  const size_t byte_size = tensor_view->stop - tensor_view->start;
+  if (byte_size > static_cast<size_t>(std::numeric_limits<int64_t>::max())) {
+    return false;
+  }
+  *nbytes = static_cast<int64_t>(byte_size);
+  return true;
+}
+
+bool log_safetensors_error(::Status status,
+                           const char* op,
+                           const std::string& weights_file,
+                           const char* tensor_name = nullptr) {
+  if (status == ::Status::Ok) {
+    return true;
+  }
+  if (tensor_name == nullptr) {
+    LOG(ERROR) << op << " failed for " << weights_file
+               << ", status=" << static_cast<int>(status);
+  } else {
+    LOG(ERROR) << op << " failed for " << weights_file
+               << ", tensor_name=" << tensor_name
+               << ", status=" << static_cast<int>(status);
+  }
+  return false;
+}
+
+void check_safetensors_cleanup(::Status status,
+                               const char* op,
+                               const std::string& weights_file,
+                               const char* tensor_name = nullptr) {
+  if (tensor_name == nullptr) {
+    CHECK(status == ::Status::Ok)
+        << op << " cleanup failed for " << weights_file
+        << ", status=" << static_cast<int>(status);
+  } else {
+    CHECK(status == ::Status::Ok)
+        << op << " cleanup failed for " << weights_file
+        << ", tensor_name=" << tensor_name
+        << ", status=" << static_cast<int>(status);
+  }
 }
 
 }  // namespace
@@ -292,6 +442,126 @@ int64_t HFModelLoader::get_non_decoder_weight_size() const {
             << " norm=" << norm_size << " lm_head=" << lm_head_size
             << " total=" << result;
   return result;
+}
+
+int64_t HFModelLoader::get_max_decoder_layer_weight_size() const {
+  constexpr int64_t kInvalidLayerSize = -1;
+  if (args_.n_layers() <= 0) {
+    LOG(ERROR) << "Invalid n_layers for decoder size estimation: "
+               << args_.n_layers();
+    return kInvalidLayerSize;
+  }
+
+  std::vector<int64_t> layer_sizes(static_cast<size_t>(args_.n_layers()), 0);
+
+  for (const auto& weights_file : model_weights_files_) {
+    ScopedMmap mapping;
+    if (!mapping.map_read_only(weights_file)) {
+      return kInvalidLayerSize;
+    }
+
+    Handle* handle = nullptr;
+    if (!log_safetensors_error(
+            safetensors_deserialize(&handle, mapping.data(), mapping.size()),
+            "safetensors_deserialize",
+            weights_file)) {
+      return kInvalidLayerSize;
+    }
+    xllm::ScopeGuard handle_guard([&] {
+      if (handle != nullptr) {
+        check_safetensors_cleanup(
+            safetensors_destroy(handle), "safetensors_destroy", weights_file);
+        handle = nullptr;
+      }
+    });
+
+    const char* const* tensor_names = nullptr;
+    size_t num_tensors = 0;
+    if (!log_safetensors_error(
+            safetensors_names(handle, &tensor_names, &num_tensors),
+            "safetensors_names",
+            weights_file)) {
+      return kInvalidLayerSize;
+    }
+    xllm::ScopeGuard names_guard([&] {
+      if (tensor_names != nullptr) {
+        check_safetensors_cleanup(
+            safetensors_free_names(tensor_names, num_tensors),
+            "safetensors_free_names",
+            weights_file);
+        tensor_names = nullptr;
+        num_tensors = 0;
+      }
+    });
+
+    for (size_t i = 0; i < num_tensors; ++i) {
+      const char* tensor_name_cstr = tensor_names[i];
+      const std::string tensor_name(tensor_name_cstr);
+      int64_t layer_id = -1;
+      if (!try_parse_layer_id(tensor_name, &layer_id) || layer_id < 0 ||
+          layer_id >= args_.n_layers()) {
+        continue;
+      }
+
+      View* tensor_view = nullptr;
+      if (!log_safetensors_error(
+              safetensors_get_tensor(handle, &tensor_view, tensor_name_cstr),
+              "safetensors_get_tensor",
+              weights_file,
+              tensor_name_cstr)) {
+        return kInvalidLayerSize;
+      }
+      xllm::ScopeGuard tensor_guard([&] {
+        if (tensor_view != nullptr) {
+          check_safetensors_cleanup(safetensors_free_tensor(tensor_view),
+                                    "safetensors_free_tensor",
+                                    weights_file,
+                                    tensor_name_cstr);
+          tensor_view = nullptr;
+        }
+      });
+
+      int64_t tensor_nbytes = 0;
+      if (!try_compute_tensor_nbytes(tensor_view, &tensor_nbytes)) {
+        LOG(ERROR) << "Failed to compute tensor bytes for tensor_name="
+                   << tensor_name << " in " << weights_file;
+        return kInvalidLayerSize;
+      }
+
+      if (layer_sizes[static_cast<size_t>(layer_id)] >
+          std::numeric_limits<int64_t>::max() - tensor_nbytes) {
+        LOG(ERROR) << "Decoder layer size overflow while accumulating layer "
+                   << layer_id;
+        return kInvalidLayerSize;
+      }
+      layer_sizes[static_cast<size_t>(layer_id)] += tensor_nbytes;
+    }
+  }
+
+  int64_t max_layer_size = 0;
+  int64_t observed_layers = 0;
+  for (const int64_t layer_size : layer_sizes) {
+    if (layer_size > 0) {
+      ++observed_layers;
+      max_layer_size = std::max(max_layer_size, layer_size);
+    }
+  }
+  if (max_layer_size <= 0) {
+    LOG(ERROR) << "Failed to detect decoder-layer tensor sizes from "
+                  "safetensors metadata.";
+    return kInvalidLayerSize;
+  }
+
+  if (observed_layers != args_.n_layers()) {
+    LOG(WARNING) << "Observed decoder layer sizes for " << observed_layers
+                 << "/" << args_.n_layers()
+                 << " layers while estimating max layer size.";
+  }
+
+  LOG(INFO) << "get_max_decoder_layer_weight_size: max_layer_size="
+            << max_layer_size << ", observed_layers=" << observed_layers << "/"
+            << args_.n_layers();
+  return max_layer_size;
 }
 
 bool HFModelLoader::load_rec_vocab(const std::string& model_weights_path) {

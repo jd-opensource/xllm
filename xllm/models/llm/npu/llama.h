@@ -185,12 +185,11 @@ class LlamaModelImpl : public torch::nn::Module {
     });
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      if (rolling_mgr_)
-        rolling_mgr_->wait_layer_h2d_ready(static_cast<int32_t>(i));
+      const int32_t layer_index = i;
+      if (rolling_mgr_) rolling_mgr_->wait_layer_h2d_ready(layer_index);
       layer(h, cos_pos, sin_pos, attn_mask, kv_caches[i], input_params_new, i);
-      last_executed_layer = static_cast<int32_t>(i);
-      if (rolling_mgr_)
-        rolling_mgr_->schedule_next_layer_h2d(static_cast<int32_t>(i));
+      last_executed_layer = layer_index;
+      if (rolling_mgr_) rolling_mgr_->schedule_next_layer_h2d(layer_index);
     }
     auto hidden_states = norm_(h, 0);
     return ModelOutput(hidden_states);
