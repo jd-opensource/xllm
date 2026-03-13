@@ -125,9 +125,9 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     norm_->load_state_dict(state_dict.get_dict_with_prefix("norm."));
   }
 
-  void check_loaded() const {
+  void verify_loaded_weights() const {
     for (const auto& layer : layers_) {
-      layer->check_loaded();
+      layer->verify_loaded_weights();
     }
   }
 
@@ -177,7 +177,7 @@ class DeepseekV2ForCausalLMImpl
         lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
       }
     }
-    model_->check_loaded();
+    model_->verify_loaded_weights();
   }
 };
 TORCH_MODULE(DeepseekV2ForCausalLM);

@@ -22,6 +22,14 @@ class Glm5ForCausalLMImpl : public LlmForCausalLMImplBase<DeepseekV2Model> {
  public:
   Glm5ForCausalLMImpl(const ModelContext& context)
       : LlmForCausalLMImplBase<DeepseekV2Model>(context) {}
+
+  void load_model(
+      std::unique_ptr<ModelLoader> loader,
+      std::string prefix = "model." /*llm model weight prefix*/) override {
+    LlmForCausalLMImplBase<DeepseekV2Model>::load_model(std::move(loader),
+                                                        prefix);
+    model_->verify_loaded_weights();
+  }
 };
 TORCH_MODULE(Glm5ForCausalLM);
 
