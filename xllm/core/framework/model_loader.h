@@ -49,6 +49,10 @@ class ModelLoader {
   // weight pages without including decoder layer weights.
   virtual int64_t get_non_decoder_weight_size() const { return 0; }
 
+  // Returns the maximum byte size among all decoder layers.
+  // Return -1 if unsupported or failed to compute.
+  virtual int64_t get_max_decoder_layer_weight_size() const { return -1; }
+
  protected:
   // model args
   ModelArgs args_;

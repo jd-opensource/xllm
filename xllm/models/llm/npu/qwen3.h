@@ -87,9 +87,8 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       }
       // Pre-allocate aux output buffer [max_tokens_per_batch, hidden_size *
       // num_captured]
-      const size_t num_captured = layers_to_capture_set_.size();
-      const int64_t aux_dim =
-          model_args.hidden_size() * static_cast<int64_t>(num_captured);
+      const int64_t num_captured = layers_to_capture_set_.size();
+      const int64_t aux_dim = model_args.hidden_size() * num_captured;
       aux_output_buffer_ =
           torch::empty({FLAGS_max_tokens_per_batch, aux_dim}, options);
     }
@@ -110,7 +109,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     capture_aux_hidden_states_ = true;
     layers_to_capture_set_.clear();
     if (!layer_ids.has_value()) {
-      int32_t num_layers = static_cast<int32_t>(layers_.size());
+      int32_t num_layers = layers_.size();
       layers_to_capture_set_.insert(2);
       layers_to_capture_set_.insert(num_layers / 2);
       layers_to_capture_set_.insert(num_layers - 3);
@@ -154,7 +153,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       auto apply = [this](torch::Tensor x) {
         auto freqs_t = x[0].clone();
         // mrop_length == freqs_length == head_dim / 2
-        int64_t mrop_length = static_cast<int64_t>(freqs_t.size(-1) / 2);
+        int64_t mrop_length = freqs_t.size(-1) / 2;
 
         for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
           int64_t offset = dim_idx;
@@ -214,13 +213,8 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         const_cast<ModelInputParams&>(input_params);
     const int64_t num_tokens = h.size(0);
     const int64_t hidden_size = h.size(-1);
-    size_t capture_idx = 0;
-    int32_t last_executed_layer = -1;
-    SCOPE_GUARD([this, &last_executed_layer] {
-      if (rolling_mgr_ != nullptr) {
-        rolling_mgr_->finalize(last_executed_layer);
-      }
-    });
+    int64_t capture_idx = 0;
+    RollingLayerGuard rolling_guard(rolling_mgr_);
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event{nullptr};
       std::atomic<bool>* event_flag{nullptr};
@@ -234,12 +228,12 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       }
 
       auto& layer = layers_[i];
+      const int32_t layer_index = i;
       if (capture_aux_hidden_states_ &&
-          layers_to_capture_set_.count(static_cast<int32_t>(i)) != 0) {
+          layers_to_capture_set_.count(layer_index) != 0) {
         aux_output_buffer_.slice(0, 0, num_tokens)
-            .slice(1,
-                   static_cast<int64_t>(capture_idx) * hidden_size,
-                   static_cast<int64_t>(capture_idx + 1) * hidden_size)
+            .slice(
+                1, capture_idx * hidden_size, (capture_idx + 1) * hidden_size)
             .copy_(h.reshape({num_tokens, hidden_size}));
         capture_idx++;
       }
@@ -248,8 +242,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         LOG(INFO) << "Forward interrupted at layer: " << i;
         return ModelOutput();
       }
-      if (rolling_mgr_)
-        rolling_mgr_->wait_layer_h2d_ready(static_cast<int32_t>(i));
+      rolling_guard.before_layer(layer_index);
 
       layer(h,
             cos_pos,
@@ -260,9 +253,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
             event,
             event_flag);
 
-      last_executed_layer = static_cast<int32_t>(i);
-      if (rolling_mgr_)
-        rolling_mgr_->schedule_next_layer_h2d(static_cast<int32_t>(i));
+      rolling_guard.after_layer(layer_index);
       if (use_deepstack) {
         if (deep_stacks.size() > 0 && i < deep_stacks.size()) {
           h = deepstack_process(

@@ -41,7 +41,6 @@ limitations under the License.
 #include "core/layers/npu/npu_pos_embedding_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "core/layers/npu/npu_word_embedding_impl.h"
-#include "core/util/scope_guard.h"
 #include "models/model_registry.h"
 #include "xllm_atb_layers/core/include/atb_speed/log.h"
 
@@ -222,12 +221,7 @@ class LlmModelImplBase : public torch::nn::Module {
       }
     }
 
-    int32_t last_executed_layer = -1;
-    SCOPE_GUARD([this, &last_executed_layer] {
-      if (rolling_mgr_ != nullptr) {
-        rolling_mgr_->finalize(last_executed_layer);
-      }
-    });
+    RollingLayerGuard rolling_guard(rolling_mgr_);
 
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
@@ -246,8 +240,8 @@ class LlmModelImplBase : public torch::nn::Module {
         LOG(INFO) << "Forward interrupted at layer: " << i;
         return ModelOutput();
       }
-      if (rolling_mgr_)
-        rolling_mgr_->wait_layer_h2d_ready(static_cast<int32_t>(i));
+      const int32_t layer_index = i;
+      rolling_guard.before_layer(layer_index);
 
       layer(h,
             cos_pos,
@@ -258,9 +252,7 @@ class LlmModelImplBase : public torch::nn::Module {
             event,
             event_flag);
 
-      last_executed_layer = static_cast<int32_t>(i);
-      if (rolling_mgr_)
-        rolling_mgr_->schedule_next_layer_h2d(static_cast<int32_t>(i));
+      rolling_guard.after_layer(layer_index);
     }
 
     auto hidden_states = norm_(h, 0);
@@ -569,27 +561,33 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     if (rolling_load_manager_ == nullptr) {
       auto loaders = model_->get_decoder_loaders();
       CHECK(!loaders.empty()) << "No decoder loaders found for rolling load";
-      CHECK(loaders[0] != nullptr) << "Decoder loader[0] is null";
-
-      const size_t storage_size = loaders[0]->get_storage_size();
-      for (size_t i = 1; i < loaders.size(); ++i) {
+      size_t max_storage_size = 0;
+      for (size_t i = 0; i < loaders.size(); ++i) {
         CHECK(loaders[i] != nullptr) << "Decoder loader[" << i << "] is null";
-        CHECK_EQ(loaders[i]->get_storage_size(), storage_size)
-            << "Decoder loader[" << i
-            << "] storage_size mismatch with loader[0]";
+        const size_t layer_storage_size = loaders[i]->get_storage_size();
+        CHECK_GT(layer_storage_size, 0)
+            << "Decoder loader[" << i << "] invalid storage_size";
+        if (layer_storage_size > max_storage_size) {
+          max_storage_size = layer_storage_size;
+        }
       }
+      CHECK_GT(max_storage_size, 0)
+          << "Failed to determine max decoder layer storage_size";
 
       rolling_weight_buffer_ = std::make_shared<layer::RollingWeightBuffer>(
-          num_cached_slots, storage_size, model_id);
+          num_cached_slots, max_storage_size, model_id);
       rolling_load_manager_ =
           std::make_unique<RollingLoadManager>(loaders,
                                                rolling_weight_buffer_,
                                                load_stream,
                                                compute_stream,
                                                requested_rolling_slots);
+      LOG(INFO) << "Rolling runtime init: num_cached_slots=" << num_cached_slots
+                << ", max_decoder_layer_storage_size=" << max_storage_size;
 
-      for (int32_t i = 0; i < static_cast<int32_t>(loaders.size()); ++i) {
-        const int32_t slot = rolling_load_manager_->slot_for_layer(i);
+      for (size_t i = 0; i < loaders.size(); ++i) {
+        const int32_t layer_index = i;
+        const int32_t slot = rolling_load_manager_->slot_for_layer(layer_index);
         loaders[i]->set_rolling_buffer(rolling_weight_buffer_, slot);
       }
     } else {

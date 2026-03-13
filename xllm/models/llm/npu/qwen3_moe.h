@@ -209,7 +209,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         // auto sections = mrope_section_;
         auto freqs_t = x[0].clone();
         // mrop_length == freqs_length == head_dim / 2
-        int64_t mrop_length = static_cast<int64_t>(freqs_t.size(-1) / 2);
+        int64_t mrop_length = freqs_t.size(-1) / 2;
 
         for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
           int64_t offset = dim_idx;  // H -> offset=1, W -> offset=2
@@ -278,12 +278,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         const_cast<ModelInputParams&>(input_params);
     input_params_new.expert_array = expert_array;
 
-    int32_t last_executed_layer = -1;
-    SCOPE_GUARD([this, &last_executed_layer] {
-      if (rolling_mgr_ != nullptr) {
-        rolling_mgr_->finalize(last_executed_layer);
-      }
-    });
+    RollingLayerGuard rolling_guard(rolling_mgr_);
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
@@ -296,8 +291,8 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       }
 
       auto& layer = layers_[i];
-      if (rolling_mgr_)
-        rolling_mgr_->wait_layer_h2d_ready(static_cast<int32_t>(i));
+      const int32_t layer_index = i;
+      rolling_guard.before_layer(layer_index);
       layer(h,
             cos_pos,
             sin_pos,
@@ -306,9 +301,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
             input_params,
             event,
             event_flag);
-      last_executed_layer = static_cast<int32_t>(i);
-      if (rolling_mgr_)
-        rolling_mgr_->schedule_next_layer_h2d(static_cast<int32_t>(i));
+      rolling_guard.after_layer(layer_index);
       if (deep_stack_size && i < deep_stack_size) {
         h = deepstack_process(h, input_params.visual_pos_masks, deep_stacks[i]);
       }

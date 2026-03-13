@@ -31,12 +31,6 @@ class NpuWordEmbedding;
 #endif
 }  // namespace layer
 
-#if defined(USE_NPU)
-// Forward declaration for rolling load manager trait detection
-class RollingLoadManager;
-class Stream;
-#endif
-
 namespace detail {
 template <typename T, typename = void>
 struct has_get_lm_head : std::false_type {};
@@ -146,33 +140,6 @@ struct has_set_npu_word_embedding<
     T,
     std::void_t<decltype(std::declval<T>()->set_npu_word_embedding(
         std::declval<layer::NpuWordEmbedding&>()))>> : std::true_type {};
-
-template <typename T, typename = void>
-struct has_get_decoder_loaders : std::false_type {};
-
-template <typename T>
-struct has_get_decoder_loaders<
-    T,
-    std::void_t<decltype(std::declval<T>()->get_decoder_loaders())>>
-    : std::true_type {};
-
-template <typename T, typename = void>
-struct has_set_rolling_load_manager : std::false_type {};
-
-template <typename T>
-struct has_set_rolling_load_manager<
-    T,
-    std::void_t<decltype(std::declval<T>()->set_rolling_load_manager(
-        std::declval<::xllm::RollingLoadManager*>()))>> : std::true_type {};
-
-template <typename T, typename = void>
-struct has_init_rolling_model_state : std::false_type {};
-
-template <typename T>
-struct has_init_rolling_model_state<
-    T,
-    std::void_t<decltype(std::declval<T>()->init_rolling_model_state())>>
-    : std::true_type {};
 
 template <typename T, typename = void>
 struct has_init_or_refresh_rolling_runtime : std::false_type {};

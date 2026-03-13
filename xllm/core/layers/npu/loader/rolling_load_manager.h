@@ -127,4 +127,37 @@ class RollingLoadManager {
   std::vector<bool> refilled_slots_;
 };
 
+// RAII helper for rolling load coordination in decoder layer loops.
+class RollingLayerGuard final {
+ public:
+  explicit RollingLayerGuard(RollingLoadManager*& rolling_mgr)
+      : rolling_mgr_(rolling_mgr) {}
+
+  RollingLayerGuard(const RollingLayerGuard&) = delete;
+  RollingLayerGuard& operator=(const RollingLayerGuard&) = delete;
+
+  ~RollingLayerGuard() noexcept {
+    if (rolling_mgr_ != nullptr) {
+      rolling_mgr_->finalize(last_executed_layer_);
+    }
+  }
+
+  void before_layer(int32_t layer_index) {
+    if (rolling_mgr_ != nullptr) {
+      rolling_mgr_->wait_layer_h2d_ready(layer_index);
+    }
+  }
+
+  void after_layer(int32_t layer_index) {
+    last_executed_layer_ = layer_index;
+    if (rolling_mgr_ != nullptr) {
+      rolling_mgr_->schedule_next_layer_h2d(layer_index);
+    }
+  }
+
+ private:
+  RollingLoadManager*& rolling_mgr_;
+  int32_t last_executed_layer_ = -1;
+};
+
 }  // namespace xllm

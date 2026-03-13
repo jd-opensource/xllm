@@ -204,12 +204,7 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
         const_cast<ModelInputParams&>(input_params);
     input_params_new.expert_array = expert_array;
 
-    int32_t last_executed_layer = -1;
-    SCOPE_GUARD([this, &last_executed_layer] {
-      if (rolling_mgr_ != nullptr) {
-        rolling_mgr_->finalize(last_executed_layer);
-      }
-    });
+    RollingLayerGuard rolling_guard(rolling_mgr_);
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
@@ -224,8 +219,8 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
       }
 
       auto& layer = layers_[i];
-      if (rolling_mgr_)
-        rolling_mgr_->wait_layer_h2d_ready(static_cast<int32_t>(i));
+      const int32_t layer_index = i;
+      rolling_guard.before_layer(layer_index);
       layer(h,
             cos_pos,
             sin_pos,
@@ -234,9 +229,7 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
             input_params_new,
             event,
             event_flag);
-      last_executed_layer = static_cast<int32_t>(i);
-      if (rolling_mgr_)
-        rolling_mgr_->schedule_next_layer_h2d(static_cast<int32_t>(i));
+      rolling_guard.after_layer(layer_index);
     }
     return ModelOutput(norm_(h, 0));
   }

@@ -20,8 +20,6 @@ limitations under the License.
 #include "graph/types.h"
 #include "layers/npu/npu_lm_head_impl.h"
 #include "layers/npu/npu_word_embedding_impl.h"
-#include "layers/npu/loader/base_manual_loader.h"
-#include "layers/npu/loader/rolling_load_manager.h"
 #endif
 #include "layers/common/lm_head.h"
 #include "layers/common/word_embedding.h"
@@ -46,10 +44,6 @@ limitations under the License.
 #include "model_traits.h"
 
 namespace xllm {
-
-#if defined(USE_NPU)
-class Stream;
-#endif
 
 class CausalLM : public torch::nn::Module {
  public:
@@ -105,18 +99,6 @@ class CausalLM : public torch::nn::Module {
   virtual void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) {
     NOT_IMPLEMENTED();
   }
-
-  virtual std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
-    NOT_IMPLEMENTED();
-    return {};
-  }
-
-  virtual void set_rolling_load_manager(RollingLoadManager* mgr) {
-    NOT_IMPLEMENTED();
-  }
-
-  // Rolling initialization entry for model internals.
-  virtual void init_rolling_model_state() { NOT_IMPLEMENTED(); }
 
   virtual bool init_or_refresh_rolling_runtime(Stream* load_stream,
                                                Stream* compute_stream,
@@ -252,30 +234,6 @@ class CausalLMImpl : public CausalLM {
       model_->set_npu_word_embedding(embedding);
     } else {
       CausalLM::set_npu_word_embedding(embedding);
-    }
-  }
-
-  std::vector<layer::BaseManualLoader*> get_decoder_loaders() override {
-    if constexpr (detail::has_get_decoder_loaders<Model>::value) {
-      return model_->get_decoder_loaders();
-    } else {
-      return CausalLM::get_decoder_loaders();
-    }
-  }
-
-  void set_rolling_load_manager(RollingLoadManager* mgr) override {
-    if constexpr (detail::has_set_rolling_load_manager<Model>::value) {
-      model_->set_rolling_load_manager(mgr);
-    } else {
-      CausalLM::set_rolling_load_manager(mgr);
-    }
-  }
-
-  void init_rolling_model_state() override {
-    if constexpr (detail::has_init_rolling_model_state<Model>::value) {
-      model_->init_rolling_model_state();
-    } else {
-      CausalLM::init_rolling_model_state();
     }
   }
 

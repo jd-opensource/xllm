@@ -41,6 +41,8 @@ class HFModelLoader : public ModelLoader {
 
   int64_t get_non_decoder_weight_size() const override;
 
+  int64_t get_max_decoder_layer_weight_size() const override;
+
  private:
   bool load_args(const std::string& model_weights_path);
   bool load_rec_vocab(const std::string& model_weights_path);
