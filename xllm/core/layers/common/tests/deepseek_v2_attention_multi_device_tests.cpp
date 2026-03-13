@@ -120,6 +120,19 @@ ModelArgs create_attention_model_args(int64_t q_lora_rank = 0,
   return args;
 }
 
+ModelArgs create_glm5_attention_model_args() {
+  ModelArgs args =
+      create_attention_model_args(/*q_lora_rank=*/64, /*enable_indexer=*/true);
+  args.model_type() = "glm_moe_dsa";
+  args.qk_nope_head_dim() = 192;
+  args.v_head_dim() = 256;
+  args.index_n_heads() = 32;
+  args.rope_theta() = 1000000.0f;
+  args.rope_scaling_rope_type() = "default";
+  args.indexer_rope_interleave() = true;
+  return args;
+}
+
 StateDict create_attention_state_dict(const ModelArgs& args,
                                       const torch::TensorOptions& options) {
   const int64_t hidden_size = args.hidden_size();
@@ -506,7 +519,8 @@ int32_t run_attention_test_child(int32_t rank,
 int32_t run_attention_prefill_test_child(int32_t rank,
                                          int32_t world_size,
                                          int32_t port,
-                                         const std::string& host) {
+                                         const std::string& host,
+                                         bool use_glm5_args = false) {
   try {
     const int32_t dev_count = xllm::Device::device_count();
     if (dev_count < world_size) {
@@ -533,7 +547,8 @@ int32_t run_attention_prefill_test_child(int32_t rank,
                        .dtype(torch::kBFloat16)
                        .device(device)
                        .requires_grad(false);
-    ModelArgs model_args = create_attention_model_args();
+    ModelArgs model_args = use_glm5_args ? create_glm5_attention_model_args()
+                                         : create_attention_model_args();
     QuantArgs quant_args = create_default_quant_args();
     StateDict state_dict = create_attention_state_dict(model_args, options);
 
@@ -599,7 +614,8 @@ int32_t run_attention_prefill_test_child(int32_t rank,
 int32_t run_attention_prefill_fallback_test_child(int32_t rank,
                                                   int32_t world_size,
                                                   int32_t port,
-                                                  const std::string& host) {
+                                                  const std::string& host,
+                                                  bool use_glm5_args = false) {
   try {
     const int32_t dev_count = xllm::Device::device_count();
     if (dev_count < world_size) {
@@ -626,7 +642,8 @@ int32_t run_attention_prefill_fallback_test_child(int32_t rank,
                        .dtype(torch::kBFloat16)
                        .device(device)
                        .requires_grad(false);
-    ModelArgs model_args = create_attention_model_args();
+    ModelArgs model_args = use_glm5_args ? create_glm5_attention_model_args()
+                                         : create_attention_model_args();
     QuantArgs quant_args = create_default_quant_args();
     StateDict state_dict = create_attention_state_dict(model_args, options);
 
@@ -961,13 +978,13 @@ class AttentionMultiDeviceTest : public ::testing::Test {
     }
   }
 
-  void run_prefill_test() {
+  void run_prefill_test(bool use_glm5_args = false) {
     std::vector<pid_t> child_pids;
     for (int32_t rank = 0; rank < world_size_; ++rank) {
       pid_t pid = fork();
       if (pid == 0) {
-        const int32_t exit_code =
-            run_attention_prefill_test_child(rank, world_size_, port_, host_);
+        const int32_t exit_code = run_attention_prefill_test_child(
+            rank, world_size_, port_, host_, use_glm5_args);
         _exit(exit_code);
       } else if (pid > 0) {
         child_pids.push_back(pid);
@@ -1002,13 +1019,13 @@ class AttentionMultiDeviceTest : public ::testing::Test {
     }
   }
 
-  void run_prefill_fallback_test() {
+  void run_prefill_fallback_test(bool use_glm5_args = false) {
     std::vector<pid_t> child_pids;
     for (int32_t rank = 0; rank < world_size_; ++rank) {
       pid_t pid = fork();
       if (pid == 0) {
         const int32_t exit_code = run_attention_prefill_fallback_test_child(
-            rank, world_size_, port_, host_);
+            rank, world_size_, port_, host_, use_glm5_args);
         _exit(exit_code);
       } else if (pid > 0) {
         child_pids.push_back(pid);
@@ -1102,8 +1119,17 @@ TEST_F(AttentionMultiDeviceTest, PrefillFullWeightMatchesShardedPath) {
   run_prefill_test();
 }
 
+TEST_F(AttentionMultiDeviceTest, Glm5PrefillFullWeightMatchesShardedPath) {
+  run_prefill_test(/*use_glm5_args=*/true);
+}
+
 TEST_F(AttentionMultiDeviceTest, PrefillFullWeightFallbackMatchesShardedPath) {
   run_prefill_fallback_test();
+}
+
+TEST_F(AttentionMultiDeviceTest,
+       Glm5PrefillFullWeightFallbackMatchesShardedPath) {
+  run_prefill_fallback_test(/*use_glm5_args=*/true);
 }
 
 TEST_F(AttentionMultiDeviceTest, ChunkedPrefillFullWeightMatchesShardedPath) {
