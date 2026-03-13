@@ -1,8 +1,10 @@
 import os
 import signal
 import sys
+import time
+import uuid
 from . import util
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Union
 
 from xllm_export import (LLMMaster, Options, RequestOutput,
                          RequestParams)
@@ -153,5 +155,116 @@ class LLM:
                 raise ValidationError(outputs[idx].status.code, outputs[idx].status.message)
             outputs[idx].prompt = prompts[idx]
             idx += 1
+
+        return outputs
+
+    @staticmethod
+    def _normalize_selector_values(
+        prompts: Sequence[str],
+        selector: Union[str, dict, Sequence[Union[str, dict]]],
+    ) -> List[str]:
+        def get_literal(value: Union[str, dict]) -> str:
+            if isinstance(value, str):
+                return value
+            if isinstance(value, dict):
+                selector_type = value.get("type", "literal")
+                literal = value.get("value", "")
+                if selector_type != "literal":
+                    raise ValueError("selector.type must be literal")
+                if not isinstance(literal, str) or not literal:
+                    raise ValueError("selector.value is required")
+                return literal
+            raise ValueError("selector must be a string or dict")
+
+        if isinstance(selector, (str, dict)):
+            literal = get_literal(selector)
+            return [literal for _ in prompts]
+
+        selector_values = list(selector)
+        if len(selector_values) != len(prompts):
+            raise ValueError("selector count must match prompts count")
+        return [get_literal(item) for item in selector_values]
+
+    @staticmethod
+    def _build_request_params_list(
+        prompts: Sequence[str],
+        request_params: Optional[Union[RequestParams, Sequence[RequestParams]]],
+    ) -> List[RequestParams]:
+        if request_params is None:
+            return [RequestParams() for _ in prompts]
+        if isinstance(request_params, RequestParams):
+            if len(prompts) != 1:
+                raise ValueError(
+                    "request_params must be a list when prompts has multiple items"
+                )
+            return [request_params]
+
+        params_list = list(request_params)
+        if len(params_list) != len(prompts):
+            raise ValueError("request_params count must match prompts count")
+        return params_list
+
+    def sample(
+        self,
+        prompts: Union[str, List[str]],
+        selector: Union[str, dict, Sequence[Union[str, dict]]],
+        request_params: Optional[Union[RequestParams, Sequence[RequestParams]]] = None,
+        logprobs: int = 5,
+        wait_schedule_done: bool = True,
+    ) -> List[RequestOutput]:
+        if isinstance(prompts, str):
+            prompts = [prompts]
+        if not prompts:
+            return []
+
+        selector_values = self._normalize_selector_values(prompts, selector)
+        params_list = self._build_request_params_list(prompts, request_params)
+
+        for i, prompt in enumerate(prompts):
+            params = params_list[i]
+            if not params.request_id:
+                params.request_id = "sample-" + uuid.uuid4().hex
+
+            params.max_tokens = 1
+            params.n = 1
+            params.best_of = 1
+            params.logprobs = True
+            params.top_logprobs = logprobs
+            params.add_special_tokens = True
+            params.is_sample_request = True
+
+            ok, sample_slots = self.master.build_sample_slots(
+                params.request_id,
+                prompt,
+                selector_values[i],
+            )
+            if not ok:
+                raise ValueError(
+                    "Failed to build sample slots. "
+                    "selector.value must be a stable single special token."
+                )
+            params.sample_slots = sample_slots
+
+        outputs = [None] * len(prompts)
+
+        def callback(index: int, output: RequestOutput) -> bool:
+            outputs[index] = output
+            return True
+
+        self.master.handle_batch_request(prompts, params_list, callback)
+
+        if wait_schedule_done:
+            pass
+
+        self.master.generate()
+
+        for i in range(len(outputs)):
+            while outputs[i] is None:
+                time.sleep(0.01)
+            if outputs[i].status is not None and not outputs[i].status.ok:
+                raise RuntimeError(
+                    f"sample request failed: {outputs[i].status.message}"
+                )
+            outputs[i].prompt = prompts[i]
 
         return outputs
