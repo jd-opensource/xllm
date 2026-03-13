@@ -88,13 +88,11 @@ class GraphPersistentParam {
   }
   torch::Tensor persistent_positions(uint32_t actual_tokens = 0) const {
     if (actual_tokens > 0) {
-      if (use_mrope_) {
-        // mRoPE positions have shape [3, num_tokens]
-        return persistent_positions_.slice(
-            /*dim=*/1, /*start=*/0, /*end=*/actual_tokens);
-      }
-      return persistent_positions_.slice(
-          /*dim=*/0, /*start=*/0, /*end=*/actual_tokens);
+      int32_t slice_dim = use_mrope_ ? 1 : 0;
+      return persistent_positions_
+          .slice(
+              /*dim=*/slice_dim, /*start=*/0, /*end=*/actual_tokens)
+          .contiguous();
     }
     return persistent_positions_;
   }
