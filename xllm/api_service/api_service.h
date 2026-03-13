@@ -28,6 +28,7 @@ limitations under the License.
 #include "qwen3_rerank_service_impl.h"
 #include "rec_completion_service_impl.h"
 #include "rerank_service_impl.h"
+#include "sample_service_impl.h"
 #include "xllm_service.pb.h"
 
 namespace xllm {
@@ -48,6 +49,16 @@ class APIService : public proto::XllmAPIService {
                        const proto::HttpRequest* request,
                        proto::HttpResponse* response,
                        ::google::protobuf::Closure* done) override;
+
+  void Sample(::google::protobuf::RpcController* controller,
+              const proto::SampleRequest* request,
+              proto::SampleResponse* response,
+              ::google::protobuf::Closure* done) override;
+
+  void SampleHttp(::google::protobuf::RpcController* controller,
+                  const proto::HttpRequest* request,
+                  proto::HttpResponse* response,
+                  ::google::protobuf::Closure* done) override;
 
   void ChatCompletions(::google::protobuf::RpcController* controller,
                        const proto::ChatRequest* request,
@@ -172,6 +183,7 @@ class APIService : public proto::XllmAPIService {
   std::unordered_map<std::string, Master*> masters_;
   std::unique_ptr<AnthropicServiceImpl> anthropic_service_impl_;
   std::unique_ptr<CompletionServiceImpl> completion_service_impl_;
+  std::unique_ptr<SampleServiceImpl> sample_service_impl_;
   std::unique_ptr<ChatServiceImpl> chat_service_impl_;
   std::unique_ptr<MMChatServiceImpl> mm_chat_service_impl_;
   std::unique_ptr<EmbeddingServiceImpl> embedding_service_impl_;

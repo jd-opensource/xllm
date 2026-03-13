@@ -35,6 +35,7 @@ limitations under the License.
 #include "mm_data.h"
 #include "rec_type.h"
 #include "request_output.h"
+#include "sample_slot.h"
 #include "sequence_kv_state.h"
 #include "sequence_logprob_state.h"
 #include "stopping_checker.h"
@@ -89,6 +90,8 @@ struct SequenceParams {
 
   // request id for suffix-decoding request identity
   std::string request_id;
+
+  const std::vector<SampleSlot>* sample_slots = nullptr;
 
   // sampling params
   // reference from request
@@ -217,6 +220,8 @@ class Sequence final {
   // get the full output of the sequence
   SequenceOutput generate_output(const Tokenizer& tokenizer);
   SequenceOutput generate_output();
+  void generate_sample_outputs(std::vector<SequenceOutput>& outputs,
+                               const Tokenizer& tokenizer);
 
   // get the sampling parameters
   const RequestSamplingParam* sampling_param() const {
@@ -290,6 +295,13 @@ class Sequence final {
 
   bool check_beam_search() {
     return sequence_params_.sampling_param->beam_width > 1;
+  }
+
+  const std::vector<SampleSlot>& sample_slots() const {
+    static const std::vector<SampleSlot> kEmpty;
+    return sequence_params_.sample_slots == nullptr
+               ? kEmpty
+               : *sequence_params_.sample_slots;
   }
 
   bool check_need_unique_tokens() { return need_unique_tokens_; }

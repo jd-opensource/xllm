@@ -36,6 +36,16 @@ limitations under the License.
 #include "util/utils.h"
 
 namespace xllm {
+namespace {
+
+uint32_t get_sample_source_position(const SampleSlot& sample_slot) {
+  if (sample_slot.token_position == 0) {
+    return 0;
+  }
+  return static_cast<uint32_t>(sample_slot.token_position - 1);
+}
+
+}  // namespace
 
 BatchInputBuilder::BatchInputBuilder(
     const std::vector<Sequence*>& sequences,
@@ -313,6 +323,8 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
 
   const auto& token_ids = sequence->tokens();
   const uint32_t n_tokens = token_ids.size();
+  const auto& sample_slots = sequence->sample_slots();
+  size_t sample_slot_idx = 0;
 
   // Handle MRope positions
   if (use_mrope_) {
@@ -329,10 +341,28 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
       state.flatten_positions_vec.push_back(static_cast<int32_t>(j));
     }
 
-    // Handle sampling for last tokens
-    if (j + 1 < n_tokens) continue;
+    if (sample_slots.empty()) {
+      // Non-sample requests only select the last prompt token.
+      if (j + 1 < n_tokens) continue;
+      handle_sampling_parameters(sequence, state_ptr);
+      continue;
+    }
 
-    handle_sampling_parameters(sequence, j, seq_len, state_ptr);
+    // Sample requests need one sampling entry per selector hit. The logits for
+    // selector start position come from the preceding token's hidden state.
+    while (sample_slot_idx < sample_slots.size()) {
+      const uint32_t sample_source_position =
+          get_sample_source_position(sample_slots[sample_slot_idx]);
+      if (sample_source_position < j) {
+        ++sample_slot_idx;
+        continue;
+      }
+      if (sample_source_position > j) {
+        break;
+      }
+      handle_sampling_parameters(sequence, state_ptr);
+      ++sample_slot_idx;
+    }
   }
 
   // Add extra token id
@@ -348,18 +378,15 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
 }
 
 void BatchInputBuilder::handle_sampling_parameters(Sequence* sequence,
-                                                   uint32_t token_position,
-                                                   uint32_t seq_len,
                                                    BuilderState* state_ptr) {
   BuilderState& state = state_ptr ? *state_ptr : state_;
 
-  // const auto token_ids = sequence->token_ids();
-  const auto token_id = sequence->tokens()[token_position];
-
   // Select token for sampling
-  state.selected_token_idxes.push_back(state.flatten_tokens_vec.size() - 1);
+  state.selected_token_idxes.push_back(
+      static_cast<int32_t>(state.flatten_tokens_vec.size() - 1));
   state.sampling_params.push_back(sequence->sampling_param());
-  state.sample_idxes.push_back(state.selected_token_idxes.size() - 1);
+  state.sample_idxes.push_back(
+      static_cast<int32_t>(state.selected_token_idxes.size() - 1));
 
   // Process unique tokens
   if (need_unique_tokens_) {

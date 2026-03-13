@@ -139,6 +139,13 @@ class Batch {
   std::vector<Sequence*> get_sequences();
 
  private:
+  struct OutputTarget {
+    Sequence* sequence = nullptr;
+    size_t sample_id = 0;
+    bool from_sample_slot = false;
+  };
+
+  void refresh_output_targets();
   bool update_sequence_state(Sequence* seq, bool replace_fake_token);
 
   void append_token_for_sequence(Sequence* seq,
@@ -166,6 +173,11 @@ class Batch {
 
   // mm_data in the batch
   std::vector<MMData> mm_data_vec_;
+
+  // Runtime sampling targets that were actually injected for the current
+  // forward pass. Sample requests may contribute multiple targets per
+  // sequence.
+  std::vector<OutputTarget> output_targets_;
 
   BatchForwardType batch_forward_type_;
 

@@ -95,6 +95,34 @@ bool SequencesGroup::expand_sequences(bool share_prefix) {
 void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
                                       const Tokenizer& tokenizer,
                                       ThreadPool* thread_pool) {
+  const bool has_sample_outputs =
+      std::any_of(sequences_.begin(), sequences_.end(), [](const auto& seq) {
+        return seq != nullptr && !seq->sample_slots().empty();
+      });
+  if (has_sample_outputs) {
+    const size_t previous_size = outputs.size();
+    size_t total_outputs = previous_size;
+    for (const auto& seq : sequences_) {
+      if (seq == nullptr) {
+        continue;
+      }
+      total_outputs +=
+          seq->sample_slots().empty() ? 1 : seq->sample_slots().size();
+    }
+    outputs.reserve(total_outputs);
+    for (auto& seq : sequences_) {
+      if (seq == nullptr) {
+        continue;
+      }
+      seq->generate_sample_outputs(outputs, tokenizer);
+    }
+    std::stable_sort(
+        outputs.begin() + previous_size,
+        outputs.end(),
+        [](const auto& lhs, const auto& rhs) { return lhs.index < rhs.index; });
+    return;
+  }
+
   // Check for multi-round beam search results
   if (is_rec_multi_round_mode() && check_beam_search() &&
       sequences_.size() == 1) {

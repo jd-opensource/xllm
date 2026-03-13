@@ -324,10 +324,18 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     const uint32_t kDefaultMaxTokens = 5120;
     max_tokens = kDefaultMaxTokens;
   }
+  uint32_t effective_max_tokens = max_tokens;
+  if (sp.is_sample_request) {
+    const uint32_t sample_slot_tokens =
+        static_cast<uint32_t>(sp.sample_slots.size());
+    if (sample_slot_tokens > effective_max_tokens) {
+      effective_max_tokens = sample_slot_tokens;
+    }
+  }
 
   // allocate enough capacity for prompt tokens, max tokens, and speculative
   // tokens
-  size_t capacity = local_prompt_tokens.size() + max_tokens +
+  size_t capacity = local_prompt_tokens.size() + effective_max_tokens +
                     options_.num_speculative_tokens() + /*bouns_token*/ 1;
   if (options_.enable_schedule_overlap()) {
     capacity += options_.num_speculative_tokens() + 1;
@@ -387,7 +395,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   }
 
   StoppingChecker stopping_checker(
-      max_tokens,
+      effective_max_tokens,
       max_context_len - options_.num_speculative_tokens(),
       model_args_.eos_token_id(),
       sp.ignore_eos,
@@ -453,6 +461,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
                          batch_callback,
                          sp.decode_address,
                          call);
+  req_state.sample_slots = sp.sample_slots;
 
   auto request = std::make_shared<Request>(sp.request_id,
                                            sp.x_request_id,
