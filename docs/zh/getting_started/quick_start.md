@@ -9,11 +9,11 @@
 下面是我们构建好的开发镜像，由于依赖的基础镜像无法开源，所以我们无法提供Dockerfile。
 ```bash
 # A2 x86
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-hb-rc2-x86
+docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-a2-x86-20260306
 # A2 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-hb-rc2-arm
+docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-a2-arm-20260306
 # A3 arm
-docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-hc-rc2-arm
+docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-a3-arm-20260306
 ```
 
 容器启动命令如下：
