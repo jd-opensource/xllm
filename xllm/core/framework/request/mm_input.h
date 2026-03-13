@@ -145,18 +145,48 @@ class MMInput {
   std::vector<MMInputItem> items_;
 };
 
+enum class MMErrCode : uint8_t {
+  SUCCESS = 0,
+  LOAD_DATA_ERR = 1,
+  LOAD_HTTP_ERR = 2,
+  INVALID_URL_ERR = 3,
+  PARSE_EMB_ERR = 4,
+  DECODE_ERR = 5,
+  HANDLER_ERR = 6,
+};
+
+inline const char* MMErrToString(MMErrCode code) {
+  switch (code) {
+    case MMErrCode::LOAD_DATA_ERR:
+      return "Failed to load multimodal input from data url.";
+    case MMErrCode::LOAD_HTTP_ERR:
+      return "Failed to download multimodal input from http url.";
+    case MMErrCode::PARSE_EMB_ERR:
+      return "Failed to parse input multimodal embedding.";
+    case MMErrCode::DECODE_ERR:
+      return "Failed to decode multimodal input.";
+    case MMErrCode::INVALID_URL_ERR:
+      return "Multimodal input url must be a data URL (base64 or binary) or an "
+             "http(s) URL.";
+    case MMErrCode::HANDLER_ERR:
+      return "Unsupported multimodal input type.";
+    default:
+      return "Unknown error occurred when loading/decoding multimodal input.";
+  }
+}
+
 class MMHandlerSet;
 class MMInputTransfer {
  public:
   MMInputTransfer();
   ~MMInputTransfer();
 
-  bool trans(const std::vector<Message>& messages, MMInput& inputs);
+  MMErrCode trans(const std::vector<Message>& messages, MMInput& inputs);
 
  private:
-  bool trans(const MMContentVec& mmc,
-             std::vector<MMInputItem>& inputs,
-             MMPayload& payload);
+  MMErrCode trans(const MMContentVec& mmc,
+                  std::vector<MMInputItem>& inputs,
+                  MMPayload& payload);
 
   std::unique_ptr<MMHandlerSet> mm_handlers_;
 };

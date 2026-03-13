@@ -23,68 +23,75 @@ limitations under the License.
 #include "core/util/http_downloader.h"
 #include "mm_codec.h"
 #include "mm_embedding_handler.h"
-#include "mm_input.h"
 
 namespace xllm {
 
-bool MMHandlerBase::process(const MMContent& content,
-                            MMInputItem& input,
-                            MMPayload& payload) {
-  if (!this->load(content, input, payload)) {
-    LOG(ERROR) << " load mm data failed";
-    return false;
-  }
+MMErrCode MMHandlerBase::process(const MMContent& content,
+                                 MMInputItem& input,
+                                 MMPayload& payload) {
+  MMErrCode code = this->load(content, input, payload);
+  if (code != MMErrCode::SUCCESS) return code;
 
-  if (!this->decode(input)) {
-    LOG(ERROR) << " decode mm data failed";
-    return false;
-  }
+  code = this->decode(input);
+  if (code != MMErrCode::SUCCESS) return code;
 
-  return true;
+  return MMErrCode::SUCCESS;
 }
 
-bool MMHandlerBase::load_from_dataurl(const std::string& url,
-                                      std::string& raw_data,
-                                      MMPayload& payload) {
+MMErrCode MMHandlerBase::load_from_dataurl(const std::string& url,
+                                           std::string& raw_data,
+                                           MMPayload& payload) {
   size_t pos = url.find_first_of(';');
-  if (pos == std::string::npos) return false;
+  if (pos == std::string::npos) return MMErrCode::LOAD_DATA_ERR;
 
   butil::StringPiece sub(url, pos + 1);
   pos = sub.find_first_of(',');
-  if (pos == std::string::npos) return false;
+  if (pos == std::string::npos) return MMErrCode::LOAD_DATA_ERR;
 
   butil::StringPiece type(sub, 0, pos);
   butil::StringPiece data(sub, pos + 1);
 
   if (type == "base64") {
-    return butil::Base64Decode(data, &raw_data);
+    if (!butil::Base64Decode(data, &raw_data)) {
+      return MMErrCode::LOAD_DATA_ERR;
+    }
+    return MMErrCode::SUCCESS;
   } else if (type == "binary") {
     size_t len = 0;
     bool res = butil::StringToSizeT(data, &len);
     if (res) {
-      return payload.get(raw_data, len);
+      if (!payload.get(raw_data, len)) {
+        LOG(ERROR) << "load data from binary url failed, url is: " << url;
+        return MMErrCode::LOAD_DATA_ERR;
+      }
+      return MMErrCode::SUCCESS;
     } else {
       LOG(ERROR) << " data url is invalid, url is " << url;
-      return false;
+      return MMErrCode::LOAD_DATA_ERR;
     }
   } else {
     LOG(ERROR) << " data url is invalid, url is " << url;
-    return false;
+    return MMErrCode::LOAD_DATA_ERR;
   }
 }
 
-bool MMHandlerBase::load_from_local(const std::string& url, std::string& data) {
-  return false;
+MMErrCode MMHandlerBase::load_from_local(const std::string& url,
+                                         std::string& data) {
+  return MMErrCode::INVALID_URL_ERR;
 }
 
-bool MMHandlerBase::load_from_http(const std::string& url, std::string& data) {
+MMErrCode MMHandlerBase::load_from_http(const std::string& url,
+                                        std::string& data) {
   BRpcDownloader helper_;
-  return helper_.fetch_data(url, data);
+  if (!helper_.fetch_data(url, data)) {
+    return MMErrCode::LOAD_HTTP_ERR;
+  }
+  return MMErrCode::SUCCESS;
 }
 
-bool ImageHandler::load(const MMContent& content,
-                        MMInputItem& input,
-                        MMPayload& payload) {
+MMErrCode ImageHandler::load(const MMContent& content,
+                             MMInputItem& input,
+                             MMPayload& payload) {
   input.clear();
 
   const auto& image_url = content.image_url;
@@ -102,18 +109,21 @@ bool ImageHandler::load(const MMContent& content,
     return this->load_from_http(url, input.raw_data);
   } else {
     LOG(ERROR) << " image url is invalid, url is " << url;
-    return false;
+    return MMErrCode::INVALID_URL_ERR;
   }
 }
 
-bool ImageHandler::decode(MMInputItem& input) {
+MMErrCode ImageHandler::decode(MMInputItem& input) {
   OpenCVImageDecoder decoder;
-  return decoder.decode(input.raw_data, input.decode_image);
+  if (!decoder.decode(input.raw_data, input.decode_image)) {
+    return MMErrCode::DECODE_ERR;
+  }
+  return MMErrCode::SUCCESS;
 }
 
-bool VideoHandler::load(const MMContent& content,
-                        MMInputItem& input,
-                        MMPayload& payload) {
+MMErrCode VideoHandler::load(const MMContent& content,
+                             MMInputItem& input,
+                             MMPayload& payload) {
   input.clear();
 
   const auto& video_url = content.video_url;
@@ -131,11 +141,11 @@ bool VideoHandler::load(const MMContent& content,
     return this->load_from_http(url, input.raw_data);
   } else {
     LOG(ERROR) << " video url is invalid, url is " << url;
-    return false;
+    return MMErrCode::INVALID_URL_ERR;
   }
 }
 
-bool VideoHandler::decode(MMInputItem& input) {
+MMErrCode VideoHandler::decode(MMInputItem& input) {
   if (FLAGS_use_audio_in_video) {
     FFmpegAudioDecoder audio_decoder;
     if (audio_decoder.decode(
@@ -143,17 +153,20 @@ bool VideoHandler::decode(MMInputItem& input) {
       input.type |= MMType::AUDIO;
     } else {
       LOG(ERROR) << "decode audio in video failed";
-      return false;
+      return MMErrCode::DECODE_ERR;
     }
   }
 
   FFmpegVideoDecoder decoder;
-  return decoder.decode(input.raw_data, input.decode_video, input.video_meta);
+  if (!decoder.decode(input.raw_data, input.decode_video, input.video_meta)) {
+    return MMErrCode::DECODE_ERR;
+  }
+  return MMErrCode::SUCCESS;
 }
 
-bool AudioHandler::load(const MMContent& content,
-                        MMInputItem& input,
-                        MMPayload& payload) {
+MMErrCode AudioHandler::load(const MMContent& content,
+                             MMInputItem& input,
+                             MMPayload& payload) {
   input.clear();
 
   const auto& audio_url = content.audio_url;
@@ -171,13 +184,16 @@ bool AudioHandler::load(const MMContent& content,
     return this->load_from_http(url, input.raw_data);
   } else {
     LOG(ERROR) << " audio url is invalid, url is " << url;
-    return false;
+    return MMErrCode::INVALID_URL_ERR;
   }
 }
 
-bool AudioHandler::decode(MMInputItem& input) {
+MMErrCode AudioHandler::decode(MMInputItem& input) {
   FFmpegAudioDecoder decoder;
-  return decoder.decode(input.raw_data, input.decode_audio, input.audio_meta);
+  if (!decoder.decode(input.raw_data, input.decode_audio, input.audio_meta)) {
+    return MMErrCode::DECODE_ERR;
+  }
+  return MMErrCode::SUCCESS;
 }
 
 MMHandlerSet::MMHandlerSet() {
@@ -194,13 +210,13 @@ MMHandlerSet::MMHandlerSet() {
 
 MMHandlerSet::~MMHandlerSet() {}
 
-bool MMHandlerSet::process(const std::string& type,
-                           const MMContent& content,
-                           MMInputItem& input,
-                           MMPayload& payload) {
+MMErrCode MMHandlerSet::process(const std::string& type,
+                                const MMContent& content,
+                                MMInputItem& input,
+                                MMPayload& payload) {
   auto itor = handlers_.find(type);
   if (itor == handlers_.end()) {
-    return false;
+    return MMErrCode::HANDLER_ERR;
   }
 
   auto& handler = itor->second;

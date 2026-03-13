@@ -500,6 +500,10 @@ class MemoryAudioReader : public MemoryMediaReader {
 
 bool OpenCVImageDecoder::decode(const std::string& raw_data, torch::Tensor& t) {
   cv::Mat buffer(1, raw_data.size(), CV_8UC1, (void*)raw_data.data());
+  if (raw_data.empty()) {
+    LOG(ERROR) << "opencv image decode got empty data";
+    return false;
+  }
   cv::Mat image = cv::imdecode(buffer, cv::IMREAD_COLOR);
   if (image.empty()) {
     LOG(INFO) << " opencv image decode failed";
