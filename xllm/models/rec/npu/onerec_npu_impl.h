@@ -203,7 +203,7 @@ class OneRecStackImpl : public torch::nn::Module {
       } else {
         h = embed_tokens_(tokens);
 
-        auto& context_emb = onerec_params->decoder_context_embedding;
+        auto context_emb = onerec_params->decoder_context_embedding.clone();
         const int64_t hidden_size = context_emb.size(3);
         const int64_t bs = onerec_params->bs;
         const int64_t group_width = onerec_params->group_width;
