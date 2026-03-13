@@ -91,9 +91,12 @@ const OptionCategory kXllmServiceOptions = {"XLLM-SERVICE OPTIONS",
 
 const OptionCategory kBeamSearchOptions = {"BEAM SEARCH OPTIONS",
                                            {"enable_beam_search_kernel",
-                                            "enable_rec_fast_sampler",
-                                            "enable_topk_sorted",
-                                            "output_rec_logprobs"}};
+                                            "enable_topk_sorted"}};
+
+const OptionCategory kRecOptions = {"REC OPTIONS",
+                                    {"enable_rec_fast_sampler",
+                                     "enable_rec_prefill_only",
+                                     "output_rec_logprobs"}};
 
 const OptionCategory kPrefixCacheOptions = {
     "PREFIX CACHE OPTIONS",
@@ -118,6 +121,7 @@ const std::vector<OptionCategory> kOptionCategories = {
     kMtpOptions,
     kXllmServiceOptions,
     kBeamSearchOptions,
+    kRecOptions,
     kPrefixCacheOptions,
     kOtherOptions};
 
