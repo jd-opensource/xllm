@@ -30,15 +30,11 @@ inline std::optional<std::string> validate_deepseek_v32_sequence_parallel_flags(
   if (!FLAGS_enable_prefill_sp) {
     return std::nullopt;
   }
-
-  if (!FLAGS_enable_mla) {
-    return "enable_prefill_sp requires enable_mla=true.";
-  }
   if (FLAGS_nnodes <= 1) {
     return "enable_prefill_sp requires nnodes > 1.";
   }
   if (FLAGS_dp_size != 1) {
-    return "enable_prefill_sp requires dp_size == 1.";
+    return "enable_prefill_sp requires dp_size == 1 for now.";
   }
 
   return std::nullopt;
