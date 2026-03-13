@@ -489,7 +489,7 @@ struct ModelInputParams {
   int32_t kv_max_seq_len = 0;
   int32_t q_max_seq_len = 0;
 
-  uint64_t batch_id;
+  uint64_t batch_id = 0;
 
   torch::Tensor q_seq_lens;
   torch::Tensor kv_seq_lens;

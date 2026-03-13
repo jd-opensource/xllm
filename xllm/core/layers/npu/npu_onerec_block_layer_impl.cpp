@@ -35,18 +35,34 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(torch::Tensor& hidden_states,
                                                int32_t node_id,
                                                aclrtEvent* event,
                                                std::atomic<bool>* event_flag) {
+  return forward(hidden_states,
+                 attn_mask,
+                 kv_cache,
+                 input_params,
+                 encoder_output,
+                 node_id,
+                 event,
+                 event_flag,
+                 torch::Tensor());
+}
+
+torch::Tensor NpuOneRecBlockLayerImpl::forward(
+    torch::Tensor& hidden_states,
+    torch::Tensor& attn_mask,
+    KVCache& kv_cache,
+    ModelInputParams& input_params,
+    torch::Tensor* encoder_output,
+    int32_t node_id,
+    aclrtEvent* event,
+    std::atomic<bool>* event_flag,
+    const torch::Tensor& expert_array) {
   (void)attn_mask;
   (void)kv_cache;
+  (void)input_params;
   (void)node_id;
   (void)event;
   (void)event_flag;
-
-  const auto* onerec_params = input_params.onerec_params();
-  CHECK(onerec_params != nullptr) << "OneRec block requires onerec_params().";
-
-  const bool is_prefill =
-      onerec_params->rec_stage == OneRecModelInputParams::RecStage::PREFILL;
-  (void)is_prefill;
+  (void)expert_array;
 
   if (encoder_output != nullptr && encoder_output->defined() &&
       encoder_output->device() != device_) {
@@ -63,6 +79,17 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(torch::Tensor& hidden_states,
 
   return hidden_states;
 }
+
+void NpuOneRecBlockLayerImpl::load_state_dict(const StateDict& state_dict) {
+  (void)state_dict;
+}
+
+void NpuOneRecBlockLayerImpl::verify_loaded_weights(
+    const std::string& prefix) const {
+  (void)prefix;
+}
+
+void NpuOneRecBlockLayerImpl::merge_loaded_weights() {}
 
 }  // namespace layer
 }  // namespace xllm
