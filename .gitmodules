@@ -34,6 +34,7 @@
 [submodule "third_party/xllm_atb_layers"]
 	path = third_party/xllm_atb_layers
 	url = https://gitcode.com/xLLM-AI/xllm_atb_layers.git
+	branch = feat/onerec-git-code-pr
 [submodule "third_party/xxHash"]
 	path = third_party/xxHash
 	url = https://gitcode.com/xLLM-AI/xxHash.git
