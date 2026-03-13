@@ -25,16 +25,17 @@ limitations under the License.
 
 namespace xllm {
 
-inline std::optional<std::string> validate_deepseek_v32_sequence_parallel_flags(
-    const std::string& /* model_type */) {
+inline std::optional<std::string> validate_deepseek_v32_sp_flags(
+    const ParallelArgs& parallel_args) {
   if (!FLAGS_enable_prefill_sp) {
     return std::nullopt;
   }
-  if (FLAGS_nnodes <= 1) {
-    return "enable_prefill_sp requires nnodes > 1.";
-  }
-  if (FLAGS_dp_size != 1) {
+  if (parallel_args.dp_size() != 1) {
     return "enable_prefill_sp requires dp_size == 1 for now.";
+  }
+  if (parallel_args.sp_group_ == nullptr ||
+      parallel_args.sp_group_->world_size() <= 1) {
+    return "enable_prefill_sp requires sequence parallel world_size > 1.";
   }
 
   return std::nullopt;
@@ -46,8 +47,8 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
       : DeepseekV2ModelImpl(context),
         sequence_parallel_group_(context.get_parallel_args().sp_group_),
         parallel_world_size_(context.get_parallel_args().world_size()) {
-    const auto sp_config_error = validate_deepseek_v32_sequence_parallel_flags(
-        context.get_model_args().model_type());
+    const auto sp_config_error =
+        validate_deepseek_v32_sp_flags(context.get_parallel_args());
     CHECK(!sp_config_error.has_value()) << sp_config_error.value();
   }
 
