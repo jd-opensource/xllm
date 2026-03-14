@@ -22,6 +22,7 @@ xLLM uses gflags to manage service startup parameters. The specific parameter me
 | `max_tokens_per_batch` | `int32` | Maximum value of int32 |  | The maximum number of tokens that can be computed per step. |  |
 | `max_seqs_per_batch` | `int32` | 256 |  | The maximum number of sequences that can be computed per step. |  |
 | `enable_chunked_prefill` | `bool` | true | false | Whether to enable chunked prefill. |  |
+| `enable_prefill_sp` | `bool` | false | true | Whether to enable prefill-only sequence parallel. | `enable_chunked_prefill=true` is supported only for prefill-only batches (`PREFILL` / `CHUNKED_PREFILL`); `MIXED` and `DECODE` batches do not run with sequence parallel. |
 | `enable_schedule_overlap` | `bool` | false | true | Whether to enable asynchronous scheduling. | [Details](./features/async_schedule.md) |
 | `enable_prefix_cache` | `bool` | true | false | Whether to enable prefix cache (not supported by DeepSeek currently). |  |
 | `communication_backend` | `string` | "hccl" | "lccl" | The backend used for communication operations. |  |

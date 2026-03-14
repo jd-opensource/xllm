@@ -429,17 +429,45 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::sp_post(
     const v32_sp::DeepseekV32SPMetadata& sp_meta,
     const v32_sp::DeepseekV32SPContext& sp_ctx) {
   (void)sp_ctx;
+  CHECK(attn_metadata.is_prefill || attn_metadata.is_chunked_prefill)
+      << "deepseek_v32 sequence parallel indexer only supports prefill "
+         "batches.";
+  CHECK(attn_metadata.slot_mapping.defined())
+      << "deepseek_v32 sequence parallel indexer requires slot_mapping.";
+  CHECK_EQ(k_global.size(0), attn_metadata.slot_mapping.numel())
+      << "deepseek_v32 sequence parallel expects gathered K rows to match "
+         "slot_mapping size before packing.";
+  CHECK_EQ(sp_meta.seg_q_cu_lens.size(0), sp_meta.seg_ctx_lens.size(0) + 1)
+      << "deepseek_v32 sequence parallel expects one seg_q_cu_lens prefix "
+         "entry per segment.";
+  CHECK_EQ(sp_meta.seg_suffix_k_cu_lens.size(0),
+           sp_meta.seg_ctx_lens.size(0) + 1)
+      << "deepseek_v32 sequence parallel expects one seg_suffix_k_cu_lens "
+         "prefix entry per segment.";
+  CHECK_EQ(sp_meta.seg_ctx_cu_lens.size(0), sp_meta.seg_ctx_lens.size(0) + 1)
+      << "deepseek_v32 sequence parallel expects one seg_ctx_cu_lens prefix "
+         "entry per segment.";
+
+  // For chunked SP, keep the runtime contract aligned with the normal chunked
+  // indexer path: write the freshly computed suffix K into paged cache first,
+  // rebuild the full-context dense K from cache, then repack it into segment
+  // order before select. Feeding suffix-only K here would truncate the
+  // effective context seen by the indexer on long prompts.
   write_prefill_k_cache(k_global, k_cache, attn_metadata.slot_mapping);
-  torch::Tensor k_packed = v32_sp::pack_sp_k_for_indexer(k_global, sp_meta);
   torch::Tensor q = pre_out.q;
   torch::Tensor weights = pre_out.weights;
-  IndexerRuntimeContext ctx = prepare_runtime_context(k_packed,
+  IndexerRuntimeContext ctx = prepare_runtime_context(k_global,
                                                       k_cache,
                                                       q,
                                                       weights,
                                                       attn_metadata,
                                                       /*is_prefill=*/true,
                                                       q.size(0));
+  if (attn_metadata.is_chunked_prefill) {
+    ctx.k_cache_tensor = v32_sp::pack_sp_ctx_k(ctx.k_cache_tensor, sp_meta);
+  } else {
+    ctx.k_cache_tensor = v32_sp::pack_sp_k_for_indexer(k_global, sp_meta);
+  }
   return run_indexer_select_kernel(
       attn_metadata, /*is_prefill=*/true, ctx, &sp_meta);
 }
@@ -471,8 +499,10 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::run_indexer_select_kernel(
   if (sp_meta != nullptr) {
     params.kv_cache_block_table = sp_meta->seg_block_table;
     params.cu_seq_q_lens = sp_meta->seg_q_cu_lens;
-    params.cu_seq_k_lens = sp_meta->seg_k_cu_lens;
-    params.k_context_lens = sp_meta->seg_k_lens;
+    params.cu_seq_k_lens = attn_metadata.is_chunked_prefill
+                               ? sp_meta->seg_ctx_cu_lens
+                               : sp_meta->seg_suffix_k_cu_lens;
+    params.k_context_lens = sp_meta->seg_ctx_lens;
   } else {
     params.kv_cache_block_table = attn_metadata.block_table;
     params.cu_seq_q_lens = ctx.cu_seq_q_lens;

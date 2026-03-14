@@ -15,15 +15,129 @@ limitations under the License.
 
 #pragma once
 
+#include <optional>
+#include <string>
+
+#include "core/common/global_flags.h"
 #include "deepseek_v2.h"
+#include "layers/common/attention_metadata_builder.h"
+#include "layers/mlu/deepseek_v32_sp_context.h"
 
 namespace xllm {
 
+inline std::optional<std::string> validate_deepseek_v32_sp_flags(
+    const ParallelArgs& parallel_args) {
+  if (!FLAGS_enable_prefill_sp) {
+    return std::nullopt;
+  }
+  if (parallel_args.dp_size() != 1) {
+    return "enable_prefill_sp requires dp_size == 1 for now.";
+  }
+  if (parallel_args.sp_group_ == nullptr ||
+      parallel_args.sp_group_->world_size() <= 1) {
+    return "enable_prefill_sp requires sequence parallel world_size > 1.";
+  }
+
+  return std::nullopt;
+}
+
+class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
+ public:
+  explicit DeepseekV32ModelImpl(const ModelContext& context)
+      : DeepseekV2ModelImpl(context),
+        sequence_parallel_group_(context.get_parallel_args().sp_group_),
+        parallel_world_size_(context.get_parallel_args().world_size()) {
+    const auto sp_config_error =
+        validate_deepseek_v32_sp_flags(context.get_parallel_args());
+    CHECK(!sp_config_error.has_value()) << sp_config_error.value();
+  }
+
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& input_params) {
+    ModelInputParams modified_input_params = input_params;
+    if (!modified_input_params.attn_metadata) {
+      modified_input_params.attn_metadata =
+          std::make_shared<layer::AttentionMetadata>(
+              layer::AttentionMetadataBuilder::build(modified_input_params));
+    }
+    auto& attn_metadata = *modified_input_params.attn_metadata;
+    std::optional<layer::v32_sp::DeepseekV32SPContext> sp_ctx;
+    const bool requested_sequence_parallel =
+        FLAGS_enable_prefill_sp && input_params.batch_forward_type.no_decode();
+    if (requested_sequence_parallel) {
+      if (sequence_parallel_group_ == nullptr) {
+        CHECK_EQ(parallel_world_size_, 1)
+            << "deepseek_v32 sequence parallel requires sp_group_.";
+      } else if (sequence_parallel_group_->world_size() > 1) {
+        sp_ctx = layer::v32_sp::build_deepseek_v32_sp_context(
+            attn_metadata,
+            input_params.batch_forward_type,
+            tokens,
+            sequence_parallel_group_,
+            sequence_parallel_group_->rank(),
+            sequence_parallel_group_->world_size());
+      }
+    }
+    if (!sp_ctx.has_value()) {
+      // Fallback to the normal TP path when SP is disabled or the current
+      // prefill batch cannot be split across all SP ranks.
+      active_sequence_parallel_context_ = nullptr;
+      return DeepseekV2ModelImpl::forward(
+          tokens, positions, kv_caches, modified_input_params);
+    }
+
+    active_sequence_parallel_context_ = &sp_ctx.value();
+    torch::Tensor hidden_states = embed_mod()(tokens);
+    hidden_states =
+        layer::v32_sp::reorder_to_local_shard(hidden_states, sp_ctx.value());
+    torch::Tensor positions_local =
+        layer::v32_sp::reorder_to_local_shard(positions, sp_ctx.value());
+    std::optional<torch::Tensor> residual;
+    for (size_t i = 0; i < layers_ref().size(); ++i) {
+#if defined(USE_CUDA) || defined(USE_MUSA)
+      attn_metadata.plan_info->layer_id = i;
+#endif
+      auto& layer = layers_ref()[i];
+      prepare_decoder_layer_for_forward(i, layer, attn_metadata);
+      hidden_states = layer(hidden_states,
+                            residual,
+                            positions_local,
+                            attn_metadata,
+                            kv_caches[i],
+                            modified_input_params);
+    }
+    hidden_states =
+        layer::v32_sp::gather_and_restore_global(hidden_states, sp_ctx.value());
+    auto [h, res] = norm_mod()(hidden_states, residual);
+    active_sequence_parallel_context_ = nullptr;
+    return ModelOutput(h, res);
+  }
+
+ protected:
+  void prepare_decoder_layer_for_forward(
+      size_t /*layer_id*/,
+      layer::DeepseekV2DecoderLayer& layer,
+      const layer::AttentionMetadata& /*attn_metadata*/) override {
+#if defined(USE_MLU)
+    layer->set_sequence_parallel_context(active_sequence_parallel_context_);
+#endif
+  }
+
+ private:
+  ProcessGroup* sequence_parallel_group_ = nullptr;
+  int32_t parallel_world_size_ = 1;
+  const layer::v32_sp::DeepseekV32SPContext* active_sequence_parallel_context_ =
+      nullptr;
+};
+TORCH_MODULE(DeepseekV32Model);
+
 class DeepseekV32ForCausalLMImpl
-    : public LlmForCausalLMImplBase<DeepseekV2Model> {
+    : public LlmForCausalLMImplBase<DeepseekV32Model> {
  public:
   DeepseekV32ForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {}
+      : LlmForCausalLMImplBase<DeepseekV32Model>(context) {}
 };
 TORCH_MODULE(DeepseekV32ForCausalLM);
 

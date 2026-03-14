@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "scheduler/scheduler_factory.h"
 
+#include "core/common/global_flags.h"
 #include "scheduler/chunked_prefill_scheduler.h"
 #include "scheduler/continuous_scheduler.h"
 #include "scheduler/disagg_pd_scheduler.h"
@@ -45,7 +46,7 @@ std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
   }
 
   if (options.enable_chunked_prefill()) {
-    if (options.num_speculative_tokens() > 0) {
+    if (FLAGS_enable_prefill_sp || options.num_speculative_tokens() > 0) {
       return std::make_unique<PrefillOnlyScheduler>(engine, options);
     } else {
       return std::make_unique<ChunkedPrefillScheduler>(engine, options);

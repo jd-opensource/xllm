@@ -62,6 +62,7 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("enable_mla", &Options::enable_mla_)
       .def_readwrite("enable_chunked_prefill",
                      &Options::enable_chunked_prefill_)
+      .def_readwrite("enable_prefill_sp", &Options::enable_prefill_sp_)
       .def_readwrite("master_node_addr", &Options::master_node_addr_)
       .def_readwrite("nnodes", &Options::nnodes_)
       .def_readwrite("node_rank", &Options::node_rank_)
