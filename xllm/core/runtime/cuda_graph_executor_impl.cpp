@@ -340,11 +340,16 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
         persistent_new_cache_slots(slot_mapping_tokens);
   }
 
-  // Copy block table data
+  // Copy block table data. In rec multi-round, block_tables may already be
+  // expanded to batch_size * beam_width rows while num_sequences still tracks
+  // the logical request count. Use the tensor's real row count here.
+  const int64_t actual_block_table_batch = is_rec_multi_round_mode()
+                                               ? params.block_tables.size(0)
+                                               : actual_batch_size;
   const int64_t actual_block_table_len = params.block_tables.size(1);
   torch::Tensor slice_persistent_block_tables =
       persistent_block_tables_
-          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_block_table_batch)
           .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_block_table_len);
 
   VLOG(kGraphExecutorLogVerboseLevel)

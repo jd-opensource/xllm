@@ -345,21 +345,29 @@ void XAttentionImpl::prefill_forward(const AttentionMetadata& attn_metadata,
                                      torch::Tensor& value,
                                      torch::Tensor& output,
                                      std::optional<at::Tensor>& output_lse) {
-  flashinfer::update_prefill_plan_info(
-      attn_metadata.plan_info,
-      xllm::kernel::cuda::determine_attention_backend(
-          /*pos_encoding_mode=*/0,
-          /*use_fp16_qk_reduction=*/false,
-          /*use_custom_mask=*/false),
-      attn_metadata,
-      query.scalar_type(),
-      key.scalar_type(),
-      output.scalar_type(),
-      head_size_,
-      head_size_,
-      num_heads_,
-      num_kv_heads_,
-      /*enable_cuda_graph=*/false);
+  if (attn_metadata.enable_cuda_graph) {
+    CHECK(attn_metadata.plan_info->plan_info.defined())
+        << "plan_info plan_info should not be null when enable_cuda_graph is "
+           "true";
+    CHECK(!attn_metadata.plan_info->uri.empty())
+        << "plan_info uri should not be empty when enable_cuda_graph is true";
+  } else {
+    flashinfer::update_prefill_plan_info(
+        attn_metadata.plan_info,
+        xllm::kernel::cuda::determine_attention_backend(
+            /*pos_encoding_mode=*/0,
+            /*use_fp16_qk_reduction=*/false,
+            /*use_custom_mask=*/false),
+        attn_metadata,
+        query.scalar_type(),
+        key.scalar_type(),
+        output.scalar_type(),
+        head_size_,
+        head_size_,
+        num_heads_,
+        num_kv_heads_,
+        /*enable_cuda_graph=*/false);
+  }
 
   xllm::kernel::cuda::prefill_reshape_and_cache(
       key, value, attn_metadata.full_k_cache, attn_metadata.full_v_cache);
