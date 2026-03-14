@@ -10,6 +10,7 @@ cc_library (
         core_types.h
         base_format_detector.h
         qwen25_detector.h
+        qwen3_coder_detector.h
         kimik2_detector.h
         deepseekv3_detector.h
         deepseekv32_detector.h
@@ -21,6 +22,7 @@ cc_library (
   SRCS
         base_format_detector.cpp
         qwen25_detector.cpp
+        qwen3_coder_detector.cpp
         kimik2_detector.cpp
         deepseekv3_detector.cpp
         deepseekv32_detector.cpp
@@ -51,9 +53,9 @@ function(add_detector_test TEST_NAME)
 endfunction()
 
 add_detector_test(qwen25_detector_test)
+add_detector_test(qwen3_coder_detector_test)
 add_detector_test(kimik2_detector_test)
 add_detector_test(deepseekv3_detector_test)
 add_detector_test(glm45_detector_test)
 add_detector_test(glm47_detector_test)
 add_detector_test(deepseekv32_detector_test)
-

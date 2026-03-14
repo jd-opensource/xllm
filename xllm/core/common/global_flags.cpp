@@ -512,7 +512,8 @@ DEFINE_string(
 DEFINE_string(tool_call_parser,
               "",
               "Specify the parser for handling tool-call interactions(e.g. "
-              "auto, qwen25, qwen3, kimi_k2, deepseekv3, glm45, glm47, glm5).");
+              "auto, qwen25, qwen3, qwen35, qwen3_coder, kimi_k2, "
+              "deepseekv3, glm45, glm47, glm5).");
 
 // --- qwen3 reranker config ---
 
