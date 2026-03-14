@@ -512,6 +512,7 @@ void DisaggPDScheduler::prefill_send_first_generation() {
     auto request = running_requests_[i];
     // Check if the request is a recently completed prefill request
     if (request->sequences()[0]->num_generated_tokens() == 1) {
+      request->log_statistic(request->elapsed_seconds());
       requests.emplace_back(request);
       if (!request->state().stream) {
         non_stream_requests.emplace_back(request);
@@ -538,6 +539,8 @@ void DisaggPDScheduler::prefill_send_first_generation() {
       proto::DisaggGenerationsRequests gens;
       auto gen = gens.mutable_multi_gens()->Add();
       gen->set_req_id(request->request_id());
+      gen->set_x_request_id(request->x_request_id());
+      gen->set_x_request_time(request->x_request_time());
       if (request->sequences()[0]->first_token().has_value()) {
         auto token = gen->mutable_tokens()->Add();
         token->set_token_id(
