@@ -145,7 +145,9 @@ def set_npu_envs() -> None:
         ATB_PATH = "/usr/local/Ascend/nnal/atb"
 
 
-    ATB_HOME_PATH = ATB_PATH+"/latest/atb/cxx_abi_"+str(get_cxx_abi())
+    cxx_abi = "1" if get_cxx_abi() else "0"
+    ATB_HOME_PATH = os.path.join(ATB_PATH, "latest", "atb", "cxx_abi_" + cxx_abi)
+    os.environ["ATB_HOME_PATH"] = ATB_HOME_PATH
     LD_LIBRARY_PATH = os.getenv("LD_LIBRARY_PATH", "")
     LD_LIBRARY_PATH = ATB_HOME_PATH+"/lib" + ":" + \
         ATB_HOME_PATH+"/examples" + ":" + \
