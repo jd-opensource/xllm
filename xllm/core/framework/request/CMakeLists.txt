@@ -26,6 +26,7 @@ cc_library(
     dit_request_output.h
     dit_request_params.h
     request_params.h
+    sample_slot.h
     sequence.h
     sequence_logprob_state.h
     sequence_kv_state.h
@@ -53,6 +54,7 @@ cc_library(
     request_output.cpp
     dit_request_output.cpp
     request_params.cpp
+    sample_slot.cpp
     dit_request_params.cpp
     sequence.cpp
     sequence_logprob_state.cpp
@@ -75,3 +77,13 @@ cc_library(
     ${OpenCV_LIBS}
 )
 
+cc_test(
+  NAME
+    sample_slot_test
+  SRCS
+    sample_slot_test.cpp
+  DEPS
+    :request
+    GTest::gtest
+    GTest::gtest_main
+)

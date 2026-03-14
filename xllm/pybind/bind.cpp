@@ -27,6 +27,7 @@ limitations under the License.
 #include "core/framework/request/mm_data.h"
 #include "core/framework/request/request_output.h"
 #include "core/framework/request/request_params.h"
+#include "core/framework/request/sample_slot.h"
 
 namespace xllm {
 namespace py = pybind11;
@@ -128,6 +129,21 @@ PYBIND11_MODULE(xllm_export, m) {
       .def("options",
            &LLMMaster::options,
            py::call_guard<py::gil_scoped_release>())
+      .def(
+          "build_sample_slots",
+          [](const LLMMaster& self,
+             const std::string& request_id,
+             const std::string& prompt,
+             const std::string& literal) {
+            std::vector<SampleSlot> sample_slots;
+            const bool ok = xllm::build_sample_slots(
+                request_id, prompt, literal, self.tokenizer(), &sample_slots);
+            return std::make_pair(ok, sample_slots);
+          },
+          py::arg("request_id"),
+          py::arg("prompt"),
+          py::arg("literal"),
+          py::call_guard<py::gil_scoped_release>())
       .def("get_rate_limiter",
            &LLMMaster::get_rate_limiter,
            py::call_guard<py::gil_scoped_release>())
@@ -135,7 +151,14 @@ PYBIND11_MODULE(xllm_export, m) {
         return "LLMMaster({})"_s.format(self.options());
       });
 
-  // 3. export RequestParams
+  // 3. export SampleSlot
+  py::class_<SampleSlot>(m, "SampleSlot")
+      .def(py::init())
+      .def_readwrite("request_id", &SampleSlot::request_id)
+      .def_readwrite("sample_id", &SampleSlot::sample_id)
+      .def_readwrite("token_position", &SampleSlot::token_position);
+
+  // 4. export RequestParams
   py::class_<RequestParams>(m, "RequestParams")
       .def(py::init())
       .def_readwrite("request_id", &RequestParams::request_id)
@@ -158,9 +181,12 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("ignore_eos", &RequestParams::ignore_eos)
       .def_readwrite("is_embeddings", &RequestParams::is_embeddings)
       .def_readwrite("stop", &RequestParams::stop)
-      .def_readwrite("stop_token_ids", &RequestParams::stop_token_ids);
+      .def_readwrite("stop_token_ids", &RequestParams::stop_token_ids)
+      .def_readwrite("add_special_tokens", &RequestParams::add_special_tokens)
+      .def_readwrite("is_sample_request", &RequestParams::is_sample_request)
+      .def_readwrite("sample_slots", &RequestParams::sample_slots);
 
-  // 4. export RequestOutput
+  // 5. export RequestOutput
   py::class_<RequestOutput>(m, "RequestOutput")
       .def(py::init())
       .def_readwrite("request_id", &RequestOutput::request_id)
@@ -172,7 +198,7 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("finished", &RequestOutput::finished)
       .def_readwrite("cancelled", &RequestOutput::cancelled);
 
-  // 5. export StatusCode
+  // 6. export StatusCode
   py::enum_<StatusCode>(m, "StatusCode")
       .value("OK", StatusCode::OK)
       .value("CANCELLED", StatusCode::CANCELLED)
@@ -182,7 +208,7 @@ PYBIND11_MODULE(xllm_export, m) {
       .value("RESOURCE_EXHAUSTED", StatusCode::RESOURCE_EXHAUSTED)
       .export_values();
 
-  // 6. export Status
+  // 7. export Status
   py::class_<Status>(m, "Status")
       .def(py::init<StatusCode, const std::string&>(),
            py::arg("code"),
@@ -198,7 +224,7 @@ PYBIND11_MODULE(xllm_export, m) {
                                                         self.message());
       });
 
-  // 7. export SequenceOutput
+  // 8. export SequenceOutput
   py::class_<SequenceOutput>(m, "SequenceOutput")
       .def(py::init())
       .def_readwrite("index", &SequenceOutput::index)
@@ -212,7 +238,7 @@ PYBIND11_MODULE(xllm_export, m) {
         return "SequenceOutput({}: {!r})"_s.format(self.index, self.text);
       });
 
-  // 8. export MMType
+  // 9. export MMType
   py::enum_<MMType::Value>(m, "MMType")
       .value("NONE", MMType::Value::NONE)
       .value("IMAGE", MMType::Value::IMAGE)
@@ -220,7 +246,7 @@ PYBIND11_MODULE(xllm_export, m) {
       .value("AUDIO", MMType::Value::AUDIO)
       .export_values();
 
-  // 9. export MMData
+  // 10. export MMData
   py::class_<MMData>(m, "MMData")
       .def(py::init<int, const MMDict&>(), py::arg("ty"), py::arg("data"))
       .def("get",
@@ -245,7 +271,7 @@ PYBIND11_MODULE(xllm_export, m) {
         return ss.str();
       });
 
-  // 10. export VLMMaster
+  // 11. export VLMMaster
   py::class_<VLMMaster>(m, "VLMMaster")
       .def(py::init<const Options&>(),
            py::arg("options"),

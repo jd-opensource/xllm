@@ -53,6 +53,11 @@ google::protobuf::Arena* GetArenaWithCheck(
     return message->GetArena();
   }
 }
+
+std::string build_sample_backend_error_message() {
+  return "Current backend '" + FLAGS_backend +
+         "' does not support /v1/sample; only llm is supported";
+}
 }  // namespace
 
 APIService::APIService(Master* master,
@@ -70,6 +75,9 @@ APIService::APIService(Master* master,
     completion_service_impl_ =
         ServiceImplFactory<CompletionServiceImpl>::create_service_impl(
             llm_master, model_names);
+    sample_service_impl_ =
+        ServiceImplFactory<SampleServiceImpl>::create_service_impl(llm_master,
+                                                                   model_names);
     chat_service_impl_ =
         ServiceImplFactory<ChatServiceImpl>::create_service_impl(llm_master,
                                                                  model_names);
@@ -199,6 +207,75 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
   } else if (FLAGS_backend == "rec") {
     rec_completion_service_impl_->process_async(call);
   }
+}
+
+void APIService::Sample(::google::protobuf::RpcController* controller,
+                        const proto::SampleRequest* request,
+                        proto::SampleResponse* response,
+                        ::google::protobuf::Closure* done) {
+  xllm::ClosureGuard done_guard(
+      done,
+      std::bind(request_in_metric, nullptr),
+      std::bind(request_out_metric, (void*)controller));
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null.";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  if (FLAGS_backend != "llm") {
+    ctrl->SetFailed(build_sample_backend_error_message());
+    return;
+  }
+  CHECK(sample_service_impl_) << " sample service is invalid.";
+
+  Status status;
+  if (!sample_service_impl_->process_request(*request, response, &status)) {
+    ctrl->SetFailed(status.message());
+    LOG(ERROR) << "sample request failed: " << status.message();
+  }
+}
+
+void APIService::SampleHttp(::google::protobuf::RpcController* controller,
+                            const proto::HttpRequest* request,
+                            proto::HttpResponse* response,
+                            ::google::protobuf::Closure* done) {
+  xllm::ClosureGuard done_guard(
+      done,
+      std::bind(request_in_metric, nullptr),
+      std::bind(request_out_metric, (void*)controller));
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  if (FLAGS_backend != "llm") {
+    ctrl->SetFailed(build_sample_backend_error_message());
+    return;
+  }
+  CHECK(sample_service_impl_) << " sample service is invalid.";
+
+  auto arena = GetArenaWithCheck<SampleCall>(response);
+  auto req_pb =
+      google::protobuf::Arena::CreateMessage<proto::SampleRequest>(arena);
+  auto resp_pb =
+      google::protobuf::Arena::CreateMessage<proto::SampleResponse>(arena);
+
+  std::string error;
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
+  if (!st) {
+    ctrl->SetFailed(error);
+    LOG(ERROR) << "parse json to proto failed: " << error;
+    return;
+  }
+
+  std::shared_ptr<Call> call = std::make_shared<SampleCall>(
+      ctrl, done_guard.release(), req_pb, resp_pb, arena != nullptr);
+  sample_service_impl_->process_async(call);
 }
 
 namespace {

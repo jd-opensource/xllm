@@ -8,6 +8,7 @@ proto_library(
     common.proto
     rec.proto
     completion.proto
+    sample.proto
     chat.proto
     multimodal.proto
     embedding.proto

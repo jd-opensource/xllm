@@ -28,6 +28,7 @@ limitations under the License.
 #include "mm_data.h"
 #include "rec_type.h"
 #include "request_output.h"
+#include "sample_slot.h"
 #include "stopping_checker.h"
 
 namespace xllm {
@@ -172,6 +173,8 @@ struct RequestState final {
   bool handle_last_token_done = false;
 
   std::optional<Call*> call_;
+
+  std::vector<SampleSlot> sample_slots;
 };
 
 }  // namespace xllm

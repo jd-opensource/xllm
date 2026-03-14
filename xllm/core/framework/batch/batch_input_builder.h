@@ -125,8 +125,6 @@ class BatchInputBuilder {
                                     uint32_t seq_len,
                                     BuilderState* state_ptr = nullptr);
   void handle_sampling_parameters(Sequence* sequence,
-                                  uint32_t token_position,
-                                  uint32_t seq_len,
                                   BuilderState* state_ptr = nullptr);
   void setup_kv_cache_info(
       Sequence* sequence,
