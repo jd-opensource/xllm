@@ -40,6 +40,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "framework/xtensor/xtensor.h"
 #include "loader/base_loader.h"
+#include "loader/base_manual_loader.h"
 #include "platform/device.h"
 #include "pytorch/adapter/utils/utils.h"
 #include "pytorch/adapter/workspace/workspace.h"
@@ -182,6 +183,23 @@ class BaseLayer : public torch::nn::Module {
       init_layer();
     }
   };
+
+  virtual void refresh_rolling_weights() {
+    if (loader_) {
+      loader_->refresh_rolling_weights();
+      auto& at_weight_tensors = loader_->get_at_weight_tensors();
+      for (int i = 0; i < atb_weight_tensors_.size(); i++) {
+        atb_weight_tensors_[i] =
+            atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
+      }
+    }
+  };
+
+  // Returns the loader cast to BaseManualLoader*, or nullptr if the loader is
+  // not a BaseManualLoader (e.g., when enable_manual_loader=false).
+  virtual BaseManualLoader* get_manual_loader() {
+    return dynamic_cast<BaseManualLoader*>(loader_.get());
+  }
 
   virtual int64_t init_layer() { return 0; };
 

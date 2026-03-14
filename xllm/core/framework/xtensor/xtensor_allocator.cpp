@@ -461,7 +461,7 @@ bool XTensorAllocator::broadcast_free_weight_pages(
 
   if (model_world_size <= 1) {
     // Single process: free locally
-    free_weight_from_global_xtensor(model_id);
+    free_weight(model_id);
     return true;
   }
 
@@ -784,8 +784,7 @@ void XTensorAllocator::init_device_() {
             << " bytes";
 }
 
-size_t XTensorAllocator::free_weight_from_global_xtensor(
-    const std::string& model_id) {
+size_t XTensorAllocator::free_weight(const std::string& model_id) {
   std::lock_guard<std::mutex> lock(mtx_);
 
   auto* tensors = get_model_tensors(model_id);

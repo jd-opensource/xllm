@@ -52,11 +52,11 @@ int64_t get_kv_cache_dtype_size_in_bytes(const std::string& kv_cache_dtype,
     return model_dtype_size;
   }
   if (kv_cache_dtype == "int8") {
-    return static_cast<int64_t>(sizeof(int8_t));
+    return sizeof(int8_t);
   }
   // for future: fp8_e4m3, fp8_e5m2, etc. -> 1 byte
   if (kv_cache_dtype == "fp8_e4m3" || kv_cache_dtype == "fp8_e5m2") {
-    return static_cast<int64_t>(sizeof(int8_t));
+    return sizeof(int8_t);
   }
   return model_dtype_size;
 }
@@ -66,6 +66,8 @@ namespace xllm {
 
 // Defines a npu memory alignment constant with 16-byte alignment
 constexpr int32_t NZ_ALIGNMENT = 16;
+// Extra weight pages reserved for mapping/alignment overhead.
+constexpr size_t kXTensorWeightPageSafetyMargin = 20;
 
 LLMEngine::LLMEngine(const runtime::Options& options,
                      std::shared_ptr<DistManager> dist_manager)
@@ -185,8 +187,8 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   tokenizer_args_ = model_loader->tokenizer_args();
 
   // compute the number of local kv heads and head dim
-  const int world_size = dp_size_ > 1 ? (dp_local_tp_size_)
-                                      : static_cast<int>(worker_clients_num_);
+  const uint32_t world_size =
+      dp_size_ > 1 ? dp_local_tp_size_ : worker_clients_num_;
   const int64_t n_heads = args_.n_heads();
   const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
   n_local_kv_heads_ = std::max<int64_t>(1, n_kv_heads / world_size);
@@ -201,8 +203,7 @@ bool LLMEngine::init_model(MasterStatus master_status) {
             << ", dtype: " << dtype_
             << ", kv_cache_dtype: " << options_.kv_cache_dtype();
 
-  const int64_t tokenizer_vocab_size =
-      static_cast<int64_t>(tokenizer_->vocab_size());
+  const int64_t tokenizer_vocab_size = tokenizer_->vocab_size();
   int64_t model_vocab_size = args_.vocab_size();
   if (tokenizer_vocab_size != model_vocab_size) {
     // use tokenizer vocab size if model vocab size is not set
@@ -234,7 +235,7 @@ bool LLMEngine::init_model(MasterStatus master_status) {
           << "PhyPagePool must be initialized before PageAllocator";
       size_t num_phy_pages = phy_pool.num_total();
       // max_world_size = dp_size * tp_size = worker_clients_num_
-      int32_t max_world_size = static_cast<int32_t>(worker_clients_num_);
+      int32_t max_world_size = worker_clients_num_;
       page_allocator.init(num_phy_pages,
                           dp_size_,
                           max_world_size,
@@ -255,12 +256,18 @@ bool LLMEngine::init_model(MasterStatus master_status) {
     xtensor_allocator.set_model_parallel_strategy(
         model_id, dp_size_, dp_local_tp_size_);
 
-    // Get total weight size and compute aligned num_pages
-    int64_t total_weight_size = model_loader->get_total_weight_size();
-    int64_t weight_size_per_tp = total_weight_size / dp_local_tp_size_;
+    // Get weight size for XTensor page allocation.
+    const int64_t total_weight_size =
+        get_effective_xtensor_weight_size(*model_loader);
+    if (total_weight_size < 0) {
+      return false;
+    }
+    int64_t weight_size_per_tp =
+        (total_weight_size + dp_local_tp_size_ - 1) / dp_local_tp_size_;
 
     size_t page_size = FLAGS_phy_page_granularity_size;
-    size_t num_pages = (weight_size_per_tp + page_size - 1) / page_size + 10;
+    size_t num_pages = (weight_size_per_tp + page_size - 1) / page_size +
+                       kXTensorWeightPageSafetyMargin;
 
     LOG(INFO) << "XTensor weight allocation: total_weight_size="
               << total_weight_size << ", tp_size=" << dp_local_tp_size_
@@ -303,6 +310,57 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   }
 
   return true;
+}
+
+int64_t LLMEngine::get_effective_xtensor_weight_size(
+    const ModelLoader& model_loader) const {
+  constexpr int64_t kInvalidWeightSize = -1;
+  const int64_t all_size = model_loader.get_total_weight_size();
+  if (all_size <= 0) {
+    LOG(ERROR)
+        << "Invalid total model weight size: " << all_size
+        << ". Ensure model .index.json exists and has metadata.total_size";
+    return kInvalidWeightSize;
+  }
+
+  if (!FLAGS_enable_rolling_load) {
+    return all_size;
+  }
+
+  const int64_t non_decoder_size = model_loader.get_non_decoder_weight_size();
+  if (non_decoder_size <= 0) {
+    LOG(ERROR) << "Invalid non-decoder weight size: " << non_decoder_size;
+    return kInvalidWeightSize;
+  }
+  if (non_decoder_size > all_size) {
+    LOG(ERROR) << "non_decoder_weight_size (" << non_decoder_size
+               << ") exceeds total_weight_size (" << all_size << ")";
+    return kInvalidWeightSize;
+  }
+  if (args_.n_layers() <= 0) {
+    LOG(ERROR) << "Invalid layer count: " << args_.n_layers();
+    return kInvalidWeightSize;
+  }
+
+  const int64_t all_decoder_size = all_size - non_decoder_size;
+  int64_t max_layer_size = model_loader.get_max_decoder_layer_weight_size();
+  if (max_layer_size <= 0) {
+    LOG(ERROR) << "Failed to get max decoder layer size for rolling load.";
+    return kInvalidWeightSize;
+  }
+  const int64_t rolling_buffer_size =
+      FLAGS_rolling_load_num_cached_layers * max_layer_size;
+  const int64_t total_weight_size = non_decoder_size + rolling_buffer_size;
+
+  LOG(INFO) << "XTensor rolling_load weight budget: total=" << all_size
+            << ", non_decoder=" << non_decoder_size
+            << ", all_decoder=" << all_decoder_size
+            << ", max_layer=" << max_layer_size
+            << ", rolling_buffer=" << rolling_buffer_size << " ("
+            << FLAGS_rolling_load_num_cached_layers << " slots x "
+            << max_layer_size << " bytes/max-layer)"
+            << ", effective=" << total_weight_size;
+  return total_weight_size;
 }
 
 Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {

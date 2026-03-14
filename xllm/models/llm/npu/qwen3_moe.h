@@ -112,6 +112,12 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
     decoder_layer_->reload_weights_from_device();
   }
 
+  layer::BaseManualLoader* get_manual_loader() {
+    return decoder_layer_->get_manual_loader();
+  }
+
+  void refresh_rolling_weights() { decoder_layer_->refresh_rolling_weights(); }
+
  private:
   layer::NpuQwen3MoeDecoderLayer decoder_layer_{nullptr};
 };
@@ -203,7 +209,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         // auto sections = mrope_section_;
         auto freqs_t = x[0].clone();
         // mrop_length == freqs_length == head_dim / 2
-        int64_t mrop_length = static_cast<int64_t>(freqs_t.size(-1) / 2);
+        int64_t mrop_length = freqs_t.size(-1) / 2;
 
         for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
           int64_t offset = dim_idx;  // H -> offset=1, W -> offset=2
@@ -272,6 +278,12 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         const_cast<ModelInputParams&>(input_params);
     input_params_new.expert_array = expert_array;
 
+    int32_t last_executed_layer = -1;
+    SCOPE_GUARD([this, &last_executed_layer] {
+      if (rolling_mgr_ != nullptr) {
+        rolling_mgr_->finalize(last_executed_layer);
+      }
+    });
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
@@ -284,6 +296,8 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       }
 
       auto& layer = layers_[i];
+      const int32_t layer_index = i;
+      if (rolling_mgr_) rolling_mgr_->wait_layer_h2d_ready(layer_index);
       layer(h,
             cos_pos,
             sin_pos,
@@ -292,6 +306,8 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
             input_params,
             event,
             event_flag);
+      last_executed_layer = layer_index;
+      if (rolling_mgr_) rolling_mgr_->schedule_next_layer_h2d(layer_index);
       if (deep_stack_size && i < deep_stack_size) {
         h = deepstack_process(h, input_params.visual_pos_masks, deep_stacks[i]);
       }
@@ -353,6 +369,11 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     norm_->reload_weights();
   }
 
+  void reload_non_decoder_weights() {
+    npu_embed_tokens_->reload_weights();
+    norm_->reload_weights();
+  }
+
   void reload_weights_from_device() {
     npu_embed_tokens_->reload_weights_from_device();
     for (size_t i = 0; i < layers_.size(); i++) {
@@ -360,6 +381,23 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     }
     norm_->reload_weights_from_device();
   }
+
+  void refresh_rolling_weights() {
+    for (auto& layer : layers_) {
+      layer->refresh_rolling_weights();
+    }
+  }
+
+  std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
+    std::vector<layer::BaseManualLoader*> loaders;
+    loaders.reserve(layers_.size());
+    for (auto& layer : layers_) {
+      loaders.push_back(layer->get_manual_loader());
+    }
+    return loaders;
+  }
+
+  void set_rolling_load_manager(RollingLoadManager* mgr) { rolling_mgr_ = mgr; }
 
   layer::NpuWordEmbedding get_npu_word_embedding() { return npu_embed_tokens_; }
 
@@ -389,6 +427,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   torch::Tensor cos_sin_;
   layer::NpuPosEmbedding atb_pos_emb_{nullptr};
   std::vector<int64_t> mrope_section_;
+  RollingLoadManager* rolling_mgr_ = nullptr;
 };
 TORCH_MODULE(Qwen3MoeModel);
 

@@ -50,6 +50,7 @@ limitations under the License.
 #include "framework/xtensor/xtensor_allocator.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache/mooncake_weight_transfer.h"
+#include "layers/npu/loader/rolling_weight_buffer.h"
 #endif
 #include "util/net.h"
 #include "util/tensor_helper.h"
@@ -85,7 +86,7 @@ namespace {
 class ScopedAtenLoadThreads {
  public:
   explicit ScopedAtenLoadThreads(int32_t target_threads)
-      : prev_threads_(static_cast<int32_t>(at::get_num_threads())) {
+      : prev_threads_(at::get_num_threads()) {
     if (target_threads > 0 && prev_threads_ != target_threads) {
       torch::set_num_threads(target_threads);
       active_ = true;
@@ -145,6 +146,9 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
     if (!weight_transfer_->register_global_xtensor()) {
       LOG(ERROR) << "Failed to register GlobalXTensor";
     }
+  }
+  if (FLAGS_enable_rolling_load) {
+    load_stream_ = device_.get_stream_from_pool();
   }
 #endif
 }
@@ -686,88 +690,107 @@ bool WorkerImpl::sleep(MasterStatus master_status) {
 bool WorkerImpl::wakeup(const WakeupOptions& options) {
   if (!options.remote_addrs.empty()) {
 #if defined(USE_NPU)
-    // Prefer segment-based transfer if available, fallback to legacy offsets
-    bool use_segments = !options.src_weight_segments.empty();
-
-    if (use_segments) {
-      if (options.src_weight_segments.size() != options.remote_addrs.size()) {
-        LOG(ERROR) << "remote_addrs and src_weight_segments size mismatch: "
-                   << options.remote_addrs.size() << " vs "
-                   << options.src_weight_segments.size();
-        return false;
-      }
-    } else {
-      // Legacy single-offset mode (backward compatibility)
-      if (options.src_weight_segments.empty() &&
-          options.remote_addrs.size() > 0) {
-        LOG(ERROR) << "No weight segments provided for remote wakeup";
-        return false;
-      }
-    }
-
-    if (!FLAGS_enable_xtensor) {
-      LOG(ERROR) << "Remote weight wakeup requires FLAGS_enable_xtensor";
-      return false;
-    }
-
-    auto& allocator = XTensorAllocator::get_instance();
-    auto* tensors = allocator.get_model_tensors(options_.model_id());
-    if (!tensors || tensors->weight_base_ptr == nullptr ||
-        tensors->weight_num_pages == 0) {
-      LOG(ERROR) << "Weight region not initialized for model "
-                 << options_.model_id();
-      return false;
-    }
-
-    auto& global_xtensor = GlobalXTensor::get_instance();
-    if (!global_xtensor.is_initialized()) {
-      LOG(ERROR) << "GlobalXTensor not initialized";
-      return false;
-    }
-
-    if (!weight_transfer_) {
-      LOG(ERROR) << "MooncakeWeightTransfer not initialized";
-      return false;
-    }
-
-    // Destination is always contiguous (local allocation)
-    uint64_t dst_base_offset =
-        reinterpret_cast<uintptr_t>(tensors->weight_base_ptr) -
-        reinterpret_cast<uintptr_t>(global_xtensor.base_vaddr());
-
-    for (size_t i = 0; i < options.remote_addrs.size(); ++i) {
-      const auto& segments = options.src_weight_segments[i];
-      uint64_t dst_offset = dst_base_offset;
-
-      // Pull each segment from source, writing sequentially to destination
-      for (const auto& seg : segments) {
-        if (!weight_transfer_->pull_weights(
-                options.remote_addrs[i], seg.offset, dst_offset, seg.size)) {
-          LOG(ERROR) << "Failed to pull remote weight segment from "
-                     << options.remote_addrs[i] << ", src_offset=" << seg.offset
-                     << ", size=" << seg.size;
-          return false;
-        }
-        dst_offset += seg.size;
-      }
-    }
-
-    model_->reload_model_weights_from_device();
-    return true;
+    return wakeup_from_remote_weights(options);
 #endif
-    LOG(ERROR) << "Remote weight wakeup requires USE_NPU build";
+    LOG(ERROR) << "Remote weight wakeup only supports npu device.";
     return false;
   }
 
+  return wakeup_local(options);
+}
+
+bool WorkerImpl::wakeup_local(const WakeupOptions& options) {
   if (options.master_status == MasterStatus::LIGHT_SLEEP) {
+#if defined(USE_NPU)
+    if (FLAGS_enable_rolling_load && !is_spec_draft_) {
+      // Reuse rolling runtime state and refresh rolling initialization on
+      // wakeup without re-reading checkpoint in LIGHT_SLEEP.
+      if (!init_rolling_runtime_state()) {
+        LOG(ERROR) << "Failed to initialize rolling runtime state on wakeup";
+        return false;
+      }
+    } else {
+      model_->reload_model_weights();
+    }
+#else
     model_->reload_model_weights();
+#endif
   } else if (options.master_status == MasterStatus::DEEP_SLEEP) {
     auto model_loader = ModelLoader::create(model_weights_path_);
-    model_->load_model(std::move(model_loader));
+    this->load_model(std::move(model_loader));
   }
-
   return true;
 }
+
+#if defined(USE_NPU)
+bool WorkerImpl::wakeup_from_remote_weights(const WakeupOptions& options) {
+  // Prefer segment-based transfer if available, fallback to legacy offsets.
+  if (FLAGS_enable_rolling_load) {
+    LOG(ERROR)
+        << "Remote weight wakeup does not support FLAGS_enable_rolling_load";
+    return false;
+  }
+
+  bool use_segments = !options.src_weight_segments.empty();
+  if (use_segments) {
+    if (options.src_weight_segments.size() != options.remote_addrs.size()) {
+      LOG(ERROR) << "remote_addrs and src_weight_segments size mismatch: "
+                 << options.remote_addrs.size() << " vs "
+                 << options.src_weight_segments.size();
+      return false;
+    }
+  } else {
+    // Legacy single-offset mode (backward compatibility).
+    if (options.src_weight_segments.empty() &&
+        options.remote_addrs.size() > 0) {
+      LOG(ERROR) << "No weight segments provided for remote wakeup";
+      return false;
+    }
+  }
+
+  auto& allocator = XTensorAllocator::get_instance();
+  auto* tensors = allocator.get_model_tensors(options_.model_id());
+  if (!tensors || tensors->weight_base_ptr == nullptr ||
+      tensors->weight_num_pages == 0) {
+    LOG(ERROR) << "Weight region not initialized for model "
+               << options_.model_id();
+    return false;
+  }
+
+  auto& global_xtensor = GlobalXTensor::get_instance();
+  if (!global_xtensor.is_initialized()) {
+    LOG(ERROR) << "GlobalXTensor not initialized";
+    return false;
+  }
+  if (!weight_transfer_) {
+    LOG(ERROR) << "MooncakeWeightTransfer not initialized";
+    return false;
+  }
+
+  // Destination is always contiguous (local allocation).
+  uint64_t dst_base_offset =
+      reinterpret_cast<uintptr_t>(tensors->weight_base_ptr) -
+      reinterpret_cast<uintptr_t>(global_xtensor.base_vaddr());
+  for (size_t i = 0; i < options.remote_addrs.size(); ++i) {
+    const auto& segments = options.src_weight_segments[i];
+    uint64_t dst_offset = dst_base_offset;
+    // Pull each segment from source, writing sequentially to destination.
+    for (const auto& seg : segments) {
+      if (!weight_transfer_->pull_weights(
+              options.remote_addrs[i], seg.offset, dst_offset, seg.size)) {
+        LOG(ERROR) << "Failed to pull remote weight segment from "
+                   << options.remote_addrs[i] << ", src_offset=" << seg.offset
+                   << ", size=" << seg.size;
+        return false;
+      }
+      dst_offset += seg.size;
+    }
+  }
+
+  model_->reload_model_weights_from_device();
+  return true;
+}
+#endif
 
 // initialize model, cache manager. async call
 bool WorkerImpl::init_model(const std::string& model_weights_path,
@@ -785,8 +808,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   auto quant_args = model_loader->quant_args();
   torch::ScalarType dtype = util::parse_dtype(args.dtype(), device_);
 
-  const int64_t tokenizer_vocab_size =
-      static_cast<int64_t>(tokenizer->vocab_size());
+  const int64_t tokenizer_vocab_size = tokenizer->vocab_size();
   int64_t model_vocab_size = args.vocab_size();
   // use tokenizer vocab size if model vocab size is not set
   if (model_vocab_size <= 0) {
@@ -839,7 +861,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
 
   std::unique_ptr<ScopedAtenLoadThreads> scoped_load_threads;
   if (tp_world_size > 1) {
-    const int32_t prev_threads = static_cast<int32_t>(torch::get_num_threads());
+    const int32_t prev_threads = torch::get_num_threads();
     LOG(INFO) << "Temporarily setting ATen threads to 1 during weight loading"
               << ", tp_world_size=" << tp_world_size
               << ", prev_threads=" << prev_threads;
@@ -875,8 +897,42 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
 
 void WorkerImpl::load_model(std::unique_ptr<ModelLoader> loader) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
+#if defined(USE_NPU)
+  // Rolling mode uses host-pinned weights as the single source of truth:
+  // lazy_load_model -> init_rolling_runtime_state() to finish rolling init.
+  if (FLAGS_enable_rolling_load && !is_spec_draft_) {
+    model_->lazy_load_model(std::move(loader));
+    CHECK(init_rolling_runtime_state())
+        << "Failed to initialize rolling runtime state during load_model";
+    return;
+  }
+#endif
+
   model_->load_model(std::move(loader));
 }
+
+#if defined(USE_NPU)
+bool WorkerImpl::init_rolling_runtime_state() {
+  // Draft model (speculative decoding) has only 1 decoder layer, skip rolling
+  // load.
+  if (!FLAGS_enable_rolling_load || is_spec_draft_) {
+    return true;
+  }
+
+  CHECK(model_ != nullptr) << "Model is not initialized for rolling load";
+  CHECK(load_stream_ != nullptr) << "load_stream_ is null for rolling load";
+
+  // Rolling runtime ownership is moved into model.
+  // Worker provides runtime dependencies and delegates initialization/refresh.
+  const int32_t n_slots = FLAGS_rolling_load_num_cached_layers;
+  const int32_t n_rolling_slots = FLAGS_rolling_load_num_rolling_slots;
+  return model_->init_or_refresh_rolling_runtime(load_stream_.get(),
+                                                 compute_stream_.get(),
+                                                 n_slots,
+                                                 n_rolling_slots,
+                                                 options_.model_id());
+}
+#endif
 
 void WorkerImpl::lazy_load_model(std::unique_ptr<ModelLoader> loader) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
