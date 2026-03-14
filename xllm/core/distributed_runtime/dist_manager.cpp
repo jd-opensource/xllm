@@ -23,6 +23,9 @@ limitations under the License.
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/parallel_state/process_group.h"
+#if defined(USE_CUDA)
+#include "platform/numa_utils.h"
+#endif
 #include "remote_worker.h"
 #include "runtime/forward_shared_memory_manager.h"
 #include "runtime/llm_worker_impl.h"
@@ -85,12 +88,70 @@ std::unique_ptr<CommChannel> create_channel(const std::string& worker_addrs,
   return channel;
 }
 
+#if defined(USE_CUDA)
+void setup_numa_affinity_and_isolation(
+    const runtime::Options& options,
+    std::vector<int32_t>& device_numa_nodes,
+    std::vector<bool>& force_spawn_for_numa_isolation) {
+  const auto& devices = options.devices();
+
+  device_numa_nodes.assign(devices.size(), -1);
+  force_spawn_for_numa_isolation.assign(devices.size(), false);
+
+  std::set<int32_t> unique_numa_nodes;
+  for (size_t i = 0; i < devices.size(); ++i) {
+    device_numa_nodes[i] = numa::get_device_numa_node(devices[i].index());
+    if (device_numa_nodes[i] >= 0) {
+      unique_numa_nodes.insert(device_numa_nodes[i]);
+    }
+
+    LOG(INFO) << "NUMA mapping: local rank " << i << ", device "
+              << devices[i].index() << " -> NUMA node " << device_numa_nodes[i];
+  }
+
+  int32_t engine_numa_node = -1;
+  for (auto numa_node : device_numa_nodes) {
+    if (numa_node >= 0) {
+      engine_numa_node = numa_node;
+      break;
+    }
+  }
+
+  if (engine_numa_node >= 0) {
+    if (numa::bind_process_to_numa_node(engine_numa_node) != 0) {
+      LOG(WARNING) << "Failed to pin engine process to NUMA node "
+                   << engine_numa_node
+                   << ", fallback to per-worker affinity only";
+    }
+
+    if (unique_numa_nodes.size() > 1) {
+      for (size_t i = 0; i < devices.size(); ++i) {
+        force_spawn_for_numa_isolation[i] =
+            (device_numa_nodes[i] >= 0 &&
+             device_numa_nodes[i] != engine_numa_node);
+      }
+      LOG(INFO) << "Detected multi-NUMA local devices. Workers outside NUMA "
+                << engine_numa_node
+                << " will be spawned as isolated processes to avoid engine "
+                   "process cross-NUMA spanning";
+    }
+  }
+}
+#endif
+
 }  // namespace
 
 void DistManager::setup_multi_node_workers(
     const runtime::Options& options,
     const std::string& master_node_addr) {
   const auto& devices = options.devices();
+
+#if defined(USE_CUDA)
+  std::vector<int32_t> device_numa_nodes;
+  std::vector<bool> force_spawn_for_numa_isolation;
+  setup_numa_affinity_and_isolation(
+      options, device_numa_nodes, force_spawn_for_numa_isolation);
+#endif
 
   // Process/Thread Worker Mode, we use it in multi-nodes serving.
 
@@ -167,7 +228,17 @@ void DistManager::setup_multi_node_workers(
 
     // we use spawn process worker to launch a xllm instance
     // when start a offline inference task with multi-gpu/npu/mpu/...
+#if defined(USE_CUDA)
+    bool use_spawn_worker = (options.enable_offline_inference() && i > 0) ||
+                            force_spawn_for_numa_isolation[i];
+    if (force_spawn_for_numa_isolation[i]) {
+      LOG(INFO) << "Force spawn worker for local rank " << i << " (device "
+                << devices[i].index() << ", NUMA " << device_numa_nodes[i]
+                << ") to keep each process within a single NUMA region";
+    }
+#else
     bool use_spawn_worker = options.enable_offline_inference() && i > 0;
+#endif
     ParallelArgs parallel_args(rank, world_size, dp_size, nullptr, ep_size);
 
     servers_.emplace_back(std::make_unique<WorkerServer>(i,
