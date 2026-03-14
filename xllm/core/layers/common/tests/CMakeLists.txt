@@ -8,6 +8,7 @@ cc_test(
     dense_mlp_tests.cpp
     tests_utils.cpp
     deepseek_v32_sp_utils_tests.cpp
+    dp_utils_tests.cpp
     indexer_tests.cpp
     mla_tests.cpp
     deepseek_v2_decoder_layer_tests.cpp

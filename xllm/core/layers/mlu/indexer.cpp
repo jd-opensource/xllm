@@ -219,7 +219,8 @@ IndexerRuntimeContext IndexerImpl::prepare_runtime_context(
 
       // Calculate sequence lengths by diff of offsets
       auto seq_lens = torch::diff(ctx.cu_seq_k_lens);
-      int64_t max_context_len = seq_lens.max().item<int64_t>();
+      int64_t max_context_len = attn_metadata.max_seq_len;
+      ;
 
       ctx.k_context_lens = seq_lens;
 

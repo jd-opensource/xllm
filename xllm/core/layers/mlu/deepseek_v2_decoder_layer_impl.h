@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <optional>
+
 #include "attention.h"
 #include "deepseek_v2_attention.h"
 #include "framework/kv_cache/kv_cache.h"
@@ -28,12 +30,15 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/common/dense_mlp.h"
+#include "layers/common/dp_utils.h"
 #include "layers/common/rms_norm.h"
 #include "layers/mlu/deepseek_v32_sp_context.h"
 #include "layers/mlu/fused_moe.h"
 
 namespace xllm {
 namespace layer {
+
+class DeepseekV2DecoderLayerTestPeer;
 
 class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
  public:
@@ -58,6 +63,37 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
                         const ModelInputParams& input_params);
 
  private:
+  enum class PostAttnMode {
+    kReplicated,
+    kPackedLocal,
+    kDpGather,
+    kTpPadded,
+  };
+
+  struct PostAttnCarrier {
+    torch::Tensor ffn_in;
+    torch::Tensor skip_local;
+    PaddingInfo pad_info;
+    PostAttnMode mode = PostAttnMode::kReplicated;
+  };
+
+  PostAttnCarrier build_post_attn_carrier(torch::Tensor x,
+                                          const torch::Tensor& residual,
+                                          const ModelInputParams& input_params,
+                                          bool use_sp_output,
+                                          bool attn_out_repl,
+                                          bool need_dp_gather,
+                                          bool enable_moe_all2all);
+
+  torch::Tensor materialize_ffn_input(const PostAttnCarrier& carrier,
+                                      const ModelInputParams& input_params);
+
+  torch::Tensor restore_ffn_output(torch::Tensor x,
+                                   const PostAttnCarrier& carrier,
+                                   const ModelInputParams& input_params);
+
+  friend class DeepseekV2DecoderLayerTestPeer;
+
   // parallel args
   ParallelArgs parallel_args_;
   bool enable_deep_ep_;

@@ -17,10 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include <iomanip>
-
 #include "common/global_flags.h"
-#include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
 #include "layers/common/dp_utils.h"
 #include "util/tensor_helper.h"
@@ -336,13 +333,189 @@ torch::Tensor FusedMoEImpl::create_group_gemm_output(
   return workspace.slice(0, 0, required_elements).view(output_shape);
 }
 
-torch::Tensor FusedMoEImpl::forward_experts(const torch::Tensor& hidden_states,
-                                            bool enable_all2all_communication) {
+void FusedMoEImpl::init_streams(const torch::Tensor& hidden_states) {
+  if (stream_initialized_) {
+    return;
+  }
+
+  device_ = xllm::Device(hidden_states.device());
+  routed_stream_ = device_.get_stream_from_pool();
+  shared_stream_ = device_.get_stream_from_pool();
+  stream_initialized_ = true;
+}
+
+torch::Tensor FusedMoEImpl::compute_routed_experts(
+    torch::Tensor expand_hidden_states,
+    torch::ScalarType hidden_states_dtype,
+    int64_t group_gemm_max_dim,
+    int64_t expert_size,
+    SelectedExpertInfo& selected_expert_info) {
+  torch::Tensor gemm_workspace;
+
+  torch::Tensor gemm1_out =
+      create_group_gemm_output(expand_hidden_states,
+                               w13_,
+                               selected_expert_info.token_count_slice,
+                               hidden_states_dtype,
+                               gemm_workspace);
+  {
+    xllm::kernel::GroupGemmParams group_gemm_params;
+    torch::ScalarType a_dtype =
+        is_smoothquant_ ? torch::kInt8 : hidden_states_dtype;
+    group_gemm_params.a =
+        view_as_dtype(expand_hidden_states, a_dtype).view({-1, hidden_size_});
+    group_gemm_params.b = w13_;
+    group_gemm_params.token_count = selected_expert_info.token_count_slice;
+    if (is_smoothquant_) {
+      auto [b_scale, quant_flag] = prepare_group_gemm_weight_scale(w13_scale_);
+      torch::Tensor a_scale =
+          selected_expert_info.input_scale.value().flatten();
+      selected_expert_info.input_scale =
+          view_as_dtype(a_scale, torch::kFloat32);
+      group_gemm_params.a_scale = selected_expert_info.input_scale;
+      group_gemm_params.b_scale = b_scale;
+      group_gemm_params.quant_flag = quant_flag;
+    }
+    group_gemm_params.max_dim = group_gemm_max_dim;
+    group_gemm_params.trans_a = false;
+    group_gemm_params.trans_b = true;
+    group_gemm_params.a_quant_bit = is_smoothquant_ ? 8 : -1;
+    group_gemm_params.output = gemm1_out;
+    gemm1_out = xllm::kernel::group_gemm(group_gemm_params);
+  }
+
+  torch::Tensor act_out;
+  torch::Tensor act_out_scale;
+  if (is_smoothquant_) {
+    int64_t slice_dim = gemm1_out.size(1);
+    if (is_gated_) {
+      slice_dim /= 2;
+    }
+    act_out = expand_hidden_states.slice(1, 0, slice_dim);
+    act_out_scale =
+        selected_expert_info.input_scale.value().slice(0, 0, gemm1_out.size(0));
+    xllm::kernel::ScaledQuantizeParams scaled_quantize_params;
+    scaled_quantize_params.x = gemm1_out;
+    scaled_quantize_params.smooth = act_smooth_;
+    scaled_quantize_params.token_count = selected_expert_info.token_count_slice;
+    scaled_quantize_params.output = act_out;
+    scaled_quantize_params.output_scale = act_out_scale;
+    scaled_quantize_params.act_mode = hidden_act_;
+    scaled_quantize_params.active_coef = 1.0;
+    scaled_quantize_params.is_gated = is_gated_;
+    scaled_quantize_params.quant_type = torch::kChar;
+    std::tie(act_out, act_out_scale) =
+        xllm::kernel::scaled_quantize(scaled_quantize_params);
+  } else {
+    act_out =
+        is_gated_ ? gemm1_out.slice(1, 0, gemm1_out.size(1) / 2) : gemm1_out;
+    xllm::kernel::ActivationParams activation_params;
+    activation_params.input = gemm1_out;
+    activation_params.output = act_out;
+    activation_params.cusum_token_count =
+        selected_expert_info.cusum_token_count;
+    activation_params.act_mode = hidden_act_;
+    activation_params.is_gated = is_gated_;
+    activation_params.start_expert_id = start_expert_id_;
+    activation_params.expert_size = expert_size;
+    xllm::kernel::active(activation_params);
+  }
+
+  torch::Tensor gemm2_out =
+      create_group_gemm_output(act_out,
+                               w2_,
+                               selected_expert_info.token_count_slice,
+                               hidden_states_dtype,
+                               gemm_workspace);
+  {
+    xllm::kernel::GroupGemmParams group_gemm_params;
+    group_gemm_params.a = act_out;
+    group_gemm_params.b = w2_;
+    group_gemm_params.token_count = selected_expert_info.token_count_slice;
+    if (is_smoothquant_) {
+      auto [b_scale, quant_flag] = prepare_group_gemm_weight_scale(w2_scale_);
+      group_gemm_params.a_scale = act_out_scale;
+      group_gemm_params.b_scale = b_scale;
+      group_gemm_params.quant_flag = quant_flag;
+    }
+    group_gemm_params.max_dim = group_gemm_max_dim;
+    group_gemm_params.trans_a = false;
+    group_gemm_params.trans_b = true;
+    group_gemm_params.a_quant_bit = is_smoothquant_ ? 8 : -1;
+    group_gemm_params.output = gemm2_out;
+    gemm2_out = xllm::kernel::group_gemm(group_gemm_params);
+  }
+
+  expand_hidden_states = torch::Tensor();
+  selected_expert_info.input_scale = std::nullopt;
+  act_out = torch::Tensor();
+  return gemm2_out;
+}
+
+FusedMoEImpl::RouteInfo FusedMoEImpl::prep_route(
+    const torch::Tensor& hidden_states) {
+  torch::Tensor hidden_states_2d =
+      hidden_states.reshape({-1, hidden_states.size(-1)});
+  return prep_route_2d(hidden_states_2d);
+}
+
+FusedMoEImpl::RouteInfo FusedMoEImpl::prep_route_2d(
+    torch::Tensor& hidden_states_2d) {
+  RouteInfo route_info;
+  std::tie(route_info.reduce_weight, route_info.expert_id) =
+      gate_->forward(hidden_states_2d);
+  return route_info;
+}
+
+void FusedMoEImpl::check_route(const torch::Tensor& hidden_states_2d,
+                               const RouteInfo& route_info) const {
+  CHECK(route_info.reduce_weight.defined())
+      << "route_info.reduce_weight must be defined";
+  CHECK(route_info.expert_id.defined())
+      << "route_info.expert_id must be defined";
+  CHECK_EQ(route_info.reduce_weight.dim(), 2)
+      << "route_info.reduce_weight must be 2D";
+  CHECK_EQ(route_info.expert_id.dim(), 2) << "route_info.expert_id must be 2D";
+  CHECK_EQ(route_info.reduce_weight.size(0), hidden_states_2d.size(0))
+      << "route_info.reduce_weight token count mismatch";
+  CHECK_EQ(route_info.expert_id.size(0), hidden_states_2d.size(0))
+      << "route_info.expert_id token count mismatch";
+  CHECK_EQ(route_info.reduce_weight.size(1), topk_)
+      << "route_info.reduce_weight topk mismatch";
+  CHECK_EQ(route_info.expert_id.size(1), topk_)
+      << "route_info.expert_id topk mismatch";
+  CHECK(route_info.reduce_weight.device() == hidden_states_2d.device())
+      << "route_info.reduce_weight device mismatch";
+  CHECK(route_info.expert_id.device() == hidden_states_2d.device())
+      << "route_info.expert_id device mismatch";
+  auto expert_dtype = route_info.expert_id.scalar_type();
+  CHECK(expert_dtype == torch::kInt || expert_dtype == torch::kLong)
+      << "route_info.expert_id must be int32 or int64";
+}
+
+FusedMoEImpl::RouteInfo FusedMoEImpl::get_route(
+    torch::Tensor& hidden_states_2d,
+    bool enable_all2all_communication,
+    const std::optional<RouteInfo>& route_info) {
+  if (!route_info.has_value()) {
+    return prep_route_2d(hidden_states_2d);
+  }
+
+  CHECK(!enable_all2all_communication)
+      << "all2all path does not support external route_info";
+  check_route(hidden_states_2d, route_info.value());
+  return route_info.value();
+}
+
+torch::Tensor FusedMoEImpl::forward_experts(
+    const torch::Tensor& hidden_states,
+    bool enable_all2all_communication,
+    const std::optional<RouteInfo>& route_info) {
   // Dispatcher: route to the appropriate path based on communication mode
   if (enable_all2all_communication) {
-    return forward_experts_all2all(hidden_states);
+    return forward_experts_all2all(hidden_states, route_info);
   } else {
-    return forward_experts_base(hidden_states);
+    return forward_experts_base(hidden_states, route_info);
   }
 }
 
@@ -351,28 +524,8 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
   // we only support all2all communication for decode stage for now
   bool enable_all2all_communication =
       enable_deep_ep_ && all_dp_ranks_are_decode(input_params);
-
-  bool is_dp_ep_parallel =
-      parallel_args_.dp_size() > 1 && parallel_args_.ep_size() > 1;
-  // during all2all communication, the output has been
-  //  gathered and sliced by dispatch and combine steps,
-  //  so we do not need to gather input and slice output again
-  bool need_gather_and_slice =
-      is_dp_ep_parallel && !enable_all2all_communication;
-
-  auto input = hidden_states;
-  if (need_gather_and_slice) {
-    input = parallel_state::gather(input,
-                                   parallel_args_.dp_local_process_group_,
-                                   input_params.dp_global_token_nums);
-  }
-  auto output = forward_experts(input, enable_all2all_communication);
-
-  if (need_gather_and_slice) {
-    output = get_dp_local_slice(output, input_params, parallel_args_);
-  }
-
-  return output;
+  return forward_experts(
+      hidden_states, enable_all2all_communication, std::nullopt);
 }
 
 void FusedMoEImpl::load_experts(const StateDict& state_dict) {

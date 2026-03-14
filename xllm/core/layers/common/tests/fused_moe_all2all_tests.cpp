@@ -368,6 +368,76 @@ int32_t run_all2all_smoothquant_test_child(All2AllTestParams params) {
   return run_all2all_basic_test_child(params);
 }
 
+int32_t run_all2all_route_guard_test_child(All2AllTestParams params) {
+  try {
+    FLAGS_expert_parallel_degree = 2;
+
+    int32_t dev_count = xllm::Device::device_count();
+    if (dev_count < params.world_size) {
+      LOG(WARNING) << "Rank " << params.rank
+                   << ": Insufficient devices. Skipping.";
+      return EXIT_CODE_SKIP;
+    }
+    params.device_index = params.rank % dev_count;
+
+    xllm::Device xllm_device(params.device_index);
+    xllm_device.set_device();
+    torch::Device device = xllm_device.unwrap();
+
+    auto process_group = create_test_process_group(
+        params.rank, params.world_size, params.port, params.host, device);
+    CHECK(process_group) << "Rank " << params.rank
+                         << ": Failed to create ProcessGroup";
+
+    ParallelArgs parallel_args(
+        params.rank, params.world_size, process_group.get());
+    parallel_args.moe_ep_group_ = process_group.get();
+    parallel_args.ep_size_ = params.world_size;
+    parallel_args.moe_tp_group_ = process_group.get();
+
+    auto options = torch::TensorOptions()
+                       .dtype(torch::kBFloat16)
+                       .device(device)
+                       .requires_grad(false);
+
+    ModelArgs model_args = create_model_args(params);
+    QuantArgs quant_args = create_quant_args(params);
+    FusedMoE fused_moe(FusedMoEImpl(model_args,
+                                    FusedMoEArgs{.is_gated = true},
+                                    quant_args,
+                                    parallel_args,
+                                    options));
+
+    auto weight_dict = create_all2all_test_weights(params.num_experts,
+                                                   params.hidden_size,
+                                                   params.intermediate_size,
+                                                   params.is_smoothquant,
+                                                   params.moe_weight_bits,
+                                                   params.group_size,
+                                                   params.world_size,
+                                                   device);
+    StateDict state_dict(weight_dict);
+    fused_moe->load_state_dict(state_dict);
+
+    int64_t num_tokens = params.batch_size * params.seq_len;
+    auto hidden_states =
+        test::seeded_tensor("fused_moe_all2all_tests.guard.hidden_states",
+                            {num_tokens, params.hidden_size},
+                            torch::kBFloat16,
+                            device);
+    auto route_info = fused_moe->prep_route(hidden_states);
+    fused_moe->forward_experts(hidden_states,
+                               /*enable_all2all_communication=*/true,
+                               route_info);
+
+    xllm_device.synchronize_default_stream();
+    return 0;
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Rank " << params.rank << ": Exception: " << e.what();
+    return 1;
+  }
+}
+
 // Multi-process test fixture
 class FusedMoEAll2AllMultiDeviceTest : public ::testing::Test {
  protected:
@@ -413,6 +483,50 @@ class FusedMoEAll2AllMultiDeviceTest : public ::testing::Test {
       int32_t (*test_fn)(All2AllTestParams),
       std::function<All2AllTestParams(int32_t rank)> params_factory) {
     run_test_impl(test_fn, params_factory);
+  }
+
+  void run_fail_test(
+      int32_t (*test_fn)(All2AllTestParams),
+      std::function<All2AllTestParams(int32_t rank)> params_factory) {
+    std::vector<pid_t> child_pids;
+
+    for (int32_t rank = 0; rank < world_size_; ++rank) {
+      pid_t pid = fork();
+      if (pid == 0) {
+        All2AllTestParams params = params_factory(rank);
+        params.rank = rank;
+        params.world_size = world_size_;
+        int32_t exit_code = test_fn(params);
+        _exit(exit_code);
+      } else if (pid > 0) {
+        child_pids.push_back(pid);
+      } else {
+        LOG(FATAL) << "Failed to fork rank " << rank;
+      }
+    }
+
+    bool any_skipped = false;
+    bool any_succeeded = false;
+
+    for (size_t i = 0; i < child_pids.size(); ++i) {
+      int32_t status;
+      waitpid(child_pids[i], &status, 0);
+      if (WIFEXITED(status)) {
+        int32_t exit_code = WEXITSTATUS(status);
+        if (exit_code == EXIT_CODE_SKIP) {
+          any_skipped = true;
+        } else if (exit_code == 0) {
+          any_succeeded = true;
+          LOG(ERROR) << "Rank " << i << " unexpectedly succeeded.";
+        }
+      }
+    }
+
+    if (any_skipped) {
+      GTEST_SKIP() << "Test skipped due to insufficient devices.";
+    } else {
+      ASSERT_FALSE(any_succeeded) << "All2All route guard did not trigger.";
+    }
   }
 
  private:
@@ -556,6 +670,25 @@ TEST_F(FusedMoEAll2AllMultiDeviceTest, W4A8All2AllSmoke) {
                          params.perform_precise_validation = false;
                          return params;
                        });
+}
+
+TEST_F(FusedMoEAll2AllMultiDeviceTest, ExternalRouteGuard) {
+  run_fail_test(run_all2all_route_guard_test_child, [](int32_t /*rank*/) {
+    All2AllTestParams params;
+    params.rank = 0;
+    params.world_size = 2;
+    params.port = 29506;
+    params.host = "127.0.0.1";
+    params.device_index = -1;
+    params.hidden_size = 512;
+    params.intermediate_size = 256;
+    params.num_experts = 4;
+    params.top_k = 2;
+    params.batch_size = 2;
+    params.seq_len = 4;
+    params.is_smoothquant = false;
+    return params;
+  });
 }
 
 }  // namespace test

@@ -52,20 +52,12 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
                         KVCache& kv_cache,
                         const v32_sp::DeepseekV32SPContext* sp_ctx = nullptr);
 
-  // whether to use full linear weights for projection
-  bool use_full_linear_weights() const {
+  bool use_repl_attn_weights() const {
     return use_full_replicated_attention_weights_;
   }
 
   bool can_use_sp() const {
-    return enable_lighting_indexer_ && use_full_linear_weights() &&
-           static_cast<bool>(attn_full_);
-  }
-
-  int64_t local_compute_head_count() const { return num_local_heads_; }
-
-  int64_t local_compute_projection_width() const {
-    return num_local_heads_ * v_head_dim_;
+    return enable_lighting_indexer_ && use_repl_attn_weights();
   }
 
   void load_state_dict(const StateDict& state_dict);
@@ -157,6 +149,20 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   torch::Tensor project_mla_output(const torch::Tensor& attn_output,
                                    int64_t q_len);
 
+  struct HeadInfo {
+    ProcessGroup* group = nullptr;
+    int64_t attn = 1;
+    int64_t proj = 1;
+
+    int64_t proj_width(int64_t dim) const { return proj * dim; }
+  };
+
+  const HeadInfo& tp_heads() const { return tp_heads_; }
+  const HeadInfo& full_heads() const { return full_heads_; }
+  const HeadInfo& run_heads() const {
+    return use_repl_attn_weights() ? full_heads_ : tp_heads_;
+  }
+
  private:
   bool use_full_replicated_attention_weights_ = false;
   bool is_per_token_smoothquant_ = false;
@@ -165,9 +171,6 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   bool has_trans_ = false;
   bool interleaved_ = false;
   double eps_;
-  int64_t tp_rank_ = 0;
-  int64_t tp_world_size_ = 1;
-  int64_t num_local_heads_;
   int64_t qk_head_dim_;
   int64_t v_head_dim_;
   int64_t q_lora_rank_;
@@ -175,6 +178,8 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   int64_t qk_nope_head_dim_;
   int64_t qk_rope_head_dim_;
   int64_t index_topk_;
+  HeadInfo tp_heads_;
+  HeadInfo full_heads_;
   torch::Tensor w_kc_;
   torch::Tensor w_vc_;
   torch::Tensor weight_c_;
@@ -191,7 +196,6 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   RowParallelLinear o_proj_{nullptr};
 
   Attention attn_{nullptr};
-  Attention attn_full_{nullptr};
   std::shared_ptr<RotaryEmbeddingBase> rotary_emb_;
   std::shared_ptr<RotaryEmbeddingBase> indexer_rotary_emb_;
   Indexer indexer_{nullptr};

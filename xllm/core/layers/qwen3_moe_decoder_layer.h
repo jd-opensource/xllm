@@ -31,6 +31,7 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
+#include "framework/parallel_state/parallel_args.h"
 #include "framework/state_dict/state_dict.h"
 
 namespace xllm {
@@ -51,11 +52,15 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
                         const ModelInputParams& input_params);
 
  private:
+  torch::Tensor run_moe(torch::Tensor x, const ModelInputParams& input_params);
+
   Qwen2Attention attention_{nullptr};
   DenseMLP mlp_{nullptr};
   FusedMoE moe_mlp_{nullptr};
   RMSNorm input_norm_{nullptr};
   RMSNorm post_norm_{nullptr};
+  ParallelArgs parallel_args_;
+  bool enable_deep_ep_ = false;
 };
 TORCH_MODULE(Qwen3MoeDecoderLayer);
 

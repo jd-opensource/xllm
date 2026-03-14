@@ -16,21 +16,9 @@ limitations under the License.
 #include <tuple>
 
 #include "deepseek_v2_attention.h"
+#include "framework/parallel_state/parallel_state.h"
 #include "layers/mlu/deepseek_v32_sp_context.h"
 #include "platform/device.h"
-
-namespace {
-
-torch::Tensor project_sp_q_heads(xllm::layer::ColumnParallelLinear& proj,
-                                 const torch::Tensor& input,
-                                 int64_t num_local_heads,
-                                 int64_t tp_world_size,
-                                 int64_t qk_head_dim) {
-  torch::Tensor projected = proj->forward(input, /*use_full_w=*/true);
-  return projected.view({-1, num_local_heads * tp_world_size, qk_head_dim});
-}
-
-}  // namespace
 
 namespace xllm {
 namespace layer {
@@ -104,13 +92,11 @@ torch::Tensor DeepseekV2AttentionImpl::forward_sp(
       sp_ctx.local_attn_metadata.q_cu_seq_lens;
   attn_indexer_metadata.max_query_len =
       sp_ctx.local_attn_metadata.max_query_len;
-  CHECK(attn_full_)
-      << "deepseek_v32 sequence parallel requires full attention weights.";
-  auto [attn_output_local, output_lse] = attn_full_(attn_indexer_metadata,
-                                                    local_q_input,
-                                                    mla_pre.k_input,
-                                                    mla_pre.v_input,
-                                                    kv_cache);
+  auto [attn_output_local, output_lse] = attn_(attn_indexer_metadata,
+                                               local_q_input,
+                                               mla_pre.k_input,
+                                               mla_pre.v_input,
+                                               kv_cache);
   return project_sp_output(attn_output_local);
 }
 
@@ -121,11 +107,10 @@ DeepseekV2AttentionImpl::SPQRPreOut DeepseekV2AttentionImpl::sp_qr_pre(
     out.q = q_a_proj_(hidden_states);
     auto q_a = std::get<0>(q_a_layernorm_(out.q));
     out.qr = q_a;
-    out.q = project_sp_q_heads(
-        q_b_proj_, q_a, num_local_heads_, tp_world_size_, qk_head_dim_);
+    out.q = q_b_proj_->forward(q_a).view({-1, full_heads().proj, qk_head_dim_});
   } else {
-    out.q = project_sp_q_heads(
-        q_proj_, hidden_states, num_local_heads_, tp_world_size_, qk_head_dim_);
+    out.q = q_proj_->forward(hidden_states)
+                .view({-1, full_heads().proj, qk_head_dim_});
   }
   return out;
 }
@@ -137,7 +122,7 @@ DeepseekV2AttentionImpl::SPMLAPreOut DeepseekV2AttentionImpl::sp_mla_pre(
     const v32_sp::DeepseekV32SPContext& sp_ctx,
     const torch::TensorOptions& options) {
   const int32_t dim = -1;
-  const int64_t active_num_heads = num_local_heads_ * tp_world_size_;
+  const int64_t active_num_heads = full_heads().attn;
   SPMLAPreOut out;
   torch::Tensor q_input = torch::empty({hidden_states.size(0),
                                         active_num_heads,
@@ -188,7 +173,7 @@ void DeepseekV2AttentionImpl::sp_mla_finish_k(
 
 torch::Tensor DeepseekV2AttentionImpl::project_sp_output(
     const torch::Tensor& attn_output) {
-  const int64_t active_num_heads = num_local_heads_ * tp_world_size_;
+  const int64_t active_num_heads = full_heads().attn;
   auto attn_output_view =
       attn_output.view({-1, active_num_heads, kv_lora_rank_});
   auto attn_bmm_output =
@@ -197,7 +182,7 @@ torch::Tensor DeepseekV2AttentionImpl::project_sp_output(
   auto attn_bmm_trans_out = attn_bmm_output.transpose(0, 1);
   torch::bmm_out(attn_bmm_trans_out, attn_output_view.transpose(0, 1), w_vc_);
   auto proj_input = attn_bmm_output.flatten(1, 2);
-  return o_proj_->forward(proj_input, /*use_full_w=*/true);
+  return o_proj_->forward(proj_input);
 }
 
 }  // namespace layer

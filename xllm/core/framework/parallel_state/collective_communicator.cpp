@@ -149,10 +149,29 @@ void CollectiveCommunicator::create_process_groups(
                                    "tp_group",
                                    device);
   parallel_args_->tp_group_ = tp_group_.get();
+  // Single-rank group is used for modules that don't need tensor parallel (TP)
+  // communication. This avoids unnecessary communication. When tp_size > 1,
+  // create a process group of size 1 for each rank. Otherwise, reuse tp_group
+  // for single-rank operations.
+  int single_rank_group_count = 0;
+  if (tp_size > 1) {
+    single_rank_group_ = create_process_group(global_rank,
+                                              world_size,
+                                              1,
+                                              port + dp_size + global_rank + 1,
+                                              false,
+                                              host,
+                                              "single_rank_group",
+                                              device);
+    parallel_args_->single_rank_group_ = single_rank_group_.get();
+    single_rank_group_count = world_size;
+  } else {
+    parallel_args_->single_rank_group_ = tp_group_.get();
+  }
   // SP and TP share the same rank set during prefill today. Keep a distinct
   // handle so SP call sites do not depend on TP wiring directly.
   parallel_args_->sp_group_ = tp_group_.get();
-  port += dp_size;
+  port += dp_size + single_rank_group_count;
 
   if (dp_size > 1) {
     port_offset = global_rank % tp_size + 1;

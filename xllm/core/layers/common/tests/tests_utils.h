@@ -160,8 +160,17 @@ class MockProcessGroup : public xllm::ProcessGroup {
 
   void allgather(const torch::Tensor& input,
                  std::vector<torch::Tensor>& outputs) override {
-    // Mock implementation - just copy input to outputs
     outputs.resize(this->world_size());
+    if (!allgather_outputs_.empty()) {
+      CHECK_EQ(allgather_outputs_.size(), outputs.size())
+          << "mock allgather outputs size mismatch";
+      for (size_t i = 0; i < outputs.size(); ++i) {
+        outputs[i] = allgather_outputs_[i].clone();
+      }
+      return;
+    }
+
+    // Mock implementation - just copy input to outputs
     for (size_t i = 0; i < this->world_size(); ++i) {
       outputs[i] = input.clone();
     }
@@ -173,6 +182,21 @@ class MockProcessGroup : public xllm::ProcessGroup {
     allgather(input, outputs);
     return make_completed_work();
   }
+
+  void reduce_scatter(const torch::Tensor& input,
+                      torch::Tensor& output) override {
+    int64_t world_size = this->world_size();
+    int64_t chunk_size = input.size(0) / world_size;
+    int64_t start = this->rank() * chunk_size;
+    output.copy_(input.slice(0, start, start + chunk_size));
+  }
+
+  void set_allgather_outputs(std::vector<torch::Tensor> outputs) {
+    allgather_outputs_ = std::move(outputs);
+  }
+
+ private:
+  std::vector<torch::Tensor> allgather_outputs_;
 };
 
 // Helper function to create custom input tensor for precision testing

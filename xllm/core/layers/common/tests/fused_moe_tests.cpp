@@ -503,5 +503,49 @@ TEST_F(FusedMoETest, W4A8GroupwiseSmokeTest) {
   EXPECT_NE(torch::sum(output).item<float>(), 0.0f);
 }
 
+TEST_F(FusedMoETest, PrepRouteMatchesBaseForward) {
+  const int64_t batch_size = 4;
+  const int64_t seq_len = 8;
+  const int64_t hidden_size = 256;
+  const int64_t intermediate_size = 256;
+  const int64_t num_experts = 8;
+  const int64_t num_expert_group = 4;
+  const int64_t topk_group = 4;
+  const int64_t top_k = 2;
+  const double route_scale = 2.5;
+
+  auto fused_moe = create_fused_moe(num_experts,
+                                    top_k,
+                                    num_expert_group,
+                                    topk_group,
+                                    route_scale,
+                                    hidden_size,
+                                    intermediate_size,
+                                    /*n_shared_experts=*/0);
+
+  auto weight_dict =
+      create_test_weights(num_experts, hidden_size, intermediate_size);
+  StateDict state_dict(weight_dict);
+  fused_moe->load_state_dict(state_dict);
+
+  auto hidden_states = create_custom_input(
+      {batch_size * seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
+
+  auto expected =
+      fused_moe->forward_experts(hidden_states,
+                                 /*enable_all2all_communication=*/false);
+  auto route_info = fused_moe->prep_route(hidden_states);
+  auto actual =
+      fused_moe->forward_experts(hidden_states,
+                                 /*enable_all2all_communication=*/false,
+                                 route_info);
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  verify_tensor_close(actual, expected, 1e-3, 1e-4);
+}
+
 }  // namespace layer
 }  // namespace xllm

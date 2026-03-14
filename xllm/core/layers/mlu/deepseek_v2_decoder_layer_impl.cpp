@@ -21,6 +21,29 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
+namespace {
+
+bool use_moe_all2all(bool enable_deep_ep,
+                     const ModelInputParams& input_params) {
+  return enable_deep_ep && all_dp_ranks_are_decode(input_params);
+}
+
+torch::Tensor slice_tp_tokens(torch::Tensor x, const ParallelArgs& args) {
+  if (!args.tp_group_ || args.tp_group_->world_size() <= 1) {
+    return x;
+  }
+
+  int64_t tp_size = args.tp_group_->world_size();
+  CHECK_EQ(x.size(0) % tp_size, 0)
+      << "token_num " << x.size(0) << " must be divisible by tp_size "
+      << tp_size;
+  int64_t shard_tokens = x.size(0) / tp_size;
+  int64_t start = args.tp_group_->rank() * shard_tokens;
+  return x.slice(0, start, start + shard_tokens);
+}
+
+}  // namespace
+
 DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
     const ModelContext& context,
     int32_t layer_id)
@@ -36,14 +59,9 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
         << "DeepSeek MoE only supports ep_size equal to world size";
   }
 
-  // DeepSeek MoE only support deep ep all2all
-  //  when dp_size > 1 for now
-  enable_deep_ep_ = FLAGS_expert_parallel_degree == 2 && is_moe_layer_;
-  if (enable_deep_ep_) {
-    CHECK(parallel_args_.dp_size() > 1)
-        << "DeepSeek MoE only supports deep expert parallel (EP) all2all when "
-           "dp_size > 1.";
-  }
+  // Keep the all2all enable condition aligned with FusedMoE.
+  enable_deep_ep_ = FLAGS_expert_parallel_degree == 2 && is_moe_layer_ &&
+                    parallel_args_.ep_size() > 1;
 
   // Initialize attention layers
   OptimizationConfig optimization_config = context.get_optimization_config();
@@ -104,6 +122,119 @@ void DeepseekV2DecoderLayerImpl::verify_loaded_weights() const {
   }
 }
 
+DeepseekV2DecoderLayerImpl::PostAttnCarrier
+DeepseekV2DecoderLayerImpl::build_post_attn_carrier(
+    torch::Tensor x,
+    const torch::Tensor& residual,
+    const ModelInputParams& input_params,
+    bool use_sp_output,
+    bool attn_out_repl,
+    bool need_dp_gather,
+    bool enable_moe_all2all) {
+  PostAttnCarrier carrier;
+  if (use_sp_output) {
+    CHECK(sequence_parallel_context_ != nullptr)
+        << "sequence parallel carrier requires sequence parallel context";
+    CHECK(!need_dp_gather)
+        << "sequence parallel output path does not support dp gather";
+    auto [ffn_in, skip_local] = post_norm_->forward(x, residual);
+    carrier.ffn_in = ffn_in;
+    carrier.skip_local = skip_local.value();
+    carrier.ffn_in = v32_sp::all_gather_across_ranks(
+        carrier.ffn_in, *sequence_parallel_context_);
+    carrier.mode = PostAttnMode::kPackedLocal;
+    return carrier;
+  }
+
+  if (enable_moe_all2all) {
+    x = x + residual;
+    auto pad_result = pad_tokens(x, get_rs_tokens(x.size(0), parallel_args_));
+    carrier.ffn_in = slice_tp_tokens(pad_result.first, parallel_args_);
+    carrier.skip_local = carrier.ffn_in;
+    carrier.pad_info = pad_result.second;
+    carrier.mode = PostAttnMode::kTpPadded;
+    return carrier;
+  }
+
+  if (need_dp_gather) {
+    auto rs_result = rs_attn_input(
+        x,
+        residual,
+        get_dp_gather_tokens(input_params.dp_global_token_nums, parallel_args_),
+        parallel_args_);
+    carrier.ffn_in = rs_result.first;
+    carrier.pad_info = rs_result.second;
+    carrier.mode = PostAttnMode::kDpGather;
+
+    torch::Tensor local_tokens = carrier.ffn_in;
+    if (parallel_args_.tp_group_ &&
+        parallel_args_.tp_group_->world_size() > 1) {
+      local_tokens =
+          parallel_state::gather(local_tokens, parallel_args_.tp_group_, 0);
+    }
+
+    CHECK(parallel_args_.dp_local_process_group_ != nullptr)
+        << "dp gather carrier requires dp_local_process_group_";
+    const int64_t dp_rank = parallel_args_.dp_local_process_group_->rank();
+    CHECK_GE(dp_rank, 0) << "invalid dp rank " << dp_rank;
+    CHECK_LT(dp_rank,
+             static_cast<int64_t>(input_params.dp_global_token_nums.size()))
+        << "dp rank " << dp_rank << " exceeds dp_global_token_nums size "
+        << input_params.dp_global_token_nums.size();
+    const int64_t local_token_num = input_params.dp_global_token_nums[dp_rank];
+    carrier.skip_local = local_tokens.slice(0, 0, local_token_num);
+    return carrier;
+  }
+
+  if (!attn_out_repl) {
+    x = xllm::parallel_state::reduce(x, parallel_args_.tp_group_);
+  }
+  x = x + residual;
+
+  carrier.ffn_in = x;
+  carrier.skip_local = x;
+  return carrier;
+}
+
+torch::Tensor DeepseekV2DecoderLayerImpl::materialize_ffn_input(
+    const PostAttnCarrier& carrier,
+    const ModelInputParams& input_params) {
+  if (carrier.mode != PostAttnMode::kDpGather) {
+    return carrier.ffn_in;
+  }
+
+  return gather_global_tokens(
+      carrier.ffn_in, input_params.dp_global_token_nums, parallel_args_);
+}
+
+torch::Tensor DeepseekV2DecoderLayerImpl::restore_ffn_output(
+    torch::Tensor x,
+    const PostAttnCarrier& carrier,
+    const ModelInputParams& input_params) {
+  torch::Tensor skip_local = carrier.skip_local;
+  if (carrier.mode == PostAttnMode::kPackedLocal) {
+    CHECK(sequence_parallel_context_ != nullptr)
+        << "packed restore requires sequence parallel context";
+    x = v32_sp::slice_local_packed(x, *sequence_parallel_context_);
+    return x + skip_local;
+  }
+
+  if (carrier.mode == PostAttnMode::kDpGather) {
+    x = get_dp_local_slice(x, input_params, parallel_args_);
+    return x + skip_local;
+  }
+
+  if (carrier.mode == PostAttnMode::kTpPadded && parallel_args_.tp_group_ &&
+      parallel_args_.tp_group_->world_size() > 1) {
+    x = parallel_state::gather(x, parallel_args_.tp_group_, 0);
+    x = unpad_tokens(x, carrier.pad_info);
+    skip_local =
+        parallel_state::gather(skip_local, parallel_args_.tp_group_, 0);
+    skip_local = unpad_tokens(skip_local, carrier.pad_info);
+  }
+  return x + skip_local;
+}
+
 torch::Tensor DeepseekV2DecoderLayerImpl::forward(
     torch::Tensor& x,
     std::optional<torch::Tensor>& residual,
@@ -112,10 +243,9 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
     KVCache& kv_cache,
     const ModelInputParams& input_params) {
   // we only support all2all communcation for decode stage for now.
-  bool enable_moe_all2all =
-      enable_deep_ep_ && all_dp_ranks_are_decode(input_params);
-  PaddingInfo pad_info;
-  torch::Tensor sp_post_attn_local;
+  bool enable_moe_all2all = use_moe_all2all(enable_deep_ep_, input_params);
+  bool need_dp_gather =
+      moe_mlp_ && need_dp_moe_gather(parallel_args_, enable_moe_all2all);
 
   // Pre-attention norm
   residual = x;
@@ -126,56 +256,34 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
       positions, x, attn_metadata, kv_cache, sequence_parallel_context_);
   const bool use_sp_output =
       sequence_parallel_context_ != nullptr && attention_->can_use_sp();
+  const bool attn_out_repl =
+      attention_->use_repl_attn_weights() && !use_sp_output;
 
-  // we apply communcation here to avoid implicit communcation in deepseek
-  // attention layer. for dp + ep, we will use reduce scatter here instead of
-  // all reduce
-  if (enable_moe_all2all) {
-    // only rank 0 in tp_group will add the residual value
-    if (parallel_args_.tp_group_->rank() == 0) {
-      x = x + residual.value();
-    }
-    // if tp_size > 1, we need to pad the input tensor before reduce scatter
-    //  to make sure every rank contain at least one token
-    if (parallel_args_.tp_group_->world_size() > 1) {
-      auto pad_result = check_and_pad_before_scatter(x, parallel_args_);
-      x = pad_result.first;
-      pad_info = pad_result.second;
-      x = xllm::parallel_state::reduce_scatter(x, parallel_args_.tp_group_);
-    }
-    residual = x;
+  // We materialize the carrier immediately after attention so all post-attn
+  // communication paths flow through the same norm / ffn / restore stages.
+  auto carrier = build_post_attn_carrier(x,
+                                         residual.value(),
+                                         input_params,
+                                         use_sp_output,
+                                         attn_out_repl,
+                                         need_dp_gather,
+                                         enable_moe_all2all);
+  x = carrier.ffn_in;
+
+  if (carrier.mode != PostAttnMode::kPackedLocal) {
     x = std::get<0>(post_norm_->forward(x));
-  } else if (use_sp_output) {
-    sp_post_attn_local = x + residual.value();
-    x = std::get<0>(post_norm_->forward(sp_post_attn_local));
-    x = v32_sp::all_gather_across_ranks(x, *sequence_parallel_context_);
-  } else {
-    x = xllm::parallel_state::reduce(x, parallel_args_.tp_group_);
-    x = x + residual.value();
-    residual = x;
-    x = std::get<0>(post_norm_->forward(x));
+    carrier.ffn_in = x;
   }
+  x = materialize_ffn_input(carrier, input_params);
 
   // MLP forward
   if (moe_mlp_) {
-    x = moe_mlp_(x, input_params);
+    x = moe_mlp_->forward_experts(x, enable_moe_all2all);
   } else {
     x = mlp_(x);
   }
+  x = restore_ffn_output(x, carrier, input_params);
 
-  // add up residual after mlp/moe
-  if (use_sp_output) {
-    x = v32_sp::slice_local_packed(x, *sequence_parallel_context_);
-    x = x + sp_post_attn_local;
-  } else {
-    x = x + residual.value();
-  }
-
-  if (enable_moe_all2all && parallel_args_.tp_group_->world_size() > 1) {
-    // unpadding the output after all gather if tp size > 1
-    x = parallel_state::gather(x, parallel_args_.tp_group_, 0);
-    x = check_and_unpad_after_gather(x, pad_info);
-  }
   residual = std::nullopt;
   return x;
 }
