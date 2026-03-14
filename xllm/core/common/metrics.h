@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <bvar/bvar.h>
 #include <bvar/multi_dimension.h>
+#include <bvar/window.h>
 
 #include "common/macros.h"
 #include "util/timer.h"
@@ -66,6 +67,19 @@ class AutoCounter final {
 
 #define COUNTER_INC(name) COUNTER_##name << 1;
 
+// Counter with per-minute window (sliding window of last 60 seconds).
+// Usage: add values same as COUNTER; when read, returns sum in last 60 seconds.
+#define DEFINE_COUNTER_PER_MINUTE(name, desc) \
+  bvar::WindowEx<bvar::Adder<int64_t>, 60> COUNTER_PER_MINUTE_##name(#name);
+
+#define COUNTER_PER_MINUTE_ADD(name, value) \
+  COUNTER_PER_MINUTE_##name << (value);
+
+#define COUNTER_PER_MINUTE_INC(name) COUNTER_PER_MINUTE_##name << 1;
+
+#define DECLARE_COUNTER_PER_MINUTE(name) \
+  extern bvar::WindowEx<bvar::Adder<int64_t>, 60> COUNTER_PER_MINUTE_##name;
+
 // Declares a latency counter having a variable name based on line number.
 // example: AUTO_COUNTER(a_counter_name);
 #define AUTO_COUNTER(name) \
@@ -90,6 +104,23 @@ class AutoCounter final {
   if (latency_recorder_##name) {                   \
     *latency_recorder_##name << (value);           \
   }
+
+// Multi-dimension counter (per-key Adder for failure distribution by instance)
+#define DEFINE_MULTI_COUNTER(name, label, desc)                         \
+  bvar::MultiDimension<bvar::Adder<double>> MULTI_COUNTER_##name(#name, \
+                                                                 {(label)});
+
+#define MULTI_COUNTER_INC(name, key)             \
+  do {                                           \
+    bvar::Adder<double>* adder_##name =          \
+        MULTI_COUNTER_##name.get_stats({(key)}); \
+    if (adder_##name) {                          \
+      *adder_##name << 1;                        \
+    }                                            \
+  } while (0)
+
+#define DECLARE_MULTI_COUNTER(name) \
+  extern bvar::MultiDimension<bvar::Adder<double>> MULTI_COUNTER_##name;
 
 // declare gauge
 #define DECLARE_GAUGE(name) extern bvar::Status<double> GAUGE_##name;
@@ -216,6 +247,43 @@ DECLARE_HISTOGRAM(expand_beam_latency_microseconds);
 // multi node metrics
 DECLARE_COUNTER(worker_service_latency_seconds);
 DECLARE_COUNTER(engine_latency_seconds);
+
+// PD disaggregation metrics
+DECLARE_COUNTER_PER_MINUTE(disagg_pd_add_new_requests_total);
+DECLARE_COUNTER_PER_MINUTE(disagg_pd_add_new_requests_fail_total);
+DECLARE_COUNTER_PER_MINUTE(disagg_pd_add_new_requests_ok_total);
+DECLARE_COUNTER_PER_MINUTE(disagg_pd_add_new_requests_reject_total);
+DECLARE_HISTOGRAM(disagg_pd_add_new_requests_latency_microseconds);
+DECLARE_COUNTER_PER_MINUTE(disagg_pd_first_generation_total);
+DECLARE_COUNTER_PER_MINUTE(disagg_pd_first_generation_fail_total);
+DECLARE_HISTOGRAM(disagg_pd_first_generation_latency_microseconds);
+
+// PD prefill queue (per-minute enqueue/dequeue)
+DECLARE_COUNTER_PER_MINUTE(disagg_pd_prefill_queue_enqueue_total);
+DECLARE_COUNTER_PER_MINUTE(disagg_pd_prefill_queue_offline_enqueue_total);
+DECLARE_COUNTER_PER_MINUTE(disagg_pd_prefill_queue_dequeue_total);
+DECLARE_COUNTER_PER_MINUTE(disagg_pd_prefill_queue_offline_dequeue_total);
+
+// PD decode: requests waiting for FirstGeneration from prefill
+DECLARE_GAUGE(disagg_pd_received_request_map_size);
+
+// PD: current number of linked P/D instances (P side: linked D instances)
+DECLARE_GAUGE(disagg_pd_linked_instances_count);
+
+// PD: per-instance failure distribution (dimension: instance name)
+DECLARE_MULTI_COUNTER(disagg_pd_add_new_requests_fail_by_instance);
+DECLARE_MULTI_COUNTER(disagg_pd_add_new_requests_reject_by_instance);
+DECLARE_MULTI_COUNTER(disagg_pd_first_generation_fail_by_instance);
+
+// PD PULL mode: KV cache pull latency (D side)
+DECLARE_HISTOGRAM(disagg_pd_pull_kv_cache_latency_microseconds);
+
+// LLM worker PUSH mode: push KV cache success/fail (per-minute)
+DECLARE_COUNTER_PER_MINUTE(disagg_pd_push_kv_cache_ok_total);
+DECLARE_COUNTER_PER_MINUTE(disagg_pd_push_kv_cache_fail_total);
+
+// PUSH mode: collectAll wait latency (microseconds)
+DECLARE_HISTOGRAM(disagg_pd_push_kv_cache_extra_wait_microseconds);
 
 // memory metrics
 DECLARE_GAUGE(total_memory_size_in_kilobytes);
