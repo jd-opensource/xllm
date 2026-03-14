@@ -1131,6 +1131,16 @@ struct FusedIndexerQParams {
   // Quantization mode for the output.
   // Supported values: "none", "dynamic_per_token".
   std::string quant_mode = "none";
+
+  // Rotary embedding mode flag.
+  // If true, apply cross rotary embedding (interleaved).
+  // If false, apply fold rotary embedding (non-interleaved).
+  bool interleaved = true;
+
+  // Flag indicating whether to apply RoPE at the front of the operation.
+  // If true, apply RoPE at the front of the operation.
+  // If false, apply RoPE at the back of the operation.
+  bool rope_at_front = true;
 };
 
 struct FusedIndexerKParams {
@@ -1188,6 +1198,24 @@ struct FusedIndexerKParams {
   // Shape: (head_size, head_size).
   // Dtype: same as x.
   std::optional<torch::Tensor> hadamard_matrix;
+
+  // Rotary embedding mode flag.
+  // If true, apply cross rotary embedding (interleaved).
+  // If false, apply fold rotary embedding (non-interleaved).
+  bool interleaved = true;
+
+  // Optional weight tensor for RMSNorm.
+  // Shape: (head_size).
+  // Dtype: float32.
+  std::optional<torch::Tensor> gamma;
+
+  // Optional bias tensor for RMSNorm.
+  // Shape: (head_size).
+  // Dtype: float32.
+  std::optional<torch::Tensor> beta;
+
+  // RMSNorm epsilon.
+  double eps = 1e-6;
 };
 
 struct MoeInitRoutingV2Params {

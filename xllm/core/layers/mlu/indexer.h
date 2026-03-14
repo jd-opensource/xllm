@@ -118,7 +118,7 @@ class IndexerImpl : public torch::nn::Module {
   int64_t index_topk_;
   float softmax_scale_;
   bool enable_fused_qk_;
-
+  bool q_rope_at_front_;
   // Linear layers using ReplicatedLinear
   ReplicatedLinear wq_b_{nullptr};
   ReplicatedLinear wk_{nullptr};

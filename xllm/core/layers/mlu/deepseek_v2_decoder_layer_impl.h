@@ -43,6 +43,7 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
   ~DeepseekV2DecoderLayerImpl() override = default;
 
   void load_state_dict(const StateDict& state_dict);
+  void verify_loaded_weights() const;
 
   void set_sequence_parallel_context(
       const v32_sp::DeepseekV32SPContext* sp_ctx) {

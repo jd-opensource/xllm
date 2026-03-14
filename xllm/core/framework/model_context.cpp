@@ -76,12 +76,16 @@ void ModelContext::derive_optimization_config() {
     // The current implementation of fused spec kernel is not stable.
     optimization_config_.enable_fused_spec_kernel = false;
     // fused mla only support smoothquant mode
+    // TODO: the fused kernel will support "glm_moe_dsa" model soon.
+    bool is_glm_moe_dsa =
+        model_args_.model_type().find("glm_moe_dsa") != std::string::npos;
     optimization_config_.enable_fused_mla_kernel =
-        quant_args_.quant_method() == kQuantMethodSmoothquant;
+        quant_args_.quant_method() == kQuantMethodSmoothquant &&
+        !is_glm_moe_dsa;
     // TODO: enable fused indexer qk for mlu backend
     // The current implementation of fused indexer qk is missing the
     //  weights and bias loading.
-    optimization_config_.enable_fused_indexer_qk = false;
+    optimization_config_.enable_fused_indexer_qk = !is_glm_moe_dsa;
   }
 }
 

@@ -49,6 +49,7 @@ class FusedMoEImpl : public torch::nn::Module {
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
   void load_state_dict(const StateDict& state_dict);
+  void verify_loaded_weights() const;
 
  private:
   // struct to store the selected expert info

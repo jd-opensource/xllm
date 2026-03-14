@@ -434,10 +434,7 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   //  target engine.
   // so we need to override the number of layers for the draft engine.
   if (options_.is_draft_engine()) {
-    if ((args_.model_type() == "deepseek_v3" ||
-         args_.model_type() == "deepseek_v32")) {
-      kv_cache_cap.n_layers = args_.num_nextn_predict_layers();
-    }
+    kv_cache_cap.n_layers = args_.num_nextn_predict_layers();
   }
 #endif
 

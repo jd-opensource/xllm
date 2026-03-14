@@ -383,25 +383,6 @@ void FusedMoEImpl::load_experts(const StateDict& state_dict) {
   const int64_t num_total_experts = num_total_experts_;
   std::vector<std::string> prefixes = {"gate_proj.", "up_proj."};
   if (is_smoothquant_) {
-    if (moe_weight_bits_ == 4) {
-      for (int64_t idx = 0; idx < num_experts_per_rank_; ++idx) {
-        const std::string expert_prefix =
-            std::to_string(start_expert_id_ + idx) + ".";
-        for (const auto& proj : {"gate_proj.", "up_proj.", "down_proj."}) {
-          auto qweight_tensor =
-              state_dict.get_tensor(expert_prefix + proj + "qweight");
-          if (!qweight_tensor.defined()) {
-            continue;
-          }
-          CHECK_EQ(qweight_tensor.scalar_type(), torch::kInt8)
-              << "Expected int8 container tensor for int4 expert qweight at "
-              << (std::string(state_dict.prefix()) + expert_prefix + proj +
-                  "qweight")
-              << ", but got dtype " << qweight_tensor.scalar_type();
-        }
-      }
-    }
-
     LOAD_MOE_FUSED_WEIGHT("qweight", w1, w3, w13);
     LOAD_MOE_FUSED_WEIGHT("per_channel_scale", w1_scale, w3_scale, w13_scale);
     // When supporting DeepEP All2All mode,
@@ -418,6 +399,20 @@ void FusedMoEImpl::load_experts(const StateDict& state_dict) {
     LOAD_MOE_FUSED_WEIGHT("weight", w1, w3, w13);
     LOAD_MOE_WEIGHT("down_proj.", "weight", w2, 1);
   }
+}
+
+void FusedMoEImpl::verify_loaded_weights() const {
+  if (!is_smoothquant_) {
+    return;
+  }
+  CHECK(w13_is_loaded_)
+      << "SmoothQuant is enabled but expert gate_proj/up_proj qweight was not "
+         "fully loaded. This usually means the checkpoint is missing required "
+         "expert qweight tensors.";
+  CHECK(w2_is_loaded_)
+      << "SmoothQuant is enabled but expert down_proj qweight was not fully "
+         "loaded. This usually means the checkpoint is missing required "
+         "expert qweight tensors.";
 }
 
 void FusedMoEImpl::load_state_dict(const StateDict& state_dict) {
