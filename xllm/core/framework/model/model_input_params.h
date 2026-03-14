@@ -346,6 +346,20 @@ struct ModelInputParams {
     params.ring_cache_seqlen_host = ring_cache_seqlen_host;
 #if defined(USE_NPU)
     params.layer_synchronizer = layer_synchronizer;
+    params.shared_k_caches.clear();
+    params.shared_v_caches.clear();
+    for (const auto& t : shared_k_caches) {
+      params.shared_k_caches.push_back(safe_to(t, device));
+    }
+    for (const auto& t : shared_v_caches) {
+      params.shared_v_caches.push_back(safe_to(t, device));
+    }
+    if (beam_width_tensor.defined()) {
+      params.beam_width_tensor = safe_to(beam_width_tensor, device, true);
+    }
+    if (current_round_tensor.defined()) {
+      params.current_round_tensor = safe_to(current_round_tensor, device, true);
+    }
 #endif
     params.expert_load_data = expert_load_data;
     params.expert_array = expert_array;
@@ -522,6 +536,10 @@ struct ModelInputParams {
   uint32_t layers_per_bacth_copy = std::numeric_limits<uint32_t>::max();
   std::shared_ptr<NPULayerSynchronizerImpl> layer_wise_load_synchronizer =
       nullptr;
+  std::vector<torch::Tensor> shared_k_caches;
+  std::vector<torch::Tensor> shared_v_caches;
+  torch::Tensor beam_width_tensor;
+  torch::Tensor current_round_tensor;
 #endif
 
   DpEpPaddingData dp_ep_padding_data;
