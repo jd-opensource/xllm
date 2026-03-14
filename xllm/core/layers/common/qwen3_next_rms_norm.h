@@ -13,21 +13,32 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include <torch_npu/csrc/aten/CustomFunctions.h>
+#pragma once
 
-#include "npu_ops_api.h"
-#include "ops_npu/npu_ops.h"
+#include <torch/torch.h>
 
-namespace xllm::kernel::npu {
+#include "framework/state_dict/state_dict.h"
+#include "framework/state_dict/utils.h"
 
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
-apply_moe_gating_topk_softmax(const torch::Tensor& x,
-                              const std::optional<torch::Tensor>& finished,
-                              int k) {
-  const torch::Tensor finished_tensor =
-      finished.has_value() ? finished.value() : torch::Tensor();
-  return at_npu::native::custom_ops::npu_moe_gating_top_k_softmax(
-      x, finished_tensor, k);
-}
+namespace xllm {
+namespace layer {
 
-}  // namespace xllm::kernel::npu
+class Qwen3NextRMSNormImpl : public torch::nn::Module {
+ public:
+  Qwen3NextRMSNormImpl(int64_t dim,
+                   double eps,
+                   const torch::TensorOptions& options);
+
+  torch::Tensor forward(torch::Tensor& input);
+
+  void load_state_dict(const StateDict& state_dict);
+
+ private:
+  DEFINE_WEIGHT(weight);
+  int64_t norm_dim_;
+  double eps_;
+};
+TORCH_MODULE(Qwen3NextRMSNorm);
+
+}  // namespace layer
+}  // namespace xllm

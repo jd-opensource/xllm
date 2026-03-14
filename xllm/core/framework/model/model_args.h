@@ -171,6 +171,17 @@ struct ModelArgs {
   PROPERTY(int32_t, rope_scaling) = -1;
   PROPERTY(float, router_aux_loss_coef) = 0.001f;
 
+  // qwen3 next initialized with 0, and will be loaded in model file
+  PROPERTY(bool, attn_output_gate) = false;
+  PROPERTY(int32_t, full_attention_interval) = 0;
+  PROPERTY(int32_t, linear_conv_kernel_dim) = 0;
+  PROPERTY(int32_t, linear_key_head_dim) = 0;
+  PROPERTY(int32_t, linear_value_head_dim) = 0;
+  PROPERTY(int64_t, linear_num_key_heads) = 0;
+  PROPERTY(int32_t, linear_num_value_heads) = 0;
+  PROPERTY(int32_t, shared_expert_intermediate_size) = 0;
+  PROPERTY(float, partial_rotary_factor) = 0.0f;
+
   // Vision model's dropout
   PROPERTY(float, mm_dropout) = 0.0f;
 

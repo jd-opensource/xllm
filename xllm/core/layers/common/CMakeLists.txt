@@ -6,10 +6,15 @@ cc_library(
   HDRS
     qwen2_attention.h
     qwen2_vision_attention.h
+    qwen3_next_attention.h
+    qwen3_next_gated_delta_net.h
+    qwen3_next_rms_norm.h
+    partial_rotary_embedding.h
+    rms_norm_gated.h
     rms_norm.h
     rotary_embedding.h
     rotary_embedding_util.h
-    $<$<NOT:$<OR:$<BOOL:${USE_ILU}>,$<BOOL:${USE_MLU}>>>:fused_moe.h>
+    $<$<NOT:$<OR:$<BOOL:${USE_ILU}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_NPU}>>>:fused_moe.h>
     dense_mlp.h
     linear.h
     word_embedding_impl.h
@@ -23,10 +28,15 @@ cc_library(
   SRCS
     qwen2_attention.cpp
     qwen2_vision_attention.cpp
+    qwen3_next_attention.cpp
+    qwen3_next_gated_delta_net.cpp
+    qwen3_next_rms_norm.cpp
+    partial_rotary_embedding.cpp
+    rms_norm_gated.cpp
     rms_norm.cpp
     rotary_embedding.cpp
     rotary_embedding_util.cpp
-    $<$<NOT:$<OR:$<BOOL:${USE_ILU}>,$<BOOL:${USE_MLU}>>>:fused_moe.cpp>
+    $<$<NOT:$<OR:$<BOOL:${USE_ILU}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_NPU}>>>:fused_moe.cpp>
     dense_mlp.cpp
     linear.cpp
     word_embedding_impl.cpp

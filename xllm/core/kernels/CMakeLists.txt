@@ -36,6 +36,7 @@ cc_library(
     ops_api.cpp
   DEPS
     torch
+    triton_adapter
     $<$<BOOL:${USE_NPU}>:npu_kernels>
     $<$<BOOL:${USE_MLU}>:mlu_kernels>
     $<$<BOOL:${USE_MUSA}>:musa_kernels>

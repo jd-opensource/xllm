@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "param.h"
+#include "triton_npu/torch_api/triton_ops_api.h"
 
 namespace xllm::kernel {
 
@@ -124,5 +125,18 @@ torch::Tensor rms_norm_static_fp8_quant(RmsNormStaticFp8QuantParams& params);
 // Returns: tuple of (FP8 quantized output, updated residual)
 std::tuple<torch::Tensor, torch::Tensor> fused_add_rms_norm_static_fp8_quant(
     FusedAddRmsNormStaticFp8QuantParams& params);
+
+std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
+    FusedGdnGatingParams& params);
+
+std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
+    FusedRecurrentGatedDeltaRuleParams& params);
+
+torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params);
+
+torch::Tensor gated_layer_norm(GatedLayerNormParams& params);
+
+std::pair<torch::Tensor, torch::Tensor> partial_rotary_embedding(
+    PartialRotaryEmbeddingParams& params);
 
 }  // namespace xllm::kernel

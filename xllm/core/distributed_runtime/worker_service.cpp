@@ -286,19 +286,29 @@ void WorkerService::AllocateKVCache(
   threadpool_->schedule([this, controller, request, response, done]() mutable {
     brpc::ClosureGuard done_guard(done);
     std::vector<std::vector<int64_t>> kv_cache_shape;
-    // Reserve for key, value, and optionally index shape
-    kv_cache_shape.reserve(3);
-    kv_cache_shape.emplace_back(
-        std::vector<int64_t>(request->kv_cache_shape().key_shape().begin(),
-                             request->kv_cache_shape().key_shape().end()));
-    kv_cache_shape.emplace_back(
-        std::vector<int64_t>(request->kv_cache_shape().value_shape().begin(),
-                             request->kv_cache_shape().value_shape().end()));
+    const bool has_index_shape = request->kv_cache_shape().index_shape_size() > 0;
+    const bool has_conv_shape = request->kv_cache_shape().conv_shape_size() > 0;
+    const bool has_ssm_shape = request->kv_cache_shape().ssm_shape_size() > 0;
+    CHECK(!(has_index_shape && (has_conv_shape || has_ssm_shape)))
+        << "KVCacheShape does not support index_shape with conv/ssm shapes "
+        << "simultaneously.";
+    // Reserve for key, value, and optional extra shapes
+    kv_cache_shape.reserve(has_conv_shape || has_ssm_shape ? 4 : 3);
+    kv_cache_shape.emplace_back(std::vector<int64_t>(
+        request->kv_cache_shape().key_shape().begin(), request->kv_cache_shape().key_shape().end()));
+    kv_cache_shape.emplace_back(std::vector<int64_t>(
+        request->kv_cache_shape().value_shape().begin(), request->kv_cache_shape().value_shape().end()));
     // add index shape if exists
-    if (request->kv_cache_shape().index_shape_size() > 0) {
-      kv_cache_shape.emplace_back(
-          std::vector<int64_t>(request->kv_cache_shape().index_shape().begin(),
-                               request->kv_cache_shape().index_shape().end()));
+    if (has_index_shape) {
+      kv_cache_shape.emplace_back(std::vector<int64_t>(
+          request->kv_cache_shape().index_shape().begin(), request->kv_cache_shape().index_shape().end()));
+    } else if (has_conv_shape || has_ssm_shape) {
+      CHECK(has_conv_shape && has_ssm_shape)
+          << "conv_shape and ssm_shape must be provided together.";
+      kv_cache_shape.emplace_back(std::vector<int64_t>(
+          request->kv_cache_shape().conv_shape().begin(), request->kv_cache_shape().conv_shape().end()));
+      kv_cache_shape.emplace_back(std::vector<int64_t>(
+          request->kv_cache_shape().ssm_shape().begin(), request->kv_cache_shape().ssm_shape().end()));
     }
 
     auto future = worker_->allocate_kv_cache_async(kv_cache_shape);
@@ -316,18 +326,34 @@ void WorkerService::AllocateKVCacheWithTransfer(
   threadpool_->schedule([this, controller, req, resp, done]() mutable {
     brpc::ClosureGuard done_guard(done);
     std::vector<std::vector<int64_t>> kv_cache_shape;
-    kv_cache_shape.reserve(2);
+    const auto& shape_req = req->kv_cache_shape();
+    const bool has_index_shape = shape_req.index_shape_size() > 0;
+    const bool has_conv_shape = shape_req.conv_shape_size() > 0;
+    const bool has_ssm_shape = shape_req.ssm_shape_size() > 0;
+    CHECK(!(has_index_shape && (has_conv_shape || has_ssm_shape)))
+        << "KVCacheShape does not support index_shape with conv/ssm shapes "
+        << "simultaneously.";
+    kv_cache_shape.reserve(has_conv_shape || has_ssm_shape ? 4 : 3);
     kv_cache_shape.emplace_back(
-        std::vector<int64_t>(req->kv_cache_shape().key_shape().begin(),
-                             req->kv_cache_shape().key_shape().end()));
+        std::vector<int64_t>(shape_req.key_shape().begin(),
+                             shape_req.key_shape().end()));
     kv_cache_shape.emplace_back(
-        std::vector<int64_t>(req->kv_cache_shape().value_shape().begin(),
-                             req->kv_cache_shape().value_shape().end()));
+        std::vector<int64_t>(shape_req.value_shape().begin(),
+                             shape_req.value_shape().end()));
     // add index shape if exists
-    if (req->kv_cache_shape().index_shape_size() > 0) {
+    if (has_index_shape) {
       kv_cache_shape.emplace_back(
-          std::vector<int64_t>(req->kv_cache_shape().index_shape().begin(),
-                               req->kv_cache_shape().index_shape().end()));
+          std::vector<int64_t>(shape_req.index_shape().begin(),
+                               shape_req.index_shape().end()));
+    } else if (has_conv_shape || has_ssm_shape) {
+      CHECK(has_conv_shape && has_ssm_shape)
+          << "conv_shape and ssm_shape must be provided together.";
+      kv_cache_shape.emplace_back(
+          std::vector<int64_t>(shape_req.conv_shape().begin(),
+                               shape_req.conv_shape().end()));
+      kv_cache_shape.emplace_back(
+          std::vector<int64_t>(shape_req.ssm_shape().begin(),
+                               shape_req.ssm_shape().end()));
     }
 
     auto future =

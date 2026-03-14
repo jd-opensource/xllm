@@ -259,7 +259,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
 
     // Update tiling tensor based on model type
-    if (need_update_attention_plan_) {
+    // For models with mixed attention types (e.g., qwen3_next), only update if k/v cache is defined
+    if (need_update_attention_plan_ && k_cache.defined() && v_cache.defined()) {
       plan_paged_attention_tiling(
           tokens, k_cache, v_cache, persistent_block_tables_, params, stream);
     }

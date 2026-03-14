@@ -43,13 +43,16 @@ cc_library(
     qwen3_vision_layer.h
     qwen3_decoder_layer.h
     qwen3_moe_decoder_layer.h
+    qwen3_next_decoder_layer.h
   SRCS
     qwen2_vision_layer.cpp
     qwen2_decoder_layer.cpp
     qwen2_5_vision_layer.cpp
     qwen3_vision_layer.cpp
     qwen3_moe_decoder_layer.cpp
+    qwen3_next_decoder_layer.cpp
   DEPS
+    $<$<BOOL:${USE_NPU}>:npu_layers>
     $<$<BOOL:${USE_ILU}>:ilu_layers>
     :common_layers
     :parallel_state

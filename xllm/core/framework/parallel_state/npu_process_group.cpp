@@ -131,6 +131,14 @@ void ProcessGroupImpl::allgather(const torch::Tensor& input,
   check_input(input);
   torch::DeviceGuard device_guard(device());
 
+  if (pg_) {
+    std::vector<torch::Tensor> input_tensors = {input};
+    std::vector<std::vector<torch::Tensor>> output_tensors = {outputs};
+    pg_->allgather(output_tensors, input_tensors)->wait();
+    return;
+  }
+  CHECK(comm_ != nullptr) << "HCCL comm is not initialized.";
+
   torch::Tensor flattened_output = flatten_for_scatter_gather(outputs);
 
   const auto count = input.numel();
@@ -169,6 +177,13 @@ void ProcessGroupImpl::allreduce(torch::Tensor& input) {
       << "input should be on the same device as the process group";
   check_input(input);
   torch::DeviceGuard device_guard(device());
+
+  if (pg_) {
+    std::vector<torch::Tensor> input_tensors = {input};
+    pg_->allreduce(input_tensors)->wait();
+    return;
+  }
+  CHECK(comm_ != nullptr) << "HCCL comm is not initialized.";
 
   const auto count = input.numel();
   const auto data_type = to_hccl_data_type(input);

@@ -185,8 +185,9 @@ torch::Tensor FusedMoEImpl::select_experts(
   // prepare the parameters for select_experts
   xllm::kernel::MoeFusedTopkParams moe_active_topk_params;
   moe_active_topk_params.input = router_logits_2d;
-  moe_active_topk_params.finished = std::nullopt;
+  moe_active_topk_params.finished = torch::Tensor();
   moe_active_topk_params.topk = topk_;
+  moe_active_topk_params.scoring_func = "softmax";
   auto [topk_weights, topk_ids] =
       xllm::kernel::moe_active_topk(moe_active_topk_params);
   topk_ids = topk_ids.to(torch::kInt32);
@@ -262,10 +263,8 @@ torch::Tensor FusedMoEImpl::forward_expert(
     gemm1_out = xllm::kernel::group_gemm(group_gemm_params);
   }
 
-  // Step 5: activation or scaled quantization(fused with activation)
-  torch::Tensor act_out =
-      is_gated_ ? gemm1_out.slice(1, 0, gemm1_out.size(1) / 2).contiguous()
-                : gemm1_out;
+  // Step 5: activation
+  torch::Tensor act_out;
 
   xllm::kernel::ActivationParams activation_params;
   activation_params.input = gemm1_out;
@@ -273,6 +272,7 @@ torch::Tensor FusedMoEImpl::forward_expert(
   activation_params.act_mode = hidden_act_;
   activation_params.is_gated = is_gated_;
   xllm::kernel::active(activation_params);
+  act_out = activation_params.output;
   // Step 6: group gemm 2
   torch::Tensor gemm2_out =
       create_group_gemm_output(act_out,

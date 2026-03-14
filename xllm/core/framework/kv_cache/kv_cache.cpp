@@ -37,9 +37,21 @@ KVCache::KVCache(torch::Tensor key_cache,
       index_cache_(std::move(index_cache)),
       key_cache_scale_(std::move(key_cache_scale)),
       value_cache_scale_(std::move(value_cache_scale)) {}
+
+KVCache::KVCache(torch::Tensor key_cache,
+                 torch::Tensor value_cache,
+                 torch::Tensor conv_cache,
+                 torch::Tensor ssm_cache)
+    : key_cache_(std::move(key_cache)),
+      value_cache_(std::move(value_cache)),
+      conv_cache_(std::move(conv_cache)),
+      ssm_cache_(std::move(ssm_cache)) {}
+
 torch::Tensor KVCache::get_k_cache() const { return key_cache_; }
 torch::Tensor KVCache::get_v_cache() const { return value_cache_; }
 torch::Tensor KVCache::get_index_cache() const { return index_cache_; }
+torch::Tensor KVCache::get_conv_cache() const { return conv_cache_; }
+torch::Tensor KVCache::get_ssm_cache() const { return ssm_cache_; }
 
 std::optional<torch::Tensor> KVCache::get_k_cache_scale() const {
   if (!key_cache_scale_.defined() || key_cache_scale_.numel() == 0) {
