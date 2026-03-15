@@ -25,7 +25,7 @@ limitations under the License.
 namespace xllm {
 
 // Forward declaration
-typedef struct LLMCore LLMCore;
+struct LLMCore;
 
 // A wrapper for loading, initializing, and text generation functions of large
 // language models

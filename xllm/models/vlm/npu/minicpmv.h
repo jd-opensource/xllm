@@ -779,11 +779,10 @@ class Idefics2EncoderImpl : public torch::nn::Module {
 TORCH_MODULE(Idefics2Encoder);
 
 class VisionAdapterMLPImpl : public torch::nn::Module {
-  typedef std::tuple<torch::nn::LayerNorm,
-                     torch::nn::Linear,
-                     torch::nn::GELU,
-                     torch::nn::Linear>
-      MLPDef;
+  using MLPDef = std::tuple<torch::nn::LayerNorm,
+                            torch::nn::Linear,
+                            torch::nn::GELU,
+                            torch::nn::Linear>;
 
  public:
   VisionAdapterMLPImpl(const ModelContext& context) {

@@ -56,6 +56,6 @@ class BaseExecutorImpl : public ExecutorImpl {
 };
 REGISTER_EXECUTOR("llm", BaseExecutorImpl);
 
-typedef BaseExecutorImpl RecExecutorImpl;
+using RecExecutorImpl = BaseExecutorImpl;
 REGISTER_EXECUTOR("rec", RecExecutorImpl);
 }  // namespace xllm
