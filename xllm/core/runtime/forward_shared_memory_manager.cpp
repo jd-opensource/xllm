@@ -1552,14 +1552,14 @@ ForwardSharedMemoryManager::~ForwardSharedMemoryManager() = default;
 std::string ForwardSharedMemoryManager::create_unique_name(
     const std::string& prefix,
     int dp_group,
-    int forward_type,
+    ForwardType forward_type,
     int rank) {
   std::string filename = prefix;
-  if (forward_type == FORWARD_PB_INPUT_TYPE ||
-      forward_type == FORWARD_RAW_INPUT_TYPE) {
+  if (forward_type == ForwardType::PB_INPUT ||
+      forward_type == ForwardType::RAW_INPUT) {
     filename += "_dpg_" + std::to_string(dp_group) + "_input";
-  } else if (forward_type == FORWARD_PB_OUTPUT_TYPE ||
-             forward_type == FORWARD_RAW_OUTPUT_TYPE) {
+  } else if (forward_type == ForwardType::PB_OUTPUT ||
+             forward_type == ForwardType::RAW_OUTPUT) {
     filename += "_rank_" + std::to_string(rank) + "_output";
   } else {
     // TODO: support more type later

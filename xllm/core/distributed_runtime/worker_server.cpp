@@ -205,15 +205,15 @@ void WorkerServer::prepare_shm(
     std::string name_prefix =
         "xllm_" + net::extract_port(options.master_node_addr().value());
     string name = ForwardSharedMemoryManager::create_unique_name(
-        name_prefix, dp_group, FORWARD_RAW_INPUT_TYPE, parallel_args.rank());
+        name_prefix, dp_group, ForwardType::RAW_INPUT, parallel_args.rank());
     input_shm_manager = std::make_unique<ForwardSharedMemoryManager>(
-        name, options.input_shm_size(), is_creator, FORWARD_RAW_INPUT_TYPE);
+        name, options.input_shm_size(), is_creator, ForwardType::RAW_INPUT);
     LOG(INFO) << "Create input shared memory manager with name: " << name;
 
     name = ForwardSharedMemoryManager::create_unique_name(
-        name_prefix, dp_group, FORWARD_RAW_OUTPUT_TYPE, parallel_args.rank());
+        name_prefix, dp_group, ForwardType::RAW_OUTPUT, parallel_args.rank());
     output_shm_manager = std::make_unique<ForwardSharedMemoryManager>(
-        name, options.output_shm_size(), is_creator, FORWARD_RAW_OUTPUT_TYPE);
+        name, options.output_shm_size(), is_creator, ForwardType::RAW_OUTPUT);
     LOG(INFO) << "Create output shared memory manager with name: " << name;
   }
 }
