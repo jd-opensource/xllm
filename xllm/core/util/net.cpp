@@ -45,7 +45,7 @@ std::string get_local_ip_addr() {
   memset(&hints, 0, sizeof(hints));
   hints.ai_family = AF_INET;
   hints.ai_socktype = SOCK_STREAM;
-  ret = getaddrinfo(hostname, NULL, &hints, &info);
+  ret = getaddrinfo(hostname, nullptr, &hints, &info);
   if (ret != 0) {
     LOG(ERROR) << "getaddrinfo failed";
     return "";

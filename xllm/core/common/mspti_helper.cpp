@@ -90,7 +90,7 @@ void MsptiMetrics::user_buffer_complete(uint8_t* buffer,
                                         size_t size,
                                         size_t validSize) {
   if (validSize > 0) {
-    msptiActivity* pRecord = NULL;
+    msptiActivity* pRecord = nullptr;
     msptiResult status = MSPTI_SUCCESS;
     do {
       status = msptiActivityGetNextRecord(buffer, validSize, &pRecord);

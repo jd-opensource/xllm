@@ -296,7 +296,7 @@ bool WorkerServer::sync_master_node(const std::string& master_node_addr,
   const int sleep_time_second = 3;
   while (try_count < FLAGS_max_reconnect_count) {
     cntl.Reset();
-    stub.Sync(&cntl, &addr_info, &uids, NULL);
+    stub.Sync(&cntl, &addr_info, &uids, nullptr);
     if (cntl.Failed()) {
       LOG(WARNING) << "Worker#" << addr_info.global_rank()
                    << " try connect to engine server error, try again."

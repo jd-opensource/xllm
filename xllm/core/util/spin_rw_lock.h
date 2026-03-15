@@ -93,7 +93,7 @@ typedef struct easy_spinrwlock_t {
 static __inline__ int easy_spinrwlock_rdlock(easy_spinrwlock_t* lock) {
   int ret = EASY_OK;
 
-  if (NULL == lock) {
+  if (nullptr == lock) {
     ret = EASY_ERROR;
   } else {
     int cond = 1;
@@ -123,7 +123,7 @@ static __inline__ int easy_spinrwlock_rdlock(easy_spinrwlock_t* lock) {
 static __inline__ int easy_spinrwlock_wrlock(easy_spinrwlock_t* lock) {
   int ret = EASY_OK;
 
-  if (NULL == lock) {
+  if (nullptr == lock) {
     ret = EASY_ERROR;
   } else {
     int cond = 1;
@@ -157,7 +157,7 @@ static __inline__ int easy_spinrwlock_wrlock(easy_spinrwlock_t* lock) {
 static __inline__ int easy_spinrwlock_try_rdlock(easy_spinrwlock_t* lock) {
   int ret = EASY_OK;
 
-  if (NULL == lock) {
+  if (nullptr == lock) {
     ret = EASY_ERROR;
   } else {
     ret = EASY_AGAIN;
@@ -177,7 +177,7 @@ static __inline__ int easy_spinrwlock_try_rdlock(easy_spinrwlock_t* lock) {
 static __inline__ int easy_spinrwlock_try_wrlock(easy_spinrwlock_t* lock) {
   int ret = EASY_OK;
 
-  if (NULL == lock) {
+  if (nullptr == lock) {
     ret = EASY_ERROR;
   } else {
     ret = EASY_AGAIN;
@@ -197,7 +197,7 @@ static __inline__ int easy_spinrwlock_try_wrlock(easy_spinrwlock_t* lock) {
 static __inline__ int easy_spinrwlock_unlock(easy_spinrwlock_t* lock) {
   int ret = EASY_OK;
 
-  if (NULL == lock) {
+  if (nullptr == lock) {
     ret = EASY_ERROR;
   } else {
     while (1) {

@@ -97,8 +97,8 @@ std::unique_ptr<MemoryMapping> create_memory_mapping(const char* weights_file) {
   }
   mapping->mapped_size = sb.st_size;
 
-  mapping->mapped_addr =
-      mmap(NULL, mapping->mapped_size, PROT_READ, MAP_PRIVATE, mapping->fd, 0);
+  mapping->mapped_addr = mmap(
+      nullptr, mapping->mapped_size, PROT_READ, MAP_PRIVATE, mapping->fd, 0);
   if (mapping->mapped_addr == MAP_FAILED) {
     LOG(FATAL) << "Failed to map file: " << weights_file;
   }
