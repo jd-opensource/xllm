@@ -46,23 +46,27 @@ class BatchForwardType {
     return *this;
   }
 
-  int32_t value() const { return value_; }
+  constexpr int32_t value() const { return value_; }
 
-  bool is_prefill() const { return (value_ == PREFILL); }
+  constexpr bool is_prefill() const { return (value_ == PREFILL); }
 
-  bool is_chunked_prefill() const { return (value_ == CHUNKED_PREFILL); }
+  constexpr bool is_chunked_prefill() const {
+    return (value_ == CHUNKED_PREFILL);
+  }
 
-  bool no_decode() const {
+  constexpr bool no_decode() const {
     return (value_ == PREFILL || value_ == CHUNKED_PREFILL);
   }
 
-  bool has_decode() const { return (value_ == DECODE || value_ == MIXED); }
+  constexpr bool has_decode() const {
+    return (value_ == DECODE || value_ == MIXED);
+  }
 
-  bool is_decode() const { return (value_ == DECODE); }
+  constexpr bool is_decode() const { return (value_ == DECODE); }
 
-  bool is_mixed() const { return (value_ == MIXED); }
+  constexpr bool is_mixed() const { return (value_ == MIXED); }
 
-  bool is_empty() const { return (value_ == EMPTY); }
+  constexpr bool is_empty() const { return (value_ == EMPTY); }
 
   std::string to_string() const {
     switch (value_) {

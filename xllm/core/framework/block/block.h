@@ -43,10 +43,10 @@ class Block final {
   Block& operator=(Block&& other) noexcept;
 
   // get the block id
-  int32_t id() const { return id_; }
+  constexpr int32_t id() const { return id_; }
 
   // get the block size
-  uint32_t size() const { return size_; }
+  constexpr uint32_t size() const { return size_; }
 
   // get the reference count, 0 if the block is invalid after move
   uint32_t ref_count() const { return ref_count_ == nullptr ? 0 : *ref_count_; }
@@ -67,7 +67,9 @@ class Block final {
     memcpy(hash_value_, hash_value, XXH3_128BITS_HASH_VALUE_LEN);
   }
 
-  uint32_t get_hash_value_len() const { return XXH3_128BITS_HASH_VALUE_LEN; }
+  constexpr uint32_t get_hash_value_len() const {
+    return XXH3_128BITS_HASH_VALUE_LEN;
+  }
 
  private:
   // increase reference count
@@ -92,7 +94,7 @@ class Block final {
 };
 
 // equeal operator, mainly used for testing
-inline bool operator==(const Block& lhs, const Block& rhs) {
+inline constexpr bool operator==(const Block& lhs, const Block& rhs) {
   return lhs.id() == rhs.id();
 }
 
