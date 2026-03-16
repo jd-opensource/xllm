@@ -31,7 +31,7 @@ struct PbMetadata {
   uint64_t pb_size;
 };
 
-enum class ForwardType : int {
+enum class ForwardType : int8_t {
   PB_INPUT = 1,
   PB_OUTPUT = 2,
   RAW_INPUT = 3,
