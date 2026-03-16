@@ -172,8 +172,7 @@ torch::ScalarType convert_rec_type_to_torch(proto::DataType data_type) {
       return torch::kInt16;
 
     default:
-      LOG(FATAL) << "Unsupported data type: "
-                 << static_cast<int>(data_type);
+      LOG(FATAL) << "Unsupported data type: " << static_cast<int>(data_type);
   }
 }
 
