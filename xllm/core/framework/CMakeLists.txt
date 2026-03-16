@@ -39,6 +39,7 @@ cc_library(
   DEPS
     :common
     :model
+    :model_context
     :models
     $<$<BOOL:${USE_NPU}>:npu_layers>
     :tokenizer
@@ -56,4 +57,3 @@ cc_library(
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
 )
-

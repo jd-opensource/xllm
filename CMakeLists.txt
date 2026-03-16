@@ -564,5 +564,10 @@ if(USE_MUSA)
 endif()
 
 # add subdirectories
-add_subdirectory(xllm)
+# Configure third_party first so xllm can link against real CMake targets.
 add_subdirectory(third_party)
+if(TARGET brpc-static AND NOT TARGET brpc)
+  # Expose a canonical target name used across xllm/CMakeLists.
+  add_library(brpc ALIAS brpc-static)
+endif()
+add_subdirectory(xllm)

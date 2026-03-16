@@ -16,6 +16,7 @@ cc_library(
     model_registry.cpp
   DEPS
     :model
+    :model_context
     :dit_cache
     :model_loader
     :layers

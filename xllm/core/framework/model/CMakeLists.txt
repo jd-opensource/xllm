@@ -18,7 +18,6 @@ cc_library(
   DEPS
     :common
     :common_layers
-    $<$<BOOL:${USE_NPU}>:npu_layers>
     :kv_cache
     :processors
     :chat_template
