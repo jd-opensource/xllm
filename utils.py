@@ -333,8 +333,50 @@ def _ensure_prebuild_dependencies_installed(script_path: str) -> None:
     _export_cmake_prefix_paths(["/usr/local/yalantinglibs"])
 
 
+def _get_cmake_cache_path() -> str:
+    plat_name = sysconfig.get_platform()
+    dir_name = f"cmake.{plat_name}-{sys.implementation.name}-{get_python_version()}"
+    return os.path.join(get_base_dir(), "build", dir_name, "CMakeCache.txt")
+
+
+def _get_xllm_ops_marker_path() -> str:
+    ascend_home = os.getenv("ASCEND_HOME_PATH", "/usr/local/Ascend/ascend-toolkit/latest")
+    opp_root = os.path.join(ascend_home, "opp")
+    return os.path.join(opp_root, "vendors", "xllm", ".xllm_ops_git_head")
+
+
+def _clear_xllm_ops_cache_git_head(cache_path: str) -> bool:
+    if not os.path.isfile(cache_path):
+        return False
+
+    cache_prefix = "XLLM_OPS_GIT_HEAD_CACHED:"
+    with open(cache_path, "r", encoding="utf-8") as cache_file:
+        old_lines = cache_file.readlines()
+
+    new_lines = [line for line in old_lines if not line.startswith(cache_prefix)]
+    if new_lines == old_lines:
+        return False
+
+    temp_file_path = f"{cache_path}.tmp"
+    with open(temp_file_path, "w", encoding="utf-8") as cache_file:
+        cache_file.writelines(new_lines)
+    os.replace(temp_file_path, cache_path)
+    return True
+
+
+def _ensure_xllm_ops_rebuild_on_missing_marker() -> None:
+    marker_path = _get_xllm_ops_marker_path()
+    if os.path.isfile(marker_path):
+        return
+
+    cmake_cache_path = _get_cmake_cache_path()
+    if _clear_xllm_ops_cache_git_head(cmake_cache_path):
+        print("✅ Cleared XLLM_OPS_GIT_HEAD_CACHED from CMake cache to trigger xllm_ops rebuild.")
+        return
+
 def pre_build() -> None:
     script_path = os.path.dirname(os.path.abspath(__file__))
 
     _validate_submodules_or_exit(script_path)
     _ensure_prebuild_dependencies_installed(script_path)
+    _ensure_xllm_ops_rebuild_on_missing_marker()
