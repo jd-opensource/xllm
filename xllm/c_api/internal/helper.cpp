@@ -74,7 +74,7 @@ void shutdown_log() {
 void set_init_options(BackendType backend_type,
                       const XLLM_InitOptions* init_options,
                       XLLM_InitOptions* xllm_init_options) {
-  if (nullptr == init_options) {
+  if (init_options == nullptr) {
     if (backend_type == BackendType::LLM) {
       memcpy(xllm_init_options,
              &XLLM_INIT_LLM_OPTIONS_DEFAULT,
