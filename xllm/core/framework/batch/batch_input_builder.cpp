@@ -425,8 +425,8 @@ void BatchInputBuilder::setup_kv_cache_info(
 
   // calculate the block ids that need to be written
   int32_t kv_cache_block_idx = n_kv_cache_tokens / block_size;
-  for (auto iter = block_ids.begin() + kv_cache_block_idx;
-       iter != block_ids.end();
+  for (auto iter = block_ids.cbegin() + kv_cache_block_idx;
+       iter != block_ids.cend();
        ++iter) {
     write_block_ids.insert(*iter);
   }

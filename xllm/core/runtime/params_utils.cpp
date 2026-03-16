@@ -636,13 +636,13 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
           pb_token.set_empty(true);
         }
         pb_token.mutable_top_tokens()->Reserve(token.top_tokens.size());
-        for (auto it = token.top_tokens.begin(); it != token.top_tokens.end();
+        for (auto it = token.top_tokens.cbegin(); it != token.top_tokens.cend();
              ++it) {
           pb_token.add_top_tokens(*it);
         }
         pb_token.mutable_top_logprobs()->Reserve(token.top_logprobs.size());
-        for (auto it = token.top_logprobs.begin();
-             it != token.top_logprobs.end();
+        for (auto it = token.top_logprobs.cbegin();
+             it != token.top_logprobs.cend();
              ++it) {
           pb_token.add_top_logprobs(*it);
         }
@@ -674,13 +674,13 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
           pb_token.set_empty(true);
         }
         pb_token.mutable_top_tokens()->Reserve(token.top_tokens.size());
-        for (auto it = token.top_tokens.begin(); it != token.top_tokens.end();
+        for (auto it = token.top_tokens.cbegin(); it != token.top_tokens.cend();
              ++it) {
           pb_token.add_top_tokens(*it);
         }
         pb_token.mutable_top_logprobs()->Reserve(token.top_logprobs.size());
-        for (auto it = token.top_logprobs.begin();
-             it != token.top_logprobs.end();
+        for (auto it = token.top_logprobs.cbegin();
+             it != token.top_logprobs.cend();
              ++it) {
           pb_token.add_top_logprobs(*it);
         }

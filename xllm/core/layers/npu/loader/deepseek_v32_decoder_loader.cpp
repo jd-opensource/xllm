@@ -422,10 +422,10 @@ void DeekseekV32DecoderLoader::process_expert_weights(
   const int safe_end =
       std::min(end_idx, static_cast<int>(device_expert_list_.size()));
 
-  auto it = std::find(device_expert_list_.begin() + start_idx,
-                      device_expert_list_.begin() + safe_end,
+  auto it = std::find(device_expert_list_.cbegin() + start_idx,
+                      device_expert_list_.cbegin() + safe_end,
                       expert_index);
-  const bool in_partition = it != device_expert_list_.begin() + safe_end;
+  const bool in_partition = it != device_expert_list_.cbegin() + safe_end;
 
   // Early return if neither EPLB nor partition needs this expert
   if (!needs_eplb && !in_partition) {
@@ -466,11 +466,11 @@ void DeekseekV32DecoderLoader::process_expert_weights(
   // Step 5: Handle partition case
   if (in_partition) {
     std::vector<size_t> matches_pos;
-    for (auto iter = it; iter != device_expert_list_.begin() + safe_end;
+    for (auto iter = it; iter != device_expert_list_.cbegin() + safe_end;
          ++iter) {
       if (*iter == expert_index) {
         matches_pos.emplace_back(
-            std::distance(device_expert_list_.begin(), iter) - start_idx);
+            std::distance(device_expert_list_.cbegin(), iter) - start_idx);
       }
     }
 

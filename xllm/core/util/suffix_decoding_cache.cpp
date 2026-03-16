@@ -231,7 +231,7 @@ void SuffixDecodingCache::maybe_evict_requests(int32_t new_seq_id) {
   while (static_cast<int32_t>(req_to_seq_id_.size()) > max_cached_requests_) {
     bool evicted = false;
 
-    for (auto it = cache_order_.begin(); it != cache_order_.end(); ++it) {
+    for (auto it = cache_order_.cbegin(); it != cache_order_.cend(); ++it) {
       const std::string& req_id = *it;
       auto req_it = req_to_seq_id_.find(req_id);
       if (req_it == req_to_seq_id_.end()) {

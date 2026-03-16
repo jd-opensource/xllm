@@ -55,9 +55,9 @@ void MixScheduler::get_latency_budget_and_request_order(
 
   int32_t min_remaining_time = std::numeric_limits<int32_t>::max();
   int32_t min_tpot = std::numeric_limits<int32_t>::max();
-  for (auto it = running_queue.begin(); it != running_queue.end(); it++) {
-    auto request = *it;
-    auto& sequence = request->sequences()[0];
+  for (auto it = running_queue.cbegin(); it != running_queue.cend(); it++) {
+    const auto request = *it;
+    const auto& sequence = request->sequences()[0];
     auto remaining_time = request->get_remaining_time();
     total_exec_time += sequence->estimated_latency();
     if (request->tpot_slo_ms() < min_tpot) {

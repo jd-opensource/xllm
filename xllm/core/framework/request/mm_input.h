@@ -108,6 +108,14 @@ class MMInput {
 
   std::vector<MMInputItem>::const_iterator end() const { return items_.end(); }
 
+  std::vector<MMInputItem>::const_iterator cbegin() const {
+    return items_.cbegin();
+  }
+
+  std::vector<MMInputItem>::const_iterator cend() const {
+    return items_.cend();
+  }
+
   void insert(const std::vector<MMInputItem>& inputs) {
     items_.insert(items_.end(), inputs.begin(), inputs.end());
   }
@@ -129,7 +137,7 @@ class MMInput {
   std::vector<VideoMetadata> get_video_metadata() const {
     std::vector<VideoMetadata> metas;
     metas.reserve(items_.size());
-    for (auto& item : items_) {
+    for (const auto& item : items_) {
       if (item.has_type(MMType::VIDEO)) {
         metas.push_back(item.video_meta);
       }
