@@ -130,15 +130,13 @@ bool XServiceClient::init(const std::string& etcd_addr,
       &XServiceClient::reconcile_registration_loop, this);
 
   // watch master xllm_service change
-  auto master_func = std::bind(&XServiceClient::handle_master_service_watch,
-                               this,
-                               std::placeholders::_1);
-  etcd_client_->add_watch(ETCD_MASTER_SERVICE_KEY, master_func);
+  etcd_client_->add_watch(ETCD_MASTER_SERVICE_KEY, [this](auto&& arg) {
+    handle_master_service_watch(arg);
+  });
 
   // watch all xllm_service changes
-  auto xservices_func = std::bind(
-      &XServiceClient::handle_xservices_watch, this, std::placeholders::_1);
-  etcd_client_->add_watch(ETCD_XSERVICES_KEY_PREFIX, xservices_func);
+  etcd_client_->add_watch(ETCD_XSERVICES_KEY_PREFIX,
+                          [this](auto&& arg) { handle_xservices_watch(arg); });
 
   block_manager_pool_ = block_manager_pool;
 
