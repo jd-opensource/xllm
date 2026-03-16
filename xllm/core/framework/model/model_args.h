@@ -171,6 +171,13 @@ struct ModelArgs {
   PROPERTY(int32_t, rope_scaling) = -1;
   PROPERTY(float, router_aux_loss_coef) = 0.001f;
 
+  // qwen3 omni
+  PROPERTY(int64_t, talker_text_vocab_size) = 3072;
+  PROPERTY(int64_t, thinker_hidden_size) = 2048;
+  PROPERTY(int64_t, talker_text_intermediate_size) = 2048;
+  PROPERTY(int64_t, talker_text_hidden_size) = 1024;
+  PROPERTY(int32_t, talker_num_code_groups) = 16;
+
   // Vision model's dropout
   PROPERTY(float, mm_dropout) = 0.0f;
 

@@ -579,6 +579,8 @@ struct ModelInputParams {
 
   // Flag for CUDA graph capture mode
   bool enable_cuda_graph = false;
+  int32_t generation_steps =
+      0;  // TODO(panxuanyu) is there any way to get generation_steps
 };
 
 }  // namespace xllm

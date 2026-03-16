@@ -158,8 +158,12 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_mlp_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
-  param.hasSharedExpert = (args.n_shared_experts() > 0);
-  param.hasSharedExpertGate = false;
+  if (args.model_type() == "qwen3_omni_moe_talker") {
+    param.hasSharedExpert = true;
+    param.hasSharedExpertGate = true;
+  } else {
+    param.hasSharedExpertGate = false;
+  }
   param.processLogits = "normalization";
   param.numOfSelectedExperts = {args.num_experts_per_tok()};
 
@@ -312,7 +316,6 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
     LOG_IF(FATAL, st != 0) << model_name_
                            << "excute decode layer fail, error code: " << st;
   }
-
   return tensor_placeholder_;
 }
 
