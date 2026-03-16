@@ -432,6 +432,9 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::sp_post(
   CHECK(attn_metadata.is_prefill || attn_metadata.is_chunked_prefill)
       << "deepseek_v32 sequence parallel indexer only supports prefill "
          "batches.";
+  CHECK(sp_ctx.batch_forward_type.no_decode())
+      << "deepseek_v32 sequence parallel indexer only supports prefill "
+         "batches.";
   CHECK(attn_metadata.slot_mapping.defined())
       << "deepseek_v32 sequence parallel indexer requires slot_mapping.";
   CHECK_EQ(k_global.size(0), attn_metadata.slot_mapping.numel())

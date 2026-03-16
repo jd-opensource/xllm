@@ -44,6 +44,7 @@ struct DeepseekV32SPContext {
   DeepseekV32SPCommPlan comm_plan;
   AttentionMetadata local_attn_metadata;
   DeepseekV32SPMetadata sp_meta;
+  BatchForwardType batch_forward_type;
 
   torch::Tensor gathered_reorder_index;
 
@@ -99,6 +100,7 @@ inline std::optional<DeepseekV32SPContext> build_deepseek_v32_sp_context(
       base_attn_metadata, local_segments);
   context.sp_meta =
       build_sp_metadata(base_attn_metadata, local_segments, q_seq_lens);
+  context.batch_forward_type = batch_forward_type;
   context.total_tokens = total_tokens;
   context.rank = curr_rank;
   context.process_group = sp_group;

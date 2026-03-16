@@ -198,6 +198,24 @@ TEST(DeepseekV32SPUtilsTest,
   EXPECT_EQ(extract_segment_ctx_lens(segments), (std::vector<int32_t>{2, 16}));
 }
 
+TEST(DeepseekV32SPUtilsTest, BuildContextRejectsMixedBatchForwardType) {
+  ScopedFlagValue enable_prefill_sp(FLAGS_enable_prefill_sp, true);
+  auto attn_metadata = make_prefill_metadata({8}, {8}, std::nullopt);
+  auto tokens = torch::arange(8, torch::TensorOptions().dtype(torch::kInt64));
+  xllm::layer::test::MockProcessGroup process_group(torch::kCPU,
+                                                    /*rank=*/0,
+                                                    /*world_size=*/2);
+
+  auto context = build_deepseek_v32_sp_context(attn_metadata,
+                                               BatchForwardType::MIXED,
+                                               tokens,
+                                               &process_group,
+                                               /*curr_rank=*/0,
+                                               /*world_size=*/2);
+
+  EXPECT_FALSE(context.has_value());
+}
+
 TEST(DeepseekV32SPUtilsTest,
      BuildZigzagSplitPlanMatchesSingleRequestWithPadding) {
   const auto all_segments = build_all_sp_segments(4, {10}, {10});
