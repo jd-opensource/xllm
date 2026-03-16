@@ -28,6 +28,7 @@ limitations under the License.
 #endif
 #include "framework/batch/batch_forward_type.h"
 #include "framework/request/mm_batch_data.h"
+#include "npu_cp_ep_padding.h"
 #include "npu_cp_prepare.h"
 #include "npu_dp_ep_padding.h"
 #include "util/hash_util.h"
@@ -350,6 +351,22 @@ struct ModelInputParams {
     params.request_ids = std::move(request_ids);
     params.extra_token_ids = std::move(extra_token_ids);
     params.dp_ep_padding_data = dp_ep_padding_data;
+    params.cp_ep_padding_data
+        .attn_padding_idx(
+            safe_to(cp_ep_padding_data.attn_padding_idx(), device, true))
+        .attn_unpadding_idx(
+            safe_to(cp_ep_padding_data.attn_unpadding_idx(), device, true))
+        .ffn_padding_idx(
+            safe_to(cp_ep_padding_data.ffn_padding_idx(), device, true))
+        .ffn_unpadding_idx(
+            safe_to(cp_ep_padding_data.ffn_unpadding_idx(), device, true))
+        .lm_head_skip_padding_token_indices(
+            safe_to(cp_ep_padding_data.lm_head_skip_padding_token_indices(),
+                    device,
+                    true))
+        .gather_prenorm_idx(
+            safe_to(cp_ep_padding_data.gather_prenorm_idx(), device, true));
+
     params.kv_cache_tokens_nums_host = std::move(kv_cache_tokens_nums_host);
     params.kv_cache_tokens_nums = safe_to(kv_cache_tokens_nums, device);
     params.history_compressed_kv = safe_to(history_compressed_kv, device);
@@ -538,6 +555,7 @@ struct ModelInputParams {
 #endif
 
   DpEpPaddingData dp_ep_padding_data;
+  CpEpPaddingData cp_ep_padding_data;
   CpPrefillInputs cp_prefill_inputs;
 
   torch::Tensor expert_load_data;

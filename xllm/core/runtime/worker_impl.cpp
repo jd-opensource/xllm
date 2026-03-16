@@ -47,6 +47,7 @@ limitations under the License.
 #include "core/distributed_runtime/master.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model/npu_cp_ep_padding.h"
 #include "framework/model_loader.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
@@ -559,6 +560,14 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
                                               input.positions,
                                               input.input_params.q_seq_lens);
     processed_input.input_params.cp_prefill_inputs = tmp_cp_inputs.to(device_);
+    CpEpPadding cp_ep_padding(
+        input.token_ids,
+        context_.get_model_args().num_experts_per_tok(),
+        context_.get_parallel_args().mapping_data(),
+        /*device=*/device_,
+        dtype_,
+        /*is_prefill=*/input.input_params.batch_forward_type.is_prefill());
+    processed_input.input_params.cp_ep_padding_data = cp_ep_padding.build();
     LOG(INFO) << "[CP_DEBUG] : Finished to prepare cp inputs";
   }
   auto& input_params = processed_input.input_params;

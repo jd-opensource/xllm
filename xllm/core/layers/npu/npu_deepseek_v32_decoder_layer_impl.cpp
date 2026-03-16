@@ -219,15 +219,10 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
   CHECK_EQ(parallel_args.world_size(), dp_size_ * dp_local_tp_size_ * cp_size_);
   dp_local_tp_rank_ = parallel_args.rank() % dp_local_tp_size_;
 
-<<<<<<< HEAD
   param_from_args(
       prefill_param_, model_args, parallel_args, /*is_prefill=*/true);
   param_from_args(
       decode_param_, model_args, parallel_args, /*is_prefill=*/false);
-=======
-  param_from_args(prefill_param_, model_args, parallel_args, true);
-  param_from_args(decode_param_, model_args, parallel_args, false);
->>>>>>> cc287ff (dsa cp fix)
 
   loader_ = std::make_unique<DeekseekV32DecoderLoader>(
       WEIGHT_COUNT_PER_LAYER,
@@ -729,11 +724,7 @@ int64_t NpuDeepseekV32DecoderLayerImpl::init_node(
     atb_speed::deepseekV2::DecoderLayerParam& param) {
   bool eplb_enabled = FLAGS_enable_eplb &&
                       layer_id_ >= decode_param_.firstKDenseReplace &&
-<<<<<<< HEAD
                       !decode_param_.isPrefill;
-=======
-                      !param.isPrefill;
->>>>>>> cc287ff (dsa cp fix)
   atb::Operation* operation = nullptr;
   atb_speed::deepseekV2::DecoderLayer(param, &operation);
   node.operation.reset(operation);
@@ -788,7 +779,6 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
   atb::Status st;
   ModelInputParams& input_params_new =
       const_cast<ModelInputParams&>(input_params);
-<<<<<<< HEAD
   if (input_params_new.batch_forward_type.is_decode()) {
     build_node_variant_pack(decode_node_,
                             x,
@@ -802,10 +792,6 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
     LOG_IF(FATAL, st != 0) << model_name_
                            << "execute prefill layer fail, error code: " << st;
   } else {
-=======
-  if (input_params_new.batch_forward_type.is_prefill() ||
-      input_params_new.batch_forward_type.is_chunked_prefill()) {
->>>>>>> cc287ff (dsa cp fix)
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,
@@ -817,21 +803,6 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "execute prefill layer fail, error code: " << st;
-<<<<<<< HEAD
-=======
-  } else {
-    build_node_variant_pack(decode_node_,
-                            x,
-                            cos_pos,
-                            sin_pos,
-                            /*attn_mask*/ tensor_placeholder_,
-                            kv_cache,
-                            input_params_new,
-                            false);
-    st = execute_node(decode_node_, node_id + 1000, event, event_flag);
-    LOG_IF(FATAL, st != 0) << model_name_
-                           << "execute decode layer fail, error code: " << st;
->>>>>>> cc287ff (dsa cp fix)
   }
   return tensor_placeholder_;
 }
@@ -849,10 +820,15 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   // final_hidden_states_ = torch::zeros_like(x);
   int32_t input_idx = 0;
   auto& dp_ep_padding = input_params.dp_ep_padding_data;
+  auto& cp_ep_padding = input_params.cp_ep_padding_data;
   auto& cp_inputs = input_params.cp_prefill_inputs;
+  const bool use_cp_ep_padding = (cp_size_ > 1 && is_prefill);
 
   if (dp_size_ <= 1 && ep_size_ <= 1 || cp_size_ > 1) {
     dp_ep_padding.set_placeholder(tensor_placeholder_);
+  }
+  if (!use_cp_ep_padding) {
+    cp_ep_padding.set_placeholder(tensor_placeholder_);
   }
   // set micro batch 0 input part
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
@@ -932,18 +908,30 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   }
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 18) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.attn_padding_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.attn_padding_idx()
+                                            : dp_ep_padding.attn_padding_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 19) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.attn_unpadding_idx());
+      atb_speed::Utils::AtTensor2Tensor(
+          use_cp_ep_padding ? cp_ep_padding.attn_unpadding_idx()
+                            : dp_ep_padding.attn_unpadding_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 20) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.ffn_padding_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.ffn_padding_idx()
+                                            : dp_ep_padding.ffn_padding_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 21) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.ffn_unpadding_idx());
+      atb_speed::Utils::AtTensor2Tensor(
+          use_cp_ep_padding ? cp_ep_padding.ffn_unpadding_idx()
+                            : dp_ep_padding.ffn_unpadding_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 22) =
       atb_speed::Utils::AtTensor2Tensor(
-          dp_ep_padding.lm_head_skip_padding_token_indices());
+          use_cp_ep_padding
+              ? cp_ep_padding.lm_head_skip_padding_token_indices()
+              : dp_ep_padding.lm_head_skip_padding_token_indices());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 23) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.gather_prenorm_idx());
+      atb_speed::Utils::AtTensor2Tensor(
+          use_cp_ep_padding ? cp_ep_padding.gather_prenorm_idx()
+                            : dp_ep_padding.gather_prenorm_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 24) =
       atb_speed::Utils::AtTensor2Tensor(at_start_expert_id_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 25) =
