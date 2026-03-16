@@ -43,7 +43,6 @@ limitations under the License.
 
 namespace xllm {
 
-
 class OneRecModelImpl : public torch::nn::Module {
  public:
   explicit OneRecModelImpl(const ModelContext& context) {
