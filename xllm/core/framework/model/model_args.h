@@ -408,6 +408,36 @@ struct ModelArgs {
   PROPERTY(float, max_shift) = 0;
   PROPERTY(int64_t, base_image_seq_len) = 0;
   PROPERTY(int64_t, max_image_seq_len) = 0;
+
+  // qwen3_omni_code2wavargs
+  PROPERTY(int64_t, code2wav_config_codebook_size) = 2048;
+  PROPERTY(int64_t, code2wav_config_hidden_size) = 1024;
+  PROPERTY(int64_t, code2wav_config_max_position_embeddings) = 8000;
+  PROPERTY(double, code2wav_config_rope_theta) = 10000.0;
+  PROPERTY(int64_t, code2wav_config_num_attention_heads) = 16;
+  PROPERTY(int64_t, code2wav_config_num_key_value_heads) = 16;
+  PROPERTY(bool, code2wav_config_attention_bias) = false;
+  PROPERTY(int64_t, code2wav_config_sliding_window) = 72;
+  PROPERTY(int64_t, code2wav_config_intermediate_size) = 3072;
+  PROPERTY(std::string, code2wav_config_hidden_act) = std::string("silu");
+  PROPERTY(double, code2wav_config_layer_scale_initial_scale) = 0.01;
+  PROPERTY(double, code2wav_config_rms_norm_eps) = 1e-5;
+  PROPERTY(int64_t, code2wav_config_num_hidden_layers) = 8;
+  PROPERTY(int64_t, code2wav_config_num_quantizers) = 16;
+  PROPERTY(int64_t, code2wav_config_decoder_dim) = 1536;
+  PROPERTY(double, code2wav_config_attention_dropout) = 0.0;
+  PROPERTY(std::vector<int>,
+           code2wav_config_upsampling_ratios_vec) = std::vector<int> {
+    2,
+    2
+  };
+  PROPERTY(std::vector<int>,
+           code2wav_config_upsample_rates_vec) = std::vector<int> {
+    8,
+    5,
+    4,
+    3
+  };
 };
 
 inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {

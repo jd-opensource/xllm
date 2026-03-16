@@ -51,6 +51,7 @@ limitations under the License.
 #include "vlm/npu/qwen2_5_vl_mm_embedding.h"  // IWYU pragma: keep
 #include "vlm/npu/qwen2_vl.h"                 // IWYU pragma: keep
 #include "vlm/npu/qwen2_vl_embedding.h"       // IWYU pragma: keep
+#include "vlm/npu/qwen3_omni_code2wav.h"      // IWYU pragma: keep
 #include "vlm/npu/qwen3_vl.h"                 // IWYU pragma: keep
 #include "vlm/npu/qwen3_vl_mm_embedding.h"    // IWYU pragma: keep
 #include "vlm/npu/qwen3_vl_moe.h"             // IWYU pragma: keep
