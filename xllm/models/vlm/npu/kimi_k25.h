@@ -219,27 +219,145 @@ class KimiK2_5_VisionBlockImpl : public torch::nn::Module {
 };
 TORCH_MODULE(KimiK2_5_VisionBlock);
 
+class KimiK2_5_VisionPosEmbDividedImpl : public torch::nn::Module {
+ public:
+  KimiK2_5_VisionPosEmbDividedImpl(const ModelContext& context) {
+    auto model_args = context.get_model_args();
+    auto options = context.get_tensor_options();
+
+    pos_emb_height_ = model_args.mm_init_pos_emb_height();
+    pos_emb_width_ = model_args.mm_init_pos_emb_width();
+    pos_emb_time_ = model_args.mm_init_pos_emb_time();
+    dim_ = model_args.mm_hidden_size();
+
+    weight_ = register_parameter(
+        "weight",
+        torch::empty({pos_emb_height_, pos_emb_width_, dim_}, options));
+    torch::nn::init::normal_(weight_);
+
+    time_weight_ =
+        register_buffer("time_weight",
+                        build_time_weight(pos_emb_time_, dim_, options),
+                        false);
+  }
+
+  torch::Tensor forward(torch::Tensor x, torch::Tensor grid_thws) {
+    std::vector<torch::Tensor> pos_embs;
+    auto count = grid_thws.size(0);
+    pos_embs.reserve(count);
+    auto grid_thws_cpu = grid_thws.cpu().to(torch::kLong).contiguous();
+
+    for (int64_t i = 0; i < count; ++i) {
+      auto t = grid_thws_cpu[i][0].item<int64_t>();
+      auto h = grid_thws_cpu[i][1].item<int64_t>();
+      auto w = grid_thws_cpu[i][2].item<int64_t>();
+
+      CHECK_LE(t, pos_emb_time_) << "grid_thws t larger than init_pos_emb_time";
+
+      torch::Tensor pos_emb_2d;
+      if (h == pos_emb_height_ && w == pos_emb_width_) {
+        pos_emb_2d = weight_.flatten(0, 1);
+      } else {
+        namespace F = torch::nn::functional;
+        pos_emb_2d =
+            F::interpolate(weight_.permute({2, 0, 1}).unsqueeze(0),
+                           F::InterpolateFuncOptions()
+                               .size(std::vector<int64_t>({h, w}))
+                               .mode(torch::kBicubic)
+                               .align_corners(false))
+                .squeeze(0)
+                .permute({1, 2, 0})
+                .flatten(0, 1);
+      }
+
+      torch::Tensor pos_emb_3d;
+      if (t == 1) {
+        pos_emb_3d = pos_emb_2d;
+      } else {
+        pos_emb_3d =
+            pos_emb_2d.unsqueeze(0).repeat({t, 1, 1}) +
+            time_weight_.index({torch::indexing::Slice(0, t)});
+      }
+      pos_embs.emplace_back(pos_emb_3d.reshape({-1, pos_emb_3d.size(-1)}));
+    }
+
+    auto pos_emb = torch::cat(pos_embs, 0).to(x.options());
+    return x + pos_emb;
+  }
+
+  void load_state_dict(const StateDict& state_dict) {
+    auto weight = state_dict.get_tensor("weight");
+    if (weight.defined()) {
+      if (weight.sizes() != weight_.sizes()) {
+        CHECK_EQ(weight.numel(), weight_.numel())
+            << "pos_emb weight numel mismatch for " << name();
+        weight = weight.view(weight_.sizes());
+      }
+      DCHECK_EQ(weight_.sizes(), weight.sizes())
+          << "pos_emb weight size mismatch for " << name();
+      weight_.data().copy_(weight.to(weight_.device()).to(weight_.dtype()));
+      weight_loaded_ = true;
+    }
+  }
+
+  void verify_loaded_weights(const std::string& prefix) const {
+    CHECK(weight_loaded_) << "weight is not loaded for " << prefix + "weight";
+  }
+
+ private:
+  torch::Tensor build_time_weight(int64_t t_size,
+                                  int64_t embed_dim,
+                                  const torch::TensorOptions& options) {
+    CHECK_EQ(embed_dim % 2, 0) << "embed_dim must be even";
+    auto float_opts = torch::TensorOptions()
+                          .dtype(torch::kFloat32)
+                          .device(options.device());
+    auto omega = torch::arange(embed_dim / 2, float_opts);
+    omega = 1.0 / torch::pow(10000.0, omega / (embed_dim / 2.0));
+    auto pos = torch::arange(t_size, float_opts).reshape({-1});
+    auto out = torch::einsum("m,d->md", {pos, omega});
+    auto emb = torch::cat({torch::sin(out), torch::cos(out)}, 1);
+    return emb.unsqueeze(1).to(options.dtype());
+  }
+
+ private:
+  int64_t pos_emb_height_ = 0;
+  int64_t pos_emb_width_ = 0;
+  int64_t pos_emb_time_ = 0;
+  int64_t dim_ = 0;
+  torch::Tensor weight_;
+  torch::Tensor time_weight_;
+  bool weight_loaded_ = false;
+};
+TORCH_MODULE(KimiK2_5_VisionPosEmbDivided);
+
 class KimiK2_5_VisionPatchEmbedImpl : public torch::nn::Module {
  public:
   KimiK2_5_VisionPatchEmbedImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    auto in_features = model_args.mm_num_channels() *
-                       model_args.mm_temporal_patch_size() *
-                       model_args.mm_patch_size() * model_args.mm_patch_size();
-
+    auto in_features =
+        model_args.mm_num_channels() * model_args.mm_patch_size() *
+        model_args.mm_patch_size();
     auto out_features = model_args.mm_hidden_size();
 
     proj_ = register_module(
         "proj",
         torch::nn::Linear(
-            torch::nn::LinearOptions(in_features, out_features).bias(false)));
-
+            torch::nn::LinearOptions(in_features, out_features).bias(true)));
     proj_->weight.set_data(proj_->weight.to(options));
+    proj_->bias.set_data(proj_->bias.to(options));
+
+    pos_emb_ =
+        register_module("pos_emb", KimiK2_5_VisionPosEmbDivided(context));
   }
 
-  torch::Tensor forward(torch::Tensor x) { return proj_(x); }
+  torch::Tensor forward(torch::Tensor x, torch::Tensor grid_thws) {
+    x = proj_(x);
+    x = pos_emb_(x, grid_thws);
+    return x;
+  }
 
   void load_state_dict(const StateDict& state_dict) {
     auto weight = state_dict.get_tensor("proj.weight");
@@ -250,16 +368,31 @@ class KimiK2_5_VisionPatchEmbedImpl : public torch::nn::Module {
       proj_->weight.data().copy_(weight);
       proj_weight_loaded_ = true;
     }
+
+    auto bias = state_dict.get_tensor("proj.bias");
+    if (bias.defined()) {
+      DCHECK_EQ(proj_->bias.sizes(), bias.sizes())
+          << "proj bias size mismatch for " << name();
+      proj_->bias.data().copy_(bias);
+      proj_bias_loaded_ = true;
+    }
+
+    pos_emb_->load_state_dict(state_dict.get_dict_with_prefix("pos_emb."));
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
     CHECK(proj_weight_loaded_)
         << "weight is not loaded for " << prefix + "proj.weight";
+    CHECK(proj_bias_loaded_)
+        << "bias is not loaded for " << prefix + "proj.bias";
+    pos_emb_->verify_loaded_weights(prefix + "pos_emb.");
   }
 
  private:
   bool proj_weight_loaded_ = false;
+  bool proj_bias_loaded_ = false;
   torch::nn::Linear proj_{nullptr};
+  KimiK2_5_VisionPosEmbDivided pos_emb_{nullptr};
 };
 TORCH_MODULE(KimiK2_5_VisionPatchEmbed);
 
@@ -564,7 +697,7 @@ class KimiK2_5_VisionTransformerImpl : public torch::nn::Module {
                         const ModelInputParams& input_params) {
     // patchify
     // hidden_states = x.to(device=self.device, dtype=self.dtype);
-    hidden_states = patch_embed_(hidden_states);
+    hidden_states = patch_embed_(hidden_states, grid_thw);
     //  compute position embedding
     auto rotary_pos_emb = rot_pos_emb(grid_thw);
 
@@ -715,7 +848,7 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
   KimiK2_5_VLForConditionalGenerationImpl(const ModelContext& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
-    visual_ = register_module("visual", KimiK2_5_VisionTransformer(context));
+    visual_ = register_module("vision_tower", KimiK2_5_VisionTransformer(context));
 
     language_model_ =
         register_module("language_model", DeepseekV2ForCausalLM(context));
@@ -1006,7 +1139,8 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
 
   // Original qwen2_5_vl vision args not found in Kimi-K2.5 vision_config.
   // Keep defaults and mark as unmapped:
-  // LOAD_ARG_OR(mm_num_channels, "vision_config.in_chans", 3);
+  // mm_num_channels is required by patch_embed in_features (in_dim * patch^2).
+  LOAD_ARG_OR(mm_num_channels, "vision_config.in_chans", 3);
   // LOAD_ARG_OR(mm_window_size, "vision_config.window_size", 112);
   // LOAD_ARG_OR(mm_fullatt_block_indexes,
   //             "vision_config.fullatt_block_indexes",
@@ -1017,11 +1151,13 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   // [Compared with qwen2_5_vl] qwen mrope args are absent in Kimi-K2.5 config.
   // LOAD_ARG(rope_scaling_mrope_section, "rope_scaling.mrope_section");
 
+  // Add Args For Kimi-K2.5
+  LOAD_ARG_OR(mm_init_pos_emb_time, "vision_config.init_pos_emb_time", 4);
+  LOAD_ARG_OR(mm_init_pos_emb_width, "vision_config.init_pos_emb_width", 64);
+  LOAD_ARG_OR(mm_init_pos_emb_height, "vision_config.init_pos_emb_height", 64);
+
   // New Kimi-K2.5 vision_config keys currently not mapped to ModelArgs:
   // - _attn_implementation
-  // - init_pos_emb_height
-  // - init_pos_emb_time
-  // - init_pos_emb_width
   // - merge_type
   // - pos_emb_type
   // - video_attn_type
@@ -1034,5 +1170,6 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
 }  // namespace xllm
+
 
 

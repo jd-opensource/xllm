@@ -311,6 +311,11 @@ struct ModelArgs {
   PROPERTY(std::vector<double>, mm_image_normalize_mean) = {};
   PROPERTY(std::vector<double>, mm_image_normalize_std) = {};
 
+  // KIMI_K25
+  PROPERTY(int, mm_init_pos_emb_width) = 64;
+  PROPERTY(int, mm_init_pos_emb_height) = 64;
+  PROPERTY(int, mm_init_pos_emb_time) = 4;
+
   // GLM
   PROPERTY(bool, mm_video_do_rescale) = false;
   PROPERTY(std::vector<double>, mm_video_normalize_mean) = {};
