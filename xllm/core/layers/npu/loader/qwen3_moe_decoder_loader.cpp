@@ -265,7 +265,6 @@ void Qwen3MoeDecoderLoader::load_state_dict(const StateDict& state_dict) {
 
 void Qwen3MoeDecoderLoader::verify_loaded_weights(
     const std::string& prefix) const {
-  VLOG(50) << "start verify";
   for (const auto& [name, index] : WEIGHT_MAPPING) {
     if (name == "down_proj.weight" || name == "gate_proj.weight" ||
         name == "up_proj.weight" ||
@@ -283,7 +282,6 @@ void Qwen3MoeDecoderLoader::verify_loaded_weights(
     CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
         << "weight is not loaded for " << name;
   }
-  VLOG(50) << "end verify";
 }
 
 void Qwen3MoeDecoderLoader::merge_experts_weights() {
@@ -316,8 +314,6 @@ void Qwen3MoeDecoderLoader::merge_experts_weights() {
     }
     at_weight_tensors_[IN_MLP_GATEUP_WEIGHT_EXPERT] =
         at_npu::native::npu_format_cast(mlp_gateup_weight, 2).contiguous();
-    VLOG(50) << "gmm weight gateup shape"
-             << at_weight_tensors_[IN_MLP_GATEUP_WEIGHT_EXPERT].sizes();
   } catch (const std::exception& e) {
     LOG(ERROR) << "[ERROR] Exception in gateup weight processing: " << e.what();
     throw;
@@ -373,7 +369,6 @@ void Qwen3MoeDecoderLoader::merge_shared_expert_weights() {
 torch::Tensor Qwen3MoeDecoderLoader::merge_experts_weights(
     std::vector<torch::Tensor>& experts,
     bool transpose) {
-  VLOG(50) << "merge_experts_weights device " << device_;
   torch::Tensor merged_tensor = torch::stack(experts, 0).to(device_);
   if (transpose) {
     merged_tensor = merged_tensor.transpose(1, 2);
@@ -618,11 +613,8 @@ torch::Tensor Qwen3MoeDecoderLoader::merge_experts_weights(
 }
 
 void Qwen3MoeDecoderLoader::merge_loaded_weights() {
-  VLOG(50) << "start experts merging";
   merge_experts_weights();
-  VLOG(50) << "start shared experts merging";
   merge_shared_expert_weights();
-  VLOG(50) << "start qkv merging";
 
   at_weight_tensors_[IN_QKV_WEIGHT_0] =
       torch::cat({at_weight_tensors_[IN_QKV_WEIGHT_0],
