@@ -21,6 +21,7 @@ limitations under the License.
 #endif
 
 #include <unordered_map>
+#include <vector>
 
 #include "common/macros.h"
 #include "worker.pb.h"
@@ -29,7 +30,7 @@ namespace xllm {
 
 class CollectiveService : public proto::Collective {
  public:
-  CollectiveService(int dp_group_num, int total_num, int device_idx);
+  CollectiveService(int root_info_count, int total_num, int device_idx);
   virtual ~CollectiveService() = default;
 
   void Sync(::google::protobuf::RpcController* controller,

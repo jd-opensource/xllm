@@ -37,6 +37,7 @@ limitations under the License.
 #include "llm/npu/kimi_k2.h"                  // IWYU pragma: keep
 #include "llm/npu/llama.h"                    // IWYU pragma: keep
 #include "llm/npu/llama3.h"                   // IWYU pragma: keep
+#include "llm/npu/minimax_m2.h"               // IWYU pragma: keep
 #include "llm/npu/oxygen.h"                   // IWYU pragma: keep
 #include "llm/npu/qwen2.h"                    // IWYU pragma: keep
 #include "llm/npu/qwen3.h"                    // IWYU pragma: keep

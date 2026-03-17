@@ -17,6 +17,7 @@ cc_library(
     npu_qwen2dot5_vision_encoder_layer_impl.h
     npu_qwen3_vision_encoder_layer_impl.h
     npu_qwen3_moe_decoder_layer_impl.h
+    npu_minimax_m2_decoder_layer_impl.h
     # atb_parallel_linear.h
     npu_block_copy_impl.h
     buffer/atb_buffer.h
@@ -41,6 +42,7 @@ cc_library(
     loader/qwen2_decoder_loader.h
     loader/qwen3_moe_decoder_loader.h
     loader/eagle3_decoder_loader.h
+    loader/minimax_m2_decoder_loader.h
     loader/word_embedding_loader.h
     loader/lm_head_loader.h
     loader/column_parallel_linear_loader.h
@@ -71,6 +73,7 @@ cc_library(
     npu_qwen2dot5_vision_encoder_layer_impl.cpp
     npu_qwen3_vision_encoder_layer_impl.cpp
     npu_qwen3_moe_decoder_layer_impl.cpp
+    npu_minimax_m2_decoder_layer_impl.cpp
     # atb_parallel_linear.cpp
     npu_block_copy_impl.cpp
     buffer/atb_buffer.cpp
@@ -95,6 +98,7 @@ cc_library(
     loader/qwen2_decoder_loader.cpp
     loader/qwen3_moe_decoder_loader.cpp
     loader/eagle3_decoder_loader.cpp
+    loader/minimax_m2_decoder_loader.cpp
     loader/word_embedding_loader.cpp
     loader/lm_head_loader.cpp
     loader/column_parallel_linear_loader.cpp

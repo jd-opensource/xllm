@@ -569,12 +569,13 @@ QKVParallelLinearImpl::QKVParallelLinearImpl(
       head_size_(head_size),
       num_kv_head_replicas_(num_kv_head_replicas),
       gather_output_(gather_output),
-      parallel_args_(parallel_args),
+      tp_group_(parallel_args.tp_group_),
       options_(options),
       device_(options.device()),
       quant_args_(quant_args) {
-  rank_ = parallel_args_.tp_group_->rank();
-  world_size_ = parallel_args_.tp_group_->world_size();
+  CHECK(tp_group_ != nullptr) << "QKVParallelLinear requires tp_group_";
+  rank_ = tp_group_->rank();
+  world_size_ = tp_group_->world_size();
   const int64_t out_features_per_partition =
       (num_heads + 2 * num_kv_heads) * head_size;
   // Note: torch.nn.functional.linear performs XA^T + b and as a result
@@ -646,7 +647,7 @@ torch::Tensor QKVParallelLinearImpl::forward(torch::Tensor input) {
   }
 
   if (world_size_ > 1 && gather_output_) {
-    output = xllm::parallel_state::gather(output, parallel_args_.tp_group_);
+    output = xllm::parallel_state::gather(output, tp_group_);
   }
   return output;
 }

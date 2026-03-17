@@ -20,8 +20,10 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "core/common/macros.h"
 #include "core/framework/kv_cache/kv_cache.h"
@@ -179,6 +181,10 @@ class GraphPersistentParam {
   // Update attention mask efficiently from input parameters
   void update_attention_mask(const ModelInputParams& input_params);
 
+  // Update persistent block tables while skipping unchanged host rows/prefixes
+  void update_block_tables(const torch::Tensor& block_tables,
+                           int64_t actual_batch_size);
+
   // Update paged attention tiling based on input parameters
   void plan_paged_attention_tiling(const torch::Tensor& tokens,
                                    const torch::Tensor& k_cache,
@@ -186,6 +192,14 @@ class GraphPersistentParam {
                                    const torch::Tensor& block_tables,
                                    const ModelInputParams& input_params,
                                    aclrtStream stream);
+
+  bool try_use_cached_minimax_tiling(const ModelInputParams& input_params,
+                                     int64_t num_tokens,
+                                     aclrtStream stream);
+  void maybe_store_minimax_tiling(const ModelInputParams& input_params,
+                                  int64_t num_tokens,
+                                  const void* tiling_buffer,
+                                  uint64_t tiling_buffer_size);
 
   const ModelArgs& args_;
   const torch::Device& device_;
@@ -196,6 +210,8 @@ class GraphPersistentParam {
   torch::Tensor persistent_positions_;
   torch::Tensor persistent_new_cache_slots_;
   torch::Tensor persistent_block_tables_;
+  torch::Tensor cached_block_tables_host_;
+  std::vector<int64_t> cached_block_table_valid_lens_;
   // When q_seq_lens contains values greater than 1(chunked prefill mode or
   // speculative decode mode), the mask needs to be passed to the attention
   // operation
@@ -228,6 +244,19 @@ class GraphPersistentParam {
   // Cached attention parameters
   int32_t num_head_;
   int32_t head_dim_;
+
+  struct MiniMaxTilingCacheEntry {
+    uint32_t num_tokens = 0;
+    int64_t num_sequences = 0;
+    int64_t block_table_len = 0;
+    std::vector<int> kv_seq_lens;
+    std::vector<int32_t> block_tables;
+    std::vector<uint8_t> tiling_buffer;
+    uint64_t tiling_buffer_size = 0;
+  };
+  bool enable_minimax_tiling_cache_ = false;
+  size_t minimax_tiling_cache_capacity_ = 0;
+  std::deque<MiniMaxTilingCacheEntry> minimax_tiling_cache_;
 
   // Flag indicating whether attention mask needs to be updated
   bool need_update_attn_mask_;

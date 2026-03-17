@@ -108,6 +108,8 @@ def set_npu_envs() -> None:
 
     set_common_envs()
     set_npu_torch_ld_library_path()
+    torch_root = get_torch_root_path() or ""
+    torch_libs = os.path.join(os.path.dirname(torch_root), "torch.libs") if torch_root else ""
     NPU_TOOLKIT_HOME = os.getenv("NPU_TOOLKIT_HOME")
     if not NPU_TOOLKIT_HOME:
         os.environ["NPU_TOOLKIT_HOME"] = "/usr/local/Ascend/ascend-toolkit/latest"
@@ -121,6 +123,9 @@ def set_npu_envs() -> None:
         NPU_TOOLKIT_HOME+"/opp/vendors/xllm/op_api/lib" + ":" + \
         NPU_TOOLKIT_HOME+"/tools/aml/lib64" + ":" + \
         NPU_TOOLKIT_HOME+"/tools/aml/lib64/plugin" + ":" + \
+        "/usr/local/Ascend/driver/lib64/driver" + ":" + \
+        "/usr/local/Ascend/driver/lib64/common" + ":" + \
+        (torch_libs + ":" if torch_libs else "") + \
         LD_LIBRARY_PATH
     os.environ["LD_LIBRARY_PATH"] = LD_LIBRARY_PATH
     PYTHONPATH = os.getenv("PYTHONPATH", "")
@@ -144,7 +149,6 @@ def set_npu_envs() -> None:
         os.environ["ATB_PATH"] = "/usr/local/Ascend/nnal/atb"
         ATB_PATH = "/usr/local/Ascend/nnal/atb"
 
-
     cxx_abi = "1" if get_cxx_abi() else "0"
     ATB_HOME_PATH = os.path.join(ATB_PATH, "latest", "atb", "cxx_abi_" + cxx_abi)
     os.environ["ATB_HOME_PATH"] = ATB_HOME_PATH
@@ -154,6 +158,14 @@ def set_npu_envs() -> None:
         ATB_HOME_PATH+"/tests/atbopstest" + ":" + \
         LD_LIBRARY_PATH
     os.environ["LD_LIBRARY_PATH"] = LD_LIBRARY_PATH
+    LIBRARY_PATH = os.getenv("LIBRARY_PATH", "")
+    LIBRARY_PATH = "/usr/local/Ascend/driver/lib64/driver" + ":" + \
+        "/usr/local/Ascend/driver/lib64/common" + ":" + \
+        (torch_libs + ":" if torch_libs else "") + \
+        NPU_TOOLKIT_HOME+"/lib64" + ":" + \
+        ATB_HOME_PATH+"/lib" + ":" + \
+        LIBRARY_PATH
+    os.environ["LIBRARY_PATH"] = LIBRARY_PATH
     PATH = os.getenv("PATH", "")
     PATH = ATB_HOME_PATH+"/bin" + ":" + PATH
     os.environ["PATH"] = PATH

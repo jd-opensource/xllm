@@ -129,6 +129,9 @@ class ProfileManager {
 
   std::shared_ptr<Request> generate_single_request(int32_t token_length,
                                                    int32_t prefix_length);
+  std::shared_ptr<Request> generate_single_decode_request(int32_t token_length);
+
+  double run_decode_request(int32_t token_length, int32_t batch_size = 1);
 
   std::string generate_filename(const std::string& file_suffix);
 

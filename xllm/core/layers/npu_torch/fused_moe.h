@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <optional>
 
 #include "framework/model/model_args.h"
@@ -30,18 +31,22 @@ limitations under the License.
 #include "layers/common/linear.h"
 
 namespace xllm {
-namespace layer {
+namespace npu_torch_layer {
 
 class FusedMoEImpl : public torch::nn::Module {
  public:
   FusedMoEImpl() = default;
   FusedMoEImpl(const ModelArgs& model_args,
-               const FusedMoEArgs& moe_args,
+               const layer::FusedMoEArgs& moe_args,
                const QuantArgs& quant_args,
                const ParallelArgs& parallel_args,
                const torch::TensorOptions& options);
 
   torch::Tensor forward_expert(
+      const torch::Tensor& hidden_states,
+      const torch::Tensor& router_logits,
+      const std::optional<torch::Tensor>& shared_output);
+  torch::Tensor forward_expert_reference(
       const torch::Tensor& hidden_states,
       const torch::Tensor& router_logits,
       const std::optional<torch::Tensor>& shared_output);
@@ -80,17 +85,25 @@ class FusedMoEImpl : public torch::nn::Module {
   std::string hidden_act_;
   std::string scoring_func_;
   bool is_smoothquant_;
+  bool is_minimax_m2_ = false;
 
   int64_t num_experts_per_rank_;
   int64_t start_expert_id_;
 
-  ReplicatedLinear gate_{nullptr};
-  DenseMLP shared_experts_{nullptr};
+  layer::ReplicatedLinear gate_{nullptr};
+  layer::DenseMLP shared_experts_{nullptr};
   torch::nn::Linear shared_expert_gate_{nullptr};
   QuantArgs quant_args_;
-  ParallelArgs parallel_args_;
+  int64_t dp_size_ = 1;
+  int64_t ep_size_ = 1;
+  bool use_minimax_ep_reference_ = false;
+  bool compare_minimax_ep_reference_ = false;
   torch::TensorOptions options_;
+  ProcessGroup* world_pg_ = nullptr;
   ProcessGroup* tp_pg_;
+  ProcessGroup* dp_local_pg_ = nullptr;
+  ProcessGroup* moe_ep_pg_ = nullptr;
+  std::unique_ptr<ProcessGroup> shared_dispatch_pg_;
 
   DEFINE_WEIGHT(w13);
   DEFINE_FUSED_WEIGHT(w1);
@@ -109,5 +122,5 @@ class FusedMoEImpl : public torch::nn::Module {
 };
 TORCH_MODULE(FusedMoE);
 
-}  // namespace layer
+}  // namespace npu_torch_layer
 }  // namespace xllm

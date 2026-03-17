@@ -348,11 +348,19 @@ if(USE_NPU)
   link_directories(
       $ENV{PYTHON_LIB_PATH}
       $ENV{PYTORCH_INSTALL_PATH}/lib
+      $ENV{PYTORCH_INSTALL_PATH}/../torch.libs
       $ENV{PYTORCH_NPU_INSTALL_PATH}/lib
       $ENV{NPU_HOME_PATH}/lib64
       $ENV{ATB_HOME_PATH}/lib
       $ENV{NPU_TOOLKIT_HOME}/lib64
+      /usr/local/Ascend/driver/lib64/driver
+      /usr/local/Ascend/driver/lib64/common
       $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/lib/
+  )
+  add_link_options(
+      -Wl,-rpath-link,$ENV{PYTORCH_INSTALL_PATH}/../torch.libs
+      -Wl,-rpath-link,/usr/local/Ascend/driver/lib64/driver
+      -Wl,-rpath-link,/usr/local/Ascend/driver/lib64/common
   )
   link_libraries(cust_opapi)
 endif()

@@ -24,6 +24,20 @@ limitations under the License.
 #include "server/xllm_server_registry.h"
 
 namespace xllm {
+namespace {
+int get_collective_root_info_count(int world_size, int dp_size) {
+  CHECK_GT(world_size, 0);
+  CHECK_GT(dp_size, 0);
+  CHECK_EQ(world_size % dp_size, 0);
+
+  int count = 1 + dp_size;  // world + TP groups
+  if (dp_size > 1) {
+    count += world_size / dp_size;  // DP-local groups
+  }
+  return count;
+}
+}  // namespace
+
 XTensorManagerPool::XTensorManagerPool(const xtensor::Options& options,
                                        int32_t dp_size)
     : options_(options),
@@ -83,12 +97,11 @@ void XTensorManagerPool::setup_multi_node_xtensor_managers(
             i, master_node_addr, dones[i], devices[i], options_));
 
     if (FLAGS_node_rank == 0) {
-      auto dp_local_process_group_num =
-          (dp_size_ > 1 && dp_size_ < world_size) ? dp_size_ : 0;
-
       std::shared_ptr<CollectiveService> collective_service =
           std::make_shared<CollectiveService>(
-              dp_local_process_group_num, world_size, devices[0].index());
+              get_collective_root_info_count(world_size, dp_size_),
+              world_size,
+              devices[0].index());
       XllmServer* collective_server =
           ServerRegistry::get_instance().register_server(
               collective_server_name_);

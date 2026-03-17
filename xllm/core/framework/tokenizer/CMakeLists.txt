@@ -24,6 +24,7 @@ cc_library(
     rec_tokenizer.cpp
   DEPS
     :common
+    :state_dict
     :sentencepiece
     state_dict
     absl::flat_hash_map

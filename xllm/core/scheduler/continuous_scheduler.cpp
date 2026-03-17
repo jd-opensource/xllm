@@ -35,6 +35,7 @@ limitations under the License.
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 #include "scheduler/decode_priority_queue.h"
+#include "util/env_var.h"
 #include "util/utils.h"
 
 namespace xllm {
@@ -69,6 +70,16 @@ size_t get_sequence_free_blocks_for_rank(KVCacheManager* kv_cache_manager,
     return free_blocks[dp_rank];
   }
   return util::max(free_blocks);
+}
+
+}  // namespace
+
+namespace {
+
+bool are_batches_empty(const std::vector<Batch>& batches) {
+  return std::all_of(batches.begin(),
+                     batches.end(),
+                     [](const Batch& one_batch) { return one_batch.empty(); });
 }
 
 }  // namespace
@@ -994,13 +1005,35 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
 std::vector<Batch> ContinuousScheduler::schedule_request(
     const absl::Duration& timeout) {
   const auto deadline = absl::Now() + timeout;
+  const bool scheduler_idle_on_entry =
+      !if_queue_not_empty() && are_batches_empty(last_batch_);
+  const int64_t idle_collect_window_ms =
+      scheduler_idle_on_entry
+          ? std::max<int64_t>(
+                0, util::get_int_env("XLLM_SCHED_IDLE_COLLECT_WINDOW_MS", 0))
+          : 0;
+  absl::Time idle_collect_deadline = absl::InfinitePast();
   std::vector<Batch> batch;
+  constexpr uint64_t kIdleCollectPollMs = 1;
+  constexpr uint64_t kStepSleepTimeMs = 10;
   while (true) {
+    const auto now = absl::Now();
+    if (idle_collect_window_ms > 0 &&
+        idle_collect_deadline == absl::InfinitePast() &&
+        request_queue_.size() > 0) {
+      idle_collect_deadline =
+          std::min(deadline, now + absl::Milliseconds(idle_collect_window_ms));
+    }
+    if (idle_collect_deadline != absl::InfinitePast() &&
+        now < idle_collect_deadline) {
+      const auto time_to_sleep = std::min(
+          absl::Milliseconds(kIdleCollectPollMs), idle_collect_deadline - now);
+      absl::SleepFor(time_to_sleep);
+      continue;
+    }
+
     batch = prepare_batch();
-    bool all_empty =
-        std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
-          return one_batch.empty();
-        });
+    bool all_empty = are_batches_empty(batch);
     if (!all_empty) {
       return batch;
     }
@@ -1009,14 +1042,13 @@ std::vector<Batch> ContinuousScheduler::schedule_request(
       continue;
     }
 
-    const auto now = absl::Now();
-    if (now > deadline) {
+    const auto sleep_start = absl::Now();
+    if (sleep_start > deadline) {
       break;
     }
     // wait for new requests to arrive
-    constexpr uint64_t kStepSleepTimeMs = 10;
     const auto time_to_sleep =
-        std::min(absl::Milliseconds(kStepSleepTimeMs), deadline - now);
+        std::min(absl::Milliseconds(kStepSleepTimeMs), deadline - sleep_start);
     absl::SleepFor(time_to_sleep);
   }
   // return an empty batch
@@ -1030,10 +1062,7 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
     // get a new batch of requests
     last_batch_lengths_.clear();
     std::vector<Batch> batch = schedule_request(timeout);
-    bool all_empty =
-        std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
-          return one_batch.empty();
-        });
+    bool all_empty = are_batches_empty(batch);
     if (all_empty) {
       return;
     }
@@ -1056,14 +1085,8 @@ void ContinuousScheduler::step_with_schedule_overlap(
     const absl::Duration& timeout) {
   // get a new batch of requests
   std::vector<Batch> batch = schedule_request(timeout);
-  bool cur_batch_all_empty =
-      std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
-        return one_batch.empty();
-      });
-  bool last_batch_all_empty = std::all_of(
-      last_batch_.begin(), last_batch_.end(), [](const Batch& one_batch) {
-        return one_batch.empty();
-      });
+  bool cur_batch_all_empty = are_batches_empty(batch);
+  bool last_batch_all_empty = are_batches_empty(last_batch_);
   if (cur_batch_all_empty && last_batch_all_empty) {
     return;
   }

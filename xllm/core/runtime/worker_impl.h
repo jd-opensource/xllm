@@ -260,6 +260,8 @@ class WorkerImpl {
 
   Status status_ = Status::UNINITIALIZED;
 
+  int64_t tokenizer_vocab_size_ = -1;
+
   torch::Tensor expert_load_data_;
 
   std::string model_weights_path_;

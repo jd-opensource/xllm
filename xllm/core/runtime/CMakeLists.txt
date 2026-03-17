@@ -122,6 +122,8 @@ target_link_libraries(acl_graph_executor_test
                       c_sec
                       nnopbase
                       )
+target_link_libraries(acl_graph_executor_test PRIVATE
+  "$<TARGET_LINKER_FILE:xllm_server>")
 # Use --whole-archive for spdlog to ensure all symbols are available for xllm_atb_layers
 # This resolves the undefined reference issues in xllm_atb_layers
 target_link_options(acl_graph_executor_test PRIVATE

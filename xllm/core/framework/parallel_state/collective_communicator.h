@@ -17,6 +17,11 @@ limitations under the License.
 
 #include <memory>
 #include <string>
+#include <vector>
+
+#if defined(USE_NPU)
+#include <hccl/hccl.h>
+#endif
 
 #include "parallel_args.h"
 #include "process_group.h"
@@ -25,10 +30,18 @@ namespace xllm {
 
 class CollectiveCommunicator {
  public:
+#if defined(USE_NPU)
+  CollectiveCommunicator(int global_rank,
+                         int world_size,
+                         int dp_size,
+                         int ep_size,
+                         std::vector<HcclRootInfo> root_infos);
+#else
   CollectiveCommunicator(int global_rank,
                          int world_size,
                          int dp_size,
                          int ep_size);
+#endif
   ~CollectiveCommunicator() = default;
 
   void create_process_groups(const std::string& master_addr,
@@ -48,6 +61,9 @@ class CollectiveCommunicator {
   std::unique_ptr<ProcessGroup> sp_group_;
   std::unique_ptr<ProcessGroup> moe_tp_group_;
   std::unique_ptr<ProcessGroup> moe_ep_group_;
+#if defined(USE_NPU)
+  std::vector<HcclRootInfo> root_infos_;
+#endif
 };
 
 }  // namespace xllm

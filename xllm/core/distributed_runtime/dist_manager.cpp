@@ -60,6 +60,24 @@ DistManager::~DistManager() {
 }
 
 namespace {
+int get_collective_root_info_count(int world_size, int dp_size, int ep_size) {
+  CHECK_GT(world_size, 0);
+  CHECK_GT(dp_size, 0);
+  CHECK_GT(ep_size, 0);
+  CHECK_EQ(world_size % dp_size, 0);
+  CHECK_EQ(world_size % ep_size, 0);
+
+  int count = 1 + dp_size;  // world + TP groups
+  if (dp_size > 1) {
+    count += world_size / dp_size;  // DP-local groups
+  }
+  if (ep_size > 1) {
+    count += ep_size;               // MoE TP groups
+    count += world_size / ep_size;  // MoE EP groups
+  }
+  return count;
+}
+
 std::unique_ptr<CommChannel> create_channel(const std::string& worker_addrs,
                                             int r,
                                             int dp_local_tp_size,
@@ -183,15 +201,12 @@ void DistManager::setup_multi_node_workers(
 
   // Master node need to wait all workers done
   if (options.node_rank() == 0) {
-    // if dp_size equals 1, use global process group directly
-    // if dp_size equals world_size, distributed communication is not required
-    auto dp_local_process_group_num =
-        (dp_size > 1 && dp_size < world_size) ? dp_size : 0;
-
     // create collective server to sync all workers.
     std::shared_ptr<CollectiveService> collective_service =
         std::make_shared<CollectiveService>(
-            dp_local_process_group_num, world_size, devices[0].index());
+            get_collective_root_info_count(world_size, dp_size, ep_size),
+            world_size,
+            devices[0].index());
     XllmServer* collective_server =
         ServerRegistry::get_instance().register_server(server_name_);
     if (!collective_server->start(

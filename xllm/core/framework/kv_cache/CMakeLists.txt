@@ -59,3 +59,5 @@ target_link_libraries(embedding_cache_test
                       $<$<BOOL:${USE_NPU}>:hccl>
                       $<$<BOOL:${USE_NPU}>:c_sec>
                       $<$<BOOL:${USE_NPU}>:nnopbase>)
+target_link_libraries(embedding_cache_test PRIVATE
+  "$<TARGET_LINKER_FILE:xllm_server>")

@@ -21,6 +21,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -94,6 +95,17 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   Timer timer;
   auto& sampling_params = input.sampling_params;
 
+  if (input.token_ids.numel() == 0) {
+    const auto& model_args = context_.get_model_args();
+    const auto& parallel_args = context_.get_parallel_args();
+    const bool needs_empty_input_participation =
+        model_args.n_routed_experts() > 0 && parallel_args.dp_size() > 1 &&
+        parallel_args.ep_size() > 1;
+    if (!needs_empty_input_participation) {
+      return ForwardOutput{};
+    }
+  }
+
   std::vector<folly::SemiFuture<bool>> futures;
 
   if (options_.kv_cache_transfer_mode() == "PUSH" &&
@@ -128,6 +140,10 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   if (sampling_params.selected_token_idxes.defined()) {
     logits = model_->logits(model_output.hidden_states,
                             sampling_params.selected_token_idxes);
+    if (tokenizer_vocab_size_ > 0 && tokenizer_vocab_size_ < logits.size(-1)) {
+      logits.slice(/*dim=*/-1, tokenizer_vocab_size_, logits.size(-1))
+          .fill_(-std::numeric_limits<float>::infinity());
+    }
   }
 
   ForwardOutput output;

@@ -76,6 +76,10 @@ AttentionMetadata AttentionMetadataBuilder::build(
     // ACL graph mode: use CustomPagedAttention with tiling_data on device
     attn_metadata.paged_attention_tiling_data = params.graph_buffer.tiling_data;
   }
+  if (!params.q_seq_lens_vec.empty()) {
+    attn_metadata.q_seq_lens_host =
+        torch::tensor(params.q_seq_lens_vec, torch::kInt);
+  }
   // Provide host seq_lens for NPU kernels (required by CustomPagedAttention).
   if (!params.kv_seq_lens_vec.empty()) {
     attn_metadata.kv_seq_lens_host =

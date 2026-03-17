@@ -45,13 +45,14 @@ class ProcessGroup {
   virtual ~ProcessGroup() = default;
 
   int32_t rank() const {
-    CHECK(pg_ != nullptr) << "Process group is not initialized.";
-    return pg_->getRank();
+    // Some NPU paths reuse an externally-created HCCL communicator instead of a
+    // torch ProcessGroup backend. In that case pg_ stays null, but the logical
+    // rank/world size metadata passed at construction is still valid.
+    return pg_ != nullptr ? pg_->getRank() : rank_;
   }
 
   int32_t world_size() const {
-    CHECK(pg_ != nullptr) << "Process group is not initialized.";
-    return pg_->getSize();
+    return pg_ != nullptr ? pg_->getSize() : world_size_;
   }
 
   const torch::Device& device() const { return device_; }
