@@ -48,19 +48,18 @@ class DeepseekV2DecoderLayerTestPeer {
   using Carrier = DeepseekV2DecoderLayerImpl::PostAttnCarrier;
   using Mode = DeepseekV2DecoderLayerImpl::PostAttnMode;
 
-  static Carrier build_post_attn_carrier(DeepseekV2DecoderLayerImpl& decoder,
-                                         torch::Tensor x,
-                                         const torch::Tensor& residual,
-                                         const ModelInputParams& input_params,
-                                         bool use_sp_output,
-                                         bool attn_out_repl,
-                                         bool need_dp_gather,
-                                         bool enable_moe_all2all) {
+  static Carrier build_post_attn_carrier(
+      DeepseekV2DecoderLayerImpl& decoder,
+      torch::Tensor x,
+      const torch::Tensor& residual,
+      const ModelInputParams& input_params,
+      DeepseekV2AttentionImpl::PostAttnLayout attn_layout,
+      bool need_dp_gather,
+      bool enable_moe_all2all) {
     return decoder.build_post_attn_carrier(x,
                                            residual,
                                            input_params,
-                                           use_sp_output,
-                                           attn_out_repl,
+                                           attn_layout,
                                            need_dp_gather,
                                            enable_moe_all2all);
   }
@@ -787,10 +786,18 @@ class CountingProcessGroup : public test::MockProcessGroup {
     test::MockProcessGroup::allreduce(input);
   }
 
+  void reduce_scatter(const torch::Tensor& input,
+                      torch::Tensor& output) override {
+    ++rs_calls_;
+    test::MockProcessGroup::reduce_scatter(input, output);
+  }
+
   int allreduce_calls() const { return allreduce_calls_; }
+  int rs_calls() const { return rs_calls_; }
 
  private:
   int allreduce_calls_ = 0;
+  int rs_calls_ = 0;
 };
 
 struct LayerCase {
@@ -811,7 +818,7 @@ struct CarrierCase {
   CarrierEnv env;
   int64_t tp_world_size;
   int64_t ep_size;
-  bool attn_out_repl;
+  DeepseekV2AttentionImpl::PostAttnLayout attn_layout;
   bool need_dp_gather;
   bool enable_moe_all2all;
   int64_t rows;
@@ -826,6 +833,7 @@ struct CarrierCase {
   std::vector<float> expected_ffn_in;
   std::vector<float> expected_skip_local;
   int expected_allreduce_calls;
+  int expected_rs_calls;
 };
 
 struct QuantCase {
@@ -968,8 +976,7 @@ TEST_P(DeepseekV2DecoderCarrierTest,
       mat(tc.rows, tc.attn_out),
       mat(tc.rows, tc.residual),
       input_params,
-      /*use_sp_output=*/false,
-      tc.attn_out_repl,
+      tc.attn_layout,
       tc.need_dp_gather,
       tc.enable_moe_all2all);
 
@@ -984,6 +991,7 @@ TEST_P(DeepseekV2DecoderCarrierTest,
       mat(tc.expected_skip_local.size() / 2, tc.expected_skip_local));
   if (tp_pg_raw != nullptr) {
     EXPECT_EQ(tp_pg_raw->allreduce_calls(), tc.expected_allreduce_calls);
+    EXPECT_EQ(tp_pg_raw->rs_calls(), tc.expected_rs_calls);
   }
 }
 
@@ -1009,8 +1017,7 @@ TEST_F(DeepseekV2DecoderLayerTest, BuildPostAttnCarrierPackedLocal) {
       attn_out,
       residual,
       input_params,
-      /*use_sp_output=*/true,
-      /*attn_out_repl=*/false,
+      DeepseekV2AttentionImpl::PostAttnLayout::kPackedLocal,
       /*need_dp_gather=*/false,
       /*enable_moe_all2all=*/false);
 
@@ -1051,8 +1058,7 @@ TEST_F(DeepseekV2DecoderLayerTest, MaterializeFfnInputDpGather) {
       attn_out,
       residual,
       input_params,
-      /*use_sp_output=*/false,
-      /*attn_out_repl=*/false,
+      DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
       /*need_dp_gather=*/true,
       /*enable_moe_all2all=*/false);
 
@@ -1080,8 +1086,7 @@ TEST_F(DeepseekV2DecoderLayerTest, MaterializeFfnInputTpShardNoFallback) {
       attn_out,
       residual,
       input_params,
-      /*use_sp_output=*/false,
-      /*attn_out_repl=*/false,
+      DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
       /*need_dp_gather=*/false,
       /*enable_moe_all2all=*/true);
 
@@ -1105,8 +1110,7 @@ TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputTpGather) {
       attn_out,
       residual,
       input_params,
-      /*use_sp_output=*/false,
-      /*attn_out_repl=*/false,
+      DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
       /*need_dp_gather=*/false,
       /*enable_moe_all2all=*/true);
 
@@ -1141,8 +1145,7 @@ TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputReplicated) {
       attn_out,
       residual,
       input_params,
-      /*use_sp_output=*/false,
-      /*attn_out_repl=*/false,
+      DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
       /*need_dp_gather=*/false,
       /*enable_moe_all2all=*/false);
 
@@ -1181,8 +1184,7 @@ TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputDpSlice) {
       attn_out,
       residual,
       input_params,
-      /*use_sp_output=*/false,
-      /*attn_out_repl=*/false,
+      DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
       /*need_dp_gather=*/true,
       /*enable_moe_all2all=*/false);
 
@@ -1220,8 +1222,7 @@ TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputPackedLocal) {
       attn_out,
       residual,
       input_params,
-      /*use_sp_output=*/true,
-      /*attn_out_repl=*/false,
+      DeepseekV2AttentionImpl::PostAttnLayout::kPackedLocal,
       /*need_dp_gather=*/false,
       /*enable_moe_all2all=*/false);
 
@@ -1378,7 +1379,7 @@ INSTANTIATE_TEST_SUITE_P(
                     CarrierEnv::kBase,
                     /*tp_world_size=*/1,
                     /*ep_size=*/1,
-                    /*attn_out_repl=*/false,
+                    DeepseekV2AttentionImpl::PostAttnLayout::kReplicated,
                     /*need_dp_gather=*/false,
                     /*enable_moe_all2all=*/false,
                     /*rows=*/2,
@@ -1392,12 +1393,13 @@ INSTANTIATE_TEST_SUITE_P(
                     /*pad_tokens=*/0,
                     {11.0f, 22.0f, 33.0f, 44.0f},
                     {11.0f, 22.0f, 33.0f, 44.0f},
-                    /*expected_allreduce_calls=*/0},
+                    /*expected_allreduce_calls=*/0,
+                    /*expected_rs_calls=*/0},
         CarrierCase{"Replicated_TpShardInput_ReducesOnce",
                     CarrierEnv::kCountingTp,
                     /*tp_world_size=*/2,
                     /*ep_size=*/2,
-                    /*attn_out_repl=*/false,
+                    DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
                     /*need_dp_gather=*/false,
                     /*enable_moe_all2all=*/false,
                     /*rows=*/2,
@@ -1411,12 +1413,13 @@ INSTANTIATE_TEST_SUITE_P(
                     /*pad_tokens=*/0,
                     {11.0f, 22.0f, 33.0f, 44.0f},
                     {11.0f, 22.0f, 33.0f, 44.0f},
-                    /*expected_allreduce_calls=*/1},
+                    /*expected_allreduce_calls=*/1,
+                    /*expected_rs_calls=*/0},
         CarrierCase{"Replicated_FullAttnOutput_SkipsReduce",
                     CarrierEnv::kCountingTp,
                     /*tp_world_size=*/2,
                     /*ep_size=*/2,
-                    /*attn_out_repl=*/true,
+                    DeepseekV2AttentionImpl::PostAttnLayout::kReplicated,
                     /*need_dp_gather=*/false,
                     /*enable_moe_all2all=*/false,
                     /*rows=*/2,
@@ -1430,12 +1433,13 @@ INSTANTIATE_TEST_SUITE_P(
                     /*pad_tokens=*/0,
                     {11.0f, 22.0f, 33.0f, 44.0f},
                     {11.0f, 22.0f, 33.0f, 44.0f},
-                    /*expected_allreduce_calls=*/0},
+                    /*expected_allreduce_calls=*/0,
+                    /*expected_rs_calls=*/0},
         CarrierCase{"TpShard_DpGather_KeepsLocalSlice",
                     CarrierEnv::kTpDp,
                     /*tp_world_size=*/2,
                     /*ep_size=*/4,
-                    /*attn_out_repl=*/false,
+                    DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
                     /*need_dp_gather=*/true,
                     /*enable_moe_all2all=*/false,
                     /*rows=*/4,
@@ -1449,31 +1453,13 @@ INSTANTIATE_TEST_SUITE_P(
                     /*pad_tokens=*/4,
                     {11.0f, 22.0f, 33.0f, 44.0f},
                     {11.0f, 22.0f, 33.0f, 44.0f, 55.0f, 66.0f},
-                    /*expected_allreduce_calls=*/0},
-        CarrierCase{"TpShard_All2All_PadsAndMarksGather",
-                    CarrierEnv::kTpOnly,
-                    /*tp_world_size=*/2,
-                    /*ep_size=*/2,
-                    /*attn_out_repl=*/false,
-                    /*need_dp_gather=*/false,
-                    /*enable_moe_all2all=*/true,
-                    /*rows=*/3,
-                    {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-                    {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
-                    {},
-                    {},
-                    DeepseekV2DecoderLayerTestPeer::Mode::kTpPadded,
-                    /*pad_active=*/true,
-                    /*pad_org_tokens=*/3,
-                    /*pad_tokens=*/4,
-                    {1.0f, 2.0f, 3.0f, 4.0f},
-                    {1.0f, 2.0f, 3.0f, 4.0f},
-                    /*expected_allreduce_calls=*/0},
-        CarrierCase{"TpShard_FullAttnAll2All_UsesReplicatedInput",
+                    /*expected_allreduce_calls=*/0,
+                    /*expected_rs_calls=*/0},
+        CarrierCase{"TpShard_All2All_ReduceScatters",
                     CarrierEnv::kCountingTp,
                     /*tp_world_size=*/2,
                     /*ep_size=*/2,
-                    /*attn_out_repl=*/true,
+                    DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
                     /*need_dp_gather=*/false,
                     /*enable_moe_all2all=*/true,
                     /*rows=*/3,
@@ -1487,12 +1473,33 @@ INSTANTIATE_TEST_SUITE_P(
                     /*pad_tokens=*/4,
                     {11.0f, 22.0f, 33.0f, 44.0f},
                     {11.0f, 22.0f, 33.0f, 44.0f},
-                    /*expected_allreduce_calls=*/0},
+                    /*expected_allreduce_calls=*/0,
+                    /*expected_rs_calls=*/1},
+        CarrierCase{"TpShard_FullAttnAll2All_UsesReplicatedInput",
+                    CarrierEnv::kCountingTp,
+                    /*tp_world_size=*/2,
+                    /*ep_size=*/2,
+                    DeepseekV2AttentionImpl::PostAttnLayout::kReplicated,
+                    /*need_dp_gather=*/false,
+                    /*enable_moe_all2all=*/true,
+                    /*rows=*/3,
+                    {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
+                    {10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f},
+                    {},
+                    {},
+                    DeepseekV2DecoderLayerTestPeer::Mode::kTpPadded,
+                    /*pad_active=*/true,
+                    /*pad_org_tokens=*/3,
+                    /*pad_tokens=*/4,
+                    {11.0f, 22.0f, 33.0f, 44.0f},
+                    {11.0f, 22.0f, 33.0f, 44.0f},
+                    /*expected_allreduce_calls=*/0,
+                    /*expected_rs_calls=*/0},
         CarrierCase{"TpShard_WorldSizeOne_SkipsPadding",
                     CarrierEnv::kTpOnly,
                     /*tp_world_size=*/1,
                     /*ep_size=*/1,
-                    /*attn_out_repl=*/true,
+                    DeepseekV2AttentionImpl::PostAttnLayout::kReplicated,
                     /*need_dp_gather=*/false,
                     /*enable_moe_all2all=*/true,
                     /*rows=*/2,
@@ -1506,7 +1513,8 @@ INSTANTIATE_TEST_SUITE_P(
                     /*pad_tokens=*/2,
                     {11.0f, 22.0f, 33.0f, 44.0f},
                     {11.0f, 22.0f, 33.0f, 44.0f},
-                    /*expected_allreduce_calls=*/0}),
+                    /*expected_allreduce_calls=*/0,
+                    /*expected_rs_calls=*/0}),
     carrier_name);
 
 INSTANTIATE_TEST_SUITE_P(

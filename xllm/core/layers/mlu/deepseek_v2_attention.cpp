@@ -17,9 +17,7 @@ limitations under the License.
 
 #include <tuple>
 
-#include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
-#include "layers/mlu/deepseek_v32_sp_context.h"
 
 namespace xllm {
 namespace layer {
@@ -48,26 +46,14 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
   qk_head_dim_ = qk_nope_head_dim_ + qk_rope_head_dim_;
   CHECK_EQ(num_heads % tp_size, 0)
       << "num_heads must be divisible by tensor parallel size";
-  ProcessGroup* full_group = parallel_args.single_rank_group_ != nullptr
-                                 ? parallel_args.single_rank_group_
-                                 : parallel_args.tp_group_;
-  tp_heads_ = {
-      parallel_args.tp_group_, num_heads / tp_size, num_heads / tp_size};
-  full_heads_ = {full_group, num_heads, num_heads};
+  tp_heads_ = {num_heads / tp_size, num_heads / tp_size};
+  full_heads_ = {num_heads, num_heads};
   float scaling = std::pow(qk_head_dim_, -0.5f);
 
-  is_per_token_smoothquant_ =
-      quant_args.quant_method() == kQuantMethodSmoothquant;
-
-  const bool repl_attn_weights = use_repl_attn_weights();
-  ProcessGroup* input_weight_group =
-      repl_attn_weights && parallel_args.single_rank_group_ != nullptr
+  ProcessGroup* weight_group =
+      use_repl_attn_weights() && parallel_args.single_rank_group_ != nullptr
           ? parallel_args.single_rank_group_
-          : tp_heads().group;
-  ProcessGroup* output_weight_group =
-      repl_attn_weights && parallel_args.single_rank_group_ != nullptr
-          ? parallel_args.single_rank_group_
-          : tp_heads().group;
+          : parallel_args.tp_group_;
   const LinearExtraArgs attention_linear_extra_args("none", false);
 
   if (q_lora_rank_ > 0) {
@@ -84,7 +70,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                              false,
                              false,
                              quant_args,
-                             input_weight_group,
+                             weight_group,
                              options,
                              attention_linear_extra_args));
   } else {
@@ -95,7 +81,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                              false,
                              false,
                              quant_args,
-                             input_weight_group,
+                             weight_group,
                              options,
                              attention_linear_extra_args));
   }
@@ -117,7 +103,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
           false,
           false,
           QuantArgs(),
-          input_weight_group,
+          weight_group,
           options,
           attention_linear_extra_args));
 
@@ -188,26 +174,33 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                         /*input_is_parallelized=*/true,
                                         /*reduce=*/false,
                                         quant_args,
-                                        output_weight_group,
+                                        weight_group,
                                         options,
                                         attention_linear_extra_args));
 }
 
-void DeepseekV2AttentionImpl::decode_q_pre_base(
-    torch::Tensor& q,
-    torch::Tensor& qr,
+DeepseekV2AttentionImpl::QPreOut DeepseekV2AttentionImpl::q_pre(
+    const torch::Tensor& hidden_states,
+    const HeadInfo& heads) {
+  QPreOut out;
+  if (q_lora_rank_ > 0) {
+    out.q = q_a_proj_(hidden_states);
+    auto q_a = std::get<0>(q_a_layernorm_(out.q));
+    out.qr = q_a;
+    out.q = q_b_proj_->forward(q_a).view({-1, heads.proj, qk_head_dim_});
+  } else {
+    out.q =
+        q_proj_->forward(hidden_states).view({-1, heads.proj, qk_head_dim_});
+  }
+  return out;
+}
+
+void DeepseekV2AttentionImpl::fill_q_input(
     torch::Tensor& q_input,
+    const torch::Tensor& q,
     const torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,
     bool use_prompt_rope) {
-  const auto& heads = run_heads();
-  if (q_lora_rank_ > 0) {
-    auto q_a = std::get<0>(q_a_layernorm_(q));
-    qr = q_a;
-    q = q_b_proj_->forward(q_a).view({-1, heads.proj, qk_head_dim_});
-  }
-
-  // get q_nope, q_pe
   const int32_t dim = -1;
   auto q_vec = q.split({qk_nope_head_dim_, qk_rope_head_dim_}, dim);
   auto q_nope = q_vec[0];
@@ -280,8 +273,7 @@ void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
     fused_mla_q_params.interleaved = interleaved_;
     kernel::fused_mla_q(fused_mla_q_params);
   } else {
-    decode_q_pre_base(
-        q, qr, q_input, positions, attn_metadata, use_prompt_rope);
+    fill_q_input(q_input, q, positions, attn_metadata, use_prompt_rope);
   }
 
   // forward_decoder_fused_mla_kv
@@ -326,13 +318,13 @@ void DeepseekV2AttentionImpl::prepare_mla_inputs(
     bool enable_fused_qkv,
     bool use_prompt_rope) {
   const auto& heads = run_heads();
-  if (q_lora_rank_ > 0) {
-    q = q_a_proj_(hidden_states);
-  } else {
-    q = q_proj_->forward(hidden_states).view({-1, heads.proj, qk_head_dim_});
-  }
   latent_cache = kv_a_proj_with_mqa_(hidden_states);
   if (enable_fused_qkv) {
+    if (q_lora_rank_ > 0) {
+      q = q_a_proj_(hidden_states);
+    } else {
+      q = q_proj_->forward(hidden_states).view({-1, heads.proj, qk_head_dim_});
+    }
     decode_qkv_pre_fused(q,
                          qr,
                          q_input,
@@ -343,8 +335,10 @@ void DeepseekV2AttentionImpl::prepare_mla_inputs(
                          attn_metadata,
                          use_prompt_rope);
   } else {
-    decode_q_pre_base(
-        q, qr, q_input, positions, attn_metadata, use_prompt_rope);
+    auto q_out = q_pre(hidden_states, heads);
+    q = q_out.q;
+    qr = q_out.qr;
+    fill_q_input(q_input, q, positions, attn_metadata, use_prompt_rope);
     decode_kv_pre_base(latent_cache, positions, attn_metadata, use_prompt_rope);
   }
 }
@@ -405,14 +399,13 @@ AttentionMetadata DeepseekV2AttentionImpl::build_mla_attention_metadata(
   return attn_indexer_metadata;
 }
 
-torch::Tensor DeepseekV2AttentionImpl::project_mla_output(
+torch::Tensor DeepseekV2AttentionImpl::project_output(
     const torch::Tensor& attn_output,
-    int64_t q_len) {
-  const auto& heads = run_heads();
+    const HeadInfo& heads) {
   // bmm(attn_out, w_vc_)
   auto attn_output_view = attn_output.view({-1, heads.attn, kv_lora_rank_});
-  auto attn_bmm_output =
-      torch::empty({q_len, heads.proj, v_head_dim_}, attn_output.options());
+  auto attn_bmm_output = torch::empty(
+      {attn_output.size(0), heads.proj, v_head_dim_}, attn_output.options());
   auto attn_bmm_trans_out = attn_bmm_output.transpose(0, 1);
   torch::Tensor w_vc_for_runtime = w_vc_;
   torch::bmm_out(
@@ -429,7 +422,7 @@ torch::Tensor DeepseekV2AttentionImpl::forward(
     const v32_sp::DeepseekV32SPContext* sp_ctx) {
   bool is_prefill_or_chunked_prefill =
       attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
-  if (sp_ctx != nullptr && enable_lighting_indexer_) {
+  if (sp_ctx != nullptr && can_use_sp()) {
     return forward_sp(positions,
                       hidden_states,
                       attn_metadata,
@@ -451,11 +444,10 @@ torch::Tensor DeepseekV2AttentionImpl::forward_normal_tp(
     KVCache& kv_cache,
     bool is_prefill_or_chunked_prefill) {
   const auto& heads = run_heads();
-  const int64_t q_len = hidden_states.size(0);
   torch::Tensor q, qr;
-  torch::Tensor q_input =
-      torch::empty({q_len, heads.attn, kv_lora_rank_ + qk_rope_head_dim_},
-                   hidden_states.options());
+  torch::Tensor q_input = torch::empty(
+      {hidden_states.size(0), heads.attn, kv_lora_rank_ + qk_rope_head_dim_},
+      hidden_states.options());
   auto latent_cache = torch::Tensor();
   auto k_cache = kv_cache.get_k_cache();
   auto k_cache_scale = kv_cache.get_k_cache_scale();
@@ -496,7 +488,7 @@ torch::Tensor DeepseekV2AttentionImpl::forward_normal_tp(
   auto [attn_output, output_lse] =
       attn_(attn_indexer_metadata, q_input, k_input, v_input, kv_cache);
 
-  return project_mla_output(attn_output, q_len);
+  return project_output(attn_output, heads);
 }
 
 void DeepseekV2AttentionImpl::load_state_dict(const StateDict& state_dict) {

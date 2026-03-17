@@ -28,6 +28,26 @@ bool use_moe_all2all(bool enable_deep_ep,
   return enable_deep_ep && all_dp_ranks_are_decode(input_params);
 }
 
+torch::Tensor slice_tp_tokens(torch::Tensor x, const ParallelArgs& args);
+
+std::pair<torch::Tensor, PaddingInfo> shard_attn_out(
+    torch::Tensor x,
+    const torch::Tensor& residual,
+    int64_t target_tokens,
+    const ParallelArgs& args,
+    DeepseekV2AttentionImpl::PostAttnLayout attn_layout) {
+  if (attn_layout == DeepseekV2AttentionImpl::PostAttnLayout::kTpShard) {
+    return rs_attn_input(x, residual, target_tokens, args);
+  }
+
+  CHECK(attn_layout == DeepseekV2AttentionImpl::PostAttnLayout::kReplicated)
+      << "unexpected post-attention layout for TP sharding path: "
+      << static_cast<int>(attn_layout);
+  x = x + residual;
+  auto pad_result = pad_tokens(x, target_tokens);
+  return {slice_tp_tokens(pad_result.first, args), pad_result.second};
+}
+
 torch::Tensor slice_tp_tokens(torch::Tensor x, const ParallelArgs& args) {
   if (!args.tp_group_ || args.tp_group_->world_size() <= 1) {
     return x;
@@ -127,12 +147,11 @@ DeepseekV2DecoderLayerImpl::build_post_attn_carrier(
     torch::Tensor x,
     const torch::Tensor& residual,
     const ModelInputParams& input_params,
-    bool use_sp_output,
-    bool attn_out_repl,
+    DeepseekV2AttentionImpl::PostAttnLayout attn_layout,
     bool need_dp_gather,
     bool enable_moe_all2all) {
   PostAttnCarrier carrier;
-  if (use_sp_output) {
+  if (attn_layout == DeepseekV2AttentionImpl::PostAttnLayout::kPackedLocal) {
     CHECK(sequence_parallel_context_ != nullptr)
         << "sequence parallel carrier requires sequence parallel context";
     CHECK(!need_dp_gather)
@@ -147,23 +166,27 @@ DeepseekV2DecoderLayerImpl::build_post_attn_carrier(
   }
 
   if (enable_moe_all2all) {
-    x = x + residual;
-    auto pad_result = pad_tokens(x, get_rs_tokens(x.size(0), parallel_args_));
-    carrier.ffn_in = slice_tp_tokens(pad_result.first, parallel_args_);
+    auto shard_result = shard_attn_out(x,
+                                       residual,
+                                       get_rs_tokens(x.size(0), parallel_args_),
+                                       parallel_args_,
+                                       attn_layout);
+    carrier.ffn_in = shard_result.first;
     carrier.skip_local = carrier.ffn_in;
-    carrier.pad_info = pad_result.second;
+    carrier.pad_info = shard_result.second;
     carrier.mode = PostAttnMode::kTpPadded;
     return carrier;
   }
 
   if (need_dp_gather) {
-    auto rs_result = rs_attn_input(
+    auto shard_result = shard_attn_out(
         x,
         residual,
         get_dp_gather_tokens(input_params.dp_global_token_nums, parallel_args_),
-        parallel_args_);
-    carrier.ffn_in = rs_result.first;
-    carrier.pad_info = rs_result.second;
+        parallel_args_,
+        attn_layout);
+    carrier.ffn_in = shard_result.first;
+    carrier.pad_info = shard_result.second;
     carrier.mode = PostAttnMode::kDpGather;
 
     torch::Tensor local_tokens = carrier.ffn_in;
@@ -186,7 +209,7 @@ DeepseekV2DecoderLayerImpl::build_post_attn_carrier(
     return carrier;
   }
 
-  if (!attn_out_repl) {
+  if (attn_layout == DeepseekV2AttentionImpl::PostAttnLayout::kTpShard) {
     x = xllm::parallel_state::reduce(x, parallel_args_.tp_group_);
   }
   x = x + residual;
@@ -256,16 +279,14 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
       positions, x, attn_metadata, kv_cache, sequence_parallel_context_);
   const bool use_sp_output =
       sequence_parallel_context_ != nullptr && attention_->can_use_sp();
-  const bool attn_out_repl =
-      attention_->use_repl_attn_weights() && !use_sp_output;
+  const auto attn_layout = attention_->post_attn_layout(use_sp_output);
 
   // We materialize the carrier immediately after attention so all post-attn
   // communication paths flow through the same norm / ffn / restore stages.
   auto carrier = build_post_attn_carrier(x,
                                          residual.value(),
                                          input_params,
-                                         use_sp_output,
-                                         attn_out_repl,
+                                         attn_layout,
                                          need_dp_gather,
                                          enable_moe_all2all);
   x = carrier.ffn_in;

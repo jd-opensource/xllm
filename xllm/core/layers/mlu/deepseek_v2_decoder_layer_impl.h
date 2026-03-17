@@ -77,13 +77,13 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
     PostAttnMode mode = PostAttnMode::kReplicated;
   };
 
-  PostAttnCarrier build_post_attn_carrier(torch::Tensor x,
-                                          const torch::Tensor& residual,
-                                          const ModelInputParams& input_params,
-                                          bool use_sp_output,
-                                          bool attn_out_repl,
-                                          bool need_dp_gather,
-                                          bool enable_moe_all2all);
+  PostAttnCarrier build_post_attn_carrier(
+      torch::Tensor x,
+      const torch::Tensor& residual,
+      const ModelInputParams& input_params,
+      DeepseekV2AttentionImpl::PostAttnLayout attn_layout,
+      bool need_dp_gather,
+      bool enable_moe_all2all);
 
   torch::Tensor materialize_ffn_input(const PostAttnCarrier& carrier,
                                       const ModelInputParams& input_params);

@@ -39,6 +39,12 @@ namespace layer {
 
 class DeepseekV2AttentionImpl : public torch::nn::Module {
  public:
+  enum class PostAttnLayout {
+    kTpShard,
+    kReplicated,
+    kPackedLocal,
+  };
+
   DeepseekV2AttentionImpl() = default;
   DeepseekV2AttentionImpl(const ModelArgs& args,
                           const QuantArgs& quant_args,
@@ -60,15 +66,30 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
     return enable_lighting_indexer_ && use_repl_attn_weights();
   }
 
+  PostAttnLayout post_attn_layout(bool use_sp_output) const {
+    if (use_sp_output) {
+      return PostAttnLayout::kPackedLocal;
+    }
+    return use_repl_attn_weights() ? PostAttnLayout::kReplicated
+                                   : PostAttnLayout::kTpShard;
+  }
+
   void load_state_dict(const StateDict& state_dict);
 
  private:
-  struct SPQRPreOut {
+  struct HeadInfo {
+    int64_t attn = 1;
+    int64_t proj = 1;
+
+    int64_t proj_width(int64_t dim) const { return proj * dim; }
+  };
+
+  struct QPreOut {
     torch::Tensor q;
     torch::Tensor qr;
   };
 
-  struct SPMLAPreOut {
+  struct MlaIO {
     torch::Tensor qr;
     torch::Tensor q_input;
     torch::Tensor k_input;
@@ -88,26 +109,22 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
                            const v32_sp::DeepseekV32SPContext& sp_ctx,
                            KVCache& kv_cache,
                            bool is_prefill_or_chunked_prefill);
-  SPQRPreOut sp_qr_pre(const torch::Tensor& hidden_states);
-  SPMLAPreOut sp_mla_pre(const torch::Tensor& hidden_states,
-                         const torch::Tensor& positions,
-                         const SPQRPreOut& qr_pre,
-                         const v32_sp::DeepseekV32SPContext& sp_ctx,
-                         const torch::TensorOptions& options);
+  QPreOut q_pre(const torch::Tensor& hidden_states, const HeadInfo& heads);
+  void fill_q_input(torch::Tensor& q_input,
+                    const torch::Tensor& q,
+                    const torch::Tensor& positions,
+                    const AttentionMetadata& attn_metadata,
+                    bool use_prompt_rope);
+  MlaIO sp_mla_pre(const torch::Tensor& hidden_states,
+                   const torch::Tensor& positions,
+                   const QPreOut& q_pre,
+                   const v32_sp::DeepseekV32SPContext& sp_ctx);
   v32_sp::PaddedGatherHandle sp_mla_comm(
       const torch::Tensor& k_input,
       const v32_sp::DeepseekV32SPContext& sp_ctx) const;
-  void sp_mla_finish_k(SPMLAPreOut& pre_out,
+  void sp_mla_finish_k(MlaIO& pre_out,
                        const v32_sp::PaddedGatherHandle& k_handle,
                        const v32_sp::DeepseekV32SPContext& sp_ctx) const;
-  torch::Tensor project_sp_output(const torch::Tensor& attn_output);
-
-  void decode_q_pre_base(torch::Tensor& q,
-                         torch::Tensor& qr,
-                         torch::Tensor& q_input,
-                         const torch::Tensor& positions,
-                         const AttentionMetadata& attn_metadata,
-                         bool use_prompt_rope);
   void decode_kv_pre_base(torch::Tensor& latent_cache,
                           const torch::Tensor& positions,
                           const AttentionMetadata& attn_metadata,
@@ -146,16 +163,8 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
       const std::optional<torch::Tensor>& new_block_tables = std::nullopt,
       const std::optional<torch::Tensor>& new_context_lens = std::nullopt);
 
-  torch::Tensor project_mla_output(const torch::Tensor& attn_output,
-                                   int64_t q_len);
-
-  struct HeadInfo {
-    ProcessGroup* group = nullptr;
-    int64_t attn = 1;
-    int64_t proj = 1;
-
-    int64_t proj_width(int64_t dim) const { return proj * dim; }
-  };
+  torch::Tensor project_output(const torch::Tensor& attn_output,
+                               const HeadInfo& heads);
 
   const HeadInfo& tp_heads() const { return tp_heads_; }
   const HeadInfo& full_heads() const { return full_heads_; }
@@ -165,7 +174,6 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
 
  private:
   bool use_full_replicated_attention_weights_ = false;
-  bool is_per_token_smoothquant_ = false;
   bool use_fused_mla_qkv_ = false;
   bool enable_lighting_indexer_ = false;
   bool has_trans_ = false;
