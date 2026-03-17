@@ -306,6 +306,7 @@ int64_t NpuQwen3MoeDecoderLayerImpl::init_node(
 
 torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
     torch::Tensor& x,
+    std::optional<torch::Tensor>& residual,
     torch::Tensor& cos_pos,
     torch::Tensor& sin_pos,
     torch::Tensor& attn_mask,
@@ -318,6 +319,7 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
   if (!input_params.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
                             x,
+                            residual,
                             cos_pos,
                             sin_pos,
                             attn_mask,
@@ -330,6 +332,7 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
   } else {
     build_node_variant_pack(decode_node_,
                             x,
+                            residual,
                             cos_pos,
                             sin_pos,
                             /*attn_mask*/ tensor_placeholder_,
@@ -347,6 +350,7 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
 void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
     atb_speed::Model::Node& node,
     torch::Tensor& x,
+    std::optional<torch::Tensor>& residual,
     torch::Tensor& cos_pos,
     torch::Tensor& sin_pos,
     torch::Tensor& attn_mask,
@@ -432,9 +436,9 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
   }
 
   if (input_params.batch_forward_type.is_decode() &&
-      FLAGS_enable_intralayer_addnorm) {
+      FLAGS_enable_intralayer_addnorm && residual.has_value()) {
     // input
-    auto residual_tensor = input_params.residual_tensor;
+    auto& residual_tensor = residual.value();
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(residual_tensor);
     node.variantPack.inTensors.at(input_idx++) =

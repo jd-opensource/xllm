@@ -35,6 +35,7 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor x,
+                        std::optional<torch::Tensor>& residual,
                         torch::Tensor cos_pos,
                         torch::Tensor sin_pos,
                         torch::Tensor attn_mask,
@@ -43,6 +44,7 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr) {
     return decoder_layer_(x,
+                          residual,
                           cos_pos,
                           sin_pos,
                           attn_mask,
@@ -56,7 +58,6 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
     auto experts_state_dict = state_dict.get_dict_with_prefix("mlp.experts.");
     auto fused_gate_up = experts_state_dict.get_tensor("gate_up_proj");
     auto fused_down = experts_state_dict.get_tensor("down_proj");
-
     bool is_fused = fused_gate_up.defined() && fused_down.defined();
 
     if (is_fused) {
@@ -99,15 +100,11 @@ class Qwen3MoeDecoderLayerImpl : public torch::nn::Module {
   }
 
   void merge_loaded_weights() { decoder_layer_->merge_loaded_weights(); }
-
   void merge_and_move_pinned_host() {
     decoder_layer_->merge_and_move_pinned_host();
   }
-
   void free_weights() { decoder_layer_->free_weights(); }
-
   void reload_weights() { decoder_layer_->reload_weights(); }
-
   void reload_weights_from_device() {
     decoder_layer_->reload_weights_from_device();
   }
@@ -318,8 +315,10 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
 
     RollingLayerGuard rolling_guard(rolling_mgr_);
 
-    if (FLAGS_enable_intralayer_addnorm)
-      input_params_new.residual_tensor = torch::zeros_like(h);
+    std::optional<torch::Tensor> residual;
+    if (FLAGS_enable_intralayer_addnorm) {
+      residual = torch::zeros_like(h);
+    }
     const int64_t num_tokens = h.size(0);
     const int64_t hidden_size = h.size(-1);
     size_t capture_idx = 0;
@@ -337,9 +336,8 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       if (capture_aux_hidden_states_ &&
           layers_to_capture_set_.count(static_cast<int32_t>(i)) != 0) {
         // auto aux_h = h;
-        auto aux_h = (FLAGS_enable_intralayer_addnorm)
-                         ? h + input_params.residual_tensor
-                         : h;
+        auto aux_h =
+            (FLAGS_enable_intralayer_addnorm) ? h + residual.value() : h;
         aux_output_buffer_.slice(0, 0, num_tokens)
             .slice(1,
                    static_cast<int64_t>(capture_idx) * hidden_size,
@@ -352,6 +350,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       const int32_t layer_index = i;
       rolling_guard.before_layer(layer_index);
       layer(h,
+            residual,
             cos_pos,
             sin_pos,
             attn_mask,
@@ -366,7 +365,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       }
     }
 
-    if (FLAGS_enable_intralayer_addnorm) h = h + input_params.residual_tensor;
+    if (FLAGS_enable_intralayer_addnorm) h = h + residual.value();
     auto hidden_states = norm_(h, 0);
     if (capture_aux_hidden_states_) {
       torch::Tensor aux_hidden_states =

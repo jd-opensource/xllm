@@ -49,6 +49,7 @@ class NpuQwen3MoeDecoderLayerImpl : public BaseLayer {
   virtual int64_t init_layer() override;
 
   torch::Tensor forward(torch::Tensor& x,
+                        std::optional<torch::Tensor>& residual,
                         torch::Tensor& cos_pos,
                         torch::Tensor& sin_pos,
                         torch::Tensor& attn_mask,
@@ -98,6 +99,7 @@ class NpuQwen3MoeDecoderLayerImpl : public BaseLayer {
 
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                torch::Tensor& x,
+                               std::optional<torch::Tensor>& residual,
                                torch::Tensor& cos_pos,
                                torch::Tensor& sin_pos,
                                torch::Tensor& attn_mask,

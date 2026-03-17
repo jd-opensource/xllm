@@ -346,7 +346,6 @@ struct ModelInputParams {
     params.ring_cache_seqlen_host = ring_cache_seqlen_host;
 #if defined(USE_NPU)
     params.layer_synchronizer = layer_synchronizer;
-    params.residual_tensor = safe_to(residual_tensor, device);
 #endif
     params.expert_load_data = expert_load_data;
     params.expert_array = expert_array;
@@ -519,9 +518,6 @@ struct ModelInputParams {
   mutable torch::Tensor visual_pos_masks;
 
 #if defined(USE_NPU)
-  // residual tensor for intralayer addnorm
-  mutable torch::Tensor residual_tensor;
-
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
   uint32_t layers_per_bacth_copy = std::numeric_limits<uint32_t>::max();
   std::shared_ptr<NPULayerSynchronizerImpl> layer_wise_load_synchronizer =
