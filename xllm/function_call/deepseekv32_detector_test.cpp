@@ -492,6 +492,57 @@ TEST_F(DeepSeek32DetectorTest, StreamingNormalTextHandling) {
   // accumulated_normal_text
 }
 
+TEST_F(DeepSeek32DetectorTest, StreamingNormalTextBuffersIncompleteUtf8Tail) {
+  std::string chunk1 = "The user didn";
+  chunk1.push_back(static_cast<char>(0xE2));
+  chunk1.push_back(static_cast<char>(0x80));
+
+  std::string chunk2;
+  chunk2.push_back(static_cast<char>(0x99));
+  chunk2 += "t specify temperature units.";
+
+  std::string accumulated_normal_text;
+  for (const auto& chunk : {chunk1, chunk2}) {
+    auto result = detector_->parse_streaming_increment(chunk, tools_);
+    accumulated_normal_text += result.normal_text;
+  }
+
+  EXPECT_EQ(accumulated_normal_text,
+            "The user didn’t specify temperature units.");
+}
+
+TEST_F(DeepSeek32DetectorTest, StreamingToolArgumentsBufferIncompleteUtf8Tail) {
+  std::string chunk1 =
+      "<｜DSML｜function_calls><｜DSML｜invoke name=\"get_weather\">"
+      "<｜DSML｜parameter name=\"city\" string=\"true\">";
+
+  std::string chunk2;
+  chunk2.push_back(static_cast<char>(0xE5));
+  chunk2.push_back(static_cast<char>(0x8C));
+
+  std::string chunk3;
+  chunk3.push_back(static_cast<char>(0x97));
+  chunk3 += "京</｜DSML｜parameter></｜DSML｜invoke></｜DSML｜function_calls>";
+
+  std::string accumulated_arguments;
+  bool tool_name_sent = false;
+  for (const auto& chunk : {chunk1, chunk2, chunk3}) {
+    auto result = detector_->parse_streaming_increment(chunk, tools_);
+    for (const auto& call : result.calls) {
+      if (call.name.has_value()) {
+        tool_name_sent = true;
+        EXPECT_EQ(call.name.value(), "get_weather");
+      } else {
+        accumulated_arguments += call.parameters;
+      }
+    }
+  }
+
+  ASSERT_TRUE(tool_name_sent);
+  nlohmann::json params = nlohmann::json::parse(accumulated_arguments);
+  EXPECT_EQ(params["city"], "北京");
+}
+
 // Test invalid JSON in parameter values
 TEST_F(DeepSeek32DetectorTest, InvalidJsonInParameterValues) {
   std::string text =

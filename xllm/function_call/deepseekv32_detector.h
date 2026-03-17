@@ -18,6 +18,7 @@ limitations under the License.
 #include <regex>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "base_format_detector.h"
 
@@ -51,8 +52,12 @@ class DeepSeekV32Detector : public BaseFormatDetector {
 
   std::string invoke_end_token_;
   std::vector<std::string> prefix_parameter_end_call_;
+  std::string utf8_buffer_;
 
   std::string trim_whitespace(std::string_view str) const;
+
+  std::pair<std::string, std::string> split_incomplete_utf8(
+      const std::string& str) const;
 
   std::unordered_map<std::string, nlohmann::json> parse_parameters_from_xml(
       const std::string& invoke_content,

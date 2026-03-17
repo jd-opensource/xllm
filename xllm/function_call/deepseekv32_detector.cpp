@@ -61,6 +61,48 @@ DeepSeekV32Detector::DeepSeekV32Detector() : BaseFormatDetector() {
       "<｜DSML｜invoke\\s+name=\"([^\"]+)\"\\s*>([\\s\\S]*?)(</"
       "｜DSML｜invoke>|$)",
       std::regex_constants::ECMAScript);
+  utf8_buffer_.clear();
+}
+
+std::pair<std::string, std::string> DeepSeekV32Detector::split_incomplete_utf8(
+    const std::string& str) const {
+  if (str.empty()) {
+    return {"", ""};
+  }
+
+  size_t len = str.length();
+  size_t start_pos = len;
+  for (size_t i = 1; i <= len && i <= 4; ++i) {
+    if ((static_cast<unsigned char>(str[len - i]) & 0xC0) != 0x80) {
+      start_pos = len - i;
+      break;
+    }
+  }
+
+  if (start_pos == len) {
+    return {str, ""};
+  }
+
+  const unsigned char start_byte = str[start_pos];
+  size_t needed = 0;
+  if ((start_byte & 0x80) == 0) {
+    needed = 1;
+  } else if ((start_byte & 0xE0) == 0xC0) {
+    needed = 2;
+  } else if ((start_byte & 0xF0) == 0xE0) {
+    needed = 3;
+  } else if ((start_byte & 0xF8) == 0xF0) {
+    needed = 4;
+  } else {
+    return {str, ""};
+  }
+
+  const size_t available = len - start_pos;
+  if (available == needed) {
+    return {str, ""};
+  }
+
+  return {str.substr(0, start_pos), str.substr(start_pos)};
 }
 
 // Dump parameters to JSON string with sorted keys for stable prefix comparison
@@ -99,20 +141,117 @@ static std::string strip_trailing_json_hint(const std::string& text) {
   return std::regex_replace(text, kTrailingJsonHintRegex, "");
 }
 
+static bool is_ascii_whitespace(char ch) {
+  return std::isspace(static_cast<unsigned char>(ch)) != 0;
+}
+
+static bool match_placeholder_token(std::string_view text,
+                                    size_t pos,
+                                    size_t end,
+                                    size_t* token_len) {
+  static const std::vector<std::string> kPlaceholderTokens = {
+      "、", "，", ",", "。", ".", "·", "…"};
+
+  for (const auto& token : kPlaceholderTokens) {
+    if (pos + token.size() <= end && text.substr(pos, token.size()) == token) {
+      *token_len = token.size();
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool is_placeholder_only_segment(std::string_view text) {
+  size_t start = 0;
+  size_t end = text.size();
+  while (start < end && is_ascii_whitespace(text[start])) {
+    ++start;
+  }
+  while (end > start && is_ascii_whitespace(text[end - 1])) {
+    --end;
+  }
+  if (start == end) {
+    return false;
+  }
+
+  size_t pos = start;
+  size_t placeholder_count = 0;
+  while (pos < end) {
+    if (is_ascii_whitespace(text[pos])) {
+      ++pos;
+      continue;
+    }
+
+    size_t token_len = 0;
+    if (!match_placeholder_token(text, pos, end, &token_len)) {
+      return false;
+    }
+    pos += token_len;
+    ++placeholder_count;
+  }
+  return placeholder_count >= 2;
+}
+
 static std::string strip_trailing_placeholder_punctuation(
     const std::string& text) {
-  static const std::regex kTrailingPlaceholderPunctRegex(
-      R"((?:^|(?:\r?\n))\s*[、，,。\.·…]{2,}\s*$)",
-      std::regex_constants::ECMAScript);
-  return std::regex_replace(text, kTrailingPlaceholderPunctRegex, "");
+  size_t trimmed_end = text.size();
+  while (trimmed_end > 0 && is_ascii_whitespace(text[trimmed_end - 1])) {
+    --trimmed_end;
+  }
+  if (trimmed_end == 0) {
+    return "";
+  }
+
+  size_t line_start = trimmed_end;
+  while (line_start > 0 && text[line_start - 1] != '\n' &&
+         text[line_start - 1] != '\r') {
+    --line_start;
+  }
+
+  if (!is_placeholder_only_segment(std::string_view(text).substr(
+          line_start, trimmed_end - line_start))) {
+    return text;
+  }
+
+  size_t remove_start = line_start;
+  if (remove_start > 0 && text[remove_start - 1] == '\n') {
+    --remove_start;
+    if (remove_start > 0 && text[remove_start - 1] == '\r') {
+      --remove_start;
+    }
+  } else if (remove_start > 0 && text[remove_start - 1] == '\r') {
+    --remove_start;
+  }
+
+  return text.substr(0, remove_start);
 }
 
 static std::string strip_leading_placeholder_punctuation(
     const std::string& text) {
-  static const std::regex kLeadingPlaceholderPunctRegex(
-      R"(^\s*[、，,。\.·…]{2,}(?:\r?\n)?\s*)",
-      std::regex_constants::ECMAScript);
-  return std::regex_replace(text, kLeadingPlaceholderPunctRegex, "");
+  size_t line_end = 0;
+  while (line_end < text.size() && text[line_end] != '\n' &&
+         text[line_end] != '\r') {
+    ++line_end;
+  }
+
+  if (!is_placeholder_only_segment(
+          std::string_view(text).substr(0, line_end))) {
+    return text;
+  }
+
+  size_t remove_end = line_end;
+  if (remove_end < text.size() && text[remove_end] == '\r') {
+    ++remove_end;
+  }
+  if (remove_end < text.size() && text[remove_end] == '\n') {
+    ++remove_end;
+  }
+  while (remove_end < text.size() && is_ascii_whitespace(text[remove_end]) &&
+         text[remove_end] != '\n' && text[remove_end] != '\r') {
+    ++remove_end;
+  }
+
+  return text.substr(remove_end);
 }
 
 static std::string trim_line_trailing_spaces(const std::string& text) {
@@ -642,14 +781,15 @@ StreamingParseResult DeepSeekV32Detector::detect_and_parse(
 StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
     const std::string& new_text,
     const std::vector<JsonTool>& tools) {
-  // Align with ds32_de.py behavior: do not force-flush buffered tail on
-  // empty delta. This avoids leaking trailing placeholder tokens/fences that
-  // can appear right before tool-call generation in streaming output.
-  if (new_text.empty()) {
-    return StreamingParseResult("", {});
+  if (!new_text.empty()) {
+    std::string merged_text = utf8_buffer_ + new_text;
+    auto [complete_new_text, incomplete_tail] =
+        split_incomplete_utf8(merged_text);
+    utf8_buffer_ = incomplete_tail;
+    buffer_ += complete_new_text;
+  } else {
+    utf8_buffer_.clear();
   }
-
-  buffer_ += new_text;
   std::string current_text = buffer_;
 
   // Check if buffer contains any DSML markers or ends with potential tag prefix
@@ -688,6 +828,10 @@ StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
                                                 &text_before_empty_fence_block,
                                                 &trailing_empty_fence_block);
 
+  bool has_json_tool_calls =
+      (current_text.find("\"tool_calls\"") != std::string::npos ||
+       current_text.find("'tool_calls'") != std::string::npos);
+
   // Detect incomplete JSON block robustly (handles split key chunks like
   // "tool_ca" + "lls"), so we don't flush partial JSON as normal text.
   bool potentially_json_block = false;
@@ -722,9 +866,27 @@ StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
     potentially_json_block = (brace_count > 0);
   }
 
-  bool has_json_tool_calls =
-      (current_text.find("\"tool_calls\"") != std::string::npos ||
-       current_text.find("'tool_calls'") != std::string::npos);
+  if (new_text.empty()) {
+    if (current_text.empty()) {
+      return StreamingParseResult("", {});
+    }
+
+    if (has_tool_call(current_text) || potentially_dsml ||
+        has_json_tool_calls || ends_with_prefix || potentially_json_block ||
+        ends_with_open_brace) {
+      buffer_.clear();
+      return StreamingParseResult("", {});
+    }
+
+    std::string output_text = has_trailing_empty_fence_block
+                                  ? text_before_empty_fence_block
+                                  : current_text;
+    output_text = sanitize_text_before_tool_block(output_text);
+    output_text = strip_leading_markdown_fence(output_text);
+    output_text = strip_leading_placeholder_punctuation(output_text);
+    buffer_.clear();
+    return StreamingParseResult(output_text, {});
+  }
 
   if (!has_tool_call(current_text) && !potentially_dsml && !ends_with_prefix &&
       !has_json_tool_calls && !ends_with_open_brace &&
@@ -943,6 +1105,13 @@ StreamingParseResult DeepSeekV32Detector::parse_streaming_increment(
             }
           }
         }
+      }
+
+      if (!argument_diff.empty()) {
+        auto [complete_argument_diff, incomplete_tail] =
+            split_incomplete_utf8(argument_diff);
+        (void)incomplete_tail;
+        argument_diff = std::move(complete_argument_diff);
       }
 
       if (!argument_diff.empty()) {
