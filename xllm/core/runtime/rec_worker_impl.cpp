@@ -495,7 +495,9 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::LlmRecMultiRoundPipeline(
     RecPipelineRuntime& runtime)
     : RecWorkPipeline(runtime),
       rec_sampler_(std::make_unique<RecSampler>(
-          RecPipelineType::kLlmRecMultiRoundPipeline)) {
+          RecPipelineType::kLlmRecMultiRoundPipeline,
+          runtime_.worker.candidate_token_ids(),
+          runtime_.worker.device())) {
   max_seqs_per_batch_ = runtime_.worker.options_.max_seqs_per_batch();
   max_tokens_per_batch_ = runtime_.worker.options_.max_tokens_per_batch();
   max_token_per_req_ = max_seqs_per_batch_ > 0

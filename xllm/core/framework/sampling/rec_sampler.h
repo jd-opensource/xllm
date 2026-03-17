@@ -17,6 +17,8 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <memory>
+#include <optional>
+#include <vector>
 
 #include "common/rec_model_utils.h"
 #include "sampling_params.h"
@@ -27,7 +29,9 @@ class Sampler;
 
 class RecSampler {
  public:
-  explicit RecSampler(RecPipelineType pipeline_type);
+  RecSampler(RecPipelineType pipeline_type,
+             std::vector<int64_t> candidate_token_ids = {},
+             std::optional<torch::Device> candidate_device = std::nullopt);
   ~RecSampler() = default;
 
   // logits: [batch_size, vocab_size]

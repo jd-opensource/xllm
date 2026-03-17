@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "api_service/qwen3_rerank_service_impl.h"
 
+#include <glog/logging.h>
+
 #include "distributed_runtime/llm_master.h"
 #include "framework/request/request_params.h"
 
@@ -49,6 +51,8 @@ void Qwen3RerankServiceImpl::process_async_impl(
 
   RequestParams request_params(
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
+  request_params.is_embeddings = false;
+  request_params.logprobs = true;
   std::vector<RequestParams> sps(documents.size(), request_params);
   auto request_id = request_params.request_id;
 
@@ -61,14 +65,33 @@ void Qwen3RerankServiceImpl::process_async_impl(
   auto compute_scores = [](const std::vector<std::string>& documents,
                            const std::vector<RequestOutput>& req_outputs)
       -> std::vector<RerankRequestOutput> {
+    if (req_outputs.size() != documents.size()) {
+      LOG(ERROR) << "Qwen3 rerank score computation failed: outputs size "
+                 << req_outputs.size() << " != documents size "
+                 << documents.size();
+      return {};
+    }
+
     std::vector<RerankRequestOutput> rerank_outputs;
     rerank_outputs.reserve(documents.size());
 
     for (size_t i = 0; i < documents.size(); ++i) {
-      if (req_outputs[i].outputs[0].logprobs.has_value()) {
-        auto score = req_outputs[i].outputs[0].logprobs.value()[0].logprob;
-        rerank_outputs.emplace_back(i, documents[i], score);
+      const auto& req_output = req_outputs[i];
+      if (req_output.outputs.empty()) {
+        LOG(ERROR) << "Qwen3 rerank score computation failed: empty outputs at "
+                   << "document index " << i;
+        return {};
       }
+
+      const auto& output = req_output.outputs[0];
+      if (!output.logprobs.has_value() || output.logprobs.value().empty()) {
+        LOG(ERROR) << "Qwen3 rerank score computation failed: missing logprobs"
+                   << " at document index " << i;
+        return {};
+      }
+
+      auto score = output.logprobs.value()[0].logprob;
+      rerank_outputs.emplace_back(i, documents[i], score);
     }
     return rerank_outputs;
   };
