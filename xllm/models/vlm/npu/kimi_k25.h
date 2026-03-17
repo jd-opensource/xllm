@@ -338,8 +338,7 @@ class KimiK2_5_VisionPosEmbDividedImpl : public torch::nn::Module {
 
     time_weight_ =
         register_buffer("time_weight",
-                        build_time_weight(pos_emb_time_, dim_, options),
-                        false);
+                        build_time_weight(pos_emb_time_, dim_, options));
   }
 
   torch::Tensor forward(torch::Tensor x, torch::Tensor grid_thws) {
@@ -622,8 +621,7 @@ class KimiK2_5_VisionPatchMergerImpl : public torch::nn::Module {
 
   void load_state_dict(const StateDict& state_dict) {
     // prefer sglang/HF keys while keeping legacy fallback.
-    auto pre_norm_dict = state_dict.get_dict_with_prefix("pre_norm.");
-    auto ln_dict = pre_norm_dict.size() > 0 ? pre_norm_dict : legacy_ln_q_dict;
+    auto ln_dict = state_dict.get_dict_with_prefix("pre_norm.");
 
     load_layernorm_if_defined(ln_dict,
                               pre_norm_,
@@ -1025,7 +1023,7 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     if (const auto& emb = mm_data.get<torch::Tensor>("embedding")) {
       multimodal_embeds = emb.value();
     }
-    auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
+    auto inputs_embeds = language_model_->get_npu_word_embedding()(input_ids, 0);
     if (!multimodal_embeds.defined()) {
       return inputs_embeds;
     }
@@ -1054,20 +1052,18 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
         vision_dict = state_dict->get_dict_with_prefix("visual.");
       }
       visual_->load_state_dict(vision_dict);
-
+      if (mm_projector_) {
+        auto mm_projector_dict = state_dict->get_dict_with_prefix("mm_projector.");
+        if (mm_projector_dict.size() > 0) {
+          mm_projector_->load_state_dict(mm_projector_dict);
+        }
+      }
     }
     // verify
     visual_->verify_loaded_weights("vision_tower.");
     visual_->merge_loaded_weights();
-    
+
     if (mm_projector_) {
-      auto mm_projector_dict = state_dict->get_dict_with_prefix("mm_projector.");
-      if (mm_projector_dict.size() == 0) {
-        mm_projector_dict =
-            state_dict->get_dict_with_prefix("mm_projector.");
-      }
-      mm_projector_->load_state_dict(mm_projector_dict);
-      // verify
       mm_projector_->verify_loaded_weights("mm_projector.");
       mm_projector_->merge_loaded_weights();
     }
