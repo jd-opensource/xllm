@@ -55,6 +55,7 @@ class BatchInputBuilder {
   void process_sequences_multithreaded();
   void padding_decode_batch_size(uint32_t num_decoding_tokens,
                                  uint32_t min_decoding_batch_size);
+  void materialize_empty_decode_raw_participant();
   ForwardInput state_to_forward_input();
   RawForwardInput state_to_raw_forward_input();
 

@@ -22,19 +22,26 @@ limitations under the License.
 
 namespace xllm {
 
-CollectiveService::CollectiveService(int dp_group_num,
+CollectiveService::CollectiveService(int root_info_count,
                                      int total_num,
                                      int device_idx)
     : total_num_(total_num) {
 #if defined(USE_NPU)
-  root_infos_.reserve(dp_group_num + 1);
-  for (size_t i = 0; i < (dp_group_num + 1); ++i) {
+  root_infos_.reserve(root_info_count);
+  for (int i = 0; i < root_info_count; ++i) {
     HcclRootInfo root_info;
     auto error = aclrtSetDevice(device_idx);
     CHECK_EQ(error, ACL_SUCCESS)
         << "ACL set device id " << device_idx << " failed. Error : " << error;
     auto status = HcclGetRootInfo(&root_info);
-    CHECK_EQ(status, HCCL_SUCCESS) << "HCCL get root info failed.";
+    if (status != HCCL_SUCCESS) {
+      LOG(WARNING)
+          << "HCCL get root info failed with status=" << status << " on device "
+          << device_idx
+          << ". Falling back to ProcessGroup-based communicator setup.";
+      root_infos_.clear();
+      break;
+    }
     root_infos_.push_back(root_info);
   }
 #endif

@@ -22,6 +22,8 @@ limitations under the License.
 #include <torch_npu/csrc/libs/init_npu.h>
 #include <torch_npu/torch_npu.h>
 
+#include <algorithm>
+#include <cstring>
 #include <numeric>
 
 #include "core/common/global_flags.h"
@@ -33,6 +35,7 @@ limitations under the License.
 #endif
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
+#include "core/util/env_var.h"
 #include "core/util/utils.h"
 #include "platform/npu/device_capture_lock.h"
 
@@ -46,6 +49,63 @@ limitations under the License.
 #include "pytorch/adapter/utils/utils.h"
 
 namespace xllm::npu {
+
+namespace {
+
+bool tensor_on_device(const torch::Tensor& tensor,
+                      const torch::Device& device) {
+  return !tensor.defined() || tensor.device() == device;
+}
+
+bool model_input_params_on_device(const ModelInputParams& params,
+                                  const torch::Device& device) {
+  return tensor_on_device(params.kv_seq_lens, device) &&
+         tensor_on_device(params.q_seq_lens, device) &&
+         tensor_on_device(params.q_cu_seq_lens, device) &&
+         tensor_on_device(params.new_cache_slots, device) &&
+         tensor_on_device(params.block_tables, device) &&
+         tensor_on_device(params.input_embedding, device) &&
+         tensor_on_device(params.kv_cache_tokens_nums, device) &&
+         tensor_on_device(params.history_compressed_kv, device) &&
+         tensor_on_device(params.history_k_rope, device) &&
+         tensor_on_device(params.ring_cur_seqlen, device) &&
+         tensor_on_device(params.ring_cache_seqlen, device) &&
+         tensor_on_device(params.expert_load_data, device) &&
+         tensor_on_device(params.expert_array, device) &&
+         tensor_on_device(params.src_block_indices, device) &&
+         tensor_on_device(params.dst_block_indices, device) &&
+         tensor_on_device(params.cum_sum, device) &&
+         tensor_on_device(params.new_cache_slot_offsets, device) &&
+         tensor_on_device(params.kv_cache_start_offsets, device) &&
+         tensor_on_device(params.graph_buffer.attn_mask, device) &&
+         tensor_on_device(params.graph_buffer.tiling_data, device) &&
+         tensor_on_device(params.paged_kv_indptr, device) &&
+         tensor_on_device(params.paged_kv_indices, device) &&
+         tensor_on_device(params.paged_kv_last_page_len, device);
+}
+
+const torch::Tensor& maybe_to_device(const torch::Tensor& tensor,
+                                     const torch::Device& device,
+                                     torch::Tensor& storage) {
+  if (tensor_on_device(tensor, device)) {
+    return tensor;
+  }
+  storage = safe_to(tensor, device, true);
+  return storage;
+}
+
+const ModelInputParams& maybe_to_device(
+    const ModelInputParams& params,
+    const torch::Device& device,
+    std::optional<ModelInputParams>& storage) {
+  if (model_input_params_on_device(params, device)) {
+    return params;
+  }
+  storage.emplace(params.to(device));
+  return *storage;
+}
+
+}  // namespace
 
 // GraphPersistentParam implementation
 GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
@@ -104,6 +164,16 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   persistent_block_tables_ =
       torch::zeros({max_seqs_per_batch, max_block_table_len},
                    torch::dtype(torch::kInt).device(device));
+  cached_block_tables_host_ =
+      torch::zeros({max_seqs_per_batch, max_block_table_len},
+                   torch::dtype(torch::kInt).device(torch::kCPU));
+  cached_block_table_valid_lens_.assign(max_seqs_per_batch, 0);
+  if (args_.model_type() == "minimax_m2") {
+    const int64_t cache_capacity = std::max<int64_t>(
+        0, util::get_int_env("XLLM_MINIMAX_TILING_CACHE_SIZE", 64));
+    minimax_tiling_cache_capacity_ = static_cast<size_t>(cache_capacity);
+    enable_minimax_tiling_cache_ = minimax_tiling_cache_capacity_ > 0;
+  }
 
   // Output tensor for hidden states
   torch::Dtype dtype = util::parse_dtype(args.dtype(), device);
@@ -198,8 +268,13 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
         .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
         .copy_(positions, /*non_blocking=*/true);
   }
-  q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-      .copy_(params.q_seq_lens, /*non_blocking=*/true);
+  const bool skip_minimax_decode_q_updates =
+      !return_capture_params && args_.model_type() == "minimax_m2" &&
+      params.batch_forward_type.is_decode();
+  if (!skip_minimax_decode_q_updates) {
+    q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+        .copy_(params.q_seq_lens, /*non_blocking=*/true);
+  }
   kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
       .copy_(params.kv_seq_lens, /*non_blocking=*/true);
 
@@ -207,14 +282,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
       .copy_(params.new_cache_slots, /*non_blocking=*/true);
 
-  // Copy block table data
-  const int64_t actual_block_table_len = params.block_tables.size(1);
-  auto slice_persistent_block_tables =
-      persistent_block_tables_
-          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-          .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_block_table_len);
-  slice_persistent_block_tables.copy_(params.block_tables,
-                                      /*non_blocking=*/true);
+  update_block_tables(params.block_tables, actual_batch_size);
 
   // Update persistent embedding from input_embedding if available
   const auto& embedding = params.input_embedding;
@@ -237,7 +305,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
         .copy_(embedding, /*non_blocking=*/true);
   }
   // Update q_cu_seq_lens only if params.q_cu_seq_lens is defined
-  if (params.q_cu_seq_lens.defined()) {
+  if (!skip_minimax_decode_q_updates && params.q_cu_seq_lens.defined()) {
     // Lazy initialization: if q_cu_seq_lens_ is not initialized, initialize it
     if (q_cu_seq_lens_.numel() == 0) {
       const int64_t max_seqs_per_batch = options_.max_seqs_per_batch();
@@ -372,6 +440,188 @@ void GraphPersistentParam::initialize_paged_attention_plan_context(
   CHECK_EQ(status, atb::NO_ERROR)
       << "Failed to create custom paged attention operation";
   CHECK_NE(custom_pa_op_for_plan_, nullptr) << "custom_pa_op_for_plan_ is null";
+}
+
+void GraphPersistentParam::update_block_tables(
+    const torch::Tensor& block_tables,
+    int64_t actual_batch_size) {
+  CHECK(block_tables.defined()) << "block_tables must be defined";
+  const int64_t actual_block_table_len = block_tables.size(1);
+  auto persistent_slice =
+      persistent_block_tables_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+          .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_block_table_len);
+
+  const bool can_compare_on_host = block_tables.device().is_cpu() &&
+                                   block_tables.is_contiguous() &&
+                                   block_tables.scalar_type() == torch::kInt;
+  if (!can_compare_on_host) {
+    persistent_slice.copy_(block_tables, /*non_blocking=*/true);
+    if (block_tables.device().is_cpu()) {
+      cached_block_tables_host_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+          .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_block_table_len)
+          .copy_(block_tables, /*non_blocking=*/false);
+      for (int64_t row = 0; row < actual_batch_size; ++row) {
+        cached_block_table_valid_lens_[row] = actual_block_table_len;
+      }
+    }
+    return;
+  }
+
+  const auto* src_ptr = block_tables.const_data_ptr<int32_t>();
+  auto* cached_ptr = cached_block_tables_host_.data_ptr<int32_t>();
+  const int64_t cached_row_stride = cached_block_tables_host_.size(1);
+  const int64_t src_row_stride = block_tables.size(1);
+
+  for (int64_t row = 0; row < actual_batch_size; ++row) {
+    const auto* src_row = src_ptr + row * src_row_stride;
+    auto* cached_row = cached_ptr + row * cached_row_stride;
+    const int64_t valid_len = cached_block_table_valid_lens_[row];
+    const int64_t compare_len = std::min(valid_len, actual_block_table_len);
+
+    int64_t first_diff = 0;
+    while (first_diff < compare_len &&
+           src_row[first_diff] == cached_row[first_diff]) {
+      ++first_diff;
+    }
+
+    if (first_diff == compare_len && actual_block_table_len > valid_len) {
+      first_diff = valid_len;
+    }
+
+    if (first_diff == actual_block_table_len) {
+      cached_block_table_valid_lens_[row] = actual_block_table_len;
+      continue;
+    }
+
+    std::memcpy(cached_row + first_diff,
+                src_row + first_diff,
+                static_cast<size_t>(actual_block_table_len - first_diff) *
+                    sizeof(int32_t));
+
+    persistent_block_tables_.slice(/*dim=*/0, /*start=*/row, /*end=*/row + 1)
+        .slice(/*dim=*/1, /*start=*/first_diff, /*end=*/actual_block_table_len)
+        .copy_(block_tables.slice(/*dim=*/0, /*start=*/row, /*end=*/row + 1)
+                   .slice(/*dim=*/1,
+                          /*start=*/first_diff,
+                          /*end=*/actual_block_table_len),
+               /*non_blocking=*/true);
+    cached_block_table_valid_lens_[row] = actual_block_table_len;
+  }
+}
+
+bool GraphPersistentParam::try_use_cached_minimax_tiling(
+    const ModelInputParams& input_params,
+    int64_t num_tokens,
+    aclrtStream stream) {
+  const auto& block_tables = input_params.block_tables;
+  if (!enable_minimax_tiling_cache_ ||
+      !input_params.batch_forward_type.is_decode() ||
+      input_params.num_sequences <= 0 || !block_tables.defined() ||
+      !block_tables.device().is_cpu() || !block_tables.is_contiguous() ||
+      block_tables.scalar_type() != torch::kInt ||
+      input_params.kv_seq_lens_vec.size() <
+          static_cast<size_t>(input_params.num_sequences)) {
+    return false;
+  }
+  const int64_t block_table_len = block_tables.size(1);
+  const size_t num_block_table_entries =
+      static_cast<size_t>(input_params.num_sequences * block_table_len);
+  const auto* block_table_ptr = block_tables.const_data_ptr<int32_t>();
+
+  for (const auto& entry : minimax_tiling_cache_) {
+    if (entry.num_tokens != static_cast<uint32_t>(num_tokens) ||
+        entry.num_sequences != input_params.num_sequences ||
+        entry.block_table_len != block_table_len ||
+        entry.kv_seq_lens.size() !=
+            static_cast<size_t>(input_params.num_sequences) ||
+        entry.block_tables.size() != num_block_table_entries) {
+      continue;
+    }
+    if (!std::equal(entry.kv_seq_lens.begin(),
+                    entry.kv_seq_lens.end(),
+                    input_params.kv_seq_lens_vec.begin())) {
+      continue;
+    }
+    if (!std::equal(entry.block_tables.begin(),
+                    entry.block_tables.end(),
+                    block_table_ptr)) {
+      continue;
+    }
+
+    aclError acl_status =
+        aclrtMemcpyAsync(tiling_data_.data_ptr(),
+                         tiling_data_.numel() * sizeof(uint32_t),
+                         entry.tiling_buffer.data(),
+                         entry.tiling_buffer_size,
+                         ACL_MEMCPY_HOST_TO_DEVICE,
+                         stream);
+    CHECK_EQ(acl_status, ACL_SUCCESS)
+        << "Failed to copy cached MiniMax tiling buffer to device";
+    return true;
+  }
+  return false;
+}
+
+void GraphPersistentParam::maybe_store_minimax_tiling(
+    const ModelInputParams& input_params,
+    int64_t num_tokens,
+    const void* tiling_buffer,
+    uint64_t tiling_buffer_size) {
+  const auto& block_tables = input_params.block_tables;
+  if (!enable_minimax_tiling_cache_ ||
+      !input_params.batch_forward_type.is_decode() ||
+      input_params.num_sequences <= 0 || !block_tables.defined() ||
+      !block_tables.device().is_cpu() || !block_tables.is_contiguous() ||
+      block_tables.scalar_type() != torch::kInt ||
+      input_params.kv_seq_lens_vec.size() <
+          static_cast<size_t>(input_params.num_sequences) ||
+      tiling_buffer == nullptr || tiling_buffer_size == 0) {
+    return;
+  }
+  const int64_t block_table_len = block_tables.size(1);
+  const size_t num_block_table_entries =
+      static_cast<size_t>(input_params.num_sequences * block_table_len);
+  const auto* block_table_ptr = block_tables.const_data_ptr<int32_t>();
+
+  for (auto& entry : minimax_tiling_cache_) {
+    if (entry.num_tokens == static_cast<uint32_t>(num_tokens) &&
+        entry.num_sequences == input_params.num_sequences &&
+        entry.block_table_len == block_table_len &&
+        entry.kv_seq_lens.size() ==
+            static_cast<size_t>(input_params.num_sequences) &&
+        entry.block_tables.size() == num_block_table_entries &&
+        std::equal(entry.kv_seq_lens.begin(),
+                   entry.kv_seq_lens.end(),
+                   input_params.kv_seq_lens_vec.begin()) &&
+        std::equal(entry.block_tables.begin(),
+                   entry.block_tables.end(),
+                   block_table_ptr)) {
+      entry.tiling_buffer.resize(tiling_buffer_size);
+      std::memcpy(
+          entry.tiling_buffer.data(), tiling_buffer, tiling_buffer_size);
+      entry.tiling_buffer_size = tiling_buffer_size;
+      return;
+    }
+  }
+
+  MiniMaxTilingCacheEntry entry;
+  entry.num_tokens = static_cast<uint32_t>(num_tokens);
+  entry.num_sequences = input_params.num_sequences;
+  entry.block_table_len = block_table_len;
+  entry.kv_seq_lens.assign(
+      input_params.kv_seq_lens_vec.begin(),
+      input_params.kv_seq_lens_vec.begin() + input_params.num_sequences);
+  entry.block_tables.assign(block_table_ptr,
+                            block_table_ptr + num_block_table_entries);
+  entry.tiling_buffer.resize(tiling_buffer_size);
+  std::memcpy(entry.tiling_buffer.data(), tiling_buffer, tiling_buffer_size);
+  entry.tiling_buffer_size = tiling_buffer_size;
+  minimax_tiling_cache_.push_back(std::move(entry));
+  while (minimax_tiling_cache_.size() > minimax_tiling_cache_capacity_) {
+    minimax_tiling_cache_.pop_front();
+  }
 }
 
 constexpr uint32_t TILING_PARA_SIZE = 17;
@@ -567,9 +817,11 @@ void GraphPersistentParam::plan_paged_attention_tiling(
   atb::Tensor atb_v_cache = atb_speed::Utils::AtTensor2Tensor(v_cache);
   atb::Tensor atb_block_tables =
       atb_speed::Utils::AtTensor2Tensor(block_tables);
-  // Get context_lens from input_params.kv_seq_lens
-  atb::Tensor atb_context_lens =
-      atb_speed::Utils::AtTensor2Tensor(input_params.kv_seq_lens);
+  // Use the persistent device slice for tensor metadata so replay can keep the
+  // original decode params on host while still exposing the current lengths to
+  // the paged-attention planner.
+  atb::Tensor atb_context_lens = atb_speed::Utils::AtTensor2Tensor(
+      kv_seq_lens(input_params.num_sequences));
   atb_context_lens.hostData =
       const_cast<int32_t*>(input_params.kv_seq_lens_vec.data());
   atb::Tensor atb_tiling_data = atb_speed::Utils::AtTensor2Tensor(tiling_data_);
@@ -579,6 +831,10 @@ void GraphPersistentParam::plan_paged_attention_tiling(
   // Construct query atb tensor from tokens: shape [num_tokens, headNum,
   // head_dim] Get number of tokens from tokens tensor
   const int64_t num_tokens = tokens.size(0);
+
+  if (try_use_cached_minimax_tiling(input_params, num_tokens, stream)) {
+    return;
+  }
 
   // Create query atb tensor with only desc (no actual data needed)
   atb::Tensor atb_query;
@@ -642,6 +898,10 @@ void GraphPersistentParam::plan_paged_attention_tiling(
     parse_pa_host_tiling_buffer((uint32_t*)tiling_buffer_info.tilingBuffer,
                                 tiling_buffer_info.tilingBufferSize);
   }
+  maybe_store_minimax_tiling(input_params,
+                             num_tokens,
+                             tiling_buffer_info.tilingBuffer,
+                             tiling_buffer_info.tilingBufferSize);
   aclError acl_status =
       aclrtMemcpyAsync(tiling_data_.data_ptr(),
                        tiling_data_.numel() * sizeof(uint32_t),
@@ -811,6 +1071,7 @@ bool AclGraph::capture(CausalLM* model,
 
   // Use cached capture stream for graph capture
   // capture_stream_ is initialized in constructor
+  aclrtStream capture_stream = stream;
   bool need_restore_stream = false;
 
   // capture lock scope
@@ -822,8 +1083,11 @@ bool AclGraph::capture(CausalLM* model,
     if (c10_npu::getCurrentNPUStream(device_idx) ==
         c10_npu::getDefaultNPUStream(device_idx)) {
       c10_npu::setCurrentNPUStream(capture_stream_.value());
-      aclrtSynchronizeStream(capture_stream_.value().stream());
+      capture_stream = capture_stream_.value().stream();
+      aclrtSynchronizeStream(capture_stream);
       need_restore_stream = true;
+    } else {
+      capture_stream = c10_npu::getCurrentNPUStream(device_idx).stream();
     }
     LOG(INFO) << "capture begin, bucket_num_tokens: " << bucket_num_tokens
               << ", actual_num_tokens: " << actual_num_tokens;
@@ -852,12 +1116,12 @@ bool AclGraph::capture(CausalLM* model,
           c10_npu::getDefaultNPUStream(tensor_options.device().index()));
     }
   }
-  // Synchronize and test replay to verify graph capture
-  aclrtSynchronizeStream(stream);
-
-  graph_.replay();
-
-  // aclrtSynchronizeStream(stream);
+  // Align with the CUDA path: the capture pass itself has already executed
+  // one real forward. Replaying here would issue a second decode pass on
+  // ranks that captured a graph, while dummy decode ranks still only execute
+  // one eager pass, which can deadlock distributed collectives during MiniMax
+  // warmup. Waiting for the capture stream is sufficient before returning.
+  aclrtSynchronizeStream(capture_stream);
   return true;
 }
 
@@ -870,7 +1134,7 @@ void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
   device_index_ = device_index;
   LOG(INFO) << "Initialized capture_stream: " << capture_stream_.value()
             << ", id: " << capture_stream_.value().id()
-            << ", device_index: " << device_index;
+            << ", device_index: " << static_cast<int>(device_index);
 }
 
 ModelOutput AclGraph::replay(const torch::Tensor& tokens,
@@ -937,24 +1201,73 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   const torch::Tensor& tokens_tensor = tokens;
   const torch::Tensor& positions_tensor = positions;
   const ModelInputParams& params_single = params;
+  torch::Tensor tokens_on_device;
+  torch::Tensor positions_on_device;
+  std::optional<ModelInputParams> params_on_device;
   const bool in_decoding_phase = params_single.batch_forward_type.is_decode();
+  const bool minimax_decode_has_empty_dp_peer =
+      in_decoding_phase && args_.model_type() == "minimax_m2" &&
+      options_.dp_size() > 1 && !params_single.dp_global_token_nums.empty() &&
+      std::any_of(params_single.dp_global_token_nums.begin(),
+                  params_single.dp_global_token_nums.end(),
+                  [](int32_t token_count) { return token_count == 0; });
+  const bool is_dummy_decode_participant =
+      in_decoding_phase &&
+      (tokens_tensor.numel() == 0 || params_single.num_sequences == 0 ||
+       params_single.q_max_seq_len == 0);
+  const uint32_t n_tokens =
+      tokens_tensor.numel() == 0 ? 0 : tokens_tensor.size(/*dim=*/0);
+  const uint32_t bucket_num_tokens =
+      n_tokens == 0 ? 0 : get_bucket_num_tokens(n_tokens);
+  auto graph_it =
+      bucket_num_tokens == 0 ? graphs_.end() : graphs_.find(bucket_num_tokens);
+  const bool minimax_idle_dp_replay_blocked_by_moe_collectives =
+      args_.model_type() == "minimax_m2" && options_.dp_size() > 1 &&
+      options_.ep_size() > 1 && minimax_decode_has_empty_dp_peer &&
+      !is_dummy_decode_participant && graph_it != graphs_.end();
+  const bool minimax_can_replay_with_idle_dp_peer =
+      minimax_decode_has_empty_dp_peer && !is_dummy_decode_participant &&
+      graph_it != graphs_.end() &&
+      !minimax_idle_dp_replay_blocked_by_moe_collectives;
   VLOG(50) << "in_decoding_phase: " << in_decoding_phase
            << " q_max_seq_len: " << params_single.q_max_seq_len
            << " n_layers: " << args_.n_layers();
   // If not in decode phase, use eager mode directly without acl graph
   // TODO: fix mtp model support.
-  if (!in_decoding_phase || args_.n_layers() == 1) {
+  if (!in_decoding_phase || args_.n_layers() == 1 ||
+      is_dummy_decode_participant ||
+      (minimax_decode_has_empty_dp_peer &&
+       !minimax_can_replay_with_idle_dp_peer)) {
     VLOG(kGraphExecutorLogVerboseLevel)
         << "AclGraphExecutorImpl::run() in eager mode";
+    if (minimax_decode_has_empty_dp_peer && !is_dummy_decode_participant) {
+      if (minimax_idle_dp_replay_blocked_by_moe_collectives) {
+        LOG_FIRST_N(INFO, 8)
+            << "MiniMax decode disables idle-DP-peer ACL-graph replay under "
+               "dp+ep because MoE collectives still require the idle peer to "
+               "participate: bucket="
+            << bucket_num_tokens
+            << ", dp_global_token_nums=" << params_single.dp_global_token_nums;
+      } else {
+        LOG_FIRST_N(INFO, 8)
+            << "MiniMax decode falls back to eager because at least one DP "
+               "peer has zero tokens in this step and bucket "
+            << bucket_num_tokens
+            << " is not available for replay: dp_global_token_nums="
+            << params_single.dp_global_token_nums;
+      }
+    }
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(
+        maybe_to_device(tokens_tensor, device_, tokens_on_device),
+        maybe_to_device(positions_tensor, device_, positions_on_device),
+        kv_caches,
+        maybe_to_device(params_single, device_, params_on_device));
   }
 
   // Only use acl graph in decode phase for performance optimization
-  // Get actual num_tokens from tokens shape
-  const uint32_t n_tokens = tokens_tensor.size(/*dim=*/0);
   const uint32_t actual_batch_size = n_tokens / options_.num_decoding_tokens();
-  const uint32_t bucket_num_tokens = get_bucket_num_tokens(n_tokens);
+  (void)actual_batch_size;
 
   // Check if conditions are suitable for graph execution (replay or capture)
   const auto max_seq_len = args_.max_position_embeddings();
@@ -972,16 +1285,26 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
         << "). This message is logged only once. "
         << "Monitor counter 'num_model_execution_total_eager' for frequency.";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(
+        maybe_to_device(tokens_tensor, device_, tokens_on_device),
+        maybe_to_device(positions_tensor, device_, positions_on_device),
+        kv_caches,
+        maybe_to_device(params_single, device_, params_on_device));
   }
 
   // Check if captured graph exists for this bucket num_tokens
-  auto it = graphs_.find(bucket_num_tokens);
-  if (it != graphs_.end()) {
+  if (graph_it != graphs_.end()) {
     // Replay the existing graph
     VLOG(kGraphExecutorLogVerboseLevel)
         << "AclGraphExecutorImpl::run() in replay mode";
-    auto result = it->second->replay(
+    if (minimax_can_replay_with_idle_dp_peer) {
+      LOG_FIRST_N(INFO, 8)
+          << "MiniMax decode replays warmed ACL graph on the active DP "
+             "rank even though another DP peer is idle: bucket="
+          << bucket_num_tokens
+          << ", dp_global_token_nums=" << params_single.dp_global_token_nums;
+    }
+    auto result = graph_it->second->replay(
         tokens_tensor, positions_tensor, kv_caches, params_single);
     // Handle aux_hidden_states based on options
     if (options_.enable_graph_aux_hidden_states()) {
@@ -998,14 +1321,15 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   auto graph = std::make_unique<AclGraph>(*persistent_param_, device_.index());
   VLOG(kGraphExecutorLogVerboseLevel)
       << "AclGraphExecutorImpl::run() in capture mode";
-  bool capture_success = graph->capture(model_,
-                                        args_,
-                                        options_,
-                                        tokens_tensor,
-                                        positions_tensor,
-                                        params_single,
-                                        kv_caches,
-                                        bucket_num_tokens);
+  bool capture_success = graph->capture(
+      model_,
+      args_,
+      options_,
+      maybe_to_device(tokens_tensor, device_, tokens_on_device),
+      maybe_to_device(positions_tensor, device_, positions_on_device),
+      maybe_to_device(params_single, device_, params_on_device),
+      kv_caches,
+      bucket_num_tokens);
 
   if (capture_success) {
     LOG(INFO) << "Lazy capturing ACL graph for bucket num_tokens: "
@@ -1032,7 +1356,11 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   LOG(ERROR) << "Failed to capture ACL graph for bucket num_tokens: "
              << bucket_num_tokens;
   COUNTER_INC(num_model_execution_total_eager);
-  return model_->forward(tokens, positions, kv_caches, params);
+  return model_->forward(
+      maybe_to_device(tokens_tensor, device_, tokens_on_device),
+      maybe_to_device(positions_tensor, device_, positions_on_device),
+      kv_caches,
+      maybe_to_device(params_single, device_, params_on_device));
 }
 
 void AclGraph::print_graph_tensors() const {

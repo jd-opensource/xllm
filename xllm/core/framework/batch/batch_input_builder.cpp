@@ -83,6 +83,7 @@ ForwardInput BatchInputBuilder::build_forward_input(
 
 RawForwardInput BatchInputBuilder::build_raw_forward_input() {
   process_sequences();
+  materialize_empty_decode_raw_participant();
   return state_to_raw_forward_input();
 }
 
@@ -479,6 +480,37 @@ void BatchInputBuilder::padding_decode_batch_size(
   }
 }
 
+void BatchInputBuilder::materialize_empty_decode_raw_participant() {
+  if (!state_.batch_forward_type.is_decode() ||
+      !state_.flatten_tokens_vec.empty()) {
+    return;
+  }
+
+  // Preserve an empty token axis so MiniMax stays on its dummy-execution path,
+  // but materialize one metadata row so raw-input serialization remains
+  // structurally consistent on DP-idle decode participants.
+  state_.max_seq_len = 0;
+  state_.q_max_seq_len = 0;
+#if defined(USE_NPU) || defined(USE_MUSA)
+  state_.seq_lens = {0};
+  state_.q_seq_lens = {0};
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+  state_.seq_lens = {0, 0};
+  state_.q_seq_lens = {0, 0};
+#endif
+  state_.kv_cache_tokens_nums = {0};
+  state_.block_tables_vec = {{}};
+  state_.paged_kv_indptr = {0, 0};
+  state_.paged_kv_indices.clear();
+  state_.paged_kv_last_page_len = {0};
+  state_.new_token_slot_ids.clear();
+  state_.embedding_ids = {0};
+  state_.extra_token_ids = {-1};
+  state_.transfer_kv_infos.clear();
+  state_.new_cache_slot_offsets.clear();
+  state_.kv_cache_start_offsets.clear();
+}
+
 ForwardInput BatchInputBuilder::state_to_forward_input() {
   if (state_.flatten_tokens_vec.empty()) {
     return {};
@@ -560,7 +592,8 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
 }
 
 RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
-  if (state_.flatten_tokens_vec.empty()) {
+  if (state_.flatten_tokens_vec.empty() &&
+      !state_.batch_forward_type.is_decode()) {
     return {};
   }
   RawForwardInput raw_forward_input;
@@ -568,7 +601,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   if (!use_mrope_) {
     raw_forward_input.flatten_positions_vec =
         std::move(state_.flatten_positions_vec);
-  } else {
+  } else if (!state_.mrope_positions_vec.empty()) {
     auto m_positions = torch::cat(state_.mrope_positions_vec, 1);
     for (int64_t idx = 0; idx < m_positions.size(0); ++idx) {
       torch::Tensor position = m_positions[idx];
@@ -601,7 +634,21 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.new_token_slot_ids = std::move(state_.new_token_slot_ids);
   util::pad_2d_vector(state_.block_tables_vec, /*pad_value=*/0);
   raw_forward_input.block_tables_vec = std::move(state_.block_tables_vec);
-  raw_forward_input.num_sequences = num_sequences_;
+#if defined(USE_NPU) || defined(USE_MUSA)
+  const int32_t fallback_num_sequences =
+      static_cast<int32_t>(raw_forward_input.q_seq_lens.size());
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+  const int32_t fallback_num_sequences =
+      raw_forward_input.q_seq_lens.empty()
+          ? 0
+          : static_cast<int32_t>(raw_forward_input.q_seq_lens.size() - 1);
+#else
+  const int32_t fallback_num_sequences = 0;
+#endif
+  raw_forward_input.num_sequences =
+      raw_forward_input.block_tables_vec.empty()
+          ? fallback_num_sequences
+          : static_cast<int32_t>(raw_forward_input.block_tables_vec.size());
   // raw_forward_input.dp_global_token_nums = ;
   raw_forward_input.transfer_kv_infos = std::move(state_.transfer_kv_infos);
 

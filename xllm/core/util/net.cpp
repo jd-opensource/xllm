@@ -52,10 +52,18 @@ std::string get_local_ip_addr() {
   }
   auto guard = std::unique_ptr<struct addrinfo, decltype(&freeaddrinfo)>(
       info, freeaddrinfo);
-  auto* addr = (struct sockaddr_in*)info->ai_addr;
-  auto* result = inet_ntop(addr->sin_family, &addr->sin_addr, ip, sizeof(ip));
+  for (auto* current = info; current != nullptr; current = current->ai_next) {
+    auto* addr = reinterpret_cast<struct sockaddr_in*>(current->ai_addr);
+    auto* result = inet_ntop(addr->sin_family, &addr->sin_addr, ip, sizeof(ip));
+    if (result == nullptr) {
+      continue;
+    }
+    if (std::strncmp(ip, "127.", 4) != 0) {
+      return std::string(ip);
+    }
+  }
 
-  return std::string(ip);
+  return "127.0.0.1";
 }
 
 int get_local_free_port() {

@@ -51,6 +51,7 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "framework/kv_cache/mooncake_weight_transfer.h"
 #endif
+#include "util/env_var.h"
 #include "util/net.h"
 #include "util/tensor_helper.h"
 #include "util/threadpool.h"
@@ -67,6 +68,34 @@ constexpr uint32_t TIMEOUT_S = 60;      // second
 constexpr uint32_t TIMEOUT_MS = 60000;  // millisecond
 
 namespace {
+
+#if defined(USE_NPU)
+bool should_keep_minimax_decode_graph_enabled() {
+  return xllm::util::get_bool_env("XLLM_MINIMAX_NATIVE_DECODE_ATTN", true) &&
+         !xllm::util::get_bool_env("XLLM_MINIMAX_EP_MOE_REFERENCE", false) &&
+         !xllm::util::get_bool_env("XLLM_MINIMAX_COMPARE_MOE", false);
+}
+
+bool should_keep_minimax_decode_input_params_on_host(
+    const ModelArgs& args,
+    const ForwardInput& input) {
+  return FLAGS_enable_graph && args.model_type() == "minimax_m2" &&
+         input.input_params.batch_forward_type.is_decode();
+}
+
+ForwardInput prepare_minimax_decode_graph_input(const ForwardInput& input,
+                                                const torch::Device& device,
+                                                torch::ScalarType dtype) {
+  ForwardInput processed = input;
+  processed.token_ids = safe_to(input.token_ids, device, true);
+  processed.positions = safe_to(input.positions, device, true);
+  processed.sampling_params = input.sampling_params.to(device, dtype);
+  processed.decoder_sampling_params =
+      input.decoder_sampling_params.to(device, dtype);
+  processed.acc_logprob = safe_to(input.acc_logprob, device, true);
+  return processed;
+}
+#endif
 
 // During TP model initialization, each rank loads weights concurrently.
 // MoE weight assembly (especially stack/cat on large expert tensors) runs on
@@ -515,7 +544,19 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 #endif
   c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
 
-  processed_input = input.to(device_, dtype_);
+  if (
+#if defined(USE_NPU)
+      should_keep_minimax_decode_input_params_on_host(context_.get_model_args(),
+                                                      input)
+#else
+      false
+#endif
+  ) {
+    processed_input =
+        prepare_minimax_decode_graph_input(input, device_, dtype_);
+  } else {
+    processed_input = input.to(device_, dtype_);
+  }
   auto& input_params = processed_input.input_params;
 #if defined(USE_NPU)
   if (input_params.swap_blocks.size() > 0 && !FLAGS_enable_block_copy_kernel) {
@@ -780,10 +821,29 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   model_weights_path_ = std::move(model_weights_path);
   auto tokenizer = model_loader->tokenizer();
   CHECK(tokenizer != nullptr);
+  tokenizer_vocab_size_ = static_cast<int64_t>(tokenizer->vocab_size());
 
   auto args = model_loader->model_args();
   auto quant_args = model_loader->quant_args();
   torch::ScalarType dtype = util::parse_dtype(args.dtype(), device_);
+
+#if defined(USE_NPU)
+  if (args.model_type() == "minimax_m2" && FLAGS_enable_graph) {
+    if (should_keep_minimax_decode_graph_enabled()) {
+      LOG(INFO) << "Keeping ACL graph enabled for MiniMax-M2.5 worker decode: "
+                   "native paged-attention and a graph-safe MiniMax decode MoE "
+                   "path are enabled.";
+    } else {
+      LOG(WARNING) << "Disabling ACL graph for MiniMax-M2.5 worker decode "
+                      "because either XLLM_MINIMAX_NATIVE_DECODE_ATTN=0, "
+                      "XLLM_MINIMAX_EP_MOE_REFERENCE=1, or "
+                      "XLLM_MINIMAX_COMPARE_MOE=1. The eager/reference/"
+                      "compare decode paths must run outside ACL graph "
+                      "capture.";
+      FLAGS_enable_graph = false;
+    }
+  }
+#endif
 
   const int64_t tokenizer_vocab_size =
       static_cast<int64_t>(tokenizer->vocab_size());

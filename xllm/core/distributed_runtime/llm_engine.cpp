@@ -60,6 +60,48 @@ int64_t get_kv_cache_dtype_size_in_bytes(const std::string& kv_cache_dtype,
   }
   return model_dtype_size;
 }
+
+#if defined(USE_NPU)
+bool should_keep_minimax_decode_graph_enabled() {
+  return xllm::util::get_bool_env("XLLM_MINIMAX_NATIVE_DECODE_ATTN", true) &&
+         !xllm::util::get_bool_env("XLLM_MINIMAX_EP_MOE_REFERENCE", false) &&
+         !xllm::util::get_bool_env("XLLM_MINIMAX_COMPARE_MOE", false);
+}
+#endif
+
+void synthesize_dummy_decode_raw_input(xllm::RawForwardInput& input) {
+  input.flatten_tokens_vec.clear();
+  input.flatten_positions_vec.clear();
+  input.m_positions_vec.clear();
+  input.batch_forward_type = xllm::BatchForwardType::DECODE;
+  input.max_seq_len = 0;
+  input.q_max_seq_len = 0;
+#if defined(USE_NPU) || defined(USE_MUSA)
+  input.seq_lens = {0};
+  input.q_seq_lens = {0};
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+  input.seq_lens = {0, 0};
+  input.q_seq_lens = {0, 0};
+#endif
+  input.kv_cache_tokens_nums = {0};
+  input.new_token_slot_ids.clear();
+  input.block_tables_vec = {{}};
+  input.num_sequences = 1;
+  input.embedding_ids = {0};
+  input.extra_token_ids = {-1};
+  input.paged_kv_indptr = {0, 0};
+  input.paged_kv_indices.clear();
+  input.paged_kv_last_page_len = {0};
+  input.sampling_params.clear();
+  input.selected_token_idxes.clear();
+  input.sample_idxes.clear();
+  input.unique_token_ids_vec.clear();
+  input.unique_token_counts_vec.clear();
+  input.unique_token_lens_vec.clear();
+  input.transfer_kv_infos.clear();
+  input.new_cache_slot_offsets.clear();
+  input.kv_cache_start_offsets.clear();
+}
 }  // namespace
 
 namespace xllm {
@@ -183,6 +225,24 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   args_ = model_loader->model_args();
   quant_args_ = model_loader->quant_args();
   tokenizer_args_ = model_loader->tokenizer_args();
+
+#if defined(USE_NPU)
+  if (args_.model_type() == "minimax_m2" && FLAGS_enable_graph) {
+    if (should_keep_minimax_decode_graph_enabled()) {
+      LOG(INFO) << "Keeping ACL graph enabled for MiniMax-M2.5 decode: "
+                   "native paged-attention and a graph-safe MiniMax decode MoE "
+                   "path are enabled.";
+    } else {
+      LOG(WARNING) << "Disabling ACL graph for MiniMax-M2.5 decode because "
+                      "either XLLM_MINIMAX_NATIVE_DECODE_ATTN=0, "
+                      "XLLM_MINIMAX_EP_MOE_REFERENCE=1, or "
+                      "XLLM_MINIMAX_COMPARE_MOE=1. The eager/reference/"
+                      "compare decode paths must run outside ACL graph "
+                      "capture.";
+      FLAGS_enable_graph = false;
+    }
+  }
+#endif
 
   // compute the number of local kv heads and head dim
   const int world_size = dp_size_ > 1 ? (dp_local_tp_size_)
@@ -1088,8 +1148,6 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     batched_inputs.emplace_back(std::move(
         batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
-    dp_global_token_nums[dp_rank] =
-        batched_inputs[dp_rank].flatten_tokens_vec.size();
     if (batch_forward_type.is_empty() &&
         !batched_inputs[dp_rank].batch_forward_type.is_empty()) {
       batch_forward_type = batched_inputs[dp_rank].batch_forward_type;
@@ -1097,8 +1155,6 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
         batch_forward_type = BatchForwardType::PREFILL;
       }
     }
-    dp_is_decode[dp_rank] = batch_forward_type.is_decode() &&
-                            batched_inputs[dp_rank].q_max_seq_len == 1;
   }
 
   // eplb related
@@ -1109,14 +1165,26 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
 
   // update dp_global_token_nums and batch_forward_type
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs[dp_rank].dp_global_token_nums = dp_global_token_nums;
-    batched_inputs[dp_rank].dp_is_decode = dp_is_decode;
     if (FLAGS_enable_eplb) {
       batched_inputs[dp_rank].eplb_info = eplb_info;
+    }
+    if (batch_forward_type.is_decode() &&
+        batched_inputs[dp_rank].flatten_tokens_vec.empty()) {
+      synthesize_dummy_decode_raw_input(batched_inputs[dp_rank]);
     }
     if (batched_inputs[dp_rank].batch_forward_type.is_empty()) {
       batched_inputs[dp_rank].batch_forward_type = batch_forward_type;
     }
+    dp_global_token_nums[dp_rank] =
+        static_cast<int32_t>(batched_inputs[dp_rank].flatten_tokens_vec.size());
+    dp_is_decode[dp_rank] =
+        batched_inputs[dp_rank].batch_forward_type.is_decode() &&
+        batched_inputs[dp_rank].q_max_seq_len == 1;
+  }
+
+  for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
+    batched_inputs[dp_rank].dp_global_token_nums = dp_global_token_nums;
+    batched_inputs[dp_rank].dp_is_decode = dp_is_decode;
   }
 
   return batched_inputs;

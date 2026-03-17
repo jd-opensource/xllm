@@ -391,12 +391,16 @@ std::optional<SequenceOutput> Sequence::generate_streaming_output(
   // We consider both of these cases to be valid,
   // subsequent callbacks only need to skip to return tokens.
   //
-  if (delta.empty()) {
+  const bool is_finished = finished();
+  if (delta.empty() && !is_finished) {
     return std::nullopt;
   }
 
   output.index = index_;
   output.text = std::move(delta);
+  if (is_finished && finish_reason_ != FinishReason::NONE) {
+    output.finish_reason = finish_reason_.to_string();
+  }
 
   const size_t end = decoder_.output_offset();
   output.token_ids = ids.slice(start, end);

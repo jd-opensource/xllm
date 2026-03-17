@@ -23,3 +23,5 @@ cc_binary(
 )
 
 add_dependencies(export_module spawn_worker)
+target_link_libraries(spawn_worker PRIVATE brpc leveldb::leveldb protobuf::libprotobuf)
+add_dependencies(spawn_worker brpc-static)

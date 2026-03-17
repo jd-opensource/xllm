@@ -143,6 +143,7 @@ struct AttentionMetadata {
 
 #if defined(USE_NPU)
   // for npu
+  torch::Tensor q_seq_lens_host;
   torch::Tensor kv_seq_lens_host;
   // For ACL graph execution - tiling data for CustomPagedAttention.
   // If defined, use this instead of kv_seq_lens_host to avoid .to(kCPU)

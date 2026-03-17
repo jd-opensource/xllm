@@ -193,8 +193,7 @@ class QKVParallelLinearImpl : public torch::nn::Module {
   // whether to gather the output
   bool gather_output_;
   at::Device device_;
-  // parallel args
-  ParallelArgs parallel_args_;
+  ProcessGroup* tp_group_;
   torch::TensorOptions options_;
   // quantization args
   QuantArgs quant_args_;

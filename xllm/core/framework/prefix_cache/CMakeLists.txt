@@ -42,6 +42,8 @@ cc_test(
 )
 
 target_link_libraries(prefix_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto Folly::folly :xllm_server)
+target_link_libraries(prefix_test PRIVATE
+  "$<TARGET_LINKER_FILE:xllm_server>")
 add_dependencies(prefix_test brpc-static)
 
 cc_binary(

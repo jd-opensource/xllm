@@ -25,7 +25,19 @@ limitations under the License.
 
 namespace xllm {
 struct DpEpPaddingData {
-  void set_placeholder(const torch::Tensor& placeholder);
+  inline void set_placeholder(const torch::Tensor& placeholder) {
+    attn_padding_idx_ = placeholder;
+    attn_unpadding_idx_ = placeholder;
+    ffn_padding_idx_ = placeholder;
+    ffn_unpadding_idx_ = placeholder;
+    lm_head_skip_padding_token_indices_ = placeholder;
+    gather_prenorm_idx_ = placeholder;
+    padding_idx_ = placeholder;
+    un_padding_idx_ = placeholder;
+    dynamic_ep_idx_ = placeholder;
+    moe_idx_ = placeholder;
+    expert_array_ = placeholder;
+  }
 
   PROPERTY(torch::Tensor, attn_padding_idx);
 

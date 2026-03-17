@@ -53,5 +53,7 @@ if(USE_NPU)
   )
 
   target_link_libraries(block_test PRIVATE Folly::folly OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf c_sec)
+  target_link_libraries(block_test PRIVATE
+    "$<TARGET_LINKER_FILE:xllm_server>")
   add_dependencies(block_test brpc-static)
 endif()

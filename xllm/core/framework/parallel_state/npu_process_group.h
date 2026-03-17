@@ -49,6 +49,10 @@ class ProcessGroupImpl : public ProcessGroup {
   void allgather(const torch::Tensor& input,
                  std::vector<torch::Tensor>& outputs) override;
 
+  c10::intrusive_ptr<c10d::Work> allgather_async(
+      const torch::Tensor& input,
+      std::vector<torch::Tensor>& outputs) override;
+
  private:
   HcclComm comm_ = nullptr;
   c10_npu::NPUStream comm_stream_;

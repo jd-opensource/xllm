@@ -70,8 +70,16 @@ function(cc_test)
   )
 
   if(USE_NPU)
-    set(COMMON_LIBS Python::Python torch_npu torch_python)
+    set(COMMON_LIBS
+      Python::Python
+      torch_npu
+      torch_python
+      opapi
+      "$<LINK_GROUP:RESCAN,brpc,glog::glog,gflags::gflags,leveldb::leveldb,OpenSSL::SSL,OpenSSL::Crypto,protobuf::libprotobuf>"
+      "$<LINK_GROUP:RESCAN,model_context,model_loader,models>"
+    )
     target_link_libraries(${CC_TEST_NAME} PRIVATE ${COMMON_LIBS})
+    add_dependencies(${CC_TEST_NAME} brpc-static)
   endif()
 
   add_dependencies(all_tests ${CC_TEST_NAME})

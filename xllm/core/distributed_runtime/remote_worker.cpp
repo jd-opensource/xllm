@@ -21,6 +21,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -50,19 +51,37 @@ bool RemoteWorker::wait_for_server_ready(const std::string& server_address) {
   // Retry until server initialize ready
   int try_count = 0;
   const int sleep_time_second = 3;
-  while (try_count < FLAGS_max_reconnect_count) {
+  int max_reconnect_count = FLAGS_max_reconnect_count;
+#if defined(USE_NPU)
+  // CANN 8.5 can spend several minutes creating HCCL sub-groups during worker
+  // bootstrap. Keep the master-side readiness probe alive long enough for that
+  // one-time initialization instead of aborting while the worker is still
+  // making forward progress.
+  if (FLAGS_nnodes > 1) {
+    max_reconnect_count = std::max(max_reconnect_count, 400);
+  }
+#endif
+
+  while (try_count < max_reconnect_count) {
     if (channel_->hello()) {
       LOG(INFO) << "RemoteWorker Hello connected, server_address: "
                 << server_address << ", global_rank_: " << global_rank_;
       break;
     } else {
+      if ((try_count + 1) % 20 == 0) {
+        LOG(WARNING) << "RemoteWorker still waiting for server initialization"
+                     << ", server_address: " << server_address
+                     << ", global_rank_: " << global_rank_
+                     << ", try_count: " << (try_count + 1)
+                     << ", max_reconnect_count: " << max_reconnect_count;
+      }
       std::this_thread::sleep_for(std::chrono::seconds(sleep_time_second));
     }
 
     try_count++;
   }
 
-  if (try_count >= FLAGS_max_reconnect_count) {
+  if (try_count >= max_reconnect_count) {
     LOG(ERROR) << "RemoteWorker Hello method failed, global_rank_ is "
                << global_rank_;
     return false;

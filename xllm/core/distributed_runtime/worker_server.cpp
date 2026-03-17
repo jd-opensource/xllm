@@ -25,9 +25,11 @@ limitations under the License.
 #include <unistd.h>
 
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
@@ -54,6 +56,25 @@ extern char** environ;
 namespace xllm {
 namespace {
 void handle_signal(int signum) { _exit(0); }
+
+#if defined(USE_NPU)
+std::vector<HcclRootInfo> parse_root_infos(
+    const proto::CommUniqueIdList& uids) {
+  std::vector<HcclRootInfo> root_infos;
+  root_infos.reserve(uids.comm_unique_ids_size());
+  for (const auto& proto_id : uids.comm_unique_ids()) {
+    HcclRootInfo root_info;
+    CHECK_EQ(proto_id.comm_unique_id().size(), sizeof(root_info.internal))
+        << "Unexpected HCCL root info size: "
+        << proto_id.comm_unique_id().size();
+    std::memcpy(root_info.internal,
+                proto_id.comm_unique_id().data(),
+                sizeof(root_info.internal));
+    root_infos.push_back(root_info);
+  }
+  return root_infos;
+}
+#endif
 }  // namespace
 
 void WorkerServer::create_server(
@@ -103,7 +124,12 @@ void WorkerServer::create_server(
   proto::CommUniqueIdList uids;
   sync_master_node(master_node_addr, addr_info, uids);
 
+#if defined(USE_NPU)
+  CollectiveCommunicator comm(
+      worker_global_rank, world_size, dp_size, ep_size, parse_root_infos(uids));
+#else
   CollectiveCommunicator comm(worker_global_rank, world_size, dp_size, ep_size);
+#endif
   const ParallelArgs* parallel_args = comm.parallel_args();
   comm.create_process_groups(master_node_addr, device);
 

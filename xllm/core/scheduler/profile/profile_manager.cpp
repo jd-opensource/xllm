@@ -28,10 +28,31 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/rec_model_utils.h"
+#include "core/util/env_var.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request_state.h"
 
 namespace xllm {
+
+namespace {
+
+bool should_warm_minimax_decode_buckets(const ModelArgs& model_args) {
+  return model_args.model_type() == "minimax_m2" &&
+         util::get_bool_env("XLLM_MINIMAX_WARMUP_DECODE_BUCKETS", false);
+}
+
+int64_t get_default_prefill_warmup_cap(const ModelArgs& model_args) {
+  // MiniMax's current EP bring-up path may emulate the shared ATTN_DP/MOE_EP
+  // subgroup on top of the world communicator, which makes synthetic prefill
+  // warmup much more memory-hungry than normal serving. Keep the default cap
+  // conservative and let operators override it explicitly through the env.
+  if (model_args.model_type() == "minimax_m2") {
+    return 1024;
+  }
+  return FLAGS_max_tokens_per_batch;
+}
+
+}  // namespace
 
 ProfileManager::ProfileManager(Engine* engine, const Options& options)
     : options_(options), engine_(engine) {
@@ -618,6 +639,55 @@ std::shared_ptr<Request> ProfileManager::generate_single_request(
   return request;
 }
 
+std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
+    int32_t token_length) {
+  CHECK_GT(token_length, 1)
+      << "decode warmup token_length must include cached context plus one "
+         "decode token";
+
+  auto& model_args = engine_->model_args();
+  int32_t vocab_size = model_args.vocab_size();
+  int32_t eos_token_id = model_args.eos_token_id();
+
+  std::random_device rd;
+  std::mt19937_64 gen(rd());
+  std::uniform_int_distribution<int32_t> dis(1, vocab_size - 2);
+
+  std::vector<int32_t> prompt_token_ids(token_length - 1);
+  std::generate(prompt_token_ids.begin(), prompt_token_ids.end(), [&]() {
+    int32_t token = dis(gen);
+    return token == eos_token_id ? token + 1 : token;
+  });
+
+  RequestState req_state(prompt_token_ids);
+  // Decode warmup starts from a real decode-stage sequence:
+  //   cached prompt + current decode token
+  // and the profiled step will append one more output token.
+  req_state.seq_capacity = token_length + 1;
+  req_state.enable_schedule_overlap = options_.enable_schedule_overlap();
+  auto request = std::make_shared<Request>(
+      /*request_id=*/"",
+      /*x_request_id=*/"",
+      /*x_request_time=*/"",
+      req_state);
+
+  auto* sequence = request->sequences()[0].get();
+  if (!block_manager_pool_->BlockManagerPool::allocate(sequence,
+                                                       token_length)) {
+    LOG(FATAL)
+        << "Decode graph warmup failed! Not enough blocks, token length : "
+        << token_length;
+  }
+
+  sequence->kv_state().incr_kv_cache_tokens_num(token_length - 1);
+  int32_t decode_token = dis(gen);
+  if (decode_token == eos_token_id) {
+    decode_token += 1;
+  }
+  sequence->append_token(decode_token);
+  return request;
+}
+
 // collect the latency of each step
 double ProfileManager::run_request(int32_t token_length,
                                    int32_t prefix_length,
@@ -647,6 +717,36 @@ double ProfileManager::run_request(int32_t token_length,
     sequences_budget.emplace_back(token_length - prefix_length);
   }
   // build batch
+  auto batches = BatchFactory::get_instance(options_.dp_size())
+                     ->create_batches(requests, sequences, sequences_budget);
+
+  absl::Time start_time = absl::Now();
+  engine_->step(batches);
+  if (options_.enable_schedule_overlap()) {
+    engine_->update_last_step_result(batches);
+  }
+  double latency = absl::ToDoubleMilliseconds(absl::Now() - start_time);
+  for (auto& request : requests) {
+    block_manager_pool_->deallocate_without_cache(
+        request->sequences()[0].get());
+  }
+
+  return latency;
+}
+
+double ProfileManager::run_decode_request(int32_t token_length,
+                                          int32_t batch_size) {
+  std::vector<Sequence*> sequences;
+  std::vector<size_t> sequences_budget;
+  std::vector<std::shared_ptr<Request>> requests;
+
+  for (int32_t i = 0; i < batch_size; i++) {
+    auto request = generate_single_decode_request(token_length);
+    requests.emplace_back(request);
+    sequences.emplace_back(request->sequences()[0].get());
+    sequences_budget.emplace_back(1);
+  }
+
   auto batches = BatchFactory::get_instance(options_.dp_size())
                      ->create_batches(requests, sequences, sequences_budget);
 
@@ -778,9 +878,19 @@ void ProfileManager::warmup_for_graph() {
   int32_t max_context_len = model_args.max_position_embeddings();
 
   // Warmup parameters - align with bucket logic
-  // Prefill: align max_tokens_per_batch to bucket
-  int32_t prefill_tokens =
-      std::min(FLAGS_max_tokens_per_batch, max_context_len);
+  // Prefill warmup should not blindly scale to max_tokens_per_batch for large
+  // long-context models, otherwise graph warmup can OOM before serving starts.
+  const int64_t default_prefill_warmup_cap =
+      get_default_prefill_warmup_cap(model_args);
+  const int64_t prefill_warmup_cap = util::get_int_env(
+      "XLLM_GRAPH_WARMUP_PREFILL_TOKENS", default_prefill_warmup_cap);
+  int32_t prefill_tokens = 0;
+  if (prefill_warmup_cap > 0) {
+    prefill_tokens = static_cast<int32_t>(
+        std::min<int64_t>({static_cast<int64_t>(FLAGS_max_tokens_per_batch),
+                           static_cast<int64_t>(max_context_len),
+                           prefill_warmup_cap}));
+  }
 
   std::vector<int32_t> decode_seq_lens = {16};
 
@@ -809,20 +919,48 @@ void ProfileManager::warmup_for_graph() {
   }
 
   // ========== Warmup Prefill Request ==========
-  LOG(INFO) << "Warming up prefill request: tokens=" << prefill_tokens;
-  try {
-    // Prefill: prefix_length = 0 (empty KV cache), batch_size = 10,
-    // sequence_length = prefill_tokens / 10
-    double latency = run_request(prefill_tokens, 0, 1);
-    LOG(INFO) << "Prefill warmup completed: tokens=" << prefill_tokens
-              << ", latency=" << latency << " ms";
-  } catch (const std::exception& e) {
-    LOG(WARNING) << "Prefill warmup failed: tokens=" << prefill_tokens
-                 << ", error: " << e.what();
+  if (prefill_tokens > 0) {
+    LOG(INFO) << "Warming up prefill request: tokens=" << prefill_tokens
+              << ", cap=" << prefill_warmup_cap;
+    try {
+      // Prefill: prefix_length = 0 (empty KV cache), batch_size = 10,
+      // sequence_length = prefill_tokens / 10
+      double latency = run_request(prefill_tokens, 0, 1);
+      LOG(INFO) << "Prefill warmup completed: tokens=" << prefill_tokens
+                << ", latency=" << latency << " ms";
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "Prefill warmup failed: tokens=" << prefill_tokens
+                   << ", error: " << e.what();
+    }
+  } else {
+    LOG(INFO) << "Skipping prefill warmup because "
+              << "XLLM_GRAPH_WARMUP_PREFILL_TOKENS=" << prefill_warmup_cap;
   }
 
   // ========== Warmup Decode Requests ==========
-  // confict with async_schedule, so skip for now
+  if (should_warm_minimax_decode_buckets(model_args)) {
+    LOG(INFO) << "MiniMax decode graph warmup enabled. Pre-capturing decode "
+                 "ACL-graph buckets up to batch size 16.";
+    const int32_t decode_token_length = decode_seq_lens.front();
+    const int32_t decode_prefix_length = decode_token_length - 1;
+    for (int32_t batch_size : decode_batch_sizes) {
+      if (batch_size > 16) {
+        break;
+      }
+      try {
+        LOG(INFO) << "Warming up decode request: token_length="
+                  << decode_token_length
+                  << ", prefix_length=" << decode_prefix_length
+                  << ", batch_size=" << batch_size;
+        double latency = run_decode_request(decode_token_length, batch_size);
+        LOG(INFO) << "Decode warmup completed: batch_size=" << batch_size
+                  << ", latency=" << latency << " ms";
+      } catch (const std::exception& e) {
+        LOG(WARNING) << "Decode warmup failed: batch_size=" << batch_size
+                     << ", error: " << e.what();
+      }
+    }
+  }
 
   LOG(INFO) << "ACL Graph/CUDA Graph warmup completed";
 }

@@ -41,7 +41,7 @@ DEFINE_int32(rpc_channel_timeout_ms,
              "Max duration of bRPC Channel. -1 means wait indefinitely.");
 
 DEFINE_int32(max_reconnect_count,
-             40,
+             200,
              "The max count for worker try to connect to server.");
 
 DEFINE_int32(num_threads, 8, "Number of threads to process requests.");

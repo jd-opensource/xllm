@@ -69,6 +69,15 @@ void check_input(torch::Tensor input) {
   CHECK(input.is_contiguous()) << "input should be contiguous";
   CHECK(!input.is_sparse()) << "input have to be npu dense tensor";
 }
+
+class CompletedWork final : public c10d::Work {
+ public:
+  CompletedWork() { finish(); }
+};
+
+inline c10::intrusive_ptr<c10d::Work> make_completed_work() {
+  return c10::make_intrusive<CompletedWork>();
+}
 }  // namespace
 
 namespace xllm {
@@ -81,7 +90,12 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
                                    const std::string& host,
                                    const std::string& group_name,
                                    const torch::Device& device)
-    : ProcessGroup(global_rank, world_size, device),
+    : ProcessGroup(
+          world_size == rank_size
+              ? global_rank
+              : get_group_rank(world_size, global_rank, rank_size, trans).first,
+          rank_size,
+          device),
       comm_stream_(c10_npu::getNPUStreamFromPool(device.index())) {
   c10::intrusive_ptr<c10d_npu::ProcessGroupHCCL::Options> hccl_pg_options =
       c10d_npu::ProcessGroupHCCL::Options::create();
@@ -124,6 +138,11 @@ ProcessGroupImpl::ProcessGroupImpl(int rank,
 
 void ProcessGroupImpl::allgather(const torch::Tensor& input,
                                  std::vector<torch::Tensor>& outputs) {
+  if (pg_ != nullptr && comm_ == nullptr) {
+    ProcessGroup::allgather(input, outputs);
+    return;
+  }
+
   CHECK_EQ(input.device(), device())
       << "input should be on the same device as the process group";
   CHECK_EQ(outputs.size(), world_size())
@@ -164,7 +183,23 @@ void ProcessGroupImpl::allgather(const torch::Tensor& input,
   }
 }
 
+c10::intrusive_ptr<c10d::Work> ProcessGroupImpl::allgather_async(
+    const torch::Tensor& input,
+    std::vector<torch::Tensor>& outputs) {
+  if (pg_ != nullptr && comm_ == nullptr) {
+    return ProcessGroup::allgather_async(input, outputs);
+  }
+
+  allgather(input, outputs);
+  return make_completed_work();
+}
+
 void ProcessGroupImpl::allreduce(torch::Tensor& input) {
+  if (pg_ != nullptr && comm_ == nullptr) {
+    ProcessGroup::allreduce(input);
+    return;
+  }
+
   CHECK_EQ(input.device(), device())
       << "input should be on the same device as the process group";
   check_input(input);
