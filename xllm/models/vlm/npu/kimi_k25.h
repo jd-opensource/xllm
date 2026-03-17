@@ -38,6 +38,74 @@ namespace xllm {
 
 #define PrintTensor(tensor) print_tensor(tensor, #tensor, 10, true, false);
 
+namespace {
+StateDict get_dict_with_prefix_fallback(const StateDict& state_dict,
+                                        const std::vector<std::string>& prefixes) {
+  CHECK(!prefixes.empty()) << "prefixes should not be empty";
+  auto dict = state_dict.get_dict_with_prefix(prefixes[0]);
+  for (size_t idx = 1; idx < prefixes.size() && dict.size() == 0; ++idx) {
+    dict = state_dict.get_dict_with_prefix(prefixes[idx]);
+  }
+  return dict;
+}
+
+void load_tensor_if_defined(const StateDict& state_dict,
+                            const char* key,
+                            torch::Tensor& dst,
+                            bool& loaded,
+                            const std::string& module_name,
+                            const std::string& tensor_name) {
+  auto src = state_dict.get_tensor(key);
+  if (!src.defined()) {
+    return;
+  }
+  CHECK_EQ(dst.sizes(), src.sizes())
+      << tensor_name << " size mismatch for " << module_name;
+  dst.data().copy_(src);
+  loaded = true;
+}
+
+void load_linear_if_defined(const StateDict& state_dict,
+                            torch::nn::Linear& linear,
+                            bool& weight_loaded,
+                            bool& bias_loaded,
+                            const std::string& module_name,
+                            const std::string& linear_name) {
+  load_tensor_if_defined(state_dict,
+                         "weight",
+                         linear->weight,
+                         weight_loaded,
+                         module_name,
+                         linear_name + ".weight");
+  load_tensor_if_defined(state_dict,
+                         "bias",
+                         linear->bias,
+                         bias_loaded,
+                         module_name,
+                         linear_name + ".bias");
+}
+
+void load_layernorm_if_defined(const StateDict& state_dict,
+                               torch::nn::LayerNorm& layer_norm,
+                               bool& weight_loaded,
+                               bool& bias_loaded,
+                               const std::string& module_name,
+                               const std::string& layernorm_name) {
+  load_tensor_if_defined(state_dict,
+                         "weight",
+                         layer_norm->weight,
+                         weight_loaded,
+                         module_name,
+                         layernorm_name + ".weight");
+  load_tensor_if_defined(state_dict,
+                         "bias",
+                         layer_norm->bias,
+                         bias_loaded,
+                         module_name,
+                         layernorm_name + ".bias");
+}
+}  // namespace
+
 class KimiK2_5_VLInputProcessor : public InputProcessor {
   enum class TokenType {
     INVALID,
@@ -182,23 +250,53 @@ class KimiK2_5_VLInputProcessor : public InputProcessor {
 class KimiK2_5_VisionBlockImpl : public torch::nn::Module {
  public:
   KimiK2_5_VisionBlockImpl(const ModelContext& context) {
+    auto model_args = context.get_model_args();
+    auto head_dim = model_args.mm_head_dim();
+    if (head_dim <= 0 && model_args.mm_num_attention_heads() > 0) {
+      head_dim = model_args.mm_hidden_size() / model_args.mm_num_attention_heads();
+    }
+    // Compatible with current NpuQwen2dot5VisionEncoderLayer interface.
+    // Original path was: [head_dim/2] -> pad(24) -> repeat(2).
+    compat_rope_dim_ = (head_dim / 2 + 24) * 2;
+
     // register submodules
     encoder_layer_ = register_module(
         "encoder_layer", layer::NpuQwen2dot5VisionEncoderLayer(context));
   }
 
-  torch::Tensor forward(torch::Tensor& x,
-                        torch::Tensor& m_cos_pos,
-                        torch::Tensor& m_sin_pos,
-                        torch::Tensor& cu_seq_len,
-                        std::vector<int>& cu_seq_len_vec,
+  struct BlockInput {
+    torch::Tensor hidden_states;
+    torch::Tensor cu_seqlens;  // cumulative seqlens, shape [batch + 1]
+    int64_t max_seqlen = 0;
+    torch::Tensor rope_freqs_cis;  // reserved for future MoonViT-style block
+  };
+
+  torch::Tensor forward(BlockInput& block_input,
                         ModelInputParams& input_params,
                         int node_id) {
-    return encoder_layer_(x,
-                          m_cos_pos,
-                          m_sin_pos,
-                          cu_seq_len,
-                          cu_seq_len_vec,
+    auto seqlens = torch::diff(block_input.cu_seqlens);
+    auto seqlens_cpu = seqlens.cpu().to(torch::kInt32).contiguous();
+    std::vector<int> seqlens_vec(
+        seqlens_cpu.data_ptr<int>(),
+        seqlens_cpu.data_ptr<int>() + seqlens_cpu.numel());
+
+    auto token_num = block_input.hidden_states.size(0);
+    if (block_input.rope_freqs_cis.defined()) {
+      CHECK_EQ(block_input.rope_freqs_cis.size(0), token_num)
+          << "rope_freqs_cis token count mismatch for " << name();
+    }
+
+    auto rope_opts = block_input.hidden_states.options();
+    if (!compat_cos_.defined() || compat_cos_.size(0) != token_num) {
+      compat_cos_ = torch::ones({token_num, compat_rope_dim_}, rope_opts);
+      compat_sin_ = torch::zeros({token_num, compat_rope_dim_}, rope_opts);
+    }
+
+    return encoder_layer_(block_input.hidden_states,
+                          compat_cos_,
+                          compat_sin_,
+                          seqlens,
+                          seqlens_vec,
                           input_params,
                           node_id);
   }
@@ -216,6 +314,9 @@ class KimiK2_5_VisionBlockImpl : public torch::nn::Module {
 
  private:
   layer::NpuQwen2dot5VisionEncoderLayer encoder_layer_{nullptr};
+  int64_t compat_rope_dim_ = 120;
+  torch::Tensor compat_cos_;
+  torch::Tensor compat_sin_;
 };
 TORCH_MODULE(KimiK2_5_VisionBlock);
 
@@ -400,44 +501,75 @@ class KimiK2_5_VisionRotaryEmbeddingImpl : public torch::nn::Module {
  public:
   KimiK2_5_VisionRotaryEmbeddingImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
-    auto options = context.get_tensor_options();
-
-    dim_ = model_args.mm_head_dim() / 2;
-    theta_ = 10000.0;
-
-    auto opts = options.dtype(torch::kFloat32);
-    auto inv_freq =
-        1.0 / torch::pow(theta_, torch::arange(0, dim_, 2, opts) / dim_);
-    inv_freq_ = register_buffer("inv_freq", inv_freq);
+    dim_ = model_args.mm_head_dim();
+    if (dim_ <= 0 && model_args.mm_num_attention_heads() > 0) {
+      dim_ = model_args.mm_hidden_size() / model_args.mm_num_attention_heads();
+    }
+    CHECK_GT(dim_, 0) << "invalid vision head dim";
+    CHECK_EQ(dim_ % 4, 0) << "rope_2d head dim must be divisible by 4";
   }
 
-  void update_freqs_cache(int64_t seqlen) {
-    if (seqlen <= seq_len_cached_) return;
+  torch::Tensor get_freqs_cis(torch::Tensor grid_thws,
+                              const torch::Device& device) {
+    if (!freqs_cis_cache_.defined() || freqs_cis_cache_.device() != device) {
+      freqs_cis_cache_ = precompute_freqs_cis(device);
+    }
 
-    seqlen *= 2;
-    seq_len_cached_ = seqlen;
+    std::vector<torch::Tensor> freqs_cis;
+    auto count = grid_thws.size(0);
+    freqs_cis.reserve(count);
 
-    auto options = torch::TensorOptions()
-                       .dtype(torch::kFloat32)
-                       .device(inv_freq_.device());
-    inv_freq_ =
-        1.0 / torch::pow(theta_, torch::arange(0, dim_, 2, options) / dim_);
-    auto seq = torch::arange(seqlen, options);
-    freqs_cached_ = torch::outer(seq, inv_freq_);
-  }
+    auto grid_thws_cpu = grid_thws.cpu().to(torch::kLong).contiguous();
+    for (int64_t idx = 0; idx < count; ++idx) {
+      auto t = grid_thws_cpu[idx][0].item<int64_t>();
+      auto h = grid_thws_cpu[idx][1].item<int64_t>();
+      auto w = grid_thws_cpu[idx][2].item<int64_t>();
 
-  torch::Tensor forward(int seqlen) {
-    update_freqs_cache(seqlen);
-    return freqs_cached_.slice(0, 0, seqlen);
+      CHECK_GE(h, 1) << "grid_thws h must be >= 1";
+      CHECK_GE(w, 1) << "grid_thws w must be >= 1";
+      CHECK_LE(h, max_height_) << "grid_thws h exceeds rope_2d max_height";
+      CHECK_LE(w, max_width_) << "grid_thws w exceeds rope_2d max_width";
+
+      auto freq = freqs_cis_cache_
+                      .index({torch::indexing::Slice(0, h),
+                              torch::indexing::Slice(0, w)})
+                      .reshape({-1, dim_ / 2})
+                      .repeat({t, 1});
+      freqs_cis.emplace_back(freq);
+    }
+
+    if (freqs_cis.empty()) {
+      return torch::empty({0, dim_ / 2}, freqs_cis_cache_.options());
+    }
+    return torch::cat(freqs_cis, 0);
   }
 
  private:
-  int dim_ = 0;
-  double theta_ = 0.0;
+  torch::Tensor precompute_freqs_cis(const torch::Device& device) const {
+    auto options = torch::TensorOptions().dtype(torch::kFloat32).device(device);
 
-  int64_t seq_len_cached_ = 0;
-  torch::Tensor inv_freq_;
-  torch::Tensor freqs_cached_;
+    auto n = max_height_ * max_width_;
+    auto flat_pos = torch::arange(0, n, options);
+    auto x_pos = torch::remainder(flat_pos, max_width_);
+    auto y_pos = torch::floor_divide(flat_pos, max_width_);
+    auto dim_range = torch::arange(0, dim_, 4, options);
+
+    auto freqs = 1.0 / torch::pow(theta_base_, dim_range / dim_);
+    auto x_freqs = torch::outer(x_pos, freqs).to(torch::kFloat32);
+    auto y_freqs = torch::outer(y_pos, freqs).to(torch::kFloat32);
+    auto x_cis = torch::polar(torch::ones_like(x_freqs), x_freqs);
+    auto y_cis = torch::polar(torch::ones_like(y_freqs), y_freqs);
+
+    auto freqs_cis = torch::cat({x_cis.unsqueeze(-1), y_cis.unsqueeze(-1)}, -1);
+    return freqs_cis.reshape({max_height_, max_width_, dim_ / 2});
+  }
+
+ private:
+  int64_t dim_ = 0;
+  int64_t max_height_ = 512;
+  int64_t max_width_ = 512;
+  float theta_base_ = 10000.0f;
+  torch::Tensor freqs_cis_cache_;
 };
 TORCH_MODULE(KimiK2_5_VisionRotaryEmbedding);
 
@@ -446,123 +578,122 @@ class KimiK2_5_VisionPatchMergerImpl : public torch::nn::Module {
   KimiK2_5_VisionPatchMergerImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
-    auto quant_args = context.get_quant_args();
-    auto parallel_args = context.get_parallel_args();
 
     int64_t d_model = model_args.mm_projection_dim();  // out_hidden_size
-    int context_dim = model_args.mm_hidden_size();
+    context_dim_ = model_args.mm_hidden_size();
     int spatial_merge_size = model_args.mm_spatial_merge_size();
+    auto ln_eps = model_args.mm_layer_norm_eps() > 0 ? model_args.mm_layer_norm_eps()
+                                                      : 1e-5f;
 
     hidden_size_ =
-        context_dim * static_cast<int>(std::pow(spatial_merge_size, 2));
+        context_dim_ * static_cast<int>(std::pow(spatial_merge_size, 2));
 
-    ln_q_ = register_module("ln_q", layer::NpuRMSNorm(context));
+    pre_norm_ = register_module(
+        "pre_norm",
+        torch::nn::LayerNorm(torch::nn::LayerNormOptions({context_dim_})
+                                 .eps(ln_eps)
+                                 .elementwise_affine(true)));
+    pre_norm_->weight.set_data(pre_norm_->weight.to(options));
+    pre_norm_->bias.set_data(pre_norm_->bias.to(options));
 
-    auto cpl = torch::nn::Linear(
-        torch::nn::LinearOptions(hidden_size_, hidden_size_).bias(true));
-    cpl->weight.set_data(cpl->weight.to(options));
-    cpl->bias.set_data(cpl->bias.to(options));
-    auto act = torch::nn::GELU();
-    auto rpl = torch::nn::Linear(
-        torch::nn::LinearOptions(hidden_size_, d_model).bias(true));
-    rpl->weight.set_data(rpl->weight.to(options));
-    rpl->bias.set_data(rpl->bias.to(options));
-    mlp_ = register_module("mlp", torch::nn::Sequential(cpl, act, rpl));
-    layers_ = std::make_tuple(cpl, act, rpl);
+    linear_1_ = register_module(
+        "linear_1",
+        torch::nn::Linear(
+            torch::nn::LinearOptions(hidden_size_, hidden_size_).bias(true)));
+    linear_1_->weight.set_data(linear_1_->weight.to(options));
+    linear_1_->bias.set_data(linear_1_->bias.to(options));
+
+    linear_2_ = register_module(
+        "linear_2",
+        torch::nn::Linear(
+            torch::nn::LinearOptions(hidden_size_, d_model).bias(true)));
+    linear_2_->weight.set_data(linear_2_->weight.to(options));
+    linear_2_->bias.set_data(linear_2_->bias.to(options));
   }
 
   torch::Tensor forward(torch::Tensor x) {
-    x = ln_q_(x, 0);
+    x = pre_norm_(x);
     x = x.view({-1, hidden_size_});
-    return mlp_->forward(x);
+    x = linear_1_(x);
+    x = torch::gelu(x);
+    x = linear_2_(x);
+    return x;
   }
 
   void load_state_dict(const StateDict& state_dict) {
-    ln_q_->load_state_dict(state_dict.get_dict_with_prefix("ln_q."));
+    // prefer sglang/HF keys while keeping legacy fallback.
+    auto pre_norm_dict = state_dict.get_dict_with_prefix("pre_norm.");
+    auto ln_dict = pre_norm_dict.size() > 0 ? pre_norm_dict : legacy_ln_q_dict;
 
-    const auto& cpl_dict = state_dict.get_dict_with_prefix("mlp.0.");
-    const auto& cpl_weight = cpl_dict.get_tensor("weight");
-    if (cpl_weight.defined()) {
-      CHECK_EQ(std::get<0>(layers_)->weight.sizes(), cpl_weight.sizes())
-          << "weight size mismatch for " << name();
-      std::get<0>(layers_)->weight.data().copy_(cpl_weight);
-      is_cpl_weight_loaded = true;
-    }
-    const auto cpl_bias = cpl_dict.get_tensor("bias");
-    if (cpl_bias.defined()) {
-      CHECK_EQ(std::get<0>(layers_)->bias.sizes(), cpl_bias.sizes())
-          << "bias size mismatch for " << name();
-      std::get<0>(layers_)->bias.data().copy_(cpl_bias);
-      is_cpl_bias_loaded = true;
-    }
+    load_layernorm_if_defined(ln_dict,
+                              pre_norm_,
+                              is_pre_norm_weight_loaded,
+                              is_pre_norm_bias_loaded,
+                              name(),
+                              "pre_norm");
 
-    const auto& rpl_dict = state_dict.get_dict_with_prefix("mlp.2.");
-    const auto& rpl_weight = rpl_dict.get_tensor("weight");
-    if (rpl_weight.defined()) {
-      CHECK_EQ(std::get<2>(layers_)->weight.sizes(), rpl_weight.sizes())
-          << "weight size mismatch for " << name();
-      std::get<2>(layers_)->weight.data().copy_(rpl_weight);
-      is_rpl_weight_loaded = true;
-    }
-    const auto rpl_bias = rpl_dict.get_tensor("bias");
-    if (rpl_bias.defined()) {
-      CHECK_EQ(std::get<2>(layers_)->bias.sizes(), rpl_bias.sizes())
-          << "bias size mismatch for " << name();
-      std::get<2>(layers_)->bias.data().copy_(rpl_bias);
-      is_rpl_bias_loaded = true;
-    }
+    auto linear_1_dict = get_dict_with_prefix_fallback(
+        state_dict, {"proj.0.", "linear_1.", "mlp.0."});
+    load_linear_if_defined(linear_1_dict,
+                           linear_1_,
+                           is_linear_1_weight_loaded_,
+                           is_linear_1_bias_loaded_,
+                           name(),
+                           "linear_1");
+
+    auto linear_2_dict = get_dict_with_prefix_fallback(
+        state_dict, {"proj.2.", "linear_2.", "mlp.2."});
+    load_linear_if_defined(linear_2_dict,
+                           linear_2_,
+                           is_linear_2_weight_loaded_,
+                           is_linear_2_bias_loaded_,
+                           name(),
+                           "linear_2");
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
-    ln_q_->verify_loaded_weights(prefix + "ln_q.");
-    CHECK(is_cpl_weight_loaded)
-        << "weight is not loaded for " << prefix + "mlp.0" + ".weight";
-    CHECK(is_cpl_bias_loaded)
-        << "bias is not loaded for " << prefix + "mlp.0" + ".bias";
-    CHECK(is_rpl_weight_loaded)
-        << "weight is not loaded for " << prefix + "mlp.2" + ".weight";
-    CHECK(is_rpl_bias_loaded)
-        << "bias is not loaded for " << prefix + "mlp.2" + ".bias";
+    CHECK(is_pre_norm_weight_loaded)
+        << "weight is not loaded for " << prefix + "pre_norm.weight";
+    CHECK(is_pre_norm_bias_loaded)
+        << "bias is not loaded for " << prefix + "pre_norm.bias";
+    CHECK(is_linear_1_weight_loaded_)
+        << "weight is not loaded for " << prefix + "linear_1.weight";
+    CHECK(is_linear_1_bias_loaded_)
+        << "bias is not loaded for " << prefix + "linear_1.bias";
+    CHECK(is_linear_2_weight_loaded_)
+        << "weight is not loaded for " << prefix + "linear_2.weight";
+    CHECK(is_linear_2_bias_loaded_)
+        << "bias is not loaded for " << prefix + "linear_2.bias";
   }
 
-  void merge_loaded_weights() { ln_q_->merge_loaded_weights(); }
+  void merge_loaded_weights() {}
 
  private:
   int64_t hidden_size_;
+  int64_t context_dim_;
 
-  layer::NpuRMSNorm ln_q_{nullptr};
-  torch::nn::Sequential mlp_{nullptr};
-  std::tuple<torch::nn::Linear, torch::nn::GELU, torch::nn::Linear> layers_ = {
-      nullptr,
-      nullptr,
-      nullptr};
-  bool is_cpl_weight_loaded = false;
-  bool is_cpl_bias_loaded = false;
-  bool is_rpl_weight_loaded = false;
-  bool is_rpl_bias_loaded = false;
+  torch::nn::LayerNorm pre_norm_{nullptr};
+  torch::nn::Linear linear_1_{nullptr};
+  torch::nn::Linear linear_2_{nullptr};
+  bool is_pre_norm_weight_loaded = false;
+  bool is_pre_norm_bias_loaded = false;
+  bool is_linear_1_weight_loaded_ = false;
+  bool is_linear_1_bias_loaded_ = false;
+  bool is_linear_2_weight_loaded_ = false;
+  bool is_linear_2_bias_loaded_ = false;
 };
 TORCH_MODULE(KimiK2_5_VisionPatchMerger);
 
-class KimiK2_5_VisionTransformerImpl : public torch::nn::Module {
+class KimiK2_5_VisionEncoderImpl : public torch::nn::Module {
  public:
-  KimiK2_5_VisionTransformerImpl(const ModelContext& context) {
+  KimiK2_5_VisionEncoderImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
     hidden_size_ = model_args.mm_hidden_size();
-    num_heads_ = model_args.mm_num_attention_heads();
 
-    window_size_ = model_args.mm_window_size();
-    patch_size_ = model_args.mm_patch_size();
-    spatial_merge_size_ = model_args.mm_spatial_merge_size();
-    const auto& block_indexes = model_args.mm_fullatt_block_indexes();
-    fullatt_block_indexes_.insert(block_indexes.begin(), block_indexes.end());
-    spatial_merge_unit_ = static_cast<int>(std::pow(spatial_merge_size_, 2));
-
-    patch_embed_ =
-        register_module("patch_embed", KimiK2_5_VisionPatchEmbed(context));
-    rotary_pos_emb_ = register_module("rotary_pos_emb",
-                                      KimiK2_5_VisionRotaryEmbedding(context));
+    rope_2d_ =
+        register_module("rope_2d", KimiK2_5_VisionRotaryEmbedding(context));
     blocks_ = register_module("blocks", torch::nn::ModuleList());
 
     for (int32_t idx = 0; idx < model_args.mm_num_hidden_layers(); idx++) {
@@ -570,265 +701,186 @@ class KimiK2_5_VisionTransformerImpl : public torch::nn::Module {
       blocks_->push_back(block);
       layers_.push_back(block);
     }
-    merger_ = register_module("merger", KimiK2_5_VisionPatchMerger(context));
-  }
-
-  torch::Tensor rot_pos_emb(torch::Tensor grid_thw) {
-    std::vector<torch::Tensor> pos_ids_vec;
-    auto count = grid_thw.sizes()[0];
-    pos_ids_vec.reserve(count);
-
-    auto grid_thw_cpu = grid_thw.cpu();
-    auto options =
-        torch::TensorOptions().dtype(torch::kLong).device(grid_thw.device());
-
-    for (int idx = 0; idx < count; ++idx) {
-      auto t = grid_thw_cpu[idx][0].item<int64_t>();
-      auto h = grid_thw_cpu[idx][1].item<int64_t>();
-      auto w = grid_thw_cpu[idx][2].item<int64_t>();
-
-      auto hpos_ids = torch::arange(h, options).unsqueeze(1).expand({-1, w});
-      hpos_ids = hpos_ids
-                     .reshape({h / spatial_merge_size_,
-                               spatial_merge_size_,
-                               w / spatial_merge_size_,
-                               spatial_merge_size_})
-                     .permute({0, 2, 1, 3})
-                     .flatten();
-
-      auto wpos_ids = torch::arange(w, options).unsqueeze(0).expand({h, -1});
-      wpos_ids = wpos_ids
-                     .reshape({h / spatial_merge_size_,
-                               spatial_merge_size_,
-                               w / spatial_merge_size_,
-                               spatial_merge_size_})
-                     .permute({0, 2, 1, 3})
-                     .flatten();
-
-      pos_ids_vec.push_back(
-          torch::stack({hpos_ids, wpos_ids}, -1).repeat({t, 1}));
-    }
-
-    auto pos_ids = torch::cat(pos_ids_vec, 0);
-    auto max_grid_size =
-        grid_thw
-            .index({torch::indexing::Slice(),
-                    torch::indexing::Slice(1, torch::indexing::None)})
-            .max();
-
-    auto rotary_pos_emb_full = rotary_pos_emb_(max_grid_size.item<int64_t>());
-    auto rotary_pos_emb = rotary_pos_emb_full.index({pos_ids}).flatten(1);
-
-    return rotary_pos_emb;
-  }
-
-  torch::Tensor get_window_index(torch::Tensor grid_thw,
-                                 std::vector<int>& cu_window_seqlens) {
-    auto count = grid_thw.sizes()[0];
-    std::vector<torch::Tensor> window_index;
-    window_index.reserve(count);
-    cu_window_seqlens.reserve(count * 128);
-    cu_window_seqlens.emplace_back(0);
-
-    int window_index_id = 0;
-    int vit_merger_window_size =
-        window_size_ / spatial_merge_size_ / patch_size_;
-
-    auto grid_thw_cpu = grid_thw.cpu();
-    auto options =
-        torch::TensorOptions().dtype(torch::kLong).device(grid_thw.device());
-
-    for (int idx = 0; idx < count; ++idx) {
-      auto grid_t = grid_thw_cpu[idx][0].item<int64_t>();
-      auto grid_h = grid_thw_cpu[idx][1].item<int64_t>();
-      auto grid_w = grid_thw_cpu[idx][2].item<int64_t>();
-
-      auto llm_grid_h = grid_h / spatial_merge_size_;
-      auto llm_grid_w = grid_w / spatial_merge_size_;
-
-      auto index = torch::arange(grid_t * llm_grid_h * llm_grid_w, options)
-                       .reshape({grid_t, llm_grid_h, llm_grid_w});
-      auto pad_h = vit_merger_window_size - llm_grid_h % vit_merger_window_size;
-      auto pad_w = vit_merger_window_size - llm_grid_w % vit_merger_window_size;
-
-      auto num_windows_h = (llm_grid_h + pad_h) / vit_merger_window_size;
-      auto num_windows_w = (llm_grid_w + pad_w) / vit_merger_window_size;
-
-      namespace F = torch::nn::functional;
-      auto index_padded = F::pad(index,
-                                 F::PadFuncOptions({0, pad_w, 0, pad_h})
-                                     .mode(torch::kConstant)
-                                     .value(-100));
-      index_padded = index_padded.reshape({grid_t,
-                                           num_windows_h,
-                                           vit_merger_window_size,
-                                           num_windows_w,
-                                           vit_merger_window_size});
-
-      index_padded = index_padded.permute({0, 1, 3, 2, 4})
-                         .reshape({grid_t,
-                                   num_windows_h * num_windows_w,
-                                   vit_merger_window_size,
-                                   vit_merger_window_size});
-
-      auto index_padded_ne = torch::ne(index_padded, -100);
-      auto seqlens = index_padded_ne.sum({2, 3}).reshape({-1});
-      index_padded = index_padded.reshape({-1});
-      auto index_new =
-          index_padded.masked_select(index_padded_ne.reshape({-1}));
-
-      window_index.push_back(index_new + window_index_id);
-      auto cu_seqlens_tmp =
-          (seqlens.cumsum(0, torch::kInt32) * spatial_merge_unit_ +
-           cu_window_seqlens.back())
-              .cpu();
-      cu_window_seqlens.insert(
-          cu_window_seqlens.end(),
-          cu_seqlens_tmp.data_ptr<int>(),
-          cu_seqlens_tmp.data_ptr<int>() + cu_seqlens_tmp.numel());
-      window_index_id += grid_t * llm_grid_h * llm_grid_w;
-    }
-
-    return torch::cat(window_index, 0);
+    auto ln_eps = model_args.mm_layer_norm_eps() > 0 ? model_args.mm_layer_norm_eps()
+                                                      : 1e-5f;
+    final_layernorm_ = register_module(
+        "final_layernorm",
+        torch::nn::LayerNorm(torch::nn::LayerNormOptions({hidden_size_})
+                                 .eps(ln_eps)
+                                 .elementwise_affine(true)));
+    final_layernorm_->weight.set_data(final_layernorm_->weight.to(options));
+    final_layernorm_->bias.set_data(final_layernorm_->bias.to(options));
   }
 
   torch::Tensor forward(torch::Tensor hidden_states,
                         torch::Tensor grid_thw,  // [batch,thw]
                         const ModelInputParams& input_params) {
-    // patchify
-    // hidden_states = x.to(device=self.device, dtype=self.dtype);
-    hidden_states = patch_embed_(hidden_states, grid_thw);
-    //  compute position embedding
-    auto rotary_pos_emb = rot_pos_emb(grid_thw);
+    // Align with MoonViT3dEncoder:
+    // rope_freqs_cis + cu_seqlens + max_seqlen are prepared once and reused
+    // across all encoder blocks.
+    auto lengths = (grid_thw.index({torch::indexing::Slice(), 0}) *
+                    grid_thw.index({torch::indexing::Slice(), 1}) *
+                    grid_thw.index({torch::indexing::Slice(), 2}))
+                       .to(torch::kInt32)
+                       .to(hidden_states.device());
+    auto rope_freqs_cis = rope_2d_->get_freqs_cis(grid_thw, hidden_states.device());
+    auto max_seqlen = lengths.max().item<int64_t>();
+    auto zero = torch::zeros({1}, lengths.options());
+    auto cu_seqlens = torch::cat({zero, lengths.cumsum(0, torch::kInt32)}, 0);
 
-    // windows attention
-    std::vector<int> cu_window_seqlens_vec;
-    auto window_index = get_window_index(grid_thw, cu_window_seqlens_vec);
-    torch::TensorOptions options = torch::TensorOptions()
-                                       .dtype(torch::kInt32)
-                                       .device(hidden_states.device());
-    auto cu_window_seqlens = torch::tensor(cu_window_seqlens_vec, options);
-    cu_window_seqlens =
-        std::get<0>(torch::unique_consecutive(cu_window_seqlens));
-    auto seq_len = hidden_states.sizes()[0];
-    hidden_states = hidden_states.reshape(
-        {seq_len / spatial_merge_unit_, spatial_merge_unit_, -1});
-    hidden_states = hidden_states.index(
-        {window_index, torch::indexing::Slice(), torch::indexing::Slice()});
-    hidden_states = hidden_states.reshape({seq_len, -1});
+    CHECK_EQ(rope_freqs_cis.size(0), hidden_states.size(0))
+        << "rope_freqs_cis and hidden_states token count mismatch";
+    CHECK_EQ(cu_seqlens.size(0), grid_thw.size(0) + 1)
+        << "cu_seqlens length mismatch";
+    CHECK_EQ(cu_seqlens.index({-1}).item<int32_t>(), hidden_states.size(0))
+        << "cu_seqlens last value mismatch with token count";
 
-    rotary_pos_emb = rotary_pos_emb.reshape(
-        {seq_len / spatial_merge_unit_, spatial_merge_unit_, -1});
-    rotary_pos_emb = rotary_pos_emb.index(
-        {window_index, torch::indexing::Slice(), torch::indexing::Slice()});
-    rotary_pos_emb = rotary_pos_emb.reshape({seq_len, -1});
-
-    // compute cu_seqlens
-    auto cu_seqlens = torch::repeat_interleave(
-                          grid_thw.index({torch::indexing::Slice(), 1}) *
-                              grid_thw.index({torch::indexing::Slice(), 2}),
-                          grid_thw.index({torch::indexing::Slice(), 0}))
-                          .cumsum(0, torch::kInt32);
-    namespace F = torch::nn::functional;
-    cu_seqlens = F::pad(
-        cu_seqlens, F::PadFuncOptions({1, 0}).mode(torch::kConstant).value(0));
-
-    m_cos = rotary_pos_emb.cos().type_as(hidden_states);
-    m_sin = rotary_pos_emb.sin().type_as(hidden_states);
-
-    // transformers
-    cu_seqlens = torch::diff(cu_seqlens);
-    cu_window_seqlens = torch::diff(cu_window_seqlens);
-
-    m_cos = torch::nn::functional::pad(
-        m_cos, torch::nn::functional::PadFuncOptions({0, 24}));
-    m_sin = torch::nn::functional::pad(
-        m_sin, torch::nn::functional::PadFuncOptions({0, 24}));
-
-    m_cos = m_cos.repeat({1, 2});
-    m_sin = m_sin.repeat({1, 2});
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
-    torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
-    torch::Tensor cu_window_seqlens_cpu = cu_window_seqlens.cpu();
-    std::vector<int> cu_seqlens_vec(
-        cu_seqlens_cpu.data_ptr<int>(),  // full seqlen vec
-        cu_seqlens_cpu.data_ptr<int>() + cu_seqlens_cpu.numel());
-    std::vector<int> cu_w_seqlens_vec(
-        cu_window_seqlens_cpu.data_ptr<int>(),  // windows seqlen vec
-        cu_window_seqlens_cpu.data_ptr<int>() + cu_window_seqlens_cpu.numel());
-    for (int idx = 0; idx < blocks_->size(); ++idx) {
-      torch::Tensor cu_seqlens_now;
-      std::vector<int> cu_seqlens_now_vec;
-      if (fullatt_block_indexes_.find(idx) != fullatt_block_indexes_.end()) {
-        cu_seqlens_now = cu_seqlens;
-        cu_seqlens_now_vec = cu_seqlens_vec;
-      } else {
-        cu_seqlens_now = cu_window_seqlens;
-        cu_seqlens_now_vec = cu_w_seqlens_vec;
-      }
-      hidden_states = layers_[idx](hidden_states,
-                                   m_cos,
-                                   m_sin,
-                                   cu_seqlens_now,
-                                   cu_seqlens_now_vec,
-                                   input_params_new,
-                                   idx);
-    }
-    // adapter
-    hidden_states = merger_(hidden_states);
+    KimiK2_5_VisionBlockImpl::BlockInput block_input{
+        hidden_states, cu_seqlens, max_seqlen, rope_freqs_cis};
 
-    auto reverse_indices = torch::argsort(window_index);
-    hidden_states =
-        hidden_states.index({reverse_indices, torch::indexing::Slice()});
-    return hidden_states;
+    for (int idx = 0; idx < blocks_->size(); ++idx) {
+      block_input.hidden_states =
+          layers_[idx](block_input, input_params_new, idx);
+    }
+    return final_layernorm_(block_input.hidden_states);
   }
 
   void load_state_dict(const StateDict& state_dict) {
-    patch_embed_->load_state_dict(
-        state_dict.get_dict_with_prefix("patch_embed."));
     for (int idx = 0; idx < blocks_->size(); ++idx) {
       layers_[idx]->load_state_dict(state_dict.get_dict_with_prefix(
           "blocks." + std::to_string(idx) + "."));
     }
 
-    merger_->load_state_dict(state_dict.get_dict_with_prefix("merger."));
+    auto ln_dict = state_dict.get_dict_with_prefix("final_layernorm.");
+    load_layernorm_if_defined(ln_dict,
+                              final_layernorm_,
+                              final_ln_weight_loaded_,
+                              final_ln_bias_loaded_,
+                              name(),
+                              "final_layernorm");
   }
 
   void verify_loaded_weights(const std::string& prefix) const {
-    patch_embed_->verify_loaded_weights(prefix + "patch_embed.");
     for (int idx = 0; idx < blocks_->size(); ++idx) {
       layers_[idx]->verify_loaded_weights(prefix + "blocks." +
                                           std::to_string(idx) + ".");
     }
-    merger_->verify_loaded_weights(prefix + "merger.");
+    CHECK(final_ln_weight_loaded_)
+        << "weight is not loaded for " << prefix + "final_layernorm.weight";
+    CHECK(final_ln_bias_loaded_)
+        << "bias is not loaded for " << prefix + "final_layernorm.bias";
   }
 
   void merge_loaded_weights() {
     for (int idx = 0; idx < blocks_->size(); ++idx) {
       layers_[idx]->merge_loaded_weights();
     }
-    merger_->merge_loaded_weights();
   }
 
  private:
   int hidden_size_ = 0;
-  int num_heads_ = 0;
-  int window_size_ = 0;
-  int patch_size_ = 0;
+  bool final_ln_weight_loaded_ = false;
+  bool final_ln_bias_loaded_ = false;
+
+  KimiK2_5_VisionRotaryEmbedding rope_2d_{nullptr};
+  torch::nn::ModuleList blocks_{nullptr};
+  std::vector<KimiK2_5_VisionBlock> layers_;
+  torch::nn::LayerNorm final_layernorm_{nullptr};
+};
+TORCH_MODULE(KimiK2_5_VisionEncoder);
+
+class KimiK2_5_VisionTransformerImpl : public torch::nn::Module {
+ public:
+  KimiK2_5_VisionTransformerImpl(const ModelContext& context) {
+    auto model_args = context.get_model_args();
+
+    spatial_merge_size_ = model_args.mm_spatial_merge_size();
+    spatial_merge_unit_ = static_cast<int>(std::pow(spatial_merge_size_, 2));
+
+    patch_embed_ =
+        register_module("patch_embed", KimiK2_5_VisionPatchEmbed(context));
+    encoder_ = register_module("encoder", KimiK2_5_VisionEncoder(context));
+  }
+
+  torch::Tensor tpool_patch_merger(torch::Tensor hidden_states,
+                                       torch::Tensor grid_thw) {
+    std::vector<torch::Tensor> outputs;
+    auto count = grid_thw.sizes()[0];
+    outputs.reserve(count);
+
+    int64_t offset = 0;
+    auto grid_thw_cpu = grid_thw.cpu().to(torch::kLong).contiguous();
+    for (int64_t idx = 0; idx < count; ++idx) {
+      auto t = grid_thw_cpu[idx][0].item<int64_t>();
+      auto h = grid_thw_cpu[idx][1].item<int64_t>();
+      auto w = grid_thw_cpu[idx][2].item<int64_t>();
+
+      CHECK_EQ(h % spatial_merge_size_, 0)
+          << "height must be divisible by spatial_merge_size";
+      CHECK_EQ(w % spatial_merge_size_, 0)
+          << "width must be divisible by spatial_merge_size";
+
+      auto token_num = t * h * w;
+      auto seq = hidden_states.slice(0, offset, offset + token_num);
+      offset += token_num;
+
+      auto new_h = h / spatial_merge_size_;
+      auto new_w = w / spatial_merge_size_;
+      seq = seq.view({t,
+                      new_h,
+                      spatial_merge_size_,
+                      new_w,
+                      spatial_merge_size_,
+                      hidden_states.size(-1)});
+      seq = seq.permute({0, 1, 3, 2, 4, 5}).contiguous().mean(0);
+      seq = seq.view({new_h * new_w, spatial_merge_unit_, hidden_states.size(-1)});
+      outputs.emplace_back(seq);
+    }
+
+    if (outputs.empty()) {
+      return hidden_states.view({0, spatial_merge_unit_, hidden_states.size(-1)});
+    }
+    return torch::cat(outputs, 0);
+  }
+
+  torch::Tensor forward(torch::Tensor hidden_states,
+                        torch::Tensor grid_thw,  // [batch,thw]
+                        const ModelInputParams& input_params) {
+    hidden_states = patch_embed_(hidden_states, grid_thw);
+    hidden_states = encoder_(hidden_states, grid_thw, input_params);
+    // Align with MoonViT3dPretrainedModel:
+    // return vision tower output after tpool patch merge.
+    return tpool_patch_merger(hidden_states, grid_thw);
+  }
+
+  void load_state_dict(const StateDict& state_dict) {
+    patch_embed_->load_state_dict(
+        state_dict.get_dict_with_prefix("patch_embed."));
+
+    auto encoder_state_dict = state_dict.get_dict_with_prefix("encoder.");
+    if (encoder_state_dict.size() > 0) {
+      encoder_->load_state_dict(encoder_state_dict);
+    } else {
+      // fallback for checkpoints without explicit encoder prefix
+      encoder_->load_state_dict(state_dict);
+    }
+  }
+
+  void verify_loaded_weights(const std::string& prefix) const {
+    patch_embed_->verify_loaded_weights(prefix + "patch_embed.");
+    encoder_->verify_loaded_weights(prefix + "encoder.");
+  }
+
+  void merge_loaded_weights() { encoder_->merge_loaded_weights(); }
+
+ private:
   int spatial_merge_size_ = 0;
-  std::unordered_set<int> fullatt_block_indexes_;
   int spatial_merge_unit_ = 0;
 
   KimiK2_5_VisionPatchEmbed patch_embed_{nullptr};
-  KimiK2_5_VisionRotaryEmbedding rotary_pos_emb_{nullptr};
-  torch::nn::ModuleList blocks_{nullptr};
-  std::vector<KimiK2_5_VisionBlock> layers_;
-  KimiK2_5_VisionPatchMerger merger_{nullptr};
-
-  torch::Tensor m_cos;
-  torch::Tensor m_sin;
-  int device_id = 0;
+  KimiK2_5_VisionEncoder encoder_{nullptr};
 };
 TORCH_MODULE(KimiK2_5_VisionTransformer);
 
@@ -849,6 +901,17 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
     visual_ = register_module("vision_tower", KimiK2_5_VisionTransformer(context));
+    auto mm_ptype = model_args_.mm_projector_type();
+    if (mm_ptype == "patchmerger") {
+      mm_projector_ = register_module("mm_projector",
+                                      KimiK2_5_VisionPatchMerger(context));
+    } else if (mm_ptype.empty() || mm_ptype == "none" ||
+                mm_ptype == "identity") {
+      // keep mm_projector_ as nullptr
+    } else {
+      CHECK(false) << "unsupported mm_projector_type for kimi_k25: "
+                   << mm_ptype;
+    }
 
     language_model_ =
         register_module("language_model", DeepseekV2ForCausalLM(context));
@@ -930,6 +993,15 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     return multimodal_embeds;
   }
 
+  torch::Tensor apply_mm_projector(torch::Tensor vision_embeddings) {
+    if (!mm_projector_) {
+      return vision_embeddings;
+    }
+    CHECK_EQ(vision_embeddings.dim(), 3)
+        << "expect vision embeddings with shape [N, merge_unit, hidden]";
+    return mm_projector_(vision_embeddings);
+  }
+
   torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
     auto special_token_ids = torch::tensor(
         {model_args_.image_token_id(), model_args_.video_token_id()},
@@ -977,12 +1049,28 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
 
   void load_model(std::unique_ptr<ModelLoader> loader) {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      visual_->load_state_dict(state_dict->get_dict_with_prefix("visual."));
-    }
+      auto vision_dict = state_dict->get_dict_with_prefix("vision_tower.");
+      if (vision_dict.size() == 0) {
+        vision_dict = state_dict->get_dict_with_prefix("visual.");
+      }
+      visual_->load_state_dict(vision_dict);
 
+    }
     // verify
-    visual_->verify_loaded_weights("visual.");
+    visual_->verify_loaded_weights("vision_tower.");
     visual_->merge_loaded_weights();
+    
+    if (mm_projector_) {
+      auto mm_projector_dict = state_dict->get_dict_with_prefix("mm_projector.");
+      if (mm_projector_dict.size() == 0) {
+        mm_projector_dict =
+            state_dict->get_dict_with_prefix("mm_projector.");
+      }
+      mm_projector_->load_state_dict(mm_projector_dict);
+      // verify
+      mm_projector_->verify_loaded_weights("mm_projector.");
+      mm_projector_->merge_loaded_weights();
+    }
 
     if (!model_args_.image_embedding_mode()) {
       language_model_->load_model(std::move(loader));
@@ -1008,6 +1096,7 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
   torch::TensorOptions options_;
 
   KimiK2_5_VisionTransformer visual_{nullptr};
+  KimiK2_5_VisionPatchMerger mm_projector_{nullptr};
   DeepseekV2ForCausalLM language_model_{nullptr};
 };
 TORCH_MODULE(KimiK2_5_VLForConditionalGeneration);
