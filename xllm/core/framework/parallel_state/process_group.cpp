@@ -43,6 +43,17 @@ std::pair<int, std::vector<uint64_t>> get_trans_group_rank(int world_size,
 
   return {trans_index, trans_group_ranks};
 }
+
+std::vector<int64_t> get_gather_shape(int32_t world_size,
+                                      const torch::Tensor& input) {
+  std::vector<int64_t> out_shape;
+  out_shape.reserve(input.dim() + 1);
+  out_shape.push_back(world_size);
+  for (int64_t dim_size : input.sizes()) {
+    out_shape.push_back(dim_size);
+  }
+  return out_shape;
+}
 }  // namespace
 
 namespace xllm {
@@ -92,6 +103,36 @@ c10::intrusive_ptr<c10d::Work> ProcessGroup::allgather_async(
   std::vector<torch::Tensor> input_tensors = {input};
   std::vector<std::vector<torch::Tensor>> output_tensors = {outputs};
   return pg_->allgather(output_tensors, input_tensors);
+}
+
+c10::intrusive_ptr<c10d::Work> ProcessGroup::allgather_base_async(
+    const torch::Tensor& input,
+    torch::Tensor& output) {
+  CHECK(pg_ != nullptr) << "Process group is not initialized.";
+  CHECK_EQ(input.device(), device())
+      << "input should be on the same device as the process group";
+  CHECK(output.defined()) << "output should be preallocated";
+  CHECK_EQ(output.device(), device())
+      << "output should be on the same device as the process group";
+  CHECK(output.is_contiguous()) << "output should be contiguous";
+
+  torch::Tensor input_buf = input.contiguous();
+  const std::vector<int64_t> out_shape =
+      get_gather_shape(world_size(), input_buf);
+  CHECK_EQ(output.sizes(), torch::IntArrayRef(out_shape))
+      << "output shape mismatch for allgather_base_async";
+  c10d::AllgatherOptions opts;
+  return pg_->_allgather_base(output, input_buf, opts);
+}
+
+torch::Tensor ProcessGroup::allgather_base_sync(const torch::Tensor& input) {
+  CHECK(pg_ != nullptr) << "Process group is not initialized.";
+  CHECK_EQ(input.device(), device())
+      << "input should be on the same device as the process group";
+  torch::Tensor output =
+      torch::empty(get_gather_shape(world_size(), input), input.options());
+  allgather_base_async(input, output)->wait();
+  return output;
 }
 
 void ProcessGroup::reduce_scatter(const torch::Tensor& input,

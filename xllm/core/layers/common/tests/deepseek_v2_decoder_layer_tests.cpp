@@ -48,6 +48,18 @@ class DeepseekV2DecoderLayerTestPeer {
   using Carrier = DeepseekV2DecoderLayerImpl::PostAttnCarrier;
   using Mode = DeepseekV2DecoderLayerImpl::PostAttnMode;
 
+  static Carrier make_carrier(Mode mode,
+                              torch::Tensor skip_local = torch::Tensor(),
+                              torch::Tensor ffn_in = torch::Tensor(),
+                              PaddingInfo pad_info = {}) {
+    Carrier carrier;
+    carrier.ffn_in = std::move(ffn_in);
+    carrier.skip_local = std::move(skip_local);
+    carrier.pad_info = pad_info;
+    carrier.mode = mode;
+    return carrier;
+  }
+
   static Carrier build_post_attn_carrier(
       DeepseekV2DecoderLayerImpl& decoder,
       torch::Tensor x,
@@ -79,9 +91,36 @@ class DeepseekV2DecoderLayerTestPeer {
     return decoder.restore_ffn_output(x, carrier, input_params);
   }
 
+  static bool can_keep_local_output(DeepseekV2DecoderLayerImpl& decoder,
+                                    const Carrier& carrier,
+                                    ProcessGroup* pg) {
+    return decoder.can_keep_local_output(carrier, pg);
+  }
+
+  static torch::Tensor comm_out(DeepseekV2DecoderLayerImpl& decoder,
+                                torch::Tensor x,
+                                const Carrier& carrier,
+                                ProcessGroup* pg) {
+    return decoder.comm_out(x, carrier, pg);
+  }
+
   static torch::Tensor post_norm(DeepseekV2DecoderLayerImpl& decoder,
                                  torch::Tensor x) {
     return std::get<0>(decoder.post_norm_->forward(x));
+  }
+
+  static DenseMLP mlp(DeepseekV2DecoderLayerImpl& decoder) {
+    return decoder.mlp_;
+  }
+
+  static FusedMoE moe(DeepseekV2DecoderLayerImpl& decoder) {
+    return decoder.moe_mlp_;
+  }
+
+  static torch::Tensor reduce_out(DeepseekV2DecoderLayerImpl& decoder,
+                                  torch::Tensor x,
+                                  ProcessGroup* pg) {
+    return decoder.reduce_out(x, pg);
   }
 };
 
@@ -653,15 +692,30 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     refresh_ctx();
   }
 
-  void set_sp_ctx(DecoderHolder& decoder) {
-    sp_pg_ = std::make_unique<test::MockProcessGroup>(
-        options_.device(), /*rank=*/0, /*world_size=*/2);
+  void set_sp_ctx(DecoderHolder& decoder,
+                  ProcessGroup* process_group = nullptr,
+                  std::vector<int32_t> tokens_per_rank = {2, 1},
+                  std::vector<int32_t> padded_tokens_per_rank = {2, 2}) {
+    if (process_group == nullptr) {
+      sp_pg_ = std::make_unique<test::MockProcessGroup>(
+          options_.device(),
+          /*rank=*/0,
+          static_cast<int64_t>(tokens_per_rank.size()));
+      process_group = sp_pg_.get();
+    } else {
+      sp_pg_.reset();
+    }
     sp_ctx_ = {};
     sp_ctx_.rank = 0;
-    sp_ctx_.process_group = sp_pg_.get();
-    sp_ctx_.comm_plan.tokens_per_rank = {2, 1};
-    sp_ctx_.comm_plan.padded_tokens_per_rank = {2, 2};
+    sp_ctx_.process_group = process_group;
+    sp_ctx_.comm_plan.tokens_per_rank = std::move(tokens_per_rank);
+    sp_ctx_.comm_plan.padded_tokens_per_rank =
+        std::move(padded_tokens_per_rank);
+    CHECK_EQ(process_group->world_size(),
+             static_cast<int64_t>(sp_ctx_.comm_plan.tokens_per_rank.size()));
     sp_ctx_.comm_plan.token_num_offset = 0;
+    sp_ctx_.comm_plan.ffn_can_rs =
+        v32_sp::can_ffn_rs(sp_ctx_.comm_plan.tokens_per_rank);
     decoder->set_sequence_parallel_context(&sp_ctx_);
   }
 
@@ -1235,6 +1289,146 @@ TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputPackedLocal) {
       torch::full({2, model_args_.hidden_size()}, 10.0f, hidden_opts()));
 }
 
+TEST_F(DeepseekV2DecoderLayerTest, CanLocalOutPackedLocalNeedsEqualTokens) {
+  global_pg_ = std::make_unique<test::MockProcessGroup>(
+      options_.device(), /*rank=*/0, /*world_size=*/2);
+  auto tp_pg = std::make_unique<CountingProcessGroup>(
+      options_.device(), /*rank=*/0, /*world_size=*/2);
+  auto* tp_pg_raw = tp_pg.get();
+  tp_pg_ = std::move(tp_pg);
+
+  parallel_args_ = ParallelArgs(
+      /*rank=*/0, /*world_size=*/2, /*dp_size=*/1, global_pg_.get());
+  parallel_args_.process_group_ = global_pg_.get();
+  parallel_args_.tp_group_ = tp_pg_.get();
+  refresh_ctx();
+
+  auto decoder = make_decoder(/*layer_id=*/0);
+  auto carrier = DeepseekV2DecoderLayerTestPeer::make_carrier(
+      DeepseekV2DecoderLayerTestPeer::Mode::kPackedLocal);
+
+  set_sp_ctx(decoder, tp_pg_.get(), {2, 2}, {2, 2});
+  EXPECT_TRUE(DeepseekV2DecoderLayerTestPeer::can_keep_local_output(
+      *decoder, carrier, tp_pg_.get()));
+
+  set_sp_ctx(decoder, tp_pg_.get(), {2, 1}, {2, 2});
+  EXPECT_FALSE(DeepseekV2DecoderLayerTestPeer::can_keep_local_output(
+      *decoder, carrier, tp_pg_.get()));
+
+  EXPECT_EQ(tp_pg_raw->allreduce_calls(), 0);
+  EXPECT_EQ(tp_pg_raw->rs_calls(), 0);
+}
+
+TEST_F(DeepseekV2DecoderLayerTest, CanLocalOutPackedLocalAllowsGlobalAlias) {
+  global_pg_ = std::make_unique<test::MockProcessGroup>(
+      options_.device(), /*rank=*/0, /*world_size=*/2);
+  tp_pg_ = std::make_unique<test::MockProcessGroup>(
+      options_.device(), /*rank=*/0, /*world_size=*/2);
+
+  parallel_args_ = ParallelArgs(
+      /*rank=*/0, /*world_size=*/2, /*dp_size=*/1, global_pg_.get());
+  parallel_args_.process_group_ = global_pg_.get();
+  parallel_args_.tp_group_ = tp_pg_.get();
+  refresh_ctx();
+
+  auto decoder = make_decoder(/*layer_id=*/0);
+  auto carrier = DeepseekV2DecoderLayerTestPeer::make_carrier(
+      DeepseekV2DecoderLayerTestPeer::Mode::kPackedLocal);
+
+  set_sp_ctx(decoder, tp_pg_.get(), {2, 2}, {2, 2});
+  EXPECT_TRUE(DeepseekV2DecoderLayerTestPeer::can_keep_local_output(
+      *decoder, carrier, global_pg_.get()));
+}
+
+TEST_F(DeepseekV2DecoderLayerTest, CommOutPackedLocalReduceScatters) {
+  global_pg_ = std::make_unique<test::MockProcessGroup>(
+      options_.device(), /*rank=*/0, /*world_size=*/2);
+  auto tp_pg = std::make_unique<CountingProcessGroup>(
+      options_.device(), /*rank=*/0, /*world_size=*/2);
+  auto* tp_pg_raw = tp_pg.get();
+  tp_pg_ = std::move(tp_pg);
+
+  parallel_args_ = ParallelArgs(
+      /*rank=*/0, /*world_size=*/2, /*dp_size=*/1, global_pg_.get());
+  parallel_args_.process_group_ = global_pg_.get();
+  parallel_args_.tp_group_ = tp_pg_.get();
+  refresh_ctx();
+
+  auto decoder = make_decoder(/*layer_id=*/0);
+  set_sp_ctx(decoder, tp_pg_.get(), {2, 2}, {2, 2});
+  auto carrier = DeepseekV2DecoderLayerTestPeer::make_carrier(
+      DeepseekV2DecoderLayerTestPeer::Mode::kPackedLocal);
+  auto packed_out = torch::tensor(
+      {{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}, {7.0f, 8.0f}}, fp32_opts());
+
+  auto local_out = DeepseekV2DecoderLayerTestPeer::comm_out(
+      *decoder, packed_out, carrier, tp_pg_.get());
+
+  test::verify_tensor_close(local_out, packed_out.slice(0, 0, 2));
+  EXPECT_EQ(tp_pg_raw->allreduce_calls(), 0);
+  EXPECT_EQ(tp_pg_raw->rs_calls(), 1);
+}
+
+TEST_F(DeepseekV2DecoderLayerTest, CommOutPackedLocalSlicesSingleRankOutput) {
+  auto decoder = make_decoder(/*layer_id=*/0);
+  set_sp_ctx(decoder, nullptr, {2, 2}, {2, 2});
+  auto carrier = DeepseekV2DecoderLayerTestPeer::make_carrier(
+      DeepseekV2DecoderLayerTestPeer::Mode::kPackedLocal);
+  test::MockProcessGroup single_rank_pg(
+      options_.device(), /*rank=*/0, /*world_size=*/1);
+  auto packed_out = torch::tensor(
+      {{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}, {7.0f, 8.0f}}, fp32_opts());
+
+  auto local_out = DeepseekV2DecoderLayerTestPeer::comm_out(
+      *decoder, packed_out, carrier, &single_rank_pg);
+
+  test::verify_tensor_close(local_out, packed_out.slice(0, 0, 2));
+}
+
+TEST_F(DeepseekV2DecoderLayerTest, CommOutPackedLocalFallsBackOnPgMismatch) {
+  global_pg_ = std::make_unique<test::MockProcessGroup>(
+      options_.device(), /*rank=*/0, /*world_size=*/2);
+  tp_pg_ = std::make_unique<test::MockProcessGroup>(
+      options_.device(), /*rank=*/0, /*world_size=*/2);
+  auto mismatch_pg = std::make_unique<CountingProcessGroup>(
+      options_.device(), /*rank=*/0, /*world_size=*/4);
+  auto* mismatch_pg_raw = mismatch_pg.get();
+
+  parallel_args_ = ParallelArgs(
+      /*rank=*/0, /*world_size=*/2, /*dp_size=*/1, global_pg_.get());
+  parallel_args_.process_group_ = global_pg_.get();
+  parallel_args_.tp_group_ = tp_pg_.get();
+  refresh_ctx();
+
+  auto decoder = make_decoder(/*layer_id=*/0);
+  set_sp_ctx(decoder, tp_pg_.get(), {2, 2}, {2, 2});
+  auto carrier = DeepseekV2DecoderLayerTestPeer::make_carrier(
+      DeepseekV2DecoderLayerTestPeer::Mode::kPackedLocal);
+  auto packed_out = torch::tensor(
+      {{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}, {7.0f, 8.0f}}, fp32_opts());
+
+  auto local_out = DeepseekV2DecoderLayerTestPeer::comm_out(
+      *decoder, packed_out, carrier, mismatch_pg.get());
+
+  EXPECT_FALSE(DeepseekV2DecoderLayerTestPeer::can_keep_local_output(
+      *decoder, carrier, mismatch_pg.get()));
+  test::verify_tensor_close(local_out, packed_out);
+  EXPECT_EQ(mismatch_pg_raw->allreduce_calls(), 1);
+  EXPECT_EQ(mismatch_pg_raw->rs_calls(), 0);
+}
+
+TEST_F(DeepseekV2DecoderLayerTest, PackedLocalFastAddsSkipLocally) {
+  auto decoder = make_decoder(/*layer_id=*/0);
+  auto carrier = DeepseekV2DecoderLayerTestPeer::make_carrier(
+      DeepseekV2DecoderLayerTestPeer::Mode::kPackedLocal,
+      torch::tensor({{10.0f, 20.0f}, {30.0f, 40.0f}}, fp32_opts()));
+  auto local_out = torch::tensor({{1.0f, 2.0f}, {3.0f, 4.0f}}, fp32_opts());
+
+  test::verify_tensor_close(
+      local_out + carrier.skip_local,
+      torch::tensor({{11.0f, 22.0f}, {33.0f, 44.0f}}, fp32_opts()));
+}
+
 TEST_F(DeepseekV2DecoderLayerTest, ForwardMixedDpMoEReturnsLocalSlice) {
   const int32_t layer_id =
       std::max<int32_t>(5, model_args_.first_k_dense_replace());
@@ -1299,6 +1493,42 @@ TEST_F(DeepseekV2DecoderLayerTest, ForwardMixedDpMoEReturnsLocalSlice) {
   EXPECT_EQ(output.size(0), 2);
   EXPECT_EQ(output.size(1), model_args_.hidden_size());
   EXPECT_FALSE(residual.has_value());
+}
+
+TEST_F(DeepseekV2DecoderLayerTest, DenseMlpReductionMovesToDecoder) {
+  global_pg_ = std::make_unique<test::MockProcessGroup>(
+      options_.device(), /*rank=*/0, /*world_size=*/2);
+  auto tp_pg = std::make_unique<CountingProcessGroup>(
+      options_.device(), /*rank=*/0, /*world_size=*/2);
+  auto* tp_pg_raw = tp_pg.get();
+  tp_pg_ = std::move(tp_pg);
+
+  parallel_args_ = ParallelArgs(
+      /*rank=*/0, /*world_size=*/2, /*dp_size=*/1, global_pg_.get());
+  parallel_args_.process_group_ = global_pg_.get();
+  parallel_args_.tp_group_ = tp_pg_.get();
+  refresh_ctx();
+
+  auto decoder = make_loaded_decoder(/*layer_id=*/0);
+  auto hidden_states = test::seeded_tensor("deepseek_v2_decoder.dense_ffn",
+                                           {4, model_args_.hidden_size()},
+                                           torch::kBFloat16,
+                                           options_.device());
+
+  auto local_out =
+      DeepseekV2DecoderLayerTestPeer::mlp(*decoder)->forward(hidden_states);
+  sync_dev();
+
+  EXPECT_EQ(tp_pg_raw->allreduce_calls(), 0);
+  ASSERT_EQ(local_out.size(0), hidden_states.size(0));
+  ASSERT_EQ(local_out.size(1), model_args_.hidden_size());
+
+  auto reduced_out = DeepseekV2DecoderLayerTestPeer::reduce_out(
+      *decoder, local_out, parallel_args_.tp_group_);
+  sync_dev();
+
+  EXPECT_EQ(tp_pg_raw->allreduce_calls(), 1);
+  EXPECT_EQ(reduced_out.sizes(), local_out.sizes());
 }
 
 TEST_P(DeepseekV2DecoderLayerParamTest,

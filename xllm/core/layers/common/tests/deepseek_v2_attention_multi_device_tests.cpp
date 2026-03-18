@@ -552,8 +552,7 @@ AttentionRunResult run_attention_prefill_once(
     result.global_output = layer::v32_sp::restore_gathered_to_global_order(
         layer::v32_sp::all_gather_across_ranks(result.local_output,
                                                sp_ctx.value()),
-        sp_ctx.value(),
-        layer::v32_sp::GatheredTensorLayout::kPacked);
+        sp_ctx.value());
   }
   result.k_cache = kv_cache.get_k_cache().clone();
   if (kv_cache.get_index_cache().defined()) {

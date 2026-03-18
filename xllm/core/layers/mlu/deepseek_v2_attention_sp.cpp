@@ -56,7 +56,7 @@ torch::Tensor DeepseekV2AttentionImpl::forward_sp(
   sp_comm_stream_->wait_stream(*compute_stream);
   {
     torch::StreamGuard stream_guard = sp_comm_stream_->set_stream_guard();
-    index_handle = indexer_->sp_comm(index_pre.k_padded, sp_ctx);
+    index_handle = indexer_->sp_comm(index_pre.k_local, sp_ctx);
   }
 
   auto mla_inputs =
@@ -68,14 +68,13 @@ torch::Tensor DeepseekV2AttentionImpl::forward_sp(
   sp_comm_stream_->wait_stream(*compute_stream);
   {
     torch::StreamGuard stream_guard = sp_comm_stream_->set_stream_guard();
-    mla_handle = sp_mla_comm(mla_inputs.k_padded, sp_ctx);
+    mla_handle = sp_mla_comm(mla_inputs.k_input, sp_ctx);
   }
   auto index_out = indexer_->sp_post(index_pre,
                                      k_gathered,
                                      index_cache,
                                      attn_metadata,
                                      sp_ctx.gathered_slot_mapping,
-                                     sp_ctx.sp_meta,
                                      sp_ctx);
   new_block_tables = std::get<0>(index_out);
   new_context_lens = std::get<1>(index_out);
@@ -130,22 +129,23 @@ DeepseekV2AttentionImpl::MlaInputs DeepseekV2AttentionImpl::build_sp_mla_inputs(
   out.k_input = latent_cache;
   out.q_input = out.q_input.view({out.q_input.size(0), -1});
   out.k_input = out.k_input.view({out.k_input.size(0), -1});
-  out.k_padded = layer::v32_sp::pad_to_sp_rows(out.k_input, sp_ctx);
   out.v_input = out.v_input.view({out.v_input.size(0), -1});
   return out;
 }
 
 v32_sp::PaddedGatherHandle DeepseekV2AttentionImpl::sp_mla_comm(
-    const torch::Tensor& k_padded,
+    const torch::Tensor& k_input,
     const v32_sp::DeepseekV32SPContext& sp_ctx) const {
-  return layer::v32_sp::launch_gather_padded(k_padded, sp_ctx);
+  return parallel_state::launch_gather(
+      k_input, sp_ctx.process_group, sp_ctx.comm_plan.tokens_per_rank);
 }
 
 void DeepseekV2AttentionImpl::finish_sp_k_gather(
     MlaInputs& mla_inputs,
     const v32_sp::PaddedGatherHandle& k_handle,
     const v32_sp::DeepseekV32SPContext& sp_ctx) const {
-  mla_inputs.k_input = layer::v32_sp::finish_gather_padded(k_handle, sp_ctx);
+  (void)sp_ctx;
+  mla_inputs.k_input = parallel_state::finish_gather(k_handle);
   mla_inputs.v_input = mla_inputs.k_input.slice(-1, 0, kv_lora_rank_);
 }
 

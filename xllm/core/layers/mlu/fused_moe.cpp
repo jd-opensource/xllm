@@ -36,6 +36,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       hidden_size_(model_args.hidden_size()),
       n_shared_experts_(model_args.n_shared_experts()),
       is_gated_(moe_args.is_gated),
+      enable_result_reduction_(moe_args.enable_result_reduction),
       hidden_act_(model_args.hidden_act()),
       quant_args_(quant_args),
       parallel_args_(parallel_args),
@@ -159,6 +160,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
     // remains independent of any communication operations. For optimal
     // performance, ensure that the shared experts layer on each rank always
     // maintains its own unique weights.
+    shared_pg_ = shared_expert_pg;
     shared_experts_ =
         register_module("shared_experts",
                         DenseMLP(hidden_size_,
@@ -166,7 +168,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
                                  is_gated_,
                                  false,
                                  hidden_act_,
-                                 /*enable_result_reduction=*/true,
+                                 enable_result_reduction_,
                                  quant_args,
                                  shared_expert_pg,
                                  options));
@@ -452,19 +454,21 @@ torch::Tensor FusedMoEImpl::compute_routed_experts(
   return gemm2_out;
 }
 
-FusedMoEImpl::RouteInfo FusedMoEImpl::prep_route(
-    const torch::Tensor& hidden_states) {
+FusedMoEImpl::RouteInfo FusedMoEImpl::prep_route(torch::Tensor& hidden_states) {
   torch::Tensor hidden_states_2d =
       hidden_states.reshape({-1, hidden_states.size(-1)});
-  return prep_route_2d(hidden_states_2d);
-}
 
-FusedMoEImpl::RouteInfo FusedMoEImpl::prep_route_2d(
-    torch::Tensor& hidden_states_2d) {
   RouteInfo route_info;
   std::tie(route_info.reduce_weight, route_info.expert_id) =
       gate_->forward(hidden_states_2d);
   return route_info;
+}
+
+torch::Tensor FusedMoEImpl::forward_shared(const torch::Tensor& hidden_states) {
+  if (!shared_experts_) {
+    return torch::Tensor();
+  }
+  return shared_experts_(hidden_states);
 }
 
 void FusedMoEImpl::check_route(const torch::Tensor& hidden_states_2d,
@@ -498,7 +502,7 @@ FusedMoEImpl::RouteInfo FusedMoEImpl::get_route(
     bool enable_all2all_communication,
     const std::optional<RouteInfo>& route_info) {
   if (!route_info.has_value()) {
-    return prep_route_2d(hidden_states_2d);
+    return prep_route(hidden_states_2d);
   }
 
   CHECK(!enable_all2all_communication)

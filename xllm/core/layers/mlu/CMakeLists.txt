@@ -9,7 +9,6 @@ cc_library(
     deepseek_v2_decoder_layer_impl.h
     indexer.h
     deepseek_v32_sp_context.h
-    deepseek_v32_sp_metadata.h
     deepseek_v32_sp_plan.h
     moe_gate.h
     fused_moe.h

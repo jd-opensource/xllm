@@ -65,6 +65,15 @@ struct TestParams {
   bool test_padding;
 };
 
+struct AllGatherBaseTestParams {
+  int32_t rank;
+  int32_t world_size;
+  int32_t port;
+  std::string host;
+  int32_t device_index;
+  int64_t input_size;
+  int64_t hidden_dim;
+};
 // Child process test function
 int run_reduce_scatter_test_child(const TestParams& params) {
   try {
@@ -196,6 +205,93 @@ int run_reduce_scatter_test_child(const TestParams& params) {
   }
 }
 
+int run_allgather_base_test_child(const AllGatherBaseTestParams& params) {
+  try {
+    xllm::Device xllm_device(params.device_index);
+    xllm_device.set_device();
+    torch::Device device = xllm_device.unwrap();
+
+    auto process_group = create_test_process_group(
+        params.rank, params.world_size, params.port, params.host, device);
+    if (!process_group) {
+      LOG(ERROR) << "Rank " << params.rank << ": Failed to create ProcessGroup";
+      return 1;
+    }
+
+    auto options = torch::TensorOptions()
+                       .dtype(torch::kFloat32)
+                       .device(device)
+                       .requires_grad(false);
+    auto cpu_options = torch::TensorOptions().dtype(torch::kFloat32);
+    torch::Tensor input =
+        torch::arange(params.input_size * params.hidden_dim, cpu_options)
+            .reshape({params.input_size, params.hidden_dim})
+            .to(device) +
+        static_cast<float>(params.rank * 1000);
+
+    torch::Tensor stacked = process_group->allgather_base_sync(input);
+    torch::Tensor async_stacked = torch::empty_like(stacked);
+    process_group->allgather_base_async(input, async_stacked)->wait();
+    xllm_device.synchronize_default_stream();
+    if (stacked.dim() != 3 || stacked.size(0) != params.world_size ||
+        stacked.size(1) != params.input_size ||
+        stacked.size(2) != params.hidden_dim) {
+      LOG(ERROR) << "Rank " << params.rank
+                 << ": allgather_base output shape mismatch";
+      return 1;
+    }
+
+    torch::Tensor stacked_cpu = stacked.to(torch::kCPU);
+    for (int32_t src_rank = 0; src_rank < params.world_size; ++src_rank) {
+      torch::Tensor expected =
+          torch::arange(params.input_size * params.hidden_dim, cpu_options)
+              .reshape({params.input_size, params.hidden_dim}) +
+          static_cast<float>(src_rank * 1000);
+      if (!torch::equal(stacked_cpu[src_rank], expected)) {
+        LOG(ERROR) << "Rank " << params.rank
+                   << ": allgather_base slice mismatch for src_rank="
+                   << src_rank;
+        return 1;
+      }
+    }
+    if (!torch::equal(async_stacked.to(torch::kCPU), stacked_cpu)) {
+      LOG(ERROR) << "Rank " << params.rank
+                 << ": allgather_base_async result mismatch";
+      return 1;
+    }
+
+    torch::Tensor gathered = gather(input, process_group.get(), 0);
+    xllm_device.synchronize_default_stream();
+    std::vector<torch::Tensor> gathered_parts;
+    gathered_parts.reserve(params.world_size);
+    for (int32_t src_rank = 0; src_rank < params.world_size; ++src_rank) {
+      gathered_parts.push_back(stacked_cpu[src_rank]);
+    }
+    torch::Tensor expected_gather = torch::cat(gathered_parts, 0);
+    if (!torch::equal(gathered.to(torch::kCPU), expected_gather)) {
+      LOG(ERROR) << "Rank " << params.rank
+                 << ": gather result mismatch after allgather_base";
+      return 1;
+    }
+
+    auto gather_ctx = launch_gather(
+        input,
+        process_group.get(),
+        std::vector<int32_t>(params.world_size, params.input_size));
+    torch::Tensor gathered_async = finish_gather(std::move(gather_ctx));
+    xllm_device.synchronize_default_stream();
+    if (!torch::equal(gathered_async.to(torch::kCPU), expected_gather)) {
+      LOG(ERROR) << "Rank " << params.rank
+                 << ": async gather result mismatch for equal token_num_list";
+      return 1;
+    }
+
+    return 0;
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Rank " << params.rank << ": Exception: " << e.what();
+    return 1;
+  }
+}
 // Multi-process test fixture
 class ReduceScatterMultiDeviceTest : public ::testing::Test {
  protected:
@@ -277,6 +373,71 @@ class ReduceScatterMultiDeviceTest : public ::testing::Test {
   int64_t hidden_dim_;
 };
 
+class AllGatherBaseMultiDeviceTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    world_size_ = 2;
+    port_ = 29531;
+    host_ = "127.0.0.1";
+    input_size_ = 4;
+    hidden_dim_ = 6;
+  }
+
+  void RunMultiProcessTest(int64_t input_size, int64_t hidden_dim) {
+    std::vector<pid_t> child_pids;
+    std::vector<int> child_statuses(world_size_);
+
+    for (int32_t rank = 0; rank < world_size_; ++rank) {
+      pid_t pid = fork();
+      if (pid == 0) {
+        AllGatherBaseTestParams params;
+        params.rank = rank;
+        params.world_size = world_size_;
+        params.port = port_;
+        params.host = host_;
+        params.device_index = rank % Device::device_count();
+        params.input_size = input_size;
+        params.hidden_dim = hidden_dim;
+        _exit(run_allgather_base_test_child(params));
+      } else if (pid > 0) {
+        child_pids.push_back(pid);
+      } else {
+        LOG(FATAL) << "Failed to fork child process for rank " << rank;
+      }
+    }
+
+    bool all_passed = true;
+    for (size_t i = 0; i < child_pids.size(); ++i) {
+      int status;
+      pid_t waited_pid = waitpid(child_pids[i], &status, 0);
+      if (waited_pid == child_pids[i]) {
+        if (WIFEXITED(status)) {
+          child_statuses[i] = WEXITSTATUS(status);
+          if (child_statuses[i] != 0) {
+            all_passed = false;
+            LOG(ERROR) << "Child process for rank " << i << " exited with code "
+                       << child_statuses[i];
+          }
+        } else {
+          all_passed = false;
+          LOG(ERROR) << "Child process for rank " << i
+                     << " did not exit normally";
+        }
+      } else {
+        all_passed = false;
+        LOG(ERROR) << "Failed to wait for child process for rank " << i;
+      }
+    }
+
+    CHECK(all_passed) << "One or more child processes failed";
+  }
+
+  int32_t world_size_ = 0;
+  int32_t port_ = 0;
+  std::string host_;
+  int64_t input_size_ = 0;
+  int64_t hidden_dim_ = 0;
+};
 TEST_F(ReduceScatterMultiDeviceTest, BasicTest) {
   // Test with input size divisible by world_size
   RunMultiProcessTest(8, false);
@@ -292,6 +453,9 @@ TEST_F(ReduceScatterMultiDeviceTest, LargeInputTest) {
   RunMultiProcessTest(32, false);
 }
 
+TEST_F(AllGatherBaseMultiDeviceTest, BasicTest) {
+  RunMultiProcessTest(input_size_, hidden_dim_);
+}
 }  // namespace test
 }  // namespace parallel_state
 }  // namespace xllm

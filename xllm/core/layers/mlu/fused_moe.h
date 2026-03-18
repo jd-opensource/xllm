@@ -50,15 +50,17 @@ class FusedMoEImpl : public torch::nn::Module {
                const ParallelArgs& parallel_args,
                const torch::TensorOptions& options);
 
-  RouteInfo prep_route(const torch::Tensor& hidden_states);
+  RouteInfo prep_route(torch::Tensor& hidden_states);
   torch::Tensor forward_experts(
       const torch::Tensor& hidden_states,
       bool enable_all2all_communication,
       const std::optional<RouteInfo>& route_info = std::nullopt);
+  torch::Tensor forward_shared(const torch::Tensor& hidden_states);
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
   void load_state_dict(const StateDict& state_dict);
   void verify_loaded_weights() const;
+  ProcessGroup* shared_pg() const { return shared_pg_; }
 
  private:
   // struct to store the selected expert info
@@ -108,7 +110,6 @@ class FusedMoEImpl : public torch::nn::Module {
 
   std::pair<torch::Tensor, std::optional<torch::List<int64_t>>>
   prepare_group_gemm_weight_scale(const torch::Tensor& b_scale) const;
-  RouteInfo prep_route_2d(torch::Tensor& hidden_states_2d);
   RouteInfo get_route(torch::Tensor& hidden_states_2d,
                       bool enable_all2all_communication,
                       const std::optional<RouteInfo>& route_info);
@@ -128,6 +129,7 @@ class FusedMoEImpl : public torch::nn::Module {
   int64_t hidden_size_;
   int64_t n_shared_experts_;
   bool is_gated_;
+  bool enable_result_reduction_;
   std::string hidden_act_;
   bool is_smoothquant_;
   int64_t moe_weight_bits_ = 8;
@@ -157,6 +159,7 @@ class FusedMoEImpl : public torch::nn::Module {
   ParallelArgs parallel_args_;
   torch::TensorOptions options_;
   ProcessGroup* tp_pg_;
+  ProcessGroup* shared_pg_ = nullptr;
 
   DEFINE_WEIGHT(w13);
   DEFINE_FUSED_WEIGHT(w1);

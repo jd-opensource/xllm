@@ -39,6 +39,7 @@ struct DeepseekV32SPCommPlan {
   std::vector<int32_t> tokens_per_rank;
   std::vector<int32_t> padded_tokens_per_rank;
   int32_t token_num_offset = 0;
+  bool ffn_can_rs = false;
 };
 
 struct DeepseekV32SPRuntimeArtifacts {
@@ -104,6 +105,14 @@ inline std::vector<int32_t> split_tokens_evenly(int32_t token_num,
     token_num_split[i] += 1;
   }
   return token_num_split;
+}
+
+inline bool can_ffn_rs(const std::vector<int32_t>& tokens_per_rank) {
+  return !tokens_per_rank.empty() &&
+         std::adjacent_find(tokens_per_rank.begin(),
+                            tokens_per_rank.end(),
+                            std::not_equal_to<int32_t>()) ==
+             tokens_per_rank.end();
 }
 
 inline std::vector<DeepseekV32SPSegment> build_all_sp_segments(
@@ -211,6 +220,7 @@ inline DeepseekV32SPRuntimeArtifacts build_sp_runtime_artifacts(
       std::accumulate(comm_plan.tokens_per_rank.begin(),
                       comm_plan.tokens_per_rank.begin() + curr_rank,
                       int32_t{0});
+  comm_plan.ffn_can_rs = can_ffn_rs(comm_plan.tokens_per_rank);
 
   artifacts.gathered_reorder_index_cpu.reserve(total_tokens);
   for (const auto& rank_indices : per_rank_indices) {
