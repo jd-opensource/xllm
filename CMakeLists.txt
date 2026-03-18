@@ -261,6 +261,17 @@ find_package(leveldb CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(absl CONFIG REQUIRED)
 find_package(Protobuf CONFIG REQUIRED)
+# Ensure vcpkg protobuf headers are found before PyTorch's bundled older version.
+# Use BEFORE SYSTEM so that:
+#   1) vcpkg protobuf is first in -isystem list (before torch's -isystem)
+#   2) project-local -I paths (e.g. Mooncake fake_include stubs) still win over -isystem
+# Protobuf_INCLUDE_DIRS may be empty in CONFIG mode; fall back to the imported target.
+if(NOT Protobuf_INCLUDE_DIRS AND TARGET protobuf::libprotobuf)
+  get_target_property(Protobuf_INCLUDE_DIRS protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
+endif()
+if(Protobuf_INCLUDE_DIRS)
+  include_directories(BEFORE SYSTEM ${Protobuf_INCLUDE_DIRS})
+endif()
 find_package(gRPC CONFIG REQUIRED)
 find_package(folly CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
@@ -453,8 +464,8 @@ if(USE_CUDA)
   add_definitions(-DUSE_CUDA)
   add_compile_definitions(TORCH_CUDA=1)
   set(CMAKE_VERBOSE_MAKEFILE ON)
-  include_directories(
-      $ENV{PYTHON_INCLUDE_PATH}
+  include_directories($ENV{PYTHON_INCLUDE_PATH})
+  include_directories(SYSTEM
       $ENV{PYTORCH_INSTALL_PATH}/include
       $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
   )
