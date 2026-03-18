@@ -26,7 +26,7 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_lm_head_impl.h"
 #include "core/layers/npu/npu_qwen2_decoder_layer_impl.h"
-#include "core/layers/npu/npu_qwen2dot5_vision_encoder_layer_impl.h"
+#include "core/layers/npu/npu_kimik25_vision_encoder_layer_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "models/llm/npu/deepseek_v3.h"
 #include "models/model_registry.h"
@@ -250,25 +250,17 @@ class KimiK2_5_VLInputProcessor : public InputProcessor {
 class KimiK2_5_VisionBlockImpl : public torch::nn::Module {
  public:
   KimiK2_5_VisionBlockImpl(const ModelContext& context) {
-    auto model_args = context.get_model_args();
-    auto head_dim = model_args.mm_head_dim();
-    if (head_dim <= 0 && model_args.mm_num_attention_heads() > 0) {
-      head_dim = model_args.mm_hidden_size() / model_args.mm_num_attention_heads();
-    }
-    // Compatible with current NpuQwen2dot5VisionEncoderLayer interface.
-    // Original path was: [head_dim/2] -> pad(24) -> repeat(2).
-    compat_rope_dim_ = (head_dim / 2 + 24) * 2;
-
     // register submodules
     encoder_layer_ = register_module(
-        "encoder_layer", layer::NpuQwen2dot5VisionEncoderLayer(context));
+        "encoder_layer", layer::NpuKimik25VisionEncoderLayer(context));
   }
 
   struct BlockInput {
     torch::Tensor hidden_states;
     torch::Tensor cu_seqlens;  // cumulative seqlens, shape [batch + 1]
     int64_t max_seqlen = 0;
-    torch::Tensor rope_freqs_cis;  // reserved for future MoonViT-style block
+    torch::Tensor cos_pos;
+    torch::Tensor sin_pos;
   };
 
   torch::Tensor forward(BlockInput& block_input,
@@ -281,20 +273,16 @@ class KimiK2_5_VisionBlockImpl : public torch::nn::Module {
         seqlens_cpu.data_ptr<int>() + seqlens_cpu.numel());
 
     auto token_num = block_input.hidden_states.size(0);
-    if (block_input.rope_freqs_cis.defined()) {
-      CHECK_EQ(block_input.rope_freqs_cis.size(0), token_num)
-          << "rope_freqs_cis token count mismatch for " << name();
-    }
-
-    auto rope_opts = block_input.hidden_states.options();
-    if (!compat_cos_.defined() || compat_cos_.size(0) != token_num) {
-      compat_cos_ = torch::ones({token_num, compat_rope_dim_}, rope_opts);
-      compat_sin_ = torch::zeros({token_num, compat_rope_dim_}, rope_opts);
-    }
+    CHECK(block_input.cos_pos.defined()) << "cos_pos is undefined for " << name();
+    CHECK(block_input.sin_pos.defined()) << "sin_pos is undefined for " << name();
+    CHECK_EQ(block_input.cos_pos.size(0), token_num)
+        << "cos_pos token count mismatch for " << name();
+    CHECK_EQ(block_input.sin_pos.size(0), token_num)
+        << "sin_pos token count mismatch for " << name();
 
     return encoder_layer_(block_input.hidden_states,
-                          compat_cos_,
-                          compat_sin_,
+                          block_input.cos_pos,
+                          block_input.sin_pos,
                           seqlens,
                           seqlens_vec,
                           input_params,
@@ -313,10 +301,7 @@ class KimiK2_5_VisionBlockImpl : public torch::nn::Module {
   void merge_loaded_weights() { encoder_layer_->merge_loaded_weights(); }
 
  private:
-  layer::NpuQwen2dot5VisionEncoderLayer encoder_layer_{nullptr};
-  int64_t compat_rope_dim_ = 120;
-  torch::Tensor compat_cos_;
-  torch::Tensor compat_sin_;
+  layer::NpuKimik25VisionEncoderLayer encoder_layer_{nullptr};
 };
 TORCH_MODULE(KimiK2_5_VisionBlock);
 
@@ -689,7 +674,6 @@ class KimiK2_5_VisionEncoderImpl : public torch::nn::Module {
     auto options = context.get_tensor_options();
 
     hidden_size_ = model_args.mm_hidden_size();
-
     rope_2d_ =
         register_module("rope_2d", KimiK2_5_VisionRotaryEmbedding(context));
     blocks_ = register_module("blocks", torch::nn::ModuleList());
@@ -733,10 +717,30 @@ class KimiK2_5_VisionEncoderImpl : public torch::nn::Module {
     CHECK_EQ(cu_seqlens.index({-1}).item<int32_t>(), hidden_states.size(0))
         << "cu_seqlens last value mismatch with token count";
 
+    // Convert complex cis(freqs) to real cos/sin tensors for NPU vision block.
+    auto rope_freqs_cis_ri = torch::view_as_real(rope_freqs_cis);
+    auto cos_pos =
+        rope_freqs_cis_ri.index({torch::indexing::Slice(),
+                                 torch::indexing::Slice(),
+                                 0})
+            .repeat({1, 2})
+            .to(hidden_states.options());
+    auto sin_pos =
+        rope_freqs_cis_ri.index({torch::indexing::Slice(),
+                                 torch::indexing::Slice(),
+                                 1})
+            .repeat({1, 2})
+            .to(hidden_states.options());
+
+    CHECK_EQ(cos_pos.size(0), hidden_states.size(0))
+        << "cos_pos and hidden_states token count mismatch";
+    CHECK_EQ(sin_pos.size(0), hidden_states.size(0))
+        << "sin_pos and hidden_states token count mismatch";
+
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
     KimiK2_5_VisionBlockImpl::BlockInput block_input{
-        hidden_states, cu_seqlens, max_seqlen, rope_freqs_cis};
+        hidden_states, cu_seqlens, max_seqlen, cos_pos, sin_pos};
 
     for (int idx = 0; idx < blocks_->size(); ++idx) {
       block_input.hidden_states =

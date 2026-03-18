@@ -16,6 +16,7 @@ cc_library(
     npu_qwen2_vision_encoder_layer_impl.h
     npu_qwen2dot5_vision_encoder_layer_impl.h
     npu_qwen3_vision_encoder_layer_impl.h
+    npu_kimik25_vision_encoder_layer_impl.h
     npu_qwen3_moe_decoder_layer_impl.h
     # atb_parallel_linear.h
     npu_block_copy_impl.h
@@ -52,6 +53,7 @@ cc_library(
     loader/qwen2_vision_encoder_loader.h
     loader/qwen2dot5_vision_encoder_loader.h
     loader/qwen3_vision_encoder_loader.h
+    loader/kimik25_vision_encoder_loader.h
     loader/rms_norm_loader.h
     loader/siglip_encoder_loader.h
     loader/base_loader.h
@@ -70,6 +72,7 @@ cc_library(
     npu_qwen2_vision_encoder_layer_impl.cpp
     npu_qwen2dot5_vision_encoder_layer_impl.cpp
     npu_qwen3_vision_encoder_layer_impl.cpp
+    npu_kimik25_vision_encoder_layer_impl.cpp
     npu_qwen3_moe_decoder_layer_impl.cpp
     # atb_parallel_linear.cpp
     npu_block_copy_impl.cpp
@@ -106,6 +109,7 @@ cc_library(
     loader/qwen2_vision_encoder_loader.cpp
     loader/qwen2dot5_vision_encoder_loader.cpp
     loader/qwen3_vision_encoder_loader.cpp
+    loader/kimik25_vision_encoder_loader.cpp
     loader/rms_norm_loader.cpp
     loader/siglip_encoder_loader.cpp
     loader/base_loader.cpp
