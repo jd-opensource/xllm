@@ -47,11 +47,15 @@ struct DeepseekV32SPContext {
   BatchForwardType batch_forward_type;
 
   torch::Tensor gathered_reorder_index;
+  torch::Tensor gathered_slot_mapping;
 
   int32_t total_tokens = 0;
   int32_t rank = 0;
   ProcessGroup* process_group = nullptr;
 };
+
+inline torch::Tensor reorder_by_index(const torch::Tensor& tensor,
+                                      const torch::Tensor& reorder_index);
 
 inline std::optional<DeepseekV32SPContext> build_deepseek_v32_sp_context(
     const AttentionMetadata& base_attn_metadata,
@@ -111,6 +115,10 @@ inline std::optional<DeepseekV32SPContext> build_deepseek_v32_sp_context(
   context.gathered_reorder_index =
       torch::tensor(runtime_artifacts.gathered_reorder_index_cpu, int64_options)
           .to(device);
+  if (base_attn_metadata.slot_mapping.defined()) {
+    context.gathered_slot_mapping = reorder_by_index(
+        base_attn_metadata.slot_mapping, context.gathered_reorder_index);
+  }
   return context;
 }
 
@@ -288,10 +296,31 @@ inline torch::Tensor finish_gather_padded(const PaddedGatherHandle& handle,
   if (handle.gather_ctx.shards.empty()) {
     return torch::Tensor();
   }
-  return restore_gathered_to_global_order(
-      xllm::parallel_state::finish_gather(handle.gather_ctx),
-      context,
-      GatheredTensorLayout::kPaddedPacked);
+  if (handle.gather_ctx.work.defined()) {
+    handle.gather_ctx.work->wait();
+  }
+
+  std::vector<torch::Tensor> valid_slices;
+  valid_slices.reserve(context.comm_plan.tokens_per_rank.size());
+  for (size_t rank = 0; rank < context.comm_plan.tokens_per_rank.size();
+       ++rank) {
+    const int32_t valid_token_num = context.comm_plan.tokens_per_rank[rank];
+    if (valid_token_num <= 0) {
+      continue;
+    }
+    valid_slices.push_back(
+        handle.gather_ctx.shards[rank].narrow(0, 0, valid_token_num));
+  }
+  if (valid_slices.empty()) {
+    auto empty_shape = handle.gather_ctx.shards.front().sizes().vec();
+    empty_shape[0] = 0;
+    return torch::empty(empty_shape,
+                        handle.gather_ctx.shards.front().options());
+  }
+  if (valid_slices.size() == 1) {
+    return valid_slices.front().contiguous();
+  }
+  return torch::cat(valid_slices, 0).contiguous();
 }
 
 }  // namespace xllm::layer::v32_sp

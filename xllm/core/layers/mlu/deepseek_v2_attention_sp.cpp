@@ -56,22 +56,27 @@ torch::Tensor DeepseekV2AttentionImpl::forward_sp(
   sp_comm_stream_->wait_stream(*compute_stream);
   {
     torch::StreamGuard stream_guard = sp_comm_stream_->set_stream_guard();
-    index_handle = indexer_->sp_comm(index_pre.k_local, sp_ctx);
+    index_handle = indexer_->sp_comm(index_pre.k_padded, sp_ctx);
   }
 
   auto mla_inputs =
       build_sp_mla_inputs(hidden_states, positions, query_prep, sp_ctx);
 
-  torch::Tensor k_global =
+  torch::Tensor k_gathered =
       indexer_->sp_wait_k(index_pre.k_local, index_handle, sp_ctx);
   compute_stream = device.current_stream();
   sp_comm_stream_->wait_stream(*compute_stream);
   {
     torch::StreamGuard stream_guard = sp_comm_stream_->set_stream_guard();
-    mla_handle = launch_sp_k_gather(mla_inputs.k_input, sp_ctx);
+    mla_handle = sp_mla_comm(mla_inputs.k_padded, sp_ctx);
   }
-  auto index_out = indexer_->sp_post(
-      index_pre, k_global, index_cache, attn_metadata, sp_ctx.sp_meta, sp_ctx);
+  auto index_out = indexer_->sp_post(index_pre,
+                                     k_gathered,
+                                     index_cache,
+                                     attn_metadata,
+                                     sp_ctx.gathered_slot_mapping,
+                                     sp_ctx.sp_meta,
+                                     sp_ctx);
   new_block_tables = std::get<0>(index_out);
   new_context_lens = std::get<1>(index_out);
   finish_sp_k_gather(mla_inputs, mla_handle, sp_ctx);
@@ -85,6 +90,7 @@ torch::Tensor DeepseekV2AttentionImpl::forward_sp(
                                    kv_cache,
                                    k_cache_scale,
                                    is_prefill_or_chunked_prefill,
+                                   sp_ctx.gathered_slot_mapping,
                                    new_block_tables,
                                    new_context_lens);
   attn_indexer_metadata.q_cu_seq_lens =
@@ -124,15 +130,15 @@ DeepseekV2AttentionImpl::MlaInputs DeepseekV2AttentionImpl::build_sp_mla_inputs(
   out.k_input = latent_cache;
   out.q_input = out.q_input.view({out.q_input.size(0), -1});
   out.k_input = out.k_input.view({out.k_input.size(0), -1});
+  out.k_padded = layer::v32_sp::pad_to_sp_rows(out.k_input, sp_ctx);
   out.v_input = out.v_input.view({out.v_input.size(0), -1});
   return out;
 }
 
-v32_sp::PaddedGatherHandle DeepseekV2AttentionImpl::launch_sp_k_gather(
-    const torch::Tensor& k_input,
+v32_sp::PaddedGatherHandle DeepseekV2AttentionImpl::sp_mla_comm(
+    const torch::Tensor& k_padded,
     const v32_sp::DeepseekV32SPContext& sp_ctx) const {
-  auto padded_k = layer::v32_sp::pad_to_sp_rows(k_input, sp_ctx);
-  return layer::v32_sp::launch_gather_padded(padded_k, sp_ctx);
+  return layer::v32_sp::launch_gather_padded(k_padded, sp_ctx);
 }
 
 void DeepseekV2AttentionImpl::finish_sp_k_gather(

@@ -93,6 +93,7 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
     torch::Tensor q_norm;
     torch::Tensor q_input;
     torch::Tensor k_input;
+    torch::Tensor k_padded;
     torch::Tensor v_input;
   };
 
@@ -120,8 +121,8 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
                                 const torch::Tensor& positions,
                                 const QueryPrep& query_prep,
                                 const v32_sp::DeepseekV32SPContext& sp_ctx);
-  v32_sp::PaddedGatherHandle launch_sp_k_gather(
-      const torch::Tensor& k_input,
+  v32_sp::PaddedGatherHandle sp_mla_comm(
+      const torch::Tensor& k_padded,
       const v32_sp::DeepseekV32SPContext& sp_ctx) const;
   void finish_sp_k_gather(MlaInputs& mla_inputs,
                           const v32_sp::PaddedGatherHandle& k_handle,
@@ -161,6 +162,7 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
       KVCache& kv_cache,
       std::optional<torch::Tensor> k_cache_scale,
       bool is_prefill_phase,
+      const std::optional<torch::Tensor>& slot_mapping = std::nullopt,
       const std::optional<torch::Tensor>& new_block_tables = std::nullopt,
       const std::optional<torch::Tensor>& new_context_lens = std::nullopt);
 

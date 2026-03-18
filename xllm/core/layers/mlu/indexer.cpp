@@ -211,8 +211,9 @@ IndexerRuntimeContext IndexerImpl::prepare_runtime_context(
       // NOTE: the kv_cu_seq_lens should already include the history tokens
       ctx.cu_seq_k_lens = attn_metadata.kv_cu_seq_lens;
 
-      // Allocate contiguous memory for gathered k
-      int64_t total_k_len = ctx.cu_seq_k_lens[-1].item<int64_t>();
+      // Reuse the host-side total length cached in attention metadata to avoid
+      // synchronizing the device cu_seq tensor back to CPU.
+      int64_t total_k_len = attn_metadata.total_kv_len;
       ctx._storage_k_full = torch::empty(
           {total_k_len, head_dim_},
           torch::TensorOptions().dtype(k_cache_paged.dtype()).device(device));
@@ -410,17 +411,17 @@ IndexerSPPreOut IndexerImpl::sp_pre(
                                 attn_metadata,
                                 /*is_prefill=*/true,
                                 /*write_k_cache=*/false);
+  out.k_padded = v32_sp::pad_to_sp_rows(out.k_local, sp_ctx);
   return out;
 }
 
 v32_sp::PaddedGatherHandle IndexerImpl::sp_comm(
-    const torch::Tensor& k_local,
+    const torch::Tensor& k_padded,
     const v32_sp::DeepseekV32SPContext& sp_ctx) {
-  if (!k_local.defined()) {
+  if (!k_padded.defined()) {
     return {};
   }
-  torch::Tensor padded_k = v32_sp::pad_to_sp_rows(k_local, sp_ctx);
-  return v32_sp::launch_gather_padded(padded_k, sp_ctx);
+  return v32_sp::launch_gather_padded(k_padded, sp_ctx);
 }
 
 torch::Tensor IndexerImpl::sp_wait_k(
@@ -435,23 +436,18 @@ torch::Tensor IndexerImpl::sp_wait_k(
 
 std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::sp_post(
     const IndexerSPPreOut& pre_out,
-    const torch::Tensor& k_global,
+    const torch::Tensor& k_gathered,
     torch::Tensor& k_cache,
     const AttentionMetadata& attn_metadata,
+    const torch::Tensor& gathered_slot_mapping,
     const v32_sp::DeepseekV32SPMetadata& sp_meta,
     const v32_sp::DeepseekV32SPContext& sp_ctx) {
   (void)sp_ctx;
   CHECK(attn_metadata.is_prefill || attn_metadata.is_chunked_prefill)
       << "deepseek_v32 sequence parallel indexer only supports prefill "
          "batches.";
-  CHECK(sp_ctx.batch_forward_type.no_decode())
-      << "deepseek_v32 sequence parallel indexer only supports prefill "
-         "batches.";
   CHECK(attn_metadata.slot_mapping.defined())
       << "deepseek_v32 sequence parallel indexer requires slot_mapping.";
-  CHECK_EQ(k_global.size(0), attn_metadata.slot_mapping.numel())
-      << "deepseek_v32 sequence parallel expects gathered K rows to match "
-         "slot_mapping size before packing.";
   CHECK_EQ(sp_meta.seg_q_cu_lens.size(0), sp_meta.seg_ctx_lens.size(0) + 1)
       << "deepseek_v32 sequence parallel expects one seg_q_cu_lens prefix "
          "entry per segment.";
@@ -468,10 +464,10 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::sp_post(
   // rebuild the full-context dense K from cache, then repack it into segment
   // order before select. Feeding suffix-only K here would truncate the
   // effective context seen by the indexer on long prompts.
-  write_prefill_k_cache(k_global, k_cache, attn_metadata.slot_mapping);
+  write_prefill_k_cache(k_gathered, k_cache, gathered_slot_mapping);
   torch::Tensor q = pre_out.q;
   torch::Tensor weights = pre_out.weights;
-  IndexerRuntimeContext ctx = prepare_runtime_context(k_global,
+  IndexerRuntimeContext ctx = prepare_runtime_context(k_gathered,
                                                       k_cache,
                                                       q,
                                                       weights,
@@ -481,7 +477,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::sp_post(
   if (attn_metadata.is_chunked_prefill) {
     ctx.k_cache_tensor = v32_sp::pack_sp_ctx_k(ctx.k_cache_tensor, sp_meta);
   } else {
-    ctx.k_cache_tensor = v32_sp::pack_sp_k_for_indexer(k_global, sp_meta);
+    ctx.k_cache_tensor = v32_sp::slice_local_packed(k_gathered, sp_ctx);
   }
   return run_indexer_select_kernel(
       attn_metadata, /*is_prefill=*/true, ctx, &sp_meta);

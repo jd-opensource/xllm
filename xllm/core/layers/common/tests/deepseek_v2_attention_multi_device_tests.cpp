@@ -332,6 +332,7 @@ AttentionMetadata create_decode_metadata(const torch::TensorOptions& options) {
   metadata.slot_mapping = torch::tensor({1}, int_options);
   metadata.max_query_len = 1;
   metadata.max_seq_len = 1;
+  metadata.total_kv_len = 1;
   metadata.compute_dtype = "half";
   metadata.is_prefill = false;
   metadata.is_chunked_prefill = false;
@@ -351,6 +352,7 @@ AttentionMetadata create_prefill_metadata(const torch::TensorOptions& options,
   metadata.slot_mapping = torch::arange(seq_len, int_options);
   metadata.max_query_len = seq_len;
   metadata.max_seq_len = seq_len;
+  metadata.total_kv_len = seq_len;
   metadata.compute_dtype = "half";
   metadata.is_prefill = true;
   metadata.is_chunked_prefill = false;
@@ -372,6 +374,7 @@ AttentionMetadata create_chunked_metadata(const torch::TensorOptions& options,
   metadata.slot_mapping = torch::arange(prefix_len, ctx_len, int_options);
   metadata.max_query_len = chunk_len;
   metadata.max_seq_len = ctx_len;
+  metadata.total_kv_len = ctx_len;
   metadata.compute_dtype = "half";
   metadata.is_prefill = false;
   metadata.is_chunked_prefill = true;

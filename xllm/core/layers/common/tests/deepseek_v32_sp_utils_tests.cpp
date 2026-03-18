@@ -883,7 +883,61 @@ TEST(DeepseekV32SPUtilsTest, LaunchAndFinishGatherMatchBlockingGather) {
       torch::allclose(gathered[8], torch::full({2}, 3.0f, float_options)));
 }
 
-TEST(DeepseekV32SPUtilsTest, PaddedGatherRestoresGlobalOrder) {
+TEST(DeepseekV32SPUtilsTest, PadToSPRowsExpandsLocalShardToPaddedRows) {
+  ScopedFlagValue use_sp(FLAGS_enable_prefill_sp, true);
+  ScopedFlagValue nnodes(FLAGS_nnodes, 4);
+
+  AttentionMetadata attn_metadata = make_prefill_metadata({10});
+  torch::Tensor tokens =
+      torch::arange(0, 10, torch::TensorOptions().dtype(torch::kInt32));
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    1,
+                                    4);
+  ASSERT_TRUE(maybe_context.has_value());
+  auto context = maybe_context.value();
+
+  torch::Tensor local_tensor = torch::tensor(
+      {2.0f, 3.0f, 8.0f}, torch::TensorOptions().dtype(torch::kFloat32));
+  torch::Tensor padded = pad_to_sp_rows(local_tensor, context);
+
+  EXPECT_EQ(padded.size(0), context.comm_plan.padded_tokens_per_rank[1]);
+  EXPECT_TRUE(
+      torch::allclose(padded.slice(0, 0, local_tensor.size(0)), local_tensor));
+  EXPECT_TRUE(torch::allclose(
+      padded.slice(0, local_tensor.size(0), padded.size(0)),
+      torch::zeros({padded.size(0) - local_tensor.size(0)},
+                   torch::TensorOptions().dtype(torch::kFloat32))));
+}
+
+TEST(DeepseekV32SPUtilsTest, SPContextBuildsGatheredSlotMapping) {
+  ScopedFlagValue use_sp(FLAGS_enable_prefill_sp, true);
+  ScopedFlagValue nnodes(FLAGS_nnodes, 4);
+
+  AttentionMetadata attn_metadata = make_prefill_metadata({10});
+  attn_metadata.slot_mapping =
+      torch::arange(10, 20, torch::TensorOptions().dtype(torch::kInt32));
+  torch::Tensor tokens =
+      torch::arange(0, 10, torch::TensorOptions().dtype(torch::kInt32));
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    1,
+                                    4);
+  ASSERT_TRUE(maybe_context.has_value());
+  auto context = maybe_context.value();
+
+  torch::Tensor expected = reorder_by_index(attn_metadata.slot_mapping,
+                                            context.gathered_reorder_index);
+  EXPECT_TRUE(torch::equal(context.gathered_slot_mapping, expected));
+}
+
+TEST(DeepseekV32SPUtilsTest, PaddedGatherReturnsGatheredOrder) {
   ScopedFlagValue use_sp(FLAGS_enable_prefill_sp, true);
   ScopedFlagValue nnodes(FLAGS_nnodes, 4);
 
@@ -927,8 +981,13 @@ TEST(DeepseekV32SPUtilsTest, PaddedGatherRestoresGlobalOrder) {
 
   auto gather_handle =
       launch_gather_padded(pad_to_sp_rows(local_tensor, context), context);
-  torch::Tensor restored = finish_gather_padded(gather_handle, context);
+  torch::Tensor gathered = finish_gather_padded(gather_handle, context);
+  torch::Tensor restored = restore_gathered_to_global_order(
+      gathered, context, GatheredTensorLayout::kPacked);
 
+  EXPECT_TRUE(torch::equal(gathered,
+                           context.gathered_reorder_index.to(
+                               torch::TensorOptions().dtype(torch::kFloat32))));
   EXPECT_TRUE(torch::equal(
       restored,
       torch::arange(0, 10, torch::TensorOptions().dtype(torch::kFloat32))));
