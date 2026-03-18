@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -71,13 +71,14 @@ static const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
 
     {"mlp_layer_scale.scale", IN_MLP_LAYER_SCALE_SCALE}};
 
-static const std::map<int, int> WEIGHT_SHARD = {{IN_QKV_WEIGHT_Q, 0},
-                                                {IN_QKV_WEIGHT_K, 0},
-                                                {IN_QKV_WEIGHT_V, 0},
-                                                {IN_ATTENTION_OUT_WEIGHT, 1},
-                                                {IN_MLP_GATE_WEIGHT, 0},
-                                                {IN_MLP_UP_WEIGHT, 0},
-                                                {IN_MLP_DOWN_WEIGHT, 1}};
+static const std::unordered_map<int, int> WEIGHT_SHARD = {
+    {IN_QKV_WEIGHT_Q, 0},
+    {IN_QKV_WEIGHT_K, 0},
+    {IN_QKV_WEIGHT_V, 0},
+    {IN_ATTENTION_OUT_WEIGHT, 1},
+    {IN_MLP_GATE_WEIGHT, 0},
+    {IN_MLP_UP_WEIGHT, 0},
+    {IN_MLP_DOWN_WEIGHT, 1}};
 
 void Qwen3OmniCode2WavTransformerLayerImpl::param_from_args(
     atb_speed::qwen3_omni::Code2WavTransformerLayerParam& param,
