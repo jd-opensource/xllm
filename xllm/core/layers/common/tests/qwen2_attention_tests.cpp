@@ -100,6 +100,45 @@ class Qwen2AttentionTest : public ::testing::Test {
     }
   }
 
+  int64_t GetBlockNum(int64_t seq_len) const {
+    const int64_t block_size = 16;
+    return (seq_len + block_size - 1) / block_size + 1;
+  }
+
+  torch::Tensor MakeBlockTable(int64_t batch_size, int64_t seq_len) const {
+    auto options_int = options_.dtype(torch::kInt32);
+    const int64_t block_num_per_req = GetBlockNum(seq_len);
+    std::vector<int32_t> block_table_vec;
+    block_table_vec.reserve(batch_size * block_num_per_req);
+    for (int64_t b = 0; b < batch_size; ++b) {
+      for (int64_t i = 0; i < block_num_per_req; ++i) {
+        block_table_vec.push_back(
+            static_cast<int32_t>(b * block_num_per_req + i));
+      }
+    }
+    return torch::tensor(block_table_vec, options_int)
+        .reshape({batch_size, block_num_per_req});
+  }
+
+  torch::Tensor MakeSlotMap(int64_t batch_size,
+                            int64_t token_len,
+                            int64_t kv_seq_len) const {
+    auto options_int = options_.dtype(torch::kInt32);
+    const int64_t block_size = 16;
+    const int64_t block_num_per_req = GetBlockNum(kv_seq_len);
+    const int64_t slot_num_per_req = block_num_per_req * block_size;
+    const int64_t start_pos = kv_seq_len - token_len;
+    std::vector<int32_t> slot_map_vec;
+    slot_map_vec.reserve(batch_size * token_len);
+    for (int64_t b = 0; b < batch_size; ++b) {
+      for (int64_t i = 0; i < token_len; ++i) {
+        slot_map_vec.push_back(
+            static_cast<int32_t>(b * slot_num_per_req + start_pos + i));
+      }
+    }
+    return torch::tensor(slot_map_vec, options_int);
+  }
+
   AttentionMetadata CreateAttentionMetadata(int64_t batch_size,
                                             int64_t seq_len,
                                             bool is_prefill,
@@ -108,26 +147,20 @@ class Qwen2AttentionTest : public ::testing::Test {
     AttentionMetadata metadata;
     auto options_int = options_.dtype(torch::kInt32);
 
-    const uint32_t block_size = 16;
-    const int64_t num_blocks_per_req =
-        (max_seq_len + block_size - 1) / block_size + 1;
-
     if (is_prefill && !is_chunked_prefill) {
       // Regular prefill: query and kv have same sequence lengths
       metadata.q_cu_seq_lens =
           torch::arange(0, (batch_size + 1) * seq_len, seq_len, options_int);
       metadata.kv_cu_seq_lens = metadata.q_cu_seq_lens;
-      metadata.slot_mapping =
-          torch::arange(0, batch_size * seq_len, options_int);
+      // Keep paged-cache writes aligned with the deterministic block table.
+      metadata.slot_mapping = MakeSlotMap(batch_size, seq_len, seq_len);
       metadata.kv_seq_lens = torch::full({batch_size}, seq_len, options_int);
-      // Use random block table for regular prefill (data stored via
-      // slot_mapping)
-      metadata.block_table =
-          torch::randint(0, 100, {batch_size, num_blocks_per_req}, options_int);
+      metadata.block_table = MakeBlockTable(batch_size, seq_len);
     } else if (is_chunked_prefill) {
       // Chunked prefill: query has chunk_len, kv has full seq_len
       int64_t chunk_len = seq_len;   // current chunk length
       int64_t kv_seq_len = seq_len;  // accumulated kv length
+      const int64_t num_blocks_per_req = GetBlockNum(kv_seq_len);
       metadata.q_cu_seq_lens = torch::arange(
           0, (batch_size + 1) * chunk_len, chunk_len, options_int);
       metadata.kv_cu_seq_lens = torch::arange(
@@ -152,11 +185,10 @@ class Qwen2AttentionTest : public ::testing::Test {
       metadata.q_cu_seq_lens = torch::arange(0, batch_size + 1, 1, options_int);
       metadata.kv_cu_seq_lens =
           torch::arange(0, batch_size + 1, seq_len, options_int);
-      metadata.slot_mapping = torch::arange(0, batch_size, options_int);
+      // Append the decode token to the last slot of each request.
+      metadata.slot_mapping = MakeSlotMap(batch_size, 1, seq_len);
       metadata.kv_seq_lens = torch::full({batch_size}, seq_len, options_int);
-      // Use random block table for decode
-      metadata.block_table =
-          torch::randint(0, 100, {batch_size, num_blocks_per_req}, options_int);
+      metadata.block_table = MakeBlockTable(batch_size, seq_len);
     }
 
     metadata.max_query_len = (is_prefill || is_chunked_prefill) ? seq_len : 1;
@@ -193,8 +225,7 @@ TEST_F(Qwen2AttentionTest, PrefillTest) {
   auto positions = torch::arange(0, seq_len, options_.dtype(torch::kInt32))
                        .repeat({batch_size});
 
-  auto metadata = CreateAttentionMetadata(
-      batch_size, seq_len, true, model_args_.max_position_embeddings());
+  auto metadata = CreateAttentionMetadata(batch_size, seq_len, true, seq_len);
 
   auto output = qwen2_attention(positions, hidden_states, metadata, kv_cache_);
   xllm::Device device(options_.device());
@@ -232,8 +263,8 @@ TEST_F(Qwen2AttentionTest, DecodeTest) {
   auto positions =
       torch::full({num_tokens}, seq_len, options_.dtype(torch::kInt32));
 
-  auto metadata = CreateAttentionMetadata(
-      batch_size, seq_len + 1, false, model_args_.max_position_embeddings());
+  auto metadata =
+      CreateAttentionMetadata(batch_size, seq_len + 1, false, seq_len + 1);
 
   auto output = qwen2_attention(positions, hidden_states, metadata, kv_cache_);
   xllm::Device device(options_.device());
@@ -241,16 +272,16 @@ TEST_F(Qwen2AttentionTest, DecodeTest) {
 
   CHECK_EQ(output.sizes(), torch::IntArrayRef({num_tokens, hidden_size}));
   auto test_output = output.flatten().slice(0, 0, 10).unsqueeze(0);
-  std::vector<float> expected_values = {0.0001f * 9.1171f,
-                                        0.0001f * 7.7820f,
-                                        0.0001f * 5.5695f,
-                                        0.0001f * 2.3651f,
-                                        0.0001f * 2.3174f,
-                                        0.0001f * 2.4986f,
-                                        0.0001f * 3.2997f,
-                                        0.0001f * 1.4973f,
-                                        0.0001f * 7.7820f,
-                                        0.0001f * 6.4468f};
+  std::vector<float> expected_values = {0.0012360f,
+                                        0.0011215f,
+                                        0.0006714f,
+                                        0.0010376f,
+                                        0.0010071f,
+                                        0.0008049f,
+                                        0.0010681f,
+                                        0.0007935f,
+                                        0.0010910f,
+                                        0.0011978f};
   test::verify_precision(test_output, expected_values, 1e-5, 1e-6);
 }
 
@@ -368,8 +399,7 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCachePrefillTest) {
                                        torch::kInt32,
                                        options_.device());
 
-  auto metadata = CreateAttentionMetadata(
-      batch_size, seq_len, true, model_args_.max_position_embeddings());
+  auto metadata = CreateAttentionMetadata(batch_size, seq_len, true, seq_len);
 
   // Run forward with quantized KV cache
   auto output =
@@ -440,8 +470,7 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheDecodeDiagnosticTest) {
   auto positions =
       torch::full({num_tokens}, seq_len - 1, options_.dtype(torch::kInt32));
 
-  auto metadata = CreateAttentionMetadata(
-      batch_size, seq_len, false, model_args_.max_position_embeddings());
+  auto metadata = CreateAttentionMetadata(batch_size, seq_len, false, seq_len);
 
   // Run forward with quantized KV cache
   auto output =
@@ -517,8 +546,8 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheDecodeTest) {
   auto positions =
       torch::full({num_tokens}, seq_len, options_.dtype(torch::kInt32));
 
-  auto metadata = CreateAttentionMetadata(
-      batch_size, seq_len + 1, false, model_args_.max_position_embeddings());
+  auto metadata =
+      CreateAttentionMetadata(batch_size, seq_len + 1, false, seq_len + 1);
 
   // Run forward with quantized KV cache
   auto output =
@@ -540,9 +569,9 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheDecodeTest) {
   // Verify precision using expect_tensor_stats
   // Expected values established from successful diagnostic run
   test::expect_tensor_stats(output,
-                            /*expected_min=*/-296,
-                            /*expected_max=*/165,
-                            /*expected_sum=*/-211443.53,
+                            /*expected_min=*/-282,
+                            /*expected_max=*/67,
+                            /*expected_sum=*/-387352.6875,
                             /*rtol=*/0.01,
                             /*atol=*/1.0);
 }
