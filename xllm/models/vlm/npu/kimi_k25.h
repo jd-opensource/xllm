@@ -1258,6 +1258,50 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   // - use_cache
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
+
+REGISTER_TOKENIZER_ARGS(kimi_k25, [&] {
+  // Kimi-K2.5 uses TikTokenTokenizer with tiktoken.model.
+  // HF files:
+  // - tokenizer_config.json (tokenizer_class=TikTokenTokenizer)
+  // - tiktoken.model
+  SET_ARG(tokenizer_type, "tiktoken");
+  SET_ARG(vocab_file, "tiktoken.model");
+
+  // ref:
+  // https://huggingface.co/moonshotai/Kimi-K2.5/blob/main/tokenizer_config.json
+  const std::vector<SpecialToken> special_tokens(
+      {{"[BOS]", 163584},
+       {"[EOS]", 163585},
+       {"<|im_end|>", 163586},
+       {"<|im_user|>", 163587},
+       {"<|im_assistant|>", 163588},
+       {"<|start_header_id|>", 163590},
+       {"<|end_header_id|>", 163591},
+       {"[EOT]", 163593},
+       {"<|im_system|>", 163594},
+       {"<|tool_calls_section_begin|>", 163595},
+       {"<|tool_calls_section_end|>", 163596},
+       {"<|tool_call_begin|>", 163597},
+       {"<|tool_call_argument_begin|>", 163598},
+       {"<|tool_call_end|>", 163599},
+       {"<|im_middle|>", 163601},
+       {"<|media_begin|>", 163602},
+       {"<|media_content|>", 163603},
+       {"<|media_end|>", 163604},
+       {"<|media_pad|>", 163605},
+       {"<think>", 163606},
+       {"</think>", 163607},
+       {"[UNK]", 163838},
+       {"[PAD]", 163839}});
+  SET_ARG(special_tokens, special_tokens);
+
+  // ref:
+  // https://huggingface.co/moonshotai/Kimi-K2.5/blob/main/tokenization_kimi.py#L53-L62
+  // N.B. replaced '\s+(?!\S)' with '\s+[^\s]' to avoid regex error in re2.
+  const std::string pattern_str =
+      R"([\p{Han}]+|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+[^\s]|\s+)";
+  SET_ARG(pattern, pattern_str);
+});
 }  // namespace xllm
 
 
