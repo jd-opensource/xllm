@@ -52,18 +52,18 @@ enum VisionEncoderLayerTensorId : int {
 };
 
 static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
-    {IN_INPUT_NORM_WEIGHT, "norm1.weight"},
-    {IN_INPUT_NORM_BIAS, "norm1.bias"},
-    {IN_POST_NORM_WEIGHT, "norm2.weight"},
-    {IN_POST_NORM_BIAS, "norm2.bias"},
-    {IN_QKV_WEIGHT, "attn.qkv.weight"},
-    {IN_QKV_BIAS, "attn.qkv.bias"},
-    {IN_WATTENTION_OUT_WEIGHT, "attn.proj.weight"},
-    {IN_WATTENTION_OUT_BIAS, "attn.proj.bias"},
-    {IN_LINEAR_FC1_WEIGHT, "mlp.linear_fc1.weight"},
-    {IN_LINEAR_FC1_BIAS, "mlp.linear_fc1.bias"},
-    {IN_LINEAR_FC2_WEIGHT, "mlp.linear_fc2.weight"},
-    {IN_LINEAR_FC2_BIAS, "mlp.linear_fc2.bias"}};
+    {IN_INPUT_NORM_WEIGHT, "norm0.weight"},
+    {IN_INPUT_NORM_BIAS, "norm0.bias"},
+    {IN_POST_NORM_WEIGHT, "norm1.weight"},
+    {IN_POST_NORM_BIAS, "norm1.bias"},
+    {IN_QKV_WEIGHT, "wqkv.weight"},
+    {IN_QKV_BIAS, "wqkv.bias"},
+    {IN_WATTENTION_OUT_WEIGHT, "wo.weight"},
+    {IN_WATTENTION_OUT_BIAS, "wo.bias"},
+    {IN_LINEAR_FC1_WEIGHT, "mlp.fc0.weight"},
+    {IN_LINEAR_FC1_BIAS, "mlp.fc0.bias"},
+    {IN_LINEAR_FC2_WEIGHT, "mlp.fc1.weight"},
+    {IN_LINEAR_FC2_BIAS, "mlp.fc1.bias"}};
 
 // {weight,dim}
 static std::map<int, int> WEIGHT_SHARD = {

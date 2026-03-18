@@ -1128,7 +1128,9 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     }
 
     if (!model_args_.image_embedding_mode()) {
-      language_model_->load_model(std::move(loader));
+      language_model_->load_model_with_prefixes(std::move(loader),
+                                                "language_model.model.",
+                                                "language_model.lm_head.");
     }
   }
   layer::NpuLmHead get_npu_lm_head() {
