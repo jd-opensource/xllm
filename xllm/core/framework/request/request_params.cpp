@@ -523,14 +523,16 @@ bool RequestParams::verify_params(OutputCallback callback) const {
   if (n == 0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "n should be greater than 0",
-                        service_request_id);
+                        service_request_id,
+                        source_xservice_addr);
     return false;
   }
   if (best_of.has_value()) {
     if (n > best_of.value()) {
       CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                           "n should be less than or equal to best_of",
-                          service_request_id);
+                          service_request_id,
+                          source_xservice_addr);
       return false;
     }
   }
@@ -539,7 +541,8 @@ bool RequestParams::verify_params(OutputCallback callback) const {
   if (stop.has_value() && stop.value().size() > 4) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "stop size is too large",
-                        service_request_id);
+                        service_request_id,
+                        source_xservice_addr);
     return false;
   }
 
@@ -547,7 +550,8 @@ bool RequestParams::verify_params(OutputCallback callback) const {
   if (temperature < 0.0 || temperature > 2.0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "temperature must be between 0.0 and 2.0",
-                        service_request_id);
+                        service_request_id,
+                        source_xservice_addr);
     return false;
   }
 
@@ -555,7 +559,8 @@ bool RequestParams::verify_params(OutputCallback callback) const {
   if (top_p < 0.0 || top_p > 1.0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "top_p must be between 0.0 and 1.0",
-                        service_request_id);
+                        service_request_id,
+                        source_xservice_addr);
     return false;
   }
 
@@ -563,13 +568,15 @@ bool RequestParams::verify_params(OutputCallback callback) const {
     if (echo) {
       CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                           "logprobs is not supported with echo",
-                          service_request_id);
+                          service_request_id,
+                          source_xservice_addr);
       return false;
     }
     if (top_logprobs < 0 || top_logprobs > 2000) {
       CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                           "logprobs must be between 0 and 2000",
-                          service_request_id);
+                          service_request_id,
+                          source_xservice_addr);
       return false;
     }
   }
@@ -578,7 +585,8 @@ bool RequestParams::verify_params(OutputCallback callback) const {
   if (presence_penalty < -2.0 || presence_penalty > 2.0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "presence_penalty must be between -2.0 and 2.0",
-                        service_request_id);
+                        service_request_id,
+                        source_xservice_addr);
     return false;
   }
 
@@ -586,7 +594,8 @@ bool RequestParams::verify_params(OutputCallback callback) const {
   if (frequency_penalty < 0.0 || frequency_penalty > 2.0) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "frequency_penalty must be between 0.0 and 2.0",
-                        service_request_id);
+                        service_request_id,
+                        source_xservice_addr);
     return false;
   }
   return true;

@@ -202,7 +202,8 @@ void LLMMaster::handle_request(std::string prompt,
     if (!scheduler_->add_request(request)) {
       CALLBACK_WITH_ERROR(StatusCode::RESOURCE_EXHAUSTED,
                           "No available resources to schedule request",
-                          sp.service_request_id);
+                          sp.service_request_id,
+                          sp.source_xservice_addr);
     }
   });
 }
@@ -239,7 +240,8 @@ void LLMMaster::handle_request(std::vector<Message> messages,
     if (!scheduler_->add_request(request)) {
       CALLBACK_WITH_ERROR(StatusCode::RESOURCE_EXHAUSTED,
                           "No available resources to schedule request",
-                          sp.service_request_id);
+                          sp.service_request_id,
+                          sp.source_xservice_addr);
     }
   });
 }
@@ -282,8 +284,10 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     std::optional<Call*> call,
     OutputCallback callback) {
   if (prompt.empty()) {
-    CALLBACK_WITH_ERROR(
-        StatusCode::INVALID_ARGUMENT, "Prompt is empty", sp.service_request_id);
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "Prompt is empty",
+                        sp.service_request_id,
+                        sp.source_xservice_addr);
     return nullptr;
   }
 
@@ -299,7 +303,8 @@ std::shared_ptr<Request> LLMMaster::generate_request(
       LOG(ERROR) << "Failed to encode prompt: " << prompt;
       CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                           "Failed to encode prompt",
-                          sp.service_request_id);
+                          sp.service_request_id,
+                          sp.source_xservice_addr);
       return nullptr;
     }
   }
@@ -315,7 +320,8 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     LOG(ERROR) << "Prompt is too long: " << local_prompt_tokens.size();
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "Prompt is too long",
-                        sp.service_request_id);
+                        sp.service_request_id,
+                        sp.source_xservice_addr);
     return nullptr;
   }
 
@@ -386,7 +392,8 @@ std::shared_ptr<Request> LLMMaster::generate_request(
       if (!tokenizer_->encode(s, &tmp_tokens)) {
         CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                             "Failed to encode stop sequence",
-                            sp.service_request_id);
+                            sp.service_request_id,
+                            sp.source_xservice_addr);
         LOG(ERROR) << "Failed to encode stop sequence: " << s;
         return nullptr;
       }
@@ -409,7 +416,8 @@ std::shared_ptr<Request> LLMMaster::generate_request(
       LOG(INFO) << " finish_reason " << finish_reason.to_string().value();
       CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                           "Invalid Prompt",
-                          sp.service_request_id);
+                          sp.service_request_id,
+                          sp.source_xservice_addr);
       LOG(ERROR) << "Invalid Prompt EndWith Token_ID:"
                  << local_prompt_tokens[local_prompt_tokens.size() - 1];
       return nullptr;
@@ -486,7 +494,8 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   if (!prompt.has_value()) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "Failed to construct prompt from messages",
-                        sp.service_request_id);
+                        sp.service_request_id,
+                        sp.source_xservice_addr);
     LOG(ERROR) << "Failed to construct prompt from messages";
     return nullptr;
   }

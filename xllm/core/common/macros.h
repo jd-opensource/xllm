@@ -63,13 +63,21 @@ namespace xllm {
   } while (0)
 
 #define CALLBACK_WITH_ERROR_ARGS2(CODE, MSG) callback(Status{CODE, MSG})
-#define CALLBACK_WITH_ERROR_ARGS3(CODE, MSG, ID) \
-  callback({Status{CODE, MSG}, ID})
+#define CALLBACK_WITH_ERROR_ARGS4(CODE, MSG, ID, TARGET_XSERVICE_ADDR) \
+  callback({Status{CODE, MSG}, ID, TARGET_XSERVICE_ADDR})
+#define CALLBACK_WITH_ERROR_INVALID_ARITY(...)                        \
+  static_assert(false,                                                \
+                "CALLBACK_WITH_ERROR expects 2 or 4 args: "           \
+                "CALLBACK_WITH_ERROR(code, msg) or "                  \
+                "CALLBACK_WITH_ERROR(code, msg, service_request_id, " \
+                "target_xservice_addr)")
 
-#define GET_MACRO(_1, _2, _3, NAME, ...) NAME
-#define CALLBACK_WITH_ERROR(...)       \
-  GET_MACRO(__VA_ARGS__,               \
-            CALLBACK_WITH_ERROR_ARGS3, \
+#define GET_MACRO(_1, _2, _3, _4, _5, NAME, ...) NAME
+#define CALLBACK_WITH_ERROR(...)               \
+  GET_MACRO(__VA_ARGS__,                       \
+            CALLBACK_WITH_ERROR_INVALID_ARITY, \
+            CALLBACK_WITH_ERROR_ARGS4,         \
+            CALLBACK_WITH_ERROR_INVALID_ARITY, \
             CALLBACK_WITH_ERROR_ARGS2)(__VA_ARGS__)
 
 #define CHECK_ACL_SUCCESS(expr, msg)             \

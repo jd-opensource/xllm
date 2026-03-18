@@ -185,6 +185,7 @@ LLMMaster* CompletionServiceImpl::get_model_master(
 void CompletionServiceImpl::process_async_rpc_impl(
     const proto::CompletionRequest* request) {
   const auto& service_request_id = request->service_request_id();
+  const auto& target_xservice_addr = request->source_xservice_addr();
   auto callback = [master = master_](const RequestOutput& req_output) -> bool {
     req_output.log_request_status();
     if (req_output.status.has_value()) {
@@ -210,7 +211,8 @@ void CompletionServiceImpl::process_async_rpc_impl(
     CALLBACK_WITH_ERROR(
         StatusCode::RESOURCE_EXHAUSTED,
         "The number of concurrent requests has reached the limit.",
-        service_request_id);
+        service_request_id,
+        target_xservice_addr);
     return;
   }
 
@@ -218,8 +220,10 @@ void CompletionServiceImpl::process_async_rpc_impl(
   const auto& rpc_request = *request;
   const auto& model = rpc_request.model();
   if (unlikely(!models_.contains(model))) {
-    CALLBACK_WITH_ERROR(
-        StatusCode::UNKNOWN, "Model not supported", service_request_id);
+    CALLBACK_WITH_ERROR(StatusCode::UNKNOWN,
+                        "Model not supported",
+                        service_request_id,
+                        target_xservice_addr);
     return;
   }
 
