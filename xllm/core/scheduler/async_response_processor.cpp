@@ -47,6 +47,9 @@ void AsyncResponseProcessor::process_failed_request(
   auto runnable = [request = request, status = status]() {
     request->log_error_statistic(status);
     RequestOutput output;
+    output.request_id = request->request_id();
+    output.service_request_id = request->service_request_id();
+    output.target_xservice_addr = request->source_xservice_addr();
     output.status = status;
     request->state().output_func(output);
   };
