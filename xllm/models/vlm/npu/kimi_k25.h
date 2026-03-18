@@ -35,7 +35,7 @@ limitations under the License.
 #include "xllm_atb_layers/core/include/atb_speed/log.h"
 
 namespace xllm {
-
+const int KIMIV_VT_INFER_MAX_PATCH_NUM = 16328;
 #define PrintTensor(tensor) print_tensor(tensor, #tensor, 10, true, false);
 
 namespace {
@@ -953,17 +953,72 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
           pixel_values_videos, video_grid_thw, second_per_grid_ts};
   }
 
+  std::vector<torch::Tensor> process_vision_features(
+      torch::Tensor pixel_values,
+      torch::Tensor grid_thws,
+      const ModelInputParams& input_params) {
+    int n = grid_thws.size(0);
+    auto n_patches_each_media = grid_thws.prod(-1);
+    int max_infer_batch = std::max(n_patches_each_media.max().item<int>(), KIMIV_VT_INFER_MAX_PATCH_NUM);
+    auto n_patches_tensor = n_patches_each_media.cpu().to(torch::kInt).contiguous();
+    std::vector<int> n_patches_vec(
+        n_patches_tensor.data_ptr<int>(),
+        n_patches_tensor.data_ptr<int>() + n_patches_tensor.numel());
+
+    std::vector<torch::Tensor> features;
+    int pre_sum = 0;
+    int current_group_start = 0;
+    int current_group_patches = 0;
+
+    for (int i = 0; i < n; i++) {
+      int current_media_patches = n_patches_vec[i];
+      if (current_group_patches + current_media_patches <= max_infer_batch) {
+        current_group_patches += current_media_patches;
+        continue;
+      }
+
+      if (current_group_start < i) {
+        auto group_grid_thw = grid_thws.slice(0, current_group_start, i);
+        int group_n_patches = 0;
+        for (int j = current_group_start; j < i; j++) {
+          group_n_patches += n_patches_vec[j];
+        }
+        auto group_input = pixel_values.slice(0, pre_sum, pre_sum + group_n_patches);
+        auto group_output = visual_(group_input, group_grid_thw, input_params);
+        features.push_back(mm_projector_ ? mm_projector_(group_output) : group_output);
+        pre_sum += group_n_patches;
+      }
+      current_group_start = i;
+      current_group_patches = current_media_patches;
+    }
+
+    if (current_group_start < n) {
+      auto group_grid_thw = grid_thws.slice(0, current_group_start, n);
+      int group_n_patches = 0;
+      for (int j = current_group_start; j < n; j++) {
+        group_n_patches += n_patches_vec[j];
+      }
+      auto group_input = pixel_values.slice(0, pre_sum, pre_sum + group_n_patches);
+      auto group_output = visual_(group_input, group_grid_thw, input_params);
+      features.push_back(mm_projector_ ? mm_projector_(group_output) : group_output);
+    }
+
+    return features;
+  }
+
   MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
     std::optional<KimiK2_5_VLImageInputs> image_input;
     std::optional<KimiK2_5_VLVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
     auto merge_size = model_args_.mm_image_merge_size();
     MMDict multimodal_embeds;
+
     if (image_input) {
-      // visual
-      auto image_embeds = visual_(image_input->pixel_values.to(options_),
-                                  image_input->image_grid_thw,
-                                  input_params);
+      auto pixel_values = image_input->pixel_values.to(options_);
+      auto grid_thws = image_input->image_grid_thw.to(options_);
+      auto image_features = process_vision_features(pixel_values, grid_thws, input_params);
+      auto image_embeds = torch::cat(image_features, 0);
+
       auto image_tokens =
           (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
               .cpu()
@@ -972,14 +1027,15 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       std::vector<int64_t> image_tokens_vec(
           image_tokens.data_ptr<int64_t>(),
           image_tokens.data_ptr<int64_t>() + image_tokens.numel());
-      multimodal_embeds["image|embedding"] =
-          image_embeds.split(image_tokens_vec, 0 /*dim*/);
+      multimodal_embeds["image|embedding"] = image_embeds.split(image_tokens_vec, 0);
     }
+
     if (video_input) {
-      // visual
-      auto video_embeds = visual_(video_input->pixel_values_videos.to(options_),
-                                  video_input->video_grid_thw,
-                                  input_params);
+      auto pixel_values = video_input->pixel_values_videos.to(options_);
+      auto grid_thws = video_input->video_grid_thw.to(options_);
+      auto video_features = process_vision_features(pixel_values, grid_thws, input_params);
+      auto video_embeds = torch::cat(video_features, 0);
+
       auto video_tokens =
           (video_input->video_grid_thw.prod(-1) / merge_size / merge_size)
               .cpu()
@@ -988,10 +1044,9 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       std::vector<int64_t> video_tokens_vec(
           video_tokens.data_ptr<int64_t>(),
           video_tokens.data_ptr<int64_t>() + video_tokens.numel());
-
-      multimodal_embeds["video|embedding"] =
-          video_embeds.split(video_tokens_vec, 0 /*dim*/);
+      multimodal_embeds["video|embedding"] = video_embeds.split(video_tokens_vec, 0);
     }
+
     return multimodal_embeds;
   }
 
