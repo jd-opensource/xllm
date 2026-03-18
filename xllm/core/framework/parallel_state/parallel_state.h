@@ -28,8 +28,9 @@ struct Options;
 namespace parallel_state {
 
 struct GatherAsyncCtx {
+  torch::Tensor input;
+  torch::Tensor stacked;
   c10::intrusive_ptr<c10d::Work> work;
-  std::vector<torch::Tensor> shards;
   std::vector<int32_t> token_num_list;
 };
 

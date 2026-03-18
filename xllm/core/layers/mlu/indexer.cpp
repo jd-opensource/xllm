@@ -211,8 +211,9 @@ IndexerRuntimeContext IndexerImpl::prepare_runtime_context(
       // NOTE: the kv_cu_seq_lens should already include the history tokens
       ctx.cu_seq_k_lens = attn_metadata.kv_cu_seq_lens;
 
-      // Allocate contiguous memory for gathered k
-      int64_t total_k_len = ctx.cu_seq_k_lens[-1].item<int64_t>();
+      // Reuse the host-side total length cached in attention metadata to avoid
+      // synchronizing the device cu_seq tensor back to CPU.
+      int64_t total_k_len = attn_metadata.total_kv_len;
       ctx._storage_k_full = torch::empty(
           {total_k_len, head_dim_},
           torch::TensorOptions().dtype(k_cache_paged.dtype()).device(device));
@@ -419,72 +420,60 @@ v32_sp::PaddedGatherHandle IndexerImpl::sp_comm(
   if (!k_local.defined()) {
     return {};
   }
-  torch::Tensor padded_k = v32_sp::pad_to_sp_rows(k_local, sp_ctx);
-  return v32_sp::launch_gather_padded(padded_k, sp_ctx);
+  return parallel_state::launch_gather(
+      k_local, sp_ctx.process_group, sp_ctx.comm_plan.tokens_per_rank);
 }
 
 torch::Tensor IndexerImpl::sp_wait_k(
     const torch::Tensor& k_local,
     const v32_sp::PaddedGatherHandle& gather_handle,
     const v32_sp::DeepseekV32SPContext& sp_ctx) {
-  if (!gather_handle.gather_ctx.shards.empty()) {
-    return v32_sp::finish_gather_padded(gather_handle, sp_ctx);
+  if (gather_handle.stacked.defined()) {
+    (void)sp_ctx;
+    return parallel_state::finish_gather(gather_handle);
   }
   return k_local;
 }
 
 std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::sp_post(
     const IndexerSPPreOut& pre_out,
-    const torch::Tensor& k_global,
+    const torch::Tensor& k_gathered,
     torch::Tensor& k_cache,
     const AttentionMetadata& attn_metadata,
-    const v32_sp::DeepseekV32SPMetadata& sp_meta,
+    const torch::Tensor& gathered_slot_mapping,
     const v32_sp::DeepseekV32SPContext& sp_ctx) {
-  (void)sp_ctx;
   CHECK(attn_metadata.is_prefill || attn_metadata.is_chunked_prefill)
       << "deepseek_v32 sequence parallel indexer only supports prefill "
          "batches.";
   CHECK(sp_ctx.batch_forward_type.no_decode())
       << "deepseek_v32 sequence parallel indexer only supports prefill "
          "batches.";
+  CHECK(attn_metadata.block_table.defined())
+      << "deepseek_v32 sequence parallel indexer requires block_table.";
   CHECK(attn_metadata.slot_mapping.defined())
       << "deepseek_v32 sequence parallel indexer requires slot_mapping.";
-  CHECK_EQ(k_global.size(0), attn_metadata.slot_mapping.numel())
-      << "deepseek_v32 sequence parallel expects gathered K rows to match "
-         "slot_mapping size before packing.";
-  CHECK_EQ(sp_meta.seg_q_cu_lens.size(0), sp_meta.seg_ctx_lens.size(0) + 1)
-      << "deepseek_v32 sequence parallel expects one seg_q_cu_lens prefix "
-         "entry per segment.";
-  CHECK_EQ(sp_meta.seg_suffix_k_cu_lens.size(0),
-           sp_meta.seg_ctx_lens.size(0) + 1)
-      << "deepseek_v32 sequence parallel expects one seg_suffix_k_cu_lens "
-         "prefix entry per segment.";
-  CHECK_EQ(sp_meta.seg_ctx_cu_lens.size(0), sp_meta.seg_ctx_lens.size(0) + 1)
-      << "deepseek_v32 sequence parallel expects one seg_ctx_cu_lens prefix "
-         "entry per segment.";
+  CHECK(gathered_slot_mapping.defined())
+      << "deepseek_v32 sequence parallel indexer requires gathered "
+         "slot_mapping.";
+  for (const auto& segment : sp_ctx.local_segments) {
+    CHECK_GE(segment.req_idx, 0)
+        << "deepseek_v32 sequence parallel expects non-negative req_idx.";
+    CHECK_LT(segment.req_idx, attn_metadata.block_table.size(0))
+        << "deepseek_v32 sequence parallel segment req_idx is out of range.";
+  }
 
   // For chunked SP, keep the runtime contract aligned with the normal chunked
   // indexer path: write the freshly computed suffix K into paged cache first,
-  // rebuild the full-context dense K from cache, then repack it into segment
-  // order before select. Feeding suffix-only K here would truncate the
-  // effective context seen by the indexer on long prompts.
-  write_prefill_k_cache(k_global, k_cache, attn_metadata.slot_mapping);
-  torch::Tensor q = pre_out.q;
-  torch::Tensor weights = pre_out.weights;
-  IndexerRuntimeContext ctx = prepare_runtime_context(k_global,
-                                                      k_cache,
-                                                      q,
-                                                      weights,
-                                                      attn_metadata,
-                                                      /*is_prefill=*/true,
-                                                      q.size(0));
-  if (attn_metadata.is_chunked_prefill) {
-    ctx.k_cache_tensor = v32_sp::pack_sp_ctx_k(ctx.k_cache_tensor, sp_meta);
-  } else {
-    ctx.k_cache_tensor = v32_sp::pack_sp_k_for_indexer(k_global, sp_meta);
-  }
-  return run_indexer_select_kernel(
-      attn_metadata, /*is_prefill=*/true, ctx, &sp_meta);
+  // then rebuild the full-context dense K from cache before segmented select.
+  // Feeding suffix-only K here would truncate the effective context seen by
+  // the indexer on long prompts.
+  write_prefill_k_cache(k_gathered, k_cache, gathered_slot_mapping);
+  torch::Tensor k_source =
+      attn_metadata.is_chunked_prefill
+          ? build_sp_chunked_dense_k_source(k_cache, attn_metadata)
+          : k_gathered;
+  return run_indexer_select_kernel_sp_segmented(
+      pre_out, k_source, attn_metadata, sp_ctx);
 }
 
 void IndexerImpl::write_prefill_k_cache(const torch::Tensor& k,
@@ -501,29 +490,45 @@ void IndexerImpl::write_prefill_k_cache(const torch::Tensor& k,
   xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
 }
 
+torch::Tensor IndexerImpl::build_sp_chunked_dense_k_source(
+    torch::Tensor& k_cache,
+    const AttentionMetadata& attn_metadata) {
+  auto device = attn_metadata.block_table.device();
+  int64_t total_k_len = attn_metadata.total_kv_len;
+  torch::Tensor k_full = torch::empty(
+      {total_k_len, head_dim_},
+      torch::TensorOptions().dtype(k_cache.dtype()).device(device));
+
+  auto seq_lens = torch::diff(attn_metadata.kv_cu_seq_lens);
+  int64_t max_context_len = attn_metadata.max_seq_len;
+
+  xllm::kernel::ReshapeFromCacheParams gather_params;
+  gather_params.key = k_full.unsqueeze(1);
+  gather_params.value = std::nullopt;
+  gather_params.key_cache = k_cache;
+  gather_params.value_cache = std::nullopt;
+  gather_params.context_lengths = seq_lens;
+  gather_params.max_context_len = max_context_len;
+  gather_params.block_tables = attn_metadata.block_table;
+  gather_params.context_seq_offset = std::nullopt;
+  gather_params.cache_seq_offset = std::nullopt;
+  xllm::kernel::reshape_from_cache(gather_params);
+  return k_full;
+}
+
 std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::run_indexer_select_kernel(
     const AttentionMetadata& attn_metadata,
     bool is_prefill,
-    IndexerRuntimeContext& ctx,
-    const v32_sp::DeepseekV32SPMetadata* sp_meta) {
+    IndexerRuntimeContext& ctx) {
   // Call masked indexer select paged kv
   kernel::MaskedIndexerSelectPagedKVParams params;
   params.query = ctx.q;
   params.k_cache = ctx.k_cache_tensor;
   params.weights = ctx.weights;
-  if (sp_meta != nullptr) {
-    params.kv_cache_block_table = sp_meta->seg_block_table;
-    params.cu_seq_q_lens = sp_meta->seg_q_cu_lens;
-    params.cu_seq_k_lens = attn_metadata.is_chunked_prefill
-                               ? sp_meta->seg_ctx_cu_lens
-                               : sp_meta->seg_suffix_k_cu_lens;
-    params.k_context_lens = sp_meta->seg_ctx_lens;
-  } else {
-    params.kv_cache_block_table = attn_metadata.block_table;
-    params.cu_seq_q_lens = ctx.cu_seq_q_lens;
-    params.cu_seq_k_lens = ctx.cu_seq_k_lens;
-    params.k_context_lens = ctx.k_context_lens;
-  }
+  params.kv_cache_block_table = attn_metadata.block_table;
+  params.cu_seq_q_lens = ctx.cu_seq_q_lens;
+  params.cu_seq_k_lens = ctx.cu_seq_k_lens;
+  params.k_context_lens = ctx.k_context_lens;
   params.k_cache_block_table = ctx.k_block_table;
   params.is_prefill = is_prefill;
   params.softmax_scale = softmax_scale_;
@@ -542,6 +547,78 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::run_indexer_select_kernel(
   }
 
   return {ctx.new_block_tables, ctx.new_context_lens};
+}
+
+std::tuple<torch::Tensor, torch::Tensor>
+IndexerImpl::run_indexer_select_kernel_sp_segmented(
+    const IndexerSPPreOut& pre_out,
+    const torch::Tensor& k_source,
+    const AttentionMetadata& attn_metadata,
+    const v32_sp::DeepseekV32SPContext& sp_ctx) {
+  auto device = attn_metadata.block_table.device();
+  auto int32_options =
+      torch::TensorOptions().dtype(torch::kInt32).device(device);
+
+  torch::Tensor new_block_tables =
+      torch::empty({pre_out.q.size(0), index_topk_}, int32_options);
+  torch::Tensor new_context_lens =
+      torch::empty({pre_out.q.size(0)}, int32_options);
+
+  for (int64_t i = 0; i < static_cast<int64_t>(sp_ctx.local_segments.size());
+       ++i) {
+    const auto& segment = sp_ctx.local_segments[i];
+    if (segment.q_tokens == 0) {
+      continue;
+    }
+
+    const int32_t q_start = sp_ctx.seg_q_starts_cpu[i];
+    const int32_t req_q_start = sp_ctx.req_q_offsets_cpu[segment.req_idx];
+    const int32_t req_ctx_start = sp_ctx.req_ctx_offsets_cpu[segment.req_idx];
+
+    torch::Tensor q_seg = pre_out.q.narrow(0, q_start, segment.q_tokens);
+    torch::Tensor weights_seg =
+        pre_out.weights.narrow(0, q_start, segment.q_tokens);
+
+    torch::Tensor k_seg;
+    torch::Tensor cu_seq_k_lens_seg;
+    if (attn_metadata.is_chunked_prefill) {
+      k_seg = k_source.narrow(0, req_ctx_start, segment.ctx_k_len);
+      cu_seq_k_lens_seg = sp_ctx.seg_ctx_k_cu_lens_2col.select(0, i);
+    } else {
+      k_seg = k_source.narrow(0, req_q_start, segment.suffix_k_len);
+      cu_seq_k_lens_seg = sp_ctx.seg_suffix_k_cu_lens_2col.select(0, i);
+    }
+
+    torch::Tensor cu_seq_q_lens_seg = sp_ctx.seg_q_cu_lens_2col.select(0, i);
+    torch::Tensor k_context_lens_seg = sp_ctx.seg_ctx_lens_1col.narrow(0, i, 1);
+    torch::Tensor block_table_seg =
+        attn_metadata.block_table.narrow(0, segment.req_idx, 1);
+    torch::Tensor out_block_seg =
+        new_block_tables.narrow(0, q_start, segment.q_tokens);
+    torch::Tensor out_ctx_seg =
+        new_context_lens.narrow(0, q_start, segment.q_tokens);
+
+    kernel::MaskedIndexerSelectPagedKVParams params;
+    params.query = q_seg;
+    params.k_cache = k_seg;
+    params.weights = weights_seg;
+    params.kv_cache_block_table = block_table_seg;
+    params.cu_seq_q_lens = cu_seq_q_lens_seg;
+    params.cu_seq_k_lens = cu_seq_k_lens_seg;
+    params.k_context_lens = k_context_lens_seg;
+    params.k_cache_block_table = std::nullopt;
+    params.is_prefill = true;
+    params.softmax_scale = softmax_scale_;
+    params.q_scale = std::nullopt;
+    params.k_scale_cache = std::nullopt;
+    params.index_topk = index_topk_;
+    params.kv_cache_block_size = FLAGS_block_size;
+    params.sparse_block_table = out_block_seg;
+    params.sparse_context_lens = out_ctx_seg;
+    xllm::kernel::masked_indexer_select_paged_kv(params);
+  }
+
+  return {new_block_tables, new_context_lens};
 }
 
 std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(

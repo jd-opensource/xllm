@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "attention_metadata_builder.h"
 
+#include <numeric>
+
 #include "attention_metadata.h"
 #include "core/common/global_flags.h"
 #include "framework/model/model_input_params.h"
@@ -36,6 +38,17 @@ AttentionMetadata AttentionMetadataBuilder::build(
   attn_metadata.kv_cu_seq_lens = params.kv_seq_lens;
   attn_metadata.max_query_len = params.q_max_seq_len;
   attn_metadata.max_seq_len = params.kv_max_seq_len;
+  if (!params.kv_seq_lens_vec.empty()) {
+    const bool is_cu_seq_lens =
+        params.kv_seq_lens_vec.size() ==
+            static_cast<size_t>(params.num_sequences + 1) &&
+        params.kv_seq_lens_vec.front() == 0;
+    attn_metadata.total_kv_len =
+        is_cu_seq_lens ? params.kv_seq_lens_vec.back()
+                       : std::accumulate(params.kv_seq_lens_vec.begin(),
+                                         params.kv_seq_lens_vec.end(),
+                                         int64_t{0});
+  }
   attn_metadata.slot_mapping = params.new_cache_slots;
   attn_metadata.compute_dtype = compute_dtype;
 

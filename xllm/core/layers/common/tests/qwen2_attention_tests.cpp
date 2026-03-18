@@ -193,6 +193,7 @@ class Qwen2AttentionTest : public ::testing::Test {
 
     metadata.max_query_len = (is_prefill || is_chunked_prefill) ? seq_len : 1;
     metadata.max_seq_len = max_seq_len;
+    metadata.total_kv_len = batch_size * seq_len;
     metadata.compute_dtype = "half";
     metadata.is_prefill = is_prefill && !is_chunked_prefill;
     metadata.is_chunked_prefill = is_chunked_prefill;
@@ -682,6 +683,7 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheChunkedPrefillTest) {
       torch::zeros({batch_size, num_blocks_per_req}, options_int);
   history_metadata.max_query_len = history_len;
   history_metadata.max_seq_len = max_seq_len;
+  history_metadata.total_kv_len = batch_size * history_len;
   history_metadata.compute_dtype = "half";
   history_metadata.is_prefill = true;
   history_metadata.is_chunked_prefill = false;
@@ -720,6 +722,7 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheChunkedPrefillTest) {
   metadata.block_table = make_block_table();
   metadata.max_query_len = chunk_len;
   metadata.max_seq_len = max_seq_len;
+  metadata.total_kv_len = batch_size * total_seq_len;
   metadata.compute_dtype = "half";
   metadata.is_prefill = false;
   metadata.is_chunked_prefill = true;

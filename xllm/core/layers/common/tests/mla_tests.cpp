@@ -211,6 +211,7 @@ class DeepseekMLATest : public ::testing::Test {
 
     metadata.max_query_len = max_query_len;
     metadata.max_seq_len = max_seq_len;
+    metadata.total_kv_len = batch_size * max_query_len;
     metadata.compute_dtype = "half";
     metadata.is_prefill = is_prefill;
     metadata.is_chunked_prefill = false;

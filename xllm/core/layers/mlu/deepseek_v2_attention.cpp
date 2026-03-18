@@ -353,6 +353,7 @@ AttentionMetadata DeepseekV2AttentionImpl::build_mla_attention_metadata(
     KVCache& kv_cache,
     std::optional<torch::Tensor> k_cache_scale,
     bool is_prefill_phase,
+    const std::optional<torch::Tensor>& slot_mapping,
     const std::optional<torch::Tensor>& new_block_tables,
     const std::optional<torch::Tensor>& new_context_lens) {
   // reshape_paged_cache before attn
@@ -366,7 +367,8 @@ AttentionMetadata DeepseekV2AttentionImpl::build_mla_attention_metadata(
       xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
       reshape_paged_cache_params.key = key;
       reshape_paged_cache_params.k_cache = kv_cache.get_k_cache();
-      reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
+      reshape_paged_cache_params.slot_mapping =
+          slot_mapping.value_or(attn_metadata.slot_mapping);
       if (k_cache_scale.has_value()) {
         // Use quant_to_paged_cache for INT8 quantization
         reshape_paged_cache_params.k_cache_scale = k_cache_scale;

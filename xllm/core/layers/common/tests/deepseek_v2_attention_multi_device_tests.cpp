@@ -332,6 +332,7 @@ AttentionMetadata create_decode_metadata(const torch::TensorOptions& options) {
   metadata.slot_mapping = torch::tensor({1}, int_options);
   metadata.max_query_len = 1;
   metadata.max_seq_len = 1;
+  metadata.total_kv_len = 1;
   metadata.compute_dtype = "half";
   metadata.is_prefill = false;
   metadata.is_chunked_prefill = false;
@@ -351,6 +352,7 @@ AttentionMetadata create_prefill_metadata(const torch::TensorOptions& options,
   metadata.slot_mapping = torch::arange(seq_len, int_options);
   metadata.max_query_len = seq_len;
   metadata.max_seq_len = seq_len;
+  metadata.total_kv_len = seq_len;
   metadata.compute_dtype = "half";
   metadata.is_prefill = true;
   metadata.is_chunked_prefill = false;
@@ -372,6 +374,7 @@ AttentionMetadata create_chunked_metadata(const torch::TensorOptions& options,
   metadata.slot_mapping = torch::arange(prefix_len, ctx_len, int_options);
   metadata.max_query_len = chunk_len;
   metadata.max_seq_len = ctx_len;
+  metadata.total_kv_len = ctx_len;
   metadata.compute_dtype = "half";
   metadata.is_prefill = false;
   metadata.is_chunked_prefill = true;
@@ -549,8 +552,7 @@ AttentionRunResult run_attention_prefill_once(
     result.global_output = layer::v32_sp::restore_gathered_to_global_order(
         layer::v32_sp::all_gather_across_ranks(result.local_output,
                                                sp_ctx.value()),
-        sp_ctx.value(),
-        layer::v32_sp::GatheredTensorLayout::kPacked);
+        sp_ctx.value());
   }
   result.k_cache = kv_cache.get_k_cache().clone();
   if (kv_cache.get_index_cache().defined()) {

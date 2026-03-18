@@ -102,10 +102,10 @@ class IndexerImpl : public torch::nn::Module {
 
   std::tuple<torch::Tensor, torch::Tensor> sp_post(
       const IndexerSPPreOut& pre_out,
-      const torch::Tensor& k_global,
+      const torch::Tensor& k_gathered,
       torch::Tensor& k_cache,
       const AttentionMetadata& attn_metadata,
-      const v32_sp::DeepseekV32SPMetadata& sp_meta,
+      const torch::Tensor& gathered_slot_mapping,
       const v32_sp::DeepseekV32SPContext& sp_ctx);
 
   // load the weight from the checkpoint
@@ -178,11 +178,21 @@ class IndexerImpl : public torch::nn::Module {
                              torch::Tensor& k_cache,
                              const torch::Tensor& slot_mapping);
 
+  torch::Tensor build_sp_chunked_dense_k_source(
+      torch::Tensor& k_cache,
+      const AttentionMetadata& attn_metadata);
+
   std::tuple<torch::Tensor, torch::Tensor> run_indexer_select_kernel(
       const AttentionMetadata& attn_metadata,
       bool is_prefill,
-      IndexerRuntimeContext& ctx,
-      const v32_sp::DeepseekV32SPMetadata* sp_meta = nullptr);
+      IndexerRuntimeContext& ctx);
+
+  std::tuple<torch::Tensor, torch::Tensor>
+  run_indexer_select_kernel_sp_segmented(
+      const IndexerSPPreOut& pre_out,
+      const torch::Tensor& k_source,
+      const AttentionMetadata& attn_metadata,
+      const v32_sp::DeepseekV32SPContext& sp_ctx);
 };
 
 TORCH_MODULE(Indexer);

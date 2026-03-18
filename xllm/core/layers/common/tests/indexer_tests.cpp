@@ -151,6 +151,7 @@ class IndexerTest : public ::testing::Test {
 
     metadata.max_query_len = max_query_len;
     metadata.max_seq_len = max_seq_len;
+    metadata.total_kv_len = batch_size * max_query_len;
     metadata.compute_dtype = "bfloat16";
     metadata.is_prefill = is_prefill;
     metadata.is_chunked_prefill = false;
@@ -194,6 +195,7 @@ class IndexerTest : public ::testing::Test {
 
     metadata.max_query_len = current_len;
     metadata.max_seq_len = total_len;
+    metadata.total_kv_len = batch_size * total_len;
     metadata.compute_dtype = "bfloat16";
     metadata.is_prefill = true;
     metadata.is_chunked_prefill = true;
