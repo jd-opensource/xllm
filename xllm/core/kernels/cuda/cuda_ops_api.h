@@ -246,4 +246,6 @@ std::tuple<torch::Tensor, torch::Tensor> moe_fused_topk(
     bool renormalize,
     const std::optional<torch::Tensor>& correction_bias,
     const std::string& scoring_func);
+
+torch::Tensor random_sample(const torch::Tensor& probs);
 }  // namespace xllm::kernel::cuda
