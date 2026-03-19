@@ -650,7 +650,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     } else {
       layer::flashinfer::update_decode_plan_info(
           attn_metadata->plan_info,
-          backend,
+          /*backend=*/"fa2",  // flashinfer paged fa3 is slow, use fa2 instead
           *attn_metadata,
           dtype,                             // query_dtype
           dtype,                             // key_dtype
