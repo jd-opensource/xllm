@@ -582,8 +582,7 @@ void Batch::process_beam_search_output(const RawForwardOutput& raw_output,
       int32_t src_seq_idx = raw_output.src_seq_idxes[task_id];
       CHECK_LE(src_seq_idx, sequences_.size());
       auto src_seq = sequences_[src_seq_idx];
-      src_acc_logprob_vec[i] =
-          src_seq->get_average_logprob() * src_seq->num_generated_tokens();
+      src_acc_logprob_vec[i] = src_seq->get_acc_logprob();
       src_token_ids[i] = std::vector<int32_t>(src_seq->tokens());
       src_logprobs[i] = src_seq->logprob_state()->get_logprobs();
     }

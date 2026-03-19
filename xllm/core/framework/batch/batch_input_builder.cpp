@@ -300,8 +300,7 @@ void BatchInputBuilder::process_single_sequence(
   // Input for beam search kernel
   if (FLAGS_enable_beam_search_kernel && sequence->check_beam_search() &&
       sequence->num_generated_tokens() > 0) {
-    state.acc_logprob_vec.emplace_back(sequence->get_average_logprob() *
-                                       sequence->num_generated_tokens());
+    state.acc_logprob_vec.emplace_back(sequence->get_acc_logprob());
   }
 }
 

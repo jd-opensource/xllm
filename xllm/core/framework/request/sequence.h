@@ -270,7 +270,9 @@ class Sequence final {
   KVCacheState& host_kv_state() { return host_kv_state_; }
 
   // for generated tokens
-  float get_average_logprob();
+  float get_acc_logprob();
+  // Returns the beam base score: accumulated logprob excluding last token.
+  float get_base_logprob();
   void generate_output_tokens_logprobs(
       size_t start_idx,
       size_t end_idx,
@@ -293,6 +295,21 @@ class Sequence final {
   }
 
   bool check_need_unique_tokens() { return need_unique_tokens_; }
+
+  // True if this sequence received token updates after the previous
+  // SequencesGroup::process_beam_search() round.
+  bool updated_since_last_beam_search() const {
+    return updated_since_last_beam_search_;
+  }
+
+  void clear_updated_since_last_beam_search() {
+    updated_since_last_beam_search_ = false;
+  }
+
+  // Beam search may clone a finished sequence and then rewrite tokens to a
+  // non-finished candidate. Reset cached finish state so finished() is
+  // re-evaluated from current tokens.
+  void reset_finish_state_for_beam_search();
 
   // Multi-round beam search result caching
   void set_beam_result(int32_t bw,
@@ -506,6 +523,12 @@ class Sequence final {
   int32_t total_rounds_cached_ = 0;
   std::vector<std::vector<int32_t>> beam_seq_group_flat_;
   std::vector<float> beam_last_logprobs_;
+
+  // Mark whether the sequence has new token updates in current decode step.
+  // This is only consumed by software beam search to distinguish:
+  // 1) beams that were already finished before current step and
+  // 2) beams that just became finished in current step.
+  bool updated_since_last_beam_search_ = false;
 };
 
 }  // namespace xllm

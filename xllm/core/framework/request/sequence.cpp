@@ -186,6 +186,7 @@ Sequence::Sequence(const Sequence& other)
       cur_generated_token_idx_(other.cur_generated_token_idx_),
       first_token_(other.first_token_),
       is_pre_scheduled_step_prefill_(other.is_pre_scheduled_step_prefill_),
+      updated_since_last_beam_search_(other.updated_since_last_beam_search_),
       termination_flag_(std::make_shared<std::atomic<int32_t>>(INT32_MAX)) {
   logprob_state_ = std::make_unique<LogprobState>(*other.logprob_state_);
 }
@@ -246,6 +247,7 @@ void Sequence::append_token(const Token& token) {
 
   // invalidate the finish status once a new token is appended
   finish_status_invalidated_ = true;
+  updated_since_last_beam_search_ = true;
 }
 
 void Sequence::update_last_step_token(const Token& token, size_t token_offset) {
@@ -280,6 +282,7 @@ void Sequence::update_last_step_token(const Token& token, size_t token_offset) {
   }
   ++cur_generated_token_idx_;
   finish_status_invalidated_ = true;
+  updated_since_last_beam_search_ = true;
 }
 
 void Sequence::update_token(size_t index, const Token& token) {
@@ -587,8 +590,12 @@ int64_t Sequence::tbt(const absl::Time& now) {
   return latency;
 }
 
-float Sequence::get_average_logprob() {
-  return logprob_state_->get_average_logprob(num_tokens_);
+float Sequence::get_acc_logprob() {
+  return logprob_state_->get_acc_logprob(num_tokens_);
+}
+
+float Sequence::get_base_logprob() {
+  return logprob_state_->get_base_logprob(num_tokens_);
 }
 
 void Sequence::generate_output_tokens_logprobs(
@@ -655,6 +662,13 @@ void Sequence::finish() {
   if (finish_reason_ == FinishReason::NONE) {
     finish_reason_ = FinishReason::STOP;
   }
+}
+
+void Sequence::reset_finish_state_for_beam_search() {
+  finished_ = false;
+  finish_reason_ = FinishReason::NONE;
+  finish_status_invalidated_ = true;
+  finished();
 }
 
 }  // namespace xllm
