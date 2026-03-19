@@ -153,7 +153,7 @@ void CollectiveCommunicator::create_process_groups(
   // communication. This avoids unnecessary communication. When tp_size > 1,
   // create a process group of size 1 for each rank. Otherwise, reuse tp_group
   // for single-rank operations.
-  int single_rank_group_count = 0;
+  int32_t single_rank_group_count = 0;
   if (tp_size > 1) {
     single_rank_group_ = create_process_group(global_rank,
                                               world_size,

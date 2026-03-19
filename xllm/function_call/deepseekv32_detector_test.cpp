@@ -838,10 +838,6 @@ TEST_F(DeepSeek32DetectorTest,
 
 // Test streaming response with trailing placeholder punctuation and fence at
 // stream end. These artifacts should be removed from flushed normal_text.
-// this unit test contains bug in MLU docker, but it is not associated with any
-// backend.
-// TODO: fix the bug in MLU docker.
-#if !defined(USE_MLU)
 TEST_F(DeepSeek32DetectorTest,
        StreamingFlushStripsTrailingPlaceholderAndFence) {
   std::vector<std::string> chunks = {
@@ -872,7 +868,6 @@ TEST_F(DeepSeek32DetectorTest,
   EXPECT_TRUE(!accumulated_normal_text.empty() &&
               accumulated_normal_text.back() != ' ');
 }
-#endif
 
 // Test standalone placeholder/fence chunks right before invoke start.
 // They should not leak into streamed normal_text.
