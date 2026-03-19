@@ -16,14 +16,19 @@ limitations under the License.
 #include "xservice_client.h"
 
 #include <absl/strings/str_split.h>
+#include <absl/time/clock.h>
+#include <absl/time/time.h>
 #include <folly/executors/GlobalExecutor.h>
 #include <folly/futures/Future.h>
 #include <glog/logging.h>
+#include <unistd.h>
 
+#include <algorithm>
 #include <unordered_map>
 
 #include "util/hash_util.h"
 #include "util/net.h"
+#include "util/uuid.h"
 
 namespace xllm {
 namespace {
@@ -78,6 +83,10 @@ bool XServiceClient::init(const std::string& etcd_addr,
   }
 
   instance_name_ = instance_name;
+  if (incarnation_id_.empty()) {
+    ShortUUID uuid;
+    incarnation_id_ = uuid.random();
+  }
   chan_options_.max_retry = 3;
   chan_options_.timeout_ms = FLAGS_rpc_channel_timeout_ms;
 
@@ -117,6 +126,8 @@ bool XServiceClient::init(const std::string& etcd_addr,
   // heartbeat thread
   heartbeat_thread_ =
       std::make_unique<std::thread>(&XServiceClient::heartbeat, this);
+  reconcile_thread_ = std::make_unique<std::thread>(
+      &XServiceClient::reconcile_registration_loop, this);
 
   // watch master xllm_service change
   auto master_func = std::bind(&XServiceClient::handle_master_service_watch,
@@ -142,48 +153,110 @@ void XServiceClient::set_scheduler(Scheduler* scheduler) {
 void XServiceClient::set_engine(Engine* engine) { engine_ = engine; }
 
 XServiceClient::~XServiceClient() {
-  exited_ = true;
+  exited_.store(true);
   if (heartbeat_thread_ && heartbeat_thread_->joinable()) {
     heartbeat_thread_->join();
+  }
+  if (reconcile_thread_ && reconcile_thread_->joinable()) {
+    reconcile_thread_->join();
   }
 }
 
 std::string XServiceClient::get_instance_name() { return instance_name_; }
 
-void XServiceClient::register_instance(const InstanceInfo& instance_info) {
-  std::string key_prefix = "";
-  if (InstanceRole(instance_info.type) == InstanceRole::DEFAULT) {
-    key_prefix =
-        ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::DEFAULT];
-  } else if (InstanceRole(instance_info.type) == InstanceRole::PREFILL) {
-    key_prefix =
-        ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::PREFILL];
-  } else if (InstanceRole(instance_info.type) == InstanceRole::DECODE) {
-    key_prefix =
-        ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::DECODE];
-  } else if (InstanceRole(instance_info.type) == InstanceRole::MIX) {
-    key_prefix = ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::MIX];
-  } else {
-    LOG(ERROR) << "Unsupported instance type: " << instance_info.type;
-    return;
-  }
-
+bool XServiceClient::register_instance_with_retry(const std::string& key,
+                                                  const std::string& value) {
   int retry_cnt = 0;
-  while (
-      !etcd_client_->register_instance(key_prefix.append(instance_info.name),
-                                       instance_info.serialize_to_json().dump(),
-                                       FLAGS_etcd_ttl)) {
+  while (!etcd_client_->register_instance(key, value, FLAGS_etcd_ttl)) {
     if (retry_cnt >= 30) {
-      LOG(FATAL) << "Register Instance to etcd faill!";
-      return;
+      LOG(ERROR) << "Register instance failed! key: " << key;
+      return false;
     }
 
-    LOG(ERROR) << "Register Instance faill, wait 2s!";
+    LOG(WARNING) << "Register instance failed, wait 2s! key: " << key;
     sleep(2);
     retry_cnt++;
   }
+  return true;
+}
 
-  register_done_ = true;
+bool XServiceClient::reconcile_registration() {
+  std::string registration_key;
+  std::string registration_value;
+  {
+    std::lock_guard<std::mutex> lock(registration_mutex_);
+    if (!register_done_.load() || registration_key_.empty() ||
+        registration_value_.empty()) {
+      return true;
+    }
+    registration_key = registration_key_;
+    registration_value = registration_value_;
+  }
+
+  std::string current_value;
+  if (etcd_client_->get(registration_key, &current_value) &&
+      !current_value.empty()) {
+    return true;
+  }
+
+  LOG(WARNING) << "Detected missing instance registration in etcd, "
+                  "re-registering instance: "
+               << registration_key;
+  return register_instance_with_retry(registration_key, registration_value);
+}
+
+void XServiceClient::reconcile_registration_loop() {
+  while (!exited_.load()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(
+        static_cast<int64_t>(FLAGS_heart_beat_interval * 1000)));
+    if (!register_done_.load()) continue;
+
+    if (!reconcile_registration()) {
+      LOG(ERROR) << "Failed to reconcile instance registration in etcd.";
+    }
+  }
+}
+
+void XServiceClient::register_instance(const InstanceInfo& instance_info) {
+  InstanceInfo registered_info = instance_info;
+  registered_info.incarnation_id = incarnation_id_;
+  if (registered_info.register_ts_ms == 0) {
+    registered_info.register_ts_ms =
+        static_cast<uint64_t>(absl::ToUnixMillis(absl::Now()));
+  }
+
+  std::string key_prefix = "";
+  if (InstanceRole(registered_info.type) == InstanceRole::DEFAULT) {
+    key_prefix =
+        ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::DEFAULT];
+  } else if (InstanceRole(registered_info.type) == InstanceRole::PREFILL) {
+    key_prefix =
+        ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::PREFILL];
+  } else if (InstanceRole(registered_info.type) == InstanceRole::DECODE) {
+    key_prefix =
+        ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::DECODE];
+  } else if (InstanceRole(registered_info.type) == InstanceRole::MIX) {
+    key_prefix = ETCD_KEYS_PREFIX_MAP[xllm_service::proto::InstanceType::MIX];
+  } else {
+    LOG(ERROR) << "Unsupported instance type: " << registered_info.type;
+    return;
+  }
+
+  const std::string key = key_prefix + registered_info.name;
+  const std::string value = registered_info.serialize_to_json().dump();
+  {
+    std::lock_guard<std::mutex> lock(registration_mutex_);
+    instance_name_ = registered_info.name;
+    registration_key_ = key;
+    registration_value_ = value;
+  }
+
+  if (!register_instance_with_retry(key, value)) {
+    LOG(FATAL) << "Register instance to etcd failed!";
+    return;
+  }
+
+  register_done_.store(true);
   LOG(INFO) << "Success register instance to etcd.";
 }
 
@@ -211,6 +284,8 @@ InstanceInfo XServiceClient::get_instance_info(
   }
   result.name = resp.name();
   result.rpc_address = resp.rpc_address();
+  result.incarnation_id = resp.incarnation_id();
+  result.register_ts_ms = resp.register_ts_ms();
   if (resp.type() == xllm_service::proto::InstanceType::PREFILL) {
     result.type = "PREFILL";
   } else if (resp.type() == xllm_service::proto::InstanceType::DECODE) {
@@ -246,16 +321,18 @@ InstanceInfo XServiceClient::get_instance_info(
 
 void XServiceClient::heartbeat() {
   KvCacheEvent event;
-  while (!exited_) {
+  while (!exited_.load()) {
     event.clear();
     std::this_thread::sleep_for(std::chrono::milliseconds(
         static_cast<int64_t>(FLAGS_heart_beat_interval * 1000)));
-    if (!register_done_) continue;
+    if (!register_done_.load()) continue;
+
     if (block_manager_pool_ == nullptr || scheduler_ == nullptr) continue;
 
     brpc::Controller cntl;
     xllm_service::proto::HeartbeatRequest req;
     req.set_name(instance_name_);
+    req.set_incarnation_id(incarnation_id_);
     if (block_manager_pool_->options().enable_prefix_cache()) {
       block_manager_pool_->get_merged_kvcache_event(&event);
       auto cache_event = req.mutable_cache_event();
@@ -696,7 +773,7 @@ void XServiceClient::disconnect_xservice(const std::string& xservice_addr) {
 
 void XServiceClient::handle_master_service_watch(
     const etcd::Response& response) {
-  if (response.events().empty() || exited_) {
+  if (response.events().empty() || exited_.load()) {
     return;
   }
 
@@ -731,7 +808,7 @@ void XServiceClient::handle_master_service_watch(
 }
 
 void XServiceClient::handle_xservices_watch(const etcd::Response& response) {
-  if (response.events().empty() || exited_) {
+  if (response.events().empty() || exited_.load()) {
     return;
   }
 

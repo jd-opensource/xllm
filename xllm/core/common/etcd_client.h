@@ -18,6 +18,7 @@ limitations under the License.
 #include <etcd/KeepAlive.hpp>
 #include <etcd/SyncClient.hpp>
 #include <etcd/Watcher.hpp>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -42,6 +43,7 @@ class EtcdClient {
   bool register_instance(const std::string& key,
                          const std::string& value,
                          const int ttl);
+  bool get(const std::string& key, std::string* value);
 
   bool get_master_service(const std::string& key_prefix, std::string* values);
 
@@ -58,7 +60,9 @@ class EtcdClient {
   std::string etcd_addr_;
   std::mutex watchers_mutex_;
   std::unordered_map<std::string, WatcherInfo> watchers_;
-  std::vector<std::shared_ptr<etcd::KeepAlive>> keep_alives_;
+  std::mutex keep_alives_mutex_;
+  std::unordered_map<std::string, std::shared_ptr<etcd::KeepAlive>>
+      keep_alives_;
 };
 
 }  // namespace xllm

@@ -16,6 +16,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -207,6 +208,8 @@ struct WeightSegment {
 struct InstanceInfo {
   std::string name = "";
   std::string rpc_address = "";
+  std::string incarnation_id = "";
+  uint64_t register_ts_ms = 0;
   // DEFAULT/PREFILL/DECODE/MIX
   std::string type = "";
   // remote kv cache info
@@ -237,6 +240,8 @@ struct InstanceInfo {
     nlohmann::json json_val;
     json_val["name"] = name;
     json_val["rpc_address"] = rpc_address;
+    json_val["incarnation_id"] = incarnation_id;
+    json_val["register_ts_ms"] = register_ts_ms;
     if (InstanceRole(type) == InstanceRole::DEFAULT) {
       json_val["type"] = 0;
     } else if (InstanceRole(type) == InstanceRole::PREFILL) {
