@@ -49,6 +49,18 @@ void MMDataItem::get(const MMKey& key, std::vector<torch::Tensor>& vec) const {
   }
 }
 
+void MMDataItem::get(const MMKey& key, std::vector<std::string>& vec) const {
+  if (!valid()) return;
+
+  const auto& itor = data_.find(key);
+  if (itor == data_.end()) return;
+
+  if (std::holds_alternative<std::vector<std::string>>(itor->second)) {
+    const auto& data = std::get<std::vector<std::string>>(itor->second);
+    vec.insert(vec.end(), data.begin(), data.end());
+  }
+}
+
 void MMDataItem::debug_print() const {
   LOG(INFO) << "mm data item debug print, type:" << type_;
 

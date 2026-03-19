@@ -378,8 +378,8 @@ std::optional<NavitResizeResult> KimiK25ImageProcessor::navit_resize(
 
 bool KimiK25ImageProcessor::process_images(std::vector<torch::Tensor> images,
                                            MMData& mm_datas) {
+  torch::Tensor pixel_values, thw;
   for (const auto& img : images) {
-    torch::Tensor pixel_values, thw;
     if (!process_image(img, pixel_values, thw)) {
       return false;
     }
@@ -451,31 +451,52 @@ bool KimiK25ImageProcessor::process_videos(
     std::vector<VideoMetadata> video_meta_list,
     MMData& mm_datas) {
   const size_t video_count = videos.size();
+  auto opts = torch::TensorOptions().dtype(torch::kFloat32);
+
   for (size_t i = 0; i < video_count; ++i) {
     auto& video = videos[i];
     auto& meta = video_meta_list[i];
+    torch::Tensor pixel_values;
+    torch::Tensor thw;
 
     std::vector<VideoChunkMetadata> chunks = split_video_chunks(meta);
 
+    double seconds_per_grid = 0;
+    std::vector<std::string> video_prompts = {};
     for (const auto& chunk : chunks) {
+      torch::Tensor pixel_values_chunk;
+      torch::Tensor thw_chunk;
+
       torch::Tensor chunk_frames = video.index_select(
           0, torch::tensor(chunk.frame_indices, torch::kLong));
 
-      torch::Tensor pixel_values, thw;
-      if (!process_video_chunk(chunk_frames, meta, pixel_values, thw)) {
+      if (!process_video_chunk(
+              chunk_frames, meta, pixel_values_chunk, thw_chunk)) {
         return false;
       }
 
-      auto& item = mm_datas.add(MMType::VIDEO);
-      item.set_data(
-          {{"pixel_values_videos", pixel_values}, {"video_grid_thw", thw}});
-      // todo
-      //{"chunk_id", torch::tensor(chunk.chunk_id, torch::kInt64)},
-      //{"start_timestamp", torch::tensor(chunk.start_timestamp,
-      // torch::kFloat64)},
-      //{"timestamp_text", chunk.timestamp_text},
-      //{"prompt", chunk.prompt}});
+      double single_seconds_per_grid =
+          static_cast<double>(chunk.num_frames) / meta.fps;
+      seconds_per_grid += single_seconds_per_grid;
+
+      if (pixel_values.numel() == 0) {
+        pixel_values = pixel_values_chunk;
+        thw = thw_chunk;
+      } else {
+        pixel_values = torch::cat({pixel_values, pixel_values_chunk}, 0);
+        thw = torch::cat({thw, thw_chunk}, 0);
+      }
+      video_prompts.push_back(chunk.prompt);
     }
+
+    auto second_per_grid_ts = torch::tensor({seconds_per_grid}, opts);
+    auto& item = mm_datas.add(MMType::VIDEO);
+
+    item.set_data({{"pixel_values_videos", pixel_values},
+                   {"video_grid_thw", thw},
+                   {"second_per_grid_ts", second_per_grid_ts},
+                   {"video_prompts", video_prompts}});
+    item.set_metadata(meta);
   }
   return true;
 }
