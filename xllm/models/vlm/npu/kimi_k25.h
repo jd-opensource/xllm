@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <atb/atb_infer.h>
 #include <c10/core/ScalarType.h>
+#include <glog/logging.h>
 #include <torch/torch.h>
 
 #include <unordered_map>
@@ -1118,6 +1119,7 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader) {
+    LOG(INFO) << "loading vit / projector weight...";
     for (const auto& state_dict : loader->get_state_dicts()) {
       auto vision_dict = state_dict->get_dict_with_prefix("vision_tower.");
       if (vision_dict.size() == 0) {
@@ -1132,19 +1134,23 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
         }
       }
     }
+    LOG(INFO) << "verifying vit weight...";
     // verify
     visual_->verify_loaded_weights("vision_tower.");
     visual_->merge_loaded_weights();
 
     if (mm_projector_) {
+      LOG(INFO) << "verifying projector weight...";
       mm_projector_->verify_loaded_weights("mm_projector.");
       mm_projector_->merge_loaded_weights();
     }
 
     if (!model_args_.image_embedding_mode()) {
+      LOG(INFO) << "loading llm weight...";
       language_model_->load_model_with_prefixes(std::move(loader),
                                                 "language_model.model.",
                                                 "language_model.lm_head.");
+      LOG(INFO) << "loaded all weight.";
     }
   }
   layer::NpuLmHead get_npu_lm_head() {
@@ -1179,7 +1185,7 @@ REGISTER_IMAGE_PROCESSOR(kimi_k25, KimiK25ImageProcessor);
 REGISTER_MODEL_ARGS(kimi_k25, [&] {
   // text config (Kimi-K2.5): args are under text_config.* in HF config.
   LOAD_ARG_OR(model_type, "model_type", "kimi_k25");
-  LOAD_ARG_OR_FUNC(dtype, "text_config.dtype", [&] {
+  LOAD_ARG_OR_FUNC(dtype, "dtype", [&] {
     return json.value_or<std::string>("torch_dtype", "bfloat16");
   });
   LOAD_ARG_OR(vocab_size, "text_config.vocab_size", 163840);
@@ -1197,8 +1203,6 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
 
   LOAD_ARG_OR(attention_bias, "text_config.attention_bias", false);
   LOAD_ARG_OR(attention_dropout, "text_config.attention_dropout", 0.0f);
-  LOAD_ARG_OR(use_sliding_window, "text_config.use_sliding_window", false);
-  LOAD_ARG_OR(sliding_window, "text_config.sliding_window", 4096);
 
   // [Kimi-K2.5 config missing, keep DeepSeek-V3-compatible default]
   LOAD_ARG_OR(max_window_layers, "text_config.max_window_layers", 61);
@@ -1224,11 +1228,12 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   LOAD_ARG_OR(kv_lora_rank, "text_config.kv_lora_rank", 512);
   LOAD_ARG_OR(scoring_func, "text_config.scoring_func", "sigmoid");
 
-  LOAD_ARG_OR(head_dim, "head_dim", 256);
+  LOAD_ARG_OR_FUNC(
+      head_dim, "text_config.head_dim", [&] { return args->v_head_dim(); });
   LOAD_ARG_OR_FUNC(
       rotary_dim, "rotary_dim", [&] { return args->qk_rope_head_dim(); });
 
-  SET_ARG(rope_scaling_rope_type, "deepseek_yarn");
+  LOAD_ARG(rope_scaling_rope_type, "text_config.rope_scaling.type");
   LOAD_ARG(rope_scaling_beta_fast, "text_config.rope_scaling.beta_fast");
   LOAD_ARG(rope_scaling_beta_slow, "text_config.rope_scaling.beta_slow");
   LOAD_ARG(rope_scaling_factor, "text_config.rope_scaling.factor");
@@ -1242,6 +1247,8 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
            "text_config.rope_scaling.original_max_position_embeddings");
   LOAD_ARG_OR(
       rope_scaling_attn_factor, "text_config.rope_scaling.attn_factor", 1.0f);
+  LOAD_ARG_OR(
+      num_nextn_predict_layers, "text_config.num_nextn_predict_layers", 1);
 
   LOAD_ARG_OR(bos_token_id, "text_config.bos_token_id", 163584);
   LOAD_ARG_OR(eos_token_id, "text_config.eos_token_id", 163585);
@@ -1258,7 +1265,7 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   LOAD_ARG_OR(mm_num_hidden_layers, "vision_config.vt_num_hidden_layers", 27);
   // vt_hidden_act is not provided in Kimi-K2.5 config, keep default "silu".
   LOAD_ARG_OR(mm_hidden_act, "vision_config.vt_hidden_act", "silu");
-  LOAD_ARG_OR(mm_hidden_size, "vision_config.vt_hidden_size", 1152);
+  LOAD_ARG_OR(mm_hidden_size, "vision_config.mm_hidden_size", 1152);
   LOAD_ARG_OR(mm_intermediate_size, "vision_config.vt_intermediate_size", 4304);
   LOAD_ARG_OR(
       mm_num_attention_heads, "vision_config.vt_num_attention_heads", 16);
