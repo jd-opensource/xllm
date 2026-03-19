@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+option go_package = "jd.com/jd-infer/xllm;xllm";
+package xllm.proto;
+
+import "common.proto";
+import "completion.proto";
+
+message SampleSelector {
+  // the selector type. V1 only supports "literal".
+  string type = 1;
+
+  // the literal value to match against the prompt.
+  string value = 2;
+}
+
+// Next ID: 6
+message SampleRequest {
+  // ID of the model to use. You can use the ListModels endpoint to list available models.
+  string model = 1;
+
+  // the full prompt to sample from.
+  string prompt = 2;
+
+  // selector for locating sample positions in the prompt.
+  SampleSelector selector = 3;
+
+  // the number of log probabilities to include in the response, between [1, 5].
+  optional uint32 logprobs = 4;
+
+  // unique request identifier for traceability.
+  optional string request_id = 5;
+}
+
+message SampleResponse {
+  // unique id for the sample request.
+  string id = 1;
+
+  // the object type, which is always "sample_completion".
+  string object = 2;
+
+  // the unix timestamp (in seconds) of when the sample response was created.
+  uint32 created = 3;
+
+  // the model used for the sample response.
+  string model = 4;
+
+  // list of sample choices for selector matches in prompt order.
+  repeated Choice choices = 5;
+
+  // usage statistics for the sample request.
+  Usage usage = 6;
+}

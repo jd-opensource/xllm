@@ -38,6 +38,33 @@ limitations under the License.
 #include "util/utils.h"
 
 namespace xllm {
+namespace {
+
+uint32_t get_sample_source_position(const SampleSlot& sample_slot) {
+  if (sample_slot.token_position == 0) {
+    return 0;
+  }
+  return static_cast<uint32_t>(sample_slot.token_position - 1);
+}
+
+Token make_token(const RawToken& raw_token) {
+  Token token(raw_token.id);
+  if (raw_token.logprob.has_value()) {
+    token.logprob = raw_token.logprob.value();
+  }
+  token.top_tokens = raw_token.top_tokens;
+  token.top_logprobs = raw_token.top_logprobs;
+  return token;
+}
+
+Token make_empty_logprob_placeholder(const Sequence& seq) {
+  const auto prompt_tokens = seq.tokens();
+  const int64_t placeholder_token_id =
+      prompt_tokens.empty() ? 0 : prompt_tokens[0];
+  return Token(placeholder_token_id);
+}
+
+}  // namespace
 
 Batch::Batch(Sequence* sequence) { add(sequence); }
 Batch::Batch(const std::vector<Sequence*>& sequences) { add(sequences); }
@@ -109,9 +136,11 @@ ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
                                           uint32_t min_decoding_batch_size,
                                           const ModelArgs& args) {
   if (sequences_.empty() && !sequence_groups_.empty()) {
+    output_targets_.clear();
     return prepare_rec_forward_input(
         num_decoding_tokens, min_decoding_batch_size, args);
   }
+  refresh_output_targets();
   BatchInputBuilder builder(sequences_,
                             allowed_max_tokens_,
                             input_embeddings_vec_,
@@ -128,6 +157,7 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
                                               uint32_t min_decoding_batch_size,
                                               const ModelArgs& args,
                                               ThreadPool* thread_pool) {
+  output_targets_.clear();
   RecType rec_type = RecType::kNone;
   if (!sequence_groups_.empty() && !sequence_groups_[0]->sequences().empty()) {
     rec_type = sequence_groups_[0]->sequences()[0]->rec_type();
@@ -305,6 +335,7 @@ std::unordered_map<uint32_t, uint32_t> Batch::cal_seq_exchange_index(
 RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
                                              ThreadPool* thread_pool) {
   dp_balance_shuffle_seqs();
+  refresh_output_targets();
   BatchInputBuilder builder(sequences_,
                             allowed_max_tokens_,
                             input_embeddings_vec_,
@@ -323,77 +354,123 @@ RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
   return raw_input;
 }
 
+void Batch::refresh_output_targets() {
+  output_targets_.clear();
+  if (sequences_.empty()) {
+    return;
+  }
+
+  for (size_t seq_index = 0; seq_index < sequences_.size(); ++seq_index) {
+    auto* sequence = sequences_[seq_index];
+    if (sequence == nullptr) {
+      continue;
+    }
+
+    const auto token_ids = sequence->tokens();
+    const uint32_t n_tokens = token_ids.size();
+    const uint32_t n_kv_cache_tokens =
+        sequence->kv_state().kv_cache_tokens_num();
+    if (n_tokens <= n_kv_cache_tokens) {
+      continue;
+    }
+
+    CHECK(allowed_max_tokens_[seq_index] > 0);
+    const uint32_t q_seq_len =
+        std::min(n_tokens - n_kv_cache_tokens, allowed_max_tokens_[seq_index]);
+    const uint32_t seq_len = q_seq_len + n_kv_cache_tokens;
+    const auto& sample_slots = sequence->sample_slots();
+
+    if (sample_slots.empty()) {
+      if (seq_len == n_tokens) {
+        output_targets_.push_back({sequence, /*sample_id=*/0, false});
+      }
+      continue;
+    }
+
+    for (const auto& sample_slot : sample_slots) {
+      const uint32_t sample_source_position =
+          get_sample_source_position(sample_slot);
+      if (sample_source_position < n_kv_cache_tokens ||
+          sample_source_position >= seq_len) {
+        continue;
+      }
+      output_targets_.push_back(
+          {sequence, sample_slot.sample_id, /*from_sample_slot=*/true});
+    }
+  }
+}
+
 void Batch::process_sample_output(const RawForwardOutput& raw_output,
                                   bool replace_fake_token) {
-  int64_t num_seqs;
   if (raw_output.mm_embeddings.size() > 0) {
     // mm embed task
-    num_seqs = sequences_.size();
-  } else {
-    // generate or embed task
-    // if raw_output.outputs.size() value is 0,
-    // this means all sequences are in prefill stage status.
-    num_seqs = raw_output.outputs.size();
-  }
-  int64_t mm_embedding_idx = 0;
-  int64_t output_idx = 0;
-  const auto sequences = get_sequences();
-  for (auto* seq : sequences) {
-    if (seq->finished()) {
-      output_idx++;
-      continue;
-    }
-    if (update_sequence_state(seq, replace_fake_token)) {
-      continue;
-    }
-    CHECK_LT(output_idx, num_seqs);
-
-    // mm embed task
-    if (raw_output.mm_embeddings.size() > 0) {
+    int64_t mm_embedding_idx = 0;
+    const auto sequences = get_sequences();
+    for (auto* seq : sequences) {
       int64_t n_images = seq->get_mm_data().size();
-      if (n_images > 0) {
-        std::vector<torch::Tensor> seq_mm_embeddings;
-        seq_mm_embeddings.reserve(n_images);
-        for (int i = mm_embedding_idx; i < mm_embedding_idx + n_images; i++) {
-          CHECK_LT(i, raw_output.mm_embeddings.size());
-          seq_mm_embeddings.push_back(raw_output.mm_embeddings[i]);
-        }
-        seq->update_mm_embeddings(seq_mm_embeddings);
-        // we only support complete mm embedding in one iteration now
-        CHECK(seq->finished());
+      if (n_images <= 0) {
+        continue;
+      }
+      std::vector<torch::Tensor> seq_mm_embeddings;
+      seq_mm_embeddings.reserve(n_images);
+      for (int i = mm_embedding_idx; i < mm_embedding_idx + n_images; ++i) {
+        CHECK_LT(i, raw_output.mm_embeddings.size());
+        seq_mm_embeddings.push_back(raw_output.mm_embeddings[i]);
+      }
+      seq->update_mm_embeddings(seq_mm_embeddings);
+      // we only support complete mm embedding in one iteration now
+      CHECK(seq->finished());
+      mm_embedding_idx += n_images;
+    }
+  }
 
-        mm_embedding_idx += n_images;
-        output_idx++;
+  for (size_t output_idx = 0; output_idx < output_targets_.size();
+       ++output_idx) {
+    const auto& target = output_targets_[output_idx];
+    auto* seq = target.sequence;
+    CHECK(seq != nullptr);
+
+    if (!target.from_sample_slot) {
+      if (seq->finished()) {
+        continue;
+      }
+      if (update_sequence_state(seq, replace_fake_token)) {
         continue;
       }
     }
 
-    const auto curr_idx = output_idx++;
-    const RawSampleOutput raw_sam_output = raw_output.outputs[curr_idx];
-    const size_t token_size = raw_sam_output.tokens.size();
-    for (size_t t_idx = 0; t_idx < token_size; t_idx++) {
-      Token t(raw_sam_output.tokens[t_idx].id);
-      if (raw_sam_output.tokens[t_idx].logprob.has_value()) {
-        t.logprob = raw_sam_output.tokens[t_idx].logprob.value();
+    const bool missing_output = output_idx >= raw_output.outputs.size();
+    const bool empty_output =
+        !missing_output && raw_output.outputs[output_idx].tokens.empty();
+    if (missing_output || empty_output) {
+      if (target.from_sample_slot) {
+        append_token_for_sequence(
+            seq, make_empty_logprob_placeholder(*seq), 0, replace_fake_token);
       }
-      t.top_tokens = raw_sam_output.tokens[t_idx].top_tokens;
-      t.top_logprobs = raw_sam_output.tokens[t_idx].top_logprobs;
-      // always append a token, maybe true or fake token
-      append_token_for_sequence(seq, t, t_idx, replace_fake_token);
+      continue;
+    }
 
-      if (raw_sam_output.tokens[t_idx].embeddings.size() > 0) {
-        torch::Tensor embeddings =
-            torch::tensor(raw_sam_output.tokens[t_idx].embeddings);
+    const auto& raw_sample_output = raw_output.outputs[output_idx];
+    for (size_t token_idx = 0; token_idx < raw_sample_output.tokens.size();
+         ++token_idx) {
+      const auto& raw_token = raw_sample_output.tokens[token_idx];
+      append_token_for_sequence(
+          seq, make_token(raw_token), token_idx, replace_fake_token);
+
+      if (!raw_token.embeddings.empty()) {
+        torch::Tensor embeddings = torch::tensor(raw_token.embeddings);
         seq->update_embeddings(embeddings);
       }
       // Speculative decoding may append an EOS token at the beginning,
       // followed by bonus tokens, causing the sequence stopping check to fail.
-      if (seq->finished()) {
+      if (!target.from_sample_slot && seq->finished()) {
         break;
       }
     }
   }
-  CHECK_EQ(output_idx, num_seqs);
+  if (replace_fake_token) {
+    output_targets_.clear();
+  }
 
   if (!FLAGS_enable_schedule_overlap || replace_fake_token) {
     process_beam_search();
@@ -477,21 +554,31 @@ void Batch::process_sample_output(const SampleOutput& sample_output,
   // if sample_output.next_tokens not defined,
   // sample_output.next_tokens.size(0) value is 0,
   // this means all sequences are in prefill stage status.
-  const int64_t num_seqs = sample_output.next_tokens.size(0);
-  int64_t output_idx = 0;
-  const auto sequences = get_sequences();
-  for (auto* seq : sequences) {
-    if (seq->finished()) {
-      output_idx++;
-      continue;
-    }
-    if (update_sequence_state(seq, replace_fake_token)) {
-      continue;
-    }
-    CHECK_LT(output_idx, num_seqs);
+  const int64_t num_outputs = sample_output.next_tokens.size(0);
+  for (size_t output_idx = 0; output_idx < output_targets_.size();
+       ++output_idx) {
+    const auto& target = output_targets_[output_idx];
+    auto* seq = target.sequence;
+    CHECK(seq != nullptr);
 
-    const auto curr_idx = output_idx++;
-    const auto token = build_token(curr_idx,
+    if (!target.from_sample_slot) {
+      if (seq->finished()) {
+        continue;
+      }
+      if (update_sequence_state(seq, replace_fake_token)) {
+        continue;
+      }
+    }
+
+    if (output_idx >= static_cast<size_t>(num_outputs)) {
+      if (target.from_sample_slot) {
+        append_token_for_sequence(
+            seq, make_empty_logprob_placeholder(*seq), 0, replace_fake_token);
+      }
+      continue;
+    }
+
+    const auto token = build_token(output_idx,
                                    sample_output.next_tokens,
                                    sample_output.logprobs,
                                    sample_output.top_tokens,
@@ -500,7 +587,9 @@ void Batch::process_sample_output(const SampleOutput& sample_output,
     // always append a token, maybe true or fake token
     append_token_for_sequence(seq, token, 0, replace_fake_token);
   }
-  CHECK_EQ(output_idx, num_seqs);
+  if (replace_fake_token) {
+    output_targets_.clear();
+  }
 
   if (!FLAGS_enable_schedule_overlap || replace_fake_token) {
     process_beam_search();

@@ -13,6 +13,7 @@ cc_library(
     rec_completion_service_impl.h
     chat_service_impl.h
     anthropic_service_impl.h
+    sample_service_impl.h
     embedding_service_impl.h
     image_generation_service_impl.h
     rerank_service_impl.h
@@ -32,6 +33,7 @@ cc_library(
     rec_completion_service_impl.cpp
     chat_service_impl.cpp
     anthropic_service_impl.cpp
+    sample_service_impl.cpp
     embedding_service_impl.cpp
     image_generation_service_impl.cpp
     models_service_impl.cpp
@@ -93,3 +95,29 @@ cc_test(
     GTest::gtest_main
     nlohmann_json::nlohmann_json
 )
+
+cc_test(
+  NAME
+    sample_service_impl_test
+  SRCS
+    sample_service_impl_test.cpp
+  DEPS
+    api_service
+    GTest::gtest_main
+)
+
+# Integration smoke tests for OpenAI-compatible endpoints. These require a
+# running server and are disabled by default in code.
+cc_test(
+  NAME
+    openai_service_test
+  SRCS
+    openai_service_test.cpp
+  DEPS
+    GTest::gtest
+    GTest::gtest_main
+    nlohmann_json::nlohmann_json
+    glog::glog
+)
+target_link_libraries(openai_service_test PRIVATE brpc leveldb::leveldb OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
+add_dependencies(openai_service_test brpc-static)

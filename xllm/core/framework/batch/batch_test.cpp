@@ -20,7 +20,10 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <optional>
 
+#include "batch_input_builder.h"
+#include "common/global_flags.h"
 #include "framework/block/block.h"
 #include "framework/block/block_manager_impl.h"
 #include "framework/model/model_args.h"
@@ -42,6 +45,21 @@ bool equal(const torch::Tensor& t, const std::vector<T>& d) {
     }
   }
   return true;
+}
+
+RawSampleOutput make_raw_sample_output(int64_t token_id,
+                                       std::optional<float> logprob,
+                                       std::vector<int64_t> top_tokens = {},
+                                       std::vector<float> top_logprobs = {}) {
+  RawToken raw_token;
+  raw_token.id = token_id;
+  raw_token.logprob = logprob;
+  raw_token.top_tokens = std::move(top_tokens);
+  raw_token.top_logprobs = std::move(top_logprobs);
+
+  RawSampleOutput raw_output;
+  raw_output.tokens.push_back(std::move(raw_token));
+  return raw_output;
 }
 
 TEST(BatchTest, Basic) {
@@ -220,6 +238,440 @@ TEST(BatchTest, Basic) {
   EXPECT_TRUE(equal(sampling_params.sample_idxes, expected_sample_idxes));
 
   // clang-format on
+}
+
+TEST(BatchTest, SampleRequestInjectsAllMatchedSlots) {
+  torch::Device device(Device::type_torch(), 0);
+  const uint32_t n_blocks = 8;
+  const uint32_t block_size = 4;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size);
+  BlockManagerImpl manager(options);
+
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(1);
+  const size_t capacity = 32;
+  std::vector<SampleSlot> sample_slots;
+
+  SampleSlot first_slot;
+  first_slot.request_id = "sample-req";
+  first_slot.sample_id = 0;
+  first_slot.token_position = 2;
+  sample_slots.push_back(first_slot);
+
+  SampleSlot second_slot;
+  second_slot.request_id = "sample-req";
+  second_slot.sample_id = 1;
+  second_slot.token_position = 5;
+  sample_slots.push_back(second_slot);
+
+  SequenceParams seq_params;
+  seq_params.seq_capacity = capacity;
+  seq_params.stopping_checker = &stopping_checker;
+  seq_params.sampling_param = &sampling_param;
+  seq_params.sample_slots = &sample_slots;
+  seq_params.skip_special_tokens = true;
+  seq_params.echo = false;
+  seq_params.logprobs = true;
+  seq_params.enable_schedule_overlap = false;
+
+  torch::Tensor input_embedding;
+  MMData mm_data;
+  IncrementalDecoder decoder("", 1, false, false);
+  Sequence seq(/*index=*/0,
+               /*token_ids=*/{1, 10, 11, 12, 13, 14},
+               input_embedding,
+               mm_data,
+               std::move(decoder),
+               seq_params);
+  seq.add_kv_blocks(manager.allocate(2));
+
+  Batch batch({&seq});
+  ForwardInput forward_input = batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+
+  const auto& sampling_params_out = forward_input.sampling_params;
+  const std::vector<int32_t> expected_selected_token_idxes = {1, 4};
+  const std::vector<int32_t> expected_sample_idxes = {0, 1};
+  EXPECT_TRUE(equal(sampling_params_out.selected_token_idxes,
+                    expected_selected_token_idxes));
+  EXPECT_TRUE(equal(sampling_params_out.sample_idxes, expected_sample_idxes));
+  EXPECT_EQ(sampling_params_out.selected_token_idxes.size(0), 2);
+}
+
+TEST(BatchTest, SampleRequestKeepsThreadedRawBuilderOffsetsStable) {
+  torch::Device device(Device::type_torch(), 0);
+  const uint32_t n_blocks = 8;
+  const uint32_t block_size = 4;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size);
+  BlockManagerImpl manager(options);
+
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(1);
+  const size_t capacity = 32;
+
+  std::vector<SampleSlot> sample_slots_seq1;
+  SampleSlot seq1_slot0;
+  seq1_slot0.request_id = "sample-req-1";
+  seq1_slot0.sample_id = 0;
+  seq1_slot0.token_position = 2;
+  sample_slots_seq1.push_back(seq1_slot0);
+  SampleSlot seq1_slot1;
+  seq1_slot1.request_id = "sample-req-1";
+  seq1_slot1.sample_id = 1;
+  seq1_slot1.token_position = 4;
+  sample_slots_seq1.push_back(seq1_slot1);
+
+  SequenceParams seq1_params;
+  seq1_params.seq_capacity = capacity;
+  seq1_params.stopping_checker = &stopping_checker;
+  seq1_params.sampling_param = &sampling_param;
+  seq1_params.sample_slots = &sample_slots_seq1;
+  seq1_params.skip_special_tokens = true;
+  seq1_params.echo = false;
+  seq1_params.logprobs = true;
+  seq1_params.enable_schedule_overlap = false;
+
+  std::vector<SampleSlot> sample_slots_seq2;
+  SampleSlot seq2_slot0;
+  seq2_slot0.request_id = "sample-req-2";
+  seq2_slot0.sample_id = 0;
+  seq2_slot0.token_position = 1;
+  sample_slots_seq2.push_back(seq2_slot0);
+  SampleSlot seq2_slot1;
+  seq2_slot1.request_id = "sample-req-2";
+  seq2_slot1.sample_id = 1;
+  seq2_slot1.token_position = 3;
+  sample_slots_seq2.push_back(seq2_slot1);
+
+  SequenceParams seq2_params = seq1_params;
+  seq2_params.sample_slots = &sample_slots_seq2;
+
+  torch::Tensor input_embedding;
+  MMData mm_data;
+  IncrementalDecoder decoder1("", 1, false, false);
+  Sequence seq1(/*index=*/0,
+                /*token_ids=*/{1, 21, 22, 23},
+                input_embedding,
+                mm_data,
+                std::move(decoder1),
+                seq1_params);
+  seq1.add_kv_blocks(manager.allocate(1));
+
+  IncrementalDecoder decoder2("", 2, false, false);
+  Sequence seq2(/*index=*/1,
+                /*token_ids=*/{1, 31, 32},
+                input_embedding,
+                mm_data,
+                std::move(decoder2),
+                seq2_params);
+  seq2.add_kv_blocks(manager.allocate(1));
+
+  std::vector<Sequence*> sequences = {&seq1, &seq2};
+  std::vector<uint32_t> allowed_max_tokens = {
+      std::numeric_limits<uint32_t>::max(),
+      std::numeric_limits<uint32_t>::max()};
+  std::vector<torch::Tensor> input_embeddings_vec;
+  std::vector<MMData> mm_data_vec;
+  ThreadPool thread_pool(2);
+  ModelArgs args;
+  BatchInputBuilder builder(sequences,
+                            allowed_max_tokens,
+                            input_embeddings_vec,
+                            mm_data_vec,
+                            /*swap_block_transfer_infos=*/nullptr,
+                            /*batch_id=*/1,
+                            &args,
+                            BatchForwardType::PREFILL,
+                            &thread_pool);
+
+  RawForwardInput raw_forward_input = builder.build_raw_forward_input();
+
+  const std::vector<int32_t> expected_selected_token_idxes = {1, 3, 4, 6};
+  const std::vector<int32_t> expected_sample_idxes = {0, 1, 2, 3};
+  EXPECT_EQ(raw_forward_input.sampling_params.size(), 4);
+  EXPECT_EQ(raw_forward_input.selected_token_idxes,
+            expected_selected_token_idxes);
+  EXPECT_EQ(raw_forward_input.sample_idxes, expected_sample_idxes);
+}
+
+TEST(BatchTest, SampleRequestProcessesAllMatchedRawOutputs) {
+  torch::Device device(Device::type_torch(), 0);
+  const uint32_t n_blocks = 8;
+  const uint32_t block_size = 4;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size);
+  BlockManagerImpl manager(options);
+
+  RequestSamplingParam sampling_param;
+  sampling_param.logprobs = true;
+  sampling_param.top_logprobs = 2;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(1);
+
+  std::vector<SampleSlot> sample_slots;
+  SampleSlot slot0;
+  slot0.request_id = "sample-req";
+  slot0.sample_id = 0;
+  slot0.token_position = 2;
+  sample_slots.push_back(slot0);
+  SampleSlot slot1 = slot0;
+  slot1.sample_id = 1;
+  slot1.token_position = 5;
+  sample_slots.push_back(slot1);
+
+  SequenceParams seq_params;
+  seq_params.seq_capacity = 32;
+  seq_params.stopping_checker = &stopping_checker;
+  seq_params.sampling_param = &sampling_param;
+  seq_params.sample_slots = &sample_slots;
+  seq_params.skip_special_tokens = true;
+  seq_params.echo = false;
+  seq_params.logprobs = true;
+  seq_params.enable_schedule_overlap = false;
+
+  torch::Tensor input_embedding;
+  MMData mm_data;
+  IncrementalDecoder decoder("", 1, false, false);
+  Sequence seq(/*index=*/0,
+               /*token_ids=*/{1, 10, 11, 12, 13, 14},
+               input_embedding,
+               mm_data,
+               std::move(decoder),
+               seq_params);
+  seq.add_kv_blocks(manager.allocate(2));
+
+  Batch batch({&seq});
+  batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+
+  RawForwardOutput raw_output;
+  raw_output.outputs.push_back(
+      make_raw_sample_output(101, -0.10f, {101, 111}, {-0.10f, -1.0f}));
+  raw_output.outputs.push_back(
+      make_raw_sample_output(202, -0.20f, {202, 212}, {-0.20f, -2.0f}));
+  batch.process_sample_output(raw_output, /*replace_fake_token=*/false);
+
+  const size_t prompt_tokens = seq.num_prompt_tokens();
+  EXPECT_EQ(seq.num_generated_tokens(), 2);
+  EXPECT_EQ(seq.tokens()[prompt_tokens], 101);
+  EXPECT_EQ(seq.tokens()[prompt_tokens + 1], 202);
+
+  const auto& logprobs = seq.logprob_state()->get_logprobs();
+  ASSERT_TRUE(logprobs[prompt_tokens].has_value());
+  ASSERT_TRUE(logprobs[prompt_tokens + 1].has_value());
+  EXPECT_FLOAT_EQ(logprobs[prompt_tokens].value(), -0.10f);
+  EXPECT_FLOAT_EQ(logprobs[prompt_tokens + 1].value(), -0.20f);
+
+  const auto& top_tokens = seq.logprob_state()->get_top_tokens();
+  ASSERT_EQ(top_tokens[prompt_tokens].size(), 2);
+  ASSERT_EQ(top_tokens[prompt_tokens + 1].size(), 2);
+  EXPECT_EQ(top_tokens[prompt_tokens][0], 101);
+  EXPECT_EQ(top_tokens[prompt_tokens + 1][0], 202);
+}
+
+TEST(BatchTest, SampleRequestDistributesRawOutputsAcrossSequences) {
+  torch::Device device(Device::type_torch(), 0);
+  const uint32_t n_blocks = 8;
+  const uint32_t block_size = 4;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size);
+  BlockManagerImpl manager(options);
+
+  RequestSamplingParam sampling_param;
+  sampling_param.logprobs = true;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(1);
+
+  SequenceParams seq_params;
+  seq_params.seq_capacity = 32;
+  seq_params.stopping_checker = &stopping_checker;
+  seq_params.sampling_param = &sampling_param;
+  seq_params.skip_special_tokens = true;
+  seq_params.echo = false;
+  seq_params.logprobs = true;
+  seq_params.enable_schedule_overlap = false;
+
+  std::vector<SampleSlot> sample_slots_seq1;
+  SampleSlot seq1_slot;
+  seq1_slot.request_id = "sample-req-1";
+  seq1_slot.sample_id = 0;
+  seq1_slot.token_position = 2;
+  sample_slots_seq1.push_back(seq1_slot);
+  seq_params.sample_slots = &sample_slots_seq1;
+
+  torch::Tensor input_embedding;
+  MMData mm_data;
+  IncrementalDecoder decoder1("", 1, false, false);
+  Sequence seq1(/*index=*/0,
+                /*token_ids=*/{1, 21, 22, 23},
+                input_embedding,
+                mm_data,
+                std::move(decoder1),
+                seq_params);
+  seq1.add_kv_blocks(manager.allocate(1));
+
+  std::vector<SampleSlot> sample_slots_seq2;
+  SampleSlot seq2_slot0;
+  seq2_slot0.request_id = "sample-req-2";
+  seq2_slot0.sample_id = 0;
+  seq2_slot0.token_position = 1;
+  sample_slots_seq2.push_back(seq2_slot0);
+  SampleSlot seq2_slot1 = seq2_slot0;
+  seq2_slot1.sample_id = 1;
+  seq2_slot1.token_position = 3;
+  sample_slots_seq2.push_back(seq2_slot1);
+  seq_params.sample_slots = &sample_slots_seq2;
+
+  IncrementalDecoder decoder2("", 2, false, false);
+  Sequence seq2(/*index=*/1,
+                /*token_ids=*/{1, 31, 32},
+                input_embedding,
+                mm_data,
+                std::move(decoder2),
+                seq_params);
+  seq2.add_kv_blocks(manager.allocate(1));
+
+  Batch batch({&seq1, &seq2});
+  batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+
+  RawForwardOutput raw_output;
+  raw_output.outputs.push_back(make_raw_sample_output(111, -0.11f));
+  raw_output.outputs.push_back(make_raw_sample_output(221, -0.21f));
+  raw_output.outputs.push_back(make_raw_sample_output(222, -0.22f));
+  batch.process_sample_output(raw_output, /*replace_fake_token=*/false);
+
+  const size_t seq1_prompt_tokens = seq1.num_prompt_tokens();
+  EXPECT_EQ(seq1.num_generated_tokens(), 1);
+  EXPECT_EQ(seq1.tokens()[seq1_prompt_tokens], 111);
+
+  const size_t seq2_prompt_tokens = seq2.num_prompt_tokens();
+  EXPECT_EQ(seq2.num_generated_tokens(), 2);
+  EXPECT_EQ(seq2.tokens()[seq2_prompt_tokens], 221);
+  EXPECT_EQ(seq2.tokens()[seq2_prompt_tokens + 1], 222);
+}
+
+TEST(BatchTest, SampleRequestFallsBackToEmptyPlaceholderOnPartialRawOutputs) {
+  torch::Device device(Device::type_torch(), 0);
+  const uint32_t n_blocks = 8;
+  const uint32_t block_size = 4;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size);
+  BlockManagerImpl manager(options);
+
+  RequestSamplingParam sampling_param;
+  sampling_param.logprobs = true;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(1);
+
+  std::vector<SampleSlot> sample_slots;
+  SampleSlot slot0;
+  slot0.request_id = "sample-req";
+  slot0.sample_id = 0;
+  slot0.token_position = 2;
+  sample_slots.push_back(slot0);
+  SampleSlot slot1 = slot0;
+  slot1.sample_id = 1;
+  slot1.token_position = 4;
+  sample_slots.push_back(slot1);
+
+  SequenceParams seq_params;
+  seq_params.seq_capacity = 32;
+  seq_params.stopping_checker = &stopping_checker;
+  seq_params.sampling_param = &sampling_param;
+  seq_params.sample_slots = &sample_slots;
+  seq_params.skip_special_tokens = true;
+  seq_params.echo = false;
+  seq_params.logprobs = true;
+  seq_params.enable_schedule_overlap = false;
+
+  torch::Tensor input_embedding;
+  MMData mm_data;
+  IncrementalDecoder decoder("", 1, false, false);
+  Sequence seq(/*index=*/0,
+               /*token_ids=*/{1, 10, 11, 12, 13},
+               input_embedding,
+               mm_data,
+               std::move(decoder),
+               seq_params);
+  seq.add_kv_blocks(manager.allocate(2));
+
+  Batch batch({&seq});
+  batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+
+  RawForwardOutput raw_output;
+  raw_output.outputs.push_back(make_raw_sample_output(301, -0.30f));
+  batch.process_sample_output(raw_output, /*replace_fake_token=*/false);
+
+  const size_t prompt_tokens = seq.num_prompt_tokens();
+  EXPECT_EQ(seq.num_generated_tokens(), 2);
+  EXPECT_EQ(seq.tokens()[prompt_tokens], 301);
+  EXPECT_EQ(seq.tokens()[prompt_tokens + 1], seq.tokens()[0]);
+
+  const auto& logprobs = seq.logprob_state()->get_logprobs();
+  ASSERT_TRUE(logprobs[prompt_tokens].has_value());
+  EXPECT_FALSE(logprobs[prompt_tokens + 1].has_value());
+}
+
+TEST(BatchTest, KeepTargetsForOverlapReplacement) {
+  const bool old_enable_schedule_overlap = FLAGS_enable_schedule_overlap;
+  FLAGS_enable_schedule_overlap = true;
+
+  torch::Device device(Device::type_torch(), 0);
+  const uint32_t n_blocks = 8;
+  const uint32_t block_size = 4;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size);
+  BlockManagerImpl manager(options);
+
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(1);
+
+  SequenceParams seq_params;
+  seq_params.seq_capacity = 32;
+  seq_params.stopping_checker = &stopping_checker;
+  seq_params.sampling_param = &sampling_param;
+  seq_params.skip_special_tokens = true;
+  seq_params.echo = false;
+  seq_params.logprobs = false;
+  seq_params.enable_schedule_overlap = true;
+
+  torch::Tensor input_embedding;
+  MMData mm_data;
+  IncrementalDecoder decoder("", 1, false, false);
+  Sequence seq(/*index=*/0,
+               /*token_ids=*/{1, 10, 11},
+               input_embedding,
+               mm_data,
+               std::move(decoder),
+               seq_params);
+  seq.add_kv_blocks(manager.allocate(1));
+  seq.kv_state().incr_kv_cache_tokens_num(seq.num_prompt_tokens() - 1);
+
+  Batch batch({&seq});
+  batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+
+  RawForwardOutput fake_output;
+  fake_output.outputs.push_back(make_raw_sample_output(-1, std::nullopt));
+  batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
+  EXPECT_EQ(seq.tokens()[seq.num_prompt_tokens()], -1);
+  EXPECT_FALSE(seq.finished());
+
+  RawForwardOutput real_output;
+  real_output.outputs.push_back(make_raw_sample_output(101, -0.1f));
+  batch.process_sample_output(real_output, /*replace_fake_token=*/true);
+
+  EXPECT_EQ(seq.tokens()[seq.num_prompt_tokens()], 101);
+  EXPECT_TRUE(seq.finished());
+
+  FLAGS_enable_schedule_overlap = old_enable_schedule_overlap;
 }
 
 TEST(BatchTest, DPBalanceShuffle) {

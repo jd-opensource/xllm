@@ -35,6 +35,7 @@ limitations under the License.
 namespace xllm {
 
 class Call;
+class Tokenizer;
 
 class LLMMaster : public Master {
  public:
@@ -71,6 +72,8 @@ class LLMMaster : public Master {
 
   std::vector<bool> handle_rpc_responses(
       const std::vector<RequestOutput>& outputs);
+
+  const Tokenizer& tokenizer() const { return *tokenizer_; }
 
   // start running loop
   void run() override;

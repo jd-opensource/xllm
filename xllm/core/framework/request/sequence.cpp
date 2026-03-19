@@ -40,6 +40,7 @@ namespace xllm {
 namespace {
 constexpr size_t kDecoderBosTokenCount = 1;
 constexpr size_t kDecoderMaxTokenCount = kRecTotalSteps + kDecoderBosTokenCount;
+constexpr char kEmptyLogprobsFinishReason[] = "empty_logprobs";
 }  // namespace
 
 const std::string Sequence::ENCODER_SPARSE_EMBEDDING_NAME = "sparse_embedding";
@@ -413,6 +414,41 @@ SequenceOutput Sequence::generate_output() {
   }
 
   return output;
+}
+
+void Sequence::generate_sample_outputs(std::vector<SequenceOutput>& outputs,
+                                       const Tokenizer& tokenizer) {
+  const auto& slots = sample_slots();
+  if (slots.empty()) {
+    outputs.push_back(generate_output(tokenizer));
+    return;
+  }
+
+  outputs.reserve(outputs.size() + slots.size());
+  for (size_t slot_idx = 0; slot_idx < slots.size(); ++slot_idx) {
+    SequenceOutput output;
+    output.index = slots[slot_idx].sample_id;
+
+    const size_t token_idx = num_prompt_tokens_ + slot_idx;
+    if (token_idx >= num_tokens_ || tokens_[token_idx] < 0) {
+      output.finish_reason = kEmptyLogprobsFinishReason;
+      outputs.push_back(std::move(output));
+      continue;
+    }
+
+    output.token_ids.push_back(tokens_[token_idx]);
+    generate_output_tokens_logprobs(
+        token_idx, token_idx + 1, tokenizer, output.logprobs);
+    if (!output.logprobs.has_value() || output.logprobs->empty()) {
+      output.token_ids.clear();
+      output.finish_reason = kEmptyLogprobsFinishReason;
+      outputs.push_back(std::move(output));
+      continue;
+    }
+
+    output.text = output.logprobs->front().token;
+    outputs.push_back(std::move(output));
+  }
 }
 
 SequenceOutputType Sequence::output_type() {
