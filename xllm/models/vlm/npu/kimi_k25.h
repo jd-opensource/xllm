@@ -24,14 +24,14 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
+#include "core/layers/npu/npu_kimik25_vision_encoder_layer_impl.h"
 #include "core/layers/npu/npu_lm_head_impl.h"
 #include "core/layers/npu/npu_qwen2_decoder_layer_impl.h"
-#include "core/layers/npu/npu_kimik25_vision_encoder_layer_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "models/llm/npu/deepseek_v3.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
-#include "processors/qwen2_vl_image_processor.h"
+#include "processors/kimi25_image_processor.h"
 #include "xllm_atb_layers/core/include/atb_speed/log.h"
 
 namespace xllm {
@@ -39,8 +39,9 @@ const int KIMIV_VT_INFER_MAX_PATCH_NUM = 16328;
 #define PrintTensor(tensor) print_tensor(tensor, #tensor, 10, true, false);
 
 namespace {
-StateDict get_dict_with_prefix_fallback(const StateDict& state_dict,
-                                        const std::vector<std::string>& prefixes) {
+StateDict get_dict_with_prefix_fallback(
+    const StateDict& state_dict,
+    const std::vector<std::string>& prefixes) {
   CHECK(!prefixes.empty()) << "prefixes should not be empty";
   auto dict = state_dict.get_dict_with_prefix(prefixes[0]);
   for (size_t idx = 1; idx < prefixes.size() && dict.size() == 0; ++idx) {
@@ -273,8 +274,10 @@ class KimiK2_5_VisionBlockImpl : public torch::nn::Module {
         seqlens_cpu.data_ptr<int>() + seqlens_cpu.numel());
 
     auto token_num = block_input.hidden_states.size(0);
-    CHECK(block_input.cos_pos.defined()) << "cos_pos is undefined for " << name();
-    CHECK(block_input.sin_pos.defined()) << "sin_pos is undefined for " << name();
+    CHECK(block_input.cos_pos.defined())
+        << "cos_pos is undefined for " << name();
+    CHECK(block_input.sin_pos.defined())
+        << "sin_pos is undefined for " << name();
     CHECK_EQ(block_input.cos_pos.size(0), token_num)
         << "cos_pos token count mismatch for " << name();
     CHECK_EQ(block_input.sin_pos.size(0), token_num)
@@ -321,9 +324,8 @@ class KimiK2_5_VisionPosEmbDividedImpl : public torch::nn::Module {
         torch::empty({pos_emb_height_, pos_emb_width_, dim_}, options));
     torch::nn::init::normal_(weight_);
 
-    time_weight_ =
-        register_buffer("time_weight",
-                        build_time_weight(pos_emb_time_, dim_, options));
+    time_weight_ = register_buffer(
+        "time_weight", build_time_weight(pos_emb_time_, dim_, options));
   }
 
   torch::Tensor forward(torch::Tensor x, torch::Tensor grid_thws) {
@@ -344,24 +346,22 @@ class KimiK2_5_VisionPosEmbDividedImpl : public torch::nn::Module {
         pos_emb_2d = weight_.flatten(0, 1);
       } else {
         namespace F = torch::nn::functional;
-        pos_emb_2d =
-            F::interpolate(weight_.permute({2, 0, 1}).unsqueeze(0),
-                           F::InterpolateFuncOptions()
-                               .size(std::vector<int64_t>({h, w}))
-                               .mode(torch::kBicubic)
-                               .align_corners(false))
-                .squeeze(0)
-                .permute({1, 2, 0})
-                .flatten(0, 1);
+        pos_emb_2d = F::interpolate(weight_.permute({2, 0, 1}).unsqueeze(0),
+                                    F::InterpolateFuncOptions()
+                                        .size(std::vector<int64_t>({h, w}))
+                                        .mode(torch::kBicubic)
+                                        .align_corners(false))
+                         .squeeze(0)
+                         .permute({1, 2, 0})
+                         .flatten(0, 1);
       }
 
       torch::Tensor pos_emb_3d;
       if (t == 1) {
         pos_emb_3d = pos_emb_2d;
       } else {
-        pos_emb_3d =
-            pos_emb_2d.unsqueeze(0).repeat({t, 1, 1}) +
-            time_weight_.index({torch::indexing::Slice(0, t)});
+        pos_emb_3d = pos_emb_2d.unsqueeze(0).repeat({t, 1, 1}) +
+                     time_weight_.index({torch::indexing::Slice(0, t)});
       }
       pos_embs.emplace_back(pos_emb_3d.reshape({-1, pos_emb_3d.size(-1)}));
     }
@@ -394,9 +394,8 @@ class KimiK2_5_VisionPosEmbDividedImpl : public torch::nn::Module {
                                   int64_t embed_dim,
                                   const torch::TensorOptions& options) {
     CHECK_EQ(embed_dim % 2, 0) << "embed_dim must be even";
-    auto float_opts = torch::TensorOptions()
-                          .dtype(torch::kFloat32)
-                          .device(options.device());
+    auto float_opts =
+        torch::TensorOptions().dtype(torch::kFloat32).device(options.device());
     auto omega = torch::arange(embed_dim / 2, float_opts);
     omega = 1.0 / torch::pow(10000.0, omega / (embed_dim / 2.0));
     auto pos = torch::arange(t_size, float_opts).reshape({-1});
@@ -422,9 +421,8 @@ class KimiK2_5_VisionPatchEmbedImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    auto in_features =
-        model_args.mm_num_channels() * model_args.mm_patch_size() *
-        model_args.mm_patch_size();
+    auto in_features = model_args.mm_num_channels() *
+                       model_args.mm_patch_size() * model_args.mm_patch_size();
     auto out_features = model_args.mm_hidden_size();
 
     proj_ = register_module(
@@ -566,8 +564,9 @@ class KimiK2_5_VisionPatchMergerImpl : public torch::nn::Module {
     int64_t d_model = model_args.mm_projection_dim();  // out_hidden_size
     context_dim_ = model_args.mm_hidden_size();
     int spatial_merge_size = model_args.mm_spatial_merge_size();
-    auto ln_eps = model_args.mm_layer_norm_eps() > 0 ? model_args.mm_layer_norm_eps()
-                                                      : 1e-5f;
+    auto ln_eps = model_args.mm_layer_norm_eps() > 0
+                      ? model_args.mm_layer_norm_eps()
+                      : 1e-5f;
 
     hidden_size_ =
         context_dim_ * static_cast<int>(std::pow(spatial_merge_size, 2));
@@ -683,8 +682,9 @@ class KimiK2_5_VisionEncoderImpl : public torch::nn::Module {
       blocks_->push_back(block);
       layers_.push_back(block);
     }
-    auto ln_eps = model_args.mm_layer_norm_eps() > 0 ? model_args.mm_layer_norm_eps()
-                                                      : 1e-5f;
+    auto ln_eps = model_args.mm_layer_norm_eps() > 0
+                      ? model_args.mm_layer_norm_eps()
+                      : 1e-5f;
     final_layernorm_ = register_module(
         "final_layernorm",
         torch::nn::LayerNorm(torch::nn::LayerNormOptions({hidden_size_})
@@ -705,7 +705,8 @@ class KimiK2_5_VisionEncoderImpl : public torch::nn::Module {
                     grid_thw.index({torch::indexing::Slice(), 2}))
                        .to(torch::kInt32)
                        .to(hidden_states.device());
-    auto rope_freqs_cis = rope_2d_->get_freqs_cis(grid_thw, hidden_states.device());
+    auto rope_freqs_cis =
+        rope_2d_->get_freqs_cis(grid_thw, hidden_states.device());
     auto max_seqlen = lengths.max().item<int64_t>();
     auto zero = torch::zeros({1}, lengths.options());
     auto cu_seqlens = torch::cat({zero, lengths.cumsum(0, torch::kInt32)}, 0);
@@ -720,15 +721,13 @@ class KimiK2_5_VisionEncoderImpl : public torch::nn::Module {
     // Convert complex cis(freqs) to real cos/sin tensors for NPU vision block.
     auto rope_freqs_cis_ri = torch::view_as_real(rope_freqs_cis);
     auto cos_pos =
-        rope_freqs_cis_ri.index({torch::indexing::Slice(),
-                                 torch::indexing::Slice(),
-                                 0})
+        rope_freqs_cis_ri
+            .index({torch::indexing::Slice(), torch::indexing::Slice(), 0})
             .repeat({1, 2})
             .to(hidden_states.options());
     auto sin_pos =
-        rope_freqs_cis_ri.index({torch::indexing::Slice(),
-                                 torch::indexing::Slice(),
-                                 1})
+        rope_freqs_cis_ri
+            .index({torch::indexing::Slice(), torch::indexing::Slice(), 1})
             .repeat({1, 2})
             .to(hidden_states.options());
 
@@ -807,7 +806,7 @@ class KimiK2_5_VisionTransformerImpl : public torch::nn::Module {
   }
 
   torch::Tensor tpool_patch_merger(torch::Tensor hidden_states,
-                                       torch::Tensor grid_thw) {
+                                   torch::Tensor grid_thw) {
     std::vector<torch::Tensor> outputs;
     auto count = grid_thw.sizes()[0];
     outputs.reserve(count);
@@ -837,12 +836,14 @@ class KimiK2_5_VisionTransformerImpl : public torch::nn::Module {
                       spatial_merge_size_,
                       hidden_states.size(-1)});
       seq = seq.permute({0, 1, 3, 2, 4, 5}).contiguous().mean(0);
-      seq = seq.view({new_h * new_w, spatial_merge_unit_, hidden_states.size(-1)});
+      seq = seq.view(
+          {new_h * new_w, spatial_merge_unit_, hidden_states.size(-1)});
       outputs.emplace_back(seq);
     }
 
     if (outputs.empty()) {
-      return hidden_states.view({0, spatial_merge_unit_, hidden_states.size(-1)});
+      return hidden_states.view(
+          {0, spatial_merge_unit_, hidden_states.size(-1)});
     }
     return torch::cat(outputs, 0);
   }
@@ -902,13 +903,14 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
   KimiK2_5_VLForConditionalGenerationImpl(const ModelContext& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
-    visual_ = register_module("vision_tower", KimiK2_5_VisionTransformer(context));
+    visual_ =
+        register_module("vision_tower", KimiK2_5_VisionTransformer(context));
     auto mm_ptype = model_args_.mm_projector_type();
     if (mm_ptype == "patchmerger") {
-      mm_projector_ = register_module("mm_projector",
-                                      KimiK2_5_VisionPatchMerger(context));
+      mm_projector_ =
+          register_module("mm_projector", KimiK2_5_VisionPatchMerger(context));
     } else if (mm_ptype.empty() || mm_ptype == "none" ||
-                mm_ptype == "identity") {
+               mm_ptype == "identity") {
       // keep mm_projector_ as nullptr
     } else {
       CHECK(false) << "unsupported mm_projector_type for kimi_k25: "
@@ -959,8 +961,10 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       const ModelInputParams& input_params) {
     int n = grid_thws.size(0);
     auto n_patches_each_media = grid_thws.prod(-1);
-    int max_infer_batch = std::max(n_patches_each_media.max().item<int>(), KIMIV_VT_INFER_MAX_PATCH_NUM);
-    auto n_patches_tensor = n_patches_each_media.cpu().to(torch::kInt).contiguous();
+    int max_infer_batch = std::max(n_patches_each_media.max().item<int>(),
+                                   KIMIV_VT_INFER_MAX_PATCH_NUM);
+    auto n_patches_tensor =
+        n_patches_each_media.cpu().to(torch::kInt).contiguous();
     std::vector<int> n_patches_vec(
         n_patches_tensor.data_ptr<int>(),
         n_patches_tensor.data_ptr<int>() + n_patches_tensor.numel());
@@ -983,9 +987,11 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
         for (int j = current_group_start; j < i; j++) {
           group_n_patches += n_patches_vec[j];
         }
-        auto group_input = pixel_values.slice(0, pre_sum, pre_sum + group_n_patches);
+        auto group_input =
+            pixel_values.slice(0, pre_sum, pre_sum + group_n_patches);
         auto group_output = visual_(group_input, group_grid_thw, input_params);
-        features.push_back(mm_projector_ ? mm_projector_(group_output) : group_output);
+        features.push_back(mm_projector_ ? mm_projector_(group_output)
+                                         : group_output);
         pre_sum += group_n_patches;
       }
       current_group_start = i;
@@ -998,9 +1004,11 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       for (int j = current_group_start; j < n; j++) {
         group_n_patches += n_patches_vec[j];
       }
-      auto group_input = pixel_values.slice(0, pre_sum, pre_sum + group_n_patches);
+      auto group_input =
+          pixel_values.slice(0, pre_sum, pre_sum + group_n_patches);
       auto group_output = visual_(group_input, group_grid_thw, input_params);
-      features.push_back(mm_projector_ ? mm_projector_(group_output) : group_output);
+      features.push_back(mm_projector_ ? mm_projector_(group_output)
+                                       : group_output);
     }
 
     return features;
@@ -1016,7 +1024,8 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     if (image_input) {
       auto pixel_values = image_input->pixel_values.to(options_);
       auto grid_thws = image_input->image_grid_thw.to(options_);
-      auto image_features = process_vision_features(pixel_values, grid_thws, input_params);
+      auto image_features =
+          process_vision_features(pixel_values, grid_thws, input_params);
       auto image_embeds = torch::cat(image_features, 0);
 
       auto image_tokens =
@@ -1027,13 +1036,15 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       std::vector<int64_t> image_tokens_vec(
           image_tokens.data_ptr<int64_t>(),
           image_tokens.data_ptr<int64_t>() + image_tokens.numel());
-      multimodal_embeds["image|embedding"] = image_embeds.split(image_tokens_vec, 0);
+      multimodal_embeds["image|embedding"] =
+          image_embeds.split(image_tokens_vec, 0);
     }
 
     if (video_input) {
       auto pixel_values = video_input->pixel_values_videos.to(options_);
       auto grid_thws = video_input->video_grid_thw.to(options_);
-      auto video_features = process_vision_features(pixel_values, grid_thws, input_params);
+      auto video_features =
+          process_vision_features(pixel_values, grid_thws, input_params);
       auto video_embeds = torch::cat(video_features, 0);
 
       auto video_tokens =
@@ -1044,7 +1055,8 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       std::vector<int64_t> video_tokens_vec(
           video_tokens.data_ptr<int64_t>(),
           video_tokens.data_ptr<int64_t>() + video_tokens.numel());
-      multimodal_embeds["video|embedding"] = video_embeds.split(video_tokens_vec, 0);
+      multimodal_embeds["video|embedding"] =
+          video_embeds.split(video_tokens_vec, 0);
     }
 
     return multimodal_embeds;
@@ -1082,7 +1094,8 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     if (const auto& emb = mm_data.get<torch::Tensor>("embedding")) {
       multimodal_embeds = emb.value();
     }
-    auto inputs_embeds = language_model_->get_npu_word_embedding()(input_ids, 0);
+    auto inputs_embeds =
+        language_model_->get_npu_word_embedding()(input_ids, 0);
     if (!multimodal_embeds.defined()) {
       return inputs_embeds;
     }
@@ -1112,7 +1125,8 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       }
       visual_->load_state_dict(vision_dict);
       if (mm_projector_) {
-        auto mm_projector_dict = state_dict->get_dict_with_prefix("mm_projector.");
+        auto mm_projector_dict =
+            state_dict->get_dict_with_prefix("mm_projector.");
         if (mm_projector_dict.size() > 0) {
           mm_projector_->load_state_dict(mm_projector_dict);
         }
@@ -1160,7 +1174,7 @@ TORCH_MODULE(KimiK2_5_VLForConditionalGeneration);
 
 REGISTER_INPUT_PROCESSOR(kimi_k25, KimiK2_5_VLInputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(kimi_k25, KimiK2_5_VLForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(kimi_k25, Qwen2VLImageProcessor);
+REGISTER_IMAGE_PROCESSOR(kimi_k25, KimiK25ImageProcessor);
 
 REGISTER_MODEL_ARGS(kimi_k25, [&] {
   // text config (Kimi-K2.5): args are under text_config.* in HF config.
@@ -1176,9 +1190,8 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   LOAD_ARG_OR(n_layers, "text_config.num_hidden_layers", 61);
   LOAD_ARG_OR(n_heads, "text_config.num_attention_heads", 64);
   LOAD_ARG_OR(n_kv_heads, "text_config.num_key_value_heads", 64);
-  LOAD_ARG_OR(max_position_embeddings,
-              "text_config.max_position_embeddings",
-              262144);
+  LOAD_ARG_OR(
+      max_position_embeddings, "text_config.max_position_embeddings", 262144);
   LOAD_ARG_OR(rms_norm_eps, "text_config.rms_norm_eps", 1e-05);
   LOAD_ARG_OR(rope_theta, "text_config.rope_theta", 50000.0f);
 
@@ -1199,9 +1212,8 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   LOAD_ARG_OR(n_shared_experts, "text_config.n_shared_experts", 1);
   LOAD_ARG_OR(num_experts_per_tok, "text_config.num_experts_per_tok", 8);
   LOAD_ARG_OR(moe_intermediate_size, "text_config.moe_intermediate_size", 2048);
-  LOAD_ARG_OR(routed_scaling_factor,
-              "text_config.routed_scaling_factor",
-              2.827f);
+  LOAD_ARG_OR(
+      routed_scaling_factor, "text_config.routed_scaling_factor", 2.827f);
   LOAD_ARG_OR(norm_topk_prob, "text_config.norm_topk_prob", true);
   LOAD_ARG_OR(n_group, "text_config.n_group", 1);
   LOAD_ARG_OR(topk_group, "text_config.topk_group", 1);
@@ -1220,10 +1232,9 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   LOAD_ARG(rope_scaling_beta_fast, "text_config.rope_scaling.beta_fast");
   LOAD_ARG(rope_scaling_beta_slow, "text_config.rope_scaling.beta_slow");
   LOAD_ARG(rope_scaling_factor, "text_config.rope_scaling.factor");
-  LOAD_ARG_OR(
-      rope_extrapolation_factor,
-      "text_config.rope_scaling.extrapolation_factor",
-      1.0f);
+  LOAD_ARG_OR(rope_extrapolation_factor,
+              "text_config.rope_scaling.extrapolation_factor",
+              1.0f);
   LOAD_ARG(rope_scaling_mscale, "text_config.rope_scaling.mscale");
   LOAD_ARG(rope_scaling_mscale_all_dim,
            "text_config.rope_scaling.mscale_all_dim");
@@ -1235,7 +1246,7 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   LOAD_ARG_OR(bos_token_id, "text_config.bos_token_id", 163584);
   LOAD_ARG_OR(eos_token_id, "text_config.eos_token_id", 163585);
   LOAD_ARG_OR(pad_token_id, "text_config.pad_token_id", 163839);
-  
+
   // [Compared with qwen2_5_vl] missing in Kimi-K2.5 config, keep defaults.
   // LOAD_ARG_OR(vision_start_token_id, "vision_start_token_id", 151652);
   // LOAD_ARG_OR(vision_end_token_id, "vision_end_token_id", 151653);
@@ -1248,40 +1259,38 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   // vt_hidden_act is not provided in Kimi-K2.5 config, keep default "silu".
   LOAD_ARG_OR(mm_hidden_act, "vision_config.vt_hidden_act", "silu");
   LOAD_ARG_OR(mm_hidden_size, "vision_config.vt_hidden_size", 1152);
-  LOAD_ARG_OR(mm_intermediate_size,
-              "vision_config.vt_intermediate_size",
-              4304);
-  LOAD_ARG_OR(mm_num_attention_heads,
-              "vision_config.vt_num_attention_heads",
-              16);
+  LOAD_ARG_OR(mm_intermediate_size, "vision_config.vt_intermediate_size", 4304);
+  LOAD_ARG_OR(
+      mm_num_attention_heads, "vision_config.vt_num_attention_heads", 16);
 
   // Projector-related args from Kimi-K2.5 vision_config.
   LOAD_ARG_OR(mm_projection_dim, "vision_config.text_hidden_size", 7168);
-  LOAD_ARG_OR(mm_projector_type, "vision_config.mm_projector_type", "patchmerger");
-  LOAD_ARG_OR(mm_projector_hidden_act,
-              "vision_config.projector_hidden_act",
-              "gelu");
+  LOAD_ARG_OR(
+      mm_projector_type, "vision_config.mm_projector_type", "patchmerger");
+  LOAD_ARG_OR(
+      mm_projector_hidden_act, "vision_config.projector_hidden_act", "gelu");
   // NOTE: projector_ln_eps is mapped to mm_layer_norm_eps by inference.
   LOAD_ARG_OR(mm_layer_norm_eps, "vision_config.projector_ln_eps", 1e-05f);
 
   LOAD_ARG_OR(mm_patch_size, "vision_config.patch_size", 14);
   // Kimi-K2.5 uses merge_kernel_size (e.g. [2,2]); map first dim by inference.
-  LOAD_ARG_OR_FUNC(mm_spatial_merge_size, "vision_config.spatial_merge_size", [&] {
-    if (auto merge_kernel_size =
-            json.value<std::vector<int64_t>>("vision_config.merge_kernel_size");
-        merge_kernel_size.has_value() && !merge_kernel_size->empty()) {
-      return (*merge_kernel_size)[0];
-    }
-    return int64_t(2);
-  });
+  LOAD_ARG_OR_FUNC(
+      mm_spatial_merge_size, "vision_config.spatial_merge_size", [&] {
+        if (auto merge_kernel_size = json.value<std::vector<int64_t>>(
+                "vision_config.merge_kernel_size");
+            merge_kernel_size.has_value() && !merge_kernel_size->empty()) {
+          return (*merge_kernel_size)[0];
+        }
+        return int64_t(2);
+      });
 
   LOAD_ARG_OR_FUNC(mm_head_dim, "vision_config.head_dim", [&] {
     return args->mm_hidden_size() / args->mm_num_attention_heads();
   });
   // No explicit spatial_patch_size in Kimi-K2.5; fallback to patch_size.
-  LOAD_ARG_OR_FUNC(mm_spatial_patch_size, "vision_config.spatial_patch_size", [&] {
-    return args->mm_patch_size();
-  });
+  LOAD_ARG_OR_FUNC(mm_spatial_patch_size,
+                   "vision_config.spatial_patch_size",
+                   [&] { return args->mm_patch_size(); });
 
   // Original qwen2_5_vl vision args not found in Kimi-K2.5 vision_config.
   // Keep defaults and mark as unmapped:
@@ -1292,7 +1301,8 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   //             "vision_config.fullatt_block_indexes",
   //             std::vector<int64_t>({7, 15, 23, 31}));
   // LOAD_ARG_OR(mm_tokens_per_second, "vision_config.tokens_per_second", 2);
-  // LOAD_ARG_OR(mm_temporal_patch_size, "vision_config.temporal_patch_size", 2);
+  // LOAD_ARG_OR(mm_temporal_patch_size, "vision_config.temporal_patch_size",
+  // 2);
 
   // [Compared with qwen2_5_vl] qwen mrope args are absent in Kimi-K2.5 config.
   // LOAD_ARG(rope_scaling_mrope_section, "rope_scaling.mrope_section");
@@ -1360,6 +1370,3 @@ REGISTER_TOKENIZER_ARGS(kimi_k25, [&] {
   SET_ARG(pattern, pattern_str);
 });
 }  // namespace xllm
-
-
-
