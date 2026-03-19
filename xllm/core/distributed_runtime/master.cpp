@@ -453,6 +453,9 @@ std::unique_ptr<Master> fork_master(Master* master, const Options& options) {
     new_options.model_path() = options.model_path();
   }
   new_options.master_node_addr() = options.master_node_addr();
+  if (options.disagg_pd_port().has_value()) {
+    new_options.disagg_pd_port() = options.disagg_pd_port();
+  }
   new_options.server_idx() = server_idx++;
   new_options.master_status() = options.master_status();
   // Set nnodes and dp_size from fork request (tp_size * dp_size = nnodes)

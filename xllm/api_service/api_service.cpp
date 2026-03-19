@@ -21,6 +21,7 @@ limitations under the License.
 #include <json2pb/pb_to_json.h>
 
 #include <filesystem>
+#include <limits>
 
 #include "api_service/chat_json_parser.h"
 #include "call.h"
@@ -754,6 +755,16 @@ bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
   }
   if (request->dp_size() > 0) {
     options.dp_size() = request->dp_size();
+  }
+  if (request->disagg_pd_port() > 0) {
+    if (request->disagg_pd_port() >
+        std::numeric_limits<uint16_t>::max()) {
+      LOG(ERROR) << "Invalid disagg_pd_port in fork request: "
+                 << request->disagg_pd_port();
+      return false;
+    }
+    options.disagg_pd_port() =
+        static_cast<uint16_t>(request->disagg_pd_port());
   }
 
   return true;
