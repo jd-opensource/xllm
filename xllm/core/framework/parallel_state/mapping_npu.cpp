@@ -22,7 +22,7 @@ limitations under the License.
 #define ENV_lm_head_local_tp false
 #define ENV_hccl_moe_ep_buffer 512
 #define ENV_hccl_moe_tp_buffer 64
-#define ENV_enable_dp_partition_up false
+#define ENV_enable_dp_partition_up true
 
 namespace xllm {
 
