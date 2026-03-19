@@ -130,6 +130,20 @@ bool DecodeDensityComparator::operator()(
   return sequence_a->stage() < sequence_b->stage();
 }
 
+// density-first with anti-starve.
+// starved requests are sorted in deadline-first and have higher priority.
+bool DensityWithAntiStarveComparator::operator()(
+    const std::shared_ptr<Request>& a,
+    const std::shared_ptr<Request>& b) const {
+  if (a->is_starved() && b->is_starved()) {
+    return DeadlineComparator()(a, b);
+  } else if (!a->is_starved() && !b->is_starved()) {
+    return DensityComparator()(a, b);
+  } else {
+    return a->is_starved() < b->is_starved();
+  }
+}
+
 // decode-first, then density-first with anti-starve
 // used by UrgencyDensityComparator to avoid overly starvation
 bool DecodeDensityWithAntiStarveComparator::operator()(
@@ -142,15 +156,8 @@ bool DecodeDensityWithAntiStarveComparator::operator()(
     return DensityComparator()(a, b);
   } else if (sequence_a->stage() != SequenceStage::DECODE &&
              sequence_b->stage() != SequenceStage::DECODE) {
-    // with anti-starve, and starved requests have higher priority and use
-    // deadline first and they better not interfere with decode stage
-    if (a->is_starved() && b->is_starved()) {
-      return DeadlineComparator()(a, b);
-    } else if (!a->is_starved() && !b->is_starved()) {
-      return DensityComparator()(a, b);
-    } else {
-      return a->is_starved() < b->is_starved();
-    }
+    // anti-starve should not interfere with decode stage.
+    return DensityWithAntiStarveComparator()(a, b);
   } else {
     return sequence_a->stage() < sequence_b->stage();
   }
@@ -166,6 +173,7 @@ bool UrgencyDensityComparator::operator()(
   if (a->urgency() == b->urgency()) {
     if (a->urgency() == Urgency::URGENT) {
       // return DensityComparator()(a, b);
+      // return DensityWithAntiStarveComparator()(a, b);
       return DecodeDensityWithAntiStarveComparator()(a, b);
     }
     if (a->urgency() == Urgency::NORMAL) {

@@ -45,10 +45,10 @@ struct SchedulerParam {
   int32_t ttlt_slo_ms = std::numeric_limits<int32_t>::max();
   int32_t ttft_slo_ms = std::numeric_limits<int32_t>::max();
   int32_t tpot_slo_ms = std::numeric_limits<int32_t>::max();
-  int32_t tpot_priority_weight = 0;
-  int32_t ttft_priority_weight = 0;
-  int32_t ttlt_priority_weight = 0;
-  int32_t priority_weight = 0;
+  int32_t tpot_priority_weight = 1;
+  int32_t ttft_priority_weight = 1;
+  int32_t ttlt_priority_weight = 1;
+  int32_t priority_weight = 1;
   RequestPriority priority = RequestPriority::NORMAL;
 };
 

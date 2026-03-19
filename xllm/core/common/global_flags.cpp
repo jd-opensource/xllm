@@ -197,6 +197,20 @@ DEFINE_bool(enable_online_preempt_offline,
             true,
             "Whether to enable online preempt offline.");
 
+// --- mix scheduler scheduling config ---
+
+DEFINE_double(aggressive_coeff,
+              1.0,
+              "Aggressive coefficient for MixScheduler urgency judgment.");
+
+DEFINE_double(starve_threshold,
+              1.0,
+              "Starvation threshold coefficient for MixScheduler.");
+
+DEFINE_bool(enable_starve_prevent,
+            true,
+            "Whether to enable anti-starvation in MixScheduler.");
+
 // for rec, it's better to set to 100;
 DEFINE_int32(request_queue_size,
              100000,

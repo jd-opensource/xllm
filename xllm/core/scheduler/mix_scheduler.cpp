@@ -18,6 +18,7 @@ limitations under the License.
 #include <algorithm>
 #include <limits>
 
+#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/batch/batch_factory.h"
 #include "util/timer.h"
@@ -77,21 +78,22 @@ void MixScheduler::get_latency_budget_and_request_order(
   int32_t latency_budget_threshold = static_cast<int32_t>(0.65 * min_tpot);
   latency_budget = std::max(min_remaining_time, latency_budget_threshold);
 
-  double lambda = 1.0;
+  const double lambda = FLAGS_aggressive_coeff;
   double load_judge_func =
       total_exec_time * latency_budget / (latency_budget - constant_overhead);
   for (auto& request : running_queue) {  // determine urgency
     auto& sequence = request->sequences()[0];
 
-    // avoid overly starvation
-    double starve_threshold = 1.0;
-    int32_t starve_unit_time = -min_tpot;
-    // int32_t starve_unit_time = sequence->is_prefill_stage()?
-    // request->ttft_slo_ms(): request->tpot_slo_ms();
-    int32_t starve_time_threshold =
-        static_cast<int32_t>(starve_threshold * starve_unit_time);
-    if (request->get_remaining_time() < starve_time_threshold) {
-      request->set_starved(true);
+    if (FLAGS_enable_starve_prevent) {
+      // avoid overly starvation, threshold can be tuned
+      const int32_t starve_unit_time = sequence->is_prefill_stage()
+                                           ? -request->ttft_slo_ms()
+                                           : -request->tpot_slo_ms();
+      const int32_t starve_time_threshold =
+          static_cast<int32_t>(FLAGS_starve_threshold * starve_unit_time);
+      if (request->get_remaining_time() < starve_time_threshold) {
+        request->set_starved(true);
+      }
     }
 
     if (request->get_remaining_time() < lambda * load_judge_func) {
@@ -102,7 +104,13 @@ void MixScheduler::get_latency_budget_and_request_order(
   }
 
   // sort, should be urgency_density now
-  running_queue.sort(create_comparator(options_.priority_strategy(), true));
+  auto priority_strategy = options_.priority_strategy();
+  // not specifically configure priority strategy, use optimized priority
+  // strategy for mix_scheduler
+  if (priority_strategy == "fcfs") {
+    priority_strategy = "urgency_density";
+  }
+  running_queue.sort(create_comparator(priority_strategy, true));
 }
 
 size_t MixScheduler::get_needed_copy_block_num(

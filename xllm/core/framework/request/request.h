@@ -132,13 +132,16 @@ class Request : public RequestBase {
     return state_.scheduler_param.tpot_slo_ms;
   }
   const int32_t tpot_priority_weight() const {
-    return state_.scheduler_param.tpot_priority_weight;
+    return state_.scheduler_param.tpot_priority_weight *
+           state_.scheduler_param.priority_weight;
   }
   const int32_t ttft_priority_weight() const {
-    return state_.scheduler_param.ttft_priority_weight;
+    return state_.scheduler_param.ttft_priority_weight *
+           state_.scheduler_param.priority_weight;
   }
   const int32_t ttlt_priority_weight() const {
-    return state_.scheduler_param.ttlt_priority_weight;
+    return state_.scheduler_param.ttlt_priority_weight *
+           state_.scheduler_param.priority_weight;
   }
 
   void set_urgency(Urgency urgency) { urgency_ = urgency; }

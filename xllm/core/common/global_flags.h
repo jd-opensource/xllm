@@ -190,6 +190,13 @@ DECLARE_bool(use_mix_scheduler);
 
 DECLARE_bool(enable_online_preempt_offline);
 
+// --- mix scheduler config ---
+DECLARE_double(aggressive_coeff);
+
+DECLARE_double(starve_threshold);
+
+DECLARE_bool(enable_starve_prevent);
+
 DECLARE_double(host_blocks_factor);
 
 DECLARE_bool(enable_kvcache_store);
