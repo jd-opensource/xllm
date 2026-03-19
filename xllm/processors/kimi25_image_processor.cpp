@@ -59,8 +59,7 @@ KimiK25ImageProcessor::KimiK25ImageProcessor(const ModelArgs& args) {
   config_.do_normalize = true;
   config_.do_resize = true;
 
-  config_.resample =
-      args.mm_image_resample() > 0 ? args.mm_image_resample() : 3;
+  config_.resample = 3;
 }
 
 torch::Tensor KimiK25ImageProcessor::km_normalize(
