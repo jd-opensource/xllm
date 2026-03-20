@@ -220,7 +220,6 @@ nav:
         - features/eplb.md
       - Advanced Guides:
         - Speculative Inference: features/mtp.md
-        - EPLB: features/eplb.md
         - GraphMode: features/graph_mode.md
   - CLI Reference:
     - cli_reference.md
