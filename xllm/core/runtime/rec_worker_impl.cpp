@@ -663,9 +663,10 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::
   llm_rec_params.decode_positions_tensor_list.clear();
   if (!decode_positions.empty() && beam_width > 0 && total_round > 1) {
     const int32_t num_sequences = static_cast<int32_t>(decode_positions.size());
+    std::vector<int32_t> position_buffer;
+    position_buffer.reserve(static_cast<size_t>(num_sequences * beam_width));
     for (int32_t round_idx = 0; round_idx < total_round - 1; ++round_idx) {
-      std::vector<int32_t> position_buffer;
-      position_buffer.reserve(static_cast<size_t>(num_sequences * beam_width));
+      position_buffer.clear();
       for (int32_t seq_idx = 0; seq_idx < num_sequences; ++seq_idx) {
         const int32_t base_position = decode_positions[seq_idx] + round_idx;
         for (int32_t beam_idx = 0; beam_idx < beam_width; ++beam_idx) {

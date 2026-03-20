@@ -431,11 +431,14 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
   bool has_logprobs = output.beam_search_output.out_logprobs.defined() &&
                       output.beam_search_output.out_logprobs.numel() > 0;
 
+  std::vector<std::vector<int32_t>> group_flat2d;
+  std::vector<float> last_logprobs;
+  group_flat2d.reserve(static_cast<size_t>(beam_width));
+  last_logprobs.reserve(static_cast<size_t>(beam_width));
+
   for (size_t g = 0; g < num_groups; ++g) {
-    std::vector<std::vector<int32_t>> group_flat2d;
-    group_flat2d.reserve(static_cast<size_t>(beam_width));
-    std::vector<float> last_logprobs;
-    last_logprobs.reserve(static_cast<size_t>(beam_width));
+    group_flat2d.clear();
+    last_logprobs.clear();
 
     for (int b = 0; b < beam_width; ++b) {
       std::vector<int32_t> row_tokens;
