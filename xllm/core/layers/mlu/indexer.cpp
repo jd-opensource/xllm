@@ -468,10 +468,13 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::sp_post(
   // Feeding suffix-only K here would truncate the effective context seen by
   // the indexer on long prompts.
   write_prefill_k_cache(k_gathered, k_cache, gathered_slot_mapping);
+  // `k_gathered` stays in rank-packed gather order for paged-cache placement.
+  // The non-chunked segmented select path, however, slices dense K with
+  // request-global offsets and therefore must consume original token order.
   torch::Tensor k_source =
       attn_metadata.is_chunked_prefill
           ? build_sp_chunked_dense_k_source(k_cache, attn_metadata)
-          : k_gathered;
+          : v32_sp::restore_gathered_to_global_order(k_gathered, sp_ctx);
   return run_indexer_select_kernel_sp_segmented(
       pre_out, k_source, attn_metadata, sp_ctx);
 }

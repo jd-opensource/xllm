@@ -155,8 +155,6 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
 
   use_fused_mla_qkv_ = optimization_config.enable_fused_mla_kernel;
 
-  // TODO: refactor this choice of attention in the future to make it more
-  // flexible
   attn_ = register_module("attn",
                           Attention(active_heads().attn,
                                     kv_lora_rank_ + qk_rope_head_dim_,

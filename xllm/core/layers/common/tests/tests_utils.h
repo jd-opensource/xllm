@@ -158,6 +158,12 @@ class MockProcessGroup : public xllm::ProcessGroup {
     // Mock implementation - do nothing for testing
   }
 
+  c10::intrusive_ptr<c10d::Work> allreduce_async(
+      torch::Tensor& input) override {
+    allreduce(input);
+    return make_completed_work();
+  }
+
   void allgather(const torch::Tensor& input,
                  std::vector<torch::Tensor>& outputs) override {
     outputs.resize(this->world_size());

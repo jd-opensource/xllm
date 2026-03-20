@@ -502,7 +502,8 @@ AttentionRunResult run_attention_prefill_once(
     bool enable_full_weight_path,
     bool enable_fused_mla_kernel,
     BatchForwardType batch_forward_type = BatchForwardType::PREFILL,
-    int32_t prefix_len = 0) {
+    int32_t prefix_len = 0,
+    bool build_sp_context = true) {
   ScopedBoolFlagValue flag_guard(FLAGS_enable_prefill_sp,
                                  enable_full_weight_path);
   OptimizationConfig optimization_config;
@@ -519,7 +520,7 @@ AttentionRunResult run_attention_prefill_once(
   std::optional<layer::v32_sp::DeepseekV32SPContext> sp_ctx;
   torch::Tensor local_positions = positions;
   torch::Tensor local_hidden_states = hidden_states;
-  if (enable_full_weight_path && args.index_n_heads() > 0) {
+  if (build_sp_context && enable_full_weight_path && args.index_n_heads() > 0) {
     ProcessGroup* sp_group = parallel_args.sp_group_ != nullptr
                                  ? parallel_args.sp_group_
                                  : parallel_args.process_group_;
@@ -885,6 +886,112 @@ int32_t run_attention_prefill_sp_test_child(int32_t rank,
         parallel_args.tp_group_,
         use_glm5_args ? "DeepseekV2Attention glm5 prefill sp output"
                       : "DeepseekV2Attention prefill sp output");
+    return 0;
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Rank " << rank << ": Exception: " << e.what();
+    return 1;
+  }
+}
+
+int32_t run_attention_prefill_sp_baseline_test_child(int32_t rank,
+                                                     int32_t world_size,
+                                                     int32_t port,
+                                                     const std::string& host) {
+  try {
+    const int32_t dev_count = xllm::Device::device_count();
+    if (dev_count < world_size) {
+      LOG(WARNING) << "Rank " << rank << ": insufficient devices. Skipping.";
+      return EXIT_CODE_SKIP;
+    }
+
+    FLAGS_enable_mla = true;
+    FLAGS_block_size = 16;
+    const int32_t device_index = rank % dev_count;
+    xllm::Device xllm_device(device_index);
+    xllm_device.set_device();
+    torch::Device device = xllm_device.unwrap();
+    auto process_group =
+        create_test_process_group(rank, world_size, port, host, device);
+    CHECK(process_group) << "Rank " << rank
+                         << ": failed to create process group";
+    auto self_group =
+        create_test_self_group(rank, world_size, port, host, device);
+    CHECK(self_group) << "Rank " << rank << ": failed to create self group";
+
+    ParallelArgs parallel_args(rank, world_size, process_group.get());
+    parallel_args.tp_group_ = process_group.get();
+    parallel_args.single_rank_group_ = self_group.get();
+    parallel_args.sp_group_ = process_group.get();
+
+    auto options = torch::TensorOptions()
+                       .dtype(torch::kBFloat16)
+                       .device(device)
+                       .requires_grad(false);
+    ModelArgs model_args = create_attention_model_args(/*q_lora_rank=*/64,
+                                                       /*enable_indexer=*/true);
+    QuantArgs quant_args = create_default_quant_args();
+    StateDict state_dict = create_attention_state_dict(model_args, options);
+
+    constexpr int32_t seq_len = 4;
+    torch::Tensor tokens =
+        torch::arange(seq_len, options.dtype(torch::kInt32).device(device));
+    torch::Tensor hidden_states = seeded_tensor(
+        "attention_multi_device/sp_prefill_baseline_hidden_states",
+        {seq_len, model_args.hidden_size()},
+        torch::kBFloat16,
+        device);
+    torch::Tensor positions =
+        torch::arange(seq_len, options.dtype(torch::kInt32).device(device));
+
+    KVCache baseline_kv_cache = create_decode_kv_cache(model_args, options);
+    baseline_kv_cache.get_k_cache().zero_();
+    KVCache sp_kv_cache = create_decode_kv_cache(model_args, options);
+    sp_kv_cache.get_k_cache().zero_();
+
+    auto baseline_result =
+        run_attention_prefill_once(model_args,
+                                   quant_args,
+                                   parallel_args,
+                                   options,
+                                   state_dict,
+                                   tokens,
+                                   positions,
+                                   hidden_states,
+                                   baseline_kv_cache,
+                                   /*enable_full_weight_path=*/true,
+                                   /*enable_fused_mla_kernel=*/false,
+                                   BatchForwardType::PREFILL,
+                                   /*prefix_len=*/0,
+                                   /*build_sp_context=*/false);
+    auto sp_result =
+        run_attention_prefill_once(model_args,
+                                   quant_args,
+                                   parallel_args,
+                                   options,
+                                   state_dict,
+                                   tokens,
+                                   positions,
+                                   hidden_states,
+                                   sp_kv_cache,
+                                   /*enable_full_weight_path=*/true,
+                                   /*enable_fused_mla_kernel=*/
+                                   false);
+
+    xllm_device.synchronize_default_stream();
+    check_repl_output_contract(baseline_result,
+                               seq_len,
+                               model_args.hidden_size(),
+                               "DeepseekV2Attention prefill baseline");
+    check_sp_output_contract(sp_result,
+                             seq_len,
+                             model_args.hidden_size(),
+                             /*local_token_num=*/seq_len / world_size,
+                             "DeepseekV2Attention prefill sp baseline");
+    check_tensors_close(sp_result.global_output,
+                        baseline_result.global_output,
+                        /*rtol=*/1e-3,
+                        /*atol=*/1e-2,
+                        "DeepseekV2Attention prefill sp output");
     return 0;
   } catch (const std::exception& e) {
     LOG(ERROR) << "Rank " << rank << ": Exception: " << e.what();
@@ -1280,6 +1387,48 @@ class AttentionMultiDeviceTest : public ::testing::Test {
     }
   }
 
+  void run_prefill_sp_baseline_test() {
+    std::vector<pid_t> child_pids;
+    for (int32_t rank = 0; rank < world_size_; ++rank) {
+      pid_t pid = fork();
+      if (pid == 0) {
+        const int32_t exit_code = run_attention_prefill_sp_baseline_test_child(
+            rank, world_size_, port_, host_);
+        _exit(exit_code);
+      } else if (pid > 0) {
+        child_pids.push_back(pid);
+      } else {
+        LOG(FATAL) << "Failed to fork rank " << rank;
+      }
+    }
+
+    bool any_failed = false;
+    bool any_skipped = false;
+    for (size_t i = 0; i < child_pids.size(); ++i) {
+      int32_t status;
+      waitpid(child_pids[i], &status, 0);
+      if (WIFEXITED(status)) {
+        const int32_t exit_code = WEXITSTATUS(status);
+        if (exit_code == EXIT_CODE_SKIP) {
+          any_skipped = true;
+        } else if (exit_code != 0) {
+          any_failed = true;
+          LOG(ERROR) << "Rank " << i << " failed with code " << exit_code;
+        }
+      } else {
+        any_failed = true;
+        LOG(ERROR) << "Rank " << i << " crashed (signal).";
+      }
+    }
+
+    if (any_skipped) {
+      GTEST_SKIP() << "Test skipped due to insufficient devices.";
+    } else {
+      ASSERT_FALSE(any_failed)
+          << "Attention multi-device SP prefill baseline test failed.";
+    }
+  }
+
   int32_t world_size_;
   int32_t port_;
   std::string host_;
@@ -1315,6 +1464,10 @@ TEST_F(AttentionMultiDeviceTest, Glm5PrefillSpRestoresToTpBaseline) {
 TEST_F(AttentionMultiDeviceTest,
        ChunkedPrefillSpAcrossChunksMatchesTpBaseline) {
   run_chunked_test();
+}
+
+TEST_F(AttentionMultiDeviceTest, PrefillSpNonChunkedMatchesReplicatedBaseline) {
+  run_prefill_sp_baseline_test();
 }
 
 }  // namespace test

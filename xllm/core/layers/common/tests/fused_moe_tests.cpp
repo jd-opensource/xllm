@@ -278,12 +278,15 @@ class FusedMoETest : public ::testing::Test {
   void set_tp_ctx(int64_t world_size) {
     mock_process_group_ = std::make_unique<test::MockProcessGroup>(
         options_.device(), /*rank=*/0, world_size);
+    single_rank_pg_ = std::make_unique<test::MockProcessGroup>(
+        options_.device(), /*rank=*/0, /*world_size=*/1);
     parallel_args_ = ParallelArgs(/*rank=*/0,
                                   world_size,
                                   /*dp_size=*/1,
                                   mock_process_group_.get());
     parallel_args_.process_group_ = mock_process_group_.get();
     parallel_args_.tp_group_ = mock_process_group_.get();
+    parallel_args_.single_rank_group_ = single_rank_pg_.get();
   }
 
   // Helper function to create test weights for the FusedMoE (w8a8 smoothquant
@@ -337,6 +340,7 @@ class FusedMoETest : public ::testing::Test {
 
   // Helper to create a mock ProcessGroup for testing
   std::unique_ptr<xllm::ProcessGroup> mock_process_group_;
+  std::unique_ptr<xllm::ProcessGroup> single_rank_pg_;
 
   // Expected output for precision verification
   std::vector<float> expected_output_;
@@ -613,6 +617,7 @@ TEST_F(FusedMoETest, NoReductionModeMatchesExternalReduce) {
 
   auto shared = raw_moe->forward_shared(hidden_states);
   ASSERT_TRUE(shared.defined());
+  ASSERT_EQ(raw_moe->shared_pg(), parallel_args_.single_rank_group_);
   shared = parallel_state::reduce(shared, raw_moe->shared_pg());
   actual = actual + shared;
 

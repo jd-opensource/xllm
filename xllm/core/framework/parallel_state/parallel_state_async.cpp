@@ -69,5 +69,17 @@ GatherAsyncCtx launch_gather(const torch::Tensor& input,
   return ctx;
 }
 
+ReduceAsyncCtx launch_reduce(torch::Tensor input, ProcessGroup* process_group) {
+  ReduceAsyncCtx ctx;
+  if (!process_group || process_group->world_size() <= 1) {
+    ctx.tensor = std::move(input);
+    return ctx;
+  }
+
+  ctx.tensor = input.contiguous();
+  ctx.work = process_group->allreduce_async(ctx.tensor);
+  return ctx;
+}
+
 }  // namespace parallel_state
 }  // namespace xllm

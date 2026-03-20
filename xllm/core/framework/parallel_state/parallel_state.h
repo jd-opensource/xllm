@@ -34,6 +34,11 @@ struct GatherAsyncCtx {
   std::vector<int32_t> token_num_list;
 };
 
+struct ReduceAsyncCtx {
+  torch::Tensor tensor;
+  c10::intrusive_ptr<c10d::Work> work;
+};
+
 std::optional<ParallelArgs> get_dp_attn_parallel_args(
     const ParallelArgs& parallel_args);
 
@@ -50,6 +55,10 @@ GatherAsyncCtx launch_gather(const torch::Tensor& input,
                              const std::vector<int32_t>& token_num_list);
 
 torch::Tensor finish_gather(GatherAsyncCtx ctx);
+
+ReduceAsyncCtx launch_reduce(torch::Tensor input, ProcessGroup* process_group);
+
+torch::Tensor finish_reduce(ReduceAsyncCtx ctx);
 
 torch::Tensor all_gather_interleaved(const torch::Tensor& input,
                                      ProcessGroup* process_group);

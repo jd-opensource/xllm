@@ -60,7 +60,13 @@ class FusedMoEImpl : public torch::nn::Module {
                         const ModelInputParams& input_params);
   void load_state_dict(const StateDict& state_dict);
   void verify_loaded_weights() const;
+  bool has_shared() const { return static_cast<bool>(shared_experts_); }
+  void init_async(const torch::Tensor& hidden_states) {
+    init_streams(hidden_states);
+  }
   ProcessGroup* shared_pg() const { return shared_pg_; }
+  Stream* shared_stream() const { return shared_stream_.get(); }
+  Stream* routed_stream() const { return routed_stream_.get(); }
 
  private:
   // struct to store the selected expert info

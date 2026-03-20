@@ -292,6 +292,20 @@ inline torch::Tensor all_gather_across_ranks(
       local_tensor, context.process_group, context.comm_plan.tokens_per_rank);
 }
 
+inline PaddedGatherHandle launch_all_gather_across_ranks(
+    const torch::Tensor& local_tensor,
+    const DeepseekV32SPContext& context) {
+  if (!local_tensor.defined()) {
+    return {};
+  }
+  return xllm::parallel_state::launch_gather(
+      local_tensor, context.process_group, context.comm_plan.tokens_per_rank);
+}
+
+inline torch::Tensor finish_all_gather_across_ranks(PaddedGatherHandle handle) {
+  return xllm::parallel_state::finish_gather(std::move(handle));
+}
+
 inline torch::Tensor restore_gathered_to_global_order(
     const torch::Tensor& gathered_tensor,
     const DeepseekV32SPContext& context) {

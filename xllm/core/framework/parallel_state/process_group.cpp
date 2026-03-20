@@ -87,8 +87,14 @@ c10::intrusive_ptr<c10d::Store> create_tcp_store(const std::string& host,
 
 void ProcessGroup::allreduce(torch::Tensor& input) {
   CHECK(pg_ != nullptr) << "Process group is not initialized.";
+  allreduce_async(input)->wait();
+}
+
+c10::intrusive_ptr<c10d::Work> ProcessGroup::allreduce_async(
+    torch::Tensor& input) {
+  CHECK(pg_ != nullptr) << "Process group is not initialized.";
   std::vector<torch::Tensor> input_tensors = {input};
-  pg_->allreduce(input_tensors)->wait();
+  return pg_->allreduce(input_tensors);
 }
 
 void ProcessGroup::allgather(const torch::Tensor& input,
