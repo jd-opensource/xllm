@@ -27,6 +27,7 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
                                     const ModelArgs& args,
                                     const ParallelArgs& parallel_args,
                                     bool isPrefill) {
+  const bool use_column_parallel = cp_size_ > 1;
   param.unpadInputs = true;
   param.gatherAhead = isPrefill;
   LOG(INFO) << "[CP_DEBUG] gatherAhead = " << param.gatherAhead;
@@ -52,7 +53,9 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
         param.linearParallelParam.tensorParallelInfo.worldSize =
             parallel_args.world_size();
       }
-      param.linearParallelParam.parallelType = atb_speed::common::ROW_PARALLEL;
+      param.linearParallelParam.parallelType =
+          use_column_parallel ? atb_speed::common::COLUMN_PARALLEL
+                              : atb_speed::common::ROW_PARALLEL;
       const int32_t tp_group_id =
           use_local_tp ? (parallel_args.rank() / dp_local_tp_size_) : 0;
       param.linearParallelParam.tensorParallelInfo.commDomain =
@@ -62,7 +65,9 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
       lm_head_tp_world_size =
           param.linearParallelParam.tensorParallelInfo.worldSize;
     } else {
-      param.linearParallelParam.parallelType = atb_speed::common::ROW_PARALLEL;
+      param.linearParallelParam.parallelType =
+          use_column_parallel ? atb_speed::common::COLUMN_PARALLEL
+                              : atb_speed::common::ROW_PARALLEL;
       atb_speed::common::ParallelInfo parallelInfo =
           parallel_args.mapping().Get(atb_speed::base::LM_HEAD_TP);
       param.linearParallelParam.tensorParallelInfo.rank = parallelInfo.rank;
@@ -78,8 +83,10 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
       param.contextParallelInfo =
           parallel_args.mapping().Get(atb_speed::base::ATTN_CP);
     }
-    param.hiddenSizePerAttentionHead =
-        args.hidden_size() / lm_head_tp_world_size;
+    if (!use_column_parallel) {
+      param.hiddenSizePerAttentionHead =
+          args.hidden_size() / lm_head_tp_world_size;
+    }
   }
 }
 

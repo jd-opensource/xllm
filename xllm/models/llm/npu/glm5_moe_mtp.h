@@ -54,7 +54,7 @@ TORCH_MODULE(GlmMoeDsaMtpForCausalLM);
 REGISTER_CAUSAL_MODEL(glm_moe_dsa_mtp, GlmMoeDsaMtpForCausalLM);
 
 REGISTER_MODEL_ARGS(glm_moe_dsa_mtp, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "glm_moe_dsa_mtp");
+  LOAD_ARG_OR(model_type, "model_type", "_mtp");
   LOAD_ARG_OR(dtype, "dtype", "");
   LOAD_ARG_OR(attention_bias, "attention_bias", false);
   LOAD_ARG_OR(attention_dropout, "attention_dropout", 0.0f);
