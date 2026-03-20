@@ -287,7 +287,7 @@ void AttentionImpl::decoder_forward(
                                   /*out_quant_scale=*/std::nullopt,
                                   /*alibi_slope=*/std::nullopt,
                                   /*mask=*/std::nullopt,
-                                  /*compute_dtype=*/"float",
+                                  attn_metadata.compute_dtype,
                                   attn_metadata.max_seq_len,
                                   sliding_window_,
                                   /*window_size_right=*/-1,

@@ -828,6 +828,47 @@ TEST(DeepseekV32SPUtilsTest, SPContextBuildsGatheredSlotMapping) {
   EXPECT_TRUE(torch::equal(context.gathered_slot_mapping, expected));
 }
 
+TEST(DeepseekV32SPUtilsTest,
+     NonChunkedSegmentSliceRequiresRestoredGlobalDenseOrder) {
+  ScopedFlagValue use_sp(FLAGS_enable_prefill_sp, true);
+  ScopedFlagValue nnodes(FLAGS_nnodes, 2);
+
+  AttentionMetadata attn_metadata = make_prefill_metadata({4});
+  torch::Tensor tokens =
+      torch::arange(0, 4, torch::TensorOptions().dtype(torch::kInt32));
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    0,
+                                    2);
+  ASSERT_TRUE(maybe_context.has_value());
+  const auto& context = maybe_context.value();
+
+  ASSERT_EQ(context.local_segments.size(), 2U);
+  const auto& right_segment = context.local_segments[1];
+  EXPECT_EQ(right_segment.q_tokens, 1);
+  EXPECT_EQ(right_segment.suffix_k_len, 4);
+  EXPECT_EQ(context.req_q_offsets_cpu[right_segment.req_idx], 0);
+
+  torch::Tensor k_gathered = context.gathered_reorder_index.to(
+      torch::TensorOptions().dtype(torch::kFloat32));
+  torch::Tensor k_restored =
+      restore_gathered_to_global_order(k_gathered, context);
+
+  const int32_t req_q_start = context.req_q_offsets_cpu[right_segment.req_idx];
+  torch::Tensor packed_slice =
+      k_gathered.narrow(0, req_q_start, right_segment.suffix_k_len);
+  torch::Tensor restored_slice =
+      k_restored.narrow(0, req_q_start, right_segment.suffix_k_len);
+  torch::Tensor expected =
+      torch::arange(0, 4, torch::TensorOptions().dtype(torch::kFloat32));
+
+  EXPECT_FALSE(torch::equal(packed_slice, expected));
+  EXPECT_TRUE(torch::equal(restored_slice, expected));
+}
+
 TEST(DeepseekV32SPUtilsTest, AsyncGatherReturnsGatheredOrder) {
   ScopedFlagValue use_sp(FLAGS_enable_prefill_sp, true);
   ScopedFlagValue nnodes(FLAGS_nnodes, 4);
@@ -881,6 +922,49 @@ TEST(DeepseekV32SPUtilsTest, AsyncGatherReturnsGatheredOrder) {
   EXPECT_TRUE(torch::equal(
       restored,
       torch::arange(0, 10, torch::TensorOptions().dtype(torch::kFloat32))));
+}
+
+TEST(DeepseekV32SPUtilsTest, AsyncGatherHelpersMatchBlockingGather) {
+  ScopedFlagValue use_sp(FLAGS_enable_prefill_sp, true);
+  ScopedFlagValue nnodes(FLAGS_nnodes, 4);
+
+  AttentionMetadata attn_metadata = make_prefill_metadata({10});
+  torch::Tensor tokens =
+      torch::arange(0, 10, torch::TensorOptions().dtype(torch::kInt32));
+  auto maybe_context =
+      build_deepseek_v32_sp_context(attn_metadata,
+                                    BatchForwardType::PREFILL,
+                                    tokens,
+                                    reinterpret_cast<ProcessGroup*>(0x1),
+                                    1,
+                                    4);
+  ASSERT_TRUE(maybe_context.has_value());
+  auto context = maybe_context.value();
+
+  const int64_t padded_token_num = context.comm_plan.padded_tokens_per_rank[0];
+  std::vector<torch::Tensor> scripted_outputs;
+  scripted_outputs.reserve(4);
+  for (int64_t world_rank = 0; world_rank < 4; ++world_rank) {
+    scripted_outputs.push_back(
+        torch::full({padded_token_num, 2},
+                    static_cast<float>(world_rank),
+                    torch::TensorOptions().dtype(torch::kFloat32)));
+  }
+
+  ScriptedAllGatherProcessGroup scripted_group(
+      torch::Device(torch::kCPU), 1, std::move(scripted_outputs));
+  context.process_group = &scripted_group;
+  torch::Tensor local_tensor =
+      torch::full({context.comm_plan.tokens_per_rank[context.rank], 2},
+                  1.0f,
+                  torch::TensorOptions().dtype(torch::kFloat32));
+
+  auto gather_handle = launch_all_gather_across_ranks(local_tensor, context);
+  auto gathered_async =
+      finish_all_gather_across_ranks(std::move(gather_handle));
+  auto gathered_sync = all_gather_across_ranks(local_tensor, context);
+
+  EXPECT_TRUE(torch::equal(gathered_async, gathered_sync));
 }
 
 }  // namespace

@@ -68,19 +68,10 @@ class DeepseekV2DecoderLayerTestPeer {
       DeepseekV2AttentionImpl::PostAttnLayout attn_layout,
       bool need_dp_gather,
       bool enable_moe_all2all) {
-    return decoder.build_post_attn_carrier(x,
-                                           residual,
-                                           input_params,
-                                           attn_layout,
-                                           need_dp_gather,
-                                           enable_moe_all2all);
-  }
-
-  static torch::Tensor materialize_ffn_input(
-      DeepseekV2DecoderLayerImpl& decoder,
-      Carrier& carrier,
-      const ModelInputParams& input_params) {
-    return decoder.materialize_ffn_input(carrier, input_params);
+    (void)input_params;
+    (void)need_dp_gather;
+    (void)enable_moe_all2all;
+    return decoder.build_post_attn_carrier(x, residual, attn_layout);
   }
 
   static torch::Tensor restore_ffn_output(
@@ -88,7 +79,8 @@ class DeepseekV2DecoderLayerTestPeer {
       torch::Tensor x,
       const Carrier& carrier,
       const ModelInputParams& input_params) {
-    return decoder.restore_ffn_output(x, carrier, input_params);
+    (void)input_params;
+    return decoder.restore_ffn_output(x, carrier);
   }
 
   static bool can_keep_local_output(DeepseekV2DecoderLayerImpl& decoder,
@@ -113,8 +105,19 @@ class DeepseekV2DecoderLayerTestPeer {
     return decoder.mlp_;
   }
 
-  static FusedMoE moe(DeepseekV2DecoderLayerImpl& decoder) {
-    return decoder.moe_mlp_;
+  static torch::Tensor run_mlp(DeepseekV2DecoderLayerImpl& decoder,
+                               torch::Tensor x,
+                               const ModelInputParams& input_params) {
+    return decoder.run_mlp(std::move(x), input_params);
+  }
+
+  static int64_t sp_ffn_chunk(DeepseekV2DecoderLayerImpl& decoder) {
+    return decoder.sp_ffn_chunk_size_;
+  }
+
+  static void set_sp_ffn_chunk(DeepseekV2DecoderLayerImpl& decoder,
+                               int64_t chunk_size) {
+    decoder.sp_ffn_chunk_size_ = chunk_size;
   }
 
   static torch::Tensor reduce_out(DeepseekV2DecoderLayerImpl& decoder,
@@ -654,6 +657,9 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     parallel_args_.process_group_ = global_pg_.get();
     parallel_args_.dp_local_process_group_ = dp_pg_.get();
     parallel_args_.tp_group_ = tp_pg_.get();
+    parallel_args_.single_rank_group_ =
+        tp_size > 1 ? build_single_rank_pg() : tp_pg_.get();
+    parallel_args_.sp_group_ = tp_pg_.get();
     refresh_ctx();
   }
 
@@ -670,6 +676,9 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     parallel_args_.process_group_ = global_pg_.get();
     parallel_args_.dp_local_process_group_ = nullptr;
     parallel_args_.tp_group_ = tp_pg_.get();
+    parallel_args_.single_rank_group_ =
+        world_size > 1 ? build_single_rank_pg() : tp_pg_.get();
+    parallel_args_.sp_group_ = tp_pg_.get();
     refresh_ctx();
   }
 
@@ -687,9 +696,17 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     parallel_args_.process_group_ = global_pg_.get();
     parallel_args_.dp_local_process_group_ = dp_pg_.get();
     parallel_args_.tp_group_ = tp_pg_.get();
+    parallel_args_.single_rank_group_ = tp_pg_.get();
+    parallel_args_.sp_group_ = tp_pg_.get();
     parallel_args_.moe_ep_group_ = global_pg_.get();
     parallel_args_.moe_tp_group_ = tp_pg_.get();
     refresh_ctx();
+  }
+
+  ProcessGroup* build_single_rank_pg() {
+    single_rank_pg_ = std::make_unique<test::MockProcessGroup>(
+        options_.device(), /*rank=*/0, /*world_size=*/1);
+    return single_rank_pg_.get();
   }
 
   void set_sp_ctx(DecoderHolder& decoder,
@@ -821,6 +838,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
   std::unique_ptr<test::MockProcessGroup> global_pg_;
   std::unique_ptr<test::MockProcessGroup> dp_pg_;
   std::unique_ptr<test::MockProcessGroup> tp_pg_;
+  std::unique_ptr<test::MockProcessGroup> single_rank_pg_;
   std::unique_ptr<test::MockProcessGroup> sp_pg_;
   ModelContext context_{};
   v32_sp::DeepseekV32SPContext sp_ctx_{};
@@ -1083,107 +1101,6 @@ TEST_F(DeepseekV2DecoderLayerTest, BuildPostAttnCarrierPackedLocal) {
       torch::cat({expected_local_norm, remote_norm.slice(0, 0, 1)}, 0));
 }
 
-TEST_F(DeepseekV2DecoderLayerTest, MaterializeFfnInputDpGather) {
-  set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
-  auto decoder = make_decoder(/*layer_id=*/0);
-  ModelInputParams input_params;
-  input_params.dp_global_token_nums = {3, 1};
-
-  auto attn_out = torch::tensor(
-      {{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}, {7.0f, 8.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  auto residual = torch::tensor(
-      {{10.0f, 20.0f}, {30.0f, 40.0f}, {50.0f, 60.0f}, {70.0f, 80.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  auto dp0_tp0 = torch::tensor(
-      {{11.0f, 22.0f}, {33.0f, 44.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  auto dp0_tp1 = torch::tensor(
-      {{55.0f, 66.0f}, {0.0f, 0.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  auto dp1_tp0 = torch::tensor(
-      {{101.0f, 202.0f}, {0.0f, 0.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  auto dp1_tp1 = torch::zeros_like(dp1_tp0);
-  tp_pg_->set_allgather_outputs({dp0_tp0, dp0_tp1});
-
-  auto carrier = DeepseekV2DecoderLayerTestPeer::build_post_attn_carrier(
-      *decoder,
-      attn_out,
-      residual,
-      input_params,
-      DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
-      /*need_dp_gather=*/true,
-      /*enable_moe_all2all=*/false);
-
-  global_pg_->set_allgather_outputs({dp0_tp0, dp0_tp1, dp1_tp0, dp1_tp1});
-  auto ffn_input = DeepseekV2DecoderLayerTestPeer::materialize_ffn_input(
-      *decoder, carrier, input_params);
-
-  auto expected = torch::tensor(
-      {{11.0f, 22.0f}, {33.0f, 44.0f}, {55.0f, 66.0f}, {101.0f, 202.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  test::verify_tensor_close(ffn_input, expected);
-}
-
-TEST_F(DeepseekV2DecoderLayerTest, MaterializeFfnInputTpShardNoFallback) {
-  set_tp_ctx(/*world_size=*/2, /*ep_size=*/2);
-  auto decoder = make_decoder(/*layer_id=*/0);
-  ModelInputParams input_params;
-
-  auto attn_out = torch::tensor(
-      {{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  auto residual = torch::zeros_like(attn_out);
-  auto carrier = DeepseekV2DecoderLayerTestPeer::build_post_attn_carrier(
-      *decoder,
-      attn_out,
-      residual,
-      input_params,
-      DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
-      /*need_dp_gather=*/false,
-      /*enable_moe_all2all=*/true);
-
-  auto materialized = DeepseekV2DecoderLayerTestPeer::materialize_ffn_input(
-      *decoder, carrier, input_params);
-
-  test::verify_tensor_close(materialized, carrier.ffn_in);
-}
-
-TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputTpGather) {
-  set_tp_ctx(/*world_size=*/2, /*ep_size=*/2);
-  auto decoder = make_decoder(/*layer_id=*/0);
-  ModelInputParams input_params;
-
-  auto attn_out = torch::tensor(
-      {{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  auto residual = torch::zeros_like(attn_out);
-  auto carrier = DeepseekV2DecoderLayerTestPeer::build_post_attn_carrier(
-      *decoder,
-      attn_out,
-      residual,
-      input_params,
-      DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
-      /*need_dp_gather=*/false,
-      /*enable_moe_all2all=*/true);
-
-  auto shard0 = torch::tensor(
-      {{1.0f, 2.0f}, {3.0f, 4.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  auto shard1 = torch::tensor(
-      {{5.0f, 6.0f}, {0.0f, 0.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  tp_pg_->set_allgather_outputs({shard0, shard1});
-
-  auto restored = DeepseekV2DecoderLayerTestPeer::restore_ffn_output(
-      *decoder, shard0, carrier, input_params);
-  auto expected = torch::tensor(
-      {{2.0f, 4.0f}, {6.0f, 8.0f}, {10.0f, 12.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  test::verify_tensor_close(restored, expected);
-}
-
 TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputReplicated) {
   auto decoder = make_decoder(/*layer_id=*/0);
   ModelInputParams input_params;
@@ -1211,44 +1128,6 @@ TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputReplicated) {
 
   auto expected = torch::tensor(
       {{111.0f, 222.0f}, {333.0f, 444.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  test::verify_tensor_close(restored, expected);
-}
-
-TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputDpSlice) {
-  set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
-  auto decoder = make_decoder(/*layer_id=*/0);
-  ModelInputParams input_params;
-  input_params.dp_global_token_nums = {3, 1};
-
-  auto attn_out = torch::tensor(
-      {{1.0f, 2.0f}, {3.0f, 4.0f}, {5.0f, 6.0f}, {7.0f, 8.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  auto residual = torch::tensor(
-      {{10.0f, 20.0f}, {30.0f, 40.0f}, {50.0f, 60.0f}, {70.0f, 80.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  auto full_tokens = torch::tensor(
-      {{11.0f, 22.0f}, {33.0f, 44.0f}, {55.0f, 66.0f}, {77.0f, 88.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  tp_pg_->set_allgather_outputs(
-      {full_tokens.slice(0, 0, 2), full_tokens.slice(0, 2, 4)});
-
-  auto carrier = DeepseekV2DecoderLayerTestPeer::build_post_attn_carrier(
-      *decoder,
-      attn_out,
-      residual,
-      input_params,
-      DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
-      /*need_dp_gather=*/true,
-      /*enable_moe_all2all=*/false);
-
-  auto ffn_out = torch::tensor(
-      {{101.0f, 102.0f}, {103.0f, 104.0f}, {105.0f, 106.0f}, {107.0f, 108.0f}},
-      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
-  auto restored = DeepseekV2DecoderLayerTestPeer::restore_ffn_output(
-      *decoder, ffn_out, carrier, input_params);
-  auto expected = torch::tensor(
-      {{112.0f, 124.0f}, {136.0f, 148.0f}, {160.0f, 172.0f}},
       torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
   test::verify_tensor_close(restored, expected);
 }
@@ -1531,6 +1410,47 @@ TEST_F(DeepseekV2DecoderLayerTest, DenseMlpReductionMovesToDecoder) {
   EXPECT_EQ(reduced_out.sizes(), local_out.sizes());
 }
 
+TEST_F(DeepseekV2DecoderLayerTest, DenseMlpChunkMatchesDirectPrefill) {
+  auto decoder = make_loaded_decoder(/*layer_id=*/0);
+  set_sp_ctx(decoder);
+  DeepseekV2DecoderLayerTestPeer::set_sp_ffn_chunk(*decoder, /*chunk_size=*/2);
+
+  auto hidden_states = test::seeded_tensor("deepseek_v2_decoder.chunk_prefill",
+                                           {5, model_args_.hidden_size()},
+                                           torch::kBFloat16,
+                                           options_.device());
+  auto input_params = build_prefill_params(/*batch_size=*/1, /*seq_len=*/5);
+
+  auto expected =
+      DeepseekV2DecoderLayerTestPeer::mlp(*decoder)->forward(hidden_states);
+  auto actual = DeepseekV2DecoderLayerTestPeer::run_mlp(
+      *decoder, hidden_states, input_params);
+
+  sync_dev();
+  test::verify_tensor_close(actual, expected, 1e-3, 1e-4);
+}
+
+TEST_F(DeepseekV2DecoderLayerTest, DenseMlpChunkMatchesDirectChunkedPrefill) {
+  auto decoder = make_loaded_decoder(/*layer_id=*/0);
+  set_sp_ctx(decoder);
+  DeepseekV2DecoderLayerTestPeer::set_sp_ffn_chunk(*decoder, /*chunk_size=*/2);
+
+  auto hidden_states = test::seeded_tensor("deepseek_v2_decoder.chunk_chunked",
+                                           {5, model_args_.hidden_size()},
+                                           torch::kBFloat16,
+                                           options_.device());
+  auto input_params = build_prefill_params(/*batch_size=*/1, /*seq_len=*/5);
+  input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
+
+  auto expected =
+      DeepseekV2DecoderLayerTestPeer::mlp(*decoder)->forward(hidden_states);
+  auto actual = DeepseekV2DecoderLayerTestPeer::run_mlp(
+      *decoder, hidden_states, input_params);
+
+  sync_dev();
+  test::verify_tensor_close(actual, expected, 1e-3, 1e-4);
+}
+
 TEST_P(DeepseekV2DecoderLayerParamTest,
        Forward_WhenPrefill_ThenMatchesReferencePrefix) {
   constexpr int64_t kBatchSize = 4;
@@ -1661,86 +1581,6 @@ INSTANTIATE_TEST_SUITE_P(
                     /*pad_active=*/false,
                     /*pad_org_tokens=*/0,
                     /*pad_tokens=*/0,
-                    {11.0f, 22.0f, 33.0f, 44.0f},
-                    {11.0f, 22.0f, 33.0f, 44.0f},
-                    /*expected_allreduce_calls=*/0,
-                    /*expected_rs_calls=*/0},
-        CarrierCase{"TpShard_DpGather_KeepsLocalSlice",
-                    CarrierEnv::kTpDp,
-                    /*tp_world_size=*/2,
-                    /*ep_size=*/4,
-                    DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
-                    /*need_dp_gather=*/true,
-                    /*enable_moe_all2all=*/false,
-                    /*rows=*/4,
-                    {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f},
-                    {10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f, 70.0f, 80.0f},
-                    {3, 1},
-                    {11.0f, 22.0f, 33.0f, 44.0f, 55.0f, 66.0f, 77.0f, 88.0f},
-                    DeepseekV2DecoderLayerTestPeer::Mode::kDpGather,
-                    /*pad_active=*/false,
-                    /*pad_org_tokens=*/4,
-                    /*pad_tokens=*/4,
-                    {11.0f, 22.0f, 33.0f, 44.0f},
-                    {11.0f, 22.0f, 33.0f, 44.0f, 55.0f, 66.0f},
-                    /*expected_allreduce_calls=*/0,
-                    /*expected_rs_calls=*/0},
-        CarrierCase{"TpShard_All2All_ReduceScatters",
-                    CarrierEnv::kCountingTp,
-                    /*tp_world_size=*/2,
-                    /*ep_size=*/2,
-                    DeepseekV2AttentionImpl::PostAttnLayout::kTpShard,
-                    /*need_dp_gather=*/false,
-                    /*enable_moe_all2all=*/true,
-                    /*rows=*/3,
-                    {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-                    {10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f},
-                    {},
-                    {},
-                    DeepseekV2DecoderLayerTestPeer::Mode::kTpPadded,
-                    /*pad_active=*/true,
-                    /*pad_org_tokens=*/3,
-                    /*pad_tokens=*/4,
-                    {11.0f, 22.0f, 33.0f, 44.0f},
-                    {11.0f, 22.0f, 33.0f, 44.0f},
-                    /*expected_allreduce_calls=*/0,
-                    /*expected_rs_calls=*/1},
-        CarrierCase{"TpShard_FullAttnAll2All_UsesReplicatedInput",
-                    CarrierEnv::kCountingTp,
-                    /*tp_world_size=*/2,
-                    /*ep_size=*/2,
-                    DeepseekV2AttentionImpl::PostAttnLayout::kReplicated,
-                    /*need_dp_gather=*/false,
-                    /*enable_moe_all2all=*/true,
-                    /*rows=*/3,
-                    {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-                    {10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f},
-                    {},
-                    {},
-                    DeepseekV2DecoderLayerTestPeer::Mode::kTpPadded,
-                    /*pad_active=*/true,
-                    /*pad_org_tokens=*/3,
-                    /*pad_tokens=*/4,
-                    {11.0f, 22.0f, 33.0f, 44.0f},
-                    {11.0f, 22.0f, 33.0f, 44.0f},
-                    /*expected_allreduce_calls=*/0,
-                    /*expected_rs_calls=*/0},
-        CarrierCase{"TpShard_WorldSizeOne_SkipsPadding",
-                    CarrierEnv::kTpOnly,
-                    /*tp_world_size=*/1,
-                    /*ep_size=*/1,
-                    DeepseekV2AttentionImpl::PostAttnLayout::kReplicated,
-                    /*need_dp_gather=*/false,
-                    /*enable_moe_all2all=*/true,
-                    /*rows=*/2,
-                    {1.0f, 2.0f, 3.0f, 4.0f},
-                    {10.0f, 20.0f, 30.0f, 40.0f},
-                    {},
-                    {},
-                    DeepseekV2DecoderLayerTestPeer::Mode::kTpPadded,
-                    /*pad_active=*/false,
-                    /*pad_org_tokens=*/2,
-                    /*pad_tokens=*/2,
                     {11.0f, 22.0f, 33.0f, 44.0f},
                     {11.0f, 22.0f, 33.0f, 44.0f},
                     /*expected_allreduce_calls=*/0,

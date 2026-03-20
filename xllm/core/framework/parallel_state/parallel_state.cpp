@@ -173,6 +173,13 @@ torch::Tensor all_gather_interleaved(const torch::Tensor& input,
   return torch::cat(ordered_tensors, dim).contiguous();
 }
 
+torch::Tensor finish_reduce(ReduceAsyncCtx ctx) {
+  if (ctx.work.defined()) {
+    ctx.work->wait();
+  }
+  return ctx.tensor;
+}
+
 torch::Tensor reduce(torch::Tensor& input, ProcessGroup* process_group) {
   if (!process_group) {
     return input;
@@ -181,8 +188,7 @@ torch::Tensor reduce(torch::Tensor& input, ProcessGroup* process_group) {
   if (world_size == 1) {
     return input;
   }
-  process_group->allreduce(input);
-  return input;
+  return finish_reduce(launch_reduce(input, process_group));
 }
 
 torch::Tensor reduce_scatter(const torch::Tensor& input,

@@ -33,6 +33,7 @@ cc_test(
   SRCS
     moe_gate_tests.cpp
     fused_moe_tests.cpp
+    deepseek_v2_sparse_moe_block_tests.cpp
     tests_utils.cpp
   DEPS
     :common_layers

@@ -145,22 +145,11 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
 
   gate_ = register_module("gate", MoEGate(model_args, quant_args, options));
   if (n_shared_experts_ > 0) {
-    ProcessGroup* shared_expert_pg;
-    if (parallel_args_.ep_size() > 1) {
-      // we use tp=1 for shared experts computation in deep ep mode
-      CHECK(parallel_args_.ep_size() == parallel_args_.world_size())
-          << "Models with shared experts only support ep_size equal to "
-             "world size for now.";
-      shared_expert_pg = parallel_args.moe_tp_group_;
-    } else {
-      shared_expert_pg = parallel_args.process_group_;
-    }
-    // The shared experts computation can proceed in parallel with the
-    // final communication step during the MoE computation, as long as it
-    // remains independent of any communication operations. For optimal
-    // performance, ensure that the shared experts layer on each rank always
-    // maintains its own unique weights.
-    shared_pg_ = shared_expert_pg;
+    CHECK(parallel_args.single_rank_group_ != nullptr)
+        << "shared experts require single_rank_group_";
+    // Shared experts always run with full weights on the local rank. This
+    // keeps the shared path independent from TP/EP sharding.
+    shared_pg_ = parallel_args.single_rank_group_;
     shared_experts_ =
         register_module("shared_experts",
                         DenseMLP(hidden_size_,
@@ -170,7 +159,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
                                  hidden_act_,
                                  enable_result_reduction_,
                                  quant_args,
-                                 shared_expert_pg,
+                                 shared_pg_,
                                  options));
   }
 
