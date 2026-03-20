@@ -36,6 +36,7 @@ cc_library(
     npu_glm4_decoder_layer_impl.h
     npu_rms_norm_impl.h
     npu_siglip_encoder_layer_impl.h
+    npu_qwen3_omni_code2wav_transformer_layer_impl.h
     ../common/rotary_embedding_util.h
     loader/qwen3_decoder_loader.h
     loader/qwen2_decoder_loader.h
@@ -94,6 +95,7 @@ cc_library(
     npu_glm4_decoder_layer_impl.cpp
     npu_rms_norm_impl.cpp
     npu_siglip_encoder_layer_impl.cpp
+    npu_qwen3_omni_code2wav_transformer_layer_impl.h
     ../common/rotary_embedding_util.cpp
     loader/qwen3_decoder_loader.cpp
     loader/qwen2_decoder_loader.cpp
