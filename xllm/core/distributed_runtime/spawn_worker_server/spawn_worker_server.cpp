@@ -15,14 +15,11 @@ limitations under the License.
 
 #include "spawn_worker_server.h"
 
-#include <absl/strings/str_split.h>
 #if defined(USE_NPU)
 #include <acl/acl.h>
 #endif
 #include <signal.h>
-#include <sys/prctl.h>
-
-#include <cstdlib>
+#include <unistd.h>
 
 #include "core/distributed_runtime/worker_server.h"
 #include "core/platform/device.h"
@@ -32,8 +29,6 @@ limitations under the License.
 #include "core/runtime/options.h"
 
 namespace xllm {
-
-bool xllm::SpawnWorkerServer::g_running_ = true;
 
 namespace {
 std::string get_backend_from_worker_type(const std::string& worker_type) {
@@ -134,15 +129,19 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
 
 SpawnWorkerServer::~SpawnWorkerServer() = default;
 
-void SpawnWorkerServer::handle_signal(int signum) { g_running_ = false; }
+void SpawnWorkerServer::handle_signal(int signum) {
+  (void)signum;
+  _exit(0);
+}
 
 void SpawnWorkerServer::run() {
   signal(SIGINT, SpawnWorkerServer::handle_signal);
   signal(SIGTERM, SpawnWorkerServer::handle_signal);
+  signal(SIGHUP, SpawnWorkerServer::handle_signal);
 
-  // main thread waiting here
-  while (SpawnWorkerServer::g_running_) {
-    sleep(5);
+  // Keep process alive until SIGTERM/SIGINT arrives from parent teardown.
+  while (true) {
+    pause();
   }
 }
 

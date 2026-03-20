@@ -17,9 +17,10 @@ limitations under the License.
 
 #include <brpc/server.h>
 #include <folly/futures/Future.h>
-#include <spawn.h>
+#include <sys/types.h>
 #include <torch/torch.h>
 
+#include <atomic>
 #include <thread>
 
 #include "common/macros.h"
@@ -53,7 +54,7 @@ class WorkerServer {
       std::atomic<bool>& done,
       const std::string& master_node_addr,
       const torch::Device& d,
-      int world_sizse,
+      int world_size,
       int global_rank,
       int32_t dp_size,
       int local_rank,
@@ -79,6 +80,8 @@ class WorkerServer {
       std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
       std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager);
 
+  void stop_spawn_worker();
+
   bool sync_master_node(const std::string& master_node_addr,
                         proto::AddressInfo& addr_info,
                         proto::CommUniqueIdList& uids);
@@ -94,8 +97,8 @@ class WorkerServer {
 
   // for offline inference spawn process worker.
   bool use_spwan_worker_ = false;
-  posix_spawn_file_actions_t file_actions_;
-  posix_spawnattr_t spawn_attr_;
+  pid_t spawned_worker_pid_ = -1;
+  std::atomic<bool> stopped_{false};
   std::string server_name_;
 };
 
