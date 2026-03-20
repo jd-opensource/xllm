@@ -15,8 +15,8 @@ The overall architecture is shown below:
 ## Usage
 ### Preparation
 #### Install Dependencies
-- **xLLM**: Refer to [Installation && Compilation](../getting_started/compile.md)
-- **xLLM Service**: Refer to [PD disaggregation](../getting_started/PD_disagg.md)
+- **xLLM**: Refer to [Installation && Compilation](../getting_started/quick_start.md)
+- **xLLM Service**: Refer to [PD disaggregation](../getting_started/disagg_pd.md)
 
 #### Obtain Environment Information  
 Deploying Disaggregated PD Service requires obtaining the Device IP of the machine to create communication resources. Execute the command `cat /etc/hccn.conf | grep address` on the current AI Server to get the Device IP, for example:
