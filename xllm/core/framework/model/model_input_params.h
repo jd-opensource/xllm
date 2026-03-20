@@ -28,8 +28,8 @@ limitations under the License.
 #endif
 #include "framework/batch/batch_forward_type.h"
 #include "framework/request/mm_batch_data.h"
-#include "npu_dp_ep_padding.h"
 #include "npu_cp_prepare.h"
+#include "npu_dp_ep_padding.h"
 #include "util/hash_util.h"
 #include "util/tensor_helper.h"
 
@@ -395,15 +395,7 @@ struct ModelInputParams {
       params.rec_params = llmrec->to(device);
     }
 
-    params.cp_prefill_inputs.cp_load_balance_idx = safe_to(cp_prefill_inputs.cp_load_balance_idx, device, true);
-    params.cp_prefill_inputs.cp_o_recover_idx = safe_to(cp_prefill_inputs.cp_o_recover_idx, device, true);
-    params.cp_prefill_inputs.cp_kv_recover_idx = safe_to(cp_prefill_inputs.cp_kv_recover_idx, device, true);
-    params.cp_prefill_inputs.k_gather_index_prev = safe_to(cp_prefill_inputs.k_gather_index_prev, device, true);
-    params.cp_prefill_inputs.k_gather_index_next = safe_to(cp_prefill_inputs.k_gather_index_next, device, true);
-    params.cp_prefill_inputs.actual_seq_lengths_query_prev = safe_to(cp_prefill_inputs.actual_seq_lengths_query_prev, device, true);
-    params.cp_prefill_inputs.actual_seq_lengths_query_next = safe_to(cp_prefill_inputs.actual_seq_lengths_query_next, device, true);
-    params.cp_prefill_inputs.actual_seq_lengths_key_prev = safe_to(cp_prefill_inputs.actual_seq_lengths_key_prev, device, true);
-    params.cp_prefill_inputs.actual_seq_lengths_key_next = safe_to(cp_prefill_inputs.actual_seq_lengths_key_next, device, true);
+    params.cp_prefill_inputs = cp_prefill_inputs.to(device);
 
     return params;
   }

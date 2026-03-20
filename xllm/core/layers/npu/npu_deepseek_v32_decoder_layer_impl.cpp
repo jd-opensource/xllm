@@ -219,10 +219,15 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
   CHECK_EQ(parallel_args.world_size(), dp_size_ * dp_local_tp_size_ * cp_size_);
   dp_local_tp_rank_ = parallel_args.rank() % dp_local_tp_size_;
 
+<<<<<<< HEAD
   param_from_args(
       prefill_param_, model_args, parallel_args, /*is_prefill=*/true);
   param_from_args(
       decode_param_, model_args, parallel_args, /*is_prefill=*/false);
+=======
+  param_from_args(prefill_param_, model_args, parallel_args, true);
+  param_from_args(decode_param_, model_args, parallel_args, false);
+>>>>>>> cc287ff (dsa cp fix)
 
   loader_ = std::make_unique<DeekseekV32DecoderLoader>(
       WEIGHT_COUNT_PER_LAYER,
@@ -455,6 +460,13 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_parallel_parameters(
   param.enableExtraOprojTp = false;  // TODO
   param.isMlpFullTP = false;         // TODO
   param.mapping = parallel_args.mapping();
+  // Decode node should not use CP-specific graph branches.
+  if (!param.isPrefill) {
+    auto cp_info = param.mapping.Get(atb_speed::base::ATTN_CP);
+    cp_info.rank = 0;
+    cp_info.rankIds = {static_cast<uint32_t>(parallel_args.rank())};
+    param.mapping.Register(atb_speed::base::ATTN_CP, cp_info);
+  }
   param.maxDecodeDpTokenSize = 0;  // TODO
 }
 
@@ -717,7 +729,11 @@ int64_t NpuDeepseekV32DecoderLayerImpl::init_node(
     atb_speed::deepseekV2::DecoderLayerParam& param) {
   bool eplb_enabled = FLAGS_enable_eplb &&
                       layer_id_ >= decode_param_.firstKDenseReplace &&
+<<<<<<< HEAD
                       !decode_param_.isPrefill;
+=======
+                      !param.isPrefill;
+>>>>>>> cc287ff (dsa cp fix)
   atb::Operation* operation = nullptr;
   atb_speed::deepseekV2::DecoderLayer(param, &operation);
   node.operation.reset(operation);
@@ -772,6 +788,7 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
   atb::Status st;
   ModelInputParams& input_params_new =
       const_cast<ModelInputParams&>(input_params);
+<<<<<<< HEAD
   if (input_params_new.batch_forward_type.is_decode()) {
     build_node_variant_pack(decode_node_,
                             x,
@@ -785,6 +802,10 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
     LOG_IF(FATAL, st != 0) << model_name_
                            << "execute prefill layer fail, error code: " << st;
   } else {
+=======
+  if (input_params_new.batch_forward_type.is_prefill() ||
+      input_params_new.batch_forward_type.is_chunked_prefill()) {
+>>>>>>> cc287ff (dsa cp fix)
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,
@@ -796,6 +817,21 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "execute prefill layer fail, error code: " << st;
+<<<<<<< HEAD
+=======
+  } else {
+    build_node_variant_pack(decode_node_,
+                            x,
+                            cos_pos,
+                            sin_pos,
+                            /*attn_mask*/ tensor_placeholder_,
+                            kv_cache,
+                            input_params_new,
+                            false);
+    st = execute_node(decode_node_, node_id + 1000, event, event_flag);
+    LOG_IF(FATAL, st != 0) << model_name_
+                           << "execute decode layer fail, error code: " << st;
+>>>>>>> cc287ff (dsa cp fix)
   }
   return tensor_placeholder_;
 }

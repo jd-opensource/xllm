@@ -275,13 +275,14 @@ struct RawForwardInput {
     const int32_t num_chunks = cp_size * 2;
     const int64_t token_num = static_cast<int64_t>(flatten_tokens_vec.size());
 
-    auto to_seq_lens = [&](const std::vector<int32_t>& lens)
-        -> std::vector<int32_t> {
+    auto to_seq_lens =
+        [&](const std::vector<int32_t>& lens) -> std::vector<int32_t> {
       if (lens.empty()) {
         return std::vector<int32_t>(num_sequences, 0);
       }
-      const bool is_cumsum = lens.size() == static_cast<size_t>(num_sequences + 1) &&
-                             lens.front() == 0;
+      const bool is_cumsum =
+          lens.size() == static_cast<size_t>(num_sequences + 1) &&
+          lens.front() == 0;
       std::vector<int32_t> seq_lens;
       seq_lens.reserve(num_sequences);
       if (is_cumsum) {
@@ -351,9 +352,11 @@ struct RawForwardInput {
 
       int64_t seq_cp_max = 0;
       for (int32_t rank = 0; rank < cp_size; ++rank) {
-        const int64_t former_len = range_len(chunk_len * rank, chunk_len * (rank + 1));
-        const int64_t latter_len = range_len(
-            chunk_len * (num_chunks - 1 - rank), chunk_len * (num_chunks - rank));
+        const int64_t former_len =
+            range_len(chunk_len * rank, chunk_len * (rank + 1));
+        const int64_t latter_len =
+            range_len(chunk_len * (num_chunks - 1 - rank),
+                      chunk_len * (num_chunks - rank));
         seq_cp_max = std::max(seq_cp_max, former_len + latter_len);
       }
       cp_global_max_seq_len =
@@ -385,7 +388,8 @@ struct RawForwardInput {
       return dst;
     };
 
-    outputs.flatten_tokens_vec = gather_token_level_vector_i32(flatten_tokens_vec);
+    outputs.flatten_tokens_vec =
+        gather_token_level_vector_i32(flatten_tokens_vec);
     if (!flatten_positions_vec.empty()) {
       outputs.flatten_positions_vec =
           gather_token_level_vector_i32(flatten_positions_vec);
@@ -428,17 +432,22 @@ struct RawForwardInput {
     outputs.q_seq_lens = build_seq_lens(q_seq_lens, cp_q_lens);
     outputs.seq_lens = build_seq_lens(seq_lens, cp_q_lens);
     outputs.q_cu_seq_lens.resize(cp_q_lens.size());
-    std::partial_sum(cp_q_lens.begin(),
-                     cp_q_lens.end(),
-                     outputs.q_cu_seq_lens.begin());
+    std::partial_sum(
+        cp_q_lens.begin(), cp_q_lens.end(), outputs.q_cu_seq_lens.begin());
 
     outputs.q_max_seq_len = cp_global_max_seq_len;
     outputs.max_seq_len = cp_global_max_seq_len;
 
-    outputs.new_token_slot_ids = gather_token_level_vector_i32(new_token_slot_ids);
+    /*
+    outputs.new_token_slot_ids =
+    gather_token_level_vector_i32(new_token_slot_ids);
     outputs.new_cache_slot_offsets =
         gather_token_level_vector_i64(new_cache_slot_offsets);
-
+    */
+    LOG(INFO) << "[CP_DEBUG] outputs.new_token_slot_ids.size() = "
+              << outputs.new_token_slot_ids.size();
+    LOG(INFO) << "[CP_DEBUG] outputs.new_cache_slot_offsets.size() = "
+              << outputs.new_cache_slot_offsets.size();
     if (embeddings.size() == static_cast<size_t>(token_num)) {
       std::vector<std::vector<float>> gathered_embeddings;
       gathered_embeddings.reserve(gather_indices.size());
@@ -457,7 +466,8 @@ struct RawForwardInput {
     }
 
     if (!selected_token_idxes.empty()) {
-      const int64_t selected_num = static_cast<int64_t>(selected_token_idxes.size());
+      const int64_t selected_num =
+          static_cast<int64_t>(selected_token_idxes.size());
       std::vector<int64_t> remapped_idxes;
       remapped_idxes.reserve(selected_num);
 
@@ -479,15 +489,18 @@ struct RawForwardInput {
           int64_t seq_idx =
               static_cast<int64_t>(upper - old_seq_offsets.begin()) - 1;
           seq_idx = std::max<int64_t>(
-              0, std::min<int64_t>(seq_idx, static_cast<int64_t>(num_sequences) - 1));
+              0,
+              std::min<int64_t>(seq_idx,
+                                static_cast<int64_t>(num_sequences) - 1));
           selected_seq_idx[i] = seq_idx;
 
           const int64_t seq_start = old_seq_offsets[seq_idx];
           const int64_t seq_end = old_seq_offsets[seq_idx + 1];
           const int64_t seq_len = std::max<int64_t>(0, seq_end - seq_start);
-          const int64_t context_len =
-              std::max<int64_t>(1, std::min<int64_t>(old_idx - seq_start + 1, seq_len));
-          seq_context_lens[seq_idx] = std::max(seq_context_lens[seq_idx], context_len);
+          const int64_t context_len = std::max<int64_t>(
+              1, std::min<int64_t>(old_idx - seq_start + 1, seq_len));
+          seq_context_lens[seq_idx] =
+              std::max(seq_context_lens[seq_idx], context_len);
         }
 
         if (valid) {
@@ -506,7 +519,8 @@ struct RawForwardInput {
 
           for (int32_t seq_idx = 0; seq_idx < num_sequences; ++seq_idx) {
             int64_t chunk_len =
-                (seq_context_lens[seq_idx] + num_chunks_i64 - 1) / num_chunks_i64;
+                (seq_context_lens[seq_idx] + num_chunks_i64 - 1) /
+                num_chunks_i64;
             chunk_len = std::max<int64_t>(1, chunk_len);
             chunk_lens[seq_idx] = chunk_len;
             seq_prefix_per_rank[seq_idx] = token_num_per_rank;
@@ -527,16 +541,17 @@ struct RawForwardInput {
             const int64_t chunk_id = token_pos / chunk_len;
             const int64_t offset = token_pos % chunk_len;
             const int64_t rank_id =
-                chunk_id >= cp_size ? static_cast<int64_t>(2 * cp_size) - chunk_id - 1
-                                    : chunk_id;
+                chunk_id >= cp_size
+                    ? static_cast<int64_t>(2 * cp_size) - chunk_id - 1
+                    : chunk_id;
             if (rank_id < 0 || rank_id >= cp_size) {
               valid = false;
               break;
             }
 
-            const int64_t remap_idx =
-                token_num_per_rank * rank_id + seq_prefix_per_rank[seq_idx] +
-                (chunk_id / cp_size) * chunk_len + offset;
+            const int64_t remap_idx = token_num_per_rank * rank_id +
+                                      seq_prefix_per_rank[seq_idx] +
+                                      (chunk_id / cp_size) * chunk_len + offset;
             remapped_idxes.push_back(remap_idx);
           }
 
@@ -556,9 +571,12 @@ struct RawForwardInput {
 
           auto upper = std::upper_bound(
               old_seq_offsets.begin(), old_seq_offsets.end(), old_idx);
-          int64_t seq_idx = static_cast<int64_t>(upper - old_seq_offsets.begin()) - 1;
+          int64_t seq_idx =
+              static_cast<int64_t>(upper - old_seq_offsets.begin()) - 1;
           seq_idx = std::max<int64_t>(
-              0, std::min<int64_t>(seq_idx, static_cast<int64_t>(num_sequences) - 1));
+              0,
+              std::min<int64_t>(seq_idx,
+                                static_cast<int64_t>(num_sequences) - 1));
 
           const int64_t new_start = new_seq_offsets[seq_idx];
           const int64_t new_end = new_seq_offsets[seq_idx + 1];

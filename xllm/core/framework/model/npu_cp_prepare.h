@@ -15,9 +15,11 @@ limitations under the License.
 
 #pragma once
 
+#include <torch/torch.h>
+
 #include <cstdint>
 
-#include <torch/torch.h>
+#include "util/tensor_helper.h"
 
 namespace xllm {
 
@@ -33,11 +35,29 @@ struct CpPrefillInputs {
   torch::Tensor actual_seq_lengths_query_next;
   torch::Tensor actual_seq_lengths_key_prev;
   torch::Tensor actual_seq_lengths_key_next;
+
+  CpPrefillInputs to(const torch::Device& device) const {
+    CpPrefillInputs inputs;
+    inputs.cp_load_balance_idx = safe_to(cp_load_balance_idx, device, true);
+    inputs.cp_o_recover_idx = safe_to(cp_o_recover_idx, device, true);
+    inputs.cp_kv_recover_idx = safe_to(cp_kv_recover_idx, device, true);
+    inputs.k_gather_index_prev = safe_to(k_gather_index_prev, device, true);
+    inputs.k_gather_index_next = safe_to(k_gather_index_next, device, true);
+    inputs.actual_seq_lengths_query_prev =
+        safe_to(actual_seq_lengths_query_prev, device, true);
+    inputs.actual_seq_lengths_query_next =
+        safe_to(actual_seq_lengths_query_next, device, true);
+    inputs.actual_seq_lengths_key_prev =
+        safe_to(actual_seq_lengths_key_prev, device, true);
+    inputs.actual_seq_lengths_key_next =
+        safe_to(actual_seq_lengths_key_next, device, true);
+    return inputs;
+  }
 };
 
 CpPrefillInputs prepare_cp_prefill_inputs(int cp_size,
-            const torch::Tensor& input_ids,
-            const torch::Tensor& position_ids,
-            const torch::Tensor& input_lengths);
+                                          const torch::Tensor& input_ids,
+                                          const torch::Tensor& position_ids,
+                                          const torch::Tensor& input_lengths);
 
 }  // namespace xllm
