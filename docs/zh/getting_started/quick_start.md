@@ -44,7 +44,7 @@ docker run -it \
 
 ### NVIDIA GPU
 
-我们提供了NVIDIA GPU使用的[Dockerfile](../../../docker/Dockerfile)，可以构建自定义镜像，当然也可以使用我们根据默认Dockerfile构建的开发镜像：
+我们提供了NVIDIA GPU使用的[Dockerfile](../../../docker/Dockerfile.cuda)，可以构建自定义镜像，当然也可以使用我们根据默认Dockerfile构建的开发镜像：
 ```bash
 docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-cuda-x86
 ```

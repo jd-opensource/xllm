@@ -44,7 +44,7 @@ docker run -it \
 
 ### NVIDIA GPU
 
-We provide a [Dockerfile](../../../docker/Dockerfile) for NVIDIA GPU usage, which can be used to build custom image. Of course, you can also use dev image we built based on the default Dockerfile:
+We provide a [Dockerfile](../../../docker/Dockerfile.cuda) for NVIDIA GPU usage, which can be used to build custom image. Of course, you can also use dev image we built based on the default Dockerfile:
 ```bash
 docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-cuda-x86
 ```
