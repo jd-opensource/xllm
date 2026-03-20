@@ -73,19 +73,10 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
       parallelInfo.InitCommDomain(
           param.linearParallelParam.tensorParallelInfo.hcommInfo,
           param.linearParallelParam.tensorParallelInfo.commDomain);
-<<<<<<< HEAD
       lm_head_tp_world_size =
           param.linearParallelParam.tensorParallelInfo.worldSize;
       param.contextParallelInfo =
           parallel_args.mapping().Get(atb_speed::base::ATTN_CP);
-=======
-      if (isPrefill) {
-        param.contextParallelInfo =
-            parallel_args.mapping().Get(atb_speed::base::ATTN_CP);
-        LOG(INFO) << "[CP_DEBUG] : contextParallelInfo.Enabled"
-                  << param.contextParallelInfo.IsEnabled();
-      }
->>>>>>> cc287ff (dsa cp fix)
     }
     param.hiddenSizePerAttentionHead =
         args.hidden_size() / lm_head_tp_world_size;
