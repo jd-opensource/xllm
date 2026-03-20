@@ -222,7 +222,7 @@ nav:
         - features/eplb.md
       - 进阶指南:
         - 投机推理: features/mtp.md
-        - ACLGraph: features/acl_graph.md
+        - GraphMode: features/graph_mode.md
       - xLLM Service概览: features/xllm_service_overview.md
   - CLI参考:
     - cli_reference.md
