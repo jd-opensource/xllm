@@ -84,6 +84,9 @@ class NpuKimik25VisionEncoderLayerImpl : public BaseLayer {
                        const ModelArgs& args,
                        const ParallelArgs& parallel_args);
 
+  void initialize_quantization_parameters(
+      atb_speed::kimi::VisionEncoderLayerParam& param);
+
   int64_t init_node(atb_speed::Model::Node& node,
                     atb_speed::kimi::VisionEncoderLayerParam& param);
 

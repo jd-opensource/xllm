@@ -28,7 +28,16 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-const uint64_t WEIGHT_COUNT_PER_LAYER = 18;
+const uint64_t WEIGHT_COUNT_PER_LAYER = 22;
+
+void NpuKimik25VisionEncoderLayerImpl::initialize_quantization_parameters(
+  atb_speed::kimi::VisionEncoderLayerParam& param) {
+  param.MlpQuantType =
+      quantize_type_ == "w8a8_dynamic"
+          ? static_cast<int>(
+                atb_speed::common::LinearQuantType::LINEAR_W8A8_DYNAMIC_QUANT)
+          : static_cast<int>(atb_speed::common::LinearQuantType::NO_QUANT);
+}
 
 void NpuKimik25VisionEncoderLayerImpl::param_from_args(
     atb_speed::kimi::VisionEncoderLayerParam& param,
@@ -48,6 +57,7 @@ void NpuKimik25VisionEncoderLayerImpl::param_from_args(
   param.backend = "lccl";
   param.enableLogN = false;
   param.MLPActivationType = atb::infer::ActivationType::ACTIVATION_GELU;
+  initialize_quantization_parameters(param);
 }
 
 NpuKimik25VisionEncoderLayerImpl::NpuKimik25VisionEncoderLayerImpl(
