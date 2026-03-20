@@ -438,6 +438,7 @@ class KimiK2_5_VisionPatchEmbedImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor x, torch::Tensor grid_thws) {
+    x = x.view({x.size(0), -1});
     x = proj_(x);
     x = pos_emb_(x, grid_thws);
     return x;
