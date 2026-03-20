@@ -1020,15 +1020,14 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     std::optional<KimiK2_5_VLVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
     auto merge_size = model_args_.mm_image_merge_size();
+    merge_size = 2;
     MMDict multimodal_embeds;
-
     if (image_input) {
-      auto pixel_values = image_input->pixel_values.to(options_);
-      auto grid_thws = image_input->image_grid_thw.to(options_);
-      auto image_features =
-          process_vision_features(pixel_values, grid_thws, input_params);
-      auto image_embeds = torch::cat(image_features, 0);
-
+      // visual
+      auto image_embeds = visual_(image_input->pixel_values.to(options_),
+                                  image_input->image_grid_thw,
+                                  input_params);
+      image_embeds = apply_mm_projector(image_embeds);                           
       auto image_tokens =
           (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
               .cpu()
@@ -1038,28 +1037,8 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
           image_tokens.data_ptr<int64_t>(),
           image_tokens.data_ptr<int64_t>() + image_tokens.numel());
       multimodal_embeds["image|embedding"] =
-          image_embeds.split(image_tokens_vec, 0);
+          image_embeds.split(image_tokens_vec, 0 /*dim*/);
     }
-
-    if (video_input) {
-      auto pixel_values = video_input->pixel_values_videos.to(options_);
-      auto grid_thws = video_input->video_grid_thw.to(options_);
-      auto video_features =
-          process_vision_features(pixel_values, grid_thws, input_params);
-      auto video_embeds = torch::cat(video_features, 0);
-
-      auto video_tokens =
-          (video_input->video_grid_thw.prod(-1) / merge_size / merge_size)
-              .cpu()
-              .contiguous()
-              .to(torch::kLong);
-      std::vector<int64_t> video_tokens_vec(
-          video_tokens.data_ptr<int64_t>(),
-          video_tokens.data_ptr<int64_t>() + video_tokens.numel());
-      multimodal_embeds["video|embedding"] =
-          video_embeds.split(video_tokens_vec, 0);
-    }
-
     return multimodal_embeds;
   }
 
