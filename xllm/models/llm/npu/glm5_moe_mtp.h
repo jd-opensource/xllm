@@ -50,8 +50,6 @@ class GlmMoeDsaMtpForCausalLMImpl
 };
 TORCH_MODULE(GlmMoeDsaMtpForCausalLM);
 
-using GlmMoeDsaMtpForCausalLM = Glm5MoeMtpForCausalLM;
-
 // register the causal model
 REGISTER_CAUSAL_MODEL(glm_moe_dsa_mtp, GlmMoeDsaMtpForCausalLM);
 
