@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "mtp_worker_impl.h"
 
+#include <unordered_set>
+
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/request/mm_data.h"
@@ -53,7 +55,7 @@ MTPWorkerImpl::MTPWorkerImpl(const ParallelArgs& parallel_args,
                     options,
                     MTPTargetOptions(options),
                     MTPDraftOptions(options),
-                    FLAGS_enable_opt_validate_probs) {}
+                    /*enable_opt_validate_probs=*/true) {}
 
 MTPWorkerImpl::MTPWorkerImpl(const ParallelArgs& parallel_args,
                              const torch::Device& device,
@@ -108,8 +110,47 @@ bool MTPWorkerImpl::init_model(const std::string& model_weights_path,
   return result;
 }
 
+std::optional<ForwardOutput> MTPWorkerImpl::step(const ForwardInput& input) {
+  clear_release_cache(input);
+  return SpeculativeWorkerImpl::step(input);
+}
+
 int64_t MTPWorkerImpl::get_embedding_placeholder_size() {
   return static_cast<int64_t>(embedding_size_);
+}
+
+void MTPWorkerImpl::clear_release_cache(const ForwardInput& input) {
+  if (embedding_cache_ == nullptr) {
+    return;
+  }
+  const auto& released_ids = input.input_params.released_embedding_ids;
+  if (released_ids.empty()) {
+    return;
+  }
+  std::unordered_set<int64_t> active_ids(
+      input.input_params.embedding_ids.begin(),
+      input.input_params.embedding_ids.end());
+  std::unordered_set<int64_t> clear_ids_set;
+  std::vector<int64_t> clear_ids;
+  clear_ids.reserve(released_ids.size());
+  size_t skipped_active = 0;
+  for (int64_t id : released_ids) {
+    if (active_ids.count(id) > 0) {
+      ++skipped_active;
+      continue;
+    }
+    if (clear_ids_set.insert(id).second) {
+      clear_ids.push_back(id);
+    }
+  }
+  if (skipped_active > 0) {
+    VLOG(1) << "Skip clearing " << skipped_active
+            << " active embedding cache ids";
+  }
+  if (clear_ids.empty()) {
+    return;
+  }
+  embedding_cache_->clear(clear_ids);
 }
 
 bool MTPWorkerImpl::allocate_kv_cache(

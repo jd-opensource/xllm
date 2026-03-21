@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 #include "common/macros.h"
@@ -36,14 +37,14 @@ class EmbeddingCache final {
     torch::Tensor probs;
   };
 
-  EmbeddingCache(int32_t total_nums);
+  explicit EmbeddingCache(int32_t total_nums);
 
   ~EmbeddingCache() = default;
 
   // disable copy, move and assign
   DISALLOW_COPY_AND_ASSIGN(EmbeddingCache);
 
-  void write(const std::vector<int32_t>& embedding_ids,
+  void write(const std::vector<int64_t>& embedding_ids,
              const torch::Tensor& next_tokens,
              const torch::Tensor& embeddings,
              const torch::Tensor& probs,
@@ -51,20 +52,20 @@ class EmbeddingCache final {
 
   void set_placeholder(const torch::Tensor& embedding_placeholder);
 
-  ForwardOutput read_for_decode(const std::vector<int32_t>& embedding_ids);
+  ForwardOutput read_for_decode(const std::vector<int64_t>& embedding_ids);
   std::vector<int32_t> read_correction_tokens(
-      const std::vector<int32_t>& embedding_ids) const;
+      const std::vector<int64_t>& embedding_ids) const;
   std::vector<int32_t> read_position_offsets(
-      const std::vector<int32_t>& embedding_ids) const;
+      const std::vector<int64_t>& embedding_ids) const;
 
-  void clear(const std::vector<int32_t>& embedding_ids);
+  void clear(const std::vector<int64_t>& embedding_ids);
 
  private:
-  std::vector<DecodeState> decode_tails_;
+  std::unordered_map<int64_t, DecodeState> decode_tails_;
   torch::Tensor embedding_placeholder_;
 
-  DecodeState& mutable_tail(int32_t embedding_id);
-  const DecodeState& get_tail(int32_t embedding_id) const;
+  DecodeState& mutable_tail(int64_t embedding_id);
+  const DecodeState& get_tail(int64_t embedding_id) const;
 };
 
 }  // namespace xllm

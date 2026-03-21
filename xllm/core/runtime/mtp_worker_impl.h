@@ -55,6 +55,8 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
                   int32_t random_seed,
                   MasterStatus master_status) override;
 
+  std::optional<ForwardOutput> step(const ForwardInput& input) override;
+
   bool allocate_kv_cache(
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
 
@@ -117,6 +119,8 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
   // Run one draft extend forward and write next-step seed into embedding cache.
   void run_draft_extend(const ForwardInput& input,
                         const SampleOutput& validate_output);
+
+  void clear_release_cache(const ForwardInput& input);
 
  protected:
   // Draft model worker

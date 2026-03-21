@@ -234,7 +234,9 @@ struct RawForwardInput {
   // extra token ids for each sequence, and -1 for last chunk
   std::vector<int32_t> extra_token_ids;
   // embedding ids of each sequence
-  std::vector<int> embedding_ids;
+  std::vector<int64_t> embedding_ids;
+  // embedding ids whose MTP cache entries should be released before execute
+  std::vector<int64_t> released_embedding_ids;
   // request ids of each sequence
   std::vector<std::string> request_ids;
   // swap

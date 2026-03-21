@@ -332,9 +332,10 @@ struct ModelInputParams {
     params.mm_data = MMBatchData::to(mm_data, device);
     params.dp_global_token_nums = dp_global_token_nums;
     params.dp_is_decode = dp_is_decode;
-    params.embedding_ids = std::move(embedding_ids);
-    params.request_ids = std::move(request_ids);
-    params.extra_token_ids = std::move(extra_token_ids);
+    params.embedding_ids = embedding_ids;
+    params.released_embedding_ids = released_embedding_ids;
+    params.request_ids = request_ids;
+    params.extra_token_ids = extra_token_ids;
     params.dp_ep_padding_data = dp_ep_padding_data;
     params.kv_cache_tokens_nums_host = std::move(kv_cache_tokens_nums_host);
     params.kv_cache_tokens_nums = safe_to(kv_cache_tokens_nums, device);
@@ -492,7 +493,10 @@ struct ModelInputParams {
   std::vector<int32_t> dp_is_decode;
 
   // embedding ids of each sequence
-  std::vector<int32_t> embedding_ids;
+  std::vector<int64_t> embedding_ids;
+
+  // embedding ids whose MTP cache entries should be released before execute
+  std::vector<int64_t> released_embedding_ids;
 
   // request ids of each sequence, used by suffix decoding request identity
   std::vector<std::string> request_ids;

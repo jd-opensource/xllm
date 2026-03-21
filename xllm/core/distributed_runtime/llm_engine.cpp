@@ -100,6 +100,7 @@ LLMEngine::LLMEngine(const runtime::Options& options,
   dp_size_ = options_.dp_size();
   worker_clients_num_ = worker_clients_.size();
   dp_local_tp_size_ = worker_clients_num_ / dp_size_;
+  pending_clear_embedding_ids_.resize(dp_size_);
 
   // create ThreadPool for link cluster
   link_threadpool_ = std::make_unique<ThreadPool>(worker_clients_num_);
@@ -1017,8 +1018,10 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
         // token, if it's enabled, this false here will append the fake token in
         // process_sample_output
         batch[dp_rank].process_sample_output(result.value(), false);
+        collect_release_ids(batch[dp_rank], dp_rank);
       } else {
         batch[dp_rank].process_beam_search_output(result.value(), false);
+        collect_release_ids(batch[dp_rank], dp_rank);
       }
     } else {
       LOG(FATAL) << "Failed to execute model, result has no value";
@@ -1074,6 +1077,24 @@ void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
   for (auto i = 0; i < last_batch.size(); i++) {
     last_batch[i].process_sample_output(raw_forward_outputs[i],
                                         options_.enable_schedule_overlap());
+    collect_release_ids(last_batch[i], i);
+  }
+}
+
+void LLMEngine::collect_release_ids(Batch& batch, size_t dp_rank) {
+  auto& pending_ids = pending_clear_embedding_ids_[dp_rank];
+  for (auto* seq : batch.get_sequences()) {
+    if (!seq->finished()) {
+      continue;
+    }
+    const int64_t embedding_id = seq->get_embedding_id();
+    if (embedding_id < 0) {
+      continue;
+    }
+    if (std::find(pending_ids.begin(), pending_ids.end(), embedding_id) ==
+        pending_ids.end()) {
+      pending_ids.push_back(embedding_id);
+    }
   }
 }
 
@@ -1143,6 +1164,8 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     batched_inputs.emplace_back(std::move(
         batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
+    batched_inputs[dp_rank].released_embedding_ids =
+        std::move(pending_clear_embedding_ids_[dp_rank]);
     dp_global_token_nums[dp_rank] =
         batched_inputs[dp_rank].flatten_tokens_vec.size();
     if (batch_forward_type.is_empty() &&

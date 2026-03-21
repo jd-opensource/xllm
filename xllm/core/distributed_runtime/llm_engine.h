@@ -143,6 +143,7 @@ class LLMEngine : public Engine {
   Engine::KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap);
   std::vector<RawForwardInput> prepare_inputs(std::vector<Batch>& batch);
+  void collect_release_ids(Batch& batch, size_t dp_rank);
   void process_group_test();
 
  protected:
@@ -193,6 +194,7 @@ class LLMEngine : public Engine {
 
   std::vector<std::string> worker_device_ips_;
   std::vector<uint16_t> worker_ports_;
+  std::vector<std::vector<int64_t>> pending_clear_embedding_ids_;
 
   bool layer_forward_interrupted_ = false;
 

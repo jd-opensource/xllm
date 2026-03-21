@@ -30,7 +30,7 @@ bool tensor_equal(const torch::Tensor& lhs, const torch::Tensor& rhs) {
 TEST(EmbeddingCacheTest, WriteAndClear) {
   EmbeddingCache cache(/*total_nums=*/4);
 
-  std::vector<int32_t> ids = {3, 2};
+  std::vector<int64_t> ids = {3, 2};
   auto cached_tokens = torch::tensor({31, 41}, torch::kInt);
   auto cached_embeddings = torch::tensor({{1.0f, 2.0f}, {3.0f, 4.0f}});
   auto cached_probs = torch::tensor({{0.1f, 0.9f}, {0.4f, 0.6f}});

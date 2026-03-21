@@ -21,6 +21,7 @@ limitations under the License.
 #include <absl/time/time.h>
 #include <glog/logging.h>
 
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -40,6 +41,7 @@ namespace xllm {
 namespace {
 constexpr size_t kDecoderBosTokenCount = 1;
 constexpr size_t kDecoderMaxTokenCount = kRecTotalSteps + kDecoderBosTokenCount;
+std::atomic<int64_t> g_next_embedding_id{0};
 }  // namespace
 
 const std::string Sequence::ENCODER_SPARSE_EMBEDDING_NAME = "sparse_embedding";
@@ -524,9 +526,9 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
 
 void Sequence::add_kv_blocks(const std::vector<Block>& blocks) {
   kv_state_.add_kv_blocks(blocks);
-  // use the last prefill block id as the embedding id
+  // Allocate a stable cache key once per sequence lifetime.
   if (embedding_id_ == -1) {
-    embedding_id_ = blocks.back().id();
+    embedding_id_ = g_next_embedding_id.fetch_add(1, std::memory_order_relaxed);
   }
 }
 

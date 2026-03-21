@@ -125,9 +125,12 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   // aprint<int32_t>(unique_token_lens_vec, "unique_token_lens_vec",
   // global_rank_);
 
-  std::vector<int32_t> embedding_ids =
-      std::vector<int32_t>(pb_forward_input->embedding_ids().begin(),
+  std::vector<int64_t> embedding_ids =
+      std::vector<int64_t>(pb_forward_input->embedding_ids().begin(),
                            pb_forward_input->embedding_ids().end());
+  std::vector<int64_t> released_embedding_ids =
+      std::vector<int64_t>(pb_forward_input->released_embedding_ids().begin(),
+                           pb_forward_input->released_embedding_ids().end());
   std::vector<int32_t> extra_token_ids =
       std::vector<int32_t>(pb_forward_input->extra_token_ids().begin(),
                            pb_forward_input->extra_token_ids().end());
@@ -225,6 +228,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.dp_global_token_nums = std::move(dp_global_token_nums);
   input_params.dp_is_decode = std::move(dp_is_decode);
   input_params.embedding_ids = std::move(embedding_ids);
+  input_params.released_embedding_ids = std::move(released_embedding_ids);
   input_params.request_ids = std::move(request_ids);
   input_params.extra_token_ids = std::move(extra_token_ids);
 
@@ -501,6 +505,8 @@ void forward_input_to_proto(const RawForwardInput& inputs,
 
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_embedding_ids(),
                       inputs.embedding_ids);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_released_embedding_ids(),
+                      inputs.released_embedding_ids);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_request_ids(),
                       inputs.request_ids);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_extra_token_ids(),

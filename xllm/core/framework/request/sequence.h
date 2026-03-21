@@ -185,7 +185,7 @@ class Sequence final {
   void update_mm_embeddings(const std::vector<torch::Tensor>& mm_embeddings);
   // update embeddings to the sequence
   void update_embeddings(const torch::Tensor& embedding);
-  int32_t get_embedding_id() const { return embedding_id_; }
+  int64_t get_embedding_id() const { return embedding_id_; }
   const std::string& request_id() const { return request_id_; }
   // get input embedding
   torch::Tensor get_input_embedding() const { return input_embedding_; }
@@ -454,7 +454,7 @@ class Sequence final {
   size_t volatile_num_prompt_tokens_ = 0;
 
   // embedding id that hold the embedding.
-  int32_t embedding_id_ = -1;
+  int64_t embedding_id_ = -1;
 
   // is the sequence finished
   mutable bool finished_ = false;

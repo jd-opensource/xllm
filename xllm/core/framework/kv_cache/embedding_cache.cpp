@@ -26,10 +26,9 @@ namespace xllm {
 
 EmbeddingCache::EmbeddingCache(int32_t total_nums) {
   CHECK_GT(total_nums, 0) << "No embeddings to allocate";
-  decode_tails_.resize(total_nums);
 }
 
-void EmbeddingCache::write(const std::vector<int32_t>& ids,
+void EmbeddingCache::write(const std::vector<int64_t>& ids,
                            const torch::Tensor& next_tokens,
                            const torch::Tensor& embeddings,
                            const torch::Tensor& probs,
@@ -61,8 +60,10 @@ void EmbeddingCache::write(const std::vector<int32_t>& ids,
         tail.correction_position_offset = last_valid_idx;
       }
     }
-    tail.embedding = embeddings[i];
-    tail.probs = probs[i];
+    // Clone the per-sequence slice so the cache does not retain the storage of
+    // a whole batch tensor across request lifetimes.
+    tail.embedding = embeddings[i].contiguous().clone();
+    tail.probs = probs[i].contiguous().clone();
   }
 }
 
@@ -71,7 +72,7 @@ void EmbeddingCache::set_placeholder(
   embedding_placeholder_ = embedding_placeholder;
 }
 
-ForwardOutput EmbeddingCache::read_for_decode(const std::vector<int32_t>& ids) {
+ForwardOutput EmbeddingCache::read_for_decode(const std::vector<int64_t>& ids) {
   CHECK(!ids.empty()) << "decode ids should not be empty";
   std::vector<int32_t> token_ids;
   std::vector<torch::Tensor> embeddings;
@@ -79,7 +80,7 @@ ForwardOutput EmbeddingCache::read_for_decode(const std::vector<int32_t>& ids) {
   token_ids.reserve(ids.size());
   embeddings.reserve(ids.size());
   probs.reserve(ids.size());
-  for (int32_t id : ids) {
+  for (int64_t id : ids) {
     const auto& item = get_tail(id);
     CHECK_GE(item.token_id, 0) << "decode entry missing token id";
     CHECK(item.embedding.defined()) << "decode entry missing embedding";
@@ -96,11 +97,11 @@ ForwardOutput EmbeddingCache::read_for_decode(const std::vector<int32_t>& ids) {
 }
 
 std::vector<int32_t> EmbeddingCache::read_correction_tokens(
-    const std::vector<int32_t>& ids) const {
+    const std::vector<int64_t>& ids) const {
   CHECK(!ids.empty()) << "decode ids should not be empty";
   std::vector<int32_t> tokens;
   tokens.reserve(ids.size());
-  for (int32_t id : ids) {
+  for (int64_t id : ids) {
     const auto& item = get_tail(id);
     CHECK_GE(item.correction_token_id, 0)
         << "decode entry missing correction token id";
@@ -110,11 +111,11 @@ std::vector<int32_t> EmbeddingCache::read_correction_tokens(
 }
 
 std::vector<int32_t> EmbeddingCache::read_position_offsets(
-    const std::vector<int32_t>& ids) const {
+    const std::vector<int64_t>& ids) const {
   CHECK(!ids.empty()) << "decode ids should not be empty";
   std::vector<int32_t> offsets;
   offsets.reserve(ids.size());
-  for (int32_t id : ids) {
+  for (int64_t id : ids) {
     const auto& item = get_tail(id);
     CHECK_GE(item.correction_token_id, 0)
         << "decode entry missing correction token id";
@@ -123,28 +124,23 @@ std::vector<int32_t> EmbeddingCache::read_position_offsets(
   return offsets;
 }
 
-void EmbeddingCache::clear(const std::vector<int32_t>& ids) {
-  for (int32_t id : ids) {
-    auto& tail = mutable_tail(id);
-    tail.embedding = torch::Tensor();
-    tail.token_id = -1;
-    tail.correction_token_id = -1;
-    tail.correction_position_offset = 0;
-    tail.probs = torch::Tensor();
+void EmbeddingCache::clear(const std::vector<int64_t>& ids) {
+  for (int64_t id : ids) {
+    decode_tails_.erase(id);
   }
 }
 
 EmbeddingCache::DecodeState& EmbeddingCache::mutable_tail(
-    int32_t embedding_id) {
+    int64_t embedding_id) {
   CHECK_GE(embedding_id, 0);
-  CHECK_LT(static_cast<size_t>(embedding_id), decode_tails_.size());
   return decode_tails_[embedding_id];
 }
 
 const EmbeddingCache::DecodeState& EmbeddingCache::get_tail(
-    int32_t embedding_id) const {
+    int64_t embedding_id) const {
   CHECK_GE(embedding_id, 0);
-  CHECK_LT(static_cast<size_t>(embedding_id), decode_tails_.size());
-  return decode_tails_[embedding_id];
+  auto it = decode_tails_.find(embedding_id);
+  CHECK(it != decode_tails_.end()) << "decode entry missing embedding cache id";
+  return it->second;
 }
 }  // namespace xllm

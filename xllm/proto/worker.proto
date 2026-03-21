@@ -222,7 +222,7 @@ message ForwardInput {
   repeated TransferKVInfo transfer_kv_infos = 22;
   repeated Embeddings embeds = 23;
   // uint32 prefill_seq_len = 24;
-  repeated int32 embedding_ids = 25;
+  repeated int64 embedding_ids = 25;
   repeated int32 extra_token_ids = 26;
   EplbInfo eplb_info =27;
   repeated BlockTransferInfo swap_blocks = 28;
@@ -239,6 +239,7 @@ message ForwardInput {
   repeated int32 dp_is_decode = 42;
   repeated int32 kv_cache_tokens_nums = 43;
   repeated string request_ids = 44;
+  repeated int64 released_embedding_ids = 45;
 }
 
  message BatchedForwardInputs {
