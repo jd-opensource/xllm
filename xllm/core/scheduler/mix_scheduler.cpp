@@ -408,7 +408,7 @@ void MixScheduler::handle_running_queue_requests(
                    << " is too long, please set a larger "
                       "max_tokens value via --max_tokens_per_batch.";
         running_queue.pop_front();
-        kv_cache_manager_->deallocate(request.get());
+        release_request_cache(request);
         response_processor_->process_failed_request(
             request,
             {StatusCode::RESOURCE_EXHAUSTED,
@@ -458,7 +458,7 @@ void MixScheduler::handle_running_queue_requests(
       LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
                  << "a single sequence.";
       running_queue.pop_front();
-      kv_cache_manager_->deallocate(request.get());
+      release_request_cache(request);
       response_processor_->process_failed_request(
           request,
           {StatusCode::RESOURCE_EXHAUSTED,
@@ -508,7 +508,7 @@ std::vector<Batch> MixScheduler::prepare_batch() {
     std::shared_ptr<Request> request = *it;
     request->update_connection_status();
     if (request->finished() || request->cancelled()) {
-      kv_cache_manager_->deallocate(request.get());
+      release_request_cache(request);
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // finished request is set to nullptr

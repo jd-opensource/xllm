@@ -356,7 +356,7 @@ void ZeroEvictionScheduler::handle_prefill_requests(
              FLAGS_prefill_scheduling_memory_usage_threshold) {
     std::shared_ptr<Request> request(waiting_priority_queue_.top());
     if (request->finished() || request->cancelled()) {
-      kv_cache_manager_->deallocate(request.get());
+      release_request_cache(request);
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // remove the request from the priority queue
@@ -414,7 +414,7 @@ void ZeroEvictionScheduler::handle_prefill_requests(
     // no enough memory to schedule single sequence, just finish the request
     std::shared_ptr<Request> request(waiting_priority_queue_.top());
     waiting_priority_queue_.pop();
-    kv_cache_manager_->deallocate(request.get());
+    release_request_cache(request);
     response_processor_->process_failed_request(
         request,
         {StatusCode::RESOURCE_EXHAUSTED,

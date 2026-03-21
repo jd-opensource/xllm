@@ -261,7 +261,7 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
          latency_budget > estimate_latency && remaining_seq_budget > 0) {
     std::shared_ptr<Request> request(waiting_priority_queue.top());
     if (request->finished() || request->cancelled()) {
-      kv_cache_manager_->deallocate(request.get());
+      release_request_cache(request);
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // remove the request from the priority queue
@@ -405,7 +405,7 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
       running_queue_->empty()) {
     std::shared_ptr<Request> request(waiting_priority_queue.top());
     waiting_priority_queue.pop();
-    kv_cache_manager_->deallocate(request.get());
+    release_request_cache(request);
     if (blocks_exhausted) {
       LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
                     "a single sequence.";
@@ -522,7 +522,7 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
     std::shared_ptr<Request> request = *it;
     request->update_connection_status();
     if (request->finished() || request->cancelled()) {
-      kv_cache_manager_->deallocate(request.get());
+      release_request_cache(request);
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // finished request is set to nullptr

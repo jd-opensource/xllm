@@ -85,7 +85,7 @@ void FixedStepsScheduler::handle_prefill_requests(
     std::shared_ptr<Request> request(waiting_priority_queue_.top());
     if (request->finished() || request->cancelled()) {
       if (requires_kv_cache) {
-        kv_cache_manager_->deallocate(request.get());
+        release_request_cache(request);
       }
       //  release the ownership of the request
       finished_requests.emplace_back(request);
@@ -217,7 +217,7 @@ std::vector<Batch> FixedStepsScheduler::prepare_batch() {
     request->update_connection_status();
     if (request->finished() || request->cancelled()) {
       if (scheduler_pipeline_->requires_kv_cache()) {
-        kv_cache_manager_->deallocate(request.get());
+        release_request_cache(request);
       }
       finished_requests.emplace_back(request);
       // finished request is set to nullptr
@@ -361,7 +361,7 @@ void FixedStepsScheduler::step(const absl::Duration& timeout) {
         if (request) {
           request->update_connection_status();
           if (request->finished() || request->cancelled()) {
-            kv_cache_manager_->deallocate(request.get());
+            release_request_cache(request);
             finished_requests.emplace_back(request);
           }
         }

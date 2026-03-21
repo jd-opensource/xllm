@@ -63,6 +63,8 @@ class Engine {
   // return the active activation memory
   virtual std::vector<int64_t> get_active_activation_memory() const = 0;
 
+  virtual void queue_release_ids(Request* request) {}
+
   // P/D
   virtual bool pull_kv_blocks(const int32_t src_dp_size,
                               const int32_t src_dp_rank,

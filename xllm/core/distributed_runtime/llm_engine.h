@@ -119,6 +119,8 @@ class LLMEngine : public Engine {
 
   bool unlink_d2d(const std::vector<std::string>& device_ips) override;
 
+  void queue_release_ids(Request* request) override;
+
   std::shared_ptr<DistManager> get_dist_manager() { return dist_manager_; };
 
   bool sleep(MasterStatus master_status) override;
@@ -144,6 +146,7 @@ class LLMEngine : public Engine {
   bool allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap);
   std::vector<RawForwardInput> prepare_inputs(std::vector<Batch>& batch);
   void collect_release_ids(Batch& batch, size_t dp_rank);
+  void append_release_id(size_t dp_rank, int64_t embedding_id);
   void process_group_test();
 
  protected:

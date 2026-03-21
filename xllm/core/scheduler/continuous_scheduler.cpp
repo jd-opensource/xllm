@@ -239,7 +239,7 @@ void ContinuousScheduler::handle_prefill_requests(
 
     std::shared_ptr<Request> request(waiting_priority_queue.top());
     if (request->finished() || request->cancelled()) {
-      kv_cache_manager_->deallocate(request.get());
+      release_request_cache(request);
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // remove the request from the priority queue
@@ -381,7 +381,7 @@ void ContinuousScheduler::handle_prefill_requests(
       running_queue_->empty()) {
     std::shared_ptr<Request> request(waiting_priority_queue.top());
     waiting_priority_queue.pop();
-    kv_cache_manager_->deallocate(request.get());
+    release_request_cache(request);
     if (blocks_exhausted) {
       LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
                     "a single sequence.";
@@ -728,7 +728,7 @@ void ContinuousScheduler::handle_abnormal_request(
 
     // request is too long, budget or memory no enough.
     running_queue_->pop_top();
-    kv_cache_manager_->deallocate(request.get());
+    release_request_cache(request);
     response_processor_->process_failed_request(
         request,
         {StatusCode::RESOURCE_EXHAUSTED,
@@ -749,6 +749,15 @@ void ContinuousScheduler::handle_abnormal_request(
       estimate_latency += allocated_estimate_latency;
     }
   }
+}
+
+void ContinuousScheduler::release_request_cache(
+    const std::shared_ptr<Request>& request) {
+  if (request == nullptr) {
+    return;
+  }
+  engine_->queue_release_ids(request.get());
+  kv_cache_manager_->deallocate(request.get());
 }
 
 void ContinuousScheduler::handle_running_requests(
@@ -810,7 +819,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     std::shared_ptr<Request> request = *it;
     request->update_connection_status();
     if (request->finished() || request->cancelled()) {
-      kv_cache_manager_->deallocate(request.get());
+      release_request_cache(request);
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // finished request is set to nullptr

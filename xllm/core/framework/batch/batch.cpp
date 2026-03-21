@@ -120,8 +120,11 @@ ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
                             batch_id_,
                             &args,
                             batch_forward_type_);
-  return builder.build_forward_input(num_decoding_tokens,
-                                     min_decoding_batch_size);
+  auto input =
+      builder.build_forward_input(num_decoding_tokens, min_decoding_batch_size);
+  input.input_params.released_embedding_ids =
+      std::move(released_embedding_ids_);
+  return input;
 }
 
 ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
@@ -143,8 +146,11 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
                                               &args,
                                               batch_forward_type_,
                                               thread_pool);
-  return builder->build_rec_forward_input(num_decoding_tokens,
-                                          min_decoding_batch_size);
+  auto input = builder->build_rec_forward_input(num_decoding_tokens,
+                                                min_decoding_batch_size);
+  input.input_params.released_embedding_ids =
+      std::move(released_embedding_ids_);
+  return input;
 }
 
 std::vector<Sequence*> Batch::get_sequences() {
@@ -315,6 +321,7 @@ RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
                             batch_forward_type_,
                             thread_pool);
   auto raw_input = builder.build_raw_forward_input();
+  raw_input.released_embedding_ids = std::move(released_embedding_ids_);
   if (has_partial_finished_beam_group()) {
     // Beam-search kernel assumes fixed beam width per group. When only part of
     // a group is active, fall back to software beam merge.

@@ -283,6 +283,7 @@ class ContinuousScheduler : public Scheduler {
       bool budget_exhausted,
       bool block_exhausted);
   void handle_running_requests(std::shared_ptr<Request> request);
+  void release_request_cache(const std::shared_ptr<Request>& request);
 
   bool check_if_enough_to_evict(DecodePriorityQueue* running_queue_to_evict,
                                 Sequence* prefill_sequence,

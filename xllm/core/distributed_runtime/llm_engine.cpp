@@ -1081,20 +1081,45 @@ void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
   }
 }
 
-void LLMEngine::collect_release_ids(Batch& batch, size_t dp_rank) {
-  auto& pending_ids = pending_clear_embedding_ids_[dp_rank];
-  for (auto* seq : batch.get_sequences()) {
-    if (!seq->finished()) {
+void LLMEngine::queue_release_ids(Request* request) {
+  if (request == nullptr) {
+    return;
+  }
+  for (const auto& seq : request->sequences()) {
+    if (!seq) {
       continue;
     }
     const int64_t embedding_id = seq->get_embedding_id();
     if (embedding_id < 0) {
       continue;
     }
-    if (std::find(pending_ids.begin(), pending_ids.end(), embedding_id) ==
-        pending_ids.end()) {
-      pending_ids.push_back(embedding_id);
+    const int32_t dp_rank = seq->dp_rank();
+    if (dp_rank < 0 ||
+        static_cast<size_t>(dp_rank) >= pending_clear_embedding_ids_.size()) {
+      continue;
     }
+    append_release_id(static_cast<size_t>(dp_rank), embedding_id);
+  }
+}
+
+void LLMEngine::collect_release_ids(Batch& batch, size_t dp_rank) {
+  for (auto* seq : batch.get_sequences()) {
+    if (!seq->finished() && !seq->cancelled()) {
+      continue;
+    }
+    const int64_t embedding_id = seq->get_embedding_id();
+    if (embedding_id < 0) {
+      continue;
+    }
+    append_release_id(dp_rank, embedding_id);
+  }
+}
+
+void LLMEngine::append_release_id(size_t dp_rank, int64_t embedding_id) {
+  auto& pending_ids = pending_clear_embedding_ids_[dp_rank];
+  if (std::find(pending_ids.begin(), pending_ids.end(), embedding_id) ==
+      pending_ids.end()) {
+    pending_ids.push_back(embedding_id);
   }
 }
 
@@ -1162,10 +1187,10 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
 
   // build model input for every single micro batch
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
+    batch[dp_rank].set_released_embedding_ids(
+        std::move(pending_clear_embedding_ids_[dp_rank]));
     batched_inputs.emplace_back(std::move(
         batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
-    batched_inputs[dp_rank].released_embedding_ids =
-        std::move(pending_clear_embedding_ids_[dp_rank]);
     dp_global_token_nums[dp_rank] =
         batched_inputs[dp_rank].flatten_tokens_vec.size();
     if (batch_forward_type.is_empty() &&

@@ -611,7 +611,7 @@ void DisaggPDScheduler::prefill_send_first_generation() {
         std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
         req_to_channel_map_.erase(request->request_id());
       }
-      kv_cache_manager_->deallocate(request.get());
+      release_request_cache(request);
     }
   });
 }
@@ -629,7 +629,7 @@ bool DisaggPDScheduler::decode_schedule(
         received_request_map_.end()) {
       LOG(ERROR) << "Decode receive duplicate request_id from prefill: "
                  << request->request_id();
-      kv_cache_manager_->deallocate(request.get());
+      release_request_cache(request);
       return false;
     }
     received_request_map_[request->request_id()] = request;

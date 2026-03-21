@@ -225,7 +225,7 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
     std::shared_ptr<Request> request = *it;
     request->update_connection_status();
     if (request->finished() || request->cancelled()) {
-      kv_cache_manager_->deallocate(request.get());
+      release_request_cache(request);
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // finished request is set to nullptr
@@ -993,7 +993,7 @@ void PDOOCScheduler::prefill_send_first_generation() {
         std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
         req_to_channel_map_.erase(request->request_id());
       }
-      kv_cache_manager_->deallocate(request.get());
+      release_request_cache(request);
     }
   });
 }
@@ -1008,7 +1008,7 @@ bool PDOOCScheduler::decode_schedule(std::shared_ptr<Request>& request,
   if (!stub) {
     LOG(ERROR) << "Failed to create rpc channel for prefill instance: "
                << prefill_instance_name;
-    kv_cache_manager_->deallocate(request.get());
+    release_request_cache(request);
     return false;
   }
 
@@ -1412,7 +1412,7 @@ void PDOOCScheduler::prefill_send_multi_generations() {
         std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
         req_to_channel_map_.erase(request->request_id());
       }
-      kv_cache_manager_->deallocate(request.get());
+      release_request_cache(request);
     }
   });
 }

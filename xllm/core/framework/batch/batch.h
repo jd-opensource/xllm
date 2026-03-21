@@ -63,6 +63,10 @@ class Batch {
     swap_block_transfer_infos_ = swap_block_transfer_infos;
   }
 
+  void set_released_embedding_ids(std::vector<int64_t>&& ids) {
+    released_embedding_ids_ = std::move(ids);
+  }
+
   void set_batch_id() {
     if (batch_id_ == UNINITIALIZED_BATCH_ID) {
       batch_id_ = batch_counter_;
@@ -166,6 +170,8 @@ class Batch {
 
   // mm_data in the batch
   std::vector<MMData> mm_data_vec_;
+
+  std::vector<int64_t> released_embedding_ids_;
 
   BatchForwardType batch_forward_type_;
 
