@@ -725,12 +725,16 @@ class KimiK2_5_VisionEncoderImpl : public torch::nn::Module {
     auto cos_pos =
         rope_freqs_cis_ri
             .index({torch::indexing::Slice(), torch::indexing::Slice(), 0})
-            .repeat({1, 2})
+            .unsqueeze(-1)
+            .repeat({1, 1, 2})
+            .view({hidden_states.size(0), -1})
             .to(hidden_states.options());
     auto sin_pos =
         rope_freqs_cis_ri
             .index({torch::indexing::Slice(), torch::indexing::Slice(), 1})
-            .repeat({1, 2})
+            .unsqueeze(-1)
+            .repeat({1, 1, 2})
+            .view({hidden_states.size(0), -1})
             .to(hidden_states.options());
 
     CHECK_EQ(cos_pos.size(0), hidden_states.size(0))
