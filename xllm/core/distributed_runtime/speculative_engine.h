@@ -55,6 +55,8 @@ class SpeculativeEngine : public Engine {
   // return the active activation memory
   std::vector<int64_t> get_active_activation_memory() const override;
 
+  void queue_release_ids(Request* request) override;
+
   // P/D
   bool pull_kv_blocks(const int32_t src_dp_size,
                       const int32_t src_dp_rank,

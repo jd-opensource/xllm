@@ -203,6 +203,15 @@ std::vector<int64_t> SpeculativeEngine::get_active_activation_memory() const {
   return engine_->get_active_activation_memory();
 }
 
+void SpeculativeEngine::queue_release_ids(Request* request) {
+  if (request == nullptr) {
+    return;
+  }
+  // SpeculativeEngine wraps the target LLMEngine and forwards request
+  // lifecycle hooks through the same execution path that consumes release ids.
+  engine_->queue_release_ids(request);
+}
+
 bool SpeculativeEngine::pull_kv_blocks(
     const int32_t src_dp_size,
     const int32_t src_dp_rank,

@@ -21,19 +21,29 @@ class FakeTokenizer : public Tokenizer {
  public:
   bool encode(const std::string_view& text,
               std::vector<int32_t>* ids,
-              bool add_special_tokens = true) const {
-    NOT_IMPLEMENTED();
+              bool add_special_tokens = true) const override {
+    (void)text;
+    (void)ids;
+    (void)add_special_tokens;
+    return false;
   }
   std::string decode(const Slice<int32_t>& ids,
-                     bool skip_special_tokens) const {
-    NOT_IMPLEMENTED();
+                     bool skip_special_tokens) const override {
+    (void)ids;
+    (void)skip_special_tokens;
+    return "";
   }
-  std::optional<int32_t> token_to_id(const std::string_view& token) const {
-    NOT_IMPLEMENTED();
+  std::optional<int32_t> token_to_id(
+      const std::string_view& token) const override {
+    (void)token;
+    return std::nullopt;
   }
-  std::string id_to_token(int32_t id) const { NOT_IMPLEMENTED(); }
-  size_t vocab_size() const { NOT_IMPLEMENTED(); }
-  std::unique_ptr<Tokenizer> clone() const {
+  std::string id_to_token(int32_t id) const override {
+    (void)id;
+    return "";
+  }
+  size_t vocab_size() const override { return 0; }
+  std::unique_ptr<Tokenizer> clone() const override {
     return std::make_unique<FakeTokenizer>();
   }
 };
@@ -64,6 +74,63 @@ class FakeEngine : public Engine {
  private:
   std::unique_ptr<Tokenizer> fake_tokenizer_;
   std::unique_ptr<BlockManagerPool> fake_block_manager_;
+};
+
+class ReleaseTrackingEngine : public FakeEngine {
+ public:
+  ReleaseTrackingEngine(int32_t num_blocks, int32_t block_size)
+      : FakeEngine(num_blocks, block_size) {}
+
+  void queue_release_ids(Request* request) override {
+    ++release_calls_;
+    last_released_request_ = request;
+  }
+
+  int release_calls() const { return release_calls_; }
+
+  Request* last_released_request() const { return last_released_request_; }
+
+ private:
+  int release_calls_ = 0;
+  Request* last_released_request_ = nullptr;
+};
+
+class ForwardingEngine : public Engine {
+ public:
+  explicit ForwardingEngine(Engine* inner) : inner_(inner) {}
+
+  ForwardOutput step(std::vector<Batch>& batch) override {
+    return inner_->step(batch);
+  }
+
+  void update_last_step_result(std::vector<Batch>& batch) override {
+    inner_->update_last_step_result(batch);
+  }
+
+  const Tokenizer* tokenizer() const override { return inner_->tokenizer(); }
+
+  BlockManagerPool* block_manager_pool() const override {
+    return inner_->block_manager_pool();
+  }
+
+  const ModelArgs& model_args() const override { return inner_->model_args(); }
+
+  const TokenizerArgs& tokenizer_args() const override {
+    return inner_->tokenizer_args();
+  }
+
+  std::vector<int64_t> get_active_activation_memory() const override {
+    return inner_->get_active_activation_memory();
+  }
+
+  bool init() override { return inner_->init(); }
+
+  void queue_release_ids(Request* request) override {
+    inner_->queue_release_ids(request);
+  }
+
+ private:
+  Engine* inner_;
 };
 
 class ScopedBoolFlagValue {
@@ -298,6 +365,21 @@ TEST(ContinuousSchedulerFactoryTest,
   EXPECT_EQ(forward_input.input_params.num_sequences, 1);
   EXPECT_EQ(batches[0].get_allowed_max_tokens()[0],
             opt.max_tokens_per_chunk_for_prefill());
+}
+
+TEST(ContinuousSchedulerTest, QueueReleaseIdsDispatchesViaWrapperEngine) {
+  auto inner = std::make_unique<ReleaseTrackingEngine>(32, 32);
+  auto wrapper = std::make_unique<ForwardingEngine>(inner.get());
+
+  auto requests = generate_request(
+      {32}, {8}, std::nullopt, std::nullopt, std::nullopt, std::nullopt, 30000);
+  ASSERT_EQ(requests.size(), 1);
+  auto request = requests[0];
+  Engine* engine = wrapper.get();
+  engine->queue_release_ids(request.get());
+
+  EXPECT_EQ(inner->release_calls(), 1);
+  EXPECT_EQ(inner->last_released_request(), request.get());
 }
 
 // TEST-1:
