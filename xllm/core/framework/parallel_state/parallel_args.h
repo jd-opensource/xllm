@@ -88,30 +88,6 @@ struct ParallelArgs {
         dp_local_process_group_(dp_local_process_group),
         dp_size_(dp_size) {}
 
-  int32_t dp_rank() const {
-      return world_size() / (cp_size() * tp_size());
-  }
-
-  int32_t cp_rank() const {
-      return world_size() / (dp_size() * tp_size());
-  }
-
-  int32_t tp_rank() const {
-      return rank() % tp_size();
-  }
-
-  int32_t ep_rank() const {
-      return rank() / ep_size();
-  }
-
-  int32_t ep_tp_rank() const {
-      return rank() % ep_size();
-  }
-
-  int32_t tp_size() const {
-      return world_size() / (dp_size() * cp_size());
-  }
-
   // rank of current process
   PROPERTY(int32_t, rank) = 0;
 
