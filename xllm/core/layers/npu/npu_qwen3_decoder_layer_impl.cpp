@@ -237,12 +237,7 @@ torch::Tensor NpuQwen3DecoderLayerImpl::forward(torch::Tensor& x,
                                                 std::atomic<bool>* event_flag,
                                                 int node_id) {
   atb::Status st;
-  // decide prefill vs decode; for multi-round mode, use explicit is_prefill.
-  bool is_prefill =
-      input_params.is_prefill || !input_params.batch_forward_type.is_decode();
-  if (is_prefill) {
-    // if (input_params.empty_kv_cache) {
-    // mstxRangeId id = mstxRangeStartA("prefill build variant", nullptr);
+  if (!input_params.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,

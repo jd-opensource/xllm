@@ -328,7 +328,6 @@ struct ModelInputParams {
     params.num_sequences = num_sequences;
     params.kv_max_seq_len = kv_max_seq_len;
     params.q_max_seq_len = q_max_seq_len;
-    params.is_prefill = is_prefill;
 
     params.kv_seq_lens = safe_to(kv_seq_lens, device, true);
     params.q_seq_lens = safe_to(q_seq_lens, device, true);
@@ -447,9 +446,6 @@ struct ModelInputParams {
 #endif
     return true;
   }
-
-  // whether this pass is prefill stage
-  bool is_prefill = true;
 
   BatchForwardType batch_forward_type;
 

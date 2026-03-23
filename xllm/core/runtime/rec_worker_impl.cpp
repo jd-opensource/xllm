@@ -1109,29 +1109,26 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_round_input_for_npu(
   llm_rec_params.current_round_tensor = cached_current_round_tensor_;
   input.input_params.attn_metadata = nullptr;
 
-  if (round == 0) {
-    input.input_params.is_prefill = true;
-    return;
-  }
-
-  input.input_params.is_prefill = false;
-  if (round == 1) {
-    if (top_tokens.defined()) {
-      input.token_ids = top_tokens.reshape({-1});
+  if (round > 0) {
+    if (round == 1) {
+      if (top_tokens.defined()) {
+        input.token_ids = top_tokens.reshape({-1});
+      }
+    } else {
+      input.token_ids = beam_tensors.out_token_ids.reshape({-1});
     }
-  } else {
-    input.token_ids = beam_tensors.out_token_ids.reshape({-1});
-  }
 
-  const int32_t decode_step = round - 1;
-  if (!llm_rec_params.decode_positions_tensor_list.empty() &&
-      decode_step < static_cast<int32_t>(
-                        llm_rec_params.decode_positions_tensor_list.size())) {
-    input.positions = llm_rec_params.decode_positions_tensor_list[decode_step];
-  }
+    const int32_t decode_step = round - 1;
+    if (!llm_rec_params.decode_positions_tensor_list.empty() &&
+        decode_step < static_cast<int32_t>(
+                          llm_rec_params.decode_positions_tensor_list.size())) {
+      input.positions =
+          llm_rec_params.decode_positions_tensor_list[decode_step];
+    }
 
-  input.input_params.batch_forward_type = BatchForwardType(2);
-  input.input_params.input_embedding = torch::Tensor();
+    input.input_params.batch_forward_type = BatchForwardType::DECODE;
+    input.input_params.input_embedding = torch::Tensor();
+  }
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_input_for_current_round(
