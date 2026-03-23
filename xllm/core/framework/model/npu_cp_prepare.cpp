@@ -38,8 +38,7 @@ torch::Tensor generate_cp_load_balance_idx(const torch::Tensor& input_lengths) {
   int base = 0;
   for (int length : lengths_vec) {
     std::vector<int> length_range(length);
-    std::iota(
-        length_range.begin(), length_range.end(), base);
+    std::iota(length_range.begin(), length_range.end(), base);
     int divider = length / 2;
     cp_load_balance_idx_first.insert(cp_load_balance_idx_first.end(),
                                      length_range.begin(),

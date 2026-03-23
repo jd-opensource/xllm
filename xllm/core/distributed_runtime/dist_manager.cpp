@@ -186,8 +186,8 @@ void DistManager::setup_multi_node_workers(
             << ", each_node_ranks = " << each_node_ranks
             << ", current node rank = " << options.node_rank()
             << ", nnodes = " << options.nnodes() << ", dp_size = " << dp_size
-            << ", cp_size = " << cp_size
-            << ", ep_size = " << ep_size << ", tp_size = " << dp_local_tp_size;
+            << ", cp_size = " << cp_size << ", ep_size = " << ep_size
+            << ", tp_size = " << dp_local_tp_size;
 
   CHECK_EQ((world_size % dp_size), 0)
       << "Global world size must be divisible by dp size in multi-node "

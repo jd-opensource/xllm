@@ -18,7 +18,6 @@ limitations under the License.
 
 #include <iostream>
 
-
 namespace xllm {
 namespace layer {
 

@@ -61,8 +61,8 @@ MappingNPU::MappingNPU(const std::string rank_table_file,
   get_tp_group(attn_inner_sp_);
   get_dp_group(attn_cp_);
 
-  //attn_cp_.group_size_ = 1;
-  // o_proj mixture of tp and dp
+  // attn_cp_.group_size_ = 1;
+  //  o_proj mixture of tp and dp
   if (ENV_enable_extra_o_proj_tp) {
     get_domain(attn_o_proj_tp_, attn_o_proj_dp_, 0);
     get_domain(attn_tp_, attn_dp_, attn_o_proj_tp_.group_size());
@@ -186,12 +186,14 @@ void MappingNPU::validate() {
       << "World size should be multiple of the number of nodes. "
          "Please check `world_size` and `ranktablefile`.";
 
-  /* TODO: Decouple the initialization processes of DP and CP, remove this constraint */
+  /* TODO: Decouple the initialization processes of DP and CP, remove this
+   * constraint */
   if (attn_cp_.group_size() > 1) {
     CHECK(attn_dp_.group_size() == 1) << "DP size should be 1 if CP size > 1";
   }
 
-  CHECK(attn_tp_.group_size() * attn_dp_.group_size() * attn_cp_.group_size() == world_size_)
+  CHECK(attn_tp_.group_size() * attn_dp_.group_size() * attn_cp_.group_size() ==
+        world_size_)
       << "World size must equal to attention's dp_size * attention's tp_size. "
          "Attention's tp_size is " +
              std::to_string(attn_tp_.group_size()) +

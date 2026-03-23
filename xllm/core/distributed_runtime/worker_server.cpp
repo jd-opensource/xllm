@@ -134,7 +134,8 @@ void WorkerServer::create_server(
     return;
   }
 
-  CollectiveCommunicator comm(worker_global_rank, world_size, dp_size, ep_size, cp_size);
+  CollectiveCommunicator comm(
+      worker_global_rank, world_size, dp_size, ep_size, cp_size);
   const ParallelArgs* parallel_args = comm.parallel_args();
   comm.create_process_groups(master_node_addr, device);
 

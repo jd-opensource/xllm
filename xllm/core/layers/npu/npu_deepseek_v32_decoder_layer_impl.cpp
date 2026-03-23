@@ -972,23 +972,27 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
 
   if (cp_size_ > 1 && is_prefill) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 32) =
-    atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_o_recover_idx);
+        atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_o_recover_idx);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 33) =
-    atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_kv_recover_idx);
+        atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_kv_recover_idx);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 34) =
-    atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_load_balance_idx);
+        atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_load_balance_idx);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 35) =
-    atb_speed::Utils::AtTensor2Tensor(cp_inputs.k_gather_index_prev);
+        atb_speed::Utils::AtTensor2Tensor(cp_inputs.k_gather_index_prev);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 36) =
-    atb_speed::Utils::AtTensor2Tensor(cp_inputs.k_gather_index_next);
+        atb_speed::Utils::AtTensor2Tensor(cp_inputs.k_gather_index_next);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 37) =
-    atb_speed::Utils::AtTensor2Tensor(cp_inputs.actual_seq_lengths_query_prev);
+        atb_speed::Utils::AtTensor2Tensor(
+            cp_inputs.actual_seq_lengths_query_prev);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 38) =
-    atb_speed::Utils::AtTensor2Tensor(cp_inputs.actual_seq_lengths_query_next);
+        atb_speed::Utils::AtTensor2Tensor(
+            cp_inputs.actual_seq_lengths_query_next);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 39) =
-    atb_speed::Utils::AtTensor2Tensor(cp_inputs.actual_seq_lengths_key_prev);
+        atb_speed::Utils::AtTensor2Tensor(
+            cp_inputs.actual_seq_lengths_key_prev);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 40) =
-    atb_speed::Utils::AtTensor2Tensor(cp_inputs.actual_seq_lengths_key_next);
+        atb_speed::Utils::AtTensor2Tensor(
+            cp_inputs.actual_seq_lengths_key_next);
   }
 
   node.variantPack.outTensors.at(0) = internal_tensor_;

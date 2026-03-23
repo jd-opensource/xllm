@@ -1028,7 +1028,8 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
 
-  std::vector<std::vector<RawForwardInput>> cp_partitioned_inputs(static_cast<size_t>(dp_size_));
+  std::vector<std::vector<RawForwardInput>> cp_partitioned_inputs(
+      static_cast<size_t>(dp_size_));
 
   if (cp_size_ > 1) {
     for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
@@ -1048,14 +1049,16 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
     const int32_t dp_rank = worker_rank / dp_local_size_;
     const RawForwardInput* input_to_send = &raw_forward_inputs[dp_rank];
-    if (cp_size_ > 1 && raw_forward_inputs[dp_rank].batch_forward_type.is_prefill()) {
+    if (cp_size_ > 1 &&
+        raw_forward_inputs[dp_rank].batch_forward_type.is_prefill()) {
       const int32_t local_rank_in_dp_group = worker_rank % dp_local_size_;
       const int32_t cp_rank = local_rank_in_dp_group / dp_local_tp_size_;
       CHECK_GE(cp_rank, 0);
       CHECK_LT(cp_rank, static_cast<int32_t>(cp_size_));
       input_to_send = &cp_partitioned_inputs[dp_rank][cp_rank];
     }
-    futures.emplace_back(worker_clients_[worker_rank]->step_async(*input_to_send));
+    futures.emplace_back(
+        worker_clients_[worker_rank]->step_async(*input_to_send));
   }
 
   // wait for the all future to complete
@@ -1206,8 +1209,8 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
 
   // build model input for every single micro batch
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs.emplace_back(std::move(
-        batch[dp_rank].prepare_forward_input(args_, threadpool_.get(), cp_size_)));
+    batched_inputs.emplace_back(std::move(batch[dp_rank].prepare_forward_input(
+        args_, threadpool_.get(), cp_size_)));
     dp_global_token_nums[dp_rank] =
         batched_inputs[dp_rank].flatten_tokens_vec.size();
     if (batch_forward_type.is_empty() &&
