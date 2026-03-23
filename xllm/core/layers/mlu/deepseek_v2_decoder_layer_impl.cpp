@@ -37,7 +37,7 @@ std::pair<torch::Tensor, PaddingInfo> shard_attn_out(
     const ParallelArgs& args,
     DeepseekV2AttentionImpl::PostAttnLayout attn_layout) {
   if (attn_layout == DeepseekV2AttentionImpl::PostAttnLayout::kTpShard) {
-    return rs_attn_input(x, residual, target_tokens, args);
+    return reduce_scatter_attn_input(x, residual, target_tokens, args);
   }
 
   CHECK(attn_layout == DeepseekV2AttentionImpl::PostAttnLayout::kReplicated)
@@ -166,11 +166,12 @@ DeepseekV2DecoderLayerImpl::build_post_attn_carrier(
   }
 
   if (enable_moe_all2all) {
-    auto shard_result = shard_attn_out(x,
-                                       residual,
-                                       get_rs_tokens(x.size(0), parallel_args_),
-                                       parallel_args_,
-                                       attn_layout);
+    auto shard_result =
+        shard_attn_out(x,
+                       residual,
+                       get_reduce_scatter_tokens(x.size(0), parallel_args_),
+                       parallel_args_,
+                       attn_layout);
     carrier.ffn_in = shard_result.first;
     carrier.skip_local = carrier.ffn_in;
     carrier.pad_info = shard_result.second;

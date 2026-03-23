@@ -51,7 +51,8 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
   float scaling = std::pow(qk_head_dim_, -0.5f);
 
   ProcessGroup* weight_group =
-      use_repl_attn_weights() && parallel_args.single_rank_group_ != nullptr
+      use_replicated_attn_weights() &&
+              parallel_args.single_rank_group_ != nullptr
           ? parallel_args.single_rank_group_
           : parallel_args.tp_group_;
   const LinearExtraArgs attention_linear_extra_args("none", false);
@@ -157,7 +158,7 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
   // TODO: refactor this choice of attention in the future to make it more
   // flexible
   attn_ = register_module("attn",
-                          Attention(run_heads().attn,
+                          Attention(active_heads().attn,
                                     kv_lora_rank_ + qk_rope_head_dim_,
                                     /*num_local_heads=*/1,
                                     kv_lora_rank_,
@@ -179,14 +180,14 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                         attention_linear_extra_args));
 }
 
-DeepseekV2AttentionImpl::QPreOut DeepseekV2AttentionImpl::q_pre(
+DeepseekV2AttentionImpl::QueryPrep DeepseekV2AttentionImpl::prep_query(
     const torch::Tensor& hidden_states,
     const HeadInfo& heads) {
-  QPreOut out;
+  QueryPrep out;
   if (q_lora_rank_ > 0) {
     out.q = q_a_proj_(hidden_states);
     auto q_a = std::get<0>(q_a_layernorm_(out.q));
-    out.qr = q_a;
+    out.q_norm = q_a;
     out.q = q_b_proj_->forward(q_a).view({-1, heads.proj, qk_head_dim_});
   } else {
     out.q =
@@ -239,7 +240,7 @@ void DeepseekV2AttentionImpl::decode_kv_pre_base(
 
 void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
     torch::Tensor& q,
-    torch::Tensor& qr,
+    torch::Tensor& q_norm,
     torch::Tensor& q_input,
     torch::Tensor& latent_cache,
     torch::Tensor& kv_cache,
@@ -250,7 +251,7 @@ void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
   // forward_decoder_fused_mla_q
   // fused_mla_q: q_a_layernorm + q_b_proj + split + bmm + rotary_emb
   if (q_lora_rank_ > 0) {
-    qr = torch::empty_like(q);
+    q_norm = torch::empty_like(q);
     if (q.dim() == 2) {
       q = q.unsqueeze(1);
     }
@@ -259,7 +260,7 @@ void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
     kernel::FusedMlaQParams fused_mla_q_params;
     fused_mla_q_params.q = q;
     fused_mla_q_params.output = q_input;
-    fused_mla_q_params.output_norm = qr.view(q.sizes());
+    fused_mla_q_params.output_norm = q_norm.view(q.sizes());
     fused_mla_q_params.gamma = q_a_layernorm_->weight();
     fused_mla_q_params.smooth_quant_scale = q_b_proj_->smooth();
     fused_mla_q_params.weight_b = q_b_proj_->weight();
@@ -307,7 +308,7 @@ void DeepseekV2AttentionImpl::decode_qkv_pre_fused(
 
 void DeepseekV2AttentionImpl::prepare_mla_inputs(
     torch::Tensor& q,
-    torch::Tensor& qr,
+    torch::Tensor& q_norm,
     torch::Tensor& q_input,
     torch::Tensor& latent_cache,
     const torch::Tensor& hidden_states,
@@ -317,7 +318,7 @@ void DeepseekV2AttentionImpl::prepare_mla_inputs(
     const AttentionMetadata& attn_metadata,
     bool enable_fused_qkv,
     bool use_prompt_rope) {
-  const auto& heads = run_heads();
+  const auto& heads = active_heads();
   latent_cache = kv_a_proj_with_mqa_(hidden_states);
   if (enable_fused_qkv) {
     if (q_lora_rank_ > 0) {
@@ -326,7 +327,7 @@ void DeepseekV2AttentionImpl::prepare_mla_inputs(
       q = q_proj_->forward(hidden_states).view({-1, heads.proj, qk_head_dim_});
     }
     decode_qkv_pre_fused(q,
-                         qr,
+                         q_norm,
                          q_input,
                          latent_cache,
                          k_cache,
@@ -335,9 +336,9 @@ void DeepseekV2AttentionImpl::prepare_mla_inputs(
                          attn_metadata,
                          use_prompt_rope);
   } else {
-    auto q_out = q_pre(hidden_states, heads);
-    q = q_out.q;
-    qr = q_out.qr;
+    auto query_prep = prep_query(hidden_states, heads);
+    q = query_prep.q;
+    q_norm = query_prep.q_norm;
     fill_q_input(q_input, q, positions, attn_metadata, use_prompt_rope);
     decode_kv_pre_base(latent_cache, positions, attn_metadata, use_prompt_rope);
   }
@@ -346,7 +347,7 @@ void DeepseekV2AttentionImpl::prepare_mla_inputs(
 AttentionMetadata DeepseekV2AttentionImpl::build_mla_attention_metadata(
     const torch::Tensor& positions,
     const torch::Tensor& hidden_states,
-    const torch::Tensor& qr,
+    const torch::Tensor& q_norm,
     const torch::Tensor& k_input,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
@@ -385,7 +386,7 @@ AttentionMetadata DeepseekV2AttentionImpl::build_mla_attention_metadata(
     } else if (enable_lighting_indexer_) {
       auto index_cache = kv_cache.get_index_cache();
       auto [new_block_tables, new_context_lens] = indexer_(hidden_states,
-                                                           qr,
+                                                           q_norm,
                                                            positions,
                                                            index_cache,
                                                            attn_metadata,
@@ -443,8 +444,8 @@ torch::Tensor DeepseekV2AttentionImpl::forward_normal_tp(
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
     bool is_prefill_or_chunked_prefill) {
-  const auto& heads = run_heads();
-  torch::Tensor q, qr;
+  const auto& heads = active_heads();
+  torch::Tensor q, q_norm;
   torch::Tensor q_input = torch::empty(
       {hidden_states.size(0), heads.attn, kv_lora_rank_ + qk_rope_head_dim_},
       hidden_states.options());
@@ -456,7 +457,7 @@ torch::Tensor DeepseekV2AttentionImpl::forward_normal_tp(
   const bool use_prompt_rope = attn_metadata.is_prefill;
 
   prepare_mla_inputs(q,
-                     qr,
+                     q_norm,
                      q_input,
                      latent_cache,
                      hidden_states,
@@ -477,7 +478,7 @@ torch::Tensor DeepseekV2AttentionImpl::forward_normal_tp(
   AttentionMetadata attn_indexer_metadata =
       build_mla_attention_metadata(positions,
                                    hidden_states,
-                                   qr,
+                                   q_norm,
                                    k_input,
                                    attn_metadata,
                                    kv_cache,

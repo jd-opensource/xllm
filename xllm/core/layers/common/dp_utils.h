@@ -31,14 +31,15 @@ struct PaddingInfo {
   bool active = false;          // Whether padding was performed
 };
 
-int64_t get_rs_tokens(int64_t num_tokens, const ParallelArgs& parallel_args);
+int64_t get_reduce_scatter_tokens(int64_t num_tokens,
+                                  const ParallelArgs& parallel_args);
 
 std::pair<torch::Tensor, PaddingInfo> pad_tokens(torch::Tensor x,
                                                  int64_t target_tokens);
 
 // Prepare attention output for TP reduce scatter by applying the rank0
 // residual add, padding to target_tokens, then scattering across TP ranks.
-std::pair<torch::Tensor, PaddingInfo> rs_attn_input(
+std::pair<torch::Tensor, PaddingInfo> reduce_scatter_attn_input(
     torch::Tensor x,
     const torch::Tensor& residual,
     int64_t target_tokens,

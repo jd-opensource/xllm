@@ -72,7 +72,8 @@ std::pair<torch::Tensor, PaddingInfo> pad_tokens(torch::Tensor x,
   return {padded_x, {current_tokens, target_tokens, true}};
 }
 
-int64_t get_rs_tokens(int64_t num_tokens, const ParallelArgs& parallel_args) {
+int64_t get_reduce_scatter_tokens(int64_t num_tokens,
+                                  const ParallelArgs& parallel_args) {
   int64_t tp_size = get_tp_size(parallel_args);
   if (tp_size <= 1) {
     return num_tokens;
@@ -81,7 +82,7 @@ int64_t get_rs_tokens(int64_t num_tokens, const ParallelArgs& parallel_args) {
   return align_tokens(num_tokens, tp_size);
 }
 
-std::pair<torch::Tensor, PaddingInfo> rs_attn_input(
+std::pair<torch::Tensor, PaddingInfo> reduce_scatter_attn_input(
     torch::Tensor x,
     const torch::Tensor& residual,
     int64_t target_tokens,

@@ -34,7 +34,7 @@ torch::Tensor DeepseekV2AttentionImpl::forward_sp(
   CHECK(is_prefill_or_chunked_prefill)
       << "deepseek_v32 sequence parallel only supports prefill batches.";
   auto k_cache_scale = kv_cache.get_k_cache_scale();
-  auto qr_pre = q_pre(hidden_states, full_heads());
+  auto query_prep = prep_query(hidden_states, full_heads());
 
   std::optional<torch::Tensor> new_block_tables = std::nullopt;
   std::optional<torch::Tensor> new_context_lens = std::nullopt;
@@ -47,8 +47,11 @@ torch::Tensor DeepseekV2AttentionImpl::forward_sp(
   if (sp_comm_stream_ == nullptr) {
     sp_comm_stream_ = device.get_stream_from_pool();
   }
-  index_pre = indexer_->sp_pre(
-      hidden_states, qr_pre.qr, positions, sp_ctx.local_attn_metadata, sp_ctx);
+  index_pre = indexer_->sp_pre(hidden_states,
+                               query_prep.q_norm,
+                               positions,
+                               sp_ctx.local_attn_metadata,
+                               sp_ctx);
   auto compute_stream = device.current_stream();
   sp_comm_stream_->wait_stream(*compute_stream);
   {
@@ -56,7 +59,8 @@ torch::Tensor DeepseekV2AttentionImpl::forward_sp(
     index_handle = indexer_->sp_comm(index_pre.k_local, sp_ctx);
   }
 
-  auto mla_pre = sp_mla_pre(hidden_states, positions, qr_pre, sp_ctx);
+  auto mla_inputs =
+      build_sp_mla_inputs(hidden_states, positions, query_prep, sp_ctx);
 
   torch::Tensor k_global =
       indexer_->sp_wait_k(index_pre.k_local, index_handle, sp_ctx);
@@ -64,19 +68,19 @@ torch::Tensor DeepseekV2AttentionImpl::forward_sp(
   sp_comm_stream_->wait_stream(*compute_stream);
   {
     torch::StreamGuard stream_guard = sp_comm_stream_->set_stream_guard();
-    mla_handle = sp_mla_comm(mla_pre.k_input, sp_ctx);
+    mla_handle = launch_sp_k_gather(mla_inputs.k_input, sp_ctx);
   }
   auto index_out = indexer_->sp_post(
       index_pre, k_global, index_cache, attn_metadata, sp_ctx.sp_meta, sp_ctx);
   new_block_tables = std::get<0>(index_out);
   new_context_lens = std::get<1>(index_out);
-  sp_mla_finish_k(mla_pre, mla_handle, sp_ctx);
+  finish_sp_k_gather(mla_inputs, mla_handle, sp_ctx);
 
   AttentionMetadata attn_indexer_metadata =
       build_mla_attention_metadata(positions,
                                    hidden_states,
-                                   mla_pre.qr,
-                                   mla_pre.k_input,
+                                   mla_inputs.q_norm,
+                                   mla_inputs.k_input,
                                    attn_metadata,
                                    kv_cache,
                                    k_cache_scale,
@@ -88,27 +92,27 @@ torch::Tensor DeepseekV2AttentionImpl::forward_sp(
   attn_indexer_metadata.max_query_len =
       sp_ctx.local_attn_metadata.max_query_len;
   auto [attn_output_local, output_lse] = attn_(attn_indexer_metadata,
-                                               mla_pre.q_input,
-                                               mla_pre.k_input,
-                                               mla_pre.v_input,
+                                               mla_inputs.q_input,
+                                               mla_inputs.k_input,
+                                               mla_inputs.v_input,
                                                kv_cache);
   return project_output(attn_output_local, full_heads());
 }
 
-DeepseekV2AttentionImpl::MlaIO DeepseekV2AttentionImpl::sp_mla_pre(
+DeepseekV2AttentionImpl::MlaInputs DeepseekV2AttentionImpl::build_sp_mla_inputs(
     const torch::Tensor& hidden_states,
     const torch::Tensor& positions,
-    const QPreOut& qr_pre,
+    const QueryPrep& query_prep,
     const v32_sp::DeepseekV32SPContext& sp_ctx) {
-  MlaIO out;
+  MlaInputs out;
   out.q_input = torch::empty({hidden_states.size(0),
                               full_heads().attn,
                               kv_lora_rank_ + qk_rope_head_dim_},
                              hidden_states.options());
-  out.qr = qr_pre.qr;
+  out.q_norm = query_prep.q_norm;
   torch::Tensor latent_cache = kv_a_proj_with_mqa_(hidden_states);
   fill_q_input(out.q_input,
-               qr_pre.q,
+               query_prep.q,
                positions,
                sp_ctx.local_attn_metadata,
                /*use_prompt_rope=*/false);
@@ -124,19 +128,19 @@ DeepseekV2AttentionImpl::MlaIO DeepseekV2AttentionImpl::sp_mla_pre(
   return out;
 }
 
-v32_sp::PaddedGatherHandle DeepseekV2AttentionImpl::sp_mla_comm(
+v32_sp::PaddedGatherHandle DeepseekV2AttentionImpl::launch_sp_k_gather(
     const torch::Tensor& k_input,
     const v32_sp::DeepseekV32SPContext& sp_ctx) const {
   auto padded_k = layer::v32_sp::pad_to_sp_rows(k_input, sp_ctx);
   return layer::v32_sp::launch_gather_padded(padded_k, sp_ctx);
 }
 
-void DeepseekV2AttentionImpl::sp_mla_finish_k(
-    MlaIO& pre_out,
+void DeepseekV2AttentionImpl::finish_sp_k_gather(
+    MlaInputs& mla_inputs,
     const v32_sp::PaddedGatherHandle& k_handle,
     const v32_sp::DeepseekV32SPContext& sp_ctx) const {
-  pre_out.k_input = layer::v32_sp::finish_gather_padded(k_handle, sp_ctx);
-  pre_out.v_input = pre_out.k_input.slice(-1, 0, kv_lora_rank_);
+  mla_inputs.k_input = layer::v32_sp::finish_gather_padded(k_handle, sp_ctx);
+  mla_inputs.v_input = mla_inputs.k_input.slice(-1, 0, kv_lora_rank_);
 }
 
 }  // namespace layer

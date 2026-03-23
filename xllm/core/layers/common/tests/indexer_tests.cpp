@@ -216,7 +216,7 @@ class IndexerTest : public ::testing::Test {
 
   struct TestInputs {
     torch::Tensor x;
-    torch::Tensor qr;
+    torch::Tensor q_norm;
     torch::Tensor positions;
     torch::Tensor k_cache;
     std::unordered_map<std::string, torch::Tensor> weights;
@@ -251,7 +251,7 @@ class IndexerTest : public ::testing::Test {
 
     inputs.x =
         create_random_tensor({num_tokens, test_config_.dim}, -1.0f, 1.0f);
-    inputs.qr = create_random_tensor(
+    inputs.q_norm = create_random_tensor(
         {num_tokens, test_config_.q_lora_rank}, -1.0f, 1.0f);
 
     inputs.positions =
@@ -304,7 +304,7 @@ class IndexerTest : public ::testing::Test {
                                        options_));
     indexer->load_state_dict(state_dict);
     return indexer->forward(inputs.x,
-                            inputs.qr,
+                            inputs.q_norm,
                             inputs.positions,
                             inputs.k_cache,
                             inputs.metadata,

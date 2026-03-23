@@ -268,11 +268,11 @@ IndexerRuntimeContext IndexerImpl::prepare_runtime_context(
 }
 
 torch::Tensor IndexerImpl::preprocess_indexer_q(
-    const torch::Tensor& qr,
+    const torch::Tensor& q_norm,
     const torch::Tensor& positions,
     const AttentionMetadata& attn_metadata) {
   // Forward pass through wq_b
-  auto q = wq_b_->forward(qr);
+  auto q = wq_b_->forward(q_norm);
   q = q.view({q.size(0), n_heads_, head_dim_});
   auto q_pe = q.slice(-1, 0, rope_head_dim_);
   rotary_emb_->forward(q_pe,
@@ -320,15 +320,16 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::preprocess_indexer_k(
 }
 
 torch::Tensor IndexerImpl::preprocess_indexer_q_fused(
-    const torch::Tensor& qr,
+    const torch::Tensor& q_norm,
     const torch::Tensor& positions) {
   // fuses the query projection(Matmul), Rotary Position Embedding (RoPE), and
   // an optional Hadamard transformation(Matmul) into a single high-performance
   // kernel
-  auto output = torch::empty({qr.size(0), n_heads_, head_dim_}, qr.options());
+  auto output =
+      torch::empty({q_norm.size(0), n_heads_, head_dim_}, q_norm.options());
   auto w_q = wq_b_->weight().view({n_heads_, head_dim_, -1});
   kernel::FusedIndexerQParams q_params;
-  q_params.input_q = qr;
+  q_params.input_q = q_norm;
   q_params.output = output;
   q_params.output_scale = std::nullopt;
   q_params.w_q = w_q;
@@ -375,7 +376,7 @@ torch::Tensor IndexerImpl::preprocess_indexer_k_fused(
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
 IndexerImpl::preprocess_indexer_inputs(const torch::Tensor& x,
-                                       const torch::Tensor& qr,
+                                       const torch::Tensor& q_norm,
                                        const torch::Tensor& positions,
                                        torch::Tensor& k_cache,
                                        const AttentionMetadata& attn_metadata,
@@ -383,10 +384,10 @@ IndexerImpl::preprocess_indexer_inputs(const torch::Tensor& x,
                                        bool write_k_cache) {
   torch::Tensor q, k, weights;
   if (!is_prefill && enable_fused_qk_) {
-    q = preprocess_indexer_q_fused(qr, positions);
+    q = preprocess_indexer_q_fused(q_norm, positions);
     weights = preprocess_indexer_k_fused(x, positions, k_cache, attn_metadata);
   } else {
-    q = preprocess_indexer_q(qr, positions, attn_metadata);
+    q = preprocess_indexer_q(q_norm, positions, attn_metadata);
     std::tie(k, weights) = preprocess_indexer_k(
         x, positions, k_cache, attn_metadata, write_k_cache);
   }
@@ -395,7 +396,7 @@ IndexerImpl::preprocess_indexer_inputs(const torch::Tensor& x,
 
 IndexerSPPreOut IndexerImpl::sp_pre(
     const torch::Tensor& x,
-    const torch::Tensor& qr,
+    const torch::Tensor& q_norm,
     const torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,
     const v32_sp::DeepseekV32SPContext& sp_ctx) {
@@ -403,7 +404,7 @@ IndexerSPPreOut IndexerImpl::sp_pre(
   IndexerSPPreOut out;
   std::tie(out.q, out.k_local, out.weights) =
       preprocess_indexer_inputs(x,
-                                qr,
+                                q_norm,
                                 positions,
                                 out.k_local,
                                 attn_metadata,
@@ -545,7 +546,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::run_indexer_select_kernel(
 
 std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
     const torch::Tensor& x,
-    const torch::Tensor& qr,
+    const torch::Tensor& q_norm,
     const torch::Tensor& positions,
     torch::Tensor& k_cache,
     const AttentionMetadata& attn_metadata,
@@ -554,7 +555,7 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::forward(
   (void)mask;
   torch::Tensor q, k, weights;
   std::tie(q, k, weights) = preprocess_indexer_inputs(x,
-                                                      qr,
+                                                      q_norm,
                                                       positions,
                                                       k_cache,
                                                       attn_metadata,

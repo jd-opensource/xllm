@@ -90,7 +90,8 @@ TEST(DpUtilsTest, RsAttnInputNoPadWhenTpOne) {
   torch::Tensor x = torch::tensor({{1.0f, 2.0f}, {3.0f, 4.0f}});
   torch::Tensor residual = torch::tensor({{10.0f, 20.0f}, {30.0f, 40.0f}});
 
-  auto rs_result = rs_attn_input(x, residual, /*target_tokens=*/2, args);
+  auto rs_result =
+      reduce_scatter_attn_input(x, residual, /*target_tokens=*/2, args);
 
   EXPECT_FALSE(rs_result.second.active);
   EXPECT_EQ(rs_result.second.original_tokens, 2);
@@ -103,16 +104,16 @@ TEST(DpUtilsTest, GetRsTokensKeepsTpOneShape) {
   std::unique_ptr<xllm::ProcessGroup> process_group;
   ParallelArgs args = make_tp_args(process_group, 0, 1);
 
-  EXPECT_EQ(get_rs_tokens(/*num_tokens=*/5, args), 5);
+  EXPECT_EQ(get_reduce_scatter_tokens(/*num_tokens=*/5, args), 5);
 }
 
 TEST(DpUtilsTest, GetRsTokensAlignsTpShard) {
   std::unique_ptr<xllm::ProcessGroup> process_group;
   ParallelArgs args = make_tp_args(process_group, 0, 4);
 
-  EXPECT_EQ(get_rs_tokens(/*num_tokens=*/2, args), 4);
-  EXPECT_EQ(get_rs_tokens(/*num_tokens=*/5, args), 8);
-  EXPECT_EQ(get_rs_tokens(/*num_tokens=*/8, args), 8);
+  EXPECT_EQ(get_reduce_scatter_tokens(/*num_tokens=*/2, args), 4);
+  EXPECT_EQ(get_reduce_scatter_tokens(/*num_tokens=*/5, args), 8);
+  EXPECT_EQ(get_reduce_scatter_tokens(/*num_tokens=*/8, args), 8);
 }
 
 TEST(DpUtilsTest, PadTokensPreservesTrailingDims) {
@@ -136,7 +137,8 @@ TEST(DpUtilsTest, RsAttnInputPadsWhenTokensLtTp) {
   torch::Tensor x = torch::tensor({{1.0f, 2.0f}, {3.0f, 4.0f}});
   torch::Tensor residual = torch::tensor({{10.0f, 20.0f}, {30.0f, 40.0f}});
 
-  auto rs_result = rs_attn_input(x, residual, /*target_tokens=*/4, args);
+  auto rs_result =
+      reduce_scatter_attn_input(x, residual, /*target_tokens=*/4, args);
 
   EXPECT_TRUE(rs_result.second.active);
   EXPECT_EQ(rs_result.second.original_tokens, 2);
@@ -152,7 +154,8 @@ TEST(DpUtilsTest, RsAttnInputPadsToAlignedTokens) {
       {{1.0f, 1.5f}, {2.0f, 2.5f}, {3.0f, 3.5f}, {4.0f, 4.5f}, {5.0f, 5.5f}});
   torch::Tensor residual = torch::full({5, 2}, 100.0f);
 
-  auto rs_result = rs_attn_input(x, residual, /*target_tokens=*/8, args);
+  auto rs_result =
+      reduce_scatter_attn_input(x, residual, /*target_tokens=*/8, args);
 
   EXPECT_TRUE(rs_result.second.active);
   EXPECT_EQ(rs_result.second.original_tokens, 5);
