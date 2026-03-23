@@ -10,8 +10,10 @@ from pathlib import Path
 from env import set_npu_envs
 
 from .common.toolchain import (
+    default_tilelang_root,
     git_head,
     prepare_tilelang_import,
+    repo_root,
     resolve_tilelang_root,
 )
 
@@ -61,11 +63,45 @@ def resolve_cann_set_env() -> Path:
 
 def ensure_tilelang_submodules(tilelang_root: str | Path) -> Path:
     tl_root = Path(tilelang_root).resolve()
-    tvm_cmake = tl_root / "3rdparty" / "tvm" / "CMakeLists.txt"
-    if not tvm_cmake.is_file():
+    required_markers = {
+        "3rdparty/catlass/CMakeLists.txt": tl_root / "3rdparty" / "catlass" / "CMakeLists.txt",
+        "3rdparty/composable_kernel/CMakeLists.txt": (
+            tl_root / "3rdparty" / "composable_kernel" / "CMakeLists.txt"
+        ),
+        "3rdparty/cutlass/CMakeLists.txt": tl_root / "3rdparty" / "cutlass" / "CMakeLists.txt",
+        "3rdparty/pto-isa/CMakeLists.txt": tl_root / "3rdparty" / "pto-isa" / "CMakeLists.txt",
+        "3rdparty/shmem/CMakeLists.txt": tl_root / "3rdparty" / "shmem" / "CMakeLists.txt",
+        "3rdparty/tvm/CMakeLists.txt": tl_root / "3rdparty" / "tvm" / "CMakeLists.txt",
+    }
+    missing = [name for name, path in required_markers.items() if not path.is_file()]
+    if missing:
+        if (tl_root / ".git").exists():
+            repair_hint = (
+                "Run "
+                f"`git -C {shlex.quote(str(tl_root))} submodule update --init --recursive` "
+                "first."
+            )
+        else:
+            bundled_root = default_tilelang_root().resolve()
+            bundled_repair_cmd = (
+                f"git -C {shlex.quote(str(repo_root()))} "
+                "submodule update --init --recursive third_party/tilelang-ascend"
+            )
+            if tl_root == bundled_root:
+                repair_hint = (
+                    "Sync the bundled TileLang checkout from the xLLM repo root: "
+                    f"`{bundled_repair_cmd}`."
+                )
+            else:
+                repair_hint = (
+                    f"`TL_ROOT={tl_root}` is not a git checkout. "
+                    "Point TL_ROOT at a fully initialized tilelang-ascend clone, "
+                    f"or sync the bundled checkout with `{bundled_repair_cmd}`."
+                )
         raise RuntimeError(
             "[ERROR] tilelang-ascend nested dependencies are incomplete: "
-            "missing 3rdparty/tvm/CMakeLists.txt."
+            f"missing {', '.join(missing)}. "
+            f"{repair_hint}"
         )
     return tl_root
 
