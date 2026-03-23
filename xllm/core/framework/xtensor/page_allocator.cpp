@@ -282,7 +282,7 @@ bool PageAllocator::wakeup_model(const std::string& model_id) {
         size_t pages_needed = virt_page_ids.size() * phy_pages_per_virt;
         auto [start_w, end_w] = get_dp_group_worker_range(model_id, dp_rank);
         total_phy_pages_needed += pages_needed;
-        groups_to_map.push_back({dp_rank, std::move(virt_page_ids)});
+        groups_to_map.emplace_back(dp_rank, std::move(virt_page_ids));
         for (int32_t w = start_w; w < end_w && w < max_world_size_; ++w) {
           pages_to_consume_per_worker[w] += pages_needed;
         }

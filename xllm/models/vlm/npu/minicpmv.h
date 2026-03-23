@@ -816,7 +816,7 @@ class VisionAdapterMLPImpl : public torch::nn::Module {
       auto seq = torch::nn::Sequential(lni, cpl, act, rpl);
 
       layers_->push_back(seq);
-      mlps_.push_back(std::make_tuple(lni, cpl, act, rpl));
+      mlps_.emplace_back(lni, cpl, act, rpl);
     }
   }
 
