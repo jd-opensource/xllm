@@ -136,6 +136,13 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   compute_stream_ = device_.get_stream_from_pool();
   sampler_ = std::make_unique<Sampler>();
 
+#if !defined(USE_NPU)
+  // Startup validation: ATB block-copy kernel is NPU-only. We should fail fast
+  // if CUDA deployment accidentally enables it.
+  CHECK(!FLAGS_enable_block_copy_kernel)
+      << "enable_block_copy_kernel must be false on CUDA builds.";
+#endif
+
 #if defined(USE_NPU)
   if (FLAGS_enable_xtensor) {
     if (!weight_transfer_) {
@@ -523,8 +530,15 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 
   processed_input = input.to(device_, dtype_);
   auto& input_params = processed_input.input_params;
+
 #if defined(USE_NPU)
-  if (input_params.swap_blocks.size() > 0 && !FLAGS_enable_block_copy_kernel) {
+  const bool use_block_copy_kernel = FLAGS_enable_block_copy_kernel;
+#else
+  const bool use_block_copy_kernel = false;
+#endif
+
+#if defined(USE_NPU) || defined(USE_CUDA)
+  if (input_params.swap_blocks.size() > 0 && !use_block_copy_kernel) {
     auto& swap_blocks = input_params.swap_blocks;
 
     // collect src and dst indices
@@ -547,6 +561,9 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
       kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
     }
   }
+#endif
+
+#if defined(USE_NPU)
   if (FLAGS_enable_mla &&
       input_params.batch_forward_type.is_chunked_prefill()) {
     prepare_mla_prefixcache_inputs(input_params);

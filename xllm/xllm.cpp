@@ -220,6 +220,11 @@ int run() {
     FLAGS_max_tokens_per_chunk_for_prefill = FLAGS_max_tokens_per_batch;
   }
 
+// disable block copy kernel on non-NPU backend
+#if !defined(USE_NPU)
+  FLAGS_enable_block_copy_kernel = false;
+#endif
+
   std::string model_type = get_model_type(model_path);
   // set enable_mla by model type
   if (FLAGS_backend != "dit") {
