@@ -1055,14 +1055,33 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
 
 void ContinuousScheduler::step_with_schedule_overlap(
     const absl::Duration& timeout) {
+  bool last_batch_all_empty = std::all_of(
+      last_batch_.begin(), last_batch_.end(), [](const Batch& one_batch) {
+        return one_batch.empty();
+      });
+  // For MTP/speculative decode, the previous overlap batch may mark requests
+  // finished after its real result is applied. Running prepare_batch() before
+  // draining that result can deallocate/reset the same sequences while
+  // last_batch_ still holds raw Sequence* pointers, which then crashes during
+  // overlap token replacement.
+  //
+  // Keep the original producer-consumer overlap for non-speculative decode,
+  // but serialize "drain last result -> schedule next batch" when MTP is
+  // enabled.
+  if (options_.num_speculative_tokens() > 0 && !is_first_step_ &&
+      !last_batch_all_empty) {
+    engine_->update_last_step_result(last_batch_);
+    process_batch_output(true);
+    last_batch_.clear();
+    last_running_sequences_.clear();
+    last_running_requests_.clear();
+    last_batch_all_empty = true;
+  }
+
   // get a new batch of requests
   std::vector<Batch> batch = schedule_request(timeout);
   bool cur_batch_all_empty =
       std::all_of(batch.begin(), batch.end(), [](const Batch& one_batch) {
-        return one_batch.empty();
-      });
-  bool last_batch_all_empty = std::all_of(
-      last_batch_.begin(), last_batch_.end(), [](const Batch& one_batch) {
         return one_batch.empty();
       });
   if (cur_batch_all_empty && last_batch_all_empty) {
@@ -1075,7 +1094,8 @@ void ContinuousScheduler::step_with_schedule_overlap(
   }
 
   // producer-consumer mode, make sure only one step is scheduled in advance
-  if (!is_first_step_ && !last_batch_all_empty) {
+  if (options_.num_speculative_tokens() == 0 && !is_first_step_ &&
+      !last_batch_all_empty) {
     engine_->update_last_step_result(last_batch_);
     process_batch_output(true);
   }
