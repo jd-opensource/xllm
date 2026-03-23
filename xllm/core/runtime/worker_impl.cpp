@@ -37,7 +37,6 @@ limitations under the License.
 #include <unordered_map>
 #include <utility>
 
-#include "common/cp_runtime_check.h"
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
@@ -554,7 +553,6 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   processed_input = input.to(device_, dtype_);
   if (parallel_args_.cp_size() > 1 &&
       input.input_params.batch_forward_type.is_prefill()) {
-    LOG(INFO) << "[CP_DEBUG] : Begin to prepare cp inputs";
     tmp_cp_inputs = prepare_cp_prefill_inputs(parallel_args_.cp_size(),
                                               input.token_ids,
                                               input.positions,
@@ -568,7 +566,6 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
         dtype_,
         /*is_prefill=*/input.input_params.batch_forward_type.is_prefill());
     processed_input.input_params.cp_ep_padding_data = cp_ep_padding.build();
-    LOG(INFO) << "[CP_DEBUG] : Finished to prepare cp inputs";
   }
   auto& input_params = processed_input.input_params;
 

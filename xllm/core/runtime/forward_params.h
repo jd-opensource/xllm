@@ -438,16 +438,6 @@ struct RawForwardInput {
     outputs.q_max_seq_len = cp_global_max_seq_len;
     outputs.max_seq_len = cp_global_max_seq_len;
 
-    /*
-    outputs.new_token_slot_ids =
-    gather_token_level_vector_i32(new_token_slot_ids);
-    outputs.new_cache_slot_offsets =
-        gather_token_level_vector_i64(new_cache_slot_offsets);
-    */
-    LOG(INFO) << "[CP_DEBUG] outputs.new_token_slot_ids.size() = "
-              << outputs.new_token_slot_ids.size();
-    LOG(INFO) << "[CP_DEBUG] outputs.new_cache_slot_offsets.size() = "
-              << outputs.new_cache_slot_offsets.size();
     if (embeddings.size() == static_cast<size_t>(token_num)) {
       std::vector<std::vector<float>> gathered_embeddings;
       gathered_embeddings.reserve(gather_indices.size());

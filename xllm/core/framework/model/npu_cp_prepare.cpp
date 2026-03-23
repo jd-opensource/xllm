@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -39,31 +39,26 @@ torch::Tensor generate_cp_load_balance_idx(const torch::Tensor& input_lengths) {
   for (int length : lengths_vec) {
     std::vector<int> length_range(length);
     std::iota(
-        length_range.begin(), length_range.end(), base);  // 生成连续整数序列
+        length_range.begin(), length_range.end(), base);
     int divider = length / 2;
-    // 前半段
     cp_load_balance_idx_first.insert(cp_load_balance_idx_first.end(),
                                      length_range.begin(),
                                      length_range.begin() + divider);
-    // 后半段
     cp_load_balance_idx_last.insert(cp_load_balance_idx_last.end(),
                                     length_range.begin() + divider,
                                     length_range.end());
     base += length;
   }
 
-  // 合并前半段+后半段
   cp_load_balance_idx_first.insert(cp_load_balance_idx_first.end(),
                                    cp_load_balance_idx_last.begin(),
                                    cp_load_balance_idx_last.end());
 
-  // 转换为torch张量（NPU设备）
   auto tensor = torch::tensor(cp_load_balance_idx_first,
                               torch::dtype(torch::kInt32).device(torch::kCPU));
   return tensor;
 }
 
-// 生成输出结果恢复索引
 torch::Tensor generate_cp_o_recover_idx(const std::vector<int>& chunk_lengths) {
   std::vector<int> cp_o_recover_idx;
   int base = 0;
@@ -73,10 +68,8 @@ torch::Tensor generate_cp_o_recover_idx(const std::vector<int>& chunk_lengths) {
   for (int chunk_len : chunk_lengths) {
     std::vector<int> length_range(chunk_len);
     std::iota(length_range.begin(), length_range.end(), base);
-    // 前半段
     cp_o_recover_idx.insert(
         cp_o_recover_idx.end(), length_range.begin(), length_range.end());
-    // 后半段（偏移chunk_lengths_sum）
     std::vector<int> last_part(length_range.size());
     std::transform(
         length_range.begin(),
@@ -92,7 +85,6 @@ torch::Tensor generate_cp_o_recover_idx(const std::vector<int>& chunk_lengths) {
                        torch::dtype(torch::kInt32).device(torch::kCPU));
 }
 
-// 生成KV缓存恢复索引
 torch::Tensor generate_cp_kv_recover_idx(
     int cp_size,
     int input_ids_size,
@@ -104,7 +96,6 @@ torch::Tensor generate_cp_kv_recover_idx(
     std::vector<std::vector<int>> gather_idx_per_chunk(cp_size * 2);
     for (int cp_rank_id = 0; cp_rank_id < cp_size; ++cp_rank_id) {
       int rank_offset = cp_rank_id * input_ids_size;
-      // 前半段索引
       std::vector<int> first_part(req_chunk_len);
       std::iota(first_part.begin(), first_part.end(), rank_offset + req_offset);
       gather_idx_per_chunk[cp_rank_id] = first_part;
@@ -173,13 +164,11 @@ std::pair<torch::Tensor, torch::Tensor> generate_k_gather_index(
   auto input_len_data = input_lengths.data_ptr<int>();
 
   for (int64_t i = 0; i < n; ++i) {
-    // 前半段索引
     std::vector<int> prev_range(prev_len_data[i]);
     std::iota(prev_range.begin(), prev_range.end(), k_offset);
     k_gather_index_prev.insert(
         k_gather_index_prev.end(), prev_range.begin(), prev_range.end());
 
-    // 完整段索引
     std::vector<int> next_range(next_len_data[i]);
     std::iota(next_range.begin(), next_range.end(), k_offset);
     k_gather_index_next.insert(

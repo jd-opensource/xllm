@@ -30,7 +30,6 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
   const bool use_column_parallel = cp_size_ > 1;
   param.unpadInputs = true;
   param.gatherAhead = isPrefill;
-  LOG(INFO) << "[CP_DEBUG] gatherAhead = " << param.gatherAhead;
   param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
   param.linearParallelParam.fusionLinearParam.isBF16 =
       args.dtype() == "bfloat16";

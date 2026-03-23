@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -50,7 +50,6 @@ CpEpPadding::CpEpPadding(const torch::Tensor& input_ids,
   attn_cp_size_ = mapping_npu["attnCp"]["rankIds"].size();
   input_length_ = std::max<int64_t>(input_ids.numel(), 1);
 
-  // Align with MindIE: dynamic/mix EP path keeps token length unchanged.
   is_dynamic_ep_ = FLAGS_expert_parallel_degree == 2 ||
                    (FLAGS_expert_parallel_degree == 3 && is_prefill);
 }

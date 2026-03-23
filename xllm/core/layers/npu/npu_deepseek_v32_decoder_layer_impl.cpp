@@ -24,7 +24,6 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "common/cp_runtime_check.h"
 #include "common/global_flags.h"
 #include "framework/model/npu_cp_prepare.h"
 #include "layers/common/rotary_embedding_util.h"
