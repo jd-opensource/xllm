@@ -7,10 +7,12 @@ cc_library(
     prefix_cache
   HDRS
     prefix_cache.h
+    in_batch_prefix_cache.h
     prefix_cache_with_upload.h
     prefix_cache_factory.h
   SRCS 
     prefix_cache.cpp
+    in_batch_prefix_cache.cpp
     prefix_cache_with_upload.cpp
     prefix_cache_factory.cpp
   DEPS
@@ -30,6 +32,7 @@ cc_test(
     prefix_test
   SRCS
     prefix_cache_test.cpp
+    in_batch_prefix_cache_test.cpp
   DEPS
     :flags
     :kv_cache

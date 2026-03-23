@@ -17,6 +17,7 @@ limitations under the License.
 #include "scheduler/prefill_only_scheduler.h"
 
 #include <limits>
+#include <utility>
 
 #include "common/metrics.h"
 #include "framework/batch/batch_factory.h"
@@ -100,6 +101,8 @@ void PrefillOnlyScheduler::handle_prefill_requests(
     size_t allocated_seqs = 0;
     size_t allocated_estimate_latency = 0;
     bool can_schedule = true;
+    std::vector<std::pair<Sequence*, size_t>> pending_in_batch_providers;
+    pending_in_batch_providers.reserve(request->sequences().size());
     std::vector<Sequence*> prefill_sequences;
     std::vector<size_t> prefill_sequences_budget;
     prefill_sequences.reserve(request->sequences().size());
@@ -109,6 +112,11 @@ void PrefillOnlyScheduler::handle_prefill_requests(
         continue;
       }
 
+      if (prefill_sequence->kv_state().num_kv_blocks() == 0) {
+        kv_cache_manager_->allocate_shared(prefill_sequence.get());
+      }
+      try_match_in_batch_prefix(prefill_sequence.get());
+
       // FIXME: use actual num_tokens to handle
       // Currently overestimating the number of tokens actually processed when
       // enable prefix cache
@@ -117,6 +125,9 @@ void PrefillOnlyScheduler::handle_prefill_requests(
                                    remaining_token_budget);
       if (remaining_token_budget < allocated_tokens + num_tokens ||
           remaining_seq_budget < allocated_seqs + 1) {
+        if (prefill_sequence->kv_state().num_kv_blocks() > 0) {
+          kv_cache_manager_->deallocate(prefill_sequence.get());
+        }
         can_schedule = false;
         budget_exhausted = true;
         break;
@@ -177,8 +188,10 @@ void PrefillOnlyScheduler::handle_prefill_requests(
         if (estimate_latency + allocated_estimate_latency +
                 seq_estimate_latency >
             latency_budget) {
-          // release shared prefix blocks
-          kv_cache_manager_->deallocate(prefill_sequence.get());
+          if (prefill_sequence->kv_state().num_kv_blocks() > 0) {
+            // release shared prefix blocks
+            kv_cache_manager_->deallocate(prefill_sequence.get());
+          }
           can_schedule = false;
           budget_exhausted = true;
           break;
@@ -190,6 +203,8 @@ void PrefillOnlyScheduler::handle_prefill_requests(
       allocated_tokens += num_tokens;
       allocated_seqs += 1;
       allocated_estimate_latency += seq_estimate_latency;
+      pending_in_batch_providers.emplace_back(prefill_sequence.get(),
+                                              prefill_sequence->num_tokens());
     }
 
     if (!can_schedule) {
@@ -198,6 +213,11 @@ void PrefillOnlyScheduler::handle_prefill_requests(
         kv_cache_manager_->deallocate(seq);
       }
       break;
+    }
+
+    for (const auto& pending_provider : pending_in_batch_providers) {
+      register_in_batch_prefix_provider(pending_provider.first,
+                                        pending_provider.second);
     }
 
     remaining_token_budget -= allocated_tokens;
@@ -288,6 +308,8 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
     size_t allocated_seqs = 0;
     size_t allocated_estimate_latency = 0;
     bool can_schedule = true;
+    std::vector<std::pair<Sequence*, size_t>> pending_in_batch_providers;
+    pending_in_batch_providers.reserve(request->sequences().size());
     std::vector<Sequence*> prefill_sequences;
     std::vector<size_t> prefill_sequences_budget;
     prefill_sequences.reserve(request->sequences().size());
@@ -297,6 +319,11 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
         continue;
       }
 
+      if (prefill_sequence->kv_state().num_kv_blocks() == 0) {
+        kv_cache_manager_->allocate_shared(prefill_sequence.get());
+      }
+      try_match_in_batch_prefix(prefill_sequence.get());
+
       // FIXME: use actual num_tokens to handle
       // Currently overestimating the number of tokens actually processed when
       // enable prefix cache
@@ -305,6 +332,9 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
                                    remaining_token_budget);
       if (remaining_token_budget < allocated_tokens + num_tokens ||
           remaining_seq_budget < allocated_seqs + 1) {
+        if (prefill_sequence->kv_state().num_kv_blocks() > 0) {
+          kv_cache_manager_->deallocate(prefill_sequence.get());
+        }
         can_schedule = false;
         budget_exhausted = true;
         break;
@@ -363,8 +393,10 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
         if (estimate_latency + allocated_estimate_latency +
                 seq_estimate_latency >
             latency_budget) {
-          // release shared prefix blocks
-          kv_cache_manager_->deallocate(prefill_sequence.get());
+          if (prefill_sequence->kv_state().num_kv_blocks() > 0) {
+            // release shared prefix blocks
+            kv_cache_manager_->deallocate(prefill_sequence.get());
+          }
           can_schedule = false;
           budget_exhausted = true;
           break;
@@ -376,6 +408,8 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
       allocated_tokens += num_tokens;
       allocated_seqs += 1;
       allocated_estimate_latency += seq_estimate_latency;
+      pending_in_batch_providers.emplace_back(prefill_sequence.get(),
+                                              prefill_sequence->num_tokens());
     }
 
     if (!can_schedule) {
@@ -384,6 +418,11 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
         kv_cache_manager_->deallocate(seq);
       }
       break;
+    }
+
+    for (const auto& pending_provider : pending_in_batch_providers) {
+      register_in_batch_prefix_provider(pending_provider.first,
+                                        pending_provider.second);
     }
 
     remaining_token_budget -= allocated_tokens;
@@ -568,6 +607,7 @@ std::vector<Batch> PrefillOnlyScheduler::prepare_batch() {
   size_t num_online_decode_preempt_online_requests = 0;
   size_t num_online_prefill_preempt_offline_requests = 0;
   size_t num_online_decode_preempt_offline_requests = 0;
+  begin_in_batch_prefix_cache();
 
   // 1. handle last step prefill requests
   // try to finish prefill requests as soon as fast as possible
@@ -621,6 +661,7 @@ std::vector<Batch> PrefillOnlyScheduler::prepare_batch() {
                            num_online_decode_preempt_offline_requests,
                            running_queue_offline_);
   }
+  end_in_batch_prefix_cache();
 
   num_preempted_requests = num_offline_decode_preempt_offline_requests +
                            num_online_decode_preempt_online_requests +

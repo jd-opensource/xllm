@@ -37,6 +37,7 @@ cc_library(
     fixed_steps_scheduler.cpp
   DEPS
     :batch
+    :prefix_cache
     :request
     :runtime
     :profile
@@ -55,6 +56,7 @@ cc_test(
     chunked_prefill_scheduler_test.cpp
     continuous_scheduler_test.cpp
     fixed_steps_scheduler_test.cpp
+    mix_scheduler_test.cpp
   DEPS
     :scheduler
     :xllm_server

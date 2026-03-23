@@ -102,6 +102,19 @@ class PrefixCache {
                                     std::vector<Block>& blocks,
                                     const size_t cached_blocks = 0);
 
+  // A physical block can be held either by:
+  // 1) one or more sequences only, or
+  // 2) sequences + prefix cache nodes.
+  // BlockManagerImpl::deallocate() needs to distinguish these cases because
+  // "ref_count == 2" is ambiguous after in-batch prefix reuse is introduced:
+  // it may mean "sequence + cache" or "provider sequence + consumer sequence".
+  // This helper answers only the cache part: whether the block is currently
+  // referenced by any prefix-cache node.
+  bool contains_block_id(int32_t block_id) const {
+    auto iter = cached_block_id_refs_.find(block_id);
+    return iter != cached_block_id_refs_.end() && iter->second > 0;
+  }
+
  protected:
   size_t insert(const Slice<int32_t>& token_ids,
                 std::vector<Block>& blocks,
@@ -207,6 +220,12 @@ class PrefixCache {
 
   std::unordered_map<XXH3Key, Node*, FixedStringKeyHash, FixedStringKeyEqual>
       cached_blocks_;
+  // Reference count of physical block ids held by prefix-cache nodes.
+  // This is not the sequence/block ref_count; it only tracks cache ownership
+  // so release logic can tell apart:
+  // - sequence + prefix cache
+  // - provider sequence + consumer sequence (in-batch shared, not cached)
+  std::unordered_map<int32_t, size_t> cached_block_id_refs_;
 
   std::atomic<uint64_t> total_blocks_{0}, matched_blocks_{0};
 };

@@ -40,6 +40,7 @@ limitations under the License.
 namespace xllm {
 class Engine;
 class DecodePriorityQueue;
+class InBatchPrefixCacheContext;
 
 class ContinuousScheduler : public Scheduler {
  public:
@@ -289,6 +290,13 @@ class ContinuousScheduler : public Scheduler {
                                 size_t max_handle_num_tokens,
                                 size_t& num_request_to_evict);
 
+  bool enable_in_batch_prefix_cache() const;
+  void begin_in_batch_prefix_cache();
+  void end_in_batch_prefix_cache();
+  void try_match_in_batch_prefix(Sequence* sequence);
+  void register_in_batch_prefix_provider(Sequence* sequence,
+                                         size_t max_handle_num_tokens);
+
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch();
 
@@ -308,6 +316,8 @@ class ContinuousScheduler : public Scheduler {
   std::vector<std::shared_ptr<Request>> last_running_requests_;
   std::vector<Sequence*> last_running_sequences_;
   bool is_first_step_ = true;
+  std::unique_ptr<InBatchPrefixCacheContext> in_batch_prefix_cache_context_holder_;
+  InBatchPrefixCacheContext* in_batch_prefix_cache_context_ = nullptr;
 
  private:
   std::vector<Batch> schedule_request(const absl::Duration& timeout);

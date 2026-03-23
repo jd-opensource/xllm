@@ -15,9 +15,14 @@ limitations under the License.
 
 #include "scheduler/mix_scheduler.h"
 
+#include <glog/logging.h>
+
 #include <algorithm>
 #include <limits>
+#include <utility>
+#include <vector>
 
+#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/batch/batch_factory.h"
 #include "util/timer.h"
@@ -274,8 +279,10 @@ void MixScheduler::handle_running_queue_requests(
 
     std::vector<Sequence*> candidate_sequences;
     std::vector<size_t> candidate_token_budgets;
+    std::vector<std::pair<Sequence*, size_t>> pending_in_batch_providers;
     candidate_sequences.reserve(num_sequences);
     candidate_token_budgets.reserve(num_sequences);
+    pending_in_batch_providers.reserve(num_sequences);
 
     auto constant_overhead = profile_manager_->get_constant_overhead();
 
@@ -291,9 +298,11 @@ void MixScheduler::handle_running_queue_requests(
         continue;
       }
 
+      const size_t block_size = kv_cache_manager_->block_size();
+      try_match_in_batch_prefix(sequence.get());
+
       // support kv cache swapping between host and device and try to overlap
       // the computation and copy overhead.
-      auto block_size = kv_cache_manager_->block_size();
       size_t host_blocks_num =
           sequence->host_kv_state().kv_cache_tokens_num() / block_size;
       size_t device_blocks_num =
@@ -380,10 +389,16 @@ void MixScheduler::handle_running_queue_requests(
       allocated_tokens += current_step_handle_tokens;
       allocated_seqs += 1;
       allocated_copy_blocks += cur_step_copy_blocks;
+      pending_in_batch_providers.emplace_back(
+          sequence.get(), kv_cache_tokens_num + current_step_handle_tokens);
       candidate_sequences.emplace_back(sequence.get());
       candidate_token_budgets.emplace_back(current_step_handle_tokens);
     }
     if (!blocks_exhausted && !budget_exhausted) {
+      for (const auto& pending_provider : pending_in_batch_providers) {
+        register_in_batch_prefix_provider(pending_provider.first,
+                                          pending_provider.second);
+      }
       // remove the request from the priority queue
       running_queue.pop_front();
       // add the request to the batch
@@ -556,6 +571,7 @@ std::vector<Batch> MixScheduler::prepare_batch() {
   bool blocks_exhausted = false;
   // keep the requests in prefill stage
   std::vector<Sequence*> prefill_stage_sequences;
+  begin_in_batch_prefix_cache();
 
   handle_running_queue_requests(latency_budget,
                                 estimate_latency,
@@ -566,6 +582,7 @@ std::vector<Batch> MixScheduler::prepare_batch() {
                                 running_queue_,
                                 budget_exhausted,
                                 blocks_exhausted);
+  end_in_batch_prefix_cache();
 
   if (!finished_requests.empty()) {
     response_processor_->process_completed_requests(finished_requests);
