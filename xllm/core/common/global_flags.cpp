@@ -739,6 +739,9 @@ DEFINE_int32(max_decode_rounds,
 
 DEFINE_int32(beam_width, 1, "Beam width for beam search.");
 
+DEFINE_int32(num_return_sequences,
+             1,
+             "Beam width for the last step of beam search.");
 // --- health check config ---
 DEFINE_int32(health_check_interval_ms,
              3000,

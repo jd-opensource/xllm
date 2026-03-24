@@ -2281,8 +2281,12 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
                                   beam_width,
                                   requested_result_width);
       } else {
-        execute_beam_search(
-            top_tokens, top_logprobs, beam_tensors, round, batch_size);
+        execute_beam_search(top_tokens,
+                            top_logprobs,
+                            beam_tensors,
+                            round,
+                            batch_size,
+                            total_rounds);
       }
 
       if (round > 0 && round < total_rounds - 1) {
@@ -2315,7 +2319,6 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_beam_search_tensors(
   auto int_options = torch::TensorOptions().dtype(torch::kInt32).device(device);
   auto fp32_options =
       torch::TensorOptions().dtype(torch::kFloat32).device(device);
-
   BeamSearchTensors tensors;
   tensors.sequence_group =
       torch::zeros({batch_size, beam_width, total_rounds}, int_options);
@@ -2326,6 +2329,7 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_beam_search_tensors(
   tensors.out_token_index = torch::zeros({num_seq, 1}, int_options);
   tensors.out_beam_count_prefix_sums = torch::zeros({num_seq, 1}, int_options);
   tensors.out_seqgroup = torch::zeros_like(tensors.sequence_group);
+  tensors.use_beam_top = false;
   return tensors;
 }
 
@@ -2334,8 +2338,10 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_beam_search(
     const torch::Tensor& top_logprobs,
     BeamSearchTensors& beam_tensors,
     int32_t round,
-    int32_t batch_size) {
+    int32_t batch_size,
+    int32_t total_rounds) {
 #if defined(USE_NPU)
+  (void)total_rounds;
   if (round == 0) {
     beam_tensors.out_token_ids.copy_(top_tokens.reshape({-1, 1}));
     beam_tensors.out_log_probs.copy_(top_logprobs.reshape({-1, 1}));
@@ -2356,6 +2362,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_beam_search(
         /*out_sequence=*/beam_tensors.out_seqgroup);
   }
 #elif defined(USE_CUDA)
+  (void)total_rounds;
   xllm::kernel::cuda::beam_search(beam_tensors.acc_logprob,
                                   beam_tensors.sequence_group,
                                   top_tokens,
@@ -2367,9 +2374,9 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_beam_search(
                                   beam_tensors.out_seqgroup,
                                   batch_size,
                                   round);
-#endif
   std::swap(beam_tensors.sequence_group, beam_tensors.out_seqgroup);
   std::swap(beam_tensors.acc_logprob, beam_tensors.out_log_probs);
+#endif
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_final_beam_search(
