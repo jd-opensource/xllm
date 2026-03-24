@@ -555,6 +555,9 @@ void DeekseekV2DecoderLoader::process_general_weights(
 
   correct_tensor_dtype(tmp_tensor, name);
   at_weight_tensors_[index] = tmp_tensor;
+  if (layer_id_ != n_layers_ && absl::StrContains(name, "layernorm.weight")) {
+    at_weight_tensors_[index + 1] = torch::zeros_like(tmp_tensor);
+  }
 }
 
 void DeekseekV2DecoderLoader::process_mlp_common_weights(
