@@ -63,6 +63,7 @@ class ExtBuild(build_ext):
         self.device: Optional[str] = None
         self.arch: Optional[str] = None
         self.generate_so: bool = False
+        self.cmake_executable: str = os.environ.get("XLLM_CMAKE", "/usr/bin/cmake" if os.path.exists("/usr/bin/cmake") else "cmake")
 
     def finalize_options(self) -> None:
         build_ext.finalize_options(self)
@@ -70,7 +71,7 @@ class ExtBuild(build_ext):
     def run(self) -> None:
         # check if cmake is installed
         try:
-            out: bytes = subprocess.check_output(["cmake", "--version"])
+            out: bytes = subprocess.check_output([self.cmake_executable, "--version"])
         except OSError:
             raise RuntimeError(
                 "CMake must be installed to build the following extensions: "
@@ -205,14 +206,12 @@ class ExtBuild(build_ext):
     ) -> None:
         """Build CMake targets"""
         cmake_dir = get_cmake_dir()
-        subprocess.check_call(
-            ["cmake", self.base_dir] + cmake_args, cwd=cmake_dir, env=env
-        )
+        subprocess.check_call([self.cmake_executable, self.base_dir] + cmake_args, cwd=cmake_dir, env=env)
 
         base_build_args = build_args
         # add build target to speed up the build process
         build_args += ["--target", ext.name, "xllm"]
-        subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
+        subprocess.check_call([self.cmake_executable, "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
 
         os.makedirs(os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"), exist_ok=True)
         shutil.copy(
@@ -223,12 +222,12 @@ class ExtBuild(build_ext):
         if BUILD_EXPORT:
             # build export module
             build_args = base_build_args + ["--target export_module"]
-            subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
+            subprocess.check_call([self.cmake_executable, "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
 
         if BUILD_TEST_FILE:
             # build tests target
             build_args = base_build_args + ["--target all_tests"]
-            subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
+            subprocess.check_call([self.cmake_executable, "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
 
 class ExtBuildSingleTest(ExtBuild):
     """Inherit ExtBuild, used to build and run a single test"""
@@ -256,14 +255,12 @@ class ExtBuildSingleTest(ExtBuild):
     ) -> None:
         """Override method: only build the specified test target and run"""
         cmake_dir = get_cmake_dir()
-        subprocess.check_call(
-            ["cmake", self.base_dir] + cmake_args, cwd=cmake_dir, env=env
-        )
+        subprocess.check_call([self.cmake_executable, self.base_dir] + cmake_args, cwd=cmake_dir, env=env)
 
         base_build_args = build_args
         # Only build the specified test target
         build_args += ["--target", self.test_name]
-        subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
+        subprocess.check_call([self.cmake_executable, "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
 
         # Find test executable
         # CMake usually places executables in CMAKE_RUNTIME_OUTPUT_DIRECTORY or build directory

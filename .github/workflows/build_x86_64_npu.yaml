@@ -109,6 +109,12 @@ jobs:
       needs.check-sensitive.outputs.do_build == 'true'
     runs-on: [self-hosted]
     steps:
+    - name: Rewrite ThirdParty Git URLs
+      run: |
+        git config --global url."https://gitcode.com/xLLM-AI/tvm.git".insteadOf "https://github.com/TileLang/tvm"
+        git config --global url."https://gitcode.com/xLLM-AI/composable_kernel.git".insteadOf "https://github.com/ROCm/composable_kernel"
+        git config --global url."https://gitcode.com/xLLM-AI/cutlass.git".insteadOf "https://github.com/NVIDIA/cutlass"
+
     - name: Checkout Code
       timeout-minutes: 5
       uses: actions/checkout@v4
