@@ -15,11 +15,15 @@ limitations under the License.
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "forward_params.h"
 #include "params_utils.h"
 #include "util/shared_memory_manager.h"
 
 namespace xllm {
+
+class Stream;
 
 constexpr int64_t kNumWaitNanoseconds = 1000;  // 1us
 
@@ -120,5 +124,6 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
   uint64_t last_version_ = 0;
   void* metadata_addr_ = nullptr;
   ControlMetadata* control_ptr_ = nullptr;
+  std::unique_ptr<Stream> stream_ = nullptr;
 };
 }  // namespace xllm
