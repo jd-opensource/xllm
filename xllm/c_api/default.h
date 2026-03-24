@@ -107,6 +107,7 @@ const XLLM_InitOptions XLLM_INIT_REC_OPTIONS_DEFAULT = {
     .expert_parallel_degree = 0,
     .server_idx = 0,
     .beam_width = 128,
+    .beam_top = 0,
     .max_decode_rounds = 3,
     .max_token_per_req = 1000,
     .max_memory_utilization = 0.55,

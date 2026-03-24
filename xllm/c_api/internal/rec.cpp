@@ -118,6 +118,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     // to be improved in the future. For example, a separate gflags
     // configuration file can be provided to the so for setting gflags.
     FLAGS_beam_width = xllm_init_options.beam_width;
+    FLAGS_beam_top = xllm_init_options.beam_top;
     FLAGS_max_decode_rounds = xllm_init_options.max_decode_rounds;
     FLAGS_max_seqs_per_batch = xllm_init_options.max_seqs_per_batch;
     FLAGS_max_tokens_per_batch = xllm_init_options.max_tokens_per_batch;

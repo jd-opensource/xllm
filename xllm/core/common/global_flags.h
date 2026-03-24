@@ -298,6 +298,7 @@ DECLARE_bool(enable_constrained_decoding);
 DECLARE_int32(max_decode_rounds);
 
 DECLARE_int32(beam_width);
+DECLARE_int32(beam_top);
 
 DECLARE_bool(enable_xattention_one_stage);
 
