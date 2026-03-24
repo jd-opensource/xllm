@@ -35,11 +35,12 @@ limitations under the License.
 // @worker_type
 // @input_shm_size
 // @output_shm_size
+// @enable_mla
 // @communication_backend
 int main(int argc, char* argv[]) {
-  if (argc < 16) {
+  if (argc < 17) {
     LOG(ERROR)
-        << "Spawn worker process receive wrong args. Need 16 args, receive "
+        << "Spawn worker process receive wrong args. Need 17 args, receive "
         << argc;
     return 1;
   }
@@ -58,7 +59,8 @@ int main(int argc, char* argv[]) {
   std::string worker_type = std::string(argv[12]);
   uint64_t input_shm_size = atoll(argv[13]);
   uint64_t output_shm_size = atoll(argv[14]);
-  std::string communication_backend = std::string(argv[15]);
+  int enable_mla = atoi(argv[15]);
+  std::string communication_backend = std::string(argv[16]);
 
   LOG(INFO) << "Spawn worker: "
             << "master_node_addr = " << master_node_addr
@@ -72,6 +74,7 @@ int main(int argc, char* argv[]) {
             << ", output_shm_size = " << output_shm_size
             << ", is_local = " << (is_local > 0)
             << ", enable_prefill_sp = " << (enable_prefill_sp > 0)
+            << ", enable_mla = " << (enable_mla > 0)
             << ", task_type = " << task_type
             << ", worker_type = " << worker_type
             << ", communication_backend = " << communication_backend << "\n";
@@ -90,6 +93,7 @@ int main(int argc, char* argv[]) {
                                  enable_prefill_sp > 0,
                                  task_type,
                                  worker_type,
+                                 enable_mla > 0,
                                  communication_backend);
 
   worker.run();

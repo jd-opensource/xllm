@@ -21,6 +21,7 @@ limitations under the License.
 #include <signal.h>
 #include <unistd.h>
 
+#include "common/global_flags.h"
 #include "core/distributed_runtime/worker_server.h"
 #include "core/platform/device.h"
 #if defined(USE_CUDA)
@@ -63,6 +64,7 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      bool enable_prefill_sp,
                                      const std::string& task_type,
                                      const std::string& worker_type,
+                                     bool enable_mla,
                                      const std::string& communication_backend) {
   // TODO: pass whole xllm::runtime::Options here from main process.
   xllm::runtime::Options runner_options;
@@ -73,6 +75,7 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
       .backend(backend)
       .num_decoding_tokens(num_decoding_tokens)
       .enable_prefill_sp(enable_prefill_sp)
+      .enable_mla(enable_mla)
       .enable_schedule_overlap(false)
       .enable_offline_inference(true)
       .master_node_addr(master_node_addr)
@@ -83,6 +86,7 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
       .task_type(task_type);
   FLAGS_enable_schedule_overlap = false;
   FLAGS_enable_prefill_sp = enable_prefill_sp;
+  FLAGS_enable_mla = enable_mla;
   FLAGS_master_node_addr = master_node_addr;
   FLAGS_block_size = block_size;
   FLAGS_communication_backend = communication_backend;

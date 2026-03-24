@@ -103,6 +103,7 @@ Master::Master(const Options& options, EngineType type)
       options_.node_rank());
   LOG(INFO) << "Master init options: " << options.to_string();
   FLAGS_enable_prefill_sp = options_.enable_prefill_sp();
+  FLAGS_enable_mla = options_.enable_mla();
 
   // Allow brpc receive SIGTREM and SIGINT signal.
   brpc::FLAGS_graceful_quit_on_sigterm = true;

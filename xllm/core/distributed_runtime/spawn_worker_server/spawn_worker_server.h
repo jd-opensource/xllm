@@ -40,6 +40,7 @@ class SpawnWorkerServer final {
                              bool enable_prefill_sp,
                              const std::string& task_type,
                              const std::string& worker_type,
+                             bool enable_mla,
                              const std::string& communication_backend);
 
   ~SpawnWorkerServer();
