@@ -241,7 +241,6 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search_impl(
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   // calculate workspace size
-  bool sorted = FLAGS_enable_topk_sorted;
   auto workspace_size = reduce_topk::invokeComputeTopkLastDimWorkspaceSize<T>(
       static_cast<SizeType32>(batch_size),
       static_cast<SizeType32>(beam_size * top_k),
@@ -299,7 +298,6 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search_impl<half>(
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   // calculate workspace size
-  bool sorted = FLAGS_enable_topk_sorted;
   auto workspace_size =
       reduce_topk::invokeComputeTopkLastDimWorkspaceSize<half>(
           static_cast<SizeType32>(batch_size),
@@ -360,7 +358,6 @@ compute_topk_for_beam_search_impl<__nv_bfloat16>(torch::Tensor combined_probs,
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   // calculate workspace size
-  bool sorted = FLAGS_enable_topk_sorted;
   auto workspace_size =
       reduce_topk::invokeComputeTopkLastDimWorkspaceSize<__nv_bfloat16>(
           static_cast<SizeType32>(batch_size),
