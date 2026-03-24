@@ -357,7 +357,9 @@ StreamingParseResult Glm47Detector::detect_and_parse(
       match_json["parameters"] = arguments;
 
       auto parsed_calls = parse_base_json(match_json, tools);
-      calls.insert(calls.end(), parsed_calls.begin(), parsed_calls.end());
+      calls.insert(calls.end(),
+                   std::make_move_iterator(parsed_calls.begin()),
+                   std::make_move_iterator(parsed_calls.end()));
     }
 
     return StreamingParseResult(normal_text, calls);

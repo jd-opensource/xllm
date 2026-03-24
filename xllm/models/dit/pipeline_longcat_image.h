@@ -435,7 +435,7 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
         all_tokens.resize(max_sequence_length);
       }
 
-      batch_all_tokens.push_back(all_tokens);
+      batch_all_tokens.push_back(std::move(all_tokens));
     }
 
     // Step 2: Pad tokens to max_sequence_length
