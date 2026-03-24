@@ -270,10 +270,17 @@ bool VLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   // init kv cache for each worker
   std::vector<std::vector<int64_t>> kv_cache_shape;
   kv_cache_shape.reserve(2);
-  kv_cache_shape.emplace_back(std::vector<int64_t>{
-      kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
-  kv_cache_shape.emplace_back(std::vector<int64_t>{
-      kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
+  if (FLAGS_enable_mla) {
+    kv_cache_shape.emplace_back(std::vector<int64_t>{
+        kv_cache_cap.n_blocks, block_size, 1, args_.kv_lora_rank()});
+    kv_cache_shape.emplace_back(std::vector<int64_t>{
+        kv_cache_cap.n_blocks, block_size, 1, args_.qk_rope_head_dim()});
+  } else {
+    kv_cache_shape.emplace_back(std::vector<int64_t>{
+        kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
+    kv_cache_shape.emplace_back(std::vector<int64_t>{
+        kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
+  }
 #if defined(USE_MLU)
   // transpose kv_cache layout for mlu
   // default layout: [n_blocks, block_size, n_head, head_dim]
