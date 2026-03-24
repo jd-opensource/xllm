@@ -6,7 +6,7 @@
 
 ### NPU
 
-下面是我们构建好的开发镜像，由于依赖的基础镜像无法开源，所以我们无法提供Dockerfile。
+下面是我们构建好的开发镜像。
 ```bash
 # A2 x86
 docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-a2-x86-20260306
@@ -97,7 +97,7 @@ pre-commit install
 git submodule update --init
 ```
 
-编译xllm，如果使用`A3`机器，需要加上`--device a3`，编译生成的二进制文件位于`/path/to/xllm/build/xllm/core/server/xllm`，在新镜像中，第一次编译xllm耗时较长，因为需要编译vcpkg中的所有依赖，但是后续编译会很快。
+编译生成的二进制文件位于`/path/to/xllm/build/xllm/core/server/xllm`，在新镜像中，第一次编译xllm耗时较长，因为需要编译vcpkg中的所有依赖，但是后续编译会很快。
 ```bash
 python setup.py build
 ```

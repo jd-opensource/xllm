@@ -6,7 +6,7 @@ All images are stored [here](https://quay.io/repository/jd_xllm/xllm-ai?tab=tags
 
 ### NPU
 
-Below are our pre-built dev image. Since the base image we depend on cannot be open-sourced, we cannot provide the Dockerfile.
+Below are our pre-built dev image.
 ```bash
 # A2 x86
 docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-a2-x86-20260306
@@ -97,7 +97,7 @@ pre-commit install
 git submodule update --init
 ```
 
-Build xllm. If using an `A3` machine, you need to add `--device a3`. The compiled binary file is located at `/path/to/xllm/build/xllm/core/server/xllm`. In a new image, the first compilation of xllm takes a long time because all dependencies in vcpkg need to be compiled, but subsequent compilations will be much faster.
+The compiled binary file is located at `/path/to/xllm/build/xllm/core/server/xllm`. In a new image, the first compilation of xllm takes a long time because all dependencies in vcpkg need to be compiled, but subsequent compilations will be much faster.
 ```bash
 python setup.py build
 ```

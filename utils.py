@@ -45,7 +45,7 @@ def get_device_type() -> str:
     try:
         import torch_npu
         if torch.npu.is_available():
-            return "a2"
+            return "npu"
     except ImportError:
         pass
 

@@ -16,18 +16,6 @@ if(DEVICE_ARCH STREQUAL "ARM")
 endif()
 
 if(USE_NPU)
-  if(DEVICE_TYPE STREQUAL "USE_A3")
-      add_compile_definitions(USE_A3) 
-      add_definitions(-DUSE_A3)
-      set(USE_A3 ON)
-      message(STATUS "Building for device: A3 (macro USE_A3 defined)")
-  else()
-      add_compile_definitions(USE_A2)
-      add_definitions(-DUSE_A2)
-      set(USE_A2 ON)
-      message(STATUS "Building for device: A2 (macro USE_A2 defined)")
-  endif()
-
   # Override Mooncake option for mooncake transfer engine
   # CANN 8.5+ migration: ascend_direct_transport replaces ascend_transport
   set(USE_ASCEND_DIRECT ON CACHE BOOL "Enable ADXL engine for Ascend NPU" FORCE)

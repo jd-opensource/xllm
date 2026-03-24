@@ -486,7 +486,7 @@ void WorkerImpl::update_last_step_output(
 
 ForwardInput WorkerImpl::update_input_by_last_step_output(
     ForwardInput& inputs) {
-#if defined(USE_A2)
+#if defined(USE_NPU)
   xllm::kernel::npu::replace_token(inputs.token_ids,
                                    last_step_output_.sample_output.next_tokens);
 #else

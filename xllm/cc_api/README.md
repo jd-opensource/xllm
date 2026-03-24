@@ -1,7 +1,7 @@
 ### How to compile xllm dynamic library
 Run the following command in root directory:
 ```
-python setup.py build --device a3 --generate-so true
+python setup.py build --generate-so true
 ```
 
 If you want to debug, it needs to set DEBUG environment variable.

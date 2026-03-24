@@ -604,7 +604,6 @@ void DeekseekV2DecoderLoader::merge_experts_weights() {
                               device_);
   }
 
-#if defined(USE_A3)
   torch::Tensor mlp_down_weight =
       merge_experts_weights(experts_weights_["down_proj.weight"],
                             device_,
@@ -613,24 +612,7 @@ void DeekseekV2DecoderLoader::merge_experts_weights() {
   //     at_npu::native::npu_format_cast(mlp_down_weight, 29);
   at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
       at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
-#else
-  // TODO: xllm ops's GMM need to support MTP.
-  if (decode_isBF16_ && false) {
-    torch::Tensor mlp_down_weight =
-        merge_experts_weights(experts_weights_["down_proj.weight"],
-                              device_,
-                              /*transpose=*/true);
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 29);
-  } else {
-    torch::Tensor mlp_down_weight =
-        merge_experts_weights(experts_weights_["down_proj.weight"],
-                              device_,
-                              /*transpose=*/false);
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
-  }
-#endif
+
   if (quantize_type_ == "w8a8_dynamic") {
     at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] = merge_experts_weights(
         experts_weights_["down_proj.weight_offset"], device_);

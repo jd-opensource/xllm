@@ -27,7 +27,7 @@ class CMakeExtension(Extension):
 class ExtBuild(build_ext):
     user_options = build_ext.user_options + [
         ("base-dir=", None, "base directory of xLLM project"),
-        ("device=", None, "target device type (a3 or a2 or mlu or cuda or musa)"),
+        ("device=", None, "target device type (npu or mlu or cuda or ilu or musa)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("generate-so=", None, "generate so or binary"),
     ]
@@ -112,11 +112,11 @@ class ExtBuild(build_ext):
         ]
 
         if self.device is None:
-            raise ValueError("Please set --device to a2 or a3 or mlu or cuda or ilu or musa.")
+            raise ValueError("Please set --device to npu or mlu or cuda or ilu or musa.")
         if self.arch is None:
             raise ValueError("Please set --arch to x86 or arm.")
 
-        if self.device == "a2" or self.device == "a3":
+        if self.device == "npu":
             cmake_args += ["-DUSE_NPU=ON"]
             set_npu_envs()
         elif self.device == "mlu":
@@ -138,7 +138,7 @@ class ExtBuild(build_ext):
             global BUILD_TEST_FILE
             BUILD_TEST_FILE = False
         else:
-            raise ValueError("Please set --device to a2 or a3 or mlu or cuda or ilu or musa.")
+            raise ValueError("Please set --device to npu or mlu or cuda or ilu or musa.")
 
         product: str = "xllm"
         if self.generate_so:
@@ -288,7 +288,7 @@ class ExtBuildSingleTest(ExtBuild):
 
 class BuildDistWheel(bdist_wheel):
     user_options = bdist_wheel.user_options + [
-        ("device=", None, "target device type (a3 or a2 or mlu or cuda or musa)"),
+        ("device=", None, "target device type (npu or mlu or cuda or ilu or musa)"),
         ("arch=", None, "target arch type (x86 or arm)"),
     ]
 
@@ -461,7 +461,7 @@ class SingleTest(Command):
     #   python setup.py test --test-name common_test
     user_options = [
         ("test-name=", None, "name of the test target to build and run (e.g. platform_vmm_test)"),
-        ("device=", None, "target device type (a3 or a2 or mlu or cuda or ilu)"),
+        ("device=", None, "target device type (npu or mlu or cuda or ilu)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("generate-so=", None, "generate so or binary"),
     ]
@@ -496,7 +496,7 @@ class SingleTest(Command):
 def parse_arguments() -> dict[str, Any]:
     parser = argparse.ArgumentParser(
         description='Setup helper for building xllm',
-        epilog='Example: python setup.py build --device a3',
+        epilog='Example: python setup.py build',
         usage='%(prog)s [COMMAND] [OPTIONS]'
     )
     
@@ -510,9 +510,9 @@ def parse_arguments() -> dict[str, Any]:
     parser.add_argument(
         '--device',
         type=str.lower,
-        choices=['auto', 'a2', 'a3', 'mlu', 'cuda', 'ilu', 'musa'],
+        choices=['auto', 'npu', 'mlu', 'cuda', 'ilu', 'musa'],
         default='auto',
-        help='Device type: a2, a3, mlu, ilu, cuda or musa (case-insensitive)'
+        help='Device type: npu, mlu, ilu, cuda or musa (case-insensitive)'
     )
 
     parser.add_argument(

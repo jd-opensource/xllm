@@ -63,7 +63,7 @@ yum install numactl
 执行编译，在`build/`下生成可执行文件`build/xllm/core/server/xllm`：
 
 ```bash
-python setup.py build --device a3
+python setup.py build
 ```
 
 ## 3.启动模型
