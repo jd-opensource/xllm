@@ -340,6 +340,95 @@ TEST(SpecDecodeInputBuilderTest, CalcSlotIdOutOfRangeDeath) {
                "block table index out of range");
 }
 
+TEST(DraftProbsBuilderTest, CompressForCacheDense) {
+  auto draft_probs =
+      torch::tensor({{0.1f, 0.2f, 0.7f}, {0.6f, 0.1f, 0.3f}}, torch::kFloat32);
+  auto token_ids = torch::tensor({1, 0}, torch::kInt64);
+  auto compressed = draftProbs::compress_for_cache(draft_probs, token_ids);
+  auto expected = torch::tensor({0.2f, 0.6f}, torch::kFloat32);
+  EXPECT_TRUE(torch::allclose(compressed, expected));
+}
+
+TEST(DraftProbsBuilderTest, BuildValidateTensorsSelectedOnly) {
+  std::vector<torch::Tensor> token_steps = {
+      torch::tensor({3, 4}, torch::kInt64),
+      torch::tensor({5, 6}, torch::kInt64)};
+  std::vector<torch::Tensor> probs_steps = {
+      torch::tensor({0.3f, 0.4f}, torch::kFloat32),
+      torch::tensor({0.5f, 0.6f}, torch::kFloat32)};
+
+  auto [draft_token_ids, draft_probs] =
+      draftProbs::build_validate_tensors(token_steps,
+                                         probs_steps,
+                                         /*batch_size=*/2,
+                                         /*vocab_size=*/8,
+                                         /*enable_opt_validate_probs=*/true);
+
+  EXPECT_EQ(draft_token_ids.dim(), 2);
+  EXPECT_EQ(draft_probs.dim(), 2);
+  EXPECT_EQ(draft_token_ids.size(0), 2);
+  EXPECT_EQ(draft_token_ids.size(1), 2);
+  EXPECT_EQ(draft_probs.size(0), 2);
+  EXPECT_EQ(draft_probs.size(1), 2);
+  EXPECT_TRUE(torch::allclose(
+      draft_probs,
+      torch::tensor({{0.3f, 0.5f}, {0.4f, 0.6f}}, torch::kFloat32)));
+}
+
+TEST(DraftProbsBuilderTest, BuildValidateTensorsRecoveredDense) {
+  std::vector<torch::Tensor> token_steps = {
+      torch::tensor({1, 2}, torch::kInt64),
+      torch::tensor({0, 3}, torch::kInt64)};
+  std::vector<torch::Tensor> probs_steps = {
+      torch::tensor({0.2f, 0.7f}, torch::kFloat32),
+      torch::tensor({0.9f, 0.1f}, torch::kFloat32)};
+
+  auto [draft_token_ids, draft_probs] =
+      draftProbs::build_validate_tensors(token_steps,
+                                         probs_steps,
+                                         /*batch_size=*/2,
+                                         /*vocab_size=*/5,
+                                         /*enable_opt_validate_probs=*/false);
+
+  EXPECT_EQ(draft_token_ids.dim(), 2);
+  EXPECT_EQ(draft_probs.dim(), 3);
+  EXPECT_EQ(draft_probs.size(0), 2);
+  EXPECT_EQ(draft_probs.size(1), 2);
+  EXPECT_EQ(draft_probs.size(2), 5);
+
+  auto selected =
+      draft_probs.gather(/*dim=*/-1, draft_token_ids.unsqueeze(-1)).squeeze(-1);
+  auto expected_selected =
+      torch::tensor({{0.2f, 0.9f}, {0.7f, 0.1f}}, torch::kFloat32);
+  EXPECT_TRUE(torch::allclose(selected, expected_selected));
+
+  auto row_sums = draft_probs.sum(/*dim=*/-1);
+  EXPECT_TRUE(torch::allclose(row_sums, expected_selected));
+}
+
+TEST(DraftProbsBuilderTest, BuildValidateTensorsDenseInputFallback) {
+  std::vector<torch::Tensor> token_steps = {
+      torch::tensor({2, 1}, torch::kInt64)};
+  std::vector<torch::Tensor> probs_steps = {
+      torch::tensor({{0.1f, 0.2f, 0.7f}, {0.3f, 0.6f, 0.1f}}, torch::kFloat32)};
+
+  auto [draft_token_ids, draft_probs] =
+      draftProbs::build_validate_tensors(token_steps,
+                                         probs_steps,
+                                         /*batch_size=*/2,
+                                         /*vocab_size=*/3,
+                                         /*enable_opt_validate_probs=*/true);
+
+  EXPECT_EQ(draft_token_ids.dim(), 2);
+  EXPECT_EQ(draft_token_ids.size(0), 2);
+  EXPECT_EQ(draft_token_ids.size(1), 1);
+  EXPECT_EQ(draft_probs.dim(), 2);
+  EXPECT_EQ(draft_probs.size(0), 2);
+  EXPECT_EQ(draft_probs.size(1), 1);
+  EXPECT_TRUE(torch::allclose(
+      draft_probs, torch::tensor({{0.7f}, {0.6f}}, torch::kFloat32)));
+}
+
 }  // namespace
 }  // namespace specBuilder
 }  // namespace xllm

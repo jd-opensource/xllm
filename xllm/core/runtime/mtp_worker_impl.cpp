@@ -506,13 +506,10 @@ std::optional<ForwardOutput> MTPWorkerImpl::run_validate(
 }
 
 void MTPWorkerImpl::process_draft_sample_output(SampleOutput& sample_output) {
-  if (sample_output.probs.defined() && enable_opt_validate_probs_) {
-    auto selected_probs =
-        sample_output.probs
-            .gather(
-                /*dim=*/-1, sample_output.next_tokens.unsqueeze(-1))
-            .squeeze(-1);
-    sample_output.probs = selected_probs;  // [batch_size]
+  if (sample_output.probs.defined()) {
+    // Cache always stores selected-only draft probs [batch_size] to reduce HBM.
+    sample_output.probs = specBuilder::draftProbs::compress_for_cache(
+        sample_output.probs, sample_output.next_tokens);
   }
 }
 
@@ -717,25 +714,22 @@ SampleOutput MTPWorkerImpl::validate(
   const int32_t batch_size = num_target_tokens / num_val_tokens;
   const int32_t vocab_size = target_output.logits.size(/*dim=*/-1);
 
-  // [batch_size, n_speculative_tokens, vocab_size]
-  std::vector<torch::Tensor> draft_token_ids_vec;
-  std::vector<torch::Tensor> draft_probs_vec;
+  std::vector<torch::Tensor> draft_token_ids_steps;
+  std::vector<torch::Tensor> draft_probs_steps;
+  draft_token_ids_steps.reserve(draft_outputs.size());
+  draft_probs_steps.reserve(draft_outputs.size());
   for (const auto& draft_output : draft_outputs) {
-    auto draft_token_ids = draft_output.sample_output.next_tokens;
-    auto draft_probs = draft_output.sample_output.probs;
-    if (enable_opt_validate_probs_) {
-      draft_probs = draft_probs.view({{batch_size, 1}});
-    } else {
-      draft_probs = draft_probs.view({{batch_size, 1, vocab_size}});
-    }
-    draft_token_ids = draft_token_ids.view({batch_size, 1});
-    draft_token_ids_vec.push_back(draft_token_ids);
-    draft_probs_vec.push_back(draft_probs);
+    draft_token_ids_steps.push_back(draft_output.sample_output.next_tokens);
+    draft_probs_steps.push_back(draft_output.sample_output.probs);
   }
 
-  // concatenate the draft token ids and probs along the last dimension
-  const auto draft_token_ids = torch::cat(draft_token_ids_vec, /*dim=*/1);
-  const auto draft_probs = torch::cat(draft_probs_vec, /*dim=*/1);
+  auto [draft_token_ids, draft_probs] =
+      specBuilder::draftProbs::build_validate_tensors(
+          draft_token_ids_steps,
+          draft_probs_steps,
+          batch_size,
+          vocab_size,
+          enable_opt_validate_probs_);
   return validate(sampling_params, draft_token_ids, draft_probs, target_output);
 }
 
