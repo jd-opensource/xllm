@@ -47,7 +47,7 @@ class XServiceClient {
   bool init(const std::string& etcd_addr,
             const std::string& instance_name = "",
             const BlockManagerPool* block_manager_pool = nullptr,
-            uint32_t offload_batch = std::numeric_limits<uint32_t>::max());
+            uint32_t offload_batch_size = std::numeric_limits<uint32_t>::max());
   void set_scheduler(Scheduler* scheduler);
   void set_engine(Engine* engine);
   bool initialize_done() { return initialize_done_; }
@@ -65,8 +65,8 @@ class XServiceClient {
   // response generation tokens to xllm service
   std::vector<bool> generations(const std::vector<RequestOutput>& outputs);
 
-  uint32_t get_offload_batch() {
-    return offload_batch_.load(std::memory_order_relaxed);
+  uint32_t get_offload_batch_size() {
+    return offload_batch_size_.load(std::memory_order_relaxed);
   }
 
  private:
@@ -121,7 +121,8 @@ class XServiceClient {
   Scheduler* scheduler_ = nullptr;                        // not own
   Engine* engine_ = nullptr;  // not own, for xtensor info
 
-  std::atomic_uint32_t offload_batch_{std::numeric_limits<uint32_t>::max()};
+  std::atomic_uint32_t offload_batch_size_{
+      std::numeric_limits<uint32_t>::max()};
 };
 
 }  // namespace xllm

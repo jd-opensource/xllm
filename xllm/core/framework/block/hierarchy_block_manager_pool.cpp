@@ -29,7 +29,7 @@ HierarchyBlockManagerPool::HierarchyBlockManagerPool(
   CHECK(options_.enable_prefix_cache())
       << "must enable prefix cache for HierarchyBlockManagerPool.";
 
-  if (options_.host_num_blocks() > 0) {
+  if (options_.enable_host_blocks()) {
     host_block_managers_.reserve(dp_size);
 
     BlockManager::Options host_options;
@@ -53,7 +53,7 @@ HierarchyBlockManagerPool::HierarchyBlockManagerPool(
 void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
   DCHECK(sequence != nullptr);
 
-  if (!host_block_managers_.empty()) {
+  if (options_.enable_host_blocks()) {
     offload_via_host(sequence, true);
   } else {
     offload_direct(sequence, true);
@@ -88,7 +88,7 @@ void HierarchyBlockManagerPool::offload_via_host(Sequence* sequence,
                                 : 0;
   uint32_t needed_offload_num = cached_device_block_num - cached_host_block_num;
 
-  if (needed_offload_num < sequence->get_offload_batch() && !finish) {
+  if (needed_offload_num < sequence->get_offload_batch_size() && !finish) {
     return;
   }
 
@@ -140,7 +140,7 @@ void HierarchyBlockManagerPool::offload_direct(Sequence* sequence,
 
   uint32_t need_offload_num = full_block_num - cached_block_num;
 
-  if (need_offload_num < sequence->get_offload_batch() && !finish) {
+  if (need_offload_num < sequence->get_offload_batch_size() && !finish) {
     return;
   }
 
@@ -226,14 +226,14 @@ bool HierarchyBlockManagerPool::allocate(Sequence* sequence,
   switch (stage) {
     case SequenceStage::PREFILL:
     case SequenceStage::CHUNKED_PREFILL:
-      if (!host_block_managers_.empty()) {
+      if (options_.enable_host_blocks()) {
         load_via_host(sequence, num_tokens);
       } else {
         load_direct(sequence, num_tokens);
       }
       break;
     case SequenceStage::DECODE:
-      if (!host_block_managers_.empty()) {
+      if (options_.enable_host_blocks()) {
         offload_via_host(sequence, false);
       } else {
         offload_direct(sequence, false);
@@ -326,7 +326,7 @@ void HierarchyBlockManagerPool::load_direct(Sequence* sequence,
 
 void HierarchyBlockManagerPool::allocate_shared(Sequence* sequence) {
   BlockManagerPool::allocate_shared(sequence);
-  if (!host_block_managers_.empty()) {
+  if (options_.enable_host_blocks()) {
     allocate_host_shared(sequence);
   } else {
     allocate_direct_shared(sequence);
@@ -512,7 +512,7 @@ void HierarchyBlockManagerPool::transfer_blocks() {
     std::vector<Block> src_blocks;
     std::vector<Block> dst_blocks;
 
-    if (!host_block_managers_.empty()) {
+    if (options_.enable_host_blocks()) {
       std::shared_ptr<OffloadBlockPair> block_pair;
       while (offload_block_pair_queues_[i].try_dequeue(block_pair)) {
         src_blocks.emplace_back(std::move(block_pair->src));

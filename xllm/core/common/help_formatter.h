@@ -88,7 +88,7 @@ const OptionCategory kMtpOptions = {"SPECULATIVE OPTIONS",
 
 const OptionCategory kXllmServiceOptions = {
     "XLLM-SERVICE OPTIONS",
-    {"etcd_addr", "offload_batch", "rank_tablefile"}};
+    {"etcd_addr", "offload_batch_size", "rank_tablefile"}};
 
 const OptionCategory kBeamSearchOptions = {"BEAM SEARCH OPTIONS",
                                            {"enable_beam_search_kernel",

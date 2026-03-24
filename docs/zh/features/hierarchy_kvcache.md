@@ -30,7 +30,7 @@
 
 - HBM 是模型执行的核心资源，既要存模型权重，也要存活跃请求的 KVCache。
 - 当上下文变长、并发升高，或者长序列请求持续进入时，HBM 中可用于 Prefix Cache 的空间会越来越紧张。
-- 老的 KV block 最终会因为容量限制被淘汰或老化掉。
+- 老的 KVCache 最终会因为容量限制被淘汰或老化掉。
 - 这样一来，即使后续相同请求再次到达同一个节点，也可能已经没有对应的 Prefix Cache 可以命中，仍然需要重新 Prefill。
 
 因此，本地 HBM Prefix Cache 只能解决“短时间、单节点”的复用问题，无法稳定支撑跨时间、跨节点的全局 KV 复用。
@@ -40,7 +40,7 @@
 
 针对上述问题，xLLM 在项目中使用了两套互补的方案：
 
-### 2.1 方案一：Cache-Aware 调度
+### 2.1 方案一：KV Cache Aware 调度
 
 针对“多副本场景下 Prefix Cache 命中依赖路由”的问题，xLLM 引入了 cache-aware 调度链路：
 
@@ -57,8 +57,12 @@
 
 针对 xLLM 支持的多种芯片，xLLM 为 KVCache Pool 设计了两种数据面路径：
 
-- 直连模式：`Device <-> Store`，数据路径更短，当前主要支持 NPU 设备。
-- Host 中转模式：`Device <-> Host <-> Store`，通过 Host staging 和 RDMA 传输链路实现，兼容性更强。
+- 直连模式：`Device <-> Store`：
+  - RH2D 一跳传输，数据路径更短，传输带宽更高；
+  - 当前主要仅支持 NPU 设备。
+- Host 中转模式：`Device <-> Host <-> Store`：
+  - 通过 Host staging 和 RDMA 传输链路实现，兼容性更强；
+  - 通过 prefetch 和分层拷贝，做计算和拷贝的overlap，性能稍差于直连模式。
 
 
 ## 3. 详细设计
@@ -244,7 +248,7 @@ Store key 规则统一为：
 | `--prefetch_timeout` | 预取等待窗口（ms），`0` 表示不等待 |
 | `--prefetch_bacth_size` | 预取分批大小 |
 | `--layers_wise_copy_batchs` | layer-wise copy 批数；当前实现建议配置为可整除层数的值 |
-| `--offload_batch` | Decode 阶段触发卸载的批量阈值 |
+| `--offload_batch_size` | Decode 阶段触发卸载的批量阈值 |
 
 实际生效逻辑：
 | 参数 | 实际生效条件 |

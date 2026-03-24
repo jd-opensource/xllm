@@ -739,8 +739,8 @@ bool DisaggPDScheduler::decode_recv_first_generation(
                             dst_block_ids);
   }
 
-  request->sequences()[0]->set_offload_batch(
-      XServiceClient::get_instance()->get_offload_batch());
+  request->sequences()[0]->set_offload_batch_size(
+      XServiceClient::get_instance()->get_offload_batch_size());
 
   request_queue_.write(request);
   return true;

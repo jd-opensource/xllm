@@ -72,7 +72,7 @@ bool check_instance_name(const std::string& name) {
 bool XServiceClient::init(const std::string& etcd_addr,
                           const std::string& instance_name,
                           const BlockManagerPool* block_manager_pool,
-                          uint32_t offload_batch) {
+                          uint32_t offload_batch_size) {
   if (initialize_done_) {
     LOG(INFO) << "XServiceClient is already initialized, skipping.";
     return true;
@@ -83,7 +83,7 @@ bool XServiceClient::init(const std::string& etcd_addr,
     return false;
   }
 
-  offload_batch_.store(offload_batch, std::memory_order_relaxed);
+  offload_batch_size_.store(offload_batch_size, std::memory_order_relaxed);
   instance_name_ = instance_name;
   if (incarnation_id_.empty()) {
     ShortUUID uuid;
@@ -368,8 +368,8 @@ void XServiceClient::heartbeat() {
       req.mutable_latency_metrics()->set_recent_max_ttft(*max_ttft);
     }
 
-    req.mutable_load_metrics()->set_offload_batch(
-        offload_batch_.load(std::memory_order_relaxed));
+    req.mutable_load_metrics()->set_offload_batch_size(
+        offload_batch_size_.load(std::memory_order_relaxed));
 
     if (!tbt.empty()) {
       auto max_tbt = std::max_element(tbt.begin(), tbt.end());

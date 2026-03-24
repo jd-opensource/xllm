@@ -402,10 +402,10 @@ class Sequence final {
     return last_token_handled_.load(std::memory_order_relaxed);
   }
 
-  void set_offload_batch(uint32_t offload_batch) {
-    offload_batch_ = offload_batch;
+  void set_offload_batch_size(uint32_t offload_batch_size) {
+    offload_batch_size_ = offload_batch_size;
   }
-  uint32_t get_offload_batch() { return offload_batch_; }
+  uint32_t get_offload_batch_size() { return offload_batch_size_; }
 
  private:
   void record_first_token(const Token& token);
@@ -553,7 +553,7 @@ class Sequence final {
   // 2) beams that just became finished in current step.
   bool updated_since_last_beam_search_ = false;
 
-  uint32_t offload_batch_ = std::numeric_limits<uint32_t>::max();
+  uint32_t offload_batch_size_ = std::numeric_limits<uint32_t>::max();
 };
 
 }  // namespace xllm

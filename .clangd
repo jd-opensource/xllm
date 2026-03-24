@@ -1,0 +1,61 @@
+CompileFlags:
+  CompilationDatabase: .
+  Add:
+    - "-std=c++20"
+    - "-D_GLIBCXX_USE_CXX11_ABI=1"
+    - "-DBUILD_LIBTORCH"
+    - "-DUSE_NPU"
+    - "-DUSE_MEMFABRIC"
+    - "-DYLT_ENABLE_IBV"
+    - "-DBUILD_SHARED_LIBS=ON"
+    # Project include paths (relative to project root)
+    - "-I."
+    - "-Ixllm/core"
+    - "-Ixllm/core/framework"
+    - "-Ixllm/core/framework/kv_cache"
+    - "-Ixllm/core/common"
+    - "-Ixllm/core/platform"
+    - "-Ixllm/core/util"
+    - "-Ithird_party/etcd_cpp_apiv3"
+    # Mooncake Store include paths (relative to project root)
+    - "-Ithird_party/Mooncake/mooncake-store/include"
+    - "-Ithird_party/Mooncake/mooncake-store/include/cachelib_memory_allocator/include"
+    - "-Ithird_party/Mooncake/mooncake-store/include/cachelib_memory_allocator/fake_include"
+    - "-Ithird_party/Mooncake/mooncake-store/include/mooncake-store/proto"
+    # Mooncake Transfer Engine include paths
+    - "-Ithird_party/Mooncake/mooncake-transfer-engine/include"
+    # Mooncake Common include paths
+    - "-Ithird_party/Mooncake/mooncake-common/include"
+    - "-Ithird_party/Mooncake/mooncake-common/etcd"
+    # Mooncake Integration include paths
+    - "-Ithird_party/Mooncake/mooncake-integration"
+    # Source directories (for relative includes)
+    - "-Ithird_party/Mooncake/mooncake-store/src"
+    # System includes
+    - "-I/usr/include/jsoncpp"
+    - "-I/usr/include/python3.9"
+    # PyTorch/Torch include paths - uncomment and set according to your environment
+    # These paths are typically set via environment variables during build
+    # Example for NPU build (uncomment and adjust paths as needed):
+    # - "-I${env:PYTORCH_INSTALL_PATH}/include"
+    # - "-I${env:PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include"
+    # - "-I${env:PYTHON_INCLUDE_PATH}"
+    # Example for CUDA build:
+    # - "-I${env:PYTORCH_INSTALL_PATH}/include"
+    # - "-I${env:PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include"
+    # - "-I${env:PYTHON_INCLUDE_PATH}"
+    # If environment variables are not available, you can use absolute paths:
+    # - "-I/path/to/pytorch/include"
+    # - "-I/path/to/pytorch/include/torch/csrc/api/include"
+    # - "-I/path/to/python/include/python3.x"
+
+Diagnostics:
+  ClangTidy:
+    Add:
+      - readability-*
+      - modernize-*
+    Remove:
+      - modernize-use-trailing-return-type
+
+Index:
+  Background: Build

@@ -48,7 +48,7 @@ HierarchyKVCacheTransfer::HierarchyKVCacheTransfer(
     copy_stream_.enqueue(device_.get_stream_from_pool(TIMEOUT_MS));
   }
 
-  if (options_.host_blocks_factor() > 1) {
+  if (options_.host_blocks_factor() > 1.0) {
     create_page_aligned_host_cache();
   }
 
@@ -473,7 +473,8 @@ bool HierarchyKVCacheTransfer::load_via_host(
 
 void HierarchyKVCacheTransfer::create_page_aligned_host_cache() {
   CHECK(kv_caches_ptr_->size() > 0) << "hbm kv cache size should > 0.";
-  CHECK(options_.host_blocks_factor() > 1) << "host_blocks_factor should > 1.";
+  CHECK(options_.host_blocks_factor() > 1.0)
+      << "host_blocks_factor should > 1.";
 
   std::vector<std::vector<int64_t>> tensor_shapes =
       kv_caches_ptr_->at(0).get_shapes();

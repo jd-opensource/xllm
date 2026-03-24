@@ -147,7 +147,7 @@ class Options {
 
   PROPERTY(std::optional<std::string>, etcd_addr);
 
-  PROPERTY(std::optional<uint32_t>, offload_batch);
+  PROPERTY(std::optional<uint32_t>, offload_batch_size);
 
   PROPERTY(bool, enable_service_routing) = false;
 

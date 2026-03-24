@@ -448,7 +448,7 @@ class ClientStreamReceiver : public brpc::StreamInputHandler {
   std::shared_ptr<std::atomic<uint32_t>> success_cnt_;
   std::promise<void> close_promise_;
   std::atomic<bool> promise_set_{false};
-  std::shared_ptr<ClientStreamReceiver> self_holder_;
+  std::shared_ptr<ClientStreamReceiver> self_guard_;
 
  public:
   ClientStreamReceiver(std::shared_ptr<std::atomic<int32_t>> termination_flag,
@@ -462,7 +462,7 @@ class ClientStreamReceiver : public brpc::StreamInputHandler {
   }
 
   void set_self_holder(std::shared_ptr<ClientStreamReceiver> self) {
-    self_holder_ = self;
+    self_guard_ = self;
   }
 
   std::future<void> get_close_future() { return close_promise_.get_future(); }
@@ -497,14 +497,14 @@ class ClientStreamReceiver : public brpc::StreamInputHandler {
     if (!promise_set_.exchange(true)) {
       close_promise_.set_value();
     }
-    self_holder_.reset();
+    self_guard_.reset();
   }
 
   virtual void on_closed(brpc::StreamId id) override {
     if (!promise_set_.exchange(true)) {
       close_promise_.set_value();
     }
-    self_holder_.reset();
+    self_guard_.reset();
   }
 };
 

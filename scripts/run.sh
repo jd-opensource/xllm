@@ -366,7 +366,7 @@ start_decode_workers() {
             --store_master_server_address="$STORE_MASTER_SERVER_ADDRESS" \
             --store_local_hostname="$STORE_HOST_IP:$client_port" \
             --logtostderr=false \
-            --offload_batch=1 \
+            --offload_batch_size=1 \
             --layers_wise_copy_batchs="$LAYERS_WISE_BATCHS" \
             -log_dir="$node_log_dir" >"$node_log_file" 2>&1 &
     done

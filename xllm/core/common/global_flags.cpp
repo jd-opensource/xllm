@@ -425,9 +425,9 @@ DEFINE_double(heart_beat_interval, 0.5, "Heart beat interval.");
 
 DEFINE_int32(etcd_ttl, 3, "Time to live for etcd.");
 
-// Trigger offload when there are offload_batch blocks not yet offloaded to
+// Trigger offload when there are offload_batch_size blocks not yet offloaded to
 // kvcache store.
-DEFINE_uint32(offload_batch,
+DEFINE_uint32(offload_batch_size,
               std::numeric_limits<uint32_t>::max(),
               "Offload batch for disaggregated prefill-decode.");
 
