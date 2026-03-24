@@ -153,6 +153,12 @@ class RecWorkerImpl : public LLMWorkerImpl {
       torch::Tensor out_token_index;  // [num_seq, 1]
       torch::Tensor out_beam_count_prefix_sums;  // [num_seq, 1]
       torch::Tensor out_seqgroup;  // [batch_size, beam_width, total_rounds]
+      torch::Tensor out_log_probs_v2;               // [num_seq_v2, 1]
+      torch::Tensor out_token_ids_v2;               // [num_seq_v2, 1]
+      torch::Tensor out_token_index_v2;             // [num_seq_v2, 1]
+      torch::Tensor out_beam_count_prefix_sums_v2;  // [num_seq_v2, 1]
+      torch::Tensor out_seqgroup_v2;  // [batch_size, beam_top, total_rounds]
+      bool use_beam_top;
     };
 
     // Prepare beam search tensors
@@ -166,7 +172,8 @@ class RecWorkerImpl : public LLMWorkerImpl {
                              const torch::Tensor& top_logprobs,
                              BeamSearchTensors& beam_tensors,
                              int32_t round,
-                             int32_t batch_size);
+                             int32_t batch_size,
+                             int32_t total_rounds);
 
     // Execute cache select kernel
     void execute_cache_select(const BeamSearchTensors& beam_tensors,

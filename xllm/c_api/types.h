@@ -106,6 +106,9 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
   /** Beam width for beam search decoding (1 for greedy search) */
   uint32_t beam_width;
 
+  /** Beam top for beam search decoding (0 = disable beam top) */
+  uint32_t beam_top;
+
   /** Maximum number of decode rounds for each inference request */
   uint32_t max_decode_rounds;
 

@@ -874,17 +874,28 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_beam_search_tensors(
   auto int_options = torch::TensorOptions().dtype(torch::kInt32).device(device);
   auto fp32_options =
       torch::TensorOptions().dtype(torch::kFloat32).device(device);
-
+  int32_t beam_top = FLAGS_beam_top;
   BeamSearchTensors tensors;
   tensors.sequence_group =
       torch::zeros({batch_size, beam_width, total_rounds}, int_options);
   int64_t num_seq = batch_size * beam_width;
+  int64_t num_seq_v2 = batch_size * beam_top;
   tensors.acc_logprob = torch::zeros({num_seq, 1}, fp32_options);
   tensors.out_log_probs = torch::zeros({num_seq, 1}, fp32_options);
   tensors.out_token_ids = torch::zeros({num_seq, 1}, int_options);
   tensors.out_token_index = torch::zeros({num_seq, 1}, int_options);
   tensors.out_beam_count_prefix_sums = torch::zeros({num_seq, 1}, int_options);
   tensors.out_seqgroup = torch::zeros_like(tensors.sequence_group);
+  tensors.use_beam_top = (beam_top > beam_width);
+  if (tensors.use_beam_top) {
+    tensors.out_log_probs_v2 = torch::zeros({num_seq_v2, 1}, fp32_options);
+    tensors.out_token_ids_v2 = torch::zeros({num_seq_v2, 1}, int_options);
+    tensors.out_token_index_v2 = torch::zeros({num_seq_v2, 1}, int_options);
+    tensors.out_beam_count_prefix_sums_v2 =
+        torch::zeros({num_seq_v2, 1}, int_options);
+    tensors.out_seqgroup_v2 =
+        torch::zeros({batch_size, beam_top, total_rounds}, int_options);
+  }
   return tensors;
 }
 
@@ -893,7 +904,8 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_beam_search(
     const torch::Tensor& top_logprobs,
     BeamSearchTensors& beam_tensors,
     int32_t round,
-    int32_t batch_size) {
+    int32_t batch_size,
+    int32_t total_rounds) {
 #if defined(USE_NPU)
   xllm::kernel::npu::beam_search_rec(
       /*logprobs=*/beam_tensors.acc_logprob,
@@ -908,20 +920,36 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_beam_search(
       beam_tensors.out_beam_count_prefix_sums,
       /*out_sequence=*/beam_tensors.out_seqgroup);
 #elif defined(USE_CUDA)
-  xllm::kernel::cuda::beam_search(beam_tensors.acc_logprob,
-                                  beam_tensors.sequence_group,
-                                  top_tokens,
-                                  top_logprobs,
-                                  beam_tensors.out_log_probs,
-                                  beam_tensors.out_token_ids,
-                                  beam_tensors.out_token_index,
-                                  beam_tensors.out_beam_count_prefix_sums,
-                                  beam_tensors.out_seqgroup,
-                                  batch_size,
-                                  round);
+  if (!beam_tensors.use_beam_top || round < total_rounds - 1) {
+    xllm::kernel::cuda::beam_search(beam_tensors.acc_logprob,
+                                    beam_tensors.sequence_group,
+                                    top_tokens,
+                                    top_logprobs,
+                                    beam_tensors.out_log_probs,
+                                    beam_tensors.out_token_ids,
+                                    beam_tensors.out_token_index,
+                                    beam_tensors.out_beam_count_prefix_sums,
+                                    beam_tensors.out_seqgroup,
+                                    batch_size,
+                                    round);
+    std::swap(beam_tensors.sequence_group, beam_tensors.out_seqgroup);
+    std::swap(beam_tensors.acc_logprob, beam_tensors.out_log_probs);
+  } else {
+    xllm::kernel::cuda::beam_search(beam_tensors.acc_logprob,
+                                    beam_tensors.sequence_group,
+                                    top_tokens,
+                                    top_logprobs,
+                                    beam_tensors.out_log_probs_v2,
+                                    beam_tensors.out_token_ids_v2,
+                                    beam_tensors.out_token_index_v2,
+                                    beam_tensors.out_beam_count_prefix_sums_v2,
+                                    beam_tensors.out_seqgroup_v2,
+                                    batch_size,
+                                    round);
+  }
+
 #endif
-  std::swap(beam_tensors.sequence_group, beam_tensors.out_seqgroup);
-  std::swap(beam_tensors.acc_logprob, beam_tensors.out_log_probs);
+
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_cache_select(
@@ -985,13 +1013,23 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::build_final_output(
   output.do_sample = sampling_params.do_sample;
   output.logprobs = sampling_params.logprobs;
   output.max_top_logprobs = sampling_params.max_top_logprobs;
-  output.beam_search_output.src_seq_idxes =
-      beam_tensors.out_token_index.reshape({-1});
-  output.beam_search_output.out_tokens =
-      beam_tensors.out_token_ids.reshape({-1});
-  output.beam_search_output.out_logprobs =
-      beam_tensors.acc_logprob.reshape({-1});
-  output.beam_sequence_group = beam_tensors.sequence_group;
+  if (beam_tensors.use_beam_top) {
+    output.beam_search_output.src_seq_idxes =
+        beam_tensors.out_token_index_v2.reshape({-1});
+    output.beam_search_output.out_tokens =
+        beam_tensors.out_token_ids_v2.reshape({-1});
+    output.beam_search_output.out_logprobs =
+        beam_tensors.out_log_probs_v2.reshape({-1});
+    output.beam_sequence_group = beam_tensors.out_seqgroup_v2;
+  } else {
+    output.beam_search_output.src_seq_idxes =
+        beam_tensors.out_token_index.reshape({-1});
+    output.beam_search_output.out_tokens =
+        beam_tensors.out_token_ids.reshape({-1});
+    output.beam_search_output.out_logprobs =
+        beam_tensors.acc_logprob.reshape({-1});
+    output.beam_sequence_group = beam_tensors.sequence_group;
+  }
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_two_stage_round_input(
