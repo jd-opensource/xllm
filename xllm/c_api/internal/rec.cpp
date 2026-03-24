@@ -191,6 +191,23 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         .is_local(true)
         .server_idx(xllm_init_options.server_idx);
 
+    // @TODO: Currently, gflags are configured through hard coding, which needs
+    // to be improved in the future. For example, a separate gflags
+    // configuration file can be provided to the so for setting gflags.
+    //
+    // REC so still has two configuration paths:
+    // - some request/runtime code reads FLAGS_* directly
+    // - master/worker construction reads xllm::Options
+    //
+    // The fields copied from init options below are read from FLAGS_* today.
+    // beam_width/block_size/max_tokens/max_seqs are also represented in
+    // Options, so duplicated values must stay aligned.
+    FLAGS_beam_width = xllm_init_options.beam_width;
+    FLAGS_num_return_sequences = xllm_init_options.num_return_sequences;
+    FLAGS_max_decode_rounds = xllm_init_options.max_decode_rounds;
+    FLAGS_max_seqs_per_batch = xllm_init_options.max_seqs_per_batch;
+    FLAGS_max_tokens_per_batch = xllm_init_options.max_tokens_per_batch;
+    FLAGS_block_size = xllm_init_options.block_size;
     if (xllm_init_options.flashinfer_workspace_buffer_size >
         static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
       LOG(ERROR) << "flashinfer_workspace_buffer_size["
