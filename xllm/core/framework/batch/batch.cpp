@@ -573,6 +573,9 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
   }
   int32_t total_rounds =
       static_cast<int32_t>(output.beam_sequence_group.size(2));
+  beam_width = (FLAGS_num_return_sequences > beam_width)
+                   ? FLAGS_num_return_sequences
+                   : beam_width;
   size_t num_groups = sequence_groups_.size();
   if (num_groups == 0) {
     // Fallback: treat sequences_ as single group
