@@ -714,15 +714,8 @@ TEST(BatchTest, OverlapMTPReplacementSkipsPreemptedSequenceWithoutKVBlocks) {
   batch.prepare_forward_input(
       /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
 
-  RawSampleOutput fake_sample_output;
-  RawToken fake_token_0;
-  fake_token_0.id = -1;
-  fake_sample_output.tokens.push_back(fake_token_0);
-  RawToken fake_token_1;
-  fake_token_1.id = -2;
-  fake_sample_output.tokens.push_back(fake_token_1);
   RawForwardOutput fake_output;
-  fake_output.outputs.push_back(std::move(fake_sample_output));
+  fake_output.outputs.push_back(make_raw_sample_output(-1, std::nullopt));
 
   batch.process_sample_output(fake_output, /*replace_fake_token=*/false);
   EXPECT_EQ(seq.num_generated_tokens(), 1);
