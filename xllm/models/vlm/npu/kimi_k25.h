@@ -117,7 +117,9 @@ class KimiK2_5_VLInputProcessor : public InputProcessor {
 
  public:
   KimiK2_5_VLInputProcessor(const ModelArgs& args) {
-    merge_size_ = args.mm_image_merge_size();
+    merge_size_ = args.mm_image_merge_size() > 0
+                      ? args.mm_image_merge_size()
+                      : std::max<int32_t>(args.mm_spatial_merge_size(), 2);
     vision_start_token_id_ = args.vision_start_token_id();
     vision_token_id_ = args.vision_token_id();
     vision_end_token_id_ = args.vision_end_token_id();
@@ -241,6 +243,8 @@ class KimiK2_5_VLInputProcessor : public InputProcessor {
     }
 
     auto merge_length = merge_size_ * merge_size_;
+    CHECK_GT(merge_length, 0)
+        << "merge_length must be positive, merge_size_=" << merge_size_;
     auto count = grid_thw.sizes()[0];
     token_counts.reserve(count);
     for (int idx = 0; idx < count; ++idx) {
@@ -1112,8 +1116,10 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     std::optional<KimiK2_5_VLImageInputs> image_input;
     std::optional<KimiK2_5_VLVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
-    auto merge_size = model_args_.mm_image_merge_size();
-    merge_size = 2;
+    auto merge_size = model_args_.mm_image_merge_size() > 0
+                          ? model_args_.mm_image_merge_size()
+                          : std::max<int64_t>(model_args_.mm_spatial_merge_size(),
+                                              int64_t(2));
     MMDict multimodal_embeds;
     if (image_input) {
       // visual
@@ -1375,6 +1381,10 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
         }
         return int64_t(2);
       });
+  LOAD_ARG_OR_FUNC(mm_image_merge_size, "vision_config.image_merge_size", [&] {
+    return args->mm_spatial_merge_size() > 0 ? args->mm_spatial_merge_size()
+                                             : int64_t(2);
+  });
 
   LOAD_ARG_OR_FUNC(mm_head_dim, "vision_config.head_dim", [&] {
     return args->mm_hidden_size() / args->mm_num_attention_heads();
