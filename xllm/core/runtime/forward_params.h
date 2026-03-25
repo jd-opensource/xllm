@@ -447,8 +447,7 @@ struct RawForwardInput {
 
       for (int32_t seq_idx = 0; seq_idx < num_sequences; ++seq_idx) {
         int64_t chunk_len =
-            (seq_context_lens[seq_idx] + num_chunks_i64 - 1) /
-            num_chunks_i64;
+            (seq_context_lens[seq_idx] + num_chunks_i64 - 1) / num_chunks_i64;
         chunk_len = std::max<int64_t>(1, chunk_len);
         chunk_lens[seq_idx] = chunk_len;
         seq_prefix_per_rank[seq_idx] = token_num_per_rank;
