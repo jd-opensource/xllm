@@ -61,7 +61,6 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("expert_parallel_degree",
                      &Options::expert_parallel_degree_)
       .def_readwrite("task_type", &Options::task_type_)
-      .def_readwrite("enable_mla", &Options::enable_mla_)
       .def_readwrite("enable_chunked_prefill",
                      &Options::enable_chunked_prefill_)
       .def_readwrite("enable_prefill_sp", &Options::enable_prefill_sp_)

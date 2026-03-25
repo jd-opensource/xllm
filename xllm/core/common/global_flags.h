@@ -98,8 +98,6 @@ DECLARE_double(eplb_update_threshold);
 
 DECLARE_string(rank_tablefile);
 
-DECLARE_bool(enable_mla);
-
 constexpr int32_t kGraphExecutorLogVerboseLevel = 50;
 
 DECLARE_bool(enable_graph);

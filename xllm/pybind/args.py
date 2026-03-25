@@ -22,7 +22,6 @@ class ArgumentParser:
         self.parser.add_argument('--communication_backend', type=str, default='hccl', help='npu communication backend.')
         self.parser.add_argument('--rank_tablefile', type=str, default='', help='atb hccl rank table file')
         self.parser.add_argument('--expert_parallel_degree', type=int, default=0, help='ep degree')
-        self.parser.add_argument('--enable_mla', action='store_true', help='whether to enable multi-head latent attention.')
         self.parser.add_argument('--disable_chunked_prefill', action='store_true', help='Whether to disable chunked prefill.')
         self.parser.add_argument('--enable_prefill_sp', action='store_true', help='Enable prefill-only sequence parallel.')
         self.parser.add_argument('--master_node_addr', type=str, default='', help='The master address for multi-node distributed serving(e.g. 10.18.1.1:9999).')

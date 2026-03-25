@@ -25,7 +25,6 @@ class Embedding:
         communication_backend: str = 'lccl',
         rank_tablefile: str = '',
         expert_parallel_degree: int = 0,
-        enable_mla: bool = False,
         disable_chunked_prefill: bool = False,
         enable_prefill_sp: bool = False,
         instance_role: str = 'DEFAULT',
@@ -66,7 +65,6 @@ class Embedding:
         options.communication_backend = communication_backend
         options.rank_tablefile = rank_tablefile
         options.expert_parallel_degree = expert_parallel_degree
-        options.enable_mla = enable_mla
         if disable_chunked_prefill:
             options.enable_chunked_prefill = False
         else:

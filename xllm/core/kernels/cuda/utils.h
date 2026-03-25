@@ -29,8 +29,6 @@ limitations under the License.
 #include <tuple>
 #include <type_traits>
 
-#include "core/util/utils.h"
-
 #if defined(__CUDACC__) || defined(_NVHPC_CUDA)
 #define HOST_DEVICE_INLINE __host__ __device__ __forceinline__
 #define DEVICE_INLINE __device__ __forceinline__

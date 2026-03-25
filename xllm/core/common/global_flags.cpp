@@ -71,10 +71,6 @@ DEFINE_string(devices,
               "npu:0",
               "Devices to run the model on, e.g. npu:0, npu:0,npu:1.");
 
-DEFINE_bool(enable_mla,
-            false,
-            "Whether to enable multi-head latent attention.");
-
 DEFINE_bool(enable_customize_mla_kernel, false, "enable customize mla kernel");
 
 // --- graph mode execution config ---

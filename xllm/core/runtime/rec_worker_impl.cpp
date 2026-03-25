@@ -104,7 +104,7 @@ void RecWorkerImpl::RecWorkPipeline::prepare_work_before_execute(
       runtime_.worker.kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
     }
   }
-  if (FLAGS_enable_mla &&
+  if (runtime_.context->get_model_args().enable_mla() &&
       input_params.batch_forward_type.is_chunked_prefill()) {
     runtime_.worker.prepare_mla_prefixcache_inputs(input_params);
   }

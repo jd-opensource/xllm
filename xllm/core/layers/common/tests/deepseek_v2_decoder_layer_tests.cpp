@@ -129,7 +129,6 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
   using DecoderHolder = torch::nn::ModuleHolder<DeepseekV2DecoderLayerImpl>;
 
   void SetUp() override {
-    FLAGS_enable_mla = true;  // Enable MLA for DeepSeek V2 attention
     // Base defaults from test helpers
     model_args_ = test::create_default_model_args();
     // test w8a8 only for now
@@ -203,6 +202,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     model_args_.index_head_dim() = 128;
     model_args_.index_n_heads() = 0;
     model_args_.index_topk() = 0;
+    model_args_.enable_mla() = true;
 
     // Build a ModelContext that the decoder requires
     context_ = ModelContext(parallel_args_, model_args_, quant_args_, options_);
@@ -1471,7 +1471,8 @@ TEST_F(DeepseekV2DecoderLayerTest, ForwardMixedDpMoEReturnsLocalSlice) {
   input_params.dp_is_decode = {0, 0};
   input_params = input_params.to(options_.device());
 
-  auto attn_metadata = AttentionMetadataBuilder::build(input_params);
+  auto attn_metadata =
+      AttentionMetadataBuilder::build(input_params, model_args_);
   auto k_cache = torch::zeros(
       {2048, 1, 1, model_args_.qk_rope_head_dim() + model_args_.kv_lora_rank()},
       options_);
@@ -1548,7 +1549,8 @@ TEST_P(DeepseekV2DecoderLayerParamTest,
       kBatchSize * kSeqLen,
       torch::TensorOptions().dtype(torch::kInt32).device(options_.device()));
   auto input_params = build_prefill_params(kBatchSize, kSeqLen);
-  auto attn_metadata = AttentionMetadataBuilder::build(input_params);
+  auto attn_metadata =
+      AttentionMetadataBuilder::build(input_params, model_args_);
   auto kv_cache = build_cache(block_num, /*block_size=*/1);
 
   std::optional<torch::Tensor> residual = std::nullopt;

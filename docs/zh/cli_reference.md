@@ -36,8 +36,9 @@ xLLM使用gflags来管理服务启动参数，具体的参数含义如下：
 |:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|
 | `dp_size` | `int32` | 1 | 2的指数 | Attention部分的dp规模大小 |  |
 | `ep_size` | `int32` | 1 | 2的指数 | MoE部分的ep规模大小 |  |
-| `enable_mla` | `bool` | false | true | 是否开启MLA |  |
 | `expert_parallel_degree` | `int32` | 0 | 1,2 | ep并行相关参数，gflag默认值为0；当`ep_size > 1`且未显式配置时，部分NPU MoE实现会按EP Level 1处理；当`ep_size=devices`总数时可设置为2（使用all2all通信） |  |
+
+支持 MLA 的模型会自动开启 MLA，不再需要单独配置 CLI 参数。
 
 
 ## PD分离相关参数

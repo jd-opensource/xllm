@@ -584,7 +584,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 #endif
 
 #if defined(USE_NPU)
-  if (FLAGS_enable_mla &&
+  if (context_.get_model_args().enable_mla() &&
       input_params.batch_forward_type.is_chunked_prefill()) {
     prepare_mla_prefixcache_inputs(input_params);
   }
@@ -908,6 +908,8 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     }
   }
 #endif
+
+  args.enable_mla(options_.enable_mla());
 
   // create model context
   dtype_ = dtype;

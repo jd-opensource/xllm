@@ -165,7 +165,8 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                     args.sliding_window(),
                                     scaling,
                                     use_fused_mla_qkv_,
-                                    enable_lighting_indexer_));
+                                    enable_lighting_indexer_,
+                                    args.enable_mla()));
 
   o_proj_ =
       register_module("o_proj",

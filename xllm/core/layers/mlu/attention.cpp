@@ -28,13 +28,13 @@ AttentionImpl::AttentionImpl(int64_t num_heads,
                              int64_t sliding_window)
     : num_heads_(num_heads),
       head_size_(head_size),
+      scale_(scale),
       num_kv_heads_(num_kv_heads),
       v_head_dim_(head_size),
-      sliding_window_(sliding_window),
-      scale_(scale),
       use_fused_mla_qkv_(false),
       enable_lighting_indexer_(false),
-      enable_mla_(false) {
+      enable_mla_(false),
+      sliding_window_(sliding_window) {
   if (sliding_window_ > -1) {
     sliding_window_ = sliding_window_ - 1;
   }
@@ -47,16 +47,17 @@ AttentionImpl::AttentionImpl(int64_t num_heads,
                              int64_t sliding_window,
                              float scale,
                              bool use_fused_mla_qkv,
-                             bool enable_lighting_indexer)
+                             bool enable_lighting_indexer,
+                             bool enable_mla)
     : num_heads_(num_heads),
       head_size_(head_size),
+      scale_(scale),
       num_kv_heads_(num_kv_heads),
       v_head_dim_(v_head_dim),
-      sliding_window_(sliding_window),
       use_fused_mla_qkv_(use_fused_mla_qkv),
-      scale_(scale),
       enable_lighting_indexer_(enable_lighting_indexer),
-      enable_mla_(FLAGS_enable_mla) {
+      enable_mla_(enable_mla),
+      sliding_window_(sliding_window) {
   if (sliding_window_ > -1) {
     sliding_window_ = sliding_window_ - 1;
   }
@@ -68,9 +69,10 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
     torch::Tensor& key,
     torch::Tensor& value,
     KVCache& kv_cache) {
+  const bool enable_mla = enable_mla_;
   std::optional<torch::Tensor> output_lse = std::nullopt;
   torch::Tensor output;
-  if (enable_mla_) {
+  if (enable_mla) {
     output = torch::empty({query.size(0), num_heads_ * v_head_dim_},
                           query.options());
   } else {
@@ -82,11 +84,11 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
 
   bool only_prefill =
       attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
-  int64_t num_kv_heads = (enable_mla_ && !only_prefill) ? 1 : num_kv_heads_;
+  int64_t num_kv_heads = (enable_mla && !only_prefill) ? 1 : num_kv_heads_;
   torch::Tensor k_cache = kv_cache.get_k_cache();
   std::optional<torch::Tensor> v_cache;
   std::optional<torch::Tensor> v;
-  if (!enable_mla_) {
+  if (!enable_mla) {
     v = value.view({-1, num_kv_heads, head_size_});
     v_cache = kv_cache.get_v_cache();
   }
@@ -95,7 +97,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   std::optional<torch::Tensor> k_cache_scale = kv_cache.get_k_cache_scale();
   std::optional<torch::Tensor> v_cache_scale = kv_cache.get_v_cache_scale();
 
-  bool skip_process_cache = enable_mla_ && (only_prefill || use_fused_mla_qkv_);
+  bool skip_process_cache = enable_mla && (only_prefill || use_fused_mla_qkv_);
   if (!skip_process_cache) {
     xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
     reshape_paged_cache_params.key = key.view({-1, num_kv_heads, head_size_});
@@ -148,7 +150,7 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
                     v_cache_scale);
   }
 
-  int64_t head_size = enable_mla_ ? v_head_dim_ : head_size_;
+  int64_t head_size = enable_mla ? v_head_dim_ : head_size_;
   output = output.view({-1, num_heads_ * head_size});
   return {output, output_lse};
 }
@@ -163,7 +165,8 @@ void AttentionImpl::prefill_forward(
     const AttentionMetadata& attn_metadata,
     const std::optional<torch::Tensor>& k_cache_scale,
     const std::optional<torch::Tensor>& v_cache_scale) {
-  int64_t head_size_v = enable_mla_ ? v_head_dim_ : head_size_;
+  const bool enable_mla = enable_mla_;
+  int64_t head_size_v = enable_mla ? v_head_dim_ : head_size_;
   query = query.view({-1, num_heads_, head_size_});
   output = output.view({-1, num_heads_, head_size_v});
 
@@ -213,13 +216,13 @@ void AttentionImpl::prefill_forward(
 
       // Use dequantized tensors for flash attention
       key = key_dequant;
-      value = enable_mla_ ? key_dequant.slice(-1, 0, v_head_dim_).contiguous()
-                          : value_dequant;
+      value = enable_mla ? key_dequant.slice(-1, 0, v_head_dim_).contiguous()
+                         : value_dequant;
     } else {
       // Non-quantized KV cache path - use directly
       key = k_cache;
-      value = enable_mla_ ? k_cache.slice(-1, 0, v_head_dim_).contiguous()
-                          : v_cache.value();
+      value = enable_mla ? k_cache.slice(-1, 0, v_head_dim_).contiguous()
+                         : v_cache.value();
       block_tables = attn_metadata.block_table;
     }
   }

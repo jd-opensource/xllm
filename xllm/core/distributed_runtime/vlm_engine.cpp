@@ -241,7 +241,7 @@ Engine::KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
   // compute kv cache slot size
   const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
   int64_t slot_size = 0;
-  if (FLAGS_enable_mla) {
+  if (options_.enable_mla()) {
     slot_size = dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
   } else {
     slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;

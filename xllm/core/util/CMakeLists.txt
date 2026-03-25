@@ -68,6 +68,7 @@ cc_library(
     :platform
     SMHasherSupport
     xxHash
+    spdlog::spdlog
 )
 
 cc_test(

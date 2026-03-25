@@ -54,19 +54,19 @@ using Qwen3HybridModelModulePtr = std::shared_ptr<Qwen3HybridModelModule>;
 class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
  public:
   explicit Qwen3HybridModelImplBase(const ModelContext& context)
-      : device_(context.get_tensor_options().device()) {
+      : device_(context.get_tensor_options().device()),
+        model_args_(context.get_model_args()) {
     auto options = context.get_tensor_options();
-    auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args.n_layers());
+    layers_.reserve(model_args_.n_layers());
     device_ = options.device();
     dtype_ = options.dtype().toScalarType();
     norm_ = register_module(
         "norm",
         xllm::layer::Qwen3NextRMSNorm(
-            model_args.hidden_size(), model_args.rms_norm_eps(), options));
+            model_args_.hidden_size(), model_args_.rms_norm_eps(), options));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
@@ -93,7 +93,7 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
 
     layer::AttentionMetadata attn_metadata =
         layer::AttentionMetadataBuilder::build(
-            input_params, build_attention_mask(input_params));
+            input_params, model_args_, build_attention_mask(input_params));
     torch::Tensor h = embed_tokens_(tokens);
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
@@ -162,6 +162,7 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
     return torch::cat(req_mask_vec, 0);
   }
 
+  ModelArgs model_args_;
   torch::nn::ModuleList blocks_{nullptr};
   std::vector<layer::Qwen3HybridDecoderLayerModulePtr> layers_;
   int32_t max_seq_len_ = 0;

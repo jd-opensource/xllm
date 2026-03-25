@@ -155,6 +155,7 @@ ModelArgs create_attention_model_args(int64_t q_lora_rank = 0,
   args.index_head_dim() = enable_indexer ? 128 : 0;
   args.index_topk() = enable_indexer ? 8 : 0;
   args.sliding_window() = 0;
+  args.enable_mla() = true;
   args.rope_scaling_rope_type() = "";
   args.rope_scaling_original_max_position_embeddings() = 128;
   args.rope_scaling_factor() = 1.0f;
@@ -574,7 +575,6 @@ int32_t run_attention_test_child(int32_t rank,
       return EXIT_CODE_SKIP;
     }
 
-    FLAGS_enable_mla = true;
     FLAGS_block_size = 16;
     const int32_t device_index = rank % dev_count;
     xllm::Device xllm_device(device_index);
@@ -649,7 +649,6 @@ int32_t run_attention_prefill_repl_test_child(int32_t rank,
       return EXIT_CODE_SKIP;
     }
 
-    FLAGS_enable_mla = true;
     FLAGS_block_size = 16;
     const int32_t device_index = rank % dev_count;
     xllm::Device xllm_device(device_index);
@@ -730,7 +729,6 @@ int32_t run_attention_prefill_fallback_test_child(int32_t rank,
       return EXIT_CODE_SKIP;
     }
 
-    FLAGS_enable_mla = true;
     FLAGS_block_size = 16;
     const int32_t device_index = rank % dev_count;
     xllm::Device xllm_device(device_index);
@@ -813,7 +811,6 @@ int32_t run_attention_prefill_sp_test_child(int32_t rank,
       return EXIT_CODE_SKIP;
     }
 
-    FLAGS_enable_mla = true;
     FLAGS_block_size = 16;
     const int32_t device_index = rank % dev_count;
     xllm::Device xllm_device(device_index);
@@ -903,7 +900,6 @@ int32_t run_attention_chunked_test_child(int32_t rank,
       return EXIT_CODE_SKIP;
     }
 
-    FLAGS_enable_mla = true;
     FLAGS_block_size = 16;
     const int32_t device_index = rank % dev_count;
     xllm::Device xllm_device(device_index);

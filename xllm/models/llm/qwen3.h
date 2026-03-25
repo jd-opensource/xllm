@@ -217,9 +217,10 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
       attn_mask = attn_mask_.get_attn_mask(
           max_seq_len_, h.dtype().toScalarType(), h.device());
     }
-    return layer::AttentionMetadataBuilder::build(params, attn_mask);
+    return layer::AttentionMetadataBuilder::build(
+        params, model_args_, attn_mask);
 #else
-    return layer::AttentionMetadataBuilder::build(params);
+    return layer::AttentionMetadataBuilder::build(params, model_args_);
 #endif
   }
 

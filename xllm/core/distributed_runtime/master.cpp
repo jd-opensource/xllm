@@ -47,6 +47,7 @@ limitations under the License.
 #include "util/model_config_utils.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
+#include "util/utils.h"
 #include "vlm_engine.h"
 #include "vlm_master.h"
 
@@ -128,11 +129,11 @@ void resolve_npu_kernel_backend_for_options(Options* options) {
 
 Master::Master(const Options& options, EngineType type)
     : options_(options), master_status_(options.master_status()) {
-  print_startup_banner(
-      std::filesystem::path(options_.model_path()).lexically_normal(),
-      options_.backend(),
-      options_.node_rank());
-  LOG(INFO) << "Master init options: " << options.to_string();
+  const auto model_path =
+      std::filesystem::path(options_.model_path()).lexically_normal();
+  options_.enable_mla(util::should_enable_mla(model_path, options_.backend()));
+  print_startup_banner(model_path, options_.backend(), options_.node_rank());
+  LOG(INFO) << "Master init options: " << options_.to_string();
   FLAGS_enable_prefill_sp = options_.enable_prefill_sp();
 
   // Allow brpc receive SIGTREM and SIGINT signal.
@@ -196,6 +197,7 @@ Master::Master(const Options& options, EngineType type)
         .max_memory_utilization(options.max_memory_utilization())
         .enable_prefix_cache(options.enable_prefix_cache())
         .task_type(options.task_type())
+        .enable_mla(options_.enable_mla())
         .enable_prefill_sp(options_.enable_prefill_sp())
         .npu_kernel_backend(options_.npu_kernel_backend())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
@@ -357,6 +359,7 @@ Master::Master(const Options& options, EngineType type)
         .enable_prefix_cache(options_.enable_prefix_cache())
         .task_type(options_.task_type())
         .npu_kernel_backend(options_.npu_kernel_backend())
+        .enable_mla(options_.enable_mla())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())

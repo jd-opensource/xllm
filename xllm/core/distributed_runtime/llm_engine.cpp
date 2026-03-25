@@ -449,7 +449,8 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   int64_t index_slot_size = 0;
   int64_t scale_slot_size =
       0;  // Extra overhead for scale tensors in quant mode
-  if (FLAGS_enable_mla) {
+
+  if (options_.enable_mla()) {
 #if defined(USE_NPU)
     if (args_.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
       slot_size =
@@ -481,7 +482,7 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   // => per token: n_kv_heads floats for K + n_kv_heads for V.
   // MLA: key scale [num_blocks, 1, block_size] => one float per token.
   if (enable_kv_cache_quant) {
-    if (FLAGS_enable_mla) {
+    if (options_.enable_mla()) {
       // MLA scale shape is [num_blocks, 1, block_size] -> one float per token
       scale_slot_size = sizeof(float);
     } else {
@@ -543,7 +544,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   // init kv cache for each worker
   std::vector<std::vector<int64_t>> kv_cache_shape;
   kv_cache_shape.reserve(2);
-  if (FLAGS_enable_mla) {
+  if (options_.enable_mla()) {
 #if defined(USE_NPU)
     if (args_.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
       kv_cache_shape.emplace_back(
@@ -597,7 +598,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   for (auto& shape : kv_cache_shape) {
     std::swap(shape[1], shape[2]);
   }
-  if (FLAGS_enable_mla) {
+  if (options_.enable_mla()) {
     kv_cache_shape[0][3] = args_.kv_lora_rank() + args_.qk_rope_head_dim();
     kv_cache_shape[1] = std::vector<int64_t>{};
   }

@@ -250,7 +250,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   // batch size in plan_info.
   std::shared_ptr<layer::AttentionMetadata> attn_metadata =
       std::make_shared<layer::AttentionMetadata>(
-          layer::AttentionMetadataBuilder::build(params));
+          layer::AttentionMetadataBuilder::build(params, args_));
   CHECK(attn_metadata) << "attn_metadata should not be null";
   attn_metadata->enable_cuda_graph = true;
   auto build_capture_params_if_needed =
@@ -357,7 +357,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
       << ", dst slice shape=" << slice_persistent_block_tables.sizes();
   slice_persistent_block_tables.copy_(params.block_tables,
                                       /*non_blocking=*/true);
-  if (!attn_metadata->is_prefill || FLAGS_enable_mla) {
+  if (!attn_metadata->is_prefill || args_.enable_mla()) {
     attn_metadata->block_table = slice_persistent_block_tables;
   }
 
