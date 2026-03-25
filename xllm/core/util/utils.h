@@ -70,7 +70,7 @@ const T& max(const std::vector<T>& vec) {
   return *std::max_element(vec.begin(), vec.end());
 }
 
-int64_t align_up(int64_t value, int64_t alignment) {
+static inline int64_t align_up(int64_t value, int64_t alignment) {
   if (alignment == 0) {
     return value;
   }
