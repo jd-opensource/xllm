@@ -47,17 +47,6 @@ uint32_t get_sample_source_position(const SampleSlot& sample_slot) {
 
 }  // namespace
 
-namespace {
-
-inline uint32_t align_up(uint32_t value, uint32_t alignment) {
-  if (alignment == 0) {
-    return value;
-  }
-  return ((value + alignment - 1) / alignment) * alignment;
-}
-
-}  // namespace
-
 BatchInputBuilder::BatchInputBuilder(
     const std::vector<Sequence*>& sequences,
     const std::vector<uint32_t>& allowed_max_tokens,
@@ -290,7 +279,7 @@ void BatchInputBuilder::process_single_sequence(
   // Continuous scheduler can enlarge token budget for CP prefill padding.
   // Keep physical q_len aligned to 2 * cp_size to match later cp_partition.
   if (cp_size_ > 1 && state.batch_forward_type.is_prefill()) {
-    const uint32_t aligned_q_seq_len = align_up(q_seq_len, cp_size_ * 2);
+    const uint32_t aligned_q_seq_len = xllm::util::align_up(q_seq_len, cp_size_ * 2);
     padded_q_seq_len =
         std::min(allowed_max_tokens_[seq_index], aligned_q_seq_len);
   }

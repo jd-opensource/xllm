@@ -70,6 +70,15 @@ const T& max(const std::vector<T>& vec) {
   return *std::max_element(vec.begin(), vec.end());
 }
 
+template <typename T>
+T align_up(T value, T alignment) {
+  if (alignment == 0) {
+    return value;
+  }
+  return ((value + alignment - 1) / alignment) * alignment;
+}
+
+
 bool match_suffix(const Slice<int32_t>& data, const Slice<int32_t>& suffix);
 
 std::vector<uint32_t> cal_vec_split_index(uint32_t vec_size, uint32_t part_num);

@@ -1028,8 +1028,7 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
 
-  std::vector<std::vector<RawForwardInput>> cp_partitioned_inputs(
-      static_cast<size_t>(dp_size_));
+  std::vector<std::vector<RawForwardInput>> cp_partitioned_inputs(dp_size_);
 
   if (cp_size_ > 1) {
     for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {

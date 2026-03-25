@@ -75,13 +75,6 @@ size_t get_sequence_free_blocks_for_rank(KVCacheManager* kv_cache_manager,
 
 namespace {
 
-inline size_t align_up(size_t value, size_t alignment) {
-  if (alignment == 0) {
-    return value;
-  }
-  return ((value + alignment - 1) / alignment) * alignment;
-}
-
 inline size_t maybe_align_cp_prefill_tokens(const Sequence* sequence,
                                             size_t num_tokens,
                                             int32_t cp_size) {
@@ -95,7 +88,7 @@ inline size_t maybe_align_cp_prefill_tokens(const Sequence* sequence,
     return num_tokens;
   }
   const size_t alignment = static_cast<size_t>(cp_size) * 2;
-  return align_up(num_tokens, alignment);
+  return xllm::util::align_up(num_tokens, alignment);
 }
 
 }  // namespace
