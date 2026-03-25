@@ -289,8 +289,7 @@ void BatchInputBuilder::process_single_sequence(
   uint32_t padded_q_seq_len = q_seq_len;
   // Continuous scheduler can enlarge token budget for CP prefill padding.
   // Keep physical q_len aligned to 2 * cp_size to match later cp_partition.
-  if (cp_size_ > 1 && !use_mrope_ && !FLAGS_enable_chunked_prefill &&
-      state.batch_forward_type.no_decode()) {
+  if (cp_size_ > 1 && state.batch_forward_type.is_prefill()) {
     const uint32_t aligned_q_seq_len = align_up(q_seq_len, cp_size_ * 2);
     padded_q_seq_len =
         std::min(allowed_max_tokens_[seq_index], aligned_q_seq_len);
