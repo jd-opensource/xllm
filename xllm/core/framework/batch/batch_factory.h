@@ -15,6 +15,12 @@ limitations under the License.
 
 #pragma once
 
+#include <glog/logging.h>
+
+#include <memory>
+#include <mutex>
+#include <unordered_map>
+
 #include "common/metrics.h"
 #include "framework/batch/batch.h"
 
@@ -22,9 +28,29 @@ namespace xllm {
 
 class BatchFactory {
  public:
+  struct Deleter {
+    void operator()(BatchFactory* ptr) const { delete ptr; }
+  };
+
   static BatchFactory* get_instance(int32_t dp_size) {
-    static BatchFactory instance(dp_size);
-    return &instance;
+    CHECK_GT(dp_size, 0) << "dp_size must be greater than 0";
+    static std::mutex mu;
+    static std::unordered_map<int32_t, std::unique_ptr<BatchFactory, Deleter>>
+        instances;
+    std::lock_guard<std::mutex> lock(mu);
+    auto it = instances.find(dp_size);
+    if (it == instances.end()) {
+      it = instances
+               .emplace(dp_size,
+                        std::unique_ptr<BatchFactory, Deleter>(
+                            new BatchFactory(dp_size)))
+               .first;
+    }
+    VLOG(1) << "[DIRTY_TRACE][BatchFactory::get_instance] "
+            << "requested_dp_size=" << dp_size
+            << ", instance_dp_size=" << it->second->dp_size_
+            << ", instance_ptr=" << static_cast<const void*>(it->second.get());
+    return it->second.get();
   }
 
   std::vector<Batch> create_batches(
