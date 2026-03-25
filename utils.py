@@ -333,50 +333,105 @@ def _ensure_prebuild_dependencies_installed(script_path: str) -> None:
     _export_cmake_prefix_paths(["/usr/local/yalantinglibs"])
 
 
-def _get_cmake_cache_path() -> str:
-    plat_name = sysconfig.get_platform()
-    dir_name = f"cmake.{plat_name}-{sys.implementation.name}-{get_python_version()}"
-    return os.path.join(get_base_dir(), "build", dir_name, "CMakeCache.txt")
+def _get_required_env_path(env_name: str) -> str:
+    env_value = os.getenv(env_name)
+    if env_value:
+        return os.path.abspath(os.path.expanduser(env_value))
+
+    print(f"❌ Required environment variable {env_name} is not set.")
+    _print_manual_check_commands([f"echo ${env_name}"])
+    exit(1)
 
 
-def _get_xllm_ops_marker_path() -> str:
-    ascend_home = os.getenv("ASCEND_HOME_PATH", "/usr/local/Ascend/ascend-toolkit/latest")
-    opp_root = os.path.join(ascend_home, "opp")
-    return os.path.join(opp_root, "vendors", "xllm", ".xllm_ops_git_head")
+def _get_xllm_ops_source_git_head() -> Optional[str]:
+    repo_root = _join_path("third_party", "xllm_ops")
+    ok, output, err = _run_command(
+        ["git", "-c", f"safe.directory={repo_root}", "rev-parse", "HEAD"],
+        cwd=repo_root,
+        check=True,
+    )
+    if ok:
+        return output.strip() or None
+    print(f"❌ Failed to get git HEAD for {repo_root}.")
+    if err:
+        print(f"   {err}")
+    return None
 
 
-def _clear_xllm_ops_cache_git_head(cache_path: str) -> bool:
-    if not os.path.isfile(cache_path):
-        return False
+def _read_version_info(file_path: str) -> Optional[str]:
+    if not os.path.isfile(file_path):
+        return None
 
-    cache_prefix = "XLLM_OPS_GIT_HEAD_CACHED:"
-    with open(cache_path, "r", encoding="utf-8") as cache_file:
-        old_lines = cache_file.readlines()
-
-    new_lines = [line for line in old_lines if not line.startswith(cache_prefix)]
-    if new_lines == old_lines:
-        return False
-
-    temp_file_path = f"{cache_path}.tmp"
-    with open(temp_file_path, "w", encoding="utf-8") as cache_file:
-        cache_file.writelines(new_lines)
-    os.replace(temp_file_path, cache_path)
-    return True
+    with open(file_path, "r", encoding="utf-8") as version_info:
+        for line in version_info:
+            if line.startswith("Version="):
+                version = line.split("=", 1)[1].strip()
+                return version or None
+    return None
 
 
-def _ensure_xllm_ops_rebuild_on_missing_marker() -> None:
-    marker_path = _get_xllm_ops_marker_path()
+def _get_cann_version_info() -> tuple[str, Optional[str]]:
+    opp_root = _get_required_env_path("ASCEND_OPP_PATH")
+    version_info_path = os.path.join(
+        os.path.dirname(opp_root),
+        "compiler",
+        "version.info",
+    )
+    return version_info_path, _read_version_info(version_info_path)
+
+
+def _ensure_xllm_ops_rebuild_state() -> None:
+    if get_device_type() != "npu":
+        return
+    source_git_head = _get_xllm_ops_source_git_head()
+    if source_git_head is None:
+        print("❌ Failed to determine third_party/xllm_ops git HEAD.")
+        _print_manual_check_commands(
+            [f"git -C {_join_path('third_party', 'xllm_ops')} rev-parse HEAD"]
+        )
+        exit(1)
+
+    opp_root = _get_required_env_path("ASCEND_OPP_PATH")
+    marker_path = os.path.join(opp_root, "vendors", "xllm", ".xllm_ops_git_head")
+    installed_git_head = None
     if os.path.isfile(marker_path):
+        with open(marker_path, "r", encoding="utf-8") as marker_file:
+            installed_git_head = marker_file.readline().strip() or None
+    if installed_git_head == source_git_head:
+        print(
+            f"✅ xllm_ops is already installed in {os.path.dirname(marker_path)} "
+            "with a matching git HEAD."
+        )
         return
 
-    cmake_cache_path = _get_cmake_cache_path()
-    if _clear_xllm_ops_cache_git_head(cmake_cache_path):
-        print("✅ Cleared XLLM_OPS_GIT_HEAD_CACHED from CMake cache to trigger xllm_ops rebuild.")
-        return
+    if installed_git_head is None:
+        print(f"ℹ️ xllm_ops marker not found at {marker_path}. A rebuild is required.")
+    else:
+        print(
+            "ℹ️ Installed xllm_ops marker does not match "
+            "third_party/xllm_ops HEAD. A rebuild is required."
+        )
+        print(f"   installed git HEAD: {installed_git_head}")
+        print(f"   source git HEAD:    {source_git_head}")
+
+    version_info_path, cann_version = _get_cann_version_info()
+    if cann_version is None:
+        print("❌ Cannot find CANN version.info. xllm_ops compilation requires CANN 8.5.")
+        _print_manual_check_commands([f"test -f {version_info_path}"])
+        exit(1)
+
+    if ".".join(cann_version.strip().split(".")[:2]) != "8.5":
+        print(
+            f"❌ xllm_ops compilation requires CANN 8.5, but detected {cann_version} "
+            f"from {version_info_path},"
+            f"please use the latest image."
+        )
+        exit(1)
+
 
 def pre_build() -> None:
     script_path = os.path.dirname(os.path.abspath(__file__))
 
     _validate_submodules_or_exit(script_path)
     _ensure_prebuild_dependencies_installed(script_path)
-    _ensure_xllm_ops_rebuild_on_missing_marker()
+    _ensure_xllm_ops_rebuild_state()
