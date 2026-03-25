@@ -105,7 +105,8 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   kv_cache_manager_ = engine_->block_manager_pool();
   CHECK(kv_cache_manager_ != nullptr);
 
-  enable_prefix_cache_ = FLAGS_enable_prefix_cache;
+  enable_prefix_cache_ = options_.enable_prefix_cache();
+  enable_in_batch_prefix_cache_ = options_.enable_in_batch_prefix_cache();
 
   last_batch_.resize(options_.dp_size());
 
@@ -226,6 +227,25 @@ bool ContinuousScheduler::check_if_enough_to_evict(
     }
   }
   return false;
+}
+
+void ContinuousScheduler::cache_in_batch_prefix(
+    const std::vector<Sequence*>& sequences,
+    const std::vector<size_t>& current_step_token_budgets) {
+  if (!enable_prefix_cache_ || !enable_in_batch_prefix_cache_ || sequences.empty()) {
+    return;
+  }
+  CHECK_EQ(sequences.size(), current_step_token_budgets.size());
+  for (size_t i = 0; i < sequences.size(); ++i) {
+    Sequence* sequence = sequences[i];
+    if (sequence == nullptr || !sequence->is_prefill_stage()) {
+      continue;
+    }
+    const size_t max_handle_num_tokens =
+        sequence->kv_state().kv_cache_tokens_num() +
+        current_step_token_budgets[i];
+    kv_cache_manager_->cache(sequence, max_handle_num_tokens);
+  }
 }
 
 void ContinuousScheduler::handle_prefill_requests(
@@ -401,6 +421,8 @@ void ContinuousScheduler::handle_prefill_requests(
     running_sequences_budgets_.insert(running_sequences_budgets_.end(),
                                       prefill_sequences_budget.begin(),
                                       prefill_sequences_budget.end());
+    cache_in_batch_prefix(prefill_sequences,
+                                           prefill_sequences_budget);
   }
   // maybe can pre-compute if prompt beyond length
   if (running_sequences_.empty() && !waiting_priority_queue.empty() &&
@@ -993,7 +1015,6 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   } else {
     kv_cache_manager_->transfer_blocks();
   }
-
   GAUGE_SET(num_pending_requests,
             pending_requests_.load(std::memory_order_relaxed));
   GAUGE_SET(num_running_requests, running_requests_.size());

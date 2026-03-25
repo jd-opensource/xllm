@@ -55,6 +55,7 @@ class KVCacheManager {
 
   virtual void allocate_shared(Sequence* sequence) = 0;
   virtual void cache(Sequence* sequence) = 0;
+  virtual void cache(Sequence* sequence, size_t num_tokens) = 0;
 
   virtual std::vector<std::vector<BlockTransferInfo>>*
   get_swap_block_transfer_infos() = 0;

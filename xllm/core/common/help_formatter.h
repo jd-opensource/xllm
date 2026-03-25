@@ -42,6 +42,7 @@ const OptionCategory kCommonOptions = {"COMMON OPTIONS",
                                         "enable_prefill_sp",
                                         "enable_schedule_overlap",
                                         "enable_prefix_cache",
+                                        "enable_in_batch_prefix_cache",
                                         "enable_shm",
                                         "enable_graph",
                                         "enable_graph_mode_decode_no_padding",
@@ -101,7 +102,7 @@ const OptionCategory kBeamSearchOptions = {"BEAM SEARCH OPTIONS",
 
 const OptionCategory kPrefixCacheOptions = {
     "PREFIX CACHE OPTIONS",
-    {"enable_prefix_cache", "xxh3_128bits_seed"}};
+    {"enable_prefix_cache", "enable_in_batch_prefix_cache", "xxh3_128bits_seed"}};
 
 const OptionCategory kOtherOptions = {
     "OTHER OPTIONS",

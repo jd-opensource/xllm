@@ -285,6 +285,11 @@ DEFINE_bool(enable_prefix_cache,
             true,
             "Whether to enable the prefix cache for the block manager.");
 
+DEFINE_bool(
+    enable_in_batch_prefix_cache,
+    true,
+    "Whether to cache admitted prefill full blocks into prefix cache.");
+
 DEFINE_bool(enable_cache_upload,
             false,
             "Whether to upload cache info to service. This feature is only "

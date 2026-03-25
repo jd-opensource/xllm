@@ -48,6 +48,7 @@ DECLARE_double(max_memory_utilization);
 DECLARE_string(kv_cache_dtype);
 
 DECLARE_bool(enable_prefix_cache);
+DECLARE_bool(enable_in_batch_prefix_cache);
 
 DECLARE_bool(enable_cache_upload);
 
