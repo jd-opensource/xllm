@@ -386,6 +386,7 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
       }
       handle_sampling_parameters(sequence, state_ptr);
       ++sample_slot_idx;
+    }
   }
 
   // Right padding for CP prefill: append physical tokens only for cache/layout.
