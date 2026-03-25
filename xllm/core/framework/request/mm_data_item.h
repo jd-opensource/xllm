@@ -29,9 +29,7 @@ limitations under the License.
 namespace xllm {
 
 using MMKey = std::string;
-using MMValue = std::variant<torch::Tensor,
-                             std::vector<torch::Tensor>,
-                             std::vector<std::string>>;
+using MMValue = std::variant<torch::Tensor, std::vector<torch::Tensor>>;
 using MMDict = std::unordered_map<MMKey, MMValue>;
 
 class MMDataItem {
@@ -60,7 +58,6 @@ class MMDataItem {
   bool has(const MMKey& key) const;
 
   void get(const MMKey& key, std::vector<torch::Tensor>& vec) const;
-  void get(const MMKey& key, std::vector<std::string>& vec) const;
   bool is_embedded() const { return has("embedding"); }
 
   template <typename T>

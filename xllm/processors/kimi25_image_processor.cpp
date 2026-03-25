@@ -494,8 +494,8 @@ bool KimiK25ImageProcessor::process_videos(
 
     item.set_data({{"pixel_values_videos", pixel_values},
                    {"video_grid_thw", thw},
-                   {"second_per_grid_ts", second_per_grid_ts},
-                   {"video_prompts", video_prompts}});
+                   {"second_per_grid_ts", second_per_grid_ts}});
+    //{"video_prompts", video_prompts}});
     item.set_metadata(meta);
   }
   return true;
