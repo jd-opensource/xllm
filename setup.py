@@ -20,7 +20,7 @@ BUILD_EXPORT: bool = True
 
 
 def _maybe_compile_tilelang_kernels(device: str) -> None:
-    if device not in ("a2", "a3"):
+    if device != "npu":
         return
 
     output_root = os.path.join(get_cmake_dir(), "xllm", "compiler", "tilelang")
@@ -35,8 +35,6 @@ def _maybe_compile_tilelang_kernels(device: str) -> None:
         "compile-kernels",
         "--target",
         "ascend",
-        "--device",
-        device,
         "--output-root",
         output_root,
     ]
@@ -63,10 +61,12 @@ class ExtBuild(build_ext):
         self.device: Optional[str] = None
         self.arch: Optional[str] = None
         self.generate_so: bool = False
-        self.cmake_executable: str = os.environ.get("XLLM_CMAKE", "/usr/bin/cmake" if os.path.exists("/usr/bin/cmake") else "cmake")
+        self.cmake_executable: str = os.environ.get("XLLM_CMAKE", "cmake")
 
     def finalize_options(self) -> None:
         build_ext.finalize_options(self)
+        if "XLLM_CMAKE" not in os.environ and self.device == "npu" and os.path.exists("/usr/bin/cmake"):
+            self.cmake_executable = "/usr/bin/cmake"
 
     def run(self) -> None:
         # check if cmake is installed
