@@ -123,8 +123,8 @@ class BatchInputBuilder {
       std::unordered_set<int32_t>* write_block_ids_ptr = nullptr);
   void extract_tokens_and_positions(Sequence* sequence,
                                     uint32_t n_kv_cache_tokens,
-                                    uint32_t logical_seq_len,
-                                    uint32_t physical_seq_len,
+                                    uint32_t seq_len,
+                                    uint32_t padded_seq_len,
                                     BuilderState* state_ptr = nullptr);
   void handle_sampling_parameters(Sequence* sequence,
                                   BuilderState* state_ptr = nullptr);
