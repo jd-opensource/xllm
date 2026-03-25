@@ -28,35 +28,47 @@ if(USE_NPU)
   endif()
   message(STATUS "Using xllm_atb_layers source at: ${XLLM_ATB_LAYERS_SOURCE_DIR}")
 
+  set(XLLM_OPS_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third_party/xllm_ops")
+  set(XLLM_OPS_MARKER_ROOT "/usr/local/Ascend/ascend-toolkit/latest/opp")
+  if(DEFINED ENV{ASCEND_OPP_PATH} AND NOT "$ENV{ASCEND_OPP_PATH}" STREQUAL "")
+    set(XLLM_OPS_MARKER_ROOT "$ENV{ASCEND_OPP_PATH}")
+  endif()
+  if(DEFINED ENV{ASCEND_HOME_PATH} AND NOT "$ENV{ASCEND_HOME_PATH}" STREQUAL "")
+    set(XLLM_OPS_MARKER_ROOT "$ENV{ASCEND_HOME_PATH}/opp")
+  endif()
+  set(XLLM_OPS_MARKER_PATH "${XLLM_OPS_MARKER_ROOT}/vendors/xllm/.xllm_ops_git_head")
+
   execute_process(
-    COMMAND git -c "safe.directory=${CMAKE_SOURCE_DIR}/third_party/xllm_ops" -C "${CMAKE_SOURCE_DIR}/third_party/xllm_ops" rev-parse HEAD
+    COMMAND git -c "safe.directory=${XLLM_OPS_SOURCE_DIR}" -C "${XLLM_OPS_SOURCE_DIR}" rev-parse HEAD
+    RESULT_VARIABLE XLLM_OPS_GIT_HEAD_RESULT
     OUTPUT_VARIABLE XLLM_OPS_GIT_HEAD
     OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
   )
-  if(DEFINED ENV{ASCEND_HOME_PATH} AND NOT "$ENV{ASCEND_HOME_PATH}" STREQUAL "")
-    set(XLLM_OPS_MARKER_PATH "$ENV{ASCEND_HOME_PATH}/opp/vendors/xllm/.xllm_ops_git_head")
-  else()
-    set(XLLM_OPS_MARKER_PATH "/usr/local/Ascend/ascend-toolkit/latest/opp/vendors/xllm/.xllm_ops_git_head")
+  if(NOT XLLM_OPS_GIT_HEAD_RESULT EQUAL 0 OR XLLM_OPS_GIT_HEAD STREQUAL "")
+    message(FATAL_ERROR "Failed to get third_party/xllm_ops git HEAD")
   endif()
 
-  if(NOT DEFINED XLLM_OPS_GIT_HEAD_CACHED OR NOT XLLM_OPS_GIT_HEAD STREQUAL XLLM_OPS_GIT_HEAD_CACHED)
-    message(STATUS "xllm_ops git HEAD changed; running precompile via execute_process")
+  set(XLLM_OPS_MARKER_GIT_HEAD "")
+  if(EXISTS "${XLLM_OPS_MARKER_PATH}")
+    file(STRINGS "${XLLM_OPS_MARKER_PATH}" XLLM_OPS_MARKER_GIT_HEAD LIMIT_COUNT 1)
+  endif()
+
+  if(XLLM_OPS_MARKER_GIT_HEAD STREQUAL XLLM_OPS_GIT_HEAD)
+    message(STATUS "xllm_ops marker matches source HEAD; skipping precompile")
+  else()
+    message(STATUS "xllm_ops marker is missing or stale; running precompile")
     execute_process(
-      COMMAND bash ${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build.sh
-      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/xllm_ops
+      COMMAND bash build.sh
+      WORKING_DIRECTORY "${XLLM_OPS_SOURCE_DIR}"
       RESULT_VARIABLE XLLM_OPS_RESULT
     )
     if(NOT XLLM_OPS_RESULT EQUAL 0)
       message(FATAL_ERROR "Failed to precompile xllm ops, error code: ${XLLM_OPS_RESULT}")
     endif()
-    set(XLLM_OPS_GIT_HEAD_CACHED "${XLLM_OPS_GIT_HEAD}" CACHE INTERNAL "" FORCE)
     get_filename_component(XLLM_OPS_MARKER_DIR "${XLLM_OPS_MARKER_PATH}" DIRECTORY)
     file(MAKE_DIRECTORY "${XLLM_OPS_MARKER_DIR}")
     file(WRITE "${XLLM_OPS_MARKER_PATH}" "${XLLM_OPS_GIT_HEAD}\n")
-    message(STATUS "xllm ops precompiled and HEAD cache updated")
-  else()
-    message(STATUS "xllm_ops git HEAD unchanged; skipping precompile")
+    message(STATUS "xllm ops precompiled and marker updated")
   endif()
 endif()
 
