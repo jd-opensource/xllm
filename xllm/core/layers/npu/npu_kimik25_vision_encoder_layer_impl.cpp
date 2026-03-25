@@ -43,9 +43,15 @@ void NpuKimik25VisionEncoderLayerImpl::param_from_args(
     atb_speed::kimi::VisionEncoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
+  const int32_t dp_size = parallel_args.dp_size() > 0 ? parallel_args.dp_size()
+                                                      : 1;
+  const int32_t dp_local_tp_size = parallel_args.world_size() / dp_size;
+  CHECK_EQ(parallel_args.world_size(), dp_size * dp_local_tp_size);
+  const int32_t dp_local_tp_rank = parallel_args.rank() % dp_local_tp_size;
+
   param.isBF16 = args.dtype() == "bfloat16";
   param.rmsNormEps = args.rms_norm_eps();
-  param.worldSize = parallel_args.world_size();
+  param.worldSize = dp_local_tp_size;
   param.numAttentionHeadsPerRank =
       args.mm_num_attention_heads() / param.worldSize;
   param.hiddenSizePerAttentionHead =
@@ -53,10 +59,11 @@ void NpuKimik25VisionEncoderLayerImpl::param_from_args(
   std::optional<long int> optionalValue = args.mm_num_attention_heads();
   param.numKeyValueHeadsPerRank =
       static_cast<int>(optionalValue.value()) / param.worldSize;
-  param.rank = parallel_args.rank();
+  param.rank = dp_local_tp_rank;
   param.backend = "lccl";
   param.enableLogN = false;
   param.MLPActivationType = atb::infer::ActivationType::ACTIVATION_GELU;
+  param.mapping = parallel_args.mapping();
   initialize_quantization_parameters(param);
 }
 

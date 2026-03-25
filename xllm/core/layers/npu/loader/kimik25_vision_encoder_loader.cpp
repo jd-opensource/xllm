@@ -119,13 +119,11 @@ static const std::map<int, int>& GetWeightShardMap(
 }
 
 Kimik25VisionEncoderLoader::Kimik25VisionEncoderLoader(uint64_t weight_count,
-                                                   const ModelContext& context)
+                                                    const ModelContext& context)
     : BaseLoader(weight_count, context) {
-  auto model_args = context.get_model_args();
-  auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
-  encode_param_rank = parallel_args.rank();
-  encode_param_worldSize = parallel_args.world_size();
+  encode_param_rank = dp_local_tp_rank_;
+  encode_param_worldSize = dp_local_tp_size_;
   at_weight_tensors_.resize(weight_count);
   dtype_ = torch::typeMetaToScalarType(options.dtype());
   device_id_ = options.device().index();
@@ -140,7 +138,12 @@ void Kimik25VisionEncoderLoader::load_state_dict(const StateDict& state_dict) {
   const auto& weight_shard = GetWeightShardMap(quantize_type_);
   for (const auto& [index, name] : weight_mapping) {
     if (weight_shard.find(index) != weight_shard.end()) {
-      set_weight(state_dict, name, index, weight_shard.at(index));
+      set_weight(state_dict,
+                 name,
+                 index,
+                 weight_shard.at(index),
+                 encode_param_rank,
+                 encode_param_worldSize);
     } else {
       set_weight(state_dict, name, index);
     }
