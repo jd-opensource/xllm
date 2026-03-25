@@ -284,8 +284,8 @@ void BatchInputBuilder::process_single_sequence(
     padded_q_seq_len =
         std::min(allowed_max_tokens_[seq_index], aligned_q_seq_len);
   }
-  const uint32_t seq_len = q_seq_len + n_kv_cache_tokens;
-  const uint32_t padded_seq_len = padded_q_seq_len + n_kv_cache_tokens;
+  const uint32_t logical_seq_len = q_seq_len + n_kv_cache_tokens;
+  const uint32_t seq_len = padded_q_seq_len + n_kv_cache_tokens;
 
   // Validation
   CHECK_GE(sequence->kv_state().current_max_tokens_capacity(), seq_len);
@@ -302,15 +302,15 @@ void BatchInputBuilder::process_single_sequence(
   state.q_max_seq_len = std::max(state.q_max_seq_len, padded_q_seq_len);
   state.kv_cache_tokens_nums.emplace_back(n_kv_cache_tokens);
 #if defined(USE_NPU)
-  state.seq_lens.push_back(padded_seq_len);
+  state.seq_lens.push_back(seq_len);
   state.q_seq_lens.push_back(padded_q_seq_len);
 #elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
-  state.seq_lens.push_back(state.seq_lens.back() + padded_seq_len);
+  state.seq_lens.push_back(state.seq_lens.back() + seq_len);
   state.q_seq_lens.push_back(state.q_seq_lens.back() + padded_q_seq_len);
 #endif
   // Process tokens and positions
   extract_tokens_and_positions(
-      sequence, n_kv_cache_tokens, seq_len, padded_seq_len, state_ptr);
+      sequence, n_kv_cache_tokens, logical_seq_len, seq_len, state_ptr);
 
   // Setup KV cache
   setup_kv_cache_info(sequence,

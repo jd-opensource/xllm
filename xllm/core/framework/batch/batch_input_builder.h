@@ -132,7 +132,7 @@ class BatchInputBuilder {
       Sequence* sequence,
       uint32_t n_kv_cache_tokens,
       uint32_t seq_len,
-      uint32_t logical_q_seq_len,
+      uint32_t q_seq_len,
       BuilderState* state_ptr = nullptr,
       std::unordered_set<int32_t>* write_block_ids_ptr = nullptr);
 
