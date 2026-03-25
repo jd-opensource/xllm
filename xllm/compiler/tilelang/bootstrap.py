@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import importlib
 import os
 import shlex
 import subprocess
-import sys
 from pathlib import Path
 
 from env import set_npu_envs
@@ -114,7 +112,8 @@ def read_tilelang_git_head_cached(tilelang_root: str | Path) -> str | None:
     cache_path = tilelang_git_head_cache_path(tilelang_root)
     if not cache_path.is_file():
         return None
-    return cache_path.read_text(encoding="utf-8").strip()
+    value = cache_path.read_text(encoding="utf-8").strip()
+    return value or None
 
 
 def write_tilelang_git_head_cached(tilelang_root: str | Path, head: str) -> None:
@@ -134,16 +133,33 @@ def tilelang_artifacts_ready(tilelang_root: str | Path) -> bool:
 
 
 def verify_tilelang_import(tilelang_root: str | Path) -> tuple[bool, str]:
-    prepare_tilelang_import(tilelang_root)
-    try:
-        importlib.invalidate_caches()
-        for module_name in list(sys.modules):
-            if module_name == "tilelang" or module_name.startswith("tilelang."):
-                sys.modules.pop(module_name, None)
-        tilelang = importlib.import_module("tilelang")
-    except Exception as exc:  # pragma: no cover - error path only
-        return False, str(exc)
-    return True, str(getattr(tilelang, "__file__", "<unknown>"))
+    tl_root = prepare_tilelang_import(tilelang_root)
+    env = os.environ.copy()
+    env["TL_ROOT"] = str(tl_root)
+    pythonpath = env.get("PYTHONPATH", "")
+    pythonpath_items = [item for item in pythonpath.split(os.pathsep) if item]
+    if str(tl_root) not in pythonpath_items:
+        pythonpath_items.insert(0, str(tl_root))
+        env["PYTHONPATH"] = os.pathsep.join(pythonpath_items)
+    cmd = [
+        "bash",
+        "-lc",
+        "python - <<'PY'\n"
+        "import tilelang\n"
+        "print(getattr(tilelang, '__file__', '<unknown>'))\n"
+        "PY",
+    ]
+    result = subprocess.run(
+        cmd,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        return False, detail
+    return True, result.stdout.strip()
 
 
 def _patch_tilelang_install_script(tilelang_root: str | Path) -> None:
@@ -182,10 +198,15 @@ def _run_tilelang_install(tilelang_root: str | Path, cann_set_env: str | Path) -
         "bash install_ascend.sh && "
         "source set_env.sh"
     )
+    env = os.environ.copy()
+    git_config_count = int(env.get("GIT_CONFIG_COUNT", "0") or "0")
+    env[f"GIT_CONFIG_KEY_{git_config_count}"] = "safe.directory"
+    env[f"GIT_CONFIG_VALUE_{git_config_count}"] = str(tl_root)
+    env["GIT_CONFIG_COUNT"] = str(git_config_count + 1)
     subprocess.check_call(
         ["bash", "-lc", cmd],
         cwd=str(tl_root),
-        env=os.environ.copy(),
+        env=env,
     )
 
 

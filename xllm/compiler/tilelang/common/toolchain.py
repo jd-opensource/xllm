@@ -66,8 +66,9 @@ def sha256_file(path: str | Path) -> str:
 
 
 def git_head(path: str | Path) -> str:
+    repo_path = str(Path(path).resolve())
     result = subprocess.run(
-        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        ["git", "-c", f"safe.directory={repo_path}", "-C", repo_path, "rev-parse", "HEAD"],
         text=True,
         capture_output=True,
         check=False,

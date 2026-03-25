@@ -45,8 +45,8 @@ def main(argv: list[str] | None = None) -> None:
     output_root.mkdir(parents=True, exist_ok=True)
 
     if args.target == "ascend":
-        from ..bootstrap import ensure_ascend_ready
-        ensure_ascend_ready()
+        from ..bootstrap import prepare_ascend
+        prepare_ascend()
         from ..targets.ascend.build import build_kernels
     elif args.target == "cuda":
         from ..targets.cuda.build import build_kernels
