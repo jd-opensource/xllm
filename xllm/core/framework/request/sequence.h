@@ -23,6 +23,7 @@ limitations under the License.
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/common/types.h"
@@ -188,7 +189,12 @@ class Sequence final {
   void update_mm_embeddings(const std::vector<torch::Tensor>& mm_embeddings);
   // update embeddings to the sequence
   void update_embeddings(const torch::Tensor& embedding);
-  int32_t get_embedding_id() const { return embedding_id_; }
+  bool has_embedding_id() const { return embedding_block_.is_valid(); }
+  int32_t get_embedding_id() const { return embedding_block_.id(); }
+  void set_embedding_block(Block embedding_block) {
+    embedding_block_ = std::move(embedding_block);
+  }
+  Block reset_embedding_block() { return std::move(embedding_block_); }
   const std::string& request_id() const { return request_id_; }
   // get input embedding
   torch::Tensor get_input_embedding() const { return input_embedding_; }
@@ -482,8 +488,8 @@ class Sequence final {
   // In the next execution, we should treat these generated tokens as prompts.
   size_t volatile_num_prompt_tokens_ = 0;
 
-  // embedding id that hold the embedding.
-  int32_t embedding_id_ = -1;
+  // embedding block that holds the embedding id.
+  Block embedding_block_;
 
   // is the sequence finished
   mutable bool finished_ = false;
