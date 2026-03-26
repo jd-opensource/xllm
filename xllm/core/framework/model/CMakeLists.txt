@@ -8,7 +8,6 @@ cc_library(
     causal_lm.h
     causal_vlm.h
     dit_model.h
-    embedding_vlm.h
     mm_embedding_vlm.h
     model_args.h
     npu_cp_ep_padding.h

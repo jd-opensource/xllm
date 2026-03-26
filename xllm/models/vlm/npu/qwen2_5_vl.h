@@ -696,6 +696,22 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     return language_model_(tokens, positions, kv_caches, input_params);
   }
 
+  torch::Tensor pooler(const torch::Tensor& hidden_states,
+                       const torch::Tensor& seleted_idxes) {
+    auto h = hidden_states;
+    // return full embeddings if set flag
+    if (FLAGS_enable_return_mm_full_embeddings) {
+      return h;
+    }
+
+    if (seleted_idxes.defined()) {
+      h = h.index_select(/*dim=*/0, seleted_idxes);
+    }
+    auto pooler_output = torch::nn::functional::normalize(
+        h, torch::nn::functional::NormalizeFuncOptions().p(2).dim(1));
+    return pooler_output;
+  }
+
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) {
     return language_model_->logits(hidden_states, seleted_idxes);

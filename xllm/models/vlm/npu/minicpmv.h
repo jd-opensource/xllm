@@ -1038,6 +1038,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
                       const ModelInputParams& input_params) {
     return language_model_(tokens, positions, kv_caches, input_params);
   }
+
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) {
     return language_model_->logits(hidden_states, seleted_idxes);
