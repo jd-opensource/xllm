@@ -645,6 +645,76 @@ void NpuOneRecBlockLayerImpl::merge_loaded_weights() {
 }
 
 void NpuOneRecBlockLayerImpl::load_state_dict(const StateDict& state_dict) {
+  const auto target_weight_dtype = [this]() -> torch::ScalarType {
+    if (torch_dtype_.empty()) {
+      return dtype_;
+    }
+    if (torch_dtype_ == "float16") {
+      return torch::kFloat16;
+    }
+    if (torch_dtype_ == "bfloat16") {
+      return torch::kBFloat16;
+    }
+    if (torch_dtype_ == "float32") {
+      return torch::kFloat32;
+    }
+    if (torch_dtype_ == "float64") {
+      return torch::kFloat64;
+    }
+    if (torch_dtype_ == "int8") {
+      return torch::kInt8;
+    }
+    if (torch_dtype_ == "int16") {
+      return torch::kInt16;
+    }
+    if (torch_dtype_ == "int32") {
+      return torch::kInt32;
+    }
+    if (torch_dtype_ == "int64") {
+      return torch::kInt64;
+    }
+    if (torch_dtype_ == "uint8") {
+      return torch::kUInt8;
+    }
+    if (torch_dtype_ == "bool") {
+      return torch::kBool;
+    }
+    LOG(FATAL) << "Unsupported OneRec weight dtype " << torch_dtype_
+               << ", layer_id=" << layer_id_;
+  };
+  const auto correct_tensor_dtype =
+      [this, &target_weight_dtype](torch::Tensor& tensor,
+                                   const std::string& tensor_name) {
+        if (absl::EndsWith(tensor_name, "deq_scale") &&
+            torch_dtype_ == "bfloat16") {
+          return;
+        }
+        if (tensor.dtype() != torch::kInt8 && tensor.dtype() != torch::kInt32 &&
+            tensor.dtype() != torch::kInt64) {
+          tensor = tensor.to(target_weight_dtype());
+        }
+      };
+  const auto load_weight = [this, &state_dict, &correct_tensor_dtype](
+                               const std::string& tensor_name,
+                               int weight_position,
+                               int shard_dim = -1) {
+    for (const auto& [name, tensor] : state_dict) {
+      if (!absl::EndsWith(name, tensor_name)) {
+        continue;
+      }
+      torch::Tensor mutable_tensor =
+          (shard_dim >= 0 && parallel_args_.world_size() > 1)
+              ? state_dict.get_sharded_tensor(tensor_name,
+                                              shard_dim,
+                                              parallel_args_.rank(),
+                                              parallel_args_.world_size())
+              : tensor;
+      correct_tensor_dtype(mutable_tensor, tensor_name);
+      at_weight_tensors_[weight_position] = mutable_tensor.to(device_);
+      return;
+    }
+  };
+
   const auto& weight_mapping =
       [this]() -> const std::unordered_map<std::string, int>& {
     if (prefill_param_.use_moe) {
@@ -704,9 +774,9 @@ void NpuOneRecBlockLayerImpl::load_state_dict(const StateDict& state_dict) {
 
     const auto it = kOneRecWeightShard.find(index);
     if (it != kOneRecWeightShard.end()) {
-      set_weight(state_dict, name, index, it->second);
+      load_weight(name, index, it->second);
     } else {
-      set_weight(state_dict, name, index);
+      load_weight(name, index);
     }
   }
 }
