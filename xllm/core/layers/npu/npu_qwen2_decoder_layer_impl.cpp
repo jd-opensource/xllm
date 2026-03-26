@@ -376,7 +376,7 @@ void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
   }
 
   auto* effective_attn_mask = &attn_mask;
-  if (is_prefill && prefill_param_.isFIA) {
+  if (is_prefill && is_fia_) {
     effective_attn_mask = &fia_attn_mask_;
     build_fia_index_tensors(input_params, x.size(0));
   }
@@ -406,13 +406,13 @@ void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
   node.variantPack.inTensors.at(input_offset++) =
       atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
-  if (is_prefill && prefill_param_.isFIA) {
+  if (is_prefill && is_fia_) {
     node.variantPack.inTensors.at(input_offset++) =
         atb_speed::Utils::AtTensor2Tensor(fia_padding_idx_);
     node.variantPack.inTensors.at(input_offset++) =
         atb_speed::Utils::AtTensor2Tensor(fia_unpadding_idx_);
   }
-  if (is_prefill && FLAGS_enable_chunked_prefill) {
+  if (is_prefill && (is_fia_ || FLAGS_enable_chunked_prefill)) {
     node.variantPack.inTensors.at(input_offset) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
     node.variantPack.inTensors.at(input_offset).hostData =
