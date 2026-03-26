@@ -111,9 +111,9 @@ jobs:
     steps:
     - name: Prepare submodule checkout
       run: |
-        git config --global url."https://gitcode.com/xLLM-AI/tvm.git".insteadOf "https://github.com/TileLang/tvm"
-        git config --global url."https://gitcode.com/xLLM-AI/composable_kernel.git".insteadOf "https://github.com/ROCm/composable_kernel"
-        git config --global url."https://gitcode.com/xLLM-AI/cutlass.git".insteadOf "https://github.com/NVIDIA/cutlass"
+        git config --global url."https://gitcode.com/xLLM-AI/tvm".insteadOf "https://github.com/TileLang/tvm"
+        git config --global url."https://gitcode.com/xLLM-AI/composable_kernel".insteadOf "https://github.com/ROCm/composable_kernel"
+        git config --global url."https://gitcode.com/xLLM-AI/cutlass".insteadOf "https://github.com/NVIDIA/cutlass"
         if [ -d .git/modules ]; then
           find .git/modules -type f -name '*.lock' -print -delete || true
         fi

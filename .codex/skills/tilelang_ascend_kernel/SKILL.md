@@ -16,13 +16,24 @@ Use this skill when the task involves any of the following in the xLLM repo:
 
 Run build and test commands inside the NPU container.
 
-Run TileLang commands from the xLLM repo root (`/path/to/xllm`), not from an installed-package environment.
+Run TileLang commands from the xLLM repo root, not from an installed-package environment.
 
 ## Entry points and TL_ROOT
 
-- Use `python xllm/compiler/tilelang_launcher.py ...`; do not use `python -m xllm.compiler...`.
+- Prefer `python xllm/compiler/tilelang_launcher.py ...` for end-to-end TileLang compile flows.
 - From the xLLM repo root, use `export TL_ROOT=$PWD/third_party/tilelang-ascend` for xLLM TileLang tooling and verify `test -f "$TL_ROOT/tilelang/__init__.py"`.
 - Before any raw script does `import tilelang`, run `export TL_ROOT=$PWD/third_party/tilelang-ascend && source third_party/tilelang-ascend/set_env.sh`, then execute the script.
+- Do not run kernel files directly with `python rope.py`; use module execution because these files rely on relative imports.
+- For direct kernel-script debugging, run them as modules and pass required CLI args:
+
+```bash
+cd xllm
+python -m compiler.tilelang.targets.ascend.kernels.rope \
+  --output ../.tmp/rope.cpp
+# Expected: [INFO] RoPE output matches torch reference
+```
+
+- The same module-style rule applies to other kernel files under `xllm/compiler/tilelang/targets/ascend/kernels/`.
 
 ## Primary Reference And Mode Preference
 
@@ -97,16 +108,16 @@ When the task is to inspect codegen or compare two kernel implementations, use a
 python xllm/compiler/tilelang_launcher.py compile-kernels \
   --target ascend \
   --device a3 \
-  --output-root /tmp/tilelang_debug \
+  --output-root .tmp/tilelang_debug \
   --kernels <kernel> \
   --force
 ```
 
 Then inspect:
 
-- `/tmp/tilelang_debug/targets/ascend/<kernel>/<variant_key>/<kernel>_<variant_key>_kernel.cpp`
-- `/tmp/tilelang_debug/targets/ascend/<kernel>/registry.inc`
-- `/tmp/tilelang_debug/targets/ascend/<kernel>/manifest.json`
+- `.tmp/tilelang_debug/targets/ascend/<kernel>/<variant_key>/<kernel>_<variant_key>_kernel.cpp`
+- `.tmp/tilelang_debug/targets/ascend/<kernel>/registry.inc`
+- `.tmp/tilelang_debug/targets/ascend/<kernel>/manifest.json`
 
 Use this path before changing wrapper code when you need to understand generated symbols, field order, or ABI.
 
@@ -115,6 +126,7 @@ Use this path before changing wrapper code when you need to understand generated
 Prefer the narrowest command first:
 
 - `python -m py_compile xllm/compiler/tilelang/targets/ascend/kernels/<kernel>.py`
+- `cd xllm && python -m compiler.tilelang.targets.ascend.kernels.<kernel> --output ../.tmp/<kernel>.cpp`
 - `python xllm/compiler/tilelang_launcher.py prepare-ascend`
 - `python setup.py test --test-name <wrapper_test_target> --device a3`
 
