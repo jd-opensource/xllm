@@ -47,7 +47,13 @@ bool MooncakeWeightTransfer::register_global_xtensor() {
   }
 
   if (global_xtensor.is_mooncake_registered()) {
-    LOG(INFO) << "GlobalXTensor already registered to mooncake, skip";
+    if (!mooncake_te_->sync_local_memory_info_from_core()) {
+      LOG(ERROR) << "GlobalXTensor already registered, but failed to sync "
+                    "local memory info";
+      return false;
+    }
+    LOG(INFO) << "GlobalXTensor already registered to mooncake, reuse "
+                 "existing memory info";
     return true;
   }
 
@@ -116,9 +122,8 @@ bool MooncakeWeightTransfer::pull_weights(const std::string& remote_addr,
                                           uint64_t src_offset,
                                           uint64_t dst_offset,
                                           size_t size) {
-  // Note: src_offsets/dst_offsets are swapped because we're reading from remote
-  std::vector<uint64_t> src_offsets = {dst_offset};
-  std::vector<uint64_t> dst_offsets = {src_offset};
+  std::vector<uint64_t> src_offsets = {src_offset};
+  std::vector<uint64_t> dst_offsets = {dst_offset};
   return mooncake_te_->move_memory_by_global_offsets(
       remote_addr,
       src_offsets,

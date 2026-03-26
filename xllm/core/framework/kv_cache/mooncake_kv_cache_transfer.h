@@ -84,10 +84,12 @@ class MooncakeKVCacheTransferNative final : public MooncakeKVCacheTransferBase {
                       const std::vector<uint64_t>& src_blocks,
                       const std::vector<uint64_t>& dst_blocks) override;
 
+#if defined(USE_NPU)
   bool push_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
       bool is_spec_draft) override;
+#endif
 
  private:
   void allocate_kv_cache_native(
@@ -131,10 +133,12 @@ class MooncakeKVCacheTransferXTensor final
                       const std::vector<uint64_t>& src_blocks,
                       const std::vector<uint64_t>& dst_blocks) override;
 
+#if defined(USE_NPU)
   bool push_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
       bool is_spec_draft) override;
+#endif
 
  private:
   void allocate_kv_cache_xtensor(
@@ -151,9 +155,11 @@ class MooncakeKVCacheTransferXTensor final
                                    const std::vector<uint64_t>& src_blocks,
                                    const std::vector<uint64_t>& dst_blocks);
 
+#if defined(USE_NPU)
   bool push_kv_blocks_xtensor_mode(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer);
+#endif
 
   std::string model_id_;
 };

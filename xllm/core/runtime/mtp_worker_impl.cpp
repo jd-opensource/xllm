@@ -20,6 +20,7 @@ limitations under the License.
 #include "framework/request/mm_data.h"
 #include "spec_input_builder.h"
 #include "util/env_var.h"
+#include "util/net.h"
 #include "util/pretty_print.h"
 #include "util/slice.h"
 #include "util/timer.h"
@@ -153,8 +154,12 @@ bool MTPWorkerImpl::allocate_kv_cache_with_transfer(
   CHECK(draft_impl_ != nullptr);
 
   if (kv_cache_transfer_ == nullptr) {
+    const std::string resolved_device_ip =
+        options_.device_ip().has_value() && !options_.device_ip()->empty()
+            ? options_.device_ip().value()
+            : net::get_local_ip_addr();
     kv_cache_transfer_ = std::make_shared<SpecKVCacheTransfer>(
-        options_.device_ip().value(),
+        resolved_device_ip,
         options_.transfer_listen_port(),
         options_.instance_role(),
         context_.get_model_args().model_type());

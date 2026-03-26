@@ -553,7 +553,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
 
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no memory for kv cache";
   const int32_t block_size = options_.block_size();
-  bool enable_lighting_indexer = args_.index_n_heads() > 1;
+  bool enable_lighting_indexer = args_.index_n_heads() > 0;
   bool enable_gdn_attention = has_linear_attention_layers(args_);
 
   // init kv cache for each worker
@@ -668,11 +668,6 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       futures.push_back(worker->allocate_kv_cache_async(kv_cache_shape));
     }
   } else {
-    if (!options_.device_ip().has_value()) {
-      LOG(ERROR)
-          << "KVCacheTransfer required device_ip, current value is empty.";
-      return false;
-    }
     for (auto& worker : worker_clients_) {
       futures.push_back(
           worker->allocate_kv_cache_with_transfer_async(kv_cache_shape));
@@ -700,10 +695,52 @@ bool LLMEngine::pull_kv_blocks(const int32_t src_dp_size,
                                const std::vector<uint64_t>& src_blocks,
                                const int32_t dst_dp_rank,
                                const std::vector<uint64_t>& dst_blocks) {
-  int32_t src_world_size = src_cluster_ids.size();
-  int32_t src_tp_size = src_world_size / src_dp_size;
-  int32_t dst_world_size = options_.nnodes();
+  const int32_t src_world_size = src_cluster_ids.size();
+  if (src_dp_size <= 0 || src_world_size % src_dp_size != 0) {
+    LOG(ERROR) << "pull_kv_blocks invalid source topology, src_dp_size="
+               << src_dp_size << ", src_world_size=" << src_world_size;
+    return false;
+  }
+  if (dp_size_ <= 0 || worker_clients_num_ % dp_size_ != 0) {
+    LOG(ERROR) << "pull_kv_blocks invalid destination topology, dst_dp_size="
+               << dp_size_ << ", dst_world_size=" << worker_clients_num_;
+    return false;
+  }
+  if (src_cluster_ids.size() != src_addrs.size() ||
+      src_cluster_ids.size() != src_k_cache_ids.size() ||
+      src_cluster_ids.size() != src_v_cache_ids.size()) {
+    LOG(ERROR) << "pull_kv_blocks source metadata size mismatch"
+               << ", cluster_ids=" << src_cluster_ids.size()
+               << ", addrs=" << src_addrs.size()
+               << ", k_cache_ids=" << src_k_cache_ids.size()
+               << ", v_cache_ids=" << src_v_cache_ids.size();
+    return false;
+  }
+  if (src_dp_rank < 0 || src_dp_rank >= src_dp_size || dst_dp_rank < 0 ||
+      dst_dp_rank >= static_cast<int32_t>(dp_size_)) {
+    LOG(ERROR) << "pull_kv_blocks invalid dp rank"
+               << ", src_dp_rank=" << src_dp_rank
+               << ", src_dp_size=" << src_dp_size
+               << ", dst_dp_rank=" << dst_dp_rank
+               << ", dst_dp_size=" << dp_size_;
+    return false;
+  }
+
+  const int32_t src_tp_size = src_world_size / src_dp_size;
+  const int32_t dst_world_size = worker_clients_num_;
   int32_t dst_tp_size = dst_world_size / dp_size_;
+
+#if defined(USE_MLU)
+  if (options_.enable_mla() && (src_dp_size != static_cast<int32_t>(dp_size_) ||
+                                src_tp_size != dst_tp_size)) {
+    LOG(ERROR) << "MLA PD pull only supports homogeneous topology"
+               << ", src_dp_size=" << src_dp_size
+               << ", src_tp_size=" << src_tp_size
+               << ", dst_dp_size=" << dp_size_
+               << ", dst_tp_size=" << dst_tp_size;
+    return false;
+  }
+#endif
 
   std::vector<bool> results;
   results.reserve(dst_tp_size);
@@ -714,6 +751,15 @@ bool LLMEngine::pull_kv_blocks(const int32_t src_dp_size,
     // worker.
     int32_t src_dp_worker_rank = dst_worker_rank % src_tp_size;
     int32_t src_worker_rank = src_dp_rank * src_tp_size + src_dp_worker_rank;
+    if (dst_worker_rank >= static_cast<int32_t>(worker_clients_num_) ||
+        src_worker_rank >= src_world_size) {
+      LOG(ERROR) << "pull_kv_blocks worker rank out of range"
+                 << ", src_worker_rank=" << src_worker_rank
+                 << ", src_world_size=" << src_world_size
+                 << ", dst_worker_rank=" << dst_worker_rank
+                 << ", dst_world_size=" << worker_clients_num_;
+      return false;
+    }
     results.push_back(worker_clients_[dst_worker_rank]->pull_kv_blocks(
         src_cluster_ids[src_worker_rank],
         src_addrs[src_worker_rank],
