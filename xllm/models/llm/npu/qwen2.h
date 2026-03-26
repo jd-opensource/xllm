@@ -75,6 +75,16 @@ class QWen2ForCausalLMImpl : public LlmForCausalLMImplBase<QWen2Model> {
  public:
   QWen2ForCausalLMImpl(const ModelContext& context)
       : LlmForCausalLMImplBase<QWen2Model>(context) {}
+
+  torch::Tensor pooler(const torch::Tensor& hidden_states,
+                       const torch::Tensor& seleted_idxes) {
+    auto h = hidden_states;
+    if (seleted_idxes.defined()) {
+      h = h.index_select(/*dim=*/0, seleted_idxes);
+    }
+    return torch::nn::functional::normalize(
+        h, torch::nn::functional::NormalizeFuncOptions().p(2).dim(1));
+  }
 };
 TORCH_MODULE(QWen2ForCausalLM);
 
