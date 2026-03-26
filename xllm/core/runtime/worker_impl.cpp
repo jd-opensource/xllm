@@ -169,7 +169,7 @@ bool WorkerImpl::allocate_kv_cache(
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
   const bool enable_linear_attention =
-      context_.get_model_args().full_attention_interval() > 1;
+      has_linear_attention_layers(context_.get_model_args());
   const bool enable_lighting_indexer =
       context_.get_model_args().index_n_heads() > 0;
   CHECK(!(enable_linear_attention && enable_lighting_indexer))

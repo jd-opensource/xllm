@@ -177,7 +177,7 @@ Sequence::Sequence(const Sequence& other)
       num_prompt_tokens_(other.num_prompt_tokens_),
       onerec_state_(other.onerec_state_),
       volatile_num_prompt_tokens_(other.volatile_num_prompt_tokens_),
-      embedding_id_(other.embedding_id_),
+      embedding_block_(other.embedding_block_),
       request_id_(other.request_id_),
       finished_(other.finished_),
       finish_status_invalidated_(other.finish_status_invalidated_),
@@ -570,10 +570,6 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
 
 void Sequence::add_kv_blocks(const std::vector<Block>& blocks) {
   kv_state_.add_kv_blocks(blocks);
-  // use the last prefill block id as the embedding id
-  if (embedding_id_ == -1) {
-    embedding_id_ = blocks.back().id();
-  }
 }
 
 void Sequence::add_host_kv_blocks(const std::vector<Block>& blocks) {

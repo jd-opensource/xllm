@@ -16,6 +16,7 @@ limitations under the License.
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <ostream>
@@ -181,6 +182,7 @@ struct ModelArgs {
   PROPERTY(int32_t, linear_num_value_heads) = 0;
   PROPERTY(int32_t, shared_expert_intermediate_size) = 0;
   PROPERTY(float, partial_rotary_factor) = 0.0f;
+  PROPERTY(std::vector<std::string>, layer_types) = {};
 
   // Vision model's dropout
   PROPERTY(float, mm_dropout) = 0.0f;
@@ -420,6 +422,36 @@ struct ModelArgs {
   PROPERTY(int64_t, base_image_seq_len) = 0;
   PROPERTY(int64_t, max_image_seq_len) = 0;
 };
+
+// Qwen hybrid models may describe full-attention layers explicitly via
+// layer_types or implicitly via full_attention_interval.
+inline bool is_full_attention_layer(const ModelArgs& args, int64_t layer_id) {
+  const auto& hybrid_layer_types = args.layer_types();
+  if (layer_id >= 0 &&
+      layer_id < static_cast<int64_t>(hybrid_layer_types.size())) {
+    const auto& layer_type = hybrid_layer_types[layer_id];
+    return layer_type == "full_attention" || layer_type == "attention";
+  }
+
+  int32_t attention_interval = args.full_attention_interval();
+  if (attention_interval <= 0) {
+    attention_interval = 4;
+  }
+  return (layer_id + 1) % attention_interval == 0;
+}
+
+inline bool has_linear_attention_layers(const ModelArgs& args) {
+  const auto& hybrid_layer_types = args.layer_types();
+  if (!hybrid_layer_types.empty()) {
+    return std::any_of(hybrid_layer_types.begin(),
+                       hybrid_layer_types.end(),
+                       [](const std::string& layer_type) {
+                         return layer_type != "full_attention" &&
+                                layer_type != "attention";
+                       });
+  }
+  return args.full_attention_interval() > 1;
+}
 
 inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {
   os << "ModelArgs: [model_type: " << args.model_type();

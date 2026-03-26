@@ -15,24 +15,18 @@ limitations under the License.
 
 #pragma once
 
-#include "layers/npu_torch/qwen3_next_gated_delta_net.h"
-#include "layers/npu_torch/qwen3_next_hybrid_decoder_layer_base.h"
+#include "layers/npu_torch/qwen3_5_gated_delta_net.h"
+#include "layers/npu_torch/qwen3_next_decoder_layer_impl.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen3NextDecoderLayerImpl : public Qwen3HybridDecoderLayerImplBase {
+class Qwen3_5DecoderLayerImpl : public Qwen3NextDecoderLayerImpl {
  public:
-  explicit Qwen3NextDecoderLayerImpl(const ModelContext& context,
-                                     int32_t layer_id);
-
- protected:
-  Qwen3NextDecoderLayerImpl(
-      const ModelContext& context,
-      int32_t layer_id,
-      std::shared_ptr<Qwen3GatedDeltaNetBaseImpl> linear_attention_module);
+  explicit Qwen3_5DecoderLayerImpl(const ModelContext& context,
+                                   int32_t layer_id);
 };
-TORCH_MODULE(Qwen3NextDecoderLayer);
+TORCH_MODULE(Qwen3_5DecoderLayer);
 
 }  // namespace layer
 }  // namespace xllm

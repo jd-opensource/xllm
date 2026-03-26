@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 #include "util/slice.h"
@@ -127,6 +128,31 @@ void update_kv_seq_lens_and_max(std::vector<int32_t>& kv_seq_lens_vec,
 // Builds q_cu_seq_lens tensor from params.get_q_seq_len(i).
 torch::Tensor build_q_cu_seq_lens_tensor(const ModelInputParams& params,
                                          torch::Device device = torch::kCPU);
+
+namespace draftProbs {
+
+// Compress draft probs to selected-only format [batch_size] for cache storage.
+// Input draft_probs may be dense [batch_size, vocab_size] or selected-only
+// [batch_size] / [batch_size, 1].
+torch::Tensor compress_for_cache(const torch::Tensor& draft_probs,
+                                 const torch::Tensor& draft_token_ids);
+
+// Build validate inputs from per-step draft token ids/probs.
+// Returns:
+//   - draft_token_ids: [batch_size, n_speculative_tokens]
+//   - draft_probs:
+//       * selected-only [batch_size, n_speculative_tokens], if
+//         enable_opt_validate_probs=true
+//       * recovered-dense [batch_size, n_speculative_tokens, vocab_size], if
+//         enable_opt_validate_probs=false
+std::pair<torch::Tensor, torch::Tensor> build_validate_tensors(
+    const std::vector<torch::Tensor>& draft_token_ids_steps,
+    const std::vector<torch::Tensor>& draft_probs_steps,
+    int32_t batch_size,
+    int32_t vocab_size,
+    bool enable_opt_validate_probs);
+
+}  // namespace draftProbs
 
 }  // namespace specBuilder
 

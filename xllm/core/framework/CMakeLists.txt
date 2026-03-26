@@ -57,3 +57,18 @@ cc_library(
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
 )
+
+cc_test(
+  NAME
+    hf_model_loader_test
+  SRCS
+    hf_model_loader_test.cpp
+  DEPS
+    :model_loader
+    :xllm_server
+    GTest::gtest_main
+)
+
+# Resolve static link order between xtensor and xllm_server for this test target.
+target_link_libraries(hf_model_loader_test PRIVATE
+  "$<LINK_GROUP:RESCAN,xtensor,xllm_server>")

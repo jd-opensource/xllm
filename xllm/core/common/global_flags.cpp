@@ -400,8 +400,9 @@ DEFINE_bool(speculative_suffix_use_tree_spec,
 
 DEFINE_bool(enable_opt_validate_probs,
             false,
-            "Whether to use optimized draft_probs handling in speculative "
-            "validation.");
+            "Whether validate uses selected-only draft_probs [B,S] directly. "
+            "If false, selected-only cache values are restored to dense "
+            "[B,S,V].");
 
 DEFINE_bool(enable_atb_spec_kernel,
             false,

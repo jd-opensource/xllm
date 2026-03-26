@@ -196,7 +196,7 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   head_dim_ = args_.head_dim();
   dtype_ = util::parse_dtype(args_.dtype(), options_.devices()[0]);
   // For qwen3_next hybrid attention.
-  if (args_.full_attention_interval() > 1) {
+  if (has_linear_attention_layers(args_)) {
     const int64_t linear_n_k_heads = args_.linear_num_key_heads();
     const int64_t linear_n_v_heads = args_.linear_num_value_heads();
     n_local_linear_k_heads_ =
@@ -538,7 +538,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no memory for kv cache";
   const int32_t block_size = options_.block_size();
   bool enable_lighting_indexer = args_.index_n_heads() > 1;
-  bool enable_gdn_attention = args_.full_attention_interval() > 1;
+  bool enable_gdn_attention = has_linear_attention_layers(args_);
 
   // init kv cache for each worker
   std::vector<std::vector<int64_t>> kv_cache_shape;

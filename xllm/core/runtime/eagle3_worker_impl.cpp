@@ -17,10 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "common/metrics.h"
+#include "common/global_flags.h"
 #include "framework/model_loader.h"
-#include "framework/sampling/rejection_sampler.h"
-#include "util/utils.h"
 
 namespace xllm {
 
@@ -51,7 +49,7 @@ Eagle3WorkerImpl::Eagle3WorkerImpl(const ParallelArgs& parallel_args,
                     options,
                     eagle3_main_options(options),
                     eagle3_draft_options(options),
-                    /*enable_opt_validate_probs=*/true) {}
+                    FLAGS_enable_opt_validate_probs) {}
 
 bool Eagle3WorkerImpl::init_model(const std::string& model_weights_path,
                                   int32_t random_seed,
@@ -91,98 +89,14 @@ int64_t Eagle3WorkerImpl::get_embedding_placeholder_size() {
 
 void Eagle3WorkerImpl::process_draft_sample_output(
     SampleOutput& sample_output) {
-  if (sample_output.probs.defined()) {
-    auto selected_probs =
-        sample_output.probs
-            .gather(
-                /*dim=*/-1, sample_output.next_tokens.unsqueeze(-1))
-            .squeeze(-1);
-    sample_output.probs = selected_probs;  // [batch_size]
-  }
+  // Keep probability compression behavior fully aligned with MTP.
+  MTPWorkerImpl::process_draft_sample_output(sample_output);
 
   // EAGLE-3 specific: map draft token IDs to target token IDs.
   if (hot_token_id_.defined()) {
     sample_output.next_tokens =
         hot_token_id_.index_select(0, sample_output.next_tokens);
   }
-}
-
-SampleOutput Eagle3WorkerImpl::validate(
-    const SamplingParameters& sampling_params,
-    const std::vector<ForwardOutput>& draft_outputs,
-    const ForwardOutput& target_output) {
-  const int32_t num_target_tokens =
-      target_output.sample_output.next_tokens.numel();
-  const int32_t num_val_tokens = options_.num_speculative_tokens() + 1;
-  CHECK_EQ(num_target_tokens % num_val_tokens, 0);
-  const int32_t batch_size = num_target_tokens / num_val_tokens;
-  const int32_t vocab_size = target_output.logits.size(/*dim=*/-1);
-
-  using torch::indexing::None;
-  using ISlice = torch::indexing::Slice;
-  auto bonus_token_ids =
-      target_output.sample_output.next_tokens
-          .index({"...", ISlice(num_val_tokens - 1, None, num_val_tokens)})
-          .view({-1, 1});
-
-  // [batch_size, n_speculative_tokens, vocab_size]
-  auto target_logits =
-      target_output.logits.view({batch_size, num_val_tokens, vocab_size});
-
-  // prepare input for rejection sampling
-  // For EAGLE-3, draft_token_ids are already mapped to target token IDs
-  // via hot_token_id_ in step_decode
-  // draft_output.sample_output.probs has been extracted to [batch_size] in
-  // step_decode
-  std::vector<torch::Tensor> draft_token_ids_vec;
-  std::vector<torch::Tensor> selected_draft_probs_vec;
-  selected_draft_probs_vec.reserve(draft_outputs.size());
-  for (size_t i = 0; i < draft_outputs.size(); ++i) {
-    const auto& draft_output = draft_outputs[i];
-    auto draft_token_ids = draft_output.sample_output.next_tokens;
-    auto selected_probs = draft_output.sample_output.probs;
-    selected_draft_probs_vec.push_back(selected_probs.view({batch_size, 1}));
-    draft_token_ids_vec.push_back(draft_token_ids.view({batch_size, 1}));
-  }
-
-  // Optimized path for Eagle3:
-  // keep only selected draft token probabilities [B, S].
-  auto draft_probs = torch::cat(selected_draft_probs_vec, /*dim=*/1);
-
-  // concatenate the draft token ids along the last dimension
-  const auto draft_token_ids =
-      torch::cat(draft_token_ids_vec, /*dim=*/1).to(bonus_token_ids);
-
-  auto rejection_sampler =
-      std::make_unique<RejectionSampler>(sampling_params.do_sample,
-                                         sampling_params.all_random_sample,
-                                         sampling_params.all_greedy_sample,
-                                         target_output.logprobs,
-                                         target_output.max_top_logprobs,
-                                         rate_controller_,
-                                         enable_fused_kernel_);
-
-  // get the accepted tokens
-  SampleOutput sample_output =
-      rejection_sampler->forward(draft_token_ids,
-                                 draft_probs,
-                                 target_logits,
-                                 bonus_token_ids,
-                                 /*mask_out_rejected_tokens=*/true);
-
-  // process embedding
-  auto embeddings = target_output.sample_output.embeddings;
-  sample_output.embeddings =
-      embeddings.view({batch_size, num_val_tokens, embeddings.size(-1)});
-
-  // metrics
-  torch::Tensor mask = (sample_output.next_tokens == -1).to(torch::kInt64);
-  size_t count = mask.sum().item<int64_t>();
-  size_t num_draft_tokens = num_target_tokens - batch_size;
-  COUNTER_ADD(speculative_num_draft_tokens_total, num_draft_tokens);
-  COUNTER_ADD(speculative_num_accepted_tokens_total, num_draft_tokens - count);
-
-  return sample_output;
 }
 
 }  // namespace xllm

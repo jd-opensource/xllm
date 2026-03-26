@@ -87,7 +87,7 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
                                 const ForwardOutput& target_output);
 
   // Hook for algorithm-specific draft output post-processing during decode.
-  // Default MTP behavior may compress probs for validate.
+  // Default MTP behavior always compresses probs for cache storage.
   virtual void process_draft_sample_output(SampleOutput& sample_output);
 
   SampleOutput validate(const SamplingParameters& sampling_params,
@@ -125,7 +125,8 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
   // Embedding cache for speculative decoding
   std::shared_ptr<EmbeddingCache> embedding_cache_;
 
-  // Whether to use optimized draft_probs handling in validation.
+  // Whether validation directly uses selected-only draft_probs [B, S].
+  // If false, selected-only cache values are restored to dense [B, S, V].
   bool enable_opt_validate_probs_ = false;
 
 #if defined(USE_NPU)
