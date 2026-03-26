@@ -11,7 +11,31 @@ message SessionInfo {
   string addr = 1;
 }
 
+enum BufferKind {
+  BUFFER_KIND_UNKNOWN = 0;
+  BUFFER_KIND_KEY = 1;
+  BUFFER_KIND_VALUE = 2;
+  BUFFER_KIND_INDEX = 3;
+}
+
+message BufferDesc {
+  int32 layer_id = 1;
+  BufferKind kind = 2;
+  uint64 addr = 3;
+  uint64 len = 4;
+  int64 bytes_per_block = 5;
+}
+
+message RegisteredMemoryInfo {
+  repeated uint64 addrs = 1;
+  repeated uint64 lens = 2;
+  int64 size_per_block = 3;
+  int64 num_layers = 4;
+  repeated BufferDesc buffers = 5;
+}
+
 service MooncakeTransferEngineService {
   rpc OpenSession(SessionInfo) returns (Status) {}
   rpc CloseSession(SessionInfo) returns (Status) {}
+  rpc GetRegisteredMemory(Empty) returns (RegisteredMemoryInfo) {}
 }

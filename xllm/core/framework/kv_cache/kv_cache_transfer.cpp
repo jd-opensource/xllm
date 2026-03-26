@@ -18,11 +18,14 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "common/global_flags.h"
+#include "util/net.h"
 
 #if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 
 #include "llm_data_dist_transfer.h"
+#include "mooncake_kv_cache_transfer.h"
+#elif defined(USE_MLU)
 #include "mooncake_kv_cache_transfer.h"
 #endif
 
@@ -245,11 +248,14 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
 
   int32_t device_id = device.index();
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
   LOG(INFO) << "Create KVCacheTransfer for " << transfer_type << "flag"
             << FLAGS_kv_cache_transfer_type;
+#if defined(USE_NPU)
   if (transfer_type == "LlmDataDist") {
-    transfer = std::make_shared<LlmDataDistTransfer>(device_ip,
+    const std::string resolved_device_ip =
+        device_ip.empty() ? net::get_local_ip_addr() : device_ip;
+    transfer = std::make_shared<LlmDataDistTransfer>(resolved_device_ip,
                                                      transfer_listen_port,
                                                      instance_role,
                                                      model_type,
@@ -259,8 +265,11 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
 
     transfer->initialize(device_id);
     transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);
-  } else if (transfer_type == "Mooncake") {
+  } else
+#endif
+      if (transfer_type == "Mooncake") {
     std::shared_ptr<MooncakeKVCacheTransferBase> mooncake_transfer;
+#if defined(USE_NPU)
     if (FLAGS_enable_xtensor) {
       auto xtensor_transfer = std::make_shared<MooncakeKVCacheTransferXTensor>(
           device_id, transfer_listen_port, device);
@@ -275,6 +284,10 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
       mooncake_transfer = std::make_shared<MooncakeKVCacheTransferNative>(
           device_id, transfer_listen_port, device, model_type);
     }
+#else
+    mooncake_transfer = std::make_shared<MooncakeKVCacheTransferNative>(
+        device_id, transfer_listen_port, device, model_type);
+#endif
 
     mooncake_transfer->initialize(device_id);
     mooncake_transfer->allocate_kv_cache(
@@ -283,7 +296,12 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
 
     transfer = mooncake_transfer;
   } else {
+#if defined(USE_MLU)
+    LOG(FATAL) << "Unsupported KVCacheTransfer type for MLU backend: "
+               << transfer_type << ". Use Mooncake for PD on MLU.";
+#else
     LOG(FATAL) << "Unsupported KVCacheTransfer type : " << transfer_type;
+#endif
   }
 #endif
 

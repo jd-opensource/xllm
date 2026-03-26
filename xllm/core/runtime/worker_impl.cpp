@@ -21,6 +21,7 @@ limitations under the License.
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+
 #if defined(USE_NPU)
 #include "acl/acl.h"
 #include "kernels/npu/xllm_ops/xllm_ops_api.h"
@@ -331,7 +332,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       context_.get_model_args().index_n_heads() > 0;
   kv_cache_transfer_ = KVCacheTransferFactory::create(
       FLAGS_kv_cache_transfer_type,
-      options_.device_ip().value(),
+      options_.device_ip().value_or(""),
       options_.transfer_listen_port(),
       options_.instance_role(),
       device_,
@@ -379,7 +380,6 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
 #endif
 
 void WorkerImpl::get_device_info(std::string& device_ip, uint16_t& port) {
-  // device_ip = options_.device_ip().value();
   device_ip = net::get_local_ip_addr();
   port = options_.transfer_listen_port();
 }
@@ -388,23 +388,31 @@ void WorkerImpl::get_cache_info(uint64_t& cluster_id,
                                 std::string& addr,
                                 int64_t& k_cache_id,
                                 int64_t& v_cache_id) {
-#if defined(USE_NPU)
+  if (!kv_cache_transfer_) {
+    LOG(ERROR) << "KV cache transfer is not initialized.";
+    cluster_id = 0;
+    addr.clear();
+    k_cache_id = 0;
+    v_cache_id = 0;
+    return;
+  }
   kv_cache_transfer_->get_cache_info(cluster_id, addr, k_cache_id, v_cache_id);
-#endif
 }
 
 bool WorkerImpl::link_cluster(const std::vector<uint64_t>& cluster_ids,
                               const std::vector<std::string>& addrs,
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports) {
-#if defined(USE_NPU)
+  if (!kv_cache_transfer_) {
+    LOG(ERROR) << "KV cache transfer is not initialized.";
+    return false;
+  }
   for (int32_t i = 0; i < cluster_ids.size(); ++i) {
     if (!kv_cache_transfer_->link_cluster(
             cluster_ids[i], addrs[i], device_ips[i], ports[i])) {
       return false;
     }
   }
-#endif
   return true;
 }
 
@@ -412,14 +420,16 @@ bool WorkerImpl::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                 const std::vector<std::string>& addrs,
                                 const std::vector<std::string>& device_ips,
                                 const std::vector<uint16_t>& ports) {
-#if defined(USE_NPU)
+  if (!kv_cache_transfer_) {
+    LOG(ERROR) << "KV cache transfer is not initialized.";
+    return false;
+  }
   for (int32_t i = 0; i < cluster_ids.size(); ++i) {
     if (!kv_cache_transfer_->unlink_cluster(
             cluster_ids[i], addrs[i], device_ips[i], ports[i])) {
       return false;
     }
   }
-#endif
   return true;
 }
 
@@ -1066,15 +1076,16 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
     int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks) {
-#if defined(USE_NPU)
+  if (!kv_cache_transfer_) {
+    LOG(ERROR) << "KV cache transfer is not initialized.";
+    return folly::makeSemiFuture(false);
+  }
   return kv_cache_transfer_->pull_kv_blocks_async(src_cluster_id,
                                                   src_addr,
                                                   src_k_cache_id,
                                                   src_v_cache_id,
                                                   src_blocks,
                                                   dst_blocks);
-#endif
-  return false;
 }
 
 uint32_t WorkerImpl::transfer_kv_blocks(

@@ -71,6 +71,33 @@ void validate_flags(const std::string& model_type) {
     LOG(FATAL) << "Currently, block_size must be 16 for MLU backend, we will "
                   "support other block sizes in the future.";
   }
+  if (FLAGS_enable_disagg_pd) {
+    if (FLAGS_backend != "llm") {
+      LOG(FATAL) << "MLU PD only supports the General LLM backend for now.";
+    }
+    if (FLAGS_kv_cache_transfer_type != "Mooncake") {
+      LOG(FATAL) << "MLU PD only supports kv_cache_transfer_type=Mooncake.";
+    }
+    if (FLAGS_kv_cache_transfer_mode != "PULL") {
+      LOG(FATAL) << "MLU PD only supports kv_cache_transfer_mode=PULL for now.";
+    }
+    if (FLAGS_kv_cache_dtype != "auto") {
+      LOG(FATAL) << "MLU PD only supports kv_cache_dtype=auto for now.";
+    }
+    if (FLAGS_enable_prefix_cache) {
+      LOG(FATAL) << "MLU PD does not support prefix cache for now.";
+    }
+    if (FLAGS_enable_chunked_prefill) {
+      LOG(FATAL) << "MLU PD does not support chunked prefill for now.";
+    }
+    if (FLAGS_enable_pd_ooc) {
+      LOG(FATAL) << "MLU PD does not support PD OOC for now.";
+    }
+    if (xllm::util::is_mla_model_type(model_type)) {
+      LOG(INFO) << "MLU PD MLA mode enabled: only homogeneous PD topology is "
+                   "supported at runtime with Mooncake PULL.";
+    }
+  }
 #endif
 
 #if defined(USE_NPU)
@@ -213,7 +240,6 @@ int run() {
       .enable_prefill_sp(FLAGS_enable_prefill_sp)
       .master_node_addr(FLAGS_master_node_addr)
       .instance_role(InstanceRole(FLAGS_instance_role))
-      .device_ip("")
       .transfer_listen_port(FLAGS_transfer_listen_port)
       .nnodes(FLAGS_nnodes)
       .node_rank(FLAGS_node_rank)
