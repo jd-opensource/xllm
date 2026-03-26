@@ -17,6 +17,9 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+
 #include "core/platform/device.h"
 #if defined(USE_NPU)
 #include "models/model_registry.h"
