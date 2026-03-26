@@ -17,6 +17,9 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
+
 #include "core/platform/device.h"
 
 namespace xllm {
@@ -69,6 +72,46 @@ TEST(HFModelLoaderTest, KeepLegacyFp8ConfigUnchanged) {
   ASSERT_TRUE(load_quant_cfg(reader, quant_args));
   EXPECT_EQ(quant_args.quant_method(), kQuantMethodFp8);
   EXPECT_FALSE(quant_args.activation_dynamic());
+}
+
+class HFModelLoaderConfigTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    test_dir_ = std::filesystem::temp_directory_path() / "hf_model_loader_test";
+    if (std::filesystem::exists(test_dir_)) {
+      std::filesystem::remove_all(test_dir_);
+    }
+    std::filesystem::create_directories(test_dir_);
+  }
+
+  void TearDown() override {
+    if (std::filesystem::exists(test_dir_)) {
+      std::filesystem::remove_all(test_dir_);
+    }
+  }
+
+  void write_file(const std::filesystem::path& path, const std::string& data) {
+    std::ofstream file(path);
+    ASSERT_TRUE(file.is_open());
+    file << data;
+    file.close();
+  }
+
+  std::filesystem::path test_dir_;
+};
+
+TEST_F(HFModelLoaderConfigTest, TreatsTopLevelDtypeAsTorchDtype) {
+  write_file(test_dir_ / "config.json", R"json(
+    {
+      "model_type": "qwen3",
+      "dtype": "bfloat16"
+    }
+  )json");
+  write_file(test_dir_ / "model.safetensors", "");
+
+  HFModelLoader loader(test_dir_.string());
+  EXPECT_EQ(loader.model_args().dtype(), "bfloat16");
+  EXPECT_EQ(loader.quant_args().torch_dtype(), "bfloat16");
 }
 
 }  // namespace xllm
