@@ -240,13 +240,13 @@ void NpuQwen2DecoderLayerImpl::build_fia_index_tensors(
     int64_t total_tokens) {
   CHECK_GT(input_params.num_sequences, 0)
       << "FIA prefill requires num_sequences > 0";
-  CHECK_EQ(input_params.kv_seq_lens_vec.size(),
+  CHECK_EQ(input_params.q_seq_lens_vec.size(),
            static_cast<size_t>(input_params.num_sequences))
-      << "kv_seq_lens_vec size mismatch for FIA prefill";
+      << "q_seq_lens_vec size mismatch for FIA prefill";
   CHECK_GT(total_tokens, 0) << "FIA prefill requires non-empty hidden states";
 
   const int32_t target_seq_len = *std::max_element(
-      input_params.kv_seq_lens_vec.begin(), input_params.kv_seq_lens_vec.end());
+      input_params.q_seq_lens_vec.begin(), input_params.q_seq_lens_vec.end());
   CHECK_GT(target_seq_len, 0)
       << "FIA prefill requires target_seq_len > 0";
 
@@ -256,7 +256,7 @@ void NpuQwen2DecoderLayerImpl::build_fia_index_tensors(
 
   int64_t source_token_offset = 0;
   for (int32_t seq_idx = 0; seq_idx < input_params.num_sequences; ++seq_idx) {
-    const int32_t seq_len = input_params.kv_seq_lens_vec[seq_idx];
+    const int32_t seq_len = input_params.q_seq_lens_vec[seq_idx];
     CHECK_GT(seq_len, 0) << "FIA sequence length must be positive";
     CHECK_LE(seq_len, target_seq_len)
         << "FIA sequence length must be <= target_seq_len";
