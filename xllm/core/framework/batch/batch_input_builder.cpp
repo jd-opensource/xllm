@@ -121,6 +121,10 @@ void BatchInputBuilder::process_sequences_multithreaded() {
   thread_builder_states.resize(threads_num);
   thread_write_block_ids.resize(threads_num);
 
+  for (auto& thread_state : thread_builder_states) {
+    thread_state.batch_forward_type = state_.batch_forward_type;
+  }
+
   // parallel processing function
   auto process_sequences_range =
       [&](size_t thread_start_idx,
