@@ -550,7 +550,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 #endif
   c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
   processed_input = input.to(device_, dtype_);
-  
+
 #if defined(USE_NPU)
   CpPrefillInputs tmp_cp_inputs;
   if (parallel_args_.cp_size() > 1 &&
@@ -569,7 +569,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
         /*is_prefill=*/input.input_params.batch_forward_type.is_prefill());
     processed_input.input_params.cp_ep_padding_data = cp_ep_padding.build();
   }
-
+#endif
 
   auto& input_params = processed_input.input_params;
 
