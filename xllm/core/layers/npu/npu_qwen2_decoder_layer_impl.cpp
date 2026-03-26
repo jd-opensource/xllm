@@ -249,8 +249,6 @@ void NpuQwen2DecoderLayerImpl::build_fia_index_tensors(
       input_params.kv_seq_lens_vec.begin(), input_params.kv_seq_lens_vec.end());
   CHECK_GT(target_seq_len, 0)
       << "FIA prefill requires target_seq_len > 0";
-  CHECK_LE(target_seq_len, kFiaMaskSeqLen)
-      << "FIA target_seq_len must be <= " << kFiaMaskSeqLen;
 
   std::vector<int32_t> padding_idx(input_params.num_sequences * target_seq_len);
   std::vector<int32_t> unpadding_idx;
@@ -379,9 +377,6 @@ void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
 
   auto* effective_attn_mask = &attn_mask;
   if (is_prefill && prefill_param_.isFIA) {
-    CHECK_LE(input_params.kv_max_seq_len, kFiaMaskSeqLen)
-        << "FIA prefill only supports kv_max_seq_len <= " << kFiaMaskSeqLen
-        << ", but got " << input_params.kv_max_seq_len;
     effective_attn_mask = &fia_attn_mask_;
     build_fia_index_tensors(input_params, x.size(0));
   }
