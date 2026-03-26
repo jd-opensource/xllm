@@ -245,26 +245,29 @@ void NpuQwen2DecoderLayerImpl::build_fia_index_tensors(
       << "kv_seq_lens_vec size mismatch for FIA prefill";
   CHECK_GT(total_tokens, 0) << "FIA prefill requires non-empty hidden states";
 
-  std::vector<int32_t> padding_idx(input_params.num_sequences * kFiaMaskSeqLen);
+  const int32_t target_seq_len = *std::max_element(
+      input_params.kv_seq_lens_vec.begin(), input_params.kv_seq_lens_vec.end());
+  CHECK_GT(target_seq_len, 0)
+      << "FIA prefill requires target_seq_len > 0";
+  CHECK_LE(target_seq_len, kFiaMaskSeqLen)
+      << "FIA target_seq_len must be <= " << kFiaMaskSeqLen;
+
+  std::vector<int32_t> padding_idx(input_params.num_sequences * target_seq_len);
   std::vector<int32_t> unpadding_idx;
   unpadding_idx.reserve(total_tokens);
 
   int64_t source_token_offset = 0;
   for (int32_t seq_idx = 0; seq_idx < input_params.num_sequences; ++seq_idx) {
     const int32_t seq_len = input_params.kv_seq_lens_vec[seq_idx];
-    CHECK_GE(seq_len, 0) << "FIA sequence length must be non-negative";
-    CHECK_LE(seq_len, kFiaMaskSeqLen)
-        << "FIA sequence length must be <= " << kFiaMaskSeqLen;
+    CHECK_GT(seq_len, 0) << "FIA sequence length must be positive";
+    CHECK_LE(seq_len, target_seq_len)
+        << "FIA sequence length must be <= target_seq_len";
     CHECK_LE(source_token_offset + seq_len, total_tokens)
         << "FIA sequence lengths exceed current hidden-state tokens";
 
-    const int32_t padded_offset = seq_idx * kFiaMaskSeqLen;
-    const int32_t fallback_idx =
-        seq_len > 0
-            ? static_cast<int32_t>(source_token_offset + seq_len - 1)
-            : static_cast<int32_t>(std::min<int64_t>(source_token_offset,
-                                                     total_tokens - 1));
-    for (int32_t pos = 0; pos < kFiaMaskSeqLen; ++pos) {
+    const int32_t padded_offset = seq_idx * target_seq_len;
+    const int32_t fallback_idx = static_cast<int32_t>(source_token_offset);
+    for (int32_t pos = 0; pos < target_seq_len; ++pos) {
       const int32_t padded_idx = padded_offset + pos;
       if (pos < seq_len) {
         padding_idx[padded_idx] =
