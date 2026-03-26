@@ -131,9 +131,9 @@ std::vector<VideoChunkMetadata> KimiK25ImageProcessor::split_video_chunks(
   std::vector<VideoChunkMetadata> chunks;
 
   torch::Tensor frame_indices = sample_frames(video_meta);
-  std::vector<int> indices(
-      frame_indices.data_ptr<int>(),
-      frame_indices.data_ptr<int>() + frame_indices.numel());
+  std::vector<int64_t> indices(
+      frame_indices.data_ptr<int64_t>(),
+      frame_indices.data_ptr<int64_t>() + frame_indices.numel());
 
   int chunk_size = config_.temporal_merge_kernel_size;
   int num_chunks = (indices.size() + chunk_size - 1) / chunk_size;

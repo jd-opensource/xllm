@@ -128,7 +128,7 @@ class KimiK2_5_VLInputProcessor : public InputProcessor {
   }
 
   void process(std::string& prompt, const MMData& mm_data) override {
-    prompt = update_raw_text(prompt, mm_data);
+    // prompt = update_raw_text(prompt, mm_data); TODO: video logic
 
     torch::Tensor image_grid_thw;
     if (auto res = mm_data.get<torch::Tensor>("image_grid_thw"))
@@ -152,8 +152,8 @@ class KimiK2_5_VLInputProcessor : public InputProcessor {
       total_video_token += token_count;
     }
 
-    size_t total_token_len = (total_image_token + total_video_token) *
-                             media_pad_token_.size();
+    size_t total_token_len =
+        (total_image_token + total_video_token) * media_pad_token_.size();
     std::string data;
     data.reserve(prompt.size() + total_token_len);
 
@@ -192,9 +192,9 @@ class KimiK2_5_VLInputProcessor : public InputProcessor {
       data.append(media_prompt_suffix_);
 
       ++(*index);
-      begin = pair.second +
-              (pair.first == TokenType::IMAGE ? image_prompt_.size()
-                                              : video_prompt_.size());
+      begin =
+          pair.second + (pair.first == TokenType::IMAGE ? image_prompt_.size()
+                                                        : video_prompt_.size());
       pair = find_media_prompt(prompt, begin);
     }
 
@@ -253,7 +253,7 @@ class KimiK2_5_VLInputProcessor : public InputProcessor {
     return token_counts;
   }
 
-  std::string update_raw_text(const std::string& prompt,
+  /*std::string update_raw_text(const std::string& prompt,
                               const MMData& mm_data) const {
     if (!mm_data.valid() || !mm_data.hold<MMItemVec>()) {
       return prompt;
@@ -297,13 +297,13 @@ class KimiK2_5_VLInputProcessor : public InputProcessor {
       if (placeholder_pos == std::string::npos) {
         break;
       }
-      updated_prompt.append(prompt, prompt_begin, placeholder_pos - prompt_begin);
-      updated_prompt.append(video_prompts[video_index++]);
+      updated_prompt.append(prompt, prompt_begin, placeholder_pos -
+  prompt_begin); updated_prompt.append(video_prompts[video_index++]);
       prompt_begin = placeholder_pos + video_placeholder_.size();
     }
     updated_prompt.append(prompt, prompt_begin, std::string::npos);
     return updated_prompt;
-  }
+  }*/
 
   std::pair<TokenType, size_t> find_media_prompt(const std::string& prompt,
                                                  size_t begin) const {
@@ -1116,17 +1116,18 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     std::optional<KimiK2_5_VLImageInputs> image_input;
     std::optional<KimiK2_5_VLVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
-    auto merge_size = model_args_.mm_image_merge_size() > 0
-                          ? model_args_.mm_image_merge_size()
-                          : std::max<int64_t>(model_args_.mm_spatial_merge_size(),
-                                              int64_t(2));
+    auto merge_size =
+        model_args_.mm_image_merge_size() > 0
+            ? model_args_.mm_image_merge_size()
+            : std::max<int64_t>(model_args_.mm_spatial_merge_size(),
+                                int64_t(2));
     MMDict multimodal_embeds;
     if (image_input) {
       // visual
       auto image_embeds = visual_(image_input->pixel_values.to(options_),
                                   image_input->image_grid_thw,
                                   input_params);
-      image_embeds = apply_mm_projector(image_embeds);                           
+      image_embeds = apply_mm_projector(image_embeds);
       auto image_tokens =
           (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
               .cpu()
@@ -1334,8 +1335,9 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
 
   // Kimi-K2.5 uses media_* special tokens instead of Qwen's vision/image/video
   // token family. The official config only exposes media_placeholder_token_id;
-  // the begin/content/end ids come from the tokenizer special token table below.
-  
+  // the begin/content/end ids come from the tokenizer special token table
+  // below.
+
   LOAD_ARG_OR_FUNC(vision_start_token_id, "vision_start_token_id", [&] {
     return int32_t(163602);  // <|media_begin|>
   });
