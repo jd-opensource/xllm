@@ -1061,6 +1061,8 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
       } else {
         batch[dp_rank].process_beam_search_output(result.value(), false);
       }
+      // Keep Batch::sequences_ aligned with SequencesGroup after beam updates.
+      batch[dp_rank].refresh_sequences_from_groups();
     } else {
       LOG(FATAL) << "Failed to execute model, result has no value";
     }
@@ -1115,6 +1117,8 @@ void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
   for (auto i = 0; i < last_batch.size(); i++) {
     last_batch[i].process_sample_output(raw_forward_outputs[i],
                                         options_.enable_schedule_overlap());
+    // Keep Batch::sequences_ aligned with SequencesGroup after beam updates.
+    last_batch[i].refresh_sequences_from_groups();
   }
 }
 

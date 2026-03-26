@@ -1141,6 +1141,10 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
       enable_schedule_overlap ? last_running_sequences_ : running_sequences_;
   std::vector<std::shared_ptr<Request>>& to_be_processed_requests =
       enable_schedule_overlap ? last_running_requests_ : running_requests_;
+  // Beam search may replace Sequence objects inside SequencesGroup.
+  // Always refresh the sequence pointers from requests before dereferencing.
+  refresh_sequences_from_requests(to_be_processed_requests,
+                                  to_be_processed_sequences);
   // update token latency metrics
   update_token_latency_metrics(to_be_processed_sequences);
 
@@ -1174,6 +1178,23 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
   }
   if (!stream_requests.empty()) {
     response_processor_->process_stream_requests(stream_requests);
+  }
+}
+
+void ContinuousScheduler::refresh_sequences_from_requests(
+    const std::vector<std::shared_ptr<Request>>& requests,
+    std::vector<Sequence*>& sequences) const {
+  sequences.clear();
+  for (const auto& request : requests) {
+    if (request == nullptr) {
+      continue;
+    }
+    auto& request_sequences = request->sequences();
+    for (auto& sequence : request_sequences) {
+      if (sequence != nullptr) {
+        sequences.emplace_back(sequence.get());
+      }
+    }
   }
 }
 
@@ -1219,6 +1240,9 @@ std::vector<int64_t> ContinuousScheduler::get_active_activation_in_bytes() {
 
 void ContinuousScheduler::update_memory_metrics(
     std::vector<Sequence*>& sequences) {
+  if (sequences.empty()) {
+    return;
+  }
   std::vector<int64_t> num_occupied_slots = get_num_occupied_slots(sequences);
   std::vector<int64_t> active_activation_size_in_bytes =
       get_active_activation_in_bytes();

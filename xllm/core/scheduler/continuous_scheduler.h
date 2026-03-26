@@ -321,6 +321,10 @@ class ContinuousScheduler : public Scheduler {
 
   void step_with_pd_ooc(std::vector<Batch>& batch);
 
+  void refresh_sequences_from_requests(
+      const std::vector<std::shared_ptr<Request>>& requests,
+      std::vector<Sequence*>& sequences) const;
+
   std::vector<int64_t> get_num_occupied_slots(
       std::vector<Sequence*>& sequences) const;
   std::vector<int64_t> get_active_activation_in_bytes();
