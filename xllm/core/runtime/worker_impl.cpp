@@ -541,18 +541,6 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     processed_input.positions =
         torch::zeros({1}, position_options.device(device_));
     empty_shard = false;
-    LOG(INFO) << "[WorkerImpl::prepare_work_before_execute] "
-              << "stage=empty_shard_materialize_fake_input, rank="
-              << parallel_args_.rank()
-              << ", token_num=" << processed_input.token_ids.numel()
-              << ", num_sequences=" << input_params.num_sequences
-              << ", mm_data_valid=" << input_params.mm_data.valid()
-              << ", batch_forward_type={empty="
-              << input_params.batch_forward_type.is_empty() << ", prefill="
-              << input_params.batch_forward_type.is_prefill() << ", decode="
-              << input_params.batch_forward_type.is_decode()
-              << "}, dp_global_token_nums="
-              << format_int_vector(input_params.dp_global_token_nums);
   }
   if (empty_shard) {
     auto ret = prepare_stream_->synchronize();
