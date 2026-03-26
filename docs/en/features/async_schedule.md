@@ -13,9 +13,9 @@ In the overall architecture, stages 1 and 3 on the CPU side are handled by diffe
 
 ## Usage
 
-xLLM provides the gflags parameter enable_schedule_overlap, which defaults to true. To disable this feature, simply set it to false in xLLM's service startup script, as
+xLLM provides the gflags parameter `enable_schedule_overlap`, which defaults to false. To enable this feature, set it to true in xLLM's service startup script:
 ```shell
---enable_schedule_overlap=false
+--enable_schedule_overlap=true
 ```
 
 ## Performance
