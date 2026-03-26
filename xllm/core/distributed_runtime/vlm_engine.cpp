@@ -26,6 +26,7 @@ limitations under the License.
 #include <chrono>
 #include <cstdlib>
 #include <memory>
+#include <sstream>
 
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
@@ -41,6 +42,33 @@ limitations under the License.
 #include "util/pretty_print.h"
 #include "util/utils.h"
 namespace xllm {
+
+namespace {
+
+std::string format_int_vector(const std::vector<int32_t>& values) {
+  std::ostringstream oss;
+  oss << "[";
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (i > 0) {
+      oss << ", ";
+    }
+    oss << values[i];
+  }
+  oss << "]";
+  return oss.str();
+}
+
+RawForwardInput make_empty_raw_forward_input() {
+  RawForwardInput input;
+  input.batch_forward_type = BatchForwardType();
+  input.max_seq_len = 0;
+  input.q_max_seq_len = 0;
+  input.num_sequences = 0;
+  input.batch_id = UNINITIALIZED_BATCH_ID;
+  return input;
+}
+
+}  // namespace
 
 VLMEngine::VLMEngine(const runtime::Options& options,
                      std::shared_ptr<DistManager> dist_manager)
@@ -336,6 +364,12 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
       << "The processed raw forward inputs size " << raw_forward_inputs.size()
       << " is not equal to dp size " << dp_size_ << ".";
 
+  for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
+    const bool empty_shard =
+        batch[dp_rank].size() == 0 &&
+        raw_forward_inputs[dp_rank].flatten_tokens_vec.empty();
+  }
+
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
 
@@ -354,6 +388,16 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
   for (auto worker_rank = 0; worker_rank < worker_clients_num_;
        worker_rank += dp_local_tp_size_) {
     auto result = results[worker_rank].value();
+    const bool empty_shard =
+        batch[dp_rank].size() == 0 &&
+        raw_forward_inputs[dp_rank].flatten_tokens_vec.empty();
+    if (empty_shard) {
+      LOG(INFO) << "[VLMEngine::step] stage=skip_result, dp_rank=" << dp_rank
+                << ", worker_rank=" << worker_rank
+                << ", reason=empty_shard";
+      ++dp_rank;
+      continue;
+    }
     if (result.has_value()) {
       if (result.value().outputs.empty() && layer_forward_interrupted_) {
         throw ForwardInterruptedException();
@@ -454,8 +498,14 @@ std::vector<RawForwardInput> VLMEngine::prepare_inputs(
   BatchForwardType batch_forward_type;
 
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs.emplace_back(std::move(
-        batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
+    if (batch[dp_rank].empty()) {
+      batched_inputs.emplace_back(make_empty_raw_forward_input());
+      LOG(INFO) << "[VLMEngine::prepare_inputs] stage=empty_batch_skip_prepare"
+                << ", dp_rank=" << dp_rank;
+    } else {
+      batched_inputs.emplace_back(std::move(
+          batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
+    }
     dp_global_token_nums[dp_rank] =
         batched_inputs[dp_rank].flatten_tokens_vec.size();
     if (batch_forward_type.is_empty() &&
@@ -470,8 +520,8 @@ std::vector<RawForwardInput> VLMEngine::prepare_inputs(
   // update dp_global_token_nums and batch_forward_type
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     batched_inputs[dp_rank].dp_global_token_nums = dp_global_token_nums;
+    batched_inputs[dp_rank].dp_is_decode = dp_is_decode;
     if (batched_inputs[dp_rank].batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].dp_is_decode = dp_is_decode;
       batched_inputs[dp_rank].batch_forward_type = batch_forward_type;
     }
   }

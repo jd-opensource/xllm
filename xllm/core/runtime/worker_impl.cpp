@@ -32,6 +32,7 @@ limitations under the License.
 
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <utility>
 
 #include "common/device_monitor.h"
@@ -517,6 +518,14 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 
   processed_input = input.to(device_, dtype_);
   auto& input_params = processed_input.input_params;
+  const bool empty_shard =
+      input_params.num_sequences == 0 &&
+      (!processed_input.token_ids.defined() ||
+       processed_input.token_ids.numel() == 0);
+  if (empty_shard) {
+    auto ret = prepare_stream_->synchronize();
+    return;
+  }
 #if defined(USE_NPU)
   if (input_params.swap_blocks.size() > 0 && !FLAGS_enable_block_copy_kernel) {
     auto& swap_blocks = input_params.swap_blocks;
