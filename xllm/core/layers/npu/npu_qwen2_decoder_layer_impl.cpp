@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "npu_qwen2_decoder_layer_impl.h"
 
+#include <algorithm>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <mstx/ms_tools_ext.h>
@@ -29,6 +30,10 @@ limitations under the License.
 
 namespace xllm {
 namespace layer {
+
+namespace {
+constexpr int64_t kFiaMaskSeqLen = 2048;
+}
 
 enum DecoderLayerTensorId : int {
   IN_NORM_WEIGHT = 0,      // weight
@@ -134,10 +139,13 @@ void NpuQwen2DecoderLayerImpl::param_from_args(
   param.rank = parallel_args.rank();
   param.backend = "lccl";
   param.enableLogN = false;
+  param.isFIA = is_fia_ && isPrefill;
 }
 
-NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(const ModelContext& context)
-    : BaseLayer(context) {
+NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(
+    const ModelContext& context,
+    bool is_fia)
+    : BaseLayer(context), is_fia_(is_fia) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
@@ -215,8 +223,70 @@ int64_t NpuQwen2DecoderLayerImpl::init_attn_mask() {
   torch::Dtype dtype =
       prefill_param_.isBF16 ? torch::kBFloat16 : torch::kFloat16;
   decode_attn_mask_ = torch::zeros({1}).to(device_).to(dtype);
+  if (is_fia_) {
+    fia_attn_mask_ =
+        torch::tril(torch::ones({kFiaMaskSeqLen, kFiaMaskSeqLen},
+                                torch::TensorOptions()
+                                    .dtype(torch::kBool)
+                                    .device(device_)))
+            .contiguous();
+  }
 
   return atb::NO_ERROR;
+}
+
+void NpuQwen2DecoderLayerImpl::build_fia_index_tensors(
+    const ModelInputParams& input_params,
+    int64_t total_tokens) {
+  CHECK_GT(input_params.num_sequences, 0)
+      << "FIA prefill requires num_sequences > 0";
+  CHECK_EQ(input_params.kv_seq_lens_vec.size(),
+           static_cast<size_t>(input_params.num_sequences))
+      << "kv_seq_lens_vec size mismatch for FIA prefill";
+  CHECK_GT(total_tokens, 0) << "FIA prefill requires non-empty hidden states";
+
+  std::vector<int32_t> padding_idx(input_params.num_sequences * kFiaMaskSeqLen);
+  std::vector<int32_t> unpadding_idx;
+  unpadding_idx.reserve(total_tokens);
+
+  int64_t source_token_offset = 0;
+  for (int32_t seq_idx = 0; seq_idx < input_params.num_sequences; ++seq_idx) {
+    const int32_t seq_len = input_params.kv_seq_lens_vec[seq_idx];
+    CHECK_GE(seq_len, 0) << "FIA sequence length must be non-negative";
+    CHECK_LE(seq_len, kFiaMaskSeqLen)
+        << "FIA sequence length must be <= " << kFiaMaskSeqLen;
+    CHECK_LE(source_token_offset + seq_len, total_tokens)
+        << "FIA sequence lengths exceed current hidden-state tokens";
+
+    const int32_t padded_offset = seq_idx * kFiaMaskSeqLen;
+    const int32_t fallback_idx =
+        seq_len > 0
+            ? static_cast<int32_t>(source_token_offset + seq_len - 1)
+            : static_cast<int32_t>(std::min<int64_t>(source_token_offset,
+                                                     total_tokens - 1));
+    for (int32_t pos = 0; pos < kFiaMaskSeqLen; ++pos) {
+      const int32_t padded_idx = padded_offset + pos;
+      if (pos < seq_len) {
+        padding_idx[padded_idx] =
+            static_cast<int32_t>(source_token_offset + pos);
+        unpadding_idx.push_back(padded_idx);
+      } else {
+        padding_idx[padded_idx] = fallback_idx;
+      }
+    }
+    source_token_offset += seq_len;
+  }
+
+  CHECK_EQ(source_token_offset, total_tokens)
+      << "FIA padding indices do not cover all hidden-state tokens";
+  CHECK_EQ(unpadding_idx.size(), static_cast<size_t>(total_tokens))
+      << "FIA unpadding indices size mismatch";
+
+  const auto index_options = torch::TensorOptions().dtype(torch::kInt32);
+  fia_padding_idx_ =
+      torch::tensor(padding_idx, index_options).to(device_).contiguous();
+  fia_unpadding_idx_ =
+      torch::tensor(unpadding_idx, index_options).to(device_).contiguous();
 }
 
 int64_t NpuQwen2DecoderLayerImpl::init_node(
@@ -300,34 +370,54 @@ void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
     KVCache& kv_cache,
     ModelInputParams& input_params,
     bool is_prefill) {
+  if (is_prefill) {
+    *prefill_param_.bs = std::max(1, input_params.num_sequences);
+  }
+
+  auto* effective_attn_mask = &attn_mask;
+  if (is_prefill && prefill_param_.isFIA) {
+    CHECK_LE(input_params.kv_max_seq_len, kFiaMaskSeqLen)
+        << "FIA prefill only supports kv_max_seq_len <= " << kFiaMaskSeqLen
+        << ", but got " << input_params.kv_max_seq_len;
+    effective_attn_mask = &fia_attn_mask_;
+    build_fia_index_tensors(input_params, x.size(0));
+  }
+
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensors_;
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
+  size_t input_offset = WEIGHT_COUNT_PER_LAYER;
+  node.variantPack.inTensors.at(input_offset++) = internal_tensors_;
+  node.variantPack.inTensors.at(input_offset++) =
       atb_speed::Utils::AtTensor2Tensor(cos_pos);
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 2) =
+  node.variantPack.inTensors.at(input_offset++) =
       atb_speed::Utils::AtTensor2Tensor(sin_pos);
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3) =
-      atb_speed::Utils::AtTensor2Tensor(attn_mask);
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 4) =
+  node.variantPack.inTensors.at(input_offset++) =
+      atb_speed::Utils::AtTensor2Tensor(*effective_attn_mask);
+  node.variantPack.inTensors.at(input_offset++) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_k_cache());
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 5) =
+  node.variantPack.inTensors.at(input_offset++) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_v_cache());
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6) =
+  node.variantPack.inTensors.at(input_offset) =
       atb_speed::Utils::AtTensor2Tensor(input_params.kv_seq_lens);
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6).hostData =
+  node.variantPack.inTensors.at(input_offset++).hostData =
       input_params.kv_seq_lens_vec.data();
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7) = placeholder_;
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7).hostData =
+  node.variantPack.inTensors.at(input_offset) = placeholder_;
+  node.variantPack.inTensors.at(input_offset++).hostData =
       placeholder_vec_.data();
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 8) = placeholder_;
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9) =
+  node.variantPack.inTensors.at(input_offset++) = placeholder_;
+  node.variantPack.inTensors.at(input_offset++) =
       atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
-  node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
+  node.variantPack.inTensors.at(input_offset++) =
       atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
+  if (is_prefill && prefill_param_.isFIA) {
+    node.variantPack.inTensors.at(input_offset++) =
+        atb_speed::Utils::AtTensor2Tensor(fia_padding_idx_);
+    node.variantPack.inTensors.at(input_offset++) =
+        atb_speed::Utils::AtTensor2Tensor(fia_unpadding_idx_);
+  }
   if (is_prefill && FLAGS_enable_chunked_prefill) {
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
+    node.variantPack.inTensors.at(input_offset) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
-    node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =
+    node.variantPack.inTensors.at(input_offset).hostData =
         input_params.q_seq_lens_vec.data();
   }
 

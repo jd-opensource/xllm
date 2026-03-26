@@ -47,7 +47,8 @@ namespace layer {
 
 class NpuQwen2DecoderLayerImpl : public BaseLayer {
  public:
-  explicit NpuQwen2DecoderLayerImpl(const ModelContext& context);
+  explicit NpuQwen2DecoderLayerImpl(const ModelContext& context,
+                                    bool is_fia = false);
 
   ~NpuQwen2DecoderLayerImpl() override = default;
 
@@ -67,6 +68,9 @@ class NpuQwen2DecoderLayerImpl : public BaseLayer {
 
  private:
   void initialize_quantization_parameters();
+
+  void build_fia_index_tensors(const ModelInputParams& input_params,
+                               int64_t total_tokens);
 
   void build_node_variant_pack(atb_speed::Model::Node& node,
                                torch::Tensor& x,
@@ -96,11 +100,15 @@ class NpuQwen2DecoderLayerImpl : public BaseLayer {
   atb::Tensor placeholder_;
 
   at::Tensor decode_attn_mask_;
+  at::Tensor fia_attn_mask_;
+  at::Tensor fia_padding_idx_;
+  at::Tensor fia_unpadding_idx_;
 
   at::Tensor at_placeholder_;
 
   int device_id_;
   int32_t layer_id_;
+  bool is_fia_ = false;
 
   std::vector<std::shared_ptr<at::Tensor>> prefill_tensor_storage_;
   std::vector<std::shared_ptr<at::Tensor>> decode_tensor_storage_;
