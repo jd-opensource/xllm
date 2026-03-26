@@ -1468,9 +1468,12 @@ REGISTER_TOKENIZER_ARGS(kimi_k25, [&] {
 
   // ref:
   // https://huggingface.co/moonshotai/Kimi-K2.5/blob/main/tokenization_kimi.py#L53-L62
-  // N.B. replaced '\s+(?!\S)' with '\s+[^\s]' to avoid regex error in re2.
+  // N.B. re2 doesn't support character class intersection (&&) or subtraction (--).
+  // Since [\p{Han}]+ is the first branch and matches all Han characters first,
+  // we can safely remove the '&&[^\p{Han}]' part from subsequent branches.
+  // N.B. replaced '\s+(?!\S)' with '\s+[^\s]' - re2 doesn't support negative lookahead.
   const std::string pattern_str =
-      R"([\p{Han}]+|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+[^\s]|\s+)";
+      R"([\p{Han}]+|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+[^\s]|\s+)";
   SET_ARG(pattern, pattern_str);
 });
 }  // namespace xllm
