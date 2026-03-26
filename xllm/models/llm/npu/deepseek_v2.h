@@ -154,7 +154,13 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
       }
     }
 
-    auto h = npu_embed_tokens_(tokens, 0);
+    auto inputs_embeds = input_params.input_embedding;
+    torch::Tensor h;
+    if (inputs_embeds.defined()) {
+      h = inputs_embeds;
+    } else {
+      h = npu_embed_tokens_(tokens, 0);
+    }
     auto cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
     auto cos_sin_chunks = cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = cos_sin_chunks[0].contiguous();
