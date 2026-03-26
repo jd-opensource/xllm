@@ -54,6 +54,17 @@ namespace xllm {
 
 namespace {
 
+JsonReader normalize_config_torch_dtype(const JsonReader& reader) {
+  auto config = reader.data();
+  if (!config.contains("torch_dtype") && config.contains("dtype")) {
+    config["torch_dtype"] = config["dtype"];
+  }
+
+  JsonReader normalized_reader;
+  normalized_reader.parse_text(config.dump());
+  return normalized_reader;
+}
+
 bool is_compressed_tensors_fp8_scheme(const nlohmann::json& config) {
   auto type_it = config.find("type");
   auto num_bits_it = config.find("num_bits");
@@ -739,7 +750,8 @@ bool HFModelLoader::load_model_args(const std::string& model_weights_path) {
                << resolved_model_type;
     return false;
   }
-  model_args_loader(reader, &args_);
+  const JsonReader config_reader = normalize_config_torch_dtype(reader);
+  model_args_loader(config_reader, &args_);
 
   return true;
 }
@@ -752,16 +764,20 @@ bool HFModelLoader::load_quant_args(const std::string& model_weights_path) {
     return false;
   }
 
-  if (!load_quant_cfg(reader, quant_args_)) {
+  const JsonReader config_reader = normalize_config_torch_dtype(reader);
+
+  if (!load_quant_cfg(config_reader, quant_args_)) {
     return false;
   }
 
   // load quantization args for npu if exists
-  if (reader.contains("quantize")) {
-    quant_args_.quantize_type() = reader.value_or<std::string>("quantize", "");
+  if (config_reader.contains("quantize")) {
+    quant_args_.quantize_type() =
+        config_reader.value_or<std::string>("quantize", "");
   }
-  if (reader.contains("torch_dtype")) {
-    quant_args_.torch_dtype() = reader.value_or<std::string>("torch_dtype", "");
+  if (config_reader.contains("torch_dtype")) {
+    quant_args_.torch_dtype() =
+        config_reader.value_or<std::string>("torch_dtype", "");
   }
 
   // awq quantization args
