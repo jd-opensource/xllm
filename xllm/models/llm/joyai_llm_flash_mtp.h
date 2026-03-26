@@ -12,28 +12,34 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
-
 #pragma once
 
-#include "deepseek_v2.h"
+#include "deepseek_mtp.h"
 
 namespace xllm {
 
-class JoyAILLMFlashForCausalLMImpl
-    : public LlmForCausalLMImplBase<DeepseekV2Model> {
+class JoyAILLMFlashMtpForCausalLMImpl
+    : public LlmForCausalLMImplBase<DeepseekMtpModel> {
  public:
-  JoyAILLMFlashForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {}
-};
-TORCH_MODULE(JoyAILLMFlashForCausalLM);
+  JoyAILLMFlashMtpForCausalLMImpl(const ModelContext& context)
+      : LlmForCausalLMImplBase<DeepseekMtpModel>(context) {}
 
-// register the causal model
-REGISTER_CAUSAL_MODEL(joyai_llm_flash, JoyAILLMFlashForCausalLM);
-// register the model args
-// example config:
-// https://huggingface.co/deepseek-ai/DeepSeek-V3/blob/main/config.json
-REGISTER_MODEL_ARGS(joyai_llm_flash, [&] {
-  LOAD_ARG_OR(model_type, "model_type", "joyai_llm_flash");
+  void load_model(
+      std::unique_ptr<ModelLoader> loader,
+      std::string prefix = "model." /*llm model weight prefix*/) override {
+    // no need to load lm_head since it shares the same weights with main model
+    for (const auto& state_dict : loader->get_state_dicts()) {
+      model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
+    }
+    model_->verify_loaded_weights();
+  }
+};
+TORCH_MODULE(JoyAILLMFlashMtpForCausalLM);
+
+REGISTER_CAUSAL_MODEL(joyai_llm_flash_mtp, JoyAILLMFlashMtpForCausalLM);
+
+REGISTER_MODEL_ARGS(joyai_llm_flash_mtp, [&] {
+  LOAD_ARG_OR(model_type, "model_type", "joyai_llm_flash_mtp");
   LOAD_ARG_OR(dtype, "torch_dtype", "");
   LOAD_ARG_OR(vocab_size, "vocab_size", 129280);
   LOAD_ARG_OR(hidden_size, "hidden_size", 2048);
@@ -45,10 +51,7 @@ REGISTER_MODEL_ARGS(joyai_llm_flash, [&] {
   LOAD_ARG_OR(rms_norm_eps, "rms_norm_eps", 1e-6);
   LOAD_ARG_OR(eos_token_id, "eos_token_id", 1);
   LOAD_ARG_OR(bos_token_id, "bos_token_id", 0);
-  LOAD_ARG_OR(rope_theta, "rope_theta", 32000000);
-  // LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
-  // LOAD_ARG_OR(sliding_window, "sliding_window", 4096);
-  // LOAD_ARG_OR(max_window_layers, "max_window_layers", 61);
+  LOAD_ARG_OR(rope_theta, "rope_theta", 32000000.0f);
 
   LOAD_ARG_OR(first_k_dense_replace, "first_k_dense_replace", 1);
   LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
@@ -76,20 +79,7 @@ REGISTER_MODEL_ARGS(joyai_llm_flash, [&] {
   LOAD_ARG_OR_FUNC(
       rotary_dim, "rotary_dim", [&] { return args->qk_rope_head_dim(); });
 
-  // uses default rope_type, no deepseek_yarn scaling
   SET_ARG(rope_scaling_rope_type, "default");
-  // SET_ARG(rope_scaling_rope_type, "deepseek_yarn");
-  // LOAD_ARG(rope_scaling_beta_fast, "rope_scaling.beta_fast");
-  // LOAD_ARG(rope_scaling_beta_slow, "rope_scaling.beta_slow");
-  // LOAD_ARG(rope_scaling_factor, "rope_scaling.factor");
-  // LOAD_ARG_OR(
-  //     rope_extrapolation_factor, "rope_scaling.extrapolation_factor", 1.0f);
-  // LOAD_ARG(rope_scaling_mscale, "rope_scaling.mscale");
-  // LOAD_ARG(rope_scaling_mscale_all_dim, "rope_scaling.mscale_all_dim");
-  // LOAD_ARG(rope_scaling_original_max_position_embeddings,
-  //          "rope_scaling.original_max_position_embeddings");
-  // LOAD_ARG_OR(rope_scaling_attn_factor, "rope_scaling.attn_factor", 1.0f);
-
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({1}));
 });
 }  // namespace xllm
