@@ -124,6 +124,14 @@ inline bool is_mla_model_type(std::string_view model_type) {
   return mla_model_type_set().contains(std::string(model_type));
 }
 
+inline std::string extract_model_name_from_path(
+    const std::filesystem::path& normalized_model_path) {
+  if (normalized_model_path.has_filename()) {
+    return normalized_model_path.filename().string();
+  }
+  return normalized_model_path.parent_path().filename().string();
+}
+
 inline std::string get_model_type(const std::filesystem::path& model_path) {
   JsonReader reader;
   std::filesystem::path config_json_path = model_path / "config.json";
