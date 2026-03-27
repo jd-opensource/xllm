@@ -337,7 +337,7 @@ class AclGraphExecutorTest : public ::testing::Test {
     auto kv_cache =
         torch::randn({n_blocks, block_size * hidden_size},
                      torch::dtype(torch::kFloat32).device(*device_));
-    kv_caches_.push_back({kv_cache, kv_cache});
+    kv_caches_.emplace_back(kv_cache, kv_cache);
   }
 
   void TearDown() override { return; }
