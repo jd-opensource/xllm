@@ -144,6 +144,58 @@ DeepseekV2DecoderLayerImpl::build_post_attn_carrier(
   return carrier;
 }
 
+DeepseekV2DecoderLayerImpl::MoeInputPrepResult
+DeepseekV2DecoderLayerImpl::prepare_moe_inputs(
+    torch::Tensor x,
+    const torch::Tensor& residual,
+    const ModelInputParams& input_params,
+    DeepseekV2AttentionImpl::PostAttnLayout attn_layout) {
+  MoeInputPrepResult result;
+  if (!sparse_moe_) {
+    result.carrier =
+        build_post_attn_carrier(std::move(x), residual, attn_layout);
+    result.ffn_in = result.carrier->ffn_in;
+    return result;
+  }
+
+  result.exec_cfg = sparse_moe_->plan_exec(input_params);
+  result.use_sp_moe_overlap =
+      attn_layout == DeepseekV2AttentionImpl::PostAttnLayout::kPackedLocal &&
+      !result.exec_cfg->enable_all2all && !result.exec_cfg->need_dp_gather &&
+      sparse_moe_->has_shared();
+  if (result.use_sp_moe_overlap) {
+    result.carrier = build_post_attn_local(std::move(x), residual);
+    result.ffn_in = result.carrier->ffn_in;
+    return result;
+  }
+
+  if (attn_layout == DeepseekV2AttentionImpl::PostAttnLayout::kPackedLocal) {
+    result.carrier =
+        build_post_attn_carrier(std::move(x), residual, attn_layout);
+    result.ffn_in = result.carrier->ffn_in;
+    result.moe_prep = DeepseekV2SparseMoEBlockImpl::PrepOut{
+        .ffn_in = result.carrier->ffn_in,
+        .skip_local = result.carrier->skip_local,
+    };
+    return result;
+  }
+
+  if (result.exec_cfg->enable_all2all || result.exec_cfg->need_dp_gather) {
+    result.moe_prep =
+        sparse_moe_->prep_in(std::move(x), residual, input_params, attn_layout);
+    result.ffn_in = result.moe_prep->ffn_in;
+    return result;
+  }
+
+  result.carrier = build_post_attn_carrier(std::move(x), residual, attn_layout);
+  result.ffn_in = result.carrier->ffn_in;
+  result.moe_prep = DeepseekV2SparseMoEBlockImpl::PrepOut{
+      .ffn_in = result.carrier->ffn_in,
+      .skip_local = result.carrier->skip_local,
+  };
+  return result;
+}
+
 bool DeepseekV2DecoderLayerImpl::can_keep_local_output(
     const PostAttnCarrier& carrier,
     ProcessGroup* pg) const {
@@ -244,44 +296,12 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
   const bool use_sp_output =
       sequence_parallel_context_ != nullptr && attention_->can_use_sp();
   const auto attn_layout = attention_->post_attn_layout(use_sp_output);
-  std::optional<PostAttnCarrier> carrier;
-  std::optional<DeepseekV2SparseMoEBlockImpl::PrepOut> moe_prep;
-  std::optional<DeepseekV2SparseMoEBlockImpl::ExecCfg> exec_cfg;
-  bool use_sp_moe_overlap = false;
-
-  if (sparse_moe_) {
-    exec_cfg = sparse_moe_->plan_exec(input_params);
-    use_sp_moe_overlap =
-        attn_layout == DeepseekV2AttentionImpl::PostAttnLayout::kPackedLocal &&
-        !exec_cfg->enable_all2all && !exec_cfg->need_dp_gather &&
-        sparse_moe_->has_shared();
-    if (use_sp_moe_overlap) {
-      carrier = build_post_attn_local(x, residual.value());
-      x = carrier->ffn_in;
-    } else if (attn_layout ==
-               DeepseekV2AttentionImpl::PostAttnLayout::kPackedLocal) {
-      carrier = build_post_attn_carrier(x, residual.value(), attn_layout);
-      x = carrier->ffn_in;
-      moe_prep = DeepseekV2SparseMoEBlockImpl::PrepOut{
-          .ffn_in = carrier->ffn_in,
-          .skip_local = carrier->skip_local,
-      };
-    } else if (exec_cfg->enable_all2all || exec_cfg->need_dp_gather) {
-      moe_prep =
-          sparse_moe_->prep_in(x, residual.value(), input_params, attn_layout);
-      x = moe_prep->ffn_in;
-    } else {
-      carrier = build_post_attn_carrier(x, residual.value(), attn_layout);
-      x = carrier->ffn_in;
-      moe_prep = DeepseekV2SparseMoEBlockImpl::PrepOut{
-          .ffn_in = carrier->ffn_in,
-          .skip_local = carrier->skip_local,
-      };
-    }
-  } else {
-    carrier = build_post_attn_carrier(x, residual.value(), attn_layout);
-    x = carrier->ffn_in;
-  }
+  auto prep = prepare_moe_inputs(
+      std::move(x), residual.value(), input_params, attn_layout);
+  auto& carrier = prep.carrier;
+  auto& moe_prep = prep.moe_prep;
+  auto& exec_cfg = prep.exec_cfg;
+  x = prep.ffn_in;
 
   if (!carrier.has_value() || carrier->mode != PostAttnMode::kPackedLocal) {
     x = std::get<0>(post_norm_->forward(x));
@@ -325,7 +345,7 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
             },
     };
     auto moe_result =
-        use_sp_moe_overlap
+        prep.use_sp_moe_overlap
             ? sparse_moe_->forward_sp(
                   x, *sequence_parallel_context_, moe_comm_fns, sp_chunk_size)
             : sparse_moe_->forward(

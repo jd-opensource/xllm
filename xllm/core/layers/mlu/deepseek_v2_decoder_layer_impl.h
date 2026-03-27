@@ -42,6 +42,9 @@ class DeepseekV2DecoderLayerTestPeer;
 
 class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
  public:
+  // Default FFN chunk size used for sequence-parallel prefill execution.
+  static constexpr int64_t kDefaultSpFfnChunkSize = 8192;
+
   explicit DeepseekV2DecoderLayerImpl(const ModelContext& context,
                                       int32_t layer_id);
 
@@ -53,10 +56,7 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
   void set_sequence_parallel_context(
       const v32_sp::DeepseekV32SPContext* sp_ctx) {
     sequence_parallel_context_ = sp_ctx;
-    // 8192 is a magic number chosen empirically to balance memory savings for
-    // long sequence scenarios when Sequence Parallel is enabled. It helps
-    // reduce memory consumption in those cases.
-    sp_ffn_chunk_size_ = sp_ctx != nullptr ? 8192 : -1;
+    sp_ffn_chunk_size_ = sp_ctx != nullptr ? kDefaultSpFfnChunkSize : -1;
   }
 
   torch::Tensor forward(torch::Tensor& x,
@@ -79,12 +79,25 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
     PostAttnMode mode = PostAttnMode::kReplicated;
   };
 
+  struct MoeInputPrepResult {
+    torch::Tensor ffn_in;
+    std::optional<PostAttnCarrier> carrier;
+    std::optional<DeepseekV2SparseMoEBlockImpl::PrepOut> moe_prep;
+    std::optional<DeepseekV2SparseMoEBlockImpl::ExecCfg> exec_cfg;
+    bool use_sp_moe_overlap = false;
+  };
+
   PostAttnCarrier build_post_attn_carrier(
       torch::Tensor x,
       const torch::Tensor& residual,
       DeepseekV2AttentionImpl::PostAttnLayout attn_layout);
   PostAttnCarrier build_post_attn_local(torch::Tensor x,
                                         const torch::Tensor& residual);
+  MoeInputPrepResult prepare_moe_inputs(
+      torch::Tensor x,
+      const torch::Tensor& residual,
+      const ModelInputParams& input_params,
+      DeepseekV2AttentionImpl::PostAttnLayout attn_layout);
 
   bool can_keep_local_output(const PostAttnCarrier& carrier,
                              ProcessGroup* pg) const;
