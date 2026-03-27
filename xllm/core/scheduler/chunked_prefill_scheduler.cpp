@@ -17,6 +17,7 @@ limitations under the License.
 #include "scheduler/chunked_prefill_scheduler.h"
 
 #include <limits>
+#include <utility>
 
 #include "common/metrics.h"
 #include "framework/batch/batch_factory.h"
@@ -60,8 +61,10 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
     const size_t num_sequences = request->sequences().size();
     std::vector<Sequence*> candidate_sequences;
     std::vector<size_t> candidate_token_budgets;
+    std::vector<std::pair<Sequence*, size_t>> pending_in_batch_providers;
     candidate_sequences.reserve(num_sequences);
     candidate_token_budgets.reserve(num_sequences);
+    pending_in_batch_providers.reserve(num_sequences);
 
     bool has_enough_budget = true;
     bool has_enough_blocks = true;
@@ -151,11 +154,22 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       allocated_estimate_latency += seq_estimate_latency;
       candidate_sequences.emplace_back(sequence.get());
       candidate_token_budgets.emplace_back(current_step_handle_tokens);
+      if (sequence->is_prefill_stage()) {
+        const size_t max_handle_num_tokens =
+            sequence->kv_state().kv_cache_tokens_num() +
+            current_step_handle_tokens;
+        pending_in_batch_providers.emplace_back(sequence.get(),
+                                                max_handle_num_tokens);
+      }
     }
     CHECK(allocated_tokens <= remaining_token_budget);
     CHECK(allocated_seqs <= remaining_seq_budget);
 
     if (has_enough_budget && has_enough_blocks) {
+      for (const auto& pending_provider : pending_in_batch_providers) {
+        register_in_batch_prefix_provider(pending_provider.first,
+                                          pending_provider.second);
+      }
       // remove the request from the priority queue
       running_queue->pop_top();
       // add the request to the batch
@@ -174,6 +188,12 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
 
     // budget exhausted, do partially schedule the request
     if (!has_enough_budget) {
+      if (!candidate_sequences.empty() && !request->check_beam_search()) {
+        for (const auto& pending_provider : pending_in_batch_providers) {
+          register_in_batch_prefix_provider(pending_provider.first,
+                                            pending_provider.second);
+        }
+      }
       handle_abnormal_request(running_queue,
                               candidate_sequences,
                               candidate_token_budgets,
@@ -227,6 +247,12 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
     }
 
     // no requests left to preempt
+    if (!candidate_sequences.empty() && !request->check_beam_search()) {
+      for (const auto& pending_provider : pending_in_batch_providers) {
+        register_in_batch_prefix_provider(pending_provider.first,
+                                          pending_provider.second);
+      }
+    }
     handle_abnormal_request(running_queue,
                             candidate_sequences,
                             candidate_token_budgets,
@@ -281,6 +307,8 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
     size_t allocated_seqs = 0;
     size_t allocated_estimate_latency = 0;
     bool can_schedule = true;
+    std::vector<std::pair<Sequence*, size_t>> pending_in_batch_providers;
+    pending_in_batch_providers.reserve(request->sequences().size());
     std::vector<Sequence*> prefill_sequences;
     std::vector<size_t> prefill_sequences_budget;
     prefill_sequences.reserve(request->sequences().size());
@@ -375,6 +403,11 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
       allocated_tokens += current_step_handle_tokens;
       allocated_seqs += 1;
       allocated_estimate_latency += seq_estimate_latency;
+      const size_t max_handle_num_tokens =
+          prefill_sequence->kv_state().kv_cache_tokens_num() +
+          current_step_handle_tokens;
+      pending_in_batch_providers.emplace_back(prefill_sequence.get(),
+                                              max_handle_num_tokens);
     }
 
     if (!can_schedule) {
@@ -383,6 +416,11 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
         kv_cache_manager_->deallocate(seq);
       }
       break;
+    }
+
+    for (const auto& pending_provider : pending_in_batch_providers) {
+      register_in_batch_prefix_provider(pending_provider.first,
+                                        pending_provider.second);
     }
 
     prefill_stage_sequences.insert(prefill_stage_sequences.end(),
@@ -591,6 +629,7 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
   size_t num_preempted_requests = 0;
   bool budget_exhausted = false;
   bool blocks_exhausted = false;
+  begin_in_batch_prefix_cache();
   // keep the requests in prefill stage
   std::vector<Sequence*> prefill_stage_sequences;
 
@@ -678,6 +717,8 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
                             blocks_exhausted);
   }
 
+  end_in_batch_prefix_cache();
+
   if (!finished_requests.empty()) {
     response_processor_->process_completed_requests(finished_requests);
   }
@@ -723,6 +764,7 @@ bool ChunkedPrefillScheduler::allocate_blocks_for(
   CHECK_GT(token_budget, min_speculative_tokens_required_);
 
   allocate_shared_blocks_for(sequence);
+  try_match_in_batch_prefix(sequence);
 
   // number of tokens in the kv cache, which are already processed
   const size_t kv_cache_tokens_num = sequence->kv_cache_tokens_num();

@@ -26,6 +26,7 @@ limitations under the License.
 #include <iomanip>
 #include <memory>
 #include <sstream>
+#include <utility>
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
@@ -35,6 +36,7 @@ limitations under the License.
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 #include "scheduler/decode_priority_queue.h"
+#include "framework/prefix_cache/in_batch_prefix_cache.h"
 #include "util/utils.h"
 
 namespace xllm {
@@ -133,6 +135,45 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
 }
 
 ContinuousScheduler::~ContinuousScheduler() { running_requests_.clear(); }
+
+bool ContinuousScheduler::enable_in_batch_prefix_cache() const {
+  return enable_prefix_cache_ && in_batch_prefix_cache_context_ != nullptr;
+}
+
+void ContinuousScheduler::begin_in_batch_prefix_cache() {
+  in_batch_prefix_cache_context_holder_.reset();
+  in_batch_prefix_cache_context_ = nullptr;
+  if (!enable_prefix_cache_) {
+    return;
+  }
+
+  in_batch_prefix_cache_context_holder_ =
+      std::make_unique<InBatchPrefixCacheContext>();
+  in_batch_prefix_cache_context_ = in_batch_prefix_cache_context_holder_.get();
+}
+
+void ContinuousScheduler::end_in_batch_prefix_cache() {
+  in_batch_prefix_cache_context_ = nullptr;
+  in_batch_prefix_cache_context_holder_.reset();
+}
+
+void ContinuousScheduler::try_match_in_batch_prefix(Sequence* sequence) {
+  if (!enable_in_batch_prefix_cache()) {
+    return;
+  }
+  in_batch_prefix_cache_context_->try_match(sequence,
+                                            kv_cache_manager_->block_size());
+}
+
+void ContinuousScheduler::register_in_batch_prefix_provider(
+    Sequence* sequence,
+    size_t max_handle_num_tokens) {
+  if (!enable_in_batch_prefix_cache()) {
+    return;
+  }
+  in_batch_prefix_cache_context_->register_provider(
+      sequence, kv_cache_manager_->block_size(), max_handle_num_tokens);
+}
 
 bool ContinuousScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
@@ -268,6 +309,8 @@ void ContinuousScheduler::handle_prefill_requests(
     size_t allocated_seqs = 0;
     double allocated_estimate_latency = 0;
     bool can_schedule = true;
+    std::vector<std::pair<Sequence*, size_t>> pending_in_batch_providers;
+    pending_in_batch_providers.reserve(request->sequences().size());
     std::vector<Sequence*> prefill_sequences;
     std::vector<size_t> prefill_sequences_budget;
     prefill_sequences.reserve(request->sequences().size());
@@ -277,15 +320,38 @@ void ContinuousScheduler::handle_prefill_requests(
         continue;
       }
 
-      // FIXME: use actual num_tokens to handle
-      // Currently overestimating the number of tokens actually processed when
-      // enable prefix cache
-      size_t num_tokens = prefill_sequence->num_need_compute_tokens();
+      if (prefill_sequence->kv_state().num_kv_blocks() == 0) {
+        kv_cache_manager_->allocate_shared(prefill_sequence.get());
+      }
+      try_match_in_batch_prefix(prefill_sequence.get());
+
+      const size_t num_tokens = prefill_sequence->num_need_compute_tokens();
       if (remaining_token_budget < allocated_tokens + num_tokens ||
           remaining_seq_budget < allocated_seqs + 1) {
+        if (prefill_sequence->kv_state().num_kv_blocks() > 0) {
+          kv_cache_manager_->deallocate(prefill_sequence.get());
+        }
         can_schedule = false;
         budget_exhausted = true;
         break;
+      }
+
+      // OPTIMIZE for multi-slo requests
+      // for prefill requests, check latency after prefix cache match
+      double seq_estimate_latency = 0;
+      if (options_.enable_latency_aware_schedule()) {
+        seq_estimate_latency =
+            profile_manager_->predict_step_time(prefill_sequence.get(), false);
+        if (estimate_latency + allocated_estimate_latency +
+                seq_estimate_latency >
+            latency_budget) {
+          if (prefill_sequence->kv_state().num_kv_blocks() > 0) {
+            kv_cache_manager_->deallocate(prefill_sequence.get());
+          }
+          can_schedule = false;
+          budget_exhausted = true;
+          break;
+        }
       }
 
       // preempt offline decode
@@ -300,7 +366,7 @@ void ContinuousScheduler::handle_prefill_requests(
           bool enough_to_evict =
               check_if_enough_to_evict(running_queue_offline_.get(),
                                        prefill_sequence.get(),
-                                       num_tokens,
+                                       prefill_sequence->num_tokens(),
                                        num_request_to_evict);
           if (enough_to_evict) {
             for (size_t i = 0; i < num_request_to_evict; ++i) {
@@ -332,28 +398,13 @@ void ContinuousScheduler::handle_prefill_requests(
         }
       }
 
-      // OPTIMIZE for multi-slo requests
-      // for prefill requests, check latency after prefix cache match
-      double seq_estimate_latency = 0;
-      if (options_.enable_latency_aware_schedule()) {
-        seq_estimate_latency =
-            profile_manager_->predict_step_time(prefill_sequence.get(), false);
-        if (estimate_latency + allocated_estimate_latency +
-                seq_estimate_latency >
-            latency_budget) {
-          // release shared prefix blocks
-          kv_cache_manager_->deallocate(prefill_sequence.get());
-          can_schedule = false;
-          budget_exhausted = true;
-          break;
-        }
-      }
-
       prefill_sequences_budget.emplace_back(num_tokens);
       prefill_sequences.emplace_back(prefill_sequence.get());
       allocated_tokens += num_tokens;
       allocated_seqs += 1;
       allocated_estimate_latency += seq_estimate_latency;
+      pending_in_batch_providers.emplace_back(prefill_sequence.get(),
+                                              prefill_sequence->num_tokens());
     }
 
     if (!can_schedule) {
@@ -362,6 +413,11 @@ void ContinuousScheduler::handle_prefill_requests(
         kv_cache_manager_->deallocate(seq);
       }
       break;
+    }
+
+    for (const auto& pending_provider : pending_in_batch_providers) {
+      register_in_batch_prefix_provider(pending_provider.first,
+                                        pending_provider.second);
     }
 
     remaining_token_budget -= allocated_tokens;
@@ -902,6 +958,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   size_t num_online_decode_preempt_online_requests = 0;
   size_t num_online_prefill_preempt_offline_requests = 0;
   size_t num_online_decode_preempt_offline_requests = 0;
+  begin_in_batch_prefix_cache();
   // TO IMPROVE?: handle online decode request before prefill offline request
   handle_prefill_requests(latency_budget,
                           estimate_latency,
@@ -940,6 +997,8 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
                            num_online_decode_preempt_offline_requests,
                            running_queue_offline_);
   }
+
+  end_in_batch_prefix_cache();
 
   num_preempted_requests = num_offline_decode_preempt_offline_requests +
                            num_online_decode_preempt_online_requests +

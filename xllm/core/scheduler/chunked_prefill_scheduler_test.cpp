@@ -21,6 +21,7 @@ limitations under the License.
 #include <cmath>
 #include <optional>
 
+#include "common/global_flags.h"
 #include "distributed_runtime/engine.h"
 #include "util/utils.h"
 
@@ -50,11 +51,13 @@ class FakeTokenizer : public Tokenizer {
 
 class FakeEngine : public Engine {
  public:
-  FakeEngine(int32_t num_blocks, int32_t block_size) {
+  FakeEngine(int32_t num_blocks,
+             int32_t block_size,
+             bool enable_prefix_cache = false) {
     BlockManagerPool::Options opt;
     opt.num_blocks_ = num_blocks;
     opt.block_size_ = block_size;
-    opt.enable_prefix_cache_ = false;  // we dont consider prefix cache here
+    opt.enable_prefix_cache_ = enable_prefix_cache;
     fake_tokenizer_ = std::make_unique<FakeTokenizer>();
     fake_block_manager_ = std::make_unique<BlockManagerPool>(opt, 1);
   }
@@ -74,6 +77,19 @@ class FakeEngine : public Engine {
  private:
   std::unique_ptr<Tokenizer> fake_tokenizer_;
   std::unique_ptr<BlockManagerPool> fake_block_manager_;
+};
+
+class ScopedBoolFlagValue {
+ public:
+  ScopedBoolFlagValue(bool& flag, bool value) : flag_(flag), old_(flag) {
+    flag_ = value;
+  }
+
+  ~ScopedBoolFlagValue() { flag_ = old_; }
+
+ private:
+  bool& flag_;
+  bool old_;
 };
 
 ContinuousScheduler::Options create_scheduler_options(
@@ -179,6 +195,69 @@ void update_requests(std::vector<std::shared_ptr<Request>> requests) {
 }
 
 }  // namespace
+
+TEST(ChunkedPrefillSchedulerTest, ReusePrefixBlocksWithinBatch) {
+  ScopedBoolFlagValue enable_prefix_cache(FLAGS_enable_prefix_cache, true);
+
+  const int32_t block_size = 16;
+  const int32_t prompt_len = 128;
+  auto engine = std::make_unique<FakeEngine>(64, block_size, true);
+  auto opt = create_scheduler_options(1024, 16, 0, 1024, 1);
+  auto scheduler =
+      std::make_unique<ChunkedPrefillScheduler>(engine.get(), opt);
+
+  auto requests = generate_request({prompt_len, prompt_len},
+                                   {8, 8},
+                                   std::nullopt,
+                                   std::nullopt,
+                                   30000);
+  for (auto& request : requests) {
+    scheduler->add_request(request);
+  }
+
+  auto batches = scheduler->prepare_batch_test();
+  ASSERT_EQ(batches.size(), 1);
+  ASSERT_EQ(batches[0].size(), 2);
+  const auto& budgets = batches[0].get_allowed_max_tokens();
+  ASSERT_EQ(budgets.size(), 2);
+
+  auto* seq0 = batches[0][0];
+  auto* seq1 = batches[0][1];
+  Sequence* producer = nullptr;
+  Sequence* consumer = nullptr;
+  uint32_t producer_budget = 0;
+  uint32_t consumer_budget = 0;
+  if (seq0->kv_state().kv_cache_tokens_num() >
+      seq1->kv_state().kv_cache_tokens_num()) {
+    consumer = seq0;
+    producer = seq1;
+    consumer_budget = budgets[0];
+    producer_budget = budgets[1];
+  } else {
+    consumer = seq1;
+    producer = seq0;
+    consumer_budget = budgets[1];
+    producer_budget = budgets[0];
+  }
+
+  ASSERT_NE(producer, nullptr);
+  ASSERT_NE(consumer, nullptr);
+
+  const size_t expected_shared_blocks = prompt_len / block_size - 1;
+  EXPECT_EQ(consumer->kv_state().shared_kv_blocks_num(),
+            expected_shared_blocks);
+  EXPECT_EQ(consumer->kv_state().kv_cache_tokens_num(),
+            expected_shared_blocks * block_size);
+  EXPECT_EQ(consumer_budget, static_cast<uint32_t>(block_size));
+  EXPECT_EQ(producer_budget, static_cast<uint32_t>(prompt_len));
+
+  ASSERT_GE(producer->kv_state().num_kv_blocks(), expected_shared_blocks);
+  ASSERT_GE(consumer->kv_state().num_kv_blocks(), expected_shared_blocks);
+  for (size_t i = 0; i < expected_shared_blocks; ++i) {
+    EXPECT_EQ(producer->kv_state().kv_blocks()[i].id(),
+              consumer->kv_state().kv_blocks()[i].id());
+  }
+}
 
 // TEST-1:
 // Three independent prefill requests, according to the configs,
