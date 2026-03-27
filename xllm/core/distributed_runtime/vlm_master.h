@@ -34,12 +34,11 @@ limitations under the License.
 #include "framework/request/request_params.h"
 #include "master.h"
 #include "scheduler/continuous_scheduler.h"
-#include "xllm/processors/input_processor.h"
+#include "xllm/processors/multimodal_processor.h"
 
 namespace xllm {
 
 struct MMData;
-class ImageProcessor;
 
 class VLMMaster : public Master {
  public:
@@ -114,10 +113,8 @@ class VLMMaster : public Master {
   // chat template instance
   std::unique_ptr<JinjaChatTemplate> chat_template_;
 
-  // input processor for vlm
-  std::unique_ptr<InputProcessor> input_processor_;
-
-  std::unique_ptr<ImageProcessor> image_processor_;
+  // multimodal processor for VLM model
+  std::unique_ptr<MultimodalProcessor> multimodal_processor_;
 
   // thread for moving forward the scheduler
   std::thread loop_thread_;

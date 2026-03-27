@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,166 +13,307 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "processors/minicpmv_input_processor.h"
-
-#include <glog/logging.h>
-#include <torch/torch.h>
-
-#include <algorithm>
-#include <regex>
-
-#include "processors/minicpmv_image_processor.h"
+#include "minicpmv_input_processor.h"
 
 namespace xllm {
 
-MiniCPMInputProcessor::MiniCPMInputProcessor(const ModelArgs& args) {
-  image_feature_size_ = args.mm_image_feature_size();
+MiniCPMVInputProcessor::MiniCPMVInputProcessor(const ModelArgs& args) {
   max_slice_nums_ = args.vision_max_slice_nums();
-  slice_mode_ = args.mm_slice_mode();
-  use_image_id_ = args.mm_use_image_id();
   scale_resolution_ = args.mm_scale_resolution();
+  patch_size_ = args.mm_patch_size();
+  slice_mode_ = args.mm_slice_mode();
+  image_feature_size_ = args.mm_image_feature_size();
+  norm_mean_ = args.mm_image_normalize_mean();
+  norm_std_ = args.mm_image_normalize_std();
 }
 
-void MiniCPMInputProcessor::process(std::string& prompt,
-                                    const MMData& mm_data) {
-  std::vector<torch::Tensor> image_sizes;
-  mm_data.get("image_sizes", image_sizes);
-
-  const std::regex pattern(R"(\(<image>[\s\S]*?</image>\))");
-
-  std::sregex_iterator image_tag_begin(prompt.begin(), prompt.end(), pattern);
-  std::sregex_iterator image_tag_end;
-
-  if (image_tag_begin == image_tag_end) {
-    return;
+bool MiniCPMVInputProcessor::process(const MMInput& mm_inputs,
+                                     MMData& mm_datas) {
+  std::vector<torch::Tensor> images = mm_inputs.get_decode_data(MMType::IMAGE);
+  if (images.empty()) {
+    LOG(ERROR) << " image tensor not found.";
+    return false;
   }
 
-  std::vector<std::pair<int32_t, int32_t>> image_size_list;
-  image_size_list.reserve(image_sizes.size());
-  for (auto& image_size : image_sizes) {
-    if (image_size.dim() != 1 || image_size.size(0) != 2) {
-      const auto& sizes = image_size.sizes();
-      LOG(FATAL) << "image_size must be a 1D tensor with 2 "
-                    "elements representing height and width;"
-                    "now sizes: "
-                 << sizes;
+  if (!this->process_images(images, mm_datas)) {
+    LOG(ERROR) << " process image failed.";
+    return false;
+  }
+
+  return true;
+}
+
+bool MiniCPMVInputProcessor::process_images(std::vector<torch::Tensor> images,
+                                            MMData& mm_datas) {
+  std::vector<torch::Tensor> new_images;
+  std::vector<torch::Tensor> tgt_sizes;
+
+  const size_t image_size = images.size();
+  new_images.reserve(image_size *
+                     (size_t{1} + static_cast<size_t>(max_slice_nums_)));
+  tgt_sizes.reserve(image_size *
+                    (size_t{1} + static_cast<size_t>(max_slice_nums_)));
+
+  for (const auto& image : images) {
+    new_images.clear();
+    tgt_sizes.clear();
+
+    if (!this->process_image(image, new_images, tgt_sizes)) {
+      LOG(ERROR)
+          << "Failed to process image. The shape(channels, height, width) is: "
+          << image.sizes();
+      return false;
     }
-    image_size_list.emplace_back(std::make_pair(image_size[0].item<int32_t>(),
-                                                image_size[1].item<int32_t>()));
+
+    // image shape: [C, H, W]
+    const auto& image_size = image.sizes();
+    int64_t orig_w = image_size[2];
+    int64_t orig_h = image_size[1];
+
+    auto image_sizes = torch::tensor({orig_w, orig_h}, torch::kInt64);
+    auto tgt_tensor = torch::stack(tgt_sizes);
+
+    auto& item = mm_datas.add(MMType::IMAGE);
+    item.set_data({{"pixel_values", new_images},
+                   {"image_sizes", image_sizes},
+                   {"tgt_sizes", tgt_tensor}});
   }
 
-  std::vector<std::string> text_chunks;
-  size_t last_pos = 0;
-
-  for (auto it = image_tag_begin; it != image_tag_end; ++it) {
-    auto match = *it;
-    text_chunks.push_back(prompt.substr(last_pos, match.position() - last_pos));
-    last_pos = match.position() + match.length();
-  }
-
-  text_chunks.push_back(prompt.substr(last_pos));
-
-  std::string new_prompt;
-  for (int32_t i = 0; i < static_cast<int32_t>(image_size_list.size()); ++i) {
-    new_prompt += text_chunks[i];
-    new_prompt += get_slice_image_placeholder(image_size_list[i], i);
-  }
-
-  new_prompt += text_chunks.back();
-  prompt = new_prompt;
+  return true;
 }
 
-void MiniCPMInputProcessor::find_mm_spans(const std::vector<int>& prompt,
-                                          MMData& mm_data) {
-  uint32_t global_mm_index = 0;
-  uint32_t offset = 0;
-  uint32_t length = 0;
-  auto& mm_items = mm_data.items<MMItemVec>();
-  auto start = prompt.begin();
-  while (true) {
-    auto image_start_it = std::find(start, prompt.end(), im_start_id_);
-    auto image_end_it = std::find(start, prompt.end(), im_end_id_);
-    if (image_start_it == prompt.end()) {
-      break;
-    }
-    offset = std::distance(prompt.begin(), image_start_it);
-    length = std::distance(image_start_it + 1, image_end_it);
-    auto& item = mm_items[global_mm_index++];
-    item.mutable_state().mutable_token_pos() = {offset + 1, length};
-    start = std::next(image_end_it);
+bool MiniCPMVInputProcessor::process_image(
+    torch::Tensor image,
+    std::vector<torch::Tensor>& new_images,
+    std::vector<torch::Tensor>& tgt_sizes) {
+  auto image_patches = get_sliced_images(image, max_slice_nums_);
+
+  for (auto& patch : image_patches) {
+    patch = patch.to(torch::kFloat32);
+    patch = patch / 255.0;
+    patch = this->normalize(patch, norm_mean_, norm_std_);
+
+    const auto& one_patch_size = patch.sizes();
+    int64_t tgt_h = one_patch_size[1] / patch_size_;
+    int64_t tgt_w = one_patch_size[2] / patch_size_;
+    tgt_sizes.emplace_back(torch::tensor({tgt_h, tgt_w}, torch::kInt64));
+
+    patch = this->reshape_by_patch(patch);
+    new_images.emplace_back(patch);
   }
+  return true;
 }
 
-std::string MiniCPMInputProcessor::get_image_id_placeholder(int32_t idx) const {
-  return im_id_start_ + std::to_string(idx) + im_id_end_;
+std::pair<int32_t, int32_t> MiniCPMVInputProcessor::find_best_resize(
+    const std::pair<int32_t, int32_t>& original_size,
+    int32_t scale_resolution,
+    int32_t patch_size,
+    bool allow_upscale) const {
+  int32_t width = original_size.first;
+  int32_t height = original_size.second;
+
+  if ((width * height > scale_resolution * scale_resolution) || allow_upscale) {
+    float aspect_ratio = static_cast<float>(width) / height;
+    height = static_cast<int32_t>(scale_resolution / std::sqrt(aspect_ratio));
+    width = static_cast<int32_t>(height * aspect_ratio);
+  }
+
+  int32_t best_width = ensure_divide(width, patch_size);
+  int32_t best_height = ensure_divide(height, patch_size);
+
+  return {best_width, best_height};
 }
 
-std::string MiniCPMInputProcessor::get_grid_placeholder(
-    const std::pair<int32_t, int32_t>& grid) const {
-  if (grid.first == 0 || grid.second == 0) {
-    return "";
-  }
-
-  std::string slice_placeholder = slice_start_token_;
-
-  for (int32_t i = 0; i < image_feature_size_; ++i) {
-    slice_placeholder += unk_token_;
-  }
-
-  slice_placeholder += slice_end_token_;
-
-  std::string grid_placeholder;
-
-  for (int32_t i = 0; i < grid.second; ++i) {
-    for (int32_t j = 0; j < grid.first; ++j) {
-      grid_placeholder += slice_placeholder;
-    }
-    if (i < grid.second - 1) {
-      grid_placeholder += "\n";
-    }
-  }
-
-  return grid_placeholder;
-}
-
-std::string MiniCPMInputProcessor::get_slice_image_placeholder(
-    const std::pair<int32_t, int32_t>& image_size,
-    int32_t image_idx,
+std::pair<int32_t, int32_t> MiniCPMVInputProcessor::get_sliced_grid(
+    const std::pair<int32_t, int32_t>& original_size,
     int32_t max_slice_nums,
-    std::optional<bool> use_image_id_opt) const {
-  if (max_slice_nums < 0) {
-    max_slice_nums = max_slice_nums_;
+    int32_t scale_resolution,
+    bool never_split) {
+  int32_t width = original_size.first;
+  int32_t height = original_size.second;
+
+  double log_ratio = std::log(static_cast<double>(width) / height);
+  double ratio = static_cast<double>(width * height) /
+                 (scale_resolution * scale_resolution);
+  int32_t multiple =
+      std::min(static_cast<int32_t>(std::ceil(ratio)), max_slice_nums);
+  if (never_split || multiple <= 1) {
+    return {-1, -1};
   }
 
-  bool use_image_id =
-      use_image_id_opt.has_value() ? use_image_id_opt.value() : use_image_id_;
+  std::vector<int32_t> candidate_split_grids_nums;
+  candidate_split_grids_nums.reserve(3);
+  for (int32_t i : {static_cast<int32_t>(multiple - 1),
+                    multiple,
+                    static_cast<int32_t>(multiple + 1)}) {
+    if (i > 1 && i <= max_slice_nums) {
+      candidate_split_grids_nums.emplace_back(i);
+    }
+  }
 
+  std::vector<std::pair<int32_t, int32_t>> candidate_grids;
+  candidate_grids.reserve(2 * multiple);
+  for (int32_t split_grids_nums : candidate_split_grids_nums) {
+    for (int32_t m = 1; m <= split_grids_nums; ++m) {
+      if (split_grids_nums % m == 0) {
+        candidate_grids.emplace_back(m, split_grids_nums / m);
+      }
+    }
+  }
+
+  std::pair<int32_t, int32_t> best_grid = {1, 1};
+  double min_error = std::numeric_limits<double>::infinity();
+  for (const auto& grid : candidate_grids) {
+    double error = std::abs(
+        log_ratio - std::log(static_cast<double>(grid.first) / grid.second));
+    if (error < min_error) {
+      best_grid = grid;
+      min_error = error;
+    }
+  }
+
+  return best_grid;
+}
+
+std::vector<std::vector<torch::Tensor>>
+MiniCPMVInputProcessor::split_to_patches(
+    const torch::Tensor& image,
+    const std::pair<int32_t, int32_t>& grid) const {
+  int64_t width = image.size(2);
+  int64_t height = image.size(1);
+  int64_t grid_x = width / grid.first;
+  int64_t grid_y = height / grid.second;
+  std::vector<std::vector<torch::Tensor>> patches;
+  patches.reserve(grid.second + 1);
+  for (int64_t i = 0; i < height; i += grid_y) {
+    std::vector<torch::Tensor> row_patches;
+    row_patches.reserve(grid.first + 1);
+    for (int64_t j = 0; j < width; j += grid_x) {
+      torch::Tensor patch;
+      patch = image.index({torch::indexing::Slice(),
+                           torch::indexing::Slice(i, i + grid_y),
+                           torch::indexing::Slice(j, j + grid_x)});
+      patch = patch.clone();
+      row_patches.emplace_back(patch);
+    }
+    if (!row_patches.empty()) patches.emplace_back(row_patches);
+  }
+
+  return patches;
+}
+
+std::pair<int32_t, int32_t> MiniCPMVInputProcessor::get_refine_size(
+    const std::pair<int32_t, int32_t>& original_size,
+    const std::pair<int32_t, int32_t>& grid,
+    int32_t scale_resolution,
+    int32_t patch_size,
+    bool allow_upscale) const {
+  int32_t width = original_size.first;
+  int32_t height = original_size.second;
+  int32_t grid_x = grid.first;
+  int32_t grid_y = grid.second;
+
+  int32_t refine_width = ensure_divide(width, grid_x);
+  int32_t refine_height = ensure_divide(height, grid_y);
+
+  float grid_width = static_cast<float>(refine_width) / grid_x;
+  float grid_height = static_cast<float>(refine_height) / grid_y;
+
+  auto best_grid_size = find_best_resize(
+      {grid_width, grid_height}, scale_resolution, patch_size, allow_upscale);
+  return {best_grid_size.first * grid_x, best_grid_size.second * grid_y};
+}
+
+std::tuple<torch::Tensor,
+           std::vector<std::vector<torch::Tensor>>,
+           std::pair<int32_t, int32_t>>
+MiniCPMVInputProcessor::slice_image(const torch::Tensor& image,
+                                    int32_t max_slice_nums,
+                                    int32_t scale_resolution,
+                                    int32_t patch_size,
+                                    bool never_split) {
+  std::pair<int32_t, int32_t> original_size = {
+      static_cast<int32_t>(image.size(2)), static_cast<int32_t>(image.size(1))};
+  torch::Tensor source_image;
+  std::vector<std::vector<torch::Tensor>> patches;
+
+  auto best_grid = get_sliced_grid(
+      original_size, max_slice_nums, scale_resolution, never_split);
+
+  if (best_grid.first == -1 && best_grid.second == -1) {
+    auto best_size =
+        find_best_resize(original_size, scale_resolution, patch_size, true);
+    std::vector<int64_t> size = {best_size.second, best_size.first};
+    source_image = resize(image, size, 3, true);
+  } else {
+    auto best_resize =
+        find_best_resize(original_size, scale_resolution, patch_size);
+    auto refine_size = get_refine_size(
+        original_size, best_grid, scale_resolution, patch_size, true);
+
+    std::vector<int64_t> best_size = {best_resize.second, best_resize.first};
+    source_image = this->resize(image, best_size, 3, true);
+
+    std::vector<int64_t> refine_sz = {refine_size.second, refine_size.first};
+    torch::Tensor refine_image = this->resize(image, refine_sz, 3, true);
+
+    patches = split_to_patches(refine_image, best_grid);
+  }
+  return {source_image, patches, best_grid};
+}
+
+torch::Tensor MiniCPMVInputProcessor::reshape_by_patch(
+    const torch::Tensor& image) {
+  if (image.dim() != 3) {
+    LOG(ERROR) << "Input must be a 3D tensor with shape [C, H, W].";
+    return torch::Tensor();
+  }
+
+  auto input = image.unsqueeze(0);
+
+  auto unfolded = torch::nn::functional::unfold(
+      input,
+      torch::nn::functional::UnfoldFuncOptions({patch_size_, patch_size_})
+          .stride({patch_size_, patch_size_}));
+
+  unfolded = unfolded.squeeze(0);
+  auto reshaped =
+      unfolded.reshape({image.size(0), patch_size_, patch_size_, -1});
+  reshaped =
+      reshaped.permute({0, 1, 3, 2}).reshape({image.size(0), patch_size_, -1});
+  return reshaped;
+}
+
+std::vector<torch::Tensor> MiniCPMVInputProcessor::get_sliced_images(
+    const torch::Tensor& image,
+    int32_t max_slice_nums) {
+  std::vector<torch::Tensor> slice_images;
+  // bool slice_mode = true;
+  if (!slice_mode_) {
+    slice_images.reserve(1);
+    slice_images.emplace_back(image);
+    return slice_images;
+  }
+
+  max_slice_nums = (max_slice_nums == -1) ? max_slice_nums_ : max_slice_nums;
   assert(max_slice_nums > 0);
 
-  auto grid = MiniCPMVImageProcessor::get_sliced_grid(
-      image_size, max_slice_nums, scale_resolution_);
+  auto [source_image, patches, sliced_grid] =
+      slice_image(image, max_slice_nums, scale_resolution_, patch_size_, false);
 
-  std::string image_placeholder = im_start_token_;
-
-  for (int i = 0; i < image_feature_size_; ++i) {
-    image_placeholder += unk_token_;
+  auto gx = (sliced_grid.first > 0) ? sliced_grid.first : 0;
+  auto gy = (sliced_grid.second > 0) ? sliced_grid.second : 0;
+  auto total = 1 + static_cast<size_t>(gx) * static_cast<size_t>(gy);
+  slice_images.reserve(total);
+  slice_images.emplace_back(source_image);
+  if (!patches.empty()) {
+    for (auto& row : patches) {
+      for (auto& patch : row) {
+        slice_images.emplace_back(patch);
+      }
+    }
   }
-
-  image_placeholder += im_end_token_;
-
-  std::string final_placeholder;
-
-  if (use_image_id) {
-    final_placeholder = get_image_id_placeholder(image_idx) + image_placeholder;
-  } else {
-    final_placeholder = image_placeholder;
-  }
-
-  if (slice_mode_) {
-    final_placeholder += get_grid_placeholder(grid);
-  }
-
-  return final_placeholder;
+  return slice_images;
 }
 
 }  // namespace xllm

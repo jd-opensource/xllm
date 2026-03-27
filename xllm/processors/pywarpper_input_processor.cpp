@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "pywarpper_image_processor.h"
+#include "pywarpper_input_processor.h"
 
 #include <pybind11/embed.h>
 #include <torch/extension.h>
@@ -68,11 +68,11 @@ class __attribute__((visibility("hidden"))) PyWrapperImpl {
   butil::Lock lock_;
 };
 
-PyWarpperImageProcessor::PyWarpperImageProcessor(const ModelArgs&) {
+PyWarpperInputProcessor::PyWarpperInputProcessor(const ModelArgs&) {
   PyWrapperImpl::instance();
 }
 
-bool PyWarpperImageProcessor::process(const MMInput& inputs, MMData& datas) {
+bool PyWarpperInputProcessor::process(const MMInput& inputs, MMData& datas) {
   return PyWrapperImpl::instance().execute(inputs, datas);
 }
 

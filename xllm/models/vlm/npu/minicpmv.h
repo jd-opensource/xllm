@@ -30,9 +30,8 @@ limitations under the License.
 #include "core/layers/npu/npu_siglip_encoder_layer_impl.h"
 #include "models/llm/npu/qwen2.h"
 #include "models/model_registry.h"
-#include "processors/minicpmv_image_processor.h"
 #include "processors/minicpmv_input_processor.h"
-#include "processors/pywarpper_image_processor.h"
+#include "processors/minicpmv_prompt_processor.h"
 
 namespace xllm::npu::model {
 
@@ -1096,8 +1095,9 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
 TORCH_MODULE(MiniCPMV2_6);
 
 REGISTER_CAUSAL_VLM_MODEL(minicpmv, MiniCPMV2_6);
-REGISTER_INPUT_PROCESSOR(minicpmv, MiniCPMInputProcessor);
-REGISTER_IMAGE_PROCESSOR(minicpmv, MiniCPMVImageProcessor);
+REGISTER_MULTIMODAL_PROCESSOR(minicpmv,
+                              MiniCPMVInputProcessor,
+                              MiniCPMPromptProcessor);
 
 REGISTER_MODEL_ARGS(minicpmv, [&] {
   // text config
