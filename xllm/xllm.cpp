@@ -114,8 +114,7 @@ int run() {
 
   std::filesystem::path model_path =
       std::filesystem::path(FLAGS_model).lexically_normal();
-  const std::string default_model_name =
-      xllm::util::extract_model_name_from_path(model_path);
+  const std::string default_model_name = xllm::util::get_model_name(model_path);
 
   if (FLAGS_model_id.empty()) {
     // use last part of the path as model id
