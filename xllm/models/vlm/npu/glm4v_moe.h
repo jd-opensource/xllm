@@ -33,8 +33,7 @@ limitations under the License.
 #include "models/llm/npu/glm4_moe.h"
 #include "models/model_registry.h"
 #include "processors/glm4v_image_processor.h"
-#include "processors/input_processor.h"
-#include "xllm_atb_layers/core/include/atb_speed/log.h"
+#include "processors/glm4v_input_processor.h"
 
 namespace xllm::npu::model {
 
