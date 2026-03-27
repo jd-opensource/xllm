@@ -36,8 +36,6 @@ limitations under the License.
 #include "core/framework/xtensor/options.h"
 #include "core/framework/xtensor/xtensor_allocator.h"
 #include "core/util/device_name_utils.h"
-#include "core/util/json_reader.h"
-#include "core/util/model_config_utils.h"
 #include "core/util/net.h"
 #include "core/util/utils.h"
 #include "function_call/function_call_parser.h"
@@ -116,15 +114,11 @@ int run() {
 
   std::filesystem::path model_path =
       std::filesystem::path(FLAGS_model).lexically_normal();
+  const std::string default_model_name = xllm::util::get_model_name(model_path);
 
   if (FLAGS_model_id.empty()) {
     // use last part of the path as model id
-    if (model_path.has_filename()) {
-      FLAGS_model_id = std::filesystem::path(FLAGS_model).filename();
-    } else {
-      FLAGS_model_id =
-          std::filesystem::path(FLAGS_model).parent_path().filename();
-    }
+    FLAGS_model_id = default_model_name;
   }
 
   if (FLAGS_backend.empty()) {
@@ -319,12 +313,7 @@ int run() {
 
   // supported models
   std::vector<std::string> model_names = {FLAGS_model_id};
-  std::string model_version;
-  if (model_path.has_filename()) {
-    model_version = std::filesystem::path(FLAGS_model).filename();
-  } else {
-    model_version = std::filesystem::path(FLAGS_model).parent_path().filename();
-  }
+  std::string model_version = default_model_name;
   std::vector<std::string> model_versions = {model_version};
 
   if (FLAGS_node_rank == 0 || FLAGS_enable_xtensor) {

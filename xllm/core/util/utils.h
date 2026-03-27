@@ -124,6 +124,26 @@ inline bool is_mla_model_type(std::string_view model_type) {
   return mla_model_type_set().contains(std::string(model_type));
 }
 
+inline std::string get_model_name(
+    const std::filesystem::path& normalized_model_path) {
+  std::string model_name;
+
+  if (normalized_model_path.has_filename()) {
+    model_name = normalized_model_path.filename().string();
+  } else {
+    model_name = normalized_model_path.parent_path().filename().string();
+  }
+
+  if (model_name.empty()) {
+    LOG(FATAL) << "Cannot extract model name from path, as it appears to be a "
+                  "root directory: "
+               << normalized_model_path.string();
+    return "";
+  }
+
+  return model_name;
+}
+
 inline std::string get_model_type(const std::filesystem::path& model_path) {
   JsonReader reader;
   std::filesystem::path config_json_path = model_path / "config.json";
