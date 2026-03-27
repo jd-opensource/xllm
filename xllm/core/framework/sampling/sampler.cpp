@@ -19,6 +19,8 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <utility>
+
 #include "common/global_flags.h"
 #include "logits_utils.h"
 #include "sampling_params.h"
@@ -75,25 +77,30 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
   output.probs = probs.to(logits.dtype());
   output.next_tokens = samples;
 
+  const bool has_candidate_ids = has_candidate_token_ids();
+  if (has_candidate_ids) {
+    CHECK_EQ(sample_logits.size(-1), candidate_token_ids_tensor_.size(0))
+        << "Candidate token ids size must match sampler logits last dimension.";
+  }
+
   if (params.logprobs) {
-    if (FLAGS_enable_qwen3_reranker) {
-      int32_t false_id = 2152;  // "no"
-      int32_t true_id = 9693;   // "yes"
-      auto indices =
-          torch::tensor({false_id, true_id}, torch::kLong).to(samples.device());
-      sample_logits = sample_logits.index_select(/*dim=*/1, indices);
-      auto logprobs = torch::log_softmax(
-          sample_logits, /*dim=*/1, /*dtype=*/torch::kFloat32);
-      logprobs = logprobs.index({torch::indexing::Slice(), 1});
-      output.logprobs = logprobs.view({-1}).exp();
-      return output;
-    }
     // log_softmax is equivalent to log(softmax) but more numerically stable
     const auto logprobs = torch::log_softmax(
         sample_logits, /*dim=*/-1, /*dtype=*/torch::kFloat32);
     // select the logprobs for each sequence
     auto selected_logprobs = logprobs.gather(/*dim=*/-1, samples.view({-1, 1}));
-    output.logprobs = selected_logprobs.view({-1});
+    selected_logprobs = selected_logprobs.view({-1});
+
+    if (FLAGS_enable_qwen3_reranker) {
+      CHECK(has_candidate_ids)
+          << "Qwen3 reranker mode requires candidate token ids.";
+      CHECK_EQ(sample_logits.size(-1), 2)
+          << "Qwen3 reranker requires exactly two candidate logits.";
+
+      selected_logprobs =
+          logprobs.index({torch::indexing::Slice(), 1}).view({-1}).exp();
+    }
+    output.logprobs = selected_logprobs;
 
     if (params.max_top_logprobs > 0) {
       auto [values, indices] =
@@ -103,7 +110,49 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
     }
   }
 
+  if (has_candidate_ids) {
+    output.next_tokens = map_local_to_global_token_ids(output.next_tokens);
+    if (output.top_tokens.defined()) {
+      output.top_tokens = map_local_to_global_token_ids(output.top_tokens);
+    }
+  }
+
   return output;
+}
+
+void Sampler::set_candidate_token_ids(std::vector<int64_t> candidate_token_ids,
+                                      std::optional<torch::Device> device) {
+  if (candidate_token_ids.empty()) {
+    candidate_token_ids_tensor_ = torch::Tensor();
+    return;
+  }
+
+  auto options = torch::TensorOptions().dtype(torch::kLong);
+  if (device.has_value()) {
+    options = options.device(device.value());
+  }
+  candidate_token_ids_tensor_ = torch::tensor(candidate_token_ids, options);
+}
+
+torch::Tensor Sampler::map_local_to_global_token_ids(
+    const torch::Tensor& token_ids) const {
+  if (!token_ids.defined() || !has_candidate_token_ids()) {
+    return token_ids;
+  }
+
+  auto local_token_ids = token_ids.reshape({-1});
+  if (local_token_ids.scalar_type() != torch::kLong) {
+    local_token_ids = local_token_ids.to(torch::kLong);
+  }
+
+  torch::Tensor mapping = candidate_token_ids_tensor_;
+  if (mapping.device() != token_ids.device()) {
+    mapping = mapping.to(token_ids.device(),
+                         /*dtype=*/torch::kLong,
+                         /*non_blocking=*/true,
+                         /*copy=*/false);
+  }
+  return mapping.index_select(/*dim=*/0, local_token_ids).view_as(token_ids);
 }
 
 torch::Tensor Sampler::greedy_sample(const torch::Tensor& probs) {

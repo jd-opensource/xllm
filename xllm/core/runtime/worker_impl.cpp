@@ -50,6 +50,7 @@ limitations under the License.
 #include "framework/model/npu_cp_ep_padding.h"
 #include "framework/model_loader.h"
 #include "framework/sampling/sampler.h"
+#include "framework/sampling/sampler_utils.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/xtensor/global_xtensor.h"
 #include "framework/xtensor/xtensor_allocator.h"
@@ -882,6 +883,14 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   } else if (tokenizer_vocab_size > model_vocab_size) {
     LOG(WARNING) << "Unsafe vocab mismatch: tokenizer: " << tokenizer_vocab_size
                  << ", model: " << model_vocab_size;
+  }
+
+  candidate_token_ids_ = resolve_candidate_token_ids(args.vocab_size());
+  sampler_->set_candidate_token_ids(candidate_token_ids_, device_.unwrap());
+  args.candidate_token_ids(candidate_token_ids_);
+  if (!candidate_token_ids_.empty()) {
+    LOG(INFO) << "Resolved candidate token ids for lm_head pruning. size="
+              << candidate_token_ids_.size();
   }
 
 #if defined(USE_NPU)

@@ -19,6 +19,9 @@ limitations under the License.
 #include <torch/torch.h>
 #include <torch/types.h>
 
+#include <optional>
+#include <vector>
+
 #include "sampling_params.h"
 
 namespace xllm {
@@ -37,12 +40,29 @@ class Sampler final {
   SampleOutput forward(torch::Tensor& logits,
                        const SamplingParameters& params) const;
 
+  // Set runtime-resolved global candidate token ids for local->global mapping.
+  void set_candidate_token_ids(
+      std::vector<int64_t> candidate_token_ids,
+      std::optional<torch::Device> device = std::nullopt);
+
   // helper functions
   // probs: [..., vocab_size]
   static torch::Tensor greedy_sample(const torch::Tensor& probs);
 
   // probs: [..., vocab_size]
   static torch::Tensor random_sample(const torch::Tensor& probs);
+
+  // Convert sampled local ids in candidate space back to global token ids.
+  torch::Tensor map_local_to_global_token_ids(
+      const torch::Tensor& token_ids) const;
+
+  bool has_candidate_token_ids() const {
+    return candidate_token_ids_tensor_.defined() &&
+           candidate_token_ids_tensor_.numel() > 0;
+  }
+
+ private:
+  torch::Tensor candidate_token_ids_tensor_;
 };
 
 }  // namespace xllm

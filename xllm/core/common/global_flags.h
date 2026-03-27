@@ -258,6 +258,9 @@ DECLARE_bool(enable_topk_sorted);
 
 DECLARE_bool(output_rec_logprobs);
 
+// --- candidate token config ---
+DECLARE_string(candidate_token_ids);
+
 // --- qwen3 reranker config ---
 DECLARE_bool(enable_qwen3_reranker);
 

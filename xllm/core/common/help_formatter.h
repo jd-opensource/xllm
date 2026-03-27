@@ -48,6 +48,7 @@ const OptionCategory kCommonOptions = {"COMMON OPTIONS",
                                         "enable_prefill_piecewise_graph",
                                         "max_tokens_for_graph_mode",
                                         "communication_backend",
+                                        "candidate_token_ids",
                                         "task"}};
 
 const OptionCategory kCacheOptions = {"KV CACHE OPTIONS",

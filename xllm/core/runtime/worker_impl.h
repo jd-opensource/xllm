@@ -191,6 +191,12 @@ class WorkerImpl {
     return context_.get_optimization_config();
   }
 
+  const std::vector<int64_t>& candidate_token_ids() const {
+    return candidate_token_ids_;
+  }
+
+  bool has_candidate_token_ids() const { return !candidate_token_ids_.empty(); }
+
  protected:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
   // Only used for deepseek chunked prefill ops on npu device
@@ -269,6 +275,9 @@ class WorkerImpl {
 #endif
 
   bool is_spec_draft_ = false;
+
+  // Resolved once at worker init and reused as read-only runtime config.
+  std::vector<int64_t> candidate_token_ids_;
 
   Status status_ = Status::UNINITIALIZED;
 

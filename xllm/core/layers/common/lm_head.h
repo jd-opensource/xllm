@@ -25,7 +25,7 @@ class LmHead : public torch::nn::ModuleHolder<RowParallelLinearImpl> {
   using torch::nn::ModuleHolder<RowParallelLinearImpl>::ModuleHolder;
   using Impl __attribute__((__unused__)) = RowParallelLinearImpl;
 
-  LmHead(const ModelContext& context)
+  explicit LmHead(const ModelContext& context, int64_t out_features = -1)
       : ModuleHolder(std::make_shared<RowParallelLinearImpl>(
             // NOTE: Quantization should NOT be used for the final language
             // modeling head (lm_head). The output logits must remain in high
@@ -33,7 +33,8 @@ class LmHead : public torch::nn::ModuleHolder<RowParallelLinearImpl> {
             // and correct evaluation of loss and predictions. Always use
             // unquantized weights here.
             context.get_model_args().hidden_size(),
-            context.get_model_args().vocab_size(),
+            out_features > 0 ? out_features
+                             : context.get_model_args().vocab_size(),
             /*bias=*/false,
             /*input_is_parallelized=*/false,
             /*enable_result_reduction=*/true,

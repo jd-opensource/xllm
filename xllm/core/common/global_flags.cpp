@@ -539,6 +539,12 @@ DEFINE_bool(
     "When enabled, missing per-token logprobs are filled with the final "
     "beam logprob.");
 
+// --- candidate token config ---
+DEFINE_string(candidate_token_ids,
+              "",
+              "Comma-separated candidate token id list for lm_head pruning, "
+              "e.g. 2152,9693.");
+
 // --- reasoning parser config ---
 
 DEFINE_string(reasoning_parser,

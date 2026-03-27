@@ -31,6 +31,12 @@ xLLM uses gflags to manage service startup parameters. The specific parameter me
 | `max_cache_size` | `int64` | 0 |  | The usable KV Cache size in bytes. |  |
 | `kv_cache_dtype` | `string` | "auto" | "int8" | KV Cache data type. "auto" aligns with model dtype (no quantization), "int8" enables INT8 quantization to save ~50% memory. MLU backend only. |  |
 
+## LM Head Candidate Pruning and Qwen3 Reranker Parameters
+| Parameter Name | Type | Default Value | Other Values | Description | Notes |
+|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|
+| `candidate_token_ids` | `string` | "" | e.g. `2152,9693` | Candidate token id list (comma-separated). When enabled, `lm_head` output dimension is pruned to candidate size. | Recommended for production |
+| `enable_qwen3_reranker` | `bool` | false | true | Whether to enable qwen3 reranker service semantics. | Requires deduplicated candidate size `K==2` when enabled |
+
 ## MoE Model Related Parameters
 | Parameter Name | Type | Default Value | Other Values | Description | Notes |
 |:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|
