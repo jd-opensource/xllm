@@ -29,6 +29,7 @@ class Glm4VImageProcessor : public ImageProcessor {
   ~Glm4VImageProcessor() override = default;
 
   bool process(const MMInput& mm_inputs, MMData& mm_datas) override;
+  void apply_mm_process_config(const MMProcessConfig& config) override;
 
  private:
   bool process_images(std::vector<torch::Tensor> images, MMData& mm_datas);

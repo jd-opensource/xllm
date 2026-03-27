@@ -103,6 +103,10 @@ VLMMaster::VLMMaster(const Options& options)
                << model_args_.model_type();
   } else {
     image_processor_ = image_processor_factory(model_args_);
+    if (options_.mm_process_config().has_value()) {
+      image_processor_->apply_mm_process_config(
+          options_.mm_process_config().value());
+    }
   }
 
   // construct tokenizer and handling threads

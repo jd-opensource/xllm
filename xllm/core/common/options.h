@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
+#include "common/multimodal_config.h"
 #include "common/types.h"
 
 namespace xllm {
@@ -50,6 +51,8 @@ class Options {
 
   // max image num per prompt, default 4
   PROPERTY(int32_t, limit_image_per_prompt) = 4;
+
+  PROPERTY(std::optional<MMProcessConfig>, mm_process_config);
 
   // block size, default 128
   PROPERTY(int32_t, block_size) = 128;

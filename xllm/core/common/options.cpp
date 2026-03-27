@@ -25,6 +25,10 @@ std::string Options::to_string() const {
      << ", draft_devices: " << draft_devices().value_or("null")
      << ", backend: " << backend()
      << ", limit_image_per_prompt: " << limit_image_per_prompt()
+     << ", mm_process_config: "
+     << (mm_process_config().has_value()
+             ? mm_process_config().value().to_string()
+             : "null")
      << ", block_size: " << block_size()
      << ", max_cache_size: " << max_cache_size()
      << ", max_memory_utilization: " << max_memory_utilization()
