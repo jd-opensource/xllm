@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "llm_worker_impl.h"
 
+#include <absl/time/clock.h>
+#include <absl/time/time.h>
 #include <c10/core/DeviceGuard.h>
 #include <folly/Unit.h>
 #include <folly/futures/Future.h>
@@ -146,11 +148,17 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     // prefill/decode stage, so, to judge transfer_kv_infos.empty,
     if (options_.kv_cache_transfer_mode() == "PUSH" &&
         !input.transfer_kv_infos.empty()) {
+      const auto wait_start = absl::Now();
       auto results =
           folly::collectAll(futures).within(std::chrono::seconds(60)).get();
+      HISTOGRAM_OBSERVE(disagg_pd_push_kv_cache_extra_wait_microseconds,
+                        absl::ToInt64Microseconds(absl::Now() - wait_start));
       for (const auto& result : results) {
         // TODO: Add error handling
-        if (!result.value()) {
+        if (result.value()) {
+          COUNTER_PER_MINUTE_INC(disagg_pd_push_kv_cache_ok_total);
+        } else {
+          COUNTER_PER_MINUTE_INC(disagg_pd_push_kv_cache_fail_total);
           LOG(ERROR) << "kv_cache_transfer_ failed";
           break;
         }
@@ -208,11 +216,17 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
 
   if (options_.kv_cache_transfer_mode() == "PUSH" &&
       !input.transfer_kv_infos.empty()) {
+    const auto wait_start = absl::Now();
     auto results =
         folly::collectAll(futures).within(std::chrono::seconds(60)).get();
+    HISTOGRAM_OBSERVE(disagg_pd_push_kv_cache_extra_wait_microseconds,
+                      absl::ToInt64Microseconds(absl::Now() - wait_start));
     for (const auto& result : results) {
       // TODO: Add error handling
-      if (!result.value()) {
+      if (result.value()) {
+        COUNTER_PER_MINUTE_INC(disagg_pd_push_kv_cache_ok_total);
+      } else {
+        COUNTER_PER_MINUTE_INC(disagg_pd_push_kv_cache_fail_total);
         LOG(ERROR) << "kv_cache_transfer_ failed";
         break;
       }
