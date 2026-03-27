@@ -48,7 +48,7 @@ namespace layer {
 class NpuQwen2DecoderLayerImpl : public BaseLayer {
  public:
   explicit NpuQwen2DecoderLayerImpl(const ModelContext& context,
-                                    bool is_fia = false);
+                                    bool is_fia = true);
 
   ~NpuQwen2DecoderLayerImpl() override = default;
 
