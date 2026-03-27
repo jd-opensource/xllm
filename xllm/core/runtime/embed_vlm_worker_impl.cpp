@@ -70,7 +70,6 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
   auto model_output = model_executor_->forward(
       flatten_tokens, flatten_positions, kv_caches_, params);
   auto hidden_states = model_output.hidden_states;
-
   ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
 
@@ -81,13 +80,26 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
   // driver prepare model output
   ForwardOutput output;
   SampleOutput sample_output;
-
   if (sampling_params.selected_token_idxes.defined() &&
       input.sampling_params.is_embeddings) {
     EmbeddingVLM* em_model = dynamic_cast<EmbeddingVLM*>(model_.get());
     auto embeddings =
         em_model->pooler(hidden_states, sampling_params.selected_token_idxes);
     sample_output.embeddings = embeddings;
+    // split full embeddings and add them to mm_embeddings
+    // so that the user could receive embeddings of images and texts
+    if (FLAGS_enable_return_mm_full_embeddings) {
+      auto q_seq_len_vec = input.input_params.q_seq_lens_vec;
+      sample_output.mm_embeddings.reserve(q_seq_len_vec.size());
+      int32_t token_start_idx = 0;
+      for (auto seq_len : q_seq_len_vec) {
+        auto image_embed =
+            embeddings.slice(0, token_start_idx, token_start_idx + seq_len);
+        sample_output.mm_embeddings.emplace_back(image_embed);
+        token_start_idx += seq_len;
+      }
+    }
+
     output.sample_output = sample_output;
     output.embedding = embeddings;
   }

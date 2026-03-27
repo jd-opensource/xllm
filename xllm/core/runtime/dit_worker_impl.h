@@ -27,24 +27,34 @@ limitations under the License.
 #include "options.h"
 #include "platform/device.h"
 #include "util/threadpool.h"
+#include "worker_impl.h"
 
 namespace xllm {
 
-class DiTWorker {
+class DiTWorkerImpl : public WorkerImpl {
  public:
-  DiTWorker(const ParallelArgs& parallel_args,
-            const torch::Device& device,
-            const runtime::Options& options);
+  DiTWorkerImpl(const ParallelArgs& parallel_args,
+                const torch::Device& device,
+                const runtime::Options& options);
 
-  ~DiTWorker() = default;
+  ~DiTWorkerImpl() = default;
 
   // initialize model, cache manager. blocking call
-  bool init_model(const std::string& model_weights_path);
+  bool init_model(const std::string& model_weights_path,
+                  int32_t random_seed,
+                  MasterStatus master_status) override;
 
   folly::SemiFuture<bool> init_model_async(
-      const std::string& model_weights_path);
+      const std::string& model_weights_path,
+      int32_t random_seed,
+      MasterStatus master_status) override;
 
-  std::optional<DiTForwardOutput> step(const DiTForwardInput& inputs);
+  bool init_model(ModelContext& context) override;
+
+  std::optional<ForwardOutput> step(const ForwardInput& inputs) override;
+
+  folly::SemiFuture<std::optional<ForwardOutput>> step_async(
+      const ForwardInput& inputs);
 
   folly::SemiFuture<std::optional<DiTForwardOutput>> step_async(
       const DiTForwardInput& inputs);
@@ -59,20 +69,12 @@ class DiTWorker {
   int64_t get_active_activation_memory();
 
  private:
-  runtime::Options options_;
-
   std::unique_ptr<DiTModel> dit_model_;
 
   std::unique_ptr<DiTExecutor> dit_model_executor_;
 
-  Device device_;
-
-  torch::ScalarType dtype_;
-
   // model context, includes model args, parallel args and date type etc.
-  mutable DiTModelContext context_;
-
-  ParallelArgs parallel_args_;
+  mutable DiTModelContext dit_context_;
 
   ThreadPool threadpool_;
 };

@@ -27,8 +27,144 @@ namespace xllm {
 
 // dit related forward input params
 struct DiTForwardInput {
+  bool valid() const {
+    return prompts.size() > 0 || prompt_embeds.defined() ||
+           pooled_prompt_embeds.defined() || images.defined();
+  }
+
+  void save_with_prefix(std::string prefix) const {
+    torch::save(images, prefix + "images_cpp.pt");
+    torch::save(prompt_embeds, prefix + "prompt_embeds_cpp.pt");
+    torch::save(negative_prompt_embeds, prefix + "neg_prompt_embeds_cpp.pt");
+  }
+  void debug_print(std::ostream& os = std::cout) const {
+    os << "=== DiTForwardInput Debug Info ===" << std::endl;
+
+    // Print basic data types
+    os << "batch_size: " << batch_size << std::endl;
+
+    // Print prompts vectors
+    os << "prompts: [";
+    for (size_t i = 0; i < prompts.size(); ++i) {
+      os << "\"" << prompts[i] << "\"";
+      if (i < prompts.size() - 1) os << ", ";
+    }
+    os << "]" << std::endl;
+
+    os << "prompts_2: [";
+    for (size_t i = 0; i < prompts_2.size(); ++i) {
+      os << "\"" << prompts_2[i] << "\"";
+      if (i < prompts_2.size() - 1) os << ", ";
+    }
+    os << "]" << std::endl;
+
+    os << "negative_prompts: [";
+    for (size_t i = 0; i < negative_prompts.size(); ++i) {
+      os << "\"" << negative_prompts[i] << "\"";
+      if (i < negative_prompts.size() - 1) os << ", ";
+    }
+    os << "]" << std::endl;
+
+    os << "negative_prompts_2: [";
+    for (size_t i = 0; i < negative_prompts_2.size(); ++i) {
+      os << "\"" << negative_prompts_2[i] << "\"";
+      if (i < negative_prompts_2.size() - 1) os << ", ";
+    }
+    os << "]" << std::endl;
+
+    // Print tensor shapes
+    os << "\n--- Tensor Shapes ---" << std::endl;
+
+    os << "images: ";
+    if (images.defined()) {
+      os << images.sizes() << std::endl;
+    } else {
+      os << "undefined" << std::endl;
+    }
+
+    os << "condition_images: ";
+    if (condition_images.defined()) {
+      os << condition_images.sizes() << std::endl;
+    } else {
+      os << "undefined" << std::endl;
+    }
+
+    os << "mask_images: ";
+    if (mask_images.defined()) {
+      os << mask_images.sizes() << std::endl;
+    } else {
+      os << "undefined" << std::endl;
+    }
+
+    os << "control_image: ";
+    if (control_image.defined()) {
+      os << control_image.sizes() << std::endl;
+    } else {
+      os << "undefined" << std::endl;
+    }
+
+    os << "masked_image_latents: ";
+    if (masked_image_latents.defined()) {
+      os << masked_image_latents.sizes() << std::endl;
+    } else {
+      os << "undefined" << std::endl;
+    }
+
+    os << "prompt_embeds: ";
+    if (prompt_embeds.defined()) {
+      os << prompt_embeds.sizes() << std::endl;
+    } else {
+      os << "undefined" << std::endl;
+    }
+
+    os << "pooled_prompt_embeds: ";
+    if (pooled_prompt_embeds.defined()) {
+      os << pooled_prompt_embeds.sizes() << std::endl;
+    } else {
+      os << "undefined" << std::endl;
+    }
+
+    os << "negative_prompt_embeds: ";
+    if (negative_prompt_embeds.defined()) {
+      os << negative_prompt_embeds.sizes() << std::endl;
+    } else {
+      os << "undefined" << std::endl;
+    }
+
+    os << "negative_pooled_prompt_embeds: ";
+    if (negative_pooled_prompt_embeds.defined()) {
+      os << negative_pooled_prompt_embeds.sizes() << std::endl;
+    } else {
+      os << "undefined" << std::endl;
+    }
+
+    os << "latents: ";
+    if (latents.defined()) {
+      os << latents.sizes() << std::endl;
+    } else {
+      os << "undefined" << std::endl;
+    }
+
+    // Print generation_params
+    os << "\n--- Generation Parameters ---" << std::endl;
+    os << "width: " << generation_params.width << std::endl;
+    os << "height: " << generation_params.height << std::endl;
+    os << "num_inference_steps: " << generation_params.num_inference_steps
+       << std::endl;
+    os << "true_cfg_scale: " << generation_params.true_cfg_scale << std::endl;
+    os << "guidance_scale: " << generation_params.guidance_scale << std::endl;
+    os << "num_images_per_prompt: " << generation_params.num_images_per_prompt
+       << std::endl;
+    os << "seed: " << generation_params.seed << std::endl;
+    os << "max_sequence_length: " << generation_params.max_sequence_length
+       << std::endl;
+    os << "strength: " << generation_params.strength << std::endl;
+
+    os << "===============================" << std::endl;
+  }
+
   DiTForwardInput to(const torch::Device& device,
-                     torch::ScalarType dtype) const {
+                     torch::ScalarType dtype = torch::kBFloat16) const {
     DiTForwardInput input = *this;
 
     if (prompt_embeds.defined()) {
@@ -63,6 +199,14 @@ struct DiTForwardInput {
     if (mask_images.defined()) {
       input.mask_images = mask_images.to(device, dtype);
     }
+
+    if (condition_images.defined()) {
+      input.condition_images = condition_images.to(device, dtype);
+    }
+
+    if (control_image.defined()) {
+      input.control_image = control_image.to(device, dtype);
+    }
     return input;
   }
 
@@ -81,6 +225,8 @@ struct DiTForwardInput {
   std::vector<std::string> negative_prompts_2;
 
   torch::Tensor images;
+
+  torch::Tensor condition_images;
 
   torch::Tensor mask_images;
 
@@ -104,6 +250,9 @@ struct DiTForwardInput {
 
 // dit related forward output params
 struct DiTForwardOutput {
+  void save_with_prefix(std::string prefix) const {
+    torch::save(tensors[0], prefix + "dit_images_cpp.pt");
+  }
   // generated tensor
   std::vector<torch::Tensor> tensors;
 };
