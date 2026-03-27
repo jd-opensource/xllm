@@ -45,12 +45,16 @@ class ProcessGroup {
   virtual ~ProcessGroup() = default;
 
   int32_t rank() const {
-    CHECK(pg_ != nullptr) << "Process group is not initialized.";
+    if (pg_ == nullptr) {
+      return rank_;
+    }
     return pg_->getRank();
   }
 
   int32_t world_size() const {
-    CHECK(pg_ != nullptr) << "Process group is not initialized.";
+    if (pg_ == nullptr) {
+      return world_size_;
+    }
     return pg_->getSize();
   }
 

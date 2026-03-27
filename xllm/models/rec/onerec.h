@@ -18,6 +18,10 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <algorithm>
+#include <cmath>
+#include <mutex>
+#include <optional>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
@@ -28,9 +32,14 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/framework/model_loader.h"
+#include "core/layers/common/lm_head.h"
 #include "core/layers/common/word_embedding.h"
 #include "models/model_registry.h"
 #include "models/rec/rec_model_base.h"
+
+#if defined(USE_NPU)
+#include "models/rec/npu/onerec_npu_impl.h"
+#endif
 
 namespace xllm {
 
@@ -40,20 +49,72 @@ class OneRecModelImpl : public torch::nn::Module {
     hidden_size_ = context.get_model_args().hidden_size();
     options_ = context.get_tensor_options();
     shared_ = register_module("shared", layer::WordEmbedding(context));
+
+#if defined(USE_NPU)
+    encoder_ = register_module(
+        "encoder", OneRecStack(context, /*is_decode=*/false, shared_));
+    decoder_ = register_module(
+        "decoder", OneRecStack(context, /*is_decode=*/true, shared_));
+#endif
   }
 
   ModelOutput forward(const torch::Tensor& tokens,
                       const torch::Tensor& positions,
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& input_params) {
-    (void)positions;
-    (void)kv_caches;
-
     if (!tokens.defined()) {
       return ModelOutput();
     }
+    (void)positions;
+    (void)kv_caches;
 
     const auto* onerec_params = input_params.onerec_params();
+
+#if defined(USE_NPU)
+    if (onerec_params != nullptr) {
+      if (onerec_params->is_encoder_forward) {
+        std::vector<KVCache> encoder_kv_caches;
+        auto encoder_output =
+            encoder_(tokens, positions, encoder_kv_caches, input_params);
+
+        torch::Tensor cached_encoder_output;
+        if (encoder_output.defined() &&
+            onerec_params->encoder_max_seq_len > 0 &&
+            !onerec_params->encoder_seq_lens.empty()) {
+          cached_encoder_output =
+              pad_encoder_output(encoder_output, input_params);
+        } else {
+          cached_encoder_output = encoder_output;
+        }
+        {
+          std::lock_guard<std::mutex> lock(encoder_output_mutex_);
+          encoder_output_ = cached_encoder_output;
+        }
+        return ModelOutput(cached_encoder_output);
+      }
+
+      torch::Tensor cached_encoder_output;
+      if (onerec_params->has_encoder_output) {
+        std::lock_guard<std::mutex> lock(encoder_output_mutex_);
+        cached_encoder_output = encoder_output_;
+      }
+
+      const torch::Tensor& decoder_context =
+          onerec_params->decoder_context_embedding;
+
+      if (!decoder_context.defined() && !cached_encoder_output.defined()) {
+        LOG(ERROR)
+            << "OneRec decoder requires decoder_context_embedding or encoder "
+               "output.";
+        return ModelOutput();
+      }
+
+      auto decoder_output = decoder_(
+          tokens, positions, kv_caches, input_params, cached_encoder_output);
+      return ModelOutput(decoder_output);
+    }
+#endif
+
     const bool is_encoder_forward =
         (onerec_params != nullptr) && onerec_params->is_encoder_forward;
 
@@ -67,7 +128,7 @@ class OneRecModelImpl : public torch::nn::Module {
       return ModelOutput(hidden_states);
     }
 
-    auto cross_context = get_cross_context_embedding(onerec_params);
+    auto cross_context = resolve_cross_context(onerec_params);
     if (cross_context.defined()) {
       auto enriched_hidden_states =
           add_cross_context_bias(hidden_states, cross_context);
@@ -84,12 +145,39 @@ class OneRecModelImpl : public torch::nn::Module {
     if (shared_dict.size() > 0) {
       shared_->load_state_dict(shared_dict);
     }
+
+#if defined(USE_NPU)
+    auto encoder_dict = state_dict.get_dict_with_prefix("encoder.");
+    if (encoder_dict.size() > 0) {
+      encoder_->load_state_dict(encoder_dict);
+    }
+    auto decoder_dict = state_dict.get_dict_with_prefix("decoder.");
+    if (decoder_dict.size() > 0) {
+      decoder_->load_state_dict(decoder_dict);
+    }
+#endif
   }
+
+#if defined(USE_NPU)
+  void verify_loaded_weights() const {
+    encoder_->verify_loaded_weights("encoder.");
+    decoder_->verify_loaded_weights("decoder.");
+  }
+
+  void merge_loaded_weights() {
+    encoder_->merge_loaded_weights();
+    decoder_->merge_loaded_weights();
+  }
+#endif
 
   layer::WordEmbedding get_word_embedding() { return shared_; }
 
   void set_word_embedding(layer::WordEmbedding& embedding) {
     shared_ = embedding;
+#if defined(USE_NPU)
+    encoder_->set_word_embedding(shared_);
+    decoder_->set_word_embedding(shared_);
+#endif
   }
 
  private:
@@ -126,7 +214,7 @@ class OneRecModelImpl : public torch::nn::Module {
     return torch::Tensor();
   }
 
-  torch::Tensor get_cross_context_embedding(
+  torch::Tensor resolve_cross_context(
       const OneRecModelInputParams* onerec_params) const {
     if (onerec_params == nullptr) {
       return torch::Tensor();
@@ -178,6 +266,13 @@ class OneRecModelImpl : public torch::nn::Module {
   torch::TensorOptions options_;
   int64_t hidden_size_ = 0;
   layer::WordEmbedding shared_{nullptr};
+
+#if defined(USE_NPU)
+  OneRecStack encoder_{nullptr};
+  OneRecStack decoder_{nullptr};
+  torch::Tensor encoder_output_;
+  std::mutex encoder_output_mutex_;
+#endif
 };
 TORCH_MODULE(OneRecModel);
 
@@ -214,6 +309,11 @@ class OneRecForConditionalGenerationImpl
         }
       }
     }
+
+#if defined(USE_NPU)
+    model_->verify_loaded_weights();
+    model_->merge_loaded_weights();
+#endif
   }
 };
 TORCH_MODULE(OneRecForConditionalGeneration);
