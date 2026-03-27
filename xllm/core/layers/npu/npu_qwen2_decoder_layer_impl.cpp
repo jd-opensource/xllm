@@ -122,13 +122,13 @@ void NpuQwen2DecoderLayerImpl::param_from_args(
                                static_cast<int>(TransposeType::INVALID),
                                static_cast<int>(TransposeType::NOT_TRANSPOSE)};
   param.kvQuant = false;
+  param.blockSize = static_cast<int64_t>(FLAGS_block_size);
   param.quantGroupSize = 0;
   param.rmsNormEps = args.rms_norm_eps();
   param.worldSize = parallel_args.world_size();
   param.numAttentionHeadsPerRank = args.n_heads() / param.worldSize;
   param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
   param.enableIntraLayerAddNorm = false;
-  param.enableInterLayerAddNorm = false;
   // param.numKeyValueHeadsPerRank = args.n_kv_heads();
   std::optional<long int> optionalValue = args.n_kv_heads();
   param.numKeyValueHeadsPerRank =
@@ -224,11 +224,12 @@ int64_t NpuQwen2DecoderLayerImpl::init_attn_mask() {
       prefill_param_.isBF16 ? torch::kBFloat16 : torch::kFloat16;
   decode_attn_mask_ = torch::zeros({1}).to(device_).to(dtype);
   if (is_fia_) {
+    const auto fia_mask_options =
+        torch::TensorOptions().dtype(torch::kBool).device(device_);
     fia_attn_mask_ =
-        torch::tril(torch::ones({kFiaMaskSeqLen, kFiaMaskSeqLen},
-                                torch::TensorOptions()
-                                    .dtype(torch::kBool)
-                                    .device(device_)))
+        torch::triu(torch::ones({kFiaMaskSeqLen, kFiaMaskSeqLen},
+                                fia_mask_options),
+                    /*diagonal=*/1)
             .contiguous();
   }
 
