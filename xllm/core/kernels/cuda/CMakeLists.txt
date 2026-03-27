@@ -94,6 +94,18 @@ cc_library(
     :platform
 )
 
+if(TVM_RUNTIME_LOADER_LIB)
+  if(UNIX AND NOT APPLE)
+    target_link_libraries(cuda_kernels
+      PUBLIC
+        "-Wl,--no-as-needed"
+        ${TVM_RUNTIME_LOADER_LIB}
+        "-Wl,--as-needed")
+  else()
+    target_link_libraries(cuda_kernels PUBLIC ${TVM_RUNTIME_LOADER_LIB})
+  endif()
+endif()
+
 cc_test(
   NAME
     activation_test

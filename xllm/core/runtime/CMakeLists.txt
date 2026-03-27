@@ -2,6 +2,33 @@ include(cc_library)
 include(cc_binary)
 include(cc_test)
 
+function(link_tvm_tilelang_runtime TARGET_NAME)
+  if(NOT TVM_RUNTIME_LOADER_LIB)
+    message(FATAL_ERROR
+            "TVM_RUNTIME_LOADER_LIB is empty. "
+            "Please set it explicitly (for example: tvm or tvm_runtime).")
+  endif()
+  if(NOT TILELANG_LIB_NAME)
+    message(FATAL_ERROR
+            "TILELANG_LIB_NAME is empty. "
+            "Please set it explicitly (for example: tilelang).")
+  endif()
+
+  if(UNIX AND NOT APPLE)
+    target_link_libraries(${TARGET_NAME}
+      PRIVATE
+        "-Wl,--no-as-needed"
+        ${TVM_RUNTIME_LOADER_LIB}
+        ${TILELANG_LIB_NAME}
+        "-Wl,--as-needed")
+  else()
+    target_link_libraries(${TARGET_NAME}
+      PRIVATE
+        ${TVM_RUNTIME_LOADER_LIB}
+        ${TILELANG_LIB_NAME})
+  endif()
+endfunction()
+
 
 cc_library(
   NAME
@@ -176,4 +203,22 @@ cc_test(
     GTest::gtest_main
     torch
 )
+
+cc_test(
+  NAME
+    flashinfer_aot_integration_test
+  SRCS
+    flashinfer_aot_integration_test.cpp
+  DEPS
+    :runtime
+    :cuda_layers
+    :batch
+    :block
+    :kv_cache
+    :kernels
+    GTest::gtest_main
+    torch
+)
+
+link_tvm_tilelang_runtime(flashinfer_aot_integration_test)
 endif()
