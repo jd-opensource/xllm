@@ -1,3 +1,138 @@
+# Release xllm 0.9.0
+
+## **Major Features and Improvements**
+
+### Model Support
+
+#### NPU
+- Support GLM-5 model.
+- Support GLM4.7-Flash model.
+- Support Qwen3-next model.
+- Support OneRec model.
+- Support Qwen3.5/Qwen3.5-MoE model.
+#### CUDA
+- Support LongCat-Image model.
+- Support LongCat-Image-Edit model.
+#### MLU
+- Support DeepSeek-V3.2 W4A8 MoE model.
+- Support GLM-5 W8A8 model.
+#### ILU
+- Support Qwen3-8B model.
+- Support Qwen3-30B-MoE model.
+
+### Feature
+- Adapt NPU builds to CANN 8.5 and PyTorch 2.7.1.
+- Support graph mode for the LLM part of VLM models on NPU devices.
+- Support context parallelism for NPU DeepSeek-V3.2 / GLM-5.
+- Support DeepSeek-V3.2 prefill sequence parallel on MLU devices.
+- Support rolling weight loading and loading model weights with varied prefixes.
+- Support dynamic and scalable multi-model serving.
+- Support bidirectional remote-host to local-device KV cache transfer and batch offload.
+- Support Qwen3 xattention on NPU devices.
+- Support prefix cache for DeepSeek-V3.2.
+- Support chunked prefill on CUDA devices.
+- Support embedding interface for all generate LLM models.
+- Support Anthropic Messages API.
+- Support the new `v1/sample` interface.
+- Support a single xLLM instance connecting to multiple xLLM services.
+- Support startup progress bar, worker health check, and unified request statistics logging.
+- Optimize Qwen3 MoE performance on NPU devices.
+- Add CUDA Graph Executor and piecewise prefill graph.
+- Support KV cache quantization on MLU devices.
+- Add VMM-based allocators to reuse graph buffers and physical memory.
+- Improve FP8 GEMM, fused RMSNorm, fused MoE, xattention, and activation kernel performance.
+
+### Bugfix
+- Support the new `compressed-tensors` FP8 config and fix Qwen2 prompt length.
+- Fix Qwen3 MoE VL parameter settings on MLU devices.
+- Fix Qwen VL issues on MLU devices and Qwen2.5 chunked-prefill accuracy on NPU.
+- Fix DeepSeek tool-call, prefix-cache, DP/MTP, and PD-disagg related issues.
+- Fix GLM-4.7 streaming function call issues and GLM detector stability issues.
+- Fix graph mode, schedule overlap, KV cache, and REC multi-round stability issues.
+- Fix multiple compile, link, env setup, and worker lifecycle issues.
+
+
+# Release xllm 0.8.0
+
+## **Major Features and Improvements**
+
+### Model Support
+
+#### NPU
+- Support DeepSeek-v3.2 model.
+- Support GLM4.7 model.
+- Support GLM4.6Vmodel.
+- Support GME-Qwen2-VL model.
+- Support FluxControl model.
+#### CUDA
+- Support Qwen2/3 Dense model.
+#### MLU
+- Support DeepSeek-v3.2 model.
+- Support Qwen2_5_vl/Qwen3_vl/Qwen3_vl_moe model.
+#### ILU
+- Support Qwen3-0.6B model.
+
+### Feature
+- Implement chunked prefill and prefix cache for Qwen3 MoE.
+- Support GLM-4.6V model.
+- Add wrappers for ATB and ACLNN fused operators.
+- Optimize prefetch from kv cache store.
+- Support Qwen2-VL & GME-Qwen2-VL model on npu device.
+- Fix hang issue when enable schedule overlap.
+- Add GLM-4.7 detector implementation and update tool call parser.
+- Adapt hierarchy block manager for disagg PD.
+- Support deepseek-v3.2-Exp for npu.
+- Support acl_graph for qwen3/qwen3_moe.
+- Support prefix cache for deepseek-v3/r1 models.
+- Support disagg PD for MTP.
+- Add mooncake kv cache transfer.
+- Add GLM-4.7 support to reasoning detector registry.
+- Support nd-to-nz continuous memory copy.
+- Support RPC-based link/unlink for PD disaggregation.
+- Support IntraLayerAddNorm, aclgraph, etc for DeepSeek V3.2.
+- Add activation, norm and rope ops for cuda device.
+- Support fused norm for Qwen3 and DeepSeek for cuda device.
+- Build deepseek v2 decoder layer and related model files for mlu device.
+- Support qwen2_5_vl/qwen3_vl/qwen3_vl_moe on mlu device.
+- Add moe all2all kernels and deep ep layer on mlu device.
+- Support deepseek mtp on mlu device.
+- Support graph executor on mlu device.
+- Support dp+ep moe and all2all computation on mlu device.
+- Support parallelized shared experts in fused moe on mlu device.
+- Support qwen3 0.6B model on iluvatar device.
+- Add rec proto,serivce and utils for rec framework
+- Support C api for llm inference.
+- Add constrained decoding for generative recommendation.
+- Add rec scheduler master and engine for rec framework.
+- Add rec_type and onerec batch input builder for rec framework.
+- Add onerec worker impl for rec framework.
+- Add qwen3/LlmRec support in rec framework.
+
+### Bugfix
+- Reslove core dump of stream chat completion request when backend is VLM.
+- Resolve duplicate content in multi-turn tool call conversations.
+- Fix core dump issue triggered by client disconnection.
+- Fix the memory leak issue in the completions interface.
+- Fix wrong positons of validate input when enable MTP.
+- Resolve kv_cache_num mismatch in ChunkedPrefill due to H2D block copy.
+- Fix the missing index shape in the allocate kv cache transfer.
+- Fix MiMo-VL weights loading crash on NPU device.
+- Fix inaccurate metrics issue when enabling schedule overlap.
+- Fix potential out-of-range and block leaks during deallocate in D2H copy.
+- Fix allocation failure in HierarchyBlockManagerPool::allocate.
+- Fix deepseek accuracy issues with prefix cache enabled.
+- Resolve Deepseek execution failure caused by invalid input.
+- Fix DeepSeek failing to run when enabling DP.
+- Fix the rate_limit bug for stream and non-stream request in PD disagg and refactor some callback logics.
+- Correct attn mask when prefix cache and MTP are both enabled in deepseek.
+- Correct precision loss when enabling prefixcache with disagg pd.
+- Fix incorrect async implementation in rerank interface.
+- Fix acl_graph_executor not handling q_cu_seq_lens parameter for deepseekv3.2.
+- Fix precision issue when enabling MTP in PD disaggregation mode.
+- Fix mrope calculation in the multimodal situation.
+- Fix core dump of large beam width.
+
+
 # Release xllm 0.7.0
 
 ## **Major Features and Improvements**
