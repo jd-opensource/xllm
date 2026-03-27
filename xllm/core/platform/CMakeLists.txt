@@ -1,10 +1,6 @@
 include(cc_library)
 include(cc_test)
 
-if(USE_NPU)
-  add_subdirectory(npu)
-endif()
-
 cc_library(
   NAME
     platform
@@ -16,12 +12,14 @@ cc_library(
     vmm_torch_allocator.h
     $<$<BOOL:${USE_CUDA}>:cuda/cuda_utils.h>
     $<$<BOOL:${USE_CUDA}>:numa_utils.h>
+    layer_synchronizer.h
   SRCS
     stream.cpp
     device.cpp
     vmm_api.cpp
     shared_vmm_allocator.cpp
     $<$<BOOL:${USE_CUDA}>:numa_utils.cpp>
+    layer_synchronizer.cpp
   DEPS
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
@@ -34,8 +32,11 @@ cc_library(
     $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_ILU}>>:numa>
     $<$<BOOL:${USE_MUSA}>:musa>
     $<$<BOOL:${USE_MUSA}>:musart>
-    $<$<BOOL:${USE_NPU}>:platform_npu>
 )
+
+if(USE_NPU)
+  add_subdirectory(npu)
+endif()
 
 # TODO: test on multi device
 if(USE_NPU OR USE_CUDA OR USE_ILU)
@@ -51,4 +52,3 @@ cc_test(
     glog::glog
 )
 endif()
-

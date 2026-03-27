@@ -695,11 +695,21 @@ bool DisaggPDScheduler::decode_recv_first_generation(
   request->sequences()[0]->set_time_to_first_token_latency_seconds(
       time_to_first_token_latency_seconds);
   // update latest_generate_time_ for sequence
-  request->sequences()[0]->tbt(
-      request->created_time() +
-      absl::Seconds(time_to_first_token_latency_seconds));
+  auto now = absl::Now();
+  request->update_created_time(
+      now - absl::Seconds(time_to_first_token_latency_seconds));
+  request->sequences()[0]->tbt(now);
 
   // TODO: we only support one sequence for currently.
+  kv_cache_manager_->cache(request->sequences()[0].get());
+  size_t shared_num =
+      request->sequences()[0]->kv_state().shared_kv_blocks_num();
+  size_t prefilled_blocks_num =
+      request->sequences()[0]->kv_state().num_kv_blocks() - shared_num;
+  if (prefilled_blocks_num > 1) {
+    request->sequences()[0]->kv_state().incr_shared_kv_blocks_num(
+        prefilled_blocks_num - 1);
+  }
   if (enable_schedule_overlap()) {
     Token fake_token(-1);
     request->sequences()[0]->append_token(fake_token);
@@ -728,6 +738,9 @@ bool DisaggPDScheduler::decode_recv_first_generation(
                             dst_dp_rank,
                             dst_block_ids);
   }
+
+  request->sequences()[0]->set_offload_batch_size(
+      XServiceClient::get_instance()->get_offload_batch_size());
 
   request_queue_.write(request);
   return true;

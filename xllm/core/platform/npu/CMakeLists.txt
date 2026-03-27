@@ -8,7 +8,10 @@ cc_library(
     device_capture_lock.h
   SRCS
     npu_layer_synchronizer.cpp
+  INCLUDES
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
   DEPS
+    :platform
     torch_npu
     glog::glog
     torch
