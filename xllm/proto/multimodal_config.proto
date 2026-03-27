@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package xllm.proto;
+
+message ImageProcessorConfig {
+  optional int32 min_pixels = 1;
+  optional int32 max_pixels = 2;
+}
+
+message MMProcessorConfig {
+  optional ImageProcessorConfig image = 1;
+}

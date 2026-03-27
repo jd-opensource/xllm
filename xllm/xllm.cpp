@@ -22,6 +22,7 @@ limitations under the License.
 #include <csignal>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <unordered_set>
 
 #include "api_service/api_service.h"
@@ -36,6 +37,8 @@ limitations under the License.
 #include "core/framework/xtensor/options.h"
 #include "core/framework/xtensor/xtensor_allocator.h"
 #include "core/util/device_name_utils.h"
+#include "core/util/model_config_utils.h"
+#include "core/util/multimodal_config_parser.h"
 #include "core/util/net.h"
 #include "core/util/utils.h"
 #include "function_call/function_call_parser.h"
@@ -181,6 +184,10 @@ int run() {
       .draft_devices(FLAGS_draft_devices)
       .backend(FLAGS_backend)
       .limit_image_per_prompt(FLAGS_limit_image_per_prompt)
+      .mm_process_config(FLAGS_mm_process_config.empty()
+                             ? std::nullopt
+                             : std::make_optional(parse_mm_process_config(
+                                   FLAGS_mm_process_config)))
       .block_size(FLAGS_block_size)
       .max_cache_size(FLAGS_max_cache_size)
       .max_memory_utilization(FLAGS_max_memory_utilization)

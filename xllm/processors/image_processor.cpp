@@ -128,4 +128,28 @@ torch::Tensor ImageProcessor::normalize(const torch::Tensor& image,
   return result.div_(s_tensor);
 }
 
+void ImageProcessor::apply_mm_processor_config(const MMProcessConfig& config) {
+  apply_image_pixel_config(config, "ImageProcessor");
+}
+
+void ImageProcessor::apply_image_pixel_config(const MMProcessConfig& config,
+                                              std::string_view processor_name) {
+  const int merged_min = config.image_min_pixels.value_or(min_pixels_);
+  const int merged_max = config.image_max_pixels.value_or(max_pixels_);
+
+  if (merged_min > merged_max) {
+    LOG(FATAL) << "mm_process_config image.min_pixels (" << merged_min
+               << ") must be <= image.max_pixels (" << merged_max << ").";
+  }
+
+  min_pixels_ = merged_min;
+  max_pixels_ = merged_max;
+
+  if (config.image_min_pixels || config.image_max_pixels) {
+    LOG(INFO) << "Applied " << processor_name
+              << " image processor config, min_pixels=" << min_pixels_
+              << ", max_pixels=" << max_pixels_;
+  }
+}
+
 }  // namespace xllm

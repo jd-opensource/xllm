@@ -215,8 +215,6 @@ Glm4VImageProcessor::Glm4VImageProcessor(const ModelArgs& args) {
   video_temporal_patch_size_ = args.mm_video_temporal_patch_size();
   video_merge_size_ = args.mm_video_merge_size();
 
-  size_ = {{"longest_edge", 12845056}, {"shortest_edge", 3136}};
-
   // fuse image mean/std and rescale_factor
   if (do_rescale_ && do_normalize_) {
     for (auto& item : image_mean_) {

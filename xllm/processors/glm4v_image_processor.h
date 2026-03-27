@@ -55,9 +55,6 @@ class Glm4VImageProcessor : public ImageProcessor {
   std::vector<double> image_mean_;
   std::vector<double> image_std_;
 
-  int max_pixels_ = 12845056;
-  int min_pixels_ = 3136;
-
   int merge_size_ = 2;
   int patch_size_ = 14;
 
