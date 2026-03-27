@@ -627,6 +627,9 @@ double ProfileManager::run_request(int32_t token_length,
   std::vector<Sequence*> sequences;
   std::vector<size_t> sequences_budget;
   std::vector<std::shared_ptr<Request>> requests;
+  sequences.reserve(batch_size);
+  sequences_budget.reserve(batch_size);
+  requests.reserve(batch_size);
 
   // batch sequences with the same kv cahce and token length
   for (int32_t i = 0; i < batch_size; i++) {
@@ -672,6 +675,9 @@ double ProfileManager::run_request(
   std::vector<Sequence*> sequences;
   std::vector<size_t> sequences_budget;
   std::vector<std::shared_ptr<Request>> requests;
+  sequences.reserve(token_length_vec.size());
+  sequences_budget.reserve(token_length_vec.size());
+  requests.reserve(token_length_vec.size());
 
   // batch sequences with the same kv cahce and token length
   for (int32_t i = 0; i < token_length_vec.size(); i++) {
