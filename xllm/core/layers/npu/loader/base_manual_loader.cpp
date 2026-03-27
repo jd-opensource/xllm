@@ -97,6 +97,7 @@ void BaseManualLoader::reload_weights_from_device() {
 }
 
 void BaseManualLoader::init_weight_slices() {
+  int wy = 0;
   weight_slices_.resize(weight_count_);
   size_t offset = 0;
   for (size_t i = 0; i < weight_count_; ++i) {
