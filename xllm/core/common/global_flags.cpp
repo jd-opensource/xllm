@@ -115,6 +115,12 @@ DEFINE_int32(limit_image_per_prompt,
              "Maximum number of image per prompt. Only applicable for "
              "multimodal models.");
 
+DEFINE_string(
+    mm_process_config,
+    "",
+    "JSON config to override multimodal processor defaults at service level. "
+    "Example: '{\"image\":{\"max_pixels\":12845056,\"min_pixels\":3136}}'.");
+
 // --- threading config ---
 
 DEFINE_int32(num_request_handling_threads,

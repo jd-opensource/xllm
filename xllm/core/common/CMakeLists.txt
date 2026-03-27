@@ -12,6 +12,7 @@ cc_library(
     macros.h
     message.h
     metrics.h
+    multimodal_config.h
     $<$<BOOL:${USE_NPU}>:mspti_helper.h>
     options.h
     rate_limiter.h

@@ -156,6 +156,11 @@ Qwen2VLImageProcessor::Qwen2VLImageProcessor(const ModelArgs& args) {
   }
 }
 
+void Qwen2VLImageProcessor::apply_mm_process_config(
+    const MMProcessConfig& config) {
+  apply_image_pixel_config(config, min_pixels_, max_pixels_, "Qwen2VL");
+}
+
 bool Qwen2VLImageProcessor::process(const MMInput& inputs, MMData& datas) {
   for (const auto& input_item : inputs) {
     std::vector<torch::Tensor> images;

@@ -17,8 +17,10 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <string_view>
 #include <vector>
 
+#include "core/common/multimodal_config.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/request/mm_data.h"
 #include "core/framework/request/mm_input.h"
@@ -30,6 +32,7 @@ class ImageProcessor {
   virtual ~ImageProcessor() = default;
 
   virtual bool process(const MMInput& mm_inputs, MMData& mm_datas) = 0;
+  virtual void apply_mm_process_config(const MMProcessConfig& /*config*/) {}
   virtual torch::Tensor resize(const torch::Tensor& image,
                                const std::vector<int64_t>& size,
                                int resample,
@@ -40,6 +43,12 @@ class ImageProcessor {
   virtual torch::Tensor normalize(const torch::Tensor& image,
                                   const std::vector<double>& mean,
                                   const std::vector<double>& std);
+
+ protected:
+  void apply_image_pixel_config(const MMProcessConfig& config,
+                                int& min_pixels,
+                                int& max_pixels,
+                                std::string_view processor_name) const;
 };
 
 }  // namespace xllm
