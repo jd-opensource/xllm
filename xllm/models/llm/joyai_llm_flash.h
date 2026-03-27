@@ -62,7 +62,7 @@ REGISTER_MODEL_ARGS(joyai_llm_flash, [&] {
   LOAD_ARG_OR(first_k_dense_replace, "first_k_dense_replace", 1);
   LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
   LOAD_ARG_OR(moe_layer_freq, "moe_layer_freq", 1);
-  // LOAD_ARG_OR(topk_method, "topk_method", "noaux_tc");
+  LOAD_ARG_OR(topk_method, "topk_method", "noaux_tc");
   LOAD_ARG_OR(n_routed_experts, "n_routed_experts", 256);
   LOAD_ARG_OR(n_shared_experts, "n_shared_experts", 1);
   LOAD_ARG_OR(num_experts_per_tok, "num_experts_per_tok", 8);

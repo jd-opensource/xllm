@@ -604,15 +604,11 @@ void DeekseekV2DecoderLoader::merge_experts_weights() {
                               device_);
   }
 
-  torch::Tensor mlp_down_weight =
-      merge_experts_weights(experts_weights_["down_proj.weight"],
-                            device_,
-                            /*transpose=*/false);
-  // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-  //     at_npu::native::npu_format_cast(mlp_down_weight, 29);
-  at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-      at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
-
+  // 配合MoeGroupedMatmulWeightNZOperation优化: 非量化权重使用ACL_FORMAT_FRACTAL_NZ排布, 量化版本依旧使用ACL_FORMAT_FRACTAL_NZ排布
+  int data_type = quantize_type_ == "" ? 29 /*ACL_FORMAT_FRACTAL_NZ*/ : 2 /*ACL_FORMAT_FRACTAL_NZ*/;
+  torch::Tensor mlp_down_weight = merge_experts_weights(experts_weights_["down_proj.weight"], device_, /*transpose=*/false);
+  at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] = at_npu::native::npu_format_cast(mlp_down_weight, data_type).contiguous();
+  
   if (quantize_type_ == "w8a8_dynamic") {
     at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] = merge_experts_weights(
         experts_weights_["down_proj.weight_offset"], device_);
