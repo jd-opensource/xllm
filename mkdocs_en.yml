@@ -221,5 +221,8 @@ nav:
       - Advanced Guides:
         - Speculative Inference: features/mtp.md
         - GraphMode: features/graph_mode.md
+  - Developer Guide:
+    - dev_guide/code_arch.md
+    - dev_guide/tilelang_ascend_kernel_dev.md
   - CLI Reference:
     - cli_reference.md
