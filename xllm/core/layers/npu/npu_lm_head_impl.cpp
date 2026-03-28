@@ -36,7 +36,6 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
   param.linearParallelParam.unpadInputs = true;
   param.linearParallelParam.fusionLinearParam.transposeType = 1;
   if (parallel_args.world_size() > 1) {
-    int32_t lm_head_tp_world_size = 1;
     if (parallel_args.mapping_data().empty()) {
       const bool use_local_tp = (dp_size_ > 1) || (cp_size_ > 1);
       if (use_local_tp) {
@@ -53,22 +52,15 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
             parallel_args.world_size();
       }
       param.linearParallelParam.parallelType =
-          use_column_parallel ? atb_speed::common::COLUMN_PARALLEL
-                              : atb_speed::common::ROW_PARALLEL;
-      const int32_t tp_group_id =
-          use_local_tp ? (parallel_args.rank() / dp_local_tp_size_) : 0;
+          atb_speed::common::COLUMN_PARALLEL;
       param.linearParallelParam.tensorParallelInfo.commDomain =
-          std::to_string(tp_group_id);
-      param.linearParallelParam.tensorParallelInfo.backend =
-          FLAGS_communication_backend;
-      lm_head_tp_world_size =
-          param.linearParallelParam.tensorParallelInfo.worldSize;
+          std::to_string(dp_rank_);
+      param.linearParallelParam.tensorParallelInfo.backend = "lccl";
     } else {
       param.linearParallelParam.parallelType =
-          use_column_parallel ? atb_speed::common::COLUMN_PARALLEL
-                              : atb_speed::common::ROW_PARALLEL;
+          atb_speed::common::COLUMN_PARALLEL;
       atb_speed::common::ParallelInfo parallelInfo =
-          parallel_args.mapping().Get(atb_speed::base::LM_HEAD_TP);
+          parallel_args.mapping().Get(atb_speed::base::ATTN_TP);
       param.linearParallelParam.tensorParallelInfo.rank = parallelInfo.rank;
       param.linearParallelParam.tensorParallelInfo.worldSize =
           parallelInfo.rankIds.size();
@@ -77,14 +69,6 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
       parallelInfo.InitCommDomain(
           param.linearParallelParam.tensorParallelInfo.hcommInfo,
           param.linearParallelParam.tensorParallelInfo.commDomain);
-      lm_head_tp_world_size =
-          param.linearParallelParam.tensorParallelInfo.worldSize;
-      param.contextParallelInfo =
-          parallel_args.mapping().Get(atb_speed::base::ATTN_CP);
-    }
-    if (!use_column_parallel) {
-      param.hiddenSizePerAttentionHead =
-          args.hidden_size() / lm_head_tp_world_size;
     }
   }
 }
