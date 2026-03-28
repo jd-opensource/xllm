@@ -51,6 +51,10 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
     sample_logits = logits.index_select(/*dim=*/0, params.sample_idxes);
   }
 
+  CHECK(params.do_sample.defined()) << "params.do_sample must be defined";
+  CHECK_EQ(params.do_sample.dim(), 1)
+      << "params.do_sample must be 1D [num_seqs], got "
+      << params.do_sample.sizes();
   // same batch size
   CHECK_EQ(sample_logits.size(0), params.do_sample.size(0));
 
