@@ -1124,10 +1124,11 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     MMDict multimodal_embeds;
     if (image_input) {
       // visual
-      auto image_embeds = visual_(image_input->pixel_values.to(options_),
-                                  image_input->image_grid_thw,
-                                  input_params);
-      image_embeds = apply_mm_projector(image_embeds);
+      auto pixel_values = image_input->pixel_values.to(options_);
+      auto grid_thw = image_input->image_grid_thw.to(options_);
+      auto image_features = process_vision_features(
+          pixel_values, grid_thw, input_params);
+      auto image_embeds = torch::cat(image_features, 0);
       auto image_tokens =
           (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
               .cpu()
