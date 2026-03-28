@@ -19,6 +19,7 @@ cc_library(
     types.h
     device_monitor.h
     version_singleton.h
+    log_debug.h
   SRCS
     etcd_client.cpp
     global_flags.cpp
