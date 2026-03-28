@@ -22,6 +22,7 @@ limitations under the License.
 #include "llm/npu/deepseek_mtp.h"             // IWYU pragma: keep
 #include "llm/npu/deepseek_v2.h"              // IWYU pragma: keep
 #include "llm/npu/deepseek_v3.h"              // IWYU pragma: keep
+#include "llm/npu/joyai_llm_flash.h"          // IWYU pragma: keep
 #include "llm/npu/deepseek_v32.h"             // IWYU pragma: keep
 #include "llm/npu/deepseek_v32_mtp.h"         // IWYU pragma: keep
 #include "llm/npu/glm4.h"                     // IWYU pragma: keep
