@@ -27,7 +27,6 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
                                     const ModelArgs& args,
                                     const ParallelArgs& parallel_args,
                                     bool isPrefill) {
-  const bool use_column_parallel = cp_size_ > 1;
   param.unpadInputs = true;
   param.gatherAhead = isPrefill;
   param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
@@ -35,6 +34,7 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
       args.dtype() == "bfloat16";
   param.linearParallelParam.unpadInputs = true;
   param.linearParallelParam.fusionLinearParam.transposeType = 1;
+
   if (parallel_args.world_size() > 1) {
     if (parallel_args.mapping_data().empty()) {
       const bool use_local_tp = (dp_size_ > 1) || (cp_size_ > 1);
@@ -53,14 +53,17 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
       }
       param.linearParallelParam.parallelType =
           atb_speed::common::COLUMN_PARALLEL;
+      const int32_t tp_group_id =
+          use_local_tp ? (parallel_args.rank() / dp_local_tp_size_) : 0;
       param.linearParallelParam.tensorParallelInfo.commDomain =
-          std::to_string(dp_rank_);
-      param.linearParallelParam.tensorParallelInfo.backend = "lccl";
+          std::to_string(tp_group_id);
+      param.linearParallelParam.tensorParallelInfo.backend =
+          FLAGS_communication_backend;
     } else {
       param.linearParallelParam.parallelType =
           atb_speed::common::COLUMN_PARALLEL;
       atb_speed::common::ParallelInfo parallelInfo =
-          parallel_args.mapping().Get(atb_speed::base::ATTN_TP);
+          parallel_args.mapping().Get(atb_speed::base::LM_HEAD_TP);
       param.linearParallelParam.tensorParallelInfo.rank = parallelInfo.rank;
       param.linearParallelParam.tensorParallelInfo.worldSize =
           parallelInfo.rankIds.size();
@@ -69,11 +72,23 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
       parallelInfo.InitCommDomain(
           param.linearParallelParam.tensorParallelInfo.hcommInfo,
           param.linearParallelParam.tensorParallelInfo.commDomain);
+      param.contextParallelInfo =
+          parallel_args.mapping().Get(atb_speed::base::ATTN_CP);
     }
   }
 }
 
 NpuLmHeadImpl::NpuLmHeadImpl(const ModelContext& context) : BaseLayer(context) {
+  vocab_size_ = context.get_model_args().vocab_size();
+  if (vocab_size_ > 0 && dp_local_tp_size_ > 1 &&
+      vocab_size_ % dp_local_tp_size_ != 0) {
+    padded_vocab_size_ =
+        ((vocab_size_ + dp_local_tp_size_ - 1) / dp_local_tp_size_) *
+        dp_local_tp_size_;
+  } else {
+    padded_vocab_size_ = vocab_size_;
+  }
+
   param_from_args(lm_head_param_prefill_,
                   context.get_model_args(),
                   context.get_parallel_args(),
@@ -150,7 +165,11 @@ torch::Tensor NpuLmHeadImpl::forward(const torch::Tensor& hidden_states,
   st = execute_node(lm_head_node_prefill_, nodeId);
   LOG_IF(FATAL, st != 0) << model_name_
                          << "execute lmhead node fail, error code: " << st;
-  return atOutTensors_[0];
+  torch::Tensor output = atOutTensors_[0];
+  if (padded_vocab_size_ > vocab_size_ && vocab_size_ > 0) {
+    output = output.slice(/*dim=*/-1, /*start=*/0, /*end=*/vocab_size_);
+  }
+  return output;
 }
 
 void NpuLmHeadImpl::build_node_variant_pack(
