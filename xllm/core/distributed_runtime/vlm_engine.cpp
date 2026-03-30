@@ -329,7 +329,7 @@ bool VLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_cache_upload(options_.enable_cache_upload());
-  kv_cache_manager_ = std::make_unique<BlockManagerPool>(options);
+  kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
 
   // init kv cache for each worker in parallel
   std::vector<folly::SemiFuture<bool>> futures;
@@ -347,7 +347,6 @@ bool VLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   return true;
 }
 
-// TODO: support dp batches later
 ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
   if (worker_clients_.empty()) {
     // empty worker, return
@@ -363,12 +362,6 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
   DCHECK(dp_size_ == raw_forward_inputs.size())
       << "The processed raw forward inputs size " << raw_forward_inputs.size()
       << " is not equal to dp size " << dp_size_ << ".";
-
-  for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    const bool empty_shard =
-        batch[dp_rank].size() == 0 &&
-        raw_forward_inputs[dp_rank].flatten_tokens_vec.empty();
-  }
 
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
