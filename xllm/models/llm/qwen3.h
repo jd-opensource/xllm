@@ -184,7 +184,7 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
     return ModelOutput(hidden_states, residual_out);
   }
 
- private:
+ protected:
   layer::AttentionMetadata get_attention_metadata(
       const ModelInputParams& params,
       const torch::Tensor& h) {
@@ -224,6 +224,7 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
 #endif
   }
 
+ private:
 #if defined(USE_NPU)
   layer::AttentionMask attn_mask_;
 #endif

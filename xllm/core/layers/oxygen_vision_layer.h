@@ -17,44 +17,40 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <functional>
+
+#include "common/dense_mlp.h"
+#include "common/oxygen_vision_attention.h"
+#include "common/rms_norm.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
-#include "framework/parallel_state/parallel_args.h"
-#include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "linear.h"
 
 namespace xllm {
 namespace layer {
 
-class Qwen2VisionAttentionImpl : public torch::nn::Module {
+class OxygenVisionLayerImpl : public torch::nn::Module {
  public:
-  Qwen2VisionAttentionImpl() = default;
-  Qwen2VisionAttentionImpl(const ModelContext& context, bool has_bias = true);
-
-  virtual torch::Tensor forward(torch::Tensor& hidden_states,
-                                torch::Tensor& m_cos_pos,
-                                torch::Tensor& m_sin_pos,
-                                torch::Tensor& cu_seq_len,
-                                std::vector<int32_t>& cu_seq_len_vec,
-                                ModelInputParams& input_params);
+  OxygenVisionLayerImpl(const ModelContext& context);
 
   void load_state_dict(const StateDict& state_dict);
 
- protected:
-  std::vector<torch::Tensor> split_qkv(const torch::Tensor& qkv);
+  torch::Tensor forward(torch::Tensor& x,
+                        torch::Tensor& m_cos_pos,
+                        torch::Tensor& m_sin_pos,
+                        torch::Tensor& cu_seq_len,
+                        std::vector<int32_t>& cu_seq_len_vec,
+                        ModelInputParams& input_params,
+                        int node_id);
 
-  int64_t hidden_size_per_attention_head_;
-  int64_t num_attention_heads_per_partition_;
-  float scale_;
-
-  ProcessGroup* tp_group_;
-
-  QKVParallelLinear qkv_proj_{nullptr};
-  RowParallelLinear proj_{nullptr};
+ private:
+  OxygenVisionAttention attention_{nullptr};
+  DenseMLP mlp_{nullptr};
+  RMSNorm norm1_{nullptr};
+  RMSNorm norm2_{nullptr};
 };
-TORCH_MODULE(Qwen2VisionAttention);
+TORCH_MODULE(OxygenVisionLayer);
 
 }  // namespace layer
 }  // namespace xllm

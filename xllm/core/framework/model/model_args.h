@@ -239,6 +239,9 @@ struct ModelArgs {
   // Vision model's mm_projection_dim
   PROPERTY(int64_t, mm_projection_dim) = 0;
 
+  // Vision model's mm_projector_hidden_size
+  PROPERTY(int64_t, mm_projector_hidden_size) = 0;
+
   PROPERTY(int64_t, mm_spatial_merge_size) = 0;
   PROPERTY(int64_t, mm_spatial_patch_size) = 0;
 

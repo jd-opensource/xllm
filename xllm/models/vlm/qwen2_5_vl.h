@@ -773,7 +773,8 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
 
   void load_model(std::unique_ptr<ModelLoader> loader) {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      visual_->load_state_dict(state_dict->get_dict_with_prefix("visual."));
+      visual_->load_state_dict(state_dict->get_dict_with_prefix(
+          std::vector<std::string>{"visual.", "model.visual."}));
     }
 
     if (!model_args_.image_embedding_mode()) {
@@ -870,6 +871,9 @@ REGISTER_IMAGE_PROCESSOR(qwen2_5_vl, Qwen2VLImageProcessor);
                 "rope_scaling.mrope_section",                                  \
                 std::vector<int64_t>({16, 24, 24}));                           \
     LOAD_ARG_OR(vocab_size, "vocab_size", 152064);                             \
+    if (args->rope_scaling_rope_type() == "default") {                         \
+      args->rope_scaling_rope_type() = "mrope";                                \
+    }                                                                          \
   } while (0)
 
 REGISTER_MODEL_ARGS(qwen2_5_vl, [&] { LOAD_QWEN2_5_VL_MODEL_ARGS(); });

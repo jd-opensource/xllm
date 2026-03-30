@@ -66,6 +66,13 @@ void validate_flags(const std::string& model_type) {
                << model_type;
   }
 #if defined(USE_MLU)
+  // Disable enable_schedule_overlap for VLM models on MLU backend
+  if (FLAGS_enable_schedule_overlap && FLAGS_backend == "vlm") {
+    LOG(WARNING) << "enable_schedule_overlap is not supported for VLM models "
+                    "on MLU backend. "
+                 << "Disabling enable_schedule_overlap.";
+    FLAGS_enable_schedule_overlap = false;
+  }
   // TODO: support other block sizes in the future
   if (FLAGS_block_size != 16 && FLAGS_block_size != 1) {
     LOG(FATAL) << "Currently, block_size must be 16 for MLU backend, we will "

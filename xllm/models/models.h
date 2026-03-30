@@ -63,9 +63,11 @@ limitations under the License.
 #include "llm/glm5_mtp.h"            // IWYU pragma: keep
 #include "llm/joyai_llm_flash.h"     // IWYU pragma: keep
 #include "llm/mtp_model_base.h"      // IWYU pragma: keep
+#include "llm/oxygen.h"              // IWYU pragma: keep
 #include "llm/qwen2.h"               // IWYU pragma: keep
 #include "llm/qwen3.h"               // IWYU pragma: keep
 #include "llm/qwen3_moe.h"           // IWYU pragma: keep
+#include "vlm/oxygen_vlm.h"          // IWYU pragma: keep
 #include "vlm/qwen2_5_vl.h"          // IWYU pragma: keep
 #include "vlm/qwen2_vl.h"            // IWYU pragma: keep
 #include "vlm/qwen2_vl_embedding.h"  // IWYU pragma: keep
