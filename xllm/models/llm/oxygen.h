@@ -93,9 +93,9 @@ class OxygenModelImpl : public QWen3ModelImpl {
     return ModelOutput(hidden_states, residual_out);
   }
 
- private:
+ protected:
   std::pair<torch::Tensor, torch::Tensor> apply_mrope(
-      const torch::Tensor positions) {
+      const torch::Tensor positions) override {
     auto target_cos_sin = cos_sin_.index({positions});
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();

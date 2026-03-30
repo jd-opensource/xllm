@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -58,9 +58,7 @@ torch::Tensor OxygenVisionAttentionImpl::forward(
   q = q.reshape({B * S, num_attention_heads_per_partition_, head_dim});
   k = k.reshape({B * S, num_attention_heads_per_partition_, head_dim});
 
-  // Apply rotary position embedding to both q and k in a single call.
-  // NOTE: Do NOT call apply_rotary twice; the first call already handles both
-  // q and k. A second call would incorrectly apply RoPE to k a second time.
+  // Apply rotary position embedding to both q and k seperately.
   xllm::kernel::RotaryParams rotary_params;
   rotary_params.q = q;
   rotary_params.sin = m_sin_pos;
