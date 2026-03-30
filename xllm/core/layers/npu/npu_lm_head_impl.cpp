@@ -63,7 +63,7 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
       param.linearParallelParam.parallelType =
           atb_speed::common::COLUMN_PARALLEL;
       atb_speed::common::ParallelInfo parallelInfo =
-          parallel_args.mapping().Get(atb_speed::base::ATTN_TP);
+          parallel_args.mapping().Get(atb_speed::base::LM_HEAD_TP);
       param.linearParallelParam.tensorParallelInfo.rank = parallelInfo.rank;
       param.linearParallelParam.tensorParallelInfo.worldSize =
           parallelInfo.rankIds.size();
