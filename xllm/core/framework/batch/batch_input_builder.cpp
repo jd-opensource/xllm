@@ -74,6 +74,7 @@ BatchInputBuilder::BatchInputBuilder(
   state_.mrope_positions_vec.reserve(sequences.size());
   state_.block_tables_vec.reserve(sequences.size());
   state_.acc_logprob_vec.reserve(sequences.size());
+  state_.mtp_shifted_token_ids.reserve(1000);
   if (args_ != nullptr) {
     use_mrope_ = (args_->rope_scaling_rope_type() == "mrope");
   }
@@ -241,6 +242,9 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.extra_token_ids.insert(state_.extra_token_ids.end(),
                                   state.extra_token_ids.begin(),
                                   state.extra_token_ids.end());
+    state_.mtp_shifted_token_ids.insert(state_.mtp_shifted_token_ids.end(),
+                                        state.mtp_shifted_token_ids.begin(),
+                                        state.mtp_shifted_token_ids.end());
     state_.transfer_kv_infos.insert(state_.transfer_kv_infos.end(),
                                     state.transfer_kv_infos.begin(),
                                     state.transfer_kv_infos.end());
@@ -337,6 +341,7 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
                                                      uint32_t padded_seq_len,
                                                      BuilderState* state_ptr) {
   BuilderState& state = state_ptr ? *state_ptr : state_;
+  const size_t seq_token_begin = state.flatten_tokens_vec.size();
 
   const auto& token_ids = sequence->tokens();
   const uint32_t n_tokens = token_ids.size();
@@ -394,6 +399,7 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
   }
 
   // Add extra token id
+  int32_t extra_token_id = -1;
   if (n_tokens == seq_len) {
     // last chunk of prefill and decode
     // add -1 as extra token id
@@ -401,7 +407,21 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     state.embedding_ids.emplace_back(sequence->get_embedding_id());
     state.request_ids.emplace_back(sequence->request_id());
   } else {
-    state.extra_token_ids.emplace_back(token_ids[seq_len]);
+    extra_token_id = token_ids[seq_len];
+    state.extra_token_ids.emplace_back(extra_token_id);
+  }
+
+  if (state.batch_forward_type.is_prefill()) {
+    const size_t seq_token_end = state.flatten_tokens_vec.size();
+    const size_t seq_token_len = seq_token_end - seq_token_begin;
+    CHECK_GT(seq_token_len, 0);
+    if (seq_token_len > 1) {
+      state.mtp_shifted_token_ids.insert(
+          state.mtp_shifted_token_ids.end(),
+          state.flatten_tokens_vec.begin() + seq_token_begin + 1,
+          state.flatten_tokens_vec.begin() + seq_token_end);
+    }
+    state.mtp_shifted_token_ids.emplace_back(extra_token_id);
   }
 }
 
@@ -588,6 +608,12 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   input_params.embedding_ids = std::move(state_.embedding_ids);
   input_params.request_ids = std::move(state_.request_ids);
   input_params.extra_token_ids = std::move(state_.extra_token_ids);
+  if (!state_.mtp_shifted_token_ids.empty()) {
+    CHECK_EQ(state_.mtp_shifted_token_ids.size(), state_.flatten_tokens_vec.size())
+        << "mtp_shifted_token_ids size should match flatten token size";
+    input_params.mtp_shifted_token_ids =
+        torch::tensor(state_.mtp_shifted_token_ids, torch::kInt);
+  }
 
   if (swap_block_transfer_infos_ != nullptr &&
       swap_block_transfer_infos_->size() > 0) {
@@ -668,6 +694,13 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
   raw_forward_input.request_ids = std::move(state_.request_ids);
   raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);
+  if (!state_.mtp_shifted_token_ids.empty()) {
+    CHECK_EQ(state_.mtp_shifted_token_ids.size(),
+             raw_forward_input.flatten_tokens_vec.size())
+        << "mtp_shifted_token_ids size should match flatten token size";
+  }
+  raw_forward_input.mtp_shifted_token_ids =
+      std::move(state_.mtp_shifted_token_ids);
   // beam search kernel input
   if (state_.acc_logprob_vec.size() > 0) {
     raw_forward_input.acc_logprob_vec = std::move(state_.acc_logprob_vec);

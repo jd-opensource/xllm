@@ -351,7 +351,18 @@ void MTPWorkerImpl::prepare_prefill_inputs(const ForwardInput& input,
                                            ForwardInput& prefill_input) {
   prefill_input = input.to(device_, dtype_);
   auto& input_params = prefill_input.input_params;
+  if (input_params.mtp_shifted_token_ids.defined() &&
+      input_params.mtp_shifted_token_ids.numel() > 0) {
+    CHECK_EQ(input_params.mtp_shifted_token_ids.numel(),
+             prefill_input.token_ids.numel())
+        << "mtp shifted tokens numel mismatch with token_ids";
+    prefill_input.token_ids = input_params.mtp_shifted_token_ids.clone();
+    return;
+  }
+
   auto& extra_token_ids = input_params.extra_token_ids;
+  CHECK_EQ(extra_token_ids.size(), static_cast<size_t>(input_params.num_sequences))
+      << "extra_token_ids size should match num_sequences";
 
   torch::Tensor token_ids = safe_to(input.token_ids, torch::kCPU);
   Slice<int32_t> tokens_ids_slice = {
@@ -371,6 +382,8 @@ void MTPWorkerImpl::prepare_prefill_inputs(const ForwardInput& input,
                          tokens_ids_slice_i.end());
     new_token_ids.emplace_back(extra_token_ids[i]);
   }
+  CHECK_EQ(static_cast<size_t>(start_idx), tokens_ids_slice.size())
+      << "q_seq_lens sum should equal token_ids numel";
   prefill_input.token_ids =
       torch::tensor(new_token_ids, prefill_input.positions.options());
 }

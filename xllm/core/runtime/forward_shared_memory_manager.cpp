@@ -281,6 +281,7 @@ size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
   total += get_vector_size(input.embedding_ids);
   total += get_string_vector_size(input.request_ids);
   total += get_vector_size(input.extra_token_ids);
+  total += get_vector_to_tensor_size(input.mtp_shifted_token_ids);
   total += type_size<uint64_t> +
            input.swap_blocks.size() * swap_block_info_fixed_size();
   total += get_vector_to_tensor_size(input.src_block_indices);
@@ -1112,6 +1113,7 @@ inline void deserialize_raw_forward_input(const char*& buffer,
   read_vector(buffer, input_params.embedding_ids, device_buffer);
   read_string_vector(buffer, input_params.request_ids, device_buffer);
   read_vector(buffer, input_params.extra_token_ids, device_buffer);
+  read_tensor(buffer, input_params.mtp_shifted_token_ids, device_buffer);
   read_swap_blocks(buffer, input_params.swap_blocks, device_buffer);
   read_tensor(buffer, input_params.src_block_indices, device_buffer);
   read_tensor(buffer, input_params.dst_block_indices, device_buffer);
@@ -1201,6 +1203,7 @@ inline void serialize_raw_forward_input(const RawForwardInput& input,
   write_vector(buffer, input.embedding_ids);
   write_string_vector(buffer, input.request_ids);
   write_vector(buffer, input.extra_token_ids);
+  write_vector_to_tensor(buffer, input.mtp_shifted_token_ids);
   write_swap_blocks(buffer, input.swap_blocks);
   write_vector_to_tensor(buffer, input.src_block_indices);
   write_vector_to_tensor(buffer, input.dst_block_indices);
@@ -1426,6 +1429,8 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
   input_params.swap_blocks = std::move(raw_input.swap_blocks);
   input_params.batch_id = std::move(raw_input.batch_id);
   input_params.extra_token_ids = std::move(raw_input.extra_token_ids);
+  input_params.mtp_shifted_token_ids =
+      torch::tensor(std::move(raw_input.mtp_shifted_token_ids), tensor_options);
 
   input_params.new_cache_slot_offsets = torch::tensor(
       std::move(raw_input.new_cache_slot_offsets), tensor_options);

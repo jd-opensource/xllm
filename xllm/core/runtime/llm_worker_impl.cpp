@@ -31,6 +31,7 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
+#include "framework/parallel_state/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
 #if defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA)
 #include "layers/cuda/flashinfer_workspace.h"
@@ -198,6 +199,14 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     if (!input.input_params.batch_forward_type.is_decode() && !is_spec_draft_) {
       output.sample_output.embeddings = embeddings;
     } else if (sampling_params.selected_token_idxes.defined()) {
+      if (context_.get_parallel_args().cp_size() > 1) {
+        auto* cp_group = context_.get_parallel_args().cp_group_;
+        CHECK(cp_group != nullptr)
+            << "cp_group_ must be initialized for CP+MTP embeddings gather.";
+        CHECK_EQ(cp_group->world_size(), context_.get_parallel_args().cp_size())
+            << "cp_group_ world size mismatch with cp_size.";
+        embeddings = parallel_state::gather(embeddings, cp_group, /*dim=*/0);
+      }
       output.sample_output.embeddings = embeddings.index_select(
           /*dim=*/0, sampling_params.selected_token_idxes);
     }

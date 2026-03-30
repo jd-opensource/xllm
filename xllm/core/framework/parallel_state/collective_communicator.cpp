@@ -119,19 +119,42 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
 void CollectiveCommunicator::create_process_groups(
     const std::string& master_addr,
     const torch::Device& device) {
-#if defined(USE_NPU)
-  if (FLAGS_npu_kernel_backend == "ATB") {
-    return;
-  }
-#endif
-  std::string host;
-  int port;
-  net::parse_host_port_from_addr(master_addr, host, port);
 
   int global_rank = parallel_args_->rank();
   int world_size = parallel_args_->world_size();
   int dp_size = parallel_args_->dp_size();
   int ep_size = parallel_args_->ep_size();
+  int cp_size = parallel_args_->cp_size();
+  
+  std::string host;
+  int port;
+  net::parse_host_port_from_addr(master_addr, host, port);
+
+#if defined(USE_NPU)
+  // ATB backend usually relies on ATB/HCCL communication. However CP+MTP
+  // needs torch process group collectives in worker runtime.
+  if (cp_size > 1) {
+    CHECK_EQ(world_size % cp_size, 0)
+        << "world_size must be divisible by cp_size.";
+    const int cp_group_count = world_size / cp_size;
+    int port_offset = global_rank % cp_group_count + 1;
+    cp_group_ = create_process_group(global_rank,
+                                     world_size,
+                                     cp_size,
+                                     port + port_offset,
+                                     true,
+                                     host,
+                                     "cp_group",
+                                     device);
+    parallel_args_->cp_group_ = cp_group_.get();
+    port += cp_group_count;
+  }
+
+  if (FLAGS_npu_kernel_backend == "ATB") {
+    return;
+  }
+#endif
+
   process_group_ = create_process_group(global_rank,
                                         world_size,
                                         world_size,

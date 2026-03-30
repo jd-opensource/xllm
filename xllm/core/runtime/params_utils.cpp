@@ -131,6 +131,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   std::vector<int32_t> extra_token_ids =
       std::vector<int32_t>(pb_forward_input->extra_token_ids().begin(),
                            pb_forward_input->extra_token_ids().end());
+  std::vector<int32_t> mtp_shifted_token_ids = std::vector<int32_t>(
+      pb_forward_input->mtp_shifted_token_ids().begin(),
+      pb_forward_input->mtp_shifted_token_ids().end());
   std::vector<std::string> request_ids =
       std::vector<std::string>(pb_forward_input->request_ids().begin(),
                                pb_forward_input->request_ids().end());
@@ -227,6 +230,8 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.embedding_ids = std::move(embedding_ids);
   input_params.request_ids = std::move(request_ids);
   input_params.extra_token_ids = std::move(extra_token_ids);
+  input_params.mtp_shifted_token_ids =
+      torch::tensor(mtp_shifted_token_ids, tensor_options);
 
   input_params.swap_blocks = std::move(swap_blocks);
   // block copy kernel
@@ -505,6 +510,8 @@ void forward_input_to_proto(const RawForwardInput& inputs,
                       inputs.request_ids);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_extra_token_ids(),
                       inputs.extra_token_ids);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_mtp_shifted_token_ids(),
+                      inputs.mtp_shifted_token_ids);
   pb_forward_input->mutable_swap_blocks()->Reserve(inputs.swap_blocks.size());
   for (auto t : inputs.swap_blocks) {
     proto::BlockTransferInfo block_transfer_info;

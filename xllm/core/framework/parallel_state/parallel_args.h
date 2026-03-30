@@ -128,6 +128,8 @@ struct ParallelArgs {
   // the same rank set during prefill, but it remains a separate handle so the
   // SP communication policy can evolve independently from TP.
   ProcessGroup* sp_group_ = nullptr;
+  // Context-parallel communication group for CP-specific runtime collectives.
+  ProcessGroup* cp_group_ = nullptr;
   ProcessGroup* moe_ep_group_ = nullptr;
   ProcessGroup* moe_tp_group_ = nullptr;
 };
