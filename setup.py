@@ -591,7 +591,7 @@ if __name__ == "__main__":
         version=version,
         license="Apache 2.0",
         author="xLLM Team",
-        author_email="infer@jd.com",
+        author_email="infer@xllm.ai",
         description="A high-performance inference system for large language models.",
         long_description=read_readme(),
         long_description_content_type="text/markdown",
