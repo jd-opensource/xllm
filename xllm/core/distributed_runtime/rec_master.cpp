@@ -506,7 +506,8 @@ RecMaster::RecMaster(const Options& options)
       .enable_chunked_prefill(options_.enable_chunked_prefill())
       .instance_role(options_.instance_role())
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
-      .enable_service_routing(options_.enable_service_routing());
+      .enable_service_routing(options_.enable_service_routing())
+      .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
   scheduler_ = create_fixed_steps_scheduler(engine_.get(), scheduler_options);
 
   chat_template_ = nullptr;
