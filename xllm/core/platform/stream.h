@@ -66,6 +66,8 @@ class Stream {
   c10_npu::NPUStream* get_stream() { return &stream_; }
 #elif defined(USE_MLU)
   torch_mlu::MLUStream* get_stream() { return &stream_; }
+#elif defined(USE_CUDA)
+  c10::cuda::CUDAStream* get_stream() { return &stream_; }
 #endif
   void wait_stream(const Stream& other_stream);
 
