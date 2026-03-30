@@ -1,16 +1,10 @@
-# AGENTS.md
-
-This file provides guidance to Codex (codex.com) or Cursor (cursor.com) when working with code in this repository.
-
-## Project Overview
-
-xLLM is an efficient LLM inference framework, specifically optimized for Chinese AI accelerators, enabling enterprise-grade deployment with enhanced efficiency and reduced cost.
+# xLLM Coding Agent Instructions
 
 ## Quick Reference
 
 | Task                                  | Command                                         |
 | ------------------------------------- | ----------------------------------------------- |
-| Initialize submodules                 | `git submodule update --init`                   |
+| Initialize submodules                 | `git submodule update --init --recursive`                   |
 | Build xLLM binary                     | `python setup.py build`                         |
 | Build xLLM wheel                      | `python setup.py bdist_wheel`                   |
 | Test xLLM                             | `python setup.py test`                          |
@@ -18,54 +12,6 @@ xLLM is an efficient LLM inference framework, specifically optimized for Chinese
 | Build xLLM binary for specific device | `python setup.py build --device <device>`       |
 | Build xLLM wheel for specific device  | `python setup.py bdist_wheel --device <device>` |
 | Install pre-commit hooks              | `pre-commit install`                            |
-
-
-
-
-## Quick Start for Development
-
-### Setup xLLM
-
-```bash
-git clone https://github.com/jd-opensource/xllm
-cd xllm
-
-# install pre-commit hooks for the first time
-pip install pre-commit
-pre-commit install
-
-git submodule update --init
-```
-
-### Build xLLM
-
-Build xLLM binary or wheel or so file.
-
-```bash
-# build bin
-python setup.py build
-
-# build wheel
-python setup.py bdist_wheel
-
-# build xllm so file
-python setup.py build --generate-so true
-```
-
-### Unit Test
-
-
-```bash
-# test all unit tests
-python setup.py test
-
-# test specific unit test
-# test_name is the name of the test case, for example:
-#   python setup.py test --test-name common_test
-python setup.py test --test-name <test_name>
-
-```
-
 
 ## Directory Structure
 
