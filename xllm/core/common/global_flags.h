@@ -294,6 +294,7 @@ DECLARE_int64(dit_cache_skip_interval_steps);
 DECLARE_double(dit_cache_residual_diff_threshold);
 
 DECLARE_bool(enable_constrained_decoding);
+DECLARE_bool(enable_convert_tokens_to_item);
 
 DECLARE_bool(enable_return_mm_full_embeddings);
 
