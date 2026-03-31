@@ -47,8 +47,7 @@ namespace layer {
 
 class NpuQwen2DecoderLayerImpl : public BaseLayer {
  public:
-  explicit NpuQwen2DecoderLayerImpl(const ModelContext& context,
-                                    bool is_fia = true);
+  explicit NpuQwen2DecoderLayerImpl(const ModelContext& context);
 
   ~NpuQwen2DecoderLayerImpl() override = default;
 
@@ -108,7 +107,6 @@ class NpuQwen2DecoderLayerImpl : public BaseLayer {
 
   int device_id_;
   int32_t layer_id_;
-  bool is_fia_ = false;
 
   std::vector<std::shared_ptr<at::Tensor>> prefill_tensor_storage_;
   std::vector<std::shared_ptr<at::Tensor>> decode_tensor_storage_;

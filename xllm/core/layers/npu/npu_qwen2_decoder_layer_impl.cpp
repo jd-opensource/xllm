@@ -139,13 +139,12 @@ void NpuQwen2DecoderLayerImpl::param_from_args(
   param.rank = parallel_args.rank();
   param.backend = "lccl";
   param.enableLogN = false;
-  param.isFIA = is_fia_ && isPrefill;
+  param.isFIA = isPrefill && FLAGS_enable_fia;
 }
 
 NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(
-    const ModelContext& context,
-    bool is_fia)
-    : BaseLayer(context), is_fia_(is_fia) {
+    const ModelContext& context)
+    : BaseLayer(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
@@ -223,7 +222,7 @@ int64_t NpuQwen2DecoderLayerImpl::init_attn_mask() {
   torch::Dtype dtype =
       prefill_param_.isBF16 ? torch::kBFloat16 : torch::kFloat16;
   decode_attn_mask_ = torch::zeros({1}).to(device_).to(dtype);
-  if (is_fia_) {
+  if (FLAGS_enable_fia) {
     const auto fia_mask_options =
         torch::TensorOptions().dtype(torch::kBool).device(device_);
     fia_attn_mask_ =
@@ -377,9 +376,9 @@ void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
   }
 
   auto* effective_attn_mask = &attn_mask;
-  if (is_prefill && is_fia_) {
+  if (is_prefill && FLAGS_enable_fia) {
     effective_attn_mask = &fia_attn_mask_;
-    build_fia_index_tensors(input_params, x.size(0));
+    // build_fia_index_tensors(input_params, x.size(0));  // bsnd
   }
 
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
@@ -407,13 +406,13 @@ void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
   node.variantPack.inTensors.at(input_offset++) =
       atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
-  if (is_prefill && is_fia_) {
-    node.variantPack.inTensors.at(input_offset++) =
-        atb_speed::Utils::AtTensor2Tensor(fia_padding_idx_);
-    node.variantPack.inTensors.at(input_offset++) =
-        atb_speed::Utils::AtTensor2Tensor(fia_unpadding_idx_);
+  if (is_prefill && FLAGS_enable_fia) {
+    node.variantPack.inTensors.at(input_offset++) =       // bsnd padding_idx
+      placeholder_;
+    node.variantPack.inTensors.at(input_offset++) =       // bsnd unpadding_idx
+      placeholder_;
   }
-  if (is_prefill && (is_fia_ || FLAGS_enable_chunked_prefill)) {
+  if (is_prefill && (FLAGS_enable_fia || FLAGS_enable_chunked_prefill)) {
     node.variantPack.inTensors.at(input_offset) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
     node.variantPack.inTensors.at(input_offset).hostData =
