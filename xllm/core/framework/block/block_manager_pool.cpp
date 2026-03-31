@@ -218,10 +218,10 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   if (blocks.size() != num_additional_blocks) {
     if (started_empty) {
       block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
-      sequence->reset();
       if (needs_embedding_id) {
         deallocate_embedding_id(sequence, dp_rank);
       }
+      sequence->reset();
     }
     // LOG(ERROR) << " Fail to allocate " << num_additional_blocks << "
     // blocks.";
