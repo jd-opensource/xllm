@@ -56,11 +56,13 @@ class ContinuousScheduler : public Scheduler {
     // the number of speculative tokens per step
     PROPERTY(int32_t, num_speculative_tokens) = 0;
 
-    // the number of tp*dp nodes
+    // the number of tp*dp*cp nodes
     PROPERTY(int32_t, nnodes) = 1;
 
     // the number of speculative tokens per step
     PROPERTY(int32_t, dp_size) = 1;
+
+    PROPERTY(int32_t, cp_size) = 1;
 
     // enable disaggregated PD mode.
     PROPERTY(bool, enable_disagg_pd) = false;
@@ -320,6 +322,10 @@ class ContinuousScheduler : public Scheduler {
   void step_with_schedule_overlap(const absl::Duration& timeout);
 
   void step_with_pd_ooc(std::vector<Batch>& batch);
+
+  void refresh_sequences_from_requests(
+      const std::vector<std::shared_ptr<Request>>& requests,
+      std::vector<Sequence*>& sequences) const;
 
   std::vector<int64_t> get_num_occupied_slots(
       std::vector<Sequence*>& sequences) const;

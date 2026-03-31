@@ -71,10 +71,6 @@ DEFINE_string(devices,
               "npu:0",
               "Devices to run the model on, e.g. npu:0, npu:0,npu:1.");
 
-DEFINE_bool(enable_mla,
-            false,
-            "Whether to enable multi-head latent attention.");
-
 DEFINE_bool(enable_customize_mla_kernel, false, "enable customize mla kernel");
 
 // --- graph mode execution config ---
@@ -221,6 +217,8 @@ DEFINE_int32(request_queue_size,
 DEFINE_int32(dp_size, 1, "Data parallel size for MLA attention.");
 
 DEFINE_int32(ep_size, 1, "Expert parallel size for MoE model.");
+
+DEFINE_int32(cp_size, 1, "Context parallel size for DSA attention.");
 
 DEFINE_string(
     communication_backend,
@@ -410,9 +408,15 @@ DEFINE_bool(enable_atb_spec_kernel,
 
 // --- block copy config ---
 
+#if defined(USE_NPU)
 DEFINE_bool(enable_block_copy_kernel,
             true,
-            "Whether to use ATB block copy kernel.");
+            "Whether to use ATB block copy kernel. NPU-only.");
+#else
+DEFINE_bool(enable_block_copy_kernel,
+            false,
+            "Whether to use ATB block copy kernel. NPU-only.");
+#endif
 
 // --- service routing config ---
 
@@ -633,15 +637,9 @@ DEFINE_uint32(rec_worker_max_concurrency,
               "equal to 1 means disable concurrent rec worker.");
 
 #if defined(USE_NPU)
-// USE_NPU_TORCH: Temporary flag used for debugging qwen3 torch NPU graph
-// capture. This variable may be removed in the future.
 DEFINE_string(npu_kernel_backend,
-#if defined(USE_NPU_TORCH)
-              "TORCH",
-#else
-              "ATB",
-#endif
-              "NPU kernel backend. Supported options: ATB, TORCH.");
+              "AUTO",
+              "NPU kernel backend. Supported options: AUTO, ATB, TORCH.");
 
 DEFINE_bool(enable_intralayer_addnorm,
             false,

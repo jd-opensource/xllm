@@ -21,7 +21,7 @@ limitations under the License.
 #include "llm_model_base.h"
 
 // llama2 model compatible with huggingface weights
-namespace xllm {
+namespace xllm::npu::model {
 
 class LlamaDecoderLayerImpl : public torch::nn::Module {
  public:
@@ -297,10 +297,11 @@ class LlamaModelImpl : public torch::nn::Module {
 };
 TORCH_MODULE(LlamaModel);
 
-class LlamaForCausalLMImpl : public LlmForCausalLMImplBase<LlamaModel> {
+class LlamaForCausalLMImpl
+    : public xllm::npu::model::LlmForCausalLMImplBase<LlamaModel> {
  public:
   LlamaForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<LlamaModel>(context) {}
+      : xllm::npu::model::LlmForCausalLMImplBase<LlamaModel>(context) {}
 };
 TORCH_MODULE(LlamaForCausalLM);
 
@@ -360,4 +361,4 @@ REGISTER_MODEL_ARGS(llama, [&] {
   });
 });
 
-}  // namespace xllm
+}  // namespace xllm::npu::model

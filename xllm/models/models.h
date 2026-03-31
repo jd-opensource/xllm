@@ -15,13 +15,7 @@ limitations under the License.
 
 #pragma once
 
-// USE_NPU_TORCH: Temporary flag used for debugging qwen3 torch NPU graph
-// capture. This variable may be removed in the future.
-#if defined(USE_NPU) && defined(USE_NPU_TORCH)
-#include "llm/qwen3.h"       // IWYU pragma: keep
-#include "llm/qwen3_5.h"     // IWYU pragma: keep
-#include "llm/qwen3_next.h"  // IWYU pragma: keep
-#elif defined(USE_NPU)
+#if defined(USE_NPU)
 #include "dit/pipeline_flux.h"                // IWYU pragma: keep
 #include "dit/pipeline_flux_control.h"        // IWYU pragma: keep
 #include "dit/pipeline_flux_fill.h"           // IWYU pragma: keep
@@ -44,6 +38,10 @@ limitations under the License.
 #include "llm/npu/qwen3.h"                    // IWYU pragma: keep
 #include "llm/npu/qwen3_eagle3.h"             // IWYU pragma: keep
 #include "llm/npu/qwen3_moe.h"                // IWYU pragma: keep
+#include "llm/qwen3.h"                        // IWYU pragma: keep
+#include "llm/qwen3_5.h"                      // IWYU pragma: keep
+#include "llm/qwen3_5_mtp.h"                  // IWYU pragma: keep
+#include "llm/qwen3_next.h"                   // IWYU pragma: keep
 #include "rec/onerec.h"                       // IWYU pragma: keep
 #include "vlm/npu/glm4v.h"                    // IWYU pragma: keep
 #include "vlm/npu/glm4v_moe.h"                // IWYU pragma: keep

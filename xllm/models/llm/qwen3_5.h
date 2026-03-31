@@ -118,6 +118,17 @@ TORCH_MODULE(Qwen3_5ForCausalLM);
                         "shared_expert_intermediate_size",                     \
                         default_shared_expert_intermediate_size);              \
   LOAD_ARG_OR(                                                                 \
+      num_nextn_predict_layers, "text_config.mtp_num_hidden_layers", 0);       \
+  LOAD_ARG_OR(num_nextn_predict_layers,                                        \
+              "mtp_num_hidden_layers",                                         \
+              args->num_nextn_predict_layers());                               \
+  LOAD_ARG_OR(num_nextn_predict_layers,                                        \
+              "text_config.num_nextn_predict_layers",                          \
+              args->num_nextn_predict_layers());                               \
+  LOAD_ARG_OR(num_nextn_predict_layers,                                        \
+              "num_nextn_predict_layers",                                      \
+              args->num_nextn_predict_layers());                               \
+  LOAD_ARG_OR(                                                                 \
       layer_types, "text_config.layer_types", std::vector<std::string>());     \
   LOAD_ARG_OR(layer_types, "layer_types", args->layer_types());                \
   LOAD_ARG_OR(                                                                 \

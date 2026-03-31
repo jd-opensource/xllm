@@ -30,11 +30,13 @@ limitations under the License.
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
@@ -45,6 +47,7 @@ limitations under the License.
 #include "core/distributed_runtime/master.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model/npu_cp_ep_padding.h"
 #include "framework/model_loader.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
@@ -125,9 +128,10 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
 
   // first worker is the driver
   driver_ = parallel_args.rank() == 0;
-  int32_t tp_size = parallel_args.world_size() / parallel_args.dp_size();
-  dp_driver_ =
-      parallel_args.dp_size() > 1 && parallel_args.rank() % tp_size == 0;
+  int32_t tp_size = parallel_args.world_size() /
+                    (parallel_args.dp_size() * parallel_args.cp_size());
+  dp_driver_ = parallel_args.dp_size() > 1 &&
+               parallel_args.rank() % (tp_size * parallel_args.cp_size()) == 0;
 
   device_.set_device();
   device_.init_device_context();
@@ -137,10 +141,11 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   sampler_ = std::make_unique<Sampler>();
 
 #if !defined(USE_NPU)
-  // Startup validation: ATB block-copy kernel is NPU-only. We should fail fast
-  // if CUDA deployment accidentally enables it.
-  CHECK(!FLAGS_enable_block_copy_kernel)
-      << "enable_block_copy_kernel must be false on CUDA builds.";
+  if (FLAGS_enable_block_copy_kernel) {
+    LOG(WARNING) << "enable_block_copy_kernel is only supported on NPU; "
+                    "forcing enable_block_copy_kernel=false.";
+    FLAGS_enable_block_copy_kernel = false;
+  }
 #endif
 
 #if defined(USE_NPU)
@@ -546,8 +551,28 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   }
 #endif
   c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
-
   processed_input = input.to(device_, dtype_);
+
+#if defined(USE_NPU)
+  CpPrefillInputs tmp_cp_inputs;
+  if (parallel_args_.cp_size() > 1 &&
+      input.input_params.batch_forward_type.is_prefill()) {
+    tmp_cp_inputs = prepare_cp_prefill_inputs(parallel_args_.cp_size(),
+                                              input.token_ids,
+                                              input.positions,
+                                              input.input_params.q_seq_lens);
+    processed_input.input_params.cp_prefill_inputs = tmp_cp_inputs.to(device_);
+    CpEpPadding cp_ep_padding(
+        input.token_ids,
+        context_.get_model_args().num_experts_per_tok(),
+        context_.get_parallel_args().mapping_data(),
+        /*device=*/device_,
+        dtype_,
+        /*is_prefill=*/input.input_params.batch_forward_type.is_prefill());
+    processed_input.input_params.cp_ep_padding_data = cp_ep_padding.build();
+  }
+#endif
+
   auto& input_params = processed_input.input_params;
 
 #if defined(USE_NPU)
@@ -583,12 +608,13 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 #endif
 
 #if defined(USE_NPU)
-  if (FLAGS_enable_mla &&
+  if (context_.get_model_args().enable_mla() &&
       input_params.batch_forward_type.is_chunked_prefill()) {
     prepare_mla_prefixcache_inputs(input_params);
   }
 
   if (!context_.get_parallel_args().mapping_data().empty() &&
+      !(context_.get_parallel_args().cp_size() > 1) &&
       (context_.get_parallel_args().dp_size() > 1 ||
        context_.get_parallel_args().ep_size() > 1)) {
     torch::Tensor token_size_per_dp_group =
@@ -862,6 +888,25 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
 #if defined(USE_NPU)
   if (options_.enable_speculative_decode() && FLAGS_enable_atb_spec_kernel) {
     args.num_speculative_tokens(options_.num_speculative_tokens());
+  } else if (options_.enable_speculative_decode() &&
+             options_.num_speculative_tokens() == 0 &&
+             args.num_nextn_predict_layers() != 0) {
+    const std::string& current_type = args.model_type();
+    const char* mtp_model_type = nullptr;
+    if (current_type == "qwen3_5") {
+      mtp_model_type = "qwen3_5_mtp";
+    } else if (current_type == "qwen3_5_moe") {
+      mtp_model_type = "qwen3_5_moe_mtp";
+    }
+    if (mtp_model_type != nullptr) {
+      LOG(INFO) << "Overriding draft model_type from " << current_type << " to "
+                << mtp_model_type << " for speculative decoding";
+      args.model_type(mtp_model_type);
+      const int32_t mtp_layers = args.num_nextn_predict_layers();
+      args.n_layers(mtp_layers);
+      args.layer_types(std::vector<std::string>(mtp_layers, "full_attention"));
+      args.full_attention_interval(1);
+    }
   }
 #else
   if (options_.enable_speculative_decode()) {
@@ -888,6 +933,8 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     }
   }
 #endif
+
+  args.enable_mla(options_.enable_mla());
 
   // create model context
   dtype_ = dtype;

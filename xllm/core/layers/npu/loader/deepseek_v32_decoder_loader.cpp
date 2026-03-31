@@ -718,15 +718,26 @@ void DeekseekV32DecoderLoader::process_shared_expert_weights(
   if (index == -1) {
     return;
   }
+
+  const bool is_sharded = WEIGHT_SHARD_W8A8.count(index);
+
   if (FLAGS_expert_parallel_degree == 2) {
     tmp_tensor = tensor.to(device_);
+  } else if (layer_id_ < first_k_dense_replace_) {
+    tmp_tensor = is_sharded ? get_sharded_tensor(state_dict,
+                                                 name,
+                                                 WEIGHT_SHARD_W8A8.at(index),
+                                                 dp_local_tp_rank_,
+                                                 dp_local_tp_size_)
+                                  .to(device_)
+                            : tensor.to(device_);
   } else {
-    const bool is_sharded = WEIGHT_SHARD_W8A8.count(index);
     tmp_tensor = is_sharded ? get_sharded_tensor(
                                   state_dict, name, WEIGHT_SHARD_W8A8.at(index))
                                   .to(device_)
                             : tensor.to(device_);
   }
+
   if (absl::StrContains(name, "down_proj")) {
     at_weight_tensors_[index] = tmp_tensor;
   } else {

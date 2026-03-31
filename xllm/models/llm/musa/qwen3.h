@@ -174,7 +174,7 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
   layer::AttentionMetadata get_attention_metadata(
       const ModelInputParams& params,
       const torch::Tensor& h) {
-    return layer::AttentionMetadataBuilder::build(params);
+    return layer::AttentionMetadataBuilder::build(params, model_args_);
   }
 };
 TORCH_MODULE(QWen3Model);

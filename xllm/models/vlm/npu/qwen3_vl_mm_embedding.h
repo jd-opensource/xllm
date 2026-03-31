@@ -15,7 +15,7 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "qwen3_vl.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 class Qwen3_VLForMMEmbeddingImpl : public torch::nn::Module {
  public:
@@ -119,10 +119,15 @@ class Qwen3_VLForMMEmbeddingImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Qwen3_VLForMMEmbedding);
 
+}  // namespace xllm::npu::model
+
+namespace xllm {
+
 template <>
-class MMEmbeddingVLMImpl<xllm::Qwen3_VLForMMEmbedding> : public MMEmbeddingVLM {
+class MMEmbeddingVLMImpl<npu::model::Qwen3_VLForMMEmbedding>
+    : public MMEmbeddingVLM {
  public:
-  MMEmbeddingVLMImpl(xllm::Qwen3_VLForMMEmbedding model,
+  MMEmbeddingVLMImpl(npu::model::Qwen3_VLForMMEmbedding model,
                      const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
@@ -169,11 +174,12 @@ class MMEmbeddingVLMImpl<xllm::Qwen3_VLForMMEmbedding> : public MMEmbeddingVLM {
   }
 
  private:
-  xllm::Qwen3_VLForMMEmbedding model_;
+  npu::model::Qwen3_VLForMMEmbedding model_;
   torch::TensorOptions options_;
 };
 
-REGISTER_MM_EMBEDDING_VLM_MODEL_WITH_VARNAME(qwen3_vl_mm_embedding,
-                                             qwen3_vl,
-                                             Qwen3_VLForMMEmbedding);
+REGISTER_MM_EMBEDDING_VLM_MODEL_WITH_VARNAME(
+    qwen3_vl_mm_embedding,
+    qwen3_vl,
+    npu::model::Qwen3_VLForMMEmbedding);
 }  // namespace xllm

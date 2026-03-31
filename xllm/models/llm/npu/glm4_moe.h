@@ -21,7 +21,7 @@ limitations under the License.
 #include "core/layers/npu/npu_glm4_moe_decoder_layer.h"
 #include "llm_model_base.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
@@ -358,10 +358,11 @@ class Glm4MoeModelImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Glm4MoeModel);
 
-class Glm4MoeForCausalLMImpl : public LlmForCausalLMImplBase<Glm4MoeModel> {
+class Glm4MoeForCausalLMImpl
+    : public xllm::npu::model::LlmForCausalLMImplBase<Glm4MoeModel> {
  public:
   Glm4MoeForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<Glm4MoeModel>(context) {}
+      : xllm::npu::model::LlmForCausalLMImplBase<Glm4MoeModel>(context) {}
 };
 TORCH_MODULE(Glm4MoeForCausalLM);
 
@@ -406,4 +407,4 @@ REGISTER_MODEL_ARGS(glm4_moe, [&] {
           std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
                                       args->eos_token_id_vec().end()));
 });
-}  // namespace xllm
+}  // namespace xllm::npu::model

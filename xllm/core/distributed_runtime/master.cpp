@@ -44,8 +44,10 @@ limitations under the License.
 #include "rec_master.h"
 #include "speculative_engine.h"
 #include "util/device_name_utils.h"
+#include "util/model_config_utils.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
+#include "util/utils.h"
 #include "vlm_engine.h"
 #include "vlm_master.h"
 
@@ -95,13 +97,43 @@ void print_startup_banner(const std::filesystem::path& model_path,
 
 }  // namespace
 
+namespace {
+
+#if defined(USE_NPU)
+void resolve_npu_kernel_backend_for_options(Options* options) {
+  CHECK(options != nullptr) << "options must not be null";
+  if (options->backend() == "dit") {
+    return;
+  }
+
+  const std::string model_type = get_model_type(options->model_path());
+  std::string effective_backend;
+  std::string resolved_name;
+  std::string error_message;
+  if (!resolve_model_registration(model_type,
+                                  options->npu_kernel_backend(),
+                                  &effective_backend,
+                                  &resolved_name,
+                                  &error_message)) {
+    LOG(FATAL) << error_message;
+  }
+
+  options->npu_kernel_backend(effective_backend);
+  FLAGS_npu_kernel_backend = effective_backend;
+  LOG(INFO) << "Resolved npu_kernel_backend=" << effective_backend
+            << " for model_type=" << model_type;
+}
+#endif
+
+}  // namespace
+
 Master::Master(const Options& options, EngineType type)
     : options_(options), master_status_(options.master_status()) {
-  print_startup_banner(
-      std::filesystem::path(options_.model_path()).lexically_normal(),
-      options_.backend(),
-      options_.node_rank());
-  LOG(INFO) << "Master init options: " << options.to_string();
+  const auto model_path =
+      std::filesystem::path(options_.model_path()).lexically_normal();
+  options_.enable_mla(util::should_enable_mla(model_path, options_.backend()));
+  print_startup_banner(model_path, options_.backend(), options_.node_rank());
+  LOG(INFO) << "Master init options: " << options_.to_string();
   FLAGS_enable_prefill_sp = options_.enable_prefill_sp();
 
   // Allow brpc receive SIGTREM and SIGINT signal.
@@ -130,6 +162,7 @@ Master::Master(const Options& options, EngineType type)
   if (options.eplb_update_threshold().has_value()) {
     FLAGS_eplb_update_threshold = options.eplb_update_threshold().value();
   }
+  resolve_npu_kernel_backend_for_options(&options_);
 #endif
   FLAGS_enable_multi_stream_parallel =
       options.enable_multi_stream_parallel() && (options.nnodes() > 1);
@@ -164,7 +197,9 @@ Master::Master(const Options& options, EngineType type)
         .max_memory_utilization(options.max_memory_utilization())
         .enable_prefix_cache(options.enable_prefix_cache())
         .task_type(options.task_type())
+        .enable_mla(options_.enable_mla())
         .enable_prefill_sp(options_.enable_prefill_sp())
+        .npu_kernel_backend(options_.npu_kernel_backend())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())
@@ -218,8 +253,9 @@ Master::Master(const Options& options, EngineType type)
             options_.speculative_suffix_max_cached_requests())
         .speculative_suffix_use_tree_spec(
             options_.speculative_suffix_use_tree_spec())
-        .task_type(options.task_type())
-        .enable_mla(options.enable_mla())
+        .task_type(options_.task_type())
+        .enable_mla(options_.enable_mla())
+        .npu_kernel_backend(options_.npu_kernel_backend())
         .master_node_addr(options.master_node_addr())
         .nnodes(options.nnodes())
         .node_rank(options.node_rank())
@@ -269,12 +305,14 @@ Master::Master(const Options& options, EngineType type)
         .enable_prefix_cache(options_.enable_prefix_cache())
         .task_type(options_.task_type())
         .enable_mla(options_.enable_mla())
+        .npu_kernel_backend(options_.npu_kernel_backend())
         .master_node_addr(options_.master_node_addr())
         .nnodes(options_.nnodes())
         .node_rank(options_.node_rank())
         .dp_size(options_.dp_size())
         .ep_size(options_.ep_size())
         .enable_prefill_sp(options_.enable_prefill_sp())
+        .cp_size(options_.cp_size())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
         .max_tokens_per_chunk_for_prefill(
@@ -321,6 +359,8 @@ Master::Master(const Options& options, EngineType type)
         .max_memory_utilization(options_.max_memory_utilization())
         .enable_prefix_cache(options_.enable_prefix_cache())
         .task_type(options_.task_type())
+        .npu_kernel_backend(options_.npu_kernel_backend())
+        .enable_mla(options_.enable_mla())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())

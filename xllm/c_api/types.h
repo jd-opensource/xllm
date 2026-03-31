@@ -40,9 +40,6 @@ extern "C" {
  * in macros. Empty string indicates disable/use default value.
  */
 typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
-  /** Whether to enable multi-head latent attention */
-  bool enable_mla;
-
   /** Whether to enable chunked prefill for inference */
   bool enable_chunked_prefill;
 

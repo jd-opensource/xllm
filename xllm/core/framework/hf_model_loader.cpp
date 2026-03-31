@@ -719,10 +719,19 @@ bool HFModelLoader::load_model_args(const std::string& model_weights_path) {
     return false;
   }
 
-  auto model_args_loader = ModelRegistry::get_model_args_loader(model_type);
+  std::string resolved_model_type;
+  std::string error_message;
+  if (!resolve_model_registration_name(
+          model_type, &resolved_model_type, &error_message)) {
+    LOG(ERROR) << error_message;
+    return false;
+  }
+
+  auto model_args_loader =
+      ModelRegistry::get_model_args_loader(resolved_model_type);
   if (model_args_loader == nullptr) {
     LOG(ERROR) << "Failed to find model args loader for model type "
-               << model_type;
+               << resolved_model_type;
     return false;
   }
   model_args_loader(reader, &args_);

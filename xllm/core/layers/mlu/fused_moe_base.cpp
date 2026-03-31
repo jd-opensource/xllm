@@ -138,9 +138,6 @@ void FusedMoEImpl::final_comm_allreduce(torch::Tensor& final_hidden_states,
 torch::Tensor FusedMoEImpl::forward_experts_base(
     const torch::Tensor& hidden_states,
     const std::optional<RouteInfo>& route_info) {
-  init_streams(hidden_states);
-
-  torch::Tensor shared_expert_output;
   torch::IntArrayRef hidden_states_shape = hidden_states.sizes();
   torch::ScalarType hidden_states_dtype = hidden_states.dtype().toScalarType();
   torch::Tensor hidden_states_2d =
@@ -188,7 +185,13 @@ torch::Tensor FusedMoEImpl::forward_experts_base(
   // reshape the final hidden states to the original shape
   final_hidden_states = final_hidden_states.reshape(hidden_states_shape);
 
-  // Communication Step 3: AllReduce
+  if (!enable_result_reduction_) {
+    return final_hidden_states;
+  }
+
+  init_streams(hidden_states);
+
+  torch::Tensor shared_expert_output;
   final_comm_allreduce(
       final_hidden_states, hidden_states, shared_expert_output);
 

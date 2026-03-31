@@ -109,7 +109,6 @@ do
     --max_memory_utilization=0.90 \
     --max_tokens_per_batch=10000 \
     --max_seqs_per_batch=256 \
-    --enable_mla=true \
     --block_size=128 \
     --ep_size=1 \
     --dp_size=1 \

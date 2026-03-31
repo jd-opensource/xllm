@@ -39,7 +39,7 @@ class LlmModelImplBase : public torch::nn::Module {
  public:
   // mode type: qwen2, qwen3 .etc
   LlmModelImplBase(const std::string& model_type, const ModelArgs& args)
-      : model_type_(model_type) {
+      : model_args_(args), model_type_(model_type) {
     InterruptionBus::get_instance().subscribe([this](bool interrupted) {
       this->layer_forward_interrupted_ = interrupted;
     });
@@ -80,7 +80,8 @@ class LlmModelImplBase : public torch::nn::Module {
     if (!modified_input_params.attn_metadata) {
       modified_input_params.attn_metadata =
           std::make_shared<layer::AttentionMetadata>(
-              layer::AttentionMetadataBuilder::build(modified_input_params));
+              layer::AttentionMetadataBuilder::build(modified_input_params,
+                                                     model_args_));
     }
     auto& attn_metadata = *(modified_input_params.attn_metadata);
     if (positions.dim() == 2) {
@@ -148,6 +149,7 @@ class LlmModelImplBase : public torch::nn::Module {
   torch::Tensor cos_sin_;
   int32_t max_seq_len_ = 0;
   std::vector<int64_t> mrope_section_;
+  ModelArgs model_args_;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::RMSNorm norm_{nullptr};
 

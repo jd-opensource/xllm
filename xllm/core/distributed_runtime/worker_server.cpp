@@ -73,10 +73,14 @@ void WorkerServer::create_server(
     int32_t dp_size,
     int local_rank,
     int32_t ep_size,
+    int32_t cp_size,
     WorkerType worker_type,
     std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
     std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
   FLAGS_enable_prefill_sp = options.enable_prefill_sp();
+#if defined(USE_NPU)
+  FLAGS_npu_kernel_backend = options.npu_kernel_backend();
+#endif
   Device device(d);
   device.set_device();
   LOG(INFO) << "Create worker server with device: " << device.index();
@@ -133,7 +137,8 @@ void WorkerServer::create_server(
     return;
   }
 
-  CollectiveCommunicator comm(worker_global_rank, world_size, dp_size, ep_size);
+  CollectiveCommunicator comm(
+      worker_global_rank, world_size, dp_size, ep_size, cp_size);
   const ParallelArgs* parallel_args = comm.parallel_args();
   comm.create_process_groups(master_node_addr, device);
 
@@ -309,6 +314,7 @@ WorkerServer::WorkerServer(int local_worker_idx,
                                         parallel_args.dp_size(),
                                         local_worker_idx,
                                         parallel_args.ep_size(),
+                                        parallel_args.cp_size(),
                                         worker_type,
                                         std::move(input_shm_manager),
                                         std::move(output_shm_manager));

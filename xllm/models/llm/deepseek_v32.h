@@ -60,7 +60,8 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
     if (!modified_input_params.attn_metadata) {
       modified_input_params.attn_metadata =
           std::make_shared<layer::AttentionMetadata>(
-              layer::AttentionMetadataBuilder::build(modified_input_params));
+              layer::AttentionMetadataBuilder::build(modified_input_params,
+                                                     model_args_));
     }
     auto& attn_metadata = *modified_input_params.attn_metadata;
     std::optional<layer::v32_sp::DeepseekV32SPContext> sp_ctx;

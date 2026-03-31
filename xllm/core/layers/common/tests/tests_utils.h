@@ -158,6 +158,12 @@ class MockProcessGroup : public xllm::ProcessGroup {
     // Mock implementation - do nothing for testing
   }
 
+  c10::intrusive_ptr<c10d::Work> allreduce_async(
+      torch::Tensor& input) override {
+    allreduce(input);
+    return make_completed_work();
+  }
+
   void allgather(const torch::Tensor& input,
                  std::vector<torch::Tensor>& outputs) override {
     outputs.resize(this->world_size());
@@ -180,6 +186,28 @@ class MockProcessGroup : public xllm::ProcessGroup {
       const torch::Tensor& input,
       std::vector<torch::Tensor>& outputs) override {
     allgather(input, outputs);
+    return make_completed_work();
+  }
+
+  c10::intrusive_ptr<c10d::Work> allgather_base_async(
+      const torch::Tensor& input,
+      torch::Tensor& output) override {
+    CHECK(output.defined()) << "mock allgather_base_async requires output";
+    CHECK_EQ(output.size(0), this->world_size())
+        << "mock allgather_base_async world_size mismatch";
+
+    if (!allgather_outputs_.empty()) {
+      CHECK_EQ(allgather_outputs_.size(), static_cast<size_t>(output.size(0)))
+          << "mock allgather_base outputs size mismatch";
+      for (int64_t i = 0; i < output.size(0); ++i) {
+        output[i].copy_(allgather_outputs_[i]);
+      }
+      return make_completed_work();
+    }
+
+    for (int64_t i = 0; i < output.size(0); ++i) {
+      output[i].copy_(input);
+    }
     return make_completed_work();
   }
 

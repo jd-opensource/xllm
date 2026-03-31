@@ -93,8 +93,8 @@ class ProfileManager {
   double run_request(const std::vector<int32_t>& token_length_vec,
                      const std::vector<int32_t>& prefix_length_vec);
 
-  // Generate a batch of decode requests and execute it, then return the step
-  // latency.
+  // Generate a batch of decode requests in DECODE stage and execute one decode
+  // step, then return the step latency.
   double profile_decode_step_time(int32_t token_length,
                                   int32_t batch_size,
                                   int32_t min_context_len,
@@ -129,6 +129,7 @@ class ProfileManager {
 
   std::shared_ptr<Request> generate_single_request(int32_t token_length,
                                                    int32_t prefix_length);
+  std::shared_ptr<Request> generate_single_decode_request(int32_t total_length);
 
   std::string generate_filename(const std::string& file_suffix);
 
@@ -147,14 +148,15 @@ class ProfileManager {
                                    int32_t lower_bound,
                                    int32_t upper_bound);
 
-  // Generate a batch of random decode requests with an average length of
-  // token_length.
+  // Generate a batch of random decode requests with an average total sequence
+  // length of token_length.
   void generate_random_decode_batch(int32_t total_length,
                                     int32_t batch_size,
                                     int32_t min_context_len,
                                     int32_t max_context_len,
-                                    std::vector<int32_t>& token_length_vec,
-                                    std::vector<int32_t>& prefix_length_vec);
+                                    std::vector<int32_t>& token_length_vec);
+
+  double run_decode_request(const std::vector<int32_t>& total_length_vec);
 
   static const std::vector<ProfileManager::CopyBlockProfile>&
   get_copy_block_profile();

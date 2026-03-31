@@ -40,7 +40,8 @@ namespace xllm {
 CollectiveCommunicator::CollectiveCommunicator(int global_rank,
                                                int world_size,
                                                int dp_size,
-                                               int ep_size) {
+                                               int ep_size,
+                                               int cp_size) {
 #if defined(USE_NPU)
   // create hccl process group with hccl_root_info
   // std::vector<HcclRootInfo> unique_ids;
@@ -63,7 +64,7 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
   // comunicator will be inited in torch.
   if (FLAGS_npu_kernel_backend == "TORCH") {
     parallel_args_ = std::make_unique<ParallelArgs>(
-        global_rank, world_size, dp_size, nullptr, ep_size);
+        global_rank, world_size, dp_size, cp_size, nullptr, ep_size);
     return;
   }
 
@@ -71,13 +72,16 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
   // HACK: MappingNPU internally uses a static counter to auto-assign
   // buffer_offset for multi-model scenarios. This is a hack and should be
   // refactored later.
+  const int32_t normalized_cp_size = cp_size > 0 ? cp_size : 1;
+  const int32_t attn_tp_size = world_size / (dp_size * normalized_cp_size);
   MappingNPU::Options mapping_options;
   mapping_options.dp_size(dp_size)
-      .tp_size(world_size / dp_size)
+      .tp_size(attn_tp_size)
       .moe_tp_size(world_size / ep_size)
       .moe_ep_size(ep_size)
       .pp_size(1)
-      .sp_size(1);
+      .sp_size(1)
+      .cp_size(normalized_cp_size);
   MappingNPU mapping_npu(
       FLAGS_rank_tablefile, world_size, global_rank, mapping_options);
   auto mapping_data = mapping_npu.to_json();
@@ -101,13 +105,14 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
                                                   dp_size,
                                                   nullptr,
                                                   ep_size,
+                                                  cp_size,
                                                   mapping_data,
                                                   mapping,
                                                   dispatchAndCombinecommDomain,
                                                   dispatchAndCombineHcclComm);
 #else
   parallel_args_ = std::make_unique<ParallelArgs>(
-      global_rank, world_size, dp_size, nullptr, ep_size);
+      global_rank, world_size, dp_size, cp_size, nullptr, ep_size);
 #endif
 }
 

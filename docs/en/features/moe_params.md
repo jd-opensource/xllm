@@ -13,7 +13,6 @@ Key advantages:
 
 + **dp_size**: Sets the data parallelism scale for the Attention part. Default: 1, can be set to powers of 2. When dp_size doesn't equal the total number of devices, TP parallelism is used within the DP group.
 + **ep_size**: Sets the expert parallelism scale for the MoE part. Default: 1, can be set to powers of 2. When ep_size doesn't equal the total number of devices, TP parallelism is used within the DP group.
-+ **enable_mla**: Default: false. Set to true when using MLA in the model.
 + **expert_parallel_degree**: EP-related parameter. Default is 0 when EP is disabled. When EP is enabled, default is 1 (EP Level 1). When ep_size equals the total number of devices, can be set to 2 to enable EP Level 2.
 
 ## Solution Design

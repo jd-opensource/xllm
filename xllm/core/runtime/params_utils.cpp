@@ -81,6 +81,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::vector<int32_t>(pb_forward_input->paged_kv_last_page_len().begin(),
                            pb_forward_input->paged_kv_last_page_len().end());
   std::vector<std::vector<int32_t>> block_tables_vec;
+  block_tables_vec.reserve(pb_forward_input->block_tables_vec().size());
   for (size_t i = 0; i < pb_forward_input->block_tables_vec().size(); ++i) {
     block_tables_vec.emplace_back(std::vector<int32_t>(
         pb_forward_input->block_tables_vec()[i].block_tables().begin(),
@@ -99,6 +100,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   // aprint<int32_t>(sample_idxes, "sample_idxes", global_rank_);
 
   std::vector<std::vector<int64_t>> unique_token_ids_vec;
+  unique_token_ids_vec.reserve(pb_forward_input->unique_token_ids_vec().size());
   for (size_t i = 0; i < pb_forward_input->unique_token_ids_vec().size(); ++i) {
     unique_token_ids_vec.emplace_back(std::vector<int64_t>(
         pb_forward_input->unique_token_ids_vec()[i].unique_token_ids().begin(),
@@ -107,6 +109,8 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
     // global_rank_);
   }
   std::vector<std::vector<int32_t>> unique_token_counts_vec;
+  unique_token_counts_vec.reserve(
+      pb_forward_input->unique_token_counts_vec().size());
   for (size_t i = 0; i < pb_forward_input->unique_token_counts_vec().size();
        ++i) {
     unique_token_counts_vec.emplace_back(
@@ -136,6 +140,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
                                pb_forward_input->request_ids().end());
 
   std::vector<BlockTransferInfo> swap_blocks;
+  swap_blocks.reserve(pb_forward_input->swap_blocks().size());
   for (size_t i = 0; i < pb_forward_input->swap_blocks().size(); ++i) {
     swap_blocks.emplace_back(pb_forward_input->swap_blocks()[i].src_block_id(),
                              pb_forward_input->swap_blocks()[i].dst_block_id());
@@ -152,6 +157,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
 
   std::vector<const RequestSamplingParam*> sampling_params;
   std::vector<RequestSamplingParam> tmp_sampling_params;
+  tmp_sampling_params.reserve(pb_forward_input->sampling_params().size());
   for (auto sp : pb_forward_input->sampling_params()) {
     RequestSamplingParam tmp;
     tmp.frequency_penalty = sp.frequency_penalty();
@@ -167,6 +173,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
     tmp.beam_width = sp.beam_width();
     tmp_sampling_params.emplace_back(tmp);
   }
+  sampling_params.reserve(tmp_sampling_params.size());
   for (size_t i = 0; i < tmp_sampling_params.size(); ++i) {
     sampling_params.emplace_back(&tmp_sampling_params[i]);
   }
@@ -242,6 +249,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
     const int32_t rows = pb_forward_input->embeds().size();
     const int32_t cols = pb_forward_input->embeds()[0].vals().size();
     std::vector<std::vector<float>> embeddings_vec;
+    embeddings_vec.reserve(rows);
     for (size_t i = 0; i < rows; ++i) {
       embeddings_vec.emplace_back(
           std::vector<float>(pb_forward_input->embeds()[i].vals().begin(),
@@ -369,6 +377,7 @@ void forward_input_to_proto(const RawForwardInput& inputs,
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_acc_logprob_vec(),
                       inputs.acc_logprob_vec);
   std::vector<proto::RequestSamplingParam> pb_sampling_params;
+  pb_sampling_params.reserve(inputs.sampling_params.size());
   for (auto sp : inputs.sampling_params) {
     proto::RequestSamplingParam pb_sp;
     pb_sp.set_frequency_penalty(sp->frequency_penalty);

@@ -23,7 +23,7 @@ WordEmbeddingManualLoader::WordEmbeddingManualLoader(
     : BaseManualLoader(weight_count, context) {}
 
 void WordEmbeddingManualLoader::load_state_dict(const StateDict& state_dict) {
-  if (dp_size_ > 1) {
+  if (dp_size_ > 1 || cp_size_ > 1) {
     set_weight(
         state_dict, "weight", 0, 1, dp_local_tp_rank_, dp_local_tp_size_, true);
   } else {

@@ -21,7 +21,7 @@ limitations under the License.
 #include "core/layers/npu/npu_qwen3_moe_decoder_layer_impl.h"
 #include "llm_model_base.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
@@ -496,10 +496,11 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Qwen3MoeModel);
 
-class Qwen3MoeForCausalLMImpl : public LlmForCausalLMImplBase<Qwen3MoeModel> {
+class Qwen3MoeForCausalLMImpl
+    : public xllm::npu::model::LlmForCausalLMImplBase<Qwen3MoeModel> {
  public:
   Qwen3MoeForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<Qwen3MoeModel>(context) {}
+      : xllm::npu::model::LlmForCausalLMImplBase<Qwen3MoeModel>(context) {}
 };
 TORCH_MODULE(Qwen3MoeForCausalLM);
 
@@ -547,4 +548,4 @@ REGISTER_MODEL_ARGS(qwen3_moe, [&] {
 
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
-}  // namespace xllm
+}  // namespace xllm::npu::model

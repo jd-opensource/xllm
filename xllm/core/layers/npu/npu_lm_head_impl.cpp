@@ -27,6 +27,7 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
                                     const ModelArgs& args,
                                     const ParallelArgs& parallel_args,
                                     bool isPrefill) {
+  const bool use_column_parallel = cp_size_ > 1;
   param.unpadInputs = true;
   param.gatherAhead = isPrefill;
   param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
@@ -37,7 +38,11 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
   if (parallel_args.world_size() > 1) {
     int32_t lm_head_tp_world_size = 1;
     if (parallel_args.mapping_data().empty()) {
-      if (dp_size_ > 1) {
+      const bool use_local_tp = (dp_size_ > 1) || (cp_size_ > 1);
+      if (use_local_tp) {
+        CHECK_GT(dp_local_tp_size_, 0);
+        CHECK_GE(dp_local_tp_rank_, 0);
+        CHECK_LT(dp_local_tp_rank_, dp_local_tp_size_);
         param.linearParallelParam.tensorParallelInfo.rank = dp_local_tp_rank_;
         param.linearParallelParam.tensorParallelInfo.worldSize =
             dp_local_tp_size_;
@@ -47,15 +52,21 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
         param.linearParallelParam.tensorParallelInfo.worldSize =
             parallel_args.world_size();
       }
-      param.linearParallelParam.parallelType = atb_speed::common::ROW_PARALLEL;
+      param.linearParallelParam.parallelType =
+          use_column_parallel ? atb_speed::common::COLUMN_PARALLEL
+                              : atb_speed::common::ROW_PARALLEL;
+      const int32_t tp_group_id =
+          use_local_tp ? (parallel_args.rank() / dp_local_tp_size_) : 0;
       param.linearParallelParam.tensorParallelInfo.commDomain =
-          std::to_string(dp_rank_);
+          std::to_string(tp_group_id);
       param.linearParallelParam.tensorParallelInfo.backend =
           FLAGS_communication_backend;
       lm_head_tp_world_size =
           param.linearParallelParam.tensorParallelInfo.worldSize;
     } else {
-      param.linearParallelParam.parallelType = atb_speed::common::ROW_PARALLEL;
+      param.linearParallelParam.parallelType =
+          use_column_parallel ? atb_speed::common::COLUMN_PARALLEL
+                              : atb_speed::common::ROW_PARALLEL;
       atb_speed::common::ParallelInfo parallelInfo =
           parallel_args.mapping().Get(atb_speed::base::LM_HEAD_TP);
       param.linearParallelParam.tensorParallelInfo.rank = parallelInfo.rank;
@@ -68,9 +79,13 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
           param.linearParallelParam.tensorParallelInfo.commDomain);
       lm_head_tp_world_size =
           param.linearParallelParam.tensorParallelInfo.worldSize;
+      param.contextParallelInfo =
+          parallel_args.mapping().Get(atb_speed::base::ATTN_CP);
     }
-    param.hiddenSizePerAttentionHead =
-        args.hidden_size() / lm_head_tp_world_size;
+    if (!use_column_parallel) {
+      param.hiddenSizePerAttentionHead =
+          args.hidden_size() / lm_head_tp_world_size;
+    }
   }
 }
 

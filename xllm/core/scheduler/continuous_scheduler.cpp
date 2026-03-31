@@ -73,6 +73,26 @@ size_t get_sequence_free_blocks_for_rank(KVCacheManager* kv_cache_manager,
 
 }  // namespace
 
+namespace {
+
+inline size_t maybe_align_cp_prefill_tokens(const Sequence* sequence,
+                                            size_t num_tokens,
+                                            int32_t cp_size) {
+  if (sequence == nullptr || cp_size <= 1 || num_tokens == 0) {
+    return num_tokens;
+  }
+  if (FLAGS_enable_chunked_prefill) {
+    return num_tokens;
+  }
+  if (!sequence->is_prefill_stage()) {
+    return num_tokens;
+  }
+  const size_t alignment = static_cast<size_t>(cp_size) * 2;
+  return xllm::util::align_up(num_tokens, alignment);
+}
+
+}  // namespace
+
 ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
     : options_(options),
       engine_(engine),
@@ -281,6 +301,10 @@ void ContinuousScheduler::handle_prefill_requests(
       // Currently overestimating the number of tokens actually processed when
       // enable prefix cache
       size_t num_tokens = prefill_sequence->num_need_compute_tokens();
+      num_tokens = maybe_align_cp_prefill_tokens(
+          prefill_sequence.get(), num_tokens, options_.cp_size());
+      const size_t target_num_tokens =
+          prefill_sequence->kv_cache_tokens_num() + num_tokens;
       if (remaining_token_budget < allocated_tokens + num_tokens ||
           remaining_seq_budget < allocated_seqs + 1) {
         can_schedule = false;
@@ -289,7 +313,8 @@ void ContinuousScheduler::handle_prefill_requests(
       }
 
       // preempt offline decode
-      if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
+      if (!kv_cache_manager_->allocate(prefill_sequence.get(),
+                                       target_num_tokens)) {
         can_schedule = false;
         if (options_.enable_online_preempt_offline() && !request->offline() &&
             !running_queue_offline_->empty()) {
@@ -300,7 +325,7 @@ void ContinuousScheduler::handle_prefill_requests(
           bool enough_to_evict =
               check_if_enough_to_evict(running_queue_offline_.get(),
                                        prefill_sequence.get(),
-                                       num_tokens,
+                                       target_num_tokens,
                                        num_request_to_evict);
           if (enough_to_evict) {
             for (size_t i = 0; i < num_request_to_evict; ++i) {
@@ -314,7 +339,8 @@ void ContinuousScheduler::handle_prefill_requests(
               request_to_preempt->set_preempted();
               waiting_priority_queue_offline_.push(request_to_preempt);
             }
-            if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
+            if (!kv_cache_manager_->allocate(prefill_sequence.get(),
+                                             target_num_tokens)) {
               LOG(ERROR) << "Should be able to allocate after preempting "
                          << num_request_to_evict
                          << " offline requests, but failed.";
@@ -1141,6 +1167,10 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
       enable_schedule_overlap ? last_running_sequences_ : running_sequences_;
   std::vector<std::shared_ptr<Request>>& to_be_processed_requests =
       enable_schedule_overlap ? last_running_requests_ : running_requests_;
+  // Beam search may replace Sequence objects inside SequencesGroup.
+  // Always refresh the sequence pointers from requests before dereferencing.
+  refresh_sequences_from_requests(to_be_processed_requests,
+                                  to_be_processed_sequences);
   // update token latency metrics
   update_token_latency_metrics(to_be_processed_sequences);
 
@@ -1174,6 +1204,23 @@ void ContinuousScheduler::process_batch_output(bool enable_schedule_overlap) {
   }
   if (!stream_requests.empty()) {
     response_processor_->process_stream_requests(stream_requests);
+  }
+}
+
+void ContinuousScheduler::refresh_sequences_from_requests(
+    const std::vector<std::shared_ptr<Request>>& requests,
+    std::vector<Sequence*>& sequences) const {
+  sequences.clear();
+  for (const auto& request : requests) {
+    if (request == nullptr) {
+      continue;
+    }
+    auto& request_sequences = request->sequences();
+    for (auto& sequence : request_sequences) {
+      if (sequence != nullptr) {
+        sequences.emplace_back(sequence.get());
+      }
+    }
   }
 }
 
@@ -1219,6 +1266,9 @@ std::vector<int64_t> ContinuousScheduler::get_active_activation_in_bytes() {
 
 void ContinuousScheduler::update_memory_metrics(
     std::vector<Sequence*>& sequences) {
+  if (sequences.empty()) {
+    return;
+  }
   std::vector<int64_t> num_occupied_slots = get_num_occupied_slots(sequences);
   std::vector<int64_t> active_activation_size_in_bytes =
       get_active_activation_in_bytes();

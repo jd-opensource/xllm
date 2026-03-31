@@ -98,8 +98,10 @@ LLMEngine::LLMEngine(const runtime::Options& options,
   setup_workers(options);
 
   dp_size_ = options_.dp_size();
+  cp_size_ = options_.cp_size();
   worker_clients_num_ = worker_clients_.size();
-  dp_local_tp_size_ = worker_clients_num_ / dp_size_;
+  dp_local_size_ = worker_clients_num_ / dp_size_;
+  dp_local_tp_size_ = dp_local_size_ / cp_size_;
 
   // create ThreadPool for link cluster
   link_threadpool_ = std::make_unique<ThreadPool>(worker_clients_num_);
@@ -187,8 +189,7 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   tokenizer_args_ = model_loader->tokenizer_args();
 
   // compute the number of local kv heads and head dim
-  const uint32_t world_size =
-      dp_size_ > 1 ? dp_local_tp_size_ : worker_clients_num_;
+  const uint32_t world_size = dp_local_tp_size_;
   const int64_t n_heads = args_.n_heads();
   const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
   n_local_kv_heads_ = std::max<int64_t>(1, n_kv_heads / world_size);
@@ -449,7 +450,8 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   int64_t index_slot_size = 0;
   int64_t scale_slot_size =
       0;  // Extra overhead for scale tensors in quant mode
-  if (FLAGS_enable_mla) {
+
+  if (options_.enable_mla()) {
 #if defined(USE_NPU)
     if (args_.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
       slot_size =
@@ -481,7 +483,7 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   // => per token: n_kv_heads floats for K + n_kv_heads for V.
   // MLA: key scale [num_blocks, 1, block_size] => one float per token.
   if (enable_kv_cache_quant) {
-    if (FLAGS_enable_mla) {
+    if (options_.enable_mla()) {
       // MLA scale shape is [num_blocks, 1, block_size] -> one float per token
       scale_slot_size = sizeof(float);
     } else {
@@ -543,7 +545,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   // init kv cache for each worker
   std::vector<std::vector<int64_t>> kv_cache_shape;
   kv_cache_shape.reserve(2);
-  if (FLAGS_enable_mla) {
+  if (options_.enable_mla()) {
 #if defined(USE_NPU)
     if (args_.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
       kv_cache_shape.emplace_back(
@@ -597,7 +599,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   for (auto& shape : kv_cache_shape) {
     std::swap(shape[1], shape[2]);
   }
-  if (FLAGS_enable_mla) {
+  if (options_.enable_mla()) {
     kv_cache_shape[0][3] = args_.kv_lora_rank() + args_.qk_rope_head_dim();
     kv_cache_shape[1] = std::vector<int64_t>{};
   }
@@ -1027,11 +1029,36 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
 
+  std::vector<std::vector<RawForwardInput>> cp_partitioned_inputs(dp_size_);
+
+  if (cp_size_ > 1) {
+    for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
+      if (!raw_forward_inputs[dp_rank].batch_forward_type.is_prefill()) {
+        continue;
+      }
+      auto& inputs_per_cp = cp_partitioned_inputs[dp_rank];
+      inputs_per_cp.reserve(cp_size_);
+      for (uint32_t cp_rank = 0; cp_rank < cp_size_; ++cp_rank) {
+        inputs_per_cp.emplace_back(
+            raw_forward_inputs[dp_rank].cp_partition(cp_rank, cp_size_));
+      }
+    }
+  }
+
   // update dp related global paramters and then execute model
   for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
-    auto dp_rank = worker_rank / dp_local_tp_size_;
+    const int32_t dp_rank = worker_rank / dp_local_size_;
+    const RawForwardInput* input_to_send = &raw_forward_inputs[dp_rank];
+    if (cp_size_ > 1 &&
+        raw_forward_inputs[dp_rank].batch_forward_type.is_prefill()) {
+      const int32_t local_rank_in_dp_group = worker_rank % dp_local_size_;
+      const int32_t cp_rank = local_rank_in_dp_group / dp_local_tp_size_;
+      CHECK_GE(cp_rank, 0);
+      CHECK_LT(cp_rank, static_cast<int32_t>(cp_size_));
+      input_to_send = &cp_partitioned_inputs[dp_rank][cp_rank];
+    }
     futures.emplace_back(
-        worker_clients_[worker_rank]->step_async(raw_forward_inputs[dp_rank]));
+        worker_clients_[worker_rank]->step_async(*input_to_send));
   }
 
   // wait for the all future to complete
@@ -1041,10 +1068,10 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
     process_eplb_data(results);
   }
 
-  assert(dp_size_ == worker_clients_num_ / dp_local_tp_size_);
+  assert(dp_size_ == worker_clients_num_ / dp_local_size_);
   size_t dp_rank = 0;
   for (auto worker_rank = 0; worker_rank < worker_clients_num_;
-       worker_rank += dp_local_tp_size_) {
+       worker_rank += dp_local_size_) {
     auto result = results[worker_rank].value();
     if (result.has_value()) {
       if (result.value().outputs.empty() && layer_forward_interrupted_) {
@@ -1061,6 +1088,8 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
       } else {
         batch[dp_rank].process_beam_search_output(result.value(), false);
       }
+      // Keep Batch::sequences_ aligned with SequencesGroup after beam updates.
+      batch[dp_rank].refresh_sequences_from_groups();
     } else {
       LOG(FATAL) << "Failed to execute model, result has no value";
     }
@@ -1115,6 +1144,8 @@ void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
   for (auto i = 0; i < last_batch.size(); i++) {
     last_batch[i].process_sample_output(raw_forward_outputs[i],
                                         options_.enable_schedule_overlap());
+    // Keep Batch::sequences_ aligned with SequencesGroup after beam updates.
+    last_batch[i].refresh_sequences_from_groups();
   }
 }
 
@@ -1171,7 +1202,7 @@ void LLMEngine::process_eplb_data(
 std::vector<RawForwardInput> LLMEngine::prepare_inputs(
     std::vector<Batch>& batch) {
   std::vector<RawForwardInput> batched_inputs;
-  batched_inputs.reserve(dp_size_);
+  batched_inputs.reserve(dp_size_ * cp_size_);
   // some dp related variables
   std::vector<int32_t> dp_global_token_nums(dp_size_);
   std::vector<int32_t> dp_is_decode(dp_size_, 0);
@@ -1182,8 +1213,8 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
 
   // build model input for every single micro batch
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs.emplace_back(std::move(
-        batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
+    batched_inputs.emplace_back(std::move(batch[dp_rank].prepare_forward_input(
+        args_, threadpool_.get(), cp_size_)));
     dp_global_token_nums[dp_rank] =
         batched_inputs[dp_rank].flatten_tokens_vec.size();
     if (batch_forward_type.is_empty() &&

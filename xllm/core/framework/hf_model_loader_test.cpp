@@ -18,6 +18,9 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include "core/platform/device.h"
+#if defined(USE_NPU)
+#include "models/model_registry.h"
+#endif
 
 namespace xllm {
 
@@ -70,5 +73,56 @@ TEST(HFModelLoaderTest, KeepLegacyFp8ConfigUnchanged) {
   EXPECT_EQ(quant_args.quant_method(), kQuantMethodFp8);
   EXPECT_FALSE(quant_args.activation_dynamic());
 }
+
+#if defined(USE_NPU)
+TEST(HFModelLoaderTest, Qwen35MtpModelArgsFromDenseConfig) {
+  auto loader = ModelRegistry::get_model_args_loader("qwen3_5_mtp");
+  ASSERT_TRUE(loader != nullptr);
+
+  JsonReader reader;
+  ASSERT_TRUE(reader.parse_text(R"json(
+    {
+      "model_type": "qwen3_5",
+      "text_config": {
+        "mtp_num_hidden_layers": 1,
+        "layer_types": ["linear_attention"]
+      }
+    }
+  )json"));
+
+  ModelArgs args;
+  ASSERT_TRUE(loader(reader, &args));
+  EXPECT_EQ(args.model_type(), "qwen3_5_mtp");
+  EXPECT_EQ(args.num_nextn_predict_layers(), 1);
+  EXPECT_EQ(args.n_layers(), 1);
+  ASSERT_EQ(args.layer_types().size(), 1);
+  EXPECT_EQ(args.layer_types()[0], "full_attention");
+}
+
+TEST(HFModelLoaderTest, Qwen35MtpModelArgsFromMoeConfig) {
+  auto loader = ModelRegistry::get_model_args_loader("qwen3_5_moe_mtp");
+  ASSERT_TRUE(loader != nullptr);
+
+  JsonReader reader;
+  ASSERT_TRUE(reader.parse_text(R"json(
+    {
+      "model_type": "qwen3_5_moe",
+      "text_config": {
+        "mtp_num_hidden_layers": 2,
+        "layer_types": ["linear_attention", "linear_attention"]
+      }
+    }
+  )json"));
+
+  ModelArgs args;
+  ASSERT_TRUE(loader(reader, &args));
+  EXPECT_EQ(args.model_type(), "qwen3_5_moe_mtp");
+  EXPECT_EQ(args.num_nextn_predict_layers(), 2);
+  EXPECT_EQ(args.n_layers(), 2);
+  ASSERT_EQ(args.layer_types().size(), 2);
+  EXPECT_EQ(args.layer_types()[0], "full_attention");
+  EXPECT_EQ(args.layer_types()[1], "full_attention");
+}
+#endif
 
 }  // namespace xllm

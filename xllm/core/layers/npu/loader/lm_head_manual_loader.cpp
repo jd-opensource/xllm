@@ -26,7 +26,10 @@ LmHeadManualLoader::LmHeadManualLoader(uint64_t weight_count,
 }
 
 void LmHeadManualLoader::load_state_dict(const StateDict& state_dict) {
-  if (dp_size_ > 1) {
+  if (cp_size_ > 1) {
+    set_weight(
+        state_dict, "weight", 0, 0, dp_local_tp_rank_, dp_local_tp_size_, true);
+  } else if (dp_size_ > 1) {
     set_weight(
         state_dict, "weight", 0, 1, dp_local_tp_rank_, dp_local_tp_size_, true);
   } else {

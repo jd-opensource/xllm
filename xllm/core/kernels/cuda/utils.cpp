@@ -26,6 +26,7 @@ limitations under the License.
 
 #include "core/platform/device.h"
 #include "core/util/env_var.h"
+#include "core/util/utils.h"
 
 namespace {
 const std::unordered_map<torch::ScalarType, std::string_view>

@@ -91,7 +91,6 @@ bool LLM::Initialize(const std::string& model_path,
         .communication_backend(init_options.communication_backend)
         .rank_tablefile(init_options.rank_tablefile)
         .expert_parallel_degree(init_options.expert_parallel_degree)
-        .enable_mla(init_options.enable_mla)
         .enable_chunked_prefill(init_options.enable_chunked_prefill)
         .enable_prefill_sp(init_options.enable_prefill_sp)
         .master_node_addr(init_options.master_node_addr)

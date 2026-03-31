@@ -97,7 +97,6 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
             xllm_init_options.num_request_handling_threads)
         .communication_backend(xllm_init_options.communication_backend)
         .expert_parallel_degree(xllm_init_options.expert_parallel_degree)
-        .enable_mla(xllm_init_options.enable_mla)
         .enable_chunked_prefill(xllm_init_options.enable_chunked_prefill)
         .enable_prefill_sp(xllm_init_options.enable_prefill_sp)
         .master_node_addr(xllm_init_options.master_node_addr)

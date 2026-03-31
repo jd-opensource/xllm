@@ -36,8 +36,7 @@ xLLM uses gflags to manage service startup parameters. The specific parameter me
 |:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|
 | `dp_size` | `int32` | 1 | Power of 2 | The dp scale size for the Attention part. |  |
 | `ep_size` | `int32` | 1 | Power of 2 | The ep scale size for the MoE part. |  |
-| `enable_mla` | `bool` | false | true | Whether to enable MLA. |  |
-| `expert_parallel_degree` | `int32` | 0 | 1,2 | EP-related parameter. The gflag default is 0. When `ep_size > 1` and the flag is left unset, some NPU MoE implementations treat it as EP Level 1 internally. Set it to 2 when `ep_size` equals the total number of devices to enable all2all-based EP Level 2. |  |
+| `expert_parallel_degree` | `int32` | 0 | 1,2 | Parameter related to ep parallelism. Defaults to 0 when ep is not used, and to 1 when ep is enabled. Can be set to 2 when `ep_size` equals the total number of devices (uses all2all communication). |  |
 
 
 ## P-D Separation Related Parameters

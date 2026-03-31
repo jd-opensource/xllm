@@ -11,9 +11,11 @@ cc_library(
     embedding_vlm.h
     mm_embedding_vlm.h
     model_args.h
+    npu_cp_ep_padding.h
     npu_dp_ep_padding.h
     model_input_params.h
   SRCS
+    npu_cp_ep_padding.cpp
     npu_dp_ep_padding.cpp
   DEPS
     :common
