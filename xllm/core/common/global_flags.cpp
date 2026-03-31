@@ -648,7 +648,7 @@ DEFINE_bool(enable_intralayer_addnorm,
             "enable fused intralayer addnorm ops.");
 
 DEFINE_bool(enable_fia,
-            true,
+            false,
             "Whether to enable FIA when initializing the NPU qwen2 decoder "
             "layer.");
 #endif

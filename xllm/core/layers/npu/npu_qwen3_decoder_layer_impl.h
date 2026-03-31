@@ -98,6 +98,7 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
   atb::Tensor placeholder_;
 
   at::Tensor decode_attn_mask_;
+  at::Tensor fia_attn_mask_;
 
   at::Tensor at_placeholder_;
 
