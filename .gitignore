@@ -46,7 +46,8 @@ MANIFEST
 xllm/*.pyd
 xllm/*.so
 xllm/version.py
-**/__pycache__/*
+__pycache__/
+.pkl_memoize_py3/
 
 # compile_commands.json from nvbench
 compile_commands.json
