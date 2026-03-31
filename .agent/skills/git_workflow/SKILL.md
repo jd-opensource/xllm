@@ -14,8 +14,11 @@ Load only the file that matches the user's immediate Git task.
 | File | What it is for | When to load it |
 | --- | --- | --- |
 | `references/source-of-truth.md` | Repo-specific source priority and canonical files to consult | Load first when repo docs, local state, and user wording may disagree |
-| `references/branch-and-pr.md` | Branch naming, day-to-day development flow, PR targeting, and review expectations | Load when the user asks about branch names, PR flow, reviewer expectations, or normal contribution steps |
-| `references/release-and-backport.md` | Release branch naming, tag shapes, and backport flow | Load when the task mentions release branches, patch releases, cherry-picks, or hotfix/backport strategy |
+| `references/branch-naming.md` | Branch naming patterns and default branch conventions | Load when the user asks how to name a branch or which branch to branch from |
+| `references/development-flow.md` | Day-to-day fork, sync, branch, validate, and push flow | Load when the user asks for normal development steps from local change to push |
+| `references/pr-review.md` | PR targeting, PR scope, and review expectations | Load when the task is about opening a PR, choosing the target branch, or deciding who should review |
+| `references/release-layout.md` | Release branch and tag shapes used by xLLM | Load when the task mentions release branches, release tags, or patch version naming |
+| `references/backport-flow.md` | Preferred backport and hotfix flow for released lines | Load when the task mentions cherry-picks, hotfixes, or fixing an already released branch |
 | `references/commit-format.md` | Commit title/body conventions and xLLM-style examples | Load when the user asks for a commit message, commit style guidance, or message cleanup |
 
 ## Workflow
