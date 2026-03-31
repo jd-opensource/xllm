@@ -15,11 +15,10 @@ limitations under the License.
 
 #include "npu_qwen3_decoder_layer_impl.h"
 
-#include <algorithm>
-
 #include <glog/logging.h>
 #include <mstx/ms_tools_ext.h>
 
+#include <algorithm>
 #include <map>
 
 #include "common/global_flags.h"
@@ -208,11 +207,10 @@ int64_t NpuQwen3DecoderLayerImpl::init_attn_mask() {
   if (prefill_param_.isFIA) {
     const auto fia_mask_options =
         torch::TensorOptions().dtype(torch::kBool).device(device_);
-    fia_attn_mask_ =
-        torch::triu(torch::ones({kFiaMaskSeqLen, kFiaMaskSeqLen},
-                                fia_mask_options),
-                    /*diagonal=*/1)
-            .contiguous();
+    fia_attn_mask_ = torch::triu(torch::ones({kFiaMaskSeqLen, kFiaMaskSeqLen},
+                                             fia_mask_options),
+                                 /*diagonal=*/1)
+                         .contiguous();
   }
 
   return atb::NO_ERROR;

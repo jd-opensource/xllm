@@ -15,11 +15,11 @@ limitations under the License.
 
 #include "npu_qwen2_decoder_layer_impl.h"
 
-#include <algorithm>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <mstx/ms_tools_ext.h>
 
+#include <algorithm>
 #include <map>
 
 #include "common/global_flags.h"
@@ -142,8 +142,7 @@ void NpuQwen2DecoderLayerImpl::param_from_args(
   param.isFIA = isPrefill && FLAGS_enable_fia;
 }
 
-NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(
-    const ModelContext& context)
+NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(const ModelContext& context)
     : BaseLayer(context) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
@@ -225,11 +224,10 @@ int64_t NpuQwen2DecoderLayerImpl::init_attn_mask() {
   if (FLAGS_enable_fia) {
     const auto fia_mask_options =
         torch::TensorOptions().dtype(torch::kBool).device(device_);
-    fia_attn_mask_ =
-        torch::triu(torch::ones({kFiaMaskSeqLen, kFiaMaskSeqLen},
-                                fia_mask_options),
-                    /*diagonal=*/1)
-            .contiguous();
+    fia_attn_mask_ = torch::triu(torch::ones({kFiaMaskSeqLen, kFiaMaskSeqLen},
+                                             fia_mask_options),
+                                 /*diagonal=*/1)
+                         .contiguous();
   }
 
   return atb::NO_ERROR;
@@ -247,8 +245,7 @@ void NpuQwen2DecoderLayerImpl::build_fia_index_tensors(
 
   const int32_t target_seq_len = *std::max_element(
       input_params.q_seq_lens_vec.begin(), input_params.q_seq_lens_vec.end());
-  CHECK_GT(target_seq_len, 0)
-      << "FIA prefill requires target_seq_len > 0";
+  CHECK_GT(target_seq_len, 0) << "FIA prefill requires target_seq_len > 0";
 
   std::vector<int32_t> padding_idx(input_params.num_sequences * target_seq_len);
   std::vector<int32_t> unpadding_idx;
@@ -407,10 +404,10 @@ void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(input_offset++) =
       atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
   if (is_prefill && FLAGS_enable_fia) {
-    node.variantPack.inTensors.at(input_offset++) =       // bsnd padding_idx
-      placeholder_;
-    node.variantPack.inTensors.at(input_offset++) =       // bsnd unpadding_idx
-      placeholder_;
+    node.variantPack.inTensors.at(input_offset++) =  // bsnd padding_idx
+        placeholder_;
+    node.variantPack.inTensors.at(input_offset++) =  // bsnd unpadding_idx
+        placeholder_;
   }
   if (is_prefill && (FLAGS_enable_fia || FLAGS_enable_chunked_prefill)) {
     node.variantPack.inTensors.at(input_offset) =
