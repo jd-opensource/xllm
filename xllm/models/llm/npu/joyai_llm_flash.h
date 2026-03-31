@@ -18,7 +18,7 @@ limitations under the License.
 #include "deepseek_v2.h"
 #include "layers/common/rotary_embedding_util.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
@@ -316,4 +316,4 @@ REGISTER_MODEL_ARGS(joyai_llm_flash, [&] {
   SET_ARG(rope_scaling_rope_type, "default");
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({1}));
 });
-}  // namespace xllm
+}  // namespace xllm::npu::model
