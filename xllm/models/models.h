@@ -44,7 +44,11 @@ limitations under the License.
 #include "llm/qwen3_5.h"                      // IWYU pragma: keep
 #include "llm/qwen3_5_mtp.h"                  // IWYU pragma: keep
 #include "llm/qwen3_next.h"                   // IWYU pragma: keep
+<<<<<<< HEAD
 #include "rec/npu/onerec.h"                   // IWYU pragma: keep
+=======
+#include "rec/npu/onerec.h"                   // IWYU pragma: keep
+>>>>>>> 702c0f6b (Address PR1158 review feedback for OneRec NPU layout)
 #include "vlm/npu/glm4v.h"                    // IWYU pragma: keep
 #include "vlm/npu/glm4v_moe.h"                // IWYU pragma: keep
 #include "vlm/npu/minicpmv.h"                 // IWYU pragma: keep
