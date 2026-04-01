@@ -355,7 +355,7 @@ void MTPWorkerImpl::prepare_prefill_inputs(const ForwardInput& input,
     CHECK(input_params.mtp_shifted_token_ids.defined());
     CHECK_EQ(input_params.mtp_shifted_token_ids.numel(),
              prefill_input.token_ids.numel());
-    prefill_input.token_ids = input_params.mtp_shifted_token_ids.clone();
+    prefill_input.token_ids = input_params.mtp_shifted_token_ids;
     return;
   }
 

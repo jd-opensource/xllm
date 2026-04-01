@@ -69,12 +69,13 @@ BatchInputBuilder::BatchInputBuilder(
       batch_id_(batch_id),
       cp_size_(std::max(1, cp_size)) {
   // Reserve space for better performance
-  state_.flatten_tokens_vec.reserve(1000);
-  state_.flatten_positions_vec.reserve(1000);
+  const size_t reserve_size = 1024;
+  state_.flatten_tokens_vec.reserve(reserve_size);
+  state_.flatten_positions_vec.reserve(reserve_size);
   state_.mrope_positions_vec.reserve(sequences.size());
   state_.block_tables_vec.reserve(sequences.size());
   state_.acc_logprob_vec.reserve(sequences.size());
-  state_.mtp_shifted_token_ids.reserve(1000);
+  state_.mtp_shifted_token_ids.reserve(reserve_size);
   if (args_ != nullptr) {
     use_mrope_ = (args_->rope_scaling_rope_type() == "mrope");
   }
