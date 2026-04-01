@@ -243,9 +243,31 @@ void BaseLoader::set_weight_with_padding(const StateDict& state_dict,
     if (absl::EndsWith(name, tensor_name)) {
       at::Tensor mutable_tensor = tensor;
       if (padded_vocab_size > tensor.size(0)) {
-        mutable_tensor = pad_vocab_tensor(tensor, padded_vocab_size);
-        mutable_tensor =
-            shard_padded_tensor(mutable_tensor, dim, rank, world_size);
+        // Memory-optimized path for vocabulary dimension sharding
+        if (dim == 0) {
+          int64_t shard_size = padded_vocab_size / world_size;
+          int64_t start_idx = rank * shard_size;
+          int64_t end_idx = (rank + 1) * shard_size;
+          if (start_idx >= tensor.size(0)) {
+            mutable_tensor =
+                torch::zeros({shard_size, tensor.size(1)}, tensor.options());
+          } else {
+            auto valid_part =
+                tensor.slice(0, start_idx, std::min(end_idx, tensor.size(0)));
+            if (valid_part.size(0) < shard_size) {
+              mutable_tensor =
+                  torch::zeros({shard_size, tensor.size(1)}, tensor.options());
+              mutable_tensor.slice(0, 0, valid_part.size(0)).copy_(valid_part);
+            } else {
+              mutable_tensor = valid_part.clone();
+            }
+          }
+        } else {
+          // Non-vocabulary dimension: use original approach
+          mutable_tensor = pad_vocab_tensor(tensor, padded_vocab_size);
+          mutable_tensor =
+              shard_padded_tensor(mutable_tensor, dim, rank, world_size);
+        }
       } else {
         mutable_tensor =
             state_dict.get_sharded_tensor(tensor_name, dim, rank, world_size);

@@ -181,13 +181,14 @@ torch::Tensor fp8_linear_forward(
 }  // namespace
 
 ColumnParallelLinearImpl::ColumnParallelLinearImpl(const ModelContext& context)
-    : ColumnParallelLinearImpl(context.get_model_args().hidden_size(),
-                               context.get_model_args().vocab_size(),
-                               /*bias=*/false,
-                               /*gather_output=*/true,
-                               QuantArgs{},
-                               context.get_parallel_args().tp_group_,
-                               context.get_tensor_options()) {}
+    : ColumnParallelLinearImpl(
+          context.get_model_args().hidden_size(),
+          context.get_model_args().vocab_size(),
+          /*bias=*/false,
+          /*gather_output=*/true,
+          QuantArgs{},  // do not use quantization for lm_head
+          context.get_parallel_args().tp_group_,
+          context.get_tensor_options()) {}
 
 // Linear layer with column parallelism.
 ColumnParallelLinearImpl::ColumnParallelLinearImpl(
