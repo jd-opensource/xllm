@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <cstring>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <stdexcept>
 
@@ -1085,6 +1086,17 @@ inline void deserialize_raw_forward_input(const char*& buffer,
                          input_params.q_seq_lens,
                          input_params.q_seq_lens_vec,
                          device_buffer);
+  if (!input_params.q_seq_lens_vec.empty()) {
+    std::vector<int32_t> cu_lens(input_params.q_seq_lens_vec.size());
+    std::partial_sum(input_params.q_seq_lens_vec.begin(),
+                     input_params.q_seq_lens_vec.end(),
+                     cu_lens.begin());
+    input_params.q_cu_seq_lens = torch::tensor(cu_lens,
+                                               torch::TensorOptions()
+                                                   .dtype(torch::kInt)
+                                                   .device(torch::kCPU)
+                                                   .pinned_memory(true));
+  }
   read_tensor_and_vector(buffer,
                          input_params.kv_seq_lens,
                          input_params.kv_seq_lens_vec,
