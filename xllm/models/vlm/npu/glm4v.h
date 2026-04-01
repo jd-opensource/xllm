@@ -812,6 +812,11 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
     return language_model_(tokens, positions, kv_caches, input_params);
   }
 
+  torch::Tensor pooler(const torch::Tensor& hidden_states,
+                       const torch::Tensor& seleted_idxes) {
+    return language_model_->pooler(hidden_states, seleted_idxes);
+  }
+
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) {
     return language_model_->logits(hidden_states, seleted_idxes);
