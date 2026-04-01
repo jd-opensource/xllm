@@ -411,17 +411,22 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     state.extra_token_ids.emplace_back(extra_token_id);
   }
 
-  if (state.batch_forward_type.is_prefill()) {
-    const size_t seq_token_end = state.flatten_tokens_vec.size();
-    const size_t seq_token_len = seq_token_end - seq_token_begin;
-    CHECK_GT(seq_token_len, 0);
-    if (seq_token_len > 1) {
+  if (cp_size_ > 1 && state.batch_forward_type.is_prefill()) {
+    const uint32_t q_len = seq_len - n_kv_cache_tokens;
+    if (q_len > 1) {
       state.mtp_shifted_token_ids.insert(
           state.mtp_shifted_token_ids.end(),
           state.flatten_tokens_vec.begin() + seq_token_begin + 1,
-          state.flatten_tokens_vec.begin() + seq_token_end);
+          state.flatten_tokens_vec.begin() + seq_token_begin + q_len);
     }
     state.mtp_shifted_token_ids.emplace_back(extra_token_id);
+    if (padded_seq_len > seq_len) {
+      const int32_t pad_token_id = args_ ? args_->pad_token_id() : 0;
+      state.mtp_shifted_token_ids.insert(
+          state.mtp_shifted_token_ids.end(),
+          padded_seq_len - seq_len,
+          pad_token_id);
+    }
   }
 }
 
@@ -609,8 +614,6 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   input_params.request_ids = std::move(state_.request_ids);
   input_params.extra_token_ids = std::move(state_.extra_token_ids);
   if (!state_.mtp_shifted_token_ids.empty()) {
-    CHECK_EQ(state_.mtp_shifted_token_ids.size(), state_.flatten_tokens_vec.size())
-        << "mtp_shifted_token_ids size should match flatten token size";
     input_params.mtp_shifted_token_ids =
         torch::tensor(state_.mtp_shifted_token_ids, torch::kInt);
   }
@@ -694,11 +697,6 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
   raw_forward_input.request_ids = std::move(state_.request_ids);
   raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);
-  if (!state_.mtp_shifted_token_ids.empty()) {
-    CHECK_EQ(state_.mtp_shifted_token_ids.size(),
-             raw_forward_input.flatten_tokens_vec.size())
-        << "mtp_shifted_token_ids size should match flatten token size";
-  }
   raw_forward_input.mtp_shifted_token_ids =
       std::move(state_.mtp_shifted_token_ids);
   // beam search kernel input

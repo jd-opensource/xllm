@@ -351,11 +351,10 @@ void MTPWorkerImpl::prepare_prefill_inputs(const ForwardInput& input,
                                            ForwardInput& prefill_input) {
   prefill_input = input.to(device_, dtype_);
   auto& input_params = prefill_input.input_params;
-  if (input_params.mtp_shifted_token_ids.defined() &&
-      input_params.mtp_shifted_token_ids.numel() > 0) {
+  if (options_.cp_size() > 1) {
+    CHECK(input_params.mtp_shifted_token_ids.defined());
     CHECK_EQ(input_params.mtp_shifted_token_ids.numel(),
-             prefill_input.token_ids.numel())
-        << "mtp shifted tokens numel mismatch with token_ids";
+             prefill_input.token_ids.numel());
     prefill_input.token_ids = input_params.mtp_shifted_token_ids.clone();
     return;
   }

@@ -386,8 +386,6 @@ struct RawForwardInput {
           gather_token_level_vector_i32(flatten_positions_vec);
     }
     if (!mtp_shifted_token_ids.empty()) {
-      CHECK_EQ(mtp_shifted_token_ids.size(), static_cast<size_t>(token_num))
-          << "mtp_shifted_token_ids size should match flatten_tokens_vec size";
       outputs.mtp_shifted_token_ids =
           gather_token_level_vector_i32(mtp_shifted_token_ids);
     }
