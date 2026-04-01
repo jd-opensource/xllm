@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cstdlib>
+#include <utility>
 
 #include "common/global_flags.h"
 #include "logits_utils.h"
@@ -73,9 +74,13 @@ static inline torch::Tensor log_softmax_last_dim(
 
 }  // namespace
 
-RecSampler::RecSampler(RecPipelineType pipeline_type)
+RecSampler::RecSampler(RecPipelineType pipeline_type,
+                       std::vector<int64_t> candidate_token_ids,
+                       std::optional<torch::Device> candidate_device)
     : sampler_(std::make_unique<Sampler>()),
       strategy_(create_sampling_strategy(pipeline_type, *sampler_)) {
+  sampler_->set_candidate_token_ids(std::move(candidate_token_ids),
+                                    std::move(candidate_device));
   LOG(INFO) << "RecSampler initialized with Sampler delegate.";
 }
 
@@ -172,6 +177,10 @@ SampleOutput RecSampler::MultiRoundFastPathSamplingStrategy::forward(
   }
 
   output.top_logprobs = log_softmax_last_dim(topk_values, temperatures);
+  if (sampler_.has_candidate_token_ids()) {
+    output.top_tokens =
+        sampler_.map_local_to_global_token_ids(output.top_tokens);
+  }
   return output;
 }
 

@@ -59,6 +59,8 @@ struct ModelArgs {
   PROPERTY(std::optional<int64_t>, decoder_n_kv_heads);
 
   PROPERTY(int64_t, vocab_size) = -1;
+  // Runtime-resolved global token ids used by lm_head candidate pruning.
+  PROPERTY(std::vector<int64_t>, candidate_token_ids);
 
   PROPERTY(bool, use_qk_norm) = false;
   PROPERTY(float, rms_norm_eps) = 0.0f;

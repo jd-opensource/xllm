@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <vector>
+
 #include "base_manual_loader.h"
 
 namespace xllm {
@@ -28,6 +30,9 @@ class LmHeadManualLoader : public BaseManualLoader {
 
  protected:
   void merge_host_at_weights() override;
+
+ private:
+  std::vector<int64_t> candidate_token_ids_;
 };
 }  // namespace layer
 }  // namespace xllm

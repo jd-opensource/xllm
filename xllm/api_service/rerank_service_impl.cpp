@@ -99,6 +99,8 @@ void RerankServiceImpl::process_async_impl(std::shared_ptr<RerankCall> call) {
 
   RequestParams request_params(
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
+  request_params.logprobs = false;
+  request_params.is_embeddings = true;
   std::vector<RequestParams> sps(documents.size(), request_params);
   auto request_id = request_params.request_id;
 

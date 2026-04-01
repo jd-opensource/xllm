@@ -15,21 +15,12 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
-#include "base_loader.h"
-
 namespace xllm {
-namespace layer {
-class LmHeadLoader : public BaseLoader {
- public:
-  LmHeadLoader(uint64_t weight_count, const ModelContext& context);
 
-  void load_state_dict(const StateDict& state_dict) override;
-  void verify_loaded_weights(const std::string& weight_str) const override;
+// Resolve candidate token flags into stable global token ids.
+std::vector<int64_t> resolve_candidate_token_ids(int64_t vocab_size);
 
- private:
-  std::vector<int64_t> candidate_token_ids_;
-};
-}  // namespace layer
 }  // namespace xllm

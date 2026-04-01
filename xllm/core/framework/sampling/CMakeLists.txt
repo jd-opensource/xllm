@@ -9,6 +9,7 @@ cc_library(
     logits_utils.h
     rejection_sampler.h
     sampler.h
+    sampler_utils.h
     rec_sampler.h
     beam_searcher.h
     rec_constrained_decoding.h
@@ -17,6 +18,7 @@ cc_library(
     logits_utils.cpp
     rejection_sampler.cpp
     sampler.cpp
+    sampler_utils.cpp
     rec_sampler.cpp
     beam_searcher.cpp
     rec_constrained_decoding.cpp
@@ -33,6 +35,7 @@ cc_test(
   NAME
     sampler_test
   SRCS
+    sampler_test.cpp
     rejection_sampler_test.cpp
     rejection_sampler.cpp
     sampling_params_test.cpp

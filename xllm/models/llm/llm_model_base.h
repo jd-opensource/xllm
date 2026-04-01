@@ -167,9 +167,15 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
  public:
   LlmForCausalLMImplBase(const ModelContext& context) {
     tie_word_embeddings = context.get_model_args().tie_word_embeddings();
+    candidate_token_ids_ = context.get_model_args().candidate_token_ids();
+    const int64_t lm_head_out_features =
+        candidate_token_ids_.empty()
+            ? context.get_model_args().vocab_size()
+            : static_cast<int64_t>(candidate_token_ids_.size());
     // register submodules
     model_ = register_module("model", LlmModelType(context));
-    lm_head_ = register_module("lm_head", layer::LmHead(context));
+    lm_head_ = register_module("lm_head",
+                               layer::LmHead(context, lm_head_out_features));
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
@@ -214,6 +220,27 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   virtual void load_model(
       std::unique_ptr<ModelLoader> loader,
       std::string prefix = "model." /*llm model weight prefix*/) {
+    const auto lm_head_weight_transform = [this](const std::string& name,
+                                                 const torch::Tensor& tensor) {
+      if (candidate_token_ids_.empty() || name != "weight") {
+        return tensor;
+      }
+      CHECK_GE(tensor.dim(), 1)
+          << "lm_head tensor " << name << " must have at least 1 dimension";
+      std::vector<int64_t> candidate_indices = candidate_token_ids_;
+      for (auto token_id : candidate_indices) {
+        CHECK_GE(token_id, 0)
+            << "candidate token id " << token_id << " is negative";
+        CHECK_LT(token_id, tensor.size(0))
+            << "candidate token id " << token_id
+            << " exceeds lm_head source dimension " << tensor.size(0);
+      }
+      auto indices = torch::tensor(
+          candidate_indices,
+          torch::TensorOptions().dtype(torch::kInt64).device(tensor.device()));
+      return tensor.index_select(/*dim=*/0, indices);
+    };
+
     for (const auto& state_dict : loader->get_state_dicts()) {
       auto sub_dict = state_dict->get_dict_with_prefix(prefix);
       if (sub_dict.size() == 0) {
@@ -222,10 +249,11 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
       model_->load_state_dict(sub_dict);
 
       if (tie_word_embeddings) {
-        lm_head_->load_state_dict(
-            state_dict->get_dict_with_prefix(prefix + "embed_tokens."));
+        lm_head_->load_state_dict(state_dict->get_dict_with_prefix(
+            prefix + "embed_tokens.", lm_head_weight_transform));
       } else {
-        lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
+        lm_head_->load_state_dict(state_dict->get_dict_with_prefix(
+            "lm_head.", lm_head_weight_transform));
       }
     }
   }
@@ -252,6 +280,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   // parameter members, must be registered
   LlmModelType model_{nullptr};
   bool tie_word_embeddings{false};
+  std::vector<int64_t> candidate_token_ids_;
   // test
   layer::LmHead lm_head_{nullptr};
 };
