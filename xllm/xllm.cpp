@@ -31,6 +31,7 @@ limitations under the License.
 #include "core/common/metrics.h"
 #include "core/common/options.h"
 #include "core/common/types.h"
+#include "core/distributed_runtime/dit_master.h"
 #include "core/distributed_runtime/master.h"
 #include "core/framework/xtensor/global_xtensor.h"
 #include "core/framework/xtensor/options.h"
@@ -163,9 +164,9 @@ int run() {
 #if !defined(USE_NPU)
   FLAGS_enable_block_copy_kernel = false;
 #endif
-
-  std::string model_type = xllm::util::get_model_type(model_path);
+  std::string model_type = "";
   if (FLAGS_backend != "dit") {
+    model_type = xllm::util::get_model_type(model_path);
     FLAGS_tool_call_parser = function_call::FunctionCallParser::get_parser_auto(
         FLAGS_tool_call_parser, model_type);
     FLAGS_reasoning_parser =
@@ -227,6 +228,10 @@ int run() {
       .dp_size(FLAGS_dp_size)
       .cp_size(FLAGS_cp_size)
       .ep_size(FLAGS_ep_size)
+      .dit_dp_size(FLAGS_dit_dp_size)
+      .dit_tp_size(FLAGS_dit_tp_size)
+      .dit_sp_size(FLAGS_dit_sp_size)
+      .dit_cfg_size(FLAGS_dit_cfg_size)
       .instance_name(FLAGS_host + ":" + std::to_string(FLAGS_port))
       .enable_disagg_pd(FLAGS_enable_disagg_pd)
       .enable_pd_ooc(FLAGS_enable_pd_ooc)
@@ -308,7 +313,11 @@ int run() {
   std::unique_ptr<Master> master;
   // working node
   if (options.node_rank() != 0) {
-    master = std::make_unique<LLMAssistantMaster>(options);
+    if (FLAGS_backend == "dit") {
+      master = std::make_unique<DiTAssistantMaster>(options);
+    } else {
+      master = std::make_unique<LLMAssistantMaster>(options);
+    }
   } else {
     if (FLAGS_random_seed < 0) {
       FLAGS_random_seed = std::random_device{}() % (1 << 30);

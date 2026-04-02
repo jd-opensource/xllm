@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch_npu/csrc/core/npu/NPUEvent.h>
 #include <torch_npu/csrc/core/npu/NPUStream.h>
 
+#include "core/common/global_flags.h"
 #include "hccl/hccl.h"
 #include "process_group.h"
 
@@ -41,13 +42,18 @@ class ProcessGroupImpl : public ProcessGroup {
                    const std::string& group_name,
                    const torch::Device& device);
 
+  ProcessGroupImpl(int32_t global_rank,
+                   int32_t local_rank,
+                   const std::vector<int32_t>& group_ranks,
+                   int32_t world_size,
+                   int32_t rank_size,
+                   int32_t port,
+                   const std::string& host,
+                   const std::string& group_name,
+                   const torch::Device& device);
+
   // Destructor.
   ~ProcessGroupImpl() override;
-
-  void allreduce(torch::Tensor& input) override;
-
-  void allgather(const torch::Tensor& input,
-                 std::vector<torch::Tensor>& outputs) override;
 
  private:
   HcclComm comm_ = nullptr;
