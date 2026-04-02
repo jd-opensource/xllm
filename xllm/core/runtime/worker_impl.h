@@ -115,6 +115,9 @@ class WorkerImpl {
   virtual void prepare_work_before_execute(const ForwardInput& inputs,
                                            ForwardInput& processed_inputs);
 
+  // Internal helper shared by worker pipelines before model execution.
+  virtual void apply_kv_block_swaps(const ModelInputParams& input_params);
+
   virtual std::optional<ForwardOutput> step(const ForwardInput& inputs) = 0;
 
   virtual void process_group_test();
@@ -204,6 +207,25 @@ class WorkerImpl {
 
   bool wakeup_local(const WakeupOptions& options);
 
+#if defined(USE_CUDA)
+  void refresh_cuda_block_copy_runtime_state();
+  bool can_use_cuda_block_copy_kernel(
+      const ModelInputParams& input_params) const;
+  void execute_cuda_block_copy_kernel(const ModelInputParams& input_params);
+
+  struct CudaBlockCopyRuntimeState {
+    torch::Tensor k_cache_ptrs_device;
+    torch::Tensor v_cache_ptrs_device;
+    int64_t num_layers = 0;
+    int64_t numel_per_block = 0;
+
+    bool valid() const {
+      return k_cache_ptrs_device.defined() && v_cache_ptrs_device.defined() &&
+             num_layers > 0 && numel_per_block > 0;
+    }
+  };
+#endif
+
 #if defined(USE_NPU)
   bool wakeup_from_remote_weights(const WakeupOptions& options);
   // Complete rolling initialization by delegating to model-owned rolling
@@ -262,6 +284,10 @@ class WorkerImpl {
 
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
   std::unique_ptr<HierarchyKVCacheTransfer> hierarchy_kv_cache_transfer_;
+
+#if defined(USE_CUDA)
+  CudaBlockCopyRuntimeState cuda_block_copy_runtime_state_;
+#endif
 
 #if defined(USE_NPU)
   std::unique_ptr<MooncakeWeightTransfer> weight_transfer_;

@@ -99,6 +99,7 @@ set(CUDA_SOURCE_FILES
   batch_decode.cpp
   batch_prefill.cpp
   batch_chunked_prefill.cpp
+  block_copy.cu
   cutlass_extensions/common.cpp
   cutlass_w8a8/scaled_mm_entry.cu
   fp8_quant.cu
@@ -148,6 +149,24 @@ cc_test(
     GTest::gtest_main
     glog::glog
 )
+
+option(XLLM_ENABLE_BLOCK_COPY_TEST
+       "Build and register the expensive CUDA block_copy_test"
+       OFF)
+
+if(XLLM_ENABLE_BLOCK_COPY_TEST)
+  cc_test(
+    NAME
+      block_copy_test
+    SRCS
+      block_copy_test.cpp
+    DEPS
+      :cuda_kernels
+      torch
+      GTest::gtest_main
+      glog::glog
+  )
+endif()
 
 cc_test(
   NAME
