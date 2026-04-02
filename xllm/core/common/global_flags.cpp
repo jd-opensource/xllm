@@ -17,9 +17,6 @@ limitations under the License.
 
 #include <algorithm>
 #include <limits>
-#include <string>
-#include <unordered_set>
-#include <vector>
 
 #include "brpc/reloadable_flags.h"
 
