@@ -382,7 +382,7 @@ class OneRecStackImpl : public torch::nn::Module {
       return torch::ones({num_heads_, seq_length, seq_length}, h.options());
     }
 
-    auto mask_value = -9984.0f;
+    const float mask_value = -9984.0f;
     auto upper_tri_mask =
         torch::triu(torch::ones({seq_length, seq_length},
                                 torch::dtype(h.dtype()).device(h.device())),
