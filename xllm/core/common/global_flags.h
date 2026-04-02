@@ -17,7 +17,32 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 
+#include <cstdint>
+#include <string>
+#include <vector>
+
 constexpr int64_t GB = int64_t(1024) * 1024 * 1024;
+
+namespace xllm {
+
+struct GlobalFlagHelpSectionInfo final {
+  std::string key;
+  std::string title;
+  std::string summary;
+  int32_t order;
+};
+
+struct GlobalFlagHelpFlagInfo final {
+  std::string section_key;
+  std::string name;
+  int32_t order;
+};
+
+const std::vector<GlobalFlagHelpSectionInfo>& get_global_flag_help_sections();
+
+const std::vector<GlobalFlagHelpFlagInfo>& get_global_flag_help_flags();
+
+}  // namespace xllm
 
 DECLARE_string(host);
 

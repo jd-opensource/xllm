@@ -15,16 +15,166 @@ limitations under the License.
 
 #include "global_flags.h"
 
+#include <algorithm>
 #include <limits>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
 #include "brpc/reloadable_flags.h"
 
+namespace xllm {
+namespace help_detail {
+
+std::vector<GlobalFlagHelpSectionInfo>& mutable_global_flag_help_sections() {
+  static std::vector<GlobalFlagHelpSectionInfo> help_sections;
+  return help_sections;
+}
+
+std::vector<GlobalFlagHelpFlagInfo>& mutable_global_flag_help_flags() {
+  static std::vector<GlobalFlagHelpFlagInfo> help_flags;
+  return help_flags;
+}
+
+void register_global_flag_help_section(const char* key,
+                                       const char* title,
+                                       const char* summary,
+                                       int32_t order) {
+  auto& help_sections = mutable_global_flag_help_sections();
+  const auto it = std::find_if(help_sections.begin(),
+                               help_sections.end(),
+                               [&](const GlobalFlagHelpSectionInfo& section) {
+                                 return section.key == key;
+                               });
+  if (it != help_sections.end()) {
+    return;
+  }
+
+  help_sections.emplace_back(
+      GlobalFlagHelpSectionInfo{key, title, summary, order});
+}
+
+void register_global_flag_help_flag(const char* section_key,
+                                    const char* name,
+                                    int32_t order) {
+  auto& help_flags = mutable_global_flag_help_flags();
+  const auto it = std::find_if(help_flags.begin(),
+                               help_flags.end(),
+                               [&](const GlobalFlagHelpFlagInfo& help_flag) {
+                                 return help_flag.name == name;
+                               });
+  if (it != help_flags.end()) {
+    return;
+  }
+
+  help_flags.emplace_back(GlobalFlagHelpFlagInfo{section_key, name, order});
+}
+
+}  // namespace help_detail
+
+const std::vector<GlobalFlagHelpSectionInfo>& get_global_flag_help_sections() {
+  return help_detail::mutable_global_flag_help_sections();
+}
+
+const std::vector<GlobalFlagHelpFlagInfo>& get_global_flag_help_flags() {
+  return help_detail::mutable_global_flag_help_flags();
+}
+
+}  // namespace xllm
+
+#define XLLM_CONCAT_INNER(lhs, rhs) lhs##rhs
+#define XLLM_CONCAT(lhs, rhs) XLLM_CONCAT_INNER(lhs, rhs)
+#define XLLM_STRINGIFY_INNER(value) #value
+#define XLLM_STRINGIFY(value) XLLM_STRINGIFY_INNER(value)
+
+#define XLLM_REGISTER_HELP_SECTION(section_key, title, summary)  \
+  namespace {                                                    \
+  const bool XLLM_CONCAT(section_key##_help_section_registered_, \
+                         __LINE__) = []() {                      \
+    xllm::help_detail::register_global_flag_help_section(        \
+        XLLM_STRINGIFY(section_key), title, summary, __LINE__);  \
+    return true;                                                 \
+  }();                                                           \
+  }
+
+#define XLLM_REGISTER_HELP_FLAG(section_key, name)                     \
+  namespace {                                                          \
+  const bool XLLM_CONCAT(section_key##_##name##_help_flag_registered_, \
+                         __LINE__) = []() {                            \
+    xllm::help_detail::register_global_flag_help_flag(                 \
+        XLLM_STRINGIFY(section_key), XLLM_STRINGIFY(name), __LINE__);  \
+    return true;                                                       \
+  }();                                                                 \
+  }
+
+#define XLLM_DEFINE_VARIABLE(type, shorttype, name, value, help) \
+  DEFINE_VARIABLE(type, shorttype, name, value, help);           \
+  XLLM_REGISTER_HELP_FLAG(XLLM_CURRENT_HELP_SECTION, name)
+
+#undef DEFINE_bool
+#define DEFINE_bool(name, val, txt)                                  \
+  namespace fLB {                                                    \
+  typedef ::fLB::CompileAssert FLAG_##name##_value_is_not_a_bool     \
+      [(sizeof(::fLB::IsBoolFlag(val)) != sizeof(double)) ? 1 : -1]; \
+  }                                                                  \
+  XLLM_DEFINE_VARIABLE(bool, B, name, val, txt)
+
+#undef DEFINE_int32
+#define DEFINE_int32(name, val, txt) \
+  XLLM_DEFINE_VARIABLE(GFLAGS_NAMESPACE::int32, I, name, val, txt)
+
+#undef DEFINE_uint32
+#define DEFINE_uint32(name, val, txt) \
+  XLLM_DEFINE_VARIABLE(GFLAGS_NAMESPACE::uint32, U, name, val, txt)
+
+#undef DEFINE_int64
+#define DEFINE_int64(name, val, txt) \
+  XLLM_DEFINE_VARIABLE(GFLAGS_NAMESPACE::int64, I64, name, val, txt)
+
+#undef DEFINE_uint64
+#define DEFINE_uint64(name, val, txt) \
+  XLLM_DEFINE_VARIABLE(GFLAGS_NAMESPACE::uint64, U64, name, val, txt)
+
+#undef DEFINE_double
+#define DEFINE_double(name, val, txt) \
+  XLLM_DEFINE_VARIABLE(double, D, name, val, txt)
+
+#undef DEFINE_string
+#define DEFINE_string(name, val, txt)                                 \
+  namespace fLS {                                                     \
+  using ::fLS::clstring;                                              \
+  using ::fLS::StringFlagDestructor;                                  \
+  static union {                                                      \
+    void* align;                                                      \
+    char s[sizeof(clstring)];                                         \
+  } s_##name[2];                                                      \
+  clstring* const FLAGS_no##name =                                    \
+      ::fLS::dont_pass0toDEFINE_string(s_##name[0].s, val);           \
+  static GFLAGS_NAMESPACE::FlagRegisterer o_##name(                   \
+      #name,                                                          \
+      MAYBE_STRIPPED_HELP(txt),                                       \
+      __FILE__,                                                       \
+      FLAGS_no##name,                                                 \
+      new(s_##name[1].s) clstring(*FLAGS_no##name));                  \
+  static StringFlagDestructor d_##name(s_##name[0].s, s_##name[1].s); \
+  extern GFLAGS_DLL_DEFINE_FLAG clstring& FLAGS_##name;               \
+  using fLS::FLAGS_##name;                                            \
+  clstring& FLAGS_##name = *FLAGS_no##name;                           \
+  }                                                                   \
+  using fLS::FLAGS_##name;                                            \
+  XLLM_REGISTER_HELP_FLAG(XLLM_CURRENT_HELP_SECTION, name)
+
 // NOTE:
 // 1. related flags should be placed together.
-// 2. when adding new flags, plz add the flag name to the appropriate
-//    category in help_formatter.h so it appears in the help output.
+// 2. help output reads descriptions dynamically from these gflags.
+// 3. section layout and flag order are registered in this file, so adding a
+//    flag under the right section updates help output automatically.
 
 // --- xllm service config ---
+XLLM_REGISTER_HELP_SECTION(kXllmServiceConfigSection,
+                           "XLLM SERVICE CONFIG",
+                           "");
+#define XLLM_CURRENT_HELP_SECTION kXllmServiceConfigSection
 
 DEFINE_string(host, "", "Host name for brpc server.");
 
@@ -52,6 +202,9 @@ DEFINE_int32(max_concurrent_requests,
              "handle. If set to 0, there is no limit.");
 
 // --- model config ---
+XLLM_REGISTER_HELP_SECTION(kModelConfigSection, "MODEL CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kModelConfigSection
 
 DEFINE_string(model_id, "", "hf model name.");
 
@@ -74,6 +227,11 @@ DEFINE_string(devices,
 DEFINE_bool(enable_customize_mla_kernel, false, "enable customize mla kernel");
 
 // --- graph mode execution config ---
+XLLM_REGISTER_HELP_SECTION(kGraphModeExecutionConfigSection,
+                           "GRAPH MODE EXECUTION CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kGraphModeExecutionConfigSection
 
 DEFINE_bool(
     enable_graph,
@@ -105,6 +263,9 @@ DEFINE_int32(max_tokens_for_graph_mode,
              "Maximum number of tokens for graph execution. "
              "If 0, no limit is applied.");
 // --- vlm config ---
+XLLM_REGISTER_HELP_SECTION(kVlmConfigSection, "VLM CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kVlmConfigSection
 
 DEFINE_int32(limit_image_per_prompt,
              4,
@@ -112,6 +273,9 @@ DEFINE_int32(limit_image_per_prompt,
              "multimodal models.");
 
 // --- threading config ---
+XLLM_REGISTER_HELP_SECTION(kThreadingConfigSection, "THREADING CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kThreadingConfigSection
 
 DEFINE_int32(num_request_handling_threads,
              4,
@@ -122,6 +286,9 @@ DEFINE_int32(num_response_handling_threads,
              "Number of threads for handling responses.");
 
 // --- kvcache config ---
+XLLM_REGISTER_HELP_SECTION(kKvCacheConfigSection, "KV CACHE CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kKvCacheConfigSection
 
 DEFINE_int32(block_size,
              128,
@@ -145,6 +312,9 @@ DEFINE_string(
     "\"int8\": Enables INT8 quantization. Only supported on MLU backend.");
 
 // --- scheduler config ---
+XLLM_REGISTER_HELP_SECTION(kSchedulerConfigSection, "SCHEDULER CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kSchedulerConfigSection
 
 DEFINE_int32(max_tokens_per_batch, 10240, "Max number of tokens per batch.");
 
@@ -194,6 +364,11 @@ DEFINE_bool(enable_online_preempt_offline,
             "Whether to enable online preempt offline.");
 
 // --- mix scheduler scheduling config ---
+XLLM_REGISTER_HELP_SECTION(kMixSchedulerConfigSection,
+                           "MIX SCHEDULER SCHEDULING CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kMixSchedulerConfigSection
 
 DEFINE_double(aggressive_coeff,
               1.0,
@@ -213,6 +388,9 @@ DEFINE_int32(request_queue_size,
              "The request queue size of the scheduler");
 
 // --- parallel config ---
+XLLM_REGISTER_HELP_SECTION(kParallelConfigSection, "PARALLEL CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kParallelConfigSection
 
 DEFINE_int32(dp_size, 1, "Data parallel size for MLA attention.");
 
@@ -226,6 +404,11 @@ DEFINE_string(
     "NPU communication backend.(e.g. lccl, hccl). When enable dp, use hccl.");
 
 // --- ep load balance config ---
+XLLM_REGISTER_HELP_SECTION(kEpLoadBalanceConfigSection,
+                           "EP LOAD BALANCE CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kEpLoadBalanceConfigSection
 
 DEFINE_bool(enable_eplb, false, "Whether to use expert parallel load balance.");
 
@@ -242,6 +425,9 @@ DEFINE_int32(expert_parallel_degree, 0, "Expert parallel degree.");
 DEFINE_string(rank_tablefile, "", "ATB HCCL rank table file.");
 
 // --- profile config ---
+XLLM_REGISTER_HELP_SECTION(kProfileConfigSection, "PROFILE CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kProfileConfigSection
 
 DEFINE_bool(enable_profile_step_time,
             false,
@@ -280,6 +466,11 @@ DEFINE_int32(max_global_tpot_ms,
              "all requests use single global ttft");
 
 // --- prefix cache config ---
+XLLM_REGISTER_HELP_SECTION(kPrefixCacheConfigSection,
+                           "PREFIX CACHE CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kPrefixCacheConfigSection
 
 DEFINE_bool(enable_prefix_cache,
             true,
@@ -293,6 +484,11 @@ DEFINE_bool(enable_cache_upload,
 DEFINE_uint32(xxh3_128bits_seed, 1024, "Default XXH3 128-bits hash seed.");
 
 // --- serving on multi-nodes config ---
+XLLM_REGISTER_HELP_SECTION(kServingOnMultiNodesConfigSection,
+                           "SERVING ON MULTI-NODES CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kServingOnMultiNodesConfigSection
 
 DEFINE_string(master_node_addr,
               "127.0.0.1:19888",
@@ -318,6 +514,11 @@ DEFINE_bool(use_contiguous_input_buffer,
             "model. Currently only effective when enable_shm is true.");
 
 // --- disaggregated prefill and decode config ---
+XLLM_REGISTER_HELP_SECTION(kDisaggregatedPrefillAndDecodeConfigSection,
+                           "DISAGGREGATED PREFILL AND DECODE CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kDisaggregatedPrefillAndDecodeConfigSection
 
 DEFINE_bool(enable_disagg_pd,
             false,
@@ -356,6 +557,9 @@ DEFINE_uint64(output_shm_size,
               "Output shared memory size, default is 128MB.");
 
 // --- speculative config ---
+XLLM_REGISTER_HELP_SECTION(kSpeculativeConfigSection, "SPECULATIVE CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kSpeculativeConfigSection
 
 DEFINE_string(draft_model, "", "draft hf model path to the model file.");
 
@@ -407,6 +611,9 @@ DEFINE_bool(enable_atb_spec_kernel,
             "Whether to use ATB speculative kernel.");
 
 // --- block copy config ---
+XLLM_REGISTER_HELP_SECTION(kBlockCopyConfigSection, "BLOCK COPY CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kBlockCopyConfigSection
 
 #if defined(USE_NPU)
 DEFINE_bool(enable_block_copy_kernel,
@@ -419,6 +626,11 @@ DEFINE_bool(enable_block_copy_kernel,
 #endif
 
 // --- service routing config ---
+XLLM_REGISTER_HELP_SECTION(kServiceRoutingConfigSection,
+                           "SERVICE ROUTING CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kServiceRoutingConfigSection
 
 DEFINE_string(etcd_addr, "", "Etcd adderss for save instance meta info.");
 
@@ -431,6 +643,11 @@ DEFINE_double(heart_beat_interval, 0.5, "Heart beat interval.");
 DEFINE_int32(etcd_ttl, 3, "Time to live for etcd.");
 
 // --- kvcache store config ---
+XLLM_REGISTER_HELP_SECTION(kKvCacheStoreConfigSection,
+                           "KV CACHE STORE CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kKvCacheStoreConfigSection
 
 DEFINE_uint32(prefetch_timeout,
               0,
@@ -470,6 +687,11 @@ DEFINE_bool(enable_control_h2d_block_num,
             "Whether to control h2d copy block num.");
 
 // --- computation communication parallel config ---
+XLLM_REGISTER_HELP_SECTION(kComputationCommunicationParallelConfigSection,
+                           "COMPUTATION COMMUNICATION PARALLEL CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kComputationCommunicationParallelConfigSection
 
 DEFINE_bool(
     enable_multi_stream_parallel,
@@ -482,6 +704,9 @@ DEFINE_int32(micro_batch_num,
              "Default use two micro batches for multi-stream parallel.");
 
 // --- dit config ---
+XLLM_REGISTER_HELP_SECTION(kDitConfigSection, "DIT CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kDitConfigSection
 
 DEFINE_int32(max_requests_per_batch, 1, "Max number of request per batch.");
 
@@ -497,6 +722,11 @@ DEFINE_bool(
     "Whether to enable xtensor for model weights with physical page pool.");
 
 // --- rolling load config ---
+XLLM_REGISTER_HELP_SECTION(kRollingLoadConfigSection,
+                           "ROLLING LOAD CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kRollingLoadConfigSection
 
 DEFINE_bool(enable_rolling_load,
             false,
@@ -524,6 +754,9 @@ DEFINE_int64(
     "continuous kv cache.");
 
 // --- beam search config ---
+XLLM_REGISTER_HELP_SECTION(kBeamSearchConfigSection, "BEAM SEARCH CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kBeamSearchConfigSection
 
 DEFINE_bool(enable_beam_search_kernel,
             false,
@@ -546,6 +779,11 @@ DEFINE_bool(
     "beam logprob.");
 
 // --- reasoning parser config ---
+XLLM_REGISTER_HELP_SECTION(kReasoningParserConfigSection,
+                           "REASONING PARSER CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kReasoningParserConfigSection
 
 DEFINE_string(reasoning_parser,
               "",
@@ -554,6 +792,11 @@ DEFINE_string(reasoning_parser,
               "deepseek-r1).");
 
 // --- function call config ---
+XLLM_REGISTER_HELP_SECTION(kFunctionCallConfigSection,
+                           "FUNCTION CALL CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kFunctionCallConfigSection
 
 DEFINE_string(tool_call_parser,
               "",
@@ -562,10 +805,18 @@ DEFINE_string(tool_call_parser,
               "deepseekv3, glm45, glm47, glm5).");
 
 // --- qwen3 reranker config ---
+XLLM_REGISTER_HELP_SECTION(kQwen3RerankerConfigSection,
+                           "QWEN3 RERANKER CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kQwen3RerankerConfigSection
 
 DEFINE_bool(enable_qwen3_reranker, false, "Whether to enable qwen3 reranker.");
 
 // --- flashinfer config ---
+XLLM_REGISTER_HELP_SECTION(kFlashinferConfigSection, "FLASHINFER CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kFlashinferConfigSection
 
 DEFINE_int32(flashinfer_workspace_buffer_size,
              128 * 1024 * 1024,
@@ -573,6 +824,11 @@ DEFINE_int32(flashinfer_workspace_buffer_size,
              "attention results in split-k algorithm for flashinfer.");
 
 // --- prefetch weight config ---
+XLLM_REGISTER_HELP_SECTION(kPrefetchWeightConfigSection,
+                           "PREFETCH WEIGHT CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kPrefetchWeightConfigSection
 
 DEFINE_bool(
     enable_prefetch_weight,
@@ -582,12 +838,20 @@ DEFINE_bool(
     "If adjustments are needed, e.g. export PREFETCH_COEFFOCIENT=0.5");
 
 // --- rec prefill-only mode ---
+XLLM_REGISTER_HELP_SECTION(kRecPrefillOnlyModeSection,
+                           "REC PREFILL-ONLY MODE",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kRecPrefillOnlyModeSection
 DEFINE_bool(enable_rec_prefill_only,
             false,
             "Enable rec prefill-only mode (no decoder self-attention blocks "
             "allocation).");
 
 // --- dp load balance ---
+XLLM_REGISTER_HELP_SECTION(kDpLoadBalanceSection, "DP LOAD BALANCE", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kDpLoadBalanceSection
 
 DEFINE_bool(
     enable_dp_balance,
@@ -596,9 +860,17 @@ DEFINE_bool(
     "dp batch will be shuffled.");
 
 // --- the seed for random number generator ---
+XLLM_REGISTER_HELP_SECTION(kRandomNumberGeneratorSection,
+                           "RANDOM NUMBER GENERATOR CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kRandomNumberGeneratorSection
 DEFINE_int32(random_seed, -1, "Random seed for random number generator.");
 
 // --- dit cache config ---
+XLLM_REGISTER_HELP_SECTION(kDitCacheConfigSection, "DIT CACHE CONFIG", "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kDitCacheConfigSection
 
 DEFINE_string(dit_cache_policy,
               "TaylorSeer",
@@ -669,12 +941,22 @@ DEFINE_bool(
     "Whether to decode both audio and video when the input is a video.");
 
 // --- concurrent rec worker config ---
+XLLM_REGISTER_HELP_SECTION(kConcurrentRecWorkerConfigSection,
+                           "CONCURRENT REC WORKER CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kConcurrentRecWorkerConfigSection
 DEFINE_uint32(rec_worker_max_concurrency,
               1,
               "Concurrency for rec worker parallel execution. Less than or "
               "equal to 1 means disable concurrent rec worker.");
 
 #if defined(USE_NPU)
+XLLM_REGISTER_HELP_SECTION(kBackendSpecificConfigSection,
+                           "BACKEND-SPECIFIC CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kBackendSpecificConfigSection
 DEFINE_string(npu_kernel_backend,
               "AUTO",
               "NPU kernel backend. Supported options: AUTO, ATB, TORCH.");
@@ -685,6 +967,11 @@ DEFINE_bool(enable_intralayer_addnorm,
 #endif
 
 // --- multi-step decode config ---
+XLLM_REGISTER_HELP_SECTION(kMultiStepDecodeConfigSection,
+                           "MULTI-STEP DECODE CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kMultiStepDecodeConfigSection
 
 DEFINE_int32(max_decode_rounds,
              0,
@@ -694,6 +981,11 @@ DEFINE_int32(max_decode_rounds,
 DEFINE_int32(beam_width, 1, "Beam width for beam search.");
 
 // --- health check config ---
+XLLM_REGISTER_HELP_SECTION(kHealthCheckConfigSection,
+                           "HEALTH CHECK CONFIG",
+                           "");
+#undef XLLM_CURRENT_HELP_SECTION
+#define XLLM_CURRENT_HELP_SECTION kHealthCheckConfigSection
 DEFINE_int32(health_check_interval_ms,
              3000,
              "Worker health check interval in milliseconds.");
