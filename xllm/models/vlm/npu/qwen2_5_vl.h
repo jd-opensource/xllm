@@ -482,6 +482,7 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
     std::vector<int> cu_w_seqlens_vec(
         cu_window_seqlens_cpu.data_ptr<int>(),  // windows seqlen vec
         cu_window_seqlens_cpu.data_ptr<int>() + cu_window_seqlens_cpu.numel());
+
     for (int idx = 0; idx < blocks_->size(); ++idx) {
       torch::Tensor cu_seqlens_now;
       std::vector<int> cu_seqlens_now_vec;
