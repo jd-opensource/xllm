@@ -519,12 +519,26 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
 #endif
 
+  int64_t full_attention_interval = (args_.full_attention_interval() < 1)
+                                        ? 1
+                                        : args_.full_attention_interval();
+  int64_t num_full_attention_layers =
+      kv_cache_cap.n_layers / full_attention_interval;
+  int64_t num_linear_attention_layers =
+      kv_cache_cap.n_layers - num_full_attention_layers;
   // compute kv cache n_blocks
   const int32_t block_size = options_.block_size();
   const int64_t block_size_in_bytes =
       block_size * (slot_size + index_slot_size + scale_slot_size);
-  kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
-                          (kv_cache_cap.n_layers * block_size_in_bytes);
+  const int64_t full_cache_block_size_in_bytes =
+      block_size * (slot_size + index_slot_size + scale_slot_size);
+  const int64_t total_cache_block_size_in_bytes =
+      num_full_attention_layers * full_cache_block_size_in_bytes +
+      num_linear_attention_layers * linear_slot_size;
+  CHECK_GT(total_cache_block_size_in_bytes, 0)
+      << "invalid cache block size estimate";
+  kv_cache_cap.n_blocks =
+      kv_cache_cap.cache_size_in_bytes / total_cache_block_size_in_bytes;
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
   return kv_cache_cap;
 }

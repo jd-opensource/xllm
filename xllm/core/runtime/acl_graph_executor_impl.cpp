@@ -48,6 +48,19 @@ limitations under the License.
 namespace xllm::npu {
 
 namespace {
+std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
+    const std::vector<KVCache>& kv_caches) {
+  for (const auto& cache : kv_caches) {
+    auto k_cache = cache.get_k_cache();
+    auto v_cache = cache.get_v_cache();
+    if (k_cache.defined() && v_cache.defined() && k_cache.numel() > 0 &&
+        v_cache.numel() > 0) {
+      return {std::move(k_cache), std::move(v_cache)};
+    }
+  }
+  return {torch::Tensor(), torch::Tensor()};
+}
+
 int64_t get_decode_graph_capacity(const runtime::Options& options) {
   CHECK_GT(options.num_decoding_tokens(), 0)
       << "num_decoding_tokens must be > 0 for graph capacity";
@@ -265,14 +278,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   }
 
   if (tiling_data_.numel() > 0) {
-    // Get current stream for tiling tensor update
     aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
 
-    // Update tiling tensor based on model type
-    // For models with mixed attention types (e.g., qwen3_next), only update if
-    // k/v cache is defined
-    // NOTE: linear attention may pass "defined but empty" k/v cache tensors.
-    // Only treat k/v cache as valid when they are defined and non-empty.
     if (need_update_attention_plan_ && k_cache.defined() && v_cache.defined() &&
         k_cache.numel() > 0 && v_cache.numel() > 0) {
       plan_paged_attention_tiling(
@@ -798,9 +805,12 @@ bool AclGraph::capture(CausalLM* model,
   aclrtStream stream =
       c10_npu::getCurrentNPUStream(tensor_options.device().index()).stream();
 
-  // Update persistent parameters with input data before capture
-  const torch::Tensor& k_cache = kv_cache[0].get_k_cache();
-  const torch::Tensor& v_cache = kv_cache[0].get_v_cache();
+  // For hybrid models (e.g., qwen3_next with mixed GDN/full_attention layers),
+  // we need to find the first Full Attention layer to get the correct kv_cache.
+  // GDN layers have empty key_cache_/value_cache_ while Full Attention layers
+  // have valid kv caches. Using layer 0's cache directly would be incorrect
+  // if layer 0 is a GDN layer.
+  auto [k_cache, v_cache] = find_attention_plan_kv_cache(kv_cache);
   const uint32_t actual_num_tokens = tokens.size(0);
   CHECK_GE(num_tokens_, actual_num_tokens)
       << "num_tokens_ >= actual_num_tokens";
@@ -899,8 +909,11 @@ ModelOutput AclGraph::replay(const torch::Tensor& tokens,
       << actual_num_tokens;
 
   // Update persistent parameters with new input data
-  const torch::Tensor& k_cache = kv_cache[0].get_k_cache();
-  const torch::Tensor& v_cache = kv_cache[0].get_v_cache();
+  // Note: tiling_data is updated in update() if needed - for hybrid models
+  // (e.g., qwen3_next with mixed GDN/attention layers), tiling should only
+  // be updated when Full Attention layers are involved, which is determined
+  // by k_cache being valid and non-empty
+  auto [k_cache, v_cache] = find_attention_plan_kv_cache(kv_cache);
   persistent_param_.update(tokens,
                            k_cache,
                            v_cache,
