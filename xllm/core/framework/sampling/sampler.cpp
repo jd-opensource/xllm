@@ -72,8 +72,9 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
     auto greedy = greedy_sample(probs);
     samples = torch::where(params.do_sample, random, greedy);
   }
+  auto sample_indices = samples.to(torch::kLong);
   output.probs = probs.to(logits.dtype());
-  output.next_tokens = samples;
+  output.next_tokens = sample_indices;
 
   if (params.logprobs) {
     if (FLAGS_enable_qwen3_reranker) {
@@ -92,7 +93,8 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
     const auto logprobs = torch::log_softmax(
         sample_logits, /*dim=*/-1, /*dtype=*/torch::kFloat32);
     // select the logprobs for each sequence
-    auto selected_logprobs = logprobs.gather(/*dim=*/-1, samples.view({-1, 1}));
+    auto selected_logprobs =
+        logprobs.gather(/*dim=*/-1, sample_indices.view({-1, 1}));
     output.logprobs = selected_logprobs.view({-1});
 
     if (params.max_top_logprobs > 0) {
