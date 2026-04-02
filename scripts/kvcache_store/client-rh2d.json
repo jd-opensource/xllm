@@ -1,0 +1,15 @@
+{
+    "local_hostname": "127.0.0.1:8002",
+    "metadata_server": "P2PHANDSHAKE",
+    "global_segment_size": 128849018880,
+    "local_buffer_size": 0,
+    "protocol": "ub",
+    "master_server_address": "127.0.0.1:8000",
+    "ub_protocol_env": {
+        "MF_USE_LOCAL_HOST": false,
+        "MF_OP_TYPE": "device_sdma",
+        "MF_STORE_URL": "127.0.0.1:7777",
+        "MF_DRAM_SIZE": 128849018880,
+        "MF_MAX_DRAM_SIZE": 128849018880
+    }
+}

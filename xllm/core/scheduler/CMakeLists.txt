@@ -56,6 +56,7 @@ cc_test(
     continuous_scheduler_test.cpp
     fixed_steps_scheduler_test.cpp
   DEPS
+    :prefix_cache
     :scheduler
     :xllm_server
     GTest::gtest_main
