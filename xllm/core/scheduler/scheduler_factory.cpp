@@ -61,9 +61,8 @@ std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
 }
 
 std::unique_ptr<DiTScheduler> create_dit_scheduler(
-    DiTEngine* engine,
     DiTScheduler::Options options) {
-  return std::make_unique<DiTDynamicBatchScheduler>(engine, options);
+  return std::make_unique<DiTDynamicBatchScheduler>(options);
 }
 
 std::unique_ptr<FixedStepsScheduler> create_fixed_steps_scheduler(

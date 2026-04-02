@@ -14,15 +14,13 @@ cc_library(
   HDRS
     engine.h
     master.h
-    dit_engine.h
-    dit_master.h
     llm_engine.h
     llm_master.h
     vlm_engine.h
     vlm_master.h
-    speculative_engine.h
     rec_engine.h
     rec_master.h
+    speculative_engine.h
     disagg_pd_service.h
     disagg_pd_service_impl.h
     pd_ooc_service.h
@@ -35,15 +33,13 @@ cc_library(
     shm_channel.h
   SRCS
     master.cpp
-    dit_engine.cpp
-    dit_master.cpp
     llm_engine.cpp
     llm_master.cpp
     vlm_engine.cpp
     vlm_master.cpp
-    speculative_engine.cpp
     rec_engine.cpp
     rec_master.cpp
+    speculative_engine.cpp
     disagg_pd_service.cpp
     disagg_pd_service_impl.cpp
     pd_ooc_service.cpp
@@ -101,14 +97,18 @@ cc_library(
   NAME 
     master
   HDRS
-    llm_master.h
     master.h
+    llm_master.h
+    vlm_engine.h
     vlm_master.h
+    dit_engine.h
     dit_master.h
   SRCS
-    llm_master.cpp
     master.cpp
+    llm_master.cpp
+    vlm_engine.cpp
     vlm_master.cpp
+    dit_engine.cpp
     dit_master.cpp
   DEPS
     :common

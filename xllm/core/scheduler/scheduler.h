@@ -38,6 +38,7 @@ class SchedulerBase {
   // incr/decr pending requests
   virtual void incr_pending_requests(size_t count) {}
   virtual void decr_pending_requests() {}
+  virtual void process_batch_output() {}
   virtual size_t num_pending_requests() { return 0; }
 };
 

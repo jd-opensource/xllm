@@ -23,9 +23,9 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "dit_engine.h"
 #include "framework/request/dit_request_params.h"
 #include "master.h"
-#include "scheduler/dit_scheduler.h"
 
 namespace xllm {
 
@@ -54,8 +54,6 @@ class DiTMaster : public Master {
 
  private:
   std::unique_ptr<DiTEngine> engine_;
-
-  std::unique_ptr<DiTScheduler> scheduler_;
 
   // thread pool for handling requests
   std::unique_ptr<ThreadPool> threadpool_;
