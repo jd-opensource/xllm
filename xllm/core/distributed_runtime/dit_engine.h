@@ -24,7 +24,9 @@ limitations under the License.
 #include "framework/batch/dit_batch.h"
 #include "framework/parallel_state/process_group.h"
 #include "framework/quant_args.h"
+#include "framework/request/dit_request.h"
 #include "runtime/dit_worker.h"
+#include "scheduler/dit_scheduler.h"
 
 namespace xllm {
 
@@ -43,6 +45,13 @@ class DiTEngine {
   // return the active activation memory
   std::vector<int64_t> get_active_activation_memory() const;
 
+  // scheduler related methods
+  bool add_request(std::shared_ptr<DiTRequest>& request);
+  void incr_pending_requests(size_t count);
+  void decr_pending_requests();
+  void step(const absl::Duration& timeout);  // TODO(panxuanyu): two step now
+  void generate();
+
  private:
   bool init_model();
   // options
@@ -53,6 +62,9 @@ class DiTEngine {
 
   // a list of workers, with each worker handling a partial of model
   std::vector<std::unique_ptr<DiTWorker>> workers_;
+
+  // scheduler
+  std::unique_ptr<DiTScheduler> scheduler_;
 };
 
 }  // namespace xllm
