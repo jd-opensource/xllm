@@ -181,20 +181,18 @@ void DistManager::setup_multi_node_workers(
   const int32_t ep_size = options.ep_size();
   /* TODO(CP): support smem  + CP */
   const int32_t dp_local_tp_size = world_size / dp_size;
-  const int32_t dit_dp_size = options.dit_dp_size();
-  const int32_t dit_tp_size = options.dit_tp_size();
-  const int32_t dit_sp_size = options.dit_sp_size();
-  const int32_t dit_cfg_size = options.dit_cfg_size();
 
   const auto& model_backend = options.backend();
   if (model_backend == "dit") {
+    const int32_t tp_size = options.tp_size();
+    const int32_t sp_size = options.sp_size();
+    const int32_t cfg_size = options.cfg_size();
     LOG(INFO) << "Multi-node serving world_size = " << world_size
               << ", each_node_ranks = " << each_node_ranks
               << ", current node rank = " << options.node_rank()
-              << ", nnodes = " << options.nnodes()
-              << ", dp_size = " << dit_dp_size << ", tp_size = " << dit_tp_size
-              << ", sp_size = " << dit_sp_size
-              << ", cfg_size = " << dit_cfg_size;
+              << ", nnodes = " << options.nnodes() << ", dp_size = " << dp_size
+              << ", tp_size = " << tp_size << ", sp_size = " << sp_size
+              << ", cfg_size = " << cfg_size;
   } else {
     LOG(INFO) << "Multi-node serving world_size = " << world_size
               << ", each_node_ranks = " << each_node_ranks

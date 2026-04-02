@@ -98,14 +98,14 @@ void FusedAddMatmulImpl::load_state_dict(
   }
 }
 
-WeightTransposeAddMatmulImpl::WeightTransposeAddMatmulImpl(
+AddMatmulWeightTransposedImpl::AddMatmulWeightTransposedImpl(
     int64_t in,
     int64_t out,
     bool with_bias,
     const torch::TensorOptions& options)
     : AddMatmulImpl(in, out, with_bias, options) {}
 
-torch::Tensor WeightTransposeAddMatmulImpl::forward(const torch::Tensor& x) {
+torch::Tensor AddMatmulWeightTransposedImpl::forward(const torch::Tensor& x) {
   // use addmm when bias is provided
   if (with_bias_) {
     auto sizes = x.sizes();
@@ -121,7 +121,7 @@ torch::Tensor WeightTransposeAddMatmulImpl::forward(const torch::Tensor& x) {
   }
 }
 
-void WeightTransposeAddMatmulImpl::load_state_dict(
+void AddMatmulWeightTransposedImpl::load_state_dict(
     const StateDict& state_dict) {
   // only transpoes weights when state_dict has the key
   // or it would be transposed multiple times when having

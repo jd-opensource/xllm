@@ -59,18 +59,18 @@ class FusedAddMatmulImpl : public AddMatmulImpl {
 };
 TORCH_MODULE(FusedAddMatmul);
 
-class WeightTransposeAddMatmulImpl : public AddMatmulImpl {
+class AddMatmulWeightTransposedImpl : public AddMatmulImpl {
  public:
-  WeightTransposeAddMatmulImpl(int64_t in,
-                               int64_t out,
-                               bool with_bias,
-                               const torch::TensorOptions& options);
+  AddMatmulWeightTransposedImpl(int64_t in,
+                                int64_t out,
+                                bool with_bias,
+                                const torch::TensorOptions& options);
 
   torch::Tensor forward(const torch::Tensor& x) override;
 
   void load_state_dict(const xllm::StateDict& state_dict) override;
 };
 
-TORCH_MODULE(WeightTransposeAddMatmul);
+TORCH_MODULE(AddMatmulWeightTransposed);
 }  // namespace layer
 }  // namespace xllm

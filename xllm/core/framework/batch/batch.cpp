@@ -422,7 +422,8 @@ void Batch::process_sample_output(const RawForwardOutput& raw_output,
       int64_t output_tensor_size =
           FLAGS_enable_return_mm_full_embeddings ? 1 : n_images;
       seq_mm_embeddings.reserve(output_tensor_size);
-      for (int64_t i = mm_embedding_idx; i < mm_embedding_idx + output_tensor_size;
+      for (int64_t i = mm_embedding_idx;
+           i < mm_embedding_idx + output_tensor_size;
            ++i) {
         CHECK_LT(i, raw_output.mm_embeddings.size());
         seq_mm_embeddings.push_back(raw_output.mm_embeddings[i]);

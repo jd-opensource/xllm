@@ -37,9 +37,8 @@ class SequenceParallelPadManager {
     }
 
     if (ref_tensor.defined()) {
-      if (ref_tensor.size(dim) % FLAGS_dit_sp_size != 0) {
-        int64_t pad_len =
-            FLAGS_dit_sp_size - ref_tensor.size(dim) % FLAGS_dit_sp_size;
+      if (ref_tensor.size(dim) % FLAGS_sp_size != 0) {
+        int64_t pad_len = FLAGS_sp_size - ref_tensor.size(dim) % FLAGS_sp_size;
         set(tensor_name, pad_len);
 
         std::vector<int64_t> pad_shape(ref_tensor.dim() * 2);
