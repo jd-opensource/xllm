@@ -38,11 +38,11 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class NpuOneRecBlockLayerImpl : public BaseLayer {
+class NpuOneRecBlockLayerImpl final : public BaseLayer {
  public:
   explicit NpuOneRecBlockLayerImpl(const ModelContext& context,
                                    bool is_decoder = false,
-                                   int layer_id = 0);
+                                   int32_t layer_id = 0);
 
   ~NpuOneRecBlockLayerImpl() override = default;
 
@@ -76,7 +76,7 @@ class NpuOneRecBlockLayerImpl : public BaseLayer {
                                        at::Tensor& attn_mask,
                                        ModelInputParams& input_params,
                                        bool is_prefill,
-                                       int layer_id = 0);
+                                       int32_t layer_id = 0);
 
   void build_decoder_node_variant_pack(atb_speed::Model::Node& node,
                                        torch::Tensor& x,
@@ -85,7 +85,7 @@ class NpuOneRecBlockLayerImpl : public BaseLayer {
                                        ModelInputParams& input_params,
                                        bool is_prefill,
                                        torch::Tensor* encoder_output = nullptr,
-                                       int layer_id = 0);
+                                       int32_t layer_id = 0);
 
   void build_decoder_moe_node_variant_pack(
       atb_speed::Model::Node& node,
@@ -95,7 +95,7 @@ class NpuOneRecBlockLayerImpl : public BaseLayer {
       ModelInputParams& input_params,
       bool is_prefill,
       torch::Tensor* encoder_output = nullptr,
-      int layer_id = 0,
+      int32_t layer_id = 0,
       const torch::Tensor& expert_array = torch::Tensor());
 
   int64_t init_node(atb_speed::Model::Node& node,
@@ -143,16 +143,16 @@ class NpuOneRecBlockLayerImpl : public BaseLayer {
 
   int device_id_ = 0;
   bool is_decoder_ = false;
-  int layer_id_ = 0;
+  int32_t layer_id_ = 0;
 
   std::unordered_map<std::string, std::vector<torch::Tensor>> experts_weights_;
   std::mutex experts_mutex_;
-  int start_expert_id_ = 0;
-  int end_expert_id_ = 0;
-  int num_experts_per_partition_ = 0;
-  int ep_size_ = 1;
-  int ep_local_tp_rank_ = 0;
-  int ep_local_tp_size_ = 1;
+  int32_t start_expert_id_ = 0;
+  int32_t end_expert_id_ = 0;
+  int32_t num_experts_per_partition_ = 0;
+  int32_t ep_size_ = 1;
+  int32_t ep_local_tp_rank_ = 0;
+  int32_t ep_local_tp_size_ = 1;
 
   std::vector<torch::Tensor> shared_expert_gate_weights_;
   std::vector<torch::Tensor> shared_expert_up_weights_;
