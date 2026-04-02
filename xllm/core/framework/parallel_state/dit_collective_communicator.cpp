@@ -71,10 +71,10 @@ void DiTCollectiveCommunicator::create_process_groups(
 
   int32_t global_rank = parallel_args_->rank();
   int32_t world_size = parallel_args_->world_size();
-  int32_t dp_size = parallel_args_->dit_dp_size();
-  int32_t tp_size = parallel_args_->dit_tp_size();
-  int32_t sp_size = parallel_args_->dit_sp_size();
-  int32_t cfg_size = parallel_args_->dit_cfg_size();
+  int32_t dp_size = parallel_args_->dp_size();
+  int32_t tp_size = parallel_args_->tp_size();
+  int32_t sp_size = parallel_args_->sp_size();
+  int32_t cfg_size = parallel_args_->cfg_size();
 
   process_group_ = create_process_group(global_rank,
                                         world_size,

@@ -60,6 +60,10 @@ const OptionCategory kMoeModelOptions = {
     "MOE MODEL OPTIONS",
     {"dp_size", "ep_size", "expert_parallel_degree"}};
 
+const OptionCategory kDiTModelOptions = {
+    "DiT MODEL OPTIONS",
+    {"dp_size", "tp_size", "sp_size", "cfg_size"}};
+
 const OptionCategory kDisaggregatedPrefillDecodeOptions = {
     "DISAGGREGATED PREFILL-DECODE OPTIONS",
     {"enable_disagg_pd",
@@ -113,6 +117,7 @@ const std::vector<OptionCategory> kOptionCategories = {
     kCommonOptions,
     kCacheOptions,
     kMoeModelOptions,
+    kDiTModelOptions,
     kDisaggregatedPrefillDecodeOptions,
     kMultiStepDecodeOptions,
     kMtpOptions,

@@ -404,10 +404,9 @@ Master::Master(const Options& options, EngineType type)
         .enable_schedule_overlap(options_.enable_schedule_overlap())
         .dp_size(options_.dp_size())
         .ep_size(options_.ep_size())
-        .dit_dp_size(options_.dit_dp_size())
-        .dit_tp_size(options_.dit_tp_size())
-        .dit_sp_size(options_.dit_sp_size())
-        .dit_cfg_size(options_.dit_cfg_size());
+        .tp_size(options_.tp_size())
+        .sp_size(options_.sp_size())
+        .cfg_size(options_.cfg_size());
 
     auto dit_engine = std::make_unique<DiTEngine>(eng_options);
     engine_ = std::move(dit_engine);

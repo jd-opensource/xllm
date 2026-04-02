@@ -462,9 +462,9 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
       negative_txt_seq_lens = negative_prompt_embeds_mask.sum(1);
     }
     /*
-    if (prompt_embeds.size(1) % FLAGS_dit_sp_size != 0) {
+    if (prompt_embeds.size(1) % FLAGS_sp_size != 0) {
       int64_t pad_len =
-          FLAGS_dit_sp_size - prompt_embeds.size(1) % FLAGS_dit_sp_size;
+          FLAGS_sp_size - prompt_embeds.size(1) % FLAGS_sp_size;
       std::vector<int64_t> pad_with = {
           0,
           0,  // 第3维�~Hhe   ight�~I�        ~Mpad
@@ -483,9 +483,9 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
           torch::pad(prompt_embeds_mask, pad_with_mask, "constant", 0);
     }
 
-    if (negative_prompt_embeds.size(1) % FLAGS_dit_sp_size != 0) {
-      int64_t pad_len = FLAGS_dit_sp_size -
-                        negative_prompt_embeds.size(1) % FLAGS_dit_sp_size;
+    if (negative_prompt_embeds.size(1) % FLAGS_sp_size != 0) {
+      int64_t pad_len = FLAGS_sp_size -
+                        negative_prompt_embeds.size(1) % FLAGS_sp_size;
       std::vector<int64_t> pad_with = {
           0,
           0,  // 第3维�~Hhe   ight�~I�        ~Mpad
@@ -521,7 +521,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
       torch::Tensor noise_pred;
       torch::Tensor neg_noise_pred;
       torch::Tensor pos_neg_noise_preds;
-      if (FLAGS_dit_cfg_size == 2 && do_true_cfg) {
+      if (FLAGS_cfg_size == 2 && do_true_cfg) {
         auto rank = parallel_args_.dit_cfg_group_->rank();
         if (rank == 0) {
           noise_pred = transformer_->forward(latent_model_input,

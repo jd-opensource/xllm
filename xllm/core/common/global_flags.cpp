@@ -641,15 +641,11 @@ DEFINE_int64(dit_cache_end_blocks,
 
 // --- dit parallel config ---
 
-DEFINE_int64(dit_dp_size, 1, "Data parallelism size for DiT models.");
+DEFINE_int64(tp_size, 1, "Tensor parallelism size");
 
-DEFINE_int64(dit_tp_size, 1, "Tensor parallelism size for DiT models");
+DEFINE_int64(sp_size, 1, "Sequence parallelism size");
 
-DEFINE_int64(dit_sp_size, 1, "Sequence parallelism size for DiT models");
-
-DEFINE_int64(dit_cfg_size,
-             1,
-             "Classifier-free guidiance parallelism size for DiT models");
+DEFINE_int64(cfg_size, 1, "Classifier-free guidiance parallelism size");
 
 DEFINE_int64(dit_sp_communication_overlap,
              1,
