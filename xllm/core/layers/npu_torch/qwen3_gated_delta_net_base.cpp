@@ -329,37 +329,34 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     const ModelInputParams& input_params) {
   auto [qkvz_padded, ba_padded] =
       project_padded_inputs(hidden_states, attn_metadata);
+    int64_t batch_size = qkvz_padded.size(0);
+  int64_t seq_len = qkvz_padded.size(1);
 
-  torch::Tensor q, k, v, z, b, a;
-  std::tie(q, k, v, z) = process_qkvz_tensor(qkvz_padded);
-  std::tie(b, a) = process_ba_tensor(ba_padded);
+  torch::Tensor qkvz_flat = qkvz_padded.view({batch_size * seq_len, qkvz_padded.size(-1)});
+  torch::Tensor ba_flat = ba_padded.view({batch_size * seq_len, ba_padded.size(-1)});
+  xllm::kernel::FusedQkvzbaSplitReshapeParams fused_params;
+  fused_params.mixed_qkvz = qkvz_flat;
+  fused_params.mixed_ba = ba_flat;
+  fused_params.num_heads_qk = static_cast<int32_t>(num_k_heads_ / tp_size_);
+  fused_params.num_heads_v = static_cast<int32_t>(num_v_heads_ / tp_size_);
+  fused_params.head_qk = static_cast<int32_t>(head_k_dim_);
+  fused_params.head_v = static_cast<int32_t>(head_v_dim_);
+  
+  torch::Tensor mixed_qkv, z, b, a;
+  std::tie(mixed_qkv, z, b, a) = xllm::kernel::fused_qkvzba_split_reshape_cat(fused_params);
 
-  auto rearrange_merge = [](const torch::Tensor& t) {
-    TORCH_CHECK(
-        t.dim() > 2, "Tensor must have at least 2 dims! but got ", t.dim());
-    std::vector<int64_t> new_shape;
-    int64_t slice_end = t.dim() - 2;
-    auto valid_slice = t.sizes().slice(0, slice_end);
-    new_shape = std::vector<int64_t>(valid_slice.begin(), valid_slice.end());
-    int64_t last_two_dim = t.size(slice_end) * t.size(slice_end + 1);
-    new_shape.push_back(last_two_dim);
-    return t.reshape(new_shape);
-  };
+  mixed_qkv = mixed_qkv.view({batch_size, seq_len, mixed_qkv.size(-1)});
+  z = z.view({batch_size, seq_len, num_v_heads_ / tp_size_, head_v_dim_});
+  b = b.view({batch_size, seq_len, num_v_heads_ / tp_size_});
+  a = a.view({batch_size, seq_len, num_v_heads_ / tp_size_});
 
-  q = rearrange_merge(q);
-  k = rearrange_merge(k);
-  v = rearrange_merge(v);
-
-  // Run the causal conv update on the mixed QKV states.
-  torch::Tensor mixed_qkv = torch::cat({q, k, v}, q.dim() - 1);
-  mixed_qkv = mixed_qkv.transpose(1, 2);
-  int64_t seq_len = mixed_qkv.size(2);
   torch::Tensor conv_cache = kv_cache.get_conv_cache();
   torch::Tensor ssm_cache = kv_cache.get_ssm_cache();
   torch::Tensor g, beta, core_attn_out, last_recurrent_state;
   auto device = mixed_qkv.device();
   auto conv_weight = conv1d_->weight();
 
+  mixed_qkv = mixed_qkv.transpose(1, 2);
   if (attn_metadata.is_prefill) {
     torch::Tensor conv_state =
         (seq_len < conv_kernel_size_ - 1)
@@ -444,7 +441,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   norm_out = norm_out.view({-1, norm_out.size(2), norm_out.size(3)});
 
   // Project the normalized attention output back to hidden size.
-  auto rearranged_norm = rearrange_merge(norm_out);
+  auto rearranged_norm = norm_out.reshape({norm_out.size(0), norm_out.size(1) * norm_out.size(2)});
   rearranged_norm = reshape_qkvz_unpad(attn_metadata, rearranged_norm);
   auto attn_output = o_proj_->forward(rearranged_norm);
   return attn_output;
@@ -517,68 +514,6 @@ Qwen3GatedDeltaNetBaseImpl::process_mixed_qkv(torch::Tensor& mixed_qkv) const {
   processed_v = processed_v.view(
       {batch_size, seq_len, num_v_heads_ / tp_size_, head_v_dim_});
   return std::make_tuple(processed_q, processed_k, processed_v);
-}
-
-std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
-Qwen3GatedDeltaNetBaseImpl::process_qkvz_tensor(
-    const torch::Tensor& qkvz) const {
-  std::vector<int64_t> new_tensor_shape_qkvz = [&]() {
-    std::vector<int64_t> dims;
-    dims.push_back(qkvz.size(0));
-    dims.push_back(qkvz.size(1));
-    int64_t dim1 = num_k_heads_ / tp_size_;
-    int64_t dim2 = head_k_dim_ + head_k_dim_ +
-                   (head_v_dim_ + head_v_dim_) * num_v_heads_ / num_k_heads_;
-    dims.push_back(dim1);
-    dims.push_back(dim2);
-    return dims;
-  }();
-
-  auto reshaped_qkvz = qkvz.view(new_tensor_shape_qkvz);
-  auto qkvz_split = torch::split(reshaped_qkvz,
-                                 {head_k_dim_,
-                                  head_k_dim_,
-                                  num_v_heads_ / num_k_heads_ * head_v_dim_,
-                                  num_v_heads_ / num_k_heads_ * head_v_dim_},
-                                 reshaped_qkvz.dim() - 1);
-
-  auto q = qkvz_split[0].contiguous();
-  auto k = qkvz_split[1].contiguous();
-  auto v = qkvz_split[2].contiguous();
-  auto z = qkvz_split[3].contiguous();
-
-  v = v.reshape({v.size(0), v.size(1), num_v_heads_ / tp_size_, head_v_dim_});
-  z = z.reshape({z.size(0), z.size(1), num_v_heads_ / tp_size_, head_v_dim_});
-
-  return std::make_tuple(q, k, v, z);
-}
-
-std::tuple<torch::Tensor, torch::Tensor>
-Qwen3GatedDeltaNetBaseImpl::process_ba_tensor(const torch::Tensor& ba) const {
-  std::vector<int64_t> new_tensor_shape_ba = [&]() {
-    std::vector<int64_t> dims;
-    dims.push_back(ba.size(0));
-    dims.push_back(ba.size(1));
-    int64_t dim1 = num_k_heads_ / tp_size_;
-    int64_t dim2 = 2 * num_v_heads_ / num_k_heads_;
-    dims.push_back(dim1);
-    dims.push_back(dim2);
-    return dims;
-  }();
-
-  auto reshaped_ba = ba.view(new_tensor_shape_ba);
-  auto ba_split =
-      torch::split(reshaped_ba,
-                   {num_v_heads_ / num_k_heads_, num_v_heads_ / num_k_heads_},
-                   reshaped_ba.dim() - 1);
-
-  auto b = ba_split[0].contiguous();
-  auto a = ba_split[1].contiguous();
-
-  b = b.reshape({b.size(0), b.size(1), num_v_heads_ / tp_size_});
-  a = a.reshape({a.size(0), a.size(1), num_v_heads_ / tp_size_});
-
-  return std::make_tuple(b, a);
 }
 
 }  // namespace layer
