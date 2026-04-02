@@ -295,6 +295,8 @@ DECLARE_double(dit_cache_residual_diff_threshold);
 
 DECLARE_bool(enable_constrained_decoding);
 
+DECLARE_bool(enable_return_mm_full_embeddings);
+
 // --- multi-step decode config ---
 
 DECLARE_int32(max_decode_rounds);
