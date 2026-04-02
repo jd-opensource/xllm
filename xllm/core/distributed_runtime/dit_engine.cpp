@@ -48,7 +48,8 @@ DiTEngine::DiTEngine(const runtime::Options& options) : options_(options) {
     process_groups_ = parallel_state::create_npu_process_groups(devices);
 #elif defined(USE_CUDA) || defined(USE_MLU)
     // MLU/CUDA uses local process groups
-    process_groups_ = parallel_state::create_local_process_groups(devices, options_);
+    process_groups_ =
+        parallel_state::create_local_process_groups(devices, options_);
 #endif
   }
   const int32_t world_size = static_cast<int32_t>(devices.size());
