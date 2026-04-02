@@ -361,6 +361,11 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
     proto_to_mmdata(pb_forward_input->mm_data(), &input_params.mm_data);
   }
 
+  if (pb_forward_input->has_dit_forward_input()) {
+    proto_to_dit_forward_input(pb_forward_input->dit_forward_input(),
+                               input_params.dit_forward_input);
+  }
+
   COUNTER_ADD(proto_latency_seconds_proto2i, timer.elapsed_seconds());
 }
 
@@ -532,6 +537,11 @@ void forward_input_to_proto(const RawForwardInput& inputs,
     mmdata_to_proto(inputs.mm_data, pb_forward_input->mutable_mm_data());
   }
 
+  if (inputs.dit_forward_input.valid()) {
+    dit_forward_input_to_proto(inputs.dit_forward_input,
+                               pb_forward_input->mutable_dit_forward_input());
+  }
+
   COUNTER_ADD(proto_latency_seconds_i2proto, timer.elapsed_seconds());
 }
 
@@ -581,7 +591,8 @@ void proto_to_forward_output(const proto::ForwardOutput& pb_output,
     }
     raw_forward_output.outputs.emplace_back(s);
   }
-
+  proto_to_dit_forward_output(pb_output.dit_forward_output(),
+                              raw_forward_output.dit_forward_output);
   COUNTER_ADD(proto_latency_seconds_proto2o, timer.elapsed_seconds());
 }
 
@@ -595,6 +606,7 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
                              const torch::Tensor& src_seq_idxes,
                              const torch::Tensor& out_tokens,
                              const torch::Tensor& out_logprobs,
+                             const std::vector<torch::Tensor>& dit_images,
                              proto::ForwardOutput* pb_forward_output) {
   Timer timer;
   int32_t num_seqs = next_tokens.size(0);
@@ -745,7 +757,11 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
     ADD_VECTOR_TO_PROTO(pb_forward_output->mutable_out_logprobs(),
                         out_logprobs_slice);
   }
-
+  if (!dit_images.empty()) {
+    TORCH_TENSOR_VEC_TO_PROTO_TENSOR_LIST(
+        pb_forward_output->mutable_dit_forward_output()->mutable_tensors(),
+        dit_images);
+  }
   COUNTER_ADD(proto_latency_seconds_o2proto, timer.elapsed_seconds());
   return;
 }
@@ -823,6 +839,215 @@ bool block_transfer_info_to_proto(
     return false;
   }
   pb_block_transfer_info->set_batch_id(batch_id);
+  return true;
+}
+
+bool dit_forward_input_to_proto(const DiTForwardInput& dit_inputs,
+                                proto::DiTForwardInput* pb_dit_inputs) {
+  pb_dit_inputs->set_batch_size(dit_inputs.batch_size);
+
+  ADD_VECTOR_TO_PROTO(pb_dit_inputs->mutable_prompts(), dit_inputs.prompts);
+
+  ADD_VECTOR_TO_PROTO(pb_dit_inputs->mutable_prompts_2(), dit_inputs.prompts_2);
+
+  ADD_VECTOR_TO_PROTO(pb_dit_inputs->mutable_negative_prompts(),
+                      dit_inputs.negative_prompts);
+
+  ADD_VECTOR_TO_PROTO(pb_dit_inputs->mutable_negative_prompts_2(),
+                      dit_inputs.negative_prompts_2);
+
+  torch_tensor_to_proto_tensor(dit_inputs.images,
+                               pb_dit_inputs->mutable_images());
+
+  torch_tensor_to_proto_tensor(dit_inputs.condition_images,
+                               pb_dit_inputs->mutable_condition_images());
+
+  torch_tensor_to_proto_tensor(dit_inputs.mask_images,
+                               pb_dit_inputs->mutable_mask_images());
+
+  torch_tensor_to_proto_tensor(dit_inputs.control_image,
+                               pb_dit_inputs->mutable_control_image());
+
+  torch_tensor_to_proto_tensor(dit_inputs.masked_image_latents,
+                               pb_dit_inputs->mutable_masked_image_latents());
+
+  torch_tensor_to_proto_tensor(dit_inputs.prompt_embeds,
+                               pb_dit_inputs->mutable_prompt_embeds());
+
+  torch_tensor_to_proto_tensor(dit_inputs.pooled_prompt_embeds,
+                               pb_dit_inputs->mutable_pooled_prompt_embeds());
+
+  torch_tensor_to_proto_tensor(dit_inputs.negative_prompt_embeds,
+                               pb_dit_inputs->mutable_negative_prompt_embeds());
+
+  torch_tensor_to_proto_tensor(
+      dit_inputs.negative_pooled_prompt_embeds,
+      pb_dit_inputs->mutable_negative_pooled_prompt_embeds());
+
+  torch_tensor_to_proto_tensor(dit_inputs.latents,
+                               pb_dit_inputs->mutable_latents());
+
+  if (!generation_params_to_proto(dit_inputs.generation_params,
+                                  pb_dit_inputs->mutable_generation_params())) {
+    LOG(ERROR) << "Failed to convert generation_params";
+    return false;
+  }
+
+  return true;
+}
+
+bool generation_params_to_proto(
+    const DiTGenerationParams& dit_generation_params,
+    proto::DiTGenerationParams* pb_dit_generation_params) {
+  pb_dit_generation_params->set_width(dit_generation_params.width);
+  pb_dit_generation_params->set_height(dit_generation_params.height);
+  pb_dit_generation_params->set_num_inference_steps(
+      dit_generation_params.num_inference_steps);
+  pb_dit_generation_params->set_true_cfg_scale(
+      dit_generation_params.true_cfg_scale);
+  pb_dit_generation_params->set_guidance_scale(
+      dit_generation_params.guidance_scale);
+  pb_dit_generation_params->set_num_images_per_prompt(
+      dit_generation_params.num_images_per_prompt);
+  pb_dit_generation_params->set_seed(dit_generation_params.seed);
+  pb_dit_generation_params->set_max_sequence_length(
+      dit_generation_params.max_sequence_length);
+  pb_dit_generation_params->set_strength(dit_generation_params.strength);
+  pb_dit_generation_params->set_enable_cfg_renorm(
+      dit_generation_params.enable_cfg_renorm);
+  pb_dit_generation_params->set_cfg_renorm_min(
+      dit_generation_params.cfg_renorm_min);
+  return true;
+}
+
+bool proto_to_dit_forward_input(const proto::DiTForwardInput& pb_dit_inputs,
+                                DiTForwardInput& dit_inputs) {
+  dit_inputs.batch_size = pb_dit_inputs.batch_size();
+
+  std::vector<std::string> prompts = std::vector<std::string>(
+      pb_dit_inputs.prompts().begin(), pb_dit_inputs.prompts().end());
+  std::vector<std::string> prompts_2 = std::vector<std::string>(
+      pb_dit_inputs.prompts_2().begin(), pb_dit_inputs.prompts_2().end());
+  std::vector<std::string> negative_prompts =
+      std::vector<std::string>(pb_dit_inputs.negative_prompts().begin(),
+                               pb_dit_inputs.negative_prompts().end());
+  std::vector<std::string> negative_prompts_2 =
+      std::vector<std::string>(pb_dit_inputs.negative_prompts_2().begin(),
+                               pb_dit_inputs.negative_prompts_2().end());
+  dit_inputs.prompts = std::move(prompts);
+
+  dit_inputs.prompts_2 = std::move(prompts_2);
+
+  dit_inputs.negative_prompts = std::move(negative_prompts);
+
+  dit_inputs.negative_prompts_2 = std::move(negative_prompts_2);
+
+  if (pb_dit_inputs.has_images()) {
+    dit_inputs.images = util::proto_to_torch(pb_dit_inputs.images());
+  }
+
+  if (pb_dit_inputs.has_condition_images()) {
+    dit_inputs.condition_images =
+        util::proto_to_torch(pb_dit_inputs.condition_images());
+  }
+
+  if (pb_dit_inputs.has_mask_images()) {
+    dit_inputs.mask_images = util::proto_to_torch(pb_dit_inputs.mask_images());
+  }
+
+  if (pb_dit_inputs.has_control_image()) {
+    dit_inputs.control_image =
+        util::proto_to_torch(pb_dit_inputs.control_image());
+  }
+
+  if (pb_dit_inputs.has_masked_image_latents()) {
+    dit_inputs.masked_image_latents =
+        util::proto_to_torch(pb_dit_inputs.masked_image_latents());
+  }
+
+  if (pb_dit_inputs.has_prompt_embeds()) {
+    dit_inputs.prompt_embeds =
+        util::proto_to_torch(pb_dit_inputs.prompt_embeds());
+  }
+
+  if (pb_dit_inputs.has_pooled_prompt_embeds()) {
+    dit_inputs.pooled_prompt_embeds =
+        util::proto_to_torch(pb_dit_inputs.pooled_prompt_embeds());
+  }
+
+  if (pb_dit_inputs.has_negative_prompt_embeds()) {
+    dit_inputs.negative_prompt_embeds =
+        util::proto_to_torch(pb_dit_inputs.negative_prompt_embeds());
+  }
+
+  if (pb_dit_inputs.has_negative_pooled_prompt_embeds()) {
+    dit_inputs.negative_pooled_prompt_embeds =
+        util::proto_to_torch(pb_dit_inputs.negative_pooled_prompt_embeds());
+  }
+
+  if (pb_dit_inputs.has_latents()) {
+    dit_inputs.latents = util::proto_to_torch(pb_dit_inputs.latents());
+  }
+
+  if (!proto_to_generation_params(pb_dit_inputs.generation_params(),
+                                  dit_inputs.generation_params)) {
+    LOG(ERROR) << "Failed to convert generation_params";
+    return false;
+  }
+
+  return true;
+}
+
+bool proto_to_generation_params(
+    const proto::DiTGenerationParams& pb_dit_generation_params,
+    DiTGenerationParams& dit_generation_params) {
+  LOG(INFO) << "start brpc transfer";
+  dit_generation_params.width = pb_dit_generation_params.width();
+  dit_generation_params.height = pb_dit_generation_params.height();
+  dit_generation_params.num_inference_steps =
+      pb_dit_generation_params.num_inference_steps();
+  dit_generation_params.true_cfg_scale =
+      pb_dit_generation_params.true_cfg_scale();
+  dit_generation_params.guidance_scale =
+      pb_dit_generation_params.guidance_scale();
+  dit_generation_params.num_images_per_prompt =
+      pb_dit_generation_params.num_images_per_prompt();
+  dit_generation_params.seed = pb_dit_generation_params.seed();
+  dit_generation_params.max_sequence_length =
+      pb_dit_generation_params.max_sequence_length();
+  dit_generation_params.strength = pb_dit_generation_params.strength();
+  dit_generation_params.enable_cfg_renorm =
+      pb_dit_generation_params.enable_cfg_renorm();
+  dit_generation_params.cfg_renorm_min =
+      pb_dit_generation_params.cfg_renorm_min();
+  return true;
+}
+
+bool proto_to_dit_forward_output(const proto::DiTForwardOutput& pb_dit_outputs,
+                                 DiTForwardOutput& dit_outputs) {
+  const auto& pb_tensor_list = pb_dit_outputs.tensors();
+  std::vector<torch::Tensor> torch_tensor_vec;
+  torch_tensor_vec.reserve(pb_tensor_list.tensors_size());
+  for (const auto& pb_tensor : pb_tensor_list.tensors()) {
+    torch::Tensor torch_tensor = util::proto_to_torch(pb_tensor);
+    if (!torch_tensor.defined()) {
+      LOG(ERROR) << "Failed to convert PB Tensor to torch Tensor (list item)";
+      return false;
+    }
+    torch_tensor_vec.emplace_back(std::move(torch_tensor));
+  }
+  dit_outputs.tensors = std::move(torch_tensor_vec);
+  return true;
+}
+
+bool torch_tensor_to_proto_tensor(const torch::Tensor& torch_tensor,
+                                  proto::Tensor* proto_tensor) {
+  if (torch_tensor.defined()) {
+    if (!util::torch_to_proto(torch_tensor, proto_tensor)) {
+      LOG(ERROR) << "Failed to convert torch Tensor to Pb Tensor ";
+      return false;
+    }
+  }
   return true;
 }
 

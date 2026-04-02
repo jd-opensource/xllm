@@ -24,7 +24,7 @@ cc_library(
     worker_impl.h
     llm_worker_impl.h
     vlm_worker_impl.h
-    dit_worker.h
+    dit_worker_impl.h
     embed_worker_impl.h
     embed_vlm_worker_impl.h
     rec_worker_impl.h
@@ -50,7 +50,7 @@ cc_library(
     worker_impl.cpp
     llm_worker_impl.cpp
     vlm_worker_impl.cpp
-    dit_worker.cpp
+    dit_worker_impl.cpp
     embed_worker_impl.cpp
     embed_vlm_worker_impl.cpp
     rec_worker_impl.cpp
