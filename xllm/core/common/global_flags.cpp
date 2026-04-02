@@ -79,6 +79,8 @@ const std::vector<GlobalFlagHelpFlagInfo>& get_global_flag_help_flags() {
 
 }  // namespace xllm
 
+namespace {
+
 #define XLLM_CONCAT_INNER(lhs, rhs) lhs##rhs
 #define XLLM_CONCAT(lhs, rhs) XLLM_CONCAT_INNER(lhs, rhs)
 #define XLLM_STRINGIFY_INNER(value) #value
@@ -160,6 +162,8 @@ const std::vector<GlobalFlagHelpFlagInfo>& get_global_flag_help_flags() {
   }                                                                   \
   using fLS::FLAGS_##name;                                            \
   XLLM_REGISTER_HELP_FLAG(XLLM_CURRENT_HELP_SECTION, name)
+
+}  // namespace
 
 // NOTE:
 // 1. related flags should be placed together.
@@ -990,3 +994,19 @@ DEFINE_bool(enable_xattention_one_stage,
             false,
             "Whether to force xattention one-stage decode for rec "
             "multi-round mode.");
+
+#undef XLLM_CURRENT_HELP_SECTION
+#undef DEFINE_string
+#undef DEFINE_double
+#undef DEFINE_uint64
+#undef DEFINE_int64
+#undef DEFINE_uint32
+#undef DEFINE_int32
+#undef DEFINE_bool
+#undef XLLM_DEFINE_VARIABLE
+#undef XLLM_REGISTER_HELP_FLAG
+#undef XLLM_REGISTER_HELP_SECTION
+#undef XLLM_STRINGIFY
+#undef XLLM_STRINGIFY_INNER
+#undef XLLM_CONCAT
+#undef XLLM_CONCAT_INNER

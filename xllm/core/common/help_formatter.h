@@ -51,6 +51,7 @@ class HelpFormatter {
 
     oss << "REQUIRED OPTIONS:\n";
     append_option(oss, model_flag);
+    oss << "\n";
 
     oss << "HELP OPTIONS:\n";
     append_virtual_option(
@@ -59,6 +60,7 @@ class HelpFormatter {
         /*option_type=*/"bool",
         /*default_value=*/"false",
         /*description=*/"Display this help message and exit.");
+    oss << "\n";
 
     oss << "AVAILABLE FLAG SECTIONS: " << public_flag_count
         << " public xLLM gflags across " << sections.size() << " sections\n\n";
@@ -75,6 +77,7 @@ class HelpFormatter {
       for (const auto& option_info : section.flags) {
         append_option(oss, option_info);
       }
+      oss << "\n";
     }
 
     oss << "For more information and all available options, visit:\n";
@@ -284,7 +287,6 @@ class HelpFormatter {
                  /*value=*/option_info.description.empty()
                      ? "No description provided."
                      : option_info.description);
-    oss << "\n";
   }
 
   static void append_virtual_option(std::ostringstream& oss,
@@ -296,7 +298,6 @@ class HelpFormatter {
     append_field(oss, /*name=*/"type", /*value=*/option_type);
     append_field(oss, /*name=*/"default", /*value=*/default_value);
     append_field(oss, /*name=*/"description", /*value=*/description);
-    oss << "\n";
   }
 
   static google::CommandLineFlagInfo get_required_model_flag() {
