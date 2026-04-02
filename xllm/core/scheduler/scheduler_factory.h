@@ -27,7 +27,7 @@ std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
     ContinuousScheduler::Options options);
 
 std::unique_ptr<DiTScheduler> create_dit_scheduler(
-    DiTEngine* engine,
+    Engine* engine,
     DiTScheduler::Options options);
 
 std::unique_ptr<FixedStepsScheduler> create_fixed_steps_scheduler(

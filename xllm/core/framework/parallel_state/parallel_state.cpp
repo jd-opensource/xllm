@@ -268,6 +268,156 @@ torch::Tensor scatter(torch::Tensor input,
   return tensor_list[rank];
 }
 
+std::function<torch::Tensor()> all_to_all_4D(const torch::Tensor& input,
+                                             int32_t scatter_idx,
+                                             int32_t gather_idx,
+                                             bool async_ops,
+                                             ProcessGroup* process_group) {
+  if (!process_group) {
+    return [input]() { return input; };
+  }
+  const int32_t group_size = process_group->world_size();
+
+  if (group_size == 1) {
+    return [input]() { return input; };
+  }
+
+  auto rank = process_group->rank();
+
+  TORCH_CHECK(input.dim() == 4,
+              "all_to_all_4D: input must be 4D, got dim=",
+              input.dim());
+  auto send_input = input;
+
+  if (scatter_idx == 2 && gather_idx == 1) {
+    // branch A : from "sequence shard" -> "head shard"
+    // input: (bs, seqlen / group_size (shard_seqlen), head_num, head_dim)
+    //   output (bs, seqlen, head_num / group_size, head_dim)
+    auto sizes = send_input.sizes().vec();
+    const int64_t bs = sizes[0];
+    const int64_t shard_seqlen = sizes[1];
+    const int64_t head_num = sizes[2];
+    const int64_t head_size = sizes[3];
+    const int64_t seqlen = shard_seqlen * group_size;
+    TORCH_CHECK(head_num % group_size == 0,
+                "all_to_all_4D(A): head_num must be divisible by group_size");
+    const int64_t shard_head_num = head_num / group_size;
+
+    // prepare expected shape for All2All (group_size, shard_seqlen, bs,
+    // shard_head_num, head_size)
+    auto input_t =
+        send_input
+            .reshape({bs, shard_seqlen, group_size, shard_head_num, head_size})
+            .transpose(
+                0,
+                2)  // (group_size, shard_seqlen, bs, shard_head_num, head_size)
+            .contiguous();
+    torch::Tensor output = torch::empty_like(input_t);
+    std::vector<int64_t> input_split_size = {};
+    std::vector<int64_t> output_split_size = {};
+
+    if (!async_ops) {
+      process_group->all_to_all_single(
+          output, input_t, output_split_size, input_split_size, async_ops);
+      output = output.reshape({seqlen, bs, shard_head_num, head_size})
+                   .transpose(0, 1)
+                   .contiguous()
+                   .reshape({bs, seqlen, shard_head_num, head_size});
+      return [output]() { return output; };
+    } else {
+      c10::intrusive_ptr<c10d::Work> all2all_work;
+      process_group->all_to_all_single(output,
+                                       input_t,
+                                       output_split_size,
+                                       input_split_size,
+                                       async_ops,
+                                       &all2all_work);
+      return [output,
+              all2all_work,
+              bs,
+              seqlen,
+              shard_head_num,
+              head_size]() mutable -> torch::Tensor {
+        all2all_work->wait();
+        auto comm_output =
+            output.reshape({seqlen, bs, shard_head_num, head_size})
+                .transpose(0, 1)
+                .contiguous()
+                .reshape({bs, seqlen, shard_head_num, head_size});
+        return comm_output;
+      };
+    }
+  } else if (scatter_idx == 1 && gather_idx == 2) {
+    // branch B : from "head shard" -> "sequence shard"
+    // input: (bs, seqlen, head_num / group_size, head_size)
+    // output (bs, seqlen / group_size, head_num, haed_size)
+    auto sizes = send_input.sizes().vec();
+    const int64_t bs = sizes[0];
+    const int64_t seqlen = sizes[1];
+    const int64_t shard_head_num = sizes[2];
+    const int64_t head_size = sizes[3];
+    TORCH_CHECK(seqlen % group_size == 0,
+                "all_to_all_4D(B): seqlen must be divisible by group_size");
+    const int64_t shard_seqlen = seqlen / group_size;
+    const int64_t head_num = shard_head_num * group_size;
+
+    // prepare expected shape for All2All (group_size, shard_head_num,
+    // shard_seqlen, bs, head_size)
+    auto input_t =
+        send_input
+            .reshape({bs, group_size, shard_seqlen, shard_head_num, head_size})
+            .transpose(
+                0,
+                3)  // (shard_head_num, group_size, shard_seqlen, bs, head_size)
+            .transpose(
+                0,
+                1)  // (group_size, shard_head_num, shard_seqlen, bs, head_size)
+            .contiguous();
+    torch::Tensor output = torch::empty_like(input_t);
+    std::vector<int64_t> input_split_size = {};
+    std::vector<int64_t> output_split_size = {};
+
+    if (!async_ops) {
+      process_group->all_to_all_single(output,
+                                       input_t,
+                                       output_split_size,
+                                       input_split_size,
+                                       /*async_op=*/false);
+      output = output.reshape({head_num, shard_seqlen, bs, head_size})
+                   .transpose(0, 2)
+                   .contiguous()
+                   .reshape({bs, shard_seqlen, head_num, head_size});
+      return [output]() { return output; };
+    } else {
+      c10::intrusive_ptr<c10d::Work> all2all_work;
+      process_group->all_to_all_single(output,
+                                       input_t,
+                                       output_split_size,
+                                       input_split_size,
+                                       /*async_op=*/true,
+                                       &all2all_work);
+      return [output,
+              all2all_work,
+              head_num,
+              shard_seqlen,
+              bs,
+              head_size]() mutable -> torch::Tensor {
+        all2all_work->wait();
+        auto comm_output =
+            output.reshape({head_num, shard_seqlen, bs, head_size})
+                .transpose(0, 2)
+                .contiguous()
+                .reshape({bs, shard_seqlen, head_num, head_size});
+        return comm_output;
+      };
+    }
+  } else {
+    TORCH_CHECK(false,
+                "all_to_all_4D: only (scatter_idx,gather_idx)=(2,1) or (1,2) "
+                "are supported");
+  }
+}
+
 std::vector<std::unique_ptr<ProcessGroup>> create_npu_process_groups(
     const std::vector<torch::Device>& devices) {
 #if defined(USE_NPU)

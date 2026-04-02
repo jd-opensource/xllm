@@ -276,6 +276,13 @@ DiTModelLoader::DiTModelLoader(const std::string& model_root_path)
     LOG(FATAL) << "DiTModelLoader: model_index.json root is not an object!";
   }
 
+  if (root_json.contains("_class_name")) {
+    set_model_type(root_json["_class_name"]);
+  } else {
+    LOG(WARNING)
+        << "model_index.json doesn't contains the _class_name key, xllm may "
+        << "not obtain model type for dit model";
+  }
   // parse model_index.json & initialize model_loader
   for (const auto& [json_key, json_value] : root_json.items()) {
     if (!json_value.is_array() || json_value.size() != 2) {

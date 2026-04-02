@@ -30,6 +30,7 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
+#include "runtime/dit_worker_impl.h"
 #include "runtime/eagle3_worker_impl.h"
 #include "runtime/embed_vlm_worker_impl.h"
 #include "runtime/embed_worker_impl.h"
@@ -69,6 +70,8 @@ Worker::Worker(const ParallelArgs& parallel_args,
     impl_ = new RecWorkerImpl(parallel_args, device, options);
   } else if (worker_type == WorkerType::MMEVLM) {
     impl_ = new MMEmbedVLMWorkerImpl(parallel_args, device, options);
+  } else if (worker_type == WorkerType::DIT) {
+    impl_ = new DiTWorkerImpl(parallel_args, device, options);
   } else {
     LOG(ERROR) << "Unknown worker type, please check logic";
   }
