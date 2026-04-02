@@ -179,8 +179,6 @@ bool WorkerImpl::allocate_kv_cache(
       << "KVCache does not support linear attention and lighting indexer "
       << "simultaneously.";
 
-  // Get layer types if available
-  const auto& layer_types = args.layer_types();
   const int64_t num_layers = get_num_layers();
 
   // Check if KV cache quantization is enabled
