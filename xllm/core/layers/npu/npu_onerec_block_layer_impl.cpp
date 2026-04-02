@@ -34,7 +34,7 @@ static constexpr uint64_t kOneRecWeightCountPerLayer = 79;
 // Decoder MoE mode weights count (exclude runtime tensors like expert_array).
 static constexpr uint64_t kOneRecMoeWeightCountPerLayer = 97;
 
-enum class OneRecBlockLayerTensorId : int32_t {
+enum OneRecBlockLayerTensorId : int32_t {
   // Self-attention layer norm
   IN_LAYER_NORM_WEIGHT = 0,
   IN_LAYER_NORM_BIAS,
@@ -137,7 +137,6 @@ enum class OneRecBlockLayerTensorId : int32_t {
   IN_FFN_WO_SCALE,
   IN_FFN_WO_COMPRESS_IDX,
 };
-using enum OneRecBlockLayerTensorId;
 
 enum OneRecMoeBlockLayerTensorId : int {
   // MoE weights (only used when use_moe=true)
@@ -702,19 +701,20 @@ void NpuOneRecBlockLayerImpl::load_state_dict(const StateDict& state_dict) {
     }
     LOG(FATAL) << "Unsupported OneRec weight dtype " << torch_dtype_
                << ", layer_id=" << layer_id_;
+    return dtype_;
   };
-  const auto correct_tensor_dtype =
-      [this, &target_weight_dtype](torch::Tensor& tensor,
-                                   const std::string& tensor_name) {
-        if (absl::EndsWith(tensor_name, "deq_scale") &&
-            torch_dtype_ == "bfloat16") {
-          return;
-        }
-        if (tensor.dtype() != torch::kInt8 && tensor.dtype() != torch::kInt32 &&
-            tensor.dtype() != torch::kInt64) {
-          tensor = tensor.to(target_weight_dtype());
-        }
-      };
+  const auto correct_tensor_dtype = [this, &target_weight_dtype](
+                                        torch::Tensor& tensor,
+                                        const std::string& tensor_name) {
+    if (absl::EndsWith(tensor_name, "deq_scale") &&
+        torch_dtype_ == "bfloat16") {
+      return;
+    }
+    if (tensor.dtype() != torch::kInt8 && tensor.dtype() != torch::kInt32 &&
+        tensor.dtype() != torch::kInt64) {
+      tensor = tensor.to(target_weight_dtype());
+    }
+  };
   const auto load_weight = [this, &state_dict, &correct_tensor_dtype](
                                const std::string& tensor_name,
                                int weight_position,
