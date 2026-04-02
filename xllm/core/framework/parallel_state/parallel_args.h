@@ -90,17 +90,17 @@ struct ParallelArgs {
 
   ParallelArgs(int32_t rank,
                int32_t world_size,
-               int32_t dit_dp_size,
-               int32_t dit_tp_size,
-               int32_t dit_sp_size,
-               int32_t dit_cfg_size,
+               int32_t dp_size,
+               int32_t tp_size,
+               int32_t sp_size,
+               int32_t cfg_size,
                ProcessGroup* process_group)
       : rank_(rank),
         world_size_(world_size),
-        dit_dp_size_(dit_dp_size),
-        dit_tp_size_(dit_tp_size),
-        dit_sp_size_(dit_sp_size),
-        dit_cfg_size_(dit_cfg_size),
+        dp_size_(dp_size),
+        tp_size_(tp_size),
+        sp_size_(sp_size),
+        cfg_size_(cfg_size),
         process_group_(process_group) {}
 
   // rank of current process
@@ -118,17 +118,14 @@ struct ParallelArgs {
   // cp size
   PROPERTY(int32_t, cp_size) = 1;
 
-  // dit dp size
-  PROPERTY(int32_t, dit_dp_size) = 1;
+  // tp size
+  PROPERTY(int32_t, tp_size) = 1;
 
-  // dit tp size
-  PROPERTY(int32_t, dit_tp_size) = 1;
+  // sp size
+  PROPERTY(int32_t, sp_size) = 1;
 
-  // dit sp size
-  PROPERTY(int32_t, dit_sp_size) = 1;
-
-  // dit cfg size
-  PROPERTY(int32_t, dit_cfg_size) = 1;
+  // cfg size
+  PROPERTY(int32_t, cfg_size) = 1;
 
   // atb hccl mapping json data
   PROPERTY(nlohmann::json, mapping_data);

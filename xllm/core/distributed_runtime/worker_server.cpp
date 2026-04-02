@@ -144,10 +144,10 @@ void WorkerServer::create_server(
     auto dit_comm =
         std::make_unique<DiTCollectiveCommunicator>(worker_global_rank,
                                                     world_size,
-                                                    options.dit_dp_size(),
-                                                    options.dit_tp_size(),
-                                                    options.dit_sp_size(),
-                                                    options.dit_cfg_size());
+                                                    options.dp_size(),
+                                                    options.tp_size(),
+                                                    options.sp_size(),
+                                                    options.cfg_size());
     comm = std::move(dit_comm);
   } else {
     auto common_comm = std::make_unique<CollectiveCommunicator>(

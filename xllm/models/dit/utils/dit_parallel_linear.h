@@ -97,7 +97,7 @@ struct SpOptions {
 // template <typename Linear>
 class DiTParallelLinearImpl : public torch::nn::Module {
  public:
-  DiTParallelLinearImpl(layer::WeightTransposeAddMatmul linear,
+  DiTParallelLinearImpl(layer::AddMatmulWeightTransposed linear,
                         const string& module_name,
                         LinearType linear_type = LinearType::Default,
                         const SpOptions& sp_options = SpOptions())
@@ -166,7 +166,7 @@ class DiTParallelLinearImpl : public torch::nn::Module {
   }
 
  private:
-  layer::WeightTransposeAddMatmul linear_{nullptr};
+  layer::AddMatmulWeightTransposed linear_{nullptr};
   SpOptions sp_options_;
   LinearType linear_type_;
 };

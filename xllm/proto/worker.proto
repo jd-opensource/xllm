@@ -292,7 +292,6 @@ message ForwardInput {
   repeated string request_ids = 44;
   repeated int32 mtp_shifted_token_ids = 45;
   DiTForwardInput dit_forward_input = 46;
->>>>>>> a8f6efe9 (refactor: change dit framework from multithread structure to multiproccess structure, support HCCL communication for dit models.)
 }
 
  message BatchedForwardInputs {
