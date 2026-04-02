@@ -74,7 +74,8 @@ void validate_flags(const std::string& model_type) {
     FLAGS_enable_schedule_overlap = false;
   }
   // TODO: support other block sizes in the future
-  if (FLAGS_block_size != 16 && FLAGS_block_size != 1) {
+  if (FLAGS_block_size != 16 && FLAGS_block_size != 1 &&
+      FLAGS_backend != "dit") {
     LOG(FATAL) << "Currently, block_size must be 16 for MLU backend, we will "
                   "support other block sizes in the future.";
   }
@@ -164,8 +165,9 @@ int run() {
   FLAGS_enable_block_copy_kernel = false;
 #endif
 
-  std::string model_type = xllm::util::get_model_type(model_path);
+  std::string model_type = "";
   if (FLAGS_backend != "dit") {
+    model_type = get_model_type(model_path);
     FLAGS_tool_call_parser = function_call::FunctionCallParser::get_parser_auto(
         FLAGS_tool_call_parser, model_type);
     FLAGS_reasoning_parser =

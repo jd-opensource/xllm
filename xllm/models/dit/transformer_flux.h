@@ -59,7 +59,7 @@ inline torch::Tensor apply_rotary_emb(const torch::Tensor& x,
 
 #if defined(USE_NPU)
   return at_npu::native::custom_ops::npu_rotary_mul(x, cos, sin, "interleave");
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_MLU)
   std::vector<int64_t> reshape_shape;
   for (int64_t i = 0; i < x.dim() - 1; ++i) {
     reshape_shape.push_back(x.size(i));
@@ -278,7 +278,7 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
     auto attn_output = std::get<0>(results);
     attn_output = attn_output.to(query.dtype());
     return attn_output.flatten(2);
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_MLU)
     query = query.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
     key = key.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
     value = value.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
@@ -458,7 +458,7 @@ class FluxAttentionImpl : public torch::nn::Module {
     auto attn_output = std::get<0>(results);
 
     attn_output = attn_output.reshape({batch_size, -1, attn_heads * head_dim});
-#elif defined(USE_CUDA) || defined(USE_MUSA)
+#elif defined(USE_CUDA) || defined(USE_MLU) || defined(USE_MUSA)
     // SDPA expects (B, H, S, D); our query1/key1/value1 are (B, S, H, D).
     // Transpose to match diffusers dispatch_attention_fn (permute 0,2,1,3).
     query1 = query1.transpose(1, 2);
