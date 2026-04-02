@@ -100,7 +100,7 @@ inline torch::Tensor compute_onerec_position_bias(
         -torch::min(relative_position, torch::zeros_like(relative_position));
   }
 
-  auto max_exact = num_buckets / 2;
+  const int64_t max_exact = num_buckets / 2;
   auto is_small = relative_position < max_exact;
   auto relative_position_if_large =
       max_exact + (torch::log(relative_position.to(torch::kFloat) / max_exact) /
@@ -137,7 +137,7 @@ inline torch::Tensor compute_onerec_position_bias(
 
   if (is_decode_stage && input_params != nullptr &&
       !input_params->kv_seq_lens_vec.empty()) {
-    const int seq_kv_len = input_params->kv_seq_lens_vec[0];
+    const int32_t seq_kv_len = input_params->kv_seq_lens_vec[0];
     values = values.slice(1, -1, values.size(1)).slice(2, 0, seq_kv_len);
   } else if (is_decode_stage) {
     values = values.slice(1, -1, values.size(1));
@@ -177,7 +177,7 @@ class OneRecStackImpl : public torch::nn::Module {
     layers_.reserve(num_layers);
     for (uint32_t i = 0; i < num_layers; ++i) {
       auto block = layer::NpuOneRecBlockLayer(context, is_decode, i);
-      layers_.push_back(block);
+      layers_.emplace_back(block);
       blocks_->push_back(block);
     }
 
@@ -199,11 +199,12 @@ class OneRecStackImpl : public torch::nn::Module {
       h = tokens;
     } else if (onerec_params->decoder_context_embedding.defined()) {
       if (tokens.numel() == 0) {
-        h = onerec_params->decoder_context_embedding;
+        h = onerec_params->decoder_context_embedding.reshape(
+            {-1, onerec_params->decoder_context_embedding.size(-1)});
       } else {
         h = embed_tokens_(tokens);
 
-        auto& context_emb = onerec_params->decoder_context_embedding;
+        auto context_emb = onerec_params->decoder_context_embedding.clone();
         const int64_t hidden_size = context_emb.size(3);
         const int64_t bs = onerec_params->bs;
         const int64_t group_width = onerec_params->group_width;
@@ -422,7 +423,7 @@ class OneRecStackImpl : public torch::nn::Module {
                                    : layer_position_bias.contiguous();
 
     if (is_decoder_ && FLAGS_enable_rec_prefill_only) {
-      auto mask_value = -9984.0f;
+      const float mask_value = -9984.0f;
       auto upper_tri_mask =
           torch::triu(torch::ones({query_length, query_length},
                                   effective_attn_mask.options()),
