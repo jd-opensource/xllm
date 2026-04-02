@@ -42,8 +42,14 @@ DiTEngine::DiTEngine(const runtime::Options& options) : options_(options) {
   }
 
   if (devices.size() > 1) {
-    // create a process group for each device if there are multiple gpus
-    process_groups_ = parallel_state::create_npu_process_groups(devices);
+    // create a process group for each device if there are multiple devices
+    if (device_type == torch::DeviceType::XLA) {
+      // NPU uses specific NPU process groups
+      process_groups_ = parallel_state::create_npu_process_groups(devices);
+    } else {
+      // MLU/CUDA uses local process groups
+      process_groups_ = parallel_state::create_local_process_groups(devices, options_);
+    }
   }
   const int32_t world_size = static_cast<int32_t>(devices.size());
 
