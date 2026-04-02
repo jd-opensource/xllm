@@ -23,7 +23,6 @@ REF_CHECK_NUM_BATCHES = 16
 VEC_NUM = 2
 VECTOR_BYTES_PER_ITER = 256
 SUPPORTED_NUM_HEADS = (16, 32, 48, 64, 128)
-MIN_FUSED_TASK_ELEMS_PER_TASK = 64
 
 
 def _dtype_size_in_bytes(dtype: str) -> int:
@@ -71,101 +70,6 @@ def build_fused_gdn_gating_kernel(
     mask_dtype = "uint8"
     ub_tensor_dim = _align_count_to_vector_bytes(num_heads, acc_dtype)
     compare_select_mask_bytes = ub_tensor_dim // 8
-    fused_group_rows = ub_tensor_dim // num_heads if num_heads < ub_tensor_dim else 1
-    fused_task_threshold_elems = task_num * MIN_FUSED_TASK_ELEMS_PER_TASK
-    enable_small_head_fusion = num_heads < ub_tensor_dim
-
-    @T.macro
-    def init_head_constants(
-        A_log: T.Buffer,
-        dt_bias: T.Buffer,
-        A_log_ub: T.Buffer,
-        dt_bias_ub: T.Buffer,
-        neg_exp_A_ub: T.Buffer,
-    ) -> None:
-        if enable_small_head_fusion:
-            for repeat_idx in T.serial(fused_group_rows):
-                start = repeat_idx * num_heads
-                stop = start + num_heads
-                T.copy(A_log[0], A_log_ub[0, start:stop])
-                T.copy(dt_bias[0], dt_bias_ub[0, start:stop])
-        else:
-            T.copy(A_log[0], A_log_ub[0, :num_heads])
-            T.copy(dt_bias[0], dt_bias_ub[0, :num_heads])
-        T.tile.exp(neg_exp_A_ub, A_log_ub)
-        T.tile.mul(neg_exp_A_ub, neg_exp_A_ub, -1.0)
-
-    @T.macro
-    def run_row_pipeline(
-        row,
-        io_count,
-        softplus_beta,
-        softplus_threshold,
-        a: T.Buffer,
-        b: T.Buffer,
-        g_out: T.Buffer,
-        beta_out: T.Buffer,
-        dt_bias_ub: T.Buffer,
-        neg_exp_A_ub: T.Buffer,
-        a_half_ub: T.Buffer,
-        b_half_ub: T.Buffer,
-        a_fp32_ub: T.Buffer,
-        b_fp32_ub: T.Buffer,
-        x_ub: T.Buffer,
-        beta_x_ub: T.Buffer,
-        softplus_abs_ub: T.Buffer,
-        softplus_neg_abs_ub: T.Buffer,
-        softplus_exp_ub: T.Buffer,
-        softplus_log_ub: T.Buffer,
-        softplus_x_ub: T.Buffer,
-        beta_fp32_ub: T.Buffer,
-        g_ub: T.Buffer,
-        beta_half_ub: T.Buffer,
-        sigmoid_tmp_ub: T.Buffer,
-        softplus_cmp_mask_ub: T.Buffer,
-    ) -> None:
-        T.copy(a[row, 0], a_half_ub[0, :io_count])
-        T.copy(b[row, 0], b_half_ub[0, :io_count])
-
-        T.tile.cast(a_fp32_ub, a_half_ub, "CAST_NONE", io_count)
-        T.tile.cast(b_fp32_ub, b_half_ub, "CAST_NONE", io_count)
-
-        T.tile.add(x_ub, a_fp32_ub, dt_bias_ub)
-        T.tile.mul(beta_x_ub, x_ub, softplus_beta)
-        T.tile.abs(softplus_abs_ub, beta_x_ub)
-        T.tile.mul(softplus_neg_abs_ub, softplus_abs_ub, -1.0)
-        T.tile.exp(softplus_exp_ub, softplus_neg_abs_ub)
-        T.tile.add(softplus_exp_ub, softplus_exp_ub, 1.0)
-        T.tile.ln(softplus_log_ub, softplus_exp_ub)
-
-        # Ascend compare/select consumes one 256B vector chunk per iteration.
-        # For float32 this is 64 elements, so num_heads < 64 must still use
-        # UB tensors aligned to the full 256B chunk.
-        T.tile.compare(
-            softplus_cmp_mask_ub,
-            beta_x_ub,
-            softplus_threshold,
-            "GT",
-        )
-        # softplus(x) = log(1 + exp(-abs(beta_x))) / beta
-        #             + 0.5 * (beta_x + abs(beta_x)) / beta
-        T.tile.mul(softplus_x_ub, beta_x_ub, 0.5 / softplus_beta)
-        T.tile.axpy(softplus_x_ub, softplus_abs_ub, 0.5 / softplus_beta)
-        T.tile.axpy(softplus_x_ub, softplus_log_ub, 1.0 / softplus_beta)
-        T.tile.select(
-            softplus_x_ub,
-            softplus_cmp_mask_ub,
-            x_ub,
-            softplus_x_ub,
-            "VSEL_TENSOR_TENSOR_MODE",
-        )
-
-        T.tile.sigmoid(beta_fp32_ub, b_fp32_ub, sigmoid_tmp_ub)
-        T.tile.mul(g_ub, neg_exp_A_ub, softplus_x_ub)
-        T.tile.cast(beta_half_ub, beta_fp32_ub, "CAST_RINT", io_count)
-
-        T.copy(g_ub[0, :io_count], g_out[row, 0])
-        T.copy(beta_half_ub[0, :io_count], beta_out[row, 0])
 
     @T.prim_func
     def fused_gdn_gating_kernel(
@@ -198,178 +102,70 @@ def build_fused_gdn_gating_kernel(
                 dt_bias_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
                 a_half_ub = T.alloc_shared((1, ub_tensor_dim), input_dtype)
                 b_half_ub = T.alloc_shared((1, ub_tensor_dim), input_dtype)
-                a_fp32_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
-                b_fp32_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
                 x_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
                 beta_x_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
                 softplus_abs_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
-                softplus_neg_abs_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
-                softplus_exp_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
-                softplus_log_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
-                softplus_x_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
+                softplus_tmp_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
                 beta_fp32_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
-                g_ub = T.alloc_shared((1, ub_tensor_dim), acc_dtype)
-                beta_half_ub = T.alloc_shared((1, ub_tensor_dim), input_dtype)
                 sigmoid_tmp_ub = T.alloc_ub((1, ub_tensor_dim), mask_dtype)
                 softplus_cmp_mask_ub = T.alloc_ub(
                     (1, compare_select_mask_bytes), mask_dtype
                 )
 
-                init_head_constants(
-                    A_log,
-                    dt_bias,
-                    A_log_ub,
-                    dt_bias_ub,
-                    neg_exp_A_ub,
-                )
+                T.copy(A_log[0], A_log_ub[0, :num_heads])
+                T.copy(dt_bias[0], dt_bias_ub[0, :num_heads])
+                T.tile.exp(neg_exp_A_ub, A_log_ub)
+                T.tile.mul(neg_exp_A_ub, neg_exp_A_ub, -1.0)
 
-                if enable_small_head_fusion:
-                    total_flat_elems = num_batches * num_heads
-                    if total_flat_elems >= fused_task_threshold_elems:
-                        fused_full_batches = (
-                            num_batches // fused_group_rows
-                        ) * fused_group_rows
-                        fused_group_count = fused_full_batches // fused_group_rows
-                        fused_block_groups = (
-                            fused_group_count + task_num - 1
-                        ) // task_num
-                        group_start = task_id * fused_block_groups
-                        groups_left = T.if_then_else(
-                            fused_group_count > group_start,
-                            fused_group_count - group_start,
-                            0,
-                        )
-                        num_groups_per_vec = T.if_then_else(
-                            groups_left < fused_block_groups,
-                            groups_left,
-                            fused_block_groups,
-                        )
+                for row_local in T.serial(num_rows_per_vec):
+                    row = row_start + row_local
 
-                        for group_local in T.serial(num_groups_per_vec):
-                            group = group_start + group_local
-                            row = group * fused_group_rows
-                            run_row_pipeline(
-                                row,
-                                ub_tensor_dim,
-                                softplus_beta,
-                                softplus_threshold,
-                                a,
-                                b,
-                                g_out,
-                                beta_out,
-                                dt_bias_ub,
-                                neg_exp_A_ub,
-                                a_half_ub,
-                                b_half_ub,
-                                a_fp32_ub,
-                                b_fp32_ub,
-                                x_ub,
-                                beta_x_ub,
-                                softplus_abs_ub,
-                                softplus_neg_abs_ub,
-                                softplus_exp_ub,
-                                softplus_log_ub,
-                                softplus_x_ub,
-                                beta_fp32_ub,
-                                g_ub,
-                                beta_half_ub,
-                                sigmoid_tmp_ub,
-                                softplus_cmp_mask_ub,
-                            )
+                    T.copy(a[row, 0], a_half_ub[0, :num_heads])
+                    T.copy(b[row, 0], b_half_ub[0, :num_heads])
 
-                        tail_batches = num_batches - fused_full_batches
-                        if task_id < tail_batches:
-                            row = fused_full_batches + task_id
-                            run_row_pipeline(
-                                row,
-                                num_heads,
-                                softplus_beta,
-                                softplus_threshold,
-                                a,
-                                b,
-                                g_out,
-                                beta_out,
-                                dt_bias_ub,
-                                neg_exp_A_ub,
-                                a_half_ub,
-                                b_half_ub,
-                                a_fp32_ub,
-                                b_fp32_ub,
-                                x_ub,
-                                beta_x_ub,
-                                softplus_abs_ub,
-                                softplus_neg_abs_ub,
-                                softplus_exp_ub,
-                                softplus_log_ub,
-                                softplus_x_ub,
-                                beta_fp32_ub,
-                                g_ub,
-                                beta_half_ub,
-                                sigmoid_tmp_ub,
-                                softplus_cmp_mask_ub,
-                            )
-                    else:
-                        for row_local in T.serial(num_rows_per_vec):
-                            row = row_start + row_local
-                            run_row_pipeline(
-                                row,
-                                num_heads,
-                                softplus_beta,
-                                softplus_threshold,
-                                a,
-                                b,
-                                g_out,
-                                beta_out,
-                                dt_bias_ub,
-                                neg_exp_A_ub,
-                                a_half_ub,
-                                b_half_ub,
-                                a_fp32_ub,
-                                b_fp32_ub,
-                                x_ub,
-                                beta_x_ub,
-                                softplus_abs_ub,
-                                softplus_neg_abs_ub,
-                                softplus_exp_ub,
-                                softplus_log_ub,
-                                softplus_x_ub,
-                                beta_fp32_ub,
-                                g_ub,
-                                beta_half_ub,
-                                sigmoid_tmp_ub,
-                                softplus_cmp_mask_ub,
-                            )
-                else:
-                    for row_local in T.serial(num_rows_per_vec):
-                        row = row_start + row_local
-                        run_row_pipeline(
-                            row,
-                            num_heads,
-                            softplus_beta,
-                            softplus_threshold,
-                            a,
-                            b,
-                            g_out,
-                            beta_out,
-                            dt_bias_ub,
-                            neg_exp_A_ub,
-                            a_half_ub,
-                            b_half_ub,
-                            a_fp32_ub,
-                            b_fp32_ub,
-                            x_ub,
-                            beta_x_ub,
-                            softplus_abs_ub,
-                            softplus_neg_abs_ub,
-                            softplus_exp_ub,
-                            softplus_log_ub,
-                            softplus_x_ub,
-                            beta_fp32_ub,
-                            g_ub,
-                            beta_half_ub,
-                            sigmoid_tmp_ub,
-                            softplus_cmp_mask_ub,
-                        )
+                    # x = a + dt_bias
+                    # beta_x = beta * x
+                    # softplus_tmp = log(1 + exp(-abs(beta_x)))
+                    T.tile.cast(x_ub, a_half_ub, "CAST_NONE", ub_tensor_dim)
+                    T.tile.axpy(x_ub, dt_bias_ub, 1.0)
+                    T.tile.mul(beta_x_ub, x_ub, softplus_beta)
+                    T.tile.abs(softplus_abs_ub, beta_x_ub)
+                    T.tile.mul(softplus_tmp_ub, softplus_abs_ub, -1.0)
+                    T.tile.exp(beta_fp32_ub, softplus_tmp_ub)
+                    T.tile.add(beta_fp32_ub, beta_fp32_ub, 1.0)
+                    T.tile.ln(softplus_tmp_ub, beta_fp32_ub)
+
+                    # Ascend compare/select consumes one 256B vector chunk per
+                    # iteration. For float32 this is 64 elements, so num_heads
+                    # < 64 still uses UB tensors aligned to the full chunk.
+                    T.tile.compare(
+                        softplus_cmp_mask_ub,
+                        beta_x_ub,
+                        softplus_threshold,
+                        "GT",
+                    )
+                    # softplus(x) = log(1 + exp(-abs(beta_x))) / beta
+                    #             + 0.5 * (beta_x + abs(beta_x)) / beta
+                    T.tile.add(beta_x_ub, beta_x_ub, softplus_abs_ub)
+                    T.tile.mul(beta_x_ub, beta_x_ub, 0.5 / softplus_beta)
+                    T.tile.axpy(beta_x_ub, softplus_tmp_ub, 1.0 / softplus_beta)
+                    T.tile.select(
+                        beta_x_ub,
+                        softplus_cmp_mask_ub,
+                        x_ub,
+                        beta_x_ub,
+                        "VSEL_TENSOR_TENSOR_MODE",
+                    )
+
+                    # Reuse x_ub as b_fp32 and g output buffer, and reuse
+                    # b_half_ub as beta_half output buffer.
+                    T.tile.cast(x_ub, b_half_ub, "CAST_NONE", ub_tensor_dim)
+                    T.tile.sigmoid(beta_fp32_ub, x_ub, sigmoid_tmp_ub)
+                    T.tile.mul(x_ub, neg_exp_A_ub, beta_x_ub)
+                    T.tile.cast(b_half_ub, beta_fp32_ub, "CAST_RINT", ub_tensor_dim)
+
+                    T.copy(x_ub[0, :num_heads], g_out[row, 0])
+                    T.copy(b_half_ub[0, :num_heads], beta_out[row, 0])
 
     return fused_gdn_gating_kernel
 
