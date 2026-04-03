@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <mstx/ms_tools_ext.h>
 
+#include <algorithm>
 #include <map>
 
 #include "common/global_flags.h"
@@ -29,6 +30,10 @@ limitations under the License.
 
 namespace xllm {
 namespace layer {
+
+namespace {
+constexpr int64_t kFiaMaskSeqLen = 2048;
+}
 
 const uint64_t WEIGHT_COUNT_PER_LAYER = 56;
 
@@ -48,6 +53,8 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
   param.rmsnormQKNorm = true;
   param.isPrefill = isPrefill;
   param.isBF16 = args.dtype() == "bfloat16";
+  param.isFIA = isPrefill && FLAGS_enable_fia;
+  param.blockSize = static_cast<int64_t>(FLAGS_block_size);
   param.enableSplitFuse = FLAGS_enable_chunked_prefill && isPrefill;
   param.loraEnableGMM = false;
   param.enableXattention = is_rec_multi_round_mode();
@@ -197,6 +204,14 @@ int64_t NpuQwen3DecoderLayerImpl::init_attn_mask() {
   torch::Dtype dtype =
       prefill_param_.isBF16 ? torch::kBFloat16 : torch::kFloat16;
   decode_attn_mask_ = torch::zeros({1}).to(device_).to(dtype);
+  if (prefill_param_.isFIA) {
+    const auto fia_mask_options =
+        torch::TensorOptions().dtype(torch::kBool).device(device_);
+    fia_attn_mask_ = torch::triu(torch::ones({kFiaMaskSeqLen, kFiaMaskSeqLen},
+                                             fia_mask_options),
+                                 /*diagonal=*/1)
+                         .contiguous();
+  }
 
   return atb::NO_ERROR;
 }
@@ -279,6 +294,15 @@ void NpuQwen3DecoderLayerImpl::build_node_variant_pack(
     ModelInputParams& input_params,
     bool is_prefill,
     int node_id) {
+  if (is_prefill) {
+    *prefill_param_.bs = std::max(1, input_params.num_sequences);
+  }
+
+  auto* effective_attn_mask = &attn_mask;
+  if (is_prefill && prefill_param_.isFIA) {
+    effective_attn_mask = &fia_attn_mask_;
+  }
+
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensors_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
@@ -286,7 +310,7 @@ void NpuQwen3DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 2) =
       atb_speed::Utils::AtTensor2Tensor(sin_pos);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3) =
-      atb_speed::Utils::AtTensor2Tensor(attn_mask);
+      atb_speed::Utils::AtTensor2Tensor(*effective_attn_mask);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6) =
       atb_speed::Utils::AtTensor2Tensor(input_params.kv_seq_lens);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6).hostData =
@@ -334,8 +358,8 @@ void NpuQwen3DecoderLayerImpl::build_node_variant_pack(
         atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
   }
 
-  if (is_prefill &&
-      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
+  if (is_prefill && (prefill_param_.isFIA || FLAGS_enable_chunked_prefill ||
+                     FLAGS_enable_prefix_cache)) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
     node.variantPack.inTensors.at(input_idx - 1).hostData =

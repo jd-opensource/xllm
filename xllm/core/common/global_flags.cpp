@@ -644,6 +644,11 @@ DEFINE_string(npu_kernel_backend,
 DEFINE_bool(enable_intralayer_addnorm,
             false,
             "enable fused intralayer addnorm ops.");
+
+DEFINE_bool(enable_fia,
+            false,
+            "Whether to enable FIA when initializing the NPU qwen2 decoder "
+            "layer.");
 #endif
 
 // --- multi-step decode config ---
