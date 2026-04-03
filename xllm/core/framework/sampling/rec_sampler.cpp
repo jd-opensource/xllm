@@ -174,12 +174,10 @@ SampleOutput RecSampler::OneRecConstrainedSamplingStrategy::forward(
           params.temperatures.index_select(/*dim=*/0, params.sample_idxes);
     }
     if (params.top_k.defined()) {
-      sample_top_k =
-          params.top_k.index_select(/*dim=*/0, params.sample_idxes);
+      sample_top_k = params.top_k.index_select(/*dim=*/0, params.sample_idxes);
     }
     if (params.top_p.defined()) {
-      sample_top_p =
-          params.top_p.index_select(/*dim=*/0, params.sample_idxes);
+      sample_top_p = params.top_p.index_select(/*dim=*/0, params.sample_idxes);
     }
   } else {
     sample_temperatures = params.temperatures;
@@ -212,8 +210,7 @@ SampleOutput RecSampler::OneRecConstrainedSamplingStrategy::forward(
   if (params.logprobs) {
     const auto logprobs = torch::log_softmax(
         sample_logits, /*dim=*/-1, /*dtype=*/torch::kFloat32);
-    auto selected_logprobs =
-        logprobs.gather(/*dim=*/-1, samples.view({-1, 1}));
+    auto selected_logprobs = logprobs.gather(/*dim=*/-1, samples.view({-1, 1}));
     output.logprobs = selected_logprobs.view({-1});
 
     if (params.max_top_logprobs > 0) {

@@ -31,10 +31,10 @@ class RecSampler {
   ~RecSampler() = default;
 
   // logits: [batch_size, vocab_size]
-  SampleOutput forward(torch::Tensor& logits,
-                       const SamplingParameters& params,
-                       const torch::Tensor& filter_mask = torch::Tensor())
-      const;
+  SampleOutput forward(
+      torch::Tensor& logits,
+      const SamplingParameters& params,
+      const torch::Tensor& filter_mask = torch::Tensor()) const;
 
  private:
   class SamplingStrategy {

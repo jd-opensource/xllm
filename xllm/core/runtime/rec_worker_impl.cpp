@@ -43,12 +43,12 @@ limitations under the License.
 #include "kernels/npu/xllm_ops/xllm_ops_api.h"
 #include "platform/npu/device_capture_lock.h"
 #endif
+#include "common/version_singleton.h"
 #include "framework/model_loader.h"
 #include "framework/sampling/rec_constrained_decoding.h"
 #include "framework/sampling/rec_sampler.h"
 #include "framework/state_dict/rec_vocab_dict.h"
 #include "models/model_registry.h"
-#include "common/version_singleton.h"
 #include "util/env_var.h"
 #include "util/timer.h"
 
@@ -300,7 +300,8 @@ void RecWorkerImpl::LlmRecWorkPipeline::prepare_work_before_execute(
 RecWorkerImpl::OneRecWorkPipeline::OneRecWorkPipeline(
     RecPipelineRuntime& runtime)
     : RecWorkPipeline(runtime),
-      rec_sampler_(std::make_unique<RecSampler>(RecPipelineType::kOneRecDefault)),
+      rec_sampler_(
+          std::make_unique<RecSampler>(RecPipelineType::kOneRecDefault)),
       filter_mask_threadpool_(std::make_unique<ThreadPool>(1)) {
   if (!FLAGS_enable_constrained_decoding) {
     return;
@@ -313,12 +314,12 @@ RecWorkerImpl::OneRecWorkPipeline::OneRecWorkPipeline(
 
   const int32_t vocab_size =
       static_cast<int32_t>(runtime_.context->get_model_args().vocab_size());
-  constrained_decoding_ = std::make_unique<RecConstrainedDecoding>(
-      vocab_dict,
-      vocab_size,
-      runtime_.worker.dtype(),
-      runtime_.worker.device(),
-      /*use_gen_threadpool=*/false);
+  constrained_decoding_ =
+      std::make_unique<RecConstrainedDecoding>(vocab_dict,
+                                               vocab_size,
+                                               runtime_.worker.dtype(),
+                                               runtime_.worker.device(),
+                                               /*use_gen_threadpool=*/false);
   CHECK(constrained_decoding_->build_mask_cache())
       << "Failed to build OneRec constrained decoding cache, vocab_size="
       << vocab_size;
@@ -359,9 +360,8 @@ RecWorkerImpl::OneRecWorkPipeline::prepare_filter_mask_async(
           const int32_t batch = static_cast<int32_t>(generated_tokens.size());
           const int32_t seq =
               batch > 0 ? static_cast<int32_t>(generated_tokens[0].size()) : 0;
-          LOG(ERROR)
-              << "Failed to generate OneRec filter mask, batch=" << batch
-              << ", seq=" << seq << ", error=" << e.what();
+          LOG(ERROR) << "Failed to generate OneRec filter mask, batch=" << batch
+                     << ", seq=" << seq << ", error=" << e.what();
           promise.setValue(torch::Tensor());
         } catch (...) {
           const int32_t batch = static_cast<int32_t>(generated_tokens.size());
@@ -396,8 +396,7 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
   if ((runtime_.worker.driver_ || runtime_.worker.dp_driver_) &&
       FLAGS_enable_constrained_decoding && constrained_decoding_ != nullptr &&
       sampling_params.selected_token_idxes.defined()) {
-    filter_mask_future =
-        prepare_filter_mask_async(rec_params.generated_tokens);
+    filter_mask_future = prepare_filter_mask_async(rec_params.generated_tokens);
   }
 
   torch::Tensor hidden_states;
@@ -499,7 +498,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
     if (filter_mask_future.has_value()) {
       filter_mask = std::move(filter_mask_future.value()).get();
     }
-    auto sample_output = rec_sampler_->forward(logits, sampling_params, filter_mask);
+    auto sample_output =
+        rec_sampler_->forward(logits, sampling_params, filter_mask);
     output.logits = logits;
     output.sample_output = sample_output;
     output.do_sample = sampling_params.do_sample;
