@@ -58,11 +58,33 @@ DEFINE_COUNTER(prefix_cache_match_length_total,
 DEFINE_COUNTER(allocate_blocks_latency_seconds,
                "Latency of blocks allocation in seconds");
 
+DEFINE_COUNTER(prefetch_kvcache_latency_seconds,
+               "Latency of prefetch kvcache in seconds");
+DEFINE_COUNTER(load_kvcache_latency_seconds,
+               "Latency of load kvcache in seconds");
+DEFINE_COUNTER(offload_kvcache_latency_seconds,
+               "Latency of offload kvcache in seconds");
+
 DEFINE_HISTOGRAM(prefix_cache_block_matched_rate,
                  "Histogram of prefix cache block match rate");
 
 DEFINE_HISTOGRAM(prefix_cache_block_matched_num,
                  "Histogram of prefix cache block matched number");
+
+DEFINE_HISTOGRAM(host_prefix_cache_block_matched_rate,
+                 "Histogram of host prefix cache block match rate");
+DEFINE_HISTOGRAM(host_prefix_cache_block_matched_num,
+                 "Histogram of host prefix cache block matched number");
+
+DEFINE_HISTOGRAM(store_prefix_cache_block_matched_rate,
+                 "Histogram of store prefix cache block match rate");
+DEFINE_HISTOGRAM(store_prefix_cache_block_matched_num,
+                 "Histogram of store prefix cache block matched number");
+
+DEFINE_HISTOGRAM(load_kvcache_block_num,
+                 "Histogram of load kvcache block number");
+DEFINE_HISTOGRAM(offload_kvcache_block_num,
+                 "Histogram of offload kvcache block number");
 
 // sequence metrics
 DEFINE_COUNTER(detokenization_latency_seconds_stream,

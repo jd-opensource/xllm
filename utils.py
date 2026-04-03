@@ -222,80 +222,38 @@ def _collect_submodule_init_issues(repo_root: str) -> dict[str, str]:
 
     return issues
 
-def _is_dependency_installed(required_files: list[str]) -> bool:
-    normalized_files = [
-        os.path.abspath(os.path.expanduser(file_path))
-        for file_path in required_files
-    ]
-    return all(os.path.isfile(file_path) for file_path in normalized_files)
 
-
-def _get_required_dependency_files() -> dict[str, list[str]]:
-    install_prefix = "/usr/local/yalantinglibs"
-    return {
-        "yalantinglibs": [
-            os.path.join(
-                install_prefix,
-                "lib",
-                "cmake",
-                "yalantinglibs",
-                "config.cmake",
-            ),
-        ],
-    }
-
-
-def _collect_missing_dependencies(
-    dependency_files: dict[str, list[str]],
-) -> dict[str, list[str]]:
-    missing: dict[str, list[str]] = {}
-    for name, required_files in dependency_files.items():
-        normalized_files = [
-            os.path.abspath(os.path.expanduser(file_path))
-            for file_path in required_files
-        ]
-        if not _is_dependency_installed(normalized_files):
-            missing[name] = normalized_files
-    return missing
-
-
-def _export_cmake_prefix_paths(prefix_paths: list[str]) -> None:
-    existing = os.environ.get("CMAKE_PREFIX_PATH", "")
-    merged_paths: list[str] = []
-
-    for path in existing.split(os.pathsep):
-        if not path:
-            continue
-        normalized_path = os.path.abspath(os.path.expanduser(path))
-        if normalized_path and normalized_path not in merged_paths:
-            merged_paths.append(normalized_path)
-
-    for path in prefix_paths:
-        if not path:
-            continue
-        normalized_path = os.path.abspath(os.path.expanduser(path))
-        if normalized_path and normalized_path not in merged_paths:
-            merged_paths.append(normalized_path)
-
-    if not merged_paths:
-        return
-
-    os.environ["CMAKE_PREFIX_PATH"] = os.pathsep.join(merged_paths)
-    print(f"✅ Export CMAKE_PREFIX_PATH to environment: {os.environ['CMAKE_PREFIX_PATH']}")
-
-
-def _run_dependencies_script_or_exit(script_path: str) -> None:
-    if not _run_shell_command(
-        "sh third_party/dependencies.sh",
+def _install_dependencies(
+    script_path: str,
+    dependency: str,
+    device: str,
+    enable_ha: bool = False,
+) -> None:
+    enable_ha_flag = "true" if enable_ha else "false"
+    command = f"sh third_party/dependencies.sh {dependency} {device} {enable_ha_flag}"
+    if _run_shell_command(
+        command,
         cwd=script_path,
         passthrough_output=True,
     ):
-        print("❌ Run shell command 'sh third_party/dependencies.sh' failed!")
-        _print_manual_check_commands([
-            f"cd {script_path}",
-            "sh third_party/dependencies.sh",
-        ])
-        exit(1)
+        return
+
+    print(f"❌ Run shell command '{command}' failed!")
+    _print_manual_check_commands([
+        f"cd {script_path}",
+        command,
+    ])
+    exit(1)
+
+
+def _upsert_cmake_bool_option(option_name: str, enabled: bool) -> None:
+    current_cmake_args = shlex.split(os.environ.get("CMAKE_ARGS", ""))
+    option_prefix = f"-D{option_name}="
+    option_value = "ON" if enabled else "OFF"
+
+    filtered_args = [arg for arg in current_cmake_args if not arg.startswith(option_prefix)]
+    filtered_args.append(f"{option_prefix}{option_value}")
+    os.environ["CMAKE_ARGS"] = " ".join(filtered_args)
 
 
 def _validate_submodules_or_exit(repo_root: str) -> None:
@@ -308,30 +266,6 @@ def _validate_submodules_or_exit(repo_root: str) -> None:
         print("\nPlease align submodules and try again:")
         print("   git submodule update --init --recursive [-f|--force]")
         exit(1)
-
-
-def _ensure_prebuild_dependencies_installed(script_path: str) -> None:
-    dependency_files = _get_required_dependency_files()
-    missing_dependencies = _collect_missing_dependencies(dependency_files)
-    if missing_dependencies:
-        missing_names = ", ".join(sorted(missing_dependencies))
-        print(f"ℹ️ Missing third-party dependencies: {missing_names}. Running dependencies.sh ...")
-        _run_dependencies_script_or_exit(script_path)
-
-        missing_dependencies = _collect_missing_dependencies(dependency_files)
-        if missing_dependencies:
-            print("❌ Some third-party dependencies are still missing after running dependencies.sh:")
-            manual_commands = [f"cd {script_path}", "sh third_party/dependencies.sh"]
-            for name in sorted(missing_dependencies):
-                print(f"   - {name}")
-                for file_path in missing_dependencies[name]:
-                    print(f"     missing file: {file_path}")
-                    manual_commands.append(f"test -f {file_path}")
-            _print_manual_check_commands(manual_commands)
-            exit(1)
-
-    _export_cmake_prefix_paths(["/usr/local/yalantinglibs"])
-
 
 def _get_cmake_cache_path() -> str:
     plat_name = sysconfig.get_platform()
@@ -374,9 +308,13 @@ def _ensure_xllm_ops_rebuild_on_missing_marker() -> None:
         print("✅ Cleared XLLM_OPS_GIT_HEAD_CACHED from CMake cache to trigger xllm_ops rebuild.")
         return
 
-def pre_build() -> None:
+def pre_build(device: Optional[str] = None, enable_ha: bool = False) -> None:
     script_path = os.path.dirname(os.path.abspath(__file__))
+    normalized_device = (device or "").lower()
 
+    _upsert_cmake_bool_option("ENABLE_HA", enable_ha)
     _validate_submodules_or_exit(script_path)
-    _ensure_prebuild_dependencies_installed(script_path)
     _ensure_xllm_ops_rebuild_on_missing_marker()
+    _install_dependencies(script_path, "yalantinglibs", normalized_device, enable_ha)
+    if enable_ha:
+        _install_dependencies(script_path, "mooncake", normalized_device, enable_ha)
