@@ -713,12 +713,12 @@ ForwardOutput RecEngine::OneRecEnginePipeline::get_model_output(
     sample_output.embeddings = safe_to(
         sample_output.embeddings,
         torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32),
-        true);
+        /*non_blocking=*/true);
   }
 
   if (sample_output.next_tokens.defined()) {
     sample_output.next_tokens =
-        safe_to(sample_output.next_tokens, torch::kCPU, true);
+        safe_to(sample_output.next_tokens, torch::kCPU, /*non_blocking=*/true);
     if (sample_output.logprobs.defined()) {
       sample_output.logprobs =
           safe_to(sample_output.logprobs, torch::kCPU, true);
