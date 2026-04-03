@@ -537,10 +537,14 @@ bool RecEngine::OneRecEnginePipeline::init_model_workers(
     engine_.process_groups_.clear();
     engine_.process_groups_.emplace_back(
         std::make_unique<ProcessGroup>(/*rank=*/0, world_size, devices[0]));
-  } else if (devices[0].is_privateuseone()) {
+  }
+#if defined(USE_NPU)
+  else if (devices[0].is_privateuseone()) {
     engine_.process_groups_ =
         parallel_state::create_npu_process_groups(devices);
-  } else {
+  }
+#endif
+  else {
     engine_.process_groups_ =
         parallel_state::create_local_process_groups(devices, engine_.options_);
   }
