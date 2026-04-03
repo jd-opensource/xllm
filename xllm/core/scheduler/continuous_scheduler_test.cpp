@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <optional>
 
 #include "chunked_prefill_scheduler.h"
@@ -54,7 +55,7 @@ class FakeEngine : public Engine {
   BlockManagerPool* block_manager_pool() const {
     return fake_block_manager_.get();
   }
-  const ModelArgs& model_args() const { NOT_IMPLEMENTED(); }
+  const std::shared_ptr<ModelArgs>& model_args() const { NOT_IMPLEMENTED(); }
   const TokenizerArgs& tokenizer_args() const { NOT_IMPLEMENTED(); }
   std::vector<int64_t> get_active_activation_memory() const {
     NOT_IMPLEMENTED();
@@ -291,7 +292,7 @@ TEST(ContinuousSchedulerFactoryTest,
   ASSERT_EQ(batches[0].size(), 1);
 
   const auto forward_input =
-      batches[0].prepare_forward_input(1, 0, ModelArgs());
+      batches[0].prepare_forward_input(1, 0, /*args=*/nullptr);
   EXPECT_TRUE(
       forward_input.input_params.batch_forward_type.is_chunked_prefill());
   EXPECT_FALSE(forward_input.input_params.batch_forward_type.is_mixed());

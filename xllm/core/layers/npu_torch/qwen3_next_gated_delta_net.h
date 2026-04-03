@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -28,7 +29,7 @@ namespace layer {
 class Qwen3NextGatedDeltaNetImpl : public Qwen3GatedDeltaNetBaseImpl {
  public:
   Qwen3NextGatedDeltaNetImpl() = default;
-  Qwen3NextGatedDeltaNetImpl(const ModelArgs& args,
+  Qwen3NextGatedDeltaNetImpl(const std::shared_ptr<ModelArgs>& args,
                              const QuantArgs& quant_args,
                              const ParallelArgs& parallel_args,
                              const torch::TensorOptions& options);
@@ -37,7 +38,7 @@ class Qwen3NextGatedDeltaNetImpl : public Qwen3GatedDeltaNetBaseImpl {
   void verify_loaded_weights(const std::string& prefix) const override;
 
  protected:
-  Qwen3NextGatedDeltaNetImpl(const ModelArgs& args,
+  Qwen3NextGatedDeltaNetImpl(const std::shared_ptr<ModelArgs>& args,
                              const QuantArgs& quant_args,
                              const ParallelArgs& parallel_args,
                              const torch::TensorOptions& options,
@@ -50,7 +51,7 @@ class Qwen3NextGatedDeltaNetImpl : public Qwen3GatedDeltaNetBaseImpl {
   virtual void load_projection_state_dict(const StateDict& state_dict);
   virtual void verify_projection_weights(const std::string& prefix) const;
 
-  void init_next_projections(const ModelArgs& args,
+  void init_next_projections(const std::shared_ptr<ModelArgs>& args,
                              const QuantArgs& quant_args,
                              const ParallelArgs& parallel_args,
                              const torch::TensorOptions& options);

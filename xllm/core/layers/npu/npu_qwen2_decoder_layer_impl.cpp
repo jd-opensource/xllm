@@ -24,6 +24,8 @@ limitations under the License.
 #include "common/global_flags.h"
 
 // #include "attn_mask.h"
+#include <memory>
+
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
 
@@ -95,12 +97,12 @@ const uint64_t WEIGHT_COUNT_PER_LAYER = 50;
 
 void NpuQwen2DecoderLayerImpl::param_from_args(
     atb_speed::qwen::DecoderLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args,
     bool isPrefill) {
   param.isFA = false;
   param.isPrefill = isPrefill;
-  param.isBF16 = args.dtype() == "bfloat16";
+  param.isBF16 = args->dtype() == "bfloat16";
   param.supportSwiGLU = true;
   param.supportLcoc = isPrefill;  // isPrefill
   param.supportSpeculate = false;
@@ -118,18 +120,18 @@ void NpuQwen2DecoderLayerImpl::param_from_args(
                                static_cast<int>(TransposeType::NOT_TRANSPOSE)};
   param.kvQuant = false;
   param.quantGroupSize = 0;
-  param.rmsNormEps = args.rms_norm_eps();
+  param.rmsNormEps = args->rms_norm_eps();
   param.worldSize = parallel_args.world_size();
-  param.numAttentionHeadsPerRank = args.n_heads() / param.worldSize;
-  param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
+  param.numAttentionHeadsPerRank = args->n_heads() / param.worldSize;
+  param.hiddenSizePerAttentionHead = args->hidden_size() / args->n_heads();
   param.enableIntraLayerAddNorm = false;
   param.enableInterLayerAddNorm = false;
-  // param.numKeyValueHeadsPerRank = args.n_kv_heads();
-  std::optional<long int> optionalValue = args.n_kv_heads();
+  // param.numKeyValueHeadsPerRank = args->n_kv_heads();
+  std::optional<long int> optionalValue = args->n_kv_heads();
   param.numKeyValueHeadsPerRank =
       static_cast<int>(optionalValue.value()) / param.worldSize;
   ;
-  // param.numKeyValueHeadsPerRank = static_cast<int>(args.n_kv_heads());
+  // param.numKeyValueHeadsPerRank = static_cast<int>(args->n_kv_heads());
 
   param.rank = parallel_args.rank();
   param.backend = "lccl";

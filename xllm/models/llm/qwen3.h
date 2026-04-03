@@ -40,12 +40,12 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
     if (!mrope_section_.empty()) {
       cos_sin_ = layer::rotary::get_concat_rotary_embedding(
           128,
-          model_args.max_position_embeddings(),
-          model_args.rope_theta(),
+          model_args->max_position_embeddings(),
+          model_args->rope_theta(),
           options);
     }
 
-    layers_.reserve(model_args.n_layers());
+    layers_.reserve(model_args->n_layers());
     norm_ = register_module("norm", layer::RMSNorm(context));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
@@ -54,7 +54,7 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
     attn_mask_ = layer::AttentionMask(
         options.device(), options.dtype().toScalarType(), mask_value);
 #endif
-    for (int32_t i = 0; i < model_args.n_layers(); i++) {
+    for (int32_t i = 0; i < model_args->n_layers(); i++) {
       auto layer = layer::Qwen3DecoderLayer(context);
       layers_.push_back(layer);
     }

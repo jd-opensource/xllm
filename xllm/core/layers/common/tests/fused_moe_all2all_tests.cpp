@@ -95,19 +95,20 @@ struct All2AllTestParams {
 
 // Helper to create model args
 ModelArgs create_model_args(const All2AllTestParams& params) {
-  ModelArgs args;
-  args.n_routed_experts() = static_cast<int32_t>(params.num_experts);
-  args.num_experts_per_tok() = static_cast<int32_t>(params.top_k);
-  args.n_group() = 1;
-  args.topk_group() = static_cast<int32_t>(params.top_k);
-  args.routed_scaling_factor() = 1.0f;
-  args.hidden_size() = params.hidden_size;
-  args.moe_intermediate_size() = static_cast<int32_t>(params.intermediate_size);
-  args.n_shared_experts() = 0;
-  args.norm_topk_prob() = true;
-  args.hidden_act() = "silu";
-  args.scoring_func() = "softmax";
-  args.topk_method() = "greedy";
+  std::shared_ptr<ModelArgs> args = nullptr;
+  args->n_routed_experts() = static_cast<int32_t>(params.num_experts);
+  args->num_experts_per_tok() = static_cast<int32_t>(params.top_k);
+  args->n_group() = 1;
+  args->topk_group() = static_cast<int32_t>(params.top_k);
+  args->routed_scaling_factor() = 1.0f;
+  args->hidden_size() = params.hidden_size;
+  args->moe_intermediate_size() =
+      static_cast<int32_t>(params.intermediate_size);
+  args->n_shared_experts() = 0;
+  args->norm_topk_prob() = true;
+  args->hidden_act() = "silu";
+  args->scoring_func() = "softmax";
+  args->topk_method() = "greedy";
   return args;
 }
 
@@ -115,11 +116,11 @@ ModelArgs create_model_args(const All2AllTestParams& params) {
 QuantArgs create_quant_args(const All2AllTestParams& params) {
   QuantArgs args;
   if (params.is_smoothquant) {
-    args.quant_method() = "smoothquant";
-    args.bits() = 8;
-    args.activation_dynamic() = true;
-    args.moe_weight_bits() = params.moe_weight_bits;
-    args.group_size() = params.group_size;
+    args->quant_method() = "smoothquant";
+    args->bits() = 8;
+    args->activation_dynamic() = true;
+    args->moe_weight_bits() = params.moe_weight_bits;
+    args->group_size() = params.group_size;
   }
   return args;
 }
@@ -283,7 +284,7 @@ int32_t run_all2all_basic_test_child(All2AllTestParams params) {
                        .requires_grad(false);
 
     // 6. Create model args and quant args
-    ModelArgs model_args = create_model_args(params);
+    std::shared_ptr<ModelArgs> model_args = create_model_args(params);
     QuantArgs quant_args = create_quant_args(params);
 
     // 7. Create FusedMoE
@@ -400,7 +401,7 @@ int32_t run_all2all_route_guard_test_child(All2AllTestParams params) {
                        .device(device)
                        .requires_grad(false);
 
-    ModelArgs model_args = create_model_args(params);
+    std::shared_ptr<ModelArgs> model_args = create_model_args(params);
     QuantArgs quant_args = create_quant_args(params);
     FusedMoE fused_moe(FusedMoEImpl(model_args,
                                     FusedMoEArgs{.is_gated = true},

@@ -48,7 +48,7 @@ StateDict find_lm_head_state_dict(const StateDict& state_dict) {
 }
 
 bool load_qwen3_5_mtp_model_args(const JsonReader& json,
-                                 ModelArgs* args,
+                                 std::shared_ptr<ModelArgs> args,
                                  const std::string& base_model_type,
                                  const std::string& mtp_model_type) {
   auto base_loader = ModelRegistry::get_model_args_loader(base_model_type);
@@ -77,19 +77,19 @@ class Qwen3_5MtpModelImpl : public Qwen3HybridModelImplBase {
     const auto& model_args = context.get_model_args();
     const auto& options = context.get_tensor_options();
     const int32_t n_layers =
-        std::max<int32_t>(static_cast<int32_t>(model_args.n_layers()), 1);
+        std::max<int32_t>(static_cast<int32_t>(model_args->n_layers()), 1);
 
     pre_fc_norm_embedding_ = register_module(
         "pre_fc_norm_embedding",
         layer::Qwen3NextRMSNorm(
-            model_args.hidden_size(), model_args.rms_norm_eps(), options));
+            model_args->hidden_size(), model_args->rms_norm_eps(), options));
     pre_fc_norm_hidden_ = register_module(
         "pre_fc_norm_hidden",
         layer::Qwen3NextRMSNorm(
-            model_args.hidden_size(), model_args.rms_norm_eps(), options));
+            model_args->hidden_size(), model_args->rms_norm_eps(), options));
     fc_ = register_module("fc",
-                          layer::ReplicatedLinear(model_args.hidden_size() * 2,
-                                                  model_args.hidden_size(),
+                          layer::ReplicatedLinear(model_args->hidden_size() * 2,
+                                                  model_args->hidden_size(),
                                                   /*bias=*/false,
                                                   QuantArgs(),
                                                   options));
@@ -259,13 +259,15 @@ REGISTER_CAUSAL_MODEL(qwen3_5_mtp, Qwen3_5MtpForCausalLM);
 REGISTER_CAUSAL_MODEL(qwen3_5_moe_mtp, Qwen3_5MtpForCausalLM);
 
 REGISTER_MODEL_ARGS_LOADER(qwen3_5_mtp,
-                           [](const JsonReader& json, ModelArgs* args) {
+                           [](const JsonReader& json,
+                              std::shared_ptr<ModelArgs> args) {
                              return load_qwen3_5_mtp_model_args(
                                  json, args, "qwen3_5", "qwen3_5_mtp");
                            });
 
 REGISTER_MODEL_ARGS_LOADER(qwen3_5_moe_mtp,
-                           [](const JsonReader& json, ModelArgs* args) {
+                           [](const JsonReader& json,
+                              std::shared_ptr<ModelArgs> args) {
                              return load_qwen3_5_mtp_model_args(
                                  json, args, "qwen3_5_moe", "qwen3_5_moe_mtp");
                            });

@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
+
 #include "common/global_flags.h"
 #include "kernels/ops_api.h"
 #include "layers/common/dp_utils.h"
@@ -26,25 +28,25 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
+FusedMoEImpl::FusedMoEImpl(const std::shared_ptr<ModelArgs>& model_args,
                            const FusedMoEArgs& moe_args,
                            const QuantArgs& quant_args,
                            const ParallelArgs& parallel_args,
                            const torch::TensorOptions& options)
-    : num_total_experts_(model_args.n_routed_experts()),
-      topk_(model_args.num_experts_per_tok()),
-      hidden_size_(model_args.hidden_size()),
-      n_shared_experts_(model_args.n_shared_experts()),
+    : num_total_experts_(model_args->n_routed_experts()),
+      topk_(model_args->num_experts_per_tok()),
+      hidden_size_(model_args->hidden_size()),
+      n_shared_experts_(model_args->n_shared_experts()),
       is_gated_(moe_args.is_gated),
       enable_result_reduction_(moe_args.enable_result_reduction),
-      hidden_act_(model_args.hidden_act()),
+      hidden_act_(model_args->hidden_act()),
       quant_args_(quant_args),
       parallel_args_(parallel_args),
       options_(options),
       device_(options.device()) {
   const int64_t num_experts = num_total_experts_;
   const int64_t intermediate_size =
-      static_cast<int64_t>(model_args.moe_intermediate_size());
+      static_cast<int64_t>(model_args->moe_intermediate_size());
   int64_t ep_size = parallel_args.ep_size();
   int64_t ep_rank = 0;
   tp_pg_ = parallel_args.tp_group_;

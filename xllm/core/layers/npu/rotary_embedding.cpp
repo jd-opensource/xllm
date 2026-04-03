@@ -83,44 +83,45 @@ std::tuple<torch::Tensor, torch::Tensor> apply_rotary_pos_emb(
 
 // create right instance based on params
 std::shared_ptr<NpuRotaryEmbedding> create_rotary_embedding(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     int64_t rotary_dim,
     bool interleaved,
     const torch::TensorOptions& options) {
   // rotary positional embedding
   auto inv_freq = layer::rotary::apply_deepseek_yarn_rope_scaling(
-      args.rope_scaling_factor(),
-      args.rope_extrapolation_factor(),
-      args.rope_scaling_beta_fast(),
-      args.rope_scaling_beta_slow(),
-      args.rotary_dim(),
-      args.rope_theta(),
-      args.rope_scaling_original_max_position_embeddings());
+      args->rope_scaling_factor(),
+      args->rope_extrapolation_factor(),
+      args->rope_scaling_beta_fast(),
+      args->rope_scaling_beta_slow(),
+      args->rotary_dim(),
+      args->rope_theta(),
+      args->rope_scaling_original_max_position_embeddings());
 
-  if (boost::iequals(args.rope_scaling_rope_type(), "deepseek_yarn")) {
-    const float attn_scale = args.attn_scalar().value_or(
-        static_cast<float>(args.qk_nope_head_dim() + args.qk_rope_head_dim()));
+  if (boost::iequals(args->rope_scaling_rope_type(), "deepseek_yarn")) {
+    const float attn_scale = args->attn_scalar().value_or(static_cast<float>(
+        args->qk_nope_head_dim() + args->qk_rope_head_dim()));
     return std::make_shared<RotaryEmbeddingDeepseekYarn>(
-        args.rope_scaling_factor(),
+        args->rope_scaling_factor(),
         rotary_dim,
-        args.max_position_embeddings(),
+        args->max_position_embeddings(),
         interleaved,
-        args.rope_scaling_attn_factor(),
-        args.rope_scaling_mscale(),
-        args.rope_scaling_mscale_all_dim(),
+        args->rope_scaling_attn_factor(),
+        args->rope_scaling_mscale(),
+        args->rope_scaling_mscale_all_dim(),
         inv_freq,
         options);
-  } else if (boost::iequals(args.rope_scaling_rope_type(), "mrope")) {
-    return std::make_shared<MRotaryEmbedding>(rotary_dim,
-                                              args.max_position_embeddings(),
-                                              inv_freq,
-                                              interleaved,
-                                              args.rope_scaling_mrope_section(),
-                                              options);
+  } else if (boost::iequals(args->rope_scaling_rope_type(), "mrope")) {
+    return std::make_shared<MRotaryEmbedding>(
+        rotary_dim,
+        args->max_position_embeddings(),
+        inv_freq,
+        interleaved,
+        args->rope_scaling_mrope_section(),
+        options);
   } else {
     return std::make_shared<RotaryEmbeddingGeneric>(
         rotary_dim,
-        args.max_position_embeddings(),
+        args->max_position_embeddings(),
         inv_freq,
         interleaved,
         options);

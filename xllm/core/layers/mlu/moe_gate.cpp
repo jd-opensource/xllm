@@ -15,33 +15,35 @@ limitations under the License.
 
 #include "moe_gate.h"
 
+#include <memory>
+
 #include "kernels/ops_api.h"
 
 namespace xllm {
 namespace layer {
 
-MoEGateImpl::MoEGateImpl(const ModelArgs& model_args,
+MoEGateImpl::MoEGateImpl(const std::shared_ptr<ModelArgs>& model_args,
                          const QuantArgs& quant_args,
                          const torch::TensorOptions& options)
-    : num_experts_(model_args.n_routed_experts()),
-      topk_(model_args.num_experts_per_tok()),
-      num_expert_group_(model_args.n_group()),
-      topk_group_(model_args.topk_group()),
-      route_scale_(static_cast<double>(model_args.routed_scaling_factor())),
-      hidden_size_(model_args.hidden_size()),
-      renormalize_(model_args.norm_topk_prob() ? 1 : 0),
-      scoring_func_(model_args.scoring_func()) {
-  const std::string& topk_method = model_args.topk_method();
+    : num_experts_(model_args->n_routed_experts()),
+      topk_(model_args->num_experts_per_tok()),
+      num_expert_group_(model_args->n_group()),
+      topk_group_(model_args->topk_group()),
+      route_scale_(static_cast<double>(model_args->routed_scaling_factor())),
+      hidden_size_(model_args->hidden_size()),
+      renormalize_(model_args->norm_topk_prob() ? 1 : 0),
+      scoring_func_(model_args->scoring_func()) {
+  const std::string& topk_method = model_args->topk_method();
   if (topk_method == "noaux_tc") {
     e_score_correction_bias_ = register_parameter(
         "e_score_correction_bias",
-        torch::empty({model_args.n_routed_experts()}, options),
+        torch::empty({model_args->n_routed_experts()}, options),
         false);
   }
 
   gate_ = register_module("gate_proj",
-                          ReplicatedLinear(model_args.hidden_size(),
-                                           model_args.n_routed_experts(),
+                          ReplicatedLinear(model_args->hidden_size(),
+                                           model_args->n_routed_experts(),
                                            false,
                                            quant_args,
                                            options));

@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -33,7 +34,7 @@ class Qwen2_5_VLInputProcessor : public InputProcessor {
   };
 
  public:
-  explicit Qwen2_5_VLInputProcessor(const ModelArgs& args);
+  explicit Qwen2_5_VLInputProcessor(const std::shared_ptr<ModelArgs>& args);
 
   void process(std::string& prompt, const MMData& mm_data) override;
   void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) override;

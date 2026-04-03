@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -28,7 +29,7 @@ namespace layer {
 class Qwen3_5GatedDeltaNetImpl : public Qwen3NextGatedDeltaNetImpl {
  public:
   Qwen3_5GatedDeltaNetImpl() = default;
-  Qwen3_5GatedDeltaNetImpl(const ModelArgs& args,
+  Qwen3_5GatedDeltaNetImpl(const std::shared_ptr<ModelArgs>& args,
                            const QuantArgs& quant_args,
                            const ParallelArgs& parallel_args,
                            const torch::TensorOptions& options);

@@ -215,8 +215,8 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
   explicit FluxSingleAttentionImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
-    heads_ = model_args.n_heads();
-    auto head_dim = model_args.head_dim();
+    heads_ = model_args->n_heads();
+    auto head_dim = model_args->head_dim();
     auto query_dim = heads_ * head_dim;
     auto out_dim = query_dim;
 
@@ -326,8 +326,8 @@ class FluxAttentionImpl : public torch::nn::Module {
   explicit FluxAttentionImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
-    heads_ = model_args.n_heads();
-    auto head_dim = model_args.head_dim();
+    heads_ = model_args->n_heads();
+    auto head_dim = model_args->head_dim();
     auto query_dim = heads_ * head_dim;
     auto out_dim = query_dim;
     auto added_kv_proj_dim = query_dim;
@@ -535,8 +535,8 @@ class PixArtAlphaTextProjectionImpl : public torch::nn::Module {
   explicit PixArtAlphaTextProjectionImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
-    int64_t hidden_size = model_args.head_dim() * model_args.n_heads();
-    int64_t in_features = model_args.pooled_projection_dim();
+    int64_t hidden_size = model_args->head_dim() * model_args->n_heads();
+    int64_t in_features = model_args->pooled_projection_dim();
     int64_t out_dim =
         hidden_size;  //(out_features == -1) ? hidden_size : out_features;
     linear_1_ = register_module(
@@ -643,7 +643,7 @@ class TimestepEmbeddingImpl : public torch::nn::Module {
   explicit TimestepEmbeddingImpl(ModelContext context)
       : options_(context.get_tensor_options()) {
     const auto& model_args = context.get_model_args();
-    int64_t time_embed_dim = model_args.head_dim() * model_args.n_heads();
+    int64_t time_embed_dim = model_args->head_dim() * model_args->n_heads();
     linear_1_ = register_module(
         "linear_1",
         layer::AddMatmul(256, time_embed_dim, /*with_bias=*/true, options_));
@@ -785,9 +785,9 @@ class AdaLayerNormZeroImpl : public torch::nn::Module {
  public:
   explicit AdaLayerNormZeroImpl(ModelContext context)
       : options_(context.get_tensor_options()) {
-    ModelArgs model_args = context.get_model_args();
-    auto num_attention_heads = model_args.n_heads();
-    auto attention_head_dim = model_args.head_dim();
+    std::shared_ptr<ModelArgs> model_args = context.get_model_args();
+    auto num_attention_heads = model_args->n_heads();
+    auto attention_head_dim = model_args->head_dim();
     int64_t embedding_dim =
         num_attention_heads * attention_head_dim;  // hidden size
     silu_ = register_module("silu", torch::nn::SiLU());
@@ -849,9 +849,9 @@ class AdaLayerNormZeroSingleImpl : public torch::nn::Module {
  public:
   explicit AdaLayerNormZeroSingleImpl(ModelContext context)
       : options_(context.get_tensor_options()) {
-    ModelArgs model_args = context.get_model_args();
-    auto num_attention_heads = model_args.n_heads();
-    auto attention_head_dim = model_args.head_dim();
+    std::shared_ptr<ModelArgs> model_args = context.get_model_args();
+    auto num_attention_heads = model_args->n_heads();
+    auto attention_head_dim = model_args->head_dim();
     int64_t embedding_dim =
         num_attention_heads * attention_head_dim;  // hidden size
     silu_ = register_module("silu", torch::nn::SiLU());
@@ -903,9 +903,9 @@ class AdaLayerNormContinuousImpl : public torch::nn::Module {
  public:
   explicit AdaLayerNormContinuousImpl(ModelContext context)
       : options_(context.get_tensor_options()) {
-    ModelArgs model_args = context.get_model_args();
-    auto num_attention_heads = model_args.n_heads();
-    auto attention_head_dim = model_args.head_dim();
+    std::shared_ptr<ModelArgs> model_args = context.get_model_args();
+    auto num_attention_heads = model_args->n_heads();
+    auto attention_head_dim = model_args->head_dim();
     auto embedding_dim = num_attention_heads * attention_head_dim;
     auto conditioning_embedding_dim = embedding_dim;
     silu_ = register_module("silu", torch::nn::SiLU());
@@ -962,8 +962,8 @@ class FeedForwardImpl : public torch::nn::Module {
   explicit FeedForwardImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
-    auto num_attention_heads = model_args.n_heads();
-    auto attention_head_dim = model_args.head_dim();
+    auto num_attention_heads = model_args->n_heads();
+    auto attention_head_dim = model_args->head_dim();
     auto dim = num_attention_heads * attention_head_dim;
     auto inner_dim = dim * 4;
     auto dim_out = dim;
@@ -1017,8 +1017,8 @@ class FluxSingleTransformerBlockImpl : public torch::nn::Module {
   explicit FluxSingleTransformerBlockImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
-    auto num_attention_heads = model_args.n_heads();
-    auto attention_head_dim = model_args.head_dim();
+    auto num_attention_heads = model_args->n_heads();
+    auto attention_head_dim = model_args->head_dim();
     auto dim = num_attention_heads * attention_head_dim;
     mlp_hidden_dim_ = dim * 4;
 
@@ -1095,8 +1095,8 @@ class FluxTransformerBlockImpl : public torch::nn::Module {
   explicit FluxTransformerBlockImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
-    auto num_attention_heads = model_args.n_heads();
-    auto attention_head_dim = model_args.head_dim();
+    auto num_attention_heads = model_args->n_heads();
+    auto attention_head_dim = model_args->head_dim();
 
     auto dim = num_attention_heads * attention_head_dim;
     double eps = 1e-6;
@@ -1203,18 +1203,18 @@ class FluxTransformer2DModelImpl : public torch::nn::Module {
   explicit FluxTransformer2DModelImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
-    auto num_attention_heads = model_args.n_heads();
-    auto attention_head_dim = model_args.head_dim();
+    auto num_attention_heads = model_args->n_heads();
+    auto attention_head_dim = model_args->head_dim();
     auto inner_dim = num_attention_heads * attention_head_dim;
-    auto pooled_projection_dim = model_args.pooled_projection_dim();
-    auto joint_attention_dim = model_args.joint_attention_dim();
-    auto axes_dims_rope = model_args.axes_dims_rope();
-    auto num_layers = model_args.num_layers();
-    auto num_single_layers = model_args.num_single_layers();
-    auto patch_size = model_args.mm_patch_size();
-    in_channels_ = model_args.in_channels();
-    out_channels_ = model_args.out_channels();
-    guidance_embeds_ = model_args.guidance_embeds();
+    auto pooled_projection_dim = model_args->pooled_projection_dim();
+    auto joint_attention_dim = model_args->joint_attention_dim();
+    auto axes_dims_rope = model_args->axes_dims_rope();
+    auto num_layers = model_args->num_layers();
+    auto num_single_layers = model_args->num_single_layers();
+    auto patch_size = model_args->mm_patch_size();
+    in_channels_ = model_args->in_channels();
+    out_channels_ = model_args->out_channels();
+    guidance_embeds_ = model_args->guidance_embeds();
 
     // Initialize the transformer model components here
     transformer_blocks_ =

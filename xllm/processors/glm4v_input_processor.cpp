@@ -21,16 +21,18 @@ limitations under the License.
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
+#include <memory>
 
 namespace xllm {
 
-GLM4VInputProcessor::GLM4VInputProcessor(const ModelArgs& args) {
-  merge_size_ = args.mm_image_merge_size();
-  image_start_token_id_ = args.image_start_token_id();
-  image_end_token_id_ = args.image_end_token_id();
-  video_start_token_id_ = args.video_start_token_id();
-  video_end_token_id_ = args.video_end_token_id();
-  image_token_id_ = args.image_token_id();
+GLM4VInputProcessor::GLM4VInputProcessor(
+    const std::shared_ptr<ModelArgs>& args) {
+  merge_size_ = args->mm_image_merge_size();
+  image_start_token_id_ = args->image_start_token_id();
+  image_end_token_id_ = args->image_end_token_id();
+  video_start_token_id_ = args->video_start_token_id();
+  video_end_token_id_ = args->video_end_token_id();
+  image_token_id_ = args->image_token_id();
 }
 
 void GLM4VInputProcessor::process(std::string& prompt, const MMData& mm_data) {

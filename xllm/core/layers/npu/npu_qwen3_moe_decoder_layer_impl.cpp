@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 
+#include <memory>
 #include <unordered_set>
 
 #include "common/global_flags.h"
@@ -33,17 +34,17 @@ NpuQwen3MoeDecoderLayerImpl::NpuQwen3MoeDecoderLayerImpl(
       device_id_(context.get_tensor_options().device().index()),
       layer_id_(layer_id),
       num_speculative_tokens_(
-          context.get_model_args().num_speculative_tokens()) {
+          context.get_model_args()->num_speculative_tokens()) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
 
-  num_experts_ = model_args.num_experts();
+  num_experts_ = model_args->num_experts();
   ep_size_ = parallel_args.ep_size();
   ep_local_tp_size_ = parallel_args.world_size() / ep_size_;
   CHECK_EQ(parallel_args.world_size(), ep_size_ * ep_local_tp_size_);
   ep_local_tp_rank_ = parallel_args.rank() % ep_local_tp_size_;
-  num_experts_per_partition_ = model_args.num_experts() / ep_size_;
+  num_experts_per_partition_ = model_args->num_experts() / ep_size_;
   ep_rank_ = parallel_args.rank() / ep_local_tp_size_;
   // int ep_rank = prefill_param_.rank /  ep_local_tp_size_;
   start_expert_id_ = ep_rank_ * num_experts_per_partition_;
@@ -83,7 +84,7 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_tensors(
 
 void NpuQwen3MoeDecoderLayerImpl::param_from_args(
     atb_speed::qwen::MoeDecoderLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args,
     bool is_prefill) {
   initialize_basic_parameters(param, args, parallel_args, is_prefill);
@@ -95,11 +96,11 @@ void NpuQwen3MoeDecoderLayerImpl::param_from_args(
 
 void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args,
     bool is_prefill) {
   param.isFA = false;
-  param.isBF16 = args.dtype() == "bfloat16";
+  param.isBF16 = args->dtype() == "bfloat16";
   param.enableSwiGLU = true;
   param.isPrefill = is_prefill;
 
@@ -135,7 +136,7 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
         static_cast<int>(TransposeType::INVALID),
         static_cast<int>(TransposeType::TRANSPOSE)};
   }
-  param.normEps = args.rms_norm_eps();
+  param.normEps = args->rms_norm_eps();
   param.rank = parallel_args.rank();
   param.backend = FLAGS_communication_backend;
   // param.rankTableFile = FLAGS_rank_tablefile;
@@ -156,11 +157,11 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
 
   param.useQKNorm = true;
   param.rmsnormQKNorm = true;
-  param.hiddenSizePerAttentionHead = args.head_dim();
-  std::optional<long int> optionalValue = args.n_kv_heads();
+  param.hiddenSizePerAttentionHead = args->head_dim();
+  std::optional<long int> optionalValue = args->n_kv_heads();
   param.numKeyValueHeadsPerRank = std::max(
       1, static_cast<int>(optionalValue.value()) / parallel_args.world_size());
-  param.numAttentionHeadsPerRank = args.n_heads() / dp_local_tp_size_;
+  param.numAttentionHeadsPerRank = args->n_heads() / dp_local_tp_size_;
 
   param.attnLinearTransposeType = {static_cast<int>(TransposeType::TRANSPOSE),
                                    static_cast<int>(TransposeType::INVALID),
@@ -177,7 +178,7 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
 
 void NpuQwen3MoeDecoderLayerImpl::initialize_attention_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args) {
   param.enableFA3 = false;           // TODO
   param.enableKvQuantLayer = false;  // TODO
@@ -185,16 +186,16 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_attention_parameters(
 
 void NpuQwen3MoeDecoderLayerImpl::initialize_mlp_parameters(
     atb_speed::qwen::MoeDecoderLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args) {
-  param.hasSharedExpert = (args.n_shared_experts() > 0);
+  param.hasSharedExpert = (args->n_shared_experts() > 0);
   param.hasSharedExpertGate = false;
   param.processLogits = "normalization";
-  param.numOfSelectedExperts = {args.num_experts_per_tok()};
+  param.numOfSelectedExperts = {args->num_experts_per_tok()};
 
   param.expertParallelDegree = 1;
   param.enableFusedRouting = 1;
-  param.numOfExperts = args.num_experts();
+  param.numOfExperts = args->num_experts();
   param.maskStartIdx = 0;
   param.routingMethod = "integratedSoftmaxTopK";
   param.quantGroupSize = 0;

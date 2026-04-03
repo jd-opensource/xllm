@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <vector>
 
 #include "core/util/tensor_helper.h"
@@ -26,7 +27,7 @@ namespace xllm {
 
 class MiniCPMVImageProcessor : public ImageProcessor {
  public:
-  MiniCPMVImageProcessor(const ModelArgs& args);
+  MiniCPMVImageProcessor(const std::shared_ptr<ModelArgs>& args);
   ~MiniCPMVImageProcessor() override = default;
 
   static std::pair<int, int> get_sliced_grid(

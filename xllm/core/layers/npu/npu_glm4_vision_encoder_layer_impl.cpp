@@ -18,6 +18,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
+
 #include "xllm_atb_layers/models/glm4v/glm4v_encoder.h"
 
 namespace xllm {
@@ -27,9 +29,9 @@ const uint64_t WEIGHT_COUNT_PER_LAYER = 8;
 
 void NpuGlm4VisionEncoderLayerImpl::param_from_args(
     atb_speed::glm::VisionEncoderLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args) {
-  param.isBF16 = args.dtype() == "bfloat16";
+  param.isBF16 = args->dtype() == "bfloat16";
   param.supportLcoc = false;
   param.supportLora = false;
   param.loraEnableGMM = false;
@@ -42,14 +44,14 @@ void NpuGlm4VisionEncoderLayerImpl::param_from_args(
   param.quantGroupSize = 64;
 
   param.numAttentionHeadsPerRank =
-      args.mm_num_attention_heads() / param.worldSize;
+      args->mm_num_attention_heads() / param.worldSize;
   param.hiddenSizePerAttentionHead =
-      args.mm_hidden_size() / args.mm_num_attention_heads();
-  std::optional<long int> optionalValue = args.mm_num_attention_heads();
+      args->mm_hidden_size() / args->mm_num_attention_heads();
+  std::optional<long int> optionalValue = args->mm_num_attention_heads();
   param.numKeyValueHeadsPerRank =
       static_cast<int>(optionalValue.value()) / param.worldSize;
 
-  param.rmsNormEps = args.rms_norm_eps();
+  param.rmsNormEps = args->rms_norm_eps();
 }
 
 NpuGlm4VisionEncoderLayerImpl::NpuGlm4VisionEncoderLayerImpl(

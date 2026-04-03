@@ -15,26 +15,28 @@ limitations under the License.
 
 #include "moe_fused_topk.h"
 
+#include <memory>
+
 #include "kernels/ops_api.h"
 
 namespace xllm {
 namespace layer {
 
-MoEFusedTopkImpl::MoEFusedTopkImpl(const ModelArgs& model_args,
+MoEFusedTopkImpl::MoEFusedTopkImpl(const std::shared_ptr<ModelArgs>& model_args,
                                    const QuantArgs& quant_args,
                                    const torch::TensorOptions& options)
-    : topk_(model_args.num_experts_per_tok()),
-      num_expert_group_(model_args.n_group()),
-      topk_group_(model_args.topk_group()),
-      route_scale_(model_args.routed_scaling_factor()),
-      hidden_size_(model_args.hidden_size()),
-      renormalize_(model_args.norm_topk_prob()),
-      scoring_func_(model_args.scoring_func()) {
-  const std::string& topk_method = model_args.topk_method();
+    : topk_(model_args->num_experts_per_tok()),
+      num_expert_group_(model_args->n_group()),
+      topk_group_(model_args->topk_group()),
+      route_scale_(model_args->routed_scaling_factor()),
+      hidden_size_(model_args->hidden_size()),
+      renormalize_(model_args->norm_topk_prob()),
+      scoring_func_(model_args->scoring_func()) {
+  const std::string& topk_method = model_args->topk_method();
   if (topk_method == "noaux_tc") {
     e_score_correction_bias_ = register_parameter(
         "e_score_correction_bias",
-        torch::empty({model_args.n_routed_experts()}, options),
+        torch::empty({model_args->n_routed_experts()}, options),
         false);
   }
 }

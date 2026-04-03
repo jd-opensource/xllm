@@ -30,12 +30,12 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
             context.get_model_args()) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
-    layers_.reserve(model_args.n_layers());
+    layers_.reserve(model_args->n_layers());
     if (!mrope_section_.empty()) {
       cos_sin_ = layer::rotary::get_concat_rotary_embedding(
           128,
-          model_args.max_position_embeddings(),
-          model_args.rope_theta(),
+          model_args->max_position_embeddings(),
+          model_args->rope_theta(),
           options);
     }
 
@@ -43,7 +43,7 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
     norm_ = register_module("norm", layer::RMSNorm(context));
-    for (int32_t i = 0; i < model_args.n_layers(); ++i) {
+    for (int32_t i = 0; i < model_args->n_layers(); ++i) {
       auto layer = layer::Qwen3MoeDecoderLayer(context, i);
       layers_.push_back(layer);
     }

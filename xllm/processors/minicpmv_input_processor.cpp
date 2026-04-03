@@ -19,18 +19,20 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <algorithm>
+#include <memory>
 #include <regex>
 
 #include "processors/minicpmv_image_processor.h"
 
 namespace xllm {
 
-MiniCPMInputProcessor::MiniCPMInputProcessor(const ModelArgs& args) {
-  image_feature_size_ = args.mm_image_feature_size();
-  max_slice_nums_ = args.vision_max_slice_nums();
-  slice_mode_ = args.mm_slice_mode();
-  use_image_id_ = args.mm_use_image_id();
-  scale_resolution_ = args.mm_scale_resolution();
+MiniCPMInputProcessor::MiniCPMInputProcessor(
+    const std::shared_ptr<ModelArgs>& args) {
+  image_feature_size_ = args->mm_image_feature_size();
+  max_slice_nums_ = args->vision_max_slice_nums();
+  slice_mode_ = args->mm_slice_mode();
+  use_image_id_ = args->mm_use_image_id();
+  scale_resolution_ = args->mm_scale_resolution();
 }
 
 void MiniCPMInputProcessor::process(std::string& prompt,

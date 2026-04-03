@@ -115,9 +115,9 @@ class QWen3Eagle3ModelImpl : public torch::nn::Module {
     // Position embedding
     atb_pos_emb_ = layer::NpuPosEmbedding(context);
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
-        model_args.head_dim(),
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
+        model_args->head_dim(),
+        model_args->max_position_embeddings(),
+        model_args->rope_theta(),
         options_);
 
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
@@ -294,7 +294,7 @@ class QWen3Eagle3ForCausalLMImpl : public torch::nn::Module {
  public:
   QWen3Eagle3ForCausalLMImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
-    tie_word_embeddings_ = model_args.tie_word_embeddings();
+    tie_word_embeddings_ = model_args->tie_word_embeddings();
 
     // register submodules
     model_ =
@@ -305,7 +305,7 @@ class QWen3Eagle3ForCausalLMImpl : public torch::nn::Module {
     // Check if we need to load lm_head from target model
     load_lm_head_from_target_ = false;
     if (!tie_word_embeddings_) {
-      int64_t vocab_size = model_args.vocab_size();
+      int64_t vocab_size = model_args->vocab_size();
       if (vocab_size == 0) {
         load_lm_head_from_target_ = true;
       }

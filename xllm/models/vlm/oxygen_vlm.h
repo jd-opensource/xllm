@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
+
 #include "core/framework/model/model_output.h"
 #include "core/layers/common/lm_head.h"
 #include "core/layers/oxygen_vision_layer.h"
@@ -40,11 +42,11 @@ class OxygenVisionPatchEmbedImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    auto in_features = model_args.mm_num_channels() *
-                       model_args.mm_temporal_patch_size() *
-                       model_args.mm_patch_size() * model_args.mm_patch_size();
+    auto in_features =
+        model_args->mm_num_channels() * model_args->mm_temporal_patch_size() *
+        model_args->mm_patch_size() * model_args->mm_patch_size();
 
-    auto out_features = model_args.mm_hidden_size();
+    auto out_features = model_args->mm_hidden_size();
 
     proj_ = register_module(
         "proj",
@@ -95,9 +97,9 @@ class OxygenVisionEmbeddingsImpl : public torch::nn::Module {
   OxygenVisionEmbeddingsImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
-    embed_dim_ = model_args.mm_hidden_size();
-    image_size_ = model_args.mm_image_size();
-    patch_size_ = model_args.mm_patch_size();
+    embed_dim_ = model_args->mm_hidden_size();
+    image_size_ = model_args->mm_image_size();
+    patch_size_ = model_args->mm_patch_size();
     num_positions_ = image_size_ / patch_size_;
     num_positions_ = num_positions_ * num_positions_;
     position_embedding_ = register_module(
@@ -200,8 +202,8 @@ class OxygenVisionPatchMergerImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     options_ = context.get_tensor_options();
     auto parallel_args = context.get_parallel_args();
-    int64_t dim = model_args.mm_projection_dim();
-    int64_t context_dim = model_args.mm_projector_hidden_size();
+    int64_t dim = model_args->mm_projection_dim();
+    int64_t context_dim = model_args->mm_projector_hidden_size();
     norm_ = register_module(
         "norm", torch::nn::LayerNorm(torch::nn::LayerNormOptions({dim})));
     norm_->weight.set_data(norm_->weight.to(options_));
@@ -324,33 +326,35 @@ class OxygenVisionTransformerImpl : public torch::nn::Module {
   OxygenVisionTransformerImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
-    spatial_merge_size_ = model_args.mm_spatial_merge_size();
-    hidden_size_ = model_args.mm_hidden_size();
-    out_hidden_size_ = model_args.mm_projection_dim();
+    spatial_merge_size_ = model_args->mm_spatial_merge_size();
+    hidden_size_ = model_args->mm_hidden_size();
+    out_hidden_size_ = model_args->mm_projection_dim();
 
     patch_embed_ =
         register_module("patch_embed", OxygenVisionPatchEmbed(context));
     rotary_pos_emb_ = register_module("rotary_pos_emb",
                                       Qwen2_5_VisionRotaryEmbedding(context));
-    post_conv_layernorm_ = register_module(
-        "post_conv_layernorm",
-        layer::RMSNorm(
-            model_args.mm_hidden_size(), model_args.rms_norm_eps(), options_));
+    post_conv_layernorm_ =
+        register_module("post_conv_layernorm",
+                        layer::RMSNorm(model_args->mm_hidden_size(),
+                                       model_args->rms_norm_eps(),
+                                       options_));
 
     embeddings_ =
         register_module("embeddings", OxygenVisionEmbeddings(context));
 
     blocks_ = register_module("blocks", torch::nn::ModuleList());
 
-    for (int32_t idx = 0; idx < model_args.mm_num_hidden_layers(); idx++) {
+    for (int32_t idx = 0; idx < model_args->mm_num_hidden_layers(); idx++) {
       auto block = layer::OxygenVisionLayer(context);
       blocks_->push_back(block);
       layers_.push_back(block);
     }
-    post_layernorm_ = register_module(
-        "post_layernorm",
-        layer::RMSNorm(
-            model_args.mm_hidden_size(), model_args.rms_norm_eps(), options_));
+    post_layernorm_ =
+        register_module("post_layernorm",
+                        layer::RMSNorm(model_args->mm_hidden_size(),
+                                       model_args->rms_norm_eps(),
+                                       options_));
 
     downsample_ = register_module(
         "downsample",
@@ -601,7 +605,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
     std::optional<OxygenVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
 
-    auto merge_size = model_args_.mm_image_merge_size();
+    auto merge_size = model_args_->mm_image_merge_size();
     MMDict multimodal_embeds;
     if (image_input) {
       // visual
@@ -654,7 +658,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
     auto special_token_ids = torch::tensor(
-        {model_args_.image_token_id(), model_args_.video_token_id()},
+        {model_args_->image_token_id(), model_args_->video_token_id()},
         input_ids.options().dtype(torch::kInt64));
     auto is_multimodal = torch::isin(input_ids, special_token_ids);
     return is_multimodal;
@@ -702,7 +706,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
       visual_->load_state_dict(
           state_dict->get_dict_with_prefix("model.visual."));
     }
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_->image_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
   }
@@ -719,7 +723,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
   }
 
  private:
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_ = nullptr;
   torch::TensorOptions options_;
   OxygenVisionTransformer visual_{nullptr};
   OxygenForCausalLM language_model_{nullptr};

@@ -17,6 +17,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -36,21 +37,21 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     auto parallel_args = context.get_parallel_args();
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args_.n_layers());
+    layers_.reserve(model_args_->n_layers());
 
     embed_tokens_ =
         register_module("embed_tokens",
-                        layer::WordEmbedding(model_args_.vocab_size(),
-                                             model_args_.hidden_size(),
+                        layer::WordEmbedding(model_args_->vocab_size(),
+                                             model_args_->hidden_size(),
                                              context.get_parallel_args(),
                                              options));
     norm_ = register_module(
         "norm",
         layer::RMSNorm(
-            model_args_.hidden_size(), model_args_.rms_norm_eps(), options));
+            model_args_->hidden_size(), model_args_->rms_norm_eps(), options));
 
     // create decoder layers
-    for (int32_t i = 0; i < model_args_.n_layers(); ++i) {
+    for (int32_t i = 0; i < model_args_->n_layers(); ++i) {
       auto block = layer::DeepseekV2DecoderLayer(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
@@ -152,7 +153,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
   layer::RMSNorm& norm_mod() { return norm_; }
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_ = nullptr;
 
  private:
   torch::nn::ModuleList blocks_{nullptr};

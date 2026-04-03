@@ -37,7 +37,7 @@ namespace xllm {
 class OneRecModelImpl : public torch::nn::Module {
  public:
   explicit OneRecModelImpl(const ModelContext& context) {
-    hidden_size_ = context.get_model_args().hidden_size();
+    hidden_size_ = context.get_model_args()->hidden_size();
     options_ = context.get_tensor_options();
     shared_ = register_module("shared", layer::WordEmbedding(context));
   }

@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <atb/atb_infer.h>
 
+#include <memory>
+
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -80,7 +82,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
     prepare_encoder_input(input_params, image_input, video_input);
 
     MMDict multimodal_embeds;
-    auto merge_size = model_args_.mm_image_merge_size();
+    auto merge_size = model_args_->mm_image_merge_size();
     if (image_input) {
       auto [image_embeds, deep_stacks] =
           visual_(image_input->pixel_values.to(options_),
@@ -110,7 +112,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
     auto special_token_ids = torch::tensor(
-        {model_args_.image_token_id(), model_args_.video_token_id()},
+        {model_args_->image_token_id(), model_args_->video_token_id()},
         input_ids.options().dtype(torch::kInt64));
     auto is_multimodal = torch::isin(input_ids, special_token_ids);
     return is_multimodal;
@@ -179,7 +181,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
     visual_->verify_loaded_weights("model.visual.");
     visual_->merge_loaded_weights();
 
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_->image_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
   }
@@ -200,7 +202,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
   }
 
  private:
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_ = nullptr;
   torch::TensorOptions options_;
   Qwen3_VisionTransformer visual_{nullptr};
   Qwen3MoeForCausalLM language_model_{nullptr};

@@ -23,18 +23,20 @@ OxygenVisionLayerImpl::OxygenVisionLayerImpl(const ModelContext& context) {
   const auto& quant_config = context.get_quant_args();
   const auto& parallel_args = context.get_parallel_args();
   const auto& options = context.get_tensor_options();
-  int64_t dim = args.mm_hidden_size();
-  int64_t mlp_intermediate_size = args.mm_intermediate_size();
+  int64_t dim = args->mm_hidden_size();
+  int64_t mlp_intermediate_size = args->mm_intermediate_size();
   attention_ = register_module("self_attn", OxygenVisionAttention(context));
-  norm1_ = register_module("norm1", RMSNorm(dim, args.rms_norm_eps(), options));
-  norm2_ = register_module("norm2", RMSNorm(dim, args.rms_norm_eps(), options));
+  norm1_ =
+      register_module("norm1", RMSNorm(dim, args->rms_norm_eps(), options));
+  norm2_ =
+      register_module("norm2", RMSNorm(dim, args->rms_norm_eps(), options));
 
   mlp_ = register_module("mlp",
                          DenseMLP(dim,
-                                  args.mm_intermediate_size(),
+                                  args->mm_intermediate_size(),
                                   /*is_gated=*/true,
                                   /*has_bias=*/false,
-                                  args.mm_hidden_act(),
+                                  args->mm_hidden_act(),
                                   /*enable_result_reduction=*/true,
                                   quant_config,
                                   parallel_args.tp_group_,

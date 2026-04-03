@@ -18,6 +18,7 @@ limitations under the License.
 #include <c10/core/DeviceType.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <thread>
 #include <vector>
 
@@ -54,7 +55,7 @@ BatchInputBuilder::BatchInputBuilder(
     const std::vector<MMData>& mm_data_vec,
     std::vector<BlockTransferInfo>* swap_block_transfer_infos,
     const uint64_t batch_id,
-    const ModelArgs* args,
+    const std::shared_ptr<ModelArgs> args,
     BatchForwardType batch_forward_type,
     int32_t cp_size,
     ThreadPool* thread_pool)
@@ -345,8 +346,7 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
 
   // Handle MRope positions
   if (use_mrope_) {
-    const auto& args = *args_;
-    MPositionHelper helper(*sequence, args);
+    MPositionHelper helper(*sequence, args_);
     state.mrope_positions_vec.emplace_back(helper.get_positions());
   }
 

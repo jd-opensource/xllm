@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <iostream>
 #include <map>
+#include <memory>
 
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
@@ -32,16 +33,16 @@ const uint64_t WEIGHT_COUNT_PER_LAYER = 18;
 
 void NpuQwen3VisionEncoderLayerImpl::param_from_args(
     atb_speed::qwen::VisionEncoderLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args) {
-  param.isBF16 = args.dtype() == "bfloat16";
-  param.rmsNormEps = args.rms_norm_eps();
+  param.isBF16 = args->dtype() == "bfloat16";
+  param.rmsNormEps = args->rms_norm_eps();
   param.worldSize = parallel_args.world_size();
   param.numAttentionHeadsPerRank =
-      args.mm_num_attention_heads() / param.worldSize;
+      args->mm_num_attention_heads() / param.worldSize;
   param.hiddenSizePerAttentionHead =
-      args.mm_hidden_size() / args.mm_num_attention_heads();
-  std::optional<long int> optionalValue = args.mm_num_attention_heads();
+      args->mm_hidden_size() / args->mm_num_attention_heads();
+  std::optional<long int> optionalValue = args->mm_num_attention_heads();
   param.numKeyValueHeadsPerRank =
       static_cast<int>(optionalValue.value()) / param.worldSize;
   param.rank = parallel_args.rank();

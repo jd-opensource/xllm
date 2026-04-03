@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <vector>
 
 #include "core/framework/model/model_args.h"
@@ -34,7 +35,7 @@ class ModelLoader {
 
   virtual ~ModelLoader() = default;
 
-  virtual const ModelArgs& model_args() const { return args_; }
+  virtual const std::shared_ptr<ModelArgs>& model_args() const { return args_; }
   virtual const QuantArgs& quant_args() const { return quant_args_; }
   virtual const TokenizerArgs& tokenizer_args() const {
     return tokenizer_args_;
@@ -55,7 +56,7 @@ class ModelLoader {
 
  protected:
   // model args
-  ModelArgs args_;
+  std::shared_ptr<ModelArgs> args_ = nullptr;
   // quantization args
   QuantArgs quant_args_;
   // tokenizer args

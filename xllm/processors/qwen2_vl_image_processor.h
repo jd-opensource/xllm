@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -25,7 +26,7 @@ namespace xllm {
 
 class Qwen2VLImageProcessor : public ImageProcessor {
  public:
-  Qwen2VLImageProcessor(const ModelArgs&);
+  Qwen2VLImageProcessor(const std::shared_ptr<ModelArgs>&);
   ~Qwen2VLImageProcessor() override = default;
 
   bool process(const MMInput& mm_inputs, MMData& mm_datas) override;

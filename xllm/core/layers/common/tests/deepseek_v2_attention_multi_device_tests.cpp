@@ -139,60 +139,60 @@ void check_attn_out_close(const torch::Tensor& sharded_output,
 
 ModelArgs create_attention_model_args(int64_t q_lora_rank = 0,
                                       bool enable_indexer = false) {
-  ModelArgs args;
-  args.model_type() = "deepseek_v32";
-  args.hidden_size() = 256;
-  args.n_heads() = 4;
-  args.max_position_embeddings() = 128;
-  args.rope_theta() = 10000.0f;
-  args.rms_norm_eps() = 1e-6f;
-  args.q_lora_rank() = q_lora_rank;
-  args.kv_lora_rank() = enable_indexer ? 256 : 128;
-  args.qk_nope_head_dim() = 128;
-  args.qk_rope_head_dim() = 64;
-  args.v_head_dim() = 128;
-  args.index_n_heads() = enable_indexer ? 64 : 0;
-  args.index_head_dim() = enable_indexer ? 128 : 0;
-  args.index_topk() = enable_indexer ? 8 : 0;
-  args.sliding_window() = 0;
-  args.enable_mla() = true;
-  args.rope_scaling_rope_type() = "";
-  args.rope_scaling_original_max_position_embeddings() = 128;
-  args.rope_scaling_factor() = 1.0f;
-  args.rope_extrapolation_factor() = 1.0f;
-  args.rope_scaling_attn_factor() = 1.0f;
-  args.rope_scaling_beta_fast() = 1;
-  args.rope_scaling_beta_slow() = 1;
-  args.rope_scaling_mscale() = 1.0f;
-  args.rope_scaling_mscale_all_dim() = 1.0f;
+  std::shared_ptr<ModelArgs> args = nullptr;
+  args->model_type() = "deepseek_v32";
+  args->hidden_size() = 256;
+  args->n_heads() = 4;
+  args->max_position_embeddings() = 128;
+  args->rope_theta() = 10000.0f;
+  args->rms_norm_eps() = 1e-6f;
+  args->q_lora_rank() = q_lora_rank;
+  args->kv_lora_rank() = enable_indexer ? 256 : 128;
+  args->qk_nope_head_dim() = 128;
+  args->qk_rope_head_dim() = 64;
+  args->v_head_dim() = 128;
+  args->index_n_heads() = enable_indexer ? 64 : 0;
+  args->index_head_dim() = enable_indexer ? 128 : 0;
+  args->index_topk() = enable_indexer ? 8 : 0;
+  args->sliding_window() = 0;
+  args->enable_mla() = true;
+  args->rope_scaling_rope_type() = "";
+  args->rope_scaling_original_max_position_embeddings() = 128;
+  args->rope_scaling_factor() = 1.0f;
+  args->rope_extrapolation_factor() = 1.0f;
+  args->rope_scaling_attn_factor() = 1.0f;
+  args->rope_scaling_beta_fast() = 1;
+  args->rope_scaling_beta_slow() = 1;
+  args->rope_scaling_mscale() = 1.0f;
+  args->rope_scaling_mscale_all_dim() = 1.0f;
   return args;
 }
 
 ModelArgs create_glm5_attention_model_args() {
-  ModelArgs args =
+  std::shared_ptr<ModelArgs> args =
       create_attention_model_args(/*q_lora_rank=*/64, /*enable_indexer=*/true);
-  args.model_type() = "glm_moe_dsa";
-  args.qk_nope_head_dim() = 192;
-  args.v_head_dim() = 256;
-  args.index_n_heads() = 32;
-  args.rope_theta() = 1000000.0f;
-  args.rope_scaling_rope_type() = "default";
-  args.indexer_rope_interleave() = true;
+  args->model_type() = "glm_moe_dsa";
+  args->qk_nope_head_dim() = 192;
+  args->v_head_dim() = 256;
+  args->index_n_heads() = 32;
+  args->rope_theta() = 1000000.0f;
+  args->rope_scaling_rope_type() = "default";
+  args->indexer_rope_interleave() = true;
   return args;
 }
 
-StateDict create_attention_state_dict(const ModelArgs& args,
+StateDict create_attention_state_dict(const std::shared_ptr<ModelArgs>& args,
                                       const torch::TensorOptions& options) {
-  const int64_t hidden_size = args.hidden_size();
-  const int64_t num_heads = args.n_heads();
-  const int64_t kv_lora_rank = args.kv_lora_rank();
-  const int64_t qk_nope_head_dim = args.qk_nope_head_dim();
-  const int64_t qk_rope_head_dim = args.qk_rope_head_dim();
-  const int64_t v_head_dim = args.v_head_dim();
+  const int64_t hidden_size = args->hidden_size();
+  const int64_t num_heads = args->n_heads();
+  const int64_t kv_lora_rank = args->kv_lora_rank();
+  const int64_t qk_nope_head_dim = args->qk_nope_head_dim();
+  const int64_t qk_rope_head_dim = args->qk_rope_head_dim();
+  const int64_t v_head_dim = args->v_head_dim();
   const int64_t qk_head_dim = qk_nope_head_dim + qk_rope_head_dim;
-  const int64_t q_lora_rank = args.q_lora_rank();
-  const int64_t index_n_heads = args.index_n_heads();
-  const int64_t index_head_dim = args.index_head_dim();
+  const int64_t q_lora_rank = args->q_lora_rank();
+  const int64_t index_n_heads = args->index_n_heads();
+  const int64_t index_head_dim = args->index_head_dim();
 
   std::unordered_map<std::string, torch::Tensor> weights;
   if (q_lora_rank > 0) {
@@ -383,19 +383,20 @@ AttentionMetadata create_chunked_metadata(const torch::TensorOptions& options,
   return metadata;
 }
 
-KVCache create_decode_kv_cache(const ModelArgs& args,
+KVCache create_decode_kv_cache(const std::shared_ptr<ModelArgs>& args,
                                const torch::TensorOptions& options) {
-  const int64_t cache_width = args.qk_rope_head_dim() + args.kv_lora_rank();
+  const int64_t cache_width = args->qk_rope_head_dim() + args->kv_lora_rank();
   torch::Tensor k_cache = seeded_tensor("attention_multi_device/k_cache",
                                         {8, 1, FLAGS_block_size, cache_width},
                                         torch::kBFloat16,
                                         options.device());
   torch::Tensor index_cache = torch::Tensor();
-  if (args.index_head_dim() > 0) {
-    index_cache = seeded_tensor("attention_multi_device/index_cache",
-                                {8, 1, FLAGS_block_size, args.index_head_dim()},
-                                torch::kBFloat16,
-                                options.device());
+  if (args->index_head_dim() > 0) {
+    index_cache =
+        seeded_tensor("attention_multi_device/index_cache",
+                      {8, 1, FLAGS_block_size, args->index_head_dim()},
+                      torch::kBFloat16,
+                      options.device());
   }
   return KVCache(k_cache, torch::Tensor(), index_cache);
 }
@@ -468,7 +469,7 @@ void check_tensor_same_across_ranks(const torch::Tensor& tensor,
   }
 }
 
-torch::Tensor run_attention_decode_once(const ModelArgs& args,
+torch::Tensor run_attention_decode_once(const std::shared_ptr<ModelArgs>& args,
                                         const QuantArgs& quant_args,
                                         const ParallelArgs& parallel_args,
                                         const torch::TensorOptions& options,
@@ -491,7 +492,7 @@ torch::Tensor run_attention_decode_once(const ModelArgs& args,
 }
 
 AttentionRunResult run_attention_prefill_once(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options,
@@ -521,7 +522,8 @@ AttentionRunResult run_attention_prefill_once(
   std::optional<layer::v32_sp::DeepseekV32SPContext> sp_ctx;
   torch::Tensor local_positions = positions;
   torch::Tensor local_hidden_states = hidden_states;
-  if (build_sp_context && enable_full_weight_path && args.index_n_heads() > 0) {
+  if (build_sp_context && enable_full_weight_path &&
+      args->index_n_heads() > 0) {
     ProcessGroup* sp_group = parallel_args.sp_group_ != nullptr
                                  ? parallel_args.sp_group_
                                  : parallel_args.process_group_;
@@ -598,13 +600,14 @@ int32_t run_attention_test_child(int32_t rank,
                        .dtype(torch::kBFloat16)
                        .device(device)
                        .requires_grad(false);
-    ModelArgs model_args = create_attention_model_args(q_lora_rank);
+    std::shared_ptr<ModelArgs> model_args =
+        create_attention_model_args(q_lora_rank);
     QuantArgs quant_args = create_default_quant_args();
     StateDict state_dict = create_attention_state_dict(model_args, options);
 
     torch::Tensor hidden_states =
         seeded_tensor("attention_multi_device/hidden_states",
-                      {1, model_args.hidden_size()},
+                      {1, model_args->hidden_size()},
                       torch::kBFloat16,
                       device);
     torch::Tensor positions =
@@ -627,7 +630,7 @@ int32_t run_attention_test_child(int32_t rank,
     xllm_device.synchronize_default_stream();
     CHECK_EQ(full_weight_output.size(0), 1)
         << "DeepseekV2Attention decode replicated token count mismatch";
-    CHECK_EQ(full_weight_output.size(1), model_args.hidden_size())
+    CHECK_EQ(full_weight_output.size(1), model_args->hidden_size())
         << "DeepseekV2Attention decode replicated hidden size mismatch";
     check_tensor_same_across_ranks(full_weight_output,
                                    parallel_args.tp_group_,
@@ -672,7 +675,7 @@ int32_t run_attention_prefill_repl_test_child(int32_t rank,
                        .dtype(torch::kBFloat16)
                        .device(device)
                        .requires_grad(false);
-    ModelArgs model_args = create_attention_model_args();
+    std::shared_ptr<ModelArgs> model_args = create_attention_model_args();
     QuantArgs quant_args = create_default_quant_args();
     StateDict state_dict = create_attention_state_dict(model_args, options);
 
@@ -681,7 +684,7 @@ int32_t run_attention_prefill_repl_test_child(int32_t rank,
         torch::arange(seq_len, options.dtype(torch::kInt32).device(device));
     torch::Tensor hidden_states =
         seeded_tensor("attention_multi_device/prefill_hidden_states",
-                      {seq_len, model_args.hidden_size()},
+                      {seq_len, model_args->hidden_size()},
                       torch::kBFloat16,
                       device);
     torch::Tensor positions =
@@ -706,7 +709,7 @@ int32_t run_attention_prefill_repl_test_child(int32_t rank,
     xllm_device.synchronize_default_stream();
     check_repl_output_contract(repl_result,
                                seq_len,
-                               model_args.hidden_size(),
+                               model_args->hidden_size(),
                                "DeepseekV2Attention prefill replicated");
     check_tensor_same_across_ranks(
         repl_result.global_output,
@@ -752,8 +755,9 @@ int32_t run_attention_prefill_fallback_test_child(int32_t rank,
                        .dtype(torch::kBFloat16)
                        .device(device)
                        .requires_grad(false);
-    ModelArgs model_args = create_attention_model_args(/*q_lora_rank=*/64,
-                                                       /*enable_indexer=*/true);
+    std::shared_ptr<ModelArgs> model_args =
+        create_attention_model_args(/*q_lora_rank=*/64,
+                                    /*enable_indexer=*/true);
     QuantArgs quant_args = create_default_quant_args();
     StateDict state_dict = create_attention_state_dict(model_args, options);
 
@@ -762,7 +766,7 @@ int32_t run_attention_prefill_fallback_test_child(int32_t rank,
         torch::arange(seq_len, options.dtype(torch::kInt32).device(device));
     torch::Tensor hidden_states =
         seeded_tensor("attention_multi_device/prefill_hidden_states_fallback",
-                      {seq_len, model_args.hidden_size()},
+                      {seq_len, model_args->hidden_size()},
                       torch::kBFloat16,
                       device);
     torch::Tensor positions =
@@ -787,7 +791,7 @@ int32_t run_attention_prefill_fallback_test_child(int32_t rank,
     xllm_device.synchronize_default_stream();
     check_repl_output_contract(repl_result,
                                seq_len,
-                               model_args.hidden_size(),
+                               model_args->hidden_size(),
                                "DeepseekV2Attention prefill fallback");
     check_tensor_same_across_ranks(
         repl_result.global_output,
@@ -834,11 +838,11 @@ int32_t run_attention_prefill_sp_test_child(int32_t rank,
                        .dtype(torch::kBFloat16)
                        .device(device)
                        .requires_grad(false);
-    ModelArgs model_args = use_glm5_args
-                               ? create_glm5_attention_model_args()
-                               : create_attention_model_args(/*q_lora_rank=*/64,
-                                                             /*enable_indexer=*/
-                                                             true);
+    std::shared_ptr<ModelArgs> model_args =
+        use_glm5_args ? create_glm5_attention_model_args()
+                      : create_attention_model_args(/*q_lora_rank=*/64,
+                                                    /*enable_indexer=*/
+                                                    true);
     QuantArgs quant_args = create_default_quant_args();
     StateDict state_dict = create_attention_state_dict(model_args, options);
 
@@ -848,7 +852,7 @@ int32_t run_attention_prefill_sp_test_child(int32_t rank,
     torch::Tensor hidden_states = seeded_tensor(
         use_glm5_args ? "attention_multi_device/glm5_prefill_hidden_states"
                       : "attention_multi_device/sp_prefill_hidden_states",
-        {seq_len, model_args.hidden_size()},
+        {seq_len, model_args->hidden_size()},
         torch::kBFloat16,
         device);
     torch::Tensor positions =
@@ -873,7 +877,7 @@ int32_t run_attention_prefill_sp_test_child(int32_t rank,
     xllm_device.synchronize_default_stream();
     check_sp_output_contract(sp_result,
                              seq_len,
-                             model_args.hidden_size(),
+                             model_args->hidden_size(),
                              /*local_token_num=*/seq_len / world_size,
                              use_glm5_args
                                  ? "DeepseekV2Attention glm5 prefill sp"
@@ -923,8 +927,9 @@ int32_t run_attention_prefill_sp_baseline_test_child(int32_t rank,
                        .dtype(torch::kBFloat16)
                        .device(device)
                        .requires_grad(false);
-    ModelArgs model_args = create_attention_model_args(/*q_lora_rank=*/64,
-                                                       /*enable_indexer=*/true);
+    std::shared_ptr<ModelArgs> model_args =
+        create_attention_model_args(/*q_lora_rank=*/64,
+                                    /*enable_indexer=*/true);
     QuantArgs quant_args = create_default_quant_args();
     StateDict state_dict = create_attention_state_dict(model_args, options);
 
@@ -933,7 +938,7 @@ int32_t run_attention_prefill_sp_baseline_test_child(int32_t rank,
         torch::arange(seq_len, options.dtype(torch::kInt32).device(device));
     torch::Tensor hidden_states = seeded_tensor(
         "attention_multi_device/sp_prefill_baseline_hidden_states",
-        {seq_len, model_args.hidden_size()},
+        {seq_len, model_args->hidden_size()},
         torch::kBFloat16,
         device);
     torch::Tensor positions =
@@ -976,11 +981,11 @@ int32_t run_attention_prefill_sp_baseline_test_child(int32_t rank,
     xllm_device.synchronize_default_stream();
     check_repl_output_contract(baseline_result,
                                seq_len,
-                               model_args.hidden_size(),
+                               model_args->hidden_size(),
                                "DeepseekV2Attention prefill baseline");
     check_sp_output_contract(sp_result,
                              seq_len,
-                             model_args.hidden_size(),
+                             model_args->hidden_size(),
                              /*local_token_num=*/seq_len / world_size,
                              "DeepseekV2Attention prefill sp baseline");
     check_tensors_close(sp_result.global_output,
@@ -1028,8 +1033,9 @@ int32_t run_attention_chunked_test_child(int32_t rank,
                        .dtype(torch::kBFloat16)
                        .device(device)
                        .requires_grad(false);
-    ModelArgs model_args = create_attention_model_args(/*q_lora_rank=*/64,
-                                                       /*enable_indexer=*/true);
+    std::shared_ptr<ModelArgs> model_args =
+        create_attention_model_args(/*q_lora_rank=*/64,
+                                    /*enable_indexer=*/true);
     QuantArgs quant_args = create_default_quant_args();
     StateDict state_dict = create_attention_state_dict(model_args, options);
 
@@ -1040,7 +1046,7 @@ int32_t run_attention_chunked_test_child(int32_t rank,
         torch::arange(prefix_len, options.dtype(torch::kInt32).device(device));
     torch::Tensor prefix_hidden_states =
         seeded_tensor("attention_multi_device/chunked_prefix_hidden_states",
-                      {prefix_len, model_args.hidden_size()},
+                      {prefix_len, model_args->hidden_size()},
                       torch::kBFloat16,
                       device);
     torch::Tensor prefix_positions =
@@ -1052,7 +1058,7 @@ int32_t run_attention_chunked_test_child(int32_t rank,
                       options.dtype(torch::kInt32).device(device));
     torch::Tensor chunk1_hidden_states =
         seeded_tensor("attention_multi_device/chunked_suffix1_hidden_states",
-                      {chunk1_len, model_args.hidden_size()},
+                      {chunk1_len, model_args->hidden_size()},
                       torch::kBFloat16,
                       device);
     torch::Tensor chunk1_positions =
@@ -1066,7 +1072,7 @@ int32_t run_attention_chunked_test_child(int32_t rank,
                       options.dtype(torch::kInt32).device(device));
     torch::Tensor chunk2_hidden_states =
         seeded_tensor("attention_multi_device/chunked_suffix2_hidden_states",
-                      {chunk2_len, model_args.hidden_size()},
+                      {chunk2_len, model_args->hidden_size()},
                       torch::kBFloat16,
                       device);
     torch::Tensor chunk2_positions =
@@ -1092,7 +1098,7 @@ int32_t run_attention_chunked_test_child(int32_t rank,
                                    false);
     check_sp_output_contract(sp_prefix_result,
                              prefix_len,
-                             model_args.hidden_size(),
+                             model_args->hidden_size(),
                              /*local_token_num=*/prefix_len / world_size,
                              "DeepseekV2Attention chunked prefix sp");
     check_tensor_same_across_ranks(sp_prefix_result.global_output,
@@ -1118,7 +1124,7 @@ int32_t run_attention_chunked_test_child(int32_t rank,
     xllm_device.synchronize_default_stream();
     check_sp_output_contract(sp_result,
                              chunk1_len,
-                             model_args.hidden_size(),
+                             model_args->hidden_size(),
                              /*local_token_num=*/chunk1_len / world_size,
                              "DeepseekV2Attention chunked prefill sp");
     check_tensor_same_across_ranks(
@@ -1144,7 +1150,7 @@ int32_t run_attention_chunked_test_child(int32_t rank,
     xllm_device.synchronize_default_stream();
     check_sp_output_contract(sp_second_result,
                              chunk2_len,
-                             model_args.hidden_size(),
+                             model_args->hidden_size(),
                              /*local_token_num=*/chunk2_len / world_size,
                              "DeepseekV2Attention second chunked prefill sp");
     check_tensor_same_across_ranks(

@@ -48,7 +48,7 @@ class Glm4ModelImpl
     dp_rank_ = parallel_args.rank() / dp_local_tp_size;
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args.n_layers());
+    layers_.reserve(model_args->n_layers());
     norm_ = register_module("norm", layer::NpuRMSNorm(context));
     npu_embed_tokens_ =
         register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
@@ -56,15 +56,15 @@ class Glm4ModelImpl
     atb_pos_emb_ = layer::NpuPosEmbedding(context);
     cos_sin_ = layer::rotary::get_chatglm_rotary_embedding(
         64,
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
+        model_args->max_position_embeddings(),
+        model_args->rope_theta(),
         options);
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
 
-    for (int32_t i = 0; i < model_args.n_layers(); i++) {
+    for (int32_t i = 0; i < model_args->n_layers(); i++) {
       auto block = Glm4DecoderLayer(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);

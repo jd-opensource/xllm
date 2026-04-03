@@ -53,14 +53,14 @@ using MMEmbeddingVLMFactory =
 using DiTModelFactory =
     std::function<std::unique_ptr<DiTModel>(const DiTModelContext& context)>;
 
-using InputProcessorFactory =
-    std::function<std::unique_ptr<InputProcessor>(const ModelArgs& args)>;
+using InputProcessorFactory = std::function<std::unique_ptr<InputProcessor>(
+    const std::shared_ptr<ModelArgs>& args)>;
 
-using ImageProcessorFactory =
-    std::function<std::unique_ptr<ImageProcessor>(const ModelArgs& args)>;
+using ImageProcessorFactory = std::function<std::unique_ptr<ImageProcessor>(
+    const std::shared_ptr<ModelArgs>& args)>;
 
-using ModelArgsLoader =
-    std::function<bool(const JsonReader& json, ModelArgs* args)>;
+using ModelArgsLoader = std::function<bool(const JsonReader& json,
+                                           std::shared_ptr<ModelArgs> args)>;
 
 using QuantArgsLoader =
     std::function<bool(const JsonReader& json, QuantArgs* args)>;
@@ -270,28 +270,28 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
 #define REGISTER_DIT_MODEL(ModelType, ModelClass) \
   REGISTER_DIT_MODEL_WITH_VARNAME(ModelType, ModelType, ModelClass)
 
-#define REGISTER_INPUT_PROCESSOR_WITH_VARNAME(                \
-    VarName, ModelType, InputProcessorClass)                  \
-  const bool VarName##_input_processor_registered = []() {    \
-    ModelRegistry::register_input_processor_factory(          \
-        #ModelType, [](const ModelArgs& args) {               \
-          return std::make_unique<InputProcessorClass>(args); \
-        });                                                   \
-    return true;                                              \
+#define REGISTER_INPUT_PROCESSOR_WITH_VARNAME(                   \
+    VarName, ModelType, InputProcessorClass)                     \
+  const bool VarName##_input_processor_registered = []() {       \
+    ModelRegistry::register_input_processor_factory(             \
+        #ModelType, [](const std::shared_ptr<ModelArgs>& args) { \
+          return std::make_unique<InputProcessorClass>(args);    \
+        });                                                      \
+    return true;                                                 \
   }()
 
 #define REGISTER_INPUT_PROCESSOR(ModelType, InputProcessorClass) \
   REGISTER_INPUT_PROCESSOR_WITH_VARNAME(                         \
       ModelType, ModelType, InputProcessorClass)
 
-#define REGISTER_IMAGE_PROCESSOR_WITH_VARNAME(                \
-    VarName, ModelType, ImageProcessorClass)                  \
-  const bool VarName##_image_processor_registered = []() {    \
-    ModelRegistry::register_image_processor_factory(          \
-        #ModelType, [](const ModelArgs& args) {               \
-          return std::make_unique<ImageProcessorClass>(args); \
-        });                                                   \
-    return true;                                              \
+#define REGISTER_IMAGE_PROCESSOR_WITH_VARNAME(                   \
+    VarName, ModelType, ImageProcessorClass)                     \
+  const bool VarName##_image_processor_registered = []() {       \
+    ModelRegistry::register_image_processor_factory(             \
+        #ModelType, [](const std::shared_ptr<ModelArgs>& args) { \
+          return std::make_unique<ImageProcessorClass>(args);    \
+        });                                                      \
+    return true;                                                 \
   }()
 
 #define REGISTER_IMAGE_PROCESSOR(ModelType, ImageProcessorClass) \
@@ -308,13 +308,15 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
 #define REGISTER_MODEL_ARGS_LOADER(ModelType, Loader) \
   REGISTER_MODEL_ARGS_LOADER_WITH_VARNAME(ModelType, ModelType, Loader)
 
-#define REGISTER_MODEL_ARGS_WITH_VARNAME(VarName, ModelType, ...)       \
-  REGISTER_MODEL_ARGS_LOADER_WITH_VARNAME(                              \
-      VarName, ModelType, [](const JsonReader& json, ModelArgs* args) { \
-        UNUSED_PARAMETER(json);                                         \
-        UNUSED_PARAMETER(args);                                         \
-        __VA_ARGS__();                                                  \
-        return true;                                                    \
+#define REGISTER_MODEL_ARGS_WITH_VARNAME(VarName, ModelType, ...)   \
+  REGISTER_MODEL_ARGS_LOADER_WITH_VARNAME(                          \
+      VarName,                                                      \
+      ModelType,                                                    \
+      [](const JsonReader& json, std::shared_ptr<ModelArgs> args) { \
+        UNUSED_PARAMETER(json);                                     \
+        UNUSED_PARAMETER(args);                                     \
+        __VA_ARGS__();                                              \
+        return true;                                                \
       })
 
 #define REGISTER_MODEL_ARGS(ModelType, ...) \

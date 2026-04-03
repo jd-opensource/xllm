@@ -30,14 +30,14 @@ AttentionImpl::AttentionImpl(ModelArgs const& args,
                              ParallelArgs const& parallel_args,
                              torch::TensorOptions const& options)
     : MUSALayerBaseImpl(options),
-      num_heads_(args.n_heads()),
-      num_kv_heads_(args.n_kv_heads().value_or(args.n_heads())),
-      head_dim_(args.head_dim()),
+      num_heads_(args->n_heads()),
+      num_kv_heads_(args->n_kv_heads().value_or(args->n_heads())),
+      head_dim_(args->head_dim()),
       q_size_(num_heads_ * head_dim_),
       kv_size_(num_kv_heads_ * head_dim_),
-      rms_eps(args.rms_norm_eps()),
+      rms_eps(args->rms_norm_eps()),
       scaling_(std::sqrt(1.0f / head_dim_)),
-      hidden_size_(args.hidden_size()) {
+      hidden_size_(args->hidden_size()) {
   weights_.resize(weight_num_);
 }
 

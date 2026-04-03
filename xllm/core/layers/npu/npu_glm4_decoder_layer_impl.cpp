@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
+
 #include "common/global_flags.h"
 
 namespace xllm {
@@ -26,7 +28,7 @@ const uint64_t WEIGHT_COUNT_PER_LAYER = 52;
 
 void NpuGlm4DecoderLayerImpl::param_from_args(
     atb_speed::chatglm::ChatglmLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args,
     bool isPrefill) {
   param.isFA = false;
@@ -35,16 +37,16 @@ void NpuGlm4DecoderLayerImpl::param_from_args(
   param.enableLcoc = false;
   param.rmsnormQKNorm = false;
   param.isPrefill = isPrefill;
-  param.isBF16 = args.dtype() == "bfloat16";
+  param.isBF16 = args->dtype() == "bfloat16";
   param.enableSplitFuse = FLAGS_enable_chunked_prefill && isPrefill;
   param.loraEnableGMM = false;
 
   param.linearTransposeType = {1, -1, -1, 1, 1, -1, 1};  // TODO
   param.quantGroupSize = 0;
-  param.normEps = args.rms_norm_eps();
-  param.numAttentionHeadsPerRank = args.n_heads() / parallel_args.world_size();
-  param.hiddenSizePerAttentionHead = args.head_dim();
-  std::optional<long int> optionalValue = args.n_kv_heads();
+  param.normEps = args->rms_norm_eps();
+  param.numAttentionHeadsPerRank = args->n_heads() / parallel_args.world_size();
+  param.hiddenSizePerAttentionHead = args->head_dim();
+  std::optional<long int> optionalValue = args->n_kv_heads();
   param.numKeyValueHeadsPerRank =
       static_cast<int>(optionalValue.value()) / parallel_args.world_size();
   param.backend = FLAGS_communication_backend;
@@ -54,7 +56,7 @@ void NpuGlm4DecoderLayerImpl::param_from_args(
   param.linearHasBias = {true, false, false, false};
   param.useQKNorm = false;
   param.enableAclGraphPagedAttention = FLAGS_enable_graph && !isPrefill;
-  param.numHiddenLayers = args.n_layers();
+  param.numHiddenLayers = args->n_layers();
   param.usePostSelfAttnLayerNorm = true;
   param.usePostMlpLayerNorm = true;
   initialize_quantization_parameters(param);

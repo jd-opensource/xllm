@@ -30,13 +30,13 @@ Qwen2VisionAttentionImpl::Qwen2VisionAttentionImpl(const ModelContext& context,
   const auto& quant_args = context.get_quant_args();
   const auto& parallel_args = context.get_parallel_args();
   const auto& options = context.get_tensor_options();
-  const int64_t hidden_size = args.mm_hidden_size();
-  const int64_t num_heads = args.mm_num_attention_heads();
+  const int64_t hidden_size = args->mm_hidden_size();
+  const int64_t num_heads = args->mm_num_attention_heads();
   const int64_t tp_size = parallel_args.tp_group_->world_size();
   CHECK(num_heads % tp_size == 0);
 
   tp_group_ = parallel_args.tp_group_;
-  hidden_size_per_attention_head_ = args.mm_head_dim();
+  hidden_size_per_attention_head_ = args->mm_head_dim();
   num_attention_heads_per_partition_ = num_heads / tp_size;
   scale_ = 1.0 / std::sqrt(static_cast<float>(hidden_size_per_attention_head_));
 

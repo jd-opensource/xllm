@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -28,7 +29,7 @@ namespace xllm {
 
 class MiniCPMInputProcessor : public InputProcessor {
  public:
-  explicit MiniCPMInputProcessor(const ModelArgs& args);
+  explicit MiniCPMInputProcessor(const std::shared_ptr<ModelArgs>& args);
 
   void process(std::string& prompt, const MMData& mm_data) override;
   void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) override;

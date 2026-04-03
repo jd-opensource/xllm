@@ -24,6 +24,8 @@ limitations under the License.
 #include "common/rec_model_utils.h"
 
 // #include "attn_mask.h"
+#include <memory>
+
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
 
@@ -34,7 +36,7 @@ const uint64_t WEIGHT_COUNT_PER_LAYER = 56;
 
 void NpuQwen3DecoderLayerImpl::param_from_args(
     atb_speed::qwen::QwenLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args,
     bool isPrefill) {
   param.isFA = false;
@@ -47,7 +49,7 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
   param.enableLcoc = false;
   param.rmsnormQKNorm = true;
   param.isPrefill = isPrefill;
-  param.isBF16 = args.dtype() == "bfloat16";
+  param.isBF16 = args->dtype() == "bfloat16";
   param.enableSplitFuse = FLAGS_enable_chunked_prefill && isPrefill;
   param.loraEnableGMM = false;
   param.enableXattention = is_rec_multi_round_mode();
@@ -60,10 +62,10 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
                                static_cast<int>(TransposeType::INVALID),
                                static_cast<int>(TransposeType::NOT_TRANSPOSE)};
   param.quantGroupSize = 0;
-  param.normEps = args.rms_norm_eps();
-  param.numAttentionHeadsPerRank = args.n_heads() / parallel_args.world_size();
-  param.hiddenSizePerAttentionHead = args.head_dim();
-  std::optional<long int> optionalValue = args.n_kv_heads();
+  param.normEps = args->rms_norm_eps();
+  param.numAttentionHeadsPerRank = args->n_heads() / parallel_args.world_size();
+  param.hiddenSizePerAttentionHead = args->head_dim();
+  std::optional<long int> optionalValue = args->n_kv_heads();
   param.numKeyValueHeadsPerRank =
       static_cast<int>(optionalValue.value()) / parallel_args.world_size();
   param.backend = FLAGS_communication_backend;
@@ -74,7 +76,7 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
   param.linearHasBias = {0, 0, 0, 0};
   param.useQKNorm = true;
 
-  param.numHiddenLayers = args.n_layers();
+  param.numHiddenLayers = args->n_layers();
   param.enableIntraLayerAddNorm = true;
   param.enableInterLayerAddNorm = false;
   param.enablePreFetchWeight = FLAGS_enable_prefetch_weight;

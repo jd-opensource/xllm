@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 #include <torch_npu/torch_npu.h>
 
+#include <memory>
 #include <nlohmann/json.hpp>
 
 #include "framework/model/model_args.h"
@@ -69,22 +70,22 @@ class NpuQwen3MoeDecoderLayerImpl : public BaseLayer {
   void initialize_tensors(const torch::TensorOptions& options);
 
   void param_from_args(atb_speed::qwen::MoeDecoderLayerParam& param,
-                       const ModelArgs& args,
+                       const std::shared_ptr<ModelArgs>& args,
                        const ParallelArgs& parallel_args,
                        bool is_prefill);
 
   void initialize_basic_parameters(atb_speed::qwen::MoeDecoderLayerParam& param,
-                                   const ModelArgs& args,
+                                   const std::shared_ptr<ModelArgs>& args,
                                    const ParallelArgs& parallel_args,
                                    bool is_prefill);
 
   void initialize_attention_parameters(
       atb_speed::qwen::MoeDecoderLayerParam& param,
-      const ModelArgs& args,
+      const std::shared_ptr<ModelArgs>& args,
       const ParallelArgs& parallel_args);
 
   void initialize_mlp_parameters(atb_speed::qwen::MoeDecoderLayerParam& param,
-                                 const ModelArgs& args,
+                                 const std::shared_ptr<ModelArgs>& args,
                                  const ParallelArgs& parallel_args);
 
   void initialize_parallel_parameters(

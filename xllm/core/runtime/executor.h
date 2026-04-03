@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "framework/batch/batch.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"
@@ -30,7 +32,7 @@ namespace xllm {
 class Executor final {
  public:
   Executor(CausalLM* model,
-           const ModelArgs& args,
+           const std::shared_ptr<ModelArgs>& args,
            const torch::Device& device,
            const runtime::Options& options);
 

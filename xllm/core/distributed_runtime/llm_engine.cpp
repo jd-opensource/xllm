@@ -143,8 +143,8 @@ bool LLMEngine::init(MasterStatus master_status) {
   }
 
   if (FLAGS_enable_eplb) {
-    int32_t num_layers = args_.n_layers() - args_.first_k_dense_replace();
-    int32_t num_experts = args_.n_routed_experts();
+    int32_t num_layers = args_->n_layers() - args_->first_k_dense_replace();
+    int32_t num_experts = args_->n_routed_experts();
     eplb_manager_ = std::make_unique<EplbManager>(
         num_layers, worker_clients_num_, num_experts);
   }
@@ -190,16 +190,16 @@ bool LLMEngine::init_model(MasterStatus master_status) {
 
   // compute the number of local kv heads and head dim
   const uint32_t world_size = dp_local_tp_size_;
-  const int64_t n_heads = args_.n_heads();
-  const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
+  const int64_t n_heads = args_->n_heads();
+  const int64_t n_kv_heads = args_->n_kv_heads().value_or(n_heads);
   n_local_kv_heads_ = std::max<int64_t>(1, n_kv_heads / world_size);
   n_local_q_heads_ = std::max<int64_t>(1, n_heads / world_size);
-  head_dim_ = args_.head_dim();
-  dtype_ = util::parse_dtype(args_.dtype(), options_.devices()[0]);
+  head_dim_ = args_->head_dim();
+  dtype_ = util::parse_dtype(args_->dtype(), options_.devices()[0]);
   // For qwen3_next hybrid attention.
   if (has_linear_attention_layers(args_)) {
-    const int64_t linear_n_k_heads = args_.linear_num_key_heads();
-    const int64_t linear_n_v_heads = args_.linear_num_value_heads();
+    const int64_t linear_n_k_heads = args_->linear_num_key_heads();
+    const int64_t linear_n_v_heads = args_->linear_num_value_heads();
     n_local_linear_k_heads_ =
         std::max<int64_t>(1, linear_n_k_heads / world_size);
     n_local_linear_v_heads_ =
@@ -208,19 +208,19 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   // key + value for all layers
   LOG(INFO) << "Block info, block_size: " << options_.block_size()
             << ", n_local_kv_heads: " << n_local_kv_heads_
-            << ", head_dim: " << head_dim_ << ", n_layers: " << args_.n_layers()
-            << ", dtype: " << dtype_
+            << ", head_dim: " << head_dim_
+            << ", n_layers: " << args_->n_layers() << ", dtype: " << dtype_
             << ", kv_cache_dtype: " << options_.kv_cache_dtype();
 
   const int64_t tokenizer_vocab_size = tokenizer_->vocab_size();
-  int64_t model_vocab_size = args_.vocab_size();
+  int64_t model_vocab_size = args_->vocab_size();
   if (tokenizer_vocab_size != model_vocab_size) {
     // use tokenizer vocab size if model vocab size is not set
     if (model_vocab_size <= 0) {
       LOG(WARNING) << "Model vocab size is not set, using tokenizer vocab "
                       "size: "
                    << tokenizer_vocab_size;
-      args_.vocab_size(tokenizer_vocab_size);
+      args_->vocab_size(tokenizer_vocab_size);
     } else if (tokenizer_vocab_size > model_vocab_size) {
       LOG(WARNING) << "Unsafe vocab mismatch: tokenizer: "
                    << tokenizer_vocab_size << ", model: " << model_vocab_size;
@@ -254,7 +254,7 @@ bool LLMEngine::init_model(MasterStatus master_status) {
     // Register model with model_id from options
     // Each model has its own logical page_list but shares physical pages
     const std::string& model_id = options_.model_id();
-    page_allocator.register_model(model_id, args_.n_layers(), master_status);
+    page_allocator.register_model(model_id, args_->n_layers(), master_status);
 
     // Set model-specific parallel strategy for broadcast operations
     // This is important for fork master with different dp/tp than original
@@ -346,8 +346,8 @@ int64_t LLMEngine::get_effective_xtensor_weight_size(
                << ") exceeds total_weight_size (" << all_size << ")";
     return kInvalidWeightSize;
   }
-  if (args_.n_layers() <= 0) {
-    LOG(ERROR) << "Invalid layer count: " << args_.n_layers();
+  if (args_->n_layers() <= 0) {
+    LOG(ERROR) << "Invalid layer count: " << args_->n_layers();
     return kInvalidWeightSize;
   }
 
@@ -453,28 +453,28 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
 
   if (options_.enable_mla()) {
 #if defined(USE_NPU)
-    if (args_.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
+    if (args_->model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
       slot_size =
           cache_dtype_size *
-          ((args_.kv_lora_rank() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT +
-           (args_.qk_rope_head_dim() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT) *
+          ((args_->kv_lora_rank() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT +
+           (args_->qk_rope_head_dim() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT) *
           NZ_ALIGNMENT;
     } else {
-      slot_size =
-          cache_dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
+      slot_size = cache_dtype_size *
+                  (args_->kv_lora_rank() + args_->qk_rope_head_dim());
     }
 #else
     slot_size =
-        cache_dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
+        cache_dtype_size * (args_->kv_lora_rank() + args_->qk_rope_head_dim());
 #endif
   } else {
     slot_size = 2 * cache_dtype_size * head_dim_ * n_local_kv_heads_;
   }
 
   // Indexer Cache always uses original precision (not quantized)
-  if (args_.index_n_heads() > 0) {
+  if (args_->index_n_heads() > 0) {
     int index_n_head = 1;
-    index_slot_size = dtype_size * index_n_head * args_.index_head_dim();
+    index_slot_size = dtype_size * index_n_head * args_->index_head_dim();
   }
 
   // Calculate scale tensor overhead for quantized KV cache (per-token bytes).
@@ -494,28 +494,28 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
   // For qwen3_next linear-attention layers.
   int64_t linear_slot_size = 0;
-  if (args_.linear_num_value_heads() > 0) {
-    int64_t head_k_dim = args_.linear_key_head_dim();
-    int64_t head_v_dim = args_.linear_value_head_dim();
+  if (args_->linear_num_value_heads() > 0) {
+    int64_t head_k_dim = args_->linear_key_head_dim();
+    int64_t head_v_dim = args_->linear_value_head_dim();
     int64_t linear_ssm_slot_size =
         dtype_size * n_local_linear_v_heads_ * head_k_dim * head_v_dim;
     int64_t linear_conv_slot_size = dtype_size *
                                     (head_k_dim * n_local_linear_k_heads_ * 2 +
                                      head_v_dim * n_local_linear_v_heads_) *
-                                    (args_.linear_conv_kernel_dim() - 1);
+                                    (args_->linear_conv_kernel_dim() - 1);
     linear_slot_size = linear_ssm_slot_size + linear_conv_slot_size;
   }
   kv_cache_cap.slot_size = slot_size;
   kv_cache_cap.index_slot_size = index_slot_size;
   kv_cache_cap.linear_slot_size = linear_slot_size;
-  kv_cache_cap.n_layers = args_.n_layers();
+  kv_cache_cap.n_layers = args_->n_layers();
 #if !defined(USE_NPU)
   // this adoption is because the allocation of kv cache is based on
   //  the number of layers, and the draft engine is using the same model as the
   //  target engine.
   // so we need to override the number of layers for the draft engine.
   if (options_.is_draft_engine()) {
-    kv_cache_cap.n_layers = args_.num_nextn_predict_layers();
+    kv_cache_cap.n_layers = args_->num_nextn_predict_layers();
   }
 #endif
 
@@ -539,7 +539,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
 
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no memory for kv cache";
   const int32_t block_size = options_.block_size();
-  bool enable_lighting_indexer = args_.index_n_heads() > 1;
+  bool enable_lighting_indexer = args_->index_n_heads() > 1;
   bool enable_gdn_attention = has_linear_attention_layers(args_);
 
   // init kv cache for each worker
@@ -547,28 +547,28 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   kv_cache_shape.reserve(2);
   if (options_.enable_mla()) {
 #if defined(USE_NPU)
-    if (args_.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
+    if (args_->model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
       kv_cache_shape.emplace_back(
           std::vector<int64_t>{kv_cache_cap.n_blocks,
-                               (args_.kv_lora_rank() + 15) / 16,
+                               (args_->kv_lora_rank() + 15) / 16,
                                block_size,
                                16});
       kv_cache_shape.emplace_back(
           std::vector<int64_t>{kv_cache_cap.n_blocks,
-                               (args_.qk_rope_head_dim() + 15) / 16,
+                               (args_->qk_rope_head_dim() + 15) / 16,
                                block_size,
                                16});
     } else {
       kv_cache_shape.emplace_back(std::vector<int64_t>{
-          kv_cache_cap.n_blocks, block_size, 1, args_.kv_lora_rank()});
+          kv_cache_cap.n_blocks, block_size, 1, args_->kv_lora_rank()});
       kv_cache_shape.emplace_back(std::vector<int64_t>{
-          kv_cache_cap.n_blocks, block_size, 1, args_.qk_rope_head_dim()});
+          kv_cache_cap.n_blocks, block_size, 1, args_->qk_rope_head_dim()});
     }
 #else
     kv_cache_shape.emplace_back(std::vector<int64_t>{
-        kv_cache_cap.n_blocks, block_size, 1, args_.kv_lora_rank()});
+        kv_cache_cap.n_blocks, block_size, 1, args_->kv_lora_rank()});
     kv_cache_shape.emplace_back(std::vector<int64_t>{
-        kv_cache_cap.n_blocks, block_size, 1, args_.qk_rope_head_dim()});
+        kv_cache_cap.n_blocks, block_size, 1, args_->qk_rope_head_dim()});
 #endif
   } else {
     kv_cache_shape.emplace_back(std::vector<int64_t>{
@@ -578,19 +578,19 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   }
   if (enable_lighting_indexer) {
     kv_cache_shape.emplace_back(std::vector<int64_t>{
-        kv_cache_cap.n_blocks, block_size, 1, args_.index_head_dim()});
+        kv_cache_cap.n_blocks, block_size, 1, args_->index_head_dim()});
   }
   if (enable_gdn_attention) {
     kv_cache_shape.emplace_back(std::vector<int64_t>{
         kv_cache_cap.n_blocks,
-        args_.linear_key_head_dim() * n_local_linear_k_heads_ * 2 +
-            args_.linear_key_head_dim() * n_local_linear_v_heads_,
-        args_.linear_conv_kernel_dim() - 1});
+        args_->linear_key_head_dim() * n_local_linear_k_heads_ * 2 +
+            args_->linear_key_head_dim() * n_local_linear_v_heads_,
+        args_->linear_conv_kernel_dim() - 1});
     kv_cache_shape.emplace_back(
         std::vector<int64_t>{kv_cache_cap.n_blocks,
                              n_local_linear_v_heads_,
-                             args_.linear_key_head_dim(),
-                             args_.linear_value_head_dim()});
+                             args_->linear_key_head_dim(),
+                             args_->linear_value_head_dim()});
   }
 #if defined(USE_MLU)
   // transpose kv_cache layout for mlu
@@ -600,7 +600,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
     std::swap(shape[1], shape[2]);
   }
   if (options_.enable_mla()) {
-    kv_cache_shape[0][3] = args_.kv_lora_rank() + args_.qk_rope_head_dim();
+    kv_cache_shape[0][3] = args_->kv_lora_rank() + args_->qk_rope_head_dim();
     kv_cache_shape[1] = std::vector<int64_t>{};
   }
 #endif
@@ -635,7 +635,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       .enable_cache_upload(options_.enable_cache_upload())
       .enable_kvcache_store(options_.enable_kvcache_store())
       .enable_xtensor(FLAGS_enable_xtensor)
-      .num_layers(args_.n_layers())
+      .num_layers(args_->n_layers())
       .slot_size(kv_cache_cap.slot_size)
       .model_id(options_.model_id());
 
@@ -1176,8 +1176,8 @@ void LLMEngine::setup_workers(const runtime::Options& options) {
 
 void LLMEngine::process_eplb_data(
     const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results) {
-  int32_t num_layers = args_.n_layers() - args_.first_k_dense_replace();
-  int32_t num_device_experts = args_.n_routed_experts() / worker_clients_num_ +
+  int32_t num_layers = args_->n_layers() - args_->first_k_dense_replace();
+  int32_t num_device_experts = args_->n_routed_experts() / worker_clients_num_ +
                                FLAGS_redundant_experts_num;
   std::vector<torch::Tensor> tensors;
   std::vector<int32_t> layer_ids(results.size(), -1);

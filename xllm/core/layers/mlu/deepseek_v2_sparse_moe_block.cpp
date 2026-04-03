@@ -16,6 +16,7 @@ limitations under the License.
 #include "deepseek_v2_sparse_moe_block.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "common/global_flags.h"
@@ -34,7 +35,7 @@ bool need_chunk(const torch::Tensor& x, int64_t chunk_size) {
 }  // namespace
 
 DeepseekV2SparseMoEBlockImpl::DeepseekV2SparseMoEBlockImpl(
-    const ModelArgs& model_args,
+    const std::shared_ptr<ModelArgs>& model_args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options)

@@ -75,19 +75,20 @@ torch::Device InitXllmCudaDeviceForTest(int32_t device_index = 0) {
 // same inputs.
 class FakeAttnCausalLM final : public CausalLM {
  public:
-  FakeAttnCausalLM(const ModelArgs& args, const torch::Device& device)
+  FakeAttnCausalLM(const std::shared_ptr<ModelArgs>& args,
+                   const torch::Device& device)
       : args_(args),
         device_(device),
         options_(
             torch::TensorOptions().dtype(torch::kBFloat16).device(device)) {
-    const int64_t vocab_size = std::max<int64_t>(args_.vocab_size(), 1024);
+    const int64_t vocab_size = std::max<int64_t>(args_->vocab_size(), 1024);
     embedding_ =
         register_module("embedding",
                         torch::nn::Embedding(torch::nn::EmbeddingOptions(
-                            vocab_size, args_.hidden_size())));
-    const int64_t q_hidden_size = args_.hidden_size();
-    const int64_t n_kv_heads = args_.n_kv_heads().value_or(args_.n_heads());
-    const int64_t kv_hidden_size = n_kv_heads * args_.head_dim();
+                            vocab_size, args_->hidden_size())));
+    const int64_t q_hidden_size = args_->hidden_size();
+    const int64_t n_kv_heads = args_->n_kv_heads().value_or(args_->n_heads());
+    const int64_t kv_hidden_size = n_kv_heads * args_->head_dim();
 
     q_proj_ = register_module("q_proj",
                               torch::nn::Linear(torch::nn::LinearOptions(
@@ -119,14 +120,14 @@ class FakeAttnCausalLM final : public CausalLM {
       v_proj_->bias.data().normal_();
     }
 
-    const int n_heads = args_.n_heads();
-    const int head_dim = args_.head_dim();
+    const int n_heads = args_->n_heads();
+    const int head_dim = args_->head_dim();
     const float scale = 1.0f / std::sqrt(static_cast<float>(head_dim));
     attn_ = std::make_unique<layer::AttentionImpl>(
         n_heads,
         head_dim,
         scale,
-        /*num_kv_heads=*/args_.n_kv_heads().value_or(n_heads),
+        /*num_kv_heads=*/args_->n_kv_heads().value_or(n_heads),
         /*sliding_window=*/-1);
   }
 
@@ -165,7 +166,7 @@ class FakeAttnCausalLM final : public CausalLM {
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& selected_idxes) override {
     (void)selected_idxes;
-    const int64_t vocab_size = std::max<int64_t>(args_.vocab_size(), 1024);
+    const int64_t vocab_size = std::max<int64_t>(args_->vocab_size(), 1024);
     return torch::zeros({hidden_states.size(0), vocab_size},
                         torch::dtype(torch::kFloat32).device(device_));
   }
@@ -178,7 +179,7 @@ class FakeAttnCausalLM final : public CausalLM {
   void update_expert_weight(int32_t) override {}
 
  private:
-  ModelArgs args_;
+  std::shared_ptr<ModelArgs> args_ = nullptr;
   torch::Device device_;
   torch::TensorOptions options_;
   torch::nn::Embedding embedding_{nullptr};
@@ -269,16 +270,16 @@ TEST(CudaGraphExecutorTest, BatchDecodeCaptureAndReplay) {
   xllm::layer::flashinfer::FlashinferWorkspace::get_instance().initialize(
       device);
 
-  ModelArgs args;
-  args.model_type("fake_attn");
-  args.dtype("bfloat16");
-  args.hidden_size(256);
-  args.max_position_embeddings(16);
-  args.vocab_size(2048);
-  args.n_layers(1);
-  args.n_heads(2);
-  args.head_dim(128);
-  args.n_kv_heads(1);
+  std::shared_ptr<ModelArgs> args = nullptr;
+  args->model_type("fake_attn");
+  args->dtype("bfloat16");
+  args->hidden_size(256);
+  args->max_position_embeddings(16);
+  args->vocab_size(2048);
+  args->n_layers(1);
+  args->n_heads(2);
+  args->head_dim(128);
+  args->n_kv_heads(1);
 
   runtime::Options options;
   options.block_size(1);
@@ -341,16 +342,16 @@ TEST(CudaGraphExecutorTest, PrefillPiecewiseCaptureAndReplay) {
   xllm::layer::flashinfer::FlashinferWorkspace::get_instance().initialize(
       device);
 
-  ModelArgs args;
-  args.model_type("fake_attn");
-  args.dtype("bfloat16");
-  args.hidden_size(256);
-  args.max_position_embeddings(256);
-  args.vocab_size(2048);
-  args.n_layers(1);
-  args.n_heads(2);
-  args.head_dim(128);
-  args.n_kv_heads(1);
+  std::shared_ptr<ModelArgs> args = nullptr;
+  args->model_type("fake_attn");
+  args->dtype("bfloat16");
+  args->hidden_size(256);
+  args->max_position_embeddings(256);
+  args->vocab_size(2048);
+  args->n_layers(1);
+  args->n_heads(2);
+  args->head_dim(128);
+  args->n_kv_heads(1);
 
   runtime::Options options;
   options.block_size(1);
@@ -400,9 +401,9 @@ TEST(CudaGraphExecutorTest, PrefillPiecewiseCaptureAndReplay) {
   FLAGS_max_tokens_for_graph_mode = old_max_tokens_for_graph_mode;
 
   EXPECT_EQ(out1.size(0), kNumTokens);
-  EXPECT_EQ(out1.size(1), args.hidden_size());
+  EXPECT_EQ(out1.size(1), args->hidden_size());
   EXPECT_EQ(out2.size(0), kNumTokens);
-  EXPECT_EQ(out2.size(1), args.hidden_size());
+  EXPECT_EQ(out2.size(1), args->hidden_size());
 
   EXPECT_TRUE(torch::isfinite(eager_out).all().item<bool>());
   EXPECT_TRUE(torch::isfinite(out1).all().item<bool>());
@@ -450,16 +451,16 @@ TEST(CudaGraphExecutorTest, CompareMqa2v1AndMqa8v1) {
   };
 
   auto run_mqa_prefill = [&](int64_t n_heads, int64_t n_kv_heads) {
-    ModelArgs args;
-    args.model_type("fake_attn");
-    args.dtype("bfloat16");
-    args.hidden_size(n_heads * 128);
-    args.max_position_embeddings(256);
-    args.vocab_size(2048);
-    args.n_layers(1);
-    args.n_heads(n_heads);
-    args.head_dim(128);
-    args.n_kv_heads(n_kv_heads);
+    std::shared_ptr<ModelArgs> args = nullptr;
+    args->model_type("fake_attn");
+    args->dtype("bfloat16");
+    args->hidden_size(n_heads * 128);
+    args->max_position_embeddings(256);
+    args->vocab_size(2048);
+    args->n_layers(1);
+    args->n_heads(n_heads);
+    args->head_dim(128);
+    args->n_kv_heads(n_kv_heads);
 
     runtime::Options options;
     options.block_size(1);
@@ -557,16 +558,16 @@ TEST(CudaGraphExecutorTest, GraphVmmPoolMemoryReuseAcrossMultiShape) {
   xllm::layer::flashinfer::FlashinferWorkspace::get_instance().initialize(
       device);
 
-  ModelArgs args;
-  args.model_type("fake_attn");
-  args.dtype("bfloat16");
-  args.hidden_size(256);
-  args.max_position_embeddings(512);
-  args.vocab_size(2048);
-  args.n_layers(1);
-  args.n_heads(2);
-  args.head_dim(128);
-  args.n_kv_heads(1);
+  std::shared_ptr<ModelArgs> args = nullptr;
+  args->model_type("fake_attn");
+  args->dtype("bfloat16");
+  args->hidden_size(256);
+  args->max_position_embeddings(512);
+  args->vocab_size(2048);
+  args->n_layers(1);
+  args->n_heads(2);
+  args->head_dim(128);
+  args->n_kv_heads(1);
 
   runtime::Options options;
   options.block_size(1);
@@ -666,16 +667,16 @@ TEST(CudaGraphExecutorTest, GraphVmmPoolEnabledPrefillCorrectness) {
   xllm::layer::flashinfer::FlashinferWorkspace::get_instance().initialize(
       device);
 
-  ModelArgs args;
-  args.model_type("fake_attn");
-  args.dtype("bfloat16");
-  args.hidden_size(256);
-  args.max_position_embeddings(512);
-  args.vocab_size(2048);
-  args.n_layers(1);
-  args.n_heads(2);
-  args.head_dim(128);
-  args.n_kv_heads(1);
+  std::shared_ptr<ModelArgs> args = nullptr;
+  args->model_type("fake_attn");
+  args->dtype("bfloat16");
+  args->hidden_size(256);
+  args->max_position_embeddings(512);
+  args->vocab_size(2048);
+  args->n_layers(1);
+  args->n_heads(2);
+  args->head_dim(128);
+  args->n_kv_heads(1);
 
   runtime::Options options;
   options.block_size(1);

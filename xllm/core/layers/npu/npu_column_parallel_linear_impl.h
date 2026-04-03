@@ -26,6 +26,7 @@ limitations under the License.
 #include <torch_npu/csrc/libs/init_npu.h>
 
 #include <functional>
+#include <memory>
 
 #include "atb/atb_infer.h"
 #include "framework/model/model_input_params.h"
@@ -66,7 +67,7 @@ class NpuColumnParallelLinearImpl : public BaseLayer {
                     atb_speed::common::LinearParallelParam& linearParam);
 
   void param_from_args(atb_speed::common::LinearParallelParam& param,
-                       const ModelArgs& args,
+                       const std::shared_ptr<ModelArgs>& args,
                        const ParallelArgs& parallel_args);
 
   atb_speed::Model::Node linear_node_;

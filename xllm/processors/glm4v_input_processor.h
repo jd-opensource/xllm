@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -34,7 +35,7 @@ class GLM4VInputProcessor : public InputProcessor {
   };
 
  public:
-  explicit GLM4VInputProcessor(const ModelArgs& args);
+  explicit GLM4VInputProcessor(const std::shared_ptr<ModelArgs>& args);
 
   void process(std::string& prompt, const MMData& mm_data) override;
   void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) override;

@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 #include <torch_npu/torch_npu.h>
 
+#include <memory>
 #include <nlohmann/json.hpp>
 
 #include "framework/eplb/expert_buffer_manager.h"
@@ -76,7 +77,7 @@ class NpuDeepseekV32DecoderLayerImpl : public BaseLayer {
   void initialize_tensors(const torch::TensorOptions& options);
 
   void param_from_args(atb_speed::deepseekV2::DecoderLayerParam& param,
-                       const ModelArgs& args,
+                       const std::shared_ptr<ModelArgs>& args,
                        const ParallelArgs& parallel_args,
                        bool is_prefill);
 
@@ -86,18 +87,18 @@ class NpuDeepseekV32DecoderLayerImpl : public BaseLayer {
 
   void initialize_basic_parameters(
       atb_speed::deepseekV2::DecoderLayerParam& param,
-      const ModelArgs& args,
+      const std::shared_ptr<ModelArgs>& args,
       const ParallelArgs& parallel_args,
       bool is_prefill);
 
   void initialize_attention_parameters(
       atb_speed::deepseekV2::DecoderLayerParam& param,
-      const ModelArgs& args,
+      const std::shared_ptr<ModelArgs>& args,
       const ParallelArgs& parallel_args);
 
   void initialize_mlp_parameters(
       atb_speed::deepseekV2::DecoderLayerParam& param,
-      const ModelArgs& args,
+      const std::shared_ptr<ModelArgs>& args,
       const ParallelArgs& parallel_args);
 
   void initialize_parallel_parameters(

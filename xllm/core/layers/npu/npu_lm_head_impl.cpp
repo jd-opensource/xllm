@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+
+#include <memory>
 DECLARE_string(rank_tablefile);
 DECLARE_string(communication_backend);
 
@@ -24,14 +26,14 @@ namespace xllm {
 namespace layer {
 
 void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
-                                    const ModelArgs& args,
+                                    const std::shared_ptr<ModelArgs>& args,
                                     const ParallelArgs& parallel_args,
                                     bool isPrefill) {
   param.unpadInputs = true;
   param.gatherAhead = isPrefill;
-  param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
+  param.hiddenSizePerAttentionHead = args->hidden_size() / args->n_heads();
   param.linearParallelParam.fusionLinearParam.isBF16 =
-      args.dtype() == "bfloat16";
+      args->dtype() == "bfloat16";
   param.linearParallelParam.unpadInputs = true;
   param.linearParallelParam.fusionLinearParam.transposeType = 1;
 

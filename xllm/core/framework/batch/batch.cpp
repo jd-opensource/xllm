@@ -20,6 +20,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
 #include "batch_input_builder.h"
@@ -132,10 +133,11 @@ void Batch::add(const std::vector<Sequence*>& sequences) {
   }
 }
 
-ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
-                                          uint32_t min_decoding_batch_size,
-                                          const ModelArgs& args,
-                                          int32_t cp_size) {
+ForwardInput Batch::prepare_forward_input(
+    uint32_t num_decoding_tokens,
+    uint32_t min_decoding_batch_size,
+    const std::shared_ptr<ModelArgs>& args,
+    int32_t cp_size) {
   if (sequences_.empty() && !sequence_groups_.empty()) {
     output_targets_.clear();
     return prepare_rec_forward_input(
@@ -148,17 +150,18 @@ ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
                             mm_data_vec_,
                             swap_block_transfer_infos_,
                             batch_id_,
-                            &args,
+                            args,
                             batch_forward_type_,
                             cp_size);
   return builder.build_forward_input(num_decoding_tokens,
                                      min_decoding_batch_size);
 }
 
-ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
-                                              uint32_t min_decoding_batch_size,
-                                              const ModelArgs& args,
-                                              ThreadPool* thread_pool) {
+ForwardInput Batch::prepare_rec_forward_input(
+    uint32_t num_decoding_tokens,
+    uint32_t min_decoding_batch_size,
+    const std::shared_ptr<ModelArgs>& args,
+    ThreadPool* thread_pool) {
   output_targets_.clear();
   RecType rec_type = RecType::kNone;
   if (!sequence_groups_.empty() && !sequence_groups_[0]->sequences().empty()) {
@@ -172,7 +175,7 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
                                               mm_data_vec_,
                                               swap_block_transfer_infos_,
                                               batch_id_,
-                                              &args,
+                                              args,
                                               batch_forward_type_,
                                               thread_pool);
   return builder->build_rec_forward_input(num_decoding_tokens,
@@ -334,9 +337,10 @@ std::unordered_map<uint32_t, uint32_t> Batch::cal_seq_exchange_index(
   return index_shift;
 }
 
-RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
-                                             ThreadPool* thread_pool,
-                                             int32_t cp_size) {
+RawForwardInput Batch::prepare_forward_input(
+    const std::shared_ptr<ModelArgs>& args,
+    ThreadPool* thread_pool,
+    int32_t cp_size) {
   dp_balance_shuffle_seqs();
   refresh_output_targets();
   BatchInputBuilder builder(sequences_,
@@ -345,7 +349,7 @@ RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
                             mm_data_vec_,
                             swap_block_transfer_infos_,
                             batch_id_,
-                            &args,
+                            args,
                             batch_forward_type_,
                             cp_size,
                             thread_pool);

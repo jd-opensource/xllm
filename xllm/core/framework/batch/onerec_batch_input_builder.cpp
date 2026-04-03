@@ -18,6 +18,7 @@ limitations under the License.
 #include <algorithm>
 #include <cstring>
 #include <future>
+#include <memory>
 #include <numeric>
 #include <thread>
 #include <vector>
@@ -47,7 +48,7 @@ OneRecBatchInputBuilder::OneRecBatchInputBuilder(
     const std::vector<MMData>& mm_data_vec,
     std::vector<BlockTransferInfo>* swap_block_transfer_infos,
     const uint64_t batch_id,
-    const ModelArgs* args,
+    const std::shared_ptr<ModelArgs> args,
     BatchForwardType batch_forward_type,
     ThreadPool* thread_pool)
     : sequence_groups_(sequence_groups),

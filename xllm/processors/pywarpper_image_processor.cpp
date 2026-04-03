@@ -18,6 +18,8 @@ limitations under the License.
 #include <pybind11/embed.h>
 #include <torch/extension.h>
 
+#include <memory>
+
 #include "butil/synchronization/lock.h"
 #include "core/common/global_flags.h"
 
@@ -68,7 +70,8 @@ class __attribute__((visibility("hidden"))) PyWrapperImpl {
   butil::Lock lock_;
 };
 
-PyWarpperImageProcessor::PyWarpperImageProcessor(const ModelArgs&) {
+PyWarpperImageProcessor::PyWarpperImageProcessor(
+    const std::shared_ptr<ModelArgs>&) {
   PyWrapperImpl::instance();
 }
 

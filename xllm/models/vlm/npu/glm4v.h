@@ -21,6 +21,7 @@ limitations under the License.
 #include <torch/nn/options/vision.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <unordered_map>
 
 #include "core/framework/kv_cache/kv_cache.h"
@@ -42,7 +43,7 @@ class Glm4VisionRmsNormImpl : public torch::nn::Module {
   Glm4VisionRmsNormImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
-    weight = torch::empty({model_args.mm_hidden_size()}, options);
+    weight = torch::empty({model_args->mm_hidden_size()}, options);
     epsilon_ = 1e-5;
   }
 
@@ -63,11 +64,11 @@ class Glm4VisionPatchEmbedImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    auto in_features = model_args.mm_num_channels() *
-                       model_args.mm_temporal_patch_size() *
-                       model_args.mm_patch_size() * model_args.mm_patch_size();
+    auto in_features =
+        model_args->mm_num_channels() * model_args->mm_temporal_patch_size() *
+        model_args->mm_patch_size() * model_args->mm_patch_size();
 
-    auto out_features = model_args.mm_hidden_size();
+    auto out_features = model_args->mm_hidden_size();
 
     proj_ = register_module(
         "proj",
@@ -158,7 +159,7 @@ class Glm4VisionRotaryEmbeddingImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    dim_ = model_args.mm_head_dim() / 2;
+    dim_ = model_args->mm_head_dim() / 2;
     theta_ = 10000.0;
 
     auto opts = options.dtype(torch::kFloat32);
@@ -202,9 +203,9 @@ class Glm4vVisionEmbeddingsImpl : public torch::nn::Module {
   Glm4vVisionEmbeddingsImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
-    embed_dim_ = model_args.mm_hidden_size();
-    image_size_ = model_args.mm_image_size();
-    patch_size_ = model_args.mm_patch_size();
+    embed_dim_ = model_args->mm_hidden_size();
+    image_size_ = model_args->mm_image_size();
+    patch_size_ = model_args->mm_patch_size();
     num_positions_ = image_size_ / patch_size_;
     num_positions_ = num_positions_ * num_positions_;
     position_embedding_ = register_module(
@@ -307,8 +308,8 @@ class Glm4_VisionPatchMergerImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     options_ = context.get_tensor_options();
     auto parallel_args = context.get_parallel_args();
-    int64_t dim = model_args.mm_projection_dim();
-    int64_t context_dim = model_args.mm_intermediate_size();
+    int64_t dim = model_args->mm_projection_dim();
+    int64_t context_dim = model_args->mm_intermediate_size();
     norm_ = register_module(
         "norm", torch::nn::LayerNorm(torch::nn::LayerNormOptions({dim})));
     norm_->weight.set_data(norm_->weight.to(options_));
@@ -431,9 +432,9 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
   Glm4VisionTransformerImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
-    spatial_merge_size_ = model_args.mm_spatial_merge_size();
-    hidden_size_ = model_args.mm_hidden_size();
-    out_hidden_size_ = model_args.mm_projection_dim();
+    spatial_merge_size_ = model_args->mm_spatial_merge_size();
+    hidden_size_ = model_args->mm_hidden_size();
+    out_hidden_size_ = model_args->mm_projection_dim();
 
     patch_embed_ =
         register_module("patch_embed", Glm4VisionPatchEmbed(context));
@@ -446,7 +447,7 @@ class Glm4VisionTransformerImpl : public torch::nn::Module {
 
     blocks_ = register_module("blocks", torch::nn::ModuleList());
 
-    for (int32_t idx = 0; idx < model_args.mm_num_hidden_layers(); idx++) {
+    for (int32_t idx = 0; idx < model_args->mm_num_hidden_layers(); idx++) {
       auto block = Glm4_VisionBlock(context);
       blocks_->push_back(block);
       layers_.push_back(block);
@@ -722,7 +723,7 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
     std::optional<Glm4VVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
 
-    auto merge_size = model_args_.mm_image_merge_size();
+    auto merge_size = model_args_->mm_image_merge_size();
     MMDict multimodal_embeds;
     if (image_input) {
       // visual
@@ -774,7 +775,7 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
     auto special_token_ids =
-        torch::tensor({model_args_.image_token_id()},
+        torch::tensor({model_args_->image_token_id()},
                       input_ids.options().dtype(torch::kInt64));
     auto is_multimodal = torch::isin(input_ids, special_token_ids);
     return is_multimodal;
@@ -824,7 +825,7 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
     }
     visual_->verify_loaded_weights("model.visual.");
     visual_->merge_loaded_weights();
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_->image_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
   }
@@ -845,7 +846,7 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
   }
 
  private:
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_ = nullptr;
   torch::TensorOptions options_;
   Glm4VisionTransformer visual_{nullptr};
   Glm4ForCausalLM language_model_{nullptr};

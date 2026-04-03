@@ -131,12 +131,13 @@ template <typename DecoderLayerType>
 class LlmModelImplBase : public torch::nn::Module {
  public:
   // mode type: qwen2, qwen3 .etc
-  LlmModelImplBase(const std::string& model_type, const ModelArgs& args)
+  LlmModelImplBase(const std::string& model_type,
+                   const std::shared_ptr<ModelArgs>& args)
       : model_type_(model_type) {
     InterruptionBus::get_instance().subscribe([this](bool interrupted) {
       this->layer_forward_interrupted_ = interrupted;
     });
-    mrope_section_ = args.rope_scaling_mrope_section();
+    mrope_section_ = args->rope_scaling_mrope_section();
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
@@ -391,7 +392,7 @@ template <typename LlmModelType>
 class LlmForCausalLMImplBase : public torch::nn::Module {
  public:
   LlmForCausalLMImplBase(const ModelContext& context) {
-    tie_word_embeddings = context.get_model_args().tie_word_embeddings();
+    tie_word_embeddings = context.get_model_args()->tie_word_embeddings();
     // register submodules
     model_ = register_module("model", LlmModelType(context));
 

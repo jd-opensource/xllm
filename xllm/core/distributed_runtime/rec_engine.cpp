@@ -84,7 +84,7 @@ bool RecEngine::init_model() {
   quant_args_ = model_loader->quant_args();
   tokenizer_args_ = model_loader->tokenizer_args();
   // Determine rec model kind and create pipeline via factory
-  rec_model_kind_ = get_rec_model_kind(args_.model_type());
+  rec_model_kind_ = get_rec_model_kind(args_->model_type());
   auto pipeline_type = get_rec_pipeline_type(rec_model_kind_);
   pipeline_ = create_pipeline(pipeline_type, *this);
   // LlmRec-specific initialization
@@ -108,16 +108,16 @@ bool RecEngine::init_model() {
   }
   // Compute KV cache config (shared logic)
   const int32_t world_size = static_cast<int32_t>(options_.devices().size());
-  const int64_t n_heads = args_.n_heads();
-  const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
+  const int64_t n_heads = args_->n_heads();
+  const int64_t n_kv_heads = args_->n_kv_heads().value_or(n_heads);
   n_local_kv_heads_ = std::max<int64_t>(1, n_kv_heads / world_size);
-  head_dim_ = args_.head_dim();
-  dtype_ = xllm::util::parse_dtype(args_.dtype(), options_.devices()[0]);
+  head_dim_ = args_->head_dim();
+  dtype_ = xllm::util::parse_dtype(args_->dtype(), options_.devices()[0]);
 
   LOG(INFO) << "Block info, block_size: " << options_.block_size()
             << ", n_local_kv_heads: " << n_local_kv_heads_
-            << ", head_dim: " << head_dim_ << ", n_layers: " << args_.n_layers()
-            << ", dtype: " << dtype_;
+            << ", head_dim: " << head_dim_
+            << ", n_layers: " << args_->n_layers() << ", dtype: " << dtype_;
   LOG(INFO) << "Initializing model with " << args_;
   LOG(INFO) << "Initializing model with quant args: " << quant_args_;
   LOG(INFO) << "Initializing model with tokenizer args: " << tokenizer_args_;
@@ -147,12 +147,12 @@ Engine::KVCacheCapacity RecEngine::estimate_kv_cache_capacity() {
   const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
   const int64_t slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
   kv_cache_cap.slot_size = slot_size;
-  kv_cache_cap.n_layers = args_.n_layers();
+  kv_cache_cap.n_layers = args_->n_layers();
 
   const int32_t block_size = options_.block_size();
   const int64_t block_size_in_bytes = block_size * slot_size;
   kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
-                          (args_.n_layers() * block_size_in_bytes);
+                          (args_->n_layers() * block_size_in_bytes);
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
 
   return kv_cache_cap;

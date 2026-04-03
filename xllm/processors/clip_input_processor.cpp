@@ -19,11 +19,13 @@ limitations under the License.
 
 #include <algorithm>
 #include <cassert>
+#include <memory>
 
 namespace xllm {
 
-CLIPVLInputProcessor::CLIPVLInputProcessor(const ModelArgs& args) {
-  merge_size_ = args.mm_image_merge_size();
+CLIPVLInputProcessor::CLIPVLInputProcessor(
+    const std::shared_ptr<ModelArgs>& args) {
+  merge_size_ = args->mm_image_merge_size();
 }
 
 void CLIPVLInputProcessor::process(std::string& prompt, const MMData& mm_data) {
