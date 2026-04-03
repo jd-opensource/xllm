@@ -138,7 +138,7 @@ enum OneRecBlockLayerTensorId : int32_t {
   IN_FFN_WO_COMPRESS_IDX,
 };
 
-enum OneRecMoeBlockLayerTensorId : int {
+enum OneRecMoeBlockLayerTensorId : int32_t {
   // MoE weights (only used when use_moe=true)
   IN_BLOCK_SPARSE_MOE_GATE_WEIGHT = 61,   // routing weights
   IN_BLOCK_SPARSE_MOE_GATE_BIAS = 62,     // routing bias
@@ -422,12 +422,14 @@ void NpuOneRecBlockLayerImpl::param_from_args(
   param.quantType = 0;
   param.quantGroupSize = 64;
 
-  auto args_n_heads = is_decoder_ ? args.decoder_n_heads() : args.n_heads();
-  auto args_head_dim = is_decoder_ ? args.decoder_head_dim() : args.head_dim();
+  const int64_t args_n_heads =
+      is_decoder_ ? args.decoder_n_heads() : args.n_heads();
+  const int64_t args_head_dim =
+      is_decoder_ ? args.decoder_head_dim() : args.head_dim();
   param.numAttentionHeadsPerRank = args_n_heads / param.worldSize;
   param.hiddenSizePerAttentionHead = args_head_dim;
 
-  std::optional<long int> optional_value =
+  std::optional<int64_t> optional_value =
       is_decoder_ ? args.decoder_n_kv_heads().value_or(args.decoder_n_heads())
                   : args.n_kv_heads().value_or(args.n_heads());
   param.numKeyValueHeadsPerRank =
@@ -967,8 +969,8 @@ void NpuOneRecBlockLayerImpl::build_encoder_node_variant_pack(
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
 
   for (size_t i = 0; i < kOneRecWeightCountPerLayer; ++i) {
-    CHECK_THROW(node.inTensors.at(i) == nullptr,
-                model_name_ << " inTensor " << i << " is NULL");
+    CHECK(node.inTensors.at(i) != nullptr)
+        << model_name_ << " inTensor " << i << " is NULL";
     node.variantPack.inTensors.at(i) = *node.inTensors.at(i);
   }
 
@@ -1021,8 +1023,8 @@ void NpuOneRecBlockLayerImpl::build_decoder_moe_node_variant_pack(
   (void)layer_id;
 
   for (size_t i = 0; i < kOneRecMoeWeightCountPerLayer; ++i) {
-    CHECK_THROW(node.inTensors.at(i) == nullptr,
-                model_name_ << " inTensor " << i << " is NULL");
+    CHECK(node.inTensors.at(i) != nullptr)
+        << model_name_ << " inTensor " << i << " is NULL";
     node.variantPack.inTensors.at(i) = *node.inTensors.at(i);
   }
 
@@ -1154,8 +1156,8 @@ void NpuOneRecBlockLayerImpl::build_decoder_node_variant_pack(
   (void)layer_id;
 
   for (size_t i = 0; i < kOneRecWeightCountPerLayer; ++i) {
-    CHECK_THROW(node.inTensors.at(i) == nullptr,
-                model_name_ << " inTensor " << i << " is NULL");
+    CHECK(node.inTensors.at(i) != nullptr)
+        << model_name_ << " inTensor " << i << " is NULL";
     node.variantPack.inTensors.at(i) = *node.inTensors.at(i);
   }
 
@@ -1219,7 +1221,7 @@ void NpuOneRecBlockLayerImpl::process_expert_weights(
                << " for " << suffix << " at layer " << layer_id_ << ".";
     return;
   }
-  it->second[local_index] = tensor.clone();
+  it->second[local_index] = tensor;
 }
 
 void NpuOneRecBlockLayerImpl::process_shared_expert_weights(
@@ -1343,13 +1345,15 @@ void NpuOneRecBlockLayerImpl::merge_experts_weights() {
                             /*transpose=*/false);
   CHECK(merged_gate_up.defined()) << "OneRec MoE gate/up experts merge failed.";
   at_weight_tensors_[IN_MOE_EXPERT_W1_WEIGHT] =
-      at_npu::native::npu_format_cast(merged_gate_up, 2).contiguous();
+      at_npu::native::npu_format_cast(merged_gate_up, /*format=*/2)
+          .contiguous();
 
   auto merged_down = merge_experts_weights(experts_weights_["down_proj.weight"],
                                            /*transpose=*/false);
   CHECK(merged_down.defined()) << "OneRec MoE down experts merge failed.";
   at_weight_tensors_[IN_MOE_EXPERT_W2_WEIGHT] =
-      at_npu::native::npu_format_cast(merged_down, 2).contiguous();
+      at_npu::native::npu_format_cast(merged_down, /*format=*/2)
+          .contiguous();
 }
 
 void NpuOneRecBlockLayerImpl::merge_shared_experts_weights() {
