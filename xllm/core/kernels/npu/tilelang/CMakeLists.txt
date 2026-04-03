@@ -128,6 +128,11 @@ tilelang_register_runtime_kernel(
   WRAPPER_SRCS rope_wrapper.cpp
 )
 
+tilelang_register_runtime_kernel(
+  NAME fused_gdn_gating
+  WRAPPER_SRCS fused_gdn_gating_wrapper.cpp
+)
+
 cc_library(
   NAME
     tilelang_kernels
@@ -158,6 +163,18 @@ cc_test(
     rope_wrapper_test
   SRCS
     rope_wrapper_test.cpp
+  DEPS
+    :tilelang_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
+)
+
+cc_test(
+  NAME
+    fused_gdn_gating_wrapper_test
+  SRCS
+    fused_gdn_gating_wrapper_test.cpp
   DEPS
     :tilelang_kernels
     torch

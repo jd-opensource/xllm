@@ -19,10 +19,22 @@ from compiler.tilelang.common.spec import (
 DEFAULT_NUM_HEADS = 32
 DEFAULT_DTYPE = "bf16"
 DEFAULT_MAX_BATCH = 4096
+DEFAULT_MAX_HEADS = 128
 REF_CHECK_NUM_BATCHES = 16
 VEC_NUM = 2
 VECTOR_BYTES_PER_ITER = 256
 SUPPORTED_NUM_HEADS = (16, 32, 48, 64, 128)
+MAX_VEC_CORE_NUM = detect_vec_core_num()
+BATCH_SIZE_SPECIALIZATIONS = tuple(range(2, 49, 2))
+
+
+def select_launch_block_num(*, num_batches: int, vec_core_num: int) -> int:
+    """Pick launch block_num by current batch size."""
+    if num_batches <= 0:
+        raise ValueError(f"num_batches({num_batches}) must be > 0")
+    if vec_core_num <= 0:
+        raise ValueError(f"vec_core_num({vec_core_num}) must be > 0")
+    return min(num_batches, vec_core_num)
 
 
 def _dtype_size_in_bytes(dtype: str) -> int:
@@ -44,27 +56,34 @@ def _align_count_to_vector_bytes(count: int, dtype: str) -> int:
 
 def build_fused_gdn_gating_kernel(
     *,
-    num_heads: int,
-    vec_core_num: int,
+    batch_size: int,
     compile_max_batch: int,
+    num_heads: int,
 ):
     if num_heads not in SUPPORTED_NUM_HEADS:
         raise ValueError(
-            f"fused_gdn_gating only supports num_heads in {SUPPORTED_NUM_HEADS}, got {num_heads}"
+            "fused_gdn_gating only supports num_heads in "
+            f"{SUPPORTED_NUM_HEADS}, got {num_heads}"
         )
-    if vec_core_num <= 0:
-        raise ValueError(f"vec_core_num({vec_core_num}) must be > 0")
-    if vec_core_num % VEC_NUM != 0:
-        raise ValueError(
-            f"vec_core_num({vec_core_num}) must be divisible by VEC_NUM({VEC_NUM})"
-        )
+    if batch_size <= 0:
+        raise ValueError(f"batch_size({batch_size}) must be > 0")
     if compile_max_batch <= 0:
         raise ValueError(
             f"compile_max_batch({compile_max_batch}) must be > 0"
         )
+    if batch_size > compile_max_batch:
+        raise ValueError(
+            f"batch_size({batch_size}) must be <= compile_max_batch({compile_max_batch})"
+        )
 
-    task_num = vec_core_num
-    m_num = vec_core_num // VEC_NUM
+    # vec_core_num is hardware capability; block_num is launch-time choice.
+    # block_num = min(num_batches, full_vec_core_num).
+    vec_core_num = MAX_VEC_CORE_NUM
+    block_num = select_launch_block_num(
+        num_batches=batch_size, vec_core_num=vec_core_num
+    )
+    cubecore_block_num = block_num
+    task_num = block_num * VEC_NUM
     acc_dtype = "float32"
     input_dtype = "bfloat16"
     mask_dtype = "uint8"
@@ -83,7 +102,7 @@ def build_fused_gdn_gating_kernel(
         softplus_beta: T.float32,
         softplus_threshold: T.float32,
     ):
-        with T.Kernel(m_num, is_npu=True) as (cid, vid):
+        with T.Kernel(cubecore_block_num, is_npu=True) as (cid, vid):
             task_id = cid * VEC_NUM + vid
             block_m = (num_batches + task_num - 1) // task_num
             row_start = task_id * block_m
@@ -162,7 +181,9 @@ def build_fused_gdn_gating_kernel(
                     T.tile.cast(x_ub, b_half_ub, "CAST_NONE", ub_tensor_dim)
                     T.tile.sigmoid(beta_fp32_ub, x_ub, sigmoid_tmp_ub)
                     T.tile.mul(x_ub, neg_exp_A_ub, beta_x_ub)
-                    T.tile.cast(b_half_ub, beta_fp32_ub, "CAST_RINT", ub_tensor_dim)
+                    T.tile.cast(
+                        b_half_ub, beta_fp32_ub, "CAST_RINT", ub_tensor_dim
+                    )
 
                     T.copy(x_ub[0, :num_heads], g_out[row, 0])
                     T.copy(b_half_ub[0, :num_heads], beta_out[row, 0])
@@ -172,63 +193,51 @@ def build_fused_gdn_gating_kernel(
 
 @tilelang.jit(pass_configs=DEFAULT_ASCEND_PASS_CONFIGS)
 def fused_gdn_gating_kernel_jit(
-    num_heads: int,
-    vec_core_num: int,
+    num_batches: int,
     compile_max_batch: int,
+    num_heads: int,
 ):
     return build_fused_gdn_gating_kernel(
-        num_heads=num_heads,
-        vec_core_num=vec_core_num,
+        batch_size=num_batches,
         compile_max_batch=compile_max_batch,
+        num_heads=num_heads,
     )
 
 
 @register_kernel
 class FusedGdnGatingKernel(TilelangKernel):
     DISPATCH_SCHEMA = [
+        DispatchField("batch_size", "int32"),
         DispatchField("num_heads", "int32"),
         DispatchField("dtype", "dtype"),
     ]
     SPECIALIZATIONS = [
         {
-            "variant_key": "nh16_bf16",
-            "num_heads": 16,
+            "variant_key": f"bs{batch_size}_nh{num_heads}_bf16",
+            "batch_size": batch_size,
+            "num_heads": num_heads,
             "dtype": DEFAULT_DTYPE,
-        },
-        {
-            "variant_key": "nh32_bf16",
-            "num_heads": 32,
-            "dtype": DEFAULT_DTYPE,
-        },
-        {
-            "variant_key": "nh48_bf16",
-            "num_heads": 48,
-            "dtype": DEFAULT_DTYPE,
-        },
-        {
-            "variant_key": "nh64_bf16",
-            "num_heads": 64,
-            "dtype": DEFAULT_DTYPE,
-        },
-        {
-            "variant_key": "nh128_bf16",
-            "num_heads": 128,
-            "dtype": DEFAULT_DTYPE,
-        },
+        }
+        for num_heads in SUPPORTED_NUM_HEADS
+        for batch_size in BATCH_SIZE_SPECIALIZATIONS
     ]
 
     @staticmethod
-    def generate_source(num_heads: int, dtype: str) -> str:
+    def generate_source(batch_size: int, num_heads: int, dtype: str) -> str:
         if dtype != DEFAULT_DTYPE:
             raise ValueError(
                 f"fused_gdn_gating only supports dtype={DEFAULT_DTYPE}, got {dtype}"
             )
+        if batch_size not in BATCH_SIZE_SPECIALIZATIONS:
+            raise ValueError(
+                "fused_gdn_gating only supports batch_size in "
+                f"{BATCH_SIZE_SPECIALIZATIONS}, got {batch_size}"
+            )
         tilelang.disable_cache()
-        vec_core_num = detect_vec_core_num()
         tilelang_kernel = build_fused_gdn_gating_kernel(
-            num_heads=num_heads,
-            vec_core_num=vec_core_num,
+            batch_size=batch_size,
             compile_max_batch=DEFAULT_MAX_BATCH,
+            num_heads=num_heads,
         )
         with tilelang.tvm.transform.PassContext(
             opt_level=3, config=DEFAULT_ASCEND_PASS_CONFIGS
@@ -262,7 +271,6 @@ def _run_ref_check(
     *,
     num_batches: int,
     num_heads: int,
-    vec_core_num: int,
     compile_max_batch: int,
     softplus_beta: float,
     softplus_threshold: float,
@@ -293,9 +301,9 @@ def _run_ref_check(
     )
 
     kernel = fused_gdn_gating_kernel_jit(
-        num_heads=num_heads,
-        vec_core_num=vec_core_num,
+        num_batches=num_batches,
         compile_max_batch=num_batches,
+        num_heads=num_heads,
     )
     kernel(
         A_log,
@@ -331,7 +339,6 @@ def _run_ref_check(
 def _run_ref_suite(
     *,
     num_batches: int,
-    vec_core_num: int,
     compile_max_batch: int,
     softplus_beta: float,
     softplus_threshold: float,
@@ -341,7 +348,6 @@ def _run_ref_suite(
         _run_ref_check(
             num_batches=num_batches,
             num_heads=num_heads,
-            vec_core_num=vec_core_num,
             compile_max_batch=compile_max_batch,
             softplus_beta=softplus_beta,
             softplus_threshold=softplus_threshold,
@@ -399,7 +405,6 @@ def main() -> None:
     if not args.skip_ref_check:
         _run_ref_suite(
             num_batches=args.ref_num_batches,
-            vec_core_num=detect_vec_core_num(),
             compile_max_batch=DEFAULT_MAX_BATCH,
             softplus_beta=args.softplus_beta,
             softplus_threshold=args.softplus_threshold,
