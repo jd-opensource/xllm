@@ -28,6 +28,10 @@ class LmHeadManualLoader : public BaseManualLoader {
 
  protected:
   void merge_host_at_weights() override;
+
+ private:
+  int64_t vocab_size_ = -1;
+  int64_t padded_vocab_size_ = -1;
 };
 }  // namespace layer
 }  // namespace xllm
