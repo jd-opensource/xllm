@@ -296,6 +296,17 @@ class MtpForCausalLMImplBase : public torch::nn::Module {
 
   // hidden_states: [num_tokens, hidden_size]
   // seleted_idxes: [num_tokens]
+  // out_hidden: [num_seqs, hidden_size]
+  // returns: [num_tokens, vocab_size]
+  virtual torch::Tensor logits(const torch::Tensor& hidden_states,
+                               const torch::Tensor& seleted_idxes,
+                               torch::Tensor& out_hidden) {
+    return lm_head_->forward_with_hidden(
+        hidden_states, seleted_idxes, out_hidden, 0);
+  }
+
+  // hidden_states: [num_tokens, hidden_size]
+  // seleted_idxes: [num_tokens]
   // returns: [num_seqs, hidden_size]
   virtual torch::Tensor pooler(const torch::Tensor& hidden_states,
                                const torch::Tensor& seleted_idxes) {

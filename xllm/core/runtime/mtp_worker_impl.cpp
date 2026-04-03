@@ -323,7 +323,6 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_prefill(
     auto mask = (token_ids == -1);
     token_ids.masked_scatter_(mask, next_tokens);
   }
-
   // generate kv cache for draft model
   timer.reset();
   auto draft_future = draft_impl_->step_async(prefill_input);
@@ -360,7 +359,8 @@ void MTPWorkerImpl::prepare_prefill_inputs(const ForwardInput& input,
   }
 
   auto& extra_token_ids = input_params.extra_token_ids;
-  CHECK_EQ(extra_token_ids.size(), static_cast<size_t>(input_params.num_sequences))
+  CHECK_EQ(extra_token_ids.size(),
+           static_cast<size_t>(input_params.num_sequences))
       << "extra_token_ids size should match num_sequences";
 
   torch::Tensor token_ids = safe_to(input.token_ids, torch::kCPU);
