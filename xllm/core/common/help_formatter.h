@@ -50,6 +50,10 @@ const OptionCategory kCommonOptions = {"COMMON OPTIONS",
                                         "communication_backend",
                                         "task"}};
 
+const OptionCategory kMultimodalOptions = {
+    "MULTIMODAL OPTIONS",
+    {"limit_image_per_prompt", "mm_process_config", "use_audio_in_video"}};
+
 const OptionCategory kCacheOptions = {"KV CACHE OPTIONS",
                                       {"block_size",
                                        "max_cache_size",
@@ -106,11 +110,11 @@ const OptionCategory kOtherOptions = {
      "num_request_handling_threads",
      "num_response_handling_threads",
      "prefill_scheduling_memory_usage_threshold",
-     "use_contiguous_input_buffer",
-     "use_audio_in_video"}};
+     "use_contiguous_input_buffer"}};
 
 const std::vector<OptionCategory> kOptionCategories = {
     kCommonOptions,
+    kMultimodalOptions,
     kCacheOptions,
     kMoeModelOptions,
     kDisaggregatedPrefillDecodeOptions,

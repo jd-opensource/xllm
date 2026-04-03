@@ -11,6 +11,7 @@ proto_library(
     sample.proto
     chat.proto
     multimodal.proto
+    multimodal_config.proto
     embedding.proto
     rerank.proto
     models.proto

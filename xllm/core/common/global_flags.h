@@ -40,6 +40,7 @@ DECLARE_string(task);
 DECLARE_string(devices);
 
 DECLARE_int32(limit_image_per_prompt);
+DECLARE_string(mm_process_config);
 
 // --- kvcache config ---
 DECLARE_int32(block_size);
