@@ -26,6 +26,7 @@ limitations under the License.
 #include <algorithm>
 #include <unordered_map>
 
+#include "util/env_var.h"
 #include "util/hash_util.h"
 #include "util/net.h"
 #include "util/uuid.h"
@@ -35,6 +36,8 @@ namespace {
 static std::string ETCD_MASTER_SERVICE_KEY = "XLLM:SERVICE:MASTER";
 static std::string ETCD_XSERVICES_KEY_PREFIX =
     "XLLM:SERVICE:";  // all xllm_service registeration prefix
+constexpr const char* kEtcdUsernameEnvVar = "ETCD_USERNAME";
+constexpr const char* kEtcdPasswordEnvVar = "ETCD_PASSWORD";
 static std::unordered_map<xllm_service::proto::InstanceType, std::string>
     ETCD_KEYS_PREFIX_MAP = {
         {xllm_service::proto::InstanceType::DEFAULT, "XLLM:DEFAULT:"},
@@ -90,7 +93,23 @@ bool XServiceClient::init(const std::string& etcd_addr,
   chan_options_.max_retry = 3;
   chan_options_.timeout_ms = FLAGS_rpc_channel_timeout_ms;
 
-  etcd_client_ = std::make_unique<EtcdClient>(etcd_addr);
+  const std::string etcd_username =
+      util::get_optional_string_env(kEtcdUsernameEnvVar).value_or("");
+  const std::string etcd_password =
+      util::get_optional_string_env(kEtcdPasswordEnvVar).value_or("");
+  const bool has_etcd_auth_user = !etcd_username.empty();
+  const bool has_etcd_auth_password = !etcd_password.empty();
+  if (has_etcd_auth_user != has_etcd_auth_password) {
+    LOG(ERROR) << "Both " << kEtcdUsernameEnvVar << " and "
+               << kEtcdPasswordEnvVar << " must be set together.";
+    return false;
+  }
+  if (has_etcd_auth_user) {
+    etcd_client_ =
+        std::make_unique<EtcdClient>(etcd_addr, etcd_username, etcd_password);
+  } else {
+    etcd_client_ = std::make_unique<EtcdClient>(etcd_addr);
+  }
 
   // connect master xllm_service
   while (!etcd_client_->get_master_service(ETCD_MASTER_SERVICE_KEY,

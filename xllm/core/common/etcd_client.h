@@ -30,6 +30,9 @@ using Callback = std::function<void(const etcd::Response&)>;
 class EtcdClient {
  public:
   EtcdClient(const std::string& etcd_addr);
+  EtcdClient(const std::string& etcd_addr,
+             const std::string& username,
+             const std::string& password);
   ~EtcdClient();
 
   void add_watch(const std::string& key_prefix,
