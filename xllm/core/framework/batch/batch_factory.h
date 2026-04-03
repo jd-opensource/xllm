@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -32,23 +33,28 @@ class BatchFactory {
     void operator()(BatchFactory* ptr) const { delete ptr; }
   };
 
-  static BatchFactory* get_instance(int32_t dp_size) {
+  static BatchFactory* get_instance(int32_t dp_size, int32_t cp_size = 1) {
     CHECK_GT(dp_size, 0) << "dp_size must be greater than 0";
+    CHECK_GT(cp_size, 0) << "cp_size must be greater than 0";
     static std::mutex mu;
-    static std::unordered_map<int32_t, std::unique_ptr<BatchFactory, Deleter>>
+    static std::unordered_map<int64_t, std::unique_ptr<BatchFactory, Deleter>>
         instances;
     std::lock_guard<std::mutex> lock(mu);
-    auto it = instances.find(dp_size);
+    const int64_t key = (static_cast<int64_t>(dp_size) << 32) |
+                        static_cast<uint32_t>(cp_size);
+    auto it = instances.find(key);
     if (it == instances.end()) {
       it = instances
-               .emplace(dp_size,
+               .emplace(key,
                         std::unique_ptr<BatchFactory, Deleter>(
-                            new BatchFactory(dp_size)))
+                            new BatchFactory(dp_size, cp_size)))
                .first;
     }
     VLOG(1) << "[DIRTY_TRACE][BatchFactory::get_instance] "
             << "requested_dp_size=" << dp_size
+            << ", requested_cp_size=" << cp_size
             << ", instance_dp_size=" << it->second->dp_size_
+            << ", instance_cp_size=" << it->second->cp_size_
             << ", instance_ptr=" << static_cast<const void*>(it->second.get());
     return it->second.get();
   }
@@ -69,12 +75,14 @@ class BatchFactory {
           nullptr);
 
  private:
-  BatchFactory(int32_t dp_size) : dp_size_(dp_size) {}
+  BatchFactory(int32_t dp_size, int32_t cp_size)
+      : dp_size_(dp_size), cp_size_(cp_size) {}
   ~BatchFactory() = default;
 
   DISALLOW_COPY_AND_ASSIGN(BatchFactory);
 
  private:
   int32_t dp_size_;
+  int32_t cp_size_;
 };
 }  // namespace xllm
