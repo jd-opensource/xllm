@@ -34,15 +34,15 @@ class MMType {
   };
 
   MMType() = default;
-  MMType(Value v) : value_(v) {}
-  operator Value() const { return value_; }
+  constexpr MMType(Value v) : value_(v) {}
+  constexpr operator Value() const { return value_; }
   explicit operator bool() const = delete;
 
-  bool operator==(MMType rhs) const { return value_ == rhs.value_; }
-  bool operator!=(MMType rhs) const { return value_ != rhs.value_; }
+  constexpr bool operator==(MMType rhs) const { return value_ == rhs.value_; }
+  constexpr bool operator!=(MMType rhs) const { return value_ != rhs.value_; }
 
-  bool operator==(Value v) const { return value_ == v; }
-  bool operator!=(Value v) const { return value_ != v; }
+  constexpr bool operator==(Value v) const { return value_ == v; }
+  constexpr bool operator!=(Value v) const { return value_ != v; }
 
   std::optional<std::string> to_string();
 

@@ -40,6 +40,8 @@ class Slice final {
   // iterator for the slice
   const T* begin() const { return data_; }
   const T* end() const { return data_ + size_; }
+  const T* cbegin() const { return data_; }
+  const T* cend() const { return data_ + size_; }
 
   // get the size of the slice
   size_t size() const { return size_; }

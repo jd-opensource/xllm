@@ -35,11 +35,13 @@ struct ParallelArgs {
   ParallelArgs(int32_t rank,
                int32_t world_size,
                int32_t dp_size,
+               int32_t cp_size,
                ProcessGroup* process_group,
                int32_t ep_size)
       : rank_(rank),
         world_size_(world_size),
         dp_size_(dp_size),
+        cp_size_(cp_size),
         process_group_(process_group),
         ep_size_(ep_size) {}
 
@@ -49,6 +51,7 @@ struct ParallelArgs {
                int32_t dp_size,
                ProcessGroup* process_group,
                int32_t ep_size,
+               int32_t cp_size,
                nlohmann::json mapping_data,
                atb_speed::base::Mapping mapping,
                std::string dispatchAndCombinecommDomain,
@@ -58,6 +61,7 @@ struct ParallelArgs {
         dp_size_(dp_size),
         process_group_(process_group),
         ep_size_(ep_size),
+        cp_size_(cp_size),
         mapping_data_(mapping_data),
         mapping_(mapping),
         dispatchAndCombinecommDomain_(dispatchAndCombinecommDomain),
@@ -96,6 +100,9 @@ struct ParallelArgs {
   // ep size
   PROPERTY(int32_t, ep_size) = 1;
 
+  // cp size
+  PROPERTY(int32_t, cp_size) = 1;
+
   // atb hccl mapping json data
   PROPERTY(nlohmann::json, mapping_data);
 
@@ -115,6 +122,7 @@ struct ParallelArgs {
   ProcessGroup* process_group_ = nullptr;
   ProcessGroup* dp_local_process_group_ = nullptr;
   ProcessGroup* tp_group_ = nullptr;
+  ProcessGroup* single_rank_group_ = nullptr;
   // Sequence-parallel communication group used by prefill attention.
   // In the current implementation this aliases the TP group because SP uses
   // the same rank set during prefill, but it remains a separate handle so the

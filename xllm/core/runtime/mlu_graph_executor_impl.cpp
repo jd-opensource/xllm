@@ -219,7 +219,8 @@ MluGraphExecutorImpl::MluGraphExecutorImpl(CausalLM* model,
 }
 
 ForwardInput MluGraphExecutorImpl::prepare_inputs(Batch& batch) {
-  return batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
+  return batch.prepare_forward_input(
+      options_.num_decoding_tokens(), 0, args_, options_.cp_size());
 }
 
 // Main execution method with graph optimization for decode phase
@@ -240,15 +241,6 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
     graph_mode = std::find(dp_is_decode.begin(), dp_is_decode.end(), 0) ==
                  dp_is_decode.end();
     CHECK_EQ(dp_is_decode.size(), params.dp_global_token_nums.size());
-  }
-
-  // Process multimodal data for VLM models
-  if (options_.backend() == "vlm") {
-    auto* vlm_model = dynamic_cast<CausalVLM*>(model_);
-    if (vlm_model) {
-      xllm::VlmExecutorImpl::process_mm_data(
-          const_cast<ModelInputParams&>(params), vlm_model, device_, tokens);
-    }
   }
 
   if (!graph_mode) {

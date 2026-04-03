@@ -20,7 +20,7 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "qwen2_5_vl.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 class Qwen2_5_VLForMMEmbeddingImpl : public torch::nn::Module {
  public:
@@ -106,11 +106,15 @@ class Qwen2_5_VLForMMEmbeddingImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Qwen2_5_VLForMMEmbedding);
 
+}  // namespace xllm::npu::model
+
+namespace xllm {
+
 template <>
-class MMEmbeddingVLMImpl<xllm::Qwen2_5_VLForMMEmbedding>
+class MMEmbeddingVLMImpl<npu::model::Qwen2_5_VLForMMEmbedding>
     : public MMEmbeddingVLM {
  public:
-  MMEmbeddingVLMImpl(xllm::Qwen2_5_VLForMMEmbedding model,
+  MMEmbeddingVLMImpl(npu::model::Qwen2_5_VLForMMEmbedding model,
                      const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
@@ -157,11 +161,12 @@ class MMEmbeddingVLMImpl<xllm::Qwen2_5_VLForMMEmbedding>
   }
 
  private:
-  xllm::Qwen2_5_VLForMMEmbedding model_;
+  npu::model::Qwen2_5_VLForMMEmbedding model_;
   torch::TensorOptions options_;
 };
 
-REGISTER_MM_EMBEDDING_VLM_MODEL_WITH_VARNAME(qwen2_5_vl_mm_embedding,
-                                             qwen2_5_vl,
-                                             Qwen2_5_VLForMMEmbedding);
+REGISTER_MM_EMBEDDING_VLM_MODEL_WITH_VARNAME(
+    qwen2_5_vl_mm_embedding,
+    qwen2_5_vl,
+    npu::model::Qwen2_5_VLForMMEmbedding);
 }  // namespace xllm

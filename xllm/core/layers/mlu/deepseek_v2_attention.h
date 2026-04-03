@@ -39,6 +39,12 @@ namespace layer {
 
 class DeepseekV2AttentionImpl : public torch::nn::Module {
  public:
+  enum class PostAttnLayout {
+    kTpShard,
+    kReplicated,
+    kPackedLocal,
+  };
+
   DeepseekV2AttentionImpl() = default;
   DeepseekV2AttentionImpl(const ModelArgs& args,
                           const QuantArgs& quant_args,
@@ -52,32 +58,39 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
                         KVCache& kv_cache,
                         const v32_sp::DeepseekV32SPContext* sp_ctx = nullptr);
 
-  // whether to use full linear weights for projection
-  bool use_full_linear_weights() const {
+  bool use_replicated_attn_weights() const {
     return use_full_replicated_attention_weights_;
   }
 
   bool can_use_sp() const {
-    return enable_lighting_indexer_ && use_full_linear_weights() &&
-           static_cast<bool>(attn_full_);
+    return enable_lighting_indexer_ && use_replicated_attn_weights();
   }
 
-  int64_t local_compute_head_count() const { return num_local_heads_; }
-
-  int64_t local_compute_projection_width() const {
-    return num_local_heads_ * v_head_dim_;
+  PostAttnLayout post_attn_layout(bool use_sp_output) const {
+    if (use_sp_output) {
+      return PostAttnLayout::kPackedLocal;
+    }
+    return use_replicated_attn_weights() ? PostAttnLayout::kReplicated
+                                         : PostAttnLayout::kTpShard;
   }
 
   void load_state_dict(const StateDict& state_dict);
 
  private:
-  struct SPQRPreOut {
-    torch::Tensor q;
-    torch::Tensor qr;
+  struct HeadInfo {
+    int64_t attn = 1;
+    int64_t proj = 1;
+
+    int64_t proj_width(int64_t dim) const { return proj * dim; }
   };
 
-  struct SPMLAPreOut {
-    torch::Tensor qr;
+  struct QueryPrep {
+    torch::Tensor q;
+    torch::Tensor q_norm;
+  };
+
+  struct MlaInputs {
+    torch::Tensor q_norm;
     torch::Tensor q_input;
     torch::Tensor k_input;
     torch::Tensor v_input;
@@ -96,32 +109,29 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
                            const v32_sp::DeepseekV32SPContext& sp_ctx,
                            KVCache& kv_cache,
                            bool is_prefill_or_chunked_prefill);
-  SPQRPreOut sp_qr_pre(const torch::Tensor& hidden_states);
-  SPMLAPreOut sp_mla_pre(const torch::Tensor& hidden_states,
-                         const torch::Tensor& positions,
-                         const SPQRPreOut& qr_pre,
-                         const v32_sp::DeepseekV32SPContext& sp_ctx,
-                         const torch::TensorOptions& options);
+  QueryPrep prep_query(const torch::Tensor& hidden_states,
+                       const HeadInfo& heads);
+  void fill_q_input(torch::Tensor& q_input,
+                    const torch::Tensor& q,
+                    const torch::Tensor& positions,
+                    const AttentionMetadata& attn_metadata,
+                    bool use_prompt_rope);
+  MlaInputs build_sp_mla_inputs(const torch::Tensor& hidden_states,
+                                const torch::Tensor& positions,
+                                const QueryPrep& query_prep,
+                                const v32_sp::DeepseekV32SPContext& sp_ctx);
   v32_sp::PaddedGatherHandle sp_mla_comm(
       const torch::Tensor& k_input,
       const v32_sp::DeepseekV32SPContext& sp_ctx) const;
-  void sp_mla_finish_k(SPMLAPreOut& pre_out,
-                       const v32_sp::PaddedGatherHandle& k_handle,
-                       const v32_sp::DeepseekV32SPContext& sp_ctx) const;
-  torch::Tensor project_sp_output(const torch::Tensor& attn_output);
-
-  void decode_q_pre_base(torch::Tensor& q,
-                         torch::Tensor& qr,
-                         torch::Tensor& q_input,
-                         const torch::Tensor& positions,
-                         const AttentionMetadata& attn_metadata,
-                         bool use_prompt_rope);
+  void finish_sp_k_gather(MlaInputs& mla_inputs,
+                          const v32_sp::PaddedGatherHandle& k_handle,
+                          const v32_sp::DeepseekV32SPContext& sp_ctx) const;
   void decode_kv_pre_base(torch::Tensor& latent_cache,
                           const torch::Tensor& positions,
                           const AttentionMetadata& attn_metadata,
                           bool use_prompt_rope);
   void decode_qkv_pre_fused(torch::Tensor& q,
-                            torch::Tensor& qr,
+                            torch::Tensor& q_norm,
                             torch::Tensor& q_input,
                             torch::Tensor& latent_cache,
                             torch::Tensor& kv_cache,
@@ -131,7 +141,7 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
                             bool use_prompt_rope);
 
   void prepare_mla_inputs(torch::Tensor& q,
-                          torch::Tensor& qr,
+                          torch::Tensor& q_norm,
                           torch::Tensor& q_input,
                           torch::Tensor& latent_cache,
                           const torch::Tensor& hidden_states,
@@ -145,29 +155,32 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   AttentionMetadata build_mla_attention_metadata(
       const torch::Tensor& positions,
       const torch::Tensor& hidden_states,
-      const torch::Tensor& qr,
+      const torch::Tensor& q_norm,
       const torch::Tensor& k_input,
       const AttentionMetadata& attn_metadata,
       KVCache& kv_cache,
       std::optional<torch::Tensor> k_cache_scale,
       bool is_prefill_phase,
+      const std::optional<torch::Tensor>& slot_mapping = std::nullopt,
       const std::optional<torch::Tensor>& new_block_tables = std::nullopt,
       const std::optional<torch::Tensor>& new_context_lens = std::nullopt);
 
-  torch::Tensor project_mla_output(const torch::Tensor& attn_output,
-                                   int64_t q_len);
+  torch::Tensor project_output(const torch::Tensor& attn_output,
+                               const HeadInfo& heads);
+
+  const HeadInfo& tp_heads() const { return tp_heads_; }
+  const HeadInfo& full_heads() const { return full_heads_; }
+  const HeadInfo& active_heads() const {
+    return use_replicated_attn_weights() ? full_heads_ : tp_heads_;
+  }
 
  private:
   bool use_full_replicated_attention_weights_ = false;
-  bool is_per_token_smoothquant_ = false;
   bool use_fused_mla_qkv_ = false;
   bool enable_lighting_indexer_ = false;
   bool has_trans_ = false;
   bool interleaved_ = false;
   double eps_;
-  int64_t tp_rank_ = 0;
-  int64_t tp_world_size_ = 1;
-  int64_t num_local_heads_;
   int64_t qk_head_dim_;
   int64_t v_head_dim_;
   int64_t q_lora_rank_;
@@ -175,6 +188,8 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   int64_t qk_nope_head_dim_;
   int64_t qk_rope_head_dim_;
   int64_t index_topk_;
+  HeadInfo tp_heads_;
+  HeadInfo full_heads_;
   torch::Tensor w_kc_;
   torch::Tensor w_vc_;
   torch::Tensor weight_c_;
@@ -191,7 +206,6 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   RowParallelLinear o_proj_{nullptr};
 
   Attention attn_{nullptr};
-  Attention attn_full_{nullptr};
   std::shared_ptr<RotaryEmbeddingBase> rotary_emb_;
   std::shared_ptr<RotaryEmbeddingBase> indexer_rotary_emb_;
   Indexer indexer_{nullptr};

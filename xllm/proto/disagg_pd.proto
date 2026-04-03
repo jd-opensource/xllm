@@ -224,6 +224,8 @@ message DisaggGenerationsRequest {
   repeated int32 block_ids = 8;
   int32 dp_size = 9;
   int32 dp_rank = 10;
+  string x_request_id = 11;
+  string x_request_time = 12;
 }
 
 message DisaggGenerationsRequests {

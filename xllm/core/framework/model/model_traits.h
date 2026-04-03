@@ -16,7 +16,10 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
+#include <string>
 #include <type_traits>
+#include <utility>
 
 namespace xllm {
 namespace layer {
@@ -137,6 +140,20 @@ struct has_set_npu_word_embedding<
     T,
     std::void_t<decltype(std::declval<T>()->set_npu_word_embedding(
         std::declval<layer::NpuWordEmbedding&>()))>> : std::true_type {};
+
+template <typename T, typename = void>
+struct has_init_or_refresh_rolling_runtime : std::false_type {};
+
+template <typename T>
+struct has_init_or_refresh_rolling_runtime<
+    T,
+    std::void_t<decltype(std::declval<T>()->init_or_refresh_rolling_runtime(
+        std::declval<::xllm::Stream*>(),
+        std::declval<::xllm::Stream*>(),
+        std::declval<int32_t>(),
+        std::declval<int32_t>(),
+        std::declval<const std::string&>()))>> : std::true_type {};
+
 #endif
 }  // namespace detail
 }  // namespace xllm

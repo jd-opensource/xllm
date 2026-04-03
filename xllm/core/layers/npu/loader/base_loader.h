@@ -43,6 +43,7 @@ class BaseLoader {
   virtual void free_weights() {};
   virtual void reload_weights() {};
   virtual void reload_weights_from_device() {};
+  virtual void refresh_rolling_weights() {};
 
   torch::Dtype string2dtype(const std::string& dtype_str);
 
@@ -90,6 +91,7 @@ class BaseLoader {
   int32_t dp_local_tp_size_;
   int32_t dp_rank_;
   int32_t dp_local_tp_rank_;
+  int32_t cp_size_;
 
   void set_weight(const StateDict& state_dict,
                   const std::string& tensor_name,
@@ -109,6 +111,32 @@ class BaseLoader {
                   int rank,
                   int world_size,
                   bool to_host = false);
+
+  void set_weight_with_padding(const StateDict& state_dict,
+                               const std::string& tensor_name,
+                               int weight_position,
+                               int dim,
+                               int64_t padded_vocab_size,
+                               bool to_host = false);
+
+  void set_weight_with_padding(const StateDict& state_dict,
+                               const std::string& tensor_name,
+                               int weight_position,
+                               int dim,
+                               int rank,
+                               int world_size,
+                               int64_t padded_vocab_size,
+                               bool to_host = false);
+
+  at::Tensor pad_vocab_tensor(const at::Tensor& tensor,
+                              int64_t padded_vocab_size) const;
+
+  at::Tensor shard_padded_tensor(const at::Tensor& padded_tensor,
+                                 int dim,
+                                 int rank,
+                                 int world_size) const;
+
+  int64_t get_padded_vocab_size(const ModelContext& context) const;
 };
 
 }  // namespace layer

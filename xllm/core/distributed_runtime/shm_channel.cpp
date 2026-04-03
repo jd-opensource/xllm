@@ -31,17 +31,17 @@ ShmChannel::ShmChannel(int dp_group,
       "xllm_" + net::extract_port(options.master_node_addr().value_or(""));
   if (is_driver) {
     auto name = ForwardSharedMemoryManager::create_unique_name(
-        name_prefix, dp_group, FORWARD_RAW_INPUT_TYPE, rank);
+        name_prefix, dp_group, ForwardType::RAW_INPUT, rank);
     input_shm_manager_ = std::make_unique<ForwardSharedMemoryManager>(
-        name, options.input_shm_size(), is_creator, FORWARD_RAW_INPUT_TYPE);
+        name, options.input_shm_size(), is_creator, ForwardType::RAW_INPUT);
     LOG(INFO) << "Create input shared memory manager with name: " << name
               << " and size: " << options.input_shm_size();
   }
 
   auto name = ForwardSharedMemoryManager::create_unique_name(
-      name_prefix, dp_group, FORWARD_RAW_OUTPUT_TYPE, rank);
+      name_prefix, dp_group, ForwardType::RAW_OUTPUT, rank);
   output_shm_manager_ = std::make_unique<ForwardSharedMemoryManager>(
-      name, options.output_shm_size(), is_creator, FORWARD_RAW_OUTPUT_TYPE);
+      name, options.output_shm_size(), is_creator, ForwardType::RAW_OUTPUT);
   LOG(INFO) << "Create output shared memory manager with name: " << name
             << " and size: " << options.output_shm_size();
 }

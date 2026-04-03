@@ -603,6 +603,8 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   }
 #endif
 
+  auto& input_params = processed_input.input_params;
+
 #if defined(USE_NPU)
   const bool use_block_copy_kernel = FLAGS_enable_block_copy_kernel;
 #else

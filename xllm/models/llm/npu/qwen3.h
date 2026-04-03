@@ -26,7 +26,7 @@ limitations under the License.
 #include "core/layers/npu/npu_qwen3_decoder_layer_impl.h"
 #include "llm_model_base.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 class QWen3DecoderLayerImpl
     : public LlmDecoderLayerImplBase<layer::NpuQwen3DecoderLayer> {
@@ -87,9 +87,8 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       }
       // Pre-allocate aux output buffer [max_tokens_per_batch, hidden_size *
       // num_captured]
-      const size_t num_captured = layers_to_capture_set_.size();
-      const int64_t aux_dim =
-          model_args.hidden_size() * static_cast<int64_t>(num_captured);
+      const int64_t num_captured = layers_to_capture_set_.size();
+      const int64_t aux_dim = model_args.hidden_size() * num_captured;
       aux_output_buffer_ =
           torch::empty({FLAGS_max_tokens_per_batch, aux_dim}, options);
     }
@@ -110,7 +109,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     capture_aux_hidden_states_ = true;
     layers_to_capture_set_.clear();
     if (!layer_ids.has_value()) {
-      int32_t num_layers = static_cast<int32_t>(layers_.size());
+      int32_t num_layers = layers_.size();
       layers_to_capture_set_.insert(2);
       layers_to_capture_set_.insert(num_layers / 2);
       layers_to_capture_set_.insert(num_layers - 3);
@@ -149,12 +148,11 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
-
     if (positions.dim() == 2) {  // mrope
       auto apply = [this](torch::Tensor x) {
         auto freqs_t = x[0].clone();
         // mrop_length == freqs_length == head_dim / 2
-        int64_t mrop_length = static_cast<int64_t>(freqs_t.size(-1) / 2);
+        int64_t mrop_length = freqs_t.size(-1) / 2;
 
         for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
           int64_t offset = dim_idx;
@@ -165,12 +163,13 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
           // idx_first_half: [offset, offset+3, offset+6, ... < mrop_length]
           // idx_second_half: [mrop_length+offset, mrop_length+offset+3,
           //     mrop_length+offset+6, ... < 2*mrop_length]
-          auto idx_first_half = torch::arange(offset, length, 3, torch::kLong);
+          torch::TensorOptions options =
+              torch::TensorOptions().dtype(torch::kLong).device(x.device());
+          auto idx_first_half = torch::arange(offset, length, 3, options);
           auto idx_second_half = torch::arange(
-              offset + mrop_length, length + mrop_length, 3, torch::kLong);
+              offset + mrop_length, length + mrop_length, 3, options);
 
-          auto idx_tensor =
-              torch::cat({idx_first_half, idx_second_half}, 0).to(x.device());
+          auto idx_tensor = torch::cat({idx_first_half, idx_second_half}, 0);
           // freqs_t[..., idx] = freqs[dim_idx][..., idx]
           auto src = x[dim_idx].index_select(-1, idx_tensor);
           freqs_t.index_copy_(-1, idx_tensor, src);
@@ -214,7 +213,8 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         const_cast<ModelInputParams&>(input_params);
     const int64_t num_tokens = h.size(0);
     const int64_t hidden_size = h.size(-1);
-    size_t capture_idx = 0;
+    int64_t capture_idx = 0;
+    RollingLayerGuard rolling_guard(rolling_mgr_);
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event{nullptr};
       std::atomic<bool>* event_flag{nullptr};
@@ -228,15 +228,21 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       }
 
       auto& layer = layers_[i];
+      const int32_t layer_index = i;
       if (capture_aux_hidden_states_ &&
-          layers_to_capture_set_.count(static_cast<int32_t>(i)) != 0) {
+          layers_to_capture_set_.count(layer_index) != 0) {
         aux_output_buffer_.slice(0, 0, num_tokens)
-            .slice(1,
-                   static_cast<int64_t>(capture_idx) * hidden_size,
-                   static_cast<int64_t>(capture_idx + 1) * hidden_size)
+            .slice(
+                1, capture_idx * hidden_size, (capture_idx + 1) * hidden_size)
             .copy_(h.reshape({num_tokens, hidden_size}));
         capture_idx++;
       }
+
+      if (layer_forward_interrupted_) {
+        LOG(INFO) << "Forward interrupted at layer: " << i;
+        return ModelOutput();
+      }
+      rolling_guard.before_layer(layer_index);
 
       layer(h,
             cos_pos,
@@ -246,6 +252,8 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
             input_params_new,
             event,
             event_flag);
+
+      rolling_guard.after_layer(layer_index);
       if (use_deepstack) {
         if (deep_stacks.size() > 0 && i < deep_stacks.size()) {
           h = deepstack_process(
@@ -288,10 +296,10 @@ class QWen3ForCausalLMImpl : public LlmForCausalLMImplBase<QWen3Model> {
 TORCH_MODULE(QWen3ForCausalLM);
 
 // register the causal model
-REGISTER_CAUSAL_MODEL(qwen3, QWen3ForCausalLM);
+REGISTER_CAUSAL_MODEL_WITH_VARNAME(qwen3_atb, qwen3_atb, QWen3ForCausalLM);
 
 // register the model args
-REGISTER_MODEL_ARGS(qwen3, [&] {
+REGISTER_MODEL_ARGS_WITH_VARNAME(qwen3_atb, qwen3_atb, [&] {
   LOAD_ARG_OR(model_type, "model_type", "qwen3");
   LOAD_ARG_OR(dtype, "torch_dtype", "");
   LOAD_ARG_OR(vocab_size, "vocab_size", 152064);
@@ -324,4 +332,4 @@ REGISTER_MODEL_ARGS(qwen3, [&] {
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
 
-}  // namespace xllm
+}  // namespace xllm::npu::model

@@ -21,7 +21,7 @@ limitations under the License.
 #include "core/layers/npu/npu_glm4_moe_decoder_layer.h"
 #include "llm_model_base.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
@@ -73,6 +73,12 @@ class Glm4MoeDecoderLayerImpl : public torch::nn::Module {
   void reload_weights_from_device() {
     decoder_layer_->reload_weights_from_device();
   }
+
+  layer::BaseManualLoader* get_manual_loader() {
+    return decoder_layer_->get_manual_loader();
+  }
+
+  void refresh_rolling_weights() { decoder_layer_->refresh_rolling_weights(); }
 
  private:
   layer::NpuGlm4MoeDecoder decoder_layer_{nullptr};
@@ -210,6 +216,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
         const_cast<ModelInputParams&>(input_params);
     input_params_new.expert_array = expert_array;
 
+    RollingLayerGuard rolling_guard(rolling_mgr_);
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
@@ -222,6 +229,8 @@ class Glm4MoeModelImpl : public torch::nn::Module {
       }
 
       auto& layer = layers_[i];
+      const int32_t layer_index = i;
+      rolling_guard.before_layer(layer_index);
       layer(h,
             cos_pos,
             sin_pos,
@@ -230,6 +239,7 @@ class Glm4MoeModelImpl : public torch::nn::Module {
             input_params_new,
             event,
             event_flag);
+      rolling_guard.after_layer(layer_index);
     }
     auto hidden_states = norm_(h, 0);
     return ModelOutput(hidden_states);
@@ -288,6 +298,11 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     norm_->reload_weights();
   }
 
+  void reload_non_decoder_weights() {
+    npu_embed_tokens_->reload_weights();
+    norm_->reload_weights();
+  }
+
   void reload_weights_from_device() {
     npu_embed_tokens_->reload_weights_from_device();
     for (size_t i = 0; i < layers_.size(); i++) {
@@ -295,6 +310,23 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     }
     norm_->reload_weights_from_device();
   }
+
+  void refresh_rolling_weights() {
+    for (auto& layer : layers_) {
+      layer->refresh_rolling_weights();
+    }
+  }
+
+  std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
+    std::vector<layer::BaseManualLoader*> loaders;
+    loaders.reserve(layers_.size());
+    for (auto& layer : layers_) {
+      loaders.push_back(layer->get_manual_loader());
+    }
+    return loaders;
+  }
+
+  void set_rolling_load_manager(RollingLoadManager* mgr) { rolling_mgr_ = mgr; }
 
   layer::NpuWordEmbedding get_npu_word_embedding() { return npu_embed_tokens_; }
 
@@ -322,13 +354,15 @@ class Glm4MoeModelImpl : public torch::nn::Module {
   layer::NpuPosEmbedding atb_pos_emb_{nullptr};
 
   std::vector<int64_t> mrope_section_;
+  RollingLoadManager* rolling_mgr_ = nullptr;
 };
 TORCH_MODULE(Glm4MoeModel);
 
-class Glm4MoeForCausalLMImpl : public LlmForCausalLMImplBase<Glm4MoeModel> {
+class Glm4MoeForCausalLMImpl
+    : public xllm::npu::model::LlmForCausalLMImplBase<Glm4MoeModel> {
  public:
   Glm4MoeForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<Glm4MoeModel>(context) {}
+      : xllm::npu::model::LlmForCausalLMImplBase<Glm4MoeModel>(context) {}
 };
 TORCH_MODULE(Glm4MoeForCausalLM);
 
@@ -373,4 +407,4 @@ REGISTER_MODEL_ARGS(glm4_moe, [&] {
           std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
                                       args->eos_token_id_vec().end()));
 });
-}  // namespace xllm
+}  // namespace xllm::npu::model

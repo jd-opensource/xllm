@@ -17,8 +17,10 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/request/mm_data_visitor.h"
+#include "platform/device.h"
 
 namespace xllm {
 
@@ -29,36 +31,20 @@ VlmExecutorImpl::VlmExecutorImpl(CausalLM* model,
     : model_(dynamic_cast<CausalVLM*>(model)),
       args_(args),
       device_(device),
-      options_(options) {}
+      options_(options) {
+  if (FLAGS_enable_graph) {
+    llm_executor_ = ExecutorImplFactory::get_instance().create_executor_impl(
+        model, args, device, options, Device::type_str());
+  }
+}
 
 ForwardInput VlmExecutorImpl::prepare_inputs(Batch& batch) {
-  return batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
+  return batch.prepare_forward_input(
+      options_.num_decoding_tokens(), 0, args_, options_.cp_size());
 }
 
 MMDict VlmExecutorImpl::encode(const ModelInputParams& params) {
   return dynamic_cast<CausalVLM*>(model_)->encode(params);
-}
-
-void VlmExecutorImpl::process_mm_data(ModelInputParams& params,
-                                      CausalVLM* model,
-                                      const torch::Device& device,
-                                      const torch::Tensor& tokens) {
-  auto& mm_data = params.mm_data;
-  EncoderInputGatherVisitor input_gather;
-  mm_data.foreach (input_gather);
-  CHECK(input_gather.finish(mm_data));
-  mm_data.to(device);
-
-  auto embedding = model->encode(params);
-  EncoderOutputScatterVisitor scatter(embedding);
-  mm_data.foreach (scatter);
-  CHECK(scatter.finish());
-
-  EncoderEmbeddingGatherVisitor gather(device);
-  mm_data.foreach (gather);
-  CHECK(gather.finish(mm_data));
-
-  params.input_embedding = model->get_input_embeddings(tokens, params);
 }
 
 ModelOutput VlmExecutorImpl::run(const torch::Tensor& tokens,
@@ -66,9 +52,26 @@ ModelOutput VlmExecutorImpl::run(const torch::Tensor& tokens,
                                  std::vector<KVCache>& kv_caches,
                                  const ModelInputParams& params) {
   torch::NoGradGuard no_grad;
+  auto& mm_data = params.mm_data;
+  EncoderInputGatherVisitor input_gather;
+  mm_data.foreach (input_gather);
+  CHECK(input_gather.finish(mm_data));
+  mm_data.to(device_);
 
-  process_mm_data(
-      const_cast<ModelInputParams&>(params), model_, device_, tokens);
+  auto embedding = encode(params);
+  EncoderOutputScatterVisitor scatter(embedding);
+  mm_data.foreach (scatter);
+  CHECK(scatter.finish());
+
+  EncoderEmbeddingGatherVisitor gather(device_);
+  mm_data.foreach (gather);
+  CHECK(gather.finish(mm_data));
+
+  params.input_embedding = model_->get_input_embeddings(tokens, params);
+
+  if (llm_executor_) {
+    return llm_executor_->run(tokens, positions, kv_caches, params);
+  }
 
   return model_->forward(tokens, positions, kv_caches, params);
 }

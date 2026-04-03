@@ -34,6 +34,15 @@ limitations under the License.
 #include "xllm_ops_api.h"
 
 namespace xllm::kernel::npu {
+
+// Used by the sampling logits preprocessing path on NPU.
+// This wrapper applies top-k and top-p filtering before token sampling so the
+// downstream sampler only sees the kept candidates.
+// Inputs:
+//   topK: top-k threshold tensor for this sampling step.
+//   topP: top-p threshold tensor for this sampling step.
+// Outputs:
+//   logits: logits tensor filtered in place and consumed by the sampler.
 void top_k_top_p(torch::Tensor& logits,
                  const torch::Tensor& topK,
                  const torch::Tensor& topP) {

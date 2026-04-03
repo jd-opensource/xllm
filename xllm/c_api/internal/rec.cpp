@@ -96,7 +96,6 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
             xllm_init_options.num_request_handling_threads)
         .communication_backend(xllm_init_options.communication_backend)
         .expert_parallel_degree(xllm_init_options.expert_parallel_degree)
-        .enable_mla(xllm_init_options.enable_mla)
         .enable_chunked_prefill(xllm_init_options.enable_chunked_prefill)
         .master_node_addr(xllm_init_options.master_node_addr)
         .device_ip(xllm_init_options.device_ip)
@@ -117,23 +116,42 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     // @TODO: Currently, gflags are configured through hard coding, which needs
     // to be improved in the future. For example, a separate gflags
     // configuration file can be provided to the so for setting gflags.
+    //
+    // REC so still has two configuration paths:
+    // - some request/runtime code reads FLAGS_* directly
+    // - master/worker construction reads xllm::Options
+    //
+    // The fields copied from init options below are read from FLAGS_* today.
+    // beam_width/block_size/max_tokens/max_seqs are also represented in
+    // Options, so duplicated values must stay aligned.
     FLAGS_beam_width = xllm_init_options.beam_width;
     FLAGS_max_decode_rounds = xllm_init_options.max_decode_rounds;
     FLAGS_max_seqs_per_batch = xllm_init_options.max_seqs_per_batch;
     FLAGS_max_tokens_per_batch = xllm_init_options.max_tokens_per_batch;
     FLAGS_block_size = xllm_init_options.block_size;
 
+    // Hard-coded REC so settings. enable_graph and rec_worker_max_concurrency
+    // are dual-source: runtime may read FLAGS_* while setup also needs the same
+    // value in Options.
     FLAGS_enable_graph = true;
     FLAGS_rec_worker_max_concurrency = 2;
+
+    // Flag-only runtime toggles in the REC so path.
     FLAGS_enable_rec_fast_sampler = true;
     FLAGS_enable_prefill_piecewise_graph = true;
     FLAGS_enable_xattention_one_stage = false;
-    FLAGS_enable_xattention_two_stage_decode = true;
     FLAGS_enable_graph_mode_decode_no_padding = true;
     // FLAGS_enable_rec_prefill_only = true;
     FLAGS_enable_topk_sorted = false;
 
-    options.enable_graph(FLAGS_enable_graph);
+    // Keep dual-source settings aligned with the FLAGS_* values above.
+    options.enable_graph(FLAGS_enable_graph)
+        .beam_width(FLAGS_beam_width)
+        .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency);
+
+#if !defined(USE_NPU)
+    FLAGS_enable_block_copy_kernel = false;
+#endif
 
     handler->master = std::make_unique<xllm::RecMaster>(options);
     handler->master->run();

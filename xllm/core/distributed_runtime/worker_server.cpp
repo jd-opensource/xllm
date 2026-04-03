@@ -21,16 +21,23 @@ limitations under the License.
 #include <folly/futures/Future.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+#include <signal.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #include <torch/torch.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <memory>
-#include <optional>
 #include <utility>
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#if defined(USE_CUDA)
+#include "core/platform/numa_utils.h"
+#endif
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state/collective_communicator.h"
@@ -66,13 +73,36 @@ void WorkerServer::create_server(
     int32_t dp_size,
     int local_rank,
     int32_t ep_size,
+    int32_t cp_size,
     WorkerType worker_type,
     std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
     std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
   FLAGS_enable_prefill_sp = options.enable_prefill_sp();
+#if defined(USE_NPU)
+  FLAGS_npu_kernel_backend = options.npu_kernel_backend();
+#endif
   Device device(d);
   device.set_device();
   LOG(INFO) << "Create worker server with device: " << device.index();
+
+#if defined(USE_CUDA)
+  // Bind worker thread to the same NUMA node as the device
+  // This prevents the thread from spanning across NUMA nodes, which would
+  // significantly degrade memory access and other performance aspects
+  int32_t numa_node = numa::get_device_numa_node(device.index());
+  if (numa_node >= 0) {
+    LOG(INFO) << "Worker thread (device " << device.index()
+              << ") binding to NUMA node " << numa_node;
+    int32_t ret = numa::bind_thread_to_numa_node(numa_node);
+    if (ret != 0) {
+      LOG(WARNING) << "Failed to bind worker thread to NUMA node " << numa_node
+                   << ", continuing without NUMA binding";
+    }
+  } else {
+    LOG(INFO) << "NUMA node detection not available or not needed for device "
+              << device.index();
+  }
+#endif
 
   auto worker_global_rank = global_rank;
   // TODO: FIXME Later
@@ -101,9 +131,14 @@ void WorkerServer::create_server(
   addr_info.set_address(worker_server_addr);
   addr_info.set_global_rank(worker_global_rank);
   proto::CommUniqueIdList uids;
-  sync_master_node(master_node_addr, addr_info, uids);
+  if (!sync_master_node(master_node_addr, addr_info, uids)) {
+    LOG(WARNING) << "Worker#" << worker_global_rank
+                 << " failed to sync with master node, stop worker startup.";
+    return;
+  }
 
-  CollectiveCommunicator comm(worker_global_rank, world_size, dp_size, ep_size);
+  CollectiveCommunicator comm(
+      worker_global_rank, world_size, dp_size, ep_size, cp_size);
   const ParallelArgs* parallel_args = comm.parallel_args();
   comm.create_process_groups(master_node_addr, device);
 
@@ -122,12 +157,24 @@ void WorkerServer::create_server(
 }
 
 void WorkerServer::stop() {
-  auto worker_server = ServerRegistry::get_instance().get_server(server_name_);
-  if (worker_server) {
-    worker_server->stop();
-
-    ServerRegistry::get_instance().unregister_server(server_name_);
+  bool expected = false;
+  if (!stopped_.compare_exchange_strong(expected, true)) {
+    return;
   }
+
+  auto& registry = ServerRegistry::get_instance();
+  auto worker_server = registry.try_get_server(server_name_);
+  if (worker_server != nullptr) {
+    worker_server->stop();
+    registry.unregister_server(server_name_);
+  }
+
+  if (worker_thread_ && worker_thread_->joinable()) {
+    worker_thread_->join();
+  }
+
+  stop_spawn_worker();
+  use_spwan_worker_ = false;
 }
 
 void WorkerServer::create_spawn_server(int local_rank,
@@ -182,19 +229,15 @@ void WorkerServer::create_spawn_server(int local_rank,
                         communication_backend_ptr,
                         nullptr};
   pid_t pid;
-  posix_spawn_file_actions_init(&file_actions_);
-  posix_spawnattr_init(&spawn_attr_);
-  int status = posix_spawnp(&pid,
-                            argv[0],
-                            &file_actions_,
-                            &spawn_attr_,
-                            const_cast<char**>(argv),
-                            environ);
+  int status = posix_spawnp(
+      &pid, argv[0], nullptr, nullptr, const_cast<char**>(argv), environ);
   if (status != 0) {
     LOG(ERROR) << "posix_spawnp failed: " << strerror(status);
     return;
   }
   use_spwan_worker_ = true;
+  spawned_worker_pid_ = pid;
+  LOG(INFO) << "Spawn worker success, pid: " << spawned_worker_pid_;
   done.store(true);
 }
 
@@ -211,15 +254,15 @@ void WorkerServer::prepare_shm(
     std::string name_prefix =
         "xllm_" + net::extract_port(options.master_node_addr().value());
     string name = ForwardSharedMemoryManager::create_unique_name(
-        name_prefix, dp_group, FORWARD_RAW_INPUT_TYPE, parallel_args.rank());
+        name_prefix, dp_group, ForwardType::RAW_INPUT, parallel_args.rank());
     input_shm_manager = std::make_unique<ForwardSharedMemoryManager>(
-        name, options.input_shm_size(), is_creator, FORWARD_RAW_INPUT_TYPE);
+        name, options.input_shm_size(), is_creator, ForwardType::RAW_INPUT);
     LOG(INFO) << "Create input shared memory manager with name: " << name;
 
     name = ForwardSharedMemoryManager::create_unique_name(
-        name_prefix, dp_group, FORWARD_RAW_OUTPUT_TYPE, parallel_args.rank());
+        name_prefix, dp_group, ForwardType::RAW_OUTPUT, parallel_args.rank());
     output_shm_manager = std::make_unique<ForwardSharedMemoryManager>(
-        name, options.output_shm_size(), is_creator, FORWARD_RAW_OUTPUT_TYPE);
+        name, options.output_shm_size(), is_creator, ForwardType::RAW_OUTPUT);
     LOG(INFO) << "Create output shared memory manager with name: " << name;
   }
 }
@@ -271,6 +314,7 @@ WorkerServer::WorkerServer(int local_worker_idx,
                                         parallel_args.dp_size(),
                                         local_worker_idx,
                                         parallel_args.ep_size(),
+                                        parallel_args.cp_size(),
                                         worker_type,
                                         std::move(input_shm_manager),
                                         std::move(output_shm_manager));
@@ -326,22 +370,29 @@ bool WorkerServer::sync_master_node(const std::string& master_node_addr,
   return true;
 }
 
-WorkerServer::~WorkerServer() {
-  auto worker_server = ServerRegistry::get_instance().get_server(server_name_);
-  if (worker_server != nullptr) {
-    worker_server->stop();
+WorkerServer::~WorkerServer() { stop(); }
+
+void WorkerServer::stop_spawn_worker() {
+  if (!use_spwan_worker_ || spawned_worker_pid_ <= 0) {
+    return;
   }
 
-  if (worker_thread_ && worker_thread_->joinable()) {
-    worker_thread_->join();
+  if (kill(spawned_worker_pid_, SIGTERM) != 0 && errno != ESRCH) {
+    LOG(WARNING) << "Failed to send SIGTERM to spawn worker pid "
+                 << spawned_worker_pid_ << ", errno: " << errno;
   }
 
-  if (use_spwan_worker_) {
-    posix_spawn_file_actions_destroy(&file_actions_);
-    posix_spawnattr_destroy(&spawn_attr_);
+  int status = 0;
+  pid_t ret = waitpid(spawned_worker_pid_, &status, 0);
+  if (ret == spawned_worker_pid_) {
+    LOG(INFO) << "Spawn worker(pid=" << spawned_worker_pid_
+              << ") exited with status: " << status;
+  } else if (ret < 0 && errno != ECHILD) {
+    LOG(WARNING) << "waitpid failed for spawn worker pid "
+                 << spawned_worker_pid_ << ", errno: " << errno;
   }
 
-  ServerRegistry::get_instance().unregister_server(server_name_);
+  spawned_worker_pid_ = -1;
 }
 
 }  // namespace xllm

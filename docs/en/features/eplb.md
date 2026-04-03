@@ -1,4 +1,4 @@
-# EPLB
+# MoE Load Balancing (EPLB)
 
 ## Background
 
@@ -6,7 +6,7 @@ MoE models rely on dynamic token routing to distribute tokens among experts. How
 
 ## Features
 
-The xLLM EPLB functionality is implemented through three main modules:
+The xLLM MoE Load Balancing (EPLB) functionality is implemented through three main modules:
 
 - **EPLB Manager**: Responsible for monitoring expert loads, collecting and managing expert distribution updates. It uses a layer-by-layer update mechanism, determining whether to update each layer based on expert load changes.
 - **EPLB Executor**: The actual executor for expert distribution updates.

@@ -17,6 +17,29 @@ from utils import get_cpu_arch, get_device_type, pre_build, get_version, check_a
 
 BUILD_TEST_FILE: bool = True
 BUILD_EXPORT: bool = True
+
+
+def _maybe_compile_tilelang_kernels(device: str) -> None:
+    if device != "npu":
+        return
+
+    output_root = os.path.join(get_cmake_dir(), "xllm", "compiler", "tilelang")
+    os.makedirs(output_root, exist_ok=True)
+
+    env = os.environ.copy()
+    base_dir = get_base_dir()
+
+    cmd = [
+        sys.executable,
+        os.path.join(base_dir, "xllm", "compiler", "tilelang_launcher.py"),
+        "compile-kernels",
+        "--target",
+        "ascend",
+        "--output-root",
+        output_root,
+    ]
+    print("[INFO] compiling TileLang kernels via source-tree launcher")
+    subprocess.check_call(cmd, cwd=base_dir, env=env)
         
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
@@ -27,7 +50,7 @@ class CMakeExtension(Extension):
 class ExtBuild(build_ext):
     user_options = build_ext.user_options + [
         ("base-dir=", None, "base directory of xLLM project"),
-        ("device=", None, "target device type (a3 or a2 or mlu or cuda or musa)"),
+        ("device=", None, "target device type (npu or mlu or cuda or ilu or musa)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("generate-so=", None, "generate so or binary"),
     ]
@@ -112,13 +135,14 @@ class ExtBuild(build_ext):
         ]
 
         if self.device is None:
-            raise ValueError("Please set --device to a2 or a3 or mlu or cuda or ilu or musa.")
+            raise ValueError("Please set --device to npu or mlu or cuda or ilu or musa.")
         if self.arch is None:
             raise ValueError("Please set --arch to x86 or arm.")
 
-        if self.device == "a2" or self.device == "a3":
+        if self.device == "npu":
             cmake_args += ["-DUSE_NPU=ON"]
             set_npu_envs()
+            _maybe_compile_tilelang_kernels(self.device)
         elif self.device == "mlu":
             cmake_args += ["-DUSE_MLU=ON"]
             set_mlu_envs()
@@ -138,7 +162,7 @@ class ExtBuild(build_ext):
             global BUILD_TEST_FILE
             BUILD_TEST_FILE = False
         else:
-            raise ValueError("Please set --device to a2 or a3 or mlu or cuda or ilu or musa.")
+            raise ValueError("Please set --device to npu or mlu or cuda or ilu or musa.")
 
         product: str = "xllm"
         if self.generate_so:
@@ -179,9 +203,7 @@ class ExtBuild(build_ext):
     ) -> None:
         """Build CMake targets"""
         cmake_dir = get_cmake_dir()
-        subprocess.check_call(
-            ["cmake", self.base_dir] + cmake_args, cwd=cmake_dir, env=env
-        )
+        subprocess.check_call(["cmake", self.base_dir] + cmake_args, cwd=cmake_dir, env=env)
 
         base_build_args = build_args
         # add build target to speed up the build process
@@ -230,9 +252,7 @@ class ExtBuildSingleTest(ExtBuild):
     ) -> None:
         """Override method: only build the specified test target and run"""
         cmake_dir = get_cmake_dir()
-        subprocess.check_call(
-            ["cmake", self.base_dir] + cmake_args, cwd=cmake_dir, env=env
-        )
+        subprocess.check_call(["cmake", self.base_dir] + cmake_args, cwd=cmake_dir, env=env)
 
         base_build_args = build_args
         # Only build the specified test target
@@ -288,7 +308,7 @@ class ExtBuildSingleTest(ExtBuild):
 
 class BuildDistWheel(bdist_wheel):
     user_options = bdist_wheel.user_options + [
-        ("device=", None, "target device type (a3 or a2 or mlu or cuda or musa)"),
+        ("device=", None, "target device type (npu or mlu or cuda or ilu or musa)"),
         ("arch=", None, "target arch type (x86 or arm)"),
     ]
 
@@ -461,7 +481,7 @@ class SingleTest(Command):
     #   python setup.py test --test-name common_test
     user_options = [
         ("test-name=", None, "name of the test target to build and run (e.g. platform_vmm_test)"),
-        ("device=", None, "target device type (a3 or a2 or mlu or cuda or ilu)"),
+        ("device=", None, "target device type (npu or mlu or cuda or ilu)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("generate-so=", None, "generate so or binary"),
     ]
@@ -496,7 +516,7 @@ class SingleTest(Command):
 def parse_arguments() -> dict[str, Any]:
     parser = argparse.ArgumentParser(
         description='Setup helper for building xllm',
-        epilog='Example: python setup.py build --device a3',
+        epilog='Example: python setup.py build',
         usage='%(prog)s [COMMAND] [OPTIONS]'
     )
     
@@ -510,11 +530,10 @@ def parse_arguments() -> dict[str, Any]:
     parser.add_argument(
         '--device',
         type=str.lower,
-        choices=['auto', 'a2', 'a3', 'mlu', 'cuda', 'ilu', 'musa'],
+        choices=['auto', 'npu', 'mlu', 'cuda', 'ilu', 'musa'],
         default='auto',
-        help='Device type: a2, a3, mlu, ilu, cuda or musa (case-insensitive)'
+        help='Device type: npu, mlu, ilu, cuda or musa (case-insensitive)'
     )
-
     parser.add_argument(
         '--generate-so',
         type=str.lower,
@@ -591,7 +610,7 @@ if __name__ == "__main__":
         version=version,
         license="Apache 2.0",
         author="xLLM Team",
-        author_email="infer@jd.com",
+        author_email="infer@xllm.ai",
         description="A high-performance inference system for large language models.",
         long_description=read_readme(),
         long_description_content_type="text/markdown",

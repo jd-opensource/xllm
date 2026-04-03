@@ -153,6 +153,16 @@ class ModelRegistry {
   std::unordered_map<std::string, std::string> model_backend_;
 };
 
+bool resolve_model_registration_name(const std::string& model_type,
+                                     std::string* resolved_name,
+                                     std::string* error_message = nullptr);
+
+bool resolve_model_registration(const std::string& model_type,
+                                const std::string& requested_npu_kernel_backend,
+                                std::string* effective_npu_kernel_backend,
+                                std::string* resolved_name,
+                                std::string* error_message = nullptr);
+
 std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context);
 
 std::unique_ptr<CausalLM> create_rec_model(const ModelContext& context);

@@ -394,13 +394,9 @@ void NpuDeepseekV2DecoderLayerImpl::initialize_mlp_parameters(
   param.scaledTopk = -1;
   param.enableATBGateMatmul = true;
 
-#if defined(USE_A3)
   param.enableIndexGmm = false;
   param.enableLcocAll2All = param.isPrefill && dp_size_ == 1;
-#else
-  // TODO: xllm ops's GMM need to support MTP.
-  param.enableIndexGmm = false;
-#endif
+
   if (layer_id_ >= param.firstKDenseReplace) {
     param.enableQkvdownDp = false;
     param.enableSharedExpertDp = false;

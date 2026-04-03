@@ -20,7 +20,7 @@ limitations under the License.
 #include "models/vlm/npu/qwen2_5_vl.h"
 #include "models/vlm/npu/qwen2_vl.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 class Qwen2_VLForEmbeddingImpl : public torch::nn::Module {
  public:
@@ -174,10 +174,14 @@ class Qwen2_VLForEmbeddingImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Qwen2_VLForEmbedding);
 
+}  // namespace xllm::npu::model
+
+namespace xllm {
+
 template <>
-class EmbeddingVLMImpl<xllm::Qwen2_VLForEmbedding> : public EmbeddingVLM {
+class EmbeddingVLMImpl<npu::model::Qwen2_VLForEmbedding> : public EmbeddingVLM {
  public:
-  EmbeddingVLMImpl(xllm::Qwen2_VLForEmbedding model,
+  EmbeddingVLMImpl(npu::model::Qwen2_VLForEmbedding model,
                    const torch::TensorOptions& options)
       : model_(std::move(model)), options_(options) {}
 
@@ -236,11 +240,11 @@ class EmbeddingVLMImpl<xllm::Qwen2_VLForEmbedding> : public EmbeddingVLM {
   }
 
  private:
-  xllm::Qwen2_VLForEmbedding model_;
+  npu::model::Qwen2_VLForEmbedding model_;
   torch::TensorOptions options_;
 };
 
 REGISTER_EMBEDDING_VLM_MODEL_WITH_VARNAME(qwen2_vl_embedding,
                                           qwen2_vl,
-                                          Qwen2_VLForEmbedding);
+                                          npu::model::Qwen2_VLForEmbedding);
 }  // namespace xllm

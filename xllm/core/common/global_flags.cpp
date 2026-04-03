@@ -71,10 +71,6 @@ DEFINE_string(devices,
               "npu:0",
               "Devices to run the model on, e.g. npu:0, npu:0,npu:1.");
 
-DEFINE_bool(enable_mla,
-            false,
-            "Whether to enable multi-head latent attention.");
-
 DEFINE_bool(enable_customize_mla_kernel, false, "enable customize mla kernel");
 
 // --- graph mode execution config ---
@@ -197,6 +193,20 @@ DEFINE_bool(enable_online_preempt_offline,
             true,
             "Whether to enable online preempt offline.");
 
+// --- mix scheduler scheduling config ---
+
+DEFINE_double(aggressive_coeff,
+              1.0,
+              "Aggressive coefficient for MixScheduler urgency judgment.");
+
+DEFINE_double(starve_threshold,
+              1.0,
+              "Starvation threshold coefficient for MixScheduler.");
+
+DEFINE_bool(enable_starve_prevent,
+            true,
+            "Whether to enable anti-starvation in MixScheduler.");
+
 // for rec, it's better to set to 100;
 DEFINE_int32(request_queue_size,
              100000,
@@ -207,6 +217,8 @@ DEFINE_int32(request_queue_size,
 DEFINE_int32(dp_size, 1, "Data parallel size for MLA attention.");
 
 DEFINE_int32(ep_size, 1, "Expert parallel size for MoE model.");
+
+DEFINE_int32(cp_size, 1, "Context parallel size for DSA attention.");
 
 DEFINE_string(
     communication_backend,
@@ -386,8 +398,9 @@ DEFINE_bool(speculative_suffix_use_tree_spec,
 
 DEFINE_bool(enable_opt_validate_probs,
             false,
-            "Whether to use optimized draft_probs handling in speculative "
-            "validation.");
+            "Whether validate uses selected-only draft_probs [B,S] directly. "
+            "If false, selected-only cache values are restored to dense "
+            "[B,S,V].");
 
 DEFINE_bool(enable_atb_spec_kernel,
             false,
@@ -395,9 +408,15 @@ DEFINE_bool(enable_atb_spec_kernel,
 
 // --- block copy config ---
 
+#if defined(USE_NPU)
 DEFINE_bool(enable_block_copy_kernel,
             true,
-            "Whether to use ATB block copy kernel.");
+            "Whether to use ATB block copy kernel. NPU-only.");
+#else
+DEFINE_bool(enable_block_copy_kernel,
+            false,
+            "Whether to use ATB block copy kernel. NPU-only.");
+#endif
 
 // --- service routing config ---
 
@@ -466,10 +485,37 @@ DEFINE_int32(micro_batch_num,
 
 DEFINE_int32(max_requests_per_batch, 1, "Max number of request per batch.");
 
+DEFINE_bool(enable_manual_loader,
+            false,
+            "Pin decoder layer weights to host memory and use async H2D "
+            "transfer. Required by enable_rolling_load; also implied by "
+            "enable_xtensor.");
+
 DEFINE_bool(
     enable_xtensor,
     false,
     "Whether to enable xtensor for model weights with physical page pool.");
+
+// --- rolling load config ---
+
+DEFINE_bool(enable_rolling_load,
+            false,
+            "Enable rolling weight load: keep only N decoder layer weight "
+            "slots in HBM and stream-load each layer just-in-time. "
+            "Requires enable_manual_loader=true. NPU only.");
+
+DEFINE_int32(rolling_load_num_cached_layers,
+             2,
+             "Number of decoder layer weight slots to keep in HBM when "
+             "enable_rolling_load=true.");
+
+DEFINE_int32(rolling_load_num_rolling_slots,
+             -1,
+             "Number of rolling slots used by decoder rolling load. "
+             "Fixed slots are computed as "
+             "rolling_load_num_cached_layers - rolling_load_num_rolling_slots."
+             " -1 means auto (min(2, preload_count)). "
+             "Must be in [-1, rolling_load_num_cached_layers].");
 
 DEFINE_int64(
     phy_page_granularity_size,
@@ -501,18 +547,19 @@ DEFINE_bool(
 
 // --- reasoning parser config ---
 
-DEFINE_string(
-    reasoning_parser,
-    "",
-    "Specify the reasoning parser for handling reasoning "
-    "interactions(e.g. auto, glm45, glm47, glm5, qwen3, deepseek-r1).");
+DEFINE_string(reasoning_parser,
+              "",
+              "Specify the reasoning parser for handling reasoning "
+              "interactions(e.g. auto, glm45, glm47, glm5, qwen3, qwen35, "
+              "deepseek-r1).");
 
 // --- function call config ---
 
 DEFINE_string(tool_call_parser,
               "",
               "Specify the parser for handling tool-call interactions(e.g. "
-              "auto, qwen25, qwen3, kimi_k2, deepseekv3, glm45, glm47, glm5).");
+              "auto, qwen25, qwen3, qwen35, qwen3_coder, kimi_k2, "
+              "deepseekv3, glm45, glm47, glm5).");
 
 // --- qwen3 reranker config ---
 
@@ -590,17 +637,13 @@ DEFINE_uint32(rec_worker_max_concurrency,
               "equal to 1 means disable concurrent rec worker.");
 
 #if defined(USE_NPU)
-
-// USE_NPU_TORCH: Temporary flag used for debugging qwen3 torch NPU graph
-// capture. This variable may be removed in the future.
 DEFINE_string(npu_kernel_backend,
-#if defined(USE_NPU_TORCH)
-              "TORCH",
-#else
-              "ATB",
-#endif
-              "NPU kernel backend. Supported options: ATB, TORCH.");
+              "AUTO",
+              "NPU kernel backend. Supported options: AUTO, ATB, TORCH.");
 
+DEFINE_bool(enable_intralayer_addnorm,
+            false,
+            "enable fused intralayer addnorm ops.");
 #endif
 
 // --- multi-step decode config ---
@@ -616,7 +659,6 @@ DEFINE_int32(beam_width, 1, "Beam width for beam search.");
 DEFINE_int32(health_check_interval_ms,
              3000,
              "Worker health check interval in milliseconds.");
-
 DEFINE_bool(enable_xattention_one_stage,
             false,
             "Whether to force xattention one-stage decode for rec "

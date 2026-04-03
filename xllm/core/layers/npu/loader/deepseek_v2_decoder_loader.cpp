@@ -378,10 +378,10 @@ void DeekseekV2DecoderLoader::process_expert_weights(
   const int safe_end =
       std::min(end_idx, static_cast<int>(device_expert_list_.size()));
 
-  auto it = std::find(device_expert_list_.begin() + start_idx,
-                      device_expert_list_.begin() + safe_end,
+  auto it = std::find(device_expert_list_.cbegin() + start_idx,
+                      device_expert_list_.cbegin() + safe_end,
                       expert_index);
-  const bool in_partition = it != device_expert_list_.begin() + safe_end;
+  const bool in_partition = it != device_expert_list_.cbegin() + safe_end;
 
   // Early return if neither EPLB nor partition needs this expert
   if (!needs_eplb && !in_partition) {
@@ -422,11 +422,11 @@ void DeekseekV2DecoderLoader::process_expert_weights(
   // Step 5: Handle partition case
   if (in_partition) {
     std::vector<size_t> matches_pos;
-    for (auto iter = it; iter != device_expert_list_.begin() + safe_end;
+    for (auto iter = it; iter != device_expert_list_.cbegin() + safe_end;
          ++iter) {
       if (*iter == expert_index) {
         matches_pos.emplace_back(
-            std::distance(device_expert_list_.begin(), iter) - start_idx);
+            std::distance(device_expert_list_.cbegin(), iter) - start_idx);
       }
     }
 
@@ -609,33 +609,15 @@ void DeekseekV2DecoderLoader::merge_experts_weights() {
                               device_);
   }
 
-#if defined(USE_A3)
-  torch::Tensor mlp_down_weight =
-      merge_experts_weights(experts_weights_["down_proj.weight"],
-                            device_,
-                            /*transpose=*/false);
-  // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-  //     at_npu::native::npu_format_cast(mlp_down_weight, 29);
+  // Optimization in coordination with MoeGroupedMatmulWeightNZOperation:
+  // ** Non-quantized weights use the ACL_FORMAT_FRACTAL_NZ layout,
+  // ** while the quantized version continues to use the ACL_FORMAT_ND layout.
+  int data_type = quantize_type_ == "" ? ACL_FORMAT_FRACTAL_NZ : ACL_FORMAT_ND;
+  torch::Tensor mlp_down_weight = merge_experts_weights(
+      experts_weights_["down_proj.weight"], device_, /*transpose=*/false);
   at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-      at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
-#else
-  // TODO: xllm ops's GMM need to support MTP.
-  if (decode_isBF16_ && false) {
-    torch::Tensor mlp_down_weight =
-        merge_experts_weights(experts_weights_["down_proj.weight"],
-                              device_,
-                              /*transpose=*/true);
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 29);
-  } else {
-    torch::Tensor mlp_down_weight =
-        merge_experts_weights(experts_weights_["down_proj.weight"],
-                              device_,
-                              /*transpose=*/false);
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
-  }
-#endif
+      at_npu::native::npu_format_cast(mlp_down_weight, data_type).contiguous();
+
   if (quantize_type_ == "w8a8_dynamic") {
     at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] = merge_experts_weights(
         experts_weights_["down_proj.weight_offset"], device_);

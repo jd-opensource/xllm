@@ -47,6 +47,17 @@ limitations under the License.
 
 namespace xllm::npu {
 
+namespace {
+int64_t get_decode_graph_capacity(const runtime::Options& options) {
+  CHECK_GT(options.num_decoding_tokens(), 0)
+      << "num_decoding_tokens must be > 0 for graph capacity";
+  if (FLAGS_enable_atb_spec_kernel) {
+    return options.max_seqs_per_batch();
+  }
+  return options.max_seqs_per_batch() * options.num_decoding_tokens();
+}
+}  // namespace
+
 // GraphPersistentParam implementation
 GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
                                            const torch::Device& device,
@@ -71,7 +82,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   // num_decode_tokens
   const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
   // num_sequences
-  const int64_t max_seqs_per_batch = options.max_seqs_per_batch();
+  const int64_t max_seqs_per_batch = get_decode_graph_capacity(options);
   auto tensor_options = torch::TensorOptions().device(device);
 
   const int64_t max_seq_len = args_.max_position_embeddings();
@@ -79,14 +90,13 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   // Create persistent tensors with max_tokens_per_batch as first dimension
   persistent_tokens_ = torch::zeros({max_tokens_per_batch},
                                     torch::dtype(torch::kInt).device(device));
-  // mRoPE positions have shape [3, num_tokens], regular positions have shape
-  // [num_tokens]
-  if (use_mrope_) {
-    persistent_positions_ = torch::zeros(
-        {3, max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
-  } else {
+  if (args.rope_scaling_mrope_section().empty()) {
     persistent_positions_ = torch::zeros(
         {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+  } else {
+    persistent_positions_ = torch::zeros(
+        {3, max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+    use_mrope_ = true;
   }
   persistent_new_cache_slots_ = torch::zeros(
       {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
@@ -240,7 +250,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   if (params.q_cu_seq_lens.defined()) {
     // Lazy initialization: if q_cu_seq_lens_ is not initialized, initialize it
     if (q_cu_seq_lens_.numel() == 0) {
-      const int64_t max_seqs_per_batch = options_.max_seqs_per_batch();
+      const int64_t max_seqs_per_batch = get_decode_graph_capacity(options_);
       q_cu_seq_lens_ = torch::zeros({max_seqs_per_batch + 1},
                                     torch::dtype(torch::kInt).device(device_));
     }
@@ -259,7 +269,12 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
 
     // Update tiling tensor based on model type
-    if (need_update_attention_plan_) {
+    // For models with mixed attention types (e.g., qwen3_next), only update if
+    // k/v cache is defined
+    // NOTE: linear attention may pass "defined but empty" k/v cache tensors.
+    // Only treat k/v cache as valid when they are defined and non-empty.
+    if (need_update_attention_plan_ && k_cache.defined() && v_cache.defined() &&
+        k_cache.numel() > 0 && v_cache.numel() > 0) {
       plan_paged_attention_tiling(
           tokens, k_cache, v_cache, persistent_block_tables_, params, stream);
     }
@@ -309,6 +324,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
                                /*start=*/0,
                                /*end=*/actual_batch_size);
     }
+
     return params_for_capture;
   }
   return std::nullopt;
@@ -922,7 +938,8 @@ AclGraphExecutorImpl::AclGraphExecutorImpl(CausalLM* model,
 
 ForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
   // Prepare inputs for workers
-  return batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
+  return batch.prepare_forward_input(
+      options_.num_decoding_tokens(), 0, args_, options_.cp_size());
 }
 
 // Main execution method with graph optimization for decode phase

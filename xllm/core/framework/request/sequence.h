@@ -23,6 +23,7 @@ limitations under the License.
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/common/types.h"
@@ -35,6 +36,7 @@ limitations under the License.
 #include "mm_data.h"
 #include "rec_type.h"
 #include "request_output.h"
+#include "sample_slot.h"
 #include "sequence_kv_state.h"
 #include "sequence_logprob_state.h"
 #include "stopping_checker.h"
@@ -89,6 +91,8 @@ struct SequenceParams {
 
   // request id for suffix-decoding request identity
   std::string request_id;
+
+  const std::vector<SampleSlot>* sample_slots = nullptr;
 
   // sampling params
   // reference from request
@@ -185,7 +189,12 @@ class Sequence final {
   void update_mm_embeddings(const std::vector<torch::Tensor>& mm_embeddings);
   // update embeddings to the sequence
   void update_embeddings(const torch::Tensor& embedding);
-  int32_t get_embedding_id() const { return embedding_id_; }
+  bool has_embedding_id() const { return embedding_block_.is_valid(); }
+  int32_t get_embedding_id() const { return embedding_block_.id(); }
+  void set_embedding_block(Block embedding_block) {
+    embedding_block_ = std::move(embedding_block);
+  }
+  Block reset_embedding_block() { return std::move(embedding_block_); }
   const std::string& request_id() const { return request_id_; }
   // get input embedding
   torch::Tensor get_input_embedding() const { return input_embedding_; }
@@ -217,6 +226,8 @@ class Sequence final {
   // get the full output of the sequence
   SequenceOutput generate_output(const Tokenizer& tokenizer);
   SequenceOutput generate_output();
+  void generate_sample_outputs(std::vector<SequenceOutput>& outputs,
+                               const Tokenizer& tokenizer);
 
   // get the sampling parameters
   const RequestSamplingParam* sampling_param() const {
@@ -270,7 +281,9 @@ class Sequence final {
   KVCacheState& host_kv_state() { return host_kv_state_; }
 
   // for generated tokens
-  float get_average_logprob();
+  float get_acc_logprob();
+  // Returns the beam base score: accumulated logprob excluding last token.
+  float get_base_logprob();
   void generate_output_tokens_logprobs(
       size_t start_idx,
       size_t end_idx,
@@ -292,7 +305,29 @@ class Sequence final {
     return sequence_params_.sampling_param->beam_width > 1;
   }
 
+  const std::vector<SampleSlot>& sample_slots() const {
+    static const std::vector<SampleSlot> kEmpty;
+    return sequence_params_.sample_slots == nullptr
+               ? kEmpty
+               : *sequence_params_.sample_slots;
+  }
+
   bool check_need_unique_tokens() { return need_unique_tokens_; }
+
+  // True if this sequence received token updates after the previous
+  // SequencesGroup::process_beam_search() round.
+  bool updated_since_last_beam_search() const {
+    return updated_since_last_beam_search_;
+  }
+
+  void clear_updated_since_last_beam_search() {
+    updated_since_last_beam_search_ = false;
+  }
+
+  // Beam search may clone a finished sequence and then rewrite tokens to a
+  // non-finished candidate. Reset cached finish state so finished() is
+  // re-evaluated from current tokens.
+  void reset_finish_state_for_beam_search();
 
   // Multi-round beam search result caching
   void set_beam_result(int32_t bw,
@@ -453,8 +488,8 @@ class Sequence final {
   // In the next execution, we should treat these generated tokens as prompts.
   size_t volatile_num_prompt_tokens_ = 0;
 
-  // embedding id that hold the embedding.
-  int32_t embedding_id_ = -1;
+  // embedding block that holds the embedding id.
+  Block embedding_block_;
 
   // is the sequence finished
   mutable bool finished_ = false;
@@ -506,6 +541,12 @@ class Sequence final {
   int32_t total_rounds_cached_ = 0;
   std::vector<std::vector<int32_t>> beam_seq_group_flat_;
   std::vector<float> beam_last_logprobs_;
+
+  // Mark whether the sequence has new token updates in current decode step.
+  // This is only consumed by software beam search to distinguish:
+  // 1) beams that were already finished before current step and
+  // 2) beams that just became finished in current step.
+  bool updated_since_last_beam_search_ = false;
 };
 
 }  // namespace xllm

@@ -15,8 +15,8 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
-#include <signal.h>
-#include <sys/prctl.h>
+
+#include <cstdlib>
 
 #include "spawn_worker_server.h"
 
@@ -39,16 +39,9 @@ limitations under the License.
 int main(int argc, char* argv[]) {
   if (argc < 16) {
     LOG(ERROR)
-        << "Spwan worker process receive wrong args. Need 16 args, receive "
+        << "Spawn worker process receive wrong args. Need 16 args, receive "
         << argc;
     return 1;
-  }
-
-  // set PR_SET_PDEATHSIG flag that child should exit
-  // when parent process exit
-  if (prctl(PR_SET_PDEATHSIG, SIGHUP) == -1) {
-    perror("prctl");
-    return EXIT_FAILURE;
   }
 
   std::string master_node_addr = std::string(argv[1]);
@@ -67,7 +60,7 @@ int main(int argc, char* argv[]) {
   uint64_t output_shm_size = atoll(argv[14]);
   std::string communication_backend = std::string(argv[15]);
 
-  LOG(INFO) << "Spwan worker: "
+  LOG(INFO) << "Spawn worker: "
             << "master_node_addr = " << master_node_addr
             << ", local_rank = " << local_rank
             << ", world_size = " << world_size

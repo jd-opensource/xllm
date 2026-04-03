@@ -20,6 +20,7 @@ namespace layer {
 
 struct FusedMoEArgs {
   bool is_gated = true;
+  bool enable_result_reduction = true;
 };
 
 }  // namespace layer

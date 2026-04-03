@@ -42,6 +42,7 @@ class BatchInputBuilder {
       const uint64_t batch_id,
       const ModelArgs* args,
       BatchForwardType batch_forward_type,
+      int32_t cp_size = 1,
       ThreadPool* thread_pool = nullptr);
 
   ForwardInput build_forward_input(uint32_t num_decoding_tokens,
@@ -123,10 +124,9 @@ class BatchInputBuilder {
   void extract_tokens_and_positions(Sequence* sequence,
                                     uint32_t n_kv_cache_tokens,
                                     uint32_t seq_len,
+                                    uint32_t padded_seq_len,
                                     BuilderState* state_ptr = nullptr);
   void handle_sampling_parameters(Sequence* sequence,
-                                  uint32_t token_position,
-                                  uint32_t seq_len,
                                   BuilderState* state_ptr = nullptr);
   void setup_kv_cache_info(
       Sequence* sequence,
@@ -150,6 +150,7 @@ class BatchInputBuilder {
   bool use_mrope_ = false;
   uint32_t num_sequences_ = 0;
   bool need_unique_tokens_ = true;
+  int32_t cp_size_ = 1;
 
   // copy in and out cache contents
   std::unordered_set<int32_t> write_block_ids_;

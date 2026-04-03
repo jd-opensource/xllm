@@ -39,6 +39,75 @@ curl http://127.0.0.1:9977/v1/completions \
   }'
 ```
 
+sample模式：
+```bash
+curl http://127.0.0.1:9977/v1/sample \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen2-7B-Instruct",
+    "prompt": "问题：<emb_0> 是否命中。结论：<emb_0>",
+    "selector": {
+      "type": "literal",
+      "value": "<emb_0>"
+    },
+    "logprobs": 5,
+    "request_id": "sample-demo-001"
+  }'
+```
+
+典型响应：
+```json
+{
+  "id": "sample-demo-001",
+  "object": "sample_completion",
+  "created": 1773369600,
+  "model": "Qwen2-7B-Instruct",
+  "choices": [
+    {
+      "index": 0,
+      "text": "True",
+      "logprobs": {
+        "tokens": ["True", "False"],
+        "token_ids": [3456, 7890],
+        "token_logprobs": [-0.12, -2.31]
+      },
+      "finish_reason": "selector_match"
+    },
+    {
+      "index": 1,
+      "text": "",
+      "logprobs": {
+        "tokens": [],
+        "token_ids": [],
+        "token_logprobs": []
+      },
+      "finish_reason": "empty_logprobs"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 20,
+    "completion_tokens": 2,
+    "total_tokens": 22
+  }
+}
+```
+
+`/v1/sample` 使用说明：
+
+- 仅支持 `--backend=llm`，当前不支持 VLM/DiT/Rec。
+- `selector.type` 当前固定为 `literal`，`selector.value` 按 prompt 文本顺序全文匹配。
+- `logprobs` 默认值为 `5`，允许范围为 `[1, 5]`。
+- `choices[i].index` 即该命中的 `sample_id`，与 prompt 中命中顺序一一对应。
+- selector 无命中时返回 `200` 且 `choices=[]`；某命中位点无可用 logprobs 时返回 `finish_reason="empty_logprobs"`。
+- 服务日志只记录 `request_id`、`sample_id`、`match_count`、`model` 等摘要字段，不记录完整 prompt。
+
+`/v1/sample` 常见错误语义：
+
+- 缺少 `model/prompt/selector/selector.value`、`selector.type != literal` 或 `logprobs` 越界时返回 `INVALID_ARGUMENT`。
+- 模型不存在或后端不是 `llm` 时返回 `UNKNOWN`。
+- 并发达到上限时返回 `RESOURCE_EXHAUSTED`。
+- 模型处于 sleep 状态时返回 `UNAVAILABLE`。
+
 ### Python调用
 ```python
 import requests

@@ -18,29 +18,109 @@ limitations under the License.
 
 #include <absl/strings/match.h>
 #include <absl/strings/str_replace.h>
+#include <fcntl.h>
 #include <glog/logging.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <torch/torch.h>
+#include <unistd.h>
 
+#include <algorithm>
 #include <boost/algorithm/string.hpp>
+#include <cctype>
 #include <filesystem>
+#include <limits>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
 #include "core/common/rec_model_utils.h"
 #include "core/common/version_singleton.h"
 #include "core/framework/state_dict/rec_vocab_dict.h"
+#include "core/framework/state_dict/safetensors/safetensors.h"
 #include "core/framework/tokenizer/fast_tokenizer.h"
 #include "core/framework/tokenizer/rec_tokenizer.h"
 #include "core/framework/tokenizer/sentencepiece_tokenizer.h"
 #include "core/framework/tokenizer/tiktoken_tokenizer.h"
 #include "core/framework/tokenizer/tokenizer_factory.h"
+#include "core/platform/device.h"
 #include "core/util/blocking_counter.h"
 #include "core/util/json_reader.h"
+#include "core/util/scope_guard.h"
+#include "core/util/tensor_helper.h"
 #include "models/model_registry.h"
 
 namespace xllm {
 
 namespace {
+
+bool is_compressed_tensors_fp8_scheme(const nlohmann::json& config) {
+  auto type_it = config.find("type");
+  auto num_bits_it = config.find("num_bits");
+  return type_it != config.end() && !type_it->is_null() &&
+         num_bits_it != config.end() && !num_bits_it->is_null() &&
+         boost::iequals(type_it->get<std::string>(), "float") &&
+         num_bits_it->get<int64_t>() == 8;
+}
+
+bool try_load_compressed_tensors_quant_cfg(const JsonReader& reader,
+                                           QuantArgs& quant_args) {
+  const auto quant_method =
+      reader.value<std::string>("quantization_config.quant_method");
+  if (!quant_method.has_value() ||
+      !boost::iequals(*quant_method, "compressed-tensors")) {
+    return false;
+  }
+
+  const auto& data = reader.data();
+  auto quant_config_it = data.find("quantization_config");
+  if (quant_config_it == data.end() || !quant_config_it->is_object()) {
+    LOG(ERROR) << "quantization_config must be an object for "
+                  "compressed-tensors quantization.";
+    return false;
+  }
+
+  auto config_groups_it = quant_config_it->find("config_groups");
+  if (config_groups_it == quant_config_it->end() ||
+      !config_groups_it->is_object()) {
+    LOG(ERROR) << "quantization_config.config_groups must be an object for "
+                  "compressed-tensors quantization.";
+    return false;
+  }
+
+  for (const auto& [group_name, group] : config_groups_it->items()) {
+    if (!group.is_object()) {
+      continue;
+    }
+
+    auto weights_it = group.find("weights");
+    auto input_activations_it = group.find("input_activations");
+    if (weights_it == group.end() || input_activations_it == group.end() ||
+        !weights_it->is_object() || !input_activations_it->is_object()) {
+      continue;
+    }
+
+    if (!is_compressed_tensors_fp8_scheme(*weights_it) ||
+        !is_compressed_tensors_fp8_scheme(*input_activations_it)) {
+      continue;
+    }
+
+    quant_args.quant_method() = kQuantMethodFp8;
+    quant_args.bits() = 8;
+    quant_args.moe_weight_bits() = 8;
+
+    auto dynamic_it = input_activations_it->find("dynamic");
+    if (dynamic_it != input_activations_it->end() && !dynamic_it->is_null()) {
+      quant_args.activation_dynamic() = dynamic_it->get<bool>();
+    }
+    return true;
+  }
+
+  LOG(ERROR) << "Failed to find an FP8 config_group in "
+                "quantization_config.config_groups for compressed-tensors "
+                "quantization.";
+  return false;
+}
 
 bool validate_smoothquant_mixed_w4a8(const JsonReader& reader,
                                      QuantArgs& quant_args,
@@ -106,6 +186,147 @@ bool validate_smoothquant_mixed_w4a8(const JsonReader& reader,
   return true;
 }
 
+bool try_parse_layer_id_with_prefix(const std::string& tensor_name,
+                                    const std::string& prefix,
+                                    int64_t* layer_id) {
+  if (!absl::StartsWith(tensor_name, prefix) || layer_id == nullptr) {
+    return false;
+  }
+
+  const size_t begin = prefix.size();
+  if (begin >= tensor_name.size() ||
+      !std::isdigit(static_cast<unsigned char>(tensor_name[begin]))) {
+    return false;
+  }
+
+  int64_t value = 0;
+  size_t end = begin;
+  while (end < tensor_name.size() &&
+         std::isdigit(static_cast<unsigned char>(tensor_name[end]))) {
+    const int digit = tensor_name[end] - '0';
+    if (value > (std::numeric_limits<int64_t>::max() - digit) / 10) {
+      return false;
+    }
+    value = value * 10 + digit;
+    ++end;
+  }
+  if (end >= tensor_name.size() || tensor_name[end] != '.') {
+    return false;
+  }
+
+  *layer_id = value;
+  return true;
+}
+
+bool try_parse_layer_id(const std::string& tensor_name, int64_t* layer_id) {
+  static const std::vector<std::string> kLayerPrefixes = {
+      "model.layers.", "layers.", "transformer.layers."};
+  for (const auto& prefix : kLayerPrefixes) {
+    if (try_parse_layer_id_with_prefix(tensor_name, prefix, layer_id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+class ScopedMmap {
+ public:
+  ~ScopedMmap() {
+    if (mapped_addr_ != MAP_FAILED) {
+      munmap(mapped_addr_, mapped_size_);
+    }
+    if (fd_ >= 0) {
+      close(fd_);
+    }
+  }
+
+  bool map_read_only(const std::string& file_path) {
+    fd_ = open(file_path.c_str(), O_RDONLY);
+    if (fd_ < 0) {
+      PLOG(ERROR) << "Failed to open safetensors file: " << file_path;
+      return false;
+    }
+
+    struct stat sb;
+    if (fstat(fd_, &sb) != 0) {
+      PLOG(ERROR) << "Failed to stat safetensors file: " << file_path;
+      return false;
+    }
+    if (sb.st_size <= 0) {
+      LOG(ERROR) << "Safetensors file is empty: " << file_path;
+      return false;
+    }
+    mapped_size_ = static_cast<size_t>(sb.st_size);
+    mapped_addr_ = mmap(nullptr, mapped_size_, PROT_READ, MAP_PRIVATE, fd_, 0);
+    if (mapped_addr_ == MAP_FAILED) {
+      PLOG(ERROR) << "Failed to mmap safetensors file: " << file_path;
+      return false;
+    }
+    return true;
+  }
+
+  const uint8_t* data() const {
+    return static_cast<const uint8_t*>(mapped_addr_);
+  }
+
+  size_t size() const { return mapped_size_; }
+
+ private:
+  void* mapped_addr_ = MAP_FAILED;
+  size_t mapped_size_ = 0;
+  int fd_ = -1;
+};
+
+bool try_compute_tensor_nbytes(const View* tensor_view, int64_t* nbytes) {
+  if (tensor_view == nullptr || nbytes == nullptr) {
+    return false;
+  }
+
+  if (tensor_view->stop < tensor_view->start) {
+    return false;
+  }
+  const size_t byte_size = tensor_view->stop - tensor_view->start;
+  if (byte_size > static_cast<size_t>(std::numeric_limits<int64_t>::max())) {
+    return false;
+  }
+  *nbytes = static_cast<int64_t>(byte_size);
+  return true;
+}
+
+bool log_safetensors_error(::Status status,
+                           const char* op,
+                           const std::string& weights_file,
+                           const char* tensor_name = nullptr) {
+  if (status == ::Status::Ok) {
+    return true;
+  }
+  if (tensor_name == nullptr) {
+    LOG(ERROR) << op << " failed for " << weights_file
+               << ", status=" << static_cast<int>(status);
+  } else {
+    LOG(ERROR) << op << " failed for " << weights_file
+               << ", tensor_name=" << tensor_name
+               << ", status=" << static_cast<int>(status);
+  }
+  return false;
+}
+
+void check_safetensors_cleanup(::Status status,
+                               const char* op,
+                               const std::string& weights_file,
+                               const char* tensor_name = nullptr) {
+  if (tensor_name == nullptr) {
+    CHECK(status == ::Status::Ok)
+        << op << " cleanup failed for " << weights_file
+        << ", status=" << static_cast<int>(status);
+  } else {
+    CHECK(status == ::Status::Ok)
+        << op << " cleanup failed for " << weights_file
+        << ", tensor_name=" << tensor_name
+        << ", status=" << static_cast<int>(status);
+  }
+}
+
 }  // namespace
 
 bool load_quant_cfg(const JsonReader& reader, QuantArgs& quant_args) {
@@ -115,6 +336,13 @@ bool load_quant_cfg(const JsonReader& reader, QuantArgs& quant_args) {
 
   if (auto v = reader.value<std::string>("quantization_config.quant_method")) {
     quant_args.quant_method() = v.value();
+  }
+  // Only CUDA currently adapts this compressed-tensors JSON layout.
+  // For other backends, skip this special parsing path and continue with the
+  // generic quantization config parsing path.
+  if (Device::type_str() == "cuda" &&
+      try_load_compressed_tensors_quant_cfg(reader, quant_args)) {
+    return true;
   }
   if (auto v = reader.value<int64_t>("quantization_config.bits")) {
     quant_args.bits() = v.value();
@@ -225,21 +453,20 @@ int64_t HFModelLoader::get_total_weight_size() const {
   }
 
   if (index_json_path.empty()) {
-    LOG(WARNING) << "Failed to find .index.json file in "
-                 << model_weights_path_;
-    return 0;
+    LOG(ERROR) << "Failed to find .index.json file in " << model_weights_path_;
+    return -1;
   }
 
   JsonReader reader;
   if (!reader.parse(index_json_path)) {
     LOG(ERROR) << "Failed to parse json file " << index_json_path;
-    return 0;
+    return -1;
   }
 
   auto total_size = reader.value<int64_t>("metadata.total_size");
   if (!total_size.has_value()) {
-    LOG(WARNING) << "Failed to find metadata.total_size in " << index_json_path;
-    return 0;
+    LOG(ERROR) << "Failed to find metadata.total_size in " << index_json_path;
+    return -1;
   }
 
   int64_t result = total_size.value();
@@ -249,21 +476,9 @@ int64_t HFModelLoader::get_total_weight_size() const {
   // inference. Add the size of word_embedding weight (vocab_size * hidden_size
   // * bytes_per_elem)
   if (args_.tie_word_embeddings()) {
-    static const std::unordered_map<std::string, torch::Dtype> kDtypeMap = {
-        {"float16", torch::kFloat16},
-        {"bfloat16", torch::kBFloat16},
-        {"float32", torch::kFloat32},
-        {"float64", torch::kFloat64},
-        {"int8", torch::kInt8},
-        {"int16", torch::kInt16},
-        {"int32", torch::kInt32},
-        {"int64", torch::kInt64},
-        {"uint8", torch::kUInt8},
-        {"bool", torch::kBool},
-    };
-    auto it = kDtypeMap.find(args_.dtype());
-    CHECK(it != kDtypeMap.end()) << "Unsupported dtype: " << args_.dtype();
-    int64_t bytes_per_elem = torch::elementSize(it->second);
+    auto scalar_type = try_get_scalar_type_from_string(args_.dtype());
+    CHECK(scalar_type.has_value()) << "Unsupported dtype: " << args_.dtype();
+    int64_t bytes_per_elem = torch::elementSize(*scalar_type);
     int64_t embedding_size =
         args_.vocab_size() * args_.hidden_size() * bytes_per_elem;
     result += embedding_size;
@@ -272,6 +487,158 @@ int64_t HFModelLoader::get_total_weight_size() const {
   }
 
   return result;
+}
+
+int64_t HFModelLoader::get_non_decoder_weight_size() const {
+  auto scalar_type = try_get_scalar_type_from_string(args_.dtype());
+  if (!scalar_type.has_value() ||
+      (*scalar_type != torch::kFloat16 && *scalar_type != torch::kBFloat16 &&
+       *scalar_type != torch::kFloat32 && *scalar_type != torch::kFloat64 &&
+       *scalar_type != torch::kInt8)) {
+    LOG(WARNING) << "get_non_decoder_weight_size: unsupported dtype "
+                 << args_.dtype() << ", falling back to total_weight_size";
+    return get_total_weight_size();
+  }
+  int64_t bytes_per_elem = torch::elementSize(*scalar_type);
+
+  // embed_tokens: vocab_size * hidden_size
+  int64_t embed_size =
+      args_.vocab_size() * args_.hidden_size() * bytes_per_elem;
+
+  // final norm: hidden_size
+  int64_t norm_size = args_.hidden_size() * bytes_per_elem;
+
+  // lm_head: vocab_size * hidden_size
+  // When tie_word_embeddings=true, lm_head shares the checkpoint weight with
+  // embed_tokens, but still gets its own device memory allocation at runtime.
+  int64_t lm_head_size =
+      args_.vocab_size() * args_.hidden_size() * bytes_per_elem;
+
+  int64_t result = embed_size + norm_size + lm_head_size;
+  LOG(INFO) << "get_non_decoder_weight_size: embed=" << embed_size
+            << " norm=" << norm_size << " lm_head=" << lm_head_size
+            << " total=" << result;
+  return result;
+}
+
+int64_t HFModelLoader::get_max_decoder_layer_weight_size() const {
+  constexpr int64_t kInvalidLayerSize = -1;
+  if (args_.n_layers() <= 0) {
+    LOG(ERROR) << "Invalid n_layers for decoder size estimation: "
+               << args_.n_layers();
+    return kInvalidLayerSize;
+  }
+
+  std::vector<int64_t> layer_sizes(static_cast<size_t>(args_.n_layers()), 0);
+
+  for (const auto& weights_file : model_weights_files_) {
+    ScopedMmap mapping;
+    if (!mapping.map_read_only(weights_file)) {
+      return kInvalidLayerSize;
+    }
+
+    Handle* handle = nullptr;
+    if (!log_safetensors_error(
+            safetensors_deserialize(&handle, mapping.data(), mapping.size()),
+            "safetensors_deserialize",
+            weights_file)) {
+      return kInvalidLayerSize;
+    }
+    xllm::ScopeGuard handle_guard([&] {
+      if (handle != nullptr) {
+        check_safetensors_cleanup(
+            safetensors_destroy(handle), "safetensors_destroy", weights_file);
+        handle = nullptr;
+      }
+    });
+
+    const char* const* tensor_names = nullptr;
+    size_t num_tensors = 0;
+    if (!log_safetensors_error(
+            safetensors_names(handle, &tensor_names, &num_tensors),
+            "safetensors_names",
+            weights_file)) {
+      return kInvalidLayerSize;
+    }
+    xllm::ScopeGuard names_guard([&] {
+      if (tensor_names != nullptr) {
+        check_safetensors_cleanup(
+            safetensors_free_names(tensor_names, num_tensors),
+            "safetensors_free_names",
+            weights_file);
+        tensor_names = nullptr;
+        num_tensors = 0;
+      }
+    });
+
+    for (size_t i = 0; i < num_tensors; ++i) {
+      const char* tensor_name_cstr = tensor_names[i];
+      const std::string tensor_name(tensor_name_cstr);
+      int64_t layer_id = -1;
+      if (!try_parse_layer_id(tensor_name, &layer_id) || layer_id < 0 ||
+          layer_id >= args_.n_layers()) {
+        continue;
+      }
+
+      View* tensor_view = nullptr;
+      if (!log_safetensors_error(
+              safetensors_get_tensor(handle, &tensor_view, tensor_name_cstr),
+              "safetensors_get_tensor",
+              weights_file,
+              tensor_name_cstr)) {
+        return kInvalidLayerSize;
+      }
+      xllm::ScopeGuard tensor_guard([&] {
+        if (tensor_view != nullptr) {
+          check_safetensors_cleanup(safetensors_free_tensor(tensor_view),
+                                    "safetensors_free_tensor",
+                                    weights_file,
+                                    tensor_name_cstr);
+          tensor_view = nullptr;
+        }
+      });
+
+      int64_t tensor_nbytes = 0;
+      if (!try_compute_tensor_nbytes(tensor_view, &tensor_nbytes)) {
+        LOG(ERROR) << "Failed to compute tensor bytes for tensor_name="
+                   << tensor_name << " in " << weights_file;
+        return kInvalidLayerSize;
+      }
+
+      if (layer_sizes[static_cast<size_t>(layer_id)] >
+          std::numeric_limits<int64_t>::max() - tensor_nbytes) {
+        LOG(ERROR) << "Decoder layer size overflow while accumulating layer "
+                   << layer_id;
+        return kInvalidLayerSize;
+      }
+      layer_sizes[static_cast<size_t>(layer_id)] += tensor_nbytes;
+    }
+  }
+
+  int64_t max_layer_size = 0;
+  int64_t observed_layers = 0;
+  for (const int64_t layer_size : layer_sizes) {
+    if (layer_size > 0) {
+      ++observed_layers;
+      max_layer_size = std::max(max_layer_size, layer_size);
+    }
+  }
+  if (max_layer_size <= 0) {
+    LOG(ERROR) << "Failed to detect decoder-layer tensor sizes from "
+                  "safetensors metadata.";
+    return kInvalidLayerSize;
+  }
+
+  if (observed_layers != args_.n_layers()) {
+    LOG(WARNING) << "Observed decoder layer sizes for " << observed_layers
+                 << "/" << args_.n_layers()
+                 << " layers while estimating max layer size.";
+  }
+
+  LOG(INFO) << "get_max_decoder_layer_weight_size: max_layer_size="
+            << max_layer_size << ", observed_layers=" << observed_layers << "/"
+            << args_.n_layers();
+  return max_layer_size;
 }
 
 bool HFModelLoader::load_rec_vocab(const std::string& model_weights_path) {
@@ -352,10 +719,19 @@ bool HFModelLoader::load_model_args(const std::string& model_weights_path) {
     return false;
   }
 
-  auto model_args_loader = ModelRegistry::get_model_args_loader(model_type);
+  std::string resolved_model_type;
+  std::string error_message;
+  if (!resolve_model_registration_name(
+          model_type, &resolved_model_type, &error_message)) {
+    LOG(ERROR) << error_message;
+    return false;
+  }
+
+  auto model_args_loader =
+      ModelRegistry::get_model_args_loader(resolved_model_type);
   if (model_args_loader == nullptr) {
     LOG(ERROR) << "Failed to find model args loader for model type "
-               << model_type;
+               << resolved_model_type;
     return false;
   }
   model_args_loader(reader, &args_);

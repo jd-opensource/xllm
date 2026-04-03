@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <optional>
 #include <utility>
 
 #include "framework/model/model_args.h"
@@ -37,6 +38,11 @@ namespace layer {
 
 class FusedMoEImpl : public torch::nn::Module {
  public:
+  struct RouteInfo {
+    torch::Tensor reduce_weight;
+    torch::Tensor expert_id;
+  };
+
   FusedMoEImpl() = default;
   FusedMoEImpl(const ModelArgs& model_args,
                const FusedMoEArgs& moe_args,
@@ -44,11 +50,23 @@ class FusedMoEImpl : public torch::nn::Module {
                const ParallelArgs& parallel_args,
                const torch::TensorOptions& options);
 
-  torch::Tensor forward_experts(const torch::Tensor& hidden_states,
-                                bool enable_all2all_communication);
+  RouteInfo prep_route(torch::Tensor& hidden_states);
+  torch::Tensor forward_experts(
+      const torch::Tensor& hidden_states,
+      bool enable_all2all_communication,
+      const std::optional<RouteInfo>& route_info = std::nullopt);
+  torch::Tensor forward_shared(const torch::Tensor& hidden_states);
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
   void load_state_dict(const StateDict& state_dict);
+  void verify_loaded_weights() const;
+  bool has_shared() const { return static_cast<bool>(shared_experts_); }
+  void init_async(const torch::Tensor& hidden_states) {
+    init_streams(hidden_states);
+  }
+  ProcessGroup* shared_pg() const { return shared_pg_; }
+  Stream* shared_stream() const { return shared_stream_.get(); }
+  Stream* routed_stream() const { return routed_stream_.get(); }
 
  private:
   // struct to store the selected expert info
@@ -66,7 +84,9 @@ class FusedMoEImpl : public torch::nn::Module {
                                     const torch::Tensor& expert_id,
                                     SelectedExpertInfo& selected_expert_info);
 
-  torch::Tensor forward_experts_base(const torch::Tensor& hidden_states);
+  torch::Tensor forward_experts_base(
+      const torch::Tensor& hidden_states,
+      const std::optional<RouteInfo>& route_info);
 
   void final_comm_allreduce(torch::Tensor& final_hidden_states,
                             const torch::Tensor& hidden_states,
@@ -78,7 +98,9 @@ class FusedMoEImpl : public torch::nn::Module {
                               const torch::Tensor& expert_id,
                               SelectedExpertInfo& selected_expert_info);
 
-  torch::Tensor forward_experts_all2all(const torch::Tensor& hidden_states);
+  torch::Tensor forward_experts_all2all(
+      const torch::Tensor& hidden_states,
+      const std::optional<RouteInfo>& route_info);
 
   // Result structure for combine_step
   struct CombineResult {
@@ -94,6 +116,18 @@ class FusedMoEImpl : public torch::nn::Module {
 
   std::pair<torch::Tensor, std::optional<torch::List<int64_t>>>
   prepare_group_gemm_weight_scale(const torch::Tensor& b_scale) const;
+  RouteInfo get_route(torch::Tensor& hidden_states_2d,
+                      bool enable_all2all_communication,
+                      const std::optional<RouteInfo>& route_info);
+  void check_route(const torch::Tensor& hidden_states_2d,
+                   const RouteInfo& route_info) const;
+  void init_streams(const torch::Tensor& hidden_states);
+  torch::Tensor compute_routed_experts(
+      torch::Tensor expand_hidden_states,
+      torch::ScalarType hidden_states_dtype,
+      int64_t group_gemm_max_dim,
+      int64_t expert_size,
+      SelectedExpertInfo& selected_expert_info);
 
  private:
   int64_t num_total_experts_;
@@ -101,6 +135,7 @@ class FusedMoEImpl : public torch::nn::Module {
   int64_t hidden_size_;
   int64_t n_shared_experts_;
   bool is_gated_;
+  bool enable_result_reduction_;
   std::string hidden_act_;
   bool is_smoothquant_;
   int64_t moe_weight_bits_ = 8;
@@ -130,6 +165,7 @@ class FusedMoEImpl : public torch::nn::Module {
   ParallelArgs parallel_args_;
   torch::TensorOptions options_;
   ProcessGroup* tp_pg_;
+  ProcessGroup* shared_pg_ = nullptr;
 
   DEFINE_WEIGHT(w13);
   DEFINE_FUSED_WEIGHT(w1);

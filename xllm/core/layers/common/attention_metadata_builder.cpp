@@ -15,27 +15,40 @@ limitations under the License.
 
 #include "attention_metadata_builder.h"
 
+#include <numeric>
+
 #include "attention_metadata.h"
 #include "core/common/global_flags.h"
+#include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 
 namespace xllm::layer {
 
-AttentionMetadata AttentionMetadataBuilder::build(
-    const ModelInputParams& params,
-    const std::optional<torch::Tensor>& attn_mask) {
-  return AttentionMetadataBuilder::build(params, "float", attn_mask);
-}
+namespace {
 
-AttentionMetadata AttentionMetadataBuilder::build(
+AttentionMetadata build_attention_metadata(
     const ModelInputParams& params,
+    bool enable_mla,
     const std::string& compute_dtype,
     const std::optional<torch::Tensor>& attn_mask) {
+  // MLA mode still affects which shared tensors must be materialized for
+  // attention execution, but the flag itself is no longer carried in metadata.
   AttentionMetadata attn_metadata;
   attn_metadata.q_cu_seq_lens = params.q_seq_lens;
   attn_metadata.kv_cu_seq_lens = params.kv_seq_lens;
   attn_metadata.max_query_len = params.q_max_seq_len;
   attn_metadata.max_seq_len = params.kv_max_seq_len;
+  if (!params.kv_seq_lens_vec.empty()) {
+    const bool is_cu_seq_lens =
+        params.kv_seq_lens_vec.size() ==
+            static_cast<size_t>(params.num_sequences + 1) &&
+        params.kv_seq_lens_vec.front() == 0;
+    attn_metadata.total_kv_len =
+        is_cu_seq_lens ? params.kv_seq_lens_vec.back()
+                       : std::accumulate(params.kv_seq_lens_vec.begin(),
+                                         params.kv_seq_lens_vec.end(),
+                                         int64_t{0});
+  }
   attn_metadata.slot_mapping = params.new_cache_slots;
   attn_metadata.compute_dtype = compute_dtype;
 
@@ -86,15 +99,23 @@ AttentionMetadata AttentionMetadataBuilder::build(
       params.batch_forward_type.is_mixed() ||
       params.batch_forward_type.is_chunked_prefill();
   attn_metadata.is_prefill = params.batch_forward_type.is_prefill();
-  if (!attn_metadata.is_prefill || FLAGS_enable_mla) {
+  if (!attn_metadata.is_prefill || enable_mla) {
     attn_metadata.block_table = params.block_tables;
-#if defined(USE_NPU)
-    // NPU path uses per-sequence lengths (not cumulative), so no diff.
-    attn_metadata.kv_seq_lens = params.kv_seq_lens;
-#else
+#if !defined(USE_NPU)
     attn_metadata.kv_seq_lens = torch::diff(params.kv_seq_lens);  // kv seqlens
+    attn_metadata.q_seq_lens = torch::diff(params.q_seq_lens);    // q seqlens
 #endif
   }
+#if defined(USE_NPU)
+  // NPU path uses per-sequence lengths (not cumulative), so no diff.
+  // Ensure per-sequence lengths are available for NPU kernels in all phases.
+  if (params.kv_seq_lens.defined()) {
+    attn_metadata.kv_seq_lens = params.kv_seq_lens;
+  }
+  if (params.q_seq_lens.defined()) {
+    attn_metadata.q_seq_lens = params.q_seq_lens;
+  }
+#endif
 
   attn_metadata.is_dummy = (params.q_max_seq_len == 0);
   if (attn_metadata.is_dummy) {
@@ -169,6 +190,39 @@ AttentionMetadata AttentionMetadataBuilder::build(
   }
 
   return attn_metadata;
+}
+
+}  // namespace
+
+AttentionMetadata AttentionMetadataBuilder::build(
+    const ModelInputParams& params,
+    const std::optional<torch::Tensor>& attn_mask) {
+  return AttentionMetadataBuilder::build(params, "float", attn_mask);
+}
+
+AttentionMetadata AttentionMetadataBuilder::build(
+    const ModelInputParams& params,
+    const ModelArgs& model_args,
+    const std::optional<torch::Tensor>& attn_mask) {
+  return AttentionMetadataBuilder::build(
+      params, model_args, "float", attn_mask);
+}
+
+AttentionMetadata AttentionMetadataBuilder::build(
+    const ModelInputParams& params,
+    const std::string& compute_dtype,
+    const std::optional<torch::Tensor>& attn_mask) {
+  return build_attention_metadata(
+      params, params.enable_mla, compute_dtype, attn_mask);
+}
+
+AttentionMetadata AttentionMetadataBuilder::build(
+    const ModelInputParams& params,
+    const ModelArgs& model_args,
+    const std::string& compute_dtype,
+    const std::optional<torch::Tensor>& attn_mask) {
+  return build_attention_metadata(
+      params, model_args.enable_mla(), compute_dtype, attn_mask);
 }
 
 }  // namespace xllm::layer

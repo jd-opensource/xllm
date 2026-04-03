@@ -29,6 +29,16 @@ limitations under the License.
 #include "tensor.pb.h"
 #include "worker.pb.h"
 
+// -------------------
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_set>
+
+#include "core/util/json_reader.h"
+#include "models/model_registry.h"
+
 namespace xllm {
 namespace util {
 
@@ -70,6 +80,13 @@ const T& max(const std::vector<T>& vec) {
   return *std::max_element(vec.begin(), vec.end());
 }
 
+static inline int64_t align_up(int64_t value, int64_t alignment) {
+  if (alignment == 0) {
+    return value;
+  }
+  return ((value + alignment - 1) / alignment) * alignment;
+}
+
 bool match_suffix(const Slice<int32_t>& data, const Slice<int32_t>& suffix);
 
 std::vector<uint32_t> cal_vec_split_index(uint32_t vec_size, uint32_t part_num);
@@ -87,6 +104,94 @@ int32_t ceil_pow2(int32_t n);
 torch::ScalarType datatype_proto_to_torch(const std::string& proto_datatype);
 
 std::string torch_datatype_to_proto(torch::ScalarType torch_dtype);
+
+inline const std::unordered_set<std::string>& mla_model_type_set() {
+  static const std::unordered_set<std::string> kMlaModelTypeSet = {
+      "deepseek_v2",
+      "deepseek_v3",
+      "deepseek_v32",
+      "deepseek_v3_mtp",
+      "deepseek_v32_mtp",
+      "kimi_k2",
+      "glm4_moe_lite",
+      "glm_moe_dsa",  // glm5 model type
+      "glm_moe_dsa_mtp",
+      "joyai_llm_flash"};
+  return kMlaModelTypeSet;
+}
+
+inline bool is_mla_model_type(std::string_view model_type) {
+  return mla_model_type_set().contains(std::string(model_type));
+}
+
+inline std::string get_model_name(
+    const std::filesystem::path& normalized_model_path) {
+  std::string model_name;
+
+  if (normalized_model_path.has_filename()) {
+    model_name = normalized_model_path.filename().string();
+  } else {
+    model_name = normalized_model_path.parent_path().filename().string();
+  }
+
+  if (model_name.empty()) {
+    LOG(FATAL) << "Cannot extract model name from path, as it appears to be a "
+                  "root directory: "
+               << normalized_model_path.string();
+    return "";
+  }
+
+  return model_name;
+}
+
+inline std::string get_model_type(const std::filesystem::path& model_path) {
+  JsonReader reader;
+  std::filesystem::path config_json_path = model_path / "config.json";
+
+  if (!std::filesystem::exists(config_json_path)) {
+    LOG(FATAL) << "Please check config.json or model_index.json file, one of "
+                  "them should exist in the model path: "
+               << model_path;
+  }
+
+  reader.parse(config_json_path);
+  auto model_type = reader.value<std::string>("model_type");
+  if (!model_type.has_value()) {
+    model_type = reader.value<std::string>("model_name");
+  }
+  if (!model_type.has_value()) {
+    LOG(FATAL) << "Please check config.json file in model path: " << model_path
+               << ", it should contain model_type or model_name key.";
+  }
+  return model_type.value();
+}
+
+inline std::string get_model_backend(const std::filesystem::path& model_path) {
+  JsonReader reader;
+  std::filesystem::path model_index_json_path = model_path / "model_index.json";
+
+  if (std::filesystem::exists(model_index_json_path)) {
+    reader.parse(model_index_json_path);
+    if (reader.value<std::string>("_diffusers_version").has_value()) {
+      return "dit";
+    }
+    LOG(FATAL) << "Please check model_index.json file in model path: "
+               << model_path << ", it should contain _diffusers_version key.";
+  }
+
+  return ModelRegistry::get_model_backend(get_model_type(model_path));
+}
+
+inline bool should_enable_mla(
+    const std::filesystem::path& model_path,
+    const std::optional<std::string>& backend = std::nullopt) {
+  const std::string resolved_backend =
+      backend.has_value() ? backend.value() : get_model_backend(model_path);
+  if (resolved_backend == "dit") {
+    return false;
+  }
+  return is_mla_model_type(get_model_type(model_path));
+}
 
 }  // namespace util
 }  // namespace xllm

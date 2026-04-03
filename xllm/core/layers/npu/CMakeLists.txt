@@ -38,6 +38,7 @@ cc_library(
     npu_rms_norm_impl.h
     npu_siglip_encoder_layer_impl.h
     ../common/rotary_embedding_util.h
+    ../../framework/model/npu_cp_prepare.h
     loader/qwen3_decoder_loader.h
     loader/qwen2_decoder_loader.h
     loader/qwen3_moe_decoder_loader.h
@@ -47,8 +48,10 @@ cc_library(
     loader/column_parallel_linear_loader.h
     loader/deepseek_v2_decoder_loader.h
     loader/deepseek_v32_decoder_loader.h
+    loader/glm4_decoder_loader.h
     loader/glm4_moe_decoder_loader.h
     loader/glm4_moe_lite_decoder_loader.h
+    loader/glm4_vision_encoder_loader.h
     loader/llama_decoder_loader.h
     loader/qwen2_vision_encoder_loader.h
     loader/qwen2dot5_vision_encoder_loader.h
@@ -64,6 +67,8 @@ cc_library(
     loader/rms_norm_manual_loader.h
     loader/word_embedding_manual_loader.h
     loader/lm_head_manual_loader.h
+    loader/rolling_weight_buffer.h
+    loader/rolling_load_manager.h
   SRCS
     multi_head_attention.cpp
     npu_word_embedding_impl.cpp
@@ -94,6 +99,7 @@ cc_library(
     npu_rms_norm_impl.cpp
     npu_siglip_encoder_layer_impl.cpp
     ../common/rotary_embedding_util.cpp
+    ../../framework/model/npu_cp_prepare.cpp
     loader/qwen3_decoder_loader.cpp
     loader/qwen2_decoder_loader.cpp
     loader/qwen3_moe_decoder_loader.cpp
@@ -103,8 +109,10 @@ cc_library(
     loader/column_parallel_linear_loader.cpp
     loader/deepseek_v2_decoder_loader.cpp
     loader/deepseek_v32_decoder_loader.cpp
+    loader/glm4_decoder_loader.cpp
     loader/glm4_moe_decoder_loader.cpp
     loader/glm4_moe_lite_decoder_loader.cpp
+    loader/glm4_vision_encoder_loader.cpp
     loader/llama_decoder_loader.cpp
     loader/qwen2_vision_encoder_loader.cpp
     loader/qwen2dot5_vision_encoder_loader.cpp
@@ -120,6 +128,8 @@ cc_library(
     loader/rms_norm_manual_loader.cpp
     loader/word_embedding_manual_loader.cpp
     loader/lm_head_manual_loader.cpp
+    loader/rolling_weight_buffer.cpp
+    loader/rolling_load_manager.cpp
   DEPS
     "-Wl,--whole-archive"
     "-Wl,--no-whole-archive"
@@ -137,5 +147,6 @@ cc_library(
     torch
     torch_npu
     xllm_atb_layers
+    ${NPU_RUNTIME_SO}
     nnopbase
 )

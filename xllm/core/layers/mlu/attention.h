@@ -41,7 +41,8 @@ class AttentionImpl : public torch::nn::Module {
                 int64_t sliding_window,
                 float scale,
                 bool use_fused_mla_qkv,
-                bool enable_lighting_indexer);
+                bool enable_lighting_indexer,
+                bool enable_mla);
 
   std::tuple<torch::Tensor, std::optional<torch::Tensor>> forward(
       const AttentionMetadata& attn_metadata,
@@ -77,8 +78,8 @@ class AttentionImpl : public torch::nn::Module {
   int64_t num_kv_heads_;
   int64_t v_head_dim_;
   bool use_fused_mla_qkv_;
-  bool enable_mla_;
   bool enable_lighting_indexer_;
+  bool enable_mla_;
   int64_t sliding_window_;
 };
 TORCH_MODULE(Attention);

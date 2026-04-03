@@ -32,17 +32,10 @@ struct LinearExtraArgs {
   // parameters for fused smoothquant behavior
   std::string act_mode;
   bool is_gated;
-  // Store a full logical weight while keeping runtime collectives wired to
-  // the real process group.
-  bool use_full_weight_storage;
 
   // default constructor
-  LinearExtraArgs(const std::string& act_mode_ = "none",
-                  bool is_gated_ = false,
-                  bool use_full_weight_storage_ = false)
-      : act_mode(act_mode_),
-        is_gated(is_gated_),
-        use_full_weight_storage(use_full_weight_storage_) {}
+  LinearExtraArgs(const std::string& act_mode_ = "none", bool is_gated_ = false)
+      : act_mode(act_mode_), is_gated(is_gated_) {}
 };
 
 // Linear layer with column parallelism.
@@ -62,7 +55,7 @@ class ColumnParallelLinearImpl : public torch::nn::Module {
 
   ColumnParallelLinearImpl(const ModelContext& context);
 
-  torch::Tensor forward(torch::Tensor input, bool use_full_w = false);
+  torch::Tensor forward(torch::Tensor input);
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict);
@@ -70,6 +63,11 @@ class ColumnParallelLinearImpl : public torch::nn::Module {
   // special load_state_dict for fused cases
   void load_state_dict(const StateDict& state_dict,
                        const std::vector<std::string>& prefixes);
+
+  // load_state_dict for merged weights with variable shard sizes
+  void load_state_dict(const StateDict& state_dict,
+                       int32_t shard_tensor_count,
+                       const std::vector<int64_t>& shard_sizes);
 
   void pretty_print(std::ostream& stream) const {
     stream << name() << " " << weight_.sizes() << " " << weight_.device();
@@ -81,9 +79,9 @@ class ColumnParallelLinearImpl : public torch::nn::Module {
     }
     return weight_;
   }
-  torch::Tensor weight_tp() const;
   torch::Tensor per_channel_scale() const { return per_channel_scale_; }
-  torch::Tensor per_channel_scale_tp() const;
+  torch::Tensor weight_scale() const { return weight_scale_; }
+  ProcessGroup* process_group() const { return process_group_; }
   std::optional<torch::Tensor> smooth() const {
     if (smooth_is_loaded_) {
       return smooth_;
@@ -97,18 +95,6 @@ class ColumnParallelLinearImpl : public torch::nn::Module {
   std::optional<torch::Tensor> get_input_scale() const;
 
  private:
-  struct WeightView {
-    std::optional<torch::Tensor> weight;
-    std::optional<torch::Tensor> qweight;
-    std::optional<torch::Tensor> per_channel_scale;
-    std::optional<torch::Tensor> bias;
-  };
-
-  WeightView get_w_view() const;
-  WeightView get_tp_view() const;
-  torch::Tensor forward_with_weight_view(torch::Tensor input,
-                                         const WeightView& weight_view);
-
   // parameter members, must be registered
   // we allocate the transpose since linear performs XA^T.
   // A^T: [out_features_per_partition, in_features]
@@ -125,8 +111,6 @@ class ColumnParallelLinearImpl : public torch::nn::Module {
 
   int64_t rank_;
   int64_t world_size_;
-  int64_t weight_rank_;
-  int64_t weight_world_size_;
   // whether to gather the output
   bool gather_output_;
   at::Device device_;
@@ -214,8 +198,6 @@ TORCH_MODULE(QKVParallelLinear);
 //                -   -
 class RowParallelLinearImpl : public torch::nn::Module {
  public:
-  RowParallelLinearImpl(const ModelContext& context);
-
   RowParallelLinearImpl(
       int64_t in_features,
       int64_t out_features,
@@ -227,7 +209,7 @@ class RowParallelLinearImpl : public torch::nn::Module {
       const torch::TensorOptions& options,
       const LinearExtraArgs& linear_extra_args = LinearExtraArgs());
 
-  torch::Tensor forward(torch::Tensor input, bool use_full_w = false);
+  torch::Tensor forward(torch::Tensor input);
 
   // load the weight from the checkpoint
   void load_state_dict(const StateDict& state_dict);
@@ -237,32 +219,22 @@ class RowParallelLinearImpl : public torch::nn::Module {
   }
 
   // return the weight (for testing)
-  torch::Tensor weight() const { return weight_; }
+  torch::Tensor weight() const {
+    if (qweight_is_loaded_) {
+      return qweight_;
+    }
+    return weight_;
+  }
+  torch::Tensor per_channel_scale() const { return per_channel_scale_; }
+  std::optional<torch::Tensor> smooth() const {
+    if (smooth_is_loaded_) {
+      return smooth_;
+    }
+    return std::nullopt;
+  }
+  ProcessGroup* process_group() const { return process_group_; }
 
  private:
-  struct CachedTPSlices {
-    std::optional<torch::Tensor> weight;
-    std::optional<torch::Tensor> qweight;
-    std::optional<torch::Tensor> smooth;
-  };
-
-  struct WeightView {
-    std::optional<torch::Tensor> weight;
-    std::optional<torch::Tensor> qweight;
-    std::optional<torch::Tensor> per_channel_scale;
-    std::optional<torch::Tensor> smooth;
-    std::optional<torch::Tensor> bias;
-  };
-
-  void build_tp_cache();
-  const CachedTPSlices& tp_cache() const;
-  WeightView get_w_view() const;
-  WeightView get_tp_view() const;
-  torch::Tensor get_tp_input(torch::Tensor input,
-                             const WeightView& weight_view) const;
-  torch::Tensor forward_with_weight_view(torch::Tensor input,
-                                         const WeightView& weight_view);
-
   // parameter members, must be registered
   // we allocate the transpose since linear performs XA^T.
   // A^T: [out_features, in_features_per_partition]
@@ -288,14 +260,11 @@ class RowParallelLinearImpl : public torch::nn::Module {
 
   int64_t rank_;
   int64_t world_size_;
-  int64_t weight_rank_;
-  int64_t weight_world_size_;
 
   // quantization args
   QuantArgs quant_args_;
   at::ScalarType output_dtype_;
   LinearExtraArgs linear_extra_args_;
-  std::optional<CachedTPSlices> tp_cache_;
 };
 TORCH_MODULE(RowParallelLinear);
 

@@ -2,7 +2,7 @@
 set -e
 
 function error() {
-  echo "Require build command, e.g. python setup.py build --device a2"
+  echo "Require build command, e.g. python setup.py build --device npu"
   exit 1
 }
 

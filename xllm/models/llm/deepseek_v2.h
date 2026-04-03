@@ -30,27 +30,27 @@ namespace xllm {
 class DeepseekV2ModelImpl : public torch::nn::Module {
  public:
   DeepseekV2ModelImpl(const ModelContext& context)
-      : device_(context.get_tensor_options().device()) {
+      : model_args_(context.get_model_args()),
+        device_(context.get_tensor_options().device()) {
     auto options = context.get_tensor_options();
-    auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args.n_layers());
+    layers_.reserve(model_args_.n_layers());
 
     embed_tokens_ =
         register_module("embed_tokens",
-                        layer::WordEmbedding(model_args.vocab_size(),
-                                             model_args.hidden_size(),
+                        layer::WordEmbedding(model_args_.vocab_size(),
+                                             model_args_.hidden_size(),
                                              context.get_parallel_args(),
                                              options));
     norm_ = register_module(
         "norm",
         layer::RMSNorm(
-            model_args.hidden_size(), model_args.rms_norm_eps(), options));
+            model_args_.hidden_size(), model_args_.rms_norm_eps(), options));
 
     // create decoder layers
-    for (int32_t i = 0; i < model_args.n_layers(); ++i) {
+    for (int32_t i = 0; i < model_args_.n_layers(); ++i) {
       auto block = layer::DeepseekV2DecoderLayer(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
@@ -83,7 +83,8 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     if (!modified_input_params.attn_metadata) {
       modified_input_params.attn_metadata =
           std::make_shared<layer::AttentionMetadata>(
-              layer::AttentionMetadataBuilder::build(modified_input_params));
+              layer::AttentionMetadataBuilder::build(modified_input_params,
+                                                     model_args_));
     }
     auto& attn_metadata = *(modified_input_params.attn_metadata);
     torch::Tensor hidden_states = embed_tokens_(tokens);
@@ -127,6 +128,12 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     norm_->load_state_dict(state_dict.get_dict_with_prefix("norm."));
   }
 
+  void verify_loaded_weights() const {
+    for (const auto& layer : layers_) {
+      layer->verify_loaded_weights();
+    }
+  }
+
   layer::WordEmbedding get_word_embedding() { return embed_tokens_; }
 
   void set_word_embedding(layer::WordEmbedding& word_embedding) {
@@ -144,6 +151,8 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
   std::vector<layer::DeepseekV2DecoderLayer>& layers_ref() { return layers_; }
 
   layer::RMSNorm& norm_mod() { return norm_; }
+
+  ModelArgs model_args_;
 
  private:
   torch::nn::ModuleList blocks_{nullptr};
@@ -171,6 +180,21 @@ class DeepseekV2ForCausalLMImpl
     CHECK(!FLAGS_enable_chunked_prefill)
         << "deepseek_v2 have not supported "
            "enable_chunked_prefill yet. Please disable it.";
+  }
+
+  void load_model(
+      std::unique_ptr<ModelLoader> loader,
+      std::string prefix = "model." /*llm model weight prefix*/) override {
+    for (const auto& state_dict : loader->get_state_dicts()) {
+      model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
+      if (tie_word_embeddings) {
+        lm_head_->load_state_dict(
+            state_dict->get_dict_with_prefix(prefix + "embed_tokens."));
+      } else {
+        lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
+      }
+    }
+    model_->verify_loaded_weights();
   }
 };
 TORCH_MODULE(DeepseekV2ForCausalLM);

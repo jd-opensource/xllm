@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <optional>
+
 #include "attention.h"
 #include "deepseek_v2_attention.h"
 #include "framework/kv_cache/kv_cache.h"
@@ -28,25 +30,33 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/common/dense_mlp.h"
+#include "layers/common/dp_utils.h"
 #include "layers/common/rms_norm.h"
+#include "layers/mlu/deepseek_v2_sparse_moe_block.h"
 #include "layers/mlu/deepseek_v32_sp_context.h"
-#include "layers/mlu/fused_moe.h"
 
 namespace xllm {
 namespace layer {
 
+class DeepseekV2DecoderLayerTestPeer;
+
 class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
  public:
+  // Default FFN chunk size used for sequence-parallel prefill execution.
+  static constexpr int64_t kDefaultSpFfnChunkSize = 8192;
+
   explicit DeepseekV2DecoderLayerImpl(const ModelContext& context,
                                       int32_t layer_id);
 
   ~DeepseekV2DecoderLayerImpl() override = default;
 
   void load_state_dict(const StateDict& state_dict);
+  void verify_loaded_weights() const;
 
   void set_sequence_parallel_context(
       const v32_sp::DeepseekV32SPContext* sp_ctx) {
     sequence_parallel_context_ = sp_ctx;
+    sp_ffn_chunk_size_ = sp_ctx != nullptr ? kDefaultSpFfnChunkSize : -1;
   }
 
   torch::Tensor forward(torch::Tensor& x,
@@ -57,17 +67,62 @@ class DeepseekV2DecoderLayerImpl : public torch::nn::Module {
                         const ModelInputParams& input_params);
 
  private:
+  enum class PostAttnMode {
+    kReplicated,
+    kPackedLocal,
+  };
+
+  struct PostAttnCarrier {
+    torch::Tensor ffn_in;
+    torch::Tensor skip_local;
+    PaddingInfo pad_info;
+    PostAttnMode mode = PostAttnMode::kReplicated;
+  };
+
+  struct MoeInputPrepResult {
+    torch::Tensor ffn_in;
+    std::optional<PostAttnCarrier> carrier;
+    std::optional<DeepseekV2SparseMoEBlockImpl::PrepOut> moe_prep;
+    std::optional<DeepseekV2SparseMoEBlockImpl::ExecCfg> exec_cfg;
+    bool use_sp_moe_overlap = false;
+  };
+
+  PostAttnCarrier build_post_attn_carrier(
+      torch::Tensor x,
+      const torch::Tensor& residual,
+      DeepseekV2AttentionImpl::PostAttnLayout attn_layout);
+  PostAttnCarrier build_post_attn_local(torch::Tensor x,
+                                        const torch::Tensor& residual);
+  MoeInputPrepResult prepare_moe_inputs(
+      torch::Tensor x,
+      const torch::Tensor& residual,
+      const ModelInputParams& input_params,
+      DeepseekV2AttentionImpl::PostAttnLayout attn_layout);
+
+  bool can_keep_local_output(const PostAttnCarrier& carrier,
+                             ProcessGroup* pg) const;
+  bool can_sp_chunk(const ModelInputParams& input_params) const;
+  torch::Tensor comm_out(torch::Tensor x,
+                         const PostAttnCarrier& carrier,
+                         ProcessGroup* pg) const;
+  torch::Tensor run_mlp(torch::Tensor x, const ModelInputParams& input_params);
+  torch::Tensor restore_ffn_output(torch::Tensor x,
+                                   const PostAttnCarrier& carrier);
+  torch::Tensor reduce_out(torch::Tensor x, ProcessGroup* pg) const;
+
+  friend class DeepseekV2DecoderLayerTestPeer;
+
   // parallel args
   ParallelArgs parallel_args_;
-  bool enable_deep_ep_;
   bool is_moe_layer_;
 
   DeepseekV2Attention attention_{nullptr};
   DenseMLP mlp_{nullptr};
-  FusedMoE moe_mlp_{nullptr};
+  DeepseekV2SparseMoEBlock sparse_moe_{nullptr};
   RMSNorm input_norm_{nullptr};
   RMSNorm post_norm_{nullptr};
   const v32_sp::DeepseekV32SPContext* sequence_parallel_context_ = nullptr;
+  int64_t sp_ffn_chunk_size_ = -1;
 };
 
 TORCH_MODULE(DeepseekV2DecoderLayer);

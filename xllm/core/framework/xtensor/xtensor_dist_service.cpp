@@ -216,7 +216,7 @@ void XTensorDistService::FreeWeightPages(
 
     // Free weight pages via XTensorAllocator (frees pages in PhyPagePool)
     auto& allocator = XTensorAllocator::get_instance();
-    size_t num_freed = allocator.free_weight_from_global_xtensor(model_id);
+    size_t num_freed = allocator.free_weight(model_id);
 
     response->set_ok(num_freed > 0);
 

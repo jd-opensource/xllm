@@ -39,7 +39,7 @@ limitations under the License.
 #include "core/layers/npu/npu_word_embedding_impl.h"
 #include "models/model_registry.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 // EAGLE-3 specific decoder layer that accepts embeds and hidden_states
 // separately, applies layernorms, then concatenates them
@@ -445,4 +445,4 @@ REGISTER_MODEL_ARGS(qwen3_eagle3, [&] {
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
 
-}  // namespace xllm
+}  // namespace xllm::npu::model

@@ -17,8 +17,8 @@ The overall architecture is shown in the diagram below:
 ### Preparation
 
 #### Install Dependencies
-- **xLLM**: Refer to [Installation && Compilation](../getting_started/compile.md)
-- **xLLM Service**: Refer to [PD disaggregation](../getting_started/PD_disagg.md)
+- **xLLM**: Refer to [Quick Start](../getting_started/quick_start.md)
+- **xLLM Service**: Refer to [PD disaggregation](../getting_started/disagg_pd.md)
 
 ### Usage Instructions
 

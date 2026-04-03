@@ -40,7 +40,7 @@ limitations under the License.
 #include "models/model_registry.h"
 #include "xllm_atb_layers/core/include/atb_speed/log.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 template <typename DecoderLayerType>
 class MtpModelImplBase : public torch::nn::Module {
  public:
@@ -341,4 +341,4 @@ class MtpForCausalLMImplBase : public torch::nn::Module {
   MtpModelType model_{nullptr};
   layer::NpuLmHead lm_head_{nullptr};
 };
-}  // namespace xllm
+}  // namespace xllm::npu::model

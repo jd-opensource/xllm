@@ -39,6 +39,7 @@ class RotaryEmbeddingBase : public torch::nn::Module {
                        bool is_prompt) = 0;
   virtual const torch::Tensor& get_sin_cache() const = 0;
   virtual const torch::Tensor& get_cos_cache() const = 0;
+  virtual const bool get_interleaved() const = 0;
 };
 
 class RotaryEmbeddingImpl : public RotaryEmbeddingBase {
@@ -70,6 +71,7 @@ class RotaryEmbeddingImpl : public RotaryEmbeddingBase {
   torch::Tensor get_cos_sin_cache() { return cos_sin_cache_; }
   const torch::Tensor& get_sin_cache() const override { return sin_; }
   const torch::Tensor& get_cos_cache() const override { return cos_; }
+  const bool get_interleaved() const override { return interleaved_; }
 
  protected:
   bool interleaved_;
@@ -129,6 +131,7 @@ class DeepseekScalingRotaryEmbeddingImpl : public RotaryEmbeddingBase {
                bool is_prompt) override;
   const torch::Tensor& get_sin_cache() const override { return sin_; }
   const torch::Tensor& get_cos_cache() const override { return cos_; }
+  const bool get_interleaved() const override { return interleaved_; }
 
  private:
   int64_t head_size_;

@@ -32,7 +32,17 @@ EtcdClient::EtcdClient(const std::string& etcd_addr)
   }
 }
 
-EtcdClient::~EtcdClient() { stop_watch(); }
+EtcdClient::~EtcdClient() {
+  stop_watch();
+
+  std::lock_guard<std::mutex> lock(keep_alives_mutex_);
+  for (auto& [key, keep_alive] : keep_alives_) {
+    if (keep_alive != nullptr) {
+      keep_alive->Cancel();
+    }
+  }
+  keep_alives_.clear();
+}
 
 void EtcdClient::add_watch(const std::string& key_prefix,
                            Callback callback,
@@ -82,6 +92,19 @@ bool EtcdClient::get_master_service(const std::string& key,
   return true;
 }
 
+bool EtcdClient::get(const std::string& key, std::string* value) {
+  auto response = client_.get(key);
+  if (!response.is_ok()) {
+    LOG(ERROR) << "etcd get " << key << " failed: " << response.error_message();
+    return false;
+  }
+
+  if (value != nullptr) {
+    *value = response.value().as_string();
+  }
+  return true;
+}
+
 bool EtcdClient::get_all_xservices(const std::string& key_prefix,
                                    std::vector<std::string>* values) {
   auto response = client_.ls(key_prefix);
@@ -114,7 +137,19 @@ bool EtcdClient::register_instance(const std::string& key,
     keep_alive->Cancel();
     return false;
   }
-  keep_alives_.emplace_back(std::move(keep_alive));
+
+  std::shared_ptr<etcd::KeepAlive> old_keep_alive;
+  {
+    std::lock_guard<std::mutex> lock(keep_alives_mutex_);
+    auto it = keep_alives_.find(key);
+    if (it != keep_alives_.end()) {
+      old_keep_alive = it->second;
+    }
+    keep_alives_[key] = keep_alive;
+  }
+  if (old_keep_alive != nullptr) {
+    old_keep_alive->Cancel();
+  }
 
   return true;
 }

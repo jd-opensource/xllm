@@ -108,6 +108,14 @@ class MMInput {
 
   std::vector<MMInputItem>::const_iterator end() const { return items_.end(); }
 
+  std::vector<MMInputItem>::const_iterator cbegin() const {
+    return items_.cbegin();
+  }
+
+  std::vector<MMInputItem>::const_iterator cend() const {
+    return items_.cend();
+  }
+
   void insert(const std::vector<MMInputItem>& inputs) {
     items_.insert(items_.end(), inputs.begin(), inputs.end());
   }
@@ -129,7 +137,7 @@ class MMInput {
   std::vector<VideoMetadata> get_video_metadata() const {
     std::vector<VideoMetadata> metas;
     metas.reserve(items_.size());
-    for (auto& item : items_) {
+    for (const auto& item : items_) {
       if (item.has_type(MMType::VIDEO)) {
         metas.push_back(item.video_meta);
       }
@@ -145,18 +153,51 @@ class MMInput {
   std::vector<MMInputItem> items_;
 };
 
+enum class MMErrCode : uint8_t {
+  SUCCESS = 0,
+  LOAD_DATA_ERR = 1,
+  LOAD_HTTP_ERR = 2,
+  LOAD_LOCAL_ERR = 3,
+  INVALID_URL_ERR = 4,
+  PARSE_EMB_ERR = 5,
+  DECODE_ERR = 6,
+  HANDLER_ERR = 7,
+};
+
+inline const char* MMErrToString(MMErrCode code) {
+  switch (code) {
+    case MMErrCode::LOAD_DATA_ERR:
+      return "Failed to load multimodal input from data url.";
+    case MMErrCode::LOAD_HTTP_ERR:
+      return "Failed to download multimodal input from http url.";
+    case MMErrCode::LOAD_LOCAL_ERR:
+      return "Failed to download multimodal input from local url.";
+    case MMErrCode::PARSE_EMB_ERR:
+      return "Failed to parse input multimodal embedding.";
+    case MMErrCode::DECODE_ERR:
+      return "Failed to decode multimodal input.";
+    case MMErrCode::INVALID_URL_ERR:
+      return "Multimodal input url must be data URL (base64 or binary) / "
+             "http(s) URL / local file URL.";
+    case MMErrCode::HANDLER_ERR:
+      return "Unsupported multimodal input type.";
+    default:
+      return "Unknown error occurred when loading/decoding multimodal input.";
+  }
+}
+
 class MMHandlerSet;
 class MMInputTransfer {
  public:
   MMInputTransfer();
   ~MMInputTransfer();
 
-  bool trans(const std::vector<Message>& messages, MMInput& inputs);
+  MMErrCode trans(const std::vector<Message>& messages, MMInput& inputs);
 
  private:
-  bool trans(const MMContentVec& mmc,
-             std::vector<MMInputItem>& inputs,
-             MMPayload& payload);
+  MMErrCode trans(const MMContentVec& mmc,
+                  std::vector<MMInputItem>& inputs,
+                  MMPayload& payload);
 
   std::unique_ptr<MMHandlerSet> mm_handlers_;
 };

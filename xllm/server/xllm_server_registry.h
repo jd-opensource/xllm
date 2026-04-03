@@ -32,6 +32,7 @@ class ServerRegistry {
   XllmServer* register_server(const std::string& name);
   void unregister_server(const std::string& name);
   XllmServer* get_server(const std::string& name);
+  XllmServer* try_get_server(const std::string& name);
 
  private:
   ServerRegistry() = default;

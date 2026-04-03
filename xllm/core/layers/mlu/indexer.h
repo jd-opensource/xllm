@@ -79,7 +79,7 @@ class IndexerImpl : public torch::nn::Module {
 
   std::tuple<torch::Tensor, torch::Tensor> forward(
       const torch::Tensor& x,
-      const torch::Tensor& qr,
+      const torch::Tensor& q_norm,
       const torch::Tensor& positions,
       torch::Tensor& k_cache,
       const AttentionMetadata& attn_metadata,
@@ -87,7 +87,7 @@ class IndexerImpl : public torch::nn::Module {
       const std::optional<torch::Tensor>& mask = std::nullopt);
 
   IndexerSPPreOut sp_pre(const torch::Tensor& x,
-                         const torch::Tensor& qr,
+                         const torch::Tensor& q_norm,
                          const torch::Tensor& positions,
                          const AttentionMetadata& attn_metadata,
                          const v32_sp::DeepseekV32SPContext& sp_ctx);
@@ -102,10 +102,10 @@ class IndexerImpl : public torch::nn::Module {
 
   std::tuple<torch::Tensor, torch::Tensor> sp_post(
       const IndexerSPPreOut& pre_out,
-      const torch::Tensor& k_global,
+      const torch::Tensor& k_gathered,
       torch::Tensor& k_cache,
       const AttentionMetadata& attn_metadata,
-      const v32_sp::DeepseekV32SPMetadata& sp_meta,
+      const torch::Tensor& gathered_slot_mapping,
       const v32_sp::DeepseekV32SPContext& sp_ctx);
 
   // load the weight from the checkpoint
@@ -118,7 +118,7 @@ class IndexerImpl : public torch::nn::Module {
   int64_t index_topk_;
   float softmax_scale_;
   bool enable_fused_qk_;
-
+  bool q_rope_at_front_;
   // Linear layers using ReplicatedLinear
   ReplicatedLinear wq_b_{nullptr};
   ReplicatedLinear wk_{nullptr};
@@ -145,7 +145,7 @@ class IndexerImpl : public torch::nn::Module {
       bool is_prefill,
       int64_t num_tokens);
 
-  torch::Tensor preprocess_indexer_q(const torch::Tensor& qr,
+  torch::Tensor preprocess_indexer_q(const torch::Tensor& q_norm,
                                      const torch::Tensor& positions,
                                      const AttentionMetadata& attn_metadata);
 
@@ -156,7 +156,7 @@ class IndexerImpl : public torch::nn::Module {
       const AttentionMetadata& attn_metadata,
       bool write_k_cache);
 
-  torch::Tensor preprocess_indexer_q_fused(const torch::Tensor& qr,
+  torch::Tensor preprocess_indexer_q_fused(const torch::Tensor& q_norm,
                                            const torch::Tensor& positions);
 
   torch::Tensor preprocess_indexer_k_fused(
@@ -167,7 +167,7 @@ class IndexerImpl : public torch::nn::Module {
 
   std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
   preprocess_indexer_inputs(const torch::Tensor& x,
-                            const torch::Tensor& qr,
+                            const torch::Tensor& q_norm,
                             const torch::Tensor& positions,
                             torch::Tensor& k_cache,
                             const AttentionMetadata& attn_metadata,
@@ -178,11 +178,21 @@ class IndexerImpl : public torch::nn::Module {
                              torch::Tensor& k_cache,
                              const torch::Tensor& slot_mapping);
 
+  torch::Tensor build_sp_chunked_dense_k_source(
+      torch::Tensor& k_cache,
+      const AttentionMetadata& attn_metadata);
+
   std::tuple<torch::Tensor, torch::Tensor> run_indexer_select_kernel(
       const AttentionMetadata& attn_metadata,
       bool is_prefill,
-      IndexerRuntimeContext& ctx,
-      const v32_sp::DeepseekV32SPMetadata* sp_meta = nullptr);
+      IndexerRuntimeContext& ctx);
+
+  std::tuple<torch::Tensor, torch::Tensor>
+  run_indexer_select_kernel_sp_segmented(
+      const IndexerSPPreOut& pre_out,
+      const torch::Tensor& k_source,
+      const AttentionMetadata& attn_metadata,
+      const v32_sp::DeepseekV32SPContext& sp_ctx);
 };
 
 TORCH_MODULE(Indexer);

@@ -248,11 +248,11 @@ class Int32Map {
   uint32_t tombstones_ = 0;  // number of TOMBSTONE
 
   // ----- Helpers -----
-  static bool is_filled_(int32_t k) noexcept {
+  static constexpr bool is_filled_(int32_t k) noexcept {
     return k != KEY_EMPTY && k != KEY_TOMBSTONE;
   }
 
-  static uint32_t mix_hash_(int32_t key) noexcept {
+  static constexpr uint32_t mix_hash_(int32_t key) noexcept {
     // 32-bit mix (Murmur-inspired)
     uint32_t x = static_cast<uint32_t>(key);
     x ^= x >> 16;

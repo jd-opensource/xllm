@@ -48,8 +48,6 @@ class SpawnWorkerServer final {
 
   static void handle_signal(int signum);
 
-  static bool g_running_;
-
  private:
   std::atomic<bool> done_{false};
   std::unique_ptr<WorkerServer> worker_server_;

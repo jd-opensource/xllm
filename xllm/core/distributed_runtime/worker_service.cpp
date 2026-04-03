@@ -25,6 +25,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "common/types.h"
+#include "core/distributed_runtime/comm_channel.h"
 #include "core/runtime/params_utils.h"
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
@@ -286,8 +287,18 @@ void WorkerService::AllocateKVCache(
   threadpool_->schedule([this, controller, request, response, done]() mutable {
     brpc::ClosureGuard done_guard(done);
     std::vector<std::vector<int64_t>> kv_cache_shape;
-    // Reserve for key, value, and optionally index shape
-    kv_cache_shape.reserve(3);
+    const bool has_index_shape =
+        request->kv_cache_shape().index_shape_size() > 0;
+    const bool has_conv_shape = request->kv_cache_shape().conv_shape_size() > 0;
+    const bool has_ssm_shape = request->kv_cache_shape().ssm_shape_size() > 0;
+    const bool enable_gdn_attention = has_conv_shape || has_ssm_shape;
+    CHECK(!(has_index_shape && enable_gdn_attention))
+        << "KVCacheShape does not support index_shape with conv/ssm shapes "
+        << "simultaneously.";
+    // Reserve for key, value, and optional extra shapes
+    kv_cache_shape.reserve(enable_gdn_attention
+                               ? kKVCacheShapeSizeWithConvAndSsm
+                               : kKVCacheShapeSizeWithIndex);
     kv_cache_shape.emplace_back(
         std::vector<int64_t>(request->kv_cache_shape().key_shape().begin(),
                              request->kv_cache_shape().key_shape().end()));
@@ -295,10 +306,19 @@ void WorkerService::AllocateKVCache(
         std::vector<int64_t>(request->kv_cache_shape().value_shape().begin(),
                              request->kv_cache_shape().value_shape().end()));
     // add index shape if exists
-    if (request->kv_cache_shape().index_shape_size() > 0) {
+    if (has_index_shape) {
       kv_cache_shape.emplace_back(
           std::vector<int64_t>(request->kv_cache_shape().index_shape().begin(),
                                request->kv_cache_shape().index_shape().end()));
+    } else if (enable_gdn_attention) {
+      CHECK(has_conv_shape && has_ssm_shape)
+          << "conv_shape and ssm_shape must be provided together.";
+      kv_cache_shape.emplace_back(
+          std::vector<int64_t>(request->kv_cache_shape().conv_shape().begin(),
+                               request->kv_cache_shape().conv_shape().end()));
+      kv_cache_shape.emplace_back(
+          std::vector<int64_t>(request->kv_cache_shape().ssm_shape().begin(),
+                               request->kv_cache_shape().ssm_shape().end()));
     }
 
     auto future = worker_->allocate_kv_cache_async(kv_cache_shape);
@@ -316,18 +336,32 @@ void WorkerService::AllocateKVCacheWithTransfer(
   threadpool_->schedule([this, controller, req, resp, done]() mutable {
     brpc::ClosureGuard done_guard(done);
     std::vector<std::vector<int64_t>> kv_cache_shape;
-    kv_cache_shape.reserve(2);
-    kv_cache_shape.emplace_back(
-        std::vector<int64_t>(req->kv_cache_shape().key_shape().begin(),
-                             req->kv_cache_shape().key_shape().end()));
-    kv_cache_shape.emplace_back(
-        std::vector<int64_t>(req->kv_cache_shape().value_shape().begin(),
-                             req->kv_cache_shape().value_shape().end()));
+    const auto& shape_req = req->kv_cache_shape();
+    const bool has_index_shape = shape_req.index_shape_size() > 0;
+    const bool has_conv_shape = shape_req.conv_shape_size() > 0;
+    const bool has_ssm_shape = shape_req.ssm_shape_size() > 0;
+    const bool enable_gdn_attention = has_conv_shape || has_ssm_shape;
+    CHECK(!(has_index_shape && enable_gdn_attention))
+        << "KVCacheShape does not support index_shape with conv/ssm shapes "
+        << "simultaneously.";
+    kv_cache_shape.reserve(enable_gdn_attention
+                               ? kKVCacheShapeSizeWithConvAndSsm
+                               : kKVCacheShapeSizeWithIndex);
+    kv_cache_shape.emplace_back(std::vector<int64_t>(
+        shape_req.key_shape().begin(), shape_req.key_shape().end()));
+    kv_cache_shape.emplace_back(std::vector<int64_t>(
+        shape_req.value_shape().begin(), shape_req.value_shape().end()));
     // add index shape if exists
-    if (req->kv_cache_shape().index_shape_size() > 0) {
-      kv_cache_shape.emplace_back(
-          std::vector<int64_t>(req->kv_cache_shape().index_shape().begin(),
-                               req->kv_cache_shape().index_shape().end()));
+    if (has_index_shape) {
+      kv_cache_shape.emplace_back(std::vector<int64_t>(
+          shape_req.index_shape().begin(), shape_req.index_shape().end()));
+    } else if (enable_gdn_attention) {
+      CHECK(has_conv_shape && has_ssm_shape)
+          << "conv_shape and ssm_shape must be provided together.";
+      kv_cache_shape.emplace_back(std::vector<int64_t>(
+          shape_req.conv_shape().begin(), shape_req.conv_shape().end()));
+      kv_cache_shape.emplace_back(std::vector<int64_t>(
+          shape_req.ssm_shape().begin(), shape_req.ssm_shape().end()));
     }
 
     auto future =
@@ -569,7 +603,7 @@ void WorkerService::Wakeup(::google::protobuf::RpcController* controller,
       std::vector<WeightSegment> segments;
       segments.reserve(seg_list.segments_size());
       for (const auto& proto_seg : seg_list.segments()) {
-        segments.push_back({proto_seg.offset(), proto_seg.size()});
+        segments.emplace_back(proto_seg.offset(), proto_seg.size());
       }
       options.src_weight_segments.push_back(std::move(segments));
     }

@@ -90,6 +90,10 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
     mtp_block_->load_state_dict(state_dict);
   }
 
+  virtual void verify_loaded_weights() const {
+    mtp_block_->verify_loaded_weights();
+  }
+
   virtual void prepare_expert_weight(int32_t layer_id,
                                      const std::vector<int32_t>& expert_ids) {
     return;
@@ -110,16 +114,16 @@ template <typename DecoderLayerType>
 class MtpModelImplBase : public torch::nn::Module {
  public:
   MtpModelImplBase(const ModelContext& context)
-      : device_(context.get_tensor_options().device()) {
+      : model_args_(context.get_model_args()),
+        device_(context.get_tensor_options().device()) {
     auto options = context.get_tensor_options();
-    auto model_args = context.get_model_args();
     auto parallel_args = context.get_parallel_args();
 
     // get mtp start and end layer index
-    mtp_start_layer_idx_ = model_args.n_layers();
+    mtp_start_layer_idx_ = model_args_.n_layers();
     mtp_end_layer_idx_ =
-        mtp_start_layer_idx_ + model_args.num_nextn_predict_layers();
-    mtp_layers_.reserve(model_args.num_nextn_predict_layers());
+        mtp_start_layer_idx_ + model_args_.num_nextn_predict_layers();
+    mtp_layers_.reserve(model_args_.num_nextn_predict_layers());
 
     // create mtp layers
     for (int32_t i = mtp_start_layer_idx_; i < mtp_end_layer_idx_; ++i) {
@@ -128,8 +132,8 @@ class MtpModelImplBase : public torch::nn::Module {
     }
     embed_tokens_ =
         register_module("embed_tokens",
-                        layer::WordEmbedding(model_args.vocab_size(),
-                                             model_args.hidden_size(),
+                        layer::WordEmbedding(model_args_.vocab_size(),
+                                             model_args_.hidden_size(),
                                              context.get_parallel_args(),
                                              options));
     norm_ = register_module("norm", layer::RMSNorm(context));
@@ -167,7 +171,8 @@ class MtpModelImplBase : public torch::nn::Module {
     if (!modified_input_params.attn_metadata) {
       modified_input_params.attn_metadata =
           std::make_shared<layer::AttentionMetadata>(
-              layer::AttentionMetadataBuilder::build(modified_input_params));
+              layer::AttentionMetadataBuilder::build(modified_input_params,
+                                                     model_args_));
     }
     auto& attn_metadata = *(modified_input_params.attn_metadata);
     torch::Tensor hidden_states = embed_tokens_(tokens);
@@ -212,6 +217,12 @@ class MtpModelImplBase : public torch::nn::Module {
     }
   }
 
+  void verify_loaded_weights() const {
+    for (const auto& layer : mtp_layers_) {
+      layer->verify_loaded_weights();
+    }
+  }
+
   layer::WordEmbedding get_word_embedding() { return embed_tokens_; }
 
   void set_word_embedding(layer::WordEmbedding& word_embedding) {
@@ -219,6 +230,7 @@ class MtpModelImplBase : public torch::nn::Module {
   }
 
  private:
+  ModelArgs model_args_;
   std::vector<DecoderLayerType> mtp_layers_;
   int32_t mtp_start_layer_idx_;
   int32_t mtp_end_layer_idx_;

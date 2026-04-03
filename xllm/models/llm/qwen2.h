@@ -108,7 +108,9 @@ REGISTER_MODEL_ARGS(qwen2, [&] {
   LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
 
   LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
-  LOAD_ARG_OR(sliding_window, "sliding_window", 4096);
+  LOAD_ARG_OR_FUNC(sliding_window, "sliding_window", [&] {
+    return args->max_position_embeddings();
+  });
   LOAD_ARG_OR(max_window_layers, "max_window_layers", 28);
 
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {

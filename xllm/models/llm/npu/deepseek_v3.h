@@ -17,7 +17,7 @@ limitations under the License.
 
 #include "deepseek_v2.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 // register the causal model
 REGISTER_CAUSAL_MODEL(deepseek_v3, DeepseekV2ForCausalLM);
 // register the model args
@@ -78,4 +78,4 @@ REGISTER_MODEL_ARGS(deepseek_v3, [&] {
 
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({1}));
 });
-}  // namespace xllm
+}  // namespace xllm::npu::model

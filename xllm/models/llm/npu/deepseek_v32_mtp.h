@@ -19,13 +19,15 @@ limitations under the License.
 #include "deepseek_v32.h"
 #include "mtp_model_base.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 class DeepseekV32MtpModelImpl
-    : public MtpModelImplBase<DeepseekV32DecoderLayer> {
+    : public xllm::npu::model::MtpModelImplBase<DeepseekV32DecoderLayer> {
  public:
   DeepseekV32MtpModelImpl(const ModelContext& context)
-      : MtpModelImplBase<DeepseekV32DecoderLayer>("deepseek_v32_mtp", context) {
+      : xllm::npu::model::MtpModelImplBase<DeepseekV32DecoderLayer>(
+            "deepseek_v32_mtp",
+            context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
@@ -54,10 +56,11 @@ class DeepseekV32MtpModelImpl
 TORCH_MODULE(DeepseekV32MtpModel);
 
 class DeepseekV32MtpForCausalLMImpl
-    : public MtpForCausalLMImplBase<DeepseekV32MtpModel> {
+    : public xllm::npu::model::MtpForCausalLMImplBase<DeepseekV32MtpModel> {
  public:
   DeepseekV32MtpForCausalLMImpl(const ModelContext& context)
-      : MtpForCausalLMImplBase<DeepseekV32MtpModel>(context) {}
+      : xllm::npu::model::MtpForCausalLMImplBase<DeepseekV32MtpModel>(context) {
+  }
 };
 TORCH_MODULE(DeepseekV32MtpForCausalLM);
 
@@ -122,4 +125,4 @@ REGISTER_MODEL_ARGS(deepseek_v32_mtp, [&] {
 
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({1}));
 });
-}  // namespace xllm
+}  // namespace xllm::npu::model

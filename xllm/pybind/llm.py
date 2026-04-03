@@ -2,8 +2,10 @@ import json
 import os
 import signal
 import sys
+import time
+import uuid
 from . import util
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Sequence, Union
 
 import xllm_export
 from xllm_export import (LLMMaster, VLMMaster, Options, RequestOutput,
@@ -110,7 +112,6 @@ class LLM:
         communication_backend: str = 'hccl',
         rank_tablefile: str = '',
         expert_parallel_degree: int = 0,
-        enable_mla: bool = False,
         disable_chunked_prefill: bool = False,
         enable_prefill_sp: bool = False,
         instance_role: str = 'DEFAULT',
@@ -172,7 +173,6 @@ class LLM:
         options.communication_backend = communication_backend
         options.rank_tablefile = rank_tablefile
         options.expert_parallel_degree = expert_parallel_degree
-        options.enable_mla = enable_mla
         if disable_chunked_prefill:
             options.enable_chunked_prefill = False
         else:
@@ -363,3 +363,123 @@ class LLM:
                                 request_params=use_params,
                                 wait_for_schedule=wait_for_schedule)
         return [EmbeddingOutput(output) for output in outputs]
+
+    @staticmethod
+    def _normalize_selector_values(
+        prompts: Sequence[str],
+        selector: Union[str, dict, Sequence[Union[str, dict]]],
+    ) -> List[str]:
+        def get_literal(value: Union[str, dict]) -> str:
+            if isinstance(value, str):
+                return value
+            if isinstance(value, dict):
+                selector_type = value.get("type", "literal")
+                literal = value.get("value", "")
+                if selector_type != "literal":
+                    raise ValueError("selector.type must be literal")
+                if not isinstance(literal, str) or not literal:
+                    raise ValueError("selector.value is required")
+                return literal
+            raise ValueError("selector must be a string or dict")
+
+        if isinstance(selector, (str, dict)):
+            literal = get_literal(selector)
+            return [literal for _ in prompts]
+
+        selector_values = list(selector)
+        if len(selector_values) != len(prompts):
+            raise ValueError("selector count must match prompts count")
+        return [get_literal(item) for item in selector_values]
+
+    @staticmethod
+    def _build_request_params_list(
+        prompts: Sequence[str],
+        request_params: Optional[Union[RequestParams, Sequence[RequestParams]]],
+    ) -> List[RequestParams]:
+        if request_params is None:
+            return [RequestParams() for _ in prompts]
+        if isinstance(request_params, RequestParams):
+            if len(prompts) != 1:
+                raise ValueError(
+                    "request_params must be a list when prompts has multiple items"
+                )
+            return [request_params]
+
+        params_list = list(request_params)
+        if len(params_list) != len(prompts):
+            raise ValueError("request_params count must match prompts count")
+        return params_list
+
+    def sample(
+        self,
+        prompts: Union[str, List[str]],
+        selector: Union[str, dict, Sequence[Union[str, dict]]],
+        request_params: Optional[Union[RequestParams, Sequence[RequestParams]]] = None,
+        logprobs: int = 5,
+        wait_schedule_done: bool = True,
+    ) -> List[RequestOutput]:
+        if isinstance(prompts, str):
+            prompts = [prompts]
+        if not prompts:
+            return []
+
+        selector_values = self._normalize_selector_values(prompts, selector)
+        params_list = self._build_request_params_list(prompts, request_params)
+        if len(params_list) > 1:
+            # sample() 会原地修改每个 RequestParams（如 request_id/sample_slots）。
+            # 若复用同一个对象，会在并发批处理时互相覆盖。
+            unique_param_objects = {id(p) for p in params_list}
+            if len(unique_param_objects) != len(params_list):
+                raise ValueError(
+                    "request_params contains duplicated RequestParams objects. "
+                    "Please create one RequestParams instance per prompt."
+                )
+
+        for i, prompt in enumerate(prompts):
+            params = params_list[i]
+            if not params.request_id:
+                params.request_id = "sample-" + uuid.uuid4().hex
+
+            params.max_tokens = 1
+            params.n = 1
+            params.best_of = 1
+            params.logprobs = True
+            params.top_logprobs = logprobs
+            params.add_special_tokens = True
+            params.is_sample_request = True
+
+            ok, sample_slots = self.master.build_sample_slots(
+                params.request_id,
+                prompt,
+                selector_values[i],
+            )
+            if not ok:
+                raise ValueError(
+                    "Failed to build sample slots. "
+                    "selector.value must be a stable single special token."
+                )
+            params.sample_slots = sample_slots
+
+        outputs = [None] * len(prompts)
+
+        def callback(index: int, output: RequestOutput) -> bool:
+            outputs[index] = output
+            return True
+
+        self.master.handle_batch_request(prompts, params_list, callback)
+
+        if wait_schedule_done:
+            pass
+
+        self.master.generate()
+
+        for i in range(len(outputs)):
+            while outputs[i] is None:
+                time.sleep(0.01)
+            if outputs[i].status is not None and not outputs[i].status.ok:
+                raise RuntimeError(
+                    f"sample request failed: {outputs[i].status.message}"
+                )
+            outputs[i].prompt = prompts[i]
+
+        return outputs

@@ -71,7 +71,7 @@ class DoubleBuffer {
   std::atomic<uint32_t> index_;
 };
 
-enum DoubleBufferIndex {
+enum class DoubleBufferIndex {
   kFront = 0,
   kBack,
 };

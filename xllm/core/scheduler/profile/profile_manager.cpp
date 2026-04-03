@@ -19,6 +19,7 @@ limitations under the License.
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -618,6 +619,62 @@ std::shared_ptr<Request> ProfileManager::generate_single_request(
   return request;
 }
 
+std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
+    int32_t total_length) {
+  CHECK_GT(total_length, 1) << "Decode profiling requires total_length > 1.";
+
+  auto& model_args = engine_->model_args();
+  int32_t vocab_size = model_args.vocab_size();
+  int32_t eos_token_id = model_args.eos_token_id();
+
+  std::random_device rd;
+  std::mt19937_64 gen(rd());
+
+  // If req_state does not initialize the stopchecker, default eos_token_id = 0,
+  // need to skip it
+  std::uniform_int_distribution<int32_t> dis(1, vocab_size - 2);
+
+  const int32_t prompt_length = total_length - 1;
+  std::vector<int32_t> prompt_token_ids(prompt_length);
+  std::generate(prompt_token_ids.begin(), prompt_token_ids.end(), [&]() {
+    int32_t token = dis(gen);
+    return token == eos_token_id ? token + 1 : token;  // skip eos
+  });
+
+  RequestState req_state(prompt_token_ids);
+  req_state.enable_schedule_overlap = options_.enable_schedule_overlap();
+  req_state.seq_capacity = total_length + 1;
+  auto request = std::make_shared<Request>(
+      /*request_id=*/"",
+      /*x_request_id=*/"",
+      /*x_request_time=*/"",
+      req_state);
+
+  auto* sequence = request->sequences()[0].get();
+  if (!block_manager_pool_->BlockManagerPool::allocate(sequence,
+                                                       total_length + 1)) {
+    LOG(FATAL) << "Profiling decode step time failed! Not enough blocks, total "
+                  "length: "
+               << total_length;
+  }
+  sequence->kv_state().incr_kv_cache_tokens_num(prompt_length);
+
+  int32_t generated_token = dis(gen);
+  generated_token =
+      generated_token == eos_token_id ? generated_token + 1 : generated_token;
+  sequence->append_token(generated_token);
+
+  CHECK(sequence->stage() == SequenceStage::DECODE)
+      << "Decode profiling request is not in DECODE stage. total_length: "
+      << total_length << ", prompt_length: " << prompt_length
+      << ", kv_cache_tokens_num: " << sequence->kv_state().kv_cache_tokens_num()
+      << ", num_tokens: " << sequence->num_tokens();
+  CHECK_EQ(sequence->num_generated_tokens(), 1)
+      << "Decode profiling request should start with one generated token.";
+
+  return request;
+}
+
 // collect the latency of each step
 double ProfileManager::run_request(int32_t token_length,
                                    int32_t prefix_length,
@@ -627,6 +684,9 @@ double ProfileManager::run_request(int32_t token_length,
   std::vector<Sequence*> sequences;
   std::vector<size_t> sequences_budget;
   std::vector<std::shared_ptr<Request>> requests;
+  sequences.reserve(batch_size);
+  sequences_budget.reserve(batch_size);
+  requests.reserve(batch_size);
 
   // batch sequences with the same kv cahce and token length
   for (int32_t i = 0; i < batch_size; i++) {
@@ -672,6 +732,9 @@ double ProfileManager::run_request(
   std::vector<Sequence*> sequences;
   std::vector<size_t> sequences_budget;
   std::vector<std::shared_ptr<Request>> requests;
+  sequences.reserve(token_length_vec.size());
+  sequences_budget.reserve(token_length_vec.size());
+  requests.reserve(token_length_vec.size());
 
   // batch sequences with the same kv cahce and token length
   for (int32_t i = 0; i < token_length_vec.size(); i++) {
@@ -704,42 +767,69 @@ double ProfileManager::run_request(
   return latency;
 }
 
-// Generate a batch of decode requests and execute it, then return the step
-// latency.
+double ProfileManager::run_decode_request(
+    const std::vector<int32_t>& total_length_vec) {
+  std::vector<Sequence*> sequences;
+  std::vector<size_t> sequences_budget;
+  std::vector<std::shared_ptr<Request>> requests;
+
+  for (int32_t total_length : total_length_vec) {
+    std::shared_ptr<Request> request =
+        generate_single_decode_request(total_length);
+    requests.emplace_back(request);
+    sequences.emplace_back(request->sequences()[0].get());
+    sequences_budget.emplace_back(1);
+  }
+
+  auto batches =
+      BatchFactory::get_instance(options_.dp_size())
+          ->create_batches(requests, sequences, sequences_budget, nullptr);
+
+  absl::Time start_time = absl::Now();
+  engine_->step(batches);
+  if (options_.enable_schedule_overlap()) {
+    engine_->update_last_step_result(batches);
+  }
+  double latency = absl::ToDoubleMilliseconds(absl::Now() - start_time);
+  for (auto& request : requests) {
+    block_manager_pool_->deallocate_without_cache(
+        request->sequences()[0].get());
+  }
+
+  return latency;
+}
+
+// Generate a batch of decode requests in DECODE stage and execute one decode
+// step, then return the step latency.
 double ProfileManager::profile_decode_step_time(int32_t token_length,
                                                 int32_t batch_size,
                                                 int32_t min_context_len,
                                                 int32_t max_context_len) {
-  double total_latency = 0;
+  double total_latency = 0.0;
   for (int32_t i = 0; i < profile_count_per_step_; ++i) {
     std::vector<int32_t> token_length_vec;
-    std::vector<int32_t> prefix_length_vec;
     generate_random_decode_batch(batch_size * token_length,
                                  batch_size,
                                  min_context_len,
                                  max_context_len,
-                                 token_length_vec,
-                                 prefix_length_vec);
-    double latency = run_request(token_length_vec, prefix_length_vec);
-    total_latency += latency;
+                                 token_length_vec);
+    total_latency += run_decode_request(token_length_vec);
   }
   return total_latency / profile_count_per_step_;
 }
 
-// Generate a batch of random decode requests with an average length of
-// token_length.
+// Generate a batch of random decode requests with an average total sequence
+// length of token_length.
 void ProfileManager::generate_random_decode_batch(
     int32_t total_length,
     int32_t batch_size,
     int32_t min_context_len,
     int32_t max_context_len,
-    std::vector<int32_t>& token_length_vec,
-    std::vector<int32_t>& prefix_length_vec) {
+    std::vector<int32_t>& token_length_vec) {
   CHECK(total_length >= batch_size * min_context_len);
   CHECK(total_length <= batch_size * max_context_len);
 
   token_length_vec.resize(batch_size, min_context_len);
-  prefix_length_vec.resize(batch_size, min_context_len - 1);
   int remain = total_length - batch_size * min_context_len;
 
   std::random_device rd;
@@ -755,7 +845,6 @@ void ProfileManager::generate_random_decode_batch(
     std::uniform_int_distribution<int> dis(0, max);
     int add = dis(gen);
     token_length_vec[i] += add;
-    prefix_length_vec[i] += add;
     remain -= add;
   }
 
@@ -763,7 +852,6 @@ void ProfileManager::generate_random_decode_batch(
   while (remain > 0) {
     if (token_length_vec[idx % batch_size] < max_context_len) {
       token_length_vec[idx % batch_size] += 1;
-      prefix_length_vec[idx % batch_size] += 1;
       --remain;
     }
     ++idx;

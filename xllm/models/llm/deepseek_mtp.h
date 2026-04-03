@@ -60,6 +60,7 @@ class DeepseekMtpForCausalLMImpl
     for (const auto& state_dict : loader->get_state_dicts()) {
       model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
     }
+    model_->verify_loaded_weights();
   }
 };
 TORCH_MODULE(DeepseekMtpForCausalLM);

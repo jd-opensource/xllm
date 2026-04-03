@@ -34,6 +34,7 @@ limitations under the License.
 #include "request.h"
 #include "request_output.h"
 #include "rerank.pb.h"
+#include "sample_slot.h"
 
 namespace xllm {
 
@@ -164,6 +165,10 @@ struct RequestParams {
   bool add_special_tokens = false;
 
   nlohmann::json chat_template_kwargs = nlohmann::json::object();
+
+  bool is_sample_request = false;
+
+  std::vector<SampleSlot> sample_slots;
 };
 
 }  // namespace xllm

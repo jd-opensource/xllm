@@ -3,6 +3,20 @@ include(cc_shared_library)
 
 include_directories(.)
 
+# Generate build-time version header from version.txt.
+file(READ "${CMAKE_SOURCE_DIR}/version.txt" XLLM_BUILD_VERSION_RAW)
+string(STRIP "${XLLM_BUILD_VERSION_RAW}" XLLM_BUILD_VERSION)
+if(XLLM_BUILD_VERSION MATCHES "^v(.+)$")
+  set(XLLM_BUILD_VERSION "${CMAKE_MATCH_1}")
+endif()
+if(XLLM_BUILD_VERSION STREQUAL "")
+  set(XLLM_BUILD_VERSION "unknown")
+endif()
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/core/common")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/core/common/xllm_build_info.h"
+     "#pragma once\n\n#define XLLM_BUILD_VERSION \"${XLLM_BUILD_VERSION}\"\n")
+include_directories("${CMAKE_CURRENT_BINARY_DIR}")
+
 # Set warning-as-error for xllm code (third-party headers are marked as SYSTEM)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(

@@ -240,7 +240,7 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
       // new prefill has high priority, but these requests has lower priority
       // then existed requests in running_queue_ in decoding stage.
       // so we need to push them to the back of running_queue_.
-      for (auto it = running_requests_.begin(); it != running_requests_.end();
+      for (auto it = running_requests_.cbegin(); it != running_requests_.cend();
            ++it) {
         // finished request is set to nullptr
         if (*it == nullptr) {
@@ -264,7 +264,8 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
       // remaining requests. Therefore, the `push_front`
       // method needs to be used.
       //
-      for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
+      for (auto it = running_requests_.crbegin();
+           it != running_requests_.crend();
            ++it) {
         // finished request is set to nullptr
         if (*it == nullptr) {
@@ -279,7 +280,7 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
       }
     }
   } else {
-    for (auto it = running_requests_.begin(); it != running_requests_.end();
+    for (auto it = running_requests_.cbegin(); it != running_requests_.cend();
          ++it) {
       if (*it == nullptr) {
         continue;
@@ -508,6 +509,9 @@ void PDOOCScheduler::handle_decode_requests(
 
   int num_offline = 0;
   double new_batch_latency = 0.0;
+  std::vector<Sequence*> candidate_sequences;
+  std::vector<size_t> candidate_token_budgets;
+
   while (!running_queue->empty() &&
          remaining_token_budget > options_.num_speculative_tokens() &&
          latency_budget > estimate_latency && remaining_seq_budget > 0) {
@@ -515,8 +519,8 @@ void PDOOCScheduler::handle_decode_requests(
     // TODO: check if request is timeout
 
     const size_t num_sequences = request->sequences().size();
-    std::vector<Sequence*> candidate_sequences;
-    std::vector<size_t> candidate_token_budgets;
+    candidate_sequences.clear();
+    candidate_token_budgets.clear();
     candidate_sequences.reserve(num_sequences);
     candidate_token_budgets.reserve(num_sequences);
 

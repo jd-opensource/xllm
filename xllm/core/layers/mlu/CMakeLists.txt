@@ -7,9 +7,9 @@ cc_library(
     attention.h
     deepseek_v2_attention.h
     deepseek_v2_decoder_layer_impl.h
+    deepseek_v2_sparse_moe_block.h
     indexer.h
     deepseek_v32_sp_context.h
-    deepseek_v32_sp_metadata.h
     deepseek_v32_sp_plan.h
     moe_gate.h
     fused_moe.h
@@ -18,6 +18,7 @@ cc_library(
     deepseek_v2_attention.cpp
     deepseek_v2_attention_sp.cpp
     deepseek_v2_decoder_layer_impl.cpp
+    deepseek_v2_sparse_moe_block.cpp
     indexer.cpp
     moe_gate.cpp
     fused_moe.cpp

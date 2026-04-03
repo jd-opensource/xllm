@@ -63,7 +63,7 @@ yum install numactl
 执行编译，在`build/`下生成可执行文件`build/xllm/core/server/xllm`：
 
 ```bash
-python setup.py build --device a3
+python setup.py build
 ```
 
 ## 3.启动模型
@@ -161,8 +161,7 @@ do
     --communication_backend="hccl" \
     --enable_schedule_overlap=true \
     --enable_graph=true \
-    --enable_graph_no_padding=true \
-    --enable_mla=true \
+    --enable_graph_mode_decode_no_padding=true \
     --draft_model=$DRAFT_MODEL_PATH \
     --draft_devices="npu:$DEVICE" \
     --num_speculative_tokens=1 \
@@ -234,8 +233,7 @@ for (( i=0; i<$LOCAL_NODES; i++ ))do
     --communication_backend="hccl" \
     --enable_schedule_overlap=true \
     --enable_graph=true \
-    --enable_graph_no_padding=true \
-    --enable_mla=true \
+    --enable_graph_mode_decode_no_padding=true \
     --ep_size=16 \
     --dp_size=1 \
     --rank_tablefile=/yourPath/ranktable.json \
@@ -275,8 +273,7 @@ for (( i=0; i<$LOCAL_NODES; i++ ))do
     --communication_backend="hccl" \
     --enable_schedule_overlap=true \
     --enable_graph=true \
-    --enable_graph_no_padding=true \
-    --enable_mla=true \
+    --enable_graph_mode_decode_no_padding=true \
     --ep_size=16 \
     --dp_size=1 \
     --rank_tablefile=/yourPath/ranktable.json \

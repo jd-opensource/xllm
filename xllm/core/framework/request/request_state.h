@@ -28,6 +28,7 @@ limitations under the License.
 #include "mm_data.h"
 #include "rec_type.h"
 #include "request_output.h"
+#include "sample_slot.h"
 #include "stopping_checker.h"
 
 namespace xllm {
@@ -45,10 +46,10 @@ struct SchedulerParam {
   int32_t ttlt_slo_ms = std::numeric_limits<int32_t>::max();
   int32_t ttft_slo_ms = std::numeric_limits<int32_t>::max();
   int32_t tpot_slo_ms = std::numeric_limits<int32_t>::max();
-  int32_t tpot_priority_weight = 0;
-  int32_t ttft_priority_weight = 0;
-  int32_t ttlt_priority_weight = 0;
-  int32_t priority_weight = 0;
+  int32_t tpot_priority_weight = 1;
+  int32_t ttft_priority_weight = 1;
+  int32_t ttlt_priority_weight = 1;
+  int32_t priority_weight = 1;
   RequestPriority priority = RequestPriority::NORMAL;
 };
 
@@ -172,6 +173,8 @@ struct RequestState final {
   bool handle_last_token_done = false;
 
   std::optional<Call*> call_;
+
+  std::vector<SampleSlot> sample_slots;
 };
 
 }  // namespace xllm

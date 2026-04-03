@@ -56,4 +56,19 @@ TEST(EmbeddingCacheTest, WriteAndClear) {
   EXPECT_TRUE(tensor_equal(output.sample_output.probs, updated_probs));
 }
 
+TEST(EmbeddingCacheTest, WriteSelectedOnlyProbs) {
+  EmbeddingCache cache(/*total_nums=*/2);
+  std::vector<int32_t> ids = {0, 1};
+  auto cached_tokens = torch::tensor({11, 12}, torch::kInt);
+  auto cached_embeddings = torch::tensor({{1.0f, 2.0f}, {3.0f, 4.0f}});
+  auto cached_probs = torch::tensor({0.2f, 0.8f});
+
+  cache.write(ids, cached_tokens, cached_embeddings, cached_probs);
+  auto output = cache.read_for_decode(ids);
+  EXPECT_TRUE(torch::equal(output.sample_output.next_tokens.to(torch::kInt),
+                           cached_tokens));
+  EXPECT_TRUE(tensor_equal(output.sample_output.embeddings, cached_embeddings));
+  EXPECT_TRUE(tensor_equal(output.sample_output.probs, cached_probs));
+}
+
 }  // namespace xllm

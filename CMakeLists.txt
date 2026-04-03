@@ -16,18 +16,6 @@ if(DEVICE_ARCH STREQUAL "ARM")
 endif()
 
 if(USE_NPU)
-  if(DEVICE_TYPE STREQUAL "USE_A3")
-      add_compile_definitions(USE_A3) 
-      add_definitions(-DUSE_A3)
-      set(USE_A3 ON)
-      message(STATUS "Building for device: A3 (macro USE_A3 defined)")
-  else()
-      add_compile_definitions(USE_A2)
-      add_definitions(-DUSE_A2)
-      set(USE_A2 ON)
-      message(STATUS "Building for device: A2 (macro USE_A2 defined)")
-  endif()
-
   # Override Mooncake option for mooncake transfer engine
   # CANN 8.5+ migration: ascend_direct_transport replaces ascend_transport
   set(USE_ASCEND_DIRECT ON CACHE BOOL "Enable ADXL engine for Ascend NPU" FORCE)
@@ -41,11 +29,16 @@ if(USE_NPU)
   message(STATUS "Using xllm_atb_layers source at: ${XLLM_ATB_LAYERS_SOURCE_DIR}")
 
   execute_process(
-    COMMAND git -C "${CMAKE_SOURCE_DIR}/third_party/xllm_ops" rev-parse HEAD
+    COMMAND git -c "safe.directory=${CMAKE_SOURCE_DIR}/third_party/xllm_ops" -C "${CMAKE_SOURCE_DIR}/third_party/xllm_ops" rev-parse HEAD
     OUTPUT_VARIABLE XLLM_OPS_GIT_HEAD
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
   )
+  if(DEFINED ENV{ASCEND_HOME_PATH} AND NOT "$ENV{ASCEND_HOME_PATH}" STREQUAL "")
+    set(XLLM_OPS_MARKER_PATH "$ENV{ASCEND_HOME_PATH}/opp/vendors/xllm/.xllm_ops_git_head")
+  else()
+    set(XLLM_OPS_MARKER_PATH "/usr/local/Ascend/ascend-toolkit/latest/opp/vendors/xllm/.xllm_ops_git_head")
+  endif()
 
   if(NOT DEFINED XLLM_OPS_GIT_HEAD_CACHED OR NOT XLLM_OPS_GIT_HEAD STREQUAL XLLM_OPS_GIT_HEAD_CACHED)
     message(STATUS "xllm_ops git HEAD changed; running precompile via execute_process")
@@ -58,6 +51,9 @@ if(USE_NPU)
       message(FATAL_ERROR "Failed to precompile xllm ops, error code: ${XLLM_OPS_RESULT}")
     endif()
     set(XLLM_OPS_GIT_HEAD_CACHED "${XLLM_OPS_GIT_HEAD}" CACHE INTERNAL "" FORCE)
+    get_filename_component(XLLM_OPS_MARKER_DIR "${XLLM_OPS_MARKER_PATH}" DIRECTORY)
+    file(MAKE_DIRECTORY "${XLLM_OPS_MARKER_DIR}")
+    file(WRITE "${XLLM_OPS_MARKER_PATH}" "${XLLM_OPS_GIT_HEAD}\n")
     message(STATUS "xllm ops precompiled and HEAD cache updated")
   else()
     message(STATUS "xllm_ops git HEAD unchanged; skipping precompile")
@@ -265,6 +261,17 @@ find_package(leveldb CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(absl CONFIG REQUIRED)
 find_package(Protobuf CONFIG REQUIRED)
+# Ensure vcpkg protobuf headers are found before PyTorch's bundled older version.
+# Use BEFORE SYSTEM so that:
+#   1) vcpkg protobuf is first in -isystem list (before torch's -isystem)
+#   2) project-local -I paths (e.g. Mooncake fake_include stubs) still win over -isystem
+# Protobuf_INCLUDE_DIRS may be empty in CONFIG mode; fall back to the imported target.
+if(NOT Protobuf_INCLUDE_DIRS AND TARGET protobuf::libprotobuf)
+  get_target_property(Protobuf_INCLUDE_DIRS protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
+endif()
+if(Protobuf_INCLUDE_DIRS)
+  include_directories(BEFORE SYSTEM ${Protobuf_INCLUDE_DIRS})
+endif()
 find_package(gRPC CONFIG REQUIRED)
 find_package(folly CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
@@ -313,9 +320,6 @@ else()
 endif()
 
 if(USE_NPU)
-  # USE_NPU_TORCH: Temporary flag used for debugging qwen3 torch NPU graph
-  # capture. This variable may be removed in the future.
-  # add_definitions(-DUSE_NPU_TORCH)
   add_definitions(-DUSE_NPU)
   add_definitions(-DBUILD_LIBTORCH)
   add_definitions(-DTORCH_SETCUSTOMHANDLER=ON)
@@ -338,6 +342,7 @@ if(USE_NPU)
       $ENV{NPU_HOME_PATH}/include
       $ENV{ATB_HOME_PATH}/include
       $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/include/
+      ${CMAKE_CURRENT_SOURCE_DIR}/third_party/torch_npu_ops/
   )
   # Keep third-party warnings suppressed while providing headers expected by
   # legacy includes like "atb_speed/log.h" from xllm_atb_layers.
@@ -355,6 +360,17 @@ if(USE_NPU)
       $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/lib/
   )
   link_libraries(cust_opapi)
+  # avoid conflicts with xllm libruntime.a
+  find_library(
+    NPU_RUNTIME_SO
+    NAMES libruntime.so
+    PATHS $ENV{ASCEND_TOOLKIT_HOME}/lib64
+    NO_DEFAULT_PATH
+  )
+  if(NOT NPU_RUNTIME_SO)
+      message(FATAL_ERROR "Failed to find npu libruntime.so in ${ASCEND_TOOLKIT_HOME}/lib64")
+  endif()
+  set(NPU_RUNTIME_SO ${NPU_RUNTIME_SO} CACHE INTERNAL "CACHED ASCEND libruntime.so path")
 endif()
 
 if(USE_MLU)
@@ -448,8 +464,8 @@ if(USE_CUDA)
   add_definitions(-DUSE_CUDA)
   add_compile_definitions(TORCH_CUDA=1)
   set(CMAKE_VERBOSE_MAKEFILE ON)
-  include_directories(
-      $ENV{PYTHON_INCLUDE_PATH}
+  include_directories($ENV{PYTHON_INCLUDE_PATH})
+  include_directories(SYSTEM
       $ENV{PYTORCH_INSTALL_PATH}/include
       $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
   )

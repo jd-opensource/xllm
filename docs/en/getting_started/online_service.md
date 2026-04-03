@@ -40,6 +40,75 @@ curl http://127.0.0.1:9977/v1/completions \
   }'
 ```
 
+Sample mode:
+```bash
+curl http://127.0.0.1:9977/v1/sample \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen2-7B-Instruct",
+    "prompt": "Question: <emb_0> matched or not. Conclusion: <emb_0>",
+    "selector": {
+      "type": "literal",
+      "value": "<emb_0>"
+    },
+    "logprobs": 5,
+    "request_id": "sample-demo-001"
+  }'
+```
+
+Typical response:
+```json
+{
+  "id": "sample-demo-001",
+  "object": "sample_completion",
+  "created": 1773369600,
+  "model": "Qwen2-7B-Instruct",
+  "choices": [
+    {
+      "index": 0,
+      "text": "True",
+      "logprobs": {
+        "tokens": ["True", "False"],
+        "token_ids": [3456, 7890],
+        "token_logprobs": [-0.12, -2.31]
+      },
+      "finish_reason": "selector_match"
+    },
+    {
+      "index": 1,
+      "text": "",
+      "logprobs": {
+        "tokens": [],
+        "token_ids": [],
+        "token_logprobs": []
+      },
+      "finish_reason": "empty_logprobs"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 20,
+    "completion_tokens": 2,
+    "total_tokens": 22
+  }
+}
+```
+
+`/v1/sample` notes:
+
+- Only `--backend=llm` is supported. VLM/DiT/Rec are not supported yet.
+- `selector.type` is currently fixed to `literal`. `selector.value` is matched against prompt text in full and in order.
+- `logprobs` defaults to `5`, with an allowed range of `[1, 5]`.
+- `choices[i].index` is the matched `sample_id`, corresponding one-to-one with the matched order in prompt.
+- If no selector match is found, the service returns `200` with `choices=[]`. If a matched position has no available logprobs, it returns `finish_reason="empty_logprobs"`.
+- Service logs only summary fields such as `request_id`, `sample_id`, `match_count`, and `model`, and do not log the full prompt.
+
+`/v1/sample` common error semantics:
+
+- Missing `model/prompt/selector/selector.value`, `selector.type != literal`, or out-of-range `logprobs` returns `INVALID_ARGUMENT`.
+- If the model does not exist or the backend is not `llm`, it returns `UNKNOWN`.
+- When concurrency reaches the upper limit, it returns `RESOURCE_EXHAUSTED`.
+- When the model is in sleep state, it returns `UNAVAILABLE`.
+
 ### Python Call
 ```python
 import requests
@@ -154,4 +223,3 @@ chat_completion = client.chat.completions.create(
 result = chat_completion.choices[0].message.content
 print("Chat completion output:", result)
 ```
-

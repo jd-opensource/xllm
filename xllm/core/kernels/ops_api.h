@@ -125,4 +125,17 @@ torch::Tensor rms_norm_static_fp8_quant(RmsNormStaticFp8QuantParams& params);
 std::tuple<torch::Tensor, torch::Tensor> fused_add_rms_norm_static_fp8_quant(
     FusedAddRmsNormStaticFp8QuantParams& params);
 
+std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
+    FusedGdnGatingParams& params);
+
+std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
+    FusedRecurrentGatedDeltaRuleParams& params);
+
+torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params);
+
+torch::Tensor gated_layer_norm(GatedLayerNormParams& params);
+
+std::pair<torch::Tensor, torch::Tensor> partial_rotary_embedding(
+    PartialRotaryEmbeddingParams& params);
+
 }  // namespace xllm::kernel

@@ -33,7 +33,9 @@ class LogprobState {
   ~LogprobState() = default;
 
   // for generated tokens
-  float get_average_logprob(int64_t num_tokens);
+  float get_acc_logprob(int64_t num_tokens);
+  // Returns the accumulated logprob excluding the last generated token.
+  float get_base_logprob(int64_t num_tokens);
 
   void generate_output_tokens_logprobs(
       size_t start_idx,

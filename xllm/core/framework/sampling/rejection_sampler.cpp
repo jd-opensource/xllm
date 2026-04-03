@@ -321,7 +321,8 @@ std::tuple<torch::Tensor, torch::Tensor> RejectionSampler::random_sample_fused(
     bool mask_out_rejected_tokens) {
   CHECK_EQ(draft_probs.dim(), 3)
       << "Fused rejection sampler requires dense draft_probs [batch, n_spec, "
-         "vocab], please set enable_optimized_validate_draft_probs_ to false.";
+         "vocab]. Ensure validate passes dense draft_probs, for example with "
+         "--enable_opt_validate_probs=false.";
 
   const auto device = draft_token_ids.device();
   const int64_t batch_size = draft_token_ids.size(0);

@@ -422,10 +422,10 @@ void DeekseekV32DecoderLoader::process_expert_weights(
   const int safe_end =
       std::min(end_idx, static_cast<int>(device_expert_list_.size()));
 
-  auto it = std::find(device_expert_list_.begin() + start_idx,
-                      device_expert_list_.begin() + safe_end,
+  auto it = std::find(device_expert_list_.cbegin() + start_idx,
+                      device_expert_list_.cbegin() + safe_end,
                       expert_index);
-  const bool in_partition = it != device_expert_list_.begin() + safe_end;
+  const bool in_partition = it != device_expert_list_.cbegin() + safe_end;
 
   // Early return if neither EPLB nor partition needs this expert
   if (!needs_eplb && !in_partition) {
@@ -466,11 +466,11 @@ void DeekseekV32DecoderLoader::process_expert_weights(
   // Step 5: Handle partition case
   if (in_partition) {
     std::vector<size_t> matches_pos;
-    for (auto iter = it; iter != device_expert_list_.begin() + safe_end;
+    for (auto iter = it; iter != device_expert_list_.cbegin() + safe_end;
          ++iter) {
       if (*iter == expert_index) {
         matches_pos.emplace_back(
-            std::distance(device_expert_list_.begin(), iter) - start_idx);
+            std::distance(device_expert_list_.cbegin(), iter) - start_idx);
       }
     }
 
@@ -658,7 +658,6 @@ void DeekseekV32DecoderLoader::merge_experts_weights() {
                               device_);
   }
 
-#if defined(USE_A3)
   torch::Tensor mlp_down_weight =
       merge_experts_weights(experts_weights_["down_proj.weight"],
                             device_,
@@ -666,24 +665,7 @@ void DeekseekV32DecoderLoader::merge_experts_weights() {
   at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
       at_npu::native::npu_format_cast(mlp_down_weight, ACL_FORMAT_FRACTAL_NZ)
           .contiguous();
-#else
-  // TODO: xllm ops's GMM need to support MTP.
-  if (decode_isBF16_ && false) {
-    torch::Tensor mlp_down_weight =
-        merge_experts_weights(experts_weights_["down_proj.weight"],
-                              device_,
-                              /*transpose=*/true);
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 29);
-  } else {
-    torch::Tensor mlp_down_weight =
-        merge_experts_weights(experts_weights_["down_proj.weight"],
-                              device_,
-                              /*transpose=*/false);
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
-  }
-#endif
+
   if (quantize_type_ == "w8a8_dynamic") {
     at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] = merge_experts_weights(
         experts_weights_["down_proj.weight_offset"], device_);
@@ -736,15 +718,26 @@ void DeekseekV32DecoderLoader::process_shared_expert_weights(
   if (index == -1) {
     return;
   }
+
+  const bool is_sharded = WEIGHT_SHARD_W8A8.count(index);
+
   if (FLAGS_expert_parallel_degree == 2) {
     tmp_tensor = tensor.to(device_);
+  } else if (layer_id_ < first_k_dense_replace_) {
+    tmp_tensor = is_sharded ? get_sharded_tensor(state_dict,
+                                                 name,
+                                                 WEIGHT_SHARD_W8A8.at(index),
+                                                 dp_local_tp_rank_,
+                                                 dp_local_tp_size_)
+                                  .to(device_)
+                            : tensor.to(device_);
   } else {
-    const bool is_sharded = WEIGHT_SHARD_W8A8.count(index);
     tmp_tensor = is_sharded ? get_sharded_tensor(
                                   state_dict, name, WEIGHT_SHARD_W8A8.at(index))
                                   .to(device_)
                             : tensor.to(device_);
   }
+
   if (absl::StrContains(name, "down_proj")) {
     at_weight_tensors_[index] = tmp_tensor;
   } else {

@@ -20,8 +20,8 @@ limitations under the License.
 #include "core/layers/qwen3_vision_layer.h"
 #include "models/llm/qwen3_moe.h"
 #include "models/model_registry.h"
-#include "processors/input_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
+#include "processors/qwen2_vl_input_processor.h"
 #include "qwen2_5_vl.h"
 #include "qwen3_vl.h"
 
@@ -196,6 +196,7 @@ TORCH_MODULE(Qwen3_VLMoeForConditionalGeneration);
 REGISTER_INPUT_PROCESSOR(qwen3_vl_moe, Qwen2_5_VLInputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_vl_moe, Qwen3_VLMoeForConditionalGeneration);
 REGISTER_IMAGE_PROCESSOR(qwen3_vl_moe, Qwen2VLImageProcessor);
+
 // register the model args
 REGISTER_MODEL_ARGS(qwen3_vl_moe, [&] {
   // text config
@@ -257,5 +258,14 @@ REGISTER_MODEL_ARGS(qwen3_vl_moe, [&] {
   LOAD_ARG_OR(video_token_id, "video_token_id", 151656);
   LOAD_ARG_OR(vision_end_token_id, "vision_end_token_id", 151653);
   LOAD_ARG_OR(vision_start_token_id, "vision_start_token_id", 151652);
+
+  // arguments to be compatible with other fused moe models
+  LOAD_ARG_OR(n_routed_experts, "num_experts", 128);
+  SET_ARG(n_shared_experts, 0);
+  SET_ARG(scoring_func, "softmax");
+  SET_ARG(topk_method, "");
+  SET_ARG(n_group, -1);
+  SET_ARG(topk_group, 0);
+  SET_ARG(routed_scaling_factor, 1.0);
 });
 }  // namespace xllm

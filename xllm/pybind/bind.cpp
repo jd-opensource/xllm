@@ -27,6 +27,7 @@ limitations under the License.
 #include "core/framework/request/mm_data.h"
 #include "core/framework/request/request_output.h"
 #include "core/framework/request/request_params.h"
+#include "core/framework/request/sample_slot.h"
 #include "models/model_registry.h"
 
 namespace xllm {
@@ -60,7 +61,6 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("expert_parallel_degree",
                      &Options::expert_parallel_degree_)
       .def_readwrite("task_type", &Options::task_type_)
-      .def_readwrite("enable_mla", &Options::enable_mla_)
       .def_readwrite("enable_chunked_prefill",
                      &Options::enable_chunked_prefill_)
       .def_readwrite("enable_prefill_sp", &Options::enable_prefill_sp_)
@@ -130,6 +130,21 @@ PYBIND11_MODULE(xllm_export, m) {
       .def("options",
            &LLMMaster::options,
            py::call_guard<py::gil_scoped_release>())
+      .def(
+          "build_sample_slots",
+          [](const LLMMaster& self,
+             const std::string& request_id,
+             const std::string& prompt,
+             const std::string& literal) {
+            std::vector<SampleSlot> sample_slots;
+            const bool ok = xllm::build_sample_slots(
+                request_id, prompt, literal, self.tokenizer(), &sample_slots);
+            return std::make_pair(ok, sample_slots);
+          },
+          py::arg("request_id"),
+          py::arg("prompt"),
+          py::arg("literal"),
+          py::call_guard<py::gil_scoped_release>())
       .def("get_rate_limiter",
            &LLMMaster::get_rate_limiter,
            py::call_guard<py::gil_scoped_release>())
@@ -137,7 +152,14 @@ PYBIND11_MODULE(xllm_export, m) {
         return "LLMMaster({})"_s.format(self.options());
       });
 
-  // 3. export RequestParams
+  // 3. export SampleSlot
+  py::class_<SampleSlot>(m, "SampleSlot")
+      .def(py::init())
+      .def_readwrite("request_id", &SampleSlot::request_id)
+      .def_readwrite("sample_id", &SampleSlot::sample_id)
+      .def_readwrite("token_position", &SampleSlot::token_position);
+
+  // 4. export RequestParams
   py::class_<RequestParams>(m, "RequestParams")
       .def(py::init())
       .def(py::init([](py::kwargs kwargs) {
@@ -172,7 +194,10 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("is_embeddings", &RequestParams::is_embeddings)
       .def_readwrite("stop", &RequestParams::stop)
       .def_readwrite("stop_token_ids", &RequestParams::stop_token_ids)
-      .def_readwrite("beam_width", &RequestParams::beam_width);
+      .def_readwrite("beam_width", &RequestParams::beam_width)
+      .def_readwrite("add_special_tokens", &RequestParams::add_special_tokens)
+      .def_readwrite("is_sample_request", &RequestParams::is_sample_request)
+      .def_readwrite("sample_slots", &RequestParams::sample_slots);
 
   // 4. export Usage
   py::class_<Usage>(m, "Usage")
@@ -189,7 +214,6 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_property_readonly("total_tokens", [](const Usage& self) {
         return self.num_total_tokens;
       });
-
   // 5. export RequestOutput
   py::class_<RequestOutput>(m, "RequestOutput")
       .def(py::init())
@@ -228,7 +252,28 @@ PYBIND11_MODULE(xllm_export, m) {
                                                         self.message());
       });
 
-  // 8. export SequenceOutput
+  // 8. export LogProbData
+  py::class_<LogProbData>(m, "LogProbData")
+      .def(py::init())
+      .def_readwrite("token", &LogProbData::token)
+      .def_readwrite("token_id", &LogProbData::token_id)
+      .def_readwrite("logprob", &LogProbData::logprob)
+      .def_readwrite("finished_token", &LogProbData::finished_token)
+      .def("__repr__", [](const LogProbData& self) {
+        return "LogProbData(token={!r}, token_id={}, logprob={})"_s.format(
+            self.token, self.token_id, self.logprob);
+      });
+
+  // 9. export LogProb
+  py::class_<LogProb, LogProbData>(m, "LogProb")
+      .def(py::init())
+      .def_readwrite("top_logprobs", &LogProb::top_logprobs)
+      .def("__repr__", [](const LogProb& self) {
+        return "LogProb(token={!r}, token_id={}, logprob={})"_s.format(
+            self.token, self.token_id, self.logprob);
+      });
+
+  // 10. export SequenceOutput
   py::class_<SequenceOutput>(m, "SequenceOutput")
       .def(py::init())
       .def_readwrite("index", &SequenceOutput::index)
@@ -242,7 +287,7 @@ PYBIND11_MODULE(xllm_export, m) {
         return "SequenceOutput({}: {!r})"_s.format(self.index, self.text);
       });
 
-  // 9. export MMType
+  // 11. export MMType
   py::enum_<MMType::Value>(m, "MMType")
       .value("NONE", MMType::Value::NONE)
       .value("IMAGE", MMType::Value::IMAGE)
@@ -250,7 +295,7 @@ PYBIND11_MODULE(xllm_export, m) {
       .value("AUDIO", MMType::Value::AUDIO)
       .export_values();
 
-  // 10. export MMData
+  // 12. export MMData
   py::class_<MMData>(m, "MMData")
       .def(py::init<int, const MMDict&>(), py::arg("ty"), py::arg("data"))
       .def("get",
@@ -275,7 +320,7 @@ PYBIND11_MODULE(xllm_export, m) {
         return ss.str();
       });
 
-  // 11. export VLMMaster
+  // 13. export VLMMaster
   py::class_<VLMMaster>(m, "VLMMaster")
       .def(py::init<const Options&>(),
            py::arg("options"),

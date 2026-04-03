@@ -17,11 +17,14 @@ limitations under the License.
 
 #include <brpc/channel.h>
 
+#include <atomic>
 #include <functional>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "common/etcd_client.h"
 #include "distributed_runtime/engine.h"
@@ -61,6 +64,11 @@ class XServiceClient {
   std::vector<bool> generations(const std::vector<RequestOutput>& outputs);
 
  private:
+  bool register_instance_with_retry(const std::string& key,
+                                    const std::string& value);
+  bool reconcile_registration();
+  void reconcile_registration_loop();
+
   void handle_master_service_watch(const etcd::Response& response);
   void handle_xservices_watch(const etcd::Response& response);
 
@@ -82,10 +90,13 @@ class XServiceClient {
  private:
   XServiceClient() = default;
 
-  bool exited_ = false;
-  bool register_done_ = false;
+  std::atomic_bool exited_{false};
+  std::atomic_bool register_done_{false};
   bool initialize_done_ = false;
   std::string instance_name_;
+  std::string incarnation_id_;
+  std::string registration_key_;
+  std::string registration_value_;
 
   std::string master_xservice_addr_;
   std::unordered_map<std::string, std::unique_ptr<brpc::Channel>>
@@ -94,8 +105,10 @@ class XServiceClient {
                      std::unique_ptr<xllm_service::proto::XllmRpcService_Stub>>
       xservice_stubs_;
   std::unique_ptr<std::thread> heartbeat_thread_;
+  std::unique_ptr<std::thread> reconcile_thread_;
 
   std::shared_mutex mutex_;
+  std::mutex registration_mutex_;
   brpc::ChannelOptions chan_options_;
   std::unique_ptr<EtcdClient> etcd_client_;
   const BlockManagerPool* block_manager_pool_ = nullptr;  // not own

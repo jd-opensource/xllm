@@ -18,7 +18,7 @@ limitations under the License.
 #include "core/layers/npu/npu_deepseek_v32_decoder_layer_impl.h"
 #include "deepseek_v32.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
@@ -98,6 +98,7 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
           num_speculative_tokens_ + 1, dtype_, device_);
     }
 
+    RollingLayerGuard rolling_guard(rolling_mgr_);
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
@@ -110,6 +111,8 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
       }
 
       auto& layer = layers_[i];
+      const int32_t layer_index = i;
+      rolling_guard.before_layer(layer_index);
       layer(h,
             cos_pos,
             sin_pos,
@@ -118,6 +121,7 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
             input_params,
             event,
             event_flag);
+      rolling_guard.after_layer(layer_index);
     }
     return ModelOutput(norm_(h, 0));
   }
@@ -175,6 +179,11 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
     norm_->reload_weights();
   }
 
+  void reload_non_decoder_weights() {
+    npu_embed_tokens_->reload_weights();
+    norm_->reload_weights();
+  }
+
   void reload_weights_from_device() {
     npu_embed_tokens_->reload_weights_from_device();
     for (size_t i = 0; i < layers_.size(); i++) {
@@ -182,6 +191,23 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
     }
     norm_->reload_weights_from_device();
   }
+
+  void refresh_rolling_weights() {
+    for (auto& layer : layers_) {
+      layer->refresh_rolling_weights();
+    }
+  }
+
+  std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
+    std::vector<layer::BaseManualLoader*> loaders;
+    loaders.reserve(layers_.size());
+    for (auto& layer : layers_) {
+      loaders.push_back(layer->get_manual_loader());
+    }
+    return loaders;
+  }
+
+  void set_rolling_load_manager(RollingLoadManager* mgr) { rolling_mgr_ = mgr; }
 
   void prepare_expert_weight(int32_t layer_id,
                              const std::vector<int32_t>& expert_ids) {
@@ -216,13 +242,15 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
   layer::NpuPosEmbedding atb_pos_emb_{nullptr};
   layer::AttentionMask attn_mask_;
   layer::NpuRMSNorm norm_{nullptr};
+  RollingLoadManager* rolling_mgr_ = nullptr;
 };
 TORCH_MODULE(GlmMoeDsaModel);
 
-class GlmMoeDsaForCausalLMImpl : public LlmForCausalLMImplBase<GlmMoeDsaModel> {
+class GlmMoeDsaForCausalLMImpl
+    : public xllm::npu::model::LlmForCausalLMImplBase<GlmMoeDsaModel> {
  public:
   GlmMoeDsaForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<GlmMoeDsaModel>(context),
+      : xllm::npu::model::LlmForCausalLMImplBase<GlmMoeDsaModel>(context),
         first_k_dense_replace_(
             context.get_model_args().first_k_dense_replace()) {}
 
@@ -299,4 +327,4 @@ REGISTER_MODEL_ARGS(glm_moe_dsa, [&] {
           std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
                                       args->eos_token_id_vec().end()));
 });
-}  // namespace xllm
+}  // namespace xllm::npu::model

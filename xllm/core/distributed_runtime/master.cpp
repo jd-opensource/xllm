@@ -17,17 +17,23 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+#include <unistd.h>
 
+#include <array>
 #include <atomic>
 #include <boost/algorithm/string.hpp>
 #include <csignal>
+#include <cstdio>
+#include <filesystem>
 #include <memory>
+#include <string_view>
 #include <thread>
 #include <utility>
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "common/types.h"
+#include "core/common/xllm_build_info.h"
 #include "dit_master.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
@@ -38,8 +44,10 @@ limitations under the License.
 #include "rec_master.h"
 #include "speculative_engine.h"
 #include "util/device_name_utils.h"
+#include "util/model_config_utils.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
+#include "util/utils.h"
 #include "vlm_engine.h"
 #include "vlm_master.h"
 
@@ -49,10 +57,83 @@ DECLARE_bool(graceful_quit_on_sighup);
 }  // namespace brpc
 
 namespace xllm {
+namespace {
+
+void print_startup_banner(const std::filesystem::path& model_path,
+                          const std::string& backend,
+                          int32_t node_rank) {
+  if (node_rank != 0) {
+    return;
+  }
+
+  constexpr std::string_view kAnsiRed = "\033[31m";
+  constexpr std::string_view kAnsiReset = "\033[0m";
+  const bool use_color = ::isatty(::fileno(stderr));
+
+  std::array<std::string_view, 4> x_logo = {
+      "      ", "▀█▄ ▀ ", "  █▶  ", "▄█▀ ▄ "};
+  std::array<std::string_view, 4> llm_logo = {"█     █     █▄   ▄█",
+                                              "█     █     █ ▀▄▀ █",
+                                              "█     █     █     █",
+                                              "█▄▄▄▄ █▄▄▄▄ █     █"};
+
+  LOG(INFO) << "";
+  LOG(INFO) << x_logo[0] << llm_logo[0];
+  if (use_color) {
+    LOG(INFO) << kAnsiRed << x_logo[1] << kAnsiReset << llm_logo[1]
+              << "  version " << XLLM_BUILD_VERSION;
+    LOG(INFO) << kAnsiRed << x_logo[2] << kAnsiReset << llm_logo[2]
+              << "  model   " << model_path.string();
+    LOG(INFO) << kAnsiRed << x_logo[3] << kAnsiReset << llm_logo[3]
+              << "  backend " << backend;
+  } else {
+    LOG(INFO) << x_logo[1] << llm_logo[1] << "  version " << XLLM_BUILD_VERSION;
+    LOG(INFO) << x_logo[2] << llm_logo[2] << "  model   "
+              << model_path.string();
+    LOG(INFO) << x_logo[3] << llm_logo[3] << "  backend " << backend;
+  }
+  LOG(INFO) << "";
+}
+
+}  // namespace
+
+namespace {
+
+#if defined(USE_NPU)
+void resolve_npu_kernel_backend_for_options(Options* options) {
+  CHECK(options != nullptr) << "options must not be null";
+  if (options->backend() == "dit") {
+    return;
+  }
+
+  const std::string model_type = get_model_type(options->model_path());
+  std::string effective_backend;
+  std::string resolved_name;
+  std::string error_message;
+  if (!resolve_model_registration(model_type,
+                                  options->npu_kernel_backend(),
+                                  &effective_backend,
+                                  &resolved_name,
+                                  &error_message)) {
+    LOG(FATAL) << error_message;
+  }
+
+  options->npu_kernel_backend(effective_backend);
+  FLAGS_npu_kernel_backend = effective_backend;
+  LOG(INFO) << "Resolved npu_kernel_backend=" << effective_backend
+            << " for model_type=" << model_type;
+}
+#endif
+
+}  // namespace
 
 Master::Master(const Options& options, EngineType type)
     : options_(options), master_status_(options.master_status()) {
-  LOG(INFO) << "Master init options: " << options.to_string();
+  const auto model_path =
+      std::filesystem::path(options_.model_path()).lexically_normal();
+  options_.enable_mla(util::should_enable_mla(model_path, options_.backend()));
+  print_startup_banner(model_path, options_.backend(), options_.node_rank());
+  LOG(INFO) << "Master init options: " << options_.to_string();
   FLAGS_enable_prefill_sp = options_.enable_prefill_sp();
 
   // Allow brpc receive SIGTREM and SIGINT signal.
@@ -81,6 +162,7 @@ Master::Master(const Options& options, EngineType type)
   if (options.eplb_update_threshold().has_value()) {
     FLAGS_eplb_update_threshold = options.eplb_update_threshold().value();
   }
+  resolve_npu_kernel_backend_for_options(&options_);
 #endif
   FLAGS_enable_multi_stream_parallel =
       options.enable_multi_stream_parallel() && (options.nnodes() > 1);
@@ -88,7 +170,6 @@ Master::Master(const Options& options, EngineType type)
     LOG(FATAL)
         << "Multi-stream parallel is refactoring now, will be supported later.";
   }
-
   // construct engine
   const auto devices =
       DeviceNameUtils::parse_devices(options_.devices().value_or("auto"));
@@ -116,7 +197,9 @@ Master::Master(const Options& options, EngineType type)
         .max_memory_utilization(options.max_memory_utilization())
         .enable_prefix_cache(options.enable_prefix_cache())
         .task_type(options.task_type())
+        .enable_mla(options_.enable_mla())
         .enable_prefill_sp(options_.enable_prefill_sp())
+        .npu_kernel_backend(options_.npu_kernel_backend())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())
@@ -170,8 +253,9 @@ Master::Master(const Options& options, EngineType type)
             options_.speculative_suffix_max_cached_requests())
         .speculative_suffix_use_tree_spec(
             options_.speculative_suffix_use_tree_spec())
-        .task_type(options.task_type())
-        .enable_mla(options.enable_mla())
+        .task_type(options_.task_type())
+        .enable_mla(options_.enable_mla())
+        .npu_kernel_backend(options_.npu_kernel_backend())
         .master_node_addr(options.master_node_addr())
         .nnodes(options.nnodes())
         .node_rank(options.node_rank())
@@ -221,12 +305,14 @@ Master::Master(const Options& options, EngineType type)
         .enable_prefix_cache(options_.enable_prefix_cache())
         .task_type(options_.task_type())
         .enable_mla(options_.enable_mla())
+        .npu_kernel_backend(options_.npu_kernel_backend())
         .master_node_addr(options_.master_node_addr())
         .nnodes(options_.nnodes())
         .node_rank(options_.node_rank())
         .dp_size(options_.dp_size())
         .ep_size(options_.ep_size())
         .enable_prefill_sp(options_.enable_prefill_sp())
+        .cp_size(options_.cp_size())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
         .max_tokens_per_chunk_for_prefill(
@@ -273,6 +359,8 @@ Master::Master(const Options& options, EngineType type)
         .max_memory_utilization(options_.max_memory_utilization())
         .enable_prefix_cache(options_.enable_prefix_cache())
         .task_type(options_.task_type())
+        .npu_kernel_backend(options_.npu_kernel_backend())
+        .enable_mla(options_.enable_mla())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())

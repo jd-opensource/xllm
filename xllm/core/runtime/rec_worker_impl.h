@@ -208,6 +208,11 @@ class RecWorkerImpl : public LLMWorkerImpl {
                                          const torch::Tensor& top_tokens,
                                          const BeamSearchTensors& beam_tensors);
 
+    void prepare_round_input_for_npu(ForwardInput& input,
+                                     int32_t round,
+                                     const torch::Tensor& top_tokens,
+                                     const BeamSearchTensors& beam_tensors);
+
     void prepare_two_stage_round_input(ForwardInput& input,
                                        int32_t round,
                                        const torch::Tensor& top_tokens,
@@ -258,6 +263,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
     torch::Tensor cached_two_stage_paged_kv_indptr_expanded_;
     torch::Tensor cached_two_stage_paged_kv_indices_expanded_;
     torch::Tensor cached_two_stage_paged_kv_last_page_len_expanded_;
+    torch::Tensor cached_beam_width_tensor_;
 
     std::unique_ptr<RecSampler> rec_sampler_;
 

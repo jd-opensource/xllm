@@ -19,6 +19,7 @@ limitations under the License.
 #include "mlu/mlu_ops_api.h"
 #elif defined(USE_NPU)
 #include "npu/npu_ops_api.h"
+#include "triton_npu/torch_api/triton_ops_api.h"
 #elif defined(USE_CUDA)
 #include "cuda/attention_runner.h"
 #include "cuda/cuda_ops_api.h"
@@ -612,6 +613,8 @@ torch::Tensor apply_top_k_top_p(TopKPParams& params) {
 torch::Tensor random_sample(RandomSampleParams& params) {
 #if defined(USE_MLU)
   return mlu::random_sample(params.logits);
+#elif defined(USE_CUDA)
+  return cuda::random_sample(params.logits);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -722,7 +725,9 @@ void fused_indexer_q(FusedIndexerQParams& params) {
                        params.sin,
                        params.cos,
                        params.position_id,
-                       params.quant_mode);
+                       params.quant_mode,
+                       params.interleaved,
+                       params.rope_at_front);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -740,7 +745,11 @@ void fused_indexer_k(FusedIndexerKParams& params) {
                        params.head_weights,
                        params.k_cache,
                        params.k_cache_scale,
-                       params.hadamard_matrix);
+                       params.hadamard_matrix,
+                       params.interleaved,
+                       params.gamma,
+                       params.beta,
+                       params.eps);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -771,6 +780,41 @@ std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
     Fp8ScaledQuantizeParams& params) {
 #if defined(USE_CUDA)
   return cuda::fp8_scaled_quantize(params.input, params.output, params.scale);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
+    FusedGdnGatingParams& params) {
+#if defined(USE_NPU)
+  return npu::npu_fused_gdn_gating(params.A_log,
+                                   params.a,
+                                   params.b,
+                                   params.dt_bias,
+                                   params.beta,
+                                   params.threshold);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
+    FusedRecurrentGatedDeltaRuleParams& params) {
+#if defined(USE_NPU)
+  return npu::npu_fused_recurrent_gated_delta_rule(
+      params.q,
+      params.k,
+      params.v,
+      params.g,
+      params.beta,
+      params.scale,
+      params.initial_state,
+      params.inplace_final_state,
+      params.cu_seqlens,
+      params.ssm_state_indices,
+      params.num_accepted_tokens,
+      params.use_qk_l2norm_in_kernel);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -864,4 +908,53 @@ std::tuple<torch::Tensor, torch::Tensor> fused_add_rms_norm_static_fp8_quant(
 #endif
 }
 
+torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params) {
+#if defined(USE_NPU)
+  return npu::npu_causal_conv1d_update(params.x,
+                                       params.conv_state,
+                                       params.weight,
+                                       params.activation,
+                                       params.bias,
+                                       params.cache_seqlens,
+                                       params.conv_state_indices,
+                                       params.num_accepted_tokens,
+                                       params.query_start_loc,
+                                       params.max_query_len,
+                                       params.intermediate_conv_window,
+                                       params.pad_slot_id,
+                                       params.validate_data);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+torch::Tensor gated_layer_norm(GatedLayerNormParams& params) {
+#if defined(USE_NPU)
+  return npu::layer_norm_fwd(params.x,
+                             params.weight,
+                             params.bias,
+                             params.eps,
+                             params.z,
+                             params.group_size,
+                             params.norm_before_gate,
+                             params.is_rms_norm);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+std::pair<torch::Tensor, torch::Tensor> partial_rotary_embedding(
+    PartialRotaryEmbeddingParams& params) {
+#if defined(USE_NPU)
+  return npu::apply_npu_partial_rotary_embedding(params.positions,
+                                                 params.query,
+                                                 params.key,
+                                                 params.head_size,
+                                                 params.rotary_dim,
+                                                 params.cos_sin_cache,
+                                                 params.is_neox_style);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
 }  // namespace xllm::kernel

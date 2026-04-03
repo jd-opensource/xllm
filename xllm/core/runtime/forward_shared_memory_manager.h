@@ -15,11 +15,15 @@ limitations under the License.
 
 #include <stddef.h>
 
+#include <memory>
+
 #include "forward_params.h"
 #include "params_utils.h"
 #include "util/shared_memory_manager.h"
 
 namespace xllm {
+
+class Stream;
 
 constexpr int64_t kNumWaitNanoseconds = 1000;  // 1us
 
@@ -31,11 +35,11 @@ struct PbMetadata {
   uint64_t pb_size;
 };
 
-enum ForwardType : int {
-  FORWARD_PB_INPUT_TYPE = 1,
-  FORWARD_PB_OUTPUT_TYPE = 2,
-  FORWARD_RAW_INPUT_TYPE = 3,
-  FORWARD_RAW_OUTPUT_TYPE = 4,
+enum class ForwardType : int8_t {
+  PB_INPUT = 1,
+  PB_OUTPUT = 2,
+  RAW_INPUT = 3,
+  RAW_OUTPUT = 4,
 };
 
 class ForwardSharedMemoryManager : public SharedMemoryManager {
@@ -47,7 +51,7 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
   ~ForwardSharedMemoryManager();
   static std::string create_unique_name(const std::string& prefix,
                                         int dp_group,
-                                        int forward_type,
+                                        ForwardType forward_type,
                                         int rank);
 
   template <typename PbType>
@@ -120,5 +124,6 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
   uint64_t last_version_ = 0;
   void* metadata_addr_ = nullptr;
   ControlMetadata* control_ptr_ = nullptr;
+  std::unique_ptr<Stream> stream_ = nullptr;
 };
 }  // namespace xllm

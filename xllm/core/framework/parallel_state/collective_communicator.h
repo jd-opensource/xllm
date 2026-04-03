@@ -28,7 +28,8 @@ class CollectiveCommunicator {
   CollectiveCommunicator(int global_rank,
                          int world_size,
                          int dp_size,
-                         int ep_size);
+                         int ep_size,
+                         int cp_size);
   ~CollectiveCommunicator() = default;
 
   void create_process_groups(const std::string& master_addr,
@@ -42,6 +43,7 @@ class CollectiveCommunicator {
   std::unique_ptr<ProcessGroup> process_group_;
   std::unique_ptr<ProcessGroup> dp_local_process_group_;
   std::unique_ptr<ProcessGroup> tp_group_;
+  std::unique_ptr<ProcessGroup> single_rank_group_;
   // Reserved owner for a future standalone SP group. The current code path
   // aliases ParallelArgs::sp_group_ to tp_group_ instead of constructing a
   // separate communicator, so this stays empty for now.

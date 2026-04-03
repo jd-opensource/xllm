@@ -16,6 +16,7 @@ limitations under the License.
 #include "sequences_group.h"
 
 #include <algorithm>
+#include <limits>
 #include <unordered_set>
 
 #include "common/global_flags.h"
@@ -95,6 +96,34 @@ bool SequencesGroup::expand_sequences(bool share_prefix) {
 void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
                                       const Tokenizer& tokenizer,
                                       ThreadPool* thread_pool) {
+  const bool has_sample_outputs =
+      std::any_of(sequences_.begin(), sequences_.end(), [](const auto& seq) {
+        return seq != nullptr && !seq->sample_slots().empty();
+      });
+  if (has_sample_outputs) {
+    const size_t previous_size = outputs.size();
+    size_t total_outputs = previous_size;
+    for (const auto& seq : sequences_) {
+      if (seq == nullptr) {
+        continue;
+      }
+      total_outputs +=
+          seq->sample_slots().empty() ? 1 : seq->sample_slots().size();
+    }
+    outputs.reserve(total_outputs);
+    for (auto& seq : sequences_) {
+      if (seq == nullptr) {
+        continue;
+      }
+      seq->generate_sample_outputs(outputs, tokenizer);
+    }
+    std::stable_sort(
+        outputs.begin() + previous_size,
+        outputs.end(),
+        [](const auto& lhs, const auto& rhs) { return lhs.index < rhs.index; });
+    return;
+  }
+
   // Check for multi-round beam search results
   if (is_rec_multi_round_mode() && check_beam_search() &&
       sequences_.size() == 1) {
@@ -119,7 +148,13 @@ void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
     std::vector<std::pair<float, size_t>> logprobs_vec;
     logprobs_vec.reserve(sequences_.size());
     for (size_t i = 0; i < sequences_.size(); ++i) {
-      logprobs_vec.emplace_back(sequences_[i]->get_average_logprob(), i);
+      const int32_t generated_tokens_num =
+          sequences_[i]->num_generated_tokens();
+      const float average_logprob =
+          generated_tokens_num > 0
+              ? sequences_[i]->get_acc_logprob() / generated_tokens_num
+              : std::numeric_limits<float>::min();
+      logprobs_vec.emplace_back(average_logprob, i);
     }
     std::sort(logprobs_vec.begin(),
               logprobs_vec.end(),
@@ -201,10 +236,7 @@ void SequencesGroup::process_beam_search() {
   auto add_self_candidate = [&](size_t seq_index, Sequence* seq) {
     const auto token_ids = seq->tokens();
     const auto& log_probs = seq->logprob_state()->get_logprobs();
-    const int32_t generated_tokens = seq->num_generated_tokens();
-    const float logprob_sum =
-        generated_tokens > 0 ? seq->get_average_logprob() * generated_tokens
-                             : 0.0f;
+    const float logprob_sum = seq->get_acc_logprob();
 
     BeamCandidate candidate;
     candidate.seq_index = seq_index;
@@ -216,8 +248,12 @@ void SequencesGroup::process_beam_search() {
 
   for (size_t i = 0; i < sequences_.size(); ++i) {
     auto* seq = sequences_[i].get();
-    if (seq->finished()) {
-      // A finished beam should be kept as-is and no longer expanded.
+    const bool updated_this_step = seq->updated_since_last_beam_search();
+    const bool seq_finished = seq->finished();
+
+    if (seq_finished && !updated_this_step) {
+      // A beam that was already finished before this step should be kept
+      // as-is and no longer expanded.
       add_self_candidate(i, seq);
       continue;
     }
@@ -227,7 +263,6 @@ void SequencesGroup::process_beam_search() {
       continue;
     }
 
-    const int32_t num_generated_tokens = seq->num_generated_tokens();
     const int32_t last_token_idx = seq->num_tokens() - 1;
     Slice<int32_t> token_ids = seq->tokens();
     const auto& log_probs = seq->logprob_state()->get_logprobs();
@@ -242,8 +277,7 @@ void SequencesGroup::process_beam_search() {
       continue;
     }
 
-    float base_logprob =
-        seq->get_average_logprob() * num_generated_tokens - top_logprobs[0];
+    const float base_logprob = seq->get_base_logprob();
     for (size_t idx = 0; idx < candidate_topk; ++idx) {
       float new_logprob = base_logprob + top_logprobs[idx];
       if (!topk_optimizer.worthInserting(new_logprob)) {
@@ -262,6 +296,9 @@ void SequencesGroup::process_beam_search() {
   }
 
   std::vector<BeamCandidate> candidates = topk_optimizer.getTopKSorted();
+  for (auto& seq : sequences_) {
+    seq->clear_updated_since_last_beam_search();
+  }
   if (candidates.empty()) {
     return;
   }
@@ -286,6 +323,7 @@ void SequencesGroup::process_beam_search() {
     }
     next_seq->logprob_state()->set_acc_logprob(c.logprob_sum);
     next_seq->logprob_state()->set_last_acc_token_idx(next_seq->num_tokens());
+    next_seq->reset_finish_state_for_beam_search();
 
     bool need_swap = !reused_src.insert(c.seq_index).second;
     auto src_blocks = src_seq->kv_state().kv_blocks();

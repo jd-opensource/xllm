@@ -24,6 +24,7 @@ limitations under the License.
 #include <atomic>
 #include <exception>
 
+#include "core/common/global_flags.h"
 #include "internal.h"
 
 namespace xllm {
@@ -90,7 +91,6 @@ bool LLM::Initialize(const std::string& model_path,
         .communication_backend(init_options.communication_backend)
         .rank_tablefile(init_options.rank_tablefile)
         .expert_parallel_degree(init_options.expert_parallel_degree)
-        .enable_mla(init_options.enable_mla)
         .enable_chunked_prefill(init_options.enable_chunked_prefill)
         .enable_prefill_sp(init_options.enable_prefill_sp)
         .master_node_addr(init_options.master_node_addr)
@@ -112,6 +112,10 @@ bool LLM::Initialize(const std::string& model_path,
         .output_shm_size(init_options.output_shm_size)
         .is_local(init_options.is_local)
         .server_idx(init_options.server_idx);
+
+#if !defined(USE_NPU)
+    FLAGS_enable_block_copy_kernel = false;
+#endif
 
     llm_core_ = new LLMCore();
     llm_core_->master = std::make_unique<LLMMaster>(options);

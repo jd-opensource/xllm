@@ -47,6 +47,9 @@ void AsyncResponseProcessor::process_failed_request(
   auto runnable = [request = request, status = status]() {
     request->log_error_statistic(status);
     RequestOutput output;
+    output.request_id = request->request_id();
+    output.service_request_id = request->service_request_id();
+    output.target_xservice_addr = request->source_xservice_addr();
     output.status = status;
     request->state().output_func(output);
   };
@@ -118,7 +121,6 @@ void AsyncResponseProcessor::batch_process_completed_requests(
           end_2_end_latency_milliseconds,
           static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
       if (request->finished() || request->cancelled()) {
-        // not log in prefill instance
         request->log_statistic(end_2_end_latency_seconds);
       }
 
@@ -199,8 +201,6 @@ void AsyncResponseProcessor::process_stream_request(
 
       RequestOutput req_output;
       req_output.request_id = request->request_id();
-      req_output.service_request_id = request->service_request_id();
-      req_output.target_xservice_addr = request->source_xservice_addr();
       for (size_t i = 0; i < indexes.size(); ++i) {
         const size_t index = indexes[i];
         const size_t size = num_tokens[i];

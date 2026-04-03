@@ -26,8 +26,8 @@ class InterruptionBus {
   void subscribe(std::function<void(bool)> func) { observers_.push_back(func); }
 
   void publish(bool interruption) {
-    for (auto it = observers_.begin(); it != observers_.end(); ++it) {
-      auto& observer = *it;
+    for (auto it = observers_.cbegin(); it != observers_.cend(); ++it) {
+      const auto& observer = *it;
       observer(interruption);
     }
   }

@@ -18,7 +18,9 @@ limitations under the License.
 // VMMTorchAllocator is only available for platforms using PyTorch's
 // CUDACachingAllocator interface (CUDA, ILU, ROCm).
 #if defined(USE_CUDA) || defined(USE_ILU)
-
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 10
+#include <ATen/cuda/MemPool.h>
+#endif
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <glog/logging.h>
 
@@ -108,10 +110,6 @@ class VMMTorchAllocator
 
   std::string name() override { return "VMMTorchAllocator"; }
 
-  void emptyCache() override {
-    LOG(FATAL) << "VMMTorchAllocator::emptyCache() called unexpectedly!";
-  }
-
   c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
       c10::DeviceIndex /*device*/) override {
     LOG(FATAL) << "VMMTorchAllocator::getDeviceStats() called unexpectedly!";
@@ -167,29 +165,6 @@ class VMMTorchAllocator
     LOG(FATAL) << "VMMTorchAllocator::recordStream() called unexpectedly!";
   }
 
-  c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot() override {
-    LOG(FATAL) << "VMMTorchAllocator::snapshot() called unexpectedly!";
-    return {};
-  }
-
-  void beginAllocateToPool(
-      c10::DeviceIndex /*device*/,
-      c10::cuda::MempoolId_t /*mempool_id*/,
-      std::function<bool(cudaStream_t)> /*filter*/) override {
-    LOG(FATAL)
-        << "VMMTorchAllocator::beginAllocateToPool() called unexpectedly!";
-  }
-
-  void endAllocateToPool(c10::DeviceIndex /*device*/,
-                         c10::cuda::MempoolId_t /*mempool_id*/) override {
-    LOG(FATAL) << "VMMTorchAllocator::endAllocateToPool() called unexpectedly!";
-  }
-
-  void releasePool(c10::DeviceIndex /*device*/,
-                   c10::cuda::MempoolId_t /*mempool_id*/) override {
-    LOG(FATAL) << "VMMTorchAllocator::releasePool() called unexpectedly!";
-  }
-
   c10::cuda::CUDACachingAllocator::ShareableHandle shareIpcHandle(
       void* /*ptr*/) override {
     LOG(ERROR) << "VMMTorchAllocator::shareIpcHandle() called - not supported!";
@@ -201,14 +176,6 @@ class VMMTorchAllocator
     LOG(ERROR) << "VMMTorchAllocator::getIpcDevPtr() called - not supported!";
     TORCH_CHECK(false, name(), " does not support IPC");
     return nullptr;
-  }
-
-  void recordHistory(
-      bool /*enabled*/,
-      c10::cuda::CUDACachingAllocator::CreateContextFn /*context_recorder*/,
-      size_t /*alloc_trace_max_entries*/,
-      c10::cuda::CUDACachingAllocator::RecordContext /*when*/) override {
-    LOG(FATAL) << "VMMTorchAllocator::recordHistory() called unexpectedly!";
   }
 
   void attachOutOfMemoryObserver(
@@ -241,15 +208,6 @@ class VMMTorchAllocator
     return cudaMemcpyAsync(dst, src, count, cudaMemcpyDefault, stream);
   }
 
-  std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
-  getCheckpointState(c10::DeviceIndex /*device*/,
-                     c10::cuda::MempoolId_t /*id*/) override {
-    LOG(ERROR)
-        << "VMMTorchAllocator::getCheckpointState() called - not supported!";
-    TORCH_CHECK(false, name(), " does not support checkpointing");
-    return nullptr;
-  }
-
   c10::cuda::CUDACachingAllocator::CheckpointDelta setCheckpointPoolState(
       c10::DeviceIndex /*device*/,
       std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> /*pps*/)
@@ -259,6 +217,77 @@ class VMMTorchAllocator
     TORCH_CHECK(false, name(), " does not support checkpointing");
     return {};
   }
+
+  void beginAllocateToPool(
+      c10::DeviceIndex /*device*/,
+      at::cuda::MempoolId_t /*mempool_id*/,
+      std::function<bool(cudaStream_t)> /*filter*/) override {
+    LOG(FATAL)
+        << "VMMTorchAllocator::beginAllocateToPool() called unexpectedly!";
+  }
+
+  void endAllocateToPool(c10::DeviceIndex /*device*/,
+                         at::cuda::MempoolId_t /*mempool_id*/) override {
+    LOG(FATAL) << "VMMTorchAllocator::endAllocateToPool() called unexpectedly!";
+  }
+
+  void releasePool(c10::DeviceIndex /*device*/,
+                   at::cuda::MempoolId_t /*mempool_id*/) override {
+    LOG(FATAL) << "VMMTorchAllocator::releasePool() called unexpectedly!";
+  }
+
+  std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
+  getCheckpointState(c10::DeviceIndex /*device*/,
+                     at::cuda::MempoolId_t /*id*/) override {
+    LOG(FATAL)
+        << "VMMTorchAllocator::getCheckpointState() called unexpectedly!";
+    return nullptr;
+  }
+
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 10
+  void emptyCache(at::cuda::MempoolId_t /*mempool_id*/ = {0, 0}) override {
+    LOG(FATAL) << "VMMTorchAllocator::emptyCache() called unexpectedly!";
+  }
+
+  std::vector<c10::cuda::CUDACachingAllocator::StreamSegmentSize>
+  getExpandableSegmentSizes(c10::DeviceIndex /*device*/) override {
+    LOG(FATAL) << "VMMTorchAllocator::getExpandableSegmentSizes() called "
+                  "unexpectedly!";
+    return {};
+  }
+
+  c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot(
+      at::cuda::MempoolId_t /*mempool_id*/ = {0, 0}) override {
+    LOG(FATAL) << "VMMTorchAllocator::snapshot() called unexpectedly!";
+    return {};
+  }
+
+  void recordHistory(
+      bool /*enabled*/,
+      c10::cuda::CUDACachingAllocator::CreateContextFn /*context_recorder*/,
+      size_t /*alloc_trace_max_entries*/,
+      c10::cuda::CUDACachingAllocator::RecordContext /*when*/,
+      bool /*clearHistory*/) override {
+    LOG(FATAL) << "VMMTorchAllocator::recordHistory() called unexpectedly!";
+  }
+#else
+  void emptyCache() override {
+    LOG(FATAL) << "VMMTorchAllocator::emptyCache() called unexpectedly!";
+  }
+
+  c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot() override {
+    LOG(FATAL) << "VMMTorchAllocator::snapshot() called unexpectedly!";
+    return {};
+  }
+
+  void recordHistory(
+      bool /*enabled*/,
+      c10::cuda::CUDACachingAllocator::CreateContextFn /*context_recorder*/,
+      size_t /*alloc_trace_max_entries*/,
+      c10::cuda::CUDACachingAllocator::RecordContext /*when*/) override {
+    LOG(FATAL) << "VMMTorchAllocator::recordHistory() called unexpectedly!";
+  }
+#endif
 
  private:
   static void raw_deleter(void* ptr) {

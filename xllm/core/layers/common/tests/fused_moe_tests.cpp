@@ -251,6 +251,7 @@ class FusedMoETest : public ::testing::Test {
                             int64_t n_shared_experts = 1,
                             bool is_gated = true,
                             int64_t renormalize = 0,
+                            bool enable_result_reduction = true,
                             const std::string& hidden_act = "silu",
                             const std::string& scoring_func = "sigmoid",
                             const std::string& topk_method = "noaux_tc") {
@@ -267,11 +268,25 @@ class FusedMoETest : public ::testing::Test {
     args.hidden_act() = hidden_act;
     args.scoring_func() = scoring_func;
     args.topk_method() = topk_method;
-    return FusedMoE(FusedMoEImpl(args,
-                                 FusedMoEArgs{.is_gated = is_gated},
-                                 quant_args_,
-                                 parallel_args_,
-                                 options_));
+    const FusedMoEArgs moe_args{
+        .is_gated = is_gated,
+        .enable_result_reduction = enable_result_reduction};
+    return FusedMoE(
+        FusedMoEImpl(args, moe_args, quant_args_, parallel_args_, options_));
+  }
+
+  void set_tp_ctx(int64_t world_size) {
+    mock_process_group_ = std::make_unique<test::MockProcessGroup>(
+        options_.device(), /*rank=*/0, world_size);
+    single_rank_pg_ = std::make_unique<test::MockProcessGroup>(
+        options_.device(), /*rank=*/0, /*world_size=*/1);
+    parallel_args_ = ParallelArgs(/*rank=*/0,
+                                  world_size,
+                                  /*dp_size=*/1,
+                                  mock_process_group_.get());
+    parallel_args_.process_group_ = mock_process_group_.get();
+    parallel_args_.tp_group_ = mock_process_group_.get();
+    parallel_args_.single_rank_group_ = single_rank_pg_.get();
   }
 
   // Helper function to create test weights for the FusedMoE (w8a8 smoothquant
@@ -325,6 +340,7 @@ class FusedMoETest : public ::testing::Test {
 
   // Helper to create a mock ProcessGroup for testing
   std::unique_ptr<xllm::ProcessGroup> mock_process_group_;
+  std::unique_ptr<xllm::ProcessGroup> single_rank_pg_;
 
   // Expected output for precision verification
   std::vector<float> expected_output_;
@@ -501,6 +517,114 @@ TEST_F(FusedMoETest, W4A8GroupwiseSmokeTest) {
   EXPECT_EQ(output.size(0), batch_size * seq_len);
   EXPECT_EQ(output.size(1), hidden_size);
   EXPECT_NE(torch::sum(output).item<float>(), 0.0f);
+}
+
+TEST_F(FusedMoETest, PrepRouteMatchesBaseForward) {
+  const int64_t batch_size = 4;
+  const int64_t seq_len = 8;
+  const int64_t hidden_size = 256;
+  const int64_t intermediate_size = 256;
+  const int64_t num_experts = 8;
+  const int64_t num_expert_group = 4;
+  const int64_t topk_group = 4;
+  const int64_t top_k = 2;
+  const double route_scale = 2.5;
+
+  auto fused_moe = create_fused_moe(num_experts,
+                                    top_k,
+                                    num_expert_group,
+                                    topk_group,
+                                    route_scale,
+                                    hidden_size,
+                                    intermediate_size,
+                                    /*n_shared_experts=*/0);
+
+  auto weight_dict =
+      create_test_weights(num_experts, hidden_size, intermediate_size);
+  StateDict state_dict(weight_dict);
+  fused_moe->load_state_dict(state_dict);
+
+  auto hidden_states = create_custom_input(
+      {batch_size * seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
+
+  auto expected =
+      fused_moe->forward_experts(hidden_states,
+                                 /*enable_all2all_communication=*/false);
+  auto route_info = fused_moe->prep_route(hidden_states);
+  auto actual =
+      fused_moe->forward_experts(hidden_states,
+                                 /*enable_all2all_communication=*/false,
+                                 route_info);
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  verify_tensor_close(actual, expected, 1e-3, 1e-4);
+}
+
+TEST_F(FusedMoETest, NoReductionModeMatchesExternalReduce) {
+  set_tp_ctx(/*world_size=*/2);
+
+  const int64_t batch_size = 4;
+  const int64_t seq_len = 8;
+  const int64_t hidden_size = 256;
+  const int64_t intermediate_size = 256;
+  const int64_t num_experts = 8;
+  const int64_t num_expert_group = 4;
+  const int64_t topk_group = 4;
+  const int64_t top_k = 2;
+  const double route_scale = 2.5;
+
+  auto reduced_moe = create_fused_moe(num_experts,
+                                      top_k,
+                                      num_expert_group,
+                                      topk_group,
+                                      route_scale,
+                                      hidden_size,
+                                      intermediate_size,
+                                      /*n_shared_experts=*/1,
+                                      /*is_gated=*/true,
+                                      /*renormalize=*/0,
+                                      /*enable_result_reduction=*/true);
+  auto raw_moe = create_fused_moe(num_experts,
+                                  top_k,
+                                  num_expert_group,
+                                  topk_group,
+                                  route_scale,
+                                  hidden_size,
+                                  intermediate_size,
+                                  /*n_shared_experts=*/1,
+                                  /*is_gated=*/true,
+                                  /*renormalize=*/0,
+                                  /*enable_result_reduction=*/false);
+
+  auto weight_dict =
+      create_test_weights(num_experts, hidden_size, intermediate_size);
+  StateDict state_dict(weight_dict);
+  reduced_moe->load_state_dict(state_dict);
+  raw_moe->load_state_dict(state_dict);
+
+  auto hidden_states = create_custom_input(
+      {batch_size * seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
+
+  auto expected = reduced_moe->forward_experts(
+      hidden_states, /*enable_all2all_communication=*/false);
+  auto actual = raw_moe->forward_experts(
+      hidden_states, /*enable_all2all_communication=*/false);
+  actual = parallel_state::reduce(actual, parallel_args_.tp_group_);
+
+  auto shared = raw_moe->forward_shared(hidden_states);
+  ASSERT_TRUE(shared.defined());
+  ASSERT_EQ(raw_moe->shared_pg(), parallel_args_.single_rank_group_);
+  shared = parallel_state::reduce(shared, raw_moe->shared_pg());
+  actual = actual + shared;
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  verify_tensor_close(actual, expected, 1e-3, 1e-4);
 }
 
 }  // namespace layer

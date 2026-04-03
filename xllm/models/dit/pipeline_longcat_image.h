@@ -383,7 +383,7 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
       char c = prompt_text[i];
       if ((c == '\'' || c == '\"') && !in_quotes) {
         if (!current.empty()) {
-          result.push_back({current, false});
+          result.emplace_back(current, false);
           current.clear();
         }
         in_quotes = true;
@@ -391,7 +391,7 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
         current += c;
       } else if (in_quotes && c == quote_char) {
         current += c;
-        result.push_back({current, true});
+        result.emplace_back(current, true);
         current.clear();
         in_quotes = false;
         quote_char = '\0';
@@ -400,7 +400,7 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
       }
     }
     if (!current.empty()) {
-      result.push_back({current, in_quotes});
+      result.emplace_back(current, in_quotes);
     }
     return result;
   }
@@ -435,7 +435,7 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
         all_tokens.resize(max_sequence_length);
       }
 
-      batch_all_tokens.push_back(all_tokens);
+      batch_all_tokens.push_back(std::move(all_tokens));
     }
 
     // Step 2: Pad tokens to max_sequence_length

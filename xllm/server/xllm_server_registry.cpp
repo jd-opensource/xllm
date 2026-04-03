@@ -60,4 +60,13 @@ XllmServer* ServerRegistry::get_server(const std::string& name) {
   }
 }
 
+XllmServer* ServerRegistry::try_get_server(const std::string& name) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = servers_.find(name);
+  if (it == servers_.end()) {
+    return nullptr;
+  }
+  return it->second.get();
+}
+
 }  // namespace xllm

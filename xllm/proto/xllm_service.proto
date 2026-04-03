@@ -6,6 +6,7 @@ option cc_enable_arenas = true;
 option cc_generic_services = true;
 
 import "completion.proto";
+import "sample.proto";
 import "chat.proto";
 import "embedding.proto";
 import "image_generation.proto";
@@ -51,6 +52,9 @@ message D2DLinkRequest {
 service XllmAPIService {
   rpc Completions (CompletionRequest) returns (CompletionResponse);
   rpc CompletionsHttp (HttpRequest) returns (HttpResponse);
+
+  rpc Sample (SampleRequest) returns (SampleResponse);
+  rpc SampleHttp (HttpRequest) returns (HttpResponse);
 
   rpc ChatCompletions (ChatRequest) returns (ChatResponse);
   rpc ChatCompletionsHttp (HttpRequest) returns (HttpResponse);

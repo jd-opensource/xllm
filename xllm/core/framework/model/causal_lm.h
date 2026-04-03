@@ -27,6 +27,8 @@ limitations under the License.
 #include <c10/core/Device.h>
 #include <torch/torch.h>
 
+#include <memory>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -96,6 +98,15 @@ class CausalLM : public torch::nn::Module {
   }
   virtual void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) {
     NOT_IMPLEMENTED();
+  }
+
+  virtual bool init_or_refresh_rolling_runtime(Stream* load_stream,
+                                               Stream* compute_stream,
+                                               int32_t num_cached_slots,
+                                               int32_t requested_rolling_slots,
+                                               const std::string& model_id) {
+    NOT_IMPLEMENTED();
+    return false;
   }
 #endif
 
@@ -224,6 +235,25 @@ class CausalLMImpl : public CausalLM {
     } else {
       CausalLM::set_npu_word_embedding(embedding);
     }
+  }
+
+  bool init_or_refresh_rolling_runtime(Stream* load_stream,
+                                       Stream* compute_stream,
+                                       int32_t num_cached_slots,
+                                       int32_t requested_rolling_slots,
+                                       const std::string& model_id) override {
+    if constexpr (detail::has_init_or_refresh_rolling_runtime<Model>::value) {
+      return model_->init_or_refresh_rolling_runtime(load_stream,
+                                                     compute_stream,
+                                                     num_cached_slots,
+                                                     requested_rolling_slots,
+                                                     model_id);
+    }
+    return CausalLM::init_or_refresh_rolling_runtime(load_stream,
+                                                     compute_stream,
+                                                     num_cached_slots,
+                                                     requested_rolling_slots,
+                                                     model_id);
   }
 #endif
 

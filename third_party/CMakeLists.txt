@@ -19,9 +19,9 @@ endif()
 
 add_subdirectory(etcd_cpp_apiv3)
 add_subdirectory(xxHash)
+add_subdirectory(spdlog)
 
 if(USE_NPU)
-  add_subdirectory(spdlog)
   add_subdirectory(torch_npu_ops)
 endif()
 add_subdirectory(Mooncake)

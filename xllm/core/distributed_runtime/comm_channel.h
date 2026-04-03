@@ -31,6 +31,9 @@ limitations under the License.
 
 namespace xllm {
 
+static constexpr size_t kKVCacheShapeSizeWithIndex = 3;
+static constexpr size_t kKVCacheShapeSizeWithConvAndSsm = 4;
+
 class CommChannel {
  public:
   CommChannel() = default;

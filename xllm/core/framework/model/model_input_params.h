@@ -28,6 +28,8 @@ limitations under the License.
 #endif
 #include "framework/batch/batch_forward_type.h"
 #include "framework/request/mm_batch_data.h"
+#include "npu_cp_ep_padding.h"
+#include "npu_cp_prepare.h"
 #include "npu_dp_ep_padding.h"
 #include "util/hash_util.h"
 #include "util/tensor_helper.h"
@@ -152,10 +154,13 @@ struct LlmRecMultiRoundParams {
   std::vector<torch::Tensor> full_v_caches;
   std::vector<torch::Tensor> unshared_k_caches;
   std::vector<torch::Tensor> unshared_v_caches;
+  std::vector<torch::Tensor> shared_k_caches;
+  std::vector<torch::Tensor> shared_v_caches;
   std::vector<torch::Tensor> decode_positions_tensor_list;
   // beam width for step-level decode
   int32_t batch_size = 0;
   int32_t beam_width = 1;
+  torch::Tensor beam_width_tensor;
   // current round for step-level decode
   torch::Tensor current_round_tensor;
   int32_t total_round = 0;
@@ -175,6 +180,8 @@ struct LlmRecMultiRoundParams {
 
     result.full_k_caches.clear();
     result.full_v_caches.clear();
+    result.full_k_caches.reserve(full_k_caches.size());
+    result.full_v_caches.reserve(full_v_caches.size());
     for (const auto& t : full_k_caches) {
       result.full_k_caches.push_back(safe_to(t, device));
     }
@@ -183,13 +190,28 @@ struct LlmRecMultiRoundParams {
     }
     result.unshared_k_caches.clear();
     result.unshared_v_caches.clear();
+    result.shared_k_caches.clear();
+    result.shared_v_caches.clear();
+    result.unshared_k_caches.reserve(unshared_k_caches.size());
+    result.unshared_v_caches.reserve(unshared_v_caches.size());
+    result.shared_k_caches.reserve(shared_k_caches.size());
+    result.shared_v_caches.reserve(shared_v_caches.size());
     for (const auto& t : unshared_k_caches) {
       result.unshared_k_caches.push_back(safe_to(t, device));
     }
     for (const auto& t : unshared_v_caches) {
       result.unshared_v_caches.push_back(safe_to(t, device));
     }
+    for (const auto& t : shared_k_caches) {
+      result.shared_k_caches.push_back(safe_to(t, device));
+    }
+    for (const auto& t : shared_v_caches) {
+      result.shared_v_caches.push_back(safe_to(t, device));
+    }
 
+    if (beam_width_tensor.defined()) {
+      result.beam_width_tensor = safe_to(beam_width_tensor, device, true);
+    }
     if (current_round_tensor.defined()) {
       result.current_round_tensor = safe_to(current_round_tensor, device, true);
     }
@@ -224,6 +246,8 @@ struct LlmRecMultiRoundParams {
     }
 
     result.decode_positions_tensor_list.clear();
+    result.decode_positions_tensor_list.reserve(
+        decode_positions_tensor_list.size());
     for (const auto& t : decode_positions_tensor_list) {
       result.decode_positions_tensor_list.push_back(safe_to(t, device));
     }
@@ -314,7 +338,7 @@ struct ModelInputParams {
     params.num_sequences = num_sequences;
     params.kv_max_seq_len = kv_max_seq_len;
     params.q_max_seq_len = q_max_seq_len;
-    params.is_prefill = is_prefill;
+    params.enable_mla = enable_mla;
 
     params.kv_seq_lens = safe_to(kv_seq_lens, device, true);
     params.q_seq_lens = safe_to(q_seq_lens, device, true);
@@ -336,6 +360,22 @@ struct ModelInputParams {
     params.request_ids = std::move(request_ids);
     params.extra_token_ids = std::move(extra_token_ids);
     params.dp_ep_padding_data = dp_ep_padding_data;
+    params.cp_ep_padding_data
+        .attn_padding_idx(
+            safe_to(cp_ep_padding_data.attn_padding_idx(), device, true))
+        .attn_unpadding_idx(
+            safe_to(cp_ep_padding_data.attn_unpadding_idx(), device, true))
+        .ffn_padding_idx(
+            safe_to(cp_ep_padding_data.ffn_padding_idx(), device, true))
+        .ffn_unpadding_idx(
+            safe_to(cp_ep_padding_data.ffn_unpadding_idx(), device, true))
+        .lm_head_skip_padding_token_indices(
+            safe_to(cp_ep_padding_data.lm_head_skip_padding_token_indices(),
+                    device,
+                    true))
+        .gather_prenorm_idx(
+            safe_to(cp_ep_padding_data.gather_prenorm_idx(), device, true));
+
     params.kv_cache_tokens_nums_host = std::move(kv_cache_tokens_nums_host);
     params.kv_cache_tokens_nums = safe_to(kv_cache_tokens_nums, device);
     params.history_compressed_kv = safe_to(history_compressed_kv, device);
@@ -380,6 +420,8 @@ struct ModelInputParams {
     } else if (const auto* llmrec = llmrec_params()) {
       params.rec_params = llmrec->to(device);
     }
+
+    params.cp_prefill_inputs = cp_prefill_inputs.to(device);
 
     return params;
   }
@@ -434,8 +476,9 @@ struct ModelInputParams {
     return true;
   }
 
-  // whether this pass is prefill stage
-  bool is_prefill = true;
+  // Compatibility fallback for metadata builders that are not wired with
+  // ModelArgs yet.
+  bool enable_mla = false;
 
   BatchForwardType batch_forward_type;
 
@@ -525,6 +568,8 @@ struct ModelInputParams {
 #endif
 
   DpEpPaddingData dp_ep_padding_data;
+  CpEpPaddingData cp_ep_padding_data;
+  CpPrefillInputs cp_prefill_inputs;
 
   torch::Tensor expert_load_data;
   torch::Tensor expert_array;

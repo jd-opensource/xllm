@@ -15,11 +15,9 @@ limitations under the License.
 
 #pragma once
 
-#include <string>
-
 namespace xllm {
 
-constexpr char kInferContentLength[] = "Infer-Content-Length";
-constexpr char kContentLength[] = "Content-Length";
+inline constexpr char kInferContentLength[] = "Infer-Content-Length";
+inline constexpr char kContentLength[] = "Content-Length";
 
 }  // namespace xllm

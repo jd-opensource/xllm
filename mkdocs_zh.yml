@@ -222,8 +222,11 @@ nav:
         - features/eplb.md
       - 进阶指南:
         - 投机推理: features/mtp.md
-        - ACLGraph: features/acl_graph.md
+        - GraphMode: features/graph_mode.md
       - xLLM Service概览: features/xllm_service_overview.md
+  - 开发者指南:
+    - dev_guide/code_arch.md
+    - dev_guide/tilelang_ascend_kernel_dev.md
   - CLI参考:
     - cli_reference.md
 

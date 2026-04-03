@@ -98,8 +98,6 @@ DECLARE_double(eplb_update_threshold);
 
 DECLARE_string(rank_tablefile);
 
-DECLARE_bool(enable_mla);
-
 constexpr int32_t kGraphExecutorLogVerboseLevel = 50;
 
 DECLARE_bool(enable_graph);
@@ -131,6 +129,8 @@ DECLARE_int32(node_rank);
 DECLARE_int32(dp_size);
 
 DECLARE_int32(ep_size);
+
+DECLARE_int32(cp_size);
 
 DECLARE_string(instance_role);
 
@@ -190,6 +190,13 @@ DECLARE_bool(use_mix_scheduler);
 
 DECLARE_bool(enable_online_preempt_offline);
 
+// --- mix scheduler config ---
+DECLARE_double(aggressive_coeff);
+
+DECLARE_double(starve_threshold);
+
+DECLARE_bool(enable_starve_prevent);
+
 DECLARE_double(host_blocks_factor);
 
 DECLARE_bool(enable_kvcache_store);
@@ -230,9 +237,17 @@ DECLARE_int32(max_global_tpot_ms);
 
 DECLARE_int32(max_requests_per_batch);
 
+DECLARE_bool(enable_manual_loader);
+
 DECLARE_bool(enable_xtensor);
 
 DECLARE_int64(phy_page_granularity_size);
+
+// --- rolling load config ---
+DECLARE_bool(enable_rolling_load);
+
+DECLARE_int32(rolling_load_num_cached_layers);
+DECLARE_int32(rolling_load_num_rolling_slots);
 
 // --- beam search config ---
 DECLARE_bool(enable_beam_search_kernel);
@@ -293,6 +308,8 @@ DECLARE_uint32(rec_worker_max_concurrency);
 
 #if defined(USE_NPU)
 DECLARE_string(npu_kernel_backend);
+
+DECLARE_bool(enable_intralayer_addnorm);
 #endif
 
 DECLARE_int32(health_check_interval_ms);

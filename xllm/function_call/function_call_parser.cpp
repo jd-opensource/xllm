@@ -27,6 +27,7 @@ limitations under the License.
 #include "glm47_detector.h"
 #include "kimik2_detector.h"
 #include "qwen25_detector.h"
+#include "qwen3_coder_detector.h"
 
 namespace xllm {
 namespace function_call {
@@ -36,6 +37,7 @@ namespace {
 const std::unordered_map<std::string, std::vector<std::string>> auto_paser_map =
     {
         {"qwen25", {"qwen2", "qwen3"}},
+        {"qwen3_coder", {"qwen3_coder", "qwen35"}},
         {"kimi_k2", {"kimi_k2"}},
         {"deepseekv3", {"deepseek_v3"}},
         {"deepseekv32", {"deepseek_v32"}},
@@ -60,6 +62,7 @@ const std::unordered_map<std::string,
                          std::function<std::unique_ptr<BaseFormatDetector>()>>
     detector_factories = {
         {"qwen25", [] { return std::make_unique<Qwen25Detector>(); }},
+        {"qwen3_coder", [] { return std::make_unique<Qwen3CoderDetector>(); }},
         {"kimi_k2", [] { return std::make_unique<KimiK2Detector>(); }},
         {"deepseekv3", [] { return std::make_unique<DeepSeekV3Detector>(); }},
         {"deepseekv32", [] { return std::make_unique<DeepSeekV32Detector>(); }},
@@ -101,6 +104,9 @@ std::string FunctionCallParser::get_parser_auto(const std::string& parser,
     // check if the tool call parser is supported
     if (parser == "qwen2" || parser == "qwen3") {
       return "qwen25";
+    }
+    if (parser == "qwen35") {
+      return "qwen3_coder";
     }
     if (detector_factories.find(parser) != detector_factories.end()) {
       return parser;

@@ -15,22 +15,20 @@ limitations under the License.
 
 #include "spawn_worker_server.h"
 
-#include <absl/strings/str_split.h>
 #if defined(USE_NPU)
 #include <acl/acl.h>
 #endif
 #include <signal.h>
-#include <sys/prctl.h>
-
-#include <cstdlib>
+#include <unistd.h>
 
 #include "core/distributed_runtime/worker_server.h"
 #include "core/platform/device.h"
+#if defined(USE_CUDA)
+#include "core/platform/numa_utils.h"
+#endif
 #include "core/runtime/options.h"
 
 namespace xllm {
-
-bool xllm::SpawnWorkerServer::g_running_ = true;
 
 namespace {
 std::string get_backend_from_worker_type(const std::string& worker_type) {
@@ -99,7 +97,31 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   FLAGS_enable_atb_comm_multiprocess = true;
 #endif
 
-  ParallelArgs parallel_args(global_rank, world_size, 1, nullptr, 1);
+#if defined(USE_CUDA)
+  // Bind worker process to the same NUMA node as the device
+  // This prevents the process from spanning across NUMA nodes, which would
+  // significantly degrade memory access and other performance aspects
+  int32_t numa_node = numa::get_device_numa_node(device_idx);
+  if (numa_node >= 0) {
+    LOG(INFO) << "Worker process (device " << device_idx
+              << ") binding to NUMA node " << numa_node;
+    int32_t ret = numa::bind_process_to_numa_node(numa_node);
+    if (ret != 0) {
+      LOG(WARNING) << "Failed to bind worker process to NUMA node " << numa_node
+                   << ", continuing without NUMA binding";
+    }
+  } else {
+    LOG(INFO) << "NUMA node detection not available or not needed for device "
+              << device_idx;
+  }
+#endif
+
+  ParallelArgs parallel_args(global_rank,
+                             world_size,
+                             /* dp_size = */ 1,
+                             /*cp_size = */ 1,
+                             /*process_group = */ nullptr,
+                             /*ep_size = */ 1);
   worker_server_ = std::make_unique<WorkerServer>(local_rank,
                                                   master_node_addr,
                                                   done_,
@@ -112,15 +134,19 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
 
 SpawnWorkerServer::~SpawnWorkerServer() = default;
 
-void SpawnWorkerServer::handle_signal(int signum) { g_running_ = false; }
+void SpawnWorkerServer::handle_signal(int signum) {
+  (void)signum;
+  _exit(0);
+}
 
 void SpawnWorkerServer::run() {
   signal(SIGINT, SpawnWorkerServer::handle_signal);
   signal(SIGTERM, SpawnWorkerServer::handle_signal);
+  signal(SIGHUP, SpawnWorkerServer::handle_signal);
 
-  // main thread waiting here
-  while (SpawnWorkerServer::g_running_) {
-    sleep(5);
+  // Keep process alive until SIGTERM/SIGINT arrives from parent teardown.
+  while (true) {
+    pause();
   }
 }
 

@@ -109,11 +109,24 @@ jobs:
       needs.check-sensitive.outputs.do_build == 'true'
     runs-on: [self-hosted]
     steps:
+    - name: Prepare submodule checkout
+      run: |
+        git config --global url."https://gitcode.com/xLLM-AI/tvm".insteadOf "https://github.com/TileLang/tvm"
+        git config --global url."https://gitcode.com/xLLM-AI/composable_kernel".insteadOf "https://github.com/ROCm/composable_kernel"
+        git config --global url."https://gitcode.com/xLLM-AI/cutlass".insteadOf "https://github.com/NVIDIA/cutlass"
+        if [ -d .git/modules ]; then
+          find .git/modules -type f -name '*.lock' -print -delete || true
+        fi
+
+        rm -rf .git/modules/third_party/tilelang-ascend
+        rm -rf third_party/tilelang-ascend
+
     - name: Checkout Code
       timeout-minutes: 5
       uses: actions/checkout@v4
       with:
-        submodules: true
+        clean: true
+        submodules: recursive
 
     - name: Build
       if: ${{ success() }}

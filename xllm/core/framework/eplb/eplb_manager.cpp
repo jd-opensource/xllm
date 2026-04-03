@@ -112,8 +112,12 @@ void EplbManager::aggregate_multi_layer_expert_loads(
         torch::cat({first_col, expert_load_data_sub}, 1);
   }
 
+  std::vector<torch::Tensor> layer_ids, layer_loads;
+  layer_ids.reserve(device_num_);
+  layer_loads.reserve(device_num_);
   for (int32_t layer = 0; layer < layer_num_; ++layer) {
-    std::vector<torch::Tensor> layer_ids, layer_loads;
+    layer_ids.clear();
+    layer_loads.clear();
     for (int32_t device = 0; device < device_num_; ++device) {
       auto ids = expert_ids_list[layer][device];
       auto loads = expert_loads_list[device][layer];

@@ -75,7 +75,8 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
                                torch::Tensor& attn_mask,
                                KVCache& kv_cache,
                                ModelInputParams& input_params,
-                               bool is_prefill);
+                               bool is_prefill,
+                               int node_id);
 
   void initialize_parallel_parameters(atb_speed::qwen::QwenLayerParam& param,
                                       const ParallelArgs& parallel_args);
