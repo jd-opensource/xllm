@@ -43,7 +43,6 @@ class OneRecModelImpl : public torch::nn::Module {
     hidden_size_ = context.get_model_args().hidden_size();
     options_ = context.get_tensor_options();
     shared_ = register_module("shared", layer::WordEmbedding(context));
-
   }
 
   ModelOutput forward(const torch::Tensor& tokens,
@@ -88,7 +87,6 @@ class OneRecModelImpl : public torch::nn::Module {
     if (shared_dict.size() > 0) {
       shared_->load_state_dict(shared_dict);
     }
-
   }
 
   layer::WordEmbedding get_word_embedding() { return shared_; }

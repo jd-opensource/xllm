@@ -35,9 +35,8 @@ limitations under the License.
 #include "core/layers/common/lm_head.h"
 #include "core/layers/common/word_embedding.h"
 #include "models/model_registry.h"
-#include "models/rec/rec_model_base.h"
-
 #include "models/rec/npu/onerec_npu_impl.h"
+#include "models/rec/rec_model_base.h"
 
 namespace xllm {
 
