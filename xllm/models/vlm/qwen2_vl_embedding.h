@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
+
 #include "core/framework/model/embedding_vlm.h"
 #include "core/framework/model/model_output.h"
 #include "models/llm/qwen2.h"
@@ -56,7 +58,7 @@ class Qwen2_VLForEmbeddingImpl : public torch::nn::Module {
     std::optional<Qwen2_VLImageInputs> image_input;
     std::optional<Qwen2_VLVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
-    auto merge_size = model_args_.mm_image_merge_size();
+    auto merge_size = model_args_->mm_image_merge_size();
     MMDict multimodal_embeds;
     if (image_input) {
       // visual
@@ -80,7 +82,7 @@ class Qwen2_VLForEmbeddingImpl : public torch::nn::Module {
 
   torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
     auto special_token_ids = torch::tensor(
-        {model_args_.image_token_id(), model_args_.video_token_id()},
+        {model_args_->image_token_id(), model_args_->video_token_id()},
         input_ids.options().dtype(torch::kInt64));
     auto is_multimodal = torch::isin(input_ids, special_token_ids);
     return is_multimodal;
@@ -142,7 +144,7 @@ class Qwen2_VLForEmbeddingImpl : public torch::nn::Module {
     for (const auto& state_dict : loader->get_state_dicts()) {
       visual_->load_state_dict(state_dict->get_dict_with_prefix("visual."));
     }
-    // if (!model_args_.image_embedding_mode()) {
+    // if (!model_args_->image_embedding_mode()) {
     language_model_->load_model(std::move(loader));
     // }
   }
@@ -159,7 +161,7 @@ class Qwen2_VLForEmbeddingImpl : public torch::nn::Module {
   }
 
  private:
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::TensorOptions options_;
 
   Qwen2_VisionTransformer visual_{nullptr};

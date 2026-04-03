@@ -31,15 +31,15 @@ class GlmMoeDsaMtpModelImpl
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
+    int32_t mask_value = model_args->dtype() == "bfloat16" ? 1 : -9984;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
 
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
-        model_args.qk_rope_head_dim(),
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
+        model_args->qk_rope_head_dim(),
+        model_args->max_position_embeddings(),
+        model_args->rope_theta(),
         options);
   }
 };
@@ -102,13 +102,14 @@ REGISTER_MODEL_ARGS(glm_moe_dsa_mtp, [&] {
   LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
 
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
-    return 256;  // args->qk_nope_head_dim() + args->qk_rope_head_dim();
+    return 256;  // model_args->qk_nope_head_dim() +
+                 // model_args->qk_rope_head_dim();
   });
   LOAD_ARG_OR_FUNC(
-      rotary_dim, "rotary_dim", [&] { return args->qk_rope_head_dim(); });
+      rotary_dim, "rotary_dim", [&] { return model_args->qk_rope_head_dim(); });
 
   SET_ARG(stop_token_ids,
-          std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
-                                      args->eos_token_id_vec().end()));
+          std::unordered_set<int32_t>(model_args->eos_token_id_vec().begin(),
+                                      model_args->eos_token_id_vec().end()));
 });
 }  // namespace xllm::npu::model

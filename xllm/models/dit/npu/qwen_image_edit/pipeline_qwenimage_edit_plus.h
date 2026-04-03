@@ -31,12 +31,12 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     device_ = options_.device();
     LOG(INFO) << "model info " << dtype_ << " ; " << options_.device();
 
-    in_channels_ = context.get_model_args("transformer").in_channels();
-    num_layers_ = context.get_model_args("transformer").num_layers();
+    in_channels_ = context.get_model_args("transformer")->in_channels();
+    num_layers_ = context.get_model_args("transformer")->num_layers();
 
     vae_scale_factor_ = static_cast<int64_t>(
-        std::pow(2, vae_model_args_.temperal_downsample().size()));
-    latent_channels_ = vae_model_args_.z_dim();
+        std::pow(2, vae_model_args_->temperal_downsample().size()));
+    latent_channels_ = vae_model_args_->z_dim();
     tokenizer_max_length_ = 1024;
 
     prompt_template_encode_ =
@@ -192,11 +192,11 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
                                   torch::Device device) {
     auto image_latents = _retrieve_latents(vae_->encode(image), seed, "argmax");
     auto latents_mean =
-        torch::tensor(vae_model_args_.latents_mean(), torch::kDouble);
+        torch::tensor(vae_model_args_->latents_mean(), torch::kDouble);
     latents_mean = latents_mean.view({1, latent_channels_, 1, 1, 1})
                        .to(device, image_latents.dtype());
     auto latents_std =
-        torch::tensor(vae_model_args_.latents_std(), torch::kDouble);
+        torch::tensor(vae_model_args_->latents_std(), torch::kDouble);
     latents_std = latents_std.view({1, latent_channels_, 1, 1, 1})
                       .to(device, image_latents.dtype());
     image_latents = (image_latents - latents_mean) / latents_std;
@@ -605,11 +605,11 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
         _unpack_latents(final_latents, height, width, vae_scale_factor_)
             .to(dtype_);
     auto latents_mean =
-        torch::tensor(vae_model_args_.latents_mean(), torch::kDouble);
+        torch::tensor(vae_model_args_->latents_mean(), torch::kDouble);
     latents_mean = latents_mean.view({1, latent_channels_, 1, 1, 1})
                        .to(device_, image_latents.dtype());
     auto latents_std =
-        torch::tensor(vae_model_args_.latents_std(), torch::kDouble);
+        torch::tensor(vae_model_args_->latents_std(), torch::kDouble);
     latents_std = 1.0 / latents_std.view({1, latent_channels_, 1, 1, 1})
                             .to(device_, image_latents.dtype());
 
@@ -652,7 +652,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
   const ParallelArgs parallel_args_;
   torch::Tensor current_timestep_;
   string prompt_template_encode_;
-  const ModelArgs& vae_model_args_;
+  const std::shared_ptr<ModelArgs> vae_model_args_;
 };
 
 REGISTER_MODEL_ARGS(Qwen2Tokenizer, [&] {});

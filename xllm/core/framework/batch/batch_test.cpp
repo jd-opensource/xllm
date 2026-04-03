@@ -20,6 +20,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 
 #include "batch_input_builder.h"
@@ -141,7 +142,9 @@ TEST(BatchTest, Basic) {
   // allowed chunk size 4
   batch.add(&seq4, 4);
   ForwardInput forward_input = batch.prepare_forward_input(
-      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+      /*num_decoding_tokens=*/1,
+      /*min_decoding_bach_size=*/0,
+      /*model_args=*/std::make_shared<ModelArgs>());
 
   // check num tokens in kv cache
   EXPECT_EQ(seq1.kv_state().kv_cache_tokens_num(), 9);
@@ -289,7 +292,9 @@ TEST(BatchTest, SampleRequestInjectsAllMatchedSlots) {
 
   Batch batch({&seq});
   ForwardInput forward_input = batch.prepare_forward_input(
-      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+      /*num_decoding_tokens=*/1,
+      /*min_decoding_bach_size=*/0,
+      /*model_args=*/std::make_shared<ModelArgs>());
 
   const auto& sampling_params_out = forward_input.sampling_params;
   const std::vector<int32_t> expected_selected_token_idxes = {1, 4};
@@ -377,14 +382,14 @@ TEST(BatchTest, SampleRequestKeepsThreadedRawBuilderOffsetsStable) {
   std::vector<torch::Tensor> input_embeddings_vec;
   std::vector<MMData> mm_data_vec;
   ThreadPool thread_pool(2);
-  ModelArgs args;
+  auto model_args = std::make_shared<ModelArgs>();
   BatchInputBuilder builder(sequences,
                             allowed_max_tokens,
                             input_embeddings_vec,
                             mm_data_vec,
                             /*swap_block_transfer_infos=*/nullptr,
                             /*batch_id=*/1,
-                            &args,
+                            model_args,
                             BatchForwardType::PREFILL,
                             /*cp_size=*/1,
                             &thread_pool);
@@ -447,7 +452,9 @@ TEST(BatchTest, SampleRequestProcessesAllMatchedRawOutputs) {
 
   Batch batch({&seq});
   batch.prepare_forward_input(
-      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+      /*num_decoding_tokens=*/1,
+      /*min_decoding_bach_size=*/0,
+      /*model_args=*/std::make_shared<ModelArgs>());
 
   RawForwardOutput raw_output;
   raw_output.outputs.push_back(
@@ -538,7 +545,9 @@ TEST(BatchTest, SampleRequestDistributesRawOutputsAcrossSequences) {
 
   Batch batch({&seq1, &seq2});
   batch.prepare_forward_input(
-      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+      /*num_decoding_tokens=*/1,
+      /*min_decoding_bach_size=*/0,
+      /*model_args=*/std::make_shared<ModelArgs>());
 
   RawForwardOutput raw_output;
   raw_output.outputs.push_back(make_raw_sample_output(111, -0.11f));
@@ -603,7 +612,9 @@ TEST(BatchTest, SampleRequestFallsBackToEmptyPlaceholderOnPartialRawOutputs) {
 
   Batch batch({&seq});
   batch.prepare_forward_input(
-      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+      /*num_decoding_tokens=*/1,
+      /*min_decoding_bach_size=*/0,
+      /*model_args=*/std::make_shared<ModelArgs>());
 
   RawForwardOutput raw_output;
   raw_output.outputs.push_back(make_raw_sample_output(301, -0.30f));
@@ -657,7 +668,9 @@ TEST(BatchTest, KeepTargetsForOverlapReplacement) {
 
   Batch batch({&seq});
   batch.prepare_forward_input(
-      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+      /*num_decoding_tokens=*/1,
+      /*min_decoding_bach_size=*/0,
+      /*model_args=*/std::make_shared<ModelArgs>());
 
   RawForwardOutput fake_output;
   fake_output.outputs.push_back(make_raw_sample_output(-1, std::nullopt));
@@ -713,7 +726,9 @@ TEST(BatchTest, OverlapMTPReplacementSkipsPreemptedSequenceWithoutKVBlocks) {
 
   Batch batch({&seq});
   batch.prepare_forward_input(
-      /*num_decoding_tokens=*/1, /*min_decoding_bach_size=*/0, ModelArgs());
+      /*num_decoding_tokens=*/1,
+      /*min_decoding_bach_size=*/0,
+      /*model_args=*/std::make_shared<ModelArgs>());
 
   RawForwardOutput fake_output;
   fake_output.outputs.push_back(make_raw_sample_output(-1, std::nullopt));

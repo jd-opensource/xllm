@@ -17,21 +17,25 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+
+#include <memory>
 DECLARE_string(rank_tablefile);
 DECLARE_string(communication_backend);
 
 namespace xllm {
 namespace layer {
 
-void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
-                                    const ModelArgs& args,
-                                    const ParallelArgs& parallel_args,
-                                    bool isPrefill) {
+void NpuLmHeadImpl::param_from_args(
+    atb_speed::common::LmHeadParam& param,
+    const std::shared_ptr<ModelArgs>& model_args,
+    const ParallelArgs& parallel_args,
+    bool isPrefill) {
   param.unpadInputs = true;
   param.gatherAhead = isPrefill;
-  param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
+  param.hiddenSizePerAttentionHead =
+      model_args->hidden_size() / model_args->n_heads();
   param.linearParallelParam.fusionLinearParam.isBF16 =
-      args.dtype() == "bfloat16";
+      model_args->dtype() == "bfloat16";
   param.linearParallelParam.unpadInputs = true;
   param.linearParallelParam.fusionLinearParam.transposeType = 1;
 
@@ -79,7 +83,7 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
 }
 
 NpuLmHeadImpl::NpuLmHeadImpl(const ModelContext& context) : BaseLayer(context) {
-  vocab_size_ = context.get_model_args().vocab_size();
+  vocab_size_ = context.get_model_args()->vocab_size();
   if (vocab_size_ > 0 && dp_local_tp_size_ > 1 &&
       vocab_size_ % dp_local_tp_size_ != 0) {
     padded_vocab_size_ =

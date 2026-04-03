@@ -40,16 +40,17 @@ namespace xllm {
 namespace layer {
 
 Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
-  const auto& args = context.get_model_args();
+  const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
   const auto& parallel_args = context.get_parallel_args();
   const auto& options = context.get_tensor_options();
   const int64_t tp_size = parallel_args.tp_group_->world_size();
-  const int64_t total_num_heads = args.n_heads();
-  const int64_t total_num_kv_heads = args.n_kv_heads().value_or(args.n_heads());
-  is_qwen3_style_ = is_qwen3_model(args.model_type());
+  const int64_t total_num_heads = model_args->n_heads();
+  const int64_t total_num_kv_heads =
+      model_args->n_kv_heads().value_or(model_args->n_heads());
+  is_qwen3_style_ = is_qwen3_model(model_args->model_type());
   can_use_fused_qk_norm_rope_ = false;
-  bool qkv_bias = is_qwen3_style_ ? args.attention_bias() : true;
+  bool qkv_bias = is_qwen3_style_ ? model_args->attention_bias() : true;
 
   CHECK(total_num_heads % tp_size == 0);
   num_heads_ = total_num_heads / tp_size;
@@ -64,7 +65,7 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
     num_kv_head_replicas_ = tp_size / total_num_kv_heads;
   }
 
-  head_dim_ = args.head_dim();
+  head_dim_ = model_args->head_dim();
   q_size_ = num_heads_ * head_dim_;
   kv_size_ = num_kv_heads_ * head_dim_;
   scaling_ = std::sqrt(1.0f / head_dim_);
@@ -72,17 +73,17 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
   // Fused QKNorm+RoPE currently only supports:
   // 1) non-MRoPE models (positions must be 1D),
   // 2) head_dim in {64, 128, 256}.
-  can_use_fused_qk_norm_rope_ = is_qwen3_style_ &&
-                                args.rope_scaling_mrope_section().empty() &&
-                                supports_fused_qk_norm_rope_head_dim(head_dim_);
+  can_use_fused_qk_norm_rope_ =
+      is_qwen3_style_ && model_args->rope_scaling_mrope_section().empty() &&
+      supports_fused_qk_norm_rope_head_dim(head_dim_);
 #endif
 
   // 1. QKV parallel linear
   qkv_proj_ = register_module("qkv_proj",
-                              QKVParallelLinear(args.hidden_size(),
+                              QKVParallelLinear(model_args->hidden_size(),
                                                 num_heads_,
                                                 num_kv_heads_,
-                                                args.head_dim(),
+                                                model_args->head_dim(),
                                                 num_kv_head_replicas_,
                                                 qkv_bias,
                                                 /*gather_output=*/false,
@@ -91,33 +92,36 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
                                                 quant_args));
 
   // 2. Output projection
-  o_proj_ = register_module("o_proj",
-                            RowParallelLinear(total_num_heads * args.head_dim(),
-                                              args.hidden_size(),
-                                              /*bias=*/false,
-                                              /*input_is_parallelized=*/true,
-                                              /*enable_result_reduction=*/true,
-                                              quant_args,
-                                              parallel_args.tp_group_,
-                                              options));
+  o_proj_ = register_module(
+      "o_proj",
+      RowParallelLinear(total_num_heads * model_args->head_dim(),
+                        model_args->hidden_size(),
+                        /*bias=*/false,
+                        /*input_is_parallelized=*/true,
+                        /*enable_result_reduction=*/true,
+                        quant_args,
+                        parallel_args.tp_group_,
+                        options));
 
   // 3. RMSNorm
   if (is_qwen3_style_) {
     q_norm_ = register_module(
-        "q_norm", RMSNorm(args.head_dim(), args.rms_norm_eps(), options));
+        "q_norm",
+        RMSNorm(model_args->head_dim(), model_args->rms_norm_eps(), options));
 
     k_norm_ = register_module(
-        "k_norm", RMSNorm(args.head_dim(), args.rms_norm_eps(), options));
+        "k_norm",
+        RMSNorm(model_args->head_dim(), model_args->rms_norm_eps(), options));
   }
 
   // 4. Rotary embedding
   rotary_emb_ =
       register_module("rope",
                       MRotaryEmbedding(/*rotary_dim=*/head_dim_,
-                                       args.max_position_embeddings(),
-                                       args.rope_theta(),
+                                       model_args->max_position_embeddings(),
+                                       model_args->rope_theta(),
                                        /*interleaved=*/false,
-                                       args.rope_scaling_mrope_section(),
+                                       model_args->rope_scaling_mrope_section(),
                                        options));
 
   // 5. Attention
@@ -126,7 +130,7 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
                                     head_dim_,
                                     scaling_,
                                     num_kv_heads_,
-                                    args.sliding_window()));
+                                    model_args->sliding_window()));
 }
 
 torch::Tensor Qwen2AttentionImpl::forward(

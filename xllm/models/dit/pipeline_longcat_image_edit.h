@@ -91,9 +91,9 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
     layer::flashinfer::FlashinferWorkspace::get_instance().initialize(
         options_.device());
 
-    vae_scale_factor_ = 1 << (model_args.block_out_channels().size() - 1);
-    vae_shift_factor_ = model_args.shift_factor();
-    vae_scaling_factor_ = model_args.scale_factor();
+    vae_scale_factor_ = 1 << (model_args->block_out_channels().size() - 1);
+    vae_shift_factor_ = model_args->shift_factor();
+    vae_scaling_factor_ = model_args->scale_factor();
 
     LOG(INFO) << "Initializing LongCat-Image-Edit pipeline...";
 
@@ -107,7 +107,7 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
                           /*do_binarize=*/false,
                           /*do_convert_rgb=*/false,
                           /*do_convert_grayscale=*/false,
-                          model_args.latent_channels());
+                          model_args->latent_channels());
     vae_ = VAE(ModelContext(context.get_parallel_args(),
                             context.get_model_args("vae"),
                             context.get_quant_args("vae"),
@@ -117,7 +117,7 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
         "pos_embed",
         LongCatImagePosEmbed(
             ROPE_SCALE_BASE,
-            context.get_model_args("transformer").axes_dims_rope()));
+            context.get_model_args("transformer")->axes_dims_rope()));
     transformer_ = LongCatImageTransformer2DModel(
         ModelContext(context.get_parallel_args(),
                      context.get_model_args("transformer"),
@@ -382,8 +382,8 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
     CHECK(image.has_value())
         << "LongCat-Image-Edit encode_prompt requires an input image.";
 
-    const auto& text_encoder_args = context_.get_model_args("text_encoder");
-    int32_t merge_size = text_encoder_args.mm_image_merge_size();
+    const auto text_encoder_args = context_.get_model_args("text_encoder");
+    int32_t merge_size = text_encoder_args->mm_image_merge_size();
     int64_t merge_length = static_cast<int64_t>(merge_size) * merge_size;
 
     // 1. Process input image with VL image processor -> pixel_values,
@@ -440,7 +440,7 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
         prompt_template_encode_suffix_, &suffix_tokens, false));
     int64_t suffix_len = suffix_tokens.size();
 
-    int32_t vision_start_token_id = text_encoder_args.vision_start_token_id();
+    int32_t vision_start_token_id = text_encoder_args->vision_start_token_id();
     int64_t prefix_len = 0;
     for (size_t i = 0; i < prefix_tokens.size(); ++i) {
       if (prefix_tokens[i] == vision_start_token_id) {
@@ -471,7 +471,7 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
       batch_all_tokens.push_back(all_tokens);
     }
 
-    int32_t pad_token_id = text_encoder_args.pad_token_id();
+    int32_t pad_token_id = text_encoder_args->pad_token_id();
     if (pad_token_id == 0) {
       auto pad_id = tokenizer_->token_to_id("<|endoftext|>");
       if (pad_id.has_value()) {
@@ -540,7 +540,7 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
     torch::Tensor positions_3d =
         positions_2d.view({3, batch_size, total_seq_len}).to(torch::kLong);
 
-    std::vector<KVCache> kv_caches(text_encoder_args.n_layers());
+    std::vector<KVCache> kv_caches(text_encoder_args->n_layers());
     std::vector<MMData> mm_data_list(static_cast<size_t>(batch_size), mm_data);
     MMBatchData mm_batch(std::move(mm_data_list));
     ModelInputParams input_params = build_longcat_input_params(
@@ -688,9 +688,9 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
         torch::ones({3, input_ids.size(0), input_ids.size(1)}, long_opts);
 
     const auto& text_encoder_args = context_.get_model_args("text_encoder");
-    int64_t spatial_merge_size = text_encoder_args.mm_image_merge_size();
-    int64_t image_token_id = text_encoder_args.image_token_id();
-    int64_t vision_start_token_id = text_encoder_args.vision_start_token_id();
+    int64_t spatial_merge_size = text_encoder_args->mm_image_merge_size();
+    int64_t image_token_id = text_encoder_args->image_token_id();
+    int64_t vision_start_token_id = text_encoder_args->vision_start_token_id();
 
     int64_t global_image_index = 0;
     int64_t num_image_grids =

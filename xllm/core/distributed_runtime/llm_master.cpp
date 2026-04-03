@@ -313,7 +313,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
 
   COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
 
-  int32_t max_context_len = model_args_.max_position_embeddings();
+  int32_t max_context_len = model_args_->max_position_embeddings();
   if (!options_.enable_chunked_prefill()) {
     max_context_len =
         std::min(max_context_len, options_.max_tokens_per_batch());
@@ -393,7 +393,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     const auto& stop_token_ids = sp.stop_token_ids.value();
     stop_tokens.insert(stop_token_ids.begin(), stop_token_ids.end());
   } else {
-    stop_tokens = model_args_.stop_token_ids();
+    stop_tokens = model_args_->stop_token_ids();
   }
   std::vector<std::vector<int32_t>> stop_sequences;
   if (sp.stop.has_value()) {
@@ -414,7 +414,7 @@ std::shared_ptr<Request> LLMMaster::generate_request(
   StoppingChecker stopping_checker(
       effective_max_tokens,
       max_context_len - options_.num_speculative_tokens(),
-      model_args_.eos_token_id(),
+      model_args_->eos_token_id(),
       sp.ignore_eos,
       std::move(stop_tokens),
       std::move(stop_sequences));

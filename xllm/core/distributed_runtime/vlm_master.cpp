@@ -88,20 +88,20 @@ VLMMaster::VLMMaster(const Options& options)
 
   // create input processor
   auto input_processor_factory =
-      ModelRegistry::get_input_processor_factory(model_args_.model_type());
+      ModelRegistry::get_input_processor_factory(model_args_->model_type());
   if (input_processor_factory == nullptr) {
     LOG(ERROR) << "No input processor defined for model type: "
-               << model_args_.model_type();
+               << model_args_->model_type();
   } else {
     input_processor_ = input_processor_factory(model_args_);
   }
 
   // create image processor
   auto image_processor_factory =
-      ModelRegistry::get_image_processor_factory(model_args_.model_type());
+      ModelRegistry::get_image_processor_factory(model_args_->model_type());
   if (image_processor_factory == nullptr) {
     LOG(ERROR) << "No image processor defined for model type: "
-               << model_args_.model_type();
+               << model_args_->model_type();
   } else {
     image_processor_ = image_processor_factory(model_args_);
   }
@@ -330,7 +330,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
   COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
 
   // TODO: prompt_token is not enough, need to add image token size
-  int32_t max_context_len = model_args_.max_position_embeddings();
+  int32_t max_context_len = model_args_->max_position_embeddings();
   if (!options_.enable_chunked_prefill()) {
     max_context_len =
         std::min(max_context_len, options_.max_tokens_per_batch());
@@ -373,7 +373,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
     const auto& stop_token_ids = sp.stop_token_ids.value();
     stop_tokens.insert(stop_token_ids.begin(), stop_token_ids.end());
   } else {
-    stop_tokens = model_args_.stop_token_ids();
+    stop_tokens = model_args_->stop_token_ids();
   }
   std::vector<std::vector<int32_t>> stop_sequences;
   if (sp.stop.has_value()) {
@@ -391,7 +391,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
 
   StoppingChecker stopping_checker(max_tokens,
                                    max_context_len,
-                                   model_args_.eos_token_id(),
+                                   model_args_->eos_token_id(),
                                    sp.ignore_eos,
                                    std::move(stop_tokens),
                                    std::move(stop_sequences));

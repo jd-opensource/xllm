@@ -141,7 +141,7 @@ void DisaggPDScheduler::profile_ttft() {
   LOG(INFO) << "Start profiling TTFT.";
   // get the maximum prefill token length
   auto& model_args = engine_->model_args();
-  int32_t max_context_len = model_args.max_position_embeddings();
+  int32_t max_context_len = model_args->max_position_embeddings();
   if (!options_.enable_chunked_prefill()) {
     max_context_len =
         std::min(max_context_len, options_.max_tokens_per_batch());
@@ -163,7 +163,7 @@ void DisaggPDScheduler::profile_tpot() {
   LOG(INFO) << "Start profiling TPOT.";
   // get the maximum token length
   auto& model_args = engine_->model_args();
-  int32_t max_context_len = model_args.max_position_embeddings();
+  int32_t max_context_len = model_args->max_position_embeddings();
   if (!options_.enable_chunked_prefill()) {
     max_context_len =
         std::min(max_context_len, options_.max_tokens_per_batch());

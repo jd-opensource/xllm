@@ -102,7 +102,7 @@ class VLMMaster : public Master {
   std::unique_ptr<Scheduler> scheduler_;
 
   // model args
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
 
   // thread pool for handling requests
   std::unique_ptr<ThreadPool> threadpool_;

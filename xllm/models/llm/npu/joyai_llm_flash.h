@@ -32,28 +32,28 @@ class JoyAILLMFlashModelImpl : public torch::nn::Module {
     auto parallel_args = context.get_parallel_args();
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args.n_layers());
+    layers_.reserve(model_args->n_layers());
     // register submodules
     device_ = options.device();
     dtype_ = options.dtype().toScalarType();
-    num_speculative_tokens_ = model_args.num_speculative_tokens();
+    num_speculative_tokens_ = model_args->num_speculative_tokens();
 
     npu_embed_tokens_ =
         register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
     atb_pos_emb_ = layer::NpuPosEmbedding(context);
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
-        model_args.qk_rope_head_dim(),
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
+        model_args->qk_rope_head_dim(),
+        model_args->max_position_embeddings(),
+        model_args->rope_theta(),
         options);
 
-    max_seq_len_ = model_args.max_position_embeddings();
-    int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
+    max_seq_len_ = model_args->max_position_embeddings();
+    int32_t mask_value = model_args->dtype() == "bfloat16" ? 1 : -9984;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
 
-    for (int32_t i = 0; i < model_args.n_layers(); ++i) {
+    for (int32_t i = 0; i < model_args->n_layers(); ++i) {
       auto block = DeepseekV2DecoderLayer(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
@@ -65,7 +65,7 @@ class JoyAILLMFlashModelImpl : public torch::nn::Module {
     dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
     dp_rank_ = parallel_args.rank() / dp_local_tp_size_;
     rank_ = parallel_args.rank();
-    num_experts_per_tok_ = model_args.num_experts_per_tok();
+    num_experts_per_tok_ = model_args->num_experts_per_tok();
   }
 
   ModelOutput forward(torch::Tensor tokens,
@@ -249,7 +249,7 @@ class JoyAILLMFlashForCausalLMImpl
   JoyAILLMFlashForCausalLMImpl(const ModelContext& context)
       : LlmForCausalLMImplBase<JoyAILLMFlashModel>(context),
         first_k_dense_replace_(
-            context.get_model_args().first_k_dense_replace()) {}
+            context.get_model_args()->first_k_dense_replace()) {}
 
   void prepare_expert_weight(int32_t layer_id,
                              const std::vector<int32_t>& expert_ids) override {
@@ -307,10 +307,11 @@ REGISTER_MODEL_ARGS(joyai_llm_flash, [&] {
   LOAD_ARG_OR(num_nextn_predict_layers, "num_nextn_predict_layers", 1);
 
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
-    return 256;  // args->qk_nope_head_dim() + args->qk_rope_head_dim();
+    return 256;  // model_args->qk_nope_head_dim() +
+                 // model_args->qk_rope_head_dim();
   });
   LOAD_ARG_OR_FUNC(
-      rotary_dim, "rotary_dim", [&] { return args->qk_rope_head_dim(); });
+      rotary_dim, "rotary_dim", [&] { return model_args->qk_rope_head_dim(); });
 
   // uses default rope_type, no deepseek_yarn scaling
   SET_ARG(rope_scaling_rope_type, "default");

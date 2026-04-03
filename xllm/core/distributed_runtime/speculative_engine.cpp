@@ -123,21 +123,21 @@ bool SpeculativeEngine::init_model() {
 
     // check if the max context length are the same
     const auto& draft_model_args = draft_engine_->model_args();
-    if (model_args_.max_position_embeddings() !=
-        draft_model_args.max_position_embeddings()) {
+    if (model_args_->max_position_embeddings() !=
+        draft_model_args->max_position_embeddings()) {
       LOG(WARNING) << "draft and target models have different max context "
                       "lengths, draft max_position_embeddings: "
-                   << draft_model_args.max_position_embeddings()
+                   << draft_model_args->max_position_embeddings()
                    << ", target max_position_embeddings: "
-                   << model_args_.max_position_embeddings()
+                   << model_args_->max_position_embeddings()
                    << ", using the minimum between them";
-      model_args_.max_position_embeddings() =
-          std::min(model_args_.max_position_embeddings(),
-                   draft_model_args.max_position_embeddings());
+      model_args_->max_position_embeddings() =
+          std::min(model_args_->max_position_embeddings(),
+                   draft_model_args->max_position_embeddings());
     }
   }
 
-  dtype_ = util::parse_dtype(model_args_.dtype(), options_.devices()[0]);
+  dtype_ = util::parse_dtype(model_args_->dtype(), options_.devices()[0]);
   return true;
 }
 

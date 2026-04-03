@@ -56,7 +56,7 @@ void NpuSiglipEncoderLayerUpImpl::build_graph(const std::string& prefix) {
   layer_norm1_op_param["layerType"] = "LAYER_NORM_NORM";
   layer_norm1_op_param["normParam"] = {
       {"quantType", "QUANT_UNDEFINED"},
-      {"epsilon", model_args_.mm_layer_norm_eps()},
+      {"epsilon", model_args_->mm_layer_norm_eps()},
       {"beginParamsAxis", 2},
       {"beginNormAxis", 2}};
   auto layer_norm1_op = std::make_shared<atb_torch::BaseOperation>(
@@ -113,8 +113,8 @@ void NpuSiglipEncoderLayerUpImpl::build_graph(const std::string& prefix) {
   atb_torch::ReshapeFunc reshape_qkv =
       [this](const std::vector<int64_t>& org_shape) -> std::vector<int64_t> {
     std::vector<int64_t> new_shape = {org_shape[0] * org_shape[1],
-                                      model_args_.mm_num_attention_heads(),
-                                      model_args_.mm_head_dim()};
+                                      model_args_->mm_num_attention_heads(),
+                                      model_args_->mm_head_dim()};
     return new_shape;
   };
 
@@ -125,9 +125,9 @@ void NpuSiglipEncoderLayerUpImpl::build_graph(const std::string& prefix) {
   // self attn
   nlohmann::json self_attn_op_param;
   float qk_scale =
-      1.0f / std::sqrt(static_cast<float>(model_args_.mm_head_dim()));
-  self_attn_op_param["headNum"] = model_args_.mm_num_attention_heads();
-  self_attn_op_param["kvHeadNum"] = model_args_.mm_num_attention_heads();
+      1.0f / std::sqrt(static_cast<float>(model_args_->mm_head_dim()));
+  self_attn_op_param["headNum"] = model_args_->mm_num_attention_heads();
+  self_attn_op_param["kvHeadNum"] = model_args_->mm_num_attention_heads();
   self_attn_op_param["qkScale"] = qk_scale;
   self_attn_op_param["calcType"] = "PA_ENCODER";
   self_attn_op_param["kernelType"] = "KERNELTYPE_HIGH_PRECISION";
@@ -225,7 +225,7 @@ void NpuSiglipEncoderLayerDownImpl::build_graph(const std::string& prefix) {
   layer_norm2_op_param["layerType"] = "LAYER_NORM_NORM";
   layer_norm2_op_param["normParam"] = {
       {"quantType", "QUANT_UNDEFINED"},
-      {"epsilon", model_args_.mm_layer_norm_eps()},
+      {"epsilon", model_args_->mm_layer_norm_eps()},
       {"beginParamsAxis", 2},
       {"beginNormAxis", 2}};
   auto layer_norm2_op = std::make_shared<atb_torch::BaseOperation>(
@@ -329,7 +329,7 @@ torch::Tensor NpuSiglipEncoderLayerImpl::forward(const torch::Tensor& x) {
   out = out.view(
       {batch,
        seq_len,
-       model_args_.mm_num_attention_heads() * model_args_.mm_head_dim()});
+       model_args_->mm_num_attention_heads() * model_args_->mm_head_dim()});
 
   return down_->forward(residual, out);
 }

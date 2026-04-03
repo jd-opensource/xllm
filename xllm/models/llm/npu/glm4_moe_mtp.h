@@ -37,8 +37,8 @@ class Glm4MoeMtpModelImpl
 
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
         64,
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
+        model_args->max_position_embeddings(),
+        model_args->rope_theta(),
         options);
   }
 };
@@ -89,7 +89,7 @@ REGISTER_MODEL_ARGS(glm4_moe_mtp, [&] {
   LOAD_ARG_OR(first_k_dense_replace, "first_k_dense_replace", 1);
 
   SET_ARG(stop_token_ids,
-          std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
-                                      args->eos_token_id_vec().end()));
+          std::unordered_set<int32_t>(model_args->eos_token_id_vec().begin(),
+                                      model_args->eos_token_id_vec().end()));
 });
 }  // namespace xllm::npu::model

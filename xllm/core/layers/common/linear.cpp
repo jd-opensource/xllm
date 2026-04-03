@@ -182,8 +182,8 @@ torch::Tensor fp8_linear_forward(
 
 ColumnParallelLinearImpl::ColumnParallelLinearImpl(const ModelContext& context)
     : ColumnParallelLinearImpl(
-          context.get_model_args().hidden_size(),
-          context.get_model_args().vocab_size(),
+          context.get_model_args()->hidden_size(),
+          context.get_model_args()->vocab_size(),
           /*bias=*/false,
           /*gather_output=*/true,
           QuantArgs{},  // do not use quantization for lm_head

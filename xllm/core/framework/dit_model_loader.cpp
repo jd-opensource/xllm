@@ -23,6 +23,7 @@ limitations under the License.
 
 #include <boost/algorithm/string.hpp>
 #include <filesystem>
+#include <memory>
 #include <vector>
 
 #include "core/framework/tokenizer/tokenizer_factory.h"
@@ -116,7 +117,7 @@ bool DiTFolderLoader::load_model_args(const std::string& model_weights_path) {
 
     auto model_args_loader = ModelRegistry::get_model_args_loader(model_type_);
     if (model_args_loader != nullptr) {
-      model_args_loader(reader, &args_);
+      model_args_loader(reader, model_args_);
     } else {
       LOG(WARNING) << "No args loader for model type: " << model_type_;
     }
@@ -181,22 +182,22 @@ bool DiTFolderLoader::load_image_preprocessor_args(
     return false;
   }
   LOG(INFO) << "Loaded image preprocessor config from " << path;
-  args_.mm_image_min_pixels() =
-      reader.value_or<int>("min_pixels", args_.mm_image_min_pixels());
-  args_.mm_image_max_pixels() =
-      reader.value_or<int>("max_pixels", args_.mm_image_max_pixels());
-  args_.mm_image_patch_size() =
-      reader.value_or<int>("patch_size", args_.mm_image_patch_size());
-  args_.mm_image_temporal_patch_size() = reader.value_or<int>(
-      "temporal_patch_size", args_.mm_image_temporal_patch_size());
-  args_.mm_image_merge_size() =
-      reader.value_or<int>("merge_size", args_.mm_image_merge_size());
+  model_args_->mm_image_min_pixels() =
+      reader.value_or<int>("min_pixels", model_args_->mm_image_min_pixels());
+  model_args_->mm_image_max_pixels() =
+      reader.value_or<int>("max_pixels", model_args_->mm_image_max_pixels());
+  model_args_->mm_image_patch_size() =
+      reader.value_or<int>("patch_size", model_args_->mm_image_patch_size());
+  model_args_->mm_image_temporal_patch_size() = reader.value_or<int>(
+      "temporal_patch_size", model_args_->mm_image_temporal_patch_size());
+  model_args_->mm_image_merge_size() =
+      reader.value_or<int>("merge_size", model_args_->mm_image_merge_size());
   if (reader.contains("image_mean")) {
-    args_.mm_image_normalize_mean() =
+    model_args_->mm_image_normalize_mean() =
         reader.data()["image_mean"].get<std::vector<double>>();
   }
   if (reader.contains("image_std")) {
-    args_.mm_image_normalize_std() =
+    model_args_->mm_image_normalize_std() =
         reader.data()["image_std"].get<std::vector<double>>();
   }
   return true;
@@ -342,9 +343,9 @@ bool DiTModelLoader::has_component(const std::string& name) const {
   }
 }
 
-std::unordered_map<std::string, ModelArgs> DiTModelLoader::get_model_args()
-    const {
-  std::unordered_map<std::string, ModelArgs> map;
+std::unordered_map<std::string, std::shared_ptr<ModelArgs>>
+DiTModelLoader::get_model_args() const {
+  std::unordered_map<std::string, std::shared_ptr<ModelArgs>> map;
   for (const auto& pair : name_to_loader_) {
     map.insert({pair.first, pair.second->model_args()});
   }
@@ -365,9 +366,9 @@ std::unordered_map<std::string, QuantArgs> DiTModelLoader::get_quant_args()
 std::string DiTModelLoader::get_torch_dtype() const {
   std::string dtype;
   for (const auto& pair : name_to_loader_) {
-    const auto& args = pair.second->model_args();
+    const auto& model_args = pair.second->model_args();
 
-    const auto& type = args.dtype();
+    const auto& type = model_args->dtype();
     if (dtype.empty() && !type.empty()) {
       dtype = type;
     } else if (!dtype.empty() && !type.empty() && dtype != type) {

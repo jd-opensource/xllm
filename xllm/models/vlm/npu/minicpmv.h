@@ -19,6 +19,7 @@ limitations under the License.
 #include <c10/core/ScalarType.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <regex>
 #include <unordered_map>
 
@@ -39,10 +40,10 @@ namespace xllm::npu::model {
 class BaseResamplerImpl : public torch::nn::Module {
  public:
   BaseResamplerImpl(const ModelContext& context)
-      : num_queries_(context.get_model_args().query_num()),
-        embed_dim_(context.get_model_args().hidden_size()),
-        num_heads_(context.get_model_args().n_heads()),
-        kv_dim_(context.get_model_args().mm_hidden_size()) {
+      : num_queries_(context.get_model_args()->query_num()),
+        embed_dim_(context.get_model_args()->hidden_size()),
+        num_heads_(context.get_model_args()->n_heads()),
+        kv_dim_(context.get_model_args()->mm_hidden_size()) {
     auto options = context.get_tensor_options();
     // Initialize learnable query parameter
     query_ =
@@ -117,8 +118,8 @@ class KVProjectorLinearImpl : public torch::nn::Module {
 
     linear_ = register_module(
         "linear",
-        torch::nn::Linear(torch::nn::LinearOptions(model_args.mm_hidden_size(),
-                                                   model_args.hidden_size())
+        torch::nn::Linear(torch::nn::LinearOptions(model_args->mm_hidden_size(),
+                                                   model_args->hidden_size())
                               .bias(false)));
     linear_->weight.set_data(linear_->weight.to(context.get_tensor_options()));
   }
@@ -414,10 +415,11 @@ class Idefics2VisionEmbeddingsImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    embed_dim_ = model_args.mm_hidden_size();
-    patch_size_ = model_args.mm_patch_size();
-    auto in_features = model_args.mm_num_channels() *
-                       model_args.mm_patch_size() * model_args.mm_patch_size();
+    embed_dim_ = model_args->mm_hidden_size();
+    patch_size_ = model_args->mm_patch_size();
+    auto in_features = model_args->mm_num_channels() *
+                       model_args->mm_patch_size() *
+                       model_args->mm_patch_size();
     auto out_features = embed_dim_;
     patch_embedding_ = register_module(
         "patch_embedding",
@@ -425,7 +427,7 @@ class Idefics2VisionEmbeddingsImpl : public torch::nn::Module {
             torch::nn::LinearOptions(in_features, out_features).bias(true)));
     patch_embedding_->weight.set_data(patch_embedding_->weight.to(options));
     patch_embedding_->bias.set_data(patch_embedding_->bias.to(options));
-    image_size_ = model_args.mm_image_size();
+    image_size_ = model_args->mm_image_size();
     num_patches_per_side_ = image_size_ / patch_size_;
     int num_patches = num_patches_per_side_ * num_patches_per_side_;
     position_embedding_ =
@@ -558,13 +560,13 @@ class Idefics2EncoderImpl : public torch::nn::Module {
   Idefics2EncoderImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
 
-    layers_.reserve(model_args.mm_num_hidden_layers());
+    layers_.reserve(model_args->mm_num_hidden_layers());
     blocks_ = register_module("blocks", torch::nn::ModuleList());
-    for (int32_t i = 0; i < model_args.mm_num_hidden_layers(); i++) {
+    for (int32_t i = 0; i < model_args->mm_num_hidden_layers(); i++) {
       int32_t sliding_window = -1;
-      if (model_args.use_sliding_window() &&
-          i >= model_args.max_window_layers()) {
-        sliding_window = model_args.sliding_window();
+      if (model_args->use_sliding_window() &&
+          i >= model_args->max_window_layers()) {
+        sliding_window = model_args->sliding_window();
       }
       auto block = layer::NpuSiglipEncoderLayer(context);
       layers_.push_back(block);
@@ -612,7 +614,7 @@ class VisionAdapterMLPImpl : public torch::nn::Module {
   VisionAdapterMLPImpl(const ModelContext& context) {
     auto options = context.get_tensor_options();
 
-    auto embed_dim = context.get_model_args().hidden_size();
+    auto embed_dim = context.get_model_args()->hidden_size();
     int num_layers = 3;
     layers_ = register_module("layers", torch::nn::ModuleList());
     for (int idx = 0; idx < num_layers; ++idx) {
@@ -748,9 +750,9 @@ class Idefics2VisionTransformerImpl : public torch::nn::Module {
     post_layernorm_ = register_module(
         "post_layernorm",
         torch::nn::LayerNorm(
-            torch::nn::LayerNormOptions({model_args.mm_hidden_size()})
+            torch::nn::LayerNormOptions({model_args->mm_hidden_size()})
                 .elementwise_affine(true)
-                .eps(model_args.mm_layer_norm_eps())));
+                .eps(model_args->mm_layer_norm_eps())));
     post_layernorm_->weight.set_data(post_layernorm_->weight.to(options));
     post_layernorm_->bias.set_data(post_layernorm_->bias.to(options));
   }
@@ -810,7 +812,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
     use_vision_adapter_ =
-        context.get_model_args().vision_custom_adapter() == "mlp3";
+        context.get_model_args()->vision_custom_adapter() == "mlp3";
 
     vpm_ = register_module("visual_", Idefics2VisionTransformer(context));
 
@@ -1046,7 +1048,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
   void load_model(std::unique_ptr<ModelLoader> loader) {
     // load weight
     for (const auto& state_dict : loader->get_state_dicts()) {
-      if (!model_args_.image_embedding_mode()) {
+      if (!model_args_->image_embedding_mode()) {
         if (use_vision_adapter_)
           mlp_->load_state_dict(state_dict->get_dict_with_prefix("mlp."));
       }
@@ -1058,7 +1060,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
                                 "llm.");  // llm. weight name prefix
 
     // verify
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_->image_embedding_mode()) {
       if (use_vision_adapter_) mlp_->verify_loaded_weights("mlp.");
     }
     resampler_->verify_loaded_weights("resampler.");
@@ -1082,7 +1084,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
 
  private:
   QWen2ForCausalLM language_model_{nullptr};
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   int64_t im_start_id_val_ = 151646;
   int64_t im_end_id_val_ = 151647;
   int64_t slice_start_id_val_ = 151656;
@@ -1121,7 +1123,7 @@ REGISTER_MODEL_ARGS(minicpmv, [&] {
   LOAD_ARG_OR(max_window_layers, "max_window_layers", 28);
   LOAD_ARG_OR(query_num, "query_num", 64);
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
-    return args->hidden_size() / args->n_heads();
+    return model_args->hidden_size() / model_args->n_heads();
   });
   LOAD_ARG_OR(vocab_size, "vocab_size", 151666);
   LOAD_ARG_OR(n_kv_heads, "num_key_value_heads", 4);
@@ -1138,7 +1140,7 @@ REGISTER_MODEL_ARGS(minicpmv, [&] {
   LOAD_ARG_OR(mm_hidden_act, "vision_config.hidden_act", "gelu_pytorch_tanh");
   LOAD_ARG_OR(mm_layer_norm_eps, "vision_config.layer_norm_eps", 1e-06);
   LOAD_ARG_OR_FUNC(mm_head_dim, "mm_head_dim", [&] {
-    return args->mm_hidden_size() / args->mm_num_attention_heads();
+    return model_args->mm_hidden_size() / model_args->mm_num_attention_heads();
   });
 });
 }  // namespace xllm::npu::model

@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <atb/atb_infer.h>
 
+#include <memory>
+
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -80,7 +82,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
     prepare_encoder_input(input_params, image_input, video_input);
 
     MMDict multimodal_embeds;
-    auto merge_size = model_args_.mm_image_merge_size();
+    auto merge_size = model_args_->mm_image_merge_size();
     if (image_input) {
       auto [image_embeds, deep_stacks] =
           visual_(image_input->pixel_values.to(options_),
@@ -110,7 +112,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
     auto special_token_ids = torch::tensor(
-        {model_args_.image_token_id(), model_args_.video_token_id()},
+        {model_args_->image_token_id(), model_args_->video_token_id()},
         input_ids.options().dtype(torch::kInt64));
     auto is_multimodal = torch::isin(input_ids, special_token_ids);
     return is_multimodal;
@@ -179,7 +181,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
     visual_->verify_loaded_weights("model.visual.");
     visual_->merge_loaded_weights();
 
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_->image_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
   }
@@ -200,7 +202,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
   }
 
  private:
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::TensorOptions options_;
   Qwen3_VisionTransformer visual_{nullptr};
   Qwen3MoeForCausalLM language_model_{nullptr};
@@ -221,7 +223,7 @@ REGISTER_MODEL_ARGS(qwen3_vl_moe, [&] {
   LOAD_ARG_OR(dtype, "text_config.dtype", "bfloat16");
   LOAD_ARG_OR(eos_token_id, "text_config.eos_token_id", 151645);
   LOAD_ARG_OR_FUNC(head_dim, "text_config.head_dim", [&] {
-    return args->hidden_size() / args->n_heads();
+    return model_args->hidden_size() / model_args->n_heads();
   });
   LOAD_ARG_OR(hidden_act, "text_config.hidden_act", "silu");
   LOAD_ARG_OR(hidden_size, "text_config.hidden_size", 2048);
@@ -263,7 +265,7 @@ REGISTER_MODEL_ARGS(qwen3_vl_moe, [&] {
   LOAD_ARG_OR(mm_spatial_merge_size, "vision_config.spatial_merge_size", 2);
   LOAD_ARG_OR(mm_temporal_patch_size, "vision_config.temporal_patch_size", 2);
   LOAD_ARG_OR_FUNC(mm_head_dim, "head_dim", [&] {
-    return args->mm_hidden_size() / args->mm_num_attention_heads();
+    return model_args->mm_hidden_size() / model_args->mm_num_attention_heads();
   });
 
   LOAD_ARG_OR(image_token_id, "image_token_id", 151655);

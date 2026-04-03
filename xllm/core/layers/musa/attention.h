@@ -29,10 +29,10 @@ namespace xllm::layer {
 
 class AttentionImpl : public MUSALayerBaseImpl {
  public:
-  explicit AttentionImpl(ModelArgs const& args,
-                         QuantArgs const& quant_args,
-                         ParallelArgs const& parallel_args,
-                         torch::TensorOptions const& options);
+  explicit AttentionImpl(const std::shared_ptr<ModelArgs>& model_args,
+                         const QuantArgs& quant_args,
+                         const ParallelArgs& parallel_args,
+                         const torch::TensorOptions& options);
 
   AttentionImpl(int64_t num_heads,
                 int64_t head_size,

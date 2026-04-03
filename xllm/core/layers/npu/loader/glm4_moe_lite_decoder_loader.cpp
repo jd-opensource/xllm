@@ -309,13 +309,13 @@ Glm4MoeDecoderLiteLoader::Glm4MoeDecoderLiteLoader(
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
 
-  num_heads_ = model_args.n_heads();
-  actual_n_heads_ = model_args.actual_n_heads();
-  num_key_value_heads_ = static_cast<int>(model_args.n_kv_heads().value());
-  qk_nope_head_dim_ = model_args.qk_nope_head_dim();
-  qk_rope_head_dim_ = model_args.qk_rope_head_dim();
-  v_head_dim_ = model_args.v_head_dim();
-  kv_lora_rank_ = model_args.kv_lora_rank();
+  num_heads_ = model_args->n_heads();
+  actual_n_heads_ = model_args->actual_n_heads();
+  num_key_value_heads_ = static_cast<int>(model_args->n_kv_heads().value());
+  qk_nope_head_dim_ = model_args->qk_nope_head_dim();
+  qk_rope_head_dim_ = model_args->qk_rope_head_dim();
+  v_head_dim_ = model_args->v_head_dim();
+  kv_lora_rank_ = model_args->kv_lora_rank();
 
   tensor_placeholder_ = torch::zeros({1}).to(options);
 
@@ -323,12 +323,12 @@ Glm4MoeDecoderLiteLoader::Glm4MoeDecoderLiteLoader(
 
   at_weight_tensors_.resize(weight_count_);
 
-  num_experts_ = model_args.num_experts();
+  num_experts_ = model_args->num_experts();
   ep_size_ = parallel_args.ep_size();
   ep_local_tp_size_ = parallel_args.world_size() / ep_size_;
   CHECK_EQ(parallel_args.world_size(), ep_size_ * ep_local_tp_size_);
   ep_local_tp_rank_ = parallel_args.rank() % ep_local_tp_size_;
-  num_experts_per_partition_ = model_args.num_experts() / ep_size_;
+  num_experts_per_partition_ = model_args->num_experts() / ep_size_;
   ep_rank_ = parallel_args.rank() / ep_local_tp_size_;
   start_expert_id_ = ep_rank_ * num_experts_per_partition_;
   end_expert_id_ = start_expert_id_ + num_experts_per_partition_ - 1;

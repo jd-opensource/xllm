@@ -59,18 +59,18 @@ class DeepseekV2SparseMoEBlockTest : public ::testing::Test {
                    .device(Device::type_torch(), 0)
                    .requires_grad(false);
     model_args_ = test::create_default_model_args();
-    model_args_.hidden_size() = 256;
-    model_args_.moe_intermediate_size() = 256;
-    model_args_.n_routed_experts() = 4;
-    model_args_.num_experts_per_tok() = 2;
-    model_args_.n_group() = 1;
-    model_args_.topk_group() = 2;
-    model_args_.n_shared_experts() = 1;
-    model_args_.routed_scaling_factor() = 1.0f;
-    model_args_.norm_topk_prob() = true;
-    model_args_.hidden_act() = "silu";
-    model_args_.scoring_func() = "softmax";
-    model_args_.topk_method() = "greedy";
+    model_args_->hidden_size() = 256;
+    model_args_->moe_intermediate_size() = 256;
+    model_args_->n_routed_experts() = 4;
+    model_args_->num_experts_per_tok() = 2;
+    model_args_->n_group() = 1;
+    model_args_->topk_group() = 2;
+    model_args_->n_shared_experts() = 1;
+    model_args_->routed_scaling_factor() = 1.0f;
+    model_args_->norm_topk_prob() = true;
+    model_args_->hidden_act() = "silu";
+    model_args_->scoring_func() = "softmax";
+    model_args_->topk_method() = "greedy";
     set_pg_ctx();
   }
 
@@ -150,9 +150,9 @@ class DeepseekV2SparseMoEBlockTest : public ::testing::Test {
   std::unordered_map<std::string, torch::Tensor> create_fp_weights(
       int64_t n_shared_experts) const {
     std::unordered_map<std::string, torch::Tensor> weight_dict;
-    const int64_t num_experts = model_args_.n_routed_experts();
-    const int64_t hidden_size = model_args_.hidden_size();
-    const int64_t intermediate_size = model_args_.moe_intermediate_size();
+    const int64_t num_experts = model_args_->n_routed_experts();
+    const int64_t hidden_size = model_args_->hidden_size();
+    const int64_t intermediate_size = model_args_->moe_intermediate_size();
 
     for (int64_t expert_id = 0; expert_id < num_experts; ++expert_id) {
       const std::string expert_prefix =
@@ -228,7 +228,7 @@ class DeepseekV2SparseMoEBlockTest : public ::testing::Test {
     xllm::Device(options_.device()).synchronize_default_stream();
   }
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   QuantArgs quant_args_;
   ParallelArgs parallel_args_{0, 1, nullptr};
   torch::TensorOptions options_;
@@ -408,7 +408,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, ForwardReducePathCombinesSharedAndRouted) {
   raw_moe->load_state_dict(state_dict);
 
   auto hidden_states = test::seeded_tensor("deepseek_v2_sparse_moe_block.input",
-                                           {4, model_args_.hidden_size()},
+                                           {4, model_args_->hidden_size()},
                                            torch::kBFloat16,
                                            options_.device());
   auto routed = raw_moe->forward_experts(
@@ -456,7 +456,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, ForwardReduceOverlapUsesAsyncReduceFns) {
 
   auto hidden_states =
       test::seeded_tensor("deepseek_v2_sparse_moe_block.async_reduce",
-                          {4, model_args_.hidden_size()},
+                          {4, model_args_->hidden_size()},
                           torch::kBFloat16,
                           options_.device());
   auto routed = raw_moe->forward_experts(
@@ -519,7 +519,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, ForwardKeepLocalUsesCommPath) {
   raw_moe->load_state_dict(state_dict);
 
   auto hidden_states = test::seeded_tensor("deepseek_v2_sparse_moe_block.comm",
-                                           {4, model_args_.hidden_size()},
+                                           {4, model_args_->hidden_size()},
                                            torch::kBFloat16,
                                            options_.device());
   auto routed = raw_moe->forward_experts(
@@ -567,7 +567,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, ForwardIgnoresSharedLocalGate) {
 
   auto hidden_states =
       test::seeded_tensor("deepseek_v2_sparse_moe_block.shared_fallback",
-                          {4, model_args_.hidden_size()},
+                          {4, model_args_->hidden_size()},
                           torch::kBFloat16,
                           options_.device());
   auto routed = raw_moe->forward_experts(
@@ -610,7 +610,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, ForwardIgnoresSharedLocalGate) {
 }
 
 TEST_F(DeepseekV2SparseMoEBlockTest, ForwardWithoutSharedIgnoresNullSharedPg) {
-  model_args_.n_shared_experts() = 0;
+  model_args_->n_shared_experts() = 0;
   auto block = create_block();
   auto raw_moe = create_raw_moe();
   StateDict state_dict(create_fp_weights(/*n_shared_experts=*/0));
@@ -619,7 +619,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, ForwardWithoutSharedIgnoresNullSharedPg) {
 
   auto hidden_states =
       test::seeded_tensor("deepseek_v2_sparse_moe_block.no_shared",
-                          {4, model_args_.hidden_size()},
+                          {4, model_args_->hidden_size()},
                           torch::kBFloat16,
                           options_.device());
   auto routed = raw_moe->forward_experts(
@@ -665,11 +665,11 @@ TEST_F(DeepseekV2SparseMoEBlockTest, ForwardSPAddsLocalSharedAfterRoutedComm) {
   raw_moe->load_state_dict(state_dict);
 
   auto local = test::seeded_tensor("deepseek_v2_sparse_moe_block.sp_local",
-                                   {2, model_args_.hidden_size()},
+                                   {2, model_args_->hidden_size()},
                                    torch::kBFloat16,
                                    options_.device());
   auto remote = test::seeded_tensor("deepseek_v2_sparse_moe_block.sp_remote",
-                                    {2, model_args_.hidden_size()},
+                                    {2, model_args_->hidden_size()},
                                     torch::kBFloat16,
                                     options_.device());
   tp_pg_->set_allgather_outputs({local, remote});
@@ -724,12 +724,12 @@ TEST_F(DeepseekV2SparseMoEBlockTest, ForwardSPFallsBackWhenLocalKeepOff) {
 
   auto local =
       test::seeded_tensor("deepseek_v2_sparse_moe_block.sp_fallback_local",
-                          {2, model_args_.hidden_size()},
+                          {2, model_args_->hidden_size()},
                           torch::kBFloat16,
                           options_.device());
   auto remote =
       test::seeded_tensor("deepseek_v2_sparse_moe_block.sp_fallback_remote",
-                          {2, model_args_.hidden_size()},
+                          {2, model_args_->hidden_size()},
                           torch::kBFloat16,
                           options_.device());
   tp_pg_->set_allgather_outputs({local, remote});
@@ -777,12 +777,12 @@ TEST_F(DeepseekV2SparseMoEBlockTest, ForwardSPChunkKeepLocalMatchesBase) {
 
   auto local =
       test::seeded_tensor("deepseek_v2_sparse_moe_block.sp_chunk_local",
-                          {2, model_args_.hidden_size()},
+                          {2, model_args_->hidden_size()},
                           torch::kBFloat16,
                           options_.device());
   auto remote =
       test::seeded_tensor("deepseek_v2_sparse_moe_block.sp_chunk_remote",
-                          {2, model_args_.hidden_size()},
+                          {2, model_args_->hidden_size()},
                           torch::kBFloat16,
                           options_.device());
   tp_pg_->set_allgather_outputs({local, remote});
@@ -860,12 +860,12 @@ TEST_F(DeepseekV2SparseMoEBlockTest, ForwardSPChunkFallbackMatchesBase) {
 
   auto local =
       test::seeded_tensor("deepseek_v2_sparse_moe_block.sp_chunk_fb_local",
-                          {2, model_args_.hidden_size()},
+                          {2, model_args_->hidden_size()},
                           torch::kBFloat16,
                           options_.device());
   auto remote =
       test::seeded_tensor("deepseek_v2_sparse_moe_block.sp_chunk_fb_remote",
-                          {2, model_args_.hidden_size()},
+                          {2, model_args_->hidden_size()},
                           torch::kBFloat16,
                           options_.device());
   tp_pg_->set_allgather_outputs({local, remote});

@@ -15,20 +15,23 @@ limitations under the License.
 
 #include "clip_image_processor.h"
 
+#include <memory>
+
 namespace xllm {
 
-CLIPImageProcessor::CLIPImageProcessor(const ModelArgs& args) {
-  do_resize_ = args.mm_image_do_resize();
-  do_center_crop_ = args.mm_image_do_center_crop();
-  do_rescale_ = args.mm_image_do_rescale();
-  do_normalize_ = args.mm_image_do_normalize();
-  shortest_edge_ = args.mm_image_resize_shortest_edge();
-  crop_size_ = std::make_pair(args.mm_image_crop_height_size(),
-                              args.mm_image_crop_width_size());
-  resample_ = args.mm_image_resample();
-  rescale_factor_ = args.mm_image_rescale_factor();
-  image_mean_ = args.mm_image_normalize_mean();
-  image_std_ = args.mm_image_normalize_std();
+CLIPImageProcessor::CLIPImageProcessor(
+    const std::shared_ptr<ModelArgs>& model_args) {
+  do_resize_ = model_args->mm_image_do_resize();
+  do_center_crop_ = model_args->mm_image_do_center_crop();
+  do_rescale_ = model_args->mm_image_do_rescale();
+  do_normalize_ = model_args->mm_image_do_normalize();
+  shortest_edge_ = model_args->mm_image_resize_shortest_edge();
+  crop_size_ = std::make_pair(model_args->mm_image_crop_height_size(),
+                              model_args->mm_image_crop_width_size());
+  resample_ = model_args->mm_image_resample();
+  rescale_factor_ = model_args->mm_image_rescale_factor();
+  image_mean_ = model_args->mm_image_normalize_mean();
+  image_std_ = model_args->mm_image_normalize_std();
 }
 
 bool CLIPImageProcessor::process(const MMInput& mm_inputs, MMData& mm_datas) {

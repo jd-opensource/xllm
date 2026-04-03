@@ -175,9 +175,9 @@ bool WorkerImpl::allocate_kv_cache(
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
-  const auto& args = context_.get_model_args();
-  const bool enable_linear_attention = has_linear_attention_layers(args);
-  const bool enable_lighting_indexer = args.index_n_heads() > 0;
+  const auto model_args = context_.get_model_args();
+  const bool enable_linear_attention = has_linear_attention_layers(model_args);
+  const bool enable_lighting_indexer = model_args->index_n_heads() > 0;
   CHECK(!(enable_linear_attention && enable_lighting_indexer))
       << "KVCache does not support linear attention and lighting indexer "
       << "simultaneously.";
@@ -239,8 +239,8 @@ bool WorkerImpl::allocate_kv_cache(
 
     // Helper function to check if a layer is linear attention
     auto is_linear_attention_layer = [&](int64_t layer_idx) {
-      if (args.full_attention_interval() > 1) {
-        return (layer_idx + 1) % args.full_attention_interval() != 0;
+      if (model_args->full_attention_interval() > 1) {
+        return (layer_idx + 1) % model_args->full_attention_interval() != 0;
       }
       return false;
     };
@@ -289,7 +289,7 @@ bool WorkerImpl::allocate_kv_cache(
         // Full attention layer: allocate key_cache and value_cache only
 #if defined(USE_NPU)
         aclFormat npu_format_type =
-            context_.get_model_args().model_type() == "deepseek_v3" &&
+            context_.get_model_args()->model_type() == "deepseek_v3" &&
                     FLAGS_enable_prefix_cache
                 ? ACL_FORMAT_FRACTAL_NZ
                 : ACL_FORMAT_ND;
@@ -374,9 +374,9 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
 
   int32_t device_id = device_.index();
   // create a KVCache for each layer
-  const int64_t num_layers = context_.get_model_args().n_layers();
+  const int64_t num_layers = context_.get_model_args()->n_layers();
   const bool enable_lighting_indexer =
-      context_.get_model_args().index_n_heads() > 0;
+      context_.get_model_args()->index_n_heads() > 0;
   kv_cache_transfer_ = KVCacheTransferFactory::create(
       FLAGS_kv_cache_transfer_type,
       options_.device_ip().value(),
@@ -391,7 +391,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
         this->allocate_kv_cache(shape);
       },
       enable_lighting_indexer,
-      context_.get_model_args().model_type(),
+      context_.get_model_args()->model_type(),
       options_.model_id());
 
   init_hierarchy_kv_cache_transfer();
@@ -410,7 +410,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   kv_cache_transfer_ = kv_cache_transfer;
 
   // create a KVCache for each layer
-  const int64_t num_layers = context_.get_model_args().n_layers();
+  const int64_t num_layers = context_.get_model_args()->n_layers();
   kv_caches_.reserve(num_layers);
   if (is_spec_draft_) {
     kv_cache_transfer_->allocate_kv_cache_spec(
@@ -613,7 +613,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     processed_input.input_params.cp_prefill_inputs = tmp_cp_inputs.to(device_);
     CpEpPadding cp_ep_padding(
         input.token_ids,
-        context_.get_model_args().num_experts_per_tok(),
+        context_.get_model_args()->num_experts_per_tok(),
         context_.get_parallel_args().mapping_data(),
         /*device=*/device_,
         dtype_,
@@ -625,7 +625,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   apply_kv_block_swaps(input_params);
 
 #if defined(USE_NPU)
-  if (context_.get_model_args().enable_mla() &&
+  if (context_.get_model_args()->enable_mla() &&
       input_params.batch_forward_type.is_chunked_prefill()) {
     prepare_mla_prefixcache_inputs(input_params);
   }
@@ -643,7 +643,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     bool is_prefill =
         processed_input.input_params.batch_forward_type.is_prefill();
     DpEpPadding dp_ep_padding(token_size_per_dp_group,
-                              context_.get_model_args().num_experts_per_tok(),
+                              context_.get_model_args()->num_experts_per_tok(),
                               context_.get_parallel_args().mapping_data(),
                               device_,
                               dtype_,
@@ -1005,17 +1005,17 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   auto tokenizer = model_loader->tokenizer();
   CHECK(tokenizer != nullptr);
 
-  auto args = model_loader->model_args();
+  auto model_args = model_loader->model_args();
   auto quant_args = model_loader->quant_args();
-  torch::ScalarType dtype = util::parse_dtype(args.dtype(), device_);
+  torch::ScalarType dtype = util::parse_dtype(model_args->dtype(), device_);
 
   const int64_t tokenizer_vocab_size = tokenizer->vocab_size();
-  int64_t model_vocab_size = args.vocab_size();
+  int64_t model_vocab_size = model_args->vocab_size();
   // use tokenizer vocab size if model vocab size is not set
   if (model_vocab_size <= 0) {
     LOG(WARNING) << "Model vocab size is not set, using tokenizer vocab size: "
                  << tokenizer_vocab_size;
-    args.vocab_size(tokenizer_vocab_size);
+    model_args->vocab_size(tokenizer_vocab_size);
   } else if (tokenizer_vocab_size > model_vocab_size) {
     LOG(WARNING) << "Unsafe vocab mismatch: tokenizer: " << tokenizer_vocab_size
                  << ", model: " << model_vocab_size;
@@ -1023,11 +1023,11 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
 
 #if defined(USE_NPU)
   if (options_.enable_speculative_decode() && FLAGS_enable_atb_spec_kernel) {
-    args.num_speculative_tokens(options_.num_speculative_tokens());
+    model_args->num_speculative_tokens(options_.num_speculative_tokens());
   } else if (options_.enable_speculative_decode() &&
              options_.num_speculative_tokens() == 0 &&
-             args.num_nextn_predict_layers() != 0) {
-    const std::string& current_type = args.model_type();
+             model_args->num_nextn_predict_layers() != 0) {
+    const std::string& current_type = model_args->model_type();
     const char* mtp_model_type = nullptr;
     if (current_type == "qwen3_5") {
       mtp_model_type = "qwen3_5_mtp";
@@ -1037,22 +1037,23 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     if (mtp_model_type != nullptr) {
       LOG(INFO) << "Overriding draft model_type from " << current_type << " to "
                 << mtp_model_type << " for speculative decoding";
-      args.model_type(mtp_model_type);
-      const int32_t mtp_layers = args.num_nextn_predict_layers();
-      args.n_layers(mtp_layers);
-      args.layer_types(std::vector<std::string>(mtp_layers, "full_attention"));
-      args.full_attention_interval(1);
+      model_args->model_type(mtp_model_type);
+      const int32_t mtp_layers = model_args->num_nextn_predict_layers();
+      model_args->n_layers(mtp_layers);
+      model_args->layer_types(
+          std::vector<std::string>(mtp_layers, "full_attention"));
+      model_args->full_attention_interval(1);
     }
   }
 #else
   if (options_.enable_speculative_decode()) {
-    args.num_speculative_tokens(options_.num_speculative_tokens());
+    model_args->num_speculative_tokens(options_.num_speculative_tokens());
     // When running speculative decoding, the draft worker reuses the same
     // checkpoint as the target model. The draft worker needs to instantiate
     // the MTP variant, so override the model_type here without mutating the
     // original config.
     if (options_.num_speculative_tokens() == 0 &&
-        args.num_nextn_predict_layers() != 0) {
+        model_args->num_nextn_predict_layers() != 0) {
       static const std::unordered_map<std::string, std::string>
           kModelTypeToMtpType = {
               {"deepseek_v3", "deepseek_v3_mtp"},
@@ -1060,23 +1061,24 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
               {"glm_moe_dsa", "glm_moe_dsa_mtp"},
               {"joyai_llm_flash", "joyai_llm_flash_mtp"},
           };
-      const std::string& current_type = args.model_type();
+      const std::string& current_type = model_args->model_type();
       auto it = kModelTypeToMtpType.find(current_type);
       if (it != kModelTypeToMtpType.end()) {
         LOG(INFO) << "Overriding draft model_type from " << current_type
                   << " to " << it->second << " for speculative decoding";
-        args.model_type(it->second);
+        model_args->model_type(it->second);
       }
     }
   }
 #endif
 
-  args.enable_mla(options_.enable_mla());
+  model_args->enable_mla(options_.enable_mla());
 
   // create model context
   dtype_ = dtype;
   auto tensor_options = torch::dtype(dtype_).device(device_);
-  context_ = ModelContext(parallel_args_, args, quant_args, tensor_options);
+  context_ =
+      ModelContext(parallel_args_, model_args, quant_args, tensor_options);
   context_.set_model_id(options_.model_id());
 
   // init model, create model executor
@@ -1115,10 +1117,11 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   status_ = Status::LOADED;
   if (FLAGS_enable_eplb) {
     // todo: support xtensor
-    int32_t num_layers = args.n_layers() - args.first_k_dense_replace();
-    int32_t num_device_experts =
-        args.n_routed_experts() / context_.get_parallel_args().world_size() +
-        FLAGS_redundant_experts_num;
+    int32_t num_layers =
+        model_args->n_layers() - model_args->first_k_dense_replace();
+    int32_t num_device_experts = model_args->n_routed_experts() /
+                                     context_.get_parallel_args().world_size() +
+                                 FLAGS_redundant_experts_num;
     expert_load_data_ = torch::zeros({num_layers, num_device_experts})
                             .to(torch::kInt64)
                             .to(device_)
@@ -1241,7 +1244,7 @@ void WorkerImpl::init_hierarchy_kv_cache_transfer() {
         .tp_rank(options_.dp_size() > 1
                      ? options_.node_rank() % options_.dp_size()
                      : options_.node_rank())
-        .layers(context_.get_model_args().n_layers())
+        .layers(context_.get_model_args()->n_layers())
         .host_blocks_factor(options_.host_blocks_factor())
         .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
         .enable_kvcache_store(options_.enable_kvcache_store())
@@ -1257,12 +1260,12 @@ void WorkerImpl::prepare_mla_prefixcache_inputs(
     ModelInputParams& input_params) {
   int32_t sum_prefix = input_params.kv_cache_tokens_nums.sum().item<int>();
   input_params.history_compressed_kv =
-      torch::empty({sum_prefix, context_.get_model_args().kv_lora_rank()},
+      torch::empty({sum_prefix, context_.get_model_args()->kv_lora_rank()},
                    torch::TensorOptions().dtype(dtype_).pinned_memory(true))
           .to(device_);
 
   input_params.history_k_rope =
-      torch::empty({sum_prefix, context_.get_model_args().qk_rope_head_dim()},
+      torch::empty({sum_prefix, context_.get_model_args()->qk_rope_head_dim()},
                    torch::TensorOptions().dtype(dtype_).pinned_memory(true))
           .to(device_);
   ;
@@ -1289,13 +1292,13 @@ void WorkerImpl::prepare_mla_prefixcache_inputs(
 }
 
 int64_t WorkerImpl::get_num_layers() const {
-  int64_t num_layers = context_.get_model_args().n_layers();
+  int64_t num_layers = context_.get_model_args()->n_layers();
 #if !defined(USE_NPU)
   if (is_spec_draft_) {
     // for MTP draft models, the number of layers is the number of nextn
     // predict layers
     int64_t num_nextn_predict_layers =
-        context_.get_model_args().num_nextn_predict_layers();
+        context_.get_model_args()->num_nextn_predict_layers();
     if (num_nextn_predict_layers > 0) {
       return num_nextn_predict_layers;
     }

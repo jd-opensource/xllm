@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <folly/futures/Future.h>
 
+#include <memory>
 #include <unordered_map>
 
 #include "framework/batch/batch.h"
@@ -53,7 +54,9 @@ class Engine {
   }
 
   // return the model args
-  virtual const ModelArgs& model_args() const { return args_; }
+  virtual const std::shared_ptr<ModelArgs>& model_args() const {
+    return model_args_;
+  }
 
   // return the tokenizer args
   virtual const TokenizerArgs& tokenizer_args() const {
@@ -186,7 +189,7 @@ class Engine {
 
  protected:
   // model args
-  ModelArgs args_;
+  std::shared_ptr<ModelArgs> model_args_;
 
   // Tokenizer args
   TokenizerArgs tokenizer_args_;

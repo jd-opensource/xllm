@@ -53,14 +53,15 @@ using MMEmbeddingVLMFactory =
 using DiTModelFactory =
     std::function<std::unique_ptr<DiTModel>(const DiTModelContext& context)>;
 
-using InputProcessorFactory =
-    std::function<std::unique_ptr<InputProcessor>(const ModelArgs& args)>;
+using InputProcessorFactory = std::function<std::unique_ptr<InputProcessor>(
+    const std::shared_ptr<ModelArgs>& model_args)>;
 
-using ImageProcessorFactory =
-    std::function<std::unique_ptr<ImageProcessor>(const ModelArgs& args)>;
+using ImageProcessorFactory = std::function<std::unique_ptr<ImageProcessor>(
+    const std::shared_ptr<ModelArgs>& model_args)>;
 
 using ModelArgsLoader =
-    std::function<bool(const JsonReader& json, ModelArgs* args)>;
+    std::function<bool(const JsonReader& json,
+                       std::shared_ptr<ModelArgs> model_args)>;
 
 using QuantArgsLoader =
     std::function<bool(const JsonReader& json, QuantArgs* args)>;
@@ -272,28 +273,28 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
 #define REGISTER_DIT_MODEL(ModelType, ModelClass) \
   REGISTER_DIT_MODEL_WITH_VARNAME(ModelType, ModelType, ModelClass)
 
-#define REGISTER_INPUT_PROCESSOR_WITH_VARNAME(                \
-    VarName, ModelType, InputProcessorClass)                  \
-  const bool VarName##_input_processor_registered = []() {    \
-    ModelRegistry::register_input_processor_factory(          \
-        #ModelType, [](const ModelArgs& args) {               \
-          return std::make_unique<InputProcessorClass>(args); \
-        });                                                   \
-    return true;                                              \
+#define REGISTER_INPUT_PROCESSOR_WITH_VARNAME(                         \
+    VarName, ModelType, InputProcessorClass)                           \
+  const bool VarName##_input_processor_registered = []() {             \
+    ModelRegistry::register_input_processor_factory(                   \
+        #ModelType, [](const std::shared_ptr<ModelArgs>& model_args) { \
+          return std::make_unique<InputProcessorClass>(model_args);    \
+        });                                                            \
+    return true;                                                       \
   }()
 
 #define REGISTER_INPUT_PROCESSOR(ModelType, InputProcessorClass) \
   REGISTER_INPUT_PROCESSOR_WITH_VARNAME(                         \
       ModelType, ModelType, InputProcessorClass)
 
-#define REGISTER_IMAGE_PROCESSOR_WITH_VARNAME(                \
-    VarName, ModelType, ImageProcessorClass)                  \
-  const bool VarName##_image_processor_registered = []() {    \
-    ModelRegistry::register_image_processor_factory(          \
-        #ModelType, [](const ModelArgs& args) {               \
-          return std::make_unique<ImageProcessorClass>(args); \
-        });                                                   \
-    return true;                                              \
+#define REGISTER_IMAGE_PROCESSOR_WITH_VARNAME(                         \
+    VarName, ModelType, ImageProcessorClass)                           \
+  const bool VarName##_image_processor_registered = []() {             \
+    ModelRegistry::register_image_processor_factory(                   \
+        #ModelType, [](const std::shared_ptr<ModelArgs>& model_args) { \
+          return std::make_unique<ImageProcessorClass>(model_args);    \
+        });                                                            \
+    return true;                                                       \
   }()
 
 #define REGISTER_IMAGE_PROCESSOR(ModelType, ImageProcessorClass) \
@@ -310,13 +311,15 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
 #define REGISTER_MODEL_ARGS_LOADER(ModelType, Loader) \
   REGISTER_MODEL_ARGS_LOADER_WITH_VARNAME(ModelType, ModelType, Loader)
 
-#define REGISTER_MODEL_ARGS_WITH_VARNAME(VarName, ModelType, ...)       \
-  REGISTER_MODEL_ARGS_LOADER_WITH_VARNAME(                              \
-      VarName, ModelType, [](const JsonReader& json, ModelArgs* args) { \
-        UNUSED_PARAMETER(json);                                         \
-        UNUSED_PARAMETER(args);                                         \
-        __VA_ARGS__();                                                  \
-        return true;                                                    \
+#define REGISTER_MODEL_ARGS_WITH_VARNAME(VarName, ModelType, ...)         \
+  REGISTER_MODEL_ARGS_LOADER_WITH_VARNAME(                                \
+      VarName,                                                            \
+      ModelType,                                                          \
+      [](const JsonReader& json, std::shared_ptr<ModelArgs> model_args) { \
+        UNUSED_PARAMETER(json);                                           \
+        UNUSED_PARAMETER(model_args);                                     \
+        __VA_ARGS__();                                                    \
+        return true;                                                      \
       })
 
 #define REGISTER_MODEL_ARGS(ModelType, ...) \
@@ -343,13 +346,15 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
 #define REGISTER_TOKENIZER_ARGS_LOADER(ModelType, Loader) \
   REGISTER_TOKENIZER_ARGS_LOADER_WITH_VARNAME(ModelType, ModelType, Loader)
 
-#define REGISTER_TOKENIZER_ARGS_WITH_VARNAME(VarName, ModelType, ...)       \
-  REGISTER_TOKENIZER_ARGS_LOADER_WITH_VARNAME(                              \
-      VarName, ModelType, [](const JsonReader& json, TokenizerArgs* args) { \
-        UNUSED_PARAMETER(json);                                             \
-        UNUSED_PARAMETER(args);                                             \
-        __VA_ARGS__();                                                      \
-        return true;                                                        \
+#define REGISTER_TOKENIZER_ARGS_WITH_VARNAME(VarName, ModelType, ...) \
+  REGISTER_TOKENIZER_ARGS_LOADER_WITH_VARNAME(                        \
+      VarName,                                                        \
+      ModelType,                                                      \
+      [](const JsonReader& json, TokenizerArgs* tokenizer_args) {     \
+        UNUSED_PARAMETER(json);                                       \
+        UNUSED_PARAMETER(tokenizer_args);                             \
+        __VA_ARGS__();                                                \
+        return true;                                                  \
       })
 
 #define REGISTER_TOKENIZER_ARGS(ModelType, ...) \
@@ -357,31 +362,63 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
 
 #define LOAD_ARG(arg_name, json_name)                          \
   [&] {                                                        \
-    auto value = args->arg_name();                             \
+    auto value = model_args->arg_name();                       \
     using value_type = remove_optional_t<decltype(value)>;     \
     if (auto data_value = json.value<value_type>(json_name)) { \
-      args->arg_name() = data_value.value();                   \
+      model_args->arg_name() = data_value.value();             \
     }                                                          \
   }()
 
-#define LOAD_ARG_OR(arg_name, json_name, default_value)                     \
-  [&] {                                                                     \
-    auto value = args->arg_name();                                          \
-    using value_type = remove_optional_t<decltype(value)>;                  \
-    args->arg_name() = json.value_or<value_type>(json_name, default_value); \
+#define LOAD_ARG_OR(arg_name, json_name, default_value)      \
+  [&] {                                                      \
+    auto value = model_args->arg_name();                     \
+    using value_type = remove_optional_t<decltype(value)>;   \
+    model_args->arg_name() =                                 \
+        json.value_or<value_type>(json_name, default_value); \
   }()
 
 #define LOAD_ARG_OR_FUNC(arg_name, json_name, ...)             \
   [&] {                                                        \
-    auto value = args->arg_name();                             \
+    auto value = model_args->arg_name();                       \
     using value_type = remove_optional_t<decltype(value)>;     \
     if (auto data_value = json.value<value_type>(json_name)) { \
-      args->arg_name() = data_value.value();                   \
+      model_args->arg_name() = data_value.value();             \
     } else {                                                   \
-      args->arg_name() = __VA_ARGS__();                        \
+      model_args->arg_name() = __VA_ARGS__();                  \
     }                                                          \
   }()
 
-#define SET_ARG(arg_name, value) [&] { args->arg_name() = value; }()
+#define SET_ARG(arg_name, value) [&] { model_args->arg_name() = value; }()
+
+#define LOAD_TOKENIZER_ARG(arg_name, json_name)                \
+  [&] {                                                        \
+    auto value = tokenizer_args->arg_name();                   \
+    using value_type = remove_optional_t<decltype(value)>;     \
+    if (auto data_value = json.value<value_type>(json_name)) { \
+      tokenizer_args->arg_name() = data_value.value();         \
+    }                                                          \
+  }()
+
+#define LOAD_TOKENIZER_ARG_OR(arg_name, json_name, default_value) \
+  [&] {                                                           \
+    auto value = tokenizer_args->arg_name();                      \
+    using value_type = remove_optional_t<decltype(value)>;        \
+    tokenizer_args->arg_name() =                                  \
+        json.value_or<value_type>(json_name, default_value);      \
+  }()
+
+#define LOAD_TOKENIZER_ARG_OR_FUNC(arg_name, json_name, ...)   \
+  [&] {                                                        \
+    auto value = tokenizer_args->arg_name();                   \
+    using value_type = remove_optional_t<decltype(value)>;     \
+    if (auto data_value = json.value<value_type>(json_name)) { \
+      tokenizer_args->arg_name() = data_value.value();         \
+    } else {                                                   \
+      tokenizer_args->arg_name() = __VA_ARGS__();              \
+    }                                                          \
+  }()
+
+#define SET_TOKENIZER_ARG(arg_name, value) \
+  [&] { tokenizer_args->arg_name() = value; }()
 
 }  // namespace xllm

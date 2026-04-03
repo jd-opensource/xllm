@@ -218,16 +218,16 @@ Qwen3MoeDecoderLoader::Qwen3MoeDecoderLoader(uint64_t weight_count,
     at_weight_tensors_[i] = torch::zeros({1}).to(options);
   }
 
-  num_experts_ = model_args.num_experts();
+  num_experts_ = model_args->num_experts();
   ep_size_ = parallel_args_.ep_size();
   ep_local_tp_size_ = parallel_args_.world_size() / ep_size_;
   CHECK_EQ(parallel_args_.world_size(), ep_size_ * ep_local_tp_size_);
   ep_local_tp_rank_ = parallel_args_.rank() % ep_local_tp_size_;
-  num_experts_per_partition_ = model_args.num_experts() / ep_size_;
+  num_experts_per_partition_ = model_args->num_experts() / ep_size_;
   ep_rank_ = parallel_args_.rank() / ep_local_tp_size_;
   start_expert_id_ = ep_rank_ * num_experts_per_partition_;
   end_expert_id_ = start_expert_id_ + num_experts_per_partition_ - 1;
-  n_kv_heads_ = static_cast<int32_t>(model_args.n_kv_heads().value());
+  n_kv_heads_ = static_cast<int32_t>(model_args->n_kv_heads().value());
 
   dp_size_ = parallel_args_.dp_size();
   dp_local_tp_size_ = parallel_args_.world_size() / dp_size_;

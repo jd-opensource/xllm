@@ -17,6 +17,8 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -181,10 +183,10 @@ class DenseMLPTest : public ::testing::Test {
     // Use custom sizes if provided, otherwise use model_args_ values
     int64_t test_hidden_size = (custom_hidden_size > 0)
                                    ? custom_hidden_size
-                                   : model_args_.hidden_size();
+                                   : model_args_->hidden_size();
     int64_t test_intermediate_size = (custom_intermediate_size > 0)
                                          ? custom_intermediate_size
-                                         : model_args_.intermediate_size();
+                                         : model_args_->intermediate_size();
 
     return create_default_test_weights(test_hidden_size,
                                        test_intermediate_size);
@@ -216,7 +218,7 @@ class DenseMLPTest : public ::testing::Test {
     test::verify_precision(actual_output, expected_output_, rtol, atol);
   }
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   QuantArgs quant_args_;
   ParallelArgs parallel_args_{0, 1, nullptr};
   torch::TensorOptions options_;
@@ -286,8 +288,8 @@ TEST_F(DenseMLPTest, Bfloat16LoadStateDictTest) {
 TEST_F(DenseMLPTest, SmoothquantLoadStateDictTest) {
   // Test loading weights into the MLP
   const int64_t batch_size = 16;
-  const int64_t hidden_size = model_args_.hidden_size();
-  const int64_t intermediate_size = model_args_.intermediate_size();
+  const int64_t hidden_size = model_args_->hidden_size();
+  const int64_t intermediate_size = model_args_->intermediate_size();
 
   // Create MLP with default dimensions
   auto mlp = create_mlp(hidden_size, intermediate_size);

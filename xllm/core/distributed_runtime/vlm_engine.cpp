@@ -124,36 +124,37 @@ bool VLMEngine::init_model() {
   tokenizer_ = model_loader->tokenizer();
   CHECK(tokenizer_ != nullptr);
 
-  args_ = model_loader->model_args();
+  model_args_ = model_loader->model_args();
   quant_args_ = model_loader->quant_args();
   tokenizer_args_ = model_loader->tokenizer_args();
 
   // compute the number of local kv heads and head dim
   const int world_size = dp_size_ > 1 ? (dp_local_tp_size_)
                                       : static_cast<int>(worker_clients_num_);
-  const int64_t n_heads = args_.n_heads();
-  const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
+  const int64_t n_heads = model_args_->n_heads();
+  const int64_t n_kv_heads = model_args_->n_kv_heads().value_or(n_heads);
 
   n_local_kv_heads_ = std::max<int64_t>(1, n_kv_heads / world_size);
-  head_dim_ = args_.head_dim();
-  dtype_ = util::parse_dtype(args_.dtype(), options_.devices()[0]);
+  head_dim_ = model_args_->head_dim();
+  dtype_ = util::parse_dtype(model_args_->dtype(), options_.devices()[0]);
 
   // key + value for all layers
   LOG(INFO) << "Block info, block_size: " << options_.block_size()
             << ", n_local_kv_heads: " << n_local_kv_heads_
-            << ", head_dim: " << head_dim_ << ", n_layers: " << args_.n_layers()
+            << ", head_dim: " << head_dim_
+            << ", n_layers: " << model_args_->n_layers()
             << ", dtype: " << dtype_;
 
   const int64_t tokenizer_vocab_size =
       static_cast<int64_t>(tokenizer_->vocab_size());
-  int64_t model_vocab_size = args_.vocab_size();
+  int64_t model_vocab_size = model_args_->vocab_size();
   if (tokenizer_vocab_size != model_vocab_size) {
     // use tokenizer vocab size if model vocab size is not set
     if (model_vocab_size <= 0) {
       LOG(WARNING) << "Model vocab size is not set, using tokenizer vocab "
                       "size: "
                    << tokenizer_vocab_size;
-      args_.vocab_size(tokenizer_vocab_size);
+      model_args_->vocab_size(tokenizer_vocab_size);
     } else if (tokenizer_vocab_size > model_vocab_size) {
       LOG(WARNING) << "Unsafe vocab mismatch: tokenizer: "
                    << tokenizer_vocab_size << ", model: " << model_vocab_size;
@@ -163,7 +164,7 @@ bool VLMEngine::init_model() {
     }
   }
 
-  LOG(INFO) << "Initializing model with " << args_;
+  LOG(INFO) << "Initializing model with " << model_args_;
   LOG(INFO) << "Initializing model with quant args: " << quant_args_;
   LOG(INFO) << "Initializing model with tokenizer args: " << tokenizer_args_;
   LOG(INFO) << "Initializing model with random seed: " << FLAGS_random_seed;
@@ -242,18 +243,19 @@ Engine::KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
   const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
   int64_t slot_size = 0;
   if (options_.enable_mla()) {
-    slot_size = dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
+    slot_size = dtype_size *
+                (model_args_->kv_lora_rank() + model_args_->qk_rope_head_dim());
   } else {
     slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
   }
   kv_cache_cap.slot_size = slot_size;
-  kv_cache_cap.n_layers = args_.n_layers();
+  kv_cache_cap.n_layers = model_args_->n_layers();
 
   // compute kv cache n_blocks
   const int32_t block_size = options_.block_size();
   const int64_t block_size_in_bytes = block_size * slot_size;
   kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
-                          (args_.n_layers() * block_size_in_bytes);
+                          (model_args_->n_layers() * block_size_in_bytes);
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
 
   return kv_cache_cap;
@@ -451,7 +453,7 @@ std::vector<RawForwardInput> VLMEngine::prepare_inputs(
 
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     batched_inputs.emplace_back(std::move(
-        batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
+        batch[dp_rank].prepare_forward_input(model_args_, threadpool_.get())));
     dp_global_token_nums[dp_rank] =
         batched_inputs[dp_rank].flatten_tokens_vec.size();
     if (batch_forward_type.is_empty() &&

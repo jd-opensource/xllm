@@ -93,9 +93,9 @@ class VAEImageProcessorImpl : public torch::nn::Module {
                                  bool do_convert_rgb = false,
                                  bool do_convert_grayscale = false,
                                  int64_t latent_channels = 4) {
-    const auto& model_args = context.get_model_args();
+    const auto model_args = context.get_model_args();
     dtype_ = context.get_tensor_options().dtype().toScalarType();
-    scale_factor_ = 1 << model_args.block_out_channels().size();
+    scale_factor_ = 1 << model_args->block_out_channels().size();
     latent_channels_ = latent_channels;
     do_resize_ = do_resize;
     do_normalize_ = do_normalize;

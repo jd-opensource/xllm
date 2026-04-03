@@ -17,6 +17,8 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -255,24 +257,25 @@ class FusedMoETest : public ::testing::Test {
                             const std::string& hidden_act = "silu",
                             const std::string& scoring_func = "sigmoid",
                             const std::string& topk_method = "noaux_tc") {
-    ModelArgs args = model_args_;
-    args.n_routed_experts() = static_cast<int32_t>(num_experts);
-    args.num_experts_per_tok() = static_cast<int32_t>(top_k);
-    args.n_group() = static_cast<int32_t>(num_expert_group);
-    args.topk_group() = static_cast<int32_t>(topk_group);
-    args.routed_scaling_factor() = static_cast<float>(route_scale);
-    args.hidden_size() = hidden_size;
-    args.moe_intermediate_size() = static_cast<int32_t>(intermediate_size);
-    args.n_shared_experts() = static_cast<int32_t>(n_shared_experts);
-    args.norm_topk_prob() = (renormalize != 0);
-    args.hidden_act() = hidden_act;
-    args.scoring_func() = scoring_func;
-    args.topk_method() = topk_method;
+    std::shared_ptr<ModelArgs> model_args = model_args_;
+    model_args->n_routed_experts() = static_cast<int32_t>(num_experts);
+    model_args->num_experts_per_tok() = static_cast<int32_t>(top_k);
+    model_args->n_group() = static_cast<int32_t>(num_expert_group);
+    model_args->topk_group() = static_cast<int32_t>(topk_group);
+    model_args->routed_scaling_factor() = static_cast<float>(route_scale);
+    model_args->hidden_size() = hidden_size;
+    model_args->moe_intermediate_size() =
+        static_cast<int32_t>(intermediate_size);
+    model_args->n_shared_experts() = static_cast<int32_t>(n_shared_experts);
+    model_args->norm_topk_prob() = (renormalize != 0);
+    model_args->hidden_act() = hidden_act;
+    model_args->scoring_func() = scoring_func;
+    model_args->topk_method() = topk_method;
     const FusedMoEArgs moe_args{
         .is_gated = is_gated,
         .enable_result_reduction = enable_result_reduction};
-    return FusedMoE(
-        FusedMoEImpl(args, moe_args, quant_args_, parallel_args_, options_));
+    return FusedMoE(FusedMoEImpl(
+        model_args, moe_args, quant_args_, parallel_args_, options_));
   }
 
   void set_tp_ctx(int64_t world_size) {
@@ -298,10 +301,10 @@ class FusedMoETest : public ::testing::Test {
     // Use custom sizes if provided, otherwise use model_args_ values
     int64_t test_hidden_size = (custom_hidden_size > 0)
                                    ? custom_hidden_size
-                                   : model_args_.hidden_size();
+                                   : model_args_->hidden_size();
     int64_t test_intermediate_size = (custom_intermediate_size > 0)
                                          ? custom_intermediate_size
-                                         : model_args_.intermediate_size();
+                                         : model_args_->intermediate_size();
 
     return create_default_test_weights(
         num_experts, test_hidden_size, test_intermediate_size);
@@ -333,7 +336,7 @@ class FusedMoETest : public ::testing::Test {
     test::verify_precision(actual_output, expected_output_, rtol, atol);
   }
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   QuantArgs quant_args_;
   ParallelArgs parallel_args_{0, 1, nullptr};
   torch::TensorOptions options_;

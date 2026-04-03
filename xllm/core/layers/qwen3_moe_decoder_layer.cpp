@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
+
 #include "common/global_flags.h"
 #include "layers/common/dp_utils.h"
 
@@ -31,12 +33,13 @@ bool use_moe_all2all(bool enable_deep_ep,
   return enable_deep_ep && all_dp_ranks_are_decode(input_params);
 }
 #endif
-bool is_moe_layer(const ModelArgs& model_args, int32_t layer_id) {
-  const auto& mlp_only_layers = model_args.mlp_only_layers();
+bool is_moe_layer(const std::shared_ptr<ModelArgs>& model_args,
+                  int32_t layer_id) {
+  const auto& mlp_only_layers = model_args->mlp_only_layers();
   return std::count(mlp_only_layers.begin(), mlp_only_layers.end(), layer_id) ==
              0 &&
-         model_args.n_routed_experts() > 0 &&
-         (layer_id + 1) % model_args.decoder_sparse_step() == 0;
+         model_args->n_routed_experts() > 0 &&
+         (layer_id + 1) % model_args->decoder_sparse_step() == 0;
 }
 
 }  // namespace
@@ -65,11 +68,11 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
   // Initialize norm layers
   input_norm_ = register_module(
       "input_layernorm",
-      RMSNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RMSNorm(model_args->hidden_size(), model_args->rms_norm_eps(), options));
 
   post_norm_ = register_module(
       "post_attention_layernorm",
-      RMSNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RMSNorm(model_args->hidden_size(), model_args->rms_norm_eps(), options));
 
   // Initialize mlp
   if (use_moe) {
@@ -81,11 +84,11 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
                                         options));
   } else {
     mlp_ = register_module("mlp",
-                           DenseMLP(model_args.hidden_size(),
-                                    model_args.intermediate_size(),
+                           DenseMLP(model_args->hidden_size(),
+                                    model_args->intermediate_size(),
                                     true,
                                     false,
-                                    model_args.hidden_act(),
+                                    model_args->hidden_act(),
                                     /*enable_result_reduction=*/true,
                                     quant_args,
                                     parallel_args_.tp_group_,

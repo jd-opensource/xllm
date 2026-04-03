@@ -47,22 +47,26 @@ struct OptimizationConfig {
 
 class ModelContext {
  public:
-  ModelContext() : parallel_args_(1, 1, nullptr) {};
+  ModelContext()
+      : model_args_(std::make_shared<ModelArgs>()),
+        parallel_args_(1, 1, nullptr) {};
 
   ModelContext(const ParallelArgs& input_parallel_args,
-               const ModelArgs& model_args,
+               const std::shared_ptr<ModelArgs>& model_args,
                const QuantArgs& quant_args,
                const torch::TensorOptions& tensor_options);
 
 #if defined(USE_NPU)
   ModelContext(const ParallelArgs& input_parallel_args,
-               const ModelArgs& model_args,
+               const std::shared_ptr<ModelArgs>& model_args,
                const QuantArgs& quant_args,
                const torch::TensorOptions& tensor_options,
                atb::Context* context);
 #endif
 
-  const ModelArgs& get_model_args() const { return model_args_; }
+  const std::shared_ptr<ModelArgs>& get_model_args() const {
+    return model_args_;
+  }
 
   const QuantArgs& get_quant_args() const { return quant_args_; }
 
@@ -84,7 +88,7 @@ class ModelContext {
 #endif
 
   void set_image_embedding_mode(bool image_embedding_mode) {
-    model_args_.image_embedding_mode() = image_embedding_mode;
+    model_args_->image_embedding_mode() = image_embedding_mode;
   }
 
   const std::string& get_model_id() const { return model_id_; }
@@ -96,7 +100,7 @@ class ModelContext {
   void derive_optimization_config();
 
   std::string model_id_;  // Model identifier for XTensor multi-model support
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   QuantArgs quant_args_;
   ParallelArgs parallel_args_;
   torch::TensorOptions tensor_options_;

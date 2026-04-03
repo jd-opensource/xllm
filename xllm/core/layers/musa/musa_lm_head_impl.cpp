@@ -24,8 +24,8 @@ namespace xllm {
 namespace layer {
 MUSALmHeadImpl::MUSALmHeadImpl(const ModelContext& context)
     : options_(context.get_tensor_options()),
-      hidden_size_(context.get_model_args().hidden_size()),
-      vocab_size_(context.get_model_args().vocab_size()) {}
+      hidden_size_(context.get_model_args()->hidden_size()),
+      vocab_size_(context.get_model_args()->vocab_size()) {}
 
 void MUSALmHeadImpl::load_state_dict(StateDict const& state_dict) {
   if (state_dict.size() == 0) return;
