@@ -1449,18 +1449,18 @@ struct DecoderOutput {
 class AutoencoderKLQwenImageImpl : public torch::nn::Module {
  public:
   AutoencoderKLQwenImageImpl(const ModelContext& context)
-      : args_(context.get_model_args()),
-        z_dim_(context.get_model_args().z_dim()),
-        temperal_downsample_(context.get_model_args().temperal_downsample()),
-        base_dim_(context.get_model_args().base_dim()),
-        dim_mult_(context.get_model_args().dim_mult()),
-        num_res_blocks_(context.get_model_args().num_res_blocks()),
-        attn_scales_(context.get_model_args().attn_scales()),
-        dropout_(context.get_model_args().dropout()) {
+      : model_args_(context.get_model_args()),
+        z_dim_(model_args_->z_dim()),
+        temperal_downsample_(model_args_->temperal_downsample()),
+        base_dim_(model_args_->base_dim()),
+        dim_mult_(model_args_->dim_mult()),
+        num_res_blocks_(model_args_->num_res_blocks()),
+        attn_scales_(model_args_->attn_scales()),
+        dropout_(model_args_->dropout()) {
     temperal_upsample_ = std::vector<bool>(temperal_downsample_.rbegin(),
                                            temperal_downsample_.rend());
 
-    int64_t input_channels = context.get_model_args().in_channels();
+    int64_t input_channels = model_args_->in_channels();
     encoder_ = register_module("encoder",
                                QwenImageEncoder3d(context,
                                                   base_dim_,
@@ -2024,7 +2024,7 @@ class AutoencoderKLQwenImageImpl : public torch::nn::Module {
   QwenImageCausalConv3d post_quant_conv_{nullptr};
   QwenImageDecoder3d decoder_{nullptr};
 
-  ModelArgs args_;
+  std::shared_ptr<ModelArgs> model_args_;
 };
 
 TORCH_MODULE(AutoencoderKLQwenImage);

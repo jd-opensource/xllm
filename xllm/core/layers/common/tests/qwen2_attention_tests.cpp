@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cmath>
+#include <memory>
 
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -35,16 +36,16 @@ class Qwen2AttentionTest : public ::testing::Test {
     torch::Device device(Device::type_torch(), 0);
     Device xllm_device(device);
     xllm_device.set_seed(42);
-    model_args_.model_type() = "qwen2";
-    model_args_.head_dim() = 128;
-    model_args_.hidden_size() = 1024;
-    model_args_.n_heads() = 16;
-    model_args_.n_kv_heads() = 8;
-    model_args_.max_position_embeddings() = 2048;
-    model_args_.rope_theta() = 1000000.0f;
-    model_args_.rms_norm_eps() = 1e-6f;
-    model_args_.rope_scaling_factor() = 1.0f;
-    model_args_.hidden_act() = "silu";
+    model_args_->model_type() = "qwen2";
+    model_args_->head_dim() = 128;
+    model_args_->hidden_size() = 1024;
+    model_args_->n_heads() = 16;
+    model_args_->n_kv_heads() = 8;
+    model_args_->max_position_embeddings() = 2048;
+    model_args_->rope_theta() = 1000000.0f;
+    model_args_->rms_norm_eps() = 1e-6f;
+    model_args_->rope_scaling_factor() = 1.0f;
+    model_args_->hidden_act() = "silu";
 
     options_ = torch::TensorOptions().dtype(torch::kBFloat16).device(device);
 
@@ -53,8 +54,8 @@ class Qwen2AttentionTest : public ::testing::Test {
     parallel_args_.tp_group_ = process_group_.get();
 
     int64_t block_num = 100;
-    int64_t n_kv_heads = model_args_.n_kv_heads().value();
-    int64_t head_dim = model_args_.head_dim();
+    int64_t n_kv_heads = model_args_->n_kv_heads().value();
+    int64_t head_dim = model_args_->head_dim();
     int64_t block_size = 16;
 
     auto k_cache = MakeNoise("qwen2_attention_test.k_cache",
@@ -70,10 +71,10 @@ class Qwen2AttentionTest : public ::testing::Test {
   }
 
   void InitTestWeights() {
-    int64_t hidden_size = model_args_.hidden_size();
-    int64_t n_heads = model_args_.n_heads();
-    int64_t n_kv_heads = model_args_.n_kv_heads().value();
-    int64_t head_dim = model_args_.head_dim();
+    int64_t hidden_size = model_args_->hidden_size();
+    int64_t n_heads = model_args_->n_heads();
+    int64_t n_kv_heads = model_args_->n_kv_heads().value();
+    int64_t head_dim = model_args_->head_dim();
     int64_t q_size = n_heads * head_dim;
     int64_t kv_size = n_kv_heads * head_dim;
 
@@ -215,7 +216,7 @@ class Qwen2AttentionTest : public ::testing::Test {
     return metadata;
   }
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_ = std::make_shared<ModelArgs>();
   ModelContext context_;
   ParallelArgs parallel_args_{0, 1, nullptr};
   torch::TensorOptions options_;
@@ -231,7 +232,7 @@ TEST_F(Qwen2AttentionTest, PrefillTest) {
   qwen2_attention->load_state_dict(state_dict.get_dict_with_prefix(prefix));
   int64_t batch_size = 2;
   int64_t seq_len = 128;
-  int64_t hidden_size = model_args_.hidden_size();
+  int64_t hidden_size = model_args_->hidden_size();
   int64_t num_tokens = batch_size * seq_len;
 
   auto hidden_states = MakeNoise("qwen2_attention_test.prefill.hidden_states",
@@ -270,7 +271,7 @@ TEST_F(Qwen2AttentionTest, DecodeTest) {
 
   int64_t batch_size = 4;
   int64_t seq_len = 256;
-  int64_t hidden_size = model_args_.hidden_size();
+  int64_t hidden_size = model_args_->hidden_size();
   int64_t num_tokens = batch_size;
 
   auto hidden_states = MakeNoise("qwen2_attention_test.decode.hidden_states",
@@ -318,7 +319,7 @@ TEST_F(Qwen2AttentionTest, MixedSequenceLengthTest) {
     cu_seq_lens.push_back(total_tokens);
   }
 
-  int64_t hidden_size = model_args_.hidden_size();
+  int64_t hidden_size = model_args_->hidden_size();
   auto hidden_states = MakeNoise("qwen2_attention_test.mix.hidden_states",
                                  {total_tokens, hidden_size},
                                  0.02f);
@@ -340,7 +341,7 @@ TEST_F(Qwen2AttentionTest, MixedSequenceLengthTest) {
   metadata.block_table = torch::zeros({seq_lens_size, 1}, options_int);
   metadata.slot_mapping = torch::arange(0, total_tokens, options_int);
   metadata.max_query_len = *std::max_element(seq_lens.begin(), seq_lens.end());
-  metadata.max_seq_len = model_args_.max_position_embeddings();
+  metadata.max_seq_len = model_args_->max_position_embeddings();
   metadata.compute_dtype = "half";
   metadata.is_prefill = true;
   metadata.is_chunked_prefill = false;
@@ -374,11 +375,11 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCachePrefillTest) {
   // Test parameters
   int64_t batch_size = 2;
   int64_t seq_len = 128;
-  int64_t hidden_size = model_args_.hidden_size();
+  int64_t hidden_size = model_args_->hidden_size();
   int64_t num_tokens = batch_size * seq_len;
   int64_t block_num = 100;
-  int64_t n_kv_heads = model_args_.n_kv_heads().value();
-  int64_t head_dim = model_args_.head_dim();
+  int64_t n_kv_heads = model_args_->n_kv_heads().value();
+  int64_t head_dim = model_args_->head_dim();
   int64_t block_size = 16;
 
   // Create INT8 KV cache tensors using seeded tensors for reproducibility
@@ -444,11 +445,11 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheDecodeDiagnosticTest) {
   // Test parameters - use minimal batch size for diagnosis
   int64_t batch_size = 1;
   int64_t seq_len = 16;  // Start with a small sequence length
-  int64_t hidden_size = model_args_.hidden_size();
+  int64_t hidden_size = model_args_->hidden_size();
   int64_t num_tokens = batch_size;
   int64_t block_num = 100;
-  int64_t n_kv_heads = model_args_.n_kv_heads().value();
-  int64_t head_dim = model_args_.head_dim();
+  int64_t n_kv_heads = model_args_->n_kv_heads().value();
+  int64_t head_dim = model_args_->head_dim();
   int64_t block_size = 16;
 
   auto int8_options =
@@ -517,11 +518,11 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheDecodeTest) {
   // Test parameters - match DecodeTest configuration
   int64_t batch_size = 4;
   int64_t seq_len = 256;
-  int64_t hidden_size = model_args_.hidden_size();
+  int64_t hidden_size = model_args_->hidden_size();
   int64_t num_tokens = batch_size;
   int64_t block_num = 100;
-  int64_t n_kv_heads = model_args_.n_kv_heads().value();
-  int64_t head_dim = model_args_.head_dim();
+  int64_t n_kv_heads = model_args_->n_kv_heads().value();
+  int64_t head_dim = model_args_->head_dim();
   int64_t block_size = 16;
 
   // Create INT8 KV cache tensors using seeded tensors for reproducibility
@@ -611,15 +612,15 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheChunkedPrefillTest) {
   int64_t chunk_len = 32;
   int64_t total_seq_len = history_len + chunk_len;
   int64_t max_seq_len = total_seq_len;
-  int64_t hidden_size = model_args_.hidden_size();
+  int64_t hidden_size = model_args_->hidden_size();
   int64_t num_tokens = batch_size * chunk_len;
   int64_t block_size = 16;
   // Calculate required blocks: each batch needs (max_seq_len/block_size) blocks
   int64_t num_blocks_per_req = (max_seq_len + block_size - 1) / block_size + 1;
   int64_t block_num =
       batch_size * num_blocks_per_req + 10;  // Extra blocks for safety
-  int64_t n_kv_heads = model_args_.n_kv_heads().value();
-  int64_t head_dim = model_args_.head_dim();
+  int64_t n_kv_heads = model_args_->n_kv_heads().value();
+  int64_t head_dim = model_args_->head_dim();
 
   // Create INT8 KV cache tensors using seeded tensors for reproducibility
   auto k_cache =

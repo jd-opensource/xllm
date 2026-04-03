@@ -19,15 +19,17 @@ limitations under the License.
 
 #include <algorithm>
 #include <cassert>
+#include <memory>
 
 namespace xllm {
 
-Qwen2_5_VLInputProcessor::Qwen2_5_VLInputProcessor(const ModelArgs& args) {
-  merge_size_ = args.mm_image_merge_size();
-  vision_start_token_id_ = args.vision_start_token_id();
-  vision_end_token_id_ = args.vision_end_token_id();
-  image_token_id_ = args.image_token_id();
-  video_token_id_ = args.video_token_id();
+Qwen2_5_VLInputProcessor::Qwen2_5_VLInputProcessor(
+    const std::shared_ptr<ModelArgs>& model_args) {
+  merge_size_ = model_args->mm_image_merge_size();
+  vision_start_token_id_ = model_args->vision_start_token_id();
+  vision_end_token_id_ = model_args->vision_end_token_id();
+  image_token_id_ = model_args->image_token_id();
+  video_token_id_ = model_args->video_token_id();
 }
 
 void Qwen2_5_VLInputProcessor::process(std::string& prompt,

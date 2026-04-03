@@ -21,6 +21,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <boost/algorithm/string.hpp>
+#include <memory>
 #include <unordered_map>
 
 #include "core/framework/kv_cache/kv_cache.h"
@@ -84,7 +85,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
     std::optional<Glm4VVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
 
-    auto merge_size = model_args_.mm_image_merge_size();
+    auto merge_size = model_args_->mm_image_merge_size();
     MMDict multimodal_embeds;
     if (image_input) {
       // visual
@@ -136,7 +137,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
     auto special_token_ids =
-        torch::tensor({model_args_.image_token_id()},
+        torch::tensor({model_args_->image_token_id()},
                       input_ids.options().dtype(torch::kInt64));
     auto is_multimodal = torch::isin(input_ids, special_token_ids);
     return is_multimodal;
@@ -187,7 +188,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
     // verify
     visual_->verify_loaded_weights("model.visual.");
     visual_->merge_loaded_weights();
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_->image_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
   }
@@ -208,7 +209,7 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
   }
 
  private:
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::TensorOptions options_;
   Glm4VisionTransformer visual_{nullptr};
   Glm4MoeForCausalLM language_model_{nullptr};
@@ -235,7 +236,7 @@ REGISTER_MODEL_ARGS(glm4v_moe, [&] {
   LOAD_ARG_OR(
       eos_token_id_vec, "text_config.eos_token_id", std::vector<int>{151329});
   LOAD_ARG_OR_FUNC(head_dim, "text_config.head_dim", [&] {
-    return args->hidden_size() / args->n_heads();
+    return model_args->hidden_size() / model_args->n_heads();
   });
   LOAD_ARG_OR(attention_bias, "text_config.attention_bias", true);
   LOAD_ARG_OR(attention_dropout, "text_config.attention_dropout", 0.0f);
@@ -286,12 +287,12 @@ REGISTER_MODEL_ARGS(glm4v_moe, [&] {
   LOAD_ARG_OR(mm_spatial_merge_size, "vision_config.spatial_merge_size", 2);
   LOAD_ARG_OR(mm_temporal_patch_size, "vision_config.temporal_patch_size", 2);
   LOAD_ARG_OR_FUNC(mm_head_dim, "head_dim", [&] {
-    return args->mm_hidden_size() / args->mm_num_attention_heads();
+    return model_args->mm_hidden_size() / model_args->mm_num_attention_heads();
   });
 
   SET_ARG(stop_token_ids,
-          std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
-                                      args->eos_token_id_vec().end()));
+          std::unordered_set<int32_t>(model_args->eos_token_id_vec().begin(),
+                                      model_args->eos_token_id_vec().end()));
   SET_ARG(rope_scaling_rope_type, "mrope");
 });
 }  // namespace xllm::npu::model

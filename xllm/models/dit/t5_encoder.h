@@ -43,9 +43,9 @@ class T5LayerNormImpl : public torch::nn::Module {
   explicit T5LayerNormImpl(ModelContext context)
       : device_(context.get_tensor_options().device()),
         dtype_(context.get_tensor_options().dtype().toScalarType()) {
-    ModelArgs model_args = context.get_model_args();
-    int64_t hidden_size = model_args.d_model();
-    variance_epsilon_ = model_args.layer_norm_eps();
+    auto model_args = context.get_model_args();
+    int64_t hidden_size = model_args->d_model();
+    variance_epsilon_ = model_args->layer_norm_eps();
     weight_ = register_parameter(
         "weight", torch::ones({hidden_size}).to(device_).to(dtype_));
   }
@@ -97,22 +97,22 @@ class T5DenseActDenseImpl : public T5DenseInterface {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
     wi_ = register_module("wi",
-                          layer::AddMatmul(model_args.d_model(),
-                                           model_args.d_ff(),
+                          layer::AddMatmul(model_args->d_model(),
+                                           model_args->d_ff(),
                                            /*with_bias=*/false,
                                            options));
     wo_ = register_module("wo",
-                          layer::AddMatmul(model_args.d_ff(),
-                                           model_args.d_model(),
+                          layer::AddMatmul(model_args->d_ff(),
+                                           model_args->d_model(),
                                            /*with_bias=*/false,
                                            options));
 
-    if (model_args.act_fn() == "relu") {
+    if (model_args->act_fn() == "relu") {
       act_ = register_module("act", torch::nn::Functional(torch::relu));
-    } else if (model_args.act_fn() == "gelu_new") {
+    } else if (model_args->act_fn() == "gelu_new") {
       act_ = register_module("act", torch::nn::Functional(gelu_new));
     } else {
-      LOG(FATAL) << "Unsupported activation function: " << model_args.act_fn();
+      LOG(FATAL) << "Unsupported activation function: " << model_args->act_fn();
     }
   }
 
@@ -147,27 +147,27 @@ class T5DenseGatedActDenseImpl : public T5DenseInterface {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
     wi_0_ = register_module("wi_0",
-                            layer::AddMatmul(model_args.d_model(),
-                                             model_args.d_ff(),
+                            layer::AddMatmul(model_args->d_model(),
+                                             model_args->d_ff(),
                                              /*with_bias=*/false,
                                              options));
     wi_1_ = register_module("wi_1",
-                            layer::AddMatmul(model_args.d_model(),
-                                             model_args.d_ff(),
+                            layer::AddMatmul(model_args->d_model(),
+                                             model_args->d_ff(),
                                              /*with_bias=*/false,
                                              options));
     wo_ = register_module("wo",
-                          layer::AddMatmul(model_args.d_ff(),
-                                           model_args.d_model(),
+                          layer::AddMatmul(model_args->d_ff(),
+                                           model_args->d_model(),
                                            /*with_bias=*/false,
                                            options));
 
-    if (model_args.act_fn() == "relu") {
+    if (model_args->act_fn() == "relu") {
       act_ = register_module("act", torch::nn::Functional(torch::relu));
-    } else if (model_args.act_fn() == "gelu_new") {
+    } else if (model_args->act_fn() == "gelu_new") {
       act_ = register_module("act", torch::nn::Functional(gelu_new));
     } else {
-      LOG(FATAL) << "Unsupported activation function: " << model_args.act_fn();
+      LOG(FATAL) << "Unsupported activation function: " << model_args->act_fn();
     }
   }
 
@@ -207,7 +207,7 @@ class T5LayerFFNImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
     layer_norm_ = register_module("layer_norm", T5LayerNorm(context));
-    if (model_args.is_gated_act()) {
+    if (model_args->is_gated_act()) {
       dense_relu_dense_ =
           register_module("DenseReluDense",
                           std::make_shared<T5DenseGatedActDenseImpl>(context));
@@ -279,15 +279,15 @@ class T5AttentionImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
     has_relative_attention_bias_ = has_relative_attention_bias;
-    inner_dim_ = model_args.n_heads() * model_args.d_kv();
+    inner_dim_ = model_args->n_heads() * model_args->d_kv();
 
-    n_heads_ = model_args.n_heads();
-    key_value_proj_dim_ = model_args.d_kv();
-    d_model_ = model_args.d_model();
+    n_heads_ = model_args->n_heads();
+    key_value_proj_dim_ = model_args->d_kv();
+    d_model_ = model_args->d_model();
     relative_attention_num_buckets_ =
-        model_args.relative_attention_num_buckets();
+        model_args->relative_attention_num_buckets();
     relative_attention_max_distance_ =
-        model_args.relative_attention_max_distance();
+        model_args->relative_attention_max_distance();
 
     inner_dim_ = n_heads_ * key_value_proj_dim_;
     q_ = register_module(
@@ -622,11 +622,11 @@ class T5EncoderModelImpl : public torch::nn::Module {
     auto options = context.get_tensor_options();
     embed_tokens_ = register_module(
         "embed_tokens",
-        torch::nn::Embedding(model_args.vocab_size(), model_args.d_model()));
+        torch::nn::Embedding(model_args->vocab_size(), model_args->d_model()));
     embed_tokens_->weight.set_data(embed_tokens_->weight.to(options));
     blocks_ = register_module("blocks", torch::nn::ModuleList{});
-    layers_.reserve(model_args.num_layers());
-    for (int64_t i = 0; i < model_args.num_layers(); ++i) {
+    layers_.reserve(model_args->num_layers());
+    for (int64_t i = 0; i < model_args->num_layers(); ++i) {
       bool has_relative_bias = (i == 0);
       auto block = T5Block(context, has_relative_bias);
       blocks_->push_back(block);

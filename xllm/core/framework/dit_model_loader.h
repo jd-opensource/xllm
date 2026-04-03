@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <vector>
 
 #include "core/framework/model/model_args.h"
@@ -66,7 +67,8 @@ class DiTModelLoader {
   bool has_component(const std::string& component) const;
   std::string model_root_path() const { return model_root_path_; }
 
-  std::unordered_map<std::string, ModelArgs> get_model_args() const;
+  std::unordered_map<std::string, std::shared_ptr<ModelArgs>> get_model_args()
+      const;
   std::unordered_map<std::string, QuantArgs> get_quant_args() const;
 
   std::string get_torch_dtype() const;

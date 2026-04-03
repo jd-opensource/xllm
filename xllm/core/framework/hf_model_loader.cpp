@@ -415,7 +415,8 @@ HFModelLoader::HFModelLoader(const std::string& model_weights_path)
   std::sort(model_weights_files_.begin(), model_weights_files_.end());
 
   threadpool_ = std::make_unique<ThreadPool>(32);
-  if (FLAGS_backend == "rec" && is_onerec_model_type(args_.model_type())) {
+  if (FLAGS_backend == "rec" &&
+      is_onerec_model_type(model_args_->model_type())) {
     CHECK(load_rec_vocab(model_weights_path))
         << "Failed to load rec content from " << model_weights_path;
   }
@@ -481,12 +482,13 @@ int64_t HFModelLoader::get_total_weight_size() const {
   // in the checkpoint, but we need to allocate memory for both during
   // inference. Add the size of word_embedding weight (vocab_size * hidden_size
   // * bytes_per_elem)
-  if (args_.tie_word_embeddings()) {
-    auto scalar_type = try_get_scalar_type_from_string(args_.dtype());
-    CHECK(scalar_type.has_value()) << "Unsupported dtype: " << args_.dtype();
+  if (model_args_->tie_word_embeddings()) {
+    auto scalar_type = try_get_scalar_type_from_string(model_args_->dtype());
+    CHECK(scalar_type.has_value())
+        << "Unsupported dtype: " << model_args_->dtype();
     int64_t bytes_per_elem = torch::elementSize(*scalar_type);
     int64_t embedding_size =
-        args_.vocab_size() * args_.hidden_size() * bytes_per_elem;
+        model_args_->vocab_size() * model_args_->hidden_size() * bytes_per_elem;
     result += embedding_size;
     LOG(INFO) << "tie_word_embeddings is true, adding embedding weight size: "
               << embedding_size << " bytes";
@@ -496,29 +498,30 @@ int64_t HFModelLoader::get_total_weight_size() const {
 }
 
 int64_t HFModelLoader::get_non_decoder_weight_size() const {
-  auto scalar_type = try_get_scalar_type_from_string(args_.dtype());
+  auto scalar_type = try_get_scalar_type_from_string(model_args_->dtype());
   if (!scalar_type.has_value() ||
       (*scalar_type != torch::kFloat16 && *scalar_type != torch::kBFloat16 &&
        *scalar_type != torch::kFloat32 && *scalar_type != torch::kFloat64 &&
        *scalar_type != torch::kInt8)) {
     LOG(WARNING) << "get_non_decoder_weight_size: unsupported dtype "
-                 << args_.dtype() << ", falling back to total_weight_size";
+                 << model_args_->dtype()
+                 << ", falling back to total_weight_size";
     return get_total_weight_size();
   }
   int64_t bytes_per_elem = torch::elementSize(*scalar_type);
 
   // embed_tokens: vocab_size * hidden_size
   int64_t embed_size =
-      args_.vocab_size() * args_.hidden_size() * bytes_per_elem;
+      model_args_->vocab_size() * model_args_->hidden_size() * bytes_per_elem;
 
   // final norm: hidden_size
-  int64_t norm_size = args_.hidden_size() * bytes_per_elem;
+  int64_t norm_size = model_args_->hidden_size() * bytes_per_elem;
 
   // lm_head: vocab_size * hidden_size
   // When tie_word_embeddings=true, lm_head shares the checkpoint weight with
   // embed_tokens, but still gets its own device memory allocation at runtime.
   int64_t lm_head_size =
-      args_.vocab_size() * args_.hidden_size() * bytes_per_elem;
+      model_args_->vocab_size() * model_args_->hidden_size() * bytes_per_elem;
 
   int64_t result = embed_size + norm_size + lm_head_size;
   LOG(INFO) << "get_non_decoder_weight_size: embed=" << embed_size
@@ -529,13 +532,14 @@ int64_t HFModelLoader::get_non_decoder_weight_size() const {
 
 int64_t HFModelLoader::get_max_decoder_layer_weight_size() const {
   constexpr int64_t kInvalidLayerSize = -1;
-  if (args_.n_layers() <= 0) {
+  if (model_args_->n_layers() <= 0) {
     LOG(ERROR) << "Invalid n_layers for decoder size estimation: "
-               << args_.n_layers();
+               << model_args_->n_layers();
     return kInvalidLayerSize;
   }
 
-  std::vector<int64_t> layer_sizes(static_cast<size_t>(args_.n_layers()), 0);
+  std::vector<int64_t> layer_sizes(static_cast<size_t>(model_args_->n_layers()),
+                                   0);
 
   for (const auto& weights_file : model_weights_files_) {
     ScopedMmap mapping;
@@ -582,7 +586,7 @@ int64_t HFModelLoader::get_max_decoder_layer_weight_size() const {
       const std::string tensor_name(tensor_name_cstr);
       int64_t layer_id = -1;
       if (!try_parse_layer_id(tensor_name, &layer_id) || layer_id < 0 ||
-          layer_id >= args_.n_layers()) {
+          layer_id >= model_args_->n_layers()) {
         continue;
       }
 
@@ -635,15 +639,15 @@ int64_t HFModelLoader::get_max_decoder_layer_weight_size() const {
     return kInvalidLayerSize;
   }
 
-  if (observed_layers != args_.n_layers()) {
+  if (observed_layers != model_args_->n_layers()) {
     LOG(WARNING) << "Observed decoder layer sizes for " << observed_layers
-                 << "/" << args_.n_layers()
+                 << "/" << model_args_->n_layers()
                  << " layers while estimating max layer size.";
   }
 
   LOG(INFO) << "get_max_decoder_layer_weight_size: max_layer_size="
             << max_layer_size << ", observed_layers=" << observed_layers << "/"
-            << args_.n_layers();
+            << model_args_->n_layers();
   return max_layer_size;
 }
 
@@ -712,10 +716,11 @@ bool HFModelLoader::load_args(const std::string& model_weights_path) {
   // Some hacky logics to support loading of old models
   // always use float16 for quantization
   // TODO: support quantization for other data types
-  if (!quant_args_.quant_method().empty() && args_.dtype() != "bfloat16") {
-    LOG(WARNING) << "Overwriting dtype from " << args_.dtype()
+  if (!quant_args_.quant_method().empty() &&
+      model_args_->dtype() != "bfloat16") {
+    LOG(WARNING) << "Overwriting dtype from " << model_args_->dtype()
                  << " to float16 for quantization";
-    args_.dtype() = "bfloat16";
+    model_args_->dtype() = "bfloat16";
   }
 
   return true;
@@ -752,7 +757,7 @@ bool HFModelLoader::load_model_args(const std::string& model_weights_path) {
                << resolved_model_type;
     return false;
   }
-  model_args_loader(reader, &args_);
+  model_args_loader(reader, model_args_);
 
   return true;
 }
@@ -893,7 +898,7 @@ bool HFModelLoader::load_tokenizer_args(const std::string& model_weights_path) {
   }
 
   auto tokenizer_args_loader =
-      ModelRegistry::get_tokenizer_args_loader(args_.model_type());
+      ModelRegistry::get_tokenizer_args_loader(model_args_->model_type());
   if (tokenizer_args_loader != nullptr) {
     if (!tokenizer_args_loader(tokenizer_reader, &tokenizer_args_)) {
       LOG(ERROR) << "Failed to load tokenizer args from "
@@ -914,80 +919,80 @@ bool HFModelLoader::load_image_preprocessor_args(
   if (image_preprocess_reader.parse(image_preprocess_file_path)) {
     LOG(INFO) << "Success to parse image preprocess args file: "
               << image_preprocess_file_path;
-    args_.mm_image_do_center_crop() =
+    model_args_->mm_image_do_center_crop() =
         image_preprocess_reader.value_or<bool>("do_center_crop", false);
-    args_.mm_image_crop_height_size() =
+    model_args_->mm_image_crop_height_size() =
         image_preprocess_reader.value_or<int>("crop_size.height", 335);
-    args_.mm_image_crop_width_size() =
+    model_args_->mm_image_crop_width_size() =
         image_preprocess_reader.value_or<int>("crop_size.width", 335);
 
-    args_.mm_image_do_resize() =
+    model_args_->mm_image_do_resize() =
         image_preprocess_reader.value_or<bool>("do_resize", false);
-    args_.mm_image_resize_shortest_edge() =
+    model_args_->mm_image_resize_shortest_edge() =
         image_preprocess_reader.value_or<int>("size.shortest_edge", 335);
-    args_.mm_image_resample() =
+    model_args_->mm_image_resample() =
         image_preprocess_reader.value_or<int>("resample", 335);
 
-    args_.mm_image_do_rescale() =
+    model_args_->mm_image_do_rescale() =
         image_preprocess_reader.value_or<bool>("do_rescale", false);
-    args_.mm_image_rescale_factor() =
+    model_args_->mm_image_rescale_factor() =
         image_preprocess_reader.value_or<double>("rescale_factor", 0);
 
-    args_.mm_image_do_normalize() =
+    model_args_->mm_image_do_normalize() =
         image_preprocess_reader.value_or<bool>("do_normalize", false);
 
     const auto& image_prerocess_data = image_preprocess_reader.data();
     if (image_preprocess_reader.contains("image_mean")) {
-      args_.mm_image_normalize_mean() =
+      model_args_->mm_image_normalize_mean() =
           image_prerocess_data["image_mean"].get<std::vector<double>>();
     }
 
     if (image_preprocess_reader.contains("image_std")) {
-      args_.mm_image_normalize_std() =
+      model_args_->mm_image_normalize_std() =
           image_prerocess_data["image_std"].get<std::vector<double>>();
     }
 
     if (image_preprocess_reader.contains("norm_mean")) {
-      args_.mm_image_normalize_mean() =
+      model_args_->mm_image_normalize_mean() =
           image_prerocess_data["norm_mean"].get<std::vector<double>>();
     }
 
     if (image_preprocess_reader.contains("norm_std")) {
-      args_.mm_image_normalize_std() =
+      model_args_->mm_image_normalize_std() =
           image_prerocess_data["norm_std"].get<std::vector<double>>();
     }
 
-    args_.mm_image_shortest_edge() =
+    model_args_->mm_image_shortest_edge() =
         image_preprocess_reader.value_or<int>("size.shortest_edge", 0);
 
-    args_.mm_image_longest_edge() =
+    model_args_->mm_image_longest_edge() =
         image_preprocess_reader.value_or<int>("size.longest_edge", 0);
 
-    args_.mm_image_min_pixels() =
+    model_args_->mm_image_min_pixels() =
         image_preprocess_reader.value_or<int>("min_pixels", 0);
 
-    args_.mm_image_max_pixels() =
+    model_args_->mm_image_max_pixels() =
         image_preprocess_reader.value_or<int>("max_pixels", 0);
 
-    args_.mm_image_patch_size() =
+    model_args_->mm_image_patch_size() =
         image_preprocess_reader.value_or<int>("patch_size", 0);
 
-    args_.mm_image_temporal_patch_size() =
+    model_args_->mm_image_temporal_patch_size() =
         image_preprocess_reader.value_or<int>("temporal_patch_size", 0);
 
-    args_.mm_image_merge_size() =
+    model_args_->mm_image_merge_size() =
         image_preprocess_reader.value_or<int>("merge_size", 0);
 
-    args_.mm_image_feature_size() =
+    model_args_->mm_image_feature_size() =
         image_preprocess_reader.value_or<int>("image_feature_size", 0);
 
-    args_.mm_scale_resolution() =
+    model_args_->mm_scale_resolution() =
         image_preprocess_reader.value_or<int>("scale_resolution", 0);
 
-    args_.mm_slice_mode() =
+    model_args_->mm_slice_mode() =
         image_preprocess_reader.value_or<bool>("slice_mode", false);
 
-    args_.mm_use_image_id() =
+    model_args_->mm_use_image_id() =
         image_preprocess_reader.value_or<bool>("use_image_id", false);
   }
 
@@ -1004,32 +1009,32 @@ bool HFModelLoader::load_video_preprocessor_args(
     LOG(INFO) << "Success to parse video preprocess args file: "
               << video_preprocess_file_path;
 
-    args_.mm_video_shortest_edge() =
+    model_args_->mm_video_shortest_edge() =
         video_preprocess_reader.value_or<int>("size.shortest_edge", 0);
 
-    args_.mm_video_longest_edge() =
+    model_args_->mm_video_longest_edge() =
         video_preprocess_reader.value_or<int>("size.longest_edge", 0);
 
     const auto& video_prerocess_data = video_preprocess_reader.data();
     if (video_preprocess_reader.contains("image_mean")) {
-      args_.mm_video_normalize_mean() =
+      model_args_->mm_video_normalize_mean() =
           video_prerocess_data["image_mean"].get<std::vector<double>>();
     }
 
     if (video_preprocess_reader.contains("image_std")) {
-      args_.mm_video_normalize_std() =
+      model_args_->mm_video_normalize_std() =
           video_prerocess_data["image_std"].get<std::vector<double>>();
     }
-    args_.mm_video_patch_size() =
+    model_args_->mm_video_patch_size() =
         video_preprocess_reader.value_or<int>("patch_size", 0);
 
-    args_.mm_video_temporal_patch_size() =
+    model_args_->mm_video_temporal_patch_size() =
         video_preprocess_reader.value_or<int>("temporal_patch_size", 0);
 
-    args_.mm_video_merge_size() =
+    model_args_->mm_video_merge_size() =
         video_preprocess_reader.value_or<int>("merge_size", 0);
 
-    args_.mm_video_do_rescale() =
+    model_args_->mm_video_do_rescale() =
         video_preprocess_reader.value_or<bool>("do_rescale", false);
   }
 

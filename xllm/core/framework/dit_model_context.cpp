@@ -25,12 +25,15 @@ limitations under the License.
 #include <torch_npu/csrc/framework/utils/OpPreparation.h>
 #endif
 #include <torch_npu/csrc/libs/init_npu.h>
+
+#include <memory>
 #endif
 
 namespace xllm {
 DiTModelContext::DiTModelContext(
     const ParallelArgs& input_parallel_args,
-    const std::unordered_map<std::string, ModelArgs>& model_args,
+    const std::unordered_map<std::string, std::shared_ptr<ModelArgs>>&
+        model_args,
     const std::unordered_map<std::string, QuantArgs>& quant_args,
     const torch::TensorOptions& tensor_options,
     const DiTCacheConfig& dit_config,
@@ -50,15 +53,15 @@ DiTModelContext::DiTModelContext(
 #endif
 }
 
-const ModelArgs& DiTModelContext::get_model_args(
+const std::shared_ptr<ModelArgs>& DiTModelContext::get_model_args(
     const std::string& component) const {
   const auto& itor = model_args_.find(component);
   if (itor != model_args_.end()) {
     return itor->second;
   } else {
     LOG(FATAL) << "model args not found, component:" << component;
-    static ModelArgs args;
-    return args;
+    static auto model_args = std::make_shared<ModelArgs>();
+    return model_args;
   }
 }
 

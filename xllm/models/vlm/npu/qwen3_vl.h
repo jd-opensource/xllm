@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <atb/atb_infer.h>
 
+#include <memory>
+
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -37,11 +39,11 @@ class Qwen3_VisionPatchEmbedImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    auto in_features = model_args.mm_num_channels() *
-                       model_args.mm_temporal_patch_size() *
-                       model_args.mm_patch_size() * model_args.mm_patch_size();
+    auto in_features =
+        model_args->mm_num_channels() * model_args->mm_temporal_patch_size() *
+        model_args->mm_patch_size() * model_args->mm_patch_size();
 
-    auto out_features = model_args.mm_hidden_size();
+    auto out_features = model_args->mm_hidden_size();
 
     proj_ = register_module(
         "proj",
@@ -133,7 +135,7 @@ class Qwen3_VisionRotaryEmbeddingImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    dim_ = model_args.mm_head_dim() / 2;
+    dim_ = model_args->mm_head_dim() / 2;
     theta_ = 10000.0;
 
     auto opts = options.dtype(torch::kFloat32);
@@ -180,9 +182,9 @@ class Qwen3_VisionPatchMergerImpl : public torch::nn::Module {
     auto options = context.get_tensor_options();
     auto quant_args = context.get_quant_args();
     auto parallel_args = context.get_parallel_args();
-    int64_t d_model = model_args.mm_projection_dim();
-    int context_dim = model_args.mm_hidden_size();
-    int spatial_merge_size = model_args.mm_spatial_merge_size();
+    int64_t d_model = model_args->mm_projection_dim();
+    int context_dim = model_args->mm_hidden_size();
+    int spatial_merge_size = model_args->mm_spatial_merge_size();
     hidden_size_ =
         context_dim * static_cast<int>(std::pow(spatial_merge_size, 2));
     use_postshuffle_norm_ = use_postshuffle_norm;
@@ -311,16 +313,16 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
   Qwen3_VisionTransformerImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
-    hidden_size_ = model_args.mm_hidden_size();
-    num_heads_ = model_args.mm_num_attention_heads();
-    window_size_ = model_args.mm_window_size();
-    patch_size_ = model_args.mm_patch_size();
-    spatial_merge_size_ = model_args.mm_spatial_merge_size();
-    auto& visual_indexes = model_args.mm_deepstack_visual_indexes();
+    hidden_size_ = model_args->mm_hidden_size();
+    num_heads_ = model_args->mm_num_attention_heads();
+    window_size_ = model_args->mm_window_size();
+    patch_size_ = model_args->mm_patch_size();
+    spatial_merge_size_ = model_args->mm_spatial_merge_size();
+    auto& visual_indexes = model_args->mm_deepstack_visual_indexes();
     deepstack_visual_indexes_.insert(deepstack_visual_indexes_.end(),
                                      visual_indexes.begin(),
                                      visual_indexes.end());
-    num_position_embeddings_ = model_args.mm_num_position_embeddings();
+    num_position_embeddings_ = model_args->mm_num_position_embeddings();
     spatial_merge_unit_ =
         static_cast<int>(spatial_merge_size_ * spatial_merge_size_);
     num_grid_per_side_ = static_cast<int>(std::sqrt(num_position_embeddings_));
@@ -341,7 +343,7 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
 
     merger_ = register_module("merger", Qwen3_VisionPatchMerger(context));
 
-    for (int32_t idx = 0; idx < model_args.mm_num_hidden_layers(); idx++) {
+    for (int32_t idx = 0; idx < model_args->mm_num_hidden_layers(); idx++) {
       auto block = Qwen3_VisionBlock(context);
       blocks_->push_back(block);
       layers_.push_back(block);
@@ -670,7 +672,7 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
     prepare_encoder_input(input_params, image_input, video_input);
 
     MMDict multimodal_embeds;
-    auto merge_size = model_args_.mm_image_merge_size();
+    auto merge_size = model_args_->mm_image_merge_size();
     if (image_input) {
       auto [image_embeds, deep_stacks] =
           visual_(image_input->pixel_values.to(options_),
@@ -724,7 +726,7 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
     auto special_token_ids = torch::tensor(
-        {model_args_.image_token_id(), model_args_.video_token_id()},
+        {model_args_->image_token_id(), model_args_->video_token_id()},
         input_ids.options().dtype(torch::kInt64));
     auto is_multimodal = torch::isin(input_ids, special_token_ids);
     return is_multimodal;
@@ -798,7 +800,7 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
     visual_->verify_loaded_weights("model.visual.");
     visual_->merge_loaded_weights();
 
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_->image_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
   }
@@ -819,7 +821,7 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
   }
 
  private:
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::TensorOptions options_;
 
   Qwen3_VisionTransformer visual_{nullptr};
@@ -863,7 +865,7 @@ REGISTER_MODEL_ARGS(qwen3_vl, [&] {
   // LOAD_ARG_OR(use_cache, "use_cache", true);
   LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);
   LOAD_ARG_OR_FUNC(head_dim, "text_config.head_dim", [&] {
-    return args->hidden_size() / args->n_heads();
+    return model_args->hidden_size() / model_args->n_heads();
   });
   // vision_config
   LOAD_ARG_OR(mm_num_hidden_layers, "vision_config.depth", 27);
@@ -882,7 +884,7 @@ REGISTER_MODEL_ARGS(qwen3_vl, [&] {
            "vision_config.deepstack_visual_indexes");
   LOAD_ARG_OR(mm_temporal_patch_size, "vision_config.temporal_patch_size", 2);
   LOAD_ARG_OR_FUNC(mm_head_dim, "head_dim", [&] {
-    return args->mm_hidden_size() / args->mm_num_attention_heads();
+    return model_args->mm_hidden_size() / model_args->mm_num_attention_heads();
   });
 
   LOAD_ARG_OR(

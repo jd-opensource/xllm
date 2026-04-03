@@ -48,22 +48,22 @@ StateDict find_lm_head_state_dict(const StateDict& state_dict) {
 }
 
 bool load_qwen3_5_mtp_model_args(const JsonReader& json,
-                                 ModelArgs* args,
+                                 std::shared_ptr<ModelArgs> model_args,
                                  const std::string& base_model_type,
                                  const std::string& mtp_model_type) {
   auto base_loader = ModelRegistry::get_model_args_loader(base_model_type);
-  if (base_loader == nullptr || base_loader(json, args) == false) {
+  if (base_loader == nullptr || base_loader(json, model_args) == false) {
     return false;
   }
 
-  int32_t mtp_num_layers = args->num_nextn_predict_layers();
+  int32_t mtp_num_layers = model_args->num_nextn_predict_layers();
   if (mtp_num_layers <= 0) {
     mtp_num_layers = 1;
   }
-  args->model_type(mtp_model_type);
-  args->num_nextn_predict_layers(mtp_num_layers);
-  args->n_layers(mtp_num_layers);
-  args->layer_types(std::vector<std::string>(
+  model_args->model_type(mtp_model_type);
+  model_args->num_nextn_predict_layers(mtp_num_layers);
+  model_args->n_layers(mtp_num_layers);
+  model_args->layer_types(std::vector<std::string>(
       static_cast<size_t>(mtp_num_layers), "full_attention"));
   return true;
 }
@@ -77,19 +77,19 @@ class Qwen3_5MtpModelImpl : public Qwen3HybridModelImplBase {
     const auto& model_args = context.get_model_args();
     const auto& options = context.get_tensor_options();
     const int32_t n_layers =
-        std::max<int32_t>(static_cast<int32_t>(model_args.n_layers()), 1);
+        std::max<int32_t>(static_cast<int32_t>(model_args->n_layers()), 1);
 
     pre_fc_norm_embedding_ = register_module(
         "pre_fc_norm_embedding",
         layer::Qwen3NextRMSNorm(
-            model_args.hidden_size(), model_args.rms_norm_eps(), options));
+            model_args->hidden_size(), model_args->rms_norm_eps(), options));
     pre_fc_norm_hidden_ = register_module(
         "pre_fc_norm_hidden",
         layer::Qwen3NextRMSNorm(
-            model_args.hidden_size(), model_args.rms_norm_eps(), options));
+            model_args->hidden_size(), model_args->rms_norm_eps(), options));
     fc_ = register_module("fc",
-                          layer::ReplicatedLinear(model_args.hidden_size() * 2,
-                                                  model_args.hidden_size(),
+                          layer::ReplicatedLinear(model_args->hidden_size() * 2,
+                                                  model_args->hidden_size(),
                                                   /*bias=*/false,
                                                   QuantArgs(),
                                                   options));
@@ -259,15 +259,17 @@ REGISTER_CAUSAL_MODEL(qwen3_5_mtp, Qwen3_5MtpForCausalLM);
 REGISTER_CAUSAL_MODEL(qwen3_5_moe_mtp, Qwen3_5MtpForCausalLM);
 
 REGISTER_MODEL_ARGS_LOADER(qwen3_5_mtp,
-                           [](const JsonReader& json, ModelArgs* args) {
+                           [](const JsonReader& json,
+                              std::shared_ptr<ModelArgs> model_args) {
                              return load_qwen3_5_mtp_model_args(
-                                 json, args, "qwen3_5", "qwen3_5_mtp");
+                                 json, model_args, "qwen3_5", "qwen3_5_mtp");
                            });
 
-REGISTER_MODEL_ARGS_LOADER(qwen3_5_moe_mtp,
-                           [](const JsonReader& json, ModelArgs* args) {
-                             return load_qwen3_5_mtp_model_args(
-                                 json, args, "qwen3_5_moe", "qwen3_5_moe_mtp");
-                           });
+REGISTER_MODEL_ARGS_LOADER(
+    qwen3_5_moe_mtp,
+    [](const JsonReader& json, std::shared_ptr<ModelArgs> model_args) {
+      return load_qwen3_5_mtp_model_args(
+          json, model_args, "qwen3_5_moe", "qwen3_5_moe_mtp");
+    });
 
 }  // namespace xllm

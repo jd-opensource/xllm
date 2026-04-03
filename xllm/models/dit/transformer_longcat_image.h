@@ -58,8 +58,8 @@ class LongCatImageSingleTransformerBlockImpl : public torch::nn::Module {
   explicit LongCatImageSingleTransformerBlockImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
-    auto num_attention_heads = model_args.n_heads();
-    auto attention_head_dim = model_args.head_dim();
+    auto num_attention_heads = model_args->n_heads();
+    auto attention_head_dim = model_args->head_dim();
     auto dim = num_attention_heads * attention_head_dim;
     mlp_hidden_dim_ = dim * 4;  // mlp_ratio = 4.0
 
@@ -206,16 +206,16 @@ class LongCatImageTransformer2DModelImpl : public torch::nn::Module {
   explicit LongCatImageTransformer2DModelImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
     auto model_args = context.get_model_args();
-    auto num_attention_heads = model_args.n_heads();
-    auto attention_head_dim = model_args.head_dim();
+    auto num_attention_heads = model_args->n_heads();
+    auto attention_head_dim = model_args->head_dim();
     auto inner_dim = num_attention_heads * attention_head_dim;
-    auto joint_attention_dim = model_args.joint_attention_dim();
-    auto axes_dims_rope = model_args.axes_dims_rope();
-    auto num_layers = model_args.num_layers();
-    auto num_single_layers = model_args.num_single_layers();
-    auto patch_size = model_args.mm_patch_size();
-    in_channels_ = model_args.in_channels();
-    out_channels_ = model_args.out_channels();
+    auto joint_attention_dim = model_args->joint_attention_dim();
+    auto axes_dims_rope = model_args->axes_dims_rope();
+    auto num_layers = model_args->num_layers();
+    auto num_single_layers = model_args->num_single_layers();
+    auto patch_size = model_args->mm_patch_size();
+    in_channels_ = model_args->in_channels();
+    out_channels_ = model_args->out_channels();
 
     pos_embed_ =
         register_module("pos_embed",

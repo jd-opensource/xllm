@@ -20,6 +20,7 @@ limitations under the License.
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
 #include <iostream>
+#include <memory>
 #include <numeric>
 #include <utility>
 #include <vector>
@@ -171,39 +172,40 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
       device_id_(context.get_tensor_options().device().index()),
       layer_id_(layer_id),
       num_speculative_tokens_(
-          context.get_model_args().num_speculative_tokens()) {
+          context.get_model_args()->num_speculative_tokens()) {
   // compute sm_scale
   // TODO: refactor this code
-  auto args = context.get_model_args();
-  if (boost::iequals(args.rope_scaling_rope_type(), "deepseek_yarn")) {
-    const float attn_scale = args.attn_scalar().value_or(
-        static_cast<float>(args.qk_nope_head_dim() + args.qk_rope_head_dim()));
+  auto model_args = context.get_model_args();
+  if (boost::iequals(model_args->rope_scaling_rope_type(), "deepseek_yarn")) {
+    const float attn_scale =
+        model_args->attn_scalar().value_or(static_cast<float>(
+            model_args->qk_nope_head_dim() + model_args->qk_rope_head_dim()));
     sm_scale_ = 1.0f / std::sqrt(attn_scale);
     float mscale = layer::rotary::yarn_get_mscale(
-        args.rope_scaling_factor(), args.rope_scaling_mscale_all_dim());
+        model_args->rope_scaling_factor(),
+        model_args->rope_scaling_mscale_all_dim());
     sm_scale_ = sm_scale_ * mscale * mscale;
-  } else if (boost::iequals(args.rope_scaling_rope_type(), "mrope")) {
-    sm_scale_ = std::pow(args.head_dim(), -0.5);
+  } else if (boost::iequals(model_args->rope_scaling_rope_type(), "mrope")) {
+    sm_scale_ = std::pow(model_args->head_dim(), -0.5);
   } else {
-    const float attn_scale =
-        args.attn_scalar().value_or(static_cast<float>(args.head_dim()));
+    const float attn_scale = model_args->attn_scalar().value_or(
+        static_cast<float>(model_args->head_dim()));
     sm_scale_ = 1.0f / std::sqrt(attn_scale);
   }
 
   auto parallel_args = context.get_parallel_args();
-  auto model_args = context.get_model_args();
   auto options = context.get_tensor_options();
 
   rank_ = parallel_args.rank();
-  first_k_dense_replace_ = model_args.first_k_dense_replace();
-  n_layers_ = model_args.n_layers();
-  num_experts_ = model_args.n_routed_experts();
+  first_k_dense_replace_ = model_args->first_k_dense_replace();
+  n_layers_ = model_args->n_layers();
+  num_experts_ = model_args->n_routed_experts();
   localWorldSize_ = parallel_args.mapping().localWorldSize();
   ep_size_ = parallel_args.ep_size();
   ep_local_tp_size_ = parallel_args.world_size() / ep_size_;
   CHECK_EQ(parallel_args.world_size(), ep_size_ * ep_local_tp_size_);
   ep_local_tp_rank_ = parallel_args.rank() % ep_local_tp_size_;
-  num_experts_per_partition_ = model_args.n_routed_experts() / ep_size_;
+  num_experts_per_partition_ = model_args->n_routed_experts() / ep_size_;
   redundant_experts_num_ = FLAGS_redundant_experts_num;
   if (FLAGS_enable_eplb) {
     num_experts_per_partition_ += redundant_experts_num_;
@@ -275,24 +277,24 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_tensors(
 
 void NpuDeepseekV32DecoderLayerImpl::param_from_args(
     atb_speed::deepseekV2::DecoderLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& model_args,
     const ParallelArgs& parallel_args,
     bool is_prefill) {
-  initialize_basic_parameters(param, args, parallel_args, is_prefill);
-  initialize_attention_parameters(param, args, parallel_args);
-  initialize_mlp_parameters(param, args, parallel_args);
+  initialize_basic_parameters(param, model_args, parallel_args, is_prefill);
+  initialize_attention_parameters(param, model_args, parallel_args);
+  initialize_mlp_parameters(param, model_args, parallel_args);
   initialize_parallel_parameters(param, parallel_args);
   initialize_quantization_parameters(param);
 }
 
 void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
     atb_speed::deepseekV2::DecoderLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& model_args,
     const ParallelArgs& parallel_args,
     bool is_prefill) {
   param.isFA = false;
   param.isPrefill = is_prefill;
-  param.isBF16 = args.dtype() == "bfloat16";
+  param.isBF16 = model_args->dtype() == "bfloat16";
   param.enableSwiGLU = true;
   param.enableLcoc = true;
   // TODO: modify xllm_atb_layers
@@ -300,15 +302,17 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
   param.attnLinearTransposeType = {1, 1, 1, 1, 1, 1};
   param.mlpLinearTransposeType = {1, -1, 1, -1};
 
-  param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
-                                     ? std::vector<int>{-1, -1, -1, -1}
-                                     : std::vector<int>{1, 0, -1, 1};
+  param.moeLinearTransposeType =
+      (layer_id_ < model_args->first_k_dense_replace())
+          ? std::vector<int>{-1, -1, -1, -1}
+          : std::vector<int>{1, 0, -1, 1};
 
   param.worldSize = parallel_args.world_size();
-  param.normEps = args.rms_norm_eps();
-  param.numAttentionHeadsPerRank = args.n_heads() / dp_local_tp_size_;
-  param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
-  std::optional<long int> optionalValue = args.n_kv_heads();
+  param.normEps = model_args->rms_norm_eps();
+  param.numAttentionHeadsPerRank = model_args->n_heads() / dp_local_tp_size_;
+  param.hiddenSizePerAttentionHead =
+      model_args->hidden_size() / model_args->n_heads();
+  std::optional<long int> optionalValue = model_args->n_kv_heads();
   param.numKeyValueHeadsPerRank = 1;
   // static_cast<int>(optionalValue.value()) / param.worldSize;
   param.rank = parallel_args.rank();
@@ -316,7 +320,7 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
   param.rankTableFile = FLAGS_rank_tablefile;
 
   param.layerId = layer_id_;
-  param.numHiddenLayers = args.n_layers();
+  param.numHiddenLayers = model_args->n_layers();
   param.enableIntraLayerAddNorm = true;
   param.enableInterLayerAddNorm = false;
   if (quantize_type_ == "") {
@@ -333,30 +337,31 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
   }
   param.maskfree = true;  // TODO
   param.enableSwiGLUQuantForSharedExperts = false;
-  num_key_value_heads_ = static_cast<int>(args.n_kv_heads().value());
-  qk_nope_head_dim_ = args.qk_nope_head_dim();
-  v_head_dim_ = args.v_head_dim();
-  kv_lora_rank_ = args.kv_lora_rank();
-  qk_rope_head_dim_ = args.qk_rope_head_dim();
+  num_key_value_heads_ = static_cast<int>(model_args->n_kv_heads().value());
+  qk_nope_head_dim_ = model_args->qk_nope_head_dim();
+  v_head_dim_ = model_args->v_head_dim();
+  kv_lora_rank_ = model_args->kv_lora_rank();
+  qk_rope_head_dim_ = model_args->qk_rope_head_dim();
 }
 
 void NpuDeepseekV32DecoderLayerImpl::initialize_attention_parameters(
     atb_speed::deepseekV2::DecoderLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& model_args,
     const ParallelArgs& parallel_args) {
-  param.qLoraRank = args.q_lora_rank();
+  param.qLoraRank = model_args->q_lora_rank();
   // NOTE: The operation in this conditional is theoretically compatible with
   // DeepSeek, but we add this specific check to ensure DeepSeek behavior
   // remains unchanged
-  if (args.model_type() != "kimi_k2") {
-    param.headNum = args.n_heads();
+  if (model_args->model_type() != "kimi_k2") {
+    param.headNum = model_args->n_heads();
   }
-  param.qkNopeHeadDim = args.qk_nope_head_dim();
-  param.qkRopeHeadDim = args.qk_rope_head_dim();
-  param.kvLoraRank = args.kv_lora_rank();
+  param.qkNopeHeadDim = model_args->qk_nope_head_dim();
+  param.qkRopeHeadDim = model_args->qk_rope_head_dim();
+  param.kvLoraRank = model_args->kv_lora_rank();
   param.softmaxScale = sm_scale_;
   // not support in glm_moe_dsa
-  if (quantize_type_ == "w8a8_dynamic" && args.model_type() != "glm_moe_dsa") {
+  if (quantize_type_ == "w8a8_dynamic" &&
+      model_args->model_type() != "glm_moe_dsa") {
     param.enableMlaPreprocess = true;
   } else {
     param.enableMlaPreprocess = false;
@@ -365,20 +370,20 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_attention_parameters(
   param.enableFA3 = false;           // TODO
   param.isNzCache = false;           // TODO
   param.enableKvQuantLayer = false;  // TODO
-  param.index_head_dim = args.index_head_dim();
-  param.index_n_heads = args.index_n_heads();
-  param.index_topk = args.index_topk();
+  param.index_head_dim = model_args->index_head_dim();
+  param.index_n_heads = model_args->index_n_heads();
+  param.index_topk = model_args->index_topk();
 }
 
 void NpuDeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
     atb_speed::deepseekV2::DecoderLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& model_args,
     const ParallelArgs& parallel_args) {
-  param.hasSharedExpert = (args.n_shared_experts() > 0);
+  param.hasSharedExpert = (model_args->n_shared_experts() > 0);
   param.hasSharedExpertGate = false;
   param.processLogits = "normScaling";
-  param.routedScalingFactor = args.routed_scaling_factor();
-  param.numOfSelectedExperts = {args.num_experts_per_tok()};
+  param.routedScalingFactor = model_args->routed_scaling_factor();
+  param.numOfSelectedExperts = {model_args->num_experts_per_tok()};
 
   if (ep_size_ > 1) {
     param.expertParallelDegree = std::max(FLAGS_expert_parallel_degree, 1);
@@ -387,18 +392,18 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
   }
 
   param.deviceExpert.resize(num_experts_per_partition_);
-  // param.deviceExpert.resize(args.n_routed_experts());
+  // param.deviceExpert.resize(model_args->n_routed_experts());
   std::iota(
       param.deviceExpert.begin(), param.deviceExpert.end(), start_expert_id_);
-  param.numOfExperts = args.n_routed_experts();
+  param.numOfExperts = model_args->n_routed_experts();
   param.numOfDeviceExperts = num_experts_per_partition_;
   param.maskStartIdx = 0;
-  param.firstKDenseReplace = args.first_k_dense_replace();
-  // param.numOfSharedExperts = args.n_shared_experts();
+  param.firstKDenseReplace = model_args->first_k_dense_replace();
+  // param.numOfSharedExperts = model_args->n_shared_experts();
   param.numOfSharedExperts = 2;
   param.routingMethod = "noAuxTc";
-  param.numOfGroups = args.n_group();
-  param.topkGroups = atb::SVector<int>{args.topk_group()};
+  param.numOfGroups = model_args->n_group();
+  param.topkGroups = atb::SVector<int>{model_args->topk_group()};
   param.isDynamicEp = param.expertParallelDegree == 2 ? true : false;
 
   param.quantGroupSize = 0;

@@ -40,7 +40,7 @@ namespace xllm {
 class OneRecModelImpl : public torch::nn::Module {
  public:
   explicit OneRecModelImpl(const ModelContext& context) {
-    hidden_size_ = context.get_model_args().hidden_size();
+    hidden_size_ = context.get_model_args()->hidden_size();
     options_ = context.get_tensor_options();
     shared_ = register_module("shared", layer::WordEmbedding(context));
   }
@@ -239,10 +239,11 @@ REGISTER_MODEL_ARGS(onerec, [&] {
 
   LOAD_ARG_OR(n_heads, "num_heads", 4);
   LOAD_ARG_OR(head_dim, "d_kv", 32);
+  LOAD_ARG_OR_FUNC(decoder_n_heads, "decoder_num_heads", [&] {
+    return model_args->n_heads();
+  });
   LOAD_ARG_OR_FUNC(
-      decoder_n_heads, "decoder_num_heads", [&] { return args->n_heads(); });
-  LOAD_ARG_OR_FUNC(
-      decoder_head_dim, "decoder_d_kv", [&] { return args->head_dim(); });
+      decoder_head_dim, "decoder_d_kv", [&] { return model_args->head_dim(); });
 
   LOAD_ARG(n_kv_heads, "num_key_value_heads");
   LOAD_ARG(decoder_n_kv_heads, "decoder_num_key_value_heads");
@@ -270,12 +271,13 @@ REGISTER_MODEL_ARGS(onerec, [&] {
       relative_attention_max_distance, "relative_attention_max_distance", 128);
   LOAD_ARG_OR(bos_token_id, "bos_token_id", 0);
   LOAD_ARG_OR(eos_token_id, "eos_token_id", 128001);
-  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
+  SET_ARG(stop_token_ids,
+          std::unordered_set<int32_t>({model_args->eos_token_id()}));
 });
 
 REGISTER_TOKENIZER_ARGS(onerec, [&] {
-  SET_ARG(tokenizer_type, "rec");
-  LOAD_ARG_OR(vocab_file, "vocab_file", "");
+  SET_TOKENIZER_ARG(tokenizer_type, "rec");
+  LOAD_TOKENIZER_ARG_OR(vocab_file, "vocab_file", "");
 });
 
 }  // namespace xllm

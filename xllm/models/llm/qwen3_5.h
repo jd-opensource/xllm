@@ -30,7 +30,7 @@ class Qwen3_5ModelImpl : public Qwen3NextModelImpl {
  public:
   explicit Qwen3_5ModelImpl(const ModelContext& context)
       : Qwen3NextModelImpl(context, /*init_decoder_layers=*/false) {
-    const int32_t n_layers = context.get_model_args().n_layers();
+    const int32_t n_layers = context.get_model_args()->n_layers();
     for (int32_t layer_id = 0; layer_id < n_layers; ++layer_id) {
       add_decoder_layer(
           std::make_shared<layer::Qwen3_5DecoderLayerImpl>(context, layer_id));
@@ -50,20 +50,22 @@ TORCH_MODULE(Qwen3_5ForCausalLM);
 
 #define LOAD_ARG_TEXT_OR_ROOT(arg_name, json_key, default_value) \
   LOAD_ARG_OR(arg_name, "text_config." json_key, default_value); \
-  LOAD_ARG_OR(arg_name, json_key, args->arg_name())
+  LOAD_ARG_OR(arg_name, json_key, model_args->arg_name())
 
 #define LOAD_ARG_TEXT_OR_ROOT_CHAIN(arg_name, json_key, default_value) \
   LOAD_ARG_TEXT_OR_ROOT(arg_name, json_key, default_value)
 
-#define LOAD_QWEN3_5_ROPE_ARG(arg_name, default_value)                       \
-  LOAD_ARG_OR(arg_name, "text_config." #arg_name, default_value);            \
-  LOAD_ARG_OR(arg_name, #arg_name, args->arg_name());                        \
-  LOAD_ARG_OR(                                                               \
-      arg_name, "text_config.rope_scaling." #arg_name, args->arg_name());    \
-  LOAD_ARG_OR(arg_name, "rope_scaling." #arg_name, args->arg_name());        \
-  LOAD_ARG_OR(                                                               \
-      arg_name, "text_config.rope_parameters." #arg_name, args->arg_name()); \
-  LOAD_ARG_OR(arg_name, "rope_parameters." #arg_name, args->arg_name())
+#define LOAD_QWEN3_5_ROPE_ARG(arg_name, default_value)                      \
+  LOAD_ARG_OR(arg_name, "text_config." #arg_name, default_value);           \
+  LOAD_ARG_OR(arg_name, #arg_name, model_args->arg_name());                 \
+  LOAD_ARG_OR(arg_name,                                                     \
+              "text_config.rope_scaling." #arg_name,                        \
+              model_args->arg_name());                                      \
+  LOAD_ARG_OR(arg_name, "rope_scaling." #arg_name, model_args->arg_name()); \
+  LOAD_ARG_OR(arg_name,                                                     \
+              "text_config.rope_parameters." #arg_name,                     \
+              model_args->arg_name());                                      \
+  LOAD_ARG_OR(arg_name, "rope_parameters." #arg_name, model_args->arg_name())
 
 #define LOAD_QWEN3_5_NEXT_COMPAT_ARGS(default_moe_intermediate_size,           \
                                       default_num_experts,                     \
@@ -93,8 +95,9 @@ TORCH_MODULE(Qwen3_5ForCausalLM);
                         default_num_experts_per_tok);                          \
   LOAD_ARG_TEXT_OR_ROOT(n_layers, "num_hidden_layers", 48);                    \
   LOAD_ARG_OR(n_kv_heads, "text_config.num_key_value_heads", 2);               \
-  LOAD_ARG_OR(                                                                 \
-      n_kv_heads, "num_key_value_heads", args->n_kv_heads().value_or(2));      \
+  LOAD_ARG_OR(n_kv_heads,                                                      \
+              "num_key_value_heads",                                           \
+              model_args->n_kv_heads().value_or(2));                           \
   LOAD_ARG_TEXT_OR_ROOT(output_router_logits, "output_router_logits", false);  \
   LOAD_ARG_TEXT_OR_ROOT(rms_norm_eps, "rms_norm_eps", 1e-6);                   \
   LOAD_QWEN3_5_ROPE_ARG(rope_theta, 10000000.0f);                              \
@@ -121,39 +124,42 @@ TORCH_MODULE(Qwen3_5ForCausalLM);
       num_nextn_predict_layers, "text_config.mtp_num_hidden_layers", 0);       \
   LOAD_ARG_OR(num_nextn_predict_layers,                                        \
               "mtp_num_hidden_layers",                                         \
-              args->num_nextn_predict_layers());                               \
+              model_args->num_nextn_predict_layers());                         \
   LOAD_ARG_OR(num_nextn_predict_layers,                                        \
               "text_config.num_nextn_predict_layers",                          \
-              args->num_nextn_predict_layers());                               \
+              model_args->num_nextn_predict_layers());                         \
   LOAD_ARG_OR(num_nextn_predict_layers,                                        \
               "num_nextn_predict_layers",                                      \
-              args->num_nextn_predict_layers());                               \
+              model_args->num_nextn_predict_layers());                         \
   LOAD_ARG_OR(                                                                 \
       layer_types, "text_config.layer_types", std::vector<std::string>());     \
-  LOAD_ARG_OR(layer_types, "layer_types", args->layer_types());                \
+  LOAD_ARG_OR(layer_types, "layer_types", model_args->layer_types());          \
+  LOAD_ARG_OR(layer_types,                                                     \
+              "text_config.layers_block_type",                                 \
+              model_args->layer_types());                                      \
+  LOAD_ARG_OR(layer_types, "layers_block_type", model_args->layer_types());    \
+  LOAD_ARG_OR(n_routed_experts,                                                \
+              "text_config.n_routed_experts",                                  \
+              model_args->num_experts());                                      \
   LOAD_ARG_OR(                                                                 \
-      layer_types, "text_config.layers_block_type", args->layer_types());      \
-  LOAD_ARG_OR(layer_types, "layers_block_type", args->layer_types());          \
-  LOAD_ARG_OR(                                                                 \
-      n_routed_experts, "text_config.n_routed_experts", args->num_experts());  \
-  LOAD_ARG_OR(n_routed_experts, "n_routed_experts", args->num_experts());      \
+      n_routed_experts, "n_routed_experts", model_args->num_experts());        \
   SET_ARG(n_shared_experts,                                                    \
-          args->shared_expert_intermediate_size() > 0 ? 1 : 0);                \
+          model_args->shared_expert_intermediate_size() > 0 ? 1 : 0);          \
   SET_ARG(scoring_func, "softmax");                                            \
   SET_ARG(topk_method, "");                                                    \
   SET_ARG(n_group, -1);                                                        \
   SET_ARG(topk_group, 0);                                                      \
   SET_ARG(routed_scaling_factor, 1.0f);                                        \
   SET_ARG(stop_token_ids,                                                      \
-          std::unordered_set<int32_t>({args->eos_token_id()}));                \
+          std::unordered_set<int32_t>({model_args->eos_token_id()}));                \
   LOAD_ARG_TEXT_OR_ROOT(mamba_ssm_dtype, "mamba_ssm_dtype", "float32")
 
 #define LOAD_QWEN3_5_TYPE_AND_DTYPE(default_model_type)         \
   LOAD_ARG_OR(model_type, "model_type", default_model_type);    \
   LOAD_ARG_OR(dtype, "text_config.dtype", "bfloat16");          \
-  LOAD_ARG_OR(dtype, "dtype", args->dtype());                   \
-  LOAD_ARG_OR(dtype, "text_config.torch_dtype", args->dtype()); \
-  LOAD_ARG_OR(dtype, "torch_dtype", args->dtype())
+  LOAD_ARG_OR(dtype, "dtype", model_args->dtype());                   \
+  LOAD_ARG_OR(dtype, "text_config.torch_dtype", model_args->dtype()); \
+  LOAD_ARG_OR(dtype, "torch_dtype", model_args->dtype())
 
 REGISTER_CAUSAL_MODEL(qwen3_5, Qwen3_5ForCausalLM);
 REGISTER_MODEL_ARGS(qwen3_5, [&] {

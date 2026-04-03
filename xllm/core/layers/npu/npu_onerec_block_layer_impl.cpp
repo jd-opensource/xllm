@@ -591,10 +591,12 @@ NpuOneRecBlockLayerImpl::NpuOneRecBlockLayerImpl(const ModelContext& context,
                                                  bool is_decoder,
                                                  int32_t layer_id)
     : BaseLayer(context), is_decoder_(is_decoder), layer_id_(layer_id) {
-  const auto& args = context.get_model_args();
+  const auto model_args = context.get_model_args();
   const auto& parallel_args = context.get_parallel_args();
-  param_from_args(prefill_param_, args, parallel_args, /*is_prefill=*/true);
-  param_from_args(decode_param_, args, parallel_args, /*is_prefill=*/false);
+  param_from_args(
+      prefill_param_, model_args, parallel_args, /*is_prefill=*/true);
+  param_from_args(
+      decode_param_, model_args, parallel_args, /*is_prefill=*/false);
 
   const int32_t weight_count = prefill_param_.use_moe
                                    ? kOneRecMoeWeightCountPerLayer
@@ -608,11 +610,12 @@ NpuOneRecBlockLayerImpl::NpuOneRecBlockLayerImpl(const ModelContext& context,
 
   auto placeholder_tensor = torch::empty({1, 1}, torch::kInt32).to(device_);
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(placeholder_tensor);
-  at_placeholder_ = torch::empty({1, args.hidden_size()}, dtype_).to(device_);
+  at_placeholder_ =
+      torch::empty({1, model_args->hidden_size()}, dtype_).to(device_);
 
   for (int32_t i = 0; i < weight_count; ++i) {
-    at_weight_tensors_[i] =
-        torch::zeros({1, args.hidden_size()}).to(context.get_tensor_options());
+    at_weight_tensors_[i] = torch::zeros({1, model_args->hidden_size()})
+                                .to(context.get_tensor_options());
   }
 
   if (prefill_param_.use_moe) {
@@ -625,7 +628,7 @@ NpuOneRecBlockLayerImpl::NpuOneRecBlockLayerImpl(const ModelContext& context,
 
 void NpuOneRecBlockLayerImpl::param_from_args(
     atb_speed::onerec::BlockLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& model_args,
     const ParallelArgs& parallel_args,
     bool is_prefill,
     const ModelInputParams* input_params) {
@@ -633,7 +636,7 @@ void NpuOneRecBlockLayerImpl::param_from_args(
 
   param.isFA = false;
   param.isPrefill = is_prefill;
-  param.isBF16 = args.dtype() == "bfloat16";
+  param.isBF16 = model_args->dtype() == "bfloat16";
   param.isPack = true;
   param.supportSwiGLU = true;
   param.supportLcoc = is_prefill;
@@ -655,18 +658,19 @@ void NpuOneRecBlockLayerImpl::param_from_args(
   param.quantGroupSize = 64;
 
   const int64_t args_n_heads =
-      is_decoder_ ? args.decoder_n_heads() : args.n_heads();
+      is_decoder_ ? model_args->decoder_n_heads() : model_args->n_heads();
   const int64_t args_head_dim =
-      is_decoder_ ? args.decoder_head_dim() : args.head_dim();
+      is_decoder_ ? model_args->decoder_head_dim() : model_args->head_dim();
   param.numAttentionHeadsPerRank = args_n_heads / param.worldSize;
   param.hiddenSizePerAttentionHead = args_head_dim;
 
   std::optional<int64_t> optional_value =
-      is_decoder_ ? args.decoder_n_kv_heads().value_or(args.decoder_n_heads())
-                  : args.n_kv_heads().value_or(args.n_heads());
+      is_decoder_ ? model_args->decoder_n_kv_heads().value_or(
+                        model_args->decoder_n_heads())
+                  : model_args->n_kv_heads().value_or(model_args->n_heads());
   param.numKeyValueHeadsPerRank =
       static_cast<int>(optional_value.value()) / param.worldSize;
-  param.rmsNormEps = args.rms_norm_eps();
+  param.rmsNormEps = model_args->rms_norm_eps();
 
   param.seqLen = {};
   param.tokenOffset = {};
@@ -689,7 +693,7 @@ void NpuOneRecBlockLayerImpl::param_from_args(
         static_cast<int>(atb_speed::common::LinearDesc::FLOAT16_DESC)};
   }
 
-  param.use_moe = args.use_moe() && is_decoder_;
+  param.use_moe = model_args->use_moe() && is_decoder_;
   if (param.use_moe) {
     ep_size_ = 1;
     const int32_t ep_rank = 0;
@@ -697,22 +701,23 @@ void NpuOneRecBlockLayerImpl::param_from_args(
     CHECK_EQ(parallel_args.world_size(), ep_size_ * ep_local_tp_size_);
     ep_local_tp_rank_ = parallel_args.rank() % ep_local_tp_size_;
 
-    num_experts_per_partition_ = args.n_routed_experts() / ep_size_;
+    num_experts_per_partition_ = model_args->n_routed_experts() / ep_size_;
     start_expert_id_ = ep_rank * num_experts_per_partition_;
     end_expert_id_ = start_expert_id_ + num_experts_per_partition_ - 1;
 
     resize_experts_weights(num_experts_per_partition_);
 
     param.moe_config = std::make_unique<atb_speed::onerec::OneRecMoEConfig>();
-    param.moe_config->moe_topk = args.num_experts_per_tok();
-    param.moe_config->moe_num_experts = args.n_routed_experts();
+    param.moe_config->moe_topk = model_args->num_experts_per_tok();
+    param.moe_config->moe_num_experts = model_args->n_routed_experts();
     param.moe_config->moe_score_func = "softmax";
-    param.moe_config->moe_route_scale = args.moe_route_scale();
-    param.moe_config->moe_inter_dim = args.moe_intermediate_size();
+    param.moe_config->moe_route_scale = model_args->moe_route_scale();
+    param.moe_config->moe_inter_dim = model_args->moe_intermediate_size();
     param.moe_config->use_bf16 = param.isBF16;
     param.moe_config->hasSharedExpertGate = false;
-    param.moe_config->moe_use_shared_experts = args.moe_use_shared_experts();
-    param.moe_config->moe_num_shared_experts = args.n_shared_experts();
+    param.moe_config->moe_use_shared_experts =
+        model_args->moe_use_shared_experts();
+    param.moe_config->moe_num_shared_experts = model_args->n_shared_experts();
 
     param.moeLinearQuantType = {atb_speed::common::LinearType::FP,
                                 atb_speed::common::LinearType::FP,

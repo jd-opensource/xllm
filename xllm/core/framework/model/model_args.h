@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -447,23 +448,26 @@ struct ModelArgs {
 
 // Qwen hybrid models may describe full-attention layers explicitly via
 // layer_types or implicitly via full_attention_interval.
-inline bool is_full_attention_layer(const ModelArgs& args, int64_t layer_id) {
-  const auto& hybrid_layer_types = args.layer_types();
+inline bool is_full_attention_layer(
+    const std::shared_ptr<ModelArgs>& model_args,
+    int64_t layer_id) {
+  const auto& hybrid_layer_types = model_args->layer_types();
   if (layer_id >= 0 &&
       layer_id < static_cast<int64_t>(hybrid_layer_types.size())) {
     const auto& layer_type = hybrid_layer_types[layer_id];
     return layer_type == "full_attention" || layer_type == "attention";
   }
 
-  int32_t attention_interval = args.full_attention_interval();
+  int32_t attention_interval = model_args->full_attention_interval();
   if (attention_interval <= 1) {
     return true;
   }
   return (layer_id + 1) % attention_interval == 0;
 }
 
-inline bool has_linear_attention_layers(const ModelArgs& args) {
-  const auto& hybrid_layer_types = args.layer_types();
+inline bool has_linear_attention_layers(
+    const std::shared_ptr<ModelArgs>& model_args) {
+  const auto& hybrid_layer_types = model_args->layer_types();
   if (!hybrid_layer_types.empty()) {
     return std::any_of(hybrid_layer_types.begin(),
                        hybrid_layer_types.end(),
@@ -472,219 +476,225 @@ inline bool has_linear_attention_layers(const ModelArgs& args) {
                                 layer_type != "attention";
                        });
   }
-  return args.full_attention_interval() > 1;
+  return model_args->full_attention_interval() > 1;
 }
 
-inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {
-  os << "ModelArgs: [model_type: " << args.model_type();
-  os << ", image_embedding_mode: " << args.image_embedding_mode();
-  os << ", dtype: " << args.dtype();
-  os << ", hidden_size: " << args.hidden_size();
-  os << ", hidden_act: " << args.hidden_act();
-  os << ", intermediate_size: " << args.intermediate_size();
-  os << ", n_layers: " << args.n_layers();
-  os << ", n_encoder_layers: " << args.n_encoder_layers();
-  os << ", head_dim: " << args.head_dim();
-  os << ", decoder_head_dim: " << args.decoder_head_dim();
-  os << ", n_heads: " << args.n_heads();
-  os << ", decoder_n_heads: " << args.decoder_n_heads();
-  os << ", n_kv_heads: " << args.n_kv_heads().value_or(-1);
-  os << ", decoder_n_kv_heads: " << args.decoder_n_kv_heads().value_or(-1);
-  os << ", vocab_size: " << args.vocab_size();
-  os << ", rms_norm_eps: " << args.rms_norm_eps();
-  os << ", layer_norm_eps: " << args.layer_norm_eps();
-  os << ", rotary_dim: " << args.rotary_dim();
-  os << ", rope_theta: " << args.rope_theta();
-  os << ", rope_scaling_rope_type: " << args.rope_scaling_rope_type();
-  os << ", rope_scaling_factor: " << args.rope_scaling_factor();
+inline std::ostream& operator<<(std::ostream& os,
+                                const std::shared_ptr<ModelArgs>& model_args) {
+  os << "ModelArgs: [model_type: " << model_args->model_type();
+  os << ", image_embedding_mode: " << model_args->image_embedding_mode();
+  os << ", dtype: " << model_args->dtype();
+  os << ", hidden_size: " << model_args->hidden_size();
+  os << ", hidden_act: " << model_args->hidden_act();
+  os << ", intermediate_size: " << model_args->intermediate_size();
+  os << ", n_layers: " << model_args->n_layers();
+  os << ", n_encoder_layers: " << model_args->n_encoder_layers();
+  os << ", head_dim: " << model_args->head_dim();
+  os << ", decoder_head_dim: " << model_args->decoder_head_dim();
+  os << ", n_heads: " << model_args->n_heads();
+  os << ", decoder_n_heads: " << model_args->decoder_n_heads();
+  os << ", n_kv_heads: " << model_args->n_kv_heads().value_or(-1);
+  os << ", decoder_n_kv_heads: "
+     << model_args->decoder_n_kv_heads().value_or(-1);
+  os << ", vocab_size: " << model_args->vocab_size();
+  os << ", rms_norm_eps: " << model_args->rms_norm_eps();
+  os << ", layer_norm_eps: " << model_args->layer_norm_eps();
+  os << ", rotary_dim: " << model_args->rotary_dim();
+  os << ", rope_theta: " << model_args->rope_theta();
+  os << ", rope_scaling_rope_type: " << model_args->rope_scaling_rope_type();
+  os << ", rope_scaling_factor: " << model_args->rope_scaling_factor();
   os << ", rope_scaling_low_freq_factor: "
-     << args.rope_scaling_low_freq_factor();
+     << model_args->rope_scaling_low_freq_factor();
   os << ", rope_scaling_high_freq_factor: "
-     << args.rope_scaling_high_freq_factor();
+     << model_args->rope_scaling_high_freq_factor();
   os << ", rope_scaling_original_max_position_embeddings: "
-     << args.rope_scaling_original_max_position_embeddings();
+     << model_args->rope_scaling_original_max_position_embeddings();
   os << ", rope_scaling_mrope_section: [";
-  for (const auto& sec : args.rope_scaling_mrope_section()) {
+  for (const auto& sec : model_args->rope_scaling_mrope_section()) {
     os << sec << ", ";
   }
   os << "]";
-  os << ", max_position_embeddings: " << args.max_position_embeddings();
+  os << ", max_position_embeddings: " << model_args->max_position_embeddings();
   os << ", use_absolute_position_embedding: "
-     << args.use_absolute_position_embedding();
-  os << ", bos_token_id: " << args.bos_token_id();
-  os << ", eos_token_id: " << args.eos_token_id();
-  os << ", pad_token_id: " << args.pad_token_id();
-  os << ", attn_scalar: " << args.attn_scalar().value_or(0.0f);
-  os << ", no_bias: " << args.no_bias();
-  os << ", qkv_bias: " << args.qkv_bias();
+     << model_args->use_absolute_position_embedding();
+  os << ", bos_token_id: " << model_args->bos_token_id();
+  os << ", eos_token_id: " << model_args->eos_token_id();
+  os << ", pad_token_id: " << model_args->pad_token_id();
+  os << ", attn_scalar: " << model_args->attn_scalar().value_or(0.0f);
+  os << ", no_bias: " << model_args->no_bias();
+  os << ", qkv_bias: " << model_args->qkv_bias();
   os << ", stop_token_ids: [";
-  for (const auto& id : args.stop_token_ids()) {
+  for (const auto& id : model_args->stop_token_ids()) {
     os << id << ", ";
   }
   os << "]";
-  os << ", vision_start_token_id: " << args.vision_start_token_id();
-  os << ", vision_end_token_id: " << args.vision_end_token_id();
-  os << ", vision_token_id: " << args.vision_token_id();
-  os << ", image_token_id: " << args.image_token_id();
-  os << ", video_token_id: " << args.video_token_id();
-  os << ", vision_custom_adapter: " << args.vision_custom_adapter();
-  os << ", vision_max_slice_nums: " << args.vision_max_slice_nums();
-  os << ", mm_dropout: " << args.mm_dropout();
-  os << ", mm_hidden_act: " << args.mm_hidden_act();
-  os << ", mm_hidden_size: " << args.mm_hidden_size();
-  os << ", mm_image_size: " << args.mm_image_size();
-  os << ", mm_intermediate_size: " << args.mm_intermediate_size();
-  os << ", mm_num_channels: " << args.mm_num_channels();
-  os << ", mm_initializer_range: " << args.mm_initializer_range();
-  os << ", mm_layer_norm_eps: " << args.mm_layer_norm_eps();
-  os << ", mm_num_attention_heads: " << args.mm_num_attention_heads();
-  os << ", mm_num_beam_groups: " << args.mm_num_beam_groups();
-  os << ", mm_num_beams: " << args.mm_num_beams();
-  os << ", mm_num_hidden_layers: " << args.mm_num_hidden_layers();
-  os << ", mm_num_return_sequences: " << args.mm_num_return_sequences();
-  os << ", mm_output_attentions: " << args.mm_output_attentions();
-  os << ", mm_output_hidden_states: " << args.mm_output_hidden_states();
-  os << ", mm_output_scores: " << args.mm_output_scores();
-  os << ", mm_patch_size: " << args.mm_patch_size();
-  os << ", mm_projection_dim: " << args.mm_projection_dim();
-  os << ", mm_spatial_merge_size: " << args.mm_spatial_merge_size();
-  os << ", mm_spatial_patch_size: " << args.mm_spatial_patch_size();
-  os << ", mm_remove_invalid_values: " << args.mm_remove_invalid_values();
-  os << ", mm_repetition_penalty: " << args.mm_repetition_penalty();
-  os << ", mm_return_dict: " << args.mm_return_dict();
-  os << ", mm_return_dict_in_generate: " << args.mm_return_dict_in_generate();
-  os << ", mm_temperature: " << args.mm_temperature();
-  os << ", mm_tie_encoder_decoder: " << args.mm_tie_encoder_decoder();
-  os << ", mm_tie_word_embeddings: " << args.mm_tie_word_embeddings();
-  os << ", mm_top_k: " << args.mm_top_k();
-  os << ", mm_top_p: " << args.mm_top_p();
-  os << ", mm_torchscript: " << args.mm_torchscript();
-  os << ", mm_use_bfloat16: " << args.mm_use_bfloat16();
-  os << ", mm_head_dim: " << args.mm_head_dim();
-  os << ", mm_vocab_size: " << args.mm_vocab_size();
-  os << ", mm_window_size: " << args.mm_window_size();
+  os << ", vision_start_token_id: " << model_args->vision_start_token_id();
+  os << ", vision_end_token_id: " << model_args->vision_end_token_id();
+  os << ", vision_token_id: " << model_args->vision_token_id();
+  os << ", image_token_id: " << model_args->image_token_id();
+  os << ", video_token_id: " << model_args->video_token_id();
+  os << ", vision_custom_adapter: " << model_args->vision_custom_adapter();
+  os << ", vision_max_slice_nums: " << model_args->vision_max_slice_nums();
+  os << ", mm_dropout: " << model_args->mm_dropout();
+  os << ", mm_hidden_act: " << model_args->mm_hidden_act();
+  os << ", mm_hidden_size: " << model_args->mm_hidden_size();
+  os << ", mm_image_size: " << model_args->mm_image_size();
+  os << ", mm_intermediate_size: " << model_args->mm_intermediate_size();
+  os << ", mm_num_channels: " << model_args->mm_num_channels();
+  os << ", mm_initializer_range: " << model_args->mm_initializer_range();
+  os << ", mm_layer_norm_eps: " << model_args->mm_layer_norm_eps();
+  os << ", mm_num_attention_heads: " << model_args->mm_num_attention_heads();
+  os << ", mm_num_beam_groups: " << model_args->mm_num_beam_groups();
+  os << ", mm_num_beams: " << model_args->mm_num_beams();
+  os << ", mm_num_hidden_layers: " << model_args->mm_num_hidden_layers();
+  os << ", mm_num_return_sequences: " << model_args->mm_num_return_sequences();
+  os << ", mm_output_attentions: " << model_args->mm_output_attentions();
+  os << ", mm_output_hidden_states: " << model_args->mm_output_hidden_states();
+  os << ", mm_output_scores: " << model_args->mm_output_scores();
+  os << ", mm_patch_size: " << model_args->mm_patch_size();
+  os << ", mm_projection_dim: " << model_args->mm_projection_dim();
+  os << ", mm_spatial_merge_size: " << model_args->mm_spatial_merge_size();
+  os << ", mm_spatial_patch_size: " << model_args->mm_spatial_patch_size();
+  os << ", mm_remove_invalid_values: "
+     << model_args->mm_remove_invalid_values();
+  os << ", mm_repetition_penalty: " << model_args->mm_repetition_penalty();
+  os << ", mm_return_dict: " << model_args->mm_return_dict();
+  os << ", mm_return_dict_in_generate: "
+     << model_args->mm_return_dict_in_generate();
+  os << ", mm_temperature: " << model_args->mm_temperature();
+  os << ", mm_tie_encoder_decoder: " << model_args->mm_tie_encoder_decoder();
+  os << ", mm_tie_word_embeddings: " << model_args->mm_tie_word_embeddings();
+  os << ", mm_top_k: " << model_args->mm_top_k();
+  os << ", mm_top_p: " << model_args->mm_top_p();
+  os << ", mm_torchscript: " << model_args->mm_torchscript();
+  os << ", mm_use_bfloat16: " << model_args->mm_use_bfloat16();
+  os << ", mm_head_dim: " << model_args->mm_head_dim();
+  os << ", mm_vocab_size: " << model_args->mm_vocab_size();
+  os << ", mm_window_size: " << model_args->mm_window_size();
   os << ", mm_fullatt_block_indexes: [";
-  for (auto& index : args.mm_fullatt_block_indexes()) {
+  for (auto& index : model_args->mm_fullatt_block_indexes()) {
     os << index << ",";
   }
   os << "]";
   os << ", mm_deepstack_visual_indexes: [";
-  for (auto& index : args.mm_deepstack_visual_indexes()) {
+  for (auto& index : model_args->mm_deepstack_visual_indexes()) {
     os << index << ",";
   }
   os << "]";
-  os << ", mm_tokens_per_second: " << args.mm_tokens_per_second();
-  os << ", mm_temporal_patch_size: " << args.mm_temporal_patch_size();
-  os << ", mm_projector_type: " << args.mm_projector_type();
-  os << ", mm_projector_hidden_act: " << args.mm_projector_hidden_act();
-  os << ", mm_projector_n_layers: " << args.mm_projector_n_layers();
-  os << ", mm_vision_feature_layer: " << args.mm_vision_feature_layer();
+  os << ", mm_tokens_per_second: " << model_args->mm_tokens_per_second();
+  os << ", mm_temporal_patch_size: " << model_args->mm_temporal_patch_size();
+  os << ", mm_projector_type: " << model_args->mm_projector_type();
+  os << ", mm_projector_hidden_act: " << model_args->mm_projector_hidden_act();
+  os << ", mm_projector_n_layers: " << model_args->mm_projector_n_layers();
+  os << ", mm_vision_feature_layer: " << model_args->mm_vision_feature_layer();
   os << ", mm_vision_feature_select_strategy: "
-     << args.mm_vision_feature_select_strategy();
-  os << ", mm_image_do_center_crop: " << args.mm_image_do_center_crop();
-  os << ", mm_image_crop_height_size: " << args.mm_image_crop_height_size();
-  os << ", mm_image_crop_width_size: " << args.mm_image_crop_width_size();
-  os << ", mm_image_do_resize: " << args.mm_image_do_resize();
+     << model_args->mm_vision_feature_select_strategy();
+  os << ", mm_image_do_center_crop: " << model_args->mm_image_do_center_crop();
+  os << ", mm_image_crop_height_size: "
+     << model_args->mm_image_crop_height_size();
+  os << ", mm_image_crop_width_size: "
+     << model_args->mm_image_crop_width_size();
+  os << ", mm_image_do_resize: " << model_args->mm_image_do_resize();
   os << ", mm_image_resize_shortest_edge: "
-     << args.mm_image_resize_shortest_edge();
-  os << ", mm_image_resample: " << args.mm_image_resample();
-  os << ", mm_image_do_rescale: " << args.mm_image_do_rescale();
-  os << ", mm_video_do_rescale: " << args.mm_video_do_rescale();
-  os << ", mm_image_rescale_factor: " << args.mm_image_rescale_factor();
-  os << ", mm_image_do_normalize: " << args.mm_image_do_normalize();
+     << model_args->mm_image_resize_shortest_edge();
+  os << ", mm_image_resample: " << model_args->mm_image_resample();
+  os << ", mm_image_do_rescale: " << model_args->mm_image_do_rescale();
+  os << ", mm_video_do_rescale: " << model_args->mm_video_do_rescale();
+  os << ", mm_image_rescale_factor: " << model_args->mm_image_rescale_factor();
+  os << ", mm_image_do_normalize: " << model_args->mm_image_do_normalize();
   os << ", mm_image_normalize_mean: [";
-  for (const auto& mean : args.mm_image_normalize_mean()) {
+  for (const auto& mean : model_args->mm_image_normalize_mean()) {
     os << mean << ", ";
   }
   os << "], mm_image_normalize_std: [";
-  for (const auto& std : args.mm_image_normalize_std()) {
+  for (const auto& std : model_args->mm_image_normalize_std()) {
     os << std << ", ";
   }
   os << "]";
-  os << ", mm_image_shortest_edge: " << args.mm_image_shortest_edge();
-  os << ", mm_image_longest_edge: " << args.mm_image_longest_edge();
-  os << ", mm_image_min_pixels: " << args.mm_image_min_pixels();
-  os << ", mm_image_max_pixels: " << args.mm_image_max_pixels();
-  os << ", mm_image_patch_size: " << args.mm_image_patch_size();
+  os << ", mm_image_shortest_edge: " << model_args->mm_image_shortest_edge();
+  os << ", mm_image_longest_edge: " << model_args->mm_image_longest_edge();
+  os << ", mm_image_min_pixels: " << model_args->mm_image_min_pixels();
+  os << ", mm_image_max_pixels: " << model_args->mm_image_max_pixels();
+  os << ", mm_image_patch_size: " << model_args->mm_image_patch_size();
   os << ", mm_image_temporal_patch_size: "
-     << args.mm_image_temporal_patch_size();
-  os << ", mm_image_merge_size: " << args.mm_image_merge_size();
-  os << ", mm_image_token_index: " << args.mm_image_token_index();
+     << model_args->mm_image_temporal_patch_size();
+  os << ", mm_image_merge_size: " << model_args->mm_image_merge_size();
+  os << ", mm_image_token_index: " << model_args->mm_image_token_index();
   os << ", mm_video_normalize_mean: [";
-  for (const auto& mean : args.mm_video_normalize_mean()) {
+  for (const auto& mean : model_args->mm_video_normalize_mean()) {
     os << mean << ", ";
   }
   os << "], mm_video_normalize_std: [";
-  for (const auto& std : args.mm_video_normalize_std()) {
+  for (const auto& std : model_args->mm_video_normalize_std()) {
     os << std << ", ";
   }
   os << "]";
-  os << ", mm_video_shortest_edge: " << args.mm_video_shortest_edge();
-  os << ", mm_video_longest_edge: " << args.mm_video_longest_edge();
-  os << ", mm_video_patch_size: " << args.mm_video_patch_size();
+  os << ", mm_video_shortest_edge: " << model_args->mm_video_shortest_edge();
+  os << ", mm_video_longest_edge: " << model_args->mm_video_longest_edge();
+  os << ", mm_video_patch_size: " << model_args->mm_video_patch_size();
   os << ", mm_video_temporal_patch_size: "
-     << args.mm_video_temporal_patch_size();
-  os << ", mm_video_merge_size: " << args.mm_video_merge_size();
-  os << ", mm_pad_token_id: " << args.mm_pad_token_id();
-  os << ", tie_word_embeddings: " << args.tie_word_embeddings();
-  os << ", use_sliding_window: " << args.use_sliding_window();
-  os << ", sliding_window: " << args.sliding_window();
-  os << ", max_window_layers: " << args.max_window_layers();
-  os << ", query_num: " << args.query_num();
-  os << ", num_speculative_tokens: " << args.num_speculative_tokens();
-  os << ", in_channels: " << args.in_channels();
-  os << ", out_channels: " << args.out_channels();
+     << model_args->mm_video_temporal_patch_size();
+  os << ", mm_video_merge_size: " << model_args->mm_video_merge_size();
+  os << ", mm_pad_token_id: " << model_args->mm_pad_token_id();
+  os << ", tie_word_embeddings: " << model_args->tie_word_embeddings();
+  os << ", use_sliding_window: " << model_args->use_sliding_window();
+  os << ", sliding_window: " << model_args->sliding_window();
+  os << ", max_window_layers: " << model_args->max_window_layers();
+  os << ", query_num: " << model_args->query_num();
+  os << ", num_speculative_tokens: " << model_args->num_speculative_tokens();
+  os << ", in_channels: " << model_args->in_channels();
+  os << ", out_channels: " << model_args->out_channels();
   os << ", down_block_types: [";
-  for (const auto& type : args.down_block_types()) {
+  for (const auto& type : model_args->down_block_types()) {
     os << type << ", ";
   }
   os << "]";
   os << ", up_block_types: [";
-  for (const auto& type : args.up_block_types()) {
+  for (const auto& type : model_args->up_block_types()) {
     os << type << ", ";
   }
   os << "]";
   os << ", block_out_channels: [";
-  for (const auto& channel : args.block_out_channels()) {
+  for (const auto& channel : model_args->block_out_channels()) {
     os << channel << ", ";
   }
   os << "]";
-  os << ", layers_per_block: " << args.layers_per_block();
-  os << ", latent_channels: " << args.latent_channels();
-  os << ", norm_num_groups: " << args.norm_num_groups();
-  os << ", sample_size: " << args.sample_size();
-  os << ", scale_factor: " << args.scale_factor();
-  os << ", shift_factor: " << args.shift_factor();
-  os << ", mid_block_add_attention: " << args.mid_block_add_attention();
-  os << ", force_upcast: " << args.force_upcast();
-  os << ", use_quant_conv: " << args.use_quant_conv();
-  os << ", use_post_quant_conv: " << args.use_post_quant_conv();
-  os << ", joint_attention_dim: " << args.joint_attention_dim();
-  os << ", pooled_projection_dim: " << args.pooled_projection_dim();
-  os << ", guidance_embeds: " << args.guidance_embeds();
+  os << ", layers_per_block: " << model_args->layers_per_block();
+  os << ", latent_channels: " << model_args->latent_channels();
+  os << ", norm_num_groups: " << model_args->norm_num_groups();
+  os << ", sample_size: " << model_args->sample_size();
+  os << ", scale_factor: " << model_args->scale_factor();
+  os << ", shift_factor: " << model_args->shift_factor();
+  os << ", mid_block_add_attention: " << model_args->mid_block_add_attention();
+  os << ", force_upcast: " << model_args->force_upcast();
+  os << ", use_quant_conv: " << model_args->use_quant_conv();
+  os << ", use_post_quant_conv: " << model_args->use_post_quant_conv();
+  os << ", joint_attention_dim: " << model_args->joint_attention_dim();
+  os << ", pooled_projection_dim: " << model_args->pooled_projection_dim();
+  os << ", guidance_embeds: " << model_args->guidance_embeds();
   os << ", axes_dims_rope: [";
-  for (const auto& dim : args.axes_dims_rope()) {
+  for (const auto& dim : model_args->axes_dims_rope()) {
     os << dim << ", ";
   }
   os << "]";
-  os << ", num_single_layers: " << args.num_single_layers();
-  os << ", d_model: " << args.d_model();
-  os << ", num_layers: " << args.num_layers();
-  os << ", d_kv: " << args.d_kv();
-  os << ", d_ff: " << args.d_ff();
-  os << ", act_fn: " << args.act_fn();
-  os << ", is_gated_act: " << args.is_gated_act();
+  os << ", num_single_layers: " << model_args->num_single_layers();
+  os << ", d_model: " << model_args->d_model();
+  os << ", num_layers: " << model_args->num_layers();
+  os << ", d_kv: " << model_args->d_kv();
+  os << ", d_ff: " << model_args->d_ff();
+  os << ", act_fn: " << model_args->act_fn();
+  os << ", is_gated_act: " << model_args->is_gated_act();
   os << ", relative_attention_num_buckets: "
-     << args.relative_attention_num_buckets();
+     << model_args->relative_attention_num_buckets();
   os << ", relative_attention_max_distance: "
-     << args.relative_attention_max_distance();
-  os << ", num_train_timesteps: " << args.num_train_timesteps();
-  os << ", shift: " << args.shift();
-  os << ", use_dynamic_shifting: " << args.use_dynamic_shifting();
-  os << ", base_shift: " << args.base_shift();
-  os << ", max_shift: " << args.max_shift();
-  os << ", base_image_seq_len: " << args.base_image_seq_len();
-  os << ", max_image_seq_len: " << args.max_image_seq_len();
+     << model_args->relative_attention_max_distance();
+  os << ", num_train_timesteps: " << model_args->num_train_timesteps();
+  os << ", shift: " << model_args->shift();
+  os << ", use_dynamic_shifting: " << model_args->use_dynamic_shifting();
+  os << ", base_shift: " << model_args->base_shift();
+  os << ", max_shift: " << model_args->max_shift();
+  os << ", base_image_seq_len: " << model_args->base_image_seq_len();
+  os << ", max_image_seq_len: " << model_args->max_image_seq_len();
   os << "]";
   return os;
 }

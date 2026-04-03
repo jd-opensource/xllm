@@ -58,8 +58,8 @@ std::string format_tensor_shape(const proto::InferInputTensor& tensor) {
   return "[" + absl::StrJoin(dims, ", ") + "]";
 }
 
-RecType get_rec_type(const ModelArgs& model_args) {
-  const auto kind = get_rec_model_kind(model_args.model_type());
+RecType get_rec_type(const std::shared_ptr<ModelArgs>& model_args) {
+  const auto kind = get_rec_model_kind(model_args->model_type());
   switch (kind) {
     case RecModelKind::kOneRec:
       return RecType::kOneRec;
@@ -74,7 +74,7 @@ RecType get_rec_type(const ModelArgs& model_args) {
 bool process_onerec_inputs(
     const std::optional<std::vector<int>>& prompt_tokens,
     const std::optional<std::vector<proto::InferInputTensor>>& input_tensors,
-    const ModelArgs& model_args,
+    const std::shared_ptr<ModelArgs>& model_args,
     std::vector<int32_t>* local_prompt_tokens,
     MMData* processed_mm_data,
     OutputCallback callback) {
@@ -149,11 +149,11 @@ bool process_onerec_inputs(
                                 format_tensor_shape(tensor));
         return false;
       }
-      if (hidden != model_args.hidden_size()) {
+      if (hidden != model_args->hidden_size()) {
         CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                             "OneRec input tensor '" + tensor_name +
                                 "' hidden size mismatch, expected " +
-                                std::to_string(model_args.hidden_size()) +
+                                std::to_string(model_args->hidden_size()) +
                                 ", got " + std::to_string(hidden));
         return false;
       }
@@ -405,7 +405,7 @@ RecMaster::LlmRecWithMmDataMasterPipeline::generate_request(
   std::vector<int32_t> local_prompt_tokens;
   MMData processed_mm_data;
 
-  int32_t hidden_size = master_.model_args_.hidden_size();
+  int32_t hidden_size = master_.model_args_->hidden_size();
   bool ret = process_llmrec_with_mm_data_inputs(prompt_tokens,
                                                 mm_data,
                                                 &local_prompt_tokens,
@@ -489,7 +489,7 @@ RecMaster::RecMaster(const Options& options)
   model_args_ = engine_->model_args();
   rec_type_ = get_rec_type(model_args_);
   if (rec_type_ == RecType::kNone) {
-    LOG(ERROR) << "Unsupported rec model_type: " << model_args_.model_type();
+    LOG(ERROR) << "Unsupported rec model_type: " << model_args_->model_type();
   }
 
   if (options_.enable_service_routing()) {
@@ -532,9 +532,9 @@ RecMaster::RecMaster(const Options& options)
       std::make_unique<ThreadPool>(options_.num_request_handling_threads());
 
   // Create pipelines based on rec_type
-  auto rec_model_kind = get_rec_model_kind(model_args_.model_type());
+  auto rec_model_kind = get_rec_model_kind(model_args_->model_type());
   CHECK(rec_model_kind != RecModelKind::kNone)
-      << "Unsupported rec model_type: " << model_args_.model_type();
+      << "Unsupported rec model_type: " << model_args_->model_type();
   auto pipeline_type = get_rec_pipeline_type(rec_model_kind);
   pipeline_ = create_pipeline(pipeline_type, *this);
 
@@ -714,7 +714,7 @@ std::shared_ptr<Request> RecMaster::build_request_common(
     const RequestParams& sp,
     OutputCallback callback,
     bool build_stop_checker) {
-  int32_t max_context_len = model_args_.max_position_embeddings();
+  int32_t max_context_len = model_args_->max_position_embeddings();
   if (!options_.enable_chunked_prefill()) {
     int32_t max_tokens_per_req = options_.max_tokens_per_batch();
     if (rec_type_ == RecType::kLlmRec && is_rec_multi_round_mode()) {
@@ -770,7 +770,7 @@ std::shared_ptr<Request> RecMaster::build_request_common(
       const auto& stop_token_ids = sp.stop_token_ids.value();
       stop_tokens.insert(stop_token_ids.begin(), stop_token_ids.end());
     } else {
-      stop_tokens = model_args_.stop_token_ids();
+      stop_tokens = model_args_->stop_token_ids();
     }
 
     std::vector<std::vector<int32_t>> stop_sequences;
@@ -795,7 +795,7 @@ std::shared_ptr<Request> RecMaster::build_request_common(
     stopping_checker =
         StoppingChecker(max_tokens,
                         max_context_len - options_.num_speculative_tokens(),
-                        model_args_.eos_token_id(),
+                        model_args_->eos_token_id(),
                         sp.ignore_eos,
                         std::move(stop_tokens),
                         std::move(stop_sequences));
@@ -818,7 +818,7 @@ std::shared_ptr<Request> RecMaster::build_request_common(
                          nullptr,
                          sp.decode_address);
   req_state.rec_type = rec_type_;
-  req_state.bos_token_id = model_args_.bos_token_id();
+  req_state.bos_token_id = model_args_->bos_token_id();
   auto request = std::make_shared<Request>(sp.request_id,
                                            sp.x_request_id,
                                            sp.x_request_time,

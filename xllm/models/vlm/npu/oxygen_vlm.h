@@ -21,6 +21,7 @@ limitations under the License.
 #include <torch/nn/options/vision.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <unordered_map>
 
 #include "core/framework/kv_cache/kv_cache.h"
@@ -79,7 +80,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
     std::optional<Glm4VVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
 
-    auto merge_size = model_args_.mm_image_merge_size();
+    auto merge_size = model_args_->mm_image_merge_size();
     MMDict multimodal_embeds;
     if (image_input) {
       // visual
@@ -131,7 +132,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
     auto special_token_ids =
-        torch::tensor({model_args_.image_token_id()},
+        torch::tensor({model_args_->image_token_id()},
                       input_ids.options().dtype(torch::kInt64));
     auto is_multimodal = torch::isin(input_ids, special_token_ids);
     return is_multimodal;
@@ -182,7 +183,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
     }
     visual_->verify_loaded_weights("model.visual.");
     visual_->merge_loaded_weights();
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_->image_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
   }
@@ -203,7 +204,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
   }
 
  private:
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::TensorOptions options_;
   Glm4VisionTransformer visual_{nullptr};
   OxygenForCausalLM language_model_{nullptr};
@@ -262,10 +263,10 @@ REGISTER_MODEL_ARGS(oxygenvlm, [&] {
   LOAD_ARG_OR(mm_temporal_patch_size, "vision_config.temporal_patch_size", 2);
 
   LOAD_ARG_OR_FUNC(mm_head_dim, "head_dim", [&] {
-    return args->mm_hidden_size() / args->mm_num_attention_heads();
+    return model_args->mm_hidden_size() / model_args->mm_num_attention_heads();
   });
-  if (args->rope_scaling_rope_type() == "default")
-    args->rope_scaling_rope_type() = "mrope";
+  if (model_args->rope_scaling_rope_type() == "default")
+    model_args->rope_scaling_rope_type() = "mrope";
 });
 
 }  // namespace xllm::npu::model

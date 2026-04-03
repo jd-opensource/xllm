@@ -19,6 +19,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <memory>
 
 #include "common/global_flags.h"
 #include "continuous_scheduler.h"
@@ -81,9 +82,9 @@ class FakeEngine : public Engine {
   BlockManagerPool* block_manager_pool() const override {
     return fake_block_manager_.get();
   }
-  const ModelArgs& model_args() const override {
-    static ModelArgs args;
-    return args;
+  const std::shared_ptr<ModelArgs>& model_args() const override {
+    static auto model_args = std::make_shared<ModelArgs>();
+    return model_args;
   }
   const TokenizerArgs& tokenizer_args() const override {
     static TokenizerArgs args;

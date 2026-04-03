@@ -58,10 +58,11 @@ REGISTER_MODEL_ARGS(kimi_k2, [&] {
   LOAD_ARG_OR(q_lora_rank, "q_lora_rank", 1536);
   LOAD_ARG_OR(kv_lora_rank, "kv_lora_rank", 512);
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
-    return 256;  // args->qk_nope_head_dim() + args->qk_rope_head_dim();
+    return 256;  // model_args->qk_nope_head_dim() +
+                 // model_args->qk_rope_head_dim();
   });
   LOAD_ARG_OR_FUNC(
-      rotary_dim, "rotary_dim", [&] { return args->qk_rope_head_dim(); });
+      rotary_dim, "rotary_dim", [&] { return model_args->qk_rope_head_dim(); });
   SET_ARG(rope_scaling_rope_type, "deepseek_yarn");
   LOAD_ARG(rope_scaling_beta_fast, "rope_scaling.beta_fast");
   LOAD_ARG(rope_scaling_beta_slow, "rope_scaling.beta_slow");
@@ -76,8 +77,8 @@ REGISTER_MODEL_ARGS(kimi_k2, [&] {
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({163585, 163586}));
 });
 REGISTER_TOKENIZER_ARGS(kimi_k2, [&] {
-  SET_ARG(tokenizer_type, "tiktoken");
-  SET_ARG(vocab_file, "tiktoken.model");
+  SET_TOKENIZER_ARG(tokenizer_type, "tiktoken");
+  SET_TOKENIZER_ARG(vocab_file, "tiktoken.model");
   // set special tokens
   // ref to:
   // https://huggingface.co/moonshotai/Kimi-K2-Instruct/blob/main/tokenizer_config.json
@@ -90,13 +91,13 @@ REGISTER_TOKENIZER_ARGS(kimi_k2, [&] {
        {"[EOT]", 163593},
        {"<|im_system|>", 163594},
        {"<|im_middle|>", 163601}});
-  SET_ARG(special_tokens, special_tokens);
+  SET_TOKENIZER_ARG(special_tokens, special_tokens);
   // set regex pattern for tiktoken tokenizer.
   // ref to:
   // https://huggingface.co/moonshotai/Kimi-K2-Instruct/blob/main/tokenization_kimi.py#L58
   // N.B. replaced '\s+(?!\S)' with '\s+[^\s]' to avoid regex error
   const std::string pattern_str =
       R"([\p{Han}]+|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]+[\p{Ll}\p{Lm}\p{Lo}\p{M}&&[^\p{Han}]]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+[^\s]|\s+)";
-  SET_ARG(pattern, pattern_str);
+  SET_TOKENIZER_ARG(pattern, pattern_str);
 });
 }  // namespace xllm::npu::model

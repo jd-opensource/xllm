@@ -18,6 +18,8 @@ limitations under the License.
 #include <cnrt.h>
 #include <framework/core/stream_guard.h>
 
+#include <memory>
+
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/model/causal_vlm.h"
@@ -42,26 +44,28 @@ uint32_t get_bucket_num_tokens(uint32_t num_tokens) {
 
 namespace xllm::mlu {
 
-GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
-                                           const torch::Device& device,
-                                           const runtime::Options& options)
+GraphPersistentParam::GraphPersistentParam(
+    const std::shared_ptr<ModelArgs>& model_args,
+    const torch::Device& device,
+    const runtime::Options& options)
     : num_decoding_tokens_(options.num_decoding_tokens()) {
   const int64_t max_tokens = FLAGS_max_tokens_per_batch;
   const int64_t max_seqs = options.max_seqs_per_batch();
-  const int64_t max_seq_len = args.max_position_embeddings();
+  const int64_t max_seq_len = model_args->max_position_embeddings();
   const uint32_t block_size = options.block_size();
   const int64_t max_num_blocks_per_req =
       (max_seq_len + block_size - 1) / block_size + 1;
-  torch::ScalarType torch_type = util::parse_dtype(args.dtype(), device);
+  torch::ScalarType torch_type = util::parse_dtype(model_args->dtype(), device);
   auto tensor_options = torch::TensorOptions().device(device).dtype(torch_type);
   auto int_tensor_options = tensor_options.dtype(torch::kInt32);
 
   // output buffer
-  output_ = torch::zeros({max_tokens, args.hidden_size()}, tensor_options);
+  output_ =
+      torch::zeros({max_tokens, model_args->hidden_size()}, tensor_options);
   // aux_hidden_states will be lazily initialized when needed
 
   // input buffers
-  if (args.rope_scaling_mrope_section().empty()) {
+  if (model_args->rope_scaling_mrope_section().empty()) {
     positions_ = torch::zeros({max_tokens}, int_tensor_options);
   } else {
     positions_ = torch::zeros({3, max_tokens}, int_tensor_options);
@@ -205,22 +209,23 @@ void MluGraph::update_input_buffer(const torch::Tensor& tokens,
       tokens, positions, params, padding_needed);
 }
 
-MluGraphExecutorImpl::MluGraphExecutorImpl(CausalLM* model,
-                                           const ModelArgs& args,
-                                           const torch::Device& device,
-                                           const runtime::Options& options)
+MluGraphExecutorImpl::MluGraphExecutorImpl(
+    CausalLM* model,
+    const std::shared_ptr<ModelArgs>& model_args,
+    const torch::Device& device,
+    const runtime::Options& options)
     : model_(model),
-      args_(args),
+      model_args_(model_args),
       device_(device),
       options_(options),
       pool_(torch_mlu::MempoolId_t{0, 0}) {
   persistent_param_ =
-      std::make_unique<GraphPersistentParam>(args_, device_, options_);
+      std::make_unique<GraphPersistentParam>(model_args_, device_, options_);
 }
 
 ForwardInput MluGraphExecutorImpl::prepare_inputs(Batch& batch) {
   return batch.prepare_forward_input(
-      options_.num_decoding_tokens(), 0, args_, options_.cp_size());
+      options_.num_decoding_tokens(), 0, model_args_, options_.cp_size());
 }
 
 // Main execution method with graph optimization for decode phase

@@ -60,13 +60,13 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
     auto parallel_args = context.get_parallel_args();
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args_.n_layers());
+    layers_.reserve(model_args_->n_layers());
     device_ = options.device();
     dtype_ = options.dtype().toScalarType();
     norm_ = register_module(
         "norm",
         xllm::layer::Qwen3NextRMSNorm(
-            model_args_.hidden_size(), model_args_.rms_norm_eps(), options));
+            model_args_->hidden_size(), model_args_->rms_norm_eps(), options));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
@@ -162,7 +162,7 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
     return torch::cat(req_mask_vec, 0);
   }
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::nn::ModuleList blocks_{nullptr};
   std::vector<layer::Qwen3HybridDecoderLayerModulePtr> layers_;
   int32_t max_seq_len_ = 0;
@@ -177,7 +177,7 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
 class Qwen3HybridForCausalLMImplBase : public torch::nn::Module {
  public:
   explicit Qwen3HybridForCausalLMImplBase(const ModelContext& context) {
-    tie_word_embeddings_ = context.get_model_args().tie_word_embeddings();
+    tie_word_embeddings_ = context.get_model_args()->tie_word_embeddings();
     lm_head_ = register_module("lm_head", layer::LmHead(context));
   }
 

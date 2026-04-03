@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "framework/model/model_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
@@ -27,7 +29,7 @@ namespace layer {
 
 class MoEFusedTopkImpl : public torch::nn::Module {
  public:
-  MoEFusedTopkImpl(const ModelArgs& model_args,
+  MoEFusedTopkImpl(const std::shared_ptr<ModelArgs>& model_args,
                    const QuantArgs& quant_args,
                    const torch::TensorOptions& options);
 

@@ -101,25 +101,27 @@ void InitializeGlog() {
 // Uses basic operations to verify graph capture and replay functionality
 class SimpleCausalLM : public CausalLM {
  public:
-  SimpleCausalLM(const ModelArgs& args, const torch::Device& device)
-      : args_(args), device_(device) {
+  SimpleCausalLM(const std::shared_ptr<ModelArgs>& model_args,
+                 const torch::Device& device)
+      : model_args_(model_args), device_(device) {
     // Initialize a simple linear layer for testing
-    linear_ = register_module("linear",
-                              torch::nn::Linear(torch::nn::LinearOptions(
-                                  args.hidden_size(), args.hidden_size())));
+    linear_ = register_module(
+        "linear",
+        torch::nn::Linear(torch::nn::LinearOptions(model_args->hidden_size(),
+                                                   model_args->hidden_size())));
 
     // Initialize token embedding table
-    const int64_t vocab_size = std::max(args.vocab_size(), 1000L);
+    const int64_t vocab_size = std::max(model_args->vocab_size(), 1000L);
     token_embedding_table_ = register_parameter(
         "token_embedding",
-        torch::randn({vocab_size, args.hidden_size()},
+        torch::randn({vocab_size, model_args->hidden_size()},
                      torch::dtype(torch::kFloat32).device(device)));
 
     // Initialize position embedding table
-    const int64_t max_pos = args.max_position_embeddings();
+    const int64_t max_pos = model_args->max_position_embeddings();
     pos_embedding_table_ = register_parameter(
         "pos_embedding",
-        torch::randn({max_pos, args.hidden_size()},
+        torch::randn({max_pos, model_args->hidden_size()},
                      torch::dtype(torch::kFloat32).device(device)));
     // Initialize block-related tensors for Rec multi-round computation
     block_size_ = torch::tensor(4L, torch::dtype(torch::kInt64).device(device));
@@ -151,7 +153,7 @@ class SimpleCausalLM : public CausalLM {
               << ", kv_caches: " << kv_caches.size()
               << ", params: " << params.num_sequences;
     const int64_t num_tokens = tokens.size(0);
-    const int64_t hidden_size = args_.hidden_size();
+    const int64_t hidden_size = model_args_->hidden_size();
 
     // Create token embeddings using standard embedding lookup
     auto token_embeddings = torch::embedding(token_embedding_table_, tokens);
@@ -231,13 +233,13 @@ class SimpleCausalLM : public CausalLM {
     return opts;
   }
 
-  const ModelArgs& args() const { return args_; }
+  const std::shared_ptr<ModelArgs>& model_args() const { return model_args_; }
 
   // Implement required virtual functions
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& selected_idxes) override {
     // Simple logits computation
-    const int64_t vocab_size = std::max(args_.vocab_size(), 1000L);
+    const int64_t vocab_size = std::max(model_args_->vocab_size(), 1000L);
     return torch::randn({hidden_states.size(0), vocab_size},
                         torch::dtype(torch::kFloat32).device(device_));
   }
@@ -276,7 +278,7 @@ class SimpleCausalLM : public CausalLM {
   }
 
  private:
-  ModelArgs args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::Device device_;
   torch::nn::Linear linear_{nullptr};
   torch::Tensor token_embedding_table_;
@@ -302,12 +304,12 @@ class AclGraphExecutorTest : public ::testing::Test {
     initialized_ = true;
     sequences_.reserve(100);
 
-    // Set up model args
-    model_args_.model_type("test_model");
-    model_args_.dtype("float32");
-    model_args_.hidden_size(128);
-    model_args_.max_position_embeddings(2048);
-    model_args_.vocab_size(1000);  // Set a reasonable vocab size
+    // Set up model model_args
+    model_args_->model_type("test_model");
+    model_args_->dtype("float32");
+    model_args_->hidden_size(128);
+    model_args_->max_position_embeddings(2048);
+    model_args_->vocab_size(1000);  // Set a reasonable vocab size
 
     // Set up device
     device_ = std::make_unique<torch::Device>("npu:0");
@@ -341,13 +343,13 @@ class AclGraphExecutorTest : public ::testing::Test {
 
     // Initialize input embedding and mm_data
     input_embedding_ =
-        torch::zeros({1, model_args_.hidden_size()},
+        torch::zeros({1, model_args_->hidden_size()},
                      torch::dtype(torch::kFloat32).device(*device_));
     mm_data_ = MMData();  // Default constructor creates empty MMData
 
     // Initialize KV caches
     kv_caches_.clear();
-    const int64_t hidden_size = model_args_.hidden_size();
+    const int64_t hidden_size = model_args_->hidden_size();
 
     // Create KV cache with shape [n_blocks, block_size, hidden_size]
     auto kv_cache =
@@ -392,7 +394,7 @@ class AclGraphExecutorTest : public ::testing::Test {
     return batch;
   }
   bool initialized_ = false;
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_ = std::make_shared<ModelArgs>();
   std::unique_ptr<torch::Device> device_;
   runtime::Options options_;
   std::unique_ptr<CausalLM> model_;
@@ -553,7 +555,7 @@ TEST_F(AclGraphExecutorTest, DifferentBatchSizes) {
     EXPECT_EQ(output.hidden_states.size(0),
               batch_size * options_.num_decoding_tokens())
         << "Batch size: " << batch_size;
-    EXPECT_EQ(output.hidden_states.size(1), model_args_.hidden_size())
+    EXPECT_EQ(output.hidden_states.size(1), model_args_->hidden_size())
         << "Batch size: " << batch_size;
   }
 }
@@ -668,7 +670,7 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImplMultipleRuns) {
 }
 
 TEST_F(AclGraphExecutorTest, BatchInputCarriesLinearStateIds) {
-  model_args_.layer_types({"linear_attention", "full_attention"});
+  model_args_->layer_types({"linear_attention", "full_attention"});
   auto batch = CreateTestBatch();
   ASSERT_FALSE(batch->empty());
   ASSERT_FALSE(sequences_.empty());
@@ -704,16 +706,16 @@ TEST(AclGraphExecutorHybridTest, KvCacheSupportsLinearOnlyLayers) {
 }
 
 TEST(AclGraphExecutorHybridTest, ModelArgsCountsHybridLayerTypes) {
-  ModelArgs args;
-  args.n_layers(4);
-  args.layer_types(
+  std::shared_ptr<ModelArgs> model_args = std::make_shared<ModelArgs>();
+  model_args->n_layers(4);
+  model_args->layer_types(
       {"linear_attention", "full_attention", "linear_attention", "attention"});
 
-  EXPECT_FALSE(is_full_attention_layer(args, 0));
-  EXPECT_TRUE(is_full_attention_layer(args, 1));
-  EXPECT_FALSE(is_full_attention_layer(args, 2));
-  EXPECT_TRUE(is_full_attention_layer(args, 3));
-  EXPECT_TRUE(has_linear_attention_layers(args));
+  EXPECT_FALSE(is_full_attention_layer(model_args, 0));
+  EXPECT_TRUE(is_full_attention_layer(model_args, 1));
+  EXPECT_FALSE(is_full_attention_layer(model_args, 2));
+  EXPECT_TRUE(is_full_attention_layer(model_args, 3));
+  EXPECT_TRUE(has_linear_attention_layers(model_args));
 }
 
 TEST_F(AclGraphExecutorTest, GraphExecutorUsesFirstFullAttentionKvCache) {
@@ -728,7 +730,7 @@ TEST_F(AclGraphExecutorTest, GraphExecutorUsesFirstFullAttentionKvCache) {
       torch::zeros({4, 32, 3}, torch::dtype(torch::kFloat32).device(*device_));
   auto ssm_cache = torch::zeros({4, 8, 64, 64},
                                 torch::dtype(torch::kFloat32).device(*device_));
-  auto full_k = torch::randn({1000, 4 * model_args_.hidden_size()},
+  auto full_k = torch::randn({1000, 4 * model_args_->hidden_size()},
                              torch::dtype(torch::kFloat32).device(*device_));
   auto full_v = full_k.clone();
 
