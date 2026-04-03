@@ -220,7 +220,7 @@ class OneRecStackImpl : public torch::nn::Module {
             h.view({bs, group_width, seq_len1, hidden_size});
         context_emb.narrow(2, seq_len2, seq_len1)
             .copy_(token_embedding_reshaped);
-        h = context_emb.view({-1, hidden_size}).clone();
+        h = context_emb.view({-1, hidden_size});
       }
       if (!h.is_contiguous()) {
         h = h.contiguous();
