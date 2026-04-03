@@ -17,7 +17,9 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include "common/global_flags.h"
 #include "platform/device.h"
+#include "util/env_var.h"
 #if defined(USE_NPU)
 #ifdef TORCH_HIGHER_THAN_PTA6
 // #include <torch_npu/csrc/core/npu/NPUFormat.h>
@@ -30,6 +32,21 @@ limitations under the License.
 #endif
 
 namespace xllm {
+
+namespace {
+
+bool should_enable_async_tiling_copy_stream() {
+  // ATB copy-stream teardown is not reversible for the same context on the
+  // current CANN/PTA stack, so contexts that may enter graph capture must not
+  // pre-create the helper stream.
+  if (FLAGS_enable_graph) {
+    return false;
+  }
+  return util::get_bool_env("ATB_USE_TILING_COPY_STREAM", false);
+}
+
+}  // namespace
+
 ModelContext::ModelContext(const ParallelArgs& input_parallel_args,
                            const ModelArgs& model_args,
                            const QuantArgs& quant_args,
@@ -44,7 +61,9 @@ ModelContext::ModelContext(const ParallelArgs& input_parallel_args,
   atb::CreateContext(&context_);
   void* stream = c10_npu::getCurrentNPUStream(device_id).stream();
   context_->SetExecuteStream(stream);
-  context_->SetAsyncTilingCopyStatus(true);
+  if (should_enable_async_tiling_copy_stream()) {
+    context_->SetAsyncTilingCopyStatus(true);
+  }
   atb_workspace_ = std::make_shared<AtbWorkspace>(tensor_options.device());
 #endif
   derive_optimization_config();
