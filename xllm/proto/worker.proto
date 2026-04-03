@@ -218,6 +218,7 @@ message ForwardInput {
   // slot ids for new token
   repeated int32 new_token_slot_ids = 17;
   repeated BlockTables block_tables_vec = 18;
+  repeated BlockTables linear_block_tables_vec = 45;
   int32 num_sequences = 19;
   repeated int32 dp_global_token_nums = 20;
   // bool global_empty_kv_cache = 21;

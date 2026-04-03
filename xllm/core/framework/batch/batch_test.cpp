@@ -26,6 +26,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "framework/block/block.h"
 #include "framework/block/block_manager_impl.h"
+#include "framework/kv_cache/hybrid_cache_utils.h"
 #include "framework/model/model_args.h"
 #include "framework/request/stopping_checker.h"
 #include "framework/sampling/sampling_params.h"
@@ -46,6 +47,31 @@ bool equal(const torch::Tensor& t, const std::vector<T>& d) {
   }
   return true;
 }
+
+class ScopedHybridLinearCacheFlags final {
+ public:
+  ScopedHybridLinearCacheFlags(bool enable_disagg_pd,
+                               bool enable_kvcache_store,
+                               double host_blocks_factor)
+      : old_enable_disagg_pd_(FLAGS_enable_disagg_pd),
+        old_enable_kvcache_store_(FLAGS_enable_kvcache_store),
+        old_host_blocks_factor_(FLAGS_host_blocks_factor) {
+    FLAGS_enable_disagg_pd = enable_disagg_pd;
+    FLAGS_enable_kvcache_store = enable_kvcache_store;
+    FLAGS_host_blocks_factor = host_blocks_factor;
+  }
+
+  ~ScopedHybridLinearCacheFlags() {
+    FLAGS_enable_disagg_pd = old_enable_disagg_pd_;
+    FLAGS_enable_kvcache_store = old_enable_kvcache_store_;
+    FLAGS_host_blocks_factor = old_host_blocks_factor_;
+  }
+
+ private:
+  bool old_enable_disagg_pd_;
+  bool old_enable_kvcache_store_;
+  double old_host_blocks_factor_;
+};
 
 RawSampleOutput make_raw_sample_output(int64_t token_id,
                                        std::optional<float> logprob,
@@ -298,6 +324,176 @@ TEST(BatchTest, SampleRequestInjectsAllMatchedSlots) {
                     expected_selected_token_idxes));
   EXPECT_TRUE(equal(sampling_params_out.sample_idxes, expected_sample_idxes));
   EXPECT_EQ(sampling_params_out.selected_token_idxes.size(0), 2);
+}
+
+TEST(BatchTest, HybridLinearBuilderUsesCompactStateBlockTables) {
+  ScopedHybridLinearCacheFlags scoped_flags(/*enable_disagg_pd=*/false,
+                                            /*enable_kvcache_store=*/false,
+                                            /*host_blocks_factor=*/1.0);
+  torch::Device device(Device::type_torch(), 0);
+  const uint32_t n_blocks = 20;
+  const uint32_t block_size = 4;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size);
+  BlockManagerImpl manager(options);
+
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(1);
+  SequenceParams seq_params;
+  seq_params.seq_capacity = 32;
+  seq_params.stopping_checker = &stopping_checker;
+  seq_params.sampling_param = &sampling_param;
+  seq_params.skip_special_tokens = true;
+  seq_params.echo = false;
+  seq_params.logprobs = false;
+  seq_params.enable_schedule_overlap = false;
+
+  torch::Tensor input_embedding;
+  MMData mm_data;
+
+  IncrementalDecoder decoder1("", 1, false, false);
+  Sequence seq1(/*index=*/0,
+                /*token_ids=*/{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13},
+                input_embedding,
+                mm_data,
+                std::move(decoder1),
+                seq_params);
+  seq1.add_kv_blocks(manager.allocate(4));  // [1, 2, 3, 4]
+
+  IncrementalDecoder decoder2("", 2, false, false);
+  Sequence seq2(
+      /*index=*/1,
+      /*token_ids=*/{21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33},
+      input_embedding,
+      mm_data,
+      std::move(decoder2),
+      seq_params);
+  seq2.add_kv_blocks(manager.allocate(4));  // [5, 6, 7, 8]
+  seq2.kv_state().incr_kv_cache_tokens_num(/*size=*/8);
+
+  std::vector<Sequence*> sequences = {&seq1, &seq2};
+  std::vector<uint32_t> allowed_max_tokens = {
+      std::numeric_limits<uint32_t>::max(),
+      std::numeric_limits<uint32_t>::max()};
+  std::vector<torch::Tensor> input_embeddings_vec;
+  std::vector<MMData> mm_data_vec;
+  ModelArgs args;
+  args.n_layers(2).layer_types({"full_attention", "linear_attention"});
+
+  BatchInputBuilder builder(sequences,
+                            allowed_max_tokens,
+                            input_embeddings_vec,
+                            mm_data_vec,
+                            /*swap_block_transfer_infos=*/nullptr,
+                            /*batch_id=*/1,
+                            &args,
+                            BatchForwardType::PREFILL);
+
+  RawForwardInput raw_forward_input = builder.build_raw_forward_input();
+
+  ASSERT_EQ(raw_forward_input.block_tables_vec.size(), 2);
+  ASSERT_EQ(raw_forward_input.linear_block_tables_vec.size(), 2);
+  EXPECT_EQ(raw_forward_input.block_tables_vec[0],
+            (std::vector<int32_t>{1, 2, 3, 4}));
+  EXPECT_EQ(raw_forward_input.block_tables_vec[1],
+            (std::vector<int32_t>{5, 6, 7, 8}));
+  EXPECT_EQ(raw_forward_input.linear_block_tables_vec[0],
+            (std::vector<int32_t>{4, 4}));
+  EXPECT_EQ(raw_forward_input.linear_block_tables_vec[1],
+            (std::vector<int32_t>{6, 8}));
+}
+
+TEST(BatchTest, HybridLinearBuilderKeepsFullStateBlockTablesWhenDisabled) {
+  ScopedHybridLinearCacheFlags scoped_flags(/*enable_disagg_pd=*/false,
+                                            /*enable_kvcache_store=*/false,
+                                            /*host_blocks_factor=*/2.0);
+  torch::Device device(Device::type_torch(), 0);
+  const uint32_t n_blocks = 20;
+  const uint32_t block_size = 4;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size);
+  BlockManagerImpl manager(options);
+
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(1);
+  SequenceParams seq_params;
+  seq_params.seq_capacity = 32;
+  seq_params.stopping_checker = &stopping_checker;
+  seq_params.sampling_param = &sampling_param;
+  seq_params.skip_special_tokens = true;
+  seq_params.echo = false;
+  seq_params.logprobs = false;
+  seq_params.enable_schedule_overlap = false;
+
+  torch::Tensor input_embedding;
+  MMData mm_data;
+
+  IncrementalDecoder decoder("", 1, false, false);
+  Sequence seq(/*index=*/0,
+               /*token_ids=*/{1, 2, 3, 4, 5, 6, 7, 8, 9},
+               input_embedding,
+               mm_data,
+               std::move(decoder),
+               seq_params);
+  seq.add_kv_blocks(manager.allocate(3));  // [1, 2, 3]
+  seq.kv_state().incr_kv_cache_tokens_num(/*size=*/4);
+
+  std::vector<Sequence*> sequences = {&seq};
+  std::vector<uint32_t> allowed_max_tokens = {
+      std::numeric_limits<uint32_t>::max()};
+  std::vector<torch::Tensor> input_embeddings_vec;
+  std::vector<MMData> mm_data_vec;
+  ModelArgs args;
+  args.n_layers(2).layer_types({"full_attention", "linear_attention"});
+
+  BatchInputBuilder builder(sequences,
+                            allowed_max_tokens,
+                            input_embeddings_vec,
+                            mm_data_vec,
+                            /*swap_block_transfer_infos=*/nullptr,
+                            /*batch_id=*/2,
+                            &args,
+                            BatchForwardType::PREFILL);
+
+  RawForwardInput raw_forward_input = builder.build_raw_forward_input();
+
+  ASSERT_EQ(raw_forward_input.block_tables_vec.size(), 1);
+  ASSERT_EQ(raw_forward_input.linear_block_tables_vec.size(), 1);
+  EXPECT_EQ(raw_forward_input.linear_block_tables_vec[0],
+            raw_forward_input.block_tables_vec[0]);
+  EXPECT_EQ(raw_forward_input.linear_block_tables_vec[0],
+            (std::vector<int32_t>{1, 2, 3}));
+}
+
+TEST(BatchTest, HybridLinearLayerAllocationSkipsRedundantPerLayerCache) {
+  ModelArgs args;
+  args.n_layers(4).layer_types({"full_attention",
+                                "linear_attention",
+                                "full_attention",
+                                "linear_attention"});
+
+  EXPECT_TRUE(should_enable_hybrid_linear_cache(args,
+                                                /*enable_disagg_pd=*/false,
+                                                /*enable_kvcache_store=*/false,
+                                                /*host_blocks_factor=*/1.0));
+  EXPECT_EQ(count_hybrid_full_attention_layers(
+                args, /*enable_hybrid_linear_cache=*/true),
+            2);
+  EXPECT_EQ(count_hybrid_linear_attention_layers(
+                args, /*enable_hybrid_linear_cache=*/true),
+            2);
+
+  const auto full_layer = get_hybrid_linear_layer_allocation(
+      args, /*layer_id=*/0, /*enable_hybrid_linear_cache=*/true);
+  EXPECT_TRUE(full_layer.allocate_full_kv);
+  EXPECT_FALSE(full_layer.allocate_linear_state);
+
+  const auto linear_layer = get_hybrid_linear_layer_allocation(
+      args, /*layer_id=*/1, /*enable_hybrid_linear_cache=*/true);
+  EXPECT_FALSE(linear_layer.allocate_full_kv);
+  EXPECT_TRUE(linear_layer.allocate_linear_state);
 }
 
 TEST(BatchTest, SampleRequestKeepsThreadedRawBuilderOffsetsStable) {

@@ -270,6 +270,7 @@ size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
   total += get_vector_to_tensor_size(input.seq_lens);
   total += get_vector_to_tensor_size(input.new_token_slot_ids);
   total += get_2d_vector_to_tensor_size(input.block_tables_vec);
+  total += get_2d_vector_to_tensor_size(input.linear_block_tables_vec);
   total += get_vector_to_tensor_size(input.paged_kv_indptr);
   total += get_vector_to_tensor_size(input.paged_kv_indices);
   total += get_vector_to_tensor_size(input.paged_kv_last_page_len);
@@ -1165,6 +1166,7 @@ inline void deserialize_raw_forward_input(const char*& buffer,
   // root cause is identified and the error is resolved.
   read_tensor(buffer, input_params.new_cache_slots);
   read_tensor(buffer, input_params.block_tables);
+  read_tensor(buffer, input_params.linear_block_tables);
 
 #if defined(USE_NPU)
   if (device_buffer != nullptr && stream != nullptr) {
@@ -1254,6 +1256,7 @@ inline void serialize_raw_forward_input(const RawForwardInput& input,
   // root cause is identified and the error is resolved.
   write_vector_to_tensor(buffer, input.new_token_slot_ids);
   write_2d_vector_to_tensor(buffer, input.block_tables_vec);
+  write_2d_vector_to_tensor(buffer, input.linear_block_tables_vec);
 }
 
 size_t calculate_raw_token_size(const RawToken& token) {
@@ -1415,6 +1418,9 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
   util::pad_2d_vector(raw_input.block_tables_vec, 0);
   input_params.block_tables =
       create_2d_tensor(std::move(raw_input.block_tables_vec), torch::kInt);
+  util::pad_2d_vector(raw_input.linear_block_tables_vec, 0);
+  input_params.linear_block_tables = create_2d_tensor(
+      std::move(raw_input.linear_block_tables_vec), torch::kInt);
 
   input_params.src_block_indices =
       torch::tensor(std::move(raw_input.src_block_indices), tensor_options);

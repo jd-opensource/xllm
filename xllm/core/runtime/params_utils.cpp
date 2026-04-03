@@ -89,6 +89,13 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
     // aprint<int32_t>((block_tables_vec.back()), "block_tables_vec",
     // global_rank_);
   }
+  std::vector<std::vector<int32_t>> linear_block_tables_vec;
+  for (size_t i = 0; i < pb_forward_input->linear_block_tables_vec().size();
+       ++i) {
+    linear_block_tables_vec.emplace_back(std::vector<int32_t>(
+        pb_forward_input->linear_block_tables_vec()[i].block_tables().begin(),
+        pb_forward_input->linear_block_tables_vec()[i].block_tables().end()));
+  }
   std::vector<int32_t> selected_token_idxes =
       std::vector<int32_t>(pb_forward_input->selected_token_idxes().begin(),
                            pb_forward_input->selected_token_idxes().end());
@@ -228,6 +235,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   util::pad_2d_vector(block_tables_vec, /*pad_value=*/0);
   input_params.block_tables =
       std::move(create_2d_tensor(block_tables_vec, torch::kInt));
+  util::pad_2d_vector(linear_block_tables_vec, /*pad_value=*/0);
+  input_params.linear_block_tables =
+      std::move(create_2d_tensor(linear_block_tables_vec, torch::kInt));
 
   input_params.dp_global_token_nums = std::move(dp_global_token_nums);
   input_params.dp_is_decode = std::move(dp_is_decode);
@@ -443,6 +453,13 @@ void forward_input_to_proto(const RawForwardInput& inputs,
     proto::BlockTables pb_table;
     ADD_VECTOR_TO_PROTO(pb_table.mutable_block_tables(), t);
     *pb_forward_input->mutable_block_tables_vec()->Add() = pb_table;
+  }
+  pb_forward_input->mutable_linear_block_tables_vec()->Reserve(
+      inputs.linear_block_tables_vec.size());
+  for (auto t : inputs.linear_block_tables_vec) {
+    proto::BlockTables pb_table;
+    ADD_VECTOR_TO_PROTO(pb_table.mutable_block_tables(), t);
+    *pb_forward_input->mutable_linear_block_tables_vec()->Add() = pb_table;
   }
   pb_forward_input->set_num_sequences(inputs.num_sequences);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_dp_global_token_nums(),

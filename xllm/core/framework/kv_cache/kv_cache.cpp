@@ -103,6 +103,12 @@ std::vector<std::vector<int64_t>> KVCache::get_shapes() {
 
 void KVCache::swap_blocks(torch::Tensor& src_tensor,
                           torch::Tensor& dst_tensor) {
+  if (!key_cache_.defined() || !value_cache_.defined() ||
+      key_cache_.numel() == 0 || value_cache_.numel() == 0 ||
+      src_tensor.numel() == 0 || dst_tensor.numel() == 0) {
+    return;
+  }
+
   // batch select keys and values
   auto selected_keys = torch::index_select(key_cache_, 0, src_tensor);
   auto selected_values = torch::index_select(value_cache_, 0, src_tensor);

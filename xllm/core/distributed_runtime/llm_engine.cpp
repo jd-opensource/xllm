@@ -33,6 +33,9 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/options.h"
 #include "framework/block/hierarchy_block_manager_pool.h"
+#if defined(USE_NPU)
+#include "framework/kv_cache/hybrid_cache_utils.h"
+#endif
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/xtensor/page_allocator.h"
@@ -521,10 +524,39 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
 
   // compute kv cache n_blocks
   const int32_t block_size = options_.block_size();
+#if defined(USE_NPU)
+  const bool enable_lighting_indexer = args_.index_n_heads() > 1;
+  const bool enable_gdn_attention = has_linear_attention_layers(args_);
+  CHECK(!(enable_lighting_indexer && enable_gdn_attention))
+      << "KVCache does not support linear attention and lighting indexer "
+         "enabled at the same time.";
+  const bool optimize_hybrid_linear_cache =
+      should_enable_hybrid_linear_cache(args_,
+                                        options_.enable_disagg_pd(),
+                                        options_.enable_kvcache_store(),
+                                        options_.host_blocks_factor());
+  int64_t num_full_attention_layers =
+      count_hybrid_full_attention_layers(args_, optimize_hybrid_linear_cache);
+  int64_t num_linear_attention_layers = 0;
+  if (linear_slot_size > 0) {
+    num_linear_attention_layers = count_hybrid_linear_attention_layers(
+        args_, optimize_hybrid_linear_cache);
+  }
+  const int64_t full_cache_block_size_in_bytes =
+      block_size * (slot_size + index_slot_size + scale_slot_size);
+  const int64_t total_cache_block_size_in_bytes =
+      num_full_attention_layers * full_cache_block_size_in_bytes +
+      num_linear_attention_layers * linear_slot_size;
+  CHECK_GT(total_cache_block_size_in_bytes, 0)
+      << "invalid cache block size estimate";
+  kv_cache_cap.n_blocks =
+      kv_cache_cap.cache_size_in_bytes / total_cache_block_size_in_bytes;
+#else
   const int64_t block_size_in_bytes =
       block_size * (slot_size + index_slot_size + scale_slot_size);
   kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
                           (kv_cache_cap.n_layers * block_size_in_bytes);
+#endif
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
   return kv_cache_cap;
 }
@@ -541,6 +573,11 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   const int32_t block_size = options_.block_size();
   bool enable_lighting_indexer = args_.index_n_heads() > 1;
   bool enable_gdn_attention = has_linear_attention_layers(args_);
+#if defined(USE_NPU)
+  CHECK(!(enable_lighting_indexer && enable_gdn_attention))
+      << "KVCache does not support linear attention and lighting indexer "
+         "enabled at the same time.";
+#endif
 
   // init kv cache for each worker
   std::vector<std::vector<int64_t>> kv_cache_shape;
@@ -610,18 +647,31 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
     std::swap(shape[1], shape[2]);
   }
 #endif
-  LOG(INFO) << "Initializing k cache with shape: [" << kv_cache_shape[0] << "]";
-  LOG(INFO) << "Initializing v cache with shape: [" << kv_cache_shape[1] << "]";
+  // kv_cache_shape layout: [k, v, optional indexer, optional conv, optional
+  // ssm]
+  constexpr size_t kKeyCacheShapeIdx = 0;
+  constexpr size_t kValueCacheShapeIdx = 1;
+  constexpr size_t kFirstOptionalCacheShapeIdx = 2;
+  const size_t index_cache_shape_idx = kFirstOptionalCacheShapeIdx;
+  const size_t conv_cache_shape_idx =
+      kFirstOptionalCacheShapeIdx +
+      static_cast<size_t>(enable_lighting_indexer);
+  const size_t ssm_cache_shape_idx = conv_cache_shape_idx + 1;
+
+  LOG(INFO) << "Initializing k cache with shape: ["
+            << kv_cache_shape[kKeyCacheShapeIdx] << "]";
+  LOG(INFO) << "Initializing v cache with shape: ["
+            << kv_cache_shape[kValueCacheShapeIdx] << "]";
   if (enable_lighting_indexer) {
-    LOG(INFO) << "Initializing indexer cache with shape: [" << kv_cache_shape[2]
-              << "]";
+    LOG(INFO) << "Initializing indexer cache with shape: ["
+              << kv_cache_shape[index_cache_shape_idx] << "]";
   }
   if (enable_gdn_attention) {
     LOG(INFO) << "GND Attention is enabled";
-    LOG(INFO) << "Initializing conv cache with shape: [" << kv_cache_shape[2]
-              << "]";
-    LOG(INFO) << "Initializing ssm cache with shape: [" << kv_cache_shape[3]
-              << "]";
+    LOG(INFO) << "Initializing conv cache with shape: ["
+              << kv_cache_shape[conv_cache_shape_idx] << "]";
+    LOG(INFO) << "Initializing ssm cache with shape: ["
+              << kv_cache_shape[ssm_cache_shape_idx] << "]";
   }
 
   // initialize block manager

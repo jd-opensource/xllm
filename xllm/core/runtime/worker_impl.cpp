@@ -42,6 +42,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #if defined(USE_NPU)
+#include "framework/kv_cache/hybrid_cache_utils.h"
 #include "platform/npu/device_capture_lock.h"
 #endif
 #include "core/distributed_runtime/master.h"
@@ -185,6 +186,13 @@ bool WorkerImpl::allocate_kv_cache(
   // "auto" (default): cache dtype aligns with model dtype (no quantization)
   // "int8": enables INT8 quantization
   const bool enable_kv_cache_quant = options_.kv_cache_dtype() == "int8";
+#if defined(USE_NPU)
+  const bool optimize_hybrid_linear_cache =
+      should_enable_hybrid_linear_cache(context_.get_model_args(),
+                                        options_.enable_disagg_pd(),
+                                        options_.enable_kvcache_store(),
+                                        options_.host_blocks_factor());
+#endif
 
   if (enable_kv_cache_quant) {
 #if !defined(USE_MLU)
@@ -234,26 +242,32 @@ bool WorkerImpl::allocate_kv_cache(
       torch::Tensor key_cache, value_cache, index_cache, conv_cache, ssm_cache;
       torch::Tensor key_cache_scale, value_cache_scale;
 #if defined(USE_NPU)
+      const auto layer_allocation = get_hybrid_linear_layer_allocation(
+          context_.get_model_args(), i, optimize_hybrid_linear_cache);
+      const bool allocate_full_kv = layer_allocation.allocate_full_kv;
+      const bool allocate_linear_state = layer_allocation.allocate_linear_state;
       aclFormat npu_format_type =
           context_.get_model_args().model_type() == "deepseek_v3" &&
                   FLAGS_enable_prefix_cache
               ? ACL_FORMAT_FRACTAL_NZ
               : ACL_FORMAT_ND;
-      key_cache = at_npu::native::npu_format_cast(
-          torch::empty(kv_cache_shape[0],
-                       torch::dtype(cache_dtype).device(device_)),
-          npu_format_type);
-      value_cache = at_npu::native::npu_format_cast(
-          torch::empty(kv_cache_shape[1],
-                       torch::dtype(cache_dtype).device(device_)),
-          npu_format_type);
-      if (enable_lighting_indexer) {
+      if (allocate_full_kv) {
+        key_cache = at_npu::native::npu_format_cast(
+            torch::empty(kv_cache_shape[0],
+                         torch::dtype(cache_dtype).device(device_)),
+            npu_format_type);
+        value_cache = at_npu::native::npu_format_cast(
+            torch::empty(kv_cache_shape[1],
+                         torch::dtype(cache_dtype).device(device_)),
+            npu_format_type);
+      }
+      if (enable_lighting_indexer && allocate_full_kv) {
         index_cache = at_npu::native::npu_format_cast(
             torch::empty(kv_cache_shape[2],
                          torch::dtype(dtype_).device(device_)),
             npu_format_type);
       }
-      if (enable_linear_attention) {
+      if (allocate_linear_state) {
         conv_cache = at_npu::native::npu_format_cast(
             torch::zeros(kv_cache_shape[2],
                          torch::dtype(dtype_).device(device_)),
@@ -311,6 +325,9 @@ bool WorkerImpl::allocate_kv_cache(
       } else {
         kv_caches_.emplace_back(key_cache, value_cache);
       }
+#if defined(USE_NPU)
+      kv_caches_.back().set_block_size(options_.block_size());
+#endif
     }
   }
 

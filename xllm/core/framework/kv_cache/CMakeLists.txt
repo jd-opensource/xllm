@@ -8,6 +8,7 @@ cc_library(
     kv_cache
   HDRS
     embedding_cache.h
+    hybrid_cache_utils.h
     kv_cache.h
     kv_cache_event.h
     kv_cache_transfer.h

@@ -55,6 +55,8 @@ class KVCache final {
   torch::Tensor get_conv_cache() const;
   torch::Tensor get_ssm_cache() const;
   std::vector<std::vector<int64_t>> get_shapes();
+  int64_t block_size() const { return block_size_; }
+  void set_block_size(int64_t block_size) { block_size_ = block_size; }
 
   bool empty() const {
     return !key_cache_.defined() || !value_cache_.defined();
@@ -74,6 +76,7 @@ class KVCache final {
   torch::Tensor conv_cache_;
   // State space model cache for linear-attention layers (ssm_state).
   torch::Tensor ssm_cache_;
+  int64_t block_size_ = 0;
 };
 
 }  // namespace xllm
