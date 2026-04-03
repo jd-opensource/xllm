@@ -25,7 +25,6 @@ limitations under the License.
 #include <memory>
 
 #include "common/metrics.h"
-#include "distributed_runtime/dit_engine.h"
 #include "framework/request/dit_request.h"
 #include "util/utils.h"
 
@@ -48,11 +47,8 @@ void DiTAsyncResponseProcessor::process_failed_request(
     std::shared_ptr<DiTRequest> request,
     Status status) {}
 
-DiTDynamicBatchScheduler::DiTDynamicBatchScheduler(DiTEngine* engine,
-                                                   const Options& options)
-    : options_(options), engine_(engine), request_queue_(kRequestQueueSize) {
-  CHECK(engine_ != nullptr);
-
+DiTDynamicBatchScheduler::DiTDynamicBatchScheduler(const Options& options)
+    : options_(options), request_queue_(kRequestQueueSize) {
   response_handler_ = std::make_unique<DiTAsyncResponseProcessor>();
 }
 
@@ -71,26 +67,6 @@ bool DiTDynamicBatchScheduler::add_request(
   LOG(WARNING) << " request queue is full, size is " << request_queue_.size();
   return false;
 }
-
-void DiTDynamicBatchScheduler::step(const absl::Duration& timeout) {
-  // get a new batch of requests
-  std::vector<DiTBatch> batches = schedule_request(timeout);
-  bool all_empty =
-      std::all_of(batches.begin(), batches.end(), [](const DiTBatch& batch) {
-        return batch.empty();
-      });
-
-  if (all_empty) {
-    return;
-  }
-
-  auto output = engine_->step(batches);
-
-  // process request output in batch
-  process_batch_output();
-}
-
-void DiTDynamicBatchScheduler::generate() {}
 
 std::vector<DiTBatch> DiTDynamicBatchScheduler::prepare_batch() {
   Timer timer;

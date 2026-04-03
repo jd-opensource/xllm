@@ -32,8 +32,6 @@ limitations under the License.
 #include "util/threadpool.h"
 
 namespace xllm {
-class DiTEngine;
-
 class DiTAsyncResponseProcessor final {
  public:
   DiTAsyncResponseProcessor() = default;
@@ -61,18 +59,19 @@ class DiTScheduler : public SchedulerBase {
 
   // add a new request to scheduler.
   virtual bool add_request(std::shared_ptr<DiTRequest>& request) = 0;
+  virtual std::vector<DiTBatch> schedule_request(
+      const absl::Duration& timeout) = 0;
 };
 
 class DiTDynamicBatchScheduler : public DiTScheduler {
  public:
-  DiTDynamicBatchScheduler(DiTEngine* engine, const Options& options);
+  DiTDynamicBatchScheduler(const Options& options);
   virtual ~DiTDynamicBatchScheduler();
 
   bool add_request(std::shared_ptr<DiTRequest>& request) override;
 
-  void step(const absl::Duration& timeout) override;
-
-  void generate() override;
+  void step(const absl::Duration& timeout) override {}
+  void generate() override {}
 
   // inc/dec pending requests
   void incr_pending_requests(size_t count) override {
@@ -93,12 +92,13 @@ class DiTDynamicBatchScheduler : public DiTScheduler {
     return running_requests_;
   }
 
+  // process the batch output
+  void process_batch_output() override;
+  std::vector<DiTBatch> schedule_request(
+      const absl::Duration& timeout) override;
+
  protected:
   const Options options_;
-
-  // the engine to run the batch
-  DiTEngine* engine_;
-
   // a thread safe queue of requests, bounded by kRequestQueueSize
   // the schedule owns the requests and manages their lifetimes.
   folly::MPMCQueue<std::shared_ptr<DiTRequest>> request_queue_;
@@ -113,13 +113,7 @@ class DiTDynamicBatchScheduler : public DiTScheduler {
   std::atomic<size_t> pending_requests_{0};
 
   // build a batch of requests from the priority queue
-  virtual std::vector<DiTBatch> prepare_batch();
-
- private:
-  std::vector<DiTBatch> schedule_request(const absl::Duration& timeout);
-
-  // process the batch output
-  void process_batch_output();
+  std::vector<DiTBatch> prepare_batch();
 };
 
 }  // namespace xllm

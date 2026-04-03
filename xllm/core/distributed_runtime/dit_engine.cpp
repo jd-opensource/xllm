@@ -24,6 +24,7 @@ limitations under the License.
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "runtime/worker.h"
+#include "scheduler/scheduler_factory.h"
 #include "util/env_var.h"
 #include "util/timer.h"
 
@@ -74,6 +75,12 @@ DiTEngine::DiTEngine(const runtime::Options& options) : options_(options) {
         .within(std::chrono::seconds(timeout_seconds))
         .get();
   }
+
+  // initialize scheduler
+  DiTScheduler::Options scheduler_options;
+  scheduler_options.max_request_per_batch(options_.max_requests_per_batch());
+  scheduler_ = create_dit_scheduler(scheduler_options);
+  LOG(INFO) << "Created dit scheduler in DiTEngine.";
 }
 
 bool DiTEngine::init() {
@@ -106,6 +113,24 @@ bool DiTEngine::init_model() {
 
   LOG(INFO) << "All workers successfully initialized the model.";
   return true;
+}
+
+void DiTEngine::step(const absl::Duration& timeout) {
+  // 1. scheule a new batch of requests
+  std::vector<DiTBatch> batches = scheduler_->schedule_request(timeout);
+  bool all_empty =
+      std::all_of(batches.begin(), batches.end(), [](const DiTBatch& batch) {
+        return batch.empty();
+      });
+  if (all_empty) {
+    return;
+  }
+
+  // 2. engine step
+  auto output = step(batches);
+
+  // 3. move out finished requests
+  scheduler_->process_batch_output();
 }
 
 DiTForwardOutput DiTEngine::step(std::vector<DiTBatch>& batches) {
@@ -148,4 +173,18 @@ std::vector<int64_t> DiTEngine::get_active_activation_memory() const {
   }
   return active_activation_memories;
 }
+
+// scheduler related methods
+bool DiTEngine::add_request(std::shared_ptr<DiTRequest>& request) {
+  return scheduler_->add_request(request);
+}
+
+void DiTEngine::incr_pending_requests(size_t count) {
+  scheduler_->incr_pending_requests(count);
+}
+
+void DiTEngine::decr_pending_requests() { scheduler_->decr_pending_requests(); }
+
+void DiTEngine::generate() { /* not implemented*/ }
+
 }  // namespace xllm
