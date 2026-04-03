@@ -30,7 +30,7 @@ limitations under the License.
 #include "glm4v.h"
 #include "models/llm/npu/oxygen.h"
 #include "models/model_registry.h"
-#include "processors/qwen2_vl_image_processor.h"
+#include "processors/prompt_processor.h"
 #include "processors/qwen2_vl_input_processor.h"
 #include "qwen2_5_vl.h"
 #include "torch_npu/csrc/aten/CustomFunctions.h"
@@ -210,9 +210,10 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(OxygenvlmForConditionalGeneration);
 
-REGISTER_INPUT_PROCESSOR(oxygenvlm, Qwen2_5_VLInputProcessor);
+REGISTER_MULTIMODAL_PROCESSOR(oxygenvlm,
+                              Qwen2VLInputProcessor,
+                              Qwen2_5_VLPromptProcessor);
 REGISTER_CAUSAL_VLM_MODEL(oxygenvlm, OxygenvlmForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(oxygenvlm, Qwen2VLImageProcessor);
 // register the model args
 REGISTER_MODEL_ARGS(oxygenvlm, [&] {
   LOAD_ARG_OR(model_type, "model_type", "oxygenvlm");

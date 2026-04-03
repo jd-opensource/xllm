@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,35 +15,39 @@ limitations under the License.
 
 #pragma once
 
-#include <cstdint>
-#include <string>
-#include <utility>
+#include <torch/torch.h>
 
-#include "core/framework/model/model_args.h"
-#include "core/framework/request/mm_data.h"
-#include "processors/input_processor.h"
+#include <cstdint>
+#include <vector>
+
+#include "core/util/tensor_helper.h"
+#include "multimodal_input_processor.h"
 
 namespace xllm {
 
-class CLIPVLInputProcessor : public InputProcessor {
-  enum class TokenType {
-    INVALID,
-    IMAGE,
-    VIDEO,
-  };
-
+class CLIPInputProcessor : public MultimodalInputProcessor {
  public:
-  explicit CLIPVLInputProcessor(const ModelArgs& args);
+  CLIPInputProcessor(const ModelArgs& args);
+  ~CLIPInputProcessor() override = default;
 
-  void process(std::string& prompt, const MMData& mm_data) override;
+  bool process(const MMInput& mm_inputs, MMData& mm_datas) override;
+  torch::Tensor process_images(const torch::Tensor& images);
 
  private:
-  std::pair<TokenType, size_t> find_vision_token(const std::string& prompt,
-                                                 size_t begin);
+  std::vector<int64_t> get_resize_output_image_size(const torch::Tensor& image,
+                                                    int32_t shortest_edge);
 
-  const std::string image_token_ = "<|image_pad|>";
-  const std::string video_token_ = "<|video_pad|>";
-  int32_t merge_size_ = 0;
+ private:
+  bool do_resize_;
+  bool do_center_crop_;
+  bool do_rescale_;
+  bool do_normalize_;
+  int32_t shortest_edge_;
+  int32_t resample_;
+  double rescale_factor_;
+  std::pair<int32_t, int32_t> crop_size_;
+  std::vector<double> image_mean_;
+  std::vector<double> image_std_;
 };
 
 }  // namespace xllm

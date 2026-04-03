@@ -29,8 +29,8 @@ limitations under the License.
 #include "core/layers/npu/npu_lm_head_impl.h"
 #include "models/llm/npu/glm4.h"
 #include "models/model_registry.h"
-#include "processors/glm4v_image_processor.h"
 #include "processors/glm4v_input_processor.h"
+#include "processors/glm4v_prompt_processor.h"
 #include "torch_npu/csrc/aten/CustomFunctions.h"
 #include "xllm/core/layers/npu/npu_glm4_vision_encoder_layer_impl.h"
 
@@ -852,9 +852,8 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Glm4vForConditionalGeneration);
 
-REGISTER_INPUT_PROCESSOR(glm4v, GLM4VInputProcessor);
+REGISTER_MULTIMODAL_PROCESSOR(glm4v, Glm4VInputProcessor, GLM4VPromptProcessor);
 REGISTER_CAUSAL_VLM_MODEL(glm4v, Glm4vForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(glm4v, Glm4VImageProcessor);
 // register the model args
 REGISTER_MODEL_ARGS(glm4v, [&] {
   LOAD_ARG_OR(model_type, "model_type", "glm4v");

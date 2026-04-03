@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,14 +13,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "clip_image_processor.h"
+#include "multimodal_input_processor.h"
 
 namespace xllm {
 
-torch::Tensor ImageProcessor::resize(const torch::Tensor& image,
-                                     const std::vector<int64_t>& size,
-                                     int resample,
-                                     bool antialias) {
+torch::Tensor MultimodalInputProcessor::resize(const torch::Tensor& image,
+                                               const std::vector<int64_t>& size,
+                                               int32_t resample,
+                                               bool antialias) {
   if (image.dim() != 3) {
     LOG(FATAL) << "Input image must be a 3D tensor (C x H x W).";
   }
@@ -47,22 +47,23 @@ torch::Tensor ImageProcessor::resize(const torch::Tensor& image,
       .to(torch::kUInt8);
 }
 
-torch::Tensor ImageProcessor::centerCrop(const torch::Tensor& image,
-                                         const std::pair<int, int>& cropSize) {
+torch::Tensor MultimodalInputProcessor::centerCrop(
+    const torch::Tensor& image,
+    const std::pair<int32_t, int32_t>& cropSize) {
   if (image.dim() != 3) {
     LOG(FATAL)
         << "Input image must be a 3-dimensional tensor in (C, H, W) format.";
   }
 
-  int cropHeight = cropSize.first;
-  int cropWidth = cropSize.second;
-  int origHeight = image.size(1);
-  int origWidth = image.size(2);
+  int32_t cropHeight = cropSize.first;
+  int32_t cropWidth = cropSize.second;
+  int64_t origHeight = image.size(1);
+  int64_t origWidth = image.size(2);
 
-  int top = (origHeight - cropHeight) / 2;
-  int bottom = top + cropHeight;
-  int left = (origWidth - cropWidth) / 2;
-  int right = left + cropWidth;
+  int64_t top = (origHeight - cropHeight) / 2;
+  int64_t bottom = top + cropHeight;
+  int64_t left = (origWidth - cropWidth) / 2;
+  int64_t right = left + cropWidth;
 
   if (top >= 0 && bottom <= origHeight && left >= 0 && right <= origWidth) {
     return image.index({torch::indexing::Slice(),
@@ -70,13 +71,13 @@ torch::Tensor ImageProcessor::centerCrop(const torch::Tensor& image,
                         torch::indexing::Slice(left, right)});
   }
 
-  int newHeight = std::max(cropHeight, origHeight);
-  int newWidth = std::max(cropWidth, origWidth);
+  int64_t newHeight = std::max<int64_t>(cropHeight, origHeight);
+  int64_t newWidth = std::max<int64_t>(cropWidth, origWidth);
   auto paddedImage =
       torch::zeros({image.size(0), newHeight, newWidth}, image.options());
 
-  int topPad = (newHeight - origHeight + 1) / 2;
-  int leftPad = (newWidth - origWidth + 1) / 2;
+  int64_t topPad = (newHeight - origHeight + 1) / 2;
+  int64_t leftPad = (newWidth - origWidth + 1) / 2;
 
   paddedImage.index_put_({torch::indexing::Slice(),
                           torch::indexing::Slice(topPad, topPad + origHeight),
@@ -93,20 +94,21 @@ torch::Tensor ImageProcessor::centerCrop(const torch::Tensor& image,
                             torch::indexing::Slice(left, right)});
 }
 
-torch::Tensor ImageProcessor::rescale(const torch::Tensor& image,
-                                      double scale) {
+torch::Tensor MultimodalInputProcessor::rescale(const torch::Tensor& image,
+                                                double scale) {
   return image * scale;
 }
 
-torch::Tensor ImageProcessor::normalize(const torch::Tensor& image,
-                                        const std::vector<double>& mean,
-                                        const std::vector<double>& std) {
+torch::Tensor MultimodalInputProcessor::normalize(
+    const torch::Tensor& image,
+    const std::vector<double>& mean,
+    const std::vector<double>& std) {
   if (image.dim() != 3) {
     LOG(FATAL)
         << "Input image must be a 3-dimensional tensor in (C, H, W) format.";
   }
 
-  int numChannels = image.size(0);
+  int64_t numChannels = image.size(0);
   if (mean.size() != numChannels || std.size() != numChannels) {
     LOG(FATAL) << "Mean and std vectors must have the same number "
                << "of elements as the number of channels in the "

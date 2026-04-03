@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <vector>
 
 #include "core/framework/model/model_args.h"
@@ -25,17 +26,17 @@ limitations under the License.
 
 namespace xllm {
 
-class ImageProcessor {
+class MultimodalInputProcessor {
  public:
-  virtual ~ImageProcessor() = default;
+  virtual ~MultimodalInputProcessor() = default;
 
   virtual bool process(const MMInput& mm_inputs, MMData& mm_datas) = 0;
   virtual torch::Tensor resize(const torch::Tensor& image,
                                const std::vector<int64_t>& size,
-                               int resample,
+                               int32_t resample,
                                bool antialias = true);
   virtual torch::Tensor centerCrop(const torch::Tensor& image,
-                                   const std::pair<int, int>& cropSize);
+                                   const std::pair<int32_t, int32_t>& cropSize);
   virtual torch::Tensor rescale(const torch::Tensor& image, double scale);
   virtual torch::Tensor normalize(const torch::Tensor& image,
                                   const std::vector<double>& mean,

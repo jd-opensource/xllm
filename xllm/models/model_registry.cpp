@@ -241,29 +241,17 @@ void ModelRegistry::register_dit_model_factory(const std::string& name,
   }
 }
 
-void ModelRegistry::register_input_processor_factory(
+void ModelRegistry::register_multimodal_processor_factory(
     const std::string& name,
-    InputProcessorFactory factory) {
+    MultimodalProcessorFactory factory) {
   ModelRegistry* instance = get_instance();
 
-  if (instance->model_registry_[name].input_processor_factory != nullptr) {
-    SAFE_LOG_WARNING("input processor factory for " << name
-                                                    << " already registered.");
+  if (instance->model_registry_[name].multimodal_processor_factory != nullptr) {
+    SAFE_LOG_WARNING("multimodal processor factory for "
+                     << name << " already registered.");
   } else {
-    instance->model_registry_[name].input_processor_factory = factory;
-  }
-}
-
-void ModelRegistry::register_image_processor_factory(
-    const std::string& name,
-    ImageProcessorFactory factory) {
-  ModelRegistry* instance = get_instance();
-
-  if (instance->model_registry_[name].image_processor_factory != nullptr) {
-    SAFE_LOG_WARNING("image processor factory for " << name
-                                                    << " already registered.");
-  } else {
-    instance->model_registry_[name].image_processor_factory = factory;
+    instance->model_registry_[name].multimodal_processor_factory =
+        std::move(factory);
   }
 }
 
@@ -340,18 +328,10 @@ DiTModelFactory ModelRegistry::get_dit_model_factory(const std::string& name) {
   return instance->model_registry_[name].dit_model_factory;
 }
 
-InputProcessorFactory ModelRegistry::get_input_processor_factory(
+MultimodalProcessorFactory ModelRegistry::get_multimodal_processor_factory(
     const std::string& name) {
   ModelRegistry* instance = get_instance();
-
-  return instance->model_registry_[name].input_processor_factory;
-}
-
-ImageProcessorFactory ModelRegistry::get_image_processor_factory(
-    const std::string& name) {
-  ModelRegistry* instance = get_instance();
-
-  return instance->model_registry_[name].image_processor_factory;
+  return instance->model_registry_[name].multimodal_processor_factory;
 }
 
 ModelArgsLoader ModelRegistry::get_model_args_loader(const std::string& name) {

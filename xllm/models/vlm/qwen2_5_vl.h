@@ -21,7 +21,7 @@ limitations under the License.
 #include "core/layers/qwen2_decoder_layer.h"
 #include "models/llm/qwen2.h"
 #include "models/model_registry.h"
-#include "processors/qwen2_vl_image_processor.h"
+#include "processors/qwen2_5_vl_prompt_processor.h"
 #include "processors/qwen2_vl_input_processor.h"
 
 namespace xllm {
@@ -661,9 +661,10 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Qwen2_5_VLForConditionalGeneration);
 
-REGISTER_INPUT_PROCESSOR(qwen2_5_vl, Qwen2_5_VLInputProcessor);
+REGISTER_MULTIMODAL_PROCESSOR(qwen2_5_vl,
+                              Qwen2VLInputProcessor,
+                              Qwen2_5_VLPromptProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen2_5_vl, Qwen2_5_VLForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(qwen2_5_vl, Qwen2VLImageProcessor);
 
 // Macro to load Qwen2.5-VL model arguments (shared between qwen2_5_vl and
 // Qwen2_5_VLForConditionalGeneration)

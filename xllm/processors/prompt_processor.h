@@ -15,20 +15,23 @@ limitations under the License.
 
 #pragma once
 
+#include <torch/torch.h>
+
+#include <cstdint>
+#include <string>
 #include <vector>
 
-#include "image_processor.h"
+#include "core/framework/request/mm_data.h"
 
 namespace xllm {
 
-struct MMData;
-
-class PyWarpperImageProcessor : public ImageProcessor {
+class PromptProcessor {
  public:
-  PyWarpperImageProcessor(const ModelArgs&);
-  ~PyWarpperImageProcessor() override = default;
+  virtual ~PromptProcessor() = default;
 
-  bool process(const MMInput& mm_inputs, MMData& mm_datas) override;
+  virtual void process(std::string& prompt, const MMData& mm_data) = 0;
+  virtual void find_mm_spans(const std::vector<int32_t>& prompt,
+                             MMData& mm_data) {};
 };
 
 }  // namespace xllm

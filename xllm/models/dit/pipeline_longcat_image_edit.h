@@ -38,7 +38,7 @@
 #include "models/model_registry.h"
 #include "models/vlm/qwen2_5_vl.h"
 #include "pipeline_longcat_image.h"
-#include "processors/qwen2_vl_image_processor.h"
+#include "processors/qwen2_vl_input_processor.h"
 #include "transformer_longcat_image.h"
 
 namespace xllm {
@@ -157,7 +157,7 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
     prompt_template_encode_prefix_ = PROMPT_TEMPLATE_ENCODE_PREFIX_EDIT;
     prompt_template_encode_suffix_ = PROMPT_TEMPLATE_ENCODE_SUFFIX_EDIT;
 
-    vl_image_processor_ = std::make_unique<Qwen2VLImageProcessor>(
+    vl_image_processor_ = std::make_unique<Qwen2VLInputProcessor>(
         context.get_model_args("text_encoder"));
 
     register_module("vae", vae_);
@@ -910,7 +910,8 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
         /*antialias=*/true);
     // Ensure float32 before second resize: CUDA bicubic antialias kernel does
     // not support uint8. The first resize may return uint8 when the input is
-    // uint8 (image_processor.cpp restores the original dtype on output).
+    // uint8 (multimodal_input_processor.cpp restores the original dtype on
+    // output).
     if (!prompt_image.is_floating_point()) {
       prompt_image = prompt_image.to(torch::kFloat32);
     }
@@ -1117,7 +1118,7 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
 
   // Model components
   VAEImageProcessor vae_image_processor_{nullptr};
-  std::unique_ptr<Qwen2VLImageProcessor> vl_image_processor_;
+  std::unique_ptr<Qwen2VLInputProcessor> vl_image_processor_;
   VAE vae_{nullptr};
   LongCatImagePosEmbed pos_embed_{nullptr};
   LongCatImageTransformer2DModel transformer_{nullptr};

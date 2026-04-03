@@ -32,8 +32,8 @@ limitations under the License.
 #include "glm4v.h"
 #include "models/llm/npu/glm4_moe.h"
 #include "models/model_registry.h"
-#include "processors/glm4v_image_processor.h"
 #include "processors/glm4v_input_processor.h"
+#include "processors/prompt_processor.h"
 
 namespace xllm::npu::model {
 
@@ -215,9 +215,10 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Glm4vMoeForConditionalGeneration);
 
-REGISTER_INPUT_PROCESSOR(glm4v_moe, GLM4VInputProcessor);
+REGISTER_MULTIMODAL_PROCESSOR(glm4v_moe,
+                              Glm4VInputProcessor,
+                              GLM4VPromptProcessor);
 REGISTER_CAUSAL_VLM_MODEL(glm4v_moe, Glm4vMoeForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(glm4v_moe, Glm4VImageProcessor);
 // register the model args
 REGISTER_MODEL_ARGS(glm4v_moe, [&] {
   LOAD_ARG_OR(model_type, "model_type", "glm4v_moe");

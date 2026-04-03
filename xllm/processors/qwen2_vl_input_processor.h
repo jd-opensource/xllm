@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,39 +16,71 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
-#include <string>
-#include <utility>
+#include <tuple>
+#include <unordered_map>
+#include <vector>
 
-#include "core/framework/model/model_args.h"
-#include "core/framework/request/mm_data.h"
-#include "processors/input_processor.h"
+#include "multimodal_input_processor.h"
 
 namespace xllm {
 
-class Qwen2_5_VLInputProcessor : public InputProcessor {
-  enum class TokenType {
-    INVALID,
-    IMAGE,
-    VIDEO,
-  };
-
+class Qwen2VLInputProcessor : public MultimodalInputProcessor {
  public:
-  explicit Qwen2_5_VLInputProcessor(const ModelArgs& args);
+  Qwen2VLInputProcessor(const ModelArgs&);
+  ~Qwen2VLInputProcessor() override = default;
 
-  void process(std::string& prompt, const MMData& mm_data) override;
-  void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) override;
+  bool process(const MMInput& mm_inputs, MMData& mm_datas) override;
 
  private:
-  std::pair<TokenType, size_t> find_vision_token(const std::string& prompt,
-                                                 size_t begin);
+  bool process_images(std::vector<torch::Tensor> images, MMData& mm_datas);
+  bool process_image(torch::Tensor image,
+                     torch::Tensor& pixel_values,
+                     torch::Tensor& thw);
 
-  const std::string image_token_ = "<|image_pad|>";
-  const std::string video_token_ = "<|video_pad|>";
-  int32_t vision_start_token_id_;
-  int32_t vision_end_token_id_;
-  int32_t image_token_id_;
-  int32_t video_token_id_;
-  int32_t merge_size_ = 0;
+  bool process_images_embedding(
+      const std::vector<EmbeddingOutput>& images_embedding,
+      MMData& mm_datas);
+
+  bool process_videos(std::vector<torch::Tensor> videos,
+                      std::vector<VideoMetadata> video_meta_list,
+                      MMData& mm_datas);
+  bool process_video(torch::Tensor video,
+                     VideoMetadata& metadata,
+                     torch::Tensor& pixel_values,
+                     torch::Tensor& thw);
+  torch::Tensor sample_frames(const VideoMetadata& metadata,
+                              int32_t temporal_patch_size,
+                              int32_t min_frames,
+                              int32_t max_frames,
+                              int32_t num_frames = -1,
+                              double set_fps = -1.0);
+
+ private:
+  bool do_convert_rgb_ = true;
+  bool do_normalize_ = true;
+
+  bool do_rescale_ = true;
+  bool do_resize_ = true;
+
+  std::vector<double> image_mean_;
+  std::vector<double> image_std_;
+
+  int32_t max_pixels_ = 12845056;
+  int32_t min_pixels_ = 3136;
+
+  int32_t merge_size_ = 2;
+  int32_t patch_size_ = 14;
+
+  int32_t resample_ = 3;
+  double rescale_factor_ = 0.00392156862745098;
+
+  std::unordered_map<std::string, int32_t> size_;
+  int32_t temporal_patch_size_ = 2;
+
+  bool do_sample_frame_ = true;
+
+  int32_t min_frames_ = 4;
+  int32_t max_frames_ = 768;
 };
 
 }  // namespace xllm
