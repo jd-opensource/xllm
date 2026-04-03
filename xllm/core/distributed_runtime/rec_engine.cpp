@@ -539,25 +539,25 @@ bool RecEngine::OneRecEnginePipeline::init_model_workers(
         std::make_unique<ProcessGroup>(/*rank=*/0, world_size, devices[0]));
   }
 #if defined(USE_NPU)
-  else if (devices[0].is_privateuseone()) {
+  else {
     engine_.process_groups_ =
         parallel_state::create_npu_process_groups(devices);
   }
-#endif
+#else
   else {
     engine_.process_groups_ =
         parallel_state::create_local_process_groups(devices, engine_.options_);
   }
+#endif
 
   engine_.workers_.clear();
   WorkerType worker_type = WorkerType::REC;
-  for (size_t i = 0; i < devices.size(); ++i) {
-    const int32_t rank = static_cast<int32_t>(i);
-    ProcessGroup* pg = engine_.process_groups_[i].get();
+  for (int32_t rank = 0; rank < world_size; ++rank) {
+    ProcessGroup* pg = engine_.process_groups_[rank].get();
     ParallelArgs parallel_args(rank, world_size, pg);
     parallel_args.tp_group_ = pg;
     engine_.workers_.emplace_back(std::make_unique<Worker>(
-        parallel_args, devices[i], engine_.options_, worker_type));
+        parallel_args, devices[rank], engine_.options_, worker_type));
   }
 
   std::vector<folly::SemiFuture<bool>> futures;
