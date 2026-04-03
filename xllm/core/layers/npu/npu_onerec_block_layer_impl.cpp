@@ -43,7 +43,7 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(torch::Tensor& hidden_states,
                  node_id,
                  event,
                  event_flag,
-                 torch::Tensor());
+                 /*expert_array=*/torch::Tensor());
 }
 
 torch::Tensor NpuOneRecBlockLayerImpl::forward(
