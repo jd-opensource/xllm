@@ -557,10 +557,11 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   CpPrefillInputs tmp_cp_inputs;
   if (parallel_args_.cp_size() > 1 &&
       input.input_params.batch_forward_type.is_prefill()) {
-    tmp_cp_inputs = prepare_cp_prefill_inputs(parallel_args_.cp_size(),
-                                              input.token_ids.cpu(),
-                                              input.positions.cpu(),
-                                              input.input_params.q_seq_lens.cpu());
+    tmp_cp_inputs =
+        prepare_cp_prefill_inputs(parallel_args_.cp_size(),
+                                  input.token_ids.cpu(),
+                                  input.positions.cpu(),
+                                  input.input_params.q_seq_lens.cpu());
     processed_input.input_params.cp_prefill_inputs = tmp_cp_inputs.to(device_);
     CpEpPadding cp_ep_padding(
         input.token_ids.cpu(),

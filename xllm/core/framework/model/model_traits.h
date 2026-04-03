@@ -71,12 +71,12 @@ template <typename T, typename = void>
 struct has_logits_with_hidden : std::false_type {};
 
 template <typename T>
-struct has_logits_with_hidden<
-    T,
-    std::void_t<decltype(std::declval<T>()->logits(
-        std::declval<const torch::Tensor&>(),
-        std::declval<const torch::Tensor&>(),
-        std::declval<torch::Tensor&>()))>> : std::true_type {};
+struct has_logits_with_hidden<T,
+                              std::void_t<decltype(std::declval<T>()->logits(
+                                  std::declval<const torch::Tensor&>(),
+                                  std::declval<const torch::Tensor&>(),
+                                  std::declval<torch::Tensor&>()))>>
+    : std::true_type {};
 
 template <typename T, typename = void>
 struct has_lazy_load_model : std::false_type {};

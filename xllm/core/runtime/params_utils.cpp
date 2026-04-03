@@ -131,9 +131,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   std::vector<int32_t> extra_token_ids =
       std::vector<int32_t>(pb_forward_input->extra_token_ids().begin(),
                            pb_forward_input->extra_token_ids().end());
-  std::vector<int32_t> mtp_shifted_token_ids = std::vector<int32_t>(
-      pb_forward_input->mtp_shifted_token_ids().begin(),
-      pb_forward_input->mtp_shifted_token_ids().end());
+  std::vector<int32_t> mtp_shifted_token_ids =
+      std::vector<int32_t>(pb_forward_input->mtp_shifted_token_ids().begin(),
+                           pb_forward_input->mtp_shifted_token_ids().end());
   std::vector<std::string> request_ids =
       std::vector<std::string>(pb_forward_input->request_ids().begin(),
                                pb_forward_input->request_ids().end());

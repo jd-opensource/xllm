@@ -423,10 +423,9 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     state.mtp_shifted_token_ids.emplace_back(extra_token_id);
     if (padded_seq_len > seq_len) {
       const int32_t pad_token_id = args_ ? args_->pad_token_id() : 0;
-      state.mtp_shifted_token_ids.insert(
-          state.mtp_shifted_token_ids.end(),
-          padded_seq_len - seq_len,
-          pad_token_id);
+      state.mtp_shifted_token_ids.insert(state.mtp_shifted_token_ids.end(),
+                                         padded_seq_len - seq_len,
+                                         pad_token_id);
     }
   }
 }

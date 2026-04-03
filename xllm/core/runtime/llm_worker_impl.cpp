@@ -208,11 +208,11 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
       if (options_.cp_size() > 1) {
         CHECK(selected_hidden_from_lm_head.defined())
             << "selected_hidden_from_lm_head must be defined when "
-              "selected_token_idxes is defined.";
+               "selected_token_idxes is defined.";
         output.sample_output.embeddings = selected_hidden_from_lm_head;
       } else {
         output.sample_output.embeddings = embeddings.index_select(
-          /*dim=*/0, sampling_params.selected_token_idxes);
+            /*dim=*/0, sampling_params.selected_token_idxes);
       }
     }
   }
