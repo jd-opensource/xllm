@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
 #include <vector>
 
 #include "image_processor.h"
@@ -25,7 +26,7 @@ struct MMData;
 
 class PyWarpperImageProcessor : public ImageProcessor {
  public:
-  PyWarpperImageProcessor(const ModelArgs&);
+  PyWarpperImageProcessor(const std::shared_ptr<ModelArgs>&);
   ~PyWarpperImageProcessor() override = default;
 
   bool process(const MMInput& mm_inputs, MMData& mm_datas) override;

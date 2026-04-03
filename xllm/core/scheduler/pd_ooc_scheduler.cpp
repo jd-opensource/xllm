@@ -44,15 +44,15 @@ namespace xllm {
 
 PDOOCScheduler::PDOOCScheduler(Engine* engine, const Options& options)
     : DisaggPDScheduler(engine, options),
-      llm_flops_(engine->model_args().n_layers(),
-                 engine->model_args().vocab_size(),
-                 engine->model_args().hidden_size(),
-                 engine->model_args().intermediate_size(),
-                 engine->model_args().n_kv_heads().has_value()
-                     ? engine->model_args().n_heads() /
-                           engine->model_args().n_kv_heads().value()
+      llm_flops_(engine->model_args()->n_layers(),
+                 engine->model_args()->vocab_size(),
+                 engine->model_args()->hidden_size(),
+                 engine->model_args()->intermediate_size(),
+                 engine->model_args()->n_kv_heads().has_value()
+                     ? engine->model_args()->n_heads() /
+                           engine->model_args()->n_kv_heads().value()
                      : 1,
-                 engine->model_args().dtype() == "int8" ? 1 : 2,  // FIXME
+                 engine->model_args()->dtype() == "int8" ? 1 : 2,  // FIXME
                  options_.nnodes() / options_.dp_size()) {
   CHECK(options_.enable_pd_ooc());
   VLOG(1) << "Creating a PD OOC Scheduler";

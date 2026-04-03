@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -33,7 +34,7 @@ class CLIPVLInputProcessor : public InputProcessor {
   };
 
  public:
-  explicit CLIPVLInputProcessor(const ModelArgs& args);
+  explicit CLIPVLInputProcessor(const std::shared_ptr<ModelArgs>& args);
 
   void process(std::string& prompt, const MMData& mm_data) override;
 

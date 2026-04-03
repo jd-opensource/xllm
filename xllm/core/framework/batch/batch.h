@@ -21,6 +21,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <limits>
+#include <memory>
 #include <vector>
 
 #include "framework/batch/batch_forward_type.h"
@@ -84,16 +85,16 @@ class Batch {
   // prepare forward inputs
   ForwardInput prepare_forward_input(uint32_t num_decoding_tokens,
                                      uint32_t min_decoding_bach_size,
-                                     const ModelArgs& args,
+                                     const std::shared_ptr<ModelArgs>& args,
                                      int32_t cp_size = 1);
 
   ForwardInput prepare_rec_forward_input(uint32_t num_decoding_tokens,
                                          uint32_t min_decoding_batch_size,
-                                         const ModelArgs& args,
+                                         const std::shared_ptr<ModelArgs>& args,
                                          ThreadPool* thread_pool = nullptr);
 
   // Convert Batch to pb type, which will be pass to remote worker.
-  RawForwardInput prepare_forward_input(const ModelArgs& args,
+  RawForwardInput prepare_forward_input(const std::shared_ptr<ModelArgs>& args,
                                         ThreadPool* thread_pool,
                                         int32_t cp_size = 1);
 

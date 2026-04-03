@@ -15,6 +15,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <tuple>
 
 #include "xllm/core/kernels/ops_api.h"
@@ -245,23 +246,23 @@ std::tuple<torch::Tensor, torch::Tensor> torch_chunk_gated_delta_rule(
 }  // namespace
 
 Qwen3GatedDeltaNetBaseImpl::Qwen3GatedDeltaNetBaseImpl(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options) {
   tp_size_ = parallel_args.tp_group_->world_size();
   rank_ = parallel_args.tp_group_->rank();
-  num_k_heads_ = args.linear_num_key_heads();
-  num_v_heads_ = args.linear_num_value_heads();
-  head_k_dim_ = args.linear_key_head_dim();
-  head_v_dim_ = args.linear_value_head_dim();
+  num_k_heads_ = args->linear_num_key_heads();
+  num_v_heads_ = args->linear_num_value_heads();
+  head_k_dim_ = args->linear_key_head_dim();
+  head_v_dim_ = args->linear_value_head_dim();
   k_size_ = num_k_heads_ * head_k_dim_;
   v_size_ = num_v_heads_ * head_v_dim_;
-  conv_kernel_size_ = args.linear_conv_kernel_dim();
+  conv_kernel_size_ = args->linear_conv_kernel_dim();
 
   // Shared causal conv projection over mixed QKV states.
   conv1d_ = register_module("conv1d",
-                            ColumnParallelLinear(args.linear_conv_kernel_dim(),
+                            ColumnParallelLinear(args->linear_conv_kernel_dim(),
                                                  k_size_ * 2 + v_size_,
                                                  /*bias=*/false,
                                                  /*gather_output=*/false,
@@ -281,7 +282,7 @@ Qwen3GatedDeltaNetBaseImpl::Qwen3GatedDeltaNetBaseImpl(
   // Output projection and gated RMSNorm shared by hybrid variants.
   o_proj_ = register_module("out_proj",
                             RowParallelLinear(v_size_,
-                                              args.hidden_size(),
+                                              args->hidden_size(),
                                               /*bias=*/false,
                                               /*input_is_parallelized=*/true,
                                               /*if_reduce_results=*/true,
@@ -290,7 +291,7 @@ Qwen3GatedDeltaNetBaseImpl::Qwen3GatedDeltaNetBaseImpl(
                                               options));
 
   norm_ = register_module(
-      "norm", RmsNormGated(head_v_dim_, args.rms_norm_eps(), options));
+      "norm", RmsNormGated(head_v_dim_, args->rms_norm_eps(), options));
 }
 
 void Qwen3GatedDeltaNetBaseImpl::load_common_state_dict(

@@ -46,7 +46,7 @@ class DeepseekV2AttentionImpl : public torch::nn::Module {
   };
 
   DeepseekV2AttentionImpl() = default;
-  DeepseekV2AttentionImpl(const ModelArgs& args,
+  DeepseekV2AttentionImpl(const std::shared_ptr<ModelArgs>& args,
                           const QuantArgs& quant_args,
                           const ParallelArgs& parallel_args,
                           const torch::TensorOptions& options,

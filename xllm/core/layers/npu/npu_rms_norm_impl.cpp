@@ -17,13 +17,15 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
+
 namespace xllm {
 namespace layer {
 
 void NpuRMSNormImpl::param_from_args(atb::infer::RmsNormParam& param,
-                                     const ModelArgs& args) {
+                                     const std::shared_ptr<ModelArgs>& args) {
   param.layerType = atb::infer::RmsNormParam::RmsNormType::RMS_NORM_NORM;
-  param.normParam.epsilon = args.rms_norm_eps();
+  param.normParam.epsilon = args->rms_norm_eps();
 }
 
 NpuRMSNormImpl::NpuRMSNormImpl(const ModelContext& context)

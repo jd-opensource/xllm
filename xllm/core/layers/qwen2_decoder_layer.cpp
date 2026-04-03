@@ -30,19 +30,19 @@ Qwen2DecoderLayerImpl::Qwen2DecoderLayerImpl(const ModelContext& context)
   // Initialize norm layers
   input_norm_ = register_module(
       "input_layernorm",
-      RMSNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RMSNorm(model_args->hidden_size(), model_args->rms_norm_eps(), options));
 
   post_norm_ = register_module(
       "post_attention_layernorm",
-      RMSNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RMSNorm(model_args->hidden_size(), model_args->rms_norm_eps(), options));
 
   // Initialize mlp
   mlp_ = register_module("mlp",
-                         DenseMLP(model_args.hidden_size(),
-                                  model_args.intermediate_size(),
+                         DenseMLP(model_args->hidden_size(),
+                                  model_args->intermediate_size(),
                                   true,
                                   false,
-                                  model_args.hidden_act(),
+                                  model_args->hidden_act(),
                                   /*enable_result_reduction=*/true,
                                   quant_args,
                                   parallel_args_.tp_group_,

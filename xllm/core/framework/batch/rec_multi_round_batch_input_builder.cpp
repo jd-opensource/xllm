@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -50,7 +51,7 @@ RecMultiRoundBatchInputBuilder::RecMultiRoundBatchInputBuilder(
     const std::vector<MMData>& mm_data_vec,
     std::vector<BlockTransferInfo>* swap_block_transfer_infos,
     const uint64_t batch_id,
-    const ModelArgs* args,
+    const std::shared_ptr<ModelArgs> args,
     BatchForwardType batch_forward_type,
     ThreadPool* thread_pool)
     : allowed_max_tokens_(allowed_max_tokens),
@@ -185,8 +186,7 @@ void RecMultiRoundBatchInputBuilder::extract_tokens_and_positions(
 
   // Handle MRope positions
   if (use_mrope_) {
-    const auto& args = *args_;
-    MPositionHelper helper(*sequence, args);
+    MPositionHelper helper(*sequence, args_);
     base_state.mrope_positions_vec.push_back(helper.get_positions());
   }
 

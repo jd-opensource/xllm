@@ -25,6 +25,7 @@ limitations under the License.
 #include <torch_npu/csrc/libs/init_npu.h>
 
 #include <functional>
+#include <memory>
 
 #include "atb/atb_infer.h"
 #include "framework/kv_cache/kv_cache.h"
@@ -60,7 +61,8 @@ class NpuRMSNormImpl : public BaseLayer {
 
   void build_node_variant_pack(atb_speed::Model::Node& node, torch::Tensor& x);
 
-  void param_from_args(atb::infer::RmsNormParam& param, const ModelArgs& args);
+  void param_from_args(atb::infer::RmsNormParam& param,
+                       const std::shared_ptr<ModelArgs>& args);
 
   atb_speed::Model::Node norm_node_;
   std::string model_name_;

@@ -60,7 +60,7 @@ torch::Tensor MPositionHelper::get_positions() {
     if (auto res = mm_data.get<torch::Tensor>("second_per_grid_ts"))
       second_per_grid_ts = res.value();
     std::tuple<torch::Tensor, int> res;
-    if (!absl::StartsWith(args_.model_type(), "glm4v")) {
+    if (!absl::StartsWith(args_->model_type(), "glm4v")) {
       res = get_positions_p(image_grid_thw, video_grid_thw, second_per_grid_ts);
     } else {
       res = get_positions_glm(image_grid_thw, video_grid_thw);
@@ -76,11 +76,11 @@ std::tuple<torch::Tensor, int> MPositionHelper::get_positions_glm(
     torch::Tensor image_grid_thw,
     torch::Tensor video_grid_thw) {
   auto input_tokens = seq_.tokens();
-  auto spatial_merge_size = args_.mm_spatial_merge_size();
-  auto image_token_id = args_.image_token_id();
-  auto video_token_id = args_.video_token_id();
-  auto video_start_token_id = args_.video_start_token_id();
-  auto video_end_token_id = args_.video_end_token_id();
+  auto spatial_merge_size = args_->mm_spatial_merge_size();
+  auto image_token_id = args_->image_token_id();
+  auto video_token_id = args_->video_token_id();
+  auto video_start_token_id = args_->video_start_token_id();
+  auto video_end_token_id = args_->video_end_token_id();
 
   auto dtype = torch::kInt32;
 
@@ -185,11 +185,11 @@ std::tuple<torch::Tensor, int> MPositionHelper::get_positions_p(
     torch::Tensor image_grid_thw,
     torch::Tensor video_grid_thw,
     torch::Tensor second_per_grid_ts) {
-  auto image_token_id = args_.image_token_id();
-  auto video_token_id = args_.video_token_id();
-  auto vision_start_token_id = args_.vision_start_token_id();
-  auto spatial_merge_size = args_.mm_spatial_merge_size();
-  auto tokens_per_second = args_.mm_tokens_per_second();
+  auto image_token_id = args_->image_token_id();
+  auto video_token_id = args_->video_token_id();
+  auto vision_start_token_id = args_->vision_start_token_id();
+  auto spatial_merge_size = args_->mm_spatial_merge_size();
+  auto tokens_per_second = args_->mm_tokens_per_second();
 
   auto input_tokens = seq_.tokens();
   auto input_tokens_tensor = torch::tensor(std::vector<int>(input_tokens));

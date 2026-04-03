@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "npu_glm4_moe_decoder_layer.h"
 
+#include <memory>
+
 #include "common/global_flags.h"
 
 DECLARE_string(rank_tablefile);
@@ -32,7 +34,7 @@ NpuGlm4MoeDecoderImpl::NpuGlm4MoeDecoderImpl(const ModelContext& context,
       device_id_(context.get_tensor_options().device().index()),
       layer_id_(layer_id),
       num_speculative_tokens_(
-          context.get_model_args().num_speculative_tokens()) {
+          context.get_model_args()->num_speculative_tokens()) {
   auto model_args = context.get_model_args();
   auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
@@ -41,7 +43,7 @@ NpuGlm4MoeDecoderImpl::NpuGlm4MoeDecoderImpl(const ModelContext& context,
   ep_local_tp_size_ = parallel_args.world_size() / ep_size_;
   CHECK_EQ(parallel_args.world_size(), ep_size_ * ep_local_tp_size_);
   ep_local_tp_rank_ = parallel_args.rank() % ep_local_tp_size_;
-  num_experts_per_partition_ = model_args.num_experts() / ep_size_;
+  num_experts_per_partition_ = model_args->num_experts() / ep_size_;
   ep_rank_ = parallel_args.rank() / ep_local_tp_size_;
   start_expert_id_ = ep_rank_ * num_experts_per_partition_;
   end_expert_id_ = start_expert_id_ + num_experts_per_partition_ - 1;
@@ -86,7 +88,7 @@ void NpuGlm4MoeDecoderImpl::initialize_tensors(
 
 void NpuGlm4MoeDecoderImpl::param_from_args(
     atb_speed::glm::MoeLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args,
     bool is_prefill) {
   initialize_basic_parameters(param, args, parallel_args, is_prefill);
@@ -106,12 +108,12 @@ void NpuGlm4MoeDecoderImpl::initialize_weight_tensors(
 
 void NpuGlm4MoeDecoderImpl::initialize_basic_parameters(
     atb_speed::glm::MoeLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args,
     bool is_prefill) {
   param.isFA = false;
   param.isPrefill = is_prefill;
-  param.isBF16 = args.dtype() == "bfloat16";
+  param.isBF16 = args->dtype() == "bfloat16";
   param.enableSwiGLU = true;
   param.enableLcoc = is_prefill;  // false;
 
@@ -122,19 +124,19 @@ void NpuGlm4MoeDecoderImpl::initialize_basic_parameters(
 
   // TODO: not support MTP model yet
   param.enableAclGraphPagedAttention =
-      FLAGS_enable_graph && !is_prefill && args.n_layers() > 1;
+      FLAGS_enable_graph && !is_prefill && args->n_layers() > 1;
 
-  param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
+  param.moeLinearTransposeType = (layer_id_ < args->first_k_dense_replace())
                                      ? std::vector<int>{-1, -1, -1, -1}
                                      : std::vector<int>{1, 1, -1, 1};
 
-  param.normEps = args.rms_norm_eps();
+  param.normEps = args->rms_norm_eps();
   // param.rank = parallel_args.rank();
   param.backend = FLAGS_communication_backend;
   // param.rankTableFile = FLAGS_rank_tablefile;
 
   param.layerId = layer_id_;
-  param.numHiddenLayers = args.n_layers();
+  param.numHiddenLayers = args->n_layers();
   if (quantize_type_.empty()) {
     param.enableGMMSwigluQuant = false;
   } else {
@@ -145,16 +147,16 @@ void NpuGlm4MoeDecoderImpl::initialize_basic_parameters(
   param.enableSpeculate = false;                    // MTP
   param.enableSwiGLUQuantForSharedExperts = false;  // TODO
 
-  param.useQKNorm = args.use_qk_norm();
-  if (args.use_qk_norm()) {
+  param.useQKNorm = args->use_qk_norm();
+  if (args->use_qk_norm()) {
     WEIGHT_COUNT_PER_LAYER = 70;
   }
-  param.hiddenSizePerAttentionHead = args.head_dim();
-  std::optional<long int> optionalValue = args.n_kv_heads();
+  param.hiddenSizePerAttentionHead = args->head_dim();
+  std::optional<long int> optionalValue = args->n_kv_heads();
   param.numKeyValueHeadsPerRank = std::max(
       1, static_cast<int>(optionalValue.value()) / parallel_args.world_size());
 
-  param.numAttentionHeadsPerRank = args.n_heads() / dp_local_tp_size_;
+  param.numAttentionHeadsPerRank = args->n_heads() / dp_local_tp_size_;
 
   param.linearTransposeType = {1, -1, -1, 1, -1, -1, -1};
   // param.worldSize = parallel_args.world_size();
@@ -162,7 +164,7 @@ void NpuGlm4MoeDecoderImpl::initialize_basic_parameters(
 
 void NpuGlm4MoeDecoderImpl::initialize_attention_parameters(
     atb_speed::glm::MoeLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args) {
   param.linearHasBias = {true, false, false, false};
   // param.enableFA3 = false;           // TODO
@@ -171,26 +173,26 @@ void NpuGlm4MoeDecoderImpl::initialize_attention_parameters(
 
 void NpuGlm4MoeDecoderImpl::initialize_mlp_parameters(
     atb_speed::glm::MoeLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args) {
-  param.hasSharedExpert = (args.n_shared_experts() > 0);
+  param.hasSharedExpert = (args->n_shared_experts() > 0);
   param.hasSharedExpertGate = false;
   param.processLogits = "normScaling";
-  param.numOfSelectedExperts = {args.num_experts_per_tok()};
+  param.numOfSelectedExperts = {args->num_experts_per_tok()};
 
   param.expertParallelDegree = 0;
   param.enableFusedRouting = true;
-  param.numOfSharedExperts = args.n_shared_experts();
-  param.numOfExperts = args.num_experts();
-  param.numOfDeviceExperts = args.num_experts();
-  param.routedScalingFactor = args.routed_scaling_factor();
+  param.numOfSharedExperts = args->n_shared_experts();
+  param.numOfExperts = args->num_experts();
+  param.numOfDeviceExperts = args->num_experts();
+  param.routedScalingFactor = args->routed_scaling_factor();
   param.deviceExpert.resize(num_experts_per_partition_);
-  param.firstKDenseReplace = args.first_k_dense_replace();
-  param.numOfGroups = args.n_group();
-  param.topkGroups = atb::SVector<int>{args.topk_group()};
+  param.firstKDenseReplace = args->first_k_dense_replace();
+  param.numOfGroups = args->n_group();
+  param.topkGroups = atb::SVector<int>{args->topk_group()};
   param.isDenseLayer = param.layerId < param.firstKDenseReplace;
   param.enableDispatchCombineV2 = true;
-  // param.deviceExpert.resize(args.n_routed_experts());
+  // param.deviceExpert.resize(args->n_routed_experts());
   std::iota(
       param.deviceExpert.begin(), param.deviceExpert.end(), start_expert_id_);
   // param.maskStartIdx = 0;

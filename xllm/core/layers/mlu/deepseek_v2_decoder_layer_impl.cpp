@@ -41,7 +41,7 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
   const auto& options = context.get_tensor_options();
-  is_moe_layer_ = layer_id >= model_args.first_k_dense_replace();
+  is_moe_layer_ = layer_id >= model_args->first_k_dense_replace();
 
   // DeepSeek MoE only support ep == world_size when expert parallel is on
   if (parallel_args_.ep_size() > 1) {
@@ -61,11 +61,11 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
   // Initialize norm layers
   input_norm_ = register_module(
       "input_layernorm",
-      RMSNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RMSNorm(model_args->hidden_size(), model_args->rms_norm_eps(), options));
 
   post_norm_ = register_module(
       "post_attention_layernorm",
-      RMSNorm(model_args.hidden_size(), model_args.rms_norm_eps(), options));
+      RMSNorm(model_args->hidden_size(), model_args->rms_norm_eps(), options));
 
   // Initialize mlp
   if (is_moe_layer_) {
@@ -75,11 +75,11 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
                             model_args, quant_args, parallel_args_, options));
   } else {
     mlp_ = register_module("mlp",
-                           DenseMLP(model_args.hidden_size(),
-                                    model_args.intermediate_size(),
+                           DenseMLP(model_args->hidden_size(),
+                                    model_args->intermediate_size(),
                                     /*is_gated=*/true,
                                     /*has_bias=*/false,
-                                    model_args.hidden_act(),
+                                    model_args->hidden_act(),
                                     /*enable_result_reduction=*/false,
                                     quant_args,
                                     parallel_args_.tp_group_,

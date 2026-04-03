@@ -24,7 +24,7 @@ namespace layer {
 
 void NpuWordEmbeddingImpl::param_from_args(
     atb_speed::common::WordEmbeddingParam& param,
-    const xllm::ModelArgs& args,
+    const std::shared_ptr<xllm::ModelArgs>& args,
     const xllm::ParallelArgs& parallel_args) {
   param.unpadInputs = true;
 

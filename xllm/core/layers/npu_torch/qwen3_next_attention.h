@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "attention.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
@@ -33,7 +35,7 @@ namespace layer {
 class Qwen3NextAttentionImpl : public torch::nn::Module {
  public:
   Qwen3NextAttentionImpl() = default;
-  Qwen3NextAttentionImpl(const ModelArgs& args,
+  Qwen3NextAttentionImpl(const std::shared_ptr<ModelArgs>& args,
                          const QuantArgs& quant_args,
                          const ParallelArgs& parallel_args,
                          const torch::TensorOptions& options,

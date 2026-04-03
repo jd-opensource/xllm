@@ -115,15 +115,15 @@ class LlamaModelImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     // register submodules
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(context.get_model_args().n_layers());
+    layers_.reserve(context.get_model_args()->n_layers());
     npu_embed_tokens_ =
         register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
     norm_ = register_module("norm", layer::NpuRMSNorm(context));
 
     std::tie(cos_pos_, sin_pos_) =
         get_llama_rotary_embedding(128,
-                                   model_args.max_position_embeddings(),
-                                   model_args.rope_theta(),
+                                   model_args->max_position_embeddings(),
+                                   model_args->rope_theta(),
                                    options);
     // encode_attn_mask_ =
     //   layer::AttentionMask(options.device(),
@@ -135,7 +135,7 @@ class LlamaModelImpl : public torch::nn::Module {
                                       /*mask_value=*/mask_value);
     max_seq_len_ = 0;
 
-    for (int32_t i = 0; i < model_args.n_layers(); i++) {
+    for (int32_t i = 0; i < model_args->n_layers(); i++) {
       auto block = LlamaDecoderLayer(context);
       layers_.push_back(block);
       blocks_->push_back(block);

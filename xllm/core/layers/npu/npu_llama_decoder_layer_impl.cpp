@@ -19,6 +19,7 @@ limitations under the License.
 #include <mstx/ms_tools_ext.h>
 
 #include <map>
+#include <memory>
 
 #include "common/global_flags.h"
 #include "core/layers/common/attention_mask.h"
@@ -59,12 +60,12 @@ NpuLlamaDecoderLayerImpl::NpuLlamaDecoderLayerImpl(const ModelContext& context)
 // fix param
 void NpuLlamaDecoderLayerImpl::param_from_args(
     atb_speed::llama::LlamaLayerParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args,
     bool isPrefill) {
   param.isFA = false;
   param.isPrefill = isPrefill;
-  param.isBF16 = args.dtype() == "bfloat16";
+  param.isBF16 = args->dtype() == "bfloat16";
   param.enableSwiGLU = true;
   param.enableLcoc = isPrefill;
   param.enableSpeculate = false;
@@ -76,14 +77,14 @@ void NpuLlamaDecoderLayerImpl::param_from_args(
   param.linearTransposeType = {1, -1, -1, 1, 1, -1, 1};
   param.enableKvQuant = false;
   param.quantGroupSize = 0;
-  param.normEps = args.rms_norm_eps();
+  param.normEps = args->rms_norm_eps();
   param.normEps = 0.00001;
   // param.normType = 0;
   param.enableFA3 = false;
   param.worldSize = parallel_args.world_size();
-  param.numAttentionHeadsPerRank = args.n_heads() / param.worldSize;
-  param.hiddenSizePerAttentionHead = args.hidden_size() / args.n_heads();
-  std::optional<long int> optionalValue = args.n_kv_heads();
+  param.numAttentionHeadsPerRank = args->n_heads() / param.worldSize;
+  param.hiddenSizePerAttentionHead = args->hidden_size() / args->n_heads();
+  std::optional<long int> optionalValue = args->n_kv_heads();
   param.numKeyValueHeadsPerRank =
       static_cast<int>(optionalValue.value()) / param.worldSize;
   param.rank = parallel_args.rank();

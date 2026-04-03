@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 #include <torch_npu/torch_npu.h>
 
+#include <memory>
 #include <nlohmann/json.hpp>
 
 #include "framework/model/model_args.h"
@@ -67,23 +68,23 @@ class NpuGlm4MoeDecoderLiteImpl : public BaseLayer {
   void initialize_weight_tensors(const torch::TensorOptions& options);
 
   void param_from_args(atb_speed::glm::MoeLayerParam& param,
-                       const ModelArgs& args,
+                       const std::shared_ptr<ModelArgs>& args,
                        const ParallelArgs& parallel_args,
                        bool is_prefill,
                        bool is_prefixcache);
 
   void initialize_basic_parameters(atb_speed::glm::MoeLayerParam& param,
-                                   const ModelArgs& args,
+                                   const std::shared_ptr<ModelArgs>& args,
                                    const ParallelArgs& parallel_args,
                                    bool is_prefill,
                                    bool is_prefixcache);
 
   void initialize_attention_parameters(atb_speed::glm::MoeLayerParam& param,
-                                       const ModelArgs& args,
+                                       const std::shared_ptr<ModelArgs>& args,
                                        const ParallelArgs& parallel_args);
 
   void initialize_mlp_parameters(atb_speed::glm::MoeLayerParam& param,
-                                 const ModelArgs& args,
+                                 const std::shared_ptr<ModelArgs>& args,
                                  const ParallelArgs& parallel_args);
 
   void initialize_parallel_parameters(atb_speed::glm::MoeLayerParam& param,

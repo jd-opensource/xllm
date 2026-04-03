@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "deepseek_v2_attention.h"
 
+#include <memory>
 #include <tuple>
 
 #include "kernels/ops_api.h"
@@ -23,25 +24,25 @@ namespace xllm {
 namespace layer {
 
 DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options,
     const OptimizationConfig& optimization_config)
-    : q_lora_rank_(args.q_lora_rank()),
-      kv_lora_rank_(args.kv_lora_rank()),
-      qk_nope_head_dim_(args.qk_nope_head_dim()),
-      qk_rope_head_dim_(args.qk_rope_head_dim()),
-      enable_lighting_indexer_(args.index_n_heads() > 0),
-      index_topk_(args.index_topk()),
-      v_head_dim_(args.v_head_dim()),
-      eps_(args.rms_norm_eps()),
+    : q_lora_rank_(args->q_lora_rank()),
+      kv_lora_rank_(args->kv_lora_rank()),
+      qk_nope_head_dim_(args->qk_nope_head_dim()),
+      qk_rope_head_dim_(args->qk_rope_head_dim()),
+      enable_lighting_indexer_(args->index_n_heads() > 0),
+      index_topk_(args->index_topk()),
+      v_head_dim_(args->v_head_dim()),
+      eps_(args->rms_norm_eps()),
       interleaved_(true) {
   use_full_replicated_attention_weights_ = FLAGS_enable_prefill_sp;
   const int64_t tp_size = parallel_args.tp_group_->world_size();
-  int64_t hidden_size = args.hidden_size();
-  int64_t num_heads = args.n_heads();
-  int64_t max_position_embeddings = args.max_position_embeddings();
+  int64_t hidden_size = args->hidden_size();
+  int64_t num_heads = args->n_heads();
+  int64_t max_position_embeddings = args->max_position_embeddings();
 
   qk_head_dim_ = qk_nope_head_dim_ + qk_rope_head_dim_;
   CHECK_EQ(num_heads % tp_size, 0)
@@ -128,12 +129,12 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
       create_mla_rotary_embedding(args,
                                   qk_rope_head_dim_,
                                   max_position_embeddings,
-                                  args.indexer_rope_interleave(),
+                                  args->indexer_rope_interleave(),
                                   options));
 
-  if (args.rope_scaling_rope_type() == "deepseek_yarn") {
+  if (args->rope_scaling_rope_type() == "deepseek_yarn") {
     float mscale = layer::rotary::yarn_get_mscale(
-        args.rope_scaling_factor(), args.rope_scaling_mscale_all_dim());
+        args->rope_scaling_factor(), args->rope_scaling_mscale_all_dim());
     scaling *= mscale * mscale;
   }
 
@@ -141,10 +142,10 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
     indexer_ =
         register_module("indexer",
                         Indexer(hidden_size,
-                                args.index_n_heads(),
-                                args.index_head_dim(),
+                                args->index_n_heads(),
+                                args->index_head_dim(),
                                 qk_rope_head_dim_,
-                                args.index_topk(),
+                                args->index_topk(),
                                 q_lora_rank_,
                                 optimization_config.enable_fused_indexer_qk,
                                 indexer_rotary_emb_,
@@ -160,11 +161,11 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                     kv_lora_rank_ + qk_rope_head_dim_,
                                     /*num_local_heads=*/1,
                                     kv_lora_rank_,
-                                    args.sliding_window(),
+                                    args->sliding_window(),
                                     scaling,
                                     use_fused_mla_qkv_,
                                     enable_lighting_indexer_,
-                                    args.enable_mla()));
+                                    args->enable_mla()));
 
   o_proj_ =
       register_module("o_proj",

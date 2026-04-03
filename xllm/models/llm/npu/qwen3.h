@@ -50,15 +50,15 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     dp_rank_ = parallel_args.rank() / dp_local_tp_size;
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args.n_layers());
+    layers_.reserve(model_args->n_layers());
     norm_ = register_module("norm", layer::NpuRMSNorm(context));
     npu_embed_tokens_ =
         register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
     atb_pos_emb_ = layer::NpuPosEmbedding(context);
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
         128,
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
+        model_args->max_position_embeddings(),
+        model_args->rope_theta(),
         options);
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     // encode_attn_mask_ =
@@ -69,7 +69,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
 
-    for (int32_t i = 0; i < model_args.n_layers(); i++) {
+    for (int32_t i = 0; i < model_args->n_layers(); i++) {
       auto block = QWen3DecoderLayer(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
@@ -78,7 +78,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     // Eagle3: layer ids to capture (can be read from layers_to_capture in
     // config.json)
     if (FLAGS_speculative_algorithm == "Eagle3") {
-      const auto& layer_ids_from_config = model_args.layers_to_capture();
+      const auto& layer_ids_from_config = model_args->layers_to_capture();
       if (!layer_ids_from_config.empty()) {
         set_eagle3_layers_to_capture(
             std::make_optional<std::vector<int32_t>>(layer_ids_from_config));
@@ -88,7 +88,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       // Pre-allocate aux output buffer [max_tokens_per_batch, hidden_size *
       // num_captured]
       const int64_t num_captured = layers_to_capture_set_.size();
-      const int64_t aux_dim = model_args.hidden_size() * num_captured;
+      const int64_t aux_dim = model_args->hidden_size() * num_captured;
       aux_output_buffer_ =
           torch::empty({FLAGS_max_tokens_per_batch, aux_dim}, options);
     }

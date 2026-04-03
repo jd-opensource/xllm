@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <limits>
+#include <memory>
 #include <vector>
 
 namespace xllm {
@@ -27,7 +28,7 @@ struct ModelArgs;
 
 class MPositionHelper {
  public:
-  MPositionHelper(Sequence& seq, const ModelArgs& args)
+  MPositionHelper(Sequence& seq, const std::shared_ptr<ModelArgs>& args)
       : seq_(seq), args_(args) {}
 
   torch::Tensor get_positions();
@@ -45,7 +46,7 @@ class MPositionHelper {
 
  private:
   Sequence& seq_;
-  const ModelArgs& args_;
+  const std::shared_ptr<ModelArgs>& args_;
 };
 
 }  // namespace xllm

@@ -37,8 +37,8 @@ class Glm4MoeMtpModelImpl
 
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
         64,
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
+        model_args->max_position_embeddings(),
+        model_args->rope_theta(),
         options);
   }
 };

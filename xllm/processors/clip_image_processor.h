@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <vector>
 
 #include "core/util/tensor_helper.h"
@@ -26,7 +27,7 @@ namespace xllm {
 
 class CLIPImageProcessor : public ImageProcessor {
  public:
-  CLIPImageProcessor(const ModelArgs& args);
+  CLIPImageProcessor(const std::shared_ptr<ModelArgs>& args);
   ~CLIPImageProcessor() override = default;
 
   bool process(const MMInput& mm_inputs, MMData& mm_datas) override;

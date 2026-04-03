@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
+
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/request/mm_data_visitor.h"
@@ -25,7 +27,7 @@ limitations under the License.
 namespace xllm {
 
 VlmExecutorImpl::VlmExecutorImpl(CausalLM* model,
-                                 const ModelArgs& args,
+                                 const std::shared_ptr<ModelArgs>& args,
                                  const torch::Device& device,
                                  const runtime::Options& options)
     : model_(dynamic_cast<CausalVLM*>(model)),

@@ -95,46 +95,46 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
     auto parallel_args = context.get_parallel_args();
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args.n_layers());
+    layers_.reserve(model_args->n_layers());
     // register submodules
     device_ = options.device();
     dtype_ = options.dtype().toScalarType();
-    num_speculative_tokens_ = model_args.num_speculative_tokens();
+    num_speculative_tokens_ = model_args->num_speculative_tokens();
     npu_embed_tokens_ =
         register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
 
     atb_pos_emb_ = layer::NpuPosEmbedding(context);
 
     // cos_sin_ = layer::rotary::get_deepseek_rotary_embedding(
-    //     model_args.qk_rope_head_dim(),
-    //     model_args.qk_rope_head_dim(),
-    //     model_args.max_position_embeddings(),
-    //     model_args.rope_scaling_original_max_position_embeddings(),
-    //     model_args.rope_theta(),
+    //     model_args->qk_rope_head_dim(),
+    //     model_args->qk_rope_head_dim(),
+    //     model_args->max_position_embeddings(),
+    //     model_args->rope_scaling_original_max_position_embeddings(),
+    //     model_args->rope_theta(),
     //     /*interleaved*/ false,
-    //     model_args.rope_scaling_factor(),
-    //     model_args.rope_extrapolation_factor(),
-    //     model_args.rope_scaling_attn_factor(),
-    //     model_args.rope_scaling_beta_fast(),
-    //     model_args.rope_scaling_beta_slow(),
-    //     model_args.rope_scaling_mscale(),
-    //     model_args.rope_scaling_mscale_all_dim(),
+    //     model_args->rope_scaling_factor(),
+    //     model_args->rope_extrapolation_factor(),
+    //     model_args->rope_scaling_attn_factor(),
+    //     model_args->rope_scaling_beta_fast(),
+    //     model_args->rope_scaling_beta_slow(),
+    //     model_args->rope_scaling_mscale(),
+    //     model_args->rope_scaling_mscale_all_dim(),
     //     options);
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
-        model_args.qk_rope_head_dim(),
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
+        model_args->qk_rope_head_dim(),
+        model_args->max_position_embeddings(),
+        model_args->rope_theta(),
         options);
-    // mrope_section_ = model_args.rope_scaling_mrope_section();
+    // mrope_section_ = model_args->rope_scaling_mrope_section();
 
-    max_seq_len_ = model_args.max_position_embeddings();
-    // int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
+    max_seq_len_ = model_args->max_position_embeddings();
+    // int32_t mask_value = model_args->dtype() == "bfloat16" ? 1 : -9984;
     // int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
-    int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
+    int32_t mask_value = model_args->dtype() == "bfloat16" ? 1 : -9984;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
-    for (int32_t i = 0; i < model_args.n_layers(); ++i) {
+    for (int32_t i = 0; i < model_args->n_layers(); ++i) {
       auto block = Glm4MoeDecoderLiteLayer(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
@@ -147,7 +147,7 @@ class Glm4MoeLiteModelImpl : public torch::nn::Module {
     dp_rank_ = parallel_args.rank() / dp_local_tp_size_;
     rank_ = parallel_args.rank();
     mapping_data_ = parallel_args.mapping_data();
-    num_experts_per_tok_ = model_args.num_experts_per_tok();
+    num_experts_per_tok_ = model_args->num_experts_per_tok();
     for (int i = 0; i < parallel_args.world_size(); i += dp_local_tp_size_) {
       indices.push_back(i);
     }

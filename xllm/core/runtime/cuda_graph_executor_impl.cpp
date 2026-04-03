@@ -23,6 +23,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <algorithm>
+#include <memory>
 #include <numeric>
 #include <shared_mutex>
 #include <unordered_map>
@@ -100,7 +101,7 @@ size_t get_allocator_reserved_bytes(c10::DeviceIndex device_index) {
 
 // CudaGraphPersistentParam implementation
 CudaGraphPersistentParam::CudaGraphPersistentParam(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const torch::Device& device,
     const runtime::Options& options)
     : args_(args), device_(device), options_(options) {
@@ -119,7 +120,7 @@ CudaGraphPersistentParam::CudaGraphPersistentParam(
   }
   auto tensor_options = torch::TensorOptions().device(device);
 
-  const int64_t max_seq_len = args_.max_position_embeddings();
+  const int64_t max_seq_len = args_->max_position_embeddings();
 
   // Create persistent tensors with max_tokens_per_batch as first dimension
   persistent_tokens_ = torch::zeros({max_tokens_per_batch},
@@ -145,14 +146,14 @@ CudaGraphPersistentParam::CudaGraphPersistentParam(
                    torch::dtype(torch::kInt).device(device));
 
   // Output tensor for hidden states
-  torch::ScalarType dtype = util::parse_dtype(args.dtype(), device);
-  if (args.dtype() == "float" || args.dtype() == "float32") {
+  torch::ScalarType dtype = util::parse_dtype(args->dtype(), device);
+  if (args->dtype() == "float" || args->dtype() == "float32") {
     LOG(WARNING)
         << "Cuda graph executor init hidden_states compatible with float32 "
            "dtype: float32. This should not happen in production but for test.";
     dtype = torch::kFloat32;
   }
-  hidden_states_ = torch::zeros({max_tokens_per_batch, args.hidden_size()},
+  hidden_states_ = torch::zeros({max_tokens_per_batch, args->hidden_size()},
                                 torch::dtype(dtype).device(device));
 
   // FlashInfer decode mode parameters
@@ -194,8 +195,8 @@ void CudaGraphPersistentParam::set_aux_hidden_states(
     const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
     auto shape = value.sizes().vec();
     shape[0] = max_tokens_per_batch;
-    torch::ScalarType dtype = util::parse_dtype(args_.dtype(), device_);
-    if (args_.dtype() == "float" || args_.dtype() == "float32") {
+    torch::ScalarType dtype = util::parse_dtype(args_->dtype(), device_);
+    if (args_->dtype() == "float" || args_->dtype() == "float32") {
       dtype = torch::kFloat32;
     }
     aux_hidden_states_ =
@@ -357,7 +358,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
       << ", dst slice shape=" << slice_persistent_block_tables.sizes();
   slice_persistent_block_tables.copy_(params.block_tables,
                                       /*non_blocking=*/true);
-  if (!attn_metadata->is_prefill || args_.enable_mla()) {
+  if (!attn_metadata->is_prefill || args_->enable_mla()) {
     attn_metadata->block_table = slice_persistent_block_tables;
   }
 
@@ -370,7 +371,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     if (persistent_embedding_.numel() == 0) {
       const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
       const int64_t embedding_dim = embedding.size(1);
-      torch::ScalarType dtype = util::parse_dtype(args_.dtype(), device_);
+      torch::ScalarType dtype = util::parse_dtype(args_->dtype(), device_);
       persistent_embedding_ =
           torch::zeros({max_tokens_per_batch, embedding_dim},
                        torch::dtype(dtype).device(device_));
@@ -390,11 +391,11 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
       params.batch_forward_type.is_decode() && params.has_llmrec_params();
   const bool use_two_stage_decode =
       !FLAGS_enable_xattention_one_stage && is_decode_with_llmrec;
-  const int32_t head_dim = args_.head_dim();
+  const int32_t head_dim = args_->head_dim();
   const int64_t tp_size =
       options_.world_size() / std::max(options_.dp_size(), 1);
-  const int64_t n_heads = args_.n_heads() / std::max(tp_size, int64_t{1});
-  const int64_t total_kv_heads = args_.n_kv_heads().value_or(args_.n_heads());
+  const int64_t n_heads = args_->n_heads() / std::max(tp_size, int64_t{1});
+  const int64_t total_kv_heads = args_->n_kv_heads().value_or(args_->n_heads());
   const int64_t n_kv_heads =
       (total_kv_heads >= tp_size)
           ? (total_kv_heads / std::max(tp_size, int64_t{1}))
@@ -406,7 +407,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   // attention it's used as window_size_left which is typically sliding_window
   // - 1. This matches the behavior in attention.cpp where sliding_window_ is
   // initialized as sliding_window - 1 regardless of the value.
-  int32_t sliding_window = args_.sliding_window();
+  int32_t sliding_window = args_->sliding_window();
   sliding_window =
       sliding_window - 1;  // Convert to window_size_left (always subtract 1)
 
@@ -686,7 +687,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
 
 // CudaGraph implementation
 bool CudaGraph::capture(CausalLM* model,
-                        const ModelArgs& args,
+                        const std::shared_ptr<ModelArgs>& args,
                         const runtime::Options& options,
                         const torch::Tensor& tokens,
                         const torch::Tensor& positions,
@@ -936,10 +937,11 @@ ModelOutput CudaGraph::replay(const torch::Tensor& tokens,
 }
 
 // CudaGraphExecutorImpl implementation
-CudaGraphExecutorImpl::CudaGraphExecutorImpl(CausalLM* model,
-                                             const ModelArgs& args,
-                                             const torch::Device& device,
-                                             const runtime::Options& options)
+CudaGraphExecutorImpl::CudaGraphExecutorImpl(
+    CausalLM* model,
+    const std::shared_ptr<ModelArgs>& args,
+    const torch::Device& device,
+    const runtime::Options& options)
     : model_(model),
       args_(args),
       device_(device),
@@ -1312,7 +1314,7 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
   // Decode phase with full graph
   if (is_decode) {
     // Check if conditions are suitable for graph execution (replay or capture)
-    const auto max_seq_len = args_.max_position_embeddings();
+    const auto max_seq_len = args_->max_position_embeddings();
     const bool seq_len_supported = params.kv_max_seq_len <= max_seq_len;
 
     // Early return if conditions are not suitable for graph operations

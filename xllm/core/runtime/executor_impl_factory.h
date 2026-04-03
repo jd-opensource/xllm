@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "common/macros.h"
 #include "executor_impl.h"
 #include "framework/model/causal_lm.h"
@@ -26,11 +28,11 @@ namespace xllm {
 
 class ExecutorImplFactory {
  public:
-  using Creator =
-      std::function<std::unique_ptr<ExecutorImpl>(CausalLM*,
-                                                  const ModelArgs&,
-                                                  const torch::Device&,
-                                                  const runtime::Options&)>;
+  using Creator = std::function<std::unique_ptr<ExecutorImpl>(
+      CausalLM*,
+      const std::shared_ptr<ModelArgs>&,
+      const torch::Device&,
+      const runtime::Options&)>;
 
   static ExecutorImplFactory& get_instance();
 
@@ -38,7 +40,7 @@ class ExecutorImplFactory {
 
   std::unique_ptr<ExecutorImpl> create_executor_impl(
       CausalLM* model,
-      const ModelArgs& args,
+      const std::shared_ptr<ModelArgs>& args,
       const torch::Device& device,
       const runtime::Options& options,
       const std::string& backend);
@@ -59,7 +61,7 @@ class ExecutorImplFactory {
     return ExecutorImplFactory::get_instance().register_creator(               \
         backend,                                                               \
         [](CausalLM* model,                                                    \
-           const ModelArgs& args,                                              \
+           const std::shared_ptr<ModelArgs>& args,                             \
            const torch::Device& device,                                        \
            const runtime::Options& options) -> std::unique_ptr<ExecutorImpl> { \
           return std::make_unique<class_type>(model, args, device, options);   \

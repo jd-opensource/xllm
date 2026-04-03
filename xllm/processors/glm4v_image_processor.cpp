@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "glm4v_image_processor.h"
 
+#include <memory>
+
 namespace xllm {
 
 namespace {
@@ -188,32 +190,33 @@ torch::Tensor Glm4VImageProcessor::sample_frames(const VideoMetadata& metadata,
   return torch::tensor(uniq, torch::TensorOptions().dtype(torch::kLong));
 }
 
-Glm4VImageProcessor::Glm4VImageProcessor(const ModelArgs& args) {
-  image_mean_ = args.mm_image_normalize_mean();
-  image_std_ = args.mm_image_normalize_std();
+Glm4VImageProcessor::Glm4VImageProcessor(
+    const std::shared_ptr<ModelArgs>& args) {
+  image_mean_ = args->mm_image_normalize_mean();
+  image_std_ = args->mm_image_normalize_std();
 
-  if (args.mm_image_max_pixels() && args.mm_image_min_pixels()) {
-    min_pixels_ = args.mm_image_min_pixels();
-    max_pixels_ = args.mm_image_max_pixels();
-  } else if (args.mm_image_shortest_edge() && args.mm_image_longest_edge()) {
-    min_pixels_ = args.mm_image_shortest_edge();
-    max_pixels_ = args.mm_image_longest_edge();
+  if (args->mm_image_max_pixels() && args->mm_image_min_pixels()) {
+    min_pixels_ = args->mm_image_min_pixels();
+    max_pixels_ = args->mm_image_max_pixels();
+  } else if (args->mm_image_shortest_edge() && args->mm_image_longest_edge()) {
+    min_pixels_ = args->mm_image_shortest_edge();
+    max_pixels_ = args->mm_image_longest_edge();
   }
 
-  patch_size_ = args.mm_image_patch_size();
-  temporal_patch_size_ = args.mm_image_temporal_patch_size();
+  patch_size_ = args->mm_image_patch_size();
+  temporal_patch_size_ = args->mm_image_temporal_patch_size();
 
-  merge_size_ = args.mm_image_merge_size();
+  merge_size_ = args->mm_image_merge_size();
 
-  video_mean_ = args.mm_video_normalize_mean();
-  video_std_ = args.mm_video_normalize_std();
+  video_mean_ = args->mm_video_normalize_mean();
+  video_std_ = args->mm_video_normalize_std();
 
-  video_min_pixels_ = args.mm_video_shortest_edge();
-  video_max_pixels_ = args.mm_video_longest_edge();
+  video_min_pixels_ = args->mm_video_shortest_edge();
+  video_max_pixels_ = args->mm_video_longest_edge();
 
-  video_patch_size_ = args.mm_video_patch_size();
-  video_temporal_patch_size_ = args.mm_video_temporal_patch_size();
-  video_merge_size_ = args.mm_video_merge_size();
+  video_patch_size_ = args->mm_video_patch_size();
+  video_temporal_patch_size_ = args->mm_video_temporal_patch_size();
+  video_merge_size_ = args->mm_video_merge_size();
 
   size_ = {{"longest_edge", 12845056}, {"shortest_edge", 3136}};
 

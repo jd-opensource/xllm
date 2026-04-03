@@ -34,7 +34,7 @@ std::unique_ptr<RecBatchInputBuilder> RecBatchInputBuilder::create(
     const std::vector<MMData>& mm_data_vec,
     std::vector<BlockTransferInfo>* swap_block_transfer_infos,
     uint64_t batch_id,
-    const ModelArgs* args,
+    const std::shared_ptr<ModelArgs> args,
     BatchForwardType batch_forward_type,
     ThreadPool* thread_pool) {
   switch (rec_type) {

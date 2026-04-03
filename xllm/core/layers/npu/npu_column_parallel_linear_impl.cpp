@@ -15,14 +15,16 @@ limitations under the License.
 
 #include "layers/npu/npu_column_parallel_linear_impl.h"
 
+#include <memory>
+
 namespace xllm {
 namespace layer {
 
 void NpuColumnParallelLinearImpl::param_from_args(
     atb_speed::common::LinearParallelParam& param,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const ParallelArgs& parallel_args) {
-  param.fusionLinearParam.isBF16 = args.dtype() == "bfloat16";
+  param.fusionLinearParam.isBF16 = args->dtype() == "bfloat16";
   param.unpadInputs = true;
   param.fusionLinearParam.transposeType = 1;
 

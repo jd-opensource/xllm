@@ -99,12 +99,12 @@ void RecWorkerImpl::RecWorkPipeline::prepare_work_before_execute(
     auto dst_tensor = torch::tensor(
         dst_indices,
         torch::dtype(torch::kLong).device(runtime_.worker.device_));
-    const int64_t num_layers = runtime_.context->get_model_args().n_layers();
+    const int64_t num_layers = runtime_.context->get_model_args()->n_layers();
     for (int layer_id = 0; layer_id < num_layers; layer_id++) {
       runtime_.worker.kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
     }
   }
-  if (runtime_.context->get_model_args().enable_mla() &&
+  if (runtime_.context->get_model_args()->enable_mla() &&
       input_params.batch_forward_type.is_chunked_prefill()) {
     runtime_.worker.prepare_mla_prefixcache_inputs(input_params);
   }
@@ -122,7 +122,7 @@ void RecWorkerImpl::RecWorkPipeline::prepare_work_before_execute(
         processed_inputs.input_params.batch_forward_type.is_prefill();
     DpEpPadding dp_ep_padding(
         token_size_per_dp_group,
-        runtime_.context->get_model_args().num_experts_per_tok(),
+        runtime_.context->get_model_args()->num_experts_per_tok(),
         runtime_.context->get_parallel_args().mapping_data(),
         runtime_.worker.device(),
         runtime_.worker.dtype(),
@@ -148,7 +148,7 @@ std::optional<ForwardOutput> RecWorkerImpl::RecWorkPipeline::step(
 #if defined(USE_NPU)
     std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer =
         std::make_shared<NPULayerSynchronizerImpl>(
-            runtime_.context->get_model_args().n_layers());
+            runtime_.context->get_model_args()->n_layers());
     const_cast<ModelInputParams*>(&(input.input_params))->layer_synchronizer =
         layer_synchronizer;
 
@@ -538,15 +538,15 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::allocate_kv_caches_related() {
   auto device = runtime_.worker.device();
   auto kv_cache_options = torch::TensorOptions().dtype(dtype).device(device);
   auto int_options = torch::TensorOptions().dtype(torch::kInt32).device(device);
-  int32_t num_layers = runtime_.context->get_model_args().n_layers();
+  int32_t num_layers = runtime_.context->get_model_args()->n_layers();
 
   int32_t full_kv_len =
       max_tokens_per_batch_ + max_seqs_per_batch_ * beam_width_ *
                                   (get_rec_multi_round_decode_rounds() - 1);
   int64_t num_kv_heads =
-      runtime_.context->get_model_args().n_kv_heads().value_or(
-          runtime_.context->get_model_args().n_heads());
-  int64_t head_dim = runtime_.context->get_model_args().head_dim();
+      runtime_.context->get_model_args()->n_kv_heads().value_or(
+          runtime_.context->get_model_args()->n_heads());
+  int64_t head_dim = runtime_.context->get_model_args()->head_dim();
 
   cached_full_k_caches_.resize(num_layers);
   cached_full_v_caches_.resize(num_layers);
@@ -584,7 +584,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::allocate_kv_caches_related() {
     return;
   }
 
-  const int64_t num_heads = runtime_.context->get_model_args().n_heads();
+  const int64_t num_heads = runtime_.context->get_model_args()->n_heads();
   const int64_t max_total_beam =
       static_cast<int64_t>(max_seqs_per_batch_) * beam_width_;
   auto fp32_options =
@@ -629,7 +629,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::
   int32_t full_kv_len = shape[0];
   int64_t num_kv_heads = shape[1];
   int64_t head_dim = shape[2];
-  int32_t num_layers = runtime_.context->get_model_args().n_layers();
+  int32_t num_layers = runtime_.context->get_model_args()->n_layers();
   int32_t max_decode_step = total_round - 1;
   int32_t unshared_offset = max_tokens_per_batch_;
 
@@ -762,7 +762,7 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
   int32_t batch_size = step_meta->batch_size;
   int32_t beam_width = step_meta->beam_width;
   int32_t num_layers =
-      static_cast<int32_t>(runtime_.context->get_model_args().n_layers());
+      static_cast<int32_t>(runtime_.context->get_model_args()->n_layers());
 
   CHECK_GT(runtime_.worker.kv_caches_.size(), 0)
       << "KV caches are not initialized.";
@@ -1455,7 +1455,7 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
 
   // Determine rec model kind and pipeline type
-  const auto& model_type = context.get_model_args().model_type();
+  const auto& model_type = context.get_model_args()->model_type();
   rec_model_kind_ = get_rec_model_kind(model_type);
   CHECK(rec_model_kind_ != RecModelKind::kNone)
       << "Unsupported rec model_type: " << model_type;

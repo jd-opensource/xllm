@@ -19,6 +19,7 @@ limitations under the License.
 #include <c10/core/ScalarType.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <unordered_map>
 
 #include "core/framework/kv_cache/kv_cache.h"
@@ -81,11 +82,11 @@ class Qwen2_VisionPatchEmbedImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    auto in_features = model_args.mm_num_channels() *
-                       model_args.mm_temporal_patch_size() *
-                       model_args.mm_patch_size() * model_args.mm_patch_size();
+    auto in_features =
+        model_args->mm_num_channels() * model_args->mm_temporal_patch_size() *
+        model_args->mm_patch_size() * model_args->mm_patch_size();
 
-    auto out_features = model_args.mm_hidden_size();
+    auto out_features = model_args->mm_hidden_size();
 
     proj_ = register_module(
         "proj",
@@ -125,7 +126,7 @@ class Qwen2_VisionRotaryEmbeddingImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    dim_ = model_args.mm_head_dim() / 2;
+    dim_ = model_args->mm_head_dim() / 2;
     theta_ = 10000.0;
 
     auto opts = options.dtype(torch::kFloat32);
@@ -172,9 +173,9 @@ class Qwen2_VisionPatchMergerImpl : public torch::nn::Module {
     auto quant_args = context.get_quant_args();
     auto parallel_args = context.get_parallel_args();
 
-    int64_t d_model = model_args.mm_projection_dim();  // out_hidden_size
-    int64_t context_dim = model_args.mm_hidden_size();
-    int64_t spatial_merge_size = model_args.mm_spatial_merge_size();
+    int64_t d_model = model_args->mm_projection_dim();  // out_hidden_size
+    int64_t context_dim = model_args->mm_hidden_size();
+    int64_t spatial_merge_size = model_args->mm_spatial_merge_size();
 
     hidden_size_ =
         context_dim * static_cast<int>(std::pow(spatial_merge_size, 2));
@@ -290,14 +291,14 @@ class Qwen2_VisionTransformerImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    hidden_size_ = model_args.mm_hidden_size();
-    num_heads_ = model_args.mm_num_attention_heads();
+    hidden_size_ = model_args->mm_hidden_size();
+    num_heads_ = model_args->mm_num_attention_heads();
 
-    window_size_ = model_args.mm_window_size();
-    patch_size_ = model_args.mm_patch_size();
-    spatial_merge_size_ = model_args.mm_spatial_merge_size();
+    window_size_ = model_args->mm_window_size();
+    patch_size_ = model_args->mm_patch_size();
+    spatial_merge_size_ = model_args->mm_spatial_merge_size();
     spatial_merge_unit_ = static_cast<int>(std::pow(spatial_merge_size_, 2));
-    // mlp_ratio_ = model_args.mm_mlp_ratio();
+    // mlp_ratio_ = model_args->mm_mlp_ratio();
 
     patch_embed_ =
         register_module("patch_embed", Qwen2_VisionPatchEmbed(context));
@@ -305,7 +306,7 @@ class Qwen2_VisionTransformerImpl : public torch::nn::Module {
         register_module("rotary_pos_emb", Qwen2_VisionRotaryEmbedding(context));
     blocks_ = register_module("blocks", torch::nn::ModuleList());
 
-    for (int32_t idx = 0; idx < model_args.mm_num_hidden_layers(); idx++) {
+    for (int32_t idx = 0; idx < model_args->mm_num_hidden_layers(); idx++) {
       auto block = Qwen2_VisionBlock(context);
       blocks_->push_back(block);
       layers_.push_back(block);
@@ -515,7 +516,7 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
     std::optional<Qwen2_VLImageInputs> image_input;
     std::optional<Qwen2_VLVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
-    auto merge_size = model_args_.mm_image_merge_size();
+    auto merge_size = model_args_->mm_image_merge_size();
     MMDict multimodal_embeds;
     if (image_input) {
       // visual
@@ -539,7 +540,7 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
     auto special_token_ids = torch::tensor(
-        {model_args_.image_token_id(), model_args_.video_token_id()},
+        {model_args_->image_token_id(), model_args_->video_token_id()},
         input_ids.options().dtype(torch::kInt64));
     auto is_multimodal = torch::isin(input_ids, special_token_ids);
     return is_multimodal;
@@ -589,7 +590,7 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
     // verify
     visual_->verify_loaded_weights("visual.");
     visual_->merge_loaded_weights();
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_->image_embedding_mode()) {
       language_model_->load_model(std::move(loader));
     }
   }
@@ -610,7 +611,7 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
   }
 
  private:
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_ = nullptr;
   torch::TensorOptions options_;
 
   Qwen2_VisionTransformer visual_{nullptr};

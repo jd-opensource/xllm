@@ -25,6 +25,7 @@ limitations under the License.
 #include <torch_npu/csrc/libs/init_npu.h>
 
 #include <functional>
+#include <memory>
 
 #include "atb/atb_infer.h"
 #include "framework/kv_cache/kv_cache.h"
@@ -78,7 +79,7 @@ class NpuQwen2DecoderLayerImpl : public BaseLayer {
                                bool is_prefill);
 
   void param_from_args(atb_speed::qwen::DecoderLayerParam& param,
-                       const ModelArgs& args,
+                       const std::shared_ptr<ModelArgs>& args,
                        const ParallelArgs& parallel_args,
                        bool isPrefill);
 

@@ -16,6 +16,7 @@ limitations under the License.
 #include "tests_utils.h"
 
 #include <cmath>
+#include <memory>
 
 #include "core/platform/device.h"
 
@@ -116,10 +117,10 @@ void expect_tensor_stats(const torch::Tensor& t,
 }
 
 ModelArgs create_default_model_args() {
-  ModelArgs model_args;
-  model_args.hidden_size() = 7168;
-  model_args.intermediate_size() = 18432;
-  model_args.hidden_act() = "silu";
+  std::shared_ptr<ModelArgs> model_args = nullptr;
+  model_args->hidden_size() = 7168;
+  model_args->intermediate_size() = 18432;
+  model_args->hidden_act() = "silu";
   return model_args;
 }
 

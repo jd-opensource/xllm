@@ -23,6 +23,8 @@ limitations under the License.
 #elif defined(USE_MLU)
 #include "runtime/mlu_graph_executor_impl.h"
 #elif defined(USE_CUDA)
+#include <memory>
+
 #include "runtime/cuda_graph_executor_impl.h"
 #endif
 
@@ -41,7 +43,7 @@ bool ExecutorImplFactory::register_creator(const std::string& name,
 
 std::unique_ptr<ExecutorImpl> ExecutorImplFactory::create_executor_impl(
     CausalLM* model,
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const torch::Device& device,
     const runtime::Options& options,
     const std::string& backend) {

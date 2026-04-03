@@ -31,15 +31,15 @@ class GlmMoeDsaMtpModelImpl
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
+    int32_t mask_value = model_args->dtype() == "bfloat16" ? 1 : -9984;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
 
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
-        model_args.qk_rope_head_dim(),
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
+        model_args->qk_rope_head_dim(),
+        model_args->max_position_embeddings(),
+        model_args->rope_theta(),
         options);
   }
 };

@@ -19,6 +19,8 @@ limitations under the License.
 
 #include "core/platform/device.h"
 #if defined(USE_NPU)
+#include <memory>
+
 #include "models/model_registry.h"
 #endif
 
@@ -90,13 +92,13 @@ TEST(HFModelLoaderTest, Qwen35MtpModelArgsFromDenseConfig) {
     }
   )json"));
 
-  ModelArgs args;
-  ASSERT_TRUE(loader(reader, &args));
-  EXPECT_EQ(args.model_type(), "qwen3_5_mtp");
-  EXPECT_EQ(args.num_nextn_predict_layers(), 1);
-  EXPECT_EQ(args.n_layers(), 1);
-  ASSERT_EQ(args.layer_types().size(), 1);
-  EXPECT_EQ(args.layer_types()[0], "full_attention");
+  std::shared_ptr<ModelArgs> args = nullptr;
+  ASSERT_TRUE(loader(reader, args));
+  EXPECT_EQ(args->model_type(), "qwen3_5_mtp");
+  EXPECT_EQ(args->num_nextn_predict_layers(), 1);
+  EXPECT_EQ(args->n_layers(), 1);
+  ASSERT_EQ(args->layer_types().size(), 1);
+  EXPECT_EQ(args->layer_types()[0], "full_attention");
 }
 
 TEST(HFModelLoaderTest, Qwen35MtpModelArgsFromMoeConfig) {
@@ -114,14 +116,14 @@ TEST(HFModelLoaderTest, Qwen35MtpModelArgsFromMoeConfig) {
     }
   )json"));
 
-  ModelArgs args;
-  ASSERT_TRUE(loader(reader, &args));
-  EXPECT_EQ(args.model_type(), "qwen3_5_moe_mtp");
-  EXPECT_EQ(args.num_nextn_predict_layers(), 2);
-  EXPECT_EQ(args.n_layers(), 2);
-  ASSERT_EQ(args.layer_types().size(), 2);
-  EXPECT_EQ(args.layer_types()[0], "full_attention");
-  EXPECT_EQ(args.layer_types()[1], "full_attention");
+  std::shared_ptr<ModelArgs> args = nullptr;
+  ASSERT_TRUE(loader(reader, args));
+  EXPECT_EQ(args->model_type(), "qwen3_5_moe_mtp");
+  EXPECT_EQ(args->num_nextn_predict_layers(), 2);
+  EXPECT_EQ(args->n_layers(), 2);
+  ASSERT_EQ(args->layer_types().size(), 2);
+  EXPECT_EQ(args->layer_types()[0], "full_attention");
+  EXPECT_EQ(args->layer_types()[1], "full_attention");
 }
 #endif
 

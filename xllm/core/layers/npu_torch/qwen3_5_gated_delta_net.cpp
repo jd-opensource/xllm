@@ -14,11 +14,13 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
+
 namespace xllm {
 namespace layer {
 
 Qwen3_5GatedDeltaNetImpl::Qwen3_5GatedDeltaNetImpl(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options)
@@ -28,7 +30,7 @@ Qwen3_5GatedDeltaNetImpl::Qwen3_5GatedDeltaNetImpl(
                                  options,
                                  /*init_projections=*/false) {
   in_proj_qkv_ = register_module("in_proj_qkv",
-                                 ColumnParallelLinear(args.hidden_size(),
+                                 ColumnParallelLinear(args->hidden_size(),
                                                       k_size_ * 2 + v_size_,
                                                       /*bias=*/false,
                                                       /*gather_output=*/false,
@@ -36,7 +38,7 @@ Qwen3_5GatedDeltaNetImpl::Qwen3_5GatedDeltaNetImpl(
                                                       parallel_args.tp_group_,
                                                       options));
   in_proj_z_ = register_module("in_proj_z",
-                               ColumnParallelLinear(args.hidden_size(),
+                               ColumnParallelLinear(args->hidden_size(),
                                                     v_size_,
                                                     /*bias=*/false,
                                                     /*gather_output=*/false,
@@ -44,7 +46,7 @@ Qwen3_5GatedDeltaNetImpl::Qwen3_5GatedDeltaNetImpl(
                                                     parallel_args.tp_group_,
                                                     options));
   in_proj_b_ = register_module("in_proj_b",
-                               ColumnParallelLinear(args.hidden_size(),
+                               ColumnParallelLinear(args->hidden_size(),
                                                     num_v_heads_,
                                                     /*bias=*/false,
                                                     /*gather_output=*/false,
@@ -52,7 +54,7 @@ Qwen3_5GatedDeltaNetImpl::Qwen3_5GatedDeltaNetImpl(
                                                     parallel_args.tp_group_,
                                                     options));
   in_proj_a_ = register_module("in_proj_a",
-                               ColumnParallelLinear(args.hidden_size(),
+                               ColumnParallelLinear(args->hidden_size(),
                                                     num_v_heads_,
                                                     /*bias=*/false,
                                                     /*gather_output=*/false,

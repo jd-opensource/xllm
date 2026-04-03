@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "rotary_embedding.h"
 
+#include <memory>
+
 #include "kernels/ops_api.h"
 #include "platform/device.h"
 
@@ -272,32 +274,32 @@ void DeepseekScalingRotaryEmbeddingImpl::forward(
 
 // Factory function: creates the appropriate RoPE type based on model args
 std::shared_ptr<RotaryEmbeddingBase> create_mla_rotary_embedding(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     int64_t rotary_dim,
     int64_t max_position_embeddings,
     bool interleaved,
     const torch::TensorOptions& options) {
-  if (args.rope_scaling_rope_type() == "deepseek_yarn") {
+  if (args->rope_scaling_rope_type() == "deepseek_yarn") {
     return std::make_shared<DeepseekScalingRotaryEmbeddingImpl>(
         rotary_dim,  // head_size (same as rotary_dim for MLA)
         rotary_dim,
         max_position_embeddings,
-        args.rope_scaling_original_max_position_embeddings(),
-        args.rope_theta(),
+        args->rope_scaling_original_max_position_embeddings(),
+        args->rope_theta(),
         interleaved,
-        args.rope_scaling_factor(),
-        args.rope_extrapolation_factor(),
-        args.rope_scaling_attn_factor(),
-        args.rope_scaling_beta_fast(),
-        args.rope_scaling_beta_slow(),
-        args.rope_scaling_mscale(),
-        args.rope_scaling_mscale_all_dim(),
+        args->rope_scaling_factor(),
+        args->rope_extrapolation_factor(),
+        args->rope_scaling_attn_factor(),
+        args->rope_scaling_beta_fast(),
+        args->rope_scaling_beta_slow(),
+        args->rope_scaling_mscale(),
+        args->rope_scaling_mscale_all_dim(),
         options);
   } else {
     // default rope type
     return std::make_shared<RotaryEmbeddingImpl>(rotary_dim,
                                                  max_position_embeddings,
-                                                 args.rope_theta(),
+                                                 args->rope_theta(),
                                                  interleaved,
                                                  options);
   }

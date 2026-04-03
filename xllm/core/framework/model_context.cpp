@@ -27,11 +27,13 @@ limitations under the License.
 #include <torch_npu/csrc/framework/utils/OpPreparation.h>
 #endif
 #include <torch_npu/csrc/libs/init_npu.h>
+
+#include <memory>
 #endif
 
 namespace xllm {
 ModelContext::ModelContext(const ParallelArgs& input_parallel_args,
-                           const ModelArgs& model_args,
+                           const std::shared_ptr<ModelArgs>& model_args,
                            const QuantArgs& quant_args,
                            const torch::TensorOptions& tensor_options)
     : parallel_args_(input_parallel_args),
@@ -52,7 +54,7 @@ ModelContext::ModelContext(const ParallelArgs& input_parallel_args,
 
 #if defined(USE_NPU)
 ModelContext::ModelContext(const ParallelArgs& input_parallel_args,
-                           const ModelArgs& model_args,
+                           const std::shared_ptr<ModelArgs>& model_args,
                            const QuantArgs& quant_args,
                            const torch::TensorOptions& tensor_options,
                            atb::Context* context)
@@ -78,7 +80,7 @@ void ModelContext::derive_optimization_config() {
     // fused mla only support smoothquant mode
     // TODO: the fused kernel will support "glm_moe_dsa" model soon.
     bool is_glm_moe_dsa =
-        model_args_.model_type().find("glm_moe_dsa") != std::string::npos;
+        model_args_->model_type().find("glm_moe_dsa") != std::string::npos;
     optimization_config_.enable_fused_mla_kernel =
         quant_args_.quant_method() == kQuantMethodSmoothquant &&
         !is_glm_moe_dsa;

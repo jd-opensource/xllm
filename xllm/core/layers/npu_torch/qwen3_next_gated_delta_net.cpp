@@ -14,11 +14,13 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
+
 namespace xllm {
 namespace layer {
 
 Qwen3NextGatedDeltaNetImpl::Qwen3NextGatedDeltaNetImpl(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options)
@@ -29,7 +31,7 @@ Qwen3NextGatedDeltaNetImpl::Qwen3NextGatedDeltaNetImpl(
                                  /*init_projections=*/true) {}
 
 Qwen3NextGatedDeltaNetImpl::Qwen3NextGatedDeltaNetImpl(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options,
@@ -41,13 +43,13 @@ Qwen3NextGatedDeltaNetImpl::Qwen3NextGatedDeltaNetImpl(
 }
 
 void Qwen3NextGatedDeltaNetImpl::init_next_projections(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options) {
   // QKVZ projection used by Qwen3-Next linear attention.
   qkvz_proj_ = register_module("in_proj_qkvz",
-                               ColumnParallelLinear(args.hidden_size(),
+                               ColumnParallelLinear(args->hidden_size(),
                                                     k_size_ * 2 + v_size_ * 2,
                                                     /*bias=*/false,
                                                     /*gather_output=*/false,
@@ -56,7 +58,7 @@ void Qwen3NextGatedDeltaNetImpl::init_next_projections(
                                                     options));
   // BA projection used to derive gating and beta terms.
   ba_proj_ = register_module("in_proj_ba",
-                             ColumnParallelLinear(args.hidden_size(),
+                             ColumnParallelLinear(args->hidden_size(),
                                                   num_v_heads_ * 2,
                                                   /*bias=*/false,
                                                   /*gather_output=*/false,

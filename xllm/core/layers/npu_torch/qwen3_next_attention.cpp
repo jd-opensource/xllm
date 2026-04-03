@@ -17,19 +17,21 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
 #include <tuple>
 namespace xllm {
 namespace layer {
 
 Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options,
     int32_t layer_id) {
   const int64_t tp_size = parallel_args.tp_group_->world_size();
-  const int64_t total_num_heads = args.n_heads();
-  const int64_t total_num_kv_heads = args.n_kv_heads().value_or(args.n_heads());
+  const int64_t total_num_heads = args->n_heads();
+  const int64_t total_num_kv_heads =
+      args->n_kv_heads().value_or(args->n_heads());
   layer_id_ = layer_id;
   rank_ = parallel_args.tp_group_->rank();
   CHECK(total_num_heads % tp_size == 0);
@@ -45,20 +47,20 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
     num_kv_head_replicas_ = tp_size / total_num_kv_heads;
   }
 
-  head_dim_ = args.head_dim();
+  head_dim_ = args->head_dim();
   q_size_ = num_heads_ * head_dim_;
   kv_size_ = num_kv_heads_ * head_dim_;
   scaling_ = 1.0f / std::sqrt(static_cast<float>(head_dim_));
-  attn_output_gate_ = args.attn_output_gate();
+  attn_output_gate_ = args->attn_output_gate();
   // 1. QKV linear
   qkv_proj_ = register_module(
       "qkv_proj",
-      QKVParallelLinear(args.hidden_size(),
+      QKVParallelLinear(args->hidden_size(),
                         attn_output_gate_ ? num_heads_ * 2 : num_heads_,
                         num_kv_heads_,
-                        args.head_dim(),
+                        args->head_dim(),
                         num_kv_head_replicas_,
-                        /*bias=*/args.attention_bias(),
+                        /*bias=*/args->attention_bias(),
                         /*gather_output=*/false,
                         parallel_args,
                         options));
@@ -66,7 +68,7 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
   // 2. O proj
   o_proj_ = register_module("o_proj",
                             RowParallelLinear(total_num_heads * head_dim_,
-                                              args.hidden_size(),
+                                              args->hidden_size(),
                                               /*bias=*/false,
                                               /*input_is_parallelized=*/true,
                                               /*if_reduce_results=*/true,
@@ -76,20 +78,20 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
 
   // 3. Q norm
   q_norm_ = register_module(
-      "q_norm", Qwen3NextRMSNorm(head_dim_, args.rms_norm_eps(), options));
+      "q_norm", Qwen3NextRMSNorm(head_dim_, args->rms_norm_eps(), options));
 
   // 4. K norm
   k_norm_ = register_module(
-      "k_norm", Qwen3NextRMSNorm(head_dim_, args.rms_norm_eps(), options));
+      "k_norm", Qwen3NextRMSNorm(head_dim_, args->rms_norm_eps(), options));
 
   // 5. Rotary embedding
   const int rotary_dim =
-      static_cast<int>(head_dim_ * args.partial_rotary_factor());
+      static_cast<int>(head_dim_ * args->partial_rotary_factor());
   rotary_emb_ =
       register_module("rotary_emb",
                       PartialRotaryEmbedding(rotary_dim,
-                                             args.max_position_embeddings(),
-                                             args.rope_theta(),
+                                             args->max_position_embeddings(),
+                                             args->rope_theta(),
                                              head_dim_,
                                              true,
                                              false,
@@ -101,7 +103,7 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
                                     head_dim_,
                                     scaling_,
                                     num_kv_heads_,
-                                    args.sliding_window()));
+                                    args->sliding_window()));
 }
 
 torch::Tensor Qwen3NextAttentionImpl::forward(

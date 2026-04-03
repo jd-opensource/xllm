@@ -15,16 +15,19 @@ limitations under the License.
 
 #include "minicpmv_image_processor.h"
 
+#include <memory>
+
 namespace xllm {
 
-MiniCPMVImageProcessor::MiniCPMVImageProcessor(const ModelArgs& args) {
-  max_slice_nums_ = args.vision_max_slice_nums();
-  scale_resolution_ = args.mm_scale_resolution();
-  patch_size_ = args.mm_patch_size();
-  slice_mode_ = args.mm_slice_mode();
-  image_feature_size_ = args.mm_image_feature_size();
-  norm_mean_ = args.mm_image_normalize_mean();
-  norm_std_ = args.mm_image_normalize_std();
+MiniCPMVImageProcessor::MiniCPMVImageProcessor(
+    const std::shared_ptr<ModelArgs>& args) {
+  max_slice_nums_ = args->vision_max_slice_nums();
+  scale_resolution_ = args->mm_scale_resolution();
+  patch_size_ = args->mm_patch_size();
+  slice_mode_ = args->mm_slice_mode();
+  image_feature_size_ = args->mm_image_feature_size();
+  norm_mean_ = args->mm_image_normalize_mean();
+  norm_std_ = args->mm_image_normalize_std();
 }
 
 bool MiniCPMVImageProcessor::process(const MMInput& mm_inputs,
