@@ -19,7 +19,12 @@ limitations under the License.
 #include <filesystem>
 #include <string>
 
+#include "core/util/json_reader.h"
+
 namespace xllm {
+
+std::string get_model_type(const JsonReader& reader,
+                           const std::filesystem::path& model_path);
 
 std::string get_model_type(const std::filesystem::path& model_path);
 

@@ -46,6 +46,7 @@ limitations under the License.
 #include "core/platform/device.h"
 #include "core/util/blocking_counter.h"
 #include "core/util/json_reader.h"
+#include "core/util/model_config_utils.h"
 #include "core/util/scope_guard.h"
 #include "core/util/tensor_helper.h"
 #include "models/model_registry.h"
@@ -711,13 +712,8 @@ bool HFModelLoader::load_model_args(const std::string& model_weights_path) {
     return false;
   }
 
-  std::string model_type;
-  if (auto data = reader.value<std::string>("model_type")) {
-    model_type = data.value();
-  } else {
-    LOG(ERROR) << "Failed to find model_type in " << args_file_path;
-    return false;
-  }
+  const std::string model_type =
+      get_model_type(reader, std::filesystem::path(model_weights_path));
 
   std::string resolved_model_type;
   std::string error_message;

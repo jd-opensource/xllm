@@ -28,6 +28,7 @@ limitations under the License.
 #include "layers/common/qwen3_next_rms_norm.h"
 
 namespace xllm {
+
 namespace layer {
 
 class Qwen3NextAttentionImpl : public torch::nn::Module {
@@ -63,9 +64,11 @@ class Qwen3NextAttentionImpl : public torch::nn::Module {
 
   Qwen3NextRMSNorm q_norm_{nullptr};
   Qwen3NextRMSNorm k_norm_{nullptr};
+  PartialRotaryEmbedding partial_rotary_emb_{nullptr};
 
   Attention attn_{nullptr};
-  PartialRotaryEmbedding rotary_emb_{nullptr};
+  int64_t rotary_dim_ = 0;
+  bool rotary_interleaved_ = false;
 };
 TORCH_MODULE(Qwen3NextAttention);
 

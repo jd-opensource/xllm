@@ -68,6 +68,7 @@ constexpr char kTorchBackend[] = "TORCH";
 bool is_torch_only_model_type(const std::string& model_type) {
   static const std::unordered_set<std::string> kTorchOnlyModelTypes = {
       "qwen3_5",
+      "qwen3_5_vl",
       "qwen3_5_text",
       "qwen3_5_moe",
       "qwen3_5_moe_text",
