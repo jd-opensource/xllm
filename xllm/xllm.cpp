@@ -351,6 +351,7 @@ int main(int argc, char** argv) {
 
   FLAGS_alsologtostderr = true;
   FLAGS_minloglevel = 0;
+  FLAGS_v = 0;
   google::ParseCommandLineFlags(&argc, &argv, true);
 
   google::InitGoogleLogging("xllm");

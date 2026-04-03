@@ -170,6 +170,11 @@ class APIService : public proto::XllmAPIService {
                      proto::HttpResponse* response,
                      ::google::protobuf::Closure* done) override;
 
+  void LoggingHttp(::google::protobuf::RpcController* controller,
+                   const proto::HttpRequest* request,
+                   proto::HttpResponse* response,
+                   ::google::protobuf::Closure* done) override;
+
  private:
   bool ParseForkMasterRequest(const proto::MasterInfos* request,
                               Options& options);
