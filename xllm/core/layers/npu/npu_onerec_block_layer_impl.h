@@ -59,7 +59,7 @@ class NpuOneRecBlockLayerImpl final : public BaseLayer {
                         KVCache& kv_cache,
                         ModelInputParams& input_params,
                         torch::Tensor* encoder_output = nullptr,
-                        int node_id = 0,
+                        int32_t node_id = 0,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
                         const torch::Tensor& expert_array = torch::Tensor());
@@ -125,7 +125,7 @@ class NpuOneRecBlockLayerImpl final : public BaseLayer {
   torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts_gate,
                                       std::vector<torch::Tensor>& experts_up,
                                       bool transpose = false);
-  int extract_expert_index(const std::string& name);
+  int32_t extract_expert_index(const std::string& name);
   std::string extract_endswith(const std::string& input);
 
   atb_speed::Model::Node prefill_node_;
