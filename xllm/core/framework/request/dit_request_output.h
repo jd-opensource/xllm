@@ -34,13 +34,16 @@ struct DiTGenerationOutput {
   // the generated image in torch tensor format.
   std::string image;
 
+  // the generated audio as raw WAV bytes (audio models only).
+  std::string audio;
+
   // the height of the generated image.
   int32_t height;
 
   // the width of the generated image.
   int32_t width;
 
-  // seed used for image generation.
+  // seed used for generation.
   int64_t seed;
 };
 

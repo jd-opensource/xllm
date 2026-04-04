@@ -109,6 +109,17 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
     mask_images.emplace_back(input_params.mask_image);
     condition_images.emplace_back(input_params.condition_image);
     control_images.emplace_back(input_params.control_image);
+
+    // Voice cloning: prompt_audio is per-request (batch_size==1 in practice).
+    // Forward the first defined tensor; multi-batch voice cloning is not
+    // supported (different prompt lengths can't be stacked).
+    if (input_params.prompt_audio.defined() && !input.prompt_audio.defined()) {
+      input.prompt_audio = input_params.prompt_audio;
+    }
+    if (!input_params.audio_prompt_text.empty() &&
+        input.audio_prompt_text.empty()) {
+      input.audio_prompt_text = input_params.audio_prompt_text;
+    }
   }
 
   if (input.prompts.size() != request_vec_.size()) {

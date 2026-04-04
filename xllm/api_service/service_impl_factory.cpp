@@ -88,9 +88,11 @@ void ServiceImplFactory::create(
        [](APIService* self,
           Master* master,
           const std::vector<std::string>& models) {
+         auto* dit_master = dynamic_cast<DiTMaster*>(master);
          self->image_generation_service_impl_ =
-             std::make_unique<ImageGenerationServiceImpl>(
-                 dynamic_cast<DiTMaster*>(master), models);
+             std::make_unique<ImageGenerationServiceImpl>(dit_master, models);
+         self->audio_generation_service_impl_ =
+             std::make_unique<AudioGenerationServiceImpl>(dit_master, models);
        }},
       {static_cast<int8_t>(ServingMode::REC),
        [](APIService* self,

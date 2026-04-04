@@ -223,6 +223,10 @@ message DiTForwardInput {
   
   // generation params
   DiTGenerationParams generation_params = 16;
+
+  // Voice cloning fields (LongCat-AudioDiT)
+  optional Tensor prompt_audio = 17;
+  optional string audio_prompt_text = 18;
 }
 
 message DiTForwardOutput {

@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "audio_generation.pb.h"
 #include "dit_request_output.h"
 #include "dit_request_state.h"
 #include "image_generation.pb.h"
@@ -17,6 +18,9 @@ namespace xllm {
 struct DiTRequestParams {
   DiTRequestParams() = default;
   DiTRequestParams(const proto::ImageGenerationRequest& request,
+                   const std::string& x_rid,
+                   const std::string& x_rtime);
+  DiTRequestParams(const proto::AudioGenerationRequest& request,
                    const std::string& x_rid,
                    const std::string& x_rtime);
 
