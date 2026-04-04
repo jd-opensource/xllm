@@ -295,6 +295,7 @@ DECLARE_double(dit_cache_residual_diff_threshold);
 
 DECLARE_bool(enable_constrained_decoding);
 DECLARE_bool(enable_convert_tokens_to_item);
+DECLARE_bool(enable_rec_score_output);
 
 DECLARE_bool(enable_return_mm_full_embeddings);
 

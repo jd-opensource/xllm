@@ -42,6 +42,25 @@ limitations under the License.
 
 namespace xllm {
 namespace {
+void append_rec_scores(proto::Content* scores_context,
+                       const SequenceOutput& output,
+                       int32_t expected_count) {
+  const auto& token_scores = output.token_ids_logprobs;
+  const int32_t actual_count = static_cast<int32_t>(token_scores.size());
+  CHECK(actual_count == 0 || actual_count == expected_count)
+      << "REC sku_logprobs width mismatch, actual_count=" << actual_count
+      << ", expected_count=" << expected_count
+      << ", token_ids=" << output.token_ids.size();
+
+  for (int32_t i = 0; i < expected_count; ++i) {
+    if (i < actual_count && token_scores[i].has_value()) {
+      scores_context->mutable_fp32_contents()->Add(token_scores[i].value());
+    } else {
+      scores_context->mutable_fp32_contents()->Add(0.0f);
+    }
+  }
+}
+
 void set_logprobs(proto::Choice* choice,
                   const std::optional<std::vector<LogProb>>& logprobs) {
   if (!logprobs.has_value() || logprobs.value().empty()) {
@@ -91,14 +110,33 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
   // Add rec specific output tensors
   auto output_tensor = response.mutable_output_tensors()->Add();
   output_tensor->set_name("rec_result");
+  proto::InferOutputTensor* scores_tensor = nullptr;
+  int32_t score_width = 0;
+  if (FLAGS_enable_rec_score_output) {
+    scores_tensor = response.mutable_output_tensors()->Add();
+    scores_tensor->set_name("sku_logprobs");
+    scores_tensor->set_datatype(proto::DataType::FLOAT);
+    score_width = req_output.outputs.empty()
+                      ? 0
+                      : static_cast<int32_t>(
+                            req_output.outputs.front().token_ids_logprobs.size());
+    scores_tensor->mutable_shape()->Add(req_output.outputs.size());
+    scores_tensor->mutable_shape()->Add(score_width);
+  }
+
   if (FLAGS_enable_convert_tokens_to_item) {
     output_tensor->set_datatype(proto::DataType::INT64);
     output_tensor->mutable_shape()->Add(req_output.outputs.size());
     auto context = output_tensor->mutable_contents();
+    auto* scores_context =
+        scores_tensor == nullptr ? nullptr : scores_tensor->mutable_contents();
     for (int i = 0; i < req_output.outputs.size(); ++i) {
       if (req_output.outputs[i].item_ids.has_value()) {
         context->mutable_int64_contents()->Add(
             req_output.outputs[i].item_ids.value());
+      }
+      if (scores_context != nullptr) {
+        append_rec_scores(scores_context, req_output.outputs[i], score_width);
       }
     }
   } else {
@@ -114,11 +152,16 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
     output_tensor->mutable_shape()->Add(req_output.outputs[0].token_ids.size());
 
     auto context = output_tensor->mutable_contents();
+    auto* scores_context =
+        scores_tensor == nullptr ? nullptr : scores_tensor->mutable_contents();
     for (int i = 0; i < req_output.outputs.size(); ++i) {
       // LOG(INFO) << req_output.outputs[i].token_ids;
       context->mutable_int_contents()->Add(
           req_output.outputs[i].token_ids.begin(),
           req_output.outputs[i].token_ids.end());
+      if (scores_context != nullptr) {
+        append_rec_scores(scores_context, req_output.outputs[i], score_width);
+      }
     }
   }
 
@@ -155,6 +198,9 @@ void RecCompletionServiceImpl::process_async_impl(
 
   RequestParams request_params(
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
+  if (FLAGS_enable_rec_score_output) {
+    request_params.logprobs = true;
+  }
   bool include_usage = false;
   if (rpc_request.has_stream_options()) {
     include_usage = rpc_request.stream_options().include_usage();

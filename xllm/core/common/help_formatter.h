@@ -100,6 +100,7 @@ const OptionCategory kBeamSearchOptions = {
 const OptionCategory kRecOptions = {"REC OPTIONS",
                                     {"enable_rec_fast_sampler",
                                      "enable_convert_tokens_to_item",
+                                     "enable_rec_score_output",
                                      "enable_rec_prefill_only",
                                      "output_rec_logprobs"}};
 
