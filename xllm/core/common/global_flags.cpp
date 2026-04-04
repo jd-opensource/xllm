@@ -667,6 +667,10 @@ DEFINE_bool(enable_convert_tokens_to_item,
             false,
             "Enable token ids conversion to item id in REC/OneRec response.");
 
+DEFINE_bool(enable_rec_score_output,
+            false,
+            "Enable REC / OneRec token-aligned score tensor output.");
+
 DEFINE_bool(
     use_audio_in_video,
     false,
