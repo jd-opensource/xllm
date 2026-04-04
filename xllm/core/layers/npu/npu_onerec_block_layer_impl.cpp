@@ -372,25 +372,6 @@ NpuOneRecBlockLayerImpl::NpuOneRecBlockLayerImpl(const ModelContext& context,
   }
 }
 
-torch::Tensor NpuOneRecBlockLayerImpl::forward(torch::Tensor& hidden_states,
-                                               torch::Tensor& attn_mask,
-                                               KVCache& kv_cache,
-                                               ModelInputParams& input_params,
-                                               torch::Tensor* encoder_output,
-                                               int32_t node_id,
-                                               aclrtEvent* event,
-                                               std::atomic<bool>* event_flag) {
-  return forward(hidden_states,
-                 attn_mask,
-                 kv_cache,
-                 input_params,
-                 encoder_output,
-                 node_id,
-                 event,
-                 event_flag,
-                 /*expert_array=*/torch::Tensor());
-}
-
 void NpuOneRecBlockLayerImpl::param_from_args(
     atb_speed::onerec::BlockLayerParam& param,
     const ModelArgs& args,
@@ -1352,8 +1333,7 @@ void NpuOneRecBlockLayerImpl::merge_experts_weights() {
                                            /*transpose=*/false);
   CHECK(merged_down.defined()) << "OneRec MoE down experts merge failed.";
   at_weight_tensors_[IN_MOE_EXPERT_W2_WEIGHT] =
-      at_npu::native::npu_format_cast(merged_down, /*format=*/2)
-          .contiguous();
+      at_npu::native::npu_format_cast(merged_down, /*format=*/2).contiguous();
 }
 
 void NpuOneRecBlockLayerImpl::merge_shared_experts_weights() {
