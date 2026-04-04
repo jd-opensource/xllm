@@ -107,11 +107,15 @@ void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
     output.finish_reason = finish_reason_.to_string();
   }
   output.token_ids = ids.slice(num_prompt_tokens_, size);
-  if (FLAGS_enable_rec_score_output) {
+  if (FLAGS_enable_rec_score_output && logprob_state_ != nullptr) {
     const auto& token_logprobs = logprob_state_->get_logprobs();
     output.token_ids_logprobs.reserve(output.token_ids.size());
     for (size_t i = num_prompt_tokens_; i < size; ++i) {
-      output.token_ids_logprobs.push_back(token_logprobs.at(i));
+      if (i < token_logprobs.size()) {
+        output.token_ids_logprobs.push_back(token_logprobs[i]);
+      } else {
+        output.token_ids_logprobs.emplace_back();
+      }
     }
   }
   if (FLAGS_enable_convert_tokens_to_item &&
