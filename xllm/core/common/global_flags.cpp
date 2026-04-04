@@ -671,6 +671,18 @@ DEFINE_bool(enable_rec_score_output,
             false,
             "Enable REC / OneRec token-aligned score tensor output.");
 
+DEFINE_bool(enable_rec_multi_item_output,
+            false,
+            "Enable multi-item REC / OneRec result output.");
+
+DEFINE_int32(each_conversion_threshold,
+             50,
+             "Maximum number of items emitted for each REC token triplet.");
+
+DEFINE_int32(total_conversion_threshold,
+             1000,
+             "Maximum total number of items emitted in one REC response.");
+
 DEFINE_bool(
     use_audio_in_video,
     false,

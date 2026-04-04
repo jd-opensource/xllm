@@ -123,6 +123,9 @@ void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
         &item_ids);
     if (ok && !item_ids.empty()) {
       output.item_ids = item_ids.front();
+      if (FLAGS_enable_rec_multi_item_output) {
+        output.item_ids_list = item_ids;
+      }
     }
   }
 }

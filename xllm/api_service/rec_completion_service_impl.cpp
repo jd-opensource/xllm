@@ -20,8 +20,12 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <random>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 #include "common/global_flags.h"
 #include "common/instance_name.h"
@@ -59,6 +63,39 @@ void append_rec_scores(proto::Content* scores_context,
       scores_context->mutable_fp32_contents()->Add(0.0f);
     }
   }
+}
+
+std::vector<int64_t> select_rec_item_ids(const SequenceOutput& output) {
+  if (!FLAGS_enable_rec_multi_item_output || output.item_ids_list.empty()) {
+    if (output.item_ids.has_value()) {
+      return {output.item_ids.value()};
+    }
+    return {};
+  }
+
+  std::vector<int64_t> selected_item_ids;
+  selected_item_ids.reserve(output.item_ids_list.size());
+  std::unordered_set<int64_t> seen_item_ids;
+  for (const int64_t item_id : output.item_ids_list) {
+    if (seen_item_ids.insert(item_id).second) {
+      selected_item_ids.push_back(item_id);
+    }
+  }
+
+  const int32_t each_threshold = FLAGS_each_conversion_threshold;
+  if (each_threshold > 0 &&
+      static_cast<int32_t>(selected_item_ids.size()) > each_threshold) {
+    uint32_t seed = FLAGS_random_seed >= 0
+                        ? static_cast<uint32_t>(FLAGS_random_seed) +
+                              static_cast<uint32_t>(output.index)
+                        : std::random_device{}();
+    std::mt19937 generator(seed);
+    std::shuffle(
+        selected_item_ids.begin(), selected_item_ids.end(), generator);
+    selected_item_ids.resize(each_threshold);
+  }
+
+  return selected_item_ids;
 }
 
 void set_logprobs(proto::Choice* choice,
@@ -120,23 +157,48 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
                       ? 0
                       : static_cast<int32_t>(
                             req_output.outputs.front().token_ids_logprobs.size());
-    scores_tensor->mutable_shape()->Add(req_output.outputs.size());
-    scores_tensor->mutable_shape()->Add(score_width);
   }
 
   if (FLAGS_enable_convert_tokens_to_item) {
     output_tensor->set_datatype(proto::DataType::INT64);
-    output_tensor->mutable_shape()->Add(req_output.outputs.size());
-    auto context = output_tensor->mutable_contents();
+    std::vector<std::vector<int64_t>> selected_item_groups;
+    selected_item_groups.reserve(req_output.outputs.size());
+
+    int32_t total_item_count = 0;
+    const int32_t total_threshold = FLAGS_total_conversion_threshold;
+    for (const auto& output : req_output.outputs) {
+      std::vector<int64_t> selected_item_ids = select_rec_item_ids(output);
+      if (total_threshold > 0 &&
+          total_item_count + static_cast<int32_t>(selected_item_ids.size()) >
+              total_threshold) {
+        const int32_t remaining_count =
+            std::max(total_threshold - total_item_count, 0);
+        if (remaining_count == 0) {
+          selected_item_ids.clear();
+        } else {
+          selected_item_ids.resize(remaining_count);
+        }
+      }
+      total_item_count += static_cast<int32_t>(selected_item_ids.size());
+      selected_item_groups.push_back(std::move(selected_item_ids));
+    }
+
+    output_tensor->mutable_shape()->Add(total_item_count);
+    if (scores_tensor != nullptr) {
+      scores_tensor->mutable_shape()->Add(total_item_count);
+      scores_tensor->mutable_shape()->Add(score_width);
+    }
+
+    auto* output_context = output_tensor->mutable_contents();
     auto* scores_context =
         scores_tensor == nullptr ? nullptr : scores_tensor->mutable_contents();
     for (int i = 0; i < req_output.outputs.size(); ++i) {
-      if (req_output.outputs[i].item_ids.has_value()) {
-        context->mutable_int64_contents()->Add(
-            req_output.outputs[i].item_ids.value());
-      }
-      if (scores_context != nullptr) {
-        append_rec_scores(scores_context, req_output.outputs[i], score_width);
+      const auto& selected_item_ids = selected_item_groups[i];
+      for (const int64_t item_id : selected_item_ids) {
+        output_context->mutable_int64_contents()->Add(item_id);
+        if (scores_context != nullptr) {
+          append_rec_scores(scores_context, req_output.outputs[i], score_width);
+        }
       }
     }
   } else {
@@ -145,11 +207,19 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
     if (req_output.outputs.empty()) {
       output_tensor->mutable_shape()->Add(0);
       output_tensor->mutable_shape()->Add(0);
+      if (scores_tensor != nullptr) {
+        scores_tensor->mutable_shape()->Add(0);
+        scores_tensor->mutable_shape()->Add(0);
+      }
       return call->write_and_finish(response);
     }
 
     output_tensor->mutable_shape()->Add(req_output.outputs.size());
     output_tensor->mutable_shape()->Add(req_output.outputs[0].token_ids.size());
+    if (scores_tensor != nullptr) {
+      scores_tensor->mutable_shape()->Add(req_output.outputs.size());
+      scores_tensor->mutable_shape()->Add(score_width);
+    }
 
     auto context = output_tensor->mutable_contents();
     auto* scores_context =
