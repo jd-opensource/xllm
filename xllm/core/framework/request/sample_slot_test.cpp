@@ -24,11 +24,11 @@ limitations under the License.
 #include <string_view>
 #include <vector>
 
+#include "common/global_flags.h"
 #include "framework/block/block_manager_impl.h"
 #include "platform/device.h"
 #include "request.h"
 #include "request_state.h"
-#include "common/global_flags.h"
 
 namespace xllm {
 namespace {

@@ -83,7 +83,7 @@ struct SequenceOutput {
   // log probabilities of the generated tokens.
   std::optional<std::vector<LogProb>> logprobs;
 
-  // token-aligned scores for REC / OneRec outputs.
+  // token-aligned logprobs for REC / OneRec outputs.
   std::vector<std::optional<float>> token_ids_logprobs;
 
   // the embeddings of the prompt token

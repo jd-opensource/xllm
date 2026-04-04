@@ -46,21 +46,18 @@ limitations under the License.
 
 namespace xllm {
 namespace {
-void append_rec_scores(proto::Content* scores_context,
-                       const SequenceOutput& output,
-                       int32_t expected_count) {
-  const auto& token_scores = output.token_ids_logprobs;
-  const int32_t actual_count = static_cast<int32_t>(token_scores.size());
-  CHECK(actual_count == 0 || actual_count == expected_count)
-      << "REC sku_logprobs width mismatch, actual_count=" << actual_count
-      << ", expected_count=" << expected_count
-      << ", token_ids=" << output.token_ids.size();
+void append_rec_logprobs(proto::Content* logprobs_context,
+                         const SequenceOutput& output,
+                         int32_t expected_count) {
+  const auto& token_logprobs = output.token_ids_logprobs;
+  const int32_t actual_count = static_cast<int32_t>(token_logprobs.size());
 
   for (int32_t i = 0; i < expected_count; ++i) {
-    if (i < actual_count && token_scores[i].has_value()) {
-      scores_context->mutable_fp32_contents()->Add(token_scores[i].value());
+    if (i < actual_count && token_logprobs[i].has_value()) {
+      logprobs_context->mutable_fp32_contents()->Add(
+          token_logprobs[i].value());
     } else {
-      scores_context->mutable_fp32_contents()->Add(0.0f);
+      logprobs_context->mutable_fp32_contents()->Add(0.0f);
     }
   }
 }
@@ -147,16 +144,17 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
   // Add rec specific output tensors
   auto output_tensor = response.mutable_output_tensors()->Add();
   output_tensor->set_name("rec_result");
-  proto::InferOutputTensor* scores_tensor = nullptr;
-  int32_t score_width = 0;
+  proto::InferOutputTensor* logprobs_tensor = nullptr;
+  int32_t logprob_width = 0;
   if (FLAGS_enable_rec_score_output) {
-    scores_tensor = response.mutable_output_tensors()->Add();
-    scores_tensor->set_name("sku_logprobs");
-    scores_tensor->set_datatype(proto::DataType::FLOAT);
-    score_width = req_output.outputs.empty()
-                      ? 0
-                      : static_cast<int32_t>(
-                            req_output.outputs.front().token_ids_logprobs.size());
+    logprobs_tensor = response.mutable_output_tensors()->Add();
+    logprobs_tensor->set_name("sku_logprobs");
+    logprobs_tensor->set_datatype(proto::DataType::FLOAT);
+    for (const auto& output : req_output.outputs) {
+      logprob_width = std::max(
+          logprob_width,
+          static_cast<int32_t>(output.token_ids_logprobs.size()));
+    }
   }
 
   if (FLAGS_enable_convert_tokens_to_item) {
@@ -165,6 +163,7 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
     selected_item_groups.reserve(req_output.outputs.size());
 
     int32_t total_item_count = 0;
+    int32_t max_items_per_output = 0;
     const int32_t total_threshold = FLAGS_total_conversion_threshold;
     for (const auto& output : req_output.outputs) {
       std::vector<int64_t> selected_item_ids = select_rec_item_ids(output);
@@ -180,25 +179,69 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
         }
       }
       total_item_count += static_cast<int32_t>(selected_item_ids.size());
+      max_items_per_output = std::max(
+          max_items_per_output,
+          static_cast<int32_t>(selected_item_ids.size()));
       selected_item_groups.push_back(std::move(selected_item_ids));
     }
 
-    output_tensor->mutable_shape()->Add(total_item_count);
-    if (scores_tensor != nullptr) {
-      scores_tensor->mutable_shape()->Add(total_item_count);
-      scores_tensor->mutable_shape()->Add(score_width);
+    if (FLAGS_enable_rec_multi_item_output) {
+      auto lengths_tensor = response.mutable_output_tensors()->Add();
+      lengths_tensor->set_name("rec_result_lengths");
+      lengths_tensor->set_datatype(proto::DataType::INT32);
+      lengths_tensor->mutable_shape()->Add(req_output.outputs.size());
+      auto* lengths_context = lengths_tensor->mutable_contents();
+
+      output_tensor->mutable_shape()->Add(req_output.outputs.size());
+      output_tensor->mutable_shape()->Add(max_items_per_output);
+      if (logprobs_tensor != nullptr) {
+        logprobs_tensor->mutable_shape()->Add(req_output.outputs.size());
+        logprobs_tensor->mutable_shape()->Add(logprob_width);
+      }
+
+      auto* output_context = output_tensor->mutable_contents();
+      auto* logprobs_context = logprobs_tensor == nullptr
+                                   ? nullptr
+                                   : logprobs_tensor->mutable_contents();
+      for (int i = 0; i < req_output.outputs.size(); ++i) {
+        const auto& selected_item_ids = selected_item_groups[i];
+        lengths_context->mutable_int_contents()->Add(
+            static_cast<int32_t>(selected_item_ids.size()));
+        for (int32_t j = 0; j < max_items_per_output; ++j) {
+          if (j < static_cast<int32_t>(selected_item_ids.size())) {
+            output_context->mutable_int64_contents()->Add(selected_item_ids[j]);
+          } else {
+            output_context->mutable_int64_contents()->Add(0);
+          }
+        }
+        if (logprobs_context != nullptr) {
+          append_rec_logprobs(
+              logprobs_context, req_output.outputs[i], logprob_width);
+        }
+      }
+      return call->write_and_finish(response);
+    }
+
+    output_tensor->mutable_shape()->Add(req_output.outputs.size());
+    if (logprobs_tensor != nullptr) {
+      logprobs_tensor->mutable_shape()->Add(req_output.outputs.size());
+      logprobs_tensor->mutable_shape()->Add(logprob_width);
     }
 
     auto* output_context = output_tensor->mutable_contents();
-    auto* scores_context =
-        scores_tensor == nullptr ? nullptr : scores_tensor->mutable_contents();
+    auto* logprobs_context = logprobs_tensor == nullptr
+                                 ? nullptr
+                                 : logprobs_tensor->mutable_contents();
     for (int i = 0; i < req_output.outputs.size(); ++i) {
       const auto& selected_item_ids = selected_item_groups[i];
-      for (const int64_t item_id : selected_item_ids) {
-        output_context->mutable_int64_contents()->Add(item_id);
-        if (scores_context != nullptr) {
-          append_rec_scores(scores_context, req_output.outputs[i], score_width);
-        }
+      if (!selected_item_ids.empty()) {
+        output_context->mutable_int64_contents()->Add(selected_item_ids.front());
+      } else {
+        output_context->mutable_int64_contents()->Add(0);
+      }
+      if (logprobs_context != nullptr) {
+        append_rec_logprobs(
+            logprobs_context, req_output.outputs[i], logprob_width);
       }
     }
   } else {
@@ -207,30 +250,32 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
     if (req_output.outputs.empty()) {
       output_tensor->mutable_shape()->Add(0);
       output_tensor->mutable_shape()->Add(0);
-      if (scores_tensor != nullptr) {
-        scores_tensor->mutable_shape()->Add(0);
-        scores_tensor->mutable_shape()->Add(0);
+      if (logprobs_tensor != nullptr) {
+        logprobs_tensor->mutable_shape()->Add(0);
+        logprobs_tensor->mutable_shape()->Add(0);
       }
       return call->write_and_finish(response);
     }
 
     output_tensor->mutable_shape()->Add(req_output.outputs.size());
     output_tensor->mutable_shape()->Add(req_output.outputs[0].token_ids.size());
-    if (scores_tensor != nullptr) {
-      scores_tensor->mutable_shape()->Add(req_output.outputs.size());
-      scores_tensor->mutable_shape()->Add(score_width);
+    if (logprobs_tensor != nullptr) {
+      logprobs_tensor->mutable_shape()->Add(req_output.outputs.size());
+      logprobs_tensor->mutable_shape()->Add(logprob_width);
     }
 
-    auto context = output_tensor->mutable_contents();
-    auto* scores_context =
-        scores_tensor == nullptr ? nullptr : scores_tensor->mutable_contents();
+    auto* context = output_tensor->mutable_contents();
+    auto* logprobs_context = logprobs_tensor == nullptr
+                                 ? nullptr
+                                 : logprobs_tensor->mutable_contents();
     for (int i = 0; i < req_output.outputs.size(); ++i) {
       // LOG(INFO) << req_output.outputs[i].token_ids;
       context->mutable_int_contents()->Add(
           req_output.outputs[i].token_ids.begin(),
           req_output.outputs[i].token_ids.end());
-      if (scores_context != nullptr) {
-        append_rec_scores(scores_context, req_output.outputs[i], score_width);
+      if (logprobs_context != nullptr) {
+        append_rec_logprobs(
+            logprobs_context, req_output.outputs[i], logprob_width);
       }
     }
   }
