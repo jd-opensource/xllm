@@ -108,6 +108,18 @@ INSTANTIATE_TEST_SUITE_P(FusedGdnGatingCases,
                          TileLangFusedGdnGatingWrapperCaseTest,
                          ::testing::Values(
                              FusedGdnGatingTestCase{
+                                 .name = "tiny_b1_h8",
+                                 .num_batches = 1,
+                                 .num_heads = 8,
+                                 .seed = 101,
+                             },
+                             FusedGdnGatingTestCase{
+                                 .name = "tiny_b17_h8",
+                                 .num_batches = 17,
+                                 .num_heads = 8,
+                                 .seed = 101,
+                             },
+                             FusedGdnGatingTestCase{
                                  .name = "tiny_b1_h16",
                                  .num_batches = 1,
                                  .num_heads = 16,

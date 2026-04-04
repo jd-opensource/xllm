@@ -21,9 +21,10 @@ DEFAULT_DTYPE = "bf16"
 DEFAULT_MAX_BATCH = 4096
 DEFAULT_MAX_HEADS = 128
 REF_CHECK_NUM_BATCHES = 16
+REF_CHECK_NUM_HEADS = (1, 16, 32, 48, 64, 128)
 VEC_NUM = 2
 VECTOR_BYTES_PER_ITER = 256
-SUPPORTED_NUM_HEADS = (16, 32, 48, 64, 128)
+SUPPORTED_NUM_HEADS = (8,12,16,24,32,48,64,128)
 MAX_VEC_CORE_NUM = detect_vec_core_num()
 BATCH_SIZE_SPECIALIZATIONS = tuple(range(2, 49, 2))
 
@@ -228,6 +229,11 @@ class FusedGdnGatingKernel(TilelangKernel):
             raise ValueError(
                 f"fused_gdn_gating only supports dtype={DEFAULT_DTYPE}, got {dtype}"
             )
+        if num_heads not in SUPPORTED_NUM_HEADS:
+            raise ValueError(
+                "fused_gdn_gating only supports num_heads in "
+                f"{SUPPORTED_NUM_HEADS}, got {num_heads}"
+            )
         if batch_size not in BATCH_SIZE_SPECIALIZATIONS:
             raise ValueError(
                 "fused_gdn_gating only supports batch_size in "
@@ -359,6 +365,15 @@ def parse_args() -> argparse.Namespace:
         description="Generate TileLang AscendC source for fused_gdn_gating AOT kernel."
     )
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=max(BATCH_SIZE_SPECIALIZATIONS),
+        help=(
+            "Batch-size specialization used for source generation. "
+            f"Supported values: {BATCH_SIZE_SPECIALIZATIONS}"
+        ),
+    )
     parser.add_argument("--num-heads", type=int, default=DEFAULT_NUM_HEADS)
     parser.add_argument("--dtype", type=str, default=DEFAULT_DTYPE)
     parser.add_argument(
@@ -388,7 +403,7 @@ def parse_args() -> argparse.Namespace:
         "--ref-num-heads-list",
         type=int,
         nargs="+",
-        default=list(SUPPORTED_NUM_HEADS),
+        default=list(REF_CHECK_NUM_HEADS),
         help="Head counts covered by the optional bf16 torch-reference test suite.",
     )
     return parser.parse_args()
@@ -397,7 +412,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     source = FusedGdnGatingKernel.generate_source(
-        num_heads=args.num_heads, dtype=args.dtype
+        batch_size=args.batch_size,
+        num_heads=args.num_heads,
+        dtype=args.dtype,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(source, encoding="utf-8")
