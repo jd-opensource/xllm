@@ -372,8 +372,9 @@ TEST(SampleSlotTest, RequestOutputStableSortsOutOfOrderSampleIds) {
   EXPECT_EQ(output.outputs[2].text, "C");
 }
 
-TEST(SampleSlotTest, OneRecOutputCarriesTokenScoresWhenEnabled) {
-  ScopedBoolFlag enable_rec_score_output(&FLAGS_enable_rec_score_output, true);
+TEST(SampleSlotTest, OneRecOutputCarriesTokenLogprobsWhenEnabled) {
+  ScopedBoolFlag enable_rec_logprobs_output(
+      &FLAGS_enable_rec_logprobs_output, true);
   ScopedBoolFlag enable_convert_tokens_to_item(
       &FLAGS_enable_convert_tokens_to_item, false);
 

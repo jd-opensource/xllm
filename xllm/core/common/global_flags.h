@@ -295,7 +295,7 @@ DECLARE_double(dit_cache_residual_diff_threshold);
 
 DECLARE_bool(enable_constrained_decoding);
 DECLARE_bool(enable_convert_tokens_to_item);
-DECLARE_bool(enable_rec_score_output);
+DECLARE_bool(enable_rec_logprobs_output);
 DECLARE_bool(enable_rec_multi_item_output);
 DECLARE_int32(each_conversion_threshold);
 DECLARE_int32(total_conversion_threshold);
