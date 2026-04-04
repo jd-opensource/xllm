@@ -450,7 +450,8 @@ constexpr int32_t IN_MOE_SHARED_W1_WEIGHT =
 constexpr int32_t IN_MOE_SHARED_W2_WEIGHT =
     static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MOE_SHARED_W2_WEIGHT);
 
-static const std::unordered_map<std::string, int> kOneRecEncoderWeightMapping =
+static const std::unordered_map<std::string, int32_t>
+    kOneRecEncoderWeightMapping =
     {
         {"layer.0.layer_norm.weight", IN_LAYER_NORM_WEIGHT},
         {"layer.0.SelfAttention.q.weight", IN_Q_WEIGHT},
@@ -483,7 +484,8 @@ static const std::unordered_map<std::string, int> kOneRecEncoderWeightMapping =
         {"1.ffn.gate_proj.weight", IN_FFN_WI_0_WEIGHT},
 };
 
-static const std::unordered_map<std::string, int> kOneRecDecoderWeightMapping =
+static const std::unordered_map<std::string, int32_t>
+    kOneRecDecoderWeightMapping =
     {
         {"layer.0.layer_norm.weight", IN_LAYER_NORM_WEIGHT},
         {"layer.0.SelfAttention.q.weight", IN_Q_WEIGHT},
@@ -523,9 +525,10 @@ static const std::unordered_map<std::string, int> kOneRecDecoderWeightMapping =
         {"2.ffn.gate_proj.weight", IN_FFN_WI_0_WEIGHT},
 };
 
-static std::unordered_map<std::string, int>
+static std::unordered_map<std::string, int32_t>
 get_onerec_decoder_moe_weight_mapping() {
-  std::unordered_map<std::string, int> mapping = kOneRecDecoderWeightMapping;
+  std::unordered_map<std::string, int32_t> mapping =
+      kOneRecDecoderWeightMapping;
 
   mapping.emplace("layer.2.ffn.gate.weight", IN_BLOCK_SPARSE_MOE_GATE_WEIGHT);
   mapping.emplace("2.ffn.gate.weight", IN_BLOCK_SPARSE_MOE_GATE_WEIGHT);
@@ -553,7 +556,7 @@ get_onerec_decoder_moe_weight_mapping() {
   return mapping;
 }
 
-static const std::unordered_map<std::string, int>
+static const std::unordered_map<std::string, int32_t>
     kOneRecDecoderMoeWeightMapping = get_onerec_decoder_moe_weight_mapping();
 
 static const std::unordered_map<int32_t, int32_t> kOneRecWeightShard = {
@@ -596,9 +599,9 @@ NpuOneRecBlockLayerImpl::NpuOneRecBlockLayerImpl(const ModelContext& context,
   param_from_args(prefill_param_, args, parallel_args, /*is_prefill=*/true);
   param_from_args(decode_param_, args, parallel_args, /*is_prefill=*/false);
 
-  const int weight_count = prefill_param_.use_moe
-                               ? kOneRecMoeWeightCountPerLayer
-                               : kOneRecWeightCountPerLayer;
+  const int32_t weight_count = prefill_param_.use_moe
+                                   ? kOneRecMoeWeightCountPerLayer
+                                   : kOneRecWeightCountPerLayer;
   at_weight_tensors_.resize(weight_count);
   atb_weight_tensors_.resize(weight_count);
 
@@ -610,7 +613,7 @@ NpuOneRecBlockLayerImpl::NpuOneRecBlockLayerImpl(const ModelContext& context,
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(placeholder_tensor);
   at_placeholder_ = torch::empty({1, args.hidden_size()}, dtype_).to(device_);
 
-  for (int i = 0; i < weight_count; ++i) {
+  for (int32_t i = 0; i < weight_count; ++i) {
     at_weight_tensors_[i] =
         torch::zeros({1, args.hidden_size()}).to(context.get_tensor_options());
   }
@@ -724,7 +727,7 @@ void NpuOneRecBlockLayerImpl::param_from_args(
 void NpuOneRecBlockLayerImpl::verify_loaded_weights(
     const std::string& prefix) const {
   const auto& weight_mapping =
-      [this]() -> const std::unordered_map<std::string, int>& {
+      [this]() -> const std::unordered_map<std::string, int32_t>& {
     if (prefill_param_.use_moe) {
       return kOneRecDecoderMoeWeightMapping;
     }
@@ -871,7 +874,7 @@ void NpuOneRecBlockLayerImpl::merge_loaded_weights() {
   const uint64_t weight_count = prefill_param_.use_moe
                                     ? kOneRecMoeWeightCountPerLayer
                                     : kOneRecWeightCountPerLayer;
-  for (int i = 0; i < static_cast<int>(weight_count); ++i) {
+  for (int32_t i = 0; i < static_cast<int32_t>(weight_count); ++i) {
     if (!at_weight_tensors_[i].defined()) {
       at_weight_tensors_[i] = torch::zeros(
           {1, 1}, torch::TensorOptions().device(device_).dtype(dtype_));
@@ -881,7 +884,7 @@ void NpuOneRecBlockLayerImpl::merge_loaded_weights() {
     }
   }
 
-  for (int i = 0; i < static_cast<int>(weight_count); ++i) {
+  for (int32_t i = 0; i < static_cast<int32_t>(weight_count); ++i) {
     atb_weight_tensors_[i] =
         atb_speed::Utils::AtTensor2Tensor(at_weight_tensors_[i]);
   }
@@ -951,8 +954,8 @@ void NpuOneRecBlockLayerImpl::load_state_dict(const StateDict& state_dict) {
   };
   const auto load_weight = [this, &state_dict, &correct_tensor_dtype](
                                const std::string& tensor_name,
-                               int weight_position,
-                               int shard_dim = -1) {
+                               int32_t weight_position,
+                               int32_t shard_dim = -1) {
     for (const auto& [name, tensor] : state_dict) {
       if (!absl::EndsWith(name, tensor_name)) {
         continue;
@@ -971,7 +974,7 @@ void NpuOneRecBlockLayerImpl::load_state_dict(const StateDict& state_dict) {
   };
 
   const auto& weight_mapping =
-      [this]() -> const std::unordered_map<std::string, int>& {
+      [this]() -> const std::unordered_map<std::string, int32_t>& {
     if (prefill_param_.use_moe) {
       return kOneRecDecoderMoeWeightMapping;
     }
@@ -1111,7 +1114,7 @@ torch::Tensor NpuOneRecBlockLayerImpl::forward(
     KVCache& kv_cache,
     ModelInputParams& input_params,
     torch::Tensor* encoder_output,
-    int node_id,
+    int32_t node_id,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
     const torch::Tensor& expert_array) {
@@ -1353,7 +1356,7 @@ int NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
   }
   idx++;
 
-  for (int i = 0; i < 3; i++) {
+  for (int32_t i = 0; i < 3; ++i) {
     node.variantPack.inTensors.at(idx) = placeholder_;
     node.variantPack.inTensors.at(idx++).hostData = placeholder_vec_.data();
   }
@@ -1425,7 +1428,7 @@ void NpuOneRecBlockLayerImpl::process_expert_weights(
   (void)state_dict;
   std::lock_guard<std::mutex> lock(experts_mutex_);
 
-  int expert_id = extract_expert_index(name);
+  int32_t expert_id = extract_expert_index(name);
   if (expert_id < 0) {
     return;
   }
@@ -1484,7 +1487,7 @@ void NpuOneRecBlockLayerImpl::process_shared_expert_weights(
   shared_expert_weights_map_[canonical_name] = tmp_tensor;
 }
 
-int NpuOneRecBlockLayerImpl::extract_expert_index(const std::string& name) {
+int32_t NpuOneRecBlockLayerImpl::extract_expert_index(const std::string& name) {
   size_t experts_pos = name.find(".experts.");
   if (experts_pos == std::string::npos) {
     return -1;

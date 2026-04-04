@@ -112,7 +112,7 @@ void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
     output.token_ids_logprobs.reserve(output.token_ids.size());
     for (size_t i = num_prompt_tokens_; i < size; ++i) {
       if (i < token_logprobs.size()) {
-        output.token_ids_logprobs.push_back(token_logprobs[i]);
+        output.token_ids_logprobs.emplace_back(token_logprobs[i]);
       } else {
         output.token_ids_logprobs.emplace_back();
       }
