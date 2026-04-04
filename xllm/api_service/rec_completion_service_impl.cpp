@@ -146,7 +146,7 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
   output_tensor->set_name("rec_result");
   proto::InferOutputTensor* logprobs_tensor = nullptr;
   int32_t logprob_width = 0;
-  if (FLAGS_enable_rec_score_output) {
+  if (FLAGS_enable_rec_logprobs_output) {
     logprobs_tensor = response.mutable_output_tensors()->Add();
     logprobs_tensor->set_name("sku_logprobs");
     logprobs_tensor->set_datatype(proto::DataType::FLOAT);
@@ -313,7 +313,7 @@ void RecCompletionServiceImpl::process_async_impl(
 
   RequestParams request_params(
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
-  if (FLAGS_enable_rec_score_output) {
+  if (FLAGS_enable_rec_logprobs_output) {
     request_params.logprobs = true;
   }
   bool include_usage = false;
