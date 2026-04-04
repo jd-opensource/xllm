@@ -70,6 +70,9 @@ void apply_onerec_pipeline_toggles(xllm::Options* options) {
   FLAGS_enable_rec_prefill_only = true;
   FLAGS_enable_constrained_decoding = true;
   FLAGS_enable_convert_tokens_to_item = false;
+  FLAGS_enable_prefix_cache = false;
+  FLAGS_enable_schedule_overlap = false;
+  FLAGS_enable_chunked_prefill = false;
 
   options->enable_prefix_cache(false)
       .enable_schedule_overlap(false)
@@ -182,6 +185,9 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     FLAGS_max_seqs_per_batch = xllm_init_options.max_seqs_per_batch;
     FLAGS_max_tokens_per_batch = xllm_init_options.max_tokens_per_batch;
     FLAGS_block_size = xllm_init_options.block_size;
+    FLAGS_enable_prefix_cache = xllm_init_options.enable_prefix_cache;
+    FLAGS_enable_schedule_overlap = xllm_init_options.enable_schedule_overlap;
+    FLAGS_enable_chunked_prefill = xllm_init_options.enable_chunked_prefill;
 
     std::unique_ptr<xllm::ModelLoader> model_loader =
         xllm::ModelLoader::create(model_path);
@@ -227,6 +233,9 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
               << ", enable_rec_prefill_only=" << FLAGS_enable_rec_prefill_only
               << ", enable_constrained_decoding="
               << FLAGS_enable_constrained_decoding
+              << ", enable_prefix_cache=" << FLAGS_enable_prefix_cache
+              << ", enable_schedule_overlap=" << FLAGS_enable_schedule_overlap
+              << ", enable_chunked_prefill=" << FLAGS_enable_chunked_prefill
               << ", enable_rec_fast_sampler=" << FLAGS_enable_rec_fast_sampler
               << ", max_decode_rounds=" << FLAGS_max_decode_rounds;
 
