@@ -28,6 +28,7 @@ limitations under the License.
 #include "platform/device.h"
 #include "request.h"
 #include "request_state.h"
+#include "common/global_flags.h"
 
 namespace xllm {
 namespace {
@@ -101,6 +102,32 @@ class CharTokenizer final : public Tokenizer {
   static constexpr int32_t kEmbTokenId = 100000;
   static constexpr char kEmbToken[] = "<emb_0>";
   static constexpr size_t kEmbTokenLen = sizeof(kEmbToken) - 1;
+};
+
+class FakeRecTokenizer final : public CharTokenizer {
+ public:
+  bool decode(const Slice<int32_t>& token_ids,
+              bool skip_special_tokens,
+              std::vector<int64_t>* item_ids) const override {
+    (void)token_ids;
+    (void)skip_special_tokens;
+    CHECK(item_ids != nullptr);
+    *item_ids = {1001, 1002, 1003};
+    return true;
+  }
+};
+
+class ScopedBoolFlag final {
+ public:
+  ScopedBoolFlag(bool* flag, bool value) : flag_(flag), old_value_(*flag) {
+    *flag_ = value;
+  }
+
+  ~ScopedBoolFlag() { *flag_ = old_value_; }
+
+ private:
+  bool* flag_;
+  bool old_value_;
 };
 
 TEST(SampleSlotTest, BuildSampleSlotsKeepsMatchOrderAndSampleIds) {
@@ -343,6 +370,113 @@ TEST(SampleSlotTest, RequestOutputStableSortsOutOfOrderSampleIds) {
   EXPECT_EQ(output.outputs[1].text, "B");
   EXPECT_EQ(output.outputs[2].index, 2U);
   EXPECT_EQ(output.outputs[2].text, "C");
+}
+
+TEST(SampleSlotTest, OneRecOutputCarriesTokenScoresWhenEnabled) {
+  ScopedBoolFlag enable_rec_score_output(&FLAGS_enable_rec_score_output, true);
+  ScopedBoolFlag enable_convert_tokens_to_item(
+      &FLAGS_enable_convert_tokens_to_item, false);
+
+  CharTokenizer tokenizer;
+  RequestSamplingParam sampling_param;
+  sampling_param.logprobs = true;
+
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(3);
+
+  RequestState request_state(
+      "",
+      std::vector<int32_t>{11, 12},
+      sampling_param,
+      SchedulerParam{},
+      stopping_checker,
+      /*seq_capacity=*/8,
+      /*n=*/1,
+      /*best_of=*/1,
+      /*logprobs=*/true,
+      /*stream=*/false,
+      /*echo=*/false,
+      /*skip_special_tokens=*/true,
+      /*enable_schedule_overlap=*/false,
+      [](const RequestOutput&) { return true; },
+      OutputsFunc{});
+  request_state.rec_type = RecType::kOneRec;
+
+  Request request("onerec-score", "", "", request_state);
+  auto* seq = request.sequences()[0].get();
+
+  Token first_token(101);
+  first_token.logprob = -0.10f;
+  seq->append_token(first_token);
+
+  Token second_token(102);
+  second_token.logprob = -0.20f;
+  seq->append_token(second_token);
+
+  Token third_token(103);
+  third_token.logprob = -0.30f;
+  seq->append_token(third_token);
+
+  RequestOutput output = request.generate_output(tokenizer);
+
+  ASSERT_EQ(output.outputs.size(), 1);
+  ASSERT_EQ(output.outputs[0].token_ids.size(), 3U);
+  ASSERT_EQ(output.outputs[0].token_ids_logprobs.size(), 3U);
+  ASSERT_TRUE(output.outputs[0].token_ids_logprobs[0].has_value());
+  ASSERT_TRUE(output.outputs[0].token_ids_logprobs[1].has_value());
+  ASSERT_TRUE(output.outputs[0].token_ids_logprobs[2].has_value());
+  EXPECT_FLOAT_EQ(output.outputs[0].token_ids_logprobs[0].value(), -0.10f);
+  EXPECT_FLOAT_EQ(output.outputs[0].token_ids_logprobs[1].value(), -0.20f);
+  EXPECT_FLOAT_EQ(output.outputs[0].token_ids_logprobs[2].value(), -0.30f);
+}
+
+TEST(SampleSlotTest, OneRecOutputCarriesMultiItemIdsWhenEnabled) {
+  ScopedBoolFlag enable_convert_tokens_to_item(
+      &FLAGS_enable_convert_tokens_to_item, true);
+  ScopedBoolFlag enable_rec_multi_item_output(
+      &FLAGS_enable_rec_multi_item_output, true);
+
+  FakeRecTokenizer tokenizer;
+  RequestSamplingParam sampling_param;
+  sampling_param.logprobs = false;
+
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(3);
+
+  RequestState request_state(
+      "",
+      std::vector<int32_t>{11, 12},
+      sampling_param,
+      SchedulerParam{},
+      stopping_checker,
+      /*seq_capacity=*/8,
+      /*n=*/1,
+      /*best_of=*/1,
+      /*logprobs=*/false,
+      /*stream=*/false,
+      /*echo=*/false,
+      /*skip_special_tokens=*/true,
+      /*enable_schedule_overlap=*/false,
+      [](const RequestOutput&) { return true; },
+      OutputsFunc{});
+  request_state.rec_type = RecType::kOneRec;
+
+  Request request("onerec-items", "", "", request_state);
+  auto* seq = request.sequences()[0].get();
+
+  seq->append_token(Token(201));
+  seq->append_token(Token(202));
+  seq->append_token(Token(203));
+
+  RequestOutput output = request.generate_output(tokenizer);
+
+  ASSERT_EQ(output.outputs.size(), 1);
+  ASSERT_TRUE(output.outputs[0].item_ids.has_value());
+  EXPECT_EQ(output.outputs[0].item_ids.value(), 1001);
+  ASSERT_EQ(output.outputs[0].item_ids_list.size(), 3U);
+  EXPECT_EQ(output.outputs[0].item_ids_list[0], 1001);
+  EXPECT_EQ(output.outputs[0].item_ids_list[1], 1002);
+  EXPECT_EQ(output.outputs[0].item_ids_list[2], 1003);
 }
 
 }  // namespace
