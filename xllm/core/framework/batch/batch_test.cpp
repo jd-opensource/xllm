@@ -26,10 +26,13 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "framework/block/block.h"
 #include "framework/block/block_manager_impl.h"
+#include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/request/stopping_checker.h"
 #include "framework/sampling/sampling_params.h"
 #include "platform/device.h"
+#include "runtime/forward_shared_memory_manager.h"
+#include "runtime/params_utils.h"
 
 namespace xllm {
 
@@ -172,6 +175,9 @@ TEST(BatchTest, Basic) {
   EXPECT_EQ(input_params.num_sequences, 4);
   EXPECT_EQ(input_params.q_max_seq_len, 9);
   EXPECT_EQ(input_params.kv_max_seq_len, 16);
+  EXPECT_EQ(input_params.embedding_ids, std::vector<int32_t>({-1, -1, -1}));
+  EXPECT_EQ(input_params.linear_state_ids,
+            std::vector<int32_t>({-1, -1, -1, -1}));
 
 #if defined(USE_NPU)
   const std::vector<int32_t> q_seq_lens = {9, 1, 1, 4};
@@ -300,6 +306,24 @@ TEST(BatchTest, SampleRequestInjectsAllMatchedSlots) {
   EXPECT_EQ(sampling_params_out.selected_token_idxes.size(0), 2);
 }
 
+TEST(BatchTest, KVCacheEmptySupportsLinearOnlyAndFullOnlyLayouts) {
+  auto options =
+      torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+  auto conv_cache = torch::zeros({2, 4, 3}, options);
+  auto ssm_cache = torch::zeros({2, 1, 4, 4}, options);
+  KVCache linear_only_cache(
+      torch::Tensor(), torch::Tensor(), conv_cache, ssm_cache);
+  EXPECT_FALSE(linear_only_cache.empty());
+
+  auto key_cache = torch::zeros({2, 4, 1, 8}, options);
+  auto value_cache = torch::zeros({2, 4, 1, 8}, options);
+  KVCache full_only_cache(key_cache, value_cache);
+  EXPECT_FALSE(full_only_cache.empty());
+
+  KVCache empty_cache;
+  EXPECT_TRUE(empty_cache.empty());
+}
+
 TEST(BatchTest, SampleRequestKeepsThreadedRawBuilderOffsetsStable) {
   torch::Device device(Device::type_torch(), 0);
   const uint32_t n_blocks = 8;
@@ -397,6 +421,200 @@ TEST(BatchTest, SampleRequestKeepsThreadedRawBuilderOffsetsStable) {
   EXPECT_EQ(raw_forward_input.selected_token_idxes,
             expected_selected_token_idxes);
   EXPECT_EQ(raw_forward_input.sample_idxes, expected_sample_idxes);
+  ASSERT_EQ(raw_forward_input.embedding_ids.size(), sequences.size());
+  ASSERT_EQ(raw_forward_input.linear_state_ids.size(), sequences.size());
+  EXPECT_EQ(raw_forward_input.embedding_ids, std::vector<int>({-1, -1}));
+  EXPECT_EQ(raw_forward_input.linear_state_ids, std::vector<int>({-1, -1}));
+}
+
+TEST(BatchTest, DecodeMinBatchSizeDoesNotPadTransportState) {
+  torch::Device device(Device::type_torch(), 0);
+  const uint32_t n_blocks = 8;
+  const uint32_t block_size = 4;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size);
+  BlockManagerImpl manager(options);
+
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(20);
+  SequenceParams seq_params;
+  seq_params.seq_capacity = 32;
+  seq_params.stopping_checker = &stopping_checker;
+  seq_params.sampling_param = &sampling_param;
+
+  torch::Tensor input_embedding;
+  MMData mm_data;
+  IncrementalDecoder decoder("", 1, false, false);
+  Sequence seq(/*index=*/0,
+               /*token_ids=*/{1, 2, 3},
+               input_embedding,
+               mm_data,
+               std::move(decoder),
+               seq_params);
+  seq.add_kv_blocks(manager.allocate(1));
+  seq.kv_state().incr_kv_cache_tokens_num(/*size=*/3);
+  seq.append_token(4);
+
+  std::vector<Sequence*> sequences = {&seq};
+  std::vector<uint32_t> allowed_max_tokens = {1};
+  std::vector<torch::Tensor> input_embeddings_vec;
+  std::vector<MMData> mm_data_vec;
+  ModelArgs args;
+  BatchInputBuilder builder(sequences,
+                            allowed_max_tokens,
+                            input_embeddings_vec,
+                            mm_data_vec,
+                            /*swap_block_transfer_infos=*/nullptr,
+                            /*batch_id=*/1,
+                            &args,
+                            BatchForwardType::DECODE);
+
+  ForwardInput forward_input =
+      builder.build_forward_input(/*num_decoding_tokens=*/1,
+                                  /*min_decoding_batch_size=*/3);
+
+  EXPECT_EQ(forward_input.input_params.num_sequences, 1);
+  EXPECT_EQ(forward_input.input_params.linear_state_ids,
+            std::vector<int32_t>({-1}));
+  EXPECT_EQ(forward_input.input_params.embedding_ids,
+            std::vector<int32_t>({-1}));
+}
+
+TEST(BatchTest, DecodeSingleBlockIdsStaySplitInTransportButShareSlotValue) {
+  const uint32_t n_blocks = 8;
+  const uint32_t block_size = 4;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size);
+  BlockManagerImpl manager(options);
+
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(20);
+  SequenceParams seq_params;
+  seq_params.seq_capacity = 32;
+  seq_params.stopping_checker = &stopping_checker;
+  seq_params.sampling_param = &sampling_param;
+
+  torch::Tensor input_embedding;
+  MMData mm_data;
+  IncrementalDecoder decoder("", 1, false, false);
+  Sequence seq(/*index=*/0,
+               /*token_ids=*/{1, 2, 3},
+               input_embedding,
+               mm_data,
+               std::move(decoder),
+               seq_params);
+  seq.add_kv_blocks(manager.allocate(1));
+  seq.kv_state().incr_kv_cache_tokens_num(/*size=*/3);
+  seq.append_token(4);
+
+  auto slot_block = manager.allocate(1);
+  ASSERT_EQ(slot_block.size(), 1u);
+  const int32_t expected_slot_id = slot_block[0].id();
+  seq.set_single_block(std::move(slot_block[0]));
+
+  std::vector<Sequence*> sequences = {&seq};
+  std::vector<uint32_t> allowed_max_tokens = {1};
+  std::vector<torch::Tensor> input_embeddings_vec;
+  std::vector<MMData> mm_data_vec;
+  ModelArgs args;
+  args.layer_types({"linear_attention"});
+  BatchInputBuilder builder(sequences,
+                            allowed_max_tokens,
+                            input_embeddings_vec,
+                            mm_data_vec,
+                            /*swap_block_transfer_infos=*/nullptr,
+                            /*batch_id=*/1,
+                            &args,
+                            BatchForwardType::DECODE);
+
+  ForwardInput forward_input =
+      builder.build_forward_input(/*num_decoding_tokens=*/1,
+                                  /*min_decoding_batch_size=*/0);
+
+  ASSERT_EQ(forward_input.input_params.embedding_ids.size(), 1u);
+  ASSERT_EQ(forward_input.input_params.linear_state_ids.size(), 1u);
+  EXPECT_EQ(forward_input.input_params.embedding_ids[0], expected_slot_id);
+  EXPECT_EQ(forward_input.input_params.linear_state_ids[0], expected_slot_id);
+}
+
+TEST(BatchTest, ProtoRoundTripPreservesAndDefaultsLinearStateIds) {
+  RawForwardInput raw_input;
+  raw_input.batch_forward_type = BatchForwardType::DECODE;
+  raw_input.flatten_tokens_vec = {1, 2};
+  raw_input.flatten_positions_vec = {0, 0};
+  raw_input.max_seq_len = 1;
+  raw_input.q_max_seq_len = 1;
+  raw_input.seq_lens = {1, 1};
+  raw_input.q_seq_lens = {1, 1};
+  raw_input.kv_cache_tokens_nums = {0, 0};
+  raw_input.new_token_slot_ids = {0, 0};
+  raw_input.block_tables_vec = {{0}, {0}};
+  raw_input.num_sequences = 2;
+  raw_input.linear_state_ids = {7, 9};
+
+  proto::ForwardInput pb_forward_input;
+  forward_input_to_proto(raw_input, &pb_forward_input);
+
+  ForwardInput round_trip;
+  proto_to_forward_input(&pb_forward_input,
+                         round_trip,
+                         /*num_decoding_tokens=*/1);
+  EXPECT_EQ(round_trip.input_params.linear_state_ids,
+            std::vector<int32_t>({7, 9}));
+
+  proto::ForwardInput legacy_pb = pb_forward_input;
+  legacy_pb.clear_linear_state_ids();
+
+  ForwardInput legacy_round_trip;
+  proto_to_forward_input(&legacy_pb,
+                         legacy_round_trip,
+                         /*num_decoding_tokens=*/1);
+  EXPECT_EQ(legacy_round_trip.input_params.linear_state_ids,
+            std::vector<int32_t>({-1, -1}));
+}
+
+TEST(BatchTest, SharedMemoryRoundTripPreservesAndDefaultsLinearStateIds) {
+  RawForwardInput raw_input;
+  raw_input.batch_forward_type = BatchForwardType::DECODE;
+  raw_input.flatten_tokens_vec = {1, 2};
+  raw_input.flatten_positions_vec = {0, 0};
+  raw_input.max_seq_len = 1;
+  raw_input.q_max_seq_len = 1;
+  raw_input.seq_lens = {1, 1};
+  raw_input.q_seq_lens = {1, 1};
+  raw_input.kv_cache_tokens_nums = {0, 0};
+  raw_input.new_token_slot_ids = {0, 0};
+  raw_input.block_tables_vec = {{0}, {0}};
+  raw_input.num_sequences = 2;
+  raw_input.linear_state_ids = {4, 6};
+
+  bool is_creator = false;
+  auto shm_name =
+      ForwardSharedMemoryManager::create_unique_name("batch_test_linear_state",
+                                                     /*dp_group=*/0,
+                                                     ForwardType::RAW_INPUT,
+                                                     /*rank=*/0);
+  ForwardSharedMemoryManager writer_manager(
+      shm_name, 1 << 20, is_creator, ForwardType::RAW_INPUT);
+  bool is_reader_creator = false;
+  ForwardSharedMemoryManager reader_manager(
+      shm_name, 1 << 20, is_reader_creator, ForwardType::RAW_INPUT);
+  ASSERT_TRUE(writer_manager.raw_input_write(raw_input));
+
+  ForwardInput from_shm;
+  reader_manager.raw_input_read(from_shm, torch::Device(torch::kCPU));
+  EXPECT_EQ(from_shm.input_params.linear_state_ids,
+            std::vector<int32_t>({4, 6}));
+
+  raw_input.linear_state_ids.clear();
+  ASSERT_TRUE(writer_manager.raw_input_write(raw_input));
+
+  ForwardInput legacy_from_shm;
+  reader_manager.raw_input_read(legacy_from_shm, torch::Device(torch::kCPU));
+  EXPECT_EQ(legacy_from_shm.input_params.linear_state_ids,
+            std::vector<int32_t>({-1, -1}));
 }
 
 TEST(BatchTest, SampleRequestProcessesAllMatchedRawOutputs) {

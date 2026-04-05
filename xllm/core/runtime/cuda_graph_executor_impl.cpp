@@ -128,6 +128,8 @@ CudaGraphPersistentParam::CudaGraphPersistentParam(
       {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
   persistent_new_cache_slots_ = torch::zeros(
       {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+  persistent_linear_state_indices_ = torch::zeros(
+      {max_seqs_per_batch}, torch::dtype(torch::kInt).device(device));
 
   // q_seq_lens is q_cu_seq_lens in GPU Model.
   // kv_seq_lens is kv_cu_seq_lens in GPU Model.
@@ -218,6 +220,7 @@ size_t CudaGraphPersistentParam::get_persistent_tensor_bytes() const {
   total += bytes(persistent_tokens_);
   total += bytes(persistent_positions_);
   total += bytes(persistent_new_cache_slots_);
+  total += bytes(persistent_linear_state_indices_);
   total += bytes(persistent_block_tables_);
   total += bytes(hidden_states_);
   total += bytes(q_seq_lens_);
@@ -265,6 +268,11 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     if (params.input_embedding.defined()) {
       params_for_capture->input_embedding =
           persistent_embedding(padded_num_tokens);
+    }
+    if (!params.linear_state_ids.empty()) {
+      params_for_capture->linear_state_ids = params.linear_state_ids;
+      params_for_capture->linear_state_indices =
+          persistent_linear_state_indices(params.num_sequences);
     }
     params_for_capture->attn_metadata = attn_metadata;
     return params_for_capture;
@@ -319,6 +327,19 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     persistent_new_cache_slots_
         .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
         .copy_(params.new_cache_slots, /*non_blocking=*/true);
+    if (!params.linear_state_ids.empty()) {
+      if (params.linear_state_indices.defined()) {
+        persistent_linear_state_indices_
+            .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+            .copy_(params.linear_state_indices, /*non_blocking=*/true);
+      } else {
+        persistent_linear_state_indices_
+            .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+            .copy_(
+                torch::tensor(params.linear_state_ids, torch::kInt).to(device_),
+                /*non_blocking=*/true);
+      }
+    }
     if (padded_num_tokens > actual_num_tokens) {
       persistent_new_cache_slots_
           .slice(/*dim=*/0,
@@ -727,8 +748,12 @@ bool CudaGraph::capture(CausalLM* model,
 
   // Update persistent parameters with input data before capture (includes
   // FlashInfer plan/update).
-  const torch::Tensor& k_cache = kv_cache[0].get_k_cache();
-  const torch::Tensor& v_cache = kv_cache[0].get_v_cache();
+  auto full_attention_cache =
+      CudaGraphExecutorImpl::find_first_full_attention_cache(kv_cache);
+  CHECK(full_attention_cache.has_value())
+      << "CUDA graph capture requires at least one full-attention KV cache";
+  const torch::Tensor& k_cache = full_attention_cache->first;
+  const torch::Tensor& v_cache = full_attention_cache->second;
   auto graph_params_opt =
       persistent_param_.update(tokens,
                                k_cache,
@@ -876,8 +901,12 @@ ModelOutput CudaGraph::replay(const torch::Tensor& tokens,
   }
 
   // Update persistent parameters with new input data
-  const torch::Tensor& k_cache = kv_cache[0].get_k_cache();
-  const torch::Tensor& v_cache = kv_cache[0].get_v_cache();
+  auto full_attention_cache =
+      CudaGraphExecutorImpl::find_first_full_attention_cache(kv_cache);
+  CHECK(full_attention_cache.has_value())
+      << "CUDA graph replay requires at least one full-attention KV cache";
+  const torch::Tensor& k_cache = full_attention_cache->first;
+  const torch::Tensor& v_cache = full_attention_cache->second;
 
   if (is_piecewise_) {
     // Piecewise replay mode (for prefill)
@@ -967,6 +996,23 @@ CudaGraphExecutorImpl::CudaGraphExecutorImpl(CausalLM* model,
   baseline_private_pool_active_bytes_ = private_pool_usage.active_bytes;
   baseline_allocator_reserved_bytes_ =
       get_allocator_reserved_bytes(device_.index());
+}
+
+std::optional<std::pair<torch::Tensor, torch::Tensor>>
+CudaGraphExecutorImpl::find_first_full_attention_cache(
+    const std::vector<KVCache>& kv_caches) {
+  for (const auto& cache : kv_caches) {
+    if (!cache.has_kv_cache()) {
+      continue;
+    }
+    auto k_cache = cache.get_k_cache();
+    auto v_cache = cache.get_v_cache();
+    if (k_cache.defined() && v_cache.defined() && k_cache.numel() > 0 &&
+        v_cache.numel() > 0) {
+      return std::make_pair(std::move(k_cache), std::move(v_cache));
+    }
+  }
+  return std::nullopt;
 }
 
 // ============== VMM Allocator Support ==============

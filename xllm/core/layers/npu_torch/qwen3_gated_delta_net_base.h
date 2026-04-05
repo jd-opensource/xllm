@@ -62,6 +62,8 @@ class Qwen3GatedDeltaNetBaseImpl : public torch::nn::Module {
                                       const torch::Tensor& qkvz) const;
   torch::Tensor reshape_qkvz_unpad(const AttentionMetadata& attn_metadata,
                                    const torch::Tensor& padded_qkvz) const;
+  torch::Tensor get_linear_state_indices(const ModelInputParams& input_params,
+                                         const torch::Device& device) const;
 
   std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
   process_qkvz_tensor(const torch::Tensor& qkvz) const;
