@@ -351,6 +351,7 @@ struct ModelInputParams {
     params.embedding_ids = std::move(embedding_ids);
     params.request_ids = std::move(request_ids);
     params.extra_token_ids = std::move(extra_token_ids);
+    params.mtp_shifted_token_ids = safe_to(mtp_shifted_token_ids, device, true);
     params.dp_ep_padding_data = dp_ep_padding_data;
     params.cp_ep_padding_data
         .attn_padding_idx(
@@ -535,6 +536,8 @@ struct ModelInputParams {
   // chunked prefill case of speculative decoding
   // extra token ids for each sequence, and -1 for last chunk
   std::vector<int32_t> extra_token_ids;
+  // precomputed shifted token ids for mtp prefill.
+  torch::Tensor mtp_shifted_token_ids;
 
   // swap
   std::vector<BlockTransferInfo> swap_blocks;

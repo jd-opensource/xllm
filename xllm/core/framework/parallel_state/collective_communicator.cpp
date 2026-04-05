@@ -119,19 +119,22 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
 void CollectiveCommunicator::create_process_groups(
     const std::string& master_addr,
     const torch::Device& device) {
+  int global_rank = parallel_args_->rank();
+  int world_size = parallel_args_->world_size();
+  int dp_size = parallel_args_->dp_size();
+  int ep_size = parallel_args_->ep_size();
+  int cp_size = parallel_args_->cp_size();
+
+  std::string host;
+  int port;
+  net::parse_host_port_from_addr(master_addr, host, port);
+
 #if defined(USE_NPU)
   if (FLAGS_npu_kernel_backend == "ATB") {
     return;
   }
 #endif
-  std::string host;
-  int port;
-  net::parse_host_port_from_addr(master_addr, host, port);
 
-  int global_rank = parallel_args_->rank();
-  int world_size = parallel_args_->world_size();
-  int dp_size = parallel_args_->dp_size();
-  int ep_size = parallel_args_->ep_size();
   process_group_ = create_process_group(global_rank,
                                         world_size,
                                         world_size,

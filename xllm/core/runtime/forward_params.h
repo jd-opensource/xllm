@@ -237,6 +237,9 @@ struct RawForwardInput {
   // chunked prefill case of speculative decoding
   // extra token ids for each sequence, and -1 for last chunk
   std::vector<int32_t> extra_token_ids;
+  // precomputed shifted token ids for mtp prefill, aligned with
+  // flatten_tokens_vec at token level.
+  std::vector<int32_t> mtp_shifted_token_ids;
   // embedding ids of each sequence
   std::vector<int> embedding_ids;
   // request ids of each sequence
@@ -381,6 +384,10 @@ struct RawForwardInput {
     if (!flatten_positions_vec.empty()) {
       outputs.flatten_positions_vec =
           gather_token_level_vector_i32(flatten_positions_vec);
+    }
+    if (!mtp_shifted_token_ids.empty()) {
+      outputs.mtp_shifted_token_ids =
+          gather_token_level_vector_i32(mtp_shifted_token_ids);
     }
 
     auto build_seq_lens = [&](const std::vector<int32_t>& original,

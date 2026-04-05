@@ -323,7 +323,6 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_prefill(
     auto mask = (token_ids == -1);
     token_ids.masked_scatter_(mask, next_tokens);
   }
-
   // generate kv cache for draft model
   timer.reset();
   auto draft_future = draft_impl_->step_async(prefill_input);
@@ -351,6 +350,14 @@ void MTPWorkerImpl::prepare_prefill_inputs(const ForwardInput& input,
                                            ForwardInput& prefill_input) {
   prefill_input = input.to(device_, dtype_);
   auto& input_params = prefill_input.input_params;
+  if (options_.cp_size() > 1) {
+    CHECK(input_params.mtp_shifted_token_ids.defined());
+    CHECK_EQ(input_params.mtp_shifted_token_ids.numel(),
+             prefill_input.token_ids.numel());
+    prefill_input.token_ids = input_params.mtp_shifted_token_ids;
+    return;
+  }
+
   auto& extra_token_ids = input_params.extra_token_ids;
 
   torch::Tensor token_ids = safe_to(input.token_ids, torch::kCPU);
