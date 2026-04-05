@@ -197,7 +197,7 @@ def _collect_submodule_init_issues(repo_root: str) -> dict[str, str]:
         _print_manual_check_commands([
             f"cd {repo_root}",
             "git submodule status",
-            "git submodule update --init",
+            "git submodule update --init --recursive",
         ])
         exit(1)
 
@@ -306,7 +306,7 @@ def _validate_submodules_or_exit(repo_root: str) -> None:
         for path in sorted(issues):
             print(f"   - {path}: {issues[path]}")
         print("\nPlease align submodules and try again:")
-        print("   git submodule update --init [-f|--force]")
+        print("   git submodule update --init --recursive [-f|--force]")
         exit(1)
 
 

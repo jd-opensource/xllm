@@ -391,8 +391,14 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
   const bool use_two_stage_decode =
       !FLAGS_enable_xattention_one_stage && is_decode_with_llmrec;
   const int32_t head_dim = args_.head_dim();
-  const int64_t n_heads = args_.n_heads();
-  const int64_t n_kv_heads = args_.n_kv_heads().value_or(n_heads);
+  const int64_t tp_size =
+      options_.world_size() / std::max(options_.dp_size(), 1);
+  const int64_t n_heads = args_.n_heads() / std::max(tp_size, int64_t{1});
+  const int64_t total_kv_heads = args_.n_kv_heads().value_or(args_.n_heads());
+  const int64_t n_kv_heads =
+      (total_kv_heads >= tp_size)
+          ? (total_kv_heads / std::max(tp_size, int64_t{1}))
+          : 1;
   const int64_t block_size = options_.block_size();
 
   // Get sliding_window from ModelArgs (default to -1 if not available)

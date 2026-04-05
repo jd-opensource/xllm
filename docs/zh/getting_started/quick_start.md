@@ -94,7 +94,7 @@ cd xllm
 pip install pre-commit
 pre-commit install
 
-git submodule update --init
+git submodule update --init --recursive
 ```
 
 编译生成的二进制文件位于`/path/to/xllm/build/xllm/core/server/xllm`，在新镜像中，第一次编译xllm耗时较长，因为需要编译vcpkg中的所有依赖，但是后续编译会很快。

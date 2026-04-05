@@ -31,13 +31,12 @@ limitations under the License.
 #include "core/common/metrics.h"
 #include "core/common/options.h"
 #include "core/common/types.h"
+#include "core/distributed_runtime/dit_master.h"
 #include "core/distributed_runtime/master.h"
 #include "core/framework/xtensor/global_xtensor.h"
 #include "core/framework/xtensor/options.h"
 #include "core/framework/xtensor/xtensor_allocator.h"
 #include "core/util/device_name_utils.h"
-#include "core/util/json_reader.h"
-#include "core/util/model_config_utils.h"
 #include "core/util/net.h"
 #include "core/util/utils.h"
 #include "function_call/function_call_parser.h"
@@ -68,6 +67,13 @@ void validate_flags(const std::string& model_type) {
                << model_type;
   }
 #if defined(USE_MLU)
+  // Disable enable_schedule_overlap for VLM models on MLU backend
+  if (FLAGS_enable_schedule_overlap && FLAGS_backend == "vlm") {
+    LOG(WARNING) << "enable_schedule_overlap is not supported for VLM models "
+                    "on MLU backend. "
+                 << "Disabling enable_schedule_overlap.";
+    FLAGS_enable_schedule_overlap = false;
+  }
   // TODO: support other block sizes in the future
   if (FLAGS_block_size != 16 && FLAGS_block_size != 1) {
     LOG(FATAL) << "Currently, block_size must be 16 for MLU backend, we will "
@@ -116,15 +122,11 @@ int run() {
 
   std::filesystem::path model_path =
       std::filesystem::path(FLAGS_model).lexically_normal();
+  const std::string default_model_name = xllm::util::get_model_name(model_path);
 
   if (FLAGS_model_id.empty()) {
     // use last part of the path as model id
-    if (model_path.has_filename()) {
-      FLAGS_model_id = std::filesystem::path(FLAGS_model).filename();
-    } else {
-      FLAGS_model_id =
-          std::filesystem::path(FLAGS_model).parent_path().filename();
-    }
+    FLAGS_model_id = default_model_name;
   }
 
   if (FLAGS_backend.empty()) {
@@ -162,9 +164,9 @@ int run() {
 #if !defined(USE_NPU)
   FLAGS_enable_block_copy_kernel = false;
 #endif
-
-  std::string model_type = xllm::util::get_model_type(model_path);
+  std::string model_type = "";
   if (FLAGS_backend != "dit") {
+    model_type = xllm::util::get_model_type(model_path);
     FLAGS_tool_call_parser = function_call::FunctionCallParser::get_parser_auto(
         FLAGS_tool_call_parser, model_type);
     FLAGS_reasoning_parser =
@@ -226,6 +228,9 @@ int run() {
       .dp_size(FLAGS_dp_size)
       .cp_size(FLAGS_cp_size)
       .ep_size(FLAGS_ep_size)
+      .tp_size(FLAGS_tp_size)
+      .sp_size(FLAGS_sp_size)
+      .cfg_size(FLAGS_cfg_size)
       .instance_name(FLAGS_host + ":" + std::to_string(FLAGS_port))
       .enable_disagg_pd(FLAGS_enable_disagg_pd)
       .enable_pd_ooc(FLAGS_enable_pd_ooc)
@@ -307,7 +312,11 @@ int run() {
   std::unique_ptr<Master> master;
   // working node
   if (options.node_rank() != 0) {
-    master = std::make_unique<LLMAssistantMaster>(options);
+    if (FLAGS_backend == "dit") {
+      master = std::make_unique<DiTAssistantMaster>(options);
+    } else {
+      master = std::make_unique<LLMAssistantMaster>(options);
+    }
   } else {
     if (FLAGS_random_seed < 0) {
       FLAGS_random_seed = std::random_device{}() % (1 << 30);
@@ -319,12 +328,7 @@ int run() {
 
   // supported models
   std::vector<std::string> model_names = {FLAGS_model_id};
-  std::string model_version;
-  if (model_path.has_filename()) {
-    model_version = std::filesystem::path(FLAGS_model).filename();
-  } else {
-    model_version = std::filesystem::path(FLAGS_model).parent_path().filename();
-  }
+  std::string model_version = default_model_name;
   std::vector<std::string> model_versions = {model_version};
 
   if (FLAGS_node_rank == 0 || FLAGS_enable_xtensor) {

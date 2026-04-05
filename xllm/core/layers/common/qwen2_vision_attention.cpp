@@ -24,8 +24,8 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-Qwen2VisionAttentionImpl::Qwen2VisionAttentionImpl(
-    const ModelContext& context) {
+Qwen2VisionAttentionImpl::Qwen2VisionAttentionImpl(const ModelContext& context,
+                                                   bool has_bias) {
   const auto& args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
   const auto& parallel_args = context.get_parallel_args();
@@ -47,7 +47,7 @@ Qwen2VisionAttentionImpl::Qwen2VisionAttentionImpl(
                                         num_attention_heads_per_partition_,
                                         hidden_size_per_attention_head_,
                                         /*num_kv_head_replicas=*/1,
-                                        /*bias=*/true,
+                                        /*bias=*/has_bias,
                                         /*gather_output=*/false,
                                         parallel_args,
                                         options));
@@ -55,7 +55,7 @@ Qwen2VisionAttentionImpl::Qwen2VisionAttentionImpl(
   proj_ = register_module("proj",
                           RowParallelLinear(hidden_size,
                                             hidden_size,
-                                            /*bias=*/true,
+                                            /*bias=*/has_bias,
                                             /*input_is_parallelized=*/true,
                                             /*if_reduce_results=*/true,
                                             quant_args,

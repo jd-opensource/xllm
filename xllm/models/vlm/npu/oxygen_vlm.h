@@ -30,8 +30,8 @@ limitations under the License.
 #include "glm4v.h"
 #include "models/llm/npu/oxygen.h"
 #include "models/model_registry.h"
-#include "processors/input_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
+#include "processors/qwen2_vl_input_processor.h"
 #include "qwen2_5_vl.h"
 #include "torch_npu/csrc/aten/CustomFunctions.h"
 

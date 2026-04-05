@@ -901,7 +901,6 @@ int32_t run_attention_prefill_sp_baseline_test_child(int32_t rank,
       return EXIT_CODE_SKIP;
     }
 
-    FLAGS_enable_mla = true;
     FLAGS_block_size = 16;
     const int32_t device_index = rank % dev_count;
     xllm::Device xllm_device(device_index);

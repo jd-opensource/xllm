@@ -483,6 +483,9 @@ torch::Tensor proto_to_torch(const proto::Tensor& proto_tensor) {
     data_ptr = get_data_from_contents<uint8_t>(proto_contents, proto_datatype);
     data_count = proto_contents.bytes_contents().size() /
                  static_cast<size_t>(sizeof(torch::Half));
+  } else if (proto_datatype == "BYTES") {
+    data_ptr = get_data_from_contents<uint8_t>(proto_contents, proto_datatype);
+    data_count = proto_contents.bytes_contents().size();
   }
 
   if (data_ptr == nullptr) {

@@ -31,6 +31,7 @@ limitations under the License.
 #include "npu_cp_ep_padding.h"
 #include "npu_cp_prepare.h"
 #include "npu_dp_ep_padding.h"
+#include "runtime/dit_forward_params.h"
 #include "util/hash_util.h"
 #include "util/tensor_helper.h"
 
@@ -180,6 +181,8 @@ struct LlmRecMultiRoundParams {
 
     result.full_k_caches.clear();
     result.full_v_caches.clear();
+    result.full_k_caches.reserve(full_k_caches.size());
+    result.full_v_caches.reserve(full_v_caches.size());
     for (const auto& t : full_k_caches) {
       result.full_k_caches.push_back(safe_to(t, device));
     }
@@ -190,6 +193,10 @@ struct LlmRecMultiRoundParams {
     result.unshared_v_caches.clear();
     result.shared_k_caches.clear();
     result.shared_v_caches.clear();
+    result.unshared_k_caches.reserve(unshared_k_caches.size());
+    result.unshared_v_caches.reserve(unshared_v_caches.size());
+    result.shared_k_caches.reserve(shared_k_caches.size());
+    result.shared_v_caches.reserve(shared_v_caches.size());
     for (const auto& t : unshared_k_caches) {
       result.unshared_k_caches.push_back(safe_to(t, device));
     }
@@ -240,6 +247,8 @@ struct LlmRecMultiRoundParams {
     }
 
     result.decode_positions_tensor_list.clear();
+    result.decode_positions_tensor_list.reserve(
+        decode_positions_tensor_list.size());
     for (const auto& t : decode_positions_tensor_list) {
       result.decode_positions_tensor_list.push_back(safe_to(t, device));
     }
@@ -405,6 +414,8 @@ struct ModelInputParams {
     params.paged_kv_last_page_len = safe_to(paged_kv_last_page_len, device);
 
     params.batch_id = batch_id;
+
+    params.dit_forward_input = dit_forward_input.to(device);
 
     // rec_params device conversion for both OneRec and LLM-Rec variants
     if (const auto* onerec = onerec_params()) {
@@ -576,6 +587,9 @@ struct ModelInputParams {
   std::vector<int32_t> ring_cache_seqlen_host;
 
   RecModelInputParams rec_params;
+
+  // dit input data
+  DiTForwardInput dit_forward_input;
 
   const OneRecModelInputParams* onerec_params() const {
     return std::get_if<OneRecModelInputParams>(&rec_params);

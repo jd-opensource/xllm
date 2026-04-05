@@ -4,6 +4,7 @@ cc_library(
   NAME
     common_layers
   HDRS
+    oxygen_vision_attention.h
     qwen2_attention.h
     qwen2_vision_attention.h
     qwen3_next_rms_norm.h
@@ -24,6 +25,7 @@ cc_library(
     add_matmul.h
     moe_fused_topk.h
   SRCS
+    oxygen_vision_attention.cpp
     qwen2_attention.cpp
     qwen2_vision_attention.cpp
     qwen3_next_rms_norm.cpp

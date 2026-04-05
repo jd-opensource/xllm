@@ -1,39 +1,57 @@
 [submodule "third_party/brpc"]
 	path = third_party/brpc
 	url = https://gitcode.com/xLLM-AI/brpc.git
+	fetchRecurseSubmodules = false
 [submodule "third_party/cpprestsdk"]
 	path = third_party/cpprestsdk
 	url = https://gitcode.com/xLLM-AI/cpprestsdk.git
+	fetchRecurseSubmodules = false
 [submodule "third_party/minja"]
 	path = third_party/minja
 	url = https://gitcode.com/xLLM-AI/minja.git
+	fetchRecurseSubmodules = false
 [submodule "third_party/sentencepiece"]
 	path = third_party/sentencepiece
 	url = https://gitcode.com/xLLM-AI/sentencepiece.git
+	fetchRecurseSubmodules = false
 [submodule "third_party/smhasher"]
 	path = third_party/smhasher
 	url = https://gitcode.com/xLLM-AI/smhasher.git
+	fetchRecurseSubmodules = false
 [submodule "third_party/xllm_ops"]
 	path = third_party/xllm_ops
 	url = https://gitcode.com/xLLM-AI/xllm_ops.git
+	fetchRecurseSubmodules = true
 [submodule "third_party/etcd_cpp_apiv3"]
 	path = third_party/etcd_cpp_apiv3
 	url = https://gitcode.com/xLLM-AI/etcd-cpp-apiv3.git
+	fetchRecurseSubmodules = false
 [submodule "third_party/spdlog"]
 	path = third_party/spdlog
 	url = https://gitcode.com/xLLM-AI/spdlog.git
+	fetchRecurseSubmodules = false
 [submodule "third_party/Mooncake"]
 	path = third_party/Mooncake
 	url = https://gitcode.com/xLLM-AI/Mooncake.git
+	fetchRecurseSubmodules = false
 [submodule "third_party/torch_npu_ops"]
 	path = third_party/torch_npu_ops
 	url = https://gitcode.com/xLLM-AI/torch_npu_ops.git
+	fetchRecurseSubmodules = false
 [submodule "third_party/cutlass"]
 	path = third_party/cutlass
 	url = https://gitcode.com/xLLM-AI/cutlass.git
+	fetchRecurseSubmodules = false
 [submodule "third_party/xllm_atb_layers"]
 	path = third_party/xllm_atb_layers
 	url = https://gitcode.com/xLLM-AI/xllm_atb_layers.git
+	fetchRecurseSubmodules = false
 [submodule "third_party/xxHash"]
 	path = third_party/xxHash
 	url = https://gitcode.com/xLLM-AI/xxHash.git
+	fetchRecurseSubmodules = false
+[submodule "third_party/tilelang-ascend"]
+	path = third_party/tilelang-ascend
+	url = https://gitcode.com/xLLM-AI/tilelang-ascend.git
+	branch = ascendc_pto
+	fetchRecurseSubmodules = true

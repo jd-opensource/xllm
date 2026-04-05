@@ -29,10 +29,9 @@ limitations under the License.
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "models/llm/npu/qwen2.h"
 #include "models/model_registry.h"
-#include "processors/input_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
+#include "processors/qwen2_vl_input_processor.h"
 #include "qwen2_5_vl.h"
-#include "xllm_atb_layers/core/include/atb_speed/log.h"
 
 namespace xllm::npu::model {
 

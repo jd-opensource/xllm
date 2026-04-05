@@ -17,6 +17,7 @@ limitations under the License.
 #include <folly/Function.h>
 
 #include <thread>
+#include <vector>
 
 #include "concurrent_queue.h"
 #include "util/blocking_counter.h"
@@ -41,6 +42,14 @@ class ThreadPool final {
 
   explicit ThreadPool(size_t num_threads);
   explicit ThreadPool(size_t num_threads, Runnable init_func);
+  // Bind each worker thread to the corresponding CPU core in cpu_cores.
+  // cpu_cores[i] is the CPU core ID for thread i. If cpu_cores is empty,
+  // no binding is performed. If cpu_cores.size() does not equal num_threads,
+  // a warning will be logged and CPU core binding will be skipped.
+  explicit ThreadPool(size_t num_threads, std::vector<int32_t> cpu_cores);
+  explicit ThreadPool(size_t num_threads,
+                      Runnable init_func,
+                      std::vector<int32_t> cpu_cores);
 
   // schedule a runnable to be executed
   int32_t schedule(Runnable runnable);
@@ -58,7 +67,8 @@ class ThreadPool final {
  private:
   void internal_loop(size_t tid,
                      Runnable* init_func,
-                     BlockingCounter* block_counter);
+                     BlockingCounter* block_counter,
+                     int32_t cpu_core);
 
   std::vector<std::thread> threads_;
   std::vector<ConcurrentQueue<Runnable>> queues_;

@@ -21,6 +21,7 @@ limitations under the License.
 
 #include <memory>
 
+#include "core/framework/dit_cache/dit_cache_config.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model_context.h"
 #include "core/framework/quant_args.h"
@@ -36,6 +37,7 @@ class DiTModelContext {
                   const std::unordered_map<std::string, ModelArgs>& model_args,
                   const std::unordered_map<std::string, QuantArgs>& quant_args,
                   const torch::TensorOptions& tensor_options,
+                  const DiTCacheConfig& dit_config,
                   const std::string& model_type);
 
   const ModelArgs& get_model_args(const std::string& component) const;
@@ -54,6 +56,8 @@ class DiTModelContext {
 
   const std::string& model_type() const { return model_type_; }
 
+  const DiTCacheConfig& get_dit_config() const { return dit_config_; }
+
 #if defined(USE_NPU)
   const atb::Context* get_atb_context() const { return context_; }
 #endif
@@ -63,6 +67,7 @@ class DiTModelContext {
   std::unordered_map<std::string, QuantArgs> quant_args_;
   ParallelArgs parallel_args_;
   torch::TensorOptions tensor_options_;
+  DiTCacheConfig dit_config_;
   std::string model_type_;
 
 #if defined(USE_NPU)

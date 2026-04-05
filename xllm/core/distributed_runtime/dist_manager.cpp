@@ -182,12 +182,25 @@ void DistManager::setup_multi_node_workers(
   /* TODO(CP): support smem  + CP */
   const int32_t dp_local_tp_size = world_size / dp_size;
 
-  LOG(INFO) << "Multi-node serving world_size = " << world_size
-            << ", each_node_ranks = " << each_node_ranks
-            << ", current node rank = " << options.node_rank()
-            << ", nnodes = " << options.nnodes() << ", dp_size = " << dp_size
-            << ", cp_size = " << cp_size << ", ep_size = " << ep_size
-            << ", tp_size = " << dp_local_tp_size;
+  const auto& model_backend = options.backend();
+  if (model_backend == "dit") {
+    const int32_t tp_size = options.tp_size();
+    const int32_t sp_size = options.sp_size();
+    const int32_t cfg_size = options.cfg_size();
+    LOG(INFO) << "Multi-node serving world_size = " << world_size
+              << ", each_node_ranks = " << each_node_ranks
+              << ", current node rank = " << options.node_rank()
+              << ", nnodes = " << options.nnodes() << ", dp_size = " << dp_size
+              << ", tp_size = " << tp_size << ", sp_size = " << sp_size
+              << ", cfg_size = " << cfg_size;
+  } else {
+    LOG(INFO) << "Multi-node serving world_size = " << world_size
+              << ", each_node_ranks = " << each_node_ranks
+              << ", current node rank = " << options.node_rank()
+              << ", nnodes = " << options.nnodes() << ", dp_size = " << dp_size
+              << ", cp_size = " << cp_size << ", ep_size = " << ep_size
+              << ", tp_size = " << dp_local_tp_size;
+  }
 
   CHECK_EQ((world_size % dp_size), 0)
       << "Global world size must be divisible by dp size in multi-node "
@@ -196,7 +209,6 @@ void DistManager::setup_multi_node_workers(
   runtime::Options worker_server_options = options;
   worker_server_options.world_size(world_size);
   WorkerType worker_type("LLM");
-  const auto& model_backend = options.backend();
   if (model_backend == "llm") {
     if (options.task_type() == "generate") {
       worker_type = WorkerType::LLM;
@@ -219,6 +231,8 @@ void DistManager::setup_multi_node_workers(
     }
   } else if (model_backend == "rec") {
     worker_type = WorkerType::REC;
+  } else if (model_backend == "dit") {
+    worker_type = WorkerType::DIT;
   } else {
     LOG(FATAL) << "Unsupported " << model_backend << " in multi-node.";
   }
