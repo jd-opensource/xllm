@@ -97,6 +97,7 @@ void Sequence::generate_onerec_streaming_output(const Slice<int32_t>& ids,
 
 void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
                                       size_t size,
+                                      const Tokenizer& tokenizer,
                                       SequenceOutput& output) const {
   output.index = index_;
   if (output_embedding_.defined()) {
@@ -106,6 +107,31 @@ void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
     output.finish_reason = finish_reason_.to_string();
   }
   output.token_ids = ids.slice(num_prompt_tokens_, size);
+  if (FLAGS_enable_rec_logprobs_output && logprob_state_ != nullptr) {
+    const auto& token_logprobs = logprob_state_->get_logprobs();
+    output.token_ids_logprobs.reserve(output.token_ids.size());
+    for (size_t i = num_prompt_tokens_; i < size; ++i) {
+      if (i < token_logprobs.size()) {
+        output.token_ids_logprobs.emplace_back(token_logprobs[i]);
+      } else {
+        output.token_ids_logprobs.emplace_back();
+      }
+    }
+  }
+  if (FLAGS_enable_convert_tokens_to_item &&
+      output.token_ids.size() == static_cast<size_t>(REC_TOKEN_SIZE)) {
+    std::vector<int64_t> item_ids;
+    const bool ok = tokenizer.decode(
+        Slice<int32_t>{output.token_ids.data(), output.token_ids.size()},
+        sequence_params_.skip_special_tokens,
+        &item_ids);
+    if (ok && !item_ids.empty()) {
+      output.item_ids = item_ids.front();
+      if (FLAGS_enable_rec_multi_item_output) {
+        output.item_ids_list = item_ids;
+      }
+    }
+  }
 }
 
 Sequence::Sequence(size_t index,
@@ -530,7 +556,7 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
 
   // 3. generate onerec output
   if (is_onerec_model()) {
-    generate_onerec_output(ids, size, output);
+    generate_onerec_output(ids, size, tokenizer, output);
     return output;
   }
 

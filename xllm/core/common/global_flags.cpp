@@ -663,6 +663,26 @@ DEFINE_bool(enable_return_mm_full_embeddings,
             false,
             "return vit and sequence embeddings for vlm models");
 
+DEFINE_bool(enable_convert_tokens_to_item,
+            false,
+            "Enable token ids conversion to item id in REC/OneRec response.");
+
+DEFINE_bool(enable_rec_logprobs_output,
+            false,
+            "Enable REC / OneRec token-aligned logprobs tensor output.");
+
+DEFINE_bool(enable_rec_multi_item_output,
+            false,
+            "Enable multi-item REC / OneRec result output.");
+
+DEFINE_int32(each_conversion_threshold,
+             50,
+             "Maximum number of items emitted for each REC token triplet.");
+
+DEFINE_int32(total_conversion_threshold,
+             1000,
+             "Maximum total number of items emitted in one REC response.");
+
 DEFINE_bool(
     use_audio_in_video,
     false,

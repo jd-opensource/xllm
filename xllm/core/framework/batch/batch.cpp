@@ -159,10 +159,20 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
                                               uint32_t min_decoding_batch_size,
                                               const ModelArgs& args,
                                               ThreadPool* thread_pool) {
-  output_targets_.clear();
   RecType rec_type = RecType::kNone;
   if (!sequence_groups_.empty() && !sequence_groups_[0]->sequences().empty()) {
     rec_type = sequence_groups_[0]->sequences()[0]->rec_type();
+  }
+  output_targets_.clear();
+  if (rec_type == RecType::kOneRec && !sequence_groups_.empty()) {
+    // OneRec REC batches are tracked via sequence_groups_, while output target
+    // generation still walks sequences_. Refresh the flattened sequence view
+    // on every step so token writeback stays aligned after beam search expands
+    // or replaces the group-owned Sequence instances.
+    refresh_sequences_from_groups();
+  }
+  if (rec_type == RecType::kOneRec) {
+    refresh_output_targets();
   }
 
   auto builder = RecBatchInputBuilder::create(rec_type,

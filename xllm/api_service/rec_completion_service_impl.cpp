@@ -20,8 +20,12 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <random>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 #include "common/global_flags.h"
 #include "common/instance_name.h"
@@ -42,6 +46,55 @@ limitations under the License.
 
 namespace xllm {
 namespace {
+void append_rec_logprobs(proto::Content* logprobs_context,
+                         const SequenceOutput& output,
+                         int32_t expected_count) {
+  const auto& token_logprobs = output.token_ids_logprobs;
+  const int32_t actual_count = static_cast<int32_t>(token_logprobs.size());
+
+  for (int32_t i = 0; i < expected_count; ++i) {
+    if (i < actual_count && token_logprobs[i].has_value()) {
+      logprobs_context->mutable_fp32_contents()->Add(
+          token_logprobs[i].value());
+    } else {
+      logprobs_context->mutable_fp32_contents()->Add(0.0f);
+    }
+  }
+}
+
+std::vector<int64_t> select_rec_item_ids(const SequenceOutput& output) {
+  if (!FLAGS_enable_rec_multi_item_output || output.item_ids_list.empty()) {
+    if (output.item_ids.has_value()) {
+      return {output.item_ids.value()};
+    }
+    return {};
+  }
+
+  std::vector<int64_t> selected_item_ids;
+  selected_item_ids.reserve(output.item_ids_list.size());
+  std::unordered_set<int64_t> seen_item_ids;
+  for (const int64_t item_id : output.item_ids_list) {
+    if (seen_item_ids.insert(item_id).second) {
+      selected_item_ids.emplace_back(item_id);
+    }
+  }
+
+  const int32_t each_threshold = FLAGS_each_conversion_threshold;
+  if (each_threshold > 0 &&
+      static_cast<int32_t>(selected_item_ids.size()) > each_threshold) {
+    uint32_t seed = FLAGS_random_seed >= 0
+                        ? static_cast<uint32_t>(FLAGS_random_seed) +
+                              static_cast<uint32_t>(output.index)
+                        : std::random_device{}();
+    std::mt19937 generator(seed);
+    std::shuffle(
+        selected_item_ids.begin(), selected_item_ids.end(), generator);
+    selected_item_ids.resize(each_threshold);
+  }
+
+  return selected_item_ids;
+}
+
 void set_logprobs(proto::Choice* choice,
                   const std::optional<std::vector<LogProb>>& logprobs) {
   if (!logprobs.has_value() || logprobs.value().empty()) {
@@ -91,32 +144,141 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
   // Add rec specific output tensors
   auto output_tensor = response.mutable_output_tensors()->Add();
   output_tensor->set_name("rec_result");
-  if (FLAGS_enable_constrained_decoding) {
+  proto::InferOutputTensor* logprobs_tensor = nullptr;
+  int32_t logprob_width = 0;
+  if (FLAGS_enable_rec_logprobs_output) {
+    logprobs_tensor = response.mutable_output_tensors()->Add();
+    logprobs_tensor->set_name("sku_logprobs");
+    logprobs_tensor->set_datatype(proto::DataType::FLOAT);
+    for (const auto& output : req_output.outputs) {
+      logprob_width = std::max(
+          logprob_width,
+          static_cast<int32_t>(output.token_ids_logprobs.size()));
+    }
+  }
+
+  if (FLAGS_enable_convert_tokens_to_item) {
     output_tensor->set_datatype(proto::DataType::INT64);
-    output_tensor->mutable_shape()->Add(req_output.outputs.size());
-    output_tensor->mutable_shape()->Add(1);  // Single item per output
-    // TODO: add following when next pr.
-    /*
-    auto context = output_tensor->mutable_contents();
-    for (int i = 0; i < req_output.outputs.size(); ++i) {
-      if (req_output.outputs[i].item_ids.has_value()) {
-        context->mutable_int64_contents()->Add(
-            req_output.outputs[i].item_ids.value());
+    std::vector<std::vector<int64_t>> selected_item_groups;
+    selected_item_groups.reserve(req_output.outputs.size());
+
+    int32_t total_item_count = 0;
+    int32_t max_items_per_output = 0;
+    const int32_t total_threshold = FLAGS_total_conversion_threshold;
+    for (const auto& output : req_output.outputs) {
+      std::vector<int64_t> selected_item_ids = select_rec_item_ids(output);
+      if (total_threshold > 0 &&
+          total_item_count + static_cast<int32_t>(selected_item_ids.size()) >
+              total_threshold) {
+        const int32_t remaining_count =
+            std::max(total_threshold - total_item_count, 0);
+        if (remaining_count == 0) {
+          selected_item_ids.clear();
+        } else {
+          selected_item_ids.resize(remaining_count);
+        }
+      }
+      total_item_count += static_cast<int32_t>(selected_item_ids.size());
+      max_items_per_output = std::max(
+          max_items_per_output,
+          static_cast<int32_t>(selected_item_ids.size()));
+      selected_item_groups.emplace_back(std::move(selected_item_ids));
+    }
+
+    const int32_t output_count = static_cast<int32_t>(req_output.outputs.size());
+    if (FLAGS_enable_rec_multi_item_output) {
+      auto lengths_tensor = response.mutable_output_tensors()->Add();
+      lengths_tensor->set_name("rec_result_lengths");
+      lengths_tensor->set_datatype(proto::DataType::INT32);
+      lengths_tensor->mutable_shape()->Add(output_count);
+      auto* lengths_context = lengths_tensor->mutable_contents();
+
+      output_tensor->mutable_shape()->Add(output_count);
+      output_tensor->mutable_shape()->Add(max_items_per_output);
+      if (logprobs_tensor != nullptr) {
+        logprobs_tensor->mutable_shape()->Add(output_count);
+        logprobs_tensor->mutable_shape()->Add(logprob_width);
+      }
+
+      auto* output_context = output_tensor->mutable_contents();
+      auto* logprobs_context = logprobs_tensor == nullptr
+                                   ? nullptr
+                                   : logprobs_tensor->mutable_contents();
+      for (int32_t i = 0; i < output_count; ++i) {
+        const auto& selected_item_ids = selected_item_groups[i];
+        lengths_context->mutable_int_contents()->Add(
+            static_cast<int32_t>(selected_item_ids.size()));
+        for (int32_t j = 0; j < max_items_per_output; ++j) {
+          if (j < static_cast<int32_t>(selected_item_ids.size())) {
+            output_context->mutable_int64_contents()->Add(selected_item_ids[j]);
+          } else {
+            output_context->mutable_int64_contents()->Add(0);
+          }
+        }
+        if (logprobs_context != nullptr) {
+          append_rec_logprobs(
+              logprobs_context, req_output.outputs[i], logprob_width);
+        }
+      }
+      return call->write_and_finish(response);
+    }
+
+    output_tensor->mutable_shape()->Add(output_count);
+    if (logprobs_tensor != nullptr) {
+      logprobs_tensor->mutable_shape()->Add(output_count);
+      logprobs_tensor->mutable_shape()->Add(logprob_width);
+    }
+
+    auto* output_context = output_tensor->mutable_contents();
+    auto* logprobs_context = logprobs_tensor == nullptr
+                                 ? nullptr
+                                 : logprobs_tensor->mutable_contents();
+    for (int32_t i = 0; i < output_count; ++i) {
+      const auto& selected_item_ids = selected_item_groups[i];
+      if (!selected_item_ids.empty()) {
+        output_context->mutable_int64_contents()->Add(selected_item_ids.front());
+      } else {
+        output_context->mutable_int64_contents()->Add(0);
+      }
+      if (logprobs_context != nullptr) {
+        append_rec_logprobs(
+            logprobs_context, req_output.outputs[i], logprob_width);
       }
     }
-    */
   } else {
     output_tensor->set_datatype(proto::DataType::INT32);
 
-    output_tensor->mutable_shape()->Add(req_output.outputs.size());
-    output_tensor->mutable_shape()->Add(req_output.outputs[0].token_ids.size());
+    if (req_output.outputs.empty()) {
+      output_tensor->mutable_shape()->Add(0);
+      output_tensor->mutable_shape()->Add(0);
+      if (logprobs_tensor != nullptr) {
+        logprobs_tensor->mutable_shape()->Add(0);
+        logprobs_tensor->mutable_shape()->Add(0);
+      }
+      return call->write_and_finish(response);
+    }
 
-    auto context = output_tensor->mutable_contents();
-    for (int i = 0; i < req_output.outputs.size(); ++i) {
+    const int32_t output_count = static_cast<int32_t>(req_output.outputs.size());
+    output_tensor->mutable_shape()->Add(output_count);
+    output_tensor->mutable_shape()->Add(req_output.outputs[0].token_ids.size());
+    if (logprobs_tensor != nullptr) {
+      logprobs_tensor->mutable_shape()->Add(output_count);
+      logprobs_tensor->mutable_shape()->Add(logprob_width);
+    }
+
+    auto* context = output_tensor->mutable_contents();
+    auto* logprobs_context = logprobs_tensor == nullptr
+                                 ? nullptr
+                                 : logprobs_tensor->mutable_contents();
+    for (int32_t i = 0; i < output_count; ++i) {
       // LOG(INFO) << req_output.outputs[i].token_ids;
       context->mutable_int_contents()->Add(
           req_output.outputs[i].token_ids.begin(),
           req_output.outputs[i].token_ids.end());
+      if (logprobs_context != nullptr) {
+        append_rec_logprobs(
+            logprobs_context, req_output.outputs[i], logprob_width);
+      }
     }
   }
 
@@ -153,6 +315,9 @@ void RecCompletionServiceImpl::process_async_impl(
 
   RequestParams request_params(
       rpc_request, call->get_x_request_id(), call->get_x_request_time());
+  if (FLAGS_enable_rec_logprobs_output) {
+    request_params.logprobs = true;
+  }
   bool include_usage = false;
   if (rpc_request.has_stream_options()) {
     include_usage = rpc_request.stream_options().include_usage();
