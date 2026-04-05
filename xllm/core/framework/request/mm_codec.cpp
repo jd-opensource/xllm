@@ -263,7 +263,7 @@ class MemoryVideoReader : public MemoryMediaReader {
     }
 
     tensor = torch::stack(frames_);  // [T,C,H,W]
-    metadata.total_num_frames = static_cast<int64_t>(frames_.size());
+    metadata.total_num_frames = static_cast<int32_t>(frames_.size());
     metadata.duration =
         (metadata.fps > 0.0)
             ? static_cast<double>(metadata.total_num_frames) / metadata.fps
@@ -376,12 +376,12 @@ class MemoryAudioReader : public MemoryMediaReader {
     }
 
     AVChannelLayout out_layout;
-    av_channel_layout_default(&out_layout, static_cast<int32_t>(target_ch_));
+    av_channel_layout_default(&out_layout, target_ch_);
 
     if (swr_alloc_set_opts2(&swr_ctx_,
                             &out_layout,
                             AV_SAMPLE_FMT_FLT,
-                            static_cast<int32_t>(target_sr_),
+                            target_sr_,
                             &in_layout,
                             codec_ctx_->sample_fmt,
                             codec_ctx_->sample_rate,
@@ -437,13 +437,13 @@ class MemoryAudioReader : public MemoryMediaReader {
     // build output tensor and compute metadata
     if (target_ch_ == 1) {
       tensor = torch::from_blob(pcm_.data(),
-                                {static_cast<int64_t>(pcm_.size())},
+                                {static_cast<int32_t>(pcm_.size())},
                                 torch::TensorOptions().dtype(torch::kFloat32))
                    .clone();
       metadata.duration = static_cast<double>(pcm_.size()) / target_sr_;
     } else {
-      int64_t T =
-          static_cast<int64_t>(pcm_.size() / static_cast<size_t>(target_ch_));
+      int32_t T =
+          static_cast<int32_t>(pcm_.size() / static_cast<size_t>(target_ch_));
       tensor = torch::from_blob(pcm_.data(),
                                 {T, target_ch_},
                                 torch::TensorOptions().dtype(torch::kFloat32))
@@ -485,7 +485,7 @@ class MemoryAudioReader : public MemoryMediaReader {
     }
 
     // append converted samples to pcm buffer
-    const int64_t n = static_cast<int64_t>(converted) * target_ch_;
+    const int64_t n = static_cast<int64_t>(converted * target_ch_);
     pcm_.reserve(pcm_.size() + static_cast<size_t>(n));
     pcm_.insert(pcm_.end(), out_buf.data(), out_buf.data() + n);
     return converted;
@@ -493,8 +493,8 @@ class MemoryAudioReader : public MemoryMediaReader {
 
  private:
   SwrContext* swr_ctx_ = nullptr;
-  int64_t target_sr_ = 16000;
-  int64_t target_ch_ = 1;
+  int32_t target_sr_ = 16000;
+  int32_t target_ch_ = 1;
   std::vector<float> pcm_;
 };
 
