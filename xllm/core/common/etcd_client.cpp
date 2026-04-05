@@ -32,6 +32,17 @@ EtcdClient::EtcdClient(const std::string& etcd_addr)
   }
 }
 
+EtcdClient::EtcdClient(const std::string& etcd_addr,
+                       const std::string& username,
+                       const std::string& password)
+    : client_(etcd_addr, username, password), etcd_addr_(etcd_addr) {
+  auto response = client_.put("XLLM_PING", "PING");
+  if (!response.is_ok()) {
+    LOG(FATAL) << "etcd connect to etcd server failed: "
+               << response.error_message();
+  }
+}
+
 EtcdClient::~EtcdClient() {
   stop_watch();
 
