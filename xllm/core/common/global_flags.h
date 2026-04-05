@@ -17,7 +17,32 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 
+#include <cstdint>
+#include <string>
+#include <vector>
+
 constexpr int64_t GB = int64_t(1024) * 1024 * 1024;
+
+namespace xllm {
+
+struct GlobalFlagHelpSectionInfo final {
+  std::string key;
+  std::string title;
+  std::string summary;
+  int32_t order;
+};
+
+struct GlobalFlagHelpFlagInfo final {
+  std::string section_key;
+  std::string name;
+  int32_t order;
+};
+
+const std::vector<GlobalFlagHelpSectionInfo>& get_global_flag_help_sections();
+
+const std::vector<GlobalFlagHelpFlagInfo>& get_global_flag_help_flags();
+
+}  // namespace xllm
 
 DECLARE_string(host);
 
@@ -40,6 +65,10 @@ DECLARE_string(task);
 DECLARE_string(devices);
 
 DECLARE_int32(limit_image_per_prompt);
+
+DECLARE_bool(enable_return_mm_full_embeddings);
+
+DECLARE_bool(use_audio_in_video);
 
 // --- kvcache config ---
 DECLARE_int32(block_size);
@@ -293,8 +322,6 @@ DECLARE_double(dit_cache_residual_diff_threshold);
 
 DECLARE_bool(enable_constrained_decoding);
 
-DECLARE_bool(enable_return_mm_full_embeddings);
-
 DECLARE_int64(dit_cache_start_steps);
 
 DECLARE_int64(dit_cache_end_steps);
@@ -309,6 +336,8 @@ DECLARE_int64(sp_size);
 
 DECLARE_int64(cfg_size);
 
+DECLARE_int64(dit_sp_communication_overlap);
+
 DECLARE_bool(dit_debug_print);
 
 // --- multi-step decode config ---
@@ -318,8 +347,6 @@ DECLARE_int32(max_decode_rounds);
 DECLARE_int32(beam_width);
 
 DECLARE_bool(enable_xattention_one_stage);
-
-DECLARE_bool(use_audio_in_video);
 
 // --- concurrent rec worker config ---
 DECLARE_uint32(rec_worker_max_concurrency);
