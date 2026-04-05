@@ -124,9 +124,16 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   }
 
   torch::Tensor logits;
+  torch::Tensor selected_hidden_from_lm_head;
   if (sampling_params.selected_token_idxes.defined()) {
-    logits = model_->logits(model_output.hidden_states,
-                            sampling_params.selected_token_idxes);
+    if (options_.cp_size() > 1) {
+      logits = model_->logits(model_output.hidden_states,
+                              sampling_params.selected_token_idxes,
+                              selected_hidden_from_lm_head);
+    } else {
+      logits = model_->logits(model_output.hidden_states,
+                              sampling_params.selected_token_idxes);
+    }
   }
 
   ForwardOutput output;
@@ -198,8 +205,15 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     if (!input.input_params.batch_forward_type.is_decode() && !is_spec_draft_) {
       output.sample_output.embeddings = embeddings;
     } else if (sampling_params.selected_token_idxes.defined()) {
-      output.sample_output.embeddings = embeddings.index_select(
-          /*dim=*/0, sampling_params.selected_token_idxes);
+      if (options_.cp_size() > 1) {
+        CHECK(selected_hidden_from_lm_head.defined())
+            << "selected_hidden_from_lm_head must be defined when "
+               "selected_token_idxes is defined.";
+        output.sample_output.embeddings = selected_hidden_from_lm_head;
+      } else {
+        output.sample_output.embeddings = embeddings.index_select(
+            /*dim=*/0, sampling_params.selected_token_idxes);
+      }
     }
   }
 
