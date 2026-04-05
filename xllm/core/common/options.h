@@ -152,6 +152,8 @@ class Options {
 
   PROPERTY(std::optional<std::string>, etcd_addr);
 
+  PROPERTY(std::optional<std::string>, etcd_namespace);
+
   PROPERTY(bool, enable_service_routing) = false;
 
   PROPERTY(std::optional<std::string>, tool_call_parser);

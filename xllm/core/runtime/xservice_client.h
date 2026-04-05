@@ -45,7 +45,8 @@ class XServiceClient {
   ~XServiceClient();
   bool init(const std::string& etcd_addr,
             const std::string& instance_name = "",
-            const BlockManagerPool* block_manager_pool = nullptr);
+            const BlockManagerPool* block_manager_pool = nullptr,
+            const std::string& etcd_namespace = "");
   void set_scheduler(Scheduler* scheduler);
   void set_engine(Engine* engine);
   bool initialize_done() { return initialize_done_; }
@@ -69,8 +70,10 @@ class XServiceClient {
   bool reconcile_registration();
   void reconcile_registration_loop();
 
-  void handle_master_service_watch(const etcd::Response& response);
-  void handle_xservices_watch(const etcd::Response& response);
+  void handle_master_service_watch(const etcd::Response& response,
+                                   const uint64_t& prefix_len);
+  void handle_xservices_watch(const etcd::Response& response,
+                              const uint64_t& prefix_len);
 
   // connect to specific xllm_service
   bool connect_to_xservice(const std::string& xservice_addr);

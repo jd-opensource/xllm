@@ -74,7 +74,8 @@ bool check_instance_name(const std::string& name) {
 
 bool XServiceClient::init(const std::string& etcd_addr,
                           const std::string& instance_name,
-                          const BlockManagerPool* block_manager_pool) {
+                          const BlockManagerPool* block_manager_pool,
+                          const std::string& etcd_namespace) {
   if (initialize_done_) {
     LOG(INFO) << "XServiceClient is already initialized, skipping.";
     return true;
@@ -105,10 +106,10 @@ bool XServiceClient::init(const std::string& etcd_addr,
     return false;
   }
   if (has_etcd_auth_user) {
-    etcd_client_ =
-        std::make_unique<EtcdClient>(etcd_addr, etcd_username, etcd_password);
+    etcd_client_ = std::make_unique<EtcdClient>(
+        etcd_addr, etcd_username, etcd_password, etcd_namespace);
   } else {
-    etcd_client_ = std::make_unique<EtcdClient>(etcd_addr);
+    etcd_client_ = std::make_unique<EtcdClient>(etcd_addr, etcd_namespace);
   }
 
   // connect master xllm_service
@@ -151,12 +152,15 @@ bool XServiceClient::init(const std::string& etcd_addr,
   // watch master xllm_service change
   auto master_func = std::bind(&XServiceClient::handle_master_service_watch,
                                this,
-                               std::placeholders::_1);
+                               std::placeholders::_1,
+                               std::placeholders::_2);
   etcd_client_->add_watch(ETCD_MASTER_SERVICE_KEY, master_func);
 
   // watch all xllm_service changes
-  auto xservices_func = std::bind(
-      &XServiceClient::handle_xservices_watch, this, std::placeholders::_1);
+  auto xservices_func = std::bind(&XServiceClient::handle_xservices_watch,
+                                  this,
+                                  std::placeholders::_1,
+                                  std::placeholders::_2);
   etcd_client_->add_watch(ETCD_XSERVICES_KEY_PREFIX, xservices_func);
 
   block_manager_pool_ = block_manager_pool;
@@ -790,8 +794,8 @@ void XServiceClient::disconnect_xservice(const std::string& xservice_addr) {
   }
 }
 
-void XServiceClient::handle_master_service_watch(
-    const etcd::Response& response) {
+void XServiceClient::handle_master_service_watch(const etcd::Response& response,
+                                                 const uint64_t& prefix_len) {
   if (response.events().empty() || exited_.load()) {
     return;
   }
@@ -826,7 +830,8 @@ void XServiceClient::handle_master_service_watch(
   }
 }
 
-void XServiceClient::handle_xservices_watch(const etcd::Response& response) {
+void XServiceClient::handle_xservices_watch(const etcd::Response& response,
+                                            const uint64_t& prefix_len) {
   if (response.events().empty() || exited_.load()) {
     return;
   }
@@ -836,17 +841,17 @@ void XServiceClient::handle_xservices_watch(const etcd::Response& response) {
     std::string service_addr;
     if (event.event_type() == etcd::Event::EventType::PUT) {
       if (event.has_kv()) {
-        event_key = event.kv().key();
+        event_key = event.kv().key().substr(prefix_len);
         service_addr = event.kv().as_string();
       }
     } else if (event.event_type() == etcd::Event::EventType::DELETE_) {
       if (event.has_prev_kv()) {
-        event_key = event.prev_kv().key();
+        event_key = event.prev_kv().key().substr(prefix_len);
         service_addr = event.prev_kv().as_string();
       }
       if (service_addr.empty() && event.has_kv()) {
         if (event_key.empty()) {
-          event_key = event.kv().key();
+          event_key = event.kv().key().substr(prefix_len);
         }
         service_addr = event.kv().as_string();
       }

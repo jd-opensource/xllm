@@ -90,8 +90,9 @@ const OptionCategory kMtpOptions = {"SPECULATIVE OPTIONS",
                                      "speculative_suffix_max_cached_requests",
                                      "speculative_suffix_use_tree_spec"}};
 
-const OptionCategory kXllmServiceOptions = {"XLLM-SERVICE OPTIONS",
-                                            {"etcd_addr", "rank_tablefile"}};
+const OptionCategory kXllmServiceOptions = {
+    "XLLM-SERVICE OPTIONS",
+    {"etcd_addr", "rank_tablefile", "etcd_namespace"}};
 
 const OptionCategory kBeamSearchOptions = {"BEAM SEARCH OPTIONS",
                                            {"enable_beam_search_kernel",
