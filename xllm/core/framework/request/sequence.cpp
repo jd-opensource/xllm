@@ -97,6 +97,7 @@ void Sequence::generate_onerec_streaming_output(const Slice<int32_t>& ids,
 
 void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
                                       size_t size,
+                                      const Tokenizer& tokenizer,
                                       SequenceOutput& output) const {
   output.index = index_;
   if (output_embedding_.defined()) {
@@ -106,6 +107,17 @@ void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
     output.finish_reason = finish_reason_.to_string();
   }
   output.token_ids = ids.slice(num_prompt_tokens_, size);
+  if (FLAGS_enable_convert_tokens_to_item &&
+      output.token_ids.size() == static_cast<size_t>(REC_TOKEN_SIZE)) {
+    std::vector<int64_t> item_ids;
+    const bool ok = tokenizer.decode(
+        Slice<int32_t>{output.token_ids.data(), output.token_ids.size()},
+        sequence_params_.skip_special_tokens,
+        &item_ids);
+    if (ok && !item_ids.empty()) {
+      output.item_ids = item_ids.front();
+    }
+  }
 }
 
 Sequence::Sequence(size_t index,
@@ -530,7 +542,7 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
 
   // 3. generate onerec output
   if (is_onerec_model()) {
-    generate_onerec_output(ids, size, output);
+    generate_onerec_output(ids, size, tokenizer, output);
     return output;
   }
 

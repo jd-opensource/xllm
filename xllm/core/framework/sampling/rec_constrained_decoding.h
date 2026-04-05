@@ -22,9 +22,11 @@ limitations under the License.
 
 namespace xllm {
 
+class RecVocabDict;
+
 class RecConstrainedDecoding : public ConstrainedDecoding {
  public:
-  RecConstrainedDecoding(uint64_t model_version,
+  RecConstrainedDecoding(RecVocabDict* vocab_dict,
                          const int32_t vocab_size,
                          torch::ScalarType dtype,
                          torch::Device device,
@@ -48,7 +50,7 @@ class RecConstrainedDecoding : public ConstrainedDecoding {
   bool build_mask_cache_;
   bool use_gen_threadpool_;
   int32_t vocab_size_;
-  uint64_t model_version_;
+  RecVocabDict* vocab_dict_ = nullptr;
   torch::Device device_;
   torch::ScalarType dtype_;
   torch::Tensor first_token_mask_;

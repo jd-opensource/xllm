@@ -418,6 +418,7 @@ class Sequence final {
 
   void generate_onerec_output(const Slice<int32_t>& ids,
                               size_t size,
+                              const Tokenizer& tokenizer,
                               SequenceOutput& output) const;
 
   struct OneRecState {
