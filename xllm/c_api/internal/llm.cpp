@@ -117,7 +117,7 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
 
     options.enable_graph(FLAGS_enable_graph);
 
-#if !defined(USE_NPU)
+#if !defined(USE_NPU) && !defined(USE_CUDA)
     FLAGS_enable_block_copy_kernel = false;
 #endif
 

@@ -408,14 +408,14 @@ DEFINE_bool(enable_atb_spec_kernel,
 
 // --- block copy config ---
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_CUDA)
 DEFINE_bool(enable_block_copy_kernel,
             true,
-            "Whether to use ATB block copy kernel. NPU-only.");
+            "Whether to use block copy kernel on supported backends.");
 #else
 DEFINE_bool(enable_block_copy_kernel,
             false,
-            "Whether to use ATB block copy kernel. NPU-only.");
+            "Whether to use block copy kernel on supported backends.");
 #endif
 
 // --- service routing config ---

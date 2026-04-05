@@ -149,7 +149,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         .beam_width(FLAGS_beam_width)
         .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency);
 
-#if !defined(USE_NPU)
+#if !defined(USE_NPU) && !defined(USE_CUDA)
     FLAGS_enable_block_copy_kernel = false;
 #endif
 
