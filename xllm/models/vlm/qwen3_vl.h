@@ -21,10 +21,272 @@ limitations under the License.
 #include "models/llm/qwen3.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
-#include "processors/qwen2_vl_image_processor.h"
+#include "processors/qwen3_vl_image_processor.h"
 #include "qwen2_5_vl.h"
 
 namespace xllm {
+
+class Qwen3_VLInputProcessor : public InputProcessor {
+  enum class TokenType {
+    INVALID,
+    IMAGE,
+    VIDEO,
+  };
+
+ public:
+  Qwen3_VLInputProcessor(const ModelArgs& args) {
+    merge_size_ = args.mm_image_merge_size();
+    vision_start_token_id_ = args.vision_start_token_id();
+    vision_end_token_id_ = args.vision_end_token_id();
+    image_token_id_ = args.image_token_id();
+    video_token_id_ = args.video_token_id();
+    temporal_patch_size_ = args.mm_temporal_patch_size();
+  }
+
+  void process(std::string& prompt, const MMData& mm_data) override {
+    torch::Tensor image_grid_thw;
+    if (auto res = mm_data.get<torch::Tensor>("image_grid_thw"))
+      image_grid_thw = res.value();
+
+    torch::Tensor video_grid_thw;
+    if (auto res = mm_data.get<torch::Tensor>("video_grid_thw"))
+      video_grid_thw = res.value();
+
+    if (!image_grid_thw.defined() && !video_grid_thw.defined()) return;
+
+    std::vector<VideoMetadata> video_metadata;
+    mm_data.get_metadata(MMType::VIDEO, video_metadata);
+    if (video_grid_thw.defined()) {
+      CHECK(video_metadata.size() ==
+            static_cast<size_t>(video_grid_thw.size(0)));
+    }
+
+    const int32_t merge_length = merge_size_ * merge_size_;
+
+    int32_t total_image_token = 0;
+    if (image_grid_thw.defined()) {
+      int32_t count = image_grid_thw.size(0);
+      for (int32_t idx = 0; idx < count; ++idx) {
+        total_image_token +=
+            image_grid_thw[idx].prod().item<int32_t>() / merge_length;
+      }
+    }
+
+    int32_t total_video_token = 0;
+    if (video_grid_thw.defined()) {
+      int32_t count = video_grid_thw.size(0);
+      for (int32_t idx = 0; idx < count; ++idx) {
+        total_video_token +=
+            video_grid_thw[idx].prod().item<int32_t>() / merge_length;
+      }
+    }
+
+    size_t total_token_len = total_image_token * image_token_.size() +
+                             total_video_token * video_token_.size();
+    std::string data;
+    data.reserve(prompt.size() + total_token_len);
+
+    int32_t image_index = 0;
+    int32_t video_index = 0;
+
+    size_t begin = 0;
+    auto pair = find_vision_token(prompt, begin);
+
+    while (pair.second != std::string::npos) {
+      if (pair.first == TokenType::IMAGE) {
+        data.append(prompt, begin, pair.second - begin);
+
+        auto token_num =
+            image_grid_thw[image_index].prod().item<int32_t>() / merge_length;
+        while (token_num--) {
+          data.append(image_token_);
+        }
+
+        ++image_index;
+        begin = pair.second + image_token_.size();
+
+      } else if (pair.first == TokenType::VIDEO) {
+        const size_t pos = pair.second;
+        const size_t vs_len = vision_start_token_.size();
+        const size_t ve_len = vision_end_token_.size();
+        const size_t vt_len = video_token_.size();
+
+        size_t replace_begin = pos;
+        size_t replace_end = pos + vt_len;
+
+        if (pos >= vs_len &&
+            prompt.compare(pos - vs_len, vs_len, vision_start_token_) == 0 &&
+            prompt.compare(pos + vt_len, ve_len, vision_end_token_) == 0) {
+          replace_begin = pos - vs_len;
+          replace_end = pos + vt_len + ve_len;
+        }
+
+        data.append(prompt, begin, replace_begin - begin);
+
+        const int32_t num_frames =
+            video_grid_thw[video_index][0].item<int32_t>();
+        const int32_t token_num =
+            video_grid_thw[video_index][1].item<int32_t>() *
+            video_grid_thw[video_index][2].item<int32_t>() / merge_length;
+
+        const auto& timestamps = video_metadata[video_index].timestamps;
+        CHECK(!timestamps.empty());
+
+        auto selected = build_timestamps(
+            timestamps, static_cast<size_t>(num_frames), temporal_patch_size_);
+
+        for (int32_t idx = 0; idx < num_frames; ++idx) {
+          data.append(format_timestamp_str(selected[idx]));
+          data.append(vision_start_token_);
+          int32_t num = token_num;
+
+          while (num--) {
+            data.append(video_token_);
+          }
+          data.append(vision_end_token_);
+        }
+
+        ++video_index;
+        begin = replace_end;
+      } else {
+        assert(false);
+      }
+
+      pair = find_vision_token(prompt, begin);
+    }
+
+    if (begin < prompt.size()) data.append(prompt, begin, std::string::npos);
+    prompt = std::move(data);
+  }
+
+  void find_mm_spans(const std::vector<int32_t>& prompt,
+                     MMData& mm_data) override {
+    auto start = prompt.begin();
+    uint32_t global_mm_index = 0;
+    uint32_t offset = 0;
+    uint32_t length = 0;
+    auto& mm_items = mm_data.items<MMItemVec>();
+
+    torch::Tensor video_grid_thw;
+    if (auto res = mm_data.get<torch::Tensor>("video_grid_thw")) {
+      video_grid_thw = res.value();
+    }
+
+    int32_t video_index = 0;
+    int32_t video_frames_left = 0;
+
+    while (true) {
+      auto vision_start_it =
+          std::find(start, prompt.end(), vision_start_token_id_);
+      if (vision_start_it == prompt.end()) {
+        break;
+      }
+      auto vision_end_it =
+          std::find(vision_start_it + 1, prompt.end(), vision_end_token_id_);
+      CHECK(vision_end_it != prompt.end());
+
+      offset = std::distance(prompt.begin(), vision_start_it);
+      length = std::distance(vision_start_it + 1, vision_end_it);
+
+      int32_t first_token = *(vision_start_it + 1);
+      if (first_token == image_token_id_) {
+        CHECK(global_mm_index < mm_items.size());
+        auto& item = mm_items[global_mm_index];
+        item.mutable_state().mutable_token_pos() = {offset + 1, length};
+        ++global_mm_index;
+
+      } else if (first_token == video_token_id_) {
+        if (video_frames_left == 0) {
+          CHECK(video_grid_thw.defined() && video_grid_thw.numel() > 0)
+              << "video token exists but video_grid_thw is missing";
+          CHECK(video_index < video_grid_thw.size(0));
+          CHECK(global_mm_index < mm_items.size());
+
+          video_frames_left = video_grid_thw[video_index][0].item<int32_t>();
+
+          auto& item = mm_items[global_mm_index];
+          item.mutable_state().mutable_token_pos() = {offset + 1, length};
+
+          ++global_mm_index;
+          ++video_index;
+        }
+
+        CHECK(video_frames_left > 0);
+        --video_frames_left;
+      }
+
+      start = std::next(vision_end_it);
+    }
+  }
+
+ private:
+  std::pair<TokenType, size_t> find_vision_token(const std::string& prompt,
+                                                 size_t begin) {
+    auto img_pos = prompt.find(image_token_, begin);
+    auto vid_pos = prompt.find(video_token_, begin);
+
+    if (img_pos == std::string::npos && vid_pos == std::string::npos)
+      return {TokenType::INVALID, std::string::npos};
+    else if (vid_pos == std::string::npos)
+      return {TokenType::IMAGE, img_pos};
+    else if (img_pos == std::string::npos)
+      return {TokenType::VIDEO, vid_pos};
+    else
+      return img_pos < vid_pos ? std::make_pair(TokenType::IMAGE, img_pos)
+                               : std::make_pair(TokenType::VIDEO, vid_pos);
+  }
+
+  std::vector<double> build_timestamps(const std::vector<double>& timestamps,
+                                       size_t num_frames,
+                                       int32_t merge_size) {
+    CHECK_GT(merge_size, 0);
+
+    if (timestamps.empty()) {
+      return std::vector<double>(num_frames, 0.0);
+    }
+
+    std::vector<double> ts = timestamps;
+    const size_t rem = ts.size() % static_cast<size_t>(merge_size);
+    if (rem != 0) {
+      ts.insert(ts.end(), static_cast<size_t>(merge_size) - rem, ts.back());
+    }
+
+    std::vector<double> out;
+    out.reserve(ts.size() / static_cast<size_t>(merge_size));
+
+    for (size_t i = 0; i < ts.size(); i += static_cast<size_t>(merge_size)) {
+      out.push_back((ts[i] + ts[i + static_cast<size_t>(merge_size) - 1]) /
+                    2.0);
+    }
+
+    if (out.size() > num_frames) {
+      out.resize(num_frames);
+    }
+    while (out.size() < num_frames) {
+      out.push_back(out.back());
+    }
+
+    return out;
+  }
+
+  std::string format_timestamp_str(double timestamp) {
+    char buffer[32];
+    snprintf(buffer, sizeof(buffer), "<%.1f seconds>", timestamp);
+    return buffer;
+  }
+
+ private:
+  const std::string image_token_ = "<|image_pad|>";
+  const std::string video_token_ = "<|video_pad|>";
+  const std::string vision_start_token_ = "<|vision_start|>";
+  const std::string vision_end_token_ = "<|vision_end|>";
+  int32_t vision_start_token_id_;
+  int32_t vision_end_token_id_;
+  int32_t image_token_id_;
+  int32_t video_token_id_;
+  int32_t merge_size_ = 0;
+  int32_t temporal_patch_size_ = 0;
+};
 
 class Qwen3_VisionPatchEmbedImpl : public torch::nn::Module {
  public:
@@ -552,7 +814,6 @@ struct Qwen3_VLImageInputs {
 struct Qwen3_VLVideoInputs {
   torch::Tensor pixel_values_videos;
   torch::Tensor video_grid_thw;
-  torch::Tensor second_per_grid_ts;
 };
 
 class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
@@ -585,17 +846,11 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
     if (const auto& res = mm_data.get<torch::Tensor>("video_grid_thw"))
       video_grid_thw = res.value();
 
-    torch::Tensor second_per_grid_ts;
-    if (const auto& res = mm_data.get<torch::Tensor>("second_per_grid_ts"))
-      second_per_grid_ts = res.value();
-
     if (pixel_values.defined() && image_grid_thw.defined())
       image_inputs = Qwen3_VLImageInputs{pixel_values, image_grid_thw};
 
-    if (pixel_values_videos.defined() && video_grid_thw.defined() &&
-        second_per_grid_ts.defined())
-      video_inputs = Qwen3_VLVideoInputs{
-          pixel_values_videos, video_grid_thw, second_per_grid_ts};
+    if (pixel_values_videos.defined() && video_grid_thw.defined())
+      video_inputs = Qwen3_VLVideoInputs{pixel_values_videos, video_grid_thw};
   }
 
   MMDict get_multimodal_embeddings(const ModelInputParams& input_params) {
@@ -677,6 +932,7 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
         mm_data.get<torch::Tensor>("embedding|deepstack_2").value()};
     return deepstacks;
   }
+
   torch::Tensor merge_multimodal_embeddings(
       torch::Tensor inputs_embeds,
       const torch::Tensor& multimodal_embeds,
@@ -746,9 +1002,9 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Qwen3_VLForConditionalGeneration);
 
-REGISTER_INPUT_PROCESSOR(qwen3_vl, Qwen2_5_VLInputProcessor);
+REGISTER_INPUT_PROCESSOR(qwen3_vl, Qwen3_VLInputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_vl, Qwen3_VLForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(qwen3_vl, Qwen2VLImageProcessor);
+REGISTER_IMAGE_PROCESSOR(qwen3_vl, Qwen3VLImageProcessor);
 
 REGISTER_MODEL_ARGS(qwen3_vl, [&] {
   // text config
