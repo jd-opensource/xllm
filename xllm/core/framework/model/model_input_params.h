@@ -358,6 +358,8 @@ struct ModelInputParams {
     params.dp_global_token_nums = dp_global_token_nums;
     params.dp_is_decode = dp_is_decode;
     params.embedding_ids = std::move(embedding_ids);
+    params.linear_state_ids = std::move(linear_state_ids);
+    params.linear_state_indices = safe_to(linear_state_indices, device, true);
     params.request_ids = std::move(request_ids);
     params.extra_token_ids = std::move(extra_token_ids);
     params.dp_ep_padding_data = dp_ep_padding_data;
@@ -539,6 +541,12 @@ struct ModelInputParams {
 
   // embedding ids of each sequence
   std::vector<int32_t> embedding_ids;
+
+  // linear state ids of each sequence
+  std::vector<int32_t> linear_state_ids;
+
+  // IntTensor: [n_seq]
+  torch::Tensor linear_state_indices;
 
   // request ids of each sequence, used by suffix decoding request identity
   std::vector<std::string> request_ids;

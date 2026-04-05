@@ -181,7 +181,11 @@ class Engine {
     int64_t slot_size = 0;
     int64_t index_slot_size = 0;
     int64_t linear_slot_size = 0;
+    int64_t linear_cache_size_in_bytes = 0;
     int64_t n_layers = 0;
+    int64_t num_linear_state_blocks = 0;
+    int64_t num_full_attention_layers = 0;
+    int64_t num_linear_attention_layers = 0;
   };
 
  protected:

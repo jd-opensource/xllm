@@ -31,7 +31,7 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
     : options_(options) {
   CHECK(dp_size > 0) << "dp_size must be greater than 0";
   block_managers_.reserve(dp_size);
-  embedding_managers_.reserve(dp_size);
+  single_block_managers_.reserve(dp_size);
 
   BlockManager::Options block_options;
   block_options.num_blocks(options_.num_blocks())
@@ -68,10 +68,13 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
       block_managers_.emplace_back(
           std::make_unique<BlockManagerImpl>(block_options));
     }
-    // since one sequence only has one embedding block,
-    // FLAGS_max_seqs_per_batch + 1 is enough.
-    embedding_managers_.emplace_back(
-        std::make_unique<EmbeddingManager>(FLAGS_max_seqs_per_batch + 2));
+    // Scheduler-side per-sequence resources share one logical single-block
+    // pool. Worker-side embedding and linear-state caches remain physically
+    // separate and are addressed via transport fields.
+    single_block_managers_.emplace_back(std::make_unique<SingleBlockManager>(
+        /*num_blocks=*/FLAGS_max_seqs_per_batch + 2,
+        /*resource_name=*/"single block",
+        /*exhaustion_message=*/"No more single-block ids available"));
   }
   reset_transfer_infos();
 }
@@ -105,37 +108,34 @@ int32_t BlockManagerPool::get_dp_rank(Sequence* sequence) const {
   return dp_rank;
 }
 
-bool BlockManagerPool::allocate_embedding_id(Sequence* sequence,
+bool BlockManagerPool::allocate_single_block(Sequence* sequence,
                                              int32_t dp_rank) {
   CHECK(sequence != nullptr);
   CHECK_GE(dp_rank, 0);
-  CHECK_LT(static_cast<size_t>(dp_rank), embedding_managers_.size());
-  if (sequence->has_embedding_id()) {
+  CHECK_LT(static_cast<size_t>(dp_rank), single_block_managers_.size());
+  if (sequence->has_single_block_id()) {
     return true;
   }
 
-  auto embedding_blocks = embedding_managers_[dp_rank]->allocate(1);
-  if (embedding_blocks.empty()) {
-    LOG(ERROR) << "Failed to allocate embedding block!";
+  auto single_blocks = single_block_managers_[dp_rank]->allocate(1);
+  if (single_blocks.empty()) {
+    LOG(ERROR) << "Failed to allocate single block!";
     return false;
   }
-  sequence->set_embedding_block(std::move(embedding_blocks[0]));
+  sequence->set_single_block(std::move(single_blocks[0]));
   return true;
 }
 
-void BlockManagerPool::deallocate_embedding_id(Sequence* sequence,
+void BlockManagerPool::deallocate_single_block(Sequence* sequence,
                                                int32_t dp_rank) {
   DCHECK(sequence != nullptr);
   CHECK_GE(dp_rank, 0);
-  CHECK_LT(static_cast<size_t>(dp_rank), embedding_managers_.size());
-  auto embedding_block = sequence->reset_embedding_block();
-  if (!embedding_block.is_valid()) {
+  CHECK_LT(static_cast<size_t>(dp_rank), single_block_managers_.size());
+  auto single_block = sequence->reset_single_block();
+  if (!single_block.is_valid()) {
     return;
   }
-
-  // std::vector<Block> embedding_blocks;
-  // embedding_blocks.emplace_back(std::move(embedding_block));
-  embedding_managers_[dp_rank]->deallocate({&embedding_block, 1});
+  single_block_managers_[dp_rank]->deallocate({&single_block, 1});
 }
 
 void BlockManagerPool::deallocate(Request* request) {
@@ -157,7 +157,7 @@ void BlockManagerPool::deallocate(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
   cache(sequence);
   block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
-  deallocate_embedding_id(sequence, dp_rank);
+  deallocate_single_block(sequence, dp_rank);
   // release the blocks after prefix cache insertion
   sequence->reset();
 }
@@ -193,8 +193,8 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   DCHECK(sequence != nullptr);
   int32_t dp_rank = get_dp_rank(sequence);
   const bool started_empty = sequence->kv_state().num_kv_blocks() == 0;
-  const bool needs_embedding_id = !sequence->has_embedding_id();
-  if (needs_embedding_id && !allocate_embedding_id(sequence, dp_rank)) {
+  const bool needs_single_block = !sequence->has_single_block_id();
+  if (needs_single_block && !allocate_single_block(sequence, dp_rank)) {
     return false;
   }
 
@@ -218,13 +218,14 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   if (blocks.size() != num_additional_blocks) {
     if (started_empty) {
       block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
-      if (needs_embedding_id) {
-        deallocate_embedding_id(sequence, dp_rank);
+      if (needs_single_block) {
+        deallocate_single_block(sequence, dp_rank);
       }
       sequence->reset();
     }
     // LOG(ERROR) << " Fail to allocate " << num_additional_blocks << "
     // blocks.";
+
     return false;
   }
 
@@ -239,6 +240,7 @@ bool BlockManagerPool::allocate(Sequence* sequence,
   LOG(FATAL)
       << "allocate(Sequence* sequence, size_t num_tokens, size_t "
          "needed_copy_in_blocks_num) is not implemented in BlockManagerPool.";
+  return false;
 }
 
 std::vector<Block> BlockManagerPool::allocate(size_t num_tokens,
@@ -251,8 +253,8 @@ std::vector<Block> BlockManagerPool::allocate(size_t num_tokens,
 
 bool BlockManagerPool::try_allocate(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
-  const bool needs_embedding_id = !sequence->has_embedding_id();
-  if (needs_embedding_id && !allocate_embedding_id(sequence, dp_rank)) {
+  const bool needs_single_block = !sequence->has_single_block_id();
+  if (needs_single_block && !allocate_single_block(sequence, dp_rank)) {
     return false;
   }
 
@@ -280,12 +282,12 @@ bool BlockManagerPool::try_allocate(Sequence* sequence) {
   if (num_blocks_needed > 0) {
     const auto blocks = block_managers_[dp_rank]->allocate(num_blocks_needed);
     if (blocks.size() != num_blocks_needed) {
+      if (needs_single_block) {
+        deallocate_single_block(sequence, dp_rank);
+      }
       if (shared_num != 0) {
         block_managers_[dp_rank]->deallocate(shared_blocks);
         sequence->reset();
-      }
-      if (needs_embedding_id) {
-        deallocate_embedding_id(sequence, dp_rank);
       }
       return false;
     }
@@ -402,7 +404,7 @@ void BlockManagerPool::deallocate_without_cache(Sequence* sequence) {
   DCHECK(sequence != nullptr);
   int32_t dp_rank = get_dp_rank(sequence);
   block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
-  deallocate_embedding_id(sequence, dp_rank);
+  deallocate_single_block(sequence, dp_rank);
   sequence->reset();
 }
 
