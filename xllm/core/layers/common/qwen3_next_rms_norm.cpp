@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include "core/kernels/npu/npu_ops_api.h"
+
 namespace xllm {
 namespace layer {
 
@@ -28,15 +30,11 @@ Qwen3NextRMSNormImpl::Qwen3NextRMSNormImpl(int64_t dim,
 }
 
 torch::Tensor Qwen3NextRMSNormImpl::forward(torch::Tensor& input) {
-  auto input_dtype = input.dtype();
-  input = input.to(torch::kFloat32);
-
-  // Calculate RMS
-  auto variance = torch::mean(torch::pow(input, 2), -1, true);
-  auto normalized = input * torch::rsqrt(variance + eps_);
-
-  // Apply weight and convert back to original dtype
-  return (normalized * (1.0f + weight_.to(torch::kFloat32))).to(input_dtype);
+  torch::Tensor yOut;
+  torch::Tensor rstdOut;
+  xllm::kernel::npu::npu_gemma_rms_norm(
+      input, weight_, eps_, rstdOut, yOut);
+  return yOut;
 }
 
 void Qwen3NextRMSNormImpl::load_state_dict(const StateDict& state_dict) {
