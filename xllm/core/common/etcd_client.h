@@ -25,14 +25,16 @@ limitations under the License.
 
 namespace xllm {
 
-using Callback = std::function<void(const etcd::Response&)>;
+using Callback = std::function<void(const etcd::Response&, const uint64_t&)>;
 
 class EtcdClient {
  public:
-  EtcdClient(const std::string& etcd_addr);
+  explicit EtcdClient(const std::string& etcd_addr,
+                      const std::string& etcd_namespace = "");
   EtcdClient(const std::string& etcd_addr,
              const std::string& username,
-             const std::string& password);
+             const std::string& password,
+             const std::string& etcd_namespace = "");
   ~EtcdClient();
 
   void add_watch(const std::string& key_prefix,
@@ -54,6 +56,8 @@ class EtcdClient {
                          std::vector<std::string>* values);
 
  private:
+  std::string namespaced_key(const std::string& logical_key) const;
+
   struct WatcherInfo {
     std::unique_ptr<etcd::Watcher> watcher;
     Callback callback;
@@ -61,6 +65,7 @@ class EtcdClient {
 
   etcd::SyncClient client_;
   std::string etcd_addr_;
+  std::string etcd_namespace_prefix_;
   std::mutex watchers_mutex_;
   std::unordered_map<std::string, WatcherInfo> watchers_;
   std::mutex keep_alives_mutex_;
