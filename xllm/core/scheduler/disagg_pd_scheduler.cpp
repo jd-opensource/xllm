@@ -716,17 +716,36 @@ bool DisaggPDScheduler::decode_recv_first_generation(
     for (const auto& block : blocks) {
       dst_block_ids.push_back(block.id());
     }
+    if (src_block_ids.size() != dst_block_ids.size()) {
+      LOG(ERROR) << "PD decode pull block size mismatch, req_id=" << req_id
+                 << ", src_blocks.size=" << src_block_ids.size()
+                 << ", dst_blocks.size=" << dst_block_ids.size()
+                 << ", src_dp_rank=" << src_dp_rank
+                 << ", dst_dp_rank=" << request->sequences()[0]->dp_rank()
+                 << ", src_dp_size=" << src_dp_size;
+      kv_cache_manager_->deallocate(request.get());
+      return false;
+    }
 
     int32_t dst_dp_rank = request->sequences()[0]->dp_rank();
-    engine_->pull_kv_blocks(src_dp_size,
-                            src_dp_rank,
-                            src_cluster_ids,
-                            src_addrs,
-                            src_k_cache_ids,
-                            src_v_cache_ids,
-                            src_block_ids,
-                            dst_dp_rank,
-                            dst_block_ids);
+    const bool pull_success = engine_->pull_kv_blocks(src_dp_size,
+                                                      src_dp_rank,
+                                                      src_cluster_ids,
+                                                      src_addrs,
+                                                      src_k_cache_ids,
+                                                      src_v_cache_ids,
+                                                      src_block_ids,
+                                                      dst_dp_rank,
+                                                      dst_block_ids);
+    if (!pull_success) {
+      LOG(ERROR) << "PD decode pull_kv_blocks failed, req_id=" << req_id
+                 << ", src_dp_size=" << src_dp_size
+                 << ", src_dp_rank=" << src_dp_rank
+                 << ", dst_dp_rank=" << dst_dp_rank
+                 << ", src_addrs=" << absl::StrJoin(src_addrs, ", ");
+      kv_cache_manager_->deallocate(request.get());
+      return false;
+    }
   }
 
   request_queue_.write(request);

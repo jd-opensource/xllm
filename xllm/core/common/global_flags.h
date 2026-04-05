@@ -140,8 +140,6 @@ DECLARE_string(kv_cache_transfer_mode);
 
 DECLARE_int32(npu_phy_id);
 
-DECLARE_string(device_ip);
-
 DECLARE_int32(transfer_listen_port);
 
 DECLARE_int32(max_concurrent_requests);
