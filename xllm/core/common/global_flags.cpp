@@ -663,6 +663,10 @@ DEFINE_bool(enable_return_mm_full_embeddings,
             false,
             "return vit and sequence embeddings for vlm models");
 
+DEFINE_bool(enable_convert_tokens_to_item,
+            false,
+            "Enable token ids conversion to item id in REC/OneRec response.");
+
 DEFINE_bool(
     use_audio_in_video,
     false,

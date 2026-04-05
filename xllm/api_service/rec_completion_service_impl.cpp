@@ -91,12 +91,9 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
   // Add rec specific output tensors
   auto output_tensor = response.mutable_output_tensors()->Add();
   output_tensor->set_name("rec_result");
-  if (FLAGS_enable_constrained_decoding) {
+  if (FLAGS_enable_convert_tokens_to_item) {
     output_tensor->set_datatype(proto::DataType::INT64);
     output_tensor->mutable_shape()->Add(req_output.outputs.size());
-    output_tensor->mutable_shape()->Add(1);  // Single item per output
-    // TODO: add following when next pr.
-    /*
     auto context = output_tensor->mutable_contents();
     for (int i = 0; i < req_output.outputs.size(); ++i) {
       if (req_output.outputs[i].item_ids.has_value()) {
@@ -104,9 +101,14 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
             req_output.outputs[i].item_ids.value());
       }
     }
-    */
   } else {
     output_tensor->set_datatype(proto::DataType::INT32);
+
+    if (req_output.outputs.empty()) {
+      output_tensor->mutable_shape()->Add(0);
+      output_tensor->mutable_shape()->Add(0);
+      return call->write_and_finish(response);
+    }
 
     output_tensor->mutable_shape()->Add(req_output.outputs.size());
     output_tensor->mutable_shape()->Add(req_output.outputs[0].token_ids.size());
