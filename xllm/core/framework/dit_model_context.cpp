@@ -33,11 +33,13 @@ DiTModelContext::DiTModelContext(
     const std::unordered_map<std::string, ModelArgs>& model_args,
     const std::unordered_map<std::string, QuantArgs>& quant_args,
     const torch::TensorOptions& tensor_options,
+    const DiTCacheConfig& dit_config,
     const std::string& model_type)
     : parallel_args_(input_parallel_args),
       model_args_(std::move(model_args)),
       quant_args_(std::move(quant_args)),
       tensor_options_(tensor_options),
+      dit_config_(dit_config),
       model_type_(model_type) {
 #if defined(USE_NPU)
   int32_t device_id = tensor_options.device().index();

@@ -33,6 +33,7 @@ limitations under the License.
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/sampling_params.h"
 #include "platform/device.h"
+#include "runtime/dit_forward_params.h"
 
 namespace xllm {
 
@@ -203,6 +204,9 @@ struct ForwardOutput {
 
   BeamSearchOutput beam_search_output;
   torch::Tensor beam_sequence_group;
+
+  // dit output data
+  DiTForwardOutput dit_forward_output;
 };
 
 // Model input with raw data, which will be
@@ -259,6 +263,9 @@ struct RawForwardInput {
   std::vector<int32_t> paged_kv_last_page_len;  //[n_seq]
   // multimodal data
   MMBatchData mm_data;
+
+  // dit input data
+  DiTForwardInput dit_forward_input;
 
   RawForwardInput cp_partition(int32_t cp_rank, int32_t cp_size) const {
     RawForwardInput outputs = *this;
@@ -505,6 +512,8 @@ struct RawForwardOutput {
   std::vector<int32_t> beam_sequence_group;  // flattened 2D
   // multimodal embedding output
   std::vector<torch::Tensor> mm_embeddings;
+  // dit output data
+  DiTForwardOutput dit_forward_output;
 };
 
 struct BatchedForwardInputs {

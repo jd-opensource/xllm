@@ -98,5 +98,46 @@ void FusedAddMatmulImpl::load_state_dict(
   }
 }
 
+AddMatmulWeightTransposedImpl::AddMatmulWeightTransposedImpl(
+    int64_t in,
+    int64_t out,
+    bool with_bias,
+    const torch::TensorOptions& options)
+    : AddMatmulImpl(in, out, with_bias, options) {}
+
+torch::Tensor AddMatmulWeightTransposedImpl::forward(const torch::Tensor& x) {
+  // use addmm when bias is provided
+  if (with_bias_) {
+    auto sizes = x.sizes();
+    if (sizes.size() == 3) {
+      torch::Tensor t = x.reshape({sizes[0] * sizes[1], sizes[2]});
+      return torch::addmm(bias_, t, weight_)
+          .reshape({sizes[0], sizes[1], weight_.size(1)});
+    } else {
+      return torch::addmm(bias_, x, weight_);
+    }
+  } else {
+    return torch::matmul(x, weight_);
+  }
+}
+
+void AddMatmulWeightTransposedImpl::load_state_dict(
+    const StateDict& state_dict) {
+  // only transpoes weights when state_dict has the key
+  // or it would be transposed multiple times when having
+  // multiple state dicts
+  if (state_dict.has("weight")) {
+    xllm::weight::load_weight(state_dict, "weight", weight_, weight_is_loaded_);
+    // weight need to be transposed when using addmm
+    if (with_bias_) {
+      torch::Tensor transposed = weight_.data().transpose(0, 1).contiguous();
+      weight_.set_data(transposed);
+    }
+  }
+  if (with_bias_) {
+    weight::load_weight(state_dict, "bias", bias_, bias_is_loaded_);
+  }
+}
+
 }  // namespace layer
 }  // namespace xllm
