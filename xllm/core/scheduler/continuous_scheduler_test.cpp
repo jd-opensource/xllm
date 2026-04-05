@@ -40,11 +40,13 @@ class FakeTokenizer : public Tokenizer {
 
 class FakeEngine : public Engine {
  public:
-  FakeEngine(int32_t num_blocks, int32_t block_size) {
+  FakeEngine(int32_t num_blocks,
+             int32_t block_size,
+             bool enable_prefix_cache = false) {
     BlockManagerPool::Options opt;
     opt.num_blocks_ = num_blocks;
     opt.block_size_ = block_size;
-    opt.enable_prefix_cache_ = false;  // we dont consider prefix cache here
+    opt.enable_prefix_cache_ = enable_prefix_cache;
     fake_tokenizer_ = std::make_unique<FakeTokenizer>();
     fake_block_manager_ = std::make_unique<BlockManagerPool>(opt, 1);
   }
@@ -180,6 +182,37 @@ std::vector<std::shared_ptr<Request>> generate_request(
   }
 
   return requests;
+}
+
+std::shared_ptr<Request> generate_request_with_prompt_tokens(
+    const std::vector<int32_t>& prompt_token_ids,
+    int32_t max_tokens,
+    int32_t max_context_len) {
+  RequestSamplingParam sampling_param;
+  SchedulerParam scheduler_param;
+
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(max_tokens);
+  stopping_checker.set_max_context_len(max_context_len);
+  stopping_checker.set_ignore_eos(true);
+
+  RequestState req_state("x",
+                         prompt_token_ids,
+                         sampling_param,
+                         scheduler_param,
+                         stopping_checker,
+                         prompt_token_ids.size() + 30000,
+                         1,
+                         1,
+                         false,
+                         false,
+                         false,
+                         false,
+                         false,
+                         nullptr,
+                         nullptr);
+
+  return std::make_shared<Request>("1", "1", "1", std::move(req_state), "1");
 }
 
 // dont not consider speculative decoding.
@@ -649,6 +682,48 @@ TEST(ContinuousSchedulerTest, LatencySchedule) {
   // // 2*10 < tpot_slo=25 < 3 * 10, only two requests enter decode
   // EXPECT_TRUE(batch[0].size() == 2);
   // EXPECT_TRUE(scheduler->get_running_requests().size() == 2);
+}
+
+TEST(BlockManagerPoolTest, AllocateFailureRollsBackSharedPrefixBlocks) {
+  auto engine = std::make_unique<FakeEngine>(3, 4, true);
+  BlockManagerPool* block_manager_pool = engine->block_manager_pool();
+
+  auto cached_request =
+      generate_request_with_prompt_tokens({1, 2, 3, 4, 5, 6, 7, 8}, 1, 30000);
+  auto failed_request = generate_request_with_prompt_tokens(
+      {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}, 1, 30000);
+  auto later_request =
+      generate_request_with_prompt_tokens({20, 21, 22, 23}, 1, 30000);
+
+  auto* cached_sequence = cached_request->sequences()[0].get();
+  ASSERT_TRUE(block_manager_pool->allocate(cached_sequence,
+                                           cached_sequence->num_tokens()));
+  cached_sequence->kv_state().set_kv_cache_tokens_num(
+      cached_sequence->num_tokens());
+  block_manager_pool->deallocate(cached_sequence);
+
+  const size_t free_blocks_before_failure =
+      util::max(block_manager_pool->num_free_blocks());
+  const size_t used_blocks_before_failure =
+      util::min(block_manager_pool->num_used_blocks());
+  EXPECT_EQ(free_blocks_before_failure, 0);
+
+  auto* failed_sequence = failed_request->sequences()[0].get();
+  EXPECT_FALSE(block_manager_pool->allocate(failed_sequence,
+                                            failed_sequence->num_tokens()));
+  EXPECT_EQ(failed_sequence->kv_state().num_kv_blocks(), 0);
+  EXPECT_EQ(failed_sequence->kv_state().shared_kv_blocks_num(), 0);
+  EXPECT_EQ(util::max(block_manager_pool->num_free_blocks()),
+            free_blocks_before_failure);
+  EXPECT_EQ(util::min(block_manager_pool->num_used_blocks()),
+            used_blocks_before_failure);
+
+  auto* later_sequence = later_request->sequences()[0].get();
+  EXPECT_TRUE(block_manager_pool->allocate(later_sequence,
+                                           later_sequence->num_tokens()));
+  EXPECT_EQ(later_sequence->kv_state().num_kv_blocks(), 1);
+
+  (void)engine.release();
 }
 
 }  // namespace xllm
