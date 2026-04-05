@@ -47,6 +47,7 @@ limitations under the License.
 #include "rec/onerec.h"                       // IWYU pragma: keep
 #include "vlm/npu/glm4v.h"                    // IWYU pragma: keep
 #include "vlm/npu/glm4v_moe.h"                // IWYU pragma: keep
+#include "vlm/npu/kimi_k25.h"                 // IWYU pragma: keep
 #include "vlm/npu/minicpmv.h"                 // IWYU pragma: keep
 #include "vlm/npu/oxygen_vlm.h"               // IWYU pragma: keep
 #include "vlm/npu/qwen2_5_vl.h"               // IWYU pragma: keep

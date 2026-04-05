@@ -26,6 +26,7 @@ limitations under the License.
 #include <chrono>
 #include <cstdlib>
 #include <memory>
+#include <sstream>
 
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
@@ -41,6 +42,33 @@ limitations under the License.
 #include "util/pretty_print.h"
 #include "util/utils.h"
 namespace xllm {
+
+namespace {
+
+std::string format_int_vector(const std::vector<int32_t>& values) {
+  std::ostringstream oss;
+  oss << "[";
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (i > 0) {
+      oss << ", ";
+    }
+    oss << values[i];
+  }
+  oss << "]";
+  return oss.str();
+}
+
+RawForwardInput make_empty_raw_forward_input() {
+  RawForwardInput input;
+  input.batch_forward_type = BatchForwardType();
+  input.max_seq_len = 0;
+  input.q_max_seq_len = 0;
+  input.num_sequences = 0;
+  input.batch_id = UNINITIALIZED_BATCH_ID;
+  return input;
+}
+
+}  // namespace
 
 VLMEngine::VLMEngine(const runtime::Options& options,
                      std::shared_ptr<DistManager> dist_manager)
@@ -270,10 +298,17 @@ bool VLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   // init kv cache for each worker
   std::vector<std::vector<int64_t>> kv_cache_shape;
   kv_cache_shape.reserve(2);
-  kv_cache_shape.emplace_back(std::vector<int64_t>{
-      kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
-  kv_cache_shape.emplace_back(std::vector<int64_t>{
-      kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
+  if (FLAGS_enable_mla) {
+    kv_cache_shape.emplace_back(std::vector<int64_t>{
+        kv_cache_cap.n_blocks, block_size, 1, args_.kv_lora_rank()});
+    kv_cache_shape.emplace_back(std::vector<int64_t>{
+        kv_cache_cap.n_blocks, block_size, 1, args_.qk_rope_head_dim()});
+  } else {
+    kv_cache_shape.emplace_back(std::vector<int64_t>{
+        kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
+    kv_cache_shape.emplace_back(std::vector<int64_t>{
+        kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
+  }
 #if defined(USE_MLU)
   // transpose kv_cache layout for mlu
   // default layout: [n_blocks, block_size, n_head, head_dim]
@@ -294,7 +329,7 @@ bool VLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_cache_upload(options_.enable_cache_upload());
-  kv_cache_manager_ = std::make_unique<BlockManagerPool>(options);
+  kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
 
   // init kv cache for each worker in parallel
   std::vector<folly::SemiFuture<bool>> futures;
@@ -312,7 +347,6 @@ bool VLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   return true;
 }
 
-// TODO: support dp batches later
 ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
   if (worker_clients_.empty()) {
     // empty worker, return
@@ -347,6 +381,16 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
   for (auto worker_rank = 0; worker_rank < worker_clients_num_;
        worker_rank += dp_local_tp_size_) {
     auto result = results[worker_rank].value();
+    const bool empty_shard =
+        batch[dp_rank].size() == 0 &&
+        raw_forward_inputs[dp_rank].flatten_tokens_vec.empty();
+    if (empty_shard) {
+      LOG(INFO) << "[VLMEngine::step] stage=skip_result, dp_rank=" << dp_rank
+                << ", worker_rank=" << worker_rank
+                << ", reason=empty_shard";
+      ++dp_rank;
+      continue;
+    }
     if (result.has_value()) {
       if (result.value().outputs.empty() && layer_forward_interrupted_) {
         throw ForwardInterruptedException();
@@ -450,8 +494,14 @@ std::vector<RawForwardInput> VLMEngine::prepare_inputs(
   BatchForwardType batch_forward_type;
 
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs.emplace_back(std::move(
-        batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
+    if (batch[dp_rank].empty()) {
+      batched_inputs.emplace_back(make_empty_raw_forward_input());
+      LOG(INFO) << "[VLMEngine::prepare_inputs] stage=empty_batch_skip_prepare"
+                << ", dp_rank=" << dp_rank;
+    } else {
+      batched_inputs.emplace_back(std::move(
+          batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
+    }
     dp_global_token_nums[dp_rank] =
         batched_inputs[dp_rank].flatten_tokens_vec.size();
     if (batch_forward_type.is_empty() &&
@@ -466,8 +516,8 @@ std::vector<RawForwardInput> VLMEngine::prepare_inputs(
   // update dp_global_token_nums and batch_forward_type
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     batched_inputs[dp_rank].dp_global_token_nums = dp_global_token_nums;
+    batched_inputs[dp_rank].dp_is_decode = dp_is_decode;
     if (batched_inputs[dp_rank].batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].dp_is_decode = dp_is_decode;
       batched_inputs[dp_rank].batch_forward_type = batch_forward_type;
     }
   }
