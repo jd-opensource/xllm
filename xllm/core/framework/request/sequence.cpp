@@ -177,7 +177,6 @@ Sequence::Sequence(const Sequence& other)
       num_prompt_tokens_(other.num_prompt_tokens_),
       onerec_state_(other.onerec_state_),
       volatile_num_prompt_tokens_(other.volatile_num_prompt_tokens_),
-      embedding_block_(other.embedding_block_),
       request_id_(other.request_id_),
       finished_(other.finished_),
       finish_status_invalidated_(other.finish_status_invalidated_),
@@ -583,6 +582,7 @@ void Sequence::reset() {
   timer_.reset();
   is_timeout_set_ = false;
   volatile_num_prompt_tokens_ = num_tokens_;
+  single_block_ = Block();
 }
 
 void Sequence::add_shared_kv_blocks(std::vector<Block>&& blocks) {

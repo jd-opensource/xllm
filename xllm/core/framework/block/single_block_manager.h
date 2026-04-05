@@ -18,15 +18,19 @@ limitations under the License.
 #include <atomic>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <vector>
 
 #include "block_manager.h"
 
 namespace xllm {
 
-class EmbeddingManager : public BlockManager {
+class SingleBlockManager final : public BlockManager {
  public:
-  explicit EmbeddingManager(uint32_t num_ids);
+  SingleBlockManager(uint32_t num_blocks,
+                     std::string resource_name,
+                     std::string exhaustion_message = "");
+  ~SingleBlockManager() override = default;
 
   std::vector<Block> allocate(size_t num_blocks) override;
   Block allocate() override;
@@ -43,20 +47,26 @@ class EmbeddingManager : public BlockManager {
 
   void get_merged_kvcache_event(KvCacheEvent* event) const override;
 
-  size_t num_blocks_in_prefix_cache() const override { return 0; }
-  size_t num_free_blocks() const override { return num_free_blocks_; }
-  size_t num_used_blocks() const override { return num_used_blocks_; }
+  size_t num_blocks_in_prefix_cache() const override;
+  size_t num_free_blocks() const override;
+  size_t num_used_blocks() const override;
   double kv_cache_utilization() const override;
-
   void free(int32_t block_id) override;
-
-  size_t num_total_blocks() const override { return free_ids_.size(); }
+  size_t num_total_blocks() const override;
 
  private:
   std::vector<int32_t> free_ids_;
   std::vector<bool> in_use_ids_;
+  // Tracks whether `num_used_blocks_` currently includes this block id.
+  // Semantics: `num_used_blocks()` reports logical/effective usage. It may
+  // temporarily differ from `num_free_blocks()` because `deallocate()` can
+  // drop effective usage before the last `Block` reference is released and
+  // the id is physically returned to `free_ids_` via `free()`.
+  std::vector<bool> usage_accounted_ids_;
   std::atomic<size_t> num_free_blocks_{0};
   std::atomic<size_t> num_used_blocks_{0};
+  std::string resource_name_;
+  std::string exhaustion_message_;
   mutable std::mutex mutex_;
 };
 

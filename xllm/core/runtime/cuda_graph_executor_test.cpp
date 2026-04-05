@@ -39,6 +39,21 @@ limitations under the License.
 namespace xllm {
 namespace {
 
+const KVCache& first_full_attention_cache(
+    const std::vector<KVCache>& kv_caches) {
+  for (const auto& kv_cache : kv_caches) {
+    if (kv_cache.has_kv_cache()) {
+      const auto& k_cache = kv_cache.get_k_cache();
+      const auto& v_cache = kv_cache.get_v_cache();
+      if (k_cache.defined() && v_cache.defined() && k_cache.numel() > 0 &&
+          v_cache.numel() > 0) {
+        return kv_cache;
+      }
+    }
+  }
+  LOG(FATAL) << "No full-attention KV cache found";
+}
+
 class CudaGraphExecutorTestEnvironment : public ::testing::Environment {
  public:
   void SetUp() override {
@@ -155,7 +170,9 @@ class FakeAttnCausalLM final : public CausalLM {
     torch::Tensor k = k_proj_->forward(x);
     torch::Tensor v = v_proj_->forward(x);
 
-    auto [out, out_lse] = attn_->forward(attn_meta, q, k, v, kv_caches[0]);
+    auto& full_kv_cache =
+        const_cast<KVCache&>(first_full_attention_cache(kv_caches));
+    auto [out, out_lse] = attn_->forward(attn_meta, q, k, v, full_kv_cache);
     (void)out_lse;
     return ModelOutput(out);
   }
@@ -257,6 +274,24 @@ std::vector<KVCache> MakeKvCaches(const torch::Device& device,
   return {KVCache(k_cache, v_cache)};
 }
 
+std::vector<KVCache> MakeHybridKvCaches(const torch::Device& device,
+                                        int64_t num_pages,
+                                        int64_t page_size,
+                                        int64_t num_kv_heads,
+                                        int64_t head_dim) {
+  auto full_kv =
+      MakeKvCaches(device, num_pages, page_size, num_kv_heads, head_dim)
+          .front();
+  auto linear_options =
+      torch::TensorOptions().dtype(torch::kFloat32).device(device);
+  auto conv_cache =
+      torch::zeros({8, num_kv_heads * page_size * head_dim, 3}, linear_options);
+  auto ssm_cache =
+      torch::zeros({8, num_kv_heads, head_dim, head_dim}, linear_options);
+  return {KVCache(torch::Tensor(), torch::Tensor(), conv_cache, ssm_cache),
+          KVCache(full_kv.get_k_cache(), full_kv.get_v_cache())};
+}
+
 TEST(CudaGraphExecutorTest, BatchDecodeCaptureAndReplay) {
   if (!torch::cuda::is_available()) {
     GTEST_SKIP() << "CUDA is not available at runtime.";
@@ -315,6 +350,64 @@ TEST(CudaGraphExecutorTest, BatchDecodeCaptureAndReplay) {
   torch::cuda::synchronize();
   EXPECT_TRUE(torch::allclose(out2, eager_out, /*rtol=*/1e-3, /*atol=*/1e-3))
       << "graph replay output should match eager output";
+
+  FLAGS_enable_graph_vmm_pool = old_enable_graph_vmm_pool;
+}
+
+TEST(CudaGraphExecutorTest,
+     BatchDecodeCaptureAndReplayWithLinearOnlyLayerZero) {
+  if (!torch::cuda::is_available()) {
+    GTEST_SKIP() << "CUDA is not available at runtime.";
+  }
+
+  const bool old_enable_graph_vmm_pool = FLAGS_enable_graph_vmm_pool;
+  FLAGS_enable_graph_vmm_pool = false;
+
+  const torch::Device device = InitXllmCudaDeviceForTest(/*device_index=*/0);
+  xllm::layer::flashinfer::FlashinferWorkspace::get_instance().initialize(
+      device);
+
+  ModelArgs args;
+  args.model_type("fake_attn");
+  args.dtype("bfloat16");
+  args.hidden_size(256);
+  args.max_position_embeddings(16);
+  args.vocab_size(2048);
+  args.n_layers(2);
+  args.n_heads(2);
+  args.head_dim(128);
+  args.n_kv_heads(1);
+  args.layer_types({"linear_attention", "full_attention"});
+
+  runtime::Options options;
+  options.block_size(1);
+  options.max_seqs_per_batch(1);
+
+  auto model = std::make_unique<FakeAttnCausalLM>(args, device);
+  auto graph_exec = std::make_unique<runtime::cuda::CudaGraphExecutorImpl>(
+      model.get(), args, device, options);
+
+  auto tokens = torch::tensor(
+      {1}, torch::TensorOptions().dtype(torch::kInt32).device(device));
+  auto positions = torch::tensor(
+      {0}, torch::TensorOptions().dtype(torch::kInt32).device(device));
+  auto params = MakeDecodeParams(device);
+  auto kv = MakeHybridKvCaches(device,
+                               /*num_pages=*/4,
+                               /*page_size=*/1,
+                               /*num_kv_heads=*/1,
+                               /*head_dim=*/128);
+
+  auto eager_out =
+      model->forward(tokens, positions, kv, params).hidden_states.clone();
+  torch::cuda::synchronize();
+  auto out1 = graph_exec->run(tokens, positions, kv, params).hidden_states;
+  torch::cuda::synchronize();
+  auto out2 = graph_exec->run(tokens, positions, kv, params).hidden_states;
+  torch::cuda::synchronize();
+
+  EXPECT_TRUE(torch::allclose(out1, eager_out, /*rtol=*/1e-3, /*atol=*/1e-3));
+  EXPECT_TRUE(torch::allclose(out2, eager_out, /*rtol=*/1e-3, /*atol=*/1e-3));
 
   FLAGS_enable_graph_vmm_pool = old_enable_graph_vmm_pool;
 }
