@@ -46,7 +46,7 @@ limitations under the License.
 
 namespace xllm {
 namespace {
-void append_rec_logprobs(proto::Content* logprobs_context,
+void append_rec_logprobs(proto::InferTensorContents* logprobs_context,
                          const SequenceOutput& output,
                          int32_t expected_count) {
   const auto& token_logprobs = output.token_ids_logprobs;
