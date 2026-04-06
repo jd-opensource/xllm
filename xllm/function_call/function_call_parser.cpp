@@ -38,7 +38,7 @@ const std::unordered_map<std::string, std::vector<std::string>> auto_paser_map =
     {
         {"qwen25", {"qwen2", "qwen3"}},
         {"qwen3_coder", {"qwen3_coder", "qwen35"}},
-        {"kimi_k2", {"kimi_k2"}},
+        {"kimi_k2", {"kimi_k2", "kimi_k25"}},
         {"deepseekv3", {"deepseek_v3"}},
         {"deepseekv32", {"deepseek_v32"}},
         // GLM-4.5 and GLM-4.7 are not supported for tool call parser

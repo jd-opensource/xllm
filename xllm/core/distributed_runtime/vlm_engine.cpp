@@ -26,7 +26,6 @@ limitations under the License.
 #include <chrono>
 #include <cstdlib>
 #include <memory>
-#include <sstream>
 
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
@@ -42,33 +41,6 @@ limitations under the License.
 #include "util/pretty_print.h"
 #include "util/utils.h"
 namespace xllm {
-
-namespace {
-
-std::string format_int_vector(const std::vector<int32_t>& values) {
-  std::ostringstream oss;
-  oss << "[";
-  for (size_t i = 0; i < values.size(); ++i) {
-    if (i > 0) {
-      oss << ", ";
-    }
-    oss << values[i];
-  }
-  oss << "]";
-  return oss.str();
-}
-
-RawForwardInput make_empty_raw_forward_input() {
-  RawForwardInput input;
-  input.batch_forward_type = BatchForwardType();
-  input.max_seq_len = 0;
-  input.q_max_seq_len = 0;
-  input.num_sequences = 0;
-  input.batch_id = UNINITIALIZED_BATCH_ID;
-  return input;
-}
-
-}  // namespace
 
 VLMEngine::VLMEngine(const runtime::Options& options,
                      std::shared_ptr<DistManager> dist_manager)
@@ -492,8 +464,11 @@ std::vector<RawForwardInput> VLMEngine::prepare_inputs(
 
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     if (batch[dp_rank].empty()) {
-      // make empty batch forward input for empty batch
-      batched_inputs.emplace_back(make_empty_raw_forward_input());
+      // Use value-initialization to zero primitive fields for empty shard.
+      RawForwardInput empty_input{};
+      empty_input.batch_forward_type = BatchForwardType();
+      empty_input.batch_id = UNINITIALIZED_BATCH_ID;
+      batched_inputs.emplace_back(std::move(empty_input));
     } else {
       batched_inputs.emplace_back(std::move(
           batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
