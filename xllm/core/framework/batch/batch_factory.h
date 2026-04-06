@@ -40,8 +40,8 @@ class BatchFactory {
     static std::unordered_map<int64_t, std::unique_ptr<BatchFactory, Deleter>>
         instances;
     std::lock_guard<std::mutex> lock(mu);
-    const int64_t key = (static_cast<int64_t>(dp_size) << 32) |
-                        static_cast<uint32_t>(cp_size);
+    const int64_t key =
+        (static_cast<int64_t>(dp_size) << 32) | static_cast<uint32_t>(cp_size);
     auto it = instances.find(key);
     if (it == instances.end()) {
       it = instances

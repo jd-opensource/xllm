@@ -25,7 +25,8 @@ namespace layer {
 
 class Kimik25VisionEncoderLoader : public BaseLoader {
  public:
-  Kimik25VisionEncoderLoader(uint64_t weight_count, const ModelContext& context);
+  Kimik25VisionEncoderLoader(uint64_t weight_count,
+                             const ModelContext& context);
 
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;

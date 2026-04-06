@@ -271,8 +271,7 @@ DeekseekV2DecoderLoader::DeekseekV2DecoderLoader(
       decode_isBF16_(decode_isBF16) {
   auto model_args = context.get_model_args();
   auto options = context.get_tensor_options();
-  enable_kimi_k25_moe_scale_dtype_fix_ =
-      model_args.model_type() == "kimi_k25";
+  enable_kimi_k25_moe_scale_dtype_fix_ = model_args.model_type() == "kimi_k25";
 
   rank_ = parallel_args_.rank();
   first_k_dense_replace_ = model_args.first_k_dense_replace();
@@ -948,8 +947,7 @@ void DeekseekV2DecoderLoader::merge_loaded_weights() {
   if (quantize_type_ == "w8a8_dynamic") {
     if (enable_kimi_k25_moe_scale_dtype_fix_) {
       at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT] =
-          at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT].to(
-              torch::kBFloat16);
+          at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT].to(torch::kBFloat16);
       at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] =
           at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT].to(torch::kBFloat16);
     }

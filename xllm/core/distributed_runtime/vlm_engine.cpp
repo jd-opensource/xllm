@@ -385,9 +385,6 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
         batch[dp_rank].size() == 0 &&
         raw_forward_inputs[dp_rank].flatten_tokens_vec.empty();
     if (empty_shard) {
-      LOG(INFO) << "[VLMEngine::step] stage=skip_result, dp_rank=" << dp_rank
-                << ", worker_rank=" << worker_rank
-                << ", reason=empty_shard";
       ++dp_rank;
       continue;
     }
@@ -495,9 +492,8 @@ std::vector<RawForwardInput> VLMEngine::prepare_inputs(
 
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     if (batch[dp_rank].empty()) {
+      // make empty batch forward input for empty batch
       batched_inputs.emplace_back(make_empty_raw_forward_input());
-      LOG(INFO) << "[VLMEngine::prepare_inputs] stage=empty_batch_skip_prepare"
-                << ", dp_rank=" << dp_rank;
     } else {
       batched_inputs.emplace_back(std::move(
           batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));

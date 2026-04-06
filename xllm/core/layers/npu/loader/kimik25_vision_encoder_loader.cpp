@@ -39,7 +39,7 @@ enum VisionEncoderLayerTensorId : int {
   IN_QKV_BIAS,
   IN_WATTENTION_OUT_WEIGHT,
   IN_WATTENTION_OUT_BIAS,
-  
+
   IN_LINEAR_FC1_WEIGHT,
   IN_LINEAR_FC1_BIAS,
   IN_LINEAR_FC1_OFFSET,
@@ -71,7 +71,6 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
     {IN_LINEAR_FC1_BIAS, "mlp.fc0.bias"},
     {IN_LINEAR_FC2_WEIGHT, "mlp.fc1.weight"},
     {IN_LINEAR_FC2_BIAS, "mlp.fc1.bias"}};
-    
 
 static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8 = {
     {IN_INPUT_NORM_WEIGHT, "norm0.weight"},
@@ -96,7 +95,7 @@ static std::map<int, int> WEIGHT_SHARD = {
     {IN_WATTENTION_OUT_WEIGHT, 1},
     {IN_LINEAR_FC1_WEIGHT, 0},
     {IN_LINEAR_FC1_BIAS, 0},
-    {IN_LINEAR_FC2_WEIGHT, 1},    //allreduce
+    {IN_LINEAR_FC2_WEIGHT, 1},  // allreduce
 };
 
 static std::map<int, int> WEIGHT_SHARD_W8A8 = {
@@ -118,8 +117,9 @@ static const std::map<int, int>& GetWeightShardMap(
   return quantize_type == "w8a8_dynamic" ? WEIGHT_SHARD_W8A8 : WEIGHT_SHARD;
 }
 
-Kimik25VisionEncoderLoader::Kimik25VisionEncoderLoader(uint64_t weight_count,
-                                                    const ModelContext& context)
+Kimik25VisionEncoderLoader::Kimik25VisionEncoderLoader(
+    uint64_t weight_count,
+    const ModelContext& context)
     : BaseLoader(weight_count, context) {
   auto options = context.get_tensor_options();
   encode_param_rank = dp_local_tp_rank_;

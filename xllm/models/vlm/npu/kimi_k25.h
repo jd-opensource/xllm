@@ -1001,6 +1001,15 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
   KimiK2_5_VLForConditionalGenerationImpl(const ModelContext& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
+    auto parallel_args = context.get_parallel_args();
+    const int32_t dp_size =
+        parallel_args.dp_size() > 0 ? parallel_args.dp_size() : 1;
+    CHECK_LE(tp_size, 8)
+        << "kimi_k25 only supports tp_size <= 8, got tp_size="
+        << tp_size << " (world_size="
+        << parallel_args.world_size()
+        << ", dp_size=" << dp_size << ")";
+
     visual_ =
         register_module("vision_tower", KimiK2_5_VisionTransformer(context));
     auto mm_ptype = model_args_.mm_projector_type();
@@ -1126,8 +1135,8 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       // visual
       auto pixel_values = image_input->pixel_values.to(options_);
       auto grid_thw = image_input->image_grid_thw.to(options_);
-      auto image_features = process_vision_features(
-          pixel_values, grid_thw, input_params);
+      auto image_features =
+          process_vision_features(pixel_values, grid_thw, input_params);
       auto image_embeds = torch::cat(image_features, 0);
       auto image_tokens =
           (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
@@ -1469,10 +1478,11 @@ REGISTER_TOKENIZER_ARGS(kimi_k25, [&] {
 
   // ref:
   // https://huggingface.co/moonshotai/Kimi-K2.5/blob/main/tokenization_kimi.py#L53-L62
-  // N.B. re2 doesn't support character class intersection (&&) or subtraction (--).
-  // Since [\p{Han}]+ is the first branch and matches all Han characters first,
-  // we can safely remove the '&&[^\p{Han}]' part from subsequent branches.
-  // N.B. replaced '\s+(?!\S)' with '\s+[^\s]' - re2 doesn't support negative lookahead.
+  // N.B. re2 doesn't support character class intersection (&&) or subtraction
+  // (--). Since [\p{Han}]+ is the first branch and matches all Han characters
+  // first, we can safely remove the '&&[^\p{Han}]' part from subsequent
+  // branches. N.B. replaced '\s+(?!\S)' with '\s+[^\s]' - re2 doesn't support
+  // negative lookahead.
   const std::string pattern_str =
       R"([\p{Han}]+|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+(?i:'s|'t|'re|'ve|'m|'ll|'d)?|[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*(?i:'s|'t|'re|'ve|'m|'ll|'d)?|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+[^\s]|\s+)";
   SET_ARG(pattern, pattern_str);

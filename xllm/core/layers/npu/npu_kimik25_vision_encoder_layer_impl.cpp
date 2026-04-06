@@ -31,7 +31,7 @@ namespace layer {
 const uint64_t WEIGHT_COUNT_PER_LAYER = 22;
 
 void NpuKimik25VisionEncoderLayerImpl::initialize_quantization_parameters(
-  atb_speed::kimi::VisionEncoderLayerParam& param) {
+    atb_speed::kimi::VisionEncoderLayerParam& param) {
   param.MlpQuantType =
       quantize_type_ == "w8a8_dynamic"
           ? static_cast<int>(
@@ -43,8 +43,8 @@ void NpuKimik25VisionEncoderLayerImpl::param_from_args(
     atb_speed::kimi::VisionEncoderLayerParam& param,
     const ModelArgs& args,
     const ParallelArgs& parallel_args) {
-  const int32_t dp_size = parallel_args.dp_size() > 0 ? parallel_args.dp_size()
-                                                      : 1;
+  const int32_t dp_size =
+      parallel_args.dp_size() > 0 ? parallel_args.dp_size() : 1;
   const int32_t dp_local_tp_size = parallel_args.world_size() / dp_size;
   CHECK_EQ(parallel_args.world_size(), dp_size * dp_local_tp_size);
   const int32_t dp_local_tp_rank = parallel_args.rank() % dp_local_tp_size;
@@ -81,7 +81,7 @@ NpuKimik25VisionEncoderLayerImpl::NpuKimik25VisionEncoderLayerImpl(
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
   loader_ = std::make_unique<Kimik25VisionEncoderLoader>(WEIGHT_COUNT_PER_LAYER,
-                                                       context);
+                                                         context);
 }
 
 void NpuKimik25VisionEncoderLayerImpl::merge_loaded_weights() {
