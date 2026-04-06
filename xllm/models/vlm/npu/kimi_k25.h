@@ -1004,12 +1004,10 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     auto parallel_args = context.get_parallel_args();
     const int32_t dp_size =
         parallel_args.dp_size() > 0 ? parallel_args.dp_size() : 1;
-    CHECK_LE(tp_size, 8)
-        << "kimi_k25 only supports tp_size <= 8, got tp_size="
-        << tp_size << " (world_size="
-        << parallel_args.world_size()
-        << ", dp_size=" << dp_size << ")";
-
+    CHECK_LE(tp_size, 8) << "kimi_k25 only supports tp_size <= 8, got tp_size="
+                         << tp_size
+                         << " (world_size=" << parallel_args.world_size()
+                         << ", dp_size=" << dp_size << ")";
     visual_ =
         register_module("vision_tower", KimiK2_5_VisionTransformer(context));
     auto mm_ptype = model_args_.mm_projector_type();
