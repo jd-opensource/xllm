@@ -16,8 +16,11 @@ limitations under the License.
 #include <pthread.h>
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <atomic>
+#include <random>
 #include <string>
+#include <unordered_set>
 
 #include "core/common/global_flags.h"
 #include "core/util/env_var.h"
@@ -29,6 +32,39 @@ namespace {
 thread_local ShortUUID short_uuid;
 static std::atomic<bool> g_glog_inited = false;
 static pthread_mutex_t g_log_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+std::vector<int64_t> select_rec_item_ids(const SequenceOutput& output) {
+  if (!FLAGS_enable_rec_multi_item_output || output.item_ids_list.empty()) {
+    if (output.item_ids.has_value()) {
+      return {output.item_ids.value()};
+    }
+    return {};
+  }
+
+  std::vector<int64_t> selected_item_ids;
+  selected_item_ids.reserve(output.item_ids_list.size());
+  std::unordered_set<int64_t> seen_item_ids;
+  for (const int64_t item_id : output.item_ids_list) {
+    if (seen_item_ids.insert(item_id).second) {
+      selected_item_ids.emplace_back(item_id);
+    }
+  }
+
+  const int32_t each_threshold = FLAGS_each_conversion_threshold;
+  if (each_threshold > 0 &&
+      static_cast<int32_t>(selected_item_ids.size()) > each_threshold) {
+    uint32_t seed = FLAGS_random_seed >= 0
+                        ? static_cast<uint32_t>(FLAGS_random_seed) +
+                              static_cast<uint32_t>(output.index)
+                        : std::random_device{}();
+    std::mt19937 generator(seed);
+    std::shuffle(
+        selected_item_ids.begin(), selected_item_ids.end(), generator);
+    selected_item_ids.resize(each_threshold);
+  }
+
+  return selected_item_ids;
+}
 }  // namespace
 
 std::string generate_request_id() {
@@ -217,6 +253,38 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
       CHECK(nullptr != choice.token_ids);
       for (int j = 0; j < choice.token_size; j++) {
         choice.token_ids[j] = seq_output.token_ids[j];
+      }
+    }
+
+    if ((inference_type == InferenceType::REC_COMPLETIONS ||
+         inference_type == InferenceType::REC_CHAT_COMPLETIONS) &&
+        FLAGS_enable_convert_tokens_to_item) {
+      std::vector<int64_t> selected_item_ids = select_rec_item_ids(seq_output);
+      if (!selected_item_ids.empty()) {
+        choice.item_ids_size = selected_item_ids.size();
+        choice.item_ids = new int64_t[choice.item_ids_size];
+        CHECK(nullptr != choice.item_ids);
+        for (size_t j = 0; j < choice.item_ids_size; ++j) {
+          choice.item_ids[j] = selected_item_ids[j];
+        }
+      }
+    }
+
+    if ((inference_type == InferenceType::REC_COMPLETIONS ||
+         inference_type == InferenceType::REC_CHAT_COMPLETIONS) &&
+        FLAGS_enable_rec_logprobs_output &&
+        !seq_output.token_ids_logprobs.empty()) {
+      choice.rec_token_logprobs_size = seq_output.token_ids_logprobs.size();
+      choice.rec_token_logprobs =
+          new float[choice.rec_token_logprobs_size];
+      CHECK(nullptr != choice.rec_token_logprobs);
+      for (size_t j = 0; j < choice.rec_token_logprobs_size; ++j) {
+        if (seq_output.token_ids_logprobs[j].has_value()) {
+          choice.rec_token_logprobs[j] =
+              seq_output.token_ids_logprobs[j].value();
+        } else {
+          choice.rec_token_logprobs[j] = 0.0f;
+        }
       }
     }
 
@@ -418,6 +486,18 @@ void xllm_free_response(XLLM_Response* resp) {
         delete[] choice.token_ids;
         choice.token_ids = nullptr;
         choice.token_size = 0;
+      }
+
+      if (nullptr != choice.item_ids) {
+        delete[] choice.item_ids;
+        choice.item_ids = nullptr;
+        choice.item_ids_size = 0;
+      }
+
+      if (nullptr != choice.rec_token_logprobs) {
+        delete[] choice.rec_token_logprobs;
+        choice.rec_token_logprobs = nullptr;
+        choice.rec_token_logprobs_size = 0;
       }
 
       if (nullptr != choice.logprobs.entries) {

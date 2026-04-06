@@ -26,7 +26,61 @@ limitations under the License.
 #include <exception>
 #include <stdexcept>
 
+#include "core/common/rec_model_utils.h"
+#include "core/framework/model_loader.h"
 #include "helper.h"
+
+namespace {
+
+const char* get_rec_pipeline_name(xllm::RecPipelineType pipeline_type) {
+  switch (pipeline_type) {
+    case xllm::RecPipelineType::kLlmRecDefault:
+      return "LlmRecEnginePipeline";
+    case xllm::RecPipelineType::kLlmRecWithMmData:
+      return "LlmRecWithMmData";
+    case xllm::RecPipelineType::kLlmRecMultiRoundPipeline:
+      return "RecMultiRoundEnginePipeline";
+    case xllm::RecPipelineType::kOneRecDefault:
+      return "OneRecEnginePipeline";
+    default:
+      return "UnknownRecPipeline";
+  }
+}
+
+void reset_pipeline_runtime_toggles() {
+  FLAGS_enable_rec_fast_sampler = false;
+  FLAGS_enable_prefill_piecewise_graph = false;
+  FLAGS_enable_xattention_one_stage = false;
+  FLAGS_enable_graph_mode_decode_no_padding = false;
+  FLAGS_enable_rec_prefill_only = false;
+  FLAGS_enable_constrained_decoding = false;
+  FLAGS_enable_topk_sorted = false;
+}
+
+void apply_multi_round_pipeline_toggles() {
+  FLAGS_enable_rec_fast_sampler = true;
+  FLAGS_enable_prefill_piecewise_graph = true;
+  FLAGS_enable_xattention_one_stage = false;
+  FLAGS_enable_graph_mode_decode_no_padding = true;
+  FLAGS_enable_topk_sorted = false;
+}
+
+void apply_onerec_pipeline_toggles(xllm::Options* options) {
+  FLAGS_enable_rec_prefill_only = true;
+  FLAGS_enable_constrained_decoding = true;
+  FLAGS_enable_prefix_cache = false;
+  FLAGS_enable_schedule_overlap = false;
+  FLAGS_enable_chunked_prefill = false;
+
+  options->enable_prefix_cache(false)
+      .enable_schedule_overlap(false)
+      .enable_chunked_prefill(false);
+
+  // OneRec does not use Rec multi-round decode rounds.
+  FLAGS_max_decode_rounds = 0;
+}
+
+}  // namespace
 
 XLLM_CAPI_EXPORT XLLM_REC_Handler* xllm_rec_create(void) {
   XLLM_REC_Handler* handler = new XLLM_REC_Handler();
@@ -129,6 +183,21 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     FLAGS_max_seqs_per_batch = xllm_init_options.max_seqs_per_batch;
     FLAGS_max_tokens_per_batch = xllm_init_options.max_tokens_per_batch;
     FLAGS_block_size = xllm_init_options.block_size;
+    FLAGS_enable_prefix_cache = xllm_init_options.enable_prefix_cache;
+    FLAGS_enable_schedule_overlap = xllm_init_options.enable_schedule_overlap;
+    FLAGS_enable_chunked_prefill = xllm_init_options.enable_chunked_prefill;
+
+    std::unique_ptr<xllm::ModelLoader> model_loader =
+        xllm::ModelLoader::create(model_path);
+    const xllm::ModelArgs model_args = model_loader->model_args();
+    const xllm::RecModelKind rec_model_kind =
+        xllm::get_rec_model_kind(model_args.model_type());
+    if (rec_model_kind == xllm::RecModelKind::kNone) {
+      LOG(ERROR) << "Unsupported rec model_type: " << model_args.model_type();
+      return false;
+    }
+    const xllm::RecPipelineType pipeline_type =
+        xllm::get_rec_pipeline_type(rec_model_kind);
 
     // Hard-coded REC so settings. enable_graph and rec_worker_max_concurrency
     // are dual-source: runtime may read FLAGS_* while setup also needs the same
@@ -136,18 +205,40 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     FLAGS_enable_graph = true;
     FLAGS_rec_worker_max_concurrency = 2;
 
-    // Flag-only runtime toggles in the REC so path.
-    FLAGS_enable_rec_fast_sampler = true;
-    FLAGS_enable_prefill_piecewise_graph = true;
-    FLAGS_enable_xattention_one_stage = false;
-    FLAGS_enable_graph_mode_decode_no_padding = true;
-    // FLAGS_enable_rec_prefill_only = true;
-    FLAGS_enable_topk_sorted = false;
+    // Pipeline-specific runtime toggles in the REC so path.
+    reset_pipeline_runtime_toggles();
+    switch (pipeline_type) {
+      case xllm::RecPipelineType::kLlmRecMultiRoundPipeline:
+        apply_multi_round_pipeline_toggles();
+        break;
+      case xllm::RecPipelineType::kOneRecDefault:
+        apply_onerec_pipeline_toggles(&options);
+        break;
+      case xllm::RecPipelineType::kLlmRecDefault:
+      case xllm::RecPipelineType::kLlmRecWithMmData:
+        break;
+      default:
+        LOG(ERROR) << "Unsupported rec pipeline type: "
+                   << static_cast<int>(pipeline_type);
+        return false;
+    }
 
     // Keep dual-source settings aligned with the FLAGS_* values above.
     options.enable_graph(FLAGS_enable_graph)
         .beam_width(FLAGS_beam_width)
         .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency);
+
+    LOG(INFO) << "REC C API selected pipeline="
+              << get_rec_pipeline_name(pipeline_type)
+              << ", model_type=" << model_args.model_type()
+              << ", enable_rec_prefill_only=" << FLAGS_enable_rec_prefill_only
+              << ", enable_constrained_decoding="
+              << FLAGS_enable_constrained_decoding
+              << ", enable_prefix_cache=" << FLAGS_enable_prefix_cache
+              << ", enable_schedule_overlap=" << FLAGS_enable_schedule_overlap
+              << ", enable_chunked_prefill=" << FLAGS_enable_chunked_prefill
+              << ", enable_rec_fast_sampler=" << FLAGS_enable_rec_fast_sampler
+              << ", max_decode_rounds=" << FLAGS_max_decode_rounds;
 
 #if !defined(USE_NPU)
     FLAGS_enable_block_copy_kernel = false;

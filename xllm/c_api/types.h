@@ -305,6 +305,18 @@ typedef struct XLLM_CAPI_EXPORT XLLM_Choice {
   /** Generated token ids size */
   size_t token_size;
 
+  /** OneRec selected item ids */
+  int64_t* item_ids;
+
+  /** Number of selected OneRec item ids */
+  size_t item_ids_size;
+
+  /** Token-aligned REC/OneRec logprobs */
+  float* rec_token_logprobs;
+
+  /** Number of entries in rec_token_logprobs */
+  size_t rec_token_logprobs_size;
+
   /** Token log probabilities */
   XLLM_LogProbs logprobs;
 
