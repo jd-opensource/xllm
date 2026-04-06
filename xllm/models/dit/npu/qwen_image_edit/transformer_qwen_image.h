@@ -302,7 +302,7 @@ torch::Tensor apply_rotary_emb_qwen(const torch::Tensor& x,
                           .expand({-1, -1, -1, -1, 2})
                           .reshape({1, seqlen, 1, -1});
   auto x_out = at_npu::native::custom_ops::npu_rotary_mul(
-      x, cos_expanded, sin_expanded, "interleave");
+      x.to(torch::kFloat), cos_expanded, sin_expanded, "interleave");
   return x_out.to(x.dtype());
 }
 

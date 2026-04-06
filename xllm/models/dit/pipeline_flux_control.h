@@ -162,7 +162,8 @@ class FluxControlPipelineImpl : public FluxPipelineBaseImpl {
           batch_size, adjusted_height / 2, adjusted_width / 2);
       return {latents.value(), latent_image_ids};
     }
-    torch::Tensor latents_tensor = randn_tensor(shape, seed, options_);
+    torch::Tensor latents_tensor =
+        xllm::dit::randn_tensor(shape, seed, options_);
     torch::Tensor packed_latents = pack_latents(latents_tensor,
                                                 batch_size,
                                                 num_channels_latents,
