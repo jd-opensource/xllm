@@ -192,18 +192,18 @@ constexpr int32_t IN_SELF_ATTN_OUT_OFFSET =
     static_cast<int32_t>(OneRecBlockLayerTensorId::IN_SELF_ATTN_OUT_OFFSET);
 constexpr int32_t IN_SELF_ATTN_OUT_SCALE =
     static_cast<int32_t>(OneRecBlockLayerTensorId::IN_SELF_ATTN_OUT_SCALE);
-constexpr int32_t IN_SELF_ATTN_OUT_COMPRESS_IDX =
-    static_cast<int32_t>(OneRecBlockLayerTensorId::IN_SELF_ATTN_OUT_COMPRESS_IDX);
-constexpr int32_t IN_RELATIVE_ATTENTION_BIAS_WEIGHT =
-    static_cast<int32_t>(OneRecBlockLayerTensorId::IN_RELATIVE_ATTENTION_BIAS_WEIGHT);
+constexpr int32_t IN_SELF_ATTN_OUT_COMPRESS_IDX = static_cast<int32_t>(
+    OneRecBlockLayerTensorId::IN_SELF_ATTN_OUT_COMPRESS_IDX);
+constexpr int32_t IN_RELATIVE_ATTENTION_BIAS_WEIGHT = static_cast<int32_t>(
+    OneRecBlockLayerTensorId::IN_RELATIVE_ATTENTION_BIAS_WEIGHT);
 constexpr int32_t IN_CROSS_LAYER_NORM_WEIGHT =
     static_cast<int32_t>(OneRecBlockLayerTensorId::IN_CROSS_LAYER_NORM_WEIGHT);
 constexpr int32_t IN_CROSS_LAYER_NORM_BIAS =
     static_cast<int32_t>(OneRecBlockLayerTensorId::IN_CROSS_LAYER_NORM_BIAS);
-constexpr int32_t IN_CROSS_LAYER_NORM_NEW_WEIGHT =
-    static_cast<int32_t>(OneRecBlockLayerTensorId::IN_CROSS_LAYER_NORM_NEW_WEIGHT);
-constexpr int32_t IN_CROSS_LAYER_NORM_NEW_BIAS =
-    static_cast<int32_t>(OneRecBlockLayerTensorId::IN_CROSS_LAYER_NORM_NEW_BIAS);
+constexpr int32_t IN_CROSS_LAYER_NORM_NEW_WEIGHT = static_cast<int32_t>(
+    OneRecBlockLayerTensorId::IN_CROSS_LAYER_NORM_NEW_WEIGHT);
+constexpr int32_t IN_CROSS_LAYER_NORM_NEW_BIAS = static_cast<int32_t>(
+    OneRecBlockLayerTensorId::IN_CROSS_LAYER_NORM_NEW_BIAS);
 constexpr int32_t IN_CROSS_Q_WEIGHT =
     static_cast<int32_t>(OneRecBlockLayerTensorId::IN_CROSS_Q_WEIGHT);
 constexpr int32_t IN_CROSS_Q_BIAS =
@@ -250,16 +250,16 @@ constexpr int32_t IN_CROSS_ATTN_OUT_OFFSET =
     static_cast<int32_t>(OneRecBlockLayerTensorId::IN_CROSS_ATTN_OUT_OFFSET);
 constexpr int32_t IN_CROSS_ATTN_OUT_SCALE =
     static_cast<int32_t>(OneRecBlockLayerTensorId::IN_CROSS_ATTN_OUT_SCALE);
-constexpr int32_t IN_CROSS_ATTN_OUT_COMPRESS_IDX =
-    static_cast<int32_t>(OneRecBlockLayerTensorId::IN_CROSS_ATTN_OUT_COMPRESS_IDX);
+constexpr int32_t IN_CROSS_ATTN_OUT_COMPRESS_IDX = static_cast<int32_t>(
+    OneRecBlockLayerTensorId::IN_CROSS_ATTN_OUT_COMPRESS_IDX);
 constexpr int32_t IN_FINAL_LAYER_NORM_WEIGHT =
     static_cast<int32_t>(OneRecBlockLayerTensorId::IN_FINAL_LAYER_NORM_WEIGHT);
 constexpr int32_t IN_FINAL_LAYER_NORM_BIAS =
     static_cast<int32_t>(OneRecBlockLayerTensorId::IN_FINAL_LAYER_NORM_BIAS);
-constexpr int32_t IN_FINAL_LAYER_NORM_NEW_WEIGHT =
-    static_cast<int32_t>(OneRecBlockLayerTensorId::IN_FINAL_LAYER_NORM_NEW_WEIGHT);
-constexpr int32_t IN_FINAL_LAYER_NORM_NEW_BIAS =
-    static_cast<int32_t>(OneRecBlockLayerTensorId::IN_FINAL_LAYER_NORM_NEW_BIAS);
+constexpr int32_t IN_FINAL_LAYER_NORM_NEW_WEIGHT = static_cast<int32_t>(
+    OneRecBlockLayerTensorId::IN_FINAL_LAYER_NORM_NEW_WEIGHT);
+constexpr int32_t IN_FINAL_LAYER_NORM_NEW_BIAS = static_cast<int32_t>(
+    OneRecBlockLayerTensorId::IN_FINAL_LAYER_NORM_NEW_BIAS);
 constexpr int32_t IN_FFN_WI_0_WEIGHT =
     static_cast<int32_t>(OneRecBlockLayerTensorId::IN_FFN_WI_0_WEIGHT);
 constexpr int32_t IN_FFN_WI_0_BIAS =
@@ -358,78 +358,79 @@ enum class OneRecMoeBlockLayerTensorId : int32_t {
   IN_MOE_SHARED_W2_WEIGHT = IN_MLP_DOWN_WEIGHT_SHARED_EXPERT,
 };
 
-constexpr int32_t IN_BLOCK_SPARSE_MOE_GATE_WEIGHT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_BLOCK_SPARSE_MOE_GATE_WEIGHT);
-constexpr int32_t IN_BLOCK_SPARSE_MOE_GATE_BIAS =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_BLOCK_SPARSE_MOE_GATE_BIAS);
-constexpr int32_t IN_BLOCK_SPARSE_MOE_GATE_DESCALE =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_BLOCK_SPARSE_MOE_GATE_DESCALE);
-constexpr int32_t IN_BLOCK_SPARSE_MOE_GATE_OFFSET =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_BLOCK_SPARSE_MOE_GATE_OFFSET);
-constexpr int32_t IN_BLOCK_SPARSE_MOE_GATE_SCALE =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_BLOCK_SPARSE_MOE_GATE_SCALE);
-constexpr int32_t IN_BLOCK_SPARSE_MOE_GATE_COMPRESS_IDX =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_BLOCK_SPARSE_MOE_GATE_COMPRESS_IDX);
-constexpr int32_t IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT);
-constexpr int32_t IN_MLP_GATEUP_BIAS_SHARED_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_BIAS_SHARED_EXPERT);
-constexpr int32_t IN_MLP_GATEUP_DESCALE_SHARED_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_DESCALE_SHARED_EXPERT);
-constexpr int32_t IN_MLP_GATEUP_OFFSET_SHARED_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_OFFSET_SHARED_EXPERT);
-constexpr int32_t IN_MLP_GATEUP_SCALE_SHARED_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_SCALE_SHARED_EXPERT);
+constexpr int32_t IN_BLOCK_SPARSE_MOE_GATE_WEIGHT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_BLOCK_SPARSE_MOE_GATE_WEIGHT);
+constexpr int32_t IN_BLOCK_SPARSE_MOE_GATE_BIAS = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_BLOCK_SPARSE_MOE_GATE_BIAS);
+constexpr int32_t IN_BLOCK_SPARSE_MOE_GATE_DESCALE = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_BLOCK_SPARSE_MOE_GATE_DESCALE);
+constexpr int32_t IN_BLOCK_SPARSE_MOE_GATE_OFFSET = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_BLOCK_SPARSE_MOE_GATE_OFFSET);
+constexpr int32_t IN_BLOCK_SPARSE_MOE_GATE_SCALE = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_BLOCK_SPARSE_MOE_GATE_SCALE);
+constexpr int32_t IN_BLOCK_SPARSE_MOE_GATE_COMPRESS_IDX = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_BLOCK_SPARSE_MOE_GATE_COMPRESS_IDX);
+constexpr int32_t IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT);
+constexpr int32_t IN_MLP_GATEUP_BIAS_SHARED_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_BIAS_SHARED_EXPERT);
+constexpr int32_t IN_MLP_GATEUP_DESCALE_SHARED_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_DESCALE_SHARED_EXPERT);
+constexpr int32_t IN_MLP_GATEUP_OFFSET_SHARED_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_OFFSET_SHARED_EXPERT);
+constexpr int32_t IN_MLP_GATEUP_SCALE_SHARED_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_SCALE_SHARED_EXPERT);
 constexpr int32_t IN_MLP_GATEUP_COMPRESS_IDX_SHARED_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_COMPRESS_IDX_SHARED_EXPERT);
-constexpr int32_t IN_MLP_DOWN_WEIGHT_SHARED_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_WEIGHT_SHARED_EXPERT);
-constexpr int32_t IN_MLP_DOWN_BIAS_SHARED_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_BIAS_SHARED_EXPERT);
-constexpr int32_t IN_MLP_DOWN_DESCALE_SHARED_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_DESCALE_SHARED_EXPERT);
-constexpr int32_t IN_MLP_DOWN_OFFSET_SHARED_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_OFFSET_SHARED_EXPERT);
-constexpr int32_t IN_MLP_DOWN_SCALE_SHARED_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_SCALE_SHARED_EXPERT);
-constexpr int32_t IN_MLP_DOWN_COMPRESS_IDX_SHARED_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_COMPRESS_IDX_SHARED_EXPERT);
-constexpr int32_t IN_SHARED_EXPERT_GATE_WEIGHT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_SHARED_EXPERT_GATE_WEIGHT);
-constexpr int32_t IN_SHARED_EXPERT_GATE_BIAS =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_SHARED_EXPERT_GATE_BIAS);
-constexpr int32_t IN_SHARED_EXPERT_GATE_DESCALE =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_SHARED_EXPERT_GATE_DESCALE);
-constexpr int32_t IN_SHARED_EXPERT_GATE_OFFSET =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_SHARED_EXPERT_GATE_OFFSET);
-constexpr int32_t IN_SHARED_EXPERT_GATE_SCALE =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_SHARED_EXPERT_GATE_SCALE);
-constexpr int32_t IN_SHARED_EXPERT_GATE_COMPRESS_IDX =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_SHARED_EXPERT_GATE_COMPRESS_IDX);
-constexpr int32_t IN_MLP_GATEUP_WEIGHT_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_WEIGHT_EXPERT);
-constexpr int32_t IN_MLP_GATEUP_BIAS_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_BIAS_EXPERT);
-constexpr int32_t IN_MLP_GATEUP_DESCALE_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_DESCALE_EXPERT);
-constexpr int32_t IN_MLP_GATEUP_OFFSET_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_OFFSET_EXPERT);
-constexpr int32_t IN_MLP_GATEUP_SCALE_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_SCALE_EXPERT);
-constexpr int32_t IN_MLP_GATEUP_COMPRESS_IDX_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_COMPRESS_IDX_EXPERT);
-constexpr int32_t IN_MLP_DOWN_WEIGHT_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_WEIGHT_EXPERT);
+    static_cast<int32_t>(
+        OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_COMPRESS_IDX_SHARED_EXPERT);
+constexpr int32_t IN_MLP_DOWN_WEIGHT_SHARED_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_WEIGHT_SHARED_EXPERT);
+constexpr int32_t IN_MLP_DOWN_BIAS_SHARED_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_BIAS_SHARED_EXPERT);
+constexpr int32_t IN_MLP_DOWN_DESCALE_SHARED_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_DESCALE_SHARED_EXPERT);
+constexpr int32_t IN_MLP_DOWN_OFFSET_SHARED_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_OFFSET_SHARED_EXPERT);
+constexpr int32_t IN_MLP_DOWN_SCALE_SHARED_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_SCALE_SHARED_EXPERT);
+constexpr int32_t IN_MLP_DOWN_COMPRESS_IDX_SHARED_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_COMPRESS_IDX_SHARED_EXPERT);
+constexpr int32_t IN_SHARED_EXPERT_GATE_WEIGHT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_SHARED_EXPERT_GATE_WEIGHT);
+constexpr int32_t IN_SHARED_EXPERT_GATE_BIAS = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_SHARED_EXPERT_GATE_BIAS);
+constexpr int32_t IN_SHARED_EXPERT_GATE_DESCALE = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_SHARED_EXPERT_GATE_DESCALE);
+constexpr int32_t IN_SHARED_EXPERT_GATE_OFFSET = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_SHARED_EXPERT_GATE_OFFSET);
+constexpr int32_t IN_SHARED_EXPERT_GATE_SCALE = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_SHARED_EXPERT_GATE_SCALE);
+constexpr int32_t IN_SHARED_EXPERT_GATE_COMPRESS_IDX = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_SHARED_EXPERT_GATE_COMPRESS_IDX);
+constexpr int32_t IN_MLP_GATEUP_WEIGHT_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_WEIGHT_EXPERT);
+constexpr int32_t IN_MLP_GATEUP_BIAS_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_BIAS_EXPERT);
+constexpr int32_t IN_MLP_GATEUP_DESCALE_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_DESCALE_EXPERT);
+constexpr int32_t IN_MLP_GATEUP_OFFSET_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_OFFSET_EXPERT);
+constexpr int32_t IN_MLP_GATEUP_SCALE_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_SCALE_EXPERT);
+constexpr int32_t IN_MLP_GATEUP_COMPRESS_IDX_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_COMPRESS_IDX_EXPERT);
+constexpr int32_t IN_MLP_DOWN_WEIGHT_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_WEIGHT_EXPERT);
 constexpr int32_t IN_MLP_DOWN_BIAS_EXPERT =
     static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_BIAS_EXPERT);
-constexpr int32_t IN_MLP_DOWN_DESCALE_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_DESCALE_EXPERT);
-constexpr int32_t IN_MLP_DOWN_OFFSET_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_OFFSET_EXPERT);
+constexpr int32_t IN_MLP_DOWN_DESCALE_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_DESCALE_EXPERT);
+constexpr int32_t IN_MLP_DOWN_OFFSET_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_OFFSET_EXPERT);
 constexpr int32_t IN_MLP_DOWN_SCALE_EXPERT =
     static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_SCALE_EXPERT);
-constexpr int32_t IN_MLP_DOWN_COMPRESS_IDX_EXPERT =
-    static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_COMPRESS_IDX_EXPERT);
+constexpr int32_t IN_MLP_DOWN_COMPRESS_IDX_EXPERT = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_COMPRESS_IDX_EXPERT);
 constexpr int32_t IN_EXPERT_ARRAY =
     static_cast<int32_t>(OneRecMoeBlockLayerTensorId::IN_EXPERT_ARRAY);
 constexpr int32_t IN_EXPERT_GROUP =
