@@ -1004,6 +1004,11 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     auto parallel_args = context.get_parallel_args();
     const int32_t dp_size =
         parallel_args.dp_size() > 0 ? parallel_args.dp_size() : 1;
+    const int32_t tp_size = parallel_args.world_size() / dp_size;
+    CHECK_EQ(parallel_args.world_size(), tp_size * dp_size)
+        << "invalid parallel config for kimi_k25: world_size("
+        << parallel_args.world_size() << ") must be divisible by dp_size("
+        << dp_size << ")";
     CHECK_LE(tp_size, 8) << "kimi_k25 only supports tp_size <= 8, got tp_size="
                          << tp_size
                          << " (world_size=" << parallel_args.world_size()
@@ -1022,8 +1027,8 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
                    << mm_ptype;
     }
 
-    language_model_ =
-        register_module("language_model", DeepseekV2ForCausalLM(context));
+    language_model_ = register_module(
+        "language_model", npu::model::DeepseekV2ForCausalLM(context));
   }
 
   void prepare_encoder_input(
@@ -1261,7 +1266,7 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
 
   KimiK2_5_VisionTransformer visual_{nullptr};
   KimiK2_5_VisionPatchMerger mm_projector_{nullptr};
-  DeepseekV2ForCausalLM language_model_{nullptr};
+  npu::model::DeepseekV2ForCausalLM language_model_{nullptr};
 };
 TORCH_MODULE(KimiK2_5_VLForConditionalGeneration);
 

@@ -298,7 +298,7 @@ bool VLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   // init kv cache for each worker
   std::vector<std::vector<int64_t>> kv_cache_shape;
   kv_cache_shape.reserve(2);
-  if (FLAGS_enable_mla) {
+  if (options_.enable_mla()) {
     kv_cache_shape.emplace_back(std::vector<int64_t>{
         kv_cache_cap.n_blocks, block_size, 1, args_.kv_lora_rank()});
     kv_cache_shape.emplace_back(std::vector<int64_t>{
