@@ -122,8 +122,8 @@ Kimik25VisionEncoderLoader::Kimik25VisionEncoderLoader(
     const ModelContext& context)
     : BaseLoader(weight_count, context) {
   auto options = context.get_tensor_options();
-  encode_param_rank = dp_local_tp_rank_;
-  encode_param_worldSize = dp_local_tp_size_;
+  encode_param_rank_ = dp_local_tp_rank_;
+  encode_param_worldSize_ = dp_local_tp_size_;
   at_weight_tensors_.resize(weight_count);
   dtype_ = torch::typeMetaToScalarType(options.dtype());
   device_id_ = options.device().index();
@@ -142,8 +142,8 @@ void Kimik25VisionEncoderLoader::load_state_dict(const StateDict& state_dict) {
                  name,
                  index,
                  weight_shard.at(index),
-                 encode_param_rank,
-                 encode_param_worldSize);
+                 encode_param_rank_,
+                 encode_param_worldSize_);
     } else {
       set_weight(state_dict, name, index);
     }
@@ -161,7 +161,7 @@ void Kimik25VisionEncoderLoader::verify_loaded_weights() const {
 void Kimik25VisionEncoderLoader::merge_loaded_weights() {
   // spilt pack qkv weight when enable tp
   get_weights_col_packed_qkv();
-  if (encode_param_worldSize > 1) {
+  if (encode_param_worldSize_ > 1) {
     // merge qkv weight
     auto new_qkv_weight = torch::cat({at_weight_tensors_[IN_VISION_Q_WEIGHT],
                                       at_weight_tensors_[IN_VISION_K_WEIGHT],
@@ -186,25 +186,25 @@ void Kimik25VisionEncoderLoader::merge_loaded_weights() {
 
 // tp spilt weight
 void Kimik25VisionEncoderLoader::get_weights_col_packed_qkv() {
-  int rank = encode_param_rank;
-  int worldSize = encode_param_worldSize;
+  int rank = encode_param_rank_;
+  int worldSize = encode_param_worldSize_;
   // split qkv weight
-  qkv_weight = torch::chunk(at_weight_tensors_[IN_QKV_WEIGHT], 3, 0);
-  qkv_bias = torch::chunk(at_weight_tensors_[IN_QKV_BIAS], 3, 0);
+  qkv_weight_ = torch::chunk(at_weight_tensors_[IN_QKV_WEIGHT], 3, 0);
+  qkv_bias_ = torch::chunk(at_weight_tensors_[IN_QKV_BIAS], 3, 0);
   // weight
   at_weight_tensors_[IN_VISION_Q_WEIGHT] =
-      (qkv_weight[0].chunk(worldSize, 0))[rank];
+      (qkv_weight_[0].chunk(worldSize, 0))[rank];
   at_weight_tensors_[IN_VISION_K_WEIGHT] =
-      (qkv_weight[1].chunk(worldSize, 0))[rank];
+      (qkv_weight_[1].chunk(worldSize, 0))[rank];
   at_weight_tensors_[IN_VISION_V_WEIGHT] =
-      (qkv_weight[2].chunk(worldSize, 0))[rank];
+      (qkv_weight_[2].chunk(worldSize, 0))[rank];
   // bias
   at_weight_tensors_[IN_VISION_Q_BIAS] =
-      (qkv_bias[0].chunk(worldSize, 0))[rank];
+      (qkv_bias_[0].chunk(worldSize, 0))[rank];
   at_weight_tensors_[IN_VISION_K_BIAS] =
-      (qkv_bias[1].chunk(worldSize, 0))[rank];
+      (qkv_bias_[1].chunk(worldSize, 0))[rank];
   at_weight_tensors_[IN_VISION_V_BIAS] =
-      (qkv_bias[2].chunk(worldSize, 0))[rank];
+      (qkv_bias_[2].chunk(worldSize, 0))[rank];
 }
 
 }  // namespace layer

@@ -25,6 +25,7 @@ limitations under the License.
 
 #include <torch_npu/csrc/libs/init_npu.h>
 
+#include <cstdint>
 #include <functional>
 
 #include "atb/atb_infer.h"
@@ -120,9 +121,9 @@ class NpuKimik25VisionEncoderLayerImpl : public BaseLayer {
   atb::Tensor placeholder_;
   at::Tensor cu_seqlen_;
   at::Tensor at_placeholder_;
-  std::vector<torch::Tensor> qkv_weight;
-  std::vector<torch::Tensor> qkv_bias;
-  int device_id_;
+  std::vector<torch::Tensor> qkv_weight_;
+  std::vector<torch::Tensor> qkv_bias_;
+  int32_t device_id_;
 };
 TORCH_MODULE(NpuKimik25VisionEncoderLayer);
 

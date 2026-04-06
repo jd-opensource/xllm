@@ -20,6 +20,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <unordered_map>
 
 #include "core/framework/kv_cache/kv_cache.h"
@@ -36,7 +37,7 @@ limitations under the License.
 #include "xllm_atb_layers/core/include/atb_speed/log.h"
 
 namespace xllm {
-const int KIMIV_VT_INFER_MAX_PATCH_NUM = 16328;
+const int32_t KIMIV_VT_INFER_MAX_PATCH_NUM = 16328;
 #define PrintTensor(tensor) print_tensor(tensor, #tensor, 10, true, false);
 
 namespace {

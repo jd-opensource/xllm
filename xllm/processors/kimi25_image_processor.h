@@ -5,6 +5,7 @@ you may not use this file except in compliance with the License.
 
 #pragma once
 
+#include <cstdint>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -15,37 +16,37 @@ you may not use this file except in compliance with the License.
 namespace xllm {
 
 struct VideoChunkMetadata {
-  int chunk_id;
+  int32_t chunk_id;
   double start_timestamp;
-  int num_frames;
+  int32_t num_frames;
   std::vector<int> frame_indices;
   std::string timestamp_text;
   std::string prompt;
 };
 
 struct NavitResizeResult {
-  int num_tokens = 0;
-  int new_width = 0;
-  int new_height = 0;
-  int pad_width = 0;
-  int pad_height = 0;
-  int sampled_nframes = 1;
+  int32_t num_tokens = 0;
+  int32_t new_width = 0;
+  int32_t new_height = 0;
+  int32_t pad_width = 0;
+  int32_t pad_height = 0;
+  int32_t sampled_nframes = 1;
 };
 
 struct KimiK25MediaConfig {
-  int patch_size = 14;
-  int merge_kernel_size = 2;
-  int temporal_merge_kernel_size = 4;
+  int32_t patch_size = 14;
+  int32_t merge_kernel_size = 2;
+  int32_t temporal_merge_kernel_size = 4;
 
-  int in_patch_limit = 16384;
-  int in_patch_limit_each_frame = -1;
-  int patch_limit_on_one_side = 512;
-  int in_patch_limit_video = -1;
-  int fixed_output_tokens = -1;
+  int32_t in_patch_limit = 16384;
+  int32_t in_patch_limit_each_frame = -1;
+  int32_t patch_limit_on_one_side = 512;
+  int32_t in_patch_limit_video = -1;
+  int32_t fixed_output_tokens = -1;
 
   double sample_fps = 2.0;
-  int max_num_frames_each_video = 128;
-  int min_frames = 4;
+  int32_t max_num_frames_each_video = 128;
+  int32_t min_frames = 4;
   std::string timestamp_mode = "hh:mm:ss.fff";
 
   std::vector<double> image_mean = {0.5, 0.5, 0.5};
@@ -54,7 +55,7 @@ struct KimiK25MediaConfig {
   bool do_convert_rgb = true;
   bool do_normalize = true;
   bool do_resize = true;
-  int resample = 3;
+  int32_t resample = 3;
 };
 
 class KimiK25ImageProcessor : public ImageProcessor {

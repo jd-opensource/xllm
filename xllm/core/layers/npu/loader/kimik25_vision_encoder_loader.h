@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <vector>
 
@@ -39,11 +40,11 @@ class Kimik25VisionEncoderLoader : public BaseLoader {
   std::string model_name_;
   at::Tensor cu_seqlen_;
   at::Tensor at_placeholder_;
-  std::vector<torch::Tensor> qkv_weight;
-  std::vector<torch::Tensor> qkv_bias;
-  int device_id_;
-  int encode_param_rank;
-  int encode_param_worldSize;
+  std::vector<torch::Tensor> qkv_weight_;
+  std::vector<torch::Tensor> qkv_bias_;
+  int32_t device_id_;
+  int32_t encode_param_rank_;
+  int32_t encode_param_worldSize_;
 };
 
 }  // namespace layer
