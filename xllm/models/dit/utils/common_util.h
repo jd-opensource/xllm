@@ -13,11 +13,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #pragma once
-
 #include <torch/torch.h>
 
-#include "models/dit/flowmatch_euler_discrete_scheduler.h"
+#include <opencv2/opencv.hpp>
 
+#include "models/dit/flowmatch_euler_discrete_scheduler.h"
 namespace xllm::dit {
 
 float calculate_shift(int64_t image_seq_len,
@@ -86,16 +86,20 @@ torch::Tensor randn_tensor(const std::vector<int64_t>& shape,
 
 class VAEImageProcessorImpl : public torch::nn::Module {
  public:
-  explicit VAEImageProcessorImpl(ModelContext context,
-                                 bool do_resize = true,
-                                 bool do_normalize = true,
-                                 bool do_binarize = false,
-                                 bool do_convert_rgb = false,
-                                 bool do_convert_grayscale = false,
-                                 int64_t latent_channels = 4) {
+  explicit VAEImageProcessorImpl(
+      ModelContext context,
+      bool do_resize = true,
+      bool do_normalize = true,
+      bool do_binarize = false,
+      bool do_convert_rgb = false,
+      bool do_convert_grayscale = false,
+      int64_t latent_channels = 4,
+      std::optional<int64_t> scale_factor = std::nullopt) {
     const auto& model_args = context.get_model_args();
     dtype_ = context.get_tensor_options().dtype().toScalarType();
-    scale_factor_ = 1 << model_args.block_out_channels().size();
+    scale_factor_ = scale_factor.has_value()
+                        ? scale_factor.value()
+                        : 1 << model_args.block_out_channels().size();
     latent_channels_ = latent_channels;
     do_resize_ = do_resize;
     do_normalize_ = do_normalize;
@@ -150,7 +154,7 @@ class VAEImageProcessorImpl : public torch::nn::Module {
     auto [target_h, target_w] =
         get_default_height_width(processed, height, width);
     if (do_resize_) {
-      processed = resize(processed, target_h, target_w);
+      processed = lanczo_resize(processed, target_h, target_w);
     }
 
     if (do_normalize_) {
@@ -223,6 +227,40 @@ class VAEImageProcessorImpl : public torch::nn::Module {
         torch::nn::functional::InterpolateFuncOptions()
             .size(std::vector<int64_t>{target_height, target_width})
             .mode(torch::kNearest));
+  }
+
+  // This function is used to align with the PIL Image.resize function
+  // currently, the diffusers uses LANCZO mode to resize the pil image inputs,
+  // but there is not a implementation for pytorch/libtorch, use
+  // torch::nn::functional::Interpolate for torch tensor may cause a precision
+  // problem, diffusers repo also have the same problem when using torch tensor
+  // as input. to keep the same with PIL Image, we borrow the lanczo function
+  // from opencv library
+  torch::Tensor lanczo_resize(torch::Tensor image, int target_h, int target_w) {
+    auto options = image.options();
+    image = image.cpu().to(torch::kFloat32);
+
+    bool is_batch = (image.dim() == 4);
+    int c = is_batch ? image.size(1) : image.size(0);
+    int h = is_batch ? image.size(2) : image.size(1);
+    int w = is_batch ? image.size(3) : image.size(2);
+
+    cv::Mat mat(h, w, CV_32FC(c));
+    float* data = image.data_ptr<float>();
+    memcpy(mat.data, data, c * h * w * sizeof(float));
+
+    cv::Mat resized;
+    cv::resize(
+        mat, resized, cv::Size(target_w, target_h), 0, 0, cv::INTER_LANCZOS4);
+
+    torch::Tensor result =
+        torch::empty({c, target_h, target_w}, image.options());
+    memcpy(result.data_ptr<float>(),
+           resized.data,
+           c * target_h * target_w * sizeof(float));
+    result = result.to(options);
+
+    return is_batch ? result.unsqueeze(0) : result;
   }
 
  private:
