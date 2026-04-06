@@ -58,8 +58,7 @@ std::vector<int64_t> select_rec_item_ids(const SequenceOutput& output) {
                               static_cast<uint32_t>(output.index)
                         : std::random_device{}();
     std::mt19937 generator(seed);
-    std::shuffle(
-        selected_item_ids.begin(), selected_item_ids.end(), generator);
+    std::shuffle(selected_item_ids.begin(), selected_item_ids.end(), generator);
     selected_item_ids.resize(each_threshold);
   }
 
@@ -216,11 +215,48 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
   response->choices.entries_size = output.outputs.size();
   response->choices.entries = new XLLM_Choice[response->choices.entries_size]();
   CHECK(nullptr != response->choices.entries);
+  if (inference_type == InferenceType::REC_COMPLETIONS ||
+      inference_type == InferenceType::REC_CHAT_COMPLETIONS) {
+    response->rec_outputs.entries_size = output.outputs.size();
+    response->rec_outputs.entries =
+        new XLLM_RecOutput[response->rec_outputs.entries_size]();
+    CHECK(nullptr != response->rec_outputs.entries);
+  }
+
+  std::vector<std::vector<int64_t>> selected_item_groups;
+  int32_t total_item_count = 0;
+  const int32_t total_threshold = FLAGS_total_conversion_threshold;
+  if ((inference_type == InferenceType::REC_COMPLETIONS ||
+       inference_type == InferenceType::REC_CHAT_COMPLETIONS) &&
+      FLAGS_enable_convert_tokens_to_item) {
+    selected_item_groups.reserve(output.outputs.size());
+    for (const auto& seq_output : output.outputs) {
+      std::vector<int64_t> selected_item_ids = select_rec_item_ids(seq_output);
+      if (total_threshold > 0 &&
+          total_item_count + static_cast<int32_t>(selected_item_ids.size()) >
+              total_threshold) {
+        const int32_t remaining_count =
+            std::max(total_threshold - total_item_count, 0);
+        if (remaining_count == 0) {
+          selected_item_ids.clear();
+        } else {
+          selected_item_ids.resize(remaining_count);
+        }
+      }
+      total_item_count += static_cast<int32_t>(selected_item_ids.size());
+      selected_item_groups.emplace_back(std::move(selected_item_ids));
+    }
+  }
 
   for (int i = 0; i < output.outputs.size(); i++) {
     const auto& seq_output = output.outputs[i];
     XLLM_Choice& choice = response->choices.entries[i];
     choice.index = seq_output.index;
+    XLLM_RecOutput* rec_output = nullptr;
+    if (response->rec_outputs.entries != nullptr) {
+      rec_output = &response->rec_outputs.entries[i];
+      rec_output->index = seq_output.index;
+    }
 
     if (inference_type == InferenceType::LLM_COMPLETIONS ||
         inference_type == InferenceType::REC_COMPLETIONS) {
@@ -258,14 +294,14 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
 
     if ((inference_type == InferenceType::REC_COMPLETIONS ||
          inference_type == InferenceType::REC_CHAT_COMPLETIONS) &&
-        FLAGS_enable_convert_tokens_to_item) {
-      std::vector<int64_t> selected_item_ids = select_rec_item_ids(seq_output);
+        FLAGS_enable_convert_tokens_to_item && rec_output != nullptr) {
+      const std::vector<int64_t>& selected_item_ids = selected_item_groups[i];
       if (!selected_item_ids.empty()) {
-        choice.item_ids_size = selected_item_ids.size();
-        choice.item_ids = new int64_t[choice.item_ids_size];
-        CHECK(nullptr != choice.item_ids);
-        for (size_t j = 0; j < choice.item_ids_size; ++j) {
-          choice.item_ids[j] = selected_item_ids[j];
+        rec_output->item_ids_size = selected_item_ids.size();
+        rec_output->item_ids = new int64_t[rec_output->item_ids_size];
+        CHECK(nullptr != rec_output->item_ids);
+        for (size_t j = 0; j < rec_output->item_ids_size; ++j) {
+          rec_output->item_ids[j] = selected_item_ids[j];
         }
       }
     }
@@ -273,17 +309,18 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
     if ((inference_type == InferenceType::REC_COMPLETIONS ||
          inference_type == InferenceType::REC_CHAT_COMPLETIONS) &&
         FLAGS_enable_rec_logprobs_output &&
-        !seq_output.token_ids_logprobs.empty()) {
-      choice.rec_token_logprobs_size = seq_output.token_ids_logprobs.size();
-      choice.rec_token_logprobs =
-          new float[choice.rec_token_logprobs_size];
-      CHECK(nullptr != choice.rec_token_logprobs);
-      for (size_t j = 0; j < choice.rec_token_logprobs_size; ++j) {
+        !seq_output.token_ids_logprobs.empty() && rec_output != nullptr) {
+      rec_output->rec_token_logprobs_size =
+          seq_output.token_ids_logprobs.size();
+      rec_output->rec_token_logprobs =
+          new float[rec_output->rec_token_logprobs_size];
+      CHECK(nullptr != rec_output->rec_token_logprobs);
+      for (size_t j = 0; j < rec_output->rec_token_logprobs_size; ++j) {
         if (seq_output.token_ids_logprobs[j].has_value()) {
-          choice.rec_token_logprobs[j] =
+          rec_output->rec_token_logprobs[j] =
               seq_output.token_ids_logprobs[j].value();
         } else {
-          choice.rec_token_logprobs[j] = 0.0f;
+          rec_output->rec_token_logprobs[j] = 0.0f;
         }
       }
     }
@@ -347,6 +384,11 @@ XLLM_Response* handle_inference_request(
   xllm::RequestParams xllm_request_params;
   transfer_request_params(inference_type, request_params, &xllm_request_params);
   xllm_request_params.request_id = request_id;
+  if constexpr (std::is_same_v<HandlerType, XLLM_REC_Handler>) {
+    if (FLAGS_enable_rec_logprobs_output) {
+      xllm_request_params.logprobs = true;
+    }
+  }
 
   const int64_t created_time = absl::ToUnixSeconds(absl::Now());
 
@@ -488,18 +530,6 @@ void xllm_free_response(XLLM_Response* resp) {
         choice.token_size = 0;
       }
 
-      if (nullptr != choice.item_ids) {
-        delete[] choice.item_ids;
-        choice.item_ids = nullptr;
-        choice.item_ids_size = 0;
-      }
-
-      if (nullptr != choice.rec_token_logprobs) {
-        delete[] choice.rec_token_logprobs;
-        choice.rec_token_logprobs = nullptr;
-        choice.rec_token_logprobs_size = 0;
-      }
-
       if (nullptr != choice.logprobs.entries) {
         delete[] choice.logprobs.entries;
         choice.logprobs.entries = nullptr;
@@ -512,6 +542,24 @@ void xllm_free_response(XLLM_Response* resp) {
   }
 
   resp->choices.entries_size = 0;
+  if (nullptr != resp->rec_outputs.entries) {
+    for (size_t i = 0; i < resp->rec_outputs.entries_size; ++i) {
+      XLLM_RecOutput& rec_output = resp->rec_outputs.entries[i];
+      if (nullptr != rec_output.item_ids) {
+        delete[] rec_output.item_ids;
+        rec_output.item_ids = nullptr;
+        rec_output.item_ids_size = 0;
+      }
+      if (nullptr != rec_output.rec_token_logprobs) {
+        delete[] rec_output.rec_token_logprobs;
+        rec_output.rec_token_logprobs = nullptr;
+        rec_output.rec_token_logprobs_size = 0;
+      }
+    }
+    delete[] resp->rec_outputs.entries;
+    resp->rec_outputs.entries = nullptr;
+  }
+  resp->rec_outputs.entries_size = 0;
   delete resp;
 
   return;

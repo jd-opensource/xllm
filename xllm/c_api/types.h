@@ -305,18 +305,6 @@ typedef struct XLLM_CAPI_EXPORT XLLM_Choice {
   /** Generated token ids size */
   size_t token_size;
 
-  /** OneRec selected item ids */
-  int64_t* item_ids;
-
-  /** Number of selected OneRec item ids */
-  size_t item_ids_size;
-
-  /** Token-aligned REC/OneRec logprobs */
-  float* rec_token_logprobs;
-
-  /** Number of entries in rec_token_logprobs */
-  size_t rec_token_logprobs_size;
-
   /** Token log probabilities */
   XLLM_LogProbs logprobs;
 
@@ -334,6 +322,37 @@ typedef struct XLLM_CAPI_EXPORT XLLM_Choices {
   /** Number of entries in the choices array */
   size_t entries_size;
 } XLLM_Choices;
+
+/**
+ * @brief REC/OneRec specific output extension aligned by choice index
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_RecOutput {
+  /** Choice index this REC extension belongs to */
+  uint32_t index;
+
+  /** OneRec selected item ids */
+  int64_t* item_ids;
+
+  /** Number of selected OneRec item ids */
+  size_t item_ids_size;
+
+  /** Token-aligned REC/OneRec logprobs */
+  float* rec_token_logprobs;
+
+  /** Number of entries in rec_token_logprobs */
+  size_t rec_token_logprobs_size;
+} XLLM_RecOutput;
+
+/**
+ * @brief List of REC/OneRec specific output extensions
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_RecOutputs {
+  /** Pointer to array of REC output entries */
+  XLLM_RecOutput* entries;
+
+  /** Number of entries in the REC output array */
+  size_t entries_size;
+} XLLM_RecOutputs;
 
 #define XLLM_ERROR_INFO_MAX_LEN 512
 
@@ -364,6 +383,9 @@ typedef struct XLLM_CAPI_EXPORT XLLM_Response {
 
   /** Token usage statistics for the request */
   XLLM_Usage usage;
+
+  /** REC/OneRec specific response extensions */
+  XLLM_RecOutputs rec_outputs;
 } XLLM_Response;
 
 /**
