@@ -157,14 +157,26 @@ TEST(MooncakeTransferEngineTest, BuildEntriesForKeyAndIndex) {
   local_info.layers.resize(1);
   remote_info.layers.resize(1);
 
-  local_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x1000, 0x400, 0x40);
-  local_info.layers[0].index =
-      mk_desc(0, proto::BUFFER_KIND_INDEX, 0x3000, 0x80, 0x08);
-  remote_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x5000, 0x400, 0x40);
-  remote_info.layers[0].index =
-      mk_desc(0, proto::BUFFER_KIND_INDEX, 0x7000, 0x80, 0x08);
+  local_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                     /*kind=*/proto::BUFFER_KIND_KEY,
+                                     /*addr=*/0x1000,
+                                     /*len=*/0x400,
+                                     /*bytes_per_block=*/0x40);
+  local_info.layers[0].index = mk_desc(/*layer_id=*/0,
+                                       /*kind=*/proto::BUFFER_KIND_INDEX,
+                                       /*addr=*/0x3000,
+                                       /*len=*/0x80,
+                                       /*bytes_per_block=*/0x08);
+  remote_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                      /*kind=*/proto::BUFFER_KIND_KEY,
+                                      /*addr=*/0x5000,
+                                      /*len=*/0x400,
+                                      /*bytes_per_block=*/0x40);
+  remote_info.layers[0].index = mk_desc(/*layer_id=*/0,
+                                        /*kind=*/proto::BUFFER_KIND_INDEX,
+                                        /*addr=*/0x7000,
+                                        /*len=*/0x80,
+                                        /*bytes_per_block=*/0x08);
 
   std::vector<TransferRequest> entries;
   std::string err;
@@ -197,12 +209,21 @@ TEST(MooncakeTransferEngineTest, RejectMismatchedIndexDesc) {
   local_info.layers.resize(1);
   remote_info.layers.resize(1);
 
-  local_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x1000, 0x400, 0x40);
-  local_info.layers[0].index =
-      mk_desc(0, proto::BUFFER_KIND_INDEX, 0x3000, 0x80, 0x08);
-  remote_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x5000, 0x400, 0x40);
+  local_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                     /*kind=*/proto::BUFFER_KIND_KEY,
+                                     /*addr=*/0x1000,
+                                     /*len=*/0x400,
+                                     /*bytes_per_block=*/0x40);
+  local_info.layers[0].index = mk_desc(/*layer_id=*/0,
+                                       /*kind=*/proto::BUFFER_KIND_INDEX,
+                                       /*addr=*/0x3000,
+                                       /*len=*/0x80,
+                                       /*bytes_per_block=*/0x08);
+  remote_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                      /*kind=*/proto::BUFFER_KIND_KEY,
+                                      /*addr=*/0x5000,
+                                      /*len=*/0x400,
+                                      /*bytes_per_block=*/0x40);
 
   std::string err;
   EXPECT_FALSE(
@@ -218,10 +239,16 @@ TEST(MooncakeTransferEngineTest, AllowCapMismatchWithSameLayout) {
   local_info.layers.resize(1);
   remote_info.layers.resize(1);
 
-  local_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x1000, 0x400, 0x40);
-  remote_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x5000, 0x3c0, 0x40);
+  local_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                     /*kind=*/proto::BUFFER_KIND_KEY,
+                                     /*addr=*/0x1000,
+                                     /*len=*/0x400,
+                                     /*bytes_per_block=*/0x40);
+  remote_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                      /*kind=*/proto::BUFFER_KIND_KEY,
+                                      /*addr=*/0x5000,
+                                      /*len=*/0x3c0,
+                                      /*bytes_per_block=*/0x40);
 
   std::string err;
   EXPECT_TRUE(
@@ -237,10 +264,16 @@ TEST(MooncakeTransferEngineTest, RejectEntryBounds) {
   local_info.layers.resize(1);
   remote_info.layers.resize(1);
 
-  local_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x1000, 0x80, 0x40);
-  remote_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x5000, 0x80, 0x40);
+  local_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                     /*kind=*/proto::BUFFER_KIND_KEY,
+                                     /*addr=*/0x1000,
+                                     /*len=*/0x80,
+                                     /*bytes_per_block=*/0x40);
+  remote_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                      /*kind=*/proto::BUFFER_KIND_KEY,
+                                      /*addr=*/0x5000,
+                                      /*len=*/0x80,
+                                      /*bytes_per_block=*/0x40);
 
   std::vector<TransferRequest> entries;
   std::string err;
@@ -266,10 +299,16 @@ TEST(MooncakeTransferEngineTest, BuildEntriesWithAsymCap) {
   local_info.layers.resize(1);
   remote_info.layers.resize(1);
 
-  local_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x1000, 0x400, 0x40);
-  remote_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x5000, 0x100, 0x40);
+  local_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                     /*kind=*/proto::BUFFER_KIND_KEY,
+                                     /*addr=*/0x1000,
+                                     /*len=*/0x400,
+                                     /*bytes_per_block=*/0x40);
+  remote_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                      /*kind=*/proto::BUFFER_KIND_KEY,
+                                      /*addr=*/0x5000,
+                                      /*len=*/0x100,
+                                      /*bytes_per_block=*/0x40);
 
   std::vector<TransferRequest> entries;
   std::string err;
@@ -300,10 +339,16 @@ TEST(MooncakeTransferEngineTest, RejectRemoteRangeOverflow) {
   local_info.layers.resize(1);
   remote_info.layers.resize(1);
 
-  local_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x1000, 0x400, 0x40);
-  remote_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x5000, 0x100, 0x40);
+  local_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                     /*kind=*/proto::BUFFER_KIND_KEY,
+                                     /*addr=*/0x1000,
+                                     /*len=*/0x400,
+                                     /*bytes_per_block=*/0x40);
+  remote_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                      /*kind=*/proto::BUFFER_KIND_KEY,
+                                      /*addr=*/0x5000,
+                                      /*len=*/0x100,
+                                      /*bytes_per_block=*/0x40);
 
   std::vector<TransferRequest> entries;
   std::string err;
@@ -329,18 +374,36 @@ TEST(MooncakeTransferEngineTest, BuildEntriesForMultiLayer) {
   local_info.layers.resize(2);
   remote_info.layers.resize(2);
 
-  local_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x1000, 0x400, 0x40);
-  local_info.layers[1].key =
-      mk_desc(1, proto::BUFFER_KIND_KEY, 0x2000, 0x400, 0x40);
-  local_info.layers[1].index =
-      mk_desc(1, proto::BUFFER_KIND_INDEX, 0x3000, 0x80, 0x08);
-  remote_info.layers[0].key =
-      mk_desc(0, proto::BUFFER_KIND_KEY, 0x5000, 0x400, 0x40);
-  remote_info.layers[1].key =
-      mk_desc(1, proto::BUFFER_KIND_KEY, 0x6000, 0x400, 0x40);
-  remote_info.layers[1].index =
-      mk_desc(1, proto::BUFFER_KIND_INDEX, 0x7000, 0x80, 0x08);
+  local_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                     /*kind=*/proto::BUFFER_KIND_KEY,
+                                     /*addr=*/0x1000,
+                                     /*len=*/0x400,
+                                     /*bytes_per_block=*/0x40);
+  local_info.layers[1].key = mk_desc(/*layer_id=*/1,
+                                     /*kind=*/proto::BUFFER_KIND_KEY,
+                                     /*addr=*/0x2000,
+                                     /*len=*/0x400,
+                                     /*bytes_per_block=*/0x40);
+  local_info.layers[1].index = mk_desc(/*layer_id=*/1,
+                                       /*kind=*/proto::BUFFER_KIND_INDEX,
+                                       /*addr=*/0x3000,
+                                       /*len=*/0x80,
+                                       /*bytes_per_block=*/0x08);
+  remote_info.layers[0].key = mk_desc(/*layer_id=*/0,
+                                      /*kind=*/proto::BUFFER_KIND_KEY,
+                                      /*addr=*/0x5000,
+                                      /*len=*/0x400,
+                                      /*bytes_per_block=*/0x40);
+  remote_info.layers[1].key = mk_desc(/*layer_id=*/1,
+                                      /*kind=*/proto::BUFFER_KIND_KEY,
+                                      /*addr=*/0x6000,
+                                      /*len=*/0x400,
+                                      /*bytes_per_block=*/0x40);
+  remote_info.layers[1].index = mk_desc(/*layer_id=*/1,
+                                        /*kind=*/proto::BUFFER_KIND_INDEX,
+                                        /*addr=*/0x7000,
+                                        /*len=*/0x80,
+                                        /*bytes_per_block=*/0x08);
 
   std::vector<TransferRequest> entries;
   std::string err;

@@ -487,7 +487,7 @@ bool MooncakeTransferEngine::register_memory(std::vector<void*> addrs,
   std::vector<BufferEntry> buffers;
   buffers.reserve(num);
   for (size_t i = 0; i < num; i++) {
-    buffers.push_back(BufferEntry{addrs[i], lens[i]});
+    buffers.emplace_back(addrs[i], lens[i]);
   }
 
   int ret =
@@ -530,10 +530,8 @@ bool MooncakeTransferEngine::register_memory(
   std::vector<BufferEntry> entries;
   entries.reserve(buffers.size());
   for (const auto& buffer_desc : mem_info.buffers) {
-    entries.push_back(BufferEntry{
-        reinterpret_cast<void*>(buffer_desc.addr),
-        static_cast<size_t>(buffer_desc.len),
-    });
+    entries.emplace_back(reinterpret_cast<void*>(buffer_desc.addr),
+                         static_cast<size_t>(buffer_desc.len));
   }
 
   int ret =
@@ -1146,7 +1144,7 @@ bool MooncakeTransferEngine::build_entries(
                                    err)) {
           return false;
         }
-        TransferRequest entry;
+        TransferRequest& entry = entries->emplace_back();
         entry.opcode = opcode;
         entry.length = len;
         entry.source = static_cast<void*>(local_base + local_bias);
@@ -1154,7 +1152,6 @@ bool MooncakeTransferEngine::build_entries(
         entry.target_offset =
             reinterpret_cast<uint64_t>(remote_base + remote_bias);
         entry.advise_retry_cnt = 0;
-        entries->push_back(entry);
       }
     }
   }
@@ -1198,8 +1195,10 @@ bool MooncakeTransferEngine::move_memory_by_global_offsets(
     return false;
   }
 
-  char* local_base = (char*)(local_segment_desc->buffers[0].addr);
-  char* remote_base = (char*)(remote_segment_desc->buffers[0].addr);
+  char* local_base =
+      reinterpret_cast<char*>(local_segment_desc->buffers[0].addr);
+  char* remote_base =
+      reinterpret_cast<char*>(remote_segment_desc->buffers[0].addr);
 
   TransferRequest::OpCode opcode;
   if (move_opcode == MoveOpcode::WRITE) {
@@ -1216,14 +1215,14 @@ bool MooncakeTransferEngine::move_memory_by_global_offsets(
         move_opcode == MoveOpcode::READ ? dst_offsets[i] : src_offsets[i];
     const uint64_t remote_offset =
         move_opcode == MoveOpcode::READ ? src_offsets[i] : dst_offsets[i];
-    TransferRequest entry;
+    TransferRequest& entry = entries.emplace_back();
     entry.opcode = opcode;
     entry.length = transfer_size;
-    entry.source = (void*)(local_base + local_offset);
+    entry.source = static_cast<void*>(local_base + local_offset);
     entry.target_id = remote_handle;
-    entry.target_offset = (uint64_t)(remote_base + remote_offset);
+    entry.target_offset =
+        reinterpret_cast<uint64_t>(remote_base + remote_offset);
     entry.advise_retry_cnt = 0;
-    entries.push_back(entry);
   }
 
   auto batch_size = entries.size();
