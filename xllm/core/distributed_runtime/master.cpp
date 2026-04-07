@@ -135,6 +135,7 @@ Master::Master(const Options& options, EngineType type)
   print_startup_banner(model_path, options_.backend(), options_.node_rank());
   LOG(INFO) << "Master init options: " << options_.to_string();
   FLAGS_enable_prefill_sp = options_.enable_prefill_sp();
+  FLAGS_enable_block_copy_kernel = options_.enable_block_copy_kernel();
 
   // Allow brpc receive SIGTREM and SIGINT signal.
   brpc::FLAGS_graceful_quit_on_sigterm = true;
@@ -206,6 +207,7 @@ Master::Master(const Options& options, EngineType type)
         .enable_shm(options_.enable_shm())
         .input_shm_size(options_.input_shm_size() * 1024 * 1024)
         .output_shm_size(options_.output_shm_size() * 1024 * 1024)
+        .enable_block_copy_kernel(options_.enable_block_copy_kernel())
         .is_local(options_.is_local())
         .enable_schedule_overlap(options_.enable_schedule_overlap())
         .master_node_addr(options.master_node_addr())
@@ -278,6 +280,8 @@ Master::Master(const Options& options, EngineType type)
         .enable_shm(options_.enable_shm())
         .input_shm_size(options_.input_shm_size() * 1024 * 1024)
         .output_shm_size(options_.output_shm_size() * 1024 * 1024)
+        .enable_block_copy_kernel(options_.enable_block_copy_kernel())
+        .enable_rec_fast_sampler(options_.enable_rec_fast_sampler())
         .is_local(options_.is_local());
 
     if (options_.device_ip().has_value()) {
@@ -337,7 +341,9 @@ Master::Master(const Options& options, EngineType type)
         .enable_shm(options_.enable_shm())
         .input_shm_size(options_.input_shm_size() * 1024 * 1024)
         .output_shm_size(options_.output_shm_size() * 1024 * 1024)
+        .enable_block_copy_kernel(options_.enable_block_copy_kernel())
         .is_local(options_.is_local())
+        .enable_rec_fast_sampler(options_.enable_rec_fast_sampler())
         .server_idx(options_.server_idx())
         .kv_cache_dtype(options_.kv_cache_dtype())
         .model_id(options_.model_id());
@@ -365,6 +371,7 @@ Master::Master(const Options& options, EngineType type)
         .enable_offline_inference(options_.enable_offline_inference())
         .spawn_worker_path(options_.spawn_worker_path())
         .enable_shm(options_.enable_shm())
+        .enable_block_copy_kernel(options_.enable_block_copy_kernel())
         .is_local(options_.is_local())
         .enable_schedule_overlap(options_.enable_schedule_overlap())
         .master_node_addr(options_.master_node_addr())
@@ -375,6 +382,7 @@ Master::Master(const Options& options, EngineType type)
         .enable_prefill_sp(options_.enable_prefill_sp())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
         .beam_width(options_.beam_width())
+        .enable_rec_fast_sampler(options_.enable_rec_fast_sampler())
         .max_tokens_per_batch(options_.max_tokens_per_batch())
         .enable_graph(options_.enable_graph())
         .max_tokens_per_chunk_for_prefill(
@@ -399,6 +407,7 @@ Master::Master(const Options& options, EngineType type)
         .enable_shm(options_.enable_shm())
         .input_shm_size(options_.input_shm_size() * 1024 * 1024)
         .output_shm_size(options_.output_shm_size() * 1024 * 1024)
+        .enable_block_copy_kernel(options_.enable_block_copy_kernel())
         .is_local(options_.is_local())
         .node_rank(options_.node_rank())
         .enable_schedule_overlap(options_.enable_schedule_overlap())

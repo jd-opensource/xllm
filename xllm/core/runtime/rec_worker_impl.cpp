@@ -198,7 +198,8 @@ std::optional<ForwardOutput> RecWorkerImpl::RecWorkPipeline::step(
 
     // beam search kernel
     BeamSearchOutput beam_search_output;
-    if (sampling_params.use_beam_search && input.acc_logprob.defined() &&
+    if (runtime_.worker.beam_searcher_ != nullptr &&
+        sampling_params.use_beam_search && input.acc_logprob.defined() &&
         input.acc_logprob.numel() > 0) {
       beam_search_output =
           runtime_.worker.beam_searcher_->forward(input.acc_logprob,
@@ -479,7 +480,8 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::LlmRecMultiRoundPipeline(
     RecPipelineRuntime& runtime)
     : RecWorkPipeline(runtime),
       rec_sampler_(std::make_unique<RecSampler>(
-          RecPipelineType::kLlmRecMultiRoundPipeline)) {
+          RecPipelineType::kLlmRecMultiRoundPipeline,
+          runtime.worker.options_.enable_rec_fast_sampler())) {
   max_seqs_per_batch_ = runtime_.worker.options_.max_seqs_per_batch();
   max_tokens_per_batch_ = runtime_.worker.options_.max_tokens_per_batch();
   max_token_per_req_ = max_seqs_per_batch_ > 0
@@ -1488,7 +1490,13 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
 
   // Complete other initialization (EPLB, BeamSearcher, etc.)
   if (FLAGS_enable_beam_search_kernel) {
+#if defined(USE_NPU)
     beam_searcher_ = std::make_unique<BeamSearcher>();
+#else
+    LOG(WARNING) << "enable_beam_search_kernel is enabled, but BeamSearcher "
+                    "is only implemented on NPU. Falling back to "
+                    "host-side beam-search processing.";
+#endif
   }
 
   if (FLAGS_enable_eplb) {

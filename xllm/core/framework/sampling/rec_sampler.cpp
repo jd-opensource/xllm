@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cstdlib>
+#include <tuple>
 
 #include "common/global_flags.h"
 #include "logits_utils.h"
@@ -42,12 +43,11 @@ static inline bool use_air_log_softmax_env() {
   return enabled;
 }
 
-// Check if fast path sampling can be used for multi-round pipeline.
-static inline bool can_use_fast_path(const SamplingParameters& params) {
-  return params.use_beam_search && params.logprobs &&
-         FLAGS_enable_rec_fast_sampler && params.max_top_logprobs > 0 &&
-         !params.top_p.defined() && !FLAGS_enable_qwen3_reranker &&
-         FLAGS_max_decode_rounds > 0;
+static inline bool can_use_fast_path(const SamplingParameters& params,
+                                     bool enable_fast_path) {
+  return params.use_beam_search && params.logprobs && enable_fast_path &&
+         params.max_top_logprobs > 0 && !params.top_p.defined() &&
+         !FLAGS_enable_qwen3_reranker;
 }
 
 static inline torch::Tensor log_softmax_last_dim(
@@ -73,25 +73,30 @@ static inline torch::Tensor log_softmax_last_dim(
 
 }  // namespace
 
-RecSampler::RecSampler(RecPipelineType pipeline_type)
+RecSampler::RecSampler(RecPipelineType pipeline_type, bool enable_fast_path)
     : sampler_(std::make_unique<Sampler>()),
-      strategy_(create_sampling_strategy(pipeline_type, *sampler_)) {
-  LOG(INFO) << "RecSampler initialized with Sampler delegate.";
+      strategy_(
+          create_sampling_strategy(pipeline_type, *sampler_, enable_fast_path)),
+      enable_fast_path_(enable_fast_path) {
+  LOG(INFO) << "RecSampler initialized with Sampler delegate, fast_path="
+            << enable_fast_path;
 }
+
+RecSampler::~RecSampler() = default;
 
 SampleOutput RecSampler::forward(torch::Tensor& logits,
                                  const SamplingParameters& params) const {
   return strategy_->forward(logits, params);
 }
 
-// --- SamplingStrategy factory ---
-
 std::unique_ptr<RecSampler::SamplingStrategy>
 RecSampler::create_sampling_strategy(RecPipelineType type,
-                                     const Sampler& sampler) {
+                                     const Sampler& sampler,
+                                     bool enable_fast_path) {
   switch (type) {
     case RecPipelineType::kLlmRecMultiRoundPipeline:
-      return std::make_unique<MultiRoundFastPathSamplingStrategy>(sampler);
+      return std::make_unique<MultiRoundFastPathSamplingStrategy>(
+          sampler, enable_fast_path);
     case RecPipelineType::kLlmRecDefault:
     case RecPipelineType::kLlmRecWithMmData:
     case RecPipelineType::kOneRecDefault:
@@ -101,8 +106,6 @@ RecSampler::create_sampling_strategy(RecPipelineType type,
       __builtin_unreachable();
   }
 }
-
-// --- DefaultSamplingStrategy ---
 
 RecSampler::DefaultSamplingStrategy::DefaultSamplingStrategy(
     const Sampler& sampler)
@@ -114,16 +117,15 @@ SampleOutput RecSampler::DefaultSamplingStrategy::forward(
   return sampler_.forward(logits, params);
 }
 
-// --- MultiRoundFastPathSamplingStrategy ---
-
 RecSampler::MultiRoundFastPathSamplingStrategy::
-    MultiRoundFastPathSamplingStrategy(const Sampler& sampler)
-    : sampler_(sampler) {}
+    MultiRoundFastPathSamplingStrategy(const Sampler& sampler,
+                                       bool enable_fast_path)
+    : sampler_(sampler), enable_fast_path_(enable_fast_path) {}
 
 SampleOutput RecSampler::MultiRoundFastPathSamplingStrategy::forward(
     torch::Tensor& logits,
     const SamplingParameters& params) const {
-  const bool use_fast_path = can_use_fast_path(params);
+  const bool use_fast_path = can_use_fast_path(params, enable_fast_path_);
 
   if (!use_fast_path) {
     return sampler_.forward(logits, params);
@@ -171,7 +173,18 @@ SampleOutput RecSampler::MultiRoundFastPathSamplingStrategy::forward(
     temperatures = temperatures.to(torch::kFloat32);
   }
 
+#if defined(USE_CUDA)
+  if (sample_logits.is_cuda()) {
+    std::tie(output.next_tokens, output.logprobs, output.top_logprobs) =
+        kernel::cuda::rec_topk_postprocess(
+            topk_values, output.top_tokens, temperatures);
+    return output;
+  }
+#endif
+
   output.top_logprobs = log_softmax_last_dim(topk_values, temperatures);
+  output.next_tokens = output.top_tokens.index({torch::indexing::Slice(), 0});
+  output.logprobs = output.top_logprobs.index({torch::indexing::Slice(), 0});
   return output;
 }
 

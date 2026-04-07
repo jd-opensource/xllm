@@ -34,6 +34,8 @@ class SpawnWorkerServer final {
                              int num_decoding_tokens,
                              int block_size,
                              bool enable_shm,
+                             bool enable_rec_fast_sampler,
+                             bool enable_block_copy_kernel,
                              uint64_t input_shm_size,
                              uint64_t output_shm_size,
                              bool is_local,

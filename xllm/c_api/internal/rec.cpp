@@ -147,6 +147,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     // Keep dual-source settings aligned with the FLAGS_* values above.
     options.enable_graph(FLAGS_enable_graph)
         .beam_width(FLAGS_beam_width)
+        .enable_rec_fast_sampler(FLAGS_enable_rec_fast_sampler)
         .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency);
 
 #if !defined(USE_NPU) && !defined(USE_CUDA)

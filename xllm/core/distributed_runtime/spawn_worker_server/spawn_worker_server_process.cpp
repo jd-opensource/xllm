@@ -29,6 +29,8 @@ limitations under the License.
 // @num_decoding_tokens
 // @block_size
 // @enable_shm
+// @enable_rec_fast_sampler
+// @enable_block_copy_kernel
 // @is_local
 // @enable_prefill_sp
 // @task_type
@@ -37,9 +39,9 @@ limitations under the License.
 // @output_shm_size
 // @communication_backend
 int main(int argc, char* argv[]) {
-  if (argc < 16) {
+  if (argc < 18) {
     LOG(ERROR)
-        << "Spawn worker process receive wrong args. Need 16 args, receive "
+        << "Spawn worker process receive wrong args. Need 18 args, receive "
         << argc;
     return 1;
   }
@@ -52,13 +54,15 @@ int main(int argc, char* argv[]) {
   int num_decoding_tokens = atoi(argv[6]);
   int block_size = atoi(argv[7]);
   int enable_shm = atoi(argv[8]);
-  int is_local = atoi(argv[9]);
-  int enable_prefill_sp = atoi(argv[10]);
-  std::string task_type = std::string(argv[11]);
-  std::string worker_type = std::string(argv[12]);
-  uint64_t input_shm_size = atoll(argv[13]);
-  uint64_t output_shm_size = atoll(argv[14]);
-  std::string communication_backend = std::string(argv[15]);
+  int enable_rec_fast_sampler = atoi(argv[9]);
+  int enable_block_copy_kernel = atoi(argv[10]);
+  int is_local = atoi(argv[11]);
+  int enable_prefill_sp = atoi(argv[12]);
+  std::string task_type = std::string(argv[13]);
+  std::string worker_type = std::string(argv[14]);
+  uint64_t input_shm_size = atoll(argv[15]);
+  uint64_t output_shm_size = atoll(argv[16]);
+  std::string communication_backend = std::string(argv[17]);
 
   LOG(INFO) << "Spawn worker: "
             << "master_node_addr = " << master_node_addr
@@ -68,6 +72,8 @@ int main(int argc, char* argv[]) {
             << ", num_decoding_tokens = " << num_decoding_tokens
             << ", block_size = " << block_size
             << ", enable_shm = " << (enable_shm > 0)
+            << ", enable_rec_fast_sampler = " << (enable_rec_fast_sampler > 0)
+            << ", enable_block_copy_kernel = " << (enable_block_copy_kernel > 0)
             << ", input_shm_size = " << input_shm_size
             << ", output_shm_size = " << output_shm_size
             << ", is_local = " << (is_local > 0)
@@ -84,6 +90,8 @@ int main(int argc, char* argv[]) {
                                  num_decoding_tokens,
                                  block_size,
                                  enable_shm > 0,
+                                 enable_rec_fast_sampler > 0,
+                                 enable_block_copy_kernel > 0,
                                  input_shm_size,
                                  output_shm_size,
                                  is_local > 0,
