@@ -1138,7 +1138,11 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     if (image_input) {
       // visual
       auto pixel_values = image_input->pixel_values.to(options_);
-      auto grid_thw = image_input->image_grid_thw.to(options_);
+      auto grid_thw = image_input->image_grid_thw.to(pixel_values.device());
+      CHECK(grid_thw.scalar_type() == torch::kInt32 ||
+            grid_thw.scalar_type() == torch::kInt64)
+          << "image_grid_thw must be int tensor, got dtype="
+          << grid_thw.scalar_type();
       auto image_features =
           process_vision_features(pixel_values, grid_thw, input_params);
       auto image_embeds = torch::cat(image_features, 0);
