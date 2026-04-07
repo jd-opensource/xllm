@@ -41,15 +41,15 @@ class EngineType {
 
   constexpr EngineType(Value v) : value_(v) {}
   EngineType(const std::string& str) {
-    if (str == "LLM") {
+    if (str == "LLM" || str == "llm") {
       value_ = LLM;
-    } else if (str == "SSM") {
+    } else if (str == "SSM" || str == "ssm") {
       value_ = SSM;
-    } else if (str == "VLM") {
+    } else if (str == "VLM" || str == "vlm") {
       value_ = VLM;
-    } else if (str == "DIT") {
+    } else if (str == "DIT" || str == "dit") {
       value_ = DIT;
-    } else if (str == "REC") {
+    } else if (str == "REC" || str == "rec") {
       value_ = REC;
     } else {
       value_ = INVALID;
