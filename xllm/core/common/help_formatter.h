@@ -89,11 +89,15 @@ const OptionCategory kMtpOptions = {"SPECULATIVE OPTIONS",
 const OptionCategory kXllmServiceOptions = {"XLLM-SERVICE OPTIONS",
                                             {"etcd_addr", "rank_tablefile"}};
 
-const OptionCategory kBeamSearchOptions = {"BEAM SEARCH OPTIONS",
-                                           {"enable_beam_search_kernel",
-                                            "enable_rec_fast_sampler",
-                                            "enable_topk_sorted",
-                                            "output_rec_logprobs"}};
+const OptionCategory kBeamSearchOptions = {
+    "BEAM SEARCH OPTIONS",
+    {"enable_beam_search_kernel", "enable_topk_sorted"}};
+
+const OptionCategory kRecOptions = {"REC OPTIONS",
+                                    {"enable_rec_fast_sampler",
+                                     "enable_convert_tokens_to_item",
+                                     "enable_rec_prefill_only",
+                                     "output_rec_logprobs"}};
 
 const OptionCategory kPrefixCacheOptions = {
     "PREFIX CACHE OPTIONS",

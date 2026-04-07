@@ -625,6 +625,47 @@ DEFINE_bool(enable_constrained_decoding,
             "that the output meets specific format or structural requirements "
             "through pre-defined rules.");
 
+DEFINE_bool(enable_convert_tokens_to_item,
+            false,
+            "Enable token ids conversion to item id in REC/OneRec response.");
+
+DEFINE_int64(dit_cache_start_steps,
+             5,
+             "The number of steps to skip at the start");
+
+DEFINE_int64(dit_cache_end_steps, 5, "The number of steps to skip at the end.");
+
+DEFINE_int64(dit_cache_start_blocks,
+             5,
+             "The number of blocks to skip at the start.");
+
+DEFINE_int64(dit_cache_end_blocks,
+             5,
+             "The number of blocks to skip at the end.");
+
+// --- dit parallel config ---
+
+DEFINE_int64(tp_size, 1, "Tensor parallelism size");
+
+DEFINE_int64(sp_size, 1, "Sequence parallelism size");
+
+DEFINE_int64(cfg_size, 1, "Classifier-free guidiance parallelism size");
+
+DEFINE_int64(dit_sp_communication_overlap,
+             1,
+             "Communication & Computation overlap for sequence parallel");
+
+// --- dit debug ---
+
+DEFINE_bool(dit_debug_print,
+            false,
+            "whether print the debug info for dit models");
+
+// --- embedding type ---
+
+DEFINE_bool(enable_return_mm_full_embeddings,
+            false,
+            "return vit and sequence embeddings for vlm models");
 DEFINE_bool(
     use_audio_in_video,
     false,

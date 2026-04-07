@@ -30,6 +30,7 @@ limitations under the License.
 namespace xllm {
 
 class RecSampler;
+class RecConstrainedDecoding;
 
 class RecWorkerImpl : public LLMWorkerImpl {
   friend class RecWorkPipeline;
@@ -115,12 +116,22 @@ class RecWorkerImpl : public LLMWorkerImpl {
 
   class OneRecWorkPipeline final : public RecWorkPipeline {
    public:
-    explicit OneRecWorkPipeline(RecPipelineRuntime& runtime)
-        : RecWorkPipeline(runtime) {}
+    explicit OneRecWorkPipeline(RecPipelineRuntime& runtime);
 
     ForwardInput prepare_inputs(Batch& batch) override;
 
+    void prepare_work_before_execute(const ForwardInput& inputs,
+                                     ForwardInput& processed_inputs) override;
+
     std::optional<ForwardOutput> step(const ForwardInput& input) override;
+
+   private:
+    folly::SemiFuture<torch::Tensor> prepare_filter_mask_async(
+        const std::vector<std::vector<int32_t>>& generated_tokens);
+
+    std::unique_ptr<RecSampler> rec_sampler_;
+    std::unique_ptr<RecConstrainedDecoding> constrained_decoding_;
+    std::unique_ptr<ThreadPool> filter_mask_threadpool_;
   };
 
   class LlmRecWithMmDataWorkPipeline final : public RecWorkPipeline {
