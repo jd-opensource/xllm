@@ -138,8 +138,7 @@ class MtpModelImplBase : public torch::nn::Module {
         }
         attn_mask = torch::cat(req_mask_vec, 0);
       }
-    } else if (model_type_.compare(0, strlen("deepseek_v3"), "deepseek_v3") ==
-                   0 &&
+    } else if (absl::StartsWith(model_type_, "deepseek_v3") &&
                FLAGS_enable_prefix_cache &&
                !input_params.batch_forward_type.is_decode()) {
       attn_mask =
