@@ -422,6 +422,10 @@ DEFINE_bool(enable_block_copy_kernel,
 
 DEFINE_string(etcd_addr, "", "Etcd adderss for save instance meta info.");
 
+DEFINE_string(etcd_namespace,
+              "",
+              "Optional etcd namespace prefix for all xllm keys, e.g. prod-a.");
+
 DEFINE_bool(enable_service_routing,
             false,
             "Whether to use xllm service routing.");

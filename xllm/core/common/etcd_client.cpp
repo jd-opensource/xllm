@@ -21,11 +21,16 @@ limitations under the License.
 #include <etcd/Response.hpp>
 #include <nlohmann/json.hpp>
 
+#include "xllm/core/common/etcd_utils.h"
+
 namespace xllm {
 
-EtcdClient::EtcdClient(const std::string& etcd_addr)
-    : client_(etcd_addr), etcd_addr_(etcd_addr) {
-  auto response = client_.put("XLLM_PING", "PING");
+EtcdClient::EtcdClient(const std::string& etcd_addr,
+                       const std::string& etcd_namespace)
+    : client_(etcd_addr),
+      etcd_addr_(etcd_addr),
+      etcd_namespace_prefix_(normalize_etcd_namespace(etcd_namespace)) {
+  auto response = client_.put(namespaced_key("XLLM_PING"), "PING");
   if (!response.is_ok()) {
     LOG(FATAL) << "etcd connect to etcd server failed: "
                << response.error_message();
@@ -34,13 +39,23 @@ EtcdClient::EtcdClient(const std::string& etcd_addr)
 
 EtcdClient::EtcdClient(const std::string& etcd_addr,
                        const std::string& username,
-                       const std::string& password)
-    : client_(etcd_addr, username, password), etcd_addr_(etcd_addr) {
-  auto response = client_.put("XLLM_PING", "PING");
+                       const std::string& password,
+                       const std::string& etcd_namespace)
+    : client_(etcd_addr, username, password),
+      etcd_addr_(etcd_addr),
+      etcd_namespace_prefix_(normalize_etcd_namespace(etcd_namespace)) {
+  auto response = client_.put(namespaced_key("XLLM_PING"), "PING");
   if (!response.is_ok()) {
     LOG(FATAL) << "etcd connect to etcd server failed: "
                << response.error_message();
   }
+}
+
+std::string EtcdClient::namespaced_key(const std::string& logical_key) const {
+  if (etcd_namespace_prefix_.empty()) {
+    return logical_key;
+  }
+  return etcd_namespace_prefix_ + logical_key;
 }
 
 EtcdClient::~EtcdClient() {
@@ -63,10 +78,14 @@ void EtcdClient::add_watch(const std::string& key_prefix,
   if (watchers_.find(key_prefix) != watchers_.end()) {
     watchers_[key_prefix].watcher->Cancel();
   }
+
+  uint64_t prefix_len = etcd_namespace_prefix_.size();
+  auto bound_callback = std::bind(callback, std::placeholders::_1, prefix_len);
+
   auto watcher = std::make_unique<etcd::Watcher>(
       client_,
-      key_prefix,
-      [callback](etcd::Response response) { callback(response); },
+      namespaced_key(key_prefix),
+      [bound_callback](etcd::Response response) { bound_callback(response); },
       recursive);
 
   watchers_[key_prefix] = {std::move(watcher), callback};
@@ -94,7 +113,7 @@ void EtcdClient::stop_watch() {
 
 bool EtcdClient::get_master_service(const std::string& key,
                                     std::string* values) {
-  auto response = client_.get(key);
+  auto response = client_.get(namespaced_key(key));
   if (!response.is_ok()) {
     LOG(ERROR) << "etcd get " << key << " failed: " << response.error_message();
     return false;
@@ -104,7 +123,7 @@ bool EtcdClient::get_master_service(const std::string& key,
 }
 
 bool EtcdClient::get(const std::string& key, std::string* value) {
-  auto response = client_.get(key);
+  auto response = client_.get(namespaced_key(key));
   if (!response.is_ok()) {
     LOG(ERROR) << "etcd get " << key << " failed: " << response.error_message();
     return false;
@@ -118,7 +137,7 @@ bool EtcdClient::get(const std::string& key, std::string* value) {
 
 bool EtcdClient::get_all_xservices(const std::string& key_prefix,
                                    std::vector<std::string>* values) {
-  auto response = client_.ls(key_prefix);
+  auto response = client_.ls(namespaced_key(key_prefix));
   if (!response.is_ok()) {
     LOG(ERROR) << "etcd get " << key_prefix
                << " failed: " << response.error_message();
@@ -142,7 +161,7 @@ bool EtcdClient::register_instance(const std::string& key,
                                    const std::string& value,
                                    const int ttl) {
   auto keep_alive = std::make_shared<etcd::KeepAlive>(&client_, ttl);
-  auto response = client_.put(key, value, keep_alive->Lease());
+  auto response = client_.put(namespaced_key(key), value, keep_alive->Lease());
   if (!response.is_ok()) {
     LOG(ERROR) << "etcd set " << key << " failed: " << response.error_message();
     keep_alive->Cancel();
