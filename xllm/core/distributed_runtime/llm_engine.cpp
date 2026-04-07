@@ -528,8 +528,6 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
       kv_cache_cap.n_layers - num_full_attention_layers;
   // compute kv cache n_blocks
   const int32_t block_size = options_.block_size();
-  const int64_t block_size_in_bytes =
-      block_size * (slot_size + index_slot_size + scale_slot_size);
   const int64_t full_cache_block_size_in_bytes =
       block_size * (slot_size + index_slot_size + scale_slot_size);
   const int64_t total_cache_block_size_in_bytes =
