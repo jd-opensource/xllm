@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "collective_communicator_base.h"
-#include "dit_mapping_npu.h"
+#include "dit_mapping.h"
 
 namespace xllm {
 
@@ -38,7 +38,7 @@ class DiTCollectiveCommunicator : public CollectiveCommunicatorBase {
   const ParallelArgs* parallel_args() override;
 
  private:
-  std::unique_ptr<DiTMappingNPU> dit_mapping_npu_{nullptr};
+  std::unique_ptr<DiTMapping> dit_mapping_{nullptr};
   std::unique_ptr<ParallelArgs> parallel_args_;
   std::unique_ptr<ProcessGroup> process_group_;
   std::unique_ptr<ProcessGroup> dit_tp_group_;

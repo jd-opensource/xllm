@@ -13,15 +13,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "dit_mapping_npu.h"
+#include "dit_mapping.h"
 
 #include <glog/logging.h>
 
 namespace xllm {
 
-DiTMappingNPU::DiTMappingNPU(const int32_t world_size,
-                             const int32_t rank,
-                             const Options& options)
+DiTMapping::DiTMapping(const int32_t world_size,
+                       const int32_t rank,
+                       const Options& options)
     : rank_(rank), options_(options), world_size_(world_size) {
   tp_.backend("hccl");
   sp_.backend("hccl");
@@ -41,7 +41,7 @@ DiTMappingNPU::DiTMappingNPU(const int32_t world_size,
   set_group_by_type(dp_, "dp");
 }
 
-void DiTMappingNPU::parse_parallel_info() {
+void DiTMapping::parse_parallel_info() {
   if (options_.dit_tp_size() != -1) {
     tp_.group_size(options_.dit_tp_size());
   }
@@ -56,7 +56,7 @@ void DiTMappingNPU::parse_parallel_info() {
   }
 }
 
-void DiTMappingNPU::validate() {
+void DiTMapping::validate() {
   CHECK(cfg_.group_size() * tp_.group_size() * sp_.group_size() *
             dp_.group_size() ==
         world_size_)
@@ -84,8 +84,8 @@ void DiTMappingNPU::validate() {
                                        ". Please check `cfg` .";
 }
 
-void DiTMappingNPU::set_group_by_type(ParallelInfo& parallel_info,
-                                      const std::string& group_type) {
+void DiTMapping::set_group_by_type(ParallelInfo& parallel_info,
+                                   const std::string& group_type) {
   auto rank_per_group = rank_generator_->get_ranks(group_type);
   parallel_info.rank_per_group(rank_per_group);
   auto group_size = rank_per_group[0].size();
@@ -99,7 +99,7 @@ void DiTMappingNPU::set_group_by_type(ParallelInfo& parallel_info,
   parallel_info.rank(local_rank);
 }
 
-std::tuple<int32_t, int32_t> DiTMappingNPU::get_current_group_id(
+std::tuple<int32_t, int32_t> DiTMapping::get_current_group_id(
     const std::vector<std::vector<int32_t>>& rank_per_group,
     int32_t target_rank_id) {
   for (int32_t idx = 0; idx < rank_per_group.size(); ++idx) {
@@ -112,7 +112,7 @@ std::tuple<int32_t, int32_t> DiTMappingNPU::get_current_group_id(
   return std::make_tuple(-1, -1);
 }
 
-const ParallelInfo& DiTMappingNPU::get_parallel_info(
+const ParallelInfo& DiTMapping::get_parallel_info(
     const std::string& group_type) const {
   if (group_type == "tp") {
     return tp_;
@@ -127,7 +127,7 @@ const ParallelInfo& DiTMappingNPU::get_parallel_info(
   }
 }
 
-nlohmann::json DiTMappingNPU::to_json() {
+nlohmann::json DiTMapping::to_json() {
   nlohmann::json data;
 
   data["SpSize"] = options_.dit_sp_size();

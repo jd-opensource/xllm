@@ -23,7 +23,7 @@ limitations under the License.
 #include "rank_generator.h"
 namespace xllm {
 
-class DiTMappingNPU final {
+class DiTMapping final {
  public:
   struct Options {
     // cfg size
@@ -36,9 +36,9 @@ class DiTMappingNPU final {
     PROPERTY(int32_t, dit_dp_size) = -1;
   };
 
-  DiTMappingNPU(const int32_t world_size,
-                const int32_t rank,
-                const Options& options);
+  DiTMapping(const int32_t world_size,
+             const int32_t rank,
+             const Options& options);
 
   int32_t get_num_nodes();
 
