@@ -256,11 +256,11 @@ bool WorkerImpl::allocate_kv_cache(
           conv_cache = at_npu::native::npu_format_cast(
               torch::zeros(kv_cache_shape[2],
                            torch::dtype(dtype_).device(device_)),
-              2);
+              npu_format_type);
           ssm_cache = at_npu::native::npu_format_cast(
               torch::zeros(kv_cache_shape[3],
                            torch::dtype(dtype_).device(device_)),
-              2);
+              npu_format_type);
         }
 #elif defined(USE_ILU) || defined(USE_MLU) || defined(USE_MUSA)
         if (enable_linear_attention) {
