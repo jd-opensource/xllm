@@ -17,12 +17,17 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 
+#include <algorithm>
 #include <unordered_set>
 
 #include "common/global_flags.h"
 
 namespace xllm {
 namespace layer {
+
+namespace {
+constexpr int64_t kFiaMaskSeqLen = 2048;
+}
 
 static const uint64_t WEIGHT_COUNT_PER_LAYER = 55;
 
@@ -102,6 +107,8 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
   param.isBF16 = args.dtype() == "bfloat16";
   param.enableSwiGLU = true;
   param.isPrefill = is_prefill;
+  param.isFIA = is_prefill && FLAGS_enable_fia;
+  param.blockSize = static_cast<int64_t>(FLAGS_block_size);
 
   // prefill only feature
   param.enableLcoc = is_prefill;  // false;
@@ -271,10 +278,24 @@ void NpuQwen3MoeDecoderLayerImpl::merge_loaded_weights() {
 }
 
 int64_t NpuQwen3MoeDecoderLayerImpl::init_layer() {
+  CHECK_OPERATION_STATUS_RETURN(init_attn_mask());
   name_ = "qwen3_moe_decoder_layer " + std::to_string(layer_id_);
   model_name_ = "Qwen3_Moe";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
   CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
+
+  return atb::NO_ERROR;
+}
+
+int64_t NpuQwen3MoeDecoderLayerImpl::init_attn_mask() {
+  if (prefill_param_.isFIA) {
+    const auto fia_mask_options =
+        torch::TensorOptions().dtype(torch::kBool).device(device_);
+    fia_attn_mask_ = torch::triu(torch::ones({kFiaMaskSeqLen, kFiaMaskSeqLen},
+                                             fia_mask_options),
+                                 /*diagonal=*/1)
+                         .contiguous();
+  }
 
   return atb::NO_ERROR;
 }
@@ -357,6 +378,15 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
     KVCache& kv_cache,
     const ModelInputParams& input_params,
     bool is_prefill) {
+  if (is_prefill) {
+    *prefill_param_.bs = std::max(1, input_params.num_sequences);
+  }
+
+  auto* effective_attn_mask = &attn_mask;
+  if (is_prefill && prefill_param_.isFIA) {
+    effective_attn_mask = &fia_attn_mask_;
+  }
+
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
   int32_t input_idx = 0;
   auto& dp_ep_padding = input_params.dp_ep_padding_data;
@@ -376,7 +406,7 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6) =
       atb_speed::Utils::AtTensor2Tensor(sin_pos);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7) =
-      atb_speed::Utils::AtTensor2Tensor(attn_mask);
+      atb_speed::Utils::AtTensor2Tensor(*effective_attn_mask);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 8) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_k_cache());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9) =
@@ -420,8 +450,8 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
   }
 
   input_idx = WEIGHT_COUNT_PER_LAYER + 16;
-  if (is_prefill &&
-      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
+  if (is_prefill && (prefill_param_.isFIA || FLAGS_enable_chunked_prefill ||
+                     FLAGS_enable_prefix_cache)) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
     node.variantPack.inTensors.at(input_idx - 1).hostData =

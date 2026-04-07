@@ -114,6 +114,7 @@ const OptionCategory kOtherOptions = {
      "num_request_handling_threads",
      "num_response_handling_threads",
      "prefill_scheduling_memory_usage_threshold",
+     "enable_fia",
      "use_contiguous_input_buffer",
      "use_audio_in_video"}};
 

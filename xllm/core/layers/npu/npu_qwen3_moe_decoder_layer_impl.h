@@ -94,6 +94,8 @@ class NpuQwen3MoeDecoderLayerImpl : public BaseLayer {
   void initialize_quantization_parameters(
       atb_speed::qwen::MoeDecoderLayerParam& param);
 
+  int64_t init_attn_mask();
+
   int64_t init_node(atb_speed::Model::Node& node,
                     atb_speed::qwen::MoeDecoderLayerParam& param);
 
@@ -140,6 +142,7 @@ class NpuQwen3MoeDecoderLayerImpl : public BaseLayer {
   torch::Tensor slot_tensor_placeholder_;
   torch::Tensor int_tensor_placeholder_;
   torch::Tensor decode_attn_mask_;
+  torch::Tensor fia_attn_mask_;
   torch::Tensor expert_group_;
   torch::Tensor quant_add_norm_scaling_;
   torch::Tensor quant_add_norm_offset_;
