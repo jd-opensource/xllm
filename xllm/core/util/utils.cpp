@@ -150,7 +150,7 @@ std::vector<uint32_t> cal_vec_split_index(uint32_t vec_size,
   return split_index;
 }
 
-torch::Dtype convert_rec_type_to_torch(proto::DataType data_type) {
+torch::ScalarType convert_rec_type_to_torch(proto::DataType data_type) {
   // Future extensions go here.
   switch (data_type) {
     case proto::DataType::FLOAT:
@@ -172,8 +172,7 @@ torch::Dtype convert_rec_type_to_torch(proto::DataType data_type) {
       return torch::kInt16;
 
     default:
-      throw std::runtime_error("Unsupported data type: " +
-                               std::to_string(static_cast<int>(data_type)));
+      LOG(FATAL) << "Unsupported data type: " << static_cast<int>(data_type);
   }
 }
 
@@ -186,12 +185,12 @@ torch::Tensor convert_rec_tensor_to_torch(
   }
 
   if (!input_tensor.has_contents()) {
-    throw std::runtime_error("Input tensor '" + input_tensor.name() +
-                             "' has no contents");
+    LOG(FATAL) << "Input tensor '" << input_tensor.name()
+               << "' has no contents";
   }
 
   const auto& contents = input_tensor.contents();
-  torch::Dtype dtype = convert_rec_type_to_torch(input_tensor.data_type());
+  torch::ScalarType dtype = convert_rec_type_to_torch(input_tensor.data_type());
 
   switch (dtype) {
     case torch::kFloat32: {
@@ -240,8 +239,8 @@ torch::Tensor convert_rec_tensor_to_torch(
     }
 
     default:
-      throw std::runtime_error("Unhandled data type conversion for: " +
-                               std::to_string(static_cast<int>(dtype)));
+      LOG(FATAL) << "Unhandled data type conversion for: "
+                 << static_cast<int>(dtype);
   }
 }
 
