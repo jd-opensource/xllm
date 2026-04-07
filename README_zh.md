@@ -26,6 +26,8 @@ limitations under the License. -->
 | <a href="https://xllm.readthedocs.io/zh-cn/latest/"><b>Documentation</b></a> |  <a href="https://arxiv.org/abs/2510.14686"><b>Technical Report</b></a> |
 </p>
 
+### 📢 参加ICT竞赛的同学请参考：[竞赛准备](README_ict_final.md)。
+
 ### 📢 新闻
 
 - 2026-02-12: 🎉 我们 day-0 支持了最新的[GLM-5](https://github.com/zai-org/GLM-5) 模型的高效推理服务，部署请参考[部署文档](https://github.com/zai-org/GLM-5/blob/main/example/ascend.md)。
