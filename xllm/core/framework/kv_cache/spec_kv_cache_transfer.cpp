@@ -45,8 +45,13 @@ const std::map<torch::ScalarType, ge::DataType> kScalarTypeToDtype = {
 SpecKVCacheTransfer::SpecKVCacheTransfer(const std::string& device_ip,
                                          const uint16_t listen_port,
                                          const InstanceRole& instance_role,
-                                         const std::string& model_type)
-    : LlmDataDistTransfer(device_ip, listen_port, instance_role, model_type) {}
+                                         const std::string& model_type,
+                                         bool enable_lighting_indexer)
+    : LlmDataDistTransfer(device_ip,
+                          listen_port,
+                          instance_role,
+                          model_type,
+                          enable_lighting_indexer) {}
 
 void SpecKVCacheTransfer::allocate_kv_cache(
     std::vector<xllm::KVCache>& kv_caches,
@@ -59,7 +64,9 @@ void SpecKVCacheTransfer::allocate_kv_cache(
                              dtype,
                              /*is_spec*/ false,
                              k_cache_,
-                             v_cache_);
+                             v_cache_,
+                             enable_lighting_indexer_ ? &index_cache_
+                                                      : nullptr);
 }
 
 void SpecKVCacheTransfer::allocate_kv_cache_spec(
@@ -73,7 +80,9 @@ void SpecKVCacheTransfer::allocate_kv_cache_spec(
                              dtype,
                              /*is_spec*/ true,
                              spec_k_cache_,
-                             spec_v_cache_);
+                             spec_v_cache_,
+                             enable_lighting_indexer_ ? &spec_index_cache_
+                                                      : nullptr);
 }
 void SpecKVCacheTransfer::allocate_kv_cache_internal(
     std::vector<xllm::KVCache>& kv_caches,
@@ -82,7 +91,8 @@ void SpecKVCacheTransfer::allocate_kv_cache_internal(
     torch::ScalarType dtype,
     bool is_spec,
     Cache& k_cache,
-    Cache& v_cache) {
+    Cache& v_cache,
+    Cache* index_cache) {
   if (is_spec) {
     spec_num_layers_ = num_layers;
   } else {
@@ -103,21 +113,39 @@ void SpecKVCacheTransfer::allocate_kv_cache_internal(
                                                    kv_cache_shape[1].end(),
                                                    data_size,
                                                    std::multiplies<int64_t>());
+  int64_t index_cache_size_per_layer = 0;
+  if (index_cache != nullptr) {
+    index_cache_size_per_layer = std::accumulate(kv_cache_shape[2].begin(),
+                                                 kv_cache_shape[2].end(),
+                                                 data_size,
+                                                 std::multiplies<int64_t>());
+  }
 
   // allocate device memory for kv cache
   std::vector<uint64_t> k_cache_addrs;
   std::vector<uint64_t> v_cache_addrs;
+  std::vector<uint64_t> index_cache_addrs;
   k_cache_addrs.reserve(num_layers);
   v_cache_addrs.reserve(num_layers);
+  index_cache_addrs.reserve(num_layers);
   k_cache.tensor_addrs.reserve(num_layers);
   v_cache.tensor_addrs.reserve(num_layers);
+  if (index_cache != nullptr) {
+    index_cache->tensor_addrs.reserve(num_layers);
+  }
   for (int64_t i = 0; i < num_layers; ++i) {
     void* k_cache_buffer = nullptr;
     void* v_cache_buffer = nullptr;
+    void* index_cache_buffer = nullptr;
     CHECK_ACL_RET(aclrtMalloc(
         &k_cache_buffer, k_cache_size_per_layer, ACL_MEM_MALLOC_HUGE_ONLY));
     CHECK_ACL_RET(aclrtMalloc(
         &v_cache_buffer, v_cache_size_per_layer, ACL_MEM_MALLOC_HUGE_ONLY));
+    if (index_cache != nullptr) {
+      CHECK_ACL_RET(aclrtMalloc(&index_cache_buffer,
+                                index_cache_size_per_layer,
+                                ACL_MEM_MALLOC_HUGE_ONLY));
+    }
 
     k_cache_addrs.emplace_back(reinterpret_cast<uint64_t>(k_cache_buffer));
     v_cache_addrs.emplace_back(reinterpret_cast<uint64_t>(v_cache_buffer));
@@ -125,6 +153,12 @@ void SpecKVCacheTransfer::allocate_kv_cache_internal(
         reinterpret_cast<uintptr_t>(k_cache_buffer));
     v_cache.tensor_addrs.emplace_back(
         reinterpret_cast<uintptr_t>(v_cache_buffer));
+    if (index_cache != nullptr) {
+      index_cache_addrs.emplace_back(
+          reinterpret_cast<uint64_t>(index_cache_buffer));
+      index_cache->tensor_addrs.emplace_back(
+          reinterpret_cast<uintptr_t>(index_cache_buffer));
+    }
   }
 
   // convert memory addrs to torch tensors
@@ -136,11 +170,21 @@ void SpecKVCacheTransfer::allocate_kv_cache_internal(
       kv_cache_shape[0], dtype, k_cache.tensor_addrs, npu_format_type);
   auto v_torch_tensors = convert_to_torch_tensor(
       kv_cache_shape[1], dtype, v_cache.tensor_addrs, npu_format_type);
-  torch::Tensor key_cache, value_cache;
+  std::vector<torch::Tensor> index_torch_tensors;
+  if (index_cache != nullptr) {
+    index_torch_tensors = convert_to_torch_tensor(
+        kv_cache_shape[2], dtype, index_cache->tensor_addrs, npu_format_type);
+  }
+  torch::Tensor key_cache, value_cache, index_cache_tensor;
   for (int64_t i = 0; i < num_layers; ++i) {
     key_cache = k_torch_tensors[i];
     value_cache = v_torch_tensors[i];
-    kv_caches.emplace_back(key_cache, value_cache);
+    if (index_cache != nullptr) {
+      index_cache_tensor = index_torch_tensors[i];
+      kv_caches.emplace_back(key_cache, value_cache, index_cache_tensor);
+    } else {
+      kv_caches.emplace_back(key_cache, value_cache);
+    }
   }
 
   // register key cache
@@ -163,6 +207,17 @@ void SpecKVCacheTransfer::allocate_kv_cache_internal(
   CHECK(ret == LLM_SUCCESS)
       << "Register value cache failed, ret = " << std::hex << ret;
 
+  if (index_cache != nullptr) {
+    CacheDesc& index_cache_desc = index_cache->cache_desc;
+    index_cache_desc.num_tensors = num_layers;
+    index_cache_desc.data_type = ge_dtype;
+    index_cache_desc.shape = kv_cache_shape[2];
+    ret = llm_data_dist_->RegisterKvCache(
+        index_cache_desc, index_cache_addrs, {}, index_cache->cache_id);
+    CHECK(ret == LLM_SUCCESS)
+        << "Register index cache failed, ret = " << std::hex << ret;
+  }
+
   LOG(INFO) << "Register KV cache success.";
 }
 
@@ -174,8 +229,10 @@ void SpecKVCacheTransfer::free_kv_cache() {
   };
   free_cache(k_cache_.tensor_addrs);
   free_cache(v_cache_.tensor_addrs);
+  free_cache(index_cache_.tensor_addrs);
   free_cache(spec_k_cache_.tensor_addrs);
   free_cache(spec_v_cache_.tensor_addrs);
+  free_cache(spec_index_cache_.tensor_addrs);
 }
 
 bool SpecKVCacheTransfer::pull_kv_blocks(
@@ -191,6 +248,11 @@ bool SpecKVCacheTransfer::pull_kv_blocks(
   CacheIndex v_cache_index{src_cluster_id, src_v_cache_id};
   CHECK_LDD_RET(llm_data_dist_->PullKvBlocks(
       v_cache_index, v_cache_, src_blocks, dst_blocks));
+  if (enable_lighting_indexer_) {
+    CacheIndex index_cache_index{src_cluster_id, index_cache_.cache_id};
+    CHECK_LDD_RET(llm_data_dist_->PullKvBlocks(
+        index_cache_index, index_cache_, src_blocks, dst_blocks));
+  }
 
   CacheIndex spec_k_cache_index{src_cluster_id, spec_k_cache_.cache_id};
   CHECK_LDD_RET(llm_data_dist_->PullKvBlocks(
@@ -198,6 +260,12 @@ bool SpecKVCacheTransfer::pull_kv_blocks(
   CacheIndex spec_v_cache_index{src_cluster_id, spec_v_cache_.cache_id};
   CHECK_LDD_RET(llm_data_dist_->PullKvBlocks(
       spec_v_cache_index, spec_v_cache_, src_blocks, dst_blocks));
+  if (enable_lighting_indexer_) {
+    CacheIndex spec_index_cache_index{src_cluster_id,
+                                      spec_index_cache_.cache_id};
+    CHECK_LDD_RET(llm_data_dist_->PullKvBlocks(
+        spec_index_cache_index, spec_index_cache_, src_blocks, dst_blocks));
+  }
 
   return true;
 }
@@ -209,8 +277,13 @@ bool SpecKVCacheTransfer::push_kv_blocks(
   if (is_spec_draft) {
     return push_kv_blocks_spec(merged_kv_infos, layer_synchronizer);
   } else {
-    return push_kv_blocks_internal(
-        merged_kv_infos, layer_synchronizer, num_layers_, k_cache_, v_cache_);
+    return push_kv_blocks_internal(merged_kv_infos,
+                                   layer_synchronizer,
+                                   num_layers_,
+                                   k_cache_,
+                                   v_cache_,
+                                   enable_lighting_indexer_ ? &index_cache_
+                                                            : nullptr);
   }
 }
 
@@ -221,7 +294,10 @@ bool SpecKVCacheTransfer::push_kv_blocks_spec(
                                  layer_synchronizer,
                                  spec_num_layers_,
                                  spec_k_cache_,
-                                 spec_v_cache_);
+                                 spec_v_cache_,
+                                 enable_lighting_indexer_
+                                     ? &spec_index_cache_
+                                     : nullptr);
 }
 
 bool SpecKVCacheTransfer::push_kv_blocks_internal(
@@ -229,7 +305,8 @@ bool SpecKVCacheTransfer::push_kv_blocks_internal(
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
     int64_t num_layers,
     const Cache& k_cache,
-    const Cache& v_cache) {
+    const Cache& v_cache,
+    const Cache* index_cache) {
   for (int64_t layer_index = 0; layer_index < num_layers; ++layer_index) {
     // Wait for the KV cache computation of this layer to complete.
     layer_synchronizer->synchronize_layer(layer_index);
@@ -256,6 +333,15 @@ bool SpecKVCacheTransfer::push_kv_blocks_internal(
                                                  kv_info.src_blocks,
                                                  kv_info.dst_blocks,
                                                  ext_param));
+      if (index_cache != nullptr) {
+        CacheIndex index_cache_index{kv_info.dst_cluster_id,
+                                     index_cache->cache_id};
+        CHECK_LDD_RET(llm_data_dist_->PushKvBlocks(*index_cache,
+                                                   index_cache_index,
+                                                   kv_info.src_blocks,
+                                                   kv_info.dst_blocks,
+                                                   ext_param));
+      }
     }
   }
   return true;

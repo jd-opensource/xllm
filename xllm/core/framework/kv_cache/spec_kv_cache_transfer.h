@@ -27,7 +27,8 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
   SpecKVCacheTransfer(const std::string& device_ip,
                       const uint16_t listen_port,
                       const InstanceRole& instance_role,
-                      const std::string& model_type = "");
+                      const std::string& model_type = "",
+                      bool enable_lighting_indexer = false);
 
   virtual ~SpecKVCacheTransfer() = default;
 
@@ -50,7 +51,8 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
       torch::ScalarType dtype,
       bool is_spec,
       Cache& k_cache,
-      Cache& v_cache);
+      Cache& v_cache,
+      Cache* index_cache);
 
   void free_kv_cache() override;
 
@@ -81,7 +83,8 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
       std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
       int64_t num_layers,
       const Cache& k_cache,
-      const Cache& v_cache);
+      const Cache& v_cache,
+      const Cache* index_cache);
 
   void merge_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
@@ -93,6 +96,7 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
 
   Cache spec_k_cache_;
   Cache spec_v_cache_;
+  Cache spec_index_cache_;
 };
 
 }  // namespace xllm
