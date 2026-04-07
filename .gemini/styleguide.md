@@ -1,1 +1,1 @@
-../.agent/skills/code-review/references/custom-code-style.md
+../.agents/skills/code-review/references/custom-code-style.md
