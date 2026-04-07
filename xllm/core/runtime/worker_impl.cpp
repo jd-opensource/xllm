@@ -235,8 +235,8 @@ bool WorkerImpl::allocate_kv_cache(
       torch::Tensor key_cache_scale, value_cache_scale;
 #if defined(USE_NPU)
       aclFormat npu_format_type =
-          context_.get_model_args().model_type().compare(
-              0, strlen("deepseek_v3"), "deepseek_v3") == 0 &&
+          absl::StartsWith(context_.get_model_args().model_type(),
+                           "deepseek_v3") &&
                   FLAGS_enable_prefix_cache
               ? ACL_FORMAT_FRACTAL_NZ
               : ACL_FORMAT_ND;
