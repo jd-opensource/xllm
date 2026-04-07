@@ -19,6 +19,8 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <algorithm>
+#include <cmath>
+#include <mutex>
 #include <optional>
 #include <type_traits>
 #include <unordered_set>
@@ -33,6 +35,7 @@ limitations under the License.
 #include "core/layers/common/lm_head.h"
 #include "core/layers/common/word_embedding.h"
 #include "models/model_registry.h"
+#include "models/rec/npu/onerec_npu_impl.h"
 #include "models/rec/rec_model_base.h"
 
 namespace xllm {
@@ -43,6 +46,11 @@ class OneRecModelImpl : public torch::nn::Module {
     hidden_size_ = context.get_model_args().hidden_size();
     options_ = context.get_tensor_options();
     shared_ = register_module("shared", layer::WordEmbedding(context));
+
+    encoder_ = register_module(
+        "encoder", OneRecStack(context, /*is_decode=*/false, shared_));
+    decoder_ = register_module(
+        "decoder", OneRecStack(context, /*is_decode=*/true, shared_));
   }
 
   ModelOutput forward(const torch::Tensor& tokens,
@@ -56,6 +64,49 @@ class OneRecModelImpl : public torch::nn::Module {
     (void)kv_caches;
 
     const auto* onerec_params = input_params.onerec_params();
+
+    if (onerec_params != nullptr) {
+      if (onerec_params->is_encoder_forward) {
+        std::vector<KVCache> encoder_kv_caches;
+        auto encoder_output =
+            encoder_(tokens, positions, encoder_kv_caches, input_params);
+
+        torch::Tensor cached_encoder_output;
+        if (encoder_output.defined() &&
+            onerec_params->encoder_max_seq_len > 0 &&
+            !onerec_params->encoder_seq_lens.empty()) {
+          cached_encoder_output =
+              pad_encoder_output(encoder_output, input_params);
+        } else {
+          cached_encoder_output = encoder_output;
+        }
+        {
+          std::lock_guard<std::mutex> lock(encoder_output_mutex_);
+          encoder_output_ = cached_encoder_output;
+        }
+        return ModelOutput(cached_encoder_output);
+      }
+
+      torch::Tensor cached_encoder_output;
+      if (onerec_params->has_encoder_output) {
+        std::lock_guard<std::mutex> lock(encoder_output_mutex_);
+        cached_encoder_output = encoder_output_;
+      }
+
+      const torch::Tensor& decoder_context =
+          onerec_params->decoder_context_embedding;
+
+      if (!decoder_context.defined() && !cached_encoder_output.defined()) {
+        LOG(ERROR)
+            << "OneRec decoder requires decoder_context_embedding or encoder "
+               "output.";
+        return ModelOutput();
+      }
+
+      auto decoder_output = decoder_(
+          tokens, positions, kv_caches, input_params, cached_encoder_output);
+      return ModelOutput(decoder_output);
+    }
 
     const bool is_encoder_forward =
         (onerec_params != nullptr) && onerec_params->is_encoder_forward;
@@ -87,12 +138,33 @@ class OneRecModelImpl : public torch::nn::Module {
     if (shared_dict.size() > 0) {
       shared_->load_state_dict(shared_dict);
     }
+
+    auto encoder_dict = state_dict.get_dict_with_prefix("encoder.");
+    if (encoder_dict.size() > 0) {
+      encoder_->load_state_dict(encoder_dict);
+    }
+    auto decoder_dict = state_dict.get_dict_with_prefix("decoder.");
+    if (decoder_dict.size() > 0) {
+      decoder_->load_state_dict(decoder_dict);
+    }
+  }
+
+  void verify_loaded_weights() const {
+    encoder_->verify_loaded_weights("encoder.");
+    decoder_->verify_loaded_weights("decoder.");
+  }
+
+  void merge_loaded_weights() {
+    encoder_->merge_loaded_weights();
+    decoder_->merge_loaded_weights();
   }
 
   layer::WordEmbedding get_word_embedding() { return shared_; }
 
   void set_word_embedding(layer::WordEmbedding& embedding) {
     shared_ = embedding;
+    encoder_->set_word_embedding(shared_);
+    decoder_->set_word_embedding(shared_);
   }
 
  private:
@@ -181,6 +253,11 @@ class OneRecModelImpl : public torch::nn::Module {
   torch::TensorOptions options_;
   int64_t hidden_size_ = 0;
   layer::WordEmbedding shared_{nullptr};
+
+  OneRecStack encoder_{nullptr};
+  OneRecStack decoder_{nullptr};
+  torch::Tensor encoder_output_;
+  std::mutex encoder_output_mutex_;
 };
 TORCH_MODULE(OneRecModel);
 
@@ -217,6 +294,9 @@ class OneRecForConditionalGenerationImpl
         }
       }
     }
+
+    model_->verify_loaded_weights();
+    model_->merge_loaded_weights();
   }
 };
 TORCH_MODULE(OneRecForConditionalGeneration);
