@@ -29,43 +29,25 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "helper.h"
 
-XLLM_CAPI_EXPORT XLLM_LLM_Handler* xllm_llm_create(void) {
-  XLLM_LLM_Handler* handler = new XLLM_LLM_Handler();
-  CHECK(nullptr != handler);
+namespace {
 
-  handler->initialized = false;
-
-  return handler;
-}
-
-XLLM_CAPI_EXPORT void xllm_llm_destroy(XLLM_LLM_Handler* handler) {
-  if (!handler) return;
-
-  handler->master.reset();
-  handler->executor.reset();
-  handler->model_ids.clear();
-  handler->initialized = false;
-
-  delete handler;
-}
-
-XLLM_CAPI_EXPORT void xllm_llm_init_options_default(
-    XLLM_InitOptions* init_options) {
-  if (nullptr == init_options) return;
-  *init_options = XLLM_INIT_LLM_OPTIONS_DEFAULT;
-}
-
-XLLM_CAPI_EXPORT bool xllm_llm_initialize(
-    XLLM_LLM_Handler* handler,
-    const char* model_path,
-    const char* devices,
-    const XLLM_InitOptions* init_options) {
-  if (!handler || !model_path || !devices) return false;
+bool initialize_llm(XLLM_LLM_Handler* handler,
+                    const char* model_path,
+                    const char* devices,
+                    const XLLM_InitOptions* init_options,
+                    const XLLM_StartupFlags* startup_flags) {
+  if (!handler || !model_path || !devices) {
+    return false;
+  }
 
   try {
     XLLM_InitOptions xllm_init_options;
     xllm::helper::set_init_options(
         xllm::helper::BackendType::LLM, init_options, &xllm_init_options);
+
+    XLLM_StartupFlags xllm_startup_flags;
+    xllm::helper::set_startup_flags(
+        xllm::helper::BackendType::LLM, startup_flags, &xllm_startup_flags);
 
     std::string log_dir(xllm_init_options.log_dir);
     if (!log_dir.empty()) {
@@ -76,6 +58,8 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
       LOG(ERROR) << "model path[" << model_path << "] does not exist";
       return false;
     }
+
+    xllm::helper::apply_startup_flags(xllm_init_options, xllm_startup_flags);
 
     xllm::Options options;
     options.model_path(model_path)
@@ -111,15 +95,10 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
         .enable_schedule_overlap(xllm_init_options.enable_schedule_overlap)
         .enable_pd_ooc(xllm_init_options.enable_pd_ooc)
         .kv_cache_transfer_mode(xllm_init_options.kv_cache_transfer_mode)
+        .enable_graph(xllm_startup_flags.enable_graph)
         .enable_shm(xllm_init_options.enable_shm)
         .is_local(true)
         .server_idx(xllm_init_options.server_idx);
-
-    options.enable_graph(FLAGS_enable_graph);
-
-#if !defined(USE_NPU) && !defined(USE_CUDA)
-    FLAGS_enable_block_copy_kernel = false;
-#endif
 
     handler->master = std::make_unique<xllm::LLMMaster>(options);
     handler->master->run();
@@ -157,6 +136,60 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
   handler->initialized = false;
 
   return false;
+}
+
+}  // namespace
+
+XLLM_CAPI_EXPORT XLLM_LLM_Handler* xllm_llm_create(void) {
+  XLLM_LLM_Handler* handler = new XLLM_LLM_Handler();
+  CHECK(nullptr != handler);
+
+  handler->initialized = false;
+
+  return handler;
+}
+
+XLLM_CAPI_EXPORT void xllm_llm_destroy(XLLM_LLM_Handler* handler) {
+  if (!handler) return;
+
+  handler->master.reset();
+  handler->executor.reset();
+  handler->model_ids.clear();
+  handler->initialized = false;
+
+  delete handler;
+}
+
+XLLM_CAPI_EXPORT void xllm_llm_init_options_default(
+    XLLM_InitOptions* init_options) {
+  if (nullptr == init_options) return;
+  *init_options = XLLM_INIT_LLM_OPTIONS_DEFAULT;
+}
+
+XLLM_CAPI_EXPORT void xllm_llm_startup_flags_default(
+    XLLM_StartupFlags* startup_flags) {
+  if (nullptr == startup_flags) {
+    return;
+  }
+  *startup_flags = XLLM_LLM_STARTUP_FLAGS_DEFAULT;
+}
+
+XLLM_CAPI_EXPORT bool xllm_llm_initialize(
+    XLLM_LLM_Handler* handler,
+    const char* model_path,
+    const char* devices,
+    const XLLM_InitOptions* init_options) {
+  return initialize_llm(handler, model_path, devices, init_options, nullptr);
+}
+
+XLLM_CAPI_EXPORT bool xllm_llm_initialize_ex(
+    XLLM_LLM_Handler* handler,
+    const char* model_path,
+    const char* devices,
+    const XLLM_InitOptions* init_options,
+    const XLLM_StartupFlags* startup_flags) {
+  return initialize_llm(
+      handler, model_path, devices, init_options, startup_flags);
 }
 
 XLLM_CAPI_EXPORT void xllm_llm_request_params_default(
