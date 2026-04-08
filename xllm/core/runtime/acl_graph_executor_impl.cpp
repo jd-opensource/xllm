@@ -984,6 +984,16 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   // Get actual num_tokens from tokens shape
   const uint32_t n_tokens = tokens_tensor.size(/*dim=*/0);
   const uint32_t actual_batch_size = n_tokens / options_.num_decoding_tokens();
+
+  // Large decode batches create too many/too large ACL graphs and may OOM.
+  // Fall back to eager mode when batch size exceeds the safety threshold.
+  const uint32_t decode_batch_size_limit =
+      std::max(1, FLAGS_acl_graph_decode_batch_size_limit);
+  if (actual_batch_size > decode_batch_size_limit) {
+    COUNTER_INC(num_model_execution_total_eager);
+    return model_->forward(tokens, positions, kv_caches, params);
+  }
+
   const uint32_t bucket_num_tokens = get_bucket_num_tokens(n_tokens);
 
   // Check if conditions are suitable for graph execution (replay or capture)
