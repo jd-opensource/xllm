@@ -118,11 +118,14 @@ void DpEpPadding::prepare_indices() {
   lm_head_skip_padding_token_indices_ = build_lm_head_indices();
 
   dp_padding_idx_ = build_dp_padding_indices();
-  // padding_idx_ =
-  // dp_padding_idx_[mapping_npu_["attnDp"]["rank"].get<int64_t>()];
-  padding_idx_ = dp_padding_idx_[mapping_npu_["attnDpSize"].get<int64_t>() - 1];
-  attn_padding_idx_ =
-      dp_padding_idx_[mapping_npu_["attnDp"]["rank"].get<int64_t>()];
+  const int64_t attn_dp_rank = mapping_npu_["attnDp"]["rank"].get<int64_t>();
+  CHECK_GE(attn_dp_rank, 0);
+  CHECK_LT(attn_dp_rank, static_cast<int64_t>(dp_padding_idx_.size()));
+  // in_padding_idx (used by moe distribute dispatch) must match current DP
+  // shard layout; using a fixed DP group's indices can corrupt dispatch
+  // indexing when DP groups have different token sizes.
+  padding_idx_ = dp_padding_idx_[attn_dp_rank];
+  attn_padding_idx_ = dp_padding_idx_[attn_dp_rank];
   un_padding_idx_ = torch::zeros({1}, torch::kInt32);
 
   prepare_gather_indices();

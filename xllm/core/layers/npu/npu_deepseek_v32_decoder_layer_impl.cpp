@@ -426,7 +426,11 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
   param.enableATBGateMatmul = true;
 
   param.enableIndexGmm = false;
-  param.enableLcocAll2All = param.isPrefill && dp_size_ == 1;
+  // LCOC fused all2all path is unstable under ACL graph launch in current
+  // runtime; keep it for eager mode and fall back to the standard dynamic-ep
+  // path when graph is enabled.
+  param.enableLcocAll2All =
+      param.isPrefill && dp_size_ == 1 && !FLAGS_enable_graph;
 
   if (layer_id_ >= param.firstKDenseReplace) {
     param.enableQkvdownDp = false;
@@ -962,7 +966,9 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 30) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_index_cache());
 
-  if (input_params.q_seq_lens.numel() != 0) {
+  if (input_params.q_seq_lens.numel() != 0 &&
+      input_params.q_cu_seq_lens.defined() &&
+      input_params.q_cu_seq_lens.numel() != 0) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 31) =
         atb_speed::Utils::AtTensor2Tensor(input_params.q_cu_seq_lens);
   } else {

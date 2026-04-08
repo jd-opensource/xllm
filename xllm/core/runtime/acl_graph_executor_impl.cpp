@@ -22,6 +22,7 @@ limitations under the License.
 #include <torch_npu/csrc/libs/init_npu.h>
 #include <torch_npu/torch_npu.h>
 
+#include <algorithm>
 #include <numeric>
 
 #include "core/common/global_flags.h"
@@ -209,39 +210,113 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   const int64_t actual_batch_size = params.num_sequences;
 
   // Copy data from input parameters to persistent graph tensors
-  persistent_tokens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
-      .copy_(tokens, /*non_blocking=*/true);
-  // mRoPE positions have shape [3, num_tokens], slice on dim 1
-  if (use_mrope_) {
-    persistent_positions_
-        .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_num_tokens)
-        .copy_(positions, /*non_blocking=*/true);
-  } else {
-    persistent_positions_
-        .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
-        .copy_(positions, /*non_blocking=*/true);
+  if (actual_num_tokens > 0) {
+    persistent_tokens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+        .copy_(tokens, /*non_blocking=*/true);
   }
-  q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-      .copy_(params.q_seq_lens, /*non_blocking=*/true);
-  kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-      .copy_(params.kv_seq_lens, /*non_blocking=*/true);
+  // mRoPE positions have shape [3, num_tokens], slice on dim 1
+  if (actual_num_tokens > 0) {
+    if (use_mrope_) {
+      persistent_positions_
+          .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_num_tokens)
+          .copy_(positions, /*non_blocking=*/true);
+    } else {
+      persistent_positions_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+          .copy_(positions, /*non_blocking=*/true);
+    }
+  }
+  if (actual_batch_size > 0 && params.q_seq_lens.defined() &&
+      params.q_seq_lens.dim() >= 1 && params.q_seq_lens.numel() > 0) {
+    const int64_t q_copy_len =
+        std::min<int64_t>(actual_batch_size, params.q_seq_lens.size(0));
+    if (q_copy_len > 0) {
+      q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/q_copy_len)
+          .copy_(params.q_seq_lens.slice(/*dim=*/0,
+                                         /*start=*/0,
+                                         /*end=*/q_copy_len),
+                 /*non_blocking=*/true);
+    }
+  }
+  if (actual_batch_size > 0 && params.kv_seq_lens.defined() &&
+      params.kv_seq_lens.dim() >= 1 && params.kv_seq_lens.numel() > 0) {
+    const int64_t kv_copy_len =
+        std::min<int64_t>(actual_batch_size, params.kv_seq_lens.size(0));
+    if (kv_copy_len > 0) {
+      kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/kv_copy_len)
+          .copy_(params.kv_seq_lens.slice(/*dim=*/0,
+                                          /*start=*/0,
+                                          /*end=*/kv_copy_len),
+                 /*non_blocking=*/true);
+    }
+  }
+  // Keep padded decode slots valid for empty/local-short DP shards.
+  // These tensors are consumed by ATB setup alongside *_seq_lens_vec.
+  const int64_t padded_batch_size = static_cast<int64_t>(padded_num_tokens);
+  if (padded_batch_size > 0) {
+    const int64_t seq_fill_start =
+        std::min<int64_t>(actual_batch_size, padded_batch_size);
+    if (seq_fill_start < padded_batch_size) {
+      q_seq_lens_
+          .slice(/*dim=*/0, /*start=*/seq_fill_start, /*end=*/padded_batch_size)
+          .fill_(1);
+      kv_seq_lens_
+          .slice(/*dim=*/0, /*start=*/seq_fill_start, /*end=*/padded_batch_size)
+          .fill_(1);
+    }
+  }
 
-  persistent_new_cache_slots_
-      .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
-      .copy_(params.new_cache_slots, /*non_blocking=*/true);
+  if (actual_num_tokens > 0 && params.new_cache_slots.defined() &&
+      params.new_cache_slots.dim() >= 1 && params.new_cache_slots.numel() > 0) {
+    const int64_t slot_copy_len =
+        std::min<int64_t>(static_cast<int64_t>(actual_num_tokens),
+                          params.new_cache_slots.size(0));
+    if (slot_copy_len > 0) {
+      persistent_new_cache_slots_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/slot_copy_len)
+          .copy_(params.new_cache_slots.slice(/*dim=*/0,
+                                              /*start=*/0,
+                                              /*end=*/slot_copy_len),
+                 /*non_blocking=*/true);
+    }
+  }
+  if (actual_num_tokens < padded_num_tokens) {
+    persistent_new_cache_slots_
+        .slice(/*dim=*/0,
+               /*start=*/actual_num_tokens,
+               /*end=*/static_cast<int64_t>(padded_num_tokens))
+        .fill_(0);
+  }
 
   // Copy block table data
-  const int64_t actual_block_table_len = params.block_tables.size(1);
-  auto slice_persistent_block_tables =
-      persistent_block_tables_
-          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-          .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_block_table_len);
-  slice_persistent_block_tables.copy_(params.block_tables,
-                                      /*non_blocking=*/true);
+  if (actual_batch_size > 0 && params.block_tables.defined() &&
+      params.block_tables.dim() >= 2 && params.block_tables.numel() > 0) {
+    const int64_t block_rows_to_copy =
+        std::min<int64_t>(actual_batch_size, params.block_tables.size(0));
+    const int64_t actual_block_table_len = params.block_tables.size(1);
+    if (block_rows_to_copy > 0 && actual_block_table_len > 0) {
+      auto slice_persistent_block_tables =
+          persistent_block_tables_
+              .slice(/*dim=*/0, /*start=*/0, /*end=*/block_rows_to_copy)
+              .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_block_table_len);
+      slice_persistent_block_tables.copy_(
+          params.block_tables.slice(/*dim=*/0,
+                                    /*start=*/0,
+                                    /*end=*/block_rows_to_copy),
+          /*non_blocking=*/true);
+    }
+  }
+  if (actual_batch_size < padded_batch_size) {
+    persistent_block_tables_
+        .slice(/*dim=*/0,
+               /*start=*/actual_batch_size,
+               /*end=*/padded_batch_size)
+        .fill_(0);
+  }
 
   // Update persistent embedding from input_embedding if available
   const auto& embedding = params.input_embedding;
-  if (embedding.defined()) {
+  if (embedding.defined() && embedding.dim() >= 2) {
     const int64_t embedding_tokens = embedding.size(0);
 
     // Initialize persistent_embedding_ if needed and not already initialized
@@ -255,21 +330,50 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
 
     // Copy embedding data to persistent buffer
-    persistent_embedding_
-        .slice(/*dim=*/0, /*start=*/0, /*end=*/embedding_tokens)
-        .copy_(embedding, /*non_blocking=*/true);
-  }
-  // Update q_cu_seq_lens only if params.q_cu_seq_lens is defined
-  if (params.q_cu_seq_lens.defined()) {
-    // Lazy initialization: if q_cu_seq_lens_ is not initialized, initialize it
-    if (q_cu_seq_lens_.numel() == 0) {
-      const int64_t max_seqs_per_batch = get_decode_graph_capacity(options_);
-      q_cu_seq_lens_ = torch::zeros({max_seqs_per_batch + 1},
-                                    torch::dtype(torch::kInt).device(device_));
+    if (embedding_tokens > 0 && embedding.numel() > 0) {
+      persistent_embedding_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/embedding_tokens)
+          .copy_(embedding, /*non_blocking=*/true);
     }
-    // Copy data
-    q_cu_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-        .copy_(params.q_cu_seq_lens, /*non_blocking=*/true);
+  }
+  // Update q_cu_seq_lens used by sparse MLA indexer.
+  // Empty local DP shards can carry empty q_cu_seq_lens from upper layers;
+  // for graph capture we still need a valid non-empty length tensor for padded
+  // decode slots.
+  if (q_cu_seq_lens_.numel() == 0) {
+    const int64_t max_seqs_per_batch = get_decode_graph_capacity(options_);
+    q_cu_seq_lens_ = torch::zeros({max_seqs_per_batch + 1},
+                                  torch::dtype(torch::kInt).device(device_));
+  }
+  const bool has_q_cu =
+      params.q_cu_seq_lens.defined() && params.q_cu_seq_lens.dim() >= 1;
+  const int64_t q_cu_size = (has_q_cu && params.q_cu_seq_lens.numel() > 0)
+                                ? params.q_cu_seq_lens.size(0)
+                                : 0;
+  const int64_t q_cu_copy_len = std::min<int64_t>(actual_batch_size, q_cu_size);
+  if (q_cu_copy_len > 0) {
+    q_cu_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/q_cu_copy_len)
+        .copy_(params.q_cu_seq_lens.slice(/*dim=*/0,
+                                          /*start=*/0,
+                                          /*end=*/q_cu_copy_len),
+               /*non_blocking=*/true);
+  }
+  if (padded_batch_size > q_cu_copy_len) {
+    auto tail_q_seq_lens = q_seq_lens_.slice(/*dim=*/0,
+                                             /*start=*/q_cu_copy_len,
+                                             /*end=*/padded_batch_size);
+    auto tail_cu = torch::cumsum(tail_q_seq_lens, /*dim=*/0);
+    if (q_cu_copy_len > 0) {
+      auto last_prefix = q_cu_seq_lens_.slice(/*dim=*/0,
+                                              /*start=*/q_cu_copy_len - 1,
+                                              /*end=*/q_cu_copy_len);
+      tail_cu = tail_cu + last_prefix;
+    }
+    q_cu_seq_lens_
+        .slice(/*dim=*/0,
+               /*start=*/q_cu_copy_len,
+               /*end=*/padded_batch_size)
+        .copy_(tail_cu, /*non_blocking=*/true);
   }
 
   // Update attention mask only if needed
@@ -297,12 +401,19 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     params_for_capture->kv_seq_lens_vec.resize(padded_num_tokens);
     params_for_capture->q_seq_lens_vec.resize(padded_num_tokens);
     // Copy actual values from original params
-    for (int i = 0; i < actual_batch_size; i++) {
+    const int64_t kv_vec_size =
+        static_cast<int64_t>(params.kv_seq_lens_vec.size());
+    const int64_t q_vec_size =
+        static_cast<int64_t>(params.q_seq_lens_vec.size());
+    const int64_t vec_copy_len =
+        std::min<int64_t>(actual_batch_size, std::min(kv_vec_size, q_vec_size));
+    for (int64_t i = 0; i < vec_copy_len; i++) {
       params_for_capture->kv_seq_lens_vec[i] = params.kv_seq_lens_vec[i];
       params_for_capture->q_seq_lens_vec[i] = params.q_seq_lens_vec[i];
     }
     // Fill padded positions with default values
-    for (int i = actual_batch_size; i < padded_num_tokens; i++) {
+    for (int64_t i = vec_copy_len; i < static_cast<int64_t>(padded_num_tokens);
+         i++) {
       params_for_capture->kv_seq_lens_vec[i] = 1;
       params_for_capture->q_seq_lens_vec[i] = 1;
     }
@@ -320,16 +431,17 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
     params_for_capture->graph_buffer.tiling_data = tiling_data();
     // Set persistent embedding if available
-    if (params.input_embedding.defined()) {
+    if (params.input_embedding.defined() && params.input_embedding.dim() >= 2 &&
+        persistent_embedding_.defined() && persistent_embedding_.numel() > 0) {
       params_for_capture->input_embedding =
           persistent_embedding(padded_num_tokens);
     }
-    // Set q_cu_seq_lens if available
-    if (params.q_cu_seq_lens.defined()) {
+    // Keep q_cu_seq_lens aligned with padded capture batch.
+    if (q_cu_seq_lens_.defined() && q_cu_seq_lens_.numel() > 0) {
       params_for_capture->q_cu_seq_lens =
           q_cu_seq_lens_.slice(/*dim=*/0,
                                /*start=*/0,
-                               /*end=*/actual_batch_size);
+                               /*end=*/padded_batch_size);
     }
 
     return params_for_capture;
@@ -981,10 +1093,16 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   }
 
   // Only use acl graph in decode phase for performance optimization
-  // Get actual num_tokens from tokens shape
+  // For DP, decode graph bucket should be based on global max tokens across dp
+  // groups; local shard can be empty on some ranks.
+  uint32_t graph_num_tokens = tokens_tensor.size(/*dim=*/0);
+  if (params_single.dp_global_token_nums.size() > 1) {
+    graph_num_tokens = util::max(params_single.dp_global_token_nums);
+  }
+  // Keep actual n_tokens for replay output slicing.
   const uint32_t n_tokens = tokens_tensor.size(/*dim=*/0);
   const uint32_t actual_batch_size = n_tokens / options_.num_decoding_tokens();
-  const uint32_t bucket_num_tokens = get_bucket_num_tokens(n_tokens);
+  const uint32_t bucket_num_tokens = get_bucket_num_tokens(graph_num_tokens);
 
   // Check if conditions are suitable for graph execution (replay or capture)
   const auto max_seq_len = args_.max_position_embeddings();
