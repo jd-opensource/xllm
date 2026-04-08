@@ -1390,7 +1390,8 @@ class QwenDoubleStreamAttnProcessorBase : public torch::nn::Module {
       const torch::Tensor& encoder_hidden_states,  // Text stream
       const torch::Tensor& encoder_hidden_states_mask = torch::Tensor(),
       const torch::Tensor& attention_mask = torch::Tensor(),
-      const std::tuple<at::Tensor, at::Tensor>& image_rotary_emb = {}) = 0;
+      const std::tuple<torch::Tensor, torch::Tensor>& image_rotary_emb =
+          {}) = 0;
 
   virtual void load_state_dict(const StateDict& state_dict) {
     attn_->load_state_dict(state_dict);
@@ -1405,7 +1406,7 @@ class QwenDoubleStreamAttnProcessorBase : public torch::nn::Module {
 };
 
 // Implementation of attention forward with communication & computation overlap
-class QwenDoubleStreamAttnProcessorCMO2_0Impl
+class QwenDoubleStreamAttnProcessorCMO2_0Impl final
     : public QwenDoubleStreamAttnProcessorBase {
  public:
   QwenDoubleStreamAttnProcessorCMO2_0Impl(Attention&& attn_module,
@@ -1426,7 +1427,7 @@ class QwenDoubleStreamAttnProcessorCMO2_0Impl
       const torch::Tensor& encoder_hidden_states,  // Text stream
       const torch::Tensor& encoder_hidden_states_mask = torch::Tensor(),
       const torch::Tensor& attention_mask = torch::Tensor(),
-      const std::tuple<at::Tensor, at::Tensor>& image_rotary_emb = {})
+      const std::tuple<torch::Tensor, torch::Tensor>& image_rotary_emb = {})
       override {
     //  Compute QKV for image stream (sample projections)
     // auto reshape_dims = std::vector<int64_t>{heads / FLAGS_sp_size,
@@ -1562,8 +1563,8 @@ class QwenDoubleStreamAttnProcessorCMO2_0Impl
         /*atten_mask*/ torch::nullopt,
         /*scale=*/pow(joint_query.size(3), -0.5),
         /*keep_prob=*/1.0,
-        /*pre_tockens=*/65535,
-        /*next_tockens=*/65535);
+        /*pre_tokens=*/65535,
+        /*next_tokens=*/65535);
 
     auto joint_hidden_states = std::get<0>(results);
     // Reshape back
@@ -1634,7 +1635,7 @@ class QwenDoubleStreamAttnProcessorCMO2_0Impl
 TORCH_MODULE(QwenDoubleStreamAttnProcessorCMO2_0);
 
 // Implementation of attention forward
-class QwenDoubleStreamAttnProcessor2_0Impl
+class QwenDoubleStreamAttnProcessor2_0Impl final
     : public QwenDoubleStreamAttnProcessorBase {
  public:
   QwenDoubleStreamAttnProcessor2_0Impl(Attention&& attn_module,
@@ -1647,7 +1648,7 @@ class QwenDoubleStreamAttnProcessor2_0Impl
       const torch::Tensor& encoder_hidden_states,  // Text stream
       const torch::Tensor& encoder_hidden_states_mask = torch::Tensor(),
       const torch::Tensor& attention_mask = torch::Tensor(),
-      const std::tuple<at::Tensor, at::Tensor>& image_rotary_emb = {})
+      const std::tuple<torch::Tensor, torch::Tensor>& image_rotary_emb = {})
       override {
     // int64_t seq_txt = encoder_hidden_states.size(1);
     // int64_t seq_img = hidden_states.size(1);
@@ -2115,17 +2116,6 @@ class QwenImageTransformer2DModelImpl : public torch::nn::Module {
     out_channels = (out_channels > 0) ? out_channels : in_channels;
     auto inner_dim = num_attention_heads * attention_head_dim;
 
-    // Positional embedding
-    if (use_layer3d_rope_) {
-      pos_embed_3d_rope_ = register_module(
-          "pos_embed",
-          QwenEmbedLayer3DRope(context, /*theta=*/10000, axes_dims_rope, true));
-    } else {
-      pos_embed_ = register_module(
-          "pos_embed",
-          QwenEmbedRope(context, /*theta=*/10000, axes_dims_rope, true));
-    }
-
     // Time-text embedding
     time_text_embed_ = register_module(
         "time_text_embed",
@@ -2178,6 +2168,7 @@ class QwenImageTransformer2DModelImpl : public torch::nn::Module {
       torch::Tensor timestep = torch::Tensor(),
       std::vector<std::vector<int64_t>> img_shapes = {},
       torch::Tensor txt_seq_lens = torch::Tensor(),
+      const std::tuple<torch::Tensor, torch::Tensor>& image_rotary_emb = {},
       bool use_cfg = false,
       int64_t step_idx = 0,
       torch::Tensor addition_t_cond = torch::Tensor(),
@@ -2212,8 +2203,6 @@ class QwenImageTransformer2DModelImpl : public torch::nn::Module {
       modulate_index = torch::Tensor();
     }
 
-    auto origin_text_seq_len = encoder_hidden_states.size(1);
-
     // padding mask for sequence parallel scene
     auto padded_encoder_hidden_states_mask =
         xllm::dit::SequenceParallelPadManager::getInstance().pad_tensor(
@@ -2245,16 +2234,6 @@ class QwenImageTransformer2DModelImpl : public torch::nn::Module {
                                        padded_encoder_hidden_states_mask);
     auto temb = time_text_embed_->forward(
         new_timestep, new_hidden_states, addition_t_cond);
-    std::tuple<torch::Tensor, torch::Tensor> image_rotary_emb;
-    if (use_layer3d_rope_) {
-      image_rotary_emb = pos_embed_3d_rope_->forward(
-          img_shapes, origin_text_seq_len, new_hidden_states.device());
-    } else {
-      image_rotary_emb = pos_embed_->forward(img_shapes,
-                                             origin_text_seq_len,
-                                             new_hidden_states.device(),
-                                             /*max_txt_seq_len=*/std::nullopt);
-    }
 
     std::unordered_map<std::string, torch::Tensor> block_attention_kwargs;
     if (new_encoder_hidden_states_mask.has_value() &&
@@ -2398,8 +2377,6 @@ class QwenImageTransformer2DModelImpl : public torch::nn::Module {
 
  private:
   torch::TensorOptions options_;
-  QwenEmbedRope pos_embed_{nullptr};
-  QwenEmbedLayer3DRope pos_embed_3d_rope_{nullptr};
   QwenTimestepProjEmbeddings time_text_embed_{nullptr};
   RMSNorm txt_norm_{nullptr};
   layer::AddMatmulWeightTransposed img_in_{nullptr};
