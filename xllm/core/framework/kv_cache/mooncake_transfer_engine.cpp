@@ -15,6 +15,9 @@ limitations under the License.
 
 #include "mooncake_transfer_engine.h"
 
+#if defined(USE_NPU)
+#include <acl/acl.h>
+#endif
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
