@@ -86,6 +86,9 @@ class NpuLmHeadImpl : public BaseLayer {
   std::vector<std::shared_ptr<at::Tensor>> decode_tensor_storage_;
   atb::Tensor hidden_states_atb_;
   atb::Tensor seleted_idxes_atb_;
+
+  int64_t vocab_size_ = -1;
+  int64_t padded_vocab_size_ = -1;
 };
 TORCH_MODULE(NpuLmHead);
 

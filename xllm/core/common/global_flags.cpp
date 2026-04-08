@@ -343,8 +343,6 @@ DEFINE_string(kv_cache_transfer_mode,
               "PUSH",
               "The mode of kv cache transfer(e.g. PUSH, PULL).");
 
-DEFINE_int32(npu_phy_id, -1, "npu phy id");
-
 DEFINE_int32(transfer_listen_port, 26000, "The KVCacheTranfer listen port.");
 
 DEFINE_uint64(input_shm_size,
@@ -408,19 +406,23 @@ DEFINE_bool(enable_atb_spec_kernel,
 
 // --- block copy config ---
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_CUDA)
 DEFINE_bool(enable_block_copy_kernel,
             true,
-            "Whether to use ATB block copy kernel. NPU-only.");
+            "Whether to use block copy kernel on supported backends.");
 #else
 DEFINE_bool(enable_block_copy_kernel,
             false,
-            "Whether to use ATB block copy kernel. NPU-only.");
+            "Whether to use block copy kernel on supported backends.");
 #endif
 
 // --- service routing config ---
 
 DEFINE_string(etcd_addr, "", "Etcd adderss for save instance meta info.");
+
+DEFINE_string(etcd_namespace,
+              "",
+              "Optional etcd namespace prefix for all xllm keys, e.g. prod-a.");
 
 DEFINE_bool(enable_service_routing,
             false,
@@ -603,7 +605,7 @@ DEFINE_int32(random_seed, -1, "Random seed for random number generator.");
 DEFINE_string(dit_cache_policy,
               "TaylorSeer",
               "The policy of dit cache(e.g. None, FBCache, TaylorSeer, "
-              "FBCacheTaylorSeer).");
+              "FBCacheTaylorSeer, ResidualCache).");
 
 DEFINE_int64(dit_cache_warmup_steps, 0, "The number of warmup steps.");
 
@@ -666,6 +668,7 @@ DEFINE_bool(dit_debug_print,
 DEFINE_bool(enable_return_mm_full_embeddings,
             false,
             "return vit and sequence embeddings for vlm models");
+
 DEFINE_bool(
     use_audio_in_video,
     false,

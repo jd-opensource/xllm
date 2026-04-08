@@ -46,7 +46,8 @@ class MtpModelImplBase : public torch::nn::Module {
  public:
   // mode type: qwen2, qwen3 .etc
   MtpModelImplBase(const std::string& model_type, const ModelContext& context)
-      : model_type_(model_type) {
+      : model_type_(model_type),
+        device_(context.get_tensor_options().device()) {
     InterruptionBus::get_instance().subscribe([this](bool interrupted) {
       this->layer_forward_interrupted_ = interrupted;
     });
@@ -90,9 +91,11 @@ class MtpModelImplBase : public torch::nn::Module {
                               torch::Tensor positions,
                               std::vector<KVCache>& kv_caches,
                               const ModelInputParams& input_params) {
-    if (dp_size_ > 1 && tokens.numel() == 0) {
-      tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
-      positions = torch::tensor({0}).to(torch::kInt32).to(tokens.device());
+    if (dp_size_ > 1 && (!tokens.defined() || tokens.numel() == 0)) {
+      auto options =
+          torch::TensorOptions().dtype(torch::kInt32).device(device_);
+      tokens = torch::tensor({1}, options);
+      positions = torch::tensor({0}, options);
     }
 
     torch::Tensor h = embed_tokens_(tokens, 0);
@@ -259,6 +262,7 @@ class MtpModelImplBase : public torch::nn::Module {
 
  private:
   std::string model_type_;
+  torch::Device device_;
 };
 
 template <typename MtpModelType>

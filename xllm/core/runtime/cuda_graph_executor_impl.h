@@ -21,6 +21,9 @@ limitations under the License.
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/torch.h>
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 10
+#include <ATen/cuda/MemPool.h>
+#endif
 
 #include <cstddef>
 #include <cstdint>
@@ -39,6 +42,12 @@ limitations under the License.
 #include "options.h"
 
 namespace xllm::runtime::cuda {
+
+#if TORCH_VERSION_MAJOR >= 2 && TORCH_VERSION_MINOR >= 10
+using TorchMemPool = at::cuda::MemPool;
+#else
+using TorchMemPool = c10::cuda::MemPool;
+#endif
 
 // Helper class to hold persistent parameters for CUDA graph execution
 // Multiple CudaGraph instances can share the same CudaGraphPersistentParam
@@ -222,7 +231,7 @@ class CudaGraph {
                std::vector<KVCache>& kv_cache,
                uint32_t bucket_num_tokens,
                const at::cuda::MempoolId_t& pool,
-               c10::cuda::MemPool* pool_ptr = nullptr);
+               TorchMemPool* pool_ptr = nullptr);
 
   // Replay captured graph with new input data
   ModelOutput replay(const torch::Tensor& tokens,
@@ -341,10 +350,9 @@ class CudaGraphExecutorImpl : public ExecutorImpl {
   };
 
   VmmPoolState& get_or_create_vmm_pool_state(uint32_t physical_pool_id);
-  c10::cuda::MemPool* get_or_create_vmm_mempool(uint32_t physical_pool_id,
-                                                uint32_t shape_id);
-  c10::cuda::MemPool* get_vmm_mempool(uint32_t physical_pool_id,
-                                      uint32_t shape_id);
+  TorchMemPool* get_or_create_vmm_mempool(uint32_t physical_pool_id,
+                                          uint32_t shape_id);
+  TorchMemPool* get_vmm_mempool(uint32_t physical_pool_id, uint32_t shape_id);
   GraphMemoryUsageStats get_graph_memory_usage_stats();
   void log_graph_memory_after_capture();
 

@@ -59,7 +59,6 @@ XTensorAllocator::~XTensorAllocator() {
 void XTensorAllocator::destroy() {
   std::lock_guard<std::mutex> lock(mtx_);
   model_tensors_.clear();
-  zero_page_ = nullptr;  // Not owned, just clear pointer
   xtensor_dist_clients_.clear();
   xtensor_dist_servers_.clear();
   initialized_ = false;
@@ -553,10 +552,6 @@ std::vector<torch::Tensor> XTensorAllocator::create_kv_tensors_impl_(
   model.num_layers = num_layers;
   model.kv_tensor_size_per_layer = size;
 
-  if (!zero_page_) {
-    zero_page_ = PhyPagePool::get_instance().get_zero_page();
-  }
-
   return create_tensors_internal_(
       size, dims, dtype, num_layers, *target_tensors);
 }
@@ -763,7 +758,7 @@ std::vector<torch::Tensor> XTensorAllocator::create_tensors_internal_(
   tensors_out.reserve(num_layers);
 
   for (int64_t i = 0; i < num_layers; i++) {
-    auto xtensor = std::make_unique<XTensor>(size, dtype, dev_, zero_page_);
+    auto xtensor = std::make_unique<XTensor>(size, dtype, dev_);
     tensors.push_back(xtensor->to_torch_tensor(0, dims));
     tensors_out.push_back(std::move(xtensor));
   }

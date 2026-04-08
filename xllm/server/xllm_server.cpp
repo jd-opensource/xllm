@@ -17,11 +17,20 @@ limitations under the License.
 
 #include <brpc/server.h>
 #include <butil/at_exit.h>
+#include <unistd.h>
+
+#include <csignal>
 
 #include "core/common/global_flags.h"
 #include "health_reporter.h"
 
 namespace xllm {
+
+namespace {
+volatile std::sig_atomic_t g_quit_flag = 0;
+
+void quit_signal_handler(int /*signum*/) { g_quit_flag = 1; }
+}  // namespace
 
 XllmServer::XllmServer() { butil::AtExitManager exit_manager; }
 
@@ -84,8 +93,30 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
       std::string(butil::endpoint2str(server_->listen_address()).c_str());
   listen_port_ = FLAGS_port;
   has_initialized_ = true;
-  // Wait until Ctrl-C is pressed, then Stop() and Join() the server.
-  server_->RunUntilAskedToQuit();
+
+  auto pid = getpid();
+  LOG(INFO) << "     Started server process [" << pid << "]";
+  LOG(INFO) << "     Waiting for application startup.";
+  LOG(INFO) << "     Application startup complete.";
+
+  g_quit_flag = 0;
+  struct sigaction sa = {};
+  sa.sa_handler = quit_signal_handler;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGINT, &sa, nullptr);
+  sigaction(SIGTERM, &sa, nullptr);
+
+  while (!g_quit_flag) {
+    sleep(1);
+  }
+
+  LOG(INFO) << "     Shutting down";
+  LOG(INFO) << "     Waiting for application shutdown.";
+
+  stop();
+
+  LOG(INFO) << "     Application shutdown complete.";
+  LOG(INFO) << "     Finished server process [" << pid << "]";
 
   return true;
 }
@@ -245,6 +276,9 @@ void XllmServer::run() {
 }
 
 void XllmServer::stop() {
+  if (!server_) {
+    return;
+  }
   server_->Stop(0);
   server_->Join();
 }

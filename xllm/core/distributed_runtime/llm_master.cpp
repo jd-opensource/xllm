@@ -67,7 +67,8 @@ LLMMaster::LLMMaster(const Options& options)
     xservice_client_ = XServiceClient::get_instance();
     if (!xservice_client_->init(options_.etcd_addr().value_or(""),
                                 options_.instance_name().value_or(""),
-                                engine_->block_manager_pool())) {
+                                engine_->block_manager_pool(),
+                                options_.etcd_namespace().value_or(""))) {
       LOG(FATAL) << "XServiceClient init fail!";
       return;
     }

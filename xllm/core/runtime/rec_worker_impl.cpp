@@ -95,32 +95,9 @@ void RecWorkerImpl::RecWorkPipeline::prepare_work_before_execute(
   processed_inputs =
       inputs.to(runtime_.worker.device(), runtime_.worker.dtype());
   auto& input_params = processed_inputs.input_params;
+  runtime_.worker.apply_kv_block_swaps(input_params);
+
 #if defined(USE_NPU)
-  if (input_params.swap_blocks.size() > 0 && !FLAGS_enable_block_copy_kernel) {
-    auto& swap_blocks = input_params.swap_blocks;
-
-    // collect src and dst indices
-    std::vector<int64_t> src_indices, dst_indices;
-    src_indices.reserve(swap_blocks.size());
-    dst_indices.reserve(swap_blocks.size());
-
-    for (const auto& block : swap_blocks) {
-      src_indices.push_back(block.src_block_id);
-      dst_indices.push_back(block.dst_block_id);
-    }
-
-    // batch select keys and values
-    auto src_tensor = torch::tensor(
-        src_indices,
-        torch::dtype(torch::kLong).device(runtime_.worker.device_));
-    auto dst_tensor = torch::tensor(
-        dst_indices,
-        torch::dtype(torch::kLong).device(runtime_.worker.device_));
-    const int64_t num_layers = runtime_.context->get_model_args().n_layers();
-    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
-      runtime_.worker.kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
-    }
-  }
   if (runtime_.context->get_model_args().enable_mla() &&
       input_params.batch_forward_type.is_chunked_prefill()) {
     runtime_.worker.prepare_mla_prefixcache_inputs(input_params);
@@ -421,6 +398,10 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
   torch::Tensor hidden_states;
   if (rec_params.rec_stage == OneRecModelInputParams::RecStage::PREFILL) {
     if (!rec_params.is_first_prefill) {
+      if (!has_encoder_context) {
+        LOG(ERROR) << "OneRec prefill requires encoder context.";
+        return std::nullopt;
+      }
       ModelInputParams decoder_params = input_params;
       decoder_params.mutable_onerec_params().is_encoder_forward = false;
       decoder_params.mutable_onerec_params().has_encoder_output =
@@ -465,11 +446,6 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
       decoder_onerec_params.is_encoder_forward = false;
       decoder_onerec_params.has_encoder_output =
           encoder_output.hidden_states.defined();
-      if (encoder_output.hidden_states.defined() &&
-          !decoder_onerec_params.decoder_context_embedding.defined()) {
-        decoder_onerec_params.decoder_context_embedding =
-            encoder_output.hidden_states;
-      }
       auto model_output = runtime_.executor->forward(input.token_ids,
                                                      input.positions,
                                                      runtime_.worker.kv_caches_,
@@ -477,6 +453,10 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
       hidden_states = model_output.hidden_states;
     }
   } else {
+    if (!has_encoder_context) {
+      LOG(ERROR) << "OneRec decode requires encoder context.";
+      return std::nullopt;
+    }
     ModelInputParams decoder_params = input_params;
     decoder_params.mutable_onerec_params().is_encoder_forward = false;
     decoder_params.mutable_onerec_params().has_encoder_output =

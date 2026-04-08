@@ -192,13 +192,14 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   AUTO_COUNTER(allocate_blocks_latency_seconds);
   DCHECK(sequence != nullptr);
   int32_t dp_rank = get_dp_rank(sequence);
+  const bool started_empty = sequence->kv_state().num_kv_blocks() == 0;
   const bool needs_embedding_id = !sequence->has_embedding_id();
   if (needs_embedding_id && !allocate_embedding_id(sequence, dp_rank)) {
     return false;
   }
 
   // first try to allocate shared blocks
-  if (sequence->kv_state().num_kv_blocks() == 0) {
+  if (started_empty) {
     BlockManagerPool::allocate_shared(sequence);
   }
 
@@ -215,6 +216,13 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
 
   const auto blocks = block_managers_[dp_rank]->allocate(num_additional_blocks);
   if (blocks.size() != num_additional_blocks) {
+    if (started_empty) {
+      block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+      if (needs_embedding_id) {
+        deallocate_embedding_id(sequence, dp_rank);
+      }
+      sequence->reset();
+    }
     // LOG(ERROR) << " Fail to allocate " << num_additional_blocks << "
     // blocks.";
     return false;

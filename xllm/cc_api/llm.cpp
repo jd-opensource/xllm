@@ -113,7 +113,7 @@ bool LLM::Initialize(const std::string& model_path,
         .is_local(init_options.is_local)
         .server_idx(init_options.server_idx);
 
-#if !defined(USE_NPU)
+#if !defined(USE_NPU) && !defined(USE_CUDA)
     FLAGS_enable_block_copy_kernel = false;
 #endif
 

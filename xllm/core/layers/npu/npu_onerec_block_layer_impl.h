@@ -59,7 +59,7 @@ class NpuOneRecBlockLayerImpl final : public BaseLayer {
                         KVCache& kv_cache,
                         ModelInputParams& input_params,
                         torch::Tensor* encoder_output = nullptr,
-                        int node_id = 0,
+                        int32_t node_id = 0,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr,
                         const torch::Tensor& expert_array = torch::Tensor());
@@ -103,14 +103,14 @@ class NpuOneRecBlockLayerImpl final : public BaseLayer {
 
   int64_t init_attn_mask();
 
-  int setup_common_decoder_tensors(atb_speed::Model::Node& node,
-                                   torch::Tensor& x,
-                                   at::Tensor& attn_mask,
-                                   ModelInputParams& input_params,
-                                   torch::Tensor* encoder_output = nullptr,
-                                   int start_tensor_idx = 0);
+  int32_t setup_common_decoder_tensors(atb_speed::Model::Node& node,
+                                       torch::Tensor& x,
+                                       at::Tensor& attn_mask,
+                                       ModelInputParams& input_params,
+                                       torch::Tensor* encoder_output = nullptr,
+                                       int32_t start_tensor_idx = 0);
 
-  void resize_experts_weights(int num_of_device_experts);
+  void resize_experts_weights(int32_t num_of_device_experts);
   void process_expert_weights(const StateDict& state_dict,
                               const std::string& state_key,
                               const torch::Tensor& tensor);
@@ -125,7 +125,7 @@ class NpuOneRecBlockLayerImpl final : public BaseLayer {
   torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts_gate,
                                       std::vector<torch::Tensor>& experts_up,
                                       bool transpose = false);
-  int extract_expert_index(const std::string& name);
+  int32_t extract_expert_index(const std::string& name);
   std::string extract_endswith(const std::string& input);
 
   atb_speed::Model::Node prefill_node_;
@@ -141,7 +141,7 @@ class NpuOneRecBlockLayerImpl final : public BaseLayer {
   at::Tensor at_placeholder_;
   std::vector<int32_t> placeholder_vec_;
 
-  int device_id_ = 0;
+  int32_t device_id_ = 0;
   bool is_decoder_ = false;
   int32_t layer_id_ = 0;
 

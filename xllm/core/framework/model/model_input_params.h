@@ -31,6 +31,7 @@ limitations under the License.
 #include "npu_cp_ep_padding.h"
 #include "npu_cp_prepare.h"
 #include "npu_dp_ep_padding.h"
+#include "runtime/dit_forward_params.h"
 #include "util/hash_util.h"
 #include "util/tensor_helper.h"
 
@@ -414,6 +415,8 @@ struct ModelInputParams {
 
     params.batch_id = batch_id;
 
+    params.dit_forward_input = dit_forward_input.to(device);
+
     // rec_params device conversion for both OneRec and LLM-Rec variants
     if (const auto* onerec = onerec_params()) {
       params.rec_params = onerec->to(device);
@@ -489,7 +492,7 @@ struct ModelInputParams {
   int32_t kv_max_seq_len = 0;
   int32_t q_max_seq_len = 0;
 
-  uint64_t batch_id;
+  uint64_t batch_id = 0;
 
   torch::Tensor q_seq_lens;
   torch::Tensor kv_seq_lens;
@@ -584,6 +587,9 @@ struct ModelInputParams {
   std::vector<int32_t> ring_cache_seqlen_host;
 
   RecModelInputParams rec_params;
+
+  // dit input data
+  DiTForwardInput dit_forward_input;
 
   const OneRecModelInputParams* onerec_params() const {
     return std::get_if<OneRecModelInputParams>(&rec_params);

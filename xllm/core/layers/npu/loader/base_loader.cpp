@@ -176,5 +176,120 @@ torch::Dtype BaseLoader::string2dtype(const std::string& dtype_str) {
   LOG(FATAL) << "Unsupported dtype string: " << dtype_str;
 }
 
+at::Tensor BaseLoader::pad_vocab_tensor(const at::Tensor& tensor,
+                                        int64_t padded_vocab_size) const {
+  if (tensor.size(0) >= padded_vocab_size) {
+    return tensor;
+  }
+  at::Tensor padded_tensor =
+      torch::zeros({padded_vocab_size, tensor.size(1)}, tensor.options());
+  padded_tensor.slice(0, 0, tensor.size(0)) = tensor;
+  return padded_tensor;
+}
+
+at::Tensor BaseLoader::shard_padded_tensor(const at::Tensor& padded_tensor,
+                                           int dim,
+                                           int rank,
+                                           int world_size) const {
+  if (world_size <= 1) {
+    return padded_tensor;
+  }
+  auto chunks = padded_tensor.chunk(world_size, dim);
+  return chunks[rank];
+}
+
+void BaseLoader::set_weight_with_padding(const StateDict& state_dict,
+                                         const std::string& tensor_name,
+                                         int weight_position,
+                                         int dim,
+                                         int64_t padded_vocab_size,
+                                         bool to_host) {
+  auto device = to_host ? at::kCPU : device_;
+  for (const auto& [name, tensor] : state_dict) {
+    if (absl::EndsWith(name, tensor_name)) {
+      at::Tensor mutable_tensor = tensor;
+      if (padded_vocab_size > tensor.size(0)) {
+        mutable_tensor = pad_vocab_tensor(tensor, padded_vocab_size);
+      }
+      correct_tensor_dtype(mutable_tensor, tensor_name);
+      if (to_host) {
+        at_host_weight_tensors_[weight_position] = mutable_tensor.to(device);
+      } else {
+        at_weight_tensors_[weight_position] = mutable_tensor.to(device);
+      }
+    }
+  }
+}
+
+void BaseLoader::set_weight_with_padding(const StateDict& state_dict,
+                                         const std::string& tensor_name,
+                                         int weight_position,
+                                         int dim,
+                                         int rank,
+                                         int world_size,
+                                         int64_t padded_vocab_size,
+                                         bool to_host) {
+  auto device = to_host ? at::kCPU : device_;
+  if (world_size <= 1) {
+    set_weight_with_padding(state_dict,
+                            tensor_name,
+                            weight_position,
+                            dim,
+                            padded_vocab_size,
+                            to_host);
+    return;
+  }
+  for (const auto& [name, tensor] : state_dict) {
+    if (absl::EndsWith(name, tensor_name)) {
+      at::Tensor mutable_tensor = tensor;
+      if (padded_vocab_size > tensor.size(0)) {
+        // Memory-optimized path for vocabulary dimension sharding
+        if (dim == 0) {
+          int64_t shard_size = padded_vocab_size / world_size;
+          int64_t start_idx = rank * shard_size;
+          int64_t end_idx = (rank + 1) * shard_size;
+          if (start_idx >= tensor.size(0)) {
+            mutable_tensor =
+                torch::zeros({shard_size, tensor.size(1)}, tensor.options());
+          } else {
+            auto valid_part =
+                tensor.slice(0, start_idx, std::min(end_idx, tensor.size(0)));
+            if (valid_part.size(0) < shard_size) {
+              mutable_tensor =
+                  torch::zeros({shard_size, tensor.size(1)}, tensor.options());
+              mutable_tensor.slice(0, 0, valid_part.size(0)).copy_(valid_part);
+            } else {
+              mutable_tensor = valid_part.clone();
+            }
+          }
+        } else {
+          // Non-vocabulary dimension: use original approach
+          mutable_tensor = pad_vocab_tensor(tensor, padded_vocab_size);
+          mutable_tensor =
+              shard_padded_tensor(mutable_tensor, dim, rank, world_size);
+        }
+      } else {
+        mutable_tensor =
+            state_dict.get_sharded_tensor(tensor_name, dim, rank, world_size);
+      }
+      correct_tensor_dtype(mutable_tensor, tensor_name);
+      if (to_host) {
+        at_host_weight_tensors_[weight_position] = mutable_tensor.to(device);
+      } else {
+        at_weight_tensors_[weight_position] = mutable_tensor.to(device);
+      }
+    }
+  }
+}
+
+int64_t BaseLoader::get_padded_vocab_size(const ModelContext& context) const {
+  int64_t vocab_size = context.get_model_args().vocab_size();
+  int32_t local_tp_size = dp_local_tp_size_;
+  if (vocab_size > 0 && local_tp_size > 1 && vocab_size % local_tp_size != 0) {
+    return ((vocab_size + local_tp_size - 1) / local_tp_size) * local_tp_size;
+  }
+  return vocab_size;
+}
+
 }  // namespace layer
 }  // namespace xllm

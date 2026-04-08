@@ -181,13 +181,14 @@ torch::Tensor fp8_linear_forward(
 }  // namespace
 
 ColumnParallelLinearImpl::ColumnParallelLinearImpl(const ModelContext& context)
-    : ColumnParallelLinearImpl(context.get_model_args().hidden_size(),
-                               context.get_model_args().vocab_size(),
-                               /*bias=*/false,
-                               /*gather_output=*/true,
-                               context.get_quant_args(),
-                               context.get_parallel_args().tp_group_,
-                               context.get_tensor_options()) {}
+    : ColumnParallelLinearImpl(
+          context.get_model_args().hidden_size(),
+          context.get_model_args().vocab_size(),
+          /*bias=*/false,
+          /*gather_output=*/true,
+          QuantArgs{},  // do not use quantization for lm_head
+          context.get_parallel_args().tp_group_,
+          context.get_tensor_options()) {}
 
 // Linear layer with column parallelism.
 ColumnParallelLinearImpl::ColumnParallelLinearImpl(
@@ -666,17 +667,6 @@ std::optional<torch::Tensor> QKVParallelLinearImpl::get_input_scale() const {
   }
   return std::nullopt;
 }
-
-// Linear layer with row parallelism.
-RowParallelLinearImpl::RowParallelLinearImpl(const ModelContext& context)
-    : RowParallelLinearImpl(context.get_model_args().hidden_size(),
-                            context.get_model_args().vocab_size(),
-                            /*bias=*/false,
-                            /*input_is_parallelized=*/false,
-                            /*enable_result_reduction=*/true,
-                            context.get_quant_args(),
-                            context.get_parallel_args().tp_group_,
-                            context.get_tensor_options()) {}
 
 // Linear layer with row parallelism.
 RowParallelLinearImpl::RowParallelLinearImpl(

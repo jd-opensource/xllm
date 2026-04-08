@@ -27,8 +27,8 @@ limitations under the License.
 
 #if CUB_VERSION >= 200800
 #include <cuda/std/functional>
-using CubAddOp = cuda::std::plus<>;
-using CubMaxOp = cuda::maximum<>;
+using CubAddOp = ::cuda::std::plus<>;
+using CubMaxOp = ::cuda::maximum<>;
 #else   // if CUB_VERSION < 200800
 using CubAddOp = cub::Sum;
 using CubMaxOp = cub::Max;
