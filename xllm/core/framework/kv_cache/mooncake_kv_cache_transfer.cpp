@@ -90,10 +90,10 @@ bool MooncakeKVCacheTransferBase::unlink_cluster(const uint64_t& cluster_id,
 }
 
 // ============================================================================
-// MooncakeKVCacheTransferNative
+// MooncakeKVCacheTransferDefault
 // ============================================================================
 
-MooncakeKVCacheTransferNative::MooncakeKVCacheTransferNative(
+MooncakeKVCacheTransferDefault::MooncakeKVCacheTransferDefault(
     const int32_t device_id,
     const int16_t listen_port,
     const torch::Device& device,
@@ -105,16 +105,16 @@ MooncakeKVCacheTransferNative::MooncakeKVCacheTransferNative(
           std::make_unique<MooncakeTransferEngine>(listen_port, device)),
       model_type_(model_type) {}
 
-void MooncakeKVCacheTransferNative::allocate_kv_cache(
+void MooncakeKVCacheTransferDefault::allocate_kv_cache(
     std::vector<xllm::KVCache>& kv_caches,
     const int64_t num_layers,
     const std::vector<std::vector<int64_t>>& kv_cache_shape,
     torch::ScalarType dtype) {
   num_layers_ = num_layers;
-  allocate_kv_cache_native(kv_caches, num_layers, kv_cache_shape, dtype);
+  allocate_kv_cache_impl(kv_caches, num_layers, kv_cache_shape, dtype);
 }
 
-void MooncakeKVCacheTransferNative::register_kv_cache(
+void MooncakeKVCacheTransferDefault::register_kv_cache(
     std::vector<xllm::KVCache>& kv_caches,
     const std::vector<std::vector<int64_t>>& kv_cache_shape,
     torch::ScalarType dtype) {
@@ -127,10 +127,10 @@ void MooncakeKVCacheTransferNative::register_kv_cache(
   }
   size_per_block_ = count_per_block * data_size;
 
-  register_per_layer_kv_cache(kv_caches, kv_cache_shape, dtype);
+  register_kv_cache_impl(kv_caches);
 }
 
-void MooncakeKVCacheTransferNative::allocate_kv_cache_native(
+void MooncakeKVCacheTransferDefault::allocate_kv_cache_impl(
     std::vector<xllm::KVCache>& kv_caches,
     int64_t num_layers,
     const std::vector<std::vector<int64_t>>& kv_cache_shape,
@@ -192,10 +192,9 @@ void MooncakeKVCacheTransferNative::allocate_kv_cache_native(
   }
 }
 
-void MooncakeKVCacheTransferNative::register_per_layer_kv_cache(
-    std::vector<xllm::KVCache>& kv_caches,
-    const std::vector<std::vector<int64_t>>& kv_cache_shape,
-    torch::ScalarType dtype) {
+void MooncakeKVCacheTransferDefault::register_kv_cache_impl(
+    std::vector<xllm::KVCache>& kv_caches) {
+  // Default mode registers each layer's K/V cache tensor buffers directly.
   int64_t num_cache = num_layers_ * 2;
 
   std::vector<void*> cache_addrs;
@@ -215,15 +214,15 @@ void MooncakeKVCacheTransferNative::register_per_layer_kv_cache(
 
   if (!mooncake_te_->register_memory(
           cache_addrs, cache_lens, size_per_block_)) {
-    LOG(ERROR) << "register_per_layer_kv_cache failed";
+    LOG(ERROR) << "register_kv_cache_impl failed";
     return;
   }
 
-  LOG(INFO) << "register_per_layer_kv_cache success, num_layers=" << num_layers_
+  LOG(INFO) << "register_kv_cache_impl success, num_layers=" << num_layers_
             << ", size_per_block=" << size_per_block_;
 }
 
-bool MooncakeKVCacheTransferNative::pull_kv_blocks(
+bool MooncakeKVCacheTransferDefault::pull_kv_blocks(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
     const int64_t src_k_cache_id,
@@ -243,7 +242,7 @@ bool MooncakeKVCacheTransferNative::pull_kv_blocks(
   return true;
 }
 
-bool MooncakeKVCacheTransferNative::push_kv_blocks(
+bool MooncakeKVCacheTransferDefault::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
     bool is_spec_draft) {
@@ -285,7 +284,7 @@ void MooncakeKVCacheTransferXTensor::allocate_kv_cache(
     const std::vector<std::vector<int64_t>>& kv_cache_shape,
     torch::ScalarType dtype) {
   num_layers_ = num_layers;
-  allocate_kv_cache_xtensor(kv_caches, num_layers, kv_cache_shape, dtype);
+  allocate_kv_cache_impl(kv_caches, num_layers, kv_cache_shape, dtype);
 }
 
 void MooncakeKVCacheTransferXTensor::register_kv_cache(
@@ -301,10 +300,10 @@ void MooncakeKVCacheTransferXTensor::register_kv_cache(
   }
   size_per_block_ = count_per_block * data_size;
 
-  register_global_xtensor(kv_cache_shape, dtype);
+  register_kv_cache_impl();
 }
 
-void MooncakeKVCacheTransferXTensor::allocate_kv_cache_xtensor(
+void MooncakeKVCacheTransferXTensor::allocate_kv_cache_impl(
     std::vector<xllm::KVCache>& kv_caches,
     int64_t num_layers,
     const std::vector<std::vector<int64_t>>& kv_cache_shape,
@@ -333,9 +332,8 @@ void MooncakeKVCacheTransferXTensor::allocate_kv_cache_xtensor(
             << ", model_id=" << model_id_ << ", num_layers=" << num_layers;
 }
 
-void MooncakeKVCacheTransferXTensor::register_global_xtensor(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape,
-    torch::ScalarType dtype) {
+void MooncakeKVCacheTransferXTensor::register_kv_cache_impl() {
+  // XTensor mode registers one shared GlobalXTensor memory region.
   auto& global_xtensor = GlobalXTensor::get_instance();
   if (!global_xtensor.is_initialized()) {
     LOG(ERROR) << "GlobalXTensor not initialized in xtensor mode";
@@ -356,7 +354,7 @@ void MooncakeKVCacheTransferXTensor::register_global_xtensor(
   }
 
   global_xtensor.set_mooncake_registered(true);
-  LOG(INFO) << "register_global_xtensor success, total_size="
+  LOG(INFO) << "register_kv_cache_impl success, total_size="
             << global_xtensor.total_size()
             << ", num_pages=" << global_xtensor.num_total_pages()
             << ", size_per_block=" << size_per_block_;
@@ -372,7 +370,7 @@ bool MooncakeKVCacheTransferXTensor::pull_kv_blocks(
   (void)src_cluster_id;
   (void)src_k_cache_id;
   (void)src_v_cache_id;
-  return pull_kv_blocks_xtensor_mode(src_addr, src_blocks, dst_blocks);
+  return pull_kv_blocks_impl(src_addr, src_blocks, dst_blocks);
 }
 
 bool MooncakeKVCacheTransferXTensor::push_kv_blocks(
@@ -380,10 +378,10 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks(
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
     bool is_spec_draft) {
   (void)is_spec_draft;
-  return push_kv_blocks_xtensor_mode(merged_kv_infos, layer_synchronizer);
+  return push_kv_blocks_impl(merged_kv_infos, layer_synchronizer);
 }
 
-bool MooncakeKVCacheTransferXTensor::pull_kv_blocks_xtensor_mode(
+bool MooncakeKVCacheTransferXTensor::pull_kv_blocks_impl(
     const std::string& src_addr,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks) {
@@ -436,17 +434,17 @@ bool MooncakeKVCacheTransferXTensor::pull_kv_blocks_xtensor_mode(
         size_per_block_,
         MooncakeTransferEngine::MoveOpcode::READ);
     if (!ret) {
-      LOG(ERROR) << "pull_kv_blocks_xtensor_mode failed at layer " << layer_id;
+      LOG(ERROR) << "pull_kv_blocks_impl failed at layer " << layer_id;
       return false;
     }
   }
 
-  VLOG(1) << "pull_kv_blocks_xtensor_mode success, num_blocks="
-          << src_blocks.size() << ", num_layers=" << num_layers_;
+  VLOG(1) << "pull_kv_blocks_impl success, num_blocks=" << src_blocks.size()
+          << ", num_layers=" << num_layers_;
   return true;
 }
 
-bool MooncakeKVCacheTransferXTensor::push_kv_blocks_xtensor_mode(
+bool MooncakeKVCacheTransferXTensor::push_kv_blocks_impl(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer) {
   if (model_id_.empty()) {
@@ -520,14 +518,13 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_xtensor_mode(
           size_per_block_,
           MooncakeTransferEngine::MoveOpcode::WRITE);
       if (!ret) {
-        LOG(ERROR) << "push_kv_blocks_xtensor_mode failed at layer "
-                   << layer_index;
+        LOG(ERROR) << "push_kv_blocks_impl failed at layer " << layer_index;
         return false;
       }
     }
   }
 
-  VLOG(1) << "push_kv_blocks_xtensor_mode success, num_layers=" << num_layers_;
+  VLOG(1) << "push_kv_blocks_impl success, num_layers=" << num_layers_;
   return true;
 }
 

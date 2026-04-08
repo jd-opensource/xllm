@@ -20,8 +20,8 @@ limitations under the License.
 
 namespace xllm {
 
-// Base class for Mooncake-based KV cache transfer
-// Native and XTensor subclasses inherit this class (single inheritance).
+// Base class for Mooncake-based KV cache transfer.
+// Default and XTensor subclasses inherit this class (single inheritance).
 class MooncakeKVCacheTransferBase : public KVCacheTransfer {
  public:
   MooncakeKVCacheTransferBase(const int32_t device_id,
@@ -59,12 +59,13 @@ class MooncakeKVCacheTransferBase : public KVCacheTransfer {
   std::unique_ptr<MooncakeTransferEngine> mooncake_te_;
 };
 
-class MooncakeKVCacheTransferNative final : public MooncakeKVCacheTransferBase {
+class MooncakeKVCacheTransferDefault final
+    : public MooncakeKVCacheTransferBase {
  public:
-  MooncakeKVCacheTransferNative(const int32_t device_id,
-                                const int16_t listen_port,
-                                const torch::Device& device,
-                                const std::string& model_type);
+  MooncakeKVCacheTransferDefault(const int32_t device_id,
+                                 const int16_t listen_port,
+                                 const torch::Device& device,
+                                 const std::string& model_type);
 
   void allocate_kv_cache(
       std::vector<xllm::KVCache>& kv_caches,
@@ -90,16 +91,14 @@ class MooncakeKVCacheTransferNative final : public MooncakeKVCacheTransferBase {
       bool is_spec_draft) override;
 
  private:
-  void allocate_kv_cache_native(
+  void allocate_kv_cache_impl(
       std::vector<xllm::KVCache>& kv_caches,
       int64_t num_layers,
       const std::vector<std::vector<int64_t>>& kv_cache_shape,
       torch::ScalarType dtype);
 
-  void register_per_layer_kv_cache(
-      std::vector<xllm::KVCache>& kv_caches,
-      const std::vector<std::vector<int64_t>>& kv_cache_shape,
-      torch::ScalarType dtype);
+  // Register per-layer K/V tensor memory.
+  void register_kv_cache_impl(std::vector<xllm::KVCache>& kv_caches);
 
   std::string model_type_;
 };
@@ -137,21 +136,20 @@ class MooncakeKVCacheTransferXTensor final
       bool is_spec_draft) override;
 
  private:
-  void allocate_kv_cache_xtensor(
+  void allocate_kv_cache_impl(
       std::vector<xllm::KVCache>& kv_caches,
       int64_t num_layers,
       const std::vector<std::vector<int64_t>>& kv_cache_shape,
       torch::ScalarType dtype);
 
-  void register_global_xtensor(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape,
-      torch::ScalarType dtype);
+  // Register GlobalXTensor memory region.
+  void register_kv_cache_impl();
 
-  bool pull_kv_blocks_xtensor_mode(const std::string& src_addr,
-                                   const std::vector<uint64_t>& src_blocks,
-                                   const std::vector<uint64_t>& dst_blocks);
+  bool pull_kv_blocks_impl(const std::string& src_addr,
+                           const std::vector<uint64_t>& src_blocks,
+                           const std::vector<uint64_t>& dst_blocks);
 
-  bool push_kv_blocks_xtensor_mode(
+  bool push_kv_blocks_impl(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer);
 
