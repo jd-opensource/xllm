@@ -181,6 +181,9 @@ class NpuDeepseekV32DecoderLayerImpl : public BaseLayer {
   torch::Tensor final_hidden_states_;
   torch::Tensor at_start_expert_id_;
   torch::Tensor at_in_device_expert_count_;
+  torch::Tensor cos_pos_fallback_;
+  torch::Tensor sin_pos_fallback_;
+  torch::Tensor attn_mask_fallback_;
 
   std::vector<int32_t> int_placeholder_;
 

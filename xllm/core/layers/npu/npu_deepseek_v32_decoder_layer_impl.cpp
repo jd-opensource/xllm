@@ -744,7 +744,6 @@ int64_t NpuDeepseekV32DecoderLayerImpl::init_node(
   }
 
   size_t inTensorId = 1;
-
   for (size_t weightTensorId = 0; weightTensorId < WEIGHT_COUNT_PER_LAYER;
        ++weightTensorId) {
     node.inTensors.at(weightTensorId) = &atb_weight_tensors_[weightTensorId];
@@ -815,7 +814,13 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
     KVCache& kv_cache,
     ModelInputParams& input_params,
     bool is_prefill) {
-  internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
+  auto safe_tensor_or = [&](const torch::Tensor& t,
+                            const torch::Tensor& fallback) -> torch::Tensor {
+    return t.defined() ? t : fallback;
+  };
+
+  const auto x_safe = safe_tensor_or(x, tensor_placeholder_);
+  internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x_safe);
   // final_hidden_states_ = torch::zeros_like(x);
   int32_t input_idx = 0;
   auto& dp_ep_padding = input_params.dp_ep_padding_data;
@@ -829,10 +834,13 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   if (!use_cp_ep_padding) {
     cp_ep_padding.set_placeholder(tensor_placeholder_);
   }
+  const auto expert_array =
+      safe_tensor_or(dp_ep_padding.expert_array(), int_tensor_placeholder_);
+
   // set micro batch 0 input part
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.expert_array());
+      atb_speed::Utils::AtTensor2Tensor(expert_array);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 2) =
       atb_speed::Utils::AtTensor2Tensor(expert_group_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3) =
@@ -841,12 +849,27 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(zero_hot_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 5) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
+  const auto cos_pos_defined = safe_tensor_or(cos_pos, tensor_placeholder_);
+  const auto sin_pos_defined = safe_tensor_or(sin_pos, tensor_placeholder_);
+  const auto attn_mask_defined = safe_tensor_or(attn_mask, tensor_placeholder_);
+  const auto cos_pos_npu =
+      cos_pos_defined.device().type() == torch::kPrivateUse1
+          ? cos_pos_defined
+          : (cos_pos_fallback_ = cos_pos_defined.to(device_));
+  const auto sin_pos_npu =
+      sin_pos_defined.device().type() == torch::kPrivateUse1
+          ? sin_pos_defined
+          : (sin_pos_fallback_ = sin_pos_defined.to(device_));
+  const auto attn_mask_npu =
+      attn_mask_defined.device().type() == torch::kPrivateUse1
+          ? attn_mask_defined
+          : (attn_mask_fallback_ = attn_mask_defined.to(device_));
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6) =
-      atb_speed::Utils::AtTensor2Tensor(cos_pos);
+      atb_speed::Utils::AtTensor2Tensor(cos_pos_npu);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7) =
-      atb_speed::Utils::AtTensor2Tensor(sin_pos);
+      atb_speed::Utils::AtTensor2Tensor(sin_pos_npu);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 8) =
-      atb_speed::Utils::AtTensor2Tensor(attn_mask);
+      atb_speed::Utils::AtTensor2Tensor(attn_mask_npu);
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_k_cache());
@@ -906,43 +929,63 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
         atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
   }
 
+  const auto attn_padding_idx =
+      safe_tensor_or(use_cp_ep_padding ? cp_ep_padding.attn_padding_idx()
+                                       : dp_ep_padding.attn_padding_idx(),
+                     int_tensor_placeholder_);
+  const auto attn_unpadding_idx =
+      safe_tensor_or(use_cp_ep_padding ? cp_ep_padding.attn_unpadding_idx()
+                                       : dp_ep_padding.attn_unpadding_idx(),
+                     int_tensor_placeholder_);
+  const auto ffn_padding_idx =
+      safe_tensor_or(use_cp_ep_padding ? cp_ep_padding.ffn_padding_idx()
+                                       : dp_ep_padding.ffn_padding_idx(),
+                     int_tensor_placeholder_);
+  const auto ffn_unpadding_idx =
+      safe_tensor_or(use_cp_ep_padding ? cp_ep_padding.ffn_unpadding_idx()
+                                       : dp_ep_padding.ffn_unpadding_idx(),
+                     int_tensor_placeholder_);
+  const auto lm_head_skip_padding_idx = safe_tensor_or(
+      use_cp_ep_padding ? cp_ep_padding.lm_head_skip_padding_token_indices()
+                        : dp_ep_padding.lm_head_skip_padding_token_indices(),
+      int_tensor_placeholder_);
+  const auto gather_prenorm_idx =
+      safe_tensor_or(use_cp_ep_padding ? cp_ep_padding.gather_prenorm_idx()
+                                       : dp_ep_padding.gather_prenorm_idx(),
+                     int_tensor_placeholder_);
+  const auto padding_idx =
+      safe_tensor_or(dp_ep_padding.padding_idx(), int_tensor_placeholder_);
+  const auto un_padding_idx =
+      safe_tensor_or(dp_ep_padding.un_padding_idx(), int_tensor_placeholder_);
+  const auto dynamic_ep_idx =
+      safe_tensor_or(dp_ep_padding.dynamic_ep_idx(), int_tensor_placeholder_);
+  const auto moe_idx =
+      safe_tensor_or(dp_ep_padding.moe_idx(), int_tensor_placeholder_);
+
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 18) =
-      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
-                                            ? cp_ep_padding.attn_padding_idx()
-                                            : dp_ep_padding.attn_padding_idx());
+      atb_speed::Utils::AtTensor2Tensor(attn_padding_idx);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 19) =
-      atb_speed::Utils::AtTensor2Tensor(
-          use_cp_ep_padding ? cp_ep_padding.attn_unpadding_idx()
-                            : dp_ep_padding.attn_unpadding_idx());
+      atb_speed::Utils::AtTensor2Tensor(attn_unpadding_idx);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 20) =
-      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
-                                            ? cp_ep_padding.ffn_padding_idx()
-                                            : dp_ep_padding.ffn_padding_idx());
+      atb_speed::Utils::AtTensor2Tensor(ffn_padding_idx);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 21) =
-      atb_speed::Utils::AtTensor2Tensor(
-          use_cp_ep_padding ? cp_ep_padding.ffn_unpadding_idx()
-                            : dp_ep_padding.ffn_unpadding_idx());
+      atb_speed::Utils::AtTensor2Tensor(ffn_unpadding_idx);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 22) =
-      atb_speed::Utils::AtTensor2Tensor(
-          use_cp_ep_padding
-              ? cp_ep_padding.lm_head_skip_padding_token_indices()
-              : dp_ep_padding.lm_head_skip_padding_token_indices());
+      atb_speed::Utils::AtTensor2Tensor(lm_head_skip_padding_idx);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 23) =
-      atb_speed::Utils::AtTensor2Tensor(
-          use_cp_ep_padding ? cp_ep_padding.gather_prenorm_idx()
-                            : dp_ep_padding.gather_prenorm_idx());
+      atb_speed::Utils::AtTensor2Tensor(gather_prenorm_idx);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 24) =
       atb_speed::Utils::AtTensor2Tensor(at_start_expert_id_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 25) =
       atb_speed::Utils::AtTensor2Tensor(at_in_device_expert_count_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 26) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.padding_idx());
+      atb_speed::Utils::AtTensor2Tensor(padding_idx);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 27) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.un_padding_idx());
+      atb_speed::Utils::AtTensor2Tensor(un_padding_idx);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 28) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.dynamic_ep_idx());
+      atb_speed::Utils::AtTensor2Tensor(dynamic_ep_idx);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 29) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.moe_idx());
+      atb_speed::Utils::AtTensor2Tensor(moe_idx);
   if (FLAGS_enable_eplb && layer_id_ >= decode_param_.firstKDenseReplace) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 30) =
         atb_speed::Utils::AtTensor2Tensor(expert_routing_map_);
@@ -959,12 +1002,25 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
     node.variantPack.inTensors.at(i) = *node.inTensors.at(i);
   }
 
+  const auto index_cache =
+      safe_tensor_or(kv_cache.get_index_cache(), int_tensor_placeholder_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 30) =
-      atb_speed::Utils::AtTensor2Tensor(kv_cache.get_index_cache());
+      atb_speed::Utils::AtTensor2Tensor(index_cache);
 
   if (input_params.q_seq_lens.numel() != 0) {
+    std::vector<int32_t> q_cu_seq_lens_vec = input_params.q_seq_lens_vec;
+    std::partial_sum(q_cu_seq_lens_vec.begin(),
+                     q_cu_seq_lens_vec.end(),
+                     q_cu_seq_lens_vec.begin());
+    const auto q_cu_seq_lens =
+        input_params.q_cu_seq_lens.defined() &&
+                input_params.q_cu_seq_lens.device().type() ==
+                    torch::kPrivateUse1
+            ? input_params.q_cu_seq_lens
+            : (torch::tensor(q_cu_seq_lens_vec,
+                             torch::dtype(torch::kInt32).device(device_)));
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 31) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.q_cu_seq_lens);
+        atb_speed::Utils::AtTensor2Tensor(q_cu_seq_lens);
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 31) =
         atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
