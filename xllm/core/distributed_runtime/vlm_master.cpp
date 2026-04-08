@@ -33,7 +33,6 @@ limitations under the License.
 #include "framework/request/request.h"
 #include "models/model_registry.h"
 #include "runtime/xservice_client.h"
-#include "scheduler/scheduler_factory.h"
 #include "server/xllm_server_registry.h"
 #include "speculative_engine.h"
 #include "util/device_name_utils.h"
@@ -57,28 +56,6 @@ VLMMaster::VLMMaster(const Options& options)
       LOG(FATAL) << "XServiceClient init fail!";
       return;
     }
-  }
-
-  ContinuousScheduler::Options scheduler_options;
-  scheduler_options.max_tokens_per_batch(options.max_tokens_per_batch())
-      .max_seqs_per_batch(options.max_seqs_per_batch())
-      .max_tokens_per_chunk_for_prefill(
-          options.max_tokens_per_chunk_for_prefill())
-      .enable_disagg_pd(options_.enable_disagg_pd())
-      .enable_chunked_prefill(options_.enable_chunked_prefill())
-      .instance_name(options_.instance_name())
-      .instance_role(options_.instance_role())
-      .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
-      .enable_service_routing(options_.enable_service_routing())
-      .disable_ttft_profiling(options_.disable_ttft_profiling())
-      .enable_forward_interruption(options_.enable_forward_interruption())
-      .enable_schedule_overlap(options_.enable_schedule_overlap())
-      .server_idx(options_.server_idx());
-  scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
-
-  if (options_.enable_service_routing()) {
-    auto& instance_info = scheduler_->get_instance_info();
-    XServiceClient::get_instance()->register_instance(instance_info);
   }
 
   // construct chat template
@@ -123,9 +100,9 @@ void VLMMaster::handle_request(std::string prompt,
                                MMData mm_data,
                                RequestParams sp,
                                OutputCallback callback) {
-  scheduler_->incr_pending_requests(1);
-  auto cb = [callback = std::move(callback),
-             scheduler = scheduler_.get()](const RequestOutput& output) {
+  LOG(INFO) << "handler request: calling incre pending requests";
+  engine_->incr_pending_requests(1);
+  auto cb = [callback = std::move(callback)](const RequestOutput& output) {
     output.log_request_status();
     return callback(output);
   };
@@ -135,10 +112,11 @@ void VLMMaster::handle_request(std::string prompt,
                          mm_data = std::move(mm_data),
                          sp = std::move(sp),
                          callback = std::move(cb)]() mutable {
+    LOG(INFO) << "handler request: entering runnable";
     AUTO_COUNTER(request_handling_latency_seconds_completion);
 
     // remove the pending request after scheduling
-    SCOPE_GUARD([this] { scheduler_->decr_pending_requests(); });
+    SCOPE_GUARD([this] { engine_->decr_pending_requests(); });
 
     Timer timer;
     // verify the prompt
@@ -146,15 +124,17 @@ void VLMMaster::handle_request(std::string prompt,
       return;
     }
 
+    LOG(INFO) << "handler request: request is to be generated";
     auto request = generate_request(std::move(prompt),
                                     std::move(mm_data),
                                     std::move(sp),
                                     std::move(callback));
+    LOG(INFO) << "handler request: request had be generated";
     if (!request) {
       return;
     }
 
-    if (!scheduler_->add_request(request)) {
+    if (!engine_->add_request(request)) {
       CALLBACK_WITH_ERROR(StatusCode::RESOURCE_EXHAUSTED,
                           "No available resources to schedule request");
     }
@@ -165,9 +145,9 @@ void VLMMaster::handle_request(std::vector<Message> messages,
                                RequestParams sp,
                                std::string payload,
                                OutputCallback callback) {
-  scheduler_->incr_pending_requests(1);
+  engine_->incr_pending_requests(1);
   auto cb = [callback = std::move(callback),
-             scheduler = scheduler_.get()](const RequestOutput& output) {
+             scheduler = engine_.get()](const RequestOutput& output) {
     output.log_request_status();
     return callback(output);
   };
@@ -180,7 +160,7 @@ void VLMMaster::handle_request(std::vector<Message> messages,
     AUTO_COUNTER(request_handling_latency_seconds_chat);
 
     // remove the pending request after scheduling
-    SCOPE_GUARD([this] { scheduler_->decr_pending_requests(); });
+    SCOPE_GUARD([this] { engine_->decr_pending_requests(); });
 
     // verify the prompt
     if (!sp.verify_params(callback)) {
@@ -195,7 +175,7 @@ void VLMMaster::handle_request(std::vector<Message> messages,
       return;
     }
 
-    if (!scheduler_->add_request(request)) {
+    if (!engine_->add_request(request)) {
       CALLBACK_WITH_ERROR(StatusCode::RESOURCE_EXHAUSTED,
                           "No available resources to schedule request");
     }
@@ -286,7 +266,7 @@ void VLMMaster::run() {
     running_.store(true, std::memory_order_relaxed);
     const auto timeout = absl::Milliseconds(500);
     while (!stoped_.load(std::memory_order_relaxed)) {
-      scheduler_->step(timeout);
+      engine_->step(timeout);
     }
     running_.store(false, std::memory_order_relaxed);
   });
@@ -302,7 +282,7 @@ void VLMMaster::generate() {
   }
 
   running_.store(true, std::memory_order_relaxed);
-  scheduler_->generate();
+  engine_->generate();
   running_.store(false, std::memory_order_relaxed);
 }
 

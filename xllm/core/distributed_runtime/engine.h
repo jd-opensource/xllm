@@ -25,6 +25,7 @@ limitations under the License.
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
 #include "runtime/options.h"
+#include "scheduler/scheduler.h"
 
 namespace xllm {
 class Engine {
@@ -184,6 +185,29 @@ class Engine {
     int64_t n_layers = 0;
   };
 
+  // schedule related
+  // TODO(panxuanyu): sink scheduler to engine
+  virtual bool add_request(std::shared_ptr<Request>& request) {
+    CHECK(scheduler_);
+    return scheduler_->add_request(request);
+  }
+  virtual void incr_pending_requests(size_t count) {
+    CHECK(scheduler_);
+    scheduler_->incr_pending_requests(count);
+  }
+  virtual void decr_pending_requests() {
+    CHECK(scheduler_);
+    scheduler_->decr_pending_requests();
+  }
+  virtual void step(const absl::Duration& timeout) {
+    CHECK(scheduler_);
+    scheduler_->step(timeout);
+  }
+  virtual void generate() {
+    CHECK(scheduler_);
+    scheduler_->generate();
+  }
+
  protected:
   // model args
   ModelArgs args_;
@@ -197,5 +221,8 @@ class Engine {
 
   // tokenizer
   std::unique_ptr<Tokenizer> tokenizer_;
+
+  // scheduler
+  std::unique_ptr<Scheduler> scheduler_;
 };
 }  // namespace xllm

@@ -37,6 +37,8 @@ limitations under the License.
 #include "framework/parallel_state/parallel_state.h"
 #include "runtime/llm_worker_impl.h"
 #include "runtime/worker.h"
+#include "runtime/xservice_client.h"
+#include "scheduler/scheduler_factory.h"
 #include "util/env_var.h"
 #include "util/pretty_print.h"
 #include "util/utils.h"
@@ -111,6 +113,28 @@ bool VLMEngine::init() {
   if (!allocate_kv_cache(kv_cache_cap)) {
     LOG(ERROR) << "Failed to allocate kv cache";
     return false;
+  }
+
+  ContinuousScheduler::Options scheduler_options;
+  scheduler_options.max_tokens_per_batch(options_.max_tokens_per_batch())
+      .max_seqs_per_batch(options_.max_seqs_per_batch())
+      .max_tokens_per_chunk_for_prefill(
+          options_.max_tokens_per_chunk_for_prefill())
+      .enable_disagg_pd(options_.enable_disagg_pd())
+      .enable_chunked_prefill(options_.enable_chunked_prefill())
+      .instance_name(options_.instance_name())
+      .instance_role(options_.instance_role())
+      .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
+      .enable_service_routing(options_.enable_service_routing())
+      .disable_ttft_profiling(options_.disable_ttft_profiling())
+      .enable_forward_interruption(options_.enable_forward_interruption())
+      .enable_schedule_overlap(options_.enable_schedule_overlap())
+      .server_idx(options_.server_idx());
+  scheduler_ = create_continuous_scheduler(this, scheduler_options);
+
+  if (options_.enable_service_routing()) {
+    auto& instance_info = scheduler_->get_instance_info();
+    XServiceClient::get_instance()->register_instance(instance_info);
   }
 
   return true;
@@ -474,5 +498,25 @@ std::vector<RawForwardInput> VLMEngine::prepare_inputs(
 
   return batched_inputs;
 }
+
+/*
+bool VLMEngine::add_request(std::shared_ptr<Request>& request) {
+  return scheduler_->add_request(request);
+}
+
+void VLMEngine::incr_pending_requests(size_t count) {
+  scheduler_->incr_pending_requests(count);
+}
+
+void VLMEngine::decr_pending_requests() {
+  scheduler_->decr_pending_requests();
+}
+*/
+
+void VLMEngine::step(const absl::Duration& timeout) {
+  scheduler_->step(timeout);
+}
+
+void VLMEngine::generate() { scheduler_->generate(); }
 
 }  // namespace xllm

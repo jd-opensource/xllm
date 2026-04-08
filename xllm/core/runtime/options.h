@@ -231,6 +231,12 @@ struct Options {
 
   // max concurrency for rec worker
   PROPERTY(int32_t, rec_worker_max_concurrency) = 1;
+
+  // scheduler options
+  // true if disable ttft profiling
+  PROPERTY(bool, disable_ttft_profiling) = false;
+  // true if enable forward interruption
+  PROPERTY(bool, enable_forward_interruption) = false;
 };
 
 }  // namespace runtime

@@ -26,6 +26,7 @@ limitations under the License.
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/quant_args.h"
+#include "framework/request/request.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
 #include "runtime/worker.h"
@@ -52,6 +53,13 @@ class VLMEngine : public Engine {
 
   // return the active activation memory
   std::vector<int64_t> get_active_activation_memory() const override;
+
+  // scheduler related methods TODO(panxuanyu): abstract maybe
+  // bool add_request(std::shared_ptr<Request>& request) override;
+  // void incr_pending_requests(size_t count) override;
+  // void decr_pending_requests() override;
+  void step(const absl::Duration& timeout) override;
+  void generate() override;
 
  private:
   bool init_model();
