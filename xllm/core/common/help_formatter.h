@@ -47,6 +47,7 @@ const OptionCategory kCommonOptions = {"COMMON OPTIONS",
                                         "enable_graph_mode_decode_no_padding",
                                         "enable_prefill_piecewise_graph",
                                         "max_tokens_for_graph_mode",
+                                        "acl_graph_decode_batch_size_limit",
                                         "communication_backend",
                                         "task"}};
 

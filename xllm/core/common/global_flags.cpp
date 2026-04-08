@@ -104,6 +104,12 @@ DEFINE_int32(max_tokens_for_graph_mode,
              2048,
              "Maximum number of tokens for graph execution. "
              "If 0, no limit is applied.");
+
+DEFINE_int32(acl_graph_decode_batch_size_limit,
+             16,
+             "Decode batch size threshold for ACL graph on NPU. "
+             "When actual decode batch_size > this value, ACL graph decode "
+             "falls back to eager mode to avoid OOM.");
 // --- vlm config ---
 
 DEFINE_int32(limit_image_per_prompt,
