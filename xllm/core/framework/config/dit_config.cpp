@@ -53,9 +53,9 @@ DEFINE_int64(dit_cache_end_blocks,
              5,
              "The number of blocks to skip at the end.");
 
-DEFINE_int64(dit_sp_communication_overlap,
-             1,
-             "Communication & Computation overlap for sequence parallel");
+DEFINE_bool(dit_sp_communication_overlap,
+            false,
+            "Communication & Computation overlap for sequence parallel");
 
 DEFINE_bool(dit_debug_print,
             false,
