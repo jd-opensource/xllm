@@ -78,7 +78,7 @@ class DiTConfig final {
 
   PROPERTY(int64_t, dit_cache_end_blocks) = 5;
 
-  PROPERTY(int64_t, dit_sp_communication_overlap) = 1;
+  PROPERTY(bool, dit_sp_communication_overlap) = false;
 
   PROPERTY(bool, dit_debug_print) = false;
 
