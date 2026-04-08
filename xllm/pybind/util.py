@@ -32,4 +32,3 @@ def get_free_port() -> int:
         s.bind(('0.0.0.0', 0))
         _, port = s.getsockname()
     return port
-

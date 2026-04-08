@@ -59,6 +59,14 @@ const XLLM_InitOptions XLLM_INIT_LLM_OPTIONS_DEFAULT = {
     .draft_model = "",
     .draft_devices = ""};
 
+const XLLM_StartupFlags XLLM_LLM_STARTUP_FLAGS_DEFAULT = {
+    .use_contiguous_input_buffer = false,
+    .enable_graph = false,
+    .enable_graph_mode_decode_no_padding = false,
+    .enable_block_copy_kernel = false,
+    .enable_beam_search_kernel = false,
+    .enable_rec_fast_sampler = false};
+
 const XLLM_RequestParams XLLM_LLM_REQUEST_PARAMS_DEFAULT = {
     .echo = false,
     .offline = false,
@@ -120,6 +128,14 @@ const XLLM_InitOptions XLLM_INIT_REC_OPTIONS_DEFAULT = {
     .log_dir = "",
     .draft_model = "",
     .draft_devices = ""};
+
+const XLLM_StartupFlags XLLM_REC_STARTUP_FLAGS_DEFAULT = {
+    .use_contiguous_input_buffer = false,
+    .enable_graph = true,
+    .enable_graph_mode_decode_no_padding = true,
+    .enable_block_copy_kernel = false,
+    .enable_beam_search_kernel = false,
+    .enable_rec_fast_sampler = true};
 
 const XLLM_RequestParams XLLM_REC_REQUEST_PARAMS_DEFAULT = {
     .echo = false,

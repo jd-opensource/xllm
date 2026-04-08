@@ -77,6 +77,18 @@ XLLM_CAPI_EXPORT void xllm_llm_init_options_default(
     XLLM_InitOptions* init_options);
 
 /**
+ * @brief Initialize XLLM_StartupFlags with canonical default values
+ *
+ * Populates the XLLM_StartupFlags struct with startup runtime flag defaults.
+ *
+ * @param startup_flags Pointer to XLLM_StartupFlags to initialize (NULL =
+ * no-op)
+ * @see xllm_llm_initialize_ex, XLLM_LLM_STARTUP_FLAGS_DEFAULT
+ */
+XLLM_CAPI_EXPORT void xllm_llm_startup_flags_default(
+    XLLM_StartupFlags* startup_flags);
+
+/**
  * @brief Initialize the LLM model and runtime environment
  *
  * Loads model weights from the specified path, configures target devices,
@@ -111,6 +123,26 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(XLLM_LLM_Handler* handler,
                                           const char* model_path,
                                           const char* devices,
                                           const XLLM_InitOptions* init_options);
+
+/**
+ * @brief Initialize the LLM model with extended startup runtime flags
+ *
+ * This API preserves the ABI of xllm_llm_initialize by keeping init options in
+ * XLLM_InitOptions and passing newly added startup-only flags separately.
+ *
+ * @param handler Valid LLM instance handle (must not be NULL)
+ * @param model_path Null-terminated string of the model directory/file path
+ * @param devices Null-terminated string specifying target devices
+ * @param init_options Advanced initialization options (NULL = use defaults)
+ * @param startup_flags Startup runtime flags (NULL = use defaults)
+ * @return true if initialization succeeds; false on failure
+ */
+XLLM_CAPI_EXPORT bool xllm_llm_initialize_ex(
+    XLLM_LLM_Handler* handler,
+    const char* model_path,
+    const char* devices,
+    const XLLM_InitOptions* init_options,
+    const XLLM_StartupFlags* startup_flags);
 
 /**
  * @brief Initialize XLLM_RequestParams with canonical generation defaults
