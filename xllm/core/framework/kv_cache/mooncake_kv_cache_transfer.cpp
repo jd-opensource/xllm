@@ -35,6 +35,14 @@ limitations under the License.
 
 namespace xllm {
 
+namespace {
+
+constexpr int32_t kKeySlot = 0;
+constexpr int32_t kValSlot = 1;
+constexpr int32_t kIdxSlot = 2;
+
+}  // namespace
+
 // ============================================================================
 // MooncakeKVCacheTransferBase
 // ============================================================================
@@ -234,27 +242,27 @@ void MooncakeKVCacheTransferNative::register_per_layer_kv_cache(
   buffers.reserve(num_layers_ * 3);
 
   auto add_buf = [&buffers](const torch::Tensor& tensor,
-                            int64_t layer_id,
-                            proto::BufferKind kind) {
+                            int64_t group_id,
+                            int32_t slot_id) {
     if (!tensor.defined() || tensor.numel() == 0) {
       return;
     }
     CHECK_GT(tensor.size(0), 0)
         << "registered cache tensor expects positive block dim";
     MooncakeTransferEngine::BufferDesc buffer_desc;
-    buffer_desc.layer_id = layer_id;
-    buffer_desc.kind = kind;
+    buffer_desc.group_id = group_id;
+    buffer_desc.slot_id = slot_id;
     buffer_desc.addr = reinterpret_cast<uint64_t>(tensor.data_ptr());
     buffer_desc.len = static_cast<uint64_t>(tensor.nbytes());
     buffer_desc.bytes_per_block =
         static_cast<int64_t>(tensor.nbytes() / tensor.size(0));
-    buffers.push_back(buffer_desc);
+    buffers.emplace_back(buffer_desc);
   };
 
   for (int32_t i = 0; i < num_layers_; ++i) {
-    add_buf(kv_caches[i].get_k_cache(), i, proto::BUFFER_KIND_KEY);
-    add_buf(kv_caches[i].get_v_cache(), i, proto::BUFFER_KIND_VALUE);
-    add_buf(kv_caches[i].get_index_cache(), i, proto::BUFFER_KIND_INDEX);
+    add_buf(kv_caches[i].get_k_cache(), i, kKeySlot);
+    add_buf(kv_caches[i].get_v_cache(), i, kValSlot);
+    add_buf(kv_caches[i].get_index_cache(), i, kIdxSlot);
   }
 
   if (!mooncake_te_->register_memory(buffers, num_layers_)) {

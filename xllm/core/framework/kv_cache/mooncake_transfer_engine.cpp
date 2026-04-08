@@ -47,96 +47,45 @@ std::string get_transfer_engine_device_name(int32_t device_id) {
 
 enum class BufferLayoutKind {
   kUnknown = 0,
-  kSinglePerLayer = 1,
-  kPairPerLayer = 2
+  kSinglePerGroup = 1,
+  kPairPerGroup = 2
 };
 
-constexpr std::array<proto::BufferKind, 3> kBufKinds = {
-    proto::BUFFER_KIND_KEY,
-    proto::BUFFER_KIND_VALUE,
-    proto::BUFFER_KIND_INDEX,
-};
-
-BufferLayoutKind detect_buffer_layout(size_t num_buffers, int64_t num_layers) {
-  if (num_layers <= 0) {
+BufferLayoutKind detect_buffer_layout(size_t num_buffers, int64_t num_groups) {
+  if (num_groups <= 0) {
     return BufferLayoutKind::kUnknown;
   }
-  if (num_buffers == static_cast<size_t>(num_layers)) {
-    return BufferLayoutKind::kSinglePerLayer;
+  if (num_buffers == static_cast<size_t>(num_groups)) {
+    return BufferLayoutKind::kSinglePerGroup;
   }
-  if (num_buffers == static_cast<size_t>(num_layers * 2)) {
-    return BufferLayoutKind::kPairPerLayer;
+  if (num_buffers == static_cast<size_t>(num_groups * 2)) {
+    return BufferLayoutKind::kPairPerGroup;
   }
   return BufferLayoutKind::kUnknown;
 }
 
 const char* buffer_layout_to_string(BufferLayoutKind layout) {
   switch (layout) {
-    case BufferLayoutKind::kSinglePerLayer:
-      return "single_per_layer";
-    case BufferLayoutKind::kPairPerLayer:
-      return "pair_per_layer";
+    case BufferLayoutKind::kSinglePerGroup:
+      return "single_per_group";
+    case BufferLayoutKind::kPairPerGroup:
+      return "pair_per_group";
     case BufferLayoutKind::kUnknown:
     default:
       return "unknown";
   }
 }
 
-const char* buffer_kind_to_string(proto::BufferKind kind) {
-  switch (kind) {
-    case proto::BUFFER_KIND_KEY:
-      return "key";
-    case proto::BUFFER_KIND_VALUE:
-      return "value";
-    case proto::BUFFER_KIND_INDEX:
-      return "index";
-    case proto::BUFFER_KIND_UNKNOWN:
-    default:
-      return "unknown";
-  }
-}
-
-std::optional<MooncakeTransferEngine::BufferDesc>* get_layer_buffer_slot(
-    MooncakeTransferEngine::LayerDesc* layer_desc,
-    proto::BufferKind kind) {
-  if (layer_desc == nullptr) {
-    return nullptr;
-  }
-  switch (kind) {
-    case proto::BUFFER_KIND_KEY:
-      return &layer_desc->key;
-    case proto::BUFFER_KIND_VALUE:
-      return &layer_desc->value;
-    case proto::BUFFER_KIND_INDEX:
-      return &layer_desc->index;
-    case proto::BUFFER_KIND_UNKNOWN:
-    default:
-      return nullptr;
-  }
-}
-
-const std::optional<MooncakeTransferEngine::BufferDesc>* get_layer_buffer_slot(
-    const MooncakeTransferEngine::LayerDesc& layer_desc,
-    proto::BufferKind kind) {
-  switch (kind) {
-    case proto::BUFFER_KIND_KEY:
-      return &layer_desc.key;
-    case proto::BUFFER_KIND_VALUE:
-      return &layer_desc.value;
-    case proto::BUFFER_KIND_INDEX:
-      return &layer_desc.index;
-    case proto::BUFFER_KIND_UNKNOWN:
-    default:
-      return nullptr;
-  }
+std::string slot_id_to_string(int32_t slot_id) {
+  return "slot=" + std::to_string(slot_id);
 }
 
 std::string format_buffer_desc(
     const MooncakeTransferEngine::BufferDesc& buffer_desc) {
   std::ostringstream os;
-  os << "layer=" << buffer_desc.layer_id
-     << ", kind=" << buffer_kind_to_string(buffer_desc.kind) << ", addr=0x"
-     << std::hex << buffer_desc.addr << std::dec << ", len=" << buffer_desc.len
+  os << "group=" << buffer_desc.group_id << ", "
+     << slot_id_to_string(buffer_desc.slot_id) << ", addr=0x" << std::hex
+     << buffer_desc.addr << std::dec << ", len=" << buffer_desc.len
      << ", bytes_per_block=" << buffer_desc.bytes_per_block;
   return os.str();
 }
@@ -147,8 +96,8 @@ std::vector<proto::BufferDesc> to_proto_buffer_descs(
   proto_buffers.reserve(buffers.size());
   for (const auto& buffer_desc : buffers) {
     proto::BufferDesc pb_desc;
-    pb_desc.set_layer_id(buffer_desc.layer_id);
-    pb_desc.set_kind(buffer_desc.kind);
+    pb_desc.set_group_id(buffer_desc.group_id);
+    pb_desc.set_slot_id(buffer_desc.slot_id);
     pb_desc.set_addr(buffer_desc.addr);
     pb_desc.set_len(buffer_desc.len);
     pb_desc.set_bytes_per_block(buffer_desc.bytes_per_block);
@@ -171,8 +120,8 @@ bool checked_multiply_u64(uint64_t lhs, uint64_t rhs, uint64_t* out) {
 bool validate_buffer_range(const MooncakeTransferEngine::BufferDesc& buf,
                            uint64_t bias,
                            uint64_t len,
-                           int64_t layer_id,
-                           proto::BufferKind kind,
+                           int64_t group_id,
+                           int32_t slot_id,
                            uint64_t block_id,
                            uint64_t block_len,
                            const char* side,
@@ -180,8 +129,8 @@ bool validate_buffer_range(const MooncakeTransferEngine::BufferDesc& buf,
   if (bias > buf.len || len > buf.len - bias) {
     if (err != nullptr) {
       std::ostringstream os;
-      os << side << " range overflow, layer=" << layer_id
-         << ", kind=" << buffer_kind_to_string(kind) << ", block=" << block_id
+      os << side << " range overflow, group=" << group_id << ", "
+         << slot_id_to_string(slot_id) << ", block=" << block_id
          << ", block_len=" << block_len << ", bias=" << bias << ", len=" << len
          << ", buf_len=" << buf.len;
       *err = os.str();
@@ -426,16 +375,16 @@ void MooncakeTransferEngineCore::set_registered_memory_info(
     const std::vector<void*>& addrs,
     const std::vector<size_t>& lens,
     int64_t size_per_block,
-    int64_t num_layers) {
+    int64_t num_groups) {
   CHECK(service_ != nullptr) << "MooncakeTransferEngineService not initialized";
-  service_->set_registered_memory_info(addrs, lens, size_per_block, num_layers);
+  service_->set_registered_memory_info(addrs, lens, size_per_block, num_groups);
 }
 
 void MooncakeTransferEngineCore::set_registered_memory_info(
     const std::vector<proto::BufferDesc>& buffers,
-    int64_t num_layers) {
+    int64_t num_groups) {
   CHECK(service_ != nullptr) << "MooncakeTransferEngineService not initialized";
-  service_->set_registered_memory_info(buffers, num_layers);
+  service_->set_registered_memory_info(buffers, num_groups);
 }
 
 proto::RegisteredMemoryInfo
@@ -465,10 +414,10 @@ std::string MooncakeTransferEngine::initialize() {
 bool MooncakeTransferEngine::register_memory(std::vector<void*> addrs,
                                              std::vector<size_t> lens,
                                              int64_t size_per_block,
-                                             int64_t num_layers) {
+                                             int64_t num_groups) {
   int64_t num = addrs.size();
-  const int64_t reg_layers =
-      num_layers >= 0 ? num_layers : std::max<int64_t>(1, num / 2);
+  const int64_t reg_groups =
+      num_groups >= 0 ? num_groups : std::max<int64_t>(1, num / 2);
 
   size_per_block_ = size_per_block;
   proto::RegisteredMemoryInfo pb_info;
@@ -479,7 +428,7 @@ bool MooncakeTransferEngine::register_memory(std::vector<void*> addrs,
     pb_info.add_lens(static_cast<uint64_t>(len));
   }
   pb_info.set_size_per_block(size_per_block_);
-  pb_info.set_num_layers(reg_layers);
+  pb_info.set_num_layers(reg_groups);
   std::string err;
   MemInfo mem_info;
   if (!parse_mem_info(pb_info, &mem_info, &err)) {
@@ -500,25 +449,25 @@ bool MooncakeTransferEngine::register_memory(std::vector<void*> addrs,
     return false;
   }
 
-  num_layers_ = reg_layers;
+  num_groups_ = reg_groups;
   local_memory_info_ = std::move(mem_info);
-  core_.set_registered_memory_info(addrs, lens, size_per_block_, num_layers_);
+  core_.set_registered_memory_info(addrs, lens, size_per_block_, num_groups_);
 
   const BufferLayoutKind layout =
-      detect_buffer_layout(addrs.size(), num_layers_);
+      detect_buffer_layout(addrs.size(), num_groups_);
 
   LOG(INFO) << "register_memory success, size_per_block_=" << size_per_block_
-            << ", num_layers=" << num_layers_ << ", num_buffers=" << num
+            << ", num_groups=" << num_groups_ << ", num_buffers=" << num
             << ", layout=" << buffer_layout_to_string(layout);
   return true;
 }
 
 bool MooncakeTransferEngine::register_memory(
     const std::vector<BufferDesc>& buffers,
-    int64_t num_layers) {
+    int64_t num_groups) {
   const auto proto_buffers = to_proto_buffer_descs(buffers);
   proto::RegisteredMemoryInfo pb_info;
-  pb_info.set_num_layers(num_layers);
+  pb_info.set_num_layers(num_groups);
   for (const auto& pb_desc : proto_buffers) {
     *pb_info.add_buffers() = pb_desc;
   }
@@ -544,11 +493,11 @@ bool MooncakeTransferEngine::register_memory(
     return false;
   }
 
-  num_layers_ = num_layers;
+  num_groups_ = num_groups;
   local_memory_info_ = std::move(mem_info);
-  core_.set_registered_memory_info(proto_buffers, num_layers_);
+  core_.set_registered_memory_info(proto_buffers, num_groups_);
 
-  LOG(INFO) << "register_memory success, num_layers=" << num_layers_
+  LOG(INFO) << "register_memory success, num_groups=" << num_groups_
             << ", num_buffers=" << buffers.size() << ", layout=per_desc";
   return true;
 }
@@ -598,31 +547,28 @@ bool MooncakeTransferEngine::fetch_remote_registered_memory(
                << remote_addr << ", err=" << err;
     return false;
   }
-  for (int64_t layer_id = 0; layer_id < local_memory_info_.num_layers;
-       ++layer_id) {
-    for (const auto kind : kBufKinds) {
-      const auto* local_buf =
-          get_layer_buffer_slot(local_memory_info_.layers[layer_id], kind);
-      const auto* remote_buf =
-          get_layer_buffer_slot(info.layers[layer_id], kind);
-      if (local_buf == nullptr || remote_buf == nullptr ||
-          !local_buf->has_value() || !remote_buf->has_value()) {
+  for (int64_t group_id = 0; group_id < local_memory_info_.num_groups;
+       ++group_id) {
+    const auto& local_slots = local_memory_info_.groups[group_id].slots;
+    const auto& remote_slots = info.groups[group_id].slots;
+    for (const auto& [slot_id, local_buf] : local_slots) {
+      const auto remote_it = remote_slots.find(slot_id);
+      if (remote_it == remote_slots.end()) {
         continue;
       }
-      const auto local_blocks = get_num_blocks(local_buf->value());
-      const auto remote_blocks = get_num_blocks(remote_buf->value());
+      const auto local_blocks = get_num_blocks(local_buf);
+      const auto remote_blocks = get_num_blocks(remote_it->second);
       if (local_blocks == remote_blocks) {
         continue;
       }
       LOG(INFO) << "GetRegisteredMemory capacity asymmetry accepted"
-                << ", remote_addr=" << remote_addr << ", layer=" << layer_id
-                << ", kind=" << buffer_kind_to_string(kind)
+                << ", remote_addr=" << remote_addr << ", group=" << group_id
+                << ", " << slot_id_to_string(slot_id)
                 << ", local_blocks=" << local_blocks
                 << ", remote_blocks=" << remote_blocks
-                << ", local_bytes_per_block="
-                << local_buf->value().bytes_per_block
+                << ", local_bytes_per_block=" << local_buf.bytes_per_block
                 << ", remote_bytes_per_block="
-                << remote_buf->value().bytes_per_block;
+                << remote_it->second.bytes_per_block;
     }
   }
 
@@ -640,7 +586,7 @@ bool MooncakeTransferEngine::sync_local_memory_info_from_core() {
     return false;
   }
 
-  num_layers_ = mem_info.num_layers;
+  num_groups_ = mem_info.num_groups;
   local_memory_info_ = std::move(mem_info);
   return true;
 }
@@ -723,7 +669,7 @@ bool MooncakeTransferEngine::move_memory_blocks(
     const std::string& remote_addr,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
-    const std::vector<int64_t>& layer_ids,
+    const std::vector<int64_t>& group_ids,
     MoveOpcode move_opcode) {
   if (src_blocks.size() != dst_blocks.size()) {
     LOG(ERROR) << "move_memory_blocks block count mismatch, src_blocks.size="
@@ -756,12 +702,12 @@ bool MooncakeTransferEngine::move_memory_blocks(
                   merged_dst_blocks,
                   block_lengths);
 
-  std::vector<int64_t> addr_ids;
-  if (layer_ids.size() == 0) {
-    addr_ids.resize(num_layers_);
-    std::iota(addr_ids.begin(), addr_ids.end(), 0);
+  std::vector<int64_t> target_group_ids;
+  if (group_ids.empty()) {
+    target_group_ids.resize(num_groups_);
+    std::iota(target_group_ids.begin(), target_group_ids.end(), 0);
   } else {
-    addr_ids = layer_ids;
+    target_group_ids = group_ids;
   }
 
   std::vector<TransferRequest> entries;
@@ -771,7 +717,7 @@ bool MooncakeTransferEngine::move_memory_blocks(
                      merged_src_blocks,
                      merged_dst_blocks,
                      block_lengths,
-                     addr_ids,
+                     target_group_ids,
                      move_opcode,
                      remote_handle,
                      &entries,
@@ -831,29 +777,30 @@ bool MooncakeTransferEngine::parse_mem_info(
   }
 
   mem_info->buffers.clear();
-  mem_info->layers.clear();
-  mem_info->num_layers = pb_info.num_layers();
+  mem_info->groups.clear();
+  mem_info->num_groups = pb_info.num_layers();
 
-  if (mem_info->num_layers <= 0) {
+  if (mem_info->num_groups <= 0) {
     if (err != nullptr) {
-      *err = "num_layers must be positive";
+      *err = "num_groups must be positive";
     }
     return false;
   }
 
-  mem_info->layers.assign(mem_info->num_layers, LayerDesc{});
+  mem_info->groups.assign(mem_info->num_groups, GroupDesc{});
   auto add_desc = [mem_info, err](const BufferDesc& buffer_desc) {
-    if (buffer_desc.layer_id < 0 ||
-        buffer_desc.layer_id >= mem_info->num_layers) {
+    if (buffer_desc.group_id < 0 ||
+        buffer_desc.group_id >= mem_info->num_groups) {
       if (err != nullptr) {
         *err =
-            "buffer layer_id out of range: " + format_buffer_desc(buffer_desc);
+            "buffer group_id out of range: " + format_buffer_desc(buffer_desc);
       }
       return false;
     }
-    if (buffer_desc.kind == proto::BUFFER_KIND_UNKNOWN) {
+    if (buffer_desc.slot_id < 0) {
       if (err != nullptr) {
-        *err = "buffer kind unknown: " + format_buffer_desc(buffer_desc);
+        *err = "buffer slot_id must be non-negative: " +
+               format_buffer_desc(buffer_desc);
       }
       return false;
     }
@@ -878,21 +825,14 @@ bool MooncakeTransferEngine::parse_mem_info(
       }
       return false;
     }
-    auto* slot = get_layer_buffer_slot(&mem_info->layers[buffer_desc.layer_id],
-                                       buffer_desc.kind);
-    if (slot == nullptr) {
-      if (err != nullptr) {
-        *err = "unsupported buffer kind: " + format_buffer_desc(buffer_desc);
-      }
-      return false;
-    }
-    if (slot->has_value()) {
+    auto& slots = mem_info->groups[buffer_desc.group_id].slots;
+    if (slots.find(buffer_desc.slot_id) != slots.end()) {
       if (err != nullptr) {
         *err = "duplicate buffer desc: " + format_buffer_desc(buffer_desc);
       }
       return false;
     }
-    *slot = buffer_desc;
+    slots.emplace(buffer_desc.slot_id, buffer_desc);
     mem_info->buffers.push_back(buffer_desc);
     return true;
   };
@@ -900,8 +840,8 @@ bool MooncakeTransferEngine::parse_mem_info(
   if (pb_info.buffers_size() > 0) {
     for (const auto& pb_desc : pb_info.buffers()) {
       BufferDesc buffer_desc;
-      buffer_desc.layer_id = pb_desc.layer_id();
-      buffer_desc.kind = pb_desc.kind();
+      buffer_desc.group_id = pb_desc.group_id();
+      buffer_desc.slot_id = pb_desc.slot_id();
       buffer_desc.addr = pb_desc.addr();
       buffer_desc.len = pb_desc.len();
       buffer_desc.bytes_per_block = pb_desc.bytes_per_block();
@@ -917,7 +857,7 @@ bool MooncakeTransferEngine::parse_mem_info(
       return false;
     }
     const BufferLayoutKind layout =
-        detect_buffer_layout(pb_info.addrs_size(), mem_info->num_layers);
+        detect_buffer_layout(pb_info.addrs_size(), mem_info->num_groups);
     if (layout == BufferLayoutKind::kUnknown) {
       if (err != nullptr) {
         *err = "legacy layout unknown";
@@ -931,23 +871,23 @@ bool MooncakeTransferEngine::parse_mem_info(
       return false;
     }
 
-    for (int64_t layer_id = 0; layer_id < mem_info->num_layers; ++layer_id) {
+    for (int64_t group_id = 0; group_id < mem_info->num_groups; ++group_id) {
       BufferDesc buffer_desc;
-      buffer_desc.layer_id = layer_id;
-      buffer_desc.kind = proto::BUFFER_KIND_KEY;
-      buffer_desc.addr = pb_info.addrs(layer_id);
-      buffer_desc.len = pb_info.lens(layer_id);
+      buffer_desc.group_id = group_id;
+      buffer_desc.slot_id = 0;
+      buffer_desc.addr = pb_info.addrs(group_id);
+      buffer_desc.len = pb_info.lens(group_id);
       buffer_desc.bytes_per_block = pb_info.size_per_block();
       if (!add_desc(buffer_desc)) {
         return false;
       }
     }
-    if (layout == BufferLayoutKind::kPairPerLayer) {
-      for (int64_t layer_id = 0; layer_id < mem_info->num_layers; ++layer_id) {
-        const int64_t idx = layer_id + mem_info->num_layers;
+    if (layout == BufferLayoutKind::kPairPerGroup) {
+      for (int64_t group_id = 0; group_id < mem_info->num_groups; ++group_id) {
+        const int64_t idx = group_id + mem_info->num_groups;
         BufferDesc buffer_desc;
-        buffer_desc.layer_id = layer_id;
-        buffer_desc.kind = proto::BUFFER_KIND_VALUE;
+        buffer_desc.group_id = group_id;
+        buffer_desc.slot_id = 1;
         buffer_desc.addr = pb_info.addrs(idx);
         buffer_desc.len = pb_info.lens(idx);
         buffer_desc.bytes_per_block = pb_info.size_per_block();
@@ -961,8 +901,8 @@ bool MooncakeTransferEngine::parse_mem_info(
   std::sort(mem_info->buffers.begin(),
             mem_info->buffers.end(),
             [](const BufferDesc& lhs, const BufferDesc& rhs) {
-              return std::tie(lhs.layer_id, lhs.kind) <
-                     std::tie(rhs.layer_id, rhs.kind);
+              return std::tie(lhs.group_id, lhs.slot_id) <
+                     std::tie(rhs.group_id, rhs.slot_id);
             });
   return true;
 }
@@ -970,46 +910,42 @@ bool MooncakeTransferEngine::parse_mem_info(
 bool MooncakeTransferEngine::same_layout(const MemInfo& local_info,
                                          const MemInfo& remote_info,
                                          std::string* err) {
-  if (local_info.num_layers != remote_info.num_layers) {
+  if (local_info.num_groups != remote_info.num_groups) {
     if (err != nullptr) {
-      *err = "num_layers mismatch, local=" +
-             std::to_string(local_info.num_layers) +
-             ", remote=" + std::to_string(remote_info.num_layers);
+      *err = "num_groups mismatch, local=" +
+             std::to_string(local_info.num_groups) +
+             ", remote=" + std::to_string(remote_info.num_groups);
     }
     return false;
   }
 
-  for (int64_t layer_id = 0; layer_id < local_info.num_layers; ++layer_id) {
-    for (const auto kind : kBufKinds) {
-      const auto* local_buf =
-          get_layer_buffer_slot(local_info.layers[layer_id], kind);
-      const auto* remote_buf =
-          get_layer_buffer_slot(remote_info.layers[layer_id], kind);
-      if (local_buf == nullptr || remote_buf == nullptr) {
+  for (int64_t group_id = 0; group_id < local_info.num_groups; ++group_id) {
+    const auto& local_slots = local_info.groups[group_id].slots;
+    const auto& remote_slots = remote_info.groups[group_id].slots;
+    if (local_slots.size() != remote_slots.size()) {
+      if (err != nullptr) {
+        *err = "slot count mismatch at group=" + std::to_string(group_id) +
+               ", local=" + std::to_string(local_slots.size()) +
+               ", remote=" + std::to_string(remote_slots.size());
+      }
+      return false;
+    }
+    for (const auto& [slot_id, local_buf] : local_slots) {
+      const auto remote_it = remote_slots.find(slot_id);
+      if (remote_it == remote_slots.end()) {
         if (err != nullptr) {
-          *err = "unsupported kind at layer=" + std::to_string(layer_id) +
-                 ", kind=" + buffer_kind_to_string(kind);
+          *err = "slot mismatch at group=" + std::to_string(group_id) + ", " +
+                 slot_id_to_string(slot_id);
         }
         return false;
       }
-      if (local_buf->has_value() != remote_buf->has_value()) {
-        if (err != nullptr) {
-          *err = "kind mismatch at layer=" + std::to_string(layer_id) +
-                 ", kind=" + buffer_kind_to_string(kind);
-        }
-        return false;
-      }
-      if (!local_buf->has_value()) {
-        continue;
-      }
-      if (local_buf->value().bytes_per_block !=
-          remote_buf->value().bytes_per_block) {
+      if (local_buf.bytes_per_block != remote_it->second.bytes_per_block) {
         if (err != nullptr) {
           *err =
-              "bytes_per_block mismatch at layer=" + std::to_string(layer_id) +
-              ", kind=" + buffer_kind_to_string(kind) +
-              ", local=" + std::to_string(local_buf->value().bytes_per_block) +
-              ", remote=" + std::to_string(remote_buf->value().bytes_per_block);
+              "bytes_per_block mismatch at group=" + std::to_string(group_id) +
+              ", " + slot_id_to_string(slot_id) +
+              ", local=" + std::to_string(local_buf.bytes_per_block) +
+              ", remote=" + std::to_string(remote_it->second.bytes_per_block);
         }
         return false;
       }
@@ -1024,7 +960,7 @@ bool MooncakeTransferEngine::build_entries(
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& block_lens,
-    const std::vector<int64_t>& layer_ids,
+    const std::vector<int64_t>& group_ids,
     MoveOpcode move_opcode,
     uint64_t remote_handle,
     std::vector<TransferRequest>* entries,
@@ -1050,55 +986,44 @@ bool MooncakeTransferEngine::build_entries(
                                        ? TransferRequest::WRITE
                                        : TransferRequest::READ;
 
-  const std::vector<int64_t>* target_layers = &layer_ids;
-  std::vector<int64_t> all_layers;
-  if (layer_ids.empty()) {
-    all_layers.resize(local_info.num_layers);
-    std::iota(all_layers.begin(), all_layers.end(), 0);
-    target_layers = &all_layers;
+  const std::vector<int64_t>* target_groups = &group_ids;
+  std::vector<int64_t> all_groups;
+  if (group_ids.empty()) {
+    all_groups.resize(local_info.num_groups);
+    std::iota(all_groups.begin(), all_groups.end(), 0);
+    target_groups = &all_groups;
   }
 
   entries->clear();
-  entries->reserve(target_layers->size() * src_blocks.size() * 3);
-  for (const auto layer_id : *target_layers) {
-    if (layer_id < 0 || layer_id >= local_info.num_layers) {
+  entries->reserve(local_info.buffers.size() * src_blocks.size());
+  for (const auto group_id : *target_groups) {
+    if (group_id < 0 || group_id >= local_info.num_groups) {
       if (err != nullptr) {
-        *err = "layer_id out of range: " + std::to_string(layer_id);
+        *err = "group_id out of range: " + std::to_string(group_id);
       }
       return false;
     }
-    for (const auto kind : kBufKinds) {
-      const auto* local_buf =
-          get_layer_buffer_slot(local_info.layers[layer_id], kind);
-      const auto* remote_buf =
-          get_layer_buffer_slot(remote_info.layers[layer_id], kind);
-      if (local_buf == nullptr || remote_buf == nullptr) {
+    const auto& local_slots = local_info.groups[group_id].slots;
+    const auto& remote_slots = remote_info.groups[group_id].slots;
+    for (const auto& [slot_id, local_buf] : local_slots) {
+      const auto remote_it = remote_slots.find(slot_id);
+      if (remote_it == remote_slots.end()) {
         if (err != nullptr) {
-          *err = "unsupported kind at layer=" + std::to_string(layer_id) +
-                 ", kind=" + buffer_kind_to_string(kind);
+          *err = "missing remote buffer at group=" + std::to_string(group_id) +
+                 ", " + slot_id_to_string(slot_id);
         }
         return false;
       }
-      if (!local_buf->has_value()) {
-        continue;
-      }
-      if (!remote_buf->has_value()) {
-        if (err != nullptr) {
-          *err = "missing remote buffer at layer=" + std::to_string(layer_id) +
-                 ", kind=" + buffer_kind_to_string(kind);
-        }
-        return false;
-      }
+      const auto& remote_buf = remote_it->second;
       const auto bytes_per_block =
-          static_cast<uint64_t>(local_buf->value().bytes_per_block);
-      auto* local_base = reinterpret_cast<char*>(local_buf->value().addr);
-      auto* remote_base = reinterpret_cast<char*>(remote_buf->value().addr);
+          static_cast<uint64_t>(local_buf.bytes_per_block);
+      auto* local_base = reinterpret_cast<char*>(local_buf.addr);
+      auto* remote_base = reinterpret_cast<char*>(remote_buf.addr);
       for (size_t idx = 0; idx < src_blocks.size(); ++idx) {
         if (block_lens[idx] == 0) {
           if (err != nullptr) {
-            *err = "block_len must be positive, layer=" +
-                   std::to_string(layer_id) +
-                   ", kind=" + buffer_kind_to_string(kind);
+            *err = "block_len must be positive, group=" +
+                   std::to_string(group_id) + ", " + slot_id_to_string(slot_id);
           }
           return false;
         }
@@ -1111,8 +1036,8 @@ bool MooncakeTransferEngine::build_entries(
                 dst_blocks[idx], bytes_per_block, &dst_bias) ||
             !checked_multiply_u64(block_lens[idx], bytes_per_block, &len)) {
           if (err != nullptr) {
-            *err = "entry size overflow, layer=" + std::to_string(layer_id) +
-                   ", kind=" + buffer_kind_to_string(kind) +
+            *err = "entry size overflow, group=" + std::to_string(group_id) +
+                   ", " + slot_id_to_string(slot_id) +
                    ", src_block=" + std::to_string(src_blocks[idx]) +
                    ", dst_block=" + std::to_string(dst_blocks[idx]) +
                    ", block_len=" + std::to_string(block_lens[idx]);
@@ -1123,22 +1048,22 @@ bool MooncakeTransferEngine::build_entries(
             move_opcode == MoveOpcode::READ ? dst_bias : src_bias;
         const uint64_t remote_bias =
             move_opcode == MoveOpcode::READ ? src_bias : dst_bias;
-        if (!validate_buffer_range(local_buf->value(),
+        if (!validate_buffer_range(local_buf,
                                    local_bias,
                                    len,
-                                   layer_id,
-                                   kind,
+                                   group_id,
+                                   slot_id,
                                    move_opcode == MoveOpcode::READ
                                        ? dst_blocks[idx]
                                        : src_blocks[idx],
                                    block_lens[idx],
                                    "local",
                                    err) ||
-            !validate_buffer_range(remote_buf->value(),
+            !validate_buffer_range(remote_it->second,
                                    remote_bias,
                                    len,
-                                   layer_id,
-                                   kind,
+                                   group_id,
+                                   slot_id,
                                    move_opcode == MoveOpcode::READ
                                        ? src_blocks[idx]
                                        : dst_blocks[idx],
@@ -1270,9 +1195,9 @@ bool MooncakeTransferEngine::pull_memory_blocks(
     const std::string& remote_addr,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
-    const std::vector<int64_t>& layer_ids) {
+    const std::vector<int64_t>& group_ids) {
   auto ret = move_memory_blocks(
-      remote_addr, src_blocks, dst_blocks, layer_ids, MoveOpcode::READ);
+      remote_addr, src_blocks, dst_blocks, group_ids, MoveOpcode::READ);
   if (!ret) {
     LOG(ERROR) << "Pull memory blocks failed, ret = " << ret;
     return false;
@@ -1285,9 +1210,9 @@ bool MooncakeTransferEngine::push_memory_blocks(
     const std::string& remote_addr,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
-    const std::vector<int64_t>& layer_ids) {
+    const std::vector<int64_t>& group_ids) {
   auto ret = move_memory_blocks(
-      remote_addr, src_blocks, dst_blocks, layer_ids, MoveOpcode::WRITE);
+      remote_addr, src_blocks, dst_blocks, group_ids, MoveOpcode::WRITE);
   if (!ret) {
     LOG(ERROR) << "Push memory blocks failed, ret = " << ret;
     return false;
@@ -1304,7 +1229,7 @@ void MooncakeTransferEngineService::set_registered_memory_info(
     const std::vector<void*>& addrs,
     const std::vector<size_t>& lens,
     int64_t size_per_block,
-    int64_t num_layers) {
+    int64_t num_groups) {
   std::lock_guard<std::mutex> lock(registered_memory_mutex_);
   registered_memory_info_.clear_addrs();
   registered_memory_info_.clear_lens();
@@ -1315,18 +1240,18 @@ void MooncakeTransferEngineService::set_registered_memory_info(
     registered_memory_info_.add_lens(static_cast<uint64_t>(len));
   }
   registered_memory_info_.set_size_per_block(size_per_block);
-  registered_memory_info_.set_num_layers(num_layers);
+  registered_memory_info_.set_num_layers(num_groups);
   registered_memory_info_.clear_buffers();
 }
 
 void MooncakeTransferEngineService::set_registered_memory_info(
     const std::vector<proto::BufferDesc>& buffers,
-    int64_t num_layers) {
+    int64_t num_groups) {
   std::lock_guard<std::mutex> lock(registered_memory_mutex_);
   registered_memory_info_.clear_addrs();
   registered_memory_info_.clear_lens();
   registered_memory_info_.set_size_per_block(0);
-  registered_memory_info_.set_num_layers(num_layers);
+  registered_memory_info_.set_num_layers(num_groups);
   registered_memory_info_.clear_buffers();
   for (const auto& buffer_desc : buffers) {
     *registered_memory_info_.add_buffers() = buffer_desc;

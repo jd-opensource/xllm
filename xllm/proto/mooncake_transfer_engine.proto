@@ -11,16 +11,9 @@ message SessionInfo {
   string addr = 1;
 }
 
-enum BufferKind {
-  BUFFER_KIND_UNKNOWN = 0;
-  BUFFER_KIND_KEY = 1;
-  BUFFER_KIND_VALUE = 2;
-  BUFFER_KIND_INDEX = 3;
-}
-
 message BufferDesc {
-  int32 layer_id = 1;
-  BufferKind kind = 2;
+  int32 group_id = 1;
+  int32 slot_id = 2;
   uint64 addr = 3;
   uint64 len = 4;
   int64 bytes_per_block = 5;

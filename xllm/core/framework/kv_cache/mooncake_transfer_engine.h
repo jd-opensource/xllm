@@ -19,6 +19,7 @@ limitations under the License.
 #include <brpc/channel.h>
 #include <brpc/server.h>
 
+#include <map>
 #include <mutex>
 #include <optional>
 #include <thread>
@@ -66,9 +67,9 @@ class MooncakeTransferEngineCore {
   void set_registered_memory_info(const std::vector<void*>& addrs,
                                   const std::vector<size_t>& lens,
                                   int64_t size_per_block,
-                                  int64_t num_layers);
+                                  int64_t num_groups);
   void set_registered_memory_info(const std::vector<proto::BufferDesc>& buffers,
-                                  int64_t num_layers);
+                                  int64_t num_groups);
   proto::RegisteredMemoryInfo get_registered_memory_info();
 
   bool is_initialized() const { return initialized_; }
@@ -108,23 +109,21 @@ class MooncakeTransferEngine final {
   enum class MoveOpcode { READ = 0, WRITE = 1 };
 
   struct BufferDesc {
-    int64_t layer_id = -1;
-    proto::BufferKind kind = proto::BUFFER_KIND_UNKNOWN;
+    int64_t group_id = -1;
+    int32_t slot_id = -1;
     uint64_t addr = 0;
     uint64_t len = 0;
     int64_t bytes_per_block = 0;
   };
 
-  struct LayerDesc {
-    std::optional<BufferDesc> key;
-    std::optional<BufferDesc> value;
-    std::optional<BufferDesc> index;
+  struct GroupDesc {
+    std::map<int32_t, BufferDesc> slots;
   };
 
   struct MemInfo {
     std::vector<BufferDesc> buffers;
-    std::vector<LayerDesc> layers;
-    int64_t num_layers = 0;
+    std::vector<GroupDesc> groups;
+    int64_t num_groups = 0;
   };
 
   MooncakeTransferEngine(const int16_t listen_port,
@@ -136,25 +135,25 @@ class MooncakeTransferEngine final {
   bool register_memory(std::vector<void*> addrs,
                        std::vector<size_t> lens,
                        int64_t size_per_block,
-                       int64_t num_layers = -1);
+                       int64_t num_groups = -1);
   bool register_memory(const std::vector<BufferDesc>& buffers,
-                       int64_t num_layers);
+                       int64_t num_groups);
 
   bool move_memory_blocks(const std::string& remote_addr,
                           const std::vector<uint64_t>& src_blocks,
                           const std::vector<uint64_t>& dst_blocks,
-                          const std::vector<int64_t>& layer_ids,
+                          const std::vector<int64_t>& group_ids,
                           MoveOpcode move_opcode);
 
   bool pull_memory_blocks(const std::string& remote_addr,
                           const std::vector<uint64_t>& src_blocks,
                           const std::vector<uint64_t>& dst_blocks,
-                          const std::vector<int64_t>& layer_ids);
+                          const std::vector<int64_t>& group_ids);
 
   bool push_memory_blocks(const std::string& remote_addr,
                           const std::vector<uint64_t>& src_blocks,
                           const std::vector<uint64_t>& dst_blocks,
-                          const std::vector<int64_t>& layer_ids);
+                          const std::vector<int64_t>& group_ids);
 
   // === XTensor mode: transfer by GlobalXTensor offsets ===
   // Instead of using block_id and per-layer buffers, this method uses
@@ -188,7 +187,7 @@ class MooncakeTransferEngine final {
                             const std::vector<uint64_t>& src_blocks,
                             const std::vector<uint64_t>& dst_blocks,
                             const std::vector<uint64_t>& block_lens,
-                            const std::vector<int64_t>& layer_ids,
+                            const std::vector<int64_t>& group_ids,
                             MoveOpcode move_opcode,
                             uint64_t remote_handle,
                             std::vector<TransferRequest>* entries,
@@ -198,7 +197,7 @@ class MooncakeTransferEngine final {
   int16_t listen_port_;
   // Only used by the legacy addrs/lens path.
   int64_t size_per_block_ = 0;
-  int64_t num_layers_ = 0;
+  int64_t num_groups_ = 0;
   Device device_;
   MooncakeTransferEngineCore& core_;
   MemInfo local_memory_info_;
@@ -215,9 +214,9 @@ class MooncakeTransferEngineService
   void set_registered_memory_info(const std::vector<void*>& addrs,
                                   const std::vector<size_t>& lens,
                                   int64_t size_per_block,
-                                  int64_t num_layers);
+                                  int64_t num_groups);
   void set_registered_memory_info(const std::vector<proto::BufferDesc>& buffers,
-                                  int64_t num_layers);
+                                  int64_t num_groups);
   proto::RegisteredMemoryInfo get_registered_memory_info();
 
   virtual void OpenSession(google::protobuf::RpcController* controller,
