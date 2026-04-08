@@ -908,6 +908,10 @@ std::tuple<torch::Tensor, torch::Tensor> fused_add_rms_norm_static_fp8_quant(
 
 torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params) {
 #if defined(USE_NPU)
+  if (params.conv_state_indices.has_value()) {
+    CHECK(params.conv_state_indices.value().is_contiguous())
+        << "causal_conv1d_update: conv_state_indices must be contiguous.";
+  }
   return npu::npu_causal_conv1d_update(params.x,
                                        params.conv_state,
                                        params.weight,
