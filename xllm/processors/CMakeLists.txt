@@ -27,6 +27,7 @@ cc_library(
     glm4v_image_processor.h
     pywarpper_image_processor.h
     input_processor.h
+    kimi25_image_processor.h
     qwen2_vl_input_processor.h
     qwen3_vl_input_processor.h
     glm4v_input_processor.h
@@ -40,6 +41,7 @@ cc_library(
     qwen3_vl_image_processor.cpp
     glm4v_image_processor.cpp
     pywarpper_image_processor.cpp
+    kimi25_image_processor.cpp
     qwen2_vl_input_processor.cpp
     qwen3_vl_input_processor.cpp
     glm4v_input_processor.cpp

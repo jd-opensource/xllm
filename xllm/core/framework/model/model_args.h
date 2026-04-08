@@ -328,6 +328,24 @@ struct ModelArgs {
   PROPERTY(std::vector<double>, mm_image_normalize_mean) = {};
   PROPERTY(std::vector<double>, mm_image_normalize_std) = {};
 
+  // KIMI_K25
+  PROPERTY(int, mm_init_pos_emb_width) = 64;
+  PROPERTY(int, mm_init_pos_emb_height) = 64;
+  PROPERTY(int, mm_init_pos_emb_time) = 4;
+  PROPERTY(int, mm_km_in_patch_limit) = 16384;
+  PROPERTY(int, mm_km_patch_size) = 14;
+  PROPERTY(std::vector<int64_t>, mm_km_image_mean) = {};
+  PROPERTY(std::vector<int64_t>, mm_km_image_std) = {};
+  PROPERTY(int, mm_km_merge_kernel_size) = 2;
+  PROPERTY(int, mm_km_fixed_output_tokens) = -1;
+  PROPERTY(int, mm_km_patch_limit_on_one_side) = 512;
+  PROPERTY(int, mm_km_in_patch_limit_each_frame) = 4096;
+  PROPERTY(int, mm_km_in_patch_limit_video) = 200;
+  PROPERTY(float, mm_km_sample_fps) = 2.0;
+  PROPERTY(int, mm_km_max_num_frames_each_video) = 2;
+  PROPERTY(int, mm_km_temporal_merge_kernel_size) = 4;
+  PROPERTY(std::string, mm_km_timestamp_mode) = "hh:mm:ss.fff";
+
   // GLM
   PROPERTY(bool, mm_video_do_rescale) = false;
   PROPERTY(std::vector<double>, mm_video_normalize_mean) = {};
