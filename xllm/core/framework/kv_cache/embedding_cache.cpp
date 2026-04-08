@@ -71,6 +71,11 @@ void EmbeddingCache::set_placeholder(
   embedding_placeholder_ = embedding_placeholder;
 }
 
+void EmbeddingCache::set_probs_placeholder(
+    const torch::Tensor& probs_placeholder) {
+  probs_placeholder_ = probs_placeholder;
+}
+
 ForwardOutput EmbeddingCache::read_for_decode(const std::vector<int32_t>& ids) {
   CHECK(!ids.empty()) << "decode ids should not be empty";
   std::vector<int32_t> token_ids;
@@ -81,12 +86,20 @@ ForwardOutput EmbeddingCache::read_for_decode(const std::vector<int32_t>& ids) {
   probs.reserve(ids.size());
   for (int32_t id : ids) {
     const auto& item = get_tail(id);
-    CHECK_GE(item.token_id, 0) << "decode entry missing token id";
-    CHECK(item.embedding.defined()) << "decode entry missing embedding";
-    CHECK(item.probs.defined()) << "decode entry missing probs";
-    token_ids.emplace_back(item.token_id);
-    embeddings.emplace_back(item.embedding);
-    probs.emplace_back(item.probs);
+    const bool has_cache =
+        item.token_id >= 0 && item.embedding.defined() && item.probs.defined();
+    if (has_cache) {
+      token_ids.emplace_back(item.token_id);
+      embeddings.emplace_back(item.embedding);
+      probs.emplace_back(item.probs);
+      continue;
+    }
+    CHECK(embedding_placeholder_.defined())
+        << "embedding placeholder must be initialized";
+    CHECK(probs_placeholder_.defined()) << "probs placeholder must be initialized";
+    token_ids.emplace_back(token_id_placeholder_);
+    embeddings.emplace_back(embedding_placeholder_);
+    probs.emplace_back(probs_placeholder_);
   }
   ForwardOutput output;
   output.sample_output.next_tokens = torch::tensor(token_ids, torch::kInt);
@@ -102,8 +115,6 @@ std::vector<int32_t> EmbeddingCache::read_correction_tokens(
   tokens.reserve(ids.size());
   for (int32_t id : ids) {
     const auto& item = get_tail(id);
-    CHECK_GE(item.correction_token_id, 0)
-        << "decode entry missing correction token id";
     tokens.emplace_back(item.correction_token_id);
   }
   return tokens;
@@ -116,8 +127,6 @@ std::vector<int32_t> EmbeddingCache::read_position_offsets(
   offsets.reserve(ids.size());
   for (int32_t id : ids) {
     const auto& item = get_tail(id);
-    CHECK_GE(item.correction_token_id, 0)
-        << "decode entry missing correction token id";
     offsets.emplace_back(item.correction_position_offset);
   }
   return offsets;
@@ -127,8 +136,8 @@ void EmbeddingCache::clear(const std::vector<int32_t>& ids) {
   for (int32_t id : ids) {
     auto& tail = mutable_tail(id);
     tail.embedding = torch::Tensor();
-    tail.token_id = -1;
-    tail.correction_token_id = -1;
+    tail.token_id = 0;
+    tail.correction_token_id = 0;
     tail.correction_position_offset = 0;
     tail.probs = torch::Tensor();
   }
