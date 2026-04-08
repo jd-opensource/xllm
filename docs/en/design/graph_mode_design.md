@@ -24,6 +24,10 @@ The non-goals of this document are:
 - full adaptation details for every operator or every model
 - replacing feature documentation for flags and usage examples
 
+Related design documents:
+
+- for a recommendation-oriented case study that focuses on fixed scheduling, multi-step execution, and custom operators, see: [Generative Recommendation Design Document](generative_recommendation_design.md)
+
 ## 1. Graph Mode Fundamentals
 
 ### 1.1 Capture / Replay Basics
