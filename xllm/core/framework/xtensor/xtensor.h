@@ -19,6 +19,7 @@ limitations under the License.
 
 #include <memory>
 #include <unordered_map>
+#include <vector>
 
 #include "common/global_flags.h"
 #include "common/macros.h"
@@ -33,10 +34,7 @@ using offset_t = page_id_t;
 /* NOTE: XTensorAllocator is thread-safe but XTensor is not. */
 class XTensor {
  public:
-  XTensor(size_t size,
-          torch::Dtype dtype,
-          torch::Device dev,
-          PhyPage* zero_page);
+  XTensor(size_t size, torch::Dtype dtype, torch::Device dev);
 
   // Constructor for weight tensor using pre-allocated page_ids (non-contiguous)
   // page_ids: physical page IDs from PhyPagePool (allocated via
@@ -105,14 +103,12 @@ class XTensor {
  private:
   // Map a single physical page at the given offset
   bool map_phy_page_(PhyPage* page, offset_t offset);
-  bool init_with_zero_();
 
   VirPtr vaddr_;
   size_t size_;
   size_t page_size_;  // Page size (FLAGS_phy_page_granularity_size)
   torch::Dtype dtype_;
   torch::Device dev_;
-  PhyPage* zero_page_;  // Not owned, managed by PhyPagePool
 
   // Maps page id -> PhyPage (page id = offset / page_size_)
   std::unordered_map<page_id_t, std::unique_ptr<PhyPage>> mapping_;

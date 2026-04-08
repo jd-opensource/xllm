@@ -19,6 +19,8 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/global_flags.h"
@@ -695,11 +697,65 @@ void BatchInputBuilder::process_swap_block_infos(
               [](const BlockTransferInfo& a, const BlockTransferInfo& b) {
                 return a.src_block_id < b.src_block_id;
               });
+#if defined(USE_CUDA)
+    raw_forward_input.swap_blocks.insert(raw_forward_input.swap_blocks.end(),
+                                         swap_blocks.begin(),
+                                         swap_blocks.end());
+
+    if (swap_blocks.size() > 0) {
+      std::vector<int32_t> src_indices, dst_indices, cum_sum;
+      std::unordered_set<int32_t> src_set;
+      std::unordered_map<int32_t, int32_t> dst_to_src;
+      bool has_overlap = false;
+      int32_t current_src = swap_blocks[0].src_block_id;
+      src_indices.reserve(swap_blocks.size());
+      dst_indices.reserve(swap_blocks.size());
+      cum_sum.reserve(swap_blocks.size());
+
+      for (const auto& block : swap_blocks) {
+        src_set.insert(block.src_block_id);
+      }
+
+      src_indices.push_back(swap_blocks[0].src_block_id);
+      dst_indices.push_back(swap_blocks[0].dst_block_id);
+      dst_to_src.emplace(swap_blocks[0].dst_block_id,
+                         swap_blocks[0].src_block_id);
+      if (src_set.count(swap_blocks[0].dst_block_id) > 0 &&
+          swap_blocks[0].dst_block_id != swap_blocks[0].src_block_id) {
+        has_overlap = true;
+      }
+      for (size_t i = 1; i < swap_blocks.size(); i++) {
+        dst_indices.push_back(swap_blocks[i].dst_block_id);
+        auto [it, inserted] = dst_to_src.emplace(swap_blocks[i].dst_block_id,
+                                                 swap_blocks[i].src_block_id);
+        if (!inserted && it->second != swap_blocks[i].src_block_id) {
+          has_overlap = true;
+        }
+        if (src_set.count(swap_blocks[i].dst_block_id) > 0 &&
+            swap_blocks[i].dst_block_id != swap_blocks[i].src_block_id) {
+          has_overlap = true;
+        }
+        if (swap_blocks[i].src_block_id != current_src) {
+          src_indices.push_back(swap_blocks[i].src_block_id);
+          cum_sum.push_back(i);
+          current_src = swap_blocks[i].src_block_id;
+        }
+      }
+      cum_sum.emplace_back(swap_blocks.size());
+
+      if (!has_overlap) {
+        raw_forward_input.src_block_indices = std::move(src_indices);
+        raw_forward_input.dst_block_indices = std::move(dst_indices);
+        raw_forward_input.cum_sum = std::move(cum_sum);
+      }
+    }
+#else
     if (swap_blocks.size() > 0) {
       std::vector<int32_t> src_indices, dst_indices, cum_sum;
       int32_t current_src = swap_blocks[0].src_block_id;
       src_indices.reserve(swap_blocks.size());
       dst_indices.reserve(swap_blocks.size());
+      cum_sum.reserve(swap_blocks.size());
 
       src_indices.push_back(swap_blocks[0].src_block_id);
       dst_indices.push_back(swap_blocks[0].dst_block_id);
@@ -718,6 +774,7 @@ void BatchInputBuilder::process_swap_block_infos(
       raw_forward_input.dst_block_indices = std::move(dst_indices);
       raw_forward_input.cum_sum = std::move(cum_sum);
     }
+#endif
   } else {
     raw_forward_input.swap_blocks.insert(raw_forward_input.swap_blocks.end(),
                                          swap_block_transfer_infos_->begin(),

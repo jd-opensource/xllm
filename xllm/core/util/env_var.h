@@ -29,6 +29,7 @@ bool get_bool_env(const std::string& key, bool defaultValue);
 int64_t get_int_env(const std::string& key, int64_t defaultValue);
 
 std::string get_string_env(const std::string& name);
+std::optional<std::string> get_optional_string_env(const std::string& name);
 
 // Get the timeout in seconds for process group test operations.
 // This timeout is used when waiting for process group initialization tests

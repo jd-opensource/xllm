@@ -71,8 +71,14 @@ class DiTModelLoader {
 
   std::string get_torch_dtype() const;
 
+  void set_model_type(const std::string& model_type) {
+    model_type_ = model_type;
+  }
+  std::string get_model_type() { return model_type_; }
+
  private:
   std::string model_root_path_;
+  std::string model_type_;
 
   std::unordered_map<std::string, std::unique_ptr<DiTFolderLoader>>
       name_to_loader_;

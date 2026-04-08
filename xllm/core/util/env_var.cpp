@@ -62,6 +62,14 @@ std::string get_string_env(const std::string& name) {
   return std::string(val);
 }
 
+std::optional<std::string> get_optional_string_env(const std::string& name) {
+  const char* val = std::getenv(name.c_str());
+  if (val == nullptr) {
+    return std::nullopt;
+  }
+  return std::string(val);
+}
+
 double get_double_env(const std::string& key, double defaultValue = -1) {
   const char* val = std::getenv(key.c_str());
   if (val == nullptr) {

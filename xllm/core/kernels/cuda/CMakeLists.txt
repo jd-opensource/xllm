@@ -44,7 +44,54 @@ set(CUDA_HEADER_FILES
   moe/moe_topk_softmax_kernels.cuh
 )
 
+#
+# Per-SM-architecture CUTLASS libraries.
+#
+# CUTLASS template instantiations are extremely expensive to compile. Splitting each SM generation
+# into its own static library improves incremental build times — changing one SM's CUTLASS code
+# only recompiles that library, not all CUTLASS files.
+
+set(_CUTLASS_SM_LIBS "")
+
+if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0)
+  # --- SM90 (Hopper) ---
+  cc_library(
+    NAME cutlass_sm90
+    SRCS
+      cutlass_w8a8/c3x/scaled_mm_sm90_fp8.cu
+      cutlass_w8a8/scaled_mm_c3x_sm90.cu
+    DEPS
+      torch
+      tvm_ffi
+  )
+
+  # --- SM100 (Blackwell) ---
+  cc_library(
+    NAME cutlass_sm100
+    SRCS
+      cutlass_w8a8/c3x/scaled_mm_sm100_fp8.cu
+      cutlass_w8a8/scaled_mm_c3x_sm100.cu
+    DEPS
+      torch
+      tvm_ffi
+  )
+
+  # --- SM120 ---
+  cc_library(
+    NAME cutlass_sm120
+    SRCS
+      cutlass_w8a8/c3x/scaled_mm_sm120_fp8.cu
+      cutlass_w8a8/scaled_mm_c3x_sm120.cu
+    DEPS
+      torch
+      tvm_ffi
+  )
+
+  set(_CUTLASS_SM_LIBS :cutlass_sm90 :cutlass_sm100 :cutlass_sm120)
+endif()
+
 # Keep source list explicit to avoid accidentally compiling test files into cuda_kernels.
+# NOTE: SM-specific CUTLASS sources are compiled via the per-arch libraries above.
 set(CUDA_SOURCE_FILES
   activation.cu
   air_log_softmax_last_dim.cu
@@ -52,13 +99,8 @@ set(CUDA_SOURCE_FILES
   batch_decode.cpp
   batch_prefill.cpp
   batch_chunked_prefill.cpp
+  block_copy.cu
   cutlass_extensions/common.cpp
-  cutlass_w8a8/c3x/scaled_mm_sm100_fp8.cu
-  cutlass_w8a8/c3x/scaled_mm_sm120_fp8.cu
-  cutlass_w8a8/c3x/scaled_mm_sm90_fp8.cu
-  cutlass_w8a8/scaled_mm_c3x_sm100.cu
-  cutlass_w8a8/scaled_mm_c3x_sm120.cu
-  cutlass_w8a8/scaled_mm_c3x_sm90.cu
   cutlass_w8a8/scaled_mm_entry.cu
   fp8_quant.cu
   fp8_scaled_matmul.cpp
@@ -93,6 +135,7 @@ cc_library(
     torch
     :util
     :platform
+    ${_CUTLASS_SM_LIBS}
 )
 
 cc_test(
@@ -106,6 +149,24 @@ cc_test(
     GTest::gtest_main
     glog::glog
 )
+
+option(XLLM_ENABLE_BLOCK_COPY_TEST
+       "Build and register the expensive CUDA block_copy_test"
+       OFF)
+
+if(XLLM_ENABLE_BLOCK_COPY_TEST)
+  cc_test(
+    NAME
+      block_copy_test
+    SRCS
+      block_copy_test.cpp
+    DEPS
+      :cuda_kernels
+      torch
+      GTest::gtest_main
+      glog::glog
+  )
+endif()
 
 cc_test(
   NAME

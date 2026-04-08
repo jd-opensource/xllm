@@ -17,55 +17,64 @@ limitations under the License.
 
 namespace xllm {
 
-namespace {
-
-using Size = std::pair<int, int>;
-std::optional<Size> smart_resize(int height,
-                                 int width,
-                                 int factor = 28,
-                                 int min_pixels = 56 * 56,
-                                 int max_pixels = 14 * 14 * 4 * 1280) {
+std::optional<Qwen2VLImageProcessor::Size>
+Qwen2VLImageProcessor::smart_resize_image(int32_t height,
+                                          int32_t width,
+                                          int32_t factor = 28,
+                                          int32_t min_pixels = 56 * 56,
+                                          int32_t max_pixels = 14 * 14 * 4 *
+                                                               1280) const {
   if (static_cast<double>(std::max(height, width)) / std::min(height, width) >
-      200) {
+      200.0) {
     LOG(ERROR) << "Absolute aspect ratio must be smaller than 200";
     return std::nullopt;
   }
 
-  int h_bar =
-      static_cast<int>(std::round(height / static_cast<double>(factor))) *
+  int32_t h_bar =
+      static_cast<int32_t>(std::round(height / static_cast<double>(factor))) *
       factor;
-  int w_bar =
-      static_cast<int>(std::round(width / static_cast<double>(factor))) *
+  int32_t w_bar =
+      static_cast<int32_t>(std::round(width / static_cast<double>(factor))) *
       factor;
 
   if (h_bar * w_bar > max_pixels) {
     double beta = std::sqrt((height * width) / static_cast<double>(max_pixels));
-    h_bar = static_cast<int>(
+    h_bar = static_cast<int32_t>(
                 std::floor(height / beta / static_cast<double>(factor))) *
             factor;
-    w_bar = static_cast<int>(
+    w_bar = static_cast<int32_t>(
                 std::floor(width / beta / static_cast<double>(factor))) *
             factor;
   } else if (h_bar * w_bar < min_pixels) {
     double beta = std::sqrt(min_pixels / static_cast<double>(height * width));
-    h_bar = static_cast<int>(
+    h_bar = static_cast<int32_t>(
                 std::ceil(height * beta / static_cast<double>(factor))) *
             factor;
-    w_bar = static_cast<int>(
+    w_bar = static_cast<int32_t>(
                 std::ceil(width * beta / static_cast<double>(factor))) *
             factor;
   }
 
   return std::make_pair(h_bar, w_bar);
 }
-}  // namespace
+
+std::optional<Qwen2VLImageProcessor::Size>
+Qwen2VLImageProcessor::smart_resize_video(int32_t num_frames,
+                                          int32_t height,
+                                          int32_t width,
+                                          int32_t temporal_factor,
+                                          int32_t factor,
+                                          int32_t min_pixels,
+                                          int32_t max_pixels) const {
+  return smart_resize_image(height, width, factor, min_pixels, max_pixels);
+}
 
 torch::Tensor Qwen2VLImageProcessor::sample_frames(
     const VideoMetadata& metadata,
-    int temporal_patch_size,
-    int min_frames,
-    int max_frames,
-    int num_frames,
+    int32_t temporal_patch_size,
+    int32_t min_frames,
+    int32_t max_frames,
+    int32_t num_frames,
     double set_fps) {
   if (set_fps > 0.0 && num_frames > 0) {
     LOG(FATAL) << "num_frames and fps are mutually exclusive arguments, please "
@@ -74,13 +83,13 @@ torch::Tensor Qwen2VLImageProcessor::sample_frames(
 
   double fps = set_fps;
 
-  int total_num_frames = metadata.total_num_frames;
+  int32_t total_num_frames = metadata.total_num_frames;
 
   if (num_frames > 0) {
     double double_num_frames =
         std::round(static_cast<double>(num_frames) / temporal_patch_size) *
         temporal_patch_size;
-    num_frames = static_cast<int>(double_num_frames);
+    num_frames = static_cast<int32_t>(double_num_frames);
   } else if (fps > 0.0) {
     if (metadata.fps <= 0.0) {
       LOG(FATAL)
@@ -88,9 +97,9 @@ torch::Tensor Qwen2VLImageProcessor::sample_frames(
              "was provided which is required when sampling with `fps`. ";
     }
 
-    max_frames =
-        (std::min(max_frames, total_num_frames) / temporal_patch_size) *
-        temporal_patch_size;
+    max_frames = (std::min(max_frames, static_cast<int32_t>(total_num_frames)) /
+                  temporal_patch_size) *
+                 temporal_patch_size;
     double double_num_frames =
         static_cast<double>(total_num_frames) / metadata.fps * fps;
     double_num_frames = std::min(
@@ -100,7 +109,7 @@ torch::Tensor Qwen2VLImageProcessor::sample_frames(
     double_num_frames = std::floor(double_num_frames / temporal_patch_size) *
                         temporal_patch_size;
 
-    num_frames = static_cast<int>(double_num_frames);
+    num_frames = static_cast<int32_t>(double_num_frames);
   }
 
   if (num_frames > total_num_frames) {
@@ -110,19 +119,19 @@ torch::Tensor Qwen2VLImageProcessor::sample_frames(
   }
 
   if (num_frames > 0) {
-    std::vector<int64_t> indices;
+    std::vector<int32_t> indices;
     indices.reserve(num_frames);
-    for (int i = 0; i < num_frames; ++i) {
-      int64_t k = static_cast<int64_t>(
-          (static_cast<int64_t>(i) * total_num_frames) / num_frames);
-      if (k >= total_num_frames) k = total_num_frames - 1;
+    for (int32_t i = 0; i < num_frames; ++i) {
+      int32_t k = i * total_num_frames / num_frames;
+      if (k >= total_num_frames) {
+        k = total_num_frames - 1;
+      }
       indices.push_back(k);
     }
-    return torch::tensor(indices, torch::TensorOptions().dtype(torch::kLong));
+    return torch::tensor(indices, torch::TensorOptions().dtype(torch::kInt32));
   } else {
-    return torch::arange(0,
-                         static_cast<int64_t>(total_num_frames),
-                         torch::TensorOptions().dtype(torch::kLong));
+    return torch::arange(
+        0, total_num_frames, torch::TensorOptions().dtype(torch::kInt32));
   }
 }
 
@@ -263,11 +272,11 @@ bool Qwen2VLImageProcessor::process_image(torch::Tensor image,
 
   // resize
   if (do_resize_) {
-    auto size = smart_resize(resized_height,
-                             resized_width,
-                             patch_size_ * merge_size_,
-                             min_pixels_,
-                             max_pixels_);
+    auto size = smart_resize_image(resized_height,
+                                   resized_width,
+                                   patch_size_ * merge_size_,
+                                   min_pixels_,
+                                   max_pixels_);
     // size_["shortest_edge"],
     // size_["longest_edge"]);
     if (!size) {
@@ -375,19 +384,18 @@ bool Qwen2VLImageProcessor::process_video(torch::Tensor origin_video,
                                   /*num_frames=*/-1,
                                   /*set_fps=*/2.0);
   } else {
-    indices = torch::arange(0,
-                            static_cast<int64_t>(origin_video.size(0)),
-                            torch::TensorOptions().dtype(torch::kLong));
+    indices = torch::arange(
+        0, origin_video.size(0), torch::TensorOptions().dtype(torch::kInt32));
   }
   auto video = origin_video.index_select(/*dim=*/0, indices);
-  int64_t sampled_total_frames = video.size(0);
+  int32_t sampled_total_frames = video.size(0);
 
   metadata.frame_indices = indices;
   metadata.timestamps.clear();
   metadata.timestamps.reserve(static_cast<size_t>(sampled_total_frames));
   double fps_for_ts = (metadata.fps > 0.0) ? metadata.fps : 24.0;
-  for (int64_t i = 0; i < sampled_total_frames; ++i) {
-    int64_t frame_idx = metadata.frame_indices[i].item<int64_t>();
+  for (int32_t i = 0; i < sampled_total_frames; ++i) {
+    int32_t frame_idx = metadata.frame_indices[i].item<int32_t>();
     metadata.timestamps.push_back(static_cast<double>(frame_idx) / fps_for_ts);
   }
 
@@ -405,11 +413,13 @@ bool Qwen2VLImageProcessor::process_video(torch::Tensor origin_video,
   auto resized_width = shape[3];
 
   if (do_resize_) {
-    auto size = smart_resize(resized_height,
-                             resized_width,
-                             patch_size_ * merge_size_,
-                             size_["shortest_edge"],
-                             size_["longest_edge"]);
+    auto size = smart_resize_video(static_cast<int32_t>(time_len),
+                                   resized_height,
+                                   resized_width,
+                                   temporal_patch_size_,
+                                   patch_size_ * merge_size_,
+                                   min_pixels_,
+                                   max_pixels_);
     if (!size) {
       return false;
     }

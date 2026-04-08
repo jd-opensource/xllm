@@ -476,15 +476,31 @@ if(USE_CUDA)
     $ENV{CUDA_TOOLKIT_ROOT_DIR}/lib64
   )
 
-  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -O3)
+  # To reduce compilation time during development, use fewer architectures:
+  #   export TORCH_CUDA_ARCH_LIST="9.0"
+  option(CUDA_DEV_MODE "Use -O1 instead of -O3 for faster CUDA compilation during development" OFF)
+  if(CUDA_DEV_MODE)
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O1")
+  else()
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
+  endif()
+
   # The following definitions must be undefined since half-precision operation is required.
-  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}
-        -U__CUDA_NO_HALF_OPERATORS__
-        -U__CUDA_NO_HALF_CONVERSIONS__
-        -U__CUDA_NO_HALF2_OPERATORS__
-        -U__CUDA_NO_BFLOAT16_CONVERSIONS__)
-  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} --use_fast_math -Xfatbin -compress-all)
-  message(STATUS "CUDA_NVCC_FLAGS: ${CUDA_NVCC_FLAGS}")
+  string(APPEND CMAKE_CUDA_FLAGS
+    " -U__CUDA_NO_HALF_OPERATORS__"
+    " -U__CUDA_NO_HALF_CONVERSIONS__"
+    " -U__CUDA_NO_HALF2_OPERATORS__"
+    " -U__CUDA_NO_BFLOAT16_CONVERSIONS__"
+    " --use_fast_math"
+    " -Xfatbin -compress-all")
+
+  # Parallel nvcc compilation: compile multiple GPU architectures simultaneously within each .cu
+  # file. --threads 0 = auto-detect CPU core count. Requires CUDA >= 11.2.
+  if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 11.2)
+    string(APPEND CMAKE_CUDA_FLAGS " --threads 0")
+  endif()
+
+  message(STATUS "CMAKE_CUDA_FLAGS: ${CMAKE_CUDA_FLAGS}")
 
   # find_package(NCCL REQUIRED)
 

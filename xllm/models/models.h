@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #if defined(USE_NPU)
+#include "dit/npu/qwen_image_edit/pipeline_qwenimage_edit_plus.h"  // IWYU pragma: keep
 #include "dit/pipeline_flux.h"                // IWYU pragma: keep
 #include "dit/pipeline_flux_control.h"        // IWYU pragma: keep
 #include "dit/pipeline_flux_fill.h"           // IWYU pragma: keep
@@ -43,13 +44,14 @@ limitations under the License.
 #include "llm/qwen3_5.h"                      // IWYU pragma: keep
 #include "llm/qwen3_5_mtp.h"                  // IWYU pragma: keep
 #include "llm/qwen3_next.h"                   // IWYU pragma: keep
-#include "rec/onerec.h"                       // IWYU pragma: keep
+#include "rec/npu/onerec.h"                   // IWYU pragma: keep
 #include "vlm/npu/glm4v.h"                    // IWYU pragma: keep
 #include "vlm/npu/glm4v_moe.h"                // IWYU pragma: keep
 #include "vlm/npu/kimi_k25.h"                 // IWYU pragma: keep
 #include "vlm/npu/minicpmv.h"                 // IWYU pragma: keep
 #include "vlm/npu/oxygen_vlm.h"               // IWYU pragma: keep
 #include "vlm/npu/qwen2_5_vl.h"               // IWYU pragma: keep
+#include "vlm/npu/qwen2_5_vl_embedding.h"     // IWYU pragma: keep
 #include "vlm/npu/qwen2_5_vl_mm_embedding.h"  // IWYU pragma: keep
 #include "vlm/npu/qwen2_vl.h"                 // IWYU pragma: keep
 #include "vlm/npu/qwen2_vl_embedding.h"       // IWYU pragma: keep

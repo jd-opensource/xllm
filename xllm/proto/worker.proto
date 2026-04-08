@@ -193,6 +193,55 @@ message MMData {
   map<string, MMValue> dict = 2;
 }
 
+message DiTForwardInput {
+  int32 batch_size = 1;
+  
+  // Primary input text description for image generation
+  repeated string prompts = 2;
+  
+  // Secondary prompt for additional details (e.g., color, lighting)
+  repeated string prompts_2 = 3;
+  
+  // Negative prompt to exclude low-quality features
+  repeated string negative_prompts = 4;
+  
+  // Secondary negative prompt to exclude additional unwanted features
+  repeated string negative_prompts_2 = 5;
+  
+  // Tensor fields
+  Tensor images = 6;
+  Tensor condition_images = 7;
+  Tensor mask_images = 8;
+  Tensor control_image = 9;
+  Tensor masked_image_latents = 10;
+  Tensor prompt_embeds = 11;
+  Tensor pooled_prompt_embeds = 12;
+  Tensor negative_prompt_embeds = 13;
+  Tensor negative_pooled_prompt_embeds = 14;
+  Tensor latents = 15;
+  
+  // generation params
+  DiTGenerationParams generation_params = 16;
+}
+
+message DiTForwardOutput {
+  TensorList tensors = 1; 
+}
+
+message DiTGenerationParams {
+  int32 width = 1;
+  int32 height = 2;
+  int32 num_inference_steps = 3;
+  float true_cfg_scale = 4;
+  float guidance_scale = 5;
+  uint32 num_images_per_prompt = 6;
+  int64 seed = 7;
+  int32 max_sequence_length = 8;
+  float strength = 9;
+  bool enable_cfg_renorm = 10;
+  float cfg_renorm_min = 11;
+}
+
 message ForwardInput {
   // flatten the token ids and positions
   repeated int32 flatten_tokens_vec = 1;
@@ -241,6 +290,7 @@ message ForwardInput {
   repeated int32 dp_is_decode = 42;
   repeated int32 kv_cache_tokens_nums = 43;
   repeated string request_ids = 44;
+  DiTForwardInput dit_forward_input = 45;
 }
 
  message BatchedForwardInputs {
@@ -273,6 +323,7 @@ message ForwardOutput {
   repeated int32 src_seq_idxes = 5;
   repeated int32 out_tokens = 6;
   repeated float out_logprobs = 7;
+  DiTForwardOutput dit_forward_output = 8;
 }
 
 // master create Collective service

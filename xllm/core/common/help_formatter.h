@@ -60,6 +60,10 @@ const OptionCategory kMoeModelOptions = {
     "MOE MODEL OPTIONS",
     {"dp_size", "ep_size", "expert_parallel_degree"}};
 
+const OptionCategory kDiTModelOptions = {
+    "DiT MODEL OPTIONS",
+    {"dp_size", "tp_size", "sp_size", "cfg_size"}};
+
 const OptionCategory kDisaggregatedPrefillDecodeOptions = {
     "DISAGGREGATED PREFILL-DECODE OPTIONS",
     {"enable_disagg_pd",
@@ -67,7 +71,6 @@ const OptionCategory kDisaggregatedPrefillDecodeOptions = {
      "instance_role",
      "kv_cache_transfer_mode",
      "device_ip",
-     "npu_phy_id",
      "transfer_listen_port"}};
 
 const OptionCategory kMultiStepDecodeOptions = {
@@ -86,14 +89,18 @@ const OptionCategory kMtpOptions = {"SPECULATIVE OPTIONS",
                                      "speculative_suffix_max_cached_requests",
                                      "speculative_suffix_use_tree_spec"}};
 
-const OptionCategory kXllmServiceOptions = {"XLLM-SERVICE OPTIONS",
-                                            {"etcd_addr", "rank_tablefile"}};
+const OptionCategory kXllmServiceOptions = {
+    "XLLM-SERVICE OPTIONS",
+    {"etcd_addr", "rank_tablefile", "etcd_namespace"}};
 
-const OptionCategory kBeamSearchOptions = {"BEAM SEARCH OPTIONS",
-                                           {"enable_beam_search_kernel",
-                                            "enable_rec_fast_sampler",
-                                            "enable_topk_sorted",
-                                            "output_rec_logprobs"}};
+const OptionCategory kBeamSearchOptions = {
+    "BEAM SEARCH OPTIONS",
+    {"enable_beam_search_kernel", "enable_topk_sorted"}};
+
+const OptionCategory kRecOptions = {"REC OPTIONS",
+                                    {"enable_rec_fast_sampler",
+                                     "enable_rec_prefill_only",
+                                     "output_rec_logprobs"}};
 
 const OptionCategory kPrefixCacheOptions = {
     "PREFIX CACHE OPTIONS",
@@ -113,11 +120,13 @@ const std::vector<OptionCategory> kOptionCategories = {
     kCommonOptions,
     kCacheOptions,
     kMoeModelOptions,
+    kDiTModelOptions,
     kDisaggregatedPrefillDecodeOptions,
     kMultiStepDecodeOptions,
     kMtpOptions,
     kXllmServiceOptions,
     kBeamSearchOptions,
+    kRecOptions,
     kPrefixCacheOptions,
     kOtherOptions};
 
