@@ -542,6 +542,57 @@ TEST_F(AclGraphExecutorTest, DifferentBatchSizes) {
   }
 }
 
+// Test decode batch-size threshold fallback: ACL graph should fall back to
+// eager when batch_size exceeds the configured limit (default: 16).
+TEST_F(AclGraphExecutorTest, DecodeBatchSizeThresholdFallsBackToEager) {
+  constexpr uint32_t batch_size = 17;
+  sequences_.clear();
+  auto batch = std::make_unique<Batch>();
+
+  for (uint32_t i = 0; i < batch_size; ++i) {
+    sequences_.emplace_back(i,
+                            std::vector<int32_t>{static_cast<int32_t>(1 + i),
+                                                 static_cast<int32_t>(3 + i),
+                                                 static_cast<int32_t>(5 + i),
+                                                 static_cast<int32_t>(7 + i)},
+                            input_embedding_,
+                            mm_data_,
+                            fake_decoder_,
+                            seq_params_);
+    auto& sequence = sequences_.back();
+    sequence.add_kv_blocks(block_manager_->allocate(2));
+    sequence.kv_state().incr_kv_cache_tokens_num(/*size=*/4);
+    sequence.append_token(100 + i);
+    batch->add(&sequence);
+  }
+
+  auto forward_input = batch->prepare_forward_input(
+      options_.num_decoding_tokens(), 0, model_args_);
+  forward_input = forward_input.to(*device_, torch::kFloat32);
+
+  auto npu_executor = std::make_unique<BaseExecutorImpl>(
+      model_.get(), model_args_, *device_, options_);
+  auto graph_executor = std::make_unique<::xllm::npu::AclGraphExecutorImpl>(
+      model_.get(), model_args_, *device_, options_);
+
+  auto eager_out = npu_executor->run({forward_input.token_ids},
+                                     {forward_input.positions},
+                                     kv_caches_,
+                                     {forward_input.input_params});
+  auto graph_out = graph_executor->run({forward_input.token_ids},
+                                       {forward_input.positions},
+                                       kv_caches_,
+                                       {forward_input.input_params});
+
+  EXPECT_EQ(graph_out.hidden_states.size(0),
+            batch_size * options_.num_decoding_tokens());
+  EXPECT_EQ(graph_out.hidden_states.size(1), model_args_.hidden_size());
+  EXPECT_TRUE(torch::allclose(eager_out.hidden_states,
+                              graph_out.hidden_states,
+                              /*rtol=*/1e-5,
+                              /*atol=*/1e-6));
+}
+
 // Test ACL graph executor against original NPU executor implementation
 TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImpl) {
   // Create test batch

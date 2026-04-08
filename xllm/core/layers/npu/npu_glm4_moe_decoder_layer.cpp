@@ -47,7 +47,9 @@ NpuGlm4MoeDecoderImpl::NpuGlm4MoeDecoderImpl(const ModelContext& context,
   end_expert_id_ = start_expert_id_ + num_experts_per_partition_ - 1;
 
   param_from_args(prefill_param_, model_args, parallel_args, true);
-  param_from_args(decode_param_, model_args, parallel_args, false);
+  param_from_args(decode_graph_param_, model_args, parallel_args, false);
+  decode_eager_param_ = decode_graph_param_;
+  decode_eager_param_.enableAclGraphPagedAttention = false;
   atb_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   placeholder_vec_ = {1};
   device_id_ = options.device().index();
@@ -300,7 +302,10 @@ int64_t NpuGlm4MoeDecoderImpl::init_layer() {
   BaseLayer::name_ = "glm4_moe_decoder_layer " + std::to_string(layer_id_);
   model_name_ = "Glm4_Moe";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
-  CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
+  CHECK_OPERATION_STATUS_RETURN(
+      init_node(decode_graph_node_, decode_graph_param_));
+  CHECK_OPERATION_STATUS_RETURN(
+      init_node(decode_eager_node_, decode_eager_param_));
 
   return atb::NO_ERROR;
 }
@@ -356,20 +361,26 @@ torch::Tensor NpuGlm4MoeDecoderImpl::forward(
                             attn_mask,
                             kv_cache,
                             input_params,
-                            true);
+                            true,
+                            false);
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << " excute prefill layer fail, error code: " << st;
   } else {
-    build_node_variant_pack(decode_node_,
+    const bool use_graph_decode_input =
+        FLAGS_enable_graph && input_params.graph_buffer.tiling_data.defined();
+    auto& decode_node =
+        use_graph_decode_input ? decode_graph_node_ : decode_eager_node_;
+    build_node_variant_pack(decode_node,
                             x,
                             cos_pos,
                             sin_pos,
                             /*attn_mask*/ tensor_placeholder_,
                             kv_cache,
                             input_params,
-                            false);
-    st = execute_node(decode_node_, node_id + 1000, event, event_flag);
+                            false,
+                            use_graph_decode_input);
+    st = execute_node(decode_node, node_id + 1000, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << " excute decode layer fail, error code: " << st;
   }
@@ -385,7 +396,8 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
     const ModelInputParams& input_params,
-    bool is_prefill) {
+    bool is_prefill,
+    bool use_graph_decode_input) {
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
   auto& dp_ep_padding = input_params.dp_ep_padding_data;
 
@@ -458,7 +470,7 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(input_idx++) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
-  if (FLAGS_enable_graph && !is_prefill &&
+  if (!is_prefill && use_graph_decode_input &&
       input_params.graph_buffer.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(
