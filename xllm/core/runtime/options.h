@@ -220,6 +220,9 @@ struct Options {
   // Output shared memory size
   PROPERTY(uint64_t, output_shm_size) = 128;
 
+  // whether to enable block copy kernel when available.
+  PROPERTY(bool, enable_block_copy_kernel) = false;
+
   // whether the worker and master are on the same machine.
   PROPERTY(bool, is_local) = false;
 
@@ -232,6 +235,9 @@ struct Options {
 
   // beam width for beam search
   PROPERTY(int32_t, beam_width) = 128;
+
+  // enable RecSampler fast path for Rec pipelines and LLM beam search
+  PROPERTY(bool, enable_rec_fast_sampler) = true;
 
   // max tokens per batch
   PROPERTY(int32_t, max_tokens_per_batch) = 4096;

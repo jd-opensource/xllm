@@ -57,6 +57,8 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      int num_decoding_tokens,
                                      int block_size,
                                      bool enable_shm,
+                                     bool enable_rec_fast_sampler,
+                                     bool enable_block_copy_kernel,
                                      uint64_t input_shm_size,
                                      uint64_t output_shm_size,
                                      bool is_local,
@@ -77,12 +79,16 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
       .enable_offline_inference(true)
       .master_node_addr(master_node_addr)
       .enable_shm(enable_shm)
+      .enable_rec_fast_sampler(enable_rec_fast_sampler)
+      .enable_block_copy_kernel(enable_block_copy_kernel)
       .input_shm_size(input_shm_size)
       .output_shm_size(output_shm_size)
       .is_local(is_local)
       .task_type(task_type);
   FLAGS_enable_schedule_overlap = false;
   FLAGS_enable_prefill_sp = enable_prefill_sp;
+  FLAGS_enable_rec_fast_sampler = enable_rec_fast_sampler;
+  FLAGS_enable_block_copy_kernel = enable_block_copy_kernel;
   FLAGS_master_node_addr = master_node_addr;
   FLAGS_block_size = block_size;
   FLAGS_communication_backend = communication_backend;

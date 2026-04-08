@@ -274,7 +274,9 @@ int run() {
       .enable_shm(FLAGS_enable_shm)
       .input_shm_size(FLAGS_input_shm_size)
       .output_shm_size(FLAGS_output_shm_size)
+      .enable_block_copy_kernel(FLAGS_enable_block_copy_kernel)
       .beam_width(FLAGS_beam_width)
+      .enable_rec_fast_sampler(FLAGS_enable_rec_fast_sampler)
       .kv_cache_dtype(FLAGS_kv_cache_dtype)
       .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency)
       .is_local(is_local);

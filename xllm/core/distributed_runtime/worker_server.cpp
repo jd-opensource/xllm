@@ -216,6 +216,13 @@ void WorkerServer::create_spawn_server(int local_rank,
   const char* block_size_ptr = block_size_str.c_str();
   auto enable_shm_str = std::to_string(options.enable_shm());
   const char* enable_shm_ptr = enable_shm_str.c_str();
+  auto enable_rec_fast_sampler_str =
+      std::to_string(options.enable_rec_fast_sampler());
+  const char* enable_rec_fast_sampler_ptr = enable_rec_fast_sampler_str.c_str();
+  auto enable_block_copy_kernel_str =
+      std::to_string(options.enable_block_copy_kernel());
+  const char* enable_block_copy_kernel_ptr =
+      enable_block_copy_kernel_str.c_str();
   auto input_shm_size_str = std::to_string(options.input_shm_size());
   const char* input_shm_size_ptr = input_shm_size_str.c_str();
   auto output_shm_size_str = std::to_string(options.output_shm_size());
@@ -238,6 +245,8 @@ void WorkerServer::create_spawn_server(int local_rank,
                         num_decoding_tokens_ptr,
                         block_size_ptr,
                         enable_shm_ptr,
+                        enable_rec_fast_sampler_ptr,
+                        enable_block_copy_kernel_ptr,
                         is_local_ptr,
                         enable_prefill_sp_ptr,
                         options.task_type().c_str(),

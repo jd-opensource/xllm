@@ -34,6 +34,7 @@ cc_test(
     sampler_test
   SRCS
     rejection_sampler_test.cpp
+    rec_sampler_test.cpp
     rejection_sampler.cpp
     sampling_params_test.cpp
   DEPS
