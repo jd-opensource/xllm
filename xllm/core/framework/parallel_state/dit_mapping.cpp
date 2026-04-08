@@ -104,7 +104,7 @@ void DiTMapping::validate() {
              ". Please check `vae` and 'world_size'.";
 
   CHECK(world_size_ % vae_.group_size() == 0)
-      << "world_size could not be divided by world_size. "
+      << "world_size could not be divided by vae_size. "
          "vae_size is " +
              std::to_string(vae_.group_size()) + ", world_size is " +
              std::to_string(world_size_) +
