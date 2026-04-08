@@ -587,8 +587,9 @@ std::vector<ToolCallItem> DeepSeekV32Detector::parse_json_tool_calls(
 
                     auto parsed_calls =
                         this->parse_base_json(match_result, tools);
-                    calls.insert(
-                        calls.end(), parsed_calls.begin(), parsed_calls.end());
+                    calls.insert(calls.end(),
+                                 std::make_move_iterator(parsed_calls.begin()),
+                                 std::make_move_iterator(parsed_calls.end()));
                   }
                 }
               }
@@ -645,7 +646,9 @@ std::vector<ToolCallItem> DeepSeekV32Detector::parse_json_tool_calls(
           match_result["parameters"] = func_args;
 
           auto parsed_calls = this->parse_base_json(match_result, tools);
-          calls.insert(calls.end(), parsed_calls.begin(), parsed_calls.end());
+          calls.insert(calls.end(),
+                       std::make_move_iterator(parsed_calls.begin()),
+                       std::make_move_iterator(parsed_calls.end()));
         }
       }
     }
@@ -749,7 +752,9 @@ StreamingParseResult DeepSeekV32Detector::detect_and_parse(
           match_result["parameters"] = func_args;
 
           auto parsed_calls = this->parse_base_json(match_result, tools);
-          calls.insert(calls.end(), parsed_calls.begin(), parsed_calls.end());
+          calls.insert(calls.end(),
+                       std::make_move_iterator(parsed_calls.begin()),
+                       std::make_move_iterator(parsed_calls.end()));
         }
       }
     }

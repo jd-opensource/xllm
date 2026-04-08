@@ -26,13 +26,12 @@ limitations under the License.
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "models/llm/npu/qwen3_moe.h"
 #include "models/model_registry.h"
-#include "processors/input_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
+#include "processors/qwen2_vl_input_processor.h"
 #include "qwen2_5_vl.h"
 #include "qwen3_vl.h"
-#include "xllm_atb_layers/core/include/atb_speed/log.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
@@ -273,4 +272,4 @@ REGISTER_MODEL_ARGS(qwen3_vl_moe, [&] {
   LOAD_ARG_OR(vision_end_token_id, "vision_end_token_id", 151653);
   LOAD_ARG_OR(vision_start_token_id, "vision_start_token_id", 151652);
 });
-}  // namespace xllm
+}  // namespace xllm::npu::model

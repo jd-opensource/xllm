@@ -27,13 +27,13 @@ AttentionImpl::AttentionImpl(int64_t num_heads,
                              int64_t sliding_window)
     : num_heads_(num_heads),
       head_size_(head_size),
+      scale_(scale),
       num_kv_heads_(num_kv_heads),
       v_head_dim_(head_size),
-      sliding_window_(sliding_window),
-      scale_(scale),
       use_fused_mla_qkv_(false),
       enable_lighting_indexer_(false),
-      enable_mla_(false) {
+      enable_mla_(false),
+      sliding_window_(sliding_window) {
   if (sliding_window_ > -1) {
     sliding_window_ = sliding_window_ - 1;
   }
@@ -46,16 +46,17 @@ AttentionImpl::AttentionImpl(int64_t num_heads,
                              int64_t sliding_window,
                              float scale,
                              bool use_fused_mla_qkv,
-                             bool enable_lighting_indexer)
+                             bool enable_lighting_indexer,
+                             bool enable_mla)
     : num_heads_(num_heads),
       head_size_(head_size),
+      scale_(scale),
       num_kv_heads_(num_kv_heads),
       v_head_dim_(v_head_dim),
-      sliding_window_(sliding_window),
       use_fused_mla_qkv_(use_fused_mla_qkv),
-      scale_(scale),
       enable_lighting_indexer_(enable_lighting_indexer),
-      enable_mla_(FLAGS_enable_mla) {
+      enable_mla_(enable_mla),
+      sliding_window_(sliding_window) {
   if (sliding_window_ > -1) {
     sliding_window_ = sliding_window_ - 1;
   }

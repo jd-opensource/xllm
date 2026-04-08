@@ -26,6 +26,7 @@ limitations under the License.
 #include <exception>
 #include <stdexcept>
 
+#include "core/common/global_flags.h"
 #include "helper.h"
 
 XLLM_CAPI_EXPORT XLLM_LLM_Handler* xllm_llm_create(void) {
@@ -96,7 +97,6 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
             xllm_init_options.num_request_handling_threads)
         .communication_backend(xllm_init_options.communication_backend)
         .expert_parallel_degree(xllm_init_options.expert_parallel_degree)
-        .enable_mla(xllm_init_options.enable_mla)
         .enable_chunked_prefill(xllm_init_options.enable_chunked_prefill)
         .enable_prefill_sp(xllm_init_options.enable_prefill_sp)
         .master_node_addr(xllm_init_options.master_node_addr)
@@ -116,6 +116,10 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
         .server_idx(xllm_init_options.server_idx);
 
     options.enable_graph(FLAGS_enable_graph);
+
+#if !defined(USE_NPU)
+    FLAGS_enable_block_copy_kernel = false;
+#endif
 
     handler->master = std::make_unique<xllm::LLMMaster>(options);
     handler->master->run();

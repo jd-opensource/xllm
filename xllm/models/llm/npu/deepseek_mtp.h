@@ -23,12 +23,15 @@ limitations under the License.
 // ref to:
 // https://github.com/vllm-project/vllm/blob/v0.6.6/vllm/model_executor/models/deepseek_v2.py
 
-namespace xllm {
+namespace xllm::npu::model {
 
-class DeepseekMtpModelImpl : public MtpModelImplBase<DeepseekV2DecoderLayer> {
+class DeepseekMtpModelImpl
+    : public xllm::npu::model::MtpModelImplBase<DeepseekV2DecoderLayer> {
  public:
   DeepseekMtpModelImpl(const ModelContext& context)
-      : MtpModelImplBase<DeepseekV2DecoderLayer>("deepseek_v3_mtp", context) {
+      : xllm::npu::model::MtpModelImplBase<DeepseekV2DecoderLayer>(
+            "deepseek_v3_mtp",
+            context) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
@@ -57,10 +60,10 @@ class DeepseekMtpModelImpl : public MtpModelImplBase<DeepseekV2DecoderLayer> {
 TORCH_MODULE(DeepseekMtpModel);
 
 class DeepseekMtpForCausalLMImpl
-    : public MtpForCausalLMImplBase<DeepseekMtpModel> {
+    : public xllm::npu::model::MtpForCausalLMImplBase<DeepseekMtpModel> {
  public:
   DeepseekMtpForCausalLMImpl(const ModelContext& context)
-      : MtpForCausalLMImplBase<DeepseekMtpModel>(context) {}
+      : xllm::npu::model::MtpForCausalLMImplBase<DeepseekMtpModel>(context) {}
 };
 TORCH_MODULE(DeepseekMtpForCausalLM);
 
@@ -124,4 +127,4 @@ REGISTER_MODEL_ARGS(deepseek_v3_mtp, [&] {
 
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({1}));
 });
-}  // namespace xllm
+}  // namespace xllm::npu::model

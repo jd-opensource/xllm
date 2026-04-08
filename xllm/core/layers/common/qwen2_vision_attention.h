@@ -31,18 +31,18 @@ namespace layer {
 class Qwen2VisionAttentionImpl : public torch::nn::Module {
  public:
   Qwen2VisionAttentionImpl() = default;
-  Qwen2VisionAttentionImpl(const ModelContext& context);
+  Qwen2VisionAttentionImpl(const ModelContext& context, bool has_bias = true);
 
-  torch::Tensor forward(torch::Tensor& hidden_states,
-                        torch::Tensor& m_cos_pos,
-                        torch::Tensor& m_sin_pos,
-                        torch::Tensor& cu_seq_len,
-                        std::vector<int32_t>& cu_seq_len_vec,
-                        ModelInputParams& input_params);
+  virtual torch::Tensor forward(torch::Tensor& hidden_states,
+                                torch::Tensor& m_cos_pos,
+                                torch::Tensor& m_sin_pos,
+                                torch::Tensor& cu_seq_len,
+                                std::vector<int32_t>& cu_seq_len_vec,
+                                ModelInputParams& input_params);
 
   void load_state_dict(const StateDict& state_dict);
 
- private:
+ protected:
   std::vector<torch::Tensor> split_qkv(const torch::Tensor& qkv);
 
   int64_t hidden_size_per_attention_head_;

@@ -129,11 +129,8 @@ torch::Tensor gather_global_tokens(const torch::Tensor& input,
       << "input tokens " << input.size(0) << " must match shard_tokens "
       << plan.shard_tokens;
 
-  std::vector<torch::Tensor> gathered_tensors(world_size);
-  for (int64_t i = 0; i < world_size; ++i) {
-    gathered_tensors[i] = torch::empty_like(input);
-  }
-  args.process_group_->allgather(input, gathered_tensors);
+  torch::Tensor gathered_tensors =
+      args.process_group_->allgather_base_sync(input);
 
   int64_t total_tokens =
       std::accumulate(dp_tokens.begin(), dp_tokens.end(), int64_t{0});

@@ -146,12 +146,24 @@ class ModelRegistry {
   static ImageProcessorFactory get_image_processor_factory(
       const std::string& name);
 
+  static bool has_dit_model_factory(const std::string& name);
+
   static std::string get_model_backend(const std::string& name);
 
  private:
   std::unordered_map<std::string, ModelMeta> model_registry_;
   std::unordered_map<std::string, std::string> model_backend_;
 };
+
+bool resolve_model_registration_name(const std::string& model_type,
+                                     std::string* resolved_name,
+                                     std::string* error_message = nullptr);
+
+bool resolve_model_registration(const std::string& model_type,
+                                const std::string& requested_npu_kernel_backend,
+                                std::string* effective_npu_kernel_backend,
+                                std::string* resolved_name,
+                                std::string* error_message = nullptr);
 
 std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context);
 

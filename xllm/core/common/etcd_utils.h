@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,19 +16,27 @@ limitations under the License.
 #pragma once
 
 #include <string>
-#include <utility>
-
-#include "core/common/types.h"
 
 namespace xllm {
 
-// Preprocess chat JSON to normalize array content to string.
-// For text-only backends (is_multimodal=false), combines text array items into
-// a single string. Returns an error if non-text content is encountered.
-// For multimodal backends (is_multimodal=true), leaves non-text content
-// unchanged for downstream processing.
-// Returns Status with processed JSON on success, or error status on failure.
-std::pair<Status, std::string> preprocess_chat_json(std::string json_str,
-                                                    bool is_multimodal);
+inline std::string normalize_etcd_namespace(const std::string& etcd_namespace) {
+  if (etcd_namespace.empty()) {
+    return "";
+  }
+
+  size_t start = 0;
+  size_t end = etcd_namespace.size();
+  while (start < end && etcd_namespace[start] == '/') {
+    ++start;
+  }
+  while (end > start && etcd_namespace[end - 1] == '/') {
+    --end;
+  }
+
+  if (start >= end) {
+    return "";
+  }
+  return "/" + etcd_namespace.substr(start, end - start) + "/";
+}
 
 }  // namespace xllm

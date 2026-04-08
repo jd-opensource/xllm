@@ -155,8 +155,6 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
 
   use_fused_mla_qkv_ = optimization_config.enable_fused_mla_kernel;
 
-  // TODO: refactor this choice of attention in the future to make it more
-  // flexible
   attn_ = register_module("attn",
                           Attention(active_heads().attn,
                                     kv_lora_rank_ + qk_rope_head_dim_,
@@ -165,7 +163,8 @@ DeepseekV2AttentionImpl::DeepseekV2AttentionImpl(
                                     args.sliding_window(),
                                     scaling,
                                     use_fused_mla_qkv_,
-                                    enable_lighting_indexer_));
+                                    enable_lighting_indexer_,
+                                    args.enable_mla()));
 
   o_proj_ =
       register_module("o_proj",
@@ -353,6 +352,7 @@ AttentionMetadata DeepseekV2AttentionImpl::build_mla_attention_metadata(
     KVCache& kv_cache,
     std::optional<torch::Tensor> k_cache_scale,
     bool is_prefill_phase,
+    const std::optional<torch::Tensor>& slot_mapping,
     const std::optional<torch::Tensor>& new_block_tables,
     const std::optional<torch::Tensor>& new_context_lens) {
   // reshape_paged_cache before attn
@@ -366,7 +366,8 @@ AttentionMetadata DeepseekV2AttentionImpl::build_mla_attention_metadata(
       xllm::kernel::ReshapePagedCacheParams reshape_paged_cache_params;
       reshape_paged_cache_params.key = key;
       reshape_paged_cache_params.k_cache = kv_cache.get_k_cache();
-      reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
+      reshape_paged_cache_params.slot_mapping =
+          slot_mapping.value_or(attn_metadata.slot_mapping);
       if (k_cache_scale.has_value()) {
         // Use quant_to_paged_cache for INT8 quantization
         reshape_paged_cache_params.k_cache_scale = k_cache_scale;

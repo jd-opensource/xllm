@@ -35,9 +35,6 @@ struct XLLM_CAPI_EXPORT XLLM_ChatMessage {
 };
 
 struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
-  // Whether to enable multi-head latent attention
-  bool enable_mla = false;
-
   bool enable_chunked_prefill = false;
 
   // Whether to enable prefill-only sequence parallel

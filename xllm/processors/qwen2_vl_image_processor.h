@@ -30,6 +30,21 @@ class Qwen2VLImageProcessor : public ImageProcessor {
 
   bool process(const MMInput& mm_inputs, MMData& mm_datas) override;
 
+  using Size = std::pair<int32_t, int32_t>;
+  virtual std::optional<Size> smart_resize_image(int32_t height,
+                                                 int32_t width,
+                                                 int32_t factor,
+                                                 int32_t min_pixels,
+                                                 int32_t max_pixels) const;
+
+  virtual std::optional<Size> smart_resize_video(int32_t num_frames,
+                                                 int32_t height,
+                                                 int32_t width,
+                                                 int32_t temporal_factor,
+                                                 int32_t factor,
+                                                 int32_t min_pixels,
+                                                 int32_t max_pixels) const;
+
  private:
   bool process_images(std::vector<torch::Tensor> images, MMData& mm_datas);
   bool process_image(torch::Tensor image,
@@ -47,12 +62,12 @@ class Qwen2VLImageProcessor : public ImageProcessor {
                      VideoMetadata& metadata,
                      torch::Tensor& pixel_values,
                      torch::Tensor& thw);
-  torch::Tensor sample_frames(const VideoMetadata& metadata,
-                              int temporal_patch_size,
-                              int min_frames,
-                              int max_frames,
-                              int num_frames = -1,
-                              double set_fps = -1.0);
+  virtual torch::Tensor sample_frames(const VideoMetadata& metadata,
+                                      int32_t temporal_patch_size,
+                                      int32_t min_frames,
+                                      int32_t max_frames,
+                                      int32_t num_frames = -1,
+                                      double set_fps = -1.0);
 
  private:
   bool do_convert_rgb_ = true;
@@ -64,22 +79,22 @@ class Qwen2VLImageProcessor : public ImageProcessor {
   std::vector<double> image_mean_;
   std::vector<double> image_std_;
 
-  int max_pixels_ = 12845056;
-  int min_pixels_ = 3136;
+  int32_t max_pixels_ = 12845056;
+  int32_t min_pixels_ = 3136;
 
-  int merge_size_ = 2;
-  int patch_size_ = 14;
+  int32_t merge_size_ = 2;
+  int32_t patch_size_ = 14;
 
-  int resample_ = 3;
+  int32_t resample_ = 3;
   double rescale_factor_ = 0.00392156862745098;
 
   std::unordered_map<std::string, int> size_;
-  int temporal_patch_size_ = 2;
+  int32_t temporal_patch_size_ = 2;
 
   bool do_sample_frame_ = true;
 
-  int min_frames_ = 4;
-  int max_frames_ = 768;
+  int32_t min_frames_ = 4;
+  int32_t max_frames_ = 768;
 };
 
 }  // namespace xllm

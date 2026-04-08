@@ -28,9 +28,15 @@ struct Options;
 namespace parallel_state {
 
 struct GatherAsyncCtx {
+  torch::Tensor input;
+  torch::Tensor stacked;
   c10::intrusive_ptr<c10d::Work> work;
-  std::vector<torch::Tensor> shards;
   std::vector<int32_t> token_num_list;
+};
+
+struct ReduceAsyncCtx {
+  torch::Tensor tensor;
+  c10::intrusive_ptr<c10d::Work> work;
 };
 
 std::optional<ParallelArgs> get_dp_attn_parallel_args(
@@ -50,6 +56,10 @@ GatherAsyncCtx launch_gather(const torch::Tensor& input,
 
 torch::Tensor finish_gather(GatherAsyncCtx ctx);
 
+ReduceAsyncCtx launch_reduce(torch::Tensor input, ProcessGroup* process_group);
+
+torch::Tensor finish_reduce(ReduceAsyncCtx ctx);
+
 torch::Tensor all_gather_interleaved(const torch::Tensor& input,
                                      ProcessGroup* process_group);
 
@@ -61,6 +71,12 @@ torch::Tensor reduce_scatter(const torch::Tensor& input,
 torch::Tensor scatter(torch::Tensor input,
                       ProcessGroup* process_group,
                       int dim = -1);
+
+std::function<torch::Tensor()> all_to_all_4D(const torch::Tensor& input_,
+                                             int32_t scatter_idx,
+                                             int32_t gather_idx,
+                                             bool is_sync,
+                                             ProcessGroup* pg);
 
 // Create a process group where each process has a single device
 // devices: list of devices to create process groups on.

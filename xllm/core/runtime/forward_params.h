@@ -18,9 +18,13 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <nlohmann/json.hpp>
+#include <numeric>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "common/types.h"
 #include "framework/model/model_input_params.h"
@@ -29,6 +33,7 @@ limitations under the License.
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/sampling_params.h"
 #include "platform/device.h"
+#include "runtime/dit_forward_params.h"
 
 namespace xllm {
 
@@ -199,6 +204,9 @@ struct ForwardOutput {
 
   BeamSearchOutput beam_search_output;
   torch::Tensor beam_sequence_group;
+
+  // dit output data
+  DiTForwardOutput dit_forward_output;
 };
 
 // Model input with raw data, which will be
@@ -255,6 +263,236 @@ struct RawForwardInput {
   std::vector<int32_t> paged_kv_last_page_len;  //[n_seq]
   // multimodal data
   MMBatchData mm_data;
+
+  // dit input data
+  DiTForwardInput dit_forward_input;
+
+  RawForwardInput cp_partition(int32_t cp_rank, int32_t cp_size) const {
+    RawForwardInput outputs = *this;
+    if (cp_size <= 1 || flatten_tokens_vec.empty() ||
+        !batch_forward_type.is_prefill()) {
+      return outputs;
+    }
+
+    CHECK_GT(cp_size, 0);
+    CHECK_GE(cp_rank, 0);
+    CHECK_LT(cp_rank, cp_size);
+    CHECK_GT(num_sequences, 0);
+
+    const int32_t num_chunks = cp_size * 2;
+    const int64_t token_num = static_cast<int64_t>(flatten_tokens_vec.size());
+
+    auto to_seq_lens =
+        [&](const std::vector<int32_t>& lens) -> std::vector<int32_t> {
+      if (lens.empty()) {
+        return std::vector<int32_t>(num_sequences, 0);
+      }
+      const bool is_cumsum =
+          lens.size() == static_cast<size_t>(num_sequences + 1) &&
+          lens.front() == 0;
+      std::vector<int32_t> seq_lens;
+      seq_lens.reserve(num_sequences);
+      if (is_cumsum) {
+        for (int32_t i = 0; i < num_sequences; ++i) {
+          seq_lens.push_back(std::max(0, lens[i + 1] - lens[i]));
+        }
+      } else {
+        CHECK_GE(lens.size(), static_cast<size_t>(num_sequences));
+        for (int32_t i = 0; i < num_sequences; ++i) {
+          seq_lens.push_back(std::max(0, lens[i]));
+        }
+      }
+      return seq_lens;
+    };
+
+    const std::vector<int32_t> input_lens =
+        !q_seq_lens.empty() ? to_seq_lens(q_seq_lens) : to_seq_lens(seq_lens);
+
+    std::vector<int32_t> cp_q_lens;
+    cp_q_lens.reserve(num_sequences);
+    std::vector<int64_t> gather_indices;
+    gather_indices.reserve(token_num);
+    int32_t cp_global_max_seq_len = 0;
+
+    std::vector<int64_t> old_seq_offsets;
+    old_seq_offsets.reserve(num_sequences + 1);
+    old_seq_offsets.push_back(0);
+    std::vector<int64_t> new_seq_offsets;
+    new_seq_offsets.reserve(num_sequences + 1);
+    new_seq_offsets.push_back(0);
+
+    for (int32_t seq_idx = 0; seq_idx < num_sequences; ++seq_idx) {
+      const int32_t input_len = std::max(0, input_lens[seq_idx]);
+      const int64_t seq_start = old_seq_offsets.back();
+      const int64_t chunk_len =
+          (input_len + num_chunks - 1) / static_cast<int64_t>(num_chunks);
+
+      auto range_len = [&](int64_t local_start, int64_t local_end) -> int64_t {
+        local_start = std::max<int64_t>(0, local_start);
+        local_end = std::max<int64_t>(0, local_end);
+        local_start = std::min<int64_t>(local_start, input_len);
+        local_end = std::min<int64_t>(local_end, input_len);
+        return std::max<int64_t>(0, local_end - local_start);
+      };
+
+      int64_t local_len = 0;
+      auto append_range = [&](int64_t local_start, int64_t local_end) {
+        const int64_t valid_len = range_len(local_start, local_end);
+        if (valid_len <= 0) {
+          return;
+        }
+        const int64_t start =
+            std::max<int64_t>(0, std::min<int64_t>(local_start, input_len));
+        for (int64_t i = 0; i < valid_len; ++i) {
+          gather_indices.push_back(seq_start + start + i);
+        }
+        local_len += valid_len;
+      };
+
+      append_range(chunk_len * cp_rank, chunk_len * (cp_rank + 1));
+      append_range(chunk_len * (num_chunks - 1 - cp_rank),
+                   chunk_len * (num_chunks - cp_rank));
+
+      cp_q_lens.push_back(static_cast<int32_t>(local_len));
+      old_seq_offsets.push_back(seq_start + input_len);
+      new_seq_offsets.push_back(new_seq_offsets.back() + local_len);
+
+      int64_t seq_cp_max = 0;
+      for (int32_t rank = 0; rank < cp_size; ++rank) {
+        const int64_t former_len =
+            range_len(chunk_len * rank, chunk_len * (rank + 1));
+        const int64_t latter_len =
+            range_len(chunk_len * (num_chunks - 1 - rank),
+                      chunk_len * (num_chunks - rank));
+        seq_cp_max = std::max(seq_cp_max, former_len + latter_len);
+      }
+      cp_global_max_seq_len =
+          std::max(cp_global_max_seq_len, static_cast<int32_t>(seq_cp_max));
+    }
+    CHECK_EQ(old_seq_offsets.back(), token_num);
+
+    auto gather_token_level_vector_i32 = [&](const std::vector<int32_t>& src) {
+      if (src.size() != static_cast<size_t>(token_num)) {
+        return src;
+      }
+      std::vector<int32_t> dst;
+      dst.reserve(gather_indices.size());
+      for (int64_t idx : gather_indices) {
+        dst.push_back(src[static_cast<size_t>(idx)]);
+      }
+      return dst;
+    };
+
+    outputs.flatten_tokens_vec =
+        gather_token_level_vector_i32(flatten_tokens_vec);
+    if (!flatten_positions_vec.empty()) {
+      outputs.flatten_positions_vec =
+          gather_token_level_vector_i32(flatten_positions_vec);
+    }
+
+    auto build_seq_lens = [&](const std::vector<int32_t>& original,
+                              const std::vector<int32_t>& lengths) {
+      const bool is_cumsum =
+          original.size() == static_cast<size_t>(num_sequences + 1) &&
+          !original.empty() && original.front() == 0;
+      std::vector<int32_t> result;
+      if (is_cumsum) {
+        result.reserve(num_sequences + 1);
+        result.push_back(0);
+        for (const int32_t len : lengths) {
+          result.push_back(result.back() + len);
+        }
+      } else {
+        result.assign(lengths.begin(), lengths.end());
+      }
+      return result;
+    };
+
+    outputs.q_seq_lens = build_seq_lens(q_seq_lens, cp_q_lens);
+    outputs.seq_lens = build_seq_lens(seq_lens, cp_q_lens);
+    outputs.q_cu_seq_lens.resize(cp_q_lens.size());
+    std::partial_sum(
+        cp_q_lens.begin(), cp_q_lens.end(), outputs.q_cu_seq_lens.begin());
+
+    outputs.q_max_seq_len = cp_global_max_seq_len;
+    outputs.max_seq_len = cp_global_max_seq_len;
+
+    if (!selected_token_idxes.empty()) {
+      const int64_t selected_num =
+          static_cast<int64_t>(selected_token_idxes.size());
+      std::vector<int64_t> remapped_idxes;
+      remapped_idxes.reserve(selected_num);
+
+      const int64_t num_chunks_i64 = static_cast<int64_t>(cp_size) * 2;
+      std::vector<int64_t> seq_context_lens(num_sequences, 0);
+      std::vector<int64_t> selected_seq_idx(selected_num, 0);
+
+      for (int64_t i = 0; i < selected_num; ++i) {
+        const int64_t old_idx = selected_token_idxes[i];
+        auto upper = std::upper_bound(
+            old_seq_offsets.begin(), old_seq_offsets.end(), old_idx);
+        int64_t seq_idx =
+            static_cast<int64_t>(upper - old_seq_offsets.begin()) - 1;
+        seq_idx = std::max<int64_t>(
+            0,
+            std::min<int64_t>(seq_idx,
+                              static_cast<int64_t>(num_sequences) - 1));
+        selected_seq_idx[i] = seq_idx;
+
+        const int64_t seq_start = old_seq_offsets[seq_idx];
+        const int64_t seq_end = old_seq_offsets[seq_idx + 1];
+        const int64_t seq_len = std::max<int64_t>(0, seq_end - seq_start);
+        const int64_t context_len = std::max<int64_t>(
+            1, std::min<int64_t>(old_idx - seq_start + 1, seq_len));
+        seq_context_lens[seq_idx] =
+            std::max(seq_context_lens[seq_idx], context_len);
+      }
+
+      std::vector<int64_t> chunk_lens(num_sequences, 1);
+      std::vector<int64_t> seq_prefix_per_rank(num_sequences, 0);
+      int64_t token_num_per_rank = 0;
+
+      for (int32_t seq_idx = 0; seq_idx < num_sequences; ++seq_idx) {
+        int64_t chunk_len =
+            (seq_context_lens[seq_idx] + num_chunks_i64 - 1) / num_chunks_i64;
+        chunk_len = std::max<int64_t>(1, chunk_len);
+        chunk_lens[seq_idx] = chunk_len;
+        seq_prefix_per_rank[seq_idx] = token_num_per_rank;
+        token_num_per_rank += (chunk_len * num_chunks_i64) / cp_size;
+      }
+
+      remapped_idxes.clear();
+      for (int64_t i = 0; i < selected_num; ++i) {
+        const int64_t old_idx = selected_token_idxes[i];
+        const int64_t seq_idx = selected_seq_idx[i];
+        const int64_t seq_start = old_seq_offsets[seq_idx];
+        const int64_t seq_context_len = seq_context_lens[seq_idx];
+        const int64_t chunk_len = chunk_lens[seq_idx];
+
+        int64_t token_pos = old_idx - seq_start;
+        token_pos = std::max<int64_t>(
+            0, std::min<int64_t>(token_pos, seq_context_len - 1));
+        const int64_t chunk_id = token_pos / chunk_len;
+        const int64_t offset = token_pos % chunk_len;
+        const int64_t rank_id =
+            chunk_id >= cp_size
+                ? static_cast<int64_t>(2 * cp_size) - chunk_id - 1
+                : chunk_id;
+        const int64_t remap_idx = token_num_per_rank * rank_id +
+                                  seq_prefix_per_rank[seq_idx] +
+                                  (chunk_id / cp_size) * chunk_len + offset;
+        remapped_idxes.push_back(remap_idx);
+      }
+
+      outputs.selected_token_idxes.clear();
+      outputs.selected_token_idxes.reserve(remapped_idxes.size());
+      for (int64_t idx : remapped_idxes) {
+        outputs.selected_token_idxes.push_back(static_cast<int32_t>(idx));
+      }
+    }
+
+    return outputs;
+  }
 };
 
 struct RawSampleOutput {
@@ -274,6 +512,8 @@ struct RawForwardOutput {
   std::vector<int32_t> beam_sequence_group;  // flattened 2D
   // multimodal embedding output
   std::vector<torch::Tensor> mm_embeddings;
+  // dit output data
+  DiTForwardOutput dit_forward_output;
 };
 
 struct BatchedForwardInputs {

@@ -110,6 +110,8 @@ class Options {
 
   PROPERTY(bool, enable_mla) = false;
 
+  PROPERTY(std::string, npu_kernel_backend) = "AUTO";
+
   PROPERTY(bool, enable_chunked_prefill) = true;
 
   PROPERTY(bool, enable_prefill_sp) = false;
@@ -122,7 +124,15 @@ class Options {
 
   PROPERTY(int32_t, dp_size) = 1;
 
+  PROPERTY(int32_t, cp_size) = 1;
+
   PROPERTY(int32_t, ep_size) = 1;
+
+  PROPERTY(int32_t, tp_size) = 1;
+
+  PROPERTY(int32_t, sp_size) = 1;
+
+  PROPERTY(int32_t, cfg_size) = 1;
 
   PROPERTY(std::optional<std::string>, instance_name);
 
@@ -141,6 +151,8 @@ class Options {
   PROPERTY(uint16_t, transfer_listen_port) = 26000;
 
   PROPERTY(std::optional<std::string>, etcd_addr);
+
+  PROPERTY(std::optional<std::string>, etcd_namespace);
 
   PROPERTY(bool, enable_service_routing) = false;
 

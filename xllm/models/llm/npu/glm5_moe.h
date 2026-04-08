@@ -18,7 +18,7 @@ limitations under the License.
 #include "core/layers/npu/npu_deepseek_v32_decoder_layer_impl.h"
 #include "deepseek_v32.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
@@ -246,10 +246,11 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
 };
 TORCH_MODULE(GlmMoeDsaModel);
 
-class GlmMoeDsaForCausalLMImpl : public LlmForCausalLMImplBase<GlmMoeDsaModel> {
+class GlmMoeDsaForCausalLMImpl
+    : public xllm::npu::model::LlmForCausalLMImplBase<GlmMoeDsaModel> {
  public:
   GlmMoeDsaForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<GlmMoeDsaModel>(context),
+      : xllm::npu::model::LlmForCausalLMImplBase<GlmMoeDsaModel>(context),
         first_k_dense_replace_(
             context.get_model_args().first_k_dense_replace()) {}
 
@@ -326,4 +327,4 @@ REGISTER_MODEL_ARGS(glm_moe_dsa, [&] {
           std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
                                       args->eos_token_id_vec().end()));
 });
-}  // namespace xllm
+}  // namespace xllm::npu::model

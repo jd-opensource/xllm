@@ -42,6 +42,12 @@ void SamplingParameters::init(
   std::vector<float> temperatures;
   std::vector<float> top_p;
   std::vector<int64_t> top_k;
+  frequency_penalties.reserve(req_sampling_params.size());
+  presence_penalties.reserve(req_sampling_params.size());
+  repetition_penalties.reserve(req_sampling_params.size());
+  temperatures.reserve(req_sampling_params.size());
+  top_p.reserve(req_sampling_params.size());
+  top_k.reserve(req_sampling_params.size());
   bool logprobs = false;
   int64_t max_top_logprobs = 0;
   bool is_embeddings = false;
@@ -128,6 +134,7 @@ void SamplingParameters::init(
 
   // construct do sample tensor
   std::vector<int32_t> do_sample;
+  do_sample.reserve(sample_idxes.size());
   for (const auto idx : sample_idxes) {
     const auto* p = req_sampling_params[idx];
     // need to do sample if any of following is true

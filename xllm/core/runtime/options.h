@@ -89,6 +89,8 @@ struct Options {
 
   PROPERTY(bool, enable_mla) = false;
 
+  PROPERTY(std::string, npu_kernel_backend) = "AUTO";
+
   // master node address when we launch a multi-node task.
   PROPERTY(std::optional<std::string>, master_node_addr);
 
@@ -105,6 +107,21 @@ struct Options {
   // expert parallelism size, currently mainly used for MoE model
   // Default set as 1 for non-MoE model.
   PROPERTY(int32_t, ep_size) = 1;
+
+  // Context parallelism size
+  PROPERTY(int32_t, cp_size) = 1;
+
+  // tensor parallelism size
+  // Default set as 1
+  PROPERTY(int32_t, tp_size) = 1;
+
+  // sequence parallelism size
+  // Default set as 1
+  PROPERTY(int32_t, sp_size) = 1;
+
+  // classifier-free guidance parallelism size
+  // Default set as 1
+  PROPERTY(int32_t, cfg_size) = 1;
 
   // enable enable_schedule_overlap to improve runtime execution efficiency.
   PROPERTY(bool, enable_schedule_overlap) = true;

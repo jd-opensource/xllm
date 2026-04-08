@@ -41,6 +41,7 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state/collective_communicator.h"
+#include "framework/parallel_state/dit_collective_communicator.h"
 #include "framework/parallel_state/mapping_npu.h"
 #include "framework/state_dict/state_dict.h"
 #include "runtime/forward_params.h"
@@ -73,10 +74,14 @@ void WorkerServer::create_server(
     int32_t dp_size,
     int local_rank,
     int32_t ep_size,
+    int32_t cp_size,
     WorkerType worker_type,
     std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
     std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
   FLAGS_enable_prefill_sp = options.enable_prefill_sp();
+#if defined(USE_NPU)
+  FLAGS_npu_kernel_backend = options.npu_kernel_backend();
+#endif
   Device device(d);
   device.set_device();
   LOG(INFO) << "Create worker server with device: " << device.index();
@@ -133,14 +138,32 @@ void WorkerServer::create_server(
     return;
   }
 
-  CollectiveCommunicator comm(worker_global_rank, world_size, dp_size, ep_size);
-  const ParallelArgs* parallel_args = comm.parallel_args();
-  comm.create_process_groups(master_node_addr, device);
+  const ParallelArgs* parallel_args = nullptr;
+  std::unique_ptr<CollectiveCommunicatorBase> comm;
+  if (worker_type == WorkerType::DIT) {
+    auto dit_comm =
+        std::make_unique<DiTCollectiveCommunicator>(worker_global_rank,
+                                                    world_size,
+                                                    options.dp_size(),
+                                                    options.tp_size(),
+                                                    options.sp_size(),
+                                                    options.cfg_size());
+    comm = std::move(dit_comm);
+  } else {
+    auto common_comm = std::make_unique<CollectiveCommunicator>(
+        worker_global_rank, world_size, dp_size, ep_size, cp_size);
+    comm = std::move(common_comm);
+  }
+
+  comm->create_process_groups(master_node_addr, device);
+  parallel_args = comm->parallel_args();
 
   std::unique_ptr<Worker> worker =
       std::make_unique<Worker>(*parallel_args, device, options, worker_type);
   worker_service->set_worker(std::move(worker));
-  if (options.enable_shm() && input_shm_manager && output_shm_manager) {
+  bool create_shm =
+      options.enable_shm() && input_shm_manager && output_shm_manager;
+  if (create_shm) {
     worker_service->create_polling_shm_thread(std::move(input_shm_manager),
                                               std::move(output_shm_manager));
   }
@@ -275,7 +298,8 @@ WorkerServer::WorkerServer(int local_worker_idx,
 
   if (worker_type == WorkerType::LLM || worker_type == WorkerType::ELM ||
       worker_type == WorkerType::VLM || worker_type == WorkerType::EVLM ||
-      worker_type == WorkerType::REC || worker_type == WorkerType::MMEVLM) {
+      worker_type == WorkerType::REC || worker_type == WorkerType::MMEVLM ||
+      worker_type == WorkerType::DIT) {
     if (use_spawn_worker) {
       // start worker in a spawn process(for offline inference worker.)
       create_spawn_server(local_worker_idx,
@@ -309,6 +333,7 @@ WorkerServer::WorkerServer(int local_worker_idx,
                                         parallel_args.dp_size(),
                                         local_worker_idx,
                                         parallel_args.ep_size(),
+                                        parallel_args.cp_size(),
                                         worker_type,
                                         std::move(input_shm_manager),
                                         std::move(output_shm_manager));

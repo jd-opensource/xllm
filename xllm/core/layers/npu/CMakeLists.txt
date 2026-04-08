@@ -37,6 +37,7 @@ cc_library(
     npu_rms_norm_impl.h
     npu_siglip_encoder_layer_impl.h
     ../common/rotary_embedding_util.h
+    ../../framework/model/npu_cp_prepare.h
     loader/qwen3_decoder_loader.h
     loader/qwen2_decoder_loader.h
     loader/qwen3_moe_decoder_loader.h
@@ -95,6 +96,7 @@ cc_library(
     npu_rms_norm_impl.cpp
     npu_siglip_encoder_layer_impl.cpp
     ../common/rotary_embedding_util.cpp
+    ../../framework/model/npu_cp_prepare.cpp
     loader/qwen3_decoder_loader.cpp
     loader/qwen2_decoder_loader.cpp
     loader/qwen3_moe_decoder_loader.cpp

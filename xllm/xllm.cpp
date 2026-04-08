@@ -31,33 +31,20 @@ limitations under the License.
 #include "core/common/metrics.h"
 #include "core/common/options.h"
 #include "core/common/types.h"
+#include "core/distributed_runtime/dit_master.h"
 #include "core/distributed_runtime/master.h"
 #include "core/framework/xtensor/global_xtensor.h"
 #include "core/framework/xtensor/options.h"
 #include "core/framework/xtensor/xtensor_allocator.h"
 #include "core/util/device_name_utils.h"
-#include "core/util/json_reader.h"
 #include "core/util/net.h"
 #include "core/util/utils.h"
 #include "function_call/function_call_parser.h"
-#include "models/model_registry.h"
 #include "parser/reasoning_parser.h"
 #include "server/xllm_server_registry.h"
 using namespace xllm;
 
 static std::atomic<uint32_t> signal_received{0};
-
-static std::unordered_set<std::string> deepseek_like_model_set = {
-    "deepseek_v2",
-    "deepseek_v3",
-    "deepseek_v32",
-    "deepseek_v3_mtp",
-    "deepseek_v32_mtp",
-    "kimi_k2",
-    "glm4_moe_lite",
-    "glm_moe_dsa",  // glm5 model type
-    "glm_moe_dsa_mtp",
-    "joyai_llm_flash"};
 
 static const std::unordered_set<std::string> prefill_sp_supported_model_set = {
     "deepseek_v32",
@@ -67,56 +54,6 @@ void shutdown_handler(int signal) {
   // TODO: gracefully shutdown the server
   LOG(WARNING) << "Received signal " << signal << ", stopping server...";
   exit(1);
-}
-
-std::string get_model_type(const std::filesystem::path& model_path) {
-  JsonReader reader;
-  // for llm, vlm and rec models, the config.json file is in the model path
-  std::filesystem::path config_json_path = model_path / "config.json";
-
-  if (std::filesystem::exists(config_json_path)) {
-    reader.parse(config_json_path);
-    // Prefer model_type (e.g. LLM/VLM); fall back to model_name for configs
-    // that only have model_name (e.g. LongCat-Image: {"model_name":
-    // "LongCat-Image"}).
-    auto model_type = reader.value<std::string>("model_type");
-    if (!model_type.has_value()) {
-      model_type = reader.value<std::string>("model_name");
-    }
-    if (!model_type.has_value()) {
-      LOG(FATAL) << "Please check config.json file in model path: "
-                 << model_path
-                 << ", it should contain model_type or model_name key.";
-    }
-    return model_type.value();
-  } else {
-    LOG(FATAL) << "Please check config.json or model_index.json file, one of "
-                  "them should exist in the model path: "
-               << model_path;
-  }
-}
-
-std::string get_model_backend(const std::filesystem::path& model_path) {
-  JsonReader reader;
-  // for dit models, the model_index.json file is in the model path
-  std::filesystem::path model_index_json_path = model_path / "model_index.json";
-
-  if (std::filesystem::exists(model_index_json_path)) {
-    reader.parse(model_index_json_path);
-
-    if (reader.value<std::string>("_diffusers_version").has_value()) {
-      return "dit";
-    } else {
-      LOG(FATAL) << "Please check model_index.json file in model path: "
-                 << model_path << ", it should contain _diffusers_version key.";
-    }
-  }
-
-  // for llm, vlm and rec models, get backend from model type
-  std::string model_type = get_model_type(model_path);
-  // model_type always exists since get_model_type() will log fatal error if
-  // model_type is empty
-  return ModelRegistry::get_model_backend(model_type);
 }
 
 void validate_flags(const std::string& model_type) {
@@ -130,6 +67,13 @@ void validate_flags(const std::string& model_type) {
                << model_type;
   }
 #if defined(USE_MLU)
+  // Disable enable_schedule_overlap for VLM models on MLU backend
+  if (FLAGS_enable_schedule_overlap && FLAGS_backend == "vlm") {
+    LOG(WARNING) << "enable_schedule_overlap is not supported for VLM models "
+                    "on MLU backend. "
+                 << "Disabling enable_schedule_overlap.";
+    FLAGS_enable_schedule_overlap = false;
+  }
   // TODO: support other block sizes in the future
   if (FLAGS_block_size != 16 && FLAGS_block_size != 1) {
     LOG(FATAL) << "Currently, block_size must be 16 for MLU backend, we will "
@@ -178,19 +122,15 @@ int run() {
 
   std::filesystem::path model_path =
       std::filesystem::path(FLAGS_model).lexically_normal();
+  const std::string default_model_name = xllm::util::get_model_name(model_path);
 
   if (FLAGS_model_id.empty()) {
     // use last part of the path as model id
-    if (model_path.has_filename()) {
-      FLAGS_model_id = std::filesystem::path(FLAGS_model).filename();
-    } else {
-      FLAGS_model_id =
-          std::filesystem::path(FLAGS_model).parent_path().filename();
-    }
+    FLAGS_model_id = default_model_name;
   }
 
   if (FLAGS_backend.empty()) {
-    FLAGS_backend = get_model_backend(model_path);
+    FLAGS_backend = xllm::util::get_model_backend(model_path);
   }
 
   if (FLAGS_host.empty()) {
@@ -224,27 +164,23 @@ int run() {
 #if !defined(USE_NPU)
   FLAGS_enable_block_copy_kernel = false;
 #endif
-
-  std::string model_type = get_model_type(model_path);
-  // set enable_mla by model type
+  std::string model_type = "";
   if (FLAGS_backend != "dit") {
-    if (deepseek_like_model_set.find(model_type) !=
-        deepseek_like_model_set.end()) {
-      FLAGS_enable_mla = true;
-    } else {
-      FLAGS_enable_mla = false;
-    }
+    model_type = xllm::util::get_model_type(model_path);
+    FLAGS_tool_call_parser = function_call::FunctionCallParser::get_parser_auto(
+        FLAGS_tool_call_parser, model_type);
+    FLAGS_reasoning_parser =
+        ReasoningParser::get_parser_auto(FLAGS_reasoning_parser, model_type);
   }
-  FLAGS_tool_call_parser = function_call::FunctionCallParser::get_parser_auto(
-      FLAGS_tool_call_parser, model_type);
-  FLAGS_reasoning_parser =
-      ReasoningParser::get_parser_auto(FLAGS_reasoning_parser, model_type);
 
   // validate flags before creating master
   validate_flags(model_type);
 
   // Create Master
   Options options;
+#if defined(USE_NPU)
+  options.npu_kernel_backend(FLAGS_npu_kernel_backend);
+#endif
   options.model_path(FLAGS_model)
       .model_id(FLAGS_model_id)
       .task_type(FLAGS_task)
@@ -281,7 +217,6 @@ int run() {
       .eplb_update_threshold(FLAGS_eplb_update_threshold)
       .rank_tablefile(FLAGS_rank_tablefile)
       .expert_parallel_degree(FLAGS_expert_parallel_degree)
-      .enable_mla(FLAGS_enable_mla)
       .enable_chunked_prefill(FLAGS_enable_chunked_prefill)
       .enable_prefill_sp(FLAGS_enable_prefill_sp)
       .master_node_addr(FLAGS_master_node_addr)
@@ -291,13 +226,18 @@ int run() {
       .nnodes(FLAGS_nnodes)
       .node_rank(FLAGS_node_rank)
       .dp_size(FLAGS_dp_size)
+      .cp_size(FLAGS_cp_size)
       .ep_size(FLAGS_ep_size)
+      .tp_size(FLAGS_tp_size)
+      .sp_size(FLAGS_sp_size)
+      .cfg_size(FLAGS_cfg_size)
       .instance_name(FLAGS_host + ":" + std::to_string(FLAGS_port))
       .enable_disagg_pd(FLAGS_enable_disagg_pd)
       .enable_pd_ooc(FLAGS_enable_pd_ooc)
       .enable_schedule_overlap(FLAGS_enable_schedule_overlap)
       .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
       .etcd_addr(FLAGS_etcd_addr)
+      .etcd_namespace(FLAGS_etcd_namespace)
       .enable_service_routing(FLAGS_enable_service_routing ||
                               FLAGS_enable_disagg_pd)
       .tool_call_parser(FLAGS_tool_call_parser)
@@ -373,7 +313,11 @@ int run() {
   std::unique_ptr<Master> master;
   // working node
   if (options.node_rank() != 0) {
-    master = std::make_unique<LLMAssistantMaster>(options);
+    if (FLAGS_backend == "dit") {
+      master = std::make_unique<DiTAssistantMaster>(options);
+    } else {
+      master = std::make_unique<LLMAssistantMaster>(options);
+    }
   } else {
     if (FLAGS_random_seed < 0) {
       FLAGS_random_seed = std::random_device{}() % (1 << 30);
@@ -385,12 +329,7 @@ int run() {
 
   // supported models
   std::vector<std::string> model_names = {FLAGS_model_id};
-  std::string model_version;
-  if (model_path.has_filename()) {
-    model_version = std::filesystem::path(FLAGS_model).filename();
-  } else {
-    model_version = std::filesystem::path(FLAGS_model).parent_path().filename();
-  }
+  std::string model_version = default_model_name;
   std::vector<std::string> model_versions = {model_version};
 
   if (FLAGS_node_rank == 0 || FLAGS_enable_xtensor) {

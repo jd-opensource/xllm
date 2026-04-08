@@ -51,13 +51,13 @@ class MMType {
 };
 
 struct ImageMetadata {
-  int64_t height = 0;
-  int64_t width = 0;
+  int32_t height = 0;
+  int32_t width = 0;
 };
 
 struct VideoMetadata {
   double fps = 0.0;              // original fps
-  int64_t total_num_frames = 0;  // original frames
+  int32_t total_num_frames = 0;  // original frames
   double duration = 0.0;
   double sampled_fps = 0.0;
   torch::Tensor frame_indices;
@@ -65,8 +65,8 @@ struct VideoMetadata {
 };
 
 struct AudioMetadata {
-  int64_t sample_rate = 0;
-  int64_t num_channels = 0;
+  int32_t sample_rate = 0;
+  int32_t num_channels = 0;
   double duration = 0.0;
 };
 

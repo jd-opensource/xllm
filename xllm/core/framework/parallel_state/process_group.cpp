@@ -43,6 +43,17 @@ std::pair<int, std::vector<uint64_t>> get_trans_group_rank(int world_size,
 
   return {trans_index, trans_group_ranks};
 }
+
+std::vector<int64_t> get_gather_shape(int32_t world_size,
+                                      const torch::Tensor& input) {
+  std::vector<int64_t> out_shape;
+  out_shape.reserve(input.dim() + 1);
+  out_shape.push_back(world_size);
+  for (int64_t dim_size : input.sizes()) {
+    out_shape.push_back(dim_size);
+  }
+  return out_shape;
+}
 }  // namespace
 
 namespace xllm {
@@ -76,8 +87,14 @@ c10::intrusive_ptr<c10d::Store> create_tcp_store(const std::string& host,
 
 void ProcessGroup::allreduce(torch::Tensor& input) {
   CHECK(pg_ != nullptr) << "Process group is not initialized.";
+  allreduce_async(input)->wait();
+}
+
+c10::intrusive_ptr<c10d::Work> ProcessGroup::allreduce_async(
+    torch::Tensor& input) {
+  CHECK(pg_ != nullptr) << "Process group is not initialized.";
   std::vector<torch::Tensor> input_tensors = {input};
-  pg_->allreduce(input_tensors)->wait();
+  return pg_->allreduce(input_tensors);
 }
 
 void ProcessGroup::allgather(const torch::Tensor& input,
@@ -92,6 +109,36 @@ c10::intrusive_ptr<c10d::Work> ProcessGroup::allgather_async(
   std::vector<torch::Tensor> input_tensors = {input};
   std::vector<std::vector<torch::Tensor>> output_tensors = {outputs};
   return pg_->allgather(output_tensors, input_tensors);
+}
+
+c10::intrusive_ptr<c10d::Work> ProcessGroup::allgather_base_async(
+    const torch::Tensor& input,
+    torch::Tensor& output) {
+  CHECK(pg_ != nullptr) << "Process group is not initialized.";
+  CHECK_EQ(input.device(), device())
+      << "input should be on the same device as the process group";
+  CHECK(output.defined()) << "output should be preallocated";
+  CHECK_EQ(output.device(), device())
+      << "output should be on the same device as the process group";
+  CHECK(output.is_contiguous()) << "output should be contiguous";
+
+  torch::Tensor input_buf = input.contiguous();
+  const std::vector<int64_t> out_shape =
+      get_gather_shape(world_size(), input_buf);
+  CHECK_EQ(output.sizes(), torch::IntArrayRef(out_shape))
+      << "output shape mismatch for allgather_base_async";
+  c10d::AllgatherOptions opts;
+  return pg_->_allgather_base(output, input_buf, opts);
+}
+
+torch::Tensor ProcessGroup::allgather_base_sync(const torch::Tensor& input) {
+  CHECK(pg_ != nullptr) << "Process group is not initialized.";
+  CHECK_EQ(input.device(), device())
+      << "input should be on the same device as the process group";
+  torch::Tensor output =
+      torch::empty(get_gather_shape(world_size(), input), input.options());
+  allgather_base_async(input, output)->wait();
+  return output;
 }
 
 void ProcessGroup::reduce_scatter(const torch::Tensor& input,
@@ -109,6 +156,35 @@ void ProcessGroup::reduce_scatter(const torch::Tensor& input,
       ->wait();
 }
 
+void ProcessGroup::all_to_all_single(
+    torch::Tensor output,
+    torch::Tensor input,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    bool async_op,
+    c10::intrusive_ptr<c10d::Work>* async_work) {
+  CHECK(pg_ != nullptr) << "Process group is not initialized.";
+  CHECK(output.defined())
+      << "Output of all_to_all_single function is not defined";
+  CHECK(input.defined())
+      << "Input of all_to_all_single function is not defined";
+  if (input.is_complex()) {
+    input = torch::view_as_real(input);
+  }
+  if (output.is_complex()) {
+    output = torch::view_as_real(output);
+  }
+
+  auto opts = c10d::AllToAllOptions();
+  auto work = pg_->alltoall_base(
+      output, input, output_split_sizes, input_split_sizes, opts);
+  if (async_op) {
+    *async_work = work;
+  } else {
+    work->wait();
+  }
+}
+
 std::unique_ptr<ProcessGroup> create_process_group(
     int32_t rank,
     int32_t world_size,
@@ -122,4 +198,31 @@ std::unique_ptr<ProcessGroup> create_process_group(
       rank, world_size, rank_size, port, trans, host, group_name, device);
 }
 
+#if defined(USE_NPU)
+// TODO: This function is used by DiT models, since the DiT communication group
+// info have already been calculated by rank_generator, we only need to pass the
+// info to create the process groups. For any device that want to reuse the
+// function and dit process groups, please implement the corresponding
+// ProcessGroupImpl construct function.
+std::unique_ptr<ProcessGroup> create_process_group(
+    int32_t global_rank,
+    int32_t local_rank,
+    const std::vector<int32_t>& group_ranks,
+    int32_t world_size,
+    int32_t rank_size,
+    int32_t port,
+    const std::string& host,
+    const std::string& group_name,
+    const torch::Device& device) {
+  return std::make_unique<ProcessGroupImpl>(global_rank,
+                                            local_rank,
+                                            group_ranks,
+                                            world_size,
+                                            rank_size,
+                                            port,
+                                            host,
+                                            group_name,
+                                            device);
+}
+#endif
 }  // namespace xllm

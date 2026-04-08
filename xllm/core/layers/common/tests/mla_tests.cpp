@@ -35,7 +35,6 @@ class DeepseekMLATest : public ::testing::Test {
     Device device(torch_device);
     device.set_seed();
 
-    FLAGS_enable_mla = true;
     FLAGS_block_size = 1;
     // Initialize default model arguments for testing
     model_args_ = create_mla_model_args();
@@ -84,6 +83,7 @@ class DeepseekMLATest : public ::testing::Test {
     model_args.index_head_dim() = 128;
     model_args.index_n_heads() = 64;
     model_args.index_topk() = 2048;
+    model_args.enable_mla() = true;
 
     return model_args;
   }
@@ -211,6 +211,7 @@ class DeepseekMLATest : public ::testing::Test {
 
     metadata.max_query_len = max_query_len;
     metadata.max_seq_len = max_seq_len;
+    metadata.total_kv_len = batch_size * max_query_len;
     metadata.compute_dtype = "half";
     metadata.is_prefill = is_prefill;
     metadata.is_chunked_prefill = false;

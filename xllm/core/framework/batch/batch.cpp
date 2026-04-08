@@ -134,7 +134,8 @@ void Batch::add(const std::vector<Sequence*>& sequences) {
 
 ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
                                           uint32_t min_decoding_batch_size,
-                                          const ModelArgs& args) {
+                                          const ModelArgs& args,
+                                          int32_t cp_size) {
   if (sequences_.empty() && !sequence_groups_.empty()) {
     output_targets_.clear();
     return prepare_rec_forward_input(
@@ -148,7 +149,8 @@ ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
                             swap_block_transfer_infos_,
                             batch_id_,
                             &args,
-                            batch_forward_type_);
+                            batch_forward_type_,
+                            cp_size);
   return builder.build_forward_input(num_decoding_tokens,
                                      min_decoding_batch_size);
 }
@@ -333,7 +335,8 @@ std::unordered_map<uint32_t, uint32_t> Batch::cal_seq_exchange_index(
 }
 
 RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
-                                             ThreadPool* thread_pool) {
+                                             ThreadPool* thread_pool,
+                                             int32_t cp_size) {
   dp_balance_shuffle_seqs();
   refresh_output_targets();
   BatchInputBuilder builder(sequences_,
@@ -344,6 +347,7 @@ RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
                             batch_id_,
                             &args,
                             batch_forward_type_,
+                            cp_size,
                             thread_pool);
   auto raw_input = builder.build_raw_forward_input();
   if (has_partial_finished_beam_group()) {
@@ -412,15 +416,22 @@ void Batch::process_sample_output(const RawForwardOutput& raw_output,
         continue;
       }
       std::vector<torch::Tensor> seq_mm_embeddings;
-      seq_mm_embeddings.reserve(n_images);
-      for (int i = mm_embedding_idx; i < mm_embedding_idx + n_images; ++i) {
+      // if we want to return the full embeding of images and prompts,
+      // the output is a single embedding tensor, else it would be a vector of
+      // image embeddings
+      int64_t output_tensor_size =
+          FLAGS_enable_return_mm_full_embeddings ? 1 : n_images;
+      seq_mm_embeddings.reserve(output_tensor_size);
+      for (int64_t i = mm_embedding_idx;
+           i < mm_embedding_idx + output_tensor_size;
+           ++i) {
         CHECK_LT(i, raw_output.mm_embeddings.size());
         seq_mm_embeddings.push_back(raw_output.mm_embeddings[i]);
       }
       seq->update_mm_embeddings(seq_mm_embeddings);
       // we only support complete mm embedding in one iteration now
       CHECK(seq->finished());
-      mm_embedding_idx += n_images;
+      mm_embedding_idx += output_tensor_size;
     }
   }
 

@@ -74,6 +74,7 @@ struct AttentionMetadata {
   torch::Tensor slot_mapping;
   int64_t max_query_len;
   int64_t max_seq_len;
+  int64_t total_kv_len = 0;
   std::string compute_dtype;
   bool is_prefill;
   bool is_chunked_prefill;

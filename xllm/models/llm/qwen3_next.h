@@ -15,203 +15,49 @@ limitations under the License.
 
 #pragma once
 
-#include <memory>
+#include <string>
+#include <unordered_set>
 #include <vector>
 
-#include "core/common/global_flags.h"
-#include "core/framework/model/model_output.h"
-#include "core/framework/model_context.h"
-#include "core/framework/model_loader.h"
-#include "core/layers/common/attention_mask.h"
-#include "core/layers/common/attention_metadata_builder.h"
-#include "core/layers/common/lm_head.h"
-#include "core/layers/common/qwen3_next_rms_norm.h"
-#include "core/layers/common/word_embedding.h"
 #include "core/layers/npu_torch/qwen3_next_decoder_layer_impl.h"
 #include "models/model_registry.h"
+#include "qwen3_next_hybrid_base.h"
 
 namespace xllm {
 
-class Qwen3NextModelImpl : public torch::nn::Module {
+class Qwen3NextModelImpl : public Qwen3HybridModelImplBase {
  public:
-  Qwen3NextModelImpl(const ModelContext& context)
-      : device_(context.get_tensor_options().device()) {
-    auto options = context.get_tensor_options();
-    auto model_args = context.get_model_args();
-    auto parallel_args = context.get_parallel_args();
+  explicit Qwen3NextModelImpl(const ModelContext& context)
+      : Qwen3NextModelImpl(context, /*init_decoder_layers=*/true) {}
 
-    blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args.n_layers());
-    device_ = options.device();
-    dtype_ = options.dtype().toScalarType();
-    norm_ = register_module(
-        "norm",
-        xllm::layer::Qwen3NextRMSNorm(
-            model_args.hidden_size(), model_args.rms_norm_eps(), options));
-    embed_tokens_ =
-        register_module("embed_tokens", layer::WordEmbedding(context));
-    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
-    attn_mask_ = layer::AttentionMask(options.device(),
-                                      options.dtype().toScalarType(),
-                                      /*mask_value=*/mask_value);
-    for (int32_t i = 0; i < model_args.n_layers(); ++i) {
-      auto block = layer::Qwen3NextDecoderLayer(context, i);
-      layers_.push_back(block);
-      blocks_->push_back(block);
-    }
-
-    dp_size_ = parallel_args.dp_size();
-  }
-
-  // tokens: [num_tokens]
-  // positions: [num_tokens] token pos in the sequence
-  ModelOutput forward(torch::Tensor tokens,
-                      torch::Tensor positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    // Disable gradient computation to reduce memory usage during inference
-    torch::NoGradGuard no_grad;
-    if (dp_size_ > 1) {
-      if (tokens.sizes() == 0) {
-        tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
-        positions = torch::tensor({0}).to(torch::kInt32).to(device_);
+ protected:
+  explicit Qwen3NextModelImpl(const ModelContext& context,
+                              bool init_decoder_layers)
+      : Qwen3HybridModelImplBase(context) {
+    if (init_decoder_layers) {
+      const int32_t n_layers = context.get_model_args().n_layers();
+      for (int32_t layer_id = 0; layer_id < n_layers; ++layer_id) {
+        add_decoder_layer(std::make_shared<layer::Qwen3NextDecoderLayerImpl>(
+            context, layer_id));
       }
     }
-
-    layer::AttentionMetadata attn_metadata =
-        layer::AttentionMetadataBuilder::build(
-            input_params, build_attention_mask(input_params));
-    torch::Tensor h = embed_tokens_(tokens);
-    for (size_t i = 0; i < layers_.size(); i++) {
-      auto& layer = layers_[i];
-      h = layer(h, positions, attn_metadata, kv_caches[i], input_params);
-    }
-    h = norm_(h);
-    return ModelOutput(h);
   }
-
-  // load the weight from the checkpoint
-  void load_state_dict(const StateDict& state_dict) {
-    embed_tokens_->load_state_dict(
-        state_dict.get_dict_with_prefix("embed_tokens."));
-    for (int i = 0; i < layers_.size(); i++) {
-      layers_[i]->load_state_dict(
-          state_dict.get_dict_with_prefix("layers." + std::to_string(i) + "."));
-    }
-    norm_->load_state_dict(state_dict.get_dict_with_prefix("norm."));
-  }
-
-  layer::WordEmbedding get_word_embedding() { return embed_tokens_; }
-
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    embed_tokens_ = word_embedding;
-  }
-
- private:
-  torch::Tensor build_attention_mask(const ModelInputParams& input_params) {
-    max_seq_len_ = std::max(input_params.kv_max_seq_len, max_seq_len_);
-    if (!FLAGS_enable_chunked_prefill) {
-      return attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
-    }
-
-    const int32_t num_sequences = input_params.num_sequences;
-    if (num_sequences <= 0) {
-      return attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
-    }
-
-    std::vector<torch::Tensor> req_mask_vec;
-    req_mask_vec.reserve(num_sequences);
-    for (int32_t j = 0; j < num_sequences; ++j) {
-      req_mask_vec.emplace_back(
-          attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                     input_params.kv_seq_lens_vec[j],
-                                     max_seq_len_,
-                                     dtype_,
-                                     device_));
-    }
-    return torch::cat(req_mask_vec, 0);
-  }
-
-  torch::nn::ModuleList blocks_{nullptr};
-  std::vector<layer::Qwen3NextDecoderLayer> layers_;
-  int32_t max_seq_len_ = 0;
-  int32_t dp_size_;
-  torch::Device device_;
-  torch::ScalarType dtype_;
-  layer::Qwen3NextRMSNorm norm_{nullptr};
-  layer::AttentionMask attn_mask_;
-  layer::WordEmbedding embed_tokens_{nullptr};
 };
-
 TORCH_MODULE(Qwen3NextModel);
 
-class Qwen3NextForCausalLMImpl : public torch::nn::Module {
+class Qwen3NextForCausalLMImpl : public Qwen3HybridForCausalLMImplBase {
  public:
-  Qwen3NextForCausalLMImpl(const ModelContext& context) {
-    model_ = register_module("model", Qwen3NextModel(context));
-    lm_head_ = register_module("lm_head", layer::LmHead(context));
-  }
+  explicit Qwen3NextForCausalLMImpl(const ModelContext& context)
+      : Qwen3NextForCausalLMImpl(context, /*init_model=*/true) {}
 
-  // tokens: [num_tokens]
-  // positions: [num_tokens] token pos in the sequence
-  // returns: [num_tokens, hidden_size]
-  ModelOutput forward(const torch::Tensor& tokens,
-                      const torch::Tensor& positions,
-                      std::vector<KVCache>& kv_caches,
-                      const ModelInputParams& input_params) {
-    return model_(tokens, positions, kv_caches, input_params);
-  }
-
-  // hidden_states: [num_tokens, hidden_size]
-  // seleted_idxes: [num_tokens]
-  // returns: [num_tokens, vocab_size]
-  torch::Tensor logits(const torch::Tensor& hidden_states,
-                       const torch::Tensor& seleted_idxes) {
-    auto h = hidden_states;
-    if (seleted_idxes.defined()) {
-      h = h.index_select(/*dim=*/0, seleted_idxes);
-    }
-    return lm_head_(h);
-  }
-
-  torch::Tensor pooler(const torch::Tensor& hidden_states,
-                       const torch::Tensor& seleted_idxes) {
-    auto h = hidden_states;
-    if (seleted_idxes.defined()) {
-      h = h.index_select(/*dim=*/0, seleted_idxes);
-    }
-    namespace F = torch::nn::functional;
-    return F::normalize(h, F::NormalizeFuncOptions().p(2).dim(1));
-  }
-
-  void load_model(std::unique_ptr<ModelLoader> loader) {
-    for (const auto& state_dict : loader->get_state_dicts()) {
-      model_->load_state_dict(state_dict->get_dict_with_prefix("model."));
-      lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
+ protected:
+  explicit Qwen3NextForCausalLMImpl(const ModelContext& context,
+                                    bool init_model)
+      : Qwen3HybridForCausalLMImplBase(context) {
+    if (init_model) {
+      set_model_module(std::make_shared<Qwen3NextModelImpl>(context));
     }
   }
-
-  virtual void prepare_expert_weight(int32_t layer_id,
-                                     const std::vector<int32_t>& expert_ids) {
-    return;
-  }
-  virtual void update_expert_weight(int32_t layer_id) { return; }
-
-  layer::LmHead get_lm_head() { return lm_head_; }
-
-  void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
-
-  layer::WordEmbedding get_word_embedding() {
-    return model_->get_word_embedding();
-  }
-
-  void set_word_embedding(layer::WordEmbedding& word_embedding) {
-    model_->set_word_embedding(word_embedding);
-  }
-
- private:
-  layer::LmHead lm_head_{nullptr};
-  Qwen3NextModel model_{nullptr};
 };
 TORCH_MODULE(Qwen3NextForCausalLM);
 
@@ -262,6 +108,7 @@ REGISTER_MODEL_ARGS(qwen3_next, [&] {
   LOAD_ARG_OR(partial_rotary_factor, "partial_rotary_factor", 0.25f);
   LOAD_ARG_OR(
       shared_expert_intermediate_size, "shared_expert_intermediate_size", 512);
+  LOAD_ARG_OR(layer_types, "layer_types", std::vector<std::string>());
 
   // MoE compatibility with fused_moe implementation.
   LOAD_ARG_OR(n_routed_experts, "n_routed_experts", args->num_experts());

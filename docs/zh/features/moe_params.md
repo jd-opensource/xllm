@@ -7,8 +7,9 @@
 ## 参数设置
 + dp_size：设置Attention部分的dp规模大小，默认值为1，可设置为2的指数倍，当dp_size不等于卡数时，dp组内为tp并行.
 + ep_size：设置MoE部分的ep规模大小，默认值为1，可设置为2的指数倍，当ep_size不等于卡数时，dp组内为tp并行.
-+ enable_mla ：默认为false，当模型使用mla时需要设置为true.
 + expert_parallel_degree ：ep并行相关参数，不开启ep时默认设置为0，开启ep时默认为1，此时为ep level1，当ep_size等于卡数时可以设置为2开启ep level2.
+
+支持 MLA 的模型会自动开启 MLA，不再需要手动配置。
 ## 方案设计
 + 当开启ep时，默认为ep level1，此时attn与moe部分计算完成后，通过All Gather全卡通讯将数据发送到下一阶段，以64卡attn部分dp32tp2 moe部分ep32tp2为例，执行流程如下：
 ![Alt text](../../assets/moe_eplevel1.jpg)

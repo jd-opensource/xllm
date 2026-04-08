@@ -63,6 +63,7 @@ void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
     host_block_managers_[dp_rank]->deallocate(
         sequence->host_kv_state().kv_blocks());
     block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+    deallocate_embedding_id(sequence, dp_rank);
     sequence->reset();
     return;
   }
@@ -97,6 +98,7 @@ void HierarchyBlockManagerPool::deallocate(Sequence* sequence) {
       sequence->host_kv_state().kv_blocks());
 
   block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+  deallocate_embedding_id(sequence, dp_rank);
   sequence->reset();
 }
 

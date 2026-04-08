@@ -9,3 +9,4 @@ crate-type = ["staticlib"]
 
 [dependencies]
 tokenizers = { version = "0.21.0", default-features = false, features = ["onig"] }
+unicode-segmentation = "=1.11.0"

@@ -17,6 +17,8 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <cmath>
+
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/state_dict/state_dict.h"
@@ -55,12 +57,12 @@ class Qwen2AttentionTest : public ::testing::Test {
     int64_t head_dim = model_args_.head_dim();
     int64_t block_size = 16;
 
-    auto k_cache =
-        torch::randn({block_num, n_kv_heads, block_size, head_dim}, options_) *
-        0.01f;
-    auto v_cache =
-        torch::randn({block_num, n_kv_heads, block_size, head_dim}, options_) *
-        0.01f;
+    auto k_cache = MakeNoise("qwen2_attention_test.k_cache",
+                             {block_num, n_kv_heads, block_size, head_dim},
+                             0.01f);
+    auto v_cache = MakeNoise("qwen2_attention_test.v_cache",
+                             {block_num, n_kv_heads, block_size, head_dim},
+                             0.01f);
     kv_cache_ = KVCache(k_cache, v_cache);
 
     context_ = ModelContext(parallel_args_, model_args_, QuantArgs(), options_);
@@ -98,6 +100,17 @@ class Qwen2AttentionTest : public ::testing::Test {
       tensor = tensor / torch::sqrt(torch::tensor(tensor.size(0), options_));
       weight_dict_["model.layers.0.self_attn." + name] = tensor;
     }
+  }
+
+  torch::Tensor MakeNoise(const std::string& key,
+                          torch::IntArrayRef shape,
+                          float stddev) const {
+    auto noise =
+        test::seeded_tensor(key,
+                            shape,
+                            torch::typeMetaToScalarType(options_.dtype()),
+                            options_.device());
+    return (noise - 0.5f) * (std::sqrt(12.0f) * stddev);
   }
 
   int64_t GetBlockNum(int64_t seq_len) const {
@@ -193,6 +206,7 @@ class Qwen2AttentionTest : public ::testing::Test {
 
     metadata.max_query_len = (is_prefill || is_chunked_prefill) ? seq_len : 1;
     metadata.max_seq_len = max_seq_len;
+    metadata.total_kv_len = batch_size * seq_len;
     metadata.compute_dtype = "half";
     metadata.is_prefill = is_prefill && !is_chunked_prefill;
     metadata.is_chunked_prefill = is_chunked_prefill;
@@ -220,8 +234,9 @@ TEST_F(Qwen2AttentionTest, PrefillTest) {
   int64_t hidden_size = model_args_.hidden_size();
   int64_t num_tokens = batch_size * seq_len;
 
-  auto hidden_states =
-      torch::randn({num_tokens, hidden_size}, options_) * 0.02f;
+  auto hidden_states = MakeNoise("qwen2_attention_test.prefill.hidden_states",
+                                 {num_tokens, hidden_size},
+                                 0.02f);
   auto positions = torch::arange(0, seq_len, options_.dtype(torch::kInt32))
                        .repeat({batch_size});
 
@@ -233,16 +248,16 @@ TEST_F(Qwen2AttentionTest, PrefillTest) {
 
   CHECK_EQ(output.sizes(), torch::IntArrayRef({num_tokens, hidden_size}));
   auto test_output = output.flatten().slice(0, 0, 10).unsqueeze(0);
-  std::vector<float> expected_values = {0.2031f,
-                                        0.2109f,
-                                        0.2129f,
-                                        0.2041f,
-                                        0.1963f,
-                                        0.2129f,
-                                        0.2139f,
-                                        0.2070f,
-                                        0.2188f,
-                                        0.2061f};
+  std::vector<float> expected_values = {0.6796875f,
+                                        0.67578125f,
+                                        0.6875f,
+                                        0.65625f,
+                                        0.6640625f,
+                                        0.6796875f,
+                                        0.68359375f,
+                                        0.67578125f,
+                                        0.6796875f,
+                                        0.66796875f};
   test::verify_precision(test_output, expected_values, 1e-5, 1e-6);
 }
 
@@ -258,8 +273,9 @@ TEST_F(Qwen2AttentionTest, DecodeTest) {
   int64_t hidden_size = model_args_.hidden_size();
   int64_t num_tokens = batch_size;
 
-  auto hidden_states =
-      torch::randn({num_tokens, hidden_size}, options_) * 0.02f;
+  auto hidden_states = MakeNoise("qwen2_attention_test.decode.hidden_states",
+                                 {num_tokens, hidden_size},
+                                 0.02f);
   auto positions =
       torch::full({num_tokens}, seq_len, options_.dtype(torch::kInt32));
 
@@ -272,16 +288,16 @@ TEST_F(Qwen2AttentionTest, DecodeTest) {
 
   CHECK_EQ(output.sizes(), torch::IntArrayRef({num_tokens, hidden_size}));
   auto test_output = output.flatten().slice(0, 0, 10).unsqueeze(0);
-  std::vector<float> expected_values = {0.0012360f,
-                                        0.0011215f,
-                                        0.0006714f,
-                                        0.0010376f,
-                                        0.0010071f,
-                                        0.0008049f,
-                                        0.0010681f,
-                                        0.0007935f,
-                                        0.0010910f,
-                                        0.0011978f};
+  std::vector<float> expected_values = {0.0005264282f,
+                                        0.0008239746f,
+                                        0.0005722046f,
+                                        0.0006027222f,
+                                        0.000831604f,
+                                        0.0004405975f,
+                                        0.001037598f,
+                                        0.001083374f,
+                                        0.000289917f,
+                                        0.0007820129f};
   test::verify_precision(test_output, expected_values, 1e-5, 1e-6);
 }
 
@@ -303,8 +319,9 @@ TEST_F(Qwen2AttentionTest, MixedSequenceLengthTest) {
   }
 
   int64_t hidden_size = model_args_.hidden_size();
-  auto hidden_states =
-      torch::randn({total_tokens, hidden_size}, options_) * 0.02f;
+  auto hidden_states = MakeNoise("qwen2_attention_test.mix.hidden_states",
+                                 {total_tokens, hidden_size},
+                                 0.02f);
 
   std::vector<int32_t> positions_vec;
   for (size_t i = 0; i < seq_lens_size; ++i) {
@@ -335,16 +352,16 @@ TEST_F(Qwen2AttentionTest, MixedSequenceLengthTest) {
 
   CHECK_EQ(output.sizes(), torch::IntArrayRef({total_tokens, hidden_size}));
   auto test_output = output.flatten().slice(0, 0, 10).unsqueeze(0);
-  std::vector<float> expected_values = {0.2412f,
-                                        0.2520f,
-                                        0.2559f,
-                                        0.2422f,
-                                        0.2393f,
-                                        0.2559f,
-                                        0.2578f,
-                                        0.2520f,
-                                        0.2539f,
-                                        0.2441f};
+  std::vector<float> expected_values = {0.07763672f,
+                                        0.08349609f,
+                                        0.08496094f,
+                                        0.08349609f,
+                                        0.07958984f,
+                                        0.08740234f,
+                                        0.09130859f,
+                                        0.08398438f,
+                                        0.08642578f,
+                                        0.07958984f};
   test::verify_precision(test_output, expected_values, 1e-5, 1e-6);
 }
 
@@ -682,6 +699,7 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheChunkedPrefillTest) {
       torch::zeros({batch_size, num_blocks_per_req}, options_int);
   history_metadata.max_query_len = history_len;
   history_metadata.max_seq_len = max_seq_len;
+  history_metadata.total_kv_len = batch_size * history_len;
   history_metadata.compute_dtype = "half";
   history_metadata.is_prefill = true;
   history_metadata.is_chunked_prefill = false;
@@ -720,6 +738,7 @@ TEST_F(Qwen2AttentionTest, QuantizedKVCacheChunkedPrefillTest) {
   metadata.block_table = make_block_table();
   metadata.max_query_len = chunk_len;
   metadata.max_seq_len = max_seq_len;
+  metadata.total_kv_len = batch_size * total_seq_len;
   metadata.compute_dtype = "half";
   metadata.is_prefill = false;
   metadata.is_chunked_prefill = true;

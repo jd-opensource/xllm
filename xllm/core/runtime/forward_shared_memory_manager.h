@@ -15,11 +15,16 @@ limitations under the License.
 
 #include <stddef.h>
 
+#include <memory>
+
+#include "dit_forward_params.h"
 #include "forward_params.h"
 #include "params_utils.h"
 #include "util/shared_memory_manager.h"
 
 namespace xllm {
+
+class Stream;
 
 constexpr int64_t kNumWaitNanoseconds = 1000;  // 1us
 
@@ -106,6 +111,7 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
                         const torch::Tensor& top_logprobs,
                         const torch::Tensor& embeddings,
                         const std::vector<torch::Tensor>& mm_embeddings,
+                        const std::vector<torch::Tensor>& dit_images,
                         const torch::Tensor& expert_load_data,
                         int32_t prepared_layer_id,
                         const torch::Tensor& src_seq_idxes,
@@ -120,5 +126,6 @@ class ForwardSharedMemoryManager : public SharedMemoryManager {
   uint64_t last_version_ = 0;
   void* metadata_addr_ = nullptr;
   ControlMetadata* control_ptr_ = nullptr;
+  std::unique_ptr<Stream> stream_ = nullptr;
 };
 }  // namespace xllm

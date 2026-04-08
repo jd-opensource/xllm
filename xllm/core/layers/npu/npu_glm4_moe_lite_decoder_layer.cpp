@@ -156,8 +156,6 @@ void NpuGlm4MoeDecoderLiteImpl::initialize_basic_parameters(
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
 
   param.enableAclGraphPagedAttention = false;
-  // TODO(zhangminchao1@jd.com): not support MTP model yet
-  //  FLAGS_enable_graph && !is_prefill && args.n_layers() > 1;
 
   param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
                                      ? std::vector<int>{-1, -1, -1, -1}

@@ -94,7 +94,7 @@ cd xllm
 pip install pre-commit
 pre-commit install
 
-git submodule update --init
+git submodule update --init --recursive
 ```
 
 The compiled binary file is located at `/path/to/xllm/build/xllm/core/server/xllm`. In a new image, the first compilation of xllm takes a long time because all dependencies in vcpkg need to be compiled, but subsequent compilations will be much faster.

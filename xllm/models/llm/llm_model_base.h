@@ -39,7 +39,7 @@ class LlmModelImplBase : public torch::nn::Module {
  public:
   // mode type: qwen2, qwen3 .etc
   LlmModelImplBase(const std::string& model_type, const ModelArgs& args)
-      : model_type_(model_type) {
+      : model_args_(args), model_type_(model_type) {
     InterruptionBus::get_instance().subscribe([this](bool interrupted) {
       this->layer_forward_interrupted_ = interrupted;
     });
@@ -80,7 +80,8 @@ class LlmModelImplBase : public torch::nn::Module {
     if (!modified_input_params.attn_metadata) {
       modified_input_params.attn_metadata =
           std::make_shared<layer::AttentionMetadata>(
-              layer::AttentionMetadataBuilder::build(modified_input_params));
+              layer::AttentionMetadataBuilder::build(modified_input_params,
+                                                     model_args_));
     }
     auto& attn_metadata = *(modified_input_params.attn_metadata);
     if (positions.dim() == 2) {
@@ -148,6 +149,7 @@ class LlmModelImplBase : public torch::nn::Module {
   torch::Tensor cos_sin_;
   int32_t max_seq_len_ = 0;
   std::vector<int64_t> mrope_section_;
+  ModelArgs model_args_;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::RMSNorm norm_{nullptr};
 
@@ -213,15 +215,20 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
       std::unique_ptr<ModelLoader> loader,
       std::string prefix = "model." /*llm model weight prefix*/) {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      auto sub_dict = state_dict->get_dict_with_prefix(prefix);
-      if (sub_dict.size() == 0) {
-        sub_dict = state_dict->get_dict_with_prefix("");
-      }
-      model_->load_state_dict(sub_dict);
+      // The same model_type may come from checkpoints with different top-level
+      // weight prefixes. Try these candidate prefixes in order to improve
+      // compatibility across such variants.
+      model_->load_state_dict(state_dict->get_dict_with_prefix(
+          std::vector<std::string>{"model.language_model.",
+                                   "language_model.model.",
+                                   prefix,
+                                   "model.",
+                                   ""}));
 
       if (tie_word_embeddings) {
         lm_head_->load_state_dict(
-            state_dict->get_dict_with_prefix(prefix + "embed_tokens."));
+            state_dict->get_dict_with_prefix(std::vector<std::string>{
+                prefix + "embed_tokens.", "embed_tokens."}));
       } else {
         lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
       }

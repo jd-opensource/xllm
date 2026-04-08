@@ -19,7 +19,7 @@ limitations under the License.
 #include "llm_model_base.h"
 #include "qwen3.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 class OxygenModelImpl : public QWen3ModelImpl {
  public:
@@ -139,14 +139,15 @@ class OxygenModelImpl : public QWen3ModelImpl {
 };
 TORCH_MODULE(OxygenModel);
 
-class OxygenForCausalLMImpl : public LlmForCausalLMImplBase<OxygenModel> {
+class OxygenForCausalLMImpl
+    : public xllm::npu::model::LlmForCausalLMImplBase<OxygenModel> {
  public:
   OxygenForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<OxygenModel>(context) {}
+      : xllm::npu::model::LlmForCausalLMImplBase<OxygenModel>(context) {}
 };
 TORCH_MODULE(OxygenForCausalLM);
 
 // register the causal model
 REGISTER_CAUSAL_MODEL(oxygenvlm_text, OxygenForCausalLM);
 
-}  // namespace xllm
+}  // namespace xllm::npu::model

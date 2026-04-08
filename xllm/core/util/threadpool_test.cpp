@@ -18,6 +18,8 @@ limitations under the License.
 #include <absl/synchronization/notification.h>
 #include <absl/time/clock.h>
 #include <gtest/gtest.h>
+#include <pthread.h>
+#include <sched.h>
 
 namespace xllm {
 
@@ -85,6 +87,86 @@ TEST(ThreadPoolTest, MultipleThreads) {
   EXPECT_TRUE(
       notification.WaitForNotificationWithTimeout(absl::Milliseconds(400)));
   EXPECT_EQ(counter, 10);
+}
+
+TEST(ThreadPoolTest, CpuCoreBindingConstructor) {
+  // Construct with cpu_cores binding — should not crash even if binding fails
+  // (e.g., in containers with restricted affinity).
+  std::vector<int32_t> cpu_cores = {0, 0};  // bind both threads to core 0
+  ThreadPool threadpool(2, cpu_cores);
+  EXPECT_EQ(threadpool.size(), 2);
+
+  std::atomic<int> counter{0};
+  absl::Notification notification;
+  for (int i = 0; i < 2; ++i) {
+    threadpool.schedule([&counter, &notification]() {
+      if (++counter == 2) {
+        notification.Notify();
+      }
+    });
+  }
+  EXPECT_TRUE(
+      notification.WaitForNotificationWithTimeout(absl::Milliseconds(500)));
+  EXPECT_EQ(counter, 2);
+}
+
+TEST(ThreadPoolTest, CpuCoreBindingWithInitFunc) {
+  std::vector<int32_t> cpu_cores = {0};
+  std::atomic<bool> init_called{false};
+  absl::Notification init_done;
+  ThreadPool threadpool(
+      1,
+      [&init_called, &init_done]() {
+        init_called = true;
+        init_done.Notify();
+      },
+      cpu_cores);
+  EXPECT_TRUE(
+      init_done.WaitForNotificationWithTimeout(absl::Milliseconds(500)));
+  EXPECT_TRUE(init_called);
+}
+
+TEST(ThreadPoolTest, CpuCoreBindingMismatchFallback) {
+  // Mismatched cpu_cores size — should fall back to no binding gracefully.
+  std::vector<int32_t> cpu_cores = {0, 1};  // 2 cores but 4 threads
+  ThreadPool threadpool(4, cpu_cores);
+  EXPECT_EQ(threadpool.size(), 4);
+
+  std::atomic<int> counter{0};
+  absl::Notification notification;
+  for (int i = 0; i < 4; ++i) {
+    threadpool.schedule([&counter, &notification]() {
+      if (++counter == 4) {
+        notification.Notify();
+      }
+    });
+  }
+  EXPECT_TRUE(
+      notification.WaitForNotificationWithTimeout(absl::Milliseconds(500)));
+  EXPECT_EQ(counter, 4);
+}
+
+TEST(ThreadPoolTest, CpuCoreBindingVerifyAffinity) {
+  // Verify that after construction the thread is actually bound to the
+  // requested core (if the system allows it).
+  const int32_t target_core = 0;
+  std::vector<int32_t> cpu_cores = {target_core};
+
+  absl::Notification done;
+  std::atomic<bool> affinity_ok{false};
+
+  ThreadPool threadpool(1, cpu_cores);
+  threadpool.schedule([&done, &affinity_ok, target_core]() {
+    cpu_set_t cpu_set;
+    CPU_ZERO(&cpu_set);
+    if (pthread_getaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu_set) ==
+        0) {
+      affinity_ok = CPU_ISSET(target_core, &cpu_set);
+    }
+    done.Notify();
+  });
+  EXPECT_TRUE(done.WaitForNotificationWithTimeout(absl::Milliseconds(500)));
+  EXPECT_TRUE(affinity_ok);
 }
 
 }  // namespace xllm

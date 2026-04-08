@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "chat_json_utils.h"
+#include "api_service/chat_json_parser.h"
 
 #include <gtest/gtest.h>
 
@@ -23,23 +23,20 @@ namespace xllm {
 
 class PreprocessChatJsonTest : public ::testing::Test {
  protected:
-  // Helper to check successful preprocessing
-  void ExpectSuccess(const std::string& input,
-                     bool is_multimodal,
-                     const std::string& expected_output) {
-    auto [status, result] = preprocess_chat_json(input, is_multimodal);
+  void expect_success(const std::string& input,
+                      const ChatJsonParser& parser,
+                      const std::string& expected_output) {
+    auto [status, result] = parser.preprocess(input);
     ASSERT_TRUE(status.ok()) << "Unexpected error: " << status.message();
-    // Parse both to compare JSON structure, not string equality
     auto result_json = nlohmann::json::parse(result);
     auto expected_json = nlohmann::json::parse(expected_output);
     EXPECT_EQ(result_json, expected_json);
   }
 
-  // Helper to check expected error
-  void ExpectError(const std::string& input,
-                   bool is_multimodal,
-                   const std::string& expected_error_substring) {
-    auto [status, result] = preprocess_chat_json(input, is_multimodal);
+  void expect_error(const std::string& input,
+                    const ChatJsonParser& parser,
+                    const std::string& expected_error_substring) {
+    auto [status, result] = parser.preprocess(input);
     ASSERT_FALSE(status.ok()) << "Expected error but got success";
     EXPECT_NE(status.message().find(expected_error_substring),
               std::string::npos)
@@ -58,14 +55,17 @@ TEST_F(PreprocessChatJsonTest, PassThroughNonArrayContent) {
   std::string input = R"({
     "messages": [{"role": "user", "content": "Hello"}]
   })";
-  ExpectSuccess(input, /*is_multimodal=*/false, input);
-  ExpectSuccess(input, /*is_multimodal=*/true, input);
+  LlmChatJsonParser llm_parser;
+  VlmChatJsonParser vlm_parser;
+  expect_success(input, llm_parser, input);
+  expect_success(input, vlm_parser, input);
 }
 
 TEST_F(PreprocessChatJsonTest, PassThroughNoMessages) {
   // JSON without messages field should pass through
   std::string input = R"({"model": "test"})";
-  ExpectSuccess(input, /*is_multimodal=*/false, input);
+  LlmChatJsonParser llm_parser;
+  expect_success(input, llm_parser, input);
 }
 
 TEST_F(PreprocessChatJsonTest, CombineTextArrayIntoString) {
@@ -83,9 +83,11 @@ TEST_F(PreprocessChatJsonTest, CombineTextArrayIntoString) {
   std::string expected = R"({
     "messages": [{"role": "user", "content": "Hello\nWorld"}]
   })";
-  ExpectSuccess(input, /*is_multimodal=*/false, expected);
+  LlmChatJsonParser llm_parser;
+  VlmChatJsonParser vlm_parser;
+  expect_success(input, llm_parser, expected);
   // For multimodal, array is preserved (not combined)
-  ExpectSuccess(input, /*is_multimodal=*/true, input);
+  expect_success(input, vlm_parser, input);
 }
 
 TEST_F(PreprocessChatJsonTest, SingleTextItemCombined) {
@@ -99,9 +101,11 @@ TEST_F(PreprocessChatJsonTest, SingleTextItemCombined) {
   std::string expected = R"({
     "messages": [{"role": "user", "content": "Hello"}]
   })";
-  ExpectSuccess(input, /*is_multimodal=*/false, expected);
+  LlmChatJsonParser llm_parser;
+  VlmChatJsonParser vlm_parser;
+  expect_success(input, llm_parser, expected);
   // For multimodal, array is preserved
-  ExpectSuccess(input, /*is_multimodal=*/true, input);
+  expect_success(input, vlm_parser, input);
 }
 
 // =============================================================================
@@ -119,8 +123,9 @@ TEST_F(PreprocessChatJsonTest, ImageUrlPassesThroughOnMultimodal) {
       ]
     }]
   })";
+  VlmChatJsonParser vlm_parser;
   // Should pass through unchanged for multimodal
-  ExpectSuccess(input, /*is_multimodal=*/true, input);
+  expect_success(input, vlm_parser, input);
 }
 
 TEST_F(PreprocessChatJsonTest, ImageUrlErrorsOnTextOnly) {
@@ -134,8 +139,9 @@ TEST_F(PreprocessChatJsonTest, ImageUrlErrorsOnTextOnly) {
       ]
     }]
   })";
-  ExpectError(input, /*is_multimodal=*/false, "multimodal backend");
-  ExpectError(input, /*is_multimodal=*/false, "-backend vlm");
+  LlmChatJsonParser llm_parser;
+  expect_error(input, llm_parser, "multimodal backend");
+  expect_error(input, llm_parser, "-backend vlm");
 }
 
 TEST_F(PreprocessChatJsonTest, MultipleMessagesWithMixedContent) {
@@ -156,8 +162,9 @@ TEST_F(PreprocessChatJsonTest, MultipleMessagesWithMixedContent) {
       }
     ]
   })";
+  VlmChatJsonParser vlm_parser;
   // On multimodal: all arrays preserved unchanged
-  ExpectSuccess(input, /*is_multimodal=*/true, input);
+  expect_success(input, vlm_parser, input);
 }
 
 // =============================================================================
@@ -166,35 +173,38 @@ TEST_F(PreprocessChatJsonTest, MultipleMessagesWithMixedContent) {
 
 TEST_F(PreprocessChatJsonTest, InvalidJsonReturnsError) {
   std::string input = "not valid json";
-  ExpectError(input, /*is_multimodal=*/false, "Invalid JSON");
+  LlmChatJsonParser llm_parser;
+  expect_error(input, llm_parser, "Invalid JSON");
 }
 
 TEST_F(PreprocessChatJsonTest, NonObjectMessageReturnsError) {
   std::string input = R"({"messages": ["not an object"]})";
-  ExpectError(input, /*is_multimodal=*/false, "must be an object");
+  LlmChatJsonParser llm_parser;
+  expect_error(input, llm_parser, "must be an object");
 }
 
 TEST_F(PreprocessChatJsonTest, NonObjectContentItemReturnsError) {
   std::string input = R"({
     "messages": [{"role": "user", "content": ["not an object"]}]
   })";
-  ExpectError(input, /*is_multimodal=*/false, "must be an object");
+  LlmChatJsonParser llm_parser;
+  expect_error(input, llm_parser, "must be an object");
 }
 
 TEST_F(PreprocessChatJsonTest, MissingTextFieldReturnsError) {
   std::string input = R"({
     "messages": [{"role": "user", "content": [{"type": "text"}]}]
   })";
-  ExpectError(
-      input, /*is_multimodal=*/false, "Missing or invalid 'text' field");
+  LlmChatJsonParser llm_parser;
+  expect_error(input, llm_parser, "Missing or invalid 'text' field");
 }
 
 TEST_F(PreprocessChatJsonTest, NonStringTextFieldReturnsError) {
   std::string input = R"({
     "messages": [{"role": "user", "content": [{"type": "text", "text": 123}]}]
   })";
-  ExpectError(
-      input, /*is_multimodal=*/false, "Missing or invalid 'text' field");
+  LlmChatJsonParser llm_parser;
+  expect_error(input, llm_parser, "Missing or invalid 'text' field");
 }
 
 TEST_F(PreprocessChatJsonTest, MalformedTextInMultimodalContent) {
@@ -208,8 +218,9 @@ TEST_F(PreprocessChatJsonTest, MalformedTextInMultimodalContent) {
       ]
     }]
   })";
+  VlmChatJsonParser vlm_parser;
   // Should pass through unchanged without validation
-  ExpectSuccess(input, /*is_multimodal=*/true, input);
+  expect_success(input, vlm_parser, input);
 }
 
 // =============================================================================
@@ -224,9 +235,11 @@ TEST_F(PreprocessChatJsonTest, EmptyContentArray) {
   std::string expected = R"({
     "messages": [{"role": "user", "content": ""}]
   })";
-  ExpectSuccess(input, /*is_multimodal=*/false, expected);
+  LlmChatJsonParser llm_parser;
+  VlmChatJsonParser vlm_parser;
+  expect_success(input, llm_parser, expected);
   // For multimodal, empty array is preserved
-  ExpectSuccess(input, /*is_multimodal=*/true, input);
+  expect_success(input, vlm_parser, input);
 }
 
 TEST_F(PreprocessChatJsonTest, PreservesOtherFields) {
@@ -243,9 +256,11 @@ TEST_F(PreprocessChatJsonTest, PreservesOtherFields) {
     "temperature": 0.7,
     "max_tokens": 100
   })";
-  ExpectSuccess(input, /*is_multimodal=*/false, expected);
+  LlmChatJsonParser llm_parser;
+  VlmChatJsonParser vlm_parser;
+  expect_success(input, llm_parser, expected);
   // For multimodal, array is preserved
-  ExpectSuccess(input, /*is_multimodal=*/true, input);
+  expect_success(input, vlm_parser, input);
 }
 
 TEST_F(PreprocessChatJsonTest, UnknownContentTypeOnMultimodal) {
@@ -256,7 +271,8 @@ TEST_F(PreprocessChatJsonTest, UnknownContentTypeOnMultimodal) {
       "content": [{"type": "video", "video": {"url": "..."}}]
     }]
   })";
-  ExpectSuccess(input, /*is_multimodal=*/true, input);
+  VlmChatJsonParser vlm_parser;
+  expect_success(input, vlm_parser, input);
 }
 
 TEST_F(PreprocessChatJsonTest, UnknownContentTypeErrorsOnTextOnly) {
@@ -267,7 +283,101 @@ TEST_F(PreprocessChatJsonTest, UnknownContentTypeErrorsOnTextOnly) {
       "content": [{"type": "video", "video": {"url": "..."}}]
     }]
   })";
-  ExpectError(input, /*is_multimodal=*/false, "multimodal backend");
+  LlmChatJsonParser llm_parser;
+  expect_error(input, llm_parser, "multimodal backend");
+}
+
+// =============================================================================
+// Anthropic parser tests
+// =============================================================================
+
+TEST_F(PreprocessChatJsonTest, AnthropicStringContentRemapped) {
+  std::string input = R"({
+    "messages": [{"role": "user", "content": "Hello"}]
+  })";
+  std::string expected = R"({
+    "messages": [{"role": "user", "content_string": "Hello"}]
+  })";
+  AnthropicChatJsonParser parser;
+  expect_success(input, parser, expected);
+}
+
+TEST_F(PreprocessChatJsonTest, AnthropicArrayContentRemapped) {
+  std::string input = R"({
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "Hello"},
+        {"type": "image", "source": {"data": "abc"}}
+      ]
+    }]
+  })";
+  std::string expected = R"({
+    "messages": [{
+      "role": "user",
+      "content_blocks": {
+        "blocks": [
+          {"type": "text", "text": "Hello"},
+          {"type": "image", "source": {"data": "abc"}}
+        ]
+      }
+    }]
+  })";
+  AnthropicChatJsonParser parser;
+  expect_success(input, parser, expected);
+}
+
+TEST_F(PreprocessChatJsonTest, AnthropicSystemStringRemapped) {
+  std::string input = R"({
+    "system": "You are helpful.",
+    "messages": [{"role": "user", "content": "Hi"}]
+  })";
+  std::string expected = R"({
+    "system_string": "You are helpful.",
+    "messages": [{"role": "user", "content_string": "Hi"}]
+  })";
+  AnthropicChatJsonParser parser;
+  expect_success(input, parser, expected);
+}
+
+TEST_F(PreprocessChatJsonTest, AnthropicSystemArrayRemapped) {
+  std::string input = R"({
+    "system": [{"type": "text", "text": "You are helpful."}],
+    "messages": [{"role": "user", "content": "Hi"}]
+  })";
+  std::string expected = R"({
+    "system_blocks": {"blocks": [{"type": "text", "text": "You are helpful."}]},
+    "messages": [{"role": "user", "content_string": "Hi"}]
+  })";
+  AnthropicChatJsonParser parser;
+  expect_success(input, parser, expected);
+}
+
+TEST_F(PreprocessChatJsonTest, AnthropicNoContentNoSystem) {
+  std::string input = R"({"model": "claude-3"})";
+  AnthropicChatJsonParser parser;
+  expect_success(input, parser, input);
+}
+
+TEST_F(PreprocessChatJsonTest, AnthropicInvalidJsonReturnsError) {
+  std::string input = "not valid json";
+  AnthropicChatJsonParser parser;
+  expect_error(input, parser, "Invalid JSON");
+}
+
+TEST_F(PreprocessChatJsonTest, AnthropicPreservesOtherFields) {
+  std::string input = R"({
+    "model": "claude-3",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "Hello"}]
+  })";
+  std::string expected = R"({
+    "model": "claude-3",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content_string": "Hello"}]
+  })";
+  AnthropicChatJsonParser parser;
+  expect_success(input, parser, expected);
 }
 
 }  // namespace xllm

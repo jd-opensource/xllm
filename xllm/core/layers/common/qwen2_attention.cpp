@@ -25,7 +25,7 @@ limitations under the License.
 namespace {
 inline bool is_qwen3_model(const std::string& model_type) {
   static const std::unordered_set<std::string> qwen3_type_set = {
-      "qwen3", "qwen3_vl", "qwen3_moe", "qwen3_vl_moe"};
+      "qwen3", "qwen3_vl", "qwen3_moe", "qwen3_vl_moe", "oxygenvlm"};
   return qwen3_type_set.contains(model_type);
 }
 

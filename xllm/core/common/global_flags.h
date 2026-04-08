@@ -98,8 +98,6 @@ DECLARE_double(eplb_update_threshold);
 
 DECLARE_string(rank_tablefile);
 
-DECLARE_bool(enable_mla);
-
 constexpr int32_t kGraphExecutorLogVerboseLevel = 50;
 
 DECLARE_bool(enable_graph);
@@ -132,6 +130,8 @@ DECLARE_int32(dp_size);
 
 DECLARE_int32(ep_size);
 
+DECLARE_int32(cp_size);
+
 DECLARE_string(instance_role);
 
 DECLARE_string(kv_cache_transfer_type);
@@ -163,6 +163,8 @@ DECLARE_bool(enable_atb_spec_kernel);
 DECLARE_bool(enable_block_copy_kernel);
 
 DECLARE_string(etcd_addr);
+
+DECLARE_string(etcd_namespace);
 
 DECLARE_bool(enable_service_routing);
 
@@ -254,6 +256,8 @@ DECLARE_bool(enable_beam_search_kernel);
 
 DECLARE_bool(enable_rec_fast_sampler);
 
+DECLARE_bool(enable_rec_prefill_only);
+
 DECLARE_bool(enable_topk_sorted);
 
 DECLARE_bool(output_rec_logprobs);
@@ -292,6 +296,24 @@ DECLARE_int64(dit_cache_skip_interval_steps);
 DECLARE_double(dit_cache_residual_diff_threshold);
 
 DECLARE_bool(enable_constrained_decoding);
+
+DECLARE_bool(enable_return_mm_full_embeddings);
+
+DECLARE_int64(dit_cache_start_steps);
+
+DECLARE_int64(dit_cache_end_steps);
+
+DECLARE_int64(dit_cache_start_blocks);
+
+DECLARE_int64(dit_cache_end_blocks);
+
+DECLARE_int64(tp_size);
+
+DECLARE_int64(sp_size);
+
+DECLARE_int64(cfg_size);
+
+DECLARE_bool(dit_debug_print);
 
 // --- multi-step decode config ---
 

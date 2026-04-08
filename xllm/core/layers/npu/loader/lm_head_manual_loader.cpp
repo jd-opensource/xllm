@@ -23,14 +23,32 @@ LmHeadManualLoader::LmHeadManualLoader(uint64_t weight_count,
     : BaseManualLoader(weight_count, context) {
   auto options = context.get_tensor_options();
   at_weight_tensors_[0] = torch::zeros({1}).to(options);
+  vocab_size_ = context.get_model_args().vocab_size();
+  padded_vocab_size_ = get_padded_vocab_size(context);
 }
 
 void LmHeadManualLoader::load_state_dict(const StateDict& state_dict) {
-  if (dp_size_ > 1) {
-    set_weight(
-        state_dict, "weight", 0, 1, dp_local_tp_rank_, dp_local_tp_size_, true);
+  if (cp_size_ > 1 || dp_size_ > 1) {
+    set_weight_with_padding(state_dict,
+                            "weight",
+                            0,
+                            0,
+                            dp_local_tp_rank_,
+                            dp_local_tp_size_,
+                            padded_vocab_size_,
+                            true);
+  } else if (parallel_args_.world_size() > 1) {
+    set_weight_with_padding(state_dict,
+                            "weight",
+                            0,
+                            0,
+                            parallel_args_.rank(),
+                            parallel_args_.world_size(),
+                            padded_vocab_size_,
+                            true);
   } else {
-    set_weight(state_dict, "weight", 0, 1, true);
+    set_weight_with_padding(
+        state_dict, "weight", 0, 0, padded_vocab_size_, true);
   }
 }
 

@@ -20,8 +20,8 @@ limitations under the License.
 #include "core/layers/qwen3_vision_layer.h"
 #include "models/llm/qwen3_moe.h"
 #include "models/model_registry.h"
-#include "processors/input_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
+#include "processors/qwen2_vl_input_processor.h"
 #include "qwen2_5_vl.h"
 #include "qwen3_vl.h"
 

@@ -22,6 +22,7 @@ limitations under the License.
 #include <pybind11/pybind11.h>
 #include <torch/torch.h>
 
+#include <limits>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -157,14 +158,21 @@ bool process_onerec_inputs(
         return false;
       }
 
+      if (len > std::numeric_limits<int64_t>::max() / hidden) {
+        CALLBACK_WITH_ERROR(
+            StatusCode::INVALID_ARGUMENT,
+            "OneRec input tensor '" + tensor_name + "' shape is too large");
+        return false;
+      }
+
+      const int64_t expected_numel = len * hidden;
       const int64_t actual_numel =
           static_cast<int64_t>(tensor.contents().fp32_contents_size());
-      if (actual_numel % hidden != 0 || actual_numel / hidden != len) {
+      if (expected_numel != actual_numel) {
         CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                             "OneRec input tensor '" + tensor_name +
                                 "' fp32 contents size mismatch, expected " +
-                                std::to_string(len) + " * " +
-                                std::to_string(hidden) + ", got " +
+                                std::to_string(expected_numel) + ", got " +
                                 std::to_string(actual_numel));
         return false;
       }
@@ -488,7 +496,8 @@ RecMaster::RecMaster(const Options& options)
     XServiceClient* xservice_client = XServiceClient::get_instance();
     if (!xservice_client->init(options_.etcd_addr().value_or(""),
                                options_.instance_name().value_or(""),
-                               engine_->block_manager_pool())) {
+                               engine_->block_manager_pool(),
+                               options_.etcd_namespace().value_or(""))) {
       LOG(FATAL) << "XServiceClient init fail!";
       return;
     }
@@ -506,7 +515,8 @@ RecMaster::RecMaster(const Options& options)
       .enable_chunked_prefill(options_.enable_chunked_prefill())
       .instance_role(options_.instance_role())
       .kv_cache_transfer_mode(options_.kv_cache_transfer_mode())
-      .enable_service_routing(options_.enable_service_routing());
+      .enable_service_routing(options_.enable_service_routing())
+      .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
   scheduler_ = create_fixed_steps_scheduler(engine_.get(), scheduler_options);
 
   chat_template_ = nullptr;
@@ -523,6 +533,8 @@ RecMaster::RecMaster(const Options& options)
 
   // Create pipelines based on rec_type
   auto rec_model_kind = get_rec_model_kind(model_args_.model_type());
+  CHECK(rec_model_kind != RecModelKind::kNone)
+      << "Unsupported rec model_type: " << model_args_.model_type();
   auto pipeline_type = get_rec_pipeline_type(rec_model_kind);
   pipeline_ = create_pipeline(pipeline_type, *this);
 

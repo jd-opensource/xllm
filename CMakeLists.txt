@@ -261,6 +261,17 @@ find_package(leveldb CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(absl CONFIG REQUIRED)
 find_package(Protobuf CONFIG REQUIRED)
+# Ensure vcpkg protobuf headers are found before PyTorch's bundled older version.
+# Use BEFORE SYSTEM so that:
+#   1) vcpkg protobuf is first in -isystem list (before torch's -isystem)
+#   2) project-local -I paths (e.g. Mooncake fake_include stubs) still win over -isystem
+# Protobuf_INCLUDE_DIRS may be empty in CONFIG mode; fall back to the imported target.
+if(NOT Protobuf_INCLUDE_DIRS AND TARGET protobuf::libprotobuf)
+  get_target_property(Protobuf_INCLUDE_DIRS protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
+endif()
+if(Protobuf_INCLUDE_DIRS)
+  include_directories(BEFORE SYSTEM ${Protobuf_INCLUDE_DIRS})
+endif()
 find_package(gRPC CONFIG REQUIRED)
 find_package(folly CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
@@ -309,9 +320,6 @@ else()
 endif()
 
 if(USE_NPU)
-  # USE_NPU_TORCH: Temporary flag used for debugging qwen3 torch NPU graph
-  # capture. This variable may be removed in the future.
-  # add_definitions(-DUSE_NPU_TORCH)
   add_definitions(-DUSE_NPU)
   add_definitions(-DBUILD_LIBTORCH)
   add_definitions(-DTORCH_SETCUSTOMHANDLER=ON)
@@ -456,8 +464,8 @@ if(USE_CUDA)
   add_definitions(-DUSE_CUDA)
   add_compile_definitions(TORCH_CUDA=1)
   set(CMAKE_VERBOSE_MAKEFILE ON)
-  include_directories(
-      $ENV{PYTHON_INCLUDE_PATH}
+  include_directories($ENV{PYTHON_INCLUDE_PATH})
+  include_directories(SYSTEM
       $ENV{PYTORCH_INSTALL_PATH}/include
       $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
   )
@@ -468,15 +476,31 @@ if(USE_CUDA)
     $ENV{CUDA_TOOLKIT_ROOT_DIR}/lib64
   )
 
-  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} -O3)
+  # To reduce compilation time during development, use fewer architectures:
+  #   export TORCH_CUDA_ARCH_LIST="9.0"
+  option(CUDA_DEV_MODE "Use -O1 instead of -O3 for faster CUDA compilation during development" OFF)
+  if(CUDA_DEV_MODE)
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O1")
+  else()
+    set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -O3")
+  endif()
+
   # The following definitions must be undefined since half-precision operation is required.
-  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}
-        -U__CUDA_NO_HALF_OPERATORS__
-        -U__CUDA_NO_HALF_CONVERSIONS__
-        -U__CUDA_NO_HALF2_OPERATORS__
-        -U__CUDA_NO_BFLOAT16_CONVERSIONS__)
-  set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS} --use_fast_math -Xfatbin -compress-all)
-  message(STATUS "CUDA_NVCC_FLAGS: ${CUDA_NVCC_FLAGS}")
+  string(APPEND CMAKE_CUDA_FLAGS
+    " -U__CUDA_NO_HALF_OPERATORS__"
+    " -U__CUDA_NO_HALF_CONVERSIONS__"
+    " -U__CUDA_NO_HALF2_OPERATORS__"
+    " -U__CUDA_NO_BFLOAT16_CONVERSIONS__"
+    " --use_fast_math"
+    " -Xfatbin -compress-all")
+
+  # Parallel nvcc compilation: compile multiple GPU architectures simultaneously within each .cu
+  # file. --threads 0 = auto-detect CPU core count. Requires CUDA >= 11.2.
+  if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 11.2)
+    string(APPEND CMAKE_CUDA_FLAGS " --threads 0")
+  endif()
+
+  message(STATUS "CMAKE_CUDA_FLAGS: ${CMAKE_CUDA_FLAGS}")
 
   # find_package(NCCL REQUIRED)
 

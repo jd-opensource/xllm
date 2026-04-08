@@ -24,7 +24,8 @@ GatherAsyncCtx launch_gather(const torch::Tensor& input,
                              const std::vector<int32_t>& token_num_list) {
   GatherAsyncCtx ctx;
   if (!process_group) {
-    ctx.shards = {input};
+    ctx.input = input.contiguous();
+    ctx.stacked = ctx.input.unsqueeze(0);
     ctx.token_num_list = {static_cast<int32_t>(input.size(0))};
     return ctx;
   }
@@ -35,7 +36,8 @@ GatherAsyncCtx launch_gather(const torch::Tensor& input,
       << "token_num_list size " << token_num_list.size()
       << " does not match world_size " << world_size;
   if (world_size == 1) {
-    ctx.shards = {input.contiguous()};
+    ctx.input = input.contiguous();
+    ctx.stacked = ctx.input.unsqueeze(0);
     ctx.token_num_list = token_num_list;
     return ctx;
   }
@@ -58,12 +60,24 @@ GatherAsyncCtx launch_gather(const torch::Tensor& input,
     padded_input = torch::cat({contiguous_input, pad_tensor}, /*dim=*/0);
   }
 
-  ctx.shards.resize(world_size);
-  for (int32_t i = 0; i < world_size; ++i) {
-    ctx.shards[i] = torch::empty_like(padded_input);
-  }
+  ctx.input = padded_input;
+  auto stacked_shape = ctx.input.sizes().vec();
+  stacked_shape.insert(stacked_shape.begin(), world_size);
+  ctx.stacked = torch::empty(stacked_shape, ctx.input.options());
   ctx.token_num_list = token_num_list;
-  ctx.work = process_group->allgather_async(padded_input, ctx.shards);
+  ctx.work = process_group->allgather_base_async(ctx.input, ctx.stacked);
+  return ctx;
+}
+
+ReduceAsyncCtx launch_reduce(torch::Tensor input, ProcessGroup* process_group) {
+  ReduceAsyncCtx ctx;
+  if (!process_group || process_group->world_size() <= 1) {
+    ctx.tensor = std::move(input);
+    return ctx;
+  }
+
+  ctx.tensor = input.contiguous();
+  ctx.work = process_group->allreduce_async(ctx.tensor);
   return ctx;
 }
 

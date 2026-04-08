@@ -26,16 +26,26 @@ limitations under the License.
 
 namespace xllm {
 
+std::string CreateTestTokenizerJson(const std::string& filepath,
+                                    const std::string& truncation_json,
+                                    const std::string& padding_json);
+
 // Helper function to create a minimal valid tokenizer.json file for testing
 // This creates a simple BPE tokenizer with a small vocabulary
 std::string CreateTestTokenizerJson(const std::string& filepath) {
+  return CreateTestTokenizerJson(filepath, "null", "null");
+}
+
+std::string CreateTestTokenizerJson(const std::string& filepath,
+                                    const std::string& truncation_json,
+                                    const std::string& padding_json) {
   // Minimal valid tokenizer.json for testing
   // This is a simplified BPE tokenizer configuration compatible with
   // HuggingFace tokenizers
   const std::string tokenizer_json = R"({
   "version": "1.0",
-  "truncation": null,
-  "padding": null,
+  "truncation": __TRUNCATION__,
+  "padding": __PADDING__,
   "added_tokens": [
     {"id": 0, "content": "<|bos|>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
     {"id": 1, "content": "<|eos|>", "single_word": false, "lstrip": false, "rstrip": false, "normalized": false, "special": true},
@@ -84,12 +94,17 @@ std::string CreateTestTokenizerJson(const std::string& filepath) {
     "merges": []
   }
 })";
+  std::string rendered = tokenizer_json;
+  size_t pos = rendered.find("__TRUNCATION__");
+  rendered.replace(pos, std::string("__TRUNCATION__").size(), truncation_json);
+  pos = rendered.find("__PADDING__");
+  rendered.replace(pos, std::string("__PADDING__").size(), padding_json);
 
   std::ofstream file(filepath);
   if (!file.is_open()) {
     return "";
   }
-  file << tokenizer_json;
+  file << rendered;
   file.close();
   return filepath;
 }
@@ -379,6 +394,29 @@ TEST_F(FastTokenizerTest, SkipBothBosAndEosTokensWhenAlreadyPresent) {
   // Should have at most one EOS token at the end
   EXPECT_LE(eos_count_at_end, 1)
       << "EOS token should not be duplicated when already present";
+}
+
+TEST_F(FastTokenizerTest, IgnoreTokenizerJsonPaddingAndTruncation) {
+  std::filesystem::path padded_tokenizer_path =
+      test_dir_ / "tokenizer_with_padding.json";
+  ASSERT_FALSE(
+      CreateTestTokenizerJson(
+          padded_tokenizer_path.string(),
+          R"({"direction":"Right","max_length":4,"strategy":"LongestFirst","stride":0})",
+          R"({"strategy":{"Fixed":4},"direction":"Right","pad_to_multiple_of":null,"pad_id":0,"pad_type_id":0,"pad_token":"<|bos|>"})")
+          .empty());
+
+  TokenizerArgs args;
+  args.tokenizer_type() = "fast";
+  args.vocab_file() = padded_tokenizer_path.string();
+
+  FastTokenizer tokenizer(args);
+
+  std::vector<int32_t> ids;
+  ASSERT_TRUE(tokenizer.encode("hello", &ids));
+  EXPECT_EQ(ids.size(), 1)
+      << "FastTokenizer should ignore tokenizer.json padding/truncation.";
+  EXPECT_EQ(ids[0], 2);
 }
 
 }  // namespace xllm

@@ -23,7 +23,7 @@ limitations under the License.
 // ref to:
 // https://github.com/vllm-project/vllm/blob/v0.6.6/vllm/model_executor/models/deepseek_v2.py
 
-namespace xllm {
+namespace xllm::npu::model {
 
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
@@ -329,10 +329,10 @@ class DeepseekV32ModelImpl : public torch::nn::Module {
 TORCH_MODULE(DeepseekV32Model);
 
 class DeepseekV32ForCausalLMImpl
-    : public LlmForCausalLMImplBase<DeepseekV32Model> {
+    : public xllm::npu::model::LlmForCausalLMImplBase<DeepseekV32Model> {
  public:
   DeepseekV32ForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<DeepseekV32Model>(context),
+      : xllm::npu::model::LlmForCausalLMImplBase<DeepseekV32Model>(context),
         first_k_dense_replace_(
             context.get_model_args().first_k_dense_replace()) {}
 
@@ -415,4 +415,4 @@ REGISTER_MODEL_ARGS(deepseek_v32, [&] {
 
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({1}));
 });
-}  // namespace xllm
+}  // namespace xllm::npu::model

@@ -26,7 +26,7 @@ limitations under the License.
 #include "core/layers/npu/npu_qwen3_decoder_layer_impl.h"
 #include "llm_model_base.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
 class QWen3DecoderLayerImpl
     : public LlmDecoderLayerImplBase<layer::NpuQwen3DecoderLayer> {
@@ -296,10 +296,10 @@ class QWen3ForCausalLMImpl : public LlmForCausalLMImplBase<QWen3Model> {
 TORCH_MODULE(QWen3ForCausalLM);
 
 // register the causal model
-REGISTER_CAUSAL_MODEL(qwen3, QWen3ForCausalLM);
+REGISTER_CAUSAL_MODEL_WITH_VARNAME(qwen3_atb, qwen3_atb, QWen3ForCausalLM);
 
 // register the model args
-REGISTER_MODEL_ARGS(qwen3, [&] {
+REGISTER_MODEL_ARGS_WITH_VARNAME(qwen3_atb, qwen3_atb, [&] {
   LOAD_ARG_OR(model_type, "model_type", "qwen3");
   LOAD_ARG_OR(dtype, "torch_dtype", "");
   LOAD_ARG_OR(vocab_size, "vocab_size", 152064);
@@ -332,4 +332,4 @@ REGISTER_MODEL_ARGS(qwen3, [&] {
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
 
-}  // namespace xllm
+}  // namespace xllm::npu::model

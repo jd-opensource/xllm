@@ -45,12 +45,16 @@ class ProcessGroup {
   virtual ~ProcessGroup() = default;
 
   int32_t rank() const {
-    CHECK(pg_ != nullptr) << "Process group is not initialized.";
+    if (pg_ == nullptr) {
+      return rank_;
+    }
     return pg_->getRank();
   }
 
   int32_t world_size() const {
-    CHECK(pg_ != nullptr) << "Process group is not initialized.";
+    if (pg_ == nullptr) {
+      return world_size_;
+    }
     return pg_->getSize();
   }
 
@@ -59,6 +63,9 @@ class ProcessGroup {
   // allreduce: reduce the input tensor across all processes, and all processes
   // get the result.
   virtual void allreduce(torch::Tensor& input);
+
+  // allreduce_async: enqueue allreduce and return an async work handle.
+  virtual c10::intrusive_ptr<c10d::Work> allreduce_async(torch::Tensor& input);
 
   // allgather: gather tensors from all processes and concatenate them.
   virtual void allgather(const torch::Tensor& input,
@@ -69,11 +76,29 @@ class ProcessGroup {
       const torch::Tensor& input,
       std::vector<torch::Tensor>& outputs);
 
+  // allgather_base_async: gather tensors from all processes into one stacked
+  // output with shape [world_size, *input.shape].
+  virtual c10::intrusive_ptr<c10d::Work> allgather_base_async(
+      const torch::Tensor& input,
+      torch::Tensor& output);
+
+  // allgather_base_sync: gather tensors from all processes into one stacked
+  // output with shape [world_size, *input.shape].
+  virtual torch::Tensor allgather_base_sync(const torch::Tensor& input);
+
   // reduce_scatter: reduce the input tensor across all processes, scatter the
   // reduced chunks to all processes so that each process gets one chunk of the
   // result. we use default dim 0 for reduce_scatter.
   virtual void reduce_scatter(const torch::Tensor& input,
                               torch::Tensor& output);
+
+  virtual void all_to_all_single(
+      torch::Tensor output,
+      torch::Tensor input,
+      std::vector<int64_t> output_split_sizes = {},
+      std::vector<int64_t> input_split_sizes = {},
+      bool async_op = false,
+      c10::intrusive_ptr<c10d::Work>* async_work = nullptr);
 
  private:
   // rank of current process.
@@ -104,6 +129,17 @@ std::unique_ptr<xllm::ProcessGroup> create_process_group(
     int32_t rank_size,
     int32_t port,
     bool trans,
+    const std::string& host,
+    const std::string& group_name,
+    const torch::Device& device);
+
+std::unique_ptr<xllm::ProcessGroup> create_process_group(
+    int32_t global_rank,
+    int32_t local_rank,
+    const std::vector<int32_t>& group_ranks,
+    int32_t world_size,
+    int32_t rank_size,
+    int32_t port,
     const std::string& host,
     const std::string& group_name,
     const torch::Device& device);

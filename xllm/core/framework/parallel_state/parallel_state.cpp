@@ -29,32 +29,34 @@ namespace parallel_state {
 
 namespace {
 
-torch::Tensor assemble_gathered(
-    const std::vector<torch::Tensor>& gathered_tensors,
-    const std::vector<int32_t>& token_num_list) {
-  CHECK(!gathered_tensors.empty()) << "gathered_tensors must not be empty.";
-  CHECK_EQ(gathered_tensors.size(), token_num_list.size())
-      << "gathered_tensors size " << gathered_tensors.size()
+torch::Tensor assemble_gathered(const torch::Tensor& stacked_tensor,
+                                const std::vector<int32_t>& token_num_list) {
+  CHECK(stacked_tensor.defined()) << "stacked_tensor must be defined.";
+  CHECK_GT(stacked_tensor.dim(), 1)
+      << "stacked_tensor must be stacked by rank.";
+  CHECK_EQ(stacked_tensor.size(0), static_cast<int64_t>(token_num_list.size()))
+      << "stacked_tensor size " << stacked_tensor.size(0)
       << " does not match token_num_list size " << token_num_list.size();
 
   int64_t total_tokens = xllm::util::sum(token_num_list);
-  auto out_shape = gathered_tensors.front().sizes().vec();
+  auto out_shape = stacked_tensor[0].sizes().vec();
   out_shape[0] = total_tokens;
-  torch::Tensor output =
-      torch::empty(out_shape, gathered_tensors.front().options());
+  torch::Tensor output = torch::empty(out_shape, stacked_tensor.options());
 
   int64_t offset = 0;
-  for (size_t i = 0; i < gathered_tensors.size(); ++i) {
+  for (size_t i = 0; i < token_num_list.size(); ++i) {
     const int32_t valid_tokens = token_num_list[i];
     if (valid_tokens <= 0) {
       continue;
     }
-    CHECK_GE(gathered_tensors[i].size(0), valid_tokens)
+    CHECK_GE(stacked_tensor[static_cast<int64_t>(i)].size(0), valid_tokens)
         << "sequence-parallel gather received fewer rows than expected: "
-        << "src_rank=" << i << ", gathered_rows=" << gathered_tensors[i].size(0)
+        << "src_rank=" << i
+        << ", gathered_rows=" << stacked_tensor[static_cast<int64_t>(i)].size(0)
         << ", expected_rows=" << valid_tokens;
     output.slice(0, offset, offset + valid_tokens)
-        .copy_(gathered_tensors[i].slice(0, 0, valid_tokens));
+        .copy_(
+            stacked_tensor[static_cast<int64_t>(i)].slice(0, 0, valid_tokens));
     offset += valid_tokens;
   }
   return output;
@@ -95,13 +97,8 @@ torch::Tensor gather(const torch::Tensor& input,
     return input;
   }
 
-  std::vector<torch::Tensor> tensors(world_size);
-  for (int64_t i = 0; i < world_size; ++i) {
-    tensors[i] = torch::empty_like(input);
-  }
-  // blocking call
-  process_group->allgather(input, tensors);
-  return torch::cat(tensors, /*dim=*/dim).contiguous();
+  torch::Tensor stacked = process_group->allgather_base_sync(input);
+  return torch::cat(stacked.unbind(0), /*dim=*/dim).contiguous();
 }
 
 torch::Tensor gather(const torch::Tensor& input,
@@ -131,12 +128,23 @@ torch::Tensor finish_gather(GatherAsyncCtx ctx) {
   if (ctx.work.defined()) {
     ctx.work->wait();
   }
-  if (ctx.shards.size() == 1 && ctx.token_num_list.size() == 1) {
-    if (ctx.shards.front().size(0) == ctx.token_num_list.front()) {
-      return ctx.shards.front();
+  if (ctx.stacked.defined() && ctx.stacked.size(0) == 1 &&
+      ctx.token_num_list.size() == 1) {
+    if (ctx.stacked[0].size(0) == ctx.token_num_list.front()) {
+      return ctx.stacked[0];
     }
   }
-  return assemble_gathered(ctx.shards, ctx.token_num_list);
+  const bool num_tokens_equal =
+      !ctx.token_num_list.empty() &&
+      std::all_of(ctx.token_num_list.begin(),
+                  ctx.token_num_list.end(),
+                  [first_token_num = ctx.token_num_list[0]](int64_t num) {
+                    return num == first_token_num;
+                  });
+  if (num_tokens_equal) {
+    return ctx.stacked.flatten(0, 1).contiguous();
+  }
+  return assemble_gathered(ctx.stacked, ctx.token_num_list);
 }
 
 torch::Tensor all_gather_interleaved(const torch::Tensor& input,
@@ -149,11 +157,7 @@ torch::Tensor all_gather_interleaved(const torch::Tensor& input,
     return input;
   }
 
-  std::vector<torch::Tensor> gathered_tensors(world_size);
-  for (int64_t i = 0; i < world_size; ++i) {
-    gathered_tensors[i] = torch::empty_like(input);
-  }
-  process_group->allgather(input, gathered_tensors);
+  torch::Tensor gathered_tensors = process_group->allgather_base_sync(input);
 
   int32_t dim = -1;
   size_t num_chunks = 3;
@@ -169,6 +173,13 @@ torch::Tensor all_gather_interleaved(const torch::Tensor& input,
   return torch::cat(ordered_tensors, dim).contiguous();
 }
 
+torch::Tensor finish_reduce(ReduceAsyncCtx ctx) {
+  if (ctx.work.defined()) {
+    ctx.work->wait();
+  }
+  return ctx.tensor;
+}
+
 torch::Tensor reduce(torch::Tensor& input, ProcessGroup* process_group) {
   if (!process_group) {
     return input;
@@ -177,8 +188,7 @@ torch::Tensor reduce(torch::Tensor& input, ProcessGroup* process_group) {
   if (world_size == 1) {
     return input;
   }
-  process_group->allreduce(input);
-  return input;
+  return finish_reduce(launch_reduce(input, process_group));
 }
 
 torch::Tensor reduce_scatter(const torch::Tensor& input,
@@ -256,6 +266,156 @@ torch::Tensor scatter(torch::Tensor input,
   const auto tensor_list = input.split(dim_size / world_size, dim);
   const int32_t rank = process_group->rank();
   return tensor_list[rank];
+}
+
+std::function<torch::Tensor()> all_to_all_4D(const torch::Tensor& input,
+                                             int32_t scatter_idx,
+                                             int32_t gather_idx,
+                                             bool async_ops,
+                                             ProcessGroup* process_group) {
+  if (!process_group) {
+    return [input]() { return input; };
+  }
+  const int32_t group_size = process_group->world_size();
+
+  if (group_size == 1) {
+    return [input]() { return input; };
+  }
+
+  auto rank = process_group->rank();
+
+  TORCH_CHECK(input.dim() == 4,
+              "all_to_all_4D: input must be 4D, got dim=",
+              input.dim());
+  auto send_input = input;
+
+  if (scatter_idx == 2 && gather_idx == 1) {
+    // branch A : from "sequence shard" -> "head shard"
+    // input: (bs, seqlen / group_size (shard_seqlen), head_num, head_dim)
+    //   output (bs, seqlen, head_num / group_size, head_dim)
+    auto sizes = send_input.sizes().vec();
+    const int64_t bs = sizes[0];
+    const int64_t shard_seqlen = sizes[1];
+    const int64_t head_num = sizes[2];
+    const int64_t head_size = sizes[3];
+    const int64_t seqlen = shard_seqlen * group_size;
+    TORCH_CHECK(head_num % group_size == 0,
+                "all_to_all_4D(A): head_num must be divisible by group_size");
+    const int64_t shard_head_num = head_num / group_size;
+
+    // prepare expected shape for All2All (group_size, shard_seqlen, bs,
+    // shard_head_num, head_size)
+    auto input_t =
+        send_input
+            .reshape({bs, shard_seqlen, group_size, shard_head_num, head_size})
+            .transpose(
+                0,
+                2)  // (group_size, shard_seqlen, bs, shard_head_num, head_size)
+            .contiguous();
+    torch::Tensor output = torch::empty_like(input_t);
+    std::vector<int64_t> input_split_size = {};
+    std::vector<int64_t> output_split_size = {};
+
+    if (!async_ops) {
+      process_group->all_to_all_single(
+          output, input_t, output_split_size, input_split_size, async_ops);
+      output = output.reshape({seqlen, bs, shard_head_num, head_size})
+                   .transpose(0, 1)
+                   .contiguous()
+                   .reshape({bs, seqlen, shard_head_num, head_size});
+      return [output]() { return output; };
+    } else {
+      c10::intrusive_ptr<c10d::Work> all2all_work;
+      process_group->all_to_all_single(output,
+                                       input_t,
+                                       output_split_size,
+                                       input_split_size,
+                                       async_ops,
+                                       &all2all_work);
+      return [output,
+              all2all_work,
+              bs,
+              seqlen,
+              shard_head_num,
+              head_size]() mutable -> torch::Tensor {
+        all2all_work->wait();
+        auto comm_output =
+            output.reshape({seqlen, bs, shard_head_num, head_size})
+                .transpose(0, 1)
+                .contiguous()
+                .reshape({bs, seqlen, shard_head_num, head_size});
+        return comm_output;
+      };
+    }
+  } else if (scatter_idx == 1 && gather_idx == 2) {
+    // branch B : from "head shard" -> "sequence shard"
+    // input: (bs, seqlen, head_num / group_size, head_size)
+    // output (bs, seqlen / group_size, head_num, haed_size)
+    auto sizes = send_input.sizes().vec();
+    const int64_t bs = sizes[0];
+    const int64_t seqlen = sizes[1];
+    const int64_t shard_head_num = sizes[2];
+    const int64_t head_size = sizes[3];
+    TORCH_CHECK(seqlen % group_size == 0,
+                "all_to_all_4D(B): seqlen must be divisible by group_size");
+    const int64_t shard_seqlen = seqlen / group_size;
+    const int64_t head_num = shard_head_num * group_size;
+
+    // prepare expected shape for All2All (group_size, shard_head_num,
+    // shard_seqlen, bs, head_size)
+    auto input_t =
+        send_input
+            .reshape({bs, group_size, shard_seqlen, shard_head_num, head_size})
+            .transpose(
+                0,
+                3)  // (shard_head_num, group_size, shard_seqlen, bs, head_size)
+            .transpose(
+                0,
+                1)  // (group_size, shard_head_num, shard_seqlen, bs, head_size)
+            .contiguous();
+    torch::Tensor output = torch::empty_like(input_t);
+    std::vector<int64_t> input_split_size = {};
+    std::vector<int64_t> output_split_size = {};
+
+    if (!async_ops) {
+      process_group->all_to_all_single(output,
+                                       input_t,
+                                       output_split_size,
+                                       input_split_size,
+                                       /*async_op=*/false);
+      output = output.reshape({head_num, shard_seqlen, bs, head_size})
+                   .transpose(0, 2)
+                   .contiguous()
+                   .reshape({bs, shard_seqlen, head_num, head_size});
+      return [output]() { return output; };
+    } else {
+      c10::intrusive_ptr<c10d::Work> all2all_work;
+      process_group->all_to_all_single(output,
+                                       input_t,
+                                       output_split_size,
+                                       input_split_size,
+                                       /*async_op=*/true,
+                                       &all2all_work);
+      return [output,
+              all2all_work,
+              head_num,
+              shard_seqlen,
+              bs,
+              head_size]() mutable -> torch::Tensor {
+        all2all_work->wait();
+        auto comm_output =
+            output.reshape({head_num, shard_seqlen, bs, head_size})
+                .transpose(0, 2)
+                .contiguous()
+                .reshape({bs, shard_seqlen, head_num, head_size});
+        return comm_output;
+      };
+    }
+  } else {
+    TORCH_CHECK(false,
+                "all_to_all_4D: only (scatter_idx,gather_idx)=(2,1) or (1,2) "
+                "are supported");
+  }
 }
 
 std::vector<std::unique_ptr<ProcessGroup>> create_npu_process_groups(

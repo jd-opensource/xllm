@@ -23,7 +23,11 @@ limitations under the License.
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
 
+namespace xllm {
+namespace layer {
+
 namespace {
+// Generic local tensor helpers.
 torch::Tensor create_group_gemm_output(
     const torch::Tensor& a,
     const torch::Tensor& b,
@@ -36,10 +40,93 @@ torch::Tensor create_group_gemm_output(
   return torch::empty({group_list.size(0), a.size(0), b.size(0)},
                       target_options);
 }
-}  // namespace
 
-namespace xllm {
-namespace layer {
+torch::Tensor get_tensor_with_weight_suffix(const StateDict& state_dict,
+                                            const std::string& tensor_name) {
+  auto tensor = state_dict.get_tensor(tensor_name);
+  if (!tensor.defined()) {
+    tensor = state_dict.get_tensor(tensor_name + ".weight");
+  }
+  return tensor;
+}
+
+torch::Tensor slice_expert_weights(const torch::Tensor& weight,
+                                   int64_t start_expert_id,
+                                   int64_t num_experts_per_rank) {
+  return weight
+      .slice(0, start_expert_id, start_expert_id + num_experts_per_rank)
+      .contiguous();
+}
+
+// Qwen3.5-MoE fused checkpoint fallback helpers.
+bool load_fused_gate_up_fallback(const StateDict& state_dict,
+                                 int64_t rank,
+                                 int64_t world_size,
+                                 int64_t start_expert_id,
+                                 int64_t num_experts_per_rank,
+                                 torch::Tensor& w13) {
+  auto fused_gate_up =
+      get_tensor_with_weight_suffix(state_dict, "gate_up_proj");
+  if (!fused_gate_up.defined()) {
+    return false;
+  }
+
+  if (world_size > 1) {
+    CHECK_EQ(fused_gate_up.size(1) % 2, 0)
+        << "gate_up_proj dim1 must be even, got " << fused_gate_up.size(1);
+    const int64_t full_intermediate = fused_gate_up.size(1) / 2;
+    CHECK_EQ(full_intermediate % world_size, 0)
+        << "gate_up_proj intermediate dim is not divisible by world_size";
+    const int64_t inter_shard = full_intermediate / world_size;
+
+    auto gate_full = fused_gate_up.slice(1, 0, full_intermediate);
+    auto up_full =
+        fused_gate_up.slice(1, full_intermediate, full_intermediate * 2);
+    auto gate_shard =
+        gate_full.slice(1, rank * inter_shard, (rank + 1) * inter_shard);
+    auto up_shard =
+        up_full.slice(1, rank * inter_shard, (rank + 1) * inter_shard);
+    fused_gate_up = torch::cat({gate_shard, up_shard}, 1);
+  }
+
+  auto gate_up_slice = slice_expert_weights(
+      fused_gate_up, start_expert_id, num_experts_per_rank);
+  CHECK_EQ(w13.sizes(), gate_up_slice.sizes())
+      << "weight size mismatch for " << state_dict.prefix()
+      << "experts.gate_up_proj";
+  w13.copy_(gate_up_slice);
+  return true;
+}
+
+bool load_fused_down_fallback(const StateDict& state_dict,
+                              int64_t rank,
+                              int64_t world_size,
+                              int64_t start_expert_id,
+                              int64_t num_experts_per_rank,
+                              torch::Tensor& w2) {
+  auto fused_down = get_tensor_with_weight_suffix(state_dict, "down_proj");
+  if (!fused_down.defined()) {
+    return false;
+  }
+
+  if (world_size > 1) {
+    CHECK_EQ(fused_down.size(2) % world_size, 0)
+        << "down_proj dim2 is not divisible by world_size";
+    const int64_t down_shard = fused_down.size(2) / world_size;
+    fused_down =
+        fused_down.slice(2, rank * down_shard, (rank + 1) * down_shard);
+  }
+
+  auto down_slice =
+      slice_expert_weights(fused_down, start_expert_id, num_experts_per_rank);
+  CHECK_EQ(w2.sizes(), down_slice.sizes())
+      << "weight size mismatch for " << state_dict.prefix()
+      << "experts.down_proj";
+  w2.copy_(down_slice);
+  return true;
+}
+
+}  // namespace
 
 FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
                            const FusedMoEArgs& moe_args,
@@ -376,6 +463,27 @@ void FusedMoEImpl::load_experts(const StateDict& state_dict) {
   } else {
     LOAD_MOE_FUSED_WEIGHT("weight", w1, w3, w13);
     LOAD_MOE_WEIGHT("down_proj.", "weight", w2, 1);
+
+    // Some Qwen3.5-MoE checkpoints store expert weights in fused tensors
+    // (gate_up_proj / down_proj). Fall back to this format when split
+    // gate_proj/up_proj tensors are absent.
+    if (!w13_is_loaded_) {
+      w13_is_loaded_ = load_fused_gate_up_fallback(state_dict,
+                                                   rank,
+                                                   world_size,
+                                                   start_expert_id,
+                                                   num_experts_per_rank,
+                                                   w13_);
+    }
+
+    if (!w2_is_loaded_) {
+      w2_is_loaded_ = load_fused_down_fallback(state_dict,
+                                               rank,
+                                               world_size,
+                                               start_expert_id,
+                                               num_experts_per_rank,
+                                               w2_);
+    }
   }
 }
 

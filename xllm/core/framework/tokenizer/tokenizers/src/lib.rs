@@ -28,8 +28,28 @@ fn read_file_as_u8(path: &str) -> Result<Vec<u8>, io::Error> {
 
 impl TokenizerWrapper {
     pub fn from_str(json: &str) -> TokenizerWrapper {
+        let mut tokenizer: Tokenizer = Tokenizer::from_str(json).unwrap().into();
+        // `tokenizer.json` may contain export-time truncation/padding policies
+        // (for example a fixed `max_length` / `pad_to` value from an offline
+        // preprocessing or calibration pipeline). xllm uses this tokenizer for
+        // online serving, where prompt length, padding, and batching are
+        // controlled by the server/runtime instead of by HuggingFace tokenizer
+        // defaults embedded in model artifacts.
+        //
+        // Clearing these policies avoids silently truncating prompts or padding
+        // every request to a fixed length when loading tokenizer.json from such
+        // exports.
+        //
+        // Behavior change / risk:
+        // - tokenization here may differ from raw HuggingFace `Tokenizer` behavior
+        //   for models whose tokenizer.json intentionally embeds truncation or
+        //   padding settings;
+        // - workflows that rely on tokenizer-level fixed-length preprocessing
+        //   should apply truncation/padding explicitly outside xllm.
+        tokenizer.with_padding(None);
+        tokenizer.with_truncation(None).unwrap();
         TokenizerWrapper {
-            tokenizer: Tokenizer::from_str(json).unwrap().into(),
+            tokenizer,
             decode_str: String::new(),
             id_to_token_result: String::new(),
         }

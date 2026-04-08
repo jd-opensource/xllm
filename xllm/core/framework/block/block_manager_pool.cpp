@@ -15,6 +15,9 @@ limitations under the License.
 
 #include "block_manager_pool.h"
 
+#include <algorithm>
+#include <limits>
+
 #include "block_manager_impl.h"
 #include "common/global_flags.h"
 #include "concurrent_block_manager_impl.h"
@@ -28,6 +31,7 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
     : options_(options) {
   CHECK(dp_size > 0) << "dp_size must be greater than 0";
   block_managers_.reserve(dp_size);
+  embedding_managers_.reserve(dp_size);
 
   BlockManager::Options block_options;
   block_options.num_blocks(options_.num_blocks())
@@ -64,6 +68,10 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
       block_managers_.emplace_back(
           std::make_unique<BlockManagerImpl>(block_options));
     }
+    // since one sequence only has one embedding block,
+    // FLAGS_max_seqs_per_batch + 1 is enough.
+    embedding_managers_.emplace_back(
+        std::make_unique<EmbeddingManager>(FLAGS_max_seqs_per_batch + 2));
   }
   reset_transfer_infos();
 }
@@ -97,6 +105,39 @@ int32_t BlockManagerPool::get_dp_rank(Sequence* sequence) const {
   return dp_rank;
 }
 
+bool BlockManagerPool::allocate_embedding_id(Sequence* sequence,
+                                             int32_t dp_rank) {
+  CHECK(sequence != nullptr);
+  CHECK_GE(dp_rank, 0);
+  CHECK_LT(static_cast<size_t>(dp_rank), embedding_managers_.size());
+  if (sequence->has_embedding_id()) {
+    return true;
+  }
+
+  auto embedding_blocks = embedding_managers_[dp_rank]->allocate(1);
+  if (embedding_blocks.empty()) {
+    LOG(ERROR) << "Failed to allocate embedding block!";
+    return false;
+  }
+  sequence->set_embedding_block(std::move(embedding_blocks[0]));
+  return true;
+}
+
+void BlockManagerPool::deallocate_embedding_id(Sequence* sequence,
+                                               int32_t dp_rank) {
+  DCHECK(sequence != nullptr);
+  CHECK_GE(dp_rank, 0);
+  CHECK_LT(static_cast<size_t>(dp_rank), embedding_managers_.size());
+  auto embedding_block = sequence->reset_embedding_block();
+  if (!embedding_block.is_valid()) {
+    return;
+  }
+
+  // std::vector<Block> embedding_blocks;
+  // embedding_blocks.emplace_back(std::move(embedding_block));
+  embedding_managers_[dp_rank]->deallocate({&embedding_block, 1});
+}
+
 void BlockManagerPool::deallocate(Request* request) {
   DCHECK(request != nullptr);
   for (auto& sequence : request->sequences()) {
@@ -116,6 +157,7 @@ void BlockManagerPool::deallocate(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
   cache(sequence);
   block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+  deallocate_embedding_id(sequence, dp_rank);
   // release the blocks after prefix cache insertion
   sequence->reset();
 }
@@ -149,9 +191,15 @@ bool BlockManagerPool::allocate(std::vector<Sequence*>& sequences) {
 bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   AUTO_COUNTER(allocate_blocks_latency_seconds);
   DCHECK(sequence != nullptr);
+  int32_t dp_rank = get_dp_rank(sequence);
+  const bool started_empty = sequence->kv_state().num_kv_blocks() == 0;
+  const bool needs_embedding_id = !sequence->has_embedding_id();
+  if (needs_embedding_id && !allocate_embedding_id(sequence, dp_rank)) {
+    return false;
+  }
 
   // first try to allocate shared blocks
-  if (sequence->kv_state().num_kv_blocks() == 0) {
+  if (started_empty) {
     BlockManagerPool::allocate_shared(sequence);
   }
 
@@ -166,9 +214,15 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
 
   const uint32_t num_additional_blocks = num_blocks_needed - num_blocks;
 
-  int32_t dp_rank = get_dp_rank(sequence);
   const auto blocks = block_managers_[dp_rank]->allocate(num_additional_blocks);
   if (blocks.size() != num_additional_blocks) {
+    if (started_empty) {
+      block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+      if (needs_embedding_id) {
+        deallocate_embedding_id(sequence, dp_rank);
+      }
+      sequence->reset();
+    }
     // LOG(ERROR) << " Fail to allocate " << num_additional_blocks << "
     // blocks.";
     return false;
@@ -197,6 +251,10 @@ std::vector<Block> BlockManagerPool::allocate(size_t num_tokens,
 
 bool BlockManagerPool::try_allocate(Sequence* sequence) {
   int32_t dp_rank = get_dp_rank(sequence);
+  const bool needs_embedding_id = !sequence->has_embedding_id();
+  if (needs_embedding_id && !allocate_embedding_id(sequence, dp_rank)) {
+    return false;
+  }
 
   std::vector<Block> shared_blocks;
   size_t shared_num = 0;
@@ -225,6 +283,9 @@ bool BlockManagerPool::try_allocate(Sequence* sequence) {
       if (shared_num != 0) {
         block_managers_[dp_rank]->deallocate(shared_blocks);
         sequence->reset();
+      }
+      if (needs_embedding_id) {
+        deallocate_embedding_id(sequence, dp_rank);
       }
       return false;
     }
@@ -341,6 +402,7 @@ void BlockManagerPool::deallocate_without_cache(Sequence* sequence) {
   DCHECK(sequence != nullptr);
   int32_t dp_rank = get_dp_rank(sequence);
   block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
+  deallocate_embedding_id(sequence, dp_rank);
   sequence->reset();
 }
 

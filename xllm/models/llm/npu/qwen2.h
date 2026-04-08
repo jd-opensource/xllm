@@ -23,7 +23,7 @@ limitations under the License.
 // QWen2 model compatible with huggingface weights
 // ref to:
 // https://github.com/huggingface/transformers/blob/v4.43.3/src/transformers/models/qwen2/modeling_qwen2.py
-namespace xllm {
+namespace xllm::npu::model {
 
 class QWen2DecoderLayerImpl
     : public LlmDecoderLayerImplBase<layer::NpuQwen2DecoderLayer> {
@@ -115,4 +115,4 @@ REGISTER_MODEL_ARGS(qwen2, [&] {
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
 
-}  // namespace xllm
+}  // namespace xllm::npu::model

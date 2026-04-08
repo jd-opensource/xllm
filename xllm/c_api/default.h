@@ -23,7 +23,6 @@ extern "C" {
 #include "types.h"
 
 const XLLM_InitOptions XLLM_INIT_LLM_OPTIONS_DEFAULT = {
-    .enable_mla = false,
     .enable_chunked_prefill = false,
     .enable_prefill_sp = false,
     .enable_prefix_cache = false,
@@ -83,7 +82,6 @@ const XLLM_RequestParams XLLM_LLM_REQUEST_PARAMS_DEFAULT = {
     .request_id = ""};
 
 const XLLM_InitOptions XLLM_INIT_REC_OPTIONS_DEFAULT = {
-    .enable_mla = false,
     .enable_chunked_prefill = false,
     .enable_prefill_sp = false,
     .enable_prefix_cache = false,

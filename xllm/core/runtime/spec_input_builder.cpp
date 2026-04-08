@@ -235,4 +235,83 @@ torch::Tensor build_q_cu_seq_lens_tensor(const ModelInputParams& params,
                        torch::dtype(torch::kInt).device(device));
 }
 
+namespace draftProbs {
+
+namespace {
+
+torch::Tensor extract_selected_probs(const torch::Tensor& draft_probs,
+                                     const torch::Tensor& draft_token_ids) {
+  CHECK(draft_probs.defined()) << "draft_probs must be defined";
+  CHECK(draft_token_ids.defined()) << "draft_token_ids must be defined";
+
+  if (draft_probs.dim() == 1) {
+    return draft_probs;
+  }
+
+  if (draft_probs.dim() == 2) {
+    CHECK_EQ(draft_probs.size(0), draft_token_ids.numel())
+        << "draft_probs batch size mismatch";
+    if (draft_probs.size(1) == 1) {
+      return draft_probs.squeeze(-1);
+    }
+    auto ids = draft_token_ids.view({-1, 1}).to(torch::kLong);
+    return draft_probs.gather(/*dim=*/-1, ids).squeeze(-1);
+  }
+
+  CHECK(false) << "draft_probs must be [batch], [batch,1] or [batch,vocab]";
+  return torch::Tensor();
+}
+
+}  // namespace
+
+torch::Tensor compress_for_cache(const torch::Tensor& draft_probs,
+                                 const torch::Tensor& draft_token_ids) {
+  return extract_selected_probs(draft_probs, draft_token_ids);
+}
+
+std::pair<torch::Tensor, torch::Tensor> build_validate_tensors(
+    const std::vector<torch::Tensor>& draft_token_ids_steps,
+    const std::vector<torch::Tensor>& draft_probs_steps,
+    int32_t batch_size,
+    int32_t vocab_size,
+    bool enable_opt_validate_probs) {
+  CHECK_GT(batch_size, 0) << "batch_size must be > 0";
+  CHECK_GT(vocab_size, 0) << "vocab_size must be > 0";
+  CHECK_EQ(draft_token_ids_steps.size(), draft_probs_steps.size())
+      << "draft steps mismatch";
+  CHECK(!draft_token_ids_steps.empty()) << "draft steps must not be empty";
+
+  std::vector<torch::Tensor> token_ids_vec;
+  std::vector<torch::Tensor> probs_vec;
+  token_ids_vec.reserve(draft_token_ids_steps.size());
+  probs_vec.reserve(draft_probs_steps.size());
+
+  for (size_t i = 0; i < draft_token_ids_steps.size(); ++i) {
+    auto draft_token_ids =
+        draft_token_ids_steps[i].view({batch_size, 1}).to(torch::kLong);
+    auto selected_probs =
+        extract_selected_probs(draft_probs_steps[i], draft_token_ids)
+            .view({batch_size, 1});
+
+    token_ids_vec.push_back(draft_token_ids);
+    if (enable_opt_validate_probs) {
+      probs_vec.push_back(selected_probs);
+    } else {
+      auto dense_probs =
+          torch::zeros({batch_size, 1, vocab_size}, selected_probs.options());
+      dense_probs.scatter_(
+          /*dim=*/-1,
+          draft_token_ids.unsqueeze(-1),
+          selected_probs.unsqueeze(-1));
+      probs_vec.push_back(dense_probs);
+    }
+  }
+
+  auto draft_token_ids = torch::cat(token_ids_vec, /*dim=*/1);
+  auto draft_probs = torch::cat(probs_vec, /*dim=*/1);
+  return {draft_token_ids, draft_probs};
+}
+
+}  // namespace draftProbs
+
 }  // namespace xllm::specBuilder

@@ -386,6 +386,7 @@ TEST(BatchTest, SampleRequestKeepsThreadedRawBuilderOffsetsStable) {
                             /*batch_id=*/1,
                             &args,
                             BatchForwardType::PREFILL,
+                            /*cp_size=*/1,
                             &thread_pool);
 
   RawForwardInput raw_forward_input = builder.build_raw_forward_input();

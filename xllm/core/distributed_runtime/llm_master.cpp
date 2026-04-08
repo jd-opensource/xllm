@@ -67,7 +67,8 @@ LLMMaster::LLMMaster(const Options& options)
     xservice_client_ = XServiceClient::get_instance();
     if (!xservice_client_->init(options_.etcd_addr().value_or(""),
                                 options_.instance_name().value_or(""),
-                                engine_->block_manager_pool())) {
+                                engine_->block_manager_pool(),
+                                options_.etcd_namespace().value_or(""))) {
       LOG(FATAL) << "XServiceClient init fail!";
       return;
     }
@@ -81,6 +82,7 @@ LLMMaster::LLMMaster(const Options& options)
       .num_speculative_tokens(options_.num_speculative_tokens())
       .nnodes(options_.nnodes())
       .dp_size(options_.dp_size())
+      .cp_size(options_.cp_size())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_pd_ooc(options_.enable_pd_ooc())
       .enable_schedule_overlap(options_.enable_schedule_overlap())

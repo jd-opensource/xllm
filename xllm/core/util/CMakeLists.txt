@@ -16,6 +16,7 @@ cc_library(
     hash_util.h
     http_downloader.h
     json_reader.h
+    model_config_utils.h
     lightweightsemaphore.h
     net.h
     pretty_print.h
@@ -39,6 +40,7 @@ cc_library(
     http_downloader.cpp
     # TODO. add following at next pr.
     json_reader.cpp
+    model_config_utils.cpp
     net.cpp
     pretty_print.cpp
     suffix_decoding_cache.cpp
@@ -66,6 +68,7 @@ cc_library(
     :platform
     SMHasherSupport
     xxHash
+    spdlog::spdlog
 )
 
 cc_test(

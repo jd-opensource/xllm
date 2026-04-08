@@ -16,6 +16,7 @@ limitations under the License.
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <ostream>
@@ -130,6 +131,7 @@ struct ModelArgs {
   PROPERTY(int32_t, topk_group) = 0;
   PROPERTY(std::string, scoring_func);
   // deepseek v2/v3 MLA
+  PROPERTY(bool, enable_mla) = false;
   PROPERTY(int32_t, qk_nope_head_dim) = 0;
   PROPERTY(int32_t, qk_rope_head_dim) = 0;
   PROPERTY(int32_t, v_head_dim) = 0;
@@ -181,6 +183,7 @@ struct ModelArgs {
   PROPERTY(int32_t, linear_num_value_heads) = 0;
   PROPERTY(int32_t, shared_expert_intermediate_size) = 0;
   PROPERTY(float, partial_rotary_factor) = 0.0f;
+  PROPERTY(std::vector<std::string>, layer_types) = {};
 
   // Vision model's dropout
   PROPERTY(float, mm_dropout) = 0.0f;
@@ -235,6 +238,9 @@ struct ModelArgs {
 
   // Vision model's mm_projection_dim
   PROPERTY(int64_t, mm_projection_dim) = 0;
+
+  // Vision model's mm_projector_hidden_size
+  PROPERTY(int64_t, mm_projector_hidden_size) = 0;
 
   PROPERTY(int64_t, mm_spatial_merge_size) = 0;
   PROPERTY(int64_t, mm_spatial_patch_size) = 0;
@@ -419,7 +425,54 @@ struct ModelArgs {
   PROPERTY(float, max_shift) = 0;
   PROPERTY(int64_t, base_image_seq_len) = 0;
   PROPERTY(int64_t, max_image_seq_len) = 0;
+  PROPERTY(float, shift_terminal) = 0;
+
+  // qwen_image_edit_2509 vae related args
+  PROPERTY(int64_t, base_dim) = 0;
+  PROPERTY(int64_t, z_dim) = 0;
+  PROPERTY(std::vector<int64_t>, dim_mult) = {};
+  PROPERTY(std::vector<double>, attn_scales) = {};
+  PROPERTY(std::vector<bool>, temperal_downsample) = {};
+  PROPERTY(int64_t, num_res_blocks) = 0;
+  PROPERTY(double, dropout) = 0;
+  PROPERTY(std::vector<double>, latents_mean) = {};
+  PROPERTY(std::vector<double>, latents_std) = {};
+
+  // qwen_image_edit_2511 dit related args
+  PROPERTY(bool, zero_cond_t) = false;
+  PROPERTY(bool, use_additional_t_cond) = false;
+  PROPERTY(bool, use_layer3d_rope) = false;
 };
+
+// Qwen hybrid models may describe full-attention layers explicitly via
+// layer_types or implicitly via full_attention_interval.
+inline bool is_full_attention_layer(const ModelArgs& args, int64_t layer_id) {
+  const auto& hybrid_layer_types = args.layer_types();
+  if (layer_id >= 0 &&
+      layer_id < static_cast<int64_t>(hybrid_layer_types.size())) {
+    const auto& layer_type = hybrid_layer_types[layer_id];
+    return layer_type == "full_attention" || layer_type == "attention";
+  }
+
+  int32_t attention_interval = args.full_attention_interval();
+  if (attention_interval <= 0) {
+    attention_interval = 4;
+  }
+  return (layer_id + 1) % attention_interval == 0;
+}
+
+inline bool has_linear_attention_layers(const ModelArgs& args) {
+  const auto& hybrid_layer_types = args.layer_types();
+  if (!hybrid_layer_types.empty()) {
+    return std::any_of(hybrid_layer_types.begin(),
+                       hybrid_layer_types.end(),
+                       [](const std::string& layer_type) {
+                         return layer_type != "full_attention" &&
+                                layer_type != "attention";
+                       });
+  }
+  return args.full_attention_interval() > 1;
+}
 
 inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {
   os << "ModelArgs: [model_type: " << args.model_type();

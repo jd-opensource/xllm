@@ -102,6 +102,8 @@ class MappingNPU final {
     PROPERTY(int32_t, pp_size) = -1;
     // sp size (dont support now)
     PROPERTY(int32_t, sp_size) = -1;
+    // cp size
+    PROPERTY(int32_t, cp_size) = -1;
   };
 
   MappingNPU(std::string rank_table_file,
@@ -118,6 +120,8 @@ class MappingNPU final {
   void get_tp_group(ParallelInfo& parallel_info);
 
   void get_dp_group(ParallelInfo& parallel_info);
+
+  void get_cp_group(ParallelInfo& parallel_info);
 
   void get_domain(ParallelInfo& src,
                   ParallelInfo& dst,

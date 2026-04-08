@@ -59,6 +59,7 @@ class WorkerServer {
       int32_t dp_size,
       int local_rank,
       int32_t ep_size,
+      int32_t cp_size,
       WorkerType worker_type,
       std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
       std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager);
