@@ -138,7 +138,8 @@ class MtpModelImplBase : public torch::nn::Module {
         }
         attn_mask = torch::cat(req_mask_vec, 0);
       }
-    } else if (model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache &&
+    } else if (absl::StartsWith(model_type_, "deepseek_v3") &&
+               FLAGS_enable_prefix_cache &&
                !input_params.batch_forward_type.is_decode()) {
       attn_mask =
           attn_mask_.get_attn_mask(512, h.dtype().toScalarType(), h.device());
@@ -161,7 +162,6 @@ class MtpModelImplBase : public torch::nn::Module {
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
     input_params_new.expert_array = expert_array;
-
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;

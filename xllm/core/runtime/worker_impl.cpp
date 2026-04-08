@@ -287,7 +287,8 @@ bool WorkerImpl::allocate_kv_cache(
         // Full attention layer: allocate key_cache and value_cache only
 #if defined(USE_NPU)
         aclFormat npu_format_type =
-            context_.get_model_args().model_type() == "deepseek_v3" &&
+            absl::StartsWith(context_.get_model_args().model_type(),
+                             "deepseek_v3") &&
                     FLAGS_enable_prefix_cache
                 ? ACL_FORMAT_FRACTAL_NZ
                 : ACL_FORMAT_ND;

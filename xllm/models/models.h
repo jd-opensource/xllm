@@ -30,6 +30,7 @@ limitations under the License.
 #include "llm/npu/glm4_moe_mtp.h"             // IWYU pragma: keep
 #include "llm/npu/glm5_moe.h"                 // IWYU pragma: keep
 #include "llm/npu/glm5_moe_mtp.h"             // IWYU pragma: keep
+#include "llm/npu/joyai_llm_flash.h"          // IWYU pragma: keep
 #include "llm/npu/kimi_k2.h"                  // IWYU pragma: keep
 #include "llm/npu/llama.h"                    // IWYU pragma: keep
 #include "llm/npu/llama3.h"                   // IWYU pragma: keep
@@ -54,6 +55,7 @@ limitations under the License.
 #include "vlm/npu/qwen3_vl.h"                 // IWYU pragma: keep
 #include "vlm/npu/qwen3_vl_mm_embedding.h"    // IWYU pragma: keep
 #include "vlm/npu/qwen3_vl_moe.h"             // IWYU pragma: keep
+
 #elif defined(USE_MLU)
 #include "llm/deepseek_mtp.h"        // IWYU pragma: keep
 #include "llm/deepseek_v2.h"         // IWYU pragma: keep

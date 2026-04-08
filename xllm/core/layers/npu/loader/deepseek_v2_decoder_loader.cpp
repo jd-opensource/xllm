@@ -604,14 +604,14 @@ void DeekseekV2DecoderLoader::merge_experts_weights() {
                               device_);
   }
 
-  torch::Tensor mlp_down_weight =
-      merge_experts_weights(experts_weights_["down_proj.weight"],
-                            device_,
-                            /*transpose=*/false);
-  // at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-  //     at_npu::native::npu_format_cast(mlp_down_weight, 29);
+  // Optimization in coordination with MoeGroupedMatmulWeightNZOperation:
+  // ** Non-quantized weights use the ACL_FORMAT_FRACTAL_NZ layout,
+  // ** while the quantized version continues to use the ACL_FORMAT_ND layout.
+  int data_type = quantize_type_ == "" ? ACL_FORMAT_FRACTAL_NZ : ACL_FORMAT_ND;
+  torch::Tensor mlp_down_weight = merge_experts_weights(
+      experts_weights_["down_proj.weight"], device_, /*transpose=*/false);
   at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-      at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
+      at_npu::native::npu_format_cast(mlp_down_weight, data_type).contiguous();
 
   if (quantize_type_ == "w8a8_dynamic") {
     at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] = merge_experts_weights(
