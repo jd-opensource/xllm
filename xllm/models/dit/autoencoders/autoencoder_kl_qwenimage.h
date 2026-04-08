@@ -1731,8 +1731,12 @@ class AutoencoderKLQwenImageImpl : public torch::nn::Module {
 
     // dispatch rows to different ranks
     ProcessGroup* vae_group = parallel_args_.dit_vae_group_;
-    int32_t group_size = vae_group->world_size();
-    int32_t local_rank = vae_group->rank();
+    int32_t group_size = 0;
+    int32_t local_rank = 0;
+    if (vae_group) {
+      group_size = vae_group->world_size();
+      local_rank = vae_group->rank();
+    }
     bool use_vae_parallel = false;
 
     // num of patchs on different devices
@@ -1819,7 +1823,7 @@ class AutoencoderKLQwenImageImpl : public torch::nn::Module {
       row_counter += 1;
     }
 
-    if (use_vae_parallel) {
+    if (use_vae_parallel && vae_group) {
       // calculate num of patchs on different ranks
       for (int32_t rank = 0; rank < group_size; rank++) {
         int64_t rank_patch =
@@ -1832,7 +1836,6 @@ class AutoencoderKLQwenImageImpl : public torch::nn::Module {
       for (int32_t rank = 0; rank < group_size; rank++) {
         gather_shapes.emplace_back(
             torch::empty({num_rank_patchs[rank], 5}, options_));
-        gather_shapes.back().print();
       }
       auto shape_tensor = torch::cat(shape_tensors, /*dim=*/0);
       // gather shapes of patchs on different ranks
@@ -1886,7 +1889,6 @@ class AutoencoderKLQwenImageImpl : public torch::nn::Module {
             unpad_to_size(patchs[patch_index],
                           origin_shape[patch_index][3].item<int64_t>(),
                           origin_shape[patch_index][4].item<int64_t>());
-            patchs[patch_index].print();
             row.emplace_back(patchs[patch_index]);
             patch_index++;
           }
