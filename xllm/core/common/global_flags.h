@@ -164,6 +164,8 @@ DECLARE_bool(enable_block_copy_kernel);
 
 DECLARE_string(etcd_addr);
 
+DECLARE_string(etcd_namespace);
+
 DECLARE_bool(enable_service_routing);
 
 DECLARE_double(heart_beat_interval);

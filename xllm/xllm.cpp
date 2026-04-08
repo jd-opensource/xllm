@@ -232,6 +232,7 @@ int run() {
       .enable_schedule_overlap(FLAGS_enable_schedule_overlap)
       .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
       .etcd_addr(FLAGS_etcd_addr)
+      .etcd_namespace(FLAGS_etcd_namespace)
       .enable_service_routing(FLAGS_enable_service_routing ||
                               FLAGS_enable_disagg_pd)
       .tool_call_parser(FLAGS_tool_call_parser)
