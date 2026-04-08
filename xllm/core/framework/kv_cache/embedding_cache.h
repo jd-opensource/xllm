@@ -50,6 +50,8 @@ class EmbeddingCache final {
              const torch::Tensor& accepted_tokens = torch::Tensor());
 
   void set_placeholder(const torch::Tensor& embedding_placeholder);
+  void set_probs_placeholder(const torch::Tensor& probs_placeholder);
+  void set_token_placeholder(int32_t token_id_placeholder);
 
   ForwardOutput read_for_decode(const std::vector<int32_t>& embedding_ids);
   std::vector<int32_t> read_correction_tokens(
@@ -62,6 +64,8 @@ class EmbeddingCache final {
  private:
   std::vector<DecodeState> decode_tails_;
   torch::Tensor embedding_placeholder_;
+  torch::Tensor probs_placeholder_;
+  int32_t token_id_placeholder_ = 0;
 
   DecodeState& mutable_tail(int32_t embedding_id);
   const DecodeState& get_tail(int32_t embedding_id) const;
