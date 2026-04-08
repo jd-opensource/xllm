@@ -30,8 +30,8 @@ class EmbeddingCache final {
   struct DecodeState {
     // Proposal cached for next decode step.
     torch::Tensor embedding;
-    int32_t token_id = -1;             // draft next token for step_decode seed
-    int32_t correction_token_id = -1;  // accepted token for step correction
+    int32_t token_id = 0;             // draft next token for step_decode seed
+    int32_t correction_token_id = 0;  // accepted token for step correction
     int32_t correction_position_offset = 0;
     torch::Tensor probs;
   };
@@ -51,7 +51,6 @@ class EmbeddingCache final {
 
   void set_placeholder(const torch::Tensor& embedding_placeholder);
   void set_probs_placeholder(const torch::Tensor& probs_placeholder);
-  void set_token_placeholder(int32_t token_id_placeholder);
 
   ForwardOutput read_for_decode(const std::vector<int32_t>& embedding_ids);
   std::vector<int32_t> read_correction_tokens(
