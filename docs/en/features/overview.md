@@ -42,7 +42,7 @@ We have implemented various request scheduling strategies supporting continuous 
 #### Global KV Cache Management
 Utilizes ETCD as a metadata service middleware at the global level for cluster service registration, load information synchronization, and global cache state management. Each compute instance maintains a local multi-level cache pool. Regarding scheduling strategy, the system adopts a dynamic decision-making mechanism based on KV cache: it first performs prefix matching detection, calculates the KV cache reuse rate of candidate nodes, and finally selects the node with the optimal comprehensive performance for processing, achieving dynamic offloading and migration of KV cache.
 #### Speculative Inference
-xLLM incorporates an optimized speculative inference algorithm that generates multiple tokens at once to boost throughput. xLLM reduces communication costs by下沉 (sinking) the speculative module and optimizes speculative inference computation through methods like overlapping scheduling and computation timelines and reducing operator data movement in speculative scenarios.
+xLLM incorporates an optimized speculative inference algorithm that generates multiple tokens at once to boost throughput. xLLM reduces communication costs by sinking the speculative module and optimizes speculative inference computation through methods like overlapping scheduling and computation timelines and reducing operator data movement in speculative scenarios.
 #### MoE Load Balancing
 xLLM implements expert weight updates based on historical expert load statistics for MoE models. During inference, it achieves effective dynamic load balancing through efficient expert load statistics and double-buffered, seamless expert weight updates.
 

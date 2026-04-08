@@ -24,6 +24,10 @@ xLLM 的 Graph Mode 覆盖多种图执行后端。其目标是在推理服务场
 - 不覆盖所有算子或所有模型的适配细节
 - 不替代功能文档中的参数说明与使用示例
 
+相关设计文档：
+
+- 若希望看一个更偏业务推理场景、并且聚焦固定调度、多步执行和定制算子的案例，可参考：[生成式推荐设计文档](generative_recommendation_design.md)
+
 ## 1. Graph Mode 原理和在 xLLM 中的落地
 
 ### 1.1 Graph Capture / Replay 的基本原理
