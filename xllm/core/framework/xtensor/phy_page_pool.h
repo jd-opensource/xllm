@@ -90,10 +90,6 @@ class PhyPagePool {
   // Get the device
   const torch::Device& device() const { return device_; }
 
-  // Get the zero page (for initializing virtual memory)
-  // The returned pointer is owned by PhyPagePool, do not delete it
-  PhyPage* get_zero_page();
-
   // ============== Global XTensor Support ==============
 
   // Get all pages as raw pointers for GlobalXTensor mapping
@@ -125,8 +121,6 @@ class PhyPagePool {
   // Track which pages are allocated (for segment management)
   std::vector<bool> page_allocated_;
 
-  // Zero page for initializing virtual memory (owned by pool)
-  std::unique_ptr<PhyPage> zero_page_;
 };
 
 }  // namespace xllm

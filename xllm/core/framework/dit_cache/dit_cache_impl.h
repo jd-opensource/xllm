@@ -37,10 +37,20 @@ class DitCacheImpl {
   virtual bool on_before_step(const CacheStepIn& stepin) = 0;
   virtual CacheStepOut on_after_step(const CacheStepIn& stepin) = 0;
 
+  virtual void set_infer_steps(const int64_t& infer_steps) {
+    infer_steps_ = infer_steps;
+  }
+
+  virtual void set_num_blocks(const int64_t& num_blocks) {
+    num_blocks_ = num_blocks;
+  }
+
  protected:
   int64_t num_inference_steps_;
   int64_t warmup_steps_;
   int64_t current_step_;
+  int64_t infer_steps_;
+  int64_t num_blocks_;
   TensorMap buffers;
 
   static torch::Tensor get_tensor_or_empty(const TensorMap& m,

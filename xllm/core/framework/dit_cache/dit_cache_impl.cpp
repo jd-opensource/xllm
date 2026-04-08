@@ -18,6 +18,7 @@ limitations under the License.
 #include "dit_non_cache.h"
 #include "fbcache.h"
 #include "fbcache_taylorseer.h"
+#include "residual_cache.h"
 #include "taylorseer.h"
 
 namespace xllm {
@@ -55,6 +56,8 @@ std::unique_ptr<DitCacheImpl> create_dit_cache(const DiTCacheConfig& cfg) {
       return std::make_unique<TaylorSeer>();
     case PolicyType::FBCacheTaylorSeer:
       return std::make_unique<FBCacheTaylorSeer>();
+    case PolicyType::ResidualCache:
+      return std::make_unique<ResidualCache>();
     default:
       return std::make_unique<DiTNonCache>();
   }

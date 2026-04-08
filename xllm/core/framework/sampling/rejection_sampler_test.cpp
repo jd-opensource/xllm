@@ -254,6 +254,55 @@ TEST(RejectionSamplerTest, LogProbs) {
   EXPECT_TRUE(torch::equal(output.top_tokens, top_k_indices));
 }
 
+TEST(RejectionSamplerTest, ConstructorDoesNotMutateDoSampleShape) {
+  const auto device = get_test_device();
+  auto do_sample = torch::tensor({false, true}, torch::device(device));
+
+  ASSERT_EQ(do_sample.dim(), 1);
+  ASSERT_EQ(do_sample.sizes(), torch::IntArrayRef({2}));
+
+  RejectionSampler sampler(do_sample,
+                           do_sample.all().item<bool>(),
+                           !do_sample.any().item<bool>(),
+                           /*logprobs=*/false,
+                           /*max_top_logprobs=*/0);
+
+  EXPECT_EQ(do_sample.dim(), 1);
+  EXPECT_EQ(do_sample.sizes(), torch::IntArrayRef({2}));
+}
+
+TEST(RejectionSamplerTest,
+     ReusingDoSampleAfterRejectionSamplerKeepsSamplerOutput1D) {
+  const auto options = get_test_options(torch::kFloat32);
+  const auto device = get_test_device();
+  auto do_sample = torch::tensor({false, true}, torch::device(device));
+
+  RejectionSampler rejection_sampler(do_sample,
+                                     do_sample.all().item<bool>(),
+                                     !do_sample.any().item<bool>(),
+                                     /*logprobs=*/false,
+                                     /*max_top_logprobs=*/0);
+  (void)rejection_sampler;
+
+  SamplingParameters params;
+  params.selected_token_idxes =
+      torch::tensor({0, 1}, torch::dtype(torch::kInt64).device(device));
+  params.sample_idxes =
+      torch::tensor({0, 1}, torch::dtype(torch::kInt64).device(device));
+  params.do_sample = do_sample;
+  params.all_random_sample = false;
+  params.all_greedy_sample = false;
+
+  auto logits =
+      torch::tensor({{3.0f, 1.0f, 0.5f}, {0.1f, 0.2f, 4.0f}}, options);
+  auto output = Sampler().forward(logits, params);
+
+  EXPECT_EQ(output.probs.dim(), 2);
+  EXPECT_EQ(output.probs.size(0), 2);
+  EXPECT_EQ(output.next_tokens.dim(), 1);
+  EXPECT_EQ(output.next_tokens.size(0), 2);
+}
+
 TEST(RejectionSamplerTest, Random) {
   const auto options = get_test_options(torch::kFloat32);
 

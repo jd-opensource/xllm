@@ -25,6 +25,10 @@ class LmHeadLoader : public BaseLoader {
 
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights(const std::string& weight_str) const override;
+
+ private:
+  int64_t vocab_size_ = -1;
+  int64_t padded_vocab_size_ = -1;
 };
 }  // namespace layer
 }  // namespace xllm

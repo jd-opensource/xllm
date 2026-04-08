@@ -21,11 +21,10 @@ limitations under the License.
 #include <json2pb/pb_to_json.h>
 
 #include <filesystem>
-#include <nlohmann/json.hpp>
 
+#include "api_service/chat_json_parser.h"
 #include "call.h"
 #include "chat.pb.h"
-#include "chat_json_utils.h"
 #include "common.pb.h"
 #include "completion.pb.h"
 #include "core/common/constants.h"
@@ -114,6 +113,7 @@ APIService::APIService(Master* master,
   models_service_impl_ =
       ServiceImplFactory<ModelsServiceImpl>::create_service_impl(
           model_names, model_versions);
+  register_chat_completions_handler();
 }
 
 void APIService::set_model_master(const std::string& model_id, Master* master) {
@@ -298,95 +298,6 @@ size_t get_json_content_length(const brpc::Controller* ctrl) {
 
 }  // namespace
 
-// Preprocess chat JSON to normalize array content to string.
-// For text-only backends, combines text array items into a single string.
-// For multimodal backends, passes through unchanged without parsing.
-// Returns Status with processed JSON on success, or error status on failure.
-std::pair<Status, std::string> preprocess_chat_json(std::string json_str,
-                                                    bool is_multimodal) {
-  // Multimodal backends handle array content natively, skip parsing
-  if (is_multimodal) {
-    return {Status(), std::move(json_str)};
-  }
-
-  try {
-    auto json = nlohmann::json::parse(json_str);
-    if (!json.contains("messages") || !json["messages"].is_array()) {
-      return {Status(), std::move(json_str)};
-    }
-
-    bool modified = false;
-    for (auto& msg : json["messages"]) {
-      if (!msg.is_object()) {
-        return {Status(StatusCode::INVALID_ARGUMENT,
-                       "Message in 'messages' array must be an object."),
-                ""};
-      }
-      if (msg.contains("content") && msg["content"].is_array()) {
-        // Validate all items are text-only with proper text field
-        for (const auto& item : msg["content"]) {
-          if (!item.is_object()) {
-            return {Status(StatusCode::INVALID_ARGUMENT,
-                           "Content array item must be an object."),
-                    ""};
-          }
-          if (!item.contains("type") || item["type"] != "text") {
-            // Non-text content on text-only backend is an error
-            return {Status(StatusCode::INVALID_ARGUMENT,
-                           "Non-text content (e.g., image_url) requires "
-                           "multimodal backend (-backend vlm)"),
-                    ""};
-          }
-          // Validate text items have proper text field
-          if (!item.contains("text") || !item["text"].is_string()) {
-            return {Status(StatusCode::INVALID_ARGUMENT,
-                           "Missing or invalid 'text' field in content item."),
-                    ""};
-          }
-        }
-
-        // All items are text-only; combine into single string.
-        // Pre-calculate total size to avoid reallocations.
-        size_t total_size = 0;
-        size_t num_items = msg["content"].size();
-        for (const auto& item : msg["content"]) {
-          // Already validated above
-          total_size += item["text"].get_ref<const std::string&>().size();
-        }
-        // Add space for newline separators
-        if (num_items > 1) {
-          total_size += num_items - 1;
-        }
-
-        // Reserve capacity once to avoid reallocations
-        std::string combined_text;
-        combined_text.reserve(total_size);
-        bool first = true;
-        for (const auto& item : msg["content"]) {
-          if (!first) {
-            combined_text += '\n';
-          }
-          combined_text += item["text"].get_ref<const std::string&>();
-          first = false;
-        }
-        msg["content"] = combined_text;
-        modified = true;
-      }
-    }
-    return modified ? std::make_pair(Status(), json.dump())
-                    : std::make_pair(Status(), std::move(json_str));
-  } catch (const nlohmann::json::exception& e) {
-    return {Status(StatusCode::INVALID_ARGUMENT,
-                   "Invalid JSON format: " + std::string(e.what())),
-            ""};
-  } catch (const std::exception& e) {
-    LOG(ERROR) << "Exception during JSON preprocessing: " << e.what();
-    return {Status(StatusCode::UNKNOWN,
-                   "Internal server error during JSON processing."),
-            ""};
-  }
-}
-
 namespace {
 
 template <typename ChatCall, typename Service>
@@ -395,7 +306,7 @@ void chat_completions_http_impl(std::unique_ptr<Service>& service,
                                 brpc::Controller* ctrl,
                                 const proto::HttpRequest* request,
                                 proto::HttpResponse* response,
-                                bool is_multimodal) {
+                                const ChatJsonParser& chat_json_parser) {
   auto arena = GetArenaWithCheck<ChatCall>(response);
   auto req_pb =
       google::protobuf::Arena::CreateMessage<typename ChatCall::ReqType>(arena);
@@ -412,7 +323,7 @@ void chat_completions_http_impl(std::unique_ptr<Service>& service,
   ctrl->request_attachment().copy_to(&attachment, content_len, 0);
 
   auto [preprocess_status, processed_json] =
-      preprocess_chat_json(std::move(attachment), is_multimodal);
+      chat_json_parser.preprocess(std::move(attachment));
   if (!preprocess_status.ok()) {
     ctrl->SetFailed(preprocess_status.message());
     LOG(ERROR) << "Complex message preprocessing failed: "
@@ -436,6 +347,36 @@ void chat_completions_http_impl(std::unique_ptr<Service>& service,
 }
 
 }  // namespace
+
+void APIService::register_chat_completions_handler() {
+  if (mm_chat_service_impl_) {
+    chat_completions_handler_ = [this](ClosureGuard& guard,
+                                       brpc::Controller* ctrl,
+                                       const proto::HttpRequest* request,
+                                       proto::HttpResponse* response) {
+      chat_completions_http_impl<MMChatCall, MMChatServiceImpl>(
+          mm_chat_service_impl_,
+          guard,
+          ctrl,
+          request,
+          response,
+          ChatJsonParser::get("vlm"));
+    };
+  } else if (chat_service_impl_) {
+    chat_completions_handler_ = [this](ClosureGuard& guard,
+                                       brpc::Controller* ctrl,
+                                       const proto::HttpRequest* request,
+                                       proto::HttpResponse* response) {
+      chat_completions_http_impl<ChatCall, ChatServiceImpl>(
+          chat_service_impl_,
+          guard,
+          ctrl,
+          request,
+          response,
+          ChatJsonParser::get(FLAGS_backend));
+    };
+  }
+}
 
 void APIService::ChatCompletions(::google::protobuf::RpcController* controller,
                                  const proto::ChatRequest* request,
@@ -471,36 +412,14 @@ void APIService::ChatCompletionsHttp(
     return;
   }
 
-  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-
-  if (FLAGS_backend == "llm") {
-    CHECK(chat_service_impl_) << " chat service is invalid.";
-    chat_completions_http_impl<ChatCall, ChatServiceImpl>(
-        chat_service_impl_,
-        done_guard,
-        ctrl,
-        request,
-        response,
-        /*is_multimodal=*/false);
-  } else if (FLAGS_backend == "vlm") {
-    CHECK(mm_chat_service_impl_) << " mm chat service is invalid.";
-    chat_completions_http_impl<MMChatCall, MMChatServiceImpl>(
-        mm_chat_service_impl_,
-        done_guard,
-        ctrl,
-        request,
-        response,
-        /*is_multimodal=*/true);
-  } else if (FLAGS_backend == "rec") {
-    CHECK(chat_service_impl_) << " chat service is invalid.";
-    chat_completions_http_impl<ChatCall, ChatServiceImpl>(
-        chat_service_impl_,
-        done_guard,
-        ctrl,
-        request,
-        response,
-        /*is_multimodal=*/false);
+  if (!chat_completions_handler_) {
+    LOG(ERROR) << "No chat completions handler registered for backend '"
+               << FLAGS_backend << "'";
+    return;
   }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  chat_completions_handler_(done_guard, ctrl, request, response);
 }
 
 void APIService::Embeddings(::google::protobuf::RpcController* controller,
@@ -733,53 +652,6 @@ void APIService::ModelVersionsHttp(
 
 namespace {
 
-// Preprocess Anthropic API JSON to convert "content" field to
-// protobuf-compatible format Anthropic API uses "content" field which can be
-// string or array Our protobuf uses "content_string" for string and
-// "content_blocks" for array
-std::string preprocess_anthropic_json(const std::string& json_str) {
-  try {
-    nlohmann::json j = nlohmann::json::parse(json_str);
-
-    if (j.contains("messages") && j["messages"].is_array()) {
-      for (auto& msg : j["messages"]) {
-        if (msg.contains("content")) {
-          auto& content = msg["content"];
-          if (content.is_string()) {
-            // Convert "content": "string" to "content_string": "string"
-            msg["content_string"] = content.get<std::string>();
-            msg.erase("content");
-          } else if (content.is_array()) {
-            // Convert "content": [...] to "content_blocks": {"blocks": [...]}
-            nlohmann::json content_blocks;
-            content_blocks["blocks"] = content;
-            msg["content_blocks"] = content_blocks;
-            msg.erase("content");
-          }
-        }
-      }
-    }
-
-    if (j.contains("system")) {
-      auto& system = j["system"];
-      if (system.is_string()) {
-        j["system_string"] = system.get<std::string>();
-        j.erase("system");
-      } else if (system.is_array()) {
-        nlohmann::json system_blocks;
-        system_blocks["blocks"] = system;
-        j["system_blocks"] = system_blocks;
-        j.erase("system");
-      }
-    }
-
-    return j.dump();
-  } catch (const std::exception& e) {
-    LOG(ERROR) << "Failed to preprocess Anthropic JSON: " << e.what();
-    return json_str;  // Return original on error
-  }
-}
-
 void handle_anthropic_messages(std::unique_ptr<AnthropicServiceImpl>& service,
                                xllm::ClosureGuard& guard,
                                brpc::Controller* ctrl,
@@ -801,9 +673,14 @@ void handle_anthropic_messages(std::unique_ptr<AnthropicServiceImpl>& service,
   std::string attachment;
   ctrl->request_attachment().copy_to(&attachment, content_len, 0);
 
-  // Preprocess JSON to convert Anthropic API format to protobuf-compatible
-  // format
-  std::string processed_json = preprocess_anthropic_json(attachment);
+  auto [preprocess_status, processed_json] =
+      ChatJsonParser::get("anthropic").preprocess(std::move(attachment));
+  if (!preprocess_status.ok()) {
+    ctrl->SetFailed(preprocess_status.message());
+    LOG(ERROR) << "Anthropic JSON preprocessing failed: "
+               << preprocess_status.message();
+    return;
+  }
 
   google::protobuf::util::JsonParseOptions options;
   options.ignore_unknown_fields = true;

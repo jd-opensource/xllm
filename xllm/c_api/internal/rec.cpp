@@ -240,7 +240,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
               << ", enable_rec_fast_sampler=" << FLAGS_enable_rec_fast_sampler
               << ", max_decode_rounds=" << FLAGS_max_decode_rounds;
 
-#if !defined(USE_NPU)
+#if !defined(USE_NPU) && !defined(USE_CUDA)
     FLAGS_enable_block_copy_kernel = false;
 #endif
 

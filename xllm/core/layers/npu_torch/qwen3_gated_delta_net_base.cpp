@@ -382,12 +382,12 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     mixed_qkv = torch::silu(conv_output.slice(2, 0, seq_len));
 
   } else {
-    const auto state_indices = attn_metadata.block_table.select(1, 0);
     xllm::kernel::CausalConv1dUpdateParams params;
     params.x = mixed_qkv;
     params.conv_state = conv_cache;
     params.weight = conv_weight;
-    params.conv_state_indices = state_indices;
+    params.conv_state_indices =
+        attn_metadata.block_table.select(1, 0).contiguous();
     mixed_qkv = xllm::kernel::causal_conv1d_update(params);
   }
 

@@ -36,10 +36,6 @@ void PhyPagePool::init(const torch::Device& device, size_t num_pages) {
   LOG(INFO) << "PhyPagePool: pre-allocating " << num_pages
             << " physical pages on device " << device;
 
-  // Pre-allocate zero page first (used by all XTensors for initialization)
-  // Zero page has page_id = -1
-  zero_page_ = std::make_unique<PhyPage>(device_, -1);
-
   // Pre-allocate all physical pages for data with unique page_ids
   all_pages_.reserve(num_pages);
   page_allocated_.resize(num_pages, false);
@@ -55,8 +51,7 @@ void PhyPagePool::init(const torch::Device& device, size_t num_pages) {
   initialized_ = true;
 
   LOG(INFO) << "PhyPagePool: successfully pre-allocated " << num_pages
-            << " physical pages (page_id 0-" << (num_pages - 1)
-            << ") + 1 zero page";
+            << " physical pages (page_id 0-" << (num_pages - 1) << ")";
 }
 
 std::unique_ptr<PhyPage> PhyPagePool::get() {
@@ -294,13 +289,6 @@ void PhyPagePool::free_weight_pages(const std::vector<page_id_t>& page_ids) {
 size_t PhyPagePool::num_available() const {
   std::lock_guard<std::mutex> lock(mtx_);
   return free_page_ids_.size();
-}
-
-PhyPage* PhyPagePool::get_zero_page() {
-  std::lock_guard<std::mutex> lock(mtx_);
-  CHECK(initialized_) << "PhyPagePool not initialized";
-  CHECK(zero_page_) << "Zero page not created";
-  return zero_page_.get();
 }
 
 // ============== Global XTensor Support ==============

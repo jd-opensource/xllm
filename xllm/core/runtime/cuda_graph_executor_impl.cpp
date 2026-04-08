@@ -694,7 +694,7 @@ bool CudaGraph::capture(CausalLM* model,
                         std::vector<KVCache>& kv_cache,
                         uint32_t bucket_num_tokens,
                         const at::cuda::MempoolId_t& pool,
-                        c10::cuda::MemPool* pool_ptr) {
+                        TorchMemPool* pool_ptr) {
   padded_num_tokens_ = bucket_num_tokens;
   const uint32_t actual_num_tokens = tokens.size(0);
   CHECK_GE(padded_num_tokens_, actual_num_tokens)
@@ -757,14 +757,17 @@ bool CudaGraph::capture(CausalLM* model,
                    kv_cache,
                    graph_params_opt.value());
 
+    // MemPoolContext has been deprecated in torch >= 2.8
+#if TORCH_VERSION_MAJOR <= 2 && TORCH_VERSION_MINOR <= 7
     // Activate VMM mempool only for the actual capture to keep plan_info
     // allocations out of the shared physical memory pool.
     std::optional<c10::cuda::MemPoolContext> mempool_ctx;
     if (pool_ptr != nullptr) {
       mempool_ctx.emplace(pool_ptr);
     }
+#endif
 
-    // Begin piecewise capture via GlobalCaptureInstance
+    // Begin piecewise capture via GlobalCaptureInstance.
     GlobalCaptureInstance::get_instance().begin_capture(pool);
 
     // Execute forward pass - attention operations will be captured separately
@@ -803,12 +806,16 @@ bool CudaGraph::capture(CausalLM* model,
               << ", num_runners: " << piecewise_graph_.num_runners();
   } else {
     // Normal capture mode (for decode)
+
+    // MemPoolContext has been deprecated in torch >= 2.8
+#if TORCH_VERSION_MAJOR <= 2 && TORCH_VERSION_MINOR <= 7
     // Activate VMM mempool only for the actual capture to keep plan_info
     // allocations out of the shared physical memory pool.
     std::optional<c10::cuda::MemPoolContext> mempool_ctx;
     if (pool_ptr != nullptr) {
       mempool_ctx.emplace(pool_ptr);
     }
+#endif
 
     // Begin graph capture (capture_mode defaults to
     // cudaStreamCaptureModeGlobal)
@@ -976,8 +983,7 @@ constexpr uint32_t kPhysicalPoolIdDecode = 1;
 struct CudaGraphExecutorImpl::VmmPoolState {
   std::unique_ptr<xllm::SharedVMMAllocator> allocator;
   std::unique_ptr<xllm::VMMTorchAllocator> torch_allocator;
-  std::unordered_map<uint32_t, std::unique_ptr<c10::cuda::MemPool>>
-      mempools_by_shape;
+  std::unordered_map<uint32_t, std::unique_ptr<TorchMemPool>> mempools_by_shape;
 };
 
 CudaGraphExecutorImpl::~CudaGraphExecutorImpl() {
@@ -1005,7 +1011,7 @@ CudaGraphExecutorImpl::get_or_create_vmm_pool_state(uint32_t physical_pool_id) {
   return *slot;
 }
 
-c10::cuda::MemPool* CudaGraphExecutorImpl::get_or_create_vmm_mempool(
+TorchMemPool* CudaGraphExecutorImpl::get_or_create_vmm_mempool(
     uint32_t physical_pool_id,
     uint32_t shape_id) {
   VmmPoolState& state = get_or_create_vmm_pool_state(physical_pool_id);
@@ -1015,9 +1021,9 @@ c10::cuda::MemPool* CudaGraphExecutorImpl::get_or_create_vmm_mempool(
   if (it != mempools.end()) {
     return it->second.get();
   }
-  auto pool = std::make_unique<c10::cuda::MemPool>(state.torch_allocator.get(),
-                                                   /*is_user_created=*/true);
-  c10::cuda::MemPool* ptr = pool.get();
+  auto pool = std::make_unique<TorchMemPool>(state.torch_allocator.get(),
+                                             /*is_user_created=*/true);
+  TorchMemPool* ptr = pool.get();
   mempools[shape_id] = std::move(pool);
   VLOG(kGraphExecutorLogVerboseLevel)
       << "Created per-shape VMM MemPool for executor " << this << ", device "
@@ -1027,9 +1033,8 @@ c10::cuda::MemPool* CudaGraphExecutorImpl::get_or_create_vmm_mempool(
   return ptr;
 }
 
-c10::cuda::MemPool* CudaGraphExecutorImpl::get_vmm_mempool(
-    uint32_t physical_pool_id,
-    uint32_t shape_id) {
+TorchMemPool* CudaGraphExecutorImpl::get_vmm_mempool(uint32_t physical_pool_id,
+                                                     uint32_t shape_id) {
   std::lock_guard<std::mutex> lock(vmm_mutex_);
   auto it = vmm_pools_.find(physical_pool_id);
   if (it == vmm_pools_.end() || !it->second) {
@@ -1157,7 +1162,7 @@ at::cuda::MempoolId_t CudaGraphExecutorImpl::get_mem_pool(
     return graph_pool_;
   }
   // Per-shape VMM MemPool: look up pool for (physical_pool_id, shape_id).
-  c10::cuda::MemPool* pool = get_vmm_mempool(physical_pool_id, shape_id);
+  TorchMemPool* pool = get_vmm_mempool(physical_pool_id, shape_id);
   CHECK(pool != nullptr)
       << "VMM MemPool for shape_id=" << shape_id
       << ", physical_pool_id=" << physical_pool_id
@@ -1251,7 +1256,7 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
     VLOG(kGraphExecutorLogVerboseLevel)
         << "CudaGraphExecutorImpl::run() in prefill piecewise capture mode";
 
-    c10::cuda::MemPool* pool_ptr = nullptr;
+    TorchMemPool* pool_ptr = nullptr;
     if (FLAGS_enable_graph_vmm_pool) {
       reset_vmm_allocator_offset(kPhysicalPoolIdPrefill);
       const uint32_t shape_id = bucket_num_tokens;
@@ -1336,7 +1341,7 @@ ModelOutput CudaGraphExecutorImpl::run(const torch::Tensor& tokens,
     VLOG(kGraphExecutorLogVerboseLevel)
         << "CudaGraphExecutorImpl::run() in decode capture mode";
 
-    c10::cuda::MemPool* pool_ptr = nullptr;
+    TorchMemPool* pool_ptr = nullptr;
     if (FLAGS_enable_graph_vmm_pool) {
       reset_vmm_allocator_offset(kPhysicalPoolIdDecode);
       const uint32_t shape_id = bucket_num_tokens;

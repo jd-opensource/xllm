@@ -128,6 +128,12 @@ class Options {
 
   PROPERTY(int32_t, ep_size) = 1;
 
+  PROPERTY(int32_t, tp_size) = 1;
+
+  PROPERTY(int32_t, sp_size) = 1;
+
+  PROPERTY(int32_t, cfg_size) = 1;
+
   PROPERTY(std::optional<std::string>, instance_name);
 
   PROPERTY(bool, enable_disagg_pd) = false;
@@ -145,6 +151,8 @@ class Options {
   PROPERTY(uint16_t, transfer_listen_port) = 26000;
 
   PROPERTY(std::optional<std::string>, etcd_addr);
+
+  PROPERTY(std::optional<std::string>, etcd_namespace);
 
   PROPERTY(bool, enable_service_routing) = false;
 

@@ -86,6 +86,7 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
   if (input.has_latent()) {
     input_params.latent = util::proto_to_torch(input.latent());
   }
+
   if (input.has_masked_image_latent()) {
     input_params.masked_image_latent =
         util::proto_to_torch(input.masked_image_latent());
@@ -98,6 +99,16 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
       LOG(ERROR) << "Base64 image decode failed";
     }
     if (!decoder.decode(raw_bytes, input_params.image)) {
+      LOG(ERROR) << "Image decode failed.";
+    }
+  }
+
+  if (input.has_condition_image()) {
+    std::string raw_bytes;
+    if (!butil::Base64Decode(input.condition_image(), &raw_bytes)) {
+      LOG(ERROR) << "Base64 image decode failed";
+    }
+    if (!decoder.decode(raw_bytes, input_params.condition_image)) {
       LOG(ERROR) << "Image decode failed.";
     }
   }

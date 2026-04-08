@@ -33,11 +33,13 @@ DiTModelContext::DiTModelContext(
     const std::unordered_map<std::string, ModelArgs>& model_args,
     const std::unordered_map<std::string, QuantArgs>& quant_args,
     const torch::TensorOptions& tensor_options,
+    const DiTCacheConfig& dit_config,
     const std::string& model_type)
     : parallel_args_(input_parallel_args),
       model_args_(std::move(model_args)),
       quant_args_(std::move(quant_args)),
       tensor_options_(tensor_options),
+      dit_config_(dit_config),
       model_type_(model_type) {
 #if defined(USE_NPU)
   int32_t device_id = tensor_options.device().index();
@@ -72,14 +74,21 @@ const QuantArgs& DiTModelContext::get_quant_args(
   }
 }
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU)
 ModelContext DiTModelContext::get_model_context(
     const std::string& component) const {
+#if defined(USE_NPU)
   return ModelContext(parallel_args_,
                       get_model_args(component),
                       get_quant_args(component),
                       tensor_options_,
                       context_);
+#else
+  return ModelContext(parallel_args_,
+                      get_model_args(component),
+                      get_quant_args(component),
+                      tensor_options_);
+#endif
 }
 #endif
 

@@ -198,8 +198,6 @@ TORCH_MODULE(QKVParallelLinear);
 //                -   -
 class RowParallelLinearImpl : public torch::nn::Module {
  public:
-  RowParallelLinearImpl(const ModelContext& context);
-
   RowParallelLinearImpl(
       int64_t in_features,
       int64_t out_features,

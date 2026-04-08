@@ -273,9 +273,6 @@ class XTensorAllocator {
   // Per-model tensors storage (key: model_id)
   std::unordered_map<std::string, ModelTensors> model_tensors_;
 
-  // Zero page pointer (owned by PhyPagePool, not this class)
-  PhyPage* zero_page_ = nullptr;
-
   // Multi-node XTensor dist members
   int32_t world_size_ = 0;  // total workers = dp_size * tp_size
   int32_t dp_size_ = 1;
