@@ -81,6 +81,10 @@ class OxygenModelImpl : public QWen3ModelImpl {
                 attn_metadata,
                 kv_caches[i],
                 input_params_new);
+      if (!input_params_new.record_layer(static_cast<uint32_t>(i),
+                                         h.device())) {
+        return ModelOutput();
+      }
 
       if (use_deepstack) {
         if (deep_stacks.size() > 0 && i < deep_stacks.size()) {
