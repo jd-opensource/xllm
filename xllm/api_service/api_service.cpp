@@ -20,6 +20,7 @@ limitations under the License.
 #include <json2pb/json_to_pb.h>
 #include <json2pb/pb_to_json.h>
 
+#include <cctype>
 #include <filesystem>
 
 #include "api_service/chat_json_parser.h"
@@ -1147,6 +1148,112 @@ void APIService::UnlinkD2DHttp(::google::protobuf::RpcController* controller,
     LOG(ERROR) << "proto to json failed: " << err_msg;
     return;
   }
+}
+
+namespace {
+
+std::string GetCurrentLogLevelName() {
+  int level = FLAGS_minloglevel;
+  if (FLAGS_v > 0 && level == 0) {
+    return "DEBUG";
+  }
+  switch (level) {
+    case 0:
+      return "INFO";
+    case 1:
+      return "WARNING";
+    case 2:
+      return "ERROR";
+    case 3:
+      return "FATAL";
+    default:
+      return "INFO";
+  }
+}
+
+// Parse form body like "level=DEBUG" or "level=INFO"
+bool ParseLevelFromBody(const std::string& body, std::string* level_out) {
+  if (body.empty()) return false;
+  size_t pos = body.find("level=");
+  if (pos == std::string::npos) return false;
+  pos += 6;  // skip "level="
+  size_t end = body.find('&', pos);
+  if (end == std::string::npos) end = body.size();
+  std::string value = body.substr(pos, end - pos);
+  // Trim whitespace
+  size_t start = value.find_first_not_of(" \t\r\n");
+  if (start == std::string::npos) return false;
+  size_t last = value.find_last_not_of(" \t\r\n");
+  *level_out = value.substr(start, last - start + 1);
+  return true;
+}
+
+bool SetLogLevel(const std::string& level_name) {
+  std::string upper = level_name;
+  for (char& c : upper) {
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  }
+  if (upper == "DEBUG") {
+    FLAGS_minloglevel = 0;
+    FLAGS_v = 1;
+    return true;
+  }
+  if (upper == "INFO") {
+    FLAGS_minloglevel = 0;
+    FLAGS_v = 0;
+    return true;
+  }
+  if (upper == "WARNING") {
+    FLAGS_minloglevel = 1;
+    FLAGS_v = 0;
+    return true;
+  }
+  if (upper == "ERROR") {
+    FLAGS_minloglevel = 2;
+    FLAGS_v = 0;
+    return true;
+  }
+  if (upper == "FATAL") {
+    FLAGS_minloglevel = 3;
+    FLAGS_v = 0;
+    return true;
+  }
+  return false;
+}
+
+}  // namespace
+
+void APIService::LoggingHttp(::google::protobuf::RpcController* controller,
+                             const proto::HttpRequest* request,
+                             proto::HttpResponse* response,
+                             ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  butil::IOBuf& req_buf = ctrl->request_attachment();
+  std::string body = req_buf.to_string();
+
+  if (!body.empty()) {
+    std::string level_param;
+    if (ParseLevelFromBody(body, &level_param)) {
+      if (!SetLogLevel(level_param)) {
+        ctrl->SetFailed(
+            "Invalid log level, supported: DEBUG, INFO, WARNING, ERROR, FATAL");
+        return;
+      }
+    }
+  }
+
+  std::string current_level = GetCurrentLogLevelName();
+  nlohmann::json j;
+  j["level"] = current_level;
+  std::string json_str = j.dump();
+  ctrl->response_attachment().append(json_str);
+  ctrl->http_response().set_content_type("application/json");
 }
 
 }  // namespace xllm

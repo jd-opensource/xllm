@@ -60,7 +60,8 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
                             "sleep => SleepHttp,"
                             "wakeup => WakeupHttp,"
                             "link_d2d => LinkD2DHttp,"
-                            "unlink_d2d => UnlinkD2DHttp") != 0) {
+                            "unlink_d2d => UnlinkD2DHttp,"
+                            "logging => LoggingHttp") != 0) {
       LOG(ERROR) << "Fail to add api service";
       return false;
     }
