@@ -635,6 +635,10 @@ DEFINE_bool(enable_constrained_decoding,
             "that the output meets specific format or structural requirements "
             "through pre-defined rules.");
 
+DEFINE_bool(enable_convert_tokens_to_item,
+            false,
+            "Enable token ids conversion to item id in REC/OneRec response.");
+
 DEFINE_int64(dit_cache_start_steps,
              5,
              "The number of steps to skip at the start");

@@ -148,6 +148,7 @@ class Batch {
   };
 
   void refresh_output_targets();
+  void refresh_onerec_prefill_output_targets();
   bool update_sequence_state(Sequence* seq, bool replace_fake_token);
 
   void append_token_for_sequence(Sequence* seq,
