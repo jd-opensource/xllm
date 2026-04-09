@@ -187,9 +187,12 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     FLAGS_enable_schedule_overlap = xllm_init_options.enable_schedule_overlap;
     FLAGS_enable_chunked_prefill = xllm_init_options.enable_chunked_prefill;
 
-    std::unique_ptr<xllm::ModelLoader> model_loader =
-        xllm::ModelLoader::create(model_path);
-    const xllm::ModelArgs model_args = model_loader->model_args();
+    auto model_loader = xllm::ModelLoader::create(model_path);
+    if (model_loader == nullptr) {
+      LOG(ERROR) << "Failed to create model loader for path: " << model_path;
+      return false;
+    }
+    const auto& model_args = model_loader->model_args();
     const xllm::RecModelKind rec_model_kind =
         xllm::get_rec_model_kind(model_args.model_type());
     if (rec_model_kind == xllm::RecModelKind::kNone) {
@@ -219,7 +222,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         break;
       default:
         LOG(ERROR) << "Unsupported rec pipeline type: "
-                   << static_cast<int>(pipeline_type);
+                   << static_cast<int32_t>(pipeline_type);
         return false;
     }
 
