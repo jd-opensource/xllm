@@ -20,7 +20,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 
-#include "core/common/rec_model_utils.h"
+#include "core/util/rec_model_utils.h"
 #include "onerec_batch_input_builder.h"
 #include "rec_multi_round_batch_input_builder.h"
 

@@ -17,8 +17,8 @@ limitations under the License.
 
 #include <torch/nn/functional/normalization.h>
 
-#include "core/common/rec_model_utils.h"
 #include "core/framework/model/model_output.h"
+#include "core/util/rec_model_utils.h"
 #if defined(USE_NPU)
 #include "core/common/global_flags.h"
 #include "core/layers/common/attention_mask.h"

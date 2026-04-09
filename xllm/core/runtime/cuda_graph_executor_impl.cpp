@@ -29,7 +29,6 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
-#include "core/common/rec_model_utils.h"
 #include "core/layers/common/attention_metadata.h"
 #include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/cuda/flashinfer_planinfo.h"
@@ -39,6 +38,7 @@ limitations under the License.
 #include "core/platform/shared_vmm_allocator.h"
 #include "core/platform/stream.h"
 #include "core/platform/vmm_torch_allocator.h"
+#include "core/util/rec_model_utils.h"
 #include "core/util/utils.h"
 #include "kernels/cuda/global_capture_instance.h"
 #include "kernels/cuda/utils.h"

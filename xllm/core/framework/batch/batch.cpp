@@ -25,7 +25,7 @@ limitations under the License.
 #include "batch_input_builder.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
-#include "core/common/rec_model_utils.h"
+#include "core/util/rec_model_utils.h"
 #include "framework/batch/mposition.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
