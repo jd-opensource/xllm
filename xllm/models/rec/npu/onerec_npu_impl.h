@@ -18,6 +18,9 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "core/layers/common/rms_norm.h"
 #include "core/layers/npu/npu_onerec_block_layer_impl.h"
+#if defined(USE_NPU)
+#include <torch_npu/csrc/core/npu/NPUFormat.h>
+#endif
 
 namespace xllm {
 
@@ -224,6 +227,12 @@ class OneRecStackImpl : public torch::nn::Module {
       if (!h.is_contiguous()) {
         h = h.contiguous();
       }
+#if defined(USE_NPU)
+      if (h.device().type() == c10::DeviceType::PrivateUse1 &&
+          at_npu::native::get_npu_format(h) != ACL_FORMAT_ND) {
+        h = at_npu::native::npu_format_cast(h, ACL_FORMAT_ND).contiguous();
+      }
+#endif
     } else {
       h = embed_tokens_(tokens);
     }
