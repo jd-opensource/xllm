@@ -80,8 +80,9 @@ RecSampler::RecSampler(RecPipelineType pipeline_type)
 }
 
 SampleOutput RecSampler::forward(torch::Tensor& logits,
-                                 const SamplingParameters& params) const {
-  return strategy_->forward(logits, params);
+                                 const SamplingParameters& params,
+                                 const torch::Tensor& filter_mask) const {
+  return strategy_->forward(logits, params, filter_mask);
 }
 
 // --- SamplingStrategy factory ---
@@ -94,10 +95,11 @@ RecSampler::create_sampling_strategy(RecPipelineType type,
       return std::make_unique<MultiRoundFastPathSamplingStrategy>(sampler);
     case RecPipelineType::kLlmRecDefault:
     case RecPipelineType::kLlmRecWithMmData:
-    case RecPipelineType::kOneRecDefault:
       return std::make_unique<DefaultSamplingStrategy>(sampler);
+    case RecPipelineType::kOneRecDefault:
+      return std::make_unique<OneRecConstrainedSamplingStrategy>(sampler);
     default:
-      LOG(FATAL) << "Unknown RecPipelineType: " << static_cast<int>(type);
+      LOG(FATAL) << "Unknown RecPipelineType: " << static_cast<int32_t>(type);
       __builtin_unreachable();
   }
 }
@@ -110,8 +112,22 @@ RecSampler::DefaultSamplingStrategy::DefaultSamplingStrategy(
 
 SampleOutput RecSampler::DefaultSamplingStrategy::forward(
     torch::Tensor& logits,
-    const SamplingParameters& params) const {
-  return sampler_.forward(logits, params);
+    const SamplingParameters& params,
+    const torch::Tensor& filter_mask) const {
+  return sampler_.forward(logits, params, filter_mask);
+}
+
+// --- OneRecConstrainedSamplingStrategy ---
+
+RecSampler::OneRecConstrainedSamplingStrategy::
+    OneRecConstrainedSamplingStrategy(const Sampler& sampler)
+    : sampler_(sampler) {}
+
+SampleOutput RecSampler::OneRecConstrainedSamplingStrategy::forward(
+    torch::Tensor& logits,
+    const SamplingParameters& params,
+    const torch::Tensor& filter_mask) const {
+  return sampler_.forward(logits, params, filter_mask);
 }
 
 // --- MultiRoundFastPathSamplingStrategy ---
@@ -122,7 +138,9 @@ RecSampler::MultiRoundFastPathSamplingStrategy::
 
 SampleOutput RecSampler::MultiRoundFastPathSamplingStrategy::forward(
     torch::Tensor& logits,
-    const SamplingParameters& params) const {
+    const SamplingParameters& params,
+    const torch::Tensor& filter_mask) const {
+  (void)filter_mask;
   const bool use_fast_path = can_use_fast_path(params);
 
   if (!use_fast_path) {

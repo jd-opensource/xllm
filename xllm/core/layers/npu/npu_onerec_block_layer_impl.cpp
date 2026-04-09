@@ -380,9 +380,8 @@ constexpr int32_t kInMlpGateUpOffsetSharedExpert = static_cast<int32_t>(
     OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_OFFSET_SHARED_EXPERT);
 constexpr int32_t kInMlpGateUpScaleSharedExpert = static_cast<int32_t>(
     OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_SCALE_SHARED_EXPERT);
-constexpr int32_t kInMlpGateUpCompressIdxSharedExpert =
-    static_cast<int32_t>(
-        OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_COMPRESS_IDX_SHARED_EXPERT);
+constexpr int32_t kInMlpGateUpCompressIdxSharedExpert = static_cast<int32_t>(
+    OneRecMoeBlockLayerTensorId::IN_MLP_GATEUP_COMPRESS_IDX_SHARED_EXPERT);
 constexpr int32_t kInMlpDownWeightSharedExpert = static_cast<int32_t>(
     OneRecMoeBlockLayerTensorId::IN_MLP_DOWN_WEIGHT_SHARED_EXPERT);
 constexpr int32_t kInMlpDownBiasSharedExpert = static_cast<int32_t>(
@@ -598,8 +597,8 @@ NpuOneRecBlockLayerImpl::NpuOneRecBlockLayerImpl(const ModelContext& context,
   param_from_args(decode_param_, args, parallel_args, /*is_prefill=*/false);
 
   const int32_t weight_count = prefill_param_.use_moe
-                               ? kOneRecMoeWeightCountPerLayer
-                               : kOneRecWeightCountPerLayer;
+                                   ? kOneRecMoeWeightCountPerLayer
+                                   : kOneRecWeightCountPerLayer;
   at_weight_tensors_.resize(weight_count);
   atb_weight_tensors_.resize(weight_count);
 
@@ -752,14 +751,14 @@ void NpuOneRecBlockLayerImpl::verify_loaded_weights(
     const bool is_placeholder = (sizes.size() == 2 && sizes[0] == 1);
     const bool expected_placeholder = allowed_placeholders.count(index) > 0;
     const bool is_relative_bias = (index == kInRelativeAttentionBiasWeight);
-    const bool is_shared_optional =
-        prefill_param_.use_moe && !has_shared_experts &&
-        (index == kInMlpGateUpWeightSharedExpert ||
-         index == kInMlpDownWeightSharedExpert ||
-         index == kInSharedExpertGateWeight ||
-         index == kInSharedExpertGateBias ||
-         index == kInSharedExpertGateOffset ||
-         index == kInSharedExpertGateScale);
+    const bool is_shared_optional = prefill_param_.use_moe &&
+                                    !has_shared_experts &&
+                                    (index == kInMlpGateUpWeightSharedExpert ||
+                                     index == kInMlpDownWeightSharedExpert ||
+                                     index == kInSharedExpertGateWeight ||
+                                     index == kInSharedExpertGateBias ||
+                                     index == kInSharedExpertGateOffset ||
+                                     index == kInSharedExpertGateScale);
     if (is_placeholder && !expected_placeholder && !is_relative_bias &&
         !is_shared_optional) {
       CHECK(false) << "weight is not loaded for " << prefix << name;
@@ -855,10 +854,9 @@ void NpuOneRecBlockLayerImpl::merge_loaded_weights() {
     CHECK(wi0_loaded && wi1_loaded)
         << "OneRec FFN gate/up weights are not properly loaded.";
 
-    auto new_gate_up_weight =
-        torch::cat({at_weight_tensors_[kInFfnWi0Weight],
-                    at_weight_tensors_[kInFfnWi1Weight]},
-                   0);
+    auto new_gate_up_weight = torch::cat({at_weight_tensors_[kInFfnWi0Weight],
+                                          at_weight_tensors_[kInFfnWi1Weight]},
+                                         0);
     at_weight_tensors_[kInFfnWi0Weight] = new_gate_up_weight;
     at_weight_tensors_[kInFfnWi1Weight] =
         torch::zeros({1, at_weight_tensors_[kInFfnWi0Weight].size(1)})
@@ -1487,8 +1485,7 @@ void NpuOneRecBlockLayerImpl::process_shared_expert_weights(
   shared_expert_weights_map_[canonical_name] = tmp_tensor;
 }
 
-int32_t NpuOneRecBlockLayerImpl::extract_expert_index(
-    const std::string& name) {
+int32_t NpuOneRecBlockLayerImpl::extract_expert_index(const std::string& name) {
   size_t experts_pos = name.find(".experts.");
   if (experts_pos == std::string::npos) {
     return -1;
