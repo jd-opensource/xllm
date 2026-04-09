@@ -348,24 +348,23 @@ RecWorkerImpl::OneRecWorkPipeline::prepare_filter_mask_async(
 
   filter_mask_threadpool_->schedule(
       [this, generated_tokens, promise = std::move(promise)]() mutable {
+        auto set_filter_mask_error = [&generated_tokens,
+                                      &promise](const char* error_message) {
+          const int32_t batch = static_cast<int32_t>(generated_tokens.size());
+          const int32_t seq =
+              batch > 0 ? static_cast<int32_t>(generated_tokens[0].size()) : 0;
+          LOG(ERROR) << "Failed to generate OneRec filter mask, batch=" << batch
+                     << ", seq=" << seq << ", error=" << error_message;
+          promise.setValue(torch::Tensor());
+        };
         try {
           auto filter_mask =
               constrained_decoding_->generate_mask(generated_tokens);
           promise.setValue(filter_mask);
         } catch (const std::exception& e) {
-          const int32_t batch = static_cast<int32_t>(generated_tokens.size());
-          const int32_t seq =
-              batch > 0 ? static_cast<int32_t>(generated_tokens[0].size()) : 0;
-          LOG(ERROR) << "Failed to generate OneRec filter mask, batch=" << batch
-                     << ", seq=" << seq << ", error=" << e.what();
-          promise.setValue(torch::Tensor());
+          set_filter_mask_error(e.what());
         } catch (...) {
-          const int32_t batch = static_cast<int32_t>(generated_tokens.size());
-          const int32_t seq =
-              batch > 0 ? static_cast<int32_t>(generated_tokens[0].size()) : 0;
-          LOG(ERROR) << "Failed to generate OneRec filter mask, batch=" << batch
-                     << ", seq=" << seq << ", error=unknown";
-          promise.setValue(torch::Tensor());
+          set_filter_mask_error("unknown");
         }
       });
 
