@@ -15,6 +15,9 @@ limitations under the License.
 
 #include "qwen3_vl_image_processor.h"
 
+#include <cfenv>
+#include <cmath>
+
 namespace xllm {
 
 std::optional<Qwen2VLImageProcessor::Size>
@@ -37,10 +40,10 @@ Qwen3VLImageProcessor::smart_resize_video(int32_t num_frames,
   }
 
   int32_t h_bar =
-      static_cast<int32_t>(std::round(height / static_cast<double>(factor))) *
+      static_cast<int32_t>(std::rint(height / static_cast<double>(factor))) *
       factor;
   int32_t w_bar =
-      static_cast<int32_t>(std::round(width / static_cast<double>(factor))) *
+      static_cast<int32_t>(std::rint(width / static_cast<double>(factor))) *
       factor;
   int32_t t_bar = static_cast<int32_t>(std::ceil(
                       num_frames / static_cast<double>(temporal_factor))) *
