@@ -27,7 +27,61 @@ limitations under the License.
 #include <limits>
 #include <stdexcept>
 
+#include "core/common/rec_model_utils.h"
+#include "core/framework/model_loader.h"
 #include "helper.h"
+
+namespace {
+
+const char* get_rec_pipeline_name(xllm::RecPipelineType pipeline_type) {
+  switch (pipeline_type) {
+    case xllm::RecPipelineType::kLlmRecDefault:
+      return "LlmRecEnginePipeline";
+    case xllm::RecPipelineType::kLlmRecWithMmData:
+      return "LlmRecWithMmData";
+    case xllm::RecPipelineType::kLlmRecMultiRoundPipeline:
+      return "RecMultiRoundEnginePipeline";
+    case xllm::RecPipelineType::kOneRecDefault:
+      return "OneRecEnginePipeline";
+    default:
+      return "UnknownRecPipeline";
+  }
+}
+
+void reset_pipeline_runtime_toggles() {
+  FLAGS_enable_rec_fast_sampler = false;
+  FLAGS_enable_prefill_piecewise_graph = false;
+  FLAGS_enable_xattention_one_stage = false;
+  FLAGS_enable_graph_mode_decode_no_padding = false;
+  FLAGS_enable_rec_prefill_only = false;
+  FLAGS_enable_constrained_decoding = false;
+  FLAGS_enable_topk_sorted = false;
+}
+
+void apply_multi_round_pipeline_toggles() {
+  FLAGS_enable_rec_fast_sampler = true;
+  FLAGS_enable_prefill_piecewise_graph = true;
+  FLAGS_enable_xattention_one_stage = false;
+  FLAGS_enable_graph_mode_decode_no_padding = true;
+  FLAGS_enable_topk_sorted = false;
+}
+
+void apply_onerec_pipeline_toggles(xllm::Options* options) {
+  FLAGS_enable_rec_prefill_only = true;
+  FLAGS_enable_constrained_decoding = true;
+  FLAGS_enable_prefix_cache = false;
+  FLAGS_enable_schedule_overlap = false;
+  FLAGS_enable_chunked_prefill = false;
+
+  options->enable_prefix_cache(false)
+      .enable_schedule_overlap(false)
+      .enable_chunked_prefill(false);
+
+  // OneRec does not use Rec multi-round decode rounds.
+  FLAGS_max_decode_rounds = 0;
+}
+
+}  // namespace
 
 XLLM_CAPI_EXPORT XLLM_REC_Handler* xllm_rec_create(void) {
   XLLM_REC_Handler* handler = new XLLM_REC_Handler();
