@@ -553,7 +553,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
 
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no memory for kv cache";
   const int32_t block_size = options_.block_size();
-  bool enable_lighting_indexer = args_.index_n_heads() > 1;
+  bool enable_lighting_indexer = args_.index_n_heads() > 0;
   bool enable_gdn_attention = has_linear_attention_layers(args_);
 
   // init kv cache for each worker

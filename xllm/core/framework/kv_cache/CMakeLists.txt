@@ -15,8 +15,8 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:spec_kv_cache_transfer.h>
     kv_cache_store.h
     hierarchy_kv_cache_transfer.h
-    $<$<BOOL:${USE_NPU}>:mooncake_transfer_engine.h>
-    $<$<BOOL:${USE_NPU}>:mooncake_kv_cache_transfer.h>
+    $<$<OR:$<BOOL:${USE_NPU}>,$<BOOL:${USE_MLU}>>:mooncake_transfer_engine.h>
+    $<$<OR:$<BOOL:${USE_NPU}>,$<BOOL:${USE_MLU}>>:mooncake_kv_cache_transfer.h>
     $<$<BOOL:${USE_NPU}>:mooncake_weight_transfer.h>
   SRCS
     embedding_cache.cpp 
@@ -26,8 +26,8 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:spec_kv_cache_transfer.cpp>
     kv_cache_store.cpp
     hierarchy_kv_cache_transfer.cpp
-    $<$<BOOL:${USE_NPU}>:mooncake_transfer_engine.cpp>
-    $<$<BOOL:${USE_NPU}>:mooncake_kv_cache_transfer.cpp>
+    $<$<OR:$<BOOL:${USE_NPU}>,$<BOOL:${USE_MLU}>>:mooncake_transfer_engine.cpp>
+    $<$<OR:$<BOOL:${USE_NPU}>,$<BOOL:${USE_MLU}>>:mooncake_kv_cache_transfer.cpp>
     $<$<BOOL:${USE_NPU}>:mooncake_weight_transfer.cpp>
   DEPS
     :common
@@ -59,3 +59,15 @@ target_link_libraries(embedding_cache_test
                       $<$<BOOL:${USE_NPU}>:hccl>
                       $<$<BOOL:${USE_NPU}>:c_sec>
                       $<$<BOOL:${USE_NPU}>:nnopbase>)
+
+if(USE_NPU OR USE_MLU)
+cc_test(
+  NAME
+    mooncake_transfer_engine_test
+  SRCS
+    mooncake_transfer_engine_test.cpp
+  DEPS
+    :kv_cache
+    GTest::gtest_main
+)
+endif()

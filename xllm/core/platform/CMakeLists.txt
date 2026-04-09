@@ -14,6 +14,7 @@ cc_library(
     vmm_api.h
     shared_vmm_allocator.h
     vmm_torch_allocator.h
+    $<$<BOOL:${USE_MLU}>:mlu/mlu_layer_synchronizer.h>
     $<$<BOOL:${USE_CUDA}>:cuda/cuda_utils.h>
     $<$<BOOL:${USE_CUDA}>:numa_utils.h>
   SRCS
@@ -21,6 +22,7 @@ cc_library(
     device.cpp
     vmm_api.cpp
     shared_vmm_allocator.cpp
+    $<$<BOOL:${USE_MLU}>:mlu/mlu_layer_synchronizer.cpp>
     $<$<BOOL:${USE_CUDA}>:numa_utils.cpp>
   DEPS
     torch
@@ -51,4 +53,3 @@ cc_test(
     glog::glog
 )
 endif()
-

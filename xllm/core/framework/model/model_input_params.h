@@ -26,6 +26,9 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif
+#if defined(USE_MLU)
+#include "platform/mlu/mlu_layer_synchronizer.h"
+#endif
 #include "framework/batch/batch_forward_type.h"
 #include "framework/request/mm_batch_data.h"
 #include "npu_cp_ep_padding.h"
@@ -385,7 +388,7 @@ struct ModelInputParams {
     params.ring_cur_seqlen_host = ring_cur_seqlen_host;
     params.ring_cache_seqlen = safe_to(ring_cache_seqlen, device);
     params.ring_cache_seqlen_host = ring_cache_seqlen_host;
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
     params.layer_synchronizer = layer_synchronizer;
 #endif
     params.expert_load_data = expert_load_data;
@@ -475,6 +478,20 @@ struct ModelInputParams {
         return false;
       }
     }
+#else
+    (void)layer_idx;
+#endif
+    return true;
+  }
+
+  bool record_layer(uint32_t layer_idx, const torch::Device& device) const {
+#if defined(USE_MLU)
+    if (layer_synchronizer != nullptr) {
+      return layer_synchronizer->record_current(layer_idx, device.index());
+    }
+#else
+    (void)layer_idx;
+    (void)device;
 #endif
     return true;
   }
@@ -563,7 +580,9 @@ struct ModelInputParams {
   // visual pos mask for Qwen3-VL
   mutable torch::Tensor visual_pos_masks;
 
-#if defined(USE_NPU)
+#if defined(USE_MLU)
+  std::shared_ptr<MLULayerSynchronizerImpl> layer_synchronizer = nullptr;
+#elif defined(USE_NPU)
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
   uint32_t layers_per_bacth_copy = std::numeric_limits<uint32_t>::max();
   std::shared_ptr<NPULayerSynchronizerImpl> layer_wise_load_synchronizer =

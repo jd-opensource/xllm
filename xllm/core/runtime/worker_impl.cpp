@@ -436,7 +436,7 @@ void WorkerImpl::get_cache_info(uint64_t& cluster_id,
                                 std::string& addr,
                                 int64_t& k_cache_id,
                                 int64_t& v_cache_id) {
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
   kv_cache_transfer_->get_cache_info(cluster_id, addr, k_cache_id, v_cache_id);
 #endif
 }
@@ -445,7 +445,7 @@ bool WorkerImpl::link_cluster(const std::vector<uint64_t>& cluster_ids,
                               const std::vector<std::string>& addrs,
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports) {
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
   for (int32_t i = 0; i < cluster_ids.size(); ++i) {
     if (!kv_cache_transfer_->link_cluster(
             cluster_ids[i], addrs[i], device_ips[i], ports[i])) {
@@ -460,7 +460,7 @@ bool WorkerImpl::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                 const std::vector<std::string>& addrs,
                                 const std::vector<std::string>& device_ips,
                                 const std::vector<uint16_t>& ports) {
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
   for (int32_t i = 0; i < cluster_ids.size(); ++i) {
     if (!kv_cache_transfer_->unlink_cluster(
             cluster_ids[i], addrs[i], device_ips[i], ports[i])) {
@@ -1210,6 +1210,14 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
                                                   src_v_cache_id,
                                                   src_blocks,
                                                   dst_blocks);
+#elif defined(USE_MLU)
+  (void)src_cluster_id;
+  (void)src_addr;
+  (void)src_k_cache_id;
+  (void)src_v_cache_id;
+  (void)src_blocks;
+  (void)dst_blocks;
+  LOG(FATAL) << "MLU backend does not support PULL kv cache transfer.";
 #endif
   return false;
 }

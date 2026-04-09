@@ -53,6 +53,7 @@ class MooncakeKVCacheTransferBase : public KVCacheTransfer {
   uint64_t cluster_id_;
   int16_t listen_port_;
   int32_t device_id_;
+  torch::Device device_;
   int64_t num_layers_ = 0;
   int64_t size_per_block_ = 0;
 
@@ -87,7 +88,7 @@ class MooncakeKVCacheTransferDefault final
 
   bool push_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
-      std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
+      std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
       bool is_spec_draft) override;
 
  private:
@@ -97,9 +98,18 @@ class MooncakeKVCacheTransferDefault final
       const std::vector<std::vector<int64_t>>& kv_cache_shape,
       torch::ScalarType dtype);
 
+  void add_buf(const torch::Tensor& tensor,
+               std::vector<void*>& addrs,
+               std::vector<size_t>& lens,
+               std::vector<uint64_t>& buf_bytes) const;
+  std::vector<int64_t> get_buf_ids(const std::vector<int64_t>& layer_ids) const;
+
   // Register per-layer K/V tensor memory.
   void register_kv_cache_impl(std::vector<xllm::KVCache>& kv_caches);
 
+  bool has_v_cache_ = true;
+  bool has_index_cache_ = false;
+  int64_t buf_cnt_per_layer_ = 2;
   std::string model_type_;
 };
 
@@ -132,7 +142,7 @@ class MooncakeKVCacheTransferXTensor final
 
   bool push_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
-      std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
+      std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
       bool is_spec_draft) override;
 
  private:
@@ -151,7 +161,7 @@ class MooncakeKVCacheTransferXTensor final
 
   bool push_kv_blocks_impl(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
-      std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer);
+      std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer);
 
   std::string model_id_;
 };
