@@ -26,7 +26,8 @@ limitations under the License.
 namespace xllm {
 
 SampleOutput Sampler::forward(torch::Tensor& logits,
-                              const SamplingParameters& params) const {
+                              const SamplingParameters& params,
+                              const torch::Tensor& filter_mask) const {
   SampleOutput output;
   // apply frequency and presence penalties
   if (params.frequency_penalties.defined()) {
@@ -43,12 +44,45 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
         logits, params.unique_token_ids, params.repetition_penalties);
   }
 
-  // apply temperatures, top-k and top-p
-  apply_top_k_top_p(logits, params.temperatures, params.top_k, params.top_p);
-
   torch::Tensor sample_logits = logits;
-  if (params.selected_token_idxes.numel() != params.sample_idxes.numel()) {
+  torch::Tensor sample_temperatures = params.temperatures;
+  torch::Tensor sample_top_k = params.top_k;
+  torch::Tensor sample_top_p = params.top_p;
+  const bool use_sample_indices =
+      params.selected_token_idxes.numel() != params.sample_idxes.numel();
+  if (use_sample_indices) {
     sample_logits = logits.index_select(/*dim=*/0, params.sample_idxes);
+    if (params.temperatures.defined()) {
+      sample_temperatures =
+          params.temperatures.index_select(/*dim=*/0, params.sample_idxes);
+    }
+    if (params.top_k.defined()) {
+      sample_top_k = params.top_k.index_select(/*dim=*/0, params.sample_idxes);
+    }
+    if (params.top_p.defined()) {
+      sample_top_p = params.top_p.index_select(/*dim=*/0, params.sample_idxes);
+    }
+  }
+
+  if (filter_mask.defined()) {
+    CHECK_EQ(filter_mask.dim(), 2)
+        << "filter_mask must be 2-D, dim=" << filter_mask.dim();
+    CHECK_EQ(filter_mask.size(0), sample_logits.size(0))
+        << "filter_mask batch mismatch, filter_mask.size(0)="
+        << filter_mask.size(0)
+        << ", sample_logits.size(0)=" << sample_logits.size(0);
+    CHECK_EQ(filter_mask.size(1), sample_logits.size(1))
+        << "filter_mask vocab mismatch, filter_mask.size(1)="
+        << filter_mask.size(1)
+        << ", sample_logits.size(1)=" << sample_logits.size(1);
+    sample_logits = sample_logits + filter_mask;
+  }
+
+  // apply temperatures, top-k and top-p
+  apply_top_k_top_p(
+      sample_logits, sample_temperatures, sample_top_k, sample_top_p);
+  if (use_sample_indices) {
+    logits.index_copy_(/*dim=*/0, params.sample_idxes, sample_logits);
   }
 
   CHECK(params.do_sample.defined()) << "params.do_sample must be defined";
@@ -58,19 +92,14 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
   // same batch size
   CHECK_EQ(sample_logits.size(0), params.do_sample.size(0));
 
-  auto probs = sample_logits;
+  auto probs =
+      torch::softmax(sample_logits, /*dim=*/-1, /*dtype=*/torch::kFloat32);
   torch::Tensor samples;
   if (params.all_random_sample) {
-    // use float32 for probabilities and log probabilities
-    probs =
-        torch::softmax(sample_logits, /*dim=*/-1, /*dtype=*/torch::kFloat32);
     samples = random_sample(probs);
   } else if (params.all_greedy_sample) {
     samples = greedy_sample(probs);
   } else {
-    // use float32 for probabilities and log probabilities
-    probs =
-        torch::softmax(sample_logits, /*dim=*/-1, /*dtype=*/torch::kFloat32);
     // mixed sample, sample both then choose based on do_sample
     auto random = random_sample(probs);
     auto greedy = greedy_sample(probs);

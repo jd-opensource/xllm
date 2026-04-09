@@ -60,7 +60,7 @@ RecVocabDict* get_onerec_vocab_dict(const std::string& model_weights_path) {
   if (model_weights_path.empty()) {
     return nullptr;
   }
-  const auto model_version =
+  const std::string model_version =
       std::filesystem::path(model_weights_path).filename().string();
   return VersionSingleton<RecVocabDict>::GetInstance(model_version);
 }
