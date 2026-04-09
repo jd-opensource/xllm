@@ -123,15 +123,6 @@ class RecWorkerImpl : public LLMWorkerImpl {
     std::optional<ForwardOutput> step(const ForwardInput& input) override;
   };
 
-  class LlmRecWithMmDataWorkPipeline final : public RecWorkPipeline {
-   public:
-    explicit LlmRecWithMmDataWorkPipeline(RecPipelineRuntime& runtime)
-        : RecWorkPipeline(runtime) {}
-
-    void prepare_work_before_execute(const ForwardInput& inputs,
-                                     ForwardInput& processed_inputs) override;
-  };
-
   class LlmRecMultiRoundPipeline final : public RecWorkPipeline {
    public:
     explicit LlmRecMultiRoundPipeline(RecPipelineRuntime& runtime);
