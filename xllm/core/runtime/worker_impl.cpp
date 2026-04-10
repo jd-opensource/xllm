@@ -602,7 +602,6 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   processed_input = input.to(device_, dtype_);
   auto& input_params = processed_input.input_params;
 
-  auto& input_params = processed_input.input_params;
   bool empty_shard = input_params.num_sequences == 0 &&
                      (!processed_input.token_ids.defined() ||
                       processed_input.token_ids.numel() == 0);

@@ -1325,12 +1325,18 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   LOAD_ARG_OR(kv_lora_rank, "text_config.kv_lora_rank", 512);
   LOAD_ARG_OR(scoring_func, "text_config.scoring_func", "sigmoid");
 
-  LOAD_ARG_OR_FUNC(
-      head_dim, "text_config.head_dim", [&] { return args->v_head_dim(); });
+  SET_ARG(head_dim, args->qk_nope_head_dim() + args->qk_rope_head_dim());
   LOAD_ARG_OR_FUNC(
       rotary_dim, "rotary_dim", [&] { return args->qk_rope_head_dim(); });
 
   LOAD_ARG(rope_scaling_rope_type, "text_config.rope_scaling.type");
+  if (args->rope_scaling_rope_type().empty() ||
+      args->rope_scaling_rope_type() == "default" ||
+      args->rope_scaling_rope_type() == "yarn") {
+    // Kimi-K2.5 text config uses HF rope_scaling.type="yarn", while the
+    // DeepSeek MLA implementation in xLLM keys off "deepseek_yarn".
+    args->rope_scaling_rope_type() = "deepseek_yarn";
+  }
   LOAD_ARG(rope_scaling_beta_fast, "text_config.rope_scaling.beta_fast");
   LOAD_ARG(rope_scaling_beta_slow, "text_config.rope_scaling.beta_slow");
   LOAD_ARG(rope_scaling_factor, "text_config.rope_scaling.factor");
