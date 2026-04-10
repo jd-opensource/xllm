@@ -32,6 +32,7 @@ limitations under the License.
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/state_dict/utils.h"
 #include "core/layers/common/add_matmul.h"
+#include "core/layers/common/linear.h"
 #include "core/layers/common/rms_norm.h"
 #include "framework/model_context.h"
 #include "models/model_registry.h"
@@ -213,16 +214,43 @@ TORCH_MODULE(DiTRMSNorm);
 class FluxSingleAttentionImpl : public torch::nn::Module {
  public:
   explicit FluxSingleAttentionImpl(const ModelContext& context)
-      : options_(context.get_tensor_options()) {
+      : options_(context.get_tensor_options()),
+        parallel_args_(context.get_parallel_args()) {
     auto model_args = context.get_model_args();
     heads_ = model_args.n_heads();
     auto head_dim = model_args.head_dim();
     auto query_dim = heads_ * head_dim;
     auto out_dim = query_dim;
+    auto inner_dim = query_dim;
+    tp_size_ = FLAGS_tp_size;
 
-    fused_qkv_ = register_module(
-        "fused_qkv_",
-        layer::FusedAddMatmul(query_dim, 3 * out_dim, true, options_));
+    to_q_ = register_module(
+        "to_q",
+        layer::ColumnParallelLinear(query_dim,
+                                    inner_dim,
+                                    true,
+                                    false,
+                                    context.get_quant_args(),
+                                    parallel_args_.dit_tp_group_,
+                                    options_));
+    to_k_ = register_module(
+        "to_k",
+        layer::ColumnParallelLinear(query_dim,
+                                    inner_dim,
+                                    true,
+                                    false,
+                                    context.get_quant_args(),
+                                    parallel_args_.dit_tp_group_,
+                                    options_));
+    to_v_ = register_module(
+        "to_v",
+        layer::ColumnParallelLinear(query_dim,
+                                    inner_dim,
+                                    true,
+                                    false,
+                                    context.get_quant_args(),
+                                    parallel_args_.dit_tp_group_,
+                                    options_));
 
     norm_q_ =
         register_module("norm_q", layer::RMSNorm(head_dim, 1e-6f, options_));
@@ -235,16 +263,12 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
     int64_t batch_size, channel, height, width;
     batch_size = hidden_states.size(0);
 
-    auto qkv = fused_qkv_->forward(hidden_states);
-    auto chunks = qkv.chunk(3, -1);
+    torch::Tensor query = to_q_->forward(hidden_states);
+    torch::Tensor key = to_k_->forward(hidden_states);
+    torch::Tensor value = to_v_->forward(hidden_states);
 
-    torch::Tensor query = chunks[0];
-    torch::Tensor key = chunks[1];
-    torch::Tensor value = chunks[2];
-
-    // Reshape for multi-head attention
     int64_t inner_dim = key.size(-1);
-    int64_t attn_heads = heads_;
+    int64_t attn_heads = heads_ / tp_size_;
     int64_t head_dim = inner_dim / attn_heads;
 #if defined(USE_NPU)
     query = query.view({batch_size, -1, attn_heads, head_dim}).contiguous();
@@ -277,7 +301,11 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
                                                          65535);
     auto attn_output = std::get<0>(results);
     attn_output = attn_output.to(query.dtype());
-    return attn_output.flatten(2);
+    torch::Tensor output = attn_output.flatten(2);
+    if (tp_size_ > 1) {
+      output = parallel_state::gather(output, parallel_args_.dit_tp_group_);
+    }
+    return output;
 #elif defined(USE_CUDA) || defined(USE_MLU)
     query = query.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
     key = key.view({batch_size, -1, attn_heads, head_dim}).transpose(1, 2);
@@ -304,51 +332,119 @@ class FluxSingleAttentionImpl : public torch::nn::Module {
     norm_q_->load_state_dict(state_dict.get_dict_with_prefix("norm_q."));
     // norm_k
     norm_k_->load_state_dict(state_dict.get_dict_with_prefix("norm_k."));
-    // fused_qkv_
-    fused_qkv_->load_state_dict(state_dict, {"to_q", "to_k", "to_v"});
-  }
-
-  void verify_loaded_weights(const std::string& prefix) const {
-    fused_qkv_->verify_loaded_weights(prefix + "to_q|to_k|to_v.");
+    // qkv
+    to_q_->load_state_dict(state_dict.get_dict_with_prefix("to_q."));
+    to_k_->load_state_dict(state_dict.get_dict_with_prefix("to_k."));
+    to_v_->load_state_dict(state_dict.get_dict_with_prefix("to_v."));
   }
 
  private:
   int64_t heads_;
-  layer::FusedAddMatmul fused_qkv_{nullptr};
+  int64_t tp_size_;
   layer::RMSNorm norm_q_{nullptr};
   layer::RMSNorm norm_k_{nullptr};
   torch::TensorOptions options_;
+  layer::ColumnParallelLinear to_q_{nullptr};
+  layer::ColumnParallelLinear to_k_{nullptr};
+  layer::ColumnParallelLinear to_v_{nullptr};
+  ParallelArgs parallel_args_;
 };
 TORCH_MODULE(FluxSingleAttention);
 
 class FluxAttentionImpl : public torch::nn::Module {
  public:
   explicit FluxAttentionImpl(const ModelContext& context)
-      : options_(context.get_tensor_options()) {
+      : options_(context.get_tensor_options()),
+        parallel_args_(context.get_parallel_args()) {
     auto model_args = context.get_model_args();
     heads_ = model_args.n_heads();
     auto head_dim = model_args.head_dim();
     auto query_dim = heads_ * head_dim;
     auto out_dim = query_dim;
     auto added_kv_proj_dim = query_dim;
+    auto inner_dim = query_dim;
+    tp_size_ = FLAGS_tp_size;
 
-    to_out_ = register_module(
-        "to_out",
-        layer::AddMatmul(out_dim, query_dim, /*with_bias=*/true, options_));
+    to_q_ = register_module(
+        "to_q",
+        layer::ColumnParallelLinear(query_dim,
+                                    inner_dim,
+                                    true,
+                                    false,
+                                    context.get_quant_args(),
+                                    parallel_args_.dit_tp_group_,
+                                    options_));
 
-    to_add_out_ = register_module(
-        "to_add_out",
-        layer::AddMatmul(
-            out_dim, added_kv_proj_dim, /*with_bias=*/true, options_));
+    to_k_ = register_module(
+        "to_k",
+        layer::ColumnParallelLinear(query_dim,
+                                    inner_dim,
+                                    true,
+                                    false,
+                                    context.get_quant_args(),
+                                    parallel_args_.dit_tp_group_,
+                                    options_));
 
-    fused_qkv_ = register_module(
-        "fused_qkv",
-        layer::FusedAddMatmul(
-            query_dim, 3 * out_dim, /*with_bias=*/true, options_));
-    fused_add_qkv_ = register_module(
-        "fused_add_qkv",
-        layer::FusedAddMatmul(
-            added_kv_proj_dim, 3 * out_dim, /*with_bias=*/true, options_));
+    to_v_ = register_module(
+        "to_v",
+        layer::ColumnParallelLinear(query_dim,
+                                    inner_dim,
+                                    true,
+                                    false,
+                                    context.get_quant_args(),
+                                    parallel_args_.dit_tp_group_,
+                                    options_));
+
+    add_q_proj_ = register_module(
+        "add_q_proj",
+        layer::ColumnParallelLinear(query_dim,
+                                    inner_dim,
+                                    true,
+                                    false,
+                                    context.get_quant_args(),
+                                    parallel_args_.dit_tp_group_,
+                                    options_));
+
+    add_k_proj_ = register_module(
+        "add_k_proj",
+        layer::ColumnParallelLinear(query_dim,
+                                    inner_dim,
+                                    true,
+                                    false,
+                                    context.get_quant_args(),
+                                    parallel_args_.dit_tp_group_,
+                                    options_));
+
+    add_v_proj_ = register_module(
+        "add_v_proj",
+        layer::ColumnParallelLinear(query_dim,
+                                    inner_dim,
+                                    true,
+                                    false,
+                                    context.get_quant_args(),
+                                    parallel_args_.dit_tp_group_,
+                                    options_));
+
+    to_out_ =
+        register_module("to_out",
+                        layer::RowParallelLinear(query_dim,
+                                                 out_dim,
+                                                 true,
+                                                 true,
+                                                 true,
+                                                 context.get_quant_args(),
+                                                 parallel_args_.dit_tp_group_,
+                                                 options_));
+    to_add_out_ =
+        register_module("to_add_out",
+                        layer::RowParallelLinear(query_dim,
+                                                 out_dim,
+                                                 true,
+                                                 true,
+                                                 true,
+                                                 context.get_quant_args(),
+                                                 parallel_args_.dit_tp_group_,
+                                                 options_));
 
     norm_q_ =
         register_module("norm_q", layer::RMSNorm(head_dim, 1e-6f, options_));
@@ -391,15 +487,12 @@ class FluxAttentionImpl : public torch::nn::Module {
     }
     int64_t batch_size = encoder_hidden_states_reshaped.size(0);
 
-    auto qkv = fused_qkv_->forward(hidden_states_reshaped);
-
-    auto chunks = qkv.chunk(3, -1);
-    torch::Tensor query = chunks[0];
-    torch::Tensor key = chunks[1];
-    torch::Tensor value = chunks[2];
+    torch::Tensor query = to_q_->forward(hidden_states_reshaped);
+    torch::Tensor key = to_k_->forward(hidden_states_reshaped);
+    torch::Tensor value = to_v_->forward(hidden_states_reshaped);
 
     int64_t inner_dim = key.size(-1);
-    int64_t attn_heads = heads_;
+    int64_t attn_heads = heads_ / tp_size_;
 
     int64_t head_dim = inner_dim / attn_heads;
     query = query.view({batch_size, -1, attn_heads, head_dim});
@@ -408,12 +501,12 @@ class FluxAttentionImpl : public torch::nn::Module {
     if (norm_q_) query = std::get<0>(norm_q_->forward(query));
     if (norm_k_) key = std::get<0>(norm_k_->forward(key));
 
-    auto encoder_qkv = fused_add_qkv_->forward(encoder_hidden_states_reshaped);
-
-    auto encoder_chunks = encoder_qkv.chunk(3, -1);
-    torch::Tensor encoder_hidden_states_query_proj = encoder_chunks[0];
-    torch::Tensor encoder_hidden_states_key_proj = encoder_chunks[1];
-    torch::Tensor encoder_hidden_states_value_proj = encoder_chunks[2];
+    torch::Tensor encoder_hidden_states_query_proj =
+        add_q_proj_->forward(encoder_hidden_states_reshaped);
+    torch::Tensor encoder_hidden_states_key_proj =
+        add_k_proj_->forward(encoder_hidden_states_reshaped);
+    torch::Tensor encoder_hidden_states_value_proj =
+        add_v_proj_->forward(encoder_hidden_states_reshaped);
 
     encoder_hidden_states_query_proj = encoder_hidden_states_query_proj.view(
         {batch_size, -1, attn_heads, head_dim});
@@ -499,33 +592,43 @@ class FluxAttentionImpl : public torch::nn::Module {
     // norm_added_k
     norm_added_k_->load_state_dict(
         state_dict.get_dict_with_prefix("norm_added_k."));
-    // fused_qkv_
-    fused_qkv_->load_state_dict(state_dict, {"to_q", "to_k", "to_v"});
-    // fused_add_qkv_
-    fused_add_qkv_->load_state_dict(state_dict,
-                                    {"add_q_proj", "add_k_proj", "add_v_proj"});
-  }
 
-  void verify_loaded_weights(const std::string& prefix) const {
-    to_out_->verify_loaded_weights(prefix + "to_out.0.");
-    to_add_out_->verify_loaded_weights(prefix + "to_add_out.");
+    // add_q_proj
+    add_q_proj_->load_state_dict(
+        state_dict.get_dict_with_prefix("add_q_proj."));
+    // add_k_proj
+    add_k_proj_->load_state_dict(
+        state_dict.get_dict_with_prefix("add_k_proj."));
+    // add_v_proj
+    add_v_proj_->load_state_dict(
+        state_dict.get_dict_with_prefix("add_v_proj."));
 
-    fused_qkv_->verify_loaded_weights(prefix + "to_q|to_k|to_v.");
-    fused_add_qkv_->verify_loaded_weights(prefix +
-                                          "add_q_proj|add_k_proj|add_v_proj.");
+    // to_q
+    to_q_->load_state_dict(state_dict.get_dict_with_prefix("to_q."));
+    // to_k
+    to_k_->load_state_dict(state_dict.get_dict_with_prefix("to_k."));
+    // to_v
+    to_v_->load_state_dict(state_dict.get_dict_with_prefix("to_v."));
   }
 
  private:
-  layer::FusedAddMatmul fused_qkv_{nullptr};
-  layer::FusedAddMatmul fused_add_qkv_{nullptr};
-  layer::AddMatmul to_out_{nullptr};
-  layer::AddMatmul to_add_out_{nullptr};
+  layer::ColumnParallelLinear to_q_{nullptr};
+  layer::ColumnParallelLinear to_k_{nullptr};
+  layer::ColumnParallelLinear to_v_{nullptr};
+  layer::ColumnParallelLinear add_q_proj_{nullptr};
+  layer::ColumnParallelLinear add_k_proj_{nullptr};
+  layer::ColumnParallelLinear add_v_proj_{nullptr};
+
+  layer::RowParallelLinear to_out_{nullptr};
+  layer::RowParallelLinear to_add_out_{nullptr};
 
   layer::RMSNorm norm_q_{nullptr};
   layer::RMSNorm norm_k_{nullptr};
   layer::RMSNorm norm_added_q_{nullptr};
   layer::RMSNorm norm_added_k_{nullptr};
   int64_t heads_;
+  int64_t tp_size_;
+  ParallelArgs parallel_args_;
   torch::TensorOptions options_;
 };
 TORCH_MODULE(FluxAttention);
@@ -960,29 +1063,41 @@ TORCH_MODULE(AdaLayerNormContinuous);
 class FeedForwardImpl : public torch::nn::Module {
  public:
   explicit FeedForwardImpl(const ModelContext& context)
-      : options_(context.get_tensor_options()) {
+      : options_(context.get_tensor_options()),
+        parallel_args_(context.get_parallel_args()) {
     auto model_args = context.get_model_args();
     auto num_attention_heads = model_args.n_heads();
     auto attention_head_dim = model_args.head_dim();
     auto dim = num_attention_heads * attention_head_dim;
     auto inner_dim = dim * 4;
     auto dim_out = dim;
-
+    tp_size_ = FLAGS_tp_size;
     // linear1
     linear1_ = register_module(
         "linear1",
-        layer::AddMatmul(dim, inner_dim, /*with_bias=*/true, options_));
+        layer::ColumnParallelLinear(dim,
+                                    inner_dim,
+                                    true,
+                                    false,
+                                    context.get_quant_args(),
+                                    parallel_args_.dit_tp_group_,
+                                    options_));
     // activation
     activation_ = register_module(
         "activation",
         torch::nn::Functional(std::function<at::Tensor(const at::Tensor&)>(
             [](const at::Tensor& x) { return torch::gelu(x, "tanh"); })));
-
     // linear2
-
-    linear2_ = register_module(
-        "linear2",
-        layer::AddMatmul(inner_dim, dim_out, /*with_bias=*/true, options_));
+    linear2_ =
+        register_module("linear2",
+                        layer::RowParallelLinear(inner_dim,
+                                                 dim_out,
+                                                 true,
+                                                 true,
+                                                 true,
+                                                 context.get_quant_args(),
+                                                 parallel_args_.dit_tp_group_,
+                                                 options_));
   }
 
   torch::Tensor forward(const torch::Tensor& hidden_states) {
@@ -999,23 +1114,21 @@ class FeedForwardImpl : public torch::nn::Module {
     linear2_->load_state_dict(state_dict.get_dict_with_prefix("net.2."));
   }
 
-  void verify_loaded_weights(const std::string& prefix) {
-    linear1_->verify_loaded_weights(prefix + "net.0.proj.");
-    linear2_->verify_loaded_weights(prefix + "net.2.");
-  }
-
  private:
-  layer::AddMatmul linear1_{nullptr};
   torch::nn::Functional activation_{nullptr};
-  layer::AddMatmul linear2_{nullptr};
   torch::TensorOptions options_;
+  ParallelArgs parallel_args_;
+  int64_t tp_size_;
+  layer::ColumnParallelLinear linear1_{nullptr};
+  layer::RowParallelLinear linear2_{nullptr};
 };
 TORCH_MODULE(FeedForward);
 
 class FluxSingleTransformerBlockImpl : public torch::nn::Module {
  public:
   explicit FluxSingleTransformerBlockImpl(const ModelContext& context)
-      : options_(context.get_tensor_options()) {
+      : options_(context.get_tensor_options()),
+        parallel_args_(context.get_parallel_args()) {
     auto model_args = context.get_model_args();
     auto num_attention_heads = model_args.n_heads();
     auto attention_head_dim = model_args.head_dim();
@@ -1027,14 +1140,25 @@ class FluxSingleTransformerBlockImpl : public torch::nn::Module {
     int64_t mlp_out_dim = mlp_hidden_dim_;
     proj_mlp_ = register_module(
         "proj_mlp",
-        layer::AddMatmul(dim, mlp_out_dim, /*with_bias=*/true, options_));
+        layer::ColumnParallelLinear(dim,
+                                    mlp_hidden_dim_,
+                                    true,
+                                    true,
+                                    context.get_quant_args(),
+                                    parallel_args_.dit_tp_group_,
+                                    options_));
 
     int64_t proj_in_dim = dim + mlp_hidden_dim_;
     int64_t proj_out_dim = dim;
     proj_out_ = register_module(
         "proj_out",
-        layer::AddMatmul(
-            proj_in_dim, proj_out_dim, /*with_bias=*/true, options_));
+        layer::ColumnParallelLinear(proj_in_dim,
+                                    proj_out_dim,
+                                    true,
+                                    true,
+                                    context.get_quant_args(),
+                                    parallel_args_.dit_tp_group_,
+                                    options_));
     act_mlp_ =
         register_module("gelu",
                         torch::nn::Functional(
@@ -1073,16 +1197,15 @@ class FluxSingleTransformerBlockImpl : public torch::nn::Module {
   }
 
   void verify_loaded_weights(const std::string& prefix) {
-    attn_->verify_loaded_weights(prefix + "attn.");
     norm_->verify_loaded_weights(prefix + "norm.");
-    proj_mlp_->verify_loaded_weights(prefix + "proj_mlp.");
-    proj_out_->verify_loaded_weights(prefix + "proj_out.");
   }
 
  private:
   AdaLayerNormZeroSingle norm_{nullptr};
-  layer::AddMatmul proj_mlp_{nullptr};
-  layer::AddMatmul proj_out_{nullptr};
+  ParallelArgs parallel_args_;
+  int64_t tp_size_;
+  layer::ColumnParallelLinear proj_mlp_{nullptr};
+  layer::ColumnParallelLinear proj_out_{nullptr};
   torch::nn::Functional act_mlp_{nullptr};
   FluxSingleAttention attn_{nullptr};
   int64_t mlp_hidden_dim_;
@@ -1181,9 +1304,6 @@ class FluxTransformerBlockImpl : public torch::nn::Module {
   void verify_loaded_weights(const std::string& prefix) {
     norm1_->verify_loaded_weights(prefix + "norm1.");
     norm1_context_->verify_loaded_weights(prefix + "norm1_context.");
-    attn_->verify_loaded_weights(prefix + "attn.");
-    ff_->verify_loaded_weights(prefix + "ff.");
-    ff_context_->verify_loaded_weights(prefix + "ff_context.");
   }
 
  private:

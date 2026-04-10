@@ -205,8 +205,8 @@ ColumnParallelLinearImpl::ColumnParallelLinearImpl(
       process_group_(process_group),
       device_(options.device()),
       linear_extra_args_(linear_extra_args) {
-  rank_ = process_group_->rank();
-  world_size_ = process_group_->world_size();
+  rank_ = process_group_ ? process_group_->rank() : 0;
+  world_size_ = process_group_ ? process_group_->world_size() : 1;
   CHECK(out_features % world_size_ == 0)
       << "out_features " << out_features << " not divisible by world_size "
       << world_size_;
@@ -684,8 +684,8 @@ RowParallelLinearImpl::RowParallelLinearImpl(
       quant_args_(quant_args),
       process_group_(process_group),
       linear_extra_args_(linear_extra_args) {
-  rank_ = process_group_->rank();
-  world_size_ = process_group_->world_size();
+  rank_ = process_group_ ? process_group_->rank() : 0;
+  world_size_ = process_group_ ? process_group_->world_size() : 1;
   CHECK(in_features % world_size_ == 0)
       << "in_features " << in_features << " not divisible by world_size "
       << world_size_;
