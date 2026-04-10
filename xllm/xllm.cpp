@@ -194,6 +194,7 @@ int run() {
       .max_cache_size(FLAGS_max_cache_size)
       .max_memory_utilization(FLAGS_max_memory_utilization)
       .enable_prefix_cache(FLAGS_enable_prefix_cache)
+      .enable_in_batch_prefix_cache(FLAGS_enable_in_batch_prefix_cache)
       .max_tokens_per_batch(FLAGS_max_tokens_per_batch)
       .max_seqs_per_batch(FLAGS_max_seqs_per_batch)
       .max_tokens_per_chunk_for_prefill(FLAGS_max_tokens_per_chunk_for_prefill)

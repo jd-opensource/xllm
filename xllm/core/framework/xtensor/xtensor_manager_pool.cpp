@@ -155,13 +155,13 @@ int32_t XTensorManagerPool::get_dp_rank(Sequence* sequence) const {
 }
 
 bool XTensorManagerPool::allocate(Sequence* sequence) {
-  DCHECK(sequence != nullptr);
+  CHECK(sequence != nullptr);
   return allocate(sequence, sequence->num_tokens());
 }
 
 bool XTensorManagerPool::allocate(std::vector<Sequence*>& sequences) {
   for (auto* sequence : sequences) {
-    DCHECK(sequence != nullptr);
+    CHECK(sequence != nullptr);
     if (!allocate(sequence)) {
       return false;
     }
@@ -189,7 +189,7 @@ void XTensorManagerPool::deallocate(Request* request) {
 
 void XTensorManagerPool::deallocate(std::vector<Sequence*>& sequences) {
   for (auto* sequence : sequences) {
-    DCHECK(sequence != nullptr);
+    CHECK(sequence != nullptr);
     deallocate(sequence);
   }
 }

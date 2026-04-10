@@ -17,6 +17,8 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include "block_manager_impl.h"
+#include "block_manager_pool.h"
+#include "framework/request/request.h"
 
 namespace xllm {
 
@@ -117,6 +119,48 @@ TEST(BlockManagerTest, Basic) {
     }
     EXPECT_FALSE(block.is_valid());
   }
+}
+
+TEST(BlockManagerPoolTest,
+     CachePrefixClampsToSequenceTokensWhenBudgetIsOverestimated) {
+  BlockManagerPool::Options options;
+  options.num_blocks_ = 16;
+  options.block_size_ = 4;
+  options.enable_prefix_cache_ = true;
+  BlockManagerPool pool(options, 1);
+
+  RequestSamplingParam sampling_param;
+  SchedulerParam scheduler_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(1);
+  stopping_checker.set_max_context_len(64);
+  stopping_checker.set_ignore_eos(true);
+
+  std::vector<int32_t> prompt_token_ids = {1, 2, 3, 4, 5, 6, 7};
+  RequestState request_state("prompt",
+                             prompt_token_ids,
+                             sampling_param,
+                             scheduler_param,
+                             stopping_checker,
+                             /*seq_capacity=*/32,
+                             /*n=*/1,
+                             /*best_of=*/1,
+                             /*logprobs=*/false,
+                             /*stream=*/false,
+                             /*echo=*/false,
+                             /*skip_special_tokens=*/false,
+                             /*enable_schedule_overlap=*/false,
+                             nullptr,
+                             nullptr);
+
+  auto request = std::make_shared<Request>(
+      "request_id", "x_request_id", "x_request_time", request_state, "service");
+  auto* sequence = request->sequences()[0].get();
+  ASSERT_TRUE(pool.allocate(sequence));
+
+  EXPECT_NO_FATAL_FAILURE(
+      pool.cache(sequence, /*num_tokens=*/8));
+  EXPECT_EQ(pool.num_blocks_in_prefix_cache()[0], 1);
 }
 
 }  // namespace xllm

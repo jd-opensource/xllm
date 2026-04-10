@@ -62,6 +62,7 @@ class Options {
   PROPERTY(double, max_memory_utilization) = 0.9;
 
   PROPERTY(bool, enable_prefix_cache) = true;
+  PROPERTY(bool, enable_in_batch_prefix_cache) = true;
 
   // max tokens num per batch
   PROPERTY(int32_t, max_tokens_per_batch) = 20480;

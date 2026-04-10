@@ -29,6 +29,7 @@ std::string Options::to_string() const {
      << ", max_cache_size: " << max_cache_size()
      << ", max_memory_utilization: " << max_memory_utilization()
      << ", enable_prefix_cache: " << enable_prefix_cache()
+     << ", enable_in_batch_prefix_cache: " << enable_in_batch_prefix_cache()
      << ", max_tokens_per_batch: " << max_tokens_per_batch()
      << ", max_seqs_per_batch: " << max_seqs_per_batch()
      << ", max_tokens_per_chunk_for_prefill: "
