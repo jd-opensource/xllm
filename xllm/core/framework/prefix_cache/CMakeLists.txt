@@ -8,10 +8,12 @@ cc_library(
   HDRS
     prefix_cache.h
     prefix_cache_with_upload.h
+    mm_prefix_cache.h
     prefix_cache_factory.h
   SRCS 
     prefix_cache.cpp
     prefix_cache_with_upload.cpp
+    mm_prefix_cache.cpp
     prefix_cache_factory.cpp
   DEPS
     $<$<BOOL:${USE_NPU}>:torch_npu>

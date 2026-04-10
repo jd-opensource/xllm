@@ -128,28 +128,54 @@ void GLM4VInputProcessor::process(std::string& prompt, const MMData& mm_data) {
 void GLM4VInputProcessor::find_mm_spans(const std::vector<int>& prompt,
                                         MMData& mm_data) {
   size_t tokens_num = prompt.size();
-  uint32_t global_mm_index = 0;
-  uint32_t offset = 0;
-  uint32_t length = 0;
+  int32_t global_mm_index = 0;
+  int32_t image_span_offset = 0;
+  int32_t image_span_length = 0;
   bool is_video = false;
+  int32_t video_offset = 0;
+  std::vector<uint8_t> video_mask;
   auto& mm_items = mm_data.items<MMItemVec>();
   for (size_t idx = 0; idx < tokens_num; ++idx) {
     auto token = prompt[idx];
     if (token == video_start_token_id_) {
       is_video = true;
+      video_offset = idx + 1;
+      video_mask.clear();
+      continue;
     } else if (token == video_end_token_id_) {
+      if (is_video) {
+        auto& item = mm_items[global_mm_index++];
+        int32_t video_length = static_cast<int32_t>(video_mask.size());
+        item.mutable_state().mutable_token_pos() = {video_offset, video_length};
+        auto mask =
+            torch::from_blob(
+                video_mask.data(),
+                {static_cast<int64_t>(video_length)},
+                torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU))
+                .clone();
+        item.mutable_state().mutable_mm_token_mask() = mask;
+      }
       is_video = false;
+      continue;
     }
-    if (is_video) continue;
+    if (is_video) {
+      video_mask.push_back(token == image_token_id_);
+      continue;
+    }
     if (token == image_start_token_id_) {
-      offset = idx + 1;
+      image_span_offset = idx + 1;
     }
     if (token == image_token_id_) {
-      length++;
+      image_span_length++;
     } else if (token == image_end_token_id_) {
       auto& item = mm_items[global_mm_index++];
-      item.mutable_state().mutable_token_pos() = {offset, length};
-      length = 0;
+      item.mutable_state().mutable_token_pos() = {image_span_offset,
+                                                  image_span_length};
+      auto mask = torch::ones(
+          {image_span_length},
+          torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+      item.mutable_state().mutable_mm_token_mask() = mask;
+      image_span_length = 0;
     }
   }
 }

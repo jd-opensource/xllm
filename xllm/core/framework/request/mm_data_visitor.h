@@ -90,15 +90,37 @@ class EncoderOutputScatterVisitor : public MMDataItem::IVisitor {
 
 class EncoderEmbeddingGatherVisitor : public MMDataItem::IVisitor {
  public:
-  EncoderEmbeddingGatherVisitor(const torch::Device& device)
-      : device_(device) {}
-  bool visit(MMDataItem& data) override;
+  EncoderEmbeddingGatherVisitor(const torch::Device& device,
+                                const std::vector<int32_t>& seq_lens,
+                                const std::vector<int32_t>& scheduled_seq_lens);
+  bool visit(MMDataItem& data, int32_t seq_index) override;
   bool finish(MMBatchData& mm_data);
 
  public:
   torch::Device device_;
   std::string gather_prefix_ = "embedding";
+  const std::vector<int32_t>& per_seq_context_lens_;
+  const std::vector<int32_t>& per_seq_scheduled_lens_;
+  std::vector<int32_t> per_seq_scheduled_offsets_;
+  int32_t total_scheduled_tokens_ = 0;
+  torch::Tensor image_mask_;
+  torch::Tensor video_mask_;
+  torch::Tensor audio_mask_;
   std::unordered_map<MMKey, std::vector<torch::Tensor>> datas_;
+};
+
+class UpdateMMItemScheduleStateVisitor : public MMDataItem::IVisitor {
+ public:
+  UpdateMMItemScheduleStateVisitor(int32_t computed_token_num = 0,
+                                   int32_t q_seq_len = 0)
+      : computed_token_num_(computed_token_num), q_seq_len_(q_seq_len) {}
+
+  bool visit(MMDataItem& item) override;
+
+ public:
+  std::vector<MMDataItem> mm_data_items_;
+  int32_t computed_token_num_ = 0;
+  int32_t q_seq_len_ = 0;
 };
 
 }  // namespace xllm

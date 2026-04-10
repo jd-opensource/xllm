@@ -1006,7 +1006,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     std::vector<int64_t> image_tokens_vec(
         num_slices.data_ptr<int64_t>(),
         num_slices.data_ptr<int64_t>() + num_slices.numel());
-    multimodal_embeds["image|embedding"] =
+    multimodal_embeds["image|embedding|image"] =
         image_embedding.split(image_tokens_vec, 0 /*dim*/);
 
     return multimodal_embeds;

@@ -149,9 +149,9 @@ void Qwen3_VLInputProcessor::process(std::string& prompt,
 void Qwen3_VLInputProcessor::find_mm_spans(const std::vector<int32_t>& prompt,
                                            MMData& mm_data) {
   auto start = prompt.begin();
-  uint32_t global_mm_index = 0;
-  uint32_t offset = 0;
-  uint32_t length = 0;
+  int32_t global_mm_index = 0;
+  int32_t offset = 0;
+  int32_t length = 0;
   auto& mm_items = mm_data.items<MMItemVec>();
 
   torch::Tensor video_grid_thw;
@@ -161,6 +161,9 @@ void Qwen3_VLInputProcessor::find_mm_spans(const std::vector<int32_t>& prompt,
 
   int32_t video_index = 0;
   int32_t video_frames_left = 0;
+  int32_t video_span_start = -1;
+  int32_t video_span_end = -1;
+  std::vector<uint8_t> video_mask;
 
   while (true) {
     auto vision_start_it =
@@ -180,6 +183,9 @@ void Qwen3_VLInputProcessor::find_mm_spans(const std::vector<int32_t>& prompt,
       CHECK(global_mm_index < mm_items.size());
       auto& item = mm_items[global_mm_index];
       item.mutable_state().mutable_token_pos() = {offset + 1, length};
+      item.mutable_state().mutable_mm_token_mask() = torch::ones(
+          {length},
+          torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
       ++global_mm_index;
 
     } else if (first_token == video_token_id_) {
@@ -190,16 +196,39 @@ void Qwen3_VLInputProcessor::find_mm_spans(const std::vector<int32_t>& prompt,
         CHECK(global_mm_index < mm_items.size());
 
         video_frames_left = video_grid_thw[video_index][0].item<int32_t>();
+        video_span_start = offset + 1;
+        video_span_end = video_span_start;
+        video_mask.clear();
+      }
 
+      CHECK(video_frames_left > 0);
+      const int32_t frame_span_start = offset + 1;
+      const int32_t frame_span_end = frame_span_start + length;
+      if (video_span_end < frame_span_start) {
+        video_mask.insert(
+            video_mask.end(), frame_span_start - video_span_end, 0);
+      }
+      for (auto token_it = vision_start_it + 1; token_it != vision_end_it;
+           ++token_it) {
+        video_mask.push_back(
+            static_cast<uint8_t>(*token_it == video_token_id_));
+      }
+      video_span_end = frame_span_end;
+      --video_frames_left;
+      if (video_frames_left == 0) {
         auto& item = mm_items[global_mm_index];
-        item.mutable_state().mutable_token_pos() = {offset + 1, length};
+        item.mutable_state().mutable_token_pos() = {
+            video_span_start, video_span_end - video_span_start};
+        item.mutable_state().mutable_mm_token_mask() =
+            torch::from_blob(
+                video_mask.data(),
+                {static_cast<int64_t>(video_mask.size())},
+                torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU))
+                .clone();
 
         ++global_mm_index;
         ++video_index;
       }
-
-      CHECK(video_frames_left > 0);
-      --video_frames_left;
     }
 
     start = std::next(vision_end_it);
