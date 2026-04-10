@@ -360,4 +360,33 @@ inline int32_t get_dtype_size(torch::ScalarType dtype) {
   return static_cast<int32_t>(torch::elementSize(dtype));
 }
 
+inline torch::ScalarType resolve_ssm_dtype(
+    const std::string& mamba_ssm_dtype_str,
+    torch::ScalarType default_dtype) {
+  if (mamba_ssm_dtype_str.empty()) {
+    return default_dtype;
+  }
+  auto parsed = try_get_scalar_type_from_string(mamba_ssm_dtype_str);
+  if (parsed) {
+    return parsed.value();
+  }
+  LOG(WARNING) << "Failed to parse mamba_ssm_dtype='" << mamba_ssm_dtype_str
+               << "', falling back to default_dtype: " << default_dtype;
+  return default_dtype;
+}
+
+inline int64_t resolve_ssm_dtype_size(const std::string& mamba_ssm_dtype_str,
+                                      int64_t default_dtype_size) {
+  if (mamba_ssm_dtype_str.empty()) {
+    return default_dtype_size;
+  }
+  auto parsed = try_get_scalar_type_from_string(mamba_ssm_dtype_str);
+  if (parsed) {
+    return get_dtype_size(parsed.value());
+  }
+  LOG(WARNING) << "Failed to parse mamba_ssm_dtype='" << mamba_ssm_dtype_str
+               << "', falling back to default dtype size";
+  return default_dtype_size;
+}
+
 }  // namespace xllm

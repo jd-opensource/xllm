@@ -144,7 +144,9 @@ TORCH_MODULE(Qwen3_5ForCausalLM);
   SET_ARG(n_group, -1);                                                        \
   SET_ARG(topk_group, 0);                                                      \
   SET_ARG(routed_scaling_factor, 1.0f);                                        \
-  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}))
+  SET_ARG(stop_token_ids,                                                      \
+          std::unordered_set<int32_t>({args->eos_token_id()}));                \
+  LOAD_ARG_TEXT_OR_ROOT(mamba_ssm_dtype, "mamba_ssm_dtype", "float32")
 
 #define LOAD_QWEN3_5_TYPE_AND_DTYPE(default_model_type)         \
   LOAD_ARG_OR(model_type, "model_type", default_model_type);    \

@@ -411,6 +411,8 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     gdn_params.beta = 1.0f;
     gdn_params.threshold = 20.0f;
     std::tie(g, beta) = xllm::kernel::fused_gdn_gating(gdn_params);
+    g = g.permute({1, 0, 2}).contiguous();
+    beta = beta.permute({1, 0, 2}).contiguous();
   }
   auto [processed_q, processed_k, processed_v] = process_mixed_qkv(mixed_qkv);
   int64_t repeat_times = num_v_heads_ / num_k_heads_;

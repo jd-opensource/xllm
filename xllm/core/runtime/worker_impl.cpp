@@ -250,6 +250,10 @@ bool WorkerImpl::allocate_kv_cache(
 
       if (is_linear_layer) {
         // Linear attention layer: only allocate conv_cache and ssm_cache
+        // Parse mamba_ssm_dtype if specified
+        torch::ScalarType ssm_dtype =
+            resolve_ssm_dtype(args.mamba_ssm_dtype(), dtype_);
+
 #if defined(USE_NPU)
         aclFormat npu_format_type = ACL_FORMAT_ND;
         if (enable_linear_attention) {
@@ -267,14 +271,14 @@ bool WorkerImpl::allocate_kv_cache(
           conv_cache = torch::zeros(kv_cache_shape[2],
                                     torch::dtype(dtype_).device(device_));
           ssm_cache = torch::zeros(kv_cache_shape[3],
-                                   torch::dtype(dtype_).device(device_));
+                                   torch::dtype(ssm_dtype).device(device_));
         }
 #else
         if (enable_linear_attention) {
           conv_cache = torch::empty(kv_cache_shape[2],
                                     torch::dtype(dtype_).device(device_));
           ssm_cache = torch::empty(kv_cache_shape[3],
-                                   torch::dtype(dtype_).device(device_));
+                                   torch::dtype(ssm_dtype).device(device_));
         }
 #endif
         // Create empty KVCache with only conv and ssm
