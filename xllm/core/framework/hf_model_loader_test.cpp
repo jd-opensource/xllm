@@ -17,12 +17,37 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+
 #include "core/platform/device.h"
+#include "core/util/model_config_utils.h"
 #if defined(USE_NPU)
 #include "models/model_registry.h"
 #endif
 
 namespace xllm {
+
+TEST(HFModelLoaderTest, Qwen35BackendAwareModelTypeSelection) {
+  JsonReader reader;
+  ASSERT_TRUE(reader.parse_text(R"json(
+    {
+      "architectures": ["Qwen3_5ForConditionalGeneration"],
+      "model_type": "qwen3_5",
+      "text_config": {
+        "model_type": "qwen3_5_text"
+      },
+      "vision_config": {
+        "model_type": "qwen3_5"
+      }
+    }
+  )json"));
+
+  const auto fake_model_path = std::filesystem::path("/tmp/Qwen3.5-27B");
+  EXPECT_EQ(util::get_model_type(reader, fake_model_path), "qwen3_5_text");
+  EXPECT_EQ(util::get_model_type(reader, fake_model_path, "vlm"), "qwen3_5_vl");
+  EXPECT_EQ(util::get_model_type(reader, fake_model_path, "llm"),
+            "qwen3_5_text");
+}
 
 TEST(HFModelLoaderTest, LoadCompressedTensorsFp8StaticConfig) {
   JsonReader reader;
@@ -122,6 +147,38 @@ TEST(HFModelLoaderTest, Qwen35MtpModelArgsFromMoeConfig) {
   ASSERT_EQ(args.layer_types().size(), 2);
   EXPECT_EQ(args.layer_types()[0], "full_attention");
   EXPECT_EQ(args.layer_types()[1], "full_attention");
+}
+
+TEST(HFModelLoaderTest, Qwen35TextModelArgsKeepTextTypeAndMropeConfig) {
+  auto loader = ModelRegistry::get_model_args_loader("qwen3_5_text");
+  ASSERT_TRUE(loader != nullptr);
+
+  JsonReader reader;
+  ASSERT_TRUE(reader.parse_text(R"json(
+    {
+      "architectures": ["Qwen3_5ForConditionalGeneration"],
+      "model_type": "qwen3_5",
+      "text_config": {
+        "model_type": "qwen3_5_text",
+        "rope_parameters": {
+          "mrope_interleaved": true,
+          "mrope_section": [11, 11, 10],
+          "partial_rotary_factor": 0.25,
+          "rope_theta": 10000000
+        }
+      },
+      "vision_config": {
+        "model_type": "qwen3_5"
+      }
+    }
+  )json"));
+
+  ModelArgs args;
+  ASSERT_TRUE(loader(reader, &args));
+  EXPECT_EQ(args.model_type(), "qwen3_5_text");
+  EXPECT_EQ(args.rope_scaling_mrope_section(),
+            (std::vector<int64_t>{11, 11, 10}));
+  EXPECT_TRUE(args.rope_scaling_mrope_interleaved());
 }
 #endif
 

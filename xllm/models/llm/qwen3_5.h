@@ -114,6 +114,18 @@ TORCH_MODULE(Qwen3_5ForCausalLM);
   LOAD_ARG_TEXT_OR_ROOT(linear_num_value_heads, "linear_num_value_heads", 32); \
   LOAD_ARG_TEXT_OR_ROOT(linear_value_head_dim, "linear_value_head_dim", 128);  \
   LOAD_QWEN3_5_ROPE_ARG(partial_rotary_factor, 0.25f);                         \
+  LOAD_ARG_OR(rope_scaling_mrope_interleaved,                                  \
+              "text_config.rope_scaling.mrope_interleaved",                    \
+              false);                                                          \
+  LOAD_ARG_OR(rope_scaling_mrope_interleaved,                                  \
+              "rope_scaling.mrope_interleaved",                                \
+              args->rope_scaling_mrope_interleaved());                         \
+  LOAD_ARG_OR(rope_scaling_mrope_interleaved,                                  \
+              "text_config.rope_parameters.mrope_interleaved",                 \
+              args->rope_scaling_mrope_interleaved());                         \
+  LOAD_ARG_OR(rope_scaling_mrope_interleaved,                                  \
+              "rope_parameters.mrope_interleaved",                             \
+              args->rope_scaling_mrope_interleaved());                         \
   LOAD_ARG_TEXT_OR_ROOT(shared_expert_intermediate_size,                       \
                         "shared_expert_intermediate_size",                     \
                         default_shared_expert_intermediate_size);              \
@@ -153,6 +165,16 @@ TORCH_MODULE(Qwen3_5ForCausalLM);
   LOAD_ARG_OR(dtype, "text_config.torch_dtype", args->dtype()); \
   LOAD_ARG_OR(dtype, "torch_dtype", args->dtype())
 
+#define LOAD_QWEN3_5_NESTED_ROPE_ARG(arg_name, json_key, default_value)     \
+  LOAD_ARG_OR(arg_name, "text_config." #arg_name, default_value);           \
+  LOAD_ARG_OR(arg_name, #arg_name, args->arg_name());                       \
+  LOAD_ARG_OR(                                                              \
+      arg_name, "text_config.rope_scaling." json_key, args->arg_name());    \
+  LOAD_ARG_OR(arg_name, "rope_scaling." json_key, args->arg_name());        \
+  LOAD_ARG_OR(                                                              \
+      arg_name, "text_config.rope_parameters." json_key, args->arg_name()); \
+  LOAD_ARG_OR(arg_name, "rope_parameters." json_key, args->arg_name())
+
 REGISTER_CAUSAL_MODEL(qwen3_5, Qwen3_5ForCausalLM);
 REGISTER_MODEL_ARGS(qwen3_5, [&] {
   LOAD_QWEN3_5_TYPE_AND_DTYPE("qwen3_5");
@@ -160,15 +182,23 @@ REGISTER_MODEL_ARGS(qwen3_5, [&] {
                                 /*num_experts=*/0,
                                 /*num_experts_per_tok=*/0,
                                 /*shared_expert_intermediate_size=*/0);
+  LOAD_QWEN3_5_NESTED_ROPE_ARG(
+      rope_scaling_mrope_section, "mrope_section", std::vector<int64_t>());
 });
 
 REGISTER_CAUSAL_MODEL(qwen3_5_text, Qwen3_5ForCausalLM);
 REGISTER_MODEL_ARGS(qwen3_5_text, [&] {
-  LOAD_QWEN3_5_TYPE_AND_DTYPE("qwen3_5_text");
+  SET_ARG(model_type, "qwen3_5_text");
+  LOAD_ARG_OR(dtype, "text_config.dtype", "bfloat16");
+  LOAD_ARG_OR(dtype, "dtype", args->dtype());
+  LOAD_ARG_OR(dtype, "text_config.torch_dtype", args->dtype());
+  LOAD_ARG_OR(dtype, "torch_dtype", args->dtype());
   LOAD_QWEN3_5_NEXT_COMPAT_ARGS(/*moe_intermediate_size=*/0,
                                 /*num_experts=*/0,
                                 /*num_experts_per_tok=*/0,
                                 /*shared_expert_intermediate_size=*/0);
+  LOAD_QWEN3_5_NESTED_ROPE_ARG(
+      rope_scaling_mrope_section, "mrope_section", std::vector<int64_t>());
 });
 
 REGISTER_CAUSAL_MODEL(qwen3_5_moe, Qwen3_5ForCausalLM);
@@ -178,17 +208,26 @@ REGISTER_MODEL_ARGS(qwen3_5_moe, [&] {
                                 /*num_experts=*/512,
                                 /*num_experts_per_tok=*/10,
                                 /*shared_expert_intermediate_size=*/512);
+  LOAD_QWEN3_5_NESTED_ROPE_ARG(
+      rope_scaling_mrope_section, "mrope_section", std::vector<int64_t>());
 });
 
 REGISTER_CAUSAL_MODEL(qwen3_5_moe_text, Qwen3_5ForCausalLM);
 REGISTER_MODEL_ARGS(qwen3_5_moe_text, [&] {
-  LOAD_QWEN3_5_TYPE_AND_DTYPE("qwen3_5_moe_text");
+  SET_ARG(model_type, "qwen3_5_moe_text");
+  LOAD_ARG_OR(dtype, "text_config.dtype", "bfloat16");
+  LOAD_ARG_OR(dtype, "dtype", args->dtype());
+  LOAD_ARG_OR(dtype, "text_config.torch_dtype", args->dtype());
+  LOAD_ARG_OR(dtype, "torch_dtype", args->dtype());
   LOAD_QWEN3_5_NEXT_COMPAT_ARGS(/*moe_intermediate_size=*/512,
                                 /*num_experts=*/512,
                                 /*num_experts_per_tok=*/10,
                                 /*shared_expert_intermediate_size=*/512);
+  LOAD_QWEN3_5_NESTED_ROPE_ARG(
+      rope_scaling_mrope_section, "mrope_section", std::vector<int64_t>());
 });
 
+#undef LOAD_QWEN3_5_NESTED_ROPE_ARG
 #undef LOAD_QWEN3_5_TYPE_AND_DTYPE
 #undef LOAD_QWEN3_5_NEXT_COMPAT_ARGS
 #undef LOAD_QWEN3_5_ROPE_ARG

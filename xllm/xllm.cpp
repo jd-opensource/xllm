@@ -50,10 +50,25 @@ static const std::unordered_set<std::string> prefill_sp_supported_model_set = {
     "deepseek_v32",
     "glm_moe_dsa"};
 
+static const std::unordered_set<std::string>
+    prefix_cache_unsupported_model_set = {"qwen3_5_text", "qwen3_5_moe_text"};
+
+static const std::unordered_set<std::string>
+    chunked_prefill_unsupported_model_set = {"qwen3_5_text",
+                                             "qwen3_5_moe_text"};
+
 void shutdown_handler(int signal) {
   // TODO: gracefully shutdown the server
   LOG(WARNING) << "Received signal " << signal << ", stopping server...";
   exit(1);
+}
+
+bool should_disable_chunked_prefill(const std::string& model_type) {
+  return chunked_prefill_unsupported_model_set.contains(model_type);
+}
+
+bool should_disable_prefix_cache(const std::string& model_type) {
+  return prefix_cache_unsupported_model_set.contains(model_type);
 }
 
 void validate_flags(const std::string& model_type) {
@@ -167,11 +182,23 @@ int run() {
 #endif
   std::string model_type = "";
   if (FLAGS_backend != "dit") {
-    model_type = xllm::util::get_model_type(model_path);
+    model_type = xllm::util::get_model_type(model_path, FLAGS_backend);
     FLAGS_tool_call_parser = function_call::FunctionCallParser::get_parser_auto(
         FLAGS_tool_call_parser, model_type);
     FLAGS_reasoning_parser =
         ReasoningParser::get_parser_auto(FLAGS_reasoning_parser, model_type);
+  }
+
+  if (FLAGS_enable_chunked_prefill &&
+      should_disable_chunked_prefill(model_type)) {
+    LOG(WARNING) << "Disabling chunked prefill for model_type=" << model_type
+                 << " due to known output corruption on the llm path.";
+    FLAGS_enable_chunked_prefill = false;
+  }
+  if (FLAGS_enable_prefix_cache && should_disable_prefix_cache(model_type)) {
+    LOG(WARNING) << "Disabling prefix cache for model_type=" << model_type
+                 << " because it is not supported on the llm path.";
+    FLAGS_enable_prefix_cache = false;
   }
 
   // validate flags before creating master

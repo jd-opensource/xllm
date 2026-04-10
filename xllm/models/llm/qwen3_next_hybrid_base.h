@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <glog/logging.h>
 #include <torch/torch.h>
 
 #include <algorithm>
@@ -32,6 +33,7 @@ limitations under the License.
 #include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/common/lm_head.h"
 #include "core/layers/common/qwen3_next_rms_norm.h"
+#include "core/layers/common/rotary_embedding_util.h"
 #include "core/layers/common/word_embedding.h"
 #include "core/layers/npu_torch/qwen3_next_hybrid_decoder_layer_base.h"
 
@@ -74,6 +76,22 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
     dp_size_ = parallel_args.dp_size();
+    mrope_section_ = model_args_.rope_scaling_mrope_section();
+    rotary_interleaved_ =
+        !mrope_section_.empty() && model_args_.rope_scaling_mrope_interleaved();
+    const int64_t rotary_dim = static_cast<int64_t>(
+        model_args_.head_dim() * model_args_.partial_rotary_factor());
+    CHECK_GT(rotary_dim, 0) << "rotary_dim must be positive";
+    auto inv_freq = layer::rotary::compute_inv_freq(
+        rotary_dim, model_args_.rope_theta(), options);
+    rotary_cos_sin_cache_ =
+        register_buffer("rotary_cos_sin_cache",
+                        layer::rotary::compute_cos_sin_cache(
+                            rotary_dim,
+                            model_args_.max_position_embeddings(),
+                            rotary_interleaved_,
+                            inv_freq,
+                            options));
   }
 
   // tokens: [num_tokens]
@@ -94,11 +112,25 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
     layer::AttentionMetadata attn_metadata =
         layer::AttentionMetadataBuilder::build(
             input_params, model_args_, build_attention_mask(input_params));
-    torch::Tensor h = embed_tokens_(tokens);
+    const bool only_prefill =
+        attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
+    if (positions.dim() == 2 && only_prefill && !mrope_section_.empty()) {
+      std::tie(attn_metadata.mrope_cos, attn_metadata.mrope_sin) =
+          build_rotary_cos_sin(positions);
+    }
+    const bool use_deepstack = !input_params.deep_stacks.empty();
+    auto deep_stacks = input_params.deep_stacks;
+    torch::Tensor h = input_params.input_embedding;
+    if (!h.defined()) {
+      h = embed_tokens_(tokens);
+    }
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
       h = layer->forward(
           h, positions, attn_metadata, kv_caches[i], input_params);
+      if (use_deepstack && i < deep_stacks.size()) {
+        h = deepstack_process(h, input_params.visual_pos_masks, deep_stacks[i]);
+      }
     }
     h = norm_(h);
     return ModelOutput(h);
@@ -138,6 +170,56 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
   }
 
  protected:
+  torch::Tensor deepstack_process(torch::Tensor hidden_states,
+                                  torch::Tensor visual_pos_masks,
+                                  const torch::Tensor& visual_embeds) {
+    visual_pos_masks = visual_pos_masks.to(hidden_states.device());
+    auto selected = hidden_states.index({visual_pos_masks});
+    hidden_states.index_put_({visual_pos_masks}, selected + visual_embeds);
+    return hidden_states;
+  }
+
+  std::pair<torch::Tensor, torch::Tensor> build_rotary_cos_sin(
+      const torch::Tensor& positions) {
+    namespace F = torch::nn::functional;
+    auto cos_sin = F::embedding(positions, rotary_cos_sin_cache_);
+    auto chunks = cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
+    auto cos_pos = chunks[0];
+    auto sin_pos = chunks[1];
+    if (positions.dim() != 2 || mrope_section_.empty()) {
+      return std::make_pair(cos_pos, sin_pos);
+    }
+
+    auto reorder = [this](const torch::Tensor& x) {
+      std::vector<int64_t> sections = mrope_section_;
+      if (rotary_interleaved_) {
+        for (int64_t& section : sections) {
+          section *= 2;
+        }
+      } else {
+        sections.insert(
+            sections.end(), mrope_section_.begin(), mrope_section_.end());
+      }
+
+      auto split_tensors = x.split(sections, /*dim=*/-1);
+      std::vector<torch::Tensor> selected_tensors;
+      selected_tensors.reserve(split_tensors.size());
+      for (int64_t i = 0; i < static_cast<int64_t>(split_tensors.size()); ++i) {
+        const int64_t pos_axis =
+            rotary_interleaved_
+                ? i
+                : i % static_cast<int64_t>(mrope_section_.size());
+        CHECK_LT(pos_axis, split_tensors[i].size(0))
+            << "mRoPE position axis out of range for section " << i;
+        selected_tensors.push_back(
+            split_tensors[i].select(/*dim=*/0, /*index=*/pos_axis));
+      }
+      return torch::cat(selected_tensors, /*dim=*/-1);
+    };
+
+    return std::make_pair(reorder(cos_pos), reorder(sin_pos));
+  }
+
   torch::Tensor build_attention_mask(const ModelInputParams& input_params) {
     max_seq_len_ = std::max(input_params.kv_max_seq_len, max_seq_len_);
     if (!FLAGS_enable_chunked_prefill) {
@@ -172,6 +254,9 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
   layer::Qwen3NextRMSNorm norm_{nullptr};
   layer::AttentionMask attn_mask_;
   layer::WordEmbedding embed_tokens_{nullptr};
+  torch::Tensor rotary_cos_sin_cache_;
+  std::vector<int64_t> mrope_section_;
+  bool rotary_interleaved_ = false;
 };
 
 class Qwen3HybridForCausalLMImplBase : public torch::nn::Module {

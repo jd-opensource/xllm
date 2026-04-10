@@ -86,6 +86,17 @@ class CosSinCacheManager {
 using torch::indexing::None;
 using ISlice = torch::indexing::Slice;
 
+inline torch::Tensor rotate_every_two(const torch::Tensor& x) {
+  auto x1 = x.index({ISlice(), ISlice(), ISlice(0, None, 2)});
+  auto x2 = x.index({ISlice(), ISlice(), ISlice(1, None, 2)});
+  return torch::stack({-x2, x1}, /*dim=*/-1).flatten(/*start_dim=*/-2);
+}
+
+inline torch::Tensor rotate_half(const torch::Tensor& x) {
+  auto chunks = x.chunk(2, /*dim=*/-1);
+  return torch::cat({-chunks[1], chunks[0]}, /*dim=*/-1);
+}
+
 // Inverse dim formula to find dim based on number of rotations
 inline double yarn_find_correction_dim(int num_rotations,
                                        int dim,
@@ -419,6 +430,23 @@ torch::Tensor get_deepseek_rotary_embedding(
                                        inv_freq,
                                        options);
   return cos_sin;
+}
+
+std::tuple<torch::Tensor, torch::Tensor> apply_rotary_pos_emb(
+    const torch::Tensor& q,
+    const torch::Tensor& k,
+    const torch::Tensor& cos,
+    const torch::Tensor& sin,
+    bool interleaved) {
+  if (interleaved) {
+    auto q_embed = (q * cos) + (rotate_every_two(q) * sin);
+    auto k_embed = (k * cos) + (rotate_every_two(k) * sin);
+    return std::make_tuple(q_embed, k_embed);
+  }
+
+  auto q_embed = (q * cos) + (rotate_half(q) * sin);
+  auto k_embed = (k * cos) + (rotate_half(k) * sin);
+  return std::make_tuple(q_embed, k_embed);
 }
 }  // namespace rotary
 }  // namespace layer

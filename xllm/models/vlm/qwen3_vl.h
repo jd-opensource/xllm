@@ -740,6 +740,7 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Qwen3_VLForConditionalGeneration);
 
+#ifndef XLLM_DISABLE_GENERIC_VLM_REGISTRATION
 REGISTER_INPUT_PROCESSOR(qwen3_vl, Qwen3_VLInputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_vl, Qwen3_VLForConditionalGeneration);
 REGISTER_IMAGE_PROCESSOR(qwen3_vl, Qwen3VLImageProcessor);
@@ -803,4 +804,5 @@ REGISTER_MODEL_ARGS(qwen3_vl, [&] {
 
   LOAD_ARG_OR(vocab_size, "text_config.vocab_size", 151936);
 });
+#endif  // XLLM_DISABLE_GENERIC_VLM_REGISTRATION
 }  // namespace xllm
