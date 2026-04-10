@@ -138,4 +138,7 @@ torch::Tensor gated_layer_norm(GatedLayerNormParams& params);
 std::pair<torch::Tensor, torch::Tensor> partial_rotary_embedding(
     PartialRotaryEmbeddingParams& params);
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+fused_qkvzba_split_reshape_cat(FusedQkvzbaSplitReshapeParams& params);
+
 }  // namespace xllm::kernel
