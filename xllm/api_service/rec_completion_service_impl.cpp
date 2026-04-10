@@ -151,7 +151,7 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
 
     const int32_t output_count =
         static_cast<int32_t>(req_output.outputs.size());
-    auto lengths_tensor = response.mutable_output_tensors()->Add();
+    auto* lengths_tensor = response.mutable_output_tensors()->Add();
     lengths_tensor->set_name("rec_result_lengths");
     lengths_tensor->set_datatype(proto::DataType::INT32);
     lengths_tensor->mutable_shape()->Add(output_count);
@@ -168,6 +168,12 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
     auto* logprobs_context = logprobs_tensor == nullptr
                                  ? nullptr
                                  : logprobs_tensor->mutable_contents();
+    auto append_output_logprobs = [&](int32_t output_index) {
+      if (logprobs_context != nullptr) {
+        append_rec_logprobs(
+            logprobs_context, req_output.outputs[output_index], logprob_width);
+      }
+    };
     for (int32_t i = 0; i < output_count; ++i) {
       const auto& selected_item_ids = selected_item_groups[i];
       lengths_context->mutable_int_contents()->Add(
@@ -179,10 +185,7 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
           output_context->mutable_int64_contents()->Add(0);
         }
       }
-      if (logprobs_context != nullptr) {
-        append_rec_logprobs(
-            logprobs_context, req_output.outputs[i], logprob_width);
-      }
+      append_output_logprobs(i);
     }
   } else {
     output_tensor->set_datatype(proto::DataType::INT32);
@@ -210,15 +213,18 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
     auto* logprobs_context = logprobs_tensor == nullptr
                                  ? nullptr
                                  : logprobs_tensor->mutable_contents();
+    auto append_output_logprobs = [&](int32_t output_index) {
+      if (logprobs_context != nullptr) {
+        append_rec_logprobs(
+            logprobs_context, req_output.outputs[output_index], logprob_width);
+      }
+    };
     for (int32_t i = 0; i < output_count; ++i) {
       // LOG(INFO) << req_output.outputs[i].token_ids;
       context->mutable_int_contents()->Add(
           req_output.outputs[i].token_ids.begin(),
           req_output.outputs[i].token_ids.end());
-      if (logprobs_context != nullptr) {
-        append_rec_logprobs(
-            logprobs_context, req_output.outputs[i], logprob_width);
-      }
+      append_output_logprobs(i);
     }
   }
 
