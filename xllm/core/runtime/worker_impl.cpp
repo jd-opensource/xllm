@@ -286,10 +286,12 @@ bool WorkerImpl::allocate_kv_cache(
       } else {
         // Full attention layer: allocate key_cache and value_cache only
 #if defined(USE_NPU)
+        // Keep runtime allocation format consistent with capacity estimation in
+        // llm_engine: only deepseek_v3 uses FRACTAL_NZ with prefix cache.
+        const auto& model_type = context_.get_model_args().model_type();
         aclFormat npu_format_type =
-            absl::StartsWith(context_.get_model_args().model_type(),
-                             "deepseek_v3") &&
-                    FLAGS_enable_prefix_cache
+            ((model_type == "deepseek_v3" || model_type == "deepseek_v3_mtp") &&
+             FLAGS_enable_prefix_cache)
                 ? ACL_FORMAT_FRACTAL_NZ
                 : ACL_FORMAT_ND;
         key_cache = at_npu::native::npu_format_cast(
