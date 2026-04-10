@@ -18,11 +18,14 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-Qwen2DecoderLayerImpl::Qwen2DecoderLayerImpl(const ModelContext& context)
+Qwen2DecoderLayerImpl::Qwen2DecoderLayerImpl(const ModelContext& context,
+                                             int32_t layer_id)
     : parallel_args_(context.get_parallel_args()) {
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
   const auto& options = context.get_tensor_options();
+  const std::string mlp_module_prefix =
+      layer_id >= 0 ? "model.layers." + std::to_string(layer_id) + ".mlp" : "";
 
   // Initialize attention layers
   attention_ = register_module("self_attn", Qwen2Attention(context));
@@ -46,7 +49,8 @@ Qwen2DecoderLayerImpl::Qwen2DecoderLayerImpl(const ModelContext& context)
                                   /*enable_result_reduction=*/true,
                                   quant_args,
                                   parallel_args_.tp_group_,
-                                  options));
+                                  options,
+                                  mlp_module_prefix));
 }
 
 void Qwen2DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {

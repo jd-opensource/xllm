@@ -55,7 +55,7 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
         options.device(), options.dtype().toScalarType(), mask_value);
 #endif
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
-      auto layer = layer::Qwen3DecoderLayer(context);
+      auto layer = layer::Qwen3DecoderLayer(context, i);
       layers_.push_back(layer);
     }
   }

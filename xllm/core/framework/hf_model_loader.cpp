@@ -113,6 +113,11 @@ bool try_load_compressed_tensors_quant_cfg(const JsonReader& reader,
     if (dynamic_it != input_activations_it->end() && !dynamic_it->is_null()) {
       quant_args.activation_dynamic() = dynamic_it->get<bool>();
     }
+    if (const auto ignore = reader.value<std::vector<std::string>>(
+            "quantization_config.ignore");
+        ignore.has_value()) {
+      quant_args.ignored_modules() = *ignore;
+    }
     return true;
   }
 

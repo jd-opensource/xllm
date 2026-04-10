@@ -318,6 +318,54 @@ TEST_F(DenseMLPTest, SmoothquantLoadStateDictTest) {
   LOG(INFO) << "State dict loading test passed - output sum: " << output_sum;
 }
 
+TEST_F(DenseMLPTest, Fp8IgnoredDownProjLoadsAsUnquantized) {
+  QuantArgs fp8_quant_args;
+  fp8_quant_args.quant_method() = kQuantMethodFp8;
+  fp8_quant_args.bits() = 8;
+  fp8_quant_args.activation_dynamic() = false;
+  fp8_quant_args.ignored_modules() = {"model.layers.1.mlp.down_proj"};
+
+  const int64_t hidden_size = 16;
+  const int64_t intermediate_size = 32;
+  auto mlp = DenseMLP(DenseMLPImpl(hidden_size,
+                                   intermediate_size,
+                                   /*is_gated=*/true,
+                                   /*has_bias=*/false,
+                                   /*hidden_act=*/"silu",
+                                   /*enable_result_reduction=*/true,
+                                   fp8_quant_args,
+                                   parallel_args_.tp_group_,
+                                   options_,
+                                   "model.layers.1.mlp"));
+
+  std::unordered_map<std::string, torch::Tensor> weight_dict;
+  auto fp8_weight_options = options_.dtype(torch::kFloat8_e4m3fn);
+  auto scale_options = options_.dtype(torch::kFloat32);
+
+  weight_dict["gate_proj.weight"] =
+      torch::zeros({intermediate_size, hidden_size}, fp8_weight_options);
+  weight_dict["gate_proj.weight_scale"] = torch::ones({1}, scale_options);
+  weight_dict["gate_proj.input_scale"] = torch::ones({1}, scale_options);
+
+  weight_dict["up_proj.weight"] =
+      torch::zeros({intermediate_size, hidden_size}, fp8_weight_options);
+  weight_dict["up_proj.weight_scale"] = torch::ones({1}, scale_options);
+  weight_dict["up_proj.input_scale"] = torch::ones({1}, scale_options);
+
+  weight_dict["down_proj.weight"] =
+      torch::zeros({hidden_size, intermediate_size}, options_);
+
+  StateDict state_dict(weight_dict);
+  mlp->load_state_dict(state_dict);
+
+  const auto params = mlp->named_parameters(/*recurse=*/true);
+  EXPECT_TRUE(params.contains("gate_up_proj.weight_scale"));
+  EXPECT_TRUE(params.contains("gate_up_proj.input_scale"));
+  EXPECT_TRUE(params.contains("down_proj.weight"));
+  EXPECT_FALSE(params.contains("down_proj.weight_scale"));
+  EXPECT_FALSE(params.contains("down_proj.input_scale"));
+}
+
 TEST_F(DenseMLPTest, SmoothquantPrecisionVerificationTest) {
   // Test precision verification with custom input and expected output
   const int64_t batch_size = 16;

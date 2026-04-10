@@ -42,6 +42,10 @@ TEST(HFModelLoaderTest, LoadCompressedTensorsFp8StaticConfig) {
             }
           }
         },
+        "ignore": [
+          "lm_head",
+          "model.layers.1.mlp.down_proj"
+        ],
         "quant_method": "compressed-tensors"
       }
     }
@@ -54,6 +58,9 @@ TEST(HFModelLoaderTest, LoadCompressedTensorsFp8StaticConfig) {
     EXPECT_EQ(quant_args.bits(), 8);
     EXPECT_EQ(quant_args.moe_weight_bits(), 8);
     EXPECT_FALSE(quant_args.activation_dynamic());
+    ASSERT_EQ(quant_args.ignored_modules().size(), 2);
+    EXPECT_EQ(quant_args.ignored_modules()[0], "lm_head");
+    EXPECT_EQ(quant_args.ignored_modules()[1], "model.layers.1.mlp.down_proj");
   }
 }
 

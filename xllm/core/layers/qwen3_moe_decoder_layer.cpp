@@ -80,6 +80,8 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
                                         parallel_args_,
                                         options));
   } else {
+    const std::string mlp_module_prefix =
+        "model.layers." + std::to_string(layer_id) + ".mlp";
     mlp_ = register_module("mlp",
                            DenseMLP(model_args.hidden_size(),
                                     model_args.intermediate_size(),
@@ -89,7 +91,8 @@ Qwen3MoeDecoderLayerImpl::Qwen3MoeDecoderLayerImpl(const ModelContext& context,
                                     /*enable_result_reduction=*/true,
                                     quant_args,
                                     parallel_args_.tp_group_,
-                                    options));
+                                    options,
+                                    mlp_module_prefix));
   }
 }
 
