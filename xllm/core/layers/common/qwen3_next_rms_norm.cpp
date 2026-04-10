@@ -30,11 +30,11 @@ Qwen3NextRMSNormImpl::Qwen3NextRMSNormImpl(int64_t dim,
 }
 
 torch::Tensor Qwen3NextRMSNormImpl::forward(torch::Tensor& input) {
-  torch::Tensor yOut;
-  torch::Tensor rstdOut;
+  torch::Tensor norm_out;
+  torch::Tensor rstd_out;
   xllm::kernel::npu::npu_gemma_rms_norm(
-      input, weight_, eps_, rstdOut, yOut);
-  return yOut;
+      input, weight_, eps_, rstd_out, norm_out);
+  return norm_out;
 }
 
 void Qwen3NextRMSNormImpl::load_state_dict(const StateDict& state_dict) {
