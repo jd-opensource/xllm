@@ -101,9 +101,7 @@ REGISTER_MODEL_ARGS(glm_moe_dsa_mtp, [&] {
   LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);
   LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);
 
-  LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
-    return 256;  // args->qk_nope_head_dim() + args->qk_rope_head_dim();
-  });
+  SET_ARG(head_dim, args->qk_nope_head_dim() + args->qk_rope_head_dim());
   LOAD_ARG_OR_FUNC(
       rotary_dim, "rotary_dim", [&] { return args->qk_rope_head_dim(); });
 
