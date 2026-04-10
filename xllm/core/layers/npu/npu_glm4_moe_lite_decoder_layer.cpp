@@ -22,6 +22,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "layers/common/rotary_embedding_util.h"
+#include "loader/glm4_moe_lite_decoder_manual_loader.h"
 
 DECLARE_string(rank_tablefile);
 DECLARE_string(communication_backend);
@@ -77,11 +78,19 @@ NpuGlm4MoeDecoderLiteImpl::NpuGlm4MoeDecoderLiteImpl(
   placeholder_vec_ = {1};
   device_id_ = options.device().index();
 
-  loader_ = std::make_unique<Glm4MoeDecoderLiteLoader>(
-      WEIGHT_COUNT_PER_LAYER,
-      context,
-      layer_id_,
-      prefill_param_.firstKDenseReplace);
+  if (FLAGS_enable_manual_loader) {
+    loader_ = std::make_unique<Glm4MoeDecoderLiteManualLoader>(
+        WEIGHT_COUNT_PER_LAYER,
+        context,
+        layer_id_,
+        prefill_param_.firstKDenseReplace);
+  } else {
+    loader_ = std::make_unique<Glm4MoeDecoderLiteLoader>(
+        WEIGHT_COUNT_PER_LAYER,
+        context,
+        layer_id_,
+        prefill_param_.firstKDenseReplace);
+  }
 
   initialize_tensors(options);
 }

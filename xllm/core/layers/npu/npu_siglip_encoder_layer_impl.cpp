@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "npu_siglip_encoder_layer_impl.h"
 
+#include "common/global_flags.h"
+#include "loader/siglip_encoder_manual_loader.h"
 #include "nlohmann/json.hpp"
 
 namespace xllm {
@@ -28,7 +30,11 @@ NpuSiglipEncoderLayerUpImpl::NpuSiglipEncoderLayerUpImpl(
       model_args_(context.get_model_args()),
       options_(context.get_tensor_options()),
       prefix_(prefix) {
-  loader_ = std::make_unique<SiglipEncoderUpLoader>(context);
+  if (FLAGS_enable_manual_loader) {
+    loader_ = std::make_unique<SiglipEncoderUpManualLoader>(context);
+  } else {
+    loader_ = std::make_unique<SiglipEncoderUpLoader>(context);
+  }
   build_graph(prefix);
 }
 
@@ -175,7 +181,11 @@ NpuSiglipEncoderLayerDownImpl::NpuSiglipEncoderLayerDownImpl(
       model_args_(context.get_model_args()),
       options_(context.get_tensor_options()),
       prefix_(prefix) {
-  loader_ = std::make_unique<SiglipEncoderDownLoader>(context);
+  if (FLAGS_enable_manual_loader) {
+    loader_ = std::make_unique<SiglipEncoderDownManualLoader>(context);
+  } else {
+    loader_ = std::make_unique<SiglipEncoderDownLoader>(context);
+  }
 
   build_graph(prefix);
 }

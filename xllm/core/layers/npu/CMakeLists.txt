@@ -45,22 +45,35 @@ cc_library(
     loader/word_embedding_loader.h
     loader/lm_head_loader.h
     loader/column_parallel_linear_loader.h
+    loader/column_parallel_linear_manual_loader.h
     loader/deepseek_v2_decoder_loader.h
+    loader/deepseek_v2_decoder_manual_loader.h
     loader/deepseek_v32_decoder_loader.h
+    loader/deepseek_v32_decoder_manual_loader.h
     loader/glm4_decoder_loader.h
-    loader/glm4_moe_decoder_loader.h
-    loader/glm4_moe_lite_decoder_loader.h
     loader/glm4_vision_encoder_loader.h
+    loader/glm4_vision_encoder_manual_loader.h
+    loader/glm4_moe_decoder_loader.h
+    loader/glm4_moe_decoder_manual_loader.h
+    loader/glm4_moe_lite_decoder_loader.h
+    loader/glm4_moe_lite_decoder_manual_loader.h
+    loader/glm4_decoder_manual_loader.h
     loader/llama_decoder_loader.h
+    loader/llama_decoder_manual_loader.h
     loader/qwen2_vision_encoder_loader.h
+    loader/qwen2_vision_encoder_manual_loader.h
     loader/qwen2dot5_vision_encoder_loader.h
+    loader/qwen2dot5_vision_encoder_manual_loader.h
     loader/qwen3_vision_encoder_loader.h
+    loader/qwen3_vision_encoder_manual_loader.h
     loader/rms_norm_loader.h
     loader/siglip_encoder_loader.h
+    loader/siglip_encoder_manual_loader.h
     loader/base_loader.h
     loader/base_manual_loader.h
     loader/qwen2_decoder_manual_loader.h
     loader/qwen3_decoder_manual_loader.h
+    loader/qwen3_moe_decoder_manual_loader.h
     loader/eagle3_decoder_manual_loader.h
     loader/rms_norm_manual_loader.h
     loader/word_embedding_manual_loader.h
@@ -104,22 +117,35 @@ cc_library(
     loader/word_embedding_loader.cpp
     loader/lm_head_loader.cpp
     loader/column_parallel_linear_loader.cpp
+    loader/column_parallel_linear_manual_loader.cpp
     loader/deepseek_v2_decoder_loader.cpp
+    loader/deepseek_v2_decoder_manual_loader.cpp
     loader/deepseek_v32_decoder_loader.cpp
+    loader/deepseek_v32_decoder_manual_loader.cpp
     loader/glm4_decoder_loader.cpp
-    loader/glm4_moe_decoder_loader.cpp
-    loader/glm4_moe_lite_decoder_loader.cpp
     loader/glm4_vision_encoder_loader.cpp
+    loader/glm4_vision_encoder_manual_loader.cpp
+    loader/glm4_moe_decoder_loader.cpp
+    loader/glm4_moe_decoder_manual_loader.cpp
+    loader/glm4_moe_lite_decoder_loader.cpp
+    loader/glm4_moe_lite_decoder_manual_loader.cpp
+    loader/glm4_decoder_manual_loader.cpp
     loader/llama_decoder_loader.cpp
+    loader/llama_decoder_manual_loader.cpp
     loader/qwen2_vision_encoder_loader.cpp
+    loader/qwen2_vision_encoder_manual_loader.cpp
     loader/qwen2dot5_vision_encoder_loader.cpp
+    loader/qwen2dot5_vision_encoder_manual_loader.cpp
     loader/qwen3_vision_encoder_loader.cpp
+    loader/qwen3_vision_encoder_manual_loader.cpp
     loader/rms_norm_loader.cpp
     loader/siglip_encoder_loader.cpp
+    loader/siglip_encoder_manual_loader.cpp
     loader/base_loader.cpp
     loader/base_manual_loader.cpp
     loader/qwen2_decoder_manual_loader.cpp
     loader/qwen3_decoder_manual_loader.cpp
+    loader/qwen3_moe_decoder_manual_loader.cpp
     loader/eagle3_decoder_manual_loader.cpp
     loader/rms_norm_manual_loader.cpp
     loader/word_embedding_manual_loader.cpp

@@ -16,6 +16,7 @@ limitations under the License.
 #include "npu_glm4_moe_decoder_layer.h"
 
 #include "common/global_flags.h"
+#include "loader/glm4_moe_decoder_manual_loader.h"
 
 DECLARE_string(rank_tablefile);
 DECLARE_string(communication_backend);
@@ -52,11 +53,19 @@ NpuGlm4MoeDecoderImpl::NpuGlm4MoeDecoderImpl(const ModelContext& context,
   placeholder_vec_ = {1};
   device_id_ = options.device().index();
 
-  loader_ =
-      std::make_unique<Glm4MoeDecoderLoader>(WEIGHT_COUNT_PER_LAYER,
-                                             context,
-                                             layer_id_,
-                                             prefill_param_.firstKDenseReplace);
+  if (FLAGS_enable_manual_loader) {
+    loader_ = std::make_unique<Glm4MoeDecoderManualLoader>(
+        WEIGHT_COUNT_PER_LAYER,
+        context,
+        layer_id_,
+        prefill_param_.firstKDenseReplace);
+  } else {
+    loader_ = std::make_unique<Glm4MoeDecoderLoader>(
+        WEIGHT_COUNT_PER_LAYER,
+        context,
+        layer_id_,
+        prefill_param_.firstKDenseReplace);
+  }
 
   initialize_tensors(options);
 }

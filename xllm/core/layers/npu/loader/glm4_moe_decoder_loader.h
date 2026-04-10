@@ -65,6 +65,8 @@ class Glm4MoeDecoderLoader : public BaseLoader {
 
   std::unordered_map<std::string, torch::Tensor> shared_experts_weights_;
   std::unordered_map<std::string, std::vector<torch::Tensor>> experts_weights_;
+  std::unordered_map<std::string, int> weight_mapping_;
+  std::unordered_map<std::string, int> weight_mapping_w8a8_;
 
   std::mutex shared_experts_mutex_;
   std::mutex experts_mutex_;
