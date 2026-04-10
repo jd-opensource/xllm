@@ -76,7 +76,8 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
                                KVCache& kv_cache,
                                ModelInputParams& input_params,
                                bool is_prefill,
-                               int node_id);
+                               int node_id,
+                               bool use_graph_decode_input);
 
   void initialize_parallel_parameters(atb_speed::qwen::QwenLayerParam& param,
                                       const ParallelArgs& parallel_args);
@@ -90,10 +91,12 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
   int64_t init_attn_mask();
 
   atb_speed::Model::Node prefill_node_;
-  atb_speed::Model::Node decode_node_;
+  atb_speed::Model::Node decode_graph_node_;
+  atb_speed::Model::Node decode_eager_node_;
   std::string model_name_;
   atb_speed::qwen::QwenLayerParam prefill_param_;
-  atb_speed::qwen::QwenLayerParam decode_param_;
+  atb_speed::qwen::QwenLayerParam decode_graph_param_;
+  atb_speed::qwen::QwenLayerParam decode_eager_param_;
   atb::Tensor internal_tensors_;
   atb::Tensor placeholder_;
 
