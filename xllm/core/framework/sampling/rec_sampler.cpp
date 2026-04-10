@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <cstdlib>
 
 #include "common/global_flags.h"
@@ -127,7 +128,90 @@ SampleOutput RecSampler::OneRecConstrainedSamplingStrategy::forward(
     torch::Tensor& logits,
     const SamplingParameters& params,
     const torch::Tensor& filter_mask) const {
-  return sampler_.forward(logits, params, filter_mask);
+  if (!(params.use_beam_search && params.all_random_sample && params.logprobs &&
+        params.max_top_logprobs > 0)) {
+    return sampler_.forward(logits, params, filter_mask);
+  }
+
+  if (params.frequency_penalties.defined()) {
+    apply_frequency_presence_penalties(logits,
+                                       params.unique_token_ids,
+                                       params.unique_token_counts,
+                                       params.frequency_penalties,
+                                       params.presence_penalties);
+  }
+
+  if (params.repetition_penalties.defined()) {
+    apply_repetition_penalties(
+        logits, params.unique_token_ids, params.repetition_penalties);
+  }
+
+  torch::Tensor sample_logits = logits;
+  torch::Tensor sample_temperatures = params.temperatures;
+  torch::Tensor sample_top_k = params.top_k;
+  torch::Tensor sample_top_p = params.top_p;
+  const bool use_sample_indices =
+      params.selected_token_idxes.numel() != params.sample_idxes.numel();
+  if (use_sample_indices) {
+    sample_logits = logits.index_select(/*dim=*/0, params.sample_idxes);
+    if (params.temperatures.defined()) {
+      sample_temperatures =
+          params.temperatures.index_select(/*dim=*/0, params.sample_idxes);
+    }
+    if (params.top_k.defined()) {
+      sample_top_k = params.top_k.index_select(/*dim=*/0, params.sample_idxes);
+    }
+    if (params.top_p.defined()) {
+      sample_top_p = params.top_p.index_select(/*dim=*/0, params.sample_idxes);
+    }
+  }
+
+  if (filter_mask.defined()) {
+    CHECK_EQ(filter_mask.dim(), 2)
+        << "filter_mask must be 2-D, dim=" << filter_mask.dim();
+    CHECK_EQ(filter_mask.size(0), sample_logits.size(0))
+        << "filter_mask batch mismatch, filter_mask.size(0)="
+        << filter_mask.size(0)
+        << ", sample_logits.size(0)=" << sample_logits.size(0);
+    CHECK_EQ(filter_mask.size(1), sample_logits.size(1))
+        << "filter_mask vocab mismatch, filter_mask.size(1)="
+        << filter_mask.size(1)
+        << ", sample_logits.size(1)=" << sample_logits.size(1);
+    sample_logits = sample_logits + filter_mask;
+  }
+
+  apply_top_k_top_p(
+      sample_logits, sample_temperatures, sample_top_k, sample_top_p);
+  if (use_sample_indices) {
+    logits.index_copy_(/*dim=*/0, params.sample_idxes, sample_logits);
+  }
+
+  CHECK(params.do_sample.defined()) << "params.do_sample must be defined";
+  CHECK_EQ(params.do_sample.dim(), 1)
+      << "params.do_sample must be 1D [num_seqs], got "
+      << params.do_sample.sizes();
+  CHECK_EQ(sample_logits.size(0), params.do_sample.size(0));
+
+  SampleOutput output;
+  auto probs =
+      torch::softmax(sample_logits, /*dim=*/-1, /*dtype=*/torch::kFloat32);
+  output.probs = probs.to(logits.dtype());
+
+  const auto vocab_size = probs.size(-1);
+  const auto top_count = std::min<int64_t>(params.max_top_logprobs,
+                                           static_cast<int64_t>(vocab_size));
+  auto sampled_indices =
+      Sampler::random_sample(probs, static_cast<int>(top_count));
+  auto top_tokens = sampled_indices.view({sample_logits.size(0), top_count});
+  auto top_probs = probs.gather(/*dim=*/-1, top_tokens);
+  auto top_logprobs = top_probs.log();
+
+  output.top_tokens = top_tokens;
+  output.top_logprobs = top_logprobs;
+  output.next_tokens =
+      top_tokens.select(/*dim=*/1, /*index=*/0).to(torch::kLong);
+  output.logprobs = top_logprobs.select(/*dim=*/1, /*index=*/0).contiguous();
+  return output;
 }
 
 // --- MultiRoundFastPathSamplingStrategy ---

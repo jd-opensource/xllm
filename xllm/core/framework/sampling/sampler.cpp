@@ -145,22 +145,27 @@ torch::Tensor Sampler::greedy_sample(const torch::Tensor& probs) {
   return probs.argmax(/*dim=*/-1);
 }
 
-torch::Tensor Sampler::random_sample(const torch::Tensor& probs) {
+torch::Tensor Sampler::random_sample(const torch::Tensor& probs,
+                                     int num_samples) {
 #if defined(USE_MLU) || defined(USE_CUDA)
-  xllm::kernel::RandomSampleParams params;
-  params.logits = probs;
-  return xllm::kernel::random_sample(params);
+  if (num_samples == 1) {
+    xllm::kernel::RandomSampleParams params;
+    params.logits = probs;
+    return xllm::kernel::random_sample(params);
+  }
 #endif
   if (probs.dim() == 3) {
     auto batch_size = probs.size(0);
     auto seq_len = probs.size(1);
     auto vocab_size = probs.size(2);
     auto flat_probs = probs.reshape({-1, vocab_size});
-    auto sampled =
-        flat_probs.multinomial(/*num_samples=*/1, /*replacement=*/false);
-    return sampled.reshape({batch_size, seq_len});
+    auto sampled = flat_probs.multinomial(/*num_samples=*/num_samples,
+                                          /*replacement=*/false);
+    return sampled.reshape({batch_size, seq_len, num_samples});
   } else {
-    return probs.multinomial(/*num_samples=*/1, /*replacement=*/false)
+    return probs
+        .multinomial(/*num_samples=*/num_samples,
+                     /*replacement=*/false)
         .flatten();
   }
 }
