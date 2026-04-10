@@ -512,6 +512,16 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
     return language_model_(tokens, positions, kv_caches, input_params);
   }
 
+  torch::Tensor pooler(const torch::Tensor& hidden_states,
+                       const torch::Tensor& seleted_idxes) {
+    auto h = hidden_states;
+    if (seleted_idxes.defined()) {
+      h = h.index_select(/*dim=*/0, seleted_idxes);
+    }
+    namespace F = torch::nn::functional;
+    return F::normalize(h, F::NormalizeFuncOptions().p(2).dim(1));
+  }
+
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) {
     return language_model_->logits(hidden_states, seleted_idxes);
