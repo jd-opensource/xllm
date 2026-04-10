@@ -356,7 +356,9 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_attention_parameters(
   param.kvLoraRank = args.kv_lora_rank();
   param.softmaxScale = sm_scale_;
   // not support in glm_moe_dsa
-  if (quantize_type_ == "w8a8_dynamic" && args.model_type() != "glm_moe_dsa") {
+  bool is_glm_moe_dsa =
+      args.model_type().find("glm_moe_dsa") != std::string::npos;
+  if (quantize_type_ == "w8a8_dynamic" && !is_glm_moe_dsa) {
     param.enableMlaPreprocess = true;
   } else {
     param.enableMlaPreprocess = false;
