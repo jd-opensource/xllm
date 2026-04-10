@@ -88,6 +88,7 @@ XLLM_CAPI_EXPORT XLLM_REC_Handler* xllm_rec_create(void) {
   CHECK(nullptr != handler);
 
   handler->initialized = false;
+  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
 
   return handler;
 }
@@ -98,6 +99,7 @@ XLLM_CAPI_EXPORT void xllm_rec_destroy(XLLM_REC_Handler* handler) {
   handler->master.reset();
   handler->executor.reset();
   handler->model_ids.clear();
+  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
   handler->initialized = false;
 
   delete handler;
@@ -236,6 +238,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     }
     handler->model_ids.clear();
     handler->model_ids.emplace_back(model_id);
+    handler->pipeline_type = pipeline_type;
 
     handler->initialized = true;
 
@@ -247,6 +250,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
   handler->master.reset();
   handler->executor.reset();
   handler->model_ids.clear();
+  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
   handler->initialized = false;
 
   return false;

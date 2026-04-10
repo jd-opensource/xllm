@@ -21,10 +21,13 @@ limitations under the License.
 #include <absl/time/time.h>
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <random>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "core/common/global_flags.h"
@@ -41,6 +44,32 @@ namespace {
 constexpr size_t kDecoderBosTokenCount = 1;
 constexpr size_t kDecoderMaxTokenCount = kRecTotalSteps + kDecoderBosTokenCount;
 constexpr char kEmptyLogprobsFinishReason[] = "empty_logprobs";
+
+std::vector<int64_t> normalize_rec_item_ids(const std::vector<int64_t>& raw_ids,
+                                            size_t sequence_index) {
+  std::vector<int64_t> item_ids;
+  item_ids.reserve(raw_ids.size());
+  std::unordered_set<int64_t> seen_item_ids;
+  for (const int64_t item_id : raw_ids) {
+    if (seen_item_ids.insert(item_id).second) {
+      item_ids.emplace_back(item_id);
+    }
+  }
+
+  const int32_t each_threshold = FLAGS_each_conversion_threshold;
+  if (each_threshold > 0 &&
+      static_cast<int32_t>(item_ids.size()) > each_threshold) {
+    uint32_t seed = FLAGS_random_seed >= 0
+                        ? static_cast<uint32_t>(FLAGS_random_seed) +
+                              static_cast<uint32_t>(sequence_index)
+                        : std::random_device{}();
+    std::mt19937 generator(seed);
+    std::shuffle(item_ids.begin(), item_ids.end(), generator);
+    item_ids.resize(each_threshold);
+  }
+
+  return item_ids;
+}
 }  // namespace
 
 const std::string Sequence::ENCODER_SPARSE_EMBEDDING_NAME = "sparse_embedding";
@@ -107,15 +136,30 @@ void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
     output.finish_reason = finish_reason_.to_string();
   }
   output.token_ids = ids.slice(num_prompt_tokens_, size);
+  if (FLAGS_enable_output_sku_logprobs && logprob_state_ != nullptr) {
+    const auto& token_logprobs = logprob_state_->get_logprobs();
+    output.token_ids_logprobs.reserve(output.token_ids.size());
+    for (size_t i = num_prompt_tokens_; i < size; ++i) {
+      if (i < token_logprobs.size()) {
+        output.token_ids_logprobs.emplace_back(token_logprobs[i]);
+      } else {
+        output.token_ids_logprobs.emplace_back();
+      }
+    }
+  }
+  const size_t rec_token_size = static_cast<size_t>(REC_TOKEN_SIZE);
   if (FLAGS_enable_convert_tokens_to_item &&
-      output.token_ids.size() == static_cast<size_t>(REC_TOKEN_SIZE)) {
+      output.token_ids.size() == rec_token_size) {
     std::vector<int64_t> item_ids;
     const bool ok = tokenizer.decode(
         Slice<int32_t>{output.token_ids.data(), output.token_ids.size()},
         sequence_params_.skip_special_tokens,
         &item_ids);
     if (ok && !item_ids.empty()) {
-      output.item_ids = item_ids.front();
+      output.item_ids_list = normalize_rec_item_ids(item_ids, index_);
+      if (!output.item_ids_list.empty()) {
+        output.item_ids = output.item_ids_list.front();
+      }
     }
   }
 }
