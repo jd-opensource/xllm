@@ -30,12 +30,12 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
             context.get_model_args()) {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
-    layers_.reserve(model_args.n_layers());
+    layers_.reserve(model_args->n_layers());
     if (!mrope_section_.empty()) {
       cos_sin_ = layer::rotary::get_concat_rotary_embedding(
           128,
-          model_args.max_position_embeddings(),
-          model_args.rope_theta(),
+          model_args->max_position_embeddings(),
+          model_args->rope_theta(),
           options);
     }
 
@@ -43,7 +43,7 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
     norm_ = register_module("norm", layer::RMSNorm(context));
-    for (int32_t i = 0; i < model_args.n_layers(); ++i) {
+    for (int32_t i = 0; i < model_args->n_layers(); ++i) {
       auto layer = layer::Qwen3MoeDecoderLayer(context, i);
       layers_.push_back(layer);
     }
@@ -265,7 +265,8 @@ REGISTER_MODEL_ARGS(qwen3_moe, [&] {
   LOAD_ARG_OR(vocab_size, "vocab_size", 151936);
   LOAD_ARG_OR(mlp_only_layers, "mlp_only_layers", std::vector<int>());
 
-  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
+  SET_ARG(stop_token_ids,
+          std::unordered_set<int32_t>({model_args->eos_token_id()}));
 
   // arguments to be compatible with other fused moe models
   LOAD_ARG_OR(n_routed_experts, "num_experts", 128);

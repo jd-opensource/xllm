@@ -387,7 +387,7 @@ std::string ModelRegistry::get_model_backend(const std::string& name) {
 std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context) {
   std::string resolved_name;
   std::string error_message;
-  if (!resolve_model_registration_name(context.get_model_args().model_type(),
+  if (!resolve_model_registration_name(context.get_model_args()->model_type(),
                                        &resolved_name,
                                        &error_message)) {
     LOG(ERROR) << error_message;
@@ -400,7 +400,7 @@ std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context) {
   }
 
   LOG(ERROR) << "Unsupported model type: "
-             << context.get_model_args().model_type();
+             << context.get_model_args()->model_type();
 
   return nullptr;
 }
@@ -408,7 +408,7 @@ std::unique_ptr<CausalLM> create_llm_model(const ModelContext& context) {
 std::unique_ptr<CausalLM> create_rec_model(const ModelContext& context) {
   std::string resolved_name;
   std::string error_message;
-  if (!resolve_model_registration_name(context.get_model_args().model_type(),
+  if (!resolve_model_registration_name(context.get_model_args()->model_type(),
                                        &resolved_name,
                                        &error_message)) {
     LOG(ERROR) << error_message;
@@ -421,7 +421,7 @@ std::unique_ptr<CausalLM> create_rec_model(const ModelContext& context) {
   }
 
   LOG(ERROR) << "Unsupported rec model type: "
-             << context.get_model_args().model_type();
+             << context.get_model_args()->model_type();
 
   return nullptr;
 }
@@ -429,7 +429,7 @@ std::unique_ptr<CausalLM> create_rec_model(const ModelContext& context) {
 std::unique_ptr<CausalVLM> create_vlm_model(const ModelContext& context) {
   std::string resolved_name;
   std::string error_message;
-  if (!resolve_model_registration_name(context.get_model_args().model_type(),
+  if (!resolve_model_registration_name(context.get_model_args()->model_type(),
                                        &resolved_name,
                                        &error_message)) {
     LOG(ERROR) << error_message;
@@ -442,7 +442,7 @@ std::unique_ptr<CausalVLM> create_vlm_model(const ModelContext& context) {
   }
 
   LOG(ERROR) << "Unsupported model type: "
-             << context.get_model_args().model_type();
+             << context.get_model_args()->model_type();
 
   return nullptr;
 }
@@ -451,7 +451,7 @@ std::unique_ptr<EmbeddingVLM> create_vlm_embedding_model(
     const ModelContext& context) {
   std::string resolved_name;
   std::string error_message;
-  if (!resolve_model_registration_name(context.get_model_args().model_type(),
+  if (!resolve_model_registration_name(context.get_model_args()->model_type(),
                                        &resolved_name,
                                        &error_message)) {
     LOG(ERROR) << error_message;
@@ -464,7 +464,7 @@ std::unique_ptr<EmbeddingVLM> create_vlm_embedding_model(
   }
 
   LOG(ERROR) << "Unsupported model type: "
-             << context.get_model_args().model_type();
+             << context.get_model_args()->model_type();
 
   return nullptr;
 }
@@ -473,7 +473,7 @@ std::unique_ptr<MMEmbeddingVLM> create_vlm_mm_embedding_model(
     const ModelContext& context) {
   std::string resolved_name;
   std::string error_message;
-  if (!resolve_model_registration_name(context.get_model_args().model_type(),
+  if (!resolve_model_registration_name(context.get_model_args()->model_type(),
                                        &resolved_name,
                                        &error_message)) {
     LOG(ERROR) << error_message;
@@ -486,7 +486,7 @@ std::unique_ptr<MMEmbeddingVLM> create_vlm_mm_embedding_model(
   }
 
   LOG(ERROR) << "Unsupported model type: "
-             << context.get_model_args().model_type();
+             << context.get_model_args()->model_type();
 
   return nullptr;
 }

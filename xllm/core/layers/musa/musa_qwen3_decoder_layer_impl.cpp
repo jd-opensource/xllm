@@ -30,15 +30,15 @@ Qwen3DecoderLayerImpl::Qwen3DecoderLayerImpl(const ModelContext& context) {
   layers_.push_back(register_module(
       "musa_attn", Attention(model_args, quant_args, parallel_args, options)));
   layers_.push_back(register_module("musa_mlp",
-                                    MusaMLP(model_args.hidden_size(),
-                                            model_args.intermediate_size(),
+                                    MusaMLP(model_args->hidden_size(),
+                                            model_args->intermediate_size(),
                                             true,
                                             false,
-                                            model_args.hidden_act(),
+                                            model_args->hidden_act(),
                                             quant_args,
                                             parallel_args,
                                             options,
-                                            model_args.rms_norm_eps())));
+                                            model_args->rms_norm_eps())));
 }
 
 void Qwen3DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {

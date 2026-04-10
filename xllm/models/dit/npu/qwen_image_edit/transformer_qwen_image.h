@@ -153,7 +153,7 @@ class AdaLayerNormContinuousImpl : public torch::nn::Module {
                                       double eps = 1e-5,
                                       bool bias = true)
       : options_(context.get_tensor_options()) {
-    ModelArgs model_args = context.get_model_args();
+    auto model_args = context.get_model_args();
     silu_ = register_module("silu", torch::nn::SiLU());
     linear_ = register_module(
         "linear",
@@ -1826,17 +1826,17 @@ class QwenImageTransformer2DModelImpl : public torch::nn::Module {
                                   const ParallelArgs& parallel_args)
       : options_(context.get_tensor_options()), parallel_args_(parallel_args) {
     auto model_args = context.get_model_args();
-    int64_t num_attention_heads = model_args.n_heads();
-    int64_t attention_head_dim = model_args.head_dim();
-    int64_t joint_attention_dim = model_args.joint_attention_dim();
-    std::vector<int64_t> axes_dims_rope = model_args.axes_dims_rope();
-    int64_t num_layers = model_args.num_layers();
-    int64_t patch_size = model_args.mm_patch_size();
-    int64_t in_channels = model_args.in_channels();
-    int64_t out_channels = model_args.out_channels();
-    bool zero_cond_t = model_args.zero_cond_t();
-    bool use_additional_t_cond = model_args.use_additional_t_cond();
-    use_layer3d_rope_ = model_args.use_layer3d_rope();
+    int64_t num_attention_heads = model_args->n_heads();
+    int64_t attention_head_dim = model_args->head_dim();
+    int64_t joint_attention_dim = model_args->joint_attention_dim();
+    std::vector<int64_t> axes_dims_rope = model_args->axes_dims_rope();
+    int64_t num_layers = model_args->num_layers();
+    int64_t patch_size = model_args->mm_patch_size();
+    int64_t in_channels = model_args->in_channels();
+    int64_t out_channels = model_args->out_channels();
+    bool zero_cond_t = model_args->zero_cond_t();
+    bool use_additional_t_cond = model_args->use_additional_t_cond();
+    use_layer3d_rope_ = model_args->use_layer3d_rope();
 
     out_channels = (out_channels > 0) ? out_channels : in_channels;
     auto inner_dim = num_attention_heads * attention_head_dim;

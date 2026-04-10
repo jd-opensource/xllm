@@ -35,25 +35,25 @@ class DeepseekMtpModelImpl
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    int32_t mask_value = model_args.dtype() == "bfloat16" ? 1 : -9984;
+    int32_t mask_value = model_args->dtype() == "bfloat16" ? 1 : -9984;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
 
     cos_sin_ = layer::rotary::get_deepseek_rotary_embedding(
-        model_args.qk_rope_head_dim(),
-        model_args.qk_rope_head_dim(),
-        model_args.max_position_embeddings(),
-        model_args.rope_scaling_original_max_position_embeddings(),
-        model_args.rope_theta(),
+        model_args->qk_rope_head_dim(),
+        model_args->qk_rope_head_dim(),
+        model_args->max_position_embeddings(),
+        model_args->rope_scaling_original_max_position_embeddings(),
+        model_args->rope_theta(),
         /*interleaved*/ false,
-        model_args.rope_scaling_factor(),
-        model_args.rope_extrapolation_factor(),
-        model_args.rope_scaling_attn_factor(),
-        model_args.rope_scaling_beta_fast(),
-        model_args.rope_scaling_beta_slow(),
-        model_args.rope_scaling_mscale(),
-        model_args.rope_scaling_mscale_all_dim(),
+        model_args->rope_scaling_factor(),
+        model_args->rope_extrapolation_factor(),
+        model_args->rope_scaling_attn_factor(),
+        model_args->rope_scaling_beta_fast(),
+        model_args->rope_scaling_beta_slow(),
+        model_args->rope_scaling_mscale(),
+        model_args->rope_scaling_mscale_all_dim(),
         options);
   }
 };
@@ -108,10 +108,11 @@ REGISTER_MODEL_ARGS(deepseek_v3_mtp, [&] {
   LOAD_ARG_OR(kv_lora_rank, "kv_lora_rank", 512);
 
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
-    return 256;  // args->qk_nope_head_dim() + args->qk_rope_head_dim();
+    return 256;  // model_args->qk_nope_head_dim() +
+                 // model_args->qk_rope_head_dim();
   });
   LOAD_ARG_OR_FUNC(
-      rotary_dim, "rotary_dim", [&] { return args->qk_rope_head_dim(); });
+      rotary_dim, "rotary_dim", [&] { return model_args->qk_rope_head_dim(); });
 
   SET_ARG(rope_scaling_rope_type, "deepseek_yarn");
   LOAD_ARG(rope_scaling_beta_fast, "rope_scaling.beta_fast");

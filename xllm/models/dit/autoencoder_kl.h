@@ -65,7 +65,7 @@ class VAEImageProcessorImpl : public torch::nn::Module {
                                  int64_t latent_channels = 4) {
     const auto& model_args = context.get_model_args();
     options_ = context.get_tensor_options();
-    scale_factor_ = 1 << model_args.block_out_channels().size();
+    scale_factor_ = 1 << model_args->block_out_channels().size();
     latent_channels_ = latent_channels;
     do_resize_ = do_resize;
     do_normalize_ = do_normalize;
@@ -205,12 +205,12 @@ TORCH_MODULE(VAEImageProcessor);
 class AttentionImpl : public torch::nn::Module {
  public:
   explicit AttentionImpl(ModelContext context) {
-    ModelArgs model_args = context.get_model_args();
-    int64_t query_dim = model_args.block_out_channels().back();
-    int64_t head_dim = model_args.block_out_channels().back();
+    std::shared_ptr<ModelArgs> model_args = context.get_model_args();
+    int64_t query_dim = model_args->block_out_channels().back();
+    int64_t head_dim = model_args->block_out_channels().back();
     int64_t num_heads = query_dim / head_dim;
     num_heads_ = num_heads;
-    int64_t norm_num_groups = model_args.norm_num_groups();
+    int64_t norm_num_groups = model_args->norm_num_groups();
     if (norm_num_groups > 0) {
       group_norm_ =
           register_module("group_norm",
@@ -449,8 +449,8 @@ class ResnetBlock2DImpl : public torch::nn::Module {
       : in_channels_(in_channels),
         out_channels_(out_channels),
         time_embedding_norm_(time_embedding_norm) {
-    ModelArgs model_args = context.get_model_args();
-    int64_t groups_out_val = model_args.norm_num_groups();
+    std::shared_ptr<ModelArgs> model_args = context.get_model_args();
+    int64_t groups_out_val = model_args->norm_num_groups();
 
     norm1_ =
         register_module("norm1",
@@ -623,17 +623,17 @@ TORCH_MODULE(ResnetBlock2D);
 class UNetMidBlock2DImpl : public torch::nn::Module {
  public:
   explicit UNetMidBlock2DImpl(ModelContext context) {
-    ModelArgs model_args = context.get_model_args();
+    std::shared_ptr<ModelArgs> model_args = context.get_model_args();
     resnets_ = register_module("resnets", torch::nn::ModuleList());
     attentions_ = register_module("attentions", torch::nn::ModuleList());
-    int64_t in_channels = model_args.block_out_channels().back();
-    add_attention_ = model_args.mid_block_add_attention();
+    int64_t in_channels = model_args->block_out_channels().back();
+    add_attention_ = model_args->mid_block_add_attention();
     resnet_layers_.reserve(2);
     attention_layers_.reserve(add_attention_ ? 1 : 0);
     auto block1 = ResnetBlock2D(context, in_channels, in_channels, "default");
     resnets_->push_back(block1);
     resnet_layers_.push_back(block1);
-    int64_t attn_head_dim = model_args.block_out_channels().back();
+    int64_t attn_head_dim = model_args->block_out_channels().back();
     int64_t num_heads = in_channels / attn_head_dim;
     if (add_attention_) {
       auto attn_block = Attention(context);
@@ -704,8 +704,8 @@ class DownEncoderBlock2DImpl : public torch::nn::Module {
                          int64_t in_channels,
                          int64_t out_channels,
                          bool add_downsample = true) {
-    ModelArgs model_args = context.get_model_args();
-    int64_t num_layers = model_args.layers_per_block();
+    std::shared_ptr<ModelArgs> model_args = context.get_model_args();
+    int64_t num_layers = model_args->layers_per_block();
     resnets_ = register_module("resnets", torch::nn::ModuleList());
     downsamplers_ = register_module("downsamplers", torch::nn::ModuleList());
     resnet_layers_.reserve(num_layers);
@@ -789,8 +789,8 @@ class UpDecoderBlock2DImpl : public torch::nn::Module {
                        int64_t in_channels,
                        int64_t out_channels,
                        bool add_upsample = true) {
-    ModelArgs model_args = context.get_model_args();
-    int64_t num_layers = model_args.layers_per_block() + 1;
+    std::shared_ptr<ModelArgs> model_args = context.get_model_args();
+    int64_t num_layers = model_args->layers_per_block() + 1;
     resnets_ = register_module("resnets", torch::nn::ModuleList());
     resnet_layers_.reserve(num_layers);
     for (int64_t i = 0; i < num_layers; ++i) {
@@ -942,24 +942,25 @@ class DiagonalGaussianDistribution {
 class VAEEncoderImpl : public torch::nn::Module {
  public:
   explicit VAEEncoderImpl(const ModelContext& context) {
-    ModelArgs args = context.get_model_args();
+    std::shared_ptr<ModelArgs> model_args = context.get_model_args();
     down_blocks_ = register_module("down_blocks", torch::nn::ModuleList());
     auto options = context.get_tensor_options();
     conv_in_ = register_module(
         "conv_in",
-        torch::nn::Conv2d(torch::nn::Conv2dOptions(args.in_channels(),
-                                                   args.block_out_channels()[0],
-                                                   3)
-                              .stride(1)
-                              .padding(1)
-                              .bias(true)));
+        torch::nn::Conv2d(
+            torch::nn::Conv2dOptions(model_args->in_channels(),
+                                     model_args->block_out_channels()[0],
+                                     3)
+                .stride(1)
+                .padding(1)
+                .bias(true)));
     // downblocks
-    int32_t output_channels = args.block_out_channels()[0];
-    down_layers_.reserve(args.down_block_types().size());
-    for (size_t i = 0; i < args.down_block_types().size(); i++) {
+    int32_t output_channels = model_args->block_out_channels()[0];
+    down_layers_.reserve(model_args->down_block_types().size());
+    for (size_t i = 0; i < model_args->down_block_types().size(); i++) {
       int32_t input_channels = output_channels;
-      output_channels = args.block_out_channels()[i];
-      bool is_final_block = (i == args.block_out_channels().size() - 1);
+      output_channels = model_args->block_out_channels()[i];
+      bool is_final_block = (i == model_args->block_out_channels().size() - 1);
       auto down_block = DownEncoderBlock2D(
           context, input_channels, output_channels, !is_final_block);
       down_blocks_->push_back(down_block);
@@ -970,15 +971,16 @@ class VAEEncoderImpl : public torch::nn::Module {
     conv_norm_out_ = register_module(
         "conv_norm_out",
         torch::nn::GroupNorm(
-            torch::nn::GroupNormOptions(args.norm_num_groups(),
-                                        args.block_out_channels().back())
+            torch::nn::GroupNormOptions(model_args->norm_num_groups(),
+                                        model_args->block_out_channels().back())
                 .eps(1e-6)));
     conv_act_ = register_module("conv_act", torch::nn::Functional(torch::silu));
     conv_out_ = register_module(
         "conv_out",
         torch::nn::Conv2d(
-            torch::nn::Conv2dOptions(
-                args.block_out_channels().back(), 2 * args.latent_channels(), 3)
+            torch::nn::Conv2dOptions(model_args->block_out_channels().back(),
+                                     2 * model_args->latent_channels(),
+                                     3)
                 .padding(1)
                 .bias(true)));
   }
@@ -1070,14 +1072,15 @@ TORCH_MODULE(VAEEncoder);
 class VAEDecoderImpl : public torch::nn::Module {
  public:
   explicit VAEDecoderImpl(const ModelContext& context) {
-    ModelArgs args = context.get_model_args();
+    std::shared_ptr<ModelArgs> model_args = context.get_model_args();
     auto options = context.get_tensor_options();
     up_blocks_ = register_module("up_blocks", torch::nn::ModuleList());
     conv_in_ = register_module(
         "conv_in",
         torch::nn::Conv2d(
-            torch::nn::Conv2dOptions(
-                args.latent_channels(), args.block_out_channels().back(), 3)
+            torch::nn::Conv2dOptions(model_args->latent_channels(),
+                                     model_args->block_out_channels().back(),
+                                     3)
                 .stride(1)
                 .padding(1)
                 .bias(true)));
@@ -1085,14 +1088,15 @@ class VAEDecoderImpl : public torch::nn::Module {
     mid_block_ = register_module("mid_block", UNetMidBlock2D(context));
     // up blocks
     std::vector<int64_t> reversed_block_out_channels(
-        args.block_out_channels().rbegin(), args.block_out_channels().rend());
+        model_args->block_out_channels().rbegin(),
+        model_args->block_out_channels().rend());
     int64_t output_channel = reversed_block_out_channels[0];
 
-    for (size_t i = 0; i < args.up_block_types().size(); ++i) {
-      const std::string& up_block_type = args.up_block_types()[i];
+    for (size_t i = 0; i < model_args->up_block_types().size(); ++i) {
+      const std::string& up_block_type = model_args->up_block_types()[i];
       int64_t prev_output_channel = output_channel;
       output_channel = reversed_block_out_channels[i];
-      bool is_final_block = (i == args.block_out_channels().size() - 1);
+      bool is_final_block = (i == model_args->block_out_channels().size() - 1);
       // Create the up block using the factory function
       auto up_block = UpDecoderBlock2D(
           context, prev_output_channel, output_channel, !is_final_block);
@@ -1102,19 +1106,21 @@ class VAEDecoderImpl : public torch::nn::Module {
     }
     conv_norm_out_ = register_module(
         "conv_norm_out",
-        torch::nn::GroupNorm(torch::nn::GroupNormOptions(
-                                 args.norm_num_groups(),       // num_groups
-                                 args.block_out_channels()[0]  // num_channels
-                                 )
-                                 .eps(1e-6)));
+        torch::nn::GroupNorm(
+            torch::nn::GroupNormOptions(
+                model_args->norm_num_groups(),       // num_groups
+                model_args->block_out_channels()[0]  // num_channels
+                )
+                .eps(1e-6)));
     conv_act_ = register_module("conv_act", torch::nn::Functional(torch::silu));
     conv_out_ = register_module(
         "conv_out",
-        torch::nn::Conv2d(torch::nn::Conv2dOptions(args.block_out_channels()[0],
-                                                   args.out_channels(),
-                                                   3)
-                              .padding(1)
-                              .bias(true)));
+        torch::nn::Conv2d(
+            torch::nn::Conv2dOptions(model_args->block_out_channels()[0],
+                                     model_args->out_channels(),
+                                     3)
+                .padding(1)
+                .bias(true)));
   }
 
   torch::Tensor forward(const torch::Tensor& latents) {
@@ -1205,36 +1211,39 @@ TORCH_MODULE(VAEDecoder);
 class VAEImpl : public torch::nn::Module {
  public:
   explicit VAEImpl(const ModelContext& context)
-      : args_(context.get_model_args()) {
+      : model_args_(context.get_model_args()) {
     encoder_ = register_module("encoder", VAEEncoder(context));
     decoder_ = register_module("decoder", VAEDecoder(context));
-    if (args_.use_quant_conv()) {
-      quant_conv_ = register_module(
-          "quant_conv",
-          torch::nn::Conv2d(torch::nn::Conv2dOptions(
-              2 * args_.latent_channels(), 2 * args_.latent_channels(), 1)));
+    if (model_args_->use_quant_conv()) {
+      quant_conv_ = register_module("quant_conv",
+                                    torch::nn::Conv2d(torch::nn::Conv2dOptions(
+                                        2 * model_args_->latent_channels(),
+                                        2 * model_args_->latent_channels(),
+                                        1)));
     }
-    if (args_.use_post_quant_conv()) {
-      post_quant_conv_ = register_module(
-          "post_quant_conv",
-          torch::nn::Conv2d(torch::nn::Conv2dOptions(
-              args_.latent_channels(), args_.latent_channels(), 1)));
+    if (model_args_->use_post_quant_conv()) {
+      post_quant_conv_ =
+          register_module("post_quant_conv",
+                          torch::nn::Conv2d(torch::nn::Conv2dOptions(
+                              model_args_->latent_channels(),
+                              model_args_->latent_channels(),
+                              1)));
     }
 
     auto dtype = context.get_tensor_options().dtype().toScalarType();
     encoder_->to(dtype);
     decoder_->to(dtype);
-    if (args_.use_quant_conv()) {
+    if (model_args_->use_quant_conv()) {
       quant_conv_->to(dtype);
     }
-    if (args_.use_post_quant_conv()) {
+    if (model_args_->use_post_quant_conv()) {
       post_quant_conv_->to(dtype);
     }
   }
 
   torch::Tensor encode(const torch::Tensor& images, int64_t seed) {
     auto enc = encoder_(images);
-    if (args_.use_quant_conv()) {
+    if (model_args_->use_quant_conv()) {
       enc = quant_conv_(enc);
     }
     auto posterior = DiagonalGaussianDistribution(enc);
@@ -1244,7 +1253,7 @@ class VAEImpl : public torch::nn::Module {
   torch::Tensor decode(const torch::Tensor& latents) {
     torch::Tensor processed_latents = latents;
 
-    if (args_.use_post_quant_conv()) {
+    if (model_args_->use_post_quant_conv()) {
       processed_latents = post_quant_conv_(processed_latents);
     }
 
@@ -1256,7 +1265,7 @@ class VAEImpl : public torch::nn::Module {
     for (const auto& state_dict : loader->get_state_dicts()) {
       encoder_->load_state_dict(state_dict->get_dict_with_prefix("encoder."));
       decoder_->load_state_dict(state_dict->get_dict_with_prefix("decoder."));
-      if (args_.use_quant_conv()) {
+      if (model_args_->use_quant_conv()) {
         weight::load_weight(state_dict->get_dict_with_prefix("quant_conv."),
                             "weight",
                             quant_conv_->weight,
@@ -1266,7 +1275,7 @@ class VAEImpl : public torch::nn::Module {
                             quant_conv_->bias,
                             is_quant_conv_bias_);
       }
-      if (args_.use_post_quant_conv()) {
+      if (model_args_->use_post_quant_conv()) {
         weight::load_weight(
             state_dict->get_dict_with_prefix("post_quant_conv."),
             "weight",
@@ -1286,13 +1295,13 @@ class VAEImpl : public torch::nn::Module {
   void verify_loaded_weights(const std::string& prefix) {
     encoder_->verify_loaded_weights(prefix + "encoder.");
     decoder_->verify_loaded_weights(prefix + "decoder.");
-    if (args_.use_quant_conv()) {
+    if (model_args_->use_quant_conv()) {
       CHECK(is_quant_conv_weight_)
           << "weight is not loaded for " << prefix + "quant_conv.weight";
       CHECK(is_quant_conv_bias_)
           << "bias is not loaded for " << prefix + "quant_conv.bias";
     }
-    if (args_.use_post_quant_conv()) {
+    if (model_args_->use_post_quant_conv()) {
       CHECK(is_post_quant_conv_weight_)
           << "weight is not loaded for " << prefix + "post_quant_conv.weight";
       CHECK(is_post_quant_conv_bias_)
@@ -1311,7 +1320,7 @@ class VAEImpl : public torch::nn::Module {
   bool is_quant_conv_bias_ = false;
   bool is_post_quant_conv_weight_ = false;
   bool is_post_quant_conv_bias_ = false;
-  ModelArgs args_;
+  std::shared_ptr<ModelArgs> model_args_;
 };
 TORCH_MODULE(VAE);
 

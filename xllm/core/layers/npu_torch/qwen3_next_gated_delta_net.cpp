@@ -14,40 +14,45 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
+
 namespace xllm {
 namespace layer {
 
 Qwen3NextGatedDeltaNetImpl::Qwen3NextGatedDeltaNetImpl(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& model_args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options)
-    : Qwen3NextGatedDeltaNetImpl(args,
+    : Qwen3NextGatedDeltaNetImpl(model_args,
                                  quant_args,
                                  parallel_args,
                                  options,
                                  /*init_projections=*/true) {}
 
 Qwen3NextGatedDeltaNetImpl::Qwen3NextGatedDeltaNetImpl(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& model_args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options,
     bool init_projections)
-    : Qwen3GatedDeltaNetBaseImpl(args, quant_args, parallel_args, options) {
+    : Qwen3GatedDeltaNetBaseImpl(model_args,
+                                 quant_args,
+                                 parallel_args,
+                                 options) {
   if (init_projections) {
-    init_next_projections(args, quant_args, parallel_args, options);
+    init_next_projections(model_args, quant_args, parallel_args, options);
   }
 }
 
 void Qwen3NextGatedDeltaNetImpl::init_next_projections(
-    const ModelArgs& args,
+    const std::shared_ptr<ModelArgs>& model_args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
     const torch::TensorOptions& options) {
   // QKVZ projection used by Qwen3-Next linear attention.
   qkvz_proj_ = register_module("in_proj_qkvz",
-                               ColumnParallelLinear(args.hidden_size(),
+                               ColumnParallelLinear(model_args->hidden_size(),
                                                     k_size_ * 2 + v_size_ * 2,
                                                     /*bias=*/false,
                                                     /*gather_output=*/false,
@@ -56,7 +61,7 @@ void Qwen3NextGatedDeltaNetImpl::init_next_projections(
                                                     options));
   // BA projection used to derive gating and beta terms.
   ba_proj_ = register_module("in_proj_ba",
-                             ColumnParallelLinear(args.hidden_size(),
+                             ColumnParallelLinear(model_args->hidden_size(),
                                                   num_v_heads_ * 2,
                                                   /*bias=*/false,
                                                   /*gather_output=*/false,

@@ -17,10 +17,12 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
+
 namespace xllm {
 namespace layer {
 
-FusedMoEImpl::FusedMoEImpl(const ModelArgs& /*model_args*/,
+FusedMoEImpl::FusedMoEImpl(const std::shared_ptr<ModelArgs>& /*model_args*/,
                            const FusedMoEArgs& /*moe_args*/,
                            const QuantArgs& /*quant_args*/,
                            const ParallelArgs& /*parallel_args*/,

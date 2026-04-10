@@ -320,15 +320,15 @@ DeekseekV32DecoderLoader::DeekseekV32DecoderLoader(
   auto options = context.get_tensor_options();
 
   rank_ = parallel_args_.rank();
-  first_k_dense_replace_ = model_args.first_k_dense_replace();
-  n_layers_ = model_args.n_layers();
-  num_experts_ = model_args.n_routed_experts();
+  first_k_dense_replace_ = model_args->first_k_dense_replace();
+  n_layers_ = model_args->n_layers();
+  num_experts_ = model_args->n_routed_experts();
   localWorldSize_ = parallel_args_.mapping().localWorldSize();
   ep_size_ = parallel_args_.ep_size();
   ep_local_tp_size_ = parallel_args_.world_size() / ep_size_;
   CHECK_EQ(parallel_args_.world_size(), ep_size_ * ep_local_tp_size_);
   ep_local_tp_rank_ = parallel_args_.rank() % ep_local_tp_size_;
-  num_experts_per_partition_ = model_args.n_routed_experts() / ep_size_;
+  num_experts_per_partition_ = model_args->n_routed_experts() / ep_size_;
   redundant_experts_num_ = FLAGS_redundant_experts_num;
   if (FLAGS_enable_eplb) {
     num_experts_per_partition_ += redundant_experts_num_;

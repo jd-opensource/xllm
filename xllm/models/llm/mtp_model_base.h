@@ -17,6 +17,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -39,8 +40,8 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
     // no quantization for eh_proj
     eh_proj_ =
         register_module("eh_proj",
-                        layer::ReplicatedLinear(model_args_.hidden_size() * 2,
-                                                model_args_.hidden_size(),
+                        layer::ReplicatedLinear(model_args_->hidden_size() * 2,
+                                                model_args_->hidden_size(),
                                                 /*bias=*/false,
                                                 /*QuantArgs=*/QuantArgs(),
                                                 options));
@@ -60,7 +61,7 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
     torch::Tensor embedding_data = input_params.input_embedding;
     // for dummy data parallel run, we set a empty embedding
     if (attn_metadata.is_dummy) {
-      embedding_data = torch::zeros({embed.size(0), model_args_.hidden_size()},
+      embedding_data = torch::zeros({embed.size(0), model_args_->hidden_size()},
                                     embed.options());
     }
     CHECK(embedding_data.defined())
@@ -107,7 +108,7 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
   layer::ReplicatedLinear eh_proj_{nullptr};
   DecoderLayerType mtp_block_{nullptr};
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
 };
 
 template <typename DecoderLayerType>
@@ -120,10 +121,10 @@ class MtpModelImplBase : public torch::nn::Module {
     auto parallel_args = context.get_parallel_args();
 
     // get mtp start and end layer index
-    mtp_start_layer_idx_ = model_args_.n_layers();
+    mtp_start_layer_idx_ = model_args_->n_layers();
     mtp_end_layer_idx_ =
-        mtp_start_layer_idx_ + model_args_.num_nextn_predict_layers();
-    mtp_layers_.reserve(model_args_.num_nextn_predict_layers());
+        mtp_start_layer_idx_ + model_args_->num_nextn_predict_layers();
+    mtp_layers_.reserve(model_args_->num_nextn_predict_layers());
 
     // create mtp layers
     for (int32_t i = mtp_start_layer_idx_; i < mtp_end_layer_idx_; ++i) {
@@ -132,8 +133,8 @@ class MtpModelImplBase : public torch::nn::Module {
     }
     embed_tokens_ =
         register_module("embed_tokens",
-                        layer::WordEmbedding(model_args_.vocab_size(),
-                                             model_args_.hidden_size(),
+                        layer::WordEmbedding(model_args_->vocab_size(),
+                                             model_args_->hidden_size(),
                                              context.get_parallel_args(),
                                              options));
     norm_ = register_module("norm", layer::RMSNorm(context));
@@ -230,7 +231,7 @@ class MtpModelImplBase : public torch::nn::Module {
   }
 
  private:
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   std::vector<DecoderLayerType> mtp_layers_;
   int32_t mtp_start_layer_idx_;
   int32_t mtp_end_layer_idx_;

@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
+
 #include "core/framework/model/model_output.h"
 #include "core/layers/common/lm_head.h"
 #include "core/layers/qwen2_5_vision_layer.h"
@@ -32,11 +34,11 @@ class Qwen2_5_VisionPatchEmbedImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    auto in_features = model_args.mm_num_channels() *
-                       model_args.mm_temporal_patch_size() *
-                       model_args.mm_patch_size() * model_args.mm_patch_size();
+    auto in_features =
+        model_args->mm_num_channels() * model_args->mm_temporal_patch_size() *
+        model_args->mm_patch_size() * model_args->mm_patch_size();
 
-    auto out_features = model_args.mm_hidden_size();
+    auto out_features = model_args->mm_hidden_size();
 
     proj_ = register_module(
         "proj",
@@ -76,7 +78,7 @@ class Qwen2_5_VisionRotaryEmbeddingImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    dim_ = model_args.mm_head_dim() / 2;
+    dim_ = model_args->mm_head_dim() / 2;
     theta_ = 10000.0;
 
     auto opts = options.dtype(torch::kFloat32);
@@ -123,16 +125,16 @@ class Qwen2_5_VisionPatchMergerImpl : public torch::nn::Module {
     auto quant_args = context.get_quant_args();
     auto parallel_args = context.get_parallel_args();
 
-    int64_t d_model = model_args.mm_projection_dim();  // out_hidden_size
-    int context_dim = model_args.mm_hidden_size();
-    int spatial_merge_size = model_args.mm_spatial_merge_size();
+    int64_t d_model = model_args->mm_projection_dim();  // out_hidden_size
+    int context_dim = model_args->mm_hidden_size();
+    int spatial_merge_size = model_args->mm_spatial_merge_size();
 
     hidden_size_ =
         context_dim * static_cast<int>(std::pow(spatial_merge_size, 2));
 
     ln_q_ = register_module(
         "ln_q",
-        layer::RMSNorm(context_dim, model_args.rms_norm_eps(), options));
+        layer::RMSNorm(context_dim, model_args->rms_norm_eps(), options));
 
     auto cpl = torch::nn::Linear(
         torch::nn::LinearOptions(hidden_size_, hidden_size_).bias(true));
@@ -211,13 +213,13 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
     auto model_args = context.get_model_args();
     auto options = context.get_tensor_options();
 
-    hidden_size_ = model_args.mm_hidden_size();
-    num_heads_ = model_args.mm_num_attention_heads();
+    hidden_size_ = model_args->mm_hidden_size();
+    num_heads_ = model_args->mm_num_attention_heads();
 
-    window_size_ = model_args.mm_window_size();
-    patch_size_ = model_args.mm_patch_size();
-    spatial_merge_size_ = model_args.mm_spatial_merge_size();
-    const auto& block_indexes = model_args.mm_fullatt_block_indexes();
+    window_size_ = model_args->mm_window_size();
+    patch_size_ = model_args->mm_patch_size();
+    spatial_merge_size_ = model_args->mm_spatial_merge_size();
+    const auto& block_indexes = model_args->mm_fullatt_block_indexes();
     fullatt_block_indexes_.insert(block_indexes.begin(), block_indexes.end());
     spatial_merge_unit_ = static_cast<int>(std::pow(spatial_merge_size_, 2));
 
@@ -227,7 +229,7 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
                                       Qwen2_5_VisionRotaryEmbedding(context));
     blocks_ = register_module("blocks", torch::nn::ModuleList());
 
-    for (int32_t idx = 0; idx < model_args.mm_num_hidden_layers(); idx++) {
+    for (int32_t idx = 0; idx < model_args->mm_num_hidden_layers(); idx++) {
       auto block = layer::Qwen2_5_VisionLayer(context);
       blocks_->push_back(block);
       layers_.push_back(block);
@@ -528,7 +530,7 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     std::optional<Qwen2_5_VLImageInputs> image_input;
     std::optional<Qwen2_5_VLVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
-    auto merge_size = model_args_.mm_image_merge_size();
+    auto merge_size = model_args_->mm_image_merge_size();
     MMDict multimodal_embeds;
     if (image_input) {
       // visual
@@ -569,7 +571,7 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor generate_multimodal_mask(torch::Tensor input_ids) {
     auto special_token_ids = torch::tensor(
-        {model_args_.image_token_id(), model_args_.video_token_id()},
+        {model_args_->image_token_id(), model_args_->video_token_id()},
         input_ids.options().dtype(torch::kInt64));
     auto is_multimodal = torch::isin(input_ids, special_token_ids);
     return is_multimodal;
@@ -636,7 +638,7 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
           std::vector<std::string>{"visual.", "model.visual."}));
     }
 
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_->image_embedding_mode()) {
       language_model_->load_model(std::move(loader));
     }
   }
@@ -653,7 +655,7 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
   }
 
  private:
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::TensorOptions options_;
 
   Qwen2_5_VisionTransformer visual_{nullptr};
@@ -698,7 +700,7 @@ REGISTER_IMAGE_PROCESSOR(qwen2_5_vl, Qwen2VLImageProcessor);
     /* LOAD_ARG_OR(use_cache, "use_cache", true); */                           \
     LOAD_ARG_OR(use_sliding_window, "use_sliding_window", false);              \
     LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {                               \
-      return args->hidden_size() / args->n_heads();                            \
+      return model_args->hidden_size() / model_args->n_heads();                \
     });                                                                        \
                                                                                \
     /* vision_config */                                                        \
@@ -722,7 +724,8 @@ REGISTER_IMAGE_PROCESSOR(qwen2_5_vl, Qwen2VLImageProcessor);
     LOAD_ARG_OR(                                                               \
         mm_temporal_patch_size, "vision_config.temporal_patch_size", 2);       \
     LOAD_ARG_OR_FUNC(mm_head_dim, "head_dim", [&] {                            \
-      return args->mm_hidden_size() / args->mm_num_attention_heads();          \
+      return model_args->mm_hidden_size() /                                    \
+             model_args->mm_num_attention_heads();                             \
     });                                                                        \
                                                                                \
     LOAD_ARG_OR(rope_scaling_rope_type, "rope_scaling.type", "mrope");         \
@@ -730,8 +733,8 @@ REGISTER_IMAGE_PROCESSOR(qwen2_5_vl, Qwen2VLImageProcessor);
                 "rope_scaling.mrope_section",                                  \
                 std::vector<int64_t>({16, 24, 24}));                           \
     LOAD_ARG_OR(vocab_size, "vocab_size", 152064);                             \
-    if (args->rope_scaling_rope_type() == "default") {                         \
-      args->rope_scaling_rope_type() = "mrope";                                \
+    if (model_args->rope_scaling_rope_type() == "default") {                   \
+      model_args->rope_scaling_rope_type() = "mrope";                          \
     }                                                                          \
   } while (0)
 

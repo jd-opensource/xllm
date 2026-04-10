@@ -33,7 +33,7 @@ class Qwen3_VLInputProcessor : public InputProcessor {
   };
 
  public:
-  explicit Qwen3_VLInputProcessor(const ModelArgs& args);
+  explicit Qwen3_VLInputProcessor(const std::shared_ptr<ModelArgs>& model_args);
 
   void process(std::string& prompt, const MMData& mm_data) override;
   void find_mm_spans(const std::vector<int32_t>& prompt,

@@ -36,6 +36,8 @@ limitations under the License.
 #elif defined(USE_CUDA)
 #include "layers/cuda/attention.h"
 #endif
+#include <memory>
+
 #include "layers/common/attention_metadata_builder.h"
 #include "layers/common/tests/tests_utils.h"
 #include "platform/device.h"
@@ -143,69 +145,69 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     parallel_args_ = test::create_default_parallel_args(mock_process_group_);
     // Use a small but structurally valid DeepSeek-style config so the tests
     // exercise Dense/MoE/MLA wiring without allocating near-production tensors.
-    model_args_.model_type() = "deepseek_v3";
-    model_args_.dtype() = "";  // default empty
-    model_args_.vocab_size() = 4096;
-    model_args_.hidden_size() = 512;
-    model_args_.n_layers() = 8;
-    model_args_.n_heads() = 8;
-    model_args_.n_kv_heads() = 8;
-    model_args_.intermediate_size() = 1024;
-    model_args_.hidden_act() = "silu";
-    model_args_.rms_norm_eps() = 1e-6f;
-    model_args_.max_position_embeddings() = 4096;
-    model_args_.eos_token_id() = 1;
-    model_args_.bos_token_id() = 0;
+    model_args_->model_type() = "deepseek_v3";
+    model_args_->dtype() = "";  // default empty
+    model_args_->vocab_size() = 4096;
+    model_args_->hidden_size() = 512;
+    model_args_->n_layers() = 8;
+    model_args_->n_heads() = 8;
+    model_args_->n_kv_heads() = 8;
+    model_args_->intermediate_size() = 1024;
+    model_args_->hidden_act() = "silu";
+    model_args_->rms_norm_eps() = 1e-6f;
+    model_args_->max_position_embeddings() = 4096;
+    model_args_->eos_token_id() = 1;
+    model_args_->bos_token_id() = 0;
 
     // Decoder layer specific routing between MoE and Dense
-    model_args_.first_k_dense_replace() = 1;
-    model_args_.moe_layer_freq() = 1;
+    model_args_->first_k_dense_replace() = 1;
+    model_args_->moe_layer_freq() = 1;
 
     // MoE-related params
-    model_args_.n_routed_experts() = 8;
-    model_args_.n_shared_experts() = 1;
-    model_args_.num_experts_per_tok() = 2;
-    model_args_.moe_intermediate_size() = 128;
-    model_args_.routed_scaling_factor() = 2.5f;
-    model_args_.norm_topk_prob() = true;
-    model_args_.n_group() = 2;
-    model_args_.topk_group() = 1;
-    model_args_.scoring_func() = "sigmoid";
-    model_args_.topk_method() = "noaux_tc";
+    model_args_->n_routed_experts() = 8;
+    model_args_->n_shared_experts() = 1;
+    model_args_->num_experts_per_tok() = 2;
+    model_args_->moe_intermediate_size() = 128;
+    model_args_->routed_scaling_factor() = 2.5f;
+    model_args_->norm_topk_prob() = true;
+    model_args_->n_group() = 2;
+    model_args_->topk_group() = 1;
+    model_args_->scoring_func() = "sigmoid";
+    model_args_->topk_method() = "noaux_tc";
 
     // Q/K/V dims used by DeepseekV2Attention
-    model_args_.qk_nope_head_dim() = 64;
-    model_args_.qk_rope_head_dim() = 64;
-    model_args_.v_head_dim() = 64;
-    model_args_.head_dim() = 128;  // qk_nope_head_dim + qk_rope_head_dim
-    model_args_.rotary_dim() = model_args_.qk_rope_head_dim();
+    model_args_->qk_nope_head_dim() = 64;
+    model_args_->qk_rope_head_dim() = 64;
+    model_args_->v_head_dim() = 64;
+    model_args_->head_dim() = 128;  // qk_nope_head_dim + qk_rope_head_dim
+    model_args_->rotary_dim() = model_args_->qk_rope_head_dim();
 
     // Rope scaling related
-    model_args_.rope_scaling_rope_type() = "deepseek_yarn";
+    model_args_->rope_scaling_rope_type() = "deepseek_yarn";
     // The following values may be model/export dependent; set common defaults.
-    model_args_.rope_scaling_beta_fast() = 32;
-    model_args_.rope_scaling_beta_slow() = 1;
-    model_args_.rope_scaling_factor() = 40;
-    model_args_.rope_extrapolation_factor() = 1.0f;
-    model_args_.rope_scaling_mscale() = 1.0f;
-    model_args_.rope_scaling_mscale_all_dim() = 1.0f;
-    model_args_.rope_scaling_original_max_position_embeddings() = 1024;
-    model_args_.rope_scaling_attn_factor() = 1.0f;
+    model_args_->rope_scaling_beta_fast() = 32;
+    model_args_->rope_scaling_beta_slow() = 1;
+    model_args_->rope_scaling_factor() = 40;
+    model_args_->rope_extrapolation_factor() = 1.0f;
+    model_args_->rope_scaling_mscale() = 1.0f;
+    model_args_->rope_scaling_mscale_all_dim() = 1.0f;
+    model_args_->rope_scaling_original_max_position_embeddings() = 1024;
+    model_args_->rope_scaling_attn_factor() = 1.0f;
 
     // Sliding window
-    model_args_.use_sliding_window() = false;
-    model_args_.sliding_window() = 512;
-    model_args_.max_window_layers() = 8;
+    model_args_->use_sliding_window() = false;
+    model_args_->sliding_window() = 512;
+    model_args_->max_window_layers() = 8;
 
     // LORA ranks for DeepSeek-V3
-    model_args_.q_lora_rank() = 128;
-    model_args_.kv_lora_rank() = 64;  // qk_rope_head_dim + kv_lora_rank = 128
+    model_args_->q_lora_rank() = 128;
+    model_args_->kv_lora_rank() = 64;  // qk_rope_head_dim + kv_lora_rank = 128
 
     // extra parameters for DeepSeek-V3.2-Exp
-    model_args_.index_head_dim() = 128;
-    model_args_.index_n_heads() = 0;
-    model_args_.index_topk() = 0;
-    model_args_.enable_mla() = true;
+    model_args_->index_head_dim() = 128;
+    model_args_->index_n_heads() = 0;
+    model_args_->index_topk() = 0;
+    model_args_->enable_mla() = true;
 
     // Build a ModelContext that the decoder requires
     context_ = ModelContext(parallel_args_, model_args_, quant_args_, options_);
@@ -247,16 +249,16 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
                                 .device(options_.device()));
 
     // Determine if this layer uses Dense MLP or MoE
-    bool use_moe = (layer_id >= model_args_.first_k_dense_replace());
+    bool use_moe = (layer_id >= model_args_->first_k_dense_replace());
 
     if (use_moe) {
       // Create MoE weights
       int64_t test_moe_intermediate_size =
           (moe_intermediate_size > 0) ? moe_intermediate_size
-                                      : model_args_.moe_intermediate_size();
+                                      : model_args_->moe_intermediate_size();
       int test_num_routed_experts = (num_routed_experts > 0)
                                         ? num_routed_experts
-                                        : model_args_.n_routed_experts();
+                                        : model_args_->n_routed_experts();
 
       // Create gate weights (routing layer, not quantized)
       // Shape: [num_routed_experts, hidden_size]
@@ -270,7 +272,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
       weight_dict["mlp.gate.e_score_correction_bias"] = e_score_correction_bias;
 
       // Create shared experts weights if n_shared_experts > 0
-      if (model_args_.n_shared_experts() > 0) {
+      if (model_args_->n_shared_experts() > 0) {
         // gate_proj weights
         auto shared_gate_weight = torch::full(
             {test_moe_intermediate_size, hidden_size}, 0.3f, options_);
@@ -458,15 +460,15 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     }
 
     // Create attention weights for DeepSeek V2 (MLA)
-    int64_t num_heads = model_args_.n_heads();
-    int64_t q_lora_rank = model_args_.q_lora_rank();
-    int64_t kv_lora_rank = model_args_.kv_lora_rank();
-    int64_t qk_nope_head_dim = model_args_.qk_nope_head_dim();
-    int64_t qk_rope_head_dim = model_args_.qk_rope_head_dim();
+    int64_t num_heads = model_args_->n_heads();
+    int64_t q_lora_rank = model_args_->q_lora_rank();
+    int64_t kv_lora_rank = model_args_->kv_lora_rank();
+    int64_t qk_nope_head_dim = model_args_->qk_nope_head_dim();
+    int64_t qk_rope_head_dim = model_args_->qk_rope_head_dim();
     int64_t qk_head_dim = qk_nope_head_dim + qk_rope_head_dim;
-    int64_t v_head_dim = model_args_.v_head_dim();
-    int64_t index_head_dim = model_args_.index_head_dim();
-    int64_t index_n_heads = model_args_.index_n_heads();
+    int64_t v_head_dim = model_args_->v_head_dim();
+    int64_t index_head_dim = model_args_->index_head_dim();
+    int64_t index_n_heads = model_args_->index_n_heads();
 
     // Quantized weights (w8a8 smoothquant format)
     // o_proj weights
@@ -549,7 +551,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
                                     .device(options_.device()));
 
     // Indexer weights (if enabled)
-    if (model_args_.index_n_heads() > 0) {
+    if (model_args_->index_n_heads() > 0) {
       auto indexer_k_norm_bias = torch::full({index_head_dim}, 0.0f, options_);
       weight_dict["self_attn.indexer.k_norm.bias"] =
           indexer_k_norm_bias.to(torch::TensorOptions()
@@ -600,10 +602,10 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
       int custom_num_routed_experts = -1) {
     int64_t test_hidden_size = (custom_hidden_size > 0)
                                    ? custom_hidden_size
-                                   : model_args_.hidden_size();
+                                   : model_args_->hidden_size();
     int64_t test_intermediate_size = (custom_intermediate_size > 0)
                                          ? custom_intermediate_size
-                                         : model_args_.intermediate_size();
+                                         : model_args_->intermediate_size();
 
     return create_default_test_weights(layer_id,
                                        test_hidden_size,
@@ -781,10 +783,10 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
         {block_num,
          1,
          block_size,
-         model_args_.qk_rope_head_dim() + model_args_.kv_lora_rank()},
+         model_args_->qk_rope_head_dim() + model_args_->kv_lora_rank()},
         options_);
     auto index_cache = torch::zeros(
-        {block_num, 1, block_size, model_args_.index_head_dim()}, options_);
+        {block_num, 1, block_size, model_args_->index_head_dim()}, options_);
     return KVCache(k_cache, torch::Tensor(), index_cache);
   }
 
@@ -796,7 +798,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
         {block_num,
          1,
          block_size,
-         model_args_.qk_rope_head_dim() + model_args_.kv_lora_rank()},
+         model_args_->qk_rope_head_dim() + model_args_->kv_lora_rank()},
         torch::kInt8,
         options_.device());
     auto k_cache_scale = test::seeded_tensor(seed_prefix + ".k_scale",
@@ -805,7 +807,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
                                              options_.device());
     auto index_cache = test::seeded_tensor(
         seed_prefix + ".index_cache",
-        {block_num, 1, block_size, model_args_.index_head_dim()},
+        {block_num, 1, block_size, model_args_->index_head_dim()},
         torch::kBFloat16,
         options_.device());
     return KVCache(
@@ -830,7 +832,7 @@ class DeepseekV2DecoderLayerTest : public ::testing::Test {
     xllm::Device(options_.device()).synchronize_default_stream();
   }
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   QuantArgs quant_args_;
   ParallelArgs parallel_args_{0, 1, nullptr};
   torch::TensorOptions options_;
@@ -1072,15 +1074,15 @@ TEST_F(DeepseekV2DecoderLayerTest, BuildPostAttnCarrierPackedLocal) {
   set_sp_ctx(decoder);
 
   auto attn_out =
-      torch::full({2, model_args_.hidden_size()}, 1.0f, hidden_opts());
+      torch::full({2, model_args_->hidden_size()}, 1.0f, hidden_opts());
   auto residual =
-      torch::full({2, model_args_.hidden_size()}, 2.0f, hidden_opts());
+      torch::full({2, model_args_->hidden_size()}, 2.0f, hidden_opts());
   auto expected_skip =
-      torch::full({2, model_args_.hidden_size()}, 3.0f, hidden_opts());
+      torch::full({2, model_args_->hidden_size()}, 3.0f, hidden_opts());
   auto expected_local_norm = DeepseekV2DecoderLayerTestPeer::post_norm(
       *decoder, expected_skip.clone());
   auto remote_norm =
-      torch::full({2, model_args_.hidden_size()}, 5.0f, hidden_opts());
+      torch::full({2, model_args_->hidden_size()}, 5.0f, hidden_opts());
   sp_pg_->set_allgather_outputs({expected_local_norm, remote_norm});
 
   ModelInputParams input_params;
@@ -1137,15 +1139,15 @@ TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputPackedLocal) {
   set_sp_ctx(decoder);
 
   auto attn_out =
-      torch::full({2, model_args_.hidden_size()}, 1.0f, hidden_opts());
+      torch::full({2, model_args_->hidden_size()}, 1.0f, hidden_opts());
   auto residual =
-      torch::full({2, model_args_.hidden_size()}, 2.0f, hidden_opts());
+      torch::full({2, model_args_->hidden_size()}, 2.0f, hidden_opts());
   auto expected_skip =
-      torch::full({2, model_args_.hidden_size()}, 3.0f, hidden_opts());
+      torch::full({2, model_args_->hidden_size()}, 3.0f, hidden_opts());
   auto expected_local_norm = DeepseekV2DecoderLayerTestPeer::post_norm(
       *decoder, expected_skip.clone());
   auto remote_norm =
-      torch::full({2, model_args_.hidden_size()}, 5.0f, hidden_opts());
+      torch::full({2, model_args_->hidden_size()}, 5.0f, hidden_opts());
   sp_pg_->set_allgather_outputs(
       std::vector<torch::Tensor>{expected_local_norm, remote_norm});
 
@@ -1160,12 +1162,12 @@ TEST_F(DeepseekV2DecoderLayerTest, RestoreFfnOutputPackedLocal) {
       /*enable_moe_all2all=*/false);
 
   auto packed_ffn_out =
-      torch::full({3, model_args_.hidden_size()}, 7.0f, hidden_opts());
+      torch::full({3, model_args_->hidden_size()}, 7.0f, hidden_opts());
   auto restored = DeepseekV2DecoderLayerTestPeer::restore_ffn_output(
       *decoder, packed_ffn_out, carrier, input_params);
   test::verify_tensor_close(
       restored,
-      torch::full({2, model_args_.hidden_size()}, 10.0f, hidden_opts()));
+      torch::full({2, model_args_->hidden_size()}, 10.0f, hidden_opts()));
 }
 
 TEST_F(DeepseekV2DecoderLayerTest, CanLocalOutPackedLocalNeedsEqualTokens) {
@@ -1310,7 +1312,7 @@ TEST_F(DeepseekV2DecoderLayerTest, PackedLocalFastAddsSkipLocally) {
 
 TEST_F(DeepseekV2DecoderLayerTest, ForwardMixedDpMoEReturnsLocalSlice) {
   const int32_t layer_id =
-      std::max<int32_t>(5, model_args_.first_k_dense_replace());
+      std::max<int32_t>(5, model_args_->first_k_dense_replace());
   ExpertDegreeGuard guard(/*value=*/0);
   set_mixed_dp_ctx();
 
@@ -1318,7 +1320,7 @@ TEST_F(DeepseekV2DecoderLayerTest, ForwardMixedDpMoEReturnsLocalSlice) {
 
   auto hidden_states =
       xllm::layer::test::seeded_tensor("mixed_dp_moe.hidden_states",
-                                       {2, model_args_.hidden_size()},
+                                       {2, model_args_->hidden_size()},
                                        torch::kBFloat16,
                                        options_.device());
   auto positions = torch::arange(
@@ -1353,10 +1355,13 @@ TEST_F(DeepseekV2DecoderLayerTest, ForwardMixedDpMoEReturnsLocalSlice) {
   auto attn_metadata =
       AttentionMetadataBuilder::build(input_params, model_args_);
   auto k_cache = torch::zeros(
-      {2048, 1, 1, model_args_.qk_rope_head_dim() + model_args_.kv_lora_rank()},
+      {2048,
+       1,
+       1,
+       model_args_->qk_rope_head_dim() + model_args_->kv_lora_rank()},
       options_);
   auto index_cache =
-      torch::zeros({2048, 1, 1, model_args_.index_head_dim()}, options_);
+      torch::zeros({2048, 1, 1, model_args_->index_head_dim()}, options_);
   KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
 
   std::optional<torch::Tensor> residual = std::nullopt;
@@ -1371,7 +1376,7 @@ TEST_F(DeepseekV2DecoderLayerTest, ForwardMixedDpMoEReturnsLocalSlice) {
 
   ASSERT_EQ(output.dim(), 2);
   EXPECT_EQ(output.size(0), 2);
-  EXPECT_EQ(output.size(1), model_args_.hidden_size());
+  EXPECT_EQ(output.size(1), model_args_->hidden_size());
   EXPECT_FALSE(residual.has_value());
 }
 
@@ -1391,7 +1396,7 @@ TEST_F(DeepseekV2DecoderLayerTest, DenseMlpReductionMovesToDecoder) {
 
   auto decoder = make_loaded_decoder(/*layer_id=*/0);
   auto hidden_states = test::seeded_tensor("deepseek_v2_decoder.dense_ffn",
-                                           {4, model_args_.hidden_size()},
+                                           {4, model_args_->hidden_size()},
                                            torch::kBFloat16,
                                            options_.device());
 
@@ -1401,7 +1406,7 @@ TEST_F(DeepseekV2DecoderLayerTest, DenseMlpReductionMovesToDecoder) {
 
   EXPECT_EQ(tp_pg_raw->allreduce_calls(), 0);
   ASSERT_EQ(local_out.size(0), hidden_states.size(0));
-  ASSERT_EQ(local_out.size(1), model_args_.hidden_size());
+  ASSERT_EQ(local_out.size(1), model_args_->hidden_size());
 
   auto reduced_out = DeepseekV2DecoderLayerTestPeer::reduce_out(
       *decoder, local_out, parallel_args_.tp_group_);
@@ -1417,7 +1422,7 @@ TEST_F(DeepseekV2DecoderLayerTest, DenseMlpChunkMatchesDirectPrefill) {
   DeepseekV2DecoderLayerTestPeer::set_sp_ffn_chunk(*decoder, /*chunk_size=*/2);
 
   auto hidden_states = test::seeded_tensor("deepseek_v2_decoder.chunk_prefill",
-                                           {5, model_args_.hidden_size()},
+                                           {5, model_args_->hidden_size()},
                                            torch::kBFloat16,
                                            options_.device());
   auto input_params = build_prefill_params(/*batch_size=*/1, /*seq_len=*/5);
@@ -1437,7 +1442,7 @@ TEST_F(DeepseekV2DecoderLayerTest, DenseMlpChunkMatchesDirectChunkedPrefill) {
   DeepseekV2DecoderLayerTestPeer::set_sp_ffn_chunk(*decoder, /*chunk_size=*/2);
 
   auto hidden_states = test::seeded_tensor("deepseek_v2_decoder.chunk_chunked",
-                                           {5, model_args_.hidden_size()},
+                                           {5, model_args_->hidden_size()},
                                            torch::kBFloat16,
                                            options_.device());
   auto input_params = build_prefill_params(/*batch_size=*/1, /*seq_len=*/5);
@@ -1461,7 +1466,7 @@ TEST_P(DeepseekV2DecoderLayerParamTest,
   auto decoder = make_loaded_decoder(GetParam().layer_id);
   auto hidden_states = xllm::layer::test::seeded_tensor(
       "hidden_states",
-      {kBatchSize * kSeqLen, model_args_.hidden_size()},
+      {kBatchSize * kSeqLen, model_args_->hidden_size()},
       torch::kBFloat16,
       options_.device());
   auto positions = torch::arange(
@@ -1485,7 +1490,7 @@ TEST_P(DeepseekV2DecoderLayerParamTest,
 
   ASSERT_EQ(output.dim(), 2);
   EXPECT_EQ(output.size(0), kBatchSize * kSeqLen);
-  EXPECT_EQ(output.size(1), model_args_.hidden_size());
+  EXPECT_EQ(output.size(1), model_args_->hidden_size());
   verify_prefix(output, GetParam().expected_prefix);
 }
 

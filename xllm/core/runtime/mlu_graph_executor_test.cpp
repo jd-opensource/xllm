@@ -18,6 +18,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <vector>
 
 #include "base_executor_impl.h"
@@ -69,10 +70,10 @@ class MluGraphExecutorTest : public ::testing::Test {
     torch::Device device("mlu:0");
     tensor_options_ = torch::TensorOptions(torch::kBFloat16).device(device);
 
-    model_args_.model_type("test_model");
-    model_args_.dtype("bfloat16");
-    model_args_.hidden_size(1024);
-    model_args_.max_position_embeddings(2048);
+    model_args_->model_type("test_model");
+    model_args_->dtype("bfloat16");
+    model_args_->hidden_size(1024);
+    model_args_->max_position_embeddings(2048);
 
     const uint32_t block_size = 16;
     options_.num_decoding_tokens(1);
@@ -88,7 +89,7 @@ class MluGraphExecutorTest : public ::testing::Test {
   ForwardInput prepare_inputs(int32_t batch_size, uint64_t seed) {
     Device device(tensor_options_.device());
     device.set_seed(seed);
-    const int64_t max_seq_len = model_args_.max_position_embeddings();
+    const int64_t max_seq_len = model_args_->max_position_embeddings();
     const uint32_t block_size = options_.block_size();
     const int64_t num_blocks_per_req =
         (max_seq_len + block_size - 1) / block_size + 1;
@@ -104,7 +105,8 @@ class MluGraphExecutorTest : public ::testing::Test {
     auto kv_seq_lens =
         torch::randint(0, 10, {batch_size + 1}, int_tensor_options);
     auto input_embedding =
-        torch::randn({batch_size, model_args_.hidden_size()}, tensor_options_) *
+        torch::randn({batch_size, model_args_->hidden_size()},
+                     tensor_options_) *
         0.1;
     ModelInputParams input_params;
     input_params.batch_forward_type = BatchForwardType::DECODE;
@@ -120,7 +122,7 @@ class MluGraphExecutorTest : public ::testing::Test {
     return {token_ids, positions, input_params};
   }
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_ = std::make_shared<ModelArgs>();
   torch::TensorOptions tensor_options_;
   runtime::Options options_;
   std::unique_ptr<CausalLM> model_;

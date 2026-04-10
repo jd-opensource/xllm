@@ -16,6 +16,8 @@ limitations under the License.
 #pragma once
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/state_dict/state_dict.h"
@@ -45,7 +47,7 @@ class NpuSiglipEncoderLayerUpImpl : public BaseLayer {
   std::vector<std::shared_ptr<atb_torch::BaseOperation>> ops_;
   std::vector<torch::Tensor> weights_;
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::TensorOptions options_;
 
   std::string prefix_;
@@ -72,7 +74,7 @@ class NpuSiglipEncoderLayerDownImpl : public BaseLayer {
   std::vector<std::shared_ptr<atb_torch::BaseOperation>> ops_;
   std::vector<torch::Tensor> weights_;
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::TensorOptions options_;
 };
 TORCH_MODULE(NpuSiglipEncoderLayerDown);
@@ -93,7 +95,7 @@ class NpuSiglipEncoderLayerImpl : public BaseLayer {
  private:
   std::string prefix_;
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::TensorOptions options_;
 
   NpuSiglipEncoderLayerUp up_{nullptr};

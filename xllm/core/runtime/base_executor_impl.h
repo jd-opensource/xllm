@@ -33,7 +33,7 @@ namespace xllm {
 class BaseExecutorImpl : public ExecutorImpl {
  public:
   BaseExecutorImpl(CausalLM* model,
-                   const ModelArgs& args,
+                   const std::shared_ptr<ModelArgs>& model_args,
                    const torch::Device& device,
                    const runtime::Options& options);
 
@@ -50,7 +50,7 @@ class BaseExecutorImpl : public ExecutorImpl {
   // not own
   CausalLM* model_;
 
-  ModelArgs args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::Device device_;
   runtime::Options options_;
 };

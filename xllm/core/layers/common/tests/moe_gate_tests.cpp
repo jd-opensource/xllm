@@ -16,6 +16,8 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -44,7 +46,7 @@ class MoEGateTest : public ::testing::Test {
     // Clean up if needed
   }
 
-  // Set MoE gate related fields on model_args_. Call before constructing
+  // Set MoE gate related fields on model_args_-> Call before constructing
   // MoEGateImpl in each test.
   void set_moe_gate_params(int64_t num_experts,
                            int64_t top_k,
@@ -55,15 +57,15 @@ class MoEGateTest : public ::testing::Test {
                            bool renormalize,
                            const std::string& scoring_func,
                            const std::string& topk_method) {
-    model_args_.n_routed_experts() = static_cast<int32_t>(num_experts);
-    model_args_.num_experts_per_tok() = static_cast<int32_t>(top_k);
-    model_args_.n_group() = static_cast<int32_t>(num_expert_group);
-    model_args_.topk_group() = static_cast<int32_t>(topk_group);
-    model_args_.routed_scaling_factor() = static_cast<float>(route_scale);
-    model_args_.hidden_size() = hidden_size;
-    model_args_.norm_topk_prob() = renormalize;
-    model_args_.scoring_func() = scoring_func;
-    model_args_.topk_method() = topk_method;
+    model_args_->n_routed_experts() = static_cast<int32_t>(num_experts);
+    model_args_->num_experts_per_tok() = static_cast<int32_t>(top_k);
+    model_args_->n_group() = static_cast<int32_t>(num_expert_group);
+    model_args_->topk_group() = static_cast<int32_t>(topk_group);
+    model_args_->routed_scaling_factor() = static_cast<float>(route_scale);
+    model_args_->hidden_size() = hidden_size;
+    model_args_->norm_topk_prob() = renormalize;
+    model_args_->scoring_func() = scoring_func;
+    model_args_->topk_method() = topk_method;
   }
 
   // Build state dict with seeded tensors for gate (bfloat16, no quant).
@@ -91,7 +93,7 @@ class MoEGateTest : public ::testing::Test {
     return weight_dict;
   }
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   // Run forward, assert shapes, and verify min/max/sum against expected values.
   void run_forward_and_expect(MoEGateImpl* moe_gate,
                               int64_t num_tokens,

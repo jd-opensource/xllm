@@ -27,12 +27,12 @@ class FluxFillPipelineImpl : public FluxPipelineBaseImpl {
   FluxFillPipelineImpl(const DiTModelContext& context) {
     auto model_args = context.get_model_args("vae");
     options_ = context.get_tensor_options();
-    vae_scale_factor_ = 1 << (model_args.block_out_channels().size() - 1);
-    vae_shift_factor_ = model_args.shift_factor();
-    vae_scaling_factor_ = model_args.scale_factor();
-    latent_channels_ = model_args.latent_channels();
+    vae_scale_factor_ = 1 << (model_args->block_out_channels().size() - 1);
+    vae_shift_factor_ = model_args->shift_factor();
+    vae_scaling_factor_ = model_args->scale_factor();
+    latent_channels_ = model_args->latent_channels();
     tokenizer_max_length_ =
-        context.get_model_args("text_encoder").max_position_embeddings();
+        context.get_model_args("text_encoder")->max_position_embeddings();
     LOG(INFO) << "Initializing FluxFill pipeline...";
     image_processor_ = VAEImageProcessor(context.get_model_context("vae"),
                                          true,
@@ -53,7 +53,7 @@ class FluxFillPipelineImpl : public FluxPipelineBaseImpl {
     pos_embed_ = register_module(
         "pos_embed",
         FluxPosEmbed(ROPE_SCALE_BASE,
-                     context.get_model_args("transformer").axes_dims_rope()));
+                     context.get_model_args("transformer")->axes_dims_rope()));
     transformer_ = FluxDiTModel(context.get_model_context("transformer"));
     t5_ = T5EncoderModel(context.get_model_context("text_encoder_2"));
     clip_text_model_ = CLIPTextModel(context.get_model_context("text_encoder"));

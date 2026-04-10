@@ -22,13 +22,14 @@ limitations under the License.
 
 namespace xllm {
 
-Qwen3_VLInputProcessor::Qwen3_VLInputProcessor(const ModelArgs& args) {
-  merge_size_ = args.mm_image_merge_size();
-  vision_start_token_id_ = args.vision_start_token_id();
-  vision_end_token_id_ = args.vision_end_token_id();
-  image_token_id_ = args.image_token_id();
-  video_token_id_ = args.video_token_id();
-  temporal_patch_size_ = args.mm_temporal_patch_size();
+Qwen3_VLInputProcessor::Qwen3_VLInputProcessor(
+    const std::shared_ptr<ModelArgs>& model_args) {
+  merge_size_ = model_args->mm_image_merge_size();
+  vision_start_token_id_ = model_args->vision_start_token_id();
+  vision_end_token_id_ = model_args->vision_end_token_id();
+  image_token_id_ = model_args->image_token_id();
+  video_token_id_ = model_args->video_token_id();
+  temporal_patch_size_ = model_args->mm_temporal_patch_size();
 }
 
 void Qwen3_VLInputProcessor::process(std::string& prompt,

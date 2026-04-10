@@ -40,12 +40,12 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
     if (!mrope_section_.empty()) {
       cos_sin_ = layer::rotary::get_concat_rotary_embedding(
           128,
-          model_args.max_position_embeddings(),
-          model_args.rope_theta(),
+          model_args->max_position_embeddings(),
+          model_args->rope_theta(),
           options);
     }
 
-    layers_.reserve(model_args.n_layers());
+    layers_.reserve(model_args->n_layers());
     norm_ = register_module("norm", layer::RMSNorm(context));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
@@ -54,7 +54,7 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
     attn_mask_ = layer::AttentionMask(
         options.device(), options.dtype().toScalarType(), mask_value);
 #endif
-    for (int32_t i = 0; i < model_args.n_layers(); i++) {
+    for (int32_t i = 0; i < model_args->n_layers(); i++) {
       auto layer = layer::Qwen3DecoderLayer(context);
       layers_.push_back(layer);
     }
@@ -275,10 +275,11 @@ REGISTER_MODEL_ARGS(qwen3, [&] {
   LOAD_ARG_OR(max_window_layers, "max_window_layers", 28);
 
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
-    return args->hidden_size() / args->n_heads();
+    return model_args->hidden_size() / model_args->n_heads();
   });
 
-  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
+  SET_ARG(stop_token_ids,
+          std::unordered_set<int32_t>({model_args->eos_token_id()}));
 });
 
 }  // namespace xllm

@@ -22,7 +22,7 @@ LmHeadLoader::LmHeadLoader(uint64_t weight_count, const ModelContext& context)
     : BaseLoader(weight_count, context) {
   auto options = context.get_tensor_options();
   at_weight_tensors_[0] = torch::zeros({1}).to(options);
-  vocab_size_ = context.get_model_args().vocab_size();
+  vocab_size_ = context.get_model_args()->vocab_size();
   padded_vocab_size_ = get_padded_vocab_size(context);
 }
 

@@ -43,6 +43,8 @@ limitations under the License.
 #include <customize/custom_paged_attention_function.h>
 #include <customize/customize_op_params.h>
 
+#include <memory>
+
 #include "pytorch/adapter/utils/utils.h"
 
 namespace xllm::npu {
@@ -72,11 +74,12 @@ int64_t get_decode_graph_capacity(const runtime::Options& options) {
 }  // namespace
 
 // GraphPersistentParam implementation
-GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
-                                           const torch::Device& device,
-                                           const runtime::Options& options,
-                                           bool need_update_attn_mask)
-    : args_(args),
+GraphPersistentParam::GraphPersistentParam(
+    const std::shared_ptr<ModelArgs>& model_args,
+    const torch::Device& device,
+    const runtime::Options& options,
+    bool need_update_attn_mask)
+    : model_args_(model_args),
       device_(device),
       options_(options),
       context_for_plan_(nullptr),
@@ -85,11 +88,11 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
       need_update_attn_mask_(need_update_attn_mask) {
   // Determine whether attention plan needs to be updated based on model type
   // Future logic can be extended here for more complex model-specific behavior
-  need_update_attention_plan_ = (args.model_type() != "deepseek_v32" &&
-                                 args.model_type() != "glm_moe_dsa");
+  need_update_attention_plan_ = (model_args->model_type() != "deepseek_v32" &&
+                                 model_args->model_type() != "glm_moe_dsa");
 
   // Check if mRoPE is used (for VLM models like qwen2-vl)
-  use_mrope_ = !args.rope_scaling_mrope_section().empty();
+  use_mrope_ = !model_args->rope_scaling_mrope_section().empty();
 
   // Use max_tokens_per_batch for first dimension size
   // num_decode_tokens
@@ -98,12 +101,12 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   const int64_t max_seqs_per_batch = get_decode_graph_capacity(options);
   auto tensor_options = torch::TensorOptions().device(device);
 
-  const int64_t max_seq_len = args_.max_position_embeddings();
+  const int64_t max_seq_len = model_args_->max_position_embeddings();
 
   // Create persistent tensors with max_tokens_per_batch as first dimension
   persistent_tokens_ = torch::zeros({max_tokens_per_batch},
                                     torch::dtype(torch::kInt).device(device));
-  if (args.rope_scaling_mrope_section().empty()) {
+  if (model_args->rope_scaling_mrope_section().empty()) {
     persistent_positions_ = torch::zeros(
         {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
   } else {
@@ -129,15 +132,16 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
                    torch::dtype(torch::kInt).device(device));
 
   // Output tensor for hidden states
-  torch::Dtype dtype = util::parse_dtype(args.dtype(), device);
-  if (args.dtype() == "float" || args.dtype() == "float32") {
+  torch::Dtype dtype = util::parse_dtype(model_args->dtype(), device);
+  if (model_args->dtype() == "float" || model_args->dtype() == "float32") {
     LOG(WARNING)
         << "Acl graph executor init hidden_states compatible with float32 "
            "dtype: float32. This should not happen in production but for test.";
     dtype = torch::kFloat32;
   }
-  hidden_states_ = torch::zeros({max_tokens_per_batch, args.hidden_size()},
-                                torch::dtype(dtype).device(device));
+  hidden_states_ =
+      torch::zeros({max_tokens_per_batch, model_args->hidden_size()},
+                   torch::dtype(dtype).device(device));
 
   // Initialize persistent_mask_ if need_update_attn_mask is true
   if (need_update_attn_mask_) {
@@ -146,7 +150,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   }
 
   // Do not need to create ATB context and custom paged attention operation
-  if (args_.head_dim() == 0) {
+  if (model_args_->head_dim() == 0) {
     return;
   }
 
@@ -179,8 +183,8 @@ void GraphPersistentParam::set_aux_hidden_states(const torch::Tensor& value) {
     const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
     auto shape = value.sizes().vec();
     shape[0] = max_tokens_per_batch;
-    torch::Dtype dtype = util::parse_dtype(args_.dtype(), device_);
-    if (args_.dtype() == "float" || args_.dtype() == "float32") {
+    torch::Dtype dtype = util::parse_dtype(model_args_->dtype(), device_);
+    if (model_args_->dtype() == "float" || model_args_->dtype() == "float32") {
       dtype = torch::kFloat32;
     }
     aux_hidden_states_ =
@@ -248,7 +252,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     if (persistent_embedding_.numel() == 0) {
       const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
       const int64_t embedding_dim = embedding.size(1);
-      torch::Dtype dtype = util::parse_dtype(args_.dtype(), device_);
+      torch::Dtype dtype = util::parse_dtype(model_args_->dtype(), device_);
       persistent_embedding_ =
           torch::zeros({max_tokens_per_batch, embedding_dim},
                        torch::dtype(dtype).device(device_));
@@ -364,8 +368,8 @@ void GraphPersistentParam::initialize_paged_attention_plan_context(
   const int dp_local_tp_size = options_.world_size() / options_.dp_size();
 
   // Cache headNum and head_dim as member variables
-  num_head_ = static_cast<int32_t>(args_.n_heads() / dp_local_tp_size);
-  head_dim_ = static_cast<int32_t>(args_.head_dim());
+  num_head_ = static_cast<int32_t>(model_args_->n_heads() / dp_local_tp_size);
+  head_dim_ = static_cast<int32_t>(model_args_->head_dim());
 
   atb::customize::CustomPagedAttentionParam paOpParam;
   // default mask type is UNDEFINED, which means no mask is needed
@@ -375,16 +379,16 @@ void GraphPersistentParam::initialize_paged_attention_plan_context(
   }
   paOpParam.headNum = num_head_;
 
-  std::optional<long int> optionalValue = args_.n_kv_heads();
-  paOpParam.kvHeadNum =
-      std::max(1,
-               static_cast<int32_t>(optionalValue.value_or(args_.n_heads())) /
-                   dp_local_tp_size);
+  std::optional<long int> optionalValue = model_args_->n_kv_heads();
+  paOpParam.kvHeadNum = std::max(
+      1,
+      static_cast<int32_t>(optionalValue.value_or(model_args_->n_heads())) /
+          dp_local_tp_size);
 
   const float head_dim_float = static_cast<float>(head_dim_);
   paOpParam.qkScale = 1.0f / std::sqrt(head_dim_float);
 
-  const bool isBF16 = args_.dtype() == "bfloat16";
+  const bool isBF16 = model_args_->dtype() == "bfloat16";
   if (isBF16) {
     paOpParam.outDataType = ACL_BF16;
   } else {
@@ -606,7 +610,8 @@ void GraphPersistentParam::plan_paged_attention_tiling(
   // Create query atb tensor with only desc (no actual data needed)
   atb::Tensor atb_query;
   // TODO: support quant dtype
-  atb_query.desc.dtype = (args_.dtype() == "bfloat16") ? ACL_BF16 : ACL_FLOAT16;
+  atb_query.desc.dtype =
+      (model_args_->dtype() == "bfloat16") ? ACL_BF16 : ACL_FLOAT16;
   atb_query.desc.format = ACL_FORMAT_ND;
   atb_query.desc.shape.dimNum = 3;
   atb_query.desc.shape.dims[0] = num_tokens;
@@ -677,13 +682,13 @@ void GraphPersistentParam::plan_paged_attention_tiling(
 
 void GraphPersistentParam::update_attention_mask(
     const ModelInputParams& input_params) {
-  torch::Dtype dtype = util::parse_dtype(args_.dtype(), device_);
+  torch::Dtype dtype = util::parse_dtype(model_args_->dtype(), device_);
 
   // update persistent_mask_ in-place
   const int64_t batch_size = input_params.kv_seq_lens.size(0);
   const int64_t max_seq_len = input_params.kv_max_seq_len > 0
                                   ? input_params.kv_max_seq_len
-                                  : args_.max_position_embeddings();
+                                  : model_args_->max_position_embeddings();
 
   // persistent_mask_ is already initialized in constructor
   // Check if size is sufficient
@@ -783,7 +788,7 @@ void GraphPersistentParam::update_attention_mask(
 }
 
 bool AclGraph::capture(CausalLM* model,
-                       const ModelArgs& args,
+                       const std::shared_ptr<ModelArgs>& model_args,
                        const runtime::Options& options,
                        const torch::Tensor& tokens,
                        const torch::Tensor& positions,
@@ -939,20 +944,24 @@ ModelOutput AclGraph::replay(const torch::Tensor& tokens,
   return ModelOutput(get_hidden_states(actual_num_tokens));
 }
 
-AclGraphExecutorImpl::AclGraphExecutorImpl(CausalLM* model,
-                                           const ModelArgs& args,
-                                           const torch::Device& device,
-                                           const runtime::Options& options)
-    : model_(model), args_(args), device_(device), options_(options) {
+AclGraphExecutorImpl::AclGraphExecutorImpl(
+    CausalLM* model,
+    const std::shared_ptr<ModelArgs>& model_args,
+    const torch::Device& device,
+    const runtime::Options& options)
+    : model_(model),
+      model_args_(model_args),
+      device_(device),
+      options_(options) {
   // Create single persistent parameter object shared by all AclGraph instances
   persistent_param_ =
-      std::make_unique<GraphPersistentParam>(args_, device_, options_);
+      std::make_unique<GraphPersistentParam>(model_args_, device_, options_);
 }
 
 ForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
   // Prepare inputs for workers
   return batch.prepare_forward_input(
-      options_.num_decoding_tokens(), 0, args_, options_.cp_size());
+      options_.num_decoding_tokens(), 0, model_args_, options_.cp_size());
 }
 
 // Main execution method with graph optimization for decode phase
@@ -970,10 +979,10 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   const bool in_decoding_phase = params_single.batch_forward_type.is_decode();
   VLOG(50) << "in_decoding_phase: " << in_decoding_phase
            << " q_max_seq_len: " << params_single.q_max_seq_len
-           << " n_layers: " << args_.n_layers();
+           << " n_layers: " << model_args_->n_layers();
   // If not in decode phase, use eager mode directly without acl graph
   // TODO: fix mtp model support.
-  if (!in_decoding_phase || args_.n_layers() == 1) {
+  if (!in_decoding_phase || model_args_->n_layers() == 1) {
     VLOG(kGraphExecutorLogVerboseLevel)
         << "AclGraphExecutorImpl::run() in eager mode";
     COUNTER_INC(num_model_execution_total_eager);
@@ -987,7 +996,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   const uint32_t bucket_num_tokens = get_bucket_num_tokens(n_tokens);
 
   // Check if conditions are suitable for graph execution (replay or capture)
-  const auto max_seq_len = args_.max_position_embeddings();
+  const auto max_seq_len = model_args_->max_position_embeddings();
   const bool seq_len_supported = params_single.kv_max_seq_len <= max_seq_len;
 
   // Combined condition for graph capture support
@@ -1029,7 +1038,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   VLOG(kGraphExecutorLogVerboseLevel)
       << "AclGraphExecutorImpl::run() in capture mode";
   bool capture_success = graph->capture(model_,
-                                        args_,
+                                        model_args_,
                                         options_,
                                         tokens_tensor,
                                         positions_tensor,

@@ -18,6 +18,8 @@ limitations under the License.
 #include <framework/graphs/MLUGraph.h>
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "executor_impl.h"
 #include "executor_impl_factory.h"
 #include "framework/kv_cache/kv_cache.h"
@@ -30,7 +32,7 @@ namespace xllm::mlu {
 // Multiple MluGraph instances can share the same GraphPersistentParam object
 class GraphPersistentParam {
  public:
-  GraphPersistentParam(const ModelArgs& args,
+  GraphPersistentParam(const std::shared_ptr<ModelArgs>& model_args,
                        const torch::Device& device,
                        const runtime::Options& options);
 
@@ -105,7 +107,7 @@ class MluGraph {
 class MluGraphExecutorImpl : public ExecutorImpl {
  public:
   MluGraphExecutorImpl(CausalLM* model,
-                       const ModelArgs& args,
+                       const std::shared_ptr<ModelArgs>& model_args,
                        const torch::Device& device,
                        const runtime::Options& options);
 
@@ -121,7 +123,7 @@ class MluGraphExecutorImpl : public ExecutorImpl {
 
  private:
   CausalLM* model_;  // not owned
-  ModelArgs args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::Device device_;
   runtime::Options options_;
   torch_mlu::MempoolId_t pool_;

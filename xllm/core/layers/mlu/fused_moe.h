@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -44,7 +45,7 @@ class FusedMoEImpl : public torch::nn::Module {
   };
 
   FusedMoEImpl() = default;
-  FusedMoEImpl(const ModelArgs& model_args,
+  FusedMoEImpl(const std::shared_ptr<ModelArgs>& model_args,
                const FusedMoEArgs& moe_args,
                const QuantArgs& quant_args,
                const ParallelArgs& parallel_args,

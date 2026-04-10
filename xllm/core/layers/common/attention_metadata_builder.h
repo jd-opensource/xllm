@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -41,7 +42,7 @@ class AttentionMetadataBuilder {
 
   static AttentionMetadata build(
       const ModelInputParams& params,
-      const ModelArgs& model_args,
+      const std::shared_ptr<ModelArgs>& model_args,
       const std::optional<torch::Tensor>& attn_mask = {});
 
   // Build AttentionMetadata from ModelInputParams with specified compute_dtype.
@@ -52,7 +53,7 @@ class AttentionMetadataBuilder {
 
   static AttentionMetadata build(
       const ModelInputParams& params,
-      const ModelArgs& model_args,
+      const std::shared_ptr<ModelArgs>& model_args,
       const std::string& compute_dtype,
       const std::optional<torch::Tensor>& attn_mask = {});
 };

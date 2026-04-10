@@ -17,6 +17,8 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -54,52 +56,52 @@ class DeepseekMLATest : public ::testing::Test {
     init_test_weights();
   }
 
-  ModelArgs create_mla_model_args(
+  std::shared_ptr<ModelArgs> create_mla_model_args(
       const std::string& rope_type = "deepseek_yarn") {
-    ModelArgs model_args;
-    model_args.q_lora_rank() = 1536;
-    model_args.kv_lora_rank() = 512;
-    model_args.qk_nope_head_dim() = 128;
-    model_args.qk_rope_head_dim() = 64;
-    model_args.v_head_dim() = 128;
-    model_args.hidden_size() = 7168;
-    model_args.n_heads() = 128;
-    model_args.max_position_embeddings() = 163840;
-    model_args.rope_theta() = 10000;
-    model_args.rms_norm_eps() = 1e-06;
+    auto model_args = std::make_shared<ModelArgs>();
+    model_args->q_lora_rank() = 1536;
+    model_args->kv_lora_rank() = 512;
+    model_args->qk_nope_head_dim() = 128;
+    model_args->qk_rope_head_dim() = 64;
+    model_args->v_head_dim() = 128;
+    model_args->hidden_size() = 7168;
+    model_args->n_heads() = 128;
+    model_args->max_position_embeddings() = 163840;
+    model_args->rope_theta() = 10000;
+    model_args->rms_norm_eps() = 1e-06;
 
     // rope_scaling config
-    model_args.rope_scaling_original_max_position_embeddings() = 4096;
-    model_args.rope_scaling_factor() = 40;
-    model_args.rope_extrapolation_factor() = 1.;
-    model_args.rope_scaling_attn_factor() = 1.;
-    model_args.rope_scaling_beta_fast() = 32;
-    model_args.rope_scaling_beta_slow() = 1;
-    model_args.rope_scaling_mscale() = 1.;
-    model_args.rope_scaling_mscale_all_dim() = 1.;
-    model_args.rope_scaling_rope_type() = rope_type;
+    model_args->rope_scaling_original_max_position_embeddings() = 4096;
+    model_args->rope_scaling_factor() = 40;
+    model_args->rope_extrapolation_factor() = 1.;
+    model_args->rope_scaling_attn_factor() = 1.;
+    model_args->rope_scaling_beta_fast() = 32;
+    model_args->rope_scaling_beta_slow() = 1;
+    model_args->rope_scaling_mscale() = 1.;
+    model_args->rope_scaling_mscale_all_dim() = 1.;
+    model_args->rope_scaling_rope_type() = rope_type;
 
     // indexer
-    model_args.index_head_dim() = 128;
-    model_args.index_n_heads() = 64;
-    model_args.index_topk() = 2048;
-    model_args.enable_mla() = true;
+    model_args->index_head_dim() = 128;
+    model_args->index_n_heads() = 64;
+    model_args->index_topk() = 2048;
+    model_args->enable_mla() = true;
 
-    return model_args;
+    return std::move(model_args);
   }
 
   void init_test_weights() {
-    int64_t q_lora_rank = model_args_.q_lora_rank();
-    int64_t kv_lora_rank = model_args_.kv_lora_rank();
-    int64_t qk_nope_head_dim = model_args_.qk_nope_head_dim();
-    int64_t qk_rope_head_dim = model_args_.qk_rope_head_dim();
-    int64_t index_topk = model_args_.index_topk();
-    int64_t index_n_heads = model_args_.index_n_heads();
-    int64_t index_head_dim = model_args_.index_head_dim();
-    int64_t v_head_dim = model_args_.v_head_dim();
-    int64_t hidden_size = model_args_.hidden_size();
-    int64_t num_heads = model_args_.n_heads();
-    int64_t max_position_embeddings = model_args_.max_position_embeddings();
+    int64_t q_lora_rank = model_args_->q_lora_rank();
+    int64_t kv_lora_rank = model_args_->kv_lora_rank();
+    int64_t qk_nope_head_dim = model_args_->qk_nope_head_dim();
+    int64_t qk_rope_head_dim = model_args_->qk_rope_head_dim();
+    int64_t index_topk = model_args_->index_topk();
+    int64_t index_n_heads = model_args_->index_n_heads();
+    int64_t index_head_dim = model_args_->index_head_dim();
+    int64_t v_head_dim = model_args_->v_head_dim();
+    int64_t hidden_size = model_args_->hidden_size();
+    int64_t num_heads = model_args_->n_heads();
+    int64_t max_position_embeddings = model_args_->max_position_embeddings();
     int64_t qk_head_dim = qk_nope_head_dim + qk_rope_head_dim;
     std::unordered_map<std::string, std::vector<int64_t>> qweight_map = {
         {"model.layers.0.self_attn.o_proj.qweight",
@@ -244,7 +246,7 @@ class DeepseekMLATest : public ::testing::Test {
     populate_attention_metadata(metadata,
                                 batch_size,
                                 max_query_len,
-                                model_args_.max_position_embeddings(),
+                                model_args_->max_position_embeddings(),
                                 is_prefill,
                                 num_tokens);
 
@@ -255,7 +257,7 @@ class DeepseekMLATest : public ::testing::Test {
     return output;
   }
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   QuantArgs quant_args_;
   ParallelArgs parallel_args_{0, 1, nullptr};
   torch::TensorOptions options_;
@@ -270,7 +272,7 @@ TEST_F(DeepseekMLATest, PrefillTestRandomInput) {
   int64_t batch_size = 2;
   int64_t max_query_len = 5;
   int64_t num_tokens = batch_size * max_query_len;
-  int64_t hidden_size = model_args_.hidden_size();
+  int64_t hidden_size = model_args_->hidden_size();
 
   auto hidden_states = create_seeded_hidden_states(
       "mla.prefill.hidden_states", num_tokens, hidden_size);
@@ -283,10 +285,10 @@ TEST_F(DeepseekMLATest, PrefillTestRandomInput) {
       {block_num,
        1,
        1,
-       model_args_.qk_rope_head_dim() + model_args_.kv_lora_rank()});
+       model_args_->qk_rope_head_dim() + model_args_->kv_lora_rank()});
   auto index_cache =
       create_seeded_cache("mla.prefill.index_cache",
-                          {block_num, 1, 1, model_args_.index_head_dim()});
+                          {block_num, 1, 1, model_args_->index_head_dim()});
   KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
 
   auto output = run_single_test(false,
@@ -320,7 +322,7 @@ TEST_F(DeepseekMLATest, DecoderTestRandomInput) {
   int64_t batch_size = 1;
   int64_t max_query_len = 1;
   int64_t num_tokens = batch_size * max_query_len;
-  int64_t hidden_size = model_args_.hidden_size();
+  int64_t hidden_size = model_args_->hidden_size();
 
   auto hidden_states = create_seeded_hidden_states(
       "mla.decoder.hidden_states", num_tokens, hidden_size);
@@ -333,10 +335,10 @@ TEST_F(DeepseekMLATest, DecoderTestRandomInput) {
       {block_num,
        1,
        1,
-       model_args_.qk_rope_head_dim() + model_args_.kv_lora_rank()});
+       model_args_->qk_rope_head_dim() + model_args_->kv_lora_rank()});
   auto index_cache =
       create_seeded_cache("mla.decoder.index_cache",
-                          {block_num, 1, 1, model_args_.index_head_dim()});
+                          {block_num, 1, 1, model_args_->index_head_dim()});
   KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
 
   auto output_non_fused = run_single_test(false,
@@ -362,7 +364,7 @@ TEST_F(DeepseekMLATest, VariousBatchSizesTest) {
   for (const auto& batch_size : test_cases) {
     LOG(INFO) << "Testing batch_size=" << batch_size << ", seq_len=" << seq_len;
     int64_t num_tokens = batch_size * seq_len;
-    int64_t hidden_size = model_args_.hidden_size();
+    int64_t hidden_size = model_args_->hidden_size();
     auto hidden_states = create_seeded_hidden_states(
         "mla.batch.hidden_states." + std::to_string(batch_size),
         num_tokens,
@@ -376,10 +378,10 @@ TEST_F(DeepseekMLATest, VariousBatchSizesTest) {
         {block_num,
          1,
          1,
-         model_args_.qk_rope_head_dim() + model_args_.kv_lora_rank()});
+         model_args_->qk_rope_head_dim() + model_args_->kv_lora_rank()});
     auto index_cache = create_seeded_cache(
         "mla.batch.index_cache." + std::to_string(batch_size),
-        {block_num, 1, 1, model_args_.index_head_dim()});
+        {block_num, 1, 1, model_args_->index_head_dim()});
     KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
 
     bool is_prefill = false;
@@ -408,7 +410,7 @@ TEST_F(DeepseekMLATest, DefaultRopePrefillTest) {
   int64_t batch_size = 2;
   int64_t max_query_len = 3;
   int64_t num_tokens = batch_size * max_query_len;
-  int64_t hidden_size = model_args_.hidden_size();
+  int64_t hidden_size = model_args_->hidden_size();
 
   auto hidden_states = create_seeded_hidden_states(
       "mla.default_rope.hidden_states", num_tokens, hidden_size);
@@ -421,10 +423,10 @@ TEST_F(DeepseekMLATest, DefaultRopePrefillTest) {
       {block_num,
        1,
        1,
-       model_args_.qk_rope_head_dim() + model_args_.kv_lora_rank()});
+       model_args_->qk_rope_head_dim() + model_args_->kv_lora_rank()});
   auto index_cache =
       create_seeded_cache("mla.default_rope.index_cache",
-                          {block_num, 1, 1, model_args_.index_head_dim()});
+                          {block_num, 1, 1, model_args_->index_head_dim()});
   KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
 
   auto output = run_single_test(false,
