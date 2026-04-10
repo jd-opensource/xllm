@@ -88,7 +88,7 @@ static inline void sample_top_candidates(const torch::Tensor& probs,
       << ", logprobs=" << logprobs.sizes();
   CHECK_GT(top_count, 0) << "top_count must be positive";
 
-  auto batch_size = probs.size(0);
+  const int64_t batch_size = probs.size(0);
   auto device = probs.device();
   auto token_options =
       torch::TensorOptions().dtype(torch::kLong).device(device);
@@ -251,9 +251,9 @@ SampleOutput RecSampler::OneRecConstrainedSamplingStrategy::forward(
   auto logprobs =
       torch::log_softmax(sample_logits, /*dim=*/-1, /*dtype=*/torch::kFloat32);
 
-  const auto vocab_size = probs.size(-1);
-  const auto top_count = std::min<int64_t>(params.max_top_logprobs,
-                                           static_cast<int64_t>(vocab_size));
+  const int64_t vocab_size = probs.size(-1);
+  const int64_t top_count = std::min<int64_t>(params.max_top_logprobs,
+                                              static_cast<int64_t>(vocab_size));
   sample_top_candidates(
       probs, logprobs, top_count, &output.top_tokens, &output.top_logprobs);
   output.next_tokens =

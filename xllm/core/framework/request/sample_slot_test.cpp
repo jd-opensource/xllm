@@ -33,7 +33,7 @@ limitations under the License.
 namespace xllm {
 namespace {
 
-class CharTokenizer : public Tokenizer {
+class CharTokenizer final : public Tokenizer {
  public:
   bool encode(const std::string_view& text,
               std::vector<int32_t>* ids,
