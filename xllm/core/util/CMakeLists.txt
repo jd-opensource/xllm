@@ -21,7 +21,6 @@ cc_library(
     net.h
     pretty_print.h
     rec_model_utils.h
-    rec_output_utils.h
     scope_guard.h
     slice.h
     spin_lock.h

@@ -670,7 +670,7 @@ DEFINE_bool(enable_return_mm_full_embeddings,
             "return vit and sequence embeddings for vlm models");
 
 DEFINE_bool(enable_output_sku_logprobs,
-            true,
+            false,
             "Enable REC / OneRec token-aligned logprobs tensor output.");
 
 DEFINE_int32(each_conversion_threshold,

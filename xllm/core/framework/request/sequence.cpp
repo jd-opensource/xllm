@@ -21,10 +21,13 @@ limitations under the License.
 #include <absl/time/time.h>
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <random>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "core/common/global_flags.h"
@@ -41,6 +44,32 @@ namespace {
 constexpr size_t kDecoderBosTokenCount = 1;
 constexpr size_t kDecoderMaxTokenCount = kRecTotalSteps + kDecoderBosTokenCount;
 constexpr char kEmptyLogprobsFinishReason[] = "empty_logprobs";
+
+std::vector<int64_t> normalize_rec_item_ids(const std::vector<int64_t>& raw_ids,
+                                            size_t sequence_index) {
+  std::vector<int64_t> item_ids;
+  item_ids.reserve(raw_ids.size());
+  std::unordered_set<int64_t> seen_item_ids;
+  for (const int64_t item_id : raw_ids) {
+    if (seen_item_ids.insert(item_id).second) {
+      item_ids.emplace_back(item_id);
+    }
+  }
+
+  const int32_t each_threshold = FLAGS_each_conversion_threshold;
+  if (each_threshold > 0 &&
+      static_cast<int32_t>(item_ids.size()) > each_threshold) {
+    uint32_t seed = FLAGS_random_seed >= 0
+                        ? static_cast<uint32_t>(FLAGS_random_seed) +
+                              static_cast<uint32_t>(sequence_index)
+                        : std::random_device{}();
+    std::mt19937 generator(seed);
+    std::shuffle(item_ids.begin(), item_ids.end(), generator);
+    item_ids.resize(each_threshold);
+  }
+
+  return item_ids;
+}
 }  // namespace
 
 const std::string Sequence::ENCODER_SPARSE_EMBEDDING_NAME = "sparse_embedding";
@@ -127,8 +156,10 @@ void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
         sequence_params_.skip_special_tokens,
         &item_ids);
     if (ok && !item_ids.empty()) {
-      output.item_ids = item_ids.front();
-      output.item_ids_list = item_ids;
+      output.item_ids_list = normalize_rec_item_ids(item_ids, index_);
+      if (!output.item_ids_list.empty()) {
+        output.item_ids = output.item_ids_list.front();
+      }
     }
   }
 }

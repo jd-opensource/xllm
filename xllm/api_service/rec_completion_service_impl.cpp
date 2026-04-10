@@ -31,7 +31,6 @@ limitations under the License.
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/rec_master.h"
 #include "core/framework/request/request_output.h"
-#include "util/rec_output_utils.h"
 
 #ifdef likely
 #undef likely
@@ -111,54 +110,19 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
   output_tensor->set_name("rec_result");
   proto::InferOutputTensor* logprobs_tensor = nullptr;
   int32_t logprob_width = 0;
-  if (FLAGS_enable_output_sku_logprobs) {
+  if (FLAGS_enable_output_sku_logprobs && !req_output.outputs.empty()) {
     logprobs_tensor = response.mutable_output_tensors()->Add();
     logprobs_tensor->set_name("sku_logprobs");
     logprobs_tensor->set_datatype(proto::DataType::FLOAT);
-    for (const auto& output : req_output.outputs) {
-      logprob_width =
-          std::max(logprob_width,
-                   static_cast<int32_t>(output.token_ids_logprobs.size()));
-    }
+    logprob_width =
+        static_cast<int32_t>(req_output.outputs[0].token_ids_logprobs.size());
   }
 
   if (FLAGS_enable_convert_tokens_to_item) {
     output_tensor->set_datatype(proto::DataType::INT64);
-    std::vector<std::vector<int64_t>> selected_item_groups;
-    selected_item_groups.reserve(req_output.outputs.size());
-
-    int32_t total_item_count = 0;
-    int32_t max_items_per_output = 0;
-    const int32_t total_threshold = FLAGS_total_conversion_threshold;
-    for (const auto& output : req_output.outputs) {
-      std::vector<int64_t> selected_item_ids = select_rec_item_ids(output);
-      if (total_threshold > 0 &&
-          total_item_count + static_cast<int32_t>(selected_item_ids.size()) >
-              total_threshold) {
-        const int32_t remaining_count =
-            std::max(total_threshold - total_item_count, 0);
-        if (remaining_count == 0) {
-          selected_item_ids.clear();
-        } else {
-          selected_item_ids.resize(remaining_count);
-        }
-      }
-      total_item_count += static_cast<int32_t>(selected_item_ids.size());
-      max_items_per_output = std::max(
-          max_items_per_output, static_cast<int32_t>(selected_item_ids.size()));
-      selected_item_groups.emplace_back(std::move(selected_item_ids));
-    }
-
     const int32_t output_count =
         static_cast<int32_t>(req_output.outputs.size());
-    auto* lengths_tensor = response.mutable_output_tensors()->Add();
-    lengths_tensor->set_name("rec_result_lengths");
-    lengths_tensor->set_datatype(proto::DataType::INT32);
-    lengths_tensor->mutable_shape()->Add(output_count);
-    auto* lengths_context = lengths_tensor->mutable_contents();
-
     output_tensor->mutable_shape()->Add(output_count);
-    output_tensor->mutable_shape()->Add(max_items_per_output);
     if (logprobs_tensor != nullptr) {
       logprobs_tensor->mutable_shape()->Add(output_count);
       logprobs_tensor->mutable_shape()->Add(logprob_width);
@@ -174,18 +138,24 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
             logprobs_context, req_output.outputs[output_index], logprob_width);
       }
     };
+    int32_t total_count = 0;
+    const int32_t total_threshold = FLAGS_total_conversion_threshold;
     for (int32_t i = 0; i < output_count; ++i) {
-      const auto& selected_item_ids = selected_item_groups[i];
-      lengths_context->mutable_int_contents()->Add(
-          static_cast<int32_t>(selected_item_ids.size()));
-      for (int32_t j = 0; j < max_items_per_output; ++j) {
-        if (j < static_cast<int32_t>(selected_item_ids.size())) {
-          output_context->mutable_int64_contents()->Add(selected_item_ids[j]);
-        } else {
-          output_context->mutable_int64_contents()->Add(0);
+      const auto& output = req_output.outputs[i];
+      if (!output.item_ids_list.empty()) {
+        for (const int64_t item_id : output.item_ids_list) {
+          if (total_count >= total_threshold) {
+            break;
+          }
+          output_context->mutable_int64_contents()->Add(item_id);
+          append_output_logprobs(i);
+          ++total_count;
         }
+      } else if (output.item_ids.has_value() && total_count < total_threshold) {
+        output_context->mutable_int64_contents()->Add(output.item_ids.value());
+        append_output_logprobs(i);
+        ++total_count;
       }
-      append_output_logprobs(i);
     }
   } else {
     output_tensor->set_datatype(proto::DataType::INT32);
