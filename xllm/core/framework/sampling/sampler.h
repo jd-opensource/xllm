@@ -44,8 +44,7 @@ class Sampler final {
   static torch::Tensor greedy_sample(const torch::Tensor& probs);
 
   // probs: [..., vocab_size]
-  static torch::Tensor random_sample(const torch::Tensor& probs,
-                                     int num_samples = 1);
+  static torch::Tensor random_sample(const torch::Tensor& probs);
 };
 
 }  // namespace xllm
