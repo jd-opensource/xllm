@@ -373,7 +373,7 @@ TEST(SampleSlotTest, OneRecOutputCarriesTokenLogprobsWhenEnabled) {
   stopping_checker.set_max_generated_tokens(3);
 
   RequestState request_state(
-      "",
+      /*prompt=*/"",
       std::vector<int32_t>{11, 12},
       sampling_param,
       SchedulerParam{},
@@ -390,7 +390,10 @@ TEST(SampleSlotTest, OneRecOutputCarriesTokenLogprobsWhenEnabled) {
       OutputsFunc{});
   request_state.rec_type = RecType::kOneRec;
 
-  Request request("onerec-score", "", "", request_state);
+  Request request("onerec-score",
+                  /*x_request_id=*/"",
+                  /*x_request_time=*/"",
+                  request_state);
   auto* seq = request.sequences()[0].get();
 
   Token first_token(101);
