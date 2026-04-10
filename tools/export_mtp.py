@@ -64,8 +64,8 @@ def get_mtp_layer_id(config, model_type):
     if not hasattr(config, "num_hidden_layers"):
         raise ValueError("'num_hidden_layers' not found in model config.")
     
-    # For DeepSeek V3/V3.2/R1 and GLM4, MTP layer is the last layer
-    if model_type in ["deepseek_v3", "deepseek_v32", "glm4_moe"]:
+    # For DeepSeek V3/V3.2/R1, GLM4 and GLM5, MTP layer is the last layer
+    if model_type in ["deepseek_v3", "deepseek_v32", "glm4_moe", "glm_moe_dsa"]:
         return config.num_hidden_layers
     
     raise ValueError(f"Unsupported model type for MTP export: {model_type}")
@@ -77,6 +77,7 @@ def get_mtp_model_type(model_type):
         "deepseek_v3": "deepseek_v3_mtp",  # Used for V3 and R1
         "deepseek_v32": "deepseek_v32_mtp",  # Used for V3.2
         "glm4_moe": "glm4_moe_mtp",
+        "glm_moe_dsa": "glm_moe_dsa_mtp",
     }
     return mapping.get(model_type, f"{model_type}_mtp")
 
@@ -87,6 +88,7 @@ def get_mtp_architecture(model_type):
         "deepseek_v3": "DeepseekMTPForCausalLM",  # Used for V3 and R1
         "deepseek_v32": "DeepseekV32MtpForCausalLM",  # Used for V3.2
         "glm4_moe": "Glm4MoeMtpForCausalLM",
+        "glm_moe_dsa": "GlmMoeDsaMtpForCausalLM",
     }
     return mapping.get(model_type, "MtpForCausalLM")
 
@@ -105,11 +107,8 @@ def update_and_save_config(config, output_dir, model_type):
         "quantization_config": "",
     }
     
-    # Model-specific updates
-    if model_type == "deepseek_v3":  # Used for V3 and R1
-        updates["first_k_dense_replace"] = 0
-    elif model_type == "deepseek_v32":  # Used for V3.2
-        updates["first_k_dense_replace"] = 0
+    # Keep consistent with MTP exported config requirements.
+    updates["first_k_dense_replace"] = 0
     
     new_config.update(updates)
     
@@ -120,7 +119,11 @@ def update_and_save_config(config, output_dir, model_type):
 def copy_non_safetensors_files(input_dir, output_dir):
     for filename in os.listdir(input_dir):
         src_file_path = os.path.join(input_dir, filename)
-        if os.path.isfile(src_file_path) and not filename.endswith(".safetensors"):
+        if (
+            os.path.isfile(src_file_path)
+            and not filename.endswith(".safetensors")
+            and not filename.endswith(".safetensors.index.json")
+        ):
             dst_file_path = os.path.join(output_dir, filename)
             shutil.copy2(src_file_path, dst_file_path)
     print(f"All non-safetensors files have been copied to {output_dir}")
@@ -168,7 +171,7 @@ def export_mtp_layer_parameters(input_dir, output_dir, mtp_layer_id, model_type)
 
         try:
             with safe_open(file_path, framework="pt") as f:
-                matching_keys = [k for k in f.keys() if k.startswith(prefix)]
+                matching_keys = [k for k in f.keys() if (k.startswith(prefix) or k == "rot.weight")]
 
                 if not matching_keys:
                     print(f"  No parameters starting with '{prefix}' found")
@@ -176,7 +179,9 @@ def export_mtp_layer_parameters(input_dir, output_dir, mtp_layer_id, model_type)
 
                 for key in matching_keys:
                     # Handle special keys that should be at model level
-                    if any(special in key for special in ["embed_tokens", "shared_head", "enorm", "hnorm", "eh_proj"]):
+                    if key == "rot.weight":
+                        new_key = "model.rot.weight"
+                    elif any(special in key for special in ["embed_tokens", "shared_head", "enorm", "hnorm", "eh_proj"]):
                         new_key = key.replace(prefix, "model")
                     else:
                         # Map to layer 0 for MTP model
@@ -238,7 +243,7 @@ if __name__ == "__main__":
         "--model-type",
         type=str,
         default=None,
-        help="Model type (deepseek_v3, deepseek_v32, glm4_moe). If not specified, will auto-detect. Note: DeepSeek V3 and R1 use 'deepseek_v3', V3.2 uses 'deepseek_v32'.",
+        help="Model type (deepseek_v3, deepseek_v32, glm4_moe, glm_moe_dsa). If not specified, will auto-detect. Note: DeepSeek V3 and R1 use 'deepseek_v3', V3.2 uses 'deepseek_v32'.",
     )
     args = parser.parse_args()
 
