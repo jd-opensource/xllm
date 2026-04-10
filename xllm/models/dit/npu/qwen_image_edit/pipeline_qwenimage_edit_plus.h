@@ -271,9 +271,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     auto seed = generation_params.seed >= 0 ? generation_params.seed : 42;
 
     auto prompts = input.prompts;
-    auto prompts_2 = input.prompts_2;
     auto negative_prompts = input.negative_prompts;
-    auto negative_prompts_2 = input.negative_prompts_2;
     auto latents = input.latents;
     if (latents.defined()) {
       latents = latents.to(options_.device(), dtype_);
@@ -283,7 +281,6 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     if (prompt_embeds.defined()) {
       prompt_embeds = prompt_embeds.to(options_.device(), dtype_);
     }
-    auto pooled_prompt_embeds = input.pooled_prompt_embeds;
     torch::Tensor prompt_embeds_mask;
 
     auto negative_prompt_embeds = input.negative_prompt_embeds;
@@ -291,7 +288,6 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
       negative_prompt_embeds =
           negative_prompt_embeds.to(options_.device(), dtype_);
     }
-    auto negative_pooled_prompt_embeds = input.negative_pooled_prompt_embeds;
     torch::Tensor negative_prompt_embeds_mask;
 
     std::vector<torch::Tensor> image_list;
@@ -385,7 +381,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
       }
     }
 
-    bool has_neg_prompt = negative_prompts.size() > 0;
+    bool has_neg_prompt = negative_prompts.size() > 0 || negative_prompt_embeds.defined();
 
     bool do_true_cfg = (true_cfg_scale > 1.0) && has_neg_prompt;
     // inplace update prompt_embeds and prompt_embeds_mask
