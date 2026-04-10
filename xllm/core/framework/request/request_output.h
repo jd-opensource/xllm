@@ -74,11 +74,17 @@ struct SequenceOutput {
   // the decoded item id for constrained recommendation output.
   std::optional<int64_t> item_ids;
 
+  // decoded item ids for multi-item recommendation output.
+  std::vector<int64_t> item_ids_list;
+
   // the reason the sequence finished.
   std::optional<std::string> finish_reason;
 
   // log probabilities of the generated tokens.
   std::optional<std::vector<LogProb>> logprobs;
+
+  // token-aligned logprobs for REC / OneRec outputs.
+  std::vector<std::optional<float>> token_ids_logprobs;
 
   // the embeddings of the prompt token
   std::optional<std::vector<float>> embeddings;

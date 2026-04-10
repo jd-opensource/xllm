@@ -158,6 +158,7 @@ XLLM_Response* build_error_response(const std::string& request_id,
 
 XLLM_Response* build_success_response(const InferenceType& inference_type,
                                       const RequestOutput& output,
+                                      RecPipelineType rec_pipeline_type,
                                       const std::string& request_id,
                                       int64_t created_time,
                                       const std::string& model) {
@@ -180,11 +181,30 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
   response->choices.entries_size = output.outputs.size();
   response->choices.entries = new XLLM_Choice[response->choices.entries_size]();
   CHECK(nullptr != response->choices.entries);
+  const bool is_rec_inference =
+      inference_type == InferenceType::REC_COMPLETIONS ||
+      inference_type == InferenceType::REC_CHAT_COMPLETIONS;
+  const bool is_onerec_pipeline =
+      is_rec_inference && rec_pipeline_type == RecPipelineType::kOneRecDefault;
+  if (is_onerec_pipeline) {
+    response->rec_outputs.entries_size = output.outputs.size();
+    response->rec_outputs.entries =
+        new XLLM_RecOutput[response->rec_outputs.entries_size]();
+    CHECK(nullptr != response->rec_outputs.entries);
+  }
+
+  int32_t total_item_count = 0;
+  const int32_t total_threshold = FLAGS_total_conversion_threshold;
 
   for (int i = 0; i < output.outputs.size(); i++) {
     const auto& seq_output = output.outputs[i];
     XLLM_Choice& choice = response->choices.entries[i];
     choice.index = seq_output.index;
+    XLLM_RecOutput* rec_output = nullptr;
+    if (response->rec_outputs.entries != nullptr) {
+      rec_output = &response->rec_outputs.entries[i];
+      rec_output->index = seq_output.index;
+    }
 
     if (inference_type == InferenceType::LLM_COMPLETIONS ||
         inference_type == InferenceType::REC_COMPLETIONS) {
@@ -233,6 +253,50 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
         xllm_logprob.logprob = logprob.logprob;
       }
     }
+
+    if (is_onerec_pipeline && FLAGS_enable_convert_tokens_to_item &&
+        rec_output != nullptr) {
+      size_t copied_item_count = 0;
+      if (!seq_output.item_ids_list.empty()) {
+        copied_item_count =
+            std::min(seq_output.item_ids_list.size(),
+                     static_cast<size_t>(
+                         std::max(total_threshold - total_item_count, 0)));
+        if (copied_item_count > 0) {
+          rec_output->item_ids_size = copied_item_count;
+          rec_output->item_ids = new int64_t[copied_item_count];
+          CHECK(nullptr != rec_output->item_ids);
+          for (size_t j = 0; j < copied_item_count; ++j) {
+            rec_output->item_ids[j] = seq_output.item_ids_list[j];
+          }
+          total_item_count += static_cast<int32_t>(copied_item_count);
+        }
+      } else if (seq_output.item_ids.has_value() &&
+                 total_item_count < total_threshold) {
+        rec_output->item_ids_size = 1;
+        rec_output->item_ids = new int64_t[1];
+        CHECK(nullptr != rec_output->item_ids);
+        rec_output->item_ids[0] = seq_output.item_ids.value();
+        ++total_item_count;
+      }
+    }
+
+    if (is_onerec_pipeline && FLAGS_enable_output_sku_logprobs &&
+        !seq_output.token_ids_logprobs.empty() && rec_output != nullptr) {
+      rec_output->rec_token_logprobs_size =
+          seq_output.token_ids_logprobs.size();
+      rec_output->rec_token_logprobs =
+          new float[rec_output->rec_token_logprobs_size];
+      CHECK(nullptr != rec_output->rec_token_logprobs);
+      for (size_t j = 0; j < rec_output->rec_token_logprobs_size; ++j) {
+        if (seq_output.token_ids_logprobs[j].has_value()) {
+          rec_output->rec_token_logprobs[j] =
+              seq_output.token_ids_logprobs[j].value();
+        } else {
+          rec_output->rec_token_logprobs[j] = 0.0f;
+        }
+      }
+    }
   }
 
   if (output.usage.has_value()) {
@@ -279,6 +343,14 @@ XLLM_Response* handle_inference_request(
   xllm::RequestParams xllm_request_params;
   transfer_request_params(inference_type, request_params, &xllm_request_params);
   xllm_request_params.request_id = request_id;
+  RecPipelineType rec_pipeline_type = RecPipelineType::kLlmRecDefault;
+  if constexpr (std::is_same_v<HandlerType, XLLM_REC_Handler>) {
+    rec_pipeline_type = handler->pipeline_type;
+    if (FLAGS_enable_output_sku_logprobs &&
+        rec_pipeline_type == RecPipelineType::kOneRecDefault) {
+      xllm_request_params.logprobs = true;
+    }
+  }
 
   const int64_t created_time = absl::ToUnixSeconds(absl::Now());
 
@@ -290,6 +362,7 @@ XLLM_Response* handle_inference_request(
                                 request_id,
                                 created_time,
                                 inference_type,
+                                rec_pipeline_type,
                                 weak_promise = std::weak_ptr(promise_ptr)](
                                    const RequestOutput& req_output) -> bool {
       if (auto locked_promise = weak_promise.lock()) {
@@ -298,6 +371,7 @@ XLLM_Response* handle_inference_request(
             if (req_output.status.value().ok()) {
               locked_promise->setValue(build_success_response(inference_type,
                                                               req_output,
+                                                              rec_pipeline_type,
                                                               request_id,
                                                               created_time,
                                                               model_id));
@@ -432,6 +506,24 @@ void xllm_free_response(XLLM_Response* resp) {
   }
 
   resp->choices.entries_size = 0;
+  if (nullptr != resp->rec_outputs.entries) {
+    for (size_t i = 0; i < resp->rec_outputs.entries_size; ++i) {
+      XLLM_RecOutput& rec_output = resp->rec_outputs.entries[i];
+      if (nullptr != rec_output.item_ids) {
+        delete[] rec_output.item_ids;
+        rec_output.item_ids = nullptr;
+        rec_output.item_ids_size = 0;
+      }
+      if (nullptr != rec_output.rec_token_logprobs) {
+        delete[] rec_output.rec_token_logprobs;
+        rec_output.rec_token_logprobs = nullptr;
+        rec_output.rec_token_logprobs_size = 0;
+      }
+    }
+    delete[] resp->rec_outputs.entries;
+    resp->rec_outputs.entries = nullptr;
+  }
+  resp->rec_outputs.entries_size = 0;
   delete resp;
 
   return;
