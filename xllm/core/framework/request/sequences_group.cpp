@@ -20,7 +20,7 @@ limitations under the License.
 #include <unordered_set>
 
 #include "common/global_flags.h"
-#include "core/common/rec_model_utils.h"
+#include "core/util/rec_model_utils.h"
 #include "framework/batch/beam_search.h"
 #include "util/blocking_counter.h"
 #include "util/slice.h"

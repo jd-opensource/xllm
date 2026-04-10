@@ -16,7 +16,7 @@ limitations under the License.
 #include "attention.h"
 
 #include "base_attention_impl.h"
-#include "core/common/rec_model_utils.h"
+#include "core/util/rec_model_utils.h"
 #include "flashinfer_attention.h"
 #include "xattention.h"
 

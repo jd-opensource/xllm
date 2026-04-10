@@ -28,9 +28,9 @@ limitations under the License.
 #include <sstream>
 
 #include "common/global_flags.h"
-#include "common/rec_model_utils.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request_state.h"
+#include "util/rec_model_utils.h"
 
 namespace xllm {
 

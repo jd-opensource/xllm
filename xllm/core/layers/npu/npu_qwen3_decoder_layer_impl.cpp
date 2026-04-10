@@ -21,7 +21,7 @@ limitations under the License.
 #include <map>
 
 #include "common/global_flags.h"
-#include "common/rec_model_utils.h"
+#include "util/rec_model_utils.h"
 
 // #include "attn_mask.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"

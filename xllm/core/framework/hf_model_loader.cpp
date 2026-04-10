@@ -35,7 +35,6 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
-#include "core/common/rec_model_utils.h"
 #include "core/common/version_singleton.h"
 #include "core/framework/state_dict/rec_vocab_dict.h"
 #include "core/framework/state_dict/safetensors/safetensors.h"
@@ -47,6 +46,7 @@ limitations under the License.
 #include "core/platform/device.h"
 #include "core/util/blocking_counter.h"
 #include "core/util/json_reader.h"
+#include "core/util/rec_model_utils.h"
 #include "core/util/scope_guard.h"
 #include "core/util/tensor_helper.h"
 #include "models/model_registry.h"
