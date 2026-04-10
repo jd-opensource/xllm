@@ -22,6 +22,7 @@ limitations under the License.
 
 #include <iostream>
 #include <memory>
+#include <opencv2/opencv.hpp>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -56,16 +57,20 @@ torch::Tensor randn_tensor(const std::vector<int64_t>& shape,
 
 class VAEImageProcessorImpl : public torch::nn::Module {
  public:
-  explicit VAEImageProcessorImpl(ModelContext context,
-                                 bool do_resize = true,
-                                 bool do_normalize = true,
-                                 bool do_binarize = false,
-                                 bool do_convert_rgb = false,
-                                 bool do_convert_grayscale = false,
-                                 int64_t latent_channels = 4) {
+  explicit VAEImageProcessorImpl(
+      ModelContext context,
+      bool do_resize = true,
+      bool do_normalize = true,
+      bool do_binarize = false,
+      bool do_convert_rgb = false,
+      bool do_convert_grayscale = false,
+      int64_t latent_channels = 4,
+      std::optional<int64_t> scale_factor = std::nullopt) {
     const auto& model_args = context.get_model_args();
     options_ = context.get_tensor_options();
-    scale_factor_ = 1 << model_args.block_out_channels().size();
+    scale_factor_ = scale_factor.has_value()
+                        ? scale_factor.value()
+                        : 1 << model_args.block_out_channels().size();
     latent_channels_ = latent_channels;
     do_resize_ = do_resize;
     do_normalize_ = do_normalize;
@@ -120,7 +125,18 @@ class VAEImageProcessorImpl : public torch::nn::Module {
     auto [target_h, target_w] =
         get_default_height_width(processed, height, width);
     if (do_resize_) {
-      processed = resize(processed, target_h, target_w);
+      if (resize_mode == "lanczo") {
+        processed = lanczo_resize(processed, target_h, target_w);
+      } else if (resize_mode == "default") {
+        processed = resize(processed,
+                           {target_h, target_w},
+                           /*resample=*/3,  // BICUBIC (approximate LANCZOS)
+                           /*antialias=*/true);
+      } else {
+        LOG(FATAL) << "Currently only support two resize methods, 'lanczo' and "
+                      "'default'"
+                   << ", but got: " << resize_mode;
+      }
     }
 
     if (do_normalize_) {
@@ -180,14 +196,72 @@ class VAEImageProcessorImpl : public torch::nn::Module {
     return (tensor * 0.5 + 0.5).clamp(0.0, 1.0);
   }
 
+ public:
   torch::Tensor resize(const torch::Tensor& image,
-                       int64_t target_height,
-                       int64_t target_width) const {
-    return torch::nn::functional::interpolate(
-        image,
-        torch::nn::functional::InterpolateFuncOptions()
-            .size(std::vector<int64_t>{target_height, target_width})
-            .mode(torch::kNearest));
+                       const std::vector<int64_t>& size,
+                       size_t resample,
+                       bool antialias) {
+    if (image.dim() != 4) {
+      LOG(FATAL) << "Input image must be a 4D tensor (B x C x H x W).";
+    }
+    auto options = torch::nn::functional::InterpolateFuncOptions()
+                       .size(size)
+                       .align_corners(false)
+                       .antialias(antialias);
+    switch (resample) {
+      case 1:
+        options.mode(torch::kNearest);
+        break;
+      case 2:
+        options.mode(torch::kBilinear);
+        break;
+      case 3:
+        options.mode(torch::kBicubic);
+        break;
+      default:
+        LOG(FATAL) << "Invalid resample value. Must be one of 1, 2, or 3.";
+    }
+    return torch::nn::functional::interpolate(image, options);
+  }
+
+  // This function is used to align with the PIL Image.resize function
+  // currently, the diffusers uses LANCZO mode to resize the pil image inputs,
+  // but there is not a implementation for pytorch/libtorch, use
+  // torch::nn::functional::Interpolate for torch tensor may cause a precision
+  // problem, diffusers repo also have the same problem when using torch tensor
+  // as input. to keep the same with PIL Image, we borrow the lanczo function
+  // from opencv library
+  torch::Tensor lanczo_resize(torch::Tensor image,
+                              int64_t target_height,
+                              int64_t target_width) {
+    auto options = image.options();
+    image = image.cpu().to(torch::kFloat32);
+
+    bool is_batch = (image.dim() == 4);
+    int64_t c = is_batch ? image.size(1) : image.size(0);
+    int64_t h = is_batch ? image.size(2) : image.size(1);
+    int64_t w = is_batch ? image.size(3) : image.size(2);
+
+    cv::Mat mat(h, w, CV_32FC(c));
+    float* data = image.data_ptr<float>();
+    memcpy(mat.data, data, c * h * w * sizeof(float));
+
+    cv::Mat resized;
+    cv::resize(mat,
+               resized,
+               cv::Size(target_width, target_height),
+               0,
+               0,
+               cv::INTER_LANCZOS4);
+
+    torch::Tensor result =
+        torch::empty({c, target_height, target_width}, image.options());
+    memcpy(result.data_ptr<float>(),
+           resized.data,
+           c * target_height * target_width * sizeof(float));
+    result = result.to(options);
+
+    return is_batch ? result.unsqueeze(0) : result;
   }
 
  private:
