@@ -15,9 +15,9 @@ limitations under the License.
 
 #pragma once
 
-#include "core/common/rec_model_utils.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/qwen3_moe_decoder_layer.h"
+#include "core/util/rec_model_utils.h"
 #include "llm_model_base.h"
 
 namespace xllm {

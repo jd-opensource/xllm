@@ -23,8 +23,8 @@ limitations under the License.
 #include <optional>
 #include <vector>
 
-#include "common/rec_model_utils.h"
 #include "runtime/llm_worker_impl.h"
+#include "util/rec_model_utils.h"
 #include "util/threadpool.h"
 
 namespace xllm {

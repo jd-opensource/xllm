@@ -27,8 +27,8 @@ limitations under the License.
 #include <limits>
 #include <stdexcept>
 
-#include "core/common/rec_model_utils.h"
 #include "core/framework/model_loader.h"
+#include "core/util/rec_model_utils.h"
 #include "helper.h"
 
 namespace {

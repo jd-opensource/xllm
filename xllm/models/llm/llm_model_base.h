@@ -22,7 +22,6 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/interruption_bus.h"
-#include "core/common/rec_model_utils.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -30,6 +29,7 @@ limitations under the License.
 #include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/common/lm_head.h"
 #include "core/layers/common/rms_norm.h"
+#include "core/util/rec_model_utils.h"
 #include "models/model_registry.h"
 
 namespace xllm {
