@@ -44,6 +44,14 @@ limitations under the License.
 #include "server/xllm_server_registry.h"
 using namespace xllm;
 
+void test_shared_ptr() {
+  std::shared_ptr<int> ptr = std::make_shared<int>(1);
+  std::shared_ptr<int> ptr2 = ptr;
+  *ptr2 = 2;
+  LOG(INFO) << "ptr: " << *ptr;
+  LOG(INFO) << "ptr2: " << *ptr2;
+}
+
 static std::atomic<uint32_t> signal_received{0};
 
 static const std::unordered_set<std::string> prefill_sp_supported_model_set = {
