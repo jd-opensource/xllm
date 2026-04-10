@@ -15,10 +15,11 @@ limitations under the License.
 
 #pragma once
 
+#include <torch_npu/csrc/core/npu/NPUFormat.h>
+
 #include "core/common/global_flags.h"
 #include "core/layers/common/rms_norm.h"
 #include "core/layers/npu/npu_onerec_block_layer_impl.h"
-#include <torch_npu/csrc/core/npu/NPUFormat.h>
 
 namespace xllm {
 
