@@ -291,6 +291,7 @@ message ForwardInput {
   repeated int32 kv_cache_tokens_nums = 43;
   repeated string request_ids = 44;
   DiTForwardInput dit_forward_input = 45;
+  repeated int32 linear_state_ids = 46;
 }
 
  message BatchedForwardInputs {

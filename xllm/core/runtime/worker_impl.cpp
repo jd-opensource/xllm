@@ -228,9 +228,11 @@ bool WorkerImpl::allocate_kv_cache(
       k_tensor = at_npu::native::npu_format_cast(k_tensor, ACL_FORMAT_ND);
       v_tensor = at_npu::native::npu_format_cast(v_tensor, ACL_FORMAT_ND);
 #endif
-
-      // For xtensor mode, we still use the full KV cache approach
-      kv_caches_.emplace_back(k_tensor, v_tensor);
+      if (is_full_attention_layer(context_.get_model_args(), i)) {
+        kv_caches_.emplace_back(k_tensor, v_tensor);
+      } else {
+        kv_caches_.emplace_back();
+      }
     }
   } else {
     // Original mode: create torch tensors with optional int8 kv quantization.
@@ -1155,7 +1157,8 @@ bool WorkerImpl::init_rolling_runtime_state() {
   CHECK(load_stream_ != nullptr) << "load_stream_ is null for rolling load";
 
   // Rolling runtime ownership is moved into model.
-  // Worker provides runtime dependencies and delegates initialization/refresh.
+  // Worker provides runtime dependencies and delegates
+  // initialization/refresh.
   const int32_t n_slots = FLAGS_rolling_load_num_cached_layers;
   const int32_t n_rolling_slots = FLAGS_rolling_load_num_rolling_slots;
   return model_->init_or_refresh_rolling_runtime(load_stream_.get(),

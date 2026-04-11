@@ -519,26 +519,32 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
 #endif
 
-  int64_t full_attention_interval = (args_.full_attention_interval() < 1)
-                                        ? 1
-                                        : args_.full_attention_interval();
-  int64_t num_full_attention_layers =
-      kv_cache_cap.n_layers / full_attention_interval;
-  int64_t num_linear_attention_layers =
-      kv_cache_cap.n_layers - num_full_attention_layers;
+  kv_cache_cap.num_linear_state_blocks = FLAGS_max_seqs_per_batch + 2;
+  for (int64_t layer_id = 0; layer_id < kv_cache_cap.n_layers; ++layer_id) {
+    if (is_full_attention_layer(args_, layer_id)) {
+      ++kv_cache_cap.num_full_attention_layers;
+    } else {
+      ++kv_cache_cap.num_linear_attention_layers;
+    }
+  }
+
   // compute kv cache n_blocks
   const int32_t block_size = options_.block_size();
   const int64_t block_size_in_bytes =
       block_size * (slot_size + index_slot_size + scale_slot_size);
-  const int64_t full_cache_block_size_in_bytes =
-      block_size * (slot_size + index_slot_size + scale_slot_size);
-  const int64_t total_cache_block_size_in_bytes =
-      num_full_attention_layers * full_cache_block_size_in_bytes +
-      num_linear_attention_layers * linear_slot_size;
-  CHECK_GT(total_cache_block_size_in_bytes, 0)
-      << "invalid cache block size estimate";
-  kv_cache_cap.n_blocks =
-      kv_cache_cap.cache_size_in_bytes / total_cache_block_size_in_bytes;
+  kv_cache_cap.linear_cache_size_in_bytes =
+      kv_cache_cap.num_linear_attention_layers *
+      kv_cache_cap.num_linear_state_blocks * kv_cache_cap.linear_slot_size;
+  const int64_t available_full_cache_size_in_bytes =
+      kv_cache_cap.cache_size_in_bytes -
+      kv_cache_cap.linear_cache_size_in_bytes;
+  CHECK_GT(available_full_cache_size_in_bytes, 0)
+      << "no memory left for full-attention kv cache after reserving linear "
+         "state cache";
+  const int64_t full_attention_layers =
+      std::max<int64_t>(kv_cache_cap.num_full_attention_layers, 1);
+  kv_cache_cap.n_blocks = available_full_cache_size_in_bytes /
+                          (full_attention_layers * block_size_in_bytes);
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
   return kv_cache_cap;
 }
@@ -548,6 +554,10 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
             << readable_size(kv_cache_cap.cache_size_in_bytes)
             << ", blocks: " << kv_cache_cap.n_blocks
             << ", slot_size: " << kv_cache_cap.slot_size
+            << ", linear_slot_size: " << kv_cache_cap.linear_slot_size
+            << ", linear_blocks: " << kv_cache_cap.num_linear_state_blocks
+            << ", reserved_linear_bytes: "
+            << readable_size(kv_cache_cap.linear_cache_size_in_bytes)
             << ", n_layers: " << kv_cache_cap.n_layers
             << ", kv_cache_dtype: " << options_.kv_cache_dtype();
 
@@ -596,12 +606,12 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   }
   if (enable_gdn_attention) {
     kv_cache_shape.emplace_back(std::vector<int64_t>{
-        kv_cache_cap.n_blocks,
+        kv_cache_cap.num_linear_state_blocks,
         args_.linear_key_head_dim() * n_local_linear_k_heads_ * 2 +
             args_.linear_key_head_dim() * n_local_linear_v_heads_,
         args_.linear_conv_kernel_dim() - 1});
     kv_cache_shape.emplace_back(
-        std::vector<int64_t>{kv_cache_cap.n_blocks,
+        std::vector<int64_t>{kv_cache_cap.num_linear_state_blocks,
                              n_local_linear_v_heads_,
                              args_.linear_key_head_dim(),
                              args_.linear_value_head_dim()});
@@ -643,6 +653,7 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   options.num_blocks(kv_cache_cap.n_blocks)
       .block_size(block_size)
       .host_num_blocks(kv_cache_cap.n_blocks * options_.host_blocks_factor())
+      .enable_linear_state(enable_gdn_attention)
       .enable_prefix_cache(
           FLAGS_enable_xtensor ? false : options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())

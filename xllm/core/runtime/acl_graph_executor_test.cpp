@@ -71,6 +71,21 @@ class AclGraphExecutorTestEnvironment : public ::testing::Environment {
 
 namespace xllm {
 
+namespace {
+const KVCache& first_full_attention_cache(
+    const std::vector<KVCache>& kv_caches) {
+  for (const auto& kv_cache : kv_caches) {
+    if (kv_cache.has_kv_cache()) {
+      auto k_cache = kv_cache.get_k_cache();
+      if (k_cache.defined() && k_cache.numel() > 0) {
+        return kv_cache;
+      }
+    }
+  }
+  LOG(FATAL) << "No full-attention KV cache found";
+}
+}  // namespace
+
 // Initialize glog for testing - use a function to ensure proper initialization
 // order
 void InitializeGlog() {
@@ -179,7 +194,8 @@ class SimpleCausalLM : public CausalLM {
       auto max_block_nums_per_seq = torch::ceil(max_seq_len / block_size_);
 
       // Get kv_cache tensor from KVCache
-      const auto& kv_cache_tensor = kv_caches[0].get_k_cache();
+      const auto& kv_cache_tensor =
+          first_full_attention_cache(kv_caches).get_k_cache();
 
       // Create col_indices and mask
       int64_t block_table_len = params.block_tables.size(1);
@@ -649,6 +665,93 @@ TEST_F(AclGraphExecutorTest, AclGraphExecutorVsBaseExecutorImplMultipleRuns) {
         << npu_output << "\nACL Graph Executor output:\n"
         << graph_output;
   }
+}
+
+TEST_F(AclGraphExecutorTest, BatchInputCarriesLinearStateIds) {
+  model_args_.layer_types({"linear_attention", "full_attention"});
+  auto batch = CreateTestBatch();
+  ASSERT_FALSE(batch->empty());
+  ASSERT_FALSE(sequences_.empty());
+
+  auto& seq = sequences_.back();
+  auto linear_state_block = block_manager_->allocate(1);
+  ASSERT_EQ(linear_state_block.size(), 1);
+  const int32_t expected_linear_state_id = linear_state_block[0].id();
+  seq.set_single_block(std::move(linear_state_block[0]));
+
+  auto forward_input = batch->prepare_forward_input(
+      options_.num_decoding_tokens(), 0, model_args_);
+  ASSERT_EQ(forward_input.input_params.num_sequences, 1);
+  ASSERT_EQ(forward_input.input_params.linear_state_ids.size(), 1);
+  EXPECT_EQ(forward_input.input_params.linear_state_ids[0],
+            expected_linear_state_id);
+  ASSERT_EQ(forward_input.input_params.embedding_ids.size(), 1);
+  EXPECT_EQ(forward_input.input_params.embedding_ids[0],
+            expected_linear_state_id);
+}
+
+TEST(AclGraphExecutorHybridTest, KvCacheSupportsLinearOnlyLayers) {
+  auto conv_cache = torch::zeros({4, 32, 3}, torch::dtype(torch::kFloat32));
+  auto ssm_cache = torch::zeros({4, 8, 64, 64}, torch::dtype(torch::kFloat32));
+  KVCache linear_only_cache(
+      torch::Tensor(), torch::Tensor(), conv_cache, ssm_cache);
+
+  EXPECT_FALSE(linear_only_cache.empty());
+  EXPECT_FALSE(linear_only_cache.get_conv_cache().defined() == false);
+  EXPECT_FALSE(linear_only_cache.get_ssm_cache().defined() == false);
+  EXPECT_FALSE(linear_only_cache.get_k_cache().defined());
+  EXPECT_FALSE(linear_only_cache.get_v_cache().defined());
+}
+
+TEST(AclGraphExecutorHybridTest, ModelArgsCountsHybridLayerTypes) {
+  ModelArgs args;
+  args.n_layers(4);
+  args.layer_types(
+      {"linear_attention", "full_attention", "linear_attention", "attention"});
+
+  EXPECT_FALSE(is_full_attention_layer(args, 0));
+  EXPECT_TRUE(is_full_attention_layer(args, 1));
+  EXPECT_FALSE(is_full_attention_layer(args, 2));
+  EXPECT_TRUE(is_full_attention_layer(args, 3));
+  EXPECT_TRUE(has_linear_attention_layers(args));
+}
+
+TEST_F(AclGraphExecutorTest, GraphExecutorUsesFirstFullAttentionKvCache) {
+  auto batch = CreateTestBatch();
+  ASSERT_FALSE(batch->empty());
+
+  auto forward_input = batch->prepare_forward_input(
+      options_.num_decoding_tokens(), 0, model_args_);
+  forward_input = forward_input.to(*device_, torch::kFloat32);
+
+  auto conv_cache =
+      torch::zeros({4, 32, 3}, torch::dtype(torch::kFloat32).device(*device_));
+  auto ssm_cache = torch::zeros({4, 8, 64, 64},
+                                torch::dtype(torch::kFloat32).device(*device_));
+  auto full_k = torch::randn({1000, 4 * model_args_.hidden_size()},
+                             torch::dtype(torch::kFloat32).device(*device_));
+  auto full_v = full_k.clone();
+
+  std::vector<KVCache> hybrid_kv_caches;
+  hybrid_kv_caches.emplace_back(
+      torch::Tensor(), torch::Tensor(), conv_cache, ssm_cache);
+  hybrid_kv_caches.emplace_back(full_k, full_v);
+
+  auto eager_model_output = model_->forward({forward_input.token_ids},
+                                            {forward_input.positions},
+                                            hybrid_kv_caches,
+                                            {forward_input.input_params});
+  auto graph_executor = std::make_unique<::xllm::npu::AclGraphExecutorImpl>(
+      model_.get(), model_args_, *device_, options_);
+  auto graph_model_output = graph_executor->run({forward_input.token_ids},
+                                                {forward_input.positions},
+                                                hybrid_kv_caches,
+                                                {forward_input.input_params});
+
+  EXPECT_TRUE(torch::allclose(eager_model_output.hidden_states,
+                              graph_model_output.hidden_states,
+                              /*rtol=*/1e-5,
+                              /*atol=*/1e-6));
 }
 
 }  // namespace xllm

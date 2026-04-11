@@ -137,6 +137,14 @@ class CudaGraphPersistentParam {
     }
     return persistent_embedding_;
   }
+  torch::Tensor persistent_linear_state_indices(
+      uint32_t actual_batch_size) const {
+    if (actual_batch_size > 0) {
+      return persistent_linear_state_indices_.slice(
+          /*dim=*/0, /*start=*/0, /*end=*/actual_batch_size);
+    }
+    return persistent_linear_state_indices_;
+  }
   torch::Tensor aux_hidden_states(uint32_t actual_tokens) const {
     if (!aux_hidden_states_.defined() || aux_hidden_states_.numel() == 0) {
       return aux_hidden_states_;
@@ -195,6 +203,7 @@ class CudaGraphPersistentParam {
   torch::Tensor q_seq_lens_;
   torch::Tensor kv_seq_lens_;
   torch::Tensor persistent_embedding_;
+  torch::Tensor persistent_linear_state_indices_;
   torch::Tensor aux_hidden_states_;
 
   // FlashInfer decode mode parameters
@@ -287,6 +296,9 @@ class CudaGraphExecutorImpl : public ExecutorImpl {
   // Return current graph executor memory usage in bytes (including persistent
   // parameters). Exposed for tests and diagnostics.
   size_t get_graph_memory_usage_bytes();
+
+  static std::optional<std::pair<torch::Tensor, torch::Tensor>>
+  find_first_full_attention_cache(const std::vector<KVCache>& kv_caches);
 
  private:
   // not own

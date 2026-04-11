@@ -8,14 +8,14 @@ cc_library(
   HDRS
     block.h
     block_manager.h
-    embedding_manager.h
+    single_block_manager.h
     block_manager_pool.h
     block_manager_impl.h
     concurrent_block_manager_impl.h
     hierarchy_block_manager_pool.h
   SRCS 
     block.cpp
-    embedding_manager.cpp
+    single_block_manager.cpp
     block_manager_pool.cpp
     concurrent_block_manager_impl.cpp
     block_manager_impl.cpp
@@ -36,6 +36,7 @@ target_link_libraries(block PRIVATE Folly::folly)
 if(USE_NPU)
   set(TEST_SRCS
     block_manager_test.cpp
+    single_block_manager_test.cpp
   )
 
   cc_test(
@@ -55,5 +56,8 @@ if(USE_NPU)
   )
 
   target_link_libraries(block_test PRIVATE Folly::folly OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf c_sec)
+  # Resolve static link order between xtensor and xllm_server for this test target.
+  target_link_libraries(block_test PRIVATE
+    "$<LINK_GROUP:RESCAN,xtensor,xllm_server>")
   add_dependencies(block_test brpc-static)
 endif()
