@@ -121,6 +121,10 @@ class LlmModelImplBase : public torch::nn::Module {
                 attn_metadata,
                 kv_caches[i],
                 modified_input_params);
+      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
+                                              h.device())) {
+        return ModelOutput();
+      }
     }
     auto [hidden_states, residual_out] = norm_(h, residual);
     return ModelOutput(hidden_states, residual_out);

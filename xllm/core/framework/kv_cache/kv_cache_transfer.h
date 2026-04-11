@@ -22,11 +22,21 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif
+#if defined(USE_MLU)
+#include "platform/mlu/mlu_layer_synchronizer.h"
+#endif
 #include "framework/parallel_state/parallel_args.h"
 #include "platform/device.h"
 #include "util/threadpool.h"
 
 namespace xllm {
+
+#if defined(USE_NPU)
+using KVPushSynchronizerImpl = NPULayerSynchronizerImpl;
+#elif defined(USE_MLU)
+using KVPushSynchronizerImpl = MLULayerSynchronizerImpl;
+#endif
+
 class KVCacheTransfer {
  public:
   struct KVCacheInfo {
@@ -101,11 +111,11 @@ class KVCacheTransfer {
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks);
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
   virtual folly::SemiFuture<bool> push_kv_blocks_async(
       const std::vector<TransferKVInfo>& transfer_kv_infos,
       const ParallelArgs& parallel_args,
-      std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer,
+      std::shared_ptr<KVPushSynchronizerImpl> layer_synchronizer,
       bool is_spec_draft);
 #endif
 
@@ -114,10 +124,10 @@ class KVCacheTransfer {
       const std::vector<TransferKVInfo>& transfer_kv_infos,
       const ParallelArgs& parallel_args);
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
   virtual bool push_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
-      std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
+      std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
       bool is_spec_draft) = 0;
 #endif
 

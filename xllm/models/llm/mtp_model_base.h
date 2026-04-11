@@ -196,6 +196,10 @@ class MtpModelImplBase : public torch::nn::Module {
                             attn_metadata,
                             kv_caches[i],
                             modified_input_params);
+      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
+                                              hidden_states.device())) {
+        return ModelOutput();
+      }
     }
     auto [h_out, r_out] = norm_(hidden_states, residual);
     return ModelOutput(h_out, r_out);

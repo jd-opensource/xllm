@@ -21,8 +21,13 @@ limitations under the License.
 
 #if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
+#endif
 
+#if defined(USE_NPU)
 #include "llm_data_dist_transfer.h"
+#endif
+
+#if defined(USE_NPU) || defined(USE_MLU)
 #include "mooncake_kv_cache_transfer.h"
 #endif
 
@@ -56,11 +61,11 @@ folly::SemiFuture<bool> KVCacheTransfer::pull_kv_blocks_async(
   return future;
 }
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
 folly::SemiFuture<bool> KVCacheTransfer::push_kv_blocks_async(
     const std::vector<TransferKVInfo>& transfer_kv_infos,
     const ParallelArgs& parallel_args,
-    std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer,
+    std::shared_ptr<KVPushSynchronizerImpl> layer_synchronizer,
     bool is_spec_draft) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
@@ -245,10 +250,11 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
 
   int32_t device_id = device.index();
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
   LOG(INFO) << "Create KVCacheTransfer for " << transfer_type << "flag"
             << FLAGS_kv_cache_transfer_type;
   if (transfer_type == "LlmDataDist") {
+#if defined(USE_NPU)
     transfer = std::make_shared<LlmDataDistTransfer>(device_ip,
                                                      transfer_listen_port,
                                                      instance_role,
@@ -259,8 +265,12 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
 
     transfer->initialize(device_id);
     transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);
+#else
+    LOG(FATAL) << "LlmDataDist is not supported on MLU backend.";
+#endif
   } else if (transfer_type == "Mooncake") {
     std::shared_ptr<MooncakeKVCacheTransferBase> mooncake_transfer;
+#if defined(USE_NPU)
     if (FLAGS_enable_xtensor) {
       auto xtensor_transfer = std::make_shared<MooncakeKVCacheTransferXTensor>(
           device_id, transfer_listen_port, device);
@@ -275,6 +285,10 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
       mooncake_transfer = std::make_shared<MooncakeKVCacheTransferDefault>(
           device_id, transfer_listen_port, device, model_type);
     }
+#else
+    mooncake_transfer = std::make_shared<MooncakeKVCacheTransferDefault>(
+        device_id, transfer_listen_port, device, model_type);
+#endif
 
     mooncake_transfer->initialize(device_id);
     mooncake_transfer->allocate_kv_cache(
