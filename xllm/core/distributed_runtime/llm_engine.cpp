@@ -505,8 +505,7 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
       auto parsed_ssm_dtype =
           try_get_scalar_type_from_string(args_.mamba_ssm_dtype());
       if (parsed_ssm_dtype) {
-        ssm_dtype_size =
-            torch::scalarTypeToTypeMeta(parsed_ssm_dtype.value()).itemsize();
+        ssm_dtype_size = get_dtype_size(parsed_ssm_dtype.value());
       }
     }
 
