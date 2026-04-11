@@ -68,6 +68,12 @@ torch::Tensor rms_norm(const torch::Tensor& input,
                        double eps,
                        const std::string& mode);
 
+void npu_gemma_rms_norm(const torch::Tensor& x,
+                        const torch::Tensor& gamma,
+                        double epsilon,
+                        torch::Tensor& rstd_out,
+                        torch::Tensor& y_out);
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> add_rms_norm(
     const torch::Tensor& x1,
     const torch::Tensor& x2,

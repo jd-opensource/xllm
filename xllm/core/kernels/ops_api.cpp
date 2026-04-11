@@ -961,4 +961,18 @@ std::pair<torch::Tensor, torch::Tensor> partial_rotary_embedding(
   NOT_IMPLEMENTED();
 #endif
 }
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+fused_qkvzba_split_reshape_cat(FusedQkvzbaSplitReshapeParams& params) {
+#if defined(USE_NPU)
+  return npu::npu_fused_qkvzba_split_reshape_cat(params.mixed_qkvz,
+                                                 params.mixed_ba,
+                                                 params.num_heads_qk,
+                                                 params.num_heads_v,
+                                                 params.head_qk,
+                                                 params.head_v);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
 }  // namespace xllm::kernel
