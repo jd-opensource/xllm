@@ -43,6 +43,7 @@ limitations under the License.
 #include "server/xllm_server_registry.h"
 #include "util/env_var.h"
 #include "util/pretty_print.h"
+#include "util/tensor_helper.h"
 #include "util/utils.h"
 
 namespace {
@@ -497,8 +498,19 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   if (args_.linear_num_value_heads() > 0) {
     int64_t head_k_dim = args_.linear_key_head_dim();
     int64_t head_v_dim = args_.linear_value_head_dim();
+
+    // Parse mamba_ssm_dtype if specified
+    int64_t ssm_dtype_size = dtype_size;
+    if (!args_.mamba_ssm_dtype().empty()) {
+      auto parsed_ssm_dtype =
+          try_get_scalar_type_from_string(args_.mamba_ssm_dtype());
+      if (parsed_ssm_dtype) {
+        ssm_dtype_size = get_dtype_size(parsed_ssm_dtype.value());
+      }
+    }
+
     int64_t linear_ssm_slot_size =
-        dtype_size * n_local_linear_v_heads_ * head_k_dim * head_v_dim;
+        ssm_dtype_size * n_local_linear_v_heads_ * head_k_dim * head_v_dim;
     int64_t linear_conv_slot_size = dtype_size *
                                     (head_k_dim * n_local_linear_k_heads_ * 2 +
                                      head_v_dim * n_local_linear_v_heads_) *

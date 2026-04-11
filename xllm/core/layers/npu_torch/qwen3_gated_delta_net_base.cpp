@@ -202,9 +202,9 @@ std::tuple<torch::Tensor, torch::Tensor> torch_chunk_gated_delta_rule(
   if (!initial_state.has_value()) {
     last_recurrent_state = torch::zeros(
         {batch_size, num_heads, k_head_dim, v_head_dim},
-        torch::TensorOptions().dtype(value.dtype()).device(value.device()));
+        torch::TensorOptions().dtype(torch::kFloat32).device(value.device()));
   } else {
-    last_recurrent_state = initial_state.value().to(value);
+    last_recurrent_state = initial_state.value().to(torch::kFloat32);
   }
   auto core_attn_out = torch::zeros_like(value);
   mask = torch::triu(

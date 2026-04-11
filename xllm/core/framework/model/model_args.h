@@ -339,6 +339,9 @@ struct ModelArgs {
   PROPERTY(int64_t, mm_image_shortest_edge) = 0;
   PROPERTY(int64_t, mm_image_longest_edge) = 0;
 
+  // Mamba SSM dtype
+  PROPERTY(std::string, mamba_ssm_dtype);
+
   // GLM
   PROPERTY(int64_t, mm_video_shortest_edge) = 0;
   PROPERTY(int64_t, mm_video_longest_edge) = 0;

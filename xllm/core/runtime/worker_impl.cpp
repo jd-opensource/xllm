@@ -252,6 +252,16 @@ bool WorkerImpl::allocate_kv_cache(
 
       if (is_linear_layer) {
         // Linear attention layer: only allocate conv_cache and ssm_cache
+        torch::ScalarType ssm_dtype = dtype_;
+        // Parse mamba_ssm_dtype if specified
+        if (!args.mamba_ssm_dtype().empty()) {
+          auto parsed_ssm_dtype =
+              try_get_scalar_type_from_string(args.mamba_ssm_dtype());
+          if (parsed_ssm_dtype) {
+            ssm_dtype = parsed_ssm_dtype.value();
+          }
+        }
+
 #if defined(USE_NPU)
         aclFormat npu_format_type = ACL_FORMAT_ND;
         if (enable_linear_attention) {
@@ -261,7 +271,7 @@ bool WorkerImpl::allocate_kv_cache(
               2);
           ssm_cache = at_npu::native::npu_format_cast(
               torch::zeros(kv_cache_shape[3],
-                           torch::dtype(dtype_).device(device_)),
+                           torch::dtype(ssm_dtype).device(device_)),
               2);
         }
 #elif defined(USE_ILU) || defined(USE_MLU) || defined(USE_MUSA)
@@ -269,14 +279,14 @@ bool WorkerImpl::allocate_kv_cache(
           conv_cache = torch::zeros(kv_cache_shape[2],
                                     torch::dtype(dtype_).device(device_));
           ssm_cache = torch::zeros(kv_cache_shape[3],
-                                   torch::dtype(dtype_).device(device_));
+                                   torch::dtype(ssm_dtype).device(device_));
         }
 #else
         if (enable_linear_attention) {
           conv_cache = torch::empty(kv_cache_shape[2],
                                     torch::dtype(dtype_).device(device_));
           ssm_cache = torch::empty(kv_cache_shape[3],
-                                   torch::dtype(dtype_).device(device_));
+                                   torch::dtype(ssm_dtype).device(device_));
         }
 #endif
         // Create empty KVCache with only conv and ssm
