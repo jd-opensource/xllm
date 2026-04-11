@@ -329,11 +329,13 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     const ModelInputParams& input_params) {
   auto [qkvz_padded, ba_padded] =
       project_padded_inputs(hidden_states, attn_metadata);
-    int64_t batch_size = qkvz_padded.size(0);
+  int64_t batch_size = qkvz_padded.size(0);
   int64_t seq_len = qkvz_padded.size(1);
 
-  torch::Tensor qkvz_flat = qkvz_padded.view({batch_size * seq_len, qkvz_padded.size(-1)});
-  torch::Tensor ba_flat = ba_padded.view({batch_size * seq_len, ba_padded.size(-1)});
+  torch::Tensor qkvz_flat =
+      qkvz_padded.view({batch_size * seq_len, qkvz_padded.size(-1)});
+  torch::Tensor ba_flat =
+      ba_padded.view({batch_size * seq_len, ba_padded.size(-1)});
   xllm::kernel::FusedQkvzbaSplitReshapeParams fused_params;
   fused_params.mixed_qkvz = qkvz_flat;
   fused_params.mixed_ba = ba_flat;
@@ -341,9 +343,10 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   fused_params.num_heads_v = static_cast<int32_t>(num_v_heads_ / tp_size_);
   fused_params.head_qk = static_cast<int32_t>(head_k_dim_);
   fused_params.head_v = static_cast<int32_t>(head_v_dim_);
-  
+
   torch::Tensor mixed_qkv, z, b, a;
-  std::tie(mixed_qkv, z, b, a) = xllm::kernel::fused_qkvzba_split_reshape_cat(fused_params);
+  std::tie(mixed_qkv, z, b, a) =
+      xllm::kernel::fused_qkvzba_split_reshape_cat(fused_params);
 
   mixed_qkv = mixed_qkv.view({batch_size, seq_len, mixed_qkv.size(-1)});
   z = z.view({batch_size, seq_len, num_v_heads_ / tp_size_, head_v_dim_});
@@ -441,7 +444,8 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   norm_out = norm_out.view({-1, norm_out.size(2), norm_out.size(3)});
 
   // Project the normalized attention output back to hidden size.
-  auto rearranged_norm = norm_out.reshape({norm_out.size(0), norm_out.size(1) * norm_out.size(2)});
+  auto rearranged_norm =
+      norm_out.reshape({norm_out.size(0), norm_out.size(1) * norm_out.size(2)});
   rearranged_norm = reshape_qkvz_unpad(attn_metadata, rearranged_norm);
   auto attn_output = o_proj_->forward(rearranged_norm);
   return attn_output;
