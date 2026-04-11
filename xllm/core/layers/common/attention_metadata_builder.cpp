@@ -114,6 +114,10 @@ AttentionMetadata build_attention_metadata(
   }
   if (params.q_seq_lens.defined()) {
     attn_metadata.q_seq_lens = params.q_seq_lens;
+    torch::Tensor cumsum_tensor =
+        torch::cumsum(attn_metadata.q_seq_lens, 0).to(torch::kInt32);
+    auto zero = torch::zeros({1}, cumsum_tensor.options());
+    attn_metadata.q_cu_seq_lens = torch::cat({zero, cumsum_tensor}, 0);
   }
 #endif
 
