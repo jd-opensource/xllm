@@ -52,6 +52,11 @@ std::string generate_anthropic_chat_request_id() {
          short_uuid.random();
 }
 
+std::string generate_speech_request_id() {
+  return "speech-" + InstanceName::name()->get_name_hash() + "-" +
+         short_uuid.random();
+}
+
 // Handle tool_choice conversion from Anthropic format to internal format
 std::string handle_tool_choice(
     const proto::AnthropicMessagesRequest& rpc_request) {
@@ -529,6 +534,30 @@ RequestParams::RequestParams(const proto::AnthropicMessagesRequest& request,
   }
   tool_choice = std::move(handle_tool_choice(request));
   tools = std::move(handle_tools(request));
+}
+
+RequestParams::RequestParams(const proto::SpeechRequest& request,
+                             const std::string& x_rid,
+                             const std::string& x_rtime) {
+  request_id = generate_speech_request_id();
+  x_request_id = x_rid;
+  x_request_time = x_rtime;
+  speech_request = request;
+
+  const int32_t kDefaultSpeechMaxNewTokens = 2048;
+  int32_t max_new_tokens = kDefaultSpeechMaxNewTokens;
+  if (request.has_max_new_tokens() && request.max_new_tokens() > 0) {
+    max_new_tokens = request.max_new_tokens();
+  }
+
+  max_tokens = static_cast<uint32_t>(max_new_tokens);
+  n = 1;
+  best_of = 1;
+  temperature = 0.9f;
+  top_k = 50;
+  top_p = 1.0f;
+  repetition_penalty = 1.05f;
+  streaming = request.has_stream() ? request.stream() : false;
 }
 
 bool RequestParams::verify_params(OutputCallback callback) const {
