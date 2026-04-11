@@ -27,20 +27,19 @@ limitations under the License.
 #include <mutex>
 
 #include "common/global_flags.h"
-#include "common/version_singleton.h"
 #include "framework/state_dict/rec_vocab_dict.h"
 #include "util/slice.h"
 #include "util/tensor_helper.h"
 
 namespace xllm {
-RecConstrainedDecoding::RecConstrainedDecoding(uint64_t model_version,
+RecConstrainedDecoding::RecConstrainedDecoding(RecVocabDict* vocab_dict,
                                                const int32_t vocab_size,
                                                torch::ScalarType dtype,
                                                torch::Device device,
                                                bool use_gen_threadpool)
     : use_gen_threadpool_(use_gen_threadpool),
       vocab_size_(vocab_size),
-      model_version_(model_version),
+      vocab_dict_(vocab_dict),
       device_(device),
       dtype_(dtype) {
   if (use_gen_threadpool_) {
@@ -51,6 +50,8 @@ RecConstrainedDecoding::RecConstrainedDecoding(uint64_t model_version,
 }
 
 bool RecConstrainedDecoding::build_mask_cache() {
+  CHECK(vocab_dict_ != nullptr)
+      << "RecVocabDict must be initialized before constrained decoding.";
   first_token_mask_ = torch::full({vocab_size_}, PRE_MASK_FACTOR, dtype_);
 
   std::vector<int32_t> empty_token_ids;
@@ -58,9 +59,7 @@ bool RecConstrainedDecoding::build_mask_cache() {
                                      empty_token_ids.size()};
 
   const std::unordered_set<int32_t>& first_token_ids =
-      VersionSingleton<RecVocabDict>::GetInstance(
-          std::to_string(model_version_))
-          ->get_next_tokens_by_prefix_tokens(prefix_token_ids);
+      vocab_dict_->get_next_tokens_by_prefix_tokens(prefix_token_ids);
 
   for (auto token_id : first_token_ids) {
     first_token_mask_[token_id] = 0;
@@ -123,9 +122,7 @@ torch::Tensor RecConstrainedDecoding::generate_decode_mask(
       Slice<int32_t> tokens_slice(generated_token_list[token_idx]);
 
       const std::unordered_set<int32_t>& next_token_ids =
-          VersionSingleton<RecVocabDict>::GetInstance(
-              std::to_string(model_version_))
-              ->get_next_tokens_by_prefix_tokens(tokens_slice);
+          vocab_dict_->get_next_tokens_by_prefix_tokens(tokens_slice);
 
       if (next_token_ids.size() > 0) {
         for (int32_t vocab_idx : next_token_ids) {

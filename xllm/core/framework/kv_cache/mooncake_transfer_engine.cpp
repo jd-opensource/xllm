@@ -65,16 +65,7 @@ bool MooncakeTransferEngineCore::initialize(int16_t listen_port,
   dev.set_device();
   dev.init_device_context();
 
-  int32_t device_id = dev.index();
-  std::string hostname;
-  int32_t phy_id = FLAGS_npu_phy_id;
-  if (phy_id != -1) {
-    hostname = host_ip_ + ":" + std::to_string(listen_port_) + ":npu_" +
-               std::to_string(phy_id);
-  } else {
-    hostname = host_ip_ + ":" + std::to_string(listen_port_) + ":npu_" +
-               std::to_string(device_id);
-  }
+  std::string hostname = host_ip_ + ":" + std::to_string(listen_port_);
 
   if (engine_->init("P2PHANDSHAKE", hostname, "", 0)) {
     LOG(ERROR) << "engine init failed, hostname=" << hostname;

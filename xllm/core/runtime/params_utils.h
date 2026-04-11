@@ -44,6 +44,7 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
                              const torch::Tensor& src_seq_idxes,
                              const torch::Tensor& out_tokens,
                              const torch::Tensor& out_logprobs,
+                             const std::vector<torch::Tensor>& dit_images,
                              proto::ForwardOutput* pb_forward_output);
 
 Token build_token(int64_t index,
@@ -65,4 +66,23 @@ bool block_transfer_info_to_proto(
     const std::vector<BlockTransferInfo>& block_transfer_info,
     proto::BlockTransferInfos* pb_block_transfer_info);
 
+bool dit_forward_input_to_proto(const DiTForwardInput& dit_inputs,
+                                proto::DiTForwardInput* pb_dit_inputs);
+
+bool generation_params_to_proto(
+    const DiTGenerationParams& dit_generation_params,
+    proto::DiTGenerationParams* pb_dit_generation_params);
+
+bool proto_to_dit_forward_input(const proto::DiTForwardInput& pb_dit_inputs,
+                                DiTForwardInput& dit_inputs);
+
+bool proto_to_generation_params(
+    const proto::DiTGenerationParams& pb_dit_generation_params,
+    DiTGenerationParams& dit_generation_params);
+
+bool proto_to_dit_forward_output(const proto::DiTForwardOutput& pb_dit_outputs,
+                                 DiTForwardOutput& dit_outputs);
+
+bool torch_tensor_to_proto_tensor(const torch::Tensor& torch_tensor,
+                                  proto::Tensor* proto_tensor);
 }  // namespace xllm

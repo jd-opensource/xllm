@@ -25,6 +25,7 @@
 #include <limits>
 
 #include "cuda_ops_api.h"
+#include "device_utils.cuh"
 #include "utils.h"
 
 namespace xllm::kernel::cuda {
@@ -69,7 +70,7 @@ __global__ void log_softmax_last_dim_kernel(const scalar_t* __restrict__ input,
     thread_max = s_data[col] > thread_max ? s_data[col] : thread_max;
   }
   float row_max_local =
-      BlockReduce(reduce_storage).Reduce(thread_max, cub::Max());
+      BlockReduce(reduce_storage).Reduce(thread_max, MaxReduceOp());
   if (threadIdx.x == 0) {
     s_row_max = row_max_local;
   }

@@ -53,8 +53,6 @@ class DiTMaster : public Master {
   void generate();
 
  private:
-  std::unique_ptr<DiTEngine> engine_;
-
   std::unique_ptr<DiTScheduler> scheduler_;
 
   // thread pool for handling requests
@@ -68,6 +66,19 @@ class DiTMaster : public Master {
 
   // flag to indicate if the handler is running
   std::atomic_bool running_{false};
+};
+
+class DiTAssistantMaster : public Master {
+ public:
+  DiTAssistantMaster(const Options& options);
+  ~DiTAssistantMaster();
+  void run() override;
+
+  static void handle_signal(int signum) { running_ = false; }
+
+ private:
+  std::thread loop_thread_;
+  static volatile bool running_;
 };
 
 }  // namespace xllm

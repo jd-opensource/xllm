@@ -15,25 +15,30 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
+#include <optional>
+#include <vector>
+
+#include "framework/block/block.h"
+
 namespace xllm {
+
+struct BeamSourceInfo {
+  size_t suffix_start_idx = 0;
+  std::vector<int32_t> generated_token_ids;
+  std::vector<std::optional<float>> generated_logprobs;
+  std::vector<Block> src_blocks;
+};
 
 // BeamCandidate structure for beam search sorting
 struct BeamCandidate {
-  size_t seq_index;
-  float logprob_sum;
-  std::vector<int32_t> token_ids;
-  std::vector<std::optional<float>> logprobs;
+  size_t source_index = 0;
+  float logprob_sum = 0.0f;
+  bool override_last_token = false;
+  int32_t last_token_id = 0;
+  std::optional<float> last_token_logprob;
 
   BeamCandidate() = default;
-
-  BeamCandidate(size_t seq_idx,
-                float logprob,
-                std::vector<int32_t>& token_ids,
-                std::vector<std::optional<float>>& logprobs)
-      : seq_index(seq_idx),
-        logprob_sum(logprob),
-        token_ids(std::move(token_ids)),
-        logprobs(std::move(logprobs)) {}
 
   bool operator<(const BeamCandidate& other) const {
     return logprob_sum > other.logprob_sum;

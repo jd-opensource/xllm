@@ -272,7 +272,7 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
       }
       mooncake_transfer = xtensor_transfer;
     } else {
-      mooncake_transfer = std::make_shared<MooncakeKVCacheTransferNative>(
+      mooncake_transfer = std::make_shared<MooncakeKVCacheTransferDefault>(
           device_id, transfer_listen_port, device, model_type);
     }
 

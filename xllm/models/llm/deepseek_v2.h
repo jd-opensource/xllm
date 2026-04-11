@@ -171,16 +171,7 @@ class DeepseekV2ForCausalLMImpl
     : public LlmForCausalLMImplBase<DeepseekV2Model> {
  public:
   DeepseekV2ForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {
-    // Check if prefix cache or chunked prefill is enabled for unsupported
-    // models
-    CHECK(!FLAGS_enable_prefix_cache)
-        << "deepseek_v2 have not supported "
-           "enable_prefix_cache yet. Please disable it.";
-    CHECK(!FLAGS_enable_chunked_prefill)
-        << "deepseek_v2 have not supported "
-           "enable_chunked_prefill yet. Please disable it.";
-  }
+      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {}
 
   void load_model(
       std::unique_ptr<ModelLoader> loader,

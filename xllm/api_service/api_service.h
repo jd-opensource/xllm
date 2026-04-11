@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <functional>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -33,7 +34,12 @@ limitations under the License.
 
 namespace xllm {
 
+class ClosureGuard;
+class ServiceImplFactory;
+
 class APIService : public proto::XllmAPIService {
+  friend class ServiceImplFactory;
+
  public:
   APIService(Master* master,
              const std::vector<std::string>& model_names,
@@ -171,6 +177,13 @@ class APIService : public proto::XllmAPIService {
                      ::google::protobuf::Closure* done) override;
 
  private:
+  using ChatHttpHandler = std::function<void(ClosureGuard&,
+                                             brpc::Controller*,
+                                             const proto::HttpRequest*,
+                                             proto::HttpResponse*)>;
+
+  void register_chat_completions_handler();
+
   bool ParseForkMasterRequest(const proto::MasterInfos* request,
                               Options& options);
   void set_model_master(const std::string& model_id, Master* master);
@@ -179,6 +192,7 @@ class APIService : public proto::XllmAPIService {
   Master* get_model_master(const std::string& model_id) const;
 
   Master* master_;
+  ChatHttpHandler chat_completions_handler_;
   mutable std::shared_mutex masters_mutex_;
   std::unordered_map<std::string, Master*> masters_;
   std::unique_ptr<AnthropicServiceImpl> anthropic_service_impl_;

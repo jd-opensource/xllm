@@ -191,6 +191,17 @@ void AttentionImpl::prefill_forward(
           {total_seqlens, num_kv_heads_, head_size_}, query.options());
 
       torch::Tensor value_dequant;
+      std::optional<torch::Tensor> value_cache_for_dequant = v_cache;
+      std::optional<torch::Tensor> value_cache_scale_for_dequant =
+          v_cache_scale;
+      if (enable_mla_) {
+        // MLA stores latent cache only in k_cache, but the MLU dequant API
+        // requires both key/value carriers. Reuse the latent cache as a dummy
+        // value carrier and slice the real V view from key_dequant below.
+        value_dequant = torch::zeros_like(key_dequant);
+        value_cache_for_dequant = k_cache;
+        value_cache_scale_for_dequant = k_cache_scale;
+      }
       if (v_cache_scale.has_value() && v_cache_scale->defined() &&
           v_cache_scale->numel() > 0) {
         value_dequant = torch::zeros(
@@ -202,9 +213,9 @@ void AttentionImpl::prefill_forward(
       dequant_params.key = key_dequant;
       dequant_params.value = value_dequant;
       dequant_params.key_cache = k_cache;
-      dequant_params.value_cache = v_cache;
+      dequant_params.value_cache = value_cache_for_dequant;
       dequant_params.key_cache_quant_scale = k_cache_scale;
-      dequant_params.value_cache_quant_scale = v_cache_scale;
+      dequant_params.value_cache_quant_scale = value_cache_scale_for_dequant;
       dequant_params.context_lengths = attn_metadata.kv_seq_lens;
       dequant_params.max_context_len = attn_metadata.max_seq_len;
       dequant_params.context_seq_offset = std::nullopt;

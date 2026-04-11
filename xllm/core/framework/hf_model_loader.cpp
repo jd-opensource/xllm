@@ -34,7 +34,7 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
-#include "core/common/rec_model_utils.h"
+#include "core/common/global_flags.h"
 #include "core/common/version_singleton.h"
 #include "core/framework/state_dict/rec_vocab_dict.h"
 #include "core/framework/state_dict/safetensors/safetensors.h"
@@ -46,6 +46,7 @@ limitations under the License.
 #include "core/platform/device.h"
 #include "core/util/blocking_counter.h"
 #include "core/util/json_reader.h"
+#include "core/util/rec_model_utils.h"
 #include "core/util/scope_guard.h"
 #include "core/util/tensor_helper.h"
 #include "models/model_registry.h"
@@ -657,7 +658,19 @@ bool HFModelLoader::load_rec_vocab(const std::string& model_weights_path) {
               ->initialize(vocab_full_path))
         << "Failed to initialize vocab dict from " << vocab_full_path;
   } else {
-    LOG(ERROR) << "Vocab file is not set";
+    if (FLAGS_enable_constrained_decoding) {
+      LOG(ERROR) << "Vocab file is not set for OneRec REC tokenizer under "
+                 << model_weights_path
+                 << ". Constrained decoding requires `vocab_file` in "
+                    "tokenizer_config.json.";
+      return false;
+    }
+
+    LOG(WARNING) << "Vocab file is not set for OneRec REC tokenizer under "
+                 << model_weights_path
+                 << ". Skip vocab dict initialization because constrained "
+                    "decoding is disabled.";
+    return true;
   }
 
   return true;

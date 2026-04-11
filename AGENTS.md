@@ -1,18 +1,5 @@
 # xLLM Coding Agent Instructions
 
-## Quick Reference
-
-| Task                                  | Command                                         |
-| ------------------------------------- | ----------------------------------------------- |
-| Initialize submodules                 | `git submodule update --init --recursive`                   |
-| Build xLLM binary                     | `python setup.py build`                         |
-| Build xLLM wheel                      | `python setup.py bdist_wheel`                   |
-| Test xLLM                             | `python setup.py test`                          |
-| Test specific unit test               | `python setup.py test --test-name <test_name>`  |
-| Build xLLM binary for specific device | `python setup.py build --device <device>`       |
-| Build xLLM wheel for specific device  | `python setup.py bdist_wheel --device <device>` |
-| Install pre-commit hooks              | `pre-commit install`                            |
-
 ## Directory Structure
 
 ```
@@ -46,13 +33,19 @@
 
 ## Code Style Guide
 
-* Follow the code style guide in [custom-code-style.md](.agent/skills/code-review/references/custom-code-style.md).
+* Before editing, creating, refactoring, or reviewing any file under `xllm/`, you **MUST** read [custom-code-style.md](.agents/skills/code-review/references/custom-code-style.md).
+* The file above is a **required instruction file**, not an optional reference. Do not skip reading it.
+* Apply the rules in [custom-code-style.md](.agents/skills/code-review/references/custom-code-style.md) to **both code generation and code review**.
 * Follow DDD (Domain Driven Design) principles, and keep the codebase clean and maintainable.
-* Follow Google C++/Python Style Guide, if not specified in the code style guide.
+* If [custom-code-style.md](.agents/skills/code-review/references/custom-code-style.md) specifies a rule, that rule takes precedence over the Google C++/Python Style Guide.
+* Use the Google C++/Python Style Guide only for cases not specified in [custom-code-style.md](.agents/skills/code-review/references/custom-code-style.md).
 
 ## Review Instructions
 
-* Review the code changes for quality, security, performance, and correctness following the project-specific standards.
-* Review the code changes for DDD (Domain Driven Design) principles, and keep the codebase clean and maintainable.
-* Review the code changes for Google C++/Python Style Guide, if not specified in the project-specific coding style.
-* Review the code changes for the project-specific coding style in [custom-code-style.md](.agent/skills/code-review/references/custom-code-style.md).
+* For code review tasks, you **MUST** first read [code-review/SKILL.md](.agents/skills/code-review/SKILL.md).
+* Then read [custom-code-style.md](.agents/skills/code-review/references/custom-code-style.md) and apply it during the review.
+* Review code changes for quality, security, performance, correctness, and maintainability following the project-specific standards.
+* Review code changes for DDD (Domain Driven Design) principles, and keep the codebase clean and maintainable.
+* Use the review workflow, checklist, severity rules, and output format defined in [code-review/SKILL.md](.agents/skills/code-review/SKILL.md).
+* Apply the Google C++/Python Style Guide only when the project-specific style guide does not define the rule.
+* Focus the review on the requested diff or changed files. Do not comment on unrelated code.

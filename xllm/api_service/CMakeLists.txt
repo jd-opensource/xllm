@@ -8,7 +8,7 @@ cc_library(
     api_service.h
     api_service_impl.h
     call.h
-    chat_json_utils.h
+    chat_json_parser.h
     completion_service_impl.h
     rec_completion_service_impl.h
     chat_service_impl.h
@@ -20,6 +20,7 @@ cc_library(
     qwen3_rerank_service_impl.h
     non_stream_call.h
     service_impl_factory.h
+    serving_mode.h
     stream_call.h
     models_service_impl.h
     stream_output_parser.h
@@ -28,6 +29,8 @@ cc_library(
     utils.h
   SRCS
     api_service.cpp
+    chat_json_parser.cpp
+    service_impl_factory.cpp
     call.cpp
     completion_service_impl.cpp
     rec_completion_service_impl.cpp
@@ -89,7 +92,7 @@ cc_test(
   NAME
     api_service_test
   SRCS
-    chat_json_utils_test.cpp
+    chat_json_parser_test.cpp
   DEPS
     api_service
     GTest::gtest_main

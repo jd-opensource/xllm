@@ -26,7 +26,7 @@ using page_id_t = int64_t;
 
 class PhyPage {
  public:
-  // Constructor with page_id (-1 means unassigned, e.g., for zero page)
+  // Constructor with page_id (-1 means unassigned)
   PhyPage(torch::Device device, page_id_t page_id = -1);
 
   ~PhyPage();

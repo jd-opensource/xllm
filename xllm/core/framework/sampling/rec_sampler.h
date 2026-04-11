@@ -18,8 +18,8 @@ limitations under the License.
 
 #include <memory>
 
-#include "common/rec_model_utils.h"
 #include "sampling_params.h"
+#include "util/rec_model_utils.h"
 
 namespace xllm {
 
@@ -31,22 +31,37 @@ class RecSampler {
   ~RecSampler() = default;
 
   // logits: [batch_size, vocab_size]
-  SampleOutput forward(torch::Tensor& logits,
-                       const SamplingParameters& params) const;
+  SampleOutput forward(
+      torch::Tensor& logits,
+      const SamplingParameters& params,
+      const torch::Tensor& filter_mask = torch::Tensor()) const;
 
  private:
   class SamplingStrategy {
    public:
     virtual ~SamplingStrategy() = default;
     virtual SampleOutput forward(torch::Tensor& logits,
-                                 const SamplingParameters& params) const = 0;
+                                 const SamplingParameters& params,
+                                 const torch::Tensor& filter_mask) const = 0;
   };
 
   class DefaultSamplingStrategy final : public SamplingStrategy {
    public:
     explicit DefaultSamplingStrategy(const Sampler& sampler);
     SampleOutput forward(torch::Tensor& logits,
-                         const SamplingParameters& params) const override;
+                         const SamplingParameters& params,
+                         const torch::Tensor& filter_mask) const override;
+
+   private:
+    const Sampler& sampler_;
+  };
+
+  class OneRecConstrainedSamplingStrategy final : public SamplingStrategy {
+   public:
+    explicit OneRecConstrainedSamplingStrategy(const Sampler& sampler);
+    SampleOutput forward(torch::Tensor& logits,
+                         const SamplingParameters& params,
+                         const torch::Tensor& filter_mask) const override;
 
    private:
     const Sampler& sampler_;
@@ -56,7 +71,8 @@ class RecSampler {
    public:
     explicit MultiRoundFastPathSamplingStrategy(const Sampler& sampler);
     SampleOutput forward(torch::Tensor& logits,
-                         const SamplingParameters& params) const override;
+                         const SamplingParameters& params,
+                         const torch::Tensor& filter_mask) const override;
 
    private:
     const Sampler& sampler_;

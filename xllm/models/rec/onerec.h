@@ -18,6 +18,8 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <algorithm>
+#include <optional>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
@@ -28,6 +30,7 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/framework/model_loader.h"
+#include "core/layers/common/lm_head.h"
 #include "core/layers/common/word_embedding.h"
 #include "models/model_registry.h"
 #include "models/rec/rec_model_base.h"
@@ -46,14 +49,14 @@ class OneRecModelImpl : public torch::nn::Module {
                       const torch::Tensor& positions,
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& input_params) {
-    (void)positions;
-    (void)kv_caches;
-
     if (!tokens.defined()) {
       return ModelOutput();
     }
+    (void)positions;
+    (void)kv_caches;
 
     const auto* onerec_params = input_params.onerec_params();
+
     const bool is_encoder_forward =
         (onerec_params != nullptr) && onerec_params->is_encoder_forward;
 
@@ -67,7 +70,7 @@ class OneRecModelImpl : public torch::nn::Module {
       return ModelOutput(hidden_states);
     }
 
-    auto cross_context = get_cross_context_embedding(onerec_params);
+    auto cross_context = resolve_cross_context(onerec_params);
     if (cross_context.defined()) {
       auto enriched_hidden_states =
           add_cross_context_bias(hidden_states, cross_context);
@@ -126,7 +129,7 @@ class OneRecModelImpl : public torch::nn::Module {
     return torch::Tensor();
   }
 
-  torch::Tensor get_cross_context_embedding(
+  torch::Tensor resolve_cross_context(
       const OneRecModelInputParams* onerec_params) const {
     if (onerec_params == nullptr) {
       return torch::Tensor();

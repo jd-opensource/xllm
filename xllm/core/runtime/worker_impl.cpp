@@ -43,6 +43,8 @@ limitations under the License.
 #include "common/metrics.h"
 #if defined(USE_NPU)
 #include "platform/npu/device_capture_lock.h"
+#elif defined(USE_CUDA)
+#include "kernels/cuda/cuda_ops_api.h"
 #endif
 #include "core/distributed_runtime/master.h"
 #include "framework/kv_cache/kv_cache.h"
@@ -140,9 +142,9 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   compute_stream_ = device_.get_stream_from_pool();
   sampler_ = std::make_unique<Sampler>();
 
-#if !defined(USE_NPU)
+#if !defined(USE_NPU) && !defined(USE_CUDA)
   if (FLAGS_enable_block_copy_kernel) {
-    LOG(WARNING) << "enable_block_copy_kernel is only supported on NPU; "
+    LOG(WARNING) << "enable_block_copy_kernel is only supported on NPU/CUDA; "
                     "forcing enable_block_copy_kernel=false.";
     FLAGS_enable_block_copy_kernel = false;
   }
@@ -173,13 +175,14 @@ bool WorkerImpl::allocate_kv_cache(
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
-  const bool enable_linear_attention =
-      has_linear_attention_layers(context_.get_model_args());
-  const bool enable_lighting_indexer =
-      context_.get_model_args().index_n_heads() > 0;
+  const auto& args = context_.get_model_args();
+  const bool enable_linear_attention = has_linear_attention_layers(args);
+  const bool enable_lighting_indexer = args.index_n_heads() > 0;
   CHECK(!(enable_linear_attention && enable_lighting_indexer))
       << "KVCache does not support linear attention and lighting indexer "
       << "simultaneously.";
+
+  const int64_t num_layers = get_num_layers();
 
   // Check if KV cache quantization is enabled
   // "auto" (default): cache dtype aligns with model dtype (no quantization)
@@ -203,11 +206,12 @@ bool WorkerImpl::allocate_kv_cache(
   }
 
   // create a KVCache for each layer
-  const int64_t num_layers = get_num_layers();
   kv_caches_.reserve(num_layers);
 
   if (FLAGS_enable_xtensor) {
     // XTensor mode: create xtensor-backed KV cache tensors.
+    // For hybrid models, we still create full KV cache for all layers
+    // since xtensor has its own memory management
     auto& allocator = XTensorAllocator::get_instance();
     const std::string& model_id = options_.model_id();
     // Create K tensors for all layers
@@ -224,95 +228,139 @@ bool WorkerImpl::allocate_kv_cache(
       k_tensor = at_npu::native::npu_format_cast(k_tensor, ACL_FORMAT_ND);
       v_tensor = at_npu::native::npu_format_cast(v_tensor, ACL_FORMAT_ND);
 #endif
+
+      // For xtensor mode, we still use the full KV cache approach
       kv_caches_.emplace_back(k_tensor, v_tensor);
     }
   } else {
     // Original mode: create torch tensors with optional int8 kv quantization.
     torch::ScalarType cache_dtype =
         enable_kv_cache_quant ? torch::kInt8 : dtype_;
+
+    // Helper function to check if a layer is linear attention
+    auto is_linear_attention_layer = [&](int64_t layer_idx) {
+      if (args.full_attention_interval() > 1) {
+        return (layer_idx + 1) % args.full_attention_interval() != 0;
+      }
+      return false;
+    };
+
     for (int64_t i = 0; i < num_layers; ++i) {
+      bool is_linear_layer = is_linear_attention_layer(i);
       torch::Tensor key_cache, value_cache, index_cache, conv_cache, ssm_cache;
       torch::Tensor key_cache_scale, value_cache_scale;
+
+      if (is_linear_layer) {
+        // Linear attention layer: only allocate conv_cache and ssm_cache
 #if defined(USE_NPU)
-      aclFormat npu_format_type =
-          context_.get_model_args().model_type() == "deepseek_v3" &&
-                  FLAGS_enable_prefix_cache
-              ? ACL_FORMAT_FRACTAL_NZ
-              : ACL_FORMAT_ND;
-      key_cache = at_npu::native::npu_format_cast(
-          torch::empty(kv_cache_shape[0],
-                       torch::dtype(cache_dtype).device(device_)),
-          npu_format_type);
-      value_cache = at_npu::native::npu_format_cast(
-          torch::empty(kv_cache_shape[1],
-                       torch::dtype(cache_dtype).device(device_)),
-          npu_format_type);
-      if (enable_lighting_indexer) {
-        index_cache = at_npu::native::npu_format_cast(
-            torch::empty(kv_cache_shape[2],
-                         torch::dtype(dtype_).device(device_)),
-            npu_format_type);
-      }
-      if (enable_linear_attention) {
-        conv_cache = at_npu::native::npu_format_cast(
-            torch::zeros(kv_cache_shape[2],
-                         torch::dtype(dtype_).device(device_)),
-            2);
-        ssm_cache = at_npu::native::npu_format_cast(
-            torch::zeros(kv_cache_shape[3],
-                         torch::dtype(dtype_).device(device_)),
-            2);
-      }
-#elif defined(USE_ILU) || defined(USE_MLU) || defined(USE_MUSA)
-      key_cache = torch::zeros(kv_cache_shape[0],
-                               torch::dtype(cache_dtype).device(device_));
-      if (!kv_cache_shape[1].empty()) {
-        value_cache = torch::zeros(kv_cache_shape[1],
-                                   torch::dtype(cache_dtype).device(device_));
-      }
-      if (enable_lighting_indexer) {
-        index_cache = torch::zeros(kv_cache_shape[2],
-                                   torch::dtype(dtype_).device(device_));
-      }
-      if (enable_kv_cache_quant) {
-        std::vector<int64_t> key_scale_shape(kv_cache_shape[0].begin(),
-                                             kv_cache_shape[0].end() - 1);
-        key_cache_scale = torch::zeros(
-            key_scale_shape, torch::dtype(torch::kFloat32).device(device_));
-        if (!kv_cache_shape[1].empty()) {
-          std::vector<int64_t> value_scale_shape(kv_cache_shape[1].begin(),
-                                                 kv_cache_shape[1].end() - 1);
-          value_cache_scale = torch::zeros(
-              value_scale_shape, torch::dtype(torch::kFloat32).device(device_));
+        aclFormat npu_format_type = ACL_FORMAT_ND;
+        if (enable_linear_attention) {
+          conv_cache = at_npu::native::npu_format_cast(
+              torch::zeros(kv_cache_shape[2],
+                           torch::dtype(dtype_).device(device_)),
+              2);
+          ssm_cache = at_npu::native::npu_format_cast(
+              torch::zeros(kv_cache_shape[3],
+                           torch::dtype(dtype_).device(device_)),
+              2);
         }
-      }
-#else
-      key_cache = torch::empty(kv_cache_shape[0],
-                               torch::dtype(cache_dtype).device(device_));
-      if (!kv_cache_shape[1].empty()) {
-        value_cache = torch::empty(kv_cache_shape[1],
-                                   torch::dtype(cache_dtype).device(device_));
-      }
-      if (enable_lighting_indexer) {
-        index_cache = torch::empty(kv_cache_shape[2],
+#elif defined(USE_ILU) || defined(USE_MLU) || defined(USE_MUSA)
+        if (enable_linear_attention) {
+          conv_cache = torch::zeros(kv_cache_shape[2],
+                                    torch::dtype(dtype_).device(device_));
+          ssm_cache = torch::zeros(kv_cache_shape[3],
                                    torch::dtype(dtype_).device(device_));
-      }
+        }
+#else
+        if (enable_linear_attention) {
+          conv_cache = torch::empty(kv_cache_shape[2],
+                                    torch::dtype(dtype_).device(device_));
+          ssm_cache = torch::empty(kv_cache_shape[3],
+                                   torch::dtype(dtype_).device(device_));
+        }
 #endif
-      if (enable_kv_cache_quant) {
-        kv_caches_.emplace_back(key_cache,
-                                value_cache,
-                                index_cache,
-                                key_cache_scale,
-                                value_cache_scale);
-      } else if (enable_linear_attention) {
-        kv_caches_.emplace_back(key_cache, value_cache, conv_cache, ssm_cache);
-      } else if (enable_lighting_indexer) {
-        kv_caches_.emplace_back(key_cache, value_cache, index_cache);
+        // Create empty KVCache with only conv and ssm
+        kv_caches_.emplace_back(
+            torch::empty({0}, torch::dtype(dtype_).device(device_)),
+            torch::empty({0}, torch::dtype(dtype_).device(device_)),
+            conv_cache,
+            ssm_cache);
       } else {
-        kv_caches_.emplace_back(key_cache, value_cache);
+        // Full attention layer: allocate key_cache and value_cache only
+#if defined(USE_NPU)
+        aclFormat npu_format_type =
+            context_.get_model_args().model_type() == "deepseek_v3" &&
+                    FLAGS_enable_prefix_cache
+                ? ACL_FORMAT_FRACTAL_NZ
+                : ACL_FORMAT_ND;
+        key_cache = at_npu::native::npu_format_cast(
+            torch::empty(kv_cache_shape[0],
+                         torch::dtype(cache_dtype).device(device_)),
+            npu_format_type);
+        value_cache = at_npu::native::npu_format_cast(
+            torch::empty(kv_cache_shape[1],
+                         torch::dtype(cache_dtype).device(device_)),
+            npu_format_type);
+        if (enable_lighting_indexer) {
+          index_cache = at_npu::native::npu_format_cast(
+              torch::empty(kv_cache_shape[2],
+                           torch::dtype(dtype_).device(device_)),
+              npu_format_type);
+        }
+#elif defined(USE_ILU) || defined(USE_MLU) || defined(USE_MUSA)
+        key_cache = torch::zeros(kv_cache_shape[0],
+                                 torch::dtype(cache_dtype).device(device_));
+        if (!kv_cache_shape[1].empty()) {
+          value_cache = torch::zeros(kv_cache_shape[1],
+                                     torch::dtype(cache_dtype).device(device_));
+        }
+        if (enable_lighting_indexer) {
+          index_cache = torch::zeros(kv_cache_shape[2],
+                                     torch::dtype(dtype_).device(device_));
+        }
+        if (enable_kv_cache_quant) {
+          std::vector<int64_t> key_scale_shape(kv_cache_shape[0].begin(),
+                                               kv_cache_shape[0].end() - 1);
+          key_cache_scale = torch::zeros(
+              key_scale_shape, torch::dtype(torch::kFloat32).device(device_));
+          if (!kv_cache_shape[1].empty()) {
+            std::vector<int64_t> value_scale_shape(kv_cache_shape[1].begin(),
+                                                   kv_cache_shape[1].end() - 1);
+            value_cache_scale =
+                torch::zeros(value_scale_shape,
+                             torch::dtype(torch::kFloat32).device(device_));
+          }
+        }
+#else
+        key_cache = torch::empty(kv_cache_shape[0],
+                                 torch::dtype(cache_dtype).device(device_));
+        if (!kv_cache_shape[1].empty()) {
+          value_cache = torch::empty(kv_cache_shape[1],
+                                     torch::dtype(cache_dtype).device(device_));
+        }
+        if (enable_lighting_indexer) {
+          index_cache = torch::empty(kv_cache_shape[2],
+                                     torch::dtype(dtype_).device(device_));
+        }
+#endif
+        if (enable_kv_cache_quant) {
+          kv_caches_.emplace_back(key_cache,
+                                  value_cache,
+                                  index_cache,
+                                  key_cache_scale,
+                                  value_cache_scale);
+        } else if (enable_lighting_indexer) {
+          kv_caches_.emplace_back(key_cache, value_cache, index_cache);
+        } else {
+          kv_caches_.emplace_back(key_cache, value_cache);
+        }
       }
     }
   }
+
+#if defined(USE_CUDA)
+  refresh_cuda_block_copy_runtime_state();
+#endif
 
   init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;
@@ -552,6 +600,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 #endif
   c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
   processed_input = input.to(device_, dtype_);
+  auto& input_params = processed_input.input_params;
 
 #if defined(USE_NPU)
   CpPrefillInputs tmp_cp_inputs;
@@ -573,39 +622,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   }
 #endif
 
-  auto& input_params = processed_input.input_params;
-
-#if defined(USE_NPU)
-  const bool use_block_copy_kernel = FLAGS_enable_block_copy_kernel;
-#else
-  const bool use_block_copy_kernel = false;
-#endif
-
-#if defined(USE_NPU) || defined(USE_CUDA)
-  if (input_params.swap_blocks.size() > 0 && !use_block_copy_kernel) {
-    auto& swap_blocks = input_params.swap_blocks;
-
-    // collect src and dst indices
-    std::vector<int64_t> src_indices, dst_indices;
-    src_indices.reserve(swap_blocks.size());
-    dst_indices.reserve(swap_blocks.size());
-
-    for (const auto& block : swap_blocks) {
-      src_indices.push_back(block.src_block_id);
-      dst_indices.push_back(block.dst_block_id);
-    }
-
-    // batch select keys and values
-    auto src_tensor =
-        torch::tensor(src_indices, torch::dtype(torch::kLong).device(device_));
-    auto dst_tensor =
-        torch::tensor(dst_indices, torch::dtype(torch::kLong).device(device_));
-    const int64_t num_layers = context_.get_model_args().n_layers();
-    for (int32_t layer_id = 0; layer_id < num_layers; layer_id++) {
-      kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
-    }
-  }
-#endif
+  apply_kv_block_swaps(input_params);
 
 #if defined(USE_NPU)
   if (context_.get_model_args().enable_mla() &&
@@ -641,6 +658,125 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 
   auto ret = prepare_stream_->synchronize();
 }
+
+void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
+#if defined(USE_CUDA)
+  if (FLAGS_enable_block_copy_kernel &&
+      can_use_cuda_block_copy_kernel(input_params)) {
+    execute_cuda_block_copy_kernel(input_params);
+    return;
+  }
+#endif
+
+#if defined(USE_NPU)
+  if (input_params.swap_blocks.size() == 0 || FLAGS_enable_block_copy_kernel) {
+    return;
+  }
+#elif defined(USE_CUDA)
+  if (input_params.swap_blocks.size() == 0) {
+    return;
+  }
+#else
+  return;
+#endif
+
+#if defined(USE_NPU) || defined(USE_CUDA)
+  std::vector<int64_t> src_indices, dst_indices;
+  src_indices.reserve(input_params.swap_blocks.size());
+  dst_indices.reserve(input_params.swap_blocks.size());
+
+  for (const auto& block : input_params.swap_blocks) {
+    src_indices.push_back(block.src_block_id);
+    dst_indices.push_back(block.dst_block_id);
+  }
+
+  auto src_tensor =
+      torch::tensor(src_indices, torch::dtype(torch::kLong).device(device_));
+  auto dst_tensor =
+      torch::tensor(dst_indices, torch::dtype(torch::kLong).device(device_));
+  for (size_t layer_id = 0; layer_id < kv_caches_.size(); ++layer_id) {
+    kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
+  }
+#endif
+}
+
+#if defined(USE_CUDA)
+void WorkerImpl::refresh_cuda_block_copy_runtime_state() {
+  cuda_block_copy_runtime_state_ = {};
+  if (!FLAGS_enable_block_copy_kernel || kv_caches_.empty()) {
+    return;
+  }
+
+  const auto& first_kv_cache = kv_caches_.front();
+  auto key_cache = first_kv_cache.get_k_cache();
+  auto value_cache = first_kv_cache.get_v_cache();
+  if (!key_cache.defined() || !value_cache.defined() || !key_cache.is_cuda() ||
+      !value_cache.is_cuda()) {
+    return;
+  }
+
+  CHECK(key_cache.is_contiguous())
+      << "CUDA block copy kernel expects contiguous key cache";
+  CHECK(value_cache.is_contiguous())
+      << "CUDA block copy kernel expects contiguous value cache";
+  CHECK_GT(key_cache.size(0), 0);
+
+  const auto cache_dtype = key_cache.scalar_type();
+  std::vector<int64_t> key_cache_ptrs;
+  std::vector<int64_t> value_cache_ptrs;
+  key_cache_ptrs.reserve(kv_caches_.size());
+  value_cache_ptrs.reserve(kv_caches_.size());
+  for (const auto& kv_cache : kv_caches_) {
+    auto layer_k_cache = kv_cache.get_k_cache();
+    auto layer_v_cache = kv_cache.get_v_cache();
+    CHECK(layer_k_cache.defined() && layer_v_cache.defined());
+    CHECK(layer_k_cache.is_cuda() && layer_v_cache.is_cuda());
+    CHECK(layer_k_cache.is_contiguous());
+    CHECK(layer_v_cache.is_contiguous());
+    CHECK(layer_k_cache.scalar_type() == cache_dtype);
+    CHECK(layer_v_cache.scalar_type() == cache_dtype);
+    CHECK(layer_k_cache.sizes() == key_cache.sizes());
+    CHECK(layer_v_cache.sizes() == value_cache.sizes());
+    key_cache_ptrs.push_back(
+        reinterpret_cast<int64_t>(layer_k_cache.data_ptr()));
+    value_cache_ptrs.push_back(
+        reinterpret_cast<int64_t>(layer_v_cache.data_ptr()));
+  }
+
+  auto ptr_options =
+      torch::TensorOptions().device(device_).dtype(torch::kInt64);
+  cuda_block_copy_runtime_state_.k_cache_ptrs_device =
+      torch::tensor(key_cache_ptrs, ptr_options);
+  cuda_block_copy_runtime_state_.v_cache_ptrs_device =
+      torch::tensor(value_cache_ptrs, ptr_options);
+  cuda_block_copy_runtime_state_.num_layers = kv_caches_.size();
+  cuda_block_copy_runtime_state_.numel_per_block = key_cache[0].numel();
+}
+
+bool WorkerImpl::can_use_cuda_block_copy_kernel(
+    const ModelInputParams& input_params) const {
+  return cuda_block_copy_runtime_state_.valid() &&
+         input_params.src_block_indices.defined() &&
+         input_params.dst_block_indices.defined() &&
+         input_params.cum_sum.defined() &&
+         input_params.src_block_indices.numel() > 0 &&
+         input_params.dst_block_indices.numel() > 0 &&
+         input_params.cum_sum.numel() > 0;
+}
+
+void WorkerImpl::execute_cuda_block_copy_kernel(
+    const ModelInputParams& input_params) {
+  CHECK(!kv_caches_.empty());
+  xllm::kernel::cuda::block_copy(
+      cuda_block_copy_runtime_state_.k_cache_ptrs_device,
+      cuda_block_copy_runtime_state_.v_cache_ptrs_device,
+      input_params.src_block_indices,
+      input_params.dst_block_indices,
+      input_params.cum_sum,
+      cuda_block_copy_runtime_state_.numel_per_block,
+      kv_caches_.front().get_k_cache().scalar_type());
+}
+#endif
 
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
     const ForwardInput& input) {
@@ -922,6 +1058,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
               {"deepseek_v3", "deepseek_v3_mtp"},
               {"deepseek_v32", "deepseek_v3_mtp"},
               {"glm_moe_dsa", "glm_moe_dsa_mtp"},
+              {"joyai_llm_flash", "joyai_llm_flash_mtp"},
           };
       const std::string& current_type = args.model_type();
       auto it = kModelTypeToMtpType.find(current_type);

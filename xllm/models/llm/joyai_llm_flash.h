@@ -23,16 +23,7 @@ class JoyAILLMFlashForCausalLMImpl
     : public LlmForCausalLMImplBase<DeepseekV2Model> {
  public:
   JoyAILLMFlashForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {
-    // Check if prefix cache or chunked prefill is enabled for unsupported
-    // models
-    CHECK(!FLAGS_enable_prefix_cache)
-        << "JoyAILLMFlash have not supported "
-           "enable_prefix_cache yet. Please disable it.";
-    CHECK(!FLAGS_enable_chunked_prefill)
-        << "JoyAILLMFlash have not supported "
-           "enable_chunked_prefill yet. Please disable it.";
-  }
+      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {}
 };
 TORCH_MODULE(JoyAILLMFlashForCausalLM);
 

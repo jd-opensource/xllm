@@ -22,19 +22,20 @@ limitations under the License.
 #include <pybind11/pybind11.h>
 #include <torch/torch.h>
 
+#include <limits>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
 #include "common/macros.h"
 #include "common/metrics.h"
-#include "common/rec_model_utils.h"
 #include "common/types.h"
 #include "framework/request/mm_data.h"
 #include "models/model_registry.h"
 #include "rec_engine.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
+#include "util/rec_model_utils.h"
 #include "util/scope_guard.h"
 #include "util/threadpool.h"
 #include "util/utils.h"
@@ -157,14 +158,21 @@ bool process_onerec_inputs(
         return false;
       }
 
+      if (len > std::numeric_limits<int64_t>::max() / hidden) {
+        CALLBACK_WITH_ERROR(
+            StatusCode::INVALID_ARGUMENT,
+            "OneRec input tensor '" + tensor_name + "' shape is too large");
+        return false;
+      }
+
+      const int64_t expected_numel = len * hidden;
       const int64_t actual_numel =
           static_cast<int64_t>(tensor.contents().fp32_contents_size());
-      if (actual_numel % hidden != 0 || actual_numel / hidden != len) {
+      if (expected_numel != actual_numel) {
         CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                             "OneRec input tensor '" + tensor_name +
                                 "' fp32 contents size mismatch, expected " +
-                                std::to_string(len) + " * " +
-                                std::to_string(hidden) + ", got " +
+                                std::to_string(expected_numel) + ", got " +
                                 std::to_string(actual_numel));
         return false;
       }
@@ -488,7 +496,8 @@ RecMaster::RecMaster(const Options& options)
     XServiceClient* xservice_client = XServiceClient::get_instance();
     if (!xservice_client->init(options_.etcd_addr().value_or(""),
                                options_.instance_name().value_or(""),
-                               engine_->block_manager_pool())) {
+                               engine_->block_manager_pool(),
+                               options_.etcd_namespace().value_or(""))) {
       LOG(FATAL) << "XServiceClient init fail!";
       return;
     }
@@ -524,6 +533,8 @@ RecMaster::RecMaster(const Options& options)
 
   // Create pipelines based on rec_type
   auto rec_model_kind = get_rec_model_kind(model_args_.model_type());
+  CHECK(rec_model_kind != RecModelKind::kNone)
+      << "Unsupported rec model_type: " << model_args_.model_type();
   auto pipeline_type = get_rec_pipeline_type(rec_model_kind);
   pipeline_ = create_pipeline(pipeline_type, *this);
 

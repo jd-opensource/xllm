@@ -65,6 +65,7 @@ std::string Options::to_string() const {
      << ", kv_cache_dtype: " << kv_cache_dtype()
      << ", kv_cache_transfer_mode: " << kv_cache_transfer_mode()
      << ", etcd_addr: " << etcd_addr().value_or("null")
+     << ", etcd_namespace: " << etcd_namespace().value_or("null")
      << ", enable_service_routing: " << enable_service_routing()
      << ", enable_cache_upload: " << enable_cache_upload()
      << ", enable_kvcache_store: " << enable_kvcache_store()
