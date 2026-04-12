@@ -29,6 +29,15 @@ message DeviceMemory {
   int64 total_memory = 2;
 }
 
+message ProfileMem {
+  int64 total_bytes = 1;
+  int64 weight_bytes = 2;
+  int64 runtime_peak_bytes = 3;
+  int64 tmp_kv_bytes = 4;
+  int64 free_bytes = 5;
+  bool ok = 6;
+}
+
 message KVCacheShape {
   repeated int64 key_shape = 1;
   repeated int64 value_shape = 2;
@@ -338,6 +347,7 @@ service DistributeWorker {
   rpc InitModel (InitModelRequest) returns (Status);
   rpc ProcessGroupTest (Empty) returns (Status);
   rpc ProfileDeviceMemory (Empty) returns (DeviceMemory);
+  rpc ProfilePrefillMem (Empty) returns (ProfileMem);
   rpc AllocateKVCache (AllocateKVCacheRequest) returns (Status);
   rpc AllocateKVCacheWithTransfer(AllocateKVCacheRequest) returns (Status) {}
   rpc PullKVCache(PullKVCacheRequest) returns (Status) {}

@@ -103,6 +103,13 @@ std::optional<ForwardOutput> WorkerClient::step(const ForwardInput& inputs) {
   return worker_->step(inputs);
 }
 
+runtime::ProfileMem WorkerClient::profile_prefill_mem() {
+  if (worker_ == nullptr) {
+    return {};
+  }
+  return worker_->profile_prefill_mem();
+}
+
 folly::SemiFuture<std::tuple<int64_t, int64_t>>
 WorkerClient::estimate_kv_cache_capacity_async() {
   return worker_->estimate_kv_cache_capacity_async();
@@ -111,6 +118,14 @@ WorkerClient::estimate_kv_cache_capacity_async() {
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerClient::step_async(
     const ForwardInput& input) {
   return worker_->step_async(input);
+}
+
+folly::SemiFuture<runtime::ProfileMem>
+WorkerClient::profile_prefill_mem_async() {
+  if (worker_ == nullptr) {
+    return folly::makeSemiFuture(runtime::ProfileMem{});
+  }
+  return worker_->profile_prefill_mem_async();
 }
 
 folly::SemiFuture<std::optional<RawForwardOutput>> WorkerClient::step_async(

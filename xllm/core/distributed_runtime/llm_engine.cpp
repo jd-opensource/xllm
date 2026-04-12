@@ -25,6 +25,7 @@ limitations under the License.
 #include <boost/algorithm/string.hpp>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <memory>
 
 #include "common/device_monitor.h"
@@ -39,6 +40,7 @@ limitations under the License.
 #include "framework/xtensor/phy_page_pool.h"
 #include "framework/xtensor/xtensor_allocator.h"
 #include "runtime/llm_worker_impl.h"
+#include "runtime/profile_run.h"
 #include "runtime/worker.h"
 #include "server/xllm_server_registry.h"
 #include "util/env_var.h"
@@ -149,7 +151,19 @@ bool LLMEngine::init(MasterStatus master_status) {
         num_layers, worker_clients_num_, num_experts);
   }
 
-  auto kv_cache_cap = estimate_kv_cache_capacity();
+  Engine::KVCacheCapacity kv_cache_cap;
+  if (options_.enable_profile_run()) {
+    int64_t profile_cache_size = 0;
+    if (profile_kv_cache_capacity(profile_cache_size)) {
+      kv_cache_cap = build_kv_cache_capacity(profile_cache_size);
+    } else {
+      LOG(INFO) << "Profile kv cache estimate failed, fall back to static "
+                   "kv cache capacity estimate";
+      kv_cache_cap = estimate_kv_cache_capacity();
+    }
+  } else {
+    kv_cache_cap = estimate_kv_cache_capacity();
+  }
 
   if (!allocate_kv_cache(kv_cache_cap)) {
     LOG(ERROR) << "Failed to initialize kv cache";
@@ -372,59 +386,82 @@ int64_t LLMEngine::get_effective_xtensor_weight_size(
   return total_weight_size;
 }
 
-Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
-  const int64_t max_cache_size = options_.max_cache_size();
-  const double max_memory_utilization = options_.max_memory_utilization();
-
-  int64_t cache_size_in_bytes = std::numeric_limits<int64_t>::max();
-
-  if (FLAGS_enable_xtensor) {
-    // For xtensor mode, use PhyPagePool's total pages * page_size
-    auto& phy_pool = PhyPagePool::get_instance();
-    CHECK(phy_pool.is_initialized()) << "PhyPagePool not initialized";
-    cache_size_in_bytes = static_cast<int64_t>(phy_pool.num_total()) *
-                          FLAGS_phy_page_granularity_size;
-    LOG(INFO) << "XTensor mode: available memory from PhyPagePool: "
-              << readable_size(cache_size_in_bytes)
-              << " (pages: " << phy_pool.num_total()
-              << ", page_size: " << FLAGS_phy_page_granularity_size << ")";
-  } else {
-    // Original logic: query each worker for available memory
-    std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
-    futures.reserve(worker_clients_num_);
-    for (auto& worker : worker_clients_) {
-      futures.push_back(worker->estimate_kv_cache_capacity_async());
-    }
-
-    auto results = folly::collectAll(futures).get();
-    for (size_t i = 0; i < results.size(); ++i) {
-      if (!results[i].hasValue()) {
-        LOG(ERROR) << "Failed to estimate kv cache capacity for worker: " << i;
-        continue;
-      }
-
-      auto [available_memory, total_memory] = results[i].value();
-      LOG(INFO) << "worker #" << i
-                << ": available memory: " << readable_size(available_memory)
-                << ", total memory: " << readable_size(total_memory)
-                << ". Using max_memory_utilization: " << max_memory_utilization
-                << ", max_cache_size: " << readable_size(max_cache_size);
-      GAUGE_SET(weight_size_in_kilobytes,
-                (total_memory - available_memory) / 1024);
-      GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
-      // apply memory cap from config if it is set
-      if (max_memory_utilization < 1.0) {
-        const int64_t buffer_memory =
-            total_memory * (1.0 - max_memory_utilization);
-        available_memory -= buffer_memory;
-      }
-      if (max_cache_size > 0) {
-        available_memory = std::min(available_memory, max_cache_size);
-      }
-      cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
-    }
+bool LLMEngine::profile_kv_cache_capacity(int64_t& cache_size_in_bytes) {
+  if (!options_.enable_profile_run()) {
+    return false;
   }
 
+#if !defined(USE_MLU)
+  LOG(INFO) << "enable_profile_run requested but skipped: not MLU build";
+  return false;
+#else
+  if (!runtime::use_profile_run(options_, /*is_mlu_build=*/true)) {
+    LOG(INFO)
+        << "enable_profile_run requested but skipped: enable_disagg_pd=true";
+    return false;
+  }
+
+  if (FLAGS_enable_graph) {
+    LOG(INFO) << "enable_profile_run requested but skipped: "
+                 "FLAGS_enable_graph=true; profile run excludes graph memory "
+                 "overhead";
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<runtime::ProfileMem>> futures;
+  futures.reserve(worker_clients_num_);
+  for (auto& worker : worker_clients_) {
+    futures.push_back(worker->profile_prefill_mem_async());
+  }
+
+  std::vector<runtime::ProfileMem> profile_mems;
+  profile_mems.reserve(worker_clients_num_);
+  auto results = folly::collectAll(futures).get();
+  for (size_t i = 0; i < results.size(); ++i) {
+    if (!results[i].hasValue()) {
+      LOG(ERROR) << "Failed to profile kv cache for worker: " << i;
+      return false;
+    }
+
+    const runtime::ProfileMem& mem = results[i].value();
+    if (!mem.ok || mem.total_bytes <= 0) {
+      LOG(ERROR) << "Invalid profile result from worker #" << i
+                 << ": result is not ok or total_bytes must be positive";
+      return false;
+    }
+
+    const int64_t safe_kv_bytes = runtime::calc_safe_kv_bytes(mem, options_);
+    LOG(INFO) << "worker #" << i
+              << " profile result: weight=" << readable_size(mem.weight_bytes)
+              << ", tmp_kv=" << readable_size(mem.tmp_kv_bytes)
+              << ", runtime_peak=" << readable_size(mem.runtime_peak_bytes)
+              << ", safe_kv=" << readable_size(safe_kv_bytes);
+    if (safe_kv_bytes <= 0) {
+      LOG(ERROR) << "Invalid profile result from worker #" << i
+                 << ": safe_kv must be positive";
+      return false;
+    }
+    profile_mems.push_back(mem);
+  }
+
+  cache_size_in_bytes = runtime::calc_safe_kv_bytes(profile_mems, options_);
+  if (cache_size_in_bytes <= 0) {
+    LOG(ERROR) << "Invalid profile kv cache capacity";
+    return false;
+  }
+  const Engine::KVCacheCapacity kv_cache_cap =
+      build_kv_cache_capacity(cache_size_in_bytes, /*allow_empty=*/true);
+  if (kv_cache_cap.n_blocks <= 0) {
+    LOG(ERROR) << "Profile kv cache capacity is below one cache block";
+    return false;
+  }
+  return kv_cache_cap.n_blocks > 0;
+#endif
+}
+
+Engine::KVCacheCapacity LLMEngine::build_kv_cache_capacity(
+    int64_t cache_size_in_bytes,
+    bool allow_empty) {
   Engine::KVCacheCapacity kv_cache_cap;
   kv_cache_cap.cache_size_in_bytes = std::max(cache_size_in_bytes, int64_t(0));
   CHECK_GT(kv_cache_cap.cache_size_in_bytes, 0)
@@ -539,8 +576,69 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
       << "invalid cache block size estimate";
   kv_cache_cap.n_blocks =
       kv_cache_cap.cache_size_in_bytes / total_cache_block_size_in_bytes;
-  CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
+  if (kv_cache_cap.n_blocks <= 0) {
+    if (!allow_empty) {
+      CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
+    }
+    return kv_cache_cap;
+  }
   return kv_cache_cap;
+}
+
+Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
+  const int64_t max_cache_size = options_.max_cache_size();
+  const double max_memory_utilization = options_.max_memory_utilization();
+
+  int64_t cache_size_in_bytes = std::numeric_limits<int64_t>::max();
+
+  if (FLAGS_enable_xtensor) {
+    // For xtensor mode, use PhyPagePool's total pages * page_size
+    auto& phy_pool = PhyPagePool::get_instance();
+    CHECK(phy_pool.is_initialized()) << "PhyPagePool not initialized";
+    cache_size_in_bytes = static_cast<int64_t>(phy_pool.num_total()) *
+                          FLAGS_phy_page_granularity_size;
+    LOG(INFO) << "XTensor mode: available memory from PhyPagePool: "
+              << readable_size(cache_size_in_bytes)
+              << " (pages: " << phy_pool.num_total()
+              << ", page_size: " << FLAGS_phy_page_granularity_size << ")";
+  } else {
+    // Original logic: query each worker for available memory
+    std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
+    futures.reserve(worker_clients_num_);
+    for (auto& worker : worker_clients_) {
+      futures.push_back(worker->estimate_kv_cache_capacity_async());
+    }
+
+    auto results = folly::collectAll(futures).get();
+    for (size_t i = 0; i < results.size(); ++i) {
+      if (!results[i].hasValue()) {
+        LOG(ERROR) << "Failed to estimate kv cache capacity for worker: " << i;
+        continue;
+      }
+
+      auto [available_memory, total_memory] = results[i].value();
+      LOG(INFO) << "worker #" << i
+                << ": available memory: " << readable_size(available_memory)
+                << ", total memory: " << readable_size(total_memory)
+                << ". Using max_memory_utilization: " << max_memory_utilization
+                << ", max_cache_size: " << readable_size(max_cache_size);
+      GAUGE_SET(weight_size_in_kilobytes,
+                (total_memory - available_memory) / 1024);
+      GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
+      // apply memory cap from config if it is set
+      if (max_memory_utilization < 1.0) {
+        const int64_t buffer_memory =
+            total_memory * (1.0 - max_memory_utilization);
+        available_memory -= buffer_memory;
+      }
+      if (max_cache_size > 0) {
+        available_memory = std::min(available_memory, max_cache_size);
+      }
+      cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
+    }
+  }
+
+  return build_kv_cache_capacity(cache_size_in_bytes);
 }
 
 bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {

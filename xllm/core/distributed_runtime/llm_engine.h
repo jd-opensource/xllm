@@ -140,6 +140,9 @@ class LLMEngine : public Engine {
   bool init_model(MasterStatus master_status = MasterStatus::WAKEUP);
   int64_t get_effective_xtensor_weight_size(
       const ModelLoader& model_loader) const;
+  bool profile_kv_cache_capacity(int64_t& cache_size_in_bytes);
+  Engine::KVCacheCapacity build_kv_cache_capacity(int64_t cache_size_in_bytes,
+                                                  bool allow_empty = false);
   Engine::KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap);
   std::vector<RawForwardInput> prepare_inputs(std::vector<Batch>& batch);

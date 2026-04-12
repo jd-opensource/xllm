@@ -135,6 +135,10 @@ std::optional<ForwardOutput> Worker::step(const ForwardInput& inputs) {
   return impl_->step(inputs);
 }
 
+runtime::ProfileMem Worker::profile_prefill_mem() {
+  return impl_->profile_prefill_mem();
+}
+
 const bool Worker::is_driver() { return impl_->is_driver(); }
 
 folly::SemiFuture<std::tuple<int64_t, int64_t>>
@@ -145,6 +149,10 @@ Worker::estimate_kv_cache_capacity_async() {
 folly::SemiFuture<std::optional<ForwardOutput>> Worker::step_async(
     const ForwardInput& inputs) {
   return impl_->step_async(inputs);
+}
+
+folly::SemiFuture<runtime::ProfileMem> Worker::profile_prefill_mem_async() {
+  return impl_->profile_prefill_mem_async();
 }
 
 folly::SemiFuture<folly::Unit> Worker::process_group_test_async() {

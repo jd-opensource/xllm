@@ -37,6 +37,7 @@ cc_library(
     eagle3_worker_impl.h
     spec_input_builder.h
     forward_shared_memory_manager.h
+    profile_run.h
   SRCS
     executor.cpp
     executor_impl_factory.cpp
@@ -64,6 +65,7 @@ cc_library(
     eagle3_worker_impl.cpp
     spec_input_builder.cpp
     forward_shared_memory_manager.cpp
+    profile_run.cpp
   DEPS
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
@@ -92,6 +94,19 @@ cc_library(
     absl::flat_hash_map
     proto::xllm_proto
     $<$<BOOL:${USE_MLU}>:torch_mlu>
+)
+
+cc_test(
+  NAME
+    profile_run_test
+  SRCS
+    profile_run_test.cpp
+    profile_run.cpp
+  DEPS
+    torch
+    proto::xllm_proto
+    glog::glog
+    GTest::gtest_main
 )
 
 if(USE_NPU)

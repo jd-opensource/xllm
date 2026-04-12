@@ -52,6 +52,8 @@ class RemoteWorker : public WorkerClient {
 
   virtual std::tuple<int64_t, int64_t> estimate_kv_cache_capacity() override;
 
+  virtual runtime::ProfileMem profile_prefill_mem() override;
+
   virtual bool allocate_kv_cache(
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
 
@@ -96,6 +98,9 @@ class RemoteWorker : public WorkerClient {
 
   virtual folly::SemiFuture<std::tuple<int64_t, int64_t>>
   estimate_kv_cache_capacity_async() override;
+
+  virtual folly::SemiFuture<runtime::ProfileMem> profile_prefill_mem_async()
+      override;
 
   virtual folly::SemiFuture<bool> allocate_kv_cache_async(
       const std::vector<std::vector<int64_t>>& kv_cache_shape) override;

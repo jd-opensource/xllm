@@ -129,6 +129,10 @@ class WorkerClient {
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const ForwardInput& inputs);
 
+  virtual runtime::ProfileMem profile_prefill_mem();
+
+  virtual folly::SemiFuture<runtime::ProfileMem> profile_prefill_mem_async();
+
   // for multi-node serving, we pass an non-tensor params to remote workers.
   virtual folly::SemiFuture<std::optional<RawForwardOutput>> step_async(
       const RawForwardInput& inputs);

@@ -129,6 +129,9 @@ struct Options {
   // enable chunked prefill.
   PROPERTY(bool, enable_chunked_prefill) = true;
 
+  // enable profile run.
+  PROPERTY(bool, enable_profile_run) = false;
+
   // enable prefill-only sequence parallel.
   PROPERTY(bool, enable_prefill_sp) = false;
 

@@ -116,15 +116,18 @@ bool RemoteWorker::init_model(const std::string& model_weights_path,
 }
 
 std::tuple<int64_t, int64_t> RemoteWorker::estimate_kv_cache_capacity() {
-  proto::Empty req;
-  proto::DeviceMemory mem;
-  brpc::Controller cntl;
   int64_t available_memory = 0;
   int64_t total_memory = 0;
 
   channel_->estimate_kv_cache_capacity(available_memory, total_memory);
   std::tuple<int64_t, int64_t> result(available_memory, total_memory);
   return result;
+}
+
+runtime::ProfileMem RemoteWorker::profile_prefill_mem() {
+  runtime::ProfileMem mem;
+  channel_->profile_prefill_mem(mem);
+  return mem;
 }
 
 bool RemoteWorker::pull_kv_blocks(const uint64_t src_cluster_id,
@@ -156,15 +159,24 @@ RemoteWorker::estimate_kv_cache_capacity_async() {
   folly::Promise<std::tuple<int64_t, int64_t>> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this, promise = std::move(promise)]() mutable {
-    proto::Empty req;
-    proto::DeviceMemory mem;
-    brpc::Controller cntl;
     int64_t available_memory = 0;
     int64_t total_memory = 0;
 
     channel_->estimate_kv_cache_capacity(available_memory, total_memory);
     std::tuple<int64_t, int64_t> result(available_memory, total_memory);
     promise.setValue(result);
+  });
+  return future;
+}
+
+folly::SemiFuture<runtime::ProfileMem>
+RemoteWorker::profile_prefill_mem_async() {
+  folly::Promise<runtime::ProfileMem> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
+    runtime::ProfileMem mem;
+    channel_->profile_prefill_mem(mem);
+    promise.setValue(mem);
   });
   return future;
 }

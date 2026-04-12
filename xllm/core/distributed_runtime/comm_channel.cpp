@@ -289,6 +289,31 @@ bool CommChannel::estimate_kv_cache_capacity(int64_t& available_memory,
   return true;
 }
 
+bool CommChannel::profile_prefill_mem(runtime::ProfileMem& mem) {
+  proto::Empty req;
+  proto::ProfileMem resp;
+  brpc::Controller cntl;
+
+  stub_->ProfilePrefillMem(&cntl, &req, &resp, nullptr);
+  if (cntl.Failed()) {
+    LOG(ERROR) << "ProfilePrefillMem failed: " << cntl.ErrorText();
+    mem = {};
+    return false;
+  }
+
+  mem.total_bytes = resp.total_bytes();
+  mem.weight_bytes = resp.weight_bytes();
+  mem.runtime_peak_bytes = resp.runtime_peak_bytes();
+  mem.tmp_kv_bytes = resp.tmp_kv_bytes();
+  mem.free_bytes = resp.free_bytes();
+  mem.ok = resp.ok();
+  if (!mem.ok) {
+    LOG(ERROR) << "ProfilePrefillMem returned invalid result";
+    return false;
+  }
+  return true;
+}
+
 bool CommChannel::pull_kv_blocks(const uint64_t src_cluster_id,
                                  const std::string& src_addr,
                                  const int64_t src_k_cache_id,

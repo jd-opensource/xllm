@@ -184,6 +184,8 @@ class Options {
 
   PROPERTY(bool, enable_profile_token_budget) = false;
 
+  PROPERTY(bool, enable_profile_run) = false;
+
   PROPERTY(bool, enable_latency_aware_schedule) = false;
   // the max prompt length for profile
   PROPERTY(int32_t, profile_max_prompt_length) = 2048;

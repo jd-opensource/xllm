@@ -290,6 +290,30 @@ void WorkerService::ProfileDeviceMemory(
   return;
 }
 
+void WorkerService::ProfilePrefillMem(
+    ::google::protobuf::RpcController* controller,
+    const proto::Empty* request,
+    proto::ProfileMem* response,
+    ::google::protobuf::Closure* done) {
+  threadpool_->schedule([this, controller, request, response, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    if (worker_ == nullptr) {
+      response->set_ok(false);
+      return;
+    }
+
+    auto future = worker_->profile_prefill_mem_async();
+    const runtime::ProfileMem mem = std::move(future).get();
+    response->set_total_bytes(mem.total_bytes);
+    response->set_weight_bytes(mem.weight_bytes);
+    response->set_runtime_peak_bytes(mem.runtime_peak_bytes);
+    response->set_tmp_kv_bytes(mem.tmp_kv_bytes);
+    response->set_free_bytes(mem.free_bytes);
+    response->set_ok(mem.ok);
+  });
+  return;
+}
+
 void WorkerService::AllocateKVCache(
     ::google::protobuf::RpcController* controller,
     const proto::AllocateKVCacheRequest* request,
