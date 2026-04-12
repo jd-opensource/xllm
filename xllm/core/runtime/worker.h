@@ -125,8 +125,6 @@ class Worker {
   folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const ForwardInput& inputs);
 
-  runtime::ProfileMem profile_prefill_mem();
-
   folly::SemiFuture<runtime::ProfileMem> profile_prefill_mem_async();
 
   folly::SemiFuture<folly::Unit> process_group_test_async();

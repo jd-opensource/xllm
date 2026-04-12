@@ -135,10 +135,6 @@ std::optional<ForwardOutput> Worker::step(const ForwardInput& inputs) {
   return impl_->step(inputs);
 }
 
-runtime::ProfileMem Worker::profile_prefill_mem() {
-  return impl_->profile_prefill_mem();
-}
-
 const bool Worker::is_driver() { return impl_->is_driver(); }
 
 folly::SemiFuture<std::tuple<int64_t, int64_t>>

@@ -186,41 +186,6 @@ std::vector<int32_t> build_paged_last_page(const std::vector<int32_t>& seq_lens,
   return paged_kv_last_page_len;
 }
 
-int64_t get_elem_bytes(const std::string& dtype) {
-  if (dtype == "float32" || dtype == "fp32" || dtype == "f32") {
-    return 4;
-  }
-  if (dtype == "int8" || dtype == "i8") {
-    return 1;
-  }
-  return 2;
-}
-
-int64_t calc_tmp_kv_bytes(const ModelArgs& args,
-                          const std::vector<int32_t>& seq_tokens,
-                          int32_t block_size,
-                          bool is_mla) {
-  const int64_t elem_bytes = get_elem_bytes(args.dtype());
-  const int64_t num_layers = args.n_layers();
-  if (num_layers <= 0 || seq_tokens.empty()) {
-    return 0;
-  }
-  int64_t num_blocks = 0;
-  for (int32_t seq_len : seq_tokens) {
-    num_blocks += (seq_len + block_size - 1) / block_size;
-  }
-  if (is_mla) {
-    const int64_t kv_dim =
-        std::max<int64_t>(0, args.kv_lora_rank() + args.qk_rope_head_dim());
-    return num_layers * num_blocks * block_size * kv_dim * elem_bytes;
-  }
-  const int64_t n_kv_heads = args.n_kv_heads().has_value()
-                                 ? args.n_kv_heads().value()
-                                 : args.n_heads();
-  return num_layers * num_blocks * block_size * n_kv_heads * args.head_dim() *
-         elem_bytes * 2;
-}
-
 }  // namespace
 
 bool use_profile_run(const Options& opt, bool is_mlu_build) {
@@ -276,20 +241,19 @@ int64_t calc_safe_kv_bytes(const std::vector<ProfileMem>& worker_mems,
   return safe_kv_bytes;
 }
 
-ProfilePlan build_profile_plan(const ModelArgs& args,
+ProfilePlan build_profile_plan(const ModelArgs& /*args*/,
                                const Options& opt,
                                int32_t block_size,
-                               bool is_mla,
+                               bool /*is_mla*/,
                                bool is_mlu_build) {
   CHECK_GT(block_size, 0);
   ProfilePlan plan;
   plan.num_tokens = pick_profile_tokens(opt);
-  plan.num_seqs = get_seqs(opt, plan.num_tokens);
+  const int32_t num_seqs = get_seqs(opt, plan.num_tokens);
   const std::vector<int32_t> seq_tokens =
-      split_tokens(plan.num_tokens, plan.num_seqs);
+      split_tokens(plan.num_tokens, num_seqs);
   plan.seq_lens = build_seq_lens(seq_tokens, is_mlu_build);
   plan.block_tables = build_block_tables(seq_tokens, block_size);
-  plan.tmp_kv_bytes = calc_tmp_kv_bytes(args, seq_tokens, block_size, is_mla);
   return plan;
 }
 

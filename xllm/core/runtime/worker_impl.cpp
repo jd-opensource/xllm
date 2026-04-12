@@ -1067,7 +1067,6 @@ runtime::ProfileMem WorkerImpl::profile_prefill_mem() {
   mem.weight_bytes = weight_bytes;
   mem.runtime_peak_bytes = calc_runtime_peak(base, peak);
   mem.tmp_kv_bytes = tmp_kv_bytes;
-  mem.free_bytes = device_.free_memory();
   mem.ok = true;
   return mem;
 #endif

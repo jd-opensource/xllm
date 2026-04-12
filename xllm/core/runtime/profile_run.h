@@ -35,16 +35,13 @@ struct ProfileMem {
   int64_t weight_bytes = 0;
   int64_t runtime_peak_bytes = 0;
   int64_t tmp_kv_bytes = 0;
-  int64_t free_bytes = 0;
   bool ok = false;
 };
 
 struct ProfilePlan {
   int32_t num_tokens = 0;
-  int32_t num_seqs = 0;
   std::vector<int32_t> seq_lens;
   std::vector<std::vector<int32_t>> block_tables;
-  int64_t tmp_kv_bytes = 0;
 };
 
 bool use_profile_run(const Options& opt, bool is_mlu_build);

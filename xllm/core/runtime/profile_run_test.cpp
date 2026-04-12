@@ -58,33 +58,34 @@ TEST(ProfileRunTest, BuildPlanUsesCumulativeSeqLensOnMlu) {
                                         /*is_mla=*/false,
                                         /*is_mlu_build=*/true);
   EXPECT_EQ(plan.seq_lens, std::vector<int32_t>({0, 1024, 2048, 3072}));
-  EXPECT_EQ(plan.num_seqs, 3);
+  EXPECT_EQ(plan.block_tables[0],
+            std::vector<int32_t>({0, 1, 2, 3, 4, 5, 6, 7}));
+  EXPECT_EQ(plan.block_tables[1],
+            std::vector<int32_t>({8, 9, 10, 11, 12, 13, 14, 15}));
+  EXPECT_EQ(plan.block_tables[2],
+            std::vector<int32_t>({16, 17, 18, 19, 20, 21, 22, 23}));
   EXPECT_EQ(plan.num_tokens, 3072);
 }
 
-TEST(ProfileRunTest, CalcTmpKvBytesMatchesNonMlaFp16Formula) {
+TEST(ProfileRunTest, BuildPlanKeepsRuntimeLayout) {
   ModelArgs args;
-  args.dtype("fp16");
-  args.n_layers(2);
-  args.n_heads(8);
-  args.n_kv_heads(8);
-  args.head_dim(128);
 
   Options opt;
   opt.max_seqs_per_batch(2)
-      .max_tokens_per_batch(256)
-      .max_tokens_per_chunk_for_prefill(256)
+      .max_tokens_per_batch(9)
+      .max_tokens_per_chunk_for_prefill(9)
+      .block_size(4)
       .enable_chunked_prefill(false);
 
   ProfilePlan plan = build_profile_plan(args,
                                         opt,
-                                        /*block_size=*/128,
+                                        /*block_size=*/4,
                                         /*is_mla=*/false,
                                         /*is_mlu_build=*/true);
-  const int64_t num_blocks = 2;
-  const int64_t elem_bytes = 2;
-  const int64_t expect_bytes = 2 * num_blocks * 128 * 8 * 128 * elem_bytes * 2;
-  EXPECT_EQ(plan.tmp_kv_bytes, expect_bytes);
+  EXPECT_EQ(plan.seq_lens, std::vector<int32_t>({0, 5, 9}));
+  ASSERT_EQ(plan.block_tables.size(), 2);
+  EXPECT_EQ(plan.block_tables[0], std::vector<int32_t>({0, 1}));
+  EXPECT_EQ(plan.block_tables[1], std::vector<int32_t>({2}));
 }
 
 TEST(ProfileRunTest, CalcRuntimePeakUsesReservedDeltaAfterTmpKv) {

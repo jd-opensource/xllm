@@ -34,8 +34,7 @@ message ProfileMem {
   int64 weight_bytes = 2;
   int64 runtime_peak_bytes = 3;
   int64 tmp_kv_bytes = 4;
-  int64 free_bytes = 5;
-  bool ok = 6;
+  bool ok = 5;
 }
 
 message KVCacheShape {

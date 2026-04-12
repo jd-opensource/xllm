@@ -308,7 +308,6 @@ void WorkerService::ProfilePrefillMem(
     response->set_weight_bytes(mem.weight_bytes);
     response->set_runtime_peak_bytes(mem.runtime_peak_bytes);
     response->set_tmp_kv_bytes(mem.tmp_kv_bytes);
-    response->set_free_bytes(mem.free_bytes);
     response->set_ok(mem.ok);
   });
   return;

@@ -124,12 +124,6 @@ std::tuple<int64_t, int64_t> RemoteWorker::estimate_kv_cache_capacity() {
   return result;
 }
 
-runtime::ProfileMem RemoteWorker::profile_prefill_mem() {
-  runtime::ProfileMem mem;
-  channel_->profile_prefill_mem(mem);
-  return mem;
-}
-
 bool RemoteWorker::pull_kv_blocks(const uint64_t src_cluster_id,
                                   const std::string& src_addr,
                                   const int64_t src_k_cache_id,
@@ -173,11 +167,7 @@ folly::SemiFuture<runtime::ProfileMem>
 RemoteWorker::profile_prefill_mem_async() {
   folly::Promise<runtime::ProfileMem> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
-    runtime::ProfileMem mem;
-    channel_->profile_prefill_mem(mem);
-    promise.setValue(mem);
-  });
+  channel_->profile_prefill_mem_async(promise);
   return future;
 }
 

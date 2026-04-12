@@ -289,28 +289,12 @@ bool CommChannel::estimate_kv_cache_capacity(int64_t& available_memory,
   return true;
 }
 
-bool CommChannel::profile_prefill_mem(runtime::ProfileMem& mem) {
+bool CommChannel::profile_prefill_mem_async(
+    folly::Promise<runtime::ProfileMem>& promise) {
   proto::Empty req;
-  proto::ProfileMem resp;
-  brpc::Controller cntl;
-
-  stub_->ProfilePrefillMem(&cntl, &req, &resp, nullptr);
-  if (cntl.Failed()) {
-    LOG(ERROR) << "ProfilePrefillMem failed: " << cntl.ErrorText();
-    mem = {};
-    return false;
-  }
-
-  mem.total_bytes = resp.total_bytes();
-  mem.weight_bytes = resp.weight_bytes();
-  mem.runtime_peak_bytes = resp.runtime_peak_bytes();
-  mem.tmp_kv_bytes = resp.tmp_kv_bytes();
-  mem.free_bytes = resp.free_bytes();
-  mem.ok = resp.ok();
-  if (!mem.ok) {
-    LOG(ERROR) << "ProfilePrefillMem returned invalid result";
-    return false;
-  }
+  auto done = new ProfilePrefillMemClosure();
+  done->promise = std::move(promise);
+  stub_->ProfilePrefillMem(&done->cntl, &req, &done->response, done);
   return true;
 }
 
@@ -646,6 +630,27 @@ void InitModelClosure::Run() {
   promise.setValue(success);
 
   return;
+}
+
+void ProfilePrefillMemClosure::Run() {
+  std::unique_ptr<ProfilePrefillMemClosure> self_guard(this);
+
+  runtime::ProfileMem mem;
+  if (cntl.Failed()) {
+    LOG(ERROR) << "ProfilePrefillMem failed: " << cntl.ErrorText();
+    promise.setValue(mem);
+    return;
+  }
+
+  mem.total_bytes = response.total_bytes();
+  mem.weight_bytes = response.weight_bytes();
+  mem.runtime_peak_bytes = response.runtime_peak_bytes();
+  mem.tmp_kv_bytes = response.tmp_kv_bytes();
+  mem.ok = response.ok();
+  if (!mem.ok) {
+    LOG(ERROR) << "ProfilePrefillMem returned invalid result";
+  }
+  promise.setValue(mem);
 }
 
 void TransferBlocksClosure::Run() {
