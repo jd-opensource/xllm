@@ -26,6 +26,7 @@ limitations under the License.
 #if defined(USE_CUDA)
 #include "platform/numa_utils.h"
 #endif
+#include "platform/device.h"
 #include "remote_worker.h"
 #include "runtime/forward_shared_memory_manager.h"
 #include "runtime/llm_worker_impl.h"
@@ -100,13 +101,14 @@ void setup_numa_affinity_and_isolation(
 
   std::set<int32_t> unique_numa_nodes;
   for (size_t i = 0; i < devices.size(); ++i) {
-    device_numa_nodes[i] = numa::get_device_numa_node(devices[i].index());
+    const int32_t device_index = to_int32_device_index(devices[i].index());
+    device_numa_nodes[i] = numa::get_device_numa_node(device_index);
     if (device_numa_nodes[i] >= 0) {
       unique_numa_nodes.insert(device_numa_nodes[i]);
     }
 
-    LOG(INFO) << "NUMA mapping: local rank " << i << ", device "
-              << devices[i].index() << " -> NUMA node " << device_numa_nodes[i];
+    LOG(INFO) << "NUMA mapping: local rank " << i << ", device " << device_index
+              << " -> NUMA node " << device_numa_nodes[i];
   }
 
   int32_t engine_numa_node = -1;
@@ -249,8 +251,9 @@ void DistManager::setup_multi_node_workers(
     bool use_spawn_worker = (options.enable_offline_inference() && i > 0) ||
                             force_spawn_for_numa_isolation[i];
     if (force_spawn_for_numa_isolation[i]) {
+      const int32_t device_index = to_int32_device_index(devices[i].index());
       LOG(INFO) << "Force spawn worker for local rank " << i << " (device "
-                << devices[i].index() << ", NUMA " << device_numa_nodes[i]
+                << device_index << ", NUMA " << device_numa_nodes[i]
                 << ") to keep each process within a single NUMA region";
     }
 #else
