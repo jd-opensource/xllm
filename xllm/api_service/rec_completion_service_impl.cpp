@@ -128,6 +128,20 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
       logprobs_tensor->mutable_shape()->Add(logprob_width);
     }
 
+    decltype(output_tensor) did_tensor = nullptr;
+    decltype(output_tensor) type_tensor = nullptr;
+    if (FLAGS_enable_extended_item_info) {
+      did_tensor = response.mutable_output_tensors()->Add();
+      did_tensor->set_name("item_did");
+      did_tensor->set_datatype(proto::DataType::STRING);
+      did_tensor->mutable_shape()->Add(output_count);
+
+      type_tensor = response.mutable_output_tensors()->Add();
+      type_tensor->set_name("item_type");
+      type_tensor->set_datatype(proto::DataType::STRING);
+      type_tensor->mutable_shape()->Add(output_count);
+    }
+
     auto* output_context = output_tensor->mutable_contents();
     auto* logprobs_context = logprobs_tensor == nullptr
                                  ? nullptr
@@ -155,6 +169,14 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
         output_context->mutable_int64_contents()->Add(output.item_ids.value());
         append_output_logprobs(i);
         ++total_count;
+      }
+
+      if (did_tensor != nullptr && type_tensor != nullptr) {
+        const auto& item_info = output.item_info;
+        did_tensor->mutable_contents()->add_bytes_contents(
+            item_info.has_value() ? item_info->did : "");
+        type_tensor->mutable_contents()->add_bytes_contents(
+            item_info.has_value() ? item_info->type : "");
       }
     }
   } else {

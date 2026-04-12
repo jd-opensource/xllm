@@ -33,6 +33,7 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
 #include "core/framework/request/mm_data_visitor.h"
+#include "core/framework/tokenizer/rec_tokenizer.h"
 #include "core/framework/tokenizer/tokenizer.h"
 #include "core/util/slice.h"
 #include "core/util/tensor_helper.h"
@@ -150,15 +151,28 @@ void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
   const size_t rec_token_size = static_cast<size_t>(REC_TOKEN_SIZE);
   if (FLAGS_enable_convert_tokens_to_item &&
       output.token_ids.size() == rec_token_size) {
-    std::vector<int64_t> item_ids;
-    const bool ok = tokenizer.decode(
-        Slice<int32_t>{output.token_ids.data(), output.token_ids.size()},
-        sequence_params_.skip_special_tokens,
-        &item_ids);
-    if (ok && !item_ids.empty()) {
-      output.item_ids_list = normalize_rec_item_ids(item_ids, index_);
-      if (!output.item_ids_list.empty()) {
-        output.item_ids = output.item_ids_list.front();
+    const Slice<int32_t> token_slice{output.token_ids.data(),
+                                     output.token_ids.size()};
+    if (FLAGS_enable_extended_item_info) {
+      const auto* rec_tokenizer = dynamic_cast<const RecTokenizer*>(&tokenizer);
+      if (rec_tokenizer != nullptr) {
+        std::vector<RecItemInfo> item_infos;
+        const bool ok =
+            rec_tokenizer->decode_item_infos(token_slice, &item_infos);
+        if (ok && !item_infos.empty()) {
+          output.item_ids = item_infos.front().item_id;
+          output.item_info = item_infos.front();
+        }
+      }
+    } else {
+      std::vector<int64_t> item_ids;
+      const bool ok = tokenizer.decode(
+          token_slice, sequence_params_.skip_special_tokens, &item_ids);
+      if (ok && !item_ids.empty()) {
+        output.item_ids_list = normalize_rec_item_ids(item_ids, index_);
+        if (!output.item_ids_list.empty()) {
+          output.item_ids = output.item_ids_list.front();
+        }
       }
     }
   }

@@ -198,6 +198,12 @@ struct RawToken {
   std::vector<float> embeddings;  // hidden states
 };
 
+struct RecItemInfo {
+  int64_t item_id = 0;
+  std::string did;
+  std::string type;
+};
+
 // Weight segment info for D2D transfer (supports non-contiguous allocation)
 // Forward declaration needed by InstanceInfo
 struct WeightSegment {
