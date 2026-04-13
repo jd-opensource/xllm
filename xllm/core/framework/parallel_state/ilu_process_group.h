@@ -70,8 +70,9 @@ class ProcessGroupImpl : public ProcessGroup {
     if (world_size != rank_size) {
       std::vector<uint64_t> uint64_ranks;
       uint64_ranks.reserve(group_ranks.size());
-      for (const auto rank : group_ranks) {
-        uint64_ranks.push_back(static_cast<uint64_t>(rank));
+      for (const int32_t rank : group_ranks) {
+        uint64_ranks.emplace_back(static_cast<uint64_t>(rank));
+      }
       }
       pg_options->global_ranks_in_group = std::move(uint64_ranks);
     }
