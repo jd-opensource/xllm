@@ -15,6 +15,7 @@ cc_library(
     kv_cache_utils.h
     linear_attention_kv_cache_impl.h
     quantized_kv_cache_impl.h
+    push_route.h
   SRCS
     embedding_cache.cpp 
     indexed_kv_cache_impl.cpp
@@ -24,12 +25,23 @@ cc_library(
     kv_cache_utils.cpp
     linear_attention_kv_cache_impl.cpp
     quantized_kv_cache_impl.cpp
+    push_route.cpp
   DEPS
     :common
     :xtensor
     glog::glog
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
+)
+
+cc_test(
+  NAME
+    push_route_test
+  SRCS
+    push_route_test.cpp
+  DEPS
+    :kv_cache
+    GTest::gtest_main
 )
 
 cc_test(

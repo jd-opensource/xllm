@@ -84,6 +84,11 @@ class MooncakeKVCacheTransferDefault final
                       const std::vector<uint64_t>& src_blocks,
                       const std::vector<uint64_t>& dst_blocks) override;
 
+  void merge_kv_blocks(
+      std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
+      const std::vector<TransferKVInfo>& transfer_kv_infos,
+      const ParallelArgs& parallel_args) override;
+
   bool push_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
