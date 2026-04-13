@@ -158,7 +158,6 @@ bool MooncakeTransferEngineCore::open_session(const uint64_t cluster_id,
     return true;
   }
 
-  bool remote_opened = false;
   if (cluster_id != 0) {
     proto::MooncakeTransferEngineService_Stub* stub =
         get_or_create_stub_locked(cluster_id);
@@ -167,27 +166,24 @@ bool MooncakeTransferEngineCore::open_session(const uint64_t cluster_id,
       return false;
     }
 
-    proto::SessionInfo session_info;
-    session_info.set_addr(addr_);
+    proto::SessionInfo request;
+    request.set_addr(addr_);
     proto::Status response;
     brpc::Controller cntl;
-    stub->OpenSession(&cntl, &session_info, &response, nullptr);
+    stub->OpenSession(&cntl, &request, &response, nullptr);
     if (cntl.Failed() || !response.ok()) {
       LOG(ERROR) << "OpenSession failed, " << cntl.ErrorText();
       return false;
     }
-    remote_opened = true;
 
     LOG(INFO) << "OpenSession RPC to " << remote_addr
               << ", local_addr=" << addr_;
+    return true;
   }
 
   Transport::SegmentHandle handle = engine_->openSegment(remote_addr);
   if (handle == static_cast<Transport::SegmentHandle>(-1)) {
     LOG(ERROR) << "Fail to connect to " << remote_addr;
-    if (remote_opened) {
-      close_remote_session(this, cluster_id);
-    }
     return false;
   }
 
@@ -209,6 +205,18 @@ bool MooncakeTransferEngineCore::close_session(const uint64_t cluster_id,
             << ", remote_addr=" << remote_addr;
 
   auto it = handles_.find(remote_addr);
+  if (cluster_id != 0) {
+    if (it != handles_.end()) {
+      it->second.ref_count--;
+      LOG(INFO) << "Decremented ref_count for " << remote_addr
+                << ", ref_count=" << it->second.ref_count;
+      if (it->second.ref_count > 0) {
+        return true;
+      }
+    }
+    return close_remote_session(this, cluster_id);
+  }
+
   if (it == handles_.end()) {
     return true;
   }
@@ -217,14 +225,8 @@ bool MooncakeTransferEngineCore::close_session(const uint64_t cluster_id,
   LOG(INFO) << "Decremented ref_count for " << remote_addr
             << ", ref_count=" << it->second.ref_count;
 
-  // Keep the shared session alive while other users still reference it.
   if (it->second.ref_count > 0) {
     return true;
-  }
-
-  bool ret = true;
-  if (cluster_id != 0) {
-    ret = close_remote_session(this, cluster_id);
   }
 
   SegmentHandle handle = it->second.handle;
@@ -235,7 +237,7 @@ bool MooncakeTransferEngineCore::close_session(const uint64_t cluster_id,
 
   LOG(INFO) << "Closed session for " << remote_addr;
 
-  return ret;
+  return true;
 }
 
 SegmentHandle MooncakeTransferEngineCore::get_handle(
