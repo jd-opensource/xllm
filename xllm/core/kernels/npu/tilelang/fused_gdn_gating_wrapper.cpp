@@ -25,8 +25,8 @@ limitations under the License.
 #include <utility>
 
 #include "acl/acl.h"
-#include "dispatch_registry.h"
-#include "tilelang_ops_api.h"
+#include "core/kernels/npu/tilelang/dispatch_registry.h"
+#include "core/kernels/npu/tilelang/tilelang_ops_api.h"
 
 #ifndef XLLM_TL_FUSED_GDN_GATING_REGISTRY_INC
 #error "XLLM_TL_FUSED_GDN_GATING_REGISTRY_INC is not defined"
@@ -212,20 +212,18 @@ void run_tilelang_fused_gdn_gating_chunk(const torch::Tensor& A_log,
       << available_fused_gdn_gating_variant_keys();
 
   const int64_t num_batches = a.size(0);
-  CHECK_LE(num_batches, static_cast<int64_t>(std::numeric_limits<int>::max()))
-      << "TileLang fused_gdn_gating: batch count exceeds int range";
 
   const int32_t device_id = a.device().index();
   aclrtStream stream = c10_npu::getCurrentNPUStream(device_id).stream();
   auto g_rows = g_out.squeeze(0);
   auto beta_rows = beta_out.squeeze(0);
-  entry->fn(reinterpret_cast<uint8_t*>(const_cast<void*>(A_log.data_ptr())),
-            reinterpret_cast<uint8_t*>(const_cast<void*>(a.data_ptr())),
-            reinterpret_cast<uint8_t*>(const_cast<void*>(b.data_ptr())),
-            reinterpret_cast<uint8_t*>(const_cast<void*>(dt_bias.data_ptr())),
-            reinterpret_cast<uint8_t*>(g_rows.data_ptr()),
-            reinterpret_cast<uint8_t*>(beta_rows.data_ptr()),
-            static_cast<int>(num_batches),
+  entry->fn(static_cast<uint8_t*>(A_log.data_ptr()),
+            static_cast<uint8_t*>(a.data_ptr()),
+            static_cast<uint8_t*>(b.data_ptr()),
+            static_cast<uint8_t*>(dt_bias.data_ptr()),
+            static_cast<uint8_t*>(g_rows.data_ptr()),
+            static_cast<uint8_t*>(beta_rows.data_ptr()),
+            static_cast<int32_t>(num_batches),
             softplus_beta,
             softplus_threshold,
             stream);

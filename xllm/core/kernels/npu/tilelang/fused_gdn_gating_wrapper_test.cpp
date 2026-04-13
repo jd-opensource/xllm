@@ -21,13 +21,12 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "tilelang_ops_api.h"
+#include "core/kernels/npu/tilelang/tilelang_ops_api.h"
 
 namespace xllm::kernel::npu::tilelang {
 namespace {
 
-class TileLangFusedGdnGatingWrapperCaseTest
-    : public ::testing::TestWithParam<struct FusedGdnGatingTestCase> {
+class TileLangFusedGdnGatingWrapperTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() { torch_npu::init_npu("npu:0"); }
 
@@ -58,11 +57,6 @@ std::pair<torch::Tensor, torch::Tensor> torch_fused_gdn_gating(
   auto g = -A_log.exp() * softplus_out;
   auto beta_output = torch::sigmoid(b.to(torch::kFloat32)).to(torch::kBFloat16);
   return {g.unsqueeze(0), beta_output.unsqueeze(0)};
-}
-
-std::string fused_gdn_gating_case_name(
-    const testing::TestParamInfo<FusedGdnGatingTestCase>& info) {
-  return info.param.name;
 }
 
 void run_fused_gdn_gating_case(const FusedGdnGatingTestCase& test_case) {
@@ -100,70 +94,71 @@ void run_fused_gdn_gating_case(const FusedGdnGatingTestCase& test_case) {
       << "beta mismatch, max_diff=" << beta_max_diff;
 }
 
-TEST_P(TileLangFusedGdnGatingWrapperCaseTest, MatchesTorchReference) {
-  run_fused_gdn_gating_case(GetParam());
-}
+TEST_F(TileLangFusedGdnGatingWrapperTest, MatchesTorchReference) {
+  const std::vector<FusedGdnGatingTestCase> cases = {
+      {
+          .name = "tiny_b1_h8",
+          .num_batches = 1,
+          .num_heads = 8,
+          .seed = 101,
+      },
+      {
+          .name = "tiny_b17_h8",
+          .num_batches = 17,
+          .num_heads = 8,
+          .seed = 101,
+      },
+      {
+          .name = "tiny_b1_h16",
+          .num_batches = 1,
+          .num_heads = 16,
+          .seed = 101,
+      },
+      {
+          .name = "small_b17_h32",
+          .num_batches = 17,
+          .num_heads = 32,
+          .seed = 102,
+      },
+      {
+          .name = "medium_b29_h48",
+          .num_batches = 29,
+          .num_heads = 48,
+          .seed = 103,
+      },
+      {
+          .name = "medium_b131_h64",
+          .num_batches = 131,
+          .num_heads = 64,
+          .seed = 104,
+      },
+      {
+          .name = "medium_b257_h128",
+          .num_batches = 257,
+          .num_heads = 128,
+          .seed = 105,
+      },
+      {
+          .name = "large_b4096_h32",
+          .num_batches = 4096,
+          .num_heads = 32,
+          .seed = 106,
+      },
+      {
+          .name = "custom_beta2_threshold0p5_b33_h64",
+          .num_batches = 33,
+          .num_heads = 64,
+          .seed = 107,
+          .beta = 2.0F,
+          .threshold = 0.5F,
+      },
+  };
 
-INSTANTIATE_TEST_SUITE_P(FusedGdnGatingCases,
-                         TileLangFusedGdnGatingWrapperCaseTest,
-                         ::testing::Values(
-                             FusedGdnGatingTestCase{
-                                 .name = "tiny_b1_h8",
-                                 .num_batches = 1,
-                                 .num_heads = 8,
-                                 .seed = 101,
-                             },
-                             FusedGdnGatingTestCase{
-                                 .name = "tiny_b17_h8",
-                                 .num_batches = 17,
-                                 .num_heads = 8,
-                                 .seed = 101,
-                             },
-                             FusedGdnGatingTestCase{
-                                 .name = "tiny_b1_h16",
-                                 .num_batches = 1,
-                                 .num_heads = 16,
-                                 .seed = 101,
-                             },
-                             FusedGdnGatingTestCase{
-                                 .name = "small_b17_h32",
-                                 .num_batches = 17,
-                                 .num_heads = 32,
-                                 .seed = 102,
-                             },
-                             FusedGdnGatingTestCase{
-                                 .name = "medium_b29_h48",
-                                 .num_batches = 29,
-                                 .num_heads = 48,
-                                 .seed = 103,
-                             },
-                             FusedGdnGatingTestCase{
-                                 .name = "medium_b131_h64",
-                                 .num_batches = 131,
-                                 .num_heads = 64,
-                                 .seed = 104,
-                             },
-                             FusedGdnGatingTestCase{
-                                 .name = "medium_b257_h128",
-                                 .num_batches = 257,
-                                 .num_heads = 128,
-                                 .seed = 105,
-                             },
-                             FusedGdnGatingTestCase{
-                                 .name = "large_b4096_h32",
-                                 .num_batches = 4096,
-                                 .num_heads = 32,
-                                 .seed = 106,
-                             },
-                             FusedGdnGatingTestCase{
-                                 .name = "custom_beta2_threshold0p5_b33_h64",
-                                 .num_batches = 33,
-                                 .num_heads = 64,
-                                 .seed = 107,
-                                 .beta = 2.0F,
-                                 .threshold = 0.5F,
-                             }),
-                         fused_gdn_gating_case_name);
+  for (const auto& test_case : cases) {
+    SCOPED_TRACE(test_case.name);
+    run_fused_gdn_gating_case(test_case);
+  }
+}
 
 }  // namespace
 }  // namespace xllm::kernel::npu::tilelang
