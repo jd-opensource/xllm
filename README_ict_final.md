@@ -1,9 +1,15 @@
 ## 备赛赛题：基于xLLM框架的推理模型性能优化
 - 模型：[Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B)
 - 推理框架：[xLLM ict_final分支](https://github.com/jd-opensource/xllm/tree/ict_final)
-- 要求：在保证精度的前提下（ceval数据集得分大于80分），使用各种优化方法优化Qwen3.5-4B的推理性能，尽可能提高 **Output Tokens per Second** (输出Tokens/秒， TPS) ，并提供优化方法的详细说明：
-1. 单并发，输入输出64k+1k，比拼TPS
-2. 单并发，输入输出128k+1k，比拼TPS
+- 要求：在保证精度的前提下（详情见**xLLM 精度测试**），使用各种优化方法优化Qwen3.5-4B的推理性能，尽可能提高 **Output Tokens per Second** (输出Tokens/秒， TPS)：
+  - 单并发，输入输出64k+1k，比拼TPS
+  - 单并发，输入输出128k+1k，比拼TPS
+- 最终提交的报告至少需要包括以下部分：
+  - 优化方法介绍
+  - 精度测试结果
+  - 性能测试结果
+- 其他要求：
+  - 需要将代码和编译完成的二进制xllm文件一并提交
 
 
 ## xLLM 开发手册
@@ -89,12 +95,13 @@ do
     --port $PORT \
     --master_node_addr=$MASTER_NODE_ADDR \
     --nnodes=$NNODES \
-    --max_memory_utilization=0.6 \
+    --max_memory_utilization=0.45 \
     --block_size=128 \
     --communication_backend="hccl" \
     --enable_prefix_cache=false \
     --enable_chunked_prefill=false \
     --enable_schedule_overlap=false \
+    --max_tokens_per_batch=132096 \
     --enable_shm=false \
     --node_rank=$i \ > $LOG_FILE 2>&1 &
 done
@@ -120,15 +127,58 @@ curl -s "http://127.0.0.1:18000/v1/chat/completions" \
 ```
 
 ### xLLM 精度测试
-参考精度测试文档：[精度测试](docs/zh/accuracy_test.md)
+使用下面的三条请求进行精度测试，要求：
+* 严格使用下面的请求，只需要修改端口号
+* 返回的输出结果答案需要和参考答案一致
+* 需要保证返回结果中`\n</think>\n\n` 后的内容，即思考后内容，不能是乱码
 
-参数建议按如下设置：
-```python
-max_out_len = 32768
-batch_size = 32
-temperature = 0.6
-top_k = -1
-top_p = 0.95
+示例：
+```bash
+curl -s "http://127.0.0.1:18000/v1/chat/completions" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer <API Key>" \
+    -d '{
+          "model": "Qwen3.5-4B",
+          "messages": [
+            {"role": "system", "content": "You are a user assistant."},
+            {"role": "user", "content": "Loraine makes wax sculptures of animals. Large animals take four sticks of wax and small animals take two sticks. She made three times as many small animals as large animals, and she used 12 sticks of wax for small animals. How many sticks of wax did Loraine use to make all the animals?"}
+          ],
+          "stream": false
+        }'
+
+# 参考答案 ：20
+```
+
+```bash
+curl -s "http://127.0.0.1:18000/v1/chat/completions" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer <API Key>" \
+    -d '{
+          "model": "Qwen3.5-4B",
+          "messages": [
+            {"role": "system", "content": "You are a user assistant."},
+            {"role": "user", "content": "Leticia, Nina, and Rosalie have a total of 25 people on their dance team. If 8 people quit, but 13 new people got in, how many people are there now on the team?"}
+          ],
+          "stream": false
+        }'
+
+# 参考答案 ：30
+```
+
+```bash
+curl -s "http://127.0.0.1:18000/v1/chat/completions" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer <API Key>" \
+    -d '{
+          "model": "Qwen3.5-4B",
+          "messages": [
+            {"role": "system", "content": "You are a user assistant."},
+            {"role": "user", "content": "If one fourth of the engines are defective, and there are 5 batches of 80 engines each. How many engines are not defective?"}
+          ],
+          "stream": false
+        }'
+
+# 参考答案 ：300
 ```
 
 ### xLLM 性能测试
@@ -153,7 +203,11 @@ python test_xllm.py \
     --model /path/to/model/Qwen3.5-4B
 ```
 
+
+
 ## 注意事项
 - 当前xLLM不支持Qwen3.5的chunked prefill
 - 禁止使用量化模型
 - 只需要对文本token进行推理，不需要对图像token进行推理
+- 算子优化可以使用tilelang-ascend，`main`分支和未合并的pr有相关示例
+- 显存优化可以参考下：https://github.com/jd-opensource/xllm/pull/1190
