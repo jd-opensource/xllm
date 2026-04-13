@@ -1391,4 +1391,12 @@ struct FusedQkvzbaSplitReshapeParams {
   int32_t head_qk;
   int32_t head_v;
 };
+
+struct GemmaRMSNormParams {
+  torch::Tensor x;
+  torch::Tensor gamma;
+  double epsilon;
+  torch::Tensor rstd_out;
+  torch::Tensor norm_out;
+};
 }  // namespace xllm::kernel

@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "core/kernels/npu/npu_ops_api.h"
+#include "xllm/core/kernels/ops_api.h"
 
 namespace xllm {
 namespace layer {
@@ -30,11 +30,12 @@ Qwen3NextRMSNormImpl::Qwen3NextRMSNormImpl(int64_t dim,
 }
 
 torch::Tensor Qwen3NextRMSNormImpl::forward(torch::Tensor& input) {
-  torch::Tensor norm_out;
-  torch::Tensor rstd_out;
-  xllm::kernel::npu::npu_gemma_rms_norm(
-      input, weight_, eps_, rstd_out, norm_out);
-  return norm_out;
+  xllm::kernel::GemmaRMSNormParams norm_params;
+  norm_params.x = input;
+  norm_params.gamma = weight_;
+  norm_params.epsilon = eps_;
+  xllm::kernel::gemma_rms_norm(norm_params);
+  return norm_params.norm_out;
 }
 
 void Qwen3NextRMSNormImpl::load_state_dict(const StateDict& state_dict) {

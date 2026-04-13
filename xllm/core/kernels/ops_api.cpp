@@ -975,4 +975,16 @@ fused_qkvzba_split_reshape_cat(FusedQkvzbaSplitReshapeParams& params) {
   NOT_IMPLEMENTED();
 #endif
 }
+
+void gemma_rms_norm(GemmaRMSNormParams& params) {
+#if defined(USE_NPU)
+  npu::npu_gemma_rms_norm(params.x, 
+                          params.gamma,
+                          params.epsilon,
+                          params.rstd_out,
+                          params.norm_out);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
 }  // namespace xllm::kernel
