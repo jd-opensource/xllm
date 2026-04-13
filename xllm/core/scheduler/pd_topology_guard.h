@@ -1,0 +1,58 @@
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
+#pragma once
+
+#include <cstdint>
+#include <string>
+
+#include "common/types.h"
+
+namespace xllm {
+
+struct PdTopo {
+  int32_t dp_size = 0;
+  int32_t tp_size = 0;
+};
+
+struct PdTopoRule {
+  bool allow = false;
+  bool hetero = false;
+  bool invalid_local = false;
+  bool invalid_remote = false;
+  std::string reason = "";
+};
+
+bool try_get_pd_topo(const InstanceInfo& info,
+                     PdTopo* topo,
+                     std::string* reason);
+
+PdTopo get_pd_topo(const InstanceInfo& info);
+
+PdTopoRule check_pd_rule(const InstanceInfo& local,
+                         const InstanceInfo& remote,
+                         bool is_mlu_build,
+                         const std::string& kv_mode,
+                         bool enable_mla,
+                         bool enable_prefill_sp);
+
+PdTopoRule check_mlu_pd_topo(const PdTopo& local_topo,
+                             const PdTopo& remote_topo,
+                             bool is_mlu_build,
+                             const std::string& kv_mode,
+                             bool enable_mla,
+                             bool enable_prefill_sp);
+
+}  // namespace xllm

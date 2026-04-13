@@ -13,6 +13,7 @@ cc_library(
     zero_eviction_scheduler.h
     continuous_scheduler.h
     disagg_pd_scheduler.h
+    pd_topology_guard.h
     pd_ooc_scheduler.h
     async_response_processor.h
     scheduler.h
@@ -28,6 +29,7 @@ cc_library(
     zero_eviction_scheduler.cpp
     continuous_scheduler.cpp
     disagg_pd_scheduler.cpp
+    pd_topology_guard.cpp
     pd_ooc_scheduler.cpp
     async_response_processor.cpp
     dit_scheduler.cpp
@@ -60,6 +62,16 @@ cc_test(
     :xllm_server
     GTest::gtest_main
     $<$<BOOL:${USE_NPU}>:nnopbase>
+)
+
+cc_test(
+  NAME
+    pd_topology_guard_test
+  SRCS
+    pd_topology_guard_test.cpp
+  DEPS
+    :scheduler
+    GTest::gtest_main
 )
 
 target_link_libraries(chunked_prefill_scheduler_test

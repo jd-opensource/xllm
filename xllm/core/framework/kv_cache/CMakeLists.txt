@@ -10,14 +10,26 @@ cc_library(
     embedding_cache.h
     kv_cache.h
     kv_cache_event.h
+    push_route.h
   SRCS
     embedding_cache.cpp 
     kv_cache.cpp
+    push_route.cpp
   DEPS
     :common
     glog::glog
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
+)
+
+cc_test(
+  NAME
+    push_route_test
+  SRCS
+    push_route_test.cpp
+  DEPS
+    :kv_cache
+    GTest::gtest_main
 )
 
 cc_test(

@@ -186,6 +186,7 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   CHECK(tokenizer_ != nullptr);
 
   args_ = model_loader->model_args();
+  args_.enable_mla(options_.enable_mla());
   quant_args_ = model_loader->quant_args();
   tokenizer_args_ = model_loader->tokenizer_args();
 
