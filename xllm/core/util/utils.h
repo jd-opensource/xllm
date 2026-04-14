@@ -20,7 +20,6 @@ limitations under the License.
 
 #include <algorithm>
 #include <numeric>
-#include <optional>
 #include <stdexcept>
 #include <vector>
 
@@ -31,12 +30,12 @@ limitations under the License.
 
 // -------------------
 #include <filesystem>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_set>
 
 #include "core/util/json_reader.h"
+#include "core/util/model_config_utils.h"
 #include "models/model_registry.h"
 
 namespace xllm {
@@ -144,28 +143,6 @@ inline std::string get_model_name(
   return model_name;
 }
 
-inline std::string get_model_type(const std::filesystem::path& model_path) {
-  JsonReader reader;
-  std::filesystem::path config_json_path = model_path / "config.json";
-
-  if (!std::filesystem::exists(config_json_path)) {
-    LOG(FATAL) << "Please check config.json or model_index.json file, one of "
-                  "them should exist in the model path: "
-               << model_path;
-  }
-
-  reader.parse(config_json_path);
-  auto model_type = reader.value<std::string>("model_type");
-  if (!model_type.has_value()) {
-    model_type = reader.value<std::string>("model_name");
-  }
-  if (!model_type.has_value()) {
-    LOG(FATAL) << "Please check config.json file in model path: " << model_path
-               << ", it should contain model_type or model_name key.";
-  }
-  return model_type.value();
-}
-
 inline std::string get_model_backend(const std::filesystem::path& model_path) {
   JsonReader reader;
   std::filesystem::path model_index_json_path = model_path / "model_index.json";
@@ -190,7 +167,7 @@ inline bool should_enable_mla(
   if (resolved_backend == "dit") {
     return false;
   }
-  return is_mla_model_type(get_model_type(model_path));
+  return is_mla_model_type(get_model_type(model_path, backend));
 }
 
 }  // namespace util

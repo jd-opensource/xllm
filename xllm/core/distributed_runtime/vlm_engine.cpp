@@ -137,6 +137,14 @@ bool VLMEngine::init_model() {
   n_local_kv_heads_ = std::max<int64_t>(1, n_kv_heads / world_size);
   head_dim_ = args_.head_dim();
   dtype_ = util::parse_dtype(args_.dtype(), options_.devices()[0]);
+  if (has_linear_attention_layers(args_)) {
+    const int64_t linear_n_k_heads = args_.linear_num_key_heads();
+    const int64_t linear_n_v_heads = args_.linear_num_value_heads();
+    n_local_linear_k_heads_ =
+        std::max<int64_t>(1, linear_n_k_heads / world_size);
+    n_local_linear_v_heads_ =
+        std::max<int64_t>(1, linear_n_v_heads / world_size);
+  }
 
   // key + value for all layers
   LOG(INFO) << "Block info, block_size: " << options_.block_size()
@@ -247,13 +255,38 @@ Engine::KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
     slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
   }
   kv_cache_cap.slot_size = slot_size;
+  if (has_linear_attention_layers(args_)) {
+    const int64_t head_k_dim = args_.linear_key_head_dim();
+    const int64_t head_v_dim = args_.linear_value_head_dim();
+    const int64_t linear_ssm_slot_size =
+        dtype_size * n_local_linear_v_heads_ * head_k_dim * head_v_dim;
+    const int64_t linear_conv_slot_size =
+        dtype_size *
+        (head_k_dim * n_local_linear_k_heads_ * 2 +
+         head_v_dim * n_local_linear_v_heads_) *
+        (args_.linear_conv_kernel_dim() - 1);
+    kv_cache_cap.linear_slot_size =
+        linear_ssm_slot_size + linear_conv_slot_size;
+  }
   kv_cache_cap.n_layers = args_.n_layers();
 
   // compute kv cache n_blocks
+  int64_t full_attention_interval = (args_.full_attention_interval() < 1)
+                                        ? 1
+                                        : args_.full_attention_interval();
+  int64_t num_full_attention_layers =
+      kv_cache_cap.n_layers / full_attention_interval;
+  int64_t num_linear_attention_layers =
+      kv_cache_cap.n_layers - num_full_attention_layers;
   const int32_t block_size = options_.block_size();
-  const int64_t block_size_in_bytes = block_size * slot_size;
-  kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
-                          (args_.n_layers() * block_size_in_bytes);
+  const int64_t full_cache_block_size_in_bytes = block_size * slot_size;
+  const int64_t total_cache_block_size_in_bytes =
+      num_full_attention_layers * full_cache_block_size_in_bytes +
+      num_linear_attention_layers * kv_cache_cap.linear_slot_size;
+  CHECK_GT(total_cache_block_size_in_bytes, 0)
+      << "invalid cache block size estimate";
+  kv_cache_cap.n_blocks =
+      kv_cache_cap.cache_size_in_bytes / total_cache_block_size_in_bytes;
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
 
   return kv_cache_cap;
@@ -266,14 +299,27 @@ bool VLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
             << ", slot_size: " << kv_cache_cap.slot_size;
 
   const int32_t block_size = options_.block_size();
+  const bool enable_linear_attention = has_linear_attention_layers(args_);
 
   // init kv cache for each worker
   std::vector<std::vector<int64_t>> kv_cache_shape;
-  kv_cache_shape.reserve(2);
+  kv_cache_shape.reserve(enable_linear_attention ? 4 : 2);
   kv_cache_shape.emplace_back(std::vector<int64_t>{
       kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
   kv_cache_shape.emplace_back(std::vector<int64_t>{
       kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
+  if (enable_linear_attention) {
+    kv_cache_shape.emplace_back(std::vector<int64_t>{
+        kv_cache_cap.n_blocks,
+        args_.linear_key_head_dim() * n_local_linear_k_heads_ * 2 +
+            args_.linear_key_head_dim() * n_local_linear_v_heads_,
+        args_.linear_conv_kernel_dim() - 1});
+    kv_cache_shape.emplace_back(
+        std::vector<int64_t>{kv_cache_cap.n_blocks,
+                             n_local_linear_v_heads_,
+                             args_.linear_key_head_dim(),
+                             args_.linear_value_head_dim()});
+  }
 #if defined(USE_MLU)
   // transpose kv_cache layout for mlu
   // default layout: [n_blocks, block_size, n_head, head_dim]

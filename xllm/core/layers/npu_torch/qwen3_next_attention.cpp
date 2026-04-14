@@ -18,8 +18,18 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <tuple>
+
+#include "layers/common/rotary_embedding_util.h"
+
 namespace xllm {
 namespace layer {
+
+namespace {
+
+using torch::indexing::None;
+using ISlice = torch::indexing::Slice;
+
+}  // namespace
 
 Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
     const ModelArgs& args,
@@ -83,16 +93,18 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
       "k_norm", Qwen3NextRMSNorm(head_dim_, args.rms_norm_eps(), options));
 
   // 5. Rotary embedding
-  const int rotary_dim =
-      static_cast<int>(head_dim_ * args.partial_rotary_factor());
-  rotary_emb_ =
-      register_module("rotary_emb",
-                      PartialRotaryEmbedding(rotary_dim,
+  rotary_dim_ = static_cast<int64_t>(head_dim_ * args.partial_rotary_factor());
+  CHECK_GT(rotary_dim_, 0) << "rotary_dim must be positive";
+  rotary_interleaved_ = !args.rope_scaling_mrope_section().empty() &&
+                        args.rope_scaling_mrope_interleaved();
+  partial_rotary_emb_ =
+      register_module("partial_rotary_emb",
+                      PartialRotaryEmbedding(rotary_dim_,
                                              args.max_position_embeddings(),
                                              args.rope_theta(),
                                              head_dim_,
-                                             true,
-                                             false,
+                                             /*is_neox_style=*/true,
+                                             /*interleaved=*/false,
                                              options));
 
   // 6. Attention
@@ -158,14 +170,32 @@ torch::Tensor Qwen3NextAttentionImpl::forward(
   const int64_t T = q.size(0);
 
   auto q_reshaped = q.reshape({T, num_heads_, head_dim_});
-  auto q_normed = q_norm_->forward(q_reshaped);
   auto k_reshaped = k.reshape({T, num_kv_heads_, head_dim_});
+  auto q_normed = q_norm_->forward(q_reshaped);
   auto k_normed = k_norm_->forward(k_reshaped);
-
-  q = q_normed.view({T, q_size_});
-  k = k_normed.view({T, kv_size_});
-
-  rotary_emb_->forward(positions, q, k);
+  if (positions.dim() == 2 && attn_metadata.mrope_cos.defined() &&
+      attn_metadata.mrope_sin.defined()) {
+    auto q_rotary = q_normed.index({"...", ISlice(0, rotary_dim_)});
+    auto k_rotary = k_normed.index({"...", ISlice(0, rotary_dim_)});
+    std::tie(q_rotary, k_rotary) = layer::rotary::apply_rotary_pos_emb(
+        q_rotary,
+        k_rotary,
+        attn_metadata.mrope_cos.unsqueeze(1),
+        attn_metadata.mrope_sin.unsqueeze(1),
+        rotary_interleaved_);
+    q_normed = torch::cat(
+        {q_rotary, q_normed.index({"...", ISlice(rotary_dim_, None)})}, -1);
+    k_normed = torch::cat(
+        {k_rotary, k_normed.index({"...", ISlice(rotary_dim_, None)})}, -1);
+    q = q_normed.reshape({T, q_size_});
+    k = k_normed.reshape({T, kv_size_});
+  } else {
+    q = q_normed.reshape({T, q_size_});
+    k = k_normed.reshape({T, kv_size_});
+    const torch::Tensor rotary_positions =
+        positions.dim() == 2 ? positions[0] : positions;
+    partial_rotary_emb_->forward(rotary_positions, q, k);
+  }
   auto out = std::get<0>(attn_->forward(attn_metadata, q, k, v, kv_cache));
 
   if (attn_output_gate_) {

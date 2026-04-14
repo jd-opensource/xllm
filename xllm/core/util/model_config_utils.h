@@ -17,10 +17,18 @@ limitations under the License.
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <string>
 
-namespace xllm {
+#include "core/util/json_reader.h"
 
-std::string get_model_type(const std::filesystem::path& model_path);
+namespace xllm::util {
 
-}  // namespace xllm
+std::string get_model_type(const JsonReader& reader,
+                           const std::filesystem::path& model_path,
+                           std::optional<std::string> backend = std::nullopt);
+
+std::string get_model_type(const std::filesystem::path& model_path,
+                           std::optional<std::string> backend = std::nullopt);
+
+}  // namespace xllm::util

@@ -42,6 +42,11 @@ std::vector<std::tuple<std::string, int32_t, int32_t>> groupByTokenType(
       current_key, start, static_cast<int32_t>(token_types.size()));
   return groups;
 }
+
+bool is_qwen3_vl_position_model(const std::string& model_type) {
+  return absl::StartsWith(model_type, "qwen3_vl") ||
+         absl::StartsWith(model_type, "qwen3_5_vl");
+}
 }  // namespace
 
 torch::Tensor MPositionHelper::get_positions() {
@@ -63,7 +68,7 @@ torch::Tensor MPositionHelper::get_positions() {
     std::tuple<torch::Tensor, int32_t> res;
     if (absl::StartsWith(args_.model_type(), "glm4v")) {
       res = get_positions_glm(image_grid_thw, video_grid_thw);
-    } else if (absl::StartsWith(args_.model_type(), "qwen3_vl")) {
+    } else if (is_qwen3_vl_position_model(args_.model_type())) {
       res = get_positions_qwen3(image_grid_thw, video_grid_thw);
     } else {
       res = get_positions_p(image_grid_thw, video_grid_thw, second_per_grid_ts);

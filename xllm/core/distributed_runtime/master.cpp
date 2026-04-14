@@ -106,7 +106,8 @@ void resolve_npu_kernel_backend_for_options(Options* options) {
     return;
   }
 
-  const std::string model_type = get_model_type(options->model_path());
+  const std::string model_type =
+      util::get_model_type(options->model_path(), options->backend());
   std::string effective_backend;
   std::string resolved_name;
   std::string error_message;

@@ -116,6 +116,13 @@ torch::Tensor get_deepseek_rotary_embedding(
     float mscale_all_dim,
     const torch::TensorOptions& options);
 
+std::tuple<torch::Tensor, torch::Tensor> apply_rotary_pos_emb(
+    const torch::Tensor& q,
+    const torch::Tensor& k,
+    const torch::Tensor& cos,
+    const torch::Tensor& sin,
+    bool interleaved);
+
 #if defined(USE_MUSA)
 torch::Tensor get_interleave_rotary_embedding(
     int64_t dim,
