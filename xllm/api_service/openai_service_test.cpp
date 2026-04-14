@@ -56,6 +56,7 @@ struct TestConfig {
 struct HttpResult {
   bool controller_failed = false;
   int status_code = 0;
+  std::string content_type;
   std::string error_text;
   std::string body;
   nlohmann::json json = nullptr;
@@ -92,6 +93,7 @@ class HttpClient {
     HttpResult result;
     result.controller_failed = cntl.Failed();
     result.status_code = cntl.http_response().status_code();
+    result.content_type = cntl.http_response().content_type();
     result.error_text = cntl.ErrorText();
     result.body = cntl.response_attachment().to_string();
     if (!result.body.empty()) {
@@ -110,6 +112,9 @@ class HttpClient {
 
 std::string describe_result(const HttpResult& result) {
   std::string description = "status=" + std::to_string(result.status_code);
+  if (!result.content_type.empty()) {
+    description += ", content_type=" + result.content_type;
+  }
   if (!result.error_text.empty()) {
     description += ", error=" + result.error_text;
   }
@@ -196,6 +201,7 @@ TEST_F(DISABLED_OpenAIServerFeaturesTest, SampleSingleMatch) {
 
   ASSERT_FALSE(result.controller_failed) << describe_result(result);
   ASSERT_EQ(result.status_code, 200) << describe_result(result);
+  EXPECT_EQ(result.content_type, "application/json") << describe_result(result);
   ASSERT_TRUE(result.json.is_object()) << describe_result(result);
   EXPECT_EQ(result.json["id"], "sample-it");
   EXPECT_EQ(result.json["object"], "sample_completion");
@@ -261,6 +267,7 @@ TEST_F(DISABLED_OpenAIServerFeaturesTest, CompletionsRegressionSmoke) {
 
   ASSERT_FALSE(result.controller_failed) << describe_result(result);
   ASSERT_EQ(result.status_code, 200) << describe_result(result);
+  EXPECT_EQ(result.content_type, "application/json") << describe_result(result);
   ASSERT_TRUE(result.json.is_object()) << describe_result(result);
   ASSERT_TRUE(result.json.contains("choices"));
   ASSERT_EQ(result.json["choices"].size(), 1);
@@ -279,6 +286,7 @@ TEST_F(DISABLED_OpenAIServerFeaturesTest, ChatCompletionsRegressionSmoke) {
 
   ASSERT_FALSE(result.controller_failed) << describe_result(result);
   ASSERT_EQ(result.status_code, 200) << describe_result(result);
+  EXPECT_EQ(result.content_type, "application/json") << describe_result(result);
   ASSERT_TRUE(result.json.is_object()) << describe_result(result);
   ASSERT_TRUE(result.json.contains("choices"));
   ASSERT_EQ(result.json["choices"].size(), 1);
