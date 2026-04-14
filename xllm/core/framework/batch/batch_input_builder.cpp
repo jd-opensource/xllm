@@ -86,11 +86,12 @@ BatchInputBuilder::BatchInputBuilder(
 ForwardInput BatchInputBuilder::build_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
+  (void)num_decoding_tokens;
+  (void)min_decoding_batch_size;
   // Since dont test multithreaded for ForwardInput, set thread_pool_ to
   // nullptr.
   thread_pool_ = nullptr;
   process_sequences();
-  padding_decode_batch_size(num_decoding_tokens, min_decoding_batch_size);
 
   return state_to_forward_input();
 }
@@ -237,6 +238,9 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.embedding_ids.insert(state_.embedding_ids.end(),
                                 state.embedding_ids.begin(),
                                 state.embedding_ids.end());
+    state_.linear_state_ids.insert(state_.linear_state_ids.end(),
+                                   state.linear_state_ids.begin(),
+                                   state.linear_state_ids.end());
     state_.request_ids.insert(state_.request_ids.end(),
                               state.request_ids.begin(),
                               state.request_ids.end());
@@ -395,12 +399,16 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     }
   }
 
+  // `linear_state_ids` is sequence-scoped metadata and must stay aligned with
+  // logical batch rows even for non-terminal chunked-prefill slices.
+  state.linear_state_ids.emplace_back(sequence->get_single_block_id());
+
   // Add extra token id
   if (n_tokens == seq_len) {
     // last chunk of prefill and decode
     // add -1 as extra token id
     state.extra_token_ids.emplace_back(-1);
-    state.embedding_ids.emplace_back(sequence->get_embedding_id());
+    state.embedding_ids.emplace_back(sequence->get_single_block_id());
     state.request_ids.emplace_back(sequence->request_id());
   } else {
     state.extra_token_ids.emplace_back(token_ids[seq_len]);
@@ -495,46 +503,6 @@ void BatchInputBuilder::setup_kv_cache_info(
   state.block_tables_vec.emplace_back(std::move(block_ids));
 }
 
-void BatchInputBuilder::padding_decode_batch_size(
-    uint32_t num_decoding_tokens,
-    uint32_t min_decoding_batch_size) {
-  if (num_sequences_ < min_decoding_batch_size) {
-    const uint32_t n_tokens = state_.flatten_tokens_vec.size();
-    // kv_cache is not empty in decoding phase
-    const bool in_decoding_phase = !state_.batch_forward_type.is_prefill();
-    const bool same_num_decoding_tokens =
-        state_.q_max_seq_len == num_decoding_tokens &&
-        n_tokens == num_sequences_ * num_decoding_tokens;
-    if (in_decoding_phase && same_num_decoding_tokens) {
-      // add padding tokens to the batch
-      for (int32_t i = num_sequences_; i < min_decoding_batch_size; ++i) {
-        for (int32_t k = 0; k < num_decoding_tokens; ++k) {
-          state_.flatten_tokens_vec.emplace_back(0);
-          if (!use_mrope_) {
-            state_.flatten_positions_vec.emplace_back(0);
-          } else {
-            state_.mrope_positions_vec.emplace_back(
-                torch::zeros({3, 1}, torch::kInt));
-          }
-          state_.new_token_slot_ids.emplace_back(0);
-        }
-#if defined(USE_NPU) || defined(USE_MUSA)
-        state_.seq_lens.push_back(num_decoding_tokens);
-        state_.q_seq_lens.push_back(num_decoding_tokens);
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
-        state_.seq_lens.push_back(state_.seq_lens.back() + num_decoding_tokens);
-        state_.q_seq_lens.push_back(state_.q_seq_lens.back() +
-                                    num_decoding_tokens);
-#endif
-        state_.block_tables_vec.emplace_back();
-        state_.paged_kv_indices.push_back(0);
-        state_.paged_kv_indptr.push_back(state_.paged_kv_indptr.back() + 1);
-        state_.paged_kv_last_page_len.push_back(1);
-      }
-    }
-  }
-}
-
 ForwardInput BatchInputBuilder::state_to_forward_input() {
   if (state_.flatten_tokens_vec.empty()) {
     return {};
@@ -588,6 +556,11 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   }
 
   input_params.embedding_ids = std::move(state_.embedding_ids);
+  input_params.linear_state_ids = std::move(state_.linear_state_ids);
+  if (!input_params.linear_state_ids.empty()) {
+    input_params.linear_state_indices =
+        torch::tensor(input_params.linear_state_ids, torch::kInt);
+  }
   input_params.request_ids = std::move(state_.request_ids);
   input_params.extra_token_ids = std::move(state_.extra_token_ids);
 
@@ -668,6 +641,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
       std::move(state_.paged_kv_last_page_len);
 
   raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
+  raw_forward_input.linear_state_ids = std::move(state_.linear_state_ids);
   raw_forward_input.request_ids = std::move(state_.request_ids);
   raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);
   // beam search kernel input

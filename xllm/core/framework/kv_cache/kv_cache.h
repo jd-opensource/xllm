@@ -56,8 +56,20 @@ class KVCache final {
   torch::Tensor get_ssm_cache() const;
   std::vector<std::vector<int64_t>> get_shapes();
 
-  bool empty() const {
-    return !key_cache_.defined() || !value_cache_.defined();
+  bool empty() const { return !has_any_cache(); }
+
+  bool has_kv_cache() const {
+    return key_cache_.defined() && value_cache_.defined();
+  }
+
+  bool has_index_cache() const { return index_cache_.defined(); }
+
+  bool has_linear_cache() const {
+    return conv_cache_.defined() && ssm_cache_.defined();
+  }
+
+  bool has_any_cache() const {
+    return has_kv_cache() || has_index_cache() || has_linear_cache();
   }
 
   void swap_blocks(torch::Tensor& src_tensor, torch::Tensor& dst_tensor);
