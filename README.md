@@ -12,7 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. -->
 
-[English](./README.md) | [中文](./README_zh.md)
+[English](./README.md) | [中文](./docs/project/README_zh.md)
 
 <div align="center">
 <img src="docs/assets/logo_with_llm.png" alt="xLLM" style="width:50%; height:auto;">

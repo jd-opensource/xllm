@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from env import set_npu_envs
+from scripts.build_support.env import set_npu_envs
 
 from .common.toolchain import (
     default_tilelang_root,

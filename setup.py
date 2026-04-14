@@ -8,12 +8,34 @@ import argparse
 from typing import Any, Optional
 
 from distutils.core import Command
-from setuptools import Extension, setup
-from setuptools.command.bdist_wheel import bdist_wheel
+from setuptools import Extension, find_namespace_packages, setup
 from setuptools.command.build_ext import build_ext
 
-from env import get_cxx_abi, set_npu_envs, set_mlu_envs, set_cuda_envs, set_ilu_envs, set_musa_envs
-from utils import get_cpu_arch, get_device_type, pre_build, get_version, check_and_install_pre_commit, read_readme, get_cmake_dir, get_base_dir, get_python_version, get_torch_version
+try:
+    from setuptools.command.bdist_wheel import bdist_wheel
+except ModuleNotFoundError:
+    from wheel.bdist_wheel import bdist_wheel
+
+from scripts.build_support.env import (
+    get_cxx_abi,
+    set_cuda_envs,
+    set_ilu_envs,
+    set_mlu_envs,
+    set_musa_envs,
+    set_npu_envs,
+)
+from scripts.build_support.utils import (
+    check_and_install_pre_commit,
+    get_base_dir,
+    get_cmake_dir,
+    get_cpu_arch,
+    get_device_type,
+    get_python_version,
+    get_torch_version,
+    get_version,
+    pre_build,
+    read_readme,
+)
 
 BUILD_TEST_FILE: bool = True
 BUILD_EXPORT: bool = True
@@ -637,6 +659,7 @@ if __name__ == "__main__":
                   "test": test_cmd,
                   'bdist_wheel': BuildDistWheel},
         options=options,
+        packages=find_namespace_packages(include=["scripts.build_support"]),
         zip_safe=False,
         py_modules=["xllm/launch_xllm", "xllm/__init__",
                     "xllm/pybind/llm", "xllm/pybind/vlm",

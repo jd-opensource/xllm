@@ -5,6 +5,7 @@ import subprocess
 import sysconfig
 import io
 import shlex
+from pathlib import Path
 from typing import Optional
 
 # get cpu architecture
@@ -53,7 +54,13 @@ def get_device_type() -> str:
     exit(1)
 
 def get_base_dir() -> str:
-    return os.path.abspath(os.path.dirname(__file__))
+    helper_path = Path(__file__).resolve()
+    for parent in helper_path.parents:
+        if all((parent / marker).exists() for marker in ("setup.py", "version.txt", "CMakeLists.txt")):
+            return str(parent)
+
+    fallback_index = min(2, len(helper_path.parents) - 1)
+    return str(helper_path.parents[fallback_index])
 
 def _join_path(*paths: str) -> str:
     return os.path.join(get_base_dir(), *paths)
@@ -375,7 +382,7 @@ def _ensure_xllm_ops_rebuild_on_missing_marker() -> None:
         return
 
 def pre_build() -> None:
-    script_path = os.path.dirname(os.path.abspath(__file__))
+    script_path = get_base_dir()
 
     _validate_submodules_or_exit(script_path)
     _ensure_prebuild_dependencies_installed(script_path)
