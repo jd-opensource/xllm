@@ -500,14 +500,8 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     int64_t head_v_dim = args_.linear_value_head_dim();
 
     // Parse mamba_ssm_dtype if specified
-    int64_t ssm_dtype_size = dtype_size;
-    if (!args_.mamba_ssm_dtype().empty()) {
-      auto parsed_ssm_dtype =
-          try_get_scalar_type_from_string(args_.mamba_ssm_dtype());
-      if (parsed_ssm_dtype) {
-        ssm_dtype_size = get_dtype_size(parsed_ssm_dtype.value());
-      }
-    }
+    int64_t ssm_dtype_size =
+        resolve_ssm_dtype_size(args_.mamba_ssm_dtype(), dtype_size);
 
     int64_t linear_ssm_slot_size =
         ssm_dtype_size * n_local_linear_v_heads_ * head_k_dim * head_v_dim;

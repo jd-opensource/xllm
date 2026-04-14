@@ -252,15 +252,9 @@ bool WorkerImpl::allocate_kv_cache(
 
       if (is_linear_layer) {
         // Linear attention layer: only allocate conv_cache and ssm_cache
-        torch::ScalarType ssm_dtype = dtype_;
         // Parse mamba_ssm_dtype if specified
-        if (!args.mamba_ssm_dtype().empty()) {
-          auto parsed_ssm_dtype =
-              try_get_scalar_type_from_string(args.mamba_ssm_dtype());
-          if (parsed_ssm_dtype) {
-            ssm_dtype = parsed_ssm_dtype.value();
-          }
-        }
+        torch::ScalarType ssm_dtype =
+            resolve_ssm_dtype(args.mamba_ssm_dtype(), dtype_);
 
 #if defined(USE_NPU)
         aclFormat npu_format_type = ACL_FORMAT_ND;
