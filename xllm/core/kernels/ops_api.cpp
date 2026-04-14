@@ -991,4 +991,23 @@ void gemma_rms_norm(GemmaRMSNormParams& params) {
   NOT_IMPLEMENTED();
 #endif
 }
+
+std::pair<torch::Tensor, torch::Tensor> chunk_gated_delta_rule(
+    ChunkGatedDeltaRuleParams& params) {
+#if defined(USE_NPU)
+  return npu::npu_chunk_gated_delta_rule(params.q,
+                                         params.k,
+                                         params.v,
+                                         params.g,
+                                         params.beta,
+                                         params.scale,
+                                         params.initial_state,
+                                         params.output_final_state,
+                                         params.cu_seqlens,
+                                         params.head_first,
+                                         params.use_qk_l2norm_in_kernel);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
 }  // namespace xllm::kernel

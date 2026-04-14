@@ -142,5 +142,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 fused_qkvzba_split_reshape_cat(FusedQkvzbaSplitReshapeParams& params);
 
 void gemma_rms_norm(GemmaRMSNormParams& params);
+std::pair<torch::Tensor, torch::Tensor> chunk_gated_delta_rule(
+    ChunkGatedDeltaRuleParams& params);
 
 }  // namespace xllm::kernel
