@@ -1044,7 +1044,7 @@ std::vector<Batch> ContinuousScheduler::schedule_request(
       break;
     }
     // wait for new requests to arrive
-    constexpr uint64_t kStepSleepTimeMs = 10;
+    constexpr uint64_t kStepSleepTimeMs = 1;
     const auto time_to_sleep =
         std::min(absl::Milliseconds(kStepSleepTimeMs), deadline - now);
     absl::SleepFor(time_to_sleep);
@@ -1119,7 +1119,7 @@ void ContinuousScheduler::generate() {
   while (num_pending_requests() > 0 || !batch_empty ||
          request_queue_.size() > 0) {
     // build a batch of requests/sequences
-    const auto timeout = absl::Milliseconds(500);
+    const auto timeout = absl::Milliseconds(50);
     std::vector<Batch> batch = schedule_request(timeout);
     batch_empty = true;
     for (auto& b : batch) {

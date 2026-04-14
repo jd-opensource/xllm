@@ -598,65 +598,78 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     lock_guard.emplace(capture_lock);
   }
 #endif
-  c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
-  processed_input = input.to(device_, dtype_);
-  auto& input_params = processed_input.input_params;
+  const bool use_default_stream =
+      !enable_schedule_overlap() && options_.backend() == "llm";
+  auto prepare_input_on_current_stream = [&]() {
+    processed_input = input.to(device_, dtype_);
+    auto& input_params = processed_input.input_params;
 
 #if defined(USE_NPU)
-  CpPrefillInputs tmp_cp_inputs;
-  if (parallel_args_.cp_size() > 1 &&
-      input.input_params.batch_forward_type.is_prefill()) {
-    tmp_cp_inputs = prepare_cp_prefill_inputs(parallel_args_.cp_size(),
-                                              input.token_ids,
-                                              input.positions,
-                                              input.input_params.q_seq_lens);
-    processed_input.input_params.cp_prefill_inputs = tmp_cp_inputs.to(device_);
-    CpEpPadding cp_ep_padding(
-        input.token_ids,
-        context_.get_model_args().num_experts_per_tok(),
-        context_.get_parallel_args().mapping_data(),
-        /*device=*/device_,
-        dtype_,
-        /*is_prefill=*/input.input_params.batch_forward_type.is_prefill());
-    processed_input.input_params.cp_ep_padding_data = cp_ep_padding.build();
-  }
-#endif
-
-  apply_kv_block_swaps(input_params);
-
-#if defined(USE_NPU)
-  if (context_.get_model_args().enable_mla() &&
-      input_params.batch_forward_type.is_chunked_prefill()) {
-    prepare_mla_prefixcache_inputs(input_params);
-  }
-
-  if (!context_.get_parallel_args().mapping_data().empty() &&
-      !(context_.get_parallel_args().cp_size() > 1) &&
-      (context_.get_parallel_args().dp_size() > 1 ||
-       context_.get_parallel_args().ep_size() > 1)) {
-    torch::Tensor token_size_per_dp_group =
-        torch::tensor(processed_input.input_params.dp_global_token_nums,
-                      torch::TensorOptions()
-                          .device(torch::kCPU)
-                          .dtype(torch::kInt32)
-                          .pinned_memory(true));
-    bool is_prefill =
-        processed_input.input_params.batch_forward_type.is_prefill();
-    DpEpPadding dp_ep_padding(token_size_per_dp_group,
-                              context_.get_model_args().num_experts_per_tok(),
-                              context_.get_parallel_args().mapping_data(),
-                              device_,
-                              dtype_,
-                              is_prefill);
-    processed_input.input_params.dp_ep_padding_data = dp_ep_padding.build();
-    if (FLAGS_enable_eplb) {
-      // expert_load_data_.fill_(0);
-      processed_input.input_params.expert_load_data = expert_load_data_;
+    CpPrefillInputs tmp_cp_inputs;
+    if (parallel_args_.cp_size() > 1 &&
+        input.input_params.batch_forward_type.is_prefill()) {
+      tmp_cp_inputs = prepare_cp_prefill_inputs(parallel_args_.cp_size(),
+                                                input.token_ids,
+                                                input.positions,
+                                                input.input_params.q_seq_lens);
+      processed_input.input_params.cp_prefill_inputs =
+          tmp_cp_inputs.to(device_);
+      CpEpPadding cp_ep_padding(
+          input.token_ids,
+          context_.get_model_args().num_experts_per_tok(),
+          context_.get_parallel_args().mapping_data(),
+          /*device=*/device_,
+          dtype_,
+          /*is_prefill=*/input.input_params.batch_forward_type.is_prefill());
+      processed_input.input_params.cp_ep_padding_data = cp_ep_padding.build();
     }
-  }
 #endif
 
-  auto ret = prepare_stream_->synchronize();
+    apply_kv_block_swaps(input_params);
+
+#if defined(USE_NPU)
+    if (context_.get_model_args().enable_mla() &&
+        input_params.batch_forward_type.is_chunked_prefill()) {
+      prepare_mla_prefixcache_inputs(input_params);
+    }
+
+    if (!context_.get_parallel_args().mapping_data().empty() &&
+        !(context_.get_parallel_args().cp_size() > 1) &&
+        (context_.get_parallel_args().dp_size() > 1 ||
+         context_.get_parallel_args().ep_size() > 1)) {
+      torch::Tensor token_size_per_dp_group =
+          torch::tensor(processed_input.input_params.dp_global_token_nums,
+                        torch::TensorOptions()
+                            .device(torch::kCPU)
+                            .dtype(torch::kInt32)
+                            .pinned_memory(true));
+      bool is_prefill =
+          processed_input.input_params.batch_forward_type.is_prefill();
+      DpEpPadding dp_ep_padding(token_size_per_dp_group,
+                                context_.get_model_args().num_experts_per_tok(),
+                                context_.get_parallel_args().mapping_data(),
+                                device_,
+                                dtype_,
+                                is_prefill);
+      processed_input.input_params.dp_ep_padding_data = dp_ep_padding.build();
+      if (FLAGS_enable_eplb) {
+        // expert_load_data_.fill_(0);
+        processed_input.input_params.expert_load_data = expert_load_data_;
+      }
+    }
+#endif
+  };
+
+  if (use_default_stream) {
+    prepare_input_on_current_stream();
+  } else {
+    c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
+    prepare_input_on_current_stream();
+  }
+
+  if (!use_default_stream) {
+    prepare_stream_->synchronize();
+  }
 }
 
 void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {

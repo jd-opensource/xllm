@@ -79,6 +79,8 @@ void WorkerService::step(ForwardInput& fwd_input,
                          torch::Tensor& src_seq_idxes,
                          torch::Tensor& out_tokens,
                          torch::Tensor& out_logprobs) {
+  const bool use_default_stream =
+      !options_.enable_schedule_overlap() && options_.backend() == "llm";
   // execute model
   auto future = worker_->step_async(fwd_input);
   if (!options_.enable_schedule_overlap()) {
@@ -96,58 +98,71 @@ void WorkerService::step(ForwardInput& fwd_input,
       prepared_layer_id = forward_outputs.value().prepared_layer_id;
 
       {
-        c10::StreamGuard streamGuard = stream_->set_stream_guard();
-        // only driver worker (rank=0) need to fill this
-        // [num_seq, ..., embed_dim] FloatTensor
-        embeddings = safe_to(sample_output.embeddings,
-                             torch::dtype(torch::kFloat32).device(torch::kCPU),
-                             true);
-
-        mm_embeddings.clear();
-        mm_embeddings.reserve(sample_output.mm_embeddings.size());
-        for (auto mm_embedding : sample_output.mm_embeddings) {
-          mm_embeddings.emplace_back(safe_to(mm_embedding, torch::kCPU, true));
-        }
-
-        dit_images.clear();
-        dit_images.reserve(dit_forward_output.tensors.size());
-        for (auto dit_image : dit_forward_output.tensors) {
-          dit_images.emplace_back(safe_to(dit_image, torch::kCPU, true));
-        }
-
-        // [num_seq]
-        next_tokens = safe_to(sample_output.next_tokens, torch::kCPU, true);
-        if (next_tokens.defined()) {
-          // [num_seq]
-          logprobs = safe_to(sample_output.logprobs, torch::kCPU, true);
-
-          if (!beam_search_output.src_seq_idxes.defined()) {
-            // beam search kernel will provide final tokens/logprobs in beam
-            // search output, so keep top_tokens/top_logprobs undefined to
-            // avoid returning them.
-            // [num_seq, topk]
-            top_tokens = safe_to(sample_output.top_tokens, torch::kCPU, true);
-            // [num_seq, topk]
-            top_logprobs =
-                safe_to(sample_output.top_logprobs, torch::kCPU, true);
-          }
-        }
-
-        // beam search output
-        // [num_seq]
-        src_seq_idxes =
-            safe_to(beam_search_output.src_seq_idxes, torch::kCPU, true);
-        if (src_seq_idxes.defined()) {
-          // [num_seq]
-          out_tokens =
-              safe_to(beam_search_output.out_tokens, torch::kCPU, true);
-          // [num_seq]
-          out_logprobs =
-              safe_to(beam_search_output.out_logprobs,
+        auto copy_output_to_host = [&]() {
+          // only driver worker (rank=0) need to fill this
+          // [num_seq, ..., embed_dim] FloatTensor
+          embeddings =
+              safe_to(sample_output.embeddings,
                       torch::dtype(torch::kFloat32).device(torch::kCPU),
                       true);
+
+          mm_embeddings.clear();
+          mm_embeddings.reserve(sample_output.mm_embeddings.size());
+          for (auto mm_embedding : sample_output.mm_embeddings) {
+            mm_embeddings.emplace_back(
+                safe_to(mm_embedding, torch::kCPU, true));
+          }
+
+          dit_images.clear();
+          dit_images.reserve(dit_forward_output.tensors.size());
+          for (auto dit_image : dit_forward_output.tensors) {
+            dit_images.emplace_back(safe_to(dit_image, torch::kCPU, true));
+          }
+
+          // [num_seq]
+          next_tokens = safe_to(sample_output.next_tokens, torch::kCPU, true);
+          if (next_tokens.defined()) {
+            // [num_seq]
+            logprobs = safe_to(sample_output.logprobs, torch::kCPU, true);
+
+            if (!beam_search_output.src_seq_idxes.defined()) {
+              // beam search kernel will provide final tokens/logprobs in beam
+              // search output, so keep top_tokens/top_logprobs undefined to
+              // avoid returning them.
+              // [num_seq, topk]
+              top_tokens = safe_to(sample_output.top_tokens, torch::kCPU, true);
+              // [num_seq, topk]
+              top_logprobs =
+                  safe_to(sample_output.top_logprobs, torch::kCPU, true);
+            }
+          }
+
+          // beam search output
+          // [num_seq]
+          src_seq_idxes =
+              safe_to(beam_search_output.src_seq_idxes, torch::kCPU, true);
+          if (src_seq_idxes.defined()) {
+            // [num_seq]
+            out_tokens =
+                safe_to(beam_search_output.out_tokens, torch::kCPU, true);
+            // [num_seq]
+            out_logprobs =
+                safe_to(beam_search_output.out_logprobs,
+                        torch::dtype(torch::kFloat32).device(torch::kCPU),
+                        true);
+          }
+        };
+        if (use_default_stream) {
+          copy_output_to_host();
+        } else {
+          c10::StreamGuard stream_guard = stream_->set_stream_guard();
+          copy_output_to_host();
         }
-        auto ret = stream_->synchronize();
+        if (use_default_stream) {
+          device_.synchronize_default_stream();
+        } else {
+          stream_->synchronize();
+        }
       }
     }
   } else {
@@ -692,6 +707,8 @@ void WorkerService::GetLastStepResult(
   threadpool_->schedule(
       [this, controller, req, pb_forward_output, done]() mutable {
         brpc::ClosureGuard done_guard(done);
+        const bool use_default_stream =
+            !options_.enable_schedule_overlap() && options_.backend() == "llm";
 
         auto future = worker_->get_last_step_result_async();
         auto forward_outputs = std::move(future).get();
@@ -702,46 +719,64 @@ void WorkerService::GetLastStepResult(
           int32_t prepared_layer_id = forward_outputs.value().prepared_layer_id;
           const auto& beam_search_output =
               forward_outputs.value().beam_search_output;
-          c10::StreamGuard streamGuard = stream_->set_stream_guard();
-          // [num_seq, ..., embed_dim]
-          auto embeddings =
-              safe_to(sample_output.embeddings, torch::kCPU, true);
-          embeddings = safe_to(embeddings, torch::kFloat32, true);
-
+          torch::Tensor embeddings;
+          torch::Tensor next_tokens;
+          torch::Tensor logprobs;
+          torch::Tensor top_tokens;
+          torch::Tensor top_logprobs;
+          torch::Tensor src_seq_idxes;
+          torch::Tensor out_tokens;
+          torch::Tensor out_logprobs;
           std::vector<torch::Tensor> dit_images;
-          dit_images.reserve(
-              forward_outputs.value().dit_forward_output.tensors.size());
-          for (auto image :
-               forward_outputs.value().dit_forward_output.tensors) {
-            dit_images.emplace_back(image);
+          auto copy_output_to_host = [&]() {
+            // [num_seq, ..., embed_dim]
+            embeddings = safe_to(sample_output.embeddings, torch::kCPU, true);
+            embeddings = safe_to(embeddings, torch::kFloat32, true);
+
+            dit_images.reserve(
+                forward_outputs.value().dit_forward_output.tensors.size());
+            for (auto image :
+                 forward_outputs.value().dit_forward_output.tensors) {
+              dit_images.emplace_back(image);
+            }
+
+            // [num_seq]
+            next_tokens = safe_to(sample_output.next_tokens, torch::kCPU, true);
+            if (next_tokens.defined() || FLAGS_enable_eplb) {
+              // [num_seq] FloatTensor
+              logprobs = safe_to(sample_output.logprobs, torch::kCPU, true);
+              // [num_seq, topk]
+              top_tokens = safe_to(sample_output.top_tokens, torch::kCPU, true);
+              // [num_seq, topk]
+              top_logprobs =
+                  safe_to(sample_output.top_logprobs, torch::kCPU, true);
+              // [num_seq]
+              src_seq_idxes =
+                  safe_to(beam_search_output.src_seq_idxes, torch::kCPU, true);
+              // [num_seq]
+              out_tokens =
+                  safe_to(beam_search_output.out_tokens, torch::kCPU, true);
+              // [num_seq]
+              out_logprobs =
+                  safe_to(beam_search_output.out_logprobs,
+                          torch::dtype(torch::kFloat32).device(torch::kCPU),
+                          true);
+            }
+          };
+
+          if (use_default_stream) {
+            copy_output_to_host();
+          } else {
+            c10::StreamGuard stream_guard = stream_->set_stream_guard();
+            copy_output_to_host();
+          }
+          if (use_default_stream) {
+            device_.synchronize_default_stream();
+          } else {
+            stream_->synchronize();
           }
 
-          // [num_seq]
-          const auto& next_tokens =
-              safe_to(sample_output.next_tokens, torch::kCPU, true);
           if (next_tokens.defined() || FLAGS_enable_eplb) {
-            // [num_seq] FloatTensor
-            const auto& logprobs =
-                safe_to(sample_output.logprobs, torch::kCPU, true);
-            // [num_seq, topk]
-            const auto& top_tokens =
-                safe_to(sample_output.top_tokens, torch::kCPU, true);
-            // [num_seq, topk]
-            const auto& top_logprobs =
-                safe_to(sample_output.top_logprobs, torch::kCPU, true);
-            // [num_seq]
-            const auto& src_seq_idxes =
-                safe_to(beam_search_output.src_seq_idxes, torch::kCPU, true);
-            // [num_seq]
-            const auto& out_tokens =
-                safe_to(beam_search_output.out_tokens, torch::kCPU, true);
-            // [num_seq]
-            const auto& out_logprobs =
-                safe_to(beam_search_output.out_logprobs,
-                        torch::dtype(torch::kFloat32).device(torch::kCPU),
-                        true);
-            auto ret = stream_->synchronize();
-
             forward_output_to_proto(next_tokens,
                                     logprobs,
                                     top_tokens,

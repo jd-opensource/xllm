@@ -346,7 +346,9 @@ struct ModelInputParams {
 
     params.kv_seq_lens = safe_to(kv_seq_lens, device, true);
     params.q_seq_lens = safe_to(q_seq_lens, device, true);
+#if !defined(USE_CUDA)
     params.q_cu_seq_lens = safe_to(q_cu_seq_lens, device, true);
+#endif
 
     params.new_cache_slots = safe_to(new_cache_slots, device, true);
     params.block_tables = safe_to(block_tables, device, true);

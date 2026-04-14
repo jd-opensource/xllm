@@ -1978,6 +1978,7 @@ inline void deserialize_raw_forward_input(const char*& buffer,
   read_data(context, input_params.batch_id);
   read_tensor_and_vector(
       context, input_params.q_seq_lens, input_params.q_seq_lens_vec, stream);
+#if !defined(USE_CUDA)
   if (!input_params.q_seq_lens_vec.empty()) {
     std::vector<int32_t> cu_lens(input_params.q_seq_lens_vec.size());
     std::partial_sum(input_params.q_seq_lens_vec.begin(),
@@ -1989,6 +1990,7 @@ inline void deserialize_raw_forward_input(const char*& buffer,
                                                    .device(torch::kCPU)
                                                    .pinned_memory(true));
   }
+#endif
   read_tensor_and_vector(
       context, input_params.kv_seq_lens, input_params.kv_seq_lens_vec, stream);
   read_tensor(context, input_params.paged_kv_indptr, stream);
