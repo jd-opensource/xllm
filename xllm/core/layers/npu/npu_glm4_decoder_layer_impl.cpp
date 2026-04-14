@@ -86,7 +86,9 @@ NpuGlm4DecoderLayerImpl::NpuGlm4DecoderLayerImpl(const ModelContext& context)
   auto options = context.get_tensor_options();
 
   param_from_args(prefill_param_, model_args, parallel_args, true);
-  param_from_args(decode_param_, model_args, parallel_args, false);
+  param_from_args(decode_graph_param_, model_args, parallel_args, false);
+  decode_eager_param_ = decode_graph_param_;
+  decode_eager_param_.enableAclGraphPagedAttention = false;
   atb_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   placeholder_vec_ = {1};
   dtype_ = c10::typeMetaToScalarType(options.dtype());
@@ -102,7 +104,10 @@ int64_t NpuGlm4DecoderLayerImpl::init_layer() {
   name_ = "glm4_decoder_layer";
   model_name_ = "glm4";
   CHECK_OPERATION_STATUS_RETURN(init_node(prefill_node_, prefill_param_));
-  CHECK_OPERATION_STATUS_RETURN(init_node(decode_node_, decode_param_));
+  CHECK_OPERATION_STATUS_RETURN(
+      init_node(decode_graph_node_, decode_graph_param_));
+  CHECK_OPERATION_STATUS_RETURN(
+      init_node(decode_eager_node_, decode_eager_param_));
 
   return atb::NO_ERROR;
 }
@@ -164,21 +169,27 @@ torch::Tensor NpuGlm4DecoderLayerImpl::forward(torch::Tensor& x,
                             attn_mask,
                             kv_cache,
                             input_params,
-                            true);
+                            true,
+                            false);
     // mstxRangeEnd(id);
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "excute prefill layer fail, error code: " << st;
   } else {
-    build_node_variant_pack(decode_node_,
+    const bool use_graph_decode_input =
+        FLAGS_enable_graph && input_params.graph_buffer.tiling_data.defined();
+    auto& decode_node =
+        use_graph_decode_input ? decode_graph_node_ : decode_eager_node_;
+    build_node_variant_pack(decode_node,
                             x,
                             cos_pos,
                             sin_pos,
                             decode_attn_mask_,
                             kv_cache,
                             input_params,
-                            false);
-    st = execute_node(decode_node_, node_id + 1000, event, event_flag);
+                            false,
+                            use_graph_decode_input);
+    st = execute_node(decode_node, node_id + 1000, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "excute decode layer fail, error code: " << st;
   }
@@ -194,7 +205,8 @@ void NpuGlm4DecoderLayerImpl::build_node_variant_pack(
     at::Tensor& attn_mask,
     KVCache& kv_cache,
     ModelInputParams& input_params,
-    bool is_prefill) {
+    bool is_prefill,
+    bool use_graph_decode_input) {
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
   // std::cout<<"node.variantPack.inTensors.size:"<<node.variantPack.inTensors.size()<<std::endl;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensors_;
@@ -229,7 +241,7 @@ void NpuGlm4DecoderLayerImpl::build_node_variant_pack(
         input_params.q_seq_lens_vec.data();
   }
 
-  if (FLAGS_enable_graph && !is_prefill &&
+  if (!is_prefill && use_graph_decode_input &&
       input_params.graph_buffer.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(
