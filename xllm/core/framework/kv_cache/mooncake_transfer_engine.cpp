@@ -303,15 +303,6 @@ std::string MooncakeTransferEngine::initialize() {
 
 bool MooncakeTransferEngine::register_memory(std::vector<void*> addrs,
                                              std::vector<size_t> lens,
-                                             int64_t size_per_block) {
-  std::vector<uint64_t> buf_bytes(addrs.size(),
-                                  static_cast<uint64_t>(size_per_block));
-  return register_memory(
-      std::move(addrs), std::move(lens), std::move(buf_bytes));
-}
-
-bool MooncakeTransferEngine::register_memory(std::vector<void*> addrs,
-                                             std::vector<size_t> lens,
                                              std::vector<uint64_t> buf_bytes) {
   if (addrs.size() != lens.size() || addrs.size() != buf_bytes.size()) {
     LOG(ERROR) << "register_memory input size mismatch, addrs=" << addrs.size()

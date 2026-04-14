@@ -106,9 +106,6 @@ class MooncakeTransferEngine final {
 
   bool register_memory(std::vector<void*> addrs,
                        std::vector<size_t> lens,
-                       int64_t size_per_block);
-  bool register_memory(std::vector<void*> addrs,
-                       std::vector<size_t> lens,
                        std::vector<uint64_t> buf_bytes);
 
   bool move_memory_blocks(const std::string& remote_addr,

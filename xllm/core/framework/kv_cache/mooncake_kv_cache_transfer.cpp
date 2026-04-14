@@ -422,8 +422,9 @@ void MooncakeKVCacheTransferXTensor::register_kv_cache_impl() {
 
   std::vector<void*> addrs = {global_xtensor.base_vaddr()};
   std::vector<size_t> lens = {global_xtensor.total_size()};
+  std::vector<uint64_t> buf_bytes = {static_cast<uint64_t>(size_per_block_)};
 
-  if (!mooncake_te_->register_memory(addrs, lens, size_per_block_)) {
+  if (!mooncake_te_->register_memory(addrs, lens, buf_bytes)) {
     LOG(ERROR) << "register GlobalXTensor failed";
     return;
   }
