@@ -52,6 +52,7 @@ class MiniCPMInputProcessor : public InputProcessor {
 
   const int32_t im_start_id_ = 151659;
   const int32_t im_end_id_ = 151658;
+  const int32_t unk_id_ = 128244;
 
   bool slice_mode_;
   bool use_image_id_;

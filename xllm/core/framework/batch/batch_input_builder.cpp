@@ -30,6 +30,7 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
+#include "request/mm_data_visitor.h"
 #include "runtime/params_utils.h"
 #include "util/blocking_counter.h"
 #include "util/slice.h"
@@ -314,6 +315,8 @@ void BatchInputBuilder::process_single_sequence(
   state.seq_lens.push_back(state.seq_lens.back() + seq_len);
   state.q_seq_lens.push_back(state.q_seq_lens.back() + padded_q_seq_len);
 #endif
+  // Process multi-modal input
+  process_multi_modal_inputs(sequence, n_kv_cache_tokens, q_seq_len, seq_index);
   // Process tokens and positions
   extract_tokens_and_positions(
       sequence, n_kv_cache_tokens, logical_seq_len, seq_len, state_ptr);
@@ -349,7 +352,11 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
   if (use_mrope_) {
     const auto& args = *args_;
     MPositionHelper helper(*sequence, args);
-    state.mrope_positions_vec.emplace_back(helper.get_positions());
+    const auto& whole_positions = helper.get_positions();
+    auto position = (sequence->stage() == SequenceStage::DECODE)
+                        ? whole_positions
+                        : whole_positions.slice(1, n_kv_cache_tokens, seq_len);
+    state.mrope_positions_vec.push_back(position);
   }
 
   // Process real tokens
@@ -779,6 +786,21 @@ void BatchInputBuilder::process_swap_block_infos(
     raw_forward_input.swap_blocks.insert(raw_forward_input.swap_blocks.end(),
                                          swap_block_transfer_infos_->begin(),
                                          swap_block_transfer_infos_->end());
+  }
+}
+
+void BatchInputBuilder::process_multi_modal_inputs(Sequence* sequence,
+                                                   uint32_t n_kv_cache_tokens,
+                                                   uint32_t q_seq_len,
+                                                   int32_t seq_index) {
+  MMData& mm_data = sequence->mutable_mm_data();
+  if ((sequence->stage() != SequenceStage::DECODE) && mm_data.valid()) {
+    UpdateMMItemScheduleStateVisitor visitor(n_kv_cache_tokens, q_seq_len);
+    mm_data.foreach (visitor);
+    MMType ty{static_cast<MMType::Value>(mm_data.type())};
+    MMData new_mm_data(ty, std::move(visitor.mm_data_items_));
+    new_mm_data.set_seq_index(seq_index);
+    mm_data_vec_.emplace_back(std::move(new_mm_data));
   }
 }
 }  // namespace xllm

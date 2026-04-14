@@ -734,12 +734,11 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
               .cpu()
               .contiguous()
               .to(torch::kLong);
-
       std::vector<int64_t> image_tokens_vec(
           image_tokens.data_ptr<int64_t>(),
           image_tokens.data_ptr<int64_t>() + image_tokens.numel());
-      multimodal_embeds["image|embedding"] =
-          image_embeds.split(image_tokens_vec, 0 /*dim*/);
+      multimodal_embeds["image|embedding|image"] =
+          image_embeds.split(image_tokens_vec, /*dim*/ 0);
     }
     if (video_input) {
       std::vector<torch::Tensor> temp_frames_hw;
@@ -758,7 +757,7 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
                                   input_params);
       auto t = video_input->video_grid_thw.index({torch::indexing::Slice(), 0});
       auto video_tokens =
-          ((video_input->video_grid_thw.prod(-1) / merge_size / merge_size) / t)
+          ((video_input->video_grid_thw.prod(-1) / merge_size / merge_size))
               .cpu()
               .contiguous()
               .to(torch::kLong);
@@ -766,7 +765,7 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
           video_tokens.data_ptr<int64_t>(),
           video_tokens.data_ptr<int64_t>() + video_tokens.numel());
 
-      multimodal_embeds["video|embedding"] =
+      multimodal_embeds["video|embedding|video"] =
           video_embeds.split(video_tokens_vec, 0 /*dim*/);
     }
     return multimodal_embeds;
@@ -791,17 +790,20 @@ class Glm4vForConditionalGenerationImpl : public torch::nn::Module {
   torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
                                      const ModelInputParams& input_params) {
     const auto& mm_data = input_params.mm_data;
-    torch::Tensor multimodal_embeds;
-    if (const auto& emb = mm_data.get<torch::Tensor>("embedding")) {
-      multimodal_embeds = emb.value();
-    }
     auto inputs_embeds = language_model_->get_input_embeddings(input_ids);
-    if (!multimodal_embeds.defined()) {
-      return inputs_embeds;
-    }
-    auto is_multimodal = generate_multimodal_mask(input_ids);
-    inputs_embeds = merge_multimodal_embeddings(
-        inputs_embeds, multimodal_embeds, is_multimodal);
+    auto merge_modality = [&](const std::string& embed_key,
+                              const std::string& mask_key) {
+      auto emb = mm_data.get<torch::Tensor>(embed_key);
+      if (!emb.has_value()) return;
+      auto mask = mm_data.get<torch::Tensor>(mask_key);
+      if (!mask.has_value()) return;
+      inputs_embeds =
+          merge_multimodal_embeddings(inputs_embeds, emb.value(), mask.value());
+    };
+
+    merge_modality("embedding|image", "image|mask");
+    merge_modality("embedding|video", "video|mask");
+
     return inputs_embeds;
   }
 

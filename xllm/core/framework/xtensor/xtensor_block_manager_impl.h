@@ -63,11 +63,13 @@ class XTensorBlockManagerImpl : public BlockManager {
 
   // Allocate shared blocks (prefix cache not supported)
   std::vector<Block> allocate_shared(
-      const Slice<int32_t>& tokens_ids,
+      Sequence* sequence,
+      const Slice<int32_t>& token_ids,
       const Slice<Block>& existed_shared_blocks = {}) override;
 
   // Cache blocks (prefix cache not supported)
-  void cache(const Slice<int32_t>& token_ids,
+  void cache(Sequence* sequence,
+             const Slice<int32_t>& token_ids,
              std::vector<Block>& blocks,
              size_t existed_shared_blocks_num = 0) override;
   void cache(const std::vector<Block>& blocks) override;
