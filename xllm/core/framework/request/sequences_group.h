@@ -48,7 +48,7 @@ class SequencesGroup {
                         const Tokenizer& tokenizer,
                         ThreadPool* thread_pool = nullptr);
 
-  void process_beam_search();
+  void process_beam_search(bool force_requested_result_size = false);
 
   bool check_beam_search() {
     return sequence_params_.sampling_param->beam_width > 1;

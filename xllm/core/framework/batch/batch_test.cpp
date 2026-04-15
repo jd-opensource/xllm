@@ -818,7 +818,7 @@ TEST(BatchTest, BeamSearchExpandsFinalResultsBeyondBeamWidth) {
   seq1->append_token(token1);
   group.sequences().emplace_back(std::move(seq1));
 
-  group.process_beam_search();
+  group.process_beam_search(/*force_requested_result_size=*/true);
 
   ASSERT_EQ(group.sequences().size(), 4);
   EXPECT_EQ(
