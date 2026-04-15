@@ -58,7 +58,7 @@ quay.io/jd_xllm/xllm-ai:xllm-dev-a2-arm-20260306 \
 
 编译xLLM：
 ```bash
-git clone https://github.com/jd-opensource/xllm
+git clone -b ict_final https://github.com/jd-opensource/xllm
 cd xllm
 
 # Install pre-commit for the first time
