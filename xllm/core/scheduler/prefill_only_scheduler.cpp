@@ -211,6 +211,8 @@ void PrefillOnlyScheduler::handle_prefill_requests(
     running_sequences_budgets_.insert(running_sequences_budgets_.end(),
                                       prefill_sequences_budget.begin(),
                                       prefill_sequences_budget.end());
+    cache_in_batch_prefix(prefill_sequences,
+                                           prefill_sequences_budget);
   }
   // maybe can pre-compute if prompt beyond length
   if (running_sequences_.empty() && !waiting_priority_queue.empty() &&
@@ -397,6 +399,8 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
     running_sequences_budgets_.insert(running_sequences_budgets_.end(),
                                       prefill_sequences_budget.begin(),
                                       prefill_sequences_budget.end());
+    cache_in_batch_prefix(prefill_sequences,
+                                           prefill_sequences_budget);
   }
   // maybe can pre-compute if prompt beyond length
   if (running_sequences_.empty() && !last_step_prefill_requests.empty() &&

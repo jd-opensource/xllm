@@ -40,6 +40,9 @@ class XTensorManagerPool final : public KVCacheManager {
 
   // unimplemented functions
   void cache(Sequence* sequence) override { NOT_IMPLEMENTED(); }
+  void cache(Sequence* sequence, size_t num_tokens) override {
+    NOT_IMPLEMENTED();
+  }
 
   bool allocate(Sequence* sequence,
                 size_t num_tokens,

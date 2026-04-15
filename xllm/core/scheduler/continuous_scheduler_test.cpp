@@ -333,6 +333,45 @@ TEST(ContinuousSchedulerFactoryTest,
             opt.max_tokens_per_chunk_for_prefill());
 }
 
+TEST(ContinuousSchedulerTest,
+     InBatchCachePrefillBlocksIncreaseSharedBlocksForLaterRequests) {
+  const auto run_with_in_batch_prefix_cache =
+      [](bool enable_in_batch_prefix_cache) -> size_t {
+    ScopedBoolFlagValue enable_prefix_cache_flag(FLAGS_enable_prefix_cache,
+                                                 true);
+
+    ContinuousScheduler::Options opt =
+        create_scheduler_options(1024, 16, 0, 1024, 1);
+    opt.enable_in_batch_prefix_cache_ = enable_in_batch_prefix_cache;
+    auto engine = std::make_unique<FakeEngine>(32, 4, true);
+    auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+
+    auto first_request =
+        generate_request_with_prompt_tokens({1, 2, 3, 4, 5, 6, 7, 8}, 1, 30000);
+    auto second_request =
+        generate_request_with_prompt_tokens({1, 2, 3, 4, 5, 6, 7, 8}, 1, 30000);
+    scheduler->add_request(first_request);
+    scheduler->add_request(second_request);
+
+    auto batch = scheduler->prepare_batch_test();
+    EXPECT_EQ(batch.size(), 1);
+    EXPECT_EQ(batch[0].size(), 2);
+    EXPECT_EQ(first_request->sequences()[0]->kv_state().shared_kv_blocks_num(),
+              0);
+    return second_request->sequences()[0]->kv_state().shared_kv_blocks_num();
+  };
+
+  const size_t second_request_shared_blocks_when_enabled =
+      run_with_in_batch_prefix_cache(true);
+  const size_t second_request_shared_blocks_when_disabled =
+      run_with_in_batch_prefix_cache(false);
+
+  EXPECT_GT(second_request_shared_blocks_when_enabled,
+            second_request_shared_blocks_when_disabled);
+  EXPECT_GT(second_request_shared_blocks_when_enabled, 0);
+  EXPECT_EQ(second_request_shared_blocks_when_disabled, 0);
+}
+
 // TEST-1:
 // test preempt
 TEST(ContinuousSchedulerTest, OnDecodePreemptOffDecode) {

@@ -166,6 +166,8 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       running_sequences_budgets_.insert(running_sequences_budgets_.end(),
                                         candidate_token_budgets.begin(),
                                         candidate_token_budgets.end());
+      cache_in_batch_prefix(candidate_sequences,
+                                             candidate_token_budgets);
       remaining_token_budget -= allocated_tokens;
       remaining_seq_budget -= allocated_seqs;
       estimate_latency += allocated_estimate_latency;
@@ -399,6 +401,8 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
     running_sequences_budgets_.insert(running_sequences_budgets_.end(),
                                       prefill_sequences_budget.begin(),
                                       prefill_sequences_budget.end());
+    cache_in_batch_prefix(prefill_sequences,
+                                           prefill_sequences_budget);
   }
   // maybe can pre-compute if prompt beyond length
   if (running_sequences_.empty() && !waiting_priority_queue.empty() &&

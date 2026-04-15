@@ -16,7 +16,6 @@ limitations under the License.
 #include "block_manager_pool.h"
 
 #include <algorithm>
-#include <limits>
 
 #include "block_manager_impl.h"
 #include "common/global_flags.h"
@@ -125,7 +124,7 @@ bool BlockManagerPool::allocate_embedding_id(Sequence* sequence,
 
 void BlockManagerPool::deallocate_embedding_id(Sequence* sequence,
                                                int32_t dp_rank) {
-  DCHECK(sequence != nullptr);
+  CHECK(sequence != nullptr);
   CHECK_GE(dp_rank, 0);
   CHECK_LT(static_cast<size_t>(dp_rank), embedding_managers_.size());
   auto embedding_block = sequence->reset_embedding_block();
@@ -152,7 +151,7 @@ void BlockManagerPool::deallocate(std::vector<Sequence*>& sequences) {
 }
 
 void BlockManagerPool::deallocate(Sequence* sequence) {
-  DCHECK(sequence != nullptr);
+  CHECK(sequence != nullptr);
   // add blocks to the prefix cache
   int32_t dp_rank = get_dp_rank(sequence);
   cache(sequence);
@@ -173,13 +172,13 @@ void BlockManagerPool::reset_transfer_infos() {
 }
 
 bool BlockManagerPool::allocate(Sequence* sequence) {
-  DCHECK(sequence != nullptr);
+  CHECK(sequence != nullptr);
   return allocate(sequence, sequence->num_tokens());
 }
 
 bool BlockManagerPool::allocate(std::vector<Sequence*>& sequences) {
   for (auto* sequence : sequences) {
-    DCHECK(sequence != nullptr);
+    CHECK(sequence != nullptr);
     if (!allocate(sequence, sequence->num_tokens())) {
       // should we gurantee the atomicity of the allocation? all or nothing?
       return false;
@@ -190,7 +189,7 @@ bool BlockManagerPool::allocate(std::vector<Sequence*>& sequences) {
 
 bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   AUTO_COUNTER(allocate_blocks_latency_seconds);
-  DCHECK(sequence != nullptr);
+  CHECK(sequence != nullptr);
   int32_t dp_rank = get_dp_rank(sequence);
   const bool started_empty = sequence->kv_state().num_kv_blocks() == 0;
   const bool needs_embedding_id = !sequence->has_embedding_id();
@@ -340,10 +339,30 @@ void BlockManagerPool::allocate_shared(Sequence* sequence) {
 }
 
 void BlockManagerPool::cache(Sequence* sequence) {
+  cache(sequence, sequence->kv_state().kv_cache_tokens_num());
+}
+
+void BlockManagerPool::cache(Sequence* sequence, size_t num_tokens) {
+  CHECK(sequence != nullptr);
+  if (!options_.enable_prefix_cache()) {
+    return;
+  }
+
+  const size_t block_size = static_cast<size_t>(options_.block_size());
+  const size_t available_tokens_num =
+      std::min({num_tokens,
+                sequence->kv_state().num_kv_blocks() * block_size,
+                sequence->tokens().size()});
+  const size_t existed_shared_blocks_num =
+      sequence->kv_state().shared_kv_blocks_num();
+  if (available_tokens_num <= existed_shared_blocks_num * block_size) {
+    return;
+  }
+
   int32_t dp_rank = get_dp_rank(sequence);
-  const auto token_ids = sequence->cached_tokens();
+  const auto token_ids = sequence->tokens().slice(0, available_tokens_num);
   auto* blocks = sequence->kv_state().mutable_kv_blocks();
-  auto existed_shared_blocks_num = sequence->kv_state().shared_kv_blocks_num();
+  CHECK_GE(blocks->size(), existed_shared_blocks_num);
   block_managers_[dp_rank]->cache(
       token_ids, *blocks, existed_shared_blocks_num);
 }
@@ -399,7 +418,7 @@ double BlockManagerPool::kv_cache_utilization() const {
 // currently use only for profile, which not need prefix cache.
 // If more often used in the future, can be integrated into deallocate function.
 void BlockManagerPool::deallocate_without_cache(Sequence* sequence) {
-  DCHECK(sequence != nullptr);
+  CHECK(sequence != nullptr);
   int32_t dp_rank = get_dp_rank(sequence);
   block_managers_[dp_rank]->deallocate(sequence->kv_state().kv_blocks());
   deallocate_embedding_id(sequence, dp_rank);
