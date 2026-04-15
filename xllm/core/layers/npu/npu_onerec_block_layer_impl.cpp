@@ -690,6 +690,11 @@ void NpuOneRecBlockLayerImpl::param_from_args(
       is_decoder_ ? args.decoder_head_dim() : args.head_dim();
   param.numAttentionHeadsPerRank = args_n_heads / param.worldSize;
   param.hiddenSizePerAttentionHead = args_head_dim;
+  // Reuse an existing model capability bit to split the legacy and 3B paths.
+  // Current validated models follow:
+  // - legacy model: moe_use_shared_experts = false
+  // - 3B model:     moe_use_shared_experts = true
+  param.useAttentionScaling = args.moe_use_shared_experts();
 
   const auto general_kv_heads = args.n_kv_heads();
   const auto decoder_kv_heads = args.decoder_n_kv_heads().has_value()
