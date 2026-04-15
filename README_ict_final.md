@@ -9,8 +9,10 @@
   - xllm启动脚本和测试脚本
   - 精度测试结果
   - 性能测试结果
-- 其他要求：
-  - 需要将代码和编译完成的二进制xllm文件（即`/path/to/xllm/build/xllm/core/server/xllm`文件）一并提交
+- 除报告外，还需要提交以下文件： 
+  - 代码文件（不包含`build`目录和`third_party`目录
+  - 编译完成的二进制xllm文件，即`/path/to/xllm/build/xllm/core/server/xllm`文件
+  - 将上面两个文件及报告打包成一个zip文件，文件名格式为：`<队伍名称>-xllm.zip`，如：`myteam-xllm.zip`
 
 
 ## xLLM 开发手册
