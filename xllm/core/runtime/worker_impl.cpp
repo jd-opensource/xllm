@@ -268,25 +268,18 @@ bool WorkerImpl::allocate_kv_cache(
                            torch::dtype(ssm_dtype).device(device_)),
               2);
         }
-#elif defined(USE_ILU) || defined(USE_MLU) || defined(USE_MUSA)
+#else
         if (enable_linear_attention) {
           conv_cache = torch::zeros(kv_cache_shape[2],
                                     torch::dtype(dtype_).device(device_));
           ssm_cache = torch::zeros(kv_cache_shape[3],
                                    torch::dtype(ssm_dtype).device(device_));
         }
-#else
-        if (enable_linear_attention) {
-          conv_cache = torch::empty(kv_cache_shape[2],
-                                    torch::dtype(dtype_).device(device_));
-          ssm_cache = torch::empty(kv_cache_shape[3],
-                                   torch::dtype(ssm_dtype).device(device_));
-        }
 #endif
         // Create empty KVCache with only conv and ssm
         kv_caches_.emplace_back(
-            torch::empty({0}, torch::dtype(dtype_).device(device_)),
-            torch::empty({0}, torch::dtype(dtype_).device(device_)),
+            torch::zeros({0}, torch::dtype(dtype_).device(device_)),
+            torch::zeros({0}, torch::dtype(dtype_).device(device_)),
             conv_cache,
             ssm_cache);
       } else {
@@ -298,16 +291,16 @@ bool WorkerImpl::allocate_kv_cache(
                 ? ACL_FORMAT_FRACTAL_NZ
                 : ACL_FORMAT_ND;
         key_cache = at_npu::native::npu_format_cast(
-            torch::empty(kv_cache_shape[0],
+            torch::zeros(kv_cache_shape[0],
                          torch::dtype(cache_dtype).device(device_)),
             npu_format_type);
         value_cache = at_npu::native::npu_format_cast(
-            torch::empty(kv_cache_shape[1],
+            torch::zeros(kv_cache_shape[1],
                          torch::dtype(cache_dtype).device(device_)),
             npu_format_type);
         if (enable_lighting_indexer) {
           index_cache = at_npu::native::npu_format_cast(
-              torch::empty(kv_cache_shape[2],
+              torch::zeros(kv_cache_shape[2],
                            torch::dtype(dtype_).device(device_)),
               npu_format_type);
         }
@@ -336,14 +329,14 @@ bool WorkerImpl::allocate_kv_cache(
           }
         }
 #else
-        key_cache = torch::empty(kv_cache_shape[0],
+        key_cache = torch::zeros(kv_cache_shape[0],
                                  torch::dtype(cache_dtype).device(device_));
         if (!kv_cache_shape[1].empty()) {
-          value_cache = torch::empty(kv_cache_shape[1],
+          value_cache = torch::zeros(kv_cache_shape[1],
                                      torch::dtype(cache_dtype).device(device_));
         }
         if (enable_lighting_indexer) {
-          index_cache = torch::empty(kv_cache_shape[2],
+          index_cache = torch::zeros(kv_cache_shape[2],
                                      torch::dtype(dtype_).device(device_));
         }
 #endif
@@ -440,7 +433,7 @@ void WorkerImpl::get_cache_info(uint64_t& cluster_id,
                                 std::string& addr,
                                 int64_t& k_cache_id,
                                 int64_t& v_cache_id) {
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
   kv_cache_transfer_->get_cache_info(cluster_id, addr, k_cache_id, v_cache_id);
 #endif
 }
@@ -449,7 +442,7 @@ bool WorkerImpl::link_cluster(const std::vector<uint64_t>& cluster_ids,
                               const std::vector<std::string>& addrs,
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports) {
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
   for (int32_t i = 0; i < cluster_ids.size(); ++i) {
     if (!kv_cache_transfer_->link_cluster(
             cluster_ids[i], addrs[i], device_ips[i], ports[i])) {
@@ -464,7 +457,7 @@ bool WorkerImpl::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                 const std::vector<std::string>& addrs,
                                 const std::vector<std::string>& device_ips,
                                 const std::vector<uint16_t>& ports) {
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
   for (int32_t i = 0; i < cluster_ids.size(); ++i) {
     if (!kv_cache_transfer_->unlink_cluster(
             cluster_ids[i], addrs[i], device_ips[i], ports[i])) {
@@ -1214,6 +1207,14 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
                                                   src_v_cache_id,
                                                   src_blocks,
                                                   dst_blocks);
+#elif defined(USE_MLU)
+  (void)src_cluster_id;
+  (void)src_addr;
+  (void)src_k_cache_id;
+  (void)src_v_cache_id;
+  (void)src_blocks;
+  (void)dst_blocks;
+  LOG(FATAL) << "MLU backend does not support PULL kv cache transfer.";
 #endif
   return false;
 }

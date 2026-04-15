@@ -15,25 +15,72 @@ limitations under the License.
 
 #include "mooncake_transfer_engine.h"
 
-#include <acl/acl.h>
-#include <gflags/gflags.h>
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <numeric>
 
-#include "common/global_flags.h"
 #include "util/net.h"
 
 namespace xllm {
+
+namespace {
+
+bool close_remote_session(MooncakeTransferEngineCore* core,
+                          uint64_t cluster_id) {
+  proto::MooncakeTransferEngineService_Stub* stub =
+      core->get_or_create_stub(cluster_id);
+  if (stub == nullptr) {
+    LOG(ERROR) << "create_rpc_channel failed for cluster_id=" << cluster_id;
+    return false;
+  }
+
+  proto::SessionInfo session_info;
+  session_info.set_addr(core->addr());
+  proto::Status response;
+  brpc::Controller cntl;
+  stub->CloseSession(&cntl, &session_info, &response, nullptr);
+  if (cntl.Failed() || !response.ok()) {
+    LOG(ERROR) << "CloseSession failed, " << cntl.ErrorText();
+    return false;
+  }
+  return true;
+}
+
+bool check_buf_range(uint64_t buf_len,
+                     uint64_t buf_bytes,
+                     uint64_t block_id,
+                     uint64_t block_len,
+                     int64_t buf_id) {
+  if (buf_bytes == 0) {
+    LOG(ERROR) << "buf bytes is zero, buf_id=" << buf_id;
+    return false;
+  }
+  if (buf_len % buf_bytes != 0) {
+    LOG(ERROR) << "buf len is not aligned with block bytes, buf_id=" << buf_id
+               << ", buf_len=" << buf_len << ", buf_bytes=" << buf_bytes;
+    return false;
+  }
+
+  uint64_t block_cnt = buf_len / buf_bytes;
+  if (block_id > block_cnt || block_len > block_cnt - block_id) {
+    LOG(ERROR) << "block range out of bounds, buf_id=" << buf_id
+               << ", block_cnt=" << block_cnt << ", block_id=" << block_id
+               << ", block_len=" << block_len;
+    return false;
+  }
+  return true;
+}
+
+}  // namespace
 
 // ============================================================================
 // MooncakeTransferEngineCore (Singleton)
 // ============================================================================
 
 MooncakeTransferEngineCore::~MooncakeTransferEngineCore() {
-  // free stub
   for (auto& pair : stub_map_) {
-    if (pair.second) {
+    if (pair.second != nullptr) {
       delete pair.second->channel();
       delete pair.second;
     }
@@ -58,7 +105,6 @@ bool MooncakeTransferEngineCore::initialize(int16_t listen_port,
   listen_port_ = listen_port;
   host_ip_ = net::get_local_ip_addr();
 
-  // Create TransferEngine
   engine_ = std::make_unique<TransferEngine>(true);
 
   Device dev(device);
@@ -74,7 +120,6 @@ bool MooncakeTransferEngineCore::initialize(int16_t listen_port,
 
   LOG(INFO) << "TransferEngine init success, hostname=" << hostname;
 
-  // Create brpc service and server
   service_ = std::make_shared<MooncakeTransferEngineService>();
   if (server_.AddService(service_.get(), brpc::SERVER_DOESNT_OWN_SERVICE) !=
       0) {
@@ -106,7 +151,7 @@ bool MooncakeTransferEngineCore::open_session(const uint64_t cluster_id,
 
   auto it = handles_.find(remote_addr);
   if (it != handles_.end()) {
-    // Session exists, just increment ref count
+    // Reuse the existing session until the last caller releases it.
     it->second.ref_count++;
     LOG(INFO) << "Reusing existing session for " << remote_addr
               << ", ref_count=" << it->second.ref_count;
@@ -115,18 +160,18 @@ bool MooncakeTransferEngineCore::open_session(const uint64_t cluster_id,
 
   if (cluster_id != 0) {
     proto::MooncakeTransferEngineService_Stub* stub =
-        get_or_create_stub(cluster_id);
-    if (!stub) {
+        get_or_create_stub_locked(cluster_id);
+    if (stub == nullptr) {
       LOG(ERROR) << "create_rpc_channel failed";
       return false;
     }
 
-    proto::SessionInfo proto_session_info;
-    proto_session_info.set_addr(addr_);
-    proto::Status status;
+    proto::SessionInfo request;
+    request.set_addr(addr_);
+    proto::Status response;
     brpc::Controller cntl;
-    stub->OpenSession(&cntl, &proto_session_info, &status, nullptr);
-    if (cntl.Failed() || !status.ok()) {
+    stub->OpenSession(&cntl, &request, &response, nullptr);
+    if (cntl.Failed() || !response.ok()) {
       LOG(ERROR) << "OpenSession failed, " << cntl.ErrorText();
       return false;
     }
@@ -136,9 +181,8 @@ bool MooncakeTransferEngineCore::open_session(const uint64_t cluster_id,
     return true;
   }
 
-  Transport::SegmentHandle handle;
-  handle = engine_->openSegment(remote_addr);
-  if (handle == (Transport::SegmentHandle)-1) {
+  Transport::SegmentHandle handle = engine_->openSegment(remote_addr);
+  if (handle == static_cast<Transport::SegmentHandle>(-1)) {
     LOG(ERROR) << "Fail to connect to " << remote_addr;
     return false;
   }
@@ -161,43 +205,35 @@ bool MooncakeTransferEngineCore::close_session(const uint64_t cluster_id,
             << ", remote_addr=" << remote_addr;
 
   auto it = handles_.find(remote_addr);
+  if (cluster_id != 0) {
+    if (it != handles_.end()) {
+      it->second.ref_count--;
+      LOG(INFO) << "Decremented ref_count for " << remote_addr
+                << ", ref_count=" << it->second.ref_count;
+      if (it->second.ref_count > 0) {
+        return true;
+      }
+    }
+    return close_remote_session(this, cluster_id);
+  }
+
   if (it == handles_.end()) {
     return true;
   }
 
-  // Decrement ref count
   it->second.ref_count--;
   LOG(INFO) << "Decremented ref_count for " << remote_addr
             << ", ref_count=" << it->second.ref_count;
 
-  // Only close when ref_count reaches 0
   if (it->second.ref_count > 0) {
     return true;
   }
 
-  if (cluster_id != 0) {
-    proto::MooncakeTransferEngineService_Stub* stub =
-        get_or_create_stub(cluster_id);
-    if (!stub) {
-      LOG(ERROR) << "create_rpc_channel failed";
-      return false;
-    }
-
-    proto::SessionInfo proto_session_info;
-    proto_session_info.set_addr(addr_);
-
-    proto::Status status;
-    brpc::Controller cntl;
-    stub->CloseSession(&cntl, &proto_session_info, &status, nullptr);
-    if (cntl.Failed() || !status.ok()) {
-      LOG(ERROR) << "CloseSession failed, " << cntl.ErrorText();
-      return false;
-    }
-    return true;
+  SegmentHandle handle = it->second.handle;
+  if (handle != static_cast<SegmentHandle>(-1)) {
+    engine_->closeSegment(handle);
   }
-
-  engine_->closeSegment(it->second.handle);
-  handles_.erase(remote_addr);
+  handles_.erase(it);
 
   LOG(INFO) << "Closed session for " << remote_addr;
 
@@ -209,14 +245,19 @@ SegmentHandle MooncakeTransferEngineCore::get_handle(
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = handles_.find(remote_addr);
   if (it == handles_.end()) {
-    return (SegmentHandle)-1;
+    return static_cast<SegmentHandle>(-1);
   }
   return it->second.handle;
 }
 
 proto::MooncakeTransferEngineService_Stub*
 MooncakeTransferEngineCore::get_or_create_stub(uint64_t cluster_id) {
-  // Note: caller should hold mutex_ if needed
+  std::lock_guard<std::mutex> lock(mutex_);
+  return get_or_create_stub_locked(cluster_id);
+}
+
+proto::MooncakeTransferEngineService_Stub*
+MooncakeTransferEngineCore::get_or_create_stub_locked(uint64_t cluster_id) {
   auto it = stub_map_.find(cluster_id);
   if (it == stub_map_.end()) {
     auto [remote_ip, remote_port] = net::convert_uint64_to_ip_port(cluster_id);
@@ -262,26 +303,28 @@ std::string MooncakeTransferEngine::initialize() {
 
 bool MooncakeTransferEngine::register_memory(std::vector<void*> addrs,
                                              std::vector<size_t> lens,
-                                             int64_t size_per_block) {
-  int64_t num = addrs.size();
-  num_layers_ = num / 2;
-
-  std::vector<BufferEntry> buffers;
-  buffers.reserve(num);
-  for (size_t i = 0; i < num; i++) {
-    buffers.push_back(BufferEntry{(void*)addrs[i], lens[i]});
-  }
-
-  int ret =
-      core_.engine()->registerLocalMemoryBatch(buffers, kWildcardLocation);
-  if (ret) {
-    LOG(ERROR) << "registerLocalMemoryBatch failed, ret=" << ret;
+                                             std::vector<uint64_t> buf_bytes) {
+  if (addrs.size() != lens.size() || addrs.size() != buf_bytes.size()) {
+    LOG(ERROR) << "register_memory input size mismatch, addrs=" << addrs.size()
+               << ", lens=" << lens.size()
+               << ", buf_bytes=" << buf_bytes.size();
     return false;
   }
 
-  size_per_block_ = size_per_block;
+  TransferEngine* engine = core_.engine();
+  for (size_t i = 0; i < addrs.size(); ++i) {
+    int32_t ret = engine->registerLocalMemory(
+        addrs[i], lens[i], kWildcardLocation, true, true);
+    if (ret != 0) {
+      LOG(ERROR) << "registerLocalMemory failed, buf_id=" << i
+                 << ", addr=" << addrs[i] << ", len=" << lens[i]
+                 << ", ret=" << ret;
+      return false;
+    }
+  }
 
-  LOG(INFO) << "register_memory success, size_per_block_=" << size_per_block_;
+  buf_bytes_ = std::move(buf_bytes);
+  LOG(INFO) << "register_memory success, buf_num=" << buf_bytes_.size();
 
   return true;
 }
@@ -308,11 +351,11 @@ void merge_block_ids(const std::vector<uint64_t>& src_blocks,
                      std::vector<uint64_t>& merged_src_blocks,
                      std::vector<uint64_t>& merged_dst_blocks,
                      std::vector<uint64_t>& block_lengths) {
-  // Create an index array and sort it based on the values of src blocks.
   size_t block_num = src_blocks.size();
   if (block_num == 0) {
     return;
   }
+
   std::vector<uint64_t> indices(block_num);
   std::iota(indices.begin(), indices.end(), 0);
   std::sort(
@@ -320,17 +363,15 @@ void merge_block_ids(const std::vector<uint64_t>& src_blocks,
         return src_blocks[i] < src_blocks[j];
       });
 
-  // Generate sorted src blocks and dst blocks.
   std::vector<uint64_t> sorted_src_blocks;
   std::vector<uint64_t> sorted_dst_blocks;
   sorted_src_blocks.reserve(block_num);
   sorted_dst_blocks.reserve(block_num);
-  for (auto id : indices) {
+  for (uint64_t id : indices) {
     sorted_src_blocks.emplace_back(src_blocks[id]);
     sorted_dst_blocks.emplace_back(dst_blocks[id]);
   }
 
-  // Obtain continuous blocks.
   uint64_t current_src_id = sorted_src_blocks[0];
   uint64_t current_dst_id = sorted_dst_blocks[0];
   uint64_t current_length = 1;
@@ -359,32 +400,48 @@ bool MooncakeTransferEngine::move_memory_blocks(
     const std::string& remote_addr,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
-    const std::vector<int64_t>& layer_ids,
+    const std::vector<int64_t>& buf_ids,
     MoveOpcode move_opcode) {
-  auto remote_handle = core_.get_handle(remote_addr);
-  if (remote_handle == (SegmentHandle)-1) {
+  if (src_blocks.size() != dst_blocks.size()) {
+    LOG(ERROR) << "src_blocks size must equal dst_blocks size, src="
+               << src_blocks.size() << ", dst=" << dst_blocks.size();
+    return false;
+  }
+
+  SegmentHandle remote_handle = core_.get_handle(remote_addr);
+  if (remote_handle == static_cast<SegmentHandle>(-1)) {
     LOG(ERROR) << "remote addr does not exist: " << remote_addr;
     return false;
   }
 
-  auto* engine = core_.engine();
-  std::shared_ptr<TransferMetadata::SegmentDesc> remote_segment_desc;
-  remote_segment_desc =
+  TransferEngine* engine = core_.engine();
+  std::shared_ptr<TransferMetadata::SegmentDesc> remote_segment_desc =
       engine->getMetadata()->getSegmentDescByID(remote_handle);
   if (!remote_segment_desc) {
     LOG(ERROR) << "remote_segment_desc is null";
     return false;
   }
 
-  std::shared_ptr<TransferMetadata::SegmentDesc> local_segment_desc;
-  local_segment_desc =
+  std::shared_ptr<TransferMetadata::SegmentDesc> local_segment_desc =
       engine->getMetadata()->getSegmentDescByID(LOCAL_SEGMENT_ID);
   if (!local_segment_desc) {
     LOG(ERROR) << "local_segment_desc is null";
     return false;
   }
 
-  // Merge consecutive block ids to improve transmission efficiency.
+  size_t local_buf_cnt = local_segment_desc->buffers.size();
+  size_t remote_buf_cnt = remote_segment_desc->buffers.size();
+  if (local_buf_cnt != remote_buf_cnt) {
+    LOG(ERROR) << "buffer count mismatch, local=" << local_buf_cnt
+               << ", remote=" << remote_buf_cnt;
+    return false;
+  }
+  if (local_buf_cnt != buf_bytes_.size()) {
+    LOG(ERROR) << "registered buffer count mismatch, local=" << local_buf_cnt
+               << ", block_bytes=" << buf_bytes_.size();
+    return false;
+  }
+
   std::vector<uint64_t> merged_src_blocks;
   std::vector<uint64_t> merged_dst_blocks;
   std::vector<uint64_t> block_lengths;
@@ -394,60 +451,66 @@ bool MooncakeTransferEngine::move_memory_blocks(
                   merged_dst_blocks,
                   block_lengths);
 
-  std::vector<int64_t> addr_ids;
-  if (layer_ids.size() == 0) {
-    addr_ids.resize(num_layers_);
-    std::iota(addr_ids.begin(), addr_ids.end(), 0);
+  std::vector<int64_t> active_buf_ids;
+  if (buf_ids.empty()) {
+    active_buf_ids.resize(buf_bytes_.size());
+    std::iota(active_buf_ids.begin(), active_buf_ids.end(), 0);
   } else {
-    addr_ids = layer_ids;
+    active_buf_ids = buf_ids;
   }
 
-  TransferRequest::OpCode opcode;
+  TransferRequest::OpCode opcode = TransferRequest::READ;
   if (move_opcode == MoveOpcode::WRITE) {
     opcode = TransferRequest::WRITE;
-  } else {
-    opcode = TransferRequest::READ;
   }
 
   std::vector<TransferRequest> entries;
-  entries.reserve(addr_ids.size() * merged_src_blocks.size() * 2);
-  for (auto addr_id : addr_ids) {
-    char* k_local_base = (char*)(local_segment_desc->buffers[addr_id].addr);
-    char* k_remote_base = (char*)(remote_segment_desc->buffers[addr_id].addr);
+  for (int64_t buf_id : active_buf_ids) {
+    if (buf_id < 0 || static_cast<size_t>(buf_id) >= local_buf_cnt) {
+      LOG(ERROR) << "buf_id out of range, buf_id=" << buf_id
+                 << ", buf_cnt=" << local_buf_cnt;
+      return false;
+    }
 
-    int64_t v_addr_id = addr_id + num_layers_;
-    char* v_local_base = (char*)(local_segment_desc->buffers[v_addr_id].addr);
-    char* v_remote_base = (char*)(remote_segment_desc->buffers[v_addr_id].addr);
+    size_t local_buf_id = static_cast<size_t>(buf_id);
+    uint64_t buf_bytes = buf_bytes_[local_buf_id];
+    uint64_t local_buf_len = local_segment_desc->buffers[local_buf_id].length;
+    uint64_t remote_buf_len = remote_segment_desc->buffers[local_buf_id].length;
 
+    char* local_base =
+        reinterpret_cast<char*>(local_segment_desc->buffers[local_buf_id].addr);
+    uint64_t remote_base = remote_segment_desc->buffers[local_buf_id].addr;
     for (size_t i = 0; i < merged_src_blocks.size(); ++i) {
       uint64_t src_block_id = merged_src_blocks[i];
       uint64_t dst_block_id = merged_dst_blocks[i];
       uint64_t block_length = block_lengths[i];
-      uint64_t src_bias = src_block_id * size_per_block_;
-      uint64_t dst_bias = dst_block_id * size_per_block_;
-      uint64_t len = block_length * size_per_block_;
+      if (!check_buf_range(
+              local_buf_len, buf_bytes, src_block_id, block_length, buf_id) ||
+          !check_buf_range(
+              remote_buf_len, buf_bytes, dst_block_id, block_length, buf_id)) {
+        return false;
+      }
 
-      TransferRequest k_entry;
-      k_entry.opcode = opcode;
-      k_entry.length = len;
-      k_entry.source = (void*)(k_local_base + src_bias);
-      k_entry.target_id = remote_handle;
-      k_entry.target_offset = (uint64_t)(k_remote_base + dst_bias);
-      k_entry.advise_retry_cnt = 0;
-      entries.push_back(k_entry);
+      uint64_t src_bias = src_block_id * buf_bytes;
+      uint64_t dst_bias = dst_block_id * buf_bytes;
+      uint64_t len = block_length * buf_bytes;
 
-      TransferRequest v_entry;
-      v_entry.opcode = opcode;
-      v_entry.length = len;
-      v_entry.source = (void*)(v_local_base + src_bias);
-      v_entry.target_id = remote_handle;
-      v_entry.target_offset = (uint64_t)(v_remote_base + dst_bias);
-      v_entry.advise_retry_cnt = 0;
-      entries.push_back(v_entry);
+      TransferRequest entry;
+      entry.opcode = opcode;
+      entry.length = len;
+      entry.source = reinterpret_cast<void*>(local_base + src_bias);
+      entry.target_id = remote_handle;
+      entry.target_offset = remote_base + dst_bias;
+      entry.advise_retry_cnt = 0;
+      entries.push_back(entry);
     }
   }
 
-  auto batch_size = entries.size();
+  if (entries.empty()) {
+    return true;
+  }
+
+  size_t batch_size = entries.size();
   auto batch_id = engine->allocateBatchID(batch_size);
   mooncake::Status s = engine->submitTransfer(batch_id, entries);
   if (!s.ok()) {
@@ -491,44 +554,41 @@ bool MooncakeTransferEngine::move_memory_by_global_offsets(
     const std::vector<uint64_t>& dst_offsets,
     size_t transfer_size,
     MoveOpcode move_opcode) {
-  auto remote_handle = core_.get_handle(remote_addr);
-  if (remote_handle == (SegmentHandle)-1) {
+  SegmentHandle remote_handle = core_.get_handle(remote_addr);
+  if (remote_handle == static_cast<SegmentHandle>(-1)) {
     LOG(ERROR) << "remote addr does not exist: " << remote_addr;
     return false;
   }
 
-  auto* engine = core_.engine();
-  std::shared_ptr<TransferMetadata::SegmentDesc> remote_segment_desc;
-  remote_segment_desc =
+  TransferEngine* engine = core_.engine();
+  std::shared_ptr<TransferMetadata::SegmentDesc> remote_segment_desc =
       engine->getMetadata()->getSegmentDescByID(remote_handle);
   if (!remote_segment_desc) {
     LOG(ERROR) << "remote_segment_desc is null";
     return false;
   }
 
-  std::shared_ptr<TransferMetadata::SegmentDesc> local_segment_desc;
-  local_segment_desc =
+  std::shared_ptr<TransferMetadata::SegmentDesc> local_segment_desc =
       engine->getMetadata()->getSegmentDescByID(LOCAL_SEGMENT_ID);
   if (!local_segment_desc) {
     LOG(ERROR) << "local_segment_desc is null";
     return false;
   }
 
-  // XTensor mode: use buffer[0] which is the GlobalXTensor
   if (local_segment_desc->buffers.empty() ||
       remote_segment_desc->buffers.empty()) {
     LOG(ERROR) << "No buffers registered for XTensor mode";
     return false;
   }
 
-  char* local_base = (char*)(local_segment_desc->buffers[0].addr);
-  char* remote_base = (char*)(remote_segment_desc->buffers[0].addr);
+  char* local_base =
+      reinterpret_cast<char*>(local_segment_desc->buffers[0].addr);
+  char* remote_base =
+      reinterpret_cast<char*>(remote_segment_desc->buffers[0].addr);
 
-  TransferRequest::OpCode opcode;
+  TransferRequest::OpCode opcode = TransferRequest::READ;
   if (move_opcode == MoveOpcode::WRITE) {
     opcode = TransferRequest::WRITE;
-  } else {
-    opcode = TransferRequest::READ;
   }
 
   std::vector<TransferRequest> entries;
@@ -538,14 +598,15 @@ bool MooncakeTransferEngine::move_memory_by_global_offsets(
     TransferRequest entry;
     entry.opcode = opcode;
     entry.length = transfer_size;
-    entry.source = (void*)(local_base + src_offsets[i]);
+    entry.source = reinterpret_cast<void*>(local_base + src_offsets[i]);
     entry.target_id = remote_handle;
-    entry.target_offset = (uint64_t)(remote_base + dst_offsets[i]);
+    entry.target_offset =
+        reinterpret_cast<uint64_t>(remote_base + dst_offsets[i]);
     entry.advise_retry_cnt = 0;
     entries.push_back(entry);
   }
 
-  auto batch_size = entries.size();
+  size_t batch_size = entries.size();
   auto batch_id = engine->allocateBatchID(batch_size);
   mooncake::Status s = engine->submitTransfer(batch_id, entries);
   if (!s.ok()) {
@@ -587,9 +648,9 @@ bool MooncakeTransferEngine::pull_memory_blocks(
     const std::string& remote_addr,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
-    const std::vector<int64_t>& layer_ids) {
-  auto ret = move_memory_blocks(
-      remote_addr, src_blocks, dst_blocks, layer_ids, MoveOpcode::READ);
+    const std::vector<int64_t>& buf_ids) {
+  bool ret = move_memory_blocks(
+      remote_addr, src_blocks, dst_blocks, buf_ids, MoveOpcode::READ);
   if (!ret) {
     LOG(ERROR) << "Pull memory blocks failed, ret = " << ret;
     return false;
@@ -602,9 +663,9 @@ bool MooncakeTransferEngine::push_memory_blocks(
     const std::string& remote_addr,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
-    const std::vector<int64_t>& layer_ids) {
-  auto ret = move_memory_blocks(
-      remote_addr, src_blocks, dst_blocks, layer_ids, MoveOpcode::WRITE);
+    const std::vector<int64_t>& buf_ids) {
+  bool ret = move_memory_blocks(
+      remote_addr, src_blocks, dst_blocks, buf_ids, MoveOpcode::WRITE);
   if (!ret) {
     LOG(ERROR) << "Push memory blocks failed, ret = " << ret;
     return false;
@@ -623,8 +684,14 @@ void MooncakeTransferEngineService::OpenSession(
     proto::Status* response,
     ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
+  if (request == nullptr || response == nullptr || controller == nullptr) {
     LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+
+  if (request->addr().empty()) {
+    LOG(ERROR) << "OpenSession request missing addr";
+    response->set_ok(false);
     return;
   }
 
@@ -641,8 +708,14 @@ void MooncakeTransferEngineService::CloseSession(
     proto::Status* response,
     ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
-  if (!request || !response || !controller) {
+  if (request == nullptr || response == nullptr || controller == nullptr) {
     LOG(ERROR) << "brpc request | response | controller is null";
+    return;
+  }
+
+  if (request->addr().empty()) {
+    LOG(ERROR) << "CloseSession request missing addr";
+    response->set_ok(false);
     return;
   }
 

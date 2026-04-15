@@ -61,6 +61,15 @@ class CausalVLMImpl : public CausalVLM {
     return model_->forward(tokens, positions, kv_caches, parameters);
   }
 
+  torch::Tensor pooler(const torch::Tensor& hidden_states,
+                       const torch::Tensor& seleted_idxes) override {
+    if constexpr (detail::has_pooler<Model>::value) {
+      return model_->pooler(hidden_states, seleted_idxes);
+    } else {
+      return CausalLM::pooler(hidden_states, seleted_idxes);
+    }
+  }
+
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) override {
     return model_->logits(hidden_states, seleted_idxes);

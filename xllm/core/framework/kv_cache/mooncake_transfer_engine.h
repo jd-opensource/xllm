@@ -19,8 +19,11 @@ limitations under the License.
 #include <brpc/channel.h>
 #include <brpc/server.h>
 
+#include <cstdint>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
+#include <vector>
 
 #include "mooncake_transfer_engine.pb.h"
 #include "platform/device.h"
@@ -31,38 +34,38 @@ using namespace mooncake;
 
 class MooncakeTransferEngineService;
 
-// Singleton core that holds the actual TransferEngine and brpc Server
-// Multiple MooncakeTransferEngine instances share this core
+// Singleton core that holds the actual TransferEngine and brpc Server.
+// Multiple MooncakeTransferEngine instances share this core.
 class MooncakeTransferEngineCore {
  public:
-  // Get the global singleton instance
   static MooncakeTransferEngineCore& get_instance() {
     static MooncakeTransferEngineCore instance;
     return instance;
   }
 
-  // Initialize the core (only first call takes effect)
+  // Initialize the shared core. Only the first call takes effect.
   bool initialize(int16_t listen_port, const torch::Device& device);
 
-  // Get the underlying TransferEngine
   TransferEngine* engine() { return engine_.get(); }
 
-  // Get the RPC address
   const std::string& addr() const { return addr_; }
   const std::string& host_ip() const { return host_ip_; }
 
-  // Session management (shared across all MooncakeTransferEngine instances)
+  // Session state is shared across all MooncakeTransferEngine instances.
   bool open_session(const uint64_t cluster_id, const std::string& remote_addr);
   bool close_session(const uint64_t cluster_id, const std::string& remote_addr);
   SegmentHandle get_handle(const std::string& remote_addr);
 
-  // RPC channel management
+  // Lazily create and cache the RPC stub for a remote cluster.
   proto::MooncakeTransferEngineService_Stub* get_or_create_stub(
       uint64_t cluster_id);
 
   bool is_initialized() const { return initialized_; }
 
  private:
+  proto::MooncakeTransferEngineService_Stub* get_or_create_stub_locked(
+      uint64_t cluster_id);
+
   MooncakeTransferEngineCore() = default;
   ~MooncakeTransferEngineCore();
   MooncakeTransferEngineCore(const MooncakeTransferEngineCore&) = delete;
@@ -81,11 +84,10 @@ class MooncakeTransferEngineCore {
   brpc::Server server_;
   std::shared_ptr<MooncakeTransferEngineService> service_;
 
-  // Session handle with reference count for isolation between kv cache and
-  // weight transfer
+  // Keep a shared session handle so kv cache and weight transfer can reuse it.
   struct SessionInfo {
-    SegmentHandle handle;
-    int ref_count = 0;
+    SegmentHandle handle = static_cast<SegmentHandle>(-1);
+    int32_t ref_count = 0;
   };
   std::unordered_map<std::string, SessionInfo> handles_;
   std::unordered_map<uint64_t, proto::MooncakeTransferEngineService_Stub*>
@@ -104,28 +106,25 @@ class MooncakeTransferEngine final {
 
   bool register_memory(std::vector<void*> addrs,
                        std::vector<size_t> lens,
-                       int64_t size_per_block);
+                       std::vector<uint64_t> buf_bytes);
 
   bool move_memory_blocks(const std::string& remote_addr,
                           const std::vector<uint64_t>& src_blocks,
                           const std::vector<uint64_t>& dst_blocks,
-                          const std::vector<int64_t>& layer_ids,
+                          const std::vector<int64_t>& buf_ids,
                           MoveOpcode move_opcode);
 
   bool pull_memory_blocks(const std::string& remote_addr,
                           const std::vector<uint64_t>& src_blocks,
                           const std::vector<uint64_t>& dst_blocks,
-                          const std::vector<int64_t>& layer_ids);
+                          const std::vector<int64_t>& buf_ids);
 
   bool push_memory_blocks(const std::string& remote_addr,
                           const std::vector<uint64_t>& src_blocks,
                           const std::vector<uint64_t>& dst_blocks,
-                          const std::vector<int64_t>& layer_ids);
+                          const std::vector<int64_t>& buf_ids);
 
-  // === XTensor mode: transfer by GlobalXTensor offsets ===
-  // Instead of using block_id and per-layer buffers, this method uses
-  // raw offsets into the GlobalXTensor memory region (buffer[0]).
-  // src_offsets and dst_offsets are absolute offsets within GlobalXTensor.
+  // XTensor mode uses raw offsets in the GlobalXTensor region in buffer[0].
   bool move_memory_by_global_offsets(const std::string& remote_addr,
                                      const std::vector<uint64_t>& src_offsets,
                                      const std::vector<uint64_t>& dst_offsets,
@@ -141,8 +140,7 @@ class MooncakeTransferEngine final {
 
  private:
   int16_t listen_port_;
-  int64_t size_per_block_ = 0;
-  int64_t num_layers_ = 0;
+  std::vector<uint64_t> buf_bytes_;
   Device device_;
   MooncakeTransferEngineCore& core_;
 };

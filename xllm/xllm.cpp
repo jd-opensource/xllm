@@ -50,6 +50,45 @@ static const std::unordered_set<std::string> prefill_sp_supported_model_set = {
     "deepseek_v32",
     "glm_moe_dsa"};
 
+namespace {
+
+void fix_mlu_disagg_pd_flags() {
+  if (FLAGS_kv_cache_transfer_type != "Mooncake") {
+    LOG(WARNING) << "MLU disaggregated PD requires "
+                 << "kv_cache_transfer_type=Mooncake; forcing from "
+                 << FLAGS_kv_cache_transfer_type << " to Mooncake.";
+    FLAGS_kv_cache_transfer_type = "Mooncake";
+  }
+  if (FLAGS_kv_cache_transfer_mode != "PUSH") {
+    LOG(WARNING) << "MLU disaggregated PD requires "
+                 << "kv_cache_transfer_mode=PUSH; forcing from "
+                 << FLAGS_kv_cache_transfer_mode << " to PUSH.";
+    FLAGS_kv_cache_transfer_mode = "PUSH";
+  }
+  if (FLAGS_kv_cache_dtype != "auto") {
+    LOG(WARNING) << "MLU disaggregated PD requires kv_cache_dtype=auto; "
+                 << "forcing from " << FLAGS_kv_cache_dtype << " to auto.";
+    FLAGS_kv_cache_dtype = "auto";
+  }
+  if (FLAGS_enable_prefix_cache) {
+    LOG(WARNING) << "MLU disaggregated PD does not support prefix cache; "
+                 << "forcing enable_prefix_cache=false.";
+    FLAGS_enable_prefix_cache = false;
+  }
+  if (FLAGS_enable_chunked_prefill) {
+    LOG(WARNING) << "MLU disaggregated PD does not support chunked prefill; "
+                 << "forcing enable_chunked_prefill=false.";
+    FLAGS_enable_chunked_prefill = false;
+  }
+  if (FLAGS_enable_pd_ooc) {
+    LOG(WARNING) << "MLU disaggregated PD does not support pd_ooc; "
+                 << "forcing enable_pd_ooc=false.";
+    FLAGS_enable_pd_ooc = false;
+  }
+}
+
+}  // namespace
+
 void shutdown_handler(int signal) {
   // TODO: gracefully shutdown the server
   LOG(WARNING) << "Received signal " << signal << ", stopping server...";
@@ -79,6 +118,12 @@ void validate_flags(const std::string& model_type) {
       FLAGS_backend != "dit") {
     LOG(FATAL) << "Currently, block_size must be 16 for MLU backend, we will "
                   "support other block sizes in the future.";
+  }
+  if (FLAGS_enable_disagg_pd) {
+    if (FLAGS_backend != "llm") {
+      LOG(FATAL) << "MLU disaggregated PD only supports backend=llm.";
+    }
+    fix_mlu_disagg_pd_flags();
   }
 #endif
 

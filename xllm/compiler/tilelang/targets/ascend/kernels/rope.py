@@ -20,6 +20,10 @@ SECONDARY_ROPE_DIM = 128
 VEC_NUM = 2
 FIXED_UB_BUFFER_BYTES = 64 * 1024
 REF_CHECK_NUM_TOKENS = 16
+# AOT kernel tensor signatures still require static first-dim bounds.
+# Keep a sufficiently large compile-time upper bound so runtime rows
+# (`num_tokens * num_heads`) used by wrapper tests stay in-range.
+MIN_COMPILE_NUM_TOKENS = 65536
 
 # Per-row bytes in UB for this kernel:
 # x_half(2) + x(4) + sin_half(2) + sin(4) + cos_half(2) + cos(4)
@@ -67,8 +71,9 @@ def build_rope_kernel(
         ub_buffer_bytes=ub_buffer_bytes,
     )
     # Current AOT path fixes launch block_num at compile time, so runtime input
-    # shape only changes per-task workload splitting.
-    compile_num_tokens = task_num * max_rows_num_in_ub
+    # shape only changes per-task workload splitting. The tensor signature still
+    # needs a static upper bound for the first dimension.
+    compile_num_tokens = max(task_num * max_rows_num_in_ub, MIN_COMPILE_NUM_TOKENS)
     compile_flatten_width = compile_num_tokens * head_dim
     acc_dtype = "float32"
     mask_dtype = "uint32"

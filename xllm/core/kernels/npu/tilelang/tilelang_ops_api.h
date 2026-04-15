@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <utility>
+
 namespace xllm::kernel::npu::tilelang {
 
 // Public TileLang kernel APIs exported to the xLLM NPU runtime.
@@ -27,5 +29,15 @@ namespace xllm::kernel::npu::tilelang {
 void rope_in_place(torch::Tensor& input,
                    const torch::Tensor& sin_cache,
                    const torch::Tensor& cos_cache);
+
+// Compute fused GDN gating outputs on NPU.
+// Invalid inputs trigger CHECK failures.
+std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
+    const torch::Tensor& A_log,
+    const torch::Tensor& a,
+    const torch::Tensor& b,
+    const torch::Tensor& dt_bias,
+    float softplus_beta,
+    float softplus_threshold);
 
 }  // namespace xllm::kernel::npu::tilelang

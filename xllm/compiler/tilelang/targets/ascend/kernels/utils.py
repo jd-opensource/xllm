@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import tilelang
 from typing import Any
 
@@ -7,10 +5,12 @@ from ....common.manifest import KernelAbi, KernelVariantManifest
 from ....common.spec import DispatchField
 
 DEFAULT_ASCEND_PASS_CONFIGS = {
-    tilelang.PassConfigKey.TL_ASCEND_AUTO_SYNC: True,
-    tilelang.PassConfigKey.TL_ASCEND_MEMORY_PLANNING: True,
-    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_SYNC: True,
-    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_COMBINE: True,
+    # Use raw pass-config strings to avoid hard dependency on
+    # tilelang.PassConfigKey export timing/version.
+    "tl.ascend_auto_sync": True,
+    "tl.ascend_memory_planning": True,
+    "tl.ascend_auto_cross_core_sync": True,
+    "tl.ascend_auto_cv_combine": True,
 }
 
 DEFAULT_ASCEND_BISHENG_ARCH = "dav-c220"

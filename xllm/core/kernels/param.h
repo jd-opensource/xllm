@@ -1382,4 +1382,21 @@ struct PartialRotaryEmbeddingParams {
   torch::Tensor cos_sin_cache;
   bool is_neox_style;
 };
+
+struct FusedQkvzbaSplitReshapeParams {
+  torch::Tensor mixed_qkvz;
+  torch::Tensor mixed_ba;
+  int32_t num_heads_qk;
+  int32_t num_heads_v;
+  int32_t head_qk;
+  int32_t head_v;
+};
+
+struct GemmaRMSNormParams {
+  torch::Tensor x;
+  torch::Tensor gamma;
+  double epsilon;
+  torch::Tensor rstd_out;
+  torch::Tensor norm_out;
+};
 }  // namespace xllm::kernel

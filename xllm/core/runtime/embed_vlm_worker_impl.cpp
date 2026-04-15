@@ -43,8 +43,8 @@ EmbedVLMWorkerImpl::EmbedVLMWorkerImpl(const ParallelArgs& parallel_args,
 bool EmbedVLMWorkerImpl::init_model(ModelContext& context) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
 
-  context.set_image_embedding_mode(true);
-  model_ = create_vlm_embedding_model(context);
+  context.set_image_embedding_mode(false);
+  model_ = create_vlm_model(context);
   CHECK(model_ != nullptr) << "Failed to create model.";
   model_executor_ = std::make_unique<Executor>(
       model_.get(), context.get_model_args(), device_, options_);
@@ -82,9 +82,8 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
   SampleOutput sample_output;
   if (sampling_params.selected_token_idxes.defined() &&
       input.sampling_params.is_embeddings) {
-    EmbeddingVLM* em_model = dynamic_cast<EmbeddingVLM*>(model_.get());
     auto embeddings =
-        em_model->pooler(hidden_states, sampling_params.selected_token_idxes);
+        model_->pooler(hidden_states, sampling_params.selected_token_idxes);
     sample_output.embeddings = embeddings;
     // split full embeddings and add them to mm_embeddings
     // so that the user could receive embeddings of images and texts

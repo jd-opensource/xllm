@@ -164,6 +164,10 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
                 attn_metadata,
                 kv_caches[i],
                 modified_input_params);
+      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
+                                              h.device())) {
+        return ModelOutput();
+      }
 
       if (deep_stack_size && i < deep_stack_size) {
         h = deepstack_process(h, input_params.visual_pos_masks, deep_stacks[i]);
