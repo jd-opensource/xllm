@@ -48,7 +48,7 @@ size_t resolve_final_output_count(const RequestSamplingParam* sampling_param) {
 }
 
 void generate_expanded_beam_outputs(
-    const std::vector<std::unique_ptr<Sequence>>& sequences,
+    std::vector<std::unique_ptr<Sequence>>& sequences,
     const Tokenizer& tokenizer,
     const RequestSamplingParam* sampling_param,
     std::vector<SequenceOutput>* outputs) {
