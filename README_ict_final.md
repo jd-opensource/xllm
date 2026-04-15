@@ -1,4 +1,4 @@
-## 备赛赛题：基于xLLM框架的推理模型性能优化
+## 比赛赛题：基于xLLM框架的推理模型性能优化
 - 模型：[Qwen3.5-9B](https://modelscope.cn/models/Qwen/Qwen3.5-9B)
 - 推理框架：[xLLM ict_final分支](https://github.com/jd-opensource/xllm/tree/ict_final)
 - 要求：在保证精度的前提下（详情见**xLLM 精度测试**），使用各种优化方法优化Qwen3.5-9B的推理性能，尽可能提高 **Output Tokens per Second** (输出Tokens/秒， TPS)：
@@ -164,7 +164,7 @@ curl -s "http://127.0.0.1:18000/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer <API Key>" \
     -d '{
-          "model": "Qwen3.5-4B",
+          "model": "Qwen3.5-9B",
           "messages": [
             {"role": "system", "content": "You are a user assistant."},
             {"role": "user", "content": "Leticia, Nina, and Rosalie have a total of 25 people on their dance team. If 8 people quit, but 13 new people got in, how many people are there now on the team?"}

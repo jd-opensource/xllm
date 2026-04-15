@@ -26,7 +26,7 @@ limitations under the License. -->
 | <a href="https://xllm.readthedocs.io/zh-cn/latest/"><b>Documentation</b></a> |  <a href="https://arxiv.org/abs/2510.14686"><b>Technical Report</b></a> |
 </p>
 
-### 📢 参加ICT竞赛的同学请参考：[竞赛准备](README_ict_final.md)。
+### 📢 参加ICT竞赛的同学请参考：[比赛赛题](README_ict_final.md)。
 
 ### 📢 新闻
 
