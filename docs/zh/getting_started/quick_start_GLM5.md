@@ -676,7 +676,7 @@ done
 tail -f log/node_0.log
 ```
 
-#### prefill节点2
+##### prefill节点2
 ```
 #!/bin/bash
 set -e
@@ -761,8 +761,8 @@ done
 
 tail -f log/node_0.log
 ```
-### decode 双机配置
-#### decode节点1
+#### decode 双机配置
+##### decode节点1
 ```
 #!/bin/bash
 set -e
@@ -850,7 +850,7 @@ done
 
 tail -f log/node_0.log
 ```
-#### decode节点-2
+##### decode节点-2
 ```
 #!/bin/bash
 set -e
