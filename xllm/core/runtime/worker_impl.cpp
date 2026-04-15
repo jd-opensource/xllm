@@ -56,7 +56,6 @@ limitations under the License.
 #include "framework/xtensor/global_xtensor.h"
 #include "framework/xtensor/xtensor_allocator.h"
 #if defined(USE_NPU)
-#include "framework/kv_cache/mooncake_weight_transfer.h"
 #include "layers/npu/loader/rolling_weight_buffer.h"
 #endif
 #include "util/net.h"

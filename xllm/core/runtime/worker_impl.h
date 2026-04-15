@@ -25,9 +25,9 @@ limitations under the License.
 #include "executor.h"
 #include "forward_params.h"
 #include "framework/eplb/eplb_executor.h"
-#include "framework/kv_cache/hierarchy_kv_cache_transfer.h"
-#include "framework/kv_cache/kv_cache_store.h"
-#include "framework/kv_cache/kv_cache_transfer.h"
+#include "framework/kv_cache_transfer/hierarchy_kv_cache_transfer.h"
+#include "framework/kv_cache_transfer/kv_cache_store.h"
+#include "framework/kv_cache_transfer/kv_cache_transfer.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
@@ -41,7 +41,7 @@ limitations under the License.
 #include "platform/device.h"
 #include "util/threadpool.h"
 #if defined(USE_NPU)
-#include "framework/kv_cache/mooncake_weight_transfer.h"
+#include "framework/kv_cache_transfer/mooncake_weight_transfer.h"
 #include "layers/npu/loader/rolling_load_manager.h"
 #endif
 

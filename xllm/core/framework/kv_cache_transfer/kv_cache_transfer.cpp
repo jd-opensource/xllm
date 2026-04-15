@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "kv_cache_transfer.h"
+#include "framework/kv_cache_transfer/kv_cache_transfer.h"
 
 #include <glog/logging.h>
 
@@ -24,11 +24,11 @@ limitations under the License.
 #endif
 
 #if defined(USE_NPU)
-#include "llm_data_dist_transfer.h"
+#include "framework/kv_cache_transfer/llm_data_dist_transfer.h"
 #endif
 
 #if defined(USE_NPU) || defined(USE_MLU)
-#include "mooncake_kv_cache_transfer.h"
+#include "framework/kv_cache_transfer/mooncake_kv_cache_transfer.h"
 #endif
 
 namespace xllm {

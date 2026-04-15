@@ -74,6 +74,8 @@ cc_library(
     :state_dict
     :dit_cache
     :model
+    :kv_cache
+    :kv_cache_transfer
     :models
     :sampler
     :tokenizer

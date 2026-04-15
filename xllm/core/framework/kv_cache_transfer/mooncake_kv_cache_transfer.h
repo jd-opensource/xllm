@@ -15,8 +15,8 @@ limitations under the License.
 
 #pragma once
 
-#include "kv_cache_transfer.h"
-#include "mooncake_transfer_engine.h"
+#include "framework/kv_cache_transfer/kv_cache_transfer.h"
+#include "framework/kv_cache_transfer/mooncake_transfer_engine.h"
 
 namespace xllm {
 

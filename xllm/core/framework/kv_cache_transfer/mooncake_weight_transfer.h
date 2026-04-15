@@ -23,7 +23,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "mooncake_transfer_engine.h"
+#include "framework/kv_cache_transfer/mooncake_transfer_engine.h"
 
 namespace xllm {
 

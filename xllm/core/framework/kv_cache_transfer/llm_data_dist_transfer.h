@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <llm_datadist/llm_datadist.h>
 
-#include "kv_cache_transfer.h"
+#include "framework/kv_cache_transfer/kv_cache_transfer.h"
 
 namespace xllm {
 

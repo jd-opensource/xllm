@@ -1,0 +1,51 @@
+include(cc_library)
+include(cc_test)
+
+
+cc_library(
+  NAME
+    kv_cache_transfer
+  HDRS
+    kv_cache_transfer.h
+    $<$<BOOL:${USE_NPU}>:llm_data_dist_transfer.h>
+    $<$<BOOL:${USE_NPU}>:spec_kv_cache_transfer.h>
+    kv_cache_store.h
+    hierarchy_kv_cache_transfer.h
+    $<$<OR:$<BOOL:${USE_NPU}>,$<BOOL:${USE_MLU}>>:mooncake_transfer_engine.h>
+    $<$<OR:$<BOOL:${USE_NPU}>,$<BOOL:${USE_MLU}>>:mooncake_kv_cache_transfer.h>
+    $<$<BOOL:${USE_NPU}>:mooncake_weight_transfer.h>
+  SRCS
+    kv_cache_transfer.cpp
+    $<$<BOOL:${USE_NPU}>:llm_data_dist_transfer.cpp>
+    $<$<BOOL:${USE_NPU}>:spec_kv_cache_transfer.cpp>
+    kv_cache_store.cpp
+    hierarchy_kv_cache_transfer.cpp
+    $<$<OR:$<BOOL:${USE_NPU}>,$<BOOL:${USE_MLU}>>:mooncake_transfer_engine.cpp>
+    $<$<OR:$<BOOL:${USE_NPU}>,$<BOOL:${USE_MLU}>>:mooncake_kv_cache_transfer.cpp>
+    $<$<BOOL:${USE_NPU}>:mooncake_weight_transfer.cpp>
+  DEPS
+    :common
+    :kv_cache
+    :xtensor
+    $<$<BOOL:${USE_NPU}>:graph>
+    glog::glog
+    $<$<BOOL:${USE_NPU}>:llm_datadist>
+    $<$<BOOL:${USE_NPU}>:c_sec>
+    torch
+    $<$<BOOL:${USE_NPU}>:torch_npu>
+    mooncake_store
+    proto::xllm_proto
+    $<$<BOOL:${USE_NPU}>:platform_npu>
+)
+
+if(USE_NPU OR USE_MLU)
+cc_test(
+  NAME
+    mooncake_transfer_engine_test
+  SRCS
+    mooncake_transfer_engine_test.cpp
+  DEPS
+    :kv_cache_transfer
+    GTest::gtest_main
+)
+endif()

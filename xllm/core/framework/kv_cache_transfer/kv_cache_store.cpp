@@ -1,5 +1,5 @@
 
-#include "kv_cache_store.h"
+#include "framework/kv_cache_transfer/kv_cache_store.h"
 
 #include <Mooncake/mooncake-store/include/utils.h>
 #include <glog/logging.h>
@@ -11,7 +11,7 @@
 
 namespace xllm {
 
-bool KVCacheStore::init(const StoreConfig& config,
+bool KVCacheStore::init(const KVCacheStoreConfig& config,
                         std::vector<xllm::KVCache>* host_kv_caches) {
   CHECK(!is_initialized_) << "KVCacheStore is initialized.";
   config_ = config;

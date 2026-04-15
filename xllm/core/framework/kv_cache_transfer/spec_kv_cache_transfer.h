@@ -15,8 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include "framework/kv_cache_transfer/llm_data_dist_transfer.h"
 #include "framework/parallel_state/parallel_args.h"
-#include "llm_data_dist_transfer.h"
 
 namespace xllm {
 

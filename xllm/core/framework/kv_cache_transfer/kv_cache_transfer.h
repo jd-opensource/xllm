@@ -18,7 +18,7 @@ limitations under the License.
 #include <folly/futures/Future.h>
 
 #include "common/types.h"
-#include "kv_cache.h"
+#include "framework/kv_cache/kv_cache.h"
 #if defined(USE_NPU)
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif

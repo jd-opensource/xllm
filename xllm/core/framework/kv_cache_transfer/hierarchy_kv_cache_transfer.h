@@ -20,8 +20,8 @@ limitations under the License.
 #include <memory>
 
 #include "common/types.h"
+#include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
-#include "kv_cache.h"
 #include "platform/device.h"
 #include "util/blockingconcurrentqueue.h"
 #include "util/threadpool.h"

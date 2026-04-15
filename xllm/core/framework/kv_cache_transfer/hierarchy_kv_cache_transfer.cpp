@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "hierarchy_kv_cache_transfer.h"
+#include "framework/kv_cache_transfer/hierarchy_kv_cache_transfer.h"
 
 #include <folly/futures/Future.h>
 #include <sys/mman.h>
@@ -22,7 +22,7 @@ limitations under the License.
 #include <cstring>
 #include <memory>
 
-#include "kv_cache_store.h"
+#include "framework/kv_cache_transfer/kv_cache_store.h"
 namespace xllm {
 
 constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
@@ -50,7 +50,7 @@ HierarchyKVCacheTransfer::HierarchyKVCacheTransfer(
   }
 
   if (options_.enable_kvcache_store()) {
-    StoreConfig config;
+    KVCacheStoreConfig config;
     config.localhost_name = options_.store_local_hostname();
     config.protocol = options_.store_protocol();
     config.metadata_server = options_.store_metadata_server();

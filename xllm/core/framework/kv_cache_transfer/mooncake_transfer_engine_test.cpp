@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "framework/kv_cache/mooncake_transfer_engine.h"
+#include "framework/kv_cache_transfer/mooncake_transfer_engine.h"
 
 #include <brpc/controller.h>
 #include <gtest/gtest.h>

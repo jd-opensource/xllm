@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "mooncake_transfer_engine.h"
+#include "framework/kv_cache_transfer/mooncake_transfer_engine.h"
 
 #include <glog/logging.h>
 

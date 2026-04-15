@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "spec_kv_cache_transfer.h"
+#include "framework/kv_cache_transfer/spec_kv_cache_transfer.h"
 
 #include <glog/logging.h>
 #include <torch_npu/csrc/core/npu/NPUFormat.h>

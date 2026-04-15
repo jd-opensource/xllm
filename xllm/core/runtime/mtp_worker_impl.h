@@ -17,7 +17,7 @@ limitations under the License.
 
 #include "framework/kv_cache/embedding_cache.h"
 #if defined(USE_NPU)
-#include "framework/kv_cache/spec_kv_cache_transfer.h"
+#include "framework/kv_cache_transfer/spec_kv_cache_transfer.h"
 #endif
 #include "runtime/speculative_worker_impl.h"
 
