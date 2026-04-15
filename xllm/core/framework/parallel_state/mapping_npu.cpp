@@ -352,6 +352,7 @@ nlohmann::json MappingNPU::to_json() {
   data["moeTpSize"] = options_.moe_tp_size();
   data["attnDpSize"] = options_.dp_size();
   data["attnTpSize"] = options_.tp_size();
+  data["attnCpSize"] = options_.cp_size();
   data["worldSize"] = world_size_;
   data["rank"] = rank_;
   data["rankTableFile"] = rank_table_file_;

@@ -368,7 +368,14 @@ struct ModelInputParams {
                     device,
                     true))
         .gather_prenorm_idx(
-            safe_to(cp_ep_padding_data.gather_prenorm_idx(), device, true));
+            safe_to(cp_ep_padding_data.gather_prenorm_idx(), device, true))
+        .padding_idx(safe_to(cp_ep_padding_data.padding_idx(), device, true))
+        .un_padding_idx(
+            safe_to(cp_ep_padding_data.un_padding_idx(), device, true))
+        .dynamic_ep_idx(
+            safe_to(cp_ep_padding_data.dynamic_ep_idx(), device, true))
+        .moe_idx(safe_to(cp_ep_padding_data.moe_idx(), device, true))
+        .expert_array(safe_to(cp_ep_padding_data.expert_array(), device, true));
 
     params.kv_cache_tokens_nums_host = std::move(kv_cache_tokens_nums_host);
     params.kv_cache_tokens_nums = safe_to(kv_cache_tokens_nums, device);

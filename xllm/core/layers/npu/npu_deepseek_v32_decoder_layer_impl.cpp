@@ -432,7 +432,7 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
   // runtime; keep it for eager mode and fall back to the standard dynamic-ep
   // path when graph is enabled.
   param.enableLcocAll2All =
-      param.isPrefill && dp_size_ == 1 && !FLAGS_enable_graph;
+      param.isPrefill && cp_size_ == 1 && dp_size_ == 1 && !FLAGS_enable_graph;
 
   if (layer_id_ >= param.firstKDenseReplace) {
     param.enableQkvdownDp = false;
@@ -827,7 +827,7 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   auto& dp_ep_padding = input_params.dp_ep_padding_data;
   auto& cp_ep_padding = input_params.cp_ep_padding_data;
   auto& cp_inputs = input_params.cp_prefill_inputs;
-  const bool use_cp_ep_padding = (cp_size_ > 1 && is_prefill);
+  const bool use_cp_ep_padding = (cp_size_ > 1);
 
   if (dp_size_ <= 1 && ep_size_ <= 1 || cp_size_ > 1) {
     dp_ep_padding.set_placeholder(tensor_placeholder_);
@@ -838,7 +838,9 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   // set micro batch 0 input part
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.expert_array());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.expert_array()
+                                            : dp_ep_padding.expert_array());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 2) =
       atb_speed::Utils::AtTensor2Tensor(expert_group_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3) =
@@ -942,13 +944,21 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 25) =
       atb_speed::Utils::AtTensor2Tensor(at_in_device_expert_count_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 26) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.padding_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.padding_idx()
+                                            : dp_ep_padding.padding_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 27) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.un_padding_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.un_padding_idx()
+                                            : dp_ep_padding.un_padding_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 28) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.dynamic_ep_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.dynamic_ep_idx()
+                                            : dp_ep_padding.dynamic_ep_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 29) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.moe_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.moe_idx()
+                                            : dp_ep_padding.moe_idx());
   if (FLAGS_enable_eplb && layer_id_ >= decode_param_.firstKDenseReplace) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 30) =
         atb_speed::Utils::AtTensor2Tensor(expert_routing_map_);
