@@ -154,6 +154,7 @@ class NpuOneRecBlockLayerImpl final : public BaseLayer {
   std::vector<int32_t> placeholder_vec_;
   torch::Tensor cross_k_cache_;
   torch::Tensor cross_v_cache_;
+  torch::Tensor fallback_kv_seq_lens_tensor_;
   std::vector<int32_t> seq_lens_vec_;
 
   int32_t device_id_ = 0;

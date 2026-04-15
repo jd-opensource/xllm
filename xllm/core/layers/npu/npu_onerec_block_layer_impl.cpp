@@ -1087,7 +1087,8 @@ void NpuOneRecBlockLayerImpl::load_state_dict(const StateDict& state_dict) {
               << "OneRec fused FFN weight1 dim0 must be even, got "
               << fused_gate_up.sizes() << " from " << state_key;
           correct_tensor_dtype(fused_gate_up, state_key);
-          auto chunks = fused_gate_up.chunk(2, 0);
+          std::vector<torch::Tensor> chunks =
+              fused_gate_up.chunk(/*chunks=*/2, /*dim=*/0);
           at_weight_tensors_[kInFfnWi0Weight] =
               chunks[0].contiguous().to(device_);
           at_weight_tensors_[kInFfnWi1Weight] =
@@ -1515,11 +1516,11 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
   } else {
     int32_t seq_len = std::max(static_cast<int32_t>(x.size(0)), 1);
     seq_lens_vec_ = {seq_len};
-    auto seq_len_tensor = torch::tensor(
+    fallback_kv_seq_lens_tensor_ = torch::tensor(
         seq_lens_vec_,
         torch::TensorOptions().dtype(torch::kInt32).device(device_));
     node.variantPack.inTensors.at(idx) =
-        atb_speed::Utils::AtTensor2Tensor(seq_len_tensor);
+        atb_speed::Utils::AtTensor2Tensor(fallback_kv_seq_lens_tensor_);
     node.variantPack.inTensors.at(idx).hostData = seq_lens_vec_.data();
   }
   idx++;
@@ -1712,12 +1713,13 @@ void NpuOneRecBlockLayerImpl::process_expert_weights(
                    << ": " << fused_weight.sizes();
       return;
     }
-    auto reshaped = fused_weight.contiguous().view(
+    torch::Tensor reshaped = fused_weight.contiguous().view(
         {num_experts_per_partition_, fused_weight.size(0), -1});
     CHECK_EQ(reshaped.size(2) % 2, 0)
         << "OneRec fused expert weight1 last dim must be even for " << name
         << ", got shape " << fused_weight.sizes();
-    auto gate_up_chunks = reshaped.chunk(2, -1);
+    std::vector<torch::Tensor> gate_up_chunks =
+        reshaped.chunk(/*chunks=*/2, /*dim=*/-1);
     for (int32_t i = 0; i < num_experts_per_partition_; ++i) {
       experts_weights_["gate_proj.weight"][i] =
           gate_up_chunks[0][i].transpose(0, 1).contiguous();
@@ -1934,40 +1936,49 @@ void NpuOneRecBlockLayerImpl::merge_experts_weights() {
         experts_weights_.count("up_proj.weight_offset") > 0) {
       std::vector<torch::Tensor> gate_offset_1d;
       std::vector<torch::Tensor> up_offset_1d;
+      gate_offset_1d.reserve(
+          experts_weights_["gate_proj.weight_offset"].size());
+      up_offset_1d.reserve(experts_weights_["up_proj.weight_offset"].size());
       for (const auto& tensor : experts_weights_["gate_proj.weight_offset"]) {
         if (tensor.defined()) {
-          gate_offset_1d.push_back(tensor);
+          gate_offset_1d.emplace_back(tensor);
         }
       }
       for (const auto& tensor : experts_weights_["up_proj.weight_offset"]) {
         if (tensor.defined()) {
-          up_offset_1d.push_back(tensor);
+          up_offset_1d.emplace_back(tensor);
         }
       }
       if (!gate_offset_1d.empty() &&
           gate_offset_1d.size() == up_offset_1d.size()) {
         at_weight_tensors_[kInMlpGateUpOffsetExpert] =
-            merge_experts_weights(gate_offset_1d, up_offset_1d, false);
+            merge_experts_weights(gate_offset_1d,
+                                  up_offset_1d,
+                                  /*transpose=*/false);
       }
     }
     if (experts_weights_.count("gate_proj.weight_scale") > 0 &&
         experts_weights_.count("up_proj.weight_scale") > 0) {
       std::vector<torch::Tensor> gate_scale_1d;
       std::vector<torch::Tensor> up_scale_1d;
+      gate_scale_1d.reserve(experts_weights_["gate_proj.weight_scale"].size());
+      up_scale_1d.reserve(experts_weights_["up_proj.weight_scale"].size());
       for (const auto& tensor : experts_weights_["gate_proj.weight_scale"]) {
         if (tensor.defined()) {
-          gate_scale_1d.push_back(tensor);
+          gate_scale_1d.emplace_back(tensor);
         }
       }
       for (const auto& tensor : experts_weights_["up_proj.weight_scale"]) {
         if (tensor.defined()) {
-          up_scale_1d.push_back(tensor);
+          up_scale_1d.emplace_back(tensor);
         }
       }
       if (!gate_scale_1d.empty() &&
           gate_scale_1d.size() == up_scale_1d.size()) {
         at_weight_tensors_[kInMlpGateUpScaleExpert] =
-            merge_experts_weights(gate_scale_1d, up_scale_1d, false);
+            merge_experts_weights(gate_scale_1d,
+                                  up_scale_1d,
+                                  /*transpose=*/false);
       }
     }
   }
@@ -1981,26 +1992,29 @@ void NpuOneRecBlockLayerImpl::merge_experts_weights() {
   if (quantize_type_ == "w8a8_dynamic") {
     if (experts_weights_.count("down_proj.weight_offset") > 0) {
       std::vector<torch::Tensor> down_offset_1d;
+      down_offset_1d.reserve(
+          experts_weights_["down_proj.weight_offset"].size());
       for (const auto& tensor : experts_weights_["down_proj.weight_offset"]) {
         if (tensor.defined()) {
-          down_offset_1d.push_back(tensor);
+          down_offset_1d.emplace_back(tensor);
         }
       }
       if (!down_offset_1d.empty()) {
         at_weight_tensors_[kInMlpDownOffsetExpert] =
-            merge_experts_weights(down_offset_1d, false);
+            merge_experts_weights(down_offset_1d, /*transpose=*/false);
       }
     }
     if (experts_weights_.count("down_proj.weight_scale") > 0) {
       std::vector<torch::Tensor> down_scale_1d;
+      down_scale_1d.reserve(experts_weights_["down_proj.weight_scale"].size());
       for (const auto& tensor : experts_weights_["down_proj.weight_scale"]) {
         if (tensor.defined()) {
-          down_scale_1d.push_back(tensor);
+          down_scale_1d.emplace_back(tensor);
         }
       }
       if (!down_scale_1d.empty()) {
         at_weight_tensors_[kInMlpDownScaleExpert] =
-            merge_experts_weights(down_scale_1d, false);
+            merge_experts_weights(down_scale_1d, /*transpose=*/false);
       }
     }
   }
@@ -2032,10 +2046,10 @@ void NpuOneRecBlockLayerImpl::merge_shared_experts_weights() {
   };
 
   if (gate_weight.defined() && up_weight.defined()) {
-    auto merged_gate = prepare_shared_weight_2d(gate_weight, "gate");
-    auto merged_up = prepare_shared_weight_2d(up_weight, "up");
+    torch::Tensor merged_gate = prepare_shared_weight_2d(gate_weight, "gate");
+    torch::Tensor merged_up = prepare_shared_weight_2d(up_weight, "up");
     at_weight_tensors_[kInMlpGateUpWeightSharedExpert] =
-        torch::cat({merged_gate, merged_up}, 0).contiguous();
+        torch::cat({merged_gate, merged_up}, /*dim=*/0).contiguous();
   } else if (gate_weight.defined()) {
     at_weight_tensors_[kInMlpGateUpWeightSharedExpert] =
         prepare_shared_weight_2d(gate_weight, "gate_only");

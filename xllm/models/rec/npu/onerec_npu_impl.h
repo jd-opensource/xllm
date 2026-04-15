@@ -391,13 +391,14 @@ class OneRecStackImpl : public torch::nn::Module {
     }
 
     batch_size = std::max<int64_t>(1, batch_size);
-    auto mask = torch::triu(torch::ones({seq_length, seq_length},
-                                        h.options().dtype(torch::kUInt8)),
-                            1)
-                    .unsqueeze(0)
-                    .unsqueeze(0)
-                    .expand({batch_size, 1, seq_length, seq_length})
-                    .contiguous();
+    torch::Tensor mask =
+        torch::triu(torch::ones({seq_length, seq_length},
+                                h.options().dtype(torch::kUInt8)),
+                    1)
+            .unsqueeze(0)
+            .unsqueeze(0)
+            .expand({batch_size, 1, seq_length, seq_length})
+            .contiguous();
     return mask;
   }
 
