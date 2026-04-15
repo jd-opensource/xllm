@@ -153,6 +153,34 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
 } XLLM_InitLLMOptions;
 
 /**
+ * @brief Optional startup runtime flags for initialization APIs with extension
+ * support
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_StartupFlags {
+  /** Whether to use contiguous device input buffer when shared memory is
+   * enabled */
+  bool use_contiguous_input_buffer;
+
+  /** Whether to enable graph execution */
+  bool enable_graph;
+
+  /** Whether to enable no-padding graph decode mode */
+  bool enable_graph_mode_decode_no_padding;
+
+  /** Whether to enable piecewise graph execution for prefill phase */
+  bool enable_prefill_piecewise_graph;
+
+  /** Whether to enable block copy kernel on supported backends */
+  bool enable_block_copy_kernel;
+
+  /** Whether to enable beam search kernel */
+  bool enable_beam_search_kernel;
+
+  /** Whether to enable RecSampler fast sampling path */
+  bool enable_rec_fast_sampler;
+} XLLM_StartupFlags;
+
+/**
  * @brief Chat message structure (for ChatCompletions)
  */
 typedef struct XLLM_CAPI_EXPORT XLLM_ChatMessage {

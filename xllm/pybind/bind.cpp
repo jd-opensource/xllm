@@ -19,7 +19,10 @@ limitations under the License.
 #include <pybind11/stl_bind.h>
 #include <torch/python.h>
 
+#include <optional>
+
 #include "api_service/call.h"
+#include "core/common/global_flags.h"
 #include "core/common/options.h"
 #include "core/common/types.h"
 #include "core/distributed_runtime/llm_master.h"
@@ -34,7 +37,78 @@ namespace xllm {
 namespace py = pybind11;
 using namespace pybind11::literals;
 
+namespace {
+
+void configure_runtime_flags(
+    const std::optional<bool>& enable_prefix_cache,
+    const std::optional<bool>& enable_chunked_prefill,
+    const std::optional<bool>& enable_schedule_overlap,
+    const std::optional<bool>& enable_beam_search_kernel,
+    const std::optional<bool>& enable_rec_fast_sampler,
+    const std::optional<bool>& enable_shm,
+    const std::optional<bool>& use_contiguous_input_buffer,
+    const std::optional<bool>& enable_graph,
+    const std::optional<bool>& enable_graph_mode_decode_no_padding,
+    const std::optional<bool>& enable_prefill_piecewise_graph,
+    const std::optional<bool>& enable_block_copy_kernel) {
+  if (enable_prefix_cache.has_value()) {
+    FLAGS_enable_prefix_cache = enable_prefix_cache.value();
+  }
+  if (enable_chunked_prefill.has_value()) {
+    FLAGS_enable_chunked_prefill = enable_chunked_prefill.value();
+  }
+  if (enable_schedule_overlap.has_value()) {
+    FLAGS_enable_schedule_overlap = enable_schedule_overlap.value();
+  }
+  if (enable_beam_search_kernel.has_value()) {
+    FLAGS_enable_beam_search_kernel = enable_beam_search_kernel.value();
+  }
+  if (enable_rec_fast_sampler.has_value()) {
+    FLAGS_enable_rec_fast_sampler = enable_rec_fast_sampler.value();
+  }
+  if (enable_shm.has_value()) {
+    FLAGS_enable_shm = enable_shm.value();
+  }
+  if (use_contiguous_input_buffer.has_value()) {
+    FLAGS_use_contiguous_input_buffer = use_contiguous_input_buffer.value();
+  }
+  if (enable_graph.has_value()) {
+    FLAGS_enable_graph = enable_graph.value();
+  }
+  if (enable_graph_mode_decode_no_padding.has_value()) {
+    FLAGS_enable_graph_mode_decode_no_padding =
+        enable_graph_mode_decode_no_padding.value();
+  }
+  if (enable_prefill_piecewise_graph.has_value()) {
+    FLAGS_enable_prefill_piecewise_graph =
+        enable_prefill_piecewise_graph.value();
+  }
+  if (enable_block_copy_kernel.has_value()) {
+    FLAGS_enable_block_copy_kernel = enable_block_copy_kernel.value();
+  }
+
+#if !defined(USE_NPU) && !defined(USE_CUDA)
+  FLAGS_enable_block_copy_kernel = false;
+#endif
+}
+
+}  // namespace
+
 PYBIND11_MODULE(xllm_export, m) {
+  m.def("configure_runtime_flags",
+        &configure_runtime_flags,
+        py::arg("enable_prefix_cache") = py::none(),
+        py::arg("enable_chunked_prefill") = py::none(),
+        py::arg("enable_schedule_overlap") = py::none(),
+        py::arg("enable_beam_search_kernel") = py::none(),
+        py::arg("enable_rec_fast_sampler") = py::none(),
+        py::arg("enable_shm") = py::none(),
+        py::arg("use_contiguous_input_buffer") = py::none(),
+        py::arg("enable_graph") = py::none(),
+        py::arg("enable_graph_mode_decode_no_padding") = py::none(),
+        py::arg("enable_prefill_piecewise_graph") = py::none(),
+        py::arg("enable_block_copy_kernel") = py::none());
+
   // 1. export Options
   py::class_<Options>(m, "Options")
       .def(py::init())
@@ -86,6 +160,7 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("enable_offline_inference",
                      &Options::enable_offline_inference_)
       .def_readwrite("spawn_worker_path", &Options::spawn_worker_path_)
+      .def_readwrite("enable_graph", &Options::enable_graph_)
       .def_readwrite("enable_shm", &Options::enable_shm_)
       .def_readwrite("input_shm_size", &Options::input_shm_size_)
       .def_readwrite("output_shm_size", &Options::output_shm_size_)

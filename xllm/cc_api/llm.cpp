@@ -32,6 +32,26 @@ namespace {
 static std::atomic<bool> g_glog_inited = false;
 static pthread_mutex_t g_log_init_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+void ApplyStartupFlags(const XLLM_InitLLMOptions& init_options) {
+  FLAGS_enable_prefix_cache = init_options.enable_prefix_cache;
+  FLAGS_enable_chunked_prefill = init_options.enable_chunked_prefill;
+  FLAGS_enable_schedule_overlap = init_options.enable_schedule_overlap;
+  FLAGS_enable_beam_search_kernel = init_options.enable_beam_search_kernel;
+  FLAGS_enable_rec_fast_sampler = init_options.enable_rec_fast_sampler;
+  FLAGS_enable_shm = init_options.enable_shm;
+  FLAGS_use_contiguous_input_buffer = init_options.use_contiguous_input_buffer;
+  FLAGS_enable_graph = init_options.enable_graph;
+  FLAGS_enable_graph_mode_decode_no_padding =
+      init_options.enable_graph_mode_decode_no_padding;
+  FLAGS_enable_prefill_piecewise_graph =
+      init_options.enable_prefill_piecewise_graph;
+  FLAGS_enable_block_copy_kernel = init_options.enable_block_copy_kernel;
+
+#if !defined(USE_NPU) && !defined(USE_CUDA)
+  FLAGS_enable_block_copy_kernel = false;
+#endif
+}
+
 void InitGlog(const std::string& log_dir) {
   pthread_mutex_lock(&g_log_init_mutex);
   if (!g_glog_inited) {
@@ -71,6 +91,8 @@ bool LLM::Initialize(const std::string& model_path,
   }
 
   try {
+    ApplyStartupFlags(init_options);
+
     Options options;
     options.model_path(model_path)
         .task_type(init_options.task)
@@ -107,15 +129,12 @@ bool LLM::Initialize(const std::string& model_path,
         .kv_cache_transfer_mode(init_options.kv_cache_transfer_mode)
         .disable_ttft_profiling(init_options.disable_ttft_profiling)
         .enable_forward_interruption(init_options.enable_forward_interruption)
+        .enable_graph(init_options.enable_graph)
         .enable_shm(init_options.enable_shm)
         .input_shm_size(init_options.input_shm_size)
         .output_shm_size(init_options.output_shm_size)
         .is_local(init_options.is_local)
         .server_idx(init_options.server_idx);
-
-#if !defined(USE_NPU) && !defined(USE_CUDA)
-    FLAGS_enable_block_copy_kernel = false;
-#endif
 
     llm_core_ = new LLMCore();
     llm_core_->master = std::make_unique<LLMMaster>(options);

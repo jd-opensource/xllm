@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 import xllm_export
 from xllm_export import (LLMMaster, VLMMaster, Options, RequestOutput,
-                         RequestParams)
+                         RequestParams, configure_runtime_flags)
 from .errors import ValidationError
 from .params import (
     BeamSearchParams,
@@ -132,6 +132,13 @@ class LLM:
         is_local: bool = True,
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
+        enable_beam_search_kernel: bool = False,
+        enable_rec_fast_sampler: bool = False,
+        use_contiguous_input_buffer: bool = False,
+        enable_graph: bool = False,
+        enable_graph_mode_decode_no_padding: bool = False,
+        enable_prefill_piecewise_graph: bool = False,
+        enable_block_copy_kernel: bool = False,
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -151,6 +158,22 @@ class LLM:
         if backend == "vlm" and task != "generate":
             raise ValueError("VLM backend only supports generate task in LLM")
 
+        resolved_enable_prefix_cache = not disable_prefix_cache
+        resolved_enable_chunked_prefill = not disable_chunked_prefill
+        configure_runtime_flags(
+            enable_prefix_cache=resolved_enable_prefix_cache,
+            enable_chunked_prefill=resolved_enable_chunked_prefill,
+            enable_schedule_overlap=enable_schedule_overlap,
+            enable_beam_search_kernel=enable_beam_search_kernel,
+            enable_rec_fast_sampler=enable_rec_fast_sampler,
+            enable_shm=enable_shm,
+            use_contiguous_input_buffer=use_contiguous_input_buffer,
+            enable_graph=enable_graph,
+            enable_graph_mode_decode_no_padding=enable_graph_mode_decode_no_padding,
+            enable_prefill_piecewise_graph=enable_prefill_piecewise_graph,
+            enable_block_copy_kernel=enable_block_copy_kernel,
+        )
+
         options = Options()
         options.model_path = model
         options.task_type = task
@@ -161,10 +184,7 @@ class LLM:
         options.block_size = block_size
         options.max_cache_size = max_cache_size
         options.max_memory_utilization = max_memory_utilization
-        if disable_prefix_cache:
-            options.enable_prefix_cache = False
-        else:
-            options.enable_prefix_cache = True
+        options.enable_prefix_cache = resolved_enable_prefix_cache
         options.max_tokens_per_batch = max_tokens_per_batch
         options.max_seqs_per_batch = max_seqs_per_batch
         options.max_tokens_per_chunk_for_prefill = max_tokens_per_chunk_for_prefill
@@ -173,10 +193,7 @@ class LLM:
         options.communication_backend = communication_backend
         options.rank_tablefile = rank_tablefile
         options.expert_parallel_degree = expert_parallel_degree
-        if disable_chunked_prefill:
-            options.enable_chunked_prefill = False
-        else:
-            options.enable_chunked_prefill = True
+        options.enable_chunked_prefill = resolved_enable_chunked_prefill
         options.enable_prefill_sp = enable_prefill_sp
         free_port = util.get_free_port()
         options.master_node_addr = "127.0.0.1:" + str(free_port)
@@ -188,7 +205,7 @@ class LLM:
         options.ep_size = ep_size
         options.instance_name = instance_name
         options.enable_disagg_pd = enable_disagg_pd
-        options.enable_schedule_overlap = False
+        options.enable_schedule_overlap = enable_schedule_overlap
         options.enable_pd_ooc = enable_pd_ooc
         options.kv_cache_transfer_mode = kv_cache_transfer_mode
         options.disable_ttft_profiling = disable_ttft_profiling
@@ -199,6 +216,7 @@ class LLM:
         options.is_local = is_local
         options.input_shm_size = input_shm_size
         options.output_shm_size = output_shm_size
+        options.enable_graph = enable_graph
         self._backend = backend
         if backend == "vlm":
             self.master = VLMMaster(options)
