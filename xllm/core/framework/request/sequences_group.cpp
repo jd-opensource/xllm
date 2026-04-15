@@ -73,7 +73,7 @@ void generate_expanded_beam_outputs(
       std::max<size_t>(1, static_cast<size_t>(sampling_param->top_logprobs));
   SimpleTopKOptimizerBeamCandidate topk_optimizer(requested_count);
   for (size_t i = 0; i < sequences.size(); ++i) {
-    const auto* seq = sequences[i].get();
+    auto* seq = sequences[i].get();
     CHECK(seq != nullptr);
     if (seq->num_tokens() == 0) {
       continue;
