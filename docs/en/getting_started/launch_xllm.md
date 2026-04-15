@@ -43,7 +43,7 @@ do
     --enable_chunked_prefill=true \
     --enable_schedule_overlap=true \
     --enable_shm=true \
-    --node_rank=$i \ > $LOG_FILE 2>&1 &
+    --node_rank=$i > $LOG_FILE 2>&1 &
 done
 ```
 
@@ -84,7 +84,7 @@ do
     --enable_prefix_cache=false \
     --enable_chunked_prefill=false \
     --enable_schedule_overlap=true \
-    --node_rank=$i \ > $LOG_FILE 2>&1 &
+    --node_rank=$i > $LOG_FILE 2>&1 &
 done
 ```
 
@@ -120,6 +120,6 @@ do
     --nnodes=$NNODES \
     --master_node_addr=$MASTER_NODE_ADDR \
     --block_size=16 \
-    --node_rank=$i \ > $LOG_FILE 2>&1 &
+    --node_rank=$i > $LOG_FILE 2>&1 &
 done
 ```
