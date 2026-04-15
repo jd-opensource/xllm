@@ -6,6 +6,7 @@
   - 单并发，输入输出128k+1k，比拼TPS
 - 最终提交的报告至少需要包括以下部分：
   - 优化方法介绍
+  - xllm启动脚本和测试脚本
   - 精度测试结果
   - 性能测试结果
 - 其他要求：
@@ -207,6 +208,7 @@ python test_xllm.py \
 
 ## 注意事项
 - 当前xLLM不支持Qwen3.5的chunked prefill
+- xllm启动参数需要关闭prefix cache功能，即`--enable_prefix_cache=false`
 - 禁止使用量化模型
 - 只需要对文本token进行推理，不需要对图像token进行推理
 - 算子优化可以使用tilelang-ascend，`main`分支和未合并的pr有相关示例
