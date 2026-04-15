@@ -70,6 +70,8 @@ RequestParams transfer_request_params(
   xllm_request_params.stop = request_params.stop;
   xllm_request_params.stop_token_ids = request_params.stop_token_ids;
   xllm_request_params.beam_width = request_params.beam_width;
+  xllm_request_params.num_return_sequences =
+      request_params.num_return_sequences;
   xllm_request_params.top_logprobs = request_params.top_logprobs;
 
   return xllm_request_params;

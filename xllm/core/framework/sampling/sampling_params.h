@@ -36,6 +36,11 @@ struct RequestSamplingParam {
   bool do_sample = false;
   bool is_embeddings = false;
   int32_t beam_width = 0;
+  int32_t num_return_sequences = 0;
+
+  int32_t resolved_num_return_sequences() const {
+    return num_return_sequences > 0 ? num_return_sequences : beam_width;
+  }
 };
 
 struct SamplingParameters {

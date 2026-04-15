@@ -204,6 +204,8 @@ struct ForwardOutput {
 
   BeamSearchOutput beam_search_output;
   torch::Tensor beam_sequence_group;
+  torch::Tensor beam_base_logprobs;
+  torch::Tensor beam_source_sequence_group;
 
   // dit output data
   DiTForwardOutput dit_forward_output;

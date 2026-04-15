@@ -182,6 +182,8 @@ struct XLLM_CAPI_EXPORT XLLM_RequestParams {
 
   int32_t beam_width = 0;
 
+  int32_t num_return_sequences = 0;
+
   // Number of top log probabilities to return. default = 0.
   int64_t top_logprobs = 0;
 

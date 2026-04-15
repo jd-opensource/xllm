@@ -42,7 +42,7 @@ message MMChatMessage {
   optional string tool_call_id = 4;
 }
 
-// Next Id: 27
+// Next Id: 43
 message MMChatRequest {
 
   // ID of the model to use. You can use the ListModels endpoint to list available models.
@@ -144,6 +144,9 @@ message MMChatRequest {
   optional Priority priority = 31;
 
   optional int32 beam_width = 32;
+
+  // Final number of beam results to return. Defaults to beam_width when unset.
+  optional int32 num_return_sequences = 42;
 
   optional bool add_special_tokens = 33;
 

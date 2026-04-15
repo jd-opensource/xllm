@@ -26,6 +26,21 @@ limitations under the License.
 #include "util/slice.h"
 
 namespace xllm {
+namespace {
+
+size_t resolve_beam_result_size(const RequestSamplingParam* sampling_param,
+                                bool all_finished) {
+  CHECK(sampling_param != nullptr);
+  const size_t beam_width = static_cast<size_t>(sampling_param->beam_width);
+  if (!all_finished) {
+    return beam_width;
+  }
+  return static_cast<size_t>(
+      std::max(sampling_param->beam_width,
+               sampling_param->resolved_num_return_sequences()));
+}
+
+}  // namespace
 
 SequencesGroup::SequencesGroup(const std::string& prompt,
                                const std::vector<int32_t>& prompt_tokens,
@@ -167,12 +182,16 @@ void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
     }
   } else {
     // speed up when using thread pool
-    if (thread_pool && sequences_.size() > 1) {
+    if (thread_pool && sequences_.size() > 1 && !check_beam_search()) {
       generate_outputs_parallel(outputs, tokenizer, thread_pool);
       return;
     }
-    for (auto& seq : sequences_) {
-      outputs.push_back(seq->generate_output(tokenizer));
+    for (size_t i = 0; i < sequences_.size(); ++i) {
+      auto seq_output = sequences_[i]->generate_output(tokenizer);
+      if (check_beam_search()) {
+        seq_output.index = i;
+      }
+      outputs.push_back(std::move(seq_output));
     }
   }
 }
@@ -229,6 +248,12 @@ void SequencesGroup::process_beam_search() {
   }
 
   const size_t beam_width = sequence_params_.sampling_param->beam_width;
+  const bool all_finished =
+      std::all_of(sequences_.begin(), sequences_.end(), [](const auto& seq) {
+        return seq != nullptr && seq->finished();
+      });
+  const size_t target_result_size =
+      resolve_beam_result_size(sequence_params_.sampling_param, all_finished);
   const size_t topk =
       std::max<size_t>(1, sequence_params_.sampling_param->top_logprobs);
 
@@ -261,7 +286,7 @@ void SequencesGroup::process_beam_search() {
     build_source_info(sequences_[seq_index].get());
   }
 
-  SimpleTopKOptimizerBeamCandidate topk_optimizer(beam_width);
+  SimpleTopKOptimizerBeamCandidate topk_optimizer(target_result_size);
   auto add_self_candidate = [&](size_t seq_index, Sequence* seq) {
     BeamCandidate candidate;
     candidate.source_index = seq_index;
@@ -324,7 +349,7 @@ void SequencesGroup::process_beam_search() {
     return;
   }
 
-  const size_t result_size = std::min(beam_width, candidates.size());
+  const size_t result_size = std::min(target_result_size, candidates.size());
   CHECK(!sequences_.empty());
 
   std::vector<std::unique_ptr<Sequence>> replacement_sequences(result_size);
@@ -404,13 +429,17 @@ void SequencesGroup::generate_multi_round_output(
     std::vector<SequenceOutput>& outputs,
     const Tokenizer& tokenizer,
     const Sequence& base) {
-  size_t bw = static_cast<size_t>(base.beam_width_cached());
+  const auto& flat2d = base.beam_seq_group_flat();
+  const size_t output_count = flat2d.size();
+  if (output_count == 0) {
+    return;
+  }
   const auto& last_lps = base.beam_last_logprobs();
 
   // Rank by logprob
   std::vector<std::pair<float, size_t>> rank;
-  rank.reserve(bw);
-  for (size_t b = 0; b < bw; ++b) {
+  rank.reserve(output_count);
+  for (size_t b = 0; b < output_count; ++b) {
     float lp = (b < last_lps.size()) ? last_lps[b] : 0.0f;
     rank.emplace_back(lp, b);
   }
@@ -418,11 +447,9 @@ void SequencesGroup::generate_multi_round_output(
     return l.first > r.first;
   });
 
-  const auto& flat2d = base.beam_seq_group_flat();
-  size_t rounds = static_cast<size_t>(base.total_rounds_cached());
-  outputs.reserve(bw);
+  outputs.reserve(output_count);
 
-  for (size_t i = 0; i < bw; ++i) {
+  for (size_t i = 0; i < output_count; ++i) {
     size_t b = rank[i].second;
     std::vector<int32_t> gen_ids(flat2d[b].begin(), flat2d[b].end());
 
