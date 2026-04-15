@@ -44,6 +44,12 @@ limitations under the License.
 
 namespace xllm {
 namespace {
+struct RecEmitRecord {
+  int32_t output_index = 0;
+  int64_t item_id = 0;
+  std::optional<RecItemInfo> item_info;
+};
+
 void append_rec_logprobs(proto::InferTensorContents* logprobs_context,
                          const SequenceOutput& output,
                          int32_t expected_count) {
@@ -120,26 +126,64 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
 
   if (FLAGS_enable_convert_tokens_to_item) {
     output_tensor->set_datatype(proto::DataType::INT64);
-    const int32_t output_count =
-        static_cast<int32_t>(req_output.outputs.size());
-    output_tensor->mutable_shape()->Add(output_count);
-    if (logprobs_tensor != nullptr) {
-      logprobs_tensor->mutable_shape()->Add(output_count);
-      logprobs_tensor->mutable_shape()->Add(logprob_width);
-    }
-
-    decltype(output_tensor) did_tensor = nullptr;
-    decltype(output_tensor) type_tensor = nullptr;
+    proto::InferOutputTensor* did_tensor = nullptr;
+    proto::InferOutputTensor* type_tensor = nullptr;
     if (FLAGS_enable_extended_item_info) {
       did_tensor = response.mutable_output_tensors()->Add();
       did_tensor->set_name("item_did");
       did_tensor->set_datatype(proto::DataType::STRING);
-      did_tensor->mutable_shape()->Add(output_count);
 
       type_tensor = response.mutable_output_tensors()->Add();
       type_tensor->set_name("item_type");
       type_tensor->set_datatype(proto::DataType::STRING);
-      type_tensor->mutable_shape()->Add(output_count);
+    }
+
+    std::vector<RecEmitRecord> emitted_items;
+    emitted_items.reserve(req_output.outputs.size());
+    const int32_t total_threshold = FLAGS_total_conversion_threshold;
+    for (int32_t i = 0; i < static_cast<int32_t>(req_output.outputs.size());
+         ++i) {
+      const auto& output = req_output.outputs[i];
+      if (!output.item_ids_list.empty()) {
+        const bool has_item_infos =
+            output.item_infos_list.size() == output.item_ids_list.size();
+        for (size_t item_idx = 0; item_idx < output.item_ids_list.size();
+             ++item_idx) {
+          if (static_cast<int32_t>(emitted_items.size()) >= total_threshold) {
+            break;
+          }
+          std::optional<RecItemInfo> item_info;
+          if (has_item_infos) {
+            item_info = output.item_infos_list[item_idx];
+          }
+          RecEmitRecord emitted_item;
+          emitted_item.output_index = i;
+          emitted_item.item_id = output.item_ids_list[item_idx];
+          emitted_item.item_info = std::move(item_info);
+          emitted_items.emplace_back(std::move(emitted_item));
+        }
+      } else if (output.item_ids.has_value() &&
+                 static_cast<int32_t>(emitted_items.size()) < total_threshold) {
+        RecEmitRecord emitted_item;
+        emitted_item.output_index = i;
+        emitted_item.item_id = output.item_ids.value();
+        emitted_item.item_info = output.item_info;
+        emitted_items.emplace_back(std::move(emitted_item));
+      }
+      if (static_cast<int32_t>(emitted_items.size()) >= total_threshold) {
+        break;
+      }
+    }
+
+    const int32_t emitted_count = static_cast<int32_t>(emitted_items.size());
+    output_tensor->mutable_shape()->Add(emitted_count);
+    if (logprobs_tensor != nullptr) {
+      logprobs_tensor->mutable_shape()->Add(emitted_count);
+      logprobs_tensor->mutable_shape()->Add(logprob_width);
+    }
+    if (did_tensor != nullptr && type_tensor != nullptr) {
+      did_tensor->mutable_shape()->Add(emitted_count);
+      type_tensor->mutable_shape()->Add(emitted_count);
     }
 
     auto* output_context = output_tensor->mutable_contents();
@@ -152,31 +196,16 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
             logprobs_context, req_output.outputs[output_index], logprob_width);
       }
     };
-    int32_t total_count = 0;
-    const int32_t total_threshold = FLAGS_total_conversion_threshold;
-    for (int32_t i = 0; i < output_count; ++i) {
-      const auto& output = req_output.outputs[i];
-      if (!output.item_ids_list.empty()) {
-        for (const int64_t item_id : output.item_ids_list) {
-          if (total_count >= total_threshold) {
-            break;
-          }
-          output_context->mutable_int64_contents()->Add(item_id);
-          append_output_logprobs(i);
-          ++total_count;
-        }
-      } else if (output.item_ids.has_value() && total_count < total_threshold) {
-        output_context->mutable_int64_contents()->Add(output.item_ids.value());
-        append_output_logprobs(i);
-        ++total_count;
-      }
-
+    for (const RecEmitRecord& emitted_item : emitted_items) {
+      output_context->mutable_int64_contents()->Add(emitted_item.item_id);
+      append_output_logprobs(emitted_item.output_index);
       if (did_tensor != nullptr && type_tensor != nullptr) {
-        const auto& item_info = output.item_info;
         did_tensor->mutable_contents()->add_bytes_contents(
-            item_info.has_value() ? item_info->did : "");
+            emitted_item.item_info.has_value() ? emitted_item.item_info->did
+                                               : "");
         type_tensor->mutable_contents()->add_bytes_contents(
-            item_info.has_value() ? item_info->type : "");
+            emitted_item.item_info.has_value() ? emitted_item.item_info->type
+                                               : "");
       }
     }
   } else {
