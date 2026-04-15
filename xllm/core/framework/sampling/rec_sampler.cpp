@@ -154,6 +154,8 @@ RecSampler::RecSampler(RecPipelineType pipeline_type)
   LOG(INFO) << "RecSampler initialized with Sampler delegate.";
 }
 
+RecSampler::~RecSampler() = default;
+
 SampleOutput RecSampler::forward(torch::Tensor& logits,
                                  const SamplingParameters& params,
                                  const torch::Tensor& filter_mask) const {

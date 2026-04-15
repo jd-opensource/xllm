@@ -28,7 +28,7 @@ class Sampler;
 class RecSampler {
  public:
   explicit RecSampler(RecPipelineType pipeline_type);
-  ~RecSampler() = default;
+  ~RecSampler();
 
   // logits: [batch_size, vocab_size]
   SampleOutput forward(
