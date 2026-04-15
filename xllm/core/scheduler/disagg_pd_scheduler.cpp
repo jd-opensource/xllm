@@ -257,13 +257,21 @@ proto::DisaggPDService_Stub* DisaggPDScheduler::create_rpc_channel(
 }
 
 void DisaggPDScheduler::start_rpc_server() {
+  const uint16_t disagg_pd_port = options_.disagg_pd_port().value_or(
+      static_cast<uint16_t>(FLAGS_disagg_pd_port));
   std::unique_ptr<DisaggPDService> service =
       std::make_unique<DisaggPDService>(this, engine_);
   auto rpc_server =
       ServerRegistry::get_instance().register_server(server_name_);
-  if (!rpc_server->start(std::move(service))) {
-    LOG(ERROR) << "Failed to start brpc disagg pd server on port "
-               << FLAGS_disagg_pd_port;
+  if (!rpc_server->start(std::move(service), disagg_pd_port)) {
+    LOG(ERROR) << "Failed to start brpc disagg pd server, instance="
+               << options_.instance_name().value_or("unknown")
+               << ", server_name=" << server_name_
+               << ", role="
+               << (options_.instance_role().has_value()
+                       ? options_.instance_role().value().to_string()
+                       : "unknown")
+               << ", port=" << disagg_pd_port;
     return;
   }
 }
