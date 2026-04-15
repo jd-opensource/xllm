@@ -1,7 +1,7 @@
 ## 备赛赛题：基于xLLM框架的推理模型性能优化
-- 模型：[Qwen3.5-4B](https://modelscope.cn/models/Qwen/Qwen3.5-4B)
+- 模型：[Qwen3.5-9B](https://modelscope.cn/models/Qwen/Qwen3.5-9B)
 - 推理框架：[xLLM ict_final分支](https://github.com/jd-opensource/xllm/tree/ict_final)
-- 要求：在保证精度的前提下（详情见**xLLM 精度测试**），使用各种优化方法优化Qwen3.5-4B的推理性能，尽可能提高 **Output Tokens per Second** (输出Tokens/秒， TPS)：
+- 要求：在保证精度的前提下（详情见**xLLM 精度测试**），使用各种优化方法优化Qwen3.5-9B的推理性能，尽可能提高 **Output Tokens per Second** (输出Tokens/秒， TPS)：
   - 单并发，输入输出64k+1k，比拼TPS
   - 单并发，输入输出128k+1k，比拼TPS
 - 最终提交的报告至少需要包括以下部分：
@@ -10,7 +10,7 @@
   - 精度测试结果
   - 性能测试结果
 - 其他要求：
-  - 需要将代码和编译完成的二进制xllm文件一并提交
+  - 需要将代码和编译完成的二进制xllm文件（即`/path/to/xllm/build/xllm/core/server/xllm`文件）一并提交
 
 
 ## xLLM 开发手册
@@ -27,7 +27,7 @@ docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-a2-arm-20260306
 pip install modelscope
 
 # 下载模型
-modelscope download --model Qwen/Qwen3.5-4B --local_dir /path/to/model/Qwen3.5-4B
+modelscope download --model Qwen/Qwen3.5-9B --local_dir /path/to/model/Qwen3.5-9B
 ```
 
 启动容器：
@@ -85,7 +85,7 @@ export ASCEND_RT_VISIBLE_DEVICES=0
 export HCCL_IF_BASE_PORT=43432  # HCCL communication base port
 
 
-MODEL_PATH="/path/to/model/Qwen3.5-4B"               # Model path
+MODEL_PATH="/path/to/model/Qwen3.5-9B"               # Model path
 MASTER_NODE_ADDR="127.0.0.1:9748"                  # Master node address (must be globally consistent)
 START_PORT=18000                                   # Service starting port
 START_DEVICE=0                                     # Starting logical device number
@@ -99,7 +99,7 @@ do
   PORT=$((START_PORT + i))
   DEVICE=$((START_DEVICE + i))
   LOG_FILE="$LOG_DIR/node_$i.log"
-  /path/to/xllm \
+  /path/to/xllm/build/xllm/core/server/xllm \
     --model $MODEL_PATH \
     --devices="npu:$DEVICE" \
     --port $PORT \
@@ -124,7 +124,7 @@ curl -s "http://127.0.0.1:18000/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer <API Key>" \
     -d '{
-          "model": "Qwen3.5-4B",
+          "model": "Qwen3.5-9B",
           "messages": [
             {"role": "system", "content": "You are a user assistant."},
             {"role": "user", "content": "介绍下北京"}
@@ -148,7 +148,7 @@ curl -s "http://127.0.0.1:18000/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer <API Key>" \
     -d '{
-          "model": "Qwen3.5-4B",
+          "model": "Qwen3.5-9B",
           "messages": [
             {"role": "system", "content": "You are a user assistant."},
             {"role": "user", "content": "Loraine makes wax sculptures of animals. Large animals take four sticks of wax and small animals take two sticks. She made three times as many small animals as large animals, and she used 12 sticks of wax for small animals. How many sticks of wax did Loraine use to make all the animals?"}
@@ -180,7 +180,7 @@ curl -s "http://127.0.0.1:18000/v1/chat/completions" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer <API Key>" \
     -d '{
-          "model": "Qwen3.5-4B",
+          "model": "Qwen3.5-9B",
           "messages": [
             {"role": "system", "content": "You are a user assistant."},
             {"role": "user", "content": "If one fourth of the engines are defective, and there are 5 batches of 80 engines each. How many engines are not defective?"}
@@ -210,7 +210,7 @@ python test_xllm.py \
     --host 127.0.0.1 \
     --port 18000 \
     --dataset-path /path/to/dataset/ShareGPT_V3_unfiltered_cleaned_split.json \
-    --model /path/to/model/Qwen3.5-4B
+    --model /path/to/model/Qwen3.5-9B
 ```
 
 
