@@ -733,11 +733,11 @@ do
     --port $PORT \
     --host $LOCAL_HOST \
     --master_node_addr=$MASTER_NODE_ADDR \
-    --draft_model $DRAFT_MODEL_PATH \
+    --draft_model $DRAFT_MODEL_PATH \ # 草稿模型地址
     --draft_devices="npu:$DEVICE" \
-    --num_speculative_tokens 3 \
+    --num_speculative_tokens 3 \ # 采样率
     --nnodes=$NNODES \
-    --max_memory_utilization=0.7 \
+    --max_memory_utilization=0.7 \ # 显存使用率
     --block_size=128 \
     --max_seqs_per_batch=9000 \
     --max_tokens_per_batch=67000 \
@@ -745,7 +745,7 @@ do
     --enable_prefix_cache=false \
     --enable_chunked_prefill=false \
     --enable_schedule_overlap=false \
-    --enable_disagg_pd=true \
+    --enable_disagg_pd=true \ # 开启PD分离
     --instance_role=PREFILL \
     --etcd_addr=11.87.191.83:3389 \
     --transfer_listen_port=$((26100+i)) \
@@ -794,8 +794,6 @@ export ATB_CONTEXT_WORKSPACE_SIZE=0
 
 
 MODEL_PATH="/export/home/models/GLM-5-final-w8a8/"
-#MODEL_PATH="/export/home/models/DeepSeek-V3.2-w8a8/"
-#DRAFT_MODEL_PATH="/export/home/models/DeepSeek-V3.2-w8a8-mtp"
 DRAFT_MODEL_PATH="/export/home/models/GLM-5-final-w8a8-MTP/"
 MASTER_NODE_ADDR="11.87.191.83:1895"
 START_PORT=48000
@@ -911,11 +909,11 @@ do
     --port $PORT \
     --host $LOCAL_HOST \
     --master_node_addr=$MASTER_NODE_ADDR \
-    --draft_model $DRAFT_MODEL_PATH \
+    --draft_model $DRAFT_MODEL_PATH \ # 草稿模型
     --draft_devices="npu:$DEVICE" \
-    --num_speculative_tokens 3 \
+    --num_speculative_tokens 3 \ # 采样率
     --nnodes=$NNODES \
-    --max_memory_utilization=0.80 \
+    --max_memory_utilization=0.80 \ # 现存使用率 80%
     --block_size=128 \
     --max_seqs_per_batch=9000 \
     --communication_backend="hccl" \
@@ -930,8 +928,8 @@ do
     --etcd_addr=11.87.191.83:3389 \
     --transfer_listen_port=$((26100+i)) \
     --disagg_pd_port=7777 \
-    --dp_size 2 \
-    --ep_size 32 \
+    --dp_size 2 \ # 开启dp
+    --ep_size 32 \ # 开启ep
     --node_rank=$((i+LOCAL_NODES)) \
     --rank_tablefile=/export/home/shifengmin.3/workspace/ranktable_8382_new.json \ # 双机间通信路由表
     > $LOG_FILE 2>&1 &
@@ -995,8 +993,8 @@ models = [
         model="[$GLM5_mtp_weight]", # GLM5-MTP权重
         request_rate = 0,
         retry = 1,
-        host_ip = "[$server_ip]",
-        host_port = [$server_port],
+        host_ip = "[$server_ip]", # 推理服务ip
+        host_port = [$server_port], # 推理服务port 
         max_out_len = 1024, # token输出数量
         batch_size=1,
         trust_remote_code=False,
