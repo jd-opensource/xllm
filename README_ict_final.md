@@ -1,5 +1,5 @@
 ## 备赛赛题：基于xLLM框架的推理模型性能优化
-- 模型：[Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B)
+- 模型：[Qwen3.5-4B](https://modelscope.cn/models/Qwen/Qwen3.5-4B)
 - 推理框架：[xLLM ict_final分支](https://github.com/jd-opensource/xllm/tree/ict_final)
 - 要求：在保证精度的前提下（详情见**xLLM 精度测试**），使用各种优化方法优化Qwen3.5-4B的推理性能，尽可能提高 **Output Tokens per Second** (输出Tokens/秒， TPS)：
   - 单并发，输入输出64k+1k，比拼TPS
@@ -19,6 +19,15 @@
 下载镜像：
 ```bash
 docker pull quay.io/jd_xllm/xllm-ai:xllm-dev-a2-arm-20260306
+```
+
+下载模型：
+```bash
+# 安装modelscope
+pip install modelscope
+
+# 下载模型
+modelscope download --model Qwen/Qwen3.5-4B --local_dir /path/to/model/Qwen3.5-4B
 ```
 
 启动容器：
