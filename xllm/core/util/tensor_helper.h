@@ -375,9 +375,8 @@ inline torch::ScalarType resolve_ssm_dtype(
   return default_dtype;
 }
 
-inline int64_t resolve_ssm_dtype_size(
-    const std::string& mamba_ssm_dtype_str,
-    int64_t default_dtype_size) {
+inline int64_t resolve_ssm_dtype_size(const std::string& mamba_ssm_dtype_str,
+                                      int64_t default_dtype_size) {
   if (mamba_ssm_dtype_str.empty()) {
     return default_dtype_size;
   }
