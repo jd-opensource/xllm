@@ -114,6 +114,7 @@ set(CUDA_SOURCE_FILES
   reshape_paged_cache.cu
   rope.cu
   random_sample.cpp
+  topk_postprocess.cu
   utils.cpp
   xattention/beam_search.cpp
   xattention/cache_select.cu

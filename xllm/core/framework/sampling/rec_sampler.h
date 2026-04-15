@@ -27,14 +27,16 @@ class Sampler;
 
 class RecSampler {
  public:
-  explicit RecSampler(RecPipelineType pipeline_type);
-  ~RecSampler() = default;
+  explicit RecSampler(RecPipelineType pipeline_type, bool enable_fast_path);
+  ~RecSampler();
 
   // logits: [batch_size, vocab_size]
   SampleOutput forward(
       torch::Tensor& logits,
       const SamplingParameters& params,
       const torch::Tensor& filter_mask = torch::Tensor()) const;
+
+  bool fast_path_enabled() const { return enable_fast_path_; }
 
  private:
   class SamplingStrategy {
@@ -69,21 +71,25 @@ class RecSampler {
 
   class MultiRoundFastPathSamplingStrategy final : public SamplingStrategy {
    public:
-    explicit MultiRoundFastPathSamplingStrategy(const Sampler& sampler);
+    explicit MultiRoundFastPathSamplingStrategy(const Sampler& sampler,
+                                                bool enable_fast_path);
     SampleOutput forward(torch::Tensor& logits,
                          const SamplingParameters& params,
                          const torch::Tensor& filter_mask) const override;
 
    private:
     const Sampler& sampler_;
+    bool enable_fast_path_;
   };
 
   static std::unique_ptr<SamplingStrategy> create_sampling_strategy(
       RecPipelineType type,
-      const Sampler& sampler);
+      const Sampler& sampler,
+      bool enable_fast_path);
 
   std::unique_ptr<Sampler> sampler_;
   std::unique_ptr<SamplingStrategy> strategy_;
+  bool enable_fast_path_;
 };
 
 }  // namespace xllm

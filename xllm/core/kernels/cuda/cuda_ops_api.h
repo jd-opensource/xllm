@@ -232,6 +232,11 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_general(
 torch::Tensor air_log_softmax_last_dim(const torch::Tensor& input,
                                        const torch::Tensor& temperatures);
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> rec_topk_postprocess(
+    const torch::Tensor& topk_values,
+    const torch::Tensor& topk_indices,
+    const torch::Tensor& temperatures);
+
 void fused_qk_norm_rope(
     torch::Tensor& qkv,   // Combined QKV tensor [num_tokens,
                           // (num_heads_q+num_heads_k+num_heads_v)*head_dim]
