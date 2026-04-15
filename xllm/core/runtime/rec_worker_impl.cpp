@@ -1754,8 +1754,12 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
                        .reshape({-1, step_meta->beam_width});
       top_logprobs = sample_output.top_logprobs.reshape({-1, beam_width});
 #endif
-      execute_beam_search(
-          top_tokens, top_logprobs, beam_tensors, round, batch_size, total_rounds);
+      execute_beam_search(top_tokens,
+                          top_logprobs,
+                          beam_tensors,
+                          round,
+                          batch_size,
+                          total_rounds);
 
       if (round > 0 && round < total_rounds - 1) {
         execute_cache_select(
