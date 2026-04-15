@@ -837,6 +837,31 @@ TEST(BatchTest, BeamSearchExpandsFinalResultsBeyondBeamWidth) {
   EXPECT_FLOAT_EQ(group.sequences()[1]->get_acc_logprob(), 0.30f);
   EXPECT_FLOAT_EQ(group.sequences()[2]->get_acc_logprob(), 0.25f);
   EXPECT_FLOAT_EQ(group.sequences()[3]->get_acc_logprob(), 0.15f);
+
+  std::vector<SequenceOutput> outputs;
+  class FakeTokenizer final : public Tokenizer {
+   public:
+    FakeTokenizer() = default;
+    std::string decode(const Slice<int32_t>& ids, bool) const override {
+      return std::to_string(ids[ids.size() - 1]);
+    }
+    bool decode(const Slice<int32_t>&,
+                bool,
+                std::vector<int64_t>*) const override {
+      return false;
+    }
+    size_t vocab_size() const override { return 0; }
+    std::string id_to_token(int32_t id) const override {
+      return std::to_string(id);
+    }
+  } tokenizer;
+  group.finish();
+  group.generate_outputs(outputs, tokenizer);
+  ASSERT_EQ(outputs.size(), 4);
+  EXPECT_EQ(outputs[0].token_ids.back(), 10);
+  EXPECT_EQ(outputs[1].token_ids.back(), 11);
+  EXPECT_EQ(outputs[2].token_ids.back(), 20);
+  EXPECT_EQ(outputs[3].token_ids.back(), 21);
 }
 
 TEST(BatchTest, MultiRoundBeamSearchExpandsFinalResultsBeyondBeamWidth) {

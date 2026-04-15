@@ -40,6 +40,101 @@ size_t resolve_beam_result_size(const RequestSamplingParam* sampling_param,
                sampling_param->resolved_num_return_sequences()));
 }
 
+size_t resolve_final_output_count(const RequestSamplingParam* sampling_param) {
+  CHECK(sampling_param != nullptr);
+  return static_cast<size_t>(
+      std::max(sampling_param->beam_width,
+               sampling_param->resolved_num_return_sequences()));
+}
+
+void generate_expanded_beam_outputs(
+    const std::vector<std::unique_ptr<Sequence>>& sequences,
+    const Tokenizer& tokenizer,
+    const RequestSamplingParam* sampling_param,
+    std::vector<SequenceOutput>* outputs) {
+  CHECK(outputs != nullptr);
+  CHECK(sampling_param != nullptr);
+  if (sequences.empty()) {
+    return;
+  }
+
+  const size_t beam_width = static_cast<size_t>(sampling_param->beam_width);
+  const size_t requested_count = resolve_final_output_count(sampling_param);
+  if (requested_count <= sequences.size()) {
+    for (size_t i = 0; i < sequences.size(); ++i) {
+      auto seq_output = sequences[i]->generate_output(tokenizer);
+      seq_output.index = i;
+      outputs->push_back(std::move(seq_output));
+    }
+    return;
+  }
+
+  const size_t topk =
+      std::max<size_t>(1, static_cast<size_t>(sampling_param->top_logprobs));
+  SimpleTopKOptimizerBeamCandidate topk_optimizer(requested_count);
+  for (size_t i = 0; i < sequences.size(); ++i) {
+    const auto* seq = sequences[i].get();
+    CHECK(seq != nullptr);
+    if (seq->num_tokens() == 0) {
+      continue;
+    }
+
+    const int32_t last_token_idx = static_cast<int32_t>(seq->num_tokens() - 1);
+    const auto& top_logprobs =
+        seq->logprob_state()->get_top_logprobs()[last_token_idx];
+    const auto& top_tokens =
+        seq->logprob_state()->get_top_tokens()[last_token_idx];
+    const size_t candidate_topk = std::min<size_t>(
+        topk, std::min(top_logprobs.size(), top_tokens.size()));
+    if (candidate_topk == 0) {
+      BeamCandidate candidate;
+      candidate.source_index = i;
+      candidate.logprob_sum = seq->get_acc_logprob();
+      topk_optimizer.insert(std::move(candidate));
+      continue;
+    }
+
+    const float base_logprob = seq->get_base_logprob();
+    for (size_t idx = 0; idx < candidate_topk; ++idx) {
+      const float new_logprob = base_logprob + top_logprobs[idx];
+      if (!topk_optimizer.worthInserting(new_logprob)) {
+        break;
+      }
+
+      BeamCandidate candidate;
+      candidate.source_index = i;
+      candidate.logprob_sum = new_logprob;
+      candidate.override_last_token = true;
+      candidate.last_token_id = static_cast<int32_t>(top_tokens[idx]);
+      candidate.last_token_logprob = top_logprobs[idx];
+      topk_optimizer.insert(std::move(candidate));
+    }
+  }
+
+  std::vector<BeamCandidate> candidates = topk_optimizer.getTopKSorted();
+  const size_t output_count = std::min(requested_count, candidates.size());
+  outputs->reserve(outputs->size() + output_count);
+  for (size_t i = 0; i < output_count; ++i) {
+    const BeamCandidate& candidate = candidates[i];
+    CHECK_LT(candidate.source_index, sequences.size());
+    Sequence output_sequence(*sequences[candidate.source_index]);
+    if (candidate.override_last_token && output_sequence.num_tokens() > 0) {
+      const size_t last_token_idx = output_sequence.num_tokens() - 1;
+      Token token(candidate.last_token_id);
+      token.logprob = candidate.last_token_logprob.has_value()
+                          ? candidate.last_token_logprob.value()
+                          : 0.0f;
+      output_sequence.update_token(last_token_idx, token);
+      output_sequence.logprob_state()->set_acc_logprob(candidate.logprob_sum);
+      output_sequence.logprob_state()->set_last_acc_token_idx(
+          output_sequence.num_tokens());
+    }
+    auto seq_output = output_sequence.generate_output(tokenizer);
+    seq_output.index = i;
+    outputs->push_back(std::move(seq_output));
+  }
+}
+
 }  // namespace
 
 SequencesGroup::SequencesGroup(const std::string& prompt,
@@ -147,6 +242,12 @@ void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
       generate_multi_round_output(outputs, tokenizer, *base);
       return;
     }
+  }
+
+  if (check_beam_search() && !sequence_params_.streaming) {
+    generate_expanded_beam_outputs(
+        sequences_, tokenizer, sequence_params_.sampling_param, &outputs);
+    return;
   }
 
   if (sequence_params_.streaming) {
