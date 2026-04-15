@@ -273,16 +273,16 @@ bool WorkerImpl::allocate_kv_cache(
         }
 #else
         if (enable_linear_attention) {
-          conv_cache = torch::empty(kv_cache_shape[2],
+          conv_cache = torch::zeros(kv_cache_shape[2],
                                     torch::dtype(dtype_).device(device_));
-          ssm_cache = torch::empty(kv_cache_shape[3],
+          ssm_cache = torch::zeros(kv_cache_shape[3],
                                    torch::dtype(dtype_).device(device_));
         }
 #endif
         // Create empty KVCache with only conv and ssm
         kv_caches_.emplace_back(
-            torch::empty({0}, torch::dtype(dtype_).device(device_)),
-            torch::empty({0}, torch::dtype(dtype_).device(device_)),
+            torch::zeros({0}, torch::dtype(dtype_).device(device_)),
+            torch::zeros({0}, torch::dtype(dtype_).device(device_)),
             conv_cache,
             ssm_cache);
       } else {
@@ -294,16 +294,16 @@ bool WorkerImpl::allocate_kv_cache(
                 ? ACL_FORMAT_FRACTAL_NZ
                 : ACL_FORMAT_ND;
         key_cache = at_npu::native::npu_format_cast(
-            torch::empty(kv_cache_shape[0],
+            torch::zeros(kv_cache_shape[0],
                          torch::dtype(cache_dtype).device(device_)),
             npu_format_type);
         value_cache = at_npu::native::npu_format_cast(
-            torch::empty(kv_cache_shape[1],
+            torch::zeros(kv_cache_shape[1],
                          torch::dtype(cache_dtype).device(device_)),
             npu_format_type);
         if (enable_lighting_indexer) {
           index_cache = at_npu::native::npu_format_cast(
-              torch::empty(kv_cache_shape[2],
+              torch::zeros(kv_cache_shape[2],
                            torch::dtype(dtype_).device(device_)),
               npu_format_type);
         }
@@ -332,14 +332,14 @@ bool WorkerImpl::allocate_kv_cache(
           }
         }
 #else
-        key_cache = torch::empty(kv_cache_shape[0],
+        key_cache = torch::zeros(kv_cache_shape[0],
                                  torch::dtype(cache_dtype).device(device_));
         if (!kv_cache_shape[1].empty()) {
-          value_cache = torch::empty(kv_cache_shape[1],
+          value_cache = torch::zeros(kv_cache_shape[1],
                                      torch::dtype(cache_dtype).device(device_));
         }
         if (enable_lighting_indexer) {
-          index_cache = torch::empty(kv_cache_shape[2],
+          index_cache = torch::zeros(kv_cache_shape[2],
                                      torch::dtype(dtype_).device(device_));
         }
 #endif
