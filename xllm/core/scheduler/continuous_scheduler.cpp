@@ -1074,7 +1074,6 @@ void ContinuousScheduler::step(const absl::Duration& timeout) {
       step_with_pd_ooc(batch);
     }
 
-    kv_cache_manager_->reset_transfer_infos();
     // process request output in batch
     process_batch_output(false);
   } else {
@@ -1100,7 +1099,6 @@ void ContinuousScheduler::step_with_schedule_overlap(
 
   if (!cur_batch_all_empty) {
     engine_->step(batch);
-    kv_cache_manager_->reset_transfer_infos();
   }
 
   // producer-consumer mode, make sure only one step is scheduled in advance
@@ -1131,7 +1129,6 @@ void ContinuousScheduler::generate() {
 
     // run inference for the batch
     engine_->step(batch);
-    kv_cache_manager_->reset_transfer_infos();
 
     // process request output in batch
     process_batch_output(false);

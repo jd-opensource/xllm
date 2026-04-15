@@ -353,7 +353,6 @@ void FixedStepsScheduler::step(const absl::Duration& timeout) {
                      requests = std::move(result.requests),
                      sequences = std::move(result.sequences)]() mutable {
       engine_->step(batches);
-      kv_cache_manager_->reset_transfer_infos();
 
       // After step completes, check and process finished/cancelled requests
       std::vector<std::shared_ptr<Request>> finished_requests;

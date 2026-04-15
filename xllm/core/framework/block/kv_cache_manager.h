@@ -59,8 +59,6 @@ class KVCacheManager {
   virtual std::vector<std::vector<BlockTransferInfo>>*
   get_swap_block_transfer_infos() = 0;
 
-  virtual void reset_transfer_infos() = 0;
-
   virtual uint32_t num_blocks() const = 0;
   virtual int32_t block_size() const = 0;
   virtual std::vector<size_t> num_blocks_in_prefix_cache() const = 0;

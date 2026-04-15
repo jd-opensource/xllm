@@ -69,7 +69,6 @@ class BlockManagerPool : public KVCacheManager {
 
   virtual std::vector<std::vector<BlockTransferInfo>>*
   get_swap_block_transfer_infos() override;
-  virtual void reset_transfer_infos() override;
 
   virtual void get_merged_kvcache_event(KvCacheEvent* event) const;
   virtual float get_gpu_cache_usage_perc() const;

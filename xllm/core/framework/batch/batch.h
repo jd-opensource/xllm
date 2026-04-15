@@ -59,8 +59,8 @@ class Batch {
   void refresh_forward_type();
 
   void set_swap_block_transfer_infos(
-      std::vector<BlockTransferInfo>* swap_block_transfer_infos) {
-    swap_block_transfer_infos_ = swap_block_transfer_infos;
+      std::vector<BlockTransferInfo> swap_block_transfer_infos) {
+    swap_block_transfer_infos_ = std::move(swap_block_transfer_infos);
   }
 
   void set_batch_id() {
@@ -165,7 +165,7 @@ class Batch {
 
   std::vector<Sequence*> sequences_;
   std::vector<SequencesGroup*> sequence_groups_;
-  std::vector<BlockTransferInfo>* swap_block_transfer_infos_ = nullptr;
+  std::vector<BlockTransferInfo> swap_block_transfer_infos_;
 
   // max number of tokens to process for each sequence
   // default to max value
