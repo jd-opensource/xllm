@@ -168,5 +168,15 @@ xllm::MMDataItem convert_xllm_mm_item_to_internal(
 
 bool convert_xllm_mm_data_to_internal(const XLLM_MM_Data* mm_data,
                                       xllm::MMData& internal_mm_data);
+
+bool convert_xllm_mm_data_to_input_tensors(
+    const XLLM_MM_Data* mm_data,
+    std::vector<proto::InferInputTensor>* input_tensors,
+    std::string* error_info);
+
+bool convert_c_infer_input_tensors(const XLLM_InferInputTensorDesc* tensors,
+                                   size_t tensor_count,
+                                   std::vector<proto::InferInputTensor>* out,
+                                   std::string* error_info);
 }  // namespace helper
 }  // namespace xllm

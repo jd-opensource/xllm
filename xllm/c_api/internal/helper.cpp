@@ -17,8 +17,11 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <atomic>
+#include <cstring>
+#include <limits>
 #include <string>
 
+#include "completion.pb.h"
 #include "core/common/global_flags.h"
 #include "core/util/env_var.h"
 #include "core/util/rec_model_utils.h"
@@ -30,6 +33,100 @@ namespace {
 thread_local ShortUUID short_uuid;
 static std::atomic<bool> g_glog_inited = false;
 static pthread_mutex_t g_log_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void set_completion_logprobs(
+    proto::Choice* choice,
+    const std::optional<std::vector<LogProb>>& logprobs) {
+  if (!logprobs.has_value() || logprobs->empty()) {
+    return;
+  }
+
+  auto* proto_logprobs = choice->mutable_logprobs();
+  for (const auto& logprob : logprobs.value()) {
+    proto_logprobs->add_tokens(logprob.token);
+    proto_logprobs->add_token_ids(logprob.token_id);
+    proto_logprobs->add_token_logprobs(logprob.logprob);
+  }
+}
+
+bool serialize_completion_response_proto(const InferenceType inference_type,
+                                         const RequestOutput& req_output,
+                                         const std::string& request_id,
+                                         int64_t created_time,
+                                         const std::string& model,
+                                         std::string* serialized,
+                                         std::string* error_info) {
+  if (serialized == nullptr) {
+    if (error_info != nullptr) {
+      *error_info = "serialized proto output is null";
+    }
+    return false;
+  }
+
+  proto::CompletionResponse response;
+  response.set_object("text_completion");
+  response.set_id(request_id);
+  response.set_created(static_cast<uint32_t>(created_time));
+  response.set_model(model);
+
+  response.mutable_choices()->Reserve(req_output.outputs.size());
+  for (const auto& output : req_output.outputs) {
+    auto* choice = response.add_choices();
+    choice->set_index(output.index);
+    choice->set_text(output.text);
+    set_completion_logprobs(choice, output.logprobs);
+    if (output.finish_reason.has_value()) {
+      choice->set_finish_reason(output.finish_reason.value());
+    }
+  }
+
+  if (req_output.usage.has_value()) {
+    const auto& usage = req_output.usage.value();
+    auto* proto_usage = response.mutable_usage();
+    proto_usage->set_prompt_tokens(usage.num_prompt_tokens);
+    proto_usage->set_completion_tokens(usage.num_generated_tokens);
+    proto_usage->set_total_tokens(usage.num_total_tokens);
+  }
+
+  if (inference_type == InferenceType::REC_COMPLETIONS) {
+    auto* output_tensor = response.mutable_output_tensors()->Add();
+    output_tensor->set_name("rec_result");
+
+    if (FLAGS_enable_convert_tokens_to_item) {
+      output_tensor->set_datatype(proto::DataType::INT64);
+      output_tensor->mutable_shape()->Add(req_output.outputs.size());
+      auto* contents = output_tensor->mutable_contents();
+      for (const auto& output : req_output.outputs) {
+        if (output.item_ids.has_value()) {
+          contents->mutable_int64_contents()->Add(output.item_ids.value());
+        }
+      }
+    } else {
+      output_tensor->set_datatype(proto::DataType::INT32);
+      if (req_output.outputs.empty()) {
+        output_tensor->mutable_shape()->Add(0);
+        output_tensor->mutable_shape()->Add(0);
+      } else {
+        output_tensor->mutable_shape()->Add(req_output.outputs.size());
+        output_tensor->mutable_shape()->Add(
+            req_output.outputs[0].token_ids.size());
+        auto* contents = output_tensor->mutable_contents();
+        for (const auto& output : req_output.outputs) {
+          contents->mutable_int_contents()->Add(output.token_ids.begin(),
+                                                output.token_ids.end());
+        }
+      }
+    }
+  }
+
+  if (!response.SerializeToString(serialized)) {
+    if (error_info != nullptr) {
+      *error_info = "failed to serialize CompletionResponse";
+    }
+    return false;
+  }
+  return true;
+}
 }  // namespace
 
 std::string generate_request_id() {
@@ -152,6 +249,8 @@ XLLM_Response* build_error_response(const std::string& request_id,
   response->error_info[XLLM_ERROR_INFO_MAX_LEN - 1] = '\0';
 
   XLLM_SET_META_STRING_FIELD(response->id, request_id);
+  response->completion_response_proto = nullptr;
+  response->completion_response_proto_size = 0;
 
   LOG(ERROR) << "Request [" << request_id << "] error: " << error_info
              << " (code: " << static_cast<int>(response->status_code) << ")";
@@ -172,6 +271,8 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
   response->created = created_time;
   XLLM_SET_META_STRING_FIELD(response->id, request_id);
   XLLM_SET_META_STRING_FIELD(response->model, model);
+  response->completion_response_proto = nullptr;
+  response->completion_response_proto_size = 0;
 
   if (inference_type == InferenceType::LLM_COMPLETIONS ||
       inference_type == InferenceType::REC_COMPLETIONS) {
@@ -372,12 +473,41 @@ XLLM_Response* handle_inference_request(
         try {
           if (req_output.status.has_value()) {
             if (req_output.status.value().ok()) {
-              locked_promise->setValue(build_success_response(inference_type,
-                                                              req_output,
-                                                              rec_pipeline_type,
-                                                              request_id,
-                                                              created_time,
-                                                              model_id));
+              XLLM_Response* response =
+                  build_success_response(inference_type,
+                                         req_output,
+                                         rec_pipeline_type,
+                                         request_id,
+                                         created_time,
+                                         model_id);
+
+              if (response != nullptr &&
+                  (inference_type == InferenceType::LLM_COMPLETIONS ||
+                   inference_type == InferenceType::REC_COMPLETIONS)) {
+                std::string serialized;
+                std::string error_info;
+                if (serialize_completion_response_proto(inference_type,
+                                                        req_output,
+                                                        request_id,
+                                                        created_time,
+                                                        model_id,
+                                                        &serialized,
+                                                        &error_info)) {
+                  response->completion_response_proto_size = serialized.size();
+                  response->completion_response_proto =
+                      new char[response->completion_response_proto_size + 1];
+                  memcpy(response->completion_response_proto,
+                         serialized.data(),
+                         response->completion_response_proto_size);
+                  response->completion_response_proto
+                      [response->completion_response_proto_size] = '\0';
+                } else {
+                  LOG(WARNING) << "serialize_completion_response_proto failed: "
+                               << error_info;
+                }
+              }
+
+              locked_promise->setValue(response);
             } else {
               locked_promise->setValue(build_error_response(
                   request_id,
@@ -421,12 +551,31 @@ XLLM_Response* handle_inference_request(
               input, opt_mm_data, xllm_request_params, on_request_complete);
 
         } else {
+          // xllm::util::log_omnirec_completion_schedule_request(
+          //     "c_api_routing_tokens",
+          //     model_id,
+          //     xllm_request_params,
+          //     "",
+          //     &input,
+          //     nullptr);
           handler->master->handle_request("",
                                           input,
                                           std::nullopt,
                                           xllm_request_params,
                                           on_request_complete);
         }
+      } else if constexpr (std::is_same_v<
+                               InputType,
+                               std::vector<proto::InferInputTensor>>) {
+        // xllm::util::log_omnirec_completion_schedule_request(
+        //     "c_api_input_tensors",
+        //     model_id,
+        //     xllm_request_params,
+        //     "",
+        //     nullptr,
+        //     &input);
+        handler->master->handle_request(
+            "", std::nullopt, input, xllm_request_params, on_request_complete);
       } else {
         handler->master->handle_request(input,
                                         std::nullopt,
@@ -471,6 +620,12 @@ XLLM_Response* handle_inference_request(
 void xllm_free_response(XLLM_Response* resp) {
   if (nullptr == resp) {
     return;
+  }
+
+  if (resp->completion_response_proto != nullptr) {
+    delete[] resp->completion_response_proto;
+    resp->completion_response_proto = nullptr;
+    resp->completion_response_proto_size = 0;
   }
 
   if (nullptr != resp->choices.entries) {
@@ -695,6 +850,266 @@ bool convert_xllm_mm_data_to_internal(const XLLM_MM_Data* mm_data,
   return true;
 }
 
+static bool add_torch_tensor_as_input_tensor(
+    const std::string& name,
+    const torch::Tensor& tensor,
+    std::vector<proto::InferInputTensor>* out,
+    std::string* error_info) {
+  if (out == nullptr) {
+    return false;
+  }
+
+  torch::Tensor cpu_tensor = tensor.is_cuda() ? tensor.to(torch::kCPU) : tensor;
+  cpu_tensor = cpu_tensor.contiguous();
+
+  proto::InferInputTensor input_tensor;
+  input_tensor.set_name(name);
+
+  auto scalar_type = cpu_tensor.scalar_type();
+  if (scalar_type == torch::kFloat16 || scalar_type == torch::kBFloat16) {
+    cpu_tensor = cpu_tensor.to(torch::kFloat32);
+    scalar_type = cpu_tensor.scalar_type();
+  }
+
+  if (scalar_type == torch::kFloat32) {
+    input_tensor.set_data_type(proto::DataType::FLOAT);
+  } else if (scalar_type == torch::kInt32) {
+    input_tensor.set_data_type(proto::DataType::INT32);
+  } else if (scalar_type == torch::kInt64) {
+    input_tensor.set_data_type(proto::DataType::INT64);
+  } else if (scalar_type == torch::kBool) {
+    input_tensor.set_data_type(proto::DataType::BOOL);
+  } else {
+    if (error_info != nullptr) {
+      *error_info = "Unsupported tensor dtype for input_tensors: " +
+                    std::string(c10::toString(scalar_type));
+    }
+    return false;
+  }
+
+  for (int64_t i = 0; i < cpu_tensor.dim(); ++i) {
+    input_tensor.add_shape(cpu_tensor.size(i));
+  }
+
+  auto* contents = input_tensor.mutable_contents();
+  const int64_t numel = cpu_tensor.numel();
+  switch (scalar_type) {
+    case torch::kFloat32: {
+      const float* data = cpu_tensor.data_ptr<float>();
+      contents->mutable_fp32_contents()->Resize(numel, 0.0f);
+      std::copy(data, data + numel, contents->mutable_fp32_contents()->begin());
+      break;
+    }
+    case torch::kInt32: {
+      const int32_t* data = cpu_tensor.data_ptr<int32_t>();
+      contents->mutable_int_contents()->Resize(numel, 0);
+      std::copy(data, data + numel, contents->mutable_int_contents()->begin());
+      break;
+    }
+    case torch::kInt64: {
+      const int64_t* data = cpu_tensor.data_ptr<int64_t>();
+      contents->mutable_int64_contents()->Resize(numel, 0);
+      std::copy(
+          data, data + numel, contents->mutable_int64_contents()->begin());
+      break;
+    }
+    case torch::kBool: {
+      const bool* data = cpu_tensor.data_ptr<bool>();
+      contents->mutable_bool_contents()->Resize(numel, false);
+      std::copy(data, data + numel, contents->mutable_bool_contents()->begin());
+      break;
+    }
+    default: {
+      if (error_info != nullptr) {
+        *error_info = "Unhandled tensor dtype for input_tensors: " +
+                      std::string(c10::toString(scalar_type));
+      }
+      return false;
+    }
+  }
+
+  out->emplace_back(std::move(input_tensor));
+  return true;
+}
+
+namespace {
+
+int64_t infer_input_tensor_desc_numel(const int64_t* shape, size_t rank) {
+  if (shape == nullptr || rank == 0) {
+    return -1;
+  }
+
+  int64_t numel = 1;
+  for (size_t i = 0; i < rank; ++i) {
+    if (shape[i] <= 0) {
+      return -1;
+    }
+    if (numel > std::numeric_limits<int64_t>::max() / shape[i]) {
+      return -1;
+    }
+    numel *= shape[i];
+  }
+  return numel;
+}
+
+}  // namespace
+
+bool convert_c_infer_input_tensors(const XLLM_InferInputTensorDesc* tensors,
+                                   size_t tensor_count,
+                                   std::vector<proto::InferInputTensor>* out,
+                                   std::string* error_info) {
+  if (out == nullptr) {
+    if (error_info != nullptr) {
+      *error_info = "output vector is null";
+    }
+    return false;
+  }
+
+  out->clear();
+  if (tensors == nullptr || tensor_count == 0) {
+    if (error_info != nullptr) {
+      *error_info = "tensors is null or tensor_count is 0";
+    }
+    return false;
+  }
+
+  for (size_t index = 0; index < tensor_count; ++index) {
+    const XLLM_InferInputTensorDesc& tensor_desc = tensors[index];
+    if (tensor_desc.name == nullptr || tensor_desc.name[0] == '\0') {
+      if (error_info != nullptr) {
+        *error_info = "tensor has empty or null name";
+      }
+      return false;
+    }
+    if (tensor_desc.shape == nullptr || tensor_desc.shape_len == 0) {
+      if (error_info != nullptr) {
+        *error_info =
+            std::string("tensor ") + tensor_desc.name + " has empty shape";
+      }
+      return false;
+    }
+    if (tensor_desc.data == nullptr) {
+      if (error_info != nullptr) {
+        *error_info = std::string("tensor ") + tensor_desc.name +
+                      " has null data pointer";
+      }
+      return false;
+    }
+
+    const int64_t expected_numel =
+        infer_input_tensor_desc_numel(tensor_desc.shape, tensor_desc.shape_len);
+    if (expected_numel < 0) {
+      if (error_info != nullptr) {
+        *error_info =
+            std::string("invalid shape for tensor ") + tensor_desc.name;
+      }
+      return false;
+    }
+    if (static_cast<int64_t>(tensor_desc.num_elements) != expected_numel) {
+      if (error_info != nullptr) {
+        *error_info =
+            std::string("num_elements mismatch for tensor ") + tensor_desc.name;
+      }
+      return false;
+    }
+
+    const auto data_type = static_cast<proto::DataType>(tensor_desc.data_type);
+    torch::ScalarType scalar_type;
+    switch (data_type) {
+      case proto::DataType::FLOAT:
+        scalar_type = torch::kFloat32;
+        break;
+      case proto::DataType::BFLOAT16:
+        scalar_type = torch::kBFloat16;
+        break;
+      case proto::DataType::FLOAT16:
+        scalar_type = torch::kFloat16;
+        break;
+      case proto::DataType::INT32:
+        scalar_type = torch::kInt32;
+        break;
+      case proto::DataType::INT64:
+        scalar_type = torch::kInt64;
+        break;
+      case proto::DataType::BOOL:
+        scalar_type = torch::kBool;
+        break;
+      default:
+        if (error_info != nullptr) {
+          *error_info = std::string("unsupported data_type for tensor ") +
+                        tensor_desc.name;
+        }
+        return false;
+    }
+
+    std::vector<int64_t> dims(tensor_desc.shape,
+                              tensor_desc.shape + tensor_desc.shape_len);
+    torch::Tensor tensor =
+        torch::from_blob(const_cast<void*>(tensor_desc.data),
+                         dims,
+                         torch::TensorOptions().dtype(scalar_type))
+            .clone();
+    if (!add_torch_tensor_as_input_tensor(
+            tensor_desc.name, tensor, out, error_info)) {
+      return false;
+    }
+  }
+
+  // if (!out->empty()) {
+  //   LOG(INFO) << xllm::util::infer_input_tensors_debug_string(*out);
+  // }
+  return !out->empty();
+}
+
+bool convert_xllm_mm_data_to_input_tensors(
+    const XLLM_MM_Data* mm_data,
+    std::vector<proto::InferInputTensor>* input_tensors,
+    std::string* error_info) {
+  if (input_tensors == nullptr) {
+    if (error_info != nullptr) {
+      *error_info = "input_tensors is null";
+    }
+    return false;
+  }
+
+  input_tensors->clear();
+  if (mm_data == nullptr || mm_data->type_mask == XLLM_MM_TYPE_NONE) {
+    if (error_info != nullptr) {
+      *error_info = "mm_data is null/empty";
+    }
+    return false;
+  }
+  if (!mm_data->is_dict) {
+    if (error_info != nullptr) {
+      *error_info = "mm_data must be dict for input_tensors";
+    }
+    return false;
+  }
+
+  const XLLM_MM_Dict& xllm_dict = mm_data->data.dict;
+  for (size_t i = 0; i < xllm_dict.entries_size; ++i) {
+    const XLLM_MM_DictEntry& entry = xllm_dict.entries[i];
+    const XLLM_MM_Value& value = entry.value;
+    if (!value.is_single_tensor) {
+      if (error_info != nullptr) {
+        *error_info = "mm_data tensor list is not supported for input_tensors";
+      }
+      return false;
+    }
+
+    torch::Tensor tensor = convert_xllm_tensor_to_torch(value.data.tensor);
+    if (!add_torch_tensor_as_input_tensor(
+            entry.key, tensor, input_tensors, error_info)) {
+      return false;
+    }
+  }
+
+  if (!input_tensors->empty()) {
+    LOG(INFO) << xllm::util::infer_input_tensors_debug_string(*input_tensors);
+  }
+  return !input_tensors->empty();
+}
+
 // 1. LLM Handler + const char* (text completions)
 template XLLM_Response* handle_inference_request<XLLM_LLM_Handler, const char*>(
     XLLM_LLM_Handler* handler,
@@ -744,6 +1159,17 @@ handle_inference_request<XLLM_REC_Handler, std::vector<int>>(
     InferenceType inference_type,
     const std::string& model_id,
     const std::vector<int>& input,
+    void* extra,
+    uint32_t timeout_ms,
+    const XLLM_RequestParams* request_params);
+
+template XLLM_Response*
+handle_inference_request<XLLM_REC_Handler,
+                         std::vector<proto::InferInputTensor>>(
+    XLLM_REC_Handler* handler,
+    InferenceType inference_type,
+    const std::string& model_id,
+    const std::vector<proto::InferInputTensor>& input,
     void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);

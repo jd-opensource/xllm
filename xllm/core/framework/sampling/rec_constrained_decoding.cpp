@@ -129,9 +129,6 @@ torch::Tensor RecConstrainedDecoding::generate_decode_mask(
           local_token_indices.push_back(static_cast<int64_t>(token_idx));
           local_vocab_indices.push_back(static_cast<int64_t>(vocab_idx));
         }
-      } else {
-        LOG(ERROR) << "Fail to generate mask for tokens:"
-                   << generated_token_list[token_idx];
       }
     }
 

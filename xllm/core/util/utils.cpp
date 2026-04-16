@@ -21,6 +21,8 @@ limitations under the License.
 
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
+#include <iomanip>
+#include <sstream>
 
 namespace xllm {
 namespace util {
@@ -242,6 +244,210 @@ torch::Tensor convert_rec_tensor_to_torch(
       LOG(FATAL) << "Unhandled data type conversion for: "
                  << static_cast<int>(dtype);
   }
+}
+
+namespace {
+
+template <typename Fn>
+void append_numeric_preview(std::ostringstream& oss,
+                            size_t total_len,
+                            size_t max_preview,
+                            Fn get_elem) {
+  oss << " len=" << total_len << " preview=[";
+  const size_t count = std::min(total_len, max_preview);
+  for (size_t i = 0; i < count; ++i) {
+    if (i != 0) {
+      oss << ",";
+    }
+    oss << get_elem(i);
+  }
+  if (total_len > count) {
+    oss << ",...";
+  }
+  oss << "]";
+}
+
+void append_infer_tensor_contents_debug(std::ostringstream& oss,
+                                        const proto::InferTensorContents& c,
+                                        size_t max_preview_elems) {
+  if (c.bool_contents_size() > 0) {
+    oss << " field=bool_contents";
+    append_numeric_preview(oss,
+                           static_cast<size_t>(c.bool_contents_size()),
+                           max_preview_elems,
+                           [&c](size_t i) {
+                             return c.bool_contents(static_cast<int>(i)) ? 1
+                                                                         : 0;
+                           });
+    return;
+  }
+  if (c.int_contents_size() > 0) {
+    oss << " field=int_contents";
+    append_numeric_preview(
+        oss,
+        static_cast<size_t>(c.int_contents_size()),
+        max_preview_elems,
+        [&c](size_t i) { return c.int_contents(static_cast<int>(i)); });
+    return;
+  }
+  if (c.int64_contents_size() > 0) {
+    oss << " field=int64_contents";
+    append_numeric_preview(
+        oss,
+        static_cast<size_t>(c.int64_contents_size()),
+        max_preview_elems,
+        [&c](size_t i) { return c.int64_contents(static_cast<int>(i)); });
+    return;
+  }
+  if (c.uint_contents_size() > 0) {
+    oss << " field=uint_contents";
+    append_numeric_preview(
+        oss,
+        static_cast<size_t>(c.uint_contents_size()),
+        max_preview_elems,
+        [&c](size_t i) { return c.uint_contents(static_cast<int>(i)); });
+    return;
+  }
+  if (c.uint64_contents_size() > 0) {
+    oss << " field=uint64_contents";
+    append_numeric_preview(
+        oss,
+        static_cast<size_t>(c.uint64_contents_size()),
+        max_preview_elems,
+        [&c](size_t i) { return c.uint64_contents(static_cast<int>(i)); });
+    return;
+  }
+  if (c.fp32_contents_size() > 0) {
+    oss << " field=fp32_contents";
+    append_numeric_preview(
+        oss,
+        static_cast<size_t>(c.fp32_contents_size()),
+        max_preview_elems,
+        [&c](size_t i) { return c.fp32_contents(static_cast<int>(i)); });
+    return;
+  }
+  if (c.fp64_contents_size() > 0) {
+    oss << " field=fp64_contents";
+    append_numeric_preview(
+        oss,
+        static_cast<size_t>(c.fp64_contents_size()),
+        max_preview_elems,
+        [&c](size_t i) { return c.fp64_contents(static_cast<int>(i)); });
+    return;
+  }
+  if (c.bytes_contents_size() > 0) {
+    oss << " field=bytes_contents blobs=" << c.bytes_contents_size();
+    size_t total_bytes = 0;
+    for (int i = 0; i < c.bytes_contents_size(); ++i) {
+      total_bytes += c.bytes_contents(i).size();
+    }
+    oss << " total_bytes=" << total_bytes;
+    if (c.bytes_contents_size() > 0) {
+      const std::string& blob = c.bytes_contents(0);
+      const size_t preview_size = std::min<size_t>(blob.size(), 32);
+      oss << " first_blob_len=" << blob.size() << " hex_preview=";
+      oss << std::hex << std::setfill('0');
+      for (size_t i = 0; i < preview_size; ++i) {
+        oss << std::setw(2)
+            << static_cast<unsigned>(
+                   static_cast<unsigned char>(blob[static_cast<int>(i)]));
+      }
+      oss << std::dec;
+      if (blob.size() > preview_size) {
+        oss << "...";
+      }
+    }
+    return;
+  }
+  oss << " field=<empty>";
+}
+
+}  // namespace
+
+std::string infer_input_tensor_debug_string(const proto::InferInputTensor& t,
+                                            size_t max_preview_elems) {
+  std::ostringstream oss;
+  oss << "name=" << t.name()
+      << " data_type=" << proto::DataType_Name(t.data_type()) << " shape=[";
+  for (int i = 0; i < t.shape_size(); ++i) {
+    if (i != 0) {
+      oss << ",";
+    }
+    oss << t.shape(i);
+  }
+  oss << "]";
+  if (!t.has_contents()) {
+    oss << " contents=<missing>";
+    return oss.str();
+  }
+  append_infer_tensor_contents_debug(oss, t.contents(), max_preview_elems);
+  return oss.str();
+}
+
+std::string infer_input_tensors_debug_string(
+    const std::vector<proto::InferInputTensor>& tensors,
+    size_t max_preview_elems) {
+  std::ostringstream oss;
+  oss << "InferInputTensor count=" << tensors.size();
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    oss << "\n  [" << i << "] "
+        << infer_input_tensor_debug_string(tensors[i], max_preview_elems);
+  }
+  return oss.str();
+}
+
+void log_omnirec_completion_schedule_request(
+    const std::string& source_tag,
+    const std::string& model_id,
+    const RequestParams& request_params,
+    const std::string& prompt,
+    const std::vector<int>* prompt_tokens,
+    const std::vector<proto::InferInputTensor>* input_tensors) {
+  std::ostringstream oss;
+  oss << "RecMaster::handle_request source=" << source_tag
+      << " model_id=" << model_id << " request_id=" << request_params.request_id
+      << " max_tokens=" << request_params.max_tokens
+      << " n=" << request_params.n
+      << " temperature=" << request_params.temperature
+      << " beam_width=" << request_params.beam_width
+      << " logprobs=" << request_params.logprobs
+      << " top_logprobs=" << request_params.top_logprobs
+      << " ignore_eos=" << request_params.ignore_eos;
+
+  oss << " prompt_len=" << prompt.size();
+  if (!prompt.empty()) {
+    constexpr size_t kMaxPromptPrefix = 256;
+    if (prompt.size() <= kMaxPromptPrefix) {
+      oss << " prompt=" << prompt;
+    } else {
+      oss << " prompt_prefix=" << prompt.substr(0, 128) << "...";
+    }
+  }
+
+  if (prompt_tokens != nullptr) {
+    if (prompt_tokens->empty()) {
+      oss << " routing_token_ids=empty";
+    } else {
+      const size_t count = std::min<size_t>(prompt_tokens->size(), 16);
+      oss << " routing_token_ids(size=" << prompt_tokens->size() << " first_"
+          << count << "=[";
+      for (size_t i = 0; i < count; ++i) {
+        if (i != 0) {
+          oss << ",";
+        }
+        oss << (*prompt_tokens)[i];
+      }
+      oss << "])";
+    }
+  }
+
+  if (input_tensors == nullptr || input_tensors->empty()) {
+    LOG(INFO) << oss.str();
+    return;
+  }
+
+  LOG(INFO) << oss.str() << "\n"
+            << infer_input_tensors_debug_string(*input_tensors);
 }
 
 torch::ScalarType datatype_proto_to_torch(const std::string& proto_datatype) {

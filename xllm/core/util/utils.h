@@ -24,6 +24,7 @@ limitations under the License.
 #include <stdexcept>
 #include <vector>
 
+#include "core/framework/request/request_params.h"
 #include "rec.pb.h"
 #include "slice.h"
 #include "tensor.pb.h"
@@ -93,6 +94,21 @@ std::vector<uint32_t> cal_vec_split_index(uint32_t vec_size, uint32_t part_num);
 
 torch::Tensor convert_rec_tensor_to_torch(
     const proto::InferInputTensor& input_tensor);
+
+std::string infer_input_tensor_debug_string(const proto::InferInputTensor& t,
+                                            size_t max_preview_elems = 64);
+
+std::string infer_input_tensors_debug_string(
+    const std::vector<proto::InferInputTensor>& tensors,
+    size_t max_preview_elems = 64);
+
+void log_omnirec_completion_schedule_request(
+    const std::string& source_tag,
+    const std::string& model_id,
+    const RequestParams& request_params,
+    const std::string& prompt,
+    const std::vector<int>* prompt_tokens,
+    const std::vector<proto::InferInputTensor>* input_tensors);
 
 torch::Tensor proto_to_torch(const proto::Tensor& proto_tensor);
 
