@@ -196,7 +196,7 @@ curl -s "http://127.0.0.1:18000/v1/chat/completions" \
 ### xLLM 性能测试
 下载测试数据集：
 ```bash
-wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json -O ShareGPT_V3_unfiltered_cleaned_split.json
+wget https://www.modelscope.cn/datasets/gliang1001/ShareGPT_V3_unfiltered_cleaned_split/resolve/master/ShareGPT_V3_unfiltered_cleaned_split.json -O ShareGPT_V3_unfiltered_cleaned_split.json
 ```
 
 [test_xllm.py](test_xllm.py) 脚本用于测试xLLM的性能，使用示例：
