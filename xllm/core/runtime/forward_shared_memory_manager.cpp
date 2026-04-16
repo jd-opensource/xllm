@@ -372,8 +372,13 @@ inline size_t get_dit_forward_input_size(const DiTForwardInput& input) {
   return size;
 }
 
-inline size_t get_dit_forward_output_size(const DiTForwardOutput& output) {
-  return get_vector_tensor_size(output.tensors);
+inline size_t get_vector_tensor_size(
+    const std::vector<torch::Tensor>& tensor_vec) {
+  size_t size = type_size<int32_t>;  // vector size
+  for (const auto& tensor : tensor_vec) {
+    size += get_tensor_size(tensor);
+  }
+  return size;
 }
 
 template <typename T>
@@ -1068,11 +1073,6 @@ inline void write_dit_forward_input(RawInputSerializeContext& context,
   write_tensor(context, input.latents);
 
   write_dit_generation_params(context, input.generation_params);
-}
-
-inline void write_dit_forward_output(char*& buffer,
-                                     const DiTForwardOutput& output) {
-  write_vector_tensor(buffer, output.tensors);
 }
 
 inline void safe_advance_buffer(const char*& buffer, size_t offset) {
@@ -2010,11 +2010,6 @@ inline void read_dit_forward_input(ReadContext& context,
   read_dit_generation_params(context, input.generation_params);
 }
 
-inline void read_dit_forward_output(const char*& buffer,
-                                    DiTForwardOutput& output) {
-  read_vector_tensor(buffer, output.tensors);
-}
-
 inline void initialize_device_buffer_session(ReadContext& context,
                                              ForwardInput& forward_input,
                                              const torch::Device& device,
@@ -2343,8 +2338,10 @@ size_t calculate_raw_forward_output_size(const RawForwardOutput& output) {
   size += get_vector_size(output.out_tokens);
   size += get_vector_size(output.out_logprobs);
   size += type_size<int32_t>;  // prepared_layer_id
+  // mm_embedding_data
+  size += get_vector_tensor_size(output.mm_embeddings);
   // dit output data
-  size += get_dit_forward_output_size(output.dit_forward_output);
+  size += get_vector_tensor_size(output.dit_forward_output.tensors);
 
   return size;
 }
@@ -2411,7 +2408,7 @@ void deserialize_raw_forward_output(const char* buffer,
 
   read_vector_tensor(buffer, output.mm_embeddings);
   // read dit output
-  read_dit_forward_output(buffer, output.dit_forward_output);
+  read_vector_tensor(buffer, output.dit_forward_output.tensors);
 }
 
 void serialize_raw_forward_output(const RawForwardOutput& output,
@@ -2427,7 +2424,7 @@ void serialize_raw_forward_output(const RawForwardOutput& output,
 
   write_vector_tensor(buffer, output.mm_embeddings);
   // write dit output
-  write_dit_forward_output(buffer, output.dit_forward_output);
+  write_vector_tensor(buffer, output.dit_forward_output.tensors);
 }
 
 template <typename T>
