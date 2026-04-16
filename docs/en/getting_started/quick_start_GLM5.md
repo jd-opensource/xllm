@@ -575,7 +575,7 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ../xllm-service/build/xllm_service/xllm_m
 
 # GLM5/CP Feature Stress Test Data (Optimal Configuration)
 ##  Stress Test Environment
-* Hardware: Ascend 910C (A3) / 4 Pods
+* Hardware: Ascend A3 / 4 Nodes
 * Main Model: GLM5-W8A8 
 * Draft Model: GLM5-W8A8-MTP
 * PD Separation Configuration:
