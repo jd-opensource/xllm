@@ -132,8 +132,8 @@ MODEL_PATH=/path/to/GLM-5-W8A8/
 DRAFT_MODEL_PATH=/path/to/GLM-5-W8A8/GLM-5-W8A8-MTP/
 #Glm-5 导出的mtp权重
 
-MASTER_NODE_ADDR="11.87.49.110:10015"
-LOCAL_HOST="11.87.49.110"
+MASTER_NODE_ADDR="$master_ip:$master_port"
+LOCAL_HOST="$local_ip"
 # Service Port
 START_PORT=18994
 START_DEVICE=0
@@ -204,8 +204,8 @@ export ATB_MATMUL_SHUFFLE_K_ENABLE=0
 ### Node0 (master)
 
 ```bash
-MASTER_NODE_ADDR="11.87.49.110:19990"
-LOCAL_HOST="11.87.49.110"
+MASTER_NODE_ADDR="$master_ip:$master_port"
+LOCAL_HOST="$local_ip"
 START_PORT=15890
 START_DEVICE=0
 LOG_DIR="logs"
@@ -244,8 +244,8 @@ done
 #### Node1 (worker)
 
 ```bash
-MASTER_NODE_ADDR="11.87.49.110:19990"
-LOCAL_HOST="11.87.49.111"
+MASTER_NODE_ADDR="$master_ip:$master_port"
+LOCAL_HOST="$local_ip"
 START_PORT=15890
 START_DEVICE=0
 LOG_DIR="logs"
@@ -291,34 +291,34 @@ done
     "server_count": "2",
     "server_list": [
         {
-            "server_id": "11.87.49.110",
+            "server_id": "$server_id",
             "device": [
                 {
                     "device_id": "0",
-                    "device_ip": "11.86.23.210",
+                    "device_ip": "$device_ip_0",
                     "rank_id": "0"
                 },
                 ...
                 {
                     "device_id": "7",
-                    "device_ip": "11.86.23.217",
+                    "device_ip": "$device_ip_7",
                     "rank_id": "7"
                 }
             ],
             "host_nic_ip": "reserve"
         },
         {
-            "server_id": "11.87.49.111",
+            "server_id": "$server_id",
             "device": [
                 {
                     "device_id": "0",
-                    "device_ip": "11.87.63.202",
+                    "device_ip": "$device_ip_0",
                     "rank_id": "8"
                 },
                 ...
                 {
                     "device_id": "7",
-                    "device_ip": "11.87.63.209",
+                    "device_ip": "$device_ip_7",
                     "rank_id": "15"
                 }
             ],
@@ -462,7 +462,7 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
 跨机配置时，启动xllm service:
 
 ```bash
-ENABLE_DECODE_RESPONSE_TO_SERVICE=true ../xllm-service/build/xllm_service/xllm_master_serving --etcd_addr="11.87.191.82:3389" --http_server_port 38888 --rpc_server_port 38889 --tokenizer_path=/export/home/models/GLM-5-W8A8/
+ENABLE_DECODE_RESPONSE_TO_SERVICE=true ../xllm-service/build/xllm_service/xllm_master_serving --etcd_addr="$etcd_ip:$etcd_port" --http_server_port 38888 --rpc_server_port 38889 --tokenizer_path=/export/home/models/GLM-5-W8A8/
 ```
 - 启动Prefill实例
 ```bash
