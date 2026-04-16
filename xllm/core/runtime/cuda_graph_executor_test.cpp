@@ -25,7 +25,6 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/framework/batch/batch_forward_type.h"
-#include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
@@ -42,7 +41,7 @@ namespace {
 const KVCache& first_full_attention_cache(
     const std::vector<KVCache>& kv_caches) {
   for (const auto& kv_cache : kv_caches) {
-    if (kv_cache.has_kv_cache()) {
+    if (!kv_cache.empty()) {
       const auto& k_cache = kv_cache.get_k_cache();
       const auto& v_cache = kv_cache.get_v_cache();
       if (k_cache.defined() && v_cache.defined() && k_cache.numel() > 0 &&
@@ -52,6 +51,14 @@ const KVCache& first_full_attention_cache(
     }
   }
   LOG(FATAL) << "No full-attention KV cache found";
+  std::abort();
+}
+
+std::vector<KVCache> MakeSingleKvCaches(torch::Tensor k_cache,
+                                        torch::Tensor v_cache) {
+  std::vector<KVCache> kv_caches;
+  kv_caches.emplace_back(KVCacheTensors{k_cache, v_cache});
+  return kv_caches;
 }
 
 class CudaGraphExecutorTestEnvironment : public ::testing::Environment {
@@ -271,7 +278,7 @@ std::vector<KVCache> MakeKvCaches(const torch::Device& device,
       torch::randn({num_pages, page_size, num_kv_heads, head_dim}, opt);
   auto v_cache =
       torch::randn({num_pages, page_size, num_kv_heads, head_dim}, opt);
-  return {KVCache(k_cache, v_cache)};
+  return MakeSingleKvCaches(k_cache, v_cache);
 }
 
 std::vector<KVCache> MakeHybridKvCaches(const torch::Device& device,
@@ -279,17 +286,20 @@ std::vector<KVCache> MakeHybridKvCaches(const torch::Device& device,
                                         int64_t page_size,
                                         int64_t num_kv_heads,
                                         int64_t head_dim) {
-  auto full_kv =
-      MakeKvCaches(device, num_pages, page_size, num_kv_heads, head_dim)
-          .front();
+  std::vector<KVCache> full_kv_caches =
+      MakeKvCaches(device, num_pages, page_size, num_kv_heads, head_dim);
+  KVCache full_kv = std::move(full_kv_caches.front());
   auto linear_options =
       torch::TensorOptions().dtype(torch::kFloat32).device(device);
   auto conv_cache =
       torch::zeros({8, num_kv_heads * page_size * head_dim, 3}, linear_options);
   auto ssm_cache =
       torch::zeros({8, num_kv_heads, head_dim, head_dim}, linear_options);
-  return {KVCache(torch::Tensor(), torch::Tensor(), conv_cache, ssm_cache),
-          KVCache(full_kv.get_k_cache(), full_kv.get_v_cache())};
+  std::vector<KVCache> kv_caches;
+  kv_caches.emplace_back(LinearAttentionKVCacheTensors{conv_cache, ssm_cache});
+  kv_caches.emplace_back(
+      KVCacheTensors{full_kv.get_k_cache(), full_kv.get_v_cache()});
+  return kv_caches;
 }
 
 TEST(CudaGraphExecutorTest, BatchDecodeCaptureAndReplay) {
@@ -465,12 +475,12 @@ TEST(CudaGraphExecutorTest, PrefillPiecewiseCaptureAndReplay) {
                          /*num_kv_heads=*/1,
                          /*head_dim=*/128);
 
-  auto kv_eager = std::vector<KVCache>{
-      KVCache(kv[0].get_k_cache().clone(), kv[0].get_v_cache().clone())};
-  auto kv_graph_first = std::vector<KVCache>{
-      KVCache(kv[0].get_k_cache().clone(), kv[0].get_v_cache().clone())};
-  auto kv_graph_second = std::vector<KVCache>{
-      KVCache(kv[0].get_k_cache().clone(), kv[0].get_v_cache().clone())};
+  auto kv_eager = MakeSingleKvCaches(kv[0].get_k_cache().clone(),
+                                     kv[0].get_v_cache().clone());
+  auto kv_graph_first = MakeSingleKvCaches(kv[0].get_k_cache().clone(),
+                                           kv[0].get_v_cache().clone());
+  auto kv_graph_second = MakeSingleKvCaches(kv[0].get_k_cache().clone(),
+                                            kv[0].get_v_cache().clone());
 
   auto eager_out =
       model->forward(tokens, positions, kv_eager, params).hidden_states.clone();
@@ -568,10 +578,10 @@ TEST(CudaGraphExecutorTest, CompareMqa2v1AndMqa8v1) {
                            /*page_size=*/1,
                            /*num_kv_heads=*/n_kv_heads,
                            /*head_dim=*/128);
-    auto kv_eager = std::vector<KVCache>{
-        KVCache(kv[0].get_k_cache().clone(), kv[0].get_v_cache().clone())};
-    auto kv_graph = std::vector<KVCache>{
-        KVCache(kv[0].get_k_cache().clone(), kv[0].get_v_cache().clone())};
+    auto kv_eager = MakeSingleKvCaches(kv[0].get_k_cache().clone(),
+                                       kv[0].get_v_cache().clone());
+    auto kv_graph = MakeSingleKvCaches(kv[0].get_k_cache().clone(),
+                                       kv[0].get_v_cache().clone());
 
     auto eager_out = model->forward(tokens, positions, kv_eager, params)
                          .hidden_states.clone();
@@ -793,10 +803,10 @@ TEST(CudaGraphExecutorTest, GraphVmmPoolEnabledPrefillCorrectness) {
                                 /*page_size=*/1,
                                 /*num_kv_heads=*/1,
                                 /*head_dim=*/128);
-    auto kv_eager = std::vector<KVCache>{KVCache(
-        kv_base[0].get_k_cache().clone(), kv_base[0].get_v_cache().clone())};
-    auto kv_graph = std::vector<KVCache>{KVCache(
-        kv_base[0].get_k_cache().clone(), kv_base[0].get_v_cache().clone())};
+    auto kv_eager = MakeSingleKvCaches(kv_base[0].get_k_cache().clone(),
+                                       kv_base[0].get_v_cache().clone());
+    auto kv_graph = MakeSingleKvCaches(kv_base[0].get_k_cache().clone(),
+                                       kv_base[0].get_v_cache().clone());
 
     auto eager_out = model->forward(tokens, positions, kv_eager, params)
                          .hidden_states.clone();

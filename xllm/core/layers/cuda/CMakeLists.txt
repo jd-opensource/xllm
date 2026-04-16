@@ -32,10 +32,12 @@ cc_test(
   SRCS
     xattention_test.cpp
   DEPS
+    :common_layers
     :cuda_layers
     :cuda_kernels
     torch
     GTest::gtest_main
     glog::glog
+    :block
 )
 target_link_libraries(xattention_test PRIVATE brpc)

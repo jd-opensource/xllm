@@ -160,9 +160,10 @@ void MooncakeKVCacheTransferDefault::allocate_kv_cache_impl(
       index_cache = torch::zeros(kv_cache_shape[2], options);
     }
     if (index_cache.defined()) {
-      kv_caches.emplace_back(key_cache, value_cache, index_cache);
+      kv_caches.emplace_back(IndexedKVCacheTensors{
+          KVCacheTensors{key_cache, value_cache}, index_cache});
     } else {
-      kv_caches.emplace_back(key_cache, value_cache);
+      kv_caches.emplace_back(KVCacheTensors{key_cache, value_cache});
     }
   }
 #else
@@ -219,7 +220,8 @@ void MooncakeKVCacheTransferDefault::allocate_kv_cache_impl(
   for (int64_t i = 0; i < num_layers; ++i) {
     key_cache = k_torch_tensors[i];
     value_cache = v_torch_tensors[i];
-    kv_caches.emplace_back(key_cache, value_cache);
+    kv_caches.emplace_back(
+        KVCacheTensors{std::move(key_cache), std::move(value_cache)});
   }
 #endif
 }
@@ -397,9 +399,9 @@ void MooncakeKVCacheTransferXTensor::allocate_kv_cache_impl(
         at_npu::native::npu_format_cast(k_tensors[i], ACL_FORMAT_ND);
     auto v_tensor =
         at_npu::native::npu_format_cast(v_tensors[i], ACL_FORMAT_ND);
-    kv_caches.emplace_back(k_tensor, v_tensor);
+    kv_caches.emplace_back(KVCacheTensors{k_tensor, v_tensor});
 #else
-    kv_caches.emplace_back(k_tensors[i], v_tensors[i]);
+    kv_caches.emplace_back(KVCacheTensors{k_tensors[i], v_tensors[i]});
 #endif
   }
 

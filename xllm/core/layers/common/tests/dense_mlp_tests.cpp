@@ -318,6 +318,7 @@ TEST_F(DenseMLPTest, SmoothquantLoadStateDictTest) {
   LOG(INFO) << "State dict loading test passed - output sum: " << output_sum;
 }
 
+#if defined(USE_CUDA)
 TEST_F(DenseMLPTest, Fp8IgnoredDownProjLoadsAsUnquantized) {
   QuantArgs fp8_quant_args;
   fp8_quant_args.quant_method() = kQuantMethodFp8;
@@ -365,6 +366,7 @@ TEST_F(DenseMLPTest, Fp8IgnoredDownProjLoadsAsUnquantized) {
   EXPECT_FALSE(params.contains("down_proj.weight_scale"));
   EXPECT_FALSE(params.contains("down_proj.input_scale"));
 }
+#endif
 
 TEST_F(DenseMLPTest, SmoothquantPrecisionVerificationTest) {
   // Test precision verification with custom input and expected output

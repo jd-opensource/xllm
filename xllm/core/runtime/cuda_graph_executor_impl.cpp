@@ -1002,7 +1002,7 @@ std::optional<std::pair<torch::Tensor, torch::Tensor>>
 CudaGraphExecutorImpl::find_first_full_attention_cache(
     const std::vector<KVCache>& kv_caches) {
   for (const auto& cache : kv_caches) {
-    if (!cache.has_kv_cache()) {
+    if (cache.empty()) {
       continue;
     }
     auto k_cache = cache.get_k_cache();

@@ -536,7 +536,13 @@ void HierarchyKVCacheTransfer::create_page_aligned_host_cache() {
       current_offset += cache_size_per_tensor[2];
     }
 
-    host_kv_caches_.emplace_back(key_cache, value_cache, index_cache);
+    if (index_cache.defined()) {
+      host_kv_caches_.emplace_back(IndexedKVCacheTensors{
+          KVCacheTensors{key_cache, value_cache}, index_cache});
+      continue;
+    }
+
+    host_kv_caches_.emplace_back(KVCacheTensors{key_cache, value_cache});
   }
 
   LOG(INFO) << "host k cache shape: "

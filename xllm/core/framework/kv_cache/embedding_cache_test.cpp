@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
+#include "platform/device.h"
+
 namespace xllm {
 
 namespace {
@@ -28,6 +30,10 @@ bool tensor_equal(const torch::Tensor& lhs, const torch::Tensor& rhs) {
 }  // namespace
 
 TEST(EmbeddingCacheTest, WriteAndClear) {
+  // use init device to trigger the loading of torch backend for different
+  // devices
+  //  since the allocation of pinnned memory on cpu is still backend-dependent.
+  torch::Device device(Device::type_torch(), 0);
   EmbeddingCache cache(/*total_nums=*/4);
 
   std::vector<int32_t> ids = {3, 2};
@@ -57,6 +63,10 @@ TEST(EmbeddingCacheTest, WriteAndClear) {
 }
 
 TEST(EmbeddingCacheTest, WriteSelectedOnlyProbs) {
+  // use init device to trigger the loading of torch backend for different
+  // devices
+  //  since the allocation of pinnned memory on cpu is still backend-dependent.
+  torch::Device device(Device::type_torch(), 0);
   EmbeddingCache cache(/*total_nums=*/2);
   std::vector<int32_t> ids = {0, 1};
   auto cached_tokens = torch::tensor({11, 12}, torch::kInt);

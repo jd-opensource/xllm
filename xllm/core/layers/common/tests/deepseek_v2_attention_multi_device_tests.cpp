@@ -43,6 +43,12 @@ namespace test {
 
 namespace {
 
+KVCache create_indexed_kv_cache(torch::Tensor key_cache,
+                                torch::Tensor index_cache) {
+  return KVCache(IndexedKVCacheTensors{
+      KVCacheTensors{key_cache, torch::Tensor()}, index_cache});
+}
+
 constexpr int32_t EXIT_CODE_SKIP = 77;
 
 class ScopedBoolFlagValue {
@@ -397,7 +403,7 @@ KVCache create_decode_kv_cache(const ModelArgs& args,
                                 torch::kBFloat16,
                                 options.device());
   }
-  return KVCache(k_cache, torch::Tensor(), index_cache);
+  return create_indexed_kv_cache(std::move(k_cache), std::move(index_cache));
 }
 
 struct AttentionRunResult {

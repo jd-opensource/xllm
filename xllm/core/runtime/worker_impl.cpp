@@ -204,155 +204,26 @@ bool WorkerImpl::allocate_kv_cache(
     }
   }
 
-  // create a KVCache for each layer
-  kv_caches_.reserve(num_layers);
-
-  if (FLAGS_enable_xtensor) {
-    // XTensor mode: create xtensor-backed KV cache tensors.
-    // For hybrid models, we still create full KV cache for all layers
-    // since xtensor has its own memory management
-    auto& allocator = XTensorAllocator::get_instance();
-    const std::string& model_id = options_.model_id();
-    // Create K tensors for all layers
-    auto k_tensors = allocator.create_k_tensors(
-        model_id, kv_cache_shape[0], dtype_, num_layers);
-    // Create V tensors for all layers
-    auto v_tensors = allocator.create_v_tensors(
-        model_id, kv_cache_shape[1], dtype_, num_layers);
-
-    for (int64_t i = 0; i < num_layers; ++i) {
-      auto k_tensor = k_tensors[i];
-      auto v_tensor = v_tensors[i];
-#if defined(USE_NPU)
-      k_tensor = at_npu::native::npu_format_cast(k_tensor, ACL_FORMAT_ND);
-      v_tensor = at_npu::native::npu_format_cast(v_tensor, ACL_FORMAT_ND);
-#endif
-      if (is_full_attention_layer(context_.get_model_args(), i)) {
-        kv_caches_.emplace_back(k_tensor, v_tensor);
-      } else {
-        kv_caches_.emplace_back();
-      }
-    }
-  } else {
-    // Original mode: create torch tensors with optional int8 kv quantization.
-    torch::ScalarType cache_dtype =
-        enable_kv_cache_quant ? torch::kInt8 : dtype_;
-
-    // Helper function to check if a layer is linear attention.
-    // Keep this consistent with KV cache capacity estimation.
-    auto is_linear_attention_layer = [&](int64_t layer_idx) {
-      return !is_full_attention_layer(args, layer_idx);
-    };
-
-    for (int64_t i = 0; i < num_layers; ++i) {
-      bool is_linear_layer = is_linear_attention_layer(i);
-      torch::Tensor key_cache, value_cache, index_cache, conv_cache, ssm_cache;
-      torch::Tensor key_cache_scale, value_cache_scale;
-
-      if (is_linear_layer) {
-        // Linear attention layer: only allocate conv_cache and ssm_cache
-        // Parse mamba_ssm_dtype if specified
-        torch::ScalarType ssm_dtype =
-            resolve_ssm_dtype(args.mamba_ssm_dtype(), dtype_);
-
-#if defined(USE_NPU)
-        aclFormat npu_format_type = ACL_FORMAT_ND;
-        if (enable_linear_attention) {
-          conv_cache = at_npu::native::npu_format_cast(
-              torch::zeros(kv_cache_shape[2],
-                           torch::dtype(dtype_).device(device_)),
-              2);
-          ssm_cache = at_npu::native::npu_format_cast(
-              torch::zeros(kv_cache_shape[3],
-                           torch::dtype(ssm_dtype).device(device_)),
-              2);
-        }
-#else
-        if (enable_linear_attention) {
-          conv_cache = torch::zeros(kv_cache_shape[2],
-                                    torch::dtype(dtype_).device(device_));
-          ssm_cache = torch::zeros(kv_cache_shape[3],
-                                   torch::dtype(ssm_dtype).device(device_));
-        }
-#endif
-        // Create empty KVCache with only conv and ssm
-        kv_caches_.emplace_back(
-            torch::zeros({0}, torch::dtype(dtype_).device(device_)),
-            torch::zeros({0}, torch::dtype(dtype_).device(device_)),
-            conv_cache,
-            ssm_cache);
-      } else {
-        // Full attention layer: allocate key_cache and value_cache only
-#if defined(USE_NPU)
-        aclFormat npu_format_type =
-            context_.get_model_args().model_type() == "deepseek_v3" &&
-                    FLAGS_enable_prefix_cache
-                ? ACL_FORMAT_FRACTAL_NZ
-                : ACL_FORMAT_ND;
-        key_cache = at_npu::native::npu_format_cast(
-            torch::zeros(kv_cache_shape[0],
-                         torch::dtype(cache_dtype).device(device_)),
-            npu_format_type);
-        value_cache = at_npu::native::npu_format_cast(
-            torch::zeros(kv_cache_shape[1],
-                         torch::dtype(cache_dtype).device(device_)),
-            npu_format_type);
-        if (enable_lighting_indexer) {
-          index_cache = at_npu::native::npu_format_cast(
-              torch::zeros(kv_cache_shape[2],
-                           torch::dtype(dtype_).device(device_)),
-              npu_format_type);
-        }
-#elif defined(USE_ILU) || defined(USE_MLU) || defined(USE_MUSA)
-        key_cache = torch::zeros(kv_cache_shape[0],
-                                 torch::dtype(cache_dtype).device(device_));
-        if (!kv_cache_shape[1].empty()) {
-          value_cache = torch::zeros(kv_cache_shape[1],
-                                     torch::dtype(cache_dtype).device(device_));
-        }
-        if (enable_lighting_indexer) {
-          index_cache = torch::zeros(kv_cache_shape[2],
-                                     torch::dtype(dtype_).device(device_));
-        }
-        if (enable_kv_cache_quant) {
-          std::vector<int64_t> key_scale_shape(kv_cache_shape[0].begin(),
-                                               kv_cache_shape[0].end() - 1);
-          key_cache_scale = torch::zeros(
-              key_scale_shape, torch::dtype(torch::kFloat32).device(device_));
-          if (!kv_cache_shape[1].empty()) {
-            std::vector<int64_t> value_scale_shape(kv_cache_shape[1].begin(),
-                                                   kv_cache_shape[1].end() - 1);
-            value_cache_scale =
-                torch::zeros(value_scale_shape,
-                             torch::dtype(torch::kFloat32).device(device_));
-          }
-        }
-#else
-        key_cache = torch::zeros(kv_cache_shape[0],
-                                 torch::dtype(cache_dtype).device(device_));
-        if (!kv_cache_shape[1].empty()) {
-          value_cache = torch::zeros(kv_cache_shape[1],
-                                     torch::dtype(cache_dtype).device(device_));
-        }
-        if (enable_lighting_indexer) {
-          index_cache = torch::zeros(kv_cache_shape[2],
-                                     torch::dtype(dtype_).device(device_));
-        }
-#endif
-        if (enable_kv_cache_quant) {
-          kv_caches_.emplace_back(key_cache,
-                                  value_cache,
-                                  index_cache,
-                                  key_cache_scale,
-                                  value_cache_scale);
-        } else if (enable_lighting_indexer) {
-          kv_caches_.emplace_back(key_cache, value_cache, index_cache);
-        } else {
-          kv_caches_.emplace_back(key_cache, value_cache);
-        }
-      }
-    }
+  // Parse mamba_ssm_dtype if specified for linear attention layers.
+  torch::ScalarType ssm_dtype = dtype_;
+  if (enable_linear_attention) {
+    ssm_dtype = resolve_ssm_dtype(args.mamba_ssm_dtype(), dtype_);
   }
+
+  KVCacheCreateOptions create_options;
+  create_options.device(device_)
+      .dtype(dtype_)
+      .ssm_dtype(ssm_dtype)
+      .num_layers(num_layers)
+      .full_attention_interval(args.full_attention_interval())
+      .model_id(options_.model_id())
+      .model_type(args.model_type())
+      .enable_xtensor(FLAGS_enable_xtensor)
+      .enable_linear_attention(enable_linear_attention)
+      .enable_lighting_indexer(enable_lighting_indexer)
+      .enable_kv_cache_quant(enable_kv_cache_quant);
+
+  allocate_kv_caches(kv_caches_, kv_cache_shape, create_options);
 
 #if defined(USE_CUDA)
   refresh_cuda_block_copy_runtime_state();
