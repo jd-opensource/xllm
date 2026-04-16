@@ -1499,8 +1499,8 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
   node.variantPack.inTensors.at(idx++) =
       atb_speed::Utils::AtTensor2Tensor(attn_mask);
 
-  auto k_cache = kv_cache.get_k_cache();
-  auto v_cache = kv_cache.get_v_cache();
+  torch::Tensor k_cache = kv_cache.get_k_cache();
+  torch::Tensor v_cache = kv_cache.get_v_cache();
   node.variantPack.inTensors.at(idx++) =
       k_cache.defined() ? atb_speed::Utils::AtTensor2Tensor(k_cache)
                         : placeholder_;
@@ -1574,8 +1574,8 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
         onerec_params->cross_attn_kv_cu_seq_lens.defined()) {
       node.variantPack.inTensors.at(idx) = atb_speed::Utils::AtTensor2Tensor(
           onerec_params->cross_attn_kv_cu_seq_lens);
-      node.variantPack.inTensors.at(idx).hostData =
-          const_cast<int*>(onerec_params->cross_attn_kv_cu_seq_lens_vec.data());
+      node.variantPack.inTensors.at(idx).hostData = const_cast<int32_t*>(
+          onerec_params->cross_attn_kv_cu_seq_lens_vec.data());
     } else {
       node.variantPack.inTensors.at(idx) = placeholder_;
       node.variantPack.inTensors.at(idx).hostData = placeholder_vec_.data();
@@ -1738,7 +1738,7 @@ void NpuOneRecBlockLayerImpl::process_expert_weights(
                    << ": " << fused_weight.sizes();
       return;
     }
-    auto reshaped = fused_weight.contiguous().view(
+    torch::Tensor reshaped = fused_weight.contiguous().view(
         {num_experts_per_partition_, -1, fused_weight.size(1)});
     for (int32_t i = 0; i < num_experts_per_partition_; ++i) {
       experts_weights_["down_proj.weight"][i] =

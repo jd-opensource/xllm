@@ -270,7 +270,7 @@ class OneRecForConditionalGenerationImpl final
   void load_model(std::unique_ptr<ModelLoader> loader,
                   std::string prefix = "model.") override {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      auto prefixed_state_dict =
+      StateDict prefixed_state_dict =
           state_dict->get_dict_with_prefix("module.module3.t5_model.");
       StateDict model_state_dict =
           prefixed_state_dict.size() > 0
