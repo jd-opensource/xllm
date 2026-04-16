@@ -200,10 +200,10 @@ bool send_result_to_client_brpc_rec(std::shared_ptr<CompletionCall> call,
       output_context->mutable_int64_contents()->Add(emitted_item.item_id);
       append_output_logprobs(emitted_item.output_index);
       if (did_tensor != nullptr && type_tensor != nullptr) {
-        did_tensor->mutable_contents()->add_bytes_contents(
+        did_tensor->mutable_contents()->add_string_contents(
             emitted_item.item_info.has_value() ? emitted_item.item_info->did
                                                : "");
-        type_tensor->mutable_contents()->add_bytes_contents(
+        type_tensor->mutable_contents()->add_string_contents(
             emitted_item.item_info.has_value() ? emitted_item.item_info->type
                                                : "");
       }

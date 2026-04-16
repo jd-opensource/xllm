@@ -115,7 +115,7 @@ bool RecVocabDict::initialize(const std::string& vocab_file) {
     while (ifs.read(reinterpret_cast<char*>(&item_id), itemid_size)) {
       uint32_t did_length = 0;
       if (!ifs.read(reinterpret_cast<char*>(&did_length), sizeof(uint32_t))) {
-        break;
+        return fail_with_error("Failed to read did length from " + vocab_file);
       }
       if (!validate_extended_field_length(did_length, "did")) {
         return false;
@@ -169,7 +169,7 @@ bool RecVocabDict::initialize(const std::string& vocab_file) {
       tokens_to_item_infos_map_[tokens].emplace_back(std::move(item_info));
     }
 
-    if (!ifs.eof() && ifs.fail()) {
+    if (ifs.gcount() > 0 || (!ifs.eof() && ifs.fail())) {
       return fail_with_error("Failed while reading " + vocab_file);
     }
   }

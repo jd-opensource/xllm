@@ -199,8 +199,11 @@ struct RawToken {
 };
 
 struct RecItemInfo {
+  // The decoded recommendation item id.
   int64_t item_id = 0;
+  // The DID associated with the recommendation item.
   std::string did;
+  // The business type associated with the recommendation item.
   std::string type;
 };
 
