@@ -302,6 +302,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PrepInDpGatherBuildsLocalSkip) {
   auto prep = block->prep_in(attn_out,
                              residual,
                              input_params,
+                             block->plan_exec(input_params),
                              DeepseekV2AttentionImpl::PostAttnLayout::kTpShard);
 
   EXPECT_TRUE(prep.need_dp_gather);
@@ -349,6 +350,7 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PrepInAll2AllPadsTpShardInput) {
   auto prep = block->prep_in(attn_out,
                              residual,
                              input_params,
+                             block->plan_exec(input_params),
                              DeepseekV2AttentionImpl::PostAttnLayout::kTpShard);
 
   EXPECT_FALSE(prep.need_dp_gather);
@@ -358,6 +360,35 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PrepInAll2AllPadsTpShardInput) {
   EXPECT_EQ(prep.pad_info.padded_tokens, 4);
   test::verify_tensor_close(prep.ffn_in,
                             mat(/*rows=*/2, {11.0f, 22.0f, 33.0f, 44.0f}));
+  test::verify_tensor_close(prep.skip_local, prep.ffn_in);
+}
+
+TEST_F(DeepseekV2SparseMoEBlockTest, PrepInUsesProvidedExecCfg) {
+  set_tp_dp_ctx(/*world_size=*/4, /*dp_size=*/2, /*tp_size=*/2, /*ep_size=*/4);
+  auto block = create_block();
+
+  ModelInputParams input_params;
+  input_params.dp_global_token_nums = {3, 1};
+  input_params.dp_is_decode = {0, 0};
+  auto planned_cfg = block->plan_exec(input_params);
+  EXPECT_FALSE(planned_cfg.enable_all2all);
+  EXPECT_TRUE(planned_cfg.need_dp_gather);
+
+  DeepseekV2SparseMoEBlockImpl::ExecCfg forced_cfg;
+  forced_cfg.enable_all2all = true;
+  forced_cfg.need_dp_gather = false;
+  auto attn_out = mat(/*rows=*/3, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f});
+  auto residual = mat(/*rows=*/3, {10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f});
+
+  auto prep = block->prep_in(attn_out,
+                             residual,
+                             input_params,
+                             forced_cfg,
+                             DeepseekV2AttentionImpl::PostAttnLayout::kTpShard);
+
+  EXPECT_FALSE(prep.need_dp_gather);
+  EXPECT_TRUE(prep.need_tp_pad);
+  EXPECT_TRUE(prep.pad_info.active);
   test::verify_tensor_close(prep.skip_local, prep.ffn_in);
 }
 
