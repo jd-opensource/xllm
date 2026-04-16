@@ -756,6 +756,14 @@ void fused_indexer_k(FusedIndexerKParams& params) {
 #endif
 }
 
+torch::Tensor l2_norm(torch::Tensor& x, double eps) {
+#if defined(USE_NPU)
+  return npu::npu_l2norm_last_dim(x, eps);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 moe_init_routing_v2(MoeInitRoutingV2Params& params) {
 #if defined(USE_NPU)

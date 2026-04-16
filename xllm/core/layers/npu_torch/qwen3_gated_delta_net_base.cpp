@@ -440,8 +440,8 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
         {input_params.block_tables.select(1, 0)},
         last_recurrent_state.transpose(-1, -2).to(ssm_cache.dtype()));
   } else {
-    processed_q = l2norm(processed_q, -1, 1e-6);
-    processed_k = l2norm(processed_k, -1, 1e-6);
+    processed_q = xllm::kernel::l2_norm(processed_q, 1e-6);
+    processed_k = xllm::kernel::l2_norm(processed_k, 1e-6);
     torch::Tensor ssm_state_indices =
         attn_metadata.block_table.select(1, 0).contiguous();
 
