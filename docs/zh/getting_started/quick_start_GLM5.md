@@ -575,7 +575,7 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ../xllm-service/build/xllm_service/xllm_m
 
 # GLM5/CP 特性压测数据（最优配置）
 ##  压测环境
-* 硬件： Ascend 910C（A3） / 4 Pods
+* 硬件： Ascend A3 / 4 Pods
 * 主模型：GLM5-W8A8 
 * 草稿模型：GLM5-W8A8-MTP
 * PD分离配置：
