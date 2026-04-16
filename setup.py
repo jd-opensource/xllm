@@ -666,10 +666,5 @@ if __name__ == "__main__":
                     "xllm/pybind/embedding", "xllm/pybind/util",
                     "xllm/pybind/args", "xllm/pybind/params",
                     "xllm/pybind/errors", "xllm/pybind/mm_utils"],
-        entry_points={
-            'console_scripts': [
-                'xllm = xllm.launch_xllm:launch_xllm'
-            ],
-        },
         python_requires=">=3.10",
     )

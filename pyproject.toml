@@ -28,6 +28,9 @@ Homepage = "https://xllm.readthedocs.io/zh-cn/latest/"
 Documentation = "https://xllm.readthedocs.io/zh-cn/latest/"
 Repository = "https://github.com/jd-opensource/xllm"
 
+[project.scripts]
+xllm = "xllm.launch_xllm:launch_xllm"
+
 [tool.setuptools.dynamic]
 readme = { file = ["README.md"], content-type = "text/markdown" }
 version = { file = ["version.txt"] }
