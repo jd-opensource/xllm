@@ -54,7 +54,7 @@ void reset_pipeline_runtime_toggles() {
   FLAGS_enable_graph_mode_decode_no_padding = false;
   FLAGS_enable_rec_prefill_only = false;
   FLAGS_enable_constrained_decoding = false;
-  FLAGS_enable_topk_sorted = true;
+  FLAGS_enable_topk_sorted = false;
 }
 
 void apply_multi_round_pipeline_toggles() {
@@ -62,7 +62,7 @@ void apply_multi_round_pipeline_toggles() {
   FLAGS_enable_prefill_piecewise_graph = true;
   FLAGS_enable_xattention_one_stage = false;
   FLAGS_enable_graph_mode_decode_no_padding = true;
-  FLAGS_enable_topk_sorted = true;
+  FLAGS_enable_topk_sorted = false;
 }
 
 void apply_onerec_pipeline_toggles(xllm::Options* options) {
