@@ -21,10 +21,6 @@ bool use_push_owner(const int32_t src_tp_size, const int32_t dst_tp_size) {
   return src_tp_size > 0 && dst_tp_size > 0 && src_tp_size > dst_tp_size;
 }
 
-bool is_push_owner(const int32_t src_tp_rank, const int32_t dst_tp_size) {
-  return src_tp_rank >= 0 && src_tp_rank < dst_tp_size;
-}
-
 std::vector<int32_t> get_dst_ranks(const int32_t src_tp_rank,
                                    const int32_t src_tp_size,
                                    const int32_t dst_tp_size,

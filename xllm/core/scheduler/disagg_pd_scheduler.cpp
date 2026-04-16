@@ -343,13 +343,11 @@ void DisaggPDScheduler::dispatch_requests() {
     is_mlu_build = true;
 #endif
     const bool enable_mla = engine_->model_args().enable_mla();
-    const bool enable_prefill_sp = FLAGS_enable_prefill_sp;
     const PdTopoRule rule = check_pd_rule(instance_info_,
                                           remote_info,
                                           is_mlu_build,
                                           options_.kv_cache_transfer_mode(),
-                                          enable_mla,
-                                          enable_prefill_sp);
+                                          enable_mla);
     if (!rule.allow) {
       if (rule.invalid_remote) {
         remote_instances_info_.erase(selected_instance);

@@ -45,14 +45,12 @@ PdTopoRule check_pd_rule(const InstanceInfo& local,
                          const InstanceInfo& remote,
                          bool is_mlu_build,
                          const std::string& kv_mode,
-                         bool enable_mla,
-                         bool enable_prefill_sp);
+                         bool enable_mla);
 
 PdTopoRule check_mlu_pd_topo(const PdTopo& local_topo,
                              const PdTopo& remote_topo,
                              bool is_mlu_build,
                              const std::string& kv_mode,
-                             bool enable_mla,
-                             bool enable_prefill_sp);
+                             bool enable_mla);
 
 }  // namespace xllm

@@ -75,8 +75,7 @@ PdTopoRule check_pd_rule(const InstanceInfo& local,
                          const InstanceInfo& remote,
                          bool is_mlu_build,
                          const std::string& kv_mode,
-                         bool enable_mla,
-                         bool enable_prefill_sp) {
+                         bool enable_mla) {
   PdTopo local_topo;
   std::string reason;
   if (!try_get_pd_topo(local, &local_topo, &reason)) {
@@ -90,20 +89,15 @@ PdTopoRule check_pd_rule(const InstanceInfo& local,
         false, false, false, true, "invalid remote pd topo: " + reason};
   }
 
-  return check_mlu_pd_topo(local_topo,
-                           remote_topo,
-                           is_mlu_build,
-                           kv_mode,
-                           enable_mla,
-                           enable_prefill_sp);
+  return check_mlu_pd_topo(
+      local_topo, remote_topo, is_mlu_build, kv_mode, enable_mla);
 }
 
 PdTopoRule check_mlu_pd_topo(const PdTopo& local_topo,
                              const PdTopo& remote_topo,
                              bool is_mlu_build,
                              const std::string& kv_mode,
-                             bool enable_mla,
-                             bool enable_prefill_sp) {
+                             bool enable_mla) {
   const bool same_dp = local_topo.dp_size == remote_topo.dp_size;
   const bool same_tp = local_topo.tp_size == remote_topo.tp_size;
   if (same_dp && same_tp) {
@@ -122,7 +116,6 @@ PdTopoRule check_mlu_pd_topo(const PdTopo& local_topo,
     return PdTopoRule{
         false, true, false, false, "hetero pd requires enable_mla=true"};
   }
-  (void)enable_prefill_sp;
 
   return PdTopoRule{true, true, false, false, ""};
 }
