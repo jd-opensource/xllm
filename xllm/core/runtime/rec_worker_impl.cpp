@@ -1101,7 +1101,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::build_final_output(
   output.beam_search_output.out_logprobs =
       beam_tensors.acc_logprob.reshape({-1});
   output.beam_sequence_group = beam_tensors.sequence_group;
-  output.beam_base_logprobs = beam_base_logprobs;
+  output.beam_base_logprobs = beam_base_logprobs.reshape({-1});
   output.beam_source_sequence_group = beam_source_sequence_group;
 }
 
