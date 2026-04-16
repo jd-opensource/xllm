@@ -94,6 +94,9 @@ void fused_indexer_q(FusedIndexerQParams& params);
 
 void fused_indexer_k(FusedIndexerKParams& params);
 
+// L2 normalization along the last dimension
+torch::Tensor l2_norm(torch::Tensor& x, double eps = 1e-6);
+
 // TODO: NPU moe_init_routing_v2 is equivalent to moe_gen_idx + moe_expand_input
 // (and token_count/cusum outputs) on other backends.
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -142,5 +145,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 fused_qkvzba_split_reshape_cat(FusedQkvzbaSplitReshapeParams& params);
 
 void gemma_rms_norm(GemmaRMSNormParams& params);
+std::pair<torch::Tensor, torch::Tensor> chunk_gated_delta_rule(
+    ChunkGatedDeltaRuleParams& params);
 
 }  // namespace xllm::kernel

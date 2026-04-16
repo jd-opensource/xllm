@@ -1399,4 +1399,32 @@ struct GemmaRMSNormParams {
   torch::Tensor rstd_out;
   torch::Tensor norm_out;
 };
+
+struct ChunkGatedDeltaRuleParams {
+  // Query tensor. Shape: [B, T, Hqk, K]. Dtype: bfloat16.
+  torch::Tensor q;
+  // Key tensor. Shape: [B, T, Hqk, K]. Dtype: bfloat16.
+  torch::Tensor k;
+  // Value tensor. Shape: [B, T, H, V]. Dtype: bfloat16.
+  torch::Tensor v;
+  // Gating tensor. Shape: [B, T, H]. Dtype: float32 or bfloat16.
+  torch::Tensor g;
+  // Beta tensor. Shape: [B, T, H]. Dtype: float32 or bfloat16.
+  torch::Tensor beta;
+  // Optional scale factor for attention. Default: K^(-0.5).
+  std::optional<float> scale = std::nullopt;
+  // Optional initial state tensor. Shape: [N, H, K, V]. Dtype: bfloat16.
+  std::optional<torch::Tensor> initial_state = std::nullopt;
+  // Whether to output the final state.
+  bool output_final_state = false;
+  // Chunk size for processing. Default: 64.
+  int64_t chunk_size = 64;
+  // Optional cumulative sequence lengths. Shape: [num_sequences + 1]. Dtype:
+  // int32.
+  std::optional<torch::Tensor> cu_seqlens = std::nullopt;
+  // Whether input is head-first format. Default: false (batch-first).
+  bool head_first = false;
+  // Whether to apply L2 norm to q and k inside the kernel. Default: false.
+  bool use_qk_l2norm_in_kernel = false;
+};
 }  // namespace xllm::kernel
