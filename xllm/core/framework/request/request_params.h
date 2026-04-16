@@ -163,10 +163,6 @@ struct RequestParams {
   int32_t beam_width = 0;
   int32_t num_return_sequences = 0;
 
-  int32_t resolved_num_return_sequences() const {
-    return num_return_sequences > 0 ? num_return_sequences : beam_width;
-  }
-
   bool add_special_tokens = false;
 
   nlohmann::json chat_template_kwargs = nlohmann::json::object();

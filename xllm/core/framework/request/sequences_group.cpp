@@ -229,9 +229,12 @@ void SequencesGroup::process_beam_search(bool force_requested_result_size) {
   }
 
   const size_t beam_width = sequence_params_.sampling_param->beam_width;
-  const size_t requested_result_size = static_cast<size_t>(std::max(
-      sequence_params_.sampling_param->beam_width,
-      sequence_params_.sampling_param->resolved_num_return_sequences()));
+  const int32_t requested_num_return_sequences =
+      sequence_params_.sampling_param->num_return_sequences > 0
+          ? sequence_params_.sampling_param->num_return_sequences
+          : sequence_params_.sampling_param->beam_width;
+  const size_t requested_result_size =
+      static_cast<size_t>(requested_num_return_sequences);
   const size_t topk =
       std::max<size_t>(1, sequence_params_.sampling_param->top_logprobs);
 
