@@ -456,8 +456,8 @@ inline bool is_full_attention_layer(const ModelArgs& args, int64_t layer_id) {
   }
 
   int32_t attention_interval = args.full_attention_interval();
-  if (attention_interval <= 0) {
-    attention_interval = 4;
+  if (attention_interval <= 1) {
+    return true;
   }
   return (layer_id + 1) % attention_interval == 0;
 }

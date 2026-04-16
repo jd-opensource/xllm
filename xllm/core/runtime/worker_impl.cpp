@@ -238,12 +238,10 @@ bool WorkerImpl::allocate_kv_cache(
     torch::ScalarType cache_dtype =
         enable_kv_cache_quant ? torch::kInt8 : dtype_;
 
-    // Helper function to check if a layer is linear attention
+    // Helper function to check if a layer is linear attention.
+    // Keep this consistent with KV cache capacity estimation.
     auto is_linear_attention_layer = [&](int64_t layer_idx) {
-      if (args.full_attention_interval() > 1) {
-        return (layer_idx + 1) % args.full_attention_interval() != 0;
-      }
-      return false;
+      return !is_full_attention_layer(args, layer_idx);
     };
 
     for (int64_t i = 0; i < num_layers; ++i) {
