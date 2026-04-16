@@ -331,10 +331,7 @@ class LLM:
             params.logprobs = True
             if params.top_logprobs == 0:
                 # if not set top_logprobs, default to returning 2x candidates for better deduplication
-                params.top_logprobs = max(
-                    2 * params.beam_width,
-                    getattr(params, "num_return_sequences", 0),
-                )
+                params.top_logprobs = 2 * params.beam_width
 
         outputs = self.generate(parsed_prompts,
                                 request_params=params,

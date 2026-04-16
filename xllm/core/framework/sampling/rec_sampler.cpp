@@ -73,28 +73,6 @@ static inline torch::Tensor log_softmax_last_dim(
   return torch::log_softmax(logits, /*dim=*/-1);
 }
 
-static inline torch::Tensor compute_exact_top_logprobs(
-    const torch::Tensor& logits,
-    const torch::Tensor& topk_values,
-    const torch::Tensor& temperatures) {
-  auto logits_f32 = logits.to(torch::kFloat32);
-  auto topk_f32 = topk_values.to(torch::kFloat32);
-  if (!temperatures.defined()) {
-    const auto normalizer =
-        torch::logsumexp(logits_f32, /*dim=*/-1, /*keepdim=*/true);
-    return topk_f32 - normalizer;
-  }
-
-  auto temps =
-      temperatures.to(torch::kFloat32).to(logits.device()).unsqueeze(1);
-  temps = torch::where(temps == 0, torch::ones_like(temps), temps);
-  logits_f32.div_(temps);
-  topk_f32.div_(temps);
-  const auto normalizer =
-      torch::logsumexp(logits_f32, /*dim=*/-1, /*keepdim=*/true);
-  return topk_f32 - normalizer;
-}
-
 static inline void sample_top_candidates(const torch::Tensor& probs,
                                          const torch::Tensor& logprobs,
                                          int64_t top_count,
@@ -153,8 +131,6 @@ RecSampler::RecSampler(RecPipelineType pipeline_type)
       strategy_(create_sampling_strategy(pipeline_type, *sampler_)) {
   LOG(INFO) << "RecSampler initialized with Sampler delegate.";
 }
-
-RecSampler::~RecSampler() = default;
 
 SampleOutput RecSampler::forward(torch::Tensor& logits,
                                  const SamplingParameters& params,
@@ -346,12 +322,7 @@ SampleOutput RecSampler::MultiRoundFastPathSamplingStrategy::forward(
     temperatures = temperatures.to(torch::kFloat32);
   }
 
-  output.top_logprobs =
-      compute_exact_top_logprobs(sample_logits, topk_values, temperatures);
-  output.next_tokens =
-      output.top_tokens.select(/*dim=*/1, /*index=*/0).to(torch::kLong);
-  output.logprobs =
-      output.top_logprobs.select(/*dim=*/1, /*index=*/0).contiguous();
+  output.top_logprobs = log_softmax_last_dim(topk_values, temperatures);
   return output;
 }
 

@@ -25,7 +25,6 @@ limitations under the License.
 #include "batch_input_builder.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
-#include "core/framework/batch/beam_search.h"
 #include "core/util/rec_model_utils.h"
 #include "framework/batch/mposition.h"
 #include "framework/model/model_args.h"
@@ -63,127 +62,6 @@ Token make_empty_logprob_placeholder(const Sequence& seq) {
   const int64_t placeholder_token_id =
       prompt_tokens.empty() ? 0 : prompt_tokens[0];
   return Token(placeholder_token_id);
-}
-
-size_t resolve_multi_round_result_size(
-    const RequestSamplingParam* sampling_param) {
-  if (sampling_param == nullptr) {
-    return 0;
-  }
-  return static_cast<size_t>(
-      std::max(sampling_param->beam_width,
-               sampling_param->resolved_num_return_sequences()));
-}
-
-bool expand_multi_round_beam_results(
-    const ForwardOutput& output,
-    size_t group_index,
-    int32_t beam_width,
-    int32_t total_rounds,
-    size_t requested_result_size,
-    std::vector<std::vector<int32_t>>* group_flat2d,
-    std::vector<float>* last_logprobs) {
-  CHECK(group_flat2d != nullptr);
-  CHECK(last_logprobs != nullptr);
-  if (requested_result_size <= static_cast<size_t>(beam_width)) {
-    return false;
-  }
-  if (!output.beam_base_logprobs.defined() ||
-      !output.beam_source_sequence_group.defined() ||
-      !output.sample_output.top_tokens.defined() ||
-      !output.sample_output.top_logprobs.defined()) {
-    return false;
-  }
-  CHECK_EQ(output.beam_base_logprobs.dim(), 1)
-      << "beam_base_logprobs must be 1-D, got "
-      << output.beam_base_logprobs.sizes();
-  CHECK_EQ(output.beam_source_sequence_group.dim(), 3)
-      << "beam_source_sequence_group must be 3-D, got "
-      << output.beam_source_sequence_group.sizes();
-  CHECK_EQ(output.sample_output.top_tokens.dim(), 2)
-      << "sample_output.top_tokens must be 2-D, got "
-      << output.sample_output.top_tokens.sizes();
-  CHECK_EQ(output.sample_output.top_logprobs.dim(), 2)
-      << "sample_output.top_logprobs must be 2-D, got "
-      << output.sample_output.top_logprobs.sizes();
-
-  const int64_t row_offset =
-      static_cast<int64_t>(group_index) * static_cast<int64_t>(beam_width);
-  CHECK_LE(row_offset + beam_width, output.beam_base_logprobs.size(0))
-      << "beam_base_logprobs size is too small, row_offset=" << row_offset
-      << ", beam_width=" << beam_width
-      << ", size=" << output.beam_base_logprobs.size(0);
-  CHECK_LE(row_offset + beam_width, output.sample_output.top_tokens.size(0))
-      << "sample_output.top_tokens size is too small, row_offset=" << row_offset
-      << ", beam_width=" << beam_width
-      << ", size=" << output.sample_output.top_tokens.size(0);
-  CHECK_LE(row_offset + beam_width, output.sample_output.top_logprobs.size(0))
-      << "sample_output.top_logprobs size is too small, row_offset="
-      << row_offset << ", beam_width=" << beam_width
-      << ", size=" << output.sample_output.top_logprobs.size(0);
-
-  const auto base_logprob_accessor =
-      output.beam_base_logprobs.accessor<float, 1>();
-  const auto prefix_group_accessor =
-      output.beam_source_sequence_group.accessor<int32_t, 3>();
-  const auto top_tokens_accessor =
-      output.sample_output.top_tokens.accessor<int64_t, 2>();
-  const auto top_logprobs_accessor =
-      output.sample_output.top_logprobs.accessor<float, 2>();
-  const int64_t top_count = std::min(output.sample_output.top_tokens.size(1),
-                                     output.sample_output.top_logprobs.size(1));
-  if (top_count <= 0) {
-    return false;
-  }
-
-  SimpleTopKOptimizerBeamCandidate topk_optimizer(requested_result_size);
-  for (int32_t source_index = 0; source_index < beam_width; ++source_index) {
-    const int64_t row_index = row_offset + source_index;
-    const float base_logprob = base_logprob_accessor[row_index];
-    for (int64_t top_index = 0; top_index < top_count; ++top_index) {
-      const float candidate_logprob =
-          base_logprob + top_logprobs_accessor[row_index][top_index];
-      if (!topk_optimizer.worthInserting(candidate_logprob)) {
-        break;
-      }
-
-      BeamCandidate candidate;
-      candidate.source_index = static_cast<size_t>(source_index);
-      candidate.logprob_sum = candidate_logprob;
-      candidate.override_last_token = true;
-      candidate.last_token_id =
-          static_cast<int32_t>(top_tokens_accessor[row_index][top_index]);
-      candidate.last_token_logprob =
-          top_logprobs_accessor[row_index][top_index];
-      topk_optimizer.insert(std::move(candidate));
-    }
-  }
-
-  std::vector<BeamCandidate> candidates = topk_optimizer.getTopKSorted();
-  if (candidates.empty()) {
-    return false;
-  }
-
-  const size_t result_size = std::min(requested_result_size, candidates.size());
-  group_flat2d->clear();
-  last_logprobs->clear();
-  group_flat2d->reserve(result_size);
-  last_logprobs->reserve(result_size);
-  for (size_t i = 0; i < result_size; ++i) {
-    const BeamCandidate& candidate = candidates[i];
-    std::vector<int32_t> row_tokens;
-    row_tokens.reserve(static_cast<size_t>(total_rounds));
-    for (int32_t round = 0; round < total_rounds; ++round) {
-      row_tokens.push_back(
-          prefix_group_accessor[group_index][candidate.source_index][round]);
-    }
-    if (!row_tokens.empty() && candidate.override_last_token) {
-      row_tokens.back() = candidate.last_token_id;
-    }
-    group_flat2d->emplace_back(std::move(row_tokens));
-    last_logprobs->push_back(candidate.logprob_sum);
-  }
-  return true;
 }
 
 }  // namespace
@@ -693,8 +571,6 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
   if (beam_width <= 1) {
     return;
   }
-  const size_t requested_result_size =
-      resolve_multi_round_result_size(sequences[0]->sampling_param());
   int32_t total_rounds = get_rec_multi_round_decode_rounds();
   size_t num_groups = sequence_groups_.size();
   if (num_groups == 0) {
@@ -734,13 +610,6 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
             output.beam_search_output.out_logprobs[logprob_idx].item<float>());
       }
     }
-    expand_multi_round_beam_results(output,
-                                    g,
-                                    beam_width,
-                                    total_rounds,
-                                    requested_result_size,
-                                    &group_flat2d,
-                                    &last_logprobs);
     // Access sequence from sequence_groups_ if available
     Sequence* seq = sequence_groups_.empty()
                         ? sequences[g]

@@ -956,30 +956,8 @@ ForwardOutput RecEngine::RecMultiRoundEnginePipeline::get_model_output(
 
   // D2H transfer for beam_sequence_group (multi-round results)
   auto& output = forward_output.value();
+  // TODO. uncomment this in next pr.
   output.beam_sequence_group = safe_to(output.beam_sequence_group, torch::kCPU);
-  if (output.beam_base_logprobs.defined()) {
-    output.beam_base_logprobs = safe_to(output.beam_base_logprobs, torch::kCPU);
-  }
-  if (output.beam_source_sequence_group.defined()) {
-    output.beam_source_sequence_group =
-        safe_to(output.beam_source_sequence_group, torch::kCPU);
-  }
-  auto& sample_output = output.sample_output;
-  if (sample_output.top_tokens.defined()) {
-    sample_output.top_tokens = safe_to(sample_output.top_tokens, torch::kCPU);
-  }
-  if (sample_output.top_logprobs.defined()) {
-    sample_output.top_logprobs =
-        safe_to(sample_output.top_logprobs, torch::kCPU);
-  }
-  if (output.beam_search_output.src_seq_idxes.defined()) {
-    output.beam_search_output.src_seq_idxes =
-        safe_to(output.beam_search_output.src_seq_idxes, torch::kCPU);
-  }
-  if (output.beam_search_output.out_tokens.defined()) {
-    output.beam_search_output.out_tokens =
-        safe_to(output.beam_search_output.out_tokens, torch::kCPU);
-  }
   if (output.beam_search_output.out_logprobs.defined()) {
     output.beam_search_output.out_logprobs =
         safe_to(output.beam_search_output.out_logprobs, torch::kCPU);

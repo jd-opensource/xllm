@@ -191,8 +191,6 @@ class RecWorkerImpl : public LLMWorkerImpl {
                             const SampleOutput& sample_output,
                             const SamplingParameters& sampling_params,
                             const BeamSearchTensors& beam_tensors,
-                            const torch::Tensor& beam_base_logprobs,
-                            const torch::Tensor& beam_source_sequence_group,
                             ForwardOutput& output);
 
     // Structure to hold async computation results for next round input

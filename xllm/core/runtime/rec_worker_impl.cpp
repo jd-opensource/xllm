@@ -871,8 +871,6 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
   SampleOutput sample_output;
   torch::Tensor top_tokens;
   torch::Tensor top_logprobs;
-  torch::Tensor beam_base_logprobs;
-  torch::Tensor beam_source_sequence_group;
   std::optional<folly::SemiFuture<NextRoundInputResults>>
       next_round_async_result;
 
@@ -941,10 +939,6 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
                        .reshape({-1, step_meta->beam_width});
       top_logprobs = sample_output.top_logprobs.reshape({-1, beam_width});
 #endif
-      if (round == total_rounds - 1) {
-        beam_base_logprobs = beam_tensors.acc_logprob.clone();
-        beam_source_sequence_group = beam_tensors.sequence_group.clone();
-      }
       execute_beam_search(
           top_tokens, top_logprobs, beam_tensors, round, batch_size);
 
@@ -954,13 +948,8 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
       }
 
       if (round == total_rounds - 1) {
-        build_final_output(logits,
-                           sample_output,
-                           sampling_params,
-                           beam_tensors,
-                           beam_base_logprobs,
-                           beam_source_sequence_group,
-                           output);
+        build_final_output(
+            logits, sample_output, sampling_params, beam_tensors, output);
       }
     }
   }
@@ -1086,8 +1075,6 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::build_final_output(
     const SampleOutput& sample_output,
     const SamplingParameters& sampling_params,
     const BeamSearchTensors& beam_tensors,
-    const torch::Tensor& beam_base_logprobs,
-    const torch::Tensor& beam_source_sequence_group,
     ForwardOutput& output) {
   output.logits = logits;
   output.sample_output = sample_output;
@@ -1101,8 +1088,6 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::build_final_output(
   output.beam_search_output.out_logprobs =
       beam_tensors.acc_logprob.reshape({-1});
   output.beam_sequence_group = beam_tensors.sequence_group;
-  output.beam_base_logprobs = beam_base_logprobs.reshape({-1});
-  output.beam_source_sequence_group = beam_source_sequence_group;
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_two_stage_round_input(
