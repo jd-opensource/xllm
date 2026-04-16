@@ -289,6 +289,15 @@ bool CommChannel::estimate_kv_cache_capacity(int64_t& available_memory,
   return true;
 }
 
+bool CommChannel::profile_prefill_mem_async(
+    folly::Promise<runtime::ProfileMem>& promise) {
+  proto::Empty req;
+  auto done = new ProfilePrefillMemClosure();
+  done->promise = std::move(promise);
+  stub_->ProfilePrefillMem(&done->cntl, &req, &done->response, done);
+  return true;
+}
+
 bool CommChannel::pull_kv_blocks(const uint64_t src_cluster_id,
                                  const std::string& src_addr,
                                  const int64_t src_k_cache_id,
@@ -621,6 +630,27 @@ void InitModelClosure::Run() {
   promise.setValue(success);
 
   return;
+}
+
+void ProfilePrefillMemClosure::Run() {
+  std::unique_ptr<ProfilePrefillMemClosure> self_guard(this);
+
+  runtime::ProfileMem mem;
+  if (cntl.Failed()) {
+    LOG(ERROR) << "ProfilePrefillMem failed: " << cntl.ErrorText();
+    promise.setValue(mem);
+    return;
+  }
+
+  mem.total_bytes = response.total_bytes();
+  mem.weight_bytes = response.weight_bytes();
+  mem.runtime_peak_bytes = response.runtime_peak_bytes();
+  mem.tmp_kv_bytes = response.tmp_kv_bytes();
+  mem.ok = response.ok();
+  if (!mem.ok) {
+    LOG(ERROR) << "ProfilePrefillMem returned invalid result";
+  }
+  promise.setValue(mem);
 }
 
 void TransferBlocksClosure::Run() {

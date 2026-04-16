@@ -113,6 +113,14 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerClient::step_async(
   return worker_->step_async(input);
 }
 
+folly::SemiFuture<runtime::ProfileMem>
+WorkerClient::profile_prefill_mem_async() {
+  if (worker_ == nullptr) {
+    return folly::makeSemiFuture(runtime::ProfileMem{});
+  }
+  return worker_->profile_prefill_mem_async();
+}
+
 folly::SemiFuture<std::optional<RawForwardOutput>> WorkerClient::step_async(
     const RawForwardInput& inputs) {
   LOG(FATAL) << "Worker Method step_async with RawForwardInput param is "

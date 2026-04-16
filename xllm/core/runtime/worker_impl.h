@@ -39,6 +39,7 @@ limitations under the License.
 #include "framework/xtensor/xtensor.h"
 #include "options.h"
 #include "platform/device.h"
+#include "runtime/profile_run.h"
 #include "util/threadpool.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache_transfer/mooncake_weight_transfer.h"
@@ -164,6 +165,10 @@ class WorkerImpl {
   // the future returns a successfull status with no meaningful value
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const ForwardInput& inputs);
+
+  virtual runtime::ProfileMem profile_prefill_mem();
+
+  virtual folly::SemiFuture<runtime::ProfileMem> profile_prefill_mem_async();
 
   virtual folly::SemiFuture<folly::Unit> process_group_test_async();
 

@@ -147,6 +147,10 @@ folly::SemiFuture<std::optional<ForwardOutput>> Worker::step_async(
   return impl_->step_async(inputs);
 }
 
+folly::SemiFuture<runtime::ProfileMem> Worker::profile_prefill_mem_async() {
+  return impl_->profile_prefill_mem_async();
+}
+
 folly::SemiFuture<folly::Unit> Worker::process_group_test_async() {
   return impl_->process_group_test_async();
 }

@@ -27,6 +27,7 @@ limitations under the License.
 #include "framework/xtensor/xtensor.h"
 #include "runtime/forward_params.h"
 #include "runtime/params_utils.h"
+#include "runtime/profile_run.h"
 #include "worker.pb.h"
 
 namespace xllm {
@@ -78,6 +79,9 @@ class CommChannel {
 
   virtual bool estimate_kv_cache_capacity(int64_t& available_memory,
                                           int64_t& total_memory);
+
+  virtual bool profile_prefill_mem_async(
+      folly::Promise<runtime::ProfileMem>& promise);
 
   virtual bool pull_kv_blocks(const uint64_t src_cluster_id,
                               const std::string& src_addr,
@@ -143,6 +147,15 @@ class InitModelClosure : public google::protobuf::Closure {
   folly::Promise<bool> promise;
 };
 
+class ProfilePrefillMemClosure : public google::protobuf::Closure {
+ public:
+  void Run();
+
+  proto::ProfileMem response;
+  brpc::Controller cntl;
+  folly::Promise<runtime::ProfileMem> promise;
+};
+
 class ExecuteModelClosure : public google::protobuf::Closure {
  public:
   void Run();
@@ -160,4 +173,5 @@ class TransferBlocksClosure : public google::protobuf::Closure {
   brpc::Controller cntl;
   folly::Promise<uint32_t> promise;
 };
+
 }  // namespace xllm

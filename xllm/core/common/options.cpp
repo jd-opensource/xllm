@@ -79,6 +79,7 @@ std::string Options::to_string() const {
      << ", enable_multi_stream_parallel: " << enable_multi_stream_parallel()
      << ", disable_ttft_profiling: " << disable_ttft_profiling()
      << ", enable_forward_interruption: " << enable_forward_interruption()
+     << ", enable_profile_run: " << enable_profile_run()
      << ", enable_graph: " << enable_graph()
      << ", server_idx: " << server_idx();
   ss << "]";

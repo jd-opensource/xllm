@@ -307,6 +307,7 @@ int run() {
       .enable_multi_stream_parallel(FLAGS_enable_multi_stream_parallel)
       .enable_profile_step_time(FLAGS_enable_profile_step_time)
       .enable_profile_token_budget(FLAGS_enable_profile_token_budget)
+      .enable_profile_run(FLAGS_enable_profile_run)
       .enable_latency_aware_schedule(FLAGS_enable_latency_aware_schedule)
       .profile_max_prompt_length(FLAGS_profile_max_prompt_length)
       .enable_profile_kv_blocks(FLAGS_enable_profile_kv_blocks)

@@ -59,6 +59,11 @@ class WorkerService : public proto::DistributeWorker {
                            proto::DeviceMemory* response,
                            ::google::protobuf::Closure* done) override;
 
+  void ProfilePrefillMem(::google::protobuf::RpcController* controller,
+                         const proto::Empty* request,
+                         proto::ProfileMem* response,
+                         ::google::protobuf::Closure* done) override;
+
   void AllocateKVCache(::google::protobuf::RpcController* controller,
                        const proto::AllocateKVCacheRequest* request,
                        proto::Status* response,

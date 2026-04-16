@@ -116,6 +116,174 @@ class ScopedAtenLoadThreads {
   bool active_ = false;
 };
 
+#if defined(USE_MLU)
+runtime::PeakMem read_mem(int32_t device_index) {
+  const auto stats =
+      torch_mlu::MLUCachingAllocator::getDeviceStats(device_index);
+  runtime::PeakMem mem;
+  mem.alloc_bytes = stats.allocated_bytes[0].current;
+  mem.cache_bytes = stats.reserved_bytes[0].current;
+  return mem;
+}
+
+runtime::PeakMem read_peak_mem(int32_t device_index) {
+  const auto stats =
+      torch_mlu::MLUCachingAllocator::getDeviceStats(device_index);
+  runtime::PeakMem mem;
+  mem.alloc_bytes = stats.allocated_bytes[0].peak;
+  mem.cache_bytes = stats.reserved_bytes[0].peak;
+  return mem;
+}
+
+void reset_peak_mem(int32_t device_index) {
+  torch_mlu::MLUCachingAllocator::resetPeakStats(device_index);
+}
+#else
+runtime::PeakMem read_mem(int32_t /*device_index*/) { return {}; }
+
+runtime::PeakMem read_peak_mem(int32_t /*device_index*/) { return {}; }
+
+void reset_peak_mem(int32_t /*device_index*/) {}
+#endif
+
+int64_t get_profile_blocks(const runtime::ProfilePlan& plan) {
+  int64_t num_blocks = 0;
+  for (const auto& row : plan.block_tables) {
+    num_blocks += static_cast<int64_t>(row.size());
+  }
+  return num_blocks;
+}
+
+int64_t get_tensor_bytes(const torch::Tensor& tensor) {
+  if (!tensor.defined()) {
+    return 0;
+  }
+  return static_cast<int64_t>(tensor.nbytes());
+}
+
+int64_t get_profile_kv_bytes(const std::vector<KVCache>& kv_caches) {
+  int64_t total_bytes = 0;
+  for (const auto& kv_cache : kv_caches) {
+    total_bytes += get_tensor_bytes(kv_cache.get_k_cache());
+    total_bytes += get_tensor_bytes(kv_cache.get_v_cache());
+    total_bytes += get_tensor_bytes(kv_cache.get_index_cache());
+    total_bytes += get_tensor_bytes(kv_cache.get_conv_cache());
+    total_bytes += get_tensor_bytes(kv_cache.get_ssm_cache());
+    total_bytes += get_tensor_bytes(
+        kv_cache.get_k_cache_scale().value_or(torch::Tensor{}));
+    total_bytes += get_tensor_bytes(
+        kv_cache.get_v_cache_scale().value_or(torch::Tensor{}));
+  }
+  return total_bytes;
+}
+
+std::vector<KVCache> build_profile_kv_caches(const ModelArgs& args,
+                                             const runtime::Options& options,
+                                             const torch::Device& device,
+                                             torch::ScalarType dtype,
+                                             int64_t num_blocks,
+                                             int64_t num_layers,
+                                             int64_t tp_size) {
+  std::vector<KVCache> kv_caches;
+  kv_caches.reserve(static_cast<size_t>(num_layers));
+
+  if (has_linear_attention_layers(args)) {
+    LOG(WARNING) << "profile_prefill_mem skips linear-attention models";
+    return kv_caches;
+  }
+
+  const bool enable_lighting_indexer = args.index_n_heads() > 0;
+  const bool enable_kv_cache_quant = options.kv_cache_dtype() == "int8";
+  const int64_t n_kv_heads = args.n_kv_heads().has_value()
+                                 ? args.n_kv_heads().value()
+                                 : args.n_heads();
+  const int64_t n_local_kv_heads = std::max<int64_t>(1, n_kv_heads / tp_size);
+  const int64_t block_size = options.block_size();
+  const torch::TensorOptions tensor_options =
+      torch::dtype(dtype).device(device);
+  const torch::ScalarType cache_dtype =
+      enable_kv_cache_quant ? torch::kInt8 : dtype;
+  const torch::TensorOptions cache_options =
+      torch::dtype(cache_dtype).device(device);
+
+  for (int64_t i = 0; i < num_layers; ++i) {
+    torch::Tensor key_cache;
+    torch::Tensor value_cache;
+    torch::Tensor index_cache;
+    torch::Tensor key_cache_scale;
+    torch::Tensor value_cache_scale;
+
+    if (options.enable_mla()) {
+      if (num_blocks > 0) {
+        key_cache =
+            torch::empty({num_blocks,
+                          1,
+                          block_size,
+                          args.kv_lora_rank() + args.qk_rope_head_dim()},
+                         cache_options);
+        if (enable_lighting_indexer) {
+          index_cache =
+              torch::empty({num_blocks, 1, block_size, args.index_head_dim()},
+                           tensor_options);
+        }
+        if (enable_kv_cache_quant) {
+          key_cache_scale =
+              torch::zeros({num_blocks, 1, block_size},
+                           torch::dtype(torch::kFloat32).device(device));
+        }
+      }
+      if (enable_kv_cache_quant) {
+        kv_caches.emplace_back(key_cache,
+                               value_cache,
+                               index_cache,
+                               key_cache_scale,
+                               value_cache_scale);
+      } else if (enable_lighting_indexer) {
+        kv_caches.emplace_back(key_cache, value_cache, index_cache);
+      } else {
+        kv_caches.emplace_back(std::move(key_cache), std::move(value_cache));
+      }
+      continue;
+    }
+
+    if (num_blocks > 0) {
+      key_cache = torch::empty(
+          {num_blocks, n_local_kv_heads, block_size, args.head_dim()},
+          cache_options);
+      value_cache = torch::empty(
+          {num_blocks, n_local_kv_heads, block_size, args.head_dim()},
+          cache_options);
+      if (enable_lighting_indexer) {
+        index_cache = torch::empty(
+            {num_blocks, 1, block_size, args.index_head_dim()}, tensor_options);
+      }
+      if (enable_kv_cache_quant) {
+        std::vector<int64_t> key_scale_shape = {
+            num_blocks, n_local_kv_heads, block_size};
+        std::vector<int64_t> value_scale_shape = key_scale_shape;
+        key_cache_scale = torch::zeros(
+            key_scale_shape, torch::dtype(torch::kFloat32).device(device));
+        value_cache_scale = torch::zeros(
+            value_scale_shape, torch::dtype(torch::kFloat32).device(device));
+      }
+    }
+
+    if (enable_kv_cache_quant) {
+      kv_caches.emplace_back(key_cache,
+                             value_cache,
+                             index_cache,
+                             key_cache_scale,
+                             value_cache_scale);
+    } else if (enable_lighting_indexer) {
+      kv_caches.emplace_back(key_cache, value_cache, index_cache);
+    } else {
+      kv_caches.emplace_back(key_cache, value_cache);
+    }
+  }
+
+  return kv_caches;
+}
+
 }  // namespace
 
 WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
@@ -837,6 +1005,87 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
       }
       promise.setValue(output);
     }
+  });
+  return future;
+}
+
+runtime::ProfileMem WorkerImpl::profile_prefill_mem() {
+#if !defined(USE_MLU)
+  return {};
+#else
+  const bool is_mlu_build = true;
+  if (!use_profile_run(options_, is_mlu_build) || model_executor_ == nullptr ||
+      model_ == nullptr) {
+    return {};
+  }
+
+  const auto& args = context_.get_model_args();
+  const runtime::ProfilePlan plan = build_profile_plan(
+      args, options_, options_.block_size(), args.enable_mla(), is_mlu_build);
+  if (plan.num_tokens <= 0) {
+    return {};
+  }
+
+  device_.set_device();
+  Device::empty_cache(device_.index());
+  device_.synchronize_default_stream();
+
+  const runtime::PeakMem weight_mem = read_mem(device_.index());
+  const int64_t weight_bytes = std::max<int64_t>(0, weight_mem.alloc_bytes);
+  const int64_t tp_size = std::max<int64_t>(1, parallel_args_.tp_size());
+  const int64_t num_blocks = get_profile_blocks(plan);
+  int64_t tmp_kv_bytes = 0;
+
+  runtime::PeakMem base;
+  runtime::PeakMem peak;
+  runtime::ProfileMem mem;
+  {
+    std::vector<KVCache> profile_kv_caches =
+        build_profile_kv_caches(args,
+                                options_,
+                                device_.unwrap(),
+                                dtype_,
+                                num_blocks,
+                                get_num_layers(),
+                                tp_size);
+    if (profile_kv_caches.empty() && num_blocks > 0) {
+      return {};
+    }
+    tmp_kv_bytes = get_profile_kv_bytes(profile_kv_caches);
+
+    base = read_mem(device_.index());
+    reset_peak_mem(device_.index());
+
+    ForwardInput input =
+        build_profile_input(args, options_, plan, is_mlu_build);
+    ForwardInput processed_input;
+    prepare_work_before_execute(input, processed_input);
+    model_executor_->forward(processed_input.token_ids,
+                             processed_input.positions,
+                             profile_kv_caches,
+                             processed_input.input_params);
+    device_.synchronize_default_stream();
+
+    peak = read_peak_mem(device_.index());
+  }
+
+  Device::empty_cache(device_.index());
+  device_.synchronize_default_stream();
+
+  mem.total_bytes = device_.total_memory();
+  mem.weight_bytes = weight_bytes;
+  mem.runtime_peak_bytes = calc_runtime_peak(base, peak);
+  mem.tmp_kv_bytes = tmp_kv_bytes;
+  mem.ok = true;
+  return mem;
+#endif
+}
+
+folly::SemiFuture<runtime::ProfileMem> WorkerImpl::profile_prefill_mem_async() {
+  folly::Promise<runtime::ProfileMem> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
+    promise.setValue(this->profile_prefill_mem());
   });
   return future;
 }
