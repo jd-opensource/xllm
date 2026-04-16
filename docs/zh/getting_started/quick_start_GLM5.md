@@ -474,8 +474,8 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ../xllm-service/build/xllm_service/xllm_m
   #模型路径（此处为int量化的Glm-5）
   DRAFT_MODEL_PATH=/export/home/models/GLM-5-MTP/
   
-  MASTER_NODE_ADDR="11.87.49.110:10015"
-  LOCAL_HOST="11.87.49.110"
+  MASTER_NODE_ADDR="$master_ip:$master_port"
+  LOCAL_HOST="$local_ip"
   # Service Port
   START_PORT=18994
   START_DEVICE=0
@@ -529,8 +529,8 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ../xllm-service/build/xllm_service/xllm_m
   #模型路径（此处为int量化的Glm-5）
   DRAFT_MODEL_PATH=/export/home/models/GLM-5-MTP/
   
-  MASTER_NODE_ADDR="11.87.49.110:10015"
-  LOCAL_HOST="11.87.49.110"
+  MASTER_NODE_ADDR="$master_ip:$master_port"
+  LOCAL_HOST="$local_ip"
   # Service Port
   START_PORT=18994
   START_DEVICE=0
@@ -621,13 +621,13 @@ MODEL_PATH="/export/home/models/GLM-5-final-w8a8/"
 #MODEL_PATH="/export/home/models/DeepSeek-V3.2-w8a8/"
 #DRAFT_MODEL_PATH="/export/home/models/DeepSeek-V3.2-w8a8-mtp"
 DRAFT_MODEL_PATH="/export/home/models/GLM-5-final-w8a8-MTP/"
-MASTER_NODE_ADDR="11.87.191.98:1895"
+MASTER_NODE_ADDR="$master_ip:$master_port"
 START_PORT=48000
 START_DEVICE=0
 LOG_DIR="log"
 NNODES=32
 LOCAL_NODES=16
-LOCAL_HOST="11.87.191.98"
+LOCAL_HOST="$local_ip"
 
 mkdir -p $LOG_DIR
 
@@ -661,7 +661,7 @@ do
     --enable_schedule_overlap=false \
     --enable_disagg_pd=true \ # 开启PD分离
     --instance_role=PREFILL \
-    --etcd_addr=11.87.191.83:3389 \
+    --etcd_addr=$etcd_addr:$etcd_port \
     --transfer_listen_port=$((26000+i)) \
     --disagg_pd_port=7777 \
     --cp_size 16 \ # 开启CP
@@ -707,13 +707,13 @@ export ATB_CONTEXT_WORKSPACE_SIZE=0
 
 MODEL_PATH="/export/home/models/GLM-5-final-w8a8/"
 DRAFT_MODEL_PATH="/export/home/models/GLM-5-final-w8a8-MTP/"
-MASTER_NODE_ADDR="11.87.191.98:1895"
+MASTER_NODE_ADDR="$master_ip:$master_port"
 START_PORT=48000
 START_DEVICE=0
 LOG_DIR="log"
 NNODES=32
 LOCAL_NODES=16
-LOCAL_HOST="11.87.191.99"
+LOCAL_HOST="$local_ip"
 
 mkdir -p $LOG_DIR
 
@@ -747,7 +747,7 @@ do
     --enable_schedule_overlap=false \
     --enable_disagg_pd=true \ # 开启PD分离
     --instance_role=PREFILL \
-    --etcd_addr=11.87.191.83:3389 \
+    --etcd_addr=$etcd_addr:$etcd_port \
     --transfer_listen_port=$((26100+i)) \
     --disagg_pd_port=7777 \
     --cp_size 16 \ # 开启CP
@@ -795,13 +795,13 @@ export ATB_CONTEXT_WORKSPACE_SIZE=0
 
 MODEL_PATH="/export/home/models/GLM-5-final-w8a8/"
 DRAFT_MODEL_PATH="/export/home/models/GLM-5-final-w8a8-MTP/"
-MASTER_NODE_ADDR="11.87.191.83:1895"
+MASTER_NODE_ADDR="$master_ip:$master_port"
 START_PORT=48000
 START_DEVICE=0
 LOG_DIR="log"
 NNODES=32
 LOCAL_NODES=16
-LOCAL_HOST="11.87.191.83"
+LOCAL_HOST="$local_ip"
 
 mkdir -p $LOG_DIR
 
@@ -837,7 +837,7 @@ do
     --enable_graph_mode_decode_no_padding=false \
     --enable_disagg_pd=true \ # 开启PD分离
     --instance_role=DECODE \
-    --etcd_addr=11.87.191.83:3389 \
+    --etcd_addr=$etcd_addr:$etcd_port \
     --transfer_listen_port=$((26000+i)) \
     --disagg_pd_port=7777 \
     --dp_size 2 \ # dp并行
@@ -883,13 +883,13 @@ export ATB_CONTEXT_WORKSPACE_SIZE=0
 
 MODEL_PATH="/export/home/models/GLM-5-final-w8a8/"
 DRAFT_MODEL_PATH="/export/home/models/GLM-5-final-w8a8-MTP/"
-MASTER_NODE_ADDR="11.87.191.83:1895"
+MASTER_NODE_ADDR="$master_ip:$master_port"
 START_PORT=48000
 START_DEVICE=0
 LOG_DIR="log"
 NNODES=32
 LOCAL_NODES=16
-LOCAL_HOST="11.87.191.82"
+LOCAL_HOST="$local_ip"
 
 mkdir -p $LOG_DIR
 
@@ -925,7 +925,7 @@ do
     --enable_graph_mode_decode_no_padding=false \
     --enable_disagg_pd=true \ # PD分离
     --instance_role=DECODE \ #  decode 节点
-    --etcd_addr=11.87.191.83:3389 \
+    --etcd_addr=$etcd_ip:$etcd_port \
     --transfer_listen_port=$((26100+i)) \
     --disagg_pd_port=7777 \
     --dp_size 2 \ # 开启dp
