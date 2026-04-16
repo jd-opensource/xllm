@@ -31,6 +31,7 @@ limitations under the License.
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/rec_master.h"
 #include "core/framework/request/request_output.h"
+#include "core/util/utils.h"
 
 #ifdef likely
 #undef likely
@@ -312,6 +313,17 @@ void RecCompletionServiceImpl::process_async_impl(
     }
     input_tensors = std::move(tensors);
   }
+
+  const std::vector<int>* routing_tokens_ptr =
+      prompt_tokens.has_value() ? &prompt_tokens.value() : nullptr;
+  const std::vector<proto::InferInputTensor>* input_tensors_ptr =
+      input_tensors.has_value() ? &input_tensors.value() : nullptr;
+  // xllm::util::log_omnirec_completion_schedule_request("CompletionRPC",
+  //                                                     model,
+  //                                                     request_params,
+  //                                                     rpc_request_ref.prompt(),
+  //                                                     routing_tokens_ptr,
+  //                                                     input_tensors_ptr);
 
   // schedule the request
   auto saved_streaming = request_params.streaming;

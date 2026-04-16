@@ -24,11 +24,13 @@ limitations under the License.
 #include <atomic>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <limits>
 #include <stdexcept>
 
 #include "core/framework/model_loader.h"
 #include "core/util/rec_model_utils.h"
+#include "core/util/utils.h"
 #include "helper.h"
 
 namespace {
@@ -86,6 +88,47 @@ void apply_onerec_pipeline_toggles(xllm::Options* options) {
   }
 }
 
+constexpr uint32_t kOneRecEmbeddedBlockSize = 128;
+constexpr uint32_t kOneRecEmbeddedMaxCacheSizeBytes =
+    std::numeric_limits<uint32_t>::max();
+constexpr uint32_t kOneRecEmbeddedMaxSeqsPerBatch = 4;
+constexpr uint32_t kOneRecEmbeddedWorkerConcurrency = 1;
+
+bool should_apply_onerec_embedded_defaults(const char* model_path) {
+  try {
+    return xllm::util::get_model_type(std::filesystem::path(model_path)) ==
+           "onerec";
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Failed to resolve model type for REC C API init: "
+                 << e.what();
+    return false;
+  }
+}
+
+void normalize_onerec_embedded_init_options(XLLM_InitOptions* init_options) {
+  if (init_options == nullptr) {
+    return;
+  }
+
+  // Predictor-embedded OneRec historically relies on REC C API defaults.
+  // The legacy defaults (block_size=1, max_cache_size=1,000,000) are not
+  // compatible with the current OneRec NPU runtime:
+  // - block_size=1 together with graph mode can fail BlockLayer creation
+  // - max_cache_size=1,000,000 yields zero KV cache blocks
+  //
+  // Align the embedded path with a configuration that is verified to start in
+  // the current repo while keeping its conservative batch sizing.
+  if (init_options->block_size <= 1) {
+    init_options->block_size = kOneRecEmbeddedBlockSize;
+  }
+  if (init_options->max_cache_size <= 1000000U) {
+    init_options->max_cache_size = kOneRecEmbeddedMaxCacheSizeBytes;
+  }
+  if (init_options->max_seqs_per_batch == 0) {
+    init_options->max_seqs_per_batch = kOneRecEmbeddedMaxSeqsPerBatch;
+  }
+}
+
 }  // namespace
 
 XLLM_CAPI_EXPORT XLLM_REC_Handler* xllm_rec_create(void) {
@@ -127,6 +170,12 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     XLLM_InitOptions xllm_init_options;
     xllm::helper::set_init_options(
         xllm::helper::BackendType::REC, init_options, &xllm_init_options);
+
+    const bool is_onerec_model =
+        should_apply_onerec_embedded_defaults(model_path);
+    if (is_onerec_model) {
+      normalize_onerec_embedded_init_options(&xllm_init_options);
+    }
 
     std::string log_dir(xllm_init_options.log_dir);
     if (!log_dir.empty()) {
@@ -233,6 +282,13 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     const xllm::RecPipelineType pipeline_type =
         xllm::get_rec_pipeline_type(rec_model_kind);
 
+    // Hard-coded REC so settings. enable_graph and rec_worker_max_concurrency
+    // are dual-source: runtime may read FLAGS_* while setup also needs the same
+    // value in Options.
+    FLAGS_enable_graph = !is_onerec_model;
+    FLAGS_rec_worker_max_concurrency =
+        is_onerec_model ? kOneRecEmbeddedWorkerConcurrency : 2;
+
     // Pipeline-specific runtime toggles in the REC so path.
     reset_pipeline_runtime_toggles();
     switch (pipeline_type) {
@@ -267,6 +323,19 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
               << ", enable_chunked_prefill=" << FLAGS_enable_chunked_prefill
               << ", enable_rec_fast_sampler=" << FLAGS_enable_rec_fast_sampler
               << ", max_decode_rounds=" << FLAGS_max_decode_rounds;
+
+    if (is_onerec_model) {
+      LOG(INFO) << "Applied embedded OneRec REC defaults: block_size="
+                << xllm_init_options.block_size
+                << ", max_cache_size=" << xllm_init_options.max_cache_size
+                << ", max_seqs_per_batch="
+                << xllm_init_options.max_seqs_per_batch
+                << ", enable_graph=" << FLAGS_enable_graph
+                << ", enable_chunked_prefill=" << FLAGS_enable_chunked_prefill
+                << ", enable_rec_prefill_only=" << FLAGS_enable_rec_prefill_only
+                << ", rec_worker_max_concurrency="
+                << FLAGS_rec_worker_max_concurrency;
+    }
 
 #if !defined(USE_NPU) && !defined(USE_CUDA)
     FLAGS_enable_block_copy_kernel = false;
@@ -376,15 +445,45 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_multimodal_completions(
     const XLLM_MM_Data* mm_data,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params) {
-  if (!handler || !model_id || *model_id == '\0' || !token_ids ||
-      token_size == 0) {
+  if (!handler || !model_id || *model_id == '\0') {
     return xllm::helper::build_error_response(
         "", XLLM_StatusCode::kInvalidRequest, "Invalid input parameters");
   }
 
   if (!mm_data) {
+    if (!token_ids || token_size == 0) {
+      return xllm::helper::build_error_response(
+          "", XLLM_StatusCode::kInvalidRequest, "Invalid input parameters");
+    }
     return xllm_rec_token_completions(
         handler, model_id, token_ids, token_size, timeout_ms, request_params);
+  }
+
+  if ((!token_ids || token_size == 0) && mm_data != nullptr) {
+    std::vector<xllm::proto::InferInputTensor> input_tensors;
+    std::string error_info;
+    if (!xllm::helper::convert_xllm_mm_data_to_input_tensors(
+            mm_data, &input_tensors, &error_info)) {
+      return xllm::helper::build_error_response(
+          "",
+          XLLM_StatusCode::kInvalidRequest,
+          error_info.empty() ? "failed to convert mm_data to input_tensors"
+                             : error_info);
+    }
+
+    return xllm::helper::handle_inference_request(
+        handler,
+        xllm::helper::InferenceType::REC_COMPLETIONS,
+        model_id,
+        input_tensors,
+        nullptr,
+        timeout_ms,
+        request_params);
+  }
+
+  if (!token_ids || token_size == 0) {
+    return xllm::helper::build_error_response(
+        "", XLLM_StatusCode::kInvalidRequest, "Invalid input parameters");
   }
 
   xllm::MMData internal_mm_data;
@@ -413,6 +512,42 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_multimodal_completions(
       model_id,
       token_ids_vec,
       static_cast<void*>(&internal_mm_data),
+      timeout_ms,
+      request_params);
+}
+
+XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_input_tensors_completions(
+    XLLM_REC_Handler* handler,
+    const char* model_id,
+    const XLLM_InferInputTensorDesc* tensors,
+    size_t tensor_count,
+    uint32_t timeout_ms,
+    const XLLM_RequestParams* request_params) {
+  if (!handler || !model_id || *model_id == '\0' || !tensors ||
+      tensor_count == 0) {
+    return xllm::helper::build_error_response(
+        "",
+        XLLM_StatusCode::kInvalidRequest,
+        "Invalid input parameters for xllm_rec_input_tensors_completions");
+  }
+
+  std::vector<xllm::proto::InferInputTensor> input_tensors;
+  std::string error_info;
+  if (!xllm::helper::convert_c_infer_input_tensors(
+          tensors, tensor_count, &input_tensors, &error_info)) {
+    return xllm::helper::build_error_response(
+        "",
+        XLLM_StatusCode::kInvalidRequest,
+        error_info.empty() ? "convert_c_infer_input_tensors failed"
+                           : error_info);
+  }
+
+  return xllm::helper::handle_inference_request(
+      handler,
+      xllm::helper::InferenceType::REC_COMPLETIONS,
+      model_id,
+      input_tensors,
+      nullptr,
       timeout_ms,
       request_params);
 }

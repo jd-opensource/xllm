@@ -289,6 +289,25 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_multimodal_completions(
     const XLLM_RequestParams* request_params);
 
 /**
+ * @brief Generate recommendation completions from raw input_tensors.
+ * @param handler Valid, initialized REC inference instance handle.
+ * @param model_id Null-terminated string of the loaded REC model ID.
+ * @param tensors Array of XLLM_InferInputTensorDesc.
+ * @param tensor_count Number of tensors in @p tensors.
+ * @param timeout_ms Timeout in milliseconds (0 = no timeout).
+ * @param request_params Generation parameters (NULL = use REC defaults).
+ * @return Pointer to XLLM_Response. Caller must free with
+ * xllm_rec_free_response().
+ */
+XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_input_tensors_completions(
+    XLLM_REC_Handler* handler,
+    const char* model_id,
+    const XLLM_InferInputTensorDesc* tensors,
+    size_t tensor_count,
+    uint32_t timeout_ms,
+    const XLLM_RequestParams* request_params);
+
+/**
  * @brief Generate generative recommendation chat completions from multi-turn
  * conversation history Generates personalized recommendation responses for a
  * multi-turn user-assistant conversation
@@ -328,7 +347,7 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_chat_completions(
  * @warning Mandatory: Must be called after using REC completions/chat
  * completions responses
  * @see xllm_rec_text_completions, xllm_rec_token_completions,
- * xllm_rec_chat_completions
+ * xllm_rec_input_tensors_completions, xllm_rec_chat_completions
  */
 XLLM_CAPI_EXPORT void xllm_rec_free_response(XLLM_Response* resp);
 

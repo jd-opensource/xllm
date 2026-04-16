@@ -257,6 +257,30 @@ typedef struct XLLM_CAPI_EXPORT XLLM_RequestParams {
 } XLLM_RequestParams;
 
 /**
+ * @brief One input tensor for xllm_rec_input_tensors_completions.
+ * @note data_type uses numeric values from xllm.proto.DataType.
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_InferInputTensorDesc {
+  /** Tensor name, e.g. sparse_embedding or decoder_context_embedding. */
+  const char* name;
+
+  /** xllm.proto.DataType numeric value. */
+  int32_t data_type;
+
+  /** Row-major shape dimensions. */
+  const int64_t* shape;
+
+  /** Rank of shape. */
+  size_t shape_len;
+
+  /** Raw row-major tensor buffer. */
+  const void* data;
+
+  /** Number of elements in data. */
+  size_t num_elements;
+} XLLM_InferInputTensorDesc;
+
+/**
  * @brief API response status codes
  */
 typedef enum XLLM_CAPI_EXPORT XLLM_StatusCode {
@@ -416,6 +440,15 @@ typedef struct XLLM_CAPI_EXPORT XLLM_Response {
 
   /** REC/OneRec specific response extensions */
   XLLM_RecOutputs rec_outputs;
+
+  /**
+   * Serialized xllm::proto::CompletionResponse payload.
+   * Embedded callers can parse it to access output_tensors.
+   */
+  char* completion_response_proto;
+
+  /** Byte size of completion_response_proto. */
+  size_t completion_response_proto_size;
 } XLLM_Response;
 
 /**
