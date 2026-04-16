@@ -36,6 +36,7 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/kernels/cuda/llm_decode_metadata_update.h"
 #include "core/kernels/cuda/piecewise_graphs.h"
 #include "executor_impl.h"
 #include "executor_impl_factory.h"
@@ -188,8 +189,25 @@ class CudaGraphPersistentParam {
     }
     return persistent_decode_qo_indptr_;
   }
+  torch::Tensor persistent_kv_seq_lens_delta(uint32_t actual_batch_size) const {
+    if (actual_batch_size > 0) {
+      return persistent_kv_seq_lens_delta_.slice(
+          /*dim=*/0, /*start=*/0, /*end=*/actual_batch_size);
+    }
+    return persistent_kv_seq_lens_delta_;
+  }
 
  private:
+  bool can_use_llm_decode_fast_path(const torch::Tensor& tokens,
+                                    const torch::Tensor& positions,
+                                    const ModelInputParams& params) const;
+  void update_llm_decode_metadata_fast_path(const torch::Tensor& tokens,
+                                            const torch::Tensor& positions,
+                                            const ModelInputParams& params,
+                                            uint32_t padded_num_tokens,
+                                            int64_t actual_batch_size,
+                                            int64_t actual_num_tokens);
+
   const ModelArgs& args_;
   const torch::Device& device_;
   const runtime::Options& options_;
@@ -211,6 +229,7 @@ class CudaGraphPersistentParam {
   torch::Tensor persistent_paged_kv_indices_;
   torch::Tensor persistent_paged_kv_last_page_len_;
   torch::Tensor persistent_decode_qo_indptr_;
+  torch::Tensor persistent_kv_seq_lens_delta_;
 
   // TODO maybe not used. or use q_cu_seq_lens instead.
   torch::Tensor persistent_chunked_prefill_qo_indptr_;
