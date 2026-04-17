@@ -181,8 +181,11 @@ DeepseekV2DecoderLayerImpl::prepare_moe_inputs(
   }
 
   if (result.exec_cfg->enable_all2all || result.exec_cfg->need_dp_gather) {
-    result.moe_prep =
-        sparse_moe_->prep_in(std::move(x), residual, input_params, attn_layout);
+    result.moe_prep = sparse_moe_->prep_in(std::move(x),
+                                           residual,
+                                           input_params,
+                                           result.exec_cfg.value(),
+                                           attn_layout);
     result.ffn_in = result.moe_prep->ffn_in;
     return result;
   }
