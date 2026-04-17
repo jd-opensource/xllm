@@ -24,6 +24,7 @@ limitations under the License.
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/quant_args.h"
+#include "framework/sampling/rec_sampler.h"
 #include "framework/state_dict/state_dict.h"
 #include "options.h"
 #include "runtime/worker_impl.h"
@@ -75,6 +76,7 @@ class LLMWorkerImpl : public WorkerImpl {
 
  protected:
   std::unique_ptr<BeamSearcher> beam_searcher_;
+  std::unique_ptr<RecSampler> rec_sampler_;
 };
 
 }  // namespace xllm

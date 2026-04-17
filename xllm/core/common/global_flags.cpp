@@ -534,7 +534,8 @@ DEFINE_bool(enable_beam_search_kernel,
 DEFINE_bool(
     enable_rec_fast_sampler,
     true,
-    "Whether to enable RecSampler fast sampling path for Rec pipelines.");
+    "Whether to enable RecSampler fast sampling path for Rec pipelines and "
+    "LLM beam search.");
 
 DEFINE_bool(enable_topk_sorted,
             true,

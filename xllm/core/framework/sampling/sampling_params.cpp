@@ -51,6 +51,7 @@ void SamplingParameters::init(
   bool logprobs = false;
   int64_t max_top_logprobs = 0;
   bool is_embeddings = false;
+  bool use_beam_search = false;
   for (const auto* p : req_sampling_params) {
     frequency_penalties.push_back(p->frequency_penalty);
     presence_penalties.push_back(p->presence_penalty);
@@ -147,6 +148,7 @@ void SamplingParameters::init(
   this->logprobs = logprobs;
   this->max_top_logprobs = max_top_logprobs;
   this->is_embeddings = is_embeddings;
+  this->use_beam_search = use_beam_search;
   if (this->do_sample.defined()) {
     this->all_random_sample = this->do_sample.all().item<bool>();
     this->all_greedy_sample = !this->do_sample.any().item<bool>();
@@ -186,6 +188,7 @@ void SamplingParameters::concat(const SamplingParameters& param) {
   this->do_sample = safe_concat(this->do_sample, param.do_sample, 0);
   this->logprobs = this->logprobs || param.logprobs;
   this->is_embeddings = this->is_embeddings || param.is_embeddings;
+  this->use_beam_search = this->use_beam_search || param.use_beam_search;
   this->max_top_logprobs =
       std::max(this->max_top_logprobs, param.max_top_logprobs);
   return;

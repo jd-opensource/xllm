@@ -70,8 +70,25 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
     eplb_executor_ = std::make_unique<EplbExecutor>(model_.get(), device_);
   }
 
+  // Keep the LLM beam-search top-k fast path scoped to CUDA so other
+  // backends continue to use the existing sampler behavior.
+#if defined(USE_CUDA)
+  if (FLAGS_enable_rec_fast_sampler) {
+    rec_sampler_ =
+        std::make_unique<RecSampler>(RecPipelineType::kLlmRecMultiRoundPipeline,
+                                     /*enable_fast_path=*/true);
+    LOG(INFO) << "Shared RecSampler fast path enabled for LLM beam search.";
+  }
+#endif
+
   if (FLAGS_enable_beam_search_kernel) {
+#if defined(USE_NPU)
     beam_searcher_ = std::make_unique<BeamSearcher>();
+#else
+    LOG(WARNING) << "enable_beam_search_kernel is enabled, but BeamSearcher "
+                    "is only implemented on NPU. Falling back to "
+                    "host-side beam-search processing.";
+#endif
   }
   return true;
 }
@@ -183,12 +200,15 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     output.logprobs = sampling_params.logprobs;
     output.max_top_logprobs = sampling_params.max_top_logprobs;
     if (!input.skip_sampling_for_logits_only) {
-      auto sample_output = sampler_->forward(logits, sampling_params);
+      auto sample_output = (sampling_params.use_beam_search &&
+                            logits.is_cuda() && rec_sampler_ != nullptr)
+                               ? rec_sampler_->forward(logits, sampling_params)
+                               : sampler_->forward(logits, sampling_params);
 
       // beam search kernel
       BeamSearchOutput beam_search_output;
-      if (sampling_params.use_beam_search && input.acc_logprob.defined() &&
-          input.acc_logprob.numel() > 0) {
+      if (beam_searcher_ != nullptr && sampling_params.use_beam_search &&
+          input.acc_logprob.defined() && input.acc_logprob.numel() > 0) {
         beam_search_output =
             beam_searcher_->forward(input.acc_logprob,
                                     sample_output.top_tokens,

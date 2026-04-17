@@ -44,12 +44,11 @@ static inline bool use_air_log_softmax_env() {
   return enabled;
 }
 
-// Check if fast path sampling can be used for multi-round pipeline.
-static inline bool can_use_fast_path(const SamplingParameters& params) {
-  return params.use_beam_search && params.logprobs &&
-         FLAGS_enable_rec_fast_sampler && params.max_top_logprobs > 0 &&
-         !params.top_p.defined() && !FLAGS_enable_qwen3_reranker &&
-         FLAGS_max_decode_rounds > 0;
+static inline bool can_use_fast_path(const SamplingParameters& params,
+                                     bool enable_fast_path) {
+  return params.use_beam_search && params.logprobs && enable_fast_path &&
+         params.max_top_logprobs > 0 && !params.top_p.defined() &&
+         !FLAGS_enable_qwen3_reranker;
 }
 
 static inline torch::Tensor log_softmax_last_dim(
@@ -126,11 +125,16 @@ static inline void sample_top_candidates(const torch::Tensor& probs,
 
 }  // namespace
 
-RecSampler::RecSampler(RecPipelineType pipeline_type)
+RecSampler::RecSampler(RecPipelineType pipeline_type, bool enable_fast_path)
     : sampler_(std::make_unique<Sampler>()),
-      strategy_(create_sampling_strategy(pipeline_type, *sampler_)) {
-  LOG(INFO) << "RecSampler initialized with Sampler delegate.";
+      strategy_(
+          create_sampling_strategy(pipeline_type, *sampler_, enable_fast_path)),
+      enable_fast_path_(enable_fast_path) {
+  LOG(INFO) << "RecSampler initialized with Sampler delegate, fast_path="
+            << enable_fast_path;
 }
+
+RecSampler::~RecSampler() = default;
 
 SampleOutput RecSampler::forward(torch::Tensor& logits,
                                  const SamplingParameters& params,
@@ -138,14 +142,14 @@ SampleOutput RecSampler::forward(torch::Tensor& logits,
   return strategy_->forward(logits, params, filter_mask);
 }
 
-// --- SamplingStrategy factory ---
-
 std::unique_ptr<RecSampler::SamplingStrategy>
 RecSampler::create_sampling_strategy(RecPipelineType type,
-                                     const Sampler& sampler) {
+                                     const Sampler& sampler,
+                                     bool enable_fast_path) {
   switch (type) {
     case RecPipelineType::kLlmRecMultiRoundPipeline:
-      return std::make_unique<MultiRoundFastPathSamplingStrategy>(sampler);
+      return std::make_unique<MultiRoundFastPathSamplingStrategy>(
+          sampler, enable_fast_path);
     case RecPipelineType::kLlmRecDefault:
     case RecPipelineType::kLlmRecWithMmData:
       return std::make_unique<DefaultSamplingStrategy>(sampler);
@@ -156,8 +160,6 @@ RecSampler::create_sampling_strategy(RecPipelineType type,
       __builtin_unreachable();
   }
 }
-
-// --- DefaultSamplingStrategy ---
 
 RecSampler::DefaultSamplingStrategy::DefaultSamplingStrategy(
     const Sampler& sampler)
@@ -263,21 +265,19 @@ SampleOutput RecSampler::OneRecConstrainedSamplingStrategy::forward(
   return output;
 }
 
-// --- MultiRoundFastPathSamplingStrategy ---
-
 RecSampler::MultiRoundFastPathSamplingStrategy::
-    MultiRoundFastPathSamplingStrategy(const Sampler& sampler)
-    : sampler_(sampler) {}
+    MultiRoundFastPathSamplingStrategy(const Sampler& sampler,
+                                       bool enable_fast_path)
+    : sampler_(sampler), enable_fast_path_(enable_fast_path) {}
 
 SampleOutput RecSampler::MultiRoundFastPathSamplingStrategy::forward(
     torch::Tensor& logits,
     const SamplingParameters& params,
     const torch::Tensor& filter_mask) const {
-  (void)filter_mask;
-  const bool use_fast_path = can_use_fast_path(params);
+  const bool use_fast_path = can_use_fast_path(params, enable_fast_path_);
 
   if (!use_fast_path) {
-    return sampler_.forward(logits, params);
+    return sampler_.forward(logits, params, filter_mask);
   }
 
   LOG_FIRST_N(INFO, 1) << "RecSampler fast path activated.";
@@ -298,8 +298,24 @@ SampleOutput RecSampler::MultiRoundFastPathSamplingStrategy::forward(
   }
 
   torch::Tensor sample_logits = logits;
-  if (params.selected_token_idxes.numel() != params.sample_idxes.numel()) {
+  const bool use_sample_indices =
+      params.selected_token_idxes.numel() != params.sample_idxes.numel();
+  if (use_sample_indices) {
     sample_logits = logits.index_select(/*dim=*/0, params.sample_idxes);
+  }
+
+  if (filter_mask.defined()) {
+    CHECK_EQ(filter_mask.dim(), 2)
+        << "filter_mask must be 2-D, dim=" << filter_mask.dim();
+    CHECK_EQ(filter_mask.size(0), sample_logits.size(0))
+        << "filter_mask batch mismatch, filter_mask.size(0)="
+        << filter_mask.size(0)
+        << ", sample_logits.size(0)=" << sample_logits.size(0);
+    CHECK_EQ(filter_mask.size(1), sample_logits.size(1))
+        << "filter_mask vocab mismatch, filter_mask.size(1)="
+        << filter_mask.size(1)
+        << ", sample_logits.size(1)=" << sample_logits.size(1);
+    sample_logits = sample_logits + filter_mask;
   }
 
   CHECK_EQ(sample_logits.size(0), params.do_sample.size(0));
@@ -316,13 +332,24 @@ SampleOutput RecSampler::MultiRoundFastPathSamplingStrategy::forward(
   torch::Tensor temperatures;
   if (params.temperatures.defined()) {
     temperatures = params.temperatures;
-    if (params.selected_token_idxes.numel() != params.sample_idxes.numel()) {
+    if (use_sample_indices) {
       temperatures = temperatures.index_select(/*dim=*/0, params.sample_idxes);
     }
     temperatures = temperatures.to(torch::kFloat32);
   }
 
+#if defined(USE_CUDA)
+  if (sample_logits.is_cuda()) {
+    std::tie(output.next_tokens, output.logprobs, output.top_logprobs) =
+        kernel::cuda::rec_topk_postprocess(
+            topk_values, output.top_tokens, temperatures);
+    return output;
+  }
+#endif
+
   output.top_logprobs = log_softmax_last_dim(topk_values, temperatures);
+  output.next_tokens = output.top_tokens.index({torch::indexing::Slice(), 0});
+  output.logprobs = output.top_logprobs.index({torch::indexing::Slice(), 0});
   return output;
 }
 
