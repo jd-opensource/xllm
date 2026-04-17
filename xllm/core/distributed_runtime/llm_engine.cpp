@@ -544,6 +544,17 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   const int64_t available_full_cache_size_in_bytes =
       kv_cache_cap.cache_size_in_bytes -
       kv_cache_cap.linear_cache_size_in_bytes;
+  if (kv_cache_cap.linear_slot_size > 0) {
+    CHECK_GT(kv_cache_cap.cache_size_in_bytes,
+             kv_cache_cap.linear_cache_size_in_bytes)
+        << "failed to reserve linear state cache for linear-attention layers: "
+        << "max_seqs_per_batch (" << FLAGS_max_seqs_per_batch
+        << ") is too large. Please reduce max_seqs_per_batch to less than "
+        << kv_cache_cap.cache_size_in_bytes /
+                   (kv_cache_cap.num_linear_attention_layers *
+                    kv_cache_cap.linear_slot_size) -
+               2;
+  }
   CHECK_GT(available_full_cache_size_in_bytes, 0)
       << "no memory left for full-attention kv cache after reserving linear "
          "state cache";
