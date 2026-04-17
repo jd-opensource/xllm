@@ -15,6 +15,9 @@ limitations under the License.
 
 #include "layers/npu/npu_column_parallel_linear_impl.h"
 
+#include "common/global_flags.h"
+#include "loader/column_parallel_linear_manual_loader.h"
+
 namespace xllm {
 namespace layer {
 
@@ -63,7 +66,11 @@ NpuColumnParallelLinearImpl::NpuColumnParallelLinearImpl(
   dtype_ = c10::typeMetaToScalarType(options.dtype());
   tensor_placeholder_ = torch::zeros({1}).to(options);
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
-  loader_ = std::make_unique<ColumParallelLinearLoader>(1, context);
+  if (FLAGS_enable_manual_loader) {
+    loader_ = std::make_unique<ColumParallelLinearManualLoader>(1, context);
+  } else {
+    loader_ = std::make_unique<ColumParallelLinearLoader>(1, context);
+  }
 }
 
 void NpuColumnParallelLinearImpl::merge_loaded_weights() {

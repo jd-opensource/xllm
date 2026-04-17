@@ -24,57 +24,14 @@ limitations under the License.
 #include <torch_npu/csrc/libs/init_npu.h>
 
 #include "qwen2dot5_vision_encoder_loader.h"
+#include "qwen_loader_constants.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
 
 namespace xllm {
 namespace layer {
 
-enum VisionEncoderLayerTensorId : int {
-  IN_INPUT_NORM_WEIGHT = 0,
-  IN_POST_NORM_WEIGHT,
-  IN_QKV_WEIGHT,
-  IN_QKV_BIAS,
-  IN_WATTENTION_OUT_WEIGHT,
-  IN_WATTENTION_OUT_BIAS,
-  IN_MLP_GATE_WEIGHT,
-  IN_MLP_GATE_BIAS,
-  IN_MLP_UP_WEIGHT,
-  IN_MLP_UP_BIAS,
-  IN_MLP_DOWN_WEIGHT,
-  IN_MLP_DOWN_BIAS,
-  IN_VISION_Q_WEIGHT,
-  IN_VISION_Q_BIAS,
-  IN_VISION_K_WEIGHT,
-  IN_VISION_K_BIAS,
-  IN_VISION_V_WEIGHT,
-  IN_VISION_V_BIAS
-};
-
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
-    {IN_INPUT_NORM_WEIGHT, "norm1.weight"},
-    {IN_POST_NORM_WEIGHT, "norm2.weight"},
-    {IN_QKV_WEIGHT, "qkv.weight"},
-    {IN_QKV_BIAS, "qkv.bias"},
-    {IN_WATTENTION_OUT_WEIGHT, "attn.proj.weight"},
-    {IN_WATTENTION_OUT_BIAS, "attn.proj.bias"},
-    {IN_MLP_GATE_WEIGHT, "mlp.gate_proj.weight"},
-    {IN_MLP_GATE_BIAS, "mlp.gate_proj.bias"},
-    {IN_MLP_UP_WEIGHT, "mlp.up_proj.weight"},
-    {IN_MLP_UP_BIAS, "mlp.up_proj.bias"},
-    {IN_MLP_DOWN_WEIGHT, "mlp.down_proj.weight"},
-    {IN_MLP_DOWN_BIAS, "mlp.down_proj.bias"},
-};
-
-// {weight,dim}
-static std::map<int, int> WEIGHT_SHARD = {
-    {IN_WATTENTION_OUT_WEIGHT, 1},
-    {IN_MLP_GATE_WEIGHT, 0},
-    {IN_MLP_GATE_BIAS, 0},
-    {IN_MLP_UP_WEIGHT, 0},
-    {IN_MLP_UP_BIAS, 0},
-    {IN_MLP_DOWN_WEIGHT, 1},
-};
+using namespace qwen2dot5_vision_encoder_constants;
 
 Qwen2dot5VisionEncoderLoader::Qwen2dot5VisionEncoderLoader(
     uint64_t weight_count,

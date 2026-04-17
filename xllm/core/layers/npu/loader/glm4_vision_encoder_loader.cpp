@@ -38,7 +38,7 @@ static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
     {IN_LINEAR_UP_WEIGHT, "mlp.up_proj.weight"},
     {IN_LINEAR_DOWN_WEIGHT, "mlp.down_proj.weight"}};
 
-// IN_QKV_WEIGHT is handled in merge_loaded_weights.
+// IN_QKV_WEIGHT is sharded explicitly in merge_loaded_weights.
 static std::map<int, int> WEIGHT_SHARD = {{IN_ATTN_PROJ_WEIGHT, 1},
                                           {IN_LINEAR_UP_WEIGHT, 0},
                                           {IN_LINEAR_GATE_WEIGHT, 0},
@@ -47,8 +47,11 @@ static std::map<int, int> WEIGHT_SHARD = {{IN_ATTN_PROJ_WEIGHT, 1},
 Glm4VisionEncoderLoader::Glm4VisionEncoderLoader(uint64_t weight_count,
                                                  const ModelContext& context)
     : BaseLoader(weight_count, context) {
+  auto parallel_args = context.get_parallel_args();
   auto options = context.get_tensor_options();
-  dtype_ = c10::typeMetaToScalarType(options.dtype());
+  encode_param_rank_ = parallel_args.rank();
+  encode_param_world_size_ = parallel_args.world_size();
+  at_weight_tensors_.resize(weight_count);
   for (int i = 0; i < weight_count; ++i) {
     at_weight_tensors_[i] = torch::zeros({1}).to(options);
   }
@@ -72,7 +75,7 @@ void Glm4VisionEncoderLoader::verify_loaded_weights() const {
 }
 
 void Glm4VisionEncoderLoader::merge_loaded_weights() {
-  if (parallel_args_.world_size() > 1) {
+  if (encode_param_world_size_ > 1) {
     get_weights_col_packed_qkv();
   }
 
@@ -80,19 +83,18 @@ void Glm4VisionEncoderLoader::merge_loaded_weights() {
       torch::cat({at_weight_tensors_[IN_LINEAR_GATE_WEIGHT],
                   at_weight_tensors_[IN_LINEAR_UP_WEIGHT]},
                  0);
+
   at_weight_tensors_[IN_LINEAR_GATE_WEIGHT] = torch::empty({}, device_);
   at_weight_tensors_[IN_LINEAR_UP_WEIGHT] = torch::empty({}, device_);
 }
 
 void Glm4VisionEncoderLoader::get_weights_col_packed_qkv() {
-  int rank = parallel_args_.rank();
-  int world_size = parallel_args_.world_size();
   auto qkv_weight = torch::chunk(at_weight_tensors_[IN_QKV_WEIGHT], 3, 0);
-  at_weight_tensors_[IN_QKV_WEIGHT] =
-      torch::cat({(qkv_weight[0].chunk(world_size, 0))[rank],
-                  (qkv_weight[1].chunk(world_size, 0))[rank],
-                  (qkv_weight[2].chunk(world_size, 0))[rank]},
-                 0);
+  at_weight_tensors_[IN_QKV_WEIGHT] = torch::cat(
+      {qkv_weight[0].chunk(encode_param_world_size_, 0)[encode_param_rank_],
+       qkv_weight[1].chunk(encode_param_world_size_, 0)[encode_param_rank_],
+       qkv_weight[2].chunk(encode_param_world_size_, 0)[encode_param_rank_]},
+      0);
 }
 
 }  // namespace layer

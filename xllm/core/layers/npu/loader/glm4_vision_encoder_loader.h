@@ -33,6 +33,9 @@ class Glm4VisionEncoderLoader : public BaseLoader {
 
  private:
   void get_weights_col_packed_qkv();
+
+  int encode_param_rank_;
+  int encode_param_world_size_;
 };
 
 }  // namespace layer
