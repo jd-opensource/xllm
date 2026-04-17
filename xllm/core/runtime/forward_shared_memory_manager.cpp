@@ -2077,7 +2077,9 @@ inline void deserialize_raw_forward_input(const char*& buffer,
               /*force_host_materialize=*/true);
 #endif
 
-  read_dit_forward_input(context, input_params.dit_forward_input);
+  if (FLAGS_backend == "dit") {
+    read_dit_forward_input(context, input_params.dit_forward_input);
+  }
 
   finalize_device_buffer_session(device_session, stream);
   buffer = context.tensor_cursor;
@@ -2160,8 +2162,9 @@ inline void serialize_raw_forward_input_sections(
 
   write_vector_to_tensor(context, input.new_token_slot_ids);
   write_2d_vector_to_tensor(context, input.block_tables_vec);
-
-  write_dit_forward_input(context, input.dit_forward_input);
+  if (FLAGS_backend == "dit") {
+    write_dit_forward_input(context, input.dit_forward_input);
+  }
 }
 
 inline RawInputLayoutHeader calculate_raw_forward_input_layout(
@@ -2246,7 +2249,9 @@ size_t calculate_raw_forward_output_size(const RawForwardOutput& output) {
   // mm_embedding_data
   size += get_vector_tensor_size(output.mm_embeddings);
   // dit output data
-  size += get_vector_tensor_size(output.dit_forward_output.tensors);
+  if (FLAGS_backend == "dit") {
+    size += get_vector_tensor_size(output.dit_forward_output.tensors);
+  }
 
   return size;
 }
@@ -2312,8 +2317,11 @@ void deserialize_raw_forward_output(const char* buffer,
   read_data(buffer, output.prepared_layer_id);
 
   read_vector_tensor(buffer, output.mm_embeddings);
+
   // read dit output
-  read_vector_tensor(buffer, output.dit_forward_output.tensors);
+  if (FLAGS_backend == "dit") {
+    read_vector_tensor(buffer, output.dit_forward_output.tensors);
+  }
 }
 
 void serialize_raw_forward_output(const RawForwardOutput& output,
@@ -2329,7 +2337,9 @@ void serialize_raw_forward_output(const RawForwardOutput& output,
 
   write_vector_tensor(buffer, output.mm_embeddings);
   // write dit output
-  write_vector_tensor(buffer, output.dit_forward_output.tensors);
+  if (FLAGS_backend == "dit") {
+    write_vector_tensor(buffer, output.dit_forward_output.tensors);
+  }
 }
 
 void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
