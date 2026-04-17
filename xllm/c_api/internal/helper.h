@@ -112,6 +112,13 @@ void set_init_options(BackendType backend_type,
                       const XLLM_InitOptions* init_options,
                       XLLM_InitOptions* xllm_init_options);
 
+void set_startup_flags(BackendType backend_type,
+                       const XLLM_StartupFlags* startup_flags,
+                       XLLM_StartupFlags* xllm_startup_flags);
+
+void apply_startup_flags(const XLLM_InitOptions& init_options,
+                         const XLLM_StartupFlags& startup_flags);
+
 /**
  * @brief Transfer C API request params to xLLM internal request params
  */

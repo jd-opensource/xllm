@@ -17,6 +17,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <atomic>
+#include <cstring>
 #include <string>
 
 #include "core/common/global_flags.h"
@@ -89,6 +90,45 @@ void set_init_options(BackendType backend_type,
   }
 
   return;
+}
+
+void set_startup_flags(BackendType backend_type,
+                       const XLLM_StartupFlags* startup_flags,
+                       XLLM_StartupFlags* xllm_startup_flags) {
+  if (startup_flags == nullptr) {
+    if (backend_type == BackendType::LLM) {
+      memcpy(xllm_startup_flags,
+             &XLLM_LLM_STARTUP_FLAGS_DEFAULT,
+             sizeof(XLLM_StartupFlags));
+    } else if (backend_type == BackendType::REC) {
+      memcpy(xllm_startup_flags,
+             &XLLM_REC_STARTUP_FLAGS_DEFAULT,
+             sizeof(XLLM_StartupFlags));
+    }
+  } else {
+    memcpy(xllm_startup_flags, startup_flags, sizeof(XLLM_StartupFlags));
+  }
+}
+
+void apply_startup_flags(const XLLM_InitOptions& init_options,
+                         const XLLM_StartupFlags& startup_flags) {
+  FLAGS_enable_prefix_cache = init_options.enable_prefix_cache;
+  FLAGS_enable_chunked_prefill = init_options.enable_chunked_prefill;
+  FLAGS_enable_schedule_overlap = init_options.enable_schedule_overlap;
+  FLAGS_enable_shm = init_options.enable_shm;
+  FLAGS_enable_beam_search_kernel = startup_flags.enable_beam_search_kernel;
+  FLAGS_enable_rec_fast_sampler = startup_flags.enable_rec_fast_sampler;
+  FLAGS_use_contiguous_input_buffer = startup_flags.use_contiguous_input_buffer;
+  FLAGS_enable_graph = startup_flags.enable_graph;
+  FLAGS_enable_graph_mode_decode_no_padding =
+      startup_flags.enable_graph_mode_decode_no_padding;
+  FLAGS_enable_prefill_piecewise_graph =
+      startup_flags.enable_prefill_piecewise_graph;
+  FLAGS_enable_block_copy_kernel = startup_flags.enable_block_copy_kernel;
+
+#if !defined(USE_NPU) && !defined(USE_CUDA)
+  FLAGS_enable_block_copy_kernel = false;
+#endif
 }
 
 void transfer_request_params(InferenceType inference_type,

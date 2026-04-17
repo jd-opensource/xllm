@@ -72,6 +72,18 @@ XLLM_CAPI_EXPORT void xllm_rec_init_options_default(
     XLLM_InitOptions* init_options);
 
 /**
+ * @brief Initialize XLLM_StartupFlags with REC default values
+ *
+ * Populates the XLLM_StartupFlags struct with REC startup runtime defaults.
+ *
+ * @param startup_flags Pointer to XLLM_StartupFlags to initialize (NULL =
+ * no-op)
+ * @see xllm_rec_initialize_ex, XLLM_REC_STARTUP_FLAGS_DEFAULT
+ */
+XLLM_CAPI_EXPORT void xllm_rec_startup_flags_default(
+    XLLM_StartupFlags* startup_flags);
+
+/**
  * @brief Initialize the Generative Recommendation (REC) model and runtime
  * environment Loads generative recommendation model weights from the specified
  * path, configures target devices, initializes compute contexts, and prepares
@@ -101,6 +113,26 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(XLLM_REC_Handler* handler,
                                           const char* model_path,
                                           const char* devices,
                                           const XLLM_InitOptions* init_options);
+
+/**
+ * @brief Initialize the REC model with extended startup runtime flags
+ *
+ * This API preserves the ABI of xllm_rec_initialize by keeping init options in
+ * XLLM_InitOptions and passing newly added startup-only flags separately.
+ *
+ * @param handler Valid REC instance handle (must not be NULL)
+ * @param model_path Null-terminated string of the REC model path
+ * @param devices Null-terminated string specifying target devices
+ * @param init_options Advanced initialization options (NULL = use defaults)
+ * @param startup_flags Startup runtime flags (NULL = use defaults)
+ * @return true if initialization succeeds; false on failure
+ */
+XLLM_CAPI_EXPORT bool xllm_rec_initialize_ex(
+    XLLM_REC_Handler* handler,
+    const char* model_path,
+    const char* devices,
+    const XLLM_InitOptions* init_options,
+    const XLLM_StartupFlags* startup_flags);
 
 /**
  * @brief Helper to initialize XLLM_RequestParams with REC default values

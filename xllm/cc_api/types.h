@@ -60,6 +60,27 @@ struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
   // Whether to enable shared memory for executing model
   bool enable_shm = false;
 
+  // Whether to use contiguous device input buffer when shared memory is enabled
+  bool use_contiguous_input_buffer = false;
+
+  // Whether to enable graph execution
+  bool enable_graph = false;
+
+  // Whether to enable no-padding graph decode mode
+  bool enable_graph_mode_decode_no_padding = false;
+
+  // Whether to enable piecewise graph execution for prefill phase
+  bool enable_prefill_piecewise_graph = false;
+
+  // Whether to enable block copy kernel on supported backends
+  bool enable_block_copy_kernel = false;
+
+  // Whether to enable beam search kernel
+  bool enable_beam_search_kernel = false;
+
+  // Whether to enable RecSampler fast sampling path
+  bool enable_rec_fast_sampler = false;
+
   // Input shared memory size (MB)
   uint64_t input_shm_size = 1024;
 

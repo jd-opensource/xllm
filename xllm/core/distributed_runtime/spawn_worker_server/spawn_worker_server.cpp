@@ -21,6 +21,7 @@ limitations under the License.
 #include <signal.h>
 #include <unistd.h>
 
+#include "core/common/global_flags.h"
 #include "core/distributed_runtime/worker_server.h"
 #include "core/platform/device.h"
 #if defined(USE_CUDA)
@@ -56,7 +57,17 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      int device_idx,
                                      int num_decoding_tokens,
                                      int block_size,
+                                     bool enable_prefix_cache,
+                                     bool enable_chunked_prefill,
+                                     bool enable_schedule_overlap,
                                      bool enable_shm,
+                                     bool use_contiguous_input_buffer,
+                                     bool enable_graph,
+                                     bool enable_graph_mode_decode_no_padding,
+                                     bool enable_prefill_piecewise_graph,
+                                     bool enable_block_copy_kernel,
+                                     bool enable_beam_search_kernel,
+                                     bool enable_rec_fast_sampler,
                                      uint64_t input_shm_size,
                                      uint64_t output_shm_size,
                                      bool is_local,
@@ -72,17 +83,31 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   runner_options.block_size(block_size)
       .backend(backend)
       .num_decoding_tokens(num_decoding_tokens)
+      .enable_prefix_cache(enable_prefix_cache)
+      .enable_chunked_prefill(enable_chunked_prefill)
       .enable_prefill_sp(enable_prefill_sp)
-      .enable_schedule_overlap(false)
+      .enable_schedule_overlap(enable_schedule_overlap)
       .enable_offline_inference(true)
       .master_node_addr(master_node_addr)
       .enable_shm(enable_shm)
+      .enable_graph(enable_graph)
       .input_shm_size(input_shm_size)
       .output_shm_size(output_shm_size)
       .is_local(is_local)
       .task_type(task_type);
-  FLAGS_enable_schedule_overlap = false;
+  FLAGS_enable_prefix_cache = enable_prefix_cache;
+  FLAGS_enable_chunked_prefill = enable_chunked_prefill;
+  FLAGS_enable_schedule_overlap = enable_schedule_overlap;
   FLAGS_enable_prefill_sp = enable_prefill_sp;
+  FLAGS_enable_shm = enable_shm;
+  FLAGS_use_contiguous_input_buffer = use_contiguous_input_buffer;
+  FLAGS_enable_graph = enable_graph;
+  FLAGS_enable_graph_mode_decode_no_padding =
+      enable_graph_mode_decode_no_padding;
+  FLAGS_enable_prefill_piecewise_graph = enable_prefill_piecewise_graph;
+  FLAGS_enable_block_copy_kernel = enable_block_copy_kernel;
+  FLAGS_enable_beam_search_kernel = enable_beam_search_kernel;
+  FLAGS_enable_rec_fast_sampler = enable_rec_fast_sampler;
   FLAGS_master_node_addr = master_node_addr;
   FLAGS_block_size = block_size;
   FLAGS_communication_backend = communication_backend;

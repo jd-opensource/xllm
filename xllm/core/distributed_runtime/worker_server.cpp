@@ -214,8 +214,41 @@ void WorkerServer::create_spawn_server(int local_rank,
   const char* num_decoding_tokens_ptr = num_decoding_tokens_str.c_str();
   auto block_size_str = std::to_string(options.block_size());
   const char* block_size_ptr = block_size_str.c_str();
+  auto enable_prefix_cache_str = std::to_string(options.enable_prefix_cache());
+  const char* enable_prefix_cache_ptr = enable_prefix_cache_str.c_str();
+  auto enable_chunked_prefill_str =
+      std::to_string(options.enable_chunked_prefill());
+  const char* enable_chunked_prefill_ptr = enable_chunked_prefill_str.c_str();
+  auto enable_schedule_overlap_str =
+      std::to_string(options.enable_schedule_overlap());
+  const char* enable_schedule_overlap_ptr = enable_schedule_overlap_str.c_str();
   auto enable_shm_str = std::to_string(options.enable_shm());
   const char* enable_shm_ptr = enable_shm_str.c_str();
+  auto use_contiguous_input_buffer_str =
+      std::to_string(FLAGS_use_contiguous_input_buffer);
+  const char* use_contiguous_input_buffer_ptr =
+      use_contiguous_input_buffer_str.c_str();
+  auto enable_graph_str = std::to_string(options.enable_graph());
+  const char* enable_graph_ptr = enable_graph_str.c_str();
+  auto enable_graph_mode_decode_no_padding_str =
+      std::to_string(FLAGS_enable_graph_mode_decode_no_padding);
+  const char* enable_graph_mode_decode_no_padding_ptr =
+      enable_graph_mode_decode_no_padding_str.c_str();
+  auto enable_prefill_piecewise_graph_str =
+      std::to_string(FLAGS_enable_prefill_piecewise_graph);
+  const char* enable_prefill_piecewise_graph_ptr =
+      enable_prefill_piecewise_graph_str.c_str();
+  auto enable_block_copy_kernel_str =
+      std::to_string(FLAGS_enable_block_copy_kernel);
+  const char* enable_block_copy_kernel_ptr =
+      enable_block_copy_kernel_str.c_str();
+  auto enable_beam_search_kernel_str =
+      std::to_string(FLAGS_enable_beam_search_kernel);
+  const char* enable_beam_search_kernel_ptr =
+      enable_beam_search_kernel_str.c_str();
+  auto enable_rec_fast_sampler_str =
+      std::to_string(FLAGS_enable_rec_fast_sampler);
+  const char* enable_rec_fast_sampler_ptr = enable_rec_fast_sampler_str.c_str();
   auto input_shm_size_str = std::to_string(options.input_shm_size());
   const char* input_shm_size_ptr = input_shm_size_str.c_str();
   auto output_shm_size_str = std::to_string(options.output_shm_size());
@@ -237,7 +270,17 @@ void WorkerServer::create_spawn_server(int local_rank,
                         device_idx_ptr,
                         num_decoding_tokens_ptr,
                         block_size_ptr,
+                        enable_prefix_cache_ptr,
+                        enable_chunked_prefill_ptr,
+                        enable_schedule_overlap_ptr,
                         enable_shm_ptr,
+                        use_contiguous_input_buffer_ptr,
+                        enable_graph_ptr,
+                        enable_graph_mode_decode_no_padding_ptr,
+                        enable_prefill_piecewise_graph_ptr,
+                        enable_block_copy_kernel_ptr,
+                        enable_beam_search_kernel_ptr,
+                        enable_rec_fast_sampler_ptr,
                         is_local_ptr,
                         enable_prefill_sp_ptr,
                         options.task_type().c_str(),

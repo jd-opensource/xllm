@@ -80,47 +80,23 @@ void apply_onerec_pipeline_toggles(xllm::Options* options) {
   FLAGS_max_decode_rounds = 0;
 }
 
-}  // namespace
-
-XLLM_CAPI_EXPORT XLLM_REC_Handler* xllm_rec_create(void) {
-  XLLM_REC_Handler* handler = new XLLM_REC_Handler();
-  CHECK(nullptr != handler);
-
-  handler->initialized = false;
-  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
-
-  return handler;
-}
-
-XLLM_CAPI_EXPORT void xllm_rec_destroy(XLLM_REC_Handler* handler) {
-  if (!handler) return;
-
-  handler->master.reset();
-  handler->executor.reset();
-  handler->model_ids.clear();
-  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
-  handler->initialized = false;
-
-  delete handler;
-}
-
-XLLM_CAPI_EXPORT void xllm_rec_init_options_default(
-    XLLM_InitOptions* init_options) {
-  if (nullptr == init_options) return;
-  *init_options = XLLM_INIT_REC_OPTIONS_DEFAULT;
-}
-
-XLLM_CAPI_EXPORT bool xllm_rec_initialize(
-    XLLM_REC_Handler* handler,
-    const char* model_path,
-    const char* devices,
-    const XLLM_InitOptions* init_options) {
-  if (!handler || !model_path || !devices) return false;
+bool initialize_rec(XLLM_REC_Handler* handler,
+                    const char* model_path,
+                    const char* devices,
+                    const XLLM_InitOptions* init_options,
+                    const XLLM_StartupFlags* startup_flags) {
+  if (!handler || !model_path || !devices) {
+    return false;
+  }
 
   try {
     XLLM_InitOptions xllm_init_options;
     xllm::helper::set_init_options(
         xllm::helper::BackendType::REC, init_options, &xllm_init_options);
+
+    XLLM_StartupFlags xllm_startup_flags;
+    xllm::helper::set_startup_flags(
+        xllm::helper::BackendType::REC, startup_flags, &xllm_startup_flags);
 
     std::string log_dir(xllm_init_options.log_dir);
     if (!log_dir.empty()) {
@@ -131,6 +107,8 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
       LOG(ERROR) << "model path[" << model_path << "] does not exist";
       return false;
     }
+
+    xllm::helper::apply_startup_flags(xllm_init_options, xllm_startup_flags);
 
     xllm::Options options;
     options.model_path(model_path)
@@ -165,6 +143,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         .enable_schedule_overlap(xllm_init_options.enable_schedule_overlap)
         .enable_pd_ooc(xllm_init_options.enable_pd_ooc)
         .kv_cache_transfer_mode(xllm_init_options.kv_cache_transfer_mode)
+        .enable_graph(xllm_startup_flags.enable_graph)
         .enable_shm(xllm_init_options.enable_shm)
         .is_local(true)
         .server_idx(xllm_init_options.server_idx);
@@ -185,9 +164,6 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     FLAGS_max_seqs_per_batch = xllm_init_options.max_seqs_per_batch;
     FLAGS_max_tokens_per_batch = xllm_init_options.max_tokens_per_batch;
     FLAGS_block_size = xllm_init_options.block_size;
-    FLAGS_enable_prefix_cache = xllm_init_options.enable_prefix_cache;
-    FLAGS_enable_schedule_overlap = xllm_init_options.enable_schedule_overlap;
-    FLAGS_enable_chunked_prefill = xllm_init_options.enable_chunked_prefill;
 
     auto model_loader = xllm::ModelLoader::create(model_path);
     if (model_loader == nullptr) {
@@ -204,10 +180,8 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     const xllm::RecPipelineType pipeline_type =
         xllm::get_rec_pipeline_type(rec_model_kind);
 
-    // Hard-coded REC so settings. enable_graph and rec_worker_max_concurrency
-    // are dual-source: runtime may read FLAGS_* while setup also needs the same
-    // value in Options.
-    FLAGS_enable_graph = true;
+    // Keep remaining REC-only defaults centralized here until they are exposed
+    // through init options.
     FLAGS_rec_worker_max_concurrency = 2;
 
     // Pipeline-specific runtime toggles in the REC so path.
@@ -228,6 +202,12 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         return false;
     }
 
+    FLAGS_enable_rec_fast_sampler = xllm_startup_flags.enable_rec_fast_sampler;
+    FLAGS_enable_prefill_piecewise_graph =
+        xllm_startup_flags.enable_prefill_piecewise_graph;
+    FLAGS_enable_graph_mode_decode_no_padding =
+        xllm_startup_flags.enable_graph_mode_decode_no_padding;
+
     // Keep dual-source settings aligned with the FLAGS_* values above.
     options.enable_graph(FLAGS_enable_graph)
         .beam_width(FLAGS_beam_width)
@@ -244,10 +224,6 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
               << ", enable_chunked_prefill=" << FLAGS_enable_chunked_prefill
               << ", enable_rec_fast_sampler=" << FLAGS_enable_rec_fast_sampler
               << ", max_decode_rounds=" << FLAGS_max_decode_rounds;
-
-#if !defined(USE_NPU) && !defined(USE_CUDA)
-    FLAGS_enable_block_copy_kernel = false;
-#endif
 
     handler->master = std::make_unique<xllm::RecMaster>(options);
     handler->master->run();
@@ -287,6 +263,62 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
   handler->initialized = false;
 
   return false;
+}
+
+}  // namespace
+
+XLLM_CAPI_EXPORT XLLM_REC_Handler* xllm_rec_create(void) {
+  XLLM_REC_Handler* handler = new XLLM_REC_Handler();
+  CHECK(nullptr != handler);
+
+  handler->initialized = false;
+  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
+
+  return handler;
+}
+
+XLLM_CAPI_EXPORT void xllm_rec_destroy(XLLM_REC_Handler* handler) {
+  if (!handler) return;
+
+  handler->master.reset();
+  handler->executor.reset();
+  handler->model_ids.clear();
+  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
+  handler->initialized = false;
+
+  delete handler;
+}
+
+XLLM_CAPI_EXPORT void xllm_rec_init_options_default(
+    XLLM_InitOptions* init_options) {
+  if (nullptr == init_options) return;
+  *init_options = XLLM_INIT_REC_OPTIONS_DEFAULT;
+}
+
+XLLM_CAPI_EXPORT void xllm_rec_startup_flags_default(
+    XLLM_StartupFlags* startup_flags) {
+  if (nullptr == startup_flags) {
+    return;
+  }
+  *startup_flags = XLLM_REC_STARTUP_FLAGS_DEFAULT;
+}
+
+XLLM_CAPI_EXPORT bool xllm_rec_initialize(
+    XLLM_REC_Handler* handler,
+    const char* model_path,
+    const char* devices,
+    const XLLM_InitOptions* init_options) {
+  return initialize_rec(handler, model_path, devices, init_options, nullptr);
+}
+
+XLLM_CAPI_EXPORT bool xllm_rec_initialize_ex(
+    XLLM_REC_Handler* handler,
+    const char* model_path,
+    const char* devices,
+    const XLLM_InitOptions* init_options,
+    const XLLM_StartupFlags* startup_flags) {
+  return initialize_rec(
+      handler, model_path, devices, init_options, startup_flags);
 }
 
 XLLM_CAPI_EXPORT void xllm_rec_request_params_default(

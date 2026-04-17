@@ -6,7 +6,7 @@ from . import util
 from typing import Any, List, Optional, Union
 
 from xllm_export import (LLMMaster, Options, RequestOutput,
-                         RequestParams)
+                         RequestParams, configure_runtime_flags)
 from .errors import ValidationError
 
 class Embedding:
@@ -36,6 +36,14 @@ class Embedding:
         is_local: bool = True,
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
+        enable_schedule_overlap: bool = False,
+        enable_beam_search_kernel: bool = False,
+        enable_rec_fast_sampler: bool = False,
+        use_contiguous_input_buffer: bool = False,
+        enable_graph: bool = False,
+        enable_graph_mode_decode_no_padding: bool = False,
+        enable_prefill_piecewise_graph: bool = False,
+        enable_block_copy_kernel: bool = False,
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -43,6 +51,22 @@ class Embedding:
 
         if not os.path.exists(model):
             raise ValueError(f"model {model} not exists")
+
+        resolved_enable_prefix_cache = not disable_prefix_cache
+        resolved_enable_chunked_prefill = not disable_chunked_prefill
+        configure_runtime_flags(
+            enable_prefix_cache=resolved_enable_prefix_cache,
+            enable_chunked_prefill=resolved_enable_chunked_prefill,
+            enable_schedule_overlap=enable_schedule_overlap,
+            enable_beam_search_kernel=enable_beam_search_kernel,
+            enable_rec_fast_sampler=enable_rec_fast_sampler,
+            enable_shm=enable_shm,
+            use_contiguous_input_buffer=use_contiguous_input_buffer,
+            enable_graph=enable_graph,
+            enable_graph_mode_decode_no_padding=enable_graph_mode_decode_no_padding,
+            enable_prefill_piecewise_graph=enable_prefill_piecewise_graph,
+            enable_block_copy_kernel=enable_block_copy_kernel,
+        )
 
         options = Options()
         options.model_path = model
@@ -54,10 +78,7 @@ class Embedding:
         options.block_size = block_size
         options.max_cache_size = max_cache_size
         options.max_memory_utilization = max_memory_utilization
-        if disable_prefix_cache:
-            options.enable_prefix_cache = False
-        else:
-            options.enable_prefix_cache = True
+        options.enable_prefix_cache = resolved_enable_prefix_cache
         options.max_tokens_per_batch = max_tokens_per_batch
         options.max_seqs_per_batch = max_seqs_per_batch
         options.max_tokens_per_chunk_for_prefill = max_tokens_per_chunk_for_prefill
@@ -65,10 +86,7 @@ class Embedding:
         options.communication_backend = communication_backend
         options.rank_tablefile = rank_tablefile
         options.expert_parallel_degree = expert_parallel_degree
-        if disable_chunked_prefill:
-            options.enable_chunked_prefill = False
-        else:
-            options.enable_chunked_prefill = True
+        options.enable_chunked_prefill = resolved_enable_chunked_prefill
         options.enable_prefill_sp = enable_prefill_sp
         free_port = util.get_free_port()
         options.master_node_addr = "127.0.0.1:" + str(free_port)
@@ -77,13 +95,14 @@ class Embedding:
         options.dp_size = dp_size
         options.ep_size = ep_size
         options.enable_disagg_pd = False
-        options.enable_schedule_overlap = False
+        options.enable_schedule_overlap = enable_schedule_overlap
         options.enable_offline_inference = True
         options.spawn_worker_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
         options.enable_shm = enable_shm
         options.is_local = is_local
         options.input_shm_size = input_shm_size
         options.output_shm_size = output_shm_size
+        options.enable_graph = enable_graph
         self.master = LLMMaster(options)
 
     def finish(self) -> None:

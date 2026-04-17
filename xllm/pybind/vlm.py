@@ -4,7 +4,7 @@ import sys
 from . import util
 from typing import List, Optional, Union, Dict, Any
 from xllm_export import (VLMMaster, Options, RequestOutput,
-                         RequestParams, MMData)
+                         RequestParams, MMData, configure_runtime_flags)
 from .errors import ValidationError
 from .params import (
     SamplingParams,
@@ -49,6 +49,13 @@ class VLM:
         is_local: bool = True,
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
+        enable_beam_search_kernel: bool = False,
+        enable_rec_fast_sampler: bool = False,
+        use_contiguous_input_buffer: bool = False,
+        enable_graph: bool = False,
+        enable_graph_mode_decode_no_padding: bool = False,
+        enable_prefill_piecewise_graph: bool = False,
+        enable_block_copy_kernel: bool = False,
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -57,6 +64,22 @@ class VLM:
         if not os.path.exists(model):
             raise ValueError(f"model {model} not exists")
         self.model = model
+
+        resolved_enable_prefix_cache = not disable_prefix_cache
+        resolved_enable_chunked_prefill = not disable_chunked_prefill
+        configure_runtime_flags(
+            enable_prefix_cache=resolved_enable_prefix_cache,
+            enable_chunked_prefill=resolved_enable_chunked_prefill,
+            enable_schedule_overlap=enable_schedule_overlap,
+            enable_beam_search_kernel=enable_beam_search_kernel,
+            enable_rec_fast_sampler=enable_rec_fast_sampler,
+            enable_shm=enable_shm,
+            use_contiguous_input_buffer=use_contiguous_input_buffer,
+            enable_graph=enable_graph,
+            enable_graph_mode_decode_no_padding=enable_graph_mode_decode_no_padding,
+            enable_prefill_piecewise_graph=enable_prefill_piecewise_graph,
+            enable_block_copy_kernel=enable_block_copy_kernel,
+        )
 
         options = Options()
         options.model_path = model
@@ -68,10 +91,7 @@ class VLM:
         options.block_size = block_size
         options.max_cache_size = max_cache_size
         options.max_memory_utilization = max_memory_utilization
-        if disable_prefix_cache:
-            options.enable_prefix_cache = False
-        else:
-            options.enable_prefix_cache = True
+        options.enable_prefix_cache = resolved_enable_prefix_cache
         options.max_tokens_per_batch = max_tokens_per_batch
         options.max_seqs_per_batch = max_seqs_per_batch
         options.max_tokens_per_chunk_for_prefill = max_tokens_per_chunk_for_prefill
@@ -80,10 +100,7 @@ class VLM:
         options.communication_backend = communication_backend
         options.rank_tablefile = rank_tablefile
         options.expert_parallel_degree = expert_parallel_degree
-        if disable_chunked_prefill:
-            options.enable_chunked_prefill = False
-        else:
-            options.enable_chunked_prefill = True
+        options.enable_chunked_prefill = resolved_enable_chunked_prefill
         options.enable_prefill_sp = enable_prefill_sp
         free_port = util.get_free_port()
         options.master_node_addr = "127.0.0.1:" + str(free_port)
@@ -95,7 +112,7 @@ class VLM:
         options.ep_size = ep_size
         options.instance_name = instance_name
         options.enable_disagg_pd = enable_disagg_pd
-        options.enable_schedule_overlap = False
+        options.enable_schedule_overlap = enable_schedule_overlap
         options.kv_cache_transfer_mode = kv_cache_transfer_mode
         options.enable_offline_inference = True
         options.spawn_worker_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -103,6 +120,7 @@ class VLM:
         options.is_local = is_local
         options.input_shm_size = input_shm_size
         options.output_shm_size = output_shm_size
+        options.enable_graph = enable_graph
         self.master = VLMMaster(options)
 
     def finish(self) -> None:
