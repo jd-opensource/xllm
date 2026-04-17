@@ -35,6 +35,7 @@ limitations under the License.
 #include "request_output.h"
 #include "rerank.pb.h"
 #include "sample_slot.h"
+#include "speech.pb.h"
 
 namespace xllm {
 
@@ -59,6 +60,9 @@ struct RequestParams {
                 const std::string& x_rid,
                 const std::string& x_rtime);
   RequestParams(const proto::AnthropicMessagesRequest& request,
+                const std::string& x_rid,
+                const std::string& x_rtime);
+  RequestParams(const proto::SpeechRequest& request,
                 const std::string& x_rid,
                 const std::string& x_rtime);
 
@@ -165,6 +169,8 @@ struct RequestParams {
   bool add_special_tokens = false;
 
   nlohmann::json chat_template_kwargs = nlohmann::json::object();
+
+  std::optional<proto::SpeechRequest> speech_request;
 
   bool is_sample_request = false;
 

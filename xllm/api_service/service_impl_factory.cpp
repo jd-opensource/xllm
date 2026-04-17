@@ -82,6 +82,8 @@ void ServiceImplFactory::create(
              std::make_unique<MMChatServiceImpl>(vlm_master, models);
          self->mm_embedding_service_impl_ =
              std::make_unique<MMEmbeddingServiceImpl>(vlm_master, models);
+         self->speech_service_impl_ =
+             create_service_impl<SpeechServiceImpl>(vlm_master, models);
        }},
       {static_cast<int8_t>(ServingMode::DIT),
        [](APIService* self,
@@ -122,3 +124,4 @@ void ServiceImplFactory::create(
 }
 
 }  // namespace xllm
+

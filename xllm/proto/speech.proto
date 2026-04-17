@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+option go_package = "jd.com/jd-infer/xllm;xllm";
+package xllm.proto;
+
+message SpeechRequest {
+  optional string model = 1;
+  string input = 2;
+  optional string voice = 3;
+  optional string instructions = 4;
+  optional string response_format = 5;
+  optional double speed = 6;
+  optional string stream_format = 7;
+  optional bool stream = 8;
+  optional string task_type = 9;
+  optional string language = 10;
+  optional string ref_audio = 11;
+  optional string ref_text = 12;
+  optional bool x_vector_only_mode = 13;
+  repeated float speaker_embedding = 14;
+  optional int32 max_new_tokens = 15;
+  optional int32 initial_codec_chunk_frames = 16;
+}
+
+message SpeechResponse {
+  bytes audio = 1;
+  string media_type = 2;
+}
+
