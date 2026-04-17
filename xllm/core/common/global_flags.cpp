@@ -607,8 +607,48 @@ DEFINE_string(dit_cache_policy,
               "The policy of dit cache(e.g. None, FBCache, TaylorSeer, "
               "FBCacheTaylorSeer, ResidualCache).");
 
-DEFINE_int64(dit_cache_warmup_steps, 0, "The number of warmup steps.");
+DEFINE_int64(dit_cache_warmup_steps, 5, "The number of warmup steps.");
+DEFINE_int64(
+    dit_cache_probe_depth,
+    2,
+    "Number of DiT blocks to run before RACFGCache makes a joint decision.");
 
+DEFINE_double(dit_cache_tau,
+              0.28,
+              "Accumulated guided-risk threshold for RACFGCache.");
+
+DEFINE_bool(dit_cache_use_prop_weight,
+            true,
+            "Whether RACFGCache uses propagation-aware reweighting.");
+
+DEFINE_double(dit_cache_prop_a,
+              1.7997948016,
+              "Propagation-aware fitted parameter a for RACFGCache.");
+
+DEFINE_double(dit_cache_prop_alpha,
+              1.1729645804,
+              "Propagation-aware fitted parameter alpha for RACFGCache.");
+
+DEFINE_double(dit_cache_prop_b,
+              -0.1016712615,
+              "Propagation-aware fitted parameter b for RACFGCache.");
+
+DEFINE_int64(dit_cache_proxy_error_type,
+             0,
+             "Proxy error type for RACFGCache: 0=delta_y, 1=delta_minus.");
+
+DEFINE_string(dit_cache_rho_table_path,
+              "qwen_image_edit_cfg4_steps40",
+              "Path to the offline rho lookup table used by RACFGCache.");
+
+DEFINE_string(
+    dit_cache_model_name,
+    "qwen_image_edit_plus",
+    "Model name for selecting hardcoded rho table when using RACFGCache.");
+
+DEFINE_double(true_cfg_scale,
+              4.0,
+              "Optional CFG scale recorded with the rho table for RACFGCache.");
 DEFINE_int64(dit_cache_n_derivatives,
              3,
              "The number of derivatives to use in TaylorSeer.");

@@ -271,9 +271,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     auto seed = generation_params.seed >= 0 ? generation_params.seed : 42;
 
     auto prompts = input.prompts;
-    auto prompts_2 = input.prompts_2;
     auto negative_prompts = input.negative_prompts;
-    auto negative_prompts_2 = input.negative_prompts_2;
     auto latents = input.latents;
     if (latents.defined()) {
       latents = latents.to(options_.device(), dtype_);
@@ -283,7 +281,6 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     if (prompt_embeds.defined()) {
       prompt_embeds = prompt_embeds.to(options_.device(), dtype_);
     }
-    auto pooled_prompt_embeds = input.pooled_prompt_embeds;
     torch::Tensor prompt_embeds_mask;
 
     auto negative_prompt_embeds = input.negative_prompt_embeds;
@@ -291,7 +288,6 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
       negative_prompt_embeds =
           negative_prompt_embeds.to(options_.device(), dtype_);
     }
-    auto negative_pooled_prompt_embeds = input.negative_pooled_prompt_embeds;
     torch::Tensor negative_prompt_embeds_mask;
 
     std::vector<torch::Tensor> image_list;
@@ -385,9 +381,37 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
       }
     }
 
-    bool has_neg_prompt = negative_prompts.size() > 0;
+    bool has_neg_prompt =
+        negative_prompts.size() > 0 || negative_prompt_embeds.defined();
 
     bool do_true_cfg = (true_cfg_scale > 1.0) && has_neg_prompt;
+    DiTCacheRuntimeContext ctx;
+    // cfg parallel
+    ctx.cfg_group = static_cast<void*>(parallel_args_.dit_cfg_group_);
+    ctx.cfg_rank = parallel_args_.dit_cfg_group_
+                       ? parallel_args_.dit_cfg_group_->rank()
+                       : 0;
+    ctx.cfg_world_size = parallel_args_.dit_cfg_group_
+                             ? parallel_args_.dit_cfg_group_->world_size()
+                             : 1;
+    LOG(INFO) << "CHECk cfg enabled: FLAGS_cfg_size=" << FLAGS_cfg_size
+              << ", true_cfg_scale=" << true_cfg_scale
+              << ", cfg_group=" << parallel_args_.dit_cfg_group_;
+    ctx.cfg_enabled = (FLAGS_cfg_size == 2 && do_true_cfg &&
+                       parallel_args_.dit_cfg_group_ != nullptr);
+    // sequence parallel
+    ctx.sp_group = static_cast<void*>(parallel_args_.dit_sp_group_);
+    ctx.sp_rank =
+        parallel_args_.dit_sp_group_ ? parallel_args_.dit_sp_group_->rank() : 0;
+    ctx.sp_world_size = parallel_args_.dit_sp_group_
+                            ? parallel_args_.dit_sp_group_->world_size()
+                            : 1;
+    ctx.sp_enabled =
+        (FLAGS_sp_size > 1 && parallel_args_.dit_sp_group_ != nullptr);
+    ctx.true_cfg_scale = generation_params.true_cfg_scale;
+    ctx.infer_steps = num_inference_steps;
+    ctx.num_blocks = num_layers_;
+    DiTCache::get_instance().set_runtime_context(ctx);
     // inplace update prompt_embeds and prompt_embeds_mask
     _encode_prompt(condition_images,
                    prompts,
