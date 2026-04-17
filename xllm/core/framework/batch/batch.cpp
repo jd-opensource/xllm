@@ -567,10 +567,11 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
     return;
   }
 
-  const int32_t beam_width = sequences[0]->sampling_param()->beam_width;
+  int32_t beam_width = sequences[0]->sampling_param()->beam_width;
   if (beam_width <= 1) {
     return;
   }
+  beam_width = (FLAGS_beam_top > beam_width) ? FLAGS_beam_top : beam_width;
   int32_t total_rounds = get_rec_multi_round_decode_rounds();
   size_t num_groups = sequence_groups_.size();
   if (num_groups == 0) {
