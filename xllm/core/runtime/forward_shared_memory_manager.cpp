@@ -2263,7 +2263,9 @@ inline void deserialize_forward_input_payload(
     input_params.multi_block_tables.emplace_back(manager_table.clone());
   }
 
-  read_dit_forward_input(context, input_params.dit_forward_input);
+  if (FLAGS_backend == "dit") {
+    read_dit_forward_input(context, input_params.dit_forward_input);
+  }
 
   finalize_device_buffer_session(device_session, stream);
   forward_input.input_host_buffer_has_layout = true;
@@ -2342,7 +2344,9 @@ size_t calculate_raw_forward_output_size(const RawForwardOutput& output) {
   // mm_embedding_data
   size += get_vector_tensor_size(output.mm_embeddings);
   // dit output data
-  size += get_vector_tensor_size(output.dit_forward_output.tensors);
+  if (FLAGS_backend == "dit") {
+    size += get_vector_tensor_size(output.dit_forward_output.tensors);
+  }
 
   return size;
 }
@@ -2408,8 +2412,11 @@ void deserialize_raw_forward_output(const char* buffer,
   read_data(buffer, output.prepared_layer_id);
 
   read_vector_tensor(buffer, output.mm_embeddings);
+
   // read dit output
-  read_vector_tensor(buffer, output.dit_forward_output.tensors);
+  if (FLAGS_backend == "dit") {
+    read_vector_tensor(buffer, output.dit_forward_output.tensors);
+  }
 }
 
 void serialize_raw_forward_output(const RawForwardOutput& output,
@@ -2425,7 +2432,9 @@ void serialize_raw_forward_output(const RawForwardOutput& output,
 
   write_vector_tensor(buffer, output.mm_embeddings);
   // write dit output
-  write_vector_tensor(buffer, output.dit_forward_output.tensors);
+  if (FLAGS_backend == "dit") {
+    write_vector_tensor(buffer, output.dit_forward_output.tensors);
+  }
 }
 
 template <typename T>
@@ -2578,7 +2587,9 @@ inline void serialize_forward_input_sections(
     write_tensor(context, manager_table);
   }
 
-  write_dit_forward_input(context, input_params.dit_forward_input);
+  if (FLAGS_backend == "dit") { 
+    write_dit_forward_input(context, input_params.dit_forward_input);
+  }
 }
 
 inline RawInputLayoutHeader calculate_forward_input_layout(
