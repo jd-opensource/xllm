@@ -1,6 +1,6 @@
 name: xLLM Build x86_64 ILU
 
-on: 
+on:
   workflow_dispatch:
   push:
     branches: [main]
@@ -14,109 +14,227 @@ on:
       - '*.md'
       - '*.txt'
       - '*.yml'
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened]
-    paths-ignore:
-      - 'cmake/**'
-      - 'docs/**'
-      - 'third_party/**'
-      - 'tools/**'
-      - '*.md'
-      - '*.txt'
-      - '*.yml'
-  pull_request_review:
-    types: [submitted]
-    paths:
-      - '.github/**.yaml'
-      - 'cibuild/**.sh'
-      - 'setup.py'
-      - 'examples/generate.py'
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+  checks: write
 
 env:
   JOBNAME: xllm-x86_64-ilu-cibuild-${{ github.run_id }}
+  BACKEND: ilu
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+  group: >-
+    ${{ github.workflow }}-${{
+      github.event_name == 'issue_comment'
+        && format('pr-{0}', github.event.issue.number)
+        || github.ref
+    }}
+  cancel-in-progress: true
 
 jobs:
-  # need to review code first when sensitive files are modified.
-  check-sensitive:
+  trigger-check:
     runs-on: [self-hosted]
+    if: >
+      github.event_name != 'issue_comment' ||
+      github.event.issue.pull_request
     outputs:
-      requires_approval: ${{ steps.check_sensitive.outputs.requires_approval }}
-      do_build: ${{ steps.decide.outputs.do_build }}
+      sha: ${{ steps.pr-info.outputs.sha || github.sha }}
+      should_run: ${{ steps.parse-command.outputs.should_run || 'true' }}
+      check_run_id: ${{ steps.create-check-run.outputs.check_run_id }}
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Ensure we can compare commits
-
-      - name: Install jq
-        run: yum install -y jq
-
-      - name: Check if sensitive files were changed
-        id: check_sensitive
+      - name: Parse comment command
+        id: parse-command
+        if: github.event_name == 'issue_comment'
         run: |
-          sensitive_files=(
-            ".github/**.yaml"
-            "cibuild/**.sh"
-            "setup.py"
-          )
-          changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})
-          requires_approval="false"
-          while IFS= read -r changed_file; do
-            [[ -z "$changed_file" ]] && continue
-            for pattern in "${sensitive_files[@]}"; do
-              if [[ "$changed_file" == $pattern ]]; then
-                requires_approval="true"
-                break 2
-              fi
-          done
-          done < <(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}")
-          echo "requires_approval=$requires_approval" >> $GITHUB_OUTPUT
-
-      - name: Decide whether to check build
-        id: decide
-        run: |
-          event="${{ github.event_name }}"
-          if [[ "$event" == "workflow_dispatch" || "$event" == "push" ]]; then
-            echo "do_build=true" >> $GITHUB_OUTPUT
-          elif [[ "$event" == "pull_request" ]]; then
-            if  [ "${{ steps.check_sensitive.outputs.requires_approval }}" == "true" ]; then
-              echo "do_build=false" >> $GITHUB_OUTPUT
-            else
-              echo "do_build=true" >> $GITHUB_OUTPUT
+          BODY=$(printf '%s\n' "${{ github.event.comment.body }}" | tr -d '\r')
+          SHOULD_RUN=false
+          REQUESTED_BACKEND=""
+          if printf '%s\n' "$BODY" | grep -Eq '^[[:space:]]*/run ci([[:space:]]+[[:alnum:]_-]+)?[[:space:]]*$'; then
+            REQUESTED_BACKEND=$(printf '%s\n' "$BODY" | sed -nE 's#^[[:space:]]*/run ci([[:space:]]+([[:alnum:]_-]+))?[[:space:]]*$#\2#p' | head -n 1)
+            if [[ -z "$REQUESTED_BACKEND" || "$REQUESTED_BACKEND" == "$BACKEND" ]]; then
+              SHOULD_RUN=true
             fi
-          elif [[ "$event" == "pull_request_review" ]]; then
-            # Since pull_request_review now only triggers when sensitive files are modified,
-            # we only need to check if the review is approved
-            if [[ "${{ github.event.review.state }}" == "approved" ]]; then
-              echo "do_build=true" >> $GITHUB_OUTPUT
-            else
-              echo "do_build=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "do_build=false" >> $GITHUB_OUTPUT
           fi
 
+          FEEDBACK_OWNER=false
+          if [[ -z "$REQUESTED_BACKEND" && "$BACKEND" == "npu" ]]; then
+            FEEDBACK_OWNER=true
+          elif [[ "$REQUESTED_BACKEND" == "$BACKEND" ]]; then
+            FEEDBACK_OWNER=true
+          fi
+
+          echo "should_run=$SHOULD_RUN" >> $GITHUB_OUTPUT
+          echo "requested_backend=$REQUESTED_BACKEND" >> $GITHUB_OUTPUT
+          echo "feedback_owner=$FEEDBACK_OWNER" >> $GITHUB_OUTPUT
+
+      - name: Install jq
+        if: github.event_name == 'issue_comment' && steps.parse-command.outputs.should_run == 'true'
+        run: yum install -y jq
+
+      - name: Check commenter permission
+        id: check-permission
+        if: github.event_name == 'issue_comment' && steps.parse-command.outputs.should_run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PERMISSION=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/collaborators/${{ github.event.comment.user.login }}/permission" \
+            | jq -r '.permission // empty')
+          ALLOWED=false
+          if [[ "$PERMISSION" == "admin" || "$PERMISSION" == "write" ]]; then
+            ALLOWED=true
+          fi
+          echo "permission=$PERMISSION" >> $GITHUB_OUTPUT
+          echo "allowed=$ALLOWED" >> $GITHUB_OUTPUT
+
+      - name: Reply permission denied
+        if: >
+          github.event_name == 'issue_comment' &&
+          steps.parse-command.outputs.should_run == 'true' &&
+          steps.check-permission.outputs.allowed != 'true' &&
+          steps.parse-command.outputs.feedback_owner == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          COMMAND="/run ci"
+          if [[ -n "${{ steps.parse-command.outputs.requested_backend }}" ]]; then
+            COMMAND="$COMMAND ${{ steps.parse-command.outputs.requested_backend }}"
+          fi
+          PERMISSION="${{ steps.check-permission.outputs.permission }}"
+          if [[ -z "$PERMISSION" ]]; then
+            PERMISSION="none"
+          fi
+          PAYLOAD=$(jq -n \
+            --arg body "@${{ github.event.comment.user.login }} cannot trigger \`$COMMAND\` because this action requires \`write\` or \`admin\` permission. Current permission: \`$PERMISSION\`." \
+            '{body:$body}')
+          curl -s -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "${{ github.event.issue.comments_url }}" \
+            -d "$PAYLOAD"
+
+      - name: Fail on permission denied
+        if: github.event_name == 'issue_comment' && steps.parse-command.outputs.should_run == 'true' && steps.check-permission.outputs.allowed != 'true'
+        run: |
+          echo "::error::User ${{ github.event.comment.user.login }} does not have write permission"
+          exit 1
+
+      - name: Get PR head SHA
+        id: pr-info
+        if: github.event_name == 'issue_comment' && steps.parse-command.outputs.should_run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_URL="${{ github.event.issue.pull_request.url }}"
+          SHA=$(curl -s -H "Authorization: Bearer $GH_TOKEN" "$PR_URL" | jq -r '.head.sha')
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Create PR check run
+        id: create-check-run
+        if: github.event_name == 'issue_comment' && steps.parse-command.outputs.should_run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DETAILS_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PAYLOAD=$(jq -n \
+            --arg name "xLLM Build x86_64 ILU (/run ci)" \
+            --arg head_sha "${{ steps.pr-info.outputs.sha }}" \
+            --arg details_url "$DETAILS_URL" \
+            '{name:$name, head_sha:$head_sha, status:"in_progress", details_url:$details_url}')
+          RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/check-runs" \
+            -d "$PAYLOAD")
+          CHECK_RUN_ID=$(echo "$RESPONSE" | jq -r '.id')
+          if [[ -z "$CHECK_RUN_ID" || "$CHECK_RUN_ID" == "null" ]]; then
+            echo "::error::Failed to create PR check run"
+            echo "$RESPONSE"
+            exit 1
+          fi
+          echo "check_run_id=$CHECK_RUN_ID" >> $GITHUB_OUTPUT
+
+      - name: Add rocket reaction
+        if: github.event_name == 'issue_comment' && steps.parse-command.outputs.should_run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          curl -s -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "${{ github.event.comment.url }}/reactions" \
+            -d '{"content":"rocket"}'
+
   build:
-    needs: check-sensitive
-    if: >
-      (github.event_name == 'workflow_dispatch' || github.event_name == 'push') ||
-      needs.check-sensitive.outputs.do_build == 'true'
+    needs: trigger-check
+    if: ${{ github.event_name != 'issue_comment' || needs.trigger-check.outputs.should_run == 'true' }}
     runs-on: [self-hosted]
     steps:
-    - name: Checkout Code
-      timeout-minutes: 5
-      uses: actions/checkout@v4
-      with:
-        submodules: true
+      - name: Checkout Code
+        timeout-minutes: 5
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          ref: ${{ needs.trigger-check.outputs.sha }}
 
-    - name: Build
-      if: ${{ success() }}
-      timeout-minutes: 60
-      run: |
-        chmod +x ./cibuild/build_ilu.sh
-        bash cibuild/build_ilu.sh 'pip3 install pre-commit -i https://pypi.tuna.tsinghua.edu.cn/simple && python setup.py build --device ilu'
+      - name: Build
+        if: ${{ success() }}
+        timeout-minutes: 60
+        run: |
+          chmod +x ./cibuild/build_ilu.sh
+          bash cibuild/build_ilu.sh 'pip3 install pre-commit -i https://pypi.tuna.tsinghua.edu.cn/simple && python setup.py build --device ilu'
+
+  report-check:
+    if: ${{ always() && github.event_name == 'issue_comment' && needs.trigger-check.outputs.check_run_id != '' }}
+    needs: [trigger-check, build]
+    runs-on: [self-hosted]
+    steps:
+      - name: Complete PR check run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_RUN_ID: ${{ needs.trigger-check.outputs.check_run_id }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          case "$BUILD_RESULT" in
+            success)
+              CONCLUSION="success"
+              TITLE="Build succeeded"
+              SUMMARY="Comment-triggered build completed successfully."
+              ;;
+            failure)
+              CONCLUSION="failure"
+              TITLE="Build failed"
+              SUMMARY="Comment-triggered build failed. Open this check for logs."
+              ;;
+            cancelled)
+              CONCLUSION="cancelled"
+              TITLE="Build cancelled"
+              SUMMARY="Comment-triggered build was cancelled."
+              ;;
+            skipped)
+              CONCLUSION="neutral"
+              TITLE="Build skipped"
+              SUMMARY="Comment-triggered build did not run."
+              ;;
+            *)
+              CONCLUSION="neutral"
+              TITLE="Build finished"
+              SUMMARY="Comment-triggered build finished with result: $BUILD_RESULT."
+              ;;
+          esac
+
+          DETAILS_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          PAYLOAD=$(cat <<EOF_JSON
+          {"status":"completed","conclusion":"$CONCLUSION","details_url":"$DETAILS_URL","output":{"title":"$TITLE","summary":"$SUMMARY"}}
+          EOF_JSON
+          )
+          curl -s -X PATCH \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "${{ github.api_url }}/repos/${{ github.repository }}/check-runs/$CHECK_RUN_ID" \
+            -d "$PAYLOAD"
