@@ -921,19 +921,19 @@ torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params) {
     CHECK(params.conv_state_indices.value().is_contiguous())
         << "causal_conv1d_update: conv_state_indices must be contiguous.";
   }
-  return npu::npu_causal_conv1d_update(params.x,
-                                       params.conv_state,
-                                       params.weight,
-                                       params.activation,
-                                       params.bias,
-                                       params.cache_seqlens,
-                                       params.conv_state_indices,
-                                       params.num_accepted_tokens,
-                                       params.query_start_loc,
-                                       params.max_query_len,
-                                       params.intermediate_conv_window,
-                                       params.pad_slot_id,
-                                       params.validate_data);
+  return npu::npu_causal_conv1d_update_v2(params.x,
+                                          params.conv_state,
+                                          params.weight,
+                                          params.activation,
+                                          params.bias,
+                                          params.conv_state_indices,
+                                          params.query_start_loc,
+                                          params.max_query_len,
+                                          params.pad_slot_id,
+                                          params.block_idx_last_scheduled_token,
+                                          params.initial_state_idx,
+                                          params.validate_data);
+
 #else
   NOT_IMPLEMENTED();
 #endif
