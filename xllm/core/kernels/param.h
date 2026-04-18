@@ -1398,4 +1398,17 @@ struct GemmaRMSNormParams {
   torch::Tensor rstd_out;
   torch::Tensor norm_out;
 };
+
+struct SplitQkvRmsnormMropeParams {
+  torch::Tensor qkvg;
+  torch::Tensor q_weight;
+  torch::Tensor k_weight;
+  torch::Tensor cos_sin;
+  torch::Tensor gather_pattern;
+  float eps;
+  int64_t num_q_heads;
+  int64_t num_kv_heads;
+  int64_t head_size;
+};
+
 }  // namespace xllm::kernel

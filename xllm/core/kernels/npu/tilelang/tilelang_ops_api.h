@@ -17,7 +17,9 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <tuple>
 #include <utility>
+#include <vector>
 
 namespace xllm::kernel::npu::tilelang {
 
@@ -39,5 +41,31 @@ std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
     const torch::Tensor& dt_bias,
     float softplus_beta,
     float softplus_threshold);
+
+// Build merged mRoPE gather offsets for split_qkv_rmsnorm_mrope.
+torch::Tensor build_split_qkv_rmsnorm_mrope_gather_pattern(
+    int64_t rope_dim,
+    const std::vector<int64_t>& mrope_section,
+    bool is_interleaved,
+    const torch::Device& device);
+
+// Split fused [Q|K|V|G], apply q/k RMSNorm + mRoPE, and return
+// (q, k, v, gate) on NPU.
+//
+// qkvg: [T, q_size + kv_size + kv_size + q_size] in Q | K | V | G layout.
+// cos_sin: [T, 3 * rope_dim] with row layout
+// [t_cos|t_sin|h_cos|h_sin|w_cos|w_sin].
+// gather_pattern: merged gather offsets built by
+// build_split_qkv_rmsnorm_mrope_gather_pattern(...).
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+split_qkv_rmsnorm_mrope(const torch::Tensor& qkvg,
+                        const torch::Tensor& q_weight,
+                        const torch::Tensor& k_weight,
+                        const torch::Tensor& cos_sin,
+                        const torch::Tensor& gather_pattern,
+                        float eps,
+                        int64_t num_q_heads,
+                        int64_t num_kv_heads,
+                        int64_t head_size);
 
 }  // namespace xllm::kernel::npu::tilelang

@@ -133,6 +133,11 @@ tilelang_register_runtime_kernel(
   WRAPPER_SRCS fused_gdn_gating_wrapper.cpp
 )
 
+tilelang_register_runtime_kernel(
+  NAME split_qkv_rmsnorm_mrope
+  WRAPPER_SRCS split_qkv_rmsnorm_mrope_wrapper.cpp
+)
+
 cc_library(
   NAME
     tilelang_kernels
@@ -152,10 +157,17 @@ target_compile_definitions(tilelang_kernels PRIVATE
 
 target_link_libraries(tilelang_kernels
   PUBLIC
+    "$ENV{NPU_HOME_PATH}/lib64/libascendc_runtime.a"
+    "$ENV{NPU_HOME_PATH}/lib64/libtiling_api.a"
     "$ENV{NPU_HOME_PATH}/lib64/libascendcl.so"
     "$ENV{NPU_HOME_PATH}/lib64/libruntime.so"
     "$ENV{NPU_HOME_PATH}/lib64/libplatform.so"
     "$ENV{NPU_HOME_PATH}/lib64/libc_sec.so"
+    "$ENV{NPU_HOME_PATH}/lib64/libascend_dump.so"
+    "$ENV{NPU_HOME_PATH}/lib64/libprofapi.so"
+    "$ENV{NPU_HOME_PATH}/lib64/libmmpa.so"
+    m
+    dl
 )
 
 cc_test(
@@ -175,6 +187,18 @@ cc_test(
     fused_gdn_gating_wrapper_test
   SRCS
     fused_gdn_gating_wrapper_test.cpp
+  DEPS
+    :tilelang_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
+)
+
+cc_test(
+  NAME
+    split_qkv_rmsnorm_mrope_wrapper_test
+  SRCS
+    split_qkv_rmsnorm_mrope_wrapper_test.cpp
   DEPS
     :tilelang_kernels
     torch

@@ -30,6 +30,8 @@ class Qwen3NextRMSNormImpl : public torch::nn::Module {
                        const torch::TensorOptions& options);
 
   torch::Tensor forward(torch::Tensor& input);
+  torch::Tensor weight() const { return weight_; }
+  double eps() const { return eps_; }
 
   void load_state_dict(const StateDict& state_dict);
 

@@ -9,20 +9,12 @@ from .kernels.utils import DEFAULT_ASCEND_BISHENG_ARCH
 
 TILELANG_BISHENG_COMMON_FLAGS = [
     "-O2",
-    "-std=gnu++17",
-    "-xcce",
+    "-std=c++17",
+    "-xasc",
     "-fPIC",
-    "-mllvm",
-    "-cce-aicore-stack-size=0x8000",
-    "-mllvm",
-    "-cce-aicore-function-stack-size=0x8000",
-    "-mllvm",
-    "-cce-aicore-record-overflow=true",
-    "-mllvm",
-    "-cce-aicore-addr-transform",
-    "-mllvm",
-    "-cce-aicore-dcci-insert-for-scalar=false",
-    "-DL2_CACHE_HINT",
+    "-Wno-macro-redefined",
+    "-Wno-ignored-attributes",
+    "-Wno-non-c-typedef-for-linkage",
     "-DBACKEND_HYBM",
 ]
 

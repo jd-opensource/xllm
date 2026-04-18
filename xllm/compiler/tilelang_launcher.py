@@ -35,6 +35,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
+    sys.setrecursionlimit(10000)
+
     parser = _build_parser()
     args, remainder = parser.parse_known_args(argv)
 

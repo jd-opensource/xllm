@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <tuple>
+#include <vector>
 namespace xllm {
 namespace layer {
 
@@ -102,6 +103,22 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
                                     scaling_,
                                     num_kv_heads_,
                                     args.sliding_window()));
+
+  // 7. Fused split_qkv_rmsnorm_mrope kernel setup
+  rotary_dim_ = static_cast<int64_t>(head_dim_ * args.partial_rotary_factor());
+  rms_norm_eps_ = args.rms_norm_eps();
+  mrope_section_ = args.rope_scaling_mrope_section();
+  is_interleaved_ = args.rope_scaling_mrope_interleaved();
+  use_fused_qkv_ = false;
+  if (attn_output_gate_ && !mrope_section_.empty() &&
+      mrope_section_.size() == 3 && rotary_dim_ > 0) {
+    mrope_gather_pattern_ =
+        xllm::kernel::build_split_qkv_rmsnorm_mrope_gather_pattern(
+            rotary_dim_, mrope_section_, is_interleaved_, options.device());
+    use_fused_qkv_ = true;
+    LOG(INFO) << "Qwen3NextAttention layer " << layer_id_
+              << ": using fused split_qkv_rmsnorm_mrope kernel";
+  }
 }
 
 torch::Tensor Qwen3NextAttentionImpl::forward(
@@ -109,76 +126,100 @@ torch::Tensor Qwen3NextAttentionImpl::forward(
     const torch::Tensor& hidden_states,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache) {
-  // 1. qkv projection
   auto qkv = qkv_proj_->forward(hidden_states);
+
+  if (use_fused_qkv_) {
+    // Build cos_sin [T, 3*rotary_dim] from positions
+    // For text-only: positions is [T] (1D), all 3 mRoPE axes share the same
+    // For VL with mRoPE: positions is [T, 3] (2D, transposed upstream)
+    auto cos_sin_cache = rotary_emb_->get_cos_sin_cache();
+    torch::Tensor cos_sin;
+    if (positions.dim() == 1) {
+      // text-only: same positions for all 3 axes → repeat 3x
+      auto per_axis = cos_sin_cache.index_select(0, positions);
+      cos_sin = per_axis.repeat({1, 3});
+    } else {
+      auto pos_0 = positions.select(1, 0).contiguous();
+      auto pos_1 = positions.select(1, 1).contiguous();
+      auto pos_2 = positions.select(1, 2).contiguous();
+      cos_sin = torch::cat({cos_sin_cache.index_select(0, pos_0),
+                            cos_sin_cache.index_select(0, pos_1),
+                            cos_sin_cache.index_select(0, pos_2)},
+                           -1);
+    }
+
+    const int64_t T = qkv.size(0);
+    xllm::kernel::SplitQkvRmsnormMropeParams params;
+    params.qkvg = qkv;
+    params.q_weight = q_norm_->weight();
+    params.k_weight = k_norm_->weight();
+    params.cos_sin = cos_sin;
+    params.gather_pattern = mrope_gather_pattern_;
+    params.eps = rms_norm_eps_;
+    params.num_q_heads = num_heads_;
+    params.num_kv_heads = num_kv_heads_;
+    params.head_size = head_dim_;
+
+    auto [q, k, v, gate] = xllm::kernel::split_qkv_rmsnorm_mrope(params);
+
+    auto q_flat = q.view({T, q_size_});
+    auto k_flat = k.view({T, kv_size_});
+    auto v_flat = v.view({T, kv_size_});
+
+    auto out = std::get<0>(
+        attn_->forward(attn_metadata, q_flat, k_flat, v_flat, kv_cache));
+    out = out * torch::sigmoid(gate.view({T, q_size_}));
+    return o_proj_->forward(out);
+  }
+
+  // Fallback path: weight-reordered layout [Q | G | K | V]
   torch::Tensor q, k, v;
   torch::Tensor gate;
 
   if (attn_output_gate_) {
-    // Split qkv for attn_output_gate case: [q_size*2, kv_size, kv_size]
-    auto q_gate = qkv.slice(/*dim=*/-1, 0, q_size_ * 2);
-    k = qkv.slice(/*dim=*/-1, q_size_ * 2, q_size_ * 2 + kv_size_);
-    v = qkv.slice(
-        /*dim=*/-1, q_size_ * 2 + kv_size_, q_size_ * 2 + kv_size_ * 2);
-    v = v.contiguous();
-
-    std::vector<int64_t> orig_shape;
-    int64_t q_gate_dim = q_gate.dim();
-    orig_shape =
-        std::vector<int64_t>(q_gate.sizes().slice(0, q_gate_dim - 1).begin(),
-                             q_gate.sizes().slice(0, q_gate_dim - 1).end());
-
-    std::vector<int64_t> new_shape = orig_shape;
-    new_shape.push_back(num_heads_);
-    int64_t orig_total = 1;
-    for (auto d : orig_shape) orig_total *= d;
-    int64_t last_dim = q_gate.numel() / (orig_total * num_heads_);
-    new_shape.push_back(last_dim);
-
-    torch::Tensor q_gate_reshaped = q_gate.reshape(new_shape);
-
-    auto chunks = torch::chunk(q_gate_reshaped, 2, /*dim=*/-1);
-    q = chunks[0];
-    gate = chunks[1];
-
-    std::vector<int64_t> q_new_shape = orig_shape;
-    q_new_shape.push_back(q.numel() / orig_total);
-    q = q.reshape(q_new_shape);
-
-    std::vector<int64_t> gate_new_shape = orig_shape;
-    gate_new_shape.push_back(gate.numel() / orig_total);
-    gate = gate.reshape(gate_new_shape);
+    q = qkv.slice(-1, 0, q_size_);
+    gate = qkv.slice(-1, q_size_, q_size_ * 2);
+    k = qkv.slice(-1, q_size_ * 2, q_size_ * 2 + kv_size_);
+    v = qkv.slice(-1, q_size_ * 2 + kv_size_, q_size_ * 2 + kv_size_ * 2);
   } else {
-    // Normal case: [q_size, kv_size, kv_size]
-    q = qkv.slice(/*dim=*/-1, 0, q_size_);
-    k = qkv.slice(/*dim=*/-1, q_size_, q_size_ + kv_size_);
-    v = qkv.slice(/*dim=*/-1, q_size_ + kv_size_, q_size_ + 2 * kv_size_);
+    q = qkv.slice(-1, 0, q_size_);
+    k = qkv.slice(-1, q_size_, q_size_ + kv_size_);
+    v = qkv.slice(-1, q_size_ + kv_size_, q_size_ + 2 * kv_size_);
   }
 
   const int64_t T = q.size(0);
-
-  auto q_reshaped = q.reshape({T, num_heads_, head_dim_});
-  auto q_normed = q_norm_->forward(q_reshaped);
-  auto k_reshaped = k.reshape({T, num_kv_heads_, head_dim_});
-  auto k_normed = k_norm_->forward(k_reshaped);
-
-  q = q_normed.view({T, q_size_});
-  k = k_normed.view({T, kv_size_});
+  auto q_3d = q.view({T, num_heads_, head_dim_});
+  q = q_norm_->forward(q_3d).view({T, q_size_});
+  auto k_3d = k.view({T, num_kv_heads_, head_dim_});
+  k = k_norm_->forward(k_3d).view({T, kv_size_});
 
   rotary_emb_->forward(positions, q, k);
   auto out = std::get<0>(attn_->forward(attn_metadata, q, k, v, kv_cache));
 
   if (attn_output_gate_) {
-    gate = torch::sigmoid(gate);
-    out = out * gate;
+    out = out * torch::sigmoid(gate);
   }
-
-  out = o_proj_->forward(out);
-  return out;
+  return o_proj_->forward(out);
 }
 
 void Qwen3NextAttentionImpl::load_state_dict(const StateDict& state_dict) {
   qkv_proj_->load_state_dict(state_dict, {"q_proj.", "k_proj.", "v_proj."});
+
+  if (attn_output_gate_) {
+    // Rearrange q_proj rows from per-head interleaved [q0,g0,q1,g1,...]
+    // to grouped [q0,q1,...,g0,g1,...] so forward output is [Q|G|K|V].
+    auto w = qkv_proj_->weight();
+    auto qg_rows = w.slice(0, 0, q_size_ * 2);
+    const int64_t hidden = w.size(1);
+    auto qg_3d = qg_rows.view({num_heads_, 2 * head_dim_, hidden});
+    auto q_part = qg_3d.slice(1, 0, head_dim_);
+    auto g_part = qg_3d.slice(1, head_dim_, 2 * head_dim_);
+    auto reordered = torch::cat(
+        {q_part.reshape({q_size_, hidden}), g_part.reshape({q_size_, hidden})},
+        0);
+    qg_rows.copy_(reordered);
+  }
+
   o_proj_->load_state_dict(state_dict.get_dict_with_prefix("o_proj."));
   if (auto w = state_dict.get_tensor("q_norm.weight"); w.defined()) {
     q_norm_->load_state_dict(StateDict({{"weight", w}}));

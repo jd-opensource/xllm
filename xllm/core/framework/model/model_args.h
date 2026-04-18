@@ -83,6 +83,7 @@ struct ModelArgs {
   PROPERTY(float, rope_scaling_mscale) = 0.0f;
   PROPERTY(float, rope_scaling_mscale_all_dim) = 0.0f;
   PROPERTY(std::vector<int64_t>, rope_scaling_mrope_section);
+  PROPERTY(bool, rope_scaling_mrope_interleaved) = false;
 
   // the maximum sequence length to use for rotary position embeddings.
   PROPERTY(int64_t, max_position_embeddings) = 0;

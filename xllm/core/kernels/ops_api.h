@@ -143,4 +143,13 @@ fused_qkvzba_split_reshape_cat(FusedQkvzbaSplitReshapeParams& params);
 
 void gemma_rms_norm(GemmaRMSNormParams& params);
 
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+split_qkv_rmsnorm_mrope(SplitQkvRmsnormMropeParams& params);
+
+torch::Tensor build_split_qkv_rmsnorm_mrope_gather_pattern(
+    int64_t rope_dim,
+    const std::vector<int64_t>& mrope_section,
+    bool is_interleaved,
+    const torch::Device& device);
+
 }  // namespace xllm::kernel

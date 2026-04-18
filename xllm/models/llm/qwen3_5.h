@@ -114,6 +114,24 @@ TORCH_MODULE(Qwen3_5ForCausalLM);
   LOAD_ARG_TEXT_OR_ROOT(linear_num_value_heads, "linear_num_value_heads", 32); \
   LOAD_ARG_TEXT_OR_ROOT(linear_value_head_dim, "linear_value_head_dim", 128);  \
   LOAD_QWEN3_5_ROPE_ARG(partial_rotary_factor, 0.25f);                         \
+  LOAD_ARG_OR(rope_scaling_mrope_section,                                      \
+              "text_config.rope_scaling.mrope_section",                        \
+              std::vector<int64_t>());                                         \
+  LOAD_ARG_OR(rope_scaling_mrope_section,                                      \
+              "text_config.rope_parameters.mrope_section",                     \
+              args->rope_scaling_mrope_section());                             \
+  LOAD_ARG_OR(rope_scaling_mrope_section,                                      \
+              "rope_parameters.mrope_section",                                 \
+              args->rope_scaling_mrope_section());                             \
+  LOAD_ARG_OR(rope_scaling_mrope_interleaved,                                  \
+              "text_config.rope_scaling.mrope_interleaved",                    \
+              false);                                                          \
+  LOAD_ARG_OR(rope_scaling_mrope_interleaved,                                  \
+              "text_config.rope_parameters.mrope_interleaved",                 \
+              args->rope_scaling_mrope_interleaved());                         \
+  LOAD_ARG_OR(rope_scaling_mrope_interleaved,                                  \
+              "rope_parameters.mrope_interleaved",                             \
+              args->rope_scaling_mrope_interleaved());                         \
   LOAD_ARG_TEXT_OR_ROOT(shared_expert_intermediate_size,                       \
                         "shared_expert_intermediate_size",                     \
                         default_shared_expert_intermediate_size);              \

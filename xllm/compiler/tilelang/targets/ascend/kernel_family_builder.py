@@ -230,7 +230,7 @@ def build_kernel_family(
 
         compile_cmd = [
             context.bisheng_executable,
-            f"--cce-aicore-arch={context.bisheng_arch}",
+            f"--npu-arch={context.bisheng_arch}",
             *TILELANG_BISHENG_COMMON_FLAGS,
             f"-Dg_tilingKey=g_tilingKey__{compile_spec.variant_key}",
             *[f"-I{include_dir}" for include_dir in context.include_dirs],

@@ -991,4 +991,35 @@ void gemma_rms_norm(GemmaRMSNormParams& params) {
   NOT_IMPLEMENTED();
 #endif
 }
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+split_qkv_rmsnorm_mrope(SplitQkvRmsnormMropeParams& params) {
+#if defined(USE_NPU)
+  return npu::tilelang::split_qkv_rmsnorm_mrope(params.qkvg,
+                                                params.q_weight,
+                                                params.k_weight,
+                                                params.cos_sin,
+                                                params.gather_pattern,
+                                                params.eps,
+                                                params.num_q_heads,
+                                                params.num_kv_heads,
+                                                params.head_size);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+torch::Tensor build_split_qkv_rmsnorm_mrope_gather_pattern(
+    int64_t rope_dim,
+    const std::vector<int64_t>& mrope_section,
+    bool is_interleaved,
+    const torch::Device& device) {
+#if defined(USE_NPU)
+  return npu::tilelang::build_split_qkv_rmsnorm_mrope_gather_pattern(
+      rope_dim, mrope_section, is_interleaved, device);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 }  // namespace xllm::kernel
