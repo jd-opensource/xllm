@@ -112,6 +112,9 @@ class BlockManagerImpl : public BlockManager {
 
   // free block list
   std::vector<int32_t> free_blocks_;
+
+  // Whether a block is already counted in num_used_blocks_.
+  std::vector<uint8_t> usage_accounted_ids_;
 };
 
 }  // namespace xllm
