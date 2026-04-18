@@ -1051,8 +1051,9 @@ CudaGraphExecutorImpl::get_or_create_vmm_pool_state(uint32_t physical_pool_id) {
     state->torch_allocator =
         std::make_unique<xllm::VMMTorchAllocator>(state->allocator.get());
     slot = std::move(state);
+    const int32_t device_index_int = to_int32_device_index(device_.index());
     LOG(INFO) << "Created VMM pool state for executor " << this << ", device "
-              << device_.index() << ", physical_pool_id: " << physical_pool_id;
+              << device_index_int << ", physical_pool_id: " << physical_pool_id;
   }
   return *slot;
 }
@@ -1073,7 +1074,8 @@ TorchMemPool* CudaGraphExecutorImpl::get_or_create_vmm_mempool(
   mempools[shape_id] = std::move(pool);
   VLOG(kGraphExecutorLogVerboseLevel)
       << "Created per-shape VMM MemPool for executor " << this << ", device "
-      << device_.index() << ", physical_pool_id: " << physical_pool_id
+      << to_int32_device_index(device_.index())
+      << ", physical_pool_id: " << physical_pool_id
       << ", shape_id: " << shape_id << ", pool_id: {" << ptr->id().first << ", "
       << ptr->id().second << "}";
   return ptr;
@@ -1190,7 +1192,8 @@ void CudaGraphExecutorImpl::reset_vmm_allocator_offset(
   auto& state = get_or_create_vmm_pool_state(physical_pool_id);
   state.allocator->switch_to_new_virtual_space();
   VLOG(kGraphExecutorLogVerboseLevel)
-      << "Reset VMM allocator for device " << device_.index()
+      << "Reset VMM allocator for device "
+      << to_int32_device_index(device_.index())
       << ", physical_pool_id: " << physical_pool_id;
 }
 
@@ -1220,6 +1223,7 @@ at::cuda::MempoolId_t CudaGraphExecutorImpl::get_mem_pool(
 // Each thread gets its own high-priority capture stream
 c10::cuda::CUDAStream CudaGraphExecutorImpl::get_capture_stream(
     c10::DeviceIndex device_index) {
+  const int32_t device_index_int = to_int32_device_index(device_index);
   // Use thread_local to ensure each thread has its own capture stream
   // This is required because CUDA graphs must be captured on a non-default
   // stream. We use high-priority streams for better performance.
@@ -1232,7 +1236,7 @@ c10::cuda::CUDAStream CudaGraphExecutorImpl::get_capture_stream(
     LOG(INFO) << "Initialized capture_stream for thread: "
               << std::this_thread::get_id()
               << ", stream: " << thread_capture_stream
-              << ", device_index: " << device_index;
+              << ", device_index: " << device_index_int;
     initialized = true;
   }
 

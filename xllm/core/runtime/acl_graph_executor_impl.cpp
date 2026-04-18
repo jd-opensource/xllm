@@ -33,6 +33,7 @@ limitations under the License.
 #endif
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
+#include "core/platform/device.h"
 #include "core/util/utils.h"
 #include "platform/npu/device_capture_lock.h"
 
@@ -911,6 +912,7 @@ bool AclGraph::capture(CausalLM* model,
 }
 
 void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
+  const int32_t device_index_int = to_int32_device_index(device_index);
   // Get a secondary stream from high-priority pool for graph capture.
   // This is required because NPUGraph::capture_begin() enforces that capture
   // must be performed on a non-default stream (see
@@ -919,7 +921,7 @@ void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
   device_index_ = device_index;
   LOG(INFO) << "Initialized capture_stream: " << capture_stream_.value()
             << ", id: " << capture_stream_.value().id()
-            << ", device_index: " << device_index;
+            << ", device_index: " << device_index_int;
 }
 
 ModelOutput AclGraph::replay(const torch::Tensor& tokens,
