@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import os
 from pathlib import Path
+from threading import Lock
 
 from ...common.cache import compute_cache_key, is_cache_hit
 from ...common.manifest import KernelAbi, KernelFamilyManifest, KernelVariantManifest
@@ -14,6 +15,8 @@ from .kernel_registry import RegisteredKernelFamily
 from .kernels import utils as kernel_utils
 from .kernels.utils import render_family_registry_inc, render_family_variants_inc
 from .toolchain import AscendBuildContext, TILELANG_BISHENG_COMMON_FLAGS
+
+_TILELANG_SOURCE_GENERATION_LOCK = Lock()
 
 
 @dataclass(frozen=True)
@@ -214,10 +217,18 @@ def build_kernel_family(
 
     compile_cwd = repo_root()
 
+    def _generate_variant_source(plan: _VariantBuildPlan) -> str:
+        # Serialize TileLang lowering because the underlying TVM script parsing
+        # is not reliably thread-safe during concurrent variant generation.
+        with _TILELANG_SOURCE_GENERATION_LOCK:
+            return family.kernel_cls.generate_source(
+                **plan.compile_spec.specialization
+            )
+
     def _run_variant_job(plan: _VariantBuildPlan) -> _VariantBuildResult:
         compile_spec = plan.compile_spec
         kernel_spec = plan.kernel_spec
-        source = family.kernel_cls.generate_source(**compile_spec.specialization)
+        source = _generate_variant_source(plan)
         entry_symbol = _variant_entry_symbol(compile_spec)
         rendered_source = abi_entry.rename_variant_internal_symbols(
             abi_entry.rename_entry_symbol(
