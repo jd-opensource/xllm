@@ -108,6 +108,11 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
                             attn_metadata,
                             kv_caches[i],
                             modified_input_params);
+      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
+                                              hidden_states.device())) {
+        active_sequence_parallel_context_ = nullptr;
+        return ModelOutput();
+      }
     }
     hidden_states =
         layer::v32_sp::gather_and_restore_global(hidden_states, sp_ctx.value());

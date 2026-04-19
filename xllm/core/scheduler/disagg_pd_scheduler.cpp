@@ -35,6 +35,7 @@ limitations under the License.
 #include "runtime/xservice_client.h"
 #include "scheduler/chunked_prefill_scheduler.h"
 #include "scheduler/continuous_scheduler.h"
+#include "scheduler/pd_topology_guard.h"
 #include "util/env_var.h"
 
 namespace xllm {
@@ -326,6 +327,47 @@ void DisaggPDScheduler::dispatch_requests() {
     std::vector<std::shared_ptr<Request>> requests;
     requests.emplace_back(request);
     std::string selected_instance = request->state().decode_address;
+
+    const InstanceInfo remote_info =
+        xservice_client_->get_instance_info(selected_instance);
+    if (remote_info.name.empty()) {
+      response_processor_->process_failed_request(
+          request,
+          {StatusCode::UNKNOWN, "failed to fetch remote decode instance info"});
+      continue;
+    }
+    remote_instances_info_[selected_instance] = remote_info;
+
+    bool is_mlu_build = false;
+#if defined(USE_MLU)
+    is_mlu_build = true;
+#endif
+    const bool enable_mla = engine_->model_args().enable_mla();
+    const PdTopoRule rule = check_pd_rule(instance_info_,
+                                          remote_info,
+                                          is_mlu_build,
+                                          options_.kv_cache_transfer_mode(),
+                                          enable_mla);
+    if (!rule.allow) {
+      if (rule.invalid_remote) {
+        remote_instances_info_.erase(selected_instance);
+      }
+      response_processor_->process_failed_request(
+          request,
+          {StatusCode::INVALID_ARGUMENT,
+           "decode instance " + selected_instance +
+               " is incompatible: " + rule.reason});
+      continue;
+    }
+    if (rule.hetero) {
+      const PdTopo local_topo = get_pd_topo(instance_info_);
+      const PdTopo remote_topo = get_pd_topo(remote_info);
+      LOG(INFO) << "Allow hetero pd topo guard: local dp/tp="
+                << local_topo.dp_size << "/" << local_topo.tp_size
+                << ", remote dp/tp=" << remote_topo.dp_size << "/"
+                << remote_topo.tp_size;
+    }
+
     proto::DisaggPDService_Stub* stub = create_rpc_channel(selected_instance);
     if (stub == nullptr) {
       response_processor_->process_failed_request(
