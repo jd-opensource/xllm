@@ -161,6 +161,7 @@ struct RequestParams {
 
   // beam search
   int32_t beam_width = 0;
+  int32_t num_return_sequences = 0;
 
   bool add_special_tokens = false;
 

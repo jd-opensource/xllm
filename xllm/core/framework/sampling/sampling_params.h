@@ -36,6 +36,7 @@ struct RequestSamplingParam {
   bool do_sample = false;
   bool is_embeddings = false;
   int32_t beam_width = 0;
+  int32_t num_return_sequences = 0;
 };
 
 struct SamplingParameters {

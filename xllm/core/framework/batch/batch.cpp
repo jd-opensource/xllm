@@ -619,7 +619,8 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
 }
 
 void Batch::process_sample_output(const SampleOutput& sample_output,
-                                  bool replace_fake_token) {
+                                  bool replace_fake_token,
+                                  bool force_requested_beam_result_size) {
   if (sample_output.embeddings.defined()) {
     const int64_t num_seqs = sample_output.embeddings.size(0);
     int64_t output_idx = 0;
@@ -673,7 +674,7 @@ void Batch::process_sample_output(const SampleOutput& sample_output,
   }
 
   if (!FLAGS_enable_schedule_overlap || replace_fake_token) {
-    process_beam_search();
+    process_beam_search(force_requested_beam_result_size);
   }
 }
 
@@ -721,9 +722,9 @@ void Batch::append_token_for_sequence(Sequence* seq,
   }
 }
 
-void Batch::process_beam_search() {
+void Batch::process_beam_search(bool force_requested_result_size) {
   for (auto* sequence_group : sequence_groups_) {
-    sequence_group->process_beam_search();
+    sequence_group->process_beam_search(force_requested_result_size);
   }
 }
 

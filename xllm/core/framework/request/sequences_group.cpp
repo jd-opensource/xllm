@@ -219,7 +219,7 @@ void SequencesGroup::generate_outputs_parallel(
   }
 }
 
-void SequencesGroup::process_beam_search() {
+void SequencesGroup::process_beam_search(bool force_requested_result_size) {
   if (!check_beam_search()) {
     return;
   }
@@ -229,6 +229,12 @@ void SequencesGroup::process_beam_search() {
   }
 
   const size_t beam_width = sequence_params_.sampling_param->beam_width;
+  const int32_t requested_num_return_sequences =
+      sequence_params_.sampling_param->num_return_sequences > 0
+          ? sequence_params_.sampling_param->num_return_sequences
+          : sequence_params_.sampling_param->beam_width;
+  const size_t requested_result_size =
+      static_cast<size_t>(requested_num_return_sequences);
   const size_t topk =
       std::max<size_t>(1, sequence_params_.sampling_param->top_logprobs);
 
@@ -261,7 +267,9 @@ void SequencesGroup::process_beam_search() {
     build_source_info(sequences_[seq_index].get());
   }
 
-  SimpleTopKOptimizerBeamCandidate topk_optimizer(beam_width);
+  const size_t target_result_size =
+      force_requested_result_size ? requested_result_size : beam_width;
+  SimpleTopKOptimizerBeamCandidate topk_optimizer(target_result_size);
   auto add_self_candidate = [&](size_t seq_index, Sequence* seq) {
     BeamCandidate candidate;
     candidate.source_index = seq_index;
@@ -324,15 +332,22 @@ void SequencesGroup::process_beam_search() {
     return;
   }
 
-  const size_t result_size = std::min(beam_width, candidates.size());
+  const size_t result_size = std::min(target_result_size, candidates.size());
   CHECK(!sequences_.empty());
 
-  std::vector<std::unique_ptr<Sequence>> replacement_sequences(result_size);
+  const size_t existing_size = sequences_.size();
+  const size_t existing_result_size = std::min(result_size, existing_size);
+  std::vector<std::unique_ptr<Sequence>> replacement_sequences(
+      existing_result_size);
+  std::vector<std::unique_ptr<Sequence>> tail_sequences;
+  if (result_size > existing_size) {
+    tail_sequences.reserve(result_size - existing_size);
+  }
   for (size_t i = 0; i < result_size; ++i) {
     const BeamCandidate& candidate = candidates[i];
     const BeamSourceInfo& source_info = source_infos[candidate.source_index];
     const bool need_replace =
-        i >= sequences_.size() || sequences_[i] == nullptr ||
+        i >= existing_size || sequences_[i] == nullptr ||
         sequences_[i]->num_prompt_tokens() != source_info.suffix_start_idx ||
         sequences_[i]->num_tokens() - source_info.suffix_start_idx !=
             source_info.generated_token_ids.size();
@@ -342,19 +357,28 @@ void SequencesGroup::process_beam_search() {
 
     CHECK_LT(candidate.source_index, sequences_.size());
     CHECK(sequences_[candidate.source_index] != nullptr);
-    replacement_sequences[i] =
-        std::make_unique<Sequence>(*sequences_[candidate.source_index]);
+    if (i < existing_size) {
+      replacement_sequences[i] =
+          std::make_unique<Sequence>(*sequences_[candidate.source_index]);
+    } else {
+      tail_sequences.emplace_back(
+          std::make_unique<Sequence>(*sequences_[candidate.source_index]));
+    }
   }
 
-  if (sequences_.size() < result_size) {
-    sequences_.resize(result_size);
+  if (existing_size < result_size) {
+    sequences_.reserve(result_size);
+    for (auto& tail_sequence : tail_sequences) {
+      sequences_.emplace_back(std::move(tail_sequence));
+    }
   }
 
   std::unordered_set<size_t> reused_src;
   for (size_t i = 0; i < result_size; ++i) {
     const BeamCandidate& candidate = candidates[i];
     const BeamSourceInfo& source_info = source_infos[candidate.source_index];
-    if (replacement_sequences[i] != nullptr) {
+    if (i < replacement_sequences.size() &&
+        replacement_sequences[i] != nullptr) {
       sequences_[i] = std::move(replacement_sequences[i]);
     }
     auto& next_seq = sequences_[i];

@@ -200,6 +200,9 @@ typedef struct XLLM_CAPI_EXPORT XLLM_RequestParams {
   /** Beam search width (0 = disable beam search) */
   uint32_t beam_width;
 
+  /** Final number of beam search results to return (0 = use beam_width) */
+  uint32_t num_return_sequences;
+
   /** Number of top log probabilities to return */
   int64_t top_logprobs;
 

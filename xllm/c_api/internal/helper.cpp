@@ -127,6 +127,8 @@ void transfer_request_params(InferenceType inference_type,
   xllm_request_params->repetition_penalty =
       final_request_params.repetition_penalty;
   xllm_request_params->beam_width = final_request_params.beam_width;
+  xllm_request_params->num_return_sequences =
+      final_request_params.num_return_sequences;
   xllm_request_params->top_logprobs = final_request_params.top_logprobs;
   xllm_request_params->temperature = final_request_params.temperature;
   xllm_request_params->request_id = final_request_params.request_id;
