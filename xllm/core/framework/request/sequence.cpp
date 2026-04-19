@@ -33,6 +33,7 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
 #include "core/framework/request/mm_data_visitor.h"
+#include "core/framework/tokenizer/rec_tokenizer.h"
 #include "core/framework/tokenizer/tokenizer.h"
 #include "core/util/slice.h"
 #include "core/util/tensor_helper.h"
@@ -69,6 +70,33 @@ std::vector<int64_t> normalize_rec_item_ids(const std::vector<int64_t>& raw_ids,
   }
 
   return item_ids;
+}
+
+std::vector<RecItemInfo> normalize_rec_item_infos(
+    const std::vector<RecItemInfo>& raw_item_infos,
+    size_t sequence_index) {
+  std::vector<RecItemInfo> item_infos;
+  item_infos.reserve(raw_item_infos.size());
+  std::unordered_set<int64_t> seen_item_ids;
+  for (const RecItemInfo& item_info : raw_item_infos) {
+    if (seen_item_ids.insert(item_info.item_id).second) {
+      item_infos.emplace_back(item_info);
+    }
+  }
+
+  const int32_t each_threshold = FLAGS_each_conversion_threshold;
+  if (each_threshold > 0 &&
+      static_cast<int32_t>(item_infos.size()) > each_threshold) {
+    uint32_t seed = FLAGS_random_seed >= 0
+                        ? static_cast<uint32_t>(FLAGS_random_seed) +
+                              static_cast<uint32_t>(sequence_index)
+                        : std::random_device{}();
+    std::mt19937 generator(seed);
+    std::shuffle(item_infos.begin(), item_infos.end(), generator);
+    item_infos.resize(each_threshold);
+  }
+
+  return item_infos;
 }
 }  // namespace
 
@@ -150,15 +178,35 @@ void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
   const size_t rec_token_size = static_cast<size_t>(REC_TOKEN_SIZE);
   if (FLAGS_enable_convert_tokens_to_item &&
       output.token_ids.size() == rec_token_size) {
-    std::vector<int64_t> item_ids;
-    const bool ok = tokenizer.decode(
-        Slice<int32_t>{output.token_ids.data(), output.token_ids.size()},
-        sequence_params_.skip_special_tokens,
-        &item_ids);
-    if (ok && !item_ids.empty()) {
-      output.item_ids_list = normalize_rec_item_ids(item_ids, index_);
-      if (!output.item_ids_list.empty()) {
-        output.item_ids = output.item_ids_list.front();
+    const Slice<int32_t> token_slice{output.token_ids.data(),
+                                     output.token_ids.size()};
+    if (FLAGS_enable_extended_item_info) {
+      const auto* rec_tokenizer = dynamic_cast<const RecTokenizer*>(&tokenizer);
+      if (rec_tokenizer != nullptr) {
+        std::vector<RecItemInfo> item_infos;
+        const bool ok =
+            rec_tokenizer->decode_item_infos(token_slice, &item_infos);
+        if (ok && !item_infos.empty()) {
+          output.item_infos_list = normalize_rec_item_infos(item_infos, index_);
+          output.item_ids_list.reserve(output.item_infos_list.size());
+          for (const RecItemInfo& item_info : output.item_infos_list) {
+            output.item_ids_list.emplace_back(item_info.item_id);
+          }
+          if (!output.item_infos_list.empty()) {
+            output.item_ids = output.item_ids_list.front();
+            output.item_info = output.item_infos_list.front();
+          }
+        }
+      }
+    } else {
+      std::vector<int64_t> item_ids;
+      const bool ok = tokenizer.decode(
+          token_slice, sequence_params_.skip_special_tokens, &item_ids);
+      if (ok && !item_ids.empty()) {
+        output.item_ids_list = normalize_rec_item_ids(item_ids, index_);
+        if (!output.item_ids_list.empty()) {
+          output.item_ids = output.item_ids_list.front();
+        }
       }
     }
   }

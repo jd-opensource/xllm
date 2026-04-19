@@ -20,6 +20,7 @@ limitations under the License.
 #include <cstdint>
 #include <optional>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -38,7 +39,7 @@ class RecVocabDict final {
   ~RecVocabDict() {
     initialized_ = false;
     item_to_tokens_map_.clear();
-    tokens_to_items_map_.clear();
+    tokens_to_item_infos_map_.clear();
     prefix_tokens_to_next_tokens_map_.clear();
   }
 
@@ -58,6 +59,9 @@ class RecVocabDict final {
    */
   bool get_items_by_tokens(const RecTokenTriple& rec_token_triple,
                            std::vector<int64_t>* item_ids) const;
+
+  bool get_item_infos_by_tokens(const RecTokenTriple& rec_token_triple,
+                                std::vector<RecItemInfo>* item_infos) const;
 
   /**
    * @brief Get the corresponding token ID triplet through a item id
@@ -88,13 +92,13 @@ class RecVocabDict final {
   // Check if initialization has been successful
   bool initialized_ = false;
 
-  // Convert token to item map, key: token id triplet, value: item id list,
-  // there is a token id triplet corresponding to multiple item IDs, and
-  // boost::hash<RecTokenTriple> will generate ordered triplet hash value
+  // Convert token to item map, key: token id triplet, value: item info list,
+  // there is a token id triplet corresponding to multiple items, and
+  // boost::hash<RecTokenTriple> will generate ordered triplet hash value.
   std::unordered_map<RecTokenTriple,
-                     std::vector<int64_t>,
+                     std::vector<RecItemInfo>,
                      boost::hash<RecTokenTriple>>
-      tokens_to_items_map_;
+      tokens_to_item_infos_map_;
 
   // Convert item to tokens map, key: item id, value: token triplet, there is a
   // item id corresponding to a token id triplet

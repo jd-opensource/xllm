@@ -23,6 +23,7 @@ limitations under the License.
 #include <string_view>
 #include <vector>
 
+#include "core/common/types.h"
 #include "tokenizer.h"
 #include "tokenizer_args.h"
 #include "util/slice.h"
@@ -40,6 +41,9 @@ class RecTokenizer : public Tokenizer {
   bool decode(const Slice<int32_t>& token_ids,
               bool skip_special_tokens,
               std::vector<int64_t>* item_ids) const override;
+
+  bool decode_item_infos(const Slice<int32_t>& token_ids,
+                         std::vector<RecItemInfo>* item_infos) const;
 
   size_t vocab_size() const override;
 
