@@ -19,6 +19,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <memory>
 #include <optional>
 
 #include "distributed_runtime/engine.h"
@@ -64,7 +65,7 @@ class FakeEngine : public Engine {
   BlockManagerPool* block_manager_pool() const {
     return fake_block_manager_.get();
   }
-  const ModelArgs& model_args() const { NOT_IMPLEMENTED(); }
+  const std::shared_ptr<ModelArgs>& model_args() const { NOT_IMPLEMENTED(); }
   const TokenizerArgs& tokenizer_args() const { NOT_IMPLEMENTED(); }
   std::vector<int64_t> get_active_activation_memory() const {
     NOT_IMPLEMENTED();

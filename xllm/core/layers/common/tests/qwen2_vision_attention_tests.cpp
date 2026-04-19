@@ -17,6 +17,8 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -34,10 +36,10 @@ class Qwen2VisionAttentionTest : public ::testing::Test {
     torch::Device device(Device::type_torch(), 0);
     Device xllm_device(device);
     xllm_device.set_seed(42);
-    model_args_.model_type() = "qwen2_vl";
-    model_args_.mm_hidden_size() = 1280;
-    model_args_.mm_head_dim() = 80;
-    model_args_.mm_num_attention_heads() = 16;
+    model_args_->model_type() = "qwen2_vl";
+    model_args_->mm_hidden_size() = 1280;
+    model_args_->mm_head_dim() = 80;
+    model_args_->mm_num_attention_heads() = 16;
 
     options_ = torch::TensorOptions().dtype(torch::kBFloat16).device(device);
 
@@ -50,9 +52,9 @@ class Qwen2VisionAttentionTest : public ::testing::Test {
   }
 
   void InitTestWeights() {
-    int32_t mm_hidden_size = model_args_.mm_hidden_size();
-    int32_t mm_num_heads = model_args_.mm_num_attention_heads();
-    int32_t mm_head_dim = model_args_.mm_head_dim();
+    int32_t mm_hidden_size = model_args_->mm_hidden_size();
+    int32_t mm_num_heads = model_args_->mm_num_attention_heads();
+    int32_t mm_head_dim = model_args_->mm_head_dim();
     int32_t qkv_size = mm_num_heads * mm_head_dim * 3;
 
     std::unordered_map<std::string, torch::Tensor> weight_map = {
@@ -69,7 +71,7 @@ class Qwen2VisionAttentionTest : public ::testing::Test {
     }
   }
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_ = std::make_shared<ModelArgs>();
   ModelContext context_;
   ParallelArgs parallel_args_{0, 1, nullptr};
   torch::TensorOptions options_;
@@ -86,7 +88,7 @@ TEST_F(Qwen2VisionAttentionTest, ForwardTest) {
 
   int32_t batch_size = 2;
   int32_t seq_len = 40;
-  int32_t mm_hidden_size = model_args_.mm_hidden_size();
+  int32_t mm_hidden_size = model_args_->mm_hidden_size();
   int32_t num_tokens = batch_size * seq_len;
 
   auto hidden_states =
@@ -102,7 +104,7 @@ TEST_F(Qwen2VisionAttentionTest, ForwardTest) {
 
   // Create rotary embeddings (cos and sin)
   // Shape: (rope_seqlen, rope_dim)
-  int32_t mm_head_dim = model_args_.mm_head_dim();
+  int32_t mm_head_dim = model_args_->mm_head_dim();
   int32_t rope_dim = mm_head_dim;
   auto m_cos_pos = test::seeded_tensor("qwen2_vision_attention.m_cos_pos",
                                        {num_tokens, rope_dim},

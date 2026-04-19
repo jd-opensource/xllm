@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <thread>
 
@@ -155,7 +156,7 @@ class RecMaster : public Master {
 
   std::unique_ptr<FixedStepsScheduler> scheduler_;
   // model args
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   RecType rec_type_ = RecType::kNone;
   std::unique_ptr<ThreadPool> threadpool_;
   std::unique_ptr<Tokenizer> tokenizer_;

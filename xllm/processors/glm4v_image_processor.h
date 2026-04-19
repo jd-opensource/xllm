@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -25,7 +26,7 @@ namespace xllm {
 
 class Glm4VImageProcessor : public ImageProcessor {
  public:
-  Glm4VImageProcessor(const ModelArgs&);
+  Glm4VImageProcessor(const std::shared_ptr<ModelArgs>&);
   ~Glm4VImageProcessor() override = default;
 
   bool process(const MMInput& mm_inputs, MMData& mm_datas) override;

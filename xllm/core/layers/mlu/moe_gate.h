@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
+
 #include "framework/model/model_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
@@ -34,7 +36,7 @@ class MoEGateImpl : public torch::nn::Module {
   // Reads MoE gate config from model_args (n_routed_experts,
   // num_experts_per_tok, n_group, topk_group, routed_scaling_factor,
   // hidden_size, norm_topk_prob, scoring_func, topk_method).
-  MoEGateImpl(const ModelArgs& model_args,
+  MoEGateImpl(const std::shared_ptr<ModelArgs>& model_args,
               const QuantArgs& quant_args,
               const torch::TensorOptions& options);
 

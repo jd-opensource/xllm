@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -38,12 +39,13 @@ template <typename DecoderLayerType>
 class LlmModelImplBase : public torch::nn::Module {
  public:
   // mode type: qwen2, qwen3 .etc
-  LlmModelImplBase(const std::string& model_type, const ModelArgs& args)
-      : model_args_(args), model_type_(model_type) {
+  LlmModelImplBase(const std::string& model_type,
+                   const std::shared_ptr<ModelArgs>& model_args)
+      : model_args_(model_args), model_type_(model_type) {
     InterruptionBus::get_instance().subscribe([this](bool interrupted) {
       this->layer_forward_interrupted_ = interrupted;
     });
-    mrope_section_ = args.rope_scaling_mrope_section();
+    mrope_section_ = model_args->rope_scaling_mrope_section();
   }
 
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
@@ -153,7 +155,7 @@ class LlmModelImplBase : public torch::nn::Module {
   torch::Tensor cos_sin_;
   int32_t max_seq_len_ = 0;
   std::vector<int64_t> mrope_section_;
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   layer::WordEmbedding embed_tokens_{nullptr};
   layer::RMSNorm norm_{nullptr};
 
@@ -170,7 +172,7 @@ template <typename LlmModelType>
 class LlmForCausalLMImplBase : public torch::nn::Module {
  public:
   LlmForCausalLMImplBase(const ModelContext& context) {
-    tie_word_embeddings = context.get_model_args().tie_word_embeddings();
+    tie_word_embeddings = context.get_model_args()->tie_word_embeddings();
     // register submodules
     model_ = register_module("model", LlmModelType(context));
     lm_head_ = register_module("lm_head", layer::LmHead(context));

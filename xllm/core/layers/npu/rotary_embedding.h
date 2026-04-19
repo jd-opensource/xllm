@@ -21,6 +21,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <functional>
+#include <memory>
 #include <tuple>
 #include <unordered_map>
 
@@ -122,7 +123,7 @@ class MRotaryEmbedding : public NpuRotaryEmbedding {
 };
 
 std::shared_ptr<NpuRotaryEmbedding> create_rotary_embedding(
-    const ModelArgs& model_args,
+    const std::shared_ptr<ModelArgs>& model_args,
     int64_t rotary_dim,
     bool interleaved,
     const torch::TensorOptions& options);

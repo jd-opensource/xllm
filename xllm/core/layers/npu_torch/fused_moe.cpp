@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
 #include <numeric>
 #include <vector>
 
@@ -128,18 +129,18 @@ bool load_fused_down_fallback(const StateDict& state_dict,
 
 }  // namespace
 
-FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
+FusedMoEImpl::FusedMoEImpl(const std::shared_ptr<ModelArgs>& model_args,
                            const FusedMoEArgs& moe_args,
                            const QuantArgs& quant_args,
                            const ParallelArgs& parallel_args,
                            const torch::TensorOptions& options)
-    : num_total_experts_(model_args.n_routed_experts()),
-      topk_(model_args.num_experts_per_tok()),
-      hidden_size_(model_args.hidden_size()),
-      n_shared_experts_(model_args.n_shared_experts()),
+    : num_total_experts_(model_args->n_routed_experts()),
+      topk_(model_args->num_experts_per_tok()),
+      hidden_size_(model_args->hidden_size()),
+      n_shared_experts_(model_args->n_shared_experts()),
       is_gated_(moe_args.is_gated),
-      renormalize_(model_args.norm_topk_prob() ? 1 : 0),
-      hidden_act_(model_args.hidden_act()),
+      renormalize_(model_args->norm_topk_prob() ? 1 : 0),
+      hidden_act_(model_args->hidden_act()),
       is_smoothquant_(false),
       quant_args_(quant_args),
       parallel_args_(parallel_args),
@@ -147,8 +148,8 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       tp_pg_(parallel_args.tp_group_) {
   const int64_t num_experts = num_total_experts_;
   const int64_t intermediate_size =
-      static_cast<int64_t>(model_args.moe_intermediate_size());
-  const std::string& topk_method = model_args.topk_method();
+      static_cast<int64_t>(model_args->moe_intermediate_size());
+  const std::string& topk_method = model_args->topk_method();
   int64_t ep_size = parallel_args.ep_size();
   int64_t ep_rank = 0;
   if (ep_size > 1) {

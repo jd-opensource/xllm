@@ -287,7 +287,7 @@ Glm4MoeDecoderLoader::Glm4MoeDecoderLoader(
 
   tensor_placeholder_ = torch::zeros({1}).to(options);
 
-  if (model_args.use_qk_norm()) {
+  if (model_args->use_qk_norm()) {
     weight_count_ = weight_count = 70;
     WEIGHT_MAPPING_W8A8["self_attn.q_norm.weight"] = Q_NORM_WEIGHT;
     WEIGHT_MAPPING_W8A8["self_attn.k_norm.weight"] = K_NORM_WEIGHT;
@@ -297,12 +297,12 @@ Glm4MoeDecoderLoader::Glm4MoeDecoderLoader(
 
   at_weight_tensors_.resize(weight_count_);
 
-  num_experts_ = model_args.num_experts();
+  num_experts_ = model_args->num_experts();
   ep_size_ = parallel_args.ep_size();
   ep_local_tp_size_ = parallel_args.world_size() / ep_size_;
   CHECK_EQ(parallel_args.world_size(), ep_size_ * ep_local_tp_size_);
   ep_local_tp_rank_ = parallel_args.rank() % ep_local_tp_size_;
-  num_experts_per_partition_ = model_args.num_experts() / ep_size_;
+  num_experts_per_partition_ = model_args->num_experts() / ep_size_;
   ep_rank_ = parallel_args.rank() / ep_local_tp_size_;
   start_expert_id_ = ep_rank_ * num_experts_per_partition_;
   end_expert_id_ = start_expert_id_ + num_experts_per_partition_ - 1;
@@ -312,7 +312,7 @@ Glm4MoeDecoderLoader::Glm4MoeDecoderLoader(
   CHECK_EQ(parallel_args.world_size(), dp_size_ * dp_local_tp_size_);
   dp_local_tp_rank_ = parallel_args.rank() % dp_local_tp_size_;
 
-  n_kv_heads_ = static_cast<int32_t>(model_args.n_kv_heads().value());
+  n_kv_heads_ = static_cast<int32_t>(model_args->n_kv_heads().value());
 }
 
 void Glm4MoeDecoderLoader::resize_experts_weights(int num_of_device_experts) {

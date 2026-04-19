@@ -35,7 +35,7 @@ class Qwen3NextModelImpl : public Qwen3HybridModelImplBase {
                               bool init_decoder_layers)
       : Qwen3HybridModelImplBase(context) {
     if (init_decoder_layers) {
-      const int32_t n_layers = context.get_model_args().n_layers();
+      const int32_t n_layers = context.get_model_args()->n_layers();
       for (int32_t layer_id = 0; layer_id < n_layers; ++layer_id) {
         add_decoder_layer(std::make_shared<layer::Qwen3NextDecoderLayerImpl>(
             context, layer_id));
@@ -111,16 +111,17 @@ REGISTER_MODEL_ARGS(qwen3_next, [&] {
   LOAD_ARG_OR(layer_types, "layer_types", std::vector<std::string>());
 
   // MoE compatibility with fused_moe implementation.
-  LOAD_ARG_OR(n_routed_experts, "n_routed_experts", args->num_experts());
+  LOAD_ARG_OR(n_routed_experts, "n_routed_experts", model_args->num_experts());
   SET_ARG(n_shared_experts,
-          args->shared_expert_intermediate_size() > 0 ? 1 : 0);
+          model_args->shared_expert_intermediate_size() > 0 ? 1 : 0);
   SET_ARG(scoring_func, "softmax");
   SET_ARG(topk_method, "");
   SET_ARG(n_group, -1);
   SET_ARG(topk_group, 0);
   SET_ARG(routed_scaling_factor, 1.0);
 
-  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
+  SET_ARG(stop_token_ids,
+          std::unordered_set<int32_t>({model_args->eos_token_id()}));
 });
 
 }  // namespace xllm

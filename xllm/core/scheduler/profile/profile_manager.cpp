@@ -265,7 +265,7 @@ void ProfileManager::dump_step_time_profile_to_file(
 void ProfileManager::profile_step_time(bool if_dump_to_file) {
   // get the maximum prefill token length
   auto& model_args = engine_->model_args();
-  int32_t max_context_len = model_args.max_position_embeddings();
+  int32_t max_context_len = model_args->max_position_embeddings();
 
   // TODO: support length for decode request profile
   int32_t profile_max_prompt_length =
@@ -576,8 +576,8 @@ std::shared_ptr<Request> ProfileManager::generate_single_request(
     int32_t token_length,
     int32_t prefix_length) {
   auto& model_args = engine_->model_args();
-  int32_t vocab_size = model_args.vocab_size();
-  int32_t eos_token_id = model_args.eos_token_id();
+  int32_t vocab_size = model_args->vocab_size();
+  int32_t eos_token_id = model_args->eos_token_id();
 
   std::random_device rd;
   std::mt19937_64 gen(rd());
@@ -624,8 +624,8 @@ std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
   CHECK_GT(total_length, 1) << "Decode profiling requires total_length > 1.";
 
   auto& model_args = engine_->model_args();
-  int32_t vocab_size = model_args.vocab_size();
-  int32_t eos_token_id = model_args.eos_token_id();
+  int32_t vocab_size = model_args->vocab_size();
+  int32_t eos_token_id = model_args->eos_token_id();
 
   std::random_device rd;
   std::mt19937_64 gen(rd());
@@ -863,7 +863,7 @@ void ProfileManager::warmup_for_graph() {
                "requests...";
 
   auto& model_args = engine_->model_args();
-  int32_t max_context_len = model_args.max_position_embeddings();
+  int32_t max_context_len = model_args->max_position_embeddings();
 
   // Warmup parameters - align with bucket logic
   // Prefill: align max_tokens_per_batch to bucket

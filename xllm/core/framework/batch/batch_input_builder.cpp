@@ -18,6 +18,7 @@ limitations under the License.
 #include <c10/core/DeviceType.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -56,7 +57,7 @@ BatchInputBuilder::BatchInputBuilder(
     const std::vector<MMData>& mm_data_vec,
     std::vector<BlockTransferInfo>* swap_block_transfer_infos,
     const uint64_t batch_id,
-    const ModelArgs* args,
+    const std::shared_ptr<ModelArgs>& model_args,
     BatchForwardType batch_forward_type,
     int32_t cp_size,
     ThreadPool* thread_pool)
@@ -64,7 +65,7 @@ BatchInputBuilder::BatchInputBuilder(
       allowed_max_tokens_(allowed_max_tokens),
       input_embeddings_vec_(input_embeddings_vec),
       mm_data_vec_(mm_data_vec),
-      args_(args),
+      model_args_(model_args),
       thread_pool_(thread_pool),
       num_sequences_(sequences.size()),
       swap_block_transfer_infos_(swap_block_transfer_infos),
@@ -76,8 +77,8 @@ BatchInputBuilder::BatchInputBuilder(
   state_.mrope_positions_vec.reserve(sequences.size());
   state_.block_tables_vec.reserve(sequences.size());
   state_.acc_logprob_vec.reserve(sequences.size());
-  if (args_ != nullptr) {
-    use_mrope_ = (args_->rope_scaling_rope_type() == "mrope");
+  if (model_args_ != nullptr) {
+    use_mrope_ = (model_args_->rope_scaling_rope_type() == "mrope");
   }
   write_block_ids_.clear();
   state_.batch_forward_type = batch_forward_type;
@@ -351,8 +352,7 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
 
   // Handle MRope positions
   if (use_mrope_) {
-    const auto& args = *args_;
-    MPositionHelper helper(*sequence, args);
+    MPositionHelper helper(*sequence, model_args_);
     state.mrope_positions_vec.emplace_back(helper.get_positions());
   }
 
@@ -390,7 +390,7 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
 
   // Right padding for CP prefill: append physical tokens only for cache/layout.
   if (padded_seq_len > seq_len) {
-    const int32_t pad_token_id = args_ ? args_->pad_token_id() : 0;
+    const int32_t pad_token_id = model_args_ ? model_args_->pad_token_id() : 0;
     for (uint32_t j = seq_len; j < padded_seq_len; ++j) {
       state.flatten_tokens_vec.emplace_back(pad_token_id);
       if (!use_mrope_) {

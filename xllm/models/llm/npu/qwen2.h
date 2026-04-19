@@ -47,22 +47,22 @@ class QWen2ModelImpl : public LlmModelImplBase<QWen2DecoderLayer> {
     dp_rank_ = parallel_args.rank() / dp_local_tp_size;
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args.n_layers());
+    layers_.reserve(model_args->n_layers());
     norm_ = register_module("norm", layer::NpuRMSNorm(context));
     npu_embed_tokens_ =
         register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
     atb_pos_emb_ = layer::NpuPosEmbedding(context);
     cos_sin_ = layer::rotary::get_concat_rotary_embedding(
-        model_args.hidden_size() / model_args.n_heads(),
-        model_args.max_position_embeddings(),
-        model_args.rope_theta(),
+        model_args->hidden_size() / model_args->n_heads(),
+        model_args->max_position_embeddings(),
+        model_args->rope_theta(),
         options);
     int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
 
-    for (int32_t i = 0; i < model_args.n_layers(); i++) {
+    for (int32_t i = 0; i < model_args->n_layers(); i++) {
       auto block = QWen2DecoderLayer(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
@@ -109,10 +109,11 @@ REGISTER_MODEL_ARGS(qwen2, [&] {
   LOAD_ARG_OR(max_window_layers, "max_window_layers", 28);
 
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
-    return args->hidden_size() / args->n_heads();
+    return model_args->hidden_size() / model_args->n_heads();
   });
 
-  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
+  SET_ARG(stop_token_ids,
+          std::unordered_set<int32_t>({model_args->eos_token_id()}));
 });
 
 }  // namespace xllm::npu::model

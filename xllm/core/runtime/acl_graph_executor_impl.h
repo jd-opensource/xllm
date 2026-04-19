@@ -57,7 +57,7 @@ namespace xllm::npu {
 // Multiple AclGraph instances can share the same GraphPersistentParam object
 class GraphPersistentParam {
  public:
-  GraphPersistentParam(const ModelArgs& args,
+  GraphPersistentParam(const std::shared_ptr<ModelArgs>& model_args,
                        const torch::Device& device,
                        const runtime::Options& options,
                        bool need_update_attn_mask = false);
@@ -193,7 +193,7 @@ class GraphPersistentParam {
                                    const ModelInputParams& input_params,
                                    aclrtStream stream);
 
-  const ModelArgs& args_;
+  const std::shared_ptr<ModelArgs>& model_args_;
   const torch::Device& device_;
   const runtime::Options& options_;
 
@@ -256,7 +256,7 @@ class AclGraph {
 
   // Capture computation graph for given bucket num_tokens
   bool capture(CausalLM* model,
-               const ModelArgs& args,
+               const std::shared_ptr<ModelArgs>& model_args,
                const runtime::Options& options,
                const torch::Tensor& tokens,
                const torch::Tensor& positions,
@@ -300,7 +300,7 @@ class AclGraph {
 class AclGraphExecutorImpl : public ExecutorImpl {
  public:
   AclGraphExecutorImpl(CausalLM* model,
-                       const ModelArgs& args,
+                       const std::shared_ptr<ModelArgs>& model_args,
                        const torch::Device& device,
                        const runtime::Options& options);
 
@@ -321,7 +321,7 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   // not own
   CausalLM* model_;
 
-  ModelArgs args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::Device device_;
   runtime::Options options_;
 

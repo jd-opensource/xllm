@@ -93,19 +93,22 @@ REGISTER_MODEL_ARGS(
 
       // Computed parameters
       // the original head_dim in glm5 config seem useless
-      // here we use args->qk_nope_head_dim() + args->qk_rope_head_dim()
+      // here we use model_args->qk_nope_head_dim() +
+      // model_args->qk_rope_head_dim()
       SET_ARG(head_dim, 256);
-      LOAD_ARG_OR_FUNC(
-          rotary_dim, "rotary_dim", [&] { return args->qk_rope_head_dim(); });
+      LOAD_ARG_OR_FUNC(rotary_dim, "rotary_dim", [&] {
+        return model_args->qk_rope_head_dim();
+      });
 
       // GLM-5 uses default rope_type, no deepseek_yarn scaling
       SET_ARG(rope_scaling_rope_type, "default");
       LOAD_ARG_OR(indexer_rope_interleave, "indexer_rope_interleave", true);
       LOAD_ARG_OR(rope_theta, "rope_parameters.rope_theta", 1000000.0f);
 
-      SET_ARG(stop_token_ids,
-              std::unordered_set<int32_t>(args->eos_token_id_vec().begin(),
-                                          args->eos_token_id_vec().end()));
+      SET_ARG(
+          stop_token_ids,
+          std::unordered_set<int32_t>(model_args->eos_token_id_vec().begin(),
+                                      model_args->eos_token_id_vec().end()));
     }));
 
 }  // namespace xllm

@@ -17,6 +17,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -36,21 +37,21 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
     auto parallel_args = context.get_parallel_args();
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args_.n_layers());
+    layers_.reserve(model_args_->n_layers());
 
     embed_tokens_ =
         register_module("embed_tokens",
-                        layer::WordEmbedding(model_args_.vocab_size(),
-                                             model_args_.hidden_size(),
+                        layer::WordEmbedding(model_args_->vocab_size(),
+                                             model_args_->hidden_size(),
                                              context.get_parallel_args(),
                                              options));
     norm_ = register_module(
         "norm",
         layer::RMSNorm(
-            model_args_.hidden_size(), model_args_.rms_norm_eps(), options));
+            model_args_->hidden_size(), model_args_->rms_norm_eps(), options));
 
     // create decoder layers
-    for (int32_t i = 0; i < model_args_.n_layers(); ++i) {
+    for (int32_t i = 0; i < model_args_->n_layers(); ++i) {
       auto block = layer::DeepseekV2DecoderLayer(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);
@@ -156,7 +157,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
 
   layer::RMSNorm& norm_mod() { return norm_; }
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
 
  private:
   torch::nn::ModuleList blocks_{nullptr};
@@ -237,10 +238,11 @@ REGISTER_MODEL_ARGS(deepseek_v2, [&] {
   LOAD_ARG_OR(num_nextn_predict_layers, "num_nextn_predict_layers", 1);
 
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
-    return 256;  // args->qk_nope_head_dim() + args->qk_rope_head_dim();
+    return 256;  // model_args->qk_nope_head_dim() +
+                 // model_args->qk_rope_head_dim();
   });
   LOAD_ARG_OR_FUNC(
-      rotary_dim, "rotary_dim", [&] { return args->qk_rope_head_dim(); });
+      rotary_dim, "rotary_dim", [&] { return model_args->qk_rope_head_dim(); });
 
   SET_ARG(rope_scaling_rope_type, "deepseek_yarn");
   LOAD_ARG(rope_scaling_beta_fast, "rope_scaling.beta_fast");

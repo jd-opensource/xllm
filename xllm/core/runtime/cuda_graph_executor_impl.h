@@ -54,7 +54,7 @@ using TorchMemPool = c10::cuda::MemPool;
 // object
 class CudaGraphPersistentParam {
  public:
-  CudaGraphPersistentParam(const ModelArgs& args,
+  CudaGraphPersistentParam(const std::shared_ptr<ModelArgs>& model_args,
                            const torch::Device& device,
                            const runtime::Options& options);
 
@@ -190,7 +190,7 @@ class CudaGraphPersistentParam {
   }
 
  private:
-  const ModelArgs& args_;
+  const std::shared_ptr<ModelArgs>& model_args_;
   const torch::Device& device_;
   const runtime::Options& options_;
 
@@ -232,7 +232,7 @@ class CudaGraph {
 
   // Capture computation graph for given bucket num_tokens
   bool capture(CausalLM* model,
-               const ModelArgs& args,
+               const std::shared_ptr<ModelArgs>& model_args,
                const runtime::Options& options,
                const torch::Tensor& tokens,
                const torch::Tensor& positions,
@@ -279,7 +279,7 @@ class CudaGraph {
 class CudaGraphExecutorImpl : public ExecutorImpl {
  public:
   CudaGraphExecutorImpl(CausalLM* model,
-                        const ModelArgs& args,
+                        const std::shared_ptr<ModelArgs>& model_args,
                         const torch::Device& device,
                         const runtime::Options& options);
 
@@ -304,7 +304,7 @@ class CudaGraphExecutorImpl : public ExecutorImpl {
   // not own
   CausalLM* model_;
 
-  ModelArgs args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::Device device_;
   runtime::Options options_;
 

@@ -45,19 +45,19 @@ Qwen3HybridDecoderLayerImplBase::Qwen3HybridDecoderLayerImplBase(
   input_norm_ = register_module(
       "input_layernorm",
       Qwen3NextRMSNorm(
-          model_args.hidden_size(), model_args.rms_norm_eps(), options));
+          model_args->hidden_size(), model_args->rms_norm_eps(), options));
 
   post_norm_ = register_module(
       "post_attention_layernorm",
       Qwen3NextRMSNorm(
-          model_args.hidden_size(), model_args.rms_norm_eps(), options));
+          model_args->hidden_size(), model_args->rms_norm_eps(), options));
 
   // Initialize mlp
-  auto mlp_only_layers = model_args.mlp_only_layers();
+  auto mlp_only_layers = model_args->mlp_only_layers();
   if ((std::count(mlp_only_layers.begin(), mlp_only_layers.end(), layer_id) ==
        0) &&
-      model_args.n_routed_experts() > 0 &&
-      (layer_id + 1) % model_args.decoder_sparse_step() == 0) {
+      model_args->n_routed_experts() > 0 &&
+      (layer_id + 1) % model_args->decoder_sparse_step() == 0) {
     moe_mlp_ = register_module("mlp",
                                FusedMoE(model_args,
                                         FusedMoEArgs{.is_gated = true},
@@ -66,11 +66,11 @@ Qwen3HybridDecoderLayerImplBase::Qwen3HybridDecoderLayerImplBase(
                                         options));
   } else {
     mlp_ = register_module("mlp",
-                           DenseMLP(model_args.hidden_size(),
-                                    model_args.intermediate_size(),
+                           DenseMLP(model_args->hidden_size(),
+                                    model_args->intermediate_size(),
                                     true,
                                     false,
-                                    model_args.hidden_act(),
+                                    model_args->hidden_act(),
                                     /*enable_result_reduction=*/true,
                                     quant_args,
                                     parallel_args.tp_group_,

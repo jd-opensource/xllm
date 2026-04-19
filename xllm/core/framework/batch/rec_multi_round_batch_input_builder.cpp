@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -50,13 +51,13 @@ RecMultiRoundBatchInputBuilder::RecMultiRoundBatchInputBuilder(
     const std::vector<MMData>& mm_data_vec,
     std::vector<BlockTransferInfo>* swap_block_transfer_infos,
     const uint64_t batch_id,
-    const ModelArgs* args,
+    const std::shared_ptr<ModelArgs>& model_args,
     BatchForwardType batch_forward_type,
     ThreadPool* thread_pool)
     : allowed_max_tokens_(allowed_max_tokens),
       input_embeddings_vec_(input_embeddings_vec),
       mm_data_vec_(mm_data_vec),
-      args_(args),
+      model_args_(model_args),
       batch_forward_type_(batch_forward_type),
       swap_block_transfer_infos_(swap_block_transfer_infos),
       thread_pool_(thread_pool),
@@ -73,8 +74,8 @@ RecMultiRoundBatchInputBuilder::RecMultiRoundBatchInputBuilder(
   num_sequences_ = static_cast<int32_t>(sequences_.size());
   CHECK_GT(num_sequences_, 0);
 
-  if (args_ != nullptr) {
-    use_mrope_ = (args_->rope_scaling_rope_type() == "mrope");
+  if (model_args_ != nullptr) {
+    use_mrope_ = (model_args_->rope_scaling_rope_type() == "mrope");
   }
 
   // Initialize RecMultiRound specific state
@@ -185,8 +186,7 @@ void RecMultiRoundBatchInputBuilder::extract_tokens_and_positions(
 
   // Handle MRope positions
   if (use_mrope_) {
-    const auto& args = *args_;
-    MPositionHelper helper(*sequence, args);
+    MPositionHelper helper(*sequence, model_args_);
     base_state.mrope_positions_vec.push_back(helper.get_positions());
   }
 
@@ -421,8 +421,9 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
   if (is_rec_multi_round_mode() && !sequences_.empty()) {
     int64_t batch_size = static_cast<int64_t>(sequences_.size());
     int64_t n_kv_heads =
-        args_ ? args_->n_kv_heads().value_or(args_->n_heads()) : 0;
-    int64_t head_dim = args_ ? args_->head_dim() : 0;
+        model_args_ ? model_args_->n_kv_heads().value_or(model_args_->n_heads())
+                    : 0;
+    int64_t head_dim = model_args_ ? model_args_->head_dim() : 0;
 
     int32_t decode_rounds = get_rec_multi_round_decode_rounds();
     full_kv_shape = {FLAGS_max_tokens_per_batch +

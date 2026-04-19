@@ -17,6 +17,8 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
+
 #include "core/framework/model/model_output.h"
 #include "qwen2_5_vl.h"
 
@@ -33,7 +35,7 @@ class Qwen2_5_VLForMMEmbeddingImpl : public torch::nn::Module {
   std::vector<int32_t> get_images_size(torch::Tensor image_grid_thw) {
     if (!image_grid_thw.defined()) return {};
 
-    int32_t merge_size = model_args_.mm_image_merge_size();
+    int32_t merge_size = model_args_->mm_image_merge_size();
     int32_t merge_length = merge_size * merge_size;
 
     std::vector<int32_t> images_size;
@@ -99,7 +101,7 @@ class Qwen2_5_VLForMMEmbeddingImpl : public torch::nn::Module {
   const torch::TensorOptions& options() const { return options_; }
 
  private:
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
   torch::TensorOptions options_;
 
   Qwen2_5_VisionTransformer visual_{nullptr};

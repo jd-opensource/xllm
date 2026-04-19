@@ -59,7 +59,7 @@ class MtpModelImplBase : public torch::nn::Module {
     dp_local_tp_size_ = parallel_args.world_size() / dp_size_;
     dp_rank_ = parallel_args.rank() / dp_local_tp_size_;
     rank_ = parallel_args.rank();
-    num_experts_per_tok_ = model_args.num_experts_per_tok();
+    num_experts_per_tok_ = model_args->num_experts_per_tok();
 
     embed_tokens_ =
         register_module("embed_tokens", layer::NpuWordEmbedding(context));
@@ -73,8 +73,8 @@ class MtpModelImplBase : public torch::nn::Module {
     final_norm_ = register_module("final_norm", layer::NpuRMSNorm(context));
 
     blocks_ = register_module("layers", torch::nn::ModuleList());
-    layers_.reserve(model_args.n_layers());
-    for (int32_t i = 0; i < model_args.n_layers(); ++i) {
+    layers_.reserve(model_args->n_layers());
+    for (int32_t i = 0; i < model_args->n_layers(); ++i) {
       auto block = DecoderLayerType(context, i);
       layers_.push_back(block);
       blocks_->push_back(block);

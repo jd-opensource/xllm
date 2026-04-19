@@ -17,19 +17,24 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <memory>
+
 #include "common/metrics.h"
 
 namespace xllm {
 
 BaseExecutorImpl::BaseExecutorImpl(CausalLM* model,
-                                   const ModelArgs& args,
+                                   const std::shared_ptr<ModelArgs>& model_args,
                                    const torch::Device& device,
                                    const runtime::Options& options)
-    : model_(model), args_(args), device_(device), options_(options) {}
+    : model_(model),
+      model_args_(model_args),
+      device_(device),
+      options_(options) {}
 
 ForwardInput BaseExecutorImpl::prepare_inputs(Batch& batch) {
   return batch.prepare_forward_input(
-      options_.num_decoding_tokens(), 0, args_, options_.cp_size());
+      options_.num_decoding_tokens(), 0, model_args_, options_.cp_size());
 }
 
 ModelOutput BaseExecutorImpl::run(const torch::Tensor& tokens,

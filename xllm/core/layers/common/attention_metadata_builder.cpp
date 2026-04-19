@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "attention_metadata_builder.h"
 
+#include <memory>
 #include <numeric>
 
 #include "attention_metadata.h"
@@ -202,7 +203,7 @@ AttentionMetadata AttentionMetadataBuilder::build(
 
 AttentionMetadata AttentionMetadataBuilder::build(
     const ModelInputParams& params,
-    const ModelArgs& model_args,
+    const std::shared_ptr<ModelArgs>& model_args,
     const std::optional<torch::Tensor>& attn_mask) {
   return AttentionMetadataBuilder::build(
       params, model_args, "float", attn_mask);
@@ -218,11 +219,11 @@ AttentionMetadata AttentionMetadataBuilder::build(
 
 AttentionMetadata AttentionMetadataBuilder::build(
     const ModelInputParams& params,
-    const ModelArgs& model_args,
+    const std::shared_ptr<ModelArgs>& model_args,
     const std::string& compute_dtype,
     const std::optional<torch::Tensor>& attn_mask) {
   return build_attention_metadata(
-      params, model_args.enable_mla(), compute_dtype, attn_mask);
+      params, model_args->enable_mla(), compute_dtype, attn_mask);
 }
 
 }  // namespace xllm::layer

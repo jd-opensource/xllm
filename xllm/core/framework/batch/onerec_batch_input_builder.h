@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <future>
+#include <memory>
 #include <vector>
 
 #include "framework/model/model_args.h"
@@ -40,7 +41,7 @@ class OneRecBatchInputBuilder : public RecBatchInputBuilder {
       const std::vector<MMData>& mm_data_vec,
       std::vector<BlockTransferInfo>* swap_block_transfer_infos,
       const uint64_t batch_id,
-      const ModelArgs* args,
+      const std::shared_ptr<ModelArgs>& model_args,
       BatchForwardType batch_forward_type,
       ThreadPool* thread_pool = nullptr);
 
@@ -56,7 +57,7 @@ class OneRecBatchInputBuilder : public RecBatchInputBuilder {
   const std::vector<MMData>& mm_data_vec_;
   std::vector<BlockTransferInfo>* swap_block_transfer_infos_ = nullptr;
   const uint64_t batch_id_;
-  const ModelArgs* args_ = nullptr;
+  const std::shared_ptr<ModelArgs> model_args_;
   ThreadPool* thread_pool_ = nullptr;
   BatchForwardType batch_forward_type_;
   // High performance cache system

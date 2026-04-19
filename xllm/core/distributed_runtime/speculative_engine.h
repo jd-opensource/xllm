@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <memory>
+
 #include "common/macros.h"
 #include "engine.h"
 #include "framework/batch/batch.h"
@@ -44,7 +46,9 @@ class SpeculativeEngine : public Engine {
     return engine_->block_manager_pool();
   }
 
-  const ModelArgs& model_args() const override { return model_args_; }
+  const std::shared_ptr<ModelArgs>& model_args() const override {
+    return model_args_;
+  }
 
   const TokenizerArgs& tokenizer_args() const override {
     return engine_->tokenizer_args();
@@ -116,7 +120,7 @@ class SpeculativeEngine : public Engine {
   // whether target and draft engine are sharing the same device
   bool share_device_ = false;
 
-  ModelArgs model_args_;
+  std::shared_ptr<ModelArgs> model_args_;
 
   std::shared_ptr<DistManager> dist_manager_ = nullptr;
 };
