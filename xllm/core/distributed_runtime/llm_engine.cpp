@@ -613,9 +613,9 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   if (enable_gdn_attention) {
     kv_cache_shape.emplace_back(std::vector<int64_t>{
         kv_cache_cap.num_linear_state_blocks,
+        args_.linear_conv_kernel_dim() - 1,
         args_.linear_key_head_dim() * n_local_linear_k_heads_ * 2 +
-            args_.linear_key_head_dim() * n_local_linear_v_heads_,
-        args_.linear_conv_kernel_dim() - 1});
+            args_.linear_key_head_dim() * n_local_linear_v_heads_});
     kv_cache_shape.emplace_back(
         std::vector<int64_t>{kv_cache_cap.num_linear_state_blocks,
                              n_local_linear_v_heads_,

@@ -360,8 +360,8 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   auto conv_weight = conv1d_->weight();
   auto linear_state_indices = get_linear_state_indices(input_params, device);
 
-  mixed_qkv = mixed_qkv.transpose(1, 2);
   if (attn_metadata.is_prefill) {
+    mixed_qkv = mixed_qkv.transpose(1, 2);
     torch::Tensor conv_state =
         (seq_len < conv_kernel_size_ - 1)
             ? torch::pad(mixed_qkv, {0, conv_kernel_size_ - 1 - seq_len})
@@ -369,6 +369,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
             ? mixed_qkv.narrow(
                   -1, seq_len - conv_kernel_size_ + 1, conv_kernel_size_ - 1)
             : mixed_qkv;
+    conv_state = conv_state.transpose(1, 2).contiguous();
     conv_cache.index_put_({linear_state_indices},
                           conv_state.to(conv_cache.dtype()));
     torch::Tensor bias;
@@ -383,12 +384,21 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     mixed_qkv = torch::silu(conv_output.slice(2, 0, seq_len));
 
   } else {
-    xllm::kernel::CausalConv1dUpdateParams params;
-    params.x = mixed_qkv;
-    params.conv_state = conv_cache;
-    params.weight = conv_weight;
-    params.conv_state_indices = linear_state_indices;
-    mixed_qkv = xllm::kernel::causal_conv1d_update(params);
+    xllm::kernel::CausalConv1dUpdateParams conv1d_params;
+    conv1d_params.x = mixed_qkv.reshape({-1, mixed_qkv.size(-1)});
+    conv1d_params.conv_state = conv_cache;
+    conv1d_params.weight = conv_weight;
+    conv1d_params.conv_state_indices = linear_state_indices;
+    conv1d_params.block_idx_last_scheduled_token =
+        std::optional<torch::Tensor>();
+    conv1d_params.initial_state_idx = std::optional<torch::Tensor>();
+    conv1d_params.query_start_loc = attn_metadata.q_cu_seq_lens;
+    conv1d_params.max_query_len = attn_metadata.max_query_len;
+    mixed_qkv = xllm::kernel::causal_conv1d_update(conv1d_params);
+    // Reshape back to 3D [batch_size, dim, seq_len]
+    mixed_qkv =
+        mixed_qkv.view({batch_size, -1, mixed_qkv.size(-1)}).contiguous();
+    mixed_qkv = mixed_qkv.transpose(1, 2);
   }
 
   // Compute gated delta net decay and beta terms.
