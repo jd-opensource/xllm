@@ -35,7 +35,7 @@ limitations under the License.
 namespace xllm::kernel::npu::tilelang {
 namespace {
 
-constexpr int64_t kCompileMaxBatch = 4096;
+constexpr int64_t kCompileMaxBatch = 262144;
 constexpr int64_t kCompileMaxHeads = 128;
 constexpr int32_t kBatchSpecializationMin = 2;
 constexpr int32_t kBatchSpecializationStep = 2;
@@ -128,10 +128,10 @@ void check_supported(const torch::Tensor& A_log,
       << "TileLang fused_gdn_gating: a last-dim stride must be 1";
   CHECK_EQ(b.stride(1), 1)
       << "TileLang fused_gdn_gating: b last-dim stride must be 1";
-  CHECK_GT(a.stride(0), 0)
-      << "TileLang fused_gdn_gating: a row stride must be > 0";
-  CHECK_GT(b.stride(0), 0)
-      << "TileLang fused_gdn_gating: b row stride must be > 0";
+  CHECK_EQ(a.stride(0), a.size(1))
+      << "TileLang fused_gdn_gating: a must be row-contiguous";
+  CHECK_EQ(b.stride(0), b.size(1))
+      << "TileLang fused_gdn_gating: b must be row-contiguous";
 }
 
 FusedGdnGatingSpecialization build_runtime_specialization(
