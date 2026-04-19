@@ -1,4 +1,3 @@
-include(cc_binary)
 include(cc_library)
 include(cc_test)
 
@@ -8,13 +7,24 @@ cc_library(
     kv_cache
   HDRS
     embedding_cache.h
+    indexed_kv_cache_impl.h
     kv_cache.h
     kv_cache_event.h
+    kv_cache_impl.h
+    kv_cache_utils.h
+    linear_attention_kv_cache_impl.h
+    quantized_kv_cache_impl.h
   SRCS
     embedding_cache.cpp 
+    indexed_kv_cache_impl.cpp
     kv_cache.cpp
+    kv_cache_impl.cpp
+    kv_cache_utils.cpp
+    linear_attention_kv_cache_impl.cpp
+    quantized_kv_cache_impl.cpp
   DEPS
     :common
+    :xtensor
     glog::glog
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
@@ -26,9 +36,7 @@ cc_test(
   SRCS
     embedding_cache_test.cpp
   DEPS
-    :xllm_server
     :kv_cache
-    $<$<BOOL:${USE_NPU}>:xllm_server>
     GTest::gtest_main
 )
 target_link_libraries(embedding_cache_test

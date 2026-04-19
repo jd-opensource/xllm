@@ -17,6 +17,7 @@ cc_test(
   DEPS
     :common_layers
     :mlu_layers
+    :block
     :parallel_state
     :model
     :model_context
@@ -95,7 +96,7 @@ cc_test(
     deepseek_v2_attention_multi_device_tests.cpp
     tests_utils.cpp
   DEPS
-    :common_layers
+    :block
     :mlu_layers
     :parallel_state
     :state_dict

@@ -312,12 +312,12 @@ TEST(BatchTest, KVCacheEmptySupportsLinearOnlyAndFullOnlyLayouts) {
   auto conv_cache = torch::zeros({2, 4, 3}, options);
   auto ssm_cache = torch::zeros({2, 1, 4, 4}, options);
   KVCache linear_only_cache(
-      torch::Tensor(), torch::Tensor(), conv_cache, ssm_cache);
+      LinearAttentionKVCacheTensors{conv_cache, ssm_cache});
   EXPECT_FALSE(linear_only_cache.empty());
 
   auto key_cache = torch::zeros({2, 4, 1, 8}, options);
   auto value_cache = torch::zeros({2, 4, 1, 8}, options);
-  KVCache full_only_cache(key_cache, value_cache);
+  KVCache full_only_cache(KVCacheTensors{key_cache, value_cache});
   EXPECT_FALSE(full_only_cache.empty());
 
   KVCache empty_cache;

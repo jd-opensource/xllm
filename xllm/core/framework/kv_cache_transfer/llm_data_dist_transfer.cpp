@@ -167,9 +167,10 @@ void LlmDataDistTransfer::allocate_kv_cache(
     value_cache = v_torch_tensors[i];
     if (enable_lighting_indexer_) {
       index_cache = index_torch_tensors[i];
-      kv_caches.emplace_back(key_cache, value_cache, index_cache);
+      kv_caches.emplace_back(IndexedKVCacheTensors{
+          KVCacheTensors{key_cache, value_cache}, index_cache});
     } else {
-      kv_caches.emplace_back(key_cache, value_cache);
+      kv_caches.emplace_back(KVCacheTensors{key_cache, value_cache});
     }
   }
 

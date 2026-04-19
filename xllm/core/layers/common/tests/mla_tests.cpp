@@ -17,6 +17,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -28,6 +29,17 @@ limitations under the License.
 
 namespace xllm {
 namespace layer {
+
+namespace {
+
+KVCache create_indexed_kv_cache(torch::Tensor key_cache,
+                                torch::Tensor index_cache) {
+  return KVCache(IndexedKVCacheTensors{
+      KVCacheTensors{key_cache, torch::Tensor()}, index_cache});
+}
+
+}  // namespace
+
 class DeepseekMLATest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -287,7 +299,8 @@ TEST_F(DeepseekMLATest, PrefillTestRandomInput) {
   auto index_cache =
       create_seeded_cache("mla.prefill.index_cache",
                           {block_num, 1, 1, model_args_.index_head_dim()});
-  KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
+  KVCache kv_cache =
+      create_indexed_kv_cache(std::move(k_cache), std::move(index_cache));
 
   auto output = run_single_test(false,
                                 batch_size,
@@ -337,7 +350,8 @@ TEST_F(DeepseekMLATest, DecoderTestRandomInput) {
   auto index_cache =
       create_seeded_cache("mla.decoder.index_cache",
                           {block_num, 1, 1, model_args_.index_head_dim()});
-  KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
+  KVCache kv_cache =
+      create_indexed_kv_cache(std::move(k_cache), std::move(index_cache));
 
   auto output_non_fused = run_single_test(false,
                                           batch_size,
@@ -380,7 +394,8 @@ TEST_F(DeepseekMLATest, VariousBatchSizesTest) {
     auto index_cache = create_seeded_cache(
         "mla.batch.index_cache." + std::to_string(batch_size),
         {block_num, 1, 1, model_args_.index_head_dim()});
-    KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
+    KVCache kv_cache =
+        create_indexed_kv_cache(std::move(k_cache), std::move(index_cache));
 
     bool is_prefill = false;
     auto output_fused = run_single_test(true,
@@ -425,7 +440,8 @@ TEST_F(DeepseekMLATest, DefaultRopePrefillTest) {
   auto index_cache =
       create_seeded_cache("mla.default_rope.index_cache",
                           {block_num, 1, 1, model_args_.index_head_dim()});
-  KVCache kv_cache(k_cache, torch::Tensor(), index_cache);
+  KVCache kv_cache =
+      create_indexed_kv_cache(std::move(k_cache), std::move(index_cache));
 
   auto output = run_single_test(false,
                                 batch_size,

@@ -15,6 +15,13 @@ limitations under the License.
 
 #pragma once
 
+// clang-format off
+#if defined(USE_NPU)
+#include "acl/acl_rt.h"
+#include "platform/npu/npu_layer_synchronizer.h"
+#endif
+// clang-format on
+
 #include <torch/torch.h>
 
 #include <memory>
@@ -25,11 +32,6 @@ limitations under the License.
 #include "platform/device.h"
 #include "util/blockingconcurrentqueue.h"
 #include "util/threadpool.h"
-
-#if defined(USE_NPU)
-#include "acl/acl_rt.h"
-#include "platform/npu/npu_layer_synchronizer.h"
-#endif
 
 namespace xllm {
 class HierarchyKVCacheTransfer {

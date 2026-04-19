@@ -418,4 +418,11 @@ inline int64_t resolve_ssm_dtype_size(const std::string& mamba_ssm_dtype_str,
   return default_dtype_size;
 }
 
+inline std::vector<int64_t> get_tensor_shape(const torch::Tensor& tensor) {
+  if (!tensor.defined() || tensor.numel() == 0) {
+    return {};
+  }
+  c10::IntArrayRef sizes = tensor.sizes();
+  return std::vector<int64_t>(sizes.begin(), sizes.end());
+}
 }  // namespace xllm

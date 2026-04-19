@@ -140,7 +140,7 @@ void SpecKVCacheTransfer::allocate_kv_cache_internal(
   for (int64_t i = 0; i < num_layers; ++i) {
     key_cache = k_torch_tensors[i];
     value_cache = v_torch_tensors[i];
-    kv_caches.emplace_back(key_cache, value_cache);
+    kv_caches.emplace_back(KVCacheTensors{key_cache, value_cache});
   }
 
   // register key cache

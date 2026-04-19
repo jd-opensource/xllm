@@ -19,11 +19,10 @@ limitations under the License.
 #include <torch/torch.h>
 #include <torch_npu/torch_npu.h>
 
+#include <cstdlib>
 #include <memory>
 #include <vector>
 
-#include "acl_graph_executor_impl.h"
-#include "base_executor_impl.h"
 #include "core/framework/batch/batch.h"
 #include "core/framework/block/block.h"
 #include "core/framework/block/block_manager_impl.h"
@@ -36,7 +35,9 @@ limitations under the License.
 #include "core/framework/sampling/sampling_params.h"
 #include "core/layers/npu/npu_lm_head_impl.h"
 #include "core/layers/npu/npu_word_embedding_impl.h"
-#include "runtime/options.h"
+#include "core/runtime/acl_graph_executor_impl.h"
+#include "core/runtime/base_executor_impl.h"
+#include "core/runtime/options.h"
 
 // Global test environment for ACL graph executor tests
 class AclGraphExecutorTestEnvironment : public ::testing::Environment {
@@ -75,7 +76,7 @@ namespace {
 const KVCache& first_full_attention_cache(
     const std::vector<KVCache>& kv_caches) {
   for (const auto& kv_cache : kv_caches) {
-    if (kv_cache.has_kv_cache()) {
+    if (!kv_cache.empty()) {
       auto k_cache = kv_cache.get_k_cache();
       if (k_cache.defined() && k_cache.numel() > 0) {
         return kv_cache;
@@ -83,6 +84,7 @@ const KVCache& first_full_attention_cache(
     }
   }
   LOG(FATAL) << "No full-attention KV cache found";
+  std::abort();
 }
 }  // namespace
 
@@ -350,10 +352,10 @@ class AclGraphExecutorTest : public ::testing::Test {
     const int64_t hidden_size = model_args_.hidden_size();
 
     // Create KV cache with shape [n_blocks, block_size, hidden_size]
-    auto kv_cache =
+    torch::Tensor kv_cache =
         torch::randn({n_blocks, block_size * hidden_size},
                      torch::dtype(torch::kFloat32).device(*device_));
-    kv_caches_.emplace_back(kv_cache, kv_cache);
+    kv_caches_.emplace_back(KVCacheTensors{kv_cache, kv_cache});
   }
 
   void TearDown() override { return; }
@@ -694,7 +696,7 @@ TEST(AclGraphExecutorHybridTest, KvCacheSupportsLinearOnlyLayers) {
   auto conv_cache = torch::zeros({4, 32, 3}, torch::dtype(torch::kFloat32));
   auto ssm_cache = torch::zeros({4, 8, 64, 64}, torch::dtype(torch::kFloat32));
   KVCache linear_only_cache(
-      torch::Tensor(), torch::Tensor(), conv_cache, ssm_cache);
+      LinearAttentionKVCacheTensors{conv_cache, ssm_cache});
 
   EXPECT_FALSE(linear_only_cache.empty());
   EXPECT_FALSE(linear_only_cache.get_conv_cache().defined() == false);
@@ -734,8 +736,8 @@ TEST_F(AclGraphExecutorTest, GraphExecutorUsesFirstFullAttentionKvCache) {
 
   std::vector<KVCache> hybrid_kv_caches;
   hybrid_kv_caches.emplace_back(
-      torch::Tensor(), torch::Tensor(), conv_cache, ssm_cache);
-  hybrid_kv_caches.emplace_back(full_k, full_v);
+      LinearAttentionKVCacheTensors{conv_cache, ssm_cache});
+  hybrid_kv_caches.emplace_back(KVCacheTensors{full_k, full_v});
 
   auto eager_model_output = model_->forward({forward_input.token_ids},
                                             {forward_input.positions},

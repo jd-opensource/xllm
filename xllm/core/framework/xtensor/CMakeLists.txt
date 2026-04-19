@@ -39,4 +39,5 @@ cc_library(
     proto::xllm_proto
     :collective_service
     :platform
+    :xllm_server
 )
