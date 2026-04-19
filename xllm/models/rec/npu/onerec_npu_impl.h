@@ -251,8 +251,10 @@ class OneRecStackImpl : public torch::nn::Module {
     const bool is_decode_stage = is_decoder_ && !is_prefill;
     torch::Tensor effective_attn_mask;
     if (use_absolute_position_embedding_) {
+      const int64_t batch_size =
+          std::max<int64_t>(1, input_params.num_sequences);
       effective_attn_mask =
-          create_moe_attention_mask(query_length, h, is_decoder_);
+          create_moe_attention_mask(query_length, h, is_decoder_, batch_size);
     } else {
       effective_attn_mask = compute_position_bias_mask(
           query_length, key_length, h, is_decode_stage, input_params);
@@ -382,24 +384,22 @@ class OneRecStackImpl : public torch::nn::Module {
 
   torch::Tensor create_moe_attention_mask(int64_t seq_length,
                                           const torch::Tensor& h,
-                                          bool is_decoder) const {
+                                          bool is_decoder,
+                                          int64_t batch_size) const {
     if (!is_decoder) {
       return torch::ones({num_heads_, seq_length, seq_length}, h.options());
     }
 
-    const float mask_value = -9984.0f;
-    auto upper_tri_mask =
+    batch_size = std::max<int64_t>(1, batch_size);
+    torch::Tensor mask =
         torch::triu(torch::ones({seq_length, seq_length},
-                                torch::dtype(h.dtype()).device(h.device())),
-                    1);
-    auto expanded_mask = upper_tri_mask.unsqueeze(0).expand(
-        {num_heads_, seq_length, seq_length});
-    auto effective_attn_mask =
-        torch::zeros({num_heads_, seq_length, seq_length},
-                     torch::dtype(h.dtype()).device(h.device()));
-    effective_attn_mask.masked_fill_(expanded_mask.to(torch::kBool),
-                                     mask_value);
-    return effective_attn_mask;
+                                h.options().dtype(torch::kUInt8)),
+                    1)
+            .unsqueeze(0)
+            .unsqueeze(0)
+            .expand({batch_size, 1, seq_length, seq_length})
+            .contiguous();
+    return mask;
   }
 
   torch::Tensor compute_position_bias_mask(

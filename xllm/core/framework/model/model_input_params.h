@@ -68,7 +68,7 @@ struct OneRecModelInputParams {
   torch::Tensor cross_attn_kv_cu_seq_lens;
   torch::Tensor cross_attn_new_cache_slots;
   torch::Tensor cross_attn_block_tables;
-  std::vector<int> cross_attn_kv_cu_seq_lens_vec;
+  std::vector<int32_t> cross_attn_kv_cu_seq_lens_vec;
 
   torch::Tensor encoder_token_ids;
   torch::Tensor encoder_positions;

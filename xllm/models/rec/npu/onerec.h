@@ -270,8 +270,17 @@ class OneRecForConditionalGenerationImpl final
   void load_model(std::unique_ptr<ModelLoader> loader,
                   std::string prefix = "model.") override {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      StateDict model_state_dict = state_dict->get_dict_with_prefix(prefix);
-      if (model_state_dict.size() == 0) {
+      StateDict prefixed_state_dict =
+          state_dict->get_dict_with_prefix("module.module3.t5_model.");
+      StateDict model_state_dict =
+          prefixed_state_dict.size() > 0
+              ? prefixed_state_dict
+              : state_dict->get_dict_with_prefix(prefix);
+      if (prefixed_state_dict.size() > 0) {
+        LOG(INFO) << "Detected temporary OneRec checkpoint prefix "
+                  << "`module.module3.t5_model.`; loading weights via the "
+                     "compatibility path.";
+      } else if (model_state_dict.size() == 0) {
         model_state_dict = *state_dict;
       }
       model_->load_state_dict(model_state_dict);
