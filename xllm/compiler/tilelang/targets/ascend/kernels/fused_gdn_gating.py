@@ -26,7 +26,15 @@ VEC_NUM = 2
 VECTOR_BYTES_PER_ITER = 256
 SUPPORTED_NUM_HEADS = (4, 6, 8, 12, 16, 24, 32, 48, 64, 128)
 MAX_VEC_CORE_NUM = detect_vec_core_num()
-BATCH_SIZE_SPECIALIZATIONS = tuple(range(2, 49, 2))
+
+
+def _build_batch_size_specializations() -> tuple[int, ...]:
+    small_dense = range(2, 49, 2)
+    large_sparse = range(64, DEFAULT_MAX_BATCH + 1, 64)
+    return tuple(sorted(set((*small_dense, *large_sparse))))
+
+
+BATCH_SIZE_SPECIALIZATIONS = _build_batch_size_specializations()
 
 
 def select_launch_block_num(*, num_batches: int, vec_core_num: int) -> int:

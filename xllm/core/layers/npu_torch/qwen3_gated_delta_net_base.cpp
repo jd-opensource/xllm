@@ -393,15 +393,16 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
 
   // Compute gated delta net decay and beta terms.
   if (attn_metadata.is_prefill) {
-    beta = torch::sigmoid(b);
-    torch::Tensor A_log_exp = A_log_.exp();
-    torch::Tensor a_float = a.to(torch::kFloat32);
-    torch::Tensor a_plus_dt = a_float + dt_bias_;
-    torch::Tensor softplus_out = torch::nn::functional::softplus(
-        a_plus_dt,
-        torch::nn::functional::SoftplusFuncOptions().beta(1.0).threshold(20.0));
-    g = -A_log_exp * softplus_out;
-    g = g.to(a.dtype()).contiguous();
+    xllm::kernel::FusedGdnGatingParams gdn_params;
+    gdn_params.A_log = A_log_;
+    gdn_params.a = a.contiguous().view({-1, a.size(-1)});
+    gdn_params.b = b.contiguous().view({-1, b.size(-1)});
+    gdn_params.dt_bias = dt_bias_;
+    gdn_params.beta = 1.0f;
+    gdn_params.threshold = 20.0f;
+    std::tie(g, beta) = xllm::kernel::fused_gdn_gating(gdn_params);
+    g = g.squeeze(0).contiguous().view({batch_size, seq_len, a.size(-1)});
+    beta = beta.squeeze(0).contiguous().view({batch_size, seq_len, b.size(-1)});
   } else {
     xllm::kernel::FusedGdnGatingParams gdn_params;
     gdn_params.A_log = A_log_;

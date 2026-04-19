@@ -193,8 +193,9 @@ void run_tilelang_fused_gdn_gating_chunk(const torch::Tensor& A_log,
 
   auto specialization = build_runtime_specialization(a);
   const auto* entry = find_fused_gdn_gating_kernel_entry(specialization);
-  // Expected fast path: compiled batch_size variants are dense [2, 4, ..., 48].
-  // If a value is missing, fall back to the nearest smaller batch_size.
+  // Small batch-size variants are dense [2, 4, ..., 48]. Larger long-prefill
+  // variants are compiled sparsely and dispatch falls back to the nearest
+  // smaller batch_size when an exact value is not available.
   if (entry == nullptr) {
     int32_t fallback_batch_size =
         specialization.batch_size - kBatchSpecializationStep;
