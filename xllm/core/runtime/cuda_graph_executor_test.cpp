@@ -20,6 +20,7 @@ limitations under the License.
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -290,6 +291,263 @@ std::vector<KVCache> MakeHybridKvCaches(const torch::Device& device,
       torch::zeros({8, num_kv_heads, head_dim, head_dim}, linear_options);
   return {KVCache(torch::Tensor(), torch::Tensor(), conv_cache, ssm_cache),
           KVCache(full_kv.get_k_cache(), full_kv.get_v_cache())};
+}
+
+ModelArgs make_test_model_args() {
+  ModelArgs args;
+  args.model_type("fake_attn");
+  args.dtype("bfloat16");
+  args.hidden_size(256);
+  args.max_position_embeddings(32);
+  args.vocab_size(2048);
+  args.n_layers(1);
+  args.n_heads(2);
+  args.head_dim(128);
+  args.n_kv_heads(1);
+  return args;
+}
+
+runtime::Options make_test_runtime_options(int64_t max_seqs_per_batch) {
+  runtime::Options options;
+  options.block_size(1);
+  options.max_seqs_per_batch(max_seqs_per_batch);
+  return options;
+}
+
+ModelInputParams make_multi_sequence_decode_params(
+    const torch::Device& device) {
+  ModelInputParams p;
+  p.batch_forward_type = BatchForwardType::DECODE;
+  p.num_sequences = 2;
+  p.kv_max_seq_len = 9;
+  p.q_max_seq_len = 1;
+  p.enable_cuda_graph = false;
+
+  torch::TensorOptions iopt =
+      torch::TensorOptions().dtype(torch::kInt32).device(device);
+  p.q_seq_lens = torch::tensor({0, 1, 2}, iopt);
+  p.kv_seq_lens = torch::tensor({0, 4, 9}, iopt);
+  p.q_cu_seq_lens = p.q_seq_lens;
+  p.new_cache_slots = torch::tensor({5, 7}, iopt);
+  p.block_tables = torch::tensor({{0, 1, 2, 3}, {4, 5, 6, 7}}, iopt);
+  p.paged_kv_indptr = torch::tensor({0, 1, 3}, iopt);
+  p.paged_kv_indices = torch::tensor({2, 4, 6}, iopt);
+  p.paged_kv_last_page_len = torch::tensor({1, 2}, iopt);
+  return p;
+}
+
+TEST(CudaGraphExecutorTest, DecodeMetadataFastPathUpdatesPersistentBuffers) {
+  if (!torch::cuda::is_available()) {
+    GTEST_SKIP() << "CUDA is not available at runtime.";
+  }
+
+  const torch::Device device = InitXllmCudaDeviceForTest(/*device_index=*/0);
+  xllm::layer::flashinfer::FlashinferWorkspace::get_instance().initialize(
+      device);
+  ModelArgs args = make_test_model_args();
+  runtime::Options options =
+      make_test_runtime_options(/*max_seqs_per_batch=*/2);
+  runtime::cuda::CudaGraphPersistentParam persistent(args, device, options);
+
+  torch::TensorOptions iopt =
+      torch::TensorOptions().dtype(torch::kInt32).device(device);
+  torch::Tensor tokens = torch::tensor({10, 11}, iopt);
+  torch::Tensor positions = torch::tensor({20, 21}, iopt);
+  ModelInputParams params = make_multi_sequence_decode_params(device);
+  std::vector<KVCache> kv = MakeKvCaches(device,
+                                         /*num_pages=*/16,
+                                         /*page_size=*/1,
+                                         /*num_kv_heads=*/1,
+                                         /*head_dim=*/128);
+
+  std::optional<ModelInputParams> updated =
+      persistent.update(tokens,
+                        kv[0].get_k_cache(),
+                        kv[0].get_v_cache(),
+                        positions,
+                        params,
+                        /*padded_num_tokens=*/4,
+                        /*return_capture_params=*/true);
+
+  ASSERT_TRUE(updated.has_value());
+  ASSERT_TRUE(updated->attn_metadata);
+
+  EXPECT_TRUE(
+      torch::equal(persistent.persistent_tokens(/*actual_tokens=*/4).cpu(),
+                   torch::tensor({10, 11, 0, 0}, torch::dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(persistent.persistent_positions(/*actual_tokens=*/2).cpu(),
+                   torch::tensor({20, 21}, torch::dtype(torch::kInt32))));
+  EXPECT_TRUE(torch::equal(
+      persistent.persistent_new_cache_slots(/*actual_tokens=*/4).cpu(),
+      torch::tensor({5, 7, 0, 0}, torch::dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(persistent.kv_seq_lens(/*actual_batch_size=*/3).cpu(),
+                   torch::tensor({0, 4, 9}, torch::dtype(torch::kInt32))));
+  EXPECT_TRUE(torch::equal(
+      persistent.persistent_kv_seq_lens_delta(/*actual_batch_size=*/2).cpu(),
+      torch::tensor({4, 5}, torch::dtype(torch::kInt32))));
+
+  EXPECT_TRUE(
+      torch::equal(updated->attn_metadata->q_cu_seq_lens.cpu(),
+                   torch::tensor({0, 1, 2}, torch::dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(updated->attn_metadata->kv_cu_seq_lens.cpu(),
+                   torch::tensor({0, 4, 9}, torch::dtype(torch::kInt32))));
+  EXPECT_TRUE(torch::equal(updated->attn_metadata->kv_seq_lens.cpu(),
+                           torch::tensor({4, 5}, torch::dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(updated->attn_metadata->slot_mapping.cpu(),
+                   torch::tensor({5, 7, 0, 0}, torch::dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(updated->attn_metadata->paged_kv_indptr.cpu(),
+                   torch::tensor({0, 1, 3}, torch::dtype(torch::kInt32))));
+  EXPECT_TRUE(
+      torch::equal(updated->attn_metadata->paged_kv_indices
+                       .slice(/*dim=*/0,
+                              /*start=*/0,
+                              /*end=*/3)
+                       .cpu(),
+                   torch::tensor({2, 4, 6}, torch::dtype(torch::kInt32))));
+  EXPECT_TRUE(torch::equal(updated->attn_metadata->paged_kv_last_page_len.cpu(),
+                           torch::tensor({1, 2}, torch::dtype(torch::kInt32))));
+  ASSERT_TRUE(updated->attn_metadata->qo_indptr.has_value());
+  EXPECT_TRUE(
+      torch::equal(updated->attn_metadata->qo_indptr.value().cpu(),
+                   torch::tensor({0, 1, 2}, torch::dtype(torch::kInt32))));
+  EXPECT_TRUE(torch::equal(updated->attn_metadata->block_table.cpu(),
+                           params.block_tables.cpu()));
+}
+
+TEST(CudaGraphExecutorTest, DecodeMetadataFastPathUpdatesLinearStateIndices) {
+  if (!torch::cuda::is_available()) {
+    GTEST_SKIP() << "CUDA is not available at runtime.";
+  }
+
+  const torch::Device device = InitXllmCudaDeviceForTest(/*device_index=*/0);
+  xllm::layer::flashinfer::FlashinferWorkspace::get_instance().initialize(
+      device);
+  ModelArgs args = make_test_model_args();
+  runtime::Options options =
+      make_test_runtime_options(/*max_seqs_per_batch=*/2);
+  runtime::cuda::CudaGraphPersistentParam persistent(args, device, options);
+
+  torch::TensorOptions iopt =
+      torch::TensorOptions().dtype(torch::kInt32).device(device);
+  torch::Tensor tokens = torch::tensor({10, 11}, iopt);
+  torch::Tensor positions = torch::tensor({20, 21}, iopt);
+  ModelInputParams params = make_multi_sequence_decode_params(device);
+  params.linear_state_ids = {8, 6};
+  params.linear_state_indices = torch::tensor({8, 6}, iopt);
+  std::vector<KVCache> kv = MakeKvCaches(device,
+                                         /*num_pages=*/16,
+                                         /*page_size=*/1,
+                                         /*num_kv_heads=*/1,
+                                         /*head_dim=*/128);
+
+  std::optional<ModelInputParams> updated =
+      persistent.update(tokens,
+                        kv[0].get_k_cache(),
+                        kv[0].get_v_cache(),
+                        positions,
+                        params,
+                        /*padded_num_tokens=*/4,
+                        /*return_capture_params=*/true);
+
+  ASSERT_TRUE(updated.has_value());
+  EXPECT_TRUE(torch::equal(
+      persistent.persistent_linear_state_indices(/*actual_batch_size=*/2).cpu(),
+      torch::tensor({8, 6}, torch::dtype(torch::kInt32))));
+  EXPECT_TRUE(torch::equal(updated->linear_state_indices.cpu(),
+                           torch::tensor({8, 6}, torch::dtype(torch::kInt32))));
+}
+
+TEST(CudaGraphExecutorTest, DecodeMetadataFastPathFallbackMatchesLegacyPath) {
+  if (!torch::cuda::is_available()) {
+    GTEST_SKIP() << "CUDA is not available at runtime.";
+  }
+
+  const torch::Device device = InitXllmCudaDeviceForTest(/*device_index=*/0);
+  xllm::layer::flashinfer::FlashinferWorkspace::get_instance().initialize(
+      device);
+  ModelArgs args = make_test_model_args();
+  runtime::Options options =
+      make_test_runtime_options(/*max_seqs_per_batch=*/2);
+  runtime::cuda::CudaGraphPersistentParam fast_path_persistent(
+      args, device, options);
+  runtime::cuda::CudaGraphPersistentParam fallback_persistent(
+      args, device, options);
+
+  torch::TensorOptions iopt =
+      torch::TensorOptions().dtype(torch::kInt32).device(device);
+  torch::Tensor tokens = torch::tensor({10, 11}, iopt);
+  torch::Tensor positions = torch::tensor({20, 21}, iopt);
+  ModelInputParams fast_params = make_multi_sequence_decode_params(device);
+  ModelInputParams fallback_params = make_multi_sequence_decode_params(device);
+  torch::Tensor new_cache_slots_base =
+      torch::tensor({5, 99, 7, 88}, iopt).view({2, 2});
+  fallback_params.new_cache_slots = new_cache_slots_base.select(1, 0);
+  ASSERT_FALSE(fallback_params.new_cache_slots.is_contiguous());
+
+  std::vector<KVCache> kv = MakeKvCaches(device,
+                                         /*num_pages=*/16,
+                                         /*page_size=*/1,
+                                         /*num_kv_heads=*/1,
+                                         /*head_dim=*/128);
+
+  std::optional<ModelInputParams> fast_updated =
+      fast_path_persistent.update(tokens,
+                                  kv[0].get_k_cache(),
+                                  kv[0].get_v_cache(),
+                                  positions,
+                                  fast_params,
+                                  /*padded_num_tokens=*/4,
+                                  /*return_capture_params=*/true);
+  std::optional<ModelInputParams> fallback_updated =
+      fallback_persistent.update(tokens,
+                                 kv[0].get_k_cache(),
+                                 kv[0].get_v_cache(),
+                                 positions,
+                                 fallback_params,
+                                 /*padded_num_tokens=*/4,
+                                 /*return_capture_params=*/true);
+
+  ASSERT_TRUE(fast_updated.has_value());
+  ASSERT_TRUE(fallback_updated.has_value());
+  ASSERT_TRUE(fast_updated->attn_metadata);
+  ASSERT_TRUE(fallback_updated->attn_metadata);
+
+  EXPECT_TRUE(torch::equal(
+      fast_path_persistent.persistent_tokens(/*actual_tokens=*/4).cpu(),
+      fallback_persistent.persistent_tokens(/*actual_tokens=*/4).cpu()));
+  EXPECT_TRUE(torch::equal(
+      fast_path_persistent.persistent_positions(/*actual_tokens=*/2).cpu(),
+      fallback_persistent.persistent_positions(/*actual_tokens=*/2).cpu()));
+  EXPECT_TRUE(torch::equal(
+      fast_path_persistent.persistent_new_cache_slots(/*actual_tokens=*/4)
+          .cpu(),
+      fallback_persistent.persistent_new_cache_slots(/*actual_tokens=*/4)
+          .cpu()));
+  EXPECT_TRUE(torch::equal(
+      fast_path_persistent.kv_seq_lens(/*actual_batch_size=*/3).cpu(),
+      fallback_persistent.kv_seq_lens(/*actual_batch_size=*/3).cpu()));
+  EXPECT_TRUE(torch::equal(fast_updated->attn_metadata->kv_seq_lens.cpu(),
+                           fallback_updated->attn_metadata->kv_seq_lens.cpu()));
+  EXPECT_TRUE(
+      torch::equal(fast_updated->attn_metadata->q_cu_seq_lens.cpu(),
+                   fallback_updated->attn_metadata->q_cu_seq_lens.cpu()));
+  EXPECT_TRUE(
+      torch::equal(fast_updated->attn_metadata->slot_mapping.cpu(),
+                   fallback_updated->attn_metadata->slot_mapping.cpu()));
+  EXPECT_TRUE(
+      torch::equal(fast_updated->attn_metadata->paged_kv_indptr.cpu(),
+                   fallback_updated->attn_metadata->paged_kv_indptr.cpu()));
+  EXPECT_TRUE(
+      torch::equal(fast_updated->attn_metadata->paged_kv_indices.cpu(),
+                   fallback_updated->attn_metadata->paged_kv_indices.cpu()));
+  EXPECT_TRUE(torch::equal(
+      fast_updated->attn_metadata->paged_kv_last_page_len.cpu(),
+      fallback_updated->attn_metadata->paged_kv_last_page_len.cpu()));
 }
 
 TEST(CudaGraphExecutorTest, BatchDecodeCaptureAndReplay) {
