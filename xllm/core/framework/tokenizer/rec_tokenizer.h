@@ -23,6 +23,7 @@ limitations under the License.
 #include <string_view>
 #include <vector>
 
+#include "common/types.h"
 #include "tokenizer.h"
 #include "tokenizer_args.h"
 #include "util/slice.h"
