@@ -31,13 +31,14 @@ constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
 namespace {
 runtime::Options MTPTargetOptions(const runtime::Options& options) {
   auto opts = options;
-  opts.enable_schedule_overlap(false);
+  opts.enable_schedule_overlap(false).is_draft_engine(false);
   return opts;
 }
 
 runtime::Options MTPDraftOptions(const runtime::Options& options) {
   auto opts = options;
   opts.enable_schedule_overlap(false)
+      .is_draft_engine(true)
       .num_decoding_tokens(1)
       .num_speculative_tokens(0);
   return opts;

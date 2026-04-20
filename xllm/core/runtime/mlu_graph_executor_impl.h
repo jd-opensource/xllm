@@ -120,6 +120,13 @@ class MluGraphExecutorImpl : public ExecutorImpl {
                   const ModelInputParams& params) override;
 
  private:
+  bool should_eager(const ModelInputParams& params) const;
+  ModelOutput run_eager(const torch::Tensor& tokens,
+                        const torch::Tensor& positions,
+                        std::vector<KVCache>& kv_caches,
+                        const ModelInputParams& params);
+  void init_param_once();
+
   CausalLM* model_;  // not owned
   ModelArgs args_;
   torch::Device device_;

@@ -181,6 +181,56 @@ TEST(DpUtilsTest, GetDpGatherTokensKeepsShardTokensPositive) {
   EXPECT_GT(shape.shard_tokens, 0);
 }
 
+TEST(DpUtilsTest, GatherGlobalTokensTpOneHandlesEqualDpTokens) {
+  std::unique_ptr<xllm::ProcessGroup> process_group;
+  std::unique_ptr<xllm::ProcessGroup> tp_group;
+  ParallelArgs args =
+      make_world_args(process_group, tp_group, /*global_rank=*/2, 3, 1);
+  const std::vector<int32_t> dp_tokens = {4, 4, 4};
+
+  auto* mock_pg = dynamic_cast<test::MockProcessGroup*>(process_group.get());
+  ASSERT_NE(mock_pg, nullptr);
+  auto shards = make_global_shards(dp_tokens, /*tp_size=*/1);
+  mock_pg->set_allgather_outputs(shards);
+
+  auto output = gather_global_tokens(shards[2], dp_tokens, args);
+
+  EXPECT_EQ(output.size(0), 12);
+  test::verify_tensor_close(output,
+                            torch::tensor({{0.0f},
+                                           {1.0f},
+                                           {2.0f},
+                                           {3.0f},
+                                           {100.0f},
+                                           {101.0f},
+                                           {102.0f},
+                                           {103.0f},
+                                           {200.0f},
+                                           {201.0f},
+                                           {202.0f},
+                                           {203.0f}}));
+}
+
+TEST(DpUtilsTest, GatherGlobalTokensTpOneHandlesUnevenDpTokens) {
+  std::unique_ptr<xllm::ProcessGroup> process_group;
+  std::unique_ptr<xllm::ProcessGroup> tp_group;
+  ParallelArgs args =
+      make_world_args(process_group, tp_group, /*global_rank=*/1, 3, 1);
+  const std::vector<int32_t> dp_tokens = {4, 0, 2};
+
+  auto* mock_pg = dynamic_cast<test::MockProcessGroup*>(process_group.get());
+  ASSERT_NE(mock_pg, nullptr);
+  auto shards = make_global_shards(dp_tokens, /*tp_size=*/1);
+  mock_pg->set_allgather_outputs(shards);
+
+  auto output = gather_global_tokens(shards[1], dp_tokens, args);
+
+  EXPECT_EQ(output.size(0), 6);
+  test::verify_tensor_close(
+      output,
+      torch::tensor({{0.0f}, {1.0f}, {2.0f}, {3.0f}, {200.0f}, {201.0f}}));
+}
+
 TEST(DpUtilsTest, GatherGlobalTokensRestoresDpMajorOrder) {
   std::unique_ptr<xllm::ProcessGroup> process_group;
   std::unique_ptr<xllm::ProcessGroup> tp_group;

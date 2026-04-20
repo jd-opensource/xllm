@@ -18,6 +18,9 @@ limitations under the License.
 #include <cnrt.h>
 #include <framework/core/stream_guard.h>
 
+#include <algorithm>
+#include <cstdint>
+
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/model/causal_vlm.h"
@@ -31,13 +34,149 @@ uint32_t get_bucket_num_tokens(uint32_t num_tokens) {
     return num_tokens;
   }
   const uint32_t graph_step = 16;
-  if (num_tokens <= 1) return 1;
-  if (num_tokens <= 2) return 2;
-  if (num_tokens <= 4) return 4;
-  if (num_tokens <= 8) return 8;
+  if (num_tokens <= 1) {
+    return 1;
+  }
+  if (num_tokens <= 2) {
+    return 2;
+  }
+  if (num_tokens <= 4) {
+    return 4;
+  }
+  if (num_tokens <= 8) {
+    return 8;
+  }
 
   return ((num_tokens + graph_step - 1) / graph_step) * graph_step;
 }
+
+xllm::ModelOutput make_graph_output(const torch::Tensor& hidden_states,
+                                    const torch::Tensor& aux_hidden_states,
+                                    bool enable_aux_hidden_states) {
+  if (enable_aux_hidden_states && aux_hidden_states.defined() &&
+      aux_hidden_states.numel() > 0) {
+    return xllm::ModelOutput(hidden_states, torch::Tensor(), aux_hidden_states);
+  }
+  return xllm::ModelOutput(hidden_states);
+}
+
+enum class RunMode : int8_t {
+  kGraph = 0,
+  kPaddedDpGraph,
+  kDraft,
+  kNonDecode,
+  kDummy,
+  kUnevenDp,
+  kMixedDp,
+  kBadDpMeta,
+};
+
+bool has_zero_tokens(const std::vector<int32_t>& dp_token_nums) {
+  return std::any_of(dp_token_nums.begin(),
+                     dp_token_nums.end(),
+                     [](int32_t token_num) { return token_num == 0; });
+}
+
+bool dp_tokens_equal(const std::vector<int32_t>& dp_token_nums) {
+  return dp_token_nums.empty() ||
+         std::all_of(
+             dp_token_nums.begin(),
+             dp_token_nums.end(),
+             [first_token_num = dp_token_nums.front()](int32_t token_num) {
+               return token_num == first_token_num;
+             });
+}
+
+bool allow_graph(RunMode run_mode) {
+  return run_mode == RunMode::kGraph || run_mode == RunMode::kPaddedDpGraph;
+}
+
+uint32_t align_tokens(uint32_t tokens, uint32_t align) {
+  CHECK_GT(align, 0U) << "align must be positive";
+  uint32_t rem = tokens % align;
+  return rem == 0 ? tokens : tokens + align - rem;
+}
+
+uint32_t get_tp_size(const xllm::runtime::Options& options) {
+  int32_t world_size = options.world_size();
+  int32_t dp_size = options.dp_size();
+  if (world_size <= 1 || dp_size <= 1 || world_size < dp_size ||
+      world_size % dp_size != 0) {
+    return 1;
+  }
+
+  return static_cast<uint32_t>(world_size / dp_size);
+}
+
+uint32_t get_graph_dp_tokens(uint32_t actual_tokens,
+                             const xllm::ModelInputParams& params,
+                             const xllm::runtime::Options& options) {
+  if (params.dp_global_token_nums.size() <= 1) {
+    return get_bucket_num_tokens(actual_tokens);
+  }
+
+  const auto max_token_num = std::max_element(
+      params.dp_global_token_nums.begin(), params.dp_global_token_nums.end());
+  CHECK(max_token_num != params.dp_global_token_nums.end())
+      << "dp_global_token_nums is empty";
+  uint32_t bucket_tokens =
+      get_bucket_num_tokens(static_cast<uint32_t>(*max_token_num));
+  uint32_t tp_size = get_tp_size(options);
+  return align_tokens(std::max(bucket_tokens, tp_size), tp_size);
+}
+
+xllm::ModelInputParams make_graph_params(const xllm::ModelInputParams& params,
+                                         uint32_t padding_num_tokens) {
+  xllm::ModelInputParams graph_params = params;
+  if (params.dp_global_token_nums.size() > 1) {
+    graph_params.dp_global_token_nums =
+        std::vector<int32_t>(params.dp_global_token_nums.size(),
+                             static_cast<int32_t>(padding_num_tokens));
+  }
+  return graph_params;
+}
+
+RunMode get_run_mode(const xllm::runtime::Options& options,
+                     const xllm::ModelInputParams& params) {
+  if (options.is_draft_engine()) {
+    return RunMode::kDraft;
+  }
+
+  if (!params.batch_forward_type.is_decode()) {
+    return RunMode::kNonDecode;
+  }
+
+  if (params.q_max_seq_len == 0) {
+    return RunMode::kDummy;
+  }
+
+  if (params.dp_global_token_nums.size() <= 1) {
+    return RunMode::kGraph;
+  }
+
+  if (has_zero_tokens(params.dp_global_token_nums)) {
+    return RunMode::kDummy;
+  }
+
+  if (params.dp_is_decode.size() != params.dp_global_token_nums.size()) {
+    return RunMode::kBadDpMeta;
+  }
+
+  if (std::find(params.dp_is_decode.begin(), params.dp_is_decode.end(), 0) !=
+      params.dp_is_decode.end()) {
+    return RunMode::kMixedDp;
+  }
+
+  if (!dp_tokens_equal(params.dp_global_token_nums)) {
+    if (params.q_max_seq_len == 1) {
+      return RunMode::kPaddedDpGraph;
+    }
+    return RunMode::kUnevenDp;
+  }
+
+  return RunMode::kGraph;
+}
+
 }  // namespace
 
 namespace xllm::mlu {
@@ -86,8 +225,6 @@ void GraphPersistentParam::init_params(const ModelInputParams& params,
       kv_seq_lens_.slice(0, 0, params.kv_seq_lens.size(0) + padding_needed);
   params_.new_cache_slots = new_cache_slots_.slice(0, 0, padding_num_tokens);
   params_.block_tables = block_table_.slice(0, 0, padding_num_tokens);
-  params_.dp_global_token_nums = std::vector<int32_t>(
-      params.dp_global_token_nums.size(), padding_num_tokens);
 
   if (params.input_embedding.defined()) {
     if (!input_embeds_.defined()) {
@@ -103,11 +240,20 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
                                                uint32_t padding_needed) {
   // Copy data from input parameters to persistent graph tensors
   int32_t slice_dim = use_mrope_ ? 1 : 0;
+  const int64_t actual_tokens = tokens.size(0);
+  const int64_t padded_tokens = actual_tokens + padding_needed;
+  const int64_t actual_batch = params.block_tables.size(0);
+  const int64_t block_rows_end = actual_batch + padding_needed;
   positions_.slice(slice_dim, 0, positions.size(slice_dim))
       .copy_(positions, true);
   tokens_.slice(0, 0, tokens.size(0)).copy_(tokens, true);
   new_cache_slots_.slice(0, 0, params.new_cache_slots.size(0))
       .copy_(params.new_cache_slots, true);
+  if (padding_needed > 0) {
+    positions_.slice(slice_dim, actual_tokens, padded_tokens).zero_();
+    tokens_.slice(0, actual_tokens, padded_tokens).zero_();
+    new_cache_slots_.slice(0, actual_tokens, padded_tokens).zero_();
+  }
 
   // Apply padding if required number of tokens exceeds actual input
   // Generate padded sequence lengths by extending the last valid value
@@ -127,15 +273,27 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
   kv_seq_lens_.slice(0, 0, kv_seq_lens.size(0)).copy_(kv_seq_lens, true);
 
   // Copy block table data
-  const int64_t actual_batch = params.block_tables.size(0);
+  const int64_t actual_block_batch = params.block_tables.size(0);
   const int64_t actual_n_block = params.block_tables.size(1);
   auto slice_block_tables =
-      block_table_.slice(0, 0, actual_batch).slice(1, 0, actual_n_block);
+      block_table_.slice(0, 0, actual_block_batch).slice(1, 0, actual_n_block);
   slice_block_tables.copy_(params.block_tables, true);
+  if (actual_n_block < block_table_.size(1)) {
+    block_table_.slice(0, 0, actual_block_batch)
+        .slice(1, actual_n_block, block_table_.size(1))
+        .zero_();
+  }
+  if (block_rows_end > actual_block_batch) {
+    block_table_.slice(0, actual_block_batch, block_rows_end).zero_();
+  }
 
   if (params.input_embedding.defined()) {
     input_embeds_.slice(0, 0, params.input_embedding.size(0))
         .copy_(params.input_embedding, true);
+    if (padding_needed > 0) {
+      input_embeds_.slice(0, params.input_embedding.size(0), padded_tokens)
+          .zero_();
+    }
   }
 }
 
@@ -213,14 +371,49 @@ MluGraphExecutorImpl::MluGraphExecutorImpl(CausalLM* model,
       args_(args),
       device_(device),
       options_(options),
-      pool_(torch_mlu::MempoolId_t{0, 0}) {
-  persistent_param_ =
-      std::make_unique<GraphPersistentParam>(args_, device_, options_);
-}
+      pool_(torch_mlu::MempoolId_t{0, 0}) {}
 
 ForwardInput MluGraphExecutorImpl::prepare_inputs(Batch& batch) {
   return batch.prepare_forward_input(
       options_.num_decoding_tokens(), 0, args_, options_.cp_size());
+}
+
+bool MluGraphExecutorImpl::should_eager(const ModelInputParams& params) const {
+  return !allow_graph(get_run_mode(options_, params));
+}
+
+ModelOutput MluGraphExecutorImpl::run_eager(const torch::Tensor& tokens,
+                                            const torch::Tensor& positions,
+                                            std::vector<KVCache>& kv_caches,
+                                            const ModelInputParams& params) {
+  RunMode run_mode = get_run_mode(options_, params);
+  if (run_mode == RunMode::kDraft) {
+    LOG_FIRST_N(INFO, 1) << "MLU graph fallback to eager for draft worker";
+  } else if (run_mode == RunMode::kDummy) {
+    LOG_FIRST_N(INFO, 1)
+        << "MLU graph fallback to eager when decode inputs contain dummy run";
+  } else if (run_mode == RunMode::kUnevenDp) {
+    LOG_FIRST_N(INFO, 1)
+        << "MLU graph fallback to eager for uneven dp decode batch";
+  } else if (run_mode == RunMode::kMixedDp) {
+    LOG_FIRST_N(INFO, 1)
+        << "MLU graph fallback to eager for mixed dp prefill/decode batch";
+  } else if (run_mode == RunMode::kBadDpMeta) {
+    LOG_FIRST_N(WARNING, 1)
+        << "MLU graph fallback to eager because dp_is_decode is invalid";
+  }
+  COUNTER_INC(num_model_execution_total_eager);
+  ModelOutput result = model_->forward(tokens, positions, kv_caches, params);
+  return make_graph_output(result.hidden_states,
+                           result.aux_hidden_states,
+                           options_.enable_graph_aux_hidden_states());
+}
+
+void MluGraphExecutorImpl::init_param_once() {
+  if (persistent_param_ == nullptr) {
+    persistent_param_ =
+        std::make_unique<GraphPersistentParam>(args_, device_, options_);
+  }
 }
 
 // Main execution method with graph optimization for decode phase
@@ -231,29 +424,33 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
                                       const torch::Tensor& positions,
                                       std::vector<KVCache>& kv_caches,
                                       const ModelInputParams& params) {
-  // If not in decode phase, use eager mode directly
-  bool graph_mode = params.batch_forward_type.is_decode();
-  int64_t actual_num_tokens = tokens.size(0);
-  if (params.dp_global_token_nums.size() > 1) {
-    actual_num_tokens = util::max(params.dp_global_token_nums);
-
-    auto& dp_is_decode = params.dp_is_decode;
-    graph_mode = std::find(dp_is_decode.begin(), dp_is_decode.end(), 0) ==
-                 dp_is_decode.end();
-    CHECK_EQ(dp_is_decode.size(), params.dp_global_token_nums.size());
+  const RunMode run_mode = get_run_mode(options_, params);
+  if (!allow_graph(run_mode)) {
+    return run_eager(tokens, positions, kv_caches, params);
   }
 
-  if (!graph_mode) {
-    COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+  init_param_once();
+
+  const uint32_t actual_tokens = static_cast<uint32_t>(tokens.size(0));
+  const uint32_t graph_tokens =
+      get_graph_dp_tokens(actual_tokens, params, options_);
+  const ModelInputParams graph_params = make_graph_params(params, graph_tokens);
+
+  if (graph_params.dp_global_token_nums != params.dp_global_token_nums) {
+    LOG_FIRST_N(INFO, 4) << "MLU graph padded dp decode path: raw "
+                         << "dp_global_token_nums="
+                         << params.dp_global_token_nums
+                         << ", graph dp_global_token_nums="
+                         << graph_params.dp_global_token_nums
+                         << ", tp_size=" << get_tp_size(options_)
+                         << ", graph_tokens=" << graph_tokens;
   }
 
-  uint32_t padding_batch_size = get_bucket_num_tokens(actual_num_tokens);
-  const uint32_t actual_tokens = tokens.size(0);
-  if (auto it = graphs_.find(padding_batch_size); it != graphs_.end()) {
-    MluGraph* cur_graph = (it->second).get();
-    cur_graph->update_input_buffer(tokens, positions, params);
-    auto result = cur_graph->replay();
+  auto it = graphs_.find(graph_tokens);
+  if (it != graphs_.end()) {
+    MluGraph* cur_graph = it->second.get();
+    cur_graph->update_input_buffer(tokens, positions, graph_params);
+    ModelOutput result = cur_graph->replay();
     // Return only the actual num_tokens portion
     auto hidden_states = result.hidden_states.slice(0, 0, actual_tokens);
     if (options_.enable_graph_aux_hidden_states()) {
@@ -261,30 +458,29 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
           persistent_param_->aux_hidden_states_.numel() > 0
               ? persistent_param_->aux_hidden_states_.slice(0, 0, actual_tokens)
               : torch::Tensor();
-      if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {
-        return ModelOutput(hidden_states, torch::Tensor(), aux_hidden_states);
-      }
-    }
-    return ModelOutput(hidden_states);
-  } else {
-    std::unique_ptr<MluGraph> graph =
-        std::make_unique<MluGraph>(persistent_param_.get(), padding_batch_size);
-    graph->update_input_buffer(tokens, positions, params, true);
-    graph->capture(model_, kv_caches, pool_, options_);
-    graphs_[padding_batch_size] = std::move(graph);
-    // Return the output from capture
-    auto hidden_states = persistent_param_->output_.slice(0, 0, actual_tokens);
-    if (options_.enable_graph_aux_hidden_states()) {
-      auto aux_hidden_states =
-          persistent_param_->aux_hidden_states_.numel() > 0
-              ? persistent_param_->aux_hidden_states_.slice(0, 0, actual_tokens)
-              : torch::Tensor();
-      if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {
-        return ModelOutput(hidden_states, torch::Tensor(), aux_hidden_states);
-      }
+      return make_graph_output(
+          hidden_states, aux_hidden_states, /*enable_aux_hidden_states=*/true);
     }
     return ModelOutput(hidden_states);
   }
+
+  std::unique_ptr<MluGraph> graph =
+      std::make_unique<MluGraph>(persistent_param_.get(), graph_tokens);
+  graph->update_input_buffer(tokens, positions, graph_params, true);
+  graph->capture(model_, kv_caches, pool_, options_);
+  graphs_[graph_tokens] = std::move(graph);
+  // Return the output from capture
+  auto hidden_states = persistent_param_->output_.slice(0, 0, actual_tokens);
+  if (options_.enable_graph_aux_hidden_states()) {
+    auto aux_hidden_states =
+        persistent_param_->aux_hidden_states_.numel() > 0
+            ? persistent_param_->aux_hidden_states_.slice(0, 0, actual_tokens)
+            : torch::Tensor();
+    return make_graph_output(
+        hidden_states, aux_hidden_states, /*enable_aux_hidden_states=*/true);
+  }
+
+  return ModelOutput(hidden_states);
 }
 
 }  // namespace xllm::mlu
