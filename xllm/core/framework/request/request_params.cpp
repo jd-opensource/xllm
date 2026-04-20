@@ -222,6 +222,9 @@ RequestParams::RequestParams(const proto::CompletionRequest& request,
   if (request.has_beam_width()) {
     beam_width = request.beam_width();
   }
+  if (request.has_num_return_sequences()) {
+    num_return_sequences = request.num_return_sequences();
+  }
   if (request.has_add_special_tokens()) {
     add_special_tokens = request.add_special_tokens();
   } else {
@@ -414,6 +417,9 @@ void init_from_chat_request(RequestParams& params, const ChatRequest& request) {
   if (request.has_beam_width()) {
     params.beam_width = request.beam_width();
   }
+  if (request.has_num_return_sequences()) {
+    params.num_return_sequences = request.num_return_sequences();
+  }
 
   if (request.has_add_special_tokens()) {
     params.add_special_tokens = request.add_special_tokens();
@@ -574,6 +580,24 @@ bool RequestParams::verify_params(OutputCallback callback) const {
                         service_request_id,
                         source_xservice_addr);
     return false;
+  }
+
+  if (num_return_sequences > 0) {
+    if (beam_width <= 0) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "num_return_sequences requires beam_width > 0",
+                          service_request_id,
+                          source_xservice_addr);
+      return false;
+    }
+    if (num_return_sequences < beam_width) {
+      CALLBACK_WITH_ERROR(
+          StatusCode::INVALID_ARGUMENT,
+          "num_return_sequences must be greater than or equal to beam_width",
+          service_request_id,
+          source_xservice_addr);
+      return false;
+    }
   }
 
   if (logprobs) {

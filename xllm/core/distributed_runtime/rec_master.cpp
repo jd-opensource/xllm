@@ -754,6 +754,7 @@ std::shared_ptr<Request> RecMaster::build_request_common(
   sampling_param.top_logprobs = sp.top_logprobs;
   sampling_param.is_embeddings = sp.is_embeddings;
   sampling_param.beam_width = sp.beam_width;
+  sampling_param.num_return_sequences = sp.num_return_sequences;
   if (best_of > sp.n) {
     sampling_param.logprobs = true;
   }

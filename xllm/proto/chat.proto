@@ -26,7 +26,7 @@ message ChatMessage {
 }
 
 
-// Next Id: 30
+// Next Id: 45
 message ChatRequest {
   // ID of the model to use. You can use the ListModels endpoint to list available models.
   string model = 1;
@@ -128,6 +128,9 @@ message ChatRequest {
   optional Priority priority = 32;
 
   optional int32 beam_width = 33;
+
+  // Final number of beam results to return. Defaults to beam_width when unset.
+  optional int32 num_return_sequences = 45;
 
   optional bool add_special_tokens = 34;
 

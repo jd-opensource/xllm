@@ -675,7 +675,10 @@ ForwardOutput RecEngine::OneRecEnginePipeline::step(
     }
 
     timer.reset();
-    batches[0].process_sample_output(decode_output.sample_output, false);
+    batches[0].process_sample_output(
+        decode_output.sample_output,
+        false,
+        /*force_requested_beam_result_size=*/i + 1 == kRecDecodeSteps);
     COUNTER_ADD(rec_sampling_latency_microseconds,
                 timer.elapsed_microseconds());
   }
