@@ -33,14 +33,13 @@ bool is_sp_alias_pg(ProcessGroup* pg, const ParallelArgs& parallel_args) {
          pg == parallel_args.moe_ep_group_;
 }
 
-bool is_mtp_dense(const ModelArgs& model_args, int32_t layer_id) {
-  return model_args.mtp_mlp_type() == "dense" &&
-         layer_id >= model_args.n_layers();
+bool is_mtp_layer(const ModelArgs& model_args) {
+  return model_args.model_type().ends_with("_mtp");
 }
 
 bool use_moe_layer(const ModelArgs& model_args, int32_t layer_id) {
-  if (is_mtp_dense(model_args, layer_id)) {
-    return false;
+  if (is_mtp_layer(model_args)) {
+    return model_args.mtp_mlp_type() != "dense";
   }
   return layer_id >= model_args.first_k_dense_replace();
 }
