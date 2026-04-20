@@ -107,7 +107,8 @@ class Batch {
   // The boolean parameter `replace_fake_token` indicates
   // whether the current stage is the second stage.
   void process_sample_output(const SampleOutput& sample_output,
-                             bool replace_fake_token);
+                             bool replace_fake_token,
+                             bool force_requested_beam_result_size = false);
 
   void process_sample_output(const RawForwardOutput& raw_output,
                              bool replace_fake_token);
@@ -156,7 +157,7 @@ class Batch {
                                  int token_idx,
                                  bool replace_fake_token);
 
-  void process_beam_search();
+  void process_beam_search(bool force_requested_result_size = false);
   bool has_partial_finished_beam_group() const;
 
   std::unordered_map<uint32_t, uint32_t> cal_seq_exchange_index(

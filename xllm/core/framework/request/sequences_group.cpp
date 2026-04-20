@@ -219,7 +219,7 @@ void SequencesGroup::generate_outputs_parallel(
   }
 }
 
-void SequencesGroup::process_beam_search() {
+void SequencesGroup::process_beam_search(bool force_requested_result_size) {
   if (!check_beam_search()) {
     return;
   }
@@ -229,10 +229,18 @@ void SequencesGroup::process_beam_search() {
   }
 
   const size_t beam_width = sequence_params_.sampling_param->beam_width;
+  const int32_t requested_num_return_sequences =
+      sequence_params_.sampling_param->num_return_sequences > 0
+          ? sequence_params_.sampling_param->num_return_sequences
+          : sequence_params_.sampling_param->beam_width;
+  const size_t requested_result_size =
+      static_cast<size_t>(requested_num_return_sequences);
   const size_t topk =
       std::max<size_t>(1, sequence_params_.sampling_param->top_logprobs);
 
-  SimpleTopKOptimizerBeamCandidate topk_optimizer(beam_width);
+  const size_t target_result_size =
+      force_requested_result_size ? requested_result_size : beam_width;
+  SimpleTopKOptimizerBeamCandidate topk_optimizer(target_result_size);
   auto add_self_candidate = [&](size_t seq_index, Sequence* seq) {
     const auto token_ids = seq->tokens();
     const auto& log_probs = seq->logprob_state()->get_logprobs();
@@ -304,9 +312,10 @@ void SequencesGroup::process_beam_search() {
   }
 
   std::vector<std::unique_ptr<Sequence>> result;
-  result.reserve(std::min(beam_width, candidates.size()));
+  const size_t result_size = std::min(target_result_size, candidates.size());
+  result.reserve(result_size);
   std::unordered_set<size_t> reused_src;
-  for (size_t i = 0; i < beam_width && i < candidates.size(); ++i) {
+  for (size_t i = 0; i < result_size; ++i) {
     const BeamCandidate& c = candidates[i];
     auto& src_seq = sequences_[c.seq_index];
     auto next_seq = std::make_unique<Sequence>(*src_seq);
