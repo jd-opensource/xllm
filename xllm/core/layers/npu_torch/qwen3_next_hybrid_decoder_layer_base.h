@@ -41,7 +41,12 @@ class Qwen3HybridDecoderLayerModule : public torch::nn::Module {
                                 torch::Tensor& positions,
                                 const AttentionMetadata& attn_metadata,
                                 KVCache& kv_cache,
-                                const ModelInputParams& input_params) = 0;
+                                const ModelInputParams& input_params,
+                                const torch::Tensor& mrope_cos_sin = {}) = 0;
+  virtual torch::Tensor build_mrope_cos_sin(
+      const torch::Tensor& positions) const {
+    return {};
+  }
 };
 
 using Qwen3HybridDecoderLayerModulePtr =
@@ -62,7 +67,11 @@ class Qwen3HybridDecoderLayerImplBase : public Qwen3HybridDecoderLayerModule {
                         torch::Tensor& positions,
                         const AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params) override;
+                        const ModelInputParams& input_params,
+                        const torch::Tensor& mrope_cos_sin = {}) override;
+
+  torch::Tensor build_mrope_cos_sin(
+      const torch::Tensor& positions) const override;
 
  protected:
   Qwen3NextAttention attention_{nullptr};

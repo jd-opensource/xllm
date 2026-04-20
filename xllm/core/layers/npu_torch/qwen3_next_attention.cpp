@@ -19,6 +19,8 @@ limitations under the License.
 
 #include <tuple>
 #include <vector>
+
+#include "core/common/global_flags.h"
 namespace xllm {
 namespace layer {
 
@@ -110,8 +112,9 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
   mrope_section_ = args.rope_scaling_mrope_section();
   is_interleaved_ = args.rope_scaling_mrope_interleaved();
   use_fused_qkv_ = false;
-  if (attn_output_gate_ && !mrope_section_.empty() &&
-      mrope_section_.size() == 3 && rotary_dim_ > 0) {
+  if (FLAGS_enable_fused_split_qkv_rmsnorm_mrope && attn_output_gate_ &&
+      !mrope_section_.empty() && mrope_section_.size() == 3 &&
+      rotary_dim_ > 0) {
     mrope_gather_pattern_ =
         xllm::kernel::build_split_qkv_rmsnorm_mrope_gather_pattern(
             rotary_dim_, mrope_section_, is_interleaved_, options.device());
@@ -121,39 +124,35 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
   }
 }
 
+torch::Tensor Qwen3NextAttentionImpl::build_mrope_cos_sin(
+    const torch::Tensor& positions) const {
+  auto cos_sin_cache = rotary_emb_->get_cos_sin_cache();
+  if (positions.dim() == 1) {
+    return cos_sin_cache.index_select(0, positions).repeat({1, 3});
+  }
+  // positions is [3, T] for mRoPE (graph mode or VL)
+  // transpose from [3, T] to [T, 3]
+  auto positions_t = positions.permute({1, 0}).contiguous();
+  auto gathered = cos_sin_cache.index_select(0, positions_t.view({-1}));
+  // [T, 3, rope_dim]
+  return gathered.view({positions.size(1), -1});
+}
+
 torch::Tensor Qwen3NextAttentionImpl::forward(
     const torch::Tensor& positions,
     const torch::Tensor& hidden_states,
     const AttentionMetadata& attn_metadata,
-    KVCache& kv_cache) {
+    KVCache& kv_cache,
+    const torch::Tensor& mrope_cos_sin) {
   auto qkv = qkv_proj_->forward(hidden_states);
 
   if (use_fused_qkv_) {
-    // Build cos_sin [T, 3*rotary_dim] from positions
-    // For text-only: positions is [T] (1D), all 3 mRoPE axes share the same
-    // For VL with mRoPE: positions is [T, 3] (2D, transposed upstream)
-    auto cos_sin_cache = rotary_emb_->get_cos_sin_cache();
-    torch::Tensor cos_sin;
-    if (positions.dim() == 1) {
-      // text-only: same positions for all 3 axes → repeat 3x
-      auto per_axis = cos_sin_cache.index_select(0, positions);
-      cos_sin = per_axis.repeat({1, 3});
-    } else {
-      auto pos_0 = positions.select(1, 0).contiguous();
-      auto pos_1 = positions.select(1, 1).contiguous();
-      auto pos_2 = positions.select(1, 2).contiguous();
-      cos_sin = torch::cat({cos_sin_cache.index_select(0, pos_0),
-                            cos_sin_cache.index_select(0, pos_1),
-                            cos_sin_cache.index_select(0, pos_2)},
-                           -1);
-    }
-
     const int64_t T = qkv.size(0);
     xllm::kernel::SplitQkvRmsnormMropeParams params;
     params.qkvg = qkv;
     params.q_weight = q_norm_->weight();
     params.k_weight = k_norm_->weight();
-    params.cos_sin = cos_sin;
+    params.cos_sin = mrope_cos_sin;
     params.gather_pattern = mrope_gather_pattern_;
     params.eps = rms_norm_eps_;
     params.num_q_heads = num_heads_;
@@ -226,6 +225,14 @@ void Qwen3NextAttentionImpl::load_state_dict(const StateDict& state_dict) {
   }
   if (auto w = state_dict.get_tensor("k_norm.weight"); w.defined()) {
     k_norm_->load_state_dict(StateDict({{"weight", w}}));
+  }
+
+  // Gemma RMSNorm uses (1 + w) as the scale factor, but the fused kernel
+  // uses standard RMSNorm (w only). Pre-add 1 so the fused kernel produces
+  // the same result as Qwen3NextRMSNorm (gemma_rms_norm).
+  if (use_fused_qkv_) {
+    q_norm_->weight().add_(1.0);
+    k_norm_->weight().add_(1.0);
   }
 }
 

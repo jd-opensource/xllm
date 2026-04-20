@@ -95,10 +95,21 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
         layer::AttentionMetadataBuilder::build(
             input_params, model_args_, build_attention_mask(input_params));
     torch::Tensor h = embed_tokens_(tokens);
+
+    torch::Tensor mrope_cos_sin;
+    for (const auto& layer : layers_) {
+      mrope_cos_sin = layer->build_mrope_cos_sin(positions);
+      if (mrope_cos_sin.defined()) break;
+    }
+
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
-      h = layer->forward(
-          h, positions, attn_metadata, kv_caches[i], input_params);
+      h = layer->forward(h,
+                         positions,
+                         attn_metadata,
+                         kv_caches[i],
+                         input_params,
+                         mrope_cos_sin);
     }
     h = norm_(h);
     return ModelOutput(h);

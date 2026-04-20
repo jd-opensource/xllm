@@ -109,14 +109,16 @@ torch::Tensor Qwen3HybridDecoderLayerImplBase::forward(
     torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
-    const ModelInputParams& input_params) {
+    const ModelInputParams& input_params,
+    const torch::Tensor& mrope_cos_sin) {
   // Pre-attention norm
   torch::Tensor residual = x;
   x = input_norm_(x);
 
   // Attention
   if (attention_) {
-    x = attention_->forward(positions, x, attn_metadata, kv_cache);
+    x = attention_->forward(
+        positions, x, attn_metadata, kv_cache, mrope_cos_sin);
   } else {
     x = linear_attention_->forward(x, attn_metadata, kv_cache, input_params);
   }
@@ -148,6 +150,14 @@ torch::Tensor Qwen3HybridDecoderLayerImplBase::forward(
   x = x + residual;
   x = x.to(orig_dtype);
   return x;
+}
+
+torch::Tensor Qwen3HybridDecoderLayerImplBase::build_mrope_cos_sin(
+    const torch::Tensor& positions) const {
+  if (attention_) {
+    return attention_->build_mrope_cos_sin(positions);
+  }
+  return {};
 }
 
 }  // namespace layer
