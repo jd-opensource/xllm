@@ -32,6 +32,18 @@ bool is_sp_alias_pg(ProcessGroup* pg, const ParallelArgs& parallel_args) {
   return pg == parallel_args.process_group_ ||
          pg == parallel_args.moe_ep_group_;
 }
+
+bool is_mtp_dense(const ModelArgs& model_args, int32_t layer_id) {
+  return model_args.mtp_mlp_type() == "dense" &&
+         layer_id >= model_args.n_layers();
+}
+
+bool use_moe_layer(const ModelArgs& model_args, int32_t layer_id) {
+  if (is_mtp_dense(model_args, layer_id)) {
+    return false;
+  }
+  return layer_id >= model_args.first_k_dense_replace();
+}
 }  // namespace
 
 DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
@@ -41,7 +53,7 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
   const auto& model_args = context.get_model_args();
   const auto& quant_args = context.get_quant_args();
   const auto& options = context.get_tensor_options();
-  is_moe_layer_ = layer_id >= model_args.first_k_dense_replace();
+  is_moe_layer_ = use_moe_layer(model_args, layer_id);
 
   // DeepSeek MoE only support ep == world_size when expert parallel is on
   if (parallel_args_.ep_size() > 1) {

@@ -72,6 +72,7 @@ REGISTER_MODEL_ARGS(joyai_llm_flash_mtp, [&] {
   LOAD_ARG_OR(q_lora_rank, "q_lora_rank", 1536);
   LOAD_ARG_OR(kv_lora_rank, "kv_lora_rank", 512);
   LOAD_ARG_OR(num_nextn_predict_layers, "num_nextn_predict_layers", 1);
+  SET_ARG(mtp_mlp_type, "dense");
 
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
     return 256;  // args->qk_nope_head_dim() + args->qk_rope_head_dim();
