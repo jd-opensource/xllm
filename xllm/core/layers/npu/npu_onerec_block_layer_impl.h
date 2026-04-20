@@ -84,6 +84,7 @@ class NpuOneRecBlockLayerImpl final : public BaseLayer {
                                        KVCache& kv_cache,
                                        ModelInputParams& input_params,
                                        bool is_prefill,
+                                       bool is_first_prefill,
                                        torch::Tensor* encoder_output = nullptr,
                                        int32_t layer_id = 0);
 
@@ -94,6 +95,7 @@ class NpuOneRecBlockLayerImpl final : public BaseLayer {
       KVCache& kv_cache,
       ModelInputParams& input_params,
       bool is_prefill,
+      bool is_first_prefill,
       torch::Tensor* encoder_output = nullptr,
       int32_t layer_id = 0,
       const torch::Tensor& expert_array = torch::Tensor());
@@ -103,12 +105,16 @@ class NpuOneRecBlockLayerImpl final : public BaseLayer {
 
   int64_t init_attn_mask();
 
-  int32_t setup_common_decoder_tensors(atb_speed::Model::Node& node,
-                                       torch::Tensor& x,
-                                       at::Tensor& attn_mask,
-                                       ModelInputParams& input_params,
-                                       torch::Tensor* encoder_output = nullptr,
-                                       int32_t start_tensor_idx = 0);
+  int32_t setup_common_decoder_tensors(
+      atb_speed::Model::Node& node,
+      torch::Tensor& x,
+      at::Tensor& attn_mask,
+      KVCache& kv_cache,
+      ModelInputParams& input_params,
+      const atb_speed::onerec::BlockLayerParam& param,
+      bool is_first_prefill,
+      torch::Tensor* encoder_output = nullptr,
+      int32_t start_tensor_idx = 0);
 
   void resize_experts_weights(int32_t num_of_device_experts);
   void process_expert_weights(const StateDict& state_dict,
@@ -129,10 +135,16 @@ class NpuOneRecBlockLayerImpl final : public BaseLayer {
   std::string extract_endswith(const std::string& input);
 
   atb_speed::Model::Node prefill_node_;
+  atb_speed::Model::Node prefill_node_atb_;
   atb_speed::Model::Node decode_node_;
+  atb_speed::Model::Node decoder_prefill_only_decode_node_;
+  atb_speed::Model::Node decoder_prefill_only_decode_node_atb_;
   std::string model_name_;
   atb_speed::onerec::BlockLayerParam prefill_param_;
+  atb_speed::onerec::BlockLayerParam prefill_param_atb_;
   atb_speed::onerec::BlockLayerParam decode_param_;
+  atb_speed::onerec::BlockLayerParam decoder_prefill_only_decode_param_;
+  atb_speed::onerec::BlockLayerParam decoder_prefill_only_decode_param_atb_;
 
   atb::Tensor internal_tensors_;
   atb::Tensor placeholder_;
@@ -140,6 +152,10 @@ class NpuOneRecBlockLayerImpl final : public BaseLayer {
   at::Tensor encoder_output_contiguous_;
   at::Tensor at_placeholder_;
   std::vector<int32_t> placeholder_vec_;
+  torch::Tensor cross_k_cache_;
+  torch::Tensor cross_v_cache_;
+  torch::Tensor fallback_kv_seq_lens_tensor_;
+  std::vector<int32_t> seq_lens_vec_;
 
   int32_t device_id_ = 0;
   bool is_decoder_ = false;
