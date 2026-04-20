@@ -1101,14 +1101,12 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   }
 
   std::unique_ptr<ScopedAtenLoadThreads> scoped_load_threads;
-  if (tp_world_size > 1) {
-    const int32_t prev_threads = torch::get_num_threads();
-    LOG(INFO) << "Temporarily setting ATen threads to 1 during weight loading"
-              << ", tp_world_size=" << tp_world_size
-              << ", prev_threads=" << prev_threads;
-    scoped_load_threads =
-        std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
-  }
+  const int32_t prev_threads = torch::get_num_threads();
+  LOG(INFO) << "Temporarily setting ATen threads to 1 during weight loading"
+            << ", tp_world_size=" << tp_world_size
+            << ", prev_threads=" << prev_threads;
+  scoped_load_threads =
+      std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
 
   if (master_status == MasterStatus::WAKEUP) {
     this->load_model(std::move(model_loader));
