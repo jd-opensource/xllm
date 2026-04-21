@@ -21,7 +21,6 @@ limitations under the License.
 
 #include <limits>
 #include <memory>
-#include <queue>
 #include <unordered_map>
 
 #include "async_response_processor.h"
@@ -34,12 +33,12 @@ limitations under the License.
 #include "framework/request/sequence.h"
 #include "runtime/xservice_client.h"
 #include "scheduler.h"
-#include "scheduler/decode_priority_queue.h"
 #include "scheduler/profile/profile_manager.h"
+#include "scheduler/request_priority_queue.h"
 
 namespace xllm {
 class Engine;
-class DecodePriorityQueue;
+class RequestPriorityQueue;
 
 class ContinuousScheduler : public Scheduler {
  public:
@@ -152,8 +151,8 @@ class ContinuousScheduler : public Scheduler {
   }
 
   uint32_t get_waiting_requests_num() const override {
-    return waiting_priority_queue_.size() +
-           waiting_priority_queue_offline_.size();
+    return waiting_priority_queue_->size() +
+           waiting_priority_queue_offline_->size();
   }
 
   // for test only
@@ -166,12 +165,15 @@ class ContinuousScheduler : public Scheduler {
   }
   std::vector<std::shared_ptr<Request>> get_waiting_requests() {
     std::vector<std::shared_ptr<Request>> result;
+    if (waiting_priority_queue_ == nullptr) {
+      return result;
+    }
 
-    auto temp_queue = waiting_priority_queue_;
-
-    while (!temp_queue.empty()) {
-      result.push_back(temp_queue.top());
-      temp_queue.pop();
+    auto copied_waiting_queue = waiting_priority_queue_->clone();
+    result.reserve(copied_waiting_queue->size());
+    while (!copied_waiting_queue->empty()) {
+      result.emplace_back(copied_waiting_queue->top());
+      copied_waiting_queue->pop_top();
     }
 
     return result;
@@ -222,17 +224,9 @@ class ContinuousScheduler : public Scheduler {
   // the number of requests that are waiting to be scheduled
   std::atomic<size_t> pending_requests_{0};
 
-  // Requests with HIGH priority are processed first, followed by MEDIUM
-  // priority requests, and finally LOW priority requests. Within each priority
-  // level, requests are handled on First-Come-First-Served (FCFS) basis.
-  using RequestPriorityQueue =
-      std::priority_queue<std::shared_ptr<Request>,
-                          std::vector<std::shared_ptr<Request>>,
-                          std::function<bool(const std::shared_ptr<Request>&,
-                                             const std::shared_ptr<Request>&)>>;
   // keep all new requests, generally speaking, they do not have any kv cache.
-  RequestPriorityQueue waiting_priority_queue_;
-  RequestPriorityQueue waiting_priority_queue_offline_;
+  std::unique_ptr<RequestPriorityQueue> waiting_priority_queue_;
+  std::unique_ptr<RequestPriorityQueue> waiting_priority_queue_offline_;
 
   // keep all running request from high priority to low.
   // NOTE: Maybe not all requests are scheduled in one step,
@@ -247,8 +241,8 @@ class ContinuousScheduler : public Scheduler {
 
   // std::deque<std::shared_ptr<Request>> running_queue_;
   // std::deque<std::shared_ptr<Request>> running_queue_offline_;
-  std::unique_ptr<DecodePriorityQueue> running_queue_;
-  std::unique_ptr<DecodePriorityQueue> running_queue_offline_;
+  std::unique_ptr<RequestPriorityQueue> running_queue_;
+  std::unique_ptr<RequestPriorityQueue> running_queue_offline_;
 
   InstanceInfo instance_info_;
 
@@ -259,7 +253,7 @@ class ContinuousScheduler : public Scheduler {
       double& estimate_latency,
       size_t& remaining_token_budget,
       size_t& remaining_seq_budget,
-      RequestPriorityQueue& waiting_priority_queue,
+      RequestPriorityQueue* waiting_priority_queue,
       size_t& num_online_prefill_preempt_offline_requests,
       std::vector<std::shared_ptr<Request>>& finished_requests);
   virtual void handle_decode_requests(
@@ -270,10 +264,14 @@ class ContinuousScheduler : public Scheduler {
       size_t& num_offline_decode_preempt_offline_requests,
       size_t& num_online_decode_preempt_online_requests,
       size_t& num_online_decode_preempt_offline_requests,
-      std::unique_ptr<DecodePriorityQueue>& running_queue);
+      RequestPriorityQueue* running_queue);
+  void get_latency_budget_and_request_order(
+      RequestPriorityQueue* request_priority_queue,
+      double& latency_budget,
+      bool for_prefill);
 
   void handle_abnormal_request(
-      std::unique_ptr<DecodePriorityQueue>& running_queue,
+      RequestPriorityQueue* running_queue,
       const std::vector<Sequence*>& candidate_sequences,
       const std::vector<size_t>& candidate_token_budgets,
       const size_t& allocated_tokens,
@@ -286,7 +284,7 @@ class ContinuousScheduler : public Scheduler {
       bool block_exhausted);
   void handle_running_requests(std::shared_ptr<Request> request);
 
-  bool check_if_enough_to_evict(DecodePriorityQueue* running_queue_to_evict,
+  bool check_if_enough_to_evict(RequestPriorityQueue* running_queue_to_evict,
                                 Sequence* prefill_sequence,
                                 size_t max_handle_num_tokens,
                                 size_t& num_request_to_evict);
@@ -295,8 +293,8 @@ class ContinuousScheduler : public Scheduler {
   virtual std::vector<Batch> prepare_batch();
 
   virtual bool if_queue_not_empty() {
-    return !waiting_priority_queue_.empty() || !running_queue_->empty() ||
-           !waiting_priority_queue_offline_.empty() ||
+    return !waiting_priority_queue_->empty() || !running_queue_->empty() ||
+           !waiting_priority_queue_offline_->empty() ||
            !running_queue_offline_->empty();
   }
 
@@ -332,6 +330,7 @@ class ContinuousScheduler : public Scheduler {
   std::vector<int64_t> get_active_activation_in_bytes();
   void update_memory_metrics(std::vector<Sequence*>& sequences);
 
+  void create_waiting_queue(const Options& options);
   void create_running_queue(const Options& options);
 };
 

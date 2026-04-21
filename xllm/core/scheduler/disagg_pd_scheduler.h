@@ -41,7 +41,7 @@ class DisaggPDScheduler : public ContinuousScheduler {
   virtual ~DisaggPDScheduler();
 
   virtual uint32_t get_waiting_requests_num() const override {
-    return waiting_priority_queue_.size();
+    return waiting_priority_queue_->size();
   };
 
   void step(const absl::Duration& timeout) override;

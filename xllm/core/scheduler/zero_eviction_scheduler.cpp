@@ -30,7 +30,7 @@ uint32_t ceiling_div(uint32_t left, uint32_t right) {
 }
 
 std::vector<Sequence*> get_running_sequences(
-    const std::unique_ptr<DecodePriorityQueue>& running_queue) {
+    const std::unique_ptr<RequestPriorityQueue>& running_queue) {
   std::vector<Sequence*> running_sequences;
 
   for (auto it = running_queue->rbegin(); it != running_queue->rend(); ++it) {
@@ -229,7 +229,7 @@ bool BlockCapacityGuard::simulate_is_satisfied_for_candidate_sequences() {
 
 bool BlockCapacityGuard::if_accept_candidate_sequences(
     const std::vector<Sequence*>& candidate_sequences,
-    const std::unique_ptr<DecodePriorityQueue>& running_queue,
+    const std::unique_ptr<RequestPriorityQueue>& running_queue,
     const std::vector<Sequence*>& running_sequences) {
   num_reserved_block_for_prefill_ = 0;
 
@@ -251,8 +251,8 @@ ZeroEvictionScheduler::ZeroEvictionScheduler(Engine* engine,
 
 ZeroEvictionScheduler::~ZeroEvictionScheduler() {
   // release all requests in the priority queue
-  while (!waiting_priority_queue_.empty()) {
-    waiting_priority_queue_.pop();
+  while (!waiting_priority_queue_->empty()) {
+    waiting_priority_queue_->pop_top();
   }
 
   // release all requests in the running priority queue
@@ -350,17 +350,17 @@ void ZeroEvictionScheduler::handle_prefill_requests(
   // NOTE: preempted requests will be pushed in waiting_priority_queue,
   // they may contian many sequences, so we should check here.
 
-  while (!waiting_priority_queue_.empty() && remaining_seq_budget > 0 &&
+  while (!waiting_priority_queue_->empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 &&
          kv_cache_manager_->kv_cache_utilization() <
              FLAGS_prefill_scheduling_memory_usage_threshold) {
-    std::shared_ptr<Request> request(waiting_priority_queue_.top());
+    std::shared_ptr<Request> request(waiting_priority_queue_->top());
     if (request->finished() || request->cancelled()) {
       kv_cache_manager_->deallocate(request.get());
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // remove the request from the priority queue
-      waiting_priority_queue_.pop();
+      waiting_priority_queue_->pop_top();
       continue;
     }
 
@@ -396,7 +396,7 @@ void ZeroEvictionScheduler::handle_prefill_requests(
 
     remaining_token_budget -= allocated_tokens;
     remaining_seq_budget -= allocated_seqs;
-    waiting_priority_queue_.pop();
+    waiting_priority_queue_->pop_top();
     running_requests_.emplace_back(request);
     running_sequences_.insert(running_sequences_.end(),
                               prefill_sequences.begin(),
@@ -406,14 +406,14 @@ void ZeroEvictionScheduler::handle_prefill_requests(
                                       prefill_sequences_budget.end());
   }
 
-  if (running_sequences_.empty() && !waiting_priority_queue_.empty() &&
+  if (running_sequences_.empty() && !waiting_priority_queue_->empty() &&
       running_queue_->empty() &&
       kv_cache_manager_->kv_cache_utilization() == 0) {
     LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
                   "a single sequence.";
     // no enough memory to schedule single sequence, just finish the request
-    std::shared_ptr<Request> request(waiting_priority_queue_.top());
-    waiting_priority_queue_.pop();
+    std::shared_ptr<Request> request(waiting_priority_queue_->top());
+    waiting_priority_queue_->pop_top();
     kv_cache_manager_->deallocate(request.get());
     response_processor_->process_failed_request(
         request,

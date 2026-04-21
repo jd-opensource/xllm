@@ -192,17 +192,17 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
     if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
       if (request->offline()) {
         int current_offline_decode_bs =
-            running_requests_.size() + waiting_priority_queue_offline_.size();
+            running_requests_.size() + waiting_priority_queue_offline_->size();
         VLOG(1) << "Current offline decode batch size: "
                 << current_offline_decode_bs
                 << ", linear_saturation_bs_: " << linear_saturation_bs_;
         if (current_offline_decode_bs < linear_saturation_bs_) {
-          waiting_priority_queue_offline_.push(request);
+          waiting_priority_queue_offline_->push(request);
         } else {
           deferred_reqs.emplace_back(request);
         }
       } else {
-        waiting_priority_queue_.push(request);
+        waiting_priority_queue_->push(request);
       }
     } else {
       // request from prefill instance in disagge pd mode.
@@ -320,7 +320,7 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
                           estimate_latency,
                           remaining_token_budget,
                           remaining_seq_budget,
-                          waiting_priority_queue_,
+                          waiting_priority_queue_.get(),
                           num_online_prefill_preempt_offline_requests,
                           finished_requests);
   if (!running_sequences_.empty()) {
@@ -333,7 +333,7 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
                             estimate_latency,
                             remaining_token_budget,
                             remaining_seq_budget,
-                            waiting_priority_queue_offline_,
+                            waiting_priority_queue_offline_.get(),
                             num_online_prefill_preempt_offline_requests,
                             finished_requests);
     if (!running_sequences_.empty()) {
@@ -351,7 +351,7 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
                              num_offline_decode_preempt_offline_requests,
                              num_online_decode_preempt_online_requests,
                              num_online_decode_preempt_offline_requests,
-                             running_queue_);
+                             running_queue_.get());
       handle_decode_requests(latency_budget,
                              estimate_latency,
                              remaining_token_budget,
@@ -359,7 +359,7 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
                              num_offline_decode_preempt_offline_requests,
                              num_online_decode_preempt_online_requests,
                              num_online_decode_preempt_offline_requests,
-                             running_queue_offline_);
+                             running_queue_offline_.get());
       if (!running_sequences_.empty()) {
         step_status_ = StepStatus::DECODE;
         VLOG(1) << "Set step status to DECODE";
@@ -398,7 +398,7 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
             pending_requests_.load(std::memory_order_relaxed));
   GAUGE_SET(num_running_requests, running_requests_.size());
   GAUGE_SET(num_waiting_requests,
-            waiting_priority_queue_.size() + running_queue_->size());
+            waiting_priority_queue_->size() + running_queue_->size());
 
   GAUGE_ADD(num_preempted_requests, num_preempted_requests);
   GAUGE_ADD(num_offline_decode_preempt_offline_requests,
@@ -444,9 +444,9 @@ void PDOOCScheduler::handle_prefill_interruption() {
     // Add back to offline waiting queue for rescheduling
     VLOG(1) << "Preempting offline request due to interruption: "
             << request->request_id();
-    VLOG(1) << "waiting_priority_queue_offline_.size() before push: "
-            << waiting_priority_queue_offline_.size();
-    waiting_priority_queue_offline_.push(request);
+    VLOG(1) << "waiting_priority_queue_offline_->size() before push: "
+            << waiting_priority_queue_offline_->size();
+    waiting_priority_queue_offline_->push(request);
 
     VLOG(1) << "Preempted offline request due to interruption: "
             << request->request_id();
@@ -486,7 +486,7 @@ void PDOOCScheduler::handle_decode_requests(
     size_t& num_offline_decode_preempt_offline_requests,
     size_t& num_online_decode_preempt_online_requests,
     size_t& num_online_decode_preempt_offline_requests,
-    std::unique_ptr<DecodePriorityQueue>& running_queue) {
+    RequestPriorityQueue* running_queue) {
   // only used in decode step
   if (options_.instance_role().value() != InstanceRole::DECODE) {
     return ContinuousScheduler::handle_decode_requests(
@@ -655,7 +655,7 @@ void PDOOCScheduler::handle_decode_requests(
       running_queue_offline_->pop_back();
       // add preemptable request to waiting priority queue
       request_to_preempt->set_preempted();
-      waiting_priority_queue_offline_.push(request_to_preempt);
+      waiting_priority_queue_offline_->push(request_to_preempt);
       continue;
     } else if (running_queue->size() > 1) {
       std::shared_ptr<Request> request_to_preempt = running_queue->back();
@@ -667,10 +667,10 @@ void PDOOCScheduler::handle_decode_requests(
         request_to_preempt->set_preempted();
         if (request_to_preempt->offline()) {
           ++num_offline_decode_preempt_offline_requests;
-          waiting_priority_queue_offline_.push(request_to_preempt);
+          waiting_priority_queue_offline_->push(request_to_preempt);
         } else {
           ++num_online_decode_preempt_online_requests;
-          waiting_priority_queue_.push(request_to_preempt);
+          waiting_priority_queue_->push(request_to_preempt);
         }
 
       } else {

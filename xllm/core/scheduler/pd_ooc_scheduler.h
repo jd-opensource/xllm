@@ -101,7 +101,7 @@ class PDOOCScheduler : public DisaggPDScheduler {
       size_t& num_offline_decode_preempt_offline_requests,
       size_t& num_online_decode_preempt_online_requests,
       size_t& num_online_decode_preempt_offline_requests,
-      std::unique_ptr<DecodePriorityQueue>& running_queue) override;
+      RequestPriorityQueue* running_queue) override;
 
  private:
   void handle_prefill_interruption();
