@@ -20,12 +20,15 @@ limitations under the License.
 #include <folly/MPMCQueue.h>
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <iomanip>
+#include <limits>
 #include <memory>
 #include <sstream>
+#include <vector>
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
@@ -34,7 +37,7 @@ limitations under the License.
 #include "framework/request/priority_comparator.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
-#include "scheduler/decode_priority_queue.h"
+#include "scheduler/request_priority_queue.h"
 #include "util/utils.h"
 
 namespace xllm {
@@ -96,10 +99,7 @@ inline size_t maybe_align_cp_prefill_tokens(const Sequence* sequence,
 ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
     : options_(options),
       engine_(engine),
-      request_queue_(FLAGS_request_queue_size),
-      waiting_priority_queue_(create_comparator(options.priority_strategy())),
-      waiting_priority_queue_offline_(
-          create_comparator(options.priority_strategy())) {
+      request_queue_(FLAGS_request_queue_size) {
   CHECK(engine_ != nullptr);
 
   kv_cache_manager_ = engine_->block_manager_pool();
@@ -126,6 +126,7 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
       engine_->tokenizer(),
       options_.instance_role(),
       options_.enable_service_routing());
+  create_waiting_queue(options);
   create_running_queue(options);
   if (options_.enable_service_routing()) {
     // connect to master service
@@ -167,31 +168,141 @@ bool ContinuousScheduler::add_request(std::shared_ptr<Request>& request) {
   return false;
 }
 
+void ContinuousScheduler::get_latency_budget_and_request_order(
+    RequestPriorityQueue* request_priority_queue,
+    double& latency_budget,
+    bool for_prefill) {
+  if (request_priority_queue == nullptr || request_priority_queue->empty()) {
+    return;
+  }
+  CHECK(profile_manager_ != nullptr);
+
+  const double constant_overhead = profile_manager_->get_constant_overhead();
+  double total_exec_time = 0.0;
+  int32_t min_remaining_time = std::numeric_limits<int32_t>::max();
+  int32_t min_tpot = std::numeric_limits<int32_t>::max();
+
+  for (auto it = request_priority_queue->begin();
+       it != request_priority_queue->end();
+       ++it) {
+    auto request = *it;
+    auto& sequence = request->sequences()[0];
+    sequence->set_estimated_latency(
+        profile_manager_->predict_step_time(sequence.get(), false));
+    request->set_elapsed_time_ms();
+    request->set_deadline_ms();
+    request->set_starved(false);
+
+    const int32_t remaining_time = request->get_remaining_time();
+    total_exec_time += sequence->estimated_latency();
+    if (request->tpot_slo_ms() < min_tpot) {
+      min_tpot = request->tpot_slo_ms();
+    }
+    if (remaining_time < sequence->estimated_latency() + constant_overhead) {
+      continue;
+    }
+    if (remaining_time < min_remaining_time) {
+      min_remaining_time = remaining_time;
+    }
+  }
+
+  if (!for_prefill) {
+    int32_t latency_budget_threshold = static_cast<int32_t>(0.65 * min_tpot);
+    latency_budget = std::max(min_remaining_time, latency_budget_threshold);
+  }
+
+  const double lambda = FLAGS_aggressive_coeff;
+  double load_judge_func = 0.0;
+  if (for_prefill) {
+    load_judge_func = total_exec_time + constant_overhead;
+  } else {
+    const double denominator =
+        std::max(latency_budget - constant_overhead, 1e-6);
+    load_judge_func = total_exec_time * latency_budget / denominator;
+  }
+
+  for (auto it = request_priority_queue->begin();
+       it != request_priority_queue->end();
+       ++it) {
+    auto request = *it;
+    auto& sequence = request->sequences()[0];
+
+    if (FLAGS_enable_starve_prevent) {
+      const int32_t starve_unit_time = sequence->is_prefill_stage()
+                                           ? -request->ttft_slo_ms()
+                                           : -request->tpot_slo_ms();
+      const int32_t starve_time_threshold =
+          static_cast<int32_t>(FLAGS_starve_threshold * starve_unit_time);
+      if (request->get_remaining_time() < starve_time_threshold) {
+        request->set_starved(true);
+      }
+    }
+
+    if (request->get_remaining_time() < lambda * load_judge_func) {
+      request->set_urgency(Urgency::URGENT);
+    } else {
+      request->set_urgency(Urgency::NORMAL);
+    }
+  }
+
+  auto comparator = create_comparator("urgency_density", true);
+  CHECK(request_priority_queue->supports_sort())
+      << "urgency_density requires sortable request queue.";
+  request_priority_queue->sort(comparator);
+
+  if (for_prefill && !request_priority_queue->empty()) {
+    constexpr int32_t kSmallPositiveTimeMs = 2;
+    const int32_t top_remaining_time =
+        request_priority_queue->top()->get_remaining_time();
+    if (min_remaining_time > constant_overhead + kSmallPositiveTimeMs) {
+      latency_budget = min_remaining_time;
+    } else if (top_remaining_time > constant_overhead + kSmallPositiveTimeMs) {
+      latency_budget = top_remaining_time;
+    } else {
+      const auto& top_sequence = request_priority_queue->top()->sequences()[0];
+      latency_budget = top_sequence->estimated_latency() + constant_overhead +
+                       kSmallPositiveTimeMs;
+    }
+  }
+}
+
+void ContinuousScheduler::create_waiting_queue(const Options& options) {
+  if (options.priority_strategy() == "urgency_density") {
+    // currently only for multi-priority scheduling
+    waiting_priority_queue_ = std::make_unique<DequeQueue>();
+    waiting_priority_queue_offline_ = std::make_unique<DequeQueue>();
+  } else {
+    // use default HeapQueue
+    waiting_priority_queue_ = std::make_unique<HeapQueue>(
+        create_comparator(options.priority_strategy(), false));
+    waiting_priority_queue_offline_ = std::make_unique<HeapQueue>(
+        create_comparator(options.priority_strategy(), false));
+  }
+}
+
 void ContinuousScheduler::create_running_queue(const Options& options) {
   if (options.priority_strategy() == "fcfs") {
-    running_queue_offline_ = std::make_unique<FCFSQueue>();
-    running_queue_ = std::make_unique<FCFSQueue>();
+    // for FCFS, we can use simple deque-based queue since no need to sort
+    running_queue_offline_ = std::make_unique<DequeQueue>();
+    running_queue_ = std::make_unique<DequeQueue>();
   } else {
-    std::unique_ptr<PriorityComparator> comparator;
-    if (options.priority_strategy() == "deadline") {
-      comparator = std::make_unique<DeadlineComparator>();
-    } else if (options.priority_strategy() == "priority") {
-      comparator = std::make_unique<StrictPriorityComparator>();
+    if (options.priority_strategy() == "deadline" ||
+        options.priority_strategy() == "priority") {
+      running_queue_ = std::make_unique<SetQueue>(
+          create_comparator(options.priority_strategy(), true));
+      running_queue_offline_ = std::make_unique<SetQueue>(
+          create_comparator(options.priority_strategy(), true));
     } else {
-      // using default FCFS
-      running_queue_offline_ = std::make_unique<FCFSQueue>();
-      running_queue_ = std::make_unique<FCFSQueue>();
-      return;
+      // for other strategies like multi-priority scheduling, we can use
+      // deque-based queue and sort them in place when needed
+      running_queue_offline_ = std::make_unique<DequeQueue>();
+      running_queue_ = std::make_unique<DequeQueue>();
     }
-    running_queue_ =
-        std::make_unique<DynamicPriorityQueue>(std::move(comparator));
-    running_queue_offline_ =
-        std::make_unique<DynamicPriorityQueue>(std::move(comparator));
   }
 }
 
 bool ContinuousScheduler::check_if_enough_to_evict(
-    DecodePriorityQueue* running_queue_to_evict,
+    RequestPriorityQueue* running_queue_to_evict,
     Sequence* prefill_sequence,
     size_t max_handle_num_tokens,
     size_t& num_request_to_evict) {
@@ -233,7 +344,7 @@ void ContinuousScheduler::handle_prefill_requests(
     double& estimate_latency,
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
-    RequestPriorityQueue& waiting_priority_queue,
+    RequestPriorityQueue* waiting_priority_queue,
     size_t& num_online_prefill_preempt_offline_requests,
     std::vector<std::shared_ptr<Request>>& finished_requests) {
   // Handle new request prompt first.
@@ -246,9 +357,14 @@ void ContinuousScheduler::handle_prefill_requests(
   //
   // NOTE: preempted requests will be pushed in waiting_priority_queue,
   // they may contian many sequences, so we should check here.
+  if (options_.priority_strategy() == "urgency_density") {
+    get_latency_budget_and_request_order(
+        waiting_priority_queue, latency_budget, true);
+  }
+
   bool budget_exhausted = false;
   bool blocks_exhausted = false;
-  while (!waiting_priority_queue.empty() && remaining_seq_budget > 0 &&
+  while (!waiting_priority_queue->empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 && latency_budget > estimate_latency) {
     if (!options_.enable_disagg_pd() &&
         kv_cache_manager_->kv_cache_utilization() >=
@@ -257,13 +373,13 @@ void ContinuousScheduler::handle_prefill_requests(
       break;
     }
 
-    std::shared_ptr<Request> request(waiting_priority_queue.top());
+    std::shared_ptr<Request> request(waiting_priority_queue->top());
     if (request->finished() || request->cancelled()) {
       kv_cache_manager_->deallocate(request.get());
       // release the ownership of the request
       finished_requests.emplace_back(request);
-      // remove the request from the priority queue
-      waiting_priority_queue.pop();
+      // remove the request from the request priority queue
+      waiting_priority_queue->pop_top();
       continue;
     }
 
@@ -275,8 +391,8 @@ void ContinuousScheduler::handle_prefill_requests(
 
     if (!kv_cache_manager_->update_prefetch_result(
             request, options_.prefetch_timeout())) {
-      waiting_priority_queue.pop();
-      waiting_priority_queue.push(request);
+      waiting_priority_queue->pop_top();
+      waiting_priority_queue->push(request);
       continue;
     }
 
@@ -334,10 +450,10 @@ void ContinuousScheduler::handle_prefill_requests(
               ++num_online_prefill_preempt_offline_requests;
               kv_cache_manager_->deallocate(request_to_preempt.get());
               running_queue_offline_->pop_back();
-              // add preemptable request to waiting priority queue
+              // add preemptable request to request priority queue
               // TO IMPROVE?: not process this offline request in current batch
               request_to_preempt->set_preempted();
-              waiting_priority_queue_offline_.push(request_to_preempt);
+              waiting_priority_queue_offline_->push(request_to_preempt);
             }
             if (!kv_cache_manager_->allocate(prefill_sequence.get(),
                                              target_num_tokens)) {
@@ -364,9 +480,10 @@ void ContinuousScheduler::handle_prefill_requests(
       if (options_.enable_latency_aware_schedule()) {
         seq_estimate_latency =
             profile_manager_->predict_step_time(prefill_sequence.get(), false);
-        if (estimate_latency + allocated_estimate_latency +
-                seq_estimate_latency >
-            latency_budget) {
+        if ((estimate_latency + allocated_estimate_latency +
+                 seq_estimate_latency >
+             latency_budget) &&
+            (!running_sequences_.empty())) {
           // release shared prefix blocks
           kv_cache_manager_->deallocate(prefill_sequence.get());
           can_schedule = false;
@@ -393,7 +510,7 @@ void ContinuousScheduler::handle_prefill_requests(
     remaining_token_budget -= allocated_tokens;
     remaining_seq_budget -= allocated_seqs;
     estimate_latency += allocated_estimate_latency;
-    waiting_priority_queue.pop();
+    waiting_priority_queue->pop_top();
     running_requests_.emplace_back(request);
     running_sequences_.insert(running_sequences_.end(),
                               prefill_sequences.begin(),
@@ -403,10 +520,10 @@ void ContinuousScheduler::handle_prefill_requests(
                                       prefill_sequences_budget.end());
   }
   // maybe can pre-compute if prompt beyond length
-  if (running_sequences_.empty() && !waiting_priority_queue.empty() &&
+  if (running_sequences_.empty() && !waiting_priority_queue->empty() &&
       running_queue_->empty()) {
-    std::shared_ptr<Request> request(waiting_priority_queue.top());
-    waiting_priority_queue.pop();
+    std::shared_ptr<Request> request(waiting_priority_queue->top());
+    waiting_priority_queue->pop_top();
     kv_cache_manager_->deallocate(request.get());
     if (blocks_exhausted) {
       LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
@@ -425,6 +542,8 @@ void ContinuousScheduler::handle_prefill_requests(
           {StatusCode::RESOURCE_EXHAUSTED,
            "No enough budget to schedule single sequence."});
     } else {
+      LOG(INFO) << "latency budegt: " << latency_budget
+                << ", estimate latency: " << estimate_latency;
       LOG(FATAL) << "Unexpected error: blocks and budget are enough but can "
                     "not schedule.";
     }
@@ -443,7 +562,12 @@ void ContinuousScheduler::handle_decode_requests(
     size_t& num_offline_decode_preempt_offline_requests,
     size_t& num_online_decode_preempt_online_requests,
     size_t& num_online_decode_preempt_offline_requests,
-    std::unique_ptr<DecodePriorityQueue>& running_queue) {
+    RequestPriorityQueue* running_queue) {
+  if (options_.priority_strategy() == "urgency_density" &&
+      running_queue != nullptr && !running_queue->empty()) {
+    get_latency_budget_and_request_order(running_queue, latency_budget, false);
+  }
+
   std::vector<Sequence*> candidate_sequences;
   std::vector<size_t> candidate_token_budgets;
 
@@ -550,9 +674,9 @@ void ContinuousScheduler::handle_decode_requests(
           running_queue->pop_top();
           request->set_preempted();
           if (request->offline()) {
-            waiting_priority_queue_offline_.push(request);
+            waiting_priority_queue_offline_->push(request);
           } else {
-            waiting_priority_queue_.push(request);
+            waiting_priority_queue_->push(request);
           }
           continue;
         }
@@ -664,7 +788,7 @@ void ContinuousScheduler::handle_decode_requests(
       running_queue_offline_->pop_back();
       // add preemptable request to waiting priority queue
       request_to_preempt->set_preempted();
-      waiting_priority_queue_offline_.push(request_to_preempt);
+      waiting_priority_queue_offline_->push(request_to_preempt);
       continue;
     } else if (running_queue->size() > 1) {
       std::shared_ptr<Request> request_to_preempt = running_queue->back();
@@ -676,10 +800,10 @@ void ContinuousScheduler::handle_decode_requests(
         request_to_preempt->set_preempted();
         if (request_to_preempt->offline()) {
           ++num_offline_decode_preempt_offline_requests;
-          waiting_priority_queue_offline_.push(request_to_preempt);
+          waiting_priority_queue_offline_->push(request_to_preempt);
         } else {
           ++num_online_decode_preempt_online_requests;
-          waiting_priority_queue_.push(request_to_preempt);
+          waiting_priority_queue_->push(request_to_preempt);
         }
 
       } else {
@@ -707,7 +831,7 @@ void ContinuousScheduler::handle_decode_requests(
 
 // NOTE: refactor ChunkedPrefillScheduler and ContinuousScheduler later.
 void ContinuousScheduler::handle_abnormal_request(
-    std::unique_ptr<DecodePriorityQueue>& running_queue,
+    RequestPriorityQueue* running_queue,
     const std::vector<Sequence*>& candidate_sequences,
     const std::vector<size_t>& candidate_token_budgets,
     const size_t& allocated_tokens,
@@ -742,7 +866,7 @@ void ContinuousScheduler::handle_abnormal_request(
       CHECK(running_queue->size() == 1)
           << "Running queue size is not 1, there maybe a bug of request "
              "preemption logic. running_queue_.size ="
-          << running_queue_->size();
+          << running_queue->size();
       if (util::sum(kv_cache_manager_->num_used_blocks()) !=
           request->total_num_blocks()) {
         // blocks_exhausted is true.
@@ -756,7 +880,7 @@ void ContinuousScheduler::handle_abnormal_request(
     }
 
     // request is too long, budget or memory no enough.
-    running_queue_->pop_top();
+    running_queue->pop_top();
     kv_cache_manager_->deallocate(request.get());
     response_processor_->process_failed_request(
         request,
@@ -807,7 +931,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
   // propogate new requests to waiting_priority_queue_
   // Include those requests that are preempted by others.
   std::shared_ptr<Request> request;
-  // read from request queue then push to waiting priority queue
+  // read from request queue then push to request priority queue
   while (request_queue_.read(request)) {
     CHECK(request);
 
@@ -819,9 +943,9 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
 
     if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
       if (request->offline()) {
-        waiting_priority_queue_offline_.push(request);
+        waiting_priority_queue_offline_->push(request);
       } else {
-        waiting_priority_queue_.push(request);
+        waiting_priority_queue_->push(request);
       }
     } else {
       // request from prefill instance in disagge pd mode.
@@ -933,14 +1057,14 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
                           estimate_latency,
                           remaining_token_budget,
                           remaining_seq_budget,
-                          waiting_priority_queue_,
+                          waiting_priority_queue_.get(),
                           num_online_prefill_preempt_offline_requests,
                           finished_requests);
   handle_prefill_requests(latency_budget,
                           estimate_latency,
                           remaining_token_budget,
                           remaining_seq_budget,
-                          waiting_priority_queue_offline_,
+                          waiting_priority_queue_offline_.get(),
                           num_online_prefill_preempt_offline_requests,
                           finished_requests);
 
@@ -956,7 +1080,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
                            num_offline_decode_preempt_offline_requests,
                            num_online_decode_preempt_online_requests,
                            num_online_decode_preempt_offline_requests,
-                           running_queue_);
+                           running_queue_.get());
     handle_decode_requests(latency_budget,
                            estimate_latency,
                            remaining_token_budget,
@@ -964,7 +1088,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
                            num_offline_decode_preempt_offline_requests,
                            num_online_decode_preempt_online_requests,
                            num_online_decode_preempt_offline_requests,
-                           running_queue_offline_);
+                           running_queue_offline_.get());
   }
 
   num_preempted_requests = num_offline_decode_preempt_offline_requests +
@@ -998,7 +1122,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
             pending_requests_.load(std::memory_order_relaxed));
   GAUGE_SET(num_running_requests, running_requests_.size());
   GAUGE_SET(num_waiting_requests,
-            waiting_priority_queue_.size() + running_queue_->size());
+            waiting_priority_queue_->size() + running_queue_->size());
 
   GAUGE_ADD(num_preempted_requests, num_preempted_requests);
   GAUGE_ADD(num_offline_decode_preempt_offline_requests,

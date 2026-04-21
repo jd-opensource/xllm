@@ -31,8 +31,8 @@ ChunkedPrefillScheduler::ChunkedPrefillScheduler(Engine* engine,
 
 ChunkedPrefillScheduler::~ChunkedPrefillScheduler() {
   // release all requests in the priority queue
-  while (!waiting_priority_queue_.empty()) {
-    waiting_priority_queue_.pop();
+  while (!waiting_priority_queue_->empty()) {
+    waiting_priority_queue_->pop_top();
   }
 
   // release all requests in the running priority queue
@@ -49,7 +49,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
     size_t& remaining_seq_budget,
     size_t& num_preempted_requests,
     std::vector<Sequence*>& prefill_stage_sequences,
-    std::unique_ptr<DecodePriorityQueue>& running_queue,
+    std::unique_ptr<RequestPriorityQueue>& running_queue,
     bool& budget_exhausted,
     bool& blocks_exhausted) {
   while (!running_queue->empty() &&
@@ -174,7 +174,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
 
     // budget exhausted, do partially schedule the request
     if (!has_enough_budget) {
-      handle_abnormal_request(running_queue,
+      handle_abnormal_request(running_queue.get(),
                               candidate_sequences,
                               candidate_token_budgets,
                               allocated_tokens,
@@ -202,7 +202,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       running_queue_offline_->pop_back();
       // add preemptable request to waiting priority queue
       request_to_preempt->set_preempted();
-      waiting_priority_queue_offline_.push(request_to_preempt);
+      waiting_priority_queue_offline_->push(request_to_preempt);
       continue;
     } else if (running_queue->size() > 1) {
       std::shared_ptr<Request> request_to_preempt = running_queue->back();
@@ -214,9 +214,9 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
         // add preemptable request to waiting priority queue
         request_to_preempt->set_preempted();
         if (request_to_preempt->offline()) {
-          waiting_priority_queue_offline_.push(request_to_preempt);
+          waiting_priority_queue_offline_->push(request_to_preempt);
         } else {
-          waiting_priority_queue_.push(request_to_preempt);
+          waiting_priority_queue_->push(request_to_preempt);
         }
 
       } else {
@@ -227,7 +227,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
     }
 
     // no requests left to preempt
-    handle_abnormal_request(running_queue,
+    handle_abnormal_request(running_queue.get(),
                             candidate_sequences,
                             candidate_token_budgets,
                             allocated_tokens,
@@ -251,21 +251,21 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
     size_t& remaining_seq_budget,
     size_t& num_preempted_requests,
     std::vector<Sequence*>& prefill_stage_sequences,
-    RequestPriorityQueue& waiting_priority_queue,
+    RequestPriorityQueue* waiting_priority_queue,
     bool& budget_exhausted,
     bool& blocks_exhausted,
     std::vector<std::shared_ptr<Request>>& finished_requests) {
   // NOTE: preempted requests will be pushed in waiting_priority_queue,
   // they may contian many sequences, so we should check here.
-  while (!waiting_priority_queue.empty() && remaining_token_budget > 0 &&
+  while (!waiting_priority_queue->empty() && remaining_token_budget > 0 &&
          latency_budget > estimate_latency && remaining_seq_budget > 0) {
-    std::shared_ptr<Request> request(waiting_priority_queue.top());
+    std::shared_ptr<Request> request(waiting_priority_queue->top());
     if (request->finished() || request->cancelled()) {
       kv_cache_manager_->deallocate(request.get());
       // release the ownership of the request
       finished_requests.emplace_back(request);
       // remove the request from the priority queue
-      waiting_priority_queue.pop();
+      waiting_priority_queue->pop_top();
       continue;
     }
 
@@ -350,7 +350,7 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
               // add preemptable request to waiting priority queue
               // TO IMPROVE?: not process this offline request in current batch
               request_to_preempt->set_preempted();
-              waiting_priority_queue_offline_.push(request_to_preempt);
+              waiting_priority_queue_offline_->push(request_to_preempt);
             }
             if (!kv_cache_manager_->allocate(prefill_sequence.get(),
                                              max_handle_num_tokens)) {
@@ -391,7 +391,7 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
     remaining_token_budget -= allocated_tokens;
     remaining_seq_budget -= allocated_seqs;
     estimate_latency += allocated_estimate_latency;
-    waiting_priority_queue.pop();
+    waiting_priority_queue->pop_top();
     running_requests_.emplace_back(request);
     running_sequences_.insert(running_sequences_.end(),
                               prefill_sequences.begin(),
@@ -401,10 +401,10 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
                                       prefill_sequences_budget.end());
   }
   // maybe can pre-compute if prompt beyond length
-  if (running_sequences_.empty() && !waiting_priority_queue.empty() &&
+  if (running_sequences_.empty() && !waiting_priority_queue->empty() &&
       running_queue_->empty()) {
-    std::shared_ptr<Request> request(waiting_priority_queue.top());
-    waiting_priority_queue.pop();
+    std::shared_ptr<Request> request(waiting_priority_queue->top());
+    waiting_priority_queue->pop_top();
     kv_cache_manager_->deallocate(request.get());
     if (blocks_exhausted) {
       LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
@@ -503,9 +503,9 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
 
     if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
       if (request->offline()) {
-        waiting_priority_queue_offline_.push(request);
+        waiting_priority_queue_offline_->push(request);
       } else {
-        waiting_priority_queue_.push(request);
+        waiting_priority_queue_->push(request);
       }
     } else {
       // request from prefill instance in disagge pd mode.
@@ -631,7 +631,7 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
                             remaining_seq_budget,
                             num_preempted_requests,
                             prefill_stage_sequences,
-                            waiting_priority_queue_,
+                            waiting_priority_queue_.get(),
                             budget_exhausted,
                             blocks_exhausted,
                             finished_requests);
@@ -662,7 +662,7 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
                             remaining_seq_budget,
                             num_preempted_requests,
                             prefill_stage_sequences,
-                            waiting_priority_queue_offline_,
+                            waiting_priority_queue_offline_.get(),
                             budget_exhausted,
                             blocks_exhausted,
                             finished_requests);
@@ -700,7 +700,7 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
             pending_requests_.load(std::memory_order_relaxed));
   GAUGE_SET(num_running_requests, running_requests_.size());
   GAUGE_SET(num_waiting_requests,
-            waiting_priority_queue_.size() + running_queue_->size());
+            waiting_priority_queue_->size() + running_queue_->size());
   GAUGE_SET(num_preempted_requests, num_preempted_requests);
 
   GAUGE_SET(num_running_sequences, running_sequences_.size());
