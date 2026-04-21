@@ -20,7 +20,6 @@ limitations under the License.
 #include <tuple>
 #include <vector>
 
-#include "core/common/global_flags.h"
 namespace xllm {
 namespace layer {
 
@@ -112,9 +111,8 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
   mrope_section_ = args.rope_scaling_mrope_section();
   is_interleaved_ = args.rope_scaling_mrope_interleaved();
   use_fused_qkv_ = false;
-  if (FLAGS_enable_fused_split_qkv_rmsnorm_mrope && attn_output_gate_ &&
-      !mrope_section_.empty() && mrope_section_.size() == 3 &&
-      rotary_dim_ > 0) {
+  if (attn_output_gate_ && !mrope_section_.empty() &&
+      mrope_section_.size() == 3 && rotary_dim_ > 0) {
     mrope_gather_pattern_ =
         xllm::kernel::build_split_qkv_rmsnorm_mrope_gather_pattern(
             rotary_dim_, mrope_section_, is_interleaved_, options.device());

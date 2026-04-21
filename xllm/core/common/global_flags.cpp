@@ -700,11 +700,6 @@ DEFINE_string(npu_kernel_backend,
 DEFINE_bool(enable_intralayer_addnorm,
             false,
             "enable fused intralayer addnorm ops.");
-
-DEFINE_bool(enable_fused_split_qkv_rmsnorm_mrope,
-            true,
-            "Whether to use the fused split_qkv_rmsnorm_mrope kernel for "
-            "Qwen3NextAttention. Set to false to use the torch fallback path.");
 #endif
 
 // --- multi-step decode config ---

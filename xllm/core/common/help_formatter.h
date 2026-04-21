@@ -118,8 +118,7 @@ const OptionCategory kOtherOptions = {
      "num_response_handling_threads",
      "prefill_scheduling_memory_usage_threshold",
      "use_contiguous_input_buffer",
-     "use_audio_in_video",
-     "enable_fused_split_qkv_rmsnorm_mrope"}};
+     "use_audio_in_video"}};
 
 const std::vector<OptionCategory> kOptionCategories = {
     kCommonOptions,
