@@ -948,8 +948,6 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   }
 #endif
 
-  args.enable_mla(options_.enable_mla());
-
   // create model context
   dtype_ = dtype;
   auto tensor_options = torch::dtype(dtype_).device(device_);

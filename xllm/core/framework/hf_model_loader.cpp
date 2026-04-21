@@ -49,6 +49,7 @@ limitations under the License.
 #include "core/util/rec_model_utils.h"
 #include "core/util/scope_guard.h"
 #include "core/util/tensor_helper.h"
+#include "core/util/utils.h"
 #include "models/model_registry.h"
 
 namespace xllm {
@@ -765,6 +766,8 @@ bool HFModelLoader::load_model_args(const std::string& model_weights_path) {
   }
   const JsonReader config_reader = normalize_config_torch_dtype(reader);
   model_args_loader(config_reader, &args_);
+  args_.enable_mla(
+      util::should_enable_mla(std::filesystem::path(model_weights_path)));
 
   return true;
 }
