@@ -485,13 +485,19 @@ def build_split_qkv_rmsnorm_mrope_kernel(
                     T.tile.cast(k_heads_half_ub, k_heads_fp32_ub, "CAST_RINT", kv_size)
                     v_notify_mte3(E.K_CAST)
 
-                    # === Store phase (MTE3 pipe, Q→K→V→G order matching
+                    # === Store phase (MTE3 pipe, Q→G→K→V order matching
                     # load order). Each store signals buffer free immediately.
                     mte3_wait_v(E.Q_CAST)
                     T.copy(q_heads_half_ub, q_out[row, 0, 0])
                     with T.If(row_local < num_rows_per_vec - 1):
                         with T.Then():
                             mte3_notify_mte2(E.Q_FREE)
+
+                    mte3_wait_mte2(E.GATE_READY)
+                    T.copy(gate_heads_half_ub, gate_out[row, 0, 0])
+                    with T.If(row_local < num_rows_per_vec - 1):
+                        with T.Then():
+                            mte3_notify_mte2(E.G_FREE)
 
                     mte3_wait_v(E.K_CAST)
                     T.copy(k_heads_half_ub, k_out[row, 0, 0])
@@ -504,12 +510,6 @@ def build_split_qkv_rmsnorm_mrope_kernel(
                     with T.If(row_local < num_rows_per_vec - 1):
                         with T.Then():
                             mte3_notify_mte2(E.V_FREE)
-
-                    mte3_wait_mte2(E.GATE_READY)
-                    T.copy(gate_heads_half_ub, gate_out[row, 0, 0])
-                    with T.If(row_local < num_rows_per_vec - 1):
-                        with T.Then():
-                            mte3_notify_mte2(E.G_FREE)
 
     return split_qkv_rmsnorm_mrope_kernel
 
