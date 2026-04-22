@@ -98,15 +98,21 @@ inline ToolCallResult process_tool_calls(
     return result;
   }
 
-  if (finish_reason == "stop") {
-    result.finish_reason = "tool_calls";
-  } else {
-    result.finish_reason = std::move(finish_reason);
-  }
-
   try {
     auto [parsed_text, call_info_list] = parser.parse_non_stream(text);
     result.text = std::move(parsed_text);
+
+    if (call_info_list.empty()) {
+      result.text = std::move(text);
+      result.finish_reason = std::move(finish_reason);
+      return result;
+    }
+
+    if (finish_reason == "stop") {
+      result.finish_reason = "tool_calls";
+    } else {
+      result.finish_reason = std::move(finish_reason);
+    }
 
     google::protobuf::RepeatedPtrField<proto::ToolCall> tool_calls;
 

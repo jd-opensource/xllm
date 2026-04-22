@@ -353,6 +353,39 @@ TEST_F(Qwen25DetectorTest, PerformanceWithManyToolCalls) {
   }
 }
 
+// Regression test: malformed qwen3 payload in message.content should still be
+// recovered into structured tool_calls for non-stream output.
+TEST_F(Qwen25StreamingTest, NonStreamMalformedToolPayloadRecoversToolCall) {
+  nlohmann::json search_recall_params = {
+      {"type", "object"},
+      {"properties",
+       {{"attribute_selection", {{"type", "object"}}},
+        {"query_list", {{"type", "array"}}},
+        {"search_mode", {{"type", "string"}}}}},
+      {"required", {"attribute_selection", "query_list", "search_mode"}}};
+  JsonTool search_recall_tool(
+      "function",
+      JsonFunction("SearchRecall", "SearchRecall tool", search_recall_params));
+
+  FunctionCallParser parser({search_recall_tool}, "qwen25");
+
+  // Real user sample: malformed JSON inside <tool_call> content.
+  std::string malformed_content =
+      "<tool_call>\n"
+      "{\"name\": \"SearchRecall\", \"arguments\": {\"attribute_selection\": "
+      "{\"color: [\"}, \"query_list\": [{\"query\": \"kids wiggle car\"}], "
+      "\"search_mode\": \"single\"}}\n"
+      "</tool_call>";
+
+  auto [normal_text, calls] = parser.parse_non_stream(malformed_content);
+
+  EXPECT_TRUE(normal_text.empty());
+  ASSERT_EQ(calls.size(), 1);
+  ASSERT_TRUE(calls[0].name.has_value());
+  EXPECT_EQ(calls[0].name.value(), "SearchRecall");
+  EXPECT_FALSE(calls[0].parameters.empty());
+}
+
 // Test basic streaming functionality
 TEST_F(Qwen25StreamingTest, BasicStreamingParsing) {
   FunctionCallParser parser(tools_, "qwen25");
@@ -539,6 +572,53 @@ TEST_F(Qwen25StreamingTest, PartialTokenHandling) {
   // Verify results
   EXPECT_EQ(accumulated_normal_text, "Testing partial tokens ");
   EXPECT_GT(accumulated_calls.size(), 0);
+}
+
+// Regression test: even with malformed payload from message.content, streaming
+// parser may still emit intermediate tool-call events (e.g. tool name token).
+TEST_F(Qwen25StreamingTest,
+       StreamingMalformedToolPayloadStillEmitsToolNameEvent) {
+  nlohmann::json search_recall_params = {
+      {"type", "object"},
+      {"properties",
+       {{"attribute_selection", {{"type", "object"}}},
+        {"query_list", {{"type", "array"}}},
+        {"search_mode", {{"type", "string"}}}}},
+      {"required", {"attribute_selection", "query_list", "search_mode"}}};
+  JsonTool search_recall_tool(
+      "function",
+      JsonFunction("SearchRecall", "SearchRecall tool", search_recall_params));
+
+  FunctionCallParser parser({search_recall_tool}, "qwen25");
+
+  std::vector<std::string> chunks = {
+      "<tool_call>\n",
+      "{\"name\": \"SearchRecall\", \"arguments\": {\"attribute_selection\": "
+      "{\"color: [\"}, ",
+      "\"query_list\": [{\"query\": \"kids wiggle car\"}], \"search_mode\": "
+      "\"single\"}}\n",
+      "</tool_call>"};
+
+  std::string streamed_normal_text;
+  std::vector<ToolCallItem> streamed_calls;
+  for (const auto& chunk : chunks) {
+    auto result = parser.parse_streaming_increment(chunk);
+    streamed_normal_text += result.normal_text;
+    streamed_calls.insert(
+        streamed_calls.end(), result.calls.begin(), result.calls.end());
+  }
+
+  bool found_search_recall_name = false;
+  for (const auto& call : streamed_calls) {
+    if (call.name.has_value() && call.name.value() == "SearchRecall") {
+      found_search_recall_name = true;
+      break;
+    }
+  }
+
+  EXPECT_FALSE(streamed_calls.empty());
+  EXPECT_TRUE(found_search_recall_name);
+  EXPECT_TRUE(streamed_normal_text.empty());
 }
 
 }  // namespace function_call

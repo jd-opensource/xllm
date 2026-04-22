@@ -110,7 +110,9 @@ StreamingParseResult Qwen25Detector::detect_and_parse(
 
     try {
       std::string json_content(trimmed_content);
-      auto json_obj = nlohmann::json::parse(json_content);
+      auto [json_obj, consumed_len] =
+          partial_json_loads(json_content, Allow::ALL);
+      (void)consumed_len;
       auto parsed_calls = parse_base_json(json_obj, tools);
 
       calls.insert(calls.end(),
