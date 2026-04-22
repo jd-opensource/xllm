@@ -59,6 +59,7 @@ struct ModelArgs {
   PROPERTY(std::optional<int64_t>, decoder_n_kv_heads);
 
   PROPERTY(int64_t, vocab_size) = -1;
+  PROPERTY(int64_t, draft_vocab_size) = 0;
 
   PROPERTY(bool, use_qk_norm) = false;
   PROPERTY(float, rms_norm_eps) = 0.0f;

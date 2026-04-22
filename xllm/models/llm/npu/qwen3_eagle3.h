@@ -421,6 +421,10 @@ REGISTER_MODEL_ARGS(qwen3_eagle3, [&] {
   LOAD_ARG_OR(model_type, "model_type", "qwen3_eagle3");
   LOAD_ARG_OR(dtype, "torch_dtype", "");
   LOAD_ARG_OR(vocab_size, "vocab_size", 152064);
+  LOAD_ARG_OR(draft_vocab_size, "draft_vocab_size", 0);
+  if (args->draft_vocab_size() > 0) {
+    args->vocab_size(args->draft_vocab_size());
+  }
   LOAD_ARG_OR(hidden_size, "hidden_size", 3584);
   LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
   LOAD_ARG_OR(n_layers, "num_hidden_layers", 1);
