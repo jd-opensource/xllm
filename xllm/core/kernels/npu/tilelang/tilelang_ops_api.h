@@ -68,4 +68,8 @@ split_qkv_rmsnorm_mrope(const torch::Tensor& qkvg,
                         int64_t num_kv_heads,
                         int64_t head_size);
 
+bool has_split_qkv_rmsnorm_mrope_specialization(int64_t num_q_heads,
+                                                int64_t num_kv_heads,
+                                                int64_t head_size);
+
 }  // namespace xllm::kernel::npu::tilelang

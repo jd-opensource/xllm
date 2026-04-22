@@ -282,6 +282,16 @@ const auto* find_kernel_entry_with_fallback(
 
 }  // namespace
 
+bool has_split_qkv_rmsnorm_mrope_specialization(int64_t num_q_heads,
+                                                int64_t num_kv_heads,
+                                                int64_t head_size) {
+  return max_compiled_num_tokens(static_cast<int32_t>(head_size),
+                                 /*rope_dim=*/64,
+                                 static_cast<int32_t>(num_q_heads),
+                                 static_cast<int32_t>(num_kv_heads),
+                                 TilelangDType::kBF16) > 0;
+}
+
 torch::Tensor build_split_qkv_rmsnorm_mrope_gather_pattern(
     int64_t rope_dim,
     const std::vector<int64_t>& mrope_section,

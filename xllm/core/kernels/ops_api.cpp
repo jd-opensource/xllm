@@ -1017,6 +1017,17 @@ split_qkv_rmsnorm_mrope(SplitQkvRmsnormMropeParams& params) {
 #endif
 }
 
+bool has_split_qkv_rmsnorm_mrope_specialization(int64_t num_q_heads,
+                                                int64_t num_kv_heads,
+                                                int64_t head_size) {
+#if defined(USE_NPU)
+  return npu::tilelang::has_split_qkv_rmsnorm_mrope_specialization(
+      num_q_heads, num_kv_heads, head_size);
+#else
+  return false;
+#endif
+}
+
 torch::Tensor build_split_qkv_rmsnorm_mrope_gather_pattern(
     int64_t rope_dim,
     const std::vector<int64_t>& mrope_section,
