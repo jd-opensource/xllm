@@ -56,15 +56,71 @@ NUM_TOKEN_SPECIALIZATIONS = tuple(
     range(VEC_NUM, MAX_LAUNCH_NUM_TOKENS + 1, VEC_NUM)
 )
 REF_CHECK_NUM_TOKENS = 16
-REF_CHECK_HEAD_CONFIGS = (
-    (16, 4),
-    (16, 2),
-    (8, 1),
-)
 REF_CHECK_EPS = 1e-6
 DEFAULT_MROPE_SECTION = (11, 11, 10)
 DEFAULT_NUM_Q_HEADS = 16
 DEFAULT_NUM_KV_HEADS = 4
+
+# All Qwen3.5/3.6 model original head configurations:
+#   Model              num_attention_heads  num_key_value_heads
+#   Qwen3.5-0.8B/2B          8                    2
+#   Qwen3.5-4B/9B           16                    4
+#   Qwen3.5-27B             24                    4
+#   Qwen3.5-35B-A3B         16                    2
+#   Qwen3.5-122B/397B       32                    2
+MODEL_HEAD_CONFIGS: tuple[tuple[int, int], ...] = (
+    (8, 2),
+    (16, 4),
+    (24, 4),
+    (16, 2),
+    (32, 2),
+)
+
+SUPPORTED_TP_SIZES = (1, 2, 4, 8, 16)
+
+
+def compute_tp_split_head_configs(
+    model_head_configs: tuple[tuple[int, int], ...],
+    tp_sizes: tuple[int, ...],
+) -> list[tuple[int, int]]:
+    """Compute deduplicated (q_heads, kv_heads) after TP split.
+
+    For each (total_q, total_kv) and each tp:
+      - q_heads = total_q / tp  (skip if not divisible)
+      - kv_heads = total_kv / tp if total_kv >= tp,
+                   else 1 if tp % total_kv == 0
+    """
+    seen: set[tuple[int, int]] = set()
+    result: list[tuple[int, int]] = []
+    for total_q, total_kv in model_head_configs:
+        for tp in tp_sizes:
+            if total_q % tp != 0:
+                continue
+            q_heads = total_q // tp
+            if total_kv >= tp:
+                if total_kv % tp != 0:
+                    continue
+                kv_heads = total_kv // tp
+            else:
+                if tp % total_kv != 0:
+                    continue
+                kv_heads = 1
+            pair = (q_heads, kv_heads)
+            if pair not in seen:
+                seen.add(pair)
+                result.append(pair)
+    result.sort(key=lambda p: (-p[0], -p[1]))
+    return result
+
+
+# Deduplicated TP-split shapes:
+#   0.8B/2B   (8,2):  tp1=(8,2)  tp2=(4,1)  tp4=(2,1)
+#   4B/9B    (16,4):  tp1=(16,4) tp2=(8,2)  tp4=(4,1)  tp8=(2,1)
+#   27B      (24,4):  tp1=(24,4) tp2=(12,2) tp4=(6,1)  tp8=(3,1)
+#   35B-A3B  (16,2):  tp1=(16,2) tp2=(8,1)  tp4=(4,1)  tp8=(2,1)
+#   122B/397B(32,2):  tp1=(32,2) tp2=(16,1) tp4=(8,1)  tp8=(4,1) tp16=(2,1)
+ALL_HEAD_CONFIGS = compute_tp_split_head_configs(MODEL_HEAD_CONFIGS, SUPPORTED_TP_SIZES)
+REF_CHECK_HEAD_CONFIGS = tuple(ALL_HEAD_CONFIGS)
 
 
 
@@ -566,7 +622,7 @@ class SplitQkvRmsnormMropeKernel(TilelangKernel):
         }
         for head_size, rope_dim in SUPPORTED_HEAD_SPECS
         for num_tokens in NUM_TOKEN_SPECIALIZATIONS
-        for num_q_heads, num_kv_heads in [(16, 4), (16, 2), (8, 1)]
+        for num_q_heads, num_kv_heads in ALL_HEAD_CONFIGS
     ]
 
     @staticmethod

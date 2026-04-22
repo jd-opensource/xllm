@@ -112,7 +112,9 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
   is_interleaved_ = args.rope_scaling_mrope_interleaved();
   use_fused_qkv_ = false;
   if (attn_output_gate_ && !mrope_section_.empty() &&
-      mrope_section_.size() == 3 && rotary_dim_ > 0) {
+      mrope_section_.size() == 3 && rotary_dim_ > 0 &&
+      xllm::kernel::has_split_qkv_rmsnorm_mrope_specialization(
+          num_heads_, num_kv_heads_, head_dim_)) {
     mrope_gather_pattern_ =
         xllm::kernel::build_split_qkv_rmsnorm_mrope_gather_pattern(
             rotary_dim_, mrope_section_, is_interleaved_, options.device());
