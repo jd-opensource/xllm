@@ -45,6 +45,7 @@ limitations under the License.
 #include "core/framework/tokenizer/tokenizer_factory.h"
 #include "core/platform/device.h"
 #include "core/util/blocking_counter.h"
+#include "core/util/env_var.h"
 #include "core/util/json_reader.h"
 #include "core/util/rec_model_utils.h"
 #include "core/util/scope_guard.h"
@@ -139,6 +140,9 @@ bool try_load_compressed_tensors_quant_cfg(const JsonReader& reader,
                 "quantization.";
   return false;
 }
+
+constexpr const char* kStreamStateDictLoadEnv =
+    "XLLM_STREAM_HF_STATE_DICT_LOAD";
 
 bool validate_smoothquant_mixed_w4a8(const JsonReader& reader,
                                      QuantArgs& quant_args,
@@ -457,6 +461,26 @@ std::vector<std::unique_ptr<StateDict>>& HFModelLoader::get_state_dicts() {
     counter.wait();
   }
   return state_dicts_;
+}
+
+void HFModelLoader::for_each_state_dict(
+    const std::function<void(const StateDict&)>& visitor) {
+  CHECK(static_cast<bool>(visitor)) << "state-dict visitor must not be empty";
+  if (!util::get_bool_env(kStreamStateDictLoadEnv, false)) {
+    for (const auto& state_dict : get_state_dicts()) {
+      visitor(*state_dict);
+    }
+    return;
+  }
+
+  LOG(INFO) << "Streaming HF safetensor shards one by one during model load: "
+            << "num_files=" << model_weights_files_.size()
+            << ", env=" << kStreamStateDictLoadEnv;
+  for (const auto& weights_file : model_weights_files_) {
+    LOG(INFO) << "Streaming model weights from " << weights_file;
+    auto state_dict = StateDictFromSafeTensor::load(weights_file);
+    visitor(*state_dict);
+  }
 }
 
 int64_t HFModelLoader::get_total_weight_size() const {

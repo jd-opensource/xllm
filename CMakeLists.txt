@@ -350,6 +350,7 @@ if(USE_NPU)
       ${XLLM_ATB_LAYERS_SOURCE_DIR}
       ${XLLM_ATB_LAYERS_SOURCE_DIR}/core/include
   )
+  set(PYTORCH_TORCH_LIBS_PATH "$ENV{PYTORCH_INSTALL_PATH}/../torch.libs")
   link_directories(
       $ENV{PYTHON_LIB_PATH}
       $ENV{PYTORCH_INSTALL_PATH}/lib
@@ -359,6 +360,10 @@ if(USE_NPU)
       $ENV{NPU_TOOLKIT_HOME}/lib64
       $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/lib/
   )
+  if(EXISTS "${PYTORCH_TORCH_LIBS_PATH}")
+    link_directories("${PYTORCH_TORCH_LIBS_PATH}")
+    add_link_options("-Wl,-rpath-link,${PYTORCH_TORCH_LIBS_PATH}")
+  endif()
   link_libraries(cust_opapi)
   # avoid conflicts with xllm libruntime.a
   find_library(

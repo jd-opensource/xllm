@@ -59,11 +59,11 @@ class WordEmbeddingImpl : public torch::nn::Module {
   // world size
   PROPERTY(int32_t, world_size) = 0;
 
+  // tensor parallel process group
+  ProcessGroup* tp_group_ = nullptr;
+
   // parameter members, must be registered
   DEFINE_WEIGHT(weight);
-
-  // parallel args
-  ParallelArgs parallel_args_;
 };
 
 }  // namespace layer
