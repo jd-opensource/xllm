@@ -125,6 +125,13 @@ uint32_t get_graph_dp_tokens(uint32_t actual_tokens,
   return align_tokens(std::max(bucket_tokens, tp_size), tp_size);
 }
 
+int64_t get_seq_lens_capacity(const xllm::runtime::Options& options) {
+  const int64_t max_seqs = options.max_seqs_per_batch();
+  const int64_t seq_expand =
+      std::max<int64_t>(1, options.num_speculative_tokens() + 1);
+  return max_seqs * seq_expand + 1;
+}
+
 xllm::ModelInputParams make_graph_params(const xllm::ModelInputParams& params,
                                          uint32_t padding_num_tokens) {
   xllm::ModelInputParams graph_params = params;
@@ -186,7 +193,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
                                            const runtime::Options& options)
     : num_decoding_tokens_(options.num_decoding_tokens()) {
   const int64_t max_tokens = FLAGS_max_tokens_per_batch;
-  const int64_t max_seqs = options.max_seqs_per_batch();
+  const int64_t max_seq_lens = get_seq_lens_capacity(options);
   const int64_t max_seq_len = args.max_position_embeddings();
   const uint32_t block_size = options.block_size();
   const int64_t max_num_blocks_per_req =
@@ -210,9 +217,11 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   new_cache_slots_ = torch::zeros({max_tokens}, int_tensor_options);
   block_table_ =
       torch::zeros({max_tokens, max_num_blocks_per_req}, int_tensor_options);
-  // Sequence length tensors with max_seqs
-  q_seq_lens_ = torch::zeros({max_seqs + 1}, int_tensor_options);
-  kv_seq_lens_ = torch::zeros({max_seqs + 1}, int_tensor_options);
+  // MTP validate expands decode rows from N to N * (K + 1), where K is the
+  // speculative token count. Draft-extend only doubles rows, so the same
+  // bound covers both paths when speculative decode is enabled.
+  q_seq_lens_ = torch::zeros({max_seq_lens}, int_tensor_options);
+  kv_seq_lens_ = torch::zeros({max_seq_lens}, int_tensor_options);
 }
 
 void GraphPersistentParam::init_params(const ModelInputParams& params,
@@ -244,11 +253,14 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
   const int64_t padded_tokens = actual_tokens + padding_needed;
   const int64_t actual_batch = params.block_tables.size(0);
   const int64_t block_rows_end = actual_batch + padding_needed;
-  positions_.slice(slice_dim, 0, positions.size(slice_dim))
-      .copy_(positions, true);
-  tokens_.slice(0, 0, tokens.size(0)).copy_(tokens, true);
-  new_cache_slots_.slice(0, 0, params.new_cache_slots.size(0))
-      .copy_(params.new_cache_slots, true);
+  auto position_slice =
+      positions_.slice(slice_dim, 0, positions.size(slice_dim));
+  auto token_slice = tokens_.slice(0, 0, tokens.size(0));
+  auto cache_slot_slice =
+      new_cache_slots_.slice(0, 0, params.new_cache_slots.size(0));
+  position_slice.copy_(positions, true);
+  token_slice.copy_(tokens, true);
+  cache_slot_slice.copy_(params.new_cache_slots, true);
   if (padding_needed > 0) {
     positions_.slice(slice_dim, actual_tokens, padded_tokens).zero_();
     tokens_.slice(0, actual_tokens, padded_tokens).zero_();
@@ -269,8 +281,10 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
   }
   auto q_seq_lens = torch::tensor(q_seq_lens_vec, q_seq_lens_.options());
   auto kv_seq_lens = torch::tensor(kv_seq_lens_vec, kv_seq_lens_.options());
-  q_seq_lens_.slice(0, 0, q_seq_lens.size(0)).copy_(q_seq_lens, true);
-  kv_seq_lens_.slice(0, 0, kv_seq_lens.size(0)).copy_(kv_seq_lens, true);
+  auto q_seq_slice = q_seq_lens_.slice(0, 0, q_seq_lens.size(0));
+  auto kv_seq_slice = kv_seq_lens_.slice(0, 0, kv_seq_lens.size(0));
+  q_seq_slice.copy_(q_seq_lens, true);
+  kv_seq_slice.copy_(kv_seq_lens, true);
 
   // Copy block table data
   const int64_t actual_block_batch = params.block_tables.size(0);
@@ -288,8 +302,9 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
   }
 
   if (params.input_embedding.defined()) {
-    input_embeds_.slice(0, 0, params.input_embedding.size(0))
-        .copy_(params.input_embedding, true);
+    auto input_embed_slice =
+        input_embeds_.slice(0, 0, params.input_embedding.size(0));
+    input_embed_slice.copy_(params.input_embedding, true);
     if (padding_needed > 0) {
       input_embeds_.slice(0, params.input_embedding.size(0), padded_tokens)
           .zero_();

@@ -431,6 +431,33 @@ TEST_F(MluGraphExecutorTest, UnevenDpDecodePadsToTpGraphSize) {
   EXPECT_EQ(model_->last_dp_token_nums(), std::vector<int32_t>({4, 4}));
 }
 
+TEST_F(MluGraphExecutorTest, MtpSeqLensCapacityUsesSpecFactor) {
+  options_.is_draft_engine(false);
+  options_.num_speculative_tokens(1);
+  options_.max_seqs_per_batch(2);
+  rebuild_impl();
+
+  auto forward_input = prepare_inputs(/*batch_size=*/4, /*seed=*/71);
+  forward_input.input_params.dp_global_token_nums = {4, 4};
+  forward_input.input_params.dp_is_decode = {1, 1};
+
+  auto first_output = impl_
+                          ->run({forward_input.token_ids},
+                                {forward_input.positions},
+                                kv_caches_,
+                                {forward_input.input_params})
+                          .hidden_states;
+  auto second_output = impl_
+                           ->run({forward_input.token_ids},
+                                 {forward_input.positions},
+                                 kv_caches_,
+                                 {forward_input.input_params})
+                           .hidden_states;
+
+  torch_mlu::synchronize();
+  EXPECT_TRUE(torch::allclose(first_output, second_output, 1e-5, 1e-6));
+}
+
 TEST_F(MluGraphExecutorTest, DpDummyFallsBackToEager) {
   options_.is_draft_engine(false);
   rebuild_impl();
