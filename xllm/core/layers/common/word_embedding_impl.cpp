@@ -27,10 +27,11 @@ WordEmbeddingImpl::WordEmbeddingImpl(const ModelContext& context)
 WordEmbeddingImpl::WordEmbeddingImpl(int64_t num_embeddings,
                                      int64_t embedding_dim,
                                      const ParallelArgs& parallel_args,
-                                     const torch::TensorOptions& options)
-    : parallel_args_(parallel_args) {
-  rank_ = parallel_args_.tp_group_->rank();
-  world_size_ = parallel_args_.tp_group_->world_size();
+                                     const torch::TensorOptions& options) {
+  tp_group_ = parallel_args.tp_group_;
+  CHECK(tp_group_ != nullptr) << "WordEmbedding requires tp_group_";
+  rank_ = tp_group_->rank();
+  world_size_ = tp_group_->world_size();
 
   CHECK(embedding_dim % world_size_ == 0)
       << "out_features " << embedding_dim << " not divisible by world_size "
@@ -50,7 +51,7 @@ torch::Tensor WordEmbeddingImpl::forward(torch::Tensor input) {
   namespace F = torch::nn::functional;
   auto output = F::embedding(input, weight_);
   if (world_size_ > 1) {
-    output = xllm::parallel_state::gather(output, parallel_args_.tp_group_);
+    output = xllm::parallel_state::gather(output, tp_group_);
   }
   return output;
 }

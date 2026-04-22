@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <functional>
 #include <vector>
 
 #include "core/framework/state_dict/state_dict.h"
@@ -36,6 +37,9 @@ class HFModelLoader : public ModelLoader {
   std::unique_ptr<Tokenizer> tokenizer() const override;
 
   std::vector<std::unique_ptr<StateDict>>& get_state_dicts() override;
+
+  void for_each_state_dict(
+      const std::function<void(const StateDict&)>& visitor);
 
   int64_t get_total_weight_size() const override;
 

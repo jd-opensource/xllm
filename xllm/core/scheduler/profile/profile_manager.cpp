@@ -30,6 +30,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request_state.h"
+#include "util/env_var.h"
 #include "util/rec_model_utils.h"
 
 namespace xllm {
@@ -867,8 +868,15 @@ void ProfileManager::warmup_for_graph() {
 
   // Warmup parameters - align with bucket logic
   // Prefill: align max_tokens_per_batch to bucket
-  int32_t prefill_tokens =
+  int32_t default_prefill_tokens =
       std::min(FLAGS_max_tokens_per_batch, max_context_len);
+  if (model_args.model_type() == "minimax_m2") {
+    default_prefill_tokens = std::min(default_prefill_tokens, 1024);
+  }
+  int64_t configured_prefill_tokens = util::get_int_env(
+      "XLLM_GRAPH_WARMUP_PREFILL_TOKENS", default_prefill_tokens);
+  int32_t prefill_tokens = static_cast<int32_t>(std::clamp<int64_t>(
+      configured_prefill_tokens, 1, default_prefill_tokens));
 
   std::vector<int32_t> decode_seq_lens = {16};
 

@@ -22,6 +22,7 @@ limitations under the License.
 #include <torch_npu/csrc/libs/init_npu.h>
 #include <torch_npu/torch_npu.h>
 
+#include <algorithm>
 #include <numeric>
 
 #include "core/common/global_flags.h"
@@ -68,6 +69,59 @@ int64_t get_decode_graph_capacity(const runtime::Options& options) {
     return options.max_seqs_per_batch();
   }
   return options.max_seqs_per_batch() * options.num_decoding_tokens();
+}
+
+bool tensor_on_device(const torch::Tensor& tensor,
+                      const torch::Device& device) {
+  return !tensor.defined() || tensor.device() == device;
+}
+
+bool model_input_params_on_device(const ModelInputParams& params,
+                                  const torch::Device& device) {
+  return tensor_on_device(params.kv_seq_lens, device) &&
+         tensor_on_device(params.q_seq_lens, device) &&
+         tensor_on_device(params.q_cu_seq_lens, device) &&
+         tensor_on_device(params.new_cache_slots, device) &&
+         tensor_on_device(params.block_tables, device) &&
+         tensor_on_device(params.input_embedding, device) &&
+         tensor_on_device(params.kv_cache_tokens_nums, device) &&
+         tensor_on_device(params.history_compressed_kv, device) &&
+         tensor_on_device(params.history_k_rope, device) &&
+         tensor_on_device(params.ring_cur_seqlen, device) &&
+         tensor_on_device(params.ring_cache_seqlen, device) &&
+         tensor_on_device(params.expert_load_data, device) &&
+         tensor_on_device(params.expert_array, device) &&
+         tensor_on_device(params.src_block_indices, device) &&
+         tensor_on_device(params.dst_block_indices, device) &&
+         tensor_on_device(params.cum_sum, device) &&
+         tensor_on_device(params.new_cache_slot_offsets, device) &&
+         tensor_on_device(params.kv_cache_start_offsets, device) &&
+         tensor_on_device(params.graph_buffer.attn_mask, device) &&
+         tensor_on_device(params.graph_buffer.tiling_data, device) &&
+         tensor_on_device(params.paged_kv_indptr, device) &&
+         tensor_on_device(params.paged_kv_indices, device) &&
+         tensor_on_device(params.paged_kv_last_page_len, device);
+}
+
+const torch::Tensor& maybe_to_device(const torch::Tensor& tensor,
+                                     const torch::Device& device,
+                                     torch::Tensor& storage) {
+  if (tensor_on_device(tensor, device)) {
+    return tensor;
+  }
+  storage = safe_to(tensor, device, true);
+  return storage;
+}
+
+const ModelInputParams& maybe_to_device(
+    const ModelInputParams& params,
+    const torch::Device& device,
+    std::optional<ModelInputParams>& storage) {
+  if (model_input_params_on_device(params, device)) {
+    return params;
+  }
+  storage.emplace(params.to(device));
+  return *storage;
 }
 }  // namespace
 
@@ -245,7 +299,6 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
   }
 
-  // Copy block table data
   const int64_t actual_block_table_len = params.block_tables.size(1);
   auto slice_persistent_block_tables =
       persistent_block_tables_
@@ -613,9 +666,11 @@ void GraphPersistentParam::plan_paged_attention_tiling(
   atb::Tensor atb_v_cache = atb_speed::Utils::AtTensor2Tensor(v_cache);
   atb::Tensor atb_block_tables =
       atb_speed::Utils::AtTensor2Tensor(block_tables);
-  // Get context_lens from input_params.kv_seq_lens
-  atb::Tensor atb_context_lens =
-      atb_speed::Utils::AtTensor2Tensor(input_params.kv_seq_lens);
+  // Use the persistent device slice for tensor metadata so replay can keep the
+  // original decode params on host while still exposing the current lengths to
+  // the paged-attention planner.
+  atb::Tensor atb_context_lens = atb_speed::Utils::AtTensor2Tensor(
+      kv_seq_lens(input_params.num_sequences));
   atb_context_lens.hostData =
       const_cast<int32_t*>(input_params.kv_seq_lens_vec.data());
   atb::Tensor atb_tiling_data = atb_speed::Utils::AtTensor2Tensor(tiling_data_);
@@ -860,6 +915,7 @@ bool AclGraph::capture(CausalLM* model,
 
   // Use cached capture stream for graph capture
   // capture_stream_ is initialized in constructor
+  aclrtStream capture_stream = stream;
   bool need_restore_stream = false;
 
   // capture lock scope
@@ -871,8 +927,11 @@ bool AclGraph::capture(CausalLM* model,
     if (c10_npu::getCurrentNPUStream(device_idx) ==
         c10_npu::getDefaultNPUStream(device_idx)) {
       c10_npu::setCurrentNPUStream(capture_stream_.value());
-      aclrtSynchronizeStream(capture_stream_.value().stream());
+      capture_stream = capture_stream_.value().stream();
+      aclrtSynchronizeStream(capture_stream);
       need_restore_stream = true;
+    } else {
+      capture_stream = c10_npu::getCurrentNPUStream(device_idx).stream();
     }
     LOG(INFO) << "capture begin, bucket_num_tokens: " << bucket_num_tokens
               << ", actual_num_tokens: " << actual_num_tokens;
@@ -901,12 +960,10 @@ bool AclGraph::capture(CausalLM* model,
           c10_npu::getDefaultNPUStream(tensor_options.device().index()));
     }
   }
-  // Synchronize and test replay to verify graph capture
-  aclrtSynchronizeStream(stream);
-
+  aclrtSynchronizeStream(capture_stream);
+  aclrtStream replay_stream = c10_npu::getCurrentNPUStream(device_idx).stream();
   graph_.replay();
-
-  // aclrtSynchronizeStream(stream);
+  aclrtSynchronizeStream(replay_stream);
   return true;
 }
 
@@ -919,7 +976,7 @@ void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
   device_index_ = device_index;
   LOG(INFO) << "Initialized capture_stream: " << capture_stream_.value()
             << ", id: " << capture_stream_.value().id()
-            << ", device_index: " << device_index;
+            << ", device_index: " << static_cast<int>(device_index);
 }
 
 ModelOutput AclGraph::replay(const torch::Tensor& tokens,
@@ -990,7 +1047,13 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   const torch::Tensor& tokens_tensor = tokens;
   const torch::Tensor& positions_tensor = positions;
   const ModelInputParams& params_single = params;
+  torch::Tensor tokens_on_device;
+  torch::Tensor positions_on_device;
+  std::optional<ModelInputParams> params_on_device;
   const bool in_decoding_phase = params_single.batch_forward_type.is_decode();
+  const uint32_t n_tokens = tokens_tensor.size(/*dim=*/0);
+  const uint32_t bucket_num_tokens = get_bucket_num_tokens(n_tokens);
+  auto graph_it = graphs_.find(bucket_num_tokens);
   VLOG(50) << "in_decoding_phase: " << in_decoding_phase
            << " q_max_seq_len: " << params_single.q_max_seq_len
            << " n_layers: " << args_.n_layers();
@@ -1000,14 +1063,16 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     VLOG(kGraphExecutorLogVerboseLevel)
         << "AclGraphExecutorImpl::run() in eager mode";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(
+        maybe_to_device(tokens_tensor, device_, tokens_on_device),
+        maybe_to_device(positions_tensor, device_, positions_on_device),
+        kv_caches,
+        maybe_to_device(params_single, device_, params_on_device));
   }
 
   // Only use acl graph in decode phase for performance optimization
-  // Get actual num_tokens from tokens shape
-  const uint32_t n_tokens = tokens_tensor.size(/*dim=*/0);
   const uint32_t actual_batch_size = n_tokens / options_.num_decoding_tokens();
-  const uint32_t bucket_num_tokens = get_bucket_num_tokens(n_tokens);
+  (void)actual_batch_size;
 
   // Check if conditions are suitable for graph execution (replay or capture)
   const auto max_seq_len = args_.max_position_embeddings();
@@ -1025,16 +1090,19 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
         << "). This message is logged only once. "
         << "Monitor counter 'num_model_execution_total_eager' for frequency.";
     COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
+    return model_->forward(
+        maybe_to_device(tokens_tensor, device_, tokens_on_device),
+        maybe_to_device(positions_tensor, device_, positions_on_device),
+        kv_caches,
+        maybe_to_device(params_single, device_, params_on_device));
   }
 
   // Check if captured graph exists for this bucket num_tokens
-  auto it = graphs_.find(bucket_num_tokens);
-  if (it != graphs_.end()) {
+  if (graph_it != graphs_.end()) {
     // Replay the existing graph
     VLOG(kGraphExecutorLogVerboseLevel)
         << "AclGraphExecutorImpl::run() in replay mode";
-    auto result = it->second->replay(
+    auto result = graph_it->second->replay(
         tokens_tensor, positions_tensor, kv_caches, params_single);
     // Handle aux_hidden_states based on options
     if (options_.enable_graph_aux_hidden_states()) {
@@ -1051,14 +1119,15 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   auto graph = std::make_unique<AclGraph>(*persistent_param_, device_.index());
   VLOG(kGraphExecutorLogVerboseLevel)
       << "AclGraphExecutorImpl::run() in capture mode";
-  bool capture_success = graph->capture(model_,
-                                        args_,
-                                        options_,
-                                        tokens_tensor,
-                                        positions_tensor,
-                                        params_single,
-                                        kv_caches,
-                                        bucket_num_tokens);
+  bool capture_success = graph->capture(
+      model_,
+      args_,
+      options_,
+      maybe_to_device(tokens_tensor, device_, tokens_on_device),
+      maybe_to_device(positions_tensor, device_, positions_on_device),
+      maybe_to_device(params_single, device_, params_on_device),
+      kv_caches,
+      bucket_num_tokens);
 
   if (capture_success) {
     LOG(INFO) << "Lazy capturing ACL graph for bucket num_tokens: "
@@ -1085,7 +1154,11 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   LOG(ERROR) << "Failed to capture ACL graph for bucket num_tokens: "
              << bucket_num_tokens;
   COUNTER_INC(num_model_execution_total_eager);
-  return model_->forward(tokens, positions, kv_caches, params);
+  return model_->forward(
+      maybe_to_device(tokens_tensor, device_, tokens_on_device),
+      maybe_to_device(positions_tensor, device_, positions_on_device),
+      kv_caches,
+      maybe_to_device(params_single, device_, params_on_device));
 }
 
 void AclGraph::print_graph_tensors() const {

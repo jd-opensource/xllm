@@ -25,6 +25,5 @@ pybind_extension(
     c10
 )
 target_link_options(xllm_export PRIVATE -Wl,-Bsymbolic)
-target_link_libraries(common PRIVATE leveldb::leveldb OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
-add_dependencies(common brpc-static)
-
+target_link_libraries(xllm_export PRIVATE leveldb::leveldb OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
+add_dependencies(xllm_export brpc-static)

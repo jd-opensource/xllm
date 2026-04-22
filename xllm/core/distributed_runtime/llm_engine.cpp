@@ -62,6 +62,13 @@ int64_t get_kv_cache_dtype_size_in_bytes(const std::string& kv_cache_dtype,
   }
   return model_dtype_size;
 }
+
+#if defined(USE_NPU)
+bool should_keep_minimax_decode_graph_enabled() {
+  return xllm::util::get_bool_env("XLLM_MINIMAX_NATIVE_DECODE_ATTN", true) &&
+         !xllm::util::get_bool_env("XLLM_MINIMAX_EP_MOE_REFERENCE", false);
+}
+#endif
 }  // namespace
 
 namespace xllm {
@@ -189,6 +196,23 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   args_ = model_loader->model_args();
   quant_args_ = model_loader->quant_args();
   tokenizer_args_ = model_loader->tokenizer_args();
+
+#if defined(USE_NPU)
+  if (args_.model_type() == "minimax_m2" && FLAGS_enable_graph) {
+    if (should_keep_minimax_decode_graph_enabled()) {
+      LOG(INFO) << "Keeping ACL graph enabled for MiniMax-M2.5 decode: "
+                   "native paged-attention and a graph-safe MiniMax decode MoE "
+                   "path are enabled.";
+    } else {
+      LOG(WARNING) << "Disabling ACL graph for MiniMax-M2.5 decode because "
+                      "either XLLM_MINIMAX_NATIVE_DECODE_ATTN=0, "
+                      "or XLLM_MINIMAX_EP_MOE_REFERENCE=1. The eager/reference/"
+                      "compare decode paths must run outside ACL graph "
+                      "capture.";
+      FLAGS_enable_graph = false;
+    }
+  }
+#endif
 
   // compute the number of local kv heads and head dim
   const uint32_t world_size = dp_local_tp_size_;
