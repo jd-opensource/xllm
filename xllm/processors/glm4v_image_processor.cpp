@@ -283,6 +283,9 @@ bool Glm4VImageProcessor::process_images(std::vector<torch::Tensor> images,
 
     auto& item = mm_datas.add(MMType::IMAGE);
     item.set_data({{"pixel_values", pixel_values}, {"image_grid_thw", thw}});
+    const int32_t mm_token_num =
+        thw.prod().item<int32_t>() / (merge_size_ * merge_size_);
+    item.mutable_state().mutable_mm_token_num() = mm_token_num;
   }
 
   return true;
@@ -380,6 +383,9 @@ bool Glm4VImageProcessor::process_videos(
     auto& item = mm_datas.add(MMType::VIDEO);
     item.set_data(
         {{"pixel_values_videos", pixel_values}, {"video_grid_thw", thw}});
+    const int32_t mm_token_num =
+        thw.prod().item<int32_t>() / (merge_size_ * merge_size_);
+    item.mutable_state().mutable_mm_token_num() = mm_token_num;
     item.set_metadata(metadata);
   }
 

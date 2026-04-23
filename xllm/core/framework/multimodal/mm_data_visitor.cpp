@@ -105,6 +105,13 @@ bool CollectMMDataTensorVisitor::visit(MMData& data) {
   return true;
 }
 
+bool MMTokenNumVisitor::visit(MMDataItem& item) {
+  if (item.type() == type_ && !item.is_embedded()) {
+    token_nums_.push_back(item.state().mm_token_num());
+  }
+  return true;
+}
+
 bool EncoderInputGatherVisitor::visit(MMDataItem& item) {
   if (item.is_embedded()) return true;
 
@@ -213,7 +220,7 @@ EncoderEmbeddingGatherVisitor::EncoderEmbeddingGatherVisitor(
 bool EncoderEmbeddingGatherVisitor::visit(MMDataItem& item) {
   const auto& state = item.state();
 
-  int32_t seq_index = item.seq_index();
+  int32_t seq_index = state.seq_index();
   CHECK_GE(seq_index, 0);
 
   auto token_pos = item.state().token_pos();
@@ -306,7 +313,7 @@ bool UpdateMMItemScheduleStateVisitor::visit(MMDataItem& item) {
   schedule_data.end_pos =
       std::min(computed_token_num_ - token_pos.offset + schedule_token_num,
                token_pos.length);
-  item.set_seq_index(seq_idx_);
+  item.mutable_state().mutable_seq_index() = seq_idx_;
   scheduled_type_ |= item.type();
   mm_data_items_.push_back(item);
   return true;

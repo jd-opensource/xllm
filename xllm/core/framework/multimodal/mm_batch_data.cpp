@@ -292,7 +292,7 @@ bool mmdata_item_to_proto(const xllm::MMDataItem& cpp_item,
   }
 
   pb_item->set_type(cpp_item.type());
-  pb_item->set_seq_index(cpp_item.seq_index());
+  pb_item->set_seq_index(cpp_item.state().seq_index());
   if (!mmdict_to_proto(cpp_item.data(), pb_item->mutable_dict())) {
     LOG(ERROR) << "Failed to convert MMDataItem dict";
     return false;
@@ -315,7 +315,7 @@ std::optional<xllm::MMDataItem> proto_to_mmdata_item(
 
   xllm::MMType type{static_cast<xllm::MMType::Value>(pb_item.type())};
   xllm::MMDataItem cpp_item(type, std::move(*dict_opt));
-  cpp_item.set_seq_index(pb_item.seq_index());
+  cpp_item.mutable_state().mutable_seq_index() = pb_item.seq_index();
   if (!proto_to_mmitem_state(pb_item.state(), &cpp_item.mutable_state())) {
     return std::nullopt;
   }

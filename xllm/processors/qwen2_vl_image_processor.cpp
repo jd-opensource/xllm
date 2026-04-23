@@ -257,8 +257,12 @@ bool Qwen2VLImageProcessor::process_images(std::vector<torch::Tensor> images,
       return false;
     }
 
+    const int32_t mm_token_num =
+        thw.prod().item<int32_t>() / (merge_size_ * merge_size_);
+    CHECK_GT(mm_token_num, 0) << "invalid image multimodal token num";
     auto& item = mm_datas.add(MMType::IMAGE);
     item.set_data({{"pixel_values", pixel_values}, {"image_grid_thw", thw}});
+    item.mutable_state().mutable_mm_token_num() = mm_token_num;
   }
 
   return true;
@@ -359,10 +363,14 @@ bool Qwen2VLImageProcessor::process_videos(
     double seconds_per_grid = static_cast<double>(temporal_patch_size_) / fps;
     auto second_per_grid_ts = torch::tensor({seconds_per_grid}, opts);
 
+    const int32_t mm_token_num =
+        thw.prod().item<int32_t>() / (merge_size_ * merge_size_);
+    CHECK_GT(mm_token_num, 0) << "invalid video multimodal token num";
     auto& item = mm_datas.add(MMType::VIDEO);
     item.set_data({{"pixel_values_videos", pixel_values},
                    {"video_grid_thw", thw},
                    {"second_per_grid_ts", second_per_grid_ts}});
+    item.mutable_state().mutable_mm_token_num() = mm_token_num;
 
     item.set_metadata(metadata);
   }

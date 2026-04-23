@@ -49,6 +49,7 @@ class ParallelConfig final {
          "cfg_size",
          "communication_backend",
          "enable_prefill_sp",
+         "enable_mm_encoder_dp",
          "enable_multi_stream_parallel",
          "micro_batch_num",
          "enable_dp_balance"}};
@@ -77,6 +78,8 @@ class ParallelConfig final {
   PROPERTY(std::string, communication_backend) = "hccl";
 
   PROPERTY(bool, enable_prefill_sp) = false;
+
+  PROPERTY(bool, enable_mm_encoder_dp) = false;
 
   PROPERTY(bool, enable_multi_stream_parallel) = false;
 
