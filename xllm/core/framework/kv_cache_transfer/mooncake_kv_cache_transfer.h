@@ -73,6 +73,11 @@ class MooncakeKVCacheTransferDefault final
                          const KVCacheShape& kv_cache_shape,
                          torch::ScalarType dtype) override;
 
+  void allocate_kv_cache_spec(std::vector<xllm::KVCache>& kv_caches,
+                              const int64_t num_layers,
+                              const KVCacheShape& kv_cache_shape,
+                              torch::ScalarType dtype) override;
+
   void register_kv_cache(std::vector<xllm::KVCache>& kv_caches,
                          const KVCacheShape& kv_cache_shape,
                          const torch::ScalarType dtype) override;
@@ -95,6 +100,13 @@ class MooncakeKVCacheTransferDefault final
       bool is_spec_draft) override;
 
  private:
+  struct BufLayout {
+    int64_t num_layers = 0;
+    int64_t buf_cnt = 0;
+    int64_t offset = 0;
+    bool registered = false;
+  };
+
   void allocate_kv_cache_impl(std::vector<xllm::KVCache>& kv_caches,
                               int64_t num_layers,
                               const KVCacheShape& kv_cache_shape,
@@ -104,14 +116,17 @@ class MooncakeKVCacheTransferDefault final
                std::vector<void*>& addrs,
                std::vector<size_t>& lens,
                std::vector<uint64_t>& buf_bytes) const;
-  std::vector<int64_t> get_buf_ids(const std::vector<int64_t>& layer_ids) const;
+  std::vector<int64_t> get_buf_ids(const std::vector<int64_t>& layer_ids,
+                                   bool is_spec_draft) const;
+  std::vector<int64_t> get_buf_ids(const std::vector<int64_t>& layer_ids,
+                                   const BufLayout& layout) const;
 
   // Register per-layer K/V tensor memory.
-  void register_kv_cache_impl(std::vector<xllm::KVCache>& kv_caches);
+  void register_kv_cache_impl(const std::vector<xllm::KVCache>& kv_caches);
 
   bool has_v_cache_ = true;
-  bool has_index_cache_ = false;
-  int64_t buf_cnt_per_layer_ = 2;
+  BufLayout main_layout_;
+  BufLayout spec_layout_;
   std::string model_type_;
 };
 

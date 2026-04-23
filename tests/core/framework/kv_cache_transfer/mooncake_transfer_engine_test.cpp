@@ -24,8 +24,10 @@ limitations under the License.
 #include "framework/kv_cache_transfer/kv_cache_transfer.h"
 
 #define private public
+#define protected public
 #include "framework/kv_cache_transfer/mooncake_kv_cache_transfer.h"
 #undef private
+#undef protected
 
 namespace xllm {
 
@@ -185,6 +187,23 @@ TEST(MooncakeKVCacheTransferDefaultTest, SmallSrcTpUsesBaseMerge) {
       base_kv_infos, {info}, parallel_args);
 
   expect_same_merge(merged_kv_infos, base_kv_infos);
+}
+
+TEST(MooncakeKVCacheTransferDefaultTest, SpecDraftBufIdsUseSpecOffset) {
+  MooncakeKVCacheTransferDefault transfer(
+      0, 0, torch::Device(torch::kCPU), "test");
+  transfer.has_v_cache_ = true;
+  transfer.main_layout_.num_layers = 40;
+  transfer.main_layout_.buf_cnt = 2;
+  transfer.main_layout_.offset = 0;
+  transfer.main_layout_.registered = true;
+  transfer.spec_layout_.num_layers = 1;
+  transfer.spec_layout_.buf_cnt = 2;
+  transfer.spec_layout_.offset = 80;
+  transfer.spec_layout_.registered = true;
+
+  EXPECT_EQ(transfer.get_buf_ids({0}, false), (std::vector<int64_t>{0, 1}));
+  EXPECT_EQ(transfer.get_buf_ids({0}, true), (std::vector<int64_t>{80, 81}));
 }
 #endif
 
