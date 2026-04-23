@@ -28,6 +28,11 @@ limitations under the License.
 #include "vlm_executor_impl.h"
 
 namespace {
+// Large decode buckets bring little replay benefit on MLU, but they still
+// retain graph buffers for each captured shape. Cap capture at 64 tokens and
+// let larger decode batches fall back to eager to avoid wasting memory.
+constexpr uint32_t kMaxGraphTokens = 64;
+
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
 uint32_t get_bucket_num_tokens(uint32_t num_tokens) {
   if (FLAGS_enable_graph_mode_decode_no_padding) {
@@ -393,10 +398,6 @@ ForwardInput MluGraphExecutorImpl::prepare_inputs(Batch& batch) {
       options_.num_decoding_tokens(), 0, args_, options_.cp_size());
 }
 
-bool MluGraphExecutorImpl::should_eager(const ModelInputParams& params) const {
-  return !allow_graph(get_run_mode(options_, params));
-}
-
 ModelOutput MluGraphExecutorImpl::run_eager(const torch::Tensor& tokens,
                                             const torch::Tensor& positions,
                                             std::vector<KVCache>& kv_caches,
@@ -449,6 +450,12 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
   const uint32_t actual_tokens = static_cast<uint32_t>(tokens.size(0));
   const uint32_t graph_tokens =
       get_graph_dp_tokens(actual_tokens, params, options_);
+  if (graph_tokens > kMaxGraphTokens) {
+    LOG_FIRST_N(INFO, 1)
+        << "MLU graph fallback to eager because graph bucket num_tokens "
+        << graph_tokens << " exceeds limit " << kMaxGraphTokens;
+    return run_eager(tokens, positions, kv_caches, params);
+  }
   const ModelInputParams graph_params = make_graph_params(params, graph_tokens);
 
   if (graph_params.dp_global_token_nums != params.dp_global_token_nums) {
