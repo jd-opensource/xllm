@@ -314,6 +314,8 @@ DECLARE_int64(cfg_size);
 
 DECLARE_bool(dit_debug_print);
 
+DECLARE_bool(dit_sp_communication_overlap);
+
 // --- multi-step decode config ---
 
 DECLARE_int32(max_decode_rounds);
