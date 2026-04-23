@@ -6,6 +6,18 @@ add_subdirectory(profile)
 
 cc_library(
   NAME
+    pd_topology_guard
+  HDRS
+    pd_topology_guard.h
+  SRCS
+    pd_topology_guard.cpp
+  DEPS
+    :common
+    glog::glog
+)
+
+cc_library(
+  NAME
     scheduler
   HDRS
     mix_scheduler.h
@@ -13,7 +25,6 @@ cc_library(
     zero_eviction_scheduler.h
     continuous_scheduler.h
     disagg_pd_scheduler.h
-    pd_topology_guard.h
     pd_ooc_scheduler.h
     async_response_processor.h
     scheduler.h
@@ -29,7 +40,6 @@ cc_library(
     zero_eviction_scheduler.cpp
     continuous_scheduler.cpp
     disagg_pd_scheduler.cpp
-    pd_topology_guard.cpp
     pd_ooc_scheduler.cpp
     async_response_processor.cpp
     dit_scheduler.cpp
@@ -42,6 +52,7 @@ cc_library(
     :request
     :runtime
     :profile
+    :pd_topology_guard
     glog::glog
     Folly::folly
     absl::time
@@ -70,7 +81,7 @@ cc_test(
   SRCS
     pd_topology_guard_test.cpp
   DEPS
-    :scheduler
+    :pd_topology_guard
     GTest::gtest_main
 )
 

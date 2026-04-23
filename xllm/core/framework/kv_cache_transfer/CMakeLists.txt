@@ -26,6 +26,7 @@ cc_library(
   DEPS
     :common
     :kv_cache
+    :push_route
     :xtensor
     $<$<BOOL:${USE_NPU}>:graph>
     glog::glog

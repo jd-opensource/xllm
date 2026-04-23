@@ -4,6 +4,15 @@ include(cc_test)
 
 cc_library(
   NAME
+    push_route
+  HDRS
+    push_route.h
+  SRCS
+    push_route.cpp
+)
+
+cc_library(
+  NAME
     kv_cache
   HDRS
     embedding_cache.h
@@ -15,7 +24,6 @@ cc_library(
     kv_cache_utils.h
     linear_attention_kv_cache_impl.h
     quantized_kv_cache_impl.h
-    push_route.h
   SRCS
     embedding_cache.cpp 
     indexed_kv_cache_impl.cpp
@@ -25,7 +33,6 @@ cc_library(
     kv_cache_utils.cpp
     linear_attention_kv_cache_impl.cpp
     quantized_kv_cache_impl.cpp
-    push_route.cpp
   DEPS
     :common
     :xtensor
@@ -40,7 +47,7 @@ cc_test(
   SRCS
     push_route_test.cpp
   DEPS
-    :kv_cache
+    :push_route
     GTest::gtest_main
 )
 
