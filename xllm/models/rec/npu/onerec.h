@@ -18,22 +18,14 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
-#include <algorithm>
-#include <cmath>
 #include <mutex>
-#include <optional>
+#include <string>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
-#include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
-#include "core/framework/model/model_output.h"
-#include "core/framework/model_context.h"
-#include "core/framework/model_loader.h"
-#include "core/layers/common/lm_head.h"
-#include "core/layers/common/word_embedding.h"
+#include "core/framework/model/rec_causal_lm.h"
 #include "models/model_registry.h"
 #include "models/rec/npu/onerec_npu_impl.h"
 #include "models/rec/rec_model_base.h"
@@ -310,9 +302,9 @@ class OneRecForConditionalGenerationImpl final
 };
 TORCH_MODULE(OneRecForConditionalGeneration);
 
-using OneRecCausalLM = CausalLMImpl<OneRecForConditionalGeneration>;
-static_assert(std::is_base_of_v<CausalLM, OneRecCausalLM>,
-              "OneRec must satisfy CausalLM contract.");
+using OneRecCausalLM = RecCausalLMImpl<OneRecForConditionalGeneration>;
+static_assert(std::is_base_of_v<RecCausalLM, OneRecCausalLM>,
+              "OneRec must satisfy RecCausalLM contract.");
 
 REGISTER_REC_MODEL(onerec, OneRecForConditionalGeneration);
 

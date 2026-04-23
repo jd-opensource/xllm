@@ -17,12 +17,71 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
+#include <string>
+#include <type_traits>
+
+#include "core/framework/model/rec_causal_lm.h"
 #include "core/platform/device.h"
-#if defined(USE_NPU)
 #include "models/model_registry.h"
-#endif
 
 namespace xllm {
+
+namespace {
+
+using ExpectedRecModelFactory =
+    std::function<std::unique_ptr<RecCausalLM>(const ModelContext& context)>;
+
+static_assert(std::is_same_v<RecModelFactory, ExpectedRecModelFactory>,
+              "RecModelFactory must return std::unique_ptr<RecCausalLM>.");
+static_assert(std::is_base_of_v<CausalLM, RecCausalLM>,
+              "RecCausalLM must derive from CausalLM.");
+
+class DummyRecCausalLM final : public RecCausalLM {
+ public:
+  explicit DummyRecCausalLM(const torch::TensorOptions& options)
+      : options_(options) {}
+
+  ModelOutput forward(const torch::Tensor& tokens,
+                      const torch::Tensor& positions,
+                      std::vector<KVCache>& kv_caches,
+                      const ModelInputParams& parameters) override {
+    UNUSED_PARAMETER(tokens);
+    UNUSED_PARAMETER(positions);
+    UNUSED_PARAMETER(kv_caches);
+    UNUSED_PARAMETER(parameters);
+    return ModelOutput();
+  }
+
+  torch::Tensor logits(const torch::Tensor& hidden_states,
+                       const torch::Tensor& seleted_idxes) override {
+    UNUSED_PARAMETER(hidden_states);
+    UNUSED_PARAMETER(seleted_idxes);
+    return torch::Tensor();
+  }
+
+  void load_model(std::unique_ptr<ModelLoader> loader) override {
+    UNUSED_PARAMETER(loader);
+  }
+
+  torch::Device device() const override { return options_.device(); }
+
+  void prepare_expert_weight(int32_t layer_id,
+                             const std::vector<int32_t>& expert_ids) override {
+    UNUSED_PARAMETER(layer_id);
+    UNUSED_PARAMETER(expert_ids);
+  }
+
+  void update_expert_weight(int32_t layer_id) override {
+    UNUSED_PARAMETER(layer_id);
+  }
+
+  const torch::TensorOptions& options() const override { return options_; }
+
+ private:
+  torch::TensorOptions options_;
+};
+
+}  // namespace
 
 TEST(HFModelLoaderTest, LoadCompressedTensorsFp8StaticConfig) {
   JsonReader reader;
@@ -79,6 +138,46 @@ TEST(HFModelLoaderTest, KeepLegacyFp8ConfigUnchanged) {
   ASSERT_TRUE(load_quant_cfg(reader, quant_args));
   EXPECT_EQ(quant_args.quant_method(), kQuantMethodFp8);
   EXPECT_FALSE(quant_args.activation_dynamic());
+}
+
+TEST(HFModelLoaderTest, RegisterRecFactoryAcceptsRecCausalLmReturnType) {
+  const std::string factory_name = "rec_causallm_factory_contract_test";
+  RecModelFactory unregistered_factory =
+      ModelRegistry::get_rec_model_factory(factory_name);
+  EXPECT_FALSE(static_cast<bool>(unregistered_factory));
+
+  ModelRegistry::register_rec_model_factory(
+      factory_name,
+      [](const ModelContext& context) -> std::unique_ptr<RecCausalLM> {
+        UNUSED_PARAMETER(context);
+        return nullptr;
+      });
+
+  RecModelFactory factory = ModelRegistry::get_rec_model_factory(factory_name);
+  EXPECT_TRUE(static_cast<bool>(factory));
+}
+
+TEST(HFModelLoaderTest, RecFactoryCreatesRecCausalLmInstance) {
+  const std::string kFactoryName = "rec_causallm_instance_contract_test";
+  ModelRegistry::register_rec_model_factory(
+      kFactoryName,
+      [](const ModelContext& context) -> std::unique_ptr<RecCausalLM> {
+        UNUSED_PARAMETER(context);
+        const torch::TensorOptions options =
+            torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);
+        return std::make_unique<DummyRecCausalLM>(options);
+      });
+
+  RecModelFactory factory = ModelRegistry::get_rec_model_factory(kFactoryName);
+  ASSERT_TRUE(static_cast<bool>(factory));
+
+  ModelContext context;
+  std::unique_ptr<RecCausalLM> rec_model = factory(context);
+  ASSERT_NE(rec_model, nullptr);
+
+  CausalLM* causal_model = dynamic_cast<CausalLM*>(rec_model.get());
+  EXPECT_NE(causal_model, nullptr);
+  EXPECT_EQ(rec_model->device(), torch::Device(torch::kCPU));
 }
 
 #if defined(USE_NPU)

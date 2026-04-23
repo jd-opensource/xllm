@@ -25,6 +25,7 @@ limitations under the License.
 #include "core/framework/model/causal_vlm.h"
 #include "core/framework/model/dit_model.h"
 #include "core/framework/model/mm_embedding_vlm.h"
+#include "core/framework/model/rec_causal_lm.h"
 #include "core/framework/model_context.h"
 #include "core/framework/tokenizer/tokenizer_args.h"
 #include "core/util/json_reader.h"
@@ -38,7 +39,7 @@ using CausalLMFactory =
     std::function<std::unique_ptr<CausalLM>(const ModelContext& context)>;
 
 using RecModelFactory =
-    std::function<std::unique_ptr<CausalLM>(const ModelContext& context)>;
+    std::function<std::unique_ptr<RecCausalLM>(const ModelContext& context)>;
 
 using CausalVLMFactory =
     std::function<std::unique_ptr<CausalVLM>(const ModelContext& context)>;
@@ -188,7 +189,7 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
         #ModelType, [](const ModelContext& context) {                   \
           ModelClass model(context);                                    \
           model->eval();                                                \
-          return std::make_unique<xllm::CausalLMImpl<ModelClass>>(      \
+          return std::make_unique<xllm::RecCausalLMImpl<ModelClass>>(   \
               std::move(model), context.get_tensor_options());          \
         });                                                             \
     return true;                                                        \
