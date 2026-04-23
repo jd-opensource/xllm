@@ -17,8 +17,8 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
+#include "core/framework/parallel_state/npu_dp_ep_padding.h"
 #include "core/layers/npu/npu_glm4_moe_lite_decoder_layer.h"
 #include "llm_model_base.h"
 

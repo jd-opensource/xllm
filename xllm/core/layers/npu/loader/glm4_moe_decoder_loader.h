@@ -23,7 +23,7 @@ limitations under the License.
 
 #include "base_loader.h"
 #include "framework/model/model_args.h"
-#include "framework/model/npu_dp_ep_padding.h"
+#include "framework/parallel_state/npu_dp_ep_padding.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "xllm_atb_layers/models/glm/layer/moe_decoder_layer.h"

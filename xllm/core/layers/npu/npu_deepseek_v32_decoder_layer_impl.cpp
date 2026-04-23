@@ -25,7 +25,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/global_flags.h"
-#include "framework/model/npu_cp_prepare.h"
+#include "framework/parallel_state/npu_cp_prepare.h"
 #include "layers/common/rotary_embedding_util.h"
 
 namespace xllm {

@@ -10,16 +10,13 @@ cc_library(
     dit_model.h
     mm_embedding_vlm.h
     model_args.h
-    npu_cp_ep_padding.h
-    npu_dp_ep_padding.h
     model_input_params.h
   SRCS
-    npu_cp_ep_padding.cpp
-    npu_dp_ep_padding.cpp
   DEPS
     :common
     :common_layers
     :kv_cache
+    :parallel_state
     :processors
     :chat_template
     glog::glog
@@ -27,26 +24,3 @@ cc_library(
     torch_python
     $<$<BOOL:${USE_NPU}>:platform_npu>
 )
-
-if(USE_NPU)
-cc_test(
-    NAME 
-      npu_dp_ep_padding_test
-    SRCS
-      npu_dp_ep_padding_test.cpp
-    DEPS
-      :parallel_state
-      torch
-      model
-      absl::synchronization
-      absl::time
-      GTest::gtest_main
-)
-
-target_link_libraries(npu_dp_ep_padding_test
-                 PUBLIC Python::Python
-                 $<$<BOOL:${USE_NPU}>:ascendcl>
-                 $<$<BOOL:${USE_NPU}>:hccl>
-                 $<$<BOOL:${USE_NPU}>:c_sec>
-                 $<$<BOOL:${USE_NPU}>:nnopbase>)
-endif()

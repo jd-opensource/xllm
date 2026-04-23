@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "framework/model/npu_cp_prepare.h"
+#include "framework/parallel_state/npu_cp_prepare.h"
 
 #include <limits>
 #include <numeric>

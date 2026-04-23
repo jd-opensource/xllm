@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "npu_dp_ep_padding.h"
+#include "framework/parallel_state/npu_dp_ep_padding.h"
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>

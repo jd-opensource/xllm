@@ -74,6 +74,7 @@ cc_library(
     :state_dict
     :dit_cache
     :model
+    :parallel_state
     :kv_cache
     :kv_cache_transfer
     :models

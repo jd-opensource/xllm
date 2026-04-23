@@ -6,6 +6,9 @@ cc_library(
     parallel_state
   HDRS
     mapping_npu.h
+    npu_cp_ep_padding.h
+    npu_cp_prepare.h
+    npu_dp_ep_padding.h
     dit_mapping.h
     rank_generator.h
     parallel_args.h
@@ -21,6 +24,9 @@ cc_library(
     dit_collective_communicator.h
   SRCS
     mapping_npu.cpp
+    npu_cp_ep_padding.cpp
+    npu_cp_prepare.cpp
+    npu_dp_ep_padding.cpp
     dit_mapping.cpp
     parallel_state.cpp
     parallel_state_async.cpp
@@ -37,6 +43,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:hccl>
     $<$<BOOL:${USE_NPU}>:hcomm>
     $<$<BOOL:${USE_NPU}>:xllm_atb_layers>
+    gflags::gflags
     glog::glog
 )
 
@@ -58,6 +65,25 @@ if(USE_NPU)
       c_sec
       spdlog::spdlog
   )
+
+  cc_test(
+    NAME
+      npu_dp_ep_padding_test
+    SRCS
+      npu_dp_ep_padding_test.cpp
+    DEPS
+      parallel_state
+      torch
+      absl::synchronization
+      absl::time
+      GTest::gtest_main
+  )
+  target_link_libraries(npu_dp_ep_padding_test
+                        PUBLIC Python::Python
+                               ascendcl
+                               hccl
+                               c_sec
+                               nnopbase)
 endif()
 
 if(USE_MLU)

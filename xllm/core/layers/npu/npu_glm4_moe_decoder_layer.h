@@ -22,7 +22,7 @@ limitations under the License.
 #include <nlohmann/json.hpp>
 
 #include "framework/model/model_args.h"
-#include "framework/model/npu_dp_ep_padding.h"
+#include "framework/parallel_state/npu_dp_ep_padding.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "loader/glm4_moe_decoder_loader.h"
