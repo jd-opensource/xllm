@@ -59,7 +59,9 @@ BlockManagerImpl::BlockManagerImpl(const Options& options)
   size_t total_blocks = options_.num_blocks();
   block_size_ = options_.block_size();
   num_free_blocks_.store(total_blocks, std::memory_order_relaxed);
-  usage_accounted_ids_.assign(total_blocks, 0);
+  if (options_.enable_prefix_cache()) {
+    usage_accounted_ids_.assign(total_blocks, 0);
+  }
   free_blocks_.reserve(total_blocks);
   for (int32_t i = 0; i < total_blocks; ++i) {
     // push smaller block ids to the back of the vector
@@ -83,8 +85,10 @@ std::vector<Block> BlockManagerImpl::allocate(size_t num_blocks) {
     size_t prev_count =
         num_free_blocks_.fetch_sub(1, std::memory_order_relaxed);
     const int32_t block_id = free_blocks_[prev_count - 1];
-    CHECK(mark_used(&usage_accounted_ids_, block_id))
-        << "block " << block_id << " usage accounted repeatedly";
+    if (options_.enable_prefix_cache()) {
+      CHECK(mark_used(&usage_accounted_ids_, block_id))
+          << "block " << block_id << " usage accounted repeatedly";
+    }
     blocks.emplace_back(block_id, this);
   }
 
@@ -215,7 +219,8 @@ Block BlockManagerImpl::allocate() {
 void BlockManagerImpl::free(int32_t block_id) {
   // do nothing for reserved block 0
   if (block_id != 0) {
-    if (clear_used(&usage_accounted_ids_, block_id)) {
+    if (options_.enable_prefix_cache() &&
+        clear_used(&usage_accounted_ids_, block_id)) {
       CHECK_GT(num_used_blocks_.load(std::memory_order_relaxed), 0u);
       num_used_blocks_.fetch_sub(1, std::memory_order_relaxed);
     }
