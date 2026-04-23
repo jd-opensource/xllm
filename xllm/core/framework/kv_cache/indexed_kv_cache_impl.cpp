@@ -40,7 +40,9 @@ IndexedKVCacheImpl::IndexedKVCacheImpl(
     : IndexedKVCacheImpl(
           create_indexed_kv_cache_tensors(kv_cache_shape, create_options)) {
   key_cache_shape_ = kv_cache_shape.key_cache_shape();
-  value_cache_shape_ = kv_cache_shape.value_cache_shape();
+  if (kv_cache_shape.has_value_cache_shape()) {
+    value_cache_shape_ = kv_cache_shape.value_cache_shape();
+  }
   index_cache_shape_ = kv_cache_shape.index_cache_shape();
 }
 

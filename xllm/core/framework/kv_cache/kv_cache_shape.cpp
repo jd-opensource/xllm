@@ -96,8 +96,9 @@ const std::vector<int64_t>& KVCacheShape::key_cache_shape() const {
 }
 
 const std::vector<int64_t>& KVCacheShape::value_cache_shape() const {
-  CHECK(value_cache_shape_.has_value())
-      << "value_cache_shape is not initialized.";
+  if (!value_cache_shape_.has_value()) {
+    return empty_shape();
+  }
   return *value_cache_shape_;
 }
 
@@ -169,8 +170,10 @@ void KVCacheShape::to_proto(proto::KVCacheShape* proto_shape) const {
   CHECK(proto_shape != nullptr) << "proto_shape must not be nullptr.";
   proto_shape->Clear();
   add_shape_to_proto(key_cache_shape(), proto_shape->mutable_key_cache_shape());
-  add_shape_to_proto(value_cache_shape(),
-                     proto_shape->mutable_value_cache_shape());
+  if (has_value_cache_shape()) {
+    add_shape_to_proto(value_cache_shape(),
+                       proto_shape->mutable_value_cache_shape());
+  }
   if (has_index_cache_shape()) {
     add_shape_to_proto(index_cache_shape(),
                        proto_shape->mutable_index_cache_shape());
@@ -187,8 +190,10 @@ KVCacheShape KVCacheShape::from_proto(const proto::KVCacheShape& proto_shape) {
   KVCacheShape kv_cache_shape;
   kv_cache_shape.key_cache_shape_ =
       repeated_field_to_vector(proto_shape.key_cache_shape());
-  kv_cache_shape.value_cache_shape_ =
-      repeated_field_to_vector(proto_shape.value_cache_shape());
+  if (proto_shape.value_cache_shape_size() > 0) {
+    kv_cache_shape.value_cache_shape_ =
+        repeated_field_to_vector(proto_shape.value_cache_shape());
+  }
   if (proto_shape.index_cache_shape_size() > 0) {
     kv_cache_shape.index_cache_shape_ =
         repeated_field_to_vector(proto_shape.index_cache_shape());
@@ -323,7 +328,7 @@ void KVCacheShape::apply_device_layout(const ModelArgs& model_args) {
     CHECK_GE(key_cache_shape_->size(), 4) << "invalid mla key_cache_shape.";
     (*key_cache_shape_)[3] =
         model_args.kv_lora_rank() + model_args.qk_rope_head_dim();
-    value_cache_shape_ = std::vector<int64_t>{};
+    value_cache_shape_.reset();
   }
 #else
   static_cast<void>(model_args);

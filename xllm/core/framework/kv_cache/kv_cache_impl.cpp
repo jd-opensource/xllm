@@ -31,7 +31,9 @@ KVCacheImpl::KVCacheImpl(const KVCacheShape& kv_cache_shape,
                          const KVCacheCreateOptions& create_options)
     : KVCacheImpl(create_kv_cache_tensors(kv_cache_shape, create_options)) {
   key_cache_shape_ = kv_cache_shape.key_cache_shape();
-  value_cache_shape_ = kv_cache_shape.value_cache_shape();
+  if (kv_cache_shape.has_value_cache_shape()) {
+    value_cache_shape_ = kv_cache_shape.value_cache_shape();
+  }
 }
 
 torch::Tensor KVCacheImpl::get_k_cache() const { return key_cache_; }
