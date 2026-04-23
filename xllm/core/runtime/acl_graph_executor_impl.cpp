@@ -33,6 +33,7 @@ limitations under the License.
 #endif
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
+#include "core/kernels/npu/tilelang/tilelang_ops_api.h"
 #include "core/util/utils.h"
 #include "platform/npu/device_capture_lock.h"
 
@@ -68,6 +69,29 @@ int64_t get_decode_graph_capacity(const runtime::Options& options) {
     return options.max_seqs_per_batch();
   }
   return options.max_seqs_per_batch() * options.num_decoding_tokens();
+}
+
+bool is_npu_int32_vector_contiguous(const torch::Tensor& tensor) {
+  return tensor.defined() &&
+         tensor.device().type() == c10::DeviceType::PrivateUse1 &&
+         tensor.dtype() == torch::kInt32 && tensor.dim() == 1 &&
+         tensor.stride(0) == 1;
+}
+
+bool is_npu_int32_matrix_lastdim_contiguous(const torch::Tensor& tensor) {
+  return tensor.defined() &&
+         tensor.device().type() == c10::DeviceType::PrivateUse1 &&
+         tensor.dtype() == torch::kInt32 && tensor.dim() == 2 &&
+         tensor.stride(1) == 1 && tensor.stride(0) > 0;
+}
+
+bool is_npu_supported_embedding_matrix(const torch::Tensor& tensor) {
+  return tensor.defined() &&
+         tensor.device().type() == c10::DeviceType::PrivateUse1 &&
+         tensor.dim() == 2 && tensor.stride(1) == 1 && tensor.stride(0) > 0 &&
+         (tensor.scalar_type() == c10::ScalarType::Half ||
+          tensor.scalar_type() == c10::ScalarType::BFloat16 ||
+          tensor.scalar_type() == c10::ScalarType::Float);
 }
 }  // namespace
 
@@ -209,82 +233,145 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       << "padded_num_tokens must be > 0 when return_capture_params is true";
   const uint32_t actual_num_tokens = tokens.size(0);
   const int64_t actual_batch_size = params.num_sequences;
+  const int64_t actual_block_table_len = params.block_tables.size(1);
 
-  // Copy data from input parameters to persistent graph tensors
-  persistent_tokens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
-      .copy_(tokens, /*non_blocking=*/true);
-  // mRoPE positions have shape [3, num_tokens], slice on dim 1
-  if (use_mrope_) {
-    persistent_positions_
-        .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_num_tokens)
-        .copy_(positions, /*non_blocking=*/true);
-  } else {
-    persistent_positions_
-        .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
-        .copy_(positions, /*non_blocking=*/true);
+  const auto& embedding = params.input_embedding;
+  if (embedding.defined() && persistent_embedding_.numel() == 0) {
+    const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
+    const int64_t embedding_dim = embedding.size(1);
+    torch::Dtype dtype = util::parse_dtype(args_.dtype(), device_);
+    persistent_embedding_ = torch::zeros({max_tokens_per_batch, embedding_dim},
+                                         torch::dtype(dtype).device(device_));
   }
-  q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-      .copy_(params.q_seq_lens, /*non_blocking=*/true);
-  kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-      .copy_(params.kv_seq_lens, /*non_blocking=*/true);
 
-  persistent_new_cache_slots_
-      .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
-      .copy_(params.new_cache_slots, /*non_blocking=*/true);
+  if (params.q_cu_seq_lens.defined() && q_cu_seq_lens_.numel() == 0) {
+    const int64_t max_seqs_per_batch = get_decode_graph_capacity(options_);
+    q_cu_seq_lens_ = torch::zeros({max_seqs_per_batch + 1},
+                                  torch::dtype(torch::kInt).device(device_));
+  }
+
+  torch::Tensor src_linear_state_indices;
   if (!params.linear_state_ids.empty()) {
     if (params.linear_state_indices.defined()) {
-      persistent_linear_state_indices_
-          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-          .copy_(params.linear_state_indices, /*non_blocking=*/true);
+      src_linear_state_indices = params.linear_state_indices;
     } else {
+      src_linear_state_indices =
+          torch::tensor(params.linear_state_ids, torch::kInt).to(device_);
+    }
+  }
+
+  const bool with_q_cu_seq_lens = params.q_cu_seq_lens.defined();
+  const bool with_linear_state_indices = src_linear_state_indices.defined();
+  const bool with_input_embedding = embedding.defined();
+  const bool positions_supported =
+      use_mrope_
+          ? (is_npu_int32_matrix_lastdim_contiguous(positions) &&
+             positions.size(0) == 3 && positions.size(1) == actual_num_tokens)
+          : (is_npu_int32_vector_contiguous(positions) &&
+             positions.size(0) == actual_num_tokens);
+  const bool persistent_positions_supported =
+      use_mrope_
+          ? (is_npu_int32_matrix_lastdim_contiguous(persistent_positions_) &&
+             persistent_positions_.size(0) == 3)
+          : is_npu_int32_vector_contiguous(persistent_positions_);
+  const bool use_fast_path =
+      params.batch_forward_type.is_decode() &&
+      actual_num_tokens == static_cast<uint32_t>(actual_batch_size) &&
+      is_npu_int32_vector_contiguous(tokens) && positions_supported &&
+      persistent_positions_supported &&
+      is_npu_int32_vector_contiguous(params.new_cache_slots) &&
+      is_npu_int32_vector_contiguous(params.q_seq_lens) &&
+      is_npu_int32_vector_contiguous(params.kv_seq_lens) &&
+      is_npu_int32_matrix_lastdim_contiguous(params.block_tables) &&
+      (!with_q_cu_seq_lens ||
+       is_npu_int32_vector_contiguous(params.q_cu_seq_lens)) &&
+      (!with_linear_state_indices ||
+       is_npu_int32_vector_contiguous(src_linear_state_indices)) &&
+      (!with_input_embedding ||
+       (is_npu_supported_embedding_matrix(embedding) &&
+        is_npu_supported_embedding_matrix(persistent_embedding_) &&
+        persistent_embedding_.scalar_type() == embedding.scalar_type())) &&
+      xllm::kernel::npu::tilelang::
+          has_model_input_buffer_updater_specialization(
+              with_input_embedding ? embedding.scalar_type()
+                                   : c10::ScalarType::Float,
+              use_mrope_,
+              with_input_embedding,
+              with_linear_state_indices,
+              with_q_cu_seq_lens);
+
+  if (use_fast_path) {
+    xllm::kernel::npu::tilelang::ModelInputBufferUpdaterParams updater_params;
+    updater_params.src_tokens = tokens;
+    updater_params.src_positions = positions;
+    updater_params.src_new_cache_slots = params.new_cache_slots;
+    updater_params.src_q_seq_lens = params.q_seq_lens;
+    updater_params.src_kv_seq_lens = params.kv_seq_lens;
+    updater_params.src_block_tables = params.block_tables;
+    updater_params.dst_tokens = persistent_tokens_;
+    updater_params.dst_positions = persistent_positions_;
+    updater_params.dst_new_cache_slots = persistent_new_cache_slots_;
+    updater_params.dst_q_seq_lens = q_seq_lens_;
+    updater_params.dst_kv_seq_lens = kv_seq_lens_;
+    updater_params.dst_block_tables = persistent_block_tables_;
+    updater_params.padded_num_tokens = padded_num_tokens;
+    if (with_q_cu_seq_lens) {
+      updater_params.src_q_cu_seq_lens = params.q_cu_seq_lens;
+      updater_params.dst_q_cu_seq_lens = q_cu_seq_lens_;
+    }
+    if (with_linear_state_indices) {
+      updater_params.src_linear_state_indices = src_linear_state_indices;
+      updater_params.dst_linear_state_indices =
+          persistent_linear_state_indices_;
+    }
+    if (with_input_embedding) {
+      updater_params.src_input_embedding = embedding;
+      updater_params.dst_input_embedding = persistent_embedding_;
+    }
+    xllm::kernel::npu::tilelang::model_input_buffer_updater(updater_params);
+  } else {
+    persistent_tokens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+        .copy_(tokens, /*non_blocking=*/true);
+    if (use_mrope_) {
+      persistent_positions_
+          .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_num_tokens)
+          .copy_(positions, /*non_blocking=*/true);
+    } else {
+      persistent_positions_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+          .copy_(positions, /*non_blocking=*/true);
+    }
+    q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+        .copy_(params.q_seq_lens, /*non_blocking=*/true);
+    kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+        .copy_(params.kv_seq_lens, /*non_blocking=*/true);
+    persistent_new_cache_slots_
+        .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
+        .copy_(params.new_cache_slots, /*non_blocking=*/true);
+
+    if (with_linear_state_indices) {
       persistent_linear_state_indices_
           .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-          .copy_(
-              torch::tensor(params.linear_state_ids, torch::kInt).to(device_),
-              /*non_blocking=*/true);
-    }
-  }
-
-  // Copy block table data
-  const int64_t actual_block_table_len = params.block_tables.size(1);
-  auto slice_persistent_block_tables =
-      persistent_block_tables_
-          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-          .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_block_table_len);
-  slice_persistent_block_tables.copy_(params.block_tables,
-                                      /*non_blocking=*/true);
-
-  // Update persistent embedding from input_embedding if available
-  const auto& embedding = params.input_embedding;
-  if (embedding.defined()) {
-    const int64_t embedding_tokens = embedding.size(0);
-
-    // Initialize persistent_embedding_ if needed and not already initialized
-    if (persistent_embedding_.numel() == 0) {
-      const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
-      const int64_t embedding_dim = embedding.size(1);
-      torch::Dtype dtype = util::parse_dtype(args_.dtype(), device_);
-      persistent_embedding_ =
-          torch::zeros({max_tokens_per_batch, embedding_dim},
-                       torch::dtype(dtype).device(device_));
+          .copy_(src_linear_state_indices, /*non_blocking=*/true);
     }
 
-    // Copy embedding data to persistent buffer
-    persistent_embedding_
-        .slice(/*dim=*/0, /*start=*/0, /*end=*/embedding_tokens)
-        .copy_(embedding, /*non_blocking=*/true);
-  }
-  // Update q_cu_seq_lens only if params.q_cu_seq_lens is defined
-  if (params.q_cu_seq_lens.defined()) {
-    // Lazy initialization: if q_cu_seq_lens_ is not initialized, initialize it
-    if (q_cu_seq_lens_.numel() == 0) {
-      const int64_t max_seqs_per_batch = get_decode_graph_capacity(options_);
-      q_cu_seq_lens_ = torch::zeros({max_seqs_per_batch + 1},
-                                    torch::dtype(torch::kInt).device(device_));
+    auto slice_persistent_block_tables =
+        persistent_block_tables_
+            .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+            .slice(/*dim=*/1, /*start=*/0, /*end=*/actual_block_table_len);
+    slice_persistent_block_tables.copy_(params.block_tables,
+                                        /*non_blocking=*/true);
+
+    if (embedding.defined()) {
+      const int64_t embedding_tokens = embedding.size(0);
+      persistent_embedding_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/embedding_tokens)
+          .copy_(embedding, /*non_blocking=*/true);
     }
-    // Copy data
-    q_cu_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
-        .copy_(params.q_cu_seq_lens, /*non_blocking=*/true);
+    if (params.q_cu_seq_lens.defined()) {
+      q_cu_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+          .copy_(params.q_cu_seq_lens, /*non_blocking=*/true);
+    }
   }
 
   // Update attention mask only if needed
