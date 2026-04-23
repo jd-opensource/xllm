@@ -957,6 +957,14 @@ torch::Tensor gated_layer_norm(GatedLayerNormParams& params) {
                              params.group_size,
                              params.norm_before_gate,
                              params.is_rms_norm);
+#elif defined(USE_MLU)
+  return mlu::gated_layer_norm(params.x,
+                               params.weight,
+                               params.bias,
+                               params.eps,
+                               params.z,
+                               params.group_size,
+                               params.norm_before_gate);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -994,6 +1002,9 @@ fused_qkvzba_split_reshape_cat(FusedQkvzbaSplitReshapeParams& params) {
 void gemma_rms_norm(GemmaRMSNormParams& params) {
 #if defined(USE_NPU)
   npu::npu_gemma_rms_norm(
+      params.x, params.gamma, params.epsilon, params.rstd_out, params.norm_out);
+#elif defined(USE_MLU)
+  mlu::gemma_rms_norm(
       params.x, params.gamma, params.epsilon, params.rstd_out, params.norm_out);
 #else
   NOT_IMPLEMENTED();
