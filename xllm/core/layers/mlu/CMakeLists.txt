@@ -8,22 +8,34 @@ cc_library(
     deepseek_v2_attention.h
     deepseek_v2_decoder_layer_impl.h
     deepseek_v2_sparse_moe_block.h
+    deepseek_v4/hyper_connection.h
+    deepseek_v4/deepseek_v4_attention.h
+    deepseek_v4/deepseek_v4_decoder_layer_impl.h
+    deepseek_v4/deepseek_v4_topk.h
+    deepseek_v4/indexer_v2.h
     indexer.h
     deepseek_v32_sp_context.h
     deepseek_v32_sp_plan.h
     moe_gate.h
     fused_moe.h
+    deepseek_v4/compressor.h
   SRCS
     attention.cpp
     deepseek_v2_attention.cpp
     deepseek_v2_attention_sp.cpp
     deepseek_v2_decoder_layer_impl.cpp
     deepseek_v2_sparse_moe_block.cpp
+    deepseek_v4/hyper_connection.cpp
+    deepseek_v4/deepseek_v4_attention.cpp
+    deepseek_v4/deepseek_v4_decoder_layer_impl.cpp
+    deepseek_v4/deepseek_v4_topk.cpp
+    deepseek_v4/indexer_v2.cpp
     indexer.cpp
     moe_gate.cpp
     fused_moe.cpp
     fused_moe_base.cpp
     fused_moe_all2all.cpp
+    deepseek_v4/compressor.cpp
   DEPS
     :common_layers
 )

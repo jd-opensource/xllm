@@ -149,6 +149,12 @@ struct ModelArgs {
   PROPERTY(int32_t, index_topk) = 0;
   PROPERTY(bool, indexer_rope_interleave) = false;
 
+  // deepseek v4 decoder layer
+  PROPERTY(int32_t, hc_mult) = 0;
+  PROPERTY(int32_t, hc_sinkhorn_iters) = 0;
+  PROPERTY(float, hc_eps) = 0.0f;
+  PROPERTY(int32_t, n_hash_layers) = 0;
+
   PROPERTY(int32_t, vision_start_token_id) = 0;
   PROPERTY(int32_t, vision_end_token_id) = 0;
   PROPERTY(int32_t, vision_token_id) = 0;

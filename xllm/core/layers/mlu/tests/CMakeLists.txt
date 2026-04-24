@@ -1,0 +1,101 @@
+include(cc_test)
+
+cc_test(
+  NAME
+    deepseek_v4_attention_test
+  SRCS
+    deepseek_v4_attention_tests.cpp
+  DEPS
+    :mlu_layers
+    :common_layers
+    :block
+    :parallel_state
+    :model
+    :model_context
+    :state_dict
+    glog::glog
+    torch
+    GTest::gtest_main
+)
+
+cc_test(
+  NAME
+    deepseek_v4_decoder_layer_test
+  SRCS
+    deepseek_v4_decoder_layer_tests.cpp
+  DEPS
+    :mlu_layers
+    :common_layers
+    :block
+    :parallel_state
+    :model
+    :model_context
+    :state_dict
+    glog::glog
+    torch
+    GTest::gtest_main
+)
+
+cc_test(
+  NAME
+    deepseek_v4_compressor_test
+  SRCS
+    compressor_tests.cpp
+    ../deepseek_v4/compressor.cpp
+  DEPS
+    :mlu_layers
+    :block
+    :parallel_state
+    :model
+    :model_context
+    :state_dict
+    glog::glog
+    torch
+    GTest::gtest_main
+)
+
+cc_test(
+  NAME
+    hyper_connection_test
+  SRCS
+    hyper_connection_tests.cpp
+  DEPS
+    :mlu_layers
+    :common_layers
+    :state_dict
+    :platform
+    glog::glog
+    torch
+    GTest::gtest_main
+)
+
+cc_test(
+  NAME
+    deepseek_v4_topk_test
+  SRCS
+    deepseek_v4_topk_tests.cpp
+    ../deepseek_v4/deepseek_v4_topk.cpp
+  DEPS
+    :state_dict
+    glog::glog
+    torch
+    GTest::gtest_main
+)
+
+cc_test(
+  NAME
+    indexer_v2_test
+  SRCS
+    indexer_v2_tests.cpp
+  DEPS
+    :mlu_layers
+    :common_layers
+    :block
+    :parallel_state
+    :model
+    :model_context
+    :state_dict
+    glog::glog
+    torch
+    GTest::gtest_main
+)
