@@ -209,6 +209,11 @@ class DeepseekV2SparseMoEBlockTest : public ::testing::Test {
         model_args_, quant_args_, parallel_args_, options_);
   }
 
+  DeepseekV2SparseMoEBlock create_block(int32_t layer_id) const {
+    return DeepseekV2SparseMoEBlock(
+        model_args_, quant_args_, parallel_args_, options_, layer_id);
+  }
+
   FusedMoE create_raw_moe() const {
     const FusedMoEArgs moe_args{.is_gated = true,
                                 .enable_result_reduction = false};
@@ -269,6 +274,24 @@ TEST_F(DeepseekV2SparseMoEBlockTest, PlanExecEnablesAll2AllOnlyForDecode) {
   auto mixed_cfg = block->plan_exec(mixed_params);
   EXPECT_FALSE(mixed_cfg.enable_all2all);
   EXPECT_FALSE(mixed_cfg.need_dp_gather);
+}
+
+TEST_F(DeepseekV2SparseMoEBlockTest, NonDeepSeekV4IgnoresHashLayers) {
+  model_args_.model_type() = "deepseek_v3";
+  model_args_.scoring_func() = "sqrtsoftplus";
+  model_args_.topk_method() = "";
+  model_args_.vocab_size() = 128;
+  model_args_.n_hash_layers() = 1;
+  model_args_.n_shared_experts() = 0;
+
+  auto weight_dict = create_fp_weights(model_args_.n_shared_experts());
+  weight_dict["gate.bias"] = torch::zeros(
+      {model_args_.n_routed_experts()},
+      torch::TensorOptions().dtype(torch::kFloat32).device(options_.device()));
+  StateDict state_dict(weight_dict);
+
+  auto block = create_block(/*layer_id=*/0);
+  block->load_state_dict(state_dict);
 }
 
 TEST_F(DeepseekV2SparseMoEBlockTest, PlanExecSetsDpGatherWhenAll2AllOff) {

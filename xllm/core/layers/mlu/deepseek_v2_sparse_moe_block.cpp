@@ -21,6 +21,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "platform/device.h"
+#include "util/utils.h"
 
 namespace xllm {
 namespace layer {
@@ -42,7 +43,9 @@ DeepseekV2SparseMoEBlockImpl::DeepseekV2SparseMoEBlockImpl(
     : parallel_args_(parallel_args) {
   enable_deep_ep_ =
       FLAGS_expert_parallel_degree == 2 && parallel_args_.ep_size() > 1;
-  const bool use_hash = layer_id < model_args.n_hash_layers();
+  const bool use_hash =
+      util::is_deepseek_v4_model_type(model_args.model_type()) &&
+      layer_id < model_args.n_hash_layers();
   const FusedMoEArgs moe_args{
       .is_gated = true, .enable_result_reduction = false, .use_hash = use_hash};
   moe_ = register_module(
