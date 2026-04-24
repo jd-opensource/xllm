@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <optional>
 #include <tuple>
 #include <vector>
@@ -205,8 +206,8 @@ class DeepSeekV4AttentionImpl : public torch::nn::Module {
   torch::Tensor freqs_cis_;
 
   // Rotary embedding
-  DeepseekScalingRotaryEmbedding rotary_emb_{nullptr};
-  DeepseekScalingRotaryEmbedding output_rotary_emb_{nullptr};
+  std::shared_ptr<RotaryEmbeddingBase> rotary_emb_;
+  std::shared_ptr<RotaryEmbeddingBase> output_rotary_emb_;
 };
 TORCH_MODULE(DeepSeekV4Attention);
 

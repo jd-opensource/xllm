@@ -354,7 +354,8 @@ torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
                                     int64_t max_position_embeddings,
                                     bool interleaved,
                                     torch::Tensor inv_freq,
-                                    const torch::TensorOptions& options) {
+                                    const torch::TensorOptions& options,
+                                    bool inverse) {
   return compute_cos_sin_cache(rotary_dim,
                                max_position_embeddings,
                                interleaved,
@@ -363,7 +364,8 @@ torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
                                1.0f,
                                1.0f,
                                inv_freq,
-                               options);
+                               options,
+                               inverse);
 }
 
 torch::Tensor get_concat_rotary_embedding(int64_t dim,

@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cmath>
+#include <memory>
 #include <numeric>
 
 #include "framework/state_dict/state_dict.h"
@@ -158,26 +159,26 @@ class IndexerV2Test : public ::testing::Test {
     parallel_args_.sp_group_ = process_group_.get();
   }
 
-  DeepseekScalingRotaryEmbedding create_rotary_embedding(
+  std::shared_ptr<RotaryEmbeddingBase> create_rotary_embedding(
       int64_t head_size,
       int64_t rotary_dim,
       int64_t max_position_embeddings,
       int64_t rope_theta) {
-    return DeepseekScalingRotaryEmbedding(
-        DeepseekScalingRotaryEmbeddingImpl(head_size,
-                                           rotary_dim,
-                                           max_position_embeddings,
-                                           max_position_embeddings,
-                                           rope_theta,
-                                           /*interleaved=*/true,
-                                           /*scaling_factor=*/1.0f,
-                                           /*extrapolation_factor=*/1.0f,
-                                           /*attn_factor=*/1.0f,
-                                           /*beta_fast=*/32.0f,
-                                           /*beta_slow=*/1.0f,
-                                           /*mscale=*/1.0f,
-                                           /*mscale_all_dim=*/1.0f,
-                                           options_));
+    return std::make_shared<DeepseekScalingRotaryEmbeddingImpl>(
+        head_size,
+        rotary_dim,
+        max_position_embeddings,
+        max_position_embeddings,
+        rope_theta,
+        /*interleaved=*/true,
+        /*scaling_factor=*/1.0f,
+        /*extrapolation_factor=*/1.0f,
+        /*attn_factor=*/1.0f,
+        /*beta_fast=*/32.0f,
+        /*beta_slow=*/1.0f,
+        /*mscale=*/1.0f,
+        /*mscale_all_dim=*/1.0f,
+        options_);
   }
 
   IndexerV2 create_indexer_v2(int64_t dim,
@@ -190,7 +191,7 @@ class IndexerV2Test : public ::testing::Test {
                               int64_t compress_ratio,
                               int64_t cached_state_num,
                               double norm_eps,
-                              DeepseekScalingRotaryEmbedding& rotary_emb) {
+                              std::shared_ptr<RotaryEmbeddingBase> rotary_emb) {
     return IndexerV2(IndexerV2Impl(dim,
                                    index_n_heads,
                                    index_head_dim,
@@ -286,7 +287,7 @@ TEST_F(IndexerV2Test, ForwardPrefillTest) {
   const int64_t num_tokens = batch_size * seq_len;
   const int64_t num_blocks = 100;
 
-  DeepseekScalingRotaryEmbedding rotary_emb = create_rotary_embedding(
+  std::shared_ptr<RotaryEmbeddingBase> rotary_emb = create_rotary_embedding(
       index_head_dim, rope_head_dim, max_position_embeddings, rope_theta);
   IndexerV2 indexer_v2 = create_indexer_v2(dim,
                                            index_n_heads,
@@ -389,7 +390,7 @@ TEST_F(IndexerV2Test, OutputShapeTest) {
   std::vector<std::pair<int64_t, int64_t>> test_configs = {
       {1, 8}, {2, 16}, {4, 32}};
 
-  DeepseekScalingRotaryEmbedding rotary_emb = create_rotary_embedding(
+  std::shared_ptr<RotaryEmbeddingBase> rotary_emb = create_rotary_embedding(
       index_head_dim, rope_head_dim, max_position_embeddings, rope_theta);
   IndexerV2 indexer_v2 = create_indexer_v2(dim,
                                            index_n_heads,

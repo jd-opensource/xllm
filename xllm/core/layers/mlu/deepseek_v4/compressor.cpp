@@ -124,7 +124,7 @@ CompressorImpl::CompressorImpl(int64_t dim,
                                int64_t cached_state_num,
                                double norm_eps,
                                bool rotate,
-                               DeepseekScalingRotaryEmbedding& rotary_emb,
+                               std::shared_ptr<RotaryEmbeddingBase> rotary_emb,
                                const torch::TensorOptions& options)
     : dim_(dim),
       head_dim_(head_dim),

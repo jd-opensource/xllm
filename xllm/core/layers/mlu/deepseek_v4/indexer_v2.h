@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <vector>
 
 #include "framework/parallel_state/parallel_args.h"
@@ -46,7 +47,7 @@ class IndexerV2Impl : public torch::nn::Module {
                 int64_t compress_ratio,
                 int64_t cached_state_num,
                 double norm_eps,
-                DeepseekScalingRotaryEmbedding& rotary_emb,
+                std::shared_ptr<RotaryEmbeddingBase> rotary_emb,
                 const ParallelArgs& parallel_args,
                 const torch::TensorOptions& options);
 
@@ -81,7 +82,7 @@ class IndexerV2Impl : public torch::nn::Module {
   ColumnParallelLinear wq_b_{nullptr};
   ColumnParallelLinear weights_proj_{nullptr};
   Compressor compressor_{nullptr};
-  DeepseekScalingRotaryEmbedding rotary_emb_{nullptr};
+  std::shared_ptr<RotaryEmbeddingBase> rotary_emb_;
   torch::Tensor hadamard_matrix_;
   torch::TensorOptions int_opts_{};
 

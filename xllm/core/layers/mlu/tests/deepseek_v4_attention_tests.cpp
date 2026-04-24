@@ -122,8 +122,12 @@ class DeepSeekV4AttentionTest : public ::testing::Test {
   int64_t calculate_num_blocks(const DeepSeekV4AttentionTestConfig& config) {
     int64_t max_blocks_attention =
         config.window_size +
-        config.max_position_embeddings / config.compress_ratio;
-    int64_t max_blocks_indexer = config.seq_len / config.compress_ratio + 100;
+        (config.compress_ratio > 0
+             ? config.max_position_embeddings / config.compress_ratio
+             : 0);
+    int64_t max_blocks_indexer =
+        config.compress_ratio > 0 ? config.seq_len / config.compress_ratio + 100
+                                  : 0;
     return std::max(max_blocks_attention, max_blocks_indexer);
   }
 
@@ -441,6 +445,37 @@ TEST_F(DeepSeekV4AttentionTest, ForwardPrefillCompressRatio4Test) {
                            /*Block 2:*/ {1.132812f, -0.134766f, 1.0f}}});
 
   LOG(INFO) << "DeepSeekV4Attention forward test passed!";
+}
+
+TEST_F(DeepSeekV4AttentionTest, ForwardPrefillNoCompressTest) {
+  DeepSeekV4AttentionTestConfig config;
+  config.compress_ratio = 0;
+  config.seq_len = 64;
+
+  const int64_t layer_id = 0;
+  const int64_t batch_size = config.batch_size;
+  const int64_t seq_len = config.seq_len;
+  const int64_t num_tokens = batch_size * seq_len;
+
+  auto attn = create_attention_module(config, layer_id);
+  auto hidden_states =
+      torch::full({num_tokens, config.dim}, config.input_val, options_);
+  auto positions = create_prefill_positions(seq_len, batch_size);
+  auto batch_to_kv_state = create_batch_to_kv_state(batch_size);
+  auto attn_metadata = create_attention_metadata(config, /*is_prefill=*/true);
+  auto kv_cache = create_kv_cache(config);
+
+  auto output = attn->forward(
+      positions, hidden_states, attn_metadata, kv_cache, batch_to_kv_state);
+
+  synchronize_device();
+
+  ASSERT_EQ(output.dim(), 2) << "Output should be 2D tensor";
+  ASSERT_EQ(output.size(0), num_tokens) << "Output batch*seq should match";
+  ASSERT_EQ(output.size(1), config.dim)
+      << "Output dim should match hidden_size";
+  ASSERT_TRUE(torch::isfinite(output.to(torch::kFloat32)).all().item<bool>())
+      << "Output should be finite";
 }
 
 // Test forward pass with compress_ratio = 128 (matches Python test)

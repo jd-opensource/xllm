@@ -299,10 +299,13 @@ DeepSeekV4AttentionImpl::DeepSeekV4AttentionImpl(
   double rope_factor = args.rope_scaling_factor();
   double beta_fast = static_cast<double>(args.rope_scaling_beta_fast());
   double beta_slow = static_cast<double>(args.rope_scaling_beta_slow());
-  double base_theta = (compress_ratio_ > 0) ? compress_rope_theta : rope_theta;
+  const bool use_compress_rope = compress_ratio_ > 0;
+  double base_theta = use_compress_rope ? compress_rope_theta : rope_theta;
+  int64_t rope_original_seq_len =
+      use_compress_rope ? original_seq_len_ : int64_t{0};
   freqs_cis_ = precompute_freqs_cis(rope_head_dim_,
                                     max_model_len_,
-                                    original_seq_len_,
+                                    rope_original_seq_len,
                                     base_theta,
                                     rope_factor,
                                     beta_fast,
@@ -310,27 +313,28 @@ DeepSeekV4AttentionImpl::DeepSeekV4AttentionImpl(
                                     torch::kCPU,
                                     torch::kComplexFloat);
 
-  // Helper lambda to create DeepseekScalingRotaryEmbedding instances
+  ModelArgs rope_args = args;
+  if (use_compress_rope) {
+    rope_args.rope_scaling_rope_type() = "deepseek_yarn";
+    rope_args.rope_theta() = static_cast<float>(compress_rope_theta);
+    rope_args.rope_scaling_original_max_position_embeddings() =
+        original_seq_len_;
+  } else {
+    rope_args.rope_scaling_rope_type() = "default";
+    rope_args.rope_theta() = static_cast<float>(rope_theta);
+    rope_args.rope_scaling_original_max_position_embeddings() = 0;
+  }
+
   auto create_rotary_emb = [&](const std::string& name,
                                bool inverse,
                                const torch::TensorOptions& opts) {
-    return register_module(
-        name,
-        DeepseekScalingRotaryEmbedding(rope_head_dim_,
-                                       rope_head_dim_,
-                                       max_model_len_,
-                                       original_seq_len_,
-                                       base_theta,
-                                       /*interleaved=*/true,
-                                       args.rope_scaling_factor(),
-                                       args.rope_extrapolation_factor(),
-                                       args.rope_scaling_attn_factor(),
-                                       args.rope_scaling_beta_fast(),
-                                       args.rope_scaling_beta_slow(),
-                                       args.rope_scaling_mscale(),
-                                       args.rope_scaling_mscale_all_dim(),
-                                       opts,
-                                       inverse));
+    return register_module(name,
+                           create_mla_rotary_embedding(rope_args,
+                                                       rope_head_dim_,
+                                                       max_model_len_,
+                                                       /*interleaved=*/true,
+                                                       opts,
+                                                       inverse));
   };
 
   // ROPE embedding

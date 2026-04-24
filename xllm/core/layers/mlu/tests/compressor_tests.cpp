@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cmath>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -136,13 +137,14 @@ class CompressorTest : public ::testing::Test {
                         .requires_grad(false);
   }
 
-  // Creates a DeepseekScalingRotaryEmbedding for the Compressor constructor.
+  // Creates a rotary embedding for the Compressor constructor.
   // Note: rotary_emb_ is not used when rotate=False, but we need a valid
   // reference.
-  DeepseekScalingRotaryEmbedding create_rotary_embedding(int64_t rope_head_dim,
-                                                         int64_t max_seq_len,
-                                                         int64_t rope_theta) {
-    return DeepseekScalingRotaryEmbedding(DeepseekScalingRotaryEmbeddingImpl(
+  std::shared_ptr<RotaryEmbeddingBase> create_rotary_embedding(
+      int64_t rope_head_dim,
+      int64_t max_seq_len,
+      int64_t rope_theta) {
+    return std::make_shared<DeepseekScalingRotaryEmbeddingImpl>(
         /*head_size=*/rope_head_dim,
         /*rotary_dim=*/rope_head_dim,
         /*max_position_embeddings=*/max_seq_len,
@@ -156,17 +158,18 @@ class CompressorTest : public ::testing::Test {
         /*beta_slow=*/1.0f,
         /*mscale=*/1.0f,
         /*mscale_all_dim=*/0.0f,
-        options_));
+        options_);
   }
 
-  Compressor create_compressor(int64_t dim,
-                               int64_t head_dim,
-                               int64_t rope_head_dim,
-                               int64_t compress_ratio,
-                               int64_t cached_state_num,
-                               double norm_eps,
-                               bool rotate,
-                               DeepseekScalingRotaryEmbedding& rotary_emb) {
+  Compressor create_compressor(
+      int64_t dim,
+      int64_t head_dim,
+      int64_t rope_head_dim,
+      int64_t compress_ratio,
+      int64_t cached_state_num,
+      double norm_eps,
+      bool rotate,
+      std::shared_ptr<RotaryEmbeddingBase> rotary_emb) {
     CompressorImpl impl(dim,
                         head_dim,
                         rope_head_dim,

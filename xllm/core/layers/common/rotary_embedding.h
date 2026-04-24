@@ -50,7 +50,8 @@ class RotaryEmbeddingImpl : public RotaryEmbeddingBase {
                       int64_t max_position_embeddings,
                       int64_t rope_theta,
                       bool interleaved,
-                      const torch::TensorOptions& options);
+                      const torch::TensorOptions& options,
+                      bool inverse = false);
   RotaryEmbeddingImpl(const ModelContext& context);
 
   void forward(torch::Tensor& q,
@@ -157,7 +158,8 @@ std::shared_ptr<RotaryEmbeddingBase> create_mla_rotary_embedding(
     int64_t rotary_dim,
     int64_t max_position_embeddings,
     bool interleaved,
-    const torch::TensorOptions& options);
+    const torch::TensorOptions& options,
+    bool inverse = false);
 
 }  // namespace layer
 }  // namespace xllm

@@ -56,7 +56,8 @@ torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
                                     int64_t max_position_embeddings,
                                     bool interleaved,
                                     torch::Tensor inv_freq,
-                                    const torch::TensorOptions& options);
+                                    const torch::TensorOptions& options,
+                                    bool inverse = false);
 
 // Internal: Cache descriptor structure for cos_sin_cache sharing
 struct CosSinCacheDesc {

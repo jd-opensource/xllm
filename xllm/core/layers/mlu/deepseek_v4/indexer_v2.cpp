@@ -103,7 +103,7 @@ IndexerV2Impl::IndexerV2Impl(int64_t dim,
                              int64_t compress_ratio,
                              int64_t cached_state_num,
                              double norm_eps,
-                             DeepseekScalingRotaryEmbedding& rotary_emb,
+                             std::shared_ptr<RotaryEmbeddingBase> rotary_emb,
                              const ParallelArgs& parallel_args,
                              const torch::TensorOptions& options)
     : dim_(dim),

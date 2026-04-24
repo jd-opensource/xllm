@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <memory>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -39,7 +40,7 @@ class CompressorImpl : public torch::nn::Module {
                  int64_t cached_state_num,
                  double norm_eps,
                  bool rotate,
-                 DeepseekScalingRotaryEmbedding& rotary_emb,
+                 std::shared_ptr<RotaryEmbeddingBase> rotary_emb,
                  const torch::TensorOptions& options);
 
   // Compresses KV states using gated attention mechanism
@@ -79,7 +80,7 @@ class CompressorImpl : public torch::nn::Module {
   ReplicatedLinear wkv_{nullptr};    // Projects input to KV states
   ReplicatedLinear wgate_{nullptr};  // Projects input to gate scores
   RMSNorm norm_{nullptr};
-  DeepseekScalingRotaryEmbedding rotary_emb_{nullptr};
+  std::shared_ptr<RotaryEmbeddingBase> rotary_emb_;
 
   // State buffers: [cached_state_num, state_ratio, state_dim]
   torch::Tensor kv_state_;     // Cached KV states for incremental compression

@@ -29,11 +29,16 @@ RotaryEmbeddingImpl::RotaryEmbeddingImpl(int64_t rotary_dim,
                                          int64_t max_position_embeddings,
                                          int64_t rope_theta,
                                          bool interleaved,
-                                         const torch::TensorOptions& options)
+                                         const torch::TensorOptions& options,
+                                         bool inverse)
     : interleaved_(interleaved) {
   auto inv_freq = rotary::compute_inv_freq(rotary_dim, rope_theta, options);
-  const auto cos_sin = rotary::compute_cos_sin_cache(
-      rotary_dim, max_position_embeddings, interleaved, inv_freq, options);
+  const auto cos_sin = rotary::compute_cos_sin_cache(rotary_dim,
+                                                     max_position_embeddings,
+                                                     interleaved,
+                                                     inv_freq,
+                                                     options,
+                                                     inverse);
   cos_sin_cache_ = register_buffer("cos_sin_cache", cos_sin);
 
   auto cos_sin_vec = cos_sin_cache_.chunk(2, /*dim=*/-1);
@@ -276,7 +281,8 @@ std::shared_ptr<RotaryEmbeddingBase> create_mla_rotary_embedding(
     int64_t rotary_dim,
     int64_t max_position_embeddings,
     bool interleaved,
-    const torch::TensorOptions& options) {
+    const torch::TensorOptions& options,
+    bool inverse) {
   if (args.rope_scaling_rope_type() == "deepseek_yarn") {
     return std::make_shared<DeepseekScalingRotaryEmbeddingImpl>(
         rotary_dim,  // head_size (same as rotary_dim for MLA)
@@ -292,14 +298,16 @@ std::shared_ptr<RotaryEmbeddingBase> create_mla_rotary_embedding(
         args.rope_scaling_beta_slow(),
         args.rope_scaling_mscale(),
         args.rope_scaling_mscale_all_dim(),
-        options);
+        options,
+        inverse);
   } else {
     // default rope type
     return std::make_shared<RotaryEmbeddingImpl>(rotary_dim,
                                                  max_position_embeddings,
                                                  args.rope_theta(),
                                                  interleaved,
-                                                 options);
+                                                 options,
+                                                 inverse);
   }
 }
 
