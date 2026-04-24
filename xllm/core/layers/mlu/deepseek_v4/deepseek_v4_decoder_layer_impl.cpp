@@ -150,12 +150,6 @@ torch::Tensor DeepSeekV4DecoderLayerImpl::forward(
   // Save residual for HyperConnection
   residual = x;
 
-  // LOG(INFO) << " ============================ ";
-  // LOG(INFO) << "layer_id: " << layer_id_;
-  // LOG(INFO) << "is_prefill: " << attn_metadata.is_prefill;
-  // LOG(INFO) << "size of input_ids: " << input_ids->size(0);
-  // LOG(INFO) << " ============================ ";
-
   // HyperConnection pre-processing for attention
   PrePostCombOutput hc_attn_output = hc_attn_pre_->forward(x);
   x = hc_attn_output.pre;

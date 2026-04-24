@@ -1026,5 +1026,79 @@ TEST_F(FusedMoETest, NoReductionModeMatchesExternalReduce) {
   verify_tensor_close(actual, expected, 1e-3, 1e-4);
 }
 
+TEST_F(FusedMoETest, DeepSeekV4SharedExpertsUseTpGroupAndForceReduction) {
+  set_tp_ctx(/*world_size=*/2);
+
+  const int64_t batch_size = 4;
+  const int64_t seq_len = 8;
+  const int64_t hidden_size = 256;
+  const int64_t intermediate_size = 256;
+  const int64_t num_experts = 8;
+  const int64_t num_expert_group = 4;
+  const int64_t topk_group = 4;
+  const int64_t top_k = 2;
+  const double route_scale = 2.5;
+
+  auto forced_moe = create_fused_moe(num_experts,
+                                     top_k,
+                                     num_expert_group,
+                                     topk_group,
+                                     route_scale,
+                                     hidden_size,
+                                     intermediate_size,
+                                     /*n_shared_experts=*/1,
+                                     /*is_gated=*/true,
+                                     /*renormalize=*/0,
+                                     /*enable_result_reduction=*/false,
+                                     /*hidden_act=*/"silu",
+                                     /*scoring_func=*/"sigmoid",
+                                     /*topk_method=*/"noaux_tc",
+                                     /*use_hash=*/false,
+                                     /*vocab_size=*/0,
+                                     /*swiglu_limit=*/std::nullopt,
+                                     /*model_type=*/"deepseek_v4");
+  auto reduced_moe = create_fused_moe(num_experts,
+                                      top_k,
+                                      num_expert_group,
+                                      topk_group,
+                                      route_scale,
+                                      hidden_size,
+                                      intermediate_size,
+                                      /*n_shared_experts=*/1,
+                                      /*is_gated=*/true,
+                                      /*renormalize=*/0,
+                                      /*enable_result_reduction=*/true,
+                                      /*hidden_act=*/"silu",
+                                      /*scoring_func=*/"sigmoid",
+                                      /*topk_method=*/"noaux_tc",
+                                      /*use_hash=*/false,
+                                      /*vocab_size=*/0,
+                                      /*swiglu_limit=*/std::nullopt,
+                                      /*model_type=*/"deepseek_v4");
+
+  ASSERT_EQ(forced_moe->shared_pg(), parallel_args_.tp_group_);
+  ASSERT_EQ(reduced_moe->shared_pg(), parallel_args_.tp_group_);
+
+  auto weight_dict =
+      create_test_weights(num_experts, hidden_size, intermediate_size);
+  StateDict state_dict(weight_dict);
+  forced_moe->load_state_dict(state_dict);
+  reduced_moe->load_state_dict(state_dict);
+
+  auto hidden_states = create_custom_input(
+      {batch_size * seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 0.05f));
+
+  auto expected = reduced_moe->forward_experts(
+      hidden_states, /*enable_all2all_communication=*/false);
+  auto actual = forced_moe->forward_experts(
+      hidden_states, /*enable_all2all_communication=*/false);
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  verify_tensor_close(actual, expected, 1e-3, 1e-4);
+}
+
 }  // namespace layer
 }  // namespace xllm

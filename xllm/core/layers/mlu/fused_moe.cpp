@@ -36,7 +36,10 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       hidden_size_(model_args.hidden_size()),
       n_shared_experts_(model_args.n_shared_experts()),
       is_gated_(moe_args.is_gated),
-      enable_result_reduction_(moe_args.enable_result_reduction),
+      enable_result_reduction_(
+          moe_args.enable_result_reduction ||
+          (model_args.n_shared_experts() > 0 &&
+           util::is_deepseek_v4_model_type(model_args.model_type()))),
       hidden_act_(model_args.hidden_act()),
       swiglu_limit_(model_args.model_type() == "deepseek_v4"
                         ? model_args.swiglu_limit()
@@ -154,11 +157,19 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   gate_ = register_module(
       "gate", MoEGate(model_args, quant_args, options, moe_args.use_hash));
   if (n_shared_experts_ > 0) {
-    CHECK(parallel_args.single_rank_group_ != nullptr)
-        << "shared experts require single_rank_group_";
-    // Shared experts always run with full weights on the local rank. This
-    // keeps the shared path independent from TP/EP sharding.
-    shared_pg_ = parallel_args.single_rank_group_;
+    const bool use_tp_shared_pg =
+        util::is_deepseek_v4_model_type(model_args.model_type());
+    if (use_tp_shared_pg) {
+      CHECK(parallel_args.tp_group_ != nullptr)
+          << "deepseek_v4 shared experts require tp_group_";
+      shared_pg_ = parallel_args.tp_group_;
+    } else {
+      CHECK(parallel_args.single_rank_group_ != nullptr)
+          << "shared experts require single_rank_group_";
+      // Shared experts usually run with full weights on the local rank. This
+      // keeps the shared path independent from TP/EP sharding.
+      shared_pg_ = parallel_args.single_rank_group_;
+    }
     shared_experts_ =
         register_module("shared_experts",
                         DenseMLP(hidden_size_,
