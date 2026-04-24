@@ -50,7 +50,8 @@ torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
                                     float mscale,
                                     float mscale_all_dim,
                                     torch::Tensor inv_freq,
-                                    const torch::TensorOptions& options);
+                                    const torch::TensorOptions& options,
+                                    bool inverse = false);
 torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
                                     int64_t max_position_embeddings,
                                     bool interleaved,
@@ -69,6 +70,7 @@ struct CosSinCacheDesc {
   size_t inv_freq_hash;  // Hash of inv_freq tensor content
   torch::Device device;
   torch::ScalarType dtype;
+  bool inverse;
 
   bool operator==(const CosSinCacheDesc& other) const {
     return rotary_dim == other.rotary_dim &&
@@ -78,7 +80,7 @@ struct CosSinCacheDesc {
            attn_factor == other.attn_factor && mscale == other.mscale &&
            mscale_all_dim == other.mscale_all_dim &&
            inv_freq_hash == other.inv_freq_hash && device == other.device &&
-           dtype == other.dtype;
+           dtype == other.dtype && inverse == other.inverse;
   }
 };
 

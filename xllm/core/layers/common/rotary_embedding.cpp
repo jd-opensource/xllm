@@ -91,17 +91,16 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& input,
                                   const torch::Tensor& positions,
                                   const torch::Tensor& cu_query_lens,
                                   int64_t max_query_len,
-                                  bool is_prompt) {
-  bool discrete;
+                                  bool is_prompt,
+                                  std::optional<bool> enforce_discrete) {
+  bool discrete = enforce_discrete.value_or(!is_prompt);
   std::optional<torch::Tensor> position_ids;
   if (is_prompt) {
-    discrete = false;
     if (Device::type_str() == "cuda" || Device::type_str() == "npu" ||
         Device::type_str() == "ilu") {
       position_ids = positions;
     }
   } else {
-    discrete = true;
     position_ids = positions;
   }
 
@@ -190,7 +189,8 @@ DeepseekScalingRotaryEmbeddingImpl::DeepseekScalingRotaryEmbeddingImpl(
     float beta_slow,
     float mscale,
     float mscale_all_dim,
-    const torch::TensorOptions& options)
+    const torch::TensorOptions& options,
+    bool inverse)
     : head_size_(head_size),
       rotary_dim_(rotary_dim),
       interleaved_(interleaved) {
@@ -210,7 +210,8 @@ DeepseekScalingRotaryEmbeddingImpl::DeepseekScalingRotaryEmbeddingImpl(
                                                      mscale,
                                                      mscale_all_dim,
                                                      inv_freq,
-                                                     options);
+                                                     options,
+                                                     inverse);
   cos_sin_cache_ = register_buffer("cos_sin_cache", cos_sin);
 
   auto cos_sin_vec = cos_sin_cache_.chunk(2, /*dim=*/-1);
@@ -231,17 +232,16 @@ void DeepseekScalingRotaryEmbeddingImpl::forward(
     const torch::Tensor& positions,
     const torch::Tensor& cu_query_lens,
     int64_t max_query_len,
-    bool is_prompt) {
+    bool is_prompt,
+    std::optional<bool> enforce_discrete) {
   const int32_t dim = -1;
-  bool discrete;
   std::optional<torch::Tensor> position_ids;
-  if (is_prompt) {
-    discrete = false;
-    position_ids = std::nullopt;
-  } else {
-    discrete = true;
+  bool discrete = enforce_discrete.value_or(!is_prompt);
+  if (!is_prompt) {
     position_ids = positions;
     max_query_len = 1;
+  } else {
+    position_ids = std::nullopt;
   }
   auto input_rot = input.slice(dim, 0, rotary_dim_);
   torch::Tensor input_pass;

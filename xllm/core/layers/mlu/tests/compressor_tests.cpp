@@ -362,7 +362,7 @@ TEST_F(CompressorTest, PrefillForwardRotateFalseTest) {
   CHECK_EQ(compress_lens.size(), batch_size) << "compress_lens size mismatch";
 
   // Expected values from vLLM MLU: compress_kvs[i].shape: [4, 1, 512]
-  const float expected_sum = 301.884;
+  const float expected_sum = 291.3675;
   const float expected_min = -0.211914f;
   const float expected_max = 0.212891f;
   const int64_t expected_compress_len = 4;

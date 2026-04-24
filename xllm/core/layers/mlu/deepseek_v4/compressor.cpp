@@ -198,6 +198,7 @@ void CompressorImpl::apply_rope_to_compressed_kv(
   rotary_emb_->forward(kv_rope,
                        cutoff_positions,
                        cu_query_lens,
+                       static_cast<int64_t>(cutoff_positions.size(0)),
                        /*is_prompt=*/false,
                        /*enforce_discrete=*/true);
 }

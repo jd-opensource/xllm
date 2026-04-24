@@ -52,6 +52,7 @@ struct CosSinCacheDescHash {
                                        std::hash<torch::Device>{}(key.device));
     hash = layer::rotary::hash_combine(
         hash, std::hash<torch::ScalarType>{}(key.dtype));
+    hash = layer::rotary::hash_combine(hash, std::hash<bool>{}(key.inverse));
     return hash;
   }
 };
@@ -111,15 +112,15 @@ inline std::tuple<int, int> yarn_find_correction_range(
 }
 
 // Create cos_sin tensor for rotary embedding cache
-inline torch::Tensor create_cos_sin_tensor(
-    int64_t max_position_embeddings,
-    float scaling_factor,
-    float attn_factor,
-    float mscale,
-    float mscale_all_dim,
-    bool interleaved,
-    const torch::Tensor& inv_freq,
-    const torch::TensorOptions& options) {
+inline torch::Tensor create_cos_sin_tensor(int64_t max_position_embeddings,
+                                           float scaling_factor,
+                                           float attn_factor,
+                                           float mscale,
+                                           float mscale_all_dim,
+                                           bool interleaved,
+                                           const torch::Tensor& inv_freq,
+                                           const torch::TensorOptions& options,
+                                           bool inverse) {
   float mscale_ = static_cast<float>(
       layer::rotary::yarn_get_mscale(scaling_factor, mscale) /
       layer::rotary::yarn_get_mscale(scaling_factor, mscale_all_dim) *
@@ -138,8 +139,10 @@ inline torch::Tensor create_cos_sin_tensor(
     // [a, b, c, d] => [a, b, c, d, a, b, c, d]
     emd = torch::cat({freqs, freqs}, /*dim=*/-1);
   }
+  float sin_multiplier = inverse ? -1.0f : 1.0f;
   const auto cos_sin =
-      torch::cat({emd.cos() * mscale_, emd.sin() * mscale_}, /*dim=*/-1)
+      torch::cat({emd.cos() * mscale_, emd.sin() * mscale_ * sin_multiplier},
+                 /*dim=*/-1)
           .to(options);
   return cos_sin;
 }
@@ -317,7 +320,8 @@ torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
                                     float mscale,
                                     float mscale_all_dim,
                                     torch::Tensor inv_freq,
-                                    const torch::TensorOptions& options) {
+                                    const torch::TensorOptions& options,
+                                    bool inverse) {
   // Create cache descriptor using aggregate initialization
   CosSinCacheDesc desc{rotary_dim,
                        max_position_embeddings,
@@ -328,7 +332,8 @@ torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
                        mscale_all_dim,
                        compute_inv_freq_hash(inv_freq),
                        options.device(),
-                       options.dtype().toScalarType()};
+                       options.dtype().toScalarType(),
+                       inverse};
 
   // Get or create cache using cache manager
   auto& cache_manager = CosSinCacheManager::get_instance();
@@ -340,7 +345,8 @@ torch::Tensor compute_cos_sin_cache(int64_t rotary_dim,
                                  mscale_all_dim,
                                  interleaved,
                                  inv_freq,
-                                 options);
+                                 options,
+                                 inverse);
   });
 }
 

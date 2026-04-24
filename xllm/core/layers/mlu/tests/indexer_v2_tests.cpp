@@ -363,12 +363,12 @@ TEST_F(IndexerV2Test, ForwardPrefillTest) {
                       /*expected_max=*/2.265625,
                       /*expected_sum=*/2.265625);
   expect_tensor_stats(kv_cache.index({1}).flatten(),
-                      /*expected_min=*/-0.06201171875,
-                      /*expected_max=*/2.25,
+                      /*expected_min=*/-0.13671875,
+                      /*expected_max=*/2.125,
                       /*expected_sum=*/2.265625);
   expect_tensor_stats(kv_cache.index({2}).flatten(),
-                      /*expected_min=*/-0.1025390625,
-                      /*expected_max=*/2.203125,
+                      /*expected_min=*/-0.1611328125,
+                      /*expected_max=*/2.09375,
                       /*expected_sum=*/2.25);
 }
 

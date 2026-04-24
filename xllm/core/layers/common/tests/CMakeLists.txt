@@ -11,6 +11,7 @@ cc_test(
     dp_utils_tests.cpp
     indexer_tests.cpp
     mla_tests.cpp
+    rotary_embedding_tests.cpp
     deepseek_v2_decoder_layer_tests.cpp
     qwen2_attention_tests.cpp
     qwen2_vision_attention_tests.cpp

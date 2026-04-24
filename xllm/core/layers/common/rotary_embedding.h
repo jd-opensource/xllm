@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/types.h>
 
 #include <memory>
+#include <optional>
 
 #include "attention_metadata.h"
 #include "core/framework/model_context.h"
@@ -36,7 +37,8 @@ class RotaryEmbeddingBase : public torch::nn::Module {
                        const torch::Tensor& positions,
                        const torch::Tensor& cu_query_lens,
                        int64_t max_query_len,
-                       bool is_prompt) = 0;
+                       bool is_prompt,
+                       std::optional<bool> enforce_discrete = std::nullopt) = 0;
   virtual const torch::Tensor& get_sin_cache() const = 0;
   virtual const torch::Tensor& get_cos_cache() const = 0;
   virtual const bool get_interleaved() const = 0;
@@ -62,7 +64,8 @@ class RotaryEmbeddingImpl : public RotaryEmbeddingBase {
                const torch::Tensor& positions,
                const torch::Tensor& cu_query_lens,
                int64_t max_query_len,
-               bool is_prompt) override;
+               bool is_prompt,
+               std::optional<bool> enforce_discrete = std::nullopt) override;
 
   const torch::Tensor& precomputed_cos_sin_cache() {
     return precomputed_cos_sin_cache_;
@@ -122,13 +125,15 @@ class DeepseekScalingRotaryEmbeddingImpl : public RotaryEmbeddingBase {
       float beta_slow,
       float mscale,
       float mscale_all_dim,
-      const torch::TensorOptions& options);
+      const torch::TensorOptions& options,
+      bool inverse = false);
 
   void forward(torch::Tensor& input,
                const torch::Tensor& positions,
                const torch::Tensor& cu_query_lens,
                int64_t max_query_len,
-               bool is_prompt) override;
+               bool is_prompt,
+               std::optional<bool> enforce_discrete = std::nullopt) override;
   const torch::Tensor& get_sin_cache() const override { return sin_; }
   const torch::Tensor& get_cos_cache() const override { return cos_; }
   const bool get_interleaved() const override { return interleaved_; }
