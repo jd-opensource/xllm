@@ -130,29 +130,23 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     FLAGS_max_tokens_per_batch = xllm_init_options.max_tokens_per_batch;
     FLAGS_block_size = xllm_init_options.block_size;
 
-    // Hard-coded REC so settings. enable_graph and rec_worker_max_concurrency
-    // are dual-source: runtime may read FLAGS_* while setup also needs the same
-    // value in Options.
-    FLAGS_enable_graph = true;
-    FLAGS_rec_worker_max_concurrency = 2;
-
-    // Flag-only runtime toggles in the REC so path.
-    FLAGS_enable_rec_fast_sampler = true;
-    FLAGS_enable_prefill_piecewise_graph = true;
-    FLAGS_enable_xattention_one_stage = false;
-    FLAGS_enable_graph_mode_decode_no_padding = true;
-    FLAGS_enable_block_copy_kernel = false;
-    // FLAGS_enable_rec_prefill_only = true;
-    FLAGS_enable_topk_sorted = false;
+    FLAGS_enable_graph = xllm_init_options.enable_graph;
+    FLAGS_rec_worker_max_concurrency =
+        xllm_init_options.rec_worker_max_concurrency;
+    FLAGS_enable_rec_fast_sampler = xllm_init_options.enable_rec_fast_sampler;
+    FLAGS_enable_prefill_piecewise_graph =
+        xllm_init_options.enable_prefill_piecewise_graph;
+    FLAGS_enable_xattention_one_stage =
+        xllm_init_options.enable_xattention_one_stage;
+    FLAGS_enable_graph_mode_decode_no_padding =
+        xllm_init_options.enable_graph_mode_decode_no_padding;
+    FLAGS_enable_block_copy_kernel = xllm_init_options.enable_block_copy_kernel;
+    FLAGS_enable_topk_sorted = xllm_init_options.enable_topk_sorted;
 
     // Keep dual-source settings aligned with the FLAGS_* values above.
     options.enable_graph(FLAGS_enable_graph)
         .beam_width(FLAGS_beam_width)
         .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency);
-
-#if !defined(USE_NPU)
-    FLAGS_enable_block_copy_kernel = false;
-#endif
 
     handler->master = std::make_unique<xllm::RecMaster>(options);
     handler->master->run();

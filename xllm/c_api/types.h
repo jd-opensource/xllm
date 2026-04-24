@@ -150,6 +150,30 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
    * Empty string = use the same devices as main model
    */
   char draft_devices[XLLM_META_STRING_FIELD_MAX_LEN];
+
+  /** Whether to enable graph execution for REC */
+  bool enable_graph;
+
+  /** Whether to enable REC fast sampler */
+  bool enable_rec_fast_sampler;
+
+  /** Whether to enable prefill piecewise graph for REC */
+  bool enable_prefill_piecewise_graph;
+
+  /** Whether to enable xattention one-stage execution for REC */
+  bool enable_xattention_one_stage;
+
+  /** Whether to enable graph-mode decode without padding for REC */
+  bool enable_graph_mode_decode_no_padding;
+
+  /** Whether to enable block copy kernel */
+  bool enable_block_copy_kernel;
+
+  /** Whether to keep REC top-k outputs sorted */
+  bool enable_topk_sorted;
+
+  /** Maximum REC worker pipeline concurrency */
+  uint32_t rec_worker_max_concurrency;
 } XLLM_InitLLMOptions;
 
 /**
