@@ -200,6 +200,9 @@ class Options {
   // all requests use single global tpot
   PROPERTY(int32_t, max_global_tpot_ms) = std::numeric_limits<int32_t>::max();
 
+  // enable compressor state id manager
+  PROPERTY(bool, enable_state_manager) = false;
+
   // dit
   // max requests per batch
   PROPERTY(int, max_requests_per_batch) = 0;

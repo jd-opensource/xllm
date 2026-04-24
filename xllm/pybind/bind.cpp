@@ -83,6 +83,7 @@ PYBIND11_MODULE(xllm_export, m) {
                      &Options::disable_ttft_profiling_)
       .def_readwrite("enable_forward_interruption",
                      &Options::enable_forward_interruption_)
+      .def_readwrite("enable_state_manager", &Options::enable_state_manager_)
       .def_readwrite("enable_offline_inference",
                      &Options::enable_offline_inference_)
       .def_readwrite("spawn_worker_path", &Options::spawn_worker_path_)

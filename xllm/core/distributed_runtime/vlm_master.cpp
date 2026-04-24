@@ -74,6 +74,7 @@ VLMMaster::VLMMaster(const Options& options)
       .disable_ttft_profiling(options_.disable_ttft_profiling())
       .enable_forward_interruption(options_.enable_forward_interruption())
       .enable_schedule_overlap(options_.enable_schedule_overlap())
+      .enable_state_manager(options_.enable_state_manager())
       .server_idx(options_.server_idx());
   scheduler_ = create_continuous_scheduler(engine_.get(), scheduler_options);
 

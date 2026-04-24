@@ -63,6 +63,20 @@ std::vector<int64_t> derive_batch_kv_state(
   }
   return batch_to_kv_state;
 }
+
+void normalize_batch_kv_state(std::vector<int64_t>& batch_to_kv_state,
+                              const std::vector<int32_t>& linear_state_ids,
+                              int32_t num_sequences) {
+  if (batch_to_kv_state.empty()) {
+    batch_to_kv_state = derive_batch_kv_state(linear_state_ids);
+    return;
+  }
+  if (num_sequences > 0) {
+    CHECK_EQ(batch_to_kv_state.size(), static_cast<size_t>(num_sequences))
+        << "batch_to_kv_state size (" << batch_to_kv_state.size()
+        << ") must match num_sequences (" << num_sequences << ")";
+  }
+}
 }  // namespace
 
 void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
@@ -161,6 +175,10 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::vector<int32_t>(pb_forward_input->linear_state_ids().begin(),
                            pb_forward_input->linear_state_ids().end());
   normalize_linear_state_ids(linear_state_ids, num_sequences);
+  std::vector<int64_t> batch_to_kv_state =
+      std::vector<int64_t>(pb_forward_input->batch_to_kv_state().begin(),
+                           pb_forward_input->batch_to_kv_state().end());
+  normalize_batch_kv_state(batch_to_kv_state, linear_state_ids, num_sequences);
   std::vector<int32_t> extra_token_ids =
       std::vector<int32_t>(pb_forward_input->extra_token_ids().begin(),
                            pb_forward_input->extra_token_ids().end());
@@ -261,7 +279,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.dp_global_token_nums = std::move(dp_global_token_nums);
   input_params.dp_is_decode = std::move(dp_is_decode);
   input_params.embedding_ids = std::move(embedding_ids);
-  input_params.batch_to_kv_state = derive_batch_kv_state(linear_state_ids);
+  input_params.batch_to_kv_state = std::move(batch_to_kv_state);
   input_params.linear_state_ids = std::move(linear_state_ids);
   input_params.request_ids = std::move(request_ids);
   input_params.extra_token_ids = std::move(extra_token_ids);
@@ -548,6 +566,8 @@ void forward_input_to_proto(const RawForwardInput& inputs,
                       inputs.embedding_ids);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_linear_state_ids(),
                       inputs.linear_state_ids);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_batch_to_kv_state(),
+                      inputs.batch_to_kv_state);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_request_ids(),
                       inputs.request_ids);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_extra_token_ids(),

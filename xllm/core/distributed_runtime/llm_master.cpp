@@ -102,6 +102,7 @@ LLMMaster::LLMMaster(const Options& options)
       .enable_forward_interruption(options_.enable_forward_interruption())
       .max_global_ttft_ms(options_.max_global_ttft_ms())
       .max_global_tpot_ms(options_.max_global_tpot_ms())
+      .enable_state_manager(options_.enable_state_manager())
       .server_idx(options_.server_idx())
       .prefetch_timeout(options_.prefetch_timeout())
       .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());

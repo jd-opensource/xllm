@@ -187,6 +187,20 @@ std::vector<int64_t> derive_batch_kv_state(
   return batch_to_kv_state;
 }
 
+void normalize_batch_kv_state(std::vector<int64_t>& batch_to_kv_state,
+                              const std::vector<int32_t>& linear_state_ids,
+                              int32_t num_sequences) {
+  if (batch_to_kv_state.empty()) {
+    batch_to_kv_state = derive_batch_kv_state(linear_state_ids);
+    return;
+  }
+  if (num_sequences > 0) {
+    CHECK_EQ(batch_to_kv_state.size(), static_cast<size_t>(num_sequences))
+        << "batch_to_kv_state size (" << batch_to_kv_state.size()
+        << ") must match num_sequences (" << num_sequences << ")";
+  }
+}
+
 inline size_t get_instance_info_size(const InstanceInfo& info) {
   size_t size = get_string_size(info.name) + get_string_size(info.rpc_address) +
                 get_string_size(info.type);
@@ -2036,8 +2050,10 @@ inline void deserialize_raw_forward_input(const char*& buffer,
   read_vector(context, input_params.linear_state_ids);
   normalize_linear_state_ids(input_params.linear_state_ids,
                              input_params.num_sequences);
-  input_params.batch_to_kv_state =
-      derive_batch_kv_state(input_params.linear_state_ids);
+  read_vector(context, input_params.batch_to_kv_state);
+  normalize_batch_kv_state(input_params.batch_to_kv_state,
+                           input_params.linear_state_ids,
+                           input_params.num_sequences);
   read_string_vector(context, input_params.request_ids);
   read_vector(context, input_params.extra_token_ids);
   read_swap_blocks(context, input_params.swap_blocks);
@@ -2145,6 +2161,7 @@ inline void serialize_raw_forward_input_sections(
   write_vector(context.descriptor, input.dp_is_decode);
   write_vector(context.descriptor, input.embedding_ids);
   write_vector(context.descriptor, input.linear_state_ids);
+  write_vector(context.descriptor, input.batch_to_kv_state);
   write_string_vector(context.descriptor, input.request_ids);
   write_vector(context.descriptor, input.extra_token_ids);
   write_swap_blocks(context, input.swap_blocks);
@@ -2390,8 +2407,10 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
   input_params.embedding_ids = std::move(raw_input.embedding_ids);
   normalize_linear_state_ids(raw_input.linear_state_ids,
                              raw_input.num_sequences);
-  input_params.batch_to_kv_state =
-      derive_batch_kv_state(raw_input.linear_state_ids);
+  normalize_batch_kv_state(raw_input.batch_to_kv_state,
+                           raw_input.linear_state_ids,
+                           raw_input.num_sequences);
+  input_params.batch_to_kv_state = std::move(raw_input.batch_to_kv_state);
   input_params.linear_state_ids = std::move(raw_input.linear_state_ids);
   input_params.request_ids = std::move(raw_input.request_ids);
   input_params.dp_global_token_nums = std::move(raw_input.dp_global_token_nums);

@@ -214,10 +214,12 @@ int run() {
   FLAGS_enable_block_copy_kernel = false;
 #endif
   std::string model_type = "";
+  bool enable_state_manager = false;
   if (FLAGS_backend != "dit") {
     model_type = xllm::util::get_model_type(model_path);
     if (xllm::util::is_deepseek_v4_model_type(model_type)) {
       FLAGS_attention_window_size = 128;
+      enable_state_manager = true;
     }
     FLAGS_tool_call_parser = function_call::FunctionCallParser::get_parser_auto(
         FLAGS_tool_call_parser, model_type);
@@ -321,6 +323,7 @@ int run() {
       .enable_graph(FLAGS_enable_graph)
       .max_global_ttft_ms(FLAGS_max_global_ttft_ms)
       .max_global_tpot_ms(FLAGS_max_global_tpot_ms)
+      .enable_state_manager(enable_state_manager)
       .max_requests_per_batch(FLAGS_max_requests_per_batch)
       .enable_shm(FLAGS_enable_shm)
       .input_shm_size(FLAGS_input_shm_size)

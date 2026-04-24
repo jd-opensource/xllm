@@ -117,6 +117,9 @@ class ContinuousScheduler : public Scheduler {
     // all requests use single global tpot
     PROPERTY(int32_t, max_global_tpot_ms) = std::numeric_limits<int32_t>::max();
 
+    // enable compressor state id manager
+    PROPERTY(bool, enable_state_manager) = false;
+
     // Index ID for internal server ID, which must be set different values
     // if the model supports multiple version or there are multiple models.
     PROPERTY(int64_t, server_idx) = 0;

@@ -32,6 +32,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
+#include "core/framework/request/compressor_state_id_manager.h"
 #include "core/framework/request/mm_data_visitor.h"
 #include "core/framework/tokenizer/tokenizer.h"
 #include "core/util/slice.h"
@@ -179,6 +180,7 @@ Sequence::Sequence(size_t index,
       request_id_(seq_params.request_id) {
   if (is_onerec_model()) {
     init_onerec_sequence(prompt_token_ids, std::move(input_embedding));
+    init_compressor_state_id();
     return;
   }
 
@@ -210,6 +212,13 @@ Sequence::Sequence(size_t index,
   token_to_count_map_[prompt_token_ids.back()] = 0;
   input_embedding_ = input_embedding;
   cur_generated_token_idx_ = num_prompt_tokens_;
+  init_compressor_state_id();
+}
+
+Sequence::~Sequence() {
+  if (compressor_state_id_ >= 0 && CompressorStateIdManager::is_initialized()) {
+    CompressorStateIdManager::get_instance().release(compressor_state_id_);
+  }
 }
 
 Sequence::Sequence(const Sequence& other)
@@ -245,6 +254,20 @@ Sequence::Sequence(const Sequence& other)
       updated_since_last_beam_search_(other.updated_since_last_beam_search_),
       termination_flag_(std::make_shared<std::atomic<int32_t>>(INT32_MAX)) {
   logprob_state_ = std::make_unique<LogprobState>(*other.logprob_state_);
+  init_compressor_state_id();
+}
+
+void Sequence::init_compressor_state_id() {
+  if (!CompressorStateIdManager::is_initialized()) {
+    return;
+  }
+  int64_t id = -1;
+  if (!CompressorStateIdManager::get_instance().try_acquire(id)) {
+    LOG(WARNING) << "No available compressor state id for sequence " << index_;
+    compressor_state_id_ = -1;
+    return;
+  }
+  compressor_state_id_ = id;
 }
 
 // The first token will be only used in disagg pd mode.

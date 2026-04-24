@@ -112,6 +112,8 @@ class Sequence final {
            const IncrementalDecoder& incremental_decoder,
            const SequenceParams& seq_params);
 
+  ~Sequence();
+
   Sequence(const Sequence& other);
 
   // get mm data
@@ -367,6 +369,8 @@ class Sequence final {
   // get sequence id
   int32_t seq_id() const { return seq_id_; }
 
+  int64_t compressor_state_id() const { return compressor_state_id_; }
+
   const std::vector<int32_t>& encoder_tokens() const {
     static const std::vector<int32_t> kEmpty;
     if (!onerec_state_.has_value()) {
@@ -405,6 +409,7 @@ class Sequence final {
   }
 
  private:
+  void init_compressor_state_id();
   void record_first_token(const Token& token);
 
   SequenceOutputType output_type();
@@ -512,6 +517,8 @@ class Sequence final {
 
   // seq id in the batch
   int32_t seq_id_ = -1;
+
+  int64_t compressor_state_id_ = -1;
 
   // for enable_schedule_overlap case
   uint32_t cur_generated_token_idx_;

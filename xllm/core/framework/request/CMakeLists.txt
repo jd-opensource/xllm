@@ -19,6 +19,7 @@ cc_library(
     mm_embedding_handler.h
     mm_input.h
     mm_type.h
+    compressor_state_id_manager.h
     request_base.h
     request.h
     dit_request.h
@@ -49,6 +50,7 @@ cc_library(
     mm_embedding_handler.cpp
     mm_input.cpp
     mm_type.cpp
+    compressor_state_id_manager.cpp
     request.cpp
     dit_request.cpp
     request_output.cpp

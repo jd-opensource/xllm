@@ -28,6 +28,7 @@ limitations under the License.
 #include "framework/block/block_manager_impl.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
+#include "framework/request/compressor_state_id_manager.h"
 #include "framework/request/stopping_checker.h"
 #include "framework/sampling/sampling_params.h"
 #include "platform/device.h"
@@ -539,6 +540,70 @@ TEST(BatchTest, DecodeSingleBlockIdsStaySplitInTransportButShareSlotValue) {
   EXPECT_EQ(forward_input.input_params.linear_state_ids[0], expected_slot_id);
 }
 
+TEST(BatchTest, StateManagerUsesCompressorStateForBatchKvState) {
+  if (!CompressorStateIdManager::is_initialized()) {
+    CompressorStateIdManager::initialize(/*capacity=*/4096);
+  }
+
+  const uint32_t n_blocks = 8;
+  const uint32_t block_size = 4;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size);
+  BlockManagerImpl manager(options);
+
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(20);
+  SequenceParams seq_params;
+  seq_params.seq_capacity = 32;
+  seq_params.stopping_checker = &stopping_checker;
+  seq_params.sampling_param = &sampling_param;
+
+  torch::Tensor input_embedding;
+  MMData mm_data;
+  IncrementalDecoder decoder("", 1, false, false);
+  Sequence seq(/*index=*/0,
+               /*token_ids=*/{1, 2, 3},
+               input_embedding,
+               mm_data,
+               std::move(decoder),
+               seq_params);
+  seq.add_kv_blocks(manager.allocate(1));
+  seq.kv_state().incr_kv_cache_tokens_num(/*size=*/3);
+  seq.append_token(4);
+
+  auto slot_block = manager.allocate(1);
+  ASSERT_EQ(slot_block.size(), 1u);
+  const int32_t expected_slot_id = slot_block[0].id();
+  seq.set_single_block(std::move(slot_block[0]));
+  const int64_t expected_state_id = seq.compressor_state_id();
+  ASSERT_GE(expected_state_id, 0);
+
+  std::vector<Sequence*> sequences = {&seq};
+  std::vector<uint32_t> allowed_max_tokens = {1};
+  std::vector<torch::Tensor> input_embeddings_vec;
+  std::vector<MMData> mm_data_vec;
+  ModelArgs args;
+  args.layer_types({"linear_attention"});
+  BatchInputBuilder builder(sequences,
+                            allowed_max_tokens,
+                            input_embeddings_vec,
+                            mm_data_vec,
+                            /*swap_block_transfer_infos=*/nullptr,
+                            /*batch_id=*/1,
+                            &args,
+                            BatchForwardType::DECODE);
+
+  ForwardInput forward_input =
+      builder.build_forward_input(/*num_decoding_tokens=*/1,
+                                  /*min_decoding_batch_size=*/0);
+
+  EXPECT_EQ(forward_input.input_params.linear_state_ids,
+            std::vector<int32_t>({expected_slot_id}));
+  EXPECT_EQ(forward_input.input_params.batch_to_kv_state,
+            std::vector<int64_t>({expected_state_id}));
+}
+
 TEST(BatchTest, ProtoRoundTripPreservesAndDefaultsLinearStateIds) {
   RawForwardInput raw_input;
   raw_input.batch_forward_type = BatchForwardType::DECODE;
@@ -553,6 +618,7 @@ TEST(BatchTest, ProtoRoundTripPreservesAndDefaultsLinearStateIds) {
   raw_input.block_tables_vec = {{0}, {0}};
   raw_input.num_sequences = 2;
   raw_input.linear_state_ids = {7, 9};
+  raw_input.batch_to_kv_state = {70, 90};
 
   proto::ForwardInput pb_forward_input;
   forward_input_to_proto(raw_input, &pb_forward_input);
@@ -563,16 +629,45 @@ TEST(BatchTest, ProtoRoundTripPreservesAndDefaultsLinearStateIds) {
                          /*num_decoding_tokens=*/1);
   EXPECT_EQ(round_trip.input_params.linear_state_ids,
             std::vector<int32_t>({7, 9}));
+  EXPECT_EQ(round_trip.input_params.batch_to_kv_state,
+            std::vector<int64_t>({70, 90}));
 
   proto::ForwardInput legacy_pb = pb_forward_input;
-  legacy_pb.clear_linear_state_ids();
+  legacy_pb.clear_batch_to_kv_state();
 
   ForwardInput legacy_round_trip;
   proto_to_forward_input(&legacy_pb,
                          legacy_round_trip,
                          /*num_decoding_tokens=*/1);
   EXPECT_EQ(legacy_round_trip.input_params.linear_state_ids,
+            std::vector<int32_t>({7, 9}));
+  EXPECT_EQ(legacy_round_trip.input_params.batch_to_kv_state,
+            std::vector<int64_t>({7, 9}));
+
+  proto::ForwardInput default_pb = legacy_pb;
+  default_pb.clear_batch_to_kv_state();
+  default_pb.clear_linear_state_ids();
+
+  ForwardInput default_round_trip;
+  proto_to_forward_input(&default_pb,
+                         default_round_trip,
+                         /*num_decoding_tokens=*/1);
+  EXPECT_EQ(default_round_trip.input_params.linear_state_ids,
             std::vector<int32_t>({-1, -1}));
+  EXPECT_EQ(default_round_trip.input_params.batch_to_kv_state,
+            std::vector<int64_t>({-1, -1}));
+
+  proto::ForwardInput explicit_batch_pb = pb_forward_input;
+  explicit_batch_pb.clear_linear_state_ids();
+
+  ForwardInput explicit_batch_round_trip;
+  proto_to_forward_input(&explicit_batch_pb,
+                         explicit_batch_round_trip,
+                         /*num_decoding_tokens=*/1);
+  EXPECT_EQ(explicit_batch_round_trip.input_params.linear_state_ids,
+            std::vector<int32_t>({-1, -1}));
+  EXPECT_EQ(explicit_batch_round_trip.input_params.batch_to_kv_state,
+            std::vector<int64_t>({70, 90}));
 }
 
 TEST(BatchTest, SharedMemoryRoundTripPreservesAndDefaultsLinearStateIds) {
@@ -589,6 +684,7 @@ TEST(BatchTest, SharedMemoryRoundTripPreservesAndDefaultsLinearStateIds) {
   raw_input.block_tables_vec = {{0}, {0}};
   raw_input.num_sequences = 2;
   raw_input.linear_state_ids = {4, 6};
+  raw_input.batch_to_kv_state = {40, 60};
 
   bool is_creator = false;
   auto shm_name =
@@ -607,7 +703,10 @@ TEST(BatchTest, SharedMemoryRoundTripPreservesAndDefaultsLinearStateIds) {
   reader_manager.raw_input_read(from_shm, torch::Device(torch::kCPU));
   EXPECT_EQ(from_shm.input_params.linear_state_ids,
             std::vector<int32_t>({4, 6}));
+  EXPECT_EQ(from_shm.input_params.batch_to_kv_state,
+            std::vector<int64_t>({40, 60}));
 
+  raw_input.batch_to_kv_state.clear();
   raw_input.linear_state_ids.clear();
   ASSERT_TRUE(writer_manager.raw_input_write(raw_input));
 
@@ -615,6 +714,8 @@ TEST(BatchTest, SharedMemoryRoundTripPreservesAndDefaultsLinearStateIds) {
   reader_manager.raw_input_read(legacy_from_shm, torch::Device(torch::kCPU));
   EXPECT_EQ(legacy_from_shm.input_params.linear_state_ids,
             std::vector<int32_t>({-1, -1}));
+  EXPECT_EQ(legacy_from_shm.input_params.batch_to_kv_state,
+            std::vector<int64_t>({-1, -1}));
 }
 
 TEST(BatchTest, SampleRequestProcessesAllMatchedRawOutputs) {

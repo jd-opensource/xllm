@@ -292,6 +292,7 @@ message ForwardInput {
   repeated string request_ids = 44;
   DiTForwardInput dit_forward_input = 45;
   repeated int32 linear_state_ids = 46;
+  repeated int64 batch_to_kv_state = 47;
 }
 
  message BatchedForwardInputs {

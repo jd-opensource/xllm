@@ -80,6 +80,7 @@ std::string Options::to_string() const {
      << ", disable_ttft_profiling: " << disable_ttft_profiling()
      << ", enable_forward_interruption: " << enable_forward_interruption()
      << ", enable_graph: " << enable_graph()
+     << ", enable_state_manager: " << enable_state_manager()
      << ", server_idx: " << server_idx();
   ss << "]";
   return ss.str();

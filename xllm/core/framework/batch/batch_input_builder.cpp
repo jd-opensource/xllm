@@ -28,6 +28,7 @@ limitations under the License.
 #include "framework/batch/mposition.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
+#include "framework/request/compressor_state_id_manager.h"
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
 #include "runtime/params_utils.h"
@@ -248,6 +249,9 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.embedding_ids.insert(state_.embedding_ids.end(),
                                 state.embedding_ids.begin(),
                                 state.embedding_ids.end());
+    state_.batch_to_kv_state.insert(state_.batch_to_kv_state.end(),
+                                    state.batch_to_kv_state.begin(),
+                                    state.batch_to_kv_state.end());
     state_.linear_state_ids.insert(state_.linear_state_ids.end(),
                                    state.linear_state_ids.begin(),
                                    state.linear_state_ids.end());
@@ -412,6 +416,11 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
   // `linear_state_ids` is sequence-scoped metadata and must stay aligned with
   // logical batch rows even for non-terminal chunked-prefill slices.
   state.linear_state_ids.emplace_back(sequence->get_single_block_id());
+  if (CompressorStateIdManager::is_initialized()) {
+    CHECK_GE(sequence->compressor_state_id(), 0)
+        << "Invalid compressor state id for sequence " << sequence->seq_id();
+    state.batch_to_kv_state.emplace_back(sequence->compressor_state_id());
+  }
 
   // Add extra token id
   if (n_tokens == seq_len) {
@@ -566,8 +575,12 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   }
 
   input_params.embedding_ids = std::move(state_.embedding_ids);
-  input_params.batch_to_kv_state =
-      derive_batch_kv_state(state_.linear_state_ids);
+  if (state_.batch_to_kv_state.empty()) {
+    input_params.batch_to_kv_state =
+        derive_batch_kv_state(state_.linear_state_ids);
+  } else {
+    input_params.batch_to_kv_state = std::move(state_.batch_to_kv_state);
+  }
   input_params.linear_state_ids = std::move(state_.linear_state_ids);
   if (!input_params.linear_state_ids.empty()) {
     input_params.linear_state_indices =
@@ -653,8 +666,12 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
       std::move(state_.paged_kv_last_page_len);
 
   raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
-  raw_forward_input.batch_to_kv_state =
-      derive_batch_kv_state(state_.linear_state_ids);
+  if (state_.batch_to_kv_state.empty()) {
+    raw_forward_input.batch_to_kv_state =
+        derive_batch_kv_state(state_.linear_state_ids);
+  } else {
+    raw_forward_input.batch_to_kv_state = std::move(state_.batch_to_kv_state);
+  }
   raw_forward_input.linear_state_ids = std::move(state_.linear_state_ids);
   raw_forward_input.request_ids = std::move(state_.request_ids);
   raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);

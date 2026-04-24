@@ -31,6 +31,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "distributed_runtime/engine.h"
 #include "framework/batch/batch_factory.h"
+#include "framework/request/compressor_state_id_manager.h"
 #include "framework/request/priority_comparator.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
@@ -105,6 +106,11 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   kv_cache_manager_ = engine_->block_manager_pool();
   CHECK(kv_cache_manager_ != nullptr);
 
+  if (options_.enable_state_manager()) {
+    CompressorStateIdManager::initialize(
+        static_cast<size_t>(options_.max_seqs_per_batch() * 2));
+  }
+
   enable_prefix_cache_ = FLAGS_enable_prefix_cache;
 
   last_batch_.resize(options_.dp_size());
@@ -157,6 +163,15 @@ ContinuousScheduler::~ContinuousScheduler() { running_requests_.clear(); }
 bool ContinuousScheduler::add_request(std::shared_ptr<Request>& request) {
   CHECK(request != nullptr);
   CHECK(!request->sequences().empty());
+
+  if (options_.enable_state_manager() &&
+      CompressorStateIdManager::is_initialized()) {
+    for (const auto& seq : request->sequences()) {
+      if (seq->compressor_state_id() < 0) {
+        return false;
+      }
+    }
+  }
 
   kv_cache_manager_->prefetch_from_storage(request);
 
