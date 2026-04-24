@@ -86,18 +86,6 @@ torch::Tensor precompute_freqs_cis(int64_t dim,
   return freqs_cis.to(device, dtype);
 }
 
-torch::Tensor select_freqs_cis(const torch::Tensor& freqs_cis,
-                               const torch::Tensor& positions,
-                               torch::Device device,
-                               bool inverse) {
-  torch::Tensor cpu_positions = positions.to(torch::kCPU).to(torch::kLong);
-  torch::Tensor freqs = freqs_cis.index_select(0, cpu_positions);
-  if (inverse) {
-    freqs = freqs.conj();
-  }
-  return freqs.to(device);
-}
-
 }  // namespace
 
 namespace xllm {
@@ -324,6 +312,7 @@ DeepSeekV4AttentionImpl::DeepSeekV4AttentionImpl(
 
   // Helper lambda to create DeepseekScalingRotaryEmbedding instances
   auto create_rotary_emb = [&](const std::string& name,
+                               bool inverse,
                                const torch::TensorOptions& opts) {
     return register_module(
         name,
@@ -340,11 +329,14 @@ DeepSeekV4AttentionImpl::DeepSeekV4AttentionImpl(
                                        args.rope_scaling_beta_slow(),
                                        args.rope_scaling_mscale(),
                                        args.rope_scaling_mscale_all_dim(),
-                                       opts));
+                                       opts,
+                                       inverse));
   };
 
   // ROPE embedding
-  rotary_emb_ = create_rotary_emb("rotary_emb", options);
+  rotary_emb_ = create_rotary_emb("rotary_emb", /*inverse=*/false, options);
+  output_rotary_emb_ = create_rotary_emb(
+      "output_rotary_emb", /*inverse=*/true, options.dtype(torch::kFloat32));
 
   // Attention sink
   attn_sink_ = register_parameter(
@@ -756,9 +748,11 @@ torch::Tensor DeepSeekV4AttentionImpl::forward_sparse_attn(
   // Apply inverse RoPE to output
   torch::Tensor attn_output_pe =
       attn_output.slice(-1, head_dim_ - rope_head_dim_, head_dim_);
-  torch::Tensor rope_freqs =
-      select_freqs_cis(freqs_cis_, positions, device, /*inverse=*/true);
-  apply_rotary_emb(attn_output_pe, rope_freqs, /*inverse=*/false);
+  output_rotary_emb_->forward(attn_output_pe,
+                              positions,
+                              q_cu_seq_lens,
+                              attn_metadata.max_query_len,
+                              is_prefill);
 
   // Convert to output dtype
   attn_output = attn_output.to(torch::kBFloat16);

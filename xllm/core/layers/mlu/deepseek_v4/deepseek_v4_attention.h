@@ -206,6 +206,7 @@ class DeepSeekV4AttentionImpl : public torch::nn::Module {
 
   // Rotary embedding
   DeepseekScalingRotaryEmbedding rotary_emb_{nullptr};
+  DeepseekScalingRotaryEmbedding output_rotary_emb_{nullptr};
 };
 TORCH_MODULE(DeepSeekV4Attention);
 
