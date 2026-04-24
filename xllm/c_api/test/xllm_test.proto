@@ -211,6 +211,12 @@ message XLLM_Request {
   string model_id = 8;
 }
 
+// One dump file record: request + optional response (xllm_dump).
+message XLLM_DumpRecord {
+  XLLM_Request request = 1;
+  XLLM_Response response = 2;
+}
+
 // brpc service: dispatch by XLLM_Request.call_function (must match xllm_test
 // --backend: rec -> xllm_rec_*; llm -> xllm_llm_*).
 service XllmRecCapiService {
