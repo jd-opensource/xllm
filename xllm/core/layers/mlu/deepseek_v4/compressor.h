@@ -67,10 +67,9 @@ class CompressorImpl : public torch::nn::Module {
 
   // Configuration flags (declared before coeff_ since coeff_ depends on
   // overlap_)
-  bool overlap_;    // Enabled when compress_ratio == 4
-  int64_t coeff_;   // Compression coefficient: 1 + overlap
-  bool rotate_;     // Apply Hadamard rotation
-  bool converted_;  // Tracks if ape has been reordered for overlap mode
+  bool overlap_;   // Enabled when compress_ratio == 4
+  int64_t coeff_;  // Compression coefficient: 1 + overlap
+  bool rotate_;    // Apply Hadamard rotation
   double norm_eps_;
 
   // Learnable parameters
@@ -86,9 +85,6 @@ class CompressorImpl : public torch::nn::Module {
   torch::Tensor kv_state_;     // Cached KV states for incremental compression
   torch::Tensor score_state_;  // Cached gate scores for weighting
   torch::Tensor hadamard_matrix_;  // For rotation if enabled
-
-  // Reorders ape for overlap mode (first time only)
-  void convert_ape_if_needed();
 
   // Updates state buffers with remainder tokens
   void update_state_indices(int64_t state_idx,

@@ -133,7 +133,6 @@ CompressorImpl::CompressorImpl(int64_t dim,
       overlap_(compress_ratio == 4),
       coeff_(1 + static_cast<int64_t>(overlap_)),
       rotate_(rotate),
-      converted_(false),
       norm_eps_(norm_eps),
       rotary_emb_(rotary_emb) {
   ape_ = register_buffer("ape",
@@ -176,15 +175,6 @@ CompressorImpl::CompressorImpl(int64_t dim,
         create_hadamard_matrix(
             head_dim_padded, torch::kFloat32, torch::kCPU, false)
             .to(options.device(), options.dtype().toScalarType());
-  }
-}
-
-// Swap halves of APE for overlap mode (done once)
-void CompressorImpl::convert_ape_if_needed() {
-  if (overlap_ && !converted_) {
-    auto ape_chunks = ape_.chunk(/*chunks=*/2, /*dim=*/-1);
-    ape_.copy_(torch::cat({ape_chunks[1], ape_chunks[0]}, /*dim=*/-1));
-    converted_ = true;
   }
 }
 
@@ -295,8 +285,6 @@ CompressorImpl::forward(const torch::Tensor& x,
                         torch::Tensor& kv_cache,
                         int64_t window_offset,
                         const torch::Tensor& freqs_cis) {
-  convert_ape_if_needed();
-
   const auto dtype = x.dtype();
   const auto x_float = x.to(torch::kFloat32);
 

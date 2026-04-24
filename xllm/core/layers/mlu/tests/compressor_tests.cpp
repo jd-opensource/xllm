@@ -403,5 +403,83 @@ TEST_F(CompressorTest, PrefillForwardRotateFalseTest) {
   LOG(INFO) << "Compressor prefill forward test (rotate=False) passed";
 }
 
+TEST_F(CompressorTest, ForwardKeepsLoadedApeLayout) {
+  const int64_t dim = 32;
+  const int64_t head_dim = 8;
+  const int64_t rope_head_dim = 4;
+  const int64_t compress_ratio = 4;
+  const int64_t cached_state_num = 1;
+  const double norm_eps = 1e-6;
+  const bool rotate = false;
+  const int64_t max_seq_len = 64;
+  const int64_t rope_theta = 10000;
+  const int64_t coeff = 2;
+  const int64_t internal_dim = coeff * head_dim;
+
+  auto rotary_emb =
+      create_rotary_embedding(rope_head_dim, max_seq_len, rope_theta);
+  auto compressor = create_compressor(dim,
+                                      head_dim,
+                                      rope_head_dim,
+                                      compress_ratio,
+                                      cached_state_num,
+                                      norm_eps,
+                                      rotate,
+                                      rotary_emb);
+
+  torch::Tensor expected_ape =
+      torch::arange(compress_ratio * internal_dim, options_fp32_)
+          .reshape({compress_ratio, internal_dim});
+
+  std::unordered_map<std::string, torch::Tensor> weight_dict;
+  weight_dict["ape"] = expected_ape.clone();
+  weight_dict["wkv.weight"] = torch::zeros({internal_dim, dim}, options_fp32_);
+  weight_dict["wgate.weight"] =
+      torch::zeros({internal_dim, dim}, options_fp32_);
+  weight_dict["norm.weight"] = torch::ones({head_dim}, options_fp32_);
+  compressor->load_state_dict(StateDict(weight_dict));
+
+  auto freqs_cis = precompute_freqs_cis(rope_head_dim,
+                                        max_seq_len,
+                                        max_seq_len,
+                                        static_cast<double>(rope_theta),
+                                        1.0,
+                                        32.0,
+                                        1.0,
+                                        options_.device(),
+                                        torch::kComplexFloat);
+  auto x = torch::zeros({compress_ratio, dim}, options_);
+  auto options_int32 = torch::TensorOptions()
+                           .dtype(torch::kInt)
+                           .device(Device::type_torch(), 0)
+                           .requires_grad(false);
+  auto positions = torch::arange(compress_ratio, options_int32);
+  auto block_tables = torch::arange(8, options_int32).unsqueeze(0);
+  std::vector<int32_t> q_cu_seq_lens_vec = {
+      0, static_cast<int32_t>(compress_ratio)};
+  auto q_cu_seq_lens = torch::tensor(q_cu_seq_lens_vec, options_int32);
+  auto seq_lens = torch::full({1}, compress_ratio, options_int32);
+  std::vector<int64_t> batch_to_kv_state = {0};
+  auto kv_cache = torch::zeros({8, 1, 1, head_dim}, options_);
+
+  auto [compress_kvs, compress_lens] = compressor->forward(x,
+                                                           positions,
+                                                           block_tables,
+                                                           q_cu_seq_lens,
+                                                           seq_lens,
+                                                           batch_to_kv_state,
+                                                           kv_cache,
+                                                           /*window_offset=*/0,
+                                                           freqs_cis);
+  synchronize_device();
+
+  const auto buffers = compressor->named_buffers(/*recurse=*/false);
+  ASSERT_TRUE(buffers.contains("ape"));
+  EXPECT_TRUE(torch::allclose(buffers["ape"].cpu(), expected_ape.cpu()))
+      << "APE must keep the layout loaded from the model weights";
+  ASSERT_EQ(compress_kvs.size(), 1);
+  EXPECT_EQ(compress_lens[0], 1);
+}
+
 }  // namespace layer
 }  // namespace xllm
