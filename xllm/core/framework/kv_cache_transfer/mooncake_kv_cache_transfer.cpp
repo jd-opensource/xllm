@@ -243,10 +243,8 @@ void MooncakeKVCacheTransferDefault::allocate_kv_cache_impl(
       value_cache = mlu::alloc_zero_tensor(value_cache_shape, dtype, device_);
     }
     if (kv_cache_shape.has_index_cache_shape()) {
-      index_cache =
-          mlu::alloc_zero_tensor(kv_cache_shape.index_cache_shape(),
-                                 torch::kInt32,
-                                 device_);
+      index_cache = mlu::alloc_zero_tensor(
+          kv_cache_shape.index_cache_shape(), dtype, device_);
     }
     if (index_cache.defined()) {
       kv_caches.emplace_back(IndexedKVCacheTensors{
