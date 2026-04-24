@@ -150,9 +150,13 @@ struct ModelArgs {
   PROPERTY(bool, indexer_rope_interleave) = false;
 
   // deepseek v4 decoder layer
+  PROPERTY(int32_t, o_groups) = 0;
+  PROPERTY(int32_t, o_lora_rank) = 0;
   PROPERTY(int32_t, hc_mult) = 0;
   PROPERTY(int32_t, hc_sinkhorn_iters) = 0;
   PROPERTY(float, hc_eps) = 0.0f;
+  PROPERTY(float, compress_rope_theta) = 0.0f;
+  PROPERTY(std::vector<int32_t>, compress_ratios) = {};
   PROPERTY(int32_t, n_hash_layers) = 0;
   PROPERTY(std::optional<float>, swiglu_limit);
 

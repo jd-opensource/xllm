@@ -207,11 +207,21 @@ DeepSeekV4AttentionImpl::DeepSeekV4AttentionImpl(
       rope_head_dim_(args.rotary_dim()),
       eps_(args.rms_norm_eps()) {
   // Get parameters from ModelArgs
-  compress_ratio_ = args.rope_scaling() > 0 ? args.rope_scaling() : 0;
+  if (!args.compress_ratios().empty()) {
+    CHECK_LT(layer_id_, static_cast<int64_t>(args.compress_ratios().size()))
+        << "layer_id " << layer_id_ << " exceeds compress_ratios size "
+        << args.compress_ratios().size();
+    compress_ratio_ = args.compress_ratios()[layer_id_];
+  } else {
+    compress_ratio_ = args.rope_scaling() > 0 ? args.rope_scaling() : 0;
+  }
   window_size_ = args.sliding_window();
   o_lora_rank_ =
-      args.kv_lora_rank() > 0 ? args.kv_lora_rank() : args.q_lora_rank();
-  o_groups_ = args.n_group() > 0 ? args.n_group() : 1;
+      args.o_lora_rank() > 0 ? args.o_lora_rank() : args.kv_lora_rank();
+  o_groups_ = args.o_groups() > 0 ? args.o_groups() : args.n_group();
+  if (o_groups_ <= 0) {
+    o_groups_ = 1;
+  }
   max_model_len_ = args.max_position_embeddings();
   original_seq_len_ = args.rope_scaling_original_max_position_embeddings();
 
@@ -293,9 +303,12 @@ DeepSeekV4AttentionImpl::DeepSeekV4AttentionImpl(
 
   // Precompute frequency tensor for RoPE
   double rope_theta = args.rope_theta();
-  double compress_rope_theta = args.rope_scaling_high_freq_factor() > 0.0f
-                                   ? args.rope_scaling_high_freq_factor()
-                                   : rope_theta;
+  double compress_rope_theta = args.compress_rope_theta() > 0.0f
+                                   ? args.compress_rope_theta()
+                                   : args.rope_scaling_high_freq_factor();
+  if (compress_rope_theta <= 0.0) {
+    compress_rope_theta = rope_theta;
+  }
   double rope_factor = args.rope_scaling_factor();
   double beta_fast = static_cast<double>(args.rope_scaling_beta_fast());
   double beta_slow = static_cast<double>(args.rope_scaling_beta_slow());

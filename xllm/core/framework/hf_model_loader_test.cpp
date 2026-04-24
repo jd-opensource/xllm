@@ -18,7 +18,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 
 #include "core/platform/device.h"
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
 #include "models/model_registry.h"
 #endif
 
@@ -129,6 +129,91 @@ TEST(HFModelLoaderTest, Qwen35MtpModelArgsFromMoeConfig) {
   ASSERT_EQ(args.layer_types().size(), 2);
   EXPECT_EQ(args.layer_types()[0], "full_attention");
   EXPECT_EQ(args.layer_types()[1], "full_attention");
+}
+#endif
+
+#if defined(USE_MLU)
+TEST(HFModelLoaderTest, DeepSeekV4ModelArgsMatchFlashConfig) {
+  auto loader = ModelRegistry::get_model_args_loader("deepseek_v4");
+  ASSERT_TRUE(loader != nullptr);
+
+  JsonReader reader;
+  ASSERT_TRUE(reader.parse_text(R"json(
+    {
+      "model_type": "deepseek_v4",
+      "torch_dtype": "bfloat16",
+      "vocab_size": 129280,
+      "hidden_size": 4096,
+      "moe_intermediate_size": 2048,
+      "num_hidden_layers": 43,
+      "hidden_act": "silu",
+      "num_attention_heads": 64,
+      "num_key_value_heads": 1,
+      "n_routed_experts": 256,
+      "n_shared_experts": 1,
+      "num_experts_per_tok": 6,
+      "scoring_func": "sqrtsoftplus",
+      "routed_scaling_factor": 1.5,
+      "q_lora_rank": 1024,
+      "head_dim": 512,
+      "qk_rope_head_dim": 64,
+      "o_groups": 8,
+      "o_lora_rank": 1024,
+      "sliding_window": 128,
+      "max_position_embeddings": 1048576,
+      "rope_theta": 10000,
+      "rope_scaling": {
+        "beta_fast": 32,
+        "beta_slow": 1,
+        "factor": 16,
+        "original_max_position_embeddings": 65536,
+        "type": "yarn"
+      },
+      "index_head_dim": 128,
+      "index_n_heads": 64,
+      "index_topk": 512,
+      "hc_mult": 4,
+      "hc_sinkhorn_iters": 20,
+      "hc_eps": 1e-6,
+      "num_hash_layers": 3,
+      "swiglu_limit": 10.0,
+      "tie_word_embeddings": false,
+      "eos_token_id": 1,
+      "bos_token_id": 0,
+      "compress_rope_theta": 160000,
+      "compress_ratios": [
+        0, 0, 4, 128, 4, 128, 4, 128, 4, 128, 4, 128, 4, 128, 4,
+        128, 4, 128, 4, 128, 4, 128, 4, 128, 4, 128, 4, 128, 4,
+        128, 4, 128, 4, 128, 4, 128, 4, 128, 4, 128, 4, 128, 4, 0
+      ]
+    }
+  )json"));
+
+  ModelArgs args;
+  ASSERT_TRUE(loader(reader, &args));
+  EXPECT_EQ(args.model_type(), "deepseek_v4");
+  EXPECT_EQ(args.dtype(), "bfloat16");
+  EXPECT_EQ(args.hidden_size(), 4096);
+  EXPECT_EQ(args.n_layers(), 43);
+  EXPECT_EQ(args.n_heads(), 64);
+  ASSERT_TRUE(args.n_kv_heads().has_value());
+  EXPECT_EQ(args.n_kv_heads().value(), 1);
+  EXPECT_EQ(args.hc_mult(), 4);
+  EXPECT_EQ(args.num_experts_per_tok(), 6);
+  EXPECT_EQ(args.index_topk(), 512);
+  EXPECT_EQ(args.n_hash_layers(), 3);
+  ASSERT_TRUE(args.swiglu_limit().has_value());
+  EXPECT_FLOAT_EQ(args.swiglu_limit().value(), 10.0f);
+  EXPECT_FLOAT_EQ(args.compress_rope_theta(), 160000.0f);
+  ASSERT_EQ(args.compress_ratios().size(), 44);
+  EXPECT_EQ(args.compress_ratios()[2], 4);
+  EXPECT_EQ(args.compress_ratios()[3], 128);
+  EXPECT_EQ(args.compress_ratios()[43], 0);
+  EXPECT_EQ(args.o_groups(), 8);
+  EXPECT_EQ(args.o_lora_rank(), 1024);
+  EXPECT_EQ(args.rotary_dim(), 64);
+  EXPECT_EQ(args.qk_rope_head_dim(), 64);
+  EXPECT_EQ(args.kv_lora_rank(), 512);
 }
 #endif
 
