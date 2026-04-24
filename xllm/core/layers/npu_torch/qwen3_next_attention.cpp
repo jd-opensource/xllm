@@ -188,9 +188,9 @@ torch::Tensor Qwen3NextAttentionImpl::forward(
 
   const int64_t T = q.size(0);
   auto q_3d = q.view({T, num_heads_, head_dim_});
-  q = q_norm_->forward(q_3d).view({T, q_size_});
+  q = std::get<0>(q_norm_->forward(q_3d)).view({T, q_size_});
   auto k_3d = k.view({T, num_kv_heads_, head_dim_});
-  k = k_norm_->forward(k_3d).view({T, kv_size_});
+  k = std::get<0>(k_norm_->forward(k_3d)).view({T, kv_size_});
 
   rotary_emb_->forward(positions, q, k);
   auto out = std::get<0>(attn_->forward(attn_metadata, q, k, v, kv_cache));

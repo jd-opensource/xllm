@@ -104,16 +104,19 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
       if (mrope_cos_sin.defined()) break;
     }
 
+    std::optional<torch::Tensor> residual = std::nullopt;
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
       h = layer->forward(h,
+                         residual,
                          positions,
                          attn_metadata,
                          kv_caches[i],
                          input_params,
                          mrope_cos_sin);
     }
-    h = norm_(h);
+    auto [hidden_states, residual_out] = norm_->forward(h, residual);
+    h = hidden_states;
     return ModelOutput(h);
   }
 

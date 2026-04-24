@@ -122,16 +122,22 @@ class Qwen3_5MtpModelImpl : public Qwen3HybridModelImplBase {
       hidden = embedding;
     }
 
-    embedding = pre_fc_norm_embedding_(embedding);
-    hidden = pre_fc_norm_hidden_(hidden);
+    embedding = std::get<0>(pre_fc_norm_embedding_->forward(embedding));
+    hidden = std::get<0>(pre_fc_norm_hidden_->forward(hidden));
     torch::Tensor mtp_hidden = fc_(torch::cat({embedding, hidden}, -1));
 
     CHECK_EQ(kv_caches.size(), layers_.size());
+    std::optional<torch::Tensor> residual = std::nullopt;
     for (size_t i = 0; i < layers_.size(); ++i) {
-      mtp_hidden = layers_[i]->forward(
-          mtp_hidden, positions, attn_metadata, kv_caches[i], input_params);
+      mtp_hidden = layers_[i]->forward(mtp_hidden,
+                                       residual,
+                                       positions,
+                                       attn_metadata,
+                                       kv_caches[i],
+                                       input_params);
     }
-    mtp_hidden = norm_(mtp_hidden);
+    auto [new_mtp_hidden, new_res] = norm_->forward(mtp_hidden, residual);
+    mtp_hidden = new_mtp_hidden;
     return ModelOutput(mtp_hidden);
   }
 
