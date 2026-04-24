@@ -321,8 +321,10 @@ void KVCacheShape::apply_device_layout(const ModelArgs& model_args) {
     CHECK(key_cache_shape_.has_value())
         << "key_cache_shape is not initialized.";
     CHECK_GE(key_cache_shape_->size(), 4) << "invalid mla key_cache_shape.";
-    (*key_cache_shape_)[3] =
-        model_args.kv_lora_rank() + model_args.qk_rope_head_dim();
+    if (model_args.model_type() != "deepseek_v4") {
+      (*key_cache_shape_)[3] =
+          model_args.kv_lora_rank() + model_args.qk_rope_head_dim();
+    }
     value_cache_shape_ = std::vector<int64_t>{};
   }
 #else

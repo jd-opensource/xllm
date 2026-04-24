@@ -257,7 +257,7 @@ REGISTER_MODEL_ARGS(deepseek_v4, [&] {
   LOAD_ARG_OR(o_groups, "o_groups", 8);
   LOAD_ARG_OR(o_lora_rank, "o_lora_rank", 1024);
   LOAD_ARG_OR(sliding_window, "sliding_window", 128);
-  LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 1048576);
+  LOAD_ARG_OR(max_position_embeddings, "max_position_embeddings", 10240);
   LOAD_ARG_OR(rope_theta, "rope_theta", 10000.0f);
 
   SET_ARG(kv_lora_rank, args->head_dim());
