@@ -19,6 +19,7 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "framework/kv_cache_transfer/spec_kv_cache_transfer.h"
 #endif
+#include "runtime/spec_input_builder.h"
 #include "runtime/speculative_worker_impl.h"
 
 namespace xllm {
@@ -63,16 +64,14 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
 #endif
 
   ForwardInput update_input_by_last_step_output(ForwardInput& inputs) override;
+  void prepare_work_before_execute(const ForwardInput& inputs,
+                                   ForwardInput& processed_inputs) override;
 
  protected:
   std::optional<ForwardOutput> step_prefill(const ForwardInput& input) override;
   std::optional<ForwardOutput> step_decode(const ForwardInput& inputs) override;
   std::optional<ForwardOutput> step_empty(const ForwardInput& inputs) override;
-  std::optional<ForwardOutput> step_decode_single(const ForwardInput& input);
-  std::optional<ForwardOutput> step_decode_multi_step(
-      const ForwardInput& input);
 
-  ForwardOutput prepare_last_output_for_decode(const ForwardInput& input);
   void fill_validate_input_from_draft_outputs(
       const std::vector<ForwardOutput>& draft_outputs,
       ForwardInput& validate_input);
@@ -102,20 +101,31 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
   void prepare_prefill_inputs(const ForwardInput& inputs,
                               ForwardInput& prefill_inputs);
 
+  // Prepare target validate input from cached target context.
+  void prepare_validate_inputs(const ForwardInput& inputs,
+                               const specBuilder::DecodeCpuView& decode_view,
+                               ForwardInput& validate_inputs);
+
   // prepare inputs for draft model at Decode phase.
   void prepare_draft_inputs(const ForwardInput& inputs,
+                            const specBuilder::DecodeCpuView& decode_view,
                             ForwardInput& draft_inputs,
-                            const int64_t offset,
-                            const torch::Device device);
+                            int32_t position_offset);
+  void build_decode_step_view(
+      const ForwardInput& input,
+      const std::vector<EmbeddingCache::DecodeState>& last_states,
+      specBuilder::DecodeCpuView& decode_view) const;
 
-  // Build a 2-token-per-seq draft extend input in one batch.
-  void prepare_draft_extend_inputs(const ForwardInput& base_input,
-                                   const SampleOutput& validate_output,
-                                   ForwardInput& extend_input);
+  // Build draft-side input from cached target context at decode step start.
+  void prepare_draft_extend_inputs(
+      const ForwardInput& base_input,
+      const specBuilder::DecodeCpuView& decode_view,
+      const std::vector<EmbeddingCache::DecodeState>& last_states,
+      ForwardInput& extend_input);
 
-  // Run one draft extend forward and write next-step seed into embedding cache.
-  void run_draft_extend(const ForwardInput& input,
-                        const SampleOutput& validate_output);
+  void write_target_context_to_cache(const ForwardInput& input,
+                                     const SampleOutput& validate_output);
+  void record_validate_metrics(const SampleOutput& validate_output) const;
 
  protected:
   // Draft model worker

@@ -129,8 +129,7 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
   buf.out_new_cache_slots.reserve(num_sequences);
 
   for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
-    specBuilder::append_decode_row_from_last_step(input_params,
-                                                  view,
+    specBuilder::append_decode_row_from_last_step(view,
                                                   seq_id,
                                                   view.token_ids[seq_id],
                                                   last_tokens_ids_slice,
@@ -239,7 +238,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
       row.append_kv_len = !FLAGS_enable_atb_spec_kernel;
       row.append_q_len_one = !FLAGS_enable_atb_spec_kernel;
       row.append_block_table = !FLAGS_enable_atb_spec_kernel;
-      specBuilder::append_decode_row(input_params, view, row, block_size, buf);
+      specBuilder::append_decode_row(view, row, block_size, buf);
     }
 
     if (FLAGS_enable_atb_spec_kernel) {
@@ -306,8 +305,7 @@ void SpeculativeWorkerImpl::prepare_work_before_execute(
     const ForwardInput& input,
     ForwardInput& processed_input) {
   WorkerImpl::prepare_work_before_execute(input, processed_input);
-  if (input.input_params.batch_forward_type.is_decode() &&
-      enable_schedule_overlap()) {
+  if (input.input_params.batch_forward_type.is_decode()) {
     processed_input.token_ids = safe_to(processed_input.token_ids, torch::kCPU);
     processed_input.positions = safe_to(processed_input.positions, torch::kCPU);
   }

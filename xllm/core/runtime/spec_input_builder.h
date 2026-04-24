@@ -30,15 +30,18 @@ struct ModelInputParams;
 namespace specBuilder {
 
 // CPU-side decoded input view used by builder helpers.
-// It keeps owning tensors plus lightweight slices for fast row access.
+// It keeps block-table ownership plus lightweight slices for fast row access.
 struct DecodeCpuView {
-  torch::Tensor token_ids_cpu;
-  torch::Tensor positions_cpu;
   torch::Tensor block_tables_cpu;
+  std::vector<int32_t> token_ids_vec;
+  std::vector<int32_t> positions_vec;
+  std::vector<int32_t> kv_seq_lens_vec;
   Slice<int32_t> token_ids;
   Slice<int32_t> positions;
   Slice<int32_t> kv_seq_lens;
-  std::vector<Slice<int32_t>> block_table_slices;
+  Slice<int32_t> block_tables_data;
+  int32_t num_sequences = 0;
+  int32_t block_table_row_stride = 0;
 };
 
 // Aggregated output vectors produced by row builders.
@@ -82,8 +85,7 @@ DecodeCpuView make_decode_cpu_view(const torch::Tensor& token_ids_cpu,
                                    const Slice<int32_t>& kv_seq_lens_slice);
 
 // Appends one logical decode row into output buffers.
-void append_decode_row(const ModelInputParams& params,
-                       const DecodeCpuView& view,
+void append_decode_row(const DecodeCpuView& view,
                        const RowSpec& row,
                        int32_t block_size,
                        DecodeBuildBuffers& buf);
@@ -98,8 +100,7 @@ TokenWithOffset resolve_token_with_position_offset(
     int32_t last_step_decode_num);
 
 // Resolves a token from last-step output and appends one decode row.
-void append_decode_row_from_last_step(const ModelInputParams& params,
-                                      const DecodeCpuView& view,
+void append_decode_row_from_last_step(const DecodeCpuView& view,
                                       int32_t seq_id,
                                       int32_t input_token_id,
                                       const Slice<int64_t>& last_step_tokens,
@@ -128,6 +129,17 @@ void update_kv_seq_lens_and_max(std::vector<int32_t>& kv_seq_lens_vec,
 // Builds q_cu_seq_lens tensor from params.get_q_seq_len(i).
 torch::Tensor build_q_cu_seq_lens_tensor(const ModelInputParams& params,
                                          torch::Device device = torch::kCPU);
+
+// Updates common decode-side ModelInputParams fields from built buffers.
+void update_input_params(ModelInputParams& input_params,
+                         DecodeBuildBuffers& buf,
+                         const torch::TensorOptions& int_options,
+                         int32_t q_max_seq_len,
+                         std::vector<int32_t> q_seq_lens_vec,
+                         int32_t kv_max_seq_len,
+                         std::vector<int32_t> kv_seq_lens_vec,
+                         bool update_block_tables = false,
+                         torch::Device block_tables_device = torch::kCPU);
 
 namespace draftProbs {
 

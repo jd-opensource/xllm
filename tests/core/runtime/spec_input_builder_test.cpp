@@ -69,7 +69,7 @@ TEST(SpecDecodeInputBuilderTest, DraftInputsSingleRowPerSeq) {
     row.seq_id = seq_id;
     row.position_offset = 1;
     row.append_token = false;
-    append_decode_row(params, view, row, /*block_size=*/4, buf);
+    append_decode_row(view, row, /*block_size=*/4, buf);
   }
 
   EXPECT_TRUE(buf.out_token_ids.empty());
@@ -105,7 +105,7 @@ TEST(SpecDecodeInputBuilderTest, ValidateInputsNonAtbExpansion) {
       row.position_offset = 1 + val_idx;
       row.append_q_len_one = true;
       row.append_block_table = true;
-      append_decode_row(params, view, row, /*block_size=*/4, buf);
+      append_decode_row(view, row, /*block_size=*/4, buf);
     }
   }
 
@@ -127,27 +127,91 @@ TEST(SpecDecodeInputBuilderTest, AppendDecodeRowTokenKinds) {
   auto view = make_decode_cpu_view(
       token_ids, positions, block_tables, to_slice(kv_seq_lens));
 
-  ModelInputParams params;
-  params.num_sequences = 2;
   DecodeBuildBuffers buf;
   append_decode_row(
-      params,
       view,
       {.seq_id = 1, .use_input_token = true, .position_offset = 0},
       /*block_size=*/4,
       buf);
-  append_decode_row(params,
-                    view,
+  append_decode_row(view,
                     {.seq_id = 0, .token_id = 123, .position_offset = 0},
                     /*block_size=*/4,
                     buf);
-  append_decode_row(params,
-                    view,
+  append_decode_row(view,
                     {.seq_id = 0, .token_id = -2, .position_offset = 0},
                     /*block_size=*/4,
                     buf);
 
   EXPECT_EQ(buf.out_token_ids, std::vector<int32_t>({20, 123, -2}));
+}
+
+TEST(SpecDecodeInputBuilderTest, MakeDecodeCpuViewUsesFlatBlockTableLayout) {
+  std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
+  torch::Tensor token_ids = torch::tensor({10, 20}, torch::kInt);
+  torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
+  torch::Tensor block_tables =
+      torch::tensor({{0, 1, 2, 0}, {3, 4, 5, 0}}, torch::kInt);
+
+  DecodeCpuView view = make_decode_cpu_view(
+      token_ids, positions, block_tables, to_slice(kv_seq_lens));
+
+  EXPECT_EQ(view.num_sequences, 2);
+  EXPECT_EQ(view.block_table_row_stride, 4);
+  EXPECT_EQ(view.block_tables_data,
+            std::vector<int32_t>({0, 1, 2, 0, 3, 4, 5, 0}));
+
+  ModelInputParams params;
+  params.num_sequences = 2;
+  DecodeBuildBuffers buf;
+  append_decode_row(view,
+                    {.seq_id = 1, .token_id = 99, .position_offset = 2},
+                    /*block_size=*/4,
+                    buf);
+
+  EXPECT_EQ(buf.out_positions, std::vector<int32_t>({10}));
+  EXPECT_EQ(buf.out_new_cache_slots, std::vector<int32_t>({22}));
+  ASSERT_EQ(buf.out_block_tables.size(), 0);
+}
+
+TEST(SpecDecodeInputBuilderTest, ValidateRowsStartFromCorrectedCurrentView) {
+  ModelInputParams params;
+  params.num_sequences = 2;
+  std::vector<int32_t> token_ids = {31, 41};
+  std::vector<int32_t> positions = {6, 9};
+  std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({7, 10});
+
+  DecodeCpuView view;
+  view.token_ids = token_ids;
+  view.positions = positions;
+  view.kv_seq_lens = kv_seq_lens;
+  view.block_tables_cpu =
+      torch::tensor({{0, 1, 2, 0}, {3, 4, 5, 0}}, torch::kInt);
+  view.block_tables_data = {view.block_tables_cpu.data_ptr<int32_t>(),
+                            static_cast<size_t>(view.block_tables_cpu.numel())};
+  view.num_sequences = static_cast<int32_t>(view.block_tables_cpu.size(0));
+  view.block_table_row_stride =
+      static_cast<int32_t>(view.block_tables_cpu.size(1));
+
+  DecodeBuildBuffers buf;
+  append_decode_row(
+      view,
+      {.seq_id = 0, .token_id = view.token_ids[0], .position_offset = 0},
+      /*block_size=*/4,
+      buf);
+  append_decode_row(view,
+                    {.seq_id = 0, .token_id = -1, .position_offset = 1},
+                    /*block_size=*/4,
+                    buf);
+  append_decode_row(
+      view,
+      {.seq_id = 1, .token_id = view.token_ids[1], .position_offset = 0},
+      /*block_size=*/4,
+      buf);
+
+  EXPECT_EQ(buf.out_token_ids, std::vector<int32_t>({31, -1, 41}));
+  EXPECT_EQ(buf.out_positions, std::vector<int32_t>({6, 7, 9}));
+  EXPECT_EQ(buf.out_new_cache_slots, std::vector<int32_t>({6, 7, 21}));
+  EXPECT_EQ(buf.out_kv_seq_lens, to_layout_seq_lens({7, 8, 10}));
 }
 
 TEST(SpecDecodeInputBuilderTest, ValidateInputsAtbChunkedPrefillShape) {
@@ -193,7 +257,7 @@ TEST(SpecDecodeInputBuilderTest, FirstDecodeInputsFixAndNonFixMix) {
         row.position_offset = position_offset;
         row.append_q_len_one = true;
         row.append_block_table = true;
-        append_decode_row(params, view, row, /*block_size=*/4, buf);
+        append_decode_row(view, row, /*block_size=*/4, buf);
       };
 
   emit_row(/*seq_id=*/0, /*token_id=*/90, /*position_offset=*/-1);
@@ -225,8 +289,7 @@ TEST(SpecDecodeInputBuilderTest, AppendDecodeRowWithInputTokenSource) {
       token_ids, positions, block_tables, to_slice(kv_seq_lens));
 
   DecodeBuildBuffers buf;
-  append_decode_row(params,
-                    view,
+  append_decode_row(view,
                     {.seq_id = 0,
                      .use_input_token = true,
                      .position_offset = 1,
@@ -234,8 +297,7 @@ TEST(SpecDecodeInputBuilderTest, AppendDecodeRowWithInputTokenSource) {
                      .append_block_table = true},
                     /*block_size=*/4,
                     buf);
-  append_decode_row(params,
-                    view,
+  append_decode_row(view,
                     {.seq_id = 1,
                      .token_id = -2,
                      .position_offset = 2,
@@ -299,16 +361,14 @@ TEST(SpecDecodeInputBuilderTest, AppendDecodeRowFromLastStep) {
       last_step_tokens.data(), static_cast<size_t>(last_step_tokens.size())};
 
   DecodeBuildBuffers buf;
-  append_decode_row_from_last_step(params,
-                                   view,
+  append_decode_row_from_last_step(view,
                                    /*seq_id=*/0,
                                    /*input_token_id=*/view.token_ids[0],
                                    last_step_slice,
                                    /*last_step_decode_num=*/2,
                                    /*block_size=*/4,
                                    buf);
-  append_decode_row_from_last_step(params,
-                                   view,
+  append_decode_row_from_last_step(view,
                                    /*seq_id=*/1,
                                    /*input_token_id=*/view.token_ids[1],
                                    last_step_slice,

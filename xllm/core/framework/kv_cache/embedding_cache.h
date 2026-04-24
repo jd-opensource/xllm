@@ -14,26 +14,42 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#include <glog/logging.h>
 #include <torch/torch.h>
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "common/macros.h"
-#include "runtime/forward_params.h"
 
 namespace xllm {
 
 class EmbeddingCache final {
  public:
+  // Per-request decode state from the last target prefill/validate output. The
+  // same token_id and position_offset drive both schedule-overlap correction
+  // and next-step draft extend input construction.
   struct DecodeState {
-    // Proposal cached for next decode step.
+    // False only for storage entries that have not received target output yet.
+    // Public read APIs materialize these entries into fake decode states.
+    bool valid = false;
+    std::string request_id;
+
+    // True only when accepted_len == num_speculative_tokens + 1. Non-DP draft
+    // extend may use this to decide whether two rows are necessary.
+    bool all_draft_accepted = false;
+
+    // Last accepted target token and its correction offset relative to the
+    // scheduler-provided decode row. All model input builders should derive the
+    // current real position from this offset.
+    int32_t token_id = -1;
+    int32_t position_offset = 0;
     torch::Tensor embedding;
-    int32_t token_id = -1;             // draft next token for step_decode seed
-    int32_t correction_token_id = -1;  // accepted token for step correction
-    int32_t correction_position_offset = 0;
-    torch::Tensor probs;
+
+    // Previous accepted target token. Its position is derived as
+    // position_offset - 1 when a 2-row draft extend is required.
+    int32_t prev_token_id = -1;
+    torch::Tensor prev_embedding;
   };
 
   EmbeddingCache(int32_t total_nums);
@@ -43,19 +59,34 @@ class EmbeddingCache final {
   // disable copy, move and assign
   DISALLOW_COPY_AND_ASSIGN(EmbeddingCache);
 
-  void write(const std::vector<int32_t>& embedding_ids,
-             const torch::Tensor& next_tokens,
-             const torch::Tensor& embeddings,
-             const torch::Tensor& probs,
-             const torch::Tensor& accepted_tokens = torch::Tensor());
+  // Writes target prefill output after target model generates the first token.
+  // Draft prefill output is intentionally ignored and must not be written here.
+  void write_prefill_target_context(
+      const std::vector<int32_t>& embedding_ids,
+      const std::vector<std::string>& request_ids,
+      const torch::Tensor& next_tokens,
+      const torch::Tensor& embeddings,
+      const torch::Tensor& selected_token_idxes = torch::Tensor());
 
+  // Writes target validate output after rejection sampling. accepted_tokens is
+  // a contiguous accepted prefix padded by -1; accepted_embeddings keeps the
+  // corresponding target hidden states for the next draft extend input.
+  void write_target_context(const std::vector<int32_t>& embedding_ids,
+                            const std::vector<std::string>& request_ids,
+                            const torch::Tensor& accepted_tokens,
+                            const torch::Tensor& accepted_embeddings,
+                            int32_t num_speculative_tokens);
+
+  // Algorithm-specific placeholder embedding for missing target context, e.g.
+  // PD first decode. MTP uses hidden_size; Eagle3 uses 3 * hidden_size.
   void set_placeholder(const torch::Tensor& embedding_placeholder);
+  const torch::Tensor& embedding_placeholder() const;
 
-  ForwardOutput read_for_decode(const std::vector<int32_t>& embedding_ids);
-  std::vector<int32_t> read_correction_tokens(
-      const std::vector<int32_t>& embedding_ids) const;
-  std::vector<int32_t> read_position_offsets(
-      const std::vector<int32_t>& embedding_ids) const;
+  // Non-failing read used by PD first decode. Missing entries are materialized
+  // as fake target states so workers can follow the normal decode path.
+  std::vector<DecodeState> read_decode_states(
+      const std::vector<int32_t>& embedding_ids,
+      const std::vector<std::string>& request_ids) const;
 
   void clear(const std::vector<int32_t>& embedding_ids);
 
