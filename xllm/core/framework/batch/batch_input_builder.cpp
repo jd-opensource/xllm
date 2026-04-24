@@ -47,6 +47,16 @@ uint32_t get_sample_source_position(const SampleSlot& sample_slot) {
   return static_cast<uint32_t>(sample_slot.token_position - 1);
 }
 
+std::vector<int64_t> derive_batch_kv_state(
+    const std::vector<int32_t>& linear_state_ids) {
+  std::vector<int64_t> batch_to_kv_state;
+  batch_to_kv_state.reserve(linear_state_ids.size());
+  for (int32_t state_id : linear_state_ids) {
+    batch_to_kv_state.push_back(static_cast<int64_t>(state_id));
+  }
+  return batch_to_kv_state;
+}
+
 }  // namespace
 
 BatchInputBuilder::BatchInputBuilder(
@@ -556,6 +566,8 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   }
 
   input_params.embedding_ids = std::move(state_.embedding_ids);
+  input_params.batch_to_kv_state =
+      derive_batch_kv_state(state_.linear_state_ids);
   input_params.linear_state_ids = std::move(state_.linear_state_ids);
   if (!input_params.linear_state_ids.empty()) {
     input_params.linear_state_indices =
@@ -641,6 +653,8 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
       std::move(state_.paged_kv_last_page_len);
 
   raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
+  raw_forward_input.batch_to_kv_state =
+      derive_batch_kv_state(state_.linear_state_ids);
   raw_forward_input.linear_state_ids = std::move(state_.linear_state_ids);
   raw_forward_input.request_ids = std::move(state_.request_ids);
   raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);

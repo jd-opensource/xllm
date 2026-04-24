@@ -206,7 +206,11 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
   const size_t num_blocks = sequence->kv_state().num_kv_blocks();
   // round up to the nearest block number
   const size_t block_size = options_.block_size();
-  const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
+  CHECK_GE(FLAGS_attention_window_size, 0);
+  const size_t total_num_tokens =
+      num_tokens + static_cast<size_t>(FLAGS_attention_window_size);
+  const size_t num_blocks_needed =
+      (total_num_tokens + block_size - 1) / block_size;
   if (num_blocks_needed <= num_blocks) {
     return process_beam_search(sequence, /*need_swap*/ true);
   }

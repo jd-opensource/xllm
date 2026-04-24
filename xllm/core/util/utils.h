@@ -110,6 +110,7 @@ inline const std::unordered_set<std::string>& mla_model_type_set() {
       "deepseek_v2",
       "deepseek_v3",
       "deepseek_v32",
+      "deepseek_v4",
       "deepseek_v3_mtp",
       "deepseek_v32_mtp",
       "kimi_k2",
@@ -122,6 +123,10 @@ inline const std::unordered_set<std::string>& mla_model_type_set() {
 
 inline bool is_mla_model_type(std::string_view model_type) {
   return mla_model_type_set().contains(std::string(model_type));
+}
+
+inline bool is_deepseek_v4_model_type(std::string_view model_type) {
+  return model_type == "deepseek_v4";
 }
 
 inline std::string get_model_name(

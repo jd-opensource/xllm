@@ -43,6 +43,7 @@ void load_sharded_weight(const StateDict& state_dict,
                          int32_t world_size,
                          torch::Tensor& weight,
                          bool& weight_is_loaded) {
+  torch::NoGradGuard no_grad;
   const auto tensor =
       state_dict.get_sharded_tensor(name, dim, rank, world_size);
   if (tensor.defined()) {
@@ -61,6 +62,7 @@ void load_sharded_weight(const StateDict& state_dict,
                          int32_t world_size,
                          torch::Tensor& weight,
                          bool& weight_is_loaded) {
+  torch::NoGradGuard no_grad;
   auto tensor = state_dict.get_sharded_tensor(name, dim, rank, world_size);
   if (tensor.defined()) {
     tensor = transform_func(tensor);
@@ -98,6 +100,7 @@ void load_fused_weight(const StateDict& state_dict,
                                       num_kv_head_replicas);
 
   if (weight_is_loaded) {
+    torch::NoGradGuard no_grad;
     const auto merged_weight = torch::cat(accumulated_tensors, /*dim=*/dim);
     CHECK_EQ(weight.sizes(), merged_weight.sizes())
         << "weight size mismatch for " << state_dict.prefix() << name;
@@ -177,6 +180,7 @@ void load_moe_weight(const StateDict& state_dict,
       state_dict, prefixes, name, dim, rank, world_size, accumulated_tensors);
 
   if (weight_is_loaded) {
+    torch::NoGradGuard no_grad;
     const auto merged_weight = torch::stack(accumulated_tensors);
     CHECK_EQ(weight.sizes(), merged_weight.sizes())
         << "weight size mismatch for " << state_dict.prefix() << "["
@@ -213,6 +217,7 @@ void load_moe_all_expert_weight(const StateDict& state_dict,
       state_dict, prefixes, name, dim, rank, world_size, accumulated_tensors);
 
   if (weight_is_loaded) {
+    torch::NoGradGuard no_grad;
     const auto merged_weight = torch::stack(accumulated_tensors);
     CHECK_EQ(weight.sizes(), merged_weight.sizes())
         << "weight size mismatch for " << state_dict.prefix() << "[" << 0 << ":"
@@ -261,6 +266,7 @@ void load_moe_fused_weight(const StateDict& state_dict,
   w13_is_loaded = w1_is_loaded && w3_is_loaded;
 
   if (w13_is_loaded) {
+    torch::NoGradGuard no_grad;
     std::vector<torch::Tensor> w13_vec(num_experts_per_rank);
     for (size_t idx = 0; idx < num_experts_per_rank; idx++) {
       w13_vec[idx] = torch::cat({w1_tensors[idx], w3_tensors[idx]});
@@ -290,6 +296,7 @@ void load_merged_weight(const StateDict& state_dict,
   if (weight_is_loaded) {
     return;
   }
+  torch::NoGradGuard no_grad;
   const auto& tensor = state_dict.get_tensor(name);
   if (!tensor.defined()) {
     return;
@@ -323,6 +330,7 @@ void load_merged_weight_v2(const StateDict& state_dict,
   if (weight_is_loaded) {
     return;
   }
+  torch::NoGradGuard no_grad;
   const auto& tensor = state_dict.get_tensor(name);
   if (!tensor.defined()) {
     return;

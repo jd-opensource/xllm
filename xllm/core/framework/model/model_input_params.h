@@ -362,6 +362,7 @@ struct ModelInputParams {
     params.dp_global_token_nums = dp_global_token_nums;
     params.dp_is_decode = dp_is_decode;
     params.embedding_ids = std::move(embedding_ids);
+    params.batch_to_kv_state = batch_to_kv_state;
     params.linear_state_ids = std::move(linear_state_ids);
     params.linear_state_indices = safe_to(linear_state_indices, device, true);
     params.request_ids = std::move(request_ids);
@@ -555,6 +556,8 @@ struct ModelInputParams {
 
   // embedding ids of each sequence
   std::vector<int32_t> embedding_ids;
+
+  std::vector<int64_t> batch_to_kv_state;
 
   // linear state ids of each sequence
   std::vector<int32_t> linear_state_ids;

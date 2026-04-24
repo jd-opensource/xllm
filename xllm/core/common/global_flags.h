@@ -47,6 +47,8 @@ DECLARE_int64(max_cache_size);
 DECLARE_double(max_memory_utilization);
 DECLARE_string(kv_cache_dtype);
 
+DECLARE_int32(attention_window_size);
+
 DECLARE_bool(enable_prefix_cache);
 
 DECLARE_bool(enable_cache_upload);

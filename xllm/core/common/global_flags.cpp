@@ -144,6 +144,10 @@ DEFINE_string(
     "cache dtype aligns with model dtype (no quantization). "
     "\"int8\": Enables INT8 quantization. Only supported on MLU backend.");
 
+DEFINE_int32(attention_window_size,
+             0,
+             "Attention window size reserved for DeepSeek V4.");
+
 // --- scheduler config ---
 
 DEFINE_int32(max_tokens_per_batch, 10240, "Max number of tokens per batch.");

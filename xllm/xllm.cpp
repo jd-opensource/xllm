@@ -100,6 +100,9 @@ void validate_flags(const std::string& model_type) {
     LOG(FATAL) << "Model is not supported currently, model type: "
                << model_type;
   }
+  if (FLAGS_attention_window_size < 0) {
+    LOG(FATAL) << "attention_window_size must be >= 0.";
+  }
   if (FLAGS_enable_prefill_sp &&
       !prefill_sp_supported_model_set.contains(model_type)) {
     LOG(FATAL) << "enable_prefill_sp is not supported for model_type="
@@ -213,6 +216,9 @@ int run() {
   std::string model_type = "";
   if (FLAGS_backend != "dit") {
     model_type = xllm::util::get_model_type(model_path);
+    if (xllm::util::is_deepseek_v4_model_type(model_type)) {
+      FLAGS_attention_window_size = 128;
+    }
     FLAGS_tool_call_parser = function_call::FunctionCallParser::get_parser_auto(
         FLAGS_tool_call_parser, model_type);
     FLAGS_reasoning_parser =

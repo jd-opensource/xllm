@@ -243,6 +243,7 @@ struct RawForwardInput {
   std::vector<int32_t> extra_token_ids;
   // embedding ids of each sequence
   std::vector<int> embedding_ids;
+  std::vector<int64_t> batch_to_kv_state;
   // linear state ids of each sequence
   std::vector<int> linear_state_ids;
   // request ids of each sequence
