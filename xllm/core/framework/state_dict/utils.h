@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <string>
 #include <vector>
 
 #include "state_dict.h"
@@ -39,6 +40,24 @@ void load_sharded_weight(const StateDict& state_dict,
                          bool& weight_is_loaded);
 
 using TensorTransform = std::function<torch::Tensor(const torch::Tensor&)>;
+
+// Lazy parameter registration/update spec used by load_state_dict paths.
+struct LazyParameterSpec {
+  torch::Tensor* tensor = nullptr;
+  bool* is_loaded = nullptr;
+  std::string name;
+  std::vector<int64_t> sizes;
+  torch::TensorOptions options;
+};
+
+// Ensure parameter storage exists and matches shape/dtype.
+void ensure_parameter_storage(torch::nn::Module* module,
+                              const LazyParameterSpec& spec);
+
+// Batch version of ensure_parameter_storage.
+void ensure_parameter_storage(torch::nn::Module* module,
+                              const std::vector<LazyParameterSpec>& specs);
+
 void load_sharded_weight(const StateDict& state_dict,
                          const std::string& name,
                          TensorTransform transform_func,

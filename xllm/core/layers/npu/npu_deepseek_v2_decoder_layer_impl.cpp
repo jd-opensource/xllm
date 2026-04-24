@@ -27,6 +27,14 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
+namespace {
+
+bool is_kimi_text_model(const ModelArgs& args) {
+  return args.model_type() == "kimi_k2" || args.model_type() == "kimi_k25";
+}
+
+}  // namespace
+
 enum DecoderLayerTensorId : int {
   IN_INPUT_NORM_WEIGHT = 0,
   IN_INPUT_NORM_BIAS = 1,
@@ -324,7 +332,7 @@ void NpuDeepseekV2DecoderLayerImpl::initialize_attention_parameters(
   // NOTE: The operation in this conditional is theoretically compatible with
   // DeepSeek, but we add this specific check to ensure DeepSeek behavior
   // remains unchanged
-  if (args.model_type() != "kimi_k2") {
+  if (!is_kimi_text_model(args)) {
     param.headNum = args.n_heads();
   }
   param.qkNopeHeadDim = args.qk_nope_head_dim();
@@ -418,7 +426,7 @@ void NpuDeepseekV2DecoderLayerImpl::initialize_kimi_k2_parameters(
     atb_speed::deepseekV2::DecoderLayerParam& param,
     const ModelArgs& args,
     bool is_prefill) {
-  if (args.model_type() != "kimi_k2") {
+  if (!is_kimi_text_model(args)) {
     return;
   }
   // NOTE: These operations are theoretically applicable to DeepSeek as well,

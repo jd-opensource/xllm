@@ -9,6 +9,10 @@ cc_library(
   SRCS
     replace_token.cpp
     top_k_top_p.cpp
+    quant_matmul.cpp
+    quantize.cpp
+    quant_dynamic.cpp
+    dequant_swiglu_quant.cpp
     ../utils.cpp
     beam_search.cpp
     select_unshared_kv.cpp

@@ -23,6 +23,7 @@ cc_library(
     npu_moe_token_unpermute.cpp
     rope.cpp
     npu_recurrent_gated_delta_rule.cpp
+    w4a8_dynamic_moe_preprocess.cpp
   DEPS
     :torch_npu_kernels
     :tilelang_kernels

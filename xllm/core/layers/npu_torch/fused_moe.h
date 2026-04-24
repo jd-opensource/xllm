@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <optional>
+#include <utility>
 
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
@@ -45,6 +46,11 @@ class FusedMoEImpl : public torch::nn::Module {
       const torch::Tensor& hidden_states,
       const torch::Tensor& router_logits,
       const std::optional<torch::Tensor>& shared_output);
+  torch::Tensor forward_with_selected_experts(
+      const torch::Tensor& hidden_states,
+      const torch::Tensor& topk_weights,
+      const torch::Tensor& topk_ids,
+      const ModelInputParams& input_params);
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
   void load_state_dict(const StateDict& state_dict);
@@ -76,13 +82,18 @@ class FusedMoEImpl : public torch::nn::Module {
   bool has_score_bias_;
   bool has_bias_;
   bool skip_bias_add_;
+  bool skip_gate_load_;
   int64_t renormalize_;
   std::string hidden_act_;
   std::string scoring_func_;
   bool is_smoothquant_;
+  std::optional<std::string> resolved_moe_quant_method_;
+  std::optional<std::pair<torch::Tensor, torch::Tensor>> preselected_experts_;
 
   int64_t num_experts_per_rank_;
   int64_t start_expert_id_;
+  int64_t local_intermediate_size_;
+  bool w4a8_dynamic_preprocessed_ = false;
 
   ReplicatedLinear gate_{nullptr};
   DenseMLP shared_experts_{nullptr};
@@ -101,11 +112,23 @@ class FusedMoEImpl : public torch::nn::Module {
   DEFINE_FUSED_WEIGHT(w1_scale);
   DEFINE_FUSED_WEIGHT(w3_scale);
   DEFINE_FUSED_WEIGHT(w2_scale);
+  DEFINE_FUSED_WEIGHT(w1_scale_second);
+  DEFINE_FUSED_WEIGHT(w3_scale_second);
+  DEFINE_FUSED_WEIGHT(w13_scale_second);
+  DEFINE_FUSED_WEIGHT(w2_scale_second);
+  DEFINE_FUSED_WEIGHT(w1_scale_bias);
+  DEFINE_FUSED_WEIGHT(w3_scale_bias);
+  DEFINE_FUSED_WEIGHT(w13_scale_bias);
+  DEFINE_FUSED_WEIGHT(w2_scale_bias);
   DEFINE_FUSED_WEIGHT(input_smooth);
   DEFINE_FUSED_WEIGHT(act_smooth);
 
   void load_e_score_correction_bias(const StateDict& state_dict);
   void load_experts(const StateDict& state_dict);
+  void resolve_quant_method_from_state_dict(const StateDict& state_dict);
+  void validate_resolved_quant_method() const;
+  void ensure_quant_weight_layout();
+  void preprocess_w4a8_dynamic_weights();
 };
 TORCH_MODULE(FusedMoE);
 

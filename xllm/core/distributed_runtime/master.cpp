@@ -35,6 +35,9 @@ limitations under the License.
 #include "common/types.h"
 #include "core/common/xllm_build_info.h"
 #include "dit_master.h"
+#if defined(USE_NPU)
+#include "framework/parallel_state/npu_rank_table_env.h"
+#endif
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
 #include "llm_engine.h"
@@ -100,6 +103,14 @@ void print_startup_banner(const std::filesystem::path& model_path,
 namespace {
 
 #if defined(USE_NPU)
+void validate_rank_tablefile_backend() {
+  if (!FLAGS_rank_tablefile.empty() && FLAGS_communication_backend != "hccl") {
+    LOG(FATAL) << "--rank_tablefile requires --communication_backend=hccl, "
+               << "but got --communication_backend="
+               << FLAGS_communication_backend;
+  }
+}
+
 void resolve_npu_kernel_backend_for_options(Options* options) {
   CHECK(options != nullptr) << "options must not be null";
   if (options->backend() == "dit") {
@@ -149,6 +160,8 @@ Master::Master(const Options& options, EngineType type)
   if (options.communication_backend().has_value()) {
     FLAGS_communication_backend = options.communication_backend().value();
   }
+  validate_rank_tablefile_backend();
+  parallel_state::sync_torch_npu_rank_table_file_env(FLAGS_rank_tablefile);
   if (options.expert_parallel_degree().has_value()) {
     FLAGS_expert_parallel_degree = options.expert_parallel_degree().value();
   }
