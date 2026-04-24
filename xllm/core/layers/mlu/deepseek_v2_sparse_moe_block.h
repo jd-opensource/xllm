@@ -68,7 +68,8 @@ class DeepseekV2SparseMoEBlockImpl : public torch::nn::Module {
   DeepseekV2SparseMoEBlockImpl(const ModelArgs& model_args,
                                const QuantArgs& quant_args,
                                const ParallelArgs& parallel_args,
-                               const torch::TensorOptions& options);
+                               const torch::TensorOptions& options,
+                               int32_t layer_id = 0);
 
   void load_state_dict(const StateDict& state_dict);
   void verify_loaded_weights() const;

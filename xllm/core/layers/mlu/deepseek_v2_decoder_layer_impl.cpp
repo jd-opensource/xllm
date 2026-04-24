@@ -80,10 +80,10 @@ DeepseekV2DecoderLayerImpl::DeepseekV2DecoderLayerImpl(
 
   // Initialize mlp
   if (is_moe_layer_) {
-    sparse_moe_ =
-        register_module("mlp",
-                        DeepseekV2SparseMoEBlock(
-                            model_args, quant_args, parallel_args_, options));
+    sparse_moe_ = register_module(
+        "mlp",
+        DeepseekV2SparseMoEBlock(
+            model_args, quant_args, parallel_args_, options, layer_id));
   } else {
     mlp_ = register_module("mlp",
                            DenseMLP(model_args.hidden_size(),

@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "framework/model/model_args.h"
+#include "framework/model/model_input_params.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/quant_args.h"
@@ -254,7 +255,9 @@ class FusedMoETest : public ::testing::Test {
                             bool enable_result_reduction = true,
                             const std::string& hidden_act = "silu",
                             const std::string& scoring_func = "sigmoid",
-                            const std::string& topk_method = "noaux_tc") {
+                            const std::string& topk_method = "noaux_tc",
+                            bool use_hash = false,
+                            int64_t vocab_size = 0) {
     ModelArgs args = model_args_;
     args.n_routed_experts() = static_cast<int32_t>(num_experts);
     args.num_experts_per_tok() = static_cast<int32_t>(top_k);
@@ -268,9 +271,11 @@ class FusedMoETest : public ::testing::Test {
     args.hidden_act() = hidden_act;
     args.scoring_func() = scoring_func;
     args.topk_method() = topk_method;
+    args.vocab_size() = vocab_size;
     const FusedMoEArgs moe_args{
         .is_gated = is_gated,
-        .enable_result_reduction = enable_result_reduction};
+        .enable_result_reduction = enable_result_reduction,
+        .use_hash = use_hash};
     return FusedMoE(
         FusedMoEImpl(args, moe_args, quant_args_, parallel_args_, options_));
   }
@@ -331,6 +336,16 @@ class FusedMoETest : public ::testing::Test {
                         double rtol = 1e-3,
                         double atol = 1e-4) {
     test::verify_precision(actual_output, expected_output_, rtol, atol);
+  }
+
+  void verify_stats(const torch::Tensor& output,
+                    float expected_sum,
+                    float expected_min,
+                    float expected_max) {
+    torch::Tensor fp32_output = output.to(torch::kFloat32);
+    EXPECT_NEAR(torch::sum(fp32_output).item<float>(), expected_sum, 1e-3f);
+    EXPECT_NEAR(torch::min(fp32_output).item<float>(), expected_min, 1e-3f);
+    EXPECT_NEAR(torch::max(fp32_output).item<float>(), expected_max, 1e-3f);
   }
 
   ModelArgs model_args_;
@@ -471,6 +486,178 @@ TEST_F(FusedMoETest, PrecisionVerificationTest) {
   set_expected_output(expected_values);
 
   verify_precision(output, 1e-3, 1e-4);
+}
+
+std::unordered_map<std::string, torch::Tensor> create_deepseek_v4_weights(
+    int64_t num_experts,
+    int64_t top_k,
+    int64_t hidden_size,
+    int64_t intermediate_size,
+    int64_t vocab_size,
+    bool use_hash,
+    const torch::TensorOptions& options) {
+  std::unordered_map<std::string, torch::Tensor> weight_dict;
+  auto fp_options =
+      torch::TensorOptions().dtype(torch::kFloat32).device(options.device());
+
+  for (int64_t expert_id = 0; expert_id < num_experts; ++expert_id) {
+    std::string expert_prefix = "experts." + std::to_string(expert_id) + ".";
+    float expert_fill = 0.01f + static_cast<float>(expert_id) * 0.01f;
+
+    weight_dict[expert_prefix + "gate_proj.weight"] =
+        torch::full({intermediate_size, hidden_size}, expert_fill, options);
+    weight_dict[expert_prefix + "up_proj.weight"] =
+        torch::full({intermediate_size, hidden_size}, expert_fill, options);
+    weight_dict[expert_prefix + "down_proj.weight"] =
+        torch::full({hidden_size, intermediate_size}, expert_fill, options);
+  }
+
+  weight_dict["gate.weight"] =
+      torch::full({num_experts, hidden_size}, 0.1f, options);
+  if (use_hash) {
+    auto gen = at::make_generator<at::CPUGeneratorImpl>(42);
+    torch::Tensor cpu_tid2eid = torch::randint(
+        0,
+        num_experts,
+        {vocab_size, top_k},
+        gen,
+        torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU));
+    weight_dict["gate.tid2eid"] = cpu_tid2eid.to(options.device());
+  } else {
+    weight_dict["gate.bias"] = torch::full({num_experts}, 0.2f, fp_options);
+  }
+
+  weight_dict["shared_experts.gate_proj.weight"] =
+      torch::full({intermediate_size, hidden_size}, 0.1f, options);
+  weight_dict["shared_experts.up_proj.weight"] =
+      torch::full({intermediate_size, hidden_size}, 0.1f, options);
+  weight_dict["shared_experts.down_proj.weight"] =
+      torch::full({hidden_size, intermediate_size}, 0.1f, options);
+
+  return weight_dict;
+}
+
+TEST_F(FusedMoETest, DeepSeekV4SqrtsoftplusWithBias) {
+  const int64_t batch_size = 2;
+  const int64_t seq_len = 128;
+  const int64_t hidden_size = 4096;
+  const int64_t intermediate_size = 2048;
+  const int64_t num_experts = 8;
+  const int64_t num_expert_group = 1;
+  const int64_t topk_group = 1;
+  const int64_t top_k = 2;
+  const double route_scale = 1.0;
+  const int64_t n_shared_experts = 1;
+  const int64_t vocab_size = 129280;
+
+  quant_args_ = QuantArgs();
+  auto fused_moe = create_fused_moe(num_experts,
+                                    top_k,
+                                    num_expert_group,
+                                    topk_group,
+                                    route_scale,
+                                    hidden_size,
+                                    intermediate_size,
+                                    n_shared_experts,
+                                    /*is_gated=*/true,
+                                    /*renormalize=*/0,
+                                    /*enable_result_reduction=*/true,
+                                    /*hidden_act=*/"silu",
+                                    /*scoring_func=*/"sqrtsoftplus",
+                                    /*topk_method=*/"",
+                                    /*use_hash=*/false,
+                                    vocab_size);
+
+  auto weight_dict = create_deepseek_v4_weights(num_experts,
+                                                top_k,
+                                                hidden_size,
+                                                intermediate_size,
+                                                vocab_size,
+                                                /*use_hash=*/false,
+                                                options_);
+  StateDict state_dict(weight_dict);
+  fused_moe->load_state_dict(state_dict);
+
+  auto hidden_states = create_custom_input(
+      {batch_size * seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 0.005f));
+
+  ModelInputParams input_params;
+  auto output = fused_moe->forward(hidden_states, input_params);
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  EXPECT_EQ(output.dim(), 2);
+  EXPECT_EQ(output.size(0), batch_size * seq_len);
+  EXPECT_EQ(output.size(1), hidden_size);
+  verify_stats(output,
+               /*expected_sum=*/801112064.0f,
+               /*expected_min=*/764.0f,
+               /*expected_max=*/764.0f);
+}
+
+TEST_F(FusedMoETest, DeepSeekV4SqrtsoftplusWithHash) {
+  const int64_t batch_size = 2;
+  const int64_t seq_len = 128;
+  const int64_t hidden_size = 4096;
+  const int64_t intermediate_size = 2048;
+  const int64_t num_experts = 8;
+  const int64_t num_expert_group = 1;
+  const int64_t topk_group = 1;
+  const int64_t top_k = 2;
+  const double route_scale = 1.0;
+  const int64_t n_shared_experts = 1;
+  const int64_t vocab_size = 129280;
+
+  quant_args_ = QuantArgs();
+  auto fused_moe = create_fused_moe(num_experts,
+                                    top_k,
+                                    num_expert_group,
+                                    topk_group,
+                                    route_scale,
+                                    hidden_size,
+                                    intermediate_size,
+                                    n_shared_experts,
+                                    /*is_gated=*/true,
+                                    /*renormalize=*/0,
+                                    /*enable_result_reduction=*/true,
+                                    /*hidden_act=*/"silu",
+                                    /*scoring_func=*/"sqrtsoftplus",
+                                    /*topk_method=*/"",
+                                    /*use_hash=*/true,
+                                    vocab_size);
+
+  auto weight_dict = create_deepseek_v4_weights(num_experts,
+                                                top_k,
+                                                hidden_size,
+                                                intermediate_size,
+                                                vocab_size,
+                                                /*use_hash=*/true,
+                                                options_);
+  StateDict state_dict(weight_dict);
+  fused_moe->load_state_dict(state_dict);
+
+  auto hidden_states = create_custom_input(
+      {batch_size * seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 0.005f));
+  auto input_ids = torch::arange(
+      batch_size * seq_len,
+      torch::TensorOptions().dtype(torch::kInt64).device(options_.device()));
+
+  ModelInputParams input_params;
+  auto output = fused_moe->forward(hidden_states, input_params, input_ids);
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  EXPECT_EQ(output.dim(), 2);
+  EXPECT_EQ(output.size(0), batch_size * seq_len);
+  EXPECT_EQ(output.size(1), hidden_size);
+  verify_stats(output,
+               /*expected_sum=*/918355968.0f,
+               /*expected_min=*/760.0f,
+               /*expected_max=*/1128.0f);
 }
 
 TEST_F(FusedMoETest, W4A8GroupwiseSmokeTest) {

@@ -22,7 +22,8 @@ namespace layer {
 
 MoEGateImpl::MoEGateImpl(const ModelArgs& model_args,
                          const QuantArgs& quant_args,
-                         const torch::TensorOptions& options)
+                         const torch::TensorOptions& options,
+                         bool use_hash)
     : num_experts_(model_args.n_routed_experts()),
       topk_(model_args.num_experts_per_tok()),
       num_expert_group_(model_args.n_group()),
@@ -32,7 +33,7 @@ MoEGateImpl::MoEGateImpl(const ModelArgs& model_args,
       renormalize_(model_args.norm_topk_prob() ? 1 : 0),
       scoring_func_(model_args.scoring_func()) {
   const std::string& topk_method = model_args.topk_method();
-  if (topk_method == "noaux_tc") {
+  if (topk_method == "noaux_tc" && scoring_func_ != "sqrtsoftplus") {
     e_score_correction_bias_ = register_parameter(
         "e_score_correction_bias",
         torch::empty({model_args.n_routed_experts()}, options),
@@ -45,13 +46,30 @@ MoEGateImpl::MoEGateImpl(const ModelArgs& model_args,
                                            false,
                                            quant_args,
                                            options));
+  if (scoring_func_ == "sqrtsoftplus") {
+    deepseek_v4_topk_ =
+        register_module("deepseek_v4_topk",
+                        DeepSeekV4TopK(model_args.n_routed_experts(),
+                                       model_args.num_experts_per_tok(),
+                                       model_args.routed_scaling_factor(),
+                                       model_args.vocab_size(),
+                                       use_hash,
+                                       options));
+  }
 }
 
 std::tuple<torch::Tensor, torch::Tensor> MoEGateImpl::forward(
-    torch::Tensor& hidden_states) {
+    torch::Tensor& hidden_states,
+    const std::optional<torch::Tensor>& input_ids) {
   torch::Tensor router_logits = gate_->forward(hidden_states);
   torch::Tensor router_logits_2d =
       router_logits.reshape({-1, router_logits.size(-1)});
+
+  if (deepseek_v4_topk_) {
+    DeepSeekV4TopKOutput output =
+        deepseek_v4_topk_->forward(router_logits_2d, input_ids);
+    return {output.weights, output.indices};
+  }
 
   std::optional<torch::Tensor> e_score_correction_bias = std::nullopt;
   if (e_score_correction_bias_.defined()) {
@@ -77,6 +95,9 @@ void MoEGateImpl::load_state_dict(const StateDict& state_dict) {
   if (e_score_correction_bias_.defined() &&
       !e_score_correction_bias_is_loaded_) {
     LOAD_WEIGHT(e_score_correction_bias);
+  }
+  if (deepseek_v4_topk_) {
+    deepseek_v4_topk_->load_state_dict(state_dict);
   }
 }
 

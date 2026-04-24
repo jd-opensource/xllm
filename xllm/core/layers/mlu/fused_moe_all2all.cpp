@@ -157,7 +157,8 @@ FusedMoEImpl::CombineResult FusedMoEImpl::combine_step(
 
 torch::Tensor FusedMoEImpl::forward_experts_all2all(
     const torch::Tensor& hidden_states,
-    const std::optional<RouteInfo>& route_info) {
+    const std::optional<RouteInfo>& route_info,
+    const std::optional<torch::Tensor>& input_ids) {
   init_streams(hidden_states);
 
   torch::Tensor shared_expert_output;
@@ -166,8 +167,10 @@ torch::Tensor FusedMoEImpl::forward_experts_all2all(
   torch::Tensor hidden_states_2d =
       hidden_states.reshape({-1, hidden_states.size(-1)});
 
-  RouteInfo route = get_route(
-      hidden_states_2d, /*enable_all2all_communication=*/true, route_info);
+  RouteInfo route = get_route(hidden_states_2d,
+                              /*enable_all2all_communication=*/true,
+                              route_info,
+                              input_ids);
 
   int64_t group_gemm_max_dim = deep_ep_params_.max_num_tokens_recv / topk_;
   int64_t expert_size = w13_.size(0);

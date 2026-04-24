@@ -37,12 +37,14 @@ DeepseekV2SparseMoEBlockImpl::DeepseekV2SparseMoEBlockImpl(
     const ModelArgs& model_args,
     const QuantArgs& quant_args,
     const ParallelArgs& parallel_args,
-    const torch::TensorOptions& options)
+    const torch::TensorOptions& options,
+    int32_t layer_id)
     : parallel_args_(parallel_args) {
   enable_deep_ep_ =
       FLAGS_expert_parallel_degree == 2 && parallel_args_.ep_size() > 1;
-  const FusedMoEArgs moe_args{.is_gated = true,
-                              .enable_result_reduction = false};
+  const bool use_hash = layer_id < model_args.n_hash_layers();
+  const FusedMoEArgs moe_args{
+      .is_gated = true, .enable_result_reduction = false, .use_hash = use_hash};
   moe_ = register_module(
       "moe",
       FusedMoE(model_args, moe_args, quant_args, parallel_args, options));

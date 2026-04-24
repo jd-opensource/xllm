@@ -143,7 +143,8 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   num_experts_per_rank_ = num_experts / ep_size;
   start_expert_id_ = ep_rank * num_experts_per_rank_;
 
-  gate_ = register_module("gate", MoEGate(model_args, quant_args, options));
+  gate_ = register_module(
+      "gate", MoEGate(model_args, quant_args, options, moe_args.use_hash));
   if (n_shared_experts_ > 0) {
     CHECK(parallel_args.single_rank_group_ != nullptr)
         << "shared experts require single_rank_group_";
@@ -443,13 +444,15 @@ torch::Tensor FusedMoEImpl::compute_routed_experts(
   return gemm2_out;
 }
 
-FusedMoEImpl::RouteInfo FusedMoEImpl::prep_route(torch::Tensor& hidden_states) {
+FusedMoEImpl::RouteInfo FusedMoEImpl::prep_route(
+    torch::Tensor& hidden_states,
+    const std::optional<torch::Tensor>& input_ids) {
   torch::Tensor hidden_states_2d =
       hidden_states.reshape({-1, hidden_states.size(-1)});
 
   RouteInfo route_info;
   std::tie(route_info.reduce_weight, route_info.expert_id) =
-      gate_->forward(hidden_states_2d);
+      gate_->forward(hidden_states_2d, input_ids);
   return route_info;
 }
 
@@ -489,9 +492,10 @@ void FusedMoEImpl::check_route(const torch::Tensor& hidden_states_2d,
 FusedMoEImpl::RouteInfo FusedMoEImpl::get_route(
     torch::Tensor& hidden_states_2d,
     bool enable_all2all_communication,
-    const std::optional<RouteInfo>& route_info) {
+    const std::optional<RouteInfo>& route_info,
+    const std::optional<torch::Tensor>& input_ids) {
   if (!route_info.has_value()) {
-    return prep_route(hidden_states_2d);
+    return prep_route(hidden_states_2d, input_ids);
   }
 
   CHECK(!enable_all2all_communication)
@@ -503,22 +507,25 @@ FusedMoEImpl::RouteInfo FusedMoEImpl::get_route(
 torch::Tensor FusedMoEImpl::forward_experts(
     const torch::Tensor& hidden_states,
     bool enable_all2all_communication,
-    const std::optional<RouteInfo>& route_info) {
+    const std::optional<RouteInfo>& route_info,
+    const std::optional<torch::Tensor>& input_ids) {
   // Dispatcher: route to the appropriate path based on communication mode
   if (enable_all2all_communication) {
-    return forward_experts_all2all(hidden_states, route_info);
+    return forward_experts_all2all(hidden_states, route_info, input_ids);
   } else {
-    return forward_experts_base(hidden_states, route_info);
+    return forward_experts_base(hidden_states, route_info, input_ids);
   }
 }
 
-torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
-                                    const ModelInputParams& input_params) {
+torch::Tensor FusedMoEImpl::forward(
+    const torch::Tensor& hidden_states,
+    const ModelInputParams& input_params,
+    const std::optional<torch::Tensor>& input_ids) {
   // we only support all2all communication for decode stage for now
   bool enable_all2all_communication =
       enable_deep_ep_ && all_dp_ranks_are_decode(input_params);
   return forward_experts(
-      hidden_states, enable_all2all_communication, std::nullopt);
+      hidden_states, enable_all2all_communication, std::nullopt, input_ids);
 }
 
 void FusedMoEImpl::load_experts(const StateDict& state_dict) {
