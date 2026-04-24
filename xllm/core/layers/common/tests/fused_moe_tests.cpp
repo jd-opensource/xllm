@@ -17,6 +17,8 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <optional>
+
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state/parallel_args.h"
@@ -257,8 +259,13 @@ class FusedMoETest : public ::testing::Test {
                             const std::string& scoring_func = "sigmoid",
                             const std::string& topk_method = "noaux_tc",
                             bool use_hash = false,
-                            int64_t vocab_size = 0) {
+                            int64_t vocab_size = 0,
+                            std::optional<float> swiglu_limit = std::nullopt,
+                            const std::string& model_type = "") {
     ModelArgs args = model_args_;
+    if (!model_type.empty()) {
+      args.model_type() = model_type;
+    }
     args.n_routed_experts() = static_cast<int32_t>(num_experts);
     args.num_experts_per_tok() = static_cast<int32_t>(top_k);
     args.n_group() = static_cast<int32_t>(num_expert_group);
@@ -272,6 +279,7 @@ class FusedMoETest : public ::testing::Test {
     args.scoring_func() = scoring_func;
     args.topk_method() = topk_method;
     args.vocab_size() = vocab_size;
+    args.swiglu_limit() = swiglu_limit;
     const FusedMoEArgs moe_args{
         .is_gated = is_gated,
         .enable_result_reduction = enable_result_reduction,
@@ -658,6 +666,210 @@ TEST_F(FusedMoETest, DeepSeekV4SqrtsoftplusWithHash) {
                /*expected_sum=*/918355968.0f,
                /*expected_min=*/760.0f,
                /*expected_max=*/1128.0f);
+}
+
+TEST_F(FusedMoETest, SwigluLimitChangesRoutedOutput) {
+  const int64_t batch_size = 2;
+  const int64_t seq_len = 16;
+  const int64_t hidden_size = 256;
+  const int64_t intermediate_size = 256;
+  const int64_t num_experts = 8;
+  const int64_t num_expert_group = 1;
+  const int64_t topk_group = 1;
+  const int64_t top_k = 2;
+  const double route_scale = 1.0;
+  const int64_t vocab_size = 1024;
+
+  quant_args_ = QuantArgs();
+  auto base_moe = create_fused_moe(num_experts,
+                                   top_k,
+                                   num_expert_group,
+                                   topk_group,
+                                   route_scale,
+                                   hidden_size,
+                                   intermediate_size,
+                                   /*n_shared_experts=*/0,
+                                   /*is_gated=*/true,
+                                   /*renormalize=*/0,
+                                   /*enable_result_reduction=*/true,
+                                   /*hidden_act=*/"silu",
+                                   /*scoring_func=*/"sqrtsoftplus",
+                                   /*topk_method=*/"",
+                                   /*use_hash=*/false,
+                                   vocab_size);
+  auto limit_moe = create_fused_moe(num_experts,
+                                    top_k,
+                                    num_expert_group,
+                                    topk_group,
+                                    route_scale,
+                                    hidden_size,
+                                    intermediate_size,
+                                    /*n_shared_experts=*/0,
+                                    /*is_gated=*/true,
+                                    /*renormalize=*/0,
+                                    /*enable_result_reduction=*/true,
+                                    /*hidden_act=*/"silu",
+                                    /*scoring_func=*/"sqrtsoftplus",
+                                    /*topk_method=*/"",
+                                    /*use_hash=*/false,
+                                    vocab_size,
+                                    /*swiglu_limit=*/1.0f,
+                                    /*model_type=*/"deepseek_v4");
+
+  auto weight_dict = create_deepseek_v4_weights(num_experts,
+                                                top_k,
+                                                hidden_size,
+                                                intermediate_size,
+                                                vocab_size,
+                                                /*use_hash=*/false,
+                                                options_);
+  StateDict state_dict(weight_dict);
+  base_moe->load_state_dict(state_dict);
+  limit_moe->load_state_dict(state_dict);
+
+  auto hidden_states = create_custom_input(
+      {batch_size * seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 0.5f));
+
+  ModelInputParams input_params;
+  auto base_out = base_moe->forward(hidden_states, input_params);
+  auto limit_out = limit_moe->forward(hidden_states, input_params);
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  EXPECT_EQ(limit_out.dim(), base_out.dim());
+  EXPECT_EQ(limit_out.size(0), base_out.size(0));
+  EXPECT_EQ(limit_out.size(1), base_out.size(1));
+  EXPECT_FALSE(torch::allclose(limit_out, base_out, 1e-3, 1e-4));
+  float base_sum = torch::sum(base_out.to(torch::kFloat32)).item<float>();
+  float limit_sum = torch::sum(limit_out.to(torch::kFloat32)).item<float>();
+  EXPECT_GT(base_sum, limit_sum);
+}
+
+TEST_F(FusedMoETest, SwigluLimitSupportsSmoothQuant) {
+  const int64_t batch_size = 2;
+  const int64_t seq_len = 8;
+  const int64_t hidden_size = 256;
+  const int64_t intermediate_size = 256;
+  const int64_t num_experts = 8;
+  const int64_t num_expert_group = 4;
+  const int64_t topk_group = 4;
+  const int64_t top_k = 2;
+  const double route_scale = 2.5;
+
+  auto fused_moe = create_fused_moe(num_experts,
+                                    top_k,
+                                    num_expert_group,
+                                    topk_group,
+                                    route_scale,
+                                    hidden_size,
+                                    intermediate_size,
+                                    /*n_shared_experts=*/0,
+                                    /*is_gated=*/true,
+                                    /*renormalize=*/0,
+                                    /*enable_result_reduction=*/true,
+                                    /*hidden_act=*/"silu",
+                                    /*scoring_func=*/"sigmoid",
+                                    /*topk_method=*/"noaux_tc",
+                                    /*use_hash=*/false,
+                                    /*vocab_size=*/0,
+                                    /*swiglu_limit=*/1.0f,
+                                    /*model_type=*/"deepseek_v4");
+
+  auto weight_dict =
+      create_test_weights(num_experts, hidden_size, intermediate_size);
+  StateDict state_dict(weight_dict);
+  fused_moe->load_state_dict(state_dict);
+
+  auto hidden_states = create_custom_input(
+      {batch_size * seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 0.5f));
+
+  auto output =
+      fused_moe->forward_experts(hidden_states,
+                                 /*enable_all2all_communication=*/false);
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  EXPECT_EQ(output.dim(), 2);
+  EXPECT_EQ(output.size(0), batch_size * seq_len);
+  EXPECT_EQ(output.size(1), hidden_size);
+  EXPECT_NE(torch::sum(output.to(torch::kFloat32)).item<float>(), 0.0f);
+}
+
+TEST_F(FusedMoETest, SwigluLimitIgnoredForNonDeepSeekV4) {
+  const int64_t batch_size = 2;
+  const int64_t seq_len = 16;
+  const int64_t hidden_size = 256;
+  const int64_t intermediate_size = 256;
+  const int64_t num_experts = 8;
+  const int64_t num_expert_group = 1;
+  const int64_t topk_group = 1;
+  const int64_t top_k = 2;
+  const double route_scale = 1.0;
+  const int64_t vocab_size = 1024;
+
+  quant_args_ = QuantArgs();
+  auto base_moe = create_fused_moe(num_experts,
+                                   top_k,
+                                   num_expert_group,
+                                   topk_group,
+                                   route_scale,
+                                   hidden_size,
+                                   intermediate_size,
+                                   /*n_shared_experts=*/0,
+                                   /*is_gated=*/true,
+                                   /*renormalize=*/0,
+                                   /*enable_result_reduction=*/true,
+                                   /*hidden_act=*/"silu",
+                                   /*scoring_func=*/"sqrtsoftplus",
+                                   /*topk_method=*/"",
+                                   /*use_hash=*/false,
+                                   vocab_size);
+  auto ignored_moe = create_fused_moe(num_experts,
+                                      top_k,
+                                      num_expert_group,
+                                      topk_group,
+                                      route_scale,
+                                      hidden_size,
+                                      intermediate_size,
+                                      /*n_shared_experts=*/0,
+                                      /*is_gated=*/true,
+                                      /*renormalize=*/0,
+                                      /*enable_result_reduction=*/true,
+                                      /*hidden_act=*/"silu",
+                                      /*scoring_func=*/"sqrtsoftplus",
+                                      /*topk_method=*/"",
+                                      /*use_hash=*/false,
+                                      vocab_size,
+                                      /*swiglu_limit=*/1.0f,
+                                      /*model_type=*/"deepseek_v3");
+
+  auto weight_dict = create_deepseek_v4_weights(num_experts,
+                                                top_k,
+                                                hidden_size,
+                                                intermediate_size,
+                                                vocab_size,
+                                                /*use_hash=*/false,
+                                                options_);
+  StateDict state_dict(weight_dict);
+  base_moe->load_state_dict(state_dict);
+  ignored_moe->load_state_dict(state_dict);
+
+  auto hidden_states = create_custom_input(
+      {batch_size * seq_len, hidden_size},
+      std::vector<float>(batch_size * seq_len * hidden_size, 0.5f));
+
+  ModelInputParams input_params;
+  auto expected = base_moe->forward(hidden_states, input_params);
+  auto actual = ignored_moe->forward(hidden_states, input_params);
+
+  xllm::Device device(options_.device());
+  device.synchronize_default_stream();
+
+  verify_tensor_close(actual, expected, 1e-3, 1e-4);
 }
 
 TEST_F(FusedMoETest, W4A8GroupwiseSmokeTest) {

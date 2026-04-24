@@ -38,10 +38,18 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       is_gated_(moe_args.is_gated),
       enable_result_reduction_(moe_args.enable_result_reduction),
       hidden_act_(model_args.hidden_act()),
+      swiglu_limit_(model_args.model_type() == "deepseek_v4"
+                        ? model_args.swiglu_limit()
+                        : std::nullopt),
       quant_args_(quant_args),
       parallel_args_(parallel_args),
       options_(options),
       device_(options.device()) {
+  if (swiglu_limit_.has_value()) {
+    CHECK_GT(swiglu_limit_.value(), 0.0f)
+        << "swiglu_limit must be greater than 0 when configured.";
+  }
+
   const int64_t num_experts = num_total_experts_;
   const int64_t intermediate_size =
       static_cast<int64_t>(model_args.moe_intermediate_size());
@@ -374,6 +382,10 @@ torch::Tensor FusedMoEImpl::compute_routed_experts(
     group_gemm_params.a_quant_bit = is_smoothquant_ ? 8 : -1;
     group_gemm_params.output = gemm1_out;
     gemm1_out = xllm::kernel::group_gemm(group_gemm_params);
+  }
+  if (swiglu_limit_.has_value()) {
+    const double limit = static_cast<double>(swiglu_limit_.value());
+    gemm1_out = torch::clamp(gemm1_out, -limit, limit);
   }
 
   torch::Tensor act_out;

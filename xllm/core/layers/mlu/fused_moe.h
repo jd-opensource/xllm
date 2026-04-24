@@ -145,6 +145,7 @@ class FusedMoEImpl : public torch::nn::Module {
   bool is_gated_;
   bool enable_result_reduction_;
   std::string hidden_act_;
+  std::optional<float> swiglu_limit_;
   bool is_smoothquant_;
   int64_t moe_weight_bits_ = 8;
   int64_t weight_pack_factor_ = 1;

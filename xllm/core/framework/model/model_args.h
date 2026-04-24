@@ -154,6 +154,7 @@ struct ModelArgs {
   PROPERTY(int32_t, hc_sinkhorn_iters) = 0;
   PROPERTY(float, hc_eps) = 0.0f;
   PROPERTY(int32_t, n_hash_layers) = 0;
+  PROPERTY(std::optional<float>, swiglu_limit);
 
   PROPERTY(int32_t, vision_start_token_id) = 0;
   PROPERTY(int32_t, vision_end_token_id) = 0;
@@ -490,6 +491,7 @@ inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {
   os << ", dtype: " << args.dtype();
   os << ", hidden_size: " << args.hidden_size();
   os << ", hidden_act: " << args.hidden_act();
+  os << ", swiglu_limit: " << args.swiglu_limit().value_or(0.0f);
   os << ", intermediate_size: " << args.intermediate_size();
   os << ", n_layers: " << args.n_layers();
   os << ", n_encoder_layers: " << args.n_encoder_layers();
