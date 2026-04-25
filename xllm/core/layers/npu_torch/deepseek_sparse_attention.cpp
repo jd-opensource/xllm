@@ -431,7 +431,7 @@ DSAttentionImpl::DSAttentionImpl(const ModelArgs& args,
                                                 hidden_size,
                                                 false,
                                                 true,
-                                                /*reduce=*/false,
+                                                /*reduce=*/true,
                                                 quant_args,
                                                 parallel_args.tp_group_,
                                                 options));
