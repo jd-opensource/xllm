@@ -422,29 +422,56 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     gdn_params.beta = 1.0f;
     gdn_params.threshold = 20.0f;
     std::tie(g, beta) = xllm::kernel::fused_gdn_gating(gdn_params);
-    g = g.permute({1, 0, 2}).contiguous();
-    beta = beta.permute({1, 0, 2}).contiguous();
   }
   auto [processed_q, processed_k, processed_v] = process_mixed_qkv(mixed_qkv);
-  int64_t repeat_times = num_v_heads_ / num_k_heads_;
-  if (repeat_times > 1) {
-    processed_q = processed_q.repeat_interleave(repeat_times, 2);
-    processed_k = processed_k.repeat_interleave(repeat_times, 2);
-  }
   // Apply chunked or recurrent gated-delta attention and update caches.
   if (attn_metadata.is_prefill) {
+    xllm::kernel::ChunkGatedDeltaRuleParams chunk_gated_delta_params;
+    chunk_gated_delta_params.q = processed_q;
+    chunk_gated_delta_params.k = processed_k;
+    chunk_gated_delta_params.v = processed_v;
+    chunk_gated_delta_params.g = g;
+    chunk_gated_delta_params.beta = beta;
+    // Get initial state from ssm_cache for sequences with previous state
+    // Shape: [batch_size, num_heads, head_k_dim, head_v_dim]
+    torch::Tensor initial_state_tensor =
+        torch::index_select(ssm_cache, 0, linear_state_indices);
+    // Todo: chunked-prefill/prefix-cache use initial_state
+    initial_state_tensor.fill_(0.0);
+    chunk_gated_delta_params.initial_state = initial_state_tensor;
+    chunk_gated_delta_params.output_final_state = true;
+    chunk_gated_delta_params.cu_seqlens = attn_metadata.q_cu_seq_lens;
+    chunk_gated_delta_params.head_first = false;
+    chunk_gated_delta_params.use_qk_l2norm_in_kernel = true;
     std::tie(core_attn_out, last_recurrent_state) =
-        torch_chunk_gated_delta_rule(
-            processed_q, processed_k, processed_v, g, beta);
-    ssm_cache.index_put_({linear_state_indices},
-                         last_recurrent_state.to(ssm_cache.dtype()));
+        xllm::kernel::chunk_gated_delta_rule(chunk_gated_delta_params);
+    ssm_cache.index_put_(
+        {linear_state_indices},
+        last_recurrent_state.transpose(-1, -2).to(ssm_cache.dtype()));
   } else {
-    auto ssm_state = torch::index_select(ssm_cache, 0, linear_state_indices);
-    std::tie(core_attn_out, last_recurrent_state) =
-        torch_recurrent_gated_delta_rule(
-            processed_q, processed_k, processed_v, g, beta, ssm_state);
-    ssm_cache.index_put_({linear_state_indices},
-                         last_recurrent_state.to(ssm_cache.dtype()));
+    processed_q = xllm::kernel::l2_norm(processed_q, 1e-6);
+    processed_k = xllm::kernel::l2_norm(processed_k, 1e-6);
+    auto zero = torch::zeros({1}, attn_metadata.q_seq_lens.options());
+    torch::Tensor actual_seq_lengths =
+        torch::cat({zero, attn_metadata.q_seq_lens}, 0);
+    double scale = 1.0 / std::sqrt(static_cast<float>(processed_q.size(-1)));
+    core_attn_out = xllm::kernel::recurrent_gated_delta_rule(
+                        processed_q.reshape(
+                            {-1, processed_q.size(-2), processed_q.size(-1)}),
+                        processed_k.reshape(
+                            {-1, processed_k.size(-2), processed_k.size(-1)}),
+                        processed_v.reshape(
+                            {-1, processed_v.size(-2), processed_v.size(-1)}),
+                        ssm_cache,
+                        beta.squeeze(0).contiguous(),
+                        scale,
+                        actual_seq_lengths,
+                        linear_state_indices,
+                        c10::nullopt,
+                        g.squeeze(0).contiguous(),
+                        c10::nullopt)
+                        .unsqueeze(0)
+                        .contiguous();
   }
 
   auto z_reshaped = z.view({-1, z.size(-1)});

@@ -756,6 +756,14 @@ void fused_indexer_k(FusedIndexerKParams& params) {
 #endif
 }
 
+torch::Tensor l2_norm(torch::Tensor& x, double eps) {
+#if defined(USE_NPU)
+  return npu::npu_l2norm_last_dim(x, eps);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 moe_init_routing_v2(MoeInitRoutingV2Params& params) {
 #if defined(USE_NPU)
@@ -1033,4 +1041,51 @@ torch::Tensor build_split_qkv_rmsnorm_mrope_gather_pattern(
 #endif
 }
 
+std::pair<torch::Tensor, torch::Tensor> chunk_gated_delta_rule(
+    ChunkGatedDeltaRuleParams& params) {
+#if defined(USE_NPU)
+  return npu::npu_chunk_gated_delta_rule(params.q,
+                                         params.k,
+                                         params.v,
+                                         params.g,
+                                         params.beta,
+                                         params.scale,
+                                         params.initial_state,
+                                         params.output_final_state,
+                                         params.cu_seqlens,
+                                         params.head_first,
+                                         params.use_qk_l2norm_in_kernel);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+torch::Tensor recurrent_gated_delta_rule(
+    const torch::Tensor& query,
+    const torch::Tensor& key,
+    const torch::Tensor& value,
+    torch::Tensor& state,
+    const std::optional<torch::Tensor>& beta,
+    const std::optional<double> scale,
+    const std::optional<torch::Tensor>& actual_seq_lengths,
+    const std::optional<torch::Tensor>& ssm_state_indices,
+    const std::optional<torch::Tensor>& num_accepted_tokens,
+    const std::optional<torch::Tensor>& g,
+    const std::optional<torch::Tensor>& gk) {
+#if defined(USE_NPU)
+  return npu::npu_recurrent_gated_delta_rule(query,
+                                             key,
+                                             value,
+                                             state,
+                                             beta,
+                                             scale,
+                                             actual_seq_lengths,
+                                             ssm_state_indices,
+                                             num_accepted_tokens,
+                                             g,
+                                             gk);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
 }  // namespace xllm::kernel
