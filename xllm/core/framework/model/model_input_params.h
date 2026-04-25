@@ -668,6 +668,10 @@ struct ModelInputParams {
   uint32_t layers_per_bacth_copy = std::numeric_limits<uint32_t>::max();
   std::shared_ptr<NPULayerSynchronizerImpl> layer_wise_load_synchronizer =
       nullptr;
+  // cumulative lengths per query
+  std::vector<int64_t> query_start_loc;
+  // if each sequencce has initial conv state, for conv1d
+  std::vector<int64_t> has_initial_state;
 #endif
 
   DpEpPaddingData dp_ep_padding_data;

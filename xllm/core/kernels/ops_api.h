@@ -192,4 +192,16 @@ torch::Tensor recurrent_gated_delta_rule(
     const std::optional<torch::Tensor>& num_accepted_tokens,
     const std::optional<torch::Tensor>& g,
     const std::optional<torch::Tensor>& gk);
+
+torch::Tensor causal_conv1d(const torch::Tensor& x,
+                            const torch::Tensor& weight,
+                            const torch::Tensor& conv_state,
+                            const std::optional<torch::Tensor>& bias_opt,
+                            const torch::IntArrayRef query_start_loc_opt,
+                            const torch::IntArrayRef cache_indices_opt,
+                            const torch::IntArrayRef initial_state_mode_opt,
+                            const torch::IntArrayRef num_accepted_tokens_opt,
+                            int64_t activation_mode,
+                            int64_t pad_slot_id,
+                            int64_t run_mode);
 }  // namespace xllm::kernel
