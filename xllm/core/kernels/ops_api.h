@@ -94,6 +94,9 @@ void fused_indexer_q(FusedIndexerQParams& params);
 
 void fused_indexer_k(FusedIndexerKParams& params);
 
+// L2 normalization along the last dimension
+torch::Tensor l2_norm(torch::Tensor& x, double eps = 1e-6);
+
 // TODO: NPU moe_init_routing_v2 is equivalent to moe_gen_idx + moe_expand_input
 // (and token_count/cusum outputs) on other backends.
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
@@ -156,4 +159,19 @@ torch::Tensor build_split_qkv_rmsnorm_mrope_gather_pattern(
     bool is_interleaved,
     const torch::Device& device);
 
+std::pair<torch::Tensor, torch::Tensor> chunk_gated_delta_rule(
+    ChunkGatedDeltaRuleParams& params);
+
+torch::Tensor recurrent_gated_delta_rule(
+    const torch::Tensor& query,
+    const torch::Tensor& key,
+    const torch::Tensor& value,
+    torch::Tensor& state,
+    const std::optional<torch::Tensor>& beta,
+    const std::optional<double> scale,
+    const std::optional<torch::Tensor>& actual_seq_lengths,
+    const std::optional<torch::Tensor>& ssm_state_indices,
+    const std::optional<torch::Tensor>& num_accepted_tokens,
+    const std::optional<torch::Tensor>& g,
+    const std::optional<torch::Tensor>& gk);
 }  // namespace xllm::kernel
