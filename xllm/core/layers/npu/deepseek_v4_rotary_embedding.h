@@ -62,6 +62,7 @@ class DeepseekV4RotaryEmbedding : public torch::nn::Module {
 
  private:
   torch::Tensor create_cos_sin_cache(
+      int64_t max_position_embeddings,
       float theta,
       float scaling_factor,
       float extrapolation_factor,

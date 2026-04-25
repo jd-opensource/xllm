@@ -71,8 +71,13 @@ DeepseekV4RotaryEmbedding::DeepseekV4RotaryEmbedding(
   CHECK_GT(max_position_embeddings_, 0)
       << "max_position_embeddings must be > 0";
 
+  const int64_t max_idx_default = max_position_embeddings_;
+  const int64_t max_idx_c4 = (max_position_embeddings_ - 1) / 4 + 1;
+  const int64_t max_idx_c128 = (max_position_embeddings_ - 1) / 128 + 1;
+
   cos_sin_cache_by_group_[kDefaultGroup] =
-      create_cos_sin_cache(rope_theta,
+      create_cos_sin_cache(max_idx_default,
+                           rope_theta,
                            scaling_factor,
                            extrapolation_factor,
                            beta_fast,
@@ -83,7 +88,8 @@ DeepseekV4RotaryEmbedding::DeepseekV4RotaryEmbedding(
                            original_max_position_embeddings);
 
   cos_sin_cache_by_group_[kC4Group] =
-      create_cos_sin_cache(compress_rope_theta,
+      create_cos_sin_cache(max_idx_c4,
+                           compress_rope_theta,
                            scaling_factor,
                            extrapolation_factor,
                            beta_fast,
@@ -93,7 +99,8 @@ DeepseekV4RotaryEmbedding::DeepseekV4RotaryEmbedding(
                            mscale_all_dim,
                            original_max_position_embeddings);
   cos_sin_cache_by_group_[kC128Group] =
-      create_cos_sin_cache(compress_rope_theta,
+      create_cos_sin_cache(max_idx_c128,
+                           compress_rope_theta,
                            scaling_factor,
                            extrapolation_factor,
                            beta_fast,
@@ -195,6 +202,7 @@ std::vector<std::string> DeepseekV4RotaryEmbedding::registered_groups() const {
 }
 
 torch::Tensor DeepseekV4RotaryEmbedding::create_cos_sin_cache(
+    int64_t max_position_embeddings,
     float theta,
     float scaling_factor,
     float extrapolation_factor,
@@ -214,7 +222,7 @@ torch::Tensor DeepseekV4RotaryEmbedding::create_cos_sin_cache(
       original_max_position_embeddings);
 
   return rotary::compute_cos_sin_cache(rotary_dim_,
-                                       max_position_embeddings_,
+                                       max_position_embeddings,
                                        interleaved_,
                                        scaling_factor,
                                        attn_factor,
