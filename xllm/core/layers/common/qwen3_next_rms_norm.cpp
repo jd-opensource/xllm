@@ -46,8 +46,12 @@ Qwen3NextRMSNormImpl::forward(torch::Tensor& input,
   xllm::kernel::FusedLayerNormParams fused_params;
   fused_params.input = input;
   fused_params.residual = residual;
+#if !defined(USE_NPU)
+  // NPU backend allocates outputs internally in npu::add_rms_norm,
+  // so skip pre-allocation to avoid wasted memory.
   fused_params.output = torch::empty_like(input);
   fused_params.residual_out = torch::empty_like(residual.value());
+#endif
   fused_params.weight = 1.0 + weight_;
   fused_params.eps = eps_;
   fused_params.mode = "rmsnorm";
