@@ -175,7 +175,7 @@ class DeepseekV4ModelImpl
           std::make_shared<layer::DeepseekV4RotaryEmbedding>(
               /*rotary_dim=*/rope_head_dim,
               /*max_position_embeddings=*/max_pos,
-              /*interleaved=*/false,
+              /*interleaved=*/true,
               /*rope_theta=*/model_args.rope_theta(),
               /*compress_rope_theta=*/model_args.compress_rope_theta(),
               /*scaling_factor=*/model_args.factor(),

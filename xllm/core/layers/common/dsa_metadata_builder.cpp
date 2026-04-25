@@ -445,7 +445,7 @@ void DSAMetadataBuilder::build_positions(const ModelInputParams& params,
   // C4 compressed positions
   auto c4_mask = ((input_positions + 1) % 4).eq(0);
   auto c4_pos = input_positions.index({c4_mask});
-  c4_pos = (c4_pos + 1) - 4;
+  c4_pos = ((c4_pos + 1) / 4) - 1;
   int64_t c4_target = std::min(num_tokens, num_tokens / 4 + batch_size);
   int64_t c4_pad_right = c4_target - c4_pos.size(0);
   if (c4_pad_right > 0) {
@@ -458,7 +458,7 @@ void DSAMetadataBuilder::build_positions(const ModelInputParams& params,
   // C128 compressed positions
   auto c128_mask = ((input_positions + 1) % 128).eq(0);
   auto c128_pos = input_positions.index({c128_mask});
-  c128_pos = (c128_pos + 1) - 128;
+  c128_pos = ((c128_pos + 1) / 128) - 1;
   int64_t c128_target = std::min(num_tokens, num_tokens / 128 + batch_size);
   int64_t c128_pad_right = c128_target - c128_pos.size(0);
   if (c128_pad_right > 0) {
