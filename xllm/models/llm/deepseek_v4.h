@@ -175,6 +175,8 @@ class DeepseekV4ModelImpl
           model_args.rope_scaling_original_max_position_embeddings() > 0
               ? model_args.rope_scaling_original_max_position_embeddings()
               : max_pos;
+      // DeepSeek V4 DSA rotary only uses YaRN to derive inv_freq.  Keep the
+      // generic cache builder's extrapolation/mscale inputs at unit values.
       dsa_rotary_embedding_ =
           std::make_shared<layer::DeepseekV4RotaryEmbedding>(
               /*rotary_dim=*/rope_head_dim,
@@ -183,12 +185,12 @@ class DeepseekV4ModelImpl
               /*rope_theta=*/model_args.rope_theta(),
               /*compress_rope_theta=*/model_args.compress_rope_theta(),
               /*scaling_factor=*/model_args.factor(),
-              /*extrapolation_factor=*/model_args.rope_extrapolation_factor(),
+              /*extrapolation_factor=*/1.0f,
               /*beta_fast=*/model_args.beta_fast(),
               /*beta_slow=*/model_args.beta_slow(),
               /*attn_factor=*/model_args.rope_scaling_attn_factor(),
-              /*mscale=*/model_args.rope_scaling_mscale(),
-              /*mscale_all_dim=*/model_args.rope_scaling_mscale_all_dim(),
+              /*mscale=*/1.0f,
+              /*mscale_all_dim=*/1.0f,
               /*original_max_position_embeddings=*/original_max_pos,
               options);
       dsa_cos_sin_ = dsa_rotary_embedding_->get_cos_sin_cache("default");

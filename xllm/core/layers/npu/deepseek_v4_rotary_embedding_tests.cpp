@@ -58,8 +58,8 @@ TEST(DeepseekV4RotaryEmbeddingTest, BuildReturnsExpectedShapes) {
   auto rope = create_test_rotary_embedding();
   std::unordered_map<std::string, torch::Tensor> positions_map = {
       {"default", torch::tensor({0, 1, 2}, torch::kInt64)},
-      {"c4", torch::tensor({3, 4}, torch::kInt64)},
-      {"c128", torch::tensor({5}, torch::kInt64)}};
+      {"c4", torch::tensor({0, 1}, torch::kInt64)},
+      {"c128", torch::tensor({0}, torch::kInt64)}};
 
   auto result = rope.build(positions_map);
 
@@ -82,8 +82,8 @@ TEST(DeepseekV4RotaryEmbeddingTest, SelectLayerGroupsUsesRegistration) {
 
   std::unordered_map<std::string, torch::Tensor> positions_map = {
       {"default", torch::tensor({0, 1}, torch::kInt64)},
-      {"c4", torch::tensor({2, 3}, torch::kInt64)},
-      {"c128", torch::tensor({4, 5}, torch::kInt64)}};
+      {"c4", torch::tensor({0, 1}, torch::kInt64)},
+      {"c128", torch::tensor({0, 0}, torch::kInt64)}};
 
   auto group_cos_sin = rope.build(positions_map);
   auto selected = rope.select_layer_groups("layers.0", group_cos_sin);
@@ -98,7 +98,7 @@ TEST(DeepseekV4RotaryEmbeddingTest, SelectLayerGroupsFallsBackToDefault) {
   auto rope = create_test_rotary_embedding();
   std::unordered_map<std::string, torch::Tensor> positions_map = {
       {"default", torch::tensor({0, 1}, torch::kInt64)},
-      {"c4", torch::tensor({2, 3}, torch::kInt64)}};
+      {"c4", torch::tensor({0, 1}, torch::kInt64)}};
 
   auto group_cos_sin = rope.build(positions_map);
   auto selected = rope.select_layer_groups("layers.unknown", group_cos_sin);

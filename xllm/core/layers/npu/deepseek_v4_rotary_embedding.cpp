@@ -212,22 +212,38 @@ torch::Tensor DeepseekV4RotaryEmbedding::create_cos_sin_cache(
     float mscale,
     float mscale_all_dim,
     int64_t original_max_position_embeddings) const {
-  auto inv_freq = rotary::apply_deepseek_yarn_rope_scaling(
-      scaling_factor,
-      extrapolation_factor,
-      beta_fast,
-      beta_slow,
-      rotary_dim_,
-      theta,
-      original_max_position_embeddings);
+  (void)extrapolation_factor;
+  (void)attn_factor;
+  (void)mscale;
+  (void)mscale_all_dim;
+  auto inv_freq = rotary::compute_inv_freq(rotary_dim_, theta, options_);
 
+  if (original_max_position_embeddings > 0) {
+    // The generic YaRN helper takes extrapolation_factor as its second
+    // argument.  DeepSeek V4 uses the scaled inv_freq only, so keep the
+    // extrapolation multiplier at 1 to match the model's expected cache.
+    inv_freq = rotary::apply_deepseek_yarn_rope_scaling(
+        scaling_factor,
+        1,
+        beta_fast,
+        beta_slow,
+        rotary_dim_,
+        theta,
+        original_max_position_embeddings);
+  }
+
+  // The following four literals are the generic cache builder's
+  // scaling_factor, attn_factor, mscale, and mscale_all_dim parameters.
+  // DeepSeek V4 passes group-specific logical cache sizes here and expects
+  // unscaled cos/sin amplitudes, so do not let the generic YaRN cache builder
+  // multiply the cache length or amplitude again.
   return rotary::compute_cos_sin_cache(rotary_dim_,
                                        max_position_embeddings,
                                        interleaved_,
-                                       scaling_factor,
-                                       attn_factor,
-                                       mscale,
-                                       mscale_all_dim,
+                                       /*scaling_factor=*/1.0f,
+                                       /*attn_factor=*/1.0f,
+                                       /*mscale=*/1.0f,
+                                       /*mscale_all_dim=*/1.0f,
                                        inv_freq,
                                        options_);
 }
