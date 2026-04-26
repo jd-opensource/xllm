@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "composite_block_manager.h"
 
+#include <algorithm>
+
 #include "block_manager_impl.h"
 #include "framework/kv_cache/kv_cache_event.h"
 #include "sliding_window_block_manager.h"
@@ -25,6 +27,9 @@ namespace {
 
 constexpr uint32_t kManagerTypeBlockManagerImpl = 0;
 constexpr uint32_t kManagerTypeSlidingWindowBlockManager = 1;
+// DeepSeek V4/MindIE keeps 12 sliding-window blocks per active sequence, plus
+// two reserved rows in the physical cache group.
+constexpr uint32_t kSlidingWindowBlocksPerSequence = 12;
 
 }  // namespace
 
@@ -50,8 +55,17 @@ CompositeBlockManager::CompositeBlockManager(
                       compress_ratio);
       sub_managers_.push_back(std::make_unique<BlockManagerImpl>(opts));
     } else if (type == kManagerTypeSlidingWindowBlockManager) {
-      opts.num_blocks(
-          16 * options_.max_seqs_per_batch() * options_.window_size() + 2);
+      const uint32_t max_seqs = std::max(options_.max_seqs_per_batch(), 1u);
+      const uint32_t swa_total_blocks =
+          kSlidingWindowBlocksPerSequence * max_seqs + 2;
+      opts.num_blocks(swa_total_blocks)
+          .window_size(kSlidingWindowBlocksPerSequence);
+      LOG(INFO)
+          << "CompositeBlockManager uses sliding-window "
+             "allocation: blocks_per_sequence="
+          << kSlidingWindowBlocksPerSequence
+          << ", total_blocks=" << swa_total_blocks << ", max_seqs=" << max_seqs
+          << ". This keeps SW block ids within the physical SW cache rows.";
       sub_managers_.push_back(
           std::make_unique<SlidingWindowBlockManager>(opts));
     } else {
@@ -71,10 +85,15 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
 
   if (composite->at(0).empty()) {
     // slice window manager allocate blocks.
+    const size_t swa_blocks_per_sequence =
+        sub_managers_[0]->options().window_size();
     composite->at(0) =
-        std::move(sub_managers_[0]->allocate(options_.window_size()));
+        std::move(sub_managers_[0]->allocate(swa_blocks_per_sequence));
+    if (composite->at(0).size() != swa_blocks_per_sequence) {
+      return false;
+    }
     seq->kv_state().set_slice_window_size(sub_managers_[0]->block_size() *
-                                          options_.window_size());
+                                          swa_blocks_per_sequence);
   } else {
     seq->kv_state().update_slice_window_pos();
   }
@@ -83,7 +102,7 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
     const size_t block_size = sub_managers_[i]->block_size();
     const size_t num_blocks_needed = (num_tokens + block_size - 1) / block_size;
     if (num_blocks_needed <= num_blocks) {
-      return true;
+      continue;
     }
 
     const uint32_t num_additional_blocks = num_blocks_needed - num_blocks;

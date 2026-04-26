@@ -600,7 +600,7 @@ torch::Tensor FusedMoEImpl::forward_expert(
       }
       group_gemm_params.b = w13_;
       group_gemm_params.group_list =
-          selected_expert_info.token_count_slice.to(torch::kInt64);
+          selected_expert_info.token_count_slice;
       group_gemm_params.split_item = 2;
       group_gemm_params.group_type = 0;
       group_gemm_params.group_list_type = 1;
@@ -627,7 +627,7 @@ torch::Tensor FusedMoEImpl::forward_expert(
       }
       group_gemm_params.b = w2_;
       group_gemm_params.group_list =
-          selected_expert_info.token_count_slice.to(torch::kInt64);
+          selected_expert_info.token_count_slice;
       group_gemm_params.split_item = 2;
       group_gemm_params.group_type = 0;
       group_gemm_params.group_list_type = 1;
