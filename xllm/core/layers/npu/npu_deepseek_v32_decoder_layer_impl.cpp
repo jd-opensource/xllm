@@ -332,7 +332,10 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
     param.enableSpeculate = true;
   }
   param.maskfree = true;  // TODO
-  param.enableSwiGLUQuantForSharedExperts = false;
+  const bool is_shared_expert_layer =
+      layer_id_ >= args.first_k_dense_replace() && args.n_shared_experts() > 0;
+  param.enableSwiGLUQuantForSharedExperts =
+      quantize_type_ == "w8a8_dynamic" && is_shared_expert_layer;
   num_key_value_heads_ = static_cast<int>(args.n_kv_heads().value());
   qk_nope_head_dim_ = args.qk_nope_head_dim();
   v_head_dim_ = args.v_head_dim();

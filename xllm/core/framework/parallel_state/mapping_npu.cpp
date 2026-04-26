@@ -17,12 +17,42 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <cerrno>
+#include <cstdlib>
+#include <limits>
+
 #define MAX_LCCL_COMM_DOMAIN 63
 #define ENV_enable_extra_o_proj_tp false
 #define ENV_lm_head_local_tp false
 #define ENV_hccl_moe_ep_buffer 512
 #define ENV_hccl_moe_tp_buffer 64
 #define ENV_enable_dp_partition_up true
+
+namespace {
+
+constexpr char kHcclBuffsizeEnv[] = "HCCL_BUFFSIZE";
+
+int32_t get_hccl_buffer_size_or_default(int32_t default_buffer_size) {
+  const char* env_value = std::getenv(kHcclBuffsizeEnv);
+  if (env_value == nullptr || env_value[0] == '\0') {
+    return default_buffer_size;
+  }
+
+  errno = 0;
+  char* parse_end = nullptr;
+  long parsed_value = std::strtol(env_value, &parse_end, 10);
+  if (errno != 0 || parse_end == env_value || *parse_end != '\0' ||
+      parsed_value <= 0 || parsed_value > std::numeric_limits<int32_t>::max()) {
+    LOG(WARNING) << kHcclBuffsizeEnv
+                 << " should be a positive int32 value, got: " << env_value
+                 << ". Use default " << default_buffer_size;
+    return default_buffer_size;
+  }
+
+  return static_cast<int32_t>(parsed_value);
+}
+
+}  // namespace
 
 namespace xllm {
 
@@ -91,7 +121,7 @@ MappingNPU::MappingNPU(const std::string rank_table_file,
       num_lccl_per_shards * (lccl_comm_shard_id + 1);
 
   mlp_tp_.domain(std::to_string(MAX_LCCL_COMM_DOMAIN));
-  moe_ep_.buffer_size(ENV_hccl_moe_ep_buffer);
+  moe_ep_.buffer_size(get_hccl_buffer_size_or_default(ENV_hccl_moe_ep_buffer));
   moe_tp_.buffer_size(ENV_hccl_moe_tp_buffer);
   attn_inner_sp_.domain(attn_tp_.domain());
 }
