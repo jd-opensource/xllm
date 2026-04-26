@@ -850,8 +850,8 @@ inline void load_deepseek_v4_model_args(const JsonReader& json,
   LOAD_ARG_OR(n_shared_experts, "n_shared_experts", 1);
   LOAD_ARG_OR(moe_intermediate_size, "moe_intermediate_size", 2048);
   LOAD_ARG_OR(n_hash_layers, "num_hash_layers", 3);
-  LOAD_ARG_OR(route_scale, "routed_scaling_factor", 1.0f);
-  LOAD_ARG_OR(score_func, "scoring_func", "sqrtsoftplus");
+  LOAD_ARG_OR(routed_scaling_factor, "routed_scaling_factor", 1.5f);
+  LOAD_ARG_OR(scoring_func, "scoring_func", "sqrtsoftplus");
 
   // Indexer
   LOAD_ARG_OR(index_head_dim, "index_head_dim", 128);
@@ -961,14 +961,14 @@ inline void validate_deepseek_v4_args(const ModelArgs& args,
   CHECK_GE(args.n_hash_layers(), 0)
       << "deepseek_v4 config num_hash_layers/n_hash_layers must be >= 0, got "
       << args.n_hash_layers();
-  CHECK_GT(args.route_scale(), 0.0f)
+  CHECK_GT(args.routed_scaling_factor(), 0.0f)
       << "deepseek_v4 config routed_scaling_factor/route_scale must be > 0, "
          "got "
-      << args.route_scale();
-  CHECK(!args.score_func().empty())
+      << args.routed_scaling_factor();
+  CHECK(!args.scoring_func().empty())
       << "deepseek_v4 config scoring_func/score_func must not be empty";
   {
-    std::string score_func = args.score_func();
+    std::string score_func = args.scoring_func();
     std::transform(
         score_func.begin(),
         score_func.end(),
@@ -977,7 +977,7 @@ inline void validate_deepseek_v4_args(const ModelArgs& args,
     CHECK(policy.supported_score_funcs.count(score_func) > 0)
         << "deepseek_v4 config scoring_func/score_func must be in "
         << absl::StrJoin(policy.supported_score_funcs, ", ") << ", got "
-        << args.score_func();
+        << args.scoring_func();
   }
   CHECK_GT(args.index_head_dim(), 0)
       << "deepseek_v4 config index_head_dim must be > 0, got "

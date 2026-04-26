@@ -155,8 +155,6 @@ struct ModelArgs {
   PROPERTY(int32_t, window_size) = 0;
   PROPERTY(int32_t, n_activated_experts) = 0;
   PROPERTY(int32_t, n_hash_layers) = 0;
-  PROPERTY(float, route_scale) = 0.0f;
-  PROPERTY(std::string, score_func);
   PROPERTY(float, factor) = 0.0f;
   PROPERTY(float, beta_fast) = 0.0f;
   PROPERTY(float, beta_slow) = 0.0f;

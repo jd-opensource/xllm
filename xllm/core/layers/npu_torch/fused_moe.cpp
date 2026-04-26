@@ -88,6 +88,19 @@ bool is_w8a8_dynamic_quant_method(
   return quant_method.has_value() && quant_method.value() == "w8a8_dynamic";
 }
 
+bool should_apply_shared_expert_gate(
+    const torch::nn::Linear& shared_expert_gate,
+    bool is_deepseek_v4,
+    bool shared_expert_gate_is_loaded) {
+  if (!shared_expert_gate) {
+    return false;
+  }
+  if (is_deepseek_v4) {
+    return shared_expert_gate_is_loaded;
+  }
+  return true;
+}
+
 // Qwen3.5-MoE fused checkpoint fallback helpers.
 bool load_fused_gate_up_fallback(const StateDict& state_dict,
                                  int64_t rank,
@@ -241,6 +254,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       n_shared_experts_(model_args.n_shared_experts()),
       is_gated_(moe_args.is_gated),
       skip_gate_load_(moe_args.skip_gate_load),
+      is_deepseek_v4_(model_args.model_type() == "deepseek_v4"),
       renormalize_(model_args.norm_topk_prob() ? 1 : 0),
       hidden_act_(model_args.hidden_act()),
       scoring_func_(model_args.scoring_func()),
@@ -642,6 +656,9 @@ torch::Tensor FusedMoEImpl::forward_expert(
   moe_combine_params.reduce_weight = selected_expert_info.reduce_weight;
   moe_combine_params.gather_ids = selected_expert_info.combine_idx;
   final_hidden_states = xllm::kernel::moe_combine_result(moe_combine_params);
+  if (is_deepseek_v4_) {
+    final_hidden_states = final_hidden_states * route_scale_;
+  }
   if (shared_output.has_value()) {
     final_hidden_states = final_hidden_states + shared_output.value();
   }
@@ -672,7 +689,9 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
   std::optional<torch::Tensor> shared_output = std::nullopt;
   if (n_shared_experts_ > 0) {
     shared_output = shared_experts_(input);
-    if (shared_expert_gate_) {
+    if (should_apply_shared_expert_gate(shared_expert_gate_,
+                                        is_deepseek_v4_,
+                                        shared_expert_gate_is_loaded_)) {
       auto gate = torch::sigmoid(shared_expert_gate_->forward(input));
       if (shared_output.has_value()) {
         torch::Tensor res = gate * shared_output.value();
@@ -734,7 +753,9 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts(
   std::optional<torch::Tensor> shared_output = std::nullopt;
   if (n_shared_experts_ > 0) {
     shared_output = shared_experts_(input);
-    if (shared_expert_gate_) {
+    if (should_apply_shared_expert_gate(shared_expert_gate_,
+                                        is_deepseek_v4_,
+                                        shared_expert_gate_is_loaded_)) {
       auto gate = torch::sigmoid(shared_expert_gate_->forward(input));
       if (shared_output.has_value()) {
         torch::Tensor res = gate * shared_output.value();
@@ -890,6 +911,7 @@ void FusedMoEImpl::load_state_dict(const StateDict& state_dict) {
       DCHECK_EQ(shared_expert_gate_->weight.sizes(), weight.sizes())
           << "proj weight size mismatch for " << name();
       shared_expert_gate_->weight.data().copy_(weight);
+      shared_expert_gate_is_loaded_ = true;
     }
   }
 
