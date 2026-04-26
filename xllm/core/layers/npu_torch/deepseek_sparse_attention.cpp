@@ -347,7 +347,7 @@ DSAttentionImpl::DSAttentionImpl(const ModelArgs& args,
 
   q_a_proj_ = register_module(
       "q_a_proj",
-      ReplicatedLinear(hidden_size, q_lora_rank_, false, quant_args, options));
+      ReplicatedLinear(hidden_size, q_lora_rank_, /*bias=*/false, quant_args, options));
 
   q_layernorm_ =
       register_module("q_a_layernorm", RMSNorm(q_lora_rank_, eps_, options));
