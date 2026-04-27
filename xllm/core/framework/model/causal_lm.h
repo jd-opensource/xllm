@@ -39,6 +39,7 @@ limitations under the License.
 #include "core/framework/quant_args.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "model_args.h"
+#include "model_input.h"
 #include "model_input_params.h"
 #include "model_output.h"
 #include "model_traits.h"
@@ -84,6 +85,18 @@ class CausalLM : public torch::nn::Module {
   virtual void update_expert_weight(int32_t layer_id) = 0;
 
   virtual const torch::TensorOptions& options() const = 0;
+
+  virtual model_input::ModelInput create_model_input(
+      const ModelInputParams& parameters) const {
+    model_input::ModelInput input;
+    model_input::ModelInputParamBundle bundle =
+        model_input::ModelInputParamBundle::from_legacy(parameters);
+    input.llm = bundle.llm;
+    if (!std::holds_alternative<std::monostate>(parameters.rec_params)) {
+      input.rec = bundle.rec;
+    }
+    return input;
+  }
 
   // MTP-specific interface.
 #if defined(USE_NPU)

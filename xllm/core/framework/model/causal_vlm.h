@@ -36,6 +36,16 @@ class CausalVLM : public CausalLM {
   virtual torch::Tensor get_input_embeddings(
       const torch::Tensor& input_ids,
       const ModelInputParams& input_params) = 0;
+
+  model_input::ModelInput create_model_input(
+      const ModelInputParams& parameters) const override {
+    model_input::ModelInput input;
+    model_input::ModelInputParamBundle bundle =
+        model_input::ModelInputParamBundle::from_legacy(parameters);
+    input.llm = bundle.llm;
+    input.vlm = bundle.vlm;
+    return input;
+  }
 };
 
 template <typename Model>
