@@ -964,8 +964,9 @@ __global__ void beam_search_last_step_kernel(
   const uint32_t tid = blockIdx.x * blockDim.x + threadIdx.x;
   const uint32_t total_elements = batch_size * beam_top;
 
-  if (tid >= total_elements) return;
-
+  if (tid >= total_elements) {
+    return;
+  }
   const uint32_t batch_idx = tid / beam_top;
   const uint32_t beam_idx = tid % beam_top;
   const uint32_t flat_idx = batch_idx * beam_top + beam_idx;
@@ -1099,6 +1100,7 @@ void beam_search_last_step(torch::Tensor top_tokens,
         batch_size,
         beam_size,
         top_k,
+        beam_top,
         total_rounds,
         current_step,
         stream);
