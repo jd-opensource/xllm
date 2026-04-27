@@ -67,13 +67,14 @@ at::Tensor apply_int4_quantize(const at::Tensor& self,
   static const bool has_ascend_quant_v3 =
       GetOpApiFuncAddr("aclnnAscendQuantV3") != nullptr &&
       GetOpApiFuncAddr("aclnnAscendQuantV3GetWorkspaceSize") != nullptr;
+  std::string quant_model = "round";
   if (has_ascend_quant_v3) {
     EXEC_NPU_CMD(aclnnAscendQuantV3,
                  self,
                  scales,
                  zero_points_opt,
                  sqrt_mode,
-                 std::string("round"),
+                 quant_model,
                  at::kInt,
                  ascend_quant_axis,
                  result);
@@ -83,7 +84,7 @@ at::Tensor apply_int4_quantize(const at::Tensor& self,
                  scales,
                  zero_points_opt,
                  sqrt_mode,
-                 std::string("round"),
+                 quant_model,
                  at::kInt,
                  result);
   }
