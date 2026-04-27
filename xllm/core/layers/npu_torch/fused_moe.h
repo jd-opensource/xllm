@@ -93,6 +93,8 @@ class FusedMoEImpl : public torch::nn::Module {
 
   int64_t num_experts_per_rank_;
   int64_t start_expert_id_;
+  int64_t local_intermediate_size_;
+  bool w4a8_dynamic_preprocessed_ = false;
 
   ReplicatedLinear gate_{nullptr};
   DenseMLP shared_experts_{nullptr};
@@ -111,6 +113,22 @@ class FusedMoEImpl : public torch::nn::Module {
   DEFINE_FUSED_WEIGHT(w1_scale);
   DEFINE_FUSED_WEIGHT(w3_scale);
   DEFINE_FUSED_WEIGHT(w2_scale);
+  DEFINE_FUSED_WEIGHT(w1_offset);
+  DEFINE_FUSED_WEIGHT(w3_offset);
+  DEFINE_FUSED_WEIGHT(w13_offset);
+  DEFINE_FUSED_WEIGHT(w2_offset);
+  DEFINE_FUSED_WEIGHT(w1_scale_second);
+  DEFINE_FUSED_WEIGHT(w3_scale_second);
+  DEFINE_FUSED_WEIGHT(w13_scale_second);
+  DEFINE_FUSED_WEIGHT(w2_scale_second);
+  DEFINE_FUSED_WEIGHT(w1_offset_second);
+  DEFINE_FUSED_WEIGHT(w3_offset_second);
+  DEFINE_FUSED_WEIGHT(w13_offset_second);
+  DEFINE_FUSED_WEIGHT(w2_offset_second);
+  DEFINE_FUSED_WEIGHT(w1_scale_bias);
+  DEFINE_FUSED_WEIGHT(w3_scale_bias);
+  DEFINE_FUSED_WEIGHT(w13_scale_bias);
+  DEFINE_FUSED_WEIGHT(w2_scale_bias);
   DEFINE_FUSED_WEIGHT(input_smooth);
   DEFINE_FUSED_WEIGHT(act_smooth);
 
@@ -119,6 +137,7 @@ class FusedMoEImpl : public torch::nn::Module {
   void resolve_quant_method_from_state_dict(const StateDict& state_dict);
   void validate_resolved_quant_method() const;
   void ensure_quant_weight_layout();
+  void preprocess_w4a8_dynamic_weights();
 };
 TORCH_MODULE(FusedMoE);
 

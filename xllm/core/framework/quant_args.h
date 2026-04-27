@@ -65,6 +65,11 @@ struct QuantArgs {
   // weight block size
   PROPERTY(std::vector<int64_t>, weight_block_size) = {};
 
+  // Optional quantization format version from Ascend
+  // quant_model_description.json. For example, W4A8_DYNAMIC version "1.0.0"
+  // stores two int4 values packed into int8 before the runtime int32 pack.
+  PROPERTY(std::string, quant_version) = "";
+
   // Optional per-weight quant type map loaded from quant_model_description.json
   // key: full tensor name, e.g. "layers.0.attn.wq_a.weight"
   // value: quant type, e.g. "W8A8_DYNAMIC"
@@ -242,6 +247,7 @@ inline std::ostream& operator<<(std::ostream& os, const QuantArgs& args) {
   os << ", is_sym: " << args.is_sym();
   os << ", activation_dynamic: " << args.activation_dynamic();
   os << ", fmt: " << args.fmt();
+  os << ", quant_version: " << args.quant_version();
   os << ", quant_desc_count: " << args.quant_descs().size();
   os << "]";
   return os;

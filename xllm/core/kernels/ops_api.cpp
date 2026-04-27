@@ -448,6 +448,33 @@ std::tuple<torch::Tensor, torch::Tensor> dequant_swiglu_quant(
 #endif
 }
 
+std::tuple<torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           std::optional<torch::Tensor>,
+           std::optional<torch::Tensor>>
+w4a8_dynamic_moe_preprocess(W4A8DynamicMoePreprocessParams& params) {
+#if defined(USE_NPU)
+  return npu::w4a8_dynamic_moe_preprocess(
+      params.w13_weight,
+      params.w2_weight,
+      params.w13_weight_scale,
+      params.w2_weight_scale,
+      params.w13_weight_offset,
+      params.w2_weight_offset,
+      params.w13_weight_scale_second,
+      params.w2_weight_scale_second,
+      params.w13_weight_offset_second,
+      params.w2_weight_offset_second,
+      params.w13_scale_bias,
+      params.w2_scale_bias,
+      params.group_size);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
     MoeFusedTopkParams& params) {
 #if defined(USE_MLU)

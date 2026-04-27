@@ -80,12 +80,35 @@ std::optional<std::string> resolve_moe_quant_method(
       }
     }
   }
+  if (!first_quant.has_value()) {
+    auto quantize_type = quant_args.quantize_type();
+    std::transform(quantize_type.begin(),
+                   quantize_type.end(),
+                   quantize_type.begin(),
+                   [](unsigned char c) {
+                     return static_cast<char>(std::tolower(c));
+                   });
+    if (quantize_type == "w4a8_dynamic") {
+      first_quant = quantize_type;
+    }
+  }
   return first_quant;
 }
 
 bool is_w8a8_dynamic_quant_method(
     const std::optional<std::string>& quant_method) {
   return quant_method.has_value() && quant_method.value() == "w8a8_dynamic";
+}
+
+bool is_w4a8_dynamic_quant_method(
+    const std::optional<std::string>& quant_method) {
+  return quant_method.has_value() && quant_method.value() == "w4a8_dynamic";
+}
+
+bool is_supported_dynamic_moe_quant_method(
+    const std::optional<std::string>& quant_method) {
+  return is_w8a8_dynamic_quant_method(quant_method) ||
+         is_w4a8_dynamic_quant_method(quant_method);
 }
 
 bool should_apply_shared_expert_gate(
@@ -321,6 +344,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       << "moe_intermediate_size(" << intermediate_size
       << ") must be divisible by MoE tp world_size(" << world_size << ")";
   int64_t local_intermediate_size = intermediate_size / world_size;
+  local_intermediate_size_ = local_intermediate_size;
   LOG(INFO) << "[MOE_LOAD_DEBUG][FusedMoEInit] hidden_size=" << hidden_size_
             << ", intermediate_size=" << intermediate_size
             << ", local_intermediate_size=" << local_intermediate_size
@@ -369,7 +393,7 @@ void FusedMoEImpl::validate_resolved_quant_method() const {
   if (!resolved_moe_quant_method_.has_value()) {
     return;
   }
-  if (resolved_moe_quant_method_.value() == "w8a8_dynamic") {
+  if (is_w8a8_dynamic_quant_method(resolved_moe_quant_method_)) {
     if (!is_gated_ || (hidden_act_ != "silu" && hidden_act_ != "swiglu")) {
       LOG(WARNING) << "W8A8_DYNAMIC FusedMoE currently uses dequant+swiglu "
                       "path, but got is_gated="
@@ -377,6 +401,21 @@ void FusedMoEImpl::validate_resolved_quant_method() const {
                    << ", hidden_act=" << hidden_act_
                    << ". This may cause activation behavior mismatch.";
     }
+  } else if (is_w4a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+    CHECK(is_gated_ && (hidden_act_ == "silu" || hidden_act_ == "swiglu"))
+        << "W4A8_DYNAMIC FusedMoE currently assumes gated SiLU/SwiGLU. "
+        << "got is_gated=" << (is_gated_ ? "true" : "false")
+        << ", hidden_act=" << hidden_act_;
+    CHECK_GE(quant_args_.group_size(), 0)
+        << "W4A8_DYNAMIC group_size must be >= 0, got "
+        << quant_args_.group_size();
+    CHECK_EQ(quant_args_.quant_version(), "1.0.0")
+        << "W4A8_DYNAMIC only supports quant_version 1.0.0, got "
+        << (quant_args_.quant_version().empty() ? "<empty>"
+                                                : quant_args_.quant_version());
+    CHECK_LE(tp_pg_->world_size(), 16)
+        << "W4A8_DYNAMIC version 1.0.0 does not support MoE TP > 16, "
+        << "got " << tp_pg_->world_size();
   } else {
     LOG(FATAL) << "Unsupported MoE quant_method for NPU FusedMoE: "
                << resolved_moe_quant_method_.value();
@@ -385,7 +424,7 @@ void FusedMoEImpl::validate_resolved_quant_method() const {
 
 void FusedMoEImpl::ensure_quant_weight_layout() {
   std::vector<weight::LazyParameterSpec> specs;
-  specs.reserve(2);
+  specs.reserve(18);
   auto push = [&](torch::Tensor& tensor,
                   bool& tensor_is_loaded,
                   const char* name,
@@ -395,20 +434,115 @@ void FusedMoEImpl::ensure_quant_weight_layout() {
         &tensor, &tensor_is_loaded, name, std::move(sizes), tensor_options});
   };
 
-  auto w13_scale_options = options_.dtype(torch::kFloat32);
-  auto w2_scale_options = options_.dtype() == torch::kBFloat16
-                              ? options_.dtype(torch::kBFloat16)
-                              : options_.dtype(torch::kFloat32);
+  const auto fp32_options = options_.dtype(torch::kFloat32);
+  if (is_w8a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+    auto w2_scale_options = options_.dtype() == torch::kBFloat16
+                                ? options_.dtype(torch::kBFloat16)
+                                : options_.dtype(torch::kFloat32);
+    push(w13_scale_,
+         w13_scale_is_loaded_,
+         "w13_scale",
+         {w13_.size(0), w13_.size(1)},
+         fp32_options);
+    push(w2_scale_,
+         w2_scale_is_loaded_,
+         "w2_scale",
+         {w2_.size(0), w2_.size(1)},
+         w2_scale_options);
+    weight::ensure_parameter_storage(this, specs);
+    return;
+  }
+
+  if (!is_w4a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+    return;
+  }
+
+  const int64_t w13_weight_out = local_intermediate_size_;
+  const int64_t w2_weight_out = hidden_size_ / 2;
+  CHECK_EQ(hidden_size_ % 2, 0)
+      << "W4A8_DYNAMIC version 1.0.0 expects even hidden_size, got "
+      << hidden_size_;
+
+  push(w13_,
+       w13_is_loaded_,
+       "w13",
+       {num_experts_per_rank_, w13_weight_out, hidden_size_},
+       options_.dtype(torch::kInt8));
+  push(w2_,
+       w2_is_loaded_,
+       "w2",
+       {num_experts_per_rank_, w2_weight_out, local_intermediate_size_},
+       options_.dtype(torch::kInt8));
+
   push(w13_scale_,
        w13_scale_is_loaded_,
        "w13_scale",
-       {w13_.size(0), w13_.size(1)},
-       w13_scale_options);
+       {num_experts_per_rank_, local_intermediate_size_ * 2, 1},
+       fp32_options);
+  push(w13_offset_,
+       w13_offset_is_loaded_,
+       "w13_offset",
+       {num_experts_per_rank_, local_intermediate_size_ * 2, 1},
+       fp32_options);
   push(w2_scale_,
        w2_scale_is_loaded_,
        "w2_scale",
-       {w2_.size(0), w2_.size(1)},
-       w2_scale_options);
+       {num_experts_per_rank_, hidden_size_, 1},
+       fp32_options);
+  push(w2_offset_,
+       w2_offset_is_loaded_,
+       "w2_offset",
+       {num_experts_per_rank_, hidden_size_, 1},
+       fp32_options);
+
+  if (quant_args_.group_size() > 0) {
+    CHECK_EQ(hidden_size_ % quant_args_.group_size(), 0)
+        << "W4A8_DYNAMIC hidden_size must be divisible by group_size, got "
+        << hidden_size_ << " and group_size=" << quant_args_.group_size();
+    CHECK_EQ(local_intermediate_size_ % quant_args_.group_size(), 0)
+        << "W4A8_DYNAMIC local_intermediate_size must be divisible by "
+        << "group_size, got " << local_intermediate_size_
+        << " and group_size=" << quant_args_.group_size();
+    push(w13_scale_second_,
+         w13_scale_second_is_loaded_,
+         "w13_scale_second",
+         {num_experts_per_rank_,
+          local_intermediate_size_ * 2,
+          hidden_size_ / quant_args_.group_size()},
+         fp32_options);
+    push(w13_offset_second_,
+         w13_offset_second_is_loaded_,
+         "w13_offset_second",
+         {num_experts_per_rank_,
+          local_intermediate_size_ * 2,
+          hidden_size_ / quant_args_.group_size()},
+         fp32_options);
+    push(w2_scale_second_,
+         w2_scale_second_is_loaded_,
+         "w2_scale_second",
+         {num_experts_per_rank_,
+          hidden_size_,
+          local_intermediate_size_ / quant_args_.group_size()},
+         fp32_options);
+    push(w2_offset_second_,
+         w2_offset_second_is_loaded_,
+         "w2_offset_second",
+         {num_experts_per_rank_,
+          hidden_size_,
+          local_intermediate_size_ / quant_args_.group_size()},
+         fp32_options);
+  }
+
+  push(w13_scale_bias_,
+       w13_scale_bias_is_loaded_,
+       "w13_scale_bias",
+       {num_experts_per_rank_, local_intermediate_size_ * 2, 1},
+       fp32_options);
+  push(w2_scale_bias_,
+       w2_scale_bias_is_loaded_,
+       "w2_scale_bias",
+       {num_experts_per_rank_, hidden_size_, 16 / tp_pg_->world_size()},
+       fp32_options);
 
   weight::ensure_parameter_storage(this, specs);
 }
@@ -421,15 +555,15 @@ void FusedMoEImpl::resolve_quant_method_from_state_dict(
             << ", resolved_moe_quant_method="
             << resolved_moe_quant_method_.value_or("<none>")
             << ", quant_desc_count=" << quant_args_.quant_descs().size();
-  if (is_w8a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+  if (is_supported_dynamic_moe_quant_method(resolved_moe_quant_method_)) {
     validate_resolved_quant_method();
     ensure_quant_weight_layout();
   } else if (!quant_args_.quant_descs().empty()) {
     // quant_descs is not empty but the resolved quant method is not
-    // w8a8_dynamic (e.g., no quant method resolved, or a non-quantized
-    // checkpoint). The weights were initialized as kInt8 in the constructor;
-    // re-register them back to the original dtype so that the subsequent
-    // load_experts can copy the checkpoint weights correctly.
+    // a supported dynamic MoE quant method (e.g., no quant method resolved, or
+    // a non-quantized checkpoint). The weights were initialized as kInt8 in
+    // the constructor; re-register them back to the original dtype so that the
+    // subsequent load_experts can copy the checkpoint weights correctly.
     std::vector<weight::LazyParameterSpec> specs;
     specs.reserve(2);
     auto push = [&](torch::Tensor& tensor,
@@ -602,6 +736,99 @@ torch::Tensor FusedMoEImpl::forward_expert(
       group_gemm_params.group_type = 0;
       group_gemm_params.group_list_type = 1;
       group_gemm_params.output_dtype = hidden_states_dtype;
+      gemm2_out = xllm::kernel::group_gemm(group_gemm_params);
+    }
+  } else if (is_w4a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+    preprocess_w4a8_dynamic_weights();
+    CHECK(w4a8_dynamic_preprocessed_)
+        << "W4A8_DYNAMIC fused MoE weights were not preprocessed. Check "
+        << "whether all W4A8 weight/scale tensors have been loaded and "
+        << "whether the xllm_ops preprocess implementation completed.";
+    CHECK(w13_scale_is_loaded_ && w13_scale_.defined())
+        << "w13_scale is required for W4A8_DYNAMIC fused MoE.";
+    CHECK(w2_scale_is_loaded_ && w2_scale_.defined())
+        << "w2_scale is required for W4A8_DYNAMIC fused MoE.";
+    CHECK(w13_scale_bias_is_loaded_ && w13_scale_bias_.defined())
+        << "w13_scale_bias is required for W4A8_DYNAMIC fused MoE.";
+    CHECK(w2_scale_bias_is_loaded_ && w2_scale_bias_.defined())
+        << "w2_scale_bias is required for W4A8_DYNAMIC fused MoE.";
+    // Match vllm-ascend's current W4A8_DYNAMIC TODO path. Revisit once the
+    // real xllm_ops preprocess/operator contract can report the desired dtype.
+    const auto w4a8_group_gemm_output_dtype = torch::kBFloat16;
+
+    xllm::kernel::NpuQuantizeParams quant_params;
+    quant_params.input = expand_hidden_states;
+    torch::Tensor quantized_expand_hidden_states;
+    std::optional<torch::Tensor> pertoken_scale;
+    std::tie(quantized_expand_hidden_states, pertoken_scale) =
+        xllm::kernel::dynamic_quant(quant_params);
+    CHECK(pertoken_scale.has_value() && pertoken_scale->defined())
+        << "dynamic_quant must return per-token scale for W4A8_DYNAMIC "
+        << "fused MoE.";
+
+    // W4A8_DYNAMIC weights are expected to be transposed/NZ-converted and
+    // packed by preprocess_w4a8_dynamic_weights(), matching vllm-ascend's
+    // process_weights_after_loading path. Do not do the ad-hoc transpose used
+    // by the unquantized/W8A8 layout fallback.
+    {
+      std::vector<torch::Tensor> x_list = {quantized_expand_hidden_states};
+      std::vector<torch::Tensor> weight_list = {w13_};
+      std::vector<torch::Tensor> scale_list = {w13_scale_};
+      std::vector<torch::Tensor> per_token_scale_list = {
+          pertoken_scale.value()};
+      std::vector<torch::Tensor> bias_list = {w13_scale_bias_};
+      xllm::kernel::GroupGemmParams group_gemm_params;
+      group_gemm_params.x_list = torch::TensorList(x_list);
+      group_gemm_params.weight_list = torch::TensorList(weight_list);
+      group_gemm_params.scale_list = torch::TensorList(scale_list);
+      group_gemm_params.bias_list = torch::TensorList(bias_list);
+      group_gemm_params.per_token_scale_list =
+          torch::TensorList(per_token_scale_list);
+      group_gemm_params.group_list = selected_expert_info.token_count_slice;
+      group_gemm_params.split_item = 2;
+      group_gemm_params.group_type = 0;
+      group_gemm_params.group_list_type = 1;
+      group_gemm_params.output_dtype = w4a8_group_gemm_output_dtype;
+      gemm1_out = xllm::kernel::group_gemm(group_gemm_params);
+    }
+
+    torch::Tensor act_out;
+    xllm::kernel::ActivationParams activation_params;
+    activation_params.input = gemm1_out;
+    activation_params.output = act_out;
+    activation_params.act_mode = hidden_act_;
+    activation_params.is_gated = is_gated_;
+    xllm::kernel::active(activation_params);
+    act_out = activation_params.output;
+
+    torch::Tensor act_quantized;
+    std::optional<torch::Tensor> act_scale;
+    quant_params = xllm::kernel::NpuQuantizeParams{};
+    quant_params.input = act_out;
+    std::tie(act_quantized, act_scale) =
+        xllm::kernel::dynamic_quant(quant_params);
+    CHECK(act_scale.has_value() && act_scale->defined())
+        << "dynamic_quant must return activation scale after W4A8_DYNAMIC "
+        << "SwiGLU.";
+
+    {
+      std::vector<torch::Tensor> x_list = {act_quantized};
+      std::vector<torch::Tensor> weight_list = {w2_};
+      std::vector<torch::Tensor> scale_list = {w2_scale_};
+      std::vector<torch::Tensor> per_token_scale_list = {act_scale.value()};
+      std::vector<torch::Tensor> bias_list = {w2_scale_bias_};
+      xllm::kernel::GroupGemmParams group_gemm_params;
+      group_gemm_params.x_list = torch::TensorList(x_list);
+      group_gemm_params.weight_list = torch::TensorList(weight_list);
+      group_gemm_params.scale_list = torch::TensorList(scale_list);
+      group_gemm_params.bias_list = torch::TensorList(bias_list);
+      group_gemm_params.per_token_scale_list =
+          torch::TensorList(per_token_scale_list);
+      group_gemm_params.group_list = selected_expert_info.token_count_slice;
+      group_gemm_params.split_item = 2;
+      group_gemm_params.group_type = 0;
+      group_gemm_params.group_list_type = 1;
+      group_gemm_params.output_dtype = w4a8_group_gemm_output_dtype;
       gemm2_out = xllm::kernel::group_gemm(group_gemm_params);
     }
   } else {
@@ -788,6 +1015,108 @@ void FusedMoEImpl::load_e_score_correction_bias(const StateDict& state_dict) {
   }
 }
 
+void FusedMoEImpl::preprocess_w4a8_dynamic_weights() {
+  if (w4a8_dynamic_preprocessed_ ||
+      !is_w4a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+    return;
+  }
+
+  CHECK_EQ(quant_args_.quant_version(), "1.0.0")
+      << "W4A8_DYNAMIC only supports quant_version 1.0.0, got "
+      << (quant_args_.quant_version().empty() ? "<empty>"
+                                              : quant_args_.quant_version());
+  const bool base_loaded = w13_is_loaded_ && w2_is_loaded_ &&
+                           w13_scale_is_loaded_ && w2_scale_is_loaded_;
+  if (!base_loaded) {
+    LOG(INFO) << "[QUANT_DEBUG][FusedMoE][W4A8Dynamic] wait for base "
+              << "weights/scales before preprocess. w13_loaded="
+              << (w13_is_loaded_ ? "true" : "false")
+              << ", w2_loaded=" << (w2_is_loaded_ ? "true" : "false")
+              << ", w13_scale_loaded="
+              << (w13_scale_is_loaded_ ? "true" : "false")
+              << ", w2_scale_loaded="
+              << (w2_scale_is_loaded_ ? "true" : "false");
+    return;
+  }
+  if (quant_args_.group_size() > 0 &&
+      !(w13_scale_second_is_loaded_ && w2_scale_second_is_loaded_)) {
+    LOG(INFO) << "[QUANT_DEBUG][FusedMoE][W4A8Dynamic] wait for "
+              << "weight_scale_second before preprocess.";
+    return;
+  }
+  if (!(w13_scale_bias_is_loaded_ && w2_scale_bias_is_loaded_)) {
+    LOG(INFO) << "[QUANT_DEBUG][FusedMoE][W4A8Dynamic] wait for scale_bias "
+              << "before preprocess.";
+    return;
+  }
+
+  xllm::kernel::W4A8DynamicMoePreprocessParams params;
+  params.w13_weight = w13_;
+  params.w2_weight = w2_;
+  params.w13_weight_scale = w13_scale_;
+  params.w2_weight_scale = w2_scale_;
+  params.w13_weight_offset =
+      w13_offset_is_loaded_ ? std::optional<torch::Tensor>(w13_offset_)
+                            : std::nullopt;
+  params.w2_weight_offset =
+      w2_offset_is_loaded_ ? std::optional<torch::Tensor>(w2_offset_)
+                           : std::nullopt;
+  params.w13_weight_scale_second =
+      w13_scale_second_is_loaded_ ? std::optional<torch::Tensor>(
+                                        w13_scale_second_)
+                                  : std::nullopt;
+  params.w2_weight_scale_second =
+      w2_scale_second_is_loaded_ ? std::optional<torch::Tensor>(
+                                       w2_scale_second_)
+                                 : std::nullopt;
+  params.w13_weight_offset_second =
+      w13_offset_second_is_loaded_ ? std::optional<torch::Tensor>(
+                                         w13_offset_second_)
+                                   : std::nullopt;
+  params.w2_weight_offset_second =
+      w2_offset_second_is_loaded_ ? std::optional<torch::Tensor>(
+                                        w2_offset_second_)
+                                  : std::nullopt;
+  params.w13_scale_bias =
+      w13_scale_bias_is_loaded_ ? std::optional<torch::Tensor>(
+                                      w13_scale_bias_)
+                                : std::nullopt;
+  params.w2_scale_bias =
+      w2_scale_bias_is_loaded_ ? std::optional<torch::Tensor>(w2_scale_bias_)
+                               : std::nullopt;
+  params.group_size = quant_args_.group_size();
+
+  torch::Tensor processed_w13;
+  torch::Tensor processed_w2;
+  torch::Tensor processed_w13_scale;
+  torch::Tensor processed_w2_scale;
+  std::optional<torch::Tensor> processed_w13_scale_bias;
+  std::optional<torch::Tensor> processed_w2_scale_bias;
+  std::tie(processed_w13,
+           processed_w2,
+           processed_w13_scale,
+           processed_w2_scale,
+           processed_w13_scale_bias,
+           processed_w2_scale_bias) =
+      xllm::kernel::w4a8_dynamic_moe_preprocess(params);
+
+  w13_.set_data(processed_w13);
+  w2_.set_data(processed_w2);
+  w13_scale_.set_data(processed_w13_scale);
+  w2_scale_.set_data(processed_w2_scale);
+  if (processed_w13_scale_bias.has_value() &&
+      processed_w13_scale_bias->defined()) {
+    w13_scale_bias_.set_data(processed_w13_scale_bias.value());
+    w13_scale_bias_is_loaded_ = true;
+  }
+  if (processed_w2_scale_bias.has_value() &&
+      processed_w2_scale_bias->defined()) {
+    w2_scale_bias_.set_data(processed_w2_scale_bias.value());
+    w2_scale_bias_is_loaded_ = true;
+  }
+  w4a8_dynamic_preprocessed_ = true;
+}
+
 void FusedMoEImpl::load_experts(const StateDict& state_dict) {
   LOG(INFO) << "[MOE_LOAD_DEBUG][FusedMoE.load_experts] prefix="
             << state_dict.prefix() << ", expected_w13=" << w13_.sizes()
@@ -808,6 +1137,25 @@ void FusedMoEImpl::load_experts(const StateDict& state_dict) {
   LOAD_MOE_WEIGHT("down_proj.", "weight", w2, 1);
   if (!w2_is_loaded_) {
     LOAD_MOE_WEIGHT("w2.", "weight", w2, 1);
+  }
+  if (is_w4a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+    // Some W4A8 checkpoints may follow the older qweight naming used by the
+    // SmoothQuant W4 path. Prefer the vllm-ascend "weight" names above, but
+    // accept qweight for loader compatibility.
+    if (!w13_is_loaded_) {
+      prefixes = {"gate_proj.", "up_proj."};
+      LOAD_MOE_FUSED_WEIGHT("qweight", w1, w3, w13);
+    }
+    if (!w13_is_loaded_) {
+      prefixes = {"w1.", "w3."};
+      LOAD_MOE_FUSED_WEIGHT("qweight", w1, w3, w13);
+    }
+    if (!w2_is_loaded_) {
+      LOAD_MOE_WEIGHT("down_proj.", "qweight", w2, 1);
+    }
+    if (!w2_is_loaded_) {
+      LOAD_MOE_WEIGHT("w2.", "qweight", w2, 1);
+    }
   }
 
   // Some Qwen3.5-MoE checkpoints store expert weights in fused tensors
@@ -855,6 +1203,81 @@ void FusedMoEImpl::load_experts(const StateDict& state_dict) {
     }
   }
 
+  if (is_w4a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+    prefixes = {"gate_proj.", "up_proj."};
+    LOAD_MOE_FUSED_WEIGHT("weight_scale", w1_scale, w3_scale, w13_scale);
+    if (!w13_scale_is_loaded_) {
+      prefixes = {"w1.", "w3."};
+      LOAD_MOE_FUSED_WEIGHT("weight_scale", w1_scale, w3_scale, w13_scale);
+    }
+    LOAD_MOE_WEIGHT("down_proj.", "weight_scale", w2_scale, -1);
+    if (!w2_scale_is_loaded_) {
+      LOAD_MOE_WEIGHT("w2.", "weight_scale", w2_scale, -1);
+    }
+
+    prefixes = {"gate_proj.", "up_proj."};
+    LOAD_MOE_FUSED_WEIGHT("weight_offset", w1_offset, w3_offset, w13_offset);
+    if (!w13_offset_is_loaded_) {
+      prefixes = {"w1.", "w3."};
+      LOAD_MOE_FUSED_WEIGHT("weight_offset", w1_offset, w3_offset, w13_offset);
+    }
+    LOAD_MOE_WEIGHT("down_proj.", "weight_offset", w2_offset, -1);
+    if (!w2_offset_is_loaded_) {
+      LOAD_MOE_WEIGHT("w2.", "weight_offset", w2_offset, -1);
+    }
+
+    if (quant_args_.group_size() > 0) {
+      prefixes = {"gate_proj.", "up_proj."};
+      LOAD_MOE_FUSED_WEIGHT("weight_scale_second",
+                            w1_scale_second,
+                            w3_scale_second,
+                            w13_scale_second);
+      if (!w13_scale_second_is_loaded_) {
+        prefixes = {"w1.", "w3."};
+        LOAD_MOE_FUSED_WEIGHT("weight_scale_second",
+                              w1_scale_second,
+                              w3_scale_second,
+                              w13_scale_second);
+      }
+      LOAD_MOE_WEIGHT(
+          "down_proj.", "weight_scale_second", w2_scale_second, 1);
+      if (!w2_scale_second_is_loaded_) {
+        LOAD_MOE_WEIGHT("w2.", "weight_scale_second", w2_scale_second, 1);
+      }
+
+      prefixes = {"gate_proj.", "up_proj."};
+      LOAD_MOE_FUSED_WEIGHT("weight_offset_second",
+                            w1_offset_second,
+                            w3_offset_second,
+                            w13_offset_second);
+      if (!w13_offset_second_is_loaded_) {
+        prefixes = {"w1.", "w3."};
+        LOAD_MOE_FUSED_WEIGHT("weight_offset_second",
+                              w1_offset_second,
+                              w3_offset_second,
+                              w13_offset_second);
+      }
+      LOAD_MOE_WEIGHT(
+          "down_proj.", "weight_offset_second", w2_offset_second, 1);
+      if (!w2_offset_second_is_loaded_) {
+        LOAD_MOE_WEIGHT("w2.", "weight_offset_second", w2_offset_second, 1);
+      }
+    }
+
+    prefixes = {"gate_proj.", "up_proj."};
+    LOAD_MOE_FUSED_WEIGHT(
+        "scale_bias", w1_scale_bias, w3_scale_bias, w13_scale_bias);
+    if (!w13_scale_bias_is_loaded_) {
+      prefixes = {"w1.", "w3."};
+      LOAD_MOE_FUSED_WEIGHT(
+          "scale_bias", w1_scale_bias, w3_scale_bias, w13_scale_bias);
+    }
+    LOAD_MOE_WEIGHT("down_proj.", "scale_bias", w2_scale_bias, 1);
+    if (!w2_scale_bias_is_loaded_) {
+      LOAD_MOE_WEIGHT("w2.", "scale_bias", w2_scale_bias, 1);
+    }
+  }
+
   LOG(INFO) << "[QUANT_DEBUG][FusedMoE.load_experts] prefix="
             << state_dict.prefix() << ", quant_method="
             << (quant_args_.quant_method().empty() ? "<empty>"
@@ -863,6 +1286,10 @@ void FusedMoEImpl::load_experts(const StateDict& state_dict) {
             << resolved_moe_quant_method_.value_or("<none>")
             << ", is_w8a8_dynamic="
             << (is_w8a8_dynamic_quant_method(resolved_moe_quant_method_)
+                    ? "true"
+                    : "false")
+            << ", is_w4a8_dynamic="
+            << (is_w4a8_dynamic_quant_method(resolved_moe_quant_method_)
                     ? "true"
                     : "false")
             << ", w13_loaded=" << (w13_is_loaded_ ? "true" : "false")
@@ -878,6 +1305,34 @@ void FusedMoEImpl::load_experts(const StateDict& state_dict) {
               << (w2_scale_is_loaded_ ? "true" : "false") << ", w13_scale={"
               << tensor_debug_info(w13_scale_) << "}"
               << ", w2_scale={" << tensor_debug_info(w2_scale_) << "}";
+  }
+  if (is_w4a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+    LOG(INFO) << "[QUANT_DEBUG][FusedMoE.load_experts][W4A8Dynamic] prefix="
+              << state_dict.prefix() << ", group_size="
+              << quant_args_.group_size() << ", quant_version="
+              << (quant_args_.quant_version().empty()
+                      ? "<empty>"
+                      : quant_args_.quant_version())
+              << ", w13_scale_loaded="
+              << (w13_scale_is_loaded_ ? "true" : "false")
+              << ", w2_scale_loaded="
+              << (w2_scale_is_loaded_ ? "true" : "false")
+              << ", w13_offset_loaded="
+              << (w13_offset_is_loaded_ ? "true" : "false")
+              << ", w2_offset_loaded="
+              << (w2_offset_is_loaded_ ? "true" : "false")
+              << ", w13_scale_second_loaded="
+              << (w13_scale_second_is_loaded_ ? "true" : "false")
+              << ", w2_scale_second_loaded="
+              << (w2_scale_second_is_loaded_ ? "true" : "false")
+              << ", w13_offset_second_loaded="
+              << (w13_offset_second_is_loaded_ ? "true" : "false")
+              << ", w2_offset_second_loaded="
+              << (w2_offset_second_is_loaded_ ? "true" : "false")
+              << ", w13_scale_bias_loaded="
+              << (w13_scale_bias_is_loaded_ ? "true" : "false")
+              << ", w2_scale_bias_loaded="
+              << (w2_scale_bias_is_loaded_ ? "true" : "false");
   }
 }
 
@@ -924,6 +1379,7 @@ void FusedMoEImpl::load_state_dict(const StateDict& state_dict) {
     load_e_score_correction_bias(state_dict.get_dict_with_prefix("gate."));
   }
   load_experts(state_dict.get_dict_with_prefix("experts."));
+  preprocess_w4a8_dynamic_weights();
 }
 
 }  // namespace layer

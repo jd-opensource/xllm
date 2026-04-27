@@ -25,6 +25,7 @@ cc_library(
     quantize.cpp
     quant_dynamic.cpp
     dequant_swiglu_quant.cpp
+    w4a8_dynamic_moe_preprocess.cpp
     mla_preprocess.cpp
     ../utils.cpp
     beam_search.cpp

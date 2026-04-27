@@ -57,6 +57,14 @@ torch::Tensor group_gemm(GroupGemmParams& params);
 std::tuple<torch::Tensor, torch::Tensor> dequant_swiglu_quant(
     DequantSwigluQuantParams& params);
 
+std::tuple<torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           std::optional<torch::Tensor>,
+           std::optional<torch::Tensor>>
+w4a8_dynamic_moe_preprocess(W4A8DynamicMoePreprocessParams& params);
+
 std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
     MoeFusedTopkParams& params);
 

@@ -460,6 +460,26 @@ struct DequantSwigluQuantParams {
   int64_t quant_mode = 1;
 };
 
+// Ascend W4A8_DYNAMIC MoE weight post-load processing for version 1.0.0.
+// Mirrors vllm-ascend's Python path: transpose/NZ-convert int4 weights, pack
+// them to int32, and fold first-level + second-level scales into the int64
+// dtype/layout consumed by npu_grouped_matmul.
+struct W4A8DynamicMoePreprocessParams {
+  torch::Tensor w13_weight;
+  torch::Tensor w2_weight;
+  torch::Tensor w13_weight_scale;
+  torch::Tensor w2_weight_scale;
+  std::optional<torch::Tensor> w13_weight_offset;
+  std::optional<torch::Tensor> w2_weight_offset;
+  std::optional<torch::Tensor> w13_weight_scale_second;
+  std::optional<torch::Tensor> w2_weight_scale_second;
+  std::optional<torch::Tensor> w13_weight_offset_second;
+  std::optional<torch::Tensor> w2_weight_offset_second;
+  std::optional<torch::Tensor> w13_scale_bias;
+  std::optional<torch::Tensor> w2_scale_bias;
+  int64_t group_size = 256;
+};
+
 struct MoeFusedTopkParams {
   // Input tensor.
   // Shape: [*, num_mask, num_expert] (e.g., [batch, num_mask, num_expert]).
