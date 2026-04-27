@@ -335,7 +335,8 @@ struct NpuQuantizeParams {
   // Zero-point for non-symmetric quantization. Optional.
   std::optional<torch::Tensor> zero_point;
   // Quantization target dtype. Currently qint8 path maps to int8 tensor output.
-  // support at::ScalarType::QInt8 /at::ScalarType::QUInt8 / at::ScalarType::QInt32
+  // support at::ScalarType::QInt8 /at::ScalarType::QUInt8 /
+  // at::ScalarType::QInt32
   at::ScalarType output_dtype = at::ScalarType::QInt8;
   int64_t axis = 1;
 
@@ -469,12 +470,8 @@ struct W4A8DynamicMoePreprocessParams {
   torch::Tensor w2_weight;
   torch::Tensor w13_weight_scale;
   torch::Tensor w2_weight_scale;
-  std::optional<torch::Tensor> w13_weight_offset;
-  std::optional<torch::Tensor> w2_weight_offset;
   std::optional<torch::Tensor> w13_weight_scale_second;
   std::optional<torch::Tensor> w2_weight_scale_second;
-  std::optional<torch::Tensor> w13_weight_offset_second;
-  std::optional<torch::Tensor> w2_weight_offset_second;
   std::optional<torch::Tensor> w13_scale_bias;
   std::optional<torch::Tensor> w2_scale_bias;
   int64_t group_size = 256;

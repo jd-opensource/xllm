@@ -113,18 +113,10 @@ class FusedMoEImpl : public torch::nn::Module {
   DEFINE_FUSED_WEIGHT(w1_scale);
   DEFINE_FUSED_WEIGHT(w3_scale);
   DEFINE_FUSED_WEIGHT(w2_scale);
-  DEFINE_FUSED_WEIGHT(w1_offset);
-  DEFINE_FUSED_WEIGHT(w3_offset);
-  DEFINE_FUSED_WEIGHT(w13_offset);
-  DEFINE_FUSED_WEIGHT(w2_offset);
   DEFINE_FUSED_WEIGHT(w1_scale_second);
   DEFINE_FUSED_WEIGHT(w3_scale_second);
   DEFINE_FUSED_WEIGHT(w13_scale_second);
   DEFINE_FUSED_WEIGHT(w2_scale_second);
-  DEFINE_FUSED_WEIGHT(w1_offset_second);
-  DEFINE_FUSED_WEIGHT(w3_offset_second);
-  DEFINE_FUSED_WEIGHT(w13_offset_second);
-  DEFINE_FUSED_WEIGHT(w2_offset_second);
   DEFINE_FUSED_WEIGHT(w1_scale_bias);
   DEFINE_FUSED_WEIGHT(w3_scale_bias);
   DEFINE_FUSED_WEIGHT(w13_scale_bias);

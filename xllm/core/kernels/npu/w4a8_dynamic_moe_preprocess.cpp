@@ -13,11 +13,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "core/kernels/npu/pytorch_npu_helper.h"
-#include "xllm_ops_api.h"
-
 #include <cstdint>
 #include <cstring>
+
+#include "core/kernels/npu/pytorch_npu_helper.h"
+#include "npu_ops_api.h"
 
 namespace xllm::kernel::npu {
 
@@ -25,7 +25,7 @@ namespace {
 
 constexpr int64_t kPackedInt8InInt32 = 4;
 
-bool is_defined(const c10::optional<at::Tensor>& tensor) {
+bool is_defined(const std::optional<at::Tensor>& tensor) {
   return tensor.has_value() && tensor->defined();
 }
 
@@ -64,8 +64,7 @@ int64_t fp32_bits_to_int64(float value, bool use_even_uint32_buffer_layout) {
 at::Tensor fp32_bits_to_int64_tensor(const at::Tensor& float_tensor,
                                      bool use_even_uint32_buffer_layout) {
   auto cpu_float =
-      float_tensor
-          .to(at::TensorOptions().dtype(at::kFloat).device(at::kCPU))
+      float_tensor.to(at::TensorOptions().dtype(at::kFloat).device(at::kCPU))
           .contiguous();
   auto cpu_bits =
       at::empty(cpu_float.sizes(), cpu_float.options().dtype(at::kLong));
@@ -74,15 +73,14 @@ at::Tensor fp32_bits_to_int64_tensor(const at::Tensor& float_tensor,
   auto* output = cpu_bits.data_ptr<int64_t>();
   const auto numel = cpu_float.numel();
   for (int64_t i = 0; i < numel; ++i) {
-    output[i] =
-        fp32_bits_to_int64(input[i], use_even_uint32_buffer_layout);
+    output[i] = fp32_bits_to_int64(input[i], use_even_uint32_buffer_layout);
   }
   return cpu_bits.to(float_tensor.device()).contiguous();
 }
 
 at::Tensor process_scale(const at::Tensor& weight,
                          const at::Tensor& scale,
-                         const c10::optional<at::Tensor>& per_group_scale,
+                         const std::optional<at::Tensor>& per_group_scale,
                          bool is_per_channel_weight) {
   TORCH_CHECK(weight.dim() == 3,
               "W4A8_DYNAMIC preprocess expects 3D expert weight, got ",
@@ -127,11 +125,10 @@ at::Tensor process_scale(const at::Tensor& weight,
   transposed_per_group_scale =
       transposed_per_group_scale.reshape({group_num, -1, n});
 
-  auto scale_fp32 =
-      (transposed_scale.to(at::kFloat) *
-       transposed_per_group_scale.to(at::kFloat))
-          .to(at::kHalf)
-          .to(at::kFloat);
+  auto scale_fp32 = (transposed_scale.to(at::kFloat) *
+                     transposed_per_group_scale.to(at::kFloat))
+                        .to(at::kHalf)
+                        .to(at::kFloat);
   return fp32_bits_to_int64_tensor(scale_fp32, true);
 }
 
@@ -159,30 +156,18 @@ std::tuple<at::Tensor,
            at::Tensor,
            at::Tensor,
            at::Tensor,
-           c10::optional<at::Tensor>,
-           c10::optional<at::Tensor>>
+           std::optional<at::Tensor>,
+           std::optional<at::Tensor>>
 w4a8_dynamic_moe_preprocess(
     const at::Tensor& w13_weight,
     const at::Tensor& w2_weight,
     const at::Tensor& w13_weight_scale,
     const at::Tensor& w2_weight_scale,
-    const c10::optional<at::Tensor>& w13_weight_offset,
-    const c10::optional<at::Tensor>& w2_weight_offset,
-    const c10::optional<at::Tensor>& w13_weight_scale_second,
-    const c10::optional<at::Tensor>& w2_weight_scale_second,
-    const c10::optional<at::Tensor>& w13_weight_offset_second,
-    const c10::optional<at::Tensor>& w2_weight_offset_second,
-    const c10::optional<at::Tensor>& w13_scale_bias,
-    const c10::optional<at::Tensor>& w2_scale_bias,
+    const std::optional<at::Tensor>& w13_weight_scale_second,
+    const std::optional<at::Tensor>& w2_weight_scale_second,
+    const std::optional<at::Tensor>& w13_scale_bias,
+    const std::optional<at::Tensor>& w2_scale_bias,
     int64_t group_size) {
-  // The offset tensors are passed through this interface so a future
-  // asymmetric implementation can consume them. The current vllm-ascend
-  // symmetric W4A8 path does not consume offsets during this post-process.
-  (void)w13_weight_offset;
-  (void)w2_weight_offset;
-  (void)w13_weight_offset_second;
-  (void)w2_weight_offset_second;
-
   TORCH_CHECK(group_size >= 0,
               "W4A8_DYNAMIC group_size must be >= 0, got ",
               group_size);

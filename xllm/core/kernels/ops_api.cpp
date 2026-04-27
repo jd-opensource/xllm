@@ -334,8 +334,7 @@ torch::Tensor quant_matmul(QuantMatmulParams& params) {
 #endif
 }
 
-torch::Tensor quantize(
-    NpuQuantizeParams& params) {
+torch::Tensor quantize(NpuQuantizeParams& params) {
 #if defined(USE_NPU)
   CHECK(params.scale.has_value() && params.scale->defined())
       << "quantize requires params.scale.";
@@ -352,14 +351,12 @@ torch::Tensor quantize(
 std::tuple<torch::Tensor, std::optional<torch::Tensor>> dynamic_quant(
     NpuQuantizeParams& params) {
 #if defined(USE_NPU)
-  auto [output, scale] = npu::dynamic_quant(params.input,
-                                           params.smooth_scales,
-                                           params.group_index,
-                                           params.dst_type);
-  return std::make_tuple(
-      output,
-      scale.has_value() ? std::optional<torch::Tensor>(scale.value())
-                        : std::nullopt);
+  auto [output, scale] = npu::dynamic_quant(
+      params.input, params.smooth_scales, params.group_index, params.dst_type);
+  return std::make_tuple(output,
+                         scale.has_value()
+                             ? std::optional<torch::Tensor>(scale.value())
+                             : std::nullopt);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -456,20 +453,15 @@ std::tuple<torch::Tensor,
            std::optional<torch::Tensor>>
 w4a8_dynamic_moe_preprocess(W4A8DynamicMoePreprocessParams& params) {
 #if defined(USE_NPU)
-  return npu::w4a8_dynamic_moe_preprocess(
-      params.w13_weight,
-      params.w2_weight,
-      params.w13_weight_scale,
-      params.w2_weight_scale,
-      params.w13_weight_offset,
-      params.w2_weight_offset,
-      params.w13_weight_scale_second,
-      params.w2_weight_scale_second,
-      params.w13_weight_offset_second,
-      params.w2_weight_offset_second,
-      params.w13_scale_bias,
-      params.w2_scale_bias,
-      params.group_size);
+  return npu::w4a8_dynamic_moe_preprocess(params.w13_weight,
+                                          params.w2_weight,
+                                          params.w13_weight_scale,
+                                          params.w2_weight_scale,
+                                          params.w13_weight_scale_second,
+                                          params.w2_weight_scale_second,
+                                          params.w13_scale_bias,
+                                          params.w2_scale_bias,
+                                          params.group_size);
 #else
   NOT_IMPLEMENTED();
 #endif

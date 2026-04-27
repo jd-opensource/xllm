@@ -30,17 +30,17 @@ limitations under the License.
 
 namespace xllm::kernel::npu {
 namespace op_infer {
-    const int N = 32;
-    // npu tensor max size
-    const int SIZE = 8;
-    const int INT4_NUMS_IN_INT32_SPACE = 8;
-    const int NPU_NSA_COMPRESS_INPUT_DIM_SECOND = 1;
-    const int NPU_NSA_COMPRESS_INPUT_DIM_THIRD = 2;
-    const int DIM_0 = 0;
-    const int DIM_1 = 1;
-    const int DIM_2 = 2;
-    const int DIM_3 = 3;
-}
+const int N = 32;
+// npu tensor max size
+const int SIZE = 8;
+const int INT4_NUMS_IN_INT32_SPACE = 8;
+const int NPU_NSA_COMPRESS_INPUT_DIM_SECOND = 1;
+const int NPU_NSA_COMPRESS_INPUT_DIM_THIRD = 2;
+const int DIM_0 = 0;
+const int DIM_1 = 1;
+const int DIM_2 = 2;
+const int DIM_3 = 3;
+}  // namespace op_infer
 
 void beam_search(const torch::Tensor& logprobs,
                  const torch::Tensor& top_tokens,
@@ -209,27 +209,6 @@ std::tuple<at::Tensor, at::Tensor> dequant_swiglu_quant(
     const c10::optional<at::Tensor>& group_index,
     bool activate_left,
     int64_t quant_mode);
-
-std::tuple<at::Tensor,
-           at::Tensor,
-           at::Tensor,
-           at::Tensor,
-           c10::optional<at::Tensor>,
-           c10::optional<at::Tensor>>
-w4a8_dynamic_moe_preprocess(
-    const at::Tensor& w13_weight,
-    const at::Tensor& w2_weight,
-    const at::Tensor& w13_weight_scale,
-    const at::Tensor& w2_weight_scale,
-    const c10::optional<at::Tensor>& w13_weight_offset,
-    const c10::optional<at::Tensor>& w2_weight_offset,
-    const c10::optional<at::Tensor>& w13_weight_scale_second,
-    const c10::optional<at::Tensor>& w2_weight_scale_second,
-    const c10::optional<at::Tensor>& w13_weight_offset_second,
-    const c10::optional<at::Tensor>& w2_weight_offset_second,
-    const c10::optional<at::Tensor>& w13_scale_bias,
-    const c10::optional<at::Tensor>& w2_scale_bias,
-    int64_t group_size);
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mla_preprocess(
     const at::Tensor& input,

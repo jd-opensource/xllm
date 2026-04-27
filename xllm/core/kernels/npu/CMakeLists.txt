@@ -17,6 +17,7 @@ cc_library(
     npu_moe_init_routing_v2.cpp
     npu_moe_token_unpermute.cpp
     rope.cpp
+    w4a8_dynamic_moe_preprocess.cpp
   DEPS
     :torch_npu_kernels
 )
