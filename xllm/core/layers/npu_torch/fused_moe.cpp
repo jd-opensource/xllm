@@ -355,9 +355,31 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
             << tp_pg_->world_size() << ", ep_size=" << ep_size
             << ", ep_rank=" << ep_rank
             << ", num_experts_per_rank=" << num_experts_per_rank_
-            << ", start_expert_id=" << start_expert_id_;
-  if (!quant_args_.quant_descs().empty()) {
-    // quant_descs is not empty: default initialize weight as kInt8.
+            << ", start_expert_id=" << start_expert_id_ << ", quant_method="
+            << (quant_args_.quant_method().empty()
+                    ? "<empty>"
+                    : quant_args_.quant_method());
+  if (quant_args_.quant_method() == kQuantMethodAscendInt4) {
+    CHECK_EQ(hidden_size_ % 2, 0)
+        << "Ascend int4 FusedMoE expects even hidden_size, got "
+        << hidden_size_;
+    // Ascend int4 stores two int4 values in one int8 slot. Initialize the
+    // packed layout up front; load_state_dict can still re-register when the
+    // resolved per-weight quant method disagrees with this model-level hint.
+    w13_ = register_parameter(
+        "w13",
+        torch::empty(
+            {num_experts_per_rank_, local_intermediate_size, hidden_size_},
+            options_.dtype(torch::kInt8)),
+        false);
+    w2_ = register_parameter(
+        "w2",
+        torch::empty(
+            {num_experts_per_rank_, hidden_size_ / 2, local_intermediate_size},
+            options_.dtype(torch::kInt8)),
+        false);
+  } else if (quant_args_.quant_method() == kQuantMethodAscendInt8) {
+    // Ascend int8 uses the normal MoE weight shape with int8 storage.
     // During load_state_dict, the weight will be lazily re-registered to the
     // appropriate dtype based on the resolved quant method.
     w13_ = register_parameter(
@@ -438,15 +460,25 @@ void FusedMoEImpl::ensure_quant_weight_layout() {
     auto w2_scale_options = options_.dtype() == torch::kBFloat16
                                 ? options_.dtype(torch::kBFloat16)
                                 : options_.dtype(torch::kFloat32);
+    push(w13_,
+         w13_is_loaded_,
+         "w13",
+         {num_experts_per_rank_, local_intermediate_size_ * 2, hidden_size_},
+         options_.dtype(torch::kInt8));
+    push(w2_,
+         w2_is_loaded_,
+         "w2",
+         {num_experts_per_rank_, hidden_size_, local_intermediate_size_},
+         options_.dtype(torch::kInt8));
     push(w13_scale_,
          w13_scale_is_loaded_,
          "w13_scale",
-         {w13_.size(0), w13_.size(1)},
+         {num_experts_per_rank_, local_intermediate_size_ * 2},
          fp32_options);
     push(w2_scale_,
          w2_scale_is_loaded_,
          "w2_scale",
-         {w2_.size(0), w2_.size(1)},
+         {num_experts_per_rank_, hidden_size_},
          w2_scale_options);
     weight::ensure_parameter_storage(this, specs);
     return;
@@ -533,12 +565,13 @@ void FusedMoEImpl::resolve_quant_method_from_state_dict(
   if (is_supported_dynamic_moe_quant_method(resolved_moe_quant_method_)) {
     validate_resolved_quant_method();
     ensure_quant_weight_layout();
-  } else if (!quant_args_.quant_descs().empty()) {
-    // quant_descs is not empty but the resolved quant method is not
-    // a supported dynamic MoE quant method (e.g., no quant method resolved, or
-    // a non-quantized checkpoint). The weights were initialized as kInt8 in
-    // the constructor; re-register them back to the original dtype so that the
-    // subsequent load_experts can copy the checkpoint weights correctly.
+  } else if (quant_args_.quant_method() == kQuantMethodAscendInt4 ||
+             quant_args_.quant_method() == kQuantMethodAscendInt8 ||
+             !quant_args_.quant_descs().empty()) {
+    // The constructor may have used an Ascend quantized layout as a
+    // model-level hint, but the actual per-weight method resolved to an
+    // unsupported/non-quantized path. Restore the unquantized MoE layout so
+    // load_experts can copy checkpoint weights correctly.
     std::vector<weight::LazyParameterSpec> specs;
     specs.reserve(2);
     auto push = [&](torch::Tensor& tensor,
@@ -548,8 +581,14 @@ void FusedMoEImpl::resolve_quant_method_from_state_dict(
       specs.push_back(weight::LazyParameterSpec{
           &tensor, &tensor_is_loaded, name, std::move(sizes), options_});
     };
-    push(w13_, w13_is_loaded_, "w13", w13_.sizes().vec());
-    push(w2_, w2_is_loaded_, "w2", w2_.sizes().vec());
+    push(w13_,
+         w13_is_loaded_,
+         "w13",
+         {num_experts_per_rank_, local_intermediate_size_ * 2, hidden_size_});
+    push(w2_,
+         w2_is_loaded_,
+         "w2",
+         {num_experts_per_rank_, hidden_size_, local_intermediate_size_});
     weight::ensure_parameter_storage(this, specs);
   }
 }

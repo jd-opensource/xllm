@@ -786,6 +786,8 @@ bool HFModelLoader::load_quant_args(const std::string& model_weights_path) {
     std::unordered_map<std::string, std::string> quant_descs;
     const auto quant_desc_data = quant_desc_reader.data();
     bool desc_model_quant_is_w4a8_dynamic = false;
+    bool desc_has_w4a8 = false;
+    bool desc_has_w8a8 = false;
     bool desc_has_w4a8_dynamic = false;
     if (!quant_desc_data.is_object()) {
       LOG(WARNING) << "quant_model_description is not a JSON object: "
@@ -803,6 +805,13 @@ bool HFModelLoader::load_quant_args(const std::string& model_weights_path) {
           continue;
         }
         const auto quant_type = it.value().get<std::string>();
+        auto quant_type_lower = quant_type;
+        boost::algorithm::to_lower(quant_type_lower);
+        if (boost::algorithm::starts_with(quant_type_lower, "w4a8")) {
+          desc_has_w4a8 = true;
+        } else if (boost::algorithm::starts_with(quant_type_lower, "w8a8")) {
+          desc_has_w8a8 = true;
+        }
         if (boost::iequals(quant_type, "w4a8_dynamic")) {
           desc_has_w4a8_dynamic = true;
         }
@@ -817,8 +826,17 @@ bool HFModelLoader::load_quant_args(const std::string& model_weights_path) {
       }
     }
     quant_args_.quant_descs() = std::move(quant_descs);
+    if (desc_has_w4a8) {
+      quant_args_.quant_method() = kQuantMethodAscendInt4;
+    } else if (desc_has_w8a8) {
+      quant_args_.quant_method() = kQuantMethodAscendInt8;
+    }
     LOG(INFO) << "Loaded quant_model_description from " << quant_desc_file_path
-              << ", quant_desc_count=" << quant_args_.quant_descs().size();
+              << ", quant_desc_count=" << quant_args_.quant_descs().size()
+              << ", quant_method="
+              << (quant_args_.quant_method().empty()
+                      ? "<empty>"
+                      : quant_args_.quant_method());
 
     if (quant_args_.quantize_type().empty()) {
       if (auto v = quant_desc_reader.value<std::string>("model_quant_type")) {

@@ -34,6 +34,8 @@ namespace xllm {
 // Quantization method identifiers
 static const std::string kQuantMethodFp8 = "fp8";
 static const std::string kQuantMethodSmoothquant = "smoothquant";
+static const std::string kQuantMethodAscendInt4 = "ascend_int4";
+static const std::string kQuantMethodAscendInt8 = "ascend_int8";
 
 struct QuantArgs {
   using QuantDescs = std::unordered_map<std::string, std::string>;

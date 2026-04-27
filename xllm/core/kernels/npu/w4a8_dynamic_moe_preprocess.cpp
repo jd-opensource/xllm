@@ -16,7 +16,6 @@ limitations under the License.
 #include <cstdint>
 #include <cstring>
 
-#include "core/kernels/npu/pytorch_npu_helper.h"
 #include "npu_ops_api.h"
 
 namespace xllm::kernel::npu {
