@@ -30,6 +30,7 @@ limitations under the License.
 #include "core/util/timer.h"
 #include "models/llm/npu/qwen3.h"
 #include "models/model_registry.h"
+#include "models/vlm/mposition/mposition.h"
 #include "models/vlm/utils/multimodal_utils.h"
 #include "processors/qwen3_vl_image_processor.h"
 #include "processors/qwen3_vl_input_processor.h"
@@ -835,6 +836,7 @@ TORCH_MODULE(Qwen3_VLForConditionalGeneration);
 REGISTER_INPUT_PROCESSOR(qwen3_vl, Qwen3_VLInputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_vl, Qwen3_VLForConditionalGeneration);
 REGISTER_IMAGE_PROCESSOR(qwen3_vl, Qwen3VLImageProcessor);
+REGISTER_MPOSITION_GENERATOR(qwen3_vl, xllm::Qwen3VLMPositionGenerator);
 
 REGISTER_MODEL_ARGS(qwen3_vl, [&] {
   // text config

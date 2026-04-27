@@ -22,6 +22,7 @@ limitations under the License.
 #include "core/layers/qwen2_decoder_layer.h"
 #include "models/llm/qwen2.h"
 #include "models/model_registry.h"
+#include "models/vlm/mposition/mposition.h"
 #include "processors/qwen2_vl_image_processor.h"
 #include "processors/qwen2_vl_input_processor.h"
 
@@ -649,6 +650,7 @@ TORCH_MODULE(Qwen2_5_VLForConditionalGeneration);
 REGISTER_INPUT_PROCESSOR(qwen2_5_vl, Qwen2_5_VLInputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen2_5_vl, Qwen2_5_VLForConditionalGeneration);
 REGISTER_IMAGE_PROCESSOR(qwen2_5_vl, Qwen2VLImageProcessor);
+REGISTER_MPOSITION_GENERATOR(qwen2_5_vl, QwenVLMPositionGenerator);
 
 // Macro to load Qwen2.5-VL model arguments (shared between qwen2_5_vl and
 // Qwen2_5_VLForConditionalGeneration)

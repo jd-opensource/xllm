@@ -18,6 +18,7 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "core/layers/common/lm_head.h"
 #include "models/model_registry.h"
+#include "models/vlm/mposition/mposition.h"
 #include "models/vlm/qwen3_vl_base.h"
 
 #if defined(USE_NPU)
@@ -318,6 +319,7 @@ using Qwen3_5ImageProcessor = Qwen2VLImageProcessor;
 REGISTER_INPUT_PROCESSOR(qwen3_5, Qwen3_5InputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_5, Qwen3_5ForConditionalGeneration);
 REGISTER_IMAGE_PROCESSOR(qwen3_5, Qwen3_5ImageProcessor);
+REGISTER_MPOSITION_GENERATOR(qwen3_5, Qwen3VLMPositionGenerator);
 REGISTER_MODEL_ARGS(qwen3_5, [&] {
   LOAD_QWEN3_5_COMMON_ARGS();
   LOAD_QWEN3_5_VISION_ARGS();
@@ -333,6 +335,7 @@ REGISTER_MODEL_ARGS(qwen3_5, [&] {
 REGISTER_INPUT_PROCESSOR(qwen3_5_moe, Qwen3_5InputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_5_moe, Qwen3_5ForConditionalGeneration);
 REGISTER_IMAGE_PROCESSOR(qwen3_5_moe, Qwen3_5ImageProcessor);
+REGISTER_MPOSITION_GENERATOR(qwen3_5_moe, Qwen3VLMPositionGenerator);
 REGISTER_MODEL_ARGS(qwen3_5_moe, [&] {
   LOAD_QWEN3_5_COMMON_ARGS();
   LOAD_QWEN3_5_VISION_ARGS();

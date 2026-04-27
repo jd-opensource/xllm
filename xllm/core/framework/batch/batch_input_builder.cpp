@@ -30,11 +30,11 @@ limitations under the License.
 #include "common/metrics.h"
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/multimodal/mm_data_visitor.h"
-#include "framework/batch/mposition.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/request/sequence.h"
 #include "framework/sampling/sampling_params.h"
+#include "models/vlm/mposition/mposition.h"
 #include "runtime/params_utils.h"
 #include "util/blocking_counter.h"
 #include "util/tensor_helper.h"
@@ -558,10 +558,8 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
 
   // Handle MRope positions
   if (use_mrope_) {
-    const auto& args = *args_;
-    MPositionHelper helper(*sequence, args);
-    state.mrope_positions_vec.push_back(
-        helper.get_scheduled_positions(n_kv_cache_tokens, seq_len));
+    state.mrope_positions_vec.emplace_back(
+        get_mrope_positions(sequence, n_kv_cache_tokens, seq_len));
   }
 
   // Process real tokens
@@ -674,6 +672,28 @@ void BatchInputBuilder::handle_sampling_parameters(Sequence* sequence,
     }
 
     state.unique_token_lens_vec.push_back(static_cast<int32_t>(ids.size()));
+  }
+}
+
+torch::Tensor BatchInputBuilder::get_mrope_positions(Sequence* sequence,
+                                                     uint32_t start,
+                                                     uint32_t end) {
+  if (sequence->stage() == SequenceStage::DECODE) {
+    const int32_t mrope_position_delta = sequence->get_mrope_position_delta();
+    const size_t num_tokens = sequence->num_tokens();
+    return torch::arange(
+               static_cast<int32_t>(mrope_position_delta + num_tokens - 1),
+               static_cast<int32_t>(mrope_position_delta + num_tokens),
+               torch::kInt32)
+        .expand({3, -1});
+  } else {
+    std::unique_ptr<MPositionGenerator> generator =
+        MPositionGeneratorFactory::get_instance().create_mposition_generator(
+            args_->model_type());
+    std::tuple<torch::Tensor, int32_t> result =
+        generator->generate(sequence->tokens(), sequence->mm_data(), *args_);
+    sequence->set_mrope_position_delta(std::get<1>(result));
+    return std::get<0>(result).slice(/*dim=*/1, start, end);
   }
 }
 

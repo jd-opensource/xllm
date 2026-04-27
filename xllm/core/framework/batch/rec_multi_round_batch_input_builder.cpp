@@ -30,7 +30,6 @@ limitations under the License.
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/util/rec_model_utils.h"
-#include "framework/batch/mposition.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/request/sequence.h"

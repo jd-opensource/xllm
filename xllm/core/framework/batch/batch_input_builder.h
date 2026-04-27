@@ -147,6 +147,10 @@ class BatchInputBuilder {
                                     uint32_t seq_len,
                                     uint32_t padded_seq_len,
                                     BuilderState* state_ptr = nullptr);
+  torch::Tensor get_mrope_positions(Sequence* sequence,
+                                    uint32_t start,
+                                    uint32_t end);
+
   void handle_sampling_parameters(Sequence* sequence,
                                   BuilderState* state_ptr = nullptr);
   void setup_kv_cache_info(

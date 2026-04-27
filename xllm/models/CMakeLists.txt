@@ -1,5 +1,7 @@
 include(cc_library)
 
+add_subdirectory(vlm/mposition)
+
 if(USE_NPU)
   include_directories(
     ${CMAKE_SOURCE_DIR}/third_party/spdlog/include
@@ -19,6 +21,7 @@ cc_library(
     vlm/utils/multimodal_utils.cpp
   DEPS
     :model
+    :mposition
     :parallel_state
     :model_context
     :dit_cache

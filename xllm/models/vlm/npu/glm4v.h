@@ -29,6 +29,7 @@ limitations under the License.
 #include "core/layers/npu/npu_lm_head_impl.h"
 #include "models/llm/npu/glm4.h"
 #include "models/model_registry.h"
+#include "models/vlm/mposition/mposition.h"
 #include "models/vlm/utils/multimodal_utils.h"
 #include "processors/glm4v_image_processor.h"
 #include "processors/glm4v_input_processor.h"
@@ -833,6 +834,7 @@ TORCH_MODULE(Glm4vForConditionalGeneration);
 REGISTER_INPUT_PROCESSOR(glm4v, GLM4VInputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(glm4v, Glm4vForConditionalGeneration);
 REGISTER_IMAGE_PROCESSOR(glm4v, Glm4VImageProcessor);
+REGISTER_MPOSITION_GENERATOR(glm4v, xllm::Glm4VMPositionGenerator);
 // register the model args
 REGISTER_MODEL_ARGS(glm4v, [&] {
   LOAD_ARG_OR(model_type, "model_type", "glm4v");

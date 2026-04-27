@@ -121,9 +121,6 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
     const size_t num_deepstacks =
         model_args_.mm_deepstack_visual_indexes().size();
     CHECK(embedding.defined()) << "Multimodal embedding is not defined.";
-    CHECK_GT(num_deepstacks, 0)
-        << "There should be at least one deepstack when splitting multimodal "
-           "embedding.";
     const int64_t num_chunks = static_cast<int64_t>(num_deepstacks + 1);
     auto chunks = embedding.chunk(/*chunks=*/num_chunks, /*dim=*/1);
     std::vector<torch::Tensor> deepstacks;
