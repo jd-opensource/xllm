@@ -336,4 +336,7 @@ DECLARE_string(npu_kernel_backend);
 DECLARE_bool(enable_intralayer_addnorm);
 #endif
 
+// --- chat template config ---
+DECLARE_bool(use_cpp_chat_template);
+
 DECLARE_int32(health_check_interval_ms);
