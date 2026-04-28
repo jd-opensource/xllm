@@ -1,16 +1,6 @@
 include(cc_library)
 include(cc_test)
 
-
-cc_library(
-  NAME
-    push_route
-  HDRS
-    push_route.h
-  SRCS
-    push_route.cpp
-)
-
 cc_library(
   NAME
     kv_cache
@@ -39,16 +29,6 @@ cc_library(
     glog::glog
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
-)
-
-cc_test(
-  NAME
-    push_route_test
-  SRCS
-    push_route_test.cpp
-  DEPS
-    :push_route
-    GTest::gtest_main
 )
 
 cc_test(

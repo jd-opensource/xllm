@@ -29,6 +29,7 @@ limitations under the License.
 #include "disagg_pd_scheduler.h"
 #include "distributed_runtime/engine.h"
 #include "framework/batch/batch_factory.h"
+#include "framework/kv_cache_transfer/pd_topology_guard.h"
 #include "framework/request/request.h"
 #include "framework/request/request_state.h"
 #include "framework/request/sequence.h"
@@ -36,7 +37,6 @@ limitations under the License.
 #include "runtime/xservice_client.h"
 #include "scheduler/chunked_prefill_scheduler.h"
 #include "scheduler/continuous_scheduler.h"
-#include "scheduler/pd_topology_guard.h"
 #include "util/env_var.h"
 
 namespace xllm {

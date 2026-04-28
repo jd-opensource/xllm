@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "scheduler/pd_topology_guard.h"
+#include "framework/kv_cache_transfer/pd_topology_guard.h"
 
 #include <glog/logging.h>
 

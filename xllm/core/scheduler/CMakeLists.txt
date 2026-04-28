@@ -6,18 +6,6 @@ add_subdirectory(profile)
 
 cc_library(
   NAME
-    pd_topology_guard
-  HDRS
-    pd_topology_guard.h
-  SRCS
-    pd_topology_guard.cpp
-  DEPS
-    :common
-    glog::glog
-)
-
-cc_library(
-  NAME
     scheduler
   HDRS
     mix_scheduler.h
@@ -73,16 +61,6 @@ cc_test(
     :xllm_server
     GTest::gtest_main
     $<$<BOOL:${USE_NPU}>:nnopbase>
-)
-
-cc_test(
-  NAME
-    pd_topology_guard_test
-  SRCS
-    pd_topology_guard_test.cpp
-  DEPS
-    :pd_topology_guard
-    GTest::gtest_main
 )
 
 target_link_libraries(chunked_prefill_scheduler_test
