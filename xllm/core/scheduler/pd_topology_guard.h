@@ -27,11 +27,16 @@ struct PdTopo {
   int32_t tp_size = 0;
 };
 
-struct PdTopoRule {
-  bool allow = false;
-  bool hetero = false;
-  bool invalid_local = false;
-  bool invalid_remote = false;
+enum class PdTopoStatus : int8_t {
+  ALLOW_HOMO = 0,
+  ALLOW_HETERO = 1,
+  DENY_HETERO = 2,
+  INVALID_LOCAL = 3,
+  INVALID_REMOTE = 4,
+};
+
+struct PdTopoResult {
+  PdTopoStatus status = PdTopoStatus::DENY_HETERO;
   std::string reason = "";
 };
 
@@ -41,16 +46,10 @@ bool try_get_pd_topo(const InstanceInfo& info,
 
 PdTopo get_pd_topo(const InstanceInfo& info);
 
-PdTopoRule check_pd_rule(const InstanceInfo& local,
-                         const InstanceInfo& remote,
-                         bool is_mlu_build,
-                         const std::string& kv_mode,
-                         bool enable_mla);
-
-PdTopoRule check_mlu_pd_topo(const PdTopo& local_topo,
-                             const PdTopo& remote_topo,
-                             bool is_mlu_build,
-                             const std::string& kv_mode,
-                             bool enable_mla);
+PdTopoResult check_pd_topo(const InstanceInfo& local,
+                           const InstanceInfo& remote,
+                           bool is_mlu_build,
+                           const std::string& kv_mode,
+                           bool enable_mla);
 
 }  // namespace xllm

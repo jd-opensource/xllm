@@ -31,6 +31,27 @@ bool fail_topo(const std::string& msg, std::string* reason) {
   return false;
 }
 
+PdTopoResult check_hetero_pd_req(bool is_mlu_build,
+                                 const std::string& kv_mode,
+                                 bool enable_mla) {
+  if (!is_mlu_build) {
+    return PdTopoResult{PdTopoStatus::DENY_HETERO,
+                        "hetero pd requires is_mlu_build=true"};
+  }
+  if (kv_mode != "PUSH") {
+    return PdTopoResult{PdTopoStatus::DENY_HETERO,
+                        "hetero pd requires kv_mode=PUSH"};
+  }
+  // Non-MLA KV cache still shards KV heads by TP. Hetero TP needs separate
+  // head-dimension split/merge support, so this path is limited to MLA.
+  if (!enable_mla) {
+    return PdTopoResult{PdTopoStatus::DENY_HETERO,
+                        "hetero pd requires enable_mla=true"};
+  }
+
+  return PdTopoResult{PdTopoStatus::ALLOW_HETERO, ""};
+}
+
 }  // namespace
 
 bool try_get_pd_topo(const InstanceInfo& info,
@@ -71,53 +92,31 @@ PdTopo get_pd_topo(const InstanceInfo& info) {
   return topo;
 }
 
-PdTopoRule check_pd_rule(const InstanceInfo& local,
-                         const InstanceInfo& remote,
-                         bool is_mlu_build,
-                         const std::string& kv_mode,
-                         bool enable_mla) {
+PdTopoResult check_pd_topo(const InstanceInfo& local,
+                           const InstanceInfo& remote,
+                           bool is_mlu_build,
+                           const std::string& kv_mode,
+                           bool enable_mla) {
   PdTopo local_topo;
   std::string reason;
   if (!try_get_pd_topo(local, &local_topo, &reason)) {
-    return PdTopoRule{
-        false, false, true, false, "invalid local pd topo: " + reason};
+    return PdTopoResult{PdTopoStatus::INVALID_LOCAL,
+                        "invalid local pd topo: " + reason};
   }
 
   PdTopo remote_topo;
   if (!try_get_pd_topo(remote, &remote_topo, &reason)) {
-    return PdTopoRule{
-        false, false, false, true, "invalid remote pd topo: " + reason};
+    return PdTopoResult{PdTopoStatus::INVALID_REMOTE,
+                        "invalid remote pd topo: " + reason};
   }
 
-  return check_mlu_pd_topo(
-      local_topo, remote_topo, is_mlu_build, kv_mode, enable_mla);
-}
-
-PdTopoRule check_mlu_pd_topo(const PdTopo& local_topo,
-                             const PdTopo& remote_topo,
-                             bool is_mlu_build,
-                             const std::string& kv_mode,
-                             bool enable_mla) {
   const bool same_dp = local_topo.dp_size == remote_topo.dp_size;
   const bool same_tp = local_topo.tp_size == remote_topo.tp_size;
   if (same_dp && same_tp) {
-    return PdTopoRule{true, false, false, false, ""};
+    return PdTopoResult{PdTopoStatus::ALLOW_HOMO, ""};
   }
 
-  if (!is_mlu_build) {
-    return PdTopoRule{
-        false, true, false, false, "hetero pd requires is_mlu_build=true"};
-  }
-  if (kv_mode != "PUSH") {
-    return PdTopoRule{
-        false, true, false, false, "hetero pd requires kv_mode=PUSH"};
-  }
-  if (!enable_mla) {
-    return PdTopoRule{
-        false, true, false, false, "hetero pd requires enable_mla=true"};
-  }
-
-  return PdTopoRule{true, true, false, false, ""};
+  return check_hetero_pd_req(is_mlu_build, kv_mode, enable_mla);
 }
 
 }  // namespace xllm

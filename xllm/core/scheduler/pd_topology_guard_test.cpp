@@ -36,18 +36,17 @@ InstanceInfo make_info(int32_t dp_size,
 }
 
 TEST(PdTopologyGuardTest, HomoTopoBypass) {
-  const InstanceInfo info = make_info(2, {0, 1, 2, 3});
+  const InstanceInfo local_info = make_info(2, {0, 1, 2, 3});
+  const InstanceInfo remote_info = make_info(2, {0, 1, 2, 3});
 
-  const PdTopo topo = get_pd_topo(info);
+  const PdTopo topo = get_pd_topo(local_info);
   EXPECT_EQ(topo.dp_size, 2);
   EXPECT_EQ(topo.tp_size, 2);
 
-  const PdTopoRule rule = check_mlu_pd_topo(topo, topo, false, "PULL", false);
-  EXPECT_TRUE(rule.allow);
-  EXPECT_FALSE(rule.hetero);
-  EXPECT_FALSE(rule.invalid_local);
-  EXPECT_FALSE(rule.invalid_remote);
-  EXPECT_TRUE(rule.reason.empty());
+  const PdTopoResult result =
+      check_pd_topo(local_info, remote_info, false, "PULL", false);
+  EXPECT_EQ(result.status, PdTopoStatus::ALLOW_HOMO);
+  EXPECT_TRUE(result.reason.empty());
 }
 
 TEST(PdTopologyGuardTest, TryGetPdTopoReturnTopo) {
@@ -62,82 +61,64 @@ TEST(PdTopologyGuardTest, TryGetPdTopoReturnTopo) {
 }
 
 TEST(PdTopologyGuardTest, HeteroTopoNeedMla) {
-  const PdTopo local_topo{2, 2};
-  const PdTopo remote_topo{1, 4};
+  const InstanceInfo local_info = make_info(2, {0, 1, 2, 3});
+  const InstanceInfo remote_info = make_info(1, {0, 1, 2, 3});
 
-  const PdTopoRule rule =
-      check_mlu_pd_topo(local_topo, remote_topo, true, "PUSH", false);
-  EXPECT_FALSE(rule.allow);
-  EXPECT_TRUE(rule.hetero);
-  EXPECT_FALSE(rule.invalid_local);
-  EXPECT_FALSE(rule.invalid_remote);
-  EXPECT_EQ(rule.reason, "hetero pd requires enable_mla=true");
+  const PdTopoResult result =
+      check_pd_topo(local_info, remote_info, true, "PUSH", false);
+  EXPECT_EQ(result.status, PdTopoStatus::DENY_HETERO);
+  EXPECT_EQ(result.reason, "hetero pd requires enable_mla=true");
 }
 
 TEST(PdTopologyGuardTest, HeteroTopoNeedMluBuild) {
-  const PdTopo local_topo{2, 2};
-  const PdTopo remote_topo{1, 4};
+  const InstanceInfo local_info = make_info(2, {0, 1, 2, 3});
+  const InstanceInfo remote_info = make_info(1, {0, 1, 2, 3});
 
-  const PdTopoRule rule =
-      check_mlu_pd_topo(local_topo, remote_topo, false, "PUSH", true);
-  EXPECT_FALSE(rule.allow);
-  EXPECT_TRUE(rule.hetero);
-  EXPECT_FALSE(rule.invalid_local);
-  EXPECT_FALSE(rule.invalid_remote);
-  EXPECT_EQ(rule.reason, "hetero pd requires is_mlu_build=true");
+  const PdTopoResult result =
+      check_pd_topo(local_info, remote_info, false, "PUSH", true);
+  EXPECT_EQ(result.status, PdTopoStatus::DENY_HETERO);
+  EXPECT_EQ(result.reason, "hetero pd requires is_mlu_build=true");
 }
 
 TEST(PdTopologyGuardTest, HeteroTopoNeedPushKv) {
-  const PdTopo local_topo{2, 2};
-  const PdTopo remote_topo{1, 4};
+  const InstanceInfo local_info = make_info(2, {0, 1, 2, 3});
+  const InstanceInfo remote_info = make_info(1, {0, 1, 2, 3});
 
-  const PdTopoRule rule =
-      check_mlu_pd_topo(local_topo, remote_topo, true, "PULL", true);
-  EXPECT_FALSE(rule.allow);
-  EXPECT_TRUE(rule.hetero);
-  EXPECT_FALSE(rule.invalid_local);
-  EXPECT_FALSE(rule.invalid_remote);
-  EXPECT_EQ(rule.reason, "hetero pd requires kv_mode=PUSH");
+  const PdTopoResult result =
+      check_pd_topo(local_info, remote_info, true, "PULL", true);
+  EXPECT_EQ(result.status, PdTopoStatus::DENY_HETERO);
+  EXPECT_EQ(result.reason, "hetero pd requires kv_mode=PUSH");
 }
 
 TEST(PdTopologyGuardTest, HeteroTopoAllowOnMluPushMla) {
-  const PdTopo local_topo{2, 2};
-  const PdTopo remote_topo{1, 4};
+  const InstanceInfo local_info = make_info(2, {0, 1, 2, 3});
+  const InstanceInfo remote_info = make_info(1, {0, 1, 2, 3});
 
-  const PdTopoRule rule =
-      check_mlu_pd_topo(local_topo, remote_topo, true, "PUSH", true);
-  EXPECT_TRUE(rule.allow);
-  EXPECT_TRUE(rule.hetero);
-  EXPECT_FALSE(rule.invalid_local);
-  EXPECT_FALSE(rule.invalid_remote);
-  EXPECT_TRUE(rule.reason.empty());
+  const PdTopoResult result =
+      check_pd_topo(local_info, remote_info, true, "PUSH", true);
+  EXPECT_EQ(result.status, PdTopoStatus::ALLOW_HETERO);
+  EXPECT_TRUE(result.reason.empty());
 }
 
-TEST(PdTopologyGuardTest, CheckPdRuleRejectInvalidLocalTopo) {
+TEST(PdTopologyGuardTest, CheckPdTopoRejectInvalidLocalTopo) {
   const InstanceInfo local_info = make_info(0, {0, 1, 2, 3});
   const InstanceInfo remote_info = make_info(1, {0, 1, 2, 3});
 
-  const PdTopoRule rule =
-      check_pd_rule(local_info, remote_info, true, "PUSH", true);
-  EXPECT_FALSE(rule.allow);
-  EXPECT_FALSE(rule.hetero);
-  EXPECT_TRUE(rule.invalid_local);
-  EXPECT_FALSE(rule.invalid_remote);
-  EXPECT_EQ(rule.reason,
+  const PdTopoResult result =
+      check_pd_topo(local_info, remote_info, true, "PUSH", true);
+  EXPECT_EQ(result.status, PdTopoStatus::INVALID_LOCAL);
+  EXPECT_EQ(result.reason,
             "invalid local pd topo: dp_size must be greater than 0");
 }
 
-TEST(PdTopologyGuardTest, CheckPdRuleRejectInvalidRemoteTopo) {
+TEST(PdTopologyGuardTest, CheckPdTopoRejectInvalidRemoteTopo) {
   const InstanceInfo local_info = make_info(1, {0, 1, 2, 3});
   const InstanceInfo remote_info = make_info(2, {0, 1, 2});
 
-  const PdTopoRule rule =
-      check_pd_rule(local_info, remote_info, true, "PUSH", true);
-  EXPECT_FALSE(rule.allow);
-  EXPECT_FALSE(rule.hetero);
-  EXPECT_FALSE(rule.invalid_local);
-  EXPECT_TRUE(rule.invalid_remote);
-  EXPECT_EQ(rule.reason,
+  const PdTopoResult result =
+      check_pd_topo(local_info, remote_info, true, "PUSH", true);
+  EXPECT_EQ(result.status, PdTopoStatus::INVALID_REMOTE);
+  EXPECT_EQ(result.reason,
             "invalid remote pd topo: cluster_ids.size() must be divisible by "
             "dp_size");
 }

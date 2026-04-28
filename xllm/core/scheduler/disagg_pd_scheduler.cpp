@@ -19,6 +19,7 @@ limitations under the License.
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
 #include <brpc/server.h>
+#include <glog/logging.h>
 
 #include <random>
 
@@ -343,29 +344,32 @@ void DisaggPDScheduler::dispatch_requests() {
     is_mlu_build = true;
 #endif
     const bool enable_mla = engine_->model_args().enable_mla();
-    const PdTopoRule rule = check_pd_rule(instance_info_,
-                                          remote_info,
-                                          is_mlu_build,
-                                          options_.kv_cache_transfer_mode(),
-                                          enable_mla);
-    if (!rule.allow) {
-      if (rule.invalid_remote) {
+    const PdTopoResult topo_result =
+        check_pd_topo(instance_info_,
+                      remote_info,
+                      is_mlu_build,
+                      options_.kv_cache_transfer_mode(),
+                      enable_mla);
+    const bool allow_pd_topo = topo_result.status == PdTopoStatus::ALLOW_HOMO ||
+                               topo_result.status == PdTopoStatus::ALLOW_HETERO;
+    if (!allow_pd_topo) {
+      if (topo_result.status == PdTopoStatus::INVALID_REMOTE) {
         remote_instances_info_.erase(selected_instance);
       }
       response_processor_->process_failed_request(
           request,
           {StatusCode::INVALID_ARGUMENT,
            "decode instance " + selected_instance +
-               " is incompatible: " + rule.reason});
+               " is incompatible: " + topo_result.reason});
       continue;
     }
-    if (rule.hetero) {
+    if (topo_result.status == PdTopoStatus::ALLOW_HETERO && VLOG_IS_ON(1)) {
       const PdTopo local_topo = get_pd_topo(instance_info_);
       const PdTopo remote_topo = get_pd_topo(remote_info);
-      LOG(INFO) << "Allow hetero pd topo guard: local dp/tp="
-                << local_topo.dp_size << "/" << local_topo.tp_size
-                << ", remote dp/tp=" << remote_topo.dp_size << "/"
-                << remote_topo.tp_size;
+      VLOG(1) << "Allow hetero pd topo guard: local dp/tp="
+              << local_topo.dp_size << "/" << local_topo.tp_size
+              << ", remote dp/tp=" << remote_topo.dp_size << "/"
+              << remote_topo.tp_size;
     }
 
     proto::DisaggPDService_Stub* stub = create_rpc_channel(selected_instance);
