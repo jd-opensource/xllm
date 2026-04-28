@@ -677,10 +677,12 @@ class DeepseekV4ModelImpl
     if (dsa.actual_seq_lengths_query.defined() &&
         dsa.actual_seq_lengths_query.dim() > 0 &&
         dsa.actual_seq_lengths_query.size(0) > 1) {
-      query_lens = dsa.actual_seq_lengths_query.slice(
-          /*dim=*/0,
-          /*start=*/1,
-          /*end=*/dsa.actual_seq_lengths_query.size(0));
+      query_lens = dsa.actual_seq_lengths_query
+                       .slice(
+                           /*dim=*/0,
+                           /*start=*/1,
+                           /*end=*/dsa.actual_seq_lengths_query.size(0))
+                       .clone();
     } else if (dsa.seq_lens_q.defined()) {
       query_lens = dsa.seq_lens_q;
     }
