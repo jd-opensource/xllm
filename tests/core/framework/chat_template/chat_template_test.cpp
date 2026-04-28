@@ -55,6 +55,7 @@ TEST(ChatTemplateFactory, NonDeepseekModelUsesJinjaWhenFlagEnabled) {
   ScopedUseCppChatTemplate scoped_flag(/*enabled=*/true);
   TokenizerArgs args;
 
+  FLAGS_use_cpp_chat_template = false;
   std::unique_ptr<ChatTemplate> impl =
       ChatTemplate::create(args, /*model_type=*/"qwen3");
 

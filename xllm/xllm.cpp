@@ -50,6 +50,9 @@ static const std::unordered_set<std::string> prefill_sp_supported_model_set = {
     "deepseek_v32",
     "glm_moe_dsa"};
 
+static const std::unordered_set<std::string> cpp_template_supported_model_set =
+    {"deepseek_v32", "deepseek_v4"};
+
 namespace {
 
 void fix_mlu_disagg_pd_flags() {
@@ -158,6 +161,11 @@ void validate_flags(const std::string& model_type) {
     LOG(FATAL) << "enable_rolling_load is only supported on NPU.";
   }
 #endif
+
+  if (!(FLAGS_use_cpp_chat_template &&
+        cpp_template_supported_model_set.contains(model_type))) {
+    FLAGS_use_cpp_chat_template = false;
+  }
 }
 
 int run() {
