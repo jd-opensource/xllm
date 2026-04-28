@@ -115,7 +115,7 @@ torch::Tensor apply_partial_rope(torch::Tensor q,
 
   auto cos_4d = cos_cache.view({cos_cache.size(0), 1, 1, rope_head_dim});
   auto sin_4d = sin_cache.view({sin_cache.size(0), 1, 1, rope_head_dim});
-  auto q_4d = (q.dim() == 3) ? q.unsqueeze(2) : q.unsqueeze(1).unsqueeze(1);
+  auto q_4d = (q.dim() == 3) ? q.unsqueeze(1) : q.unsqueeze(1).unsqueeze(1);
   xllm::kernel::NpuInplacePartialRotaryMulParams rope_params;
   rope_params.x = q_4d;
   rope_params.r1 = cos_4d;
@@ -123,7 +123,7 @@ torch::Tensor apply_partial_rope(torch::Tensor q,
   rope_params.rotary_mode = "interleave";
   rope_params.partial_slice = {rope_start_dim, rope_start_dim + rope_head_dim};
   xllm::kernel::npu_inplace_partial_rotary_mul(rope_params);
-  return (q.dim() == 3) ? q_4d.squeeze(2) : q_4d.squeeze(1).squeeze(1);
+  return (q.dim() == 3) ? q_4d.squeeze(1) : q_4d.squeeze(1).squeeze(1);
 }
 
 std::tuple<torch::Tensor, torch::Tensor> dynamic_quant_int8(
