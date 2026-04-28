@@ -187,16 +187,13 @@ void CompressorImpl::load_state_dict(const StateDict& state_dict) {
                                                "wgate.linear.weight",
                                                "gate.weight",
                                                "score_proj.weight"});
-  const auto norm = get_first_defined_tensor(state_dict,
-                                             {"norm.weight",
-                                              "norm",
-                                              "layer_norm.weight",
-                                              "rms_norm.weight"});
+  const auto norm = get_first_defined_tensor(
+      state_dict,
+      {"norm.weight", "norm", "layer_norm.weight", "rms_norm.weight"});
   auto ape = get_first_defined_tensor(
       state_dict, {"ape", "ape.weight", "position_bias", "rope_bias"});
 
-  if (!wkv.defined() && !wgate.defined() && !norm.defined() &&
-      !ape.defined()) {
+  if (!wkv.defined() && !wgate.defined() && !norm.defined() && !ape.defined()) {
     // In multi-file checkpoints each call may contain only part of weights.
     return;
   }
@@ -218,8 +215,8 @@ void CompressorImpl::load_state_dict(const StateDict& state_dict) {
     cmp_norm_loaded_ = true;
   }
   if (ape.defined()) {
-    CHECK_EQ(ape.dim(), 2)
-        << "ape weight dim should be 2, but got " << ape.dim();
+    CHECK_EQ(ape.dim(), 2) << "ape weight dim should be 2, but got "
+                           << ape.dim();
     CHECK_EQ(ape.size(0), compress_ratio_)
         << "ape weight size mismatch on dim0, expected " << compress_ratio_
         << " but got " << ape.size(0);
@@ -229,21 +226,6 @@ void CompressorImpl::load_state_dict(const StateDict& state_dict) {
     cmp_ape_ = ape.to(options_.dtype(torch::kFloat32));
     cmp_ape_loaded_ = true;
   }
-
-#if defined(USE_NPU)
-  if (is_npu_device) {
-    if (cmp_wkv_loaded_) {
-      cmp_wkv_ = at_npu::native::npu_format_cast(cmp_wkv_, 29);
-    }
-    if (cmp_wgate_loaded_) {
-      cmp_wgate_ = at_npu::native::npu_format_cast(cmp_wgate_, 29);
-    }
-  }
-#else
-  CHECK(!is_npu_device)
-      << "Compressor weights are on NPU device, but xllm is built without "
-         "USE_NPU.";
-#endif
 
   if (cmp_wkv_loaded_) {
     CHECK_EQ(cmp_wkv_.device(), options_.device())
@@ -269,12 +251,12 @@ void CompressorImpl::load_state_dict(const StateDict& state_dict) {
   if (!(cmp_wkv_loaded_ && cmp_wgate_loaded_ && cmp_norm_loaded_ &&
         cmp_ape_loaded_)) {
     LOG(INFO) << "[MOE_LOAD_DEBUG][Compressor] partial load under "
-              << state_dict.prefix() << ", loaded={wkv:"
-              << (cmp_wkv_loaded_ ? "true" : "false")
+              << state_dict.prefix()
+              << ", loaded={wkv:" << (cmp_wkv_loaded_ ? "true" : "false")
               << ", wgate:" << (cmp_wgate_loaded_ ? "true" : "false")
               << ", norm:" << (cmp_norm_loaded_ ? "true" : "false")
-              << ", ape:" << (cmp_ape_loaded_ ? "true" : "false")
-              << "} keys=[" << list_available_keys(state_dict) << "]";
+              << ", ape:" << (cmp_ape_loaded_ ? "true" : "false") << "} keys=["
+              << list_available_keys(state_dict) << "]";
   }
 }
 
