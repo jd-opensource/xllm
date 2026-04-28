@@ -63,14 +63,15 @@ void merge_xtensor_offsets(
   for (size_t layer_id = 0; layer_id < layer_offsets.size() &&
                             layer_id < merged_layer_offsets.size();
        ++layer_id) {
-    merged_layer_offsets[layer_id].k_offsets.insert(
-        merged_layer_offsets[layer_id].k_offsets.end(),
-        layer_offsets[layer_id].k_offsets.begin(),
-        layer_offsets[layer_id].k_offsets.end());
-    merged_layer_offsets[layer_id].v_offsets.insert(
-        merged_layer_offsets[layer_id].v_offsets.end(),
-        layer_offsets[layer_id].v_offsets.begin(),
-        layer_offsets[layer_id].v_offsets.end());
+    std::vector<uint64_t>& k_target = merged_layer_offsets[layer_id].k_offsets;
+    const std::vector<uint64_t>& k_source = layer_offsets[layer_id].k_offsets;
+    k_target.reserve(k_target.size() + k_source.size());
+    k_target.insert(k_target.end(), k_source.begin(), k_source.end());
+
+    std::vector<uint64_t>& v_target = merged_layer_offsets[layer_id].v_offsets;
+    const std::vector<uint64_t>& v_source = layer_offsets[layer_id].v_offsets;
+    v_target.reserve(v_target.size() + v_source.size());
+    v_target.insert(v_target.end(), v_source.begin(), v_source.end());
   }
 }
 
@@ -93,9 +94,11 @@ void merge_kv_info(
     kv_info.dst_addr = dst_addr;
     kv_info.dst_k_cache_id = k_cache_id;
     kv_info.dst_v_cache_id = v_cache_id;
+    kv_info.src_blocks.reserve(info.local_blocks_ids.size());
     kv_info.src_blocks.insert(kv_info.src_blocks.end(),
                               info.local_blocks_ids.begin(),
                               info.local_blocks_ids.end());
+    kv_info.dst_blocks.reserve(info.remote_blocks_ids.size());
     kv_info.dst_blocks.insert(kv_info.dst_blocks.end(),
                               info.remote_blocks_ids.begin(),
                               info.remote_blocks_ids.end());
@@ -105,12 +108,17 @@ void merge_kv_info(
     return;
   }
 
-  it->second.src_blocks.insert(it->second.src_blocks.end(),
-                               info.local_blocks_ids.begin(),
-                               info.local_blocks_ids.end());
-  it->second.dst_blocks.insert(it->second.dst_blocks.end(),
-                               info.remote_blocks_ids.begin(),
-                               info.remote_blocks_ids.end());
+  std::vector<uint64_t>& src_blocks = it->second.src_blocks;
+  src_blocks.reserve(src_blocks.size() + info.local_blocks_ids.size());
+  src_blocks.insert(src_blocks.end(),
+                    info.local_blocks_ids.begin(),
+                    info.local_blocks_ids.end());
+
+  std::vector<uint64_t>& dst_blocks = it->second.dst_blocks;
+  dst_blocks.reserve(dst_blocks.size() + info.remote_blocks_ids.size());
+  dst_blocks.insert(dst_blocks.end(),
+                    info.remote_blocks_ids.begin(),
+                    info.remote_blocks_ids.end());
   merge_xtensor_offsets(it->second.dst_xtensor_layer_offsets,
                         info.dst_xtensor_layer_offsets);
 }

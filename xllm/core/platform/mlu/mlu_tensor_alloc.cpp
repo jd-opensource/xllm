@@ -18,6 +18,8 @@ limitations under the License.
 #include <cnrt.h>
 #include <glog/logging.h>
 
+#include <limits>
+
 namespace xllm::mlu {
 
 namespace {
@@ -27,9 +29,18 @@ size_t get_nbytes(const std::vector<int64_t>& dims,
   size_t count = 1;
   for (int64_t dim : dims) {
     CHECK_GE(dim, 0) << "tensor dim must be non-negative";
-    count *= static_cast<size_t>(dim);
+    const size_t dim_size = static_cast<size_t>(dim);
+    if (dim_size > static_cast<size_t>(0)) {
+      CHECK_LE(count, std::numeric_limits<size_t>::max() / dim_size)
+          << "tensor element count overflow";
+    }
+    count *= dim_size;
   }
-  return count * static_cast<size_t>(torch::elementSize(dtype));
+  const size_t elem_size = static_cast<size_t>(torch::elementSize(dtype));
+  CHECK_GT(elem_size, static_cast<size_t>(0)) << "tensor dtype size is zero";
+  CHECK_LE(count, std::numeric_limits<size_t>::max() / elem_size)
+      << "tensor byte size overflow";
+  return count * elem_size;
 }
 
 void free_tensor(void* ptr, int32_t device_id) {
