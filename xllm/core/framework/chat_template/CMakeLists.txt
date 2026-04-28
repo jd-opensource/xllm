@@ -29,11 +29,11 @@ cc_library (
 
 cc_library (
   NAME
-    deepseek_v32_native_template
+    deepseek_v32_cpp_template
   HDRS
-    deepseek_v32_native_template.h
+    deepseek_v32_cpp_template.h
   SRCS
-    deepseek_v32_native_template.cpp
+    deepseek_v32_cpp_template.cpp
   DEPS
     :chat_template_base
     :tokenizer
@@ -51,7 +51,7 @@ cc_library (
   DEPS
     :chat_template_base
     :jinja_chat_template
-    :deepseek_v32_native_template
+    :deepseek_v32_cpp_template
     nlohmann_json::nlohmann_json
     glog::glog
     gflags
@@ -69,11 +69,11 @@ cc_test (
 
 cc_test (
   NAME
-    deepseek_v32_native_template_test
+    deepseek_v32_cpp_template_test
   SRCS
-    deepseek_v32_native_template_test.cpp
+    deepseek_v32_cpp_template_test.cpp
   DEPS
-    :deepseek_v32_native_template
+    :deepseek_v32_cpp_template
     GTest::gtest_main
 )
 
@@ -85,7 +85,7 @@ cc_test (
   DEPS
     :chat_template
     :jinja_chat_template
-    :deepseek_v32_native_template
+    :deepseek_v32_cpp_template
     GTest::gtest_main
     gflags
 )

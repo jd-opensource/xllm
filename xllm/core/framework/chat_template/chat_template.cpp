@@ -18,7 +18,7 @@ limitations under the License.
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
-#include "framework/chat_template/deepseek_v32_native_template.h"
+#include "framework/chat_template/deepseek_v32_cpp_template.h"
 #include "framework/chat_template/jinja_chat_template.h"
 
 DECLARE_bool(use_cpp_chat_template);
@@ -31,7 +31,7 @@ std::unique_ptr<ChatTemplate> ChatTemplate::create(
   if (FLAGS_use_cpp_chat_template && model_type == "deepseek_v32") {
     LOG(INFO) << "Using native C++ chat template for "
               << "model_type: " << model_type;
-    return std::make_unique<DeepseekV32NativeTemplate>(tokenizer_args);
+    return std::make_unique<DeepseekV32CppTemplate>(tokenizer_args);
   }
   LOG(INFO) << "Using Jinja chat template for "
             << "model_type: " << model_type;

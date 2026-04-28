@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "framework/chat_template/deepseek_v32_native_template.h"
+#include "framework/chat_template/deepseek_v32_cpp_template.h"
 
 #include <absl/strings/match.h>
 #include <absl/strings/str_join.h>
@@ -655,17 +655,17 @@ parse_tool_calls(int32_t index, const std::string& text) {
 
 }  // namespace
 
-DeepseekV32NativeTemplate::DeepseekV32NativeTemplate(const TokenizerArgs& args)
+DeepseekV32CppTemplate::DeepseekV32CppTemplate(const TokenizerArgs& args)
     : args_(args) {}
 
-std::optional<std::string> DeepseekV32NativeTemplate::apply(
+std::optional<std::string> DeepseekV32CppTemplate::apply(
     const ChatMessages& messages) const {
   const std::vector<xllm::JsonTool> empty_tools;
   const nlohmann::ordered_json kwargs = nlohmann::json::object();
   return apply(messages, empty_tools, kwargs);
 }
 
-std::optional<std::string> DeepseekV32NativeTemplate::apply(
+std::optional<std::string> DeepseekV32CppTemplate::apply(
     const ChatMessages& messages,
     const std::vector<xllm::JsonTool>& json_tools,
     const nlohmann::ordered_json& chat_template_kwargs) const {

@@ -13,16 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "framework/chat_template/deepseek_v32_native_template.h"
+#include "framework/chat_template/deepseek_v32_cpp_template.h"
 
 #include <gtest/gtest.h>
 
 namespace xllm {
 
-TEST(DeepseekV32NativeTemplate, BasicUserMessage) {
+TEST(DeepseekV32CppTemplate, BasicUserMessage) {
   TokenizerArgs args;
   args.bos_token("<｜begin▁of▁sentence｜>");
-  DeepseekV32NativeTemplate encoder(args);
+  DeepseekV32CppTemplate encoder(args);
 
   ChatMessages messages;
   messages.emplace_back("user", "hello");
@@ -35,10 +35,10 @@ TEST(DeepseekV32NativeTemplate, BasicUserMessage) {
   EXPECT_NE(prompt->find("<｜User｜>hello<｜Assistant｜>"), std::string::npos);
 }
 
-TEST(DeepseekV32NativeTemplate, DefaultThinkingModeIsChat) {
+TEST(DeepseekV32CppTemplate, DefaultThinkingModeIsChat) {
   TokenizerArgs args;
   args.bos_token("<｜begin▁of▁sentence｜>");
-  DeepseekV32NativeTemplate encoder(args);
+  DeepseekV32CppTemplate encoder(args);
 
   ChatMessages messages;
   messages.emplace_back("user", "hello");
@@ -51,10 +51,10 @@ TEST(DeepseekV32NativeTemplate, DefaultThinkingModeIsChat) {
   EXPECT_EQ(prompt->find("<think>"), std::string::npos);
 }
 
-TEST(DeepseekV32NativeTemplate, ThinkingModeEnabledByKwargs) {
+TEST(DeepseekV32CppTemplate, ThinkingModeEnabledByKwargs) {
   TokenizerArgs args;
   args.bos_token("<｜begin▁of▁sentence｜>");
-  DeepseekV32NativeTemplate encoder(args);
+  DeepseekV32CppTemplate encoder(args);
 
   ChatMessages messages;
   messages.emplace_back("user", "hello");
@@ -68,10 +68,10 @@ TEST(DeepseekV32NativeTemplate, ThinkingModeEnabledByKwargs) {
   EXPECT_NE(prompt->find("<think>"), std::string::npos);
 }
 
-TEST(DeepseekV32NativeTemplate, ToolsInjectionFormat) {
+TEST(DeepseekV32CppTemplate, ToolsInjectionFormat) {
   TokenizerArgs args;
   args.bos_token("<｜begin▁of▁sentence｜>");
-  DeepseekV32NativeTemplate encoder(args);
+  DeepseekV32CppTemplate encoder(args);
 
   ChatMessages messages;
   messages.emplace_back("user", "weather in beijing");
@@ -100,10 +100,10 @@ TEST(DeepseekV32NativeTemplate, ToolsInjectionFormat) {
             std::string::npos);
 }
 
-TEST(DeepseekV32NativeTemplate, ToolsInjectedAsNewSystemMessage) {
+TEST(DeepseekV32CppTemplate, ToolsInjectedAsNewSystemMessage) {
   TokenizerArgs args;
   args.bos_token("<｜begin▁of▁sentence｜>");
-  DeepseekV32NativeTemplate encoder(args);
+  DeepseekV32CppTemplate encoder(args);
 
   ChatMessages messages;
   messages.emplace_back("system", "You are helpful.");
@@ -129,10 +129,10 @@ TEST(DeepseekV32NativeTemplate, ToolsInjectedAsNewSystemMessage) {
   EXPECT_LT(tools_pos, content_pos);
 }
 
-TEST(DeepseekV32NativeTemplate, DropThinkingOnlyWhenLastMessageIsUser) {
+TEST(DeepseekV32CppTemplate, DropThinkingOnlyWhenLastMessageIsUser) {
   TokenizerArgs args;
   args.bos_token("<｜begin▁of▁sentence｜>");
-  DeepseekV32NativeTemplate encoder(args);
+  DeepseekV32CppTemplate encoder(args);
 
   // user -> assistant(with reasoning) -> tool
   ChatMessages messages;

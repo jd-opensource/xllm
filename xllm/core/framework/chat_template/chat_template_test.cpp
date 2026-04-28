@@ -18,7 +18,7 @@ limitations under the License.
 #include <gflags/gflags.h>
 #include <gtest/gtest.h>
 
-#include "framework/chat_template/deepseek_v32_native_template.h"
+#include "framework/chat_template/deepseek_v32_cpp_template.h"
 #include "framework/chat_template/jinja_chat_template.h"
 
 DECLARE_bool(use_cpp_chat_template);
@@ -48,7 +48,7 @@ TEST(ChatTemplateFactory, DeepseekV32FallsBackToJinjaWhenFlagDisabled) {
 
   ASSERT_TRUE(impl != nullptr);
   EXPECT_NE(dynamic_cast<JinjaChatTemplate*>(impl.get()), nullptr);
-  EXPECT_EQ(dynamic_cast<DeepseekV32NativeTemplate*>(impl.get()), nullptr);
+  EXPECT_EQ(dynamic_cast<DeepseekV32CppTemplate*>(impl.get()), nullptr);
 }
 
 TEST(ChatTemplateFactory, NonDeepseekModelUsesJinjaWhenFlagEnabled) {
@@ -60,7 +60,7 @@ TEST(ChatTemplateFactory, NonDeepseekModelUsesJinjaWhenFlagEnabled) {
 
   ASSERT_TRUE(impl != nullptr);
   EXPECT_NE(dynamic_cast<JinjaChatTemplate*>(impl.get()), nullptr);
-  EXPECT_EQ(dynamic_cast<DeepseekV32NativeTemplate*>(impl.get()), nullptr);
+  EXPECT_EQ(dynamic_cast<DeepseekV32CppTemplate*>(impl.get()), nullptr);
 }
 
 }  // namespace

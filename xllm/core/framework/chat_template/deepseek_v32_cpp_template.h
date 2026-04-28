@@ -27,9 +27,9 @@ limitations under the License.
 
 namespace xllm {
 
-class DeepseekV32NativeTemplate final : public ChatTemplate {
+class DeepseekV32CppTemplate final : public ChatTemplate {
  public:
-  explicit DeepseekV32NativeTemplate(const TokenizerArgs& args);
+  explicit DeepseekV32CppTemplate(const TokenizerArgs& args);
 
   std::optional<std::string> apply(const ChatMessages& messages) const override;
 
