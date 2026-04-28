@@ -341,6 +341,11 @@ class DeepseekV4ModelImpl
     }
     auto& attn_metadata = *(modified_input_params.attn_metadata);
 
+    // Per-ratio RoPE for the main q/kv path.  These all use input_positions;
+    // c4_cos/c128_cos below are separate compressed-position RoPE tensors.
+    std::unordered_map<int32_t, layer::DeepseekV4RotaryEmbedding::CosSinPair>
+        input_rope_by_ratio;
+
     if (attn_metadata.dsa_metadata) {
       auto& dsa = *(attn_metadata.dsa_metadata);
 
@@ -408,6 +413,7 @@ class DeepseekV4ModelImpl
 
           auto default_it = group_cos_sin.find("default");
           if (default_it != group_cos_sin.end()) {
+            input_rope_by_ratio[1] = default_it->second;
             dsa.cos = default_it->second.first;
             dsa.sin = default_it->second.second;
           }
@@ -422,6 +428,25 @@ class DeepseekV4ModelImpl
           if (c128_it != group_cos_sin.end()) {
             dsa.c128_cos = c128_it->second.first;
             dsa.c128_sin = c128_it->second.second;
+          }
+        }
+
+        if (dsa.input_positions.defined() && dsa.input_positions.numel() > 0) {
+          auto input_positions = dsa.input_positions;
+          if (input_positions.scalar_type() != torch::kInt64) {
+            input_positions = input_positions.to(torch::kInt64);
+          }
+          // C4/C128 layers still apply main q/kv RoPE at input-token length;
+          // only the RoPE group changes to use the compressed theta.
+          auto input_group_cos_sin = dsa_rotary_embedding_->build(
+              {{"c4", input_positions}, {"c128", input_positions}});
+          auto c4_input_it = input_group_cos_sin.find("c4");
+          if (c4_input_it != input_group_cos_sin.end()) {
+            input_rope_by_ratio[4] = c4_input_it->second;
+          }
+          auto c128_input_it = input_group_cos_sin.find("c128");
+          if (c128_input_it != input_group_cos_sin.end()) {
+            input_rope_by_ratio[128] = c128_input_it->second;
           }
         }
       }
@@ -439,7 +464,33 @@ class DeepseekV4ModelImpl
       if (attn_metadata.dsa_metadata) {
         auto& dsa = *(attn_metadata.dsa_metadata);
         const int32_t layer_id = static_cast<int32_t>(i);
+        // Each layer can use a different compression ratio. Read the ratio
+        // configured for this layer, or fall back to the uncompressed ratio 1
+        // when no per-layer value is available. normalize maps all values <= 1
+        // to 1.
         dsa.layer_id = layer_id;
+        const int32_t layer_compress_ratio =
+            deepseek_v4_normalize_compress_ratio(
+                (layer_id <
+                 static_cast<int32_t>(model_args_.compress_ratios().size()))
+                    ? model_args_
+                          .compress_ratios()[static_cast<size_t>(layer_id)]
+                    : 1);
+        // input_rope_by_ratio stores the main q/kv RoPE cos/sin tensors keyed
+        // by compression ratio. Prefer the RoPE tensors matching this layer.
+        auto rope_it = input_rope_by_ratio.find(layer_compress_ratio);
+        if (rope_it == input_rope_by_ratio.end()) {
+          // If no tensors were precomputed for this ratio, fall back to the
+          // default uncompressed RoPE to avoid leaving dsa.cos/dsa.sin stale or
+          // empty.
+          rope_it = input_rope_by_ratio.find(1);
+        }
+        if (rope_it != input_rope_by_ratio.end()) {
+          // Store the RoPE tensors selected for this layer in DSA metadata;
+          // the attention kernel reads them from dsa.
+          dsa.cos = rope_it->second.first;
+          dsa.sin = rope_it->second.second;
+        }
 
         if (layer_id < static_cast<int32_t>(dsa.block_tables.size()) &&
             layer_id < static_cast<int32_t>(dsa.slot_mappings.size()) &&

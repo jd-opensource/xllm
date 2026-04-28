@@ -72,9 +72,10 @@ struct DSAMetadata {
   // cp_input_dict: context-parallel inputs placeholder (reserved, optional)
   std::unordered_map<std::string, torch::Tensor> cp_input_dict;
 
-  // RoPE caches (per-position, extracted from dsa_cos_sin table)
+  // RoPE caches selected for the current layer's q/kv/output RoPE.
   torch::Tensor cos;
   torch::Tensor sin;
+  // RoPE caches for compressor/indexer paths, indexed by compressed positions.
   torch::Tensor c4_cos;
   torch::Tensor c4_sin;
   torch::Tensor c128_cos;

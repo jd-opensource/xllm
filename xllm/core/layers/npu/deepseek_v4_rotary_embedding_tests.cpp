@@ -58,7 +58,7 @@ TEST(DeepseekV4RotaryEmbeddingTest, BuildReturnsExpectedShapes) {
   auto rope = create_test_rotary_embedding();
   std::unordered_map<std::string, torch::Tensor> positions_map = {
       {"default", torch::tensor({0, 1, 2}, torch::kInt64)},
-      {"c4", torch::tensor({0, 1}, torch::kInt64)},
+      {"c4", torch::tensor({0, 4}, torch::kInt64)},
       {"c128", torch::tensor({0}, torch::kInt64)}};
 
   auto result = rope.build(positions_map);
