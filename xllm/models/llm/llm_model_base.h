@@ -222,10 +222,20 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
       model_->load_state_dict(sub_dict);
 
       if (tie_word_embeddings) {
-        lm_head_->load_state_dict(
-            state_dict->get_dict_with_prefix(prefix + "embed_tokens."));
+        auto lm_head_state_dict =
+            state_dict->get_dict_with_prefix(std::vector<std::string>{
+                prefix + "embed_tokens.", "embed_tokens.", "embed."});
+        lm_head_->load_state_dict(lm_head_state_dict);
       } else {
-        lm_head_->load_state_dict(state_dict->get_dict_with_prefix("lm_head."));
+        auto lm_head_state_dict = state_dict->get_dict_with_prefix(
+            std::vector<std::string>{"lm_head.",
+                                     "model.lm_head.",
+                                     "model.head.",
+                                     "head.",
+                                     prefix,
+                                     prefix + "lm_head.",
+                                     prefix + "head."});
+        lm_head_->load_state_dict(lm_head_state_dict);
       }
     }
   }
