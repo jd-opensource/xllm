@@ -20,14 +20,6 @@ if(USE_NPU)
   # CANN 8.5+ migration: ascend_direct_transport replaces ascend_transport
   set(USE_ASCEND_DIRECT ON CACHE BOOL "Enable ADXL engine for Ascend NPU" FORCE)
 
-  set(XLLM_ATB_LAYERS_SOURCE_DIR
-      "${CMAKE_SOURCE_DIR}/third_party/xllm_atb_layers"
-      CACHE PATH "Path to xllm_atb_layers source tree")
-  if(NOT EXISTS "${XLLM_ATB_LAYERS_SOURCE_DIR}")
-    message(FATAL_ERROR "xllm_atb_layers source not found: ${XLLM_ATB_LAYERS_SOURCE_DIR}")
-  endif()
-  message(STATUS "Using xllm_atb_layers source at: ${XLLM_ATB_LAYERS_SOURCE_DIR}")
-
   execute_process(
     COMMAND git -c "safe.directory=${CMAKE_SOURCE_DIR}/third_party/xllm_ops" -C "${CMAKE_SOURCE_DIR}/third_party/xllm_ops" rev-parse HEAD
     OUTPUT_VARIABLE XLLM_OPS_GIT_HEAD
@@ -255,6 +247,7 @@ find_package(Boost REQUIRED)
 find_package(Boost REQUIRED COMPONENTS serialization)
 find_package(Threads REQUIRED)
 # find all dependencies from vcpkg
+find_package(folly CONFIG REQUIRED)
 find_package(glog CONFIG REQUIRED)
 find_package(gflags CONFIG REQUIRED)
 find_package(leveldb CONFIG REQUIRED)
@@ -273,7 +266,6 @@ if(Protobuf_INCLUDE_DIRS)
   include_directories(BEFORE SYSTEM ${Protobuf_INCLUDE_DIRS})
 endif()
 find_package(gRPC CONFIG REQUIRED)
-find_package(folly CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 find_package(benchmark CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
@@ -327,13 +319,19 @@ if(USE_NPU)
   set(CMAKE_VERBOSE_MAKEFILE ON)
   add_definitions(-DTORCH_HIGHER_THAN_PTA6)
 
+  # Use vcpkg header files as the first priority search directory,
+  #-> because the scope of third-party softwares managed by vcpkg is used throughout the entire xllm.
+  message(STATUS "VCPKG_INCLUDE_DIR = ${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
+  include_directories("${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/include")
+
   add_subdirectory(
     "${XLLM_ATB_LAYERS_SOURCE_DIR}"
     "${CMAKE_BINARY_DIR}/xllm_atb_layers"
   )
   message(STATUS "Configured xllm_atb_layers from source: ${XLLM_ATB_LAYERS_SOURCE_DIR}")
 
-  include_directories(
+  # torch npu_torch and npu ops is only used by npu related modules/classes, so system priority is reasonable.
+  include_directories(SYSTEM
       $ENV{PYTHON_INCLUDE_PATH}
       $ENV{PYTORCH_INSTALL_PATH}/include
       $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
