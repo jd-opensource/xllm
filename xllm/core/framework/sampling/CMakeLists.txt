@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 cc_library(
   NAME 
@@ -28,28 +27,3 @@ cc_library(
     :kernels
     $<$<BOOL:${USE_NPU}>:xllm_ops>
 )
-
-cc_test(
-  NAME
-    sampler_test
-  SRCS
-    rejection_sampler_test.cpp
-    rejection_sampler.cpp
-    sampling_params_test.cpp
-  DEPS
-    absl::strings
-    GTest::gtest_main
-    :flags
-    :sampler
-    glog::glog
-    :state_dict
-)
-target_link_libraries(sampler_test PRIVATE brpc OpenSSL::SSL OpenSSL::Crypto leveldb::leveldb protobuf::libprotobuf)
-target_link_libraries(sampler_test
-                      PUBLIC
-                      Python::Python
-                      $<$<BOOL:${USE_NPU}>:ascendcl>
-                      $<$<BOOL:${USE_NPU}>:hccl>
-                      $<$<BOOL:${USE_NPU}>:c_sec>
-                      $<$<BOOL:${USE_NPU}>:nnopbase>)
-add_dependencies(sampler_test brpc-static)

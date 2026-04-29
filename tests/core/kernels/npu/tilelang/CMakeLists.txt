@@ -1,0 +1,37 @@
+include(cc_test)
+
+cc_test(
+  NAME
+    rope_wrapper_test
+  SRCS
+    rope_wrapper_test.cpp
+  DEPS
+    :tilelang_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
+)
+
+cc_test(
+  NAME
+    fused_gdn_gating_wrapper_test
+  SRCS
+    fused_gdn_gating_wrapper_test.cpp
+  DEPS
+    :tilelang_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
+)
+
+cc_test(
+  NAME
+    split_qkv_rmsnorm_mrope_wrapper_test
+  SRCS
+    split_qkv_rmsnorm_mrope_wrapper_test.cpp
+  DEPS
+    :tilelang_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
+)

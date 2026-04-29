@@ -1,6 +1,5 @@
 include(cc_binary)
 include(cc_library)
-include(cc_test)
 
 cc_library(
   NAME 
@@ -32,32 +31,3 @@ cc_library(
     :xtensor
 )
 target_link_libraries(block PRIVATE Folly::folly)
-
-if(USE_NPU)
-  set(TEST_SRCS
-    block_manager_test.cpp
-    single_block_manager_test.cpp
-  )
-
-  cc_test(
-    NAME
-      block_test
-    SRCS
-      ${TEST_SRCS}
-    DEPS
-      :xllm_server
-      :block
-      :flags
-      :kv_cache
-      :prefix_cache
-      absl::random_random
-      Boost::serialization
-      GTest::gtest_main
-  )
-
-  target_link_libraries(block_test PRIVATE Folly::folly OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf c_sec)
-  # Resolve static link order between xtensor and xllm_server for this test target.
-  target_link_libraries(block_test PRIVATE
-    "$<LINK_GROUP:RESCAN,xtensor,xllm_server>")
-  add_dependencies(block_test brpc-static)
-endif()

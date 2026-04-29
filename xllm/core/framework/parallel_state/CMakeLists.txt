@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 cc_library(
   NAME
@@ -46,46 +45,3 @@ cc_library(
     gflags::gflags
     glog::glog
 )
-
-if(USE_NPU)
-  cc_test(
-    NAME
-      mapping_npu_test
-    SRCS
-      mapping_npu_test.cpp
-    DEPS
-      parallel_state
-      absl::synchronization
-      absl::time
-      GTest::gtest_main
-      xllm_atb_layers
-      nnopbase
-      ascendcl
-      atb
-      c_sec
-      spdlog::spdlog
-  )
-
-  cc_test(
-    NAME
-      npu_dp_ep_padding_test
-    SRCS
-      npu_dp_ep_padding_test.cpp
-    DEPS
-      parallel_state
-      torch
-      absl::synchronization
-      absl::time
-      GTest::gtest_main
-  )
-  target_link_libraries(npu_dp_ep_padding_test
-                        PUBLIC Python::Python
-                               ascendcl
-                               hccl
-                               c_sec
-                               nnopbase)
-endif()
-
-if(USE_MLU)
-  add_subdirectory(tests)
-endif()

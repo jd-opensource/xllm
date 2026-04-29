@@ -25,7 +25,7 @@
 
 #include <cub/cub.cuh>
 
-#include "arch_condition.h"
+#include "core/kernels/cuda/arch_condition.h"
 
 namespace xllm::kernel::cuda {
 namespace reduce_topk {

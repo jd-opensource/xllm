@@ -64,7 +64,3 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:npu_torch_layers>
     $<$<BOOL:${USE_MUSA}>:musa_layers>
 )
-
-if(USE_MLU)
-  add_subdirectory(tests)
-endif()

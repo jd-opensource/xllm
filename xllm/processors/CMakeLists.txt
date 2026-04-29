@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 # Define the base dependencies
 set(BASE_DEPS

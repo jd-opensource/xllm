@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 cc_library(
   NAME 
@@ -52,18 +51,5 @@ cc_library(
     gflags::gflags
 )
 
-cc_test(
-  NAME 
-    common_test
-  SRCS
-    rate_limiter_test.cpp
-  DEPS
-    common
-    absl::synchronization
-    absl::time
-    GTest::gtest_main
-    gflags::gflags
-    glog::glog
-)
 target_link_libraries(common PRIVATE OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
 add_dependencies(common brpc-static)

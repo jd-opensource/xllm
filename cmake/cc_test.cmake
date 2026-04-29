@@ -52,12 +52,55 @@ function(cc_test)
     endforeach()
   endif()
 
+  set(_CC_TEST_SRCS "")
+  set(_CC_TEST_INCLUDE_DIRS ${CC_TEST_INCLUDES})
+  list(APPEND _CC_TEST_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR})
+
+  # xllm test sources live under tests and often include private headers
+  # from the mirrored production source directory.
+  if(DEFINED XLLM_TESTS_DIR)
+    list(APPEND _CC_TEST_INCLUDE_DIRS
+      ${PROJECT_SOURCE_DIR}/xllm
+      ${XLLM_TESTS_DIR}
+      ${XLLM_TESTS_DIR}/core
+    )
+  endif()
+
+  foreach(src IN LISTS CC_TEST_SRCS)
+    if(IS_ABSOLUTE "${src}")
+      list(APPEND _CC_TEST_SRCS "${src}")
+      get_filename_component(src_dir "${src}" DIRECTORY)
+      list(APPEND _CC_TEST_INCLUDE_DIRS "${src_dir}")
+      continue()
+    endif()
+
+    set(src_path "${CMAKE_CURRENT_SOURCE_DIR}/${src}")
+    if(EXISTS "${src_path}")
+      list(APPEND _CC_TEST_SRCS "${src}")
+      get_filename_component(src_dir "${src_path}" DIRECTORY)
+      list(APPEND _CC_TEST_INCLUDE_DIRS "${src_dir}")
+      if(DEFINED XLLM_TESTS_DIR)
+        file(RELATIVE_PATH xllm_test_src_dir "${XLLM_TESTS_DIR}" "${src_dir}")
+        if(NOT xllm_test_src_dir MATCHES "^\\.\\.")
+          list(APPEND _CC_TEST_INCLUDE_DIRS
+            "${PROJECT_SOURCE_DIR}/xllm/${xllm_test_src_dir}"
+          )
+        endif()
+      endif()
+      continue()
+    endif()
+
+    list(APPEND _CC_TEST_SRCS "${src}")
+  endforeach()
+
+  list(REMOVE_DUPLICATES _CC_TEST_INCLUDE_DIRS)
+
   add_executable(${CC_TEST_NAME})
-  target_sources(${CC_TEST_NAME} PRIVATE ${CC_TEST_SRCS})
+  target_sources(${CC_TEST_NAME} PRIVATE ${_CC_TEST_SRCS})
   target_include_directories(${CC_TEST_NAME}
     PUBLIC 
       "$<BUILD_INTERFACE:${COMMON_INCLUDE_DIRS}>" 
-      ${CC_TEST_INCLUDES}
+      ${_CC_TEST_INCLUDE_DIRS}
   )
 
   target_compile_options(${CC_TEST_NAME}

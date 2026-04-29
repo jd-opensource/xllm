@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 if(USE_NPU)
   add_subdirectory(npu)
@@ -40,18 +39,3 @@ cc_library(
     $<$<BOOL:${USE_MUSA}>:musart>
     $<$<BOOL:${USE_NPU}>:platform_npu>
 )
-
-# TODO: test on multi device
-if(USE_NPU OR USE_CUDA OR USE_ILU)
-cc_test(
-  NAME
-    multi_platform_vmm_test
-  SRCS
-    shared_vmm_allocator_test.cpp
-  DEPS
-    :platform
-    :flags
-    GTest::gtest_main
-    glog::glog
-)
-endif()

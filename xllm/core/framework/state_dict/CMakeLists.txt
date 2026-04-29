@@ -1,4 +1,3 @@
-include(cc_test)
 include(cc_library)
 
 include_directories(..)

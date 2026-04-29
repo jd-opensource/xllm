@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 cc_library(
   NAME
@@ -28,21 +27,3 @@ cc_library(
     :cuda_kernels
     :common_layers
 )
-
-cc_test(
-  NAME
-    xattention_test
-  SRCS
-    xattention_test.cpp
-  DEPS
-    :cuda_layers
-    :common_layers
-    torch
-    GTest::gtest_main
-    glog::glog
-    :block
-)
-target_link_libraries(xattention_test
-                      PRIVATE
-                      brpc
-                      "$<LINK_GROUP:RESCAN,cuda_layers,common_layers>")

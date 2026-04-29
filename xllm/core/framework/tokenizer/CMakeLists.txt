@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 add_subdirectory(tokenizers)
 
@@ -31,15 +30,4 @@ cc_library(
     glog::glog
     rust_tokenizers
     re2::re2
-)
-
-cc_test(
-  NAME
-    fast_tokenizer_test
-  SRCS
-    tests/fast_tokenizer_tests.cpp
-  DEPS
-    :tokenizer
-    glog::glog
-    GTest::gtest_main
 )

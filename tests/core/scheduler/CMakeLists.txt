@@ -1,0 +1,23 @@
+include(cc_test)
+
+cc_test(
+  NAME
+    chunked_prefill_scheduler_test
+  SRCS
+    chunked_prefill_scheduler_test.cpp
+    continuous_scheduler_test.cpp
+    fixed_steps_scheduler_test.cpp
+  DEPS
+    :scheduler
+    :xllm_server
+    GTest::gtest_main
+    $<$<BOOL:${USE_NPU}>:nnopbase>
+)
+target_link_libraries(chunked_prefill_scheduler_test
+                      PUBLIC
+                      Python::Python
+                      $<$<BOOL:${USE_NPU}>:ascendcl>
+                      $<$<BOOL:${USE_NPU}>:hccl>
+                      $<$<BOOL:${USE_NPU}>:c_sec>)
+target_link_libraries(chunked_prefill_scheduler_test PRIVATE
+  "$<LINK_GROUP:RESCAN,xtensor,xllm_server>")

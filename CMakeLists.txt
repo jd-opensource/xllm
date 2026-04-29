@@ -555,6 +555,7 @@ message(STATUS "CMAKE_CXX_FLAGS_DEBUG: ${CMAKE_CXX_FLAGS_DEBUG}")
 include(CTest)
 include(GoogleTest)
 option(BUILD_TESTING "Build the testing tree." ON)
+set(XLLM_TESTS_DIR "${PROJECT_SOURCE_DIR}/tests")
 
 # include current path
 list(APPEND COMMON_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR})
@@ -603,3 +604,4 @@ if(TARGET brpc-static AND NOT TARGET brpc)
   add_library(brpc ALIAS brpc-static)
 endif()
 add_subdirectory(xllm)
+add_subdirectory(tests)
