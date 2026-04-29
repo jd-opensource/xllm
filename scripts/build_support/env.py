@@ -108,6 +108,9 @@ def set_npu_envs() -> None:
 
     set_common_envs()
     set_npu_torch_ld_library_path()
+    os.environ.setdefault(
+        "TRITON_CACHE_DIR",
+        os.path.join(os.path.expanduser("~"), ".triton", "cache"))
     NPU_TOOLKIT_HOME = os.getenv("NPU_TOOLKIT_HOME")
     if not NPU_TOOLKIT_HOME:
         os.environ["NPU_TOOLKIT_HOME"] = "/usr/local/Ascend/ascend-toolkit/latest"

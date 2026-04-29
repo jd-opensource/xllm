@@ -21,6 +21,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -141,6 +142,10 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   if (sampling_params.selected_token_idxes.defined()) {
     logits = model_->logits(model_output.hidden_states,
                             sampling_params.selected_token_idxes);
+    if (tokenizer_vocab_size_ > 0 && tokenizer_vocab_size_ < logits.size(-1)) {
+      logits.slice(/*dim=*/-1, tokenizer_vocab_size_, logits.size(-1))
+          .fill_(-std::numeric_limits<float>::infinity());
+    }
   }
 
   ForwardOutput output;

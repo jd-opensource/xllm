@@ -40,6 +40,7 @@ limitations under the License.
 #endif
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
+#include "framework/model_loader.h"
 #include "framework/parallel_state/collective_communicator.h"
 #include "framework/parallel_state/dit_collective_communicator.h"
 #include "framework/parallel_state/mapping_npu.h"
@@ -62,6 +63,19 @@ extern char** environ;
 namespace xllm {
 namespace {
 void handle_signal(int signum) { _exit(0); }
+
+#if defined(USE_NPU)
+bool should_force_torch_process_groups_for_minimax(
+    const runtime::Options& options) {
+  if (options.npu_kernel_backend() != "ATB" || options.model_path().empty()) {
+    return false;
+  }
+
+  std::unique_ptr<ModelLoader> model_loader =
+      ModelLoader::create(options.model_path());
+  return model_loader->model_args().model_type() == "minimax_m2";
+}
+#endif
 }  // namespace
 
 void WorkerServer::create_server(
@@ -81,6 +95,14 @@ void WorkerServer::create_server(
   FLAGS_enable_prefill_sp = options.enable_prefill_sp();
 #if defined(USE_NPU)
   FLAGS_npu_kernel_backend = options.npu_kernel_backend();
+  const bool force_torch_process_groups_for_minimax =
+      should_force_torch_process_groups_for_minimax(options);
+  if (force_torch_process_groups_for_minimax) {
+    LOG(INFO) << "Force torch process-group initialization for MiniMax-M2 "
+                 "while keeping the ATB runtime backend. MiniMax uses "
+                 "torch tensor-parallel layers that require tp_group_.";
+    FLAGS_npu_kernel_backend = "TORCH";
+  }
 #endif
   Device device(d);
   device.set_device();
@@ -157,6 +179,12 @@ void WorkerServer::create_server(
 
   comm->create_process_groups(master_node_addr, device);
   parallel_args = comm->parallel_args();
+
+#if defined(USE_NPU)
+  if (force_torch_process_groups_for_minimax) {
+    FLAGS_npu_kernel_backend = options.npu_kernel_backend();
+  }
+#endif
 
   std::unique_ptr<Worker> worker =
       std::make_unique<Worker>(*parallel_args, device, options, worker_type);

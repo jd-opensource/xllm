@@ -22,6 +22,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "core/common/macros.h"
 #include "core/framework/kv_cache/kv_cache.h"

@@ -28,7 +28,11 @@ limitations under the License.
 #endif
 
 #include "acl/acl.h"
+#if __has_include("aclnn_recurrent_gated_delta_rule.h")
 #include "aclnn_recurrent_gated_delta_rule.h"
+#else
+#include "aclnnop/aclnn_recurrent_gated_delta_rule.h"
+#endif
 #include "core/common/macros.h"
 #include "core/kernels/npu/utils.h"
 #include "npu_ops_api.h"
