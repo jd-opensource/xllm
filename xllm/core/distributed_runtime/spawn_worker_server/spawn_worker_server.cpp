@@ -21,6 +21,7 @@ limitations under the License.
 #include <signal.h>
 #include <unistd.h>
 
+#include "core/common/global_flags.h"
 #include "core/distributed_runtime/worker_server.h"
 #include "core/platform/device.h"
 #if defined(USE_CUDA)
@@ -63,7 +64,9 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      bool enable_prefill_sp,
                                      const std::string& task_type,
                                      const std::string& worker_type,
-                                     const std::string& communication_backend) {
+                                     const std::string& communication_backend,
+                                     const std::string& npu_kernel_backend,
+                                     const std::string& rank_tablefile) {
   // TODO: pass whole xllm::runtime::Options here from main process.
   xllm::runtime::Options runner_options;
   const std::string backend = get_backend_from_worker_type(worker_type);
@@ -80,12 +83,14 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
       .input_shm_size(input_shm_size)
       .output_shm_size(output_shm_size)
       .is_local(is_local)
+      .npu_kernel_backend(npu_kernel_backend)
       .task_type(task_type);
   FLAGS_enable_schedule_overlap = false;
   FLAGS_enable_prefill_sp = enable_prefill_sp;
   FLAGS_master_node_addr = master_node_addr;
   FLAGS_block_size = block_size;
   FLAGS_communication_backend = communication_backend;
+  FLAGS_rank_tablefile = rank_tablefile;
 
   const std::string device_type = xllm::Device::type_str();
   const std::string device_str = device_type + ":" + std::to_string(device_idx);

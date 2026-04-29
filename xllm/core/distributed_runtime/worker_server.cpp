@@ -225,6 +225,9 @@ void WorkerServer::create_spawn_server(int local_rank,
   auto enable_prefill_sp_str = std::to_string(options.enable_prefill_sp());
   const char* enable_prefill_sp_ptr = enable_prefill_sp_str.c_str();
   const char* communication_backend_ptr = FLAGS_communication_backend.c_str();
+  std::string npu_kernel_backend_str = options.npu_kernel_backend();
+  const char* npu_kernel_backend_ptr = npu_kernel_backend_str.c_str();
+  const char* rank_tablefile_ptr = FLAGS_rank_tablefile.c_str();
   const char* worker_type_ptr = worker_type.to_string();
   std::string spawn_worker_bin_path =
       options.spawn_worker_path() + "/spawn_worker";
@@ -245,6 +248,8 @@ void WorkerServer::create_spawn_server(int local_rank,
                         input_shm_size_ptr,
                         output_shm_size_ptr,
                         communication_backend_ptr,
+                        npu_kernel_backend_ptr,
+                        rank_tablefile_ptr,
                         nullptr};
   pid_t pid;
   int status = posix_spawnp(

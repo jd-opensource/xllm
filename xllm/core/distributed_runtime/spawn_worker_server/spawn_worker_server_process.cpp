@@ -36,10 +36,12 @@ limitations under the License.
 // @input_shm_size
 // @output_shm_size
 // @communication_backend
+// @npu_kernel_backend
+// @rank_tablefile
 int main(int argc, char* argv[]) {
-  if (argc < 16) {
+  if (argc < 18) {
     LOG(ERROR)
-        << "Spawn worker process receive wrong args. Need 16 args, receive "
+        << "Spawn worker process receive wrong args. Need 18 args, receive "
         << argc;
     return 1;
   }
@@ -59,6 +61,8 @@ int main(int argc, char* argv[]) {
   uint64_t input_shm_size = atoll(argv[13]);
   uint64_t output_shm_size = atoll(argv[14]);
   std::string communication_backend = std::string(argv[15]);
+  std::string npu_kernel_backend = std::string(argv[16]);
+  std::string rank_tablefile = std::string(argv[17]);
 
   LOG(INFO) << "Spawn worker: "
             << "master_node_addr = " << master_node_addr
@@ -74,7 +78,9 @@ int main(int argc, char* argv[]) {
             << ", enable_prefill_sp = " << (enable_prefill_sp > 0)
             << ", task_type = " << task_type
             << ", worker_type = " << worker_type
-            << ", communication_backend = " << communication_backend << "\n";
+            << ", communication_backend = " << communication_backend
+            << ", npu_kernel_backend = " << npu_kernel_backend
+            << ", rank_tablefile = " << rank_tablefile << "\n";
 
   xllm::SpawnWorkerServer worker(master_node_addr,
                                  local_rank,
@@ -90,7 +96,9 @@ int main(int argc, char* argv[]) {
                                  enable_prefill_sp > 0,
                                  task_type,
                                  worker_type,
-                                 communication_backend);
+                                 communication_backend,
+                                 npu_kernel_backend,
+                                 rank_tablefile);
 
   worker.run();
 
