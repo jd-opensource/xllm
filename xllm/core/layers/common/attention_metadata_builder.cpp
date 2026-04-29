@@ -103,7 +103,7 @@ AttentionMetadata build_attention_metadata(
   // enable_mla is for DeepSeekv32 on mlu device
   if (!attn_metadata.is_prefill || enable_mla) {
     attn_metadata.block_table = params.block_tables;
-#if !defined(USE_NPU) && !defined(USE_CUDA)
+#if !defined(USE_NPU)
     attn_metadata.kv_seq_lens = torch::diff(params.kv_seq_lens);  // kv seqlens
     attn_metadata.q_seq_lens = torch::diff(params.q_seq_lens);    // q seqlens
 #endif
