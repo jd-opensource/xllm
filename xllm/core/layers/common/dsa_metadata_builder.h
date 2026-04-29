@@ -101,6 +101,7 @@ class DSAMetadataBuilder {
                                 const torch::Tensor& raw_slots,
                                 int32_t block_size,
                                 const std::vector<int>& ctx_lens,
+                                const std::vector<int>& q_lens,
                                 int32_t batch_size,
                                 torch::Tensor& out_bt,
                                 torch::Tensor& out_slots);

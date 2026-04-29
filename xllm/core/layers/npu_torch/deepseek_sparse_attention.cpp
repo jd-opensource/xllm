@@ -196,13 +196,15 @@ void scatter_by_slot(torch::Tensor& cache,
   const int64_t cache_rows = cache_2d.size(0);
   CHECK_GT(cache_rows, 0) << "scatter_by_slot requires cache rows > 0, cache "
                           << cache.sizes();
-  const int64_t min_slot = slots_slice.min().item<int64_t>();
-  const int64_t max_slot = slots_slice.max().item<int64_t>();
-  CHECK_GE(min_slot, 0) << "scatter_by_slot found negative slot index "
-                        << min_slot << ", cache_rows=" << cache_rows
-                        << ", slot_mapping_shape=" << slot_mapping.sizes()
-                        << ", value_shape=" << value.sizes()
-                        << ", cache_shape=" << cache.sizes();
+
+  auto valid_mask = slots_slice.ge(0);
+  if (!valid_mask.any().item<bool>()) {
+    return;
+  }
+  auto valid_slots = slots_slice.index({valid_mask});
+  auto valid_values = value_slice.index({valid_mask});
+
+  const int64_t max_slot = valid_slots.max().item<int64_t>();
   CHECK_LT(max_slot, cache_rows)
       << "scatter_by_slot slot index out of range: max_slot=" << max_slot
       << ", cache_rows=" << cache_rows
@@ -210,7 +212,7 @@ void scatter_by_slot(torch::Tensor& cache,
       << ", value_shape=" << value.sizes()
       << ", value_rows=" << value_2d.size(0) << ", update_rows=" << update_rows
       << ", cache_shape=" << cache.sizes();
-  cache_2d.index_copy_(/*dim=*/0, slots_slice, value_slice);
+  cache_2d.index_copy_(/*dim=*/0, valid_slots, valid_values);
 }
 
 int64_t tensor_max_or_zero(const torch::Tensor& tensor) {

@@ -283,6 +283,7 @@ void DSAMetadataBuilder::process_group(const torch::Tensor& raw_bt,
                       raw_slots,
                       gi.block_size,
                       ctx_lens,
+                      q_lens,
                       batch_size,
                       out_bt,
                       out_slots);
@@ -353,11 +354,63 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
                                            const torch::Tensor& raw_slots,
                                            int32_t block_size,
                                            const std::vector<int>& ctx_lens,
+                                           const std::vector<int>& q_lens,
                                            int32_t batch_size,
                                            torch::Tensor& out_bt,
                                            torch::Tensor& out_slots) {
-  out_slots =
-      torch::where(raw_slots.eq(-1), torch::zeros_like(raw_slots), raw_slots);
+  CHECK_EQ(static_cast<int32_t>(ctx_lens.size()), batch_size)
+      << "process_swa_group requires ctx_lens.size == batch_size, got "
+      << ctx_lens.size() << " vs " << batch_size;
+  CHECK_EQ(static_cast<int32_t>(q_lens.size()), batch_size)
+      << "process_swa_group requires q_lens.size == batch_size, got "
+      << q_lens.size() << " vs " << batch_size;
+  CHECK_GT(block_size, 0) << "process_swa_group requires block_size > 0, got "
+                          << block_size;
+  CHECK_EQ(raw_bt.dim(), 2)
+      << "process_swa_group requires raw_bt dim == 2, got " << raw_bt.dim();
+
+  int64_t query_total_tokens = 0;
+  for (int32_t seq = 0; seq < batch_size; ++seq) {
+    query_total_tokens += std::clamp<int64_t>(
+        static_cast<int64_t>(q_lens[seq]), 0, ctx_lens[seq]);
+  }
+
+  // SWA cache writes only the tokens produced by the current forward step.
+  // Do not reuse the full-context raw_slots prefix here: decode has one kv row,
+  // and prefix slot 0 would incorrectly overwrite cache row 0.
+  auto out_slots_tensor =
+      torch::full({query_total_tokens}, -1, raw_slots.options());
+  auto out_slots_acc = out_slots_tensor.accessor<int32_t, 1>();
+  auto raw_bt_acc = raw_bt.accessor<int32_t, 2>();
+  const int64_t max_blocks = raw_bt.size(1);
+  const int64_t block_size_i64 = static_cast<int64_t>(block_size);
+
+  auto slot_for_position = [&](int32_t seq, int64_t pos) -> int32_t {
+    if (max_blocks <= 0) {
+      return -1;
+    }
+    const int64_t block_idx = (pos / block_size_i64) % max_blocks;
+    const int32_t block_id = raw_bt_acc[seq][block_idx];
+    if (block_id < 0) {
+      return -1;
+    }
+    const int64_t block_offset = pos % block_size_i64;
+    return static_cast<int32_t>(
+        static_cast<int64_t>(block_id) * block_size_i64 + block_offset);
+  };
+
+  int64_t write_idx = 0;
+  for (int32_t seq = 0; seq < batch_size; ++seq) {
+    const int64_t ctx_len = static_cast<int64_t>(ctx_lens[seq]);
+    const int64_t q_len =
+        std::clamp<int64_t>(static_cast<int64_t>(q_lens[seq]), 0, ctx_len);
+    const int64_t q_start = ctx_len - q_len;
+    for (int64_t i = 0; i < q_len; ++i) {
+      out_slots_acc[write_idx++] = slot_for_position(seq, q_start + i);
+    }
+  }
+
+  out_slots = out_slots_tensor;
 
   int32_t current_cols = raw_bt.size(1);
   int32_t max_dst_len = 0;
