@@ -26,6 +26,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/batch/mposition.h"
+#include "framework/batch/transfer_kv_info_builder.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/request/sequence.h"
@@ -465,21 +466,15 @@ void BatchInputBuilder::setup_kv_cache_info(
       state.new_token_slot_ids.end(), slot_ids.begin(), slot_ids.end());
 
   std::vector<int32_t> block_ids;
-  std::vector<uint64_t> u_block_ids;
+  std::vector<uint64_t> local_block_ids;
   block_ids.reserve(blocks.size());
+  local_block_ids.reserve(blocks.size());
   int32_t block_size = 0;
   auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
-  uint32_t push_size = 0;
-  if (transfer_kv_info.has_value()) {
-    push_size =
-        blocks.size() - transfer_kv_info.value().remote_blocks_ids.size();
-  }
   for (const auto& block : blocks) {
     block_size = block.size();
     block_ids.push_back(block.id());
-    if (block_ids.size() > push_size) {
-      u_block_ids.emplace_back(block.id());
-    }
+    local_block_ids.emplace_back(block.id());
     state.paged_kv_indices.push_back(block.id());
   }
   state.paged_kv_indptr.push_back(state.paged_kv_indptr.back() + blocks.size());
@@ -496,8 +491,15 @@ void BatchInputBuilder::setup_kv_cache_info(
   }
 
   if (transfer_kv_info.has_value()) {
-    state.transfer_kv_infos.emplace_back(transfer_kv_info.value());
-    state.transfer_kv_infos.back().local_blocks_ids = std::move(u_block_ids);
+    TransferKVInfo step_info =
+        build_step_transfer_info(transfer_kv_info.value(),
+                                 local_block_ids,
+                                 n_kv_cache_tokens,
+                                 seq_len,
+                                 static_cast<uint32_t>(block_size));
+    if (!step_info.local_blocks_ids.empty()) {
+      state.transfer_kv_infos.emplace_back(std::move(step_info));
+    }
   }
 
   state.block_tables_vec.emplace_back(std::move(block_ids));

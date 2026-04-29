@@ -70,15 +70,15 @@ void fix_mlu_disagg_pd_flags() {
                  << "forcing from " << FLAGS_kv_cache_dtype << " to auto.";
     FLAGS_kv_cache_dtype = "auto";
   }
+  if (FLAGS_enable_schedule_overlap) {
+    LOG(WARNING) << "MLU disaggregated PD does not support schedule overlap; "
+                 << "forcing enable_schedule_overlap=false.";
+    FLAGS_enable_schedule_overlap = false;
+  }
   if (FLAGS_enable_prefix_cache) {
     LOG(WARNING) << "MLU disaggregated PD does not support prefix cache; "
                  << "forcing enable_prefix_cache=false.";
     FLAGS_enable_prefix_cache = false;
-  }
-  if (FLAGS_enable_chunked_prefill) {
-    LOG(WARNING) << "MLU disaggregated PD does not support chunked prefill; "
-                 << "forcing enable_chunked_prefill=false.";
-    FLAGS_enable_chunked_prefill = false;
   }
   if (FLAGS_enable_pd_ooc) {
     LOG(WARNING) << "MLU disaggregated PD does not support pd_ooc; "

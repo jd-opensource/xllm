@@ -306,6 +306,65 @@ TEST(BatchTest, SampleRequestInjectsAllMatchedSlots) {
   EXPECT_EQ(sampling_params_out.selected_token_idxes.size(0), 2);
 }
 
+TEST(BatchTest, ChunkedPDTransferUsesStepWindow) {
+  torch::Device device(Device::type_torch(), 0);
+  const uint32_t n_blocks = 8;
+  const uint32_t block_size = 4;
+  BlockManager::Options options;
+  options.num_blocks(n_blocks).block_size(block_size);
+  BlockManagerImpl manager(options);
+
+  RequestSamplingParam sampling_param;
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(4);
+  SequenceParams seq_params;
+  seq_params.seq_capacity = 32;
+  seq_params.stopping_checker = &stopping_checker;
+  seq_params.sampling_param = &sampling_param;
+  seq_params.skip_special_tokens = true;
+  seq_params.echo = false;
+  seq_params.logprobs = false;
+  seq_params.enable_schedule_overlap = false;
+  seq_params.request_id = "req-1";
+
+  torch::Tensor input_embedding;
+  MMData mm_data;
+  IncrementalDecoder decoder("", 1, false, false);
+  Sequence seq(/*index=*/0,
+               /*token_ids=*/{1, 2, 3, 4, 5, 6, 7, 8},
+               input_embedding,
+               mm_data,
+               std::move(decoder),
+               seq_params);
+  seq.add_kv_blocks(manager.allocate(2));
+
+  TransferKVInfo info;
+  info.request_id = "req-1";
+  info.remote_blocks_ids = {100, 101, 102, 103};
+  info.dp_rank = 0;
+  info.remote_instance_info.dp_size = 1;
+  seq.kv_state().set_transfer_kv_info(std::move(info));
+
+  std::vector<Sequence*> sequences = {&seq};
+  std::vector<uint32_t> budgets = {8};
+  BatchInputBuilder builder(sequences,
+                            budgets,
+                            {},
+                            {},
+                            nullptr,
+                            0,
+                            nullptr,
+                            BatchForwardType::PREFILL);
+
+  RawForwardInput input = builder.build_raw_forward_input();
+
+  ASSERT_EQ(input.transfer_kv_infos.size(), 1u);
+  EXPECT_EQ(input.transfer_kv_infos[0].local_blocks_ids,
+            (std::vector<uint64_t>{1, 2}));
+  EXPECT_EQ(input.transfer_kv_infos[0].remote_blocks_ids,
+            (std::vector<uint64_t>{100, 101}));
+}
+
 TEST(BatchTest, KVCacheEmptySupportsLinearOnlyAndFullOnlyLayouts) {
   auto options =
       torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU);

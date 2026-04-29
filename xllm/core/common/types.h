@@ -297,6 +297,8 @@ struct XTensorLayerOffsets {
 
 struct TransferKVInfo {
   std::string request_id;
+  // Before batch build this may carry the full logical block table length as a
+  // hint. BatchInputBuilder overwrites it with the current step local blocks.
   std::vector<uint64_t> local_blocks_ids;
   std::vector<uint64_t> remote_blocks_ids;
   int32_t dp_rank;

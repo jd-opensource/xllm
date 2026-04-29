@@ -508,6 +508,11 @@ void DisaggPDScheduler::dispatch_requests() {
           for (auto& bid : resps.resps()[i].blocks_ids()) {
             info.remote_blocks_ids.emplace_back(bid);
           }
+          const size_t prompt_blocks =
+              (requests[i]->state().prompt_tokens.size() +
+               kv_cache_manager_->block_size() - 1) /
+              kv_cache_manager_->block_size();
+          info.local_blocks_ids.resize(prompt_blocks);
           info.dp_rank = resps.resps()[i].dp_rank();
           // TODO: remote_instances_info_ is not multi-thread safe.
           info.remote_instance_info = remote_instances_info_[selected_instance];
