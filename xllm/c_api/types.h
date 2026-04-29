@@ -142,6 +142,9 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
   /** Maximum REC worker pipeline concurrency */
   uint32_t rec_worker_max_concurrency;
 
+  /** FlashInfer attention workspace buffer size in bytes. */
+  uint32_t flashinfer_workspace_buffer_size;
+
   /** Model task type (generate/embed) */
   char task[XLLM_META_STRING_FIELD_MAX_LEN];
 

@@ -629,6 +629,8 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::allocate_kv_caches_related() {
       torch::zeros({max_total_beam, num_heads, head_dim}, kv_cache_options);
   cached_two_stage_q_cu_seq_lens_shared_ =
       torch::zeros({max_seqs_per_batch_ + 1}, int_options);
+  cached_two_stage_qo_indptr_expanded_ =
+      torch::zeros({max_total_beam + 1}, int_options);
   cached_two_stage_paged_kv_indptr_expanded_ =
       torch::zeros({max_total_beam + 1}, int_options);
   cached_two_stage_paged_kv_indices_expanded_ =
@@ -1076,6 +1078,8 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_two_stage_round_input(
       << "two-stage cache total_beam overflow";
   CHECK_LE(batch_size + 1, cached_two_stage_q_cu_seq_lens_shared_.size(0))
       << "two-stage q_cu_seq_lens cache overflow";
+  CHECK_LE(total_beam + 1, cached_two_stage_qo_indptr_expanded_.size(0))
+      << "two-stage qo_indptr cache overflow";
 
   llm_rec_params.two_stage_shared_lse =
       cached_two_stage_shared_lse_.slice(0, 0, total_beam);
@@ -1087,6 +1091,8 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_two_stage_round_input(
       cached_two_stage_unshared_o_.slice(0, 0, total_beam);
   llm_rec_params.two_stage_q_cu_seq_lens_shared =
       cached_two_stage_q_cu_seq_lens_shared_.slice(0, 0, batch_size + 1);
+  llm_rec_params.two_stage_qo_indptr_expanded =
+      cached_two_stage_qo_indptr_expanded_.slice(0, 0, total_beam + 1);
   llm_rec_params.two_stage_paged_kv_indptr_expanded =
       cached_two_stage_paged_kv_indptr_expanded_.slice(0, 0, total_beam + 1);
   llm_rec_params.two_stage_paged_kv_indices_expanded =
@@ -1101,6 +1107,13 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_two_stage_round_input(
       torch::arange(0, (batch_size + 1) * beam_width, beam_width, int_options);
   llm_rec_params.two_stage_q_cu_seq_lens_shared.copy_(q_cu_seq_lens_values,
                                                       /*non_blocking=*/true);
+
+  // The unshared two-stage decode path packs one query row per expanded beam,
+  // so qo_indptr is the prefix sum of per-beam query lengths rather than a
+  // paged-kv layout descriptor.
+  auto qo_indptr_values = torch::arange(total_beam + 1, int_options);
+  llm_rec_params.two_stage_qo_indptr_expanded.copy_(qo_indptr_values,
+                                                    /*non_blocking=*/true);
 
   auto paged_kv_indptr_values = torch::arange(total_beam + 1, int_options);
   llm_rec_params.two_stage_paged_kv_indptr_expanded.copy_(

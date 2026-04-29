@@ -24,6 +24,7 @@ limitations under the License.
 #include <atomic>
 #include <cstring>
 #include <exception>
+#include <limits>
 #include <stdexcept>
 
 #include "helper.h"
@@ -130,6 +131,15 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     FLAGS_max_tokens_per_batch = xllm_init_options.max_tokens_per_batch;
     FLAGS_block_size = xllm_init_options.block_size;
     FLAGS_enable_rec_prefill_only = xllm_init_options.enable_rec_prefill_only;
+    if (xllm_init_options.flashinfer_workspace_buffer_size >
+        static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
+      LOG(ERROR) << "flashinfer_workspace_buffer_size["
+                 << xllm_init_options.flashinfer_workspace_buffer_size
+                 << "] exceeds supported int32 range";
+      return false;
+    }
+    FLAGS_flashinfer_workspace_buffer_size = static_cast<int32_t>(
+        xllm_init_options.flashinfer_workspace_buffer_size);
     FLAGS_enable_prefix_cache = xllm_init_options.enable_prefix_cache;
     FLAGS_enable_schedule_overlap = xllm_init_options.enable_schedule_overlap;
     FLAGS_enable_chunked_prefill = xllm_init_options.enable_chunked_prefill;

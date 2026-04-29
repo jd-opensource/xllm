@@ -262,6 +262,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
     torch::Tensor cached_two_stage_unshared_lse_;
     torch::Tensor cached_two_stage_unshared_o_;
     torch::Tensor cached_two_stage_q_cu_seq_lens_shared_;
+    torch::Tensor cached_two_stage_qo_indptr_expanded_;
     torch::Tensor cached_two_stage_paged_kv_indptr_expanded_;
     torch::Tensor cached_two_stage_paged_kv_indices_expanded_;
     torch::Tensor cached_two_stage_paged_kv_last_page_len_expanded_;
