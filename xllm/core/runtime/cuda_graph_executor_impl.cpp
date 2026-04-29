@@ -443,6 +443,8 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     auto cache = attn_metadata->xattention_two_stage_decode_cache.value();
     CHECK(cache.q_cu_seq_lens_shared.defined())
         << "q_cu_seq_lens_shared must be initialized in rec worker";
+    CHECK(cache.qo_indptr_expanded.defined())
+        << "qo_indptr_expanded must be initialized in rec worker";
     CHECK(cache.paged_kv_indptr_expanded.defined() &&
           cache.paged_kv_indices_expanded.defined() &&
           cache.paged_kv_last_page_len_expanded.defined())
@@ -467,6 +469,8 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
     CHECK_EQ(cache.unshared_o.size(0), total_beam)
         << "unshared_o first dim mismatch: expected total_beam=" << total_beam
         << ", got " << cache.unshared_o.size(0);
+    CHECK_EQ(cache.qo_indptr_expanded.numel(), total_beam + 1)
+        << "qo_indptr_expanded size mismatch";
     CHECK_EQ(cache.paged_kv_indptr_expanded.numel(), total_beam + 1)
         << "paged_kv_indptr_expanded size mismatch";
     CHECK_EQ(cache.paged_kv_indices_expanded.numel(), total_beam)
@@ -519,6 +523,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
 
     layer::AttentionMetadata unshared_attn_meta = *attn_metadata;
     unshared_attn_meta.plan_info = attn_metadata->unshared_plan_info;
+    unshared_attn_meta.qo_indptr = cache.qo_indptr_expanded;
     unshared_attn_meta.paged_kv_indptr = cache.paged_kv_indptr_expanded;
     unshared_attn_meta.paged_kv_indices = cache.paged_kv_indices_expanded;
     unshared_attn_meta.paged_kv_last_page_len =

@@ -177,6 +177,8 @@ class XAttentionDecodeCompareTest : public ::testing::Test {
 
     two_stage_cache.q_cu_seq_lens_shared =
         torch::arange(0, (kBatchSize + 1) * kBeamWidth, kBeamWidth, int_opts);
+    two_stage_cache.qo_indptr_expanded =
+        torch::arange(total_beam + 1, int_opts);
     two_stage_cache.paged_kv_indptr_expanded =
         torch::arange(total_beam + 1, int_opts);
     two_stage_cache.paged_kv_indices_expanded =

@@ -645,7 +645,7 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
           batch_size, num_channels_latents, adjusted_height, adjusted_width};
       torch::TensorOptions latents_options = options_.dtype(torch::kFloat32);
       torch::Tensor latents_tensor =
-          randn_tensor(shape, seed, latents_options).to(options_);
+          xllm::dit::randn_tensor(shape, seed, latents_options).to(options_);
       latents = pack_latents(latents_tensor,
                              batch_size,
                              num_channels_latents,
