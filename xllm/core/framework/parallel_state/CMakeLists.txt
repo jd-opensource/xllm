@@ -11,6 +11,7 @@ cc_library(
     parallel_args.h
     parallel_state.h
     process_group.h
+    $<$<BOOL:${USE_NPU}>:npu_rank_table_env.h>
     $<$<BOOL:${USE_NPU}>:npu_process_group.h>
     $<$<BOOL:${USE_MLU}>:mlu_process_group.h>
     $<$<BOOL:${USE_MUSA}>:musa_process_group.h>
@@ -25,6 +26,7 @@ cc_library(
     parallel_state.cpp
     parallel_state_async.cpp
     process_group.cpp
+    $<$<BOOL:${USE_NPU}>:npu_rank_table_env.cpp>
     $<$<BOOL:${USE_NPU}>:npu_process_group.cpp>
     collective_communicator.cpp
     dit_collective_communicator.cpp

@@ -20,6 +20,7 @@ limitations under the License.
 #include <c10d/TCPStore.hpp>
 #include <torch_npu/csrc/distributed/ProcessGroupHCCL.hpp>
 
+#include "npu_rank_table_env.h"
 #include "platform/device.h"
 
 namespace {
@@ -82,6 +83,7 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
                                    const torch::Device& device)
     : ProcessGroup(global_rank, world_size, device),
       comm_stream_(c10_npu::getNPUStreamFromPool(device.index())) {
+  parallel_state::sync_torch_npu_rank_table_file_env(FLAGS_rank_tablefile);
   c10::intrusive_ptr<c10d_npu::ProcessGroupHCCL::Options> hccl_pg_options =
       c10d_npu::ProcessGroupHCCL::Options::create();
   hccl_pg_options->group_id = group_name;
@@ -113,6 +115,7 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
                                    const torch::Device& device)
     : ProcessGroup(global_rank, world_size, device),
       comm_stream_(c10_npu::getNPUStreamFromPool(device.index())) {
+  parallel_state::sync_torch_npu_rank_table_file_env(FLAGS_rank_tablefile);
   c10::intrusive_ptr<c10d_npu::ProcessGroupHCCL::Options> hccl_pg_options =
       c10d_npu::ProcessGroupHCCL::Options::create();
   hccl_pg_options->group_id = group_name;
