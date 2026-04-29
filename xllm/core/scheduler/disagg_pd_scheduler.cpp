@@ -339,15 +339,10 @@ void DisaggPDScheduler::dispatch_requests() {
     }
     remote_instances_info_[selected_instance] = remote_info;
 
-    bool is_mlu_build = false;
-#if defined(USE_MLU)
-    is_mlu_build = true;
-#endif
     const bool enable_mla = engine_->model_args().enable_mla();
     const PdTopoResult topo_result =
         check_pd_topo(instance_info_,
                       remote_info,
-                      is_mlu_build,
                       options_.kv_cache_transfer_mode(),
                       enable_mla);
     const bool allow_pd_topo = topo_result.status == PdTopoStatus::ALLOW_HOMO ||

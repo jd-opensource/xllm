@@ -31,13 +31,7 @@ bool fail_topo(const std::string& msg, std::string* reason) {
   return false;
 }
 
-PdTopoResult check_hetero_pd_req(bool is_mlu_build,
-                                 const std::string& kv_mode,
-                                 bool enable_mla) {
-  if (!is_mlu_build) {
-    return PdTopoResult{PdTopoStatus::DENY_HETERO,
-                        "hetero pd requires is_mlu_build=true"};
-  }
+PdTopoResult check_hetero_pd_req(const std::string& kv_mode, bool enable_mla) {
   if (kv_mode != "PUSH") {
     return PdTopoResult{PdTopoStatus::DENY_HETERO,
                         "hetero pd requires kv_mode=PUSH"};
@@ -94,7 +88,6 @@ PdTopo get_pd_topo(const InstanceInfo& info) {
 
 PdTopoResult check_pd_topo(const InstanceInfo& local,
                            const InstanceInfo& remote,
-                           bool is_mlu_build,
                            const std::string& kv_mode,
                            bool enable_mla) {
   PdTopo local_topo;
@@ -116,7 +109,7 @@ PdTopoResult check_pd_topo(const InstanceInfo& local,
     return PdTopoResult{PdTopoStatus::ALLOW_HOMO, ""};
   }
 
-  return check_hetero_pd_req(is_mlu_build, kv_mode, enable_mla);
+  return check_hetero_pd_req(kv_mode, enable_mla);
 }
 
 }  // namespace xllm

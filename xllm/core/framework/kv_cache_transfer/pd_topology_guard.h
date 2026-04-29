@@ -48,7 +48,6 @@ PdTopo get_pd_topo(const InstanceInfo& info);
 
 PdTopoResult check_pd_topo(const InstanceInfo& local,
                            const InstanceInfo& remote,
-                           bool is_mlu_build,
                            const std::string& kv_mode,
                            bool enable_mla);
 
