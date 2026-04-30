@@ -21,6 +21,7 @@ cc_library(
     non_stream_call.h
     service_impl_factory.h
     serving_mode.h
+    speech_service_impl.h
     stream_call.h
     models_service_impl.h
     stream_output_parser.h
@@ -41,6 +42,7 @@ cc_library(
     image_generation_service_impl.cpp
     models_service_impl.cpp
     rerank_service_impl.cpp
+    speech_service_impl.cpp
     stream_output_parser.cpp
     qwen3_rerank_service_impl.cpp
     embedding_output_builder.cpp
@@ -124,3 +126,4 @@ cc_test(
 )
 target_link_libraries(openai_service_test PRIVATE brpc leveldb::leveldb OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
 add_dependencies(openai_service_test brpc-static)
+

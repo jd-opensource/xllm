@@ -9,6 +9,7 @@ import "completion.proto";
 import "sample.proto";
 import "chat.proto";
 import "embedding.proto";
+import "speech.proto";
 import "image_generation.proto";
 import "rerank.proto";
 import "models.proto";
@@ -62,6 +63,9 @@ service XllmAPIService {
   rpc Embeddings (EmbeddingRequest) returns (EmbeddingResponse);
   rpc EmbeddingsHttp (HttpRequest) returns (HttpResponse);
 
+  rpc Speech (SpeechRequest) returns (SpeechResponse);
+  rpc SpeechHttp (HttpRequest) returns (HttpResponse);
+
   rpc ImageGeneration(ImageGenerationRequest) returns (ImageGenerationResponse);
   rpc ImageGenerationHttp(HttpRequest) returns (HttpResponse);
 
@@ -90,3 +94,4 @@ service XllmAPIService {
   rpc UnlinkD2D (D2DLinkRequest) returns (Status);
   rpc UnlinkD2DHttp (HttpRequest) returns (HttpResponse);
 }; 
+

@@ -12,6 +12,7 @@ proto_library(
     chat.proto
     multimodal.proto
     embedding.proto
+    speech.proto
     rerank.proto
     models.proto
     worker.proto
@@ -24,3 +25,4 @@ proto_library(
     anthropic.proto
     xtensor_dist.proto
 )
+
