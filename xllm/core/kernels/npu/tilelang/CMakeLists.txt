@@ -138,6 +138,11 @@ tilelang_register_runtime_kernel(
   WRAPPER_SRCS split_qkv_rmsnorm_mrope_wrapper.cpp
 )
 
+tilelang_register_runtime_kernel(
+  NAME model_input_buffer_updater
+  WRAPPER_SRCS model_input_buffer_updater_wrapper.cpp
+)
+
 cc_library(
   NAME
     tilelang_kernels
@@ -199,6 +204,18 @@ cc_test(
     split_qkv_rmsnorm_mrope_wrapper_test
   SRCS
     split_qkv_rmsnorm_mrope_wrapper_test.cpp
+  DEPS
+    :tilelang_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
+)
+
+cc_test(
+  NAME
+    model_input_buffer_updater_wrapper_test
+  SRCS
+    model_input_buffer_updater_wrapper_test.cpp
   DEPS
     :tilelang_kernels
     torch

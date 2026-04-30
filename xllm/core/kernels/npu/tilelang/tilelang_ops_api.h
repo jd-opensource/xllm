@@ -42,6 +42,58 @@ std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
     float softplus_beta,
     float softplus_threshold);
 
+// Fused ACL-graph metadata updater for decode-side persistent buffers.
+//
+// All mandatory metadata tensors are int32 NPU tensors. Optional groups are
+// enabled by defining both src and dst tensors:
+// - q_cu_seq_lens
+// - linear_state_indices
+// - input_embedding
+//
+// positions:
+// - non-mRoPE: 1D [actual_num_tokens]
+// - mRoPE: 2D [3, actual_num_tokens] for src and [3, capacity] for dst
+//
+// block_tables:
+// - src: 2D [actual_batch_size, actual_block_table_len]
+// - dst: 2D [capacity, dst_block_table_stride]
+//
+// input_embedding:
+// - src: 2D [actual_num_tokens, hidden_size]
+// - dst: 2D [capacity, hidden_size]
+struct ModelInputBufferUpdaterParams {
+  torch::Tensor src_tokens;
+  torch::Tensor src_positions;
+  torch::Tensor src_new_cache_slots;
+  torch::Tensor src_q_seq_lens;
+  torch::Tensor src_kv_seq_lens;
+  torch::Tensor src_q_cu_seq_lens;
+  torch::Tensor src_linear_state_indices;
+  torch::Tensor src_block_tables;
+  torch::Tensor src_input_embedding;
+
+  torch::Tensor dst_tokens;
+  torch::Tensor dst_positions;
+  torch::Tensor dst_new_cache_slots;
+  torch::Tensor dst_q_seq_lens;
+  torch::Tensor dst_kv_seq_lens;
+  torch::Tensor dst_q_cu_seq_lens;
+  torch::Tensor dst_linear_state_indices;
+  torch::Tensor dst_block_tables;
+  torch::Tensor dst_input_embedding;
+
+  int64_t padded_num_tokens = 0;
+};
+
+void model_input_buffer_updater(ModelInputBufferUpdaterParams& params);
+
+bool has_model_input_buffer_updater_specialization(
+    c10::ScalarType embedding_dtype,
+    bool with_mrope,
+    bool with_input_embedding,
+    bool with_linear_state_indices,
+    bool with_q_cu_seq_lens);
+
 // Build merged mRoPE gather offsets for split_qkv_rmsnorm_mrope.
 torch::Tensor build_split_qkv_rmsnorm_mrope_gather_pattern(
     int64_t rope_dim,
