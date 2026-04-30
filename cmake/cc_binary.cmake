@@ -55,6 +55,10 @@ function(cc_binary)
   )
   target_compile_options(${CC_BINARY_NAME} PRIVATE ${CC_BINARY_COPTS})
   target_compile_definitions(${CC_BINARY_NAME} PUBLIC ${CC_BINARY_DEFINES})
+  set_target_properties(${CC_BINARY_NAME} PROPERTIES
+    BUILD_RPATH "$ORIGIN"
+    INSTALL_RPATH "$ORIGIN"
+  )
 
   add_executable(:${CC_BINARY_NAME} ALIAS ${CC_BINARY_NAME})
 endfunction()

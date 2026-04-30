@@ -34,6 +34,7 @@ class Block final {
   ~Block();
 
   Block() = default;
+  Block(uint32_t size);
   Block(int32_t id, BlockManager* allocator);
 
   Block(const Block& other);

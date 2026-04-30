@@ -81,6 +81,10 @@ class Request : public RequestBase {
 
   absl::Time created_time() const { return created_time_; }
 
+  void update_created_time(const absl::Time& created_time) {
+    created_time_ = created_time;
+  }
+
   int32_t get_deadline_ms() const { return deadline_ms_; }
 
   void set_deadline_ms() {

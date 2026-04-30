@@ -24,10 +24,10 @@ namespace xllm {
 class Engine;
 
 struct OffloadBlockPair {
-  OffloadBlockPair(Block& s, Block& d) : src(s), dst(d) {}
-
   OffloadBlockPair(Block&& s, Block&& d)
       : src(std::move(s)), dst(std::move(d)) {}
+
+  OffloadBlockPair(Block& s, Block&& d) : src(s), dst(std::move(d)) {}
 
   OffloadBlockPair(Block& s) : src(s) {}
 
@@ -70,6 +70,12 @@ class HierarchyBlockManagerPool : public BlockManagerPool {
 
  private:
   void allocate_host_shared(Sequence* sequence);
+  void allocate_direct_shared(Sequence* sequence);
+
+  void load_via_host(Sequence* sequence, size_t num_tokens);
+  void load_direct(Sequence* sequence, size_t num_tokens);
+  void offload_via_host(Sequence* sequence, bool finish);
+  void offload_direct(Sequence* sequence, bool finish);
 
  private:
   Engine* engine_;

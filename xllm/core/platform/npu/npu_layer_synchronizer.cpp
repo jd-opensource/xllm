@@ -21,7 +21,8 @@ namespace xllm {
 
 NPULayerSynchronizerImpl::NPULayerSynchronizerImpl(const int64_t num_layers,
                                                    const int32_t timeout)
-    : events_(num_layers, nullptr),
+    : LayerSynchronizer(num_layers, timeout),
+      events_(num_layers, nullptr),
       event_record_flags_(num_layers),
       timeout_(timeout) {
   uint32_t flags = ACL_EVENT_SYNC;
