@@ -34,6 +34,7 @@ limitations under the License.
 namespace xllm {
 
 struct ModelArgs;
+class OneRecBatchInputBuilderCache;
 
 static uint64_t batch_counter_ = 1;
 constexpr uint64_t UNINITIALIZED_BATCH_ID = 0x0;
@@ -61,6 +62,11 @@ class Batch {
   void set_swap_block_transfer_infos(
       std::vector<BlockTransferInfo> swap_block_transfer_infos) {
     swap_block_transfer_infos_ = std::move(swap_block_transfer_infos);
+  }
+
+  void set_onerec_batch_input_builder_cache(
+      OneRecBatchInputBuilderCache* onerec_batch_input_builder_cache) {
+    onerec_batch_input_builder_cache_ = onerec_batch_input_builder_cache;
   }
 
   void set_batch_id() {
@@ -186,6 +192,7 @@ class Batch {
   BatchForwardType batch_forward_type_;
 
   uint64_t batch_id_ = UNINITIALIZED_BATCH_ID;
+  OneRecBatchInputBuilderCache* onerec_batch_input_builder_cache_ = nullptr;
 };
 
 }  // namespace xllm

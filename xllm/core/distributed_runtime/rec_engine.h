@@ -23,6 +23,7 @@ limitations under the License.
 #include "distributed_runtime/dist_manager.h"
 #include "engine.h"
 #include "framework/batch/batch.h"
+#include "framework/batch/onerec_batch_input_builder.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
@@ -211,6 +212,8 @@ class RecEngine : public Engine {
   // OneRec specific (managed by prefill-only/xattention local pipelines)
   std::vector<std::unique_ptr<ProcessGroup>> process_groups_;
   std::vector<std::unique_ptr<Worker>> workers_;
+  std::unique_ptr<OneRecBatchInputBuilderCache>
+      onerec_batch_input_builder_cache_;
 
   // KV cache config
   int64_t n_local_kv_heads_ = 0;
