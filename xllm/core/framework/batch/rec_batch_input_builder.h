@@ -30,6 +30,8 @@ limitations under the License.
 
 namespace xllm {
 
+class OneRecBatchInputBuilderCache;
+
 class RecBatchInputBuilder {
  public:
   virtual ~RecBatchInputBuilder() = default;
@@ -48,7 +50,8 @@ class RecBatchInputBuilder {
       uint64_t batch_id,
       const ModelArgs* args,
       BatchForwardType batch_forward_type,
-      ThreadPool* thread_pool = nullptr);
+      ThreadPool* thread_pool = nullptr,
+      OneRecBatchInputBuilderCache* onerec_cache = nullptr);
 };
 
 }  // namespace xllm

@@ -31,6 +31,65 @@ limitations under the License.
 
 namespace xllm {
 
+class OneRecBatchInputBuilderCache final {
+ public:
+  OneRecBatchInputBuilderCache() = default;
+
+  OneRecBatchInputBuilderCache(const OneRecBatchInputBuilderCache&) = delete;
+  OneRecBatchInputBuilderCache& operator=(const OneRecBatchInputBuilderCache&) =
+      delete;
+  OneRecBatchInputBuilderCache(OneRecBatchInputBuilderCache&&) = delete;
+  OneRecBatchInputBuilderCache& operator=(OneRecBatchInputBuilderCache&&) =
+      delete;
+
+ private:
+  friend class OneRecBatchInputBuilder;
+
+  class MemoryPool final {
+   public:
+    std::vector<int32_t>& get_int32_vector(size_t reserve_size = 0) {
+      if (pool_index_ >= int32_pools_.size()) {
+        int32_pools_.emplace_back();
+      }
+      std::vector<int32_t>& vec = int32_pools_[pool_index_++];
+      vec.clear();
+      if (reserve_size > 0) {
+        vec.reserve(reserve_size);
+      }
+      return vec;
+    }
+
+    void reset() { pool_index_ = 0; }
+
+   private:
+    std::vector<std::vector<int32_t>> int32_pools_;
+    size_t pool_index_ = 0;
+  };
+
+  struct CacheData {
+    std::vector<int32_t> encoder_tokens;
+    std::vector<int32_t> encoder_seq_lens;
+    std::vector<torch::Tensor> encoder_sparse_embeddings;
+    std::vector<torch::Tensor> decoder_context_embeddings;
+  };
+
+  void ensure_tensors_initialized() {
+    if (!tensors_initialized_) {
+      fixed_positions_tensor_ = torch::tensor({0}, torch::kInt);
+      fixed_encoder_positions_tensor_ = torch::tensor({0}, torch::kInt);
+      empty_tensor_ = torch::tensor(std::vector<int32_t>{}, torch::kInt);
+      tensors_initialized_ = true;
+    }
+  }
+
+  MemoryPool memory_pool_;
+  CacheData cache_data_;
+  torch::Tensor fixed_positions_tensor_;
+  torch::Tensor fixed_encoder_positions_tensor_;
+  torch::Tensor empty_tensor_;
+  bool tensors_initialized_ = false;
+};
+
 class OneRecBatchInputBuilder : public RecBatchInputBuilder {
  public:
   explicit OneRecBatchInputBuilder(
@@ -42,7 +101,8 @@ class OneRecBatchInputBuilder : public RecBatchInputBuilder {
       const uint64_t batch_id,
       const ModelArgs* args,
       BatchForwardType batch_forward_type,
-      ThreadPool* thread_pool = nullptr);
+      ThreadPool* thread_pool,
+      OneRecBatchInputBuilderCache* perf_cache);
 
  public:
   ForwardInput build_rec_forward_input(
@@ -59,62 +119,7 @@ class OneRecBatchInputBuilder : public RecBatchInputBuilder {
   const ModelArgs* args_ = nullptr;
   ThreadPool* thread_pool_ = nullptr;
   BatchForwardType batch_forward_type_;
-  // High performance cache system
-  struct HighPerformanceCache {
-    // Memory pool - avoid frequent allocation/deallocation
-    struct MemoryPool {
-      std::vector<std::vector<int32_t>> int32_pools;
-      size_t pool_index = 0;
-
-      std::vector<int32_t>& get_int32_vector(size_t reserve_size = 0) {
-        if (pool_index >= int32_pools.size()) {
-          int32_pools.emplace_back();
-        }
-        auto& vec = int32_pools[pool_index++];
-        vec.clear();
-        if (reserve_size > 0) vec.reserve(reserve_size);
-        return vec;
-      }
-
-      void reset() { pool_index = 0; }
-    };
-
-    // Cache data structure
-    struct CacheData {
-      std::vector<int32_t> encoder_tokens;
-      std::vector<int> encoder_seq_lens;
-      std::vector<torch::Tensor> encoder_sparse_embeddings;
-      std::vector<torch::Tensor> decoder_context_embeddings;
-    };
-
-    // Pre-created constant tensors - lazy initialized to avoid static
-    // initialization order issues
-    torch::Tensor fixed_positions_tensor;
-    torch::Tensor fixed_encoder_positions_tensor;
-    torch::Tensor empty_tensor;
-    bool tensors_initialized = false;
-
-    MemoryPool memory_pool;
-    CacheData cache_data;
-
-    // Default constructor - does NOT create tensors to avoid static
-    // initialization order fiasco
-    HighPerformanceCache() = default;
-
-    // Lazy initialization of tensors - must be called before first use
-    void ensure_tensors_initialized() {
-      if (!tensors_initialized) {
-        fixed_positions_tensor = torch::tensor({0}, torch::kInt);
-        fixed_encoder_positions_tensor = torch::tensor({0}, torch::kInt);
-        empty_tensor = torch::tensor(std::vector<int32_t>{}, torch::kInt);
-        tensors_initialized = true;
-      }
-    }
-  };
-
-  // Use function-local static to ensure proper initialization order
-  // (Meyers' Singleton pattern)
-  static HighPerformanceCache& get_perf_cache();
+  OneRecBatchInputBuilderCache* perf_cache_ = nullptr;
 };
 
 }  // namespace xllm

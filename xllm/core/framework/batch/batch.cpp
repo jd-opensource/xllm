@@ -179,16 +179,18 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
     }
   }
 
-  auto builder = RecBatchInputBuilder::create(rec_type,
-                                              sequence_groups_,
-                                              allowed_max_tokens_,
-                                              input_embeddings_vec_,
-                                              mm_data_vec_,
-                                              &swap_block_transfer_infos_,
-                                              batch_id_,
-                                              &args,
-                                              batch_forward_type_,
-                                              thread_pool);
+  auto builder =
+      RecBatchInputBuilder::create(rec_type,
+                                   sequence_groups_,
+                                   allowed_max_tokens_,
+                                   input_embeddings_vec_,
+                                   mm_data_vec_,
+                                   &swap_block_transfer_infos_,
+                                   batch_id_,
+                                   &args,
+                                   batch_forward_type_,
+                                   thread_pool,
+                                   onerec_batch_input_builder_cache_);
   return builder->build_rec_forward_input(num_decoding_tokens,
                                           min_decoding_batch_size);
 }
