@@ -226,6 +226,129 @@ bool process_onerec_inputs(
   return true;
 }
 
+bool process_onerec_mm_data_inputs(const MMData& mm_data,
+                                   const ModelArgs& model_args,
+                                   std::vector<int32_t>* local_prompt_tokens,
+                                   MMData* processed_mm_data,
+                                   OutputCallback callback) {
+  if (local_prompt_tokens == nullptr || processed_mm_data == nullptr) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "OneRec mm_data outputs are null");
+    return false;
+  }
+
+  local_prompt_tokens->clear();
+  *processed_mm_data = MMData();
+  if (!mm_data.valid()) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "OneRec mm_data is empty");
+    return false;
+  }
+  if (!mm_data.hold<MMDict>()) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "OneRec mm_data must be dict type");
+    return false;
+  }
+
+  const MMDict& source_mm_dict = mm_data.items<MMDict>();
+  MMDict normalized_mm_dict;
+  normalized_mm_dict.reserve(source_mm_dict.size());
+  bool has_sparse_embedding = false;
+  int64_t sparse_embedding_hidden_size = -1;
+  int64_t decoder_context_hidden_size = -1;
+
+  for (const auto& entry : source_mm_dict) {
+    const std::string& tensor_name = entry.first;
+    if (tensor_name != kOneRecSparseEmbeddingName &&
+        tensor_name != kOneRecDecoderContextEmbeddingName) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "OneRec mm_data only supports 'sparse_embedding' and "
+                          "'decoder_context_embedding', got '" +
+                              tensor_name + "'");
+      return false;
+    }
+    if (!std::holds_alternative<torch::Tensor>(entry.second)) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "OneRec mm_data tensor '" + tensor_name +
+                              "' must be a single torch::Tensor");
+      return false;
+    }
+
+    torch::Tensor tensor = std::get<torch::Tensor>(entry.second);
+    if (!tensor.defined()) {
+      CALLBACK_WITH_ERROR(
+          StatusCode::INVALID_ARGUMENT,
+          "OneRec mm_data tensor '" + tensor_name + "' is undefined");
+      return false;
+    }
+    if (tensor.dim() != 2) {
+      CALLBACK_WITH_ERROR(
+          StatusCode::INVALID_ARGUMENT,
+          "OneRec mm_data tensor '" + tensor_name + "' must be 2-D");
+      return false;
+    }
+
+    const int64_t len = tensor.size(0);
+    const int64_t hidden = tensor.size(1);
+    if (len <= 0 || hidden <= 0) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "OneRec mm_data tensor '" + tensor_name +
+                              "' must have positive shape");
+      return false;
+    }
+    if (hidden != model_args.hidden_size()) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "OneRec mm_data tensor '" + tensor_name +
+                              "' hidden size mismatch, expected " +
+                              std::to_string(model_args.hidden_size()) +
+                              ", got " + std::to_string(hidden));
+      return false;
+    }
+
+    if (tensor.scalar_type() != torch::kBFloat16 &&
+        tensor.scalar_type() != torch::kFloat32 &&
+        tensor.scalar_type() != torch::kFloat16) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "OneRec mm_data tensor '" + tensor_name +
+                              "' must use float/bfloat16 dtype");
+      return false;
+    }
+
+    if (tensor.scalar_type() != torch::kBFloat16) {
+      tensor = tensor.to(torch::kBFloat16);
+    } else {
+      tensor = tensor.contiguous();
+    }
+
+    normalized_mm_dict[tensor_name] = tensor;
+    if (tensor_name == kOneRecSparseEmbeddingName) {
+      has_sparse_embedding = true;
+      sparse_embedding_hidden_size = hidden;
+    } else {
+      decoder_context_hidden_size = hidden;
+    }
+  }
+
+  if (!has_sparse_embedding) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "OneRec mm_data must include 'sparse_embedding'");
+    return false;
+  }
+  if (decoder_context_hidden_size != -1 &&
+      sparse_embedding_hidden_size != decoder_context_hidden_size) {
+    CALLBACK_WITH_ERROR(
+        StatusCode::INVALID_ARGUMENT,
+        "OneRec tensor hidden size mismatch: sparse_embedding=" +
+            std::to_string(sparse_embedding_hidden_size) +
+            ", decoder_context_embedding=" +
+            std::to_string(decoder_context_hidden_size));
+    return false;
+  }
+
+  *processed_mm_data = MMData(MMType::EMBEDDING, normalized_mm_dict);
+  return true;
+}
+
 bool process_llmrec_with_mm_data_inputs(
     const std::vector<int>& prompt_tokens,
     std::optional<MMData> mm_data,
@@ -366,6 +489,45 @@ RecMaster::RecMasterPipeline::generate_onerec_request_common(
                                       build_stop_checker);
 }
 
+std::shared_ptr<Request> RecMaster::RecMasterPipeline::generate_request(
+    MMData mm_data,
+    const RequestParams& sp,
+    OutputCallback callback) {
+  UNUSED_PARAMETER(mm_data);
+  UNUSED_PARAMETER(sp);
+  CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                      "This pipeline does not support mm_data input");
+  return nullptr;
+}
+
+std::shared_ptr<Request>
+RecMaster::RecMasterPipeline::generate_onerec_mm_data_request_common(
+    MMData mm_data,
+    const RequestParams& sp,
+    OutputCallback callback,
+    bool build_stop_checker) {
+  Timer timer;
+  std::vector<int32_t> local_prompt_tokens;
+  MMData processed_mm_data;
+
+  if (!process_onerec_mm_data_inputs(mm_data,
+                                     master_.model_args_,
+                                     &local_prompt_tokens,
+                                     &processed_mm_data,
+                                     callback)) {
+    return nullptr;
+  }
+
+  COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
+
+  return master_.build_request_common(std::string(""),
+                                      std::move(local_prompt_tokens),
+                                      std::move(processed_mm_data),
+                                      sp,
+                                      callback,
+                                      build_stop_checker);
+}
+
 // ============================================================
 // LlmRecMasterPipeline implementation (pure qwen3, no mm_data)
 // ============================================================
@@ -478,6 +640,15 @@ RecMaster::OneRecPrefillOnlyMasterPipeline::generate_request(
 }
 
 std::shared_ptr<Request>
+RecMaster::OneRecPrefillOnlyMasterPipeline::generate_request(
+    MMData mm_data,
+    const RequestParams& sp,
+    OutputCallback callback) {
+  return generate_onerec_mm_data_request_common(
+      std::move(mm_data), sp, callback, /*build_stop_checker=*/false);
+}
+
+std::shared_ptr<Request>
 RecMaster::OneRecXAttentionMasterPipeline::generate_request(
     std::string prompt,
     std::optional<std::vector<int>> prompt_tokens,
@@ -490,6 +661,15 @@ RecMaster::OneRecXAttentionMasterPipeline::generate_request(
                                         sp,
                                         callback,
                                         /*build_stop_checker=*/true);
+}
+
+std::shared_ptr<Request>
+RecMaster::OneRecXAttentionMasterPipeline::generate_request(
+    MMData mm_data,
+    const RequestParams& sp,
+    OutputCallback callback) {
+  return generate_onerec_mm_data_request_common(
+      std::move(mm_data), sp, callback, /*build_stop_checker=*/true);
 }
 
 // ============================================================
@@ -706,6 +886,24 @@ void RecMaster::handle_request(const std::vector<int>& prompt_tokens,
                          params,
                          std::move(cb));
                    });
+}
+
+void RecMaster::handle_request(const MMData& mm_data,
+                               RequestParams sp,
+                               OutputCallback callback) {
+  if (rec_type_ != RecType::kOneRec) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "Direct mm_data is only supported for OneRec models");
+    return;
+  }
+
+  schedule_request(
+      std::move(sp),
+      std::move(callback),
+      [this, mm_data](const RequestParams& params, OutputCallback cb) mutable {
+        return pipeline_->generate_request(
+            std::move(mm_data), params, std::move(cb));
+      });
 }
 
 void RecMaster::schedule_request(RequestParams sp,

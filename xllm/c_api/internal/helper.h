@@ -174,6 +174,12 @@ bool convert_xllm_mm_data_to_input_tensors(
     std::vector<proto::InferInputTensor>* input_tensors,
     std::string* error_info);
 
+bool convert_c_infer_input_tensors_to_onerec_mm_data(
+    const XLLM_InferInputTensorDesc* tensors,
+    size_t tensor_count,
+    xllm::MMData* mm_data,
+    std::string* error_info);
+
 bool convert_c_infer_input_tensors(const XLLM_InferInputTensorDesc* tensors,
                                    size_t tensor_count,
                                    std::vector<proto::InferInputTensor>* out,

@@ -60,6 +60,10 @@ class RecMaster : public Master {
                       RequestParams sp,
                       OutputCallback callback);
 
+  void handle_request(const MMData& mm_data,
+                      RequestParams sp,
+                      OutputCallback callback);
+
   // start the handling loop
   void run() override;
 
@@ -93,11 +97,21 @@ class RecMaster : public Master {
         const RequestParams& sp,
         OutputCallback callback);
 
+    virtual std::shared_ptr<Request> generate_request(MMData mm_data,
+                                                      const RequestParams& sp,
+                                                      OutputCallback callback);
+
    protected:
     std::shared_ptr<Request> generate_onerec_request_common(
         std::string prompt,
         std::optional<std::vector<int>> prompt_tokens,
         std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+        const RequestParams& sp,
+        OutputCallback callback,
+        bool build_stop_checker);
+
+    std::shared_ptr<Request> generate_onerec_mm_data_request_common(
+        MMData mm_data,
         const RequestParams& sp,
         OutputCallback callback,
         bool build_stop_checker);
@@ -138,6 +152,10 @@ class RecMaster : public Master {
         std::optional<std::vector<proto::InferInputTensor>> input_tensors,
         const RequestParams& sp,
         OutputCallback callback) override;
+
+    std::shared_ptr<Request> generate_request(MMData mm_data,
+                                              const RequestParams& sp,
+                                              OutputCallback callback) override;
   };
 
   // OneRecXAttentionMasterPipeline - OneRec xattention with stop checker for
@@ -153,6 +171,10 @@ class RecMaster : public Master {
         std::optional<std::vector<proto::InferInputTensor>> input_tensors,
         const RequestParams& sp,
         OutputCallback callback) override;
+
+    std::shared_ptr<Request> generate_request(MMData mm_data,
+                                              const RequestParams& sp,
+                                              OutputCallback callback) override;
   };
 
   // Factory method to create pipeline (can access private classes)
