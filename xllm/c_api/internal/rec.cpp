@@ -531,14 +531,15 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_input_tensors_completions(
         "Invalid input parameters for xllm_rec_input_tensors_completions");
   }
 
-  std::vector<xllm::proto::InferInputTensor> input_tensors;
+  xllm::MMData input_mm_data;
   std::string error_info;
-  if (!xllm::helper::convert_c_infer_input_tensors(
-          tensors, tensor_count, &input_tensors, &error_info)) {
+  if (!xllm::helper::convert_c_infer_input_tensors_to_onerec_mm_data(
+          tensors, tensor_count, &input_mm_data, &error_info)) {
     return xllm::helper::build_error_response(
         "",
         XLLM_StatusCode::kInvalidRequest,
-        error_info.empty() ? "convert_c_infer_input_tensors failed"
+        error_info.empty() ? "convert_c_infer_input_tensors_to_onerec_mm_data "
+                             "failed"
                            : error_info);
   }
 
@@ -546,7 +547,7 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_input_tensors_completions(
       handler,
       xllm::helper::InferenceType::REC_COMPLETIONS,
       model_id,
-      input_tensors,
+      input_mm_data,
       nullptr,
       timeout_ms,
       request_params);

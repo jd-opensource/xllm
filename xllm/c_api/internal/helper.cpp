@@ -25,6 +25,7 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "core/util/env_var.h"
 #include "core/util/rec_model_utils.h"
+#include "core/util/utils.h"
 #include "core/util/uuid.h"
 
 namespace xllm {
@@ -33,6 +34,9 @@ namespace {
 thread_local ShortUUID short_uuid;
 static std::atomic<bool> g_glog_inited = false;
 static pthread_mutex_t g_log_init_mutex = PTHREAD_MUTEX_INITIALIZER;
+constexpr const char* kOneRecSparseEmbeddingName = "sparse_embedding";
+constexpr const char* kOneRecDecoderContextEmbeddingName =
+    "decoder_context_embedding";
 
 void set_completion_logprobs(
     proto::Choice* choice,
@@ -576,6 +580,9 @@ XLLM_Response* handle_inference_request(
         //     &input);
         handler->master->handle_request(
             "", std::nullopt, input, xllm_request_params, on_request_complete);
+      } else if constexpr (std::is_same_v<InputType, xllm::MMData>) {
+        handler->master->handle_request(
+            input, xllm_request_params, on_request_complete);
       } else {
         handler->master->handle_request(input,
                                         std::nullopt,
@@ -1061,6 +1068,134 @@ bool convert_c_infer_input_tensors(const XLLM_InferInputTensorDesc* tensors,
   return !out->empty();
 }
 
+bool convert_c_infer_input_tensors_to_onerec_mm_data(
+    const XLLM_InferInputTensorDesc* tensors,
+    size_t tensor_count,
+    xllm::MMData* mm_data,
+    std::string* error_info) {
+  if (mm_data == nullptr) {
+    if (error_info != nullptr) {
+      *error_info = "mm_data is null";
+    }
+    return false;
+  }
+
+  *mm_data = xllm::MMData();
+  if (tensors == nullptr || tensor_count == 0) {
+    if (error_info != nullptr) {
+      *error_info = "tensors is null or tensor_count is 0";
+    }
+    return false;
+  }
+
+  xllm::MMDict mm_dict;
+  mm_dict.reserve(tensor_count);
+  bool has_sparse_embedding = false;
+
+  for (size_t index = 0; index < tensor_count; ++index) {
+    const XLLM_InferInputTensorDesc& tensor_desc = tensors[index];
+    if (tensor_desc.name == nullptr || tensor_desc.name[0] == '\0') {
+      if (error_info != nullptr) {
+        *error_info = "tensor has empty or null name";
+      }
+      return false;
+    }
+    if (tensor_desc.shape == nullptr || tensor_desc.shape_len != 2) {
+      if (error_info != nullptr) {
+        *error_info =
+            std::string("tensor ") + tensor_desc.name + " must be 2-D";
+      }
+      return false;
+    }
+    if (tensor_desc.data == nullptr) {
+      if (error_info != nullptr) {
+        *error_info = std::string("tensor ") + tensor_desc.name +
+                      " has null data pointer";
+      }
+      return false;
+    }
+    if (strcmp(tensor_desc.name, kOneRecSparseEmbeddingName) != 0 &&
+        strcmp(tensor_desc.name, kOneRecDecoderContextEmbeddingName) != 0) {
+      if (error_info != nullptr) {
+        *error_info =
+            std::string("unsupported OneRec tensor name: ") + tensor_desc.name;
+      }
+      return false;
+    }
+    if (mm_dict.find(tensor_desc.name) != mm_dict.end()) {
+      if (error_info != nullptr) {
+        *error_info =
+            std::string("duplicate OneRec tensor name: ") + tensor_desc.name;
+      }
+      return false;
+    }
+
+    const int64_t expected_numel =
+        infer_input_tensor_desc_numel(tensor_desc.shape, tensor_desc.shape_len);
+    if (expected_numel < 0) {
+      if (error_info != nullptr) {
+        *error_info =
+            std::string("invalid shape for tensor ") + tensor_desc.name;
+      }
+      return false;
+    }
+    if (static_cast<int64_t>(tensor_desc.num_elements) != expected_numel) {
+      if (error_info != nullptr) {
+        *error_info =
+            std::string("num_elements mismatch for tensor ") + tensor_desc.name;
+      }
+      return false;
+    }
+
+    torch::ScalarType scalar_type;
+    switch (static_cast<proto::DataType>(tensor_desc.data_type)) {
+      case proto::DataType::FLOAT:
+        scalar_type = torch::kFloat32;
+        break;
+      case proto::DataType::BFLOAT16:
+        scalar_type = torch::kBFloat16;
+        break;
+      case proto::DataType::FLOAT16:
+        scalar_type = torch::kFloat16;
+        break;
+      default:
+        if (error_info != nullptr) {
+          *error_info =
+              std::string("unsupported OneRec tensor data_type for ") +
+              tensor_desc.name;
+        }
+        return false;
+    }
+
+    std::vector<int64_t> dims(tensor_desc.shape,
+                              tensor_desc.shape + tensor_desc.shape_len);
+    torch::Tensor tensor =
+        torch::from_blob(const_cast<void*>(tensor_desc.data),
+                         dims,
+                         torch::TensorOptions().dtype(scalar_type));
+    if (scalar_type == torch::kBFloat16) {
+      tensor = tensor.clone();
+    } else {
+      tensor = tensor.to(torch::kBFloat16);
+    }
+
+    mm_dict[tensor_desc.name] = tensor;
+    if (strcmp(tensor_desc.name, kOneRecSparseEmbeddingName) == 0) {
+      has_sparse_embedding = true;
+    }
+  }
+
+  if (!has_sparse_embedding) {
+    if (error_info != nullptr) {
+      *error_info = "OneRec input_tensors must include 'sparse_embedding'";
+    }
+    return false;
+  }
+
+  *mm_data = xllm::MMData(xllm::MMType::EMBEDDING, mm_dict);
+  return true;
+}
+
 bool convert_xllm_mm_data_to_input_tensors(
     const XLLM_MM_Data* mm_data,
     std::vector<proto::InferInputTensor>* input_tensors,
@@ -1170,6 +1305,16 @@ handle_inference_request<XLLM_REC_Handler,
     InferenceType inference_type,
     const std::string& model_id,
     const std::vector<proto::InferInputTensor>& input,
+    void* extra,
+    uint32_t timeout_ms,
+    const XLLM_RequestParams* request_params);
+
+template XLLM_Response*
+handle_inference_request<XLLM_REC_Handler, xllm::MMData>(
+    XLLM_REC_Handler* handler,
+    InferenceType inference_type,
+    const std::string& model_id,
+    const xllm::MMData& input,
     void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
