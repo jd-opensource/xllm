@@ -654,6 +654,22 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
       << "DSAttention requires precomputed sparse metadata for compress_ratio="
       << compress_ratio_i;
 
+  // Compute cu_seqlens_cmp_kv for prefill with TND layout.
+  // cu_seqlens_cmp_kv = cumsum(seq_lens / compress_ratio)
+  c10::optional<torch::Tensor> cu_seqlens_cmp_kv_opt = c10::nullopt;
+  if (isprefill && compress_ratio_i > 1 &&
+      attn_metadata.actual_seq_lengths_query.defined() &&
+      attn_metadata.actual_seq_lengths_query.size(0) > 1) {
+    auto cu_seq_q = attn_metadata.actual_seq_lengths_query;
+    auto seq_lens = cu_seq_q.slice(0, 1) - cu_seq_q.slice(0, 0, cu_seq_q.size(0) - 1);
+    auto cmp_seq_lens = seq_lens / compress_ratio_i;
+    auto cu_seqlens_cmp_kv = torch::cat(
+        {torch::zeros({1}, cmp_seq_lens.options()),
+         torch::cumsum(cmp_seq_lens, 0)},
+        0);
+    cu_seqlens_cmp_kv_opt = as_optional(cu_seqlens_cmp_kv);
+  }
+
   auto [attn_output, output_lse] = xllm::kernel::npu::sparse_attn_sharedkv(
       /*q=*/q,
       /*ori_kv=*/as_optional(ori_kv_for_attn),
@@ -670,7 +686,7 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
       isprefill
           ? as_optional(attn_metadata.actual_seq_lengths_query)
           : c10::nullopt,
-      /*cu_seqlens_cmp_kv=*/c10::nullopt,
+      /*cu_seqlens_cmp_kv=*/cu_seqlens_cmp_kv_opt,
       /*seqused_q=*/c10::nullopt,
       /*seqused_kv=*/as_optional(attn_metadata.actual_seq_lengths_kv),
       /*sinks=*/attn_sink_loaded_ ? as_optional(attn_sink_) : c10::nullopt,
