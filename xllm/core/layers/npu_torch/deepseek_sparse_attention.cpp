@@ -563,6 +563,12 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
   }
 
   // 6) optional compressor for cmp cache
+  // Prefill: use compressed_kv directly (TND layout) to avoid ring-buffer
+  // overwrites in cmp_cache. The cmp_cache write is deferred to after attention.
+  // Decode: write compressed_kv into cmp_cache first, then pass cmp_cache
+  // (PA_ND layout).
+  torch::Tensor cmp_kv_for_attn;
+  torch::Tensor compressed_kv_for_cache;
   auto cmp_kv = kv_cache.get_k_cache();
   if (compress_ratio_i > 1 && compressor_ && cmp_kv.defined() &&
       cmp_slot.defined() && compressor_kv_state.defined() &&
@@ -590,7 +596,13 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
                              compress_sin,
                              compress_cos,
                              attn_metadata.actual_seq_lengths_query);
-    scatter_by_slot(cmp_kv, cmp_slot, compressed_kv);
+    if (isprefill) {
+      cmp_kv_for_attn = compressed_kv.unsqueeze(1);
+      compressed_kv_for_cache = compressed_kv;
+    } else {
+      scatter_by_slot(cmp_kv, cmp_slot, compressed_kv);
+      cmp_kv_for_attn = cmp_kv;
+    }
   }
 
   torch::Tensor compress_topk_idxs;
@@ -645,14 +657,14 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
   auto [attn_output, output_lse] = xllm::kernel::npu::sparse_attn_sharedkv(
       /*q=*/q,
       /*ori_kv=*/as_optional(ori_kv_for_attn),
-      /*cmp_kv=*/compress_ratio_i > 1 ? as_optional(cmp_kv) : c10::nullopt,
+      /*cmp_kv=*/compress_ratio_i > 1 ? as_optional(cmp_kv_for_attn) : c10::nullopt,
       /*ori_sparse_indices=*/c10::nullopt,
       /*cmp_sparse_indices=*/
       compress_ratio_i == 4 ? as_optional(compress_topk_idxs) : c10::nullopt,
       /*ori_block_table=*/
       isprefill ? c10::nullopt : as_optional(ori_block_table),
       /*cmp_block_table=*/
-      compress_ratio_i > 1 ? as_optional(cmp_block_table) : c10::nullopt,
+      (compress_ratio_i > 1 && !isprefill) ? as_optional(cmp_block_table) : c10::nullopt,
       /*cu_seqlens_q=*/as_optional(attn_metadata.actual_seq_lengths_query),
       /*cu_seqlens_ori_kv=*/
       isprefill
@@ -673,11 +685,14 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
       /*layout_kv=*/ori_kv_layout,
       /*return_softmax_lse=*/false);
 
-  // 8) Deferred swa_cache write for prefill.
-  // In prefill mode the swa_cache write was intentionally skipped above to
+  // 8) Deferred cache write for prefill.
+  // In prefill mode the cache write was intentionally skipped above to
   // avoid ring-buffer overwrites. Perform it now, after attention is done.
   if (isprefill) {
     scatter_by_slot(ori_kv, ori_slot, kv);
+    if (compressed_kv_for_cache.defined()) {
+      scatter_by_slot(cmp_kv, cmp_slot, compressed_kv_for_cache);
+    }
   }
 
   // 9) output RoPE + projection
