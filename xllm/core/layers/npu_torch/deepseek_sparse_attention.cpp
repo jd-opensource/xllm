@@ -675,10 +675,9 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
       /*ori_sparse_indices=*/c10::nullopt,
       /*cmp_sparse_indices=*/
       compress_ratio_i == 4 ? as_optional(compress_topk_idxs) : c10::nullopt,
-      /*ori_block_table=*/
-      isprefill ? c10::nullopt : as_optional(ori_block_table),
+      /*ori_block_table=*/as_optional(ori_block_table),
       /*cmp_block_table=*/
-      (compress_ratio_i > 1 && !isprefill) ? as_optional(cmp_block_table) : c10::nullopt,
+      compress_ratio_i > 1 ? as_optional(cmp_block_table) : c10::nullopt,
       /*cu_seqlens_q=*/as_optional(attn_metadata.actual_seq_lengths_query),
       /*cu_seqlens_ori_kv=*/
       isprefill
