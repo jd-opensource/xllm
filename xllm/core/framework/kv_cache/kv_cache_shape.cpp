@@ -22,17 +22,13 @@ limitations under the License.
 #include <utility>
 
 #include "common/global_flags.h"
+#include "util/math_utils.h"
 #include "worker.pb.h"
 
 namespace xllm {
 
 namespace {
 constexpr int64_t kNzAlignment = 16;
-
-int64_t ceil_div(int64_t dividend, int64_t divisor) {
-  CHECK_GT(divisor, 0) << "divisor must be positive.";
-  return (dividend + divisor - 1) / divisor;
-}
 
 int64_t get_local_head_count(int64_t total_head_count, int64_t world_size) {
   CHECK_GT(world_size, 0) << "world_size must be positive.";
@@ -217,7 +213,7 @@ void KVCacheShape::init_key_cache_shape(const KVCacheCapacity& kv_cache_cap,
     if (model_args.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
       key_cache_shape_ = std::vector<int64_t>{
           kv_cache_cap.n_blocks(),
-          ceil_div(model_args.kv_lora_rank(), kNzAlignment),
+          util::ceil_div(model_args.kv_lora_rank(), kNzAlignment),
           kv_cache_cap.block_size(),
           kNzAlignment};
       return;
@@ -248,7 +244,7 @@ void KVCacheShape::init_value_cache_shape(const KVCacheCapacity& kv_cache_cap,
     if (model_args.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
       value_cache_shape_ = std::vector<int64_t>{
           kv_cache_cap.n_blocks(),
-          ceil_div(model_args.qk_rope_head_dim(), kNzAlignment),
+          util::ceil_div(model_args.qk_rope_head_dim(), kNzAlignment),
           kv_cache_cap.block_size(),
           kNzAlignment};
       return;

@@ -15,18 +15,18 @@ limitations under the License.
 
 #pragma once
 
-#include <cstdint>
-#include <vector>
+#include <glog/logging.h>
 
-#include "common/types.h"
+#include <type_traits>
 
 namespace xllm {
+namespace util {
 
-TransferKVInfo build_step_transfer_info(
-    const TransferKVInfo& full_info,
-    const std::vector<uint64_t>& local_block_ids,
-    uint32_t n_kv_cache_tokens,
-    uint32_t seq_len,
-    uint32_t block_size);
+template <typename T>
+inline std::enable_if_t<std::is_integral_v<T>, T> ceil_div(T value, T divisor) {
+  CHECK_GT(divisor, 0) << "divisor must be positive.";
+  return value / divisor + static_cast<T>(value % divisor != 0);
+}
 
+}  // namespace util
 }  // namespace xllm

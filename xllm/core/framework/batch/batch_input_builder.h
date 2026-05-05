@@ -18,7 +18,10 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <limits>
+#include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "framework/request/mm_data.h"
@@ -28,6 +31,7 @@ limitations under the License.
 
 namespace xllm {
 
+class BatchInputBuilderTestPeer;
 struct ModelArgs;
 
 class BatchInputBuilder {
@@ -51,11 +55,20 @@ class BatchInputBuilder {
   RawForwardInput build_raw_forward_input();
 
  private:
+  friend class BatchInputBuilderTestPeer;
+
   // Core building methods
   void process_sequences();
   void process_sequences_multithreaded();
   ForwardInput state_to_forward_input();
   RawForwardInput state_to_raw_forward_input();
+
+  static TransferKVInfo build_step_transfer_info(
+      const TransferKVInfo& full_info,
+      const std::vector<uint64_t>& local_block_ids,
+      uint32_t n_kv_cache_tokens,
+      uint32_t seq_len,
+      uint32_t block_size);
 
   void process_swap_block_infos(RawForwardInput& raw_forward_input);
 
