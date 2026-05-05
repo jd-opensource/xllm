@@ -654,8 +654,6 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
       << "DSAttention requires precomputed sparse metadata for compress_ratio="
       << compress_ratio_i;
 
-  // Compute cu_seqlens_cmp_kv for prefill with TND layout.
-  // cu_seqlens_cmp_kv = cumsum(seq_lens / compress_ratio)
   c10::optional<torch::Tensor> cu_seqlens_cmp_kv_opt = c10::nullopt;
   if (isprefill && compress_ratio_i > 1 &&
       attn_metadata.actual_seq_lengths_query.defined() &&

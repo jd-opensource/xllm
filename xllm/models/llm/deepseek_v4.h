@@ -597,12 +597,40 @@ class DeepseekV4ModelImpl
     const int64_t ori_win_left = std::max<int64_t>(window_size_ - 1, 0);
     const int64_t sparse_topk = std::max<int64_t>(index_topk_, 1);
 
+    bool is_prefill = false;
+    if (dsa.seq_lens_q.defined() && dsa.seq_lens_q.numel() > 0) {
+      is_prefill = (dsa.seq_lens_q.max().item<int64_t>() > 1);
+    }
+    const char* layout_kv = is_prefill ? "TND" : "PA_ND";
+
+    auto cu_seqlens_ori_kv_opt =
+        is_prefill ? as_optional_tensor(dsa.actual_seq_lengths_query)
+                   : c10::optional<torch::Tensor>(c10::nullopt);
+
+    auto make_cmp_cu_seqlens = [&](int64_t ratio)
+        -> c10::optional<torch::Tensor> {
+      if (!is_prefill || !dsa.actual_seq_lengths_query.defined() ||
+          dsa.actual_seq_lengths_query.size(0) <= 1) {
+        return c10::nullopt;
+      }
+      auto cu_seq_q = dsa.actual_seq_lengths_query;
+      auto seq_lens =
+          cu_seq_q.slice(0, 1) -
+          cu_seq_q.slice(0, 0, cu_seq_q.size(0) - 1);
+      auto cmp_seq_lens = seq_lens / ratio;
+      auto cu_seqlens_cmp = torch::cat(
+          {torch::zeros({1}, cmp_seq_lens.options()),
+           torch::cumsum(cmp_seq_lens, 0)},
+          0);
+      return as_optional_tensor(cu_seqlens_cmp);
+    };
+
     xllm::kernel::SparseAttnSharedkvMetadataParams c1_params;
     c1_params.num_heads_q = tp_num_heads_;
     c1_params.num_heads_kv = 1;
     c1_params.head_dim = head_dim_;
     c1_params.cu_seqlens_q = as_optional_tensor(dsa.actual_seq_lengths_query);
-    c1_params.cu_seqlens_ori_kv = c10::nullopt;
+    c1_params.cu_seqlens_ori_kv = cu_seqlens_ori_kv_opt;
     c1_params.cu_seqlens_cmp_kv = c10::nullopt;
     c1_params.seqused_q = as_optional_tensor(dsa.seq_lens_q);
     c1_params.seqused_kv = as_optional_tensor(dsa.actual_seq_lengths_kv);
@@ -617,7 +645,7 @@ class DeepseekV4ModelImpl
     c1_params.ori_win_left = ori_win_left;
     c1_params.ori_win_right = 0;
     c1_params.layout_q = "TND";
-    c1_params.layout_kv = "PA_ND";
+    c1_params.layout_kv = layout_kv;
     c1_params.has_ori_kv = true;
     c1_params.has_cmp_kv = false;
     dsa.c1_metadata = xllm::kernel::sparse_attn_sharedkv_metadata(c1_params);
@@ -627,8 +655,8 @@ class DeepseekV4ModelImpl
     c4_params.num_heads_kv = 1;
     c4_params.head_dim = head_dim_;
     c4_params.cu_seqlens_q = as_optional_tensor(dsa.actual_seq_lengths_query);
-    c4_params.cu_seqlens_ori_kv = c10::nullopt;
-    c4_params.cu_seqlens_cmp_kv = c10::nullopt;
+    c4_params.cu_seqlens_ori_kv = cu_seqlens_ori_kv_opt;
+    c4_params.cu_seqlens_cmp_kv = make_cmp_cu_seqlens(4);
     c4_params.seqused_q = as_optional_tensor(dsa.seq_lens_q);
     c4_params.seqused_kv = as_optional_tensor(dsa.actual_seq_lengths_kv);
     c4_params.batch_size = batch_size;
@@ -642,7 +670,7 @@ class DeepseekV4ModelImpl
     c4_params.ori_win_left = ori_win_left;
     c4_params.ori_win_right = 0;
     c4_params.layout_q = "TND";
-    c4_params.layout_kv = "PA_ND";
+    c4_params.layout_kv = layout_kv;
     c4_params.has_ori_kv = true;
     c4_params.has_cmp_kv = true;
     dsa.c4_metadata = xllm::kernel::sparse_attn_sharedkv_metadata(c4_params);
@@ -652,8 +680,8 @@ class DeepseekV4ModelImpl
     c128_params.num_heads_kv = 1;
     c128_params.head_dim = head_dim_;
     c128_params.cu_seqlens_q = as_optional_tensor(dsa.actual_seq_lengths_query);
-    c128_params.cu_seqlens_ori_kv = c10::nullopt;
-    c128_params.cu_seqlens_cmp_kv = c10::nullopt;
+    c128_params.cu_seqlens_ori_kv = cu_seqlens_ori_kv_opt;
+    c128_params.cu_seqlens_cmp_kv = make_cmp_cu_seqlens(128);
     c128_params.seqused_q = as_optional_tensor(dsa.seq_lens_q);
     c128_params.seqused_kv = as_optional_tensor(dsa.actual_seq_lengths_kv);
     c128_params.batch_size = batch_size;
@@ -667,7 +695,7 @@ class DeepseekV4ModelImpl
     c128_params.ori_win_left = ori_win_left;
     c128_params.ori_win_right = 0;
     c128_params.layout_q = "TND";
-    c128_params.layout_kv = "PA_ND";
+    c128_params.layout_kv = layout_kv;
     c128_params.has_ori_kv = true;
     c128_params.has_cmp_kv = true;
     dsa.c128_metadata =
