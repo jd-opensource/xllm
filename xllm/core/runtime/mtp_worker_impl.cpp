@@ -865,7 +865,6 @@ SampleOutput MTPWorkerImpl::validate(const SamplingParameters& sampling_params,
                                          sampling_params.all_greedy_sample,
                                          target_output.logprobs,
                                          target_output.max_top_logprobs,
-                                         rate_controller_,
                                          enable_fused_kernel_);
 
   // get the accepted tokens

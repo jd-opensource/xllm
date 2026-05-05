@@ -140,11 +140,6 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   // Target model worker
   std::unique_ptr<LLMWorkerImpl> impl_;
 
-  // performance debug for fixing the speculative acceptance rate
-  // NOTE: This is for performance debugging only, it will
-  // influence the model accuracy and should not be used in production.
-  std::shared_ptr<RejectionSamplerRateController> rate_controller_;
-
   bool enable_fused_kernel_ = false;
   int32_t embedding_size_ = 0;
 };
