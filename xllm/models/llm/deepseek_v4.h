@@ -632,7 +632,7 @@ class DeepseekV4ModelImpl
     c1_params.cu_seqlens_q = as_optional_tensor(dsa.actual_seq_lengths_query);
     c1_params.cu_seqlens_ori_kv = cu_seqlens_ori_kv_opt;
     c1_params.cu_seqlens_cmp_kv = c10::nullopt;
-    c1_params.seqused_q = as_optional_tensor(dsa.seq_lens_q);
+    c1_params.seqused_q = c10::nullopt;
     c1_params.seqused_kv = as_optional_tensor(dsa.actual_seq_lengths_kv);
     c1_params.batch_size = batch_size;
     c1_params.max_seqlen_q = max_seqlen_q;
@@ -657,7 +657,7 @@ class DeepseekV4ModelImpl
     c4_params.cu_seqlens_q = as_optional_tensor(dsa.actual_seq_lengths_query);
     c4_params.cu_seqlens_ori_kv = cu_seqlens_ori_kv_opt;
     c4_params.cu_seqlens_cmp_kv = make_cmp_cu_seqlens(4);
-    c4_params.seqused_q = as_optional_tensor(dsa.seq_lens_q);
+    c4_params.seqused_q = c10::nullopt;
     c4_params.seqused_kv = as_optional_tensor(dsa.actual_seq_lengths_kv);
     c4_params.batch_size = batch_size;
     c4_params.max_seqlen_q = max_seqlen_q;
@@ -682,7 +682,7 @@ class DeepseekV4ModelImpl
     c128_params.cu_seqlens_q = as_optional_tensor(dsa.actual_seq_lengths_query);
     c128_params.cu_seqlens_ori_kv = cu_seqlens_ori_kv_opt;
     c128_params.cu_seqlens_cmp_kv = make_cmp_cu_seqlens(128);
-    c128_params.seqused_q = as_optional_tensor(dsa.seq_lens_q);
+    c128_params.seqused_q = c10::nullopt;
     c128_params.seqused_kv = as_optional_tensor(dsa.actual_seq_lengths_kv);
     c128_params.batch_size = batch_size;
     c128_params.max_seqlen_q = max_seqlen_q;
