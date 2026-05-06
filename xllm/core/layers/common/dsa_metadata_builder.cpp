@@ -427,14 +427,13 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
   auto old_acc = raw_bt.accessor<int32_t, 2>();
 
   for (int32_t s = 0; s < batch_size; ++s) {
-    int32_t pad_len = dst_lens[s] - current_cols;
-    if (pad_len > 0) {
-      for (int32_t j = 0; j < current_cols; ++j)
-        new_acc[s][pad_len + j] = old_acc[s][j];
-    } else if (pad_len < 0) {
-      for (int32_t j = 0; j < dst_lens[s]; ++j) new_acc[s][j] = old_acc[s][j];
-    } else {
-      for (int32_t j = 0; j < current_cols; ++j) new_acc[s][j] = old_acc[s][j];
+    const int32_t retained_cols = std::min(current_cols, dst_lens[s]);
+    const int32_t start_col = dst_lens[s] - retained_cols;
+    for (int32_t j = 0; j < retained_cols; ++j) {
+      const int32_t logical_col = start_col + j;
+      // Keep the read-side block table aligned with slot_for_position().
+      const int32_t physical_col = logical_col % current_cols;
+      new_acc[s][logical_col] = old_acc[s][physical_col];
     }
   }
   out_bt = new_bt;
