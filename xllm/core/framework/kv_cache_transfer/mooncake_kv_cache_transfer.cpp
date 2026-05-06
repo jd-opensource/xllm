@@ -430,8 +430,8 @@ void MooncakeKVCacheTransferDefault::register_kv_cache_impl(
     LOG(FATAL) << "register_kv_cache_impl failed";
   }
 
-  LOG(INFO) << "register_kv_cache_impl success, num_layers=" << kv_caches.size()
-            << ", buffers=" << buf_bytes.size();
+  LOG(INFO) << "register_kv_cache_impl success, registered_layers="
+            << kv_caches.size() << ", buffers=" << buf_bytes.size();
 }
 
 bool MooncakeKVCacheTransferDefault::pull_kv_blocks(
