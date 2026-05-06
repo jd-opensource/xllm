@@ -17,7 +17,6 @@ limitations under the License.
 
 #include "core/framework/model/model_output.h"
 #include "core/layers/common/lm_head.h"
-#include "core/layers/common/rms_norm_gated.h"
 #include "core/layers/common/rms_norm.h"
 #include "core/layers/common/qwen3_next_rms_norm.h"
 #include "core/layers/mlu/qwen3_5_decoder_layer.h"
@@ -30,7 +29,7 @@ limitations under the License.
 #include "qwen3_vl.h"
 
 namespace xllm {
-class Qwen3_5ModelImpl : public LlmModelImplBase<layer::Qwen3_5DecoderLayer> {
+class Qwen3_5ModelImpl final : public LlmModelImplBase<layer::Qwen3_5DecoderLayer> {
  public:
   Qwen3_5ModelImpl(const ModelContext& context)
       : LlmModelImplBase<layer::Qwen3_5DecoderLayer>("qwen3_5",
@@ -41,8 +40,9 @@ class Qwen3_5ModelImpl : public LlmModelImplBase<layer::Qwen3_5DecoderLayer> {
     dp_size_ = parallel_args.dp_size();
 
     if (!mrope_section_.empty()) {
+      int64_t rotary_dim = static_cast<int64_t>(model_args.head_dim() * model_args.partial_rotary_factor());
       cos_sin_ = layer::rotary::get_concat_rotary_embedding(
-          128,
+          rotary_dim,
           model_args.max_position_embeddings(),
           model_args.rope_theta(),
           options);
@@ -84,7 +84,7 @@ class Qwen3_5ModelImpl : public LlmModelImplBase<layer::Qwen3_5DecoderLayer> {
       auto freqs_t = x[0].clone();
       int64_t mrop_length = static_cast<int64_t>(freqs_t.size(-1) / 2);
 
-      for (int dim_idx = 1; dim_idx <= 2; ++dim_idx) {
+      for (int32_t dim_idx = 1; dim_idx <= 2; ++dim_idx) {
         int64_t offset = dim_idx;
         int64_t section_len = mrope_section_[dim_idx];
         int64_t length = section_len * 3;
@@ -157,7 +157,7 @@ class Qwen3_5ModelImpl : public LlmModelImplBase<layer::Qwen3_5DecoderLayer> {
     if (residual.has_value()) {
       h = h + residual.value();
     }
-    auto hidden_states = rms_norm_(h);
+    auto hidden_states = std::get<0>(rms_norm_(h));
     return ModelOutput(hidden_states);
   }
 
@@ -224,7 +224,7 @@ TORCH_MODULE(Qwen3_5ForConditionalGeneration);
   LOAD_ARG_OR(attention_bias, "text_config.attention_bias", false); \
   LOAD_ARG_OR(attention_dropout, "text_config.attention_dropout", 0.0f); \
   LOAD_ARG_OR(initializer_range, "text_config.initializer_range", 0.02f); \
-  LOAD_ARG_OR(mlp_only_layers, "text_config.mlp_only_layers", std::vector<int>()); \
+  LOAD_ARG_OR(mlp_only_layers, "text_config.mlp_only_layers", std::vector<int32_t>()); \
   LOAD_ARG(rope_scaling_mrope_section, "text_config.rope_parameters.mrope_section"); \
   LOAD_ARG_OR(rope_scaling_rope_type, "text_config.rope_parameters.rope_type", "default"); \
   LOAD_ARG_OR(partial_rotary_factor, "text_config.rope_parameters.partial_rotary_factor", 0.25f)

@@ -75,7 +75,7 @@ Qwen3_5DecoderLayerImpl::Qwen3_5DecoderLayerImpl(const ModelContext& context,
   } else {
     full_attention_ = register_module(
         "self_attn",
-        Qwen3NextAttention(
+        Qwen3_5Attention(
             model_args, quant_args, parallel_args_, options, layer_id));
   }
 
@@ -147,14 +147,14 @@ Qwen3_5DecoderLayerImpl::apply_norm(Qwen3NextRMSNorm& norm,
                                     std::optional<torch::Tensor>& residual) {
   if (!residual.has_value()) {
     auto new_residual = input;
-    auto output = norm->forward(input);
+    auto output = std::get<0>(norm->forward(input));
     return {output, new_residual};
   }
   auto orig_dtype = input.dtype();
   input = input + residual.value();
   auto new_residual = input;
   input = input.to(orig_dtype);
-  auto output = norm->forward(input);
+  auto output = std::get<0>(norm->forward(input));
   return {output, new_residual};
 }
 

@@ -139,5 +139,6 @@ void RMSNormImpl::set_layernorm_mode() {
   bias_ = register_parameter(
       "bias", torch::empty({norm_dim_}, weight_.options()), false);
 }
+
 }  // namespace layer
 }  // namespace xllm

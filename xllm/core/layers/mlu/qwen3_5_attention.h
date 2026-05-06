@@ -31,10 +31,10 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class Qwen3NextAttentionImpl : public torch::nn::Module {
+class Qwen3_5AttentionImpl : public torch::nn::Module {
  public:
-  Qwen3NextAttentionImpl() = default;
-  Qwen3NextAttentionImpl(const ModelArgs& args,
+  Qwen3_5AttentionImpl() = default;
+  Qwen3_5AttentionImpl(const ModelArgs& args,
                        const QuantArgs& quant_args,
                        const ParallelArgs& parallel_args,
                        const torch::TensorOptions& options,
@@ -46,6 +46,10 @@ class Qwen3NextAttentionImpl : public torch::nn::Module {
                         KVCache& kv_cache);
 
   void load_state_dict(const StateDict& state_dict);
+  void rotary_emb_forward(torch::Tensor& q,
+                          torch::Tensor& k,
+                          const torch::Tensor& positions,
+                          const AttentionMetadata& attn_metadata);
 
  private:
   int64_t num_heads_;
@@ -67,8 +71,9 @@ class Qwen3NextAttentionImpl : public torch::nn::Module {
 
   Attention attn_{nullptr};
   MRotaryEmbedding rotary_emb_{nullptr};
+  torch::Tensor mrope_cu_seq_lens_;
 };
-TORCH_MODULE(Qwen3NextAttention);
+TORCH_MODULE(Qwen3_5Attention);
 
 }  // namespace layer
 }  // namespace xllm

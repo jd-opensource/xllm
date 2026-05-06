@@ -23,32 +23,37 @@ torch::Tensor gated_layer_norm(torch::Tensor& x,
                                const std::optional<torch::Tensor>& gate,
                                int64_t group_size,
                                bool norm_before_gate) {
-  if (gate.has_value() && !norm_before_gate) {
-    torch::Tensor gate_value = gate.value();
-    gate_value = gate_value.to(torch::kFloat32);
-    x = x * torch::silu(gate_value);
+  auto origin_dtype = x.dtype();
+  auto x_fp32 = x.to(torch::kFloat32);
+  auto weight_fp32 = weight.to(torch::kFloat32);
+  torch::Tensor gate_value;
+  if (gate.has_value()) {
+    gate_value = gate.value().to(torch::kFloat32);;
   }
 
-  int64_t hidden_size = x.size(-1);
+  if (gate.has_value() && !norm_before_gate) {
+    x_fp32 = x_fp32 * torch::silu(gate_value);
+  }
+
+  int64_t hidden_size = x_fp32.size(-1);
   torch::Tensor normalized;
   if (group_size == hidden_size) {
-    auto variance = x.pow(2).mean(/*dim=*/-1, /*keepdim=*/true);
-    normalized = x * torch::rsqrt(variance + eps);
-    normalized = normalized * weight;
+    auto variance = x_fp32.pow(2).mean(/*dim=*/-1, /*keepdim=*/true);
+    normalized = x_fp32 * torch::rsqrt(variance + eps);
+    normalized = normalized * weight_fp32;
   } else {
     int64_t num_groups = hidden_size / group_size;
-    auto x_grouped = x.reshape({-1, num_groups, group_size});
+    auto x_grouped = x_fp32.reshape({-1, num_groups, group_size});
     auto variance = x_grouped.pow(2).mean(/*dim=*/-1, /*keepdim=*/true);
     auto normalized_grouped = x_grouped * torch::rsqrt(variance + eps);
     normalized = normalized_grouped.reshape({-1, num_groups * group_size});
-    normalized = normalized * weight;
+    normalized = normalized * weight_fp32;
   }
 
   if (gate.has_value() && norm_before_gate) {
-    auto gate_value = gate.value().to(torch::kFloat32);
     normalized = normalized * torch::silu(gate_value);
   }
 
-  return normalized;
+  return normalized.to(origin_dtype);
 }
 }  // namespace xllm::kernel::mlu

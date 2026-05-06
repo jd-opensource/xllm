@@ -13,20 +13,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "qwen3_next_attention.h"
+#include "qwen3_5_attention.h"
 
 #include <glog/logging.h>
 
 #include <tuple>
+
+#include "kernels/ops_api.h"
 namespace xllm {
 namespace layer {
 
-Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
-    const ModelArgs& args,
-    const QuantArgs& quant_args,
-    const ParallelArgs& parallel_args,
-    const torch::TensorOptions& options,
-    int32_t layer_id) {
+Qwen3_5AttentionImpl::Qwen3_5AttentionImpl(const ModelArgs& args,
+                                           const QuantArgs& quant_args,
+                                           const ParallelArgs& parallel_args,
+                                           const torch::TensorOptions& options,
+                                           int32_t layer_id) {
   const int64_t tp_size = parallel_args.tp_group_->world_size();
   const int64_t total_num_heads = args.n_heads();
   const int64_t total_num_kv_heads = args.n_kv_heads().value_or(args.n_heads());
@@ -50,6 +51,7 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
   kv_size_ = num_kv_heads_ * head_dim_;
   scaling_ = 1.0f / std::sqrt(static_cast<float>(head_dim_));
   attn_output_gate_ = args.attn_output_gate();
+  mrope_cu_seq_lens_ = torch::zeros(2, torch::kInt32).to(options.device());
   // 1. QKV linear
   qkv_proj_ = register_module(
       "qkv_proj",
@@ -82,9 +84,17 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
   k_norm_ = register_module(
       "k_norm", Qwen3NextRMSNorm(head_dim_, args.rms_norm_eps(), options));
 
-  // 5. Rotary embedding
-  const int rotary_dim =
-      static_cast<int>(head_dim_ * args.partial_rotary_factor());
+  // 5. Attention
+  attn_ = register_module("attn",
+                          Attention(num_heads_,
+                                    head_dim_,
+                                    scaling_,
+                                    num_kv_heads_,
+                                    args.sliding_window()));
+
+  // 6. Rotary embedding
+  const int32_t rotary_dim =
+      static_cast<int32_t>(head_dim_ * args.partial_rotary_factor());
   rotary_emb_ =
       register_module("rope",
                       MRotaryEmbedding(rotary_dim,
@@ -93,17 +103,60 @@ Qwen3NextAttentionImpl::Qwen3NextAttentionImpl(
                                        /*interleaved=*/false,
                                        args.rope_scaling_mrope_section(),
                                        options));
-
-  // 6. Attention
-  attn_ = register_module("attn",
-                          Attention(num_heads_,
-                                    head_dim_,
-                                    scaling_,
-                                    num_kv_heads_,
-                                    args.sliding_window()));
 }
 
-torch::Tensor Qwen3NextAttentionImpl::forward(
+void Qwen3_5AttentionImpl::rotary_emb_forward(
+    torch::Tensor& q,
+    torch::Tensor& k,
+    const torch::Tensor& positions,
+    const AttentionMetadata& attn_metadata) {
+  auto q_shape = q.sizes();
+  auto k_shape = k.sizes();
+  auto num_tokens = positions.size(-1);
+  mrope_cu_seq_lens_[1] = num_tokens;
+
+  xllm::kernel::RotaryParams rotary_params;
+  bool only_prefill =
+      (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill);
+  if (only_prefill) {
+    rotary_params.sin = attn_metadata.mrope_sin;
+    rotary_params.cos = attn_metadata.mrope_cos;
+    rotary_params.position_ids = std::nullopt;
+    rotary_params.cu_query_lens = mrope_cu_seq_lens_;
+    rotary_params.interleaved = false;
+    rotary_params.discrete = false;
+    rotary_params.max_query_len = num_tokens;
+
+    rotary_params.q = q.view({num_tokens, -1, head_dim_});
+    xllm::kernel::apply_rotary(rotary_params);
+    q = rotary_params.q.reshape(q_shape);
+
+    rotary_params.q = k.view({num_tokens, -1, head_dim_});
+    xllm::kernel::apply_rotary(rotary_params);
+    k = rotary_params.q.reshape(k_shape);
+  } else {
+    if (positions.dim() == 2) {
+      rotary_params.position_ids = positions[0];
+    } else {
+      rotary_params.position_ids = positions;
+    }
+    rotary_params.sin = rotary_emb_->get_sin_cache();
+    rotary_params.cos = rotary_emb_->get_cos_cache();
+
+    rotary_params.interleaved = false;
+    rotary_params.discrete = true;
+    rotary_params.max_query_len = num_tokens;
+    rotary_params.q = q.view({1, num_tokens, -1, head_dim_});
+    xllm::kernel::apply_rotary(rotary_params);
+    q = rotary_params.q.reshape(q_shape);
+
+    rotary_params.q = k.view({1, num_tokens, -1, head_dim_});
+    xllm::kernel::apply_rotary(rotary_params);
+    k = rotary_params.q.reshape(k_shape);
+  }
+}
+
+torch::Tensor Qwen3_5AttentionImpl::forward(
     const torch::Tensor& positions,
     const torch::Tensor& hidden_states,
     const AttentionMetadata& attn_metadata,
@@ -122,30 +175,23 @@ torch::Tensor Qwen3NextAttentionImpl::forward(
     v = v.contiguous();
 
     std::vector<int64_t> orig_shape;
-    int64_t q_gate_dim = q_gate.dim();
-    orig_shape =
-        std::vector<int64_t>(q_gate.sizes().slice(0, q_gate_dim - 1).begin(),
-                             q_gate.sizes().slice(0, q_gate_dim - 1).end());
-
+    for (int64_t i = 0; i < q_gate.dim() - 1; i++) {
+      orig_shape.push_back(q_gate.size(i));
+    }
     std::vector<int64_t> new_shape = orig_shape;
     new_shape.push_back(num_heads_);
-    int64_t orig_total = 1;
-    for (auto d : orig_shape) orig_total *= d;
-    int64_t last_dim = q_gate.numel() / (orig_total * num_heads_);
-    new_shape.push_back(last_dim);
-
+    new_shape.push_back(-1);
     torch::Tensor q_gate_reshaped = q_gate.reshape(new_shape);
-
     auto chunks = torch::chunk(q_gate_reshaped, 2, /*dim=*/-1);
     q = chunks[0];
     gate = chunks[1];
 
     std::vector<int64_t> q_new_shape = orig_shape;
-    q_new_shape.push_back(q.numel() / orig_total);
+    q_new_shape.push_back(-1);
     q = q.reshape(q_new_shape);
 
     std::vector<int64_t> gate_new_shape = orig_shape;
-    gate_new_shape.push_back(gate.numel() / orig_total);
+    gate_new_shape.push_back(-1);
     gate = gate.reshape(gate_new_shape);
   } else {
     // Normal case: [q_size, kv_size, kv_size]
@@ -157,15 +203,13 @@ torch::Tensor Qwen3NextAttentionImpl::forward(
   const int64_t T = q.size(0);
 
   auto q_reshaped = q.reshape({T, num_heads_, head_dim_});
-  auto q_normed = q_norm_->forward(q_reshaped);
+  auto q_normed = std::get<0>(q_norm_->forward(q_reshaped));
   auto k_reshaped = k.reshape({T, num_kv_heads_, head_dim_});
-  auto k_normed = k_norm_->forward(k_reshaped);
+  auto k_normed = std::get<0>(k_norm_->forward(k_reshaped));
 
   q = q_normed.view({T, q_size_});
   k = k_normed.view({T, kv_size_});
-
-  rotary_emb_->forward(q, k, positions, attn_metadata);
-
+  rotary_emb_forward(q, k, positions, attn_metadata);
   auto out = std::get<0>(attn_->forward(attn_metadata, q, k, v, kv_cache));
 
   if (attn_output_gate_) {
@@ -177,7 +221,7 @@ torch::Tensor Qwen3NextAttentionImpl::forward(
   return out;
 }
 
-void Qwen3NextAttentionImpl::load_state_dict(const StateDict& state_dict) {
+void Qwen3_5AttentionImpl::load_state_dict(const StateDict& state_dict) {
   qkv_proj_->load_state_dict(state_dict, {"q_proj.", "k_proj.", "v_proj."});
   o_proj_->load_state_dict(state_dict.get_dict_with_prefix("o_proj."));
   if (auto w = state_dict.get_tensor("q_norm.weight"); w.defined()) {

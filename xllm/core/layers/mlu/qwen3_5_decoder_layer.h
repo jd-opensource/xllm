@@ -22,7 +22,7 @@ limitations under the License.
 
 #include "layers/common/dense_mlp.h"
 #include "layers/common/qwen3_next_rms_norm.h"
-#include "layers/mlu/qwen3_next_attention.h"
+#include "layers/mlu/qwen3_5_attention.h"
 #include "layers/mlu/qwen3_5_fused_moe.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
@@ -34,7 +34,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class Qwen3_5DecoderLayerImpl : public torch::nn::Module {
+class Qwen3_5DecoderLayerImpl final : public torch::nn::Module {
  public:
   Qwen3_5DecoderLayerImpl(const ModelContext& context, int32_t layer_id);
 
@@ -56,7 +56,7 @@ class Qwen3_5DecoderLayerImpl : public torch::nn::Module {
   torch::Tensor run_moe(torch::Tensor x, const ModelInputParams& input_params);
 
   std::string layer_type_;
-  Qwen3NextAttention full_attention_{nullptr};
+  Qwen3_5Attention full_attention_{nullptr};
   // TODO: support linear attention
   // Qwen3_5GatedDeltaNet linear_attention_{nullptr};
   DenseMLP mlp_{nullptr};

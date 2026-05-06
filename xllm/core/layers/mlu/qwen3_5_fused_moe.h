@@ -20,7 +20,7 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-class Qwen3_5FusedMoEImpl : public FusedMoEImpl {
+class Qwen3_5FusedMoEImpl final : public FusedMoEImpl {
  public:
   Qwen3_5FusedMoEImpl() = default;
 

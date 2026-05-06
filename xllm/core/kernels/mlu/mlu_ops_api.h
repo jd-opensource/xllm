@@ -396,7 +396,6 @@ torch::Tensor gated_layer_norm(torch::Tensor& x,
 torch::Tensor gemma_rms_norm(const torch::Tensor& x,
                              const torch::Tensor& gamma,
                              double eps,
-                             torch::Tensor& rstd_out,
                              torch::Tensor& norm_out);
 
 }  // namespace xllm::kernel::mlu

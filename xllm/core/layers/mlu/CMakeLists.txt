@@ -14,7 +14,7 @@ cc_library(
     moe_gate.h
     fused_moe.h
     qwen3_5_fused_moe.h
-    qwen3_next_attention.h
+    qwen3_5_attention.h
     qwen3_5_decoder_layer.h
   SRCS
     attention.cpp
@@ -28,7 +28,7 @@ cc_library(
     fused_moe_base.cpp
     fused_moe_all2all.cpp
     qwen3_5_fused_moe.cpp
-    qwen3_next_attention.cpp
+    qwen3_5_attention.cpp
     qwen3_5_decoder_layer.cpp
   DEPS
     :common_layers
