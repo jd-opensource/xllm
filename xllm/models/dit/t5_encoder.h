@@ -67,7 +67,7 @@ class T5LayerNormImpl : public torch::nn::Module {
         << "weight is not loaded for " << prefix + "weight";
   }
 
- private:
+ protected:
   torch::Tensor weight_;
   bool weight_is_loaded_ = false;
   double variance_epsilon_;
@@ -406,7 +406,7 @@ class T5AttentionImpl : public torch::nn::Module {
     }
   }
 
- private:
+ protected:
   torch::Tensor _relative_position_bucket(torch::Tensor& relative_position,
                                           bool bidirectional = true,
                                           int64_t num_buckets = 32,
@@ -477,7 +477,7 @@ class T5AttentionImpl : public torch::nn::Module {
     return values;
   }
 
- private:
+ protected:
   bool has_relative_attention_bias_;
   int64_t relative_attention_num_buckets_;
   int64_t relative_attention_max_distance_;
