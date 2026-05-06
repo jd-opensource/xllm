@@ -17,7 +17,7 @@ cc_library(
     $<$<BOOL:${USE_MLU}>:mlu/mlu_layer_synchronizer.h>
     $<$<BOOL:${USE_MLU}>:mlu/mlu_tensor_alloc.h>
     $<$<BOOL:${USE_CUDA}>:cuda/cuda_utils.h>
-    $<$<BOOL:${USE_CUDA}>:numa_utils.h>
+    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>>:numa_utils.h>
   SRCS
     stream.cpp
     device.cpp
@@ -25,7 +25,7 @@ cc_library(
     shared_vmm_allocator.cpp
     $<$<BOOL:${USE_MLU}>:mlu/mlu_layer_synchronizer.cpp>
     $<$<BOOL:${USE_MLU}>:mlu/mlu_tensor_alloc.cpp>
-    $<$<BOOL:${USE_CUDA}>:numa_utils.cpp>
+    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>>:numa_utils.cpp>
   DEPS
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
@@ -35,7 +35,7 @@ cc_library(
     $<$<BOOL:${USE_MLU}>:cndrv>
     $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_ILU}>>:cuda>
     $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_ILU}>>:cudart>
-    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_ILU}>>:numa>
+    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_ILU}>>:numa>
     $<$<BOOL:${USE_MUSA}>:musa>
     $<$<BOOL:${USE_MUSA}>:musart>
     $<$<BOOL:${USE_NPU}>:platform_npu>

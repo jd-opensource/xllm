@@ -35,7 +35,7 @@ int32_t get_num_numa_nodes();
 
 /**
  * @brief Get the NUMA node ID for a given device index
- * @param device_index The device index (e.g., GPU/NPU index)
+ * @param device_index The backend-visible device index (e.g., CUDA/MLU ordinal)
  * @return The NUMA node ID, or -1 if unable to determine
  */
 int32_t get_device_numa_node(int32_t device_index);

@@ -35,7 +35,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_MLU)
 #include "core/platform/numa_utils.h"
 #endif
 #include "framework/kv_cache/kv_cache.h"
@@ -86,7 +86,7 @@ void WorkerServer::create_server(
   device.set_device();
   LOG(INFO) << "Create worker server with device: " << device.index();
 
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_MLU)
   // Bind worker thread to the same NUMA node as the device
   // This prevents the thread from spanning across NUMA nodes, which would
   // significantly degrade memory access and other performance aspects
