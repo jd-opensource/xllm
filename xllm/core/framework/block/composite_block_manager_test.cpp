@@ -304,4 +304,45 @@ TEST(CompositeBlockManagerTest, TokenIncrease_AddsBlocksIncrementally) {
   manager.deallocate_sequence(&seq);
 }
 
+TEST(CompositeBlockManagerTest, SlidingWindowBlockOrderStaysStable) {
+  const uint32_t base_num_blocks = 4096;
+  const uint32_t window_size = 128;
+  const uint32_t max_seqs_per_batch = 4;
+
+  BlockManager::Options opts = MakeCompositeOptions(
+      base_num_blocks, kBaseBlockSize, window_size, max_seqs_per_batch);
+  CompositeBlockManager manager(opts);
+
+  Sequence seq = MakeTestSequence(0, {1});
+  constexpr size_t kWindowTokens =
+      kSlidingWindowBlocksPerSequence * kBaseBlockSize;
+
+  EXPECT_TRUE(manager.allocate_for_sequence(&seq, kWindowTokens));
+  const auto& initial = seq.kv_state().composite_blocks();
+  ASSERT_EQ(initial.size(), 3u);
+  ASSERT_EQ(initial[0].size(), kSlidingWindowBlocksPerSequence);
+
+  std::vector<int32_t> initial_ids;
+  initial_ids.reserve(initial[0].size());
+  for (const auto& block : initial[0]) {
+    initial_ids.push_back(block.id());
+  }
+
+  EXPECT_TRUE(manager.allocate_for_sequence(&seq, kWindowTokens));
+  const auto& boundary = seq.kv_state().composite_blocks();
+  ASSERT_EQ(boundary[0].size(), kSlidingWindowBlocksPerSequence);
+  for (size_t i = 0; i < initial_ids.size(); ++i) {
+    EXPECT_EQ(boundary[0][i].id(), initial_ids[i]);
+  }
+
+  EXPECT_TRUE(manager.allocate_for_sequence(&seq, kWindowTokens + 1));
+  const auto& exceeded = seq.kv_state().composite_blocks();
+  ASSERT_EQ(exceeded[0].size(), kSlidingWindowBlocksPerSequence);
+  for (size_t i = 0; i < initial_ids.size(); ++i) {
+    EXPECT_EQ(exceeded[0][i].id(), initial_ids[i]);
+  }
+
+  manager.deallocate_sequence(&seq);
+}
+
 }  // namespace xllm
