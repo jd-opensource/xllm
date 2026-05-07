@@ -251,7 +251,6 @@ class OneRecStackImpl : public torch::nn::Module {
     auto& mutable_onerec_params = input_params_local.mutable_onerec_params();
     const auto* onerec_xattn_params = input_params.onerec_xattention_params();
 
-#if defined(USE_NPU)
     auto validate_selected_token_idxes_stage = [&](const char* stage_name) {
       if (!is_decoder_ || onerec_xattn_params == nullptr ||
           !util::get_bool_env("XLLM_DEBUG_ONEREC_SELECTED_TOKEN_CPU_CHECK",
@@ -275,7 +274,6 @@ class OneRecStackImpl : public torch::nn::Module {
           << static_cast<int32_t>(onerec_xattn_params->rec_stage)
           << ", is_first_prefill=" << onerec_xattn_params->is_first_prefill;
     };
-#endif
 
     const bool is_decode_stage = is_decoder_ && !is_prefill;
     torch::Tensor effective_attn_mask;
@@ -337,24 +335,18 @@ class OneRecStackImpl : public torch::nn::Module {
           event_flag,
           expert_array);
 
-#if defined(USE_NPU)
       if (input_params.layer_synchronizer != nullptr &&
           !input_params.layer_synchronizer->synchronize_layer(i)) {
         return torch::Tensor();
       }
       validate_selected_token_idxes_stage(
           (std::string("decoder_layer_") + std::to_string(i)).c_str());
-#endif
     }
 
-#if defined(USE_NPU)
     validate_selected_token_idxes_stage("decoder_layer_loop");
-#endif
     std::optional<torch::Tensor> residual = std::nullopt;
     h = std::get<0>(norm_->forward(h, residual));
-#if defined(USE_NPU)
     validate_selected_token_idxes_stage("decoder_final_norm");
-#endif
     return h;
   }
 
