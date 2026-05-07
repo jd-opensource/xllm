@@ -77,6 +77,12 @@ struct SequenceOutput {
   // decoded item ids for multi-item recommendation output.
   std::vector<int64_t> item_ids_list;
 
+  // the decoded extended item info for constrained recommendation output.
+  std::optional<RecItemInfo> item_info;
+
+  // decoded extended item infos for multi-item recommendation output.
+  std::vector<RecItemInfo> item_infos_list;
+
   // the reason the sequence finished.
   std::optional<std::string> finish_reason;
 
