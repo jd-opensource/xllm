@@ -1451,7 +1451,7 @@ REGISTER_MODEL_ARGS(kimi_k25, [&] {
   // - seq_aux
   // - transformers_version
   // - use_cache
-  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
+  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({163585, 163586}));
 });
 
 REGISTER_TOKENIZER_ARGS(kimi_k25, [&] {
