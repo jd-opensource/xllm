@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <string>
 #include <torch/csrc/distributed/c10d/Backend.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 
@@ -95,6 +96,8 @@ class ProcessGroup {
       std::vector<int64_t> input_split_sizes = {},
       bool async_op = false,
       c10::intrusive_ptr<c10d::Work>* async_work = nullptr);
+
+  virtual std::string hccl_comm_name(bool init_comm = true);
 
  private:
   // rank of current process.

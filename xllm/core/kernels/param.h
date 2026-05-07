@@ -1314,6 +1314,53 @@ struct MoeInitRoutingV2Params {
   int row_idx_type;
 };
 
+struct MoeDistributeDispatchV2Params {
+  torch::Tensor x;
+  torch::Tensor expert_ids;
+  std::optional<torch::Tensor> expert_scales = std::nullopt;
+  std::optional<torch::Tensor> x_active_mask = std::nullopt;
+  std::optional<torch::Tensor> scales = std::nullopt;
+  std::string group_ep;
+  int64_t ep_world_size = 1;
+  int64_t ep_rank_id = 0;
+  int64_t moe_expert_num = 1;
+  std::string group_tp;
+  int64_t tp_world_size = 0;
+  int64_t tp_rank_id = 0;
+  int64_t expert_shard_type = 0;
+  int64_t shared_expert_num = 1;
+  int64_t shared_expert_rank_num = 0;
+  int64_t quant_mode = 0;
+  int64_t global_bs = 0;
+  int64_t expert_token_nums_type = 1;
+  std::string comm_alg;
+};
+
+struct MoeDistributeCombineV2Params {
+  torch::Tensor expand_x;
+  torch::Tensor expert_ids;
+  torch::Tensor assist_info_for_combine;
+  torch::Tensor ep_send_counts;
+  torch::Tensor expert_scales;
+  std::optional<torch::Tensor> tp_send_counts = std::nullopt;
+  std::optional<torch::Tensor> x_active_mask = std::nullopt;
+  std::optional<torch::Tensor> expand_scales = std::nullopt;
+  std::optional<torch::Tensor> shared_expert_x = std::nullopt;
+  std::string group_ep;
+  int64_t ep_world_size = 1;
+  int64_t ep_rank_id = 0;
+  int64_t moe_expert_num = 1;
+  std::string group_tp;
+  int64_t tp_world_size = 0;
+  int64_t tp_rank_id = 0;
+  int64_t expert_shard_type = 0;
+  int64_t shared_expert_num = 1;
+  int64_t shared_expert_rank_num = 0;
+  int64_t global_bs = 0;
+  int64_t comm_quant_mode = 0;
+  std::string comm_alg;
+};
+
 // FP8 scaled quantize parameters
 // Quantizes input tensor to FP8 e4m3 format with scale
 struct Fp8ScaledQuantizeParams {
