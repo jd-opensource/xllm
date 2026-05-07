@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <optional>
+#include <string>
 #include <utility>
 
 #include "framework/model/model_args.h"
@@ -95,6 +96,8 @@ class FusedMoEImpl : public torch::nn::Module {
   int64_t start_expert_id_;
   int64_t local_intermediate_size_;
   bool w4a8_dynamic_preprocessed_ = false;
+  bool w13_group_gemm_layout_prepared_ = false;
+  bool w2_group_gemm_layout_prepared_ = false;
 
   ReplicatedLinear gate_{nullptr};
   DenseMLP shared_experts_{nullptr};
@@ -129,7 +132,23 @@ class FusedMoEImpl : public torch::nn::Module {
   void resolve_quant_method_from_state_dict(const StateDict& state_dict);
   void validate_resolved_quant_method() const;
   void ensure_quant_weight_layout();
+  void ensure_group_gemm_weight_layout(torch::Tensor& weight,
+                                       bool& prepared,
+                                       int64_t input_dim,
+                                       int64_t output_dim,
+                                       const char* name);
   void preprocess_w4a8_dynamic_weights();
+  bool can_use_ep2_dispatch_combine(const ModelInputParams& input_params,
+                                    const torch::Tensor& hidden_states) const;
+  torch::Tensor forward_with_selected_experts_ep2(
+      const torch::Tensor& hidden_states,
+      const torch::Tensor& topk_weights,
+      const torch::Tensor& topk_ids,
+      const ModelInputParams& input_params);
+  const std::string& get_moe_ep_group_name();
+
+  bool enable_ep2_dispatch_combine_ = false;
+  std::string moe_ep_group_name_;
 };
 TORCH_MODULE(FusedMoE);
 

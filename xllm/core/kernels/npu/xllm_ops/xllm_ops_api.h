@@ -25,6 +25,7 @@ limitations under the License.
 #include <torch_npu/csrc/framework/utils/OpPreparation.h>
 #endif
 
+#include <string>
 #include <tuple>
 #include <vector>
 

@@ -176,4 +176,17 @@ ProcessGroupImpl::ProcessGroupImpl(int rank,
       comm_(comm),
       comm_stream_(c10_npu::getNPUStreamFromPool(device.index())) {}
 
+std::string ProcessGroupImpl::hccl_comm_name(bool init_comm) {
+  CHECK(pg_ != nullptr) << "HCCL comm name requires a torch NPU process group.";
+#if defined(USE_NPU) &&         \
+    (TORCH_VERSION_MAJOR < 2 || \
+     (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR < 7))
+  return pg_->getHcclCommName(pg_->getRank(), init_comm);
+#else
+  auto* hccl_pg = dynamic_cast<c10d_npu::ProcessGroupHCCL*>(pg_.get());
+  CHECK(hccl_pg != nullptr) << "Process group is not NPU HCCL.";
+  return hccl_pg->getHcclCommName(pg_->getRank(), init_comm);
+#endif
+}
+
 }  // namespace xllm

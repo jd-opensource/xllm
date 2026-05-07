@@ -863,6 +863,78 @@ moe_init_routing_v2(MoeInitRoutingV2Params& params) {
 #endif
 }
 
+std::tuple<torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor>
+moe_distribute_dispatch_v2(MoeDistributeDispatchV2Params& params) {
+#if defined(USE_NPU)
+  return npu::apply_npu_moe_distribute_dispatch_v2(
+      params.x,
+      params.expert_ids,
+      params.expert_scales,
+      params.x_active_mask,
+      params.scales,
+      params.group_ep,
+      params.ep_world_size,
+      params.ep_rank_id,
+      params.moe_expert_num,
+      params.group_tp,
+      params.tp_world_size,
+      params.tp_rank_id,
+      params.expert_shard_type,
+      params.shared_expert_num,
+      params.shared_expert_rank_num,
+      params.quant_mode,
+      params.global_bs,
+      params.expert_token_nums_type,
+      params.comm_alg);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+torch::Tensor moe_distribute_combine_v2(MoeDistributeCombineV2Params& params) {
+#if defined(USE_NPU)
+  return npu::apply_npu_moe_distribute_combine_v2(
+      params.expand_x,
+      params.expert_ids,
+      params.assist_info_for_combine,
+      params.ep_send_counts,
+      params.expert_scales,
+      params.tp_send_counts,
+      params.x_active_mask,
+      params.expand_scales,
+      params.shared_expert_x,
+      params.group_ep,
+      params.ep_world_size,
+      params.ep_rank_id,
+      params.moe_expert_num,
+      params.group_tp,
+      params.tp_world_size,
+      params.tp_rank_id,
+      params.expert_shard_type,
+      params.shared_expert_num,
+      params.shared_expert_rank_num,
+      params.global_bs,
+      params.comm_quant_mode,
+      params.comm_alg);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+bool has_moe_distribute_dispatch_combine_v2() {
+#if defined(USE_NPU)
+  return npu::has_moe_distribute_dispatch_combine_v2();
+#else
+  return false;
+#endif
+}
+
 torch::Tensor hc_post(HcPostParams& params) {
 #if defined(USE_NPU)
   return npu::hc_post(params.x, params.residual, params.post, params.comb);

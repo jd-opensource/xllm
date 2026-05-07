@@ -46,8 +46,7 @@ torch::Tensor matmul(MatmulParams& params);
 
 torch::Tensor quant_matmul(QuantMatmulParams& params);
 
-torch::Tensor quantize(
-    NpuQuantizeParams& params);
+torch::Tensor quantize(NpuQuantizeParams& params);
 
 std::tuple<torch::Tensor, std::optional<torch::Tensor>> dynamic_quant(
     NpuQuantizeParams& params);
@@ -117,6 +116,19 @@ void fused_indexer_k(FusedIndexerKParams& params);
 // (and token_count/cusum outputs) on other backends.
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 moe_init_routing_v2(MoeInitRoutingV2Params& params);
+
+std::tuple<torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor>
+moe_distribute_dispatch_v2(MoeDistributeDispatchV2Params& params);
+
+torch::Tensor moe_distribute_combine_v2(MoeDistributeCombineV2Params& params);
+
+bool has_moe_distribute_dispatch_combine_v2();
 
 // FP8 scaled quantize: quantizes input tensor to FP8 e4m3 format
 // Returns: (quantized_output, scale)

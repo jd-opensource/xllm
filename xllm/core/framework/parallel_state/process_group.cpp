@@ -185,6 +185,12 @@ void ProcessGroup::all_to_all_single(
   }
 }
 
+std::string ProcessGroup::hccl_comm_name(bool init_comm) {
+  (void)init_comm;
+  CHECK(false) << "hccl_comm_name is only supported on NPU HCCL process group.";
+  return "";
+}
+
 std::unique_ptr<ProcessGroup> create_process_group(
     int32_t rank,
     int32_t world_size,
