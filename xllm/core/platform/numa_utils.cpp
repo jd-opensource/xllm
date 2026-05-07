@@ -199,8 +199,8 @@ int32_t get_device_numa_node(int32_t device_index) {
   }
 
   LOG(WARNING) << "Failed to query PCI bus ID for MLU device " << device_index
-               << " via cnrtDeviceGetPCIBusId, error code " << ret
-               << ", skipping NUMA binding";
+               << " via cnrtDeviceGetPCIBusId: " << cnrtGetErrorStr(ret)
+               << ", error code " << ret << ", skipping NUMA binding";
 #else
   LOG(WARNING) << "Device NUMA detection is not supported for this backend, "
                << "device index " << device_index << ", skipping NUMA binding";
