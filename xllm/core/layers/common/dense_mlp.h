@@ -38,7 +38,8 @@ class DenseMLPImpl : public torch::nn::Module {
                bool enable_result_reduction,
                const QuantArgs& quant_args,
                ProcessGroup* process_group,
-               const torch::TensorOptions& options);
+               const torch::TensorOptions& options,
+               float swiglu_limit = 0.0f);
 
   torch::Tensor forward(const torch::Tensor& hidden_states);
 
@@ -59,6 +60,7 @@ class DenseMLPImpl : public torch::nn::Module {
   Activation act_{nullptr};
   bool is_smoothquant_;
   std::string hidden_act_;
+  float swiglu_limit_ = 0.0f;
 };
 TORCH_MODULE(DenseMLP);
 

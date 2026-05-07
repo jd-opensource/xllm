@@ -154,6 +154,7 @@ struct ModelArgs {
   PROPERTY(float, compress_rope_theta) = 0.0f;
   PROPERTY(int32_t, window_size) = 0;
   PROPERTY(int32_t, n_activated_experts) = 0;
+  PROPERTY(float, swiglu_limit) = 0.0f;
   PROPERTY(int32_t, n_hash_layers) = 0;
   PROPERTY(float, factor) = 0.0f;
   PROPERTY(float, beta_fast) = 0.0f;

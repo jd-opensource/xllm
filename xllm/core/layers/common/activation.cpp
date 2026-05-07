@@ -16,8 +16,23 @@ limitations under the License.
 #include "activation.h"
 
 #include "kernels/ops_api.h"
+
 namespace xllm {
 namespace layer {
+
+bool should_apply_swiglu_limit(bool is_gated,
+                               const std::string& hidden_act,
+                               float swiglu_limit) {
+  return swiglu_limit > 0.0f && is_gated &&
+         (hidden_act == "silu" || hidden_act == "swiglu");
+}
+
+void apply_swiglu_limit(torch::Tensor& gate_up, float swiglu_limit) {
+  auto chunks = gate_up.chunk(2, -1);
+  gate_up = torch::cat({chunks[0].clamp_max(swiglu_limit),
+                        chunks[1].clamp(-swiglu_limit, swiglu_limit)},
+                       -1);
+}
 
 ActivationImpl::ActivationImpl(const std::string& act_mode, bool is_gated)
     : act_mode_(act_mode), is_gated_(is_gated) {}

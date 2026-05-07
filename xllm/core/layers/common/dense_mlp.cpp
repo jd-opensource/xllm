@@ -31,11 +31,13 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
                            bool enable_result_reduction,
                            const QuantArgs& quant_args,
                            ProcessGroup* process_group,
-                           const torch::TensorOptions& options)
+                           const torch::TensorOptions& options,
+                           float swiglu_limit)
     : is_gated_(is_gated),
       intermediate_size_(intermediate_size),
       process_group_(process_group),
-      hidden_act_(hidden_act) {
+      hidden_act_(hidden_act),
+      swiglu_limit_(swiglu_limit) {
   // Check if using w8a8 smoothquant quantization
   is_smoothquant_ = quant_args.quant_method() == kQuantMethodSmoothquant;
 
@@ -88,6 +90,9 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
 torch::Tensor DenseMLPImpl::forward(const torch::Tensor& hidden_states) {
   // input shape: [num_tokens, hidden_size]
   auto gate_up = gate_up_proj_->forward(hidden_states);
+  if (should_apply_swiglu_limit(is_gated_, hidden_act_, swiglu_limit_)) {
+    apply_swiglu_limit(gate_up, swiglu_limit_);
+  }
 
   if (is_smoothquant_) {
     // For w8a8 quantization, the active operation is fused with the down_proj

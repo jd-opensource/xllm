@@ -25,6 +25,7 @@ limitations under the License.
 #include <torch_npu/csrc/framework/utils/OpPreparation.h>
 #endif
 
+#include <optional>
 #include <tuple>
 #include <vector>
 
@@ -208,7 +209,8 @@ std::tuple<at::Tensor, at::Tensor> dequant_swiglu_quant(
     const c10::optional<at::Tensor>& quant_offset,
     const c10::optional<at::Tensor>& group_index,
     bool activate_left,
-    int64_t quant_mode);
+    int64_t quant_mode,
+    const std::optional<double>& swiglu_limit = std::nullopt);
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mla_preprocess(
     const at::Tensor& input,

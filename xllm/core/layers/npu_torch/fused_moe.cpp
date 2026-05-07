@@ -26,6 +26,7 @@ limitations under the License.
 
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
+#include "layers/common/activation.h"
 
 namespace xllm {
 namespace layer {
@@ -277,6 +278,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       is_gated_(moe_args.is_gated),
       skip_gate_load_(moe_args.skip_gate_load),
       is_deepseek_v4_(model_args.model_type() == "deepseek_v4"),
+      swiglu_limit_(is_deepseek_v4_ ? model_args.swiglu_limit() : 0.0f),
       renormalize_(model_args.norm_topk_prob() ? 1 : 0),
       hidden_act_(model_args.hidden_act()),
       scoring_func_(model_args.scoring_func()),
@@ -325,7 +327,8 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
                                  /*enable_result_reduction=*/false,
                                  quant_args,
                                  tp_pg_,
-                                 options));
+                                 options,
+                                 swiglu_limit_));
     shared_expert_gate_ = register_module(
         "shared_expert_gate",
         torch::nn::Linear(
@@ -721,6 +724,9 @@ torch::Tensor FusedMoEImpl::forward_expert(
       params.group_index = selected_expert_info.token_count_slice;
       params.activate_left = true;
       params.quant_mode = 1;
+      if (should_apply_swiglu_limit(is_gated_, hidden_act_, swiglu_limit_)) {
+        params.swiglu_limit = static_cast<double>(swiglu_limit_);
+      }
       std::tie(act_quantized, act_scale) =
           xllm::kernel::dequant_swiglu_quant(params);
     }
@@ -801,6 +807,10 @@ torch::Tensor FusedMoEImpl::forward_expert(
       gemm1_out = xllm::kernel::group_gemm(group_gemm_params);
     }
 
+    if (should_apply_swiglu_limit(is_gated_, hidden_act_, swiglu_limit_)) {
+      apply_swiglu_limit(gemm1_out, swiglu_limit_);
+    }
+
     torch::Tensor act_out;
     xllm::kernel::ActivationParams activation_params;
     activation_params.input = gemm1_out;
@@ -857,6 +867,10 @@ torch::Tensor FusedMoEImpl::forward_expert(
     }
 
     // Step 5: activation
+    if (should_apply_swiglu_limit(is_gated_, hidden_act_, swiglu_limit_)) {
+      apply_swiglu_limit(gemm1_out, swiglu_limit_);
+    }
+
     torch::Tensor act_out;
 
     xllm::kernel::ActivationParams activation_params;

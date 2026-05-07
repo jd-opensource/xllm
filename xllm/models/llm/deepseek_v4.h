@@ -877,6 +877,7 @@ inline void load_deepseek_v4_model_args(const JsonReader& json,
     return int64_t{0};
   });
   LOAD_ARG_OR(hidden_act, "hidden_act", "silu");
+  LOAD_ARG_OR(swiglu_limit, "swiglu_limit", 0.0f);
   LOAD_ARG_OR_FUNC(intermediate_size, "intermediate_size", [&] {
     if (args->intermediate_size() > 0) {
       return args->intermediate_size();
@@ -1062,6 +1063,9 @@ inline void validate_deepseek_v4_args(const ModelArgs& args,
         << absl::StrJoin(policy.supported_score_funcs, ", ") << ", got "
         << args.scoring_func();
   }
+  CHECK_GE(args.swiglu_limit(), 0.0f)
+      << "deepseek_v4 config swiglu_limit must be >= 0, got "
+      << args.swiglu_limit();
   CHECK_GT(args.index_head_dim(), 0)
       << "deepseek_v4 config index_head_dim must be > 0, got "
       << args.index_head_dim();

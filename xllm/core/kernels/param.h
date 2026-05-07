@@ -459,6 +459,9 @@ struct DequantSwigluQuantParams {
   bool activate_left = true;
   // Quantization mode: 0 static quant, 1 dynamic quant.
   int64_t quant_mode = 1;
+  // Optional SwiGLU clamp limit for kernels that fuse dequant, activation, and
+  // quant.
+  std::optional<double> swiglu_limit;
 };
 
 // Ascend W4A8_DYNAMIC MoE weight post-load processing for version 1.0.0.

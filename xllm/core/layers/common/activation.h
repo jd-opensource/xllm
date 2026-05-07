@@ -34,5 +34,10 @@ class ActivationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Activation);
 
+bool should_apply_swiglu_limit(bool is_gated,
+                               const std::string& hidden_act,
+                               float swiglu_limit);
+void apply_swiglu_limit(torch::Tensor& gate_up, float swiglu_limit);
+
 }  // namespace layer
 }  // namespace xllm

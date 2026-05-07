@@ -67,7 +67,8 @@ std::tuple<at::Tensor, at::Tensor> dequant_swiglu_quant(
     const c10::optional<at::Tensor>& quant_offset,
     const c10::optional<at::Tensor>& group_index,
     bool activate_left,
-    int64_t quant_mode) {
+    int64_t quant_mode,
+    const std::optional<double>& swiglu_limit) {
   TORCH_CHECK(quant_mode == kStaticQuantMode || quant_mode == kDynamicQuantMode,
               "quant_mode only supports 0(static) or 1(dynamic), but got ",
               quant_mode,
@@ -77,6 +78,8 @@ std::tuple<at::Tensor, at::Tensor> dequant_swiglu_quant(
   std::string quant_mode_str =
       (quant_mode == kDynamicQuantMode) ? "dynamic" : "static";
   char* quant_mode_ptr = const_cast<char*>(quant_mode_str.c_str());
+
+  const double clamp_limit = swiglu_limit.value_or(kClampLimitDefault);
 
   if (is_dequant_swiglu_quant_v2_available()) {
     std::string round_mode_str = "rint";
@@ -96,7 +99,7 @@ std::tuple<at::Tensor, at::Tensor> dequant_swiglu_quant(
                  round_mode_ptr,
                  kActivateDimDefault,
                  kSwigluModeDefault,
-                 kClampLimitDefault,
+                 clamp_limit,
                  kGluAlphaDefault,
                  kGluBiasDefault,
                  y,
