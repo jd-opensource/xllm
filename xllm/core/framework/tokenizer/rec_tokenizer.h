@@ -42,6 +42,9 @@ class RecTokenizer : public Tokenizer {
               bool skip_special_tokens,
               std::vector<int64_t>* item_ids) const override;
 
+  bool decode_item_infos(const Slice<int32_t>& token_ids,
+                         std::vector<RecItemInfo>* item_infos) const;
+
   size_t vocab_size() const override;
 
   std::unique_ptr<Tokenizer> clone() const override;

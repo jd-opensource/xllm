@@ -38,6 +38,7 @@ bool RecTokenizer::encode(int64_t item_id,
 bool RecTokenizer::decode(const Slice<int32_t>& token_ids,
                           bool skip_special_tokens,
                           std::vector<int64_t>* item_ids) const {
+  (void)skip_special_tokens;
   CHECK_EQ(token_ids.size(), REC_TOKEN_SIZE);
 
   RecTokenTriple rec_token_triple;
@@ -45,6 +46,18 @@ bool RecTokenizer::decode(const Slice<int32_t>& token_ids,
 
   return VersionSingleton<RecVocabDict>::GetInstance(model_version_)
       ->get_items_by_tokens(rec_token_triple, item_ids);
+}
+
+bool RecTokenizer::decode_item_infos(
+    const Slice<int32_t>& token_ids,
+    std::vector<RecItemInfo>* item_infos) const {
+  CHECK_EQ(token_ids.size(), REC_TOKEN_SIZE);
+
+  RecTokenTriple rec_token_triple;
+  std::copy(token_ids.begin(), token_ids.end(), rec_token_triple.begin());
+
+  return VersionSingleton<RecVocabDict>::GetInstance(model_version_)
+      ->get_item_infos_by_tokens(rec_token_triple, item_infos);
 }
 
 size_t RecTokenizer::vocab_size() const {
