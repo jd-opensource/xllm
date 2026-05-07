@@ -100,10 +100,10 @@ TEST_F(DeepseekV4IndexerTest, DsaTokenSlotsTrackCurrentDecodeStep) {
   ASSERT_EQ(dsa.slot_mappings[0].size(), 2);
 
   const auto token_slots = dsa.slot_mappings[0][0];
-  const auto expected_slots = torch::tensor({129, 0}, torch::kInt32);
+  const auto expected_slots = torch::tensor({129}, torch::kInt32);
   EXPECT_TRUE(torch::equal(token_slots, expected_slots))
       << "token slots should include only current-step committed compressed "
-         "slots plus decode padding";
+         "slots";
 }
 
 TEST_F(DeepseekV4IndexerTest, DsaSwaBlockTableWrapsWithLogicalPosition) {
