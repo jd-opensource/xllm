@@ -23,9 +23,26 @@ limitations under the License.
 #include <torch_npu/csrc/framework/utils/OpPreparation.h>
 #endif
 #include "core/common/global_flags.h"
+#include "operations/aclnn/core/acl_nn_operation.h"
 
 namespace xllm {
 namespace layer {
+
+namespace {
+atb::Status setup_node_operation(atb::Operation* operation,
+                                 const atb::VariantPack& variant_pack,
+                                 uint64_t& workspace_size,
+                                 atb::Context* context,
+                                 int32_t device_id) {
+  atb_speed::common::AclNNOperation* aclnn_operation =
+      dynamic_cast<atb_speed::common::AclNNOperation*>(operation);
+  if (aclnn_operation != nullptr) {
+    return aclnn_operation->Setup(
+        variant_pack, workspace_size, context, device_id);
+  }
+  return operation->Setup(variant_pack, workspace_size, context);
+}
+}  // namespace
 
 BaseLayer::BaseLayer(const ModelContext& context)
     : device_(context.get_tensor_options().device()),
@@ -98,8 +115,12 @@ atb::Status BaseLayer::execute_node(atb_speed::Model::Node& node,
   //     graph_captured_ = true;
   //   }
   // }
-  atb::Status st =
-      node.operation->Setup(node.variantPack, node.workspaceSize, context_);
+  int32_t device_id = static_cast<int32_t>(device_.index());
+  atb::Status st = setup_node_operation(node.operation.get(),
+                                        node.variantPack,
+                                        node.workspaceSize,
+                                        context_,
+                                        device_id);
   if (st != 0) {
     LOG(ERROR) << " setup layer node fail, not call execute";
     return st;

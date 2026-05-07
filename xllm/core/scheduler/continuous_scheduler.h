@@ -21,6 +21,7 @@ limitations under the License.
 
 #include <limits>
 #include <memory>
+#include <optional>
 #include <queue>
 #include <unordered_map>
 
@@ -91,6 +92,9 @@ class ContinuousScheduler : public Scheduler {
     PROPERTY(bool, enable_schedule_overlap) = true;
 
     PROPERTY(bool, enable_chunked_prefill) = true;
+
+    // When unset, ContinuousScheduler uses FLAGS_enable_prefix_cache.
+    PROPERTY(std::optional<bool>, enable_prefix_cache);
 
     PROPERTY(bool, enable_service_routing) = false;
 
