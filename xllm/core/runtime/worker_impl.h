@@ -48,6 +48,8 @@ limitations under the License.
 
 namespace xllm {
 
+class WorkerRendezvous;
+
 class WorkerImpl {
  public:
   enum Status : int8_t {
@@ -284,6 +286,7 @@ class WorkerImpl {
 
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
   std::unique_ptr<HierarchyKVCacheTransfer> hierarchy_kv_cache_transfer_;
+  std::unique_ptr<WorkerRendezvous> worker_rendezvous_;
 
 #if defined(USE_CUDA)
   CudaBlockCopyRuntimeState cuda_block_copy_runtime_state_;
