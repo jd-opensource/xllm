@@ -38,6 +38,14 @@ limitations under the License.
 
 namespace xllm::kernel {
 
+namespace {
+#if defined(USE_NPU)
+bool is_supported_initial_state_dtype(torch::ScalarType dtype) {
+  return dtype == torch::kBFloat16 || dtype == torch::kFloat32;
+}
+#endif
+}  // namespace
+
 void apply_rotary(RotaryParams& params) {
 #if defined(USE_MLU)
   mlu::apply_rotary(params.q,
@@ -1044,17 +1052,92 @@ torch::Tensor build_split_qkv_rmsnorm_mrope_gather_pattern(
 std::pair<torch::Tensor, torch::Tensor> chunk_gated_delta_rule(
     ChunkGatedDeltaRuleParams& params) {
 #if defined(USE_NPU)
-  return npu::npu_chunk_gated_delta_rule(params.q,
-                                         params.k,
-                                         params.v,
-                                         params.g,
-                                         params.beta,
-                                         params.scale,
-                                         params.initial_state,
-                                         params.output_final_state,
-                                         params.cu_seqlens,
-                                         params.head_first,
-                                         params.use_qk_l2norm_in_kernel);
+  CHECK(!params.head_first)
+      << "chunk_gated_delta_rule only supports head_first=false.";
+  CHECK(params.q.scalar_type() == torch::kBFloat16 &&
+        params.k.scalar_type() == torch::kBFloat16 &&
+        params.v.scalar_type() == torch::kBFloat16)
+      << "chunk_gated_delta_rule expects q/k/v to be bfloat16.";
+  if (params.initial_state.has_value()) {
+    CHECK(is_supported_initial_state_dtype(
+        params.initial_state.value().scalar_type()))
+        << "chunk_gated_delta_rule expects initial_state to be bfloat16 or "
+           "float32, got "
+        << params.initial_state.value().scalar_type();
+  }
+
+  const torch::ScalarType input_dtype = params.q.scalar_type();
+  const int64_t batch_size = params.q.size(0);
+  const int64_t seq_len = params.q.size(1);
+  const int64_t num_heads_qk = params.q.size(2);
+  CHECK(params.q.sizes() == params.k.sizes())
+      << "q and k must have the same shape.";
+  CHECK(params.v.dim() == 4 && params.v.size(0) == batch_size &&
+        params.v.size(1) == seq_len)
+      << "v must have shape [B, T, Hv, V].";
+  const int64_t num_heads_v = params.v.size(2);
+  const int64_t head_dim = params.q.size(3);
+  const int64_t chunk_size = params.chunk_size;
+  CHECK(num_heads_v % num_heads_qk == 0)
+      << "chunk_gated_delta_rule expects num_heads_v to be "
+         "divisible by num_heads_qk, got "
+      << num_heads_v << " and " << num_heads_qk;
+  CHECK(params.beta.dim() == 3 && params.beta.size(0) == batch_size &&
+        params.beta.size(1) == seq_len && params.beta.size(2) == num_heads_v)
+      << "beta must have shape [B, T, H].";
+  CHECK(params.g.dim() == 3 && params.g.size(0) == batch_size &&
+        params.g.size(1) == seq_len && params.g.size(2) == num_heads_v)
+      << "g must have shape [B, T, H].";
+
+  auto q_prepared = params.use_qk_l2norm_in_kernel
+                        ? npu::npu_l2norm_last_dim(params.q)
+                        : params.q;
+  auto k_prepared = params.use_qk_l2norm_in_kernel
+                        ? npu::npu_l2norm_last_dim(params.k)
+                        : params.k;
+  auto cu_prepared =
+      params.cu_seqlens.has_value()
+          ? std::optional<torch::Tensor>(
+                params.cu_seqlens.value().to(torch::kInt32).contiguous())
+          : std::nullopt;
+  auto g_cumsum =
+      npu::npu_chunk_local_cumsum(params.g, chunk_size, cu_prepared);
+  const float scale_value = params.scale.has_value()
+                                ? params.scale.value()
+                                : std::pow(static_cast<float>(head_dim), -0.5f);
+  auto matrix_a = npu::npu_chunk_scaled_dot_kkt_fwd(
+      k_prepared, params.beta, g_cumsum, chunk_size, cu_prepared);
+  auto matrix_a_inv = npu::npu_solve_tril(
+      matrix_a, chunk_size, cu_prepared, params.k.scalar_type());
+  auto [w, u] = npu::npu_recompute_w_u_fwd(
+      k_prepared, params.v, params.beta, g_cumsum, matrix_a_inv, cu_prepared);
+  auto init_state_prepared =
+      params.initial_state.has_value()
+          ? std::optional<torch::Tensor>(
+                params.initial_state.value().to(torch::kFloat32).contiguous())
+          : std::nullopt;
+  auto [h, v_new, final_state] =
+      npu::npu_chunk_gated_delta_rule_fwd_h(k_prepared,
+                                            w,
+                                            u,
+                                            g_cumsum,
+                                            init_state_prepared,
+                                            params.output_final_state,
+                                            chunk_size,
+                                            /*save_new_value=*/true,
+                                            cu_prepared,
+                                            /*chunk_offsets=*/std::nullopt);
+  auto out = npu::npu_chunk_fwd_o(q_prepared,
+                                  k_prepared,
+                                  v_new,
+                                  h,
+                                  g_cumsum,
+                                  scale_value,
+                                  chunk_size,
+                                  cu_prepared);
+
+  return {out.to(input_dtype),
+          params.output_final_state ? final_state : torch::Tensor()};
 #else
   NOT_IMPLEMENTED();
 #endif
