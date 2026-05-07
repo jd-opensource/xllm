@@ -72,4 +72,21 @@ bool has_split_qkv_rmsnorm_mrope_specialization(int64_t num_q_heads,
                                                 int64_t num_kv_heads,
                                                 int64_t head_size);
 
+// Compute chunked gated delta rule recurrence for varlen sequences.
+// Invalid inputs trigger CHECK failures.
+// Returns tuple of (h, v_new, ht) where:
+// - h: [1, NT_total, H, K, V] hidden states per chunk
+// - v_new: [1, T_total, H, V] new values
+// - ht: [N, H, K, V] final states (empty if output_final_state=false)
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> chunk_gated_delta_rule_fwd_h(
+    const torch::Tensor& k,
+    const torch::Tensor& w,
+    const torch::Tensor& v,
+    const torch::Tensor& g,
+    const torch::Tensor& initial_state,
+    bool output_final_state,
+    int64_t chunk_size,
+    bool save_new_value,
+    const torch::Tensor& cu_seqlens);
+
 }  // namespace xllm::kernel::npu::tilelang
