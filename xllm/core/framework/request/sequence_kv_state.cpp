@@ -55,18 +55,15 @@ void KVCacheState::set_slice_window_size(uint32_t size) {
   CHECK(!composite_blocks_.empty() && !composite_blocks_[0].empty());
   slice_window_size_ = size;
   slice_window_pos_ = 0;
-  slice_window_buffer_ = size * composite_blocks_[0][0].size();
+  slice_window_buffer_ = size;
 }
 
 void KVCacheState::update_slice_window_pos() {
   if (slice_window_size_ > 0) {
     if (slice_window_pos_ >= slice_window_buffer_) {
+      // Keep SWA physical block order stable. DSA metadata maps logical
+      // positions to physical blocks with modulo arithmetic.
       slice_window_pos_ = slice_window_pos_ % slice_window_size_;
-      std::vector<Block>& slot0 = composite_blocks_[0];
-      CHECK_GT(slot0.size(), 1);
-      Block first = std::move(slot0[0]);
-      slot0.erase(slot0.begin());
-      slot0.push_back(std::move(first));
     }
   }
 }

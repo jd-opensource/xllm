@@ -100,10 +100,47 @@ TEST_F(DeepseekV4IndexerTest, DsaTokenSlotsTrackCurrentDecodeStep) {
   ASSERT_EQ(dsa.slot_mappings[0].size(), 2);
 
   const auto token_slots = dsa.slot_mappings[0][0];
-  const auto expected_slots = torch::tensor({129, 0}, torch::kInt32);
+  const auto expected_slots = torch::tensor({129}, torch::kInt32);
   EXPECT_TRUE(torch::equal(token_slots, expected_slots))
       << "token slots should include only current-step committed compressed "
-         "slots plus decode padding";
+         "slots";
+}
+
+TEST_F(DeepseekV4IndexerTest, DsaSwaBlockTableWrapsWithLogicalPosition) {
+  ModelInputParams params;
+  params.batch_forward_type = BatchForwardType::DECODE;
+  params.num_sequences = 1;
+  params.kv_seq_lens_vec = {1537};
+  params.q_seq_lens_vec = {1};
+  params.multi_block_tables = {
+      torch::tensor({{10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}},
+                    torch::kInt32),
+  };
+
+  const auto positions = torch::tensor({1536}, torch::kInt64);
+  const std::vector<DSAGroupInfo> group_infos = {
+      {DSACacheType::SLIDING_WINDOW, 1, 128},
+  };
+  const std::vector<std::vector<DSACacheInfo>> caches_info = {{
+      {0, DSACacheType::SLIDING_WINDOW, 1, 128},
+  }};
+
+  auto metadata = DSAMetadataBuilder::build(
+      params, positions, torch::Tensor(), caches_info, group_infos);
+
+  ASSERT_TRUE(metadata.dsa_metadata != nullptr);
+  const auto& dsa = *metadata.dsa_metadata;
+  ASSERT_EQ(dsa.block_tables.size(), 1);
+  ASSERT_EQ(dsa.block_tables[0].size(), 1);
+  ASSERT_EQ(dsa.slot_mappings.size(), 1);
+  ASSERT_EQ(dsa.slot_mappings[0].size(), 1);
+
+  const auto expected_bt = torch::tensor(
+      {{0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 10}}, torch::kInt32);
+  EXPECT_TRUE(torch::equal(dsa.block_tables[0][0].cpu(), expected_bt));
+
+  const auto expected_slot = torch::tensor({10 * 128}, torch::kInt32);
+  EXPECT_TRUE(torch::equal(dsa.slot_mappings[0][0].cpu(), expected_slot));
 }
 
 }  // namespace layer

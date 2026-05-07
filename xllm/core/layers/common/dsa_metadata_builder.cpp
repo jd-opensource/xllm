@@ -315,13 +315,22 @@ void DSAMetadataBuilder::process_token_group(const torch::Tensor& raw_bt,
   for (const int q_len : q_lens) {
     query_total_tokens += static_cast<int64_t>(q_len);
   }
-  int64_t op_need_length =
-      std::min(query_total_tokens / ratio + static_cast<int64_t>(batch_size),
-               query_total_tokens);
+
+  // Token caches commit one row only when a sequence crosses a compression
+  // boundary. Count rows per sequence so multi-batch padding/dummy rows do not
+  // become cache writes.
+  int64_t committed_rows = 0;
+  for (int32_t seq = 0; seq < batch_size; ++seq) {
+    const int64_t ctx_len = static_cast<int64_t>(ctx_lens[seq]);
+    const int64_t q_len =
+        std::clamp<int64_t>(static_cast<int64_t>(q_lens[seq]), 0, ctx_len);
+    const int64_t prev_ctx_len = ctx_len - q_len;
+    committed_rows += ctx_len / ratio - prev_ctx_len / ratio;
+  }
 
   // Token caches write only the compressed rows produced by the current
-  // forward step; trailing rows remain zero-padded as dummy slots.
-  auto out_slots_tensor = torch::zeros({op_need_length}, raw_slots.options());
+  // forward step. Padded RoPE/compressor rows must not become cache writes.
+  auto out_slots_tensor = torch::empty({committed_rows}, raw_slots.options());
   auto out_slots_acc = out_slots_tensor.accessor<int32_t, 1>();
   auto raw_slots_acc = raw_slots.accessor<int32_t, 1>();
 
@@ -335,16 +344,16 @@ void DSAMetadataBuilder::process_token_group(const torch::Tensor& raw_bt,
     const int64_t prev_committed = prev_ctx_len / ratio;
     const int64_t committed = ctx_len / ratio;
     const int64_t new_committed = committed - prev_committed;
-    for (int64_t i = 0; i < new_committed && write_idx < op_need_length; ++i) {
+    for (int64_t i = 0; i < new_committed; ++i) {
       out_slots_acc[write_idx++] =
           raw_slots_acc[start_idx + prev_committed + i];
     }
     start_idx += ctx_len;
   }
 
-  CHECK_LE(write_idx, op_need_length)
-      << "process_token_group generated more committed slots than expected: "
-      << "write_idx=" << write_idx << ", op_need_length=" << op_need_length
+  CHECK_EQ(write_idx, committed_rows)
+      << "process_token_group committed slot count mismatch: write_idx="
+      << write_idx << ", committed_rows=" << committed_rows
       << ", query_total_tokens=" << query_total_tokens << ", ratio=" << ratio
       << ", batch_size=" << batch_size << ", total_tokens=" << total_tokens;
   out_slots = out_slots_tensor;
@@ -428,14 +437,13 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
   auto old_acc = raw_bt.accessor<int32_t, 2>();
 
   for (int32_t s = 0; s < batch_size; ++s) {
-    int32_t pad_len = dst_lens[s] - current_cols;
-    if (pad_len > 0) {
-      for (int32_t j = 0; j < current_cols; ++j)
-        new_acc[s][pad_len + j] = old_acc[s][j];
-    } else if (pad_len < 0) {
-      for (int32_t j = 0; j < dst_lens[s]; ++j) new_acc[s][j] = old_acc[s][j];
-    } else {
-      for (int32_t j = 0; j < current_cols; ++j) new_acc[s][j] = old_acc[s][j];
+    const int32_t retained_cols = std::min(current_cols, dst_lens[s]);
+    const int32_t start_col = dst_lens[s] - retained_cols;
+    for (int32_t j = 0; j < retained_cols; ++j) {
+      const int32_t logical_col = start_col + j;
+      // Keep the read-side block table aligned with slot_for_position().
+      const int32_t physical_col = logical_col % current_cols;
+      new_acc[s][logical_col] = old_acc[s][physical_col];
     }
   }
   out_bt = new_bt;

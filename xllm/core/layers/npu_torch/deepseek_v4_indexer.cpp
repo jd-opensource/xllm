@@ -86,6 +86,54 @@ torch::Tensor rotate_activation_with_hadamard(const torch::Tensor& x,
   return out;
 }
 
+// Scatter a row-major tensor into a flattened cache according to slot ids.
+// Each valid slot in `slot_mapping` selects the destination row for the same
+// row in `value`; negative slots are treated as padding and ignored.
+void scatter_rows_by_slot(torch::Tensor& cache,
+                          const torch::Tensor& slot_mapping,
+                          const torch::Tensor& value) {
+  if (!cache.defined() || !slot_mapping.defined() || !value.defined()) {
+    return;
+  }
+  if (slot_mapping.numel() == 0 || value.numel() == 0) {
+    return;
+  }
+
+  auto value_2d = value.reshape({-1, value.size(value.dim() - 1)});
+  auto cache_2d = cache.view({-1, value_2d.size(1)});
+  // slot_mapping and value are both flattened to row-major form. We only
+  // update the rows that have matching source data.
+  auto slots = slot_mapping.reshape({-1}).to(torch::kLong).to(cache.device());
+  const int64_t update_rows =
+      std::min<int64_t>(slots.size(0), value_2d.size(0));
+  if (update_rows <= 0) {
+    return;
+  }
+
+  auto slots_slice = slots.slice(/*dim=*/0, /*start=*/0, /*end=*/update_rows);
+  auto value_slice =
+      value_2d.slice(/*dim=*/0, /*start=*/0, /*end=*/update_rows);
+
+  // Negative slots mean "unused" entries in the metadata. Skip them so the
+  // caller can pass padded or partially-filled mappings safely.
+  auto valid_mask = slots_slice.ge(0);
+  if (!valid_mask.any().item<bool>()) {
+    return;
+  }
+
+  auto valid_slots = slots_slice.index({valid_mask});
+  auto valid_values = value_slice.index({valid_mask});
+  const int64_t cache_rows = cache_2d.size(0);
+  const int64_t max_slot = valid_slots.max().item<int64_t>();
+  CHECK_LT(max_slot, cache_rows)
+      << "scatter_rows_by_slot slot index out of range: max_slot=" << max_slot
+      << ", cache_rows=" << cache_rows
+      << ", slot_shape=" << slot_mapping.sizes()
+      << ", value_shape=" << value.sizes();
+  // Write the valid rows into the flattened cache view.
+  cache_2d.index_copy_(/*dim=*/0, valid_slots, valid_values);
+}
+
 torch::Tensor apply_partial_rope(torch::Tensor q,
                                  int64_t rope_start_dim,
                                  int64_t rope_head_dim,
@@ -314,13 +362,10 @@ torch::Tensor DeepseekV4IndexerImpl::select_qli(
   }
 
   if (kv.numel() > 0) {
-    auto slots = attn_metadata.slot_mapping.to(torch::kLong).view({-1});
-    auto cache_flat = index_cache.view({-1, kv_quant.size(-1)});
-    cache_flat.index_copy_(0, slots, kv_quant.view({-1, kv_quant.size(-1)}));
+    scatter_rows_by_slot(index_cache, attn_metadata.slot_mapping, kv_quant);
     if (quant_index_cache != nullptr && quant_index_cache->defined()) {
-      auto quant_cache_flat = quant_index_cache->view({-1, kv_scale.size(-1)});
-      quant_cache_flat.index_copy_(
-          0, slots, kv_scale.view({-1, kv_scale.size(-1)}));
+      scatter_rows_by_slot(
+          *quant_index_cache, attn_metadata.slot_mapping, kv_scale);
     }
   }
 
