@@ -74,7 +74,7 @@ bool DisaggChunkedPDScheduler::alloc_chunk(Sequence* sequence,
   const PDChunkBudget budget =
       pick_pd_chunk_budget(kv_tokens,
                            sequence->num_tokens(),
-                           options_.max_tokens_per_chunk_for_prefill(),
+                           static_cast<size_t>(options_.max_tokens_per_chunk_for_prefill()),
                            token_budget);
   *actual_tokens = budget.next_tokens;
   if (budget.next_tokens == 0) {
