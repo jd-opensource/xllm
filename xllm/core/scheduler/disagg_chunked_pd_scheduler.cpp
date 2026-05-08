@@ -16,13 +16,8 @@ limitations under the License.
 #include "scheduler/disagg_chunked_pd_scheduler.h"
 
 #include <algorithm>
-#include <memory>
-#include <vector>
-
 #include "framework/batch/batch_factory.h"
-#include "framework/request/request.h"
-#include "framework/request/sequence.h"
-#include "scheduler/continuous_scheduler.h"
+#include "util/math_utils.h"
 
 namespace xllm {
 
