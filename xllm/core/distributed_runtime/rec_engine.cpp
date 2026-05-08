@@ -38,6 +38,11 @@ limitations under the License.
 #include "util/utils.h"
 
 namespace xllm {
+namespace {
+
+constexpr int64_t kMinimalOneRecMetadataKVBlocks = 2;
+
+}  // namespace
 
 // ============================================================
 // RecEngine Implementation
@@ -132,6 +137,45 @@ Engine::KVCacheCapacity RecEngine::estimate_kv_cache_capacity() {
   const int64_t max_cache_size = options_.max_cache_size();
   const double max_memory_utilization = options_.max_memory_utilization();
 
+  // compute kv cache slot size
+  const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
+  const int64_t slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
+
+  KVCacheCapacity kv_cache_cap;
+  kv_cache_cap.slot_size = slot_size;
+  kv_cache_cap.n_layers = args_.n_layers();
+
+  const int32_t block_size = options_.block_size();
+  const int64_t block_size_in_bytes = block_size * slot_size;
+  const int64_t cache_block_size_in_bytes =
+      args_.n_layers() * block_size_in_bytes;
+  CHECK_GT(cache_block_size_in_bytes, 0)
+      << "cache block size must be positive.";
+
+  const int64_t minimal_kv_cache_blocks = pipeline_->minimal_kv_cache_blocks();
+  if (minimal_kv_cache_blocks > 0) {
+    int64_t n_blocks = minimal_kv_cache_blocks;
+    if (max_cache_size > 0) {
+      const int64_t max_cache_blocks =
+          max_cache_size / cache_block_size_in_bytes;
+      CHECK_GE(max_cache_blocks, minimal_kv_cache_blocks)
+          << "max_cache_size is too small for OneRec metadata kv cache. It "
+             "must fit the minimal metadata blocks, "
+             "max_cache_size="
+          << readable_size(max_cache_size)
+          << ", block_bytes=" << readable_size(cache_block_size_in_bytes);
+      n_blocks = std::min(n_blocks, max_cache_blocks);
+    }
+    kv_cache_cap.n_blocks = n_blocks;
+    kv_cache_cap.cache_size_in_bytes = n_blocks * cache_block_size_in_bytes;
+    LOG(INFO) << "OneRec uses minimal metadata kv cache, blocks: "
+              << kv_cache_cap.n_blocks
+              << ", bytes: " << readable_size(kv_cache_cap.cache_size_in_bytes)
+              << ", max_memory_utilization: " << max_memory_utilization
+              << ", max_cache_size: " << readable_size(max_cache_size);
+    return kv_cache_cap;
+  }
+
   int64_t cache_size_in_bytes = pipeline_->estimate_min_available_memory();
 
   // apply memory cap from config
@@ -140,19 +184,10 @@ Engine::KVCacheCapacity RecEngine::estimate_kv_cache_capacity() {
     // The caps are applied in estimate_min_available_memory
   }
 
-  KVCacheCapacity kv_cache_cap;
   kv_cache_cap.cache_size_in_bytes = std::max(cache_size_in_bytes, int64_t(0));
   CHECK_GT(kv_cache_cap.cache_size_in_bytes, 0)
       << "Available kv cache size must be greater than 0";
 
-  // compute kv cache slot size
-  const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
-  const int64_t slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
-  kv_cache_cap.slot_size = slot_size;
-  kv_cache_cap.n_layers = args_.n_layers();
-
-  const int32_t block_size = options_.block_size();
-  const int64_t block_size_in_bytes = block_size * slot_size;
   kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
                           (args_.n_layers() * block_size_in_bytes);
   CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
@@ -234,7 +269,8 @@ void RecEngine::LlmRecEnginePipeline::process_group_test() {
     for (auto& worker : engine_.worker_clients_) {
       futures.emplace_back(worker->process_group_test_async());
     }
-    const int timeout_seconds = util::get_process_group_test_timeout_seconds();
+    const int32_t timeout_seconds =
+        util::get_process_group_test_timeout_seconds();
     folly::collectAll(futures)
         .within(std::chrono::seconds(timeout_seconds))
         .get();
@@ -247,7 +283,7 @@ bool RecEngine::LlmRecEnginePipeline::init_model_workers(
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(engine_.worker_clients_num_);
   for (auto& worker : engine_.worker_clients_) {
-    futures.push_back(worker->init_model_async(
+    futures.emplace_back(worker->init_model_async(
         model_path, FLAGS_random_seed, MasterStatus::WAKEUP));
   }
   auto results = folly::collectAll(futures).get();
@@ -267,7 +303,7 @@ int64_t RecEngine::LlmRecEnginePipeline::estimate_min_available_memory() {
   std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
   futures.reserve(engine_.worker_clients_.size());
   for (auto& worker : engine_.worker_clients_) {
-    futures.push_back(worker->estimate_kv_cache_capacity_async());
+    futures.emplace_back(worker->estimate_kv_cache_capacity_async());
   }
 
   int64_t cache_size_in_bytes = std::numeric_limits<int64_t>::max();
@@ -301,7 +337,7 @@ bool RecEngine::LlmRecEnginePipeline::allocate_kv_cache(
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(engine_.worker_clients_.size());
   for (auto& worker : engine_.worker_clients_) {
-    futures.push_back(worker->allocate_kv_cache_async(kv_cache_shape));
+    futures.emplace_back(worker->allocate_kv_cache_async(kv_cache_shape));
   }
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
@@ -461,14 +497,14 @@ RecEngine::LlmRecEnginePipeline::get_active_activation_memory() const {
   std::vector<folly::SemiFuture<int64_t>> futures;
   futures.reserve(engine_.worker_clients_.size());
   for (auto& worker : engine_.worker_clients_) {
-    futures.push_back(worker->get_active_activation_memory_async());
+    futures.emplace_back(worker->get_active_activation_memory_async());
   }
 
   auto results = folly::collectAll(futures).get();
   std::vector<int64_t> active_activation_memories;
   active_activation_memories.reserve(futures.size());
   for (auto& result : results) {
-    active_activation_memories.push_back(result.value());
+    active_activation_memories.emplace_back(result.value());
   }
   return active_activation_memories;
 }
@@ -499,31 +535,33 @@ size_t RecEngine::LlmRecEnginePipeline::get_max_steps_from_batch(
 }
 
 // ============================================================
-// OneRecEnginePipeline Implementation
+// OneRecLocalEnginePipeline Implementation
 // ============================================================
 
-RecEngine::OneRecEnginePipeline::OneRecEnginePipeline(RecEngine& engine)
+RecEngine::OneRecLocalEnginePipeline::OneRecLocalEnginePipeline(
+    RecEngine& engine)
     : RecEnginePipeline(engine) {}
 
-void RecEngine::OneRecEnginePipeline::setup_workers() {
+void RecEngine::OneRecLocalEnginePipeline::setup_workers() {
   // OneRec uses local workers, no DistManager setup needed
 }
 
-void RecEngine::OneRecEnginePipeline::process_group_test() {
+void RecEngine::OneRecLocalEnginePipeline::process_group_test() {
   if (engine_.workers_.size() > 1) {
     std::vector<folly::SemiFuture<folly::Unit>> futures;
     futures.reserve(engine_.workers_.size());
     for (auto& worker : engine_.workers_) {
       futures.emplace_back(worker->process_group_test_async());
     }
-    const int timeout_seconds = util::get_process_group_test_timeout_seconds();
+    const int32_t timeout_seconds =
+        util::get_process_group_test_timeout_seconds();
     folly::collectAll(futures)
         .within(std::chrono::seconds(timeout_seconds))
         .get();
   }
 }
 
-bool RecEngine::OneRecEnginePipeline::init_model_workers(
+bool RecEngine::OneRecLocalEnginePipeline::init_model_workers(
     const std::string& model_path) {
   const auto& devices = engine_.options_.devices();
   const int32_t world_size = static_cast<int32_t>(devices.size());
@@ -563,7 +601,7 @@ bool RecEngine::OneRecEnginePipeline::init_model_workers(
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
-    futures.push_back(worker->init_model_async(
+    futures.emplace_back(worker->init_model_async(
         model_path, FLAGS_random_seed, MasterStatus::WAKEUP));
   }
   auto results = folly::collectAll(futures).get();
@@ -575,7 +613,7 @@ bool RecEngine::OneRecEnginePipeline::init_model_workers(
   return true;
 }
 
-int64_t RecEngine::OneRecEnginePipeline::estimate_min_available_memory() {
+int64_t RecEngine::OneRecLocalEnginePipeline::estimate_min_available_memory() {
   const int64_t max_cache_size = engine_.options_.max_cache_size();
   const double max_memory_utilization =
       engine_.options_.max_memory_utilization();
@@ -583,7 +621,7 @@ int64_t RecEngine::OneRecEnginePipeline::estimate_min_available_memory() {
   std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
-    futures.push_back(worker->estimate_kv_cache_capacity_async());
+    futures.emplace_back(worker->estimate_kv_cache_capacity_async());
   }
 
   int64_t cache_size_in_bytes = std::numeric_limits<int64_t>::max();
@@ -612,12 +650,12 @@ int64_t RecEngine::OneRecEnginePipeline::estimate_min_available_memory() {
   return cache_size_in_bytes;
 }
 
-bool RecEngine::OneRecEnginePipeline::allocate_kv_cache(
+bool RecEngine::OneRecLocalEnginePipeline::allocate_kv_cache(
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
-    futures.push_back(worker->allocate_kv_cache_async(kv_cache_shape));
+    futures.emplace_back(worker->allocate_kv_cache_async(kv_cache_shape));
   }
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
@@ -628,11 +666,26 @@ bool RecEngine::OneRecEnginePipeline::allocate_kv_cache(
   return true;
 }
 
-size_t RecEngine::OneRecEnginePipeline::num_workers() const {
+size_t RecEngine::OneRecLocalEnginePipeline::num_workers() const {
   return engine_.workers_.size();
 }
 
-ForwardOutput RecEngine::OneRecEnginePipeline::step(
+// ============================================================
+// OneRecPrefillOnlyEnginePipeline Implementation
+// ============================================================
+
+RecEngine::OneRecPrefillOnlyEnginePipeline::OneRecPrefillOnlyEnginePipeline(
+    RecEngine& engine)
+    : OneRecLocalEnginePipeline(engine) {}
+
+int64_t RecEngine::OneRecPrefillOnlyEnginePipeline::minimal_kv_cache_blocks()
+    const {
+  return use_legacy_onerec_prefill_only_contract()
+             ? kMinimalOneRecMetadataKVBlocks
+             : 0;
+}
+
+ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
     std::vector<Batch>& batches) {
   if (engine_.workers_.empty()) {
     return {};
@@ -687,7 +740,7 @@ ForwardOutput RecEngine::OneRecEnginePipeline::step(
   return decode_output;
 }
 
-ForwardOutput RecEngine::OneRecEnginePipeline::get_model_output(
+ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::get_model_output(
     const ForwardInput& model_inputs) {
   std::vector<folly::SemiFuture<std::optional<ForwardOutput>>> futures;
   futures.reserve(engine_.workers_.size());
@@ -741,20 +794,175 @@ ForwardOutput RecEngine::OneRecEnginePipeline::get_model_output(
 }
 
 std::vector<int64_t>
-RecEngine::OneRecEnginePipeline::get_active_activation_memory() const {
+RecEngine::OneRecLocalEnginePipeline::get_active_activation_memory() const {
   std::vector<folly::SemiFuture<int64_t>> futures;
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
-    futures.push_back(worker->get_active_activation_memory_async());
+    futures.emplace_back(worker->get_active_activation_memory_async());
   }
 
   auto results = folly::collectAll(futures).get();
   std::vector<int64_t> active_activation_memories;
   active_activation_memories.reserve(futures.size());
   for (auto& result : results) {
-    active_activation_memories.push_back(result.value());
+    active_activation_memories.emplace_back(result.value());
   }
   return active_activation_memories;
+}
+
+// ============================================================
+// OneRecXAttentionEnginePipeline Implementation
+// ============================================================
+
+RecEngine::OneRecXAttentionEnginePipeline::OneRecXAttentionEnginePipeline(
+    RecEngine& engine)
+    : OneRecLocalEnginePipeline(engine) {}
+
+int64_t RecEngine::OneRecXAttentionEnginePipeline::minimal_kv_cache_blocks()
+    const {
+  return kMinimalOneRecMetadataKVBlocks;
+}
+
+ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::step(
+    std::vector<Batch>& batches) {
+  if (engine_.workers_.empty()) {
+    return {};
+  }
+
+  Timer timer;
+  auto forward_inputs = engine_.workers_[0]->prepare_inputs(batches[0]);
+  COUNTER_ADD(prepare_input_latency_microseconds, timer.elapsed_microseconds());
+
+  if (!forward_inputs.token_ids.defined()) {
+    return {};
+  }
+
+  timer.reset();
+  const auto& output = get_model_output(forward_inputs);
+  COUNTER_ADD(rec_first_token_latency_microseconds,
+              timer.elapsed_microseconds());
+
+  timer.reset();
+  if (output.beam_sequence_group.defined() &&
+      output.beam_sequence_group.numel() > 0) {
+    batches[0].process_beam_sequence_group(output);
+  } else {
+    batches[0].process_sample_output(output.sample_output, false);
+  }
+  COUNTER_ADD(rec_sampling_latency_microseconds, timer.elapsed_microseconds());
+
+  batches[0].finish();
+  return output;
+}
+
+ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::get_model_output(
+    const ForwardInput& model_inputs) {
+  const bool trace_engine_output =
+      util::get_bool_env("XLLM_DEBUG_ONEREC_ENGINE_TRACE", false);
+  const bool trace_stage_timing =
+      util::get_bool_env("XLLM_DEBUG_ONEREC_XATTN_STAGE_TIMING", false);
+  Timer engine_timer;
+  auto log_engine_stage = [&](const char* stage_name,
+                              const torch::Tensor& tensor = torch::Tensor()) {
+    if (!trace_engine_output) {
+      return;
+    }
+    LOG(INFO) << "OneRec xattention engine stage=" << stage_name
+              << ", tensor_defined=" << tensor.defined() << ", tensor_shape="
+              << (tensor.defined() ? tensor.sizes() : c10::IntArrayRef{});
+  };
+  auto log_engine_timing = [&](const char* stage_name) {
+    if (!trace_stage_timing) {
+      return;
+    }
+    LOG(INFO) << "OneRec xattention engine timing, stage=" << stage_name
+              << ", elapsed_us=" << engine_timer.elapsed_microseconds();
+    engine_timer.reset();
+  };
+  std::vector<folly::SemiFuture<std::optional<ForwardOutput>>> futures;
+  futures.reserve(engine_.workers_.size());
+  for (auto& worker : engine_.workers_) {
+    futures.emplace_back(worker->step_async(model_inputs));
+  }
+  auto results = folly::collectAll(futures).get();
+  log_engine_timing("worker_step_collect");
+  log_engine_stage("after_collect_all");
+
+  for (size_t i = 0; i < results.size(); ++i) {
+    if (results[i].hasException()) {
+      LOG(FATAL) << "Worker " << i
+                 << " failed with exception: " << results[i].exception().what();
+    }
+    CHECK(results[i].value().has_value())
+        << "Worker " << i << " failed to execute model and returned no output.";
+  }
+
+  auto forward_output = results.front().value();
+  CHECK(forward_output.has_value()) << "Failed to execute model";
+
+  auto& output = forward_output.value();
+  auto& sample_output = output.sample_output;
+  const bool has_beam_output = output.beam_sequence_group.defined() &&
+                               output.beam_sequence_group.numel() > 0;
+
+  if (!has_beam_output && sample_output.embeddings.defined()) {
+    log_engine_stage("before_embeddings_to_cpu", sample_output.embeddings);
+    sample_output.embeddings = safe_to(
+        sample_output.embeddings,
+        torch::TensorOptions().device(torch::kCPU).dtype(torch::kFloat32),
+        /*non_blocking=*/true);
+    log_engine_stage("after_embeddings_to_cpu", sample_output.embeddings);
+  }
+
+  if (!has_beam_output && sample_output.next_tokens.defined()) {
+    log_engine_stage("before_next_tokens_to_cpu", sample_output.next_tokens);
+    sample_output.next_tokens =
+        safe_to(sample_output.next_tokens, torch::kCPU, /*non_blocking=*/true);
+    log_engine_stage("after_next_tokens_to_cpu", sample_output.next_tokens);
+    if (sample_output.logprobs.defined()) {
+      log_engine_stage("before_logprobs_to_cpu", sample_output.logprobs);
+      sample_output.logprobs =
+          safe_to(sample_output.logprobs, torch::kCPU, true);
+      log_engine_stage("after_logprobs_to_cpu", sample_output.logprobs);
+    }
+    if (sample_output.top_tokens.defined()) {
+      log_engine_stage("before_top_tokens_to_cpu", sample_output.top_tokens);
+      sample_output.top_tokens =
+          safe_to(sample_output.top_tokens, torch::kCPU, true);
+      log_engine_stage("after_top_tokens_to_cpu", sample_output.top_tokens);
+    }
+    if (sample_output.top_logprobs.defined()) {
+      log_engine_stage("before_top_logprobs_to_cpu",
+                       sample_output.top_logprobs);
+      sample_output.top_logprobs =
+          safe_to(sample_output.top_logprobs, torch::kCPU, true);
+      log_engine_stage("after_top_logprobs_to_cpu", sample_output.top_logprobs);
+    }
+  }
+  if (has_beam_output) {
+    log_engine_stage("before_beam_sequence_group_to_cpu",
+                     output.beam_sequence_group);
+    output.beam_sequence_group =
+        safe_to(output.beam_sequence_group, torch::kCPU, true);
+    log_engine_stage("after_beam_sequence_group_to_cpu",
+                     output.beam_sequence_group);
+  }
+  if (output.beam_search_output.out_logprobs.defined() &&
+      output.beam_search_output.out_logprobs.numel() > 0) {
+    log_engine_stage("before_beam_out_logprobs_to_cpu",
+                     output.beam_search_output.out_logprobs);
+    output.beam_search_output.out_logprobs =
+        safe_to(output.beam_search_output.out_logprobs, torch::kCPU, true);
+    log_engine_stage("after_beam_out_logprobs_to_cpu",
+                     output.beam_search_output.out_logprobs);
+  }
+  log_engine_timing("output_d2h_submit");
+  log_engine_stage("before_default_stream_sync");
+  Device(engine_.workers_[0]->device()).synchronize_default_stream();
+  log_engine_timing("default_stream_sync");
+  log_engine_stage("after_default_stream_sync");
+
+  return output;
 }
 
 // ============================================================
@@ -776,7 +984,8 @@ void RecEngine::RecMultiRoundEnginePipeline::process_group_test() {
     for (auto& worker : engine_.workers_) {
       futures.emplace_back(worker->process_group_test_async());
     }
-    const int timeout_seconds = util::get_process_group_test_timeout_seconds();
+    const int32_t timeout_seconds =
+        util::get_process_group_test_timeout_seconds();
     folly::collectAll(futures)
         .within(std::chrono::seconds(timeout_seconds))
         .get();
@@ -831,7 +1040,7 @@ bool RecEngine::RecMultiRoundEnginePipeline::init_model_workers(
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
-    futures.push_back(worker->init_model_async(
+    futures.emplace_back(worker->init_model_async(
         model_path, FLAGS_random_seed, MasterStatus::WAKEUP));
   }
   auto results = folly::collectAll(futures).get();
@@ -852,7 +1061,7 @@ RecEngine::RecMultiRoundEnginePipeline::estimate_min_available_memory() {
   std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
-    futures.push_back(worker->estimate_kv_cache_capacity_async());
+    futures.emplace_back(worker->estimate_kv_cache_capacity_async());
   }
 
   int64_t cache_size_in_bytes = std::numeric_limits<int64_t>::max();
@@ -886,7 +1095,7 @@ bool RecEngine::RecMultiRoundEnginePipeline::allocate_kv_cache(
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
-    futures.push_back(worker->allocate_kv_cache_async(kv_cache_shape));
+    futures.emplace_back(worker->allocate_kv_cache_async(kv_cache_shape));
   }
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
@@ -971,14 +1180,14 @@ RecEngine::RecMultiRoundEnginePipeline::get_active_activation_memory() const {
   std::vector<folly::SemiFuture<int64_t>> futures;
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
-    futures.push_back(worker->get_active_activation_memory_async());
+    futures.emplace_back(worker->get_active_activation_memory_async());
   }
 
   auto results = folly::collectAll(futures).get();
   std::vector<int64_t> active_activation_memories;
   active_activation_memories.reserve(futures.size());
   for (auto& result : results) {
-    active_activation_memories.push_back(result.value());
+    active_activation_memories.emplace_back(result.value());
   }
   return active_activation_memories;
 }
@@ -995,7 +1204,9 @@ std::unique_ptr<RecEngine::RecEnginePipeline> RecEngine::create_pipeline(
     case RecPipelineType::kLlmRecMultiRoundPipeline:
       return std::make_unique<RecMultiRoundEnginePipeline>(engine);
     case RecPipelineType::kOneRecDefault:
-      return std::make_unique<OneRecEnginePipeline>(engine);
+      return std::make_unique<OneRecPrefillOnlyEnginePipeline>(engine);
+    case RecPipelineType::kOneRecXAttentionPipeline:
+      return std::make_unique<OneRecXAttentionEnginePipeline>(engine);
     default:
       LOG(FATAL) << "Unknown RecEngine pipeline type: "
                  << static_cast<int>(type);

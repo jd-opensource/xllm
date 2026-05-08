@@ -12,6 +12,7 @@ cc_library(
     batch_input_builder.h
     rec_batch_input_builder.h
     onerec_batch_input_builder.h
+    onerec_xattention_batch_input_builder.h
     rec_multi_round_batch_input_builder.h
     mposition.h
   SRCS
@@ -21,6 +22,7 @@ cc_library(
     batch_input_builder.cpp
     rec_batch_input_builder.cpp
     onerec_batch_input_builder.cpp
+    onerec_xattention_batch_input_builder.cpp
     rec_multi_round_batch_input_builder.cpp
     mposition.cpp
     beam_search.h

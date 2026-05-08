@@ -90,6 +90,15 @@ class FixedStepsScheduler final : public ContinuousScheduler {
     }
   };
 
+  class OneRecXAttentionSchedulerPipeline final : public SchedulerPipeline {
+   public:
+    std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
+                                      BatchFactory* batch_factory) override;
+    bool requires_kv_cache() const override { return true; }
+    bool allocate_kv_cache(KVCacheManager* kv_cache_manager,
+                           Sequence* sequence) override;
+  };
+
   class RecMultiRoundSchedulerPipeline final : public SchedulerPipeline {
    public:
     std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,

@@ -21,6 +21,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/util/env_var.h"
+#include "core/util/rec_model_utils.h"
 #include "core/util/uuid.h"
 
 namespace xllm {
@@ -187,7 +188,7 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
       inference_type == InferenceType::REC_COMPLETIONS ||
       inference_type == InferenceType::REC_CHAT_COMPLETIONS;
   const bool is_onerec_pipeline =
-      is_rec_inference && rec_pipeline_type == RecPipelineType::kOneRecDefault;
+      is_rec_inference && is_onerec_pipeline_type(rec_pipeline_type);
   if (is_onerec_pipeline) {
     response->rec_outputs.entries_size = output.outputs.size();
     response->rec_outputs.entries =
@@ -349,7 +350,7 @@ XLLM_Response* handle_inference_request(
   if constexpr (std::is_same_v<HandlerType, XLLM_REC_Handler>) {
     rec_pipeline_type = handler->pipeline_type;
     if (FLAGS_enable_output_sku_logprobs &&
-        rec_pipeline_type == RecPipelineType::kOneRecDefault) {
+        is_onerec_pipeline_type(rec_pipeline_type)) {
       xllm_request_params.logprobs = true;
     }
   }

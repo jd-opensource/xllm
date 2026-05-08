@@ -52,8 +52,13 @@ struct SamplingParameters {
                         torch::ScalarType dtype) const {
     SamplingParameters params;
 
-    // all tensors should be on the same device
-    params.selected_token_idxes = safe_to(selected_token_idxes, device, true);
+    // selected/sample indices are tiny control tensors and
+    // correctness-critical. Use blocking H2D copies to avoid consuming
+    // partially transferred index buffers on NPU runtime paths.
+    params.selected_token_idxes =
+        selected_token_idxes.defined()
+            ? safe_to(selected_token_idxes, device).contiguous()
+            : selected_token_idxes;
 
     auto options = torch::device(device).dtype(dtype);
     params.frequency_penalties = safe_to(frequency_penalties, options, true);
@@ -67,7 +72,9 @@ struct SamplingParameters {
     params.unique_token_counts = safe_to(unique_token_counts, device, true);
     params.unique_token_ids_lens = safe_to(unique_token_ids_lens, device, true);
 
-    params.sample_idxes = safe_to(sample_idxes, device, true);
+    params.sample_idxes = sample_idxes.defined()
+                              ? safe_to(sample_idxes, device).contiguous()
+                              : sample_idxes;
     params.do_sample = safe_to(do_sample, device, true);
     params.all_random_sample = all_random_sample;
     params.all_greedy_sample = all_greedy_sample;

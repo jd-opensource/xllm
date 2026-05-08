@@ -33,6 +33,7 @@ limitations under the License.
 #include "distributed_runtime/engine.h"
 #include "framework/batch/batch.h"
 #include "framework/batch/batch_factory.h"
+#include "framework/request/rec_type.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 #include "util/rec_model_utils.h"
@@ -427,6 +428,37 @@ std::vector<Batch> FixedStepsScheduler::OneRecSchedulerPipeline::create_batches(
 }
 
 std::vector<Batch>
+FixedStepsScheduler::OneRecXAttentionSchedulerPipeline::create_batches(
+    FixedStepsScheduler& scheduler,
+    BatchFactory* batch_factory) {
+  return batch_factory->create_rec_batches(
+      scheduler.running_requests_,
+      scheduler.running_sequences_,
+      scheduler.running_sequences_budgets_,
+      scheduler.kv_cache_manager_->get_swap_block_transfer_infos());
+}
+
+bool FixedStepsScheduler::OneRecXAttentionSchedulerPipeline::allocate_kv_cache(
+    KVCacheManager* kv_cache_manager,
+    Sequence* sequence) {
+  const size_t num_tokens = sequence->num_tokens();
+  size_t max_generated_tokens =
+      FLAGS_max_decode_rounds > 0 ? static_cast<size_t>(FLAGS_max_decode_rounds)
+                                  : kRecDecodeSteps;
+  if (const auto* stopping_checker = sequence->stopping_checker()) {
+    max_generated_tokens = std::max(
+        max_generated_tokens, stopping_checker->get_max_generated_tokens());
+  }
+  if (std::numeric_limits<size_t>::max() - num_tokens < max_generated_tokens) {
+    LOG(ERROR) << "Integer overflow detected in OneRec xattention KV cache "
+                  "allocation";
+    return false;
+  }
+  return kv_cache_manager->allocate(sequence,
+                                    num_tokens + max_generated_tokens);
+}
+
+std::vector<Batch>
 FixedStepsScheduler::RecMultiRoundSchedulerPipeline::create_batches(
     FixedStepsScheduler& scheduler,
     BatchFactory* batch_factory) {
@@ -442,6 +474,9 @@ FixedStepsScheduler::create_scheduler_pipeline(RecType rec_type,
                                                bool is_rec_multi_round) {
   if (is_rec_multi_round) {
     return std::make_unique<RecMultiRoundSchedulerPipeline>();
+  }
+  if (rec_type == RecType::kOneRec && is_onerec_xattention_mode()) {
+    return std::make_unique<OneRecXAttentionSchedulerPipeline>();
   }
   if (rec_type == RecType::kLlmRec) {
     return std::make_unique<LlmRecSchedulerPipeline>();

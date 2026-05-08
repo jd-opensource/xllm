@@ -34,6 +34,7 @@ enum class RecPipelineType : uint8_t {
   kLlmRecWithMmData = 1,          // LlmRec with mm_data (qwen + embedding)
   kOneRecDefault = 2,             // OneRec
   kLlmRecMultiRoundPipeline = 3,  // LlmRec multi-round pipeline (device loop)
+  kOneRecXAttentionPipeline = 4,  // OneRec xattention pipeline (device loop)
 };
 
 // Check if Rec multi-round mode is enabled.
@@ -47,6 +48,22 @@ inline int32_t get_rec_multi_round_decode_rounds() {
   return is_rec_multi_round_mode() ? FLAGS_max_decode_rounds : 0;
 }
 
+inline bool is_onerec_xattention_mode() { return FLAGS_max_decode_rounds > 0; }
+
+// This helper intentionally names the legacy prefill-only contract instead of
+// mirroring the raw flag. Under the current CLI wiring, xattention mode and
+// enable_rec_prefill_only should not be active together, but many call sites
+// still need to branch on "should I use the old prefill-only behavior" as a
+// semantic boundary.
+inline bool use_legacy_onerec_prefill_only_contract() {
+  return FLAGS_enable_rec_prefill_only && !is_onerec_xattention_mode();
+}
+
+inline bool is_onerec_pipeline_type(RecPipelineType type) {
+  return type == RecPipelineType::kOneRecDefault ||
+         type == RecPipelineType::kOneRecXAttentionPipeline;
+}
+
 // Pipeline strategy selector: choose strategy based on RecModelKind
 inline RecPipelineType get_rec_pipeline_type(RecModelKind kind) {
   switch (kind) {
@@ -57,7 +74,9 @@ inline RecPipelineType get_rec_pipeline_type(RecModelKind kind) {
         return RecPipelineType::kLlmRecDefault;
       }
     case RecModelKind::kOneRec:
-      return RecPipelineType::kOneRecDefault;
+      return is_onerec_xattention_mode()
+                 ? RecPipelineType::kOneRecXAttentionPipeline
+                 : RecPipelineType::kOneRecDefault;
     default:
       return RecPipelineType::kLlmRecDefault;
   }
