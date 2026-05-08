@@ -546,7 +546,8 @@ Engine::KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   // all swa-related cache size from cache_size_in_bytes, then compute
   // c4_count / c128_count (c4_count = 32 * c128_count).
   // cache_size_in_bytes is already the full available device memory.
-  if (args_.model_type() == "deepseek_v4") {
+  if (args_.model_type() == "deepseek_v4" ||
+      args_.model_type() == "deepseek_v4_mtp") {
     const int64_t max_seqs =
         static_cast<int64_t>(std::max(options_.max_seqs_per_batch(), 1));
     kv_cache_cap.swa_count = 12 * max_seqs + 2;
@@ -699,7 +700,8 @@ bool LLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
   // init kv cache for each worker
   std::vector<std::vector<int64_t>> kv_cache_shape;
   kv_cache_shape.reserve(2);
-  if (args_.model_type() == "deepseek_v4") {
+  if (args_.model_type() == "deepseek_v4" ||
+      args_.model_type() == "deepseek_v4_mtp") {
     kv_cache_shape.emplace_back(std::vector<int64_t>{kv_cache_cap.swa_count,
                                                      kv_cache_cap.c4_count,
                                                      kv_cache_cap.c128_count});

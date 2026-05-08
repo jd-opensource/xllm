@@ -183,7 +183,8 @@ bool WorkerImpl::allocate_kv_cache(
       << "simultaneously.";
 
   const int64_t num_layers = get_num_layers();
-  const bool is_dsv4 = (args.model_type() == "deepseek_v4") &&
+  const bool is_dsv4 = (args.model_type() == "deepseek_v4" ||
+                       args.model_type() == "deepseek_v4_mtp") &&
                        kv_cache_shape.size() >= 1 &&
                        kv_cache_shape[0].size() >= 3;
 
@@ -1142,6 +1143,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
           kModelTypeToMtpType = {
               {"deepseek_v3", "deepseek_v3_mtp"},
               {"deepseek_v32", "deepseek_v3_mtp"},
+              {"deepseek_v4", "deepseek_v4_mtp"},
               {"glm_moe_dsa", "glm_moe_dsa_mtp"},
           };
       const std::string& current_type = args.model_type();
