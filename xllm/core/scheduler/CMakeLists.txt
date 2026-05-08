@@ -36,6 +36,7 @@ cc_library(
     fixed_steps_scheduler.cpp
   DEPS
     :batch
+    :distributed_runtime
     :request
     :runtime
     :profile
