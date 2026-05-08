@@ -192,8 +192,14 @@ std::vector<Batch> DisaggChunkedPDScheduler::prepare_batch() {
   running_sequences_.clear();
   running_sequences_budgets_.clear();
 
-  size_t remaining_token_budget = options_.max_tokens_per_batch();
-  size_t remaining_seq_budget = std::max(options_.max_seqs_per_batch(), 1);
+  size_t remaining_token_budget =
+      static_cast<size_t>(options_.max_tokens_per_batch());
+  const size_t max_seq_budget =
+      static_cast<size_t>(std::max(options_.max_seqs_per_batch(), 1));
+  size_t remaining_seq_budget = max_seq_budget;
+  running_requests_.reserve(max_seq_budget);
+  running_sequences_.reserve(max_seq_budget);
+  running_sequences_budgets_.reserve(max_seq_budget);
   schedule_waiting_prefill(waiting_priority_queue_,
                            remaining_token_budget,
                            remaining_seq_budget,
