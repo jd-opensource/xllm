@@ -18,9 +18,12 @@ limitations under the License.
 
 #include <algorithm>
 #include <cstdlib>
+#include <optional>
+#include <sstream>
 #include <tuple>
 #include <vector>
 
+#include "core/kernels/npu/xllm_ops/xllm_ops_api.h"
 #include "npu_ops_api.h"
 
 namespace xllm::kernel::npu {
@@ -37,6 +40,27 @@ bool enable_constrained_topk_trace() {
     return value[0] == '1' || value[0] == 't' || value[0] == 'T' ||
            value[0] == 'y' || value[0] == 'Y';
   }();
+  return enabled;
+}
+
+bool env_enabled(const char* name) {
+  const char* value = std::getenv(name);
+  if (value == nullptr) {
+    return false;
+  }
+  return value[0] == '1' || value[0] == 't' || value[0] == 'T' ||
+         value[0] == 'y' || value[0] == 'Y';
+}
+
+bool enable_fused_constrained_topk() {
+  static const bool enabled =
+      env_enabled("XLLM_ENABLE_ONEREC_FUSED_CONSTRAINED_TOPK");
+  return enabled;
+}
+
+bool enable_fused_constrained_topk_compare() {
+  static const bool enabled =
+      env_enabled("XLLM_DEBUG_ONEREC_FUSED_CONSTRAINED_TOPK_COMPARE");
   return enabled;
 }
 
@@ -143,6 +167,18 @@ std::tuple<torch::Tensor, torch::Tensor> build_first_token_candidates(
     const torch::Tensor& first_token_ids,
     int64_t top_k) {
   const int64_t allowed_count = first_token_ids.size(0);
+  if (allowed_count >= top_k) {
+    const int64_t num_rows = logits.size(0);
+    torch::Tensor candidate_tokens = first_token_ids.unsqueeze(/*dim=*/0)
+                                         .expand({num_rows, allowed_count})
+                                         .contiguous();
+    torch::Tensor valid_candidates =
+        torch::ones({num_rows, allowed_count},
+                    torch::TensorOptions()
+                        .dtype(torch::kBool)
+                        .device(first_token_ids.device()));
+    return {candidate_tokens, valid_candidates};
+  }
   const int64_t candidate_width = std::max<int64_t>(allowed_count, top_k);
   auto begin_options =
       torch::TensorOptions().dtype(torch::kLong).device(logits.device());
@@ -276,7 +312,9 @@ std::tuple<torch::Tensor, torch::Tensor> finish_prefix1_constrained_topk(
   torch::Tensor begins = prefix1_offsets.index_select(/*dim=*/0, t0);
   torch::Tensor ends = prefix1_offsets.index_select(/*dim=*/0, t0 + 1);
   torch::Tensor degrees = ends - begins;
-  const int64_t candidate_width = max_degree_with_top_k(degrees, top_k);
+  const int64_t candidate_width =
+      max_prefix1_degree > 0 ? std::max<int64_t>(top_k, max_prefix1_degree)
+                             : max_degree_with_top_k(degrees, top_k);
   if (enable_constrained_topk_trace()) {
     torch::Tensor degrees_cpu = degrees.to(torch::kCPU);
     const int64_t min_degree = degrees_cpu.min().item<int64_t>();
@@ -314,21 +352,49 @@ std::tuple<torch::Tensor, torch::Tensor> finish_prefix1_constrained_topk(
                                     candidate_width);
 }
 
-std::tuple<torch::Tensor, torch::Tensor> build_prefix2_candidates(
+std::tuple<torch::Tensor, torch::Tensor> find_prefix1_pair_indices(
+    const torch::Tensor& prefix1_pair_keys,
+    const torch::Tensor& t0,
+    const torch::Tensor& t1,
+    int64_t vocab_size) {
+  CHECK(prefix1_pair_keys.defined()) << "prefix1_pair_keys is required";
+  CHECK_GT(prefix1_pair_keys.size(0), 0);
+  torch::Tensor query_keys =
+      t0.to(torch::kLong) * vocab_size + t1.to(torch::kLong);
+  torch::Tensor pair_indices =
+      torch::searchsorted(prefix1_pair_keys, query_keys, /*out_int32=*/false);
+  const int64_t max_pair_index =
+      std::max<int64_t>(prefix1_pair_keys.size(0) - 1, 0);
+  torch::Tensor safe_pair_indices =
+      pair_indices.clamp(/*min=*/0, /*max=*/max_pair_index);
+  torch::Tensor found_keys =
+      prefix1_pair_keys.index_select(/*dim=*/0, safe_pair_indices);
+  torch::Tensor pair_valid = pair_indices.lt(prefix1_pair_keys.size(0))
+                                 .logical_and(found_keys.eq(query_keys));
+  return {pair_valid, pair_indices};
+}
+
+std::tuple<torch::Tensor, torch::Tensor> finish_prefix2_constrained_topk(
+    const torch::Tensor& logits,
     const torch::Tensor& sequence_group,
-    const torch::Tensor& prefix1_offsets,
-    const torch::Tensor& prefix1_values,
+    const torch::Tensor& prefix1_pair_keys,
+    int64_t vocab_size,
     const torch::Tensor& prefix2_value_offsets,
     const torch::Tensor& prefix2_values,
+    const torch::Tensor& temperatures,
+    int64_t current_step,
     int64_t top_k,
-    int64_t max_prefix1_degree,
     int64_t max_prefix2_degree) {
-  (void)max_prefix1_degree;
   torch::Tensor sequence_group_flat =
       sequence_group.reshape({-1, sequence_group.size(-1)});
   const int64_t num_rows = sequence_group_flat.size(0);
+  CHECK_EQ(sequence_group_flat.dim(), 2)
+      << "sequence_group must flatten to 2-D, got "
+      << sequence_group_flat.sizes();
   if (prefix2_value_offsets.size(0) < 2 || prefix2_values.size(0) == 0) {
-    const int64_t prefix2_width = std::max<int64_t>(top_k, max_prefix2_degree);
+    const int64_t prefix2_width =
+        max_prefix2_degree > 0 ? std::max<int64_t>(top_k, max_prefix2_degree)
+                               : top_k;
     torch::Tensor candidate_tokens =
         torch::zeros({num_rows, prefix2_width}, prefix2_values.options());
     torch::Tensor valid_candidates =
@@ -336,54 +402,70 @@ std::tuple<torch::Tensor, torch::Tensor> build_prefix2_candidates(
                      torch::TensorOptions()
                          .dtype(torch::kBool)
                          .device(sequence_group.device()));
-    return {candidate_tokens, valid_candidates};
+    return finish_constrained_topk(logits,
+                                   candidate_tokens,
+                                   valid_candidates,
+                                   temperatures,
+                                   current_step,
+                                   top_k);
   }
+
   torch::Tensor t0 =
       sequence_group_flat.select(/*dim=*/1, /*index=*/0).to(torch::kLong);
   torch::Tensor t1 = sequence_group_flat.select(/*dim=*/1, /*index=*/1);
 
-  torch::Tensor prefix1_begins = prefix1_offsets.index_select(/*dim=*/0, t0);
-  torch::Tensor prefix1_ends = prefix1_offsets.index_select(/*dim=*/0, t0 + 1);
-  torch::Tensor relative_pair_indices =
-      torch::searchsorted(prefix1_values, t1, /*out_int32=*/false) -
-      prefix1_begins.to(torch::kLong);
-  torch::Tensor prefix1_degrees = prefix1_ends - prefix1_begins;
-  torch::Tensor in_range = relative_pair_indices.ge(0).logical_and(
-      relative_pair_indices.lt(prefix1_degrees.to(torch::kLong)));
-  torch::Tensor pair_indices =
-      prefix1_begins.to(torch::kLong) + relative_pair_indices;
+  torch::Tensor pair_valid;
+  torch::Tensor pair_indices;
+  std::tie(pair_valid, pair_indices) =
+      find_prefix1_pair_indices(prefix1_pair_keys, t0, t1, vocab_size);
 
   const int64_t max_pair_index =
       std::max<int64_t>(prefix2_value_offsets.size(0) - 2, 0);
-  torch::Tensor safe_pair_indices =
-      torch::where(in_range, pair_indices, torch::zeros_like(pair_indices))
+  torch::Tensor safe_pair_index_rows =
+      torch::where(pair_valid, pair_indices, torch::zeros_like(pair_indices))
           .clamp(/*min=*/0, /*max=*/max_pair_index);
-  torch::Tensor pair_tokens =
-      prefix1_values.index_select(/*dim=*/0, safe_pair_indices).to(t1.dtype());
-  torch::Tensor pair_valid = in_range.logical_and(pair_tokens.eq(t1));
 
   torch::Tensor prefix2_begins =
-      prefix2_value_offsets.index_select(/*dim=*/0, safe_pair_indices);
+      prefix2_value_offsets.index_select(/*dim=*/0, safe_pair_index_rows);
   torch::Tensor prefix2_ends =
-      prefix2_value_offsets.index_select(/*dim=*/0, safe_pair_indices + 1);
+      prefix2_value_offsets.index_select(/*dim=*/0, safe_pair_index_rows + 1);
   torch::Tensor prefix2_degrees =
       torch::where(pair_valid,
                    prefix2_ends - prefix2_begins,
                    torch::zeros_like(prefix2_begins));
 
-  const int64_t prefix2_width = max_degree_with_top_k(prefix2_degrees, top_k);
-  return build_range_candidates(
-      prefix2_values, prefix2_begins, prefix2_degrees, prefix2_width);
+  const int64_t prefix2_width =
+      max_prefix2_degree > 0 ? std::max<int64_t>(top_k, max_prefix2_degree)
+                             : max_degree_with_top_k(prefix2_degrees, top_k);
+  if (prefix2_width <= top_k * 2) {
+    torch::Tensor candidate_tokens;
+    torch::Tensor valid_candidates;
+    std::tie(candidate_tokens, valid_candidates) = build_range_candidates(
+        prefix2_values, prefix2_begins, prefix2_degrees, prefix2_width);
+    return finish_constrained_topk(logits,
+                                   candidate_tokens,
+                                   valid_candidates,
+                                   temperatures,
+                                   current_step,
+                                   top_k);
+  }
+  return finish_bucketed_range_topk(logits,
+                                    prefix2_values,
+                                    prefix2_begins,
+                                    prefix2_degrees,
+                                    temperatures,
+                                    current_step,
+                                    top_k,
+                                    prefix2_width);
 }
 
-}  // namespace
-
-std::tuple<torch::Tensor, torch::Tensor> rec_constrained_topk(
+std::tuple<torch::Tensor, torch::Tensor> rec_constrained_topk_composite(
     const torch::Tensor& logits,
     const torch::Tensor& sequence_group,
     const torch::Tensor& first_token_ids,
     const torch::Tensor& prefix1_offsets,
     const torch::Tensor& prefix1_values,
+    const torch::Tensor& prefix1_pair_keys,
     const torch::Tensor& prefix2_value_offsets,
     const torch::Tensor& prefix2_values,
     const torch::Tensor& temperatures,
@@ -397,6 +479,8 @@ std::tuple<torch::Tensor, torch::Tensor> rec_constrained_topk(
   CHECK(first_token_ids.defined()) << "first_token_ids is required";
   CHECK(prefix1_offsets.defined()) << "prefix1_offsets is required";
   CHECK(prefix1_values.defined()) << "prefix1_values is required";
+  CHECK(prefix1_pair_keys.defined()) << "prefix1_pair_keys is required";
+  CHECK_EQ(prefix1_pair_keys.size(0), prefix1_values.size(0));
   CHECK(prefix2_value_offsets.defined()) << "prefix2_value_offsets is required";
   CHECK(prefix2_values.defined()) << "prefix2_values is required";
 
@@ -417,15 +501,18 @@ std::tuple<torch::Tensor, torch::Tensor> rec_constrained_topk(
                                            max_prefix1_degree);
   } else if (current_step == 2) {
     CHECK(sequence_group.defined()) << "sequence_group is required for step 2";
-    std::tie(candidate_tokens, valid_candidates) =
-        build_prefix2_candidates(sequence_group,
-                                 prefix1_offsets,
-                                 prefix1_values,
-                                 prefix2_value_offsets,
-                                 prefix2_values,
-                                 top_k,
-                                 max_prefix1_degree,
-                                 max_prefix2_degree);
+    const int64_t vocab_size = prefix1_offsets.size(0) - 1;
+    CHECK_GT(vocab_size, 0);
+    return finish_prefix2_constrained_topk(logits,
+                                           sequence_group,
+                                           prefix1_pair_keys,
+                                           vocab_size,
+                                           prefix2_value_offsets,
+                                           prefix2_values,
+                                           temperatures,
+                                           current_step,
+                                           top_k,
+                                           max_prefix2_degree);
   } else {
     LOG(FATAL) << "Unsupported OneRec constrained step: " << current_step;
   }
@@ -436,6 +523,161 @@ std::tuple<torch::Tensor, torch::Tensor> rec_constrained_topk(
                                  temperatures,
                                  current_step,
                                  top_k);
+}
+
+}  // namespace
+
+std::tuple<torch::Tensor, torch::Tensor> rec_constrained_topk(
+    const torch::Tensor& logits,
+    const torch::Tensor& sequence_group,
+    const torch::Tensor& first_token_ids,
+    const torch::Tensor& prefix1_offsets,
+    const torch::Tensor& prefix1_values,
+    const torch::Tensor& prefix1_pair_keys,
+    const torch::Tensor& prefix2_value_offsets,
+    const torch::Tensor& prefix2_values,
+    const torch::Tensor& temperatures,
+    int64_t current_step,
+    int64_t top_k,
+    int64_t max_prefix1_degree,
+    int64_t max_prefix2_degree) {
+  if (!enable_fused_constrained_topk()) {
+    return rec_constrained_topk_composite(logits,
+                                          sequence_group,
+                                          first_token_ids,
+                                          prefix1_offsets,
+                                          prefix1_values,
+                                          prefix1_pair_keys,
+                                          prefix2_value_offsets,
+                                          prefix2_values,
+                                          temperatures,
+                                          current_step,
+                                          top_k,
+                                          max_prefix1_degree,
+                                          max_prefix2_degree);
+  }
+
+  std::optional<std::tuple<torch::Tensor, torch::Tensor>> fused_output =
+      rec_constrained_topk_fused(logits,
+                                 sequence_group,
+                                 first_token_ids,
+                                 prefix1_offsets,
+                                 prefix1_values,
+                                 prefix1_pair_keys,
+                                 prefix2_value_offsets,
+                                 prefix2_values,
+                                 temperatures,
+                                 current_step,
+                                 top_k,
+                                 max_prefix1_degree,
+                                 max_prefix2_degree);
+  if (!fused_output.has_value()) {
+    LOG_FIRST_N(WARNING, 1)
+        << "OneRec fused constrained topk is enabled but unavailable or "
+           "failed; falling back to composite rec_constrained_topk.";
+    return rec_constrained_topk_composite(logits,
+                                          sequence_group,
+                                          first_token_ids,
+                                          prefix1_offsets,
+                                          prefix1_values,
+                                          prefix1_pair_keys,
+                                          prefix2_value_offsets,
+                                          prefix2_values,
+                                          temperatures,
+                                          current_step,
+                                          top_k,
+                                          max_prefix1_degree,
+                                          max_prefix2_degree);
+  }
+
+  torch::Tensor fused_tokens;
+  torch::Tensor fused_logprobs;
+  std::tie(fused_tokens, fused_logprobs) = fused_output.value();
+  fused_tokens = fused_tokens.to(torch::kLong);
+  if (enable_fused_constrained_topk_compare()) {
+    torch::Tensor composite_tokens;
+    torch::Tensor composite_logprobs;
+    std::tie(composite_tokens, composite_logprobs) =
+        rec_constrained_topk_composite(logits,
+                                       sequence_group,
+                                       first_token_ids,
+                                       prefix1_offsets,
+                                       prefix1_values,
+                                       prefix1_pair_keys,
+                                       prefix2_value_offsets,
+                                       prefix2_values,
+                                       temperatures,
+                                       current_step,
+                                       top_k,
+                                       max_prefix1_degree,
+                                       max_prefix2_degree);
+    const bool tokens_match = torch::equal(fused_tokens, composite_tokens);
+    const bool logprobs_match = torch::allclose(fused_logprobs,
+                                                composite_logprobs,
+                                                /*rtol=*/1.0e-4,
+                                                /*atol=*/1.0e-4);
+    if (!tokens_match || !logprobs_match) {
+      torch::Tensor token_diff = fused_tokens.ne(composite_tokens);
+      const int64_t token_mismatch_count =
+          token_diff.sum().to(torch::kCPU).item<int64_t>();
+      const double max_logprob_diff = (fused_logprobs - composite_logprobs)
+                                          .abs()
+                                          .max()
+                                          .to(torch::kCPU)
+                                          .item<double>();
+      torch::Tensor mismatch_rows =
+          torch::nonzero(token_diff.any(/*dim=*/1)).reshape({-1});
+      int64_t first_mismatch_row = -1;
+      if (mismatch_rows.numel() > 0) {
+        first_mismatch_row = mismatch_rows.select(/*dim=*/0, /*index=*/0)
+                                 .to(torch::kCPU)
+                                 .item<int64_t>();
+      }
+      const int64_t debug_width = std::min<int64_t>(top_k, 16);
+      std::ostringstream fused_tokens_head;
+      std::ostringstream composite_tokens_head;
+      std::ostringstream fused_logprobs_head;
+      std::ostringstream composite_logprobs_head;
+      if (first_mismatch_row >= 0) {
+        fused_tokens_head << fused_tokens.select(/*dim=*/0, first_mismatch_row)
+                                 .slice(/*dim=*/0,
+                                        /*start=*/0,
+                                        /*end=*/debug_width)
+                                 .to(torch::kCPU);
+        composite_tokens_head
+            << composite_tokens.select(/*dim=*/0, first_mismatch_row)
+                   .slice(/*dim=*/0, /*start=*/0, /*end=*/debug_width)
+                   .to(torch::kCPU);
+        fused_logprobs_head
+            << fused_logprobs.select(/*dim=*/0, first_mismatch_row)
+                   .slice(/*dim=*/0, /*start=*/0, /*end=*/debug_width)
+                   .to(torch::kCPU);
+        composite_logprobs_head
+            << composite_logprobs.select(/*dim=*/0, first_mismatch_row)
+                   .slice(/*dim=*/0, /*start=*/0, /*end=*/debug_width)
+                   .to(torch::kCPU);
+      }
+      const char* severity = logprobs_match ? "tie-order" : "value";
+      std::ostringstream message;
+      message << "OneRec fused constrained topk compare mismatch, kind="
+              << severity << ", step=" << current_step << ", top_k=" << top_k
+              << ", tokens_match=" << tokens_match
+              << ", logprobs_match=" << logprobs_match
+              << ", token_mismatch_count=" << token_mismatch_count
+              << ", max_logprob_diff=" << max_logprob_diff
+              << ", first_mismatch_row=" << first_mismatch_row
+              << ", fused_tokens_head=" << fused_tokens_head.str()
+              << ", composite_tokens_head=" << composite_tokens_head.str()
+              << ", fused_logprobs_head=" << fused_logprobs_head.str()
+              << ", composite_logprobs_head=" << composite_logprobs_head.str();
+      if (logprobs_match) {
+        LOG_FIRST_N(WARNING, 8) << message.str();
+      } else {
+        LOG(ERROR) << message.str();
+      }
+    }
+  }
+  return {fused_tokens, fused_logprobs};
 }
 
 }  // namespace xllm::kernel::npu

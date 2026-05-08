@@ -92,6 +92,15 @@ std::vector<int32_t> prefix2_values_for_tokens(
   return {};
 }
 
+std::vector<int64_t> prefix1_pair_keys_for_token(
+    const RecConstraintTables& tables,
+    int32_t t0) {
+  const int32_t begin = tables.prefix1_offsets[static_cast<size_t>(t0)];
+  const int32_t end = tables.prefix1_offsets[static_cast<size_t>(t0) + 1];
+  return std::vector<int64_t>(tables.prefix1_pair_keys.begin() + begin,
+                              tables.prefix1_pair_keys.begin() + end);
+}
+
 }  // namespace
 
 TEST(RecVocabDictTest, BuildConstraintTablesMatchesLegacyPrefixMap) {
@@ -121,6 +130,13 @@ TEST(RecVocabDictTest, BuildConstraintTablesMatchesLegacyPrefixMap) {
             std::vector<int32_t>({2, 5}));
   EXPECT_EQ(prefix1_values_for_token(tables, /*t0=*/7),
             std::vector<int32_t>({8}));
+  EXPECT_EQ(prefix1_pair_keys_for_token(tables, /*t0=*/1),
+            std::vector<int64_t>({18, 21}));
+  EXPECT_EQ(prefix1_pair_keys_for_token(tables, /*t0=*/7),
+            std::vector<int64_t>({120}));
+  EXPECT_TRUE(std::is_sorted(tables.prefix1_pair_keys.begin(),
+                             tables.prefix1_pair_keys.end()));
+  EXPECT_EQ(tables.prefix1_pair_keys.size(), tables.prefix1_values.size());
   EXPECT_TRUE(prefix1_values_for_token(tables, /*t0=*/0).empty());
   EXPECT_EQ(prefix2_values_for_tokens(tables, /*t0=*/1, /*t1=*/2),
             std::vector<int32_t>({3, 4}));

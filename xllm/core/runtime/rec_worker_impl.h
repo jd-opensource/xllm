@@ -153,6 +153,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
       torch::Tensor first_token_ids;
       torch::Tensor prefix1_offsets;
       torch::Tensor prefix1_values;
+      torch::Tensor prefix1_pair_keys;
       torch::Tensor prefix2_value_offsets;
       torch::Tensor prefix2_values;
       int64_t max_prefix1_degree = 0;

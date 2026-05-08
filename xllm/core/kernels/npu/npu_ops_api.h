@@ -160,6 +160,7 @@ std::tuple<torch::Tensor, torch::Tensor> rec_constrained_topk(
     const torch::Tensor& first_token_ids,
     const torch::Tensor& prefix1_offsets,
     const torch::Tensor& prefix1_values,
+    const torch::Tensor& prefix1_pair_keys,
     const torch::Tensor& prefix2_value_offsets,
     const torch::Tensor& prefix2_values,
     const torch::Tensor& temperatures,

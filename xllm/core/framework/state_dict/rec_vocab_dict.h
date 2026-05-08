@@ -38,6 +38,9 @@ struct RecConstraintTables {
   // valid t1 tokens after prefix [t0].
   std::vector<int32_t> prefix1_offsets;
   std::vector<int32_t> prefix1_values;
+  // Globally sorted keys aligned with prefix1_values and prefix2_value_offsets.
+  // key = int64_t(t0) * vocab_size + int64_t(t1).
+  std::vector<int64_t> prefix1_pair_keys;
 
   // prefix2_value_offsets[i:i + 1] is aligned with prefix1_values[i].
   // It contains valid t2 tokens after prefix [t0, prefix1_values[i]].

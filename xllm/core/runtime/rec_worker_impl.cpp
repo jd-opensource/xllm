@@ -96,6 +96,16 @@ torch::Tensor int32_vector_to_device_tensor(const std::vector<int32_t>& values,
   return cpu_tensor.to(device, /*non_blocking=*/false);
 }
 
+torch::Tensor int64_vector_to_device_tensor(const std::vector<int64_t>& values,
+                                            const torch::Device& device) {
+  auto cpu_options =
+      torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU);
+  torch::Tensor cpu_tensor = values.empty()
+                                 ? torch::empty({0}, cpu_options)
+                                 : torch::tensor(values, cpu_options);
+  return cpu_tensor.to(device, /*non_blocking=*/false);
+}
+
 #endif
 
 }  // namespace
@@ -594,6 +604,7 @@ void RecWorkerImpl::OneRecXAttentionWorkPipeline::
   CHECK_GT(tables.vocab_size, 0);
   CHECK(!tables.first_token_ids.empty())
       << "OneRec constrained decoding requires non-empty first token table.";
+  CHECK_EQ(tables.prefix1_pair_keys.size(), tables.prefix1_values.size());
   CHECK_EQ(tables.prefix2_value_offsets.size(),
            tables.prefix1_values.size() + 1);
 
@@ -604,6 +615,8 @@ void RecWorkerImpl::OneRecXAttentionWorkPipeline::
       int32_vector_to_device_tensor(tables.prefix1_offsets, device);
   constraint_device_tensors_.prefix1_values =
       int32_vector_to_device_tensor(tables.prefix1_values, device);
+  constraint_device_tensors_.prefix1_pair_keys =
+      int64_vector_to_device_tensor(tables.prefix1_pair_keys, device);
   constraint_device_tensors_.prefix2_value_offsets =
       int32_vector_to_device_tensor(tables.prefix2_value_offsets, device);
   constraint_device_tensors_.prefix2_values =
@@ -668,6 +681,7 @@ RecWorkerImpl::OneRecXAttentionWorkPipeline::sample_with_device_constraints(
           constraint_device_tensors_.first_token_ids,
           constraint_device_tensors_.prefix1_offsets,
           constraint_device_tensors_.prefix1_values,
+          constraint_device_tensors_.prefix1_pair_keys,
           constraint_device_tensors_.prefix2_value_offsets,
           constraint_device_tensors_.prefix2_values,
           sampling_params.temperatures,

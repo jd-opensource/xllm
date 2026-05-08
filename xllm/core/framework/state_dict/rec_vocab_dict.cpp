@@ -308,6 +308,7 @@ RecConstraintTables RecVocabDict::build_constraint_tables(
   tables.max_first_degree = static_cast<int32_t>(tables.first_token_ids.size());
 
   tables.prefix1_values.reserve(triples.size());
+  tables.prefix1_pair_keys.reserve(triples.size());
   tables.prefix2_values.reserve(triples.size());
   tables.prefix2_value_offsets.reserve(triples.size() + 1);
 
@@ -320,6 +321,9 @@ RecConstraintTables RecVocabDict::build_constraint_tables(
     while (triple_idx < triples.size() && triples[triple_idx][0] == t0) {
       const int32_t t1 = triples[triple_idx][1];
       tables.prefix1_values.emplace_back(t1);
+      tables.prefix1_pair_keys.emplace_back(
+          static_cast<int64_t>(t0) * static_cast<int64_t>(vocab_size) +
+          static_cast<int64_t>(t1));
 
       const int32_t prefix2_begin =
           static_cast<int32_t>(tables.prefix2_values.size());
@@ -349,6 +353,7 @@ RecConstraintTables RecVocabDict::build_constraint_tables(
   }
 
   CHECK_EQ(triple_idx, triples.size());
+  CHECK_EQ(tables.prefix1_pair_keys.size(), tables.prefix1_values.size());
   CHECK_EQ(tables.prefix2_value_offsets.size(),
            tables.prefix1_values.size() + 1);
   return tables;
