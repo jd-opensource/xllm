@@ -509,9 +509,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
 
   const bool is_decode_with_llmrec =
       params.meta.batch_forward_type.is_decode() && params.has_llmrec_params();
-  const bool use_two_stage_decode =
-      !::xllm::RecConfig::get_instance().enable_xattention_one_stage() &&
-      is_decode_with_llmrec;
+  const bool use_two_stage_decode = is_decode_with_llmrec;
   const int32_t head_dim = args_.head_dim();
   const int64_t tp_size =
       options_.world_size() / std::max(options_.dp_size(), 1);

@@ -28,11 +28,6 @@ DEFINE_bool(enable_rec_prefill_only,
             "Enable rec prefill-only mode (no decoder self-attention blocks "
             "allocation).");
 
-DEFINE_bool(enable_xattention_one_stage,
-            false,
-            "Whether to force xattention one-stage decode for rec "
-            "multi-round mode.");
-
 DEFINE_int32(max_decode_rounds,
              0,
              "Maximum number of decode rounds for multi-step decoding. "
@@ -85,7 +80,6 @@ namespace xllm {
 void RecConfig::from_flags() {
   enable_rec_fast_sampler(FLAGS_enable_rec_fast_sampler)
       .enable_rec_prefill_only(FLAGS_enable_rec_prefill_only)
-      .enable_xattention_one_stage(FLAGS_enable_xattention_one_stage)
       .max_decode_rounds(FLAGS_max_decode_rounds)
       .enable_constrained_decoding(FLAGS_enable_constrained_decoding)
       .output_rec_logprobs(FLAGS_output_rec_logprobs)
@@ -103,8 +97,6 @@ void RecConfig::from_json(const JsonReader& json) {
       json.value_or<bool>("enable_rec_fast_sampler", enable_rec_fast_sampler()))
       .enable_rec_prefill_only(json.value_or<bool>("enable_rec_prefill_only",
                                                    enable_rec_prefill_only()))
-      .enable_xattention_one_stage(json.value_or<bool>(
-          "enable_xattention_one_stage", enable_xattention_one_stage()))
       .max_decode_rounds(
           json.value_or<int32_t>("max_decode_rounds", max_decode_rounds()))
       .enable_constrained_decoding(json.value_or<bool>(

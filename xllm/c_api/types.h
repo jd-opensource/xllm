@@ -70,9 +70,6 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
   /** Whether to enable prefill piecewise graph for REC */
   bool enable_prefill_piecewise_graph;
 
-  /** Whether to enable xattention one-stage execution for REC */
-  bool enable_xattention_one_stage;
-
   /** Whether to enable graph-mode decode without padding for REC */
   bool enable_graph_mode_decode_no_padding;
 

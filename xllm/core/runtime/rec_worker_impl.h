@@ -261,18 +261,10 @@ class RecWorkerImpl : public LLMWorkerImpl {
                             const BeamSearchTensors& beam_tensors,
                             ForwardOutput& output);
 
-    // Structure to hold async computation results for next round input
-    struct NextRoundInputResults {
-#if defined(USE_NPU)
-// TODO: implement NextRoundInputResults for NPU
-#elif defined(USE_CUDA)
-      torch::Tensor paged_kv_indices;
-      torch::Tensor paged_kv_indptr;
-      torch::Tensor paged_kv_last_page_len;
-#endif
-    };
+    // Placeholder for backend-specific round handoff state.
+    struct NextRoundInputResults {};
 
-    // Compute next round input asynchronously (can overlap with GPU execution)
+    // Keep the round-transition flow uniform across backends.
     folly::SemiFuture<NextRoundInputResults> compute_next_round_input_async(
         const torch::Tensor& kv_seq_lens,
         int32_t current_step,
@@ -280,7 +272,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
         int32_t beam_width,
         int32_t max_decode_step);
 
-    // Apply async result to prepare decode input for current round
+    // Prepare decode input for the current round.
     void prepare_input_for_current_round(ForwardInput& input,
                                          const NextRoundInputResults& results,
                                          int32_t round,
@@ -315,21 +307,6 @@ class RecWorkerImpl : public LLMWorkerImpl {
     void prepare_kv_caches_related_for_input(const ForwardInput& inputs,
                                              ForwardInput& processed_inputs);
 
-    struct FullKvCacheOffsets {
-      explicit FullKvCacheOffsets(
-          LlmRecMultiRoundPipeline* multi_round_pipeline);
-#if defined(USE_NPU)
-// TODO: implement FullKvCacheOffsets for NPU
-#elif defined(USE_CUDA)
-      torch::Tensor full_kv_offsets;
-      torch::Tensor full_kv_mask;
-      torch::Tensor full_kv_indices;
-      torch::Tensor unshared_offsets;
-      torch::Tensor max_decode_step_ids;
-#endif
-    };
-    std::unique_ptr<FullKvCacheOffsets> full_kv_cache_offsets_;
-
     std::vector<torch::Tensor> cached_full_k_caches_;
     std::vector<torch::Tensor> cached_full_v_caches_;
     torch::Tensor cached_naive_block_table_;
@@ -346,9 +323,6 @@ class RecWorkerImpl : public LLMWorkerImpl {
     torch::Tensor cached_beam_width_tensor_;
 
     std::unique_ptr<RecSampler> rec_sampler_;
-
-    // for async scheduler
-    ThreadPool threadpool_;
 
     int32_t max_seqs_per_batch_;
     int32_t max_tokens_per_batch_;

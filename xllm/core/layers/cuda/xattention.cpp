@@ -18,7 +18,6 @@ limitations under the License.
 #include <algorithm>
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/rec_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/platform/device.h"
 #include "flashinfer_planinfo.h"
@@ -44,73 +43,6 @@ XAttentionImpl::XAttentionImpl(int64_t num_heads,
                         num_kv_heads,
                         sliding_window) {}
 
-void XAttentionImpl::run_single_stage_decode(
-    const AttentionMetadata& attn_metadata,
-    const torch::Tensor& key,
-    torch::Tensor& query,
-    torch::Tensor& output) {
-  torch::Tensor full_k_cache = attn_metadata.full_k_cache.unsqueeze(1);
-  torch::Tensor full_v_cache = attn_metadata.full_v_cache.unsqueeze(1);
-
-  if (attn_metadata.enable_cuda_graph) {
-    CHECK(attn_metadata.plan_info->plan_info.defined())
-        << "plan_info plan_info should not be null when enable_cuda_graph is "
-           "true";
-    VLOG(kGraphExecutorLogVerboseLevel)
-        << "no need to update plan_info for CUDA graph";
-  } else {
-    std::string backend = xllm::kernel::cuda::determine_attention_backend(
-        /*pos_encoding_mode=*/0,
-        /*use_fp16_qk_reduction=*/false,
-        /*use_custom_mask=*/false);
-    flashinfer::update_decode_plan_info(
-        attn_metadata.plan_info,
-        backend,
-        attn_metadata,
-        query.scalar_type(),
-        key.scalar_type(),
-        output.scalar_type(),
-        head_size_,
-        head_size_,
-        num_heads_,
-        num_kv_heads_,
-        /*block_size=*/full_k_cache.size(1),
-        /*window_size_left=*/sliding_window_,
-        /*enable_cuda_graph=*/false,
-        /*use_tensor_core=*/decode_use_tensor_core_);
-  }
-
-  std::optional<at::Tensor> unshared_lse = std::nullopt;
-
-  torch::Tensor float_workspace_buffer =
-      flashinfer::FlashinferWorkspace::get_instance()
-          .get_float_workspace_buffer();
-  torch::Tensor int_workspace_buffer =
-      flashinfer::FlashinferWorkspace::get_instance()
-          .get_int_workspace_buffer();
-  torch::Tensor page_locked_int_workspace_buffer =
-      flashinfer::FlashinferWorkspace::get_instance()
-          .get_page_locked_int_workspace_buffer();
-
-  xllm::kernel::cuda::batch_decode(attn_metadata.plan_info->uri,
-                                   attn_metadata.plan_info->plan_info,
-                                   float_workspace_buffer,
-                                   int_workspace_buffer,
-                                   page_locked_int_workspace_buffer,
-                                   query,
-                                   full_k_cache,
-                                   full_v_cache,
-                                   attn_metadata.paged_kv_indptr,
-                                   attn_metadata.paged_kv_indices,
-                                   attn_metadata.paged_kv_last_page_len,
-                                   sliding_window_,
-                                   scale_,
-                                   output,
-                                   unshared_lse,
-                                   decode_use_tensor_core_,
-                                   attn_metadata.qo_indptr);
-}
-
 void XAttentionImpl::run_two_stage_decode(
     const AttentionMetadata& attn_metadata,
     torch::Tensor& query,
@@ -127,6 +59,8 @@ void XAttentionImpl::run_two_stage_decode(
   CHECK_EQ(total_beam % batch_size, 0)
       << "total_beam must be divisible by batch_size";
 
+  CHECK(attn_metadata.xattention_two_stage_decode_cache.has_value())
+      << "two-stage decode cache must be initialized.";
   const auto& cache = attn_metadata.xattention_two_stage_decode_cache.value();
   CHECK(cache.shared_lse.defined() && cache.shared_o.defined() &&
         cache.unshared_lse.defined() && cache.unshared_o.defined())
@@ -427,11 +361,7 @@ void XAttentionImpl::decoder_forward(const AttentionMetadata& attn_metadata,
                                                 attn_metadata.unshared_k_cache,
                                                 attn_metadata.unshared_v_cache,
                                                 attn_metadata.step_tensor);
-  if (::xllm::RecConfig::get_instance().enable_xattention_one_stage()) {
-    run_single_stage_decode(attn_metadata, key, query, output);
-  } else {
-    run_two_stage_decode(attn_metadata, query, output);
-  }
+  run_two_stage_decode(attn_metadata, query, output);
 }
 
 }  // namespace layer
