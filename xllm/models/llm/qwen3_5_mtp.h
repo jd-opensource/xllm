@@ -117,7 +117,7 @@ class Qwen3_5MtpModelImpl : public Qwen3HybridModelImplBase {
         build_attention_mask(input_params));
 
     torch::Tensor embedding = embed_tokens_(tokens);
-    torch::Tensor hidden = input_params.input_embedding;
+    torch::Tensor hidden = input_params.embedding.input_embedding;
     if (hidden.defined() == false) {
       hidden = embedding;
     }

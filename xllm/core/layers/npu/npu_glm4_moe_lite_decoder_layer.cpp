@@ -413,7 +413,7 @@ torch::Tensor NpuGlm4MoeDecoderLiteImpl::forward(
     std::atomic<bool>* event_flag,
     int node_id) {
   atb::Status st;
-  if (!input_params.batch_forward_type.is_decode()) {
+  if (!input_params.meta.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,
@@ -452,7 +452,7 @@ void NpuGlm4MoeDecoderLiteImpl::build_node_variant_pack(
     const ModelInputParams& input_params,
     bool is_prefill) {
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
-  auto& dp_ep_padding = input_params.dp_ep_padding_data;
+  auto& dp_ep_padding = input_params.parallel.dp_ep_padding_data;
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
@@ -468,9 +468,10 @@ void NpuGlm4MoeDecoderLiteImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_v_cache());
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.kv_seq_lens);
+      atb_speed::Utils::AtTensor2Tensor(
+          input_params.attention.device.kv_seq_lens);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6).hostData =
-      const_cast<int32_t*>(input_params.kv_seq_lens_vec.data());
+      const_cast<int32_t*>(input_params.attention.host.kv_seq_lens.data());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7).hostData =
@@ -478,17 +479,21 @@ void NpuGlm4MoeDecoderLiteImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 8) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
+      atb_speed::Utils::AtTensor2Tensor(
+          input_params.attention.device.block_tables);
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
+      atb_speed::Utils::AtTensor2Tensor(
+          input_params.attention.device.new_cache_slots);
 
   // ADD in_q_len
-  if (input_params.batch_forward_type.is_chunked_prefill()) {
+  if (input_params.meta.batch_forward_type.is_chunked_prefill()) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.kv_cache_tokens_nums);
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.attention.device.kv_cache_tokens_nums);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11).hostData =
-        const_cast<int32_t*>(input_params.kv_cache_tokens_nums_host.data());
+        const_cast<int32_t*>(
+            input_params.attention.host.kv_cache_tokens_nums.data());
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
         atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
@@ -497,7 +502,7 @@ void NpuGlm4MoeDecoderLiteImpl::build_node_variant_pack(
   }
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 12) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.expert_array);
+      atb_speed::Utils::AtTensor2Tensor(input_params.expert.expert_array);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13) =
       atb_speed::Utils::AtTensor2Tensor(expert_group_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 14) =
@@ -508,27 +513,33 @@ void NpuGlm4MoeDecoderLiteImpl::build_node_variant_pack(
   int32_t input_idx = WEIGHT_COUNT_PER_LAYER + 16;
 
   // ADD prefix
-  if (input_params.batch_forward_type.is_chunked_prefill()) {
+  if (input_params.meta.batch_forward_type.is_chunked_prefill()) {
     node.variantPack.inTensors.at(input_idx) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.history_compressed_kv);
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.attention.device.history_compressed_kv);
     node.variantPack.inTensors.at(input_idx + 1) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.history_k_rope);
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.attention.device.history_k_rope);
     node.variantPack.inTensors.at(input_idx + 2) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.ring_cur_seqlen);
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.attention.device.ring_cur_seqlen);
     node.variantPack.inTensors.at(input_idx + 2).hostData =
-        const_cast<int32_t*>(input_params.ring_cur_seqlen_host.data());
+        const_cast<int32_t*>(
+            input_params.attention.host.ring_cur_seqlen.data());
     node.variantPack.inTensors.at(input_idx + 3) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.ring_cache_seqlen);
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.attention.device.ring_cache_seqlen);
     node.variantPack.inTensors.at(input_idx + 3).hostData =
-        const_cast<int32_t*>(input_params.ring_cache_seqlen_host.data());
+        const_cast<int32_t*>(
+            input_params.attention.host.ring_cache_seqlen.data());
   }
 
   // if (is_prefill &&
   //     (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
   //   node.variantPack.inTensors.at(input_idx) =
-  //       atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
+  //       atb_speed::Utils::AtTensor2Tensor(input_params.attention.device.q_seq_lens);
   //   node.variantPack.inTensors.at(input_idx).hostData =
-  //       const_cast<int32_t*>(input_params.q_seq_lens_vec.data());
+  //       const_cast<int32_t*>(input_params.attention.host.q_seq_lens.data());
   //   input_idx++;
   // }
 
@@ -555,10 +566,9 @@ void NpuGlm4MoeDecoderLiteImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
   if (FLAGS_enable_graph && !is_prefill &&
-      input_params.graph_buffer.tiling_data.defined()) {
+      input_params.graph.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
-        atb_speed::Utils::AtTensor2Tensor(
-            input_params.graph_buffer.tiling_data);
+        atb_speed::Utils::AtTensor2Tensor(input_params.graph.tiling_data);
   }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {

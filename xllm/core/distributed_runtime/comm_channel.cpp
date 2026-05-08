@@ -20,6 +20,8 @@ limitations under the License.
 
 #include <future>
 
+#include "common/global_flags.h"
+
 namespace xllm {
 
 bool CommChannel::init_brpc(const std::string& server_address) {
@@ -532,7 +534,15 @@ bool CommChannel::execute_model_with_brpc(
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
   // convert to proto::ForwardInput
   proto::ForwardInput pb_forward_input;
-  forward_input_to_proto(input, &pb_forward_input);
+  if (FLAGS_use_contiguous_input_buffer) {
+    auto* packed_input = pb_forward_input.mutable_packed_input();
+    if (!raw_forward_input_to_packed_proto(input, packed_input)) {
+      pb_forward_input.clear_packed_input();
+      forward_input_to_proto(input, &pb_forward_input);
+    }
+  } else {
+    forward_input_to_proto(input, &pb_forward_input);
+  }
 
   // call ExecuteModel with callback
   auto done = new ExecuteModelClosure();

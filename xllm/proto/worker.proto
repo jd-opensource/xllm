@@ -243,6 +243,14 @@ message DiTGenerationParams {
   float cfg_renorm_min = 11;
 }
 
+message PackedForwardInput {
+  // Raw input payload encoded as:
+  // [RawInputLayoutHeader][descriptor bytes][tensor arena bytes].
+  // The descriptor records metadata/non-tensor fields; tensor arena stores all
+  // tensor payloads in one contiguous host buffer.
+  bytes payload = 1;
+}
+
 message ForwardInput {
   // flatten the token ids and positions
   repeated int32 flatten_tokens_vec = 1;
@@ -293,6 +301,7 @@ message ForwardInput {
   repeated string request_ids = 44;
   DiTForwardInput dit_forward_input = 45;
   repeated int32 linear_state_ids = 46;
+  PackedForwardInput packed_input = 100;
 }
 
  message BatchedForwardInputs {

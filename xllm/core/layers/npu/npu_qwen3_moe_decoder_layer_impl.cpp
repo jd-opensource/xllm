@@ -317,7 +317,7 @@ torch::Tensor NpuQwen3MoeDecoderLayerImpl::forward(
     std::atomic<bool>* event_flag,
     int node_id) {
   atb::Status st;
-  if (!input_params.batch_forward_type.is_decode()) {
+  if (!input_params.meta.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
                             x,
                             residual,
@@ -360,11 +360,11 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
     bool is_prefill) {
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
   int32_t input_idx = 0;
-  auto& dp_ep_padding = input_params.dp_ep_padding_data;
+  auto& dp_ep_padding = input_params.parallel.dp_ep_padding_data;
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.expert_array);
+      atb_speed::Utils::AtTensor2Tensor(input_params.expert.expert_array);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 2) =
       atb_speed::Utils::AtTensor2Tensor(expert_group_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3) =
@@ -383,17 +383,18 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9) =
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_v_cache());
 
-  if (!input_params.block_tables.defined() ||
-      input_params.block_tables.storage().data() == nullptr) {
+  if (!input_params.attention.device.block_tables.defined() ||
+      input_params.attention.device.block_tables.storage().data() == nullptr) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
         atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10).hostData =
         const_cast<int32_t*>(placeholder_vec_.data());
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.kv_seq_lens);
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.attention.device.kv_seq_lens);
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10).hostData =
-        const_cast<int32_t*>(input_params.kv_seq_lens_vec.data());
+        const_cast<int32_t*>(input_params.attention.host.kv_seq_lens.data());
   }
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
@@ -403,40 +404,42 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
       const_cast<int32_t*>(placeholder_vec_.data());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
-  if (!input_params.block_tables.defined() ||
-      input_params.block_tables.storage().data() == nullptr) {
+  if (!input_params.attention.device.block_tables.defined() ||
+      input_params.attention.device.block_tables.storage().data() == nullptr) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 14) =
         atb_speed::Utils::AtTensor2Tensor(block_tables_placeholder_);
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 14) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.attention.device.block_tables);
   }
-  if (!input_params.block_tables.defined() ||
-      input_params.block_tables.storage().data() == nullptr) {
+  if (!input_params.attention.device.block_tables.defined() ||
+      input_params.attention.device.block_tables.storage().data() == nullptr) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 15) =
         atb_speed::Utils::AtTensor2Tensor(slot_tensor_placeholder_);
   } else {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 15) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.attention.device.new_cache_slots);
   }
 
   input_idx = WEIGHT_COUNT_PER_LAYER + 16;
   if (is_prefill &&
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
     node.variantPack.inTensors.at(input_idx++) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.attention.device.q_seq_lens);
     node.variantPack.inTensors.at(input_idx - 1).hostData =
-        const_cast<int32_t*>(input_params.q_seq_lens_vec.data());
+        const_cast<int32_t*>(input_params.attention.host.q_seq_lens.data());
   }
 
   if (FLAGS_enable_graph && !is_prefill &&
-      input_params.graph_buffer.tiling_data.defined()) {
+      input_params.graph.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
-        atb_speed::Utils::AtTensor2Tensor(
-            input_params.graph_buffer.tiling_data);
+        atb_speed::Utils::AtTensor2Tensor(input_params.graph.tiling_data);
   }
 
-  if (input_params.batch_forward_type.is_decode() &&
+  if (input_params.meta.batch_forward_type.is_decode() &&
       FLAGS_enable_intralayer_addnorm && residual.has_value()) {
     // input
     auto& residual_tensor = residual.value();

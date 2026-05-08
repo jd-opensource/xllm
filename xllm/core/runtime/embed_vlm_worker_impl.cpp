@@ -88,7 +88,7 @@ std::optional<ForwardOutput> EmbedVLMWorkerImpl::step(
     // split full embeddings and add them to mm_embeddings
     // so that the user could receive embeddings of images and texts
     if (FLAGS_enable_return_mm_full_embeddings) {
-      auto q_seq_len_vec = input.input_params.q_seq_lens_vec;
+      auto q_seq_len_vec = input.input_params.attention.host.q_seq_lens;
       sample_output.mm_embeddings.reserve(q_seq_len_vec.size());
       int32_t token_start_idx = 0;
       for (auto seq_len : q_seq_len_vec) {

@@ -82,7 +82,7 @@ class Glm4ModelImpl
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
       positions = torch::tensor({0}).to(torch::kInt32).to(tokens.device());
     }
-    auto inputs_embeds = input_params.input_embedding;
+    auto inputs_embeds = input_params.embedding.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
@@ -119,24 +119,24 @@ class Glm4ModelImpl
     sin_pos = sin_pos.reshape({-1, sin_pos.sizes().back() / 2, 2});
     torch::Tensor attn_mask;
     if (FLAGS_enable_chunked_prefill) {
-      int max_kv_seq = input_params.kv_max_seq_len;
-      int num_sequences = input_params.num_sequences;
+      int max_kv_seq = input_params.meta.kv_max_seq_len;
+      int num_sequences = input_params.meta.num_sequences;
       if (num_sequences > 0) {
         std::vector<torch::Tensor> req_mask_vec;
         req_mask_vec.reserve(num_sequences);
 
         for (int j = 0; j < num_sequences; j++) {
-          auto mask =
-              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                         input_params.kv_seq_lens_vec[j],
-                                         max_kv_seq,
-                                         cos_pos.dtype().toScalarType(),
-                                         cos_pos.device());
+          auto mask = attn_mask_.gen_append_mask(
+              input_params.attention.host.q_seq_lens[j],
+              input_params.attention.host.kv_seq_lens[j],
+              max_kv_seq,
+              cos_pos.dtype().toScalarType(),
+              cos_pos.device());
           req_mask_vec.emplace_back(mask);
         }
         attn_mask = torch::cat(req_mask_vec, 0);
       }
-    } else if (input_params.batch_forward_type.is_prefill()) {
+    } else if (input_params.meta.batch_forward_type.is_prefill()) {
       attn_mask = attn_mask_.get_attn_mask(
           128, cos_pos.dtype().toScalarType(), cos_pos.device());
     }
@@ -145,9 +145,10 @@ class Glm4ModelImpl
       aclrtEvent* event{nullptr};
       std::atomic<bool>* event_flag{nullptr};
 
-      if (input_params.layer_synchronizer != nullptr) {
-        event = input_params.layer_synchronizer->get_event(i);
-        event_flag = input_params.layer_synchronizer->get_event_flag(i);
+      if (input_params.parallel.layer_synchronizer != nullptr) {
+        event = input_params.parallel.layer_synchronizer->get_event(i);
+        event_flag =
+            input_params.parallel.layer_synchronizer->get_event_flag(i);
       }
       if (!input_params.synchronize_layer(i)) {
         return ModelOutput();

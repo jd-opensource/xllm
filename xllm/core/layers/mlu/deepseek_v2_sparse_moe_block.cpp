@@ -90,7 +90,8 @@ DeepseekV2SparseMoEBlockImpl::PrepOut DeepseekV2SparseMoEBlockImpl::prep_in(
   auto shard = shard_attn_out(
       x,
       residual,
-      get_dp_gather_tokens(input_params.dp_global_token_nums, parallel_args_),
+      get_dp_gather_tokens(input_params.parallel.dp_global_token_nums,
+                           parallel_args_),
       attn_layout);
   prep.ffn_in = shard.first;
   prep.pad_info = shard.second;
@@ -106,11 +107,13 @@ DeepseekV2SparseMoEBlockImpl::PrepOut DeepseekV2SparseMoEBlockImpl::prep_in(
       << "dp gather prep requires dp_local_process_group_";
   const int64_t dp_rank = parallel_args_.dp_local_process_group_->rank();
   CHECK_GE(dp_rank, 0) << "invalid dp rank " << dp_rank;
-  CHECK_LT(dp_rank,
-           static_cast<int64_t>(input_params.dp_global_token_nums.size()))
+  CHECK_LT(
+      dp_rank,
+      static_cast<int64_t>(input_params.parallel.dp_global_token_nums.size()))
       << "dp rank " << dp_rank << " exceeds dp_global_token_nums size "
-      << input_params.dp_global_token_nums.size();
-  const int64_t local_token_num = input_params.dp_global_token_nums[dp_rank];
+      << input_params.parallel.dp_global_token_nums.size();
+  const int64_t local_token_num =
+      input_params.parallel.dp_global_token_nums[dp_rank];
   prep.skip_local = local_tokens.slice(0, 0, local_token_num);
   return prep;
 }
@@ -123,7 +126,7 @@ torch::Tensor DeepseekV2SparseMoEBlockImpl::gather_in(
   }
 
   return gather_global_tokens(
-      prep.ffn_in, input_params.dp_global_token_nums, parallel_args_);
+      prep.ffn_in, input_params.parallel.dp_global_token_nums, parallel_args_);
 }
 
 torch::Tensor DeepseekV2SparseMoEBlockImpl::merge_out(

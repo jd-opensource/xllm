@@ -116,13 +116,14 @@ uint32_t get_tp_size(const xllm::runtime::Options& options) {
 uint32_t get_graph_dp_tokens(uint32_t actual_tokens,
                              const xllm::ModelInputParams& params,
                              const xllm::runtime::Options& options) {
-  if (params.dp_global_token_nums.size() <= 1) {
+  if (params.parallel.dp_global_token_nums.size() <= 1) {
     return get_bucket_num_tokens(actual_tokens);
   }
 
-  const auto max_token_num = std::max_element(
-      params.dp_global_token_nums.begin(), params.dp_global_token_nums.end());
-  CHECK(max_token_num != params.dp_global_token_nums.end())
+  const auto max_token_num =
+      std::max_element(params.parallel.dp_global_token_nums.begin(),
+                       params.parallel.dp_global_token_nums.end());
+  CHECK(max_token_num != params.parallel.dp_global_token_nums.end())
       << "dp_global_token_nums is empty";
   uint32_t bucket_tokens =
       get_bucket_num_tokens(static_cast<uint32_t>(*max_token_num));
@@ -140,9 +141,9 @@ int64_t get_seq_lens_capacity(const xllm::runtime::Options& options) {
 xllm::ModelInputParams make_graph_params(const xllm::ModelInputParams& params,
                                          uint32_t padding_num_tokens) {
   xllm::ModelInputParams graph_params = params;
-  if (params.dp_global_token_nums.size() > 1) {
-    graph_params.dp_global_token_nums =
-        std::vector<int32_t>(params.dp_global_token_nums.size(),
+  if (params.parallel.dp_global_token_nums.size() > 1) {
+    graph_params.parallel.dp_global_token_nums =
+        std::vector<int32_t>(params.parallel.dp_global_token_nums.size(),
                              static_cast<int32_t>(padding_num_tokens));
   }
   return graph_params;
@@ -154,33 +155,35 @@ RunMode get_run_mode(const xllm::runtime::Options& options,
     return RunMode::kDraft;
   }
 
-  if (!params.batch_forward_type.is_decode()) {
+  if (!params.meta.batch_forward_type.is_decode()) {
     return RunMode::kNonDecode;
   }
 
-  if (params.q_max_seq_len == 0) {
+  if (params.meta.q_max_seq_len == 0) {
     return RunMode::kDummy;
   }
 
-  if (params.dp_global_token_nums.size() <= 1) {
+  if (params.parallel.dp_global_token_nums.size() <= 1) {
     return RunMode::kGraph;
   }
 
-  if (has_zero_tokens(params.dp_global_token_nums)) {
+  if (has_zero_tokens(params.parallel.dp_global_token_nums)) {
     return RunMode::kDummy;
   }
 
-  if (params.dp_is_decode.size() != params.dp_global_token_nums.size()) {
+  if (params.parallel.dp_is_decode.size() !=
+      params.parallel.dp_global_token_nums.size()) {
     return RunMode::kBadDpMeta;
   }
 
-  if (std::find(params.dp_is_decode.begin(), params.dp_is_decode.end(), 0) !=
-      params.dp_is_decode.end()) {
+  if (std::find(params.parallel.dp_is_decode.begin(),
+                params.parallel.dp_is_decode.end(),
+                0) != params.parallel.dp_is_decode.end()) {
     return RunMode::kMixedDp;
   }
 
-  if (!dp_tokens_equal(params.dp_global_token_nums)) {
-    if (params.q_max_seq_len == 1) {
+  if (!dp_tokens_equal(params.parallel.dp_global_token_nums)) {
+    if (params.meta.q_max_seq_len == 1) {
       return RunMode::kPaddedDpGraph;
     }
     return RunMode::kUnevenDp;
@@ -233,18 +236,21 @@ void GraphPersistentParam::init_params(const ModelInputParams& params,
                                        uint32_t padding_num_tokens,
                                        uint32_t padding_needed) {
   params_ = params.to(tokens_.device());
-  params_.q_seq_lens =
-      q_seq_lens_.slice(0, 0, params.q_seq_lens.size(0) + padding_needed);
-  params_.kv_seq_lens =
-      kv_seq_lens_.slice(0, 0, params.kv_seq_lens.size(0) + padding_needed);
-  params_.new_cache_slots = new_cache_slots_.slice(0, 0, padding_num_tokens);
-  params_.block_tables = block_table_.slice(0, 0, padding_num_tokens);
+  params_.attention.device.q_seq_lens = q_seq_lens_.slice(
+      0, 0, params.attention.device.q_seq_lens.size(0) + padding_needed);
+  params_.attention.device.kv_seq_lens = kv_seq_lens_.slice(
+      0, 0, params.attention.device.kv_seq_lens.size(0) + padding_needed);
+  params_.attention.device.new_cache_slots =
+      new_cache_slots_.slice(0, 0, padding_num_tokens);
+  params_.attention.device.block_tables =
+      block_table_.slice(0, 0, padding_num_tokens);
 
-  if (params.input_embedding.defined()) {
+  if (params.embedding.input_embedding.defined()) {
     if (!input_embeds_.defined()) {
       input_embeds_ = torch::zeros_like(output_);
     }
-    params_.input_embedding = input_embeds_.slice(0, 0, padding_num_tokens);
+    params_.embedding.input_embedding =
+        input_embeds_.slice(0, 0, padding_num_tokens);
   }
 }
 
@@ -256,16 +262,16 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
   int32_t slice_dim = use_mrope_ ? 1 : 0;
   const int64_t actual_tokens = tokens.size(0);
   const int64_t padded_tokens = actual_tokens + padding_needed;
-  const int64_t actual_batch = params.block_tables.size(0);
+  const int64_t actual_batch = params.attention.device.block_tables.size(0);
   const int64_t block_rows_end = actual_batch + padding_needed;
   auto position_slice =
       positions_.slice(slice_dim, 0, positions.size(slice_dim));
   auto token_slice = tokens_.slice(0, 0, tokens.size(0));
-  auto cache_slot_slice =
-      new_cache_slots_.slice(0, 0, params.new_cache_slots.size(0));
+  auto cache_slot_slice = new_cache_slots_.slice(
+      0, 0, params.attention.device.new_cache_slots.size(0));
   position_slice.copy_(positions, true);
   token_slice.copy_(tokens, true);
-  cache_slot_slice.copy_(params.new_cache_slots, true);
+  cache_slot_slice.copy_(params.attention.device.new_cache_slots, true);
   if (padding_needed > 0) {
     positions_.slice(slice_dim, actual_tokens, padded_tokens).zero_();
     tokens_.slice(0, actual_tokens, padded_tokens).zero_();
@@ -274,8 +280,8 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
 
   // Apply padding if required number of tokens exceeds actual input
   // Generate padded sequence lengths by extending the last valid value
-  std::vector<int32_t> q_seq_lens_vec(params.q_seq_lens_vec);
-  std::vector<int32_t> kv_seq_lens_vec(params.kv_seq_lens_vec);
+  std::vector<int32_t> q_seq_lens_vec(params.attention.host.q_seq_lens);
+  std::vector<int32_t> kv_seq_lens_vec(params.attention.host.kv_seq_lens);
   if (padding_needed > 0) {
     q_seq_lens_vec.reserve(q_seq_lens_vec.size() + padding_needed);
     kv_seq_lens_vec.reserve(kv_seq_lens_vec.size() + padding_needed);
@@ -292,11 +298,12 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
   kv_seq_slice.copy_(kv_seq_lens, true);
 
   // Copy block table data
-  const int64_t actual_block_batch = params.block_tables.size(0);
-  const int64_t actual_n_block = params.block_tables.size(1);
+  const int64_t actual_block_batch =
+      params.attention.device.block_tables.size(0);
+  const int64_t actual_n_block = params.attention.device.block_tables.size(1);
   auto slice_block_tables =
       block_table_.slice(0, 0, actual_block_batch).slice(1, 0, actual_n_block);
-  slice_block_tables.copy_(params.block_tables, true);
+  slice_block_tables.copy_(params.attention.device.block_tables, true);
   if (actual_n_block < block_table_.size(1)) {
     block_table_.slice(0, 0, actual_block_batch)
         .slice(1, actual_n_block, block_table_.size(1))
@@ -306,12 +313,13 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
     block_table_.slice(0, actual_block_batch, block_rows_end).zero_();
   }
 
-  if (params.input_embedding.defined()) {
+  if (params.embedding.input_embedding.defined()) {
     auto input_embed_slice =
-        input_embeds_.slice(0, 0, params.input_embedding.size(0));
-    input_embed_slice.copy_(params.input_embedding, true);
+        input_embeds_.slice(0, 0, params.embedding.input_embedding.size(0));
+    input_embed_slice.copy_(params.embedding.input_embedding, true);
     if (padding_needed > 0) {
-      input_embeds_.slice(0, params.input_embedding.size(0), padded_tokens)
+      input_embeds_
+          .slice(0, params.embedding.input_embedding.size(0), padded_tokens)
           .zero_();
     }
   }
@@ -458,12 +466,13 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
   }
   const ModelInputParams graph_params = make_graph_params(params, graph_tokens);
 
-  if (graph_params.dp_global_token_nums != params.dp_global_token_nums) {
+  if (graph_params.parallel.dp_global_token_nums !=
+      params.parallel.dp_global_token_nums) {
     LOG_FIRST_N(INFO, 4) << "MLU graph padded dp decode path: raw "
                          << "dp_global_token_nums="
-                         << params.dp_global_token_nums
+                         << params.parallel.dp_global_token_nums
                          << ", graph dp_global_token_nums="
-                         << graph_params.dp_global_token_nums
+                         << graph_params.parallel.dp_global_token_nums
                          << ", tp_size=" << get_tp_size(options_)
                          << ", graph_tokens=" << graph_tokens;
   }

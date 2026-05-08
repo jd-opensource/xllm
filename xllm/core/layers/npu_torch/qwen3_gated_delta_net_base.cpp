@@ -363,16 +363,16 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     torch::IntArrayRef num_accepted_tokens_opt;
     torch::Tensor conv_weight_T = conv_weight.transpose(0, 1).contiguous();
     std::vector<int64_t> linear_state_indices_vec(
-        input_params.linear_state_ids.begin(),
-        input_params.linear_state_ids.end());
+        input_params.embedding.linear_state_ids.begin(),
+        input_params.embedding.linear_state_ids.end());
     mixed_qkv = xllm::kernel::causal_conv1d(
         mixed_qkv,
         conv_weight_T,
         conv_cache,
         std::optional<torch::Tensor>(),  // bias (no bias for qwen3)
-        torch::IntArrayRef(input_params.query_start_loc),
+        torch::IntArrayRef(input_params.parallel.query_start_loc),
         torch::IntArrayRef(linear_state_indices_vec),
-        torch::IntArrayRef(input_params.has_initial_state),
+        torch::IntArrayRef(input_params.parallel.has_initial_state),
         num_accepted_tokens_opt,
         1,   // activation_mode
         -1,  // pad_slot_id
@@ -506,13 +506,13 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::reshape_qkvz_unpad(
 torch::Tensor Qwen3GatedDeltaNetBaseImpl::get_linear_state_indices(
     const ModelInputParams& input_params,
     const torch::Device& device) const {
-  CHECK(!input_params.linear_state_ids.empty())
+  CHECK(!input_params.embedding.linear_state_ids.empty())
       << "linear_state_ids must be populated for gated delta net";
-  if (input_params.linear_state_indices.defined()) {
-    return input_params.linear_state_indices;
+  if (input_params.embedding.linear_state_indices.defined()) {
+    return input_params.embedding.linear_state_indices;
   }
   return torch::tensor(
-      input_params.linear_state_ids,
+      input_params.embedding.linear_state_ids,
       torch::TensorOptions().dtype(torch::kInt).device(device));
 }
 

@@ -645,23 +645,22 @@ class LongCatImagePipelineImpl : public torch::nn::Module {
     }
 
     if (actual_seq_len > 0) {
-      params.q_max_seq_len = actual_seq_len;
-      params.kv_max_seq_len = actual_seq_len;
+      params.meta.q_max_seq_len = actual_seq_len;
+      params.meta.kv_max_seq_len = actual_seq_len;
       auto cu_seqlens =
           torch::tensor({0, static_cast<int>(actual_seq_len)}, torch::kInt)
               .to(tokens.device());
-      params.q_seq_lens = cu_seqlens;
-      params.kv_seq_lens = cu_seqlens;
-      params.batch_forward_type = BatchForwardType::PREFILL;
+      params.attention.device.q_seq_lens = cu_seqlens;
+      params.attention.device.kv_seq_lens = cu_seqlens;
+      params.meta.batch_forward_type = BatchForwardType::PREFILL;
     }
 
     // Let Qwen2_5_VL build multimodal-aware embeddings from tokens and params.
-    params.input_embedding =
+    params.embedding.input_embedding =
         text_encoder_->get_input_embeddings(tokens, params);
 
     if (attention_mask.defined() && attention_mask.size(0) > 0) {
-      params.graph_buffer.attn_mask =
-          attention_mask.view({-1}).to(torch::kFloat32);
+      params.graph.attn_mask = attention_mask.view({-1}).to(torch::kFloat32);
     }
 
     return params;

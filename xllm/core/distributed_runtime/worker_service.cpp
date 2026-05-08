@@ -592,8 +592,15 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
 
         Timer timer;
         ForwardInput forward_input;
-        proto_to_forward_input(
-            pb_forward_input, forward_input, options_.num_decoding_tokens());
+        if (pb_forward_input->has_packed_input()) {
+          packed_proto_to_forward_input(pb_forward_input->packed_input(),
+                                        forward_input,
+                                        device_,
+                                        stream_.get());
+        } else {
+          proto_to_forward_input(
+              pb_forward_input, forward_input, options_.num_decoding_tokens());
+        }
 
         // model output
         torch::Tensor next_tokens;

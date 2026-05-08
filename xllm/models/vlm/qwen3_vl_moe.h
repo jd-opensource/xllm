@@ -44,7 +44,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
   void prepare_encoder_input(const ModelInputParams& input_params,
                              std::optional<Qwen3_VLImageInputs>& image_inputs,
                              std::optional<Qwen3_VLVideoInputs>& video_inputs) {
-    const auto& mm_data = input_params.mm_data;
+    const auto& mm_data = input_params.multimodal.mm_data;
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
       pixel_values = res.value();
@@ -112,7 +112,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
 
   std::vector<torch::Tensor> get_deep_stacks(
       const ModelInputParams& input_params) {
-    const auto& mm_data = input_params.mm_data;
+    const auto& mm_data = input_params.multimodal.mm_data;
     if (!mm_data.has("embedding|deepstack_0")) {
       return {};
     }
@@ -134,7 +134,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
                                      const ModelInputParams& input_params) {
-    const auto& mm_data = input_params.mm_data;
+    const auto& mm_data = input_params.multimodal.mm_data;
     torch::Tensor multimodal_embeds;
     if (const auto& emb = mm_data.get<torch::Tensor>("embedding")) {
       multimodal_embeds = emb.value();
@@ -144,7 +144,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
       return inputs_embeds;
     }
     auto is_multimodal = generate_multimodal_mask(input_ids);
-    input_params.visual_pos_masks = is_multimodal;
+    input_params.multimodal.visual_pos_masks = is_multimodal;
     inputs_embeds = merge_multimodal_embeddings(
         inputs_embeds, multimodal_embeds, is_multimodal);
     return inputs_embeds;
@@ -154,7 +154,8 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
                       const torch::Tensor& positions,
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& input_params) {
-    input_params.deep_stacks = std::move(get_deep_stacks(input_params));
+    input_params.multimodal.deep_stacks =
+        std::move(get_deep_stacks(input_params));
     return language_model_(tokens, positions, kv_caches, input_params);
   }
 

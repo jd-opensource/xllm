@@ -20,7 +20,6 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "framework/kv_cache_transfer/spec_kv_cache_transfer.h"
 #endif
-#include "runtime/spec_input_builder.h"
 #include "runtime/speculative_worker_impl.h"
 
 namespace xllm {
@@ -104,23 +103,19 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
 
   // Prepare target validate input from cached target context.
   void prepare_validate_inputs(const ForwardInput& inputs,
-                               const specBuilder::DecodeCpuView& decode_view,
                                ForwardInput& validate_inputs);
 
   // prepare inputs for draft model at Decode phase.
   void prepare_draft_inputs(const ForwardInput& inputs,
-                            const specBuilder::DecodeCpuView& decode_view,
                             ForwardInput& draft_inputs,
                             int32_t position_offset);
-  void build_decode_step_view(
-      const ForwardInput& input,
-      const std::vector<EmbeddingCache::DecodeState>& last_states,
-      specBuilder::DecodeCpuView& decode_view) const;
+  void update_decode_step_input(
+      ForwardInput& input,
+      const std::vector<EmbeddingCache::DecodeState>& last_states) const;
 
   // Build draft-side input from cached target context at decode step start.
   void prepare_draft_extend_inputs(
       const ForwardInput& base_input,
-      const specBuilder::DecodeCpuView& decode_view,
       const std::vector<EmbeddingCache::DecodeState>& last_states,
       ForwardInput& extend_input);
 

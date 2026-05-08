@@ -57,14 +57,14 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
     // Layer norm on token inputs
     auto enorm_out = std::get<0>(enorm_(embed));
 
-    torch::Tensor embedding_data = input_params.input_embedding;
+    torch::Tensor embedding_data = input_params.embedding.input_embedding;
     // for dummy data parallel run, we set a empty embedding
     if (attn_metadata.is_dummy) {
       embedding_data = torch::zeros({embed.size(0), model_args_.hidden_size()},
                                     embed.options());
     }
     CHECK(embedding_data.defined())
-        << "embedding is not defined in input_params.input_embedding";
+        << "embedding is not defined in input_params.embedding.input_embedding";
     torch::Tensor previous_hidden_states = embedding_data;
     previous_hidden_states = std::get<0>(hnorm_(previous_hidden_states));
 
@@ -165,7 +165,7 @@ class MtpModelImplBase : public torch::nn::Module {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
         positions = torch::tensor({1}).to(torch::kInt32).to(device_);
       }
-      auto& dp_token_nums = modified_input_params.dp_global_token_nums;
+      auto& dp_token_nums = modified_input_params.parallel.dp_global_token_nums;
       std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     }
     if (!modified_input_params.attn_metadata) {

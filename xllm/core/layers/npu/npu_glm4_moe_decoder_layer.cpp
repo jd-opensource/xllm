@@ -348,7 +348,7 @@ torch::Tensor NpuGlm4MoeDecoderImpl::forward(
     std::atomic<bool>* event_flag,
     int node_id) {
   atb::Status st;
-  if (!input_params.batch_forward_type.is_decode()) {
+  if (!input_params.meta.batch_forward_type.is_decode()) {
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,
@@ -387,7 +387,7 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
     const ModelInputParams& input_params,
     bool is_prefill) {
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
-  auto& dp_ep_padding = input_params.dp_ep_padding_data;
+  auto& dp_ep_padding = input_params.parallel.dp_ep_padding_data;
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
@@ -402,9 +402,10 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(kv_cache.get_v_cache());
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.kv_seq_lens);
+      atb_speed::Utils::AtTensor2Tensor(
+          input_params.attention.device.kv_seq_lens);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 6).hostData =
-      const_cast<int32_t*>(input_params.kv_seq_lens_vec.data());
+      const_cast<int32_t*>(input_params.attention.host.kv_seq_lens.data());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 7).hostData =
@@ -412,12 +413,14 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 8) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 9) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
+      atb_speed::Utils::AtTensor2Tensor(
+          input_params.attention.device.block_tables);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
+      atb_speed::Utils::AtTensor2Tensor(
+          input_params.attention.device.new_cache_slots);
 
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
-      atb_speed::Utils::AtTensor2Tensor(input_params.expert_array);
+      atb_speed::Utils::AtTensor2Tensor(input_params.expert.expert_array);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 12) =
       atb_speed::Utils::AtTensor2Tensor(expert_group_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 13) =
@@ -430,9 +433,10 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
   if (is_prefill &&
       (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
     node.variantPack.inTensors.at(input_idx) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.q_seq_lens);
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.attention.device.q_seq_lens);
     node.variantPack.inTensors.at(input_idx).hostData =
-        const_cast<int32_t*>(input_params.q_seq_lens_vec.data());
+        const_cast<int32_t*>(input_params.attention.host.q_seq_lens.data());
     input_idx++;
   }
 
@@ -459,10 +463,9 @@ void NpuGlm4MoeDecoderImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
   if (FLAGS_enable_graph && !is_prefill &&
-      input_params.graph_buffer.tiling_data.defined()) {
+      input_params.graph.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
-        atb_speed::Utils::AtTensor2Tensor(
-            input_params.graph_buffer.tiling_data);
+        atb_speed::Utils::AtTensor2Tensor(input_params.graph.tiling_data);
   }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {

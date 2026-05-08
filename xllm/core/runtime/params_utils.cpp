@@ -79,12 +79,15 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   std::vector<int32_t> q_seq_lens =
       std::vector<int32_t>(pb_forward_input->q_seq_lens().begin(),
                            pb_forward_input->q_seq_lens().end());
+  std::vector<int32_t> q_cu_seq_lens =
+      std::vector<int32_t>(pb_forward_input->q_cu_seq_lens().begin(),
+                           pb_forward_input->q_cu_seq_lens().end());
+  CHECK_EQ(q_seq_lens.empty(), q_cu_seq_lens.empty())
+      << "q_seq_lens and q_cu_seq_lens must be provided together";
   std::vector<int32_t> kv_cache_tokens_nums =
       std::vector<int32_t>(pb_forward_input->kv_cache_tokens_nums().begin(),
                            pb_forward_input->kv_cache_tokens_nums().end());
   // aprint<int32_t>(q_seq_lens, "q_seq_lens", global_rank_);
-  std::vector<int32_t> q_cu_seq_lens(q_seq_lens.size());
-  std::partial_sum(q_seq_lens.begin(), q_seq_lens.end(), q_cu_seq_lens.begin());
   // for flashinfer
   std::vector<int32_t> paged_kv_indptr =
       std::vector<int32_t>(pb_forward_input->paged_kv_indptr().begin(),
@@ -213,58 +216,67 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   forward_inputs.token_ids = torch::tensor(flatten_tokens_vec, tensor_options);
   forward_inputs.positions =
       torch::tensor(flatten_positions_vec, tensor_options);
-  forward_inputs.acc_logprob = torch::tensor(
+  forward_inputs.token_ids_host = forward_inputs.token_ids;
+  forward_inputs.positions_host = forward_inputs.positions;
+  forward_inputs.sampling_params.acc_logprob = torch::tensor(
       acc_logprob_vec,
       torch::dtype(torch::kFloat32).device(torch::kCPU).pinned_memory(true));
 
   auto& input_params = forward_inputs.input_params;
-  input_params.batch_forward_type =
+  input_params.meta.batch_forward_type =
       BatchForwardType(pb_forward_input->batch_forward_type());
-  input_params.num_sequences = block_tables_vec.size();
-  assert(input_params.num_sequences == pb_forward_input->num_sequences());
-  input_params.kv_max_seq_len = pb_forward_input->max_seq_len();
-  input_params.q_max_seq_len = pb_forward_input->q_max_seq_len();
-  input_params.kv_seq_lens = torch::tensor(seq_lens, tensor_options);
-  input_params.q_seq_lens = torch::tensor(q_seq_lens, tensor_options);
-  input_params.q_cu_seq_lens = torch::tensor(q_cu_seq_lens, tensor_options);
-  input_params.kv_cache_tokens_nums =
+  input_params.meta.num_sequences = block_tables_vec.size();
+  assert(input_params.meta.num_sequences == pb_forward_input->num_sequences());
+  input_params.meta.kv_max_seq_len = pb_forward_input->max_seq_len();
+  input_params.meta.q_max_seq_len = pb_forward_input->q_max_seq_len();
+  input_params.attention.device.kv_seq_lens =
+      torch::tensor(seq_lens, tensor_options);
+  input_params.attention.device.q_seq_lens =
+      torch::tensor(q_seq_lens, tensor_options);
+  input_params.attention.device.q_cu_seq_lens =
+      torch::tensor(q_cu_seq_lens, tensor_options);
+  input_params.attention.device.kv_cache_tokens_nums =
       torch::tensor(kv_cache_tokens_nums, tensor_options);
-  input_params.kv_cache_tokens_nums_host =
-      std::vector<int>(input_params.kv_cache_tokens_nums.data_ptr<int>(),
-                       input_params.kv_cache_tokens_nums.data_ptr<int>() +
-                           input_params.kv_cache_tokens_nums.numel());
-  input_params.kv_seq_lens_vec = std::move(seq_lens);
-  input_params.q_seq_lens_vec = std::move(q_seq_lens);
+  input_params.attention.host.kv_cache_tokens_nums = std::vector<int>(
+      input_params.attention.device.kv_cache_tokens_nums.data_ptr<int>(),
+      input_params.attention.device.kv_cache_tokens_nums.data_ptr<int>() +
+          input_params.attention.device.kv_cache_tokens_nums.numel());
+  input_params.attention.host.kv_seq_lens = std::move(seq_lens);
+  input_params.attention.host.q_cu_seq_lens = std::move(q_cu_seq_lens);
+  input_params.attention.host.q_seq_lens = std::move(q_seq_lens);
 
-  input_params.paged_kv_indptr = torch::tensor(paged_kv_indptr, tensor_options);
-  input_params.paged_kv_indices =
+  input_params.attention.device.paged_kv_indptr =
+      torch::tensor(paged_kv_indptr, tensor_options);
+  input_params.attention.device.paged_kv_indices =
       torch::tensor(paged_kv_indices, tensor_options);
-  input_params.paged_kv_last_page_len =
+  input_params.attention.device.paged_kv_last_page_len =
       torch::tensor(paged_kv_last_page_len, tensor_options);
 
-  input_params.new_cache_slots =
+  input_params.attention.device.new_cache_slots =
       torch::tensor(new_token_slot_ids, tensor_options);
 
   util::pad_2d_vector(block_tables_vec, /*pad_value=*/0);
-  input_params.block_tables =
+  input_params.attention.device.block_tables =
       std::move(create_2d_tensor(block_tables_vec, torch::kInt));
+  input_params.attention.host.block_tables =
+      input_params.attention.device.block_tables;
 
-  input_params.dp_global_token_nums = std::move(dp_global_token_nums);
-  input_params.dp_is_decode = std::move(dp_is_decode);
-  input_params.embedding_ids = std::move(embedding_ids);
-  input_params.linear_state_ids = std::move(linear_state_ids);
-  input_params.request_ids = std::move(request_ids);
-  input_params.extra_token_ids = std::move(extra_token_ids);
+  input_params.parallel.dp_global_token_nums = std::move(dp_global_token_nums);
+  input_params.parallel.dp_is_decode = std::move(dp_is_decode);
+  input_params.embedding.embedding_ids = std::move(embedding_ids);
+  input_params.embedding.linear_state_ids = std::move(linear_state_ids);
+  input_params.embedding.request_ids = std::move(request_ids);
+  input_params.embedding.extra_token_ids = std::move(extra_token_ids);
 
-  input_params.swap_blocks = std::move(swap_blocks);
+  input_params.block_copy.swap_blocks = std::move(swap_blocks);
   // block copy kernel
-  input_params.src_block_indices =
+  input_params.block_copy.src_block_indices =
       torch::tensor(src_block_indices, tensor_options);
-  input_params.dst_block_indices =
+  input_params.block_copy.dst_block_indices =
       torch::tensor(dst_block_indices, tensor_options);
-  input_params.cum_sum = torch::tensor(cum_sum, tensor_options);
+  input_params.block_copy.cum_sum = torch::tensor(cum_sum, tensor_options);
 
-  input_params.batch_id = pb_forward_input->batch_id();
+  input_params.meta.batch_id = pb_forward_input->batch_id();
 
   if (pb_forward_input->embeds().size() > 0) {
     const int32_t rows = pb_forward_input->embeds().size();
@@ -278,7 +290,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
     }
     torch::Tensor embeddings =
         create_2d_tensor(embeddings_vec, torch::kBFloat16);
-    input_params.input_embedding = embeddings;
+    input_params.embedding.input_embedding = embeddings;
   }
 
   CHECK_EQ(sampling_params.size(), selected_token_idxes.size());
@@ -374,7 +386,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
 
     forward_inputs.transfer_kv_infos.emplace_back(std::move(transfer_kv_info));
   }
-  auto& eplb_info = forward_inputs.eplb_info;
+  auto& eplb_info = forward_inputs.input_params.expert.eplb_info;
   eplb_info.prepare_layer_id = pb_forward_input->eplb_info().prepare_layer_id();
   eplb_info.expert_ids =
       std::vector<int32_t>(pb_forward_input->eplb_info().expert_ids().begin(),
@@ -382,7 +394,8 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   eplb_info.update_layer_id = pb_forward_input->eplb_info().update_layer_id();
 
   if (pb_forward_input->has_mm_data()) {
-    proto_to_mmdata(pb_forward_input->mm_data(), &input_params.mm_data);
+    proto_to_mmdata(pb_forward_input->mm_data(),
+                    &input_params.multimodal.mm_data);
   }
 
   if (pb_forward_input->has_dit_forward_input()) {
@@ -453,6 +466,8 @@ void forward_input_to_proto(const RawForwardInput& inputs,
                       inputs.kv_cache_tokens_nums);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_q_seq_lens(),
                       inputs.q_seq_lens);
+  CHECK_EQ(inputs.q_seq_lens.empty(), inputs.q_cu_seq_lens.empty())
+      << "q_seq_lens and q_cu_seq_lens must be provided together";
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_q_cu_seq_lens(),
                       inputs.q_cu_seq_lens);
   // for flashinfer

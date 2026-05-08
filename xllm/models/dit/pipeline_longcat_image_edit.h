@@ -811,19 +811,20 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
     }
 
     if (actual_seq_len > 0) {
-      params.q_max_seq_len = actual_seq_len;
-      params.kv_max_seq_len = actual_seq_len;
+      params.meta.q_max_seq_len = actual_seq_len;
+      params.meta.kv_max_seq_len = actual_seq_len;
       auto cu_seqlens =
           torch::tensor({0, static_cast<int>(actual_seq_len)}, torch::kInt)
               .to(tokens.device());
-      params.q_seq_lens = cu_seqlens;
-      params.kv_seq_lens = cu_seqlens;
-      params.batch_forward_type = BatchForwardType::PREFILL;
+      params.attention.device.q_seq_lens = cu_seqlens;
+      params.attention.device.kv_seq_lens = cu_seqlens;
+      params.meta.batch_forward_type = BatchForwardType::PREFILL;
     }
 
     // Set mm_data before get_input_embeddings
     if (mm_data_opt.has_value()) {
-      params.mm_data = MMBatchData::to(mm_data_opt.value(), options_.device());
+      params.multimodal.mm_data =
+          MMBatchData::to(mm_data_opt.value(), options_.device());
     }
 
     // Build attention metadata before get_input_embeddings
@@ -832,11 +833,10 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
         layer::AttentionMetadataBuilder::build(
             params, context_.get_model_args("text_encoder").enable_mla()));
     params.attn_metadata->is_causal = true;
-    params.input_embedding =
+    params.embedding.input_embedding =
         text_encoder_->get_input_embeddings(tokens, params);
     if (attention_mask.defined() && attention_mask.size(0) > 0) {
-      params.graph_buffer.attn_mask =
-          attention_mask.view({-1}).to(torch::kFloat32);
+      params.graph.attn_mask = attention_mask.view({-1}).to(torch::kFloat32);
     }
 
     return params;

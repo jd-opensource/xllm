@@ -42,6 +42,30 @@ limitations under the License.
 #include "util/utils.h"
 
 namespace xllm {
+namespace {
+
+std::vector<int32_t> build_q_cu_seq_lens_vec(
+    const std::vector<int32_t>& q_seq_lens) {
+  std::vector<int32_t> q_cu_seq_lens;
+  if (q_seq_lens.empty()) {
+    return q_cu_seq_lens;
+  }
+#if defined(USE_NPU)
+  q_cu_seq_lens.reserve(q_seq_lens.size());
+  int32_t cum_seq_len = 0;
+  for (int32_t q_len : q_seq_lens) {
+    cum_seq_len += q_len;
+    q_cu_seq_lens.emplace_back(cum_seq_len);
+  }
+#else
+  CHECK(q_seq_lens.front() == 0)
+      << "q_seq_lens must be cumulative with leading zero";
+  q_cu_seq_lens.assign(q_seq_lens.begin() + 1, q_seq_lens.end());
+#endif
+  return q_cu_seq_lens;
+}
+
+}  // namespace
 
 RecMultiRoundBatchInputBuilder::RecMultiRoundBatchInputBuilder(
     const std::vector<SequencesGroup*>& sequence_groups,
@@ -322,6 +346,7 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
   // Create tensors (same as BatchInputBuilder)
   forward_input.token_ids =
       torch::tensor(state.flatten_tokens_vec, torch::kInt);
+  forward_input.token_ids_host = forward_input.token_ids;
 
   if (!use_mrope_) {
     forward_input.positions =
@@ -329,51 +354,62 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
   } else {
     forward_input.positions = torch::cat(state.mrope_positions_vec, 1);
   }
+  forward_input.positions_host = forward_input.positions;
 
   auto& input_params = forward_input.input_params;
-  input_params.batch_forward_type = state.batch_forward_type;
-  input_params.num_sequences = state.block_tables_vec.size();
-  input_params.kv_max_seq_len = state.max_seq_len;
-  input_params.q_max_seq_len = state.q_max_seq_len;
-  input_params.kv_seq_lens = torch::tensor(state.seq_lens, torch::kInt);
-  input_params.q_seq_lens = torch::tensor(state.q_seq_lens, torch::kInt);
-  input_params.kv_seq_lens_vec = std::move(state.seq_lens);
-  input_params.q_seq_lens_vec = std::move(state.q_seq_lens);
-  input_params.new_cache_slots =
+  input_params.meta.batch_forward_type = state.batch_forward_type;
+  input_params.meta.num_sequences = state.block_tables_vec.size();
+  input_params.meta.kv_max_seq_len = state.max_seq_len;
+  input_params.meta.q_max_seq_len = state.q_max_seq_len;
+  input_params.attention.device.kv_seq_lens =
+      torch::tensor(state.seq_lens, torch::kInt);
+  input_params.attention.device.q_seq_lens =
+      torch::tensor(state.q_seq_lens, torch::kInt);
+  std::vector<int32_t> q_cu_seq_lens =
+      build_q_cu_seq_lens_vec(state.q_seq_lens);
+  input_params.attention.device.q_cu_seq_lens =
+      torch::tensor(q_cu_seq_lens, torch::kInt);
+  input_params.attention.host.kv_seq_lens = std::move(state.seq_lens);
+  input_params.attention.host.q_cu_seq_lens = std::move(q_cu_seq_lens);
+  input_params.attention.host.q_seq_lens = std::move(state.q_seq_lens);
+  input_params.attention.device.new_cache_slots =
       torch::tensor(state.new_token_slot_ids, torch::kInt);
 
   // for flashinfer
-  input_params.paged_kv_indptr =
+  input_params.attention.device.paged_kv_indptr =
       torch::tensor(state.paged_kv_indptr, torch::kInt);
-  input_params.paged_kv_indices =
+  input_params.attention.device.paged_kv_indices =
       torch::tensor(state.paged_kv_indices, torch::kInt);
-  input_params.paged_kv_last_page_len =
+  input_params.attention.device.paged_kv_last_page_len =
       torch::tensor(state.paged_kv_last_page_len, torch::kInt);
 
   // Setup multimodal data
-  input_params.mm_data.batch(mm_data_vec_);
+  input_params.multimodal.mm_data.batch(mm_data_vec_);
 
   // Setup block tables
   util::pad_2d_vector(state.block_tables_vec, /*pad_value=*/0);
-  input_params.block_tables =
+  input_params.attention.device.block_tables =
       create_2d_tensor(state.block_tables_vec, torch::kInt);
+  input_params.attention.host.block_tables =
+      input_params.attention.device.block_tables;
 
   if (input_embeddings_vec_.size() != 0) {
-    input_params.input_embedding = torch::cat(input_embeddings_vec_);
+    input_params.embedding.input_embedding = torch::cat(input_embeddings_vec_);
   }
-  input_params.embedding_ids = std::move(state.embedding_ids);
-  input_params.linear_state_ids = std::move(state.linear_state_ids);
-  if (!input_params.linear_state_ids.empty()) {
-    input_params.linear_state_indices =
-        torch::tensor(input_params.linear_state_ids, torch::kInt);
+  input_params.embedding.embedding_ids = std::move(state.embedding_ids);
+  input_params.embedding.linear_state_ids = std::move(state.linear_state_ids);
+  if (!input_params.embedding.linear_state_ids.empty()) {
+    input_params.embedding.linear_state_indices =
+        torch::tensor(input_params.embedding.linear_state_ids, torch::kInt);
   }
-  input_params.extra_token_ids = std::move(state.extra_token_ids);
+  input_params.embedding.extra_token_ids = std::move(state.extra_token_ids);
 
   if (swap_block_transfer_infos_ != nullptr &&
       swap_block_transfer_infos_->size() > 0) {
-    input_params.swap_blocks.insert(input_params.swap_blocks.end(),
-                                    swap_block_transfer_infos_->begin(),
-                                    swap_block_transfer_infos_->end());
+    input_params.block_copy.swap_blocks.insert(
+        input_params.block_copy.swap_blocks.end(),
+        swap_block_transfer_infos_->begin(),
+        swap_block_transfer_infos_->end());
   }
 
   CHECK_EQ(state.sampling_params.size(), state.selected_token_idxes.size());
@@ -449,7 +485,7 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
   }
 
   // Batch ID
-  input_params.batch_id = batch_id_;
+  input_params.meta.batch_id = batch_id_;
 
   return forward_input;
 }

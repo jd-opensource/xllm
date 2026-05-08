@@ -324,12 +324,12 @@ TEST(BatchTest, Basic) {
 
   // check the input parameters
   const ModelInputParams& input_params = forward_input.input_params;
-  EXPECT_TRUE(input_params.batch_forward_type.is_mixed());
-  EXPECT_EQ(input_params.num_sequences, 4);
-  EXPECT_EQ(input_params.q_max_seq_len, 9);
-  EXPECT_EQ(input_params.kv_max_seq_len, 16);
-  EXPECT_EQ(input_params.embedding_ids, std::vector<int32_t>({-1, -1, -1}));
-  EXPECT_EQ(input_params.linear_state_ids,
+  EXPECT_TRUE(input_params.meta.batch_forward_type.is_mixed());
+  EXPECT_EQ(input_params.meta.num_sequences, 4);
+  EXPECT_EQ(input_params.meta.q_max_seq_len, 9);
+  EXPECT_EQ(input_params.meta.kv_max_seq_len, 16);
+  EXPECT_EQ(input_params.embedding.embedding_ids, std::vector<int32_t>({-1, -1, -1}));
+  EXPECT_EQ(input_params.embedding.linear_state_ids,
             std::vector<int32_t>({-1, -1, -1, -1}));
 
 #if defined(USE_NPU)
@@ -337,7 +337,7 @@ TEST(BatchTest, Basic) {
 #else
   const std::vector<int32_t> q_seq_lens = {0, 9, 10, 11, 15};
 #endif
-  EXPECT_TRUE(equal(input_params.q_seq_lens, q_seq_lens));
+  EXPECT_TRUE(equal(input_params.attention.device.q_seq_lens, q_seq_lens));
 
 //  seq4's kv_seq_len = q_len + num_cached_tokens (q_len<=max_allowed_tokens)
 #if defined(USE_NPU)
@@ -345,7 +345,7 @@ TEST(BatchTest, Basic) {
 #else
   const std::vector<int32_t> kv_seq_lens = {0, 9, 17, 33, 41};
 #endif
-  EXPECT_TRUE(equal(input_params.kv_seq_lens, kv_seq_lens));
+  EXPECT_TRUE(equal(input_params.attention.device.kv_seq_lens, kv_seq_lens));
 
   const std::vector<int32_t> new_cache_slots = {
     /*seq1*/ 4, 5, 6, 7, 8, 9, 10, 11, 12, 
@@ -353,14 +353,14 @@ TEST(BatchTest, Basic) {
     /*seq3*/ 47,
     /*seq4*/ 56,57,58,59
     };
-  EXPECT_TRUE(equal(input_params.new_cache_slots, new_cache_slots));
+  EXPECT_TRUE(equal(input_params.attention.device.new_cache_slots, new_cache_slots));
 
   const std::vector<int32_t> block_tables = {
     /*seq1*/ 1, 2, 3,  0,  0,
     /*seq2*/ 4, 5, 6,  7,  0,
     /*seq3*/ 8, 9, 10, 11, 12,
     /*seq4*/ 13, 14, 15, 0, 0};
-  EXPECT_TRUE(equal(input_params.block_tables, block_tables));
+  EXPECT_TRUE(equal(input_params.attention.device.block_tables, block_tables));
 
   // const std::vector<int32_t> last_token_idxes = {8, 9, 10};
   // EXPECT_TRUE(equal(input_params.last_token_idxes, last_token_idxes));
@@ -686,10 +686,10 @@ TEST(BatchTest, DecodeMinBatchSizeDoesNotPadTransportState) {
       builder.build_forward_input(/*num_decoding_tokens=*/1,
                                   /*min_decoding_batch_size=*/3);
 
-  EXPECT_EQ(forward_input.input_params.num_sequences, 1);
-  EXPECT_EQ(forward_input.input_params.linear_state_ids,
+  EXPECT_EQ(forward_input.input_params.meta.num_sequences, 1);
+  EXPECT_EQ(forward_input.input_params.embedding.linear_state_ids,
             std::vector<int32_t>({-1}));
-  EXPECT_EQ(forward_input.input_params.embedding_ids,
+  EXPECT_EQ(forward_input.input_params.embedding.embedding_ids,
             std::vector<int32_t>({-1}));
 }
 
@@ -745,10 +745,12 @@ TEST(BatchTest, DecodeSingleBlockIdsStaySplitInTransportButShareSlotValue) {
       builder.build_forward_input(/*num_decoding_tokens=*/1,
                                   /*min_decoding_batch_size=*/0);
 
-  ASSERT_EQ(forward_input.input_params.embedding_ids.size(), 1u);
-  ASSERT_EQ(forward_input.input_params.linear_state_ids.size(), 1u);
-  EXPECT_EQ(forward_input.input_params.embedding_ids[0], expected_slot_id);
-  EXPECT_EQ(forward_input.input_params.linear_state_ids[0], expected_slot_id);
+  ASSERT_EQ(forward_input.input_params.embedding.embedding_ids.size(), 1u);
+  ASSERT_EQ(forward_input.input_params.embedding.linear_state_ids.size(), 1u);
+  EXPECT_EQ(forward_input.input_params.embedding.embedding_ids[0],
+            expected_slot_id);
+  EXPECT_EQ(forward_input.input_params.embedding.linear_state_ids[0],
+            expected_slot_id);
 }
 
 TEST(BatchTest, ProtoRoundTripPreservesAndDefaultsLinearStateIds) {
@@ -760,6 +762,7 @@ TEST(BatchTest, ProtoRoundTripPreservesAndDefaultsLinearStateIds) {
   raw_input.q_max_seq_len = 1;
   raw_input.seq_lens = {1, 1};
   raw_input.q_seq_lens = {1, 1};
+  raw_input.q_cu_seq_lens = {1, 2};
   raw_input.kv_cache_tokens_nums = {0, 0};
   raw_input.new_token_slot_ids = {0, 0};
   raw_input.block_tables_vec = {{0}, {0}};
@@ -773,7 +776,7 @@ TEST(BatchTest, ProtoRoundTripPreservesAndDefaultsLinearStateIds) {
   proto_to_forward_input(&pb_forward_input,
                          round_trip,
                          /*num_decoding_tokens=*/1);
-  EXPECT_EQ(round_trip.input_params.linear_state_ids,
+  EXPECT_EQ(round_trip.input_params.embedding.linear_state_ids,
             std::vector<int32_t>({7, 9}));
 
   proto::ForwardInput legacy_pb = pb_forward_input;
@@ -783,7 +786,7 @@ TEST(BatchTest, ProtoRoundTripPreservesAndDefaultsLinearStateIds) {
   proto_to_forward_input(&legacy_pb,
                          legacy_round_trip,
                          /*num_decoding_tokens=*/1);
-  EXPECT_EQ(legacy_round_trip.input_params.linear_state_ids,
+  EXPECT_EQ(legacy_round_trip.input_params.embedding.linear_state_ids,
             std::vector<int32_t>({-1, -1}));
 }
 
@@ -796,6 +799,7 @@ TEST(BatchTest, SharedMemoryRoundTripPreservesAndDefaultsLinearStateIds) {
   raw_input.q_max_seq_len = 1;
   raw_input.seq_lens = {1, 1};
   raw_input.q_seq_lens = {1, 1};
+  raw_input.q_cu_seq_lens = {1, 2};
   raw_input.kv_cache_tokens_nums = {0, 0};
   raw_input.new_token_slot_ids = {0, 0};
   raw_input.block_tables_vec = {{0}, {0}};
@@ -817,7 +821,7 @@ TEST(BatchTest, SharedMemoryRoundTripPreservesAndDefaultsLinearStateIds) {
 
   ForwardInput from_shm;
   reader_manager.raw_input_read(from_shm, torch::Device(torch::kCPU));
-  EXPECT_EQ(from_shm.input_params.linear_state_ids,
+  EXPECT_EQ(from_shm.input_params.embedding.linear_state_ids,
             std::vector<int32_t>({4, 6}));
 
   raw_input.linear_state_ids.clear();
@@ -825,7 +829,7 @@ TEST(BatchTest, SharedMemoryRoundTripPreservesAndDefaultsLinearStateIds) {
 
   ForwardInput legacy_from_shm;
   reader_manager.raw_input_read(legacy_from_shm, torch::Device(torch::kCPU));
-  EXPECT_EQ(legacy_from_shm.input_params.linear_state_ids,
+  EXPECT_EQ(legacy_from_shm.input_params.embedding.linear_state_ids,
             std::vector<int32_t>({-1, -1}));
 }
 

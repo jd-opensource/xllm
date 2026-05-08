@@ -120,22 +120,24 @@ class ScopedAtenLoadThreads {
 
 #if defined(USE_NPU)
 void prepare_input_params_for_linear_attention(ModelInputParams& input_params) {
-  int64_t batch_size = input_params.block_tables.size(0);
-  input_params.query_start_loc.resize(batch_size + 1, 0);
+  int64_t batch_size = input_params.attention.device.block_tables.size(0);
+  input_params.parallel.query_start_loc.resize(batch_size + 1, 0);
   int64_t max_seq_len = 0;
   for (int64_t i = 0; i < batch_size; ++i) {
-    int64_t seq_len = static_cast<int64_t>(input_params.q_seq_lens_vec[i]);
+    int64_t seq_len =
+        static_cast<int64_t>(input_params.attention.host.q_seq_lens[i]);
     max_seq_len = std::max(max_seq_len, seq_len);
   }
 
   for (int64_t i = 0; i < batch_size; ++i) {
-    input_params.query_start_loc[i + 1] = max_seq_len * (i + 1);
+    input_params.parallel.query_start_loc[i + 1] = max_seq_len * (i + 1);
   }
 
-  torch::Tensor has_initial_state_tensor = input_params.kv_seq_lens > 0;
+  torch::Tensor has_initial_state_tensor =
+      input_params.attention.device.kv_seq_lens > 0;
   torch::Tensor has_initial_state_int64 =
       has_initial_state_tensor.contiguous().to(torch::kCPU).to(torch::kInt64);
-  input_params.has_initial_state =
+  input_params.parallel.has_initial_state =
       std::vector<int64_t>(has_initial_state_int64.data_ptr<int64_t>(),
                            has_initial_state_int64.data_ptr<int64_t>() +
                                has_initial_state_int64.size(0));
@@ -472,12 +474,13 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 #if defined(USE_NPU)
     CpPrefillInputs tmp_cp_inputs;
     if (parallel_args_.cp_size() > 1 &&
-        input.input_params.batch_forward_type.is_prefill()) {
-      tmp_cp_inputs = prepare_cp_prefill_inputs(parallel_args_.cp_size(),
-                                                input.token_ids,
-                                                input.positions,
-                                                input.input_params.q_seq_lens);
-      processed_input.input_params.cp_prefill_inputs =
+        input.input_params.meta.batch_forward_type.is_prefill()) {
+      tmp_cp_inputs = prepare_cp_prefill_inputs(
+          parallel_args_.cp_size(),
+          input.token_ids,
+          input.positions,
+          input.input_params.attention.device.q_seq_lens);
+      processed_input.input_params.parallel.cp_prefill_inputs =
           tmp_cp_inputs.to(device_);
       CpEpPadding cp_ep_padding(
           input.token_ids,
@@ -485,8 +488,10 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
           context_.get_parallel_args().mapping_data(),
           /*device=*/device_,
           dtype_,
-          /*is_prefill=*/input.input_params.batch_forward_type.is_prefill());
-      processed_input.input_params.cp_ep_padding_data = cp_ep_padding.build();
+          /*is_prefill=*/
+          input.input_params.meta.batch_forward_type.is_prefill());
+      processed_input.input_params.parallel.cp_ep_padding_data =
+          cp_ep_padding.build();
     }
 #endif
 
@@ -494,7 +499,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 
 #if defined(USE_NPU)
     if (context_.get_model_args().enable_mla() &&
-        input_params.batch_forward_type.is_chunked_prefill()) {
+        input_params.meta.batch_forward_type.is_chunked_prefill()) {
       prepare_mla_prefixcache_inputs(input_params);
     }
 
@@ -502,24 +507,26 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
         !(context_.get_parallel_args().cp_size() > 1) &&
         (context_.get_parallel_args().dp_size() > 1 ||
          context_.get_parallel_args().ep_size() > 1)) {
-      torch::Tensor token_size_per_dp_group =
-          torch::tensor(processed_input.input_params.dp_global_token_nums,
-                        torch::TensorOptions()
-                            .device(torch::kCPU)
-                            .dtype(torch::kInt32)
-                            .pinned_memory(true));
+      torch::Tensor token_size_per_dp_group = torch::tensor(
+          processed_input.input_params.parallel.dp_global_token_nums,
+          torch::TensorOptions()
+              .device(torch::kCPU)
+              .dtype(torch::kInt32)
+              .pinned_memory(true));
       bool is_prefill =
-          processed_input.input_params.batch_forward_type.is_prefill();
+          processed_input.input_params.meta.batch_forward_type.is_prefill();
       DpEpPadding dp_ep_padding(token_size_per_dp_group,
                                 context_.get_model_args().num_experts_per_tok(),
                                 context_.get_parallel_args().mapping_data(),
                                 device_,
                                 dtype_,
                                 is_prefill);
-      processed_input.input_params.dp_ep_padding_data = dp_ep_padding.build();
+      processed_input.input_params.parallel.dp_ep_padding_data =
+          dp_ep_padding.build();
       if (FLAGS_enable_eplb) {
         // expert_load_data_.fill_(0);
-        processed_input.input_params.expert_load_data = expert_load_data_;
+        processed_input.input_params.expert.expert_load_data =
+            expert_load_data_;
       }
     }
 
@@ -551,11 +558,12 @@ void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
 #endif
 
 #if defined(USE_NPU)
-  if (input_params.swap_blocks.size() == 0 || FLAGS_enable_block_copy_kernel) {
+  if (input_params.block_copy.swap_blocks.size() == 0 ||
+      FLAGS_enable_block_copy_kernel) {
     return;
   }
 #elif defined(USE_CUDA)
-  if (input_params.swap_blocks.size() == 0) {
+  if (input_params.block_copy.swap_blocks.size() == 0) {
     return;
   }
 #else
@@ -564,10 +572,10 @@ void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
 
 #if defined(USE_NPU) || defined(USE_CUDA)
   std::vector<int64_t> src_indices, dst_indices;
-  src_indices.reserve(input_params.swap_blocks.size());
-  dst_indices.reserve(input_params.swap_blocks.size());
+  src_indices.reserve(input_params.block_copy.swap_blocks.size());
+  dst_indices.reserve(input_params.block_copy.swap_blocks.size());
 
-  for (const auto& block : input_params.swap_blocks) {
+  for (const auto& block : input_params.block_copy.swap_blocks) {
     src_indices.push_back(block.src_block_id);
     dst_indices.push_back(block.dst_block_id);
   }
@@ -638,12 +646,12 @@ void WorkerImpl::refresh_cuda_block_copy_runtime_state() {
 bool WorkerImpl::can_use_cuda_block_copy_kernel(
     const ModelInputParams& input_params) const {
   return cuda_block_copy_runtime_state_.valid() &&
-         input_params.src_block_indices.defined() &&
-         input_params.dst_block_indices.defined() &&
-         input_params.cum_sum.defined() &&
-         input_params.src_block_indices.numel() > 0 &&
-         input_params.dst_block_indices.numel() > 0 &&
-         input_params.cum_sum.numel() > 0;
+         input_params.block_copy.src_block_indices.defined() &&
+         input_params.block_copy.dst_block_indices.defined() &&
+         input_params.block_copy.cum_sum.defined() &&
+         input_params.block_copy.src_block_indices.numel() > 0 &&
+         input_params.block_copy.dst_block_indices.numel() > 0 &&
+         input_params.block_copy.cum_sum.numel() > 0;
 }
 
 void WorkerImpl::execute_cuda_block_copy_kernel(
@@ -652,9 +660,9 @@ void WorkerImpl::execute_cuda_block_copy_kernel(
   xllm::kernel::cuda::block_copy(
       cuda_block_copy_runtime_state_.k_cache_ptrs_device,
       cuda_block_copy_runtime_state_.v_cache_ptrs_device,
-      input_params.src_block_indices,
-      input_params.dst_block_indices,
-      input_params.cum_sum,
+      input_params.block_copy.src_block_indices,
+      input_params.block_copy.dst_block_indices,
+      input_params.block_copy.cum_sum,
       cuda_block_copy_runtime_state_.numel_per_block,
       kv_caches_.front().get_k_cache().scalar_type());
 }
@@ -681,7 +689,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
       promise.setValue(output);
     } else {
       if (last_step_output_valid_ && input.token_ids.numel() > 0 &&
-          input.input_params.batch_forward_type.has_decode()) {
+          input.input_params.meta.batch_forward_type.has_decode()) {
         // replace step i model input with true output of step i-1
         input = update_input_by_last_step_output(input);
       }
@@ -1142,35 +1150,38 @@ void WorkerImpl::init_hierarchy_kv_cache_transfer() {
 }
 void WorkerImpl::prepare_mla_prefixcache_inputs(
     ModelInputParams& input_params) {
-  int32_t sum_prefix = input_params.kv_cache_tokens_nums.sum().item<int>();
-  input_params.history_compressed_kv =
+  int32_t sum_prefix =
+      input_params.attention.device.kv_cache_tokens_nums.sum().item<int>();
+  input_params.attention.device.history_compressed_kv =
       torch::empty({sum_prefix, context_.get_model_args().kv_lora_rank()},
                    torch::TensorOptions().dtype(dtype_).pinned_memory(true))
           .to(device_);
 
-  input_params.history_k_rope =
+  input_params.attention.device.history_k_rope =
       torch::empty({sum_prefix, context_.get_model_args().qk_rope_head_dim()},
                    torch::TensorOptions().dtype(dtype_).pinned_memory(true))
           .to(device_);
   ;
 
-  input_params.ring_cur_seqlen =
-      torch::stack({input_params.q_seq_lens, input_params.q_seq_lens})
+  input_params.attention.device.ring_cur_seqlen =
+      torch::stack({input_params.attention.device.q_seq_lens,
+                    input_params.attention.device.q_seq_lens})
           .to(device_);
 
-  input_params.ring_cache_seqlen =
-      torch::stack({input_params.q_seq_lens,
-                    input_params.kv_cache_tokens_nums.to(device_)})
+  input_params.attention.device.ring_cache_seqlen =
+      torch::stack(
+          {input_params.attention.device.q_seq_lens,
+           input_params.attention.device.kv_cache_tokens_nums.to(device_)})
           .to(device_);
 
   torch::Tensor ring_cur_seqlen_host =
-      input_params.ring_cur_seqlen.cpu().contiguous();
+      input_params.attention.device.ring_cur_seqlen.cpu().contiguous();
   torch::Tensor ring_cache_seqlen_host =
-      input_params.ring_cache_seqlen.cpu().contiguous();
-  input_params.ring_cur_seqlen_host = std::vector<int>(
+      input_params.attention.device.ring_cache_seqlen.cpu().contiguous();
+  input_params.attention.host.ring_cur_seqlen = std::vector<int>(
       ring_cur_seqlen_host.data_ptr<int>(),
       ring_cur_seqlen_host.data_ptr<int>() + ring_cur_seqlen_host.numel());
-  input_params.ring_cache_seqlen_host = std::vector<int>(
+  input_params.attention.host.ring_cache_seqlen = std::vector<int>(
       ring_cache_seqlen_host.data_ptr<int>(),
       ring_cache_seqlen_host.data_ptr<int>() + ring_cache_seqlen_host.numel());
 }

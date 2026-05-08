@@ -188,8 +188,10 @@ void SamplingParameters::concat(const SamplingParameters& param) {
   this->unique_token_ids_lens =
       safe_concat(this->unique_token_ids_lens, param.unique_token_ids_lens, 0);
   this->do_sample = safe_concat(this->do_sample, param.do_sample, 0);
+  this->acc_logprob = safe_concat(this->acc_logprob, param.acc_logprob, 0);
   this->logprobs = this->logprobs || param.logprobs;
   this->is_embeddings = this->is_embeddings || param.is_embeddings;
+  this->use_beam_search = this->use_beam_search || param.use_beam_search;
   this->max_top_logprobs =
       std::max(this->max_top_logprobs, param.max_top_logprobs);
   this->num_return_sequences =

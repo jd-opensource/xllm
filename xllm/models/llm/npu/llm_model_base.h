@@ -66,12 +66,12 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
                                 ModelInputParams& input_params,
                                 aclrtEvent* event,
                                 std::atomic<bool>* event_flag) {
-    if (input_params.src_block_indices.numel() > 0) {
+    if (input_params.block_copy.src_block_indices.numel() > 0) {
       block_copy_(kv_cache.get_k_cache(),
                   kv_cache.get_v_cache(),
-                  input_params.src_block_indices,
-                  input_params.dst_block_indices,
-                  input_params.cum_sum,
+                  input_params.block_copy.src_block_indices,
+                  input_params.block_copy.dst_block_indices,
+                  input_params.block_copy.cum_sum,
                   0);
     }
 
@@ -153,7 +153,7 @@ class LlmModelImplBase : public torch::nn::Module {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
       positions = torch::tensor({0}).to(torch::kInt32).to(tokens.device());
     }
-    auto inputs_embeds = input_params.input_embedding;
+    auto inputs_embeds = input_params.embedding.input_embedding;
     // test
     torch::Tensor h;
     if (inputs_embeds.defined()) {
@@ -191,26 +191,27 @@ class LlmModelImplBase : public torch::nn::Module {
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
     torch::Tensor attn_mask;
-    max_seq_len_ = FLAGS_enable_chunked_prefill
-                       ? std::max(input_params.kv_max_seq_len, max_seq_len_)
-                       : 128;
+    max_seq_len_ =
+        FLAGS_enable_chunked_prefill
+            ? std::max(input_params.meta.kv_max_seq_len, max_seq_len_)
+            : 128;
     if (model_type_ == "qwen2") {
       attn_mask = attn_mask_.get_attn_mask(
           max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
     } else {
       if (FLAGS_enable_chunked_prefill) {
-        int num_sequences = input_params.num_sequences;
+        int num_sequences = input_params.meta.num_sequences;
         if (num_sequences > 0) {
           std::vector<torch::Tensor> req_mask_vec;
           req_mask_vec.reserve(num_sequences);
 
           for (int j = 0; j < num_sequences; j++) {
-            auto mask =
-                attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                           input_params.kv_seq_lens_vec[j],
-                                           max_seq_len_,
-                                           cos_pos.dtype().toScalarType(),
-                                           cos_pos.device());
+            auto mask = attn_mask_.gen_append_mask(
+                input_params.attention.host.q_seq_lens[j],
+                input_params.attention.host.kv_seq_lens[j],
+                max_seq_len_,
+                cos_pos.dtype().toScalarType(),
+                cos_pos.device());
             req_mask_vec.emplace_back(mask);
           }
           attn_mask = torch::cat(req_mask_vec, 0);
@@ -226,9 +227,10 @@ class LlmModelImplBase : public torch::nn::Module {
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
-      if (input_params.layer_synchronizer != nullptr) {
-        event = input_params.layer_synchronizer->get_event(i);
-        event_flag = input_params.layer_synchronizer->get_event_flag(i);
+      if (input_params.parallel.layer_synchronizer != nullptr) {
+        event = input_params.parallel.layer_synchronizer->get_event(i);
+        event_flag =
+            input_params.parallel.layer_synchronizer->get_event_flag(i);
       }
       if (!input_params.synchronize_layer(i)) {
         return ModelOutput();

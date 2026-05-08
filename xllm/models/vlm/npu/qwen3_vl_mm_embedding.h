@@ -52,7 +52,7 @@ class Qwen3_VLForMMEmbeddingImpl : public torch::nn::Module {
 
   MMDict encode(const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
-    const auto& mm_data = input_params.mm_data;
+    const auto& mm_data = input_params.multimodal.mm_data;
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
       pixel_values = res.value();
@@ -70,7 +70,7 @@ class Qwen3_VLForMMEmbeddingImpl : public torch::nn::Module {
         visual_(image_inputs->pixel_values.to(options_),
                 image_inputs->image_grid_thw,
                 input_params);
-    input_params.deep_stacks = deep_stacks;
+    input_params.multimodal.deep_stacks = deep_stacks;
 
     std::vector<int> image_sizes = get_images_size(image_grid_thw);
 

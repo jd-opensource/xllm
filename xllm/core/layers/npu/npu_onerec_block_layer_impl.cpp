@@ -67,7 +67,7 @@ int64_t ResolveOneRecBatchSize(const ModelInputParams& input_params) {
   if (onerec_params != nullptr && onerec_params->bs > 0) {
     return onerec_params->bs;
   }
-  return std::max<int64_t>(input_params.num_sequences, 1);
+  return std::max<int64_t>(input_params.meta.num_sequences, 1);
 }
 
 torch::Tensor NormalizeOneRecDecodeFasMask(torch::Tensor attn_mask,
@@ -1634,11 +1634,11 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
       v_cache.defined() ? atb_speed::Utils::AtTensor2Tensor(v_cache)
                         : placeholder_;
 
-  if (input_params.kv_seq_lens.defined()) {
-    node.variantPack.inTensors.at(idx) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.kv_seq_lens);
+  if (input_params.attention.device.kv_seq_lens.defined()) {
+    node.variantPack.inTensors.at(idx) = atb_speed::Utils::AtTensor2Tensor(
+        input_params.attention.device.kv_seq_lens);
     node.variantPack.inTensors.at(idx).hostData =
-        input_params.kv_seq_lens_vec.data();
+        input_params.attention.host.kv_seq_lens.data();
   } else {
     int32_t seq_len = std::max(static_cast<int32_t>(x.size(0)), 1);
     seq_lens_vec_ = {seq_len};
@@ -1662,9 +1662,10 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
   // Align with xllm_rec T5 prefill-only path: self-attn block tables are not
   // consumed during decoder prefill-only execution, so do not forward the
   // runtime empty [bs, 0] tensor to ATB.
-  if (!param.enableOneRecPrefillOnly && input_params.block_tables.defined()) {
-    node.variantPack.inTensors.at(idx) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.block_tables);
+  if (!param.enableOneRecPrefillOnly &&
+      input_params.attention.device.block_tables.defined()) {
+    node.variantPack.inTensors.at(idx) = atb_speed::Utils::AtTensor2Tensor(
+        input_params.attention.device.block_tables);
   } else {
     node.variantPack.inTensors.at(idx) = placeholder_;
     node.variantPack.inTensors.at(idx).hostData = placeholder_vec_.data();
@@ -1672,9 +1673,9 @@ int32_t NpuOneRecBlockLayerImpl::setup_common_decoder_tensors(
   idx++;
 
   if (!param.enableOneRecPrefillOnly &&
-      input_params.new_cache_slots.defined()) {
-    node.variantPack.inTensors.at(idx) =
-        atb_speed::Utils::AtTensor2Tensor(input_params.new_cache_slots);
+      input_params.attention.device.new_cache_slots.defined()) {
+    node.variantPack.inTensors.at(idx) = atb_speed::Utils::AtTensor2Tensor(
+        input_params.attention.device.new_cache_slots);
   } else {
     node.variantPack.inTensors.at(idx) = placeholder_;
     node.variantPack.inTensors.at(idx).hostData = placeholder_vec_.data();

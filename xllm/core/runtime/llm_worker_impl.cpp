@@ -115,8 +115,8 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
             context_.get_model_args().n_layers());
 #endif
 #if defined(USE_NPU) || defined(USE_MLU)
-    const_cast<ModelInputParams*>(&(input.input_params))->layer_synchronizer =
-        layer_synchronizer;
+    const_cast<ModelInputParams*>(&(input.input_params))
+        ->parallel.layer_synchronizer = layer_synchronizer;
 
     futures.emplace_back(
         kv_cache_transfer_->push_kv_blocks_async(input.transfer_kv_infos,
@@ -127,7 +127,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   }
 
   if (FLAGS_enable_eplb) {
-    eplb_executor_->eplb_execute(input.eplb_info);
+    eplb_executor_->eplb_execute(input.input_params.expert.eplb_info);
   }
 
   // call model executor forward to get hidden states
@@ -187,10 +187,11 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
 
       // beam search kernel
       BeamSearchOutput beam_search_output;
-      if (sampling_params.use_beam_search && input.acc_logprob.defined() &&
-          input.acc_logprob.numel() > 0) {
+      if (sampling_params.use_beam_search &&
+          sampling_params.acc_logprob.defined() &&
+          sampling_params.acc_logprob.numel() > 0) {
         beam_search_output =
-            beam_searcher_->forward(input.acc_logprob,
+            beam_searcher_->forward(sampling_params.acc_logprob,
                                     sample_output.top_tokens,
                                     sample_output.top_logprobs);
       }
@@ -209,7 +210,8 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     } else {
       embeddings = model_output.hidden_states;
     }
-    if (!input.input_params.batch_forward_type.is_decode() && !is_spec_draft_) {
+    if (!input.input_params.meta.batch_forward_type.is_decode() &&
+        !is_spec_draft_) {
       output.sample_output.embeddings = embeddings;
     } else if (sampling_params.selected_token_idxes.defined()) {
       output.sample_output.embeddings = embeddings.index_select(

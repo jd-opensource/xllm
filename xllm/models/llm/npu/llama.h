@@ -151,9 +151,11 @@ class LlamaModelImpl : public torch::nn::Module {
     auto sin_pos = sin_pos_.index_select(0, positions);
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
-    // torch::Tensor max_of_seq = torch::max(input_params.kv_seq_lens);
-    // max_seq_len_ = std::max(max_of_seq.item<int>(), max_seq_len_);
-    torch::Tensor max_of_seq = torch::max(input_params.kv_seq_lens);
+    // torch::Tensor max_of_seq =
+    // torch::max(input_params.attention.device.kv_seq_lens); max_seq_len_ =
+    // std::max(max_of_seq.item<int>(), max_seq_len_);
+    torch::Tensor max_of_seq =
+        torch::max(input_params.attention.device.kv_seq_lens);
     max_seq_len_ = FLAGS_enable_chunked_prefill
                        ? std::max(max_of_seq.item<int>(), max_seq_len_)
                        : 128;
@@ -161,14 +163,14 @@ class LlamaModelImpl : public torch::nn::Module {
         max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
     if (FLAGS_enable_chunked_prefill) {
-      int batch_size = input_params.q_seq_lens_vec.size();
+      int batch_size = input_params.attention.host.q_seq_lens.size();
       std::vector<torch::Tensor> req_mask_vec;
       req_mask_vec.reserve(batch_size);
 
       for (int i = 0; i < batch_size; i++) {
-        int start =
-            input_params.kv_seq_lens_vec[i] - input_params.q_seq_lens_vec[i];
-        int end = input_params.kv_seq_lens_vec[i];
+        int start = input_params.attention.host.kv_seq_lens[i] -
+                    input_params.attention.host.q_seq_lens[i];
+        int end = input_params.attention.host.kv_seq_lens[i];
 
         auto req_mask_slice = attn_mask.slice(0, start, end);
         req_mask_vec.emplace_back(req_mask_slice);

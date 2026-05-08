@@ -85,6 +85,7 @@ inline bool is_aligned_for_cuda_zero_copy(const void* ptr) {
 
 struct RawInputLayoutHeader final {
   uint64_t descriptor_bytes = 0;
+  uint64_t tensor_arena_offset = 0;
   uint64_t tensor_arena_bytes = 0;
 };
 
@@ -272,6 +273,7 @@ size_t get_sampling_params_size(const SamplingParameters& params) {
   total += get_tensor_size(params.unique_token_ids_lens);
   total += get_tensor_size(params.sample_idxes);
   total += get_tensor_size(params.do_sample);
+  total += get_tensor_size(params.acc_logprob);
   total += type_size<bool> * 5    // all_random_sample + all_greedy_sample +
                                   // logprobs + is_embeddings + use_beam_search
            + type_size<int64_t>   // max_top_logprobs
@@ -1253,6 +1255,12 @@ inline torch::Tensor materialize_tensor_from_current_cursor(
   CHECK_EQ(err, cudaSuccess)
       << "CUDA device buffer copy failed: " << cudaGetErrorString(err);
   return tensor;
+#elif defined(USE_MLU)
+  if (session.owner_buffer.defined()) {
+    return get_tensor_from_blob(
+        meta.shape, meta.dtype, device_buffer, session.owner_buffer);
+  }
+  return get_tensor_from_blob(meta.shape, meta.dtype, device_buffer);
 #else
   LOG(FATAL) << "Unsupported device buffer backend";
 #endif
@@ -1278,6 +1286,32 @@ inline void read_tensor(ReadContext& context,
             .dtype(meta.dtype)
             .device(torch::kCPU)
             .pinned_memory(true));
+  }
+  advance_tensor_cursors(context,
+                         get_aligned_tensor_arena_bytes(meta.data_bytes));
+}
+
+inline void read_tensor_and_host(ReadContext& context,
+                                 torch::Tensor& tensor,
+                                 torch::Tensor& host_tensor,
+                                 Stream* stream = nullptr) {
+  const TensorMeta meta = read_tensor_meta(context);
+  if (meta.shape.empty()) {
+    return;
+  }
+
+  host_tensor = torch::from_blob(
+      const_cast<void*>(static_cast<const void*>(context.tensor_cursor)),
+      meta.shape,
+      torch::TensorOptions()
+          .dtype(meta.dtype)
+          .device(torch::kCPU)
+          .pinned_memory(true));
+  if (has_device_buffer(context)) {
+    tensor = materialize_tensor_from_current_cursor(
+        meta, *context.device_session, stream);
+  } else {
+    tensor = host_tensor;
   }
   advance_tensor_cursors(context,
                          get_aligned_tensor_arena_bytes(meta.data_bytes));
@@ -1894,14 +1928,17 @@ inline void read_dit_forward_output(const char*& buffer,
 inline void initialize_device_buffer_session(ReadContext& context,
                                              ForwardInput& forward_input,
                                              const torch::Device& device,
-                                             const uint64_t buffer_size,
-                                             Stream* stream) {
+                                             const char* payload_base,
+                                             const uint64_t payload_size,
+                                             const uint64_t tensor_arena_offset,
+                                             Stream* stream,
+                                             bool materialize_device_buffer) {
   if (context.device_session == nullptr) {
     return;
   }
 
-#if defined(USE_NPU) || defined(USE_CUDA)
-  if (!FLAGS_use_contiguous_input_buffer) {
+#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU)
+  if (!materialize_device_buffer || !FLAGS_use_contiguous_input_buffer) {
     return;
   }
 
@@ -1909,12 +1946,16 @@ inline void initialize_device_buffer_session(ReadContext& context,
   if (device.type() != torch::kCUDA) {
     return;
   }
+#elif defined(USE_MLU)
+  if (device.type() != torch::kPrivateUse1) {
+    return;
+  }
 #endif
 
   auto& session = *context.device_session;
   torch::Tensor host_input_buffer =
-      torch::from_blob(const_cast<char*>(context.tensor_cursor),
-                       {static_cast<int64_t>(buffer_size)},
+      torch::from_blob(const_cast<char*>(payload_base),
+                       {static_cast<int64_t>(payload_size)},
                        torch::TensorOptions()
                            .dtype(torch::kUInt8)
                            .device(torch::kCPU)
@@ -1946,21 +1987,25 @@ inline void initialize_device_buffer_session(ReadContext& context,
 
   session.owner_buffer = forward_input.device_input_buffer;
   session.device_cursor =
-      static_cast<const char*>(forward_input.device_input_buffer.data_ptr());
+      static_cast<const char*>(forward_input.device_input_buffer.data_ptr()) +
+      tensor_arena_offset;
   session.active = session.device_cursor != nullptr;
   session.need_finalize_sync = session.active && stream != nullptr;
 #else
   (void)context;
   (void)forward_input;
   (void)device;
-  (void)buffer_size;
+  (void)payload_base;
+  (void)payload_size;
+  (void)tensor_arena_offset;
   (void)stream;
+  (void)materialize_device_buffer;
 #endif
 }
 
 inline void finalize_device_buffer_session(DeviceBufferSession& session,
                                            Stream* stream) {
-#if defined(USE_NPU) || defined(USE_CUDA)
+#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU)
   if (session.need_finalize_sync && stream != nullptr) {
     stream->synchronize();
   }
@@ -1970,77 +2015,95 @@ inline void finalize_device_buffer_session(DeviceBufferSession& session,
 #endif
 }
 
-inline void deserialize_raw_forward_input(const char*& buffer,
-                                          const uint64_t buffer_size,
-                                          ForwardInput& forward_input,
-                                          const torch::Device& device,
-                                          Stream* stream) {
+inline void deserialize_raw_forward_input(
+    const char*& buffer,
+    const uint64_t buffer_size,
+    ForwardInput& forward_input,
+    const torch::Device& device,
+    Stream* stream,
+    bool materialize_device_buffer = true) {
+  const char* payload_base = buffer;
   RawInputLayoutHeader layout;
   read_data(buffer, layout.descriptor_bytes);
+  read_data(buffer, layout.tensor_arena_offset);
   read_data(buffer, layout.tensor_arena_bytes);
   CHECK_GE(buffer_size, sizeof(RawInputLayoutHeader))
       << "raw input layout header overflow";
-  CHECK_LE(layout.descriptor_bytes + layout.tensor_arena_bytes,
-           buffer_size - sizeof(RawInputLayoutHeader))
+  CHECK_GE(layout.tensor_arena_offset,
+           sizeof(RawInputLayoutHeader) + layout.descriptor_bytes)
+      << "raw input tensor arena overlaps descriptor";
+  CHECK_LE(layout.tensor_arena_offset + layout.tensor_arena_bytes, buffer_size)
       << "raw input layout overflow";
+  CHECK_EQ(layout.tensor_arena_offset % kRawInputTensorArenaAlignment, 0)
+      << "raw input tensor arena offset is not aligned";
 
   DeviceBufferSession device_session;
-  ReadContext context{
-      buffer, buffer + layout.descriptor_bytes, &device_session};
-  initialize_device_buffer_session(
-      context, forward_input, device, layout.tensor_arena_bytes, stream);
+  const char* descriptor_base = buffer;
+  const char* tensor_arena_base = payload_base + layout.tensor_arena_offset;
+  ReadContext context{descriptor_base, tensor_arena_base, &device_session};
+  initialize_device_buffer_session(context,
+                                   forward_input,
+                                   device,
+                                   payload_base,
+                                   buffer_size,
+                                   layout.tensor_arena_offset,
+                                   stream,
+                                   materialize_device_buffer);
 
-  read_tensor(context, forward_input.token_ids, stream);
-  read_tensor(context, forward_input.positions, stream);
+  read_tensor_and_host(
+      context, forward_input.token_ids, forward_input.token_ids_host, stream);
+  read_tensor_and_host(
+      context, forward_input.positions, forward_input.positions_host, stream);
 
   // input_params
   auto& input_params = forward_input.input_params;
   int32_t batch_forward_type;
   read_data(context, batch_forward_type);
-  input_params.batch_forward_type = BatchForwardType(batch_forward_type);
-  read_data(context, input_params.num_sequences);
-  read_data(context, input_params.kv_max_seq_len);
-  read_data(context, input_params.q_max_seq_len);
-  read_data(context, input_params.batch_id);
-  read_tensor_and_vector(
-      context, input_params.q_seq_lens, input_params.q_seq_lens_vec, stream);
-#if !defined(USE_CUDA)
-  if (!input_params.q_seq_lens_vec.empty()) {
-    std::vector<int32_t> cu_lens(input_params.q_seq_lens_vec.size());
-    std::partial_sum(input_params.q_seq_lens_vec.begin(),
-                     input_params.q_seq_lens_vec.end(),
-                     cu_lens.begin());
-    input_params.q_cu_seq_lens = torch::tensor(cu_lens,
-                                               torch::TensorOptions()
-                                                   .dtype(torch::kInt)
-                                                   .device(torch::kCPU)
-                                                   .pinned_memory(true));
-  }
-#endif
-  read_tensor_and_vector(
-      context, input_params.kv_seq_lens, input_params.kv_seq_lens_vec, stream);
-  read_tensor(context, input_params.paged_kv_indptr, stream);
-  read_tensor(context, input_params.paged_kv_indices, stream);
-  read_tensor(context, input_params.paged_kv_last_page_len, stream);
-  read_tensor(context, input_params.new_cache_slot_offsets, stream);
-  read_tensor(context, input_params.kv_cache_start_offsets, stream);
-  read_tensor(context, input_params.input_embedding, stream);
-  read_vector(context, input_params.dp_global_token_nums);
-  read_vector(context, input_params.dp_is_decode);
-  read_vector(context, input_params.embedding_ids);
-  read_vector(context, input_params.linear_state_ids);
-  normalize_linear_state_ids(input_params.linear_state_ids,
-                             input_params.num_sequences);
-  read_string_vector(context, input_params.request_ids);
-  read_vector(context, input_params.extra_token_ids);
-  read_swap_blocks(context, input_params.swap_blocks);
-  read_tensor(context, input_params.src_block_indices, stream);
-  read_tensor(context, input_params.dst_block_indices, stream);
-  read_tensor(context, input_params.cum_sum, stream);
-  read_mm_batch_data(context, input_params.mm_data);
+  input_params.meta.batch_forward_type = BatchForwardType(batch_forward_type);
+  read_data(context, input_params.meta.num_sequences);
+  read_data(context, input_params.meta.kv_max_seq_len);
+  read_data(context, input_params.meta.q_max_seq_len);
+  read_data(context, input_params.meta.batch_id);
   read_tensor_and_vector(context,
-                         input_params.kv_cache_tokens_nums,
-                         input_params.kv_cache_tokens_nums_host,
+                         input_params.attention.device.q_seq_lens,
+                         input_params.attention.host.q_seq_lens,
+                         stream);
+  read_tensor_and_vector(context,
+                         input_params.attention.device.q_cu_seq_lens,
+                         input_params.attention.host.q_cu_seq_lens,
+                         stream);
+  CHECK_EQ(input_params.attention.host.q_seq_lens.empty(),
+           input_params.attention.host.q_cu_seq_lens.empty())
+      << "q_seq_lens and q_cu_seq_lens must be provided together";
+  read_tensor_and_vector(context,
+                         input_params.attention.device.kv_seq_lens,
+                         input_params.attention.host.kv_seq_lens,
+                         stream);
+  read_tensor(context, input_params.attention.device.paged_kv_indptr, stream);
+  read_tensor(context, input_params.attention.device.paged_kv_indices, stream);
+  read_tensor(
+      context, input_params.attention.device.paged_kv_last_page_len, stream);
+  read_tensor(
+      context, input_params.attention.device.new_cache_slot_offsets, stream);
+  read_tensor(
+      context, input_params.attention.device.kv_cache_start_offsets, stream);
+  read_tensor(context, input_params.embedding.input_embedding, stream);
+  read_vector(context, input_params.parallel.dp_global_token_nums);
+  read_vector(context, input_params.parallel.dp_is_decode);
+  read_vector(context, input_params.embedding.embedding_ids);
+  read_vector(context, input_params.embedding.linear_state_ids);
+  normalize_linear_state_ids(input_params.embedding.linear_state_ids,
+                             input_params.meta.num_sequences);
+  read_string_vector(context, input_params.embedding.request_ids);
+  read_vector(context, input_params.embedding.extra_token_ids);
+  read_swap_blocks(context, input_params.block_copy.swap_blocks);
+  read_tensor(context, input_params.block_copy.src_block_indices, stream);
+  read_tensor(context, input_params.block_copy.dst_block_indices, stream);
+  read_tensor(context, input_params.block_copy.cum_sum, stream);
+  read_mm_batch_data(context, input_params.multimodal.mm_data);
+  read_tensor_and_vector(context,
+                         input_params.attention.device.kv_cache_tokens_nums,
+                         input_params.attention.host.kv_cache_tokens_nums,
                          stream);
 
   // sampling_params
@@ -2069,7 +2132,7 @@ inline void deserialize_raw_forward_input(const char*& buffer,
     read_data(context, sampling_params.use_beam_search);
   }
   // acc_logprob
-  read_tensor(context, forward_input.acc_logprob, stream);
+  read_tensor(context, forward_input.sampling_params.acc_logprob, stream);
 
   // Keep transfer/eplb host-materialized, but continue advancing the
   // device cursor when a contiguous device buffer is active.
@@ -2079,37 +2142,26 @@ inline void deserialize_raw_forward_input(const char*& buffer,
   for (auto& transfer : forward_input.transfer_kv_infos) {
     read_transfer_kv_info(context, transfer);
   }
-  read_eplb_info(context, forward_input.eplb_info);
+  read_eplb_info(context, forward_input.input_params.expert.eplb_info);
 
-#if defined(USE_CUDA)
-  if (has_device_buffer(context)) {
-    read_tensor(context, input_params.new_cache_slots, stream);
-    read_tensor(context, input_params.block_tables, stream);
-  } else {
-    read_tensor(context,
-                input_params.new_cache_slots,
-                /*stream=*/nullptr,
-                /*force_host_materialize=*/true);
-    read_tensor(context,
-                input_params.block_tables,
-                /*stream=*/nullptr,
-                /*force_host_materialize=*/true);
-  }
-#else
-  read_tensor(context,
-              input_params.new_cache_slots,
-              /*stream=*/nullptr,
-              /*force_host_materialize=*/true);
-  read_tensor(context,
-              input_params.block_tables,
-              /*stream=*/nullptr,
-              /*force_host_materialize=*/true);
-#endif
+  read_tensor_and_vector(context,
+                         input_params.attention.device.new_cache_slots,
+                         input_params.attention.host.new_cache_slots,
+                         stream);
+  read_tensor_and_host(context,
+                       input_params.attention.device.block_tables,
+                       input_params.attention.host.block_tables,
+                       stream);
 
   read_dit_forward_input(context, input_params.dit_forward_input);
 
   finalize_device_buffer_session(device_session, stream);
-  buffer = context.tensor_cursor;
+  forward_input.input_host_buffer_has_layout = true;
+  if (materialize_device_buffer &&
+      forward_input.device_input_buffer.defined()) {
+    forward_input.device_tensors_ready = true;
+  }
+  buffer = payload_base + buffer_size;
 }
 
 inline void serialize_raw_forward_input_sections(
@@ -2127,7 +2179,10 @@ inline void serialize_raw_forward_input_sections(
   write_data(context.descriptor, input.max_seq_len);
   write_data(context.descriptor, input.q_max_seq_len);
   write_data(context.descriptor, input.batch_id);
+  CHECK_EQ(input.q_seq_lens.empty(), input.q_cu_seq_lens.empty())
+      << "q_seq_lens and q_cu_seq_lens must be provided together";
   write_vector_to_tensor(context, input.q_seq_lens);
+  write_vector_to_tensor(context, input.q_cu_seq_lens);
   write_vector_to_tensor(context, input.seq_lens);
   write_vector_to_tensor(context, input.paged_kv_indptr);
   write_vector_to_tensor(context, input.paged_kv_indices);
@@ -2198,14 +2253,16 @@ inline RawInputLayoutHeader calculate_raw_forward_input_layout(
     const RawForwardInput& input) {
   RawInputSerializeContext context;
   serialize_raw_forward_input_sections(input, context);
-  return RawInputLayoutHeader{context.descriptor.size,
-                              context.tensor_arena.size};
+  const uint64_t tensor_arena_offset =
+      align_up(sizeof(RawInputLayoutHeader) + context.descriptor.size,
+               kRawInputTensorArenaAlignment);
+  return RawInputLayoutHeader{
+      context.descriptor.size, tensor_arena_offset, context.tensor_arena.size};
 }
 
 inline uint64_t get_raw_forward_input_layout_size(
     const RawInputLayoutHeader& layout) {
-  return sizeof(RawInputLayoutHeader) + layout.descriptor_bytes +
-         layout.tensor_arena_bytes;
+  return layout.tensor_arena_offset + layout.tensor_arena_bytes;
 }
 
 size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
@@ -2215,12 +2272,61 @@ size_t calculate_raw_forward_input_size(const RawForwardInput& input) {
 
 inline void serialize_raw_forward_input(const RawForwardInput& input,
                                         const RawInputLayoutHeader& layout,
+                                        char*& buffer);
+
+bool raw_forward_input_to_packed_proto_impl(
+    const RawForwardInput& input,
+    proto::PackedForwardInput* packed_forward_input) {
+  CHECK(packed_forward_input != nullptr);
+  const RawInputLayoutHeader layout = calculate_raw_forward_input_layout(input);
+  const uint64_t payload_size = get_raw_forward_input_layout_size(layout);
+  std::string payload;
+  payload.resize(static_cast<size_t>(payload_size));
+
+  char* payload_ptr = &payload[0];
+  serialize_raw_forward_input(input, layout, payload_ptr);
+  CHECK_EQ(payload_ptr, &payload[0] + payload.size())
+      << "packed raw input payload size mismatch";
+
+  packed_forward_input->mutable_payload()->swap(payload);
+  return true;
+}
+
+void packed_proto_to_forward_input_impl(
+    const proto::PackedForwardInput& packed_forward_input,
+    ForwardInput& forward_input,
+    const torch::Device& device,
+    Stream* stream) {
+  (void)device;
+  (void)stream;
+  const std::string& payload = packed_forward_input.payload();
+  if (payload.empty()) {
+    return;
+  }
+
+  forward_input.input_host_buffer =
+      torch::empty({static_cast<int64_t>(payload.size())},
+                   torch::TensorOptions()
+                       .dtype(torch::kUInt8)
+                       .device(torch::kCPU)
+                       .pinned_memory(true));
+  std::memcpy(forward_input.input_host_buffer.data_ptr(),
+              payload.data(),
+              payload.size());
+  forward_input.input_host_buffer_has_layout = true;
+  forward_input.device_tensors_ready = false;
+}
+
+inline void serialize_raw_forward_input(const RawForwardInput& input,
+                                        const RawInputLayoutHeader& layout,
                                         char*& buffer) {
+  char* payload_base = buffer;
   write_data(buffer, layout.descriptor_bytes);
+  write_data(buffer, layout.tensor_arena_offset);
   write_data(buffer, layout.tensor_arena_bytes);
 
-  RawInputSerializeContext context{{buffer, 0},
-                                   {buffer + layout.descriptor_bytes, 0}};
+  RawInputSerializeContext context{
+      {buffer, 0}, {payload_base + layout.tensor_arena_offset, 0}};
   serialize_raw_forward_input_sections(input, context);
 
   CHECK_EQ(context.descriptor.size, layout.descriptor_bytes)
@@ -2228,7 +2334,15 @@ inline void serialize_raw_forward_input(const RawForwardInput& input,
   CHECK_EQ(context.tensor_arena.size, layout.tensor_arena_bytes)
       << "raw input tensor arena size mismatch";
 
-  buffer += layout.descriptor_bytes + layout.tensor_arena_bytes;
+  const uint64_t padding_bytes =
+      layout.tensor_arena_offset -
+      (sizeof(RawInputLayoutHeader) + layout.descriptor_bytes);
+  if (padding_bytes > 0) {
+    std::memset(buffer + layout.descriptor_bytes,
+                0,
+                static_cast<size_t>(padding_bytes));
+  }
+  buffer = payload_base + get_raw_forward_input_layout_size(layout);
 }
 
 inline void serialize_raw_forward_input(const RawForwardInput& input,
@@ -2369,6 +2483,7 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
 
   forward_input.token_ids =
       torch::tensor(std::move(raw_input.flatten_tokens_vec), tensor_options);
+  forward_input.token_ids_host = forward_input.token_ids;
   if (raw_input.flatten_positions_vec.size() > 0) {
     forward_input.positions = torch::tensor(
         std::move(raw_input.flatten_positions_vec), tensor_options);
@@ -2376,51 +2491,64 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
     forward_input.positions =
         create_2d_tensor(std::move(raw_input.m_positions_vec), torch::kInt);
   }
+  forward_input.positions_host = forward_input.positions;
 
   auto& input_params = forward_input.input_params;
-  input_params.batch_forward_type = raw_input.batch_forward_type;
-  input_params.num_sequences = raw_input.num_sequences;
-  input_params.kv_max_seq_len = raw_input.max_seq_len;
-  input_params.q_max_seq_len = raw_input.q_max_seq_len;
-  input_params.embedding_ids = std::move(raw_input.embedding_ids);
-  input_params.linear_state_ids = std::move(raw_input.linear_state_ids);
-  input_params.request_ids = std::move(raw_input.request_ids);
-  input_params.dp_global_token_nums = std::move(raw_input.dp_global_token_nums);
-  input_params.dp_is_decode = std::move(raw_input.dp_is_decode);
+  input_params.meta.batch_forward_type = raw_input.batch_forward_type;
+  input_params.meta.num_sequences = raw_input.num_sequences;
+  input_params.meta.kv_max_seq_len = raw_input.max_seq_len;
+  input_params.meta.q_max_seq_len = raw_input.q_max_seq_len;
+  input_params.embedding.embedding_ids = std::move(raw_input.embedding_ids);
+  input_params.embedding.linear_state_ids =
+      std::move(raw_input.linear_state_ids);
+  input_params.embedding.request_ids = std::move(raw_input.request_ids);
+  input_params.parallel.dp_global_token_nums =
+      std::move(raw_input.dp_global_token_nums);
+  input_params.parallel.dp_is_decode = std::move(raw_input.dp_is_decode);
 
-  input_params.kv_seq_lens =
-      torch::tensor(std::move(raw_input.seq_lens), tensor_options);
-  input_params.q_seq_lens =
-      torch::tensor(std::move(raw_input.q_seq_lens), tensor_options);
-  input_params.kv_seq_lens_vec = std::move(raw_input.seq_lens);
-  input_params.q_seq_lens_vec = std::move(raw_input.q_seq_lens);
+  input_params.attention.device.kv_seq_lens =
+      torch::tensor(raw_input.seq_lens, tensor_options);
+  input_params.attention.device.q_seq_lens =
+      torch::tensor(raw_input.q_seq_lens, tensor_options);
+  CHECK_EQ(raw_input.q_seq_lens.empty(), raw_input.q_cu_seq_lens.empty())
+      << "q_seq_lens and q_cu_seq_lens must be provided together";
+  input_params.attention.device.q_cu_seq_lens =
+      torch::tensor(raw_input.q_cu_seq_lens, tensor_options);
+  input_params.attention.host.kv_seq_lens = std::move(raw_input.seq_lens);
+  input_params.attention.host.q_cu_seq_lens =
+      std::move(raw_input.q_cu_seq_lens);
+  input_params.attention.host.q_seq_lens = std::move(raw_input.q_seq_lens);
 
-  input_params.new_cache_slots =
+  input_params.attention.device.new_cache_slots =
       torch::tensor(std::move(raw_input.new_token_slot_ids), tensor_options);
-  input_params.kv_cache_tokens_nums =
-      torch::tensor(std::move(raw_input.kv_cache_tokens_nums), tensor_options);
+  input_params.attention.device.kv_cache_tokens_nums =
+      torch::tensor(raw_input.kv_cache_tokens_nums, tensor_options);
+  input_params.attention.host.kv_cache_tokens_nums =
+      std::move(raw_input.kv_cache_tokens_nums);
 
   util::pad_2d_vector(raw_input.block_tables_vec, 0);
-  input_params.block_tables =
+  input_params.attention.device.block_tables =
       create_2d_tensor(std::move(raw_input.block_tables_vec), torch::kInt);
+  input_params.attention.host.block_tables =
+      input_params.attention.device.block_tables;
 
-  input_params.src_block_indices =
+  input_params.block_copy.src_block_indices =
       torch::tensor(std::move(raw_input.src_block_indices), tensor_options);
-  input_params.dst_block_indices =
+  input_params.block_copy.dst_block_indices =
       torch::tensor(std::move(raw_input.dst_block_indices), tensor_options);
-  input_params.cum_sum =
+  input_params.block_copy.cum_sum =
       torch::tensor(std::move(raw_input.cum_sum), tensor_options);
 
-  input_params.swap_blocks = std::move(raw_input.swap_blocks);
-  input_params.batch_id = std::move(raw_input.batch_id);
-  input_params.extra_token_ids = std::move(raw_input.extra_token_ids);
+  input_params.block_copy.swap_blocks = std::move(raw_input.swap_blocks);
+  input_params.meta.batch_id = std::move(raw_input.batch_id);
+  input_params.embedding.extra_token_ids = std::move(raw_input.extra_token_ids);
 
-  input_params.new_cache_slot_offsets = torch::tensor(
+  input_params.attention.device.new_cache_slot_offsets = torch::tensor(
       std::move(raw_input.new_cache_slot_offsets), tensor_options);
-  input_params.kv_cache_start_offsets = torch::tensor(
+  input_params.attention.device.kv_cache_start_offsets = torch::tensor(
       std::move(raw_input.kv_cache_start_offsets), tensor_options);
 
-  input_params.mm_data = std::move(raw_input.mm_data);
+  input_params.multimodal.mm_data = std::move(raw_input.mm_data);
 
   // dit input data
   input_params.dit_forward_input = std::move(raw_input.dit_forward_input);
@@ -2437,11 +2565,11 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
         std::move(raw_input.unique_token_lens_vec));
   }
 
-  forward_input.acc_logprob = torch::tensor(
+  forward_input.sampling_params.acc_logprob = torch::tensor(
       std::move(raw_input.acc_logprob_vec),
       torch::dtype(torch::kFloat32).device(torch::kCPU).pinned_memory(true));
   forward_input.transfer_kv_infos = std::move(raw_input.transfer_kv_infos);
-  forward_input.eplb_info = std::move(raw_input.eplb_info);
+  forward_input.input_params.expert.eplb_info = std::move(raw_input.eplb_info);
 }
 
 void convert_tensor_to_raw_output(
@@ -2574,6 +2702,65 @@ void convert_tensor_to_raw_output(
 
 }  // namespace
 
+namespace detail {
+
+bool try_to_device_from_input_host_buffer(const ForwardInput& input,
+                                          const torch::Device& device,
+                                          torch::ScalarType dtype,
+                                          ForwardInput& output) {
+  if (!input.input_host_buffer.defined() ||
+      !input.input_host_buffer.device().is_cpu() ||
+      input.input_host_buffer.numel() == 0) {
+    return false;
+  }
+
+  output = input;
+  output.device_tensors_ready = false;
+  const char* payload_ptr =
+      static_cast<const char*>(output.input_host_buffer.data_ptr());
+  deserialize_raw_forward_input(
+      payload_ptr,
+      static_cast<uint64_t>(output.input_host_buffer.numel()),
+      output,
+      device,
+      /*stream=*/nullptr,
+      /*materialize_device_buffer=*/true);
+  auto normalize_float_param = [&](torch::Tensor& tensor) {
+    if (tensor.defined() && tensor.scalar_type() != dtype) {
+      tensor = tensor.to(torch::TensorOptions().device(device).dtype(dtype));
+    }
+  };
+  normalize_float_param(output.sampling_params.frequency_penalties);
+  normalize_float_param(output.sampling_params.presence_penalties);
+  normalize_float_param(output.sampling_params.repetition_penalties);
+  normalize_float_param(output.sampling_params.temperatures);
+  normalize_float_param(output.sampling_params.top_p);
+  normalize_float_param(output.decoder_sampling_params.frequency_penalties);
+  normalize_float_param(output.decoder_sampling_params.presence_penalties);
+  normalize_float_param(output.decoder_sampling_params.repetition_penalties);
+  normalize_float_param(output.decoder_sampling_params.temperatures);
+  normalize_float_param(output.decoder_sampling_params.top_p);
+  output.positions = detail::normalize_positions_for_device(output.positions);
+  return output.device_tensors_ready;
+}
+
+}  // namespace detail
+
+bool raw_forward_input_to_packed_proto(
+    const RawForwardInput& input,
+    proto::PackedForwardInput* packed_forward_input) {
+  return raw_forward_input_to_packed_proto_impl(input, packed_forward_input);
+}
+
+void packed_proto_to_forward_input(
+    const proto::PackedForwardInput& packed_forward_input,
+    ForwardInput& forward_input,
+    const torch::Device& device,
+    Stream* stream) {
+  packed_proto_to_forward_input_impl(
+      packed_forward_input, forward_input, device, stream);
+}
+
 ForwardSharedMemoryManager::ForwardSharedMemoryManager(const std::string& name,
                                                        size_t size,
                                                        bool& is_creator,
@@ -2647,8 +2834,20 @@ void ForwardSharedMemoryManager::raw_input_read(ForwardInput& input,
       static_cast<char*>(base_address()) + sizeof(ControlMetadata);
   uint64_t total_size;
   read_data(data_ptr, total_size);
-  deserialize_raw_forward_input(
-      data_ptr, total_size, input, device, stream_.get());
+  bool materialize_device_buffer = false;
+#if defined(USE_NPU)
+  materialize_device_buffer = true;
+#elif defined(USE_CUDA)
+  materialize_device_buffer = device.type() == torch::kCUDA;
+#elif defined(USE_MLU)
+  materialize_device_buffer = device.type() == torch::kPrivateUse1;
+#endif
+  deserialize_raw_forward_input(data_ptr,
+                                total_size,
+                                input,
+                                device,
+                                stream_.get(),
+                                materialize_device_buffer);
 
   return;
 }

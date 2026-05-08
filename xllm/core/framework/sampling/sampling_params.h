@@ -76,6 +76,7 @@ struct SamplingParameters {
                               ? safe_to(sample_idxes, device).contiguous()
                               : sample_idxes;
     params.do_sample = safe_to(do_sample, device, true);
+    params.acc_logprob = safe_to(acc_logprob, device, true);
     params.all_random_sample = all_random_sample;
     params.all_greedy_sample = all_greedy_sample;
     params.logprobs = logprobs;
@@ -132,6 +133,11 @@ struct SamplingParameters {
   // whether to sample for each sequence.
   // [num_seqs] BoolTensor
   torch::Tensor do_sample;
+
+  // Beam search accumulated log probability.
+  // [num_seq, 1] FloatTensor
+  torch::Tensor acc_logprob;
+
   bool all_random_sample = false;
   bool all_greedy_sample = true;
 

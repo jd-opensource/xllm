@@ -46,7 +46,7 @@ ForwardInput OneRecXAttentionBatchInputBuilder::build_rec_forward_input(
         std::move(legacy_params);
   }
 
-  input.input_params.batch_forward_type = BatchForwardType::PREFILL;
+  input.input_params.meta.batch_forward_type = BatchForwardType::PREFILL;
 
   if (sequence_groups_.empty()) {
     return input;
@@ -149,11 +149,13 @@ ForwardInput OneRecXAttentionBatchInputBuilder::build_rec_forward_input(
 
   if (!block_tables_vec.empty()) {
     util::pad_2d_vector(block_tables_vec, /*pad_value=*/0);
-    input.input_params.block_tables =
+    input.input_params.attention.device.block_tables =
         create_2d_tensor(block_tables_vec, torch::kInt);
+    input.input_params.attention.host.block_tables =
+        input.input_params.attention.device.block_tables;
   }
   if (!new_cache_slots_vec.empty()) {
-    input.input_params.new_cache_slots =
+    input.input_params.attention.device.new_cache_slots =
         torch::tensor(new_cache_slots_vec, torch::kInt);
   }
 

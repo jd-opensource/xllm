@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "attention_metadata_builder.h"
 
+#include <glog/logging.h>
+
 #include <numeric>
 
 #include "attention_metadata.h"
@@ -34,28 +36,30 @@ AttentionMetadata build_attention_metadata(
   // MLA mode still affects which shared tensors must be materialized for
   // attention execution, but the flag itself is no longer carried in metadata.
   AttentionMetadata attn_metadata;
-  attn_metadata.q_cu_seq_lens = params.q_seq_lens;
-  attn_metadata.kv_cu_seq_lens = params.kv_seq_lens;
-  attn_metadata.max_query_len = params.q_max_seq_len;
-  attn_metadata.max_seq_len = params.kv_max_seq_len;
-  if (!params.kv_seq_lens_vec.empty()) {
+  attn_metadata.q_cu_seq_lens = params.attention.device.q_seq_lens;
+  attn_metadata.kv_cu_seq_lens = params.attention.device.kv_seq_lens;
+  attn_metadata.max_query_len = params.meta.q_max_seq_len;
+  attn_metadata.max_seq_len = params.meta.kv_max_seq_len;
+  if (!params.attention.host.kv_seq_lens.empty()) {
     const bool is_cu_seq_lens =
-        params.kv_seq_lens_vec.size() ==
-            static_cast<size_t>(params.num_sequences + 1) &&
-        params.kv_seq_lens_vec.front() == 0;
+        params.attention.host.kv_seq_lens.size() ==
+            static_cast<size_t>(params.meta.num_sequences + 1) &&
+        params.attention.host.kv_seq_lens.front() == 0;
     attn_metadata.total_kv_len =
-        is_cu_seq_lens ? params.kv_seq_lens_vec.back()
-                       : std::accumulate(params.kv_seq_lens_vec.begin(),
-                                         params.kv_seq_lens_vec.end(),
-                                         int64_t{0});
+        is_cu_seq_lens
+            ? params.attention.host.kv_seq_lens.back()
+            : std::accumulate(params.attention.host.kv_seq_lens.begin(),
+                              params.attention.host.kv_seq_lens.end(),
+                              int64_t{0});
   }
-  attn_metadata.slot_mapping = params.new_cache_slots;
+  attn_metadata.slot_mapping = params.attention.device.new_cache_slots;
   attn_metadata.compute_dtype = compute_dtype;
 
   // for flashinfer
-  attn_metadata.paged_kv_indptr = params.paged_kv_indptr;
-  attn_metadata.paged_kv_indices = params.paged_kv_indices;
-  attn_metadata.paged_kv_last_page_len = params.paged_kv_last_page_len;
+  attn_metadata.paged_kv_indptr = params.attention.device.paged_kv_indptr;
+  attn_metadata.paged_kv_indices = params.attention.device.paged_kv_indices;
+  attn_metadata.paged_kv_last_page_len =
+      params.attention.device.paged_kv_last_page_len;
 #if defined(USE_CUDA) || defined(USE_MUSA)
   attn_metadata.plan_info = std::make_shared<PlanInfo>();
   attn_metadata.shared_plan_info = std::make_shared<PlanInfo>();
@@ -67,8 +71,8 @@ AttentionMetadata build_attention_metadata(
   // graph_buffer.attn_mask (e.g. Qwen2_5_VL sets graph_buffer.attn_mask for
   // LongCat text encoding)
   std::optional<torch::Tensor> mask_to_use = attn_mask;
-  if (!mask_to_use.has_value() && params.graph_buffer.attn_mask.defined()) {
-    mask_to_use = params.graph_buffer.attn_mask;
+  if (!mask_to_use.has_value() && params.graph.attn_mask.defined()) {
+    mask_to_use = params.graph.attn_mask;
   }
   if (mask_to_use.has_value()) {
     attn_metadata.attn_mask = mask_to_use.value();
@@ -80,53 +84,57 @@ AttentionMetadata build_attention_metadata(
   // - FLAGS_enable_graph must be enabled
   // - Must be decode phase (not prefill)
   // - tiling_data must be available
-  bool is_decode = !params.batch_forward_type.is_prefill() &&
-                   !params.batch_forward_type.is_mixed() &&
-                   !params.batch_forward_type.is_chunked_prefill();
-  bool use_acl_graph = FLAGS_enable_graph && is_decode &&
-                       params.graph_buffer.tiling_data.defined();
+  bool is_decode = !params.meta.batch_forward_type.is_prefill() &&
+                   !params.meta.batch_forward_type.is_mixed() &&
+                   !params.meta.batch_forward_type.is_chunked_prefill();
+  bool use_acl_graph =
+      FLAGS_enable_graph && is_decode && params.graph.tiling_data.defined();
   if (use_acl_graph) {
     // ACL graph mode: use CustomPagedAttention with tiling_data on device
-    attn_metadata.paged_attention_tiling_data = params.graph_buffer.tiling_data;
+    attn_metadata.paged_attention_tiling_data = params.graph.tiling_data;
   }
   // Provide host seq_lens for NPU kernels (required by CustomPagedAttention).
-  if (!params.kv_seq_lens_vec.empty()) {
+  if (!params.attention.host.kv_seq_lens.empty()) {
     attn_metadata.kv_seq_lens_host =
-        torch::tensor(params.kv_seq_lens_vec, torch::kInt);
+        torch::tensor(params.attention.host.kv_seq_lens, torch::kInt);
   }
 #endif
   attn_metadata.is_chunked_prefill =
-      params.batch_forward_type.is_mixed() ||
-      params.batch_forward_type.is_chunked_prefill();
-  attn_metadata.is_prefill = params.batch_forward_type.is_prefill();
+      params.meta.batch_forward_type.is_mixed() ||
+      params.meta.batch_forward_type.is_chunked_prefill();
+  attn_metadata.is_prefill = params.meta.batch_forward_type.is_prefill();
 
   // enable_mla is for DeepSeekv32 on mlu device
   if (!attn_metadata.is_prefill || enable_mla) {
-    attn_metadata.block_table = params.block_tables;
-#if !defined(USE_NPU)
-    attn_metadata.kv_seq_lens = torch::diff(params.kv_seq_lens);  // kv seqlens
-    attn_metadata.q_seq_lens = torch::diff(params.q_seq_lens);    // q seqlens
+    attn_metadata.block_table = params.attention.device.block_tables;
+#if !defined(USE_NPU) && !defined(USE_CUDA)
+    attn_metadata.kv_seq_lens =
+        torch::diff(params.attention.device.kv_seq_lens);  // kv seqlens
+    attn_metadata.q_seq_lens =
+        torch::diff(params.attention.device.q_seq_lens);  // q seqlens
 #endif
   }
 #if defined(USE_NPU)
   // NPU path uses per-sequence lengths (not cumulative), so no diff.
   // Ensure per-sequence lengths are available for NPU kernels in all phases.
-  if (params.kv_seq_lens.defined()) {
-    attn_metadata.kv_seq_lens = params.kv_seq_lens;
+  if (params.attention.device.kv_seq_lens.defined()) {
+    attn_metadata.kv_seq_lens = params.attention.device.kv_seq_lens;
   }
-  if (params.q_seq_lens.defined()) {
-    attn_metadata.q_seq_lens = params.q_seq_lens;
-    torch::Tensor cumsum_tensor =
-        torch::cumsum(attn_metadata.q_seq_lens, 0).to(torch::kInt32);
-    auto zero = torch::zeros({1}, cumsum_tensor.options());
-    attn_metadata.q_cu_seq_lens = torch::cat({zero, cumsum_tensor}, 0);
+  if (params.attention.device.q_seq_lens.defined()) {
+    attn_metadata.q_seq_lens = params.attention.device.q_seq_lens;
+    CHECK(params.attention.device.q_cu_seq_lens.defined())
+        << "q_cu_seq_lens must be provided by upstream";
+    auto zero =
+        torch::zeros({1}, params.attention.device.q_cu_seq_lens.options());
+    attn_metadata.q_cu_seq_lens =
+        torch::cat({zero, params.attention.device.q_cu_seq_lens}, 0);
   }
 #endif
 
-  attn_metadata.is_dummy = (params.q_max_seq_len == 0);
+  attn_metadata.is_dummy = (params.meta.q_max_seq_len == 0);
   if (attn_metadata.is_dummy) {
     attn_metadata.slot_mapping =
-        torch::tensor({1}, params.new_cache_slots.options());
+        torch::tensor({1}, params.attention.device.new_cache_slots.options());
   }
 
   // Set is_causal: true for prefill (causal attention), false for decode
@@ -144,7 +152,7 @@ AttentionMetadata build_attention_metadata(
 #endif
 
 #if defined(USE_ILU)
-  attn_metadata.block_table = params.block_tables;
+  attn_metadata.block_table = params.attention.device.block_tables;
 #endif
 
   // TODO: set use_tensor_core from options.

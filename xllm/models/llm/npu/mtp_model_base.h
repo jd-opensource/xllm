@@ -101,7 +101,7 @@ class MtpModelImplBase : public torch::nn::Module {
 
     torch::Tensor h = embed_tokens_(tokens, 0);
     torch::Tensor enorm = enorm_(h, 0);
-    torch::Tensor input_embedding = input_params.input_embedding;
+    torch::Tensor input_embedding = input_params.embedding.input_embedding;
     if (input_embedding.defined()) {
       h = input_embedding;
     }
@@ -127,18 +127,18 @@ class MtpModelImplBase : public torch::nn::Module {
     torch::Tensor attn_mask;
     // TODO(liangzhiwei20): support prefix cache for deepseek .
     if (FLAGS_enable_chunked_prefill) {
-      int num_sequences = input_params.num_sequences;
+      int num_sequences = input_params.meta.num_sequences;
       if (num_sequences > 0) {
         std::vector<torch::Tensor> req_mask_vec;
         req_mask_vec.reserve(num_sequences);
 
         for (int j = 0; j < num_sequences; j++) {
-          auto mask =
-              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                         input_params.kv_seq_lens_vec[j],
-                                         input_params.kv_max_seq_len,
-                                         h.dtype().toScalarType(),
-                                         h.device());
+          auto mask = attn_mask_.gen_append_mask(
+              input_params.attention.host.q_seq_lens[j],
+              input_params.attention.host.kv_seq_lens[j],
+              input_params.meta.kv_max_seq_len,
+              h.dtype().toScalarType(),
+              h.device());
           req_mask_vec.emplace_back(mask);
         }
         attn_mask = torch::cat(req_mask_vec, 0);
@@ -148,7 +148,7 @@ class MtpModelImplBase : public torch::nn::Module {
             attn_mask_.get_attn_mask(128, h.dtype().toScalarType(), h.device());
       }
     } else if (model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache &&
-               !input_params.batch_forward_type.is_decode()) {
+               !input_params.meta.batch_forward_type.is_decode()) {
       attn_mask =
           attn_mask_.get_attn_mask(512, h.dtype().toScalarType(), h.device());
     } else {
@@ -163,20 +163,21 @@ class MtpModelImplBase : public torch::nn::Module {
         torch::TensorOptions().dtype(torch::kInt32).device(tokens.device()));
 
     // TODO(liangzhiwei20): MTP need more support for layer wise copy.
-    if (input_params.layer_wise_load_synchronizer != nullptr) {
+    if (input_params.parallel.layer_wise_load_synchronizer != nullptr) {
       LOG(FATAL) << "MTP not support layer wise copy!";
     }
 
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
-    input_params_new.expert_array = expert_array;
+    input_params_new.expert.expert_array = expert_array;
 
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
-      if (input_params.layer_synchronizer != nullptr) {
-        event = input_params.layer_synchronizer->get_event(i);
-        event_flag = input_params.layer_synchronizer->get_event_flag(i);
+      if (input_params.parallel.layer_synchronizer != nullptr) {
+        event = input_params.parallel.layer_synchronizer->get_event(i);
+        event_flag =
+            input_params.parallel.layer_synchronizer->get_event_flag(i);
       }
       if (!input_params.synchronize_layer(i)) {
         return ModelOutput();

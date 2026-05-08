@@ -77,7 +77,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
         tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
         positions = torch::tensor({1}).to(torch::kInt32).to(device_);
       }
-      auto& dp_token_nums = modified_input_params.dp_global_token_nums;
+      auto& dp_token_nums = modified_input_params.parallel.dp_global_token_nums;
       std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     }
     if (!modified_input_params.attn_metadata) {
