@@ -555,7 +555,7 @@ void BatchInputBuilder::setup_kv_cache_info(
   for (const auto& block : blocks) {
     block_size = block.size();
     block_ids.push_back(block.id());
-    local_block_ids.emplace_back(block.id());
+    local_block_ids.emplace_back(static_cast<uint64_t>(block.id()));
     state.paged_kv_indices.push_back(block.id());
   }
   state.paged_kv_indptr.push_back(state.paged_kv_indptr.back() + blocks.size());
