@@ -29,7 +29,7 @@ bool exceeds_block_capacity(Sequence* sequence, KVCacheManager* manager) {
     return true;
   }
   const size_t needed_blocks =
-      (sequence->num_prompt_tokens() + block_size - 1) / block_size;
+      util::ceil_div(static_cast<size_t>(sequence->num_prompt_tokens()), block_size);
   const std::vector<size_t> free_blocks = manager->num_free_blocks();
   const std::vector<size_t> used_blocks = manager->num_used_blocks();
   size_t max_blocks = 0;
