@@ -20,16 +20,16 @@ limitations under the License.
 #include <optional>
 #include <string>
 
-#include "layers/common/dense_mlp.h"
-#include "layers/common/qwen3_next_rms_norm.h"
-#include "layers/mlu/qwen3_5_attention.h"
-#include "layers/mlu/qwen3_5_fused_moe.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/state_dict/state_dict.h"
+#include "layers/common/dense_mlp.h"
+#include "layers/common/qwen3_next_rms_norm.h"
+#include "layers/mlu/qwen3_5_attention.h"
+#include "layers/mlu/qwen3_5_fused_moe.h"
 
 namespace xllm {
 namespace layer {

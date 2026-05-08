@@ -76,9 +76,9 @@ limitations under the License.
 #include "vlm/oxygen_vlm.h"             // IWYU pragma: keep
 #include "vlm/qwen2_5_vl.h"             // IWYU pragma: keep
 #include "vlm/qwen2_vl.h"               // IWYU pragma: keep
+#include "vlm/qwen3_5.h"                // IWYU pragma: keep
 #include "vlm/qwen3_vl.h"               // IWYU pragma: keep
 #include "vlm/qwen3_vl_moe.h"           // IWYU pragma: keep
-#include "vlm/qwen3_5.h"                // IWYU pragma: keep
 #elif defined(USE_ILU)
 #include "llm/qwen2.h"      // IWYU pragma: keep
 #include "llm/qwen3.h"      // IWYU pragma: keep

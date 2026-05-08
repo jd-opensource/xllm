@@ -14,7 +14,9 @@ limitations under the License.
 ==============================================================================*/
 
 #include "qwen3_5_fused_moe.h"
+
 #include <glog/logging.h>
+
 #include "framework/parallel_state/parallel_state.h"
 #include "framework/state_dict/utils.h"
 

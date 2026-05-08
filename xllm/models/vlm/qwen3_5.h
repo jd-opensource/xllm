@@ -17,8 +17,8 @@ limitations under the License.
 
 #include "core/framework/model/model_output.h"
 #include "core/layers/common/lm_head.h"
-#include "core/layers/common/rms_norm.h"
 #include "core/layers/common/qwen3_next_rms_norm.h"
+#include "core/layers/common/rms_norm.h"
 #include "core/layers/mlu/qwen3_5_decoder_layer.h"
 #include "core/layers/qwen3_vision_layer.h"
 #include "models/llm/llm_model_base.h"
@@ -29,7 +29,8 @@ limitations under the License.
 #include "qwen3_vl.h"
 
 namespace xllm {
-class Qwen3_5ModelImpl final : public LlmModelImplBase<layer::Qwen3_5DecoderLayer> {
+class Qwen3_5ModelImpl final
+    : public LlmModelImplBase<layer::Qwen3_5DecoderLayer> {
  public:
   Qwen3_5ModelImpl(const ModelContext& context)
       : LlmModelImplBase<layer::Qwen3_5DecoderLayer>("qwen3_5",
@@ -40,7 +41,8 @@ class Qwen3_5ModelImpl final : public LlmModelImplBase<layer::Qwen3_5DecoderLaye
     dp_size_ = parallel_args.dp_size();
 
     if (!mrope_section_.empty()) {
-      int64_t rotary_dim = static_cast<int64_t>(model_args.head_dim() * model_args.partial_rotary_factor());
+      int64_t rotary_dim = static_cast<int64_t>(
+          model_args.head_dim() * model_args.partial_rotary_factor());
       cos_sin_ = layer::rotary::get_concat_rotary_embedding(
           rotary_dim,
           model_args.max_position_embeddings(),
@@ -192,65 +194,82 @@ class Qwen3_5ForCausalLMImpl : public LlmForCausalLMImplBase<Qwen3_5Model> {
 TORCH_MODULE(Qwen3_5ForCausalLM);
 
 using Qwen3_5ForConditionalGenerationImpl =
-    Qwen3VLForConditionalGenerationBase<Qwen3_VisionTransformer, Qwen3_5ForCausalLM>;
+    Qwen3VLForConditionalGenerationBase<Qwen3_VisionTransformer,
+                                        Qwen3_5ForCausalLM>;
 TORCH_MODULE(Qwen3_5ForConditionalGeneration);
 
+#define LOAD_QWEN3_5_COMMON_ARGS()                                             \
+  LOAD_ARG_OR(model_type, "model_type", "qwen3_5");                            \
+  LOAD_ARG_OR(dtype, "text_config.dtype", "bfloat16");                         \
+  LOAD_ARG_OR(vocab_size, "text_config.vocab_size", 248320);                   \
+  LOAD_ARG_OR(hidden_size, "text_config.hidden_size", 5120);                   \
+  LOAD_ARG_OR(hidden_act, "text_config.hidden_act", "silu");                   \
+  LOAD_ARG_OR(intermediate_size, "text_config.intermediate_size", 17408);      \
+  LOAD_ARG_OR(n_layers, "text_config.num_hidden_layers", 64);                  \
+  LOAD_ARG_OR(n_heads, "text_config.num_attention_heads", 24);                 \
+  LOAD_ARG(n_kv_heads, "text_config.num_key_value_heads");                     \
+  LOAD_ARG_OR(                                                                 \
+      max_position_embeddings, "text_config.max_position_embeddings", 262144); \
+  LOAD_ARG_OR(rms_norm_eps, "text_config.rms_norm_eps", 1e-6);                 \
+  LOAD_ARG_OR(eos_token_id, "text_config.eos_token_id", 248044);               \
+  LOAD_ARG_OR(                                                                 \
+      rope_theta, "text_config.rope_parameters.rope_theta", 10000000.0f);      \
+  LOAD_ARG_OR(head_dim, "text_config.head_dim", 256);                          \
+  LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false);              \
+  LOAD_ARG(layer_types, "text_config.layer_types");                            \
+  LOAD_ARG_OR(                                                                 \
+      linear_conv_kernel_dim, "text_config.linear_conv_kernel_dim", 4);        \
+  LOAD_ARG_OR(linear_key_head_dim, "text_config.linear_key_head_dim", 128);    \
+  LOAD_ARG_OR(                                                                 \
+      linear_value_head_dim, "text_config.linear_value_head_dim", 128);        \
+  LOAD_ARG_OR(linear_num_key_heads, "text_config.linear_num_key_heads", 16);   \
+  LOAD_ARG_OR(                                                                 \
+      linear_num_value_heads, "text_config.linear_num_value_heads", 48);       \
+  LOAD_ARG_OR(                                                                 \
+      full_attention_interval, "text_config.full_attention_interval", 4);      \
+  LOAD_ARG_OR(attn_output_gate, "text_config.attn_output_gate", false);        \
+  LOAD_ARG_OR(                                                                 \
+      num_nextn_predict_layers, "text_config.mtp_num_hidden_layers", 0);       \
+  LOAD_ARG_OR(attention_bias, "text_config.attention_bias", false);            \
+  LOAD_ARG_OR(attention_dropout, "text_config.attention_dropout", 0.0f);       \
+  LOAD_ARG_OR(initializer_range, "text_config.initializer_range", 0.02f);      \
+  LOAD_ARG_OR(                                                                 \
+      mlp_only_layers, "text_config.mlp_only_layers", std::vector<int32_t>()); \
+  LOAD_ARG(rope_scaling_mrope_section,                                         \
+           "text_config.rope_parameters.mrope_section");                       \
+  LOAD_ARG_OR(rope_scaling_rope_type,                                          \
+              "text_config.rope_parameters.rope_type",                         \
+              "default");                                                      \
+  LOAD_ARG_OR(partial_rotary_factor,                                           \
+              "text_config.rope_parameters.partial_rotary_factor",             \
+              0.25f)
 
-#define LOAD_QWEN3_5_COMMON_ARGS() \
-  LOAD_ARG_OR(model_type, "model_type", "qwen3_5"); \
-  LOAD_ARG_OR(dtype, "text_config.dtype", "bfloat16"); \
-  LOAD_ARG_OR(vocab_size, "text_config.vocab_size", 248320); \
-  LOAD_ARG_OR(hidden_size, "text_config.hidden_size", 5120); \
-  LOAD_ARG_OR(hidden_act, "text_config.hidden_act", "silu"); \
-  LOAD_ARG_OR(intermediate_size, "text_config.intermediate_size", 17408); \
-  LOAD_ARG_OR(n_layers, "text_config.num_hidden_layers", 64); \
-  LOAD_ARG_OR(n_heads, "text_config.num_attention_heads", 24); \
-  LOAD_ARG(n_kv_heads, "text_config.num_key_value_heads"); \
-  LOAD_ARG_OR(max_position_embeddings, "text_config.max_position_embeddings", 262144); \
-  LOAD_ARG_OR(rms_norm_eps, "text_config.rms_norm_eps", 1e-6); \
-  LOAD_ARG_OR(eos_token_id, "text_config.eos_token_id", 248044); \
-  LOAD_ARG_OR(rope_theta, "text_config.rope_parameters.rope_theta", 10000000.0f); \
-  LOAD_ARG_OR(head_dim, "text_config.head_dim", 256); \
-  LOAD_ARG_OR(tie_word_embeddings, "tie_word_embeddings", false); \
-  LOAD_ARG(layer_types, "text_config.layer_types"); \
-  LOAD_ARG_OR(linear_conv_kernel_dim, "text_config.linear_conv_kernel_dim", 4); \
-  LOAD_ARG_OR(linear_key_head_dim, "text_config.linear_key_head_dim", 128); \
-  LOAD_ARG_OR(linear_value_head_dim, "text_config.linear_value_head_dim", 128); \
-  LOAD_ARG_OR(linear_num_key_heads, "text_config.linear_num_key_heads", 16); \
-  LOAD_ARG_OR(linear_num_value_heads, "text_config.linear_num_value_heads", 48); \
-  LOAD_ARG_OR(full_attention_interval, "text_config.full_attention_interval", 4); \
-  LOAD_ARG_OR(attn_output_gate, "text_config.attn_output_gate", false); \
-  LOAD_ARG_OR(num_nextn_predict_layers, "text_config.mtp_num_hidden_layers", 0); \
-  LOAD_ARG_OR(attention_bias, "text_config.attention_bias", false); \
-  LOAD_ARG_OR(attention_dropout, "text_config.attention_dropout", 0.0f); \
-  LOAD_ARG_OR(initializer_range, "text_config.initializer_range", 0.02f); \
-  LOAD_ARG_OR(mlp_only_layers, "text_config.mlp_only_layers", std::vector<int32_t>()); \
-  LOAD_ARG(rope_scaling_mrope_section, "text_config.rope_parameters.mrope_section"); \
-  LOAD_ARG_OR(rope_scaling_rope_type, "text_config.rope_parameters.rope_type", "default"); \
-  LOAD_ARG_OR(partial_rotary_factor, "text_config.rope_parameters.partial_rotary_factor", 0.25f)
-
-#define LOAD_QWEN3_5_VISION_ARGS() \
-  LOAD_ARG_OR(image_token_id, "image_token_id", 248056); \
-  LOAD_ARG_OR(video_token_id, "video_token_id", 248057); \
-  LOAD_ARG_OR(vision_start_token_id, "vision_start_token_id", 248053); \
-  LOAD_ARG_OR(vision_end_token_id, "vision_end_token_id", 248054); \
-  LOAD_ARG(mm_deepstack_visual_indexes, "vision_config.deepstack_visual_indexes"); \
-  LOAD_ARG_OR(mm_num_hidden_layers, "vision_config.depth", 27); \
+#define LOAD_QWEN3_5_VISION_ARGS()                                             \
+  LOAD_ARG_OR(image_token_id, "image_token_id", 248056);                       \
+  LOAD_ARG_OR(video_token_id, "video_token_id", 248057);                       \
+  LOAD_ARG_OR(vision_start_token_id, "vision_start_token_id", 248053);         \
+  LOAD_ARG_OR(vision_end_token_id, "vision_end_token_id", 248054);             \
+  LOAD_ARG(mm_deepstack_visual_indexes,                                        \
+           "vision_config.deepstack_visual_indexes");                          \
+  LOAD_ARG_OR(mm_num_hidden_layers, "vision_config.depth", 27);                \
   LOAD_ARG_OR(mm_hidden_act, "vision_config.hidden_act", "gelu_pytorch_tanh"); \
-  LOAD_ARG_OR(mm_hidden_size, "vision_config.hidden_size", 1152); \
-  LOAD_ARG_OR(mm_num_channels, "vision_config.in_channels", 3); \
+  LOAD_ARG_OR(mm_hidden_size, "vision_config.hidden_size", 1152);              \
+  LOAD_ARG_OR(mm_num_channels, "vision_config.in_channels", 3);                \
   LOAD_ARG_OR(mm_initializer_range, "vision_config.initializer_range", 0.02f); \
-  LOAD_ARG_OR(mm_intermediate_size, "vision_config.intermediate_size", 4304); \
-  LOAD_ARG_OR(mm_num_attention_heads, "vision_config.num_heads", 16); \
-  LOAD_ARG_OR(mm_num_position_embeddings, "vision_config.num_position_embeddings", 2304); \
-  LOAD_ARG_OR(mm_projection_dim, "vision_config.out_hidden_size", 5120); \
-  LOAD_ARG_OR(mm_patch_size, "vision_config.patch_size", 16); \
-  LOAD_ARG_OR(mm_spatial_merge_size, "vision_config.spatial_merge_size", 2); \
+  LOAD_ARG_OR(mm_intermediate_size, "vision_config.intermediate_size", 4304);  \
+  LOAD_ARG_OR(mm_num_attention_heads, "vision_config.num_heads", 16);          \
+  LOAD_ARG_OR(mm_num_position_embeddings,                                      \
+              "vision_config.num_position_embeddings",                         \
+              2304);                                                           \
+  LOAD_ARG_OR(mm_projection_dim, "vision_config.out_hidden_size", 5120);       \
+  LOAD_ARG_OR(mm_patch_size, "vision_config.patch_size", 16);                  \
+  LOAD_ARG_OR(mm_spatial_merge_size, "vision_config.spatial_merge_size", 2);   \
   LOAD_ARG_OR(mm_temporal_patch_size, "vision_config.temporal_patch_size", 2); \
-  LOAD_ARG_OR_FUNC(mm_head_dim, "head_dim", [&] { \
-    return args->mm_hidden_size() / args->mm_num_attention_heads(); \
-  }); \
-  LOAD_ARG_OR(rope_scaling_rope_type, "vision_config.rope_scaling.type", "mrope")
+  LOAD_ARG_OR_FUNC(mm_head_dim, "head_dim", [&] {                              \
+    return args->mm_hidden_size() / args->mm_num_attention_heads();            \
+  });                                                                          \
+  LOAD_ARG_OR(                                                                 \
+      rope_scaling_rope_type, "vision_config.rope_scaling.type", "mrope")
 
 REGISTER_INPUT_PROCESSOR(qwen3_5, Qwen2_5_VLInputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_5, Qwen3_5ForConditionalGeneration);
@@ -273,11 +292,14 @@ REGISTER_MODEL_ARGS(qwen3_5_moe, [&] {
   LOAD_ARG_OR(num_experts, "text_config.num_experts", 512);
   LOAD_ARG_OR(num_experts_per_tok, "text_config.num_experts_per_tok", 10);
   LOAD_ARG_OR(shared_expert_intermediate_size,
-              "text_config.shared_expert_intermediate_size", 512);
+              "text_config.shared_expert_intermediate_size",
+              512);
   LOAD_ARG_OR(norm_topk_prob, "text_config.norm_topk_prob", true);
 
-  LOAD_ARG_OR(n_routed_experts, "text_config.n_routed_experts", args->num_experts());
-  SET_ARG(n_shared_experts, args->shared_expert_intermediate_size() > 0 ? 1 : 0);
+  LOAD_ARG_OR(
+      n_routed_experts, "text_config.n_routed_experts", args->num_experts());
+  SET_ARG(n_shared_experts,
+          args->shared_expert_intermediate_size() > 0 ? 1 : 0);
   SET_ARG(scoring_func, "softmax");
   SET_ARG(topk_method, "");
   SET_ARG(n_group, -1);

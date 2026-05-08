@@ -1004,8 +1004,7 @@ void gemma_rms_norm(GemmaRMSNormParams& params) {
   npu::npu_gemma_rms_norm(
       params.x, params.gamma, params.epsilon, params.rstd_out, params.norm_out);
 #elif defined(USE_MLU)
-  mlu::gemma_rms_norm(
-      params.x, params.gamma, params.epsilon, params.norm_out);
+  mlu::gemma_rms_norm(params.x, params.gamma, params.epsilon, params.norm_out);
 #else
   NOT_IMPLEMENTED();
 #endif

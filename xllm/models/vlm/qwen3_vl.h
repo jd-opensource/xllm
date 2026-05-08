@@ -545,9 +545,9 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Qwen3_VisionTransformer);
 
-
 class Qwen3_VLForConditionalGenerationImpl
-    : public Qwen3VLForConditionalGenerationBase<Qwen3_VisionTransformer, QWen3ForCausalLM> {
+    : public Qwen3VLForConditionalGenerationBase<Qwen3_VisionTransformer,
+                                                 QWen3ForCausalLM> {
  public:
   Qwen3_VLForConditionalGenerationImpl(const ModelContext& context)
       : Qwen3VLForConditionalGenerationBase(context) {}

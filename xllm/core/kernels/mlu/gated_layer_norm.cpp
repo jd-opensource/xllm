@@ -28,7 +28,7 @@ torch::Tensor gated_layer_norm(torch::Tensor& x,
   auto weight_fp32 = weight.to(torch::kFloat32);
   torch::Tensor gate_value;
   if (gate.has_value()) {
-    gate_value = gate.value().to(torch::kFloat32);;
+    gate_value = gate.value().to(torch::kFloat32);
   }
 
   if (gate.has_value() && !norm_before_gate) {
