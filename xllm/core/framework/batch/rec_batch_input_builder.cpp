@@ -22,6 +22,7 @@ limitations under the License.
 
 #include "core/util/rec_model_utils.h"
 #include "onerec_batch_input_builder.h"
+#include "onerec_xattention_batch_input_builder.h"
 #include "rec_multi_round_batch_input_builder.h"
 
 namespace xllm {
@@ -39,6 +40,18 @@ std::unique_ptr<RecBatchInputBuilder> RecBatchInputBuilder::create(
     ThreadPool* thread_pool) {
   switch (rec_type) {
     case RecType::kOneRec:
+      if (is_onerec_xattention_mode()) {
+        return std::make_unique<OneRecXAttentionBatchInputBuilder>(
+            sequence_groups,
+            allowed_max_tokens,
+            input_embeddings_vec,
+            mm_data_vec,
+            swap_block_transfer_infos,
+            batch_id,
+            args,
+            batch_forward_type,
+            thread_pool);
+      }
       return std::make_unique<OneRecBatchInputBuilder>(
           sequence_groups,
           allowed_max_tokens,

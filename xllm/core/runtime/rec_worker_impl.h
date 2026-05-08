@@ -114,9 +114,11 @@ class RecWorkerImpl : public LLMWorkerImpl {
                                      ForwardInput& processed_inputs) override;
   };
 
-  class OneRecWorkPipeline final : public RecWorkPipeline {
+  class OneRecWorkPipeline : public RecWorkPipeline {
    public:
-    explicit OneRecWorkPipeline(RecPipelineRuntime& runtime);
+    explicit OneRecWorkPipeline(
+        RecPipelineRuntime& runtime,
+        RecPipelineType pipeline_type = RecPipelineType::kOneRecDefault);
 
     ForwardInput prepare_inputs(Batch& batch) override;
 
@@ -132,6 +134,54 @@ class RecWorkerImpl : public LLMWorkerImpl {
     std::unique_ptr<RecSampler> rec_sampler_;
     std::unique_ptr<RecConstrainedDecoding> constrained_decoding_;
     std::unique_ptr<ThreadPool> filter_mask_threadpool_;
+  };
+
+  class OneRecXAttentionWorkPipeline final : public RecWorkPipeline {
+   public:
+    explicit OneRecXAttentionWorkPipeline(RecPipelineRuntime& runtime);
+
+    ForwardInput prepare_inputs(Batch& batch) override;
+
+    void prepare_work_before_execute(const ForwardInput& inputs,
+                                     ForwardInput& processed_inputs) override;
+
+    std::optional<ForwardOutput> step(const ForwardInput& input) override;
+
+   private:
+    folly::SemiFuture<torch::Tensor> prepare_filter_mask_async(
+        const std::vector<std::vector<int32_t>>& generated_tokens);
+
+    void allocate_unshared_kv_caches();
+
+    void prepare_unshared_kv_caches_for_input(
+        const ForwardInput& inputs,
+        OneRecXAttentionParams& onerec_params);
+
+    void execute_cache_select(const torch::Tensor& out_token_index,
+                              const torch::Tensor& out_beam_count_prefix_sums,
+                              OneRecXAttentionParams& onerec_params,
+                              int32_t round,
+                              int32_t batch_size,
+                              int32_t beam_width,
+                              int32_t num_layers);
+
+    std::unique_ptr<RecSampler> rec_sampler_;
+    std::unique_ptr<RecConstrainedDecoding> constrained_decoding_;
+    std::unique_ptr<ThreadPool> filter_mask_threadpool_;
+    std::vector<torch::Tensor> cached_unshared_k_caches_;
+    std::vector<torch::Tensor> cached_unshared_v_caches_;
+    int32_t max_seqs_per_batch_ = 0;
+    int32_t beam_width_ = 1;
+    int32_t max_decode_step_ = 0;
+  };
+
+  class LlmRecWithMmDataWorkPipeline final : public RecWorkPipeline {
+   public:
+    explicit LlmRecWithMmDataWorkPipeline(RecPipelineRuntime& runtime)
+        : RecWorkPipeline(runtime) {}
+
+    void prepare_work_before_execute(const ForwardInput& inputs,
+                                     ForwardInput& processed_inputs) override;
   };
 
   class LlmRecMultiRoundPipeline final : public RecWorkPipeline {

@@ -172,7 +172,7 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
       // beam search expands or replaces the group-owned Sequence instances.
       refresh_sequences_from_groups();
     }
-    if (FLAGS_enable_rec_prefill_only) {
+    if (use_legacy_onerec_prefill_only_contract()) {
       refresh_onerec_prefill_output_targets();
     } else {
       refresh_output_targets();
@@ -571,7 +571,8 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
   if (beam_width <= 1) {
     return;
   }
-  int32_t total_rounds = get_rec_multi_round_decode_rounds();
+  int32_t total_rounds =
+      static_cast<int32_t>(output.beam_sequence_group.size(2));
   size_t num_groups = sequence_groups_.size();
   if (num_groups == 0) {
     // Fallback: treat sequences_ as single group

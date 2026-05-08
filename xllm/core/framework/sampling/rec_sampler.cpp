@@ -150,6 +150,7 @@ RecSampler::create_sampling_strategy(RecPipelineType type,
     case RecPipelineType::kLlmRecWithMmData:
       return std::make_unique<DefaultSamplingStrategy>(sampler);
     case RecPipelineType::kOneRecDefault:
+    case RecPipelineType::kOneRecXAttentionPipeline:
       return std::make_unique<OneRecConstrainedSamplingStrategy>(sampler);
     default:
       LOG(FATAL) << "Unknown RecPipelineType: " << static_cast<int32_t>(type);
