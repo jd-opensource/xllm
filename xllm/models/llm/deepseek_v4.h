@@ -549,6 +549,15 @@ class DeepseekV4ModelImpl
     return c10::nullopt;
   }
 
+  static c10::optional<torch::Tensor> as_empty_int32_tensor(
+      const torch::Tensor& reference) {
+    if (!reference.defined()) {
+      return c10::nullopt;
+    }
+    return c10::optional<torch::Tensor>(torch::empty(
+        {0}, torch::dtype(torch::kInt32).device(reference.device())));
+  }
+
   static int64_t tensor_max_or_zero(const torch::Tensor& tensor) {
     if (!tensor.defined() || tensor.numel() == 0) {
       return 0;
@@ -608,9 +617,10 @@ class DeepseekV4ModelImpl
     // Prefill KV is packed into PA_ND blocks before attention. Keep the
     // metadata in the same layout and do not build TND-only cu_seqlens inputs.
     const char* layout_kv = "PA_ND";
+    auto empty_int32_opt = as_empty_int32_tensor(dsa.actual_seq_lengths_query);
     auto cu_seqlens_ori_kv_opt =
         is_prefill ? as_optional_tensor(dsa.actual_seq_lengths_query)
-                   : c10::optional<torch::Tensor>(c10::nullopt);
+                   : empty_int32_opt;
 
     xllm::kernel::SparseAttnSharedkvMetadataParams c1_params;
     c1_params.num_heads_q = tp_num_heads_;
@@ -618,8 +628,8 @@ class DeepseekV4ModelImpl
     c1_params.head_dim = head_dim_;
     c1_params.cu_seqlens_q = as_optional_tensor(dsa.actual_seq_lengths_query);
     c1_params.cu_seqlens_ori_kv = cu_seqlens_ori_kv_opt;
-    c1_params.cu_seqlens_cmp_kv = c10::nullopt;
-    c1_params.seqused_q = c10::nullopt;
+    c1_params.cu_seqlens_cmp_kv = empty_int32_opt;
+    c1_params.seqused_q = empty_int32_opt;
     c1_params.seqused_kv = as_optional_tensor(dsa.actual_seq_lengths_kv);
     c1_params.batch_size = batch_size;
     c1_params.max_seqlen_q = max_seqlen_q;
@@ -643,8 +653,8 @@ class DeepseekV4ModelImpl
     c4_params.head_dim = head_dim_;
     c4_params.cu_seqlens_q = as_optional_tensor(dsa.actual_seq_lengths_query);
     c4_params.cu_seqlens_ori_kv = cu_seqlens_ori_kv_opt;
-    c4_params.cu_seqlens_cmp_kv = c10::nullopt;
-    c4_params.seqused_q = c10::nullopt;
+    c4_params.cu_seqlens_cmp_kv = empty_int32_opt;
+    c4_params.seqused_q = empty_int32_opt;
     c4_params.seqused_kv = as_optional_tensor(dsa.actual_seq_lengths_kv);
     c4_params.batch_size = batch_size;
     c4_params.max_seqlen_q = max_seqlen_q;
@@ -668,8 +678,8 @@ class DeepseekV4ModelImpl
     c128_params.head_dim = head_dim_;
     c128_params.cu_seqlens_q = as_optional_tensor(dsa.actual_seq_lengths_query);
     c128_params.cu_seqlens_ori_kv = cu_seqlens_ori_kv_opt;
-    c128_params.cu_seqlens_cmp_kv = c10::nullopt;
-    c128_params.seqused_q = c10::nullopt;
+    c128_params.cu_seqlens_cmp_kv = empty_int32_opt;
+    c128_params.seqused_q = empty_int32_opt;
     c128_params.seqused_kv = as_optional_tensor(dsa.actual_seq_lengths_kv);
     c128_params.batch_size = batch_size;
     c128_params.max_seqlen_q = max_seqlen_q;

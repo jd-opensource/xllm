@@ -114,6 +114,8 @@ std::tuple<at::Tensor, at::Tensor> quant_lightning_indexer(
   // convert str
   char* query_layout_ptr = const_cast<char*>(query_layout_str.c_str());
   char* key_layout_ptr = const_cast<char*>(key_layout_str.c_str());
+  const int64_t state_cache_stride_dim0 = key.stride(0);
+  const int64_t scale_stride_dim0 = key_dequant_scale.stride(0);
 
   EXEC_NPU_CMD(aclnnQuantLightningIndexer,
                query,
@@ -135,6 +137,8 @@ std::tuple<at::Tensor, at::Tensor> quant_lightning_indexer(
                next_tokens,
                cmp_ratio,
                return_value,
+               state_cache_stride_dim0,
+               scale_stride_dim0,
                sparse_indices_out,
                sparse_values_out);
 

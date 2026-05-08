@@ -51,6 +51,14 @@ at::Tensor construct_sparse_attn_sharedkv_softmax_lse_tensor(
   return at::empty(softmax_lse_shape, q.options().dtype(at::kFloat));
 }
 
+int64_t get_sparse_attn_sharedkv_kv_stride(
+    const c10::optional<at::Tensor>& kv) {
+  if (!kv.has_value() || !kv.value().defined() || kv.value().dim() == 0) {
+    return 0;
+  }
+  return kv.value().stride(0);
+}
+
 }  // namespace
 
 std::tuple<at::Tensor, at::Tensor> sparse_attn_sharedkv(
@@ -86,6 +94,8 @@ std::tuple<at::Tensor, at::Tensor> sparse_attn_sharedkv(
   std::string layout_kv_str = std::string(layout_kv);
   auto layout_q_arg = const_cast<char*>(layout_q_str.c_str());
   auto layout_kv_arg = const_cast<char*>(layout_kv_str.c_str());
+  const int64_t ori_kv_stride = get_sparse_attn_sharedkv_kv_stride(ori_kv);
+  const int64_t cmp_kv_stride = get_sparse_attn_sharedkv_kv_stride(cmp_kv);
 
   EXEC_NPU_CMD(aclnnSparseAttnSharedkv,
                q,
@@ -106,6 +116,8 @@ std::tuple<at::Tensor, at::Tensor> sparse_attn_sharedkv(
                cmp_ratio,
                ori_mask_mode,
                cmp_mask_mode,
+               ori_kv_stride,
+               cmp_kv_stride,
                ori_win_left,
                ori_win_right,
                layout_q_arg,

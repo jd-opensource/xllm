@@ -731,6 +731,14 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
       << "DSAttention requires precomputed sparse metadata for compress_ratio="
       << compress_ratio_i;
 
+  c10::optional<torch::Tensor> cu_seqlens_ori_kv_for_attn = c10::nullopt;
+  if (isprefill) {
+    // Prefill packs ori_kv into temporary PA_ND blocks; pass the same
+    // cu-seqlens shape used by vllm-ascend and the precomputed metadata.
+    cu_seqlens_ori_kv_for_attn =
+        as_optional(attn_metadata.actual_seq_lengths_query);
+  }
+
   auto [attn_output, output_lse] = xllm::kernel::npu::sparse_attn_sharedkv(
       /*q=*/q,
       /*ori_kv=*/as_optional(ori_kv_for_attn),
@@ -743,7 +751,7 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
       /*cmp_block_table=*/
       compress_ratio_i > 1 ? as_optional(cmp_block_table) : c10::nullopt,
       /*cu_seqlens_q=*/as_optional(attn_metadata.actual_seq_lengths_query),
-      /*cu_seqlens_ori_kv=*/c10::nullopt,
+      /*cu_seqlens_ori_kv=*/cu_seqlens_ori_kv_for_attn,
       /*cu_seqlens_cmp_kv=*/c10::nullopt,
       /*seqused_q=*/c10::nullopt,
       /*seqused_kv=*/as_optional(attn_metadata.actual_seq_lengths_kv),

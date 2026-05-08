@@ -20,6 +20,17 @@ limitations under the License.
 
 namespace xllm::kernel::npu {
 
+namespace {
+
+auto get_valid_tensor = [](const c10::optional<at::Tensor>& tensor_opt,
+                           at::Device device) {
+  return tensor_opt.has_value()
+             ? tensor_opt
+             : torch::empty({0}, torch::dtype(torch::kInt32).device(device));
+};
+
+}  // namespace
+
 at::Tensor sparse_attn_sharedkv_metadata(
     int64_t num_heads_q,
     int64_t num_heads_kv,
@@ -43,14 +54,29 @@ at::Tensor sparse_attn_sharedkv_metadata(
     c10::string_view layout_kv,
     bool has_ori_kv,
     bool has_cmp_kv) {
-  at::Tensor output;
+  constexpr int64_t OUTPUT_SIZE = 1024;
+  at::Device output_device(std::string("npu"));
   if (cu_seqlens_q.has_value()) {
-    output = torch::zeros(
-        {1024},
-        torch::dtype(torch::kInt32).device(cu_seqlens_q.value().device()));
-  } else {
-    output = torch::zeros({1024}, torch::dtype(torch::kInt32).device("npu"));
+    output_device = cu_seqlens_q.value().device();
+  } else if (cu_seqlens_ori_kv.has_value()) {
+    output_device = cu_seqlens_ori_kv.value().device();
+  } else if (cu_seqlens_cmp_kv.has_value()) {
+    output_device = cu_seqlens_cmp_kv.value().device();
+  } else if (seqused_q.has_value()) {
+    output_device = seqused_q.value().device();
+  } else if (seqused_kv.has_value()) {
+    output_device = seqused_kv.value().device();
   }
+
+  at::Tensor output = torch::zeros(
+      {OUTPUT_SIZE}, torch::dtype(torch::kInt32).device(output_device));
+  auto cu_seqlens_q_val = get_valid_tensor(cu_seqlens_q, output_device);
+  auto cu_seqlens_ori_kv_val =
+      get_valid_tensor(cu_seqlens_ori_kv, output_device);
+  auto cu_seqlens_cmp_kv_val =
+      get_valid_tensor(cu_seqlens_cmp_kv, output_device);
+  auto seqused_q_val = get_valid_tensor(seqused_q, output_device);
+  auto seqused_kv_val = get_valid_tensor(seqused_kv, output_device);
 
   // convert str
   std::string layout_q_str = std::string(layout_q);
@@ -59,11 +85,11 @@ at::Tensor sparse_attn_sharedkv_metadata(
   char* layout_kv_ptr = const_cast<char*>(layout_kv_str.c_str());
 
   EXEC_NPU_CMD(aclnnSparseAttnSharedkvMetadata,
-               cu_seqlens_q,
-               cu_seqlens_ori_kv,
-               cu_seqlens_cmp_kv,
-               seqused_q,
-               seqused_kv,
+               cu_seqlens_q_val,
+               cu_seqlens_ori_kv_val,
+               cu_seqlens_cmp_kv_val,
+               seqused_q_val,
+               seqused_kv_val,
                num_heads_q,
                num_heads_kv,
                head_dim,
