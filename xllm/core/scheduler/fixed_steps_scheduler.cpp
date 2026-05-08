@@ -37,8 +37,29 @@ limitations under the License.
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 #include "util/rec_model_utils.h"
+#include "util/scope_guard.h"
 
 namespace xllm {
+
+namespace {
+
+void fail_step_requests(const std::vector<std::shared_ptr<Request>>& requests,
+                        KVCacheManager* kv_cache_manager,
+                        AsyncResponseProcessor* response_processor,
+                        bool requires_kv_cache,
+                        const Status& status) {
+  for (const std::shared_ptr<Request>& request : requests) {
+    if (request == nullptr) {
+      continue;
+    }
+    if (requires_kv_cache) {
+      kv_cache_manager->deallocate(request.get());
+    }
+    response_processor->process_failed_request(request, status);
+  }
+}
+
+}  // namespace
 
 FixedStepsScheduler::FixedStepsScheduler(Engine* engine, const Options& options)
     : ContinuousScheduler(engine, options),
@@ -352,28 +373,59 @@ void FixedStepsScheduler::step(const absl::Duration& timeout) {
     auto function = [this,
                      batches = std::move(result.batches),
                      requests = std::move(result.requests),
-                     sequences = std::move(result.sequences)]() mutable {
-      engine_->step(batches);
+                     sequences = std::move(result.sequences),
+                     requires_kv_cache =
+                         scheduler_pipeline_ != nullptr &&
+                         scheduler_pipeline_->requires_kv_cache()]() mutable {
+      UNUSED_PARAMETER(sequences);
+      xllm::ScopeGuard step_guard([this]() {
+        if (options_.rec_worker_max_concurrency() > 1) {
+          step_semaphore_.release();
+        }
+      });
 
-      // After step completes, check and process finished/cancelled requests
-      std::vector<std::shared_ptr<Request>> finished_requests;
-      for (auto& request : requests) {
-        if (request) {
-          request->update_connection_status();
-          if (request->finished() || request->cancelled()) {
-            kv_cache_manager_->deallocate(request.get());
-            finished_requests.emplace_back(request);
+      try {
+        engine_->step(batches);
+        // kv_cache_manager_->reset_transfer_infos();
+
+        // After step completes, check and process finished/cancelled requests
+        std::vector<std::shared_ptr<Request>> finished_requests;
+        for (auto& request : requests) {
+          if (request) {
+            request->update_connection_status();
+            if (request->finished() || request->cancelled()) {
+              if (requires_kv_cache) {
+                kv_cache_manager_->deallocate(request.get());
+              }
+              finished_requests.emplace_back(request);
+            }
           }
         }
-      }
 
-      // Process finished requests
-      if (!finished_requests.empty()) {
-        response_processor_->process_completed_requests(finished_requests);
-      }
-
-      if (options_.rec_worker_max_concurrency() > 1) {
-        step_semaphore_.release();
+        // Process finished requests
+        if (!finished_requests.empty()) {
+          response_processor_->process_completed_requests(finished_requests);
+        }
+      } catch (const std::exception& e) {
+        // kv_cache_manager_->reset_transfer_infos();
+        const std::string error_message =
+            "Engine step failed: " + std::string(e.what());
+        LOG(ERROR) << error_message;
+        fail_step_requests(requests,
+                           kv_cache_manager_,
+                           response_processor_.get(),
+                           requires_kv_cache,
+                           {StatusCode::UNKNOWN, error_message});
+      } catch (...) {
+        // kv_cache_manager_->reset_transfer_infos();
+        const std::string error_message =
+            "Engine step failed: unknown exception";
+        LOG(ERROR) << error_message;
+        fail_step_requests(requests,
+                           kv_cache_manager_,
+                           response_processor_.get(),
+                           requires_kv_cache,
+                           {StatusCode::UNKNOWN, error_message});
       }
     };
 

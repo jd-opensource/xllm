@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -50,6 +51,7 @@ limitations under the License.
 #include "framework/state_dict/rec_vocab_dict.h"
 #include "models/model_registry.h"
 #include "util/env_var.h"
+#include "util/scope_guard.h"
 #include "util/timer.h"
 
 namespace xllm {
@@ -3144,28 +3146,44 @@ folly::SemiFuture<std::optional<ForwardOutput>> RecWorkerImpl::step_async(
   size_t index;
   index_queue_.wait_dequeue(index);
   auto future = promise.getSemiFuture();
+  // Copy the input because the scheduled task may run after step_async returns.
+  ForwardInput input_copy = input;
 
   // Use schedule() to assign tasks, letting ThreadPool automatically select
   // idle threads The logic for allocating instance_id happens when the task
   // executes (see lambda below)
   step_threadpool_->schedule_with_tid(
-      [this, &input, index, promise = std::move(promise)]() mutable {
-        auto stream_guard =
-            work_pipelines_[index]->runtime().stream->set_stream_guard();
+      [this,
+       input = std::move(input_copy),
+       index,
+       promise = std::move(promise)]() mutable {
+        xllm::ScopeGuard index_guard([&] { index_queue_.enqueue(index); });
+        try {
+          auto stream_guard =
+              work_pipelines_[index]->runtime().stream->set_stream_guard();
 
-        ForwardInput input_on_device;
-        work_pipelines_[index]->prepare_work_before_execute(input,
-                                                            input_on_device);
+          ForwardInput input_on_device;
+          work_pipelines_[index]->prepare_work_before_execute(input,
+                                                              input_on_device);
 
-        if (hierarchy_kv_cache_transfer_ != nullptr) {
-          hierarchy_kv_cache_transfer_->set_layer_synchronizer(
-              input_on_device.input_params);
+          if (hierarchy_kv_cache_transfer_ != nullptr) {
+            hierarchy_kv_cache_transfer_->set_layer_synchronizer(
+                input_on_device.input_params);
+          }
+
+          const auto output = work_pipelines_[index]->step(input_on_device);
+          promise.setValue(output);
+        } catch (const std::exception& e) {
+          LOG(ERROR) << "RecWorkerImpl::step_async failed on pipeline " << index
+                     << ": " << e.what();
+          promise.setException(
+              folly::exception_wrapper(std::current_exception()));
+        } catch (...) {
+          LOG(ERROR) << "RecWorkerImpl::step_async failed on pipeline " << index
+                     << ": unknown exception";
+          promise.setException(
+              folly::exception_wrapper(std::current_exception()));
         }
-
-        const auto output = work_pipelines_[index]->step(input_on_device);
-        promise.setValue(output);
-
-        index_queue_.enqueue(index);
       },
       index);
 
