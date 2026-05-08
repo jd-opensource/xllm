@@ -36,7 +36,6 @@ limitations under the License.
 #include "framework/sampling/sampling_params.h"
 #include "runtime/params_utils.h"
 #include "util/blocking_counter.h"
-#include "util/math_utils.h"
 #include "util/slice.h"
 #include "util/tensor_helper.h"
 #include "util/threadpool.h"

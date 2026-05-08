@@ -17,7 +17,6 @@ cc_library(
     json_reader.h
     model_config_utils.h
     lightweightsemaphore.h
-    math_utils.h
     net.h
     pretty_print.h
     rec_model_utils.h

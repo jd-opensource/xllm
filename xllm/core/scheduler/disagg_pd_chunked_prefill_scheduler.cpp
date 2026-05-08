@@ -18,7 +18,7 @@ limitations under the License.
 #include <algorithm>
 
 #include "framework/batch/batch_factory.h"
-#include "util/math_utils.h"
+#include "util/utils.h"
 
 namespace xllm {
 

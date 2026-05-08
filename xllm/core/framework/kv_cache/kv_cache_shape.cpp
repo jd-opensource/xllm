@@ -22,7 +22,7 @@ limitations under the License.
 #include <utility>
 
 #include "common/global_flags.h"
-#include "util/math_utils.h"
+#include "util/utils.h"
 #include "worker.pb.h"
 
 namespace xllm {
