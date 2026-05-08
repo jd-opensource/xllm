@@ -16,6 +16,7 @@ limitations under the License.
 #include "scheduler/disagg_chunked_pd_scheduler.h"
 
 #include <algorithm>
+
 #include "framework/batch/batch_factory.h"
 #include "util/math_utils.h"
 
@@ -28,8 +29,8 @@ bool exceeds_block_capacity(Sequence* sequence, KVCacheManager* manager) {
   if (block_size == 0) {
     return true;
   }
-  const size_t needed_blocks =
-      util::ceil_div(static_cast<size_t>(sequence->num_prompt_tokens()), block_size);
+  const size_t needed_blocks = util::ceil_div(
+      static_cast<size_t>(sequence->num_prompt_tokens()), block_size);
   const std::vector<size_t> free_blocks = manager->num_free_blocks();
   const std::vector<size_t> used_blocks = manager->num_used_blocks();
   size_t max_blocks = 0;
@@ -71,11 +72,11 @@ bool DisaggChunkedPDScheduler::alloc_chunk(Sequence* sequence,
   CHECK(actual_tokens != nullptr);
 
   const size_t kv_tokens = sequence->kv_cache_tokens_num();
-  const PDChunkBudget budget =
-      pick_pd_chunk_budget(kv_tokens,
-                           sequence->num_tokens(),
-                           static_cast<size_t>(options_.max_tokens_per_chunk_for_prefill()),
-                           token_budget);
+  const PDChunkBudget budget = pick_pd_chunk_budget(
+      kv_tokens,
+      sequence->num_tokens(),
+      static_cast<size_t>(options_.max_tokens_per_chunk_for_prefill()),
+      token_budget);
   *actual_tokens = budget.next_tokens;
   if (budget.next_tokens == 0) {
     return false;
@@ -150,7 +151,7 @@ std::vector<Batch> DisaggChunkedPDScheduler::prepare_batch() {
   while (request_queue_.read(request)) {
     CHECK(request);
     if (!enable_prefix_cache_) {
-      request->expand_sequences(false);
+      request->expand_sequences(/*shared_prefix=*/false);
     }
 
     if (request->offline()) {
