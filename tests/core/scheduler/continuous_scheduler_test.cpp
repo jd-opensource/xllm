@@ -333,7 +333,7 @@ TEST(ContinuousSchedulerFactoryTest,
             opt.max_tokens_per_chunk_for_prefill());
 }
 
-TEST(SchedulerFactoryTest, DisaggPDChunkedUsesDisaggChunkedPDKind) {
+TEST(SchedulerFactoryTest, DisaggPDChunkedPrefillKind) {
   ScopedBoolFlagValue use_mix_scheduler(FLAGS_use_mix_scheduler, false);
   ContinuousScheduler::Options opt =
       create_scheduler_options(10000, 256, 2, 1024, 1);
@@ -341,7 +341,8 @@ TEST(SchedulerFactoryTest, DisaggPDChunkedUsesDisaggChunkedPDKind) {
   opt.enable_pd_ooc() = false;
   opt.enable_chunked_prefill() = true;
 
-  EXPECT_EQ(select_scheduler_kind(opt), SchedulerKind::DISAGG_CHUNKED_PD);
+  EXPECT_EQ(select_scheduler_kind(opt),
+            SchedulerKind::DISAGG_PD_CHUNKED_PREFILL);
 }
 
 TEST(SchedulerFactoryTest, DisaggPDOOCKeepsPDOOCKind) {

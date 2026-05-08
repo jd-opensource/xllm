@@ -18,7 +18,7 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "scheduler/chunked_prefill_scheduler.h"
 #include "scheduler/continuous_scheduler.h"
-#include "scheduler/disagg_chunked_pd_scheduler.h"
+#include "scheduler/disagg_pd_chunked_prefill_scheduler.h"
 #include "scheduler/disagg_pd_scheduler.h"
 #include "scheduler/dit_scheduler.h"
 #include "scheduler/fixed_steps_scheduler.h"
@@ -40,7 +40,7 @@ SchedulerKind select_scheduler_kind(
       return SchedulerKind::PD_OOC;
     }
     if (options.enable_chunked_prefill()) {
-      return SchedulerKind::DISAGG_CHUNKED_PD;
+      return SchedulerKind::DISAGG_PD_CHUNKED_PREFILL;
     }
     return SchedulerKind::DISAGG_PD;
   }
@@ -69,8 +69,8 @@ std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
       return std::make_unique<MixScheduler>(engine, options);
     case SchedulerKind::PD_OOC:
       return std::make_unique<PDOOCScheduler>(engine, options);
-    case SchedulerKind::DISAGG_CHUNKED_PD:
-      return std::make_unique<DisaggChunkedPDScheduler>(engine, options);
+    case SchedulerKind::DISAGG_PD_CHUNKED_PREFILL:
+      return std::make_unique<DisaggPDChunkedPrefillScheduler>(engine, options);
     case SchedulerKind::DISAGG_PD:
       return std::make_unique<DisaggPDScheduler>(engine, options);
     case SchedulerKind::PREFILL_ONLY:

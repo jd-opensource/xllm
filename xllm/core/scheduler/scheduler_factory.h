@@ -32,7 +32,7 @@ enum class SchedulerKind : int8_t {
   MIX = 3,
   ZERO_EVICTION = 4,
   DISAGG_PD = 5,
-  DISAGG_CHUNKED_PD = 6,
+  DISAGG_PD_CHUNKED_PREFILL = 6,
   PD_OOC = 7
 };
 

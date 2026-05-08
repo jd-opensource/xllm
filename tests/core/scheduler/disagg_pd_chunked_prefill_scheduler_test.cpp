@@ -13,25 +13,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "scheduler/disagg_chunked_pd_scheduler.h"
+#include "scheduler/disagg_pd_chunked_prefill_scheduler.h"
 
 #include <gtest/gtest.h>
 
 namespace xllm {
 
-TEST(DisaggChunkedPDSchedulerTest, PicksCurrentChunkBudget) {
+TEST(DisaggPDChunkedPrefillSchedulerTest, PicksCurrentChunkBudget) {
   const PDChunkBudget budget = pick_pd_chunk_budget(32, 96, 40, 64);
   EXPECT_EQ(budget.next_tokens, 40);
   EXPECT_EQ(budget.max_tokens, 72);
 }
 
-TEST(DisaggChunkedPDSchedulerTest, LastPromptChunkStopsAtPromptEnd) {
+TEST(DisaggPDChunkedPrefillSchedulerTest, LastPromptChunkStopsAtPromptEnd) {
   const PDChunkBudget budget = pick_pd_chunk_budget(80, 96, 40, 64);
   EXPECT_EQ(budget.next_tokens, 16);
   EXPECT_EQ(budget.max_tokens, 96);
 }
 
-TEST(DisaggChunkedPDSchedulerTest, EmptyBudgetRejectsSchedule) {
+TEST(DisaggPDChunkedPrefillSchedulerTest, EmptyBudgetRejectsSchedule) {
   const PDChunkBudget budget = pick_pd_chunk_budget(32, 96, 40, 0);
   EXPECT_EQ(budget.next_tokens, 0);
   EXPECT_EQ(budget.max_tokens, 32);

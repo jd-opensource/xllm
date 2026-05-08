@@ -11,7 +11,7 @@ cc_library(
     chunked_prefill_scheduler.h
     zero_eviction_scheduler.h
     continuous_scheduler.h
-    disagg_chunked_pd_scheduler.h
+    disagg_pd_chunked_prefill_scheduler.h
     disagg_pd_scheduler.h
     pd_ooc_scheduler.h
     async_response_processor.h
@@ -27,7 +27,7 @@ cc_library(
     chunked_prefill_scheduler.cpp
     zero_eviction_scheduler.cpp
     continuous_scheduler.cpp
-    disagg_chunked_pd_scheduler.cpp
+    disagg_pd_chunked_prefill_scheduler.cpp
     disagg_pd_scheduler.cpp
     pd_ooc_scheduler.cpp
     async_response_processor.cpp

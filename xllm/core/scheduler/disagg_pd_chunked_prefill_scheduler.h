@@ -36,10 +36,10 @@ PDChunkBudget pick_pd_chunk_budget(size_t kv_tokens,
                                    size_t max_chunk,
                                    size_t remaining_budget);
 
-class DisaggChunkedPDScheduler final : public DisaggPDScheduler {
+class DisaggPDChunkedPrefillScheduler final : public DisaggPDScheduler {
  public:
-  DisaggChunkedPDScheduler(Engine* engine, const Options& options);
-  ~DisaggChunkedPDScheduler() override = default;
+  DisaggPDChunkedPrefillScheduler(Engine* engine, const Options& options);
+  ~DisaggPDChunkedPrefillScheduler() override = default;
 
  protected:
   std::vector<Batch> prepare_batch() override;

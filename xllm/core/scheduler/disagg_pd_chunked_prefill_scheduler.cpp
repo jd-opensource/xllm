@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "scheduler/disagg_chunked_pd_scheduler.h"
+#include "scheduler/disagg_pd_chunked_prefill_scheduler.h"
 
 #include <algorithm>
 
@@ -58,16 +58,17 @@ PDChunkBudget pick_pd_chunk_budget(size_t kv_tokens,
   return budget;
 }
 
-DisaggChunkedPDScheduler::DisaggChunkedPDScheduler(Engine* engine,
-                                                   const Options& options)
+DisaggPDChunkedPrefillScheduler::DisaggPDChunkedPrefillScheduler(
+    Engine* engine,
+    const Options& options)
     : DisaggPDScheduler(engine, options) {
   CHECK(!enable_prefix_cache_)
-      << "disagg chunked pd scheduler does not support prefix cache";
+      << "disagg pd chunked prefill scheduler does not support prefix cache";
 }
 
-bool DisaggChunkedPDScheduler::alloc_chunk(Sequence* sequence,
-                                           size_t token_budget,
-                                           size_t* actual_tokens) {
+bool DisaggPDChunkedPrefillScheduler::alloc_chunk(Sequence* sequence,
+                                                  size_t token_budget,
+                                                  size_t* actual_tokens) {
   CHECK(sequence != nullptr);
   CHECK(actual_tokens != nullptr);
 
@@ -84,7 +85,7 @@ bool DisaggChunkedPDScheduler::alloc_chunk(Sequence* sequence,
   return kv_cache_manager_->allocate(sequence, budget.max_tokens);
 }
 
-void DisaggChunkedPDScheduler::schedule_waiting_prefill(
+void DisaggPDChunkedPrefillScheduler::schedule_waiting_prefill(
     RequestPriorityQueue& queue,
     size_t& remaining_token_budget,
     size_t& remaining_seq_budget,
@@ -142,7 +143,7 @@ void DisaggChunkedPDScheduler::schedule_waiting_prefill(
   }
 }
 
-std::vector<Batch> DisaggChunkedPDScheduler::prepare_batch() {
+std::vector<Batch> DisaggPDChunkedPrefillScheduler::prepare_batch() {
   if (options_.instance_role() == InstanceRole::DECODE) {
     return ContinuousScheduler::prepare_batch();
   }
