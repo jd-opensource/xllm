@@ -306,9 +306,10 @@ class DeepseekV4ModelImpl
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& input_params) override {
     torch::NoGradGuard no_grad;
-    if (tokens.numel() == 0) {
+    const bool is_empty_dp_rank = tokens.numel() == 0;
+    if (is_empty_dp_rank) {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
-      positions = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
+      positions = torch::tensor({0}).to(torch::kInt32).to(tokens.device());
     }
 
     auto inputs_embeds = input_params.input_embedding;
@@ -325,6 +326,9 @@ class DeepseekV4ModelImpl
     positions = maybe_to_device(positions, runtime_device);
 
     auto modified_input_params = input_params;
+    if (is_empty_dp_rank) {
+      fill_empty_dp_rank_input_params(modified_input_params, kv_caches);
+    }
     auto& dp_token_nums = modified_input_params.dp_global_token_nums;
     // DP helper: keep zero entries at least 1 to avoid empty slices/padding
     // in xllm DP utilities. DeepSeek V4 not use DP today.
@@ -557,6 +561,62 @@ class DeepseekV4ModelImpl
       return max_seqlen_tensor.max().item<int64_t>();
     }
     return tensor_max_or_zero(fallback_tensor);
+  }
+
+  void fill_empty_dp_rank_input_params(ModelInputParams& params,
+                                       std::vector<KVCache>& kv_caches) const {
+    auto cpu_int_options = torch::TensorOptions()
+                               .dtype(torch::kInt32)
+                               .device(torch::kCPU)
+                               .pinned_memory(true);
+    params.num_sequences = 1;
+    params.kv_max_seq_len = std::max<uint32_t>(params.kv_max_seq_len, 1);
+    params.q_max_seq_len = std::max<uint32_t>(params.q_max_seq_len, 1);
+    params.kv_seq_lens_vec = {1};
+    params.q_seq_lens_vec = {1};
+    params.kv_seq_lens = torch::tensor(params.kv_seq_lens_vec, cpu_int_options);
+    params.q_seq_lens = torch::tensor(params.q_seq_lens_vec, cpu_int_options);
+    params.q_cu_seq_lens = torch::tensor({1}, cpu_int_options);
+    params.kv_cache_tokens_nums = torch::tensor({1}, cpu_int_options);
+    params.kv_cache_tokens_nums_host = {1};
+    params.new_cache_slots = torch::tensor({0}, cpu_int_options);
+    params.block_tables = torch::zeros({1, 1}, cpu_int_options);
+
+    if (!params.multi_block_tables.empty()) {
+      return;
+    }
+
+    const int32_t manager_num = static_cast<int32_t>(group_infos_.size());
+    params.multi_block_tables.reserve(manager_num);
+    for (int32_t manager_id = 0; manager_id < manager_num; ++manager_id) {
+      int64_t block_num = 1;
+      if (!kv_caches.empty()) {
+        block_num =
+            empty_dp_rank_cache_blocks_for_group(manager_id, kv_caches.front());
+      }
+      block_num = std::max<int64_t>(block_num, 1);
+      params.multi_block_tables.push_back(
+          torch::zeros({1, block_num}, cpu_int_options));
+    }
+  }
+
+  int64_t empty_dp_rank_cache_blocks_for_group(int32_t group_id,
+                                               const KVCache& kv_cache) const {
+    if (group_id < 0 || group_id >= static_cast<int32_t>(group_infos_.size())) {
+      return 1;
+    }
+    const auto& group_info = group_infos_[group_id];
+    const int64_t block_size = std::max<int64_t>(group_info.block_size, 1);
+    torch::Tensor cache;
+    if (group_info.type == DSACacheType::SLIDING_WINDOW) {
+      cache = kv_cache.get_swa_cache();
+    } else if (group_info.type == DSACacheType::TOKEN) {
+      cache = kv_cache.get_k_cache();
+    }
+    if (!cache.defined() || cache.dim() == 0) {
+      return 1;
+    }
+    return std::max<int64_t>((cache.size(0) + block_size - 1) / block_size, 1);
   }
 
   void build_precomputed_metadata(layer::DSAMetadata& dsa) const {
