@@ -106,8 +106,12 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
     hccl_pg_options->global_ranks_in_group = uint32_ranks;
     rank = local_rank;
   }
-  auto store =
-      create_tcp_store(resolve_tcp_store_host(host, rank_size), port, rank);
+  // Single-rank process groups do not need rendezvous with another worker.
+  // Use an ephemeral localhost port to avoid collisions with stale TCPStore
+  // listeners from previous abnormal exits in dense same-host launches.
+  const int32_t store_port = rank_size == 1 ? 0 : port;
+  auto store = create_tcp_store(
+      resolve_tcp_store_host(host, rank_size), store_port, rank);
   pg_ = std::make_unique<c10d_npu::ProcessGroupHCCL>(
       store, rank, rank_size, hccl_pg_options);
 }
@@ -152,8 +156,9 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
               << ranks_ss.str();
   }
 
+  const int32_t store_port = rank_size == 1 ? 0 : port;
   auto store = create_tcp_store(
-      resolve_tcp_store_host(host, rank_size), port, local_rank);
+      resolve_tcp_store_host(host, rank_size), store_port, local_rank);
   pg_ = std::make_unique<c10d_npu::ProcessGroupHCCL>(
       store, local_rank, rank_size, hccl_pg_options);
 }

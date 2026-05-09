@@ -21,7 +21,6 @@ limitations under the License.
 #include <cctype>
 #include <cstdint>
 #include <numeric>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -50,16 +49,6 @@ torch::Tensor slice_expert_weights(const torch::Tensor& weight,
   return weight
       .slice(0, start_expert_id, start_expert_id + num_experts_per_rank)
       .contiguous();
-}
-
-std::string tensor_debug_info(const torch::Tensor& tensor) {
-  if (!tensor.defined()) {
-    return "undefined";
-  }
-  std::ostringstream os;
-  os << "dtype=" << c10::toString(tensor.scalar_type())
-     << ", shape=" << tensor.sizes() << ", device=" << tensor.device();
-  return os.str();
 }
 
 std::optional<std::string> resolve_moe_quant_method(
@@ -1009,9 +998,6 @@ bool FusedMoEImpl::can_use_ep2_dispatch_combine(
   if (!all_dp_ranks_are_decode(input_params)) {
     return false;
   }
-  if (parallel_args_.dp_size() != 1) {
-    return false;
-  }
   if (hidden_states.scalar_type() != torch::kHalf &&
       hidden_states.scalar_type() != torch::kBFloat16) {
     return false;
@@ -1031,9 +1017,10 @@ bool FusedMoEImpl::can_use_ep2_dispatch_combine(
 
 const std::string& FusedMoEImpl::get_moe_ep_group_name() {
   if (moe_ep_group_name_.empty()) {
-    CHECK(parallel_args_.moe_ep_group_ != nullptr)
-        << "DeepSeek-V4 NPU EP2 dispatch/combine requires moe_ep_group.";
-    moe_ep_group_name_ = parallel_args_.moe_ep_group_->hccl_comm_name();
+    moe_ep_group_name_ = parallel_args_.dispatchAndCombinecommDomain();
+    CHECK(!moe_ep_group_name_.empty())
+        << "DeepSeek-V4 NPU EP2 dispatch/combine requires a pre-initialized "
+           "dispatch/combine comm domain.";
   }
   return moe_ep_group_name_;
 }
@@ -1059,7 +1046,13 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
 
   const auto ep_world_size = parallel_args_.moe_ep_group_->world_size();
   const auto ep_rank_id = parallel_args_.moe_ep_group_->rank();
-  const auto global_bs = input_2d.size(0) * ep_world_size;
+  int64_t global_bs = input_2d.size(0) * ep_world_size;
+  if (parallel_args_.dp_size() > 1 &&
+      !input_params.dp_global_token_nums.empty()) {
+    global_bs = std::accumulate(input_params.dp_global_token_nums.begin(),
+                                input_params.dp_global_token_nums.end(),
+                                int64_t{0});
+  }
 
   xllm::kernel::MoeDistributeDispatchV2Params dispatch_params;
   dispatch_params.x = input_2d;
@@ -1240,23 +1233,7 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts(
   auto input = hidden_states;
   auto selected_topk_weights = topk_weights;
   auto selected_topk_ids = topk_ids;
-  bool need_slice = false;
-  if (parallel_args_.dp_size() > 1 && parallel_args_.ep_size() > 1) {
-    input = parallel_state::gather(input,
-                                   parallel_args_.dp_local_process_group_,
-                                   input_params.dp_global_token_nums);
-    selected_topk_weights =
-        parallel_state::gather(selected_topk_weights,
-                               parallel_args_.dp_local_process_group_,
-                               input_params.dp_global_token_nums);
-    selected_topk_ids =
-        parallel_state::gather(selected_topk_ids,
-                               parallel_args_.dp_local_process_group_,
-                               input_params.dp_global_token_nums);
-    need_slice = true;
-  }
-
-  if (!need_slice && can_use_ep2_dispatch_combine(input_params, input)) {
+  if (can_use_ep2_dispatch_combine(input_params, input)) {
     std::optional<torch::Tensor> shared_output = std::nullopt;
     if (n_shared_experts_ > 0) {
       shared_output = shared_experts_(input);
@@ -1276,6 +1253,22 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts(
       output = output + shared_output.value();
     }
     return output;
+  }
+
+  bool need_slice = false;
+  if (parallel_args_.dp_size() > 1 && parallel_args_.ep_size() > 1) {
+    input = parallel_state::gather(input,
+                                   parallel_args_.dp_local_process_group_,
+                                   input_params.dp_global_token_nums);
+    selected_topk_weights =
+        parallel_state::gather(selected_topk_weights,
+                               parallel_args_.dp_local_process_group_,
+                               input_params.dp_global_token_nums);
+    selected_topk_ids =
+        parallel_state::gather(selected_topk_ids,
+                               parallel_args_.dp_local_process_group_,
+                               input_params.dp_global_token_nums);
+    need_slice = true;
   }
 
   auto hidden_rows = input.reshape({-1, input.size(-1)}).size(0);
