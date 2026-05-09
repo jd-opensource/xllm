@@ -1490,6 +1490,17 @@ REGISTER_TOKENIZER_ARGS(kimi_k25, [&] {
        {"[PAD]", 163839}});
   SET_ARG(special_tokens, special_tokens);
 
+  // Keep parser tokens visible in decoded output instead of stripping them.
+  const std::vector<std::string> parser_visible_special_tokens(
+      {"<|tool_calls_section_begin|>",
+       "<|tool_calls_section_end|>",
+       "<|tool_call_begin|>",
+       "<|tool_call_argument_begin|>",
+       "<|tool_call_end|>",
+       "<think>",
+       "</think>"});
+  SET_ARG(visible_special_tokens, parser_visible_special_tokens);
+
   // ref:
   // https://huggingface.co/moonshotai/Kimi-K2.5/blob/main/tokenization_kimi.py#L53-L62
   // N.B. re2 doesn't support character class intersection (&&) or subtraction

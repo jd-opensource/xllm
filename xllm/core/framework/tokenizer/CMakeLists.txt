@@ -27,6 +27,7 @@ cc_library(
     :sentencepiece
     state_dict
     absl::flat_hash_map
+    absl::flat_hash_set
     absl::strings
     glog::glog
     rust_tokenizers
@@ -43,3 +44,4 @@ cc_test(
     glog::glog
     GTest::gtest_main
 )
+
