@@ -724,7 +724,7 @@ DEFINE_bool(use_cpp_chat_template,
             "(e.g. deepseek_v32) instead of Jinja. "
             "Set to false to fallback to Jinja for debugging.");
 
-DEFINE_int32(beam_top, 1, "Beam width for the last step of beam search.");
+DEFINE_int32(num_return_sequences, 1, "Beam width for the last step of beam search.");
 // --- health check config ---
 DEFINE_int32(health_check_interval_ms,
              3000,
