@@ -272,6 +272,17 @@ class ContinuousScheduler : public Scheduler {
       size_t& num_online_decode_preempt_offline_requests,
       std::unique_ptr<DecodePriorityQueue>& running_queue);
 
+  std::vector<std::shared_ptr<Request>> select_requests_to_evict(
+      DecodePriorityQueue* running_queue_to_evict,
+      Sequence* prefill_sequence,
+      size_t max_handle_num_tokens,
+      const Request* excluded_request = nullptr) const;
+
+  bool check_if_enough_to_evict(DecodePriorityQueue* running_queue_to_evict,
+                                Sequence* prefill_sequence,
+                                size_t max_handle_num_tokens,
+                                size_t& num_request_to_evict);
+
   void handle_abnormal_request(
       std::unique_ptr<DecodePriorityQueue>& running_queue,
       const std::vector<Sequence*>& candidate_sequences,
@@ -285,11 +296,6 @@ class ContinuousScheduler : public Scheduler {
       bool budget_exhausted,
       bool block_exhausted);
   void handle_running_requests(std::shared_ptr<Request> request);
-
-  bool check_if_enough_to_evict(DecodePriorityQueue* running_queue_to_evict,
-                                Sequence* prefill_sequence,
-                                size_t max_handle_num_tokens,
-                                size_t& num_request_to_evict);
 
   // build a batch of requests from the priority queue
   virtual std::vector<Batch> prepare_batch();

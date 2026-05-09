@@ -54,6 +54,11 @@ size_t ConcurrentBlockManagerImpl::num_blocks_in_prefix_cache() const {
   return BlockManagerImpl::num_blocks_in_prefix_cache();
 }
 
+bool ConcurrentBlockManagerImpl::is_prefix_cached(const Block& block) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return BlockManagerImpl::is_prefix_cached(block);
+}
+
 size_t ConcurrentBlockManagerImpl::num_free_blocks() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return BlockManagerImpl::num_free_blocks();

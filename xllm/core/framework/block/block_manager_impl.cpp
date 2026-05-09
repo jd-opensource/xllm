@@ -207,6 +207,14 @@ void BlockManagerImpl::get_merged_kvcache_event(KvCacheEvent* event) const {
   }
 }
 
+bool BlockManagerImpl::is_prefix_cached(const Block& block) const {
+  if (!options_.enable_prefix_cache()) {
+    return false;
+  }
+  CHECK(prefix_cache_);
+  return prefix_cache_->contains(block);
+}
+
 // allocate a block id
 Block BlockManagerImpl::allocate() {
   CHECK(num_free_blocks_ > 0) << "No more blocks available";

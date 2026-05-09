@@ -55,6 +55,7 @@ class BlockManagerImpl : public BlockManager {
     }
     return 0;
   }
+  bool is_prefix_cached(const Block& block) const override;
 
   // free blocks num
   size_t num_free_blocks() const override { return num_free_blocks_; }

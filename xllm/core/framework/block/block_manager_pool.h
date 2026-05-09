@@ -15,11 +15,14 @@ limitations under the License.
 
 #pragma once
 
+#include <optional>
 #include <queue>
 #include <vector>
 
 #include "block_manager.h"
+#include "framework/block/block_group.h"
 #include "framework/block/kv_cache_manager.h"
+#include "framework/block/sequence_block_allocator.h"
 #include "framework/block/single_block_manager.h"
 
 namespace xllm {
@@ -39,6 +42,8 @@ class BlockManagerPool : public KVCacheManager {
     PROPERTY(int64_t, num_layers) = 0;  // Required when enable_xtensor is true
     PROPERTY(int64_t, slot_size) = 0;   // Memory size per slot (for xtensor)
     PROPERTY(std::string, model_id);    // Model ID for multi-model support
+    PROPERTY(std::optional<CompositeBlockPlan>,
+             composite_block_plan) = std::nullopt;
   };
 
   explicit BlockManagerPool(const Options& options, int32_t dp_size = 1);
@@ -80,6 +85,15 @@ class BlockManagerPool : public KVCacheManager {
   virtual std::vector<size_t> num_free_blocks() const override;
   virtual std::vector<size_t> num_used_blocks() const override;
   virtual double kv_cache_utilization() const override;
+  SequenceAllocEstimate estimate_allocate(
+      const Sequence* sequence,
+      size_t target_num_tokens) const override;
+  std::vector<BlockGroupUsage> estimate_release(
+      const Sequence* sequence) const override;
+  bool can_allocate_after_release(
+      const Sequence* target,
+      size_t target_num_tokens,
+      const std::vector<Sequence*>& release_candidates) const override;
 
   // get the options for the block manager
   const Options& options() const { return options_; }
@@ -91,6 +105,7 @@ class BlockManagerPool : public KVCacheManager {
  protected:
   int32_t get_manager_with_max_free_blocks() const;
   int32_t get_dp_rank(Sequence* sequence) const;
+  int32_t select_dp_rank(Sequence* sequence, size_t target_num_tokens) const;
 
   bool process_beam_search(Sequence* sequence, bool need_swap = false);
   bool allocate_single_block(Sequence* sequence, int32_t dp_rank);
@@ -104,6 +119,7 @@ class BlockManagerPool : public KVCacheManager {
   // the options for the block manager
   Options options_;
   std::vector<std::unique_ptr<BlockManager>> block_managers_;
+  std::vector<std::unique_ptr<SequenceBlockAllocator>> allocators_;
 };
 
 }  // namespace xllm

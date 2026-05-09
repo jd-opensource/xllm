@@ -190,42 +190,72 @@ void ContinuousScheduler::create_running_queue(const Options& options) {
   }
 }
 
+std::vector<std::shared_ptr<Request>>
+ContinuousScheduler::select_requests_to_evict(
+    DecodePriorityQueue* running_queue_to_evict,
+    Sequence* prefill_sequence,
+    size_t max_handle_num_tokens,
+    const Request* excluded_request) const {
+  std::vector<std::shared_ptr<Request>> requests_to_evict;
+  std::vector<Sequence*> release_candidates;
+  const int32_t target_dp_rank = prefill_sequence->dp_rank();
+
+  for (auto it = running_queue_to_evict->rbegin();
+       it != running_queue_to_evict->rend();
+       ++it) {
+    std::shared_ptr<Request> request_to_preempt = *it;
+    if (request_to_preempt.get() == excluded_request) {
+      continue;
+    }
+
+    bool can_release_for_target = false;
+    for (const auto& seq : request_to_preempt->sequences()) {
+      if (seq->finished()) {
+        continue;
+      }
+      if (target_dp_rank >= 0 && seq->dp_rank() != target_dp_rank) {
+        continue;
+      }
+      const auto release_estimate =
+          kv_cache_manager_->estimate_release(seq.get());
+      bool has_releasable_blocks = false;
+      for (const auto& group : release_estimate) {
+        if (group.releasable_blocks > 0) {
+          has_releasable_blocks = true;
+          break;
+        }
+      }
+      if (!has_releasable_blocks) {
+        continue;
+      }
+      release_candidates.emplace_back(seq.get());
+      can_release_for_target = true;
+    }
+    if (!can_release_for_target) {
+      continue;
+    }
+
+    requests_to_evict.emplace_back(request_to_preempt);
+    if (kv_cache_manager_->can_allocate_after_release(
+            prefill_sequence, max_handle_num_tokens, release_candidates)) {
+      return requests_to_evict;
+    }
+  }
+
+  requests_to_evict.clear();
+  return requests_to_evict;
+}
+
 bool ContinuousScheduler::check_if_enough_to_evict(
     DecodePriorityQueue* running_queue_to_evict,
     Sequence* prefill_sequence,
     size_t max_handle_num_tokens,
     size_t& num_request_to_evict) {
-  // check if it's enough when we evict this requests queue
-  auto block_size = kv_cache_manager_->block_size();
-  const size_t num_blocks_needed =
-      (max_handle_num_tokens + block_size - 1) / block_size;
-  size_t num_blocks_can_evict = 0;
-  // count the number of blocks can be preempted
-  for (auto it = running_queue_to_evict->rbegin();
-       it != running_queue_to_evict->rend();
-       ++it) {
-    std::shared_ptr<Request> request_to_preempt = *it;
-    num_request_to_evict++;
-    // count the number of blocks belong to the request
-    for (const auto& seq : request_to_preempt->sequences()) {
-      // num_blocks_can_evict += seq->kv_state().num_kv_blocks();
-      size_t shared_kv_blocks_num = seq->kv_state().shared_kv_blocks_num();
-      size_t num_kv_blocks = seq->kv_state().num_kv_blocks();
-      CHECK_GE(num_kv_blocks, shared_kv_blocks_num);
-      for (size_t i = 0; i < shared_kv_blocks_num; i++) {
-        // if ==2, prefix cache block will be evicted when allocate
-        const auto& block = seq->kv_state().kv_blocks()[i];
-        if (block.ref_count() <= 2) {
-          num_blocks_can_evict += 1;
-        }
-      }
-      num_blocks_can_evict += (num_kv_blocks - shared_kv_blocks_num);
-    }
-    if (num_blocks_needed <= num_blocks_can_evict) {
-      return true;
-    }
-  }
-  return false;
+  std::vector<std::shared_ptr<Request>> requests_to_evict =
+      select_requests_to_evict(
+          running_queue_to_evict, prefill_sequence, max_handle_num_tokens);
+  num_request_to_evict = requests_to_evict.size();
+  return !requests_to_evict.empty();
 }
 
 void ContinuousScheduler::handle_prefill_requests(
@@ -318,22 +348,18 @@ void ContinuousScheduler::handle_prefill_requests(
         can_schedule = false;
         if (options_.enable_online_preempt_offline() && !request->offline() &&
             !running_queue_offline_->empty()) {
-          size_t num_request_to_evict = 0;
           // according to the prefill_sequence num tokens to check if can
           // allocate blocks for it through evict
 
-          bool enough_to_evict =
-              check_if_enough_to_evict(running_queue_offline_.get(),
+          std::vector<std::shared_ptr<Request>> requests_to_evict =
+              select_requests_to_evict(running_queue_offline_.get(),
                                        prefill_sequence.get(),
-                                       target_num_tokens,
-                                       num_request_to_evict);
-          if (enough_to_evict) {
-            for (size_t i = 0; i < num_request_to_evict; ++i) {
-              std::shared_ptr<Request> request_to_preempt =
-                  running_queue_offline_->back();
+                                       target_num_tokens);
+          if (!requests_to_evict.empty()) {
+            for (auto& request_to_preempt : requests_to_evict) {
               ++num_online_prefill_preempt_offline_requests;
               kv_cache_manager_->deallocate(request_to_preempt.get());
-              running_queue_offline_->pop_back();
+              CHECK(running_queue_offline_->erase(request_to_preempt));
               // add preemptable request to waiting priority queue
               // TO IMPROVE?: not process this offline request in current batch
               request_to_preempt->set_preempted();
@@ -342,7 +368,7 @@ void ContinuousScheduler::handle_prefill_requests(
             if (!kv_cache_manager_->allocate(prefill_sequence.get(),
                                              target_num_tokens)) {
               LOG(ERROR) << "Should be able to allocate after preempting "
-                         << num_request_to_evict
+                         << requests_to_evict.size()
                          << " offline requests, but failed.";
               can_schedule = false;
             } else {
@@ -464,6 +490,8 @@ void ContinuousScheduler::handle_decode_requests(
     size_t allocated_tokens = 0;
     size_t allocated_seqs = 0;
     double allocated_estimate_latency = 0;
+    Sequence* blocked_sequence = nullptr;
+    size_t blocked_target_num_tokens = 0;
 
     if (request->check_beam_search()) {
       std::vector<Sequence*> active_sequences;
@@ -597,6 +625,8 @@ void ContinuousScheduler::handle_decode_requests(
             sequence->num_tokens() + min_speculative_tokens_required_;
         // no blocks left
         if (!kv_cache_manager_->allocate(sequence.get(), updated_num_tokens)) {
+          blocked_sequence = sequence.get();
+          blocked_target_num_tokens = updated_num_tokens;
           has_enough_blocks = false;
           break;
         }
@@ -657,21 +687,46 @@ void ContinuousScheduler::handle_decode_requests(
     // preempted
     if (options_.enable_online_preempt_offline() && !request->offline() &&
         !running_queue_offline_->empty()) {
-      std::shared_ptr<Request> request_to_preempt =
-          running_queue_offline_->back();
-      ++num_online_decode_preempt_offline_requests;
-      kv_cache_manager_->deallocate(request_to_preempt.get());
-      running_queue_offline_->pop_back();
-      // add preemptable request to waiting priority queue
-      request_to_preempt->set_preempted();
-      waiting_priority_queue_offline_.push(request_to_preempt);
+      std::vector<std::shared_ptr<Request>> requests_to_evict;
+      if (blocked_sequence != nullptr) {
+        requests_to_evict =
+            select_requests_to_evict(running_queue_offline_.get(),
+                                     blocked_sequence,
+                                     blocked_target_num_tokens);
+      }
+      if (requests_to_evict.empty()) {
+        std::shared_ptr<Request> request_to_preempt =
+            running_queue_offline_->back();
+        requests_to_evict.emplace_back(request_to_preempt);
+      }
+      for (auto& request_to_preempt : requests_to_evict) {
+        ++num_online_decode_preempt_offline_requests;
+        kv_cache_manager_->deallocate(request_to_preempt.get());
+        CHECK(running_queue_offline_->erase(request_to_preempt));
+        // add preemptable request to waiting priority queue
+        request_to_preempt->set_preempted();
+        waiting_priority_queue_offline_.push(request_to_preempt);
+      }
       continue;
     } else if (running_queue->size() > 1) {
-      std::shared_ptr<Request> request_to_preempt = running_queue->back();
-      if (request_to_preempt.get() != request.get()) {
+      std::vector<std::shared_ptr<Request>> requests_to_evict;
+      if (blocked_sequence != nullptr) {
+        requests_to_evict = select_requests_to_evict(running_queue.get(),
+                                                     blocked_sequence,
+                                                     blocked_target_num_tokens,
+                                                     request.get());
+      }
+      if (requests_to_evict.empty()) {
+        std::shared_ptr<Request> request_to_preempt = running_queue->back();
+        if (request_to_preempt.get() == request.get()) {
+          LOG(FATAL) << "Unexpected error: preempting the candidate itself.";
+        }
+        requests_to_evict.emplace_back(request_to_preempt);
+      }
+      for (auto& request_to_preempt : requests_to_evict) {
         // TO IMPROVE: kv cache offload to cpu
         kv_cache_manager_->deallocate(request_to_preempt.get());
-        running_queue->pop_back();
+        CHECK(running_queue->erase(request_to_preempt));
         // add preemptable request to waiting priority queue
         request_to_preempt->set_preempted();
         if (request_to_preempt->offline()) {
@@ -681,9 +736,6 @@ void ContinuousScheduler::handle_decode_requests(
           ++num_online_decode_preempt_online_requests;
           waiting_priority_queue_.push(request_to_preempt);
         }
-
-      } else {
-        LOG(FATAL) << "Unexpected error: preempting the candidate itself.";
       }
 
       continue;

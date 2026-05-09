@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
+#include <algorithm>
 #include <functional>
 #include <memory>
 #include <queue>
@@ -78,6 +79,7 @@ class DecodePriorityQueue {
   virtual void push(std::shared_ptr<Request> req, bool if_back) = 0;
   virtual void pop_top() = 0;
   virtual void pop_back() = 0;
+  virtual bool erase(const std::shared_ptr<Request>& request) = 0;
   virtual std::shared_ptr<Request> top() const = 0;
   virtual std::shared_ptr<Request> back() const = 0;
   virtual bool empty() const = 0;
@@ -112,6 +114,9 @@ class DynamicPriorityQueue : public DecodePriorityQueue {
   }
   void pop_top() override { queue_.erase(queue_.begin()); }
   void pop_back() override { queue_.erase(std::prev(queue_.end())); }
+  bool erase(const std::shared_ptr<Request>& request) override {
+    return queue_.erase(request) > 0;
+  }
   std::shared_ptr<Request> top() const override { return *queue_.begin(); }
   std::shared_ptr<Request> back() const override { return *queue_.rbegin(); }
   bool empty() const override { return queue_.empty(); }
@@ -158,6 +163,14 @@ class FCFSQueue : public DecodePriorityQueue {
 
   void pop_top() override { queue_.pop_front(); }
   void pop_back() override { queue_.pop_back(); }
+  bool erase(const std::shared_ptr<Request>& request) override {
+    auto it = std::find(queue_.begin(), queue_.end(), request);
+    if (it == queue_.end()) {
+      return false;
+    }
+    queue_.erase(it);
+    return true;
+  }
   std::shared_ptr<Request> top() const override { return queue_.front(); }
   std::shared_ptr<Request> back() const override { return queue_.back(); }
   bool empty() const override { return queue_.empty(); }

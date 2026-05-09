@@ -13,7 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "sequence_kv_state.h"
+#include "framework/request/sequence_kv_state.h"
+
+#include <algorithm>
+#include <limits>
 
 namespace xllm {
 
@@ -101,12 +104,49 @@ void KVCacheState::add_shared_kv_blocks(std::vector<Block>&& blocks,
 }
 
 size_t KVCacheState::current_max_tokens_capacity() const {
-  if (blocks_.empty()) {
-    return 0;
+  return token_capacity();
+}
+
+size_t KVCacheState::token_capacity() const {
+  if (!blocks_.empty()) {
+    // all blocks have the same size
+    const size_t block_size = blocks_[0].size();
+    return blocks_.size() * block_size;
   }
-  // all blocks have the same size
-  const size_t block_size = blocks_[0].size();
-  return blocks_.size() * block_size;
+
+  size_t capacity = std::numeric_limits<size_t>::max();
+  bool has_token_group = false;
+  if (composite_group_states_.size() == composite_blocks_.size()) {
+    for (const KVCacheGroupState& group_state : composite_group_states_) {
+      if (group_state.kind != BlockGroupKind::TOKEN) {
+        continue;
+      }
+      CHECK_GE(group_state.group_id, 0);
+      const size_t group_id = static_cast<size_t>(group_state.group_id);
+      CHECK_LT(group_id, composite_blocks_.size());
+      if (composite_blocks_[group_id].empty()) {
+        continue;
+      }
+      CHECK_GT(group_state.tokens_per_block, 0);
+      const size_t group_capacity =
+          composite_blocks_[group_id].size() *
+          static_cast<size_t>(group_state.tokens_per_block);
+      capacity = std::min(capacity, group_capacity);
+      has_token_group = true;
+    }
+    return has_token_group ? capacity : 0;
+  }
+
+  for (size_t group_id = 0; group_id < composite_blocks_.size(); ++group_id) {
+    if (composite_blocks_[group_id].empty()) {
+      continue;
+    }
+    const size_t group_capacity = composite_blocks_[group_id].size() *
+                                  composite_blocks_[group_id][0].size();
+    capacity = std::min(capacity, group_capacity);
+    has_token_group = true;
+  }
+  return has_token_group ? capacity : 0;
 }
 
 // returns allocated cache blocks
@@ -141,10 +181,44 @@ std::optional<TransferKVInfo>& KVCacheState::transfer_kv_info() {
   return transfer_kv_info_;
 }
 
+void KVCacheState::clear_composite_blocks() {
+  composite_blocks_.clear();
+  composite_group_states_.clear();
+}
+
+bool KVCacheState::has_composite_blocks() const {
+  return total_composite_blocks() > 0;
+}
+
+size_t KVCacheState::num_composite_groups() const {
+  if (!composite_group_states_.empty()) {
+    return composite_group_states_.size();
+  }
+  return has_composite_blocks() ? composite_blocks_.size() : 0;
+}
+
+size_t KVCacheState::num_composite_blocks(int32_t group_id) const {
+  CHECK_GE(group_id, 0);
+  const size_t group_index = static_cast<size_t>(group_id);
+  if (group_index >= composite_blocks_.size()) {
+    return 0;
+  }
+  return composite_blocks_[group_index].size();
+}
+
+size_t KVCacheState::total_composite_blocks() const {
+  size_t total_blocks = 0;
+  for (const std::vector<Block>& group_blocks : composite_blocks_) {
+    total_blocks += group_blocks.size();
+  }
+  return total_blocks;
+}
+
 void KVCacheState::reset() {
   kv_cache_tokens_num_ = 0;
   num_owned_shared_blocks_ = 0;
   blocks_.clear();
+  clear_composite_blocks();
   transfer_kv_info_.reset();
 }
 

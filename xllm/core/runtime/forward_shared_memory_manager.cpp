@@ -2106,6 +2106,19 @@ inline void deserialize_raw_forward_input(const char*& buffer,
               /*force_host_materialize=*/true);
 #endif
 
+  // Composite block table tensors.
+  int32_t manager_num = 0;
+  read_data(context, manager_num);
+  input_params.multi_block_tables.reserve(manager_num);
+  for (int32_t manager_idx = 0; manager_idx < manager_num; ++manager_idx) {
+    torch::Tensor mgr_table;
+    read_tensor(context,
+                mgr_table,
+                /*stream=*/nullptr,
+                /*force_host_materialize=*/true);
+    input_params.multi_block_tables.emplace_back(std::move(mgr_table));
+  }
+
   read_dit_forward_input(context, input_params.dit_forward_input);
 
   finalize_device_buffer_session(device_session, stream);
@@ -2190,6 +2203,12 @@ inline void serialize_raw_forward_input_sections(
 
   write_vector_to_tensor(context, input.new_token_slot_ids);
   write_2d_vector_to_tensor(context, input.block_tables_vec);
+  // Composite block table tensors.
+  write_data(context.descriptor,
+             static_cast<int32_t>(input.multi_block_tables_vec.size()));
+  for (const auto& mgr_tables : input.multi_block_tables_vec) {
+    write_2d_vector_to_tensor(context, mgr_tables);
+  }
 
   write_dit_forward_input(context, input.dit_forward_input);
 }
@@ -2403,6 +2422,13 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
   util::pad_2d_vector(raw_input.block_tables_vec, 0);
   input_params.block_tables =
       create_2d_tensor(std::move(raw_input.block_tables_vec), torch::kInt);
+
+  // Composite block table tensors.
+  for (auto& mgr_tables : raw_input.multi_block_tables_vec) {
+    util::pad_2d_vector(mgr_tables, /*pad_value=*/-1);
+    input_params.multi_block_tables.emplace_back(
+        create_2d_tensor(std::move(mgr_tables), torch::kInt));
+  }
 
   input_params.src_block_indices =
       torch::tensor(std::move(raw_input.src_block_indices), tensor_options);

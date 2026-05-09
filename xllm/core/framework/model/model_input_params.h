@@ -422,6 +422,11 @@ struct ModelInputParams {
 
     params.new_cache_slots = safe_to(new_cache_slots, device, true);
     params.block_tables = safe_to(block_tables, device, true);
+    for (const auto& table : multi_block_tables) {
+      // Keep composite block tables on CPU for host-side metadata expansion.
+      params.multi_block_tables.emplace_back(
+          safe_to(table, table.options().device(torch::kCPU), true));
+    }
     params.kv_seq_lens_vec = kv_seq_lens_vec;
     params.q_seq_lens_vec = q_seq_lens_vec;
 
@@ -597,6 +602,10 @@ struct ModelInputParams {
 
   // IntTensor: [n_seq, max_n_blocks]
   torch::Tensor block_tables;
+
+  // Composite block tables, one tensor per block group:
+  // (batch_size, max_block_length_i).
+  std::vector<torch::Tensor> multi_block_tables;
 
   // the indptr of the paged kv-cache
   // used in flashinfer

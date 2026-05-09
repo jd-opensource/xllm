@@ -6,19 +6,23 @@ cc_library(
     block
   HDRS
     block.h
+    block_group.h
     block_manager.h
     single_block_manager.h
     block_manager_pool.h
     block_manager_impl.h
+    sequence_block_allocator.h
     concurrent_block_manager_impl.h
     hierarchy_block_manager_pool.h
   SRCS 
     block.cpp
+    block_group.cpp
     single_block_manager.cpp
     block_manager_pool.cpp
     concurrent_block_manager_impl.cpp
     block_manager_impl.cpp
     hierarchy_block_manager_pool.cpp
+    sequence_block_allocator.cpp
   DEPS
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:graph>

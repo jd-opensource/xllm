@@ -43,6 +43,7 @@ class ConcurrentBlockManagerImpl : public BlockManagerImpl {
 
   // get the number of blocks in the prefix cache
   size_t num_blocks_in_prefix_cache() const override;
+  bool is_prefix_cached(const Block& block) const override;
 
   // get the number of free blocks in the block allocator
   size_t num_free_blocks() const override;

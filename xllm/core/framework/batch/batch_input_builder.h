@@ -107,6 +107,8 @@ class BatchInputBuilder {
     // Cache and block data
     std::vector<int32_t> new_token_slot_ids;
     std::vector<std::vector<int32_t>> block_tables_vec;
+    // Composite block tables: [group_num][batch_size][block_ids].
+    std::vector<std::vector<std::vector<int32_t>>> multi_block_tables_vec;
 
     // beam search kernel input
     std::vector<float> acc_logprob_vec;

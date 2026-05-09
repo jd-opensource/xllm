@@ -142,6 +142,13 @@ size_t PrefixCache::evict(size_t n_blocks) {
   return evict(n_blocks, &evict_keys);
 }
 
+bool PrefixCache::contains(const Block& block) const {
+  if (!block.is_valid()) {
+    return false;
+  }
+  return cached_block_ids_.count(block.id()) != 0;
+}
+
 size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
                            std::vector<Block>& blocks,
                            size_t existed_shared_blocks_num,
@@ -193,6 +200,7 @@ size_t PrefixCache::insert(const Slice<int32_t>& token_ids,
       node_list.push_front(new_node);
 
       cached_blocks_.emplace(std::make_pair(token_hash_key, new_node));
+      cached_block_ids_.insert(new_node->block.id());
 
       num_blocks_++;
 
@@ -238,6 +246,7 @@ size_t PrefixCache::insert(Slice<Block>& blocks,
       node_list.push_front(new_node);
 
       cached_blocks_.emplace(std::make_pair(token_hash_key, new_node));
+      cached_block_ids_.insert(new_node->block.id());
 
       num_blocks_++;
 
@@ -279,6 +288,7 @@ size_t PrefixCache::evict(size_t n_blocks, std::vector<XXH3Key>* evict_keys) {
     XXH3Key token_hash_key(del_node->block.get_immutable_hash_value());
 
     cached_blocks_.erase(token_hash_key);
+    cached_block_ids_.erase(del_node->block.id());
 
     delete del_node;
     ++evict_count;

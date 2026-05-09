@@ -345,6 +345,27 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.paged_kv_last_page_len.insert(state_.paged_kv_last_page_len.end(),
                                          state.paged_kv_last_page_len.begin(),
                                          state.paged_kv_last_page_len.end());
+
+    if (!state.multi_block_tables_vec.empty()) {
+      if (state_.multi_block_tables_vec.empty()) {
+        state_.multi_block_tables_vec.resize(
+            state.multi_block_tables_vec.size());
+      }
+      CHECK_EQ(state_.multi_block_tables_vec.size(),
+               state.multi_block_tables_vec.size())
+          << "multi_block_tables manager count mismatch while merging thread "
+             "states. dst_manager_num="
+          << state_.multi_block_tables_vec.size()
+          << ", src_manager_num=" << state.multi_block_tables_vec.size();
+      for (size_t manager_idx = 0;
+           manager_idx < state.multi_block_tables_vec.size();
+           ++manager_idx) {
+        auto& dst_mgr_tables = state_.multi_block_tables_vec[manager_idx];
+        const auto& src_mgr_tables = state.multi_block_tables_vec[manager_idx];
+        dst_mgr_tables.insert(
+            dst_mgr_tables.end(), src_mgr_tables.begin(), src_mgr_tables.end());
+      }
+    }
   }
   for (const auto& write_block_ids : thread_write_block_ids) {
     write_block_ids_.insert(write_block_ids.begin(), write_block_ids.end());
@@ -540,6 +561,37 @@ void BatchInputBuilder::setup_kv_cache_info(
   sequence->kv_state().incr_kv_cache_tokens_num(/*size=*/q_seq_len);
 
   const auto blocks = sequence->kv_state().kv_blocks();
+  const auto& composite_blocks = sequence->kv_state().composite_blocks();
+  if (!composite_blocks.empty()) {
+    if (state.multi_block_tables_vec.empty()) {
+      state.multi_block_tables_vec.resize(composite_blocks.size());
+    }
+    CHECK_EQ(state.multi_block_tables_vec.size(), composite_blocks.size())
+        << "composite block manager count mismatch. existing_manager_num="
+        << state.multi_block_tables_vec.size()
+        << ", current_manager_num=" << composite_blocks.size();
+    for (size_t manager_idx = 0; manager_idx < composite_blocks.size();
+         ++manager_idx) {
+      const auto& composite_block = composite_blocks[manager_idx];
+      std::vector<int32_t> block_ids;
+      block_ids.reserve(composite_block.size());
+      for (const auto& block : composite_block) {
+        block_ids.emplace_back(block.id());
+      }
+      state.multi_block_tables_vec[manager_idx].emplace_back(
+          std::move(block_ids));
+    }
+    return;
+  }
+
+  // Keep [manager][batch][block_ids] row-aligned even if a sequence has no
+  // composite blocks.
+  if (!state.multi_block_tables_vec.empty()) {
+    for (auto& mgr_tables : state.multi_block_tables_vec) {
+      mgr_tables.emplace_back(std::vector<int32_t>{});
+    }
+  }
+
   const auto slot_ids =
       sequence->kv_state().kv_cache_slots(n_kv_cache_tokens, seq_len);
   state.new_token_slot_ids.insert(
@@ -553,7 +605,7 @@ void BatchInputBuilder::setup_kv_cache_info(
   auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
   for (const auto& block : blocks) {
     block_size = block.size();
-    block_ids.push_back(block.id());
+    block_ids.emplace_back(block.id());
     local_block_ids.emplace_back(static_cast<uint64_t>(block.id()));
     state.paged_kv_indices.push_back(block.id());
   }
@@ -632,6 +684,13 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   util::pad_2d_vector(state_.block_tables_vec, /*pad_value=*/0);
   input_params.block_tables =
       create_2d_tensor(state_.block_tables_vec, torch::kInt);
+
+  // Setup block tables for composite block groups.
+  for (auto& mgr_tables : state_.multi_block_tables_vec) {
+    util::pad_2d_vector(mgr_tables, /*pad_value=*/-1);
+    input_params.multi_block_tables.emplace_back(
+        create_2d_tensor(mgr_tables, torch::kInt));
+  }
 
   if (input_embeddings_vec_.size() != 0) {
     input_params.input_embedding = torch::cat(input_embeddings_vec_);
@@ -712,6 +771,8 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.new_token_slot_ids = std::move(state_.new_token_slot_ids);
   util::pad_2d_vector(state_.block_tables_vec, /*pad_value=*/0);
   raw_forward_input.block_tables_vec = std::move(state_.block_tables_vec);
+  raw_forward_input.multi_block_tables_vec =
+      std::move(state_.multi_block_tables_vec);
   raw_forward_input.num_sequences = num_sequences_;
   // raw_forward_input.dp_global_token_nums = ;
   raw_forward_input.transfer_kv_infos = std::move(state_.transfer_kv_infos);

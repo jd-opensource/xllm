@@ -15,14 +15,22 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <vector>
 
 #include "core/common/types.h"
 #include "core/util/slice.h"
 #include "framework/block/block.h"
+#include "framework/block/block_group.h"
 
 namespace xllm {
+
+struct KVCacheGroupState {
+  int32_t group_id = 0;
+  BlockGroupKind kind = BlockGroupKind::TOKEN;
+  int32_t tokens_per_block = 0;
+};
 
 class KVCacheState {
  public:
@@ -39,6 +47,7 @@ class KVCacheState {
   void incr_shared_kv_blocks_num(size_t num);
 
   size_t current_max_tokens_capacity() const;
+  size_t token_capacity() const;
 
   // returns allocated cache blocks
   Slice<Block> kv_blocks() const;
@@ -57,6 +66,24 @@ class KVCacheState {
   // get the number of blocks
   size_t num_kv_blocks() const;
   std::vector<int32_t> kv_cache_slots(int32_t pos_start, int32_t pos_end);
+
+  const std::vector<std::vector<Block>>& composite_blocks() const {
+    return composite_blocks_;
+  }
+  std::vector<std::vector<Block>>* mutable_composite_blocks() {
+    return &composite_blocks_;
+  }
+  const std::vector<KVCacheGroupState>& composite_group_states() const {
+    return composite_group_states_;
+  }
+  std::vector<KVCacheGroupState>* mutable_composite_group_states() {
+    return &composite_group_states_;
+  }
+  void clear_composite_blocks();
+  bool has_composite_blocks() const;
+  size_t num_composite_groups() const;
+  size_t num_composite_blocks(int32_t group_id) const;
+  size_t total_composite_blocks() const;
 
   void set_transfer_kv_info(TransferKVInfo&& info);
   std::optional<TransferKVInfo>& transfer_kv_info();
@@ -83,6 +110,9 @@ class KVCacheState {
 
   // shared blocks number of the sequence.
   uint32_t num_owned_shared_blocks_ = 0;
+
+  std::vector<std::vector<Block>> composite_blocks_;
+  std::vector<KVCacheGroupState> composite_group_states_;
 };
 
 }  // namespace xllm

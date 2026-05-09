@@ -249,6 +249,25 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.block_tables =
       std::move(create_2d_tensor(block_tables_vec, torch::kInt));
 
+  // Composite block table tensors.
+  for (int32_t manager_idx = 0;
+       manager_idx < pb_forward_input->multi_block_tables_vec().size();
+       ++manager_idx) {
+    const auto& pb_mgr =
+        pb_forward_input->multi_block_tables_vec()[manager_idx];
+    std::vector<std::vector<int32_t>> mgr_tables;
+    mgr_tables.reserve(pb_mgr.block_tables().size());
+    for (int32_t seq_idx = 0; seq_idx < pb_mgr.block_tables().size();
+         ++seq_idx) {
+      mgr_tables.emplace_back(
+          pb_mgr.block_tables()[seq_idx].block_tables().begin(),
+          pb_mgr.block_tables()[seq_idx].block_tables().end());
+    }
+    util::pad_2d_vector(mgr_tables, /*pad_value=*/-1);
+    input_params.multi_block_tables.emplace_back(
+        create_2d_tensor(mgr_tables, torch::kInt));
+  }
+
   input_params.dp_global_token_nums = std::move(dp_global_token_nums);
   input_params.dp_is_decode = std::move(dp_is_decode);
   input_params.embedding_ids = std::move(embedding_ids);
@@ -472,6 +491,20 @@ void forward_input_to_proto(const RawForwardInput& inputs,
     *pb_forward_input->mutable_block_tables_vec()->Add() = pb_table;
   }
   pb_forward_input->set_num_sequences(inputs.num_sequences);
+  // Composite block table tensors.
+  if (!inputs.multi_block_tables_vec.empty()) {
+    pb_forward_input->mutable_multi_block_tables_vec()->Reserve(
+        inputs.multi_block_tables_vec.size());
+    for (const auto& mgr_tables : inputs.multi_block_tables_vec) {
+      auto* pb_mgr = pb_forward_input->mutable_multi_block_tables_vec()->Add();
+      pb_mgr->mutable_block_tables()->Reserve(mgr_tables.size());
+      for (const auto& seq_blocks : mgr_tables) {
+        proto::BlockTables pb_table;
+        ADD_VECTOR_TO_PROTO(pb_table.mutable_block_tables(), seq_blocks);
+        *pb_mgr->mutable_block_tables()->Add() = pb_table;
+      }
+    }
+  }
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_dp_global_token_nums(),
                       inputs.dp_global_token_nums);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_dp_is_decode(),

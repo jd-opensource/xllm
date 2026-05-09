@@ -279,8 +279,10 @@ class Sequence final {
   }
 
   KVCacheState& kv_state() { return kv_state_; }
+  const KVCacheState& kv_state() const { return kv_state_; }
 
   KVCacheState& host_kv_state() { return host_kv_state_; }
+  const KVCacheState& host_kv_state() const { return host_kv_state_; }
 
   // for generated tokens
   float get_acc_logprob();

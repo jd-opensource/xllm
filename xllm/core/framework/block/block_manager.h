@@ -68,7 +68,12 @@ class BlockManager {
   virtual void get_merged_kvcache_event(KvCacheEvent* event) const = 0;
 
   virtual size_t num_blocks_in_prefix_cache() const = 0;
+  virtual bool is_prefix_cached(const Block& /*block*/) const { return false; }
   virtual size_t num_free_blocks() const = 0;
+  virtual size_t available_blocks() const { return num_free_blocks(); }
+  virtual bool can_allocate(size_t num_blocks) const {
+    return available_blocks() >= num_blocks;
+  }
   virtual size_t num_used_blocks() const = 0;
   virtual double kv_cache_utilization() const = 0;
 

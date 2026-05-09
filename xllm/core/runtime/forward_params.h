@@ -230,6 +230,8 @@ struct RawForwardInput {
   std::vector<int32_t> kv_cache_tokens_nums;
   std::vector<int32_t> new_token_slot_ids;
   std::vector<std::vector<int32_t>> block_tables_vec;
+  // Composite block tables: [group_num][batch_size][block_ids].
+  std::vector<std::vector<std::vector<int32_t>>> multi_block_tables_vec;
   int32_t num_sequences;
   // num tokens of all workers，mainly used for dp case
   std::vector<int32_t> dp_global_token_nums;

@@ -24,6 +24,7 @@ limitations under the License.
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/types.h"
@@ -84,9 +85,13 @@ class PrefixCache {
   // get the number of blocks in the prefix cache
   virtual size_t num_blocks() const {
     CHECK(num_blocks_ == cached_blocks_.size()) << "check block num failed";
+    CHECK(num_blocks_ == cached_block_ids_.size())
+        << "check cached block ids failed";
 
     return num_blocks_;
   }
+
+  bool contains(const Block& block) const;
 
   float block_match_rate() {
     if (total_blocks_.load() == 0) {
@@ -207,6 +212,7 @@ class PrefixCache {
 
   std::unordered_map<XXH3Key, Node*, FixedStringKeyHash, FixedStringKeyEqual>
       cached_blocks_;
+  std::unordered_set<int32_t> cached_block_ids_;
 
   std::atomic<uint64_t> total_blocks_{0}, matched_blocks_{0};
 };

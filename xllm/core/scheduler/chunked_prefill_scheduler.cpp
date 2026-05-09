@@ -68,6 +68,8 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
     size_t allocated_tokens = 0;
     size_t allocated_seqs = 0;
     double allocated_estimate_latency = 0;
+    Sequence* blocked_sequence = nullptr;
+    size_t blocked_target_num_tokens = 0;
 
     for (auto& sequence : request->sequences()) {
       // skip finished sequence.
@@ -125,6 +127,9 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       // no budget left
       if (!allocate_blocks_for(
               sequence.get(), assume_max_tokens, &current_step_handle_tokens)) {
+        blocked_sequence = sequence.get();
+        blocked_target_num_tokens = current_step_handle_tokens +
+                                    sequence->kv_state().kv_cache_tokens_num();
         has_enough_blocks = false;
         break;
       }
@@ -195,22 +200,45 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
     // needs
     if (options_.enable_online_preempt_offline() && !request->offline() &&
         !running_queue_offline_->empty()) {
-      std::shared_ptr<Request> request_to_preempt =
-          running_queue_offline_->back();
-      ++num_preempted_requests;
-      kv_cache_manager_->deallocate(request_to_preempt.get());
-      running_queue_offline_->pop_back();
-      // add preemptable request to waiting priority queue
-      request_to_preempt->set_preempted();
-      waiting_priority_queue_offline_.push(request_to_preempt);
+      std::vector<std::shared_ptr<Request>> requests_to_evict;
+      if (blocked_sequence != nullptr) {
+        requests_to_evict =
+            select_requests_to_evict(running_queue_offline_.get(),
+                                     blocked_sequence,
+                                     blocked_target_num_tokens);
+      }
+      if (requests_to_evict.empty()) {
+        requests_to_evict.emplace_back(running_queue_offline_->back());
+      }
+      for (auto& request_to_preempt : requests_to_evict) {
+        ++num_preempted_requests;
+        kv_cache_manager_->deallocate(request_to_preempt.get());
+        CHECK(running_queue_offline_->erase(request_to_preempt));
+        // add preemptable request to waiting priority queue
+        request_to_preempt->set_preempted();
+        waiting_priority_queue_offline_.push(request_to_preempt);
+      }
       continue;
     } else if (running_queue->size() > 1) {
-      std::shared_ptr<Request> request_to_preempt = running_queue->back();
-      if (request_to_preempt.get() != request.get()) {
+      std::vector<std::shared_ptr<Request>> requests_to_evict;
+      if (blocked_sequence != nullptr) {
+        requests_to_evict = select_requests_to_evict(running_queue.get(),
+                                                     blocked_sequence,
+                                                     blocked_target_num_tokens,
+                                                     request.get());
+      }
+      if (requests_to_evict.empty()) {
+        std::shared_ptr<Request> request_to_preempt = running_queue->back();
+        if (request_to_preempt.get() == request.get()) {
+          LOG(FATAL) << "Unexpected error: preempting the candidate itself.";
+        }
+        requests_to_evict.emplace_back(request_to_preempt);
+      }
+      for (auto& request_to_preempt : requests_to_evict) {
         ++num_preempted_requests;
         // TO IMPROVE: kv cache offload to cpu
         kv_cache_manager_->deallocate(request_to_preempt.get());
-        running_queue_->pop_back();
+        CHECK(running_queue->erase(request_to_preempt));
         // add preemptable request to waiting priority queue
         request_to_preempt->set_preempted();
         if (request_to_preempt->offline()) {
@@ -218,9 +246,6 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
         } else {
           waiting_priority_queue_.push(request_to_preempt);
         }
-
-      } else {
-        LOG(FATAL) << "Unexpected error: preempting the candidate itself.";
       }
 
       continue;
@@ -329,24 +354,20 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
         can_schedule = false;
         if (options_.enable_online_preempt_offline() && !request->offline() &&
             !running_queue_offline_->empty()) {
-          size_t num_request_to_evict = 0;
           // according to the prefill_sequence num tokens to check if can
           // allocate blocks for it through evict
           size_t max_handle_num_tokens =
               current_step_handle_tokens +
               prefill_sequence->kv_state().kv_cache_tokens_num();
-          bool enough_to_evict =
-              check_if_enough_to_evict(running_queue_offline_.get(),
+          std::vector<std::shared_ptr<Request>> requests_to_evict =
+              select_requests_to_evict(running_queue_offline_.get(),
                                        prefill_sequence.get(),
-                                       max_handle_num_tokens,
-                                       num_request_to_evict);
-          if (enough_to_evict) {
-            for (size_t i = 0; i < num_request_to_evict; ++i) {
-              std::shared_ptr<Request> request_to_preempt =
-                  running_queue_offline_->back();
+                                       max_handle_num_tokens);
+          if (!requests_to_evict.empty()) {
+            for (auto& request_to_preempt : requests_to_evict) {
               ++num_preempted_requests;
               kv_cache_manager_->deallocate(request_to_preempt.get());
-              running_queue_offline_->pop_back();
+              CHECK(running_queue_offline_->erase(request_to_preempt));
               // add preemptable request to waiting priority queue
               // TO IMPROVE?: not process this offline request in current batch
               request_to_preempt->set_preempted();
@@ -355,7 +376,7 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
             if (!kv_cache_manager_->allocate(prefill_sequence.get(),
                                              max_handle_num_tokens)) {
               LOG(ERROR) << "Should be able to allocate after preempting "
-                         << num_request_to_evict
+                         << requests_to_evict.size()
                          << " offline requests, but failed.";
               can_schedule = false;
             } else {
