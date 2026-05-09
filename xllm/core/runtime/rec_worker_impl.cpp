@@ -1338,13 +1338,26 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
       if (filter_mask_future.has_value()) {
         filter_mask = std::move(filter_mask_future.value()).get();
       }
+      RecSamplingContext sampling_context;
+      sampling_context.sequence_group = sequence_group;
+      sampling_context.current_step = current_step;
+      sampling_context.beam_width = request_beam_width;
       if (use_device_constraints) {
-        result.sample_output = sample_with_device_constraints(
-            result.logits, sampling_params, sequence_group, current_step);
-      } else {
-        result.sample_output =
-            rec_sampler_->forward(result.logits, sampling_params, filter_mask);
+        sampling_context.device_constrained_sampler =
+            [this](torch::Tensor& logits,
+                   const SamplingParameters& params,
+                   const torch::Tensor& sequence_group,
+                   int32_t current_step,
+                   int32_t beam_width) -> std::optional<SampleOutput> {
+          if (!can_use_device_constraints(params, current_step, beam_width)) {
+            return std::nullopt;
+          }
+          return sample_with_device_constraints(
+              logits, params, sequence_group, current_step);
+        };
       }
+      result.sample_output = rec_sampler_->forward(
+          result.logits, sampling_params, filter_mask, &sampling_context);
       log_stage_timing("sampler", stage_round, stage_timer);
     }
     return result;

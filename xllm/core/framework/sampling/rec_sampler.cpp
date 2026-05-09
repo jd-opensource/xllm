@@ -23,6 +23,7 @@ limitations under the License.
 #include <tuple>
 
 #include "common/global_flags.h"
+#include "common/macros.h"
 #include "logits_utils.h"
 #include "sampler.h"
 #if defined(USE_CUDA)
@@ -134,8 +135,9 @@ RecSampler::RecSampler(RecPipelineType pipeline_type)
 
 SampleOutput RecSampler::forward(torch::Tensor& logits,
                                  const SamplingParameters& params,
-                                 const torch::Tensor& filter_mask) const {
-  return strategy_->forward(logits, params, filter_mask);
+                                 const torch::Tensor& filter_mask,
+                                 const RecSamplingContext* context) const {
+  return strategy_->forward(logits, params, filter_mask, context);
 }
 
 // --- SamplingStrategy factory ---
@@ -167,7 +169,9 @@ RecSampler::DefaultSamplingStrategy::DefaultSamplingStrategy(
 SampleOutput RecSampler::DefaultSamplingStrategy::forward(
     torch::Tensor& logits,
     const SamplingParameters& params,
-    const torch::Tensor& filter_mask) const {
+    const torch::Tensor& filter_mask,
+    const RecSamplingContext* context) const {
+  UNUSED_PARAMETER(context);
   return sampler_.forward(logits, params, filter_mask);
 }
 
@@ -180,7 +184,19 @@ RecSampler::OneRecConstrainedSamplingStrategy::
 SampleOutput RecSampler::OneRecConstrainedSamplingStrategy::forward(
     torch::Tensor& logits,
     const SamplingParameters& params,
-    const torch::Tensor& filter_mask) const {
+    const torch::Tensor& filter_mask,
+    const RecSamplingContext* context) const {
+  if (context != nullptr && context->device_constrained_sampler) {
+    auto sampled = context->device_constrained_sampler(logits,
+                                                       params,
+                                                       context->sequence_group,
+                                                       context->current_step,
+                                                       context->beam_width);
+    if (sampled.has_value()) {
+      return sampled.value();
+    }
+  }
+
   if (!(params.use_beam_search && params.all_random_sample && params.logprobs &&
         params.max_top_logprobs > 0)) {
     return sampler_.forward(logits, params, filter_mask);
@@ -273,8 +289,10 @@ RecSampler::MultiRoundFastPathSamplingStrategy::
 SampleOutput RecSampler::MultiRoundFastPathSamplingStrategy::forward(
     torch::Tensor& logits,
     const SamplingParameters& params,
-    const torch::Tensor& filter_mask) const {
+    const torch::Tensor& filter_mask,
+    const RecSamplingContext* context) const {
   (void)filter_mask;
+  UNUSED_PARAMETER(context);
   const bool use_fast_path = can_use_fast_path(params);
 
   if (!use_fast_path) {
