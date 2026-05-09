@@ -72,7 +72,7 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
     // pool. Worker-side embedding and linear-state caches remain physically
     // separate and are addressed via transport fields.
     single_block_managers_.emplace_back(std::make_unique<SingleBlockManager>(
-        /*num_blocks=*/FLAGS_max_seqs_per_batch + 2,
+        /*num_blocks=*/FLAGS_max_concurrent_requests + 2,
         /*resource_name=*/"single block",
         /*exhaustion_message=*/"No more single-block ids available"));
   }
