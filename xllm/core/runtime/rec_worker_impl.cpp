@@ -1102,8 +1102,7 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
           << (sampling_params.selected_token_idxes.defined()
                   ? sampling_params.selected_token_idxes.numel()
                   : 0)
-          << ", sample_idxes_defined="
-          << sampling_params.sample_idxes.defined()
+          << ", sample_idxes_defined=" << sampling_params.sample_idxes.defined()
           << ", sample_idxes_numel="
           << (sampling_params.sample_idxes.defined()
                   ? sampling_params.sample_idxes.numel()
