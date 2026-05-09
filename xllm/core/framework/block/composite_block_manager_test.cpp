@@ -345,4 +345,25 @@ TEST(CompositeBlockManagerTest, SlidingWindowBlockOrderStaysStable) {
   manager.deallocate_sequence(&seq);
 }
 
+TEST(CompositeBlockManagerTest, DeallocateSliceDispatchesToOwnerManagers) {
+  BlockManager::Options opts =
+      MakeCompositeOptions(4096, kBaseBlockSize, 128, 4);
+  CompositeBlockManager manager(opts);
+
+  Sequence seq = MakeTestSequence(0, {1});
+  EXPECT_TRUE(manager.allocate_for_sequence(&seq, 1500));
+  EXPECT_GT(manager.num_used_blocks(), 0u);
+
+  std::vector<Block> flat_blocks;
+  for (const auto& manager_blocks : seq.kv_state().composite_blocks()) {
+    flat_blocks.insert(
+        flat_blocks.end(), manager_blocks.begin(), manager_blocks.end());
+  }
+
+  manager.deallocate(flat_blocks);
+  EXPECT_EQ(manager.num_used_blocks(), 0u);
+
+  seq.reset();
+}
+
 }  // namespace xllm

@@ -16,6 +16,7 @@ limitations under the License.
 #include "composite_block_manager.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 #include "block_manager_impl.h"
 #include "framework/kv_cache/kv_cache_event.h"
@@ -132,7 +133,33 @@ void CompositeBlockManager::deallocate_sequence(Sequence* seq) {
 }
 
 void CompositeBlockManager::deallocate(const Slice<Block>& blocks) {
-  LOG(FATAL) << "CompositeBlockManager::deallocate is not implemented";
+  if (blocks.empty()) {
+    return;
+  }
+
+  std::unordered_map<BlockManager*, std::vector<Block>> blocks_by_manager;
+  for (const auto& block : blocks) {
+    if (!block.is_valid()) {
+      continue;
+    }
+    BlockManager* manager = block.manager();
+    CHECK(manager != nullptr)
+        << "CompositeBlockManager got a valid block without owner manager";
+    const auto it =
+        std::find_if(sub_managers_.begin(),
+                     sub_managers_.end(),
+                     [manager](const std::unique_ptr<BlockManager>& sub_mgr) {
+                       return sub_mgr.get() == manager;
+                     });
+    CHECK(it != sub_managers_.end())
+        << "CompositeBlockManager cannot deallocate block " << block.id()
+        << " from a manager outside this composite manager";
+    blocks_by_manager[manager].push_back(block);
+  }
+
+  for (auto& [manager, manager_blocks] : blocks_by_manager) {
+    manager->deallocate(manager_blocks);
+  }
 }
 
 std::vector<Block> CompositeBlockManager::allocate(size_t num_blocks) {
