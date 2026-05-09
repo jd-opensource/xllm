@@ -19,7 +19,10 @@ limitations under the License.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <memory>
+#include <sstream>
 #include <tuple>
 #include <vector>
 
@@ -47,6 +50,56 @@ c10::optional<torch::Tensor> as_optional(const torch::Tensor& tensor) {
     return c10::optional<torch::Tensor>(tensor);
   }
   return c10::nullopt;
+}
+
+bool dsv4_eager_debug_enabled() {
+  const char* value = std::getenv("XLLM_DSV4_EAGER_DEBUG");
+  return value != nullptr &&
+         (std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0 ||
+          std::strcmp(value, "TRUE") == 0 || std::strcmp(value, "on") == 0 ||
+          std::strcmp(value, "ON") == 0);
+}
+
+std::string tensor_debug_summary(const torch::Tensor& tensor,
+                                 int64_t max_preview_items = 16) {
+  if (!tensor.defined()) {
+    return "undefined";
+  }
+  std::ostringstream oss;
+  oss << "sizes=" << tensor.sizes() << " numel=" << tensor.numel()
+      << " dtype=" << tensor.scalar_type() << " device=" << tensor.device();
+  if (tensor.numel() == 0) {
+    oss << " preview=<empty>";
+    return oss.str();
+  }
+  if (tensor.numel() > 4096) {
+    oss << " preview=<skipped:numel=" << tensor.numel() << ">";
+    return oss.str();
+  }
+  try {
+    auto flat = tensor.detach().flatten().to(torch::kCPU).contiguous();
+    auto preview = flat.to(torch::kInt64).contiguous();
+    auto acc = preview.accessor<int64_t, 1>();
+    const int64_t n = std::min<int64_t>(preview.numel(), max_preview_items);
+    oss << " preview=";
+    for (int64_t i = 0; i < n; ++i) {
+      if (i != 0) {
+        oss << " ";
+      }
+      oss << acc[i];
+    }
+  } catch (const std::exception& e) {
+    oss << " preview=<error:" << e.what() << ">";
+  }
+  return oss.str();
+}
+
+void log_tensor(const std::string& name, const torch::Tensor& tensor) {
+  if (!dsv4_eager_debug_enabled()) {
+    return;
+  }
+  LOG(INFO) << "[DSV4][EagerAttn] name=" << name << " "
+            << tensor_debug_summary(tensor);
 }
 
 torch::Tensor get_layer_cache_tensor(
@@ -197,11 +250,20 @@ void scatter_by_slot(torch::Tensor& cache,
   CHECK_GT(cache_rows, 0) << "scatter_by_slot requires cache rows > 0, cache "
                           << cache.sizes();
 
-  auto valid_mask = slots_slice.ge(0);
-  if (!valid_mask.any().item<bool>()) {
+  if (!cache.device().is_cpu()) {
+    auto safe_slots = slots_slice.clamp_min(0);
+    auto valid_mask = slots_slice.ge(0).unsqueeze(1);
+    auto old_values = cache_2d.index_select(/*dim=*/0, safe_slots);
+    auto safe_values = torch::where(valid_mask, value_slice, old_values);
+    cache_2d.index_copy_(/*dim=*/0, safe_slots, safe_values);
     return;
   }
+
+  auto valid_mask = slots_slice.ge(0);
   auto valid_slots = slots_slice.index({valid_mask});
+  if (valid_slots.numel() == 0) {
+    return;
+  }
   auto valid_values = value_slice.index({valid_mask});
 
   const int64_t max_slot = valid_slots.max().item<int64_t>();
@@ -213,13 +275,6 @@ void scatter_by_slot(torch::Tensor& cache,
       << ", value_rows=" << value_2d.size(0) << ", update_rows=" << update_rows
       << ", cache_shape=" << cache.sizes();
   cache_2d.index_copy_(/*dim=*/0, valid_slots, valid_values);
-}
-
-int64_t tensor_max_or_zero(const torch::Tensor& tensor) {
-  if (!tensor.defined() || tensor.numel() == 0) {
-    return 0;
-  }
-  return tensor.max().item<int64_t>();
 }
 
 // Pack prefill TND KV [total_tokens, n, d] into temporary PA_ND blocks
@@ -306,7 +361,9 @@ AttentionMetadata build_indexer_attention_metadata(
     const DSAMetadata& attn_metadata,
     const torch::Tensor& block_table,
     const torch::Tensor& slot_mapping,
-    bool is_prefill) {
+    bool is_prefill,
+    int64_t max_query_len,
+    int64_t max_seq_len) {
   AttentionMetadata metadata;
   metadata.is_prefill = is_prefill;
   metadata.is_chunked_prefill = false;
@@ -340,19 +397,8 @@ AttentionMetadata build_indexer_attention_metadata(
         torch::cat({torch::zeros({1}, kv_seq_lens.options()), kv_cumsum});
   }
 
-  if (attn_metadata.max_seqlen_q.defined() &&
-      attn_metadata.max_seqlen_q.numel() > 0) {
-    metadata.max_query_len = attn_metadata.max_seqlen_q.max().item<int64_t>();
-  } else {
-    metadata.max_query_len = tensor_max_or_zero(metadata.q_seq_lens);
-  }
-
-  if (attn_metadata.max_seqlen_kv.defined() &&
-      attn_metadata.max_seqlen_kv.numel() > 0) {
-    metadata.max_seq_len = attn_metadata.max_seqlen_kv.max().item<int64_t>();
-  } else {
-    metadata.max_seq_len = tensor_max_or_zero(metadata.kv_seq_lens);
-  }
+  metadata.max_query_len = max_query_len;
+  metadata.max_seq_len = max_seq_len;
 
   metadata.dsa_metadata = std::make_shared<DSAMetadata>(attn_metadata);
 
@@ -601,6 +647,35 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
                                            attn_metadata.layer_id,
                                            mapping.index_cache_idx);
 
+  if (dsv4_eager_debug_enabled() && !attn_metadata.is_acl_graph) {
+    LOG(INFO) << "[DSV4][EagerAttn] layer=" << attn_metadata.layer_id
+              << " compress_ratio=" << compress_ratio_i
+              << " isprefill=" << isprefill
+              << " mapping.cmp=" << mapping.cmp_cache_idx
+              << " mapping.index=" << mapping.index_cache_idx
+              << " mapping.indexer_scale=" << mapping.indexer_scale_cache_idx
+              << " mapping.ori=" << mapping.ori_cache_idx
+              << " mapping.kv_state=" << mapping.kv_state_cache_idx
+              << " mapping.score_state=" << mapping.score_state_cache_idx
+              << " mapping.index_kv_state=" << mapping.index_kv_state_cache_idx
+              << " mapping.index_score_state="
+              << mapping.index_score_state_cache_idx;
+    log_tensor("ori_block_table", ori_block_table);
+    log_tensor("cmp_block_table", cmp_block_table);
+    log_tensor("kv_block_table", kv_block_table);
+    log_tensor("score_block_table", score_block_table);
+    log_tensor("index_kv_block_table", index_kv_block_table);
+    log_tensor("index_score_block_table", index_score_block_table);
+    log_tensor("index_block_table", index_block_table);
+    log_tensor("ori_slot", ori_slot);
+    log_tensor("cmp_slot", cmp_slot);
+    log_tensor("index_slot", index_slot);
+    log_tensor("actual_seq_lengths_query",
+               attn_metadata.actual_seq_lengths_query);
+    log_tensor("actual_seq_lengths_kv", attn_metadata.actual_seq_lengths_kv);
+    log_tensor("start_pos", attn_metadata.start_pos);
+  }
+
   auto ori_kv = std::get<0>(kv_state);
   if (!ori_kv.defined()) {
     ori_kv = kv_cache.get_swa_cache();
@@ -691,8 +766,13 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
                                                             index_score_state};
     std::tuple<torch::Tensor, torch::Tensor> indexer_block_tables{
         index_kv_block_table, index_score_block_table};
-    auto indexer_metadata = build_indexer_attention_metadata(
-        attn_metadata, index_block_table, index_slot, isprefill);
+    auto indexer_metadata =
+        build_indexer_attention_metadata(attn_metadata,
+                                         index_block_table,
+                                         index_slot,
+                                         isprefill,
+                                         attn_metadata.max_query_len,
+                                         attn_metadata.max_seq_len);
     CHECK(qli_metadata.defined()) << "DSAttention requires precomputed "
                                      "qli_metadata for compress_ratio==4.";
     auto qli_metadata_opt = std::optional<torch::Tensor>(qli_metadata);
