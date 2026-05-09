@@ -45,6 +45,10 @@ limitations under the License.
 
 namespace xllm {
 
+namespace layer {
+struct AttentionMetadata;
+}
+
 class CausalLM : public torch::nn::Module {
  public:
   ~CausalLM() override = default;
@@ -56,6 +60,14 @@ class CausalLM : public torch::nn::Module {
                               const torch::Tensor& positions,
                               std::vector<KVCache>& kv_caches,
                               const ModelInputParams& parameters) = 0;
+
+  virtual std::shared_ptr<layer::AttentionMetadata> build_deepseek_v4_metadata(
+      const torch::Tensor& positions,
+      const ModelInputParams& parameters) {
+    (void)positions;
+    (void)parameters;
+    return nullptr;
+  }
 
   // hidden_states: [num_tokens, hidden_size]
   // seleted_idxes: [num_tokens]
@@ -157,6 +169,16 @@ class CausalLMImpl : public CausalLM {
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& parameters) override {
     return model_->forward(tokens, positions, kv_caches, parameters);
+  }
+
+  std::shared_ptr<layer::AttentionMetadata> build_deepseek_v4_metadata(
+      const torch::Tensor& positions,
+      const ModelInputParams& parameters) override {
+    if constexpr (detail::has_build_deepseek_v4_metadata<Model>::value) {
+      return model_->build_deepseek_v4_metadata(positions, parameters);
+    } else {
+      return CausalLM::build_deepseek_v4_metadata(positions, parameters);
+    }
   }
 
   torch::Tensor pooler(const torch::Tensor& hidden_states,

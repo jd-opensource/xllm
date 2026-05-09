@@ -80,6 +80,11 @@ struct DSAMetadata {
   torch::Tensor c4_sin;
   torch::Tensor c128_cos;
   torch::Tensor c128_sin;
+  // Main q/kv RoPE tensors for compressed layers at input-token length.
+  torch::Tensor c4_input_cos;
+  torch::Tensor c4_input_sin;
+  torch::Tensor c128_input_cos;
+  torch::Tensor c128_input_sin;
   torch::Tensor start_pos;
 
   // Multi-manager block tables and slot mappings
