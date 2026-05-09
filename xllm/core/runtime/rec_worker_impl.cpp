@@ -585,7 +585,7 @@ RecWorkerImpl::OneRecXAttentionWorkPipeline::OneRecXAttentionWorkPipeline(
 #if defined(USE_NPU)
   initialize_constraint_device_tensors(
       vocab_dict->build_constraint_tables(vocab_size));
-#else
+#endif
   constrained_decoding_ =
       std::make_unique<RecConstrainedDecoding>(vocab_dict,
                                                vocab_size,
@@ -595,7 +595,6 @@ RecWorkerImpl::OneRecXAttentionWorkPipeline::OneRecXAttentionWorkPipeline(
   CHECK(constrained_decoding_->build_mask_cache())
       << "Failed to build OneRec xattention constrained decoding cache, "
       << "vocab_size=" << vocab_size;
-#endif
 }
 
 void RecWorkerImpl::OneRecXAttentionWorkPipeline::
@@ -1091,36 +1090,37 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
     if (FLAGS_enable_constrained_decoding &&
         sampling_params.selected_token_idxes.defined() &&
         !use_device_constraints) {
-      LOG(FATAL) << "Unsupported OneRec xattention constrained decoding "
-                    "request, current_step="
-                 << current_step << ", beam_width=" << request_beam_width
-                 << ", max_top_logprobs=" << sampling_params.max_top_logprobs
-                 << ", use_beam_search=" << sampling_params.use_beam_search
-                 << ", logprobs=" << sampling_params.logprobs
-                 << ", selected_token_idxes_numel="
-                 << (sampling_params.selected_token_idxes.defined()
-                         ? sampling_params.selected_token_idxes.numel()
-                         : 0)
-                 << ", sample_idxes_defined="
-                 << sampling_params.sample_idxes.defined()
-                 << ", sample_idxes_numel="
-                 << (sampling_params.sample_idxes.defined()
-                         ? sampling_params.sample_idxes.numel()
-                         : 0)
-                 << ", do_sample_defined="
-                 << sampling_params.do_sample.defined()
-                 << ", all_greedy_sample=" << sampling_params.all_greedy_sample
-                 << ", all_random_sample=" << sampling_params.all_random_sample
-                 << ", has_frequency_penalties="
-                 << sampling_params.frequency_penalties.defined()
-                 << ", has_presence_penalties="
-                 << sampling_params.presence_penalties.defined()
-                 << ", has_repetition_penalties="
-                 << sampling_params.repetition_penalties.defined()
-                 << ", has_top_k=" << sampling_params.top_k.defined()
-                 << ", has_top_p=" << sampling_params.top_p.defined()
-                 << ", constraint_tables_initialized="
-                 << constraint_device_tensors_.initialized;
+      LOG_FIRST_N(WARNING, 8)
+          << "Unsupported OneRec xattention constrained decoding request for "
+             "device constraints, falling back to CPU mask generation. "
+          << "current_step=" << current_step
+          << ", beam_width=" << request_beam_width
+          << ", max_top_logprobs=" << sampling_params.max_top_logprobs
+          << ", use_beam_search=" << sampling_params.use_beam_search
+          << ", logprobs=" << sampling_params.logprobs
+          << ", selected_token_idxes_numel="
+          << (sampling_params.selected_token_idxes.defined()
+                  ? sampling_params.selected_token_idxes.numel()
+                  : 0)
+          << ", sample_idxes_defined="
+          << sampling_params.sample_idxes.defined()
+          << ", sample_idxes_numel="
+          << (sampling_params.sample_idxes.defined()
+                  ? sampling_params.sample_idxes.numel()
+                  : 0)
+          << ", do_sample_defined=" << sampling_params.do_sample.defined()
+          << ", all_greedy_sample=" << sampling_params.all_greedy_sample
+          << ", all_random_sample=" << sampling_params.all_random_sample
+          << ", has_frequency_penalties="
+          << sampling_params.frequency_penalties.defined()
+          << ", has_presence_penalties="
+          << sampling_params.presence_penalties.defined()
+          << ", has_repetition_penalties="
+          << sampling_params.repetition_penalties.defined()
+          << ", has_top_k=" << sampling_params.top_k.defined()
+          << ", has_top_p=" << sampling_params.top_p.defined()
+          << ", constraint_tables_initialized="
+          << constraint_device_tensors_.initialized;
     }
 #endif
 

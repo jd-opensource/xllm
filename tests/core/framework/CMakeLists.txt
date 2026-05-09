@@ -10,6 +10,7 @@ add_subdirectory(parallel_state)
 add_subdirectory(prefix_cache)
 add_subdirectory(request)
 add_subdirectory(sampling)
+add_subdirectory(state_dict)
 add_subdirectory(tokenizer)
 
 cc_test(
