@@ -125,9 +125,11 @@ void update_kv_seq_lens_and_max(std::vector<int32_t>& kv_seq_lens_vec,
                                 int32_t kv_len,
                                 int32_t& kv_max_seq_len);
 
-// Builds q_cu_seq_lens tensor from params.get_q_seq_len(i).
+// Builds q_cu_seq_lens tensor from params.get_q_seq_len(i). When
+// include_leading_zero is true, returns query_start_loc-style [0, cumsum...].
 torch::Tensor build_q_cu_seq_lens_tensor(const ModelInputParams& params,
-                                         torch::Device device = torch::kCPU);
+                                         torch::Device device = torch::kCPU,
+                                         bool include_leading_zero = false);
 
 namespace draftProbs {
 

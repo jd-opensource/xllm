@@ -332,6 +332,17 @@ TEST(SpecDecodeInputBuilderTest, QCuSeqLensConsistency) {
             std::vector<int32_t>({1, 3, 6}));
 }
 
+TEST(SpecDecodeInputBuilderTest, QCuSeqLensWithLeadingZero) {
+  ModelInputParams params;
+  params.num_sequences = 3;
+  params.q_seq_lens_vec = to_layout_seq_lens({1, 2, 3});
+
+  torch::Tensor q_cu_seq_lens =
+      build_q_cu_seq_lens_tensor(params, torch::kCPU, true);
+  EXPECT_EQ(tensor_to_vec_int32(q_cu_seq_lens),
+            std::vector<int32_t>({0, 1, 3, 6}));
+}
+
 TEST(SpecDecodeInputBuilderTest, CalcSlotIdOutOfRangeDeath) {
   std::vector<int32_t> block_table = {0};
   EXPECT_DEATH(calc_slot_id(/*position=*/4,

@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "qwen3_next_hybrid_decoder_layer_base.h"
 
+#include <glog/logging.h>
+
 #include <algorithm>
 #include <optional>
 #include <tuple>

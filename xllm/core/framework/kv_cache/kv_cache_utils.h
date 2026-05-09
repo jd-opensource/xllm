@@ -52,6 +52,8 @@ struct KVCacheCapacity {
   // for linear attention
   PROPERTY(int64_t, linear_slot_size) = 0;
   PROPERTY(int64_t, linear_cache_size_in_bytes) = 0;
+  PROPERTY(int64_t, linear_conv_state_len) = 0;
+  PROPERTY(int64_t, linear_ssm_checkpoint_stride) = 1;
   PROPERTY(int64_t, n_layers) = 0;
   PROPERTY(int64_t, num_linear_state_blocks) = 0;
   PROPERTY(int64_t, num_full_attention_layers) = 0;

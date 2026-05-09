@@ -22,7 +22,6 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/common/global_flags.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -69,10 +68,12 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
             model_args_.hidden_size(), model_args_.rms_norm_eps(), options));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
-                                      /*mask_value=*/mask_value);
+                                      /*mask_value=*/-9984);
+    dense_attn_mask_ = layer::AttentionMask(options.device(),
+                                            options.dtype().toScalarType(),
+                                            /*mask_value=*/1);
     dp_size_ = parallel_args.dp_size();
   }
 
@@ -158,14 +159,23 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
 
  protected:
   torch::Tensor build_attention_mask(const ModelInputParams& input_params) {
+#if defined(USE_NPU)
+    if (input_params.graph_buffer.attn_mask.defined()) {
+      return input_params.graph_buffer.attn_mask;
+    }
+#endif
     max_seq_len_ = std::max(input_params.kv_max_seq_len, max_seq_len_);
-    if (!FLAGS_enable_chunked_prefill) {
-      return attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
+    const bool use_append_mask =
+        input_params.is_spec_verify ||
+        input_params.batch_forward_type.is_mixed() ||
+        input_params.batch_forward_type.is_chunked_prefill();
+    if (!use_append_mask) {
+      return dense_attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
     }
 
     const int32_t num_sequences = input_params.num_sequences;
     if (num_sequences <= 0) {
-      return attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
+      return dense_attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
     }
 
     std::vector<torch::Tensor> req_mask_vec;
@@ -190,6 +200,7 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
   torch::ScalarType dtype_ = torch::kFloat;
   layer::Qwen3NextRMSNorm norm_{nullptr};
   layer::AttentionMask attn_mask_;
+  layer::AttentionMask dense_attn_mask_;
   layer::WordEmbedding embed_tokens_{nullptr};
 };
 

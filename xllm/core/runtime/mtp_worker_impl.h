@@ -73,6 +73,8 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
       const ForwardInput& input);
 
   ForwardOutput prepare_last_output_for_decode(const ForwardInput& input);
+  void prepare_validate_inputs(const ForwardInput& input,
+                               ForwardInput& validate_input);
   void fill_validate_input_from_draft_outputs(
       const std::vector<ForwardOutput>& draft_outputs,
       ForwardInput& validate_input);
@@ -101,6 +103,7 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
   // prepare inputs for draft model at Prefill phase.
   void prepare_prefill_inputs(const ForwardInput& inputs,
                               ForwardInput& prefill_inputs);
+  bool use_qwen3_5_spec_verify_path() const;
 
   // prepare inputs for draft model at Decode phase.
   void prepare_draft_inputs(const ForwardInput& inputs,

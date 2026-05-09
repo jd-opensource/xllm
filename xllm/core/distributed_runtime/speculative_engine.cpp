@@ -43,17 +43,22 @@ SpeculativeEngine::SpeculativeEngine(const runtime::Options& options,
   dist_options.enable_speculative_decode(true);
   dist_manager_ = std::make_shared<DistManager>(dist_options);
 
-  runtime::Options engine_options = options_;
-  engine_options.num_decoding_tokens(options.num_speculative_tokens() + 1);
-  engine_ = std::make_unique<LLMEngine>(engine_options, dist_manager_);
+  runtime::Options target_engine_options = options_;
+  target_engine_options.num_decoding_tokens(options.num_speculative_tokens() +
+                                            1);
+  engine_ = std::make_unique<LLMEngine>(target_engine_options, dist_manager_);
 
   if (use_draft_engine_) {
     // draft engine
-    engine_options.model_path(options_.draft_model_path().value_or(""))
+    runtime::Options draft_engine_options = options_;
+    draft_engine_options.model_path(options_.draft_model_path().value_or(""))
         .devices(options.draft_devices())
         .num_decoding_tokens(1)
+        .enable_speculative_decode(false)
+        .enable_graph(false)
         .is_draft_engine(true);
-    draft_engine_ = std::make_unique<LLMEngine>(engine_options, dist_manager_);
+    draft_engine_ =
+        std::make_unique<LLMEngine>(draft_engine_options, dist_manager_);
 
     // check if llm and ssm are using the same device
     for (const auto& target : options.devices()) {

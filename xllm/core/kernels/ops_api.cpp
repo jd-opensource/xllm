@@ -835,6 +835,29 @@ std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
 #endif
 }
 
+torch::Tensor fused_sigmoid_gating_delta_rule_update(
+    FusedSigmoidGatingDeltaRuleUpdateParams& params) {
+#if defined(USE_NPU)
+  return npu::npu_fused_sigmoid_gating_delta_rule_update(
+      params.A_log,
+      params.a,
+      params.dt_bias,
+      params.q,
+      params.k,
+      params.v,
+      params.b,
+      params.initial_state_source,
+      params.initial_state_indices,
+      params.cu_seqlens,
+      params.scale,
+      params.use_qk_l2norm_in_kernel,
+      params.softplus_beta,
+      params.softplus_threshold);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 torch::Tensor fp8_scaled_matmul(Fp8ScaledMatmulParams& params) {
 #if defined(USE_CUDA)
   auto out_2d = cuda::fp8_scaled_matmul(params.a,
@@ -940,7 +963,8 @@ torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params) {
                                           params.pad_slot_id,
                                           params.block_idx_last_scheduled_token,
                                           params.initial_state_idx,
-                                          params.validate_data);
+                                          params.validate_data,
+                                          params.num_accepted_tokens);
 
 #else
   NOT_IMPLEMENTED();

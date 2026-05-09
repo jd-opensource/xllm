@@ -47,18 +47,20 @@ void EmbeddingCache::write(const std::vector<int32_t>& ids,
         int64_t token = accepted_tokens_cpu[i].item<int64_t>();
         tail.correction_token_id = static_cast<int32_t>(token);
       } else {
-        int32_t last_valid_token = -1;
-        int32_t last_valid_idx = -1;
+        int32_t correction_token = -1;
+        int32_t correction_offset = -1;
         const int32_t token_width = accepted_tokens_cpu.size(1);
         for (int32_t j = 0; j < token_width; ++j) {
           int64_t token = accepted_tokens_cpu[i][j].item<int64_t>();
-          if (token >= 0) {
-            last_valid_token = static_cast<int32_t>(token);
-            last_valid_idx = j;
+          if (token < 0) {
+            break;
           }
+          correction_token = static_cast<int32_t>(token);
+          correction_offset = j;
         }
-        tail.correction_token_id = last_valid_token;
-        tail.correction_position_offset = last_valid_idx;
+
+        tail.correction_token_id = correction_token;
+        tail.correction_position_offset = correction_offset;
       }
     }
     tail.embedding = embeddings[i];
@@ -121,6 +123,20 @@ std::vector<int32_t> EmbeddingCache::read_position_offsets(
     offsets.emplace_back(item.correction_position_offset);
   }
   return offsets;
+}
+
+std::vector<int32_t> EmbeddingCache::read_accepted_prefix_lengths(
+    const std::vector<int32_t>& ids) const {
+  CHECK(!ids.empty()) << "decode ids should not be empty";
+  std::vector<int32_t> accepted_prefix_lengths;
+  accepted_prefix_lengths.reserve(ids.size());
+  for (int32_t id : ids) {
+    const auto& item = get_tail(id);
+    CHECK_GE(item.correction_token_id, 0)
+        << "decode entry missing correction token id";
+    accepted_prefix_lengths.emplace_back(item.correction_position_offset + 1);
+  }
+  return accepted_prefix_lengths;
 }
 
 void EmbeddingCache::clear(const std::vector<int32_t>& ids) {

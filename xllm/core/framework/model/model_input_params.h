@@ -354,7 +354,6 @@ struct ModelInputParams {
     params.block_tables = safe_to(block_tables, device, true);
     params.kv_seq_lens_vec = kv_seq_lens_vec;
     params.q_seq_lens_vec = q_seq_lens_vec;
-
     params.input_embedding = safe_to(input_embedding, device);
 
     params.deep_stacks = deep_stacks;
@@ -365,8 +364,15 @@ struct ModelInputParams {
     params.embedding_ids = std::move(embedding_ids);
     params.linear_state_ids = std::move(linear_state_ids);
     params.linear_state_indices = safe_to(linear_state_indices, device, true);
+    if (!params.linear_state_indices.defined() &&
+        !params.linear_state_ids.empty()) {
+      params.linear_state_indices =
+          torch::tensor(params.linear_state_ids, torch::kInt).to(device);
+    }
     params.request_ids = std::move(request_ids);
     params.extra_token_ids = std::move(extra_token_ids);
+    params.is_spec_verify = is_spec_verify;
+    params.num_accepted_tokens = safe_to(num_accepted_tokens, device, true);
     params.dp_ep_padding_data = dp_ep_padding_data;
     params.cp_ep_padding_data
         .attn_padding_idx(
@@ -452,6 +458,9 @@ struct ModelInputParams {
     print_tensor(block_tables, "ModelInputParams: block_tables", 4);
     LOG(INFO) << "ModelInputParams: dp_global_token_nums is "
               << dp_global_token_nums << ", dp_is_decode: " << dp_is_decode;
+    LOG(INFO) << "ModelInputParams: is_spec_verify is " << is_spec_verify;
+    print_tensor(
+        num_accepted_tokens, "ModelInputParams: num_accepted_tokens", 4);
 
     if (const auto* onerec = onerec_params()) {
       LOG(INFO) << "ModelInputParams: has onerec_params";
@@ -574,6 +583,9 @@ struct ModelInputParams {
   // extra token ids for each sequence, and -1 for last chunk
   std::vector<int32_t> extra_token_ids;
 
+  bool is_spec_verify = false;
+  torch::Tensor num_accepted_tokens;
+
   // swap
   std::vector<BlockTransferInfo> swap_blocks;
 
@@ -654,6 +666,11 @@ struct ModelInputParams {
   struct GraphBuffer {
     torch::Tensor attn_mask;
     torch::Tensor tiling_data;
+    bool use_expanded_decode_for_spec_verify_attention = false;
+    torch::Tensor expanded_kv_seq_lens;
+    torch::Tensor expanded_block_tables;
+    torch::Tensor expanded_tiling_data;
+    std::vector<int32_t> expanded_kv_seq_lens_vec;
   };
   GraphBuffer graph_buffer;
 

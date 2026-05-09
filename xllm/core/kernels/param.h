@@ -1345,6 +1345,24 @@ struct FusedRecurrentGatedDeltaRuleParams {
   bool use_qk_l2norm_in_kernel = false;
 };
 
+// NPU Fused Sigmoid Gating Delta Rule Update parameters
+struct FusedSigmoidGatingDeltaRuleUpdateParams {
+  torch::Tensor A_log;
+  torch::Tensor a;
+  torch::Tensor dt_bias;
+  torch::Tensor q;
+  torch::Tensor k;
+  torch::Tensor v;
+  torch::Tensor b;
+  torch::Tensor initial_state_source;
+  torch::Tensor initial_state_indices;
+  torch::Tensor cu_seqlens;
+  std::optional<float> scale = std::nullopt;
+  bool use_qk_l2norm_in_kernel = false;
+  float softplus_beta = 1.0f;
+  float softplus_threshold = 20.0f;
+};
+
 // NPU Causal Conv1d Update parameters
 struct CausalConv1dUpdateParams {
   torch::Tensor x;
@@ -1353,6 +1371,7 @@ struct CausalConv1dUpdateParams {
   bool activation = true;
   std::optional<torch::Tensor> bias = std::nullopt;
   std::optional<torch::Tensor> conv_state_indices = std::nullopt;
+  std::optional<torch::Tensor> num_accepted_tokens = std::nullopt;
   std::optional<torch::Tensor> query_start_loc = std::nullopt;
   int32_t max_query_len = -1;
   int32_t pad_slot_id = -1;

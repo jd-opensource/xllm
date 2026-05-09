@@ -15,12 +15,14 @@ limitations under the License.
 
 #include "mtp_worker_impl.h"
 
+#include <algorithm>
+#include <cctype>
+
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/request/mm_data.h"
 #include "spec_input_builder.h"
-#include "util/env_var.h"
-#include "util/pretty_print.h"
+#include "util/json_reader.h"
 #include "util/slice.h"
 #include "util/timer.h"
 #include "util/utils.h"
@@ -31,17 +33,55 @@ constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
 namespace {
 runtime::Options MTPTargetOptions(const runtime::Options& options) {
   auto opts = options;
-  opts.enable_schedule_overlap(false);
+  opts.enable_schedule_overlap(false).is_draft_engine(false);
   return opts;
 }
 
 runtime::Options MTPDraftOptions(const runtime::Options& options) {
   auto opts = options;
   opts.enable_schedule_overlap(false)
+      .is_draft_engine(true)
+      .enable_graph(false)
       .num_decoding_tokens(1)
       .num_speculative_tokens(0);
   return opts;
 }
+
+bool is_qwen3_5_target_model_type(const std::string& model_type) {
+  return model_type == "qwen3_5" || model_type == "qwen3_5_moe";
+}
+
+#if defined(USE_NPU)
+std::string read_model_type_from_config(const std::string& model_weights_path) {
+  JsonReader reader;
+  const std::string config_path = model_weights_path + "/config.json";
+  if (!reader.parse(config_path)) {
+    LOG(WARNING) << "Failed to parse model config: " << config_path;
+    return "";
+  }
+
+  std::string model_type = reader.value_or<std::string>("model_type", "");
+  if (model_type.empty()) {
+    model_type = reader.value_or<std::string>("text_config.model_type", "");
+  }
+  std::transform(
+      model_type.begin(),
+      model_type.end(),
+      model_type.begin(),
+      [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return model_type;
+}
+
+void force_atb_spec_kernel_for_qwen3_5_mtp(
+    const std::string& model_weights_path) {
+  const std::string model_type =
+      read_model_type_from_config(model_weights_path);
+  if (!is_qwen3_5_target_model_type(model_type)) {
+    return;
+  }
+  FLAGS_enable_atb_spec_kernel = true;
+}
+#endif
 
 }  // namespace
 
@@ -72,13 +112,24 @@ bool MTPWorkerImpl::init_model(const std::string& model_weights_path,
                                MasterStatus master_status) {
   // Load target model via base class
   bool result = true;
-  if (impl_->get_status() == WorkerImpl::Status::UNINITIALIZED) {
+  const bool loading_target =
+      impl_->get_status() == WorkerImpl::Status::UNINITIALIZED;
+#if defined(USE_NPU)
+  if (loading_target) {
+    force_atb_spec_kernel_for_qwen3_5_mtp(model_weights_path);
+  }
+#endif
+  if (loading_target) {
     result = SpeculativeWorkerImpl::init_model(
         model_weights_path, random_seed, master_status);
   } else {
     CHECK_EQ(draft_impl_->get_status(), WorkerImpl::Status::UNINITIALIZED);
     result = draft_impl_->WorkerImpl::init_model(
         model_weights_path, random_seed, master_status);
+  }
+
+  if (impl_ != nullptr && impl_->get_status() == WorkerImpl::Status::LOADED) {
+    context_ = impl_->context_;
   }
 
   if (draft_impl_ != nullptr &&
@@ -102,14 +153,27 @@ bool MTPWorkerImpl::init_model(const std::string& model_weights_path,
     auto word_embedding = impl_->get_word_embedding();
     draft_impl_->set_word_embedding(word_embedding);
 #endif
-    // Sync context_ from impl_ for WorkerImpl::prepare_work_before_execute
-    context_ = impl_->context_;
   }
+
+#if defined(USE_NPU)
+  if (result && use_qwen3_5_spec_verify_path()) {
+    CHECK_EQ(FLAGS_npu_kernel_backend, "TORCH")
+        << "Qwen3.5 MTP only supports NPU Torch backend";
+  }
+#endif
+
   return result;
 }
 
 int64_t MTPWorkerImpl::get_embedding_placeholder_size() {
   return static_cast<int64_t>(embedding_size_);
+}
+
+bool MTPWorkerImpl::use_qwen3_5_spec_verify_path() const {
+  return impl_ != nullptr &&
+         impl_->get_status() != WorkerImpl::Status::UNINITIALIZED &&
+         is_qwen3_5_target_model_type(
+             impl_->context_.get_model_args().model_type());
 }
 
 bool MTPWorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
@@ -257,8 +321,10 @@ ForwardInput MTPWorkerImpl::update_input_by_last_step_output(
   input_params.kv_seq_lens_vec = std::move(buf.out_kv_seq_lens);
   input_params.kv_seq_lens =
       torch::tensor(input_params.kv_seq_lens_vec, int_options);
-  input_params.q_cu_seq_lens =
-      specBuilder::build_q_cu_seq_lens_tensor(input_params);
+  input_params.q_cu_seq_lens = specBuilder::build_q_cu_seq_lens_tensor(
+      input_params,
+      int_options.device(),
+      /*include_leading_zero=*/use_qwen3_5_spec_verify_path());
   input_params.new_cache_slots =
       torch::tensor(buf.out_new_cache_slots, int_options);
 
@@ -457,6 +523,33 @@ ForwardOutput MTPWorkerImpl::prepare_last_output_for_decode(
   return last_output;
 }
 
+void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
+                                            ForwardInput& validate_input) {
+  SpeculativeWorkerImpl::prepare_validate_inputs(input, validate_input);
+  if (!use_qwen3_5_spec_verify_path()) {
+    return;
+  }
+
+  torch::TensorOptions int_options = validate_input.token_ids.options();
+  auto& input_params = validate_input.input_params;
+  if (input_params.input_embedding.defined()) {
+    input_params.input_embedding = torch::Tensor();
+  }
+  input_params.is_spec_verify = true;
+  input_params.q_cu_seq_lens = specBuilder::build_q_cu_seq_lens_tensor(
+      input_params, int_options.device(), /*include_leading_zero=*/true);
+
+  const int32_t num_sequences = input.input_params.num_sequences;
+  std::vector<int32_t> accepted_prefix_lengths(num_sequences, 1);
+  if (embedding_cache_ != nullptr &&
+      !input.input_params.embedding_ids.empty()) {
+    accepted_prefix_lengths = embedding_cache_->read_accepted_prefix_lengths(
+        input.input_params.embedding_ids);
+  }
+  input_params.num_accepted_tokens =
+      torch::tensor(accepted_prefix_lengths, int_options);
+}
+
 void MTPWorkerImpl::fill_validate_input_from_draft_outputs(
     const std::vector<ForwardOutput>& draft_outputs,
     ForwardInput& validate_input) {
@@ -541,17 +634,23 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
   torch::Tensor accepted_tokens =
       safe_to(validate_output.next_tokens, torch::kCPU);
   const auto accepted_embeddings = validate_output.embeddings;
+  constexpr int32_t num_extend_tokens = 2;
+  const bool use_chunked_prefill = FLAGS_enable_atb_spec_kernel;
 
   specBuilder::DecodeBuildBuffers buf;
-  buf.out_token_ids.reserve(num_sequences * 2);
-  buf.out_positions.reserve(num_sequences * 2);
-  buf.out_new_cache_slots.reserve(num_sequences * 2);
-  buf.out_kv_seq_lens.reserve(num_sequences * 2);
-  buf.out_q_seq_lens.reserve(num_sequences * 2);
-  buf.out_block_tables.reserve(num_sequences * 2);
+  buf.out_token_ids.reserve(num_sequences * num_extend_tokens);
+  buf.out_positions.reserve(num_sequences * num_extend_tokens);
+  buf.out_new_cache_slots.reserve(num_sequences * num_extend_tokens);
+  buf.out_kv_seq_lens.reserve(num_sequences *
+                              (use_chunked_prefill ? 1 : num_extend_tokens));
+  buf.out_q_seq_lens.reserve(num_sequences *
+                             (use_chunked_prefill ? 1 : num_extend_tokens));
+  if (!use_chunked_prefill) {
+    buf.out_block_tables.reserve(num_sequences * num_extend_tokens);
+  }
   std::vector<torch::Tensor> expanded_embeddings;
   std::vector<int32_t> selected_row_idx;
-  expanded_embeddings.reserve(num_sequences * 2);
+  expanded_embeddings.reserve(num_sequences * num_extend_tokens);
   selected_row_idx.reserve(num_sequences);
 
   for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
@@ -562,8 +661,9 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
       row.seq_id = seq_id;
       row.token_id = token_id;
       row.position_offset = relative_offset;
-      row.append_q_len_one = true;
-      row.append_block_table = true;
+      row.append_kv_len = !use_chunked_prefill;
+      row.append_q_len_one = !use_chunked_prefill;
+      row.append_block_table = !use_chunked_prefill;
       specBuilder::append_decode_row(input_params, view, row, block_size, buf);
       if (embedding.defined()) {
         expanded_embeddings.emplace_back(embedding.to(device_));
@@ -602,7 +702,15 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
     const int32_t last_offset = last_idx;
     add_row(prev_token_id, prev_offset, prev_embedding);
     add_row(last_token_id, last_offset, last_embedding);
-    selected_row_idx.emplace_back(2 * seq_id + 1);
+    if (use_chunked_prefill) {
+      specBuilder::append_seq_len_by_layout(buf.out_q_seq_lens,
+                                            num_extend_tokens);
+      int32_t kv_len =
+          specBuilder::calc_kv_len(view.kv_seq_lens, seq_id, last_offset);
+      specBuilder::update_kv_seq_lens_and_max(
+          buf.out_kv_seq_lens, kv_len, buf.kv_max_seq_len);
+    }
+    selected_row_idx.emplace_back(num_extend_tokens * seq_id + 1);
   }
 
   CHECK_EQ(buf.out_new_cache_slots.size(), buf.out_positions.size())
@@ -612,27 +720,36 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
 
   extend_input.token_ids = torch::tensor(buf.out_token_ids, int_options);
   extend_input.positions = torch::tensor(buf.out_positions, int_options);
-  input_params.num_sequences = static_cast<int32_t>(buf.out_positions.size());
-  input_params.q_max_seq_len = 1;
-  input_params.batch_forward_type = BatchForwardType::DECODE;
+  if (use_chunked_prefill) {
+    input_params.num_sequences = num_sequences;
+    input_params.q_max_seq_len = num_extend_tokens;
+    input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
+  } else {
+    input_params.num_sequences = static_cast<int32_t>(buf.out_positions.size());
+    input_params.q_max_seq_len = 1;
+    input_params.batch_forward_type = BatchForwardType::DECODE;
+  }
   input_params.q_seq_lens_vec = std::move(buf.out_q_seq_lens);
   input_params.q_seq_lens =
       torch::tensor(input_params.q_seq_lens_vec, int_options);
-  input_params.q_cu_seq_lens =
-      specBuilder::build_q_cu_seq_lens_tensor(input_params);
+  input_params.q_cu_seq_lens = specBuilder::build_q_cu_seq_lens_tensor(
+      input_params,
+      int_options.device(),
+      /*include_leading_zero=*/use_qwen3_5_spec_verify_path());
   input_params.kv_max_seq_len = buf.kv_max_seq_len;
   input_params.kv_seq_lens_vec = std::move(buf.out_kv_seq_lens);
   input_params.kv_seq_lens =
       torch::tensor(input_params.kv_seq_lens_vec, int_options);
   input_params.new_cache_slots =
       torch::tensor(buf.out_new_cache_slots, int_options);
-  util::pad_2d_vector(buf.out_block_tables, /*pad_value=*/0);
-  input_params.block_tables =
-      create_2d_tensor(buf.out_block_tables, torch::kInt);
+  if (!use_chunked_prefill) {
+    util::pad_2d_vector(buf.out_block_tables, /*pad_value=*/0);
+    input_params.block_tables =
+        create_2d_tensor(buf.out_block_tables, torch::kInt);
+  }
   input_params.input_embedding = torch::stack(expanded_embeddings).to(device_);
 
   // update dp_global_token_nums for dp/ep parallel
-  constexpr int32_t num_extend_tokens = 2;
   for (auto& it : input_params.dp_global_token_nums) {
     it *= num_extend_tokens;
   }
@@ -709,8 +826,10 @@ void MTPWorkerImpl::prepare_draft_inputs(const ForwardInput& input,
       torch::tensor(input_params.kv_seq_lens_vec, int_options);
   input_params.new_cache_slots =
       torch::tensor(buf.out_new_cache_slots, int_options);
-  input_params.q_cu_seq_lens =
-      specBuilder::build_q_cu_seq_lens_tensor(input_params);
+  input_params.q_cu_seq_lens = specBuilder::build_q_cu_seq_lens_tensor(
+      input_params,
+      int_options.device(),
+      /*include_leading_zero=*/use_qwen3_5_spec_verify_path());
 }
 
 SampleOutput MTPWorkerImpl::validate(

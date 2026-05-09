@@ -896,11 +896,8 @@ void ProfileManager::warmup_for_graph() {
     }
   }
 
-  // ========== Warmup Prefill Request ==========
   LOG(INFO) << "Warming up prefill request: tokens=" << prefill_tokens;
   try {
-    // Prefill: prefix_length = 0 (empty KV cache), batch_size = 10,
-    // sequence_length = prefill_tokens / 10
     double latency = run_request(prefill_tokens, 0, 1);
     LOG(INFO) << "Prefill warmup completed: tokens=" << prefill_tokens
               << ", latency=" << latency << " ms";

@@ -223,10 +223,15 @@ void append_decode_row_from_last_step(const ModelInputParams& params,
 }
 
 torch::Tensor build_q_cu_seq_lens_tensor(const ModelInputParams& params,
-                                         torch::Device device) {
+                                         torch::Device device,
+                                         bool include_leading_zero) {
   std::vector<int32_t> q_cu_seq_lens_vec;
-  q_cu_seq_lens_vec.reserve(params.num_sequences);
+  q_cu_seq_lens_vec.reserve(params.num_sequences +
+                            (include_leading_zero ? 1 : 0));
   int32_t cum_seq_len = 0;
+  if (include_leading_zero) {
+    q_cu_seq_lens_vec.emplace_back(cum_seq_len);
+  }
   for (int32_t i = 0; i < params.num_sequences; ++i) {
     cum_seq_len += params.get_q_seq_len(i);
     q_cu_seq_lens_vec.emplace_back(cum_seq_len);
