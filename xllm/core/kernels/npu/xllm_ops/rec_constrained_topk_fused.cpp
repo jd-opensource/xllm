@@ -14,7 +14,6 @@ limitations under the License.
 ==============================================================================*/
 
 #include <c10/core/Device.h>
-#include <dlfcn.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
 #include <torch_npu/csrc/libs/init_npu.h>
@@ -33,63 +32,13 @@ limitations under the License.
 #endif
 
 #include "acl/acl.h"
-#include "aclnn/aclnn_base.h"
+#include "aclnn_rec_constrained_top_k.h"
 #include "core/common/macros.h"
 #include "core/kernels/npu/utils.h"
 #include "xllm_ops_api.h"
 
 namespace xllm::kernel::npu {
 namespace {
-
-using AclnnRecConstrainedTopKGetWorkspaceSizeFn =
-    aclnnStatus (*)(const aclTensor* logits,
-                    const aclTensor* sequence_group,
-                    const aclTensor* first_token_ids,
-                    const aclTensor* prefix1_offsets,
-                    const aclTensor* prefix1_values,
-                    const aclTensor* prefix1_pair_keys,
-                    const aclTensor* prefix2_value_offsets,
-                    const aclTensor* prefix2_values,
-                    const aclTensor* temperatures,
-                    int64_t current_step,
-                    int64_t top_k,
-                    int64_t max_prefix1_degree,
-                    int64_t max_prefix2_degree,
-                    aclTensor* out_tokens,
-                    aclTensor* out_logprobs,
-                    uint64_t* workspace_size,
-                    aclOpExecutor** executor);
-
-using AclnnRecConstrainedTopKFn = aclnnStatus (*)(void* workspace,
-                                                  uint64_t workspace_size,
-                                                  aclOpExecutor* executor,
-                                                  aclrtStream stream);
-
-void* find_opapi_symbol(const char* symbol_name) {
-  void* symbol = dlsym(RTLD_DEFAULT, symbol_name);
-  if (symbol != nullptr) {
-    return symbol;
-  }
-  static void* cust_opapi_handle = dlopen("libcust_opapi.so", RTLD_LAZY);
-  if (cust_opapi_handle == nullptr) {
-    return nullptr;
-  }
-  return dlsym(cust_opapi_handle, symbol_name);
-}
-
-AclnnRecConstrainedTopKGetWorkspaceSizeFn
-get_rec_constrained_topk_workspace_func() {
-  static auto func =
-      reinterpret_cast<AclnnRecConstrainedTopKGetWorkspaceSizeFn>(
-          find_opapi_symbol("aclnnRecConstrainedTopKGetWorkspaceSize"));
-  return func;
-}
-
-AclnnRecConstrainedTopKFn get_rec_constrained_topk_func() {
-  static auto func = reinterpret_cast<AclnnRecConstrainedTopKFn>(
-      find_opapi_symbol("aclnnRecConstrainedTopK"));
-  return func;
-}
 
 bool tensors_on_same_device(const torch::Tensor& first,
                             const torch::Tensor& second) {
@@ -200,15 +149,6 @@ rec_constrained_topk_fused(const torch::Tensor& logits,
                            int64_t top_k,
                            int64_t max_prefix1_degree,
                            int64_t max_prefix2_degree) {
-  AclnnRecConstrainedTopKGetWorkspaceSizeFn get_workspace_func =
-      get_rec_constrained_topk_workspace_func();
-  AclnnRecConstrainedTopKFn run_func = get_rec_constrained_topk_func();
-  if (get_workspace_func == nullptr || run_func == nullptr) {
-    LOG_FIRST_N(WARNING, 1)
-        << "rec_constrained_topk_fused: ACLNN custom op symbols are not "
-           "available.";
-    return std::nullopt;
-  }
   const std::optional<std::string> unsupported_reason =
       fused_inputs_unsupported_reason(logits,
                                       sequence_group,
@@ -293,23 +233,23 @@ rec_constrained_topk_fused(const torch::Tensor& logits,
   uint64_t workspace_size = 0;
   aclOpExecutor* executor = nullptr;
   const aclnnStatus workspace_status =
-      get_workspace_func(logits_ids,
-                         sequence_group_ids,
-                         first_token_ids_ids,
-                         prefix1_offsets_ids,
-                         prefix1_values_ids,
-                         prefix1_pair_keys_ids,
-                         prefix2_value_offsets_ids,
-                         prefix2_values_ids,
-                         temperatures_ids,
-                         current_step,
-                         top_k,
-                         max_prefix1_degree,
-                         max_prefix2_degree,
-                         out_tokens_ids,
-                         out_logprobs_ids,
-                         &workspace_size,
-                         &executor);
+      aclnnRecConstrainedTopKGetWorkspaceSize(logits_ids,
+                                              sequence_group_ids,
+                                              first_token_ids_ids,
+                                              prefix1_offsets_ids,
+                                              prefix1_values_ids,
+                                              prefix1_pair_keys_ids,
+                                              prefix2_value_offsets_ids,
+                                              prefix2_values_ids,
+                                              temperatures_ids,
+                                              current_step,
+                                              top_k,
+                                              max_prefix1_degree,
+                                              max_prefix2_degree,
+                                              out_tokens_ids,
+                                              out_logprobs_ids,
+                                              &workspace_size,
+                                              &executor);
   if (workspace_status != 0) {
     LOG(WARNING) << "rec_constrained_topk_fused: failed to get workspace, "
                  << "status=" << workspace_status
@@ -353,7 +293,10 @@ rec_constrained_topk_fused(const torch::Tensor& logits,
   const int32_t device_id = logits.device().index();
   const aclrtStream stream = c10_npu::getCurrentNPUStream(device_id).stream();
   const aclnnStatus run_status =
-      run_func(workspace_addr, workspace_size, executor, stream);
+      aclnnRecConstrainedTopK(workspace_addr,
+                              workspace_size,
+                              executor,
+                              stream);
   if (run_status != 0) {
     LOG(WARNING) << "rec_constrained_topk_fused: failed to execute, status="
                  << run_status << ", detail=" << aclGetRecentErrMsg();
