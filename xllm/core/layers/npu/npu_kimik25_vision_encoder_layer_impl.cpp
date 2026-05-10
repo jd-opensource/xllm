@@ -60,7 +60,7 @@ void NpuKimik25VisionEncoderLayerImpl::param_from_args(
   param.numKeyValueHeadsPerRank =
       static_cast<int>(optionalValue.value()) / param.worldSize;
   param.rank = dp_local_tp_rank;
-  param.backend = "lccl";
+  param.backend = FLAGS_communication_backend;
   param.enableLogN = false;
   param.MLPActivationType = atb::infer::ActivationType::ACTIVATION_GELU;
   param.mapping = parallel_args.mapping();

@@ -19,6 +19,8 @@ limitations under the License.
 #include "core/util/utils.h"
 #include "mm_data_visitor.h"
 
+#include <cstring>
+
 namespace xllm {
 
 MMBatchData::MMBatchData(const std::vector<MMData>& datas) {
@@ -188,6 +190,178 @@ std::optional<xllm::MMValue> proto_to_mmvalue(const proto::MMValue& pb_value) {
     return std::nullopt;
   }
 }
+
+template <typename ProtoMap>
+bool mmdict_to_proto(const xllm::MMDict& cpp_dict, ProtoMap* pb_dict) {
+  if (!pb_dict) {
+    LOG(ERROR) << "PB MMDict pointer is null";
+    return false;
+  }
+
+  for (const auto& [key, cpp_value] : cpp_dict) {
+    proto::MMValue& pb_value = (*pb_dict)[key];
+    if (!mmvalue_to_proto(cpp_value, &pb_value)) {
+      LOG(ERROR) << "Failed to convert struct MMValue for key: " << key;
+      return false;
+    }
+  }
+
+  return true;
+}
+
+template <typename ProtoMap>
+std::optional<xllm::MMDict> proto_to_mmdict(const ProtoMap& pb_dict) {
+  xllm::MMDict cpp_dict;
+
+  for (const auto& [key, pb_value] : pb_dict) {
+    auto cpp_value_opt = proto_to_mmvalue(pb_value);
+    if (!cpp_value_opt) {
+      LOG(ERROR) << "Failed to convert PB MMValue for key: " << key;
+      return std::nullopt;
+    }
+
+    cpp_dict.emplace(key, std::move(*cpp_value_opt));
+  }
+
+  return cpp_dict;
+}
+
+void mmitem_state_to_proto(const xllm::MMItemState& cpp_state,
+                           proto::MMItemState* pb_state) {
+  pb_state->set_token_pos_offset(cpp_state.token_pos().offset);
+  pb_state->set_token_pos_length(cpp_state.token_pos().length);
+  pb_state->set_cached_token_num(cpp_state.prefix_cache().cached_token_num);
+  if (cpp_state.prefix_cached()) {
+    pb_state->set_prefix_cache_key(
+        std::string(reinterpret_cast<const char*>(
+                        cpp_state.prefix_cache().key.data),
+                    XXH3_128BITS_HASH_VALUE_LEN));
+  }
+}
+
+bool proto_to_mmitem_state(const proto::MMItemState& pb_state,
+                           xllm::MMItemState* cpp_state) {
+  if (!cpp_state) {
+    LOG(ERROR) << "Struct MMItemState pointer is null";
+    return false;
+  }
+
+  cpp_state->mutable_token_pos().offset = pb_state.token_pos_offset();
+  cpp_state->mutable_token_pos().length = pb_state.token_pos_length();
+  cpp_state->mutable_prefix_cache().cached_token_num =
+      pb_state.cached_token_num();
+
+  std::memset(cpp_state->mutable_prefix_cache().key.data,
+              0,
+              XXH3_128BITS_HASH_VALUE_LEN);
+  const auto& prefix_cache_key = pb_state.prefix_cache_key();
+  if (!prefix_cache_key.empty()) {
+    if (prefix_cache_key.size() != XXH3_128BITS_HASH_VALUE_LEN) {
+      LOG(ERROR) << "Invalid MMItemState prefix cache key size: "
+                 << prefix_cache_key.size();
+      return false;
+    }
+    std::memcpy(cpp_state->mutable_prefix_cache().key.data,
+                prefix_cache_key.data(),
+                XXH3_128BITS_HASH_VALUE_LEN);
+  } else if (pb_state.cached_token_num() > 0) {
+    LOG(ERROR) << "MMItemState has cached tokens but no prefix cache key";
+    return false;
+  }
+
+  return true;
+}
+
+bool mmdata_item_to_proto(const xllm::MMDataItem& cpp_item,
+                          proto::MMDataItem* pb_item) {
+  if (!pb_item) {
+    LOG(ERROR) << "PB MMDataItem pointer is null";
+    return false;
+  }
+
+  pb_item->set_type(cpp_item.type());
+  if (!mmdict_to_proto(cpp_item.data(), pb_item->mutable_dict())) {
+    LOG(ERROR) << "Failed to convert MMDataItem dict";
+    return false;
+  }
+  mmitem_state_to_proto(cpp_item.state(), pb_item->mutable_state());
+
+  return true;
+}
+
+std::optional<xllm::MMDataItem> proto_to_mmdata_item(
+    const proto::MMDataItem& pb_item) {
+  auto dict_opt = proto_to_mmdict(pb_item.dict());
+  if (!dict_opt) {
+    LOG(ERROR) << "Failed to convert PB MMDataItem dict";
+    return std::nullopt;
+  }
+
+  xllm::MMType type{static_cast<xllm::MMType::Value>(pb_item.type())};
+  xllm::MMDataItem cpp_item(type, std::move(*dict_opt));
+  if (!proto_to_mmitem_state(pb_item.state(), &cpp_item.mutable_state())) {
+    return std::nullopt;
+  }
+
+  return cpp_item;
+}
+
+bool mmdata_entry_to_proto(const xllm::MMData& cpp_entry,
+                           proto::MMDataEntry* pb_entry) {
+  if (!pb_entry) {
+    LOG(ERROR) << "PB MMDataEntry pointer is null";
+    return false;
+  }
+
+  pb_entry->set_type(cpp_entry.type());
+  if (cpp_entry.hold<xllm::MMItemVec>()) {
+    pb_entry->set_is_item_vec(true);
+    const auto& cpp_items = cpp_entry.items<xllm::MMItemVec>();
+    pb_entry->mutable_items()->Reserve(cpp_items.size());
+    for (const auto& cpp_item : cpp_items) {
+      if (!mmdata_item_to_proto(cpp_item, pb_entry->add_items())) {
+        LOG(ERROR) << "Failed to convert MMDataEntry item";
+        return false;
+      }
+    }
+  } else if (cpp_entry.hold<xllm::MMDict>()) {
+    pb_entry->set_is_item_vec(false);
+    if (!mmdict_to_proto(cpp_entry.items<xllm::MMDict>(),
+                         pb_entry->mutable_dict())) {
+      LOG(ERROR) << "Failed to convert MMDataEntry dict";
+      return false;
+    }
+  } else {
+    LOG(ERROR) << "Unsupported MMDataEntry items type";
+    return false;
+  }
+
+  return true;
+}
+
+std::optional<xllm::MMData> proto_to_mmdata_entry(
+    const proto::MMDataEntry& pb_entry) {
+  if (pb_entry.is_item_vec()) {
+    xllm::MMItemVec cpp_items;
+    cpp_items.reserve(pb_entry.items_size());
+    for (const auto& pb_item : pb_entry.items()) {
+      auto cpp_item_opt = proto_to_mmdata_item(pb_item);
+      if (!cpp_item_opt) {
+        LOG(ERROR) << "Failed to convert PB MMDataEntry item";
+        return std::nullopt;
+      }
+      cpp_items.emplace_back(std::move(*cpp_item_opt));
+    }
+    return xllm::MMData(pb_entry.type(), std::move(cpp_items));
+  }
+
+  auto dict_opt = proto_to_mmdict(pb_entry.dict());
+  if (!dict_opt) {
+    LOG(ERROR) << "Failed to convert PB MMDataEntry dict";
+    return std::nullopt;
+  }
+  return xllm::MMData(pb_entry.type(), std::move(*dict_opt));
+}
 }  // namespace
 
 bool mmdata_to_proto(const xllm::MMBatchData& cpp_mmdata,
@@ -201,14 +375,18 @@ bool mmdata_to_proto(const xllm::MMBatchData& cpp_mmdata,
     return false;
   }
 
+  pb_mmdata->Clear();
   pb_mmdata->set_type(cpp_mmdata.type());
-  auto* pb_dict = pb_mmdata->mutable_dict();
+  if (!mmdict_to_proto(cpp_mmdata.data(), pb_mmdata->mutable_dict())) {
+    LOG(ERROR) << "Failed to convert MMBatchData dict";
+    return false;
+  }
 
-  const auto& cpp_dict = cpp_mmdata.data();
-  for (const auto& [key, cpp_value] : cpp_dict) {
-    proto::MMValue& pb_value = (*pb_dict)[key];
-    if (!mmvalue_to_proto(cpp_value, &pb_value)) {
-      LOG(ERROR) << "Failed to convert struct MMValue for key: " << key;
+  const auto& cpp_entries = cpp_mmdata.mm_data_vec();
+  pb_mmdata->mutable_entries()->Reserve(cpp_entries.size());
+  for (const auto& cpp_entry : cpp_entries) {
+    if (!mmdata_entry_to_proto(cpp_entry, pb_mmdata->add_entries())) {
+      LOG(ERROR) << "Failed to convert MMBatchData entry";
       return false;
     }
   }
@@ -224,19 +402,36 @@ bool proto_to_mmdata(const proto::MMData& pb_mmdata,
   }
 
   uint32_t type = pb_mmdata.type();
-  xllm::MMDict cpp_dict;
-
-  const auto& pb_dict = pb_mmdata.dict();
-  for (const auto& [key, pb_value] : pb_dict) {
-    auto cpp_value_opt = proto_to_mmvalue(pb_value);
-    if (!cpp_value_opt) {
-      LOG(ERROR) << "Failed to convert PB MMValue for key: " << key;
-      return false;
+  if (pb_mmdata.entries_size() > 0) {
+    std::vector<xllm::MMData> cpp_entries;
+    cpp_entries.reserve(pb_mmdata.entries_size());
+    for (const auto& pb_entry : pb_mmdata.entries()) {
+      auto cpp_entry_opt = proto_to_mmdata_entry(pb_entry);
+      if (!cpp_entry_opt) {
+        LOG(ERROR) << "Failed to convert PB MMBatchData entry";
+        return false;
+      }
+      cpp_entries.emplace_back(std::move(*cpp_entry_opt));
     }
 
-    cpp_dict.emplace(key, std::move(*cpp_value_opt));
+    cpp_mmdata->batch(cpp_entries);
+    if (cpp_mmdata->type() != type) {
+      LOG(WARNING) << "MMBatchData proto type mismatch, top-level type: "
+                   << type << ", entries type: " << cpp_mmdata->type();
+    }
+  } else {
+    auto cpp_dict_opt = proto_to_mmdict(pb_mmdata.dict());
+    if (!cpp_dict_opt) {
+      LOG(ERROR) << "Failed to convert PB MMBatchData dict";
+      return false;
+    }
+    *cpp_mmdata = xllm::MMBatchData(type, std::move(*cpp_dict_opt));
   }
-  *cpp_mmdata = xllm::MMBatchData(type, std::move(cpp_dict));
+
+  if (!cpp_mmdata->valid() && type != xllm::MMType::NONE) {
+    LOG(ERROR) << "Converted MMBatchData is invalid, proto type: " << type;
+    return false;
+  }
 
   return true;
 }

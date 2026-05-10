@@ -87,3 +87,14 @@ cc_test(
     GTest::gtest
     GTest::gtest_main
 )
+
+cc_test(
+  NAME
+    mm_batch_data_test
+  SRCS
+    mm_batch_data_test.cpp
+  DEPS
+    :request
+    GTest::gtest
+    GTest::gtest_main
+)
