@@ -657,9 +657,9 @@ DEFINE_int64(sp_size, 1, "Sequence parallelism size");
 
 DEFINE_int64(cfg_size, 1, "Classifier-free guidiance parallelism size");
 
-DEFINE_int64(dit_sp_communication_overlap,
-             1,
-             "Communication & Computation overlap for sequence parallel");
+DEFINE_bool(dit_sp_communication_overlap,
+            false,
+            "Communication & Computation overlap for sequence parallel");
 
 // --- dit debug ---
 

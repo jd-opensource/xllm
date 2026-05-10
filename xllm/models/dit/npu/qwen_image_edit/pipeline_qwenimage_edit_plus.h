@@ -68,6 +68,30 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     register_module("scheduler", scheduler_);
     register_module("transformer", transformer_);
     register_module("vae_image_processor", vae_image_processor_);
+
+    use_layer3d_rope_ = context.get_model_context("transformer")
+                            .get_model_args()
+                            .use_layer3d_rope();
+    std::vector<int64_t> axes_dims_rope =
+        context.get_model_context("transformer")
+            .get_model_args()
+            .axes_dims_rope();
+    // Positional embedding
+    if (use_layer3d_rope_) {
+      pos_embed_3d_rope_ = register_module(
+          "pos_embed",
+          QwenEmbedLayer3DRope(context.get_model_context("transformer"),
+                               /*theta=*/10000,
+                               axes_dims_rope,
+                               true));
+    } else {
+      pos_embed_ = register_module(
+          "pos_embed",
+          QwenEmbedRope(context.get_model_context("transformer"),
+                        /*theta=*/10000,
+                        axes_dims_rope,
+                        true));
+    }
   }
 
   std::vector<torch::Tensor> _extract_masked_hidden(
@@ -461,51 +485,31 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     if (do_true_cfg && negative_prompt_embeds_mask.defined()) {
       negative_txt_seq_lens = negative_prompt_embeds_mask.sum(1);
     }
-    /*
-    if (prompt_embeds.size(1) % FLAGS_sp_size != 0) {
-      int64_t pad_len =
-          FLAGS_sp_size - prompt_embeds.size(1) % FLAGS_sp_size;
-      std::vector<int64_t> pad_with = {
-          0,
-          0,  // 第3维�~Hhe   ight�~I�        ~Mpad
-          0,
-          pad_len,  // 第 2维�~Hchannels�~I�~I~M�~P~Npad
-          0,
-          0};  // 第1维�~Hbatch�~I�~Mpad
-      std::vector<int64_t> pad_with_mask = {
-          // 第3维�~Hhe   ight�~I�        ~Mpad
-          0,
-          pad_len,  // 第 2维�~Hchannels�~I�~I~M�~P~Npad
-          0,
-          0};  // 第1维�~Hbatch�~I�~Mpad
-      prompt_embeds = torch::pad(prompt_embeds, pad_with, "constant", 0);
-      prompt_embeds_mask =
-          torch::pad(prompt_embeds_mask, pad_with_mask, "constant", 0);
+
+    scheduler_->set_begin_index(0);
+
+    int64_t origin_text_seq_len = prompt_embeds.size(1);
+    int64_t origin_neg_text_seq_len = negative_prompt_embeds.size(1);
+    std::tuple<torch::Tensor, torch::Tensor> image_rotary_emb_pos;
+    std::tuple<torch::Tensor, torch::Tensor> image_rotary_emb_neg;
+    if (use_layer3d_rope_) {
+      image_rotary_emb_pos = pos_embed_3d_rope_->forward(
+          main_shape, origin_text_seq_len, prompt_embeds.device());
+      image_rotary_emb_neg = pos_embed_3d_rope_->forward(
+          main_shape, origin_neg_text_seq_len, prompt_embeds.device());
+    } else {
+      image_rotary_emb_pos =
+          pos_embed_->forward(main_shape,
+                              origin_text_seq_len,
+                              prompt_embeds.device(),
+                              /*max_txt_seq_len=*/std::nullopt);
+      image_rotary_emb_neg =
+          pos_embed_->forward(main_shape,
+                              origin_neg_text_seq_len,
+                              prompt_embeds.device(),
+                              /*max_txt_seq_len=*/std::nullopt);
     }
 
-    if (negative_prompt_embeds.size(1) % FLAGS_sp_size != 0) {
-      int64_t pad_len = FLAGS_sp_size -
-                        negative_prompt_embeds.size(1) % FLAGS_sp_size;
-      std::vector<int64_t> pad_with = {
-          0,
-          0,  // 第3维�~Hhe   ight�~I�        ~Mpad
-          0,
-          pad_len,  // 第 2维�~Hchannels�~I�~I~M�~P~Npad
-          0,
-          0};  // 第1维�~Hbatch�~I�~Mpad
-      std::vector<int64_t> pad_with_mask = {
-          // 第3维�~Hhe   ight�~I�        ~Mpad
-          0,
-          pad_len,  // 第 2维�~Hchannels�~I�~I~M�~P~Npad
-          0,
-          0};
-      negative_prompt_embeds =
-          torch::pad(negative_prompt_embeds, pad_with, "constant", 0);
-      negative_prompt_embeds_mask =
-          torch::pad(negative_prompt_embeds_mask, pad_with_mask, "constant", 0);
-    }
-    */
-    scheduler_->set_begin_index(0);
     for (int64_t i = 0; i < timesteps.size(0); ++i) {
       auto t = timesteps[i];
       current_timestep_ = t;
@@ -530,6 +534,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
                                              timestep_expanded / 1000.0,
                                              main_shape,
                                              txt_seq_lens,
+                                             image_rotary_emb_pos,
                                              /*use_cfg=*/false,
                                              /*step_index=*/i);
           noise_pred = noise_pred.slice(1, 0, final_latents.size(1));
@@ -544,6 +549,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
                                                  timestep_expanded / 1000.0,
                                                  main_shape,
                                                  negative_txt_seq_lens,
+                                                 image_rotary_emb_neg,
                                                  /*use_cfg=*/true,
                                                  /*step_index=*/i);
 
@@ -567,6 +573,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
                                            timestep_expanded / 1000.0,
                                            main_shape,
                                            txt_seq_lens,
+                                           image_rotary_emb_pos,
                                            /*use_cfg=*/false,
                                            /*step_index=*/i);
         noise_pred = noise_pred.slice(1, 0, final_latents.size(1));
@@ -577,6 +584,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
                                                  timestep_expanded / 1000.0,
                                                  main_shape,
                                                  negative_txt_seq_lens,
+                                                 image_rotary_emb_neg,
                                                  /*use_cfg=*/true,
                                                  /*step_index=*/i);
 
@@ -653,6 +661,9 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
   torch::Tensor current_timestep_;
   string prompt_template_encode_;
   const ModelArgs& vae_model_args_;
+  bool use_layer3d_rope_;
+  QwenEmbedRope pos_embed_{nullptr};
+  QwenEmbedLayer3DRope pos_embed_3d_rope_{nullptr};
 };
 
 REGISTER_MODEL_ARGS(Qwen2Tokenizer, [&] {});
