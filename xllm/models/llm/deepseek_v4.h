@@ -367,6 +367,9 @@ class DeepseekV4ModelImpl
   std::shared_ptr<layer::AttentionMetadata> build_deepseek_v4_metadata(
       const torch::Tensor& positions,
       const ModelInputParams& input_params) {
+    // Shared metadata entry point for both eager and ACL graph execution.
+    // Graph capture/replay persists the returned tensors, while eager consumes
+    // the same structure directly in forward().
     auto modified_input_params = input_params;
     auto& dp_token_nums = modified_input_params.dp_global_token_nums;
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);

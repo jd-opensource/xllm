@@ -113,10 +113,11 @@ void DSAMetadataBuilder::build_dsa_fields(
 
   dsa.input_positions = positions;
   const torch::Device target_device = infer_metadata_device(params, positions);
+  const bool is_acl_graph = params.graph_buffer.tiling_data.defined();
 
   // Build per-batch sequence length metadata.
   build_seq_lengths(params, target_device, batch_size, dsa);
-  dsa.is_acl_graph = params.graph_buffer.tiling_data.defined();
+  dsa.is_acl_graph = is_acl_graph;
   if (static_cast<int32_t>(params.q_seq_lens_vec.size()) == batch_size) {
     q_lens_vec.assign(params.q_seq_lens_vec.begin(),
                       params.q_seq_lens_vec.end());
@@ -179,9 +180,7 @@ void DSAMetadataBuilder::build_dsa_fields(
     const int32_t n_layers = static_cast<int32_t>(caches_info.size());
     const auto& ctx_lens = params.kv_seq_lens_vec;
     const int64_t graph_slot_capacity =
-        params.graph_buffer.tiling_data.defined() && positions.defined()
-            ? positions.numel()
-            : 0;
+        is_acl_graph && positions.defined() ? positions.numel() : 0;
     int64_t total_tokens = 0;
     for (auto len : ctx_lens) total_tokens += len;
 
@@ -565,6 +564,7 @@ void DSAMetadataBuilder::build_positions(const ModelInputParams& params,
 
   auto input_positions = dsa_metadata.input_positions;
   int64_t num_tokens = input_positions.size(0);
+  const bool is_acl_graph = params.graph_buffer.tiling_data.defined();
   const auto target_device = input_positions.device();
   const auto pos_dtype = input_positions.scalar_type();
   auto cpu_options =
@@ -628,7 +628,7 @@ void DSAMetadataBuilder::build_positions(const ModelInputParams& params,
       }
     }
     const int64_t target =
-        params.graph_buffer.tiling_data.defined()
+        is_acl_graph
             ? num_tokens
             : std::min<int64_t>(num_tokens, num_tokens / ratio + batch_size);
     compressed.resize(static_cast<size_t>(std::max<int64_t>(target, 0)), 0);

@@ -414,7 +414,7 @@ torch::Tensor copy_to_fixed_metadata_tensor(const torch::Tensor& src,
       dst.scalar_type() != src.scalar_type() || dst.device() != src.device()) {
     dst = torch::zeros({kDsaMetadataElements}, src.options());
   }
-  dst.copy_(torch::zeros_like(dst), /*non_blocking=*/true);
+  dst.zero_();
   const int64_t copy_numel = std::min<int64_t>(src.numel(), dst.numel());
   if (copy_numel > 0) {
     dst.flatten(0)
@@ -425,6 +425,16 @@ torch::Tensor copy_to_fixed_metadata_tensor(const torch::Tensor& src,
                /*non_blocking=*/true);
   }
   return dst;
+}
+
+void zero_tensor_tail(torch::Tensor& tensor,
+                      int64_t start,
+                      int64_t end,
+                      int64_t dim = 0) {
+  if (start >= end) {
+    return;
+  }
+  tensor.slice(/*dim=*/dim, /*start=*/start, /*end=*/end).zero_();
 }
 }  // namespace
 
@@ -680,14 +690,9 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
   }
   if (actual_num_tokens < padded_num_tokens) {
-    persistent_new_cache_slots_
-        .slice(/*dim=*/0,
-               /*start=*/actual_num_tokens,
-               /*end=*/static_cast<int64_t>(padded_num_tokens))
-        .copy_(torch::zeros({static_cast<int64_t>(padded_num_tokens) -
-                             static_cast<int64_t>(actual_num_tokens)},
-                            persistent_new_cache_slots_.options()),
-               /*non_blocking=*/true);
+    zero_tensor_tail(persistent_new_cache_slots_,
+                     actual_num_tokens,
+                     static_cast<int64_t>(padded_num_tokens));
   }
 
   // Copy block table data
@@ -715,14 +720,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
   }
   if (actual_batch_size < padded_batch_size) {
-    persistent_block_tables_
-        .slice(/*dim=*/0,
-               /*start=*/actual_batch_size,
-               /*end=*/padded_batch_size)
-        .copy_(torch::zeros({padded_batch_size - actual_batch_size,
-                             persistent_block_tables_.size(1)},
-                            persistent_block_tables_.options()),
-               /*non_blocking=*/true);
+    zero_tensor_tail(
+        persistent_block_tables_, actual_batch_size, padded_batch_size);
   }
 
   // Update persistent embedding from input_embedding if available
@@ -835,23 +834,14 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
     if (is_deepseek_v4_graph &&
         actual_batch_size < static_cast<int64_t>(padded_num_tokens)) {
-      auto zero_options = q_seq_lens_.options();
-      q_seq_lens_
-          .slice(/*dim=*/0,
-                 /*start=*/actual_batch_size,
-                 /*end=*/static_cast<int64_t>(padded_num_tokens))
-          .copy_(torch::zeros({static_cast<int64_t>(padded_num_tokens) -
-                               actual_batch_size},
-                              zero_options),
-                 /*non_blocking=*/true);
-      kv_seq_lens_
-          .slice(/*dim=*/0,
-                 /*start=*/actual_batch_size,
-                 /*end=*/static_cast<int64_t>(padded_num_tokens))
-          .copy_(torch::zeros({static_cast<int64_t>(padded_num_tokens) -
-                               actual_batch_size},
-                              kv_seq_lens_.options()),
-                 /*non_blocking=*/true);
+      // DeepSeek V4 DSA metadata derives positions from host seq-len vectors;
+      // padded graph rows must stay zero so dummy rows never become DSA work.
+      zero_tensor_tail(q_seq_lens_,
+                       actual_batch_size,
+                       static_cast<int64_t>(padded_num_tokens));
+      zero_tensor_tail(kv_seq_lens_,
+                       actual_batch_size,
+                       static_cast<int64_t>(padded_num_tokens));
     }
     params_for_capture->num_sequences = padded_num_tokens;
     params_for_capture->batch_forward_type = BatchForwardType::DECODE;
