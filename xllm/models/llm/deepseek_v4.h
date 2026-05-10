@@ -31,6 +31,7 @@ limitations under the License.
 #include <unordered_set>
 #include <utility>
 
+#include "core/common/global_flags.h"
 #include "core/framework/state_dict/utils.h"
 #include "core/kernels/ops_api.h"
 #include "core/layers/common/dsa_metadata.h"
@@ -92,6 +93,16 @@ inline torch::Tensor maybe_to_device(const torch::Tensor& tensor,
     return tensor;
   }
   return tensor.to(device);
+}
+
+inline bool deepseek_v4_uses_acl_graph(
+    const xllm::ModelInputParams& input_params) {
+#if defined(USE_NPU)
+  return FLAGS_enable_graph && input_params.graph_buffer.tiling_data.defined();
+#else
+  (void)input_params;
+  return false;
+#endif
 }
 
 // Group key: (ratio, type, block_size) -> group_id
@@ -314,6 +325,8 @@ class DeepseekV4ModelImpl
                                          group_infos_));
     if (attn_metadata->dsa_metadata) {
       prepare_dsa_metadata_for_forward(*attn_metadata, positions.device());
+      build_precomputed_metadata(*attn_metadata->dsa_metadata,
+                                 modified_input_params);
     }
     return attn_metadata;
   }
@@ -326,8 +339,13 @@ class DeepseekV4ModelImpl
                       const ModelInputParams& input_params) override {
     torch::NoGradGuard no_grad;
     if (tokens.numel() == 0) {
-      tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
-      positions = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
+      auto empty_options =
+          torch::TensorOptions()
+              .dtype(torch::kInt32)
+              .device(tokens.defined() ? tokens.device()
+                                       : torch::Device(torch::kCPU));
+      tokens = torch::tensor({1}, empty_options);
+      positions = torch::tensor({1}, empty_options);
     }
 
     auto inputs_embeds = input_params.input_embedding;
@@ -340,8 +358,20 @@ class DeepseekV4ModelImpl
 
     // Keep runtime inputs on the same accelerator device.
     const auto runtime_device = h.device();
-    tokens = maybe_to_device(tokens, runtime_device);
-    positions = maybe_to_device(positions, runtime_device);
+    const bool acl_graph_forward = deepseek_v4_uses_acl_graph(input_params);
+    if (acl_graph_forward) {
+      CHECK(tokens.defined() && tokens.device() == runtime_device)
+          << "DeepSeek V4 ACL graph requires tokens on the runtime device";
+      CHECK(positions.defined() && positions.device() == runtime_device)
+          << "DeepSeek V4 ACL graph requires positions on the runtime device";
+      CHECK(input_params.new_cache_slots.defined())
+          << "DeepSeek V4 ACL graph requires persistent new_cache_slots";
+      CHECK(input_params.block_tables.defined())
+          << "DeepSeek V4 ACL graph requires persistent block_tables";
+    } else {
+      tokens = maybe_to_device(tokens, runtime_device);
+      positions = maybe_to_device(positions, runtime_device);
+    }
 
     auto modified_input_params = input_params;
     auto& dp_token_nums = modified_input_params.dp_global_token_nums;
@@ -350,6 +380,8 @@ class DeepseekV4ModelImpl
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
 
     if (!modified_input_params.attn_metadata) {
+      CHECK(!acl_graph_forward)
+          << "DeepSeek V4 ACL graph requires prebuilt attention metadata";
       modified_input_params.attn_metadata =
           build_deepseek_v4_metadata(positions, modified_input_params);
     }
@@ -377,6 +409,8 @@ class DeepseekV4ModelImpl
           input_rope_by_ratio[128] = {dsa.c128_input_cos, dsa.c128_input_sin};
         }
       } else {
+        CHECK(!acl_graph_forward)
+            << "DeepSeek V4 ACL graph requires prebuilt DSA metadata";
         // DSAMetadataBuilder may create several length/position tensors on CPU;
         // move all operator inputs to runtime device before invoking NPU
         // kernels.
@@ -485,8 +519,6 @@ class DeepseekV4ModelImpl
           dsa.start_pos =
               (dsa.actual_seq_lengths_kv - dsa.seq_lens_q).to(torch::kInt32);
         }
-
-        build_precomputed_metadata(dsa);
       }
     }
 
@@ -573,21 +605,6 @@ class DeepseekV4ModelImpl
       return c10::optional<torch::Tensor>(tensor);
     }
     return c10::nullopt;
-  }
-
-  static int64_t tensor_max_or_zero(const torch::Tensor& tensor) {
-    if (!tensor.defined() || tensor.numel() == 0) {
-      return 0;
-    }
-    return tensor.max().item<int64_t>();
-  }
-
-  static int64_t pick_max_seqlen(const torch::Tensor& max_seqlen_tensor,
-                                 const torch::Tensor& fallback_tensor) {
-    if (max_seqlen_tensor.defined() && max_seqlen_tensor.numel() > 0) {
-      return max_seqlen_tensor.max().item<int64_t>();
-    }
-    return tensor_max_or_zero(fallback_tensor);
   }
 
   void prepare_dsa_metadata_for_forward(
@@ -703,11 +720,17 @@ class DeepseekV4ModelImpl
       dsa.start_pos =
           (dsa.actual_seq_lengths_kv - dsa.seq_lens_q).to(torch::kInt32);
     }
-
-    build_precomputed_metadata(dsa);
   }
 
-  void build_precomputed_metadata(layer::DSAMetadata& dsa) const {
+  static int64_t vector_max_or_zero(const std::vector<int32_t>& values) {
+    if (values.empty()) {
+      return 0;
+    }
+    return *std::max_element(values.begin(), values.end());
+  }
+
+  void build_precomputed_metadata(layer::DSAMetadata& dsa,
+                                  const ModelInputParams& params) const {
     dsa.c1_metadata = torch::Tensor();
     dsa.c4_metadata = torch::Tensor();
     dsa.c128_metadata = torch::Tensor();
@@ -738,15 +761,13 @@ class DeepseekV4ModelImpl
 
     const int64_t batch_size =
         std::max<int64_t>(dsa.actual_seq_lengths_kv.size(0), 1);
-    const int64_t max_seqlen_q =
-        pick_max_seqlen(dsa.max_seqlen_q, dsa.seq_lens_q);
-    const int64_t max_seqlen_kv =
-        pick_max_seqlen(dsa.max_seqlen_kv, dsa.actual_seq_lengths_kv);
+    const int64_t max_seqlen_q = std::max<int64_t>(
+        params.q_max_seq_len, vector_max_or_zero(params.q_seq_lens_vec));
+    const int64_t max_seqlen_kv = std::max<int64_t>(
+        params.kv_max_seq_len, vector_max_or_zero(params.kv_seq_lens_vec));
     const int64_t ori_win_left = std::max<int64_t>(window_size_ - 1, 0);
     const int64_t sparse_topk = std::max<int64_t>(index_topk_, 1);
-    const bool is_prefill = dsa.seq_lens_q.defined() &&
-                            dsa.seq_lens_q.numel() > 0 &&
-                            dsa.seq_lens_q.max().item<int64_t>() > 1;
+    const bool is_prefill = params.q_max_seq_len > 1;
 
     // Prefill KV is packed into PA_ND blocks before attention. Keep the
     // metadata in the same layout and do not build TND-only cu_seqlens inputs.
@@ -868,10 +889,10 @@ class DeepseekV4ModelImpl
     const int64_t index_head_dim =
         std::max<int64_t>(index_head_dim_ > 0 ? index_head_dim_ : head_dim_, 1);
     const int64_t qli_batch_size = std::max<int64_t>(key_lens.size(0), 1);
-    const int64_t qli_max_seqlen_q =
-        pick_max_seqlen(dsa.max_seqlen_q, query_lens);
-    const int64_t qli_max_seqlen_k =
-        pick_max_seqlen(dsa.max_seqlen_kv, key_lens);
+    const int64_t qli_max_seqlen_q = std::max<int64_t>(
+        params.q_max_seq_len, vector_max_or_zero(params.q_seq_lens_vec));
+    const int64_t qli_max_seqlen_k = std::max<int64_t>(
+        params.kv_max_seq_len, vector_max_or_zero(params.kv_seq_lens_vec));
 
     xllm::kernel::QuantLightningIndexerMetadataParams qli_params;
     qli_params.num_heads_q = global_index_num_heads;

@@ -181,6 +181,9 @@ class GraphPersistentParam {
   struct DSAMetadataPersistent {
     torch::Tensor seq_lens;
     torch::Tensor seq_lens_q;
+    torch::Tensor attn_mask;
+    torch::Tensor cos_table;
+    torch::Tensor sin_table;
     torch::Tensor actual_seq_lengths_query;
     torch::Tensor actual_seq_lengths_kv;
     torch::Tensor max_seqlen_q;
@@ -203,6 +206,7 @@ class GraphPersistentParam {
     torch::Tensor c4_metadata;
     torch::Tensor c128_metadata;
     torch::Tensor qli_metadata;
+    torch::Tensor hadamard;
     std::vector<std::vector<torch::Tensor>> block_tables;
     std::vector<std::vector<torch::Tensor>> slot_mappings;
   };
@@ -230,17 +234,24 @@ class GraphPersistentParam {
   torch::Tensor persistent_positions_;
   torch::Tensor persistent_new_cache_slots_;
   torch::Tensor persistent_block_tables_;
+  torch::Tensor persistent_new_cache_slots_default_;
+  torch::Tensor persistent_block_tables_default_;
   // When q_seq_lens contains values greater than 1(chunked prefill mode or
   // speculative decode mode), the mask needs to be passed to the attention
   // operation
   torch::Tensor persistent_mask_;
+  torch::Tensor persistent_mask_zero_template_;
+  torch::Tensor persistent_mask_fill_template_;
   torch::Tensor hidden_states_;
 
   torch::Tensor q_seq_lens_;
   torch::Tensor kv_seq_lens_;
+  torch::Tensor q_seq_lens_default_;
+  torch::Tensor kv_seq_lens_default_;
 
   // for deepseekv3.2
   torch::Tensor q_cu_seq_lens_;
+  torch::Tensor q_cu_seq_lens_default_;
 
   // for mtp model
   torch::Tensor persistent_embedding_;

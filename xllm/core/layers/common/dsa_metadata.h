@@ -93,6 +93,11 @@ struct DSAMetadata {
   std::vector<std::vector<torch::Tensor>> block_tables;
   std::vector<std::vector<torch::Tensor>> slot_mappings;
 
+  // Host-side max lengths cached alongside the tensors so graph code can
+  // avoid scalar reads from device tensors.
+  int64_t max_query_len = 0;
+  int64_t max_seq_len = 0;
+
   // Sequence length metadata
   // actual_seq_lengths_kv: (batch_size,) — per-seq kv context length
   torch::Tensor actual_seq_lengths_kv;
