@@ -200,6 +200,76 @@ DEFINE_COUNTER(worker_service_latency_seconds,
                "Worker service execution latency in seconds");
 DEFINE_COUNTER(engine_latency_seconds, "Engine execution latency in seconds");
 
+// PD disaggregation metrics
+DEFINE_COUNTER_PER_MINUTE(disagg_pd_add_new_requests_total,
+                          "AddNewRequests RPC calls in last 60 seconds");
+DEFINE_COUNTER_PER_MINUTE(disagg_pd_add_new_requests_fail_total,
+                          "AddNewRequests RPC failed in last 60 seconds");
+DEFINE_COUNTER_PER_MINUTE(
+    disagg_pd_add_new_requests_ok_total,
+    "AddNewRequests accepted (status 200) in last 60 seconds");
+DEFINE_COUNTER_PER_MINUTE(disagg_pd_add_new_requests_reject_total,
+                          "AddNewRequests rejected in last 60 seconds");
+DEFINE_HISTOGRAM(disagg_pd_add_new_requests_latency_microseconds,
+                 "AddNewRequests RPC latency in microseconds");
+DEFINE_COUNTER_PER_MINUTE(disagg_pd_first_generation_total,
+                          "FirstGeneration RPC calls in last 60 seconds");
+DEFINE_COUNTER_PER_MINUTE(disagg_pd_first_generation_fail_total,
+                          "FirstGeneration RPC failed in last 60 seconds");
+DEFINE_HISTOGRAM(disagg_pd_first_generation_latency_microseconds,
+                 "FirstGeneration RPC latency in microseconds");
+
+// PD prefill queue (per-minute enqueue/dequeue)
+DEFINE_COUNTER_PER_MINUTE(disagg_pd_prefill_queue_enqueue_total,
+                          "Prefill queue enqueue count in last 60 seconds");
+DEFINE_COUNTER_PER_MINUTE(
+    disagg_pd_prefill_queue_offline_enqueue_total,
+    "Prefill offline queue enqueue count in last 60 seconds");
+DEFINE_COUNTER_PER_MINUTE(disagg_pd_prefill_queue_dequeue_total,
+                          "Prefill queue dequeue count in last 60 seconds");
+DEFINE_COUNTER_PER_MINUTE(
+    disagg_pd_prefill_queue_offline_dequeue_total,
+    "Prefill offline queue dequeue count in last 60 seconds");
+
+// PD decode: requests waiting for FirstGeneration from prefill
+DEFINE_GAUGE(
+    disagg_pd_received_request_map_size,
+    "Size of received_request_map (requests pending first token from P)");
+
+// PD: current number of linked P/D instances (P side: linked D instances)
+DEFINE_GAUGE(disagg_pd_linked_instances_count,
+             "Number of linked decode instances (P side) / linked prefill "
+             "instances (D side)");
+
+// PD: per-instance failure distribution
+DEFINE_MULTI_COUNTER(disagg_pd_add_new_requests_fail_by_instance,
+                     "instance",
+                     "AddNewRequests RPC failures per decode instance");
+DEFINE_MULTI_COUNTER(
+    disagg_pd_add_new_requests_reject_by_instance,
+    "instance",
+    "AddNewRequests reject (status != 200) per decode instance");
+DEFINE_MULTI_COUNTER(disagg_pd_first_generation_fail_by_instance,
+                     "instance",
+                     "FirstGeneration RPC failures per decode instance");
+
+// PD PULL mode: KV cache pull latency on D side (end-to-end)
+DEFINE_HISTOGRAM(
+    disagg_pd_pull_kv_cache_latency_microseconds,
+    "PULL mode KV cache transfer latency in microseconds on D side");
+
+// LLM worker PUSH mode: push KV cache success/fail in last 60 seconds
+DEFINE_COUNTER_PER_MINUTE(
+    disagg_pd_push_kv_cache_ok_total,
+    "PUSH mode push KV cache success count in last 60 seconds");
+DEFINE_COUNTER_PER_MINUTE(
+    disagg_pd_push_kv_cache_fail_total,
+    "PUSH mode push KV cache failure count in last 60 seconds");
+
+// PUSH mode: collectAll wait latency in microseconds
+DEFINE_HISTOGRAM(disagg_pd_push_kv_cache_extra_wait_microseconds,
+                 "PUSH mode collectAll wait latency in microseconds");
+
 // memory metrics
 DEFINE_GAUGE(total_memory_size_in_kilobytes, "Total memory size in kilobytes");
 DEFINE_GAUGE(weight_size_in_kilobytes, "Weight size in kilobytes");
