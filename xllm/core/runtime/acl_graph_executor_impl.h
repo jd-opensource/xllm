@@ -22,6 +22,9 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 #include "core/common/macros.h"
 #include "core/framework/kv_cache/kv_cache.h"
@@ -211,6 +214,14 @@ class GraphPersistentParam {
     std::vector<std::vector<torch::Tensor>> slot_mappings;
   };
 
+  struct DebugTensorState {
+    bool defined = false;
+    const void* data_ptr = nullptr;
+    std::string sizes;
+    c10::ScalarType dtype = c10::ScalarType::Undefined;
+    c10::Device device = c10::Device(c10::DeviceType::CPU);
+  };
+
   // Initialize tiling tensor
   void initialize_paged_attention_plan_context(const torch::Device& device);
 
@@ -262,6 +273,7 @@ class GraphPersistentParam {
   // ModelOutput fields
   torch::Tensor aux_hidden_states_;
   DSAMetadataPersistent dsa_metadata_persistent_;
+  std::unordered_map<std::string, DebugTensorState> dsa_debug_states_;
 
   // ATB context and operation for paged attention plan
   atb::Context* context_for_plan_;
@@ -293,6 +305,8 @@ class AclGraph {
     initialize_capture_stream(device_index);
   }
 
+  ~AclGraph();
+
   // Capture computation graph for given bucket num_tokens
   bool capture(CausalLM* model,
                const ModelArgs& args,
@@ -322,6 +336,7 @@ class AclGraph {
 
   // Initialize capture stream if not already initialized
   void initialize_capture_stream(c10::DeviceIndex device_index);
+  void make_current_stream_wait_for_graph(aclrtStream current_stream);
 
   // NPUGraph with mempool for managing temporary tensors during forward pass
   c10_npu::NPUGraph graph_;
@@ -333,6 +348,7 @@ class AclGraph {
 
   // Cached capture stream, initialized on first capture
   std::optional<c10_npu::NPUStream> capture_stream_;
+  aclrtEvent replay_done_event_ = nullptr;
   c10::DeviceIndex device_index_;
 };
 

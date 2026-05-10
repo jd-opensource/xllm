@@ -1335,11 +1335,12 @@ inline void deserialize_raw_forward_input(const char*& buffer,
     input_params.multi_block_tables.reserve(manager_num);
     for (int32_t m = 0; m < manager_num; ++m) {
       torch::Tensor mgr_table;
-      if (graph_device_buffer != nullptr) {
-        read_tensor(buffer, mgr_table, graph_device_buffer);
-      } else {
-        read_tensor(buffer, mgr_table);
-      }
+      // DeepSeek V4 multi_block_tables are consumed by the DSA metadata
+      // builder, which still expands them through host-side tensor accessors.
+      // Keep them as host tensors here instead of routing them through the
+      // graph device buffer, otherwise graph input deserialization can fail
+      // on the packed multi-manager layout.
+      read_tensor(buffer, mgr_table);
       input_params.multi_block_tables.push_back(std::move(mgr_table));
     }
   }

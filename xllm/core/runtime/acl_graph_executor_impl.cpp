@@ -23,6 +23,8 @@ limitations under the License.
 #include <torch_npu/torch_npu.h>
 
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 #include <numeric>
 
 #include "core/common/global_flags.h"
@@ -71,6 +73,174 @@ int64_t get_decode_graph_capacity(const runtime::Options& options) {
     return options.max_seqs_per_batch();
   }
   return options.max_seqs_per_batch() * options.num_decoding_tokens();
+}
+
+bool env_flag_enabled(const char* name) {
+  const char* value = std::getenv(name);
+  return value != nullptr &&
+         (std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0 ||
+          std::strcmp(value, "TRUE") == 0 || std::strcmp(value, "on") == 0 ||
+          std::strcmp(value, "ON") == 0);
+}
+
+bool env_flag_disabled(const char* name) {
+  const char* value = std::getenv(name);
+  return value != nullptr &&
+         (std::strcmp(value, "0") == 0 || std::strcmp(value, "false") == 0 ||
+          std::strcmp(value, "FALSE") == 0 || std::strcmp(value, "off") == 0 ||
+          std::strcmp(value, "OFF") == 0);
+}
+
+bool dsv4_graph_debug_enabled() {
+  return env_flag_enabled("XLLM_DSV4_GRAPH_DEBUG");
+}
+
+bool dsv4_graph_debug_check_realloc_enabled() {
+  return dsv4_graph_debug_enabled() &&
+         !env_flag_disabled("XLLM_DSV4_GRAPH_CHECK_REALLOC");
+}
+
+std::string tensor_checksum_summary(const torch::Tensor& tensor) {
+  if (!tensor.defined()) {
+    return "checksum=<undef>";
+  }
+  if (tensor.numel() == 0) {
+    return "checksum=<empty>";
+  }
+  if (tensor.numel() > 4096) {
+    return c10::str("checksum=<skipped:numel=", tensor.numel(), ">");
+  }
+
+  try {
+    auto values = tensor.detach().flatten().to(
+        torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
+    const double sum = values.sum().item<double>();
+    const double min = values.min().item<double>();
+    const double max = values.max().item<double>();
+    return c10::str("sum=", sum, ",min=", min, ",max=", max);
+  } catch (const std::exception& e) {
+    return c10::str("checksum=<error:", e.what(), ">");
+  }
+}
+
+std::string tensor_preview_summary(const torch::Tensor& tensor,
+                                   int64_t max_items = 16) {
+  if (!tensor.defined()) {
+    return "preview=<undef>";
+  }
+  if (tensor.numel() == 0) {
+    return "preview=<empty>";
+  }
+
+  try {
+    auto values =
+        tensor.detach()
+            .flatten()
+            .to(torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU))
+            .contiguous();
+    const int64_t n = std::min<int64_t>(values.numel(), max_items);
+    std::vector<int64_t> preview;
+    preview.reserve(static_cast<size_t>(n));
+    auto acc = values.accessor<int64_t, 1>();
+    for (int64_t i = 0; i < n; ++i) {
+      preview.push_back(acc[i]);
+    }
+    return c10::str("preview=", preview);
+  } catch (const std::exception& e) {
+    return c10::str("preview=<error:", e.what(), ">");
+  }
+}
+
+void log_dsv4_graph_input_tensor(const std::string& name,
+                                 const torch::Tensor& tensor) {
+  if (!dsv4_graph_debug_enabled()) {
+    return;
+  }
+  if (!tensor.defined()) {
+    LOG(INFO) << "[DSV4][GraphInput] name=" << name << " undefined";
+    return;
+  }
+  LOG(INFO) << "[DSV4][GraphInput] name=" << name << " sizes=" << tensor.sizes()
+            << " numel=" << tensor.numel() << " dtype=" << tensor.scalar_type()
+            << " device=" << tensor.device() << " ptr=" << tensor.data_ptr()
+            << " " << tensor_checksum_summary(tensor) << " "
+            << tensor_preview_summary(tensor);
+}
+
+void log_dsv4_graph_output_tensor(const std::string& name,
+                                  const torch::Tensor& tensor) {
+  if (!dsv4_graph_debug_enabled()) {
+    return;
+  }
+  if (!tensor.defined()) {
+    LOG(INFO) << "[DSV4][GraphOutput] name=" << name << " undefined";
+    return;
+  }
+  LOG(INFO) << "[DSV4][GraphOutput] name=" << name
+            << " sizes=" << tensor.sizes() << " numel=" << tensor.numel()
+            << " dtype=" << tensor.scalar_type()
+            << " device=" << tensor.device() << " ptr=" << tensor.data_ptr()
+            << " " << tensor_checksum_summary(tensor) << " "
+            << tensor_preview_summary(tensor);
+}
+
+void log_dsv4_graph_params(const char* phase,
+                           const ModelInputParams& params,
+                           uint32_t actual_num_tokens,
+                           uint32_t padded_num_tokens) {
+  if (!dsv4_graph_debug_enabled()) {
+    return;
+  }
+  LOG(INFO) << "[DSV4][GraphInput] phase=" << phase
+            << " actual_num_tokens=" << actual_num_tokens
+            << " padded_num_tokens=" << padded_num_tokens
+            << " num_sequences=" << params.num_sequences
+            << " q_max_seq_len=" << params.q_max_seq_len
+            << " kv_max_seq_len=" << params.kv_max_seq_len
+            << " q_seq_lens_vec=" << params.q_seq_lens_vec
+            << " kv_seq_lens_vec=" << params.kv_seq_lens_vec
+            << " multi_block_tables=" << params.multi_block_tables.size();
+  log_dsv4_graph_input_tensor(c10::str(phase, ".q_seq_lens"),
+                              params.q_seq_lens);
+  log_dsv4_graph_input_tensor(c10::str(phase, ".kv_seq_lens"),
+                              params.kv_seq_lens);
+  log_dsv4_graph_input_tensor(c10::str(phase, ".q_cu_seq_lens"),
+                              params.q_cu_seq_lens);
+  log_dsv4_graph_input_tensor(c10::str(phase, ".new_cache_slots"),
+                              params.new_cache_slots);
+  log_dsv4_graph_input_tensor(c10::str(phase, ".block_tables"),
+                              params.block_tables);
+  for (size_t i = 0; i < params.multi_block_tables.size(); ++i) {
+    log_dsv4_graph_input_tensor(c10::str(phase, ".multi_block_tables.", i),
+                                params.multi_block_tables[i]);
+  }
+}
+
+int64_t infer_actual_batch_size(const ModelInputParams& params) {
+  if (params.num_sequences > 0) {
+    return params.num_sequences;
+  }
+  if (!params.kv_seq_lens_vec.empty()) {
+    return static_cast<int64_t>(params.kv_seq_lens_vec.size());
+  }
+  if (!params.q_seq_lens_vec.empty()) {
+    return static_cast<int64_t>(params.q_seq_lens_vec.size());
+  }
+  if (params.kv_seq_lens.defined() && params.kv_seq_lens.dim() >= 1) {
+    return params.kv_seq_lens.size(0);
+  }
+  if (params.q_seq_lens.defined() && params.q_seq_lens.dim() >= 1) {
+    return params.q_seq_lens.size(0);
+  }
+  if (params.block_tables.defined() && params.block_tables.dim() >= 2) {
+    return params.block_tables.size(0);
+  }
+  for (const auto& block_table : params.multi_block_tables) {
+    if (block_table.defined() && block_table.dim() >= 2) {
+      return block_table.size(0);
+    }
+  }
+  return 0;
 }
 }  // namespace
 
@@ -267,63 +437,139 @@ GraphPersistentParam::persist_deepseek_v4_metadata(
 
   auto& dsa = *metadata->dsa_metadata;
   auto& persistent = dsa_metadata_persistent_;
+  const bool debug = dsv4_graph_debug_enabled();
+  const bool check_realloc = dsv4_graph_debug_check_realloc_enabled();
 
-  dsa.seq_lens = copy_to_persistent_tensor(dsa.seq_lens, persistent.seq_lens);
+  auto record_tensor = [&](const std::string& name,
+                           const torch::Tensor& tensor) {
+    if (!debug || !tensor.defined()) {
+      return;
+    }
+
+    DebugTensorState current;
+    current.defined = tensor.defined();
+    current.data_ptr = tensor.data_ptr();
+    current.sizes = c10::str(tensor.sizes());
+    current.dtype = tensor.scalar_type();
+    current.device = tensor.device();
+
+    const std::string key = c10::str(name, "|", current.sizes);
+    auto it = dsa_debug_states_.find(key);
+    if (it != dsa_debug_states_.end()) {
+      const auto& old = it->second;
+      const bool ptr_changed =
+          old.defined && current.defined && old.data_ptr != current.data_ptr;
+      const bool dtype_changed = old.dtype != current.dtype;
+      const bool device_changed = old.device != current.device;
+      if (ptr_changed || dtype_changed || device_changed) {
+        LOG(ERROR) << "[DSV4][GraphMeta] persistent tensor changed name="
+                   << name << " sizes=" << current.sizes
+                   << " old_ptr=" << old.data_ptr
+                   << " new_ptr=" << current.data_ptr
+                   << " old_dtype=" << old.dtype
+                   << " new_dtype=" << current.dtype
+                   << " old_device=" << old.device
+                   << " new_device=" << current.device;
+        if (check_realloc) {
+          CHECK(!ptr_changed)
+              << "[DSV4][GraphMeta] persistent tensor reallocated: " << name
+              << " sizes=" << current.sizes << " old_ptr=" << old.data_ptr
+              << " new_ptr=" << current.data_ptr;
+          CHECK(!dtype_changed)
+              << "[DSV4][GraphMeta] persistent tensor dtype changed: " << name;
+          CHECK(!device_changed)
+              << "[DSV4][GraphMeta] persistent tensor device changed: " << name;
+        }
+      }
+    } else {
+      dsa_debug_states_.emplace(key, current);
+    }
+
+    LOG(INFO) << "[DSV4][GraphMeta] name=" << name << " sizes=" << current.sizes
+              << " numel=" << tensor.numel() << " dtype=" << current.dtype
+              << " device=" << current.device << " ptr=" << current.data_ptr
+              << " " << tensor_checksum_summary(tensor) << " "
+              << tensor_preview_summary(tensor);
+  };
+
+  auto persist_tensor = [&](const std::string& name,
+                            const torch::Tensor& src,
+                            torch::Tensor& dst) {
+    auto result = copy_to_persistent_tensor(src, dst);
+    record_tensor(name, result);
+    return result;
+  };
+
+  auto persist_fixed_tensor = [&](const std::string& name,
+                                  const torch::Tensor& src,
+                                  torch::Tensor& dst) {
+    auto result = copy_to_fixed_metadata_tensor(src, dst);
+    record_tensor(name, result);
+    return result;
+  };
+
+  dsa.seq_lens = persist_tensor("seq_lens", dsa.seq_lens, persistent.seq_lens);
   dsa.seq_lens_q =
-      copy_to_persistent_tensor(dsa.seq_lens_q, persistent.seq_lens_q);
+      persist_tensor("seq_lens_q", dsa.seq_lens_q, persistent.seq_lens_q);
   dsa.attn_mask =
-      copy_to_persistent_tensor(dsa.attn_mask, persistent.attn_mask);
+      persist_tensor("attn_mask", dsa.attn_mask, persistent.attn_mask);
   dsa.cos_table =
-      copy_to_persistent_tensor(dsa.cos_table, persistent.cos_table);
+      persist_tensor("cos_table", dsa.cos_table, persistent.cos_table);
   dsa.sin_table =
-      copy_to_persistent_tensor(dsa.sin_table, persistent.sin_table);
-  dsa.actual_seq_lengths_query = copy_to_persistent_tensor(
-      dsa.actual_seq_lengths_query, persistent.actual_seq_lengths_query);
-  dsa.actual_seq_lengths_kv = copy_to_persistent_tensor(
-      dsa.actual_seq_lengths_kv, persistent.actual_seq_lengths_kv);
+      persist_tensor("sin_table", dsa.sin_table, persistent.sin_table);
+  dsa.actual_seq_lengths_query =
+      persist_tensor("actual_seq_lengths_query",
+                     dsa.actual_seq_lengths_query,
+                     persistent.actual_seq_lengths_query);
+  dsa.actual_seq_lengths_kv = persist_tensor("actual_seq_lengths_kv",
+                                             dsa.actual_seq_lengths_kv,
+                                             persistent.actual_seq_lengths_kv);
   dsa.max_seqlen_q =
-      copy_to_persistent_tensor(dsa.max_seqlen_q, persistent.max_seqlen_q);
-  dsa.max_seqlen_kv =
-      copy_to_persistent_tensor(dsa.max_seqlen_kv, persistent.max_seqlen_kv);
-  dsa.input_positions = copy_to_persistent_tensor(dsa.input_positions,
-                                                  persistent.input_positions);
-  dsa.c4_pad_positions = copy_to_persistent_tensor(dsa.c4_pad_positions,
-                                                   persistent.c4_pad_positions);
-  dsa.c128_pad_positions = copy_to_persistent_tensor(
-      dsa.c128_pad_positions, persistent.c128_pad_positions);
-  dsa.cos = copy_to_persistent_tensor(dsa.cos, persistent.cos);
-  dsa.sin = copy_to_persistent_tensor(dsa.sin, persistent.sin);
-  dsa.c4_cos = copy_to_persistent_tensor(dsa.c4_cos, persistent.c4_cos);
-  dsa.c4_sin = copy_to_persistent_tensor(dsa.c4_sin, persistent.c4_sin);
-  dsa.c128_cos = copy_to_persistent_tensor(dsa.c128_cos, persistent.c128_cos);
-  dsa.c128_sin = copy_to_persistent_tensor(dsa.c128_sin, persistent.c128_sin);
+      persist_tensor("max_seqlen_q", dsa.max_seqlen_q, persistent.max_seqlen_q);
+  dsa.max_seqlen_kv = persist_tensor(
+      "max_seqlen_kv", dsa.max_seqlen_kv, persistent.max_seqlen_kv);
+  dsa.input_positions = persist_tensor(
+      "input_positions", dsa.input_positions, persistent.input_positions);
+  dsa.c4_pad_positions = persist_tensor(
+      "c4_pad_positions", dsa.c4_pad_positions, persistent.c4_pad_positions);
+  dsa.c128_pad_positions = persist_tensor("c128_pad_positions",
+                                          dsa.c128_pad_positions,
+                                          persistent.c128_pad_positions);
+  dsa.cos = persist_tensor("cos", dsa.cos, persistent.cos);
+  dsa.sin = persist_tensor("sin", dsa.sin, persistent.sin);
+  dsa.c4_cos = persist_tensor("c4_cos", dsa.c4_cos, persistent.c4_cos);
+  dsa.c4_sin = persist_tensor("c4_sin", dsa.c4_sin, persistent.c4_sin);
+  dsa.c128_cos = persist_tensor("c128_cos", dsa.c128_cos, persistent.c128_cos);
+  dsa.c128_sin = persist_tensor("c128_sin", dsa.c128_sin, persistent.c128_sin);
   dsa.c4_input_cos =
-      copy_to_persistent_tensor(dsa.c4_input_cos, persistent.c4_input_cos);
+      persist_tensor("c4_input_cos", dsa.c4_input_cos, persistent.c4_input_cos);
   dsa.c4_input_sin =
-      copy_to_persistent_tensor(dsa.c4_input_sin, persistent.c4_input_sin);
-  dsa.c128_input_cos =
-      copy_to_persistent_tensor(dsa.c128_input_cos, persistent.c128_input_cos);
-  dsa.c128_input_sin =
-      copy_to_persistent_tensor(dsa.c128_input_sin, persistent.c128_input_sin);
+      persist_tensor("c4_input_sin", dsa.c4_input_sin, persistent.c4_input_sin);
+  dsa.c128_input_cos = persist_tensor(
+      "c128_input_cos", dsa.c128_input_cos, persistent.c128_input_cos);
+  dsa.c128_input_sin = persist_tensor(
+      "c128_input_sin", dsa.c128_input_sin, persistent.c128_input_sin);
   dsa.start_pos =
-      copy_to_persistent_tensor(dsa.start_pos, persistent.start_pos);
+      persist_tensor("start_pos", dsa.start_pos, persistent.start_pos);
 
-  dsa.c1_metadata =
-      copy_to_fixed_metadata_tensor(dsa.c1_metadata, persistent.c1_metadata);
-  dsa.c4_metadata =
-      copy_to_fixed_metadata_tensor(dsa.c4_metadata, persistent.c4_metadata);
-  dsa.c128_metadata = copy_to_fixed_metadata_tensor(dsa.c128_metadata,
-                                                    persistent.c128_metadata);
-  dsa.qli_metadata =
-      copy_to_fixed_metadata_tensor(dsa.qli_metadata, persistent.qli_metadata);
-  dsa.hadamard = copy_to_persistent_tensor(dsa.hadamard, persistent.hadamard);
+  dsa.c1_metadata = persist_fixed_tensor(
+      "c1_metadata", dsa.c1_metadata, persistent.c1_metadata);
+  dsa.c4_metadata = persist_fixed_tensor(
+      "c4_metadata", dsa.c4_metadata, persistent.c4_metadata);
+  dsa.c128_metadata = persist_fixed_tensor(
+      "c128_metadata", dsa.c128_metadata, persistent.c128_metadata);
+  dsa.qli_metadata = persist_fixed_tensor(
+      "qli_metadata", dsa.qli_metadata, persistent.qli_metadata);
+  dsa.hadamard = persist_tensor("hadamard", dsa.hadamard, persistent.hadamard);
 
   persistent.block_tables.resize(dsa.block_tables.size());
   for (size_t i = 0; i < dsa.block_tables.size(); ++i) {
     persistent.block_tables[i].resize(dsa.block_tables[i].size());
     for (size_t j = 0; j < dsa.block_tables[i].size(); ++j) {
-      dsa.block_tables[i][j] = copy_to_persistent_tensor(
-          dsa.block_tables[i][j], persistent.block_tables[i][j]);
+      dsa.block_tables[i][j] =
+          persist_tensor(c10::str("block_tables.", i, ".", j),
+                         dsa.block_tables[i][j],
+                         persistent.block_tables[i][j]);
     }
   }
 
@@ -331,8 +577,10 @@ GraphPersistentParam::persist_deepseek_v4_metadata(
   for (size_t i = 0; i < dsa.slot_mappings.size(); ++i) {
     persistent.slot_mappings[i].resize(dsa.slot_mappings[i].size());
     for (size_t j = 0; j < dsa.slot_mappings[i].size(); ++j) {
-      dsa.slot_mappings[i][j] = copy_to_persistent_tensor(
-          dsa.slot_mappings[i][j], persistent.slot_mappings[i][j]);
+      dsa.slot_mappings[i][j] =
+          persist_tensor(c10::str("slot_mappings.", i, ".", j),
+                         dsa.slot_mappings[i][j],
+                         persistent.slot_mappings[i][j]);
     }
   }
 
@@ -350,7 +598,13 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   CHECK_GT(padded_num_tokens, 0)
       << "padded_num_tokens must be > 0 when return_capture_params is true";
   const uint32_t actual_num_tokens = tokens.size(0);
-  const int64_t actual_batch_size = params.num_sequences;
+  const int64_t actual_batch_size = infer_actual_batch_size(params);
+  if (args_.model_type() == "deepseek_v4") {
+    log_dsv4_graph_params(
+        "update.input", params, actual_num_tokens, padded_num_tokens);
+    log_dsv4_graph_input_tensor("update.input.tokens", tokens);
+    log_dsv4_graph_input_tensor("update.input.positions", positions);
+  }
 
   // Copy data from input parameters to persistent graph tensors
   if (actual_num_tokens > 0) {
@@ -624,6 +878,17 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
           q_cu_seq_lens_.slice(/*dim=*/0,
                                /*start=*/0,
                                /*end=*/padded_batch_size);
+    }
+
+    if (is_deepseek_v4_graph) {
+      log_dsv4_graph_params("update.capture_params",
+                            *params_for_capture,
+                            actual_num_tokens,
+                            padded_num_tokens);
+      log_dsv4_graph_input_tensor("update.capture_params.persistent_tokens",
+                                  persistent_tokens(padded_num_tokens));
+      log_dsv4_graph_input_tensor("update.capture_params.persistent_positions",
+                                  persistent_positions(padded_num_tokens));
     }
 
     return params_for_capture;
@@ -1152,6 +1417,7 @@ bool AclGraph::capture(CausalLM* model,
   // Use cached capture stream for graph capture
   // capture_stream_ is initialized in constructor
   bool need_restore_stream = false;
+  aclrtStream active_capture_stream = stream;
 
   // capture lock scope
   {
@@ -1163,6 +1429,7 @@ bool AclGraph::capture(CausalLM* model,
         c10_npu::getDefaultNPUStream(device_idx)) {
       c10_npu::setCurrentNPUStream(capture_stream_.value());
       aclrtSynchronizeStream(capture_stream_.value().stream());
+      active_capture_stream = capture_stream_.value().stream();
       need_restore_stream = true;
     }
     LOG(INFO) << "capture begin, bucket_num_tokens: " << bucket_num_tokens
@@ -1193,12 +1460,23 @@ bool AclGraph::capture(CausalLM* model,
     }
   }
   // Synchronize and test replay to verify graph capture
+  aclrtSynchronizeStream(active_capture_stream);
   aclrtSynchronizeStream(stream);
 
   graph_.replay();
 
-  // aclrtSynchronizeStream(stream);
+  make_current_stream_wait_for_graph(stream);
   return true;
+}
+
+AclGraph::~AclGraph() {
+  if (capture_stream_.has_value()) {
+    aclrtSynchronizeStream(capture_stream_.value().stream());
+  }
+  if (replay_done_event_ != nullptr) {
+    aclrtDestroyEvent(replay_done_event_);
+    replay_done_event_ = nullptr;
+  }
 }
 
 void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
@@ -1208,9 +1486,26 @@ void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
   // torch_npu/csrc/core/npu/NPUGraph.cpp:159).
   capture_stream_ = c10_npu::getStreamFromPool(true, device_index);
   device_index_ = device_index;
+  CHECK_EQ(aclrtCreateEventWithFlag(&replay_done_event_, ACL_EVENT_SYNC),
+           ACL_SUCCESS)
+      << "Failed to create ACL graph replay completion event";
   LOG(INFO) << "Initialized capture_stream: " << capture_stream_.value()
             << ", id: " << capture_stream_.value().id()
             << ", device_index: " << device_index;
+}
+
+void AclGraph::make_current_stream_wait_for_graph(aclrtStream current_stream) {
+  CHECK(capture_stream_.has_value()) << "capture_stream is not initialized";
+  CHECK_NE(replay_done_event_, nullptr)
+      << "replay_done_event is not initialized";
+  const auto graph_stream = capture_stream_.value().stream();
+  CHECK_EQ(aclrtRecordEvent(replay_done_event_, graph_stream), ACL_SUCCESS)
+      << "aclrtRecordEvent(replay_done_event) failed";
+  if (current_stream != graph_stream) {
+    CHECK_EQ(aclrtStreamWaitEvent(current_stream, replay_done_event_),
+             ACL_SUCCESS)
+        << "aclrtStreamWaitEvent(current_stream, replay_done_event) failed";
+  }
 }
 
 ModelOutput AclGraph::replay(CausalLM* model,
@@ -1253,15 +1548,18 @@ ModelOutput AclGraph::replay(CausalLM* model,
 
   graph_.replay();
 
-  // this is necessary to ensure the graph replay is completed
-  // aclError st = aclrtSynchronizeStream(stream);
-  // CHECK_EQ(st, ACL_SUCCESS)
-  // << "aclrtSynchronizeStream failed, error code: " << st;
+  // NPUGraph replays on its capture stream. Add a device-side dependency so
+  // the current/default stream only observes completed outputs.
+  make_current_stream_wait_for_graph(stream);
 
   // Return the actual num_tokens portion of ModelOutput
   // Note: aux_hidden_states handling is done in AclGraphExecutorImpl::run()
   // since replay() doesn't have access to options
-  return ModelOutput(get_hidden_states(actual_num_tokens));
+  auto hidden_states = get_hidden_states(actual_num_tokens);
+  if (args.model_type() == "deepseek_v4") {
+    log_dsv4_graph_output_tensor("replay.hidden_states", hidden_states);
+  }
+  return ModelOutput(hidden_states);
 }
 
 AclGraphExecutorImpl::AclGraphExecutorImpl(CausalLM* model,
@@ -1400,6 +1698,9 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     // already executed)
     auto hidden_states =
         graphs_[bucket_num_tokens]->get_hidden_states(n_tokens);
+    if (args_.model_type() == "deepseek_v4") {
+      log_dsv4_graph_output_tensor("capture.hidden_states", hidden_states);
+    }
     if (options_.enable_graph_aux_hidden_states()) {
       auto aux_hidden_states = persistent_param_->aux_hidden_states(n_tokens);
       if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {

@@ -68,6 +68,9 @@ struct DSAMetadata {
   int32_t layer_id = 0;
   // num_speculative_tokens: number of speculative decoding tokens
   int32_t num_speculative_tokens = 0;
+  // True when the metadata is consumed by ACL graph forward. Debug paths must
+  // not perform host/device copies in this mode.
+  bool is_acl_graph = false;
 
   // cp_input_dict: context-parallel inputs placeholder (reserved, optional)
   std::unordered_map<std::string, torch::Tensor> cp_input_dict;

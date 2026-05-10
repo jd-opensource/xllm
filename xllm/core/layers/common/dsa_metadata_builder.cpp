@@ -116,6 +116,7 @@ void DSAMetadataBuilder::build_dsa_fields(
 
   // Build per-batch sequence length metadata.
   build_seq_lengths(params, target_device, batch_size, dsa);
+  dsa.is_acl_graph = params.graph_buffer.tiling_data.defined();
   if (static_cast<int32_t>(params.q_seq_lens_vec.size()) == batch_size) {
     q_lens_vec.assign(params.q_seq_lens_vec.begin(),
                       params.q_seq_lens_vec.end());
