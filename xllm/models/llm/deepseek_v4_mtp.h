@@ -333,6 +333,7 @@ class DeepseekV4MtpModelImpl : public torch::nn::Module {
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
+
     if (tokens.numel() == 0) {
       tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
       positions = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
@@ -346,7 +347,6 @@ class DeepseekV4MtpModelImpl : public torch::nn::Module {
 
     torch::Tensor hidden_states = embed_tokens_(tokens);
 
-    const auto runtime_device = previous_hidden_states.device();
     tokens = deepseek_v4_mtp_maybe_to_device(tokens, runtime_device);
     positions = deepseek_v4_mtp_maybe_to_device(positions, runtime_device);
 
@@ -948,6 +948,9 @@ class DeepseekV4MtpModelImpl : public torch::nn::Module {
     append_group_positions("default", dsa.input_positions);
     append_group_positions("c4", dsa.c4_pad_positions);
     append_group_positions("c128", dsa.c128_pad_positions);
+
+    LOG(INFO) << "dsa.input_positions: " << dsa.input_positions;
+    LOG(INFO) << "positions_map: " << positions_map["default"];
 
     if (!positions_map.empty()) {
       auto group_cos_sin = dsa_rotary_embedding_->build(positions_map);

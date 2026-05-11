@@ -203,6 +203,150 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
 
   torch::Tensor token_ids = safe_to(input.token_ids, torch::kCPU);
   torch::Tensor positions = safe_to(input.positions, torch::kCPU);
+
+  if (!input_params.multi_block_tables.empty() &&
+      !input_params.block_tables.defined()) {
+    std::vector<int32_t> out_token_ids;
+    std::vector<int32_t> out_positions;
+    std::vector<int32_t> out_kv_seq_lens;
+    std::vector<int32_t> out_q_seq_lens;
+    int32_t kv_max_seq_len = 0;
+    out_token_ids.reserve(total_num_val_tokens);
+    out_positions.reserve(total_num_val_tokens);
+    if (!FLAGS_enable_atb_spec_kernel) {
+      out_kv_seq_lens.reserve(total_num_val_tokens);
+      out_q_seq_lens.reserve(total_num_val_tokens);
+    }
+
+    Slice<int32_t> token_ids_slice = {
+        token_ids.data_ptr<int32_t>(),
+        static_cast<size_t>(token_ids.numel())};
+    Slice<int32_t> positions_slice = {
+        positions.data_ptr<int32_t>(),
+        static_cast<size_t>(positions.numel())};
+
+    std::vector<std::vector<std::vector<int32_t>>> expanded_multi_block_tables(
+        input_params.multi_block_tables.size());
+    if (!FLAGS_enable_atb_spec_kernel) {
+      for (size_t m = 0; m < expanded_multi_block_tables.size(); ++m) {
+        expanded_multi_block_tables[m].reserve(total_num_val_tokens);
+      }
+    }
+
+    std::vector<int32_t> atb_kv_seq_lens_vec = {};
+    std::vector<int32_t> atb_q_seq_lens_vec = {};
+    int32_t atb_kv_max_seq_len = 0;
+    std::vector<torch::Tensor> multi_block_tables_cpu;
+    multi_block_tables_cpu.reserve(input_params.multi_block_tables.size());
+    for (const auto& block_table : input_params.multi_block_tables) {
+      multi_block_tables_cpu.emplace_back(safe_to(block_table, torch::kCPU));
+    }
+
+    for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
+      CHECK_LT(static_cast<size_t>(seq_id), positions_slice.size())
+          << "seq_id out of range for positions, seq_id=" << seq_id
+          << ", positions_size=" << positions_slice.size();
+      const int32_t start_position = positions_slice[seq_id];
+      const int32_t kv_len =
+          specBuilder::calc_kv_len(input_params.kv_seq_lens_vec,
+                                   seq_id,
+                                   /*offset=*/0);
+      CHECK_EQ(start_position + 1, kv_len)
+          << "validate position/kv_len mismatch, seq_id=" << seq_id
+          << ", start_position=" << start_position << ", kv_len=" << kv_len;
+
+      for (int32_t val_idx = 0; val_idx < num_val_tokens; ++val_idx) {
+        if (val_idx == 0) {
+          CHECK_LT(static_cast<size_t>(seq_id), token_ids_slice.size())
+              << "seq_id out of range for token_ids, seq_id=" << seq_id
+              << ", token_ids_size=" << token_ids_slice.size();
+          out_token_ids.emplace_back(token_ids_slice[seq_id]);
+        } else {
+          out_token_ids.emplace_back(-val_idx);
+        }
+        out_positions.emplace_back(start_position + val_idx);
+
+        if (!FLAGS_enable_atb_spec_kernel) {
+          const int32_t new_kv_len = kv_len + val_idx;
+          specBuilder::update_kv_seq_lens_and_max(
+              out_kv_seq_lens, new_kv_len, kv_max_seq_len);
+          specBuilder::append_seq_len_by_layout(out_q_seq_lens, 1);
+          for (size_t m = 0; m < multi_block_tables_cpu.size(); ++m) {
+            CHECK(multi_block_tables_cpu[m].defined())
+                << "multi_block_tables[" << m << "] is undefined";
+            CHECK_LT(seq_id, multi_block_tables_cpu[m].size(0))
+                << "seq_id out of range for multi_block_tables[" << m << "]";
+            torch::Tensor row = multi_block_tables_cpu[m][seq_id];
+            Slice<int32_t> row_slice = {
+                row.data_ptr<int32_t>(),
+                static_cast<size_t>(row.numel())};
+            expanded_multi_block_tables[m].emplace_back(row_slice.begin(),
+                                                        row_slice.end());
+          }
+        }
+      }
+
+      if (FLAGS_enable_atb_spec_kernel) {
+        const int32_t kv_len_after_validation = kv_len + num_speculative_tokens;
+        specBuilder::update_kv_seq_lens_and_max(
+            atb_kv_seq_lens_vec, kv_len_after_validation, atb_kv_max_seq_len);
+        specBuilder::append_seq_len_by_layout(atb_q_seq_lens_vec,
+                                              num_val_tokens);
+      }
+    }
+
+    CHECK_EQ(out_positions.size(), out_token_ids.size())
+        << "validate positions/tokens mismatch";
+
+    validate_input.token_ids = torch::tensor(out_token_ids, int_options);
+    validate_input.positions = torch::tensor(out_positions, int_options);
+    if (!FLAGS_enable_atb_spec_kernel) {
+      input_params.num_sequences = total_num_val_tokens;
+      input_params.q_max_seq_len = 1;
+      input_params.batch_forward_type = BatchForwardType::DECODE;
+    } else {
+      input_params.q_max_seq_len = num_val_tokens;
+      input_params.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
+    }
+    if (FLAGS_enable_atb_spec_kernel) {
+      input_params.q_seq_lens_vec = std::move(atb_q_seq_lens_vec);
+    } else {
+      input_params.q_seq_lens_vec = std::move(out_q_seq_lens);
+    }
+    input_params.q_seq_lens =
+        torch::tensor(input_params.q_seq_lens_vec, int_options);
+    input_params.q_cu_seq_lens =
+        specBuilder::build_q_cu_seq_lens_tensor(input_params);
+    if (FLAGS_enable_atb_spec_kernel) {
+      input_params.kv_max_seq_len = atb_kv_max_seq_len;
+      input_params.kv_seq_lens_vec = std::move(atb_kv_seq_lens_vec);
+    } else {
+      input_params.kv_max_seq_len = kv_max_seq_len;
+      input_params.kv_seq_lens_vec = std::move(out_kv_seq_lens);
+    }
+    input_params.kv_seq_lens =
+        torch::tensor(input_params.kv_seq_lens_vec, int_options);
+    input_params.new_cache_slots =
+        torch::zeros({static_cast<int64_t>(out_token_ids.size())}, int_options);
+    if (!FLAGS_enable_atb_spec_kernel) {
+      input_params.multi_block_tables.clear();
+      input_params.multi_block_tables.reserve(expanded_multi_block_tables.size());
+      for (auto& manager_tables : expanded_multi_block_tables) {
+        util::pad_2d_vector(manager_tables, /*pad_value=*/-1);
+        input_params.multi_block_tables.emplace_back(
+            create_2d_tensor(manager_tables, torch::kInt).to(device_));
+      }
+    }
+
+    update_sampling_params(
+        validate_input.sampling_params, num_val_tokens, total_num_val_tokens);
+
+    for (auto& it : input_params.dp_global_token_nums) {
+      it *= num_val_tokens;
+    }
+    return;
+  }
+
   torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
   auto view = specBuilder::make_decode_cpu_view(
       token_ids, positions, block_tables, input_params.kv_seq_lens_vec);

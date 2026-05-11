@@ -547,12 +547,162 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
   torch::TensorOptions int_options = extend_input.token_ids.options();
   torch::Tensor token_ids = safe_to(base_input.token_ids, torch::kCPU);
   torch::Tensor positions = safe_to(base_input.positions, torch::kCPU);
-  torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
-  auto view = specBuilder::make_decode_cpu_view(
-      token_ids, positions, block_tables, input_params.kv_seq_lens_vec);
   torch::Tensor accepted_tokens =
       safe_to(validate_output.next_tokens, torch::kCPU);
   const auto accepted_embeddings = validate_output.embeddings;
+
+  if (!input_params.multi_block_tables.empty() &&
+      !input_params.block_tables.defined()) {
+    std::vector<int32_t> out_token_ids;
+    std::vector<int32_t> out_positions;
+    std::vector<int32_t> out_kv_seq_lens;
+    std::vector<int32_t> out_q_seq_lens;
+    int32_t kv_max_seq_len = 0;
+    std::vector<torch::Tensor> expanded_embeddings;
+    std::vector<int32_t> selected_row_idx;
+    out_token_ids.reserve(num_sequences * 2);
+    out_positions.reserve(num_sequences * 2);
+    out_kv_seq_lens.reserve(num_sequences * 2);
+    out_q_seq_lens.reserve(num_sequences * 2);
+    expanded_embeddings.reserve(num_sequences * 2);
+    selected_row_idx.reserve(num_sequences);
+
+    Slice<int32_t> token_ids_slice = {
+        token_ids.data_ptr<int32_t>(),
+        static_cast<size_t>(token_ids.numel())};
+    Slice<int32_t> positions_slice = {
+        positions.data_ptr<int32_t>(),
+        static_cast<size_t>(positions.numel())};
+
+    std::vector<std::vector<std::vector<int32_t>>> expanded_multi_block_tables(
+        input_params.multi_block_tables.size());
+    for (size_t m = 0; m < expanded_multi_block_tables.size(); ++m) {
+      expanded_multi_block_tables[m].reserve(num_sequences * 2);
+    }
+
+    std::vector<torch::Tensor> multi_block_tables_cpu;
+    multi_block_tables_cpu.reserve(input_params.multi_block_tables.size());
+    for (const auto& block_table : input_params.multi_block_tables) {
+      multi_block_tables_cpu.emplace_back(safe_to(block_table, torch::kCPU));
+    }
+
+    for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
+      auto add_row = [&](int32_t token_id,
+                         int32_t relative_offset,
+                         const torch::Tensor& embedding) {
+        CHECK_LT(static_cast<size_t>(seq_id), positions_slice.size())
+            << "seq_id out of range for positions, seq_id=" << seq_id;
+        const int32_t base_position = positions_slice[seq_id];
+        const int32_t new_position = base_position + relative_offset + 1;
+
+        out_token_ids.emplace_back(token_id);
+        out_positions.emplace_back(new_position);
+
+        const int32_t new_kv_len = new_position + 1;
+        specBuilder::update_kv_seq_lens_and_max(
+            out_kv_seq_lens, new_kv_len, kv_max_seq_len);
+        specBuilder::append_seq_len_by_layout(out_q_seq_lens, 1);
+
+        for (size_t m = 0; m < multi_block_tables_cpu.size(); ++m) {
+          CHECK(multi_block_tables_cpu[m].defined())
+              << "multi_block_tables[" << m << "] is undefined";
+          CHECK_LT(seq_id, multi_block_tables_cpu[m].size(0))
+              << "seq_id out of range for multi_block_tables[" << m << "]";
+          torch::Tensor row = multi_block_tables_cpu[m][seq_id];
+          Slice<int32_t> row_slice = {
+              row.data_ptr<int32_t>(),
+              static_cast<size_t>(row.numel())};
+          expanded_multi_block_tables[m].emplace_back(row_slice.begin(),
+                                                       row_slice.end());
+        }
+
+        if (embedding.defined()) {
+          expanded_embeddings.emplace_back(embedding.to(device_));
+        } else {
+          expanded_embeddings.emplace_back(
+              torch::zeros({get_embedding_placeholder_size()},
+                           torch::dtype(dtype_).device(device_)));
+        }
+      };
+
+      int32_t last_idx = -1;
+      int32_t last_token_id = 0;
+      for (int32_t i = 0; i < accepted_tokens.size(1); ++i) {
+        int64_t token = accepted_tokens[seq_id][i].item<int64_t>();
+        if (token >= 0) {
+          last_idx = i;
+          last_token_id = static_cast<int32_t>(token);
+        }
+      }
+      CHECK_GE(last_idx, 0)
+          << "each sequence must have at least one accepted token";
+
+      int32_t prev_token_id = token_ids_slice[seq_id];
+      CHECK_GE(prev_token_id, 0);
+      torch::Tensor prev_embedding = torch::Tensor();
+      const int32_t prev_idx = last_idx - 1;
+      if (prev_idx >= 0) {
+        int64_t token = accepted_tokens[seq_id][prev_idx].item<int64_t>();
+        CHECK_GE(token, 0) << "accepted tokens should be contiguous prefix";
+        prev_token_id = static_cast<int32_t>(token);
+        prev_embedding = accepted_embeddings[seq_id][prev_idx];
+      }
+      torch::Tensor last_embedding = accepted_embeddings[seq_id][last_idx];
+
+      const int32_t prev_offset = (last_idx > 0) ? (last_idx - 1) : -1;
+      const int32_t last_offset = last_idx;
+      add_row(prev_token_id, prev_offset, prev_embedding);
+      add_row(last_token_id, last_offset, last_embedding);
+      selected_row_idx.emplace_back(2 * seq_id + 1);
+    }
+
+    CHECK_EQ(out_positions.size(), out_token_ids.size())
+        << "draft extend positions/tokens mismatch";
+    CHECK_EQ(expanded_embeddings.size(), out_positions.size())
+        << "draft extend embeddings/positions mismatch";
+
+    extend_input.token_ids = torch::tensor(out_token_ids, int_options);
+    extend_input.positions = torch::tensor(out_positions, int_options);
+    input_params.num_sequences = static_cast<int32_t>(out_positions.size());
+    input_params.q_max_seq_len = 1;
+    input_params.batch_forward_type = BatchForwardType::DECODE;
+    input_params.q_seq_lens_vec = std::move(out_q_seq_lens);
+    input_params.q_seq_lens =
+        torch::tensor(input_params.q_seq_lens_vec, int_options);
+    input_params.q_cu_seq_lens =
+        specBuilder::build_q_cu_seq_lens_tensor(input_params);
+    input_params.kv_max_seq_len = kv_max_seq_len;
+    input_params.kv_seq_lens_vec = std::move(out_kv_seq_lens);
+    input_params.kv_seq_lens =
+        torch::tensor(input_params.kv_seq_lens_vec, int_options);
+    input_params.new_cache_slots =
+        torch::zeros({static_cast<int64_t>(out_token_ids.size())}, int_options);
+    input_params.multi_block_tables.clear();
+    input_params.multi_block_tables.reserve(expanded_multi_block_tables.size());
+    for (auto& manager_tables : expanded_multi_block_tables) {
+      util::pad_2d_vector(manager_tables, /*pad_value=*/-1);
+      input_params.multi_block_tables.emplace_back(
+          create_2d_tensor(manager_tables, torch::kInt).to(device_));
+    }
+    input_params.input_embedding = torch::stack(expanded_embeddings).to(device_);
+
+    constexpr int32_t num_extend_tokens = 2;
+    for (auto& it : input_params.dp_global_token_nums) {
+      it *= num_extend_tokens;
+    }
+
+    auto& params = extend_input.sampling_params;
+    torch::TensorOptions idx_options = params.selected_token_idxes.options();
+    params.selected_token_idxes = torch::tensor(selected_row_idx, idx_options);
+    if (!params.sample_idxes.defined()) {
+      params.sample_idxes = torch::arange(num_sequences, idx_options);
+    }
+    return;
+  }
+
+  torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
+  auto view = specBuilder::make_decode_cpu_view(
+      token_ids, positions, block_tables, input_params.kv_seq_lens_vec);
 
   specBuilder::DecodeBuildBuffers buf;
   buf.out_token_ids.reserve(num_sequences * 2);
