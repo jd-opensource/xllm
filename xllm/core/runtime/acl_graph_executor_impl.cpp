@@ -34,6 +34,7 @@ limitations under the License.
 #endif
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
+#include "core/kernels/npu/xllm_ops/xllm_ops_api.h"
 #include "core/layers/common/attention_metadata.h"
 #include "core/layers/common/dsa_metadata.h"
 #include "core/util/utils.h"
@@ -266,10 +267,11 @@ torch::Tensor copy_to_fixed_metadata_tensor(const torch::Tensor& src,
   if (!src.defined()) {
     return src;
   }
-  constexpr int64_t kDsaMetadataElements = 1024;
-  if (!dst.defined() || dst.numel() != kDsaMetadataElements ||
+  if (!dst.defined() ||
+      dst.numel() != xllm::kernel::npu::kDsaMetadataBufferElements ||
       dst.scalar_type() != src.scalar_type() || dst.device() != src.device()) {
-    dst = torch::zeros({kDsaMetadataElements}, src.options());
+    dst = torch::zeros({xllm::kernel::npu::kDsaMetadataBufferElements},
+                       src.options());
   }
   dst.zero_();
   const int64_t copy_numel = std::min<int64_t>(src.numel(), dst.numel());

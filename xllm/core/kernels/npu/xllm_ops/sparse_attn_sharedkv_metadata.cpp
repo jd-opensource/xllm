@@ -46,10 +46,11 @@ at::Tensor sparse_attn_sharedkv_metadata(
   at::Tensor output;
   if (cu_seqlens_q.has_value()) {
     output = torch::zeros(
-        {1024},
+        {kDsaMetadataBufferElements},
         torch::dtype(torch::kInt32).device(cu_seqlens_q.value().device()));
   } else {
-    output = torch::zeros({1024}, torch::dtype(torch::kInt32).device("npu"));
+    output = torch::zeros({kDsaMetadataBufferElements},
+                          torch::dtype(torch::kInt32).device("npu"));
   }
 
   // convert str
