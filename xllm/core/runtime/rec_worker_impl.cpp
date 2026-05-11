@@ -179,26 +179,49 @@ OneRecBeamSearchOutputTensors prepare_onerec_beam_search_output_tensors(
 bool can_use_onerec_final_beam_select(int32_t batch_size,
                                       const torch::Tensor& top_tokens,
                                       int32_t result_width) {
+  // Gate for the NPU fused final-step path for `num_return_sequences`.
+  // If any shape/alignment requirement is not met, we fall back to the
+  // torch-based host implementation (`select_final_onerec_beam_results`) for
+  // correctness.
   constexpr int32_t kMaxFinalSelectRequestNum = 48;
   constexpr int32_t kMaxFinalSelectTopK = 2048;
   constexpr int32_t kMaxFinalSelectMergeWidth = 2048;
-  // Keep the fused kernel on the well-tested small-batch path.
+
+  // batch_size is the number of independent requests in the micro-batch.
+  // The fused kernel is only validated up to kMaxFinalSelectRequestNum.
   if (batch_size <= 0 || batch_size > kMaxFinalSelectRequestNum) {
     return false;
   }
-  // The final fused op consumes a 2D [batch * beam, top_k] tensor.
+
+  // top_tokens is expected to be a 2D tensor: [batch_size * beam_width, top_k].
   if (top_tokens.dim() != 2) {
     return false;
   }
-  // Each request must contribute a whole beam slice.
+
+  // The row dimension should be divisible by batch_size so we can infer an
+  // integer beam_width per request.
   if (top_tokens.size(0) % batch_size != 0) {
     return false;
   }
+
+  // candidate_top_k is the number of per-parent candidates produced by the
+  // sampler on the final round (top-k per active beam).
   const int64_t candidate_top_k = top_tokens.size(1);
-  // Candidate width must cover the requested output width.
-  // The kernel is vectorized in groups of 8 for the candidate dimension.
-  // The requested output width is aligned to 32 for the final merge step.
-  // Hard caps keep the custom kernel within its tuned range.
+
+  // Fused `num_return_sequences` final-step requirements:
+  // 1) candidate_top_k >= result_width:
+  //    The final selection must be able to pick result_width beams; if each
+  //    parent beam only provides fewer candidates, the fused path can miss
+  //    valid top results.
+  // 2) candidate_top_k % 8 == 0:
+  //    Implementation constraint for vectorized loads / alignment on NPU.
+  // 3) result_width % 32 == 0:
+  //    Implementation constraint for output tiling / alignment.
+  // 4) candidate_top_k <= kMaxFinalSelectTopK:
+  //    Hard cap for internal buffers / workspace.
+  // 5) result_width * 2 <= kMaxFinalSelectMergeWidth:
+  //    The kernel uses an internal merge width (often about 2x result_width)
+  //    and must stay within its supported limit.
   return candidate_top_k >= result_width && candidate_top_k % 8 == 0 &&
          result_width % 32 == 0 && candidate_top_k <= kMaxFinalSelectTopK &&
          result_width * 2 <= kMaxFinalSelectMergeWidth;
