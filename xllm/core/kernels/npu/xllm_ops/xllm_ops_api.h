@@ -17,12 +17,30 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#ifdef TORCH_HIGHER_THAN_PTA6
+#include <torch_npu/csrc/core/npu/NPUFormat.h>
+#include <torch_npu/csrc/framework/OpCommand.h>
+#else
+#include <torch_npu/csrc/aten/NPUNativeFunctions.h>
+#include <torch_npu/csrc/framework/utils/OpPreparation.h>
+#endif
+
+#include <string>
 #include <tuple>
 #include <vector>
 
 namespace xllm::kernel::npu {
 namespace op_infer {
+const int N = 32;
+// npu tensor max size
 const int SIZE = 8;
+const int INT4_NUMS_IN_INT32_SPACE = 8;
+const int NPU_NSA_COMPRESS_INPUT_DIM_SECOND = 1;
+const int NPU_NSA_COMPRESS_INPUT_DIM_THIRD = 2;
+const int DIM_0 = 0;
+const int DIM_1 = 1;
+const int DIM_2 = 2;
+const int DIM_3 = 3;
 }  // namespace op_infer
 
 void beam_search(const torch::Tensor& logprobs,

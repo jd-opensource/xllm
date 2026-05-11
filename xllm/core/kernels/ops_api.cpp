@@ -20,6 +20,7 @@ limitations under the License.
 #elif defined(USE_NPU)
 #include "core/kernels/npu/tilelang/tilelang_ops_api.h"
 #include "npu/npu_ops_api.h"
+#include "npu/xllm_ops/xllm_ops_api.h"
 #include "triton_npu/torch_api/triton_ops_api.h"
 #elif defined(USE_CUDA)
 #include "cuda/attention_runner.h"
