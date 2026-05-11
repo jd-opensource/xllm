@@ -31,19 +31,26 @@ class Glm4VImageProcessor : public ImageProcessor {
   bool process(const MMInput& mm_inputs, MMData& mm_datas) override;
 
  private:
-  bool process_images(std::vector<torch::Tensor> images, MMData& mm_datas);
+  bool process_images(std::vector<torch::Tensor> images,
+                      MMData& mm_datas,
+                      const std::optional<MMConfig>& mm_config);
   bool process_image(torch::Tensor image,
                      torch::Tensor& pixel_values,
-                     torch::Tensor& thw);
+                     torch::Tensor& thw,
+                     int32_t min_pixels,
+                     int32_t max_pixels);
   bool process_videos(std::vector<torch::Tensor> videos,
                       std::vector<VideoMetadata> video_meta_list,
-                      MMData& mm_datas);
+                      MMData& mm_datas,
+                      const std::optional<MMConfig>& mm_config);
   bool process_video(torch::Tensor video,
                      VideoMetadata& metadata,
                      torch::Tensor& pixel_values,
-                     torch::Tensor& thw);
+                     torch::Tensor& thw,
+                     int32_t video_min_pixels,
+                     int32_t video_max_pixels);
   torch::Tensor sample_frames(const VideoMetadata& metadata,
-                              int temporal_patch_size);
+                              int32_t temporal_patch_size);
 
  private:
   bool do_convert_rgb_ = true;
@@ -55,32 +62,32 @@ class Glm4VImageProcessor : public ImageProcessor {
   std::vector<double> image_mean_;
   std::vector<double> image_std_;
 
-  int max_pixels_ = 12845056;
-  int min_pixels_ = 3136;
+  int32_t max_pixels_ = 12845056;
+  int32_t min_pixels_ = 3136;
 
-  int merge_size_ = 2;
-  int patch_size_ = 14;
+  int32_t merge_size_ = 2;
+  int32_t patch_size_ = 14;
 
   std::vector<double> video_mean_;
   std::vector<double> video_std_;
 
-  int video_max_pixels_ = 47040000;
-  int video_min_pixels_ = 12544;
+  int32_t video_max_pixels_ = 47040000;
+  int32_t video_min_pixels_ = 12544;
 
-  int video_merge_size_ = 2;
-  int video_patch_size_ = 14;
+  int32_t video_merge_size_ = 2;
+  int32_t video_patch_size_ = 14;
 
-  int resample_ = 3;
+  int32_t resample_ = 3;
   double rescale_factor_ = 0.00392156862745098;
 
-  std::unordered_map<std::string, int> size_;
-  int temporal_patch_size_ = 2;
-  int video_temporal_patch_size_ = 2;
+  std::unordered_map<std::string, int32_t> size_;
+  int32_t temporal_patch_size_ = 2;
+  int32_t video_temporal_patch_size_ = 2;
 
   bool do_sample_frame_ = true;
 
-  int min_frames_ = 4;
-  int max_frames_ = 768;
+  int32_t min_frames_ = 4;
+  int32_t max_frames_ = 768;
 };
 
 }  // namespace xllm

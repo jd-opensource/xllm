@@ -39,6 +39,15 @@ struct AudioURL {
   std::string url;
 };
 
+struct MMConfig {
+  std::optional<int32_t> max_pixels;
+  std::optional<int32_t> min_pixels;
+  std::optional<int32_t> video_max_pixels;
+  std::optional<int32_t> video_min_pixels;
+  std::optional<int32_t> num_frames;
+  std::optional<double> fps;
+};
+
 struct MMContent {
   MMContent(const std::string& type, const std::string& text)
       : type(type), text(std::move(text)) {}

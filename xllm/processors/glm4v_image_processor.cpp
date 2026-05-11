@@ -242,6 +242,8 @@ Glm4VImageProcessor::Glm4VImageProcessor(const ModelArgs& args) {
 }
 
 bool Glm4VImageProcessor::process(const MMInput& inputs, MMData& datas) {
+  const auto& mm_config = inputs.mm_config();
+
   std::vector<torch::Tensor> images = inputs.get_decode_data(MMType::IMAGE);
   std::vector<torch::Tensor> videos = inputs.get_decode_data(MMType::VIDEO);
   std::vector<VideoMetadata> video_meta_list = inputs.get_video_metadata();
@@ -252,14 +254,14 @@ bool Glm4VImageProcessor::process(const MMInput& inputs, MMData& datas) {
   }
 
   if (!images.empty()) {
-    if (!this->process_images(images, datas)) {
+    if (!this->process_images(images, datas, mm_config)) {
       LOG(ERROR) << " process image failed.";
       return false;
     }
   }
 
   if (!videos.empty()) {
-    if (!this->process_videos(videos, video_meta_list, datas)) {
+    if (!this->process_videos(videos, video_meta_list, datas, mm_config)) {
       LOG(ERROR) << " process video failed.";
       return false;
     }
@@ -268,13 +270,27 @@ bool Glm4VImageProcessor::process(const MMInput& inputs, MMData& datas) {
   return true;
 }
 
-bool Glm4VImageProcessor::process_images(std::vector<torch::Tensor> images,
-                                         MMData& mm_datas) {
+bool Glm4VImageProcessor::process_images(
+    std::vector<torch::Tensor> images,
+    MMData& mm_datas,
+    const std::optional<MMConfig>& mm_config) {
+  int32_t min_pixels = min_pixels_;
+  int32_t max_pixels = max_pixels_;
+  if (mm_config) {
+    if (mm_config->min_pixels) {
+      min_pixels = std::max(min_pixels_, *mm_config->min_pixels);
+    }
+
+    if (mm_config->max_pixels && *mm_config->max_pixels > min_pixels) {
+      max_pixels = std::min(max_pixels_, *mm_config->max_pixels);
+    }
+  }
+
   torch::Tensor pixel_values;
   torch::Tensor thw;
 
   for (const auto& img : images) {
-    if (!this->process_image(img, pixel_values, thw)) {
+    if (!this->process_image(img, pixel_values, thw, min_pixels, max_pixels)) {
       LOG(ERROR)
           << "Failed to process image. The shape(channels, height, width) is: "
           << img.sizes();
@@ -290,7 +306,9 @@ bool Glm4VImageProcessor::process_images(std::vector<torch::Tensor> images,
 
 bool Glm4VImageProcessor::process_image(torch::Tensor image,
                                         torch::Tensor& pixel_values,
-                                        torch::Tensor& thw) {
+                                        torch::Tensor& thw,
+                                        int32_t min_pixels,
+                                        int32_t max_pixels) {
   auto shape = image.sizes();
 
   auto resized_height = shape[1];
@@ -305,8 +323,8 @@ bool Glm4VImageProcessor::process_image(torch::Tensor image,
                              resized_width,
                              temporal_patch_size_,
                              patch_size_ * merge_size_,
-                             min_pixels_,
-                             max_pixels_);
+                             min_pixels,
+                             max_pixels);
     if (!size) {
       return false;
     }
@@ -362,7 +380,23 @@ bool Glm4VImageProcessor::process_image(torch::Tensor image,
 bool Glm4VImageProcessor::process_videos(
     std::vector<torch::Tensor> videos,
     std::vector<VideoMetadata> video_meta_list,
-    MMData& mm_datas) {
+    MMData& mm_datas,
+    const std::optional<MMConfig>& mm_config) {
+  int32_t video_min_pixels = video_min_pixels_;
+  int32_t video_max_pixels = video_max_pixels_;
+  if (mm_config) {
+    if (mm_config->video_min_pixels) {
+      video_min_pixels =
+          std::max(video_min_pixels_, *mm_config->video_min_pixels);
+    }
+
+    if (mm_config->video_max_pixels &&
+        *mm_config->video_max_pixels > video_min_pixels) {
+      video_max_pixels =
+          std::min(video_max_pixels_, *mm_config->video_max_pixels);
+    }
+  }
+
   torch::Tensor pixel_values;
   torch::Tensor thw;
 
@@ -370,7 +404,12 @@ bool Glm4VImageProcessor::process_videos(
   for (size_t i = 0; i < video_size; ++i) {
     auto& vid = videos[i];
     auto& metadata = video_meta_list[i];
-    if (!this->process_video(vid, metadata, pixel_values, thw)) {
+    if (!this->process_video(vid,
+                             metadata,
+                             pixel_values,
+                             thw,
+                             video_min_pixels,
+                             video_max_pixels)) {
       LOG(ERROR) << "Failed to process video. The shape(num_frames, channels, "
                     "height, width) is: "
                  << vid.sizes();
@@ -389,7 +428,9 @@ bool Glm4VImageProcessor::process_videos(
 bool Glm4VImageProcessor::process_video(torch::Tensor origin_video,
                                         VideoMetadata& metadata,
                                         torch::Tensor& pixel_values,
-                                        torch::Tensor& thw) {
+                                        torch::Tensor& thw,
+                                        int32_t video_min_pixels,
+                                        int32_t video_max_pixels) {
   if (origin_video.dim() != 4) {
     LOG(FATAL) << "video must be TCHW";
   }
@@ -433,8 +474,8 @@ bool Glm4VImageProcessor::process_video(torch::Tensor origin_video,
                              resized_width,
                              video_temporal_patch_size_,
                              video_patch_size_ * video_merge_size_,
-                             video_min_pixels_,
-                             video_max_pixels_);
+                             video_min_pixels,
+                             video_max_pixels);
     if (!size) {
       return false;
     }

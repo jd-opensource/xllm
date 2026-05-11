@@ -93,7 +93,10 @@ class MMInput {
   explicit MMInput(std::string payload) : payload_(std::move(payload)) {}
 
   bool empty() const { return items_.empty(); }
-  void clear() { items_.clear(); }
+  void clear() {
+    items_.clear();
+    mm_config_.reset();
+  }
   size_t size() const { return items_.size(); }
 
   const std::vector<MMInputItem>& items() const { return items_; }
@@ -119,6 +122,12 @@ class MMInput {
   void insert(const std::vector<MMInputItem>& inputs) {
     items_.insert(items_.end(), inputs.begin(), inputs.end());
   }
+
+  void set_mm_config(const std::optional<MMConfig>& mm_config) {
+    mm_config_ = mm_config;
+  }
+
+  const std::optional<MMConfig>& mm_config() const { return mm_config_; }
 
   std::vector<torch::Tensor> get_decode_data(MMType type) const {
     std::vector<torch::Tensor> vec;
@@ -151,6 +160,7 @@ class MMInput {
  private:
   MMPayload payload_;
   std::vector<MMInputItem> items_;
+  std::optional<MMConfig> mm_config_;
 };
 
 enum class MMErrCode : uint8_t {

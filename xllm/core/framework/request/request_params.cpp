@@ -474,6 +474,37 @@ RequestParams::RequestParams(const proto::MMChatRequest& request,
   x_request_time = x_rtime;
 
   init_from_chat_request(*this, request);
+
+  if (request.has_mm_config()) {
+    MMConfig config;
+    const auto& req_mm_config = request.mm_config();
+
+    if (req_mm_config.has_max_pixels()) {
+      config.max_pixels = req_mm_config.max_pixels();
+    }
+
+    if (req_mm_config.has_min_pixels()) {
+      config.min_pixels = req_mm_config.min_pixels();
+    }
+
+    if (req_mm_config.has_video_max_pixels()) {
+      config.video_max_pixels = req_mm_config.video_max_pixels();
+    }
+
+    if (req_mm_config.has_video_min_pixels()) {
+      config.video_min_pixels = req_mm_config.video_min_pixels();
+    }
+
+    if (req_mm_config.has_num_frames()) {
+      config.num_frames = req_mm_config.num_frames();
+    }
+
+    if (req_mm_config.has_fps()) {
+      config.fps = req_mm_config.fps();
+    }
+
+    mm_config = config;
+  }
 }
 
 RequestParams::RequestParams(const proto::EmbeddingRequest& request,
@@ -649,6 +680,71 @@ bool RequestParams::verify_params(OutputCallback callback) const {
                         service_request_id,
                         source_xservice_addr);
     return false;
+  }
+
+  if (mm_config) {
+    const auto& config = *mm_config;
+
+    if (config.num_frames.value_or(0) > 0 && config.fps.value_or(0.0) > 0.0) {
+      CALLBACK_WITH_ERROR(
+          StatusCode::INVALID_ARGUMENT,
+          "num_frames and fps are mutually exclusive arguments, please use "
+          "only one.",
+          service_request_id,
+          source_xservice_addr);
+      return false;
+    }
+
+    if (config.min_pixels && *config.min_pixels <= 0) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "min_pixels must be greater than 0.",
+                          service_request_id,
+                          source_xservice_addr);
+      return false;
+    }
+
+    if (config.max_pixels && *config.max_pixels <= 0) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "max_pixels must be greater than 0.",
+                          service_request_id,
+                          source_xservice_addr);
+      return false;
+    }
+
+    if (config.min_pixels && config.max_pixels &&
+        *config.max_pixels <= *config.min_pixels) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "max_pixels must be greater than min_pixels.",
+                          service_request_id,
+                          source_xservice_addr);
+      return false;
+    }
+
+    if (config.video_min_pixels && *config.video_min_pixels <= 0) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "video_min_pixels must be greater than 0.",
+                          service_request_id,
+                          source_xservice_addr);
+      return false;
+    }
+
+    if (config.video_max_pixels && *config.video_max_pixels <= 0) {
+      CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                          "video_max_pixels must be greater than 0.",
+                          service_request_id,
+                          source_xservice_addr);
+      return false;
+    }
+
+    if (config.video_min_pixels && config.video_max_pixels &&
+        *config.video_max_pixels <= *config.video_min_pixels) {
+      CALLBACK_WITH_ERROR(
+          StatusCode::INVALID_ARGUMENT,
+          "video_max_pixels must be greater than video_min_pixels.",
+          service_request_id,
+          source_xservice_addr);
+      return false;
+    }
   }
   return true;
 }
