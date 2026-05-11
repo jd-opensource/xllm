@@ -106,6 +106,190 @@ torch::Tensor int64_vector_to_device_tensor(const std::vector<int64_t>& values,
   return cpu_tensor.to(device, /*non_blocking=*/false);
 }
 
+int32_t get_requested_beam_result_width(const SamplingParameters& params,
+                                        int32_t beam_width) {
+  return params.num_return_sequences > 0
+             ? params.num_return_sequences
+             : beam_width;
+}
+
+struct OneRecBeamSearchTensors {
+  torch::Tensor sequence_group;
+  torch::Tensor acc_logprob;
+  torch::Tensor out_log_probs;
+  torch::Tensor out_token_ids;
+  torch::Tensor out_token_index;
+  torch::Tensor out_beam_count_prefix_sums;
+  torch::Tensor out_seqgroup;
+};
+
+OneRecBeamSearchTensors prepare_onerec_beam_search_tensors(
+    int32_t batch_size,
+    int32_t beam_width,
+    int32_t total_rounds,
+    const torch::Device& device) {
+  const torch::TensorOptions int_options =
+      torch::TensorOptions().dtype(torch::kInt32).device(device);
+  const torch::TensorOptions fp32_options =
+      torch::TensorOptions().dtype(torch::kFloat32).device(device);
+  const int64_t num_seq = static_cast<int64_t>(batch_size) * beam_width;
+
+  OneRecBeamSearchTensors tensors;
+  tensors.sequence_group =
+      torch::zeros({batch_size, beam_width, total_rounds}, int_options);
+  tensors.acc_logprob = torch::zeros({num_seq, 1}, fp32_options);
+  tensors.out_log_probs = torch::zeros({num_seq, 1}, fp32_options);
+  tensors.out_token_ids = torch::zeros({num_seq, 1}, int_options);
+  tensors.out_token_index = torch::zeros({num_seq, 1}, int_options);
+  tensors.out_beam_count_prefix_sums = torch::zeros({num_seq, 1}, int_options);
+  tensors.out_seqgroup = torch::zeros_like(tensors.sequence_group);
+  return tensors;
+}
+
+#if defined(USE_NPU)
+struct OneRecBeamSearchOutputTensors {
+  torch::Tensor out_log_probs;
+  torch::Tensor out_token_ids;
+  torch::Tensor out_token_index;
+  torch::Tensor out_beam_count_prefix_sums;
+  torch::Tensor out_seqgroup;
+};
+
+OneRecBeamSearchOutputTensors prepare_onerec_beam_search_output_tensors(
+    int32_t batch_size,
+    int32_t output_width,
+    int32_t total_rounds,
+    const torch::Device& device) {
+  const torch::TensorOptions int_options =
+      torch::TensorOptions().dtype(torch::kInt32).device(device);
+  const torch::TensorOptions fp32_options =
+      torch::TensorOptions().dtype(torch::kFloat32).device(device);
+  const int64_t num_seq = static_cast<int64_t>(batch_size) * output_width;
+
+  OneRecBeamSearchOutputTensors tensors;
+  tensors.out_log_probs = torch::zeros({num_seq, 1}, fp32_options);
+  tensors.out_token_ids = torch::zeros({num_seq, 1}, int_options);
+  tensors.out_token_index = torch::zeros({num_seq, 1}, int_options);
+  tensors.out_beam_count_prefix_sums = torch::zeros({num_seq, 1}, int_options);
+  tensors.out_seqgroup =
+      torch::zeros({batch_size, output_width, total_rounds}, int_options);
+  return tensors;
+}
+
+bool can_use_onerec_final_beam_select(int32_t batch_size,
+                                      const torch::Tensor& top_tokens,
+                                      int32_t result_width) {
+  constexpr int32_t kMaxFinalSelectRequestNum = 48;
+  constexpr int32_t kMaxFinalSelectTopK = 2048;
+  constexpr int32_t kMaxFinalSelectMergeWidth = 2048;
+  // Keep the fused kernel on the well-tested small-batch path.
+  if (batch_size <= 0 || batch_size > kMaxFinalSelectRequestNum) {
+    return false;
+  }
+  // The final fused op consumes a 2D [batch * beam, top_k] tensor.
+  if (top_tokens.dim() != 2) {
+    return false;
+  }
+  // Each request must contribute a whole beam slice.
+  if (top_tokens.size(0) % batch_size != 0) {
+    return false;
+  }
+  const int64_t candidate_top_k = top_tokens.size(1);
+  // Candidate width must cover the requested output width.
+  // The kernel is vectorized in groups of 8 for the candidate dimension.
+  // The requested output width is aligned to 32 for the final merge step.
+  // Hard caps keep the custom kernel within its tuned range.
+  return candidate_top_k >= result_width && candidate_top_k % 8 == 0 &&
+         result_width % 32 == 0 && candidate_top_k <= kMaxFinalSelectTopK &&
+         result_width * 2 <= kMaxFinalSelectMergeWidth;
+}
+
+void select_final_onerec_beam_results(
+    const torch::Tensor& acc_logprob,
+    const torch::Tensor& sequence_group,
+    const torch::Tensor& top_tokens,
+    const torch::Tensor& top_logprobs,
+    int32_t batch_size,
+    int32_t beam_width,
+    int32_t result_width,
+    int32_t total_rounds,
+    int32_t current_step,
+    OneRecBeamSearchOutputTensors& output_tensors) {
+  CHECK_GT(result_width, 0);
+  CHECK_EQ(acc_logprob.dim(), 2) << "acc_logprob must be [batch * beam, 1]";
+  CHECK_EQ(sequence_group.dim(), 3)
+      << "sequence_group must be [batch, beam, total_rounds]";
+  CHECK_EQ(top_tokens.dim(), 2) << "top_tokens must be [batch * beam, top_k]";
+  CHECK_EQ(top_logprobs.dim(), 2)
+      << "top_logprobs must be [batch * beam, top_k]";
+  CHECK_EQ(top_tokens.sizes(), top_logprobs.sizes())
+      << "top_tokens/top_logprobs shape mismatch";
+  CHECK_EQ(top_tokens.size(0), static_cast<int64_t>(batch_size) * beam_width)
+      << "top_tokens rows must equal batch * beam";
+
+  const int64_t top_k = top_tokens.size(1);
+  CHECK_GT(top_k, 0);
+  CHECK_LE(result_width, beam_width * top_k)
+      << "num_return_sequences exceeds available final beam candidates";
+
+  const torch::Device device = top_tokens.device();
+  const torch::Tensor batch_offsets =
+      torch::arange(batch_size,
+                    torch::TensorOptions().dtype(torch::kLong).device(device))
+          .unsqueeze(1) *
+      beam_width;
+  const torch::Tensor top_tokens_view =
+      top_tokens.view({batch_size, beam_width, top_k});
+  const torch::Tensor top_logprobs_view =
+      top_logprobs.view({batch_size, beam_width, top_k});
+  const torch::Tensor acc_logprob_view =
+      acc_logprob.view({batch_size, beam_width, 1});
+  const torch::Tensor combined_probs =
+      (acc_logprob_view + top_logprobs_view)
+          .view({batch_size, beam_width * top_k});
+
+  torch::Tensor new_probs;
+  torch::Tensor new_indices;
+  std::tie(new_probs, new_indices) = combined_probs.topk(result_width,
+                                                         /*dim=*/-1,
+                                                         /*largest=*/true,
+                                                         /*sorted=*/true);
+
+  const torch::Tensor parent_beam = torch::floor_divide(new_indices, top_k);
+  const torch::Tensor token_in_beam = torch::remainder(new_indices, top_k);
+  const torch::Tensor batch_idx =
+      torch::arange(batch_size,
+                    torch::TensorOptions().dtype(torch::kLong).device(device))
+          .unsqueeze(1)
+          .expand_as(parent_beam);
+
+  using torch::indexing::Slice;
+  using torch::indexing::TensorIndex;
+  const torch::Tensor new_tokens =
+      top_tokens_view.index({TensorIndex(batch_idx),
+                             TensorIndex(parent_beam),
+                             TensorIndex(token_in_beam)});
+
+  output_tensors.out_log_probs.view({batch_size, result_width})
+      .copy_(new_probs);
+  output_tensors.out_token_index.view({batch_size, result_width})
+      .copy_((parent_beam + batch_offsets).to(torch::kInt32));
+  output_tensors.out_token_ids.view({batch_size, result_width})
+      .copy_(new_tokens);
+
+  const torch::Tensor batch_range =
+      torch::arange(batch_size,
+                    torch::TensorOptions().dtype(torch::kLong).device(device))
+          .unsqueeze(1)
+          .expand({batch_size, result_width});
+  output_tensors.out_seqgroup.slice(/*dim=*/2, /*start=*/0, current_step)
+      .copy_(sequence_group.index({TensorIndex(batch_range),
+                                   TensorIndex(parent_beam),
+                                   Slice(0, current_step)}));
+  output_tensors.out_seqgroup
+      .slice(/*dim=*/2, /*start=*/current_step, /*end=*/current_step + 1)
+      .copy_(new_tokens.unsqueeze(2));
+}
 #endif
 
 }  // namespace
@@ -1420,37 +1604,6 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
         mutable_input.input_params.attn_metadata = nullptr;
       };
 
-  auto prepare_beam_search_tensors =
-      [&](int32_t batch_size, int32_t beam_width, int32_t total_rounds) {
-        struct BeamSearchTensors {
-          torch::Tensor sequence_group;
-          torch::Tensor acc_logprob;
-          torch::Tensor out_log_probs;
-          torch::Tensor out_token_ids;
-          torch::Tensor out_token_index;
-          torch::Tensor out_beam_count_prefix_sums;
-          torch::Tensor out_seqgroup;
-        };
-        auto int_options = torch::TensorOptions()
-                               .dtype(torch::kInt32)
-                               .device(runtime_.worker.device());
-        auto fp32_options = torch::TensorOptions()
-                                .dtype(torch::kFloat32)
-                                .device(runtime_.worker.device());
-        BeamSearchTensors tensors;
-        tensors.sequence_group =
-            torch::zeros({batch_size, beam_width, total_rounds}, int_options);
-        const int64_t num_seq = static_cast<int64_t>(batch_size) * beam_width;
-        tensors.acc_logprob = torch::zeros({num_seq, 1}, fp32_options);
-        tensors.out_log_probs = torch::zeros({num_seq, 1}, fp32_options);
-        tensors.out_token_ids = torch::zeros({num_seq, 1}, int_options);
-        tensors.out_token_index = torch::zeros({num_seq, 1}, int_options);
-        tensors.out_beam_count_prefix_sums =
-            torch::zeros({num_seq, 1}, int_options);
-        tensors.out_seqgroup = torch::zeros_like(tensors.sequence_group);
-        return tensors;
-      };
-
   auto step_meta = mutable_input.step_meta();
   const bool use_multi_round =
       step_meta != nullptr && step_meta->total_round > 1 &&
@@ -1496,8 +1649,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
   const int32_t batch_size = step_meta->batch_size;
   const int32_t beam_width = step_meta->beam_width;
   const int32_t total_rounds = step_meta->total_round;
-  auto beam_tensors =
-      prepare_beam_search_tensors(batch_size, beam_width, total_rounds);
+  OneRecBeamSearchTensors beam_tensors = prepare_onerec_beam_search_tensors(
+      batch_size, beam_width, total_rounds, runtime_.worker.device());
 
   ForwardOutput output;
   torch::Tensor top_tokens;
@@ -1518,10 +1671,40 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
     const auto& sampling_params = round == 0
                                       ? mutable_input.sampling_params
                                       : mutable_input.decoder_sampling_params;
-    auto result = run_single_round(
-        sampling_params, round, beam_tensors.sequence_group, beam_width);
+    SamplingParameters round_sampling_params = sampling_params;
+    const int32_t requested_result_width =
+        get_requested_beam_result_width(round_sampling_params, beam_width);
+    const bool final_round = round == total_rounds - 1;
+    const bool output_logprobs = sampling_params.logprobs;
+    const int64_t output_max_top_logprobs = sampling_params.max_top_logprobs;
+    if (final_round && requested_result_width != beam_width) {
+      round_sampling_params.max_top_logprobs = std::max<int64_t>(
+          round_sampling_params.max_top_logprobs, requested_result_width);
+      round_sampling_params.logprobs = true;
+    }
+    auto result = run_single_round(round_sampling_params,
+                                   round,
+                                   beam_tensors.sequence_group,
+                                   beam_width);
     if (!result.has_value()) {
       return std::nullopt;
+    }
+    if (final_round && requested_result_width != beam_width &&
+        util::get_bool_env("XLLM_DEBUG_ONEREC_ENGINE_TRACE", false)) {
+      LOG(INFO) << "OneRec xattention final round sampling shapes: "
+                << "requested_result_width=" << requested_result_width
+                << ", beam_width=" << beam_width
+                << ", logprobs=" << round_sampling_params.logprobs
+                << ", max_top_logprobs="
+                << round_sampling_params.max_top_logprobs
+                << ", top_tokens_shape="
+                << (result->sample_output.top_tokens.defined()
+                        ? result->sample_output.top_tokens.sizes()
+                        : c10::IntArrayRef{})
+                << ", top_logprobs_shape="
+                << (result->sample_output.top_logprobs.defined()
+                        ? result->sample_output.top_logprobs.sizes()
+                        : c10::IntArrayRef{});
     }
 
     if (!result->sample_output.top_tokens.defined() ||
@@ -1542,6 +1725,47 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
       beam_tensors.out_log_probs.copy_(top_logprobs);
       beam_tensors.out_seqgroup.select(/*dim=*/2, /*index=*/0)
           .copy_(top_tokens.reshape({-1}));
+    } else if (final_round && requested_result_width != beam_width) {
+      top_tokens = result->sample_output.top_tokens.to(torch::kInt32);
+      top_logprobs = result->sample_output.top_logprobs;
+      OneRecBeamSearchOutputTensors final_tensors =
+          prepare_onerec_beam_search_output_tensors(batch_size,
+                                                    requested_result_width,
+                                                    total_rounds,
+                                                    runtime_.worker.device());
+      if (can_use_onerec_final_beam_select(
+              batch_size, top_tokens, requested_result_width)) {
+        xllm::kernel::npu::beam_search_rec(
+            /*logprobs=*/beam_tensors.acc_logprob,
+            /*top_tokens=*/top_tokens,
+            /*top_logprobs=*/top_logprobs,
+            /*sequence_group=*/beam_tensors.sequence_group,
+            /*current_step=*/static_cast<int64_t>(round),
+            /*num_return_sequences=*/requested_result_width,
+            /*out_token_ids=*/final_tensors.out_token_ids,
+            /*out_token_index=*/final_tensors.out_token_index,
+            /*out_log_probs=*/final_tensors.out_log_probs,
+            /*out_beam_count_prefix_sums=*/
+            final_tensors.out_beam_count_prefix_sums,
+            /*out_sequence=*/final_tensors.out_seqgroup);
+      } else {
+        select_final_onerec_beam_results(beam_tensors.acc_logprob,
+                                         beam_tensors.sequence_group,
+                                         top_tokens,
+                                         top_logprobs,
+                                         batch_size,
+                                         beam_width,
+                                         requested_result_width,
+                                         total_rounds,
+                                         round,
+                                         final_tensors);
+      }
+      beam_tensors.out_token_ids = std::move(final_tensors.out_token_ids);
+      beam_tensors.out_token_index = std::move(final_tensors.out_token_index);
+      beam_tensors.out_beam_count_prefix_sums =
+          std::move(final_tensors.out_beam_count_prefix_sums);
+      beam_tensors.out_log_probs = std::move(final_tensors.out_log_probs);
+      beam_tensors.out_seqgroup = std::move(final_tensors.out_seqgroup);
     } else {
       top_tokens = result->sample_output.top_tokens.to(torch::kInt32);
       top_logprobs = result->sample_output.top_logprobs;
@@ -1560,9 +1784,15 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
     }
     log_stage_timing("beam_search", round, beam_timer);
 #elif defined(USE_CUDA)
+    if (final_round && requested_result_width != beam_width) {
+      LOG(FATAL) << "OneRec xattention num_return_sequences mismatch is "
+                    "not supported on CUDA without a final-step select "
+                    "kernel.";
+    }
     top_tokens = result->sample_output.top_tokens.to(torch::kInt32)
-                     .reshape({-1, beam_width});
-    top_logprobs = result->sample_output.top_logprobs.reshape({-1, beam_width});
+                     .reshape({-1, result->sample_output.top_tokens.size(-1)});
+    top_logprobs = result->sample_output.top_logprobs.reshape(
+        {-1, result->sample_output.top_logprobs.size(-1)});
     xllm::kernel::cuda::beam_search(beam_tensors.acc_logprob,
                                     beam_tensors.sequence_group,
                                     top_tokens,
@@ -1594,8 +1824,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
 
     if (round == total_rounds - 1) {
       output.do_sample = result->sampling_params.do_sample;
-      output.logprobs = result->sampling_params.logprobs;
-      output.max_top_logprobs = result->sampling_params.max_top_logprobs;
+      output.logprobs = output_logprobs;
+      output.max_top_logprobs = output_max_top_logprobs;
       output.beam_search_output.src_seq_idxes =
           beam_tensors.out_token_index.reshape({-1});
       output.beam_search_output.out_tokens =
