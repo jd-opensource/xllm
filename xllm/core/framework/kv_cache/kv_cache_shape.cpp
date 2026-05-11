@@ -28,7 +28,7 @@ limitations under the License.
 namespace xllm {
 
 namespace {
-constexpr int64_t kNzAlignment = 16;
+constexpr int32_t kNzAlignment = 16;
 
 int64_t get_local_head_count(int64_t total_head_count, int64_t world_size) {
   CHECK_GT(world_size, 0) << "world_size must be positive.";
