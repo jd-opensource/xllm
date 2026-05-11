@@ -44,6 +44,8 @@ limitations under the License.
 
 namespace xllm {
 
+inline constexpr int64_t kDeepseekV4DsaMetadataBufferElements = 1024;
+
 inline int64_t deepseek_v4_next_power_of_two(int64_t n) {
   int64_t value = 1;
   while (value < n) {
@@ -104,6 +106,43 @@ inline bool deepseek_v4_uses_acl_graph(
   return false;
 #endif
 }
+
+struct DeepseekV4GraphMetadataState : ModelGraphMetadataState {
+  struct DSAMetadataPersistent {
+    torch::Tensor seq_lens;
+    torch::Tensor seq_lens_q;
+    torch::Tensor attn_mask;
+    torch::Tensor cos_table;
+    torch::Tensor sin_table;
+    torch::Tensor actual_seq_lengths_query;
+    torch::Tensor actual_seq_lengths_kv;
+    torch::Tensor max_seqlen_q;
+    torch::Tensor max_seqlen_kv;
+    torch::Tensor input_positions;
+    torch::Tensor c4_pad_positions;
+    torch::Tensor c128_pad_positions;
+    torch::Tensor cos;
+    torch::Tensor sin;
+    torch::Tensor c4_cos;
+    torch::Tensor c4_sin;
+    torch::Tensor c128_cos;
+    torch::Tensor c128_sin;
+    torch::Tensor c4_input_cos;
+    torch::Tensor c4_input_sin;
+    torch::Tensor c128_input_cos;
+    torch::Tensor c128_input_sin;
+    torch::Tensor start_pos;
+    torch::Tensor c1_metadata;
+    torch::Tensor c4_metadata;
+    torch::Tensor c128_metadata;
+    torch::Tensor qli_metadata;
+    torch::Tensor hadamard;
+    std::vector<std::vector<torch::Tensor>> block_tables;
+    std::vector<std::vector<torch::Tensor>> slot_mappings;
+  };
+
+  DSAMetadataPersistent dsa_metadata_persistent;
+};
 
 // Group key: (ratio, type, block_size) -> group_id
 struct DSAGroupKey {
@@ -310,28 +349,31 @@ class DeepseekV4ModelImpl
     LOAD_WEIGHT(hc_head_scale);
   }
 
-  std::shared_ptr<layer::AttentionMetadata> build_deepseek_v4_metadata(
-      const torch::Tensor& positions,
-      const ModelInputParams& input_params) {
-    // Shared metadata entry point for both eager and ACL graph execution.
-    // Graph capture/replay persists the returned tensors, while eager consumes
-    // the same structure directly in forward().
-    auto modified_input_params = input_params;
-    auto& dp_token_nums = modified_input_params.dp_global_token_nums;
-    std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
+  bool requires_graph_forward_metadata() { return true; }
 
-    auto attn_metadata = std::make_shared<layer::AttentionMetadata>(
-        layer::DSAMetadataBuilder::build(modified_input_params,
-                                         positions,
-                                         dsa_cos_sin_,
-                                         caches_info_,
-                                         group_infos_));
-    if (attn_metadata->dsa_metadata) {
-      prepare_dsa_metadata_for_forward(*attn_metadata, positions.device());
-      build_precomputed_metadata(*attn_metadata->dsa_metadata,
-                                 modified_input_params);
-    }
-    return attn_metadata;
+  std::unique_ptr<ModelGraphMetadataState>
+  create_graph_forward_metadata_state() {
+    return std::make_unique<DeepseekV4GraphMetadataState>();
+  }
+
+  void prepare_graph_forward_metadata(ModelGraphMetadataState* state,
+                                      const torch::Tensor& positions,
+                                      ModelInputParams& input_params) {
+    CHECK(state != nullptr)
+        << "DeepSeek V4 graph metadata state must be initialized";
+    auto* deepseek_v4_state =
+        dynamic_cast<DeepseekV4GraphMetadataState*>(state);
+    CHECK(deepseek_v4_state != nullptr)
+        << "DeepSeek V4 received incompatible graph metadata state";
+    normalize_graph_padding(input_params);
+    auto attn_metadata =
+        build_attention_metadata_for_forward(positions, input_params);
+    input_params.attn_metadata =
+        persist_graph_attention_metadata(*deepseek_v4_state,
+                                         std::move(attn_metadata),
+                                         input_params.block_tables);
+    CHECK(input_params.attn_metadata)
+        << "DeepSeek V4 ACL graph requires DSA metadata";
   }
 
   void log_weight_mem_stats() const { log_layer_weight_mem_stats(); }
@@ -385,7 +427,8 @@ class DeepseekV4ModelImpl
       CHECK(!acl_graph_forward)
           << "DeepSeek V4 ACL graph requires prebuilt attention metadata";
       modified_input_params.attn_metadata =
-          build_deepseek_v4_metadata(positions, modified_input_params);
+          build_attention_metadata_for_forward(positions,
+                                               modified_input_params);
     }
     auto& attn_metadata = *(modified_input_params.attn_metadata);
 
@@ -622,6 +665,250 @@ class DeepseekV4ModelImpl
       return max_seqlen_tensor.max().item<int64_t>();
     }
     return tensor_max_or_zero(fallback_tensor);
+  }
+
+  static torch::Tensor copy_to_persistent_tensor(const torch::Tensor& src,
+                                                 torch::Tensor& dst) {
+    if (!src.defined()) {
+      return src;
+    }
+    if (!dst.defined()) {
+      dst = torch::zeros_like(src);
+    } else {
+      CHECK(dst.sizes() == src.sizes())
+          << "DeepSeek V4 graph metadata tensor size changed from "
+          << dst.sizes() << " to " << src.sizes();
+      CHECK_EQ(dst.scalar_type(), src.scalar_type())
+          << "DeepSeek V4 graph metadata tensor dtype changed";
+      CHECK_EQ(dst.device(), src.device())
+          << "DeepSeek V4 graph metadata tensor device changed";
+    }
+    dst.copy_(src, /*non_blocking=*/true);
+    return dst;
+  }
+
+  static torch::Tensor copy_to_fixed_metadata_tensor(const torch::Tensor& src,
+                                                     torch::Tensor& dst) {
+    if (!src.defined()) {
+      return src;
+    }
+    if (!dst.defined()) {
+      dst = torch::zeros({kDeepseekV4DsaMetadataBufferElements}, src.options());
+    } else {
+      CHECK_EQ(dst.numel(), kDeepseekV4DsaMetadataBufferElements)
+          << "DeepSeek V4 graph metadata fixed tensor size changed";
+      CHECK_EQ(dst.scalar_type(), src.scalar_type())
+          << "DeepSeek V4 graph metadata fixed tensor dtype changed";
+      CHECK_EQ(dst.device(), src.device())
+          << "DeepSeek V4 graph metadata fixed tensor device changed";
+    }
+    CHECK_LE(src.numel(), dst.numel())
+        << "DeepSeek V4 DSA metadata exceeds graph persistent capacity: src="
+        << src.numel() << ", capacity=" << dst.numel();
+    dst.zero_();
+    if (src.numel() > 0) {
+      dst.flatten(0)
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/src.numel())
+          .copy_(src.flatten(0), /*non_blocking=*/true);
+    }
+    return dst;
+  }
+
+  static torch::Tensor copy_to_fixed_capacity_2d_tensor(
+      const torch::Tensor& src,
+      torch::Tensor& dst,
+      const torch::Tensor& template_tensor,
+      const char* name) {
+    if (!src.defined()) {
+      return src;
+    }
+    CHECK_EQ(src.dim(), 2) << name << " must be 2D, got dim=" << src.dim();
+    if (!dst.defined()) {
+      dst = torch::zeros(template_tensor.sizes(), src.options());
+    } else {
+      CHECK(dst.sizes() == template_tensor.sizes())
+          << name << " persistent tensor size changed from " << dst.sizes()
+          << " to " << template_tensor.sizes();
+      CHECK_EQ(dst.scalar_type(), src.scalar_type())
+          << name << " persistent tensor dtype changed";
+      CHECK_EQ(dst.device(), src.device())
+          << name << " persistent tensor device changed";
+      dst.zero_();
+    }
+
+    CHECK_LE(src.size(0), dst.size(0))
+        << name << " rows exceed persistent capacity: src=" << src.sizes()
+        << ", dst=" << dst.sizes();
+    CHECK_LE(src.size(1), dst.size(1))
+        << name << " cols exceed persistent capacity: src=" << src.sizes()
+        << ", dst=" << dst.sizes();
+
+    dst.slice(/*dim=*/0, /*start=*/0, /*end=*/src.size(0))
+        .slice(/*dim=*/1, /*start=*/0, /*end=*/src.size(1))
+        .copy_(src, /*non_blocking=*/true);
+    return dst.slice(/*dim=*/0, /*start=*/0, /*end=*/src.size(0));
+  }
+
+  static void zero_tensor_tail(torch::Tensor& tensor,
+                               int64_t start,
+                               int64_t end,
+                               int64_t dim = 0) {
+    if (!tensor.defined() || start >= end) {
+      return;
+    }
+    tensor.slice(/*dim=*/dim, /*start=*/start, /*end=*/end).zero_();
+  }
+
+  static int64_t infer_actual_batch_size(const ModelInputParams& params) {
+    if (params.actual_num_sequences > 0) {
+      return params.actual_num_sequences;
+    }
+    if (!params.kv_seq_lens_vec.empty()) {
+      return static_cast<int64_t>(params.kv_seq_lens_vec.size());
+    }
+    if (!params.q_seq_lens_vec.empty()) {
+      return static_cast<int64_t>(params.q_seq_lens_vec.size());
+    }
+    if (params.kv_seq_lens.defined() && params.kv_seq_lens.dim() >= 1) {
+      return params.kv_seq_lens.size(0);
+    }
+    if (params.q_seq_lens.defined() && params.q_seq_lens.dim() >= 1) {
+      return params.q_seq_lens.size(0);
+    }
+    if (params.block_tables.defined() && params.block_tables.dim() >= 2) {
+      return params.block_tables.size(0);
+    }
+    for (const auto& block_table : params.multi_block_tables) {
+      if (block_table.defined() && block_table.dim() >= 2) {
+        return block_table.size(0);
+      }
+    }
+    return 0;
+  }
+
+  void normalize_graph_padding(ModelInputParams& params) const {
+    const int64_t actual_batch_size = infer_actual_batch_size(params);
+    const int64_t padded_batch_size = params.num_sequences;
+    if (actual_batch_size <= 0 || padded_batch_size <= actual_batch_size) {
+      return;
+    }
+    for (int64_t i = actual_batch_size; i < padded_batch_size; ++i) {
+      if (i < static_cast<int64_t>(params.kv_seq_lens_vec.size())) {
+        params.kv_seq_lens_vec[i] = 0;
+      }
+      if (i < static_cast<int64_t>(params.q_seq_lens_vec.size())) {
+        params.q_seq_lens_vec[i] = 0;
+      }
+    }
+    zero_tensor_tail(params.q_seq_lens, actual_batch_size, padded_batch_size);
+    zero_tensor_tail(params.kv_seq_lens, actual_batch_size, padded_batch_size);
+  }
+
+  std::shared_ptr<layer::AttentionMetadata>
+  build_attention_metadata_for_forward(const torch::Tensor& positions,
+                                       const ModelInputParams& input_params) {
+    auto modified_input_params = input_params;
+    auto& dp_token_nums = modified_input_params.dp_global_token_nums;
+    std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
+
+    auto attn_metadata = std::make_shared<layer::AttentionMetadata>(
+        layer::DSAMetadataBuilder::build(modified_input_params,
+                                         positions,
+                                         dsa_cos_sin_,
+                                         caches_info_,
+                                         group_infos_));
+    if (attn_metadata->dsa_metadata) {
+      prepare_dsa_metadata_for_forward(*attn_metadata, positions.device());
+      build_precomputed_metadata(*attn_metadata->dsa_metadata,
+                                 modified_input_params);
+    }
+    return attn_metadata;
+  }
+
+  std::shared_ptr<layer::AttentionMetadata> persist_graph_attention_metadata(
+      DeepseekV4GraphMetadataState& state,
+      std::shared_ptr<layer::AttentionMetadata> metadata,
+      const torch::Tensor& persistent_block_tables) const {
+    if (!metadata || !metadata->dsa_metadata) {
+      return metadata;
+    }
+
+    auto& dsa = *metadata->dsa_metadata;
+    auto& persistent = state.dsa_metadata_persistent;
+
+    dsa.seq_lens = copy_to_persistent_tensor(dsa.seq_lens, persistent.seq_lens);
+    dsa.seq_lens_q =
+        copy_to_persistent_tensor(dsa.seq_lens_q, persistent.seq_lens_q);
+    dsa.attn_mask =
+        copy_to_persistent_tensor(dsa.attn_mask, persistent.attn_mask);
+    dsa.cos_table =
+        copy_to_persistent_tensor(dsa.cos_table, persistent.cos_table);
+    dsa.sin_table =
+        copy_to_persistent_tensor(dsa.sin_table, persistent.sin_table);
+    dsa.actual_seq_lengths_query = copy_to_persistent_tensor(
+        dsa.actual_seq_lengths_query, persistent.actual_seq_lengths_query);
+    dsa.actual_seq_lengths_kv = copy_to_persistent_tensor(
+        dsa.actual_seq_lengths_kv, persistent.actual_seq_lengths_kv);
+    dsa.max_seqlen_q =
+        copy_to_persistent_tensor(dsa.max_seqlen_q, persistent.max_seqlen_q);
+    dsa.max_seqlen_kv =
+        copy_to_persistent_tensor(dsa.max_seqlen_kv, persistent.max_seqlen_kv);
+    dsa.input_positions = copy_to_persistent_tensor(dsa.input_positions,
+                                                    persistent.input_positions);
+    dsa.c4_pad_positions = copy_to_persistent_tensor(
+        dsa.c4_pad_positions, persistent.c4_pad_positions);
+    dsa.c128_pad_positions = copy_to_persistent_tensor(
+        dsa.c128_pad_positions, persistent.c128_pad_positions);
+    dsa.cos = copy_to_persistent_tensor(dsa.cos, persistent.cos);
+    dsa.sin = copy_to_persistent_tensor(dsa.sin, persistent.sin);
+    dsa.c4_cos = copy_to_persistent_tensor(dsa.c4_cos, persistent.c4_cos);
+    dsa.c4_sin = copy_to_persistent_tensor(dsa.c4_sin, persistent.c4_sin);
+    dsa.c128_cos = copy_to_persistent_tensor(dsa.c128_cos, persistent.c128_cos);
+    dsa.c128_sin = copy_to_persistent_tensor(dsa.c128_sin, persistent.c128_sin);
+    dsa.c4_input_cos =
+        copy_to_persistent_tensor(dsa.c4_input_cos, persistent.c4_input_cos);
+    dsa.c4_input_sin =
+        copy_to_persistent_tensor(dsa.c4_input_sin, persistent.c4_input_sin);
+    dsa.c128_input_cos = copy_to_persistent_tensor(dsa.c128_input_cos,
+                                                   persistent.c128_input_cos);
+    dsa.c128_input_sin = copy_to_persistent_tensor(dsa.c128_input_sin,
+                                                   persistent.c128_input_sin);
+    dsa.start_pos =
+        copy_to_persistent_tensor(dsa.start_pos, persistent.start_pos);
+
+    dsa.c1_metadata =
+        copy_to_fixed_metadata_tensor(dsa.c1_metadata, persistent.c1_metadata);
+    dsa.c4_metadata =
+        copy_to_fixed_metadata_tensor(dsa.c4_metadata, persistent.c4_metadata);
+    dsa.c128_metadata = copy_to_fixed_metadata_tensor(dsa.c128_metadata,
+                                                      persistent.c128_metadata);
+    dsa.qli_metadata = copy_to_fixed_metadata_tensor(dsa.qli_metadata,
+                                                     persistent.qli_metadata);
+    dsa.hadamard = copy_to_persistent_tensor(dsa.hadamard, persistent.hadamard);
+
+    persistent.block_tables.resize(dsa.block_tables.size());
+    for (size_t i = 0; i < dsa.block_tables.size(); ++i) {
+      persistent.block_tables[i].resize(dsa.block_tables[i].size());
+      for (size_t j = 0; j < dsa.block_tables[i].size(); ++j) {
+        const std::string name = c10::str("dsa.block_tables.", i, ".", j);
+        dsa.block_tables[i][j] =
+            copy_to_fixed_capacity_2d_tensor(dsa.block_tables[i][j],
+                                             persistent.block_tables[i][j],
+                                             persistent_block_tables,
+                                             name.c_str());
+      }
+    }
+
+    persistent.slot_mappings.resize(dsa.slot_mappings.size());
+    for (size_t i = 0; i < dsa.slot_mappings.size(); ++i) {
+      persistent.slot_mappings[i].resize(dsa.slot_mappings[i].size());
+      for (size_t j = 0; j < dsa.slot_mappings[i].size(); ++j) {
+        dsa.slot_mappings[i][j] = copy_to_persistent_tensor(
+            dsa.slot_mappings[i][j], persistent.slot_mappings[i][j]);
+      }
+    }
+
+    return metadata;
   }
 
   void fill_empty_dp_rank_input_params(ModelInputParams& params,
@@ -1084,10 +1371,20 @@ class DeepseekV4ForCausalLMImpl
     this->model_->log_weight_mem_stats();
   }
 
-  std::shared_ptr<layer::AttentionMetadata> build_deepseek_v4_metadata(
-      const torch::Tensor& positions,
-      const ModelInputParams& input_params) override {
-    return this->model_->build_deepseek_v4_metadata(positions, input_params);
+  bool requires_graph_forward_metadata() {
+    return this->model_->requires_graph_forward_metadata();
+  }
+
+  std::unique_ptr<ModelGraphMetadataState>
+  create_graph_forward_metadata_state() {
+    return this->model_->create_graph_forward_metadata_state();
+  }
+
+  void prepare_graph_forward_metadata(ModelGraphMetadataState* state,
+                                      const torch::Tensor& positions,
+                                      ModelInputParams& input_params) {
+    this->model_->prepare_graph_forward_metadata(
+        state, positions, input_params);
   }
 };
 TORCH_MODULE(DeepseekV4ForCausalLM);
