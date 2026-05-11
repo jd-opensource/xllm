@@ -528,7 +528,7 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
 #endif
 
-  kv_cache_cap.num_linear_state_blocks() = FLAGS_max_seqs_per_batch + 2;
+  kv_cache_cap.num_linear_state_blocks() = FLAGS_max_concurrent_requests + 2;
   for (int64_t layer_id = 0; layer_id < kv_cache_cap.n_layers(); ++layer_id) {
     if (is_full_attention_layer(args_, layer_id)) {
       ++kv_cache_cap.num_full_attention_layers();
@@ -551,8 +551,8 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     CHECK_GT(kv_cache_cap.cache_size_in_bytes(),
              kv_cache_cap.linear_cache_size_in_bytes())
         << "failed to reserve linear state cache for linear-attention layers: "
-        << "max_seqs_per_batch (" << FLAGS_max_seqs_per_batch
-        << ") is too large. Please reduce max_seqs_per_batch to less than "
+        << "max_concurrent_requests (" << FLAGS_max_concurrent_requests
+        << ") is too large. Please reduce max_concurrent_requests to less than "
         << kv_cache_cap.cache_size_in_bytes() /
                    (kv_cache_cap.num_linear_attention_layers() *
                     kv_cache_cap.linear_slot_size()) -

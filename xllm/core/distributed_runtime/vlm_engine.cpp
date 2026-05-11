@@ -275,7 +275,7 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
   kv_cache_cap.n_layers() = args_.n_layers();
   kv_cache_cap.block_size() = options_.block_size();
 
-  kv_cache_cap.num_linear_state_blocks() = options_.max_seqs_per_batch() + 2;
+  kv_cache_cap.num_linear_state_blocks() = FLAGS_max_concurrent_requests + 2;
   for (int64_t layer_id = 0; layer_id < kv_cache_cap.n_layers(); ++layer_id) {
     if (is_full_attention_layer(args_, layer_id)) {
       ++kv_cache_cap.num_full_attention_layers();
@@ -297,7 +297,7 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
     CHECK_GT(kv_cache_cap.cache_size_in_bytes(),
              kv_cache_cap.linear_cache_size_in_bytes())
         << "failed to reserve linear state cache for VLM linear-attention "
-        << "layers: max_seqs_per_batch (" << options_.max_seqs_per_batch()
+        << "layers: max_concurrent_requests (" << FLAGS_max_concurrent_requests
         << ") is too large.";
   }
   CHECK_GT(available_full_cache_size_in_bytes, 0)
