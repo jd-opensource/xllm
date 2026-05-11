@@ -15,6 +15,7 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 
+#include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <numeric>
@@ -43,6 +44,31 @@ namespace xllm {
 namespace {
 template <typename T>
 constexpr size_t type_size = sizeof(T);
+
+constexpr size_t kTensorPayloadAlignment = 64;
+constexpr size_t kTensorPayloadPaddingOverhead =
+    type_size<uint8_t> + kTensorPayloadAlignment - 1;
+
+thread_local const char* g_tensor_payload_alignment_base = nullptr;
+
+class ScopedTensorPayloadAlignmentBase {
+ public:
+  explicit ScopedTensorPayloadAlignmentBase(const char* base)
+      : previous_(g_tensor_payload_alignment_base) {
+    g_tensor_payload_alignment_base = base;
+  }
+
+  ~ScopedTensorPayloadAlignmentBase() {
+    g_tensor_payload_alignment_base = previous_;
+  }
+
+ private:
+  const char* previous_;
+};
+
+inline size_t get_tensor_payload_padding_overhead(size_t data_bytes) {
+  return data_bytes == 0 ? 0 : kTensorPayloadPaddingOverhead;
+}
 
 constexpr size_t sampling_param_fixed_size() {
   return 5 * type_size<float>      // frequency_penalty, presence_penalty,
@@ -79,10 +105,12 @@ size_t get_vector_to_tensor_size(const std::vector<T>& vec) {
   if (vec.size() == 0) {
     return size;
   }
-  size += type_size<uint64_t>;        // shape
-  size += type_size<int8_t>;          // dtype
-  size += type_size<uint64_t>;        // databytes
-  size += vec.size() * type_size<T>;  // data
+  size += type_size<uint64_t>;  // shape
+  size += type_size<int8_t>;    // dtype
+  size += type_size<uint64_t>;  // databytes
+  const size_t data_bytes = vec.size() * type_size<T>;
+  size += get_tensor_payload_padding_overhead(data_bytes);
+  size += data_bytes;  // data
   return size;
 }
 
@@ -91,10 +119,12 @@ inline size_t get_tensor_size(const torch::Tensor& tensor) {
   if (!tensor.defined()) {
     return size;
   }
-  size += type_size<uint64_t> * tensor.dim();      // shape
-  size += type_size<int8_t>;                       // dtype
-  size += type_size<uint64_t>;                     // databytes
-  size += tensor.numel() * tensor.element_size();  // data
+  size += type_size<uint64_t> * tensor.dim();  // shape
+  size += type_size<int8_t>;                   // dtype
+  size += type_size<uint64_t>;                 // databytes
+  const size_t data_bytes = tensor.numel() * tensor.element_size();
+  size += get_tensor_payload_padding_overhead(data_bytes);
+  size += data_bytes;  // data
   return size;
 }
 
@@ -113,10 +143,12 @@ size_t get_2d_vector_to_tensor_size(const std::vector<std::vector<T>>& vec2d) {
   if (vec2d.size() == 0 || vec2d[0].size() == 0) {
     return size;
   }
-  size += type_size<uint64_t> * 2;                        // shape
-  size += type_size<int8_t>;                              // dtype
-  size += type_size<uint64_t>;                            // databytes
-  size += vec2d.size() * vec2d[0].size() * type_size<T>;  // data
+  size += type_size<uint64_t> * 2;  // shape
+  size += type_size<int8_t>;        // dtype
+  size += type_size<uint64_t>;      // databytes
+  const size_t data_bytes = vec2d.size() * vec2d[0].size() * type_size<T>;
+  size += get_tensor_payload_padding_overhead(data_bytes);
+  size += data_bytes;  // data
   return size;
 }
 
@@ -377,6 +409,29 @@ inline void write_data(char*& buffer, const T& data) {
   buffer += type_size<T>;
 }
 
+inline uint8_t tensor_payload_padding(const char* buffer) {
+  if (g_tensor_payload_alignment_base == nullptr) {
+    return 0;
+  }
+  const auto offset = static_cast<size_t>(buffer + type_size<uint8_t> -
+                                          g_tensor_payload_alignment_base);
+  return static_cast<uint8_t>(
+      (kTensorPayloadAlignment - (offset % kTensorPayloadAlignment)) %
+      kTensorPayloadAlignment);
+}
+
+inline void write_tensor_payload_padding(char*& buffer, uint64_t data_bytes) {
+  if (data_bytes == 0 || g_tensor_payload_alignment_base == nullptr) {
+    return;
+  }
+  const uint8_t padding = tensor_payload_padding(buffer);
+  write_data(buffer, padding);
+  if (padding > 0) {
+    std::memset(buffer, 0, padding);
+    buffer += padding;
+  }
+}
+
 inline void write_string(char*& buffer, const std::string& str) {
   const uint64_t len = str.size();
   write_data(buffer, len);
@@ -416,6 +471,7 @@ inline void write_tensor(char*& buffer, const torch::Tensor& tensor) {
   const uint64_t tensor_data_bytes =
       contig_tensor.numel() * contig_tensor.element_size();
   write_data(buffer, tensor_data_bytes);
+  write_tensor_payload_padding(buffer, tensor_data_bytes);
 
   if (tensor_data_bytes > 0) {
     std::memcpy(buffer, contig_tensor.data_ptr(), tensor_data_bytes);
@@ -481,6 +537,7 @@ void write_vector_to_tensor(char*& buffer, const std::vector<T>& vec) {
   // write data_bytes
   const uint64_t data_bytes = vec.size() * type_size<T>;
   write_data(buffer, data_bytes);
+  write_tensor_payload_padding(buffer, data_bytes);
   // write vec data
   std::memcpy(buffer, vec.data(), data_bytes);
   buffer += data_bytes;
@@ -517,6 +574,7 @@ void write_2d_vector_to_tensor(char*& buffer,
   const uint64_t per_data_bytes = vec2d[0].size() * type_size<T>;
   const uint64_t data_bytes = vec2d.size() * per_data_bytes;
   write_data(buffer, data_bytes);
+  write_tensor_payload_padding(buffer, data_bytes);
   // write vec data
   for (const auto& vec : vec2d) {
     std::memcpy(buffer, vec.data(), per_data_bytes);
@@ -730,6 +788,28 @@ inline void read_data(const char*& buffer,
   safe_advance_buffer(device_buffer, type_size<T>);
 }
 
+inline void read_tensor_payload_padding(const char*& buffer,
+                                        uint64_t data_bytes) {
+  if (data_bytes == 0 || g_tensor_payload_alignment_base == nullptr) {
+    return;
+  }
+  uint8_t padding = 0;
+  read_data(buffer, padding);
+  buffer += padding;
+}
+
+inline void read_tensor_payload_padding(const char*& buffer,
+                                        const char*& device_buffer,
+                                        uint64_t data_bytes) {
+  if (data_bytes == 0 || g_tensor_payload_alignment_base == nullptr) {
+    return;
+  }
+  uint8_t padding = 0;
+  read_data(buffer, padding, device_buffer);
+  buffer += padding;
+  safe_advance_buffer(device_buffer, padding);
+}
+
 inline void read_string(const char*& buffer, std::string& str) {
   uint64_t len;
   read_data(buffer, len);
@@ -797,6 +877,7 @@ inline void read_tensor(const char*& buffer, torch::Tensor& tensor) {
   // read data_bytes
   uint64_t data_bytes;
   read_data(buffer, data_bytes);
+  read_tensor_payload_padding(buffer, data_bytes);
 
   tensor = torch::from_blob(const_cast<void*>(static_cast<const void*>(buffer)),
                             shape,
@@ -830,6 +911,7 @@ void read_tensor(const char*& buffer,
   // read data_bytes
   uint64_t data_bytes;
   read_data(buffer, data_bytes, device_buffer);
+  read_tensor_payload_padding(buffer, device_buffer, data_bytes);
 
   if (device_buffer != nullptr) {
     tensor = get_tensor_from_blob(shape, dtype, device_buffer);
@@ -899,6 +981,7 @@ inline void read_tensor_and_vector(const char*& buffer,
   // read data_bytes
   uint64_t data_bytes;
   read_data(buffer, data_bytes, device_buffer);
+  read_tensor_payload_padding(buffer, device_buffer, data_bytes);
 
   if (device_buffer != nullptr) {
     tensor = get_tensor_from_blob(shape, dtype, device_buffer);
@@ -1185,16 +1268,25 @@ inline void read_dit_forward_output(const char*& buffer,
   }
 }
 
+inline bool use_contiguous_device_input_buffer() {
+#if defined(USE_NPU)
+  return FLAGS_use_contiguous_input_buffer;
+#else
+  return false;
+#endif
+}
+
 inline void deserialize_raw_forward_input(const char*& buffer,
                                           const uint64_t buffer_size,
                                           ForwardInput& forward_input,
                                           const torch::Device& device,
                                           Stream* stream) {
+  ScopedTensorPayloadAlignmentBase alignment_base(buffer);
   const char* device_buffer = nullptr;
 #if defined(USE_NPU)
   std::optional<std::unique_lock<std::mutex>> capture_lock_guard;
   torch::Tensor host_input_buffer;
-  if (FLAGS_use_contiguous_input_buffer) {
+  if (use_contiguous_device_input_buffer()) {
     host_input_buffer = torch::from_blob(const_cast<char*>(buffer),
                                          {static_cast<int64_t>(buffer_size)},
                                          torch::TensorOptions()
@@ -1357,6 +1449,7 @@ inline void deserialize_raw_forward_input(const char*& buffer,
 
 inline void serialize_raw_forward_input(const RawForwardInput& input,
                                         char*& buffer) {
+  ScopedTensorPayloadAlignmentBase alignment_base(buffer);
   write_vector_to_tensor(buffer, input.flatten_tokens_vec);
   if (input.flatten_positions_vec.size() > 0) {
     write_vector_to_tensor(buffer, input.flatten_positions_vec);
@@ -1798,7 +1891,7 @@ ForwardSharedMemoryManager::ForwardSharedMemoryManager(const std::string& name,
     : SharedMemoryManager(name, size, is_creator), forward_type_(type) {
   control_ptr_ = static_cast<ControlMetadata*>(base_address());
   metadata_addr_ = static_cast<char*>(base_address()) + sizeof(ControlMetadata);
-  if (FLAGS_use_contiguous_input_buffer) {
+  if (use_contiguous_device_input_buffer()) {
     stream_ = std::make_unique<Stream>();
   }
 }
@@ -1827,22 +1920,26 @@ std::string ForwardSharedMemoryManager::create_unique_name(
 }
 
 bool ForwardSharedMemoryManager::raw_input_write(const RawForwardInput& input) {
-  uint64_t total_size = sizeof(ControlMetadata);
-  total_size += type_size<uint64_t> + calculate_raw_forward_input_size(input);
-  if (unlikely(total_size > size())) {
-    LOG(ERROR) << "raw input size overflow, total_size: " << total_size
+  uint64_t max_total_size = sizeof(ControlMetadata);
+  max_total_size +=
+      type_size<uint64_t> + calculate_raw_forward_input_size(input);
+  if (unlikely(max_total_size > size())) {
+    LOG(ERROR) << "raw input size overflow, total_size: " << max_total_size
                << ", shm size: " << size();
     return false;
   }
 
   char* data_ptr = static_cast<char*>(base_address()) + sizeof(ControlMetadata);
-  write_data(data_ptr,
-             total_size - sizeof(ControlMetadata) - type_size<uint64_t>);
+  char* payload_size_ptr = data_ptr;
+  write_data(data_ptr, uint64_t{0});
+  char* payload_start = data_ptr;
   serialize_raw_forward_input(input, data_ptr);
+  const uint64_t payload_size = static_cast<uint64_t>(data_ptr - payload_start);
+  *reinterpret_cast<uint64_t*>(payload_size_ptr) = payload_size;
 
   uint64_t real_size =
       (uint64_t)(data_ptr - static_cast<char*>(base_address()));
-  CHECK(total_size == real_size) << "total_size != real_size.";
+  CHECK_LE(real_size, max_total_size) << "real_size exceeds max_total_size.";
   std::atomic_thread_fence(std::memory_order_release);
   control_ptr_->version = ++last_version_;
   return true;
