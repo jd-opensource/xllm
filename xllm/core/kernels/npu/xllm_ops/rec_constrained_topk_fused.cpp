@@ -293,10 +293,7 @@ rec_constrained_topk_fused(const torch::Tensor& logits,
   const int32_t device_id = logits.device().index();
   const aclrtStream stream = c10_npu::getCurrentNPUStream(device_id).stream();
   const aclnnStatus run_status =
-      aclnnRecConstrainedTopK(workspace_addr,
-                              workspace_size,
-                              executor,
-                              stream);
+      aclnnRecConstrainedTopK(workspace_addr, workspace_size, executor, stream);
   if (run_status != 0) {
     LOG(WARNING) << "rec_constrained_topk_fused: failed to execute, status="
                  << run_status << ", detail=" << aclGetRecentErrMsg();
