@@ -427,6 +427,35 @@ torch::Tensor copy_to_fixed_metadata_tensor(const torch::Tensor& src,
   return dst;
 }
 
+torch::Tensor copy_to_fixed_capacity_2d_tensor(
+    const torch::Tensor& src,
+    torch::Tensor& dst,
+    const torch::Tensor& template_tensor,
+    const char* name) {
+  if (!src.defined()) {
+    return src;
+  }
+  CHECK_EQ(src.dim(), 2) << name << " must be 2D, got dim=" << src.dim();
+  if (!dst.defined() || dst.sizes() != template_tensor.sizes() ||
+      dst.scalar_type() != src.scalar_type() || dst.device() != src.device()) {
+    dst = torch::zeros(template_tensor.sizes(), src.options());
+  } else {
+    dst.zero_();
+  }
+
+  CHECK_LE(src.size(0), dst.size(0))
+      << name << " rows exceed persistent capacity: src=" << src.sizes()
+      << ", dst=" << dst.sizes();
+  CHECK_LE(src.size(1), dst.size(1))
+      << name << " cols exceed persistent capacity: src=" << src.sizes()
+      << ", dst=" << dst.sizes();
+
+  dst.slice(/*dim=*/0, /*start=*/0, /*end=*/src.size(0))
+      .slice(/*dim=*/1, /*start=*/0, /*end=*/src.size(1))
+      .copy_(src, /*non_blocking=*/true);
+  return dst.slice(/*dim=*/0, /*start=*/0, /*end=*/src.size(0));
+}
+
 void zero_tensor_tail(torch::Tensor& tensor,
                       int64_t start,
                       int64_t end,
@@ -576,10 +605,16 @@ GraphPersistentParam::persist_deepseek_v4_metadata(
   for (size_t i = 0; i < dsa.block_tables.size(); ++i) {
     persistent.block_tables[i].resize(dsa.block_tables[i].size());
     for (size_t j = 0; j < dsa.block_tables[i].size(); ++j) {
+      const std::string name = c10::str("block_tables.", i, ".", j);
+      // Graph capture/replay requires this tensor to keep a fixed address.
+      // Long decode can grow the logical block table, but the persistent buffer
+      // must stay at the capture-time capacity and only update in place.
       dsa.block_tables[i][j] =
-          persist_tensor(c10::str("block_tables.", i, ".", j),
-                         dsa.block_tables[i][j],
-                         persistent.block_tables[i][j]);
+          copy_to_fixed_capacity_2d_tensor(dsa.block_tables[i][j],
+                                           persistent.block_tables[i][j],
+                                           persistent_block_tables_,
+                                           name.c_str());
+      record_tensor(name, dsa.block_tables[i][j]);
     }
   }
 
