@@ -254,9 +254,14 @@ torch::Tensor copy_to_persistent_tensor(const torch::Tensor& src,
   if (!src.defined()) {
     return src;
   }
-  if (!dst.defined() || dst.sizes() != src.sizes() ||
-      dst.scalar_type() != src.scalar_type() || dst.device() != src.device()) {
+  if (!dst.defined()) {
     dst = torch::zeros_like(src);
+  } else {
+    CHECK(dst.sizes() == src.sizes()) << "persistent tensor size changed from "
+                                      << dst.sizes() << " to " << src.sizes();
+    CHECK_EQ(dst.scalar_type(), src.scalar_type())
+        << "persistent tensor dtype changed";
+    CHECK_EQ(dst.device(), src.device()) << "persistent tensor device changed";
   }
   dst.copy_(src, /*non_blocking=*/true);
   return dst;
@@ -267,11 +272,16 @@ torch::Tensor copy_to_fixed_metadata_tensor(const torch::Tensor& src,
   if (!src.defined()) {
     return src;
   }
-  if (!dst.defined() ||
-      dst.numel() != xllm::kernel::npu::kDsaMetadataBufferElements ||
-      dst.scalar_type() != src.scalar_type() || dst.device() != src.device()) {
+  if (!dst.defined()) {
     dst = torch::zeros({xllm::kernel::npu::kDsaMetadataBufferElements},
                        src.options());
+  } else {
+    CHECK_EQ(dst.numel(), xllm::kernel::npu::kDsaMetadataBufferElements)
+        << "DSA metadata persistent tensor size changed";
+    CHECK_EQ(dst.scalar_type(), src.scalar_type())
+        << "DSA metadata persistent tensor dtype changed";
+    CHECK_EQ(dst.device(), src.device())
+        << "DSA metadata persistent tensor device changed";
   }
   dst.zero_();
   const int64_t copy_numel = std::min<int64_t>(src.numel(), dst.numel());
@@ -295,10 +305,16 @@ torch::Tensor copy_to_fixed_capacity_2d_tensor(
     return src;
   }
   CHECK_EQ(src.dim(), 2) << name << " must be 2D, got dim=" << src.dim();
-  if (!dst.defined() || dst.sizes() != template_tensor.sizes() ||
-      dst.scalar_type() != src.scalar_type() || dst.device() != src.device()) {
+  if (!dst.defined()) {
     dst = torch::zeros(template_tensor.sizes(), src.options());
   } else {
+    CHECK(dst.sizes() == template_tensor.sizes())
+        << name << " persistent tensor size changed from " << dst.sizes()
+        << " to " << template_tensor.sizes();
+    CHECK_EQ(dst.scalar_type(), src.scalar_type())
+        << name << " persistent tensor dtype changed";
+    CHECK_EQ(dst.device(), src.device())
+        << name << " persistent tensor device changed";
     dst.zero_();
   }
 
