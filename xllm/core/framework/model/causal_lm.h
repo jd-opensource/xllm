@@ -49,6 +49,10 @@ namespace layer {
 struct AttentionMetadata;
 }
 
+struct ModelGraphMetadataState {
+  virtual ~ModelGraphMetadataState() = default;
+};
+
 class CausalLM : public torch::nn::Module {
  public:
   ~CausalLM() override = default;
@@ -61,13 +65,16 @@ class CausalLM : public torch::nn::Module {
                               std::vector<KVCache>& kv_caches,
                               const ModelInputParams& parameters) = 0;
 
-  virtual std::shared_ptr<layer::AttentionMetadata> build_deepseek_v4_metadata(
-      const torch::Tensor& positions,
-      const ModelInputParams& parameters) {
-    (void)positions;
-    (void)parameters;
+  virtual bool requires_graph_forward_metadata() { return false; }
+
+  virtual std::unique_ptr<ModelGraphMetadataState>
+  create_graph_forward_metadata_state() {
     return nullptr;
   }
+
+  virtual void prepare_graph_forward_metadata(ModelGraphMetadataState*,
+                                              const torch::Tensor&,
+                                              ModelInputParams&) {}
 
   // hidden_states: [num_tokens, hidden_size]
   // seleted_idxes: [num_tokens]
@@ -171,13 +178,29 @@ class CausalLMImpl : public CausalLM {
     return model_->forward(tokens, positions, kv_caches, parameters);
   }
 
-  std::shared_ptr<layer::AttentionMetadata> build_deepseek_v4_metadata(
-      const torch::Tensor& positions,
-      const ModelInputParams& parameters) override {
-    if constexpr (detail::has_build_deepseek_v4_metadata<Model>::value) {
-      return model_->build_deepseek_v4_metadata(positions, parameters);
+  bool requires_graph_forward_metadata() override {
+    if constexpr (detail::has_requires_graph_forward_metadata<Model>::value) {
+      return model_->requires_graph_forward_metadata();
     } else {
-      return CausalLM::build_deepseek_v4_metadata(positions, parameters);
+      return CausalLM::requires_graph_forward_metadata();
+    }
+  }
+
+  std::unique_ptr<ModelGraphMetadataState> create_graph_forward_metadata_state()
+      override {
+    if constexpr (detail::has_create_graph_forward_metadata_state<
+                      Model>::value) {
+      return model_->create_graph_forward_metadata_state();
+    } else {
+      return CausalLM::create_graph_forward_metadata_state();
+    }
+  }
+
+  void prepare_graph_forward_metadata(ModelGraphMetadataState* state,
+                                      const torch::Tensor& positions,
+                                      ModelInputParams& parameters) override {
+    if constexpr (detail::has_prepare_graph_forward_metadata<Model>::value) {
+      model_->prepare_graph_forward_metadata(state, positions, parameters);
     }
   }
 

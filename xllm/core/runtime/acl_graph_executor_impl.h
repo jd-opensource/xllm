@@ -52,10 +52,6 @@ struct TilingBufferInfo;
 }
 }  // namespace atb
 
-namespace xllm::layer {
-struct AttentionMetadata;
-}
-
 namespace xllm::npu {
 
 // Helper class to hold persistent parameters for graph execution
@@ -175,43 +171,7 @@ class GraphPersistentParam {
   // Setter for aux_hidden_states (for assignment)
   void set_aux_hidden_states(const torch::Tensor& value);
 
-  std::shared_ptr<layer::AttentionMetadata> persist_deepseek_v4_metadata(
-      std::shared_ptr<layer::AttentionMetadata> metadata);
-
  private:
-  struct DSAMetadataPersistent {
-    torch::Tensor seq_lens;
-    torch::Tensor seq_lens_q;
-    torch::Tensor attn_mask;
-    torch::Tensor cos_table;
-    torch::Tensor sin_table;
-    torch::Tensor actual_seq_lengths_query;
-    torch::Tensor actual_seq_lengths_kv;
-    torch::Tensor max_seqlen_q;
-    torch::Tensor max_seqlen_kv;
-    torch::Tensor input_positions;
-    torch::Tensor c4_pad_positions;
-    torch::Tensor c128_pad_positions;
-    torch::Tensor cos;
-    torch::Tensor sin;
-    torch::Tensor c4_cos;
-    torch::Tensor c4_sin;
-    torch::Tensor c128_cos;
-    torch::Tensor c128_sin;
-    torch::Tensor c4_input_cos;
-    torch::Tensor c4_input_sin;
-    torch::Tensor c128_input_cos;
-    torch::Tensor c128_input_sin;
-    torch::Tensor start_pos;
-    torch::Tensor c1_metadata;
-    torch::Tensor c4_metadata;
-    torch::Tensor c128_metadata;
-    torch::Tensor qli_metadata;
-    torch::Tensor hadamard;
-    std::vector<std::vector<torch::Tensor>> block_tables;
-    std::vector<std::vector<torch::Tensor>> slot_mappings;
-  };
-
   // Initialize tiling tensor
   void initialize_paged_attention_plan_context(const torch::Device& device);
 
@@ -262,7 +222,6 @@ class GraphPersistentParam {
 
   // ModelOutput fields
   torch::Tensor aux_hidden_states_;
-  DSAMetadataPersistent dsa_metadata_persistent_;
 
   // ATB context and operation for paged attention plan
   atb::Context* context_for_plan_;
@@ -334,6 +293,7 @@ class AclGraph {
   // Reference to persistent parameters (shared across multiple AclGraph
   // instances)
   GraphPersistentParam& persistent_param_;
+  std::unique_ptr<ModelGraphMetadataState> model_graph_metadata_state_;
 
   // Fallback non-default stream for capture when callers are on default stream.
   std::optional<c10_npu::NPUStream> capture_stream_;

@@ -186,14 +186,6 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     return model_(tokens, positions, kv_caches, input_params);
   }
 
-  virtual std::shared_ptr<layer::AttentionMetadata> build_deepseek_v4_metadata(
-      const torch::Tensor& positions,
-      const ModelInputParams& input_params) {
-    (void)positions;
-    (void)input_params;
-    return nullptr;
-  }
-
   // hidden_states: [num_tokens, hidden_size]
   // seleted_idxes: [num_tokens]
   // returns: [num_tokens, vocab_size]

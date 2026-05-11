@@ -23,6 +23,7 @@ limitations under the License.
 
 namespace xllm {
 struct ModelInputParams;
+struct ModelGraphMetadataState;
 
 namespace layer {
 class LmHead;
@@ -118,14 +119,34 @@ struct has_reload_model_weights_from_device<
     : std::true_type {};
 
 template <typename T, typename = void>
-struct has_build_deepseek_v4_metadata : std::false_type {};
+struct has_requires_graph_forward_metadata : std::false_type {};
 
 template <typename T>
-struct has_build_deepseek_v4_metadata<
+struct has_requires_graph_forward_metadata<
     T,
-    std::void_t<decltype(std::declval<T>()->build_deepseek_v4_metadata(
+    std::void_t<decltype(std::declval<T>()->requires_graph_forward_metadata())>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct has_create_graph_forward_metadata_state : std::false_type {};
+
+template <typename T>
+struct has_create_graph_forward_metadata_state<
+    T,
+    std::void_t<
+        decltype(std::declval<T>()->create_graph_forward_metadata_state())>>
+    : std::true_type {};
+
+template <typename T, typename = void>
+struct has_prepare_graph_forward_metadata : std::false_type {};
+
+template <typename T>
+struct has_prepare_graph_forward_metadata<
+    T,
+    std::void_t<decltype(std::declval<T>()->prepare_graph_forward_metadata(
+        std::declval<ModelGraphMetadataState*>(),
         std::declval<const torch::Tensor&>(),
-        std::declval<const ModelInputParams&>()))>> : std::true_type {};
+        std::declval<ModelInputParams&>()))>> : std::true_type {};
 
 template <typename T, typename = void>
 struct has_pooler : std::false_type {};
