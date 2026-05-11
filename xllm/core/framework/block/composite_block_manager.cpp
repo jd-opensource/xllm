@@ -16,7 +16,6 @@ limitations under the License.
 #include "composite_block_manager.h"
 
 #include <algorithm>
-#include <unordered_map>
 
 #include "block_manager_impl.h"
 #include "framework/kv_cache/kv_cache_event.h"
@@ -137,7 +136,6 @@ void CompositeBlockManager::deallocate(const Slice<Block>& blocks) {
     return;
   }
 
-  std::unordered_map<BlockManager*, std::vector<Block>> blocks_by_manager;
   for (const auto& block : blocks) {
     if (!block.is_valid()) {
       continue;
@@ -154,11 +152,7 @@ void CompositeBlockManager::deallocate(const Slice<Block>& blocks) {
     CHECK(it != sub_managers_.end())
         << "CompositeBlockManager cannot deallocate block " << block.id()
         << " from a manager outside this composite manager";
-    blocks_by_manager[manager].push_back(block);
-  }
-
-  for (auto& [manager, manager_blocks] : blocks_by_manager) {
-    manager->deallocate(manager_blocks);
+    manager->deallocate(Slice<Block>(&block, 1));
   }
 }
 
