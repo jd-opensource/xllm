@@ -55,6 +55,21 @@ int64_t vector_max_or_zero(const std::vector<int32_t>& values) {
   return *std::max_element(values.begin(), values.end());
 }
 
+torch::Tensor pad_block_table_rows(const torch::Tensor& block_table,
+                                   int32_t target_rows,
+                                   int32_t pad_value) {
+  if (!block_table.defined() || block_table.dim() != 2 ||
+      block_table.size(0) >= target_rows) {
+    return block_table;
+  }
+
+  auto padded = torch::full(
+      {target_rows, block_table.size(1)}, pad_value, block_table.options());
+  padded.slice(/*dim=*/0, /*start=*/0, /*end=*/block_table.size(0))
+      .copy_(block_table);
+  return padded;
+}
+
 }  // namespace
 
 AttentionMetadata DSAMetadataBuilder::build(
@@ -265,6 +280,10 @@ torch::Tensor DSAMetadataBuilder::expand_blocks_to_slots(
   for (int32_t seq = 0; seq < batch_size; ++seq) {
     int64_t token_len = ctx_lens[seq];
     int64_t slot_num = compute_slot_num(gi, token_len);
+    CHECK(slot_num == 0 || seq < block_table.size(0))
+        << "DSAMetadataBuilder missing block table row for non-dummy sequence "
+        << seq << ": block_table rows=" << block_table.size(0)
+        << ", batch_size=" << batch_size << ", token_len=" << token_len;
 
     int64_t filled = 0;
     for (int32_t blk = 0; blk < max_blocks && filled < slot_num; ++blk) {
@@ -400,7 +419,9 @@ void DSAMetadataBuilder::process_token_group(const torch::Tensor& raw_bt,
       << ", query_total_tokens=" << query_total_tokens << ", ratio=" << ratio
       << ", batch_size=" << batch_size << ", total_tokens=" << total_tokens;
   out_slots = out_slots_tensor;
-  out_bt = raw_bt;  // keep original right-padded block_tables
+  out_bt = graph_slot_capacity > 0
+               ? pad_block_table_rows(raw_bt, batch_size, /*pad_value=*/-1)
+               : raw_bt;
 }
 
 void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
@@ -461,6 +482,11 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
     const int64_t ctx_len = static_cast<int64_t>(ctx_lens[seq]);
     const int64_t q_len =
         std::clamp<int64_t>(static_cast<int64_t>(q_lens[seq]), 0, ctx_len);
+    CHECK(q_len == 0 || seq < raw_bt.size(0))
+        << "DSAMetadataBuilder missing SWA block table row for non-dummy "
+        << "sequence " << seq << ": block_table rows=" << raw_bt.size(0)
+        << ", batch_size=" << batch_size << ", q_len=" << q_len
+        << ", ctx_len=" << ctx_len;
     const int64_t q_start = ctx_len - q_len;
     for (int64_t i = 0; i < q_len; ++i) {
       out_slots_acc[write_idx++] = slot_for_position(seq, q_start + i);
@@ -475,6 +501,10 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
   for (int32_t s = 0; s < batch_size; ++s) {
     dst_lens[s] = static_cast<int32_t>(
         std::ceil(static_cast<double>(ctx_lens[s]) / block_size));
+    CHECK(dst_lens[s] == 0 || s < raw_bt.size(0))
+        << "DSAMetadataBuilder missing SWA block table row for non-dummy "
+        << "sequence " << s << ": block_table rows=" << raw_bt.size(0)
+        << ", batch_size=" << batch_size << ", ctx_len=" << ctx_lens[s];
     max_dst_len = std::max(max_dst_len, dst_lens[s]);
   }
   max_dst_len = std::max(max_dst_len, current_cols);
