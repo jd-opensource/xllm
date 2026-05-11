@@ -1226,10 +1226,8 @@ bool AclGraph::capture(CausalLM* model,
   // that conflict with capture mode
   auto device_idx = tensor_options.device().index();
 
-  // Use cached capture stream for graph capture
-  // capture_stream_ is initialized in constructor
   bool need_restore_stream = false;
-  aclrtStream active_capture_stream = stream;
+  graph_stream_ = stream;
 
   // capture lock scope
   {
@@ -1241,7 +1239,7 @@ bool AclGraph::capture(CausalLM* model,
         c10_npu::getDefaultNPUStream(device_idx)) {
       c10_npu::setCurrentNPUStream(capture_stream_.value());
       aclrtSynchronizeStream(capture_stream_.value().stream());
-      active_capture_stream = capture_stream_.value().stream();
+      graph_stream_ = capture_stream_.value().stream();
       need_restore_stream = true;
     }
     LOG(INFO) << "capture begin, bucket_num_tokens: " << bucket_num_tokens
@@ -1272,7 +1270,7 @@ bool AclGraph::capture(CausalLM* model,
     }
   }
   // Synchronize and test replay to verify graph capture
-  aclrtSynchronizeStream(active_capture_stream);
+  aclrtSynchronizeStream(graph_stream_);
   aclrtSynchronizeStream(stream);
 
   graph_.replay();
@@ -1282,7 +1280,9 @@ bool AclGraph::capture(CausalLM* model,
 }
 
 AclGraph::~AclGraph() {
-  if (capture_stream_.has_value()) {
+  if (graph_stream_ != nullptr) {
+    aclrtSynchronizeStream(graph_stream_);
+  } else if (capture_stream_.has_value()) {
     aclrtSynchronizeStream(capture_stream_.value().stream());
   }
   if (replay_done_event_ != nullptr) {
@@ -1307,13 +1307,12 @@ void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
 }
 
 void AclGraph::make_current_stream_wait_for_graph(aclrtStream current_stream) {
-  CHECK(capture_stream_.has_value()) << "capture_stream is not initialized";
+  CHECK_NE(graph_stream_, nullptr) << "graph_stream is not initialized";
   CHECK_NE(replay_done_event_, nullptr)
       << "replay_done_event is not initialized";
-  const auto graph_stream = capture_stream_.value().stream();
-  CHECK_EQ(aclrtRecordEvent(replay_done_event_, graph_stream), ACL_SUCCESS)
+  CHECK_EQ(aclrtRecordEvent(replay_done_event_, graph_stream_), ACL_SUCCESS)
       << "aclrtRecordEvent(replay_done_event) failed";
-  if (current_stream != graph_stream) {
+  if (current_stream != graph_stream_) {
     CHECK_EQ(aclrtStreamWaitEvent(current_stream, replay_done_event_),
              ACL_SUCCESS)
         << "aclrtStreamWaitEvent(current_stream, replay_done_event) failed";

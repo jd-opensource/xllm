@@ -335,8 +335,9 @@ class AclGraph {
   // instances)
   GraphPersistentParam& persistent_param_;
 
-  // Cached capture stream, initialized on first capture
+  // Fallback non-default stream for capture when callers are on default stream.
   std::optional<c10_npu::NPUStream> capture_stream_;
+  aclrtStream graph_stream_ = nullptr;
   aclrtEvent replay_done_event_ = nullptr;
   c10::DeviceIndex device_index_;
 };
