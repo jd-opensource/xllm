@@ -176,10 +176,10 @@ OneRecBeamSearchOutputTensors prepare_onerec_beam_search_output_tensors(
   return tensors;
 }
 
-bool can_use_onerec_final_beam_select(int32_t batch_size,
-                                      const torch::Tensor& top_tokens,
-                                      int32_t result_width) {
-  // Gate for the NPU fused final-step path for `num_return_sequences`.
+bool can_use_beam_search_rec_final_select(int32_t batch_size,
+                                          const torch::Tensor& top_tokens,
+                                          int32_t result_width) {
+  // Gate for using the NPU fused final-step path for `num_return_sequences`.
   // If any shape/alignment requirement is not met, we fall back to the
   // torch-based host implementation (`select_final_onerec_beam_results`) for
   // correctness.
@@ -1757,7 +1757,7 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
                                                     requested_result_width,
                                                     total_rounds,
                                                     runtime_.worker.device());
-      if (can_use_onerec_final_beam_select(
+      if (can_use_beam_search_rec_final_select(
               batch_size, top_tokens, requested_result_width)) {
         xllm::kernel::npu::beam_search_rec(
             /*logprobs=*/beam_tensors.acc_logprob,
@@ -1765,7 +1765,7 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
             /*top_logprobs=*/top_logprobs,
             /*sequence_group=*/beam_tensors.sequence_group,
             /*current_step=*/static_cast<int64_t>(round),
-            /*num_return_sequences=*/requested_result_width,
+            /*result_width=*/requested_result_width,
             /*out_token_ids=*/final_tensors.out_token_ids,
             /*out_token_index=*/final_tensors.out_token_index,
             /*out_log_probs=*/final_tensors.out_log_probs,
@@ -1807,11 +1807,11 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
           /*out_sequence=*/beam_tensors.out_seqgroup);
     }
     log_stage_timing("beam_search", round, beam_timer);
-#elif defined(USE_CUDA)
+  #elif defined(USE_CUDA)
     if (final_round && requested_result_width != beam_width) {
-      LOG(FATAL) << "OneRec xattention num_return_sequences mismatch is "
-                    "not supported on CUDA without a final-step select "
-                    "kernel.";
+      LOG(FATAL) << "OneRec xattention final-step result_width != beam_width "
+                    "is not supported on CUDA without a final-step fused "
+                    "selection kernel.";
     }
     top_tokens = result->sample_output.top_tokens.to(torch::kInt32)
                      .reshape({-1, result->sample_output.top_tokens.size(-1)});
