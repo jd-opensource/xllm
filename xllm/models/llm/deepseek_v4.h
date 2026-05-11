@@ -31,6 +31,7 @@ limitations under the License.
 #include <unordered_set>
 #include <utility>
 
+#include "core/common/global_flags.h"
 #include "core/framework/state_dict/utils.h"
 #include "core/kernels/ops_api.h"
 #include "core/layers/common/dsa_metadata.h"
@@ -92,6 +93,16 @@ inline torch::Tensor maybe_to_device(const torch::Tensor& tensor,
     return tensor;
   }
   return tensor.to(device);
+}
+
+inline bool deepseek_v4_uses_acl_graph(
+    const xllm::ModelInputParams& input_params) {
+#if defined(USE_NPU)
+  return FLAGS_enable_graph && input_params.graph_buffer.tiling_data.defined();
+#else
+  (void)input_params;
+  return false;
+#endif
 }
 
 // Group key: (ratio, type, block_size) -> group_id
@@ -299,6 +310,30 @@ class DeepseekV4ModelImpl
     LOAD_WEIGHT(hc_head_scale);
   }
 
+  std::shared_ptr<layer::AttentionMetadata> build_deepseek_v4_metadata(
+      const torch::Tensor& positions,
+      const ModelInputParams& input_params) {
+    // Shared metadata entry point for both eager and ACL graph execution.
+    // Graph capture/replay persists the returned tensors, while eager consumes
+    // the same structure directly in forward().
+    auto modified_input_params = input_params;
+    auto& dp_token_nums = modified_input_params.dp_global_token_nums;
+    std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
+
+    auto attn_metadata = std::make_shared<layer::AttentionMetadata>(
+        layer::DSAMetadataBuilder::build(modified_input_params,
+                                         positions,
+                                         dsa_cos_sin_,
+                                         caches_info_,
+                                         group_infos_));
+    if (attn_metadata->dsa_metadata) {
+      prepare_dsa_metadata_for_forward(*attn_metadata, positions.device());
+      build_precomputed_metadata(*attn_metadata->dsa_metadata,
+                                 modified_input_params);
+    }
+    return attn_metadata;
+  }
+
   void log_weight_mem_stats() const { log_layer_weight_mem_stats(); }
 
   ModelOutput forward(torch::Tensor tokens,
@@ -322,8 +357,20 @@ class DeepseekV4ModelImpl
 
     // Keep runtime inputs on the same accelerator device.
     const auto runtime_device = h.device();
-    tokens = maybe_to_device(tokens, runtime_device);
-    positions = maybe_to_device(positions, runtime_device);
+    const bool acl_graph_forward = deepseek_v4_uses_acl_graph(input_params);
+    if (acl_graph_forward) {
+      CHECK(tokens.defined() && tokens.device() == runtime_device)
+          << "DeepSeek V4 ACL graph requires tokens on the runtime device";
+      CHECK(positions.defined() && positions.device() == runtime_device)
+          << "DeepSeek V4 ACL graph requires positions on the runtime device";
+      CHECK(input_params.new_cache_slots.defined())
+          << "DeepSeek V4 ACL graph requires persistent new_cache_slots";
+      CHECK(input_params.block_tables.defined())
+          << "DeepSeek V4 ACL graph requires persistent block_tables";
+    } else {
+      tokens = maybe_to_device(tokens, runtime_device);
+      positions = maybe_to_device(positions, runtime_device);
+    }
 
     auto modified_input_params = input_params;
     if (is_empty_dp_rank) {
@@ -335,13 +382,10 @@ class DeepseekV4ModelImpl
     std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
 
     if (!modified_input_params.attn_metadata) {
+      CHECK(!acl_graph_forward)
+          << "DeepSeek V4 ACL graph requires prebuilt attention metadata";
       modified_input_params.attn_metadata =
-          std::make_shared<layer::AttentionMetadata>(
-              layer::DSAMetadataBuilder::build(modified_input_params,
-                                               positions,
-                                               dsa_cos_sin_,
-                                               caches_info_,
-                                               group_infos_));
+          build_deepseek_v4_metadata(positions, modified_input_params);
     }
     auto& attn_metadata = *(modified_input_params.attn_metadata);
 
@@ -352,115 +396,132 @@ class DeepseekV4ModelImpl
 
     if (attn_metadata.dsa_metadata) {
       auto& dsa = *(attn_metadata.dsa_metadata);
+      const bool metadata_prepared =
+          dsa.c1_metadata.defined() && dsa.c4_metadata.defined() &&
+          dsa.c128_metadata.defined() && dsa.qli_metadata.defined();
 
-      // DSAMetadataBuilder may create several length/position tensors on CPU;
-      // move all operator inputs to runtime device before invoking NPU kernels.
-      dsa.seq_lens = maybe_to_device(dsa.seq_lens, runtime_device);
-      dsa.seq_lens_q = maybe_to_device(dsa.seq_lens_q, runtime_device);
-      dsa.actual_seq_lengths_query =
-          maybe_to_device(dsa.actual_seq_lengths_query, runtime_device);
-      dsa.actual_seq_lengths_kv =
-          maybe_to_device(dsa.actual_seq_lengths_kv, runtime_device);
-      dsa.max_seqlen_q = maybe_to_device(dsa.max_seqlen_q, runtime_device);
-      dsa.max_seqlen_kv = maybe_to_device(dsa.max_seqlen_kv, runtime_device);
-      dsa.input_positions =
-          maybe_to_device(dsa.input_positions, runtime_device);
-      dsa.c4_pad_positions =
-          maybe_to_device(dsa.c4_pad_positions, runtime_device);
-      dsa.c128_pad_positions =
-          maybe_to_device(dsa.c128_pad_positions, runtime_device);
-
-      for (auto& layer_block_tables : dsa.block_tables) {
-        for (auto& block_table : layer_block_tables) {
-          block_table = maybe_to_device(block_table, runtime_device);
+      if (metadata_prepared) {
+        if (dsa.cos.defined() && dsa.sin.defined()) {
+          input_rope_by_ratio[1] = {dsa.cos, dsa.sin};
         }
-      }
-      for (auto& layer_slot_mappings : dsa.slot_mappings) {
-        for (auto& slot_mapping : layer_slot_mappings) {
-          slot_mapping = maybe_to_device(slot_mapping, runtime_device);
+        if (dsa.c4_input_cos.defined() && dsa.c4_input_sin.defined()) {
+          input_rope_by_ratio[4] = {dsa.c4_input_cos, dsa.c4_input_sin};
         }
-      }
+        if (dsa.c128_input_cos.defined() && dsa.c128_input_sin.defined()) {
+          input_rope_by_ratio[128] = {dsa.c128_input_cos, dsa.c128_input_sin};
+        }
+      } else {
+        CHECK(!acl_graph_forward)
+            << "DeepSeek V4 ACL graph requires prebuilt DSA metadata";
+        // DSAMetadataBuilder may create several length/position tensors on CPU;
+        // move all operator inputs to runtime device before invoking NPU
+        // kernels.
+        dsa.seq_lens = maybe_to_device(dsa.seq_lens, runtime_device);
+        dsa.seq_lens_q = maybe_to_device(dsa.seq_lens_q, runtime_device);
+        dsa.actual_seq_lengths_query =
+            maybe_to_device(dsa.actual_seq_lengths_query, runtime_device);
+        dsa.actual_seq_lengths_kv =
+            maybe_to_device(dsa.actual_seq_lengths_kv, runtime_device);
+        dsa.max_seqlen_q = maybe_to_device(dsa.max_seqlen_q, runtime_device);
+        dsa.max_seqlen_kv = maybe_to_device(dsa.max_seqlen_kv, runtime_device);
+        dsa.input_positions =
+            maybe_to_device(dsa.input_positions, runtime_device);
+        dsa.c4_pad_positions =
+            maybe_to_device(dsa.c4_pad_positions, runtime_device);
+        dsa.c128_pad_positions =
+            maybe_to_device(dsa.c128_pad_positions, runtime_device);
 
-      if (dsa_hadamard_.defined()) {
-        dsa.hadamard = maybe_to_device(dsa_hadamard_, runtime_device);
-      }
-
-      if (dsa_rotary_embedding_) {
-        std::unordered_map<std::string, torch::Tensor> positions_map;
-        // Avoid stale group tensors when attn_metadata is reused across runs.
-        dsa.cos = torch::Tensor();
-        dsa.sin = torch::Tensor();
-        dsa.c4_cos = torch::Tensor();
-        dsa.c4_sin = torch::Tensor();
-        dsa.c128_cos = torch::Tensor();
-        dsa.c128_sin = torch::Tensor();
-
-        auto append_group_positions = [&positions_map](
-                                          const std::string& group,
-                                          const torch::Tensor& positions) {
-          if (!positions.defined() || positions.numel() == 0) {
-            return;
+        for (auto& layer_block_tables : dsa.block_tables) {
+          for (auto& block_table : layer_block_tables) {
+            block_table = maybe_to_device(block_table, runtime_device);
           }
-          auto group_positions = positions;
-          if (group_positions.scalar_type() != torch::kInt64) {
-            group_positions = group_positions.to(torch::kInt64);
-          }
-          positions_map[group] = group_positions;
-        };
-
-        append_group_positions("default", dsa.input_positions);
-        append_group_positions("c4", dsa.c4_pad_positions);
-        append_group_positions("c128", dsa.c128_pad_positions);
-
-        if (!positions_map.empty()) {
-          auto group_cos_sin = dsa_rotary_embedding_->build(positions_map);
-
-          auto default_it = group_cos_sin.find("default");
-          if (default_it != group_cos_sin.end()) {
-            input_rope_by_ratio[1] = default_it->second;
-            dsa.cos = default_it->second.first;
-            dsa.sin = default_it->second.second;
-          }
-
-          auto c4_it = group_cos_sin.find("c4");
-          if (c4_it != group_cos_sin.end()) {
-            dsa.c4_cos = c4_it->second.first;
-            dsa.c4_sin = c4_it->second.second;
-          }
-
-          auto c128_it = group_cos_sin.find("c128");
-          if (c128_it != group_cos_sin.end()) {
-            dsa.c128_cos = c128_it->second.first;
-            dsa.c128_sin = c128_it->second.second;
+        }
+        for (auto& layer_slot_mappings : dsa.slot_mappings) {
+          for (auto& slot_mapping : layer_slot_mappings) {
+            slot_mapping = maybe_to_device(slot_mapping, runtime_device);
           }
         }
 
-        if (dsa.input_positions.defined() && dsa.input_positions.numel() > 0) {
-          auto input_positions = dsa.input_positions;
-          if (input_positions.scalar_type() != torch::kInt64) {
-            input_positions = input_positions.to(torch::kInt64);
+        if (dsa_hadamard_.defined()) {
+          dsa.hadamard = maybe_to_device(dsa_hadamard_, runtime_device);
+        }
+
+        if (dsa_rotary_embedding_) {
+          std::unordered_map<std::string, torch::Tensor> positions_map;
+          // Avoid stale group tensors when attn_metadata is reused across runs.
+          dsa.cos = torch::Tensor();
+          dsa.sin = torch::Tensor();
+          dsa.c4_cos = torch::Tensor();
+          dsa.c4_sin = torch::Tensor();
+          dsa.c128_cos = torch::Tensor();
+          dsa.c128_sin = torch::Tensor();
+
+          auto append_group_positions = [&positions_map](
+                                            const std::string& group,
+                                            const torch::Tensor& positions) {
+            if (!positions.defined() || positions.numel() == 0) {
+              return;
+            }
+            auto group_positions = positions;
+            if (group_positions.scalar_type() != torch::kInt64) {
+              group_positions = group_positions.to(torch::kInt64);
+            }
+            positions_map[group] = group_positions;
+          };
+
+          append_group_positions("default", dsa.input_positions);
+          append_group_positions("c4", dsa.c4_pad_positions);
+          append_group_positions("c128", dsa.c128_pad_positions);
+
+          if (!positions_map.empty()) {
+            auto group_cos_sin = dsa_rotary_embedding_->build(positions_map);
+
+            auto default_it = group_cos_sin.find("default");
+            if (default_it != group_cos_sin.end()) {
+              input_rope_by_ratio[1] = default_it->second;
+              dsa.cos = default_it->second.first;
+              dsa.sin = default_it->second.second;
+            }
+
+            auto c4_it = group_cos_sin.find("c4");
+            if (c4_it != group_cos_sin.end()) {
+              dsa.c4_cos = c4_it->second.first;
+              dsa.c4_sin = c4_it->second.second;
+            }
+
+            auto c128_it = group_cos_sin.find("c128");
+            if (c128_it != group_cos_sin.end()) {
+              dsa.c128_cos = c128_it->second.first;
+              dsa.c128_sin = c128_it->second.second;
+            }
           }
-          // C4/C128 layers still apply main q/kv RoPE at input-token length;
-          // only the RoPE group changes to use the compressed theta.
-          auto input_group_cos_sin = dsa_rotary_embedding_->build(
-              {{"c4", input_positions}, {"c128", input_positions}});
-          auto c4_input_it = input_group_cos_sin.find("c4");
-          if (c4_input_it != input_group_cos_sin.end()) {
-            input_rope_by_ratio[4] = c4_input_it->second;
-          }
-          auto c128_input_it = input_group_cos_sin.find("c128");
-          if (c128_input_it != input_group_cos_sin.end()) {
-            input_rope_by_ratio[128] = c128_input_it->second;
+
+          if (dsa.input_positions.defined() &&
+              dsa.input_positions.numel() > 0) {
+            auto input_positions = dsa.input_positions;
+            if (input_positions.scalar_type() != torch::kInt64) {
+              input_positions = input_positions.to(torch::kInt64);
+            }
+            // C4/C128 layers still apply main q/kv RoPE at input-token length;
+            // only the RoPE group changes to use the compressed theta.
+            auto input_group_cos_sin = dsa_rotary_embedding_->build(
+                {{"c4", input_positions}, {"c128", input_positions}});
+            auto c4_input_it = input_group_cos_sin.find("c4");
+            if (c4_input_it != input_group_cos_sin.end()) {
+              input_rope_by_ratio[4] = c4_input_it->second;
+            }
+            auto c128_input_it = input_group_cos_sin.find("c128");
+            if (c128_input_it != input_group_cos_sin.end()) {
+              input_rope_by_ratio[128] = c128_input_it->second;
+            }
           }
         }
-      }
 
-      if (dsa.actual_seq_lengths_kv.defined() && dsa.seq_lens_q.defined()) {
-        dsa.start_pos =
-            (dsa.actual_seq_lengths_kv - dsa.seq_lens_q).to(torch::kInt32);
+        if (dsa.actual_seq_lengths_kv.defined() && dsa.seq_lens_q.defined()) {
+          dsa.start_pos =
+              (dsa.actual_seq_lengths_kv - dsa.seq_lens_q).to(torch::kInt32);
+        }
       }
-
-      build_precomputed_metadata(dsa);
     }
 
     std::optional<torch::Tensor> residual;
@@ -618,8 +679,130 @@ class DeepseekV4ModelImpl
     }
     return std::max<int64_t>((cache.size(0) + block_size - 1) / block_size, 1);
   }
+  void prepare_dsa_metadata_for_forward(
+      layer::AttentionMetadata& attn_metadata,
+      const torch::Device& runtime_device) const {
+    if (!attn_metadata.dsa_metadata) {
+      return;
+    }
+    auto& dsa = *(attn_metadata.dsa_metadata);
 
-  void build_precomputed_metadata(layer::DSAMetadata& dsa) const {
+    dsa.seq_lens = maybe_to_device(dsa.seq_lens, runtime_device);
+    dsa.seq_lens_q = maybe_to_device(dsa.seq_lens_q, runtime_device);
+    dsa.actual_seq_lengths_query =
+        maybe_to_device(dsa.actual_seq_lengths_query, runtime_device);
+    dsa.actual_seq_lengths_kv =
+        maybe_to_device(dsa.actual_seq_lengths_kv, runtime_device);
+    dsa.max_seqlen_q = maybe_to_device(dsa.max_seqlen_q, runtime_device);
+    dsa.max_seqlen_kv = maybe_to_device(dsa.max_seqlen_kv, runtime_device);
+    dsa.input_positions = maybe_to_device(dsa.input_positions, runtime_device);
+    dsa.c4_pad_positions =
+        maybe_to_device(dsa.c4_pad_positions, runtime_device);
+    dsa.c128_pad_positions =
+        maybe_to_device(dsa.c128_pad_positions, runtime_device);
+
+    for (auto& layer_block_tables : dsa.block_tables) {
+      for (auto& block_table : layer_block_tables) {
+        block_table = maybe_to_device(block_table, runtime_device);
+      }
+    }
+    for (auto& layer_slot_mappings : dsa.slot_mappings) {
+      for (auto& slot_mapping : layer_slot_mappings) {
+        slot_mapping = maybe_to_device(slot_mapping, runtime_device);
+      }
+    }
+
+    if (dsa_hadamard_.defined()) {
+      dsa.hadamard = maybe_to_device(dsa_hadamard_, runtime_device);
+    }
+
+    if (dsa_rotary_embedding_) {
+      std::unordered_map<std::string, torch::Tensor> positions_map;
+      dsa.cos = torch::Tensor();
+      dsa.sin = torch::Tensor();
+      dsa.c4_cos = torch::Tensor();
+      dsa.c4_sin = torch::Tensor();
+      dsa.c128_cos = torch::Tensor();
+      dsa.c128_sin = torch::Tensor();
+      dsa.c4_input_cos = torch::Tensor();
+      dsa.c4_input_sin = torch::Tensor();
+      dsa.c128_input_cos = torch::Tensor();
+      dsa.c128_input_sin = torch::Tensor();
+
+      auto append_group_positions = [&positions_map](
+                                        const std::string& group,
+                                        const torch::Tensor& positions) {
+        if (!positions.defined() || positions.numel() == 0) {
+          return;
+        }
+        auto group_positions = positions;
+        if (group_positions.scalar_type() != torch::kInt64) {
+          group_positions = group_positions.to(torch::kInt64);
+        }
+        positions_map[group] = group_positions;
+      };
+
+      append_group_positions("default", dsa.input_positions);
+      append_group_positions("c4", dsa.c4_pad_positions);
+      append_group_positions("c128", dsa.c128_pad_positions);
+
+      if (!positions_map.empty()) {
+        auto group_cos_sin = dsa_rotary_embedding_->build(positions_map);
+
+        auto default_it = group_cos_sin.find("default");
+        if (default_it != group_cos_sin.end()) {
+          dsa.cos = default_it->second.first;
+          dsa.sin = default_it->second.second;
+        }
+
+        auto c4_it = group_cos_sin.find("c4");
+        if (c4_it != group_cos_sin.end()) {
+          dsa.c4_cos = c4_it->second.first;
+          dsa.c4_sin = c4_it->second.second;
+        }
+
+        auto c128_it = group_cos_sin.find("c128");
+        if (c128_it != group_cos_sin.end()) {
+          dsa.c128_cos = c128_it->second.first;
+          dsa.c128_sin = c128_it->second.second;
+        }
+      }
+
+      if (dsa.input_positions.defined() && dsa.input_positions.numel() > 0) {
+        auto input_positions = dsa.input_positions;
+        if (input_positions.scalar_type() != torch::kInt64) {
+          input_positions = input_positions.to(torch::kInt64);
+        }
+        auto input_group_cos_sin = dsa_rotary_embedding_->build(
+            {{"c4", input_positions}, {"c128", input_positions}});
+        auto c4_input_it = input_group_cos_sin.find("c4");
+        if (c4_input_it != input_group_cos_sin.end()) {
+          dsa.c4_input_cos = c4_input_it->second.first;
+          dsa.c4_input_sin = c4_input_it->second.second;
+        }
+        auto c128_input_it = input_group_cos_sin.find("c128");
+        if (c128_input_it != input_group_cos_sin.end()) {
+          dsa.c128_input_cos = c128_input_it->second.first;
+          dsa.c128_input_sin = c128_input_it->second.second;
+        }
+      }
+    }
+
+    if (dsa.actual_seq_lengths_kv.defined() && dsa.seq_lens_q.defined()) {
+      dsa.start_pos =
+          (dsa.actual_seq_lengths_kv - dsa.seq_lens_q).to(torch::kInt32);
+    }
+  }
+
+  static int64_t vector_max_or_zero(const std::vector<int32_t>& values) {
+    if (values.empty()) {
+      return 0;
+    }
+    return *std::max_element(values.begin(), values.end());
+  }
+
+  void build_precomputed_metadata(layer::DSAMetadata& dsa,
+                                  const ModelInputParams& params) const {
     dsa.c1_metadata = torch::Tensor();
     dsa.c4_metadata = torch::Tensor();
     dsa.c128_metadata = torch::Tensor();
@@ -650,15 +833,13 @@ class DeepseekV4ModelImpl
 
     const int64_t batch_size =
         std::max<int64_t>(dsa.actual_seq_lengths_kv.size(0), 1);
-    const int64_t max_seqlen_q =
-        pick_max_seqlen(dsa.max_seqlen_q, dsa.seq_lens_q);
-    const int64_t max_seqlen_kv =
-        pick_max_seqlen(dsa.max_seqlen_kv, dsa.actual_seq_lengths_kv);
+    const int64_t max_seqlen_q = std::max<int64_t>(
+        params.q_max_seq_len, vector_max_or_zero(params.q_seq_lens_vec));
+    const int64_t max_seqlen_kv = std::max<int64_t>(
+        params.kv_max_seq_len, vector_max_or_zero(params.kv_seq_lens_vec));
     const int64_t ori_win_left = std::max<int64_t>(window_size_ - 1, 0);
     const int64_t sparse_topk = std::max<int64_t>(index_topk_, 1);
-    const bool is_prefill = dsa.seq_lens_q.defined() &&
-                            dsa.seq_lens_q.numel() > 0 &&
-                            dsa.seq_lens_q.max().item<int64_t>() > 1;
+    const bool is_prefill = params.q_max_seq_len > 1;
 
     // Prefill KV is packed into PA_ND blocks before attention. Keep the
     // metadata in the same layout and do not build TND-only cu_seqlens inputs.
@@ -780,10 +961,10 @@ class DeepseekV4ModelImpl
     const int64_t index_head_dim =
         std::max<int64_t>(index_head_dim_ > 0 ? index_head_dim_ : head_dim_, 1);
     const int64_t qli_batch_size = std::max<int64_t>(key_lens.size(0), 1);
-    const int64_t qli_max_seqlen_q =
-        pick_max_seqlen(dsa.max_seqlen_q, query_lens);
-    const int64_t qli_max_seqlen_k =
-        pick_max_seqlen(dsa.max_seqlen_kv, key_lens);
+    const int64_t qli_max_seqlen_q = std::max<int64_t>(
+        params.q_max_seq_len, vector_max_or_zero(params.q_seq_lens_vec));
+    const int64_t qli_max_seqlen_k = std::max<int64_t>(
+        params.kv_max_seq_len, vector_max_or_zero(params.kv_seq_lens_vec));
 
     xllm::kernel::QuantLightningIndexerMetadataParams qli_params;
     qli_params.num_heads_q = global_index_num_heads;
@@ -901,6 +1082,12 @@ class DeepseekV4ForCausalLMImpl
     LlmForCausalLMImplBase<DeepseekV4Model>::load_model(std::move(loader),
                                                         std::move(prefix));
     this->model_->log_weight_mem_stats();
+  }
+
+  std::shared_ptr<layer::AttentionMetadata> build_deepseek_v4_metadata(
+      const torch::Tensor& positions,
+      const ModelInputParams& input_params) override {
+    return this->model_->build_deepseek_v4_metadata(positions, input_params);
   }
 };
 TORCH_MODULE(DeepseekV4ForCausalLM);

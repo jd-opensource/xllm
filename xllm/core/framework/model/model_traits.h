@@ -22,6 +22,8 @@ limitations under the License.
 #include <utility>
 
 namespace xllm {
+struct ModelInputParams;
+
 namespace layer {
 class LmHead;
 class WordEmbedding;
@@ -114,6 +116,16 @@ struct has_reload_model_weights_from_device<
     std::void_t<
         decltype(std::declval<T>()->reload_model_weights_from_device())>>
     : std::true_type {};
+
+template <typename T, typename = void>
+struct has_build_deepseek_v4_metadata : std::false_type {};
+
+template <typename T>
+struct has_build_deepseek_v4_metadata<
+    T,
+    std::void_t<decltype(std::declval<T>()->build_deepseek_v4_metadata(
+        std::declval<const torch::Tensor&>(),
+        std::declval<const ModelInputParams&>()))>> : std::true_type {};
 
 template <typename T, typename = void>
 struct has_pooler : std::false_type {};

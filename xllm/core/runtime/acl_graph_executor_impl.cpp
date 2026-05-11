@@ -34,6 +34,9 @@ limitations under the License.
 #endif
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
+#include "core/kernels/npu/xllm_ops/xllm_ops_api.h"
+#include "core/layers/common/attention_metadata.h"
+#include "core/layers/common/dsa_metadata.h"
 #include "core/util/utils.h"
 #include "platform/npu/device_capture_lock.h"
 
@@ -69,6 +72,33 @@ int64_t get_decode_graph_capacity(const runtime::Options& options) {
     return options.max_seqs_per_batch();
   }
   return options.max_seqs_per_batch() * options.num_decoding_tokens();
+}
+
+int64_t infer_actual_batch_size(const ModelInputParams& params) {
+  if (params.num_sequences > 0) {
+    return params.num_sequences;
+  }
+  if (!params.kv_seq_lens_vec.empty()) {
+    return static_cast<int64_t>(params.kv_seq_lens_vec.size());
+  }
+  if (!params.q_seq_lens_vec.empty()) {
+    return static_cast<int64_t>(params.q_seq_lens_vec.size());
+  }
+  if (params.kv_seq_lens.defined() && params.kv_seq_lens.dim() >= 1) {
+    return params.kv_seq_lens.size(0);
+  }
+  if (params.q_seq_lens.defined() && params.q_seq_lens.dim() >= 1) {
+    return params.q_seq_lens.size(0);
+  }
+  if (params.block_tables.defined() && params.block_tables.dim() >= 2) {
+    return params.block_tables.size(0);
+  }
+  for (const auto& block_table : params.multi_block_tables) {
+    if (block_table.defined() && block_table.dim() >= 2) {
+      return block_table.size(0);
+    }
+  }
+  return 0;
 }
 }  // namespace
 
@@ -114,18 +144,27 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   }
   persistent_new_cache_slots_ = torch::zeros(
       {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+  persistent_new_cache_slots_default_ = torch::zeros(
+      {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
 
   // Sequence length tensors with max_seqs_per_batch
   q_seq_lens_ = torch::zeros({max_seqs_per_batch},
                              torch::dtype(torch::kInt).device(device));
   kv_seq_lens_ = torch::zeros({max_seqs_per_batch},
                               torch::dtype(torch::kInt).device(device));
+  q_seq_lens_default_ = torch::ones({max_seqs_per_batch},
+                                    torch::dtype(torch::kInt).device(device));
+  kv_seq_lens_default_ = torch::ones({max_seqs_per_batch},
+                                     torch::dtype(torch::kInt).device(device));
 
   // Block table tensors with maximum possible size
   const auto block_size = options.block_size();
   const int64_t max_block_table_len =
       (max_seq_len + block_size - 1) / block_size + 1;
   persistent_block_tables_ =
+      torch::zeros({max_seqs_per_batch, max_block_table_len},
+                   torch::dtype(torch::kInt).device(device));
+  persistent_block_tables_default_ =
       torch::zeros({max_seqs_per_batch, max_block_table_len},
                    torch::dtype(torch::kInt).device(device));
 
@@ -144,7 +183,20 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   if (need_update_attn_mask_) {
     persistent_mask_ = torch::zeros({max_tokens_per_batch, max_seq_len},
                                     torch::dtype(dtype).device(device));
+    persistent_mask_zero_template_ =
+        torch::zeros({max_tokens_per_batch, max_seq_len},
+                     torch::dtype(dtype).device(device));
+    const float mask_fill_value = (dtype == torch::kFloat16)
+                                      ? -std::numeric_limits<float>::infinity()
+                                      : -9984.0f;
+    persistent_mask_fill_template_ =
+        torch::full({max_tokens_per_batch, max_seq_len},
+                    mask_fill_value,
+                    torch::dtype(dtype).device(device));
   }
+
+  q_cu_seq_lens_default_ = torch::zeros(
+      {max_seqs_per_batch + 1}, torch::dtype(torch::kInt).device(device));
 
   // Do not need to create ATB context and custom paged attention operation
   if (args_.head_dim() == 0) {
@@ -196,6 +248,210 @@ void GraphPersistentParam::set_aux_hidden_states(const torch::Tensor& value) {
   }
 }
 
+namespace {
+torch::Tensor copy_to_persistent_tensor(const torch::Tensor& src,
+                                        torch::Tensor& dst) {
+  if (!src.defined()) {
+    return src;
+  }
+  if (!dst.defined()) {
+    dst = torch::zeros_like(src);
+  } else {
+    CHECK(dst.sizes() == src.sizes()) << "persistent tensor size changed from "
+                                      << dst.sizes() << " to " << src.sizes();
+    CHECK_EQ(dst.scalar_type(), src.scalar_type())
+        << "persistent tensor dtype changed";
+    CHECK_EQ(dst.device(), src.device()) << "persistent tensor device changed";
+  }
+  dst.copy_(src, /*non_blocking=*/true);
+  return dst;
+}
+
+torch::Tensor copy_to_fixed_metadata_tensor(const torch::Tensor& src,
+                                            torch::Tensor& dst) {
+  if (!src.defined()) {
+    return src;
+  }
+  if (!dst.defined()) {
+    dst = torch::zeros({xllm::kernel::npu::kDsaMetadataBufferElements},
+                       src.options());
+  } else {
+    CHECK_EQ(dst.numel(), xllm::kernel::npu::kDsaMetadataBufferElements)
+        << "DSA metadata persistent tensor size changed";
+    CHECK_EQ(dst.scalar_type(), src.scalar_type())
+        << "DSA metadata persistent tensor dtype changed";
+    CHECK_EQ(dst.device(), src.device())
+        << "DSA metadata persistent tensor device changed";
+  }
+  dst.zero_();
+  const int64_t copy_numel = std::min<int64_t>(src.numel(), dst.numel());
+  if (copy_numel > 0) {
+    dst.flatten(0)
+        .slice(/*dim=*/0, /*start=*/0, /*end=*/copy_numel)
+        .copy_(src.flatten(0).slice(/*dim=*/0,
+                                    /*start=*/0,
+                                    /*end=*/copy_numel),
+               /*non_blocking=*/true);
+  }
+  return dst;
+}
+
+torch::Tensor copy_to_fixed_capacity_2d_tensor(
+    const torch::Tensor& src,
+    torch::Tensor& dst,
+    const torch::Tensor& template_tensor,
+    const char* name) {
+  if (!src.defined()) {
+    return src;
+  }
+  CHECK_EQ(src.dim(), 2) << name << " must be 2D, got dim=" << src.dim();
+  if (!dst.defined()) {
+    dst = torch::zeros(template_tensor.sizes(), src.options());
+  } else {
+    CHECK(dst.sizes() == template_tensor.sizes())
+        << name << " persistent tensor size changed from " << dst.sizes()
+        << " to " << template_tensor.sizes();
+    CHECK_EQ(dst.scalar_type(), src.scalar_type())
+        << name << " persistent tensor dtype changed";
+    CHECK_EQ(dst.device(), src.device())
+        << name << " persistent tensor device changed";
+    dst.zero_();
+  }
+
+  CHECK_LE(src.size(0), dst.size(0))
+      << name << " rows exceed persistent capacity: src=" << src.sizes()
+      << ", dst=" << dst.sizes();
+  CHECK_LE(src.size(1), dst.size(1))
+      << name << " cols exceed persistent capacity: src=" << src.sizes()
+      << ", dst=" << dst.sizes();
+
+  dst.slice(/*dim=*/0, /*start=*/0, /*end=*/src.size(0))
+      .slice(/*dim=*/1, /*start=*/0, /*end=*/src.size(1))
+      .copy_(src, /*non_blocking=*/true);
+  return dst.slice(/*dim=*/0, /*start=*/0, /*end=*/src.size(0));
+}
+
+void zero_tensor_tail(torch::Tensor& tensor,
+                      int64_t start,
+                      int64_t end,
+                      int64_t dim = 0) {
+  if (start >= end) {
+    return;
+  }
+  tensor.slice(/*dim=*/dim, /*start=*/start, /*end=*/end).zero_();
+}
+}  // namespace
+
+std::shared_ptr<layer::AttentionMetadata>
+GraphPersistentParam::persist_deepseek_v4_metadata(
+    std::shared_ptr<layer::AttentionMetadata> metadata) {
+  if (!metadata || !metadata->dsa_metadata) {
+    return metadata;
+  }
+
+  auto& dsa = *metadata->dsa_metadata;
+  auto& persistent = dsa_metadata_persistent_;
+
+  auto persist_tensor = [&](const std::string& name,
+                            const torch::Tensor& src,
+                            torch::Tensor& dst) {
+    (void)name;
+    auto result = copy_to_persistent_tensor(src, dst);
+    return result;
+  };
+
+  auto persist_fixed_tensor = [&](const std::string& name,
+                                  const torch::Tensor& src,
+                                  torch::Tensor& dst) {
+    (void)name;
+    auto result = copy_to_fixed_metadata_tensor(src, dst);
+    return result;
+  };
+
+  dsa.seq_lens = persist_tensor("seq_lens", dsa.seq_lens, persistent.seq_lens);
+  dsa.seq_lens_q =
+      persist_tensor("seq_lens_q", dsa.seq_lens_q, persistent.seq_lens_q);
+  dsa.attn_mask =
+      persist_tensor("attn_mask", dsa.attn_mask, persistent.attn_mask);
+  dsa.cos_table =
+      persist_tensor("cos_table", dsa.cos_table, persistent.cos_table);
+  dsa.sin_table =
+      persist_tensor("sin_table", dsa.sin_table, persistent.sin_table);
+  dsa.actual_seq_lengths_query =
+      persist_tensor("actual_seq_lengths_query",
+                     dsa.actual_seq_lengths_query,
+                     persistent.actual_seq_lengths_query);
+  dsa.actual_seq_lengths_kv = persist_tensor("actual_seq_lengths_kv",
+                                             dsa.actual_seq_lengths_kv,
+                                             persistent.actual_seq_lengths_kv);
+  dsa.max_seqlen_q =
+      persist_tensor("max_seqlen_q", dsa.max_seqlen_q, persistent.max_seqlen_q);
+  dsa.max_seqlen_kv = persist_tensor(
+      "max_seqlen_kv", dsa.max_seqlen_kv, persistent.max_seqlen_kv);
+  dsa.input_positions = persist_tensor(
+      "input_positions", dsa.input_positions, persistent.input_positions);
+  dsa.c4_pad_positions = persist_tensor(
+      "c4_pad_positions", dsa.c4_pad_positions, persistent.c4_pad_positions);
+  dsa.c128_pad_positions = persist_tensor("c128_pad_positions",
+                                          dsa.c128_pad_positions,
+                                          persistent.c128_pad_positions);
+  dsa.cos = persist_tensor("cos", dsa.cos, persistent.cos);
+  dsa.sin = persist_tensor("sin", dsa.sin, persistent.sin);
+  dsa.c4_cos = persist_tensor("c4_cos", dsa.c4_cos, persistent.c4_cos);
+  dsa.c4_sin = persist_tensor("c4_sin", dsa.c4_sin, persistent.c4_sin);
+  dsa.c128_cos = persist_tensor("c128_cos", dsa.c128_cos, persistent.c128_cos);
+  dsa.c128_sin = persist_tensor("c128_sin", dsa.c128_sin, persistent.c128_sin);
+  dsa.c4_input_cos =
+      persist_tensor("c4_input_cos", dsa.c4_input_cos, persistent.c4_input_cos);
+  dsa.c4_input_sin =
+      persist_tensor("c4_input_sin", dsa.c4_input_sin, persistent.c4_input_sin);
+  dsa.c128_input_cos = persist_tensor(
+      "c128_input_cos", dsa.c128_input_cos, persistent.c128_input_cos);
+  dsa.c128_input_sin = persist_tensor(
+      "c128_input_sin", dsa.c128_input_sin, persistent.c128_input_sin);
+  dsa.start_pos =
+      persist_tensor("start_pos", dsa.start_pos, persistent.start_pos);
+
+  dsa.c1_metadata = persist_fixed_tensor(
+      "c1_metadata", dsa.c1_metadata, persistent.c1_metadata);
+  dsa.c4_metadata = persist_fixed_tensor(
+      "c4_metadata", dsa.c4_metadata, persistent.c4_metadata);
+  dsa.c128_metadata = persist_fixed_tensor(
+      "c128_metadata", dsa.c128_metadata, persistent.c128_metadata);
+  dsa.qli_metadata = persist_fixed_tensor(
+      "qli_metadata", dsa.qli_metadata, persistent.qli_metadata);
+  dsa.hadamard = persist_tensor("hadamard", dsa.hadamard, persistent.hadamard);
+
+  persistent.block_tables.resize(dsa.block_tables.size());
+  for (size_t i = 0; i < dsa.block_tables.size(); ++i) {
+    persistent.block_tables[i].resize(dsa.block_tables[i].size());
+    for (size_t j = 0; j < dsa.block_tables[i].size(); ++j) {
+      const std::string name = c10::str("block_tables.", i, ".", j);
+      // Graph capture/replay requires this tensor to keep a fixed address.
+      // Long decode can grow the logical block table, but the persistent buffer
+      // must stay at the capture-time capacity and only update in place.
+      dsa.block_tables[i][j] =
+          copy_to_fixed_capacity_2d_tensor(dsa.block_tables[i][j],
+                                           persistent.block_tables[i][j],
+                                           persistent_block_tables_,
+                                           name.c_str());
+    }
+  }
+
+  persistent.slot_mappings.resize(dsa.slot_mappings.size());
+  for (size_t i = 0; i < dsa.slot_mappings.size(); ++i) {
+    persistent.slot_mappings[i].resize(dsa.slot_mappings[i].size());
+    for (size_t j = 0; j < dsa.slot_mappings[i].size(); ++j) {
+      dsa.slot_mappings[i][j] =
+          persist_tensor(c10::str("slot_mappings.", i, ".", j),
+                         dsa.slot_mappings[i][j],
+                         persistent.slot_mappings[i][j]);
+    }
+  }
+
+  return metadata;
+}
+
 std::optional<ModelInputParams> GraphPersistentParam::update(
     const torch::Tensor& tokens,
     const torch::Tensor& k_cache,
@@ -207,7 +463,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   CHECK_GT(padded_num_tokens, 0)
       << "padded_num_tokens must be > 0 when return_capture_params is true";
   const uint32_t actual_num_tokens = tokens.size(0);
-  const int64_t actual_batch_size = params.num_sequences;
+  const int64_t actual_batch_size = infer_actual_batch_size(params);
 
   // Copy data from input parameters to persistent graph tensors
   if (actual_num_tokens > 0) {
@@ -226,6 +482,10 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
           .copy_(positions, /*non_blocking=*/true);
     }
   }
+  if (q_seq_lens_default_.defined() &&
+      q_seq_lens_default_.sizes() == q_seq_lens_.sizes()) {
+    q_seq_lens_.copy_(q_seq_lens_default_, /*non_blocking=*/true);
+  }
   if (actual_batch_size > 0 && params.q_seq_lens.defined() &&
       params.q_seq_lens.dim() >= 1 && params.q_seq_lens.numel() > 0) {
     const int64_t q_copy_len =
@@ -237,6 +497,10 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
                                          /*end=*/q_copy_len),
                  /*non_blocking=*/true);
     }
+  }
+  if (kv_seq_lens_default_.defined() &&
+      kv_seq_lens_default_.sizes() == kv_seq_lens_.sizes()) {
+    kv_seq_lens_.copy_(kv_seq_lens_default_, /*non_blocking=*/true);
   }
   if (actual_batch_size > 0 && params.kv_seq_lens.defined() &&
       params.kv_seq_lens.dim() >= 1 && params.kv_seq_lens.numel() > 0) {
@@ -253,19 +517,13 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   // Keep padded decode slots valid for empty/local-short DP shards.
   // These tensors are consumed by ATB setup alongside *_seq_lens_vec.
   const int64_t padded_batch_size = static_cast<int64_t>(padded_num_tokens);
-  if (padded_batch_size > 0) {
-    const int64_t seq_fill_start =
-        std::min<int64_t>(actual_batch_size, padded_batch_size);
-    if (seq_fill_start < padded_batch_size) {
-      q_seq_lens_
-          .slice(/*dim=*/0, /*start=*/seq_fill_start, /*end=*/padded_batch_size)
-          .fill_(1);
-      kv_seq_lens_
-          .slice(/*dim=*/0, /*start=*/seq_fill_start, /*end=*/padded_batch_size)
-          .fill_(1);
-    }
-  }
 
+  if (persistent_new_cache_slots_default_.defined() &&
+      persistent_new_cache_slots_default_.sizes() ==
+          persistent_new_cache_slots_.sizes()) {
+    persistent_new_cache_slots_.copy_(persistent_new_cache_slots_default_,
+                                      /*non_blocking=*/true);
+  }
   if (actual_num_tokens > 0 && params.new_cache_slots.defined() &&
       params.new_cache_slots.dim() >= 1 && params.new_cache_slots.numel() > 0) {
     const int64_t slot_copy_len =
@@ -281,14 +539,18 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
   }
   if (actual_num_tokens < padded_num_tokens) {
-    persistent_new_cache_slots_
-        .slice(/*dim=*/0,
-               /*start=*/actual_num_tokens,
-               /*end=*/static_cast<int64_t>(padded_num_tokens))
-        .fill_(0);
+    zero_tensor_tail(persistent_new_cache_slots_,
+                     actual_num_tokens,
+                     static_cast<int64_t>(padded_num_tokens));
   }
 
   // Copy block table data
+  if (persistent_block_tables_default_.defined() &&
+      persistent_block_tables_default_.sizes() ==
+          persistent_block_tables_.sizes()) {
+    persistent_block_tables_.copy_(persistent_block_tables_default_,
+                                   /*non_blocking=*/true);
+  }
   if (actual_batch_size > 0 && params.block_tables.defined() &&
       params.block_tables.dim() >= 2 && params.block_tables.numel() > 0) {
     const int64_t block_rows_to_copy =
@@ -307,11 +569,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
   }
   if (actual_batch_size < padded_batch_size) {
-    persistent_block_tables_
-        .slice(/*dim=*/0,
-               /*start=*/actual_batch_size,
-               /*end=*/padded_batch_size)
-        .fill_(0);
+    zero_tensor_tail(
+        persistent_block_tables_, actual_batch_size, padded_batch_size);
   }
 
   // Update persistent embedding from input_embedding if available
@@ -344,6 +603,10 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     const int64_t max_seqs_per_batch = get_decode_graph_capacity(options_);
     q_cu_seq_lens_ = torch::zeros({max_seqs_per_batch + 1},
                                   torch::dtype(torch::kInt).device(device_));
+  }
+  if (q_cu_seq_lens_default_.defined() &&
+      q_cu_seq_lens_default_.sizes() == q_cu_seq_lens_.sizes()) {
+    q_cu_seq_lens_.copy_(q_cu_seq_lens_default_, /*non_blocking=*/true);
   }
   const bool has_q_cu =
       params.q_cu_seq_lens.defined() && params.q_cu_seq_lens.dim() >= 1;
@@ -395,6 +658,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   if (return_capture_params) {
     std::optional<ModelInputParams> params_for_capture =
         std::make_optional<ModelInputParams>(params);
+    const bool is_deepseek_v4_graph = args_.model_type() == "deepseek_v4";
     // Set persistent buffers in params_for_capture
     params_for_capture->kv_seq_lens = kv_seq_lens(padded_num_tokens);
     params_for_capture->q_seq_lens = q_seq_lens(padded_num_tokens);
@@ -414,8 +678,19 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     // Fill padded positions with default values
     for (int64_t i = vec_copy_len; i < static_cast<int64_t>(padded_num_tokens);
          i++) {
-      params_for_capture->kv_seq_lens_vec[i] = 1;
-      params_for_capture->q_seq_lens_vec[i] = 1;
+      params_for_capture->kv_seq_lens_vec[i] = is_deepseek_v4_graph ? 0 : 1;
+      params_for_capture->q_seq_lens_vec[i] = is_deepseek_v4_graph ? 0 : 1;
+    }
+    if (is_deepseek_v4_graph &&
+        actual_batch_size < static_cast<int64_t>(padded_num_tokens)) {
+      // DeepSeek V4 DSA metadata derives positions from host seq-len vectors;
+      // padded graph rows must stay zero so dummy rows never become DSA work.
+      zero_tensor_tail(q_seq_lens_,
+                       actual_batch_size,
+                       static_cast<int64_t>(padded_num_tokens));
+      zero_tensor_tail(kv_seq_lens_,
+                       actual_batch_size,
+                       static_cast<int64_t>(padded_num_tokens));
     }
     params_for_capture->num_sequences = padded_num_tokens;
     params_for_capture->batch_forward_type = BatchForwardType::DECODE;
@@ -789,8 +1064,6 @@ void GraphPersistentParam::plan_paged_attention_tiling(
 
 void GraphPersistentParam::update_attention_mask(
     const ModelInputParams& input_params) {
-  torch::Dtype dtype = util::parse_dtype(args_.dtype(), device_);
-
   // update persistent_mask_ in-place
   const int64_t batch_size = input_params.kv_seq_lens.size(0);
   const int64_t max_seq_len = input_params.kv_max_seq_len > 0
@@ -830,12 +1103,9 @@ void GraphPersistentParam::update_attention_mask(
       persistent_mask_.slice(/*dim=*/0, /*start=*/0, /*end=*/num_tokens)
           .slice(/*dim=*/1, /*start=*/0, /*end=*/max_seq_len);
 
-  // Zero out the slice first
-  mask_slice.zero_();
-
-  const float mask_value = (dtype == torch::kFloat16)
-                               ? -std::numeric_limits<float>::infinity()
-                               : -9984.0f;
+  CHECK(persistent_mask_zero_template_.defined() &&
+        persistent_mask_fill_template_.defined())
+      << "persistent mask templates must be initialized";
 
   if (chunked_prefill) {
     // Generate mask considering both q_seq_lens and kv_seq_lens
@@ -860,19 +1130,26 @@ void GraphPersistentParam::update_attention_mask(
           mask_slice.slice(/*dim=*/0, /*start=*/offset, /*end=*/offset + q_len)
               .slice(
                   /*dim=*/1, /*start=*/0, /*end=*/kv_len);  // [q_len, kv_len]
-
-      // Zero out the slice first
-      seq_mask_slice.zero_();
+      auto seq_zero_slice = persistent_mask_zero_template_
+                                .slice(/*dim=*/0,
+                                       /*start=*/offset,
+                                       /*end=*/offset + q_len)
+                                .slice(/*dim=*/1, /*start=*/0, /*end=*/kv_len);
+      auto seq_fill_slice = persistent_mask_fill_template_
+                                .slice(/*dim=*/0,
+                                       /*start=*/offset,
+                                       /*end=*/offset + q_len)
+                                .slice(/*dim=*/1, /*start=*/0, /*end=*/kv_len);
 
       // Generate mask for this sequence: [q_len, kv_len]
-      // Use tril to generate lower triangular mask
       int diagonal = kv_len - q_len;
-      auto options = torch::TensorOptions().dtype(torch::kBool).device(device_);
-      auto bias = torch::tril(torch::ones({q_len, kv_len}, options), diagonal);
-      bias = ~bias;  // Invert: True positions need to be masked
-
-      // Fill mask values directly
-      seq_mask_slice.masked_fill_(bias, mask_value);
+      auto int_options =
+          torch::TensorOptions().dtype(torch::kInt32).device(device_);
+      auto row = torch::arange(q_len, int_options).unsqueeze(1);
+      auto col = torch::arange(kv_len, int_options).unsqueeze(0);
+      auto bias = col > (row + diagonal);  // True positions need to be masked
+      seq_mask_slice.copy_(torch::where(bias, seq_fill_slice, seq_zero_slice),
+                           /*non_blocking=*/true);
 
       // Update offset for next sequence
       offset += q_len;
@@ -880,8 +1157,9 @@ void GraphPersistentParam::update_attention_mask(
   } else {
     // Original logic: only consider kv_seq_lens (decode mode, q_len = 1 for
     // all)
-    auto positions = torch::arange(max_seq_len, torch::kInt32)
-                         .to(device_)
+    auto int_options =
+        torch::TensorOptions().dtype(torch::kInt32).device(device_);
+    auto positions = torch::arange(max_seq_len, int_options)
                          .unsqueeze(0)
                          .expand({batch_size, max_seq_len});
 
@@ -890,7 +1168,14 @@ void GraphPersistentParam::update_attention_mask(
                                      .expand({batch_size, max_seq_len});
 
     auto mask_condition = positions >= context_lens_expanded;
-    mask_slice.masked_fill_(mask_condition, mask_value);
+    auto zero_slice = persistent_mask_zero_template_
+                          .slice(/*dim=*/0, /*start=*/0, /*end=*/num_tokens)
+                          .slice(/*dim=*/1, /*start=*/0, /*end=*/max_seq_len);
+    auto fill_slice = persistent_mask_fill_template_
+                          .slice(/*dim=*/0, /*start=*/0, /*end=*/num_tokens)
+                          .slice(/*dim=*/1, /*start=*/0, /*end=*/max_seq_len);
+    mask_slice.copy_(torch::where(mask_condition, fill_slice, zero_slice),
+                     /*non_blocking=*/true);
   }
 }
 
@@ -939,6 +1224,16 @@ bool AclGraph::capture(CausalLM* model,
       << "update() should return ModelInputParams when "
          "return_capture_params=true";
 
+  if (args.model_type() == "deepseek_v4") {
+    auto dsa_metadata = model->build_deepseek_v4_metadata(
+        persistent_param_.persistent_positions(num_tokens_),
+        graph_params.value());
+    graph_params->attn_metadata =
+        persistent_param_.persist_deepseek_v4_metadata(std::move(dsa_metadata));
+    CHECK(graph_params->attn_metadata)
+        << "DeepSeek V4 ACL graph capture requires DSA metadata";
+  }
+
   // Synchronize stream to ensure all data is copied to graph persistent buffers
   aclrtSynchronizeStream(stream);
 
@@ -947,9 +1242,8 @@ bool AclGraph::capture(CausalLM* model,
   // that conflict with capture mode
   auto device_idx = tensor_options.device().index();
 
-  // Use cached capture stream for graph capture
-  // capture_stream_ is initialized in constructor
   bool need_restore_stream = false;
+  graph_stream_ = stream;
 
   // capture lock scope
   {
@@ -961,6 +1255,7 @@ bool AclGraph::capture(CausalLM* model,
         c10_npu::getDefaultNPUStream(device_idx)) {
       c10_npu::setCurrentNPUStream(capture_stream_.value());
       aclrtSynchronizeStream(capture_stream_.value().stream());
+      graph_stream_ = capture_stream_.value().stream();
       need_restore_stream = true;
     }
     LOG(INFO) << "capture begin, bucket_num_tokens: " << bucket_num_tokens
@@ -991,12 +1286,25 @@ bool AclGraph::capture(CausalLM* model,
     }
   }
   // Synchronize and test replay to verify graph capture
+  aclrtSynchronizeStream(graph_stream_);
   aclrtSynchronizeStream(stream);
 
   graph_.replay();
 
-  // aclrtSynchronizeStream(stream);
+  make_current_stream_wait_for_graph(stream);
   return true;
+}
+
+AclGraph::~AclGraph() {
+  if (graph_stream_ != nullptr) {
+    aclrtSynchronizeStream(graph_stream_);
+  } else if (capture_stream_.has_value()) {
+    aclrtSynchronizeStream(capture_stream_.value().stream());
+  }
+  if (replay_done_event_ != nullptr) {
+    aclrtDestroyEvent(replay_done_event_);
+    replay_done_event_ = nullptr;
+  }
 }
 
 void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
@@ -1006,12 +1314,30 @@ void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
   // torch_npu/csrc/core/npu/NPUGraph.cpp:159).
   capture_stream_ = c10_npu::getStreamFromPool(true, device_index);
   device_index_ = device_index;
+  CHECK_EQ(aclrtCreateEventWithFlag(&replay_done_event_, ACL_EVENT_SYNC),
+           ACL_SUCCESS)
+      << "Failed to create ACL graph replay completion event";
   LOG(INFO) << "Initialized capture_stream: " << capture_stream_.value()
             << ", id: " << capture_stream_.value().id()
             << ", device_index: " << device_index;
 }
 
-ModelOutput AclGraph::replay(const torch::Tensor& tokens,
+void AclGraph::make_current_stream_wait_for_graph(aclrtStream current_stream) {
+  CHECK_NE(graph_stream_, nullptr) << "graph_stream is not initialized";
+  CHECK_NE(replay_done_event_, nullptr)
+      << "replay_done_event is not initialized";
+  CHECK_EQ(aclrtRecordEvent(replay_done_event_, graph_stream_), ACL_SUCCESS)
+      << "aclrtRecordEvent(replay_done_event) failed";
+  if (current_stream != graph_stream_) {
+    CHECK_EQ(aclrtStreamWaitEvent(current_stream, replay_done_event_),
+             ACL_SUCCESS)
+        << "aclrtStreamWaitEvent(current_stream, replay_done_event) failed";
+  }
+}
+
+ModelOutput AclGraph::replay(CausalLM* model,
+                             const ModelArgs& args,
+                             const torch::Tensor& tokens,
                              const torch::Tensor& positions,
                              std::vector<KVCache>& kv_cache,
                              const ModelInputParams& params) {
@@ -1026,13 +1352,22 @@ ModelOutput AclGraph::replay(const torch::Tensor& tokens,
   // be updated when Full Attention layers are involved, which is determined
   // by k_cache being valid and non-empty
   auto [k_cache, v_cache] = find_attention_plan_kv_cache(kv_cache);
-  persistent_param_.update(tokens,
-                           k_cache,
-                           v_cache,
-                           positions,
-                           params,
-                           num_tokens_,
-                           /*return_capture_params=*/false);
+  auto graph_params =
+      persistent_param_.update(tokens,
+                               k_cache,
+                               v_cache,
+                               positions,
+                               params,
+                               num_tokens_,
+                               args.model_type() == "deepseek_v4");
+  if (args.model_type() == "deepseek_v4") {
+    CHECK(graph_params.has_value())
+        << "DeepSeek V4 ACL graph replay requires persistent params";
+    auto dsa_metadata = model->build_deepseek_v4_metadata(
+        persistent_param_.persistent_positions(num_tokens_),
+        graph_params.value());
+    persistent_param_.persist_deepseek_v4_metadata(std::move(dsa_metadata));
+  }
 
   // Replay captured graph - NPUGraph mempool reuses temporary tensors
   // Get current NPU stream from libtorch NPU API
@@ -1040,15 +1375,15 @@ ModelOutput AclGraph::replay(const torch::Tensor& tokens,
 
   graph_.replay();
 
-  // this is necessary to ensure the graph replay is completed
-  // aclError st = aclrtSynchronizeStream(stream);
-  // CHECK_EQ(st, ACL_SUCCESS)
-  // << "aclrtSynchronizeStream failed, error code: " << st;
+  // NPUGraph replays on its capture stream. Add a device-side dependency so
+  // the current/default stream only observes completed outputs.
+  make_current_stream_wait_for_graph(stream);
 
   // Return the actual num_tokens portion of ModelOutput
   // Note: aux_hidden_states handling is done in AclGraphExecutorImpl::run()
   // since replay() doesn't have access to options
-  return ModelOutput(get_hidden_states(actual_num_tokens));
+  auto hidden_states = get_hidden_states(actual_num_tokens);
+  return ModelOutput(hidden_states);
 }
 
 AclGraphExecutorImpl::AclGraphExecutorImpl(CausalLM* model,
@@ -1110,8 +1445,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   if (actual_batch_size > decode_batch_size_limit) {
     LOG_FIRST_N(WARNING, 1)
         << "Falling back to eager mode because decode batch_size ("
-        << actual_batch_size
-        << ") > " << decode_batch_size_limit
+        << actual_batch_size << ") > " << decode_batch_size_limit
         << "; ACL graph is disabled for this request size to avoid OOM. "
         << "This message is logged only once. "
         << "Monitor counter 'num_model_execution_total_eager' for frequency.";
@@ -1146,8 +1480,12 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     // Replay the existing graph
     VLOG(kGraphExecutorLogVerboseLevel)
         << "AclGraphExecutorImpl::run() in replay mode";
-    auto result = it->second->replay(
-        tokens_tensor, positions_tensor, kv_caches, params_single);
+    auto result = it->second->replay(model_,
+                                     args_,
+                                     tokens_tensor,
+                                     positions_tensor,
+                                     kv_caches,
+                                     params_single);
     // Handle aux_hidden_states based on options
     if (options_.enable_graph_aux_hidden_states()) {
       auto aux_hidden_states = persistent_param_->aux_hidden_states(n_tokens);

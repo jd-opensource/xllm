@@ -132,7 +132,28 @@ void CompositeBlockManager::deallocate_sequence(Sequence* seq) {
 }
 
 void CompositeBlockManager::deallocate(const Slice<Block>& blocks) {
-  LOG(FATAL) << "CompositeBlockManager::deallocate is not implemented";
+  if (blocks.empty()) {
+    return;
+  }
+
+  for (const auto& block : blocks) {
+    if (!block.is_valid()) {
+      continue;
+    }
+    BlockManager* manager = block.manager();
+    CHECK(manager != nullptr)
+        << "CompositeBlockManager got a valid block without owner manager";
+    const auto it =
+        std::find_if(sub_managers_.begin(),
+                     sub_managers_.end(),
+                     [manager](const std::unique_ptr<BlockManager>& sub_mgr) {
+                       return sub_mgr.get() == manager;
+                     });
+    CHECK(it != sub_managers_.end())
+        << "CompositeBlockManager cannot deallocate block " << block.id()
+        << " from a manager outside this composite manager";
+    manager->deallocate(Slice<Block>(&block, 1));
+  }
 }
 
 std::vector<Block> CompositeBlockManager::allocate(size_t num_blocks) {

@@ -197,11 +197,20 @@ void scatter_by_slot(torch::Tensor& cache,
   CHECK_GT(cache_rows, 0) << "scatter_by_slot requires cache rows > 0, cache "
                           << cache.sizes();
 
-  auto valid_mask = slots_slice.ge(0);
-  if (!valid_mask.any().item<bool>()) {
+  if (!cache.device().is_cpu()) {
+    auto safe_slots = slots_slice.clamp_min(0);
+    auto valid_mask = slots_slice.ge(0).unsqueeze(1);
+    auto old_values = cache_2d.index_select(/*dim=*/0, safe_slots);
+    auto safe_values = torch::where(valid_mask, value_slice, old_values);
+    cache_2d.index_copy_(/*dim=*/0, safe_slots, safe_values);
     return;
   }
+
+  auto valid_mask = slots_slice.ge(0);
   auto valid_slots = slots_slice.index({valid_mask});
+  if (valid_slots.numel() == 0) {
+    return;
+  }
   auto valid_values = value_slice.index({valid_mask});
 
   const int64_t max_slot = valid_slots.max().item<int64_t>();
@@ -213,13 +222,6 @@ void scatter_by_slot(torch::Tensor& cache,
       << ", value_rows=" << value_2d.size(0) << ", update_rows=" << update_rows
       << ", cache_shape=" << cache.sizes();
   cache_2d.index_copy_(/*dim=*/0, valid_slots, valid_values);
-}
-
-int64_t tensor_max_or_zero(const torch::Tensor& tensor) {
-  if (!tensor.defined() || tensor.numel() == 0) {
-    return 0;
-  }
-  return tensor.max().item<int64_t>();
 }
 
 // Pack prefill TND KV [total_tokens, n, d] into temporary PA_ND blocks
@@ -306,7 +308,9 @@ AttentionMetadata build_indexer_attention_metadata(
     const DSAMetadata& attn_metadata,
     const torch::Tensor& block_table,
     const torch::Tensor& slot_mapping,
-    bool is_prefill) {
+    bool is_prefill,
+    int64_t max_query_len,
+    int64_t max_seq_len) {
   AttentionMetadata metadata;
   metadata.is_prefill = is_prefill;
   metadata.is_chunked_prefill = false;
@@ -340,19 +344,8 @@ AttentionMetadata build_indexer_attention_metadata(
         torch::cat({torch::zeros({1}, kv_seq_lens.options()), kv_cumsum});
   }
 
-  if (attn_metadata.max_seqlen_q.defined() &&
-      attn_metadata.max_seqlen_q.numel() > 0) {
-    metadata.max_query_len = attn_metadata.max_seqlen_q.max().item<int64_t>();
-  } else {
-    metadata.max_query_len = tensor_max_or_zero(metadata.q_seq_lens);
-  }
-
-  if (attn_metadata.max_seqlen_kv.defined() &&
-      attn_metadata.max_seqlen_kv.numel() > 0) {
-    metadata.max_seq_len = attn_metadata.max_seqlen_kv.max().item<int64_t>();
-  } else {
-    metadata.max_seq_len = tensor_max_or_zero(metadata.kv_seq_lens);
-  }
+  metadata.max_query_len = max_query_len;
+  metadata.max_seq_len = max_seq_len;
 
   metadata.dsa_metadata = std::make_shared<DSAMetadata>(attn_metadata);
 
@@ -691,8 +684,13 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
                                                             index_score_state};
     std::tuple<torch::Tensor, torch::Tensor> indexer_block_tables{
         index_kv_block_table, index_score_block_table};
-    auto indexer_metadata = build_indexer_attention_metadata(
-        attn_metadata, index_block_table, index_slot, isprefill);
+    auto indexer_metadata =
+        build_indexer_attention_metadata(attn_metadata,
+                                         index_block_table,
+                                         index_slot,
+                                         isprefill,
+                                         attn_metadata.max_query_len,
+                                         attn_metadata.max_seq_len);
     CHECK(qli_metadata.defined()) << "DSAttention requires precomputed "
                                      "qli_metadata for compress_ratio==4.";
     auto qli_metadata_opt = std::optional<torch::Tensor>(qli_metadata);

@@ -84,6 +84,7 @@ class DSAMetadataBuilder {
                             const std::vector<int>& q_lens,
                             int32_t batch_size,
                             int64_t total_tokens,
+                            int64_t graph_slot_capacity,
                             torch::Tensor& out_bt,
                             torch::Tensor& out_slots);
 
@@ -94,6 +95,7 @@ class DSAMetadataBuilder {
                                   const std::vector<int>& q_lens,
                                   int32_t batch_size,
                                   int64_t total_tokens,
+                                  int64_t graph_slot_capacity,
                                   torch::Tensor& out_bt,
                                   torch::Tensor& out_slots);
 
@@ -103,11 +105,13 @@ class DSAMetadataBuilder {
                                 const std::vector<int>& ctx_lens,
                                 const std::vector<int>& q_lens,
                                 int32_t batch_size,
+                                int64_t graph_slot_capacity,
                                 torch::Tensor& out_bt,
                                 torch::Tensor& out_slots);
 
   // Build actual_seq_lengths_kv and actual_seq_lengths_query.
   static void build_seq_lengths(const ModelInputParams& params,
+                                const torch::Device& target_device,
                                 int32_t batch_size,
                                 DSAMetadata& dsa_metadata);
 

@@ -1313,11 +1313,20 @@ inline void deserialize_raw_forward_input(const char*& buffer,
   // eplb_info
   read_eplb_info(buffer, forward_input.eplb_info);
 
-  // TODO: Optimize this logic. Placing this tensor directly on contiguous
-  // device memory causes unknown errors. This needs to be optimized after the
-  // root cause is identified and the error is resolved.
-  read_tensor(buffer, input_params.new_cache_slots);
-  read_tensor(buffer, input_params.block_tables);
+  const char* graph_device_buffer =
+      (FLAGS_enable_graph && device_buffer != nullptr) ? device_buffer
+                                                       : nullptr;
+
+  if (graph_device_buffer != nullptr) {
+    read_tensor(buffer, input_params.new_cache_slots, graph_device_buffer);
+    read_tensor(buffer, input_params.block_tables, graph_device_buffer);
+  } else {
+    // TODO: Optimize this logic. Placing this tensor directly on contiguous
+    // device memory causes unknown errors. This needs to be optimized after
+    // the root cause is identified and the error is resolved.
+    read_tensor(buffer, input_params.new_cache_slots);
+    read_tensor(buffer, input_params.block_tables);
+  }
 
   // multi block manager support
   {
@@ -1326,6 +1335,11 @@ inline void deserialize_raw_forward_input(const char*& buffer,
     input_params.multi_block_tables.reserve(manager_num);
     for (int32_t m = 0; m < manager_num; ++m) {
       torch::Tensor mgr_table;
+      // DeepSeek V4 multi_block_tables are consumed by the DSA metadata
+      // builder, which still expands them through host-side tensor accessors.
+      // Keep them as host tensors here instead of routing them through the
+      // graph device buffer, otherwise graph input deserialization can fail
+      // on the packed multi-manager layout.
       read_tensor(buffer, mgr_table);
       input_params.multi_block_tables.push_back(std::move(mgr_table));
     }
