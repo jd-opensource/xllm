@@ -100,10 +100,16 @@ class MooncakeKVCacheTransferDefault final
       bool is_spec_draft) override;
 
  private:
+  // Mooncake assigns buffer ids in registration order. Main KV cache registers
+  // first, then the speculative draft KV cache is appended after it.
   struct BufLayout {
+    // Number of layers owned by this layout.
     int64_t num_layers = 0;
+    // Number of registered buffers per layer, such as K/V/index cache.
     int64_t buf_cnt = 0;
+    // Starting buffer id of this layout in the Mooncake registration table.
     int64_t offset = 0;
+    // True after the corresponding KV cache memory has been registered.
     bool registered = false;
   };
 

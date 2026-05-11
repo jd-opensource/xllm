@@ -445,7 +445,9 @@ bool MooncakeKVCacheTransferDefault::pull_kv_blocks(
   (void)src_k_cache_id;
   (void)src_v_cache_id;
   std::vector<int64_t> layer_ids;
-  std::vector<int64_t> buf_ids = get_buf_ids(layer_ids, false);
+  // Pull path is used by target/main KV cache blocks, not spec draft blocks.
+  const bool is_spec_draft = false;
+  std::vector<int64_t> buf_ids = get_buf_ids(layer_ids, is_spec_draft);
   auto ret = mooncake_te_->pull_memory_blocks(
       src_addr, src_blocks, dst_blocks, buf_ids);
   if (!ret) {
