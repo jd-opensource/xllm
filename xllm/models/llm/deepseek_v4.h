@@ -22,8 +22,6 @@ limitations under the License.
 #include <atomic>
 #include <cctype>
 #include <cmath>
-#include <cstdlib>
-#include <cstring>
 #include <iomanip>
 #include <limits>
 #include <memory>
@@ -105,58 +103,6 @@ inline bool deepseek_v4_uses_acl_graph(
   (void)input_params;
   return false;
 #endif
-}
-
-inline bool deepseek_v4_env_flag_enabled(const char* name) {
-  const char* value = std::getenv(name);
-  return value != nullptr &&
-         (std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0 ||
-          std::strcmp(value, "TRUE") == 0 || std::strcmp(value, "on") == 0 ||
-          std::strcmp(value, "ON") == 0);
-}
-
-inline bool deepseek_v4_eager_debug_enabled() {
-  return deepseek_v4_env_flag_enabled("XLLM_DSV4_EAGER_DEBUG");
-}
-
-inline std::string deepseek_v4_tensor_debug_summary(
-    const torch::Tensor& tensor,
-    int64_t max_preview_items = 16) {
-  if (!tensor.defined()) {
-    return "undefined";
-  }
-
-  std::ostringstream oss;
-  oss << "sizes=" << tensor.sizes() << " numel=" << tensor.numel()
-      << " dtype=" << tensor.scalar_type() << " device=" << tensor.device();
-  if (tensor.numel() == 0) {
-    oss << " preview=<empty>";
-    return oss.str();
-  }
-  if (tensor.numel() > 4096) {
-    oss << " preview=<skipped:numel=" << tensor.numel() << ">";
-    return oss.str();
-  }
-
-  try {
-    auto flat = tensor.detach().flatten().to(torch::kCPU).contiguous();
-    auto stats = flat.to(torch::kFloat32);
-    oss << " sum=" << stats.sum().item<double>()
-        << " min=" << stats.min().item<double>()
-        << " max=" << stats.max().item<double>() << " preview=";
-    auto preview = flat.to(torch::kInt64).contiguous();
-    auto acc = preview.accessor<int64_t, 1>();
-    const int64_t n = std::min<int64_t>(preview.numel(), max_preview_items);
-    for (int64_t i = 0; i < n; ++i) {
-      if (i != 0) {
-        oss << " ";
-      }
-      oss << acc[i];
-    }
-  } catch (const std::exception& e) {
-    oss << " preview=<error:" << e.what() << ">";
-  }
-  return oss.str();
 }
 
 // Group key: (ratio, type, block_size) -> group_id
@@ -578,10 +524,6 @@ class DeepseekV4ModelImpl
       }
     }
 
-    if (!acl_graph_forward && deepseek_v4_eager_debug_enabled()) {
-      log_eager_metadata_snapshot(attn_metadata);
-    }
-
     std::optional<torch::Tensor> residual;
     for (size_t i = 0; i < layers_.size(); i++) {
       if (attn_metadata.dsa_metadata) {
@@ -655,75 +597,10 @@ class DeepseekV4ModelImpl
     }
     h = hc_head(h);
     auto [hidden_states, residual_out] = norm_(h, std::nullopt);
-    if (!acl_graph_forward && deepseek_v4_eager_debug_enabled()) {
-      LOG(INFO) << "[DSV4][EagerOutput] name=hidden_states "
-                << deepseek_v4_tensor_debug_summary(hidden_states);
-      if (residual_out.has_value()) {
-        LOG(INFO) << "[DSV4][EagerOutput] name=residual_out "
-                  << deepseek_v4_tensor_debug_summary(residual_out.value());
-      } else {
-        LOG(INFO) << "[DSV4][EagerOutput] name=residual_out undefined";
-      }
-    }
     return ModelOutput(hidden_states, residual_out);
   }
 
  private:
-  void log_eager_metadata_tensor(const std::string& name,
-                                 const torch::Tensor& tensor) const {
-    LOG(INFO) << "[DSV4][EagerMeta] name=" << name << " "
-              << deepseek_v4_tensor_debug_summary(tensor);
-  }
-
-  void log_eager_metadata_snapshot(
-      const layer::AttentionMetadata& attn_metadata) const {
-    LOG(INFO) << "[DSV4][EagerMeta] is_prefill=" << attn_metadata.is_prefill
-              << " is_chunked_prefill=" << attn_metadata.is_chunked_prefill
-              << " max_query_len=" << attn_metadata.max_query_len
-              << " max_seq_len=" << attn_metadata.max_seq_len
-              << " total_kv_len=" << attn_metadata.total_kv_len;
-    log_eager_metadata_tensor("q_cu_seq_lens", attn_metadata.q_cu_seq_lens);
-    log_eager_metadata_tensor("kv_cu_seq_lens", attn_metadata.kv_cu_seq_lens);
-    log_eager_metadata_tensor("kv_seq_lens", attn_metadata.kv_seq_lens);
-    log_eager_metadata_tensor("q_seq_lens", attn_metadata.q_seq_lens);
-    log_eager_metadata_tensor("block_table", attn_metadata.block_table);
-    log_eager_metadata_tensor("slot_mapping", attn_metadata.slot_mapping);
-
-    if (!attn_metadata.dsa_metadata) {
-      return;
-    }
-    const auto& dsa = *attn_metadata.dsa_metadata;
-    log_eager_metadata_tensor("seq_lens", dsa.seq_lens);
-    log_eager_metadata_tensor("seq_lens_q", dsa.seq_lens_q);
-    log_eager_metadata_tensor("actual_seq_lengths_query",
-                              dsa.actual_seq_lengths_query);
-    log_eager_metadata_tensor("actual_seq_lengths_kv",
-                              dsa.actual_seq_lengths_kv);
-    log_eager_metadata_tensor("max_seqlen_q", dsa.max_seqlen_q);
-    log_eager_metadata_tensor("max_seqlen_kv", dsa.max_seqlen_kv);
-    log_eager_metadata_tensor("input_positions", dsa.input_positions);
-    log_eager_metadata_tensor("c4_pad_positions", dsa.c4_pad_positions);
-    log_eager_metadata_tensor("c128_pad_positions", dsa.c128_pad_positions);
-    log_eager_metadata_tensor("start_pos", dsa.start_pos);
-    log_eager_metadata_tensor("c1_metadata", dsa.c1_metadata);
-    log_eager_metadata_tensor("c4_metadata", dsa.c4_metadata);
-    log_eager_metadata_tensor("c128_metadata", dsa.c128_metadata);
-    log_eager_metadata_tensor("qli_metadata", dsa.qli_metadata);
-
-    for (size_t i = 0; i < dsa.block_tables.size(); ++i) {
-      for (size_t j = 0; j < dsa.block_tables[i].size(); ++j) {
-        log_eager_metadata_tensor(c10::str("block_tables.", i, ".", j),
-                                  dsa.block_tables[i][j]);
-      }
-    }
-    for (size_t i = 0; i < dsa.slot_mappings.size(); ++i) {
-      for (size_t j = 0; j < dsa.slot_mappings[i].size(); ++j) {
-        log_eager_metadata_tensor(c10::str("slot_mappings.", i, ".", j),
-                                  dsa.slot_mappings[i][j]);
-      }
-    }
-  }
-
   static c10::optional<torch::Tensor> as_optional_tensor(
       const torch::Tensor& tensor) {
     if (tensor.defined() && tensor.numel() > 0) {

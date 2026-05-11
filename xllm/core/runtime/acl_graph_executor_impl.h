@@ -22,8 +22,6 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "core/common/macros.h"
@@ -214,14 +212,6 @@ class GraphPersistentParam {
     std::vector<std::vector<torch::Tensor>> slot_mappings;
   };
 
-  struct DebugTensorState {
-    bool defined = false;
-    const void* data_ptr = nullptr;
-    std::string sizes;
-    c10::ScalarType dtype = c10::ScalarType::Undefined;
-    c10::Device device = c10::Device(c10::DeviceType::CPU);
-  };
-
   // Initialize tiling tensor
   void initialize_paged_attention_plan_context(const torch::Device& device);
 
@@ -273,7 +263,6 @@ class GraphPersistentParam {
   // ModelOutput fields
   torch::Tensor aux_hidden_states_;
   DSAMetadataPersistent dsa_metadata_persistent_;
-  std::unordered_map<std::string, DebugTensorState> dsa_debug_states_;
 
   // ATB context and operation for paged attention plan
   atb::Context* context_for_plan_;

@@ -23,8 +23,6 @@ limitations under the License.
 #include <torch_npu/torch_npu.h>
 
 #include <algorithm>
-#include <cstdlib>
-#include <cstring>
 #include <numeric>
 
 #include "core/common/global_flags.h"
@@ -73,147 +71,6 @@ int64_t get_decode_graph_capacity(const runtime::Options& options) {
     return options.max_seqs_per_batch();
   }
   return options.max_seqs_per_batch() * options.num_decoding_tokens();
-}
-
-bool env_flag_enabled(const char* name) {
-  const char* value = std::getenv(name);
-  return value != nullptr &&
-         (std::strcmp(value, "1") == 0 || std::strcmp(value, "true") == 0 ||
-          std::strcmp(value, "TRUE") == 0 || std::strcmp(value, "on") == 0 ||
-          std::strcmp(value, "ON") == 0);
-}
-
-bool env_flag_disabled(const char* name) {
-  const char* value = std::getenv(name);
-  return value != nullptr &&
-         (std::strcmp(value, "0") == 0 || std::strcmp(value, "false") == 0 ||
-          std::strcmp(value, "FALSE") == 0 || std::strcmp(value, "off") == 0 ||
-          std::strcmp(value, "OFF") == 0);
-}
-
-bool dsv4_graph_debug_enabled() {
-  return env_flag_enabled("XLLM_DSV4_GRAPH_DEBUG");
-}
-
-bool dsv4_graph_debug_check_realloc_enabled() {
-  return dsv4_graph_debug_enabled() &&
-         !env_flag_disabled("XLLM_DSV4_GRAPH_CHECK_REALLOC");
-}
-
-std::string tensor_checksum_summary(const torch::Tensor& tensor) {
-  if (!tensor.defined()) {
-    return "checksum=<undef>";
-  }
-  if (tensor.numel() == 0) {
-    return "checksum=<empty>";
-  }
-  if (tensor.numel() > 4096) {
-    return c10::str("checksum=<skipped:numel=", tensor.numel(), ">");
-  }
-
-  try {
-    auto values = tensor.detach().flatten().to(
-        torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
-    const double sum = values.sum().item<double>();
-    const double min = values.min().item<double>();
-    const double max = values.max().item<double>();
-    return c10::str("sum=", sum, ",min=", min, ",max=", max);
-  } catch (const std::exception& e) {
-    return c10::str("checksum=<error:", e.what(), ">");
-  }
-}
-
-std::string tensor_preview_summary(const torch::Tensor& tensor,
-                                   int64_t max_items = 16) {
-  if (!tensor.defined()) {
-    return "preview=<undef>";
-  }
-  if (tensor.numel() == 0) {
-    return "preview=<empty>";
-  }
-
-  try {
-    auto values =
-        tensor.detach()
-            .flatten()
-            .to(torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU))
-            .contiguous();
-    const int64_t n = std::min<int64_t>(values.numel(), max_items);
-    std::vector<int64_t> preview;
-    preview.reserve(static_cast<size_t>(n));
-    auto acc = values.accessor<int64_t, 1>();
-    for (int64_t i = 0; i < n; ++i) {
-      preview.push_back(acc[i]);
-    }
-    return c10::str("preview=", preview);
-  } catch (const std::exception& e) {
-    return c10::str("preview=<error:", e.what(), ">");
-  }
-}
-
-void log_dsv4_graph_input_tensor(const std::string& name,
-                                 const torch::Tensor& tensor) {
-  if (!dsv4_graph_debug_enabled()) {
-    return;
-  }
-  if (!tensor.defined()) {
-    LOG(INFO) << "[DSV4][GraphInput] name=" << name << " undefined";
-    return;
-  }
-  LOG(INFO) << "[DSV4][GraphInput] name=" << name << " sizes=" << tensor.sizes()
-            << " numel=" << tensor.numel() << " dtype=" << tensor.scalar_type()
-            << " device=" << tensor.device() << " ptr=" << tensor.data_ptr()
-            << " " << tensor_checksum_summary(tensor) << " "
-            << tensor_preview_summary(tensor);
-}
-
-void log_dsv4_graph_output_tensor(const std::string& name,
-                                  const torch::Tensor& tensor) {
-  if (!dsv4_graph_debug_enabled()) {
-    return;
-  }
-  if (!tensor.defined()) {
-    LOG(INFO) << "[DSV4][GraphOutput] name=" << name << " undefined";
-    return;
-  }
-  LOG(INFO) << "[DSV4][GraphOutput] name=" << name
-            << " sizes=" << tensor.sizes() << " numel=" << tensor.numel()
-            << " dtype=" << tensor.scalar_type()
-            << " device=" << tensor.device() << " ptr=" << tensor.data_ptr()
-            << " " << tensor_checksum_summary(tensor) << " "
-            << tensor_preview_summary(tensor);
-}
-
-void log_dsv4_graph_params(const char* phase,
-                           const ModelInputParams& params,
-                           uint32_t actual_num_tokens,
-                           uint32_t padded_num_tokens) {
-  if (!dsv4_graph_debug_enabled()) {
-    return;
-  }
-  LOG(INFO) << "[DSV4][GraphInput] phase=" << phase
-            << " actual_num_tokens=" << actual_num_tokens
-            << " padded_num_tokens=" << padded_num_tokens
-            << " num_sequences=" << params.num_sequences
-            << " q_max_seq_len=" << params.q_max_seq_len
-            << " kv_max_seq_len=" << params.kv_max_seq_len
-            << " q_seq_lens_vec=" << params.q_seq_lens_vec
-            << " kv_seq_lens_vec=" << params.kv_seq_lens_vec
-            << " multi_block_tables=" << params.multi_block_tables.size();
-  log_dsv4_graph_input_tensor(c10::str(phase, ".q_seq_lens"),
-                              params.q_seq_lens);
-  log_dsv4_graph_input_tensor(c10::str(phase, ".kv_seq_lens"),
-                              params.kv_seq_lens);
-  log_dsv4_graph_input_tensor(c10::str(phase, ".q_cu_seq_lens"),
-                              params.q_cu_seq_lens);
-  log_dsv4_graph_input_tensor(c10::str(phase, ".new_cache_slots"),
-                              params.new_cache_slots);
-  log_dsv4_graph_input_tensor(c10::str(phase, ".block_tables"),
-                              params.block_tables);
-  for (size_t i = 0; i < params.multi_block_tables.size(); ++i) {
-    log_dsv4_graph_input_tensor(c10::str(phase, ".multi_block_tables.", i),
-                                params.multi_block_tables[i]);
-  }
 }
 
 int64_t infer_actual_batch_size(const ModelInputParams& params) {
@@ -476,74 +333,20 @@ GraphPersistentParam::persist_deepseek_v4_metadata(
 
   auto& dsa = *metadata->dsa_metadata;
   auto& persistent = dsa_metadata_persistent_;
-  const bool debug = dsv4_graph_debug_enabled();
-  const bool check_realloc = dsv4_graph_debug_check_realloc_enabled();
-
-  auto record_tensor = [&](const std::string& name,
-                           const torch::Tensor& tensor) {
-    if (!debug || !tensor.defined()) {
-      return;
-    }
-
-    DebugTensorState current;
-    current.defined = tensor.defined();
-    current.data_ptr = tensor.data_ptr();
-    current.sizes = c10::str(tensor.sizes());
-    current.dtype = tensor.scalar_type();
-    current.device = tensor.device();
-
-    const std::string key = c10::str(name, "|", current.sizes);
-    auto it = dsa_debug_states_.find(key);
-    if (it != dsa_debug_states_.end()) {
-      const auto& old = it->second;
-      const bool ptr_changed =
-          old.defined && current.defined && old.data_ptr != current.data_ptr;
-      const bool dtype_changed = old.dtype != current.dtype;
-      const bool device_changed = old.device != current.device;
-      if (ptr_changed || dtype_changed || device_changed) {
-        LOG(ERROR) << "[DSV4][GraphMeta] persistent tensor changed name="
-                   << name << " sizes=" << current.sizes
-                   << " old_ptr=" << old.data_ptr
-                   << " new_ptr=" << current.data_ptr
-                   << " old_dtype=" << old.dtype
-                   << " new_dtype=" << current.dtype
-                   << " old_device=" << old.device
-                   << " new_device=" << current.device;
-        if (check_realloc) {
-          CHECK(!ptr_changed)
-              << "[DSV4][GraphMeta] persistent tensor reallocated: " << name
-              << " sizes=" << current.sizes << " old_ptr=" << old.data_ptr
-              << " new_ptr=" << current.data_ptr;
-          CHECK(!dtype_changed)
-              << "[DSV4][GraphMeta] persistent tensor dtype changed: " << name;
-          CHECK(!device_changed)
-              << "[DSV4][GraphMeta] persistent tensor device changed: " << name;
-        }
-      }
-    } else {
-      dsa_debug_states_.emplace(key, current);
-    }
-
-    LOG(INFO) << "[DSV4][GraphMeta] name=" << name << " sizes=" << current.sizes
-              << " numel=" << tensor.numel() << " dtype=" << current.dtype
-              << " device=" << current.device << " ptr=" << current.data_ptr
-              << " " << tensor_checksum_summary(tensor) << " "
-              << tensor_preview_summary(tensor);
-  };
 
   auto persist_tensor = [&](const std::string& name,
                             const torch::Tensor& src,
                             torch::Tensor& dst) {
+    (void)name;
     auto result = copy_to_persistent_tensor(src, dst);
-    record_tensor(name, result);
     return result;
   };
 
   auto persist_fixed_tensor = [&](const std::string& name,
                                   const torch::Tensor& src,
                                   torch::Tensor& dst) {
+    (void)name;
     auto result = copy_to_fixed_metadata_tensor(src, dst);
-    record_tensor(name, result);
     return result;
   };
 
@@ -614,7 +417,6 @@ GraphPersistentParam::persist_deepseek_v4_metadata(
                                            persistent.block_tables[i][j],
                                            persistent_block_tables_,
                                            name.c_str());
-      record_tensor(name, dsa.block_tables[i][j]);
     }
   }
 
@@ -644,12 +446,6 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       << "padded_num_tokens must be > 0 when return_capture_params is true";
   const uint32_t actual_num_tokens = tokens.size(0);
   const int64_t actual_batch_size = infer_actual_batch_size(params);
-  if (args_.model_type() == "deepseek_v4") {
-    log_dsv4_graph_params(
-        "update.input", params, actual_num_tokens, padded_num_tokens);
-    log_dsv4_graph_input_tensor("update.input.tokens", tokens);
-    log_dsv4_graph_input_tensor("update.input.positions", positions);
-  }
 
   // Copy data from input parameters to persistent graph tensors
   if (actual_num_tokens > 0) {
@@ -903,17 +699,6 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
           q_cu_seq_lens_.slice(/*dim=*/0,
                                /*start=*/0,
                                /*end=*/padded_batch_size);
-    }
-
-    if (is_deepseek_v4_graph) {
-      log_dsv4_graph_params("update.capture_params",
-                            *params_for_capture,
-                            actual_num_tokens,
-                            padded_num_tokens);
-      log_dsv4_graph_input_tensor("update.capture_params.persistent_tokens",
-                                  persistent_tokens(padded_num_tokens));
-      log_dsv4_graph_input_tensor("update.capture_params.persistent_positions",
-                                  persistent_positions(padded_num_tokens));
     }
 
     return params_for_capture;
@@ -1581,9 +1366,6 @@ ModelOutput AclGraph::replay(CausalLM* model,
   // Note: aux_hidden_states handling is done in AclGraphExecutorImpl::run()
   // since replay() doesn't have access to options
   auto hidden_states = get_hidden_states(actual_num_tokens);
-  if (args.model_type() == "deepseek_v4") {
-    log_dsv4_graph_output_tensor("replay.hidden_states", hidden_states);
-  }
   return ModelOutput(hidden_states);
 }
 
@@ -1723,9 +1505,6 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     // already executed)
     auto hidden_states =
         graphs_[bucket_num_tokens]->get_hidden_states(n_tokens);
-    if (args_.model_type() == "deepseek_v4") {
-      log_dsv4_graph_output_tensor("capture.hidden_states", hidden_states);
-    }
     if (options_.enable_graph_aux_hidden_states()) {
       auto aux_hidden_states = persistent_param_->aux_hidden_states(n_tokens);
       if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {
