@@ -571,6 +571,10 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
   if (beam_width <= 1) {
     return;
   }
+  const int32_t result_width =
+      output.beam_sequence_group.defined()
+          ? static_cast<int32_t>(output.beam_sequence_group.size(1))
+          : beam_width;
   int32_t total_rounds =
       static_cast<int32_t>(output.beam_sequence_group.size(2));
   size_t num_groups = sequence_groups_.size();
@@ -589,14 +593,14 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
 
   std::vector<std::vector<int32_t>> group_flat2d;
   std::vector<float> last_logprobs;
-  group_flat2d.reserve(static_cast<size_t>(beam_width));
-  last_logprobs.reserve(static_cast<size_t>(beam_width));
+  group_flat2d.reserve(static_cast<size_t>(result_width));
+  last_logprobs.reserve(static_cast<size_t>(result_width));
 
   for (size_t g = 0; g < num_groups; ++g) {
     group_flat2d.clear();
     last_logprobs.clear();
 
-    for (int b = 0; b < beam_width; ++b) {
+    for (int b = 0; b < result_width; ++b) {
       std::vector<int32_t> row_tokens;
       row_tokens.reserve(static_cast<size_t>(total_rounds));
       for (int c = 0; c < total_rounds; ++c) {
@@ -615,7 +619,8 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
     Sequence* seq = sequence_groups_.empty()
                         ? sequences[g]
                         : sequence_groups_[g]->sequences()[0].get();
-    seq->set_beam_result(beam_width, total_rounds, group_flat2d, last_logprobs);
+    seq->set_beam_result(
+        result_width, total_rounds, group_flat2d, last_logprobs);
   }
 }
 

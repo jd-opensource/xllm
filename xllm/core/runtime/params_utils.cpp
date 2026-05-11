@@ -190,6 +190,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
     tmp.do_sample = sp.do_sample();
     tmp.is_embeddings = sp.is_embeddings();
     tmp.beam_width = sp.beam_width();
+    tmp.num_return_sequences = sp.num_return_sequences();
     tmp_sampling_params.emplace_back(tmp);
   }
   sampling_params.reserve(tmp_sampling_params.size());
@@ -416,6 +417,7 @@ void forward_input_to_proto(const RawForwardInput& inputs,
     pb_sp.set_do_sample(sp->do_sample);
     pb_sp.set_is_embeddings(sp->is_embeddings);
     pb_sp.set_beam_width(sp->beam_width);
+    pb_sp.set_num_return_sequences(sp->num_return_sequences);
     pb_sampling_params.emplace_back(pb_sp);
   }
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_sampling_params(),

@@ -1597,6 +1597,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
         mutable_input.positions = torch::tensor(positions_host, int_options);
         mutable_input.decoder_sampling_params.selected_token_idxes =
             torch::tensor(selected_token_idxes, int_options);
+        mutable_input.decoder_sampling_params.num_return_sequences =
+            mutable_input.sampling_params.num_return_sequences;
         mutable_input.input_params.batch_forward_type =
             BatchForwardType::DECODE;
         mutable_input.input_params.num_sequences = batch_size * beam_width;
@@ -1706,7 +1708,6 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
                         ? result->sample_output.top_logprobs.sizes()
                         : c10::IntArrayRef{});
     }
-
     if (!result->sample_output.top_tokens.defined() ||
         !result->sample_output.top_logprobs.defined()) {
       output.do_sample = result->sampling_params.do_sample;
