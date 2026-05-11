@@ -127,11 +127,11 @@ void DSAMetadataBuilder::build_dsa_fields(
   q_lens_vec.reserve(batch_size);
 
   dsa.input_positions = positions;
-  const torch::Device target_device = infer_metadata_device(params, positions);
   const bool is_acl_graph = params.graph_buffer.tiling_data.defined();
+  const torch::Device metadata_device(torch::kCPU);
 
   // Build per-batch sequence length metadata.
-  build_seq_lengths(params, target_device, batch_size, dsa);
+  build_seq_lengths(params, metadata_device, batch_size, dsa);
   dsa.is_acl_graph = is_acl_graph;
   if (static_cast<int32_t>(params.q_seq_lens_vec.size()) == batch_size) {
     q_lens_vec.assign(params.q_seq_lens_vec.begin(),
@@ -225,23 +225,8 @@ void DSAMetadataBuilder::build_dsa_fields(
                     proc_slots[m]);
     }
 
-    // Metadata expansion follows the device of the graph/model inputs. In ACL
-    // graph mode these tensors are already device-backed persistent inputs, so
-    // this loop must be a no-op and must not introduce host/device copies.
-    if (!target_device.is_cpu()) {
-      for (int32_t m = 0; m < manager_num; ++m) {
-        if (proc_bt[m].defined() && proc_bt[m].device() != target_device) {
-          proc_bt[m] = safe_to(
-              proc_bt[m], proc_bt[m].options().device(target_device), true);
-        }
-        if (proc_slots[m].defined() &&
-            proc_slots[m].device() != target_device) {
-          proc_slots[m] = safe_to(proc_slots[m],
-                                  proc_slots[m].options().device(target_device),
-                                  true);
-        }
-      }
-    }
+    // Keep expanded metadata on host. DeepSeek V4 packs these small tensors
+    // into one contiguous transfer for both graph and non-graph NPU forwards.
 
     // Step 3: expand by layer using group_id
     dsa.block_tables.resize(n_layers);
@@ -533,7 +518,12 @@ void DSAMetadataBuilder::build_seq_lengths(const ModelInputParams& params,
   auto int_options =
       torch::TensorOptions().dtype(torch::kInt32).device(target_device);
   auto kv_lens = params.kv_seq_lens;
-  if (!kv_lens.defined() || kv_lens.numel() == 0) {
+  if (target_device.is_cpu() &&
+      static_cast<int32_t>(params.kv_seq_lens_vec.size()) == batch_size) {
+    kv_lens = torch::tensor(std::vector<int32_t>(params.kv_seq_lens_vec.begin(),
+                                                 params.kv_seq_lens_vec.end()),
+                            int_options);
+  } else if (!kv_lens.defined() || kv_lens.numel() == 0) {
     kv_lens = torch::tensor(std::vector<int32_t>(params.kv_seq_lens_vec.begin(),
                                                  params.kv_seq_lens_vec.end()),
                             int_options);
@@ -548,7 +538,11 @@ void DSAMetadataBuilder::build_seq_lengths(const ModelInputParams& params,
   if (static_cast<int32_t>(params.q_seq_lens_vec.size()) == batch_size) {
     // Prefer explicit per-sequence query lengths from ModelInputParams.
     // This is accurate for prefill/decode/chunked/mixed batches.
-    if (!q_lens.defined() || q_lens.numel() == 0) {
+    if (target_device.is_cpu()) {
+      q_lens = torch::tensor(std::vector<int32_t>(params.q_seq_lens_vec.begin(),
+                                                  params.q_seq_lens_vec.end()),
+                             int_options);
+    } else if (!q_lens.defined() || q_lens.numel() == 0) {
       q_lens = torch::tensor(std::vector<int32_t>(params.q_seq_lens_vec.begin(),
                                                   params.q_seq_lens_vec.end()),
                              int_options);
@@ -663,10 +657,7 @@ void DSAMetadataBuilder::build_positions(const ModelInputParams& params,
             : std::min<int64_t>(num_tokens, num_tokens / ratio + batch_size);
     compressed.resize(static_cast<size_t>(std::max<int64_t>(target, 0)), 0);
     auto tensor = torch::tensor(compressed, cpu_options);
-    if (target_device.is_cpu()) {
-      return tensor;
-    }
-    return safe_to(tensor, tensor.options().device(target_device), true);
+    return tensor;
   };
 
   dsa_metadata.c4_pad_positions = build_compressed_positions(4);
