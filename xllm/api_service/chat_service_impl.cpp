@@ -888,7 +888,12 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
 
 MMChatServiceImpl::MMChatServiceImpl(VLMMaster* master,
                                      const std::vector<std::string>& models)
-    : APIServiceImpl(models), master_(master) {
+    : APIServiceImpl(models),
+      master_(master),
+      tool_call_parser_format_(
+          master_->options().tool_call_parser().value_or("")),
+      reasoning_parser_format_(
+          master_->options().reasoning_parser().value_or("")) {
   CHECK(master != nullptr);
 }
 
@@ -923,8 +928,23 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
     include_usage = rpc_request.stream_options().include_usage();
   }
 
+  const bool is_force_reasoning = get_enable_thinking_from_request(
+      request_params.chat_template_kwargs, reasoning_parser_format_);
+
+  std::shared_ptr<StreamOutputParser> stream_parser;
+  if (request_params.streaming && (!tool_call_parser_format_.empty() ||
+                                   !reasoning_parser_format_.empty())) {
+    stream_parser =
+        std::make_shared<StreamOutputParser>(request_params.tools,
+                                             tool_call_parser_format_,
+                                             reasoning_parser_format_,
+                                             is_force_reasoning);
+    CHECK(stream_parser != nullptr) << "create StreamOutputParser failed!";
+  }
+
   auto saved_streaming = request_params.streaming;
   auto saved_request_id = request_params.request_id;
+  auto saved_tools = request_params.tools;
 
   auto payload = call->take_request_payload();
 
@@ -940,8 +960,13 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
        include_usage = include_usage,
        first_message_sent = std::unordered_set<size_t>(),
        request_id = std::move(saved_request_id),
-       created_time = absl::ToUnixSeconds(absl::Now())](
-          const RequestOutput& req_output) mutable -> bool {
+       created_time = absl::ToUnixSeconds(absl::Now()),
+       json_tools = std::move(saved_tools),
+       tool_call_parser_format = tool_call_parser_format_,
+       reasoning_parser_format = reasoning_parser_format_,
+       is_force_reasoning = is_force_reasoning,
+       stream_parser =
+           stream_parser](const RequestOutput& req_output) mutable -> bool {
         req_output.log_request_status();
         if (req_output.status.has_value()) {
           const auto& status = req_output.status.value();
@@ -969,10 +994,18 @@ void MMChatServiceImpl::process_async_impl(std::shared_ptr<MMChatCall> call) {
                                            request_id,
                                            created_time,
                                            model,
-                                           req_output);
+                                           req_output,
+                                           stream_parser);
         }
-        return send_result_to_client_brpc(
-            call, request_id, created_time, model, req_output);
+        return send_result_to_client_brpc(call,
+                                          request_id,
+                                          created_time,
+                                          model,
+                                          req_output,
+                                          tool_call_parser_format,
+                                          reasoning_parser_format,
+                                          is_force_reasoning,
+                                          json_tools);
       });
 }
 
