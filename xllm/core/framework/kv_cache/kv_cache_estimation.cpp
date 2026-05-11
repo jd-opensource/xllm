@@ -244,7 +244,7 @@ void init_dsv4_counts(const ModelArgs& model_args,
 void init_standard_counts(const ModelArgs& model_args,
                           const KVCacheEstimateOptions& options,
                           KVCacheCapacity* kv_cache_cap) {
-  kv_cache_cap->num_linear_state_blocks(options.max_seqs_per_batch + 2);
+  kv_cache_cap->num_linear_state_blocks(options.max_concurrent_requests + 2);
   for (int64_t layer_id = 0; layer_id < kv_cache_cap->n_layers(); ++layer_id) {
     if (is_full_attention_layer(model_args, layer_id)) {
       ++kv_cache_cap->num_full_attention_layers();
@@ -270,8 +270,8 @@ void init_standard_counts(const ModelArgs& model_args,
              kv_cache_cap->linear_cache_size_in_bytes())
         << "failed to reserve linear state cache for linear-attention "
            "layers: "
-        << "max_seqs_per_batch (" << options.max_seqs_per_batch
-        << ") is too large. Please reduce max_seqs_per_batch to less than "
+        << "max_concurrent_requests (" << options.max_concurrent_requests
+        << ") is too large. Please reduce max_concurrent_requests to less than "
         << kv_cache_cap->cache_size_in_bytes() /
                    (kv_cache_cap->num_linear_attention_layers() *
                     kv_cache_cap->linear_slot_size()) -

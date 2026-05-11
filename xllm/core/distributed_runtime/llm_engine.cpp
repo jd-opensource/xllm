@@ -449,6 +449,8 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
       static_cast<int64_t>(options_.num_speculative_tokens());
   estimate_options.max_tokens_per_batch =
       static_cast<int64_t>(options_.max_tokens_per_batch());
+  estimate_options.max_concurrent_requests = static_cast<int64_t>(
+      ::xllm::SchedulerConfig::get_instance().max_concurrent_requests());
   estimate_options.is_draft_engine = options_.is_draft_engine();
   estimate_options.enable_prefix_cache =
       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
@@ -463,6 +465,7 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
         device.index(), kv_cache_cap.cache_size_in_bytes());
     DeviceMonitor::get_instance().set_total_activation_memory(device.index());
   }
+
 
   return kv_cache_cap;
 }

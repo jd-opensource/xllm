@@ -37,6 +37,7 @@ KVCacheEstimateOptions make_estimate_options() {
   options.world_size = 1;
   options.n_local_kv_heads = 2;
   options.max_seqs_per_batch = 8;
+  options.max_concurrent_requests = 8;
   return options;
 }
 

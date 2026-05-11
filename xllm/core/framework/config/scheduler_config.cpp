@@ -22,6 +22,10 @@ DEFINE_int32(max_tokens_per_batch, 10240, "Max number of tokens per batch.");
 
 DEFINE_int32(max_seqs_per_batch, 1024, "Max number of sequences per batch.");
 
+DEFINE_int32(max_concurrent_requests,
+             200,
+             "Max number of concurrent requests.");
+
 DEFINE_bool(enable_schedule_overlap,
             false,
             "Whether to enable schedule overlap.");
@@ -78,6 +82,7 @@ namespace xllm {
 void SchedulerConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(max_tokens_per_batch);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(max_seqs_per_batch);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_concurrent_requests);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_schedule_overlap);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(prefill_scheduling_memory_usage_threshold);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_chunked_prefill);
@@ -96,6 +101,7 @@ void SchedulerConfig::from_flags() {
 void SchedulerConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(max_tokens_per_batch);
   XLLM_CONFIG_ASSIGN_FROM_JSON(max_seqs_per_batch);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_concurrent_requests);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_schedule_overlap);
   XLLM_CONFIG_ASSIGN_FROM_JSON(prefill_scheduling_memory_usage_threshold);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_chunked_prefill);
@@ -118,6 +124,8 @@ void SchedulerConfig::append_config_json(
       config_json, default_config, max_tokens_per_batch);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, max_seqs_per_batch);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, max_concurrent_requests);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_schedule_overlap);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
