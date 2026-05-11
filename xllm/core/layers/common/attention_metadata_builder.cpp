@@ -99,6 +99,7 @@ AttentionMetadata build_attention_metadata(
       params.batch_forward_type.is_mixed() ||
       params.batch_forward_type.is_chunked_prefill();
   attn_metadata.is_prefill = params.batch_forward_type.is_prefill();
+
   if (!attn_metadata.is_prefill || enable_mla) {
     attn_metadata.block_table = params.block_tables;
 #if !defined(USE_NPU) && !defined(USE_CUDA)
