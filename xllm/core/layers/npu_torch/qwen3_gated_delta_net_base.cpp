@@ -365,39 +365,55 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   torch::Tensor conv_cache = kv_cache.get_conv_cache();
   torch::Tensor ssm_cache = kv_cache.get_ssm_cache();
   torch::Tensor g, beta, core_attn_out, last_recurrent_state;
-  torch::Tensor conv_weight = conv1d_->weight();
-  torch::Tensor linear_state_indices =
-      get_linear_state_indices(input_params, mixed_qkv.device());
-
+  auto device = mixed_qkv.device();
+  auto conv_weight = conv1d_->weight();
+  auto linear_state_indices = get_linear_state_indices(input_params, device);
+  torch::IntArrayRef num_accepted_tokens_opt;
+  torch::IntArrayRef has_initial_state;
+  std::vector<int64_t> linear_state_indices_vec(
+      input_params.linear_state_ids.begin(),
+      input_params.linear_state_ids.end());
+  int64_t run_mode = 1;
   if (attn_metadata.is_prefill) {
-    std::vector<int64_t> linear_state_indices_vec(
-        input_params.linear_state_ids.begin(),
-        input_params.linear_state_ids.end());
-    torch::IntArrayRef has_initial_state(input_params.has_initial_state);
-    torch::IntArrayRef num_accepted_tokens_opt;
-    mixed_qkv = xllm::kernel::causal_conv1d(
-        mixed_qkv,
-        conv_weight,
-        conv_cache,
-        std::optional<torch::Tensor>(),  // bias (no bias for qwen3)
-        torch::IntArrayRef(input_params.query_start_loc),
-        torch::IntArrayRef(linear_state_indices_vec),
-        has_initial_state,
-        num_accepted_tokens_opt,
-        1,   // activation_mode
-        -1,  // pad_slot_id
-        0);  // run_mode: fn
-  } else {
-    xllm::kernel::CausalConv1dUpdateParams conv_params;
-    conv_params.x = mixed_qkv.transpose(1, 2);
-    conv_params.conv_state = conv_cache.transpose(1, 2);
-    conv_params.weight = conv_weight.transpose(0, 1);
-    conv_params.activation = true;
-    conv_params.conv_state_indices = linear_state_indices;
-    conv_params.max_query_len = static_cast<int32_t>(seq_len);
-    conv_params.pad_slot_id = -1;
-    mixed_qkv = xllm::kernel::causal_conv1d_update(conv_params);
+    run_mode = 0;
+    has_initial_state = torch::IntArrayRef(input_params.has_initial_state);
   }
+
+  // For decode path, reshape mixed_qkv from [batch, seq_len, dim] to
+  // [batch * seq_len, dim] to match kernel expectations for run_mode=1.
+  // Also build per-token query_start_loc that covers all tokens including
+  // padding entries, since input_params.query_start_loc only covers actual
+  // requests.
+  torch::Tensor mixed_qkv_input = mixed_qkv;
+  std::vector<int64_t> query_start_loc_decode;
+  if (!attn_metadata.is_prefill && mixed_qkv.dim() == 3) {
+    int64_t num_tokens = batch_size * seq_len;
+    mixed_qkv_input = mixed_qkv.view({num_tokens, mixed_qkv.size(-1)});
+
+    query_start_loc_decode.reserve(num_tokens + 1);
+    for (int64_t i = 0; i <= num_tokens; ++i) {
+      query_start_loc_decode.push_back(i);
+    }
+  }
+
+  const std::vector<int64_t>& query_start_loc_to_use =
+      !attn_metadata.is_prefill && !query_start_loc_decode.empty()
+          ? query_start_loc_decode
+          : input_params.query_start_loc;
+
+  mixed_qkv = xllm::kernel::causal_conv1d(
+      mixed_qkv_input,
+      conv_weight,
+      conv_cache,
+      std::optional<torch::Tensor>(),  // bias (no bias for qwen3)
+      torch::IntArrayRef(query_start_loc_to_use),
+      torch::IntArrayRef(linear_state_indices_vec),
+      has_initial_state,
+      num_accepted_tokens_opt,
+      1,        // activation_mode
+      -1,       // pad_slot_id
+      run_mode  // run mode  0:fn, 1:update
+  );
 
   // Reshape back to 3D [batch_size, dim, seq_len]
   mixed_qkv = mixed_qkv.view({batch_size, -1, mixed_qkv.size(-1)}).contiguous();
