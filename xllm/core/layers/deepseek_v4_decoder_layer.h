@@ -49,6 +49,7 @@ class DeepseekV4DecoderLayerImpl : public torch::nn::Module {
                                       int32_t layer_id);
 
   void load_state_dict(const StateDict& state_dict);
+  void verify_loaded_weights() const { /*TODO: not implemented*/ };
   DeepseekV4LayerWeightMemStats get_weight_mem_stats() const;
 
   torch::Tensor forward(

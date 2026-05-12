@@ -189,9 +189,7 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
   }
 
   virtual void verify_loaded_weights() const {
-    if (!is_deepseek_v4_mtp_model(model_args_)) {
-      mtp_block_->verify_loaded_weights();
-    }
+    mtp_block_->verify_loaded_weights();
   }
 
   virtual void prepare_expert_weight(int32_t layer_id,
