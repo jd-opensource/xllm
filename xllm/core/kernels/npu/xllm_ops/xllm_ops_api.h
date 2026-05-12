@@ -25,6 +25,7 @@ limitations under the License.
 #include <torch_npu/csrc/framework/utils/OpPreparation.h>
 #endif
 
+#include <cstdint>
 #include <string>
 #include <optional>
 #include <tuple>
@@ -32,16 +33,16 @@ limitations under the License.
 
 namespace xllm::kernel::npu {
 namespace op_infer {
-const int N = 32;
+constexpr int32_t N = 32;
 // npu tensor max size
-const int SIZE = 8;
-const int INT4_NUMS_IN_INT32_SPACE = 8;
-const int NPU_NSA_COMPRESS_INPUT_DIM_SECOND = 1;
-const int NPU_NSA_COMPRESS_INPUT_DIM_THIRD = 2;
-const int DIM_0 = 0;
-const int DIM_1 = 1;
-const int DIM_2 = 2;
-const int DIM_3 = 3;
+constexpr int32_t SIZE = 8;
+constexpr int32_t INT4_NUMS_IN_INT32_SPACE = 8;
+constexpr int32_t NPU_NSA_COMPRESS_INPUT_DIM_SECOND = 1;
+constexpr int32_t NPU_NSA_COMPRESS_INPUT_DIM_THIRD = 2;
+constexpr int32_t DIM_0 = 0;
+constexpr int32_t DIM_1 = 1;
+constexpr int32_t DIM_2 = 2;
+constexpr int32_t DIM_3 = 3;
 }  // namespace op_infer
 
 void beam_search(const torch::Tensor& logprobs,

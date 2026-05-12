@@ -21,8 +21,8 @@ namespace xllm::kernel::npu {
 const int64_t INT4_IN_INT32_NUM = 8;
 // Substitute INT32_OUTPUT_TYPE for ge::DataType::DT_INT32, INT8_OUTPUT_TYPE
 // for ge::DataType::DT_INT8.
-const int INT32_OUTPUT_TYPE = 3;
-const int INT8_OUTPUT_TYPE = 2;
+constexpr int64_t INT32_OUTPUT_TYPE = 3;
+constexpr int64_t INT8_OUTPUT_TYPE = 2;
 
 std::tuple<at::Tensor, c10::optional<at::Tensor>> dynamic_quant(
     const at::Tensor& input,
@@ -44,7 +44,7 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> dynamic_quant(
   at::Tensor scale = at::empty(scale_size, input.options().dtype(at::kFloat));
   c10::optional<at::Tensor> offset;
   // default quant type: Int8
-  int output_type = INT8_OUTPUT_TYPE;
+  int64_t output_type = INT8_OUTPUT_TYPE;
   at::Tensor output;
   if (quant_dtype == at::ScalarType::QUInt4x2) {
     const auto last_dim = input.size(scale_dim);
