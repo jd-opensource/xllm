@@ -24,6 +24,7 @@ limitations under the License.
 #include "engine.h"
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
+#include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
@@ -182,8 +183,8 @@ class RecEngine : public Engine {
   // Private methods
   // ============================================================
   bool init_model();
-  KVCacheCapacity estimate_kv_cache_capacity();
-  bool allocate_kv_cache(const KVCacheCapacity& kv_cache_cap);
+  xllm::KVCacheCapacity estimate_kv_cache_capacity();
+  bool allocate_kv_cache(const xllm::KVCacheCapacity& kv_cache_cap);
 
   // ============================================================
   // Member variables

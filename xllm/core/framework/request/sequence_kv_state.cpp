@@ -47,6 +47,28 @@ void KVCacheState::set_kv_cache_tokens_num(size_t num) {
 void KVCacheState::incr_kv_cache_tokens_num(size_t num) {
   CHECK(kv_cache_tokens_num_ + num <= current_max_tokens_capacity());
   kv_cache_tokens_num_ += num;
+  slice_window_pos_ += num;
+}
+
+void KVCacheState::set_slice_window_size(uint32_t size) {
+  CHECK(size > 0);
+  CHECK(!composite_blocks_.empty() && !composite_blocks_[0].empty());
+  slice_window_size_ = size;
+  slice_window_pos_ = 0;
+  slice_window_buffer_ = size * composite_blocks_[0][0].size();
+}
+
+void KVCacheState::update_slice_window_pos() {
+  if (slice_window_size_ > 0) {
+    if (slice_window_pos_ >= slice_window_buffer_) {
+      slice_window_pos_ = slice_window_pos_ % slice_window_size_;
+      std::vector<Block>& slot0 = composite_blocks_[0];
+      CHECK_GT(slot0.size(), 1);
+      Block first = std::move(slot0[0]);
+      slot0.erase(slot0.begin());
+      slot0.push_back(std::move(first));
+    }
+  }
 }
 
 void KVCacheState::add_kv_blocks(const std::vector<Block>& new_blocks) {
@@ -101,12 +123,15 @@ void KVCacheState::add_shared_kv_blocks(std::vector<Block>&& blocks,
 }
 
 size_t KVCacheState::current_max_tokens_capacity() const {
-  if (blocks_.empty()) {
-    return 0;
+  if (!blocks_.empty()) {
+    // all blocks have the same size
+    const size_t block_size = blocks_[0].size();
+    return blocks_.size() * block_size;
   }
-  // all blocks have the same size
-  const size_t block_size = blocks_[0].size();
-  return blocks_.size() * block_size;
+  if (!composite_blocks_.empty() && !composite_blocks_[1].empty()) {
+    return composite_blocks_[1].size() * composite_blocks_[1][0].size();
+  }
+  return 0;
 }
 
 // returns allocated cache blocks
@@ -145,6 +170,7 @@ void KVCacheState::reset() {
   kv_cache_tokens_num_ = 0;
   num_owned_shared_blocks_ = 0;
   blocks_.clear();
+  composite_blocks_.clear();
   transfer_kv_info_.reset();
 }
 

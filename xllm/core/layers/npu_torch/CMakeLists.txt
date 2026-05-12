@@ -13,6 +13,10 @@ cc_library(
     qwen3_next_hybrid_decoder_layer_base.h
     qwen3_next_decoder_layer_impl.h
     qwen3_5_decoder_layer_impl.h
+    deepseek_sparse_attention.h
+    compressor.h
+    deepseek_v4_indexer.h
+    deepseek_v4_gate.h
   SRCS
     fused_moe.cpp
     attention.cpp
@@ -23,6 +27,12 @@ cc_library(
     qwen3_5_gated_delta_net.cpp
     qwen3_next_decoder_layer_impl.cpp
     qwen3_5_decoder_layer_impl.cpp
+    deepseek_sparse_attention.cpp
+    compressor.cpp
+    deepseek_v4_indexer.cpp
+    deepseek_v4_gate.cpp
   DEPS
     :common_layers
+    :xllm_ops
+    :triton_adapter
 )

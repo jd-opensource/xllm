@@ -144,6 +144,16 @@ Master::Master(const Options& options, EngineType type)
       master_status_(options.master_status()) {
   const auto model_path =
       std::filesystem::path(options_.model_path()).lexically_normal();
+  if (options_.enable_prefix_cache() && options_.backend() == "llm") {
+    const std::string model_type = util::get_model_type(model_path);
+    if (model_type == "deepseek_v4") {
+      LOG(WARNING) << "deepseek_v4 does not support prefix cache with "
+                      "CompositeBlockManager yet, fallback to "
+                      "enable_prefix_cache=false";
+      options_.enable_prefix_cache(false);
+      FLAGS_enable_prefix_cache = false;
+    }
+  }
   options_.enable_mla(util::should_enable_mla(model_path, options_.backend()));
   print_startup_banner(model_path, options_.backend(), options_.node_rank());
   LOG(INFO) << "Master init options: " << options_.to_string();

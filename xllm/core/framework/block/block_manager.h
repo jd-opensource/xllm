@@ -46,6 +46,12 @@ class BlockManager {
     PROPERTY(bool, enable_prefix_cache) = true;
     PROPERTY(bool, enable_disagg_pd) = false;
     PROPERTY(bool, enable_cache_upload) = false;
+    // For SlidingWindowBlockManager: blocks to allocate per sequence.
+    PROPERTY(uint32_t, window_size) = 0;
+    // For CompositeBlockManager (passed from upstream).
+    PROPERTY(std::vector<uint32_t>, manager_types) = {};
+    PROPERTY(std::vector<uint32_t>, compress_ratios) = {};
+    PROPERTY(uint32_t, max_seqs_per_batch) = 0;
   };
 
   explicit BlockManager(Options options) : options_(options) {}
@@ -89,6 +95,13 @@ class BlockManager {
 
   // get number of total blocks
   virtual size_t num_total_blocks() const = 0;
+
+  // CompositeBlockManager: Pool calls these when is_composite() is true.
+  virtual bool is_composite() const { return false; }
+  virtual bool allocate_for_sequence(Sequence* seq, size_t num_tokens) {
+    return false;
+  }
+  virtual void deallocate_sequence(Sequence* seq) {}
 
  protected:
   // the options for the block manager

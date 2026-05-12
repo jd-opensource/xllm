@@ -38,6 +38,7 @@ cc_library(
   HDRS
     onerec_block_layer.h
     oxygen_vision_layer.h
+    deepseek_v4_decoder_layer.h
     qwen2_decoder_layer.h
     qwen2_vision_layer.h
     qwen2_5_vision_layer.h
@@ -46,6 +47,7 @@ cc_library(
     qwen3_moe_decoder_layer.h
   SRCS
     oxygen_vision_layer.cpp
+    deepseek_v4_decoder_layer.cpp
     qwen2_vision_layer.cpp
     qwen2_decoder_layer.cpp
     qwen2_5_vision_layer.cpp

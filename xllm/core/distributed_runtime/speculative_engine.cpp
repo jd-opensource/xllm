@@ -170,10 +170,10 @@ bool SpeculativeEngine::allocate_kv_cache() {
   CHECK_GT(n_blocks, 0) << "no memory for kv cache";
 
   // allocate kv cache
-  target_kv_cache_cap.n_blocks() = n_blocks;
-  target_kv_cache_cap.cache_size_in_bytes() = kv_cache_size;
-  draft_kv_cache_cap.n_blocks() = n_blocks;
-  draft_kv_cache_cap.cache_size_in_bytes() = kv_cache_size;
+  target_kv_cache_cap.n_blocks(n_blocks);
+  target_kv_cache_cap.cache_size_in_bytes(kv_cache_size);
+  draft_kv_cache_cap.n_blocks(n_blocks);
+  draft_kv_cache_cap.cache_size_in_bytes(kv_cache_size);
   return engine_->allocate_kv_cache(target_kv_cache_cap) &&
          draft_engine_->allocate_kv_cache(draft_kv_cache_cap);
 }

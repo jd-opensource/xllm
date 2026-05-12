@@ -65,6 +65,13 @@ KVCacheShape::KVCacheShape(const KVCacheCapacity& kv_cache_cap,
   CHECK_GT(world_size, 0) << "world_size must be positive.";
   CHECK_GT(kv_cache_cap.block_size(), 0) << "block_size must be positive.";
 
+  if (model_args.model_type() == "deepseek_v4") {
+    key_cache_shape_ = std::vector<int64_t>{kv_cache_cap.swa_count(),
+                                            kv_cache_cap.c4_count(),
+                                            kv_cache_cap.c128_count()};
+    return;
+  }
+
   const bool enable_lighting_indexer = model_args.index_n_heads() > 0;
   const bool enable_linear_attention = has_linear_attention_layers(model_args);
   CHECK(!(enable_lighting_indexer && enable_linear_attention))
@@ -165,7 +172,8 @@ void KVCacheShape::print_shapes() const {
 void KVCacheShape::to_proto(proto::KVCacheShape* proto_shape) const {
   CHECK(proto_shape != nullptr) << "proto_shape must not be nullptr.";
   proto_shape->Clear();
-  add_shape_to_proto(key_cache_shape(), proto_shape->mutable_key_cache_shape());
+  add_shape_to_proto(key_cache_shape(),
+                     proto_shape->mutable_key_cache_shape());
   if (has_value_cache_shape()) {
     add_shape_to_proto(value_cache_shape(),
                        proto_shape->mutable_value_cache_shape());

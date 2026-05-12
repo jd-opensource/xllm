@@ -659,6 +659,7 @@ struct MoeAll2AllCreateParams {
   // Used for collective communication context and split assignment.
   int64_t nrank;
   // The current compute device to be used
+  // The current compute device to be used�?
   // default to CPU
   torch::Device device = torch::Device(torch::kCPU);
 };
@@ -1516,4 +1517,196 @@ struct ChunkGatedDeltaRuleParams {
   // Whether to apply L2 norm to q and k inside the kernel. Default: false.
   bool use_qk_l2norm_in_kernel = false;
 };
+struct HcPostParams {
+  torch::Tensor x;
+  torch::Tensor residual;
+  torch::Tensor post;
+  torch::Tensor comb;
+};
+
+struct QuantLightningIndexerParams {
+  torch::Tensor query;
+  torch::Tensor key;
+  torch::Tensor weights;
+  torch::Tensor query_dequant_scale;
+  torch::Tensor key_dequant_scale;
+  int64_t query_quant_mode = 0;
+  int64_t key_quant_mode = 0;
+  c10::optional<torch::Tensor> actual_seq_lengths_query;
+  c10::optional<torch::Tensor> actual_seq_lengths_key;
+  c10::optional<torch::Tensor> block_table;
+  c10::optional<torch::Tensor> metadata;
+  std::string layout_query;
+  std::string layout_key;
+  int64_t sparse_count = 0;
+  int64_t sparse_mode = 0;
+  int64_t pre_tokens = 0;
+  int64_t next_tokens = 0;
+  int64_t cmp_ratio = 1;
+  bool return_value = false;
+};
+
+struct HcPreInvRmsParams {
+  torch::Tensor x;
+  double epsilon = 1e-6;
+};
+
+struct HcPreSinkhornParams {
+  torch::Tensor mixes;
+  torch::Tensor rsqrt;
+  torch::Tensor hc_scale;
+  torch::Tensor hc_base;
+  torch::Tensor x;
+  int64_t hc_mult = 4;
+  int64_t hc_sinkhorn_iters = 20;
+  double hc_eps = 1e-6;
+};
+
+struct HcPreParams {
+  torch::Tensor x;
+  torch::Tensor hc_fn;
+  torch::Tensor hc_scale;
+  torch::Tensor hc_base;
+  int64_t hc_mult = 4;
+  int64_t hc_sinkhorn_iters = 20;
+  double norm_eps = 1e-6;
+  double hc_eps = 1e-6;
+};
+
+struct MoeGatingTopKHashParams {
+  torch::Tensor x;
+  int64_t k = 0;
+  c10::optional<torch::Tensor> bias;
+  c10::optional<torch::Tensor> input_ids;
+  c10::optional<torch::Tensor> tid2eid;
+  int64_t k_group = 1;
+  int64_t group_count = 1;
+  int64_t group_select_mode = 0;
+  int64_t renorm = 0;
+  int64_t norm_type = 0;
+  bool out_flag = false;
+  double routed_scaling_factor = 1.0;
+  double eps = 1e-20;
+};
+
+struct SparseAttnSharedkvParams {
+  torch::Tensor q;
+  c10::optional<torch::Tensor> ori_kv;
+  c10::optional<torch::Tensor> cmp_kv;
+  c10::optional<torch::Tensor> ori_sparse_indices;
+  c10::optional<torch::Tensor> cmp_sparse_indices;
+  c10::optional<torch::Tensor> ori_block_table;
+  c10::optional<torch::Tensor> cmp_block_table;
+  c10::optional<torch::Tensor> cu_seqlens_q;
+  c10::optional<torch::Tensor> cu_seqlens_ori_kv;
+  c10::optional<torch::Tensor> cu_seqlens_cmp_kv;
+  c10::optional<torch::Tensor> seqused_q;
+  c10::optional<torch::Tensor> seqused_kv;
+  c10::optional<torch::Tensor> sinks;
+  c10::optional<torch::Tensor> metadata;
+  double softmax_scale = 1.0;
+  int64_t cmp_ratio = 1;
+  int64_t ori_mask_mode = 0;
+  int64_t cmp_mask_mode = 0;
+  int64_t ori_win_left = 0;
+  int64_t ori_win_right = 0;
+  std::string layout_q;
+  std::string layout_kv;
+  bool return_softmax_lse = false;
+};
+
+struct SparseFlashAttentionParams {
+  torch::Tensor query;
+  torch::Tensor key;
+  torch::Tensor value;
+  torch::Tensor sparse_indices;
+  c10::optional<torch::Tensor> block_table;
+  c10::optional<torch::Tensor> actual_seq_lengths_query;
+  c10::optional<torch::Tensor> actual_seq_lengths_kv;
+  c10::optional<torch::Tensor> query_rope;
+  c10::optional<torch::Tensor> key_rope;
+  double scale_value = 1.0;
+  int64_t sparse_block_size = 0;
+  std::string layout_query;
+  std::string layout_kv;
+  int64_t sparse_mode = 0;
+};
+
+struct CompressorParams {
+  torch::Tensor x;
+  torch::Tensor wkv;
+  torch::Tensor wgate;
+  torch::Tensor kv_state;
+  torch::Tensor score_state;
+  torch::Tensor ape;
+  torch::Tensor norm_weight;
+  torch::Tensor rope_sin;
+  torch::Tensor rope_cos;
+  c10::optional<torch::Tensor> kv_block_table;
+  c10::optional<torch::Tensor> score_block_table;
+  c10::optional<torch::Tensor> cu_seqlens;
+  c10::optional<torch::Tensor> seqused;
+  c10::optional<torch::Tensor> start_pos;
+  int64_t rope_head_dim = 0;
+  int64_t cmp_ratio = 1;
+  int64_t coff = 1;
+  double norm_eps = 1e-6;
+  int64_t rotary_mode = 0;
+  bool enable_grad = false;
+};
+
+struct QuantLightningIndexerMetadataParams {
+  int64_t num_heads_q = 0;
+  int64_t num_heads_k = 0;
+  int64_t head_dim = 0;
+  int64_t query_quant_mode = 0;
+  int64_t key_quant_mode = 0;
+  c10::optional<torch::Tensor> actual_seq_lengths_query;
+  c10::optional<torch::Tensor> actual_seq_lengths_key;
+  int64_t batch_size = 0;
+  int64_t max_seqlen_q = 0;
+  int64_t max_seqlen_k = 0;
+  std::string layout_query;
+  std::string layout_key;
+  int64_t sparse_count = 0;
+  int64_t sparse_mode = 0;
+  int64_t pre_tokens = 0;
+  int64_t next_tokens = 0;
+  int64_t cmp_ratio = 1;
+  std::string device = "npu";
+};
+
+struct SparseAttnSharedkvMetadataParams {
+  int64_t num_heads_q = 0;
+  int64_t num_heads_kv = 0;
+  int64_t head_dim = 0;
+  c10::optional<torch::Tensor> cu_seqlens_q;
+  c10::optional<torch::Tensor> cu_seqlens_ori_kv;
+  c10::optional<torch::Tensor> cu_seqlens_cmp_kv;
+  c10::optional<torch::Tensor> seqused_q;
+  c10::optional<torch::Tensor> seqused_kv;
+  int64_t batch_size = 0;
+  int64_t max_seqlen_q = 0;
+  int64_t max_seqlen_kv = 0;
+  int64_t ori_topk = 0;
+  int64_t cmp_topk = 0;
+  int64_t cmp_ratio = 1;
+  int64_t ori_mask_mode = 0;
+  int64_t cmp_mask_mode = 0;
+  int64_t ori_win_left = 0;
+  int64_t ori_win_right = 0;
+  std::string layout_q;
+  std::string layout_kv;
+  bool has_ori_kv = false;
+  bool has_cmp_kv = false;
+};
+
+struct NpuInplacePartialRotaryMulParams {
+  torch::Tensor x;
+  torch::Tensor r1;
+  torch::Tensor r2;
+  std::string rotary_mode = "interleave";
+  std::vector<int64_t> partial_slice;
+};
+
 }  // namespace xllm::kernel

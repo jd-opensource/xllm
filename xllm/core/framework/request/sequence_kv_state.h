@@ -37,6 +37,8 @@ class KVCacheState {
   void add_shared_kv_blocks(std::vector<Block>&& blocks,
                             size_t current_total_num_tokens);
   void incr_shared_kv_blocks_num(size_t num);
+  void set_slice_window_size(uint32_t size);
+  void update_slice_window_pos();
 
   size_t current_max_tokens_capacity() const;
 
@@ -57,6 +59,15 @@ class KVCacheState {
   // get the number of blocks
   size_t num_kv_blocks() const;
   std::vector<int32_t> kv_cache_slots(int32_t pos_start, int32_t pos_end);
+
+  // composite block managers: blocks per sub-manager index (for
+  // CompositeBlockManager)
+  const std::vector<std::vector<Block>>& composite_blocks() const {
+    return composite_blocks_;
+  }
+  std::vector<std::vector<Block>>* mutable_composite_blocks() {
+    return &composite_blocks_;
+  }
 
   void set_transfer_kv_info(TransferKVInfo&& info);
   std::optional<TransferKVInfo>& transfer_kv_info();
@@ -83,6 +94,14 @@ class KVCacheState {
 
   // shared blocks number of the sequence.
   uint32_t num_owned_shared_blocks_ = 0;
+
+  // blocks allocated per composite sub-manager index (used when BlockManager is
+  // CompositeBlockManager)
+  std::vector<std::vector<Block>> composite_blocks_;
+
+  uint32_t slice_window_pos_ = 0;
+  uint32_t slice_window_size_ = 0;
+  uint32_t slice_window_buffer_ = 0;
 };
 
 }  // namespace xllm

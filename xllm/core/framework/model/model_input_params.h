@@ -422,6 +422,11 @@ struct ModelInputParams {
 
     params.new_cache_slots = safe_to(new_cache_slots, device, true);
     params.block_tables = safe_to(block_tables, device, true);
+    for (const auto& t : multi_block_tables) {
+      // Keep DSA multi-block tables on CPU for host-side metadata expansion.
+      params.multi_block_tables.push_back(
+          safe_to(t, t.options().device(torch::kCPU), true));
+    }
     params.kv_seq_lens_vec = kv_seq_lens_vec;
     params.q_seq_lens_vec = q_seq_lens_vec;
 
@@ -437,6 +442,8 @@ struct ModelInputParams {
     params.linear_state_indices = safe_to(linear_state_indices, device, true);
     params.request_ids = std::move(request_ids);
     params.extra_token_ids = std::move(extra_token_ids);
+    params.mtp_shifted_token_ids =
+        safe_to(mtp_shifted_token_ids, device, true);
     params.dp_ep_padding_data = dp_ep_padding_data;
     params.cp_ep_padding_data
         .attn_padding_idx(
@@ -598,6 +605,10 @@ struct ModelInputParams {
   // IntTensor: [n_seq, max_n_blocks]
   torch::Tensor block_tables;
 
+  // multi block manager block_tables for DeepSeek V4
+  // vector of (batch_size, max_block_length_i) tensors, one per manager
+  std::vector<torch::Tensor> multi_block_tables;
+
   // the indptr of the paged kv-cache
   // used in flashinfer
   // IntTensor: [n_seq + 1]
@@ -644,6 +655,8 @@ struct ModelInputParams {
   // chunked prefill case of speculative decoding
   // extra token ids for each sequence, and -1 for last chunk
   std::vector<int32_t> extra_token_ids;
+  // Shifted target token ids for MTP training/evaluation paths.
+  torch::Tensor mtp_shifted_token_ids;
 
   // swap
   std::vector<BlockTransferInfo> swap_blocks;

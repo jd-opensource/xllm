@@ -202,6 +202,13 @@ void resolve_weight_quant_method_for_linear_load(
     resolved_weight_quant_method = to_lower_copy(resolved.value());
     return;
   }
+  const std::string quantize_type = to_lower_copy(quant_args.quantize_type());
+  if (quant_args.quant_method().empty() &&
+      (quantize_type == "w8a8" || quantize_type == "w8a8_dynamic") &&
+      quant_args.quant_descs().empty()) {
+    resolved_weight_quant_method = quantize_type;
+    return;
+  }
   if (!quant_args.quant_descs().empty()) {
     LOG(WARNING) << "[LinearLoad][QuantMethod] quant_descs is not empty but "
                     "quant method was not resolved from state_dict prefixes. "
@@ -293,7 +300,12 @@ void ensure_w8a8_params_for_linear_load(
   CHECK(refs.weight.defined())
       << "weight must be registered before lazy quant init";
 
-  specs.reserve(4);
+  specs.reserve(5);
+  push(refs.weight,
+       refs.weight_is_loaded,
+       "weight",
+       {out_features, in_features},
+       options.dtype(torch::kInt8));
   if (is_w8a8_quant(resolved_weight_quant_method)) {
     push(refs.input_scale,
          refs.input_scale_is_loaded,

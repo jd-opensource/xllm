@@ -21,8 +21,6 @@ limitations under the License.
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
-
-#include <algorithm>
 #if defined(USE_NPU)
 #include "acl/acl.h"
 #include "kernels/npu/xllm_ops/xllm_ops_api.h"
@@ -32,6 +30,7 @@ limitations under the License.
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
@@ -44,12 +43,11 @@ limitations under the License.
 #include "common/metrics.h"
 #if defined(USE_NPU)
 #include "platform/npu/device_capture_lock.h"
-#elif defined(USE_CUDA)
-#include "kernels/cuda/cuda_ops_api.h"
 #endif
 #include "core/distributed_runtime/master.h"
 #include "core/runtime/worker_rendezvous.h"
 #include "framework/kv_cache/kv_cache.h"
+#include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_loader.h"
 #include "framework/parallel_state/npu_cp_ep_padding.h"
@@ -58,6 +56,7 @@ limitations under the License.
 #include "framework/xtensor/global_xtensor.h"
 #include "framework/xtensor/xtensor_allocator.h"
 #if defined(USE_NPU)
+#include "framework/kv_cache_transfer/mooncake_weight_transfer.h"
 #include "layers/npu/loader/rolling_weight_buffer.h"
 #endif
 #include "util/net.h"
@@ -143,9 +142,9 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   compute_stream_ = device_.get_stream_from_pool();
   sampler_ = std::make_unique<Sampler>();
 
-#if !defined(USE_NPU) && !defined(USE_CUDA)
+#if !defined(USE_NPU)
   if (FLAGS_enable_block_copy_kernel) {
-    LOG(WARNING) << "enable_block_copy_kernel is only supported on NPU/CUDA; "
+    LOG(WARNING) << "enable_block_copy_kernel is only supported on NPU; "
                     "forcing enable_block_copy_kernel=false.";
     FLAGS_enable_block_copy_kernel = false;
   }
@@ -176,10 +175,10 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
 
 WorkerImpl::~WorkerImpl() = default;
 
-bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
+bool WorkerImpl::allocate_kv_cache(const KVCacheShape& cache_shape) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
-  const auto& args = context_.get_model_args();
+  const ModelArgs& args = context_.get_model_args();
   const bool enable_linear_attention = has_linear_attention_layers(args);
   const bool enable_lighting_indexer = args.index_n_heads() > 0;
   CHECK(!(enable_linear_attention && enable_lighting_indexer))
@@ -209,7 +208,6 @@ bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
     }
   }
 
-  // Parse mamba_ssm_dtype if specified for linear attention layers.
   torch::ScalarType ssm_dtype = dtype_;
   if (enable_linear_attention) {
     ssm_dtype = resolve_ssm_dtype(args.mamba_ssm_dtype(), dtype_);
@@ -226,13 +224,14 @@ bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
       .enable_xtensor(FLAGS_enable_xtensor)
       .enable_linear_attention(enable_linear_attention)
       .enable_lighting_indexer(enable_lighting_indexer)
-      .enable_kv_cache_quant(enable_kv_cache_quant);
+      .enable_kv_cache_quant(enable_kv_cache_quant)
+      .block_size(options_.block_size())
+      .head_dim(args.head_dim())
+      .index_head_dim(std::max(args.index_head_dim(), 1))
+      .window_size(std::max(args.window_size(), 1))
+      .compress_ratios(args.compress_ratios());
 
-  allocate_kv_caches(kv_caches_, kv_cache_shape, create_options);
-
-#if defined(USE_CUDA)
-  refresh_cuda_block_copy_runtime_state();
-#endif
+  allocate_kv_caches(kv_caches_, cache_shape, create_options);
 
   init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;
@@ -259,7 +258,9 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       dtype_,
       kv_caches_,
       num_layers,
-      [this](const KVCacheShape& shape) { this->allocate_kv_cache(shape); },
+      [this](const KVCacheShape& shape) {
+        this->allocate_kv_cache(shape);
+      },
       enable_lighting_indexer,
       context_.get_model_args().model_type(),
       options_.model_id());
@@ -306,7 +307,7 @@ void WorkerImpl::get_cache_info(uint64_t& cluster_id,
                                 std::string& addr,
                                 int64_t& k_cache_id,
                                 int64_t& v_cache_id) {
-#if defined(USE_NPU) || defined(USE_MLU)
+#if defined(USE_NPU)
   kv_cache_transfer_->get_cache_info(cluster_id, addr, k_cache_id, v_cache_id);
 #endif
 }
@@ -436,78 +437,67 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     lock_guard.emplace(capture_lock);
   }
 #endif
-  const bool use_default_stream =
-      !enable_schedule_overlap() && options_.backend() == "llm";
-  auto prepare_input_on_current_stream = [&]() {
-    processed_input = input.to(device_, dtype_);
-    auto& input_params = processed_input.input_params;
+  c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
+  processed_input = input.to(device_, dtype_);
 
 #if defined(USE_NPU)
-    CpPrefillInputs tmp_cp_inputs;
-    if (parallel_args_.cp_size() > 1 &&
-        input.input_params.batch_forward_type.is_prefill()) {
-      tmp_cp_inputs = prepare_cp_prefill_inputs(parallel_args_.cp_size(),
-                                                input.token_ids,
-                                                input.positions,
-                                                input.input_params.q_seq_lens);
-      processed_input.input_params.cp_prefill_inputs =
-          tmp_cp_inputs.to(device_);
-      CpEpPadding cp_ep_padding(
-          input.token_ids,
-          context_.get_model_args().num_experts_per_tok(),
-          context_.get_parallel_args().mapping_data(),
-          /*device=*/device_,
-          dtype_,
-          /*is_prefill=*/input.input_params.batch_forward_type.is_prefill());
-      processed_input.input_params.cp_ep_padding_data = cp_ep_padding.build();
-    }
+  CpPrefillInputs tmp_cp_inputs;
+  if (parallel_args_.cp_size() > 1 &&
+      input.input_params.batch_forward_type.is_prefill()) {
+    tmp_cp_inputs =
+        prepare_cp_prefill_inputs(parallel_args_.cp_size(),
+                                  input.token_ids.cpu(),
+                                  input.positions.cpu(),
+                                  input.input_params.q_seq_lens.cpu());
+    processed_input.input_params.cp_prefill_inputs = tmp_cp_inputs.to(device_);
+    CpEpPadding cp_ep_padding(
+        input.token_ids.cpu(),
+        context_.get_model_args().num_experts_per_tok(),
+        context_.get_parallel_args().mapping_data(),
+        /*device=*/device_,
+        dtype_,
+        /*is_prefill=*/input.input_params.batch_forward_type.is_prefill());
+    processed_input.input_params.cp_ep_padding_data = cp_ep_padding.build();
+  }
 #endif
 
-    apply_kv_block_swaps(input_params);
+  auto& input_params = processed_input.input_params;
+
+  apply_kv_block_swaps(input_params);
 
 #if defined(USE_NPU)
-    if (context_.get_model_args().enable_mla() &&
-        input_params.batch_forward_type.is_chunked_prefill()) {
-      prepare_mla_prefixcache_inputs(input_params);
-    }
+  if (context_.get_model_args().enable_mla() &&
+      input_params.batch_forward_type.is_chunked_prefill()) {
+    prepare_mla_prefixcache_inputs(input_params);
+  }
 
-    if (!context_.get_parallel_args().mapping_data().empty() &&
-        !(context_.get_parallel_args().cp_size() > 1) &&
-        (context_.get_parallel_args().dp_size() > 1 ||
-         context_.get_parallel_args().ep_size() > 1)) {
-      torch::Tensor token_size_per_dp_group =
-          torch::tensor(processed_input.input_params.dp_global_token_nums,
-                        torch::TensorOptions()
-                            .device(torch::kCPU)
-                            .dtype(torch::kInt32)
-                            .pinned_memory(true));
-      bool is_prefill =
-          processed_input.input_params.batch_forward_type.is_prefill();
-      DpEpPadding dp_ep_padding(token_size_per_dp_group,
-                                context_.get_model_args().num_experts_per_tok(),
-                                context_.get_parallel_args().mapping_data(),
-                                device_,
-                                dtype_,
-                                is_prefill);
-      processed_input.input_params.dp_ep_padding_data = dp_ep_padding.build();
-      if (FLAGS_enable_eplb) {
-        // expert_load_data_.fill_(0);
-        processed_input.input_params.expert_load_data = expert_load_data_;
-      }
+  if (!context_.get_parallel_args().mapping_data().empty() &&
+      !(context_.get_parallel_args().cp_size() > 1) &&
+      (context_.get_parallel_args().dp_size() > 1 ||
+       context_.get_parallel_args().ep_size() > 1)) {
+    torch::Tensor token_size_per_dp_group =
+        torch::tensor(processed_input.input_params.dp_global_token_nums,
+                      torch::TensorOptions()
+                          .device(torch::kCPU)
+                          .dtype(torch::kInt32)
+                          .pinned_memory(true));
+    bool is_prefill =
+        processed_input.input_params.batch_forward_type.is_prefill();
+    DpEpPadding dp_ep_padding(token_size_per_dp_group,
+                              context_.get_model_args().num_experts_per_tok(),
+                              context_.get_parallel_args().mapping_data(),
+                              device_,
+                              dtype_,
+                              is_prefill);
+    processed_input.input_params.dp_ep_padding_data = dp_ep_padding.build();
+    if (FLAGS_enable_eplb) {
+      // expert_load_data_.fill_(0);
+      processed_input.input_params.expert_load_data = expert_load_data_;
     }
+  }
 #endif
-  };
 
-  if (use_default_stream) {
-    prepare_input_on_current_stream();
-  } else {
-    c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
-    prepare_input_on_current_stream();
-  }
-
-  if (!use_default_stream) {
-    prepare_stream_->synchronize();
-  }
+  auto ret = prepare_stream_->synchronize();
 }
 
 void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
@@ -520,11 +510,11 @@ void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
 #endif
 
 #if defined(USE_NPU)
-  if (input_params.swap_blocks.size() == 0 || FLAGS_enable_block_copy_kernel) {
+  if (input_params.swap_blocks.empty() || FLAGS_enable_block_copy_kernel) {
     return;
   }
 #elif defined(USE_CUDA)
-  if (input_params.swap_blocks.size() == 0) {
+  if (input_params.swap_blocks.empty()) {
     return;
   }
 #else
@@ -532,102 +522,25 @@ void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
 #endif
 
 #if defined(USE_NPU) || defined(USE_CUDA)
-  std::vector<int64_t> src_indices, dst_indices;
+  std::vector<int64_t> src_indices;
+  std::vector<int64_t> dst_indices;
   src_indices.reserve(input_params.swap_blocks.size());
   dst_indices.reserve(input_params.swap_blocks.size());
 
   for (const auto& block : input_params.swap_blocks) {
-    src_indices.push_back(block.src_block_id);
-    dst_indices.push_back(block.dst_block_id);
+    src_indices.emplace_back(block.src_block_id);
+    dst_indices.emplace_back(block.dst_block_id);
   }
 
-  auto src_tensor =
+  torch::Tensor src_tensor =
       torch::tensor(src_indices, torch::dtype(torch::kLong).device(device_));
-  auto dst_tensor =
+  torch::Tensor dst_tensor =
       torch::tensor(dst_indices, torch::dtype(torch::kLong).device(device_));
   for (size_t layer_id = 0; layer_id < kv_caches_.size(); ++layer_id) {
     kv_caches_[layer_id].swap_blocks(src_tensor, dst_tensor);
   }
 #endif
 }
-
-#if defined(USE_CUDA)
-void WorkerImpl::refresh_cuda_block_copy_runtime_state() {
-  cuda_block_copy_runtime_state_ = {};
-  if (!FLAGS_enable_block_copy_kernel || kv_caches_.empty()) {
-    return;
-  }
-
-  const auto& first_kv_cache = kv_caches_.front();
-  auto key_cache = first_kv_cache.get_k_cache();
-  auto value_cache = first_kv_cache.get_v_cache();
-  if (!key_cache.defined() || !value_cache.defined() || !key_cache.is_cuda() ||
-      !value_cache.is_cuda()) {
-    return;
-  }
-
-  CHECK(key_cache.is_contiguous())
-      << "CUDA block copy kernel expects contiguous key cache";
-  CHECK(value_cache.is_contiguous())
-      << "CUDA block copy kernel expects contiguous value cache";
-  CHECK_GT(key_cache.size(0), 0);
-
-  const auto cache_dtype = key_cache.scalar_type();
-  std::vector<int64_t> key_cache_ptrs;
-  std::vector<int64_t> value_cache_ptrs;
-  key_cache_ptrs.reserve(kv_caches_.size());
-  value_cache_ptrs.reserve(kv_caches_.size());
-  for (const auto& kv_cache : kv_caches_) {
-    auto layer_k_cache = kv_cache.get_k_cache();
-    auto layer_v_cache = kv_cache.get_v_cache();
-    CHECK(layer_k_cache.defined() && layer_v_cache.defined());
-    CHECK(layer_k_cache.is_cuda() && layer_v_cache.is_cuda());
-    CHECK(layer_k_cache.is_contiguous());
-    CHECK(layer_v_cache.is_contiguous());
-    CHECK(layer_k_cache.scalar_type() == cache_dtype);
-    CHECK(layer_v_cache.scalar_type() == cache_dtype);
-    CHECK(layer_k_cache.sizes() == key_cache.sizes());
-    CHECK(layer_v_cache.sizes() == value_cache.sizes());
-    key_cache_ptrs.push_back(
-        reinterpret_cast<int64_t>(layer_k_cache.data_ptr()));
-    value_cache_ptrs.push_back(
-        reinterpret_cast<int64_t>(layer_v_cache.data_ptr()));
-  }
-
-  auto ptr_options =
-      torch::TensorOptions().device(device_).dtype(torch::kInt64);
-  cuda_block_copy_runtime_state_.k_cache_ptrs_device =
-      torch::tensor(key_cache_ptrs, ptr_options);
-  cuda_block_copy_runtime_state_.v_cache_ptrs_device =
-      torch::tensor(value_cache_ptrs, ptr_options);
-  cuda_block_copy_runtime_state_.num_layers = kv_caches_.size();
-  cuda_block_copy_runtime_state_.numel_per_block = key_cache[0].numel();
-}
-
-bool WorkerImpl::can_use_cuda_block_copy_kernel(
-    const ModelInputParams& input_params) const {
-  return cuda_block_copy_runtime_state_.valid() &&
-         input_params.src_block_indices.defined() &&
-         input_params.dst_block_indices.defined() &&
-         input_params.cum_sum.defined() &&
-         input_params.src_block_indices.numel() > 0 &&
-         input_params.dst_block_indices.numel() > 0 &&
-         input_params.cum_sum.numel() > 0;
-}
-
-void WorkerImpl::execute_cuda_block_copy_kernel(
-    const ModelInputParams& input_params) {
-  CHECK(!kv_caches_.empty());
-  xllm::kernel::cuda::block_copy(
-      cuda_block_copy_runtime_state_.k_cache_ptrs_device,
-      cuda_block_copy_runtime_state_.v_cache_ptrs_device,
-      input_params.src_block_indices,
-      input_params.dst_block_indices,
-      input_params.cum_sum,
-      cuda_block_copy_runtime_state_.numel_per_block,
-      kv_caches_.front().get_k_cache().scalar_type());
-}
-#endif
 
 folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
     const ForwardInput& input) {
@@ -909,7 +822,6 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
               {"deepseek_v3", "deepseek_v3_mtp"},
               {"deepseek_v32", "deepseek_v3_mtp"},
               {"glm_moe_dsa", "glm_moe_dsa_mtp"},
-              {"joyai_llm_flash", "joyai_llm_flash_mtp"},
           };
       const std::string& current_type = args.model_type();
       auto it = kModelTypeToMtpType.find(current_type);
@@ -921,6 +833,8 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     }
   }
 #endif
+
+  args.enable_mla(options_.enable_mla());
 
   // create model context
   dtype_ = dtype;
@@ -941,12 +855,14 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   }
 
   std::unique_ptr<ScopedAtenLoadThreads> scoped_load_threads;
-  const int32_t prev_threads = torch::get_num_threads();
-  LOG(INFO) << "Temporarily setting ATen threads to 1 during weight loading"
-            << ", tp_world_size=" << tp_world_size
-            << ", prev_threads=" << prev_threads;
-  scoped_load_threads =
-      std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
+  if (tp_world_size > 1) {
+    const int32_t prev_threads = torch::get_num_threads();
+    LOG(INFO) << "Temporarily setting ATen threads to 1 during weight loading"
+              << ", tp_world_size=" << tp_world_size
+              << ", prev_threads=" << prev_threads;
+    scoped_load_threads =
+        std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
+  }
 
   if (master_status == MasterStatus::WAKEUP) {
     this->load_model(std::move(model_loader));
@@ -1002,8 +918,7 @@ bool WorkerImpl::init_rolling_runtime_state() {
   CHECK(load_stream_ != nullptr) << "load_stream_ is null for rolling load";
 
   // Rolling runtime ownership is moved into model.
-  // Worker provides runtime dependencies and delegates
-  // initialization/refresh.
+  // Worker provides runtime dependencies and delegates initialization/refresh.
   const int32_t n_slots = FLAGS_rolling_load_num_cached_layers;
   const int32_t n_rolling_slots = FLAGS_rolling_load_num_rolling_slots;
   return model_->init_or_refresh_rolling_runtime(load_stream_.get(),
@@ -1058,14 +973,6 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
                                                   src_v_cache_id,
                                                   src_blocks,
                                                   dst_blocks);
-#elif defined(USE_MLU)
-  (void)src_cluster_id;
-  (void)src_addr;
-  (void)src_k_cache_id;
-  (void)src_v_cache_id;
-  (void)src_blocks;
-  (void)dst_blocks;
-  LOG(FATAL) << "MLU backend does not support PULL kv cache transfer.";
 #endif
   return false;
 }

@@ -154,6 +154,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   std::vector<int32_t> extra_token_ids =
       std::vector<int32_t>(pb_forward_input->extra_token_ids().begin(),
                            pb_forward_input->extra_token_ids().end());
+  std::vector<int32_t> mtp_shifted_token_ids =
+      std::vector<int32_t>(pb_forward_input->mtp_shifted_token_ids().begin(),
+                           pb_forward_input->mtp_shifted_token_ids().end());
   std::vector<std::string> request_ids =
       std::vector<std::string>(pb_forward_input->request_ids().begin(),
                                pb_forward_input->request_ids().end());
@@ -249,12 +252,28 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.block_tables =
       std::move(create_2d_tensor(block_tables_vec, torch::kInt));
 
+  // multi block manager support for DeepSeek V4
+  for (int m = 0; m < pb_forward_input->multi_block_tables_vec().size(); ++m) {
+    const auto& mgr = pb_forward_input->multi_block_tables_vec()[m];
+    std::vector<std::vector<int32_t>> mgr_tables;
+    mgr_tables.reserve(mgr.block_tables().size());
+    for (int s = 0; s < mgr.block_tables().size(); ++s) {
+      mgr_tables.emplace_back(mgr.block_tables()[s].block_tables().begin(),
+                              mgr.block_tables()[s].block_tables().end());
+    }
+    util::pad_2d_vector(mgr_tables, /*pad_value=*/-1);
+    input_params.multi_block_tables.push_back(
+        create_2d_tensor(mgr_tables, torch::kInt));
+  }
+
   input_params.dp_global_token_nums = std::move(dp_global_token_nums);
   input_params.dp_is_decode = std::move(dp_is_decode);
   input_params.embedding_ids = std::move(embedding_ids);
   input_params.linear_state_ids = std::move(linear_state_ids);
   input_params.request_ids = std::move(request_ids);
   input_params.extra_token_ids = std::move(extra_token_ids);
+  input_params.mtp_shifted_token_ids =
+      torch::tensor(std::move(mtp_shifted_token_ids), tensor_options);
 
   input_params.swap_blocks = std::move(swap_blocks);
   // block copy kernel
@@ -472,6 +491,20 @@ void forward_input_to_proto(const RawForwardInput& inputs,
     *pb_forward_input->mutable_block_tables_vec()->Add() = pb_table;
   }
   pb_forward_input->set_num_sequences(inputs.num_sequences);
+  // multi block manager support for DeepSeek V4
+  if (!inputs.multi_block_tables_vec.empty()) {
+    pb_forward_input->mutable_multi_block_tables_vec()->Reserve(
+        inputs.multi_block_tables_vec.size());
+    for (const auto& mgr_tables : inputs.multi_block_tables_vec) {
+      auto* pb_mgr = pb_forward_input->mutable_multi_block_tables_vec()->Add();
+      pb_mgr->mutable_block_tables()->Reserve(mgr_tables.size());
+      for (const auto& seq_blocks : mgr_tables) {
+        proto::BlockTables pb_table;
+        ADD_VECTOR_TO_PROTO(pb_table.mutable_block_tables(), seq_blocks);
+        *pb_mgr->mutable_block_tables()->Add() = pb_table;
+      }
+    }
+  }
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_dp_global_token_nums(),
                       inputs.dp_global_token_nums);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_dp_is_decode(),
@@ -543,6 +576,8 @@ void forward_input_to_proto(const RawForwardInput& inputs,
                       inputs.request_ids);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_extra_token_ids(),
                       inputs.extra_token_ids);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_mtp_shifted_token_ids(),
+                      inputs.mtp_shifted_token_ids);
   pb_forward_input->mutable_swap_blocks()->Reserve(inputs.swap_blocks.size());
   for (auto t : inputs.swap_blocks) {
     proto::BlockTransferInfo block_transfer_info;

@@ -22,7 +22,7 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
-#include "../../common/tests/tests_utils.h"
+#include "tests_utils.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
