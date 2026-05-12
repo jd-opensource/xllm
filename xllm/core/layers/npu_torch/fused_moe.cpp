@@ -81,7 +81,7 @@ std::optional<std::string> resolve_moe_quant_method(
     }
   }
   if (!first_quant.has_value()) {
-    auto quantize_type = quant_args.quantize_type();
+    std::string quantize_type = quant_args.quantize_type();
     std::transform(
         quantize_type.begin(),
         quantize_type.end(),

@@ -76,7 +76,8 @@ std::vector<torch::Tensor> apply_npu_grouped_matmul(
     const c10::OptionalIntArrayRef tuning_config,
     std::optional<torch::ScalarType> output_dtype) {
   CHECK(!x.empty()) << "x must not be empty for npu_grouped_matmul.";
-  CHECK(group_list.has_value()) << "group_list is required for npu_grouped_matmul.";
+  CHECK(group_list.has_value())
+      << "group_list is required for npu_grouped_matmul.";
 
   if (!should_use_extended_grouped_matmul_signature(bias,
                                                     scale,
@@ -143,7 +144,7 @@ std::vector<torch::Tensor> apply_npu_grouped_matmul(
   const int64_t resolved_act_type = act_type.value_or(0);
   const auto resolved_tuning_config =
       tuning_config.has_value() ? tuning_config.value() : c10::IntArrayRef();
-  const auto resolved_output_dtype =
+  const at::ScalarType resolved_output_dtype =
       output_dtype.value_or(x.front().scalar_type());
 
   return at_npu::native::custom_ops::npu_grouped_matmul(

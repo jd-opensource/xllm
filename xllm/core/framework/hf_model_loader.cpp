@@ -841,8 +841,8 @@ bool HFModelLoader::load_quant_args(const std::string& model_weights_path) {
         if (it.key().find('.') == std::string::npos) {
           continue;
         }
-        const auto quant_type = it.value().get<std::string>();
-        auto quant_type_lower = quant_type;
+        const std::string quant_type = it.value().get<std::string>();
+        std::string quant_type_lower = quant_type;
         boost::algorithm::to_lower(quant_type_lower);
         if (boost::algorithm::starts_with(quant_type_lower, "w4a8")) {
           desc_has_w4a8 = true;
@@ -900,8 +900,7 @@ bool HFModelLoader::load_quant_args(const std::string& model_weights_path) {
     if (auto v = quant_desc_reader.value<int64_t>("group_size")) {
       quant_args_.group_size() = v.value();
       explicit_quant_group_size = true;
-    } else if (desc_model_quant_is_w4a8_dynamic &&
-               !explicit_quant_group_size) {
+    } else if (desc_model_quant_is_w4a8_dynamic && !explicit_quant_group_size) {
       // Match vllm-ascend W4A8_DYNAMIC's default. A config value of 0 is still
       // respected as the per-channel mode.
       quant_args_.group_size() = 256;

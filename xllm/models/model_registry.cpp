@@ -132,8 +132,7 @@ bool resolve_model_registration(const std::string& model_type,
   }
   if (model_type == "qwen3" && effective_backend == kAtbBackend) {
     *resolved_name = "qwen3_atb";
-  } else if (model_type == "qwen3_moe" &&
-             effective_backend == kAtbBackend) {
+  } else if (model_type == "qwen3_moe" && effective_backend == kAtbBackend) {
     *resolved_name = "qwen3_moe_atb";
   } else {
     *resolved_name = model_type;

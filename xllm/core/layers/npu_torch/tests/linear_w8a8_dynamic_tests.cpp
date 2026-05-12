@@ -22,13 +22,13 @@ limitations under the License.
 #include <unordered_map>
 #include <vector>
 
+#include "../../common/tests/tests_utils.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "kernels/ops_api.h"
 #include "layers/common/linear.h"
 #include "platform/device.h"
-#include "../../common/tests/tests_utils.h"
 
 namespace xllm {
 namespace layer {
@@ -50,8 +50,8 @@ class NpuLinearW8A8TestBase : public ::testing::Test {
 
   torch::Tensor make_input(const std::string& key,
                            const std::vector<int64_t>& shape) const {
-    auto input = test::seeded_tensor(
-        key, shape, torch::kFloat32, options_.device());
+    auto input =
+        test::seeded_tensor(key, shape, torch::kFloat32, options_.device());
     return (input * 0.1f).to(options_);
   }
 
@@ -165,10 +165,9 @@ class NpuLinearW8A8StaticTest : public NpuLinearW8A8TestBase {
   }
 
   torch::Tensor make_input_offset() const {
-    return torch::zeros({1},
-                        torch::TensorOptions()
-                            .dtype(torch::kInt8)
-                            .device(options_.device()));
+    return torch::zeros(
+        {1},
+        torch::TensorOptions().dtype(torch::kInt8).device(options_.device()));
   }
 
   torch::Tensor make_deq_scale(const std::string& key,
@@ -215,14 +214,14 @@ TEST_F(NpuLinearW8A8DynamicTest, ColumnParallelLinearLoadAndForward) {
   const int64_t in_features = 16;
   const int64_t out_features = 12;
 
-  auto linear = ColumnParallelLinear(ColumnParallelLinearImpl(in_features,
-                                                              out_features,
-                                                              /*bias=*/true,
-                                                              /*gather=*/false,
-                                                              quant_args_,
-                                                              parallel_args_
-                                                                  .tp_group_,
-                                                              options_));
+  auto linear =
+      ColumnParallelLinear(ColumnParallelLinearImpl(in_features,
+                                                    out_features,
+                                                    /*bias=*/true,
+                                                    /*gather=*/false,
+                                                    quant_args_,
+                                                    parallel_args_.tp_group_,
+                                                    options_));
 
   auto weight =
       make_qweight("npu.linear.column.weight", out_features, in_features);
@@ -257,19 +256,21 @@ TEST_F(NpuLinearW8A8DynamicTest, RowParallelLinearLoadAndForward) {
   const int64_t in_features = 20;
   const int64_t out_features = 10;
 
-  auto linear = RowParallelLinear(RowParallelLinearImpl(
-      in_features,
-      out_features,
-      /*bias=*/true,
-      /*input_is_parallelized=*/true,
-      /*enable_result_reduction=*/false,
-      quant_args_,
-      parallel_args_.tp_group_,
-      options_));
+  auto linear =
+      RowParallelLinear(RowParallelLinearImpl(in_features,
+                                              out_features,
+                                              /*bias=*/true,
+                                              /*input_is_parallelized=*/true,
+                                              /*enable_result_reduction=*/false,
+                                              quant_args_,
+                                              parallel_args_.tp_group_,
+                                              options_));
 
-  auto weight = make_qweight("npu.linear.row.weight", out_features, in_features);
+  auto weight =
+      make_qweight("npu.linear.row.weight", out_features, in_features);
   auto weight_scale = make_weight_scale("npu.linear.row.scale", out_features);
-  auto weight_offset = make_weight_offset("npu.linear.row.offset", out_features);
+  auto weight_offset =
+      make_weight_offset("npu.linear.row.offset", out_features);
   auto bias = make_bias("npu.linear.row.bias", out_features);
 
   std::unordered_map<std::string, torch::Tensor> weight_dict = {
@@ -300,9 +301,11 @@ TEST_F(NpuLinearW8A8DynamicTest, ReplicatedLinearLoadAndForward) {
   auto linear = ReplicatedLinear(ReplicatedLinearImpl(
       in_features, out_features, /*bias=*/true, quant_args_, options_));
 
-  auto weight = make_qweight("npu.linear.rep.weight", out_features, in_features);
+  auto weight =
+      make_qweight("npu.linear.rep.weight", out_features, in_features);
   auto weight_scale = make_weight_scale("npu.linear.rep.scale", out_features);
-  auto weight_offset = make_weight_offset("npu.linear.rep.offset", out_features);
+  auto weight_offset =
+      make_weight_offset("npu.linear.rep.offset", out_features);
   auto bias = make_bias("npu.linear.rep.bias", out_features);
 
   std::unordered_map<std::string, torch::Tensor> weight_dict = {

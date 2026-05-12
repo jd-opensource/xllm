@@ -37,7 +37,7 @@ at::Tensor apply_int4_quantize(const at::Tensor& self,
   TORCH_CHECK(self.dim() >= 1, "input dim must be >= 1 for int4 quantize.");
 
   auto output_shape = self.sizes().vec();
-  const auto last_dim = self.dim() - 1;
+  const int64_t last_dim = self.dim() - 1;
   TORCH_CHECK(output_shape[last_dim] % kInt4NumsInInt32Space == 0,
               "input shape last dim must be divisible by 8 for int4 "
               "quantize, got ",
@@ -46,14 +46,13 @@ at::Tensor apply_int4_quantize(const at::Tensor& self,
 
   const auto output_options = self.options().dtype(at::kInt);
   at::Tensor result;
-  const auto npu_format = get_tensor_npu_format(self);
+  const int64_t npu_format = get_tensor_npu_format(self);
   if (npu_format == ACL_FORMAT_FRACTAL_NZ) {
     result = at_npu::native::OpPreparation::apply_tensor_with_format(
         output_shape, output_options, ACL_FORMAT_FRACTAL_NZ, true);
   } else {
-    result =
-        at_npu::native::OpPreparation::apply_tensor_without_format(
-            output_shape, output_options);
+    result = at_npu::native::OpPreparation::apply_tensor_without_format(
+        output_shape, output_options);
   }
 
   const bool sqrt_mode = false;
@@ -93,17 +92,16 @@ at::Tensor apply_int4_quantize(const at::Tensor& self,
 
 }  // namespace
 
-at::Tensor quantize_per_tensor(
-    const at::Tensor& self,
-    const at::Tensor& scales,
-    const at::Tensor& zero_points,
-    at::ScalarType dtype,
-    int64_t axis) {
+at::Tensor quantize_per_tensor(const at::Tensor& self,
+                               const at::Tensor& scales,
+                               const at::Tensor& zero_points,
+                               at::ScalarType dtype,
+                               int64_t axis) {
   if (dtype == at::ScalarType::QUInt4x2) {
     return apply_int4_quantize(self, scales, zero_points, axis);
   }
 
-  auto output_dtype = at::kInt;
+  at::ScalarType output_dtype = at::kInt;
   if (dtype == at::ScalarType::QInt8) {
     output_dtype = at::kChar;
   } else if (dtype == at::ScalarType::QUInt8) {
@@ -114,13 +112,8 @@ at::Tensor quantize_per_tensor(
 
   at::Tensor result =
       at::empty(self.sizes().vec(), self.options().dtype(output_dtype));
-  EXEC_NPU_CMD(aclnnQuantize,
-               self,
-               scales,
-               zero_points,
-               output_dtype,
-               axis,
-               result);
+  EXEC_NPU_CMD(
+      aclnnQuantize, self, scales, zero_points, output_dtype, axis, result);
   return result;
 }
 

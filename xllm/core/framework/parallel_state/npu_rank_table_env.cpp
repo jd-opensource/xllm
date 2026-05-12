@@ -27,7 +27,7 @@ namespace xllm {
 namespace parallel_state {
 namespace {
 
-constexpr char kTorchNpuRankTableFileEnv[] = "RANK_TABLE_FILE";
+constexpr char kTorchNpuRankTableFile[] = "RANK_TABLE_FILE";
 
 std::string normalize_rank_table_file(const std::string& rank_tablefile) {
   if (rank_tablefile.empty()) {
@@ -66,19 +66,19 @@ void sync_torch_npu_rank_table_file_env(const std::string& rank_tablefile) {
       normalize_rank_table_file(rank_tablefile);
 
   std::lock_guard<std::mutex> lock(env_mutex);
-  const char* current = std::getenv(kTorchNpuRankTableFileEnv);
+  const char* current = std::getenv(kTorchNpuRankTableFile);
   if (current != nullptr && normalized_rank_tablefile == current &&
       configured_rank_tablefile == normalized_rank_tablefile) {
     return;
   }
 
-  CHECK_EQ(::setenv(kTorchNpuRankTableFileEnv,
+  CHECK_EQ(::setenv(kTorchNpuRankTableFile,
                     normalized_rank_tablefile.c_str(),
                     /*overwrite=*/1),
            0)
-      << "Failed to set " << kTorchNpuRankTableFileEnv << " for torch_npu.";
+      << "Failed to set " << kTorchNpuRankTableFile << " for torch_npu.";
   configured_rank_tablefile = normalized_rank_tablefile;
-  LOG(INFO) << "Set " << kTorchNpuRankTableFileEnv
+  LOG(INFO) << "Set " << kTorchNpuRankTableFile
             << " for torch_npu ProcessGroupHCCL: " << configured_rank_tablefile;
 }
 

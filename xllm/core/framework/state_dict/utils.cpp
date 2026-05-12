@@ -85,9 +85,10 @@ void ensure_parameter_storage(torch::nn::Module* module,
   CHECK(spec.tensor != nullptr) << "spec.tensor must not be null";
   CHECK(spec.is_loaded != nullptr) << "spec.is_loaded must not be null";
 
-  const auto expected_dtype = c10::typeMetaToScalarType(spec.options.dtype());
+  const at::ScalarType expected_dtype =
+      c10::typeMetaToScalarType(spec.options.dtype());
   auto& tensor = *spec.tensor;
-  auto& tensor_is_loaded = *spec.is_loaded;
+  bool& tensor_is_loaded = *spec.is_loaded;
   if (!tensor.defined()) {
     tensor = module->register_parameter(spec.name,
                                         torch::empty(spec.sizes, spec.options),

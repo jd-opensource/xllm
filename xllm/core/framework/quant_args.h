@@ -211,7 +211,8 @@ struct QuantArgs {
       return lhs + "." + rhs;
     };
 
-    const auto base_prefix = normalize_prefix(std::string(state_dict.prefix()));
+    const std::string base_prefix =
+        normalize_prefix(std::string(state_dict.prefix()));
     std::vector<std::string> query_prefixes;
     if (prefixes.empty()) {
       if (!base_prefix.empty()) {
@@ -220,7 +221,8 @@ struct QuantArgs {
     } else {
       query_prefixes.reserve(prefixes.size());
       for (const auto& prefix : prefixes) {
-        auto full_prefix = join_prefix(base_prefix, normalize_prefix(prefix));
+        std::string full_prefix =
+            join_prefix(base_prefix, normalize_prefix(prefix));
         if (!full_prefix.empty()) {
           query_prefixes.push_back(std::move(full_prefix));
         }
@@ -246,7 +248,7 @@ struct QuantArgs {
         }
         continue;
       }
-      auto normalized_quant = to_lower(quant.value());
+      const std::string normalized_quant = to_lower(quant.value());
       if (unresolved_prefix.has_value()) {
         LOG(FATAL) << "Inconsistent quant_method for prefixes: prefix '"
                    << unresolved_prefix.value() << "' unresolved, but prefix '"

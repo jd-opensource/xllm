@@ -32,8 +32,7 @@ at::Tensor construct_quant_matmul_output_tensor(const at::Tensor& x1,
                 x1.size(-1),
                 " vs ",
                 x2.size(-1));
-  }
-  else {
+  } else {
     TORCH_CHECK(x1.size(-1) == x2.size(-2),
                 "while transpose2 is false",
                 "x1 dim[-1] must match x2 dim[-2], got ",

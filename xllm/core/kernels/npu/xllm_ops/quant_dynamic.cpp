@@ -30,9 +30,9 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> dynamic_quant(
     const c10::optional<at::Tensor>& group_index,
     c10::optional<at::ScalarType> dst_type) {
   const auto quant_dtype = dst_type.value_or(at::kChar);
-  TORCH_CHECK(quant_dtype == at::kChar ||
-                  quant_dtype == at::ScalarType::QUInt4x2,
-              "dst_type must be torch.int8 or torch.quint4x2.");
+  TORCH_CHECK(
+      quant_dtype == at::kChar || quant_dtype == at::ScalarType::QUInt4x2,
+      "dst_type must be torch.int8 or torch.quint4x2.");
   TORCH_CHECK(input.dim() >= 1, "input dim must be >= 1.");
 
   at::SmallVector<int64_t, op_infer::SIZE> scale_size;

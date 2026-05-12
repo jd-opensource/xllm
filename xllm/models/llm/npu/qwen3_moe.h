@@ -503,8 +503,9 @@ class Qwen3MoeForCausalLMImpl
 TORCH_MODULE(Qwen3MoeForCausalLM);
 
 // register the causal model
-REGISTER_CAUSAL_MODEL_WITH_VARNAME(
-    qwen3_moe_atb, qwen3_moe_atb, Qwen3MoeForCausalLM);
+REGISTER_CAUSAL_MODEL_WITH_VARNAME(qwen3_moe_atb,
+                                   qwen3_moe_atb,
+                                   Qwen3MoeForCausalLM);
 
 // register the model args
 // example config:

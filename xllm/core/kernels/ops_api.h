@@ -46,8 +46,7 @@ torch::Tensor matmul(MatmulParams& params);
 
 torch::Tensor quant_matmul(QuantMatmulParams& params);
 
-torch::Tensor quantize(
-    NpuQuantizeParams& params);
+torch::Tensor quantize(NpuQuantizeParams& params);
 
 std::tuple<torch::Tensor, std::optional<torch::Tensor>> dynamic_quant(
     NpuQuantizeParams& params);

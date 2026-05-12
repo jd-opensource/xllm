@@ -224,7 +224,7 @@ bool is_w8a8_quant(
 }
 
 torch::Dtype get_w8a8_deq_scale_dtype(const torch::TensorOptions& options) {
-  const auto dtype = c10::typeMetaToScalarType(options.dtype());
+  const torch::Dtype dtype = c10::typeMetaToScalarType(options.dtype());
   if (dtype == torch::kFloat16) {
     return torch::kInt64;
   }
@@ -281,10 +281,10 @@ void ensure_w8a8_params_for_linear_load(
       // load_experts can copy the checkpoint weights correctly.
       specs.reserve(1);
       push(refs.weight,
-          refs.weight_is_loaded,
-          "weight",
-          {out_features, in_features},
-          options);
+           refs.weight_is_loaded,
+           "weight",
+           {out_features, in_features},
+           options);
       weight::ensure_parameter_storage(module, specs);
     }
     return;
@@ -1488,14 +1488,13 @@ ReplicatedLinearImpl::ReplicatedLinearImpl(
     // appropriate dtype based on the resolved quant method.
     weight_ = register_parameter(
         "weight",
-        torch::empty({out_features, in_features},
-                     options.dtype(torch::kInt8)),
-                     /*requires_grad=*/false);
+        torch::empty({out_features, in_features}, options.dtype(torch::kInt8)),
+        /*requires_grad=*/false);
   } else {
     weight_ =
         register_parameter("weight",
-                          torch::empty({out_features, in_features}, options),
-                          /*requires_grad=*/false);
+                           torch::empty({out_features, in_features}, options),
+                           /*requires_grad=*/false);
   }
 
   if (bias) {
