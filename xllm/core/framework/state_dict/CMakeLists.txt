@@ -22,4 +22,3 @@ cc_library(
     Folly::folly
     util
 )
-

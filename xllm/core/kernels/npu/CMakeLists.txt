@@ -24,7 +24,9 @@ cc_library(
     rope.cpp
     npu_recurrent_gated_delta_rule.cpp
     w4a8_dynamic_moe_preprocess.cpp
+    rec_constrained_topk.cpp
   DEPS
     :torch_npu_kernels
     :tilelang_kernels
+    xllm_ops
 )

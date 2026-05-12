@@ -48,6 +48,7 @@ limitations under the License.
 #include "kernels/cuda/cuda_ops_api.h"
 #endif
 #include "core/distributed_runtime/master.h"
+#include "core/runtime/worker_rendezvous.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_loader.h"
@@ -166,6 +167,10 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   if (FLAGS_enable_rolling_load) {
     load_stream_ = device_.get_stream_from_pool();
   }
+  worker_rendezvous_ =
+      std::make_unique<WorkerRendezvous>(kv_cache_transfer_, weight_transfer_);
+#else
+  worker_rendezvous_ = std::make_unique<WorkerRendezvous>(kv_cache_transfer_);
 #endif
 }
 
@@ -310,56 +315,24 @@ bool WorkerImpl::link_cluster(const std::vector<uint64_t>& cluster_ids,
                               const std::vector<std::string>& addrs,
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports) {
-#if defined(USE_NPU) || defined(USE_MLU)
-  for (int32_t i = 0; i < cluster_ids.size(); ++i) {
-    if (!kv_cache_transfer_->link_cluster(
-            cluster_ids[i], addrs[i], device_ips[i], ports[i])) {
-      return false;
-    }
-  }
-#endif
-  return true;
+  return worker_rendezvous_->link_cluster(
+      cluster_ids, addrs, device_ips, ports);
 }
 
 bool WorkerImpl::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                 const std::vector<std::string>& addrs,
                                 const std::vector<std::string>& device_ips,
                                 const std::vector<uint16_t>& ports) {
-#if defined(USE_NPU) || defined(USE_MLU)
-  for (int32_t i = 0; i < cluster_ids.size(); ++i) {
-    if (!kv_cache_transfer_->unlink_cluster(
-            cluster_ids[i], addrs[i], device_ips[i], ports[i])) {
-      return false;
-    }
-  }
-#endif
-  return true;
+  return worker_rendezvous_->unlink_cluster(
+      cluster_ids, addrs, device_ips, ports);
 }
 
 bool WorkerImpl::link_d2d(const std::string& remote_addr) {
-#if defined(USE_NPU)
-  if (!weight_transfer_) {
-    LOG(ERROR) << "MooncakeWeightTransfer not initialized";
-    return false;
-  }
-  return weight_transfer_->link_d2d(remote_addr);
-#else
-  LOG(ERROR) << "link_d2d requires USE_NPU build";
-  return false;
-#endif
+  return worker_rendezvous_->link_d2d(remote_addr);
 }
 
 bool WorkerImpl::unlink_d2d(const std::string& remote_addr) {
-#if defined(USE_NPU)
-  if (!weight_transfer_) {
-    LOG(ERROR) << "MooncakeWeightTransfer not initialized";
-    return false;
-  }
-  return weight_transfer_->unlink_d2d(remote_addr);
-#else
-  LOG(ERROR) << "unlink_d2d requires USE_NPU build";
-  return false;
-#endif
+  return worker_rendezvous_->unlink_d2d(remote_addr);
 }
 
 std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {

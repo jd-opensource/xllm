@@ -36,6 +36,7 @@ cc_library(
     eagle3_worker_impl.h
     spec_input_builder.h
     forward_shared_memory_manager.h
+    worker_rendezvous.h
   SRCS
     executor.cpp
     executor_impl_factory.cpp
@@ -47,6 +48,7 @@ cc_library(
     $<$<BOOL:${USE_CUDA}>:cuda_graph_executor_impl.cpp>
     worker.cpp
     worker_impl.cpp
+    worker_rendezvous.cpp
     llm_worker_impl.cpp
     vlm_worker_impl.cpp
     dit_worker_impl.cpp

@@ -171,4 +171,18 @@ w4a8_dynamic_moe_preprocess(
     const std::optional<torch::Tensor>& w2_scale_bias,
     int64_t group_size);
 
+std::tuple<torch::Tensor, torch::Tensor> rec_constrained_topk(
+    const torch::Tensor& logits,
+    const torch::Tensor& sequence_group,
+    const torch::Tensor& first_token_ids,
+    const torch::Tensor& prefix1_offsets,
+    const torch::Tensor& prefix1_values,
+    const torch::Tensor& prefix1_pair_keys,
+    const torch::Tensor& prefix2_value_offsets,
+    const torch::Tensor& prefix2_values,
+    const torch::Tensor& temperatures,
+    int64_t current_step,
+    int64_t top_k,
+    int64_t max_prefix1_degree,
+    int64_t max_prefix2_degree);
 }  // namespace xllm::kernel::npu

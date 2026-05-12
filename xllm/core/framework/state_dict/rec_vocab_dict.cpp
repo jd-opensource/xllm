@@ -12,7 +12,27 @@
 namespace xllm {
 namespace {
 constexpr uint32_t kMaxExtendedFieldBytes = 1U << 20;
+
+bool rec_token_triple_less(const RecTokenTriple& lhs,
+                           const RecTokenTriple& rhs) {
+  if (lhs[0] != rhs[0]) {
+    return lhs[0] < rhs[0];
+  }
+  if (lhs[1] != rhs[1]) {
+    return lhs[1] < rhs[1];
+  }
+  return lhs[2] < rhs[2];
 }
+
+void check_token_id(int32_t token_id, int32_t vocab_size, const char* name) {
+  CHECK_GE(token_id, 0) << "Invalid OneRec " << name
+                        << " token id: " << token_id;
+  CHECK_LT(token_id, vocab_size)
+      << "OneRec " << name << " token id " << token_id << " exceeds vocab_size "
+      << vocab_size;
+}
+
+}  // namespace
 
 bool RecVocabDict::initialize(const std::string& vocab_file) {
   if (initialized_) {
@@ -250,6 +270,93 @@ RecVocabDict::get_next_tokens_by_prefix_tokens(
   }
 
   return iter->second;
+}
+
+RecConstraintTables RecVocabDict::build_constraint_tables(
+    int32_t vocab_size) const {
+  CHECK_EQ(initialized_, true);
+  CHECK_GT(vocab_size, 0);
+
+  RecConstraintTables tables;
+  tables.vocab_size = vocab_size;
+  tables.prefix1_offsets.assign(static_cast<size_t>(vocab_size) + 1, 0);
+  tables.prefix2_value_offsets.emplace_back(0);
+
+  if (tokens_to_item_infos_map_.empty()) {
+    return tables;
+  }
+
+  std::vector<RecTokenTriple> triples;
+  triples.reserve(tokens_to_item_infos_map_.size());
+  for (const auto& entry : tokens_to_item_infos_map_) {
+    const RecTokenTriple& tokens = entry.first;
+    check_token_id(tokens[0], vocab_size, "t0");
+    check_token_id(tokens[1], vocab_size, "t1");
+    check_token_id(tokens[2], vocab_size, "t2");
+    triples.emplace_back(tokens);
+  }
+
+  std::sort(triples.begin(), triples.end(), rec_token_triple_less);
+
+  int32_t previous_t0 = -1;
+  for (const RecTokenTriple& tokens : triples) {
+    if (tokens[0] != previous_t0) {
+      tables.first_token_ids.emplace_back(tokens[0]);
+      previous_t0 = tokens[0];
+    }
+  }
+  tables.max_first_degree = static_cast<int32_t>(tables.first_token_ids.size());
+
+  tables.prefix1_values.reserve(triples.size());
+  tables.prefix1_pair_keys.reserve(triples.size());
+  tables.prefix2_values.reserve(triples.size());
+  tables.prefix2_value_offsets.reserve(triples.size() + 1);
+
+  size_t triple_idx = 0;
+  for (int32_t t0 = 0; t0 < vocab_size; ++t0) {
+    const int32_t prefix1_begin =
+        static_cast<int32_t>(tables.prefix1_values.size());
+    tables.prefix1_offsets[static_cast<size_t>(t0)] = prefix1_begin;
+
+    while (triple_idx < triples.size() && triples[triple_idx][0] == t0) {
+      const int32_t t1 = triples[triple_idx][1];
+      tables.prefix1_values.emplace_back(t1);
+      tables.prefix1_pair_keys.emplace_back(
+          static_cast<int64_t>(t0) * static_cast<int64_t>(vocab_size) +
+          static_cast<int64_t>(t1));
+
+      const int32_t prefix2_begin =
+          static_cast<int32_t>(tables.prefix2_values.size());
+      int32_t previous_t2 = -1;
+      while (triple_idx < triples.size() && triples[triple_idx][0] == t0 &&
+             triples[triple_idx][1] == t1) {
+        const int32_t t2 = triples[triple_idx][2];
+        if (t2 != previous_t2) {
+          tables.prefix2_values.emplace_back(t2);
+          previous_t2 = t2;
+        }
+        ++triple_idx;
+      }
+
+      const int32_t prefix2_end =
+          static_cast<int32_t>(tables.prefix2_values.size());
+      tables.max_prefix2_degree =
+          std::max(tables.max_prefix2_degree, prefix2_end - prefix2_begin);
+      tables.prefix2_value_offsets.emplace_back(prefix2_end);
+    }
+
+    const int32_t prefix1_end =
+        static_cast<int32_t>(tables.prefix1_values.size());
+    tables.prefix1_offsets[static_cast<size_t>(t0) + 1] = prefix1_end;
+    tables.max_prefix1_degree =
+        std::max(tables.max_prefix1_degree, prefix1_end - prefix1_begin);
+  }
+
+  CHECK_EQ(triple_idx, triples.size());
+  CHECK_EQ(tables.prefix1_pair_keys.size(), tables.prefix1_values.size());
+  CHECK_EQ(tables.prefix2_value_offsets.size(),
+           tables.prefix1_values.size() + 1);
+  return tables;
 }
 
 }  // namespace xllm
