@@ -148,6 +148,9 @@ class Options {
 
   PROPERTY(std::optional<std::string>, device_ip);
 
+  // optional disagg pd rpc listen port for this master instance.
+  PROPERTY(std::optional<uint16_t>, disagg_pd_port);
+
   PROPERTY(uint16_t, transfer_listen_port) = 26000;
 
   PROPERTY(std::optional<std::string>, etcd_addr);

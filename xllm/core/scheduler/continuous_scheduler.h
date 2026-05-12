@@ -69,6 +69,9 @@ class ContinuousScheduler : public Scheduler {
 
     PROPERTY(bool, enable_pd_ooc) = false;
 
+    // optional disagg pd rpc listen port for this scheduler instance.
+    PROPERTY(std::optional<uint16_t>, disagg_pd_port);
+
     // for master service, current instance name(ID).
     PROPERTY(std::optional<std::string>, instance_name);
 
