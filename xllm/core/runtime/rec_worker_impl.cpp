@@ -108,9 +108,8 @@ torch::Tensor int64_vector_to_device_tensor(const std::vector<int64_t>& values,
 
 int32_t get_requested_beam_result_width(const SamplingParameters& params,
                                         int32_t beam_width) {
-  return params.num_return_sequences > 0
-             ? params.num_return_sequences
-             : beam_width;
+  return params.num_return_sequences > 0 ? params.num_return_sequences
+                                         : beam_width;
 }
 
 struct OneRecBeamSearchTensors {
@@ -313,7 +312,9 @@ void select_final_onerec_beam_results(
       .slice(/*dim=*/2, /*start=*/current_step, /*end=*/current_step + 1)
       .copy_(new_tokens.unsqueeze(2));
 }
-#endif
+#endif  // defined(USE_NPU)  // final select helpers
+
+#endif  // defined(USE_NPU)  // tensor helpers + beam-search helpers
 
 }  // namespace
 
@@ -1707,10 +1708,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
           round_sampling_params.max_top_logprobs, requested_result_width);
       round_sampling_params.logprobs = true;
     }
-    auto result = run_single_round(round_sampling_params,
-                                   round,
-                                   beam_tensors.sequence_group,
-                                   beam_width);
+    auto result = run_single_round(
+        round_sampling_params, round, beam_tensors.sequence_group, beam_width);
     if (!result.has_value()) {
       return std::nullopt;
     }
@@ -1807,7 +1806,7 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
           /*out_sequence=*/beam_tensors.out_seqgroup);
     }
     log_stage_timing("beam_search", round, beam_timer);
-  #elif defined(USE_CUDA)
+#elif defined(USE_CUDA)
     if (final_round && requested_result_width != beam_width) {
       LOG(FATAL) << "OneRec xattention final-step result_width != beam_width "
                     "is not supported on CUDA without a final-step fused "

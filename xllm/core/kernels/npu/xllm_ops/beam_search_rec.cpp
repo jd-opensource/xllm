@@ -190,7 +190,6 @@ void beam_search_rec(const torch::Tensor& logprobs,
   create_acltensor(&out_beam_count_prefix_sums_ids, out_beam_count_prefix_sums);
   create_acltensor(&out_sequence_ids, out_sequence);
 
-  const int64_t top_k = sequence_group.size(1);
   uint64_t workspace_size = 0;
   aclOpExecutor* executor = nullptr;
   CHECK_ACL_SUCCESS(
