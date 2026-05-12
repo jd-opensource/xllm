@@ -16,7 +16,6 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
-#include "aclnn_onerec_final_beam_select.h"
 #include "core/kernels/npu/aclnn/pytorch_npu_helper.hpp"
 #include "core/kernels/npu/utils.h"
 #include "xllm_ops_api.h"
