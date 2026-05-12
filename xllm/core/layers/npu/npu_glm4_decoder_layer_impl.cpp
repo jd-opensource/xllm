@@ -19,6 +19,7 @@ limitations under the License.
 #include <mstx/ms_tools_ext.h>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "loader/glm4_decoder_loader.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
@@ -40,7 +41,9 @@ void NpuGlm4DecoderLayerImpl::param_from_args(
   param.rmsnormQKNorm = false;
   param.isPrefill = isPrefill;
   param.isBF16 = args.dtype() == "bfloat16";
-  param.enableSplitFuse = FLAGS_enable_chunked_prefill && isPrefill;
+  param.enableSplitFuse =
+      ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() &&
+      isPrefill;
   param.loraEnableGMM = false;
 
   param.linearTransposeType = {1, -1, -1, 1, 1, -1, 1};  // TODO
@@ -51,13 +54,16 @@ void NpuGlm4DecoderLayerImpl::param_from_args(
   std::optional<long int> optionalValue = args.n_kv_heads();
   param.numKeyValueHeadsPerRank =
       static_cast<int>(optionalValue.value()) / parallel_args.world_size();
-  param.backend = FLAGS_communication_backend;
-  param.tensorParallelInfo = {parallel_args.rank(),
-                              parallel_args.world_size(),
-                              FLAGS_communication_backend};
+  param.backend =
+      ::xllm::ParallelConfig::get_instance().communication_backend();
+  param.tensorParallelInfo = {
+      parallel_args.rank(),
+      parallel_args.world_size(),
+      ::xllm::ParallelConfig::get_instance().communication_backend()};
   param.linearHasBias = {true, false, false, false};
   param.useQKNorm = false;
-  param.enableAclGraphPagedAttention = FLAGS_enable_graph && !isPrefill;
+  param.enableAclGraphPagedAttention =
+      ::xllm::ExecutionConfig::get_instance().enable_graph() && !isPrefill;
   param.numHiddenLayers = args.n_layers();
   param.usePostSelfAttnLayerNorm = true;
   param.usePostMlpLayerNorm = true;
@@ -102,7 +108,9 @@ NpuGlm4DecoderLayerImpl::NpuGlm4DecoderLayerImpl(const ModelContext& context)
   loader_ = std::make_unique<Glm4DecoderLoader>(
       WEIGHT_COUNT_PER_LAYER,
       context,
-      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? LoadMode::kManual
+          : LoadMode::kEager);
 }
 
 int64_t NpuGlm4DecoderLayerImpl::init_layer() {
@@ -233,7 +241,8 @@ void NpuGlm4DecoderLayerImpl::build_node_variant_pack(
           input_params.attention.device.new_cache_slots);
   size_t input_idx = WEIGHT_COUNT_PER_LAYER + 11;
   if (is_prefill &&
-      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
+      (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ||
+       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache())) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(
             input_params.attention.device.q_seq_lens);
@@ -241,7 +250,7 @@ void NpuGlm4DecoderLayerImpl::build_node_variant_pack(
         input_params.attention.host.q_seq_lens.data();
   }
 
-  if (FLAGS_enable_graph && !is_prefill &&
+  if (::xllm::ExecutionConfig::get_instance().enable_graph() && !is_prefill &&
       input_params.graph.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(input_params.graph.tiling_data);

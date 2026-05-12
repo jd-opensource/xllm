@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/interruption_bus.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -120,7 +121,9 @@ class QWen3Eagle3ModelImpl : public torch::nn::Module {
         model_args.rope_theta(),
         options_);
 
-    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
+    int32_t mask_value =
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ? -9984
+                                                                         : 1;
     attn_mask_ = layer::AttentionMask(options_.device(),
                                       options_.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
@@ -180,7 +183,7 @@ class QWen3Eagle3ModelImpl : public torch::nn::Module {
     // Generate attention mask
     torch::Tensor attn_mask;
     if (!input_params.meta.batch_forward_type.is_decode()) {
-      if (FLAGS_enable_chunked_prefill) {
+      if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
         int num_sequences = input_params.meta.num_sequences;
         if (num_sequences > 0) {
           std::vector<torch::Tensor> req_mask_vec;

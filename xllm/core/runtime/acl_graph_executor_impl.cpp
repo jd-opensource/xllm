@@ -25,6 +25,7 @@ limitations under the License.
 #include <numeric>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #ifdef TORCH_HIGHER_THAN_PTA6
 #include <torch_npu/csrc/framework/OpCommand.h>
 #else
@@ -64,7 +65,7 @@ std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
 int64_t get_decode_graph_capacity(const runtime::Options& options) {
   CHECK_GT(options.num_decoding_tokens(), 0)
       << "num_decoding_tokens must be > 0 for graph capacity";
-  if (FLAGS_enable_atb_spec_kernel) {
+  if (::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     return options.max_seqs_per_batch();
   }
   return options.max_seqs_per_batch() * options.num_decoding_tokens();
@@ -93,7 +94,8 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
 
   // Use max_tokens_per_batch for first dimension size
   // num_decode_tokens
-  const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
+  const int64_t max_tokens_per_batch =
+      ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch();
   // num_sequences
   const int64_t max_seqs_per_batch = get_decode_graph_capacity(options);
   auto tensor_options = torch::TensorOptions().device(device);
@@ -178,7 +180,8 @@ void GraphPersistentParam::set_aux_hidden_states(const torch::Tensor& value) {
   if (aux_hidden_states_.numel() == 0) {
     // Lazy initialization: create aux_hidden_states tensor if not already
     // created
-    const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
+    const int64_t max_tokens_per_batch =
+        ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch();
     auto shape = value.sizes().vec();
     shape[0] = max_tokens_per_batch;
     torch::Dtype dtype = util::parse_dtype(args_.dtype(), device_);
@@ -262,7 +265,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
 
     // Initialize persistent_embedding_ if needed and not already initialized
     if (persistent_embedding_.numel() == 0) {
-      const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
+      const int64_t max_tokens_per_batch =
+          ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch();
       const int64_t embedding_dim = embedding.size(1);
       torch::Dtype dtype = util::parse_dtype(args_.dtype(), device_);
       persistent_embedding_ =
@@ -1122,7 +1126,8 @@ void AclGraph::print_graph_tensors() const {
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
 uint32_t AclGraphExecutorImpl::get_bucket_num_tokens(
     uint32_t num_tokens) const {
-  if (FLAGS_enable_graph_mode_decode_no_padding) {
+  if (::xllm::ExecutionConfig::get_instance()
+          .enable_graph_mode_decode_no_padding()) {
     return num_tokens;
   }
   if (num_tokens <= 1) {

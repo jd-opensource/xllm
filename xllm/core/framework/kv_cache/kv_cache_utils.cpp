@@ -20,6 +20,7 @@ limitations under the License.
 #include <limits>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #if defined(USE_NPU)
 #include "acl/acl.h"
@@ -241,7 +242,8 @@ LinearAttentionKVCacheTensors create_linear_attention_kv_cache_tensors(
 
 #if defined(USE_NPU)
 aclFormat get_npu_kv_cache_format(const std::string& model_type) {
-  return model_type == "deepseek_v3" && FLAGS_enable_prefix_cache
+  return model_type == "deepseek_v3" &&
+                 ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()
              ? ACL_FORMAT_FRACTAL_NZ
              : ACL_FORMAT_ND;
 }

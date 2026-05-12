@@ -10,7 +10,7 @@ cc_test(
   DEPS
     absl::strings
     GTest::gtest_main
-    :flags
+    :config
     :sampler
     glog::glog
     :state_dict

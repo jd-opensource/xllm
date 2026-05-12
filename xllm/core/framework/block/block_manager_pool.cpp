@@ -21,6 +21,7 @@ limitations under the License.
 #include "block_manager_impl.h"
 #include "common/global_flags.h"
 #include "concurrent_block_manager_impl.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/xtensor/page_allocator.h"
 #include "framework/xtensor/phy_page_pool.h"
 #include "framework/xtensor/xtensor_block_manager_impl.h"
@@ -49,7 +50,8 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
           << "num_layers must be set when enable_xtensor is true";
       CHECK_GT(options_.slot_size(), 0)
           << "slot_size must be set when enable_xtensor is true";
-      size_t page_size = FLAGS_phy_page_granularity_size;
+      size_t page_size =
+          ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size();
       // In the current implementation, K and V must be the same size, so we
       // divide by 2.
       size_t block_mem_size =
@@ -72,7 +74,9 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
     // pool. Worker-side embedding and linear-state caches remain physically
     // separate and are addressed via transport fields.
     single_block_managers_.emplace_back(std::make_unique<SingleBlockManager>(
-        /*num_blocks=*/FLAGS_max_seqs_per_batch + 2,
+        /*num_blocks=*/::xllm::SchedulerConfig::get_instance()
+                .max_seqs_per_batch() +
+            2,
         /*resource_name=*/"single block",
         /*exhaustion_message=*/"No more single-block ids available"));
   }

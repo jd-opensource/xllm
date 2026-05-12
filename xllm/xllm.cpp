@@ -33,6 +33,7 @@ limitations under the License.
 #include "core/common/types.h"
 #include "core/distributed_runtime/dit_master.h"
 #include "core/distributed_runtime/master.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/xtensor/global_xtensor.h"
 #include "core/framework/xtensor/options.h"
 #include "core/framework/xtensor/xtensor_allocator.h"
@@ -88,6 +89,138 @@ void fix_mlu_disagg_pd_flags() {
                  << "forcing enable_pd_ooc=false.";
     FLAGS_enable_pd_ooc = false;
   }
+}
+
+Options create_options(const XllmConfig& config,
+                       const std::string& instance_name,
+                       bool is_local) {
+  Options options;
+#if defined(USE_NPU)
+  options.npu_kernel_backend(config.execution_config().npu_kernel_backend());
+#endif
+  options.model_path(config.model_config().model())
+      .model_id(config.model_config().model_id())
+      .task_type(config.model_config().task())
+      .devices(config.model_config().devices())
+      .draft_model_path(config.speculative_config().draft_model())
+      .draft_devices(config.speculative_config().draft_devices())
+      .backend(config.model_config().backend())
+      .limit_image_per_prompt(config.model_config().limit_image_per_prompt())
+      .block_size(config.kv_cache_config().block_size())
+      .max_cache_size(config.kv_cache_config().max_cache_size())
+      .max_memory_utilization(config.kv_cache_config().max_memory_utilization())
+      .enable_prefix_cache(config.kv_cache_config().enable_prefix_cache())
+      .max_tokens_per_batch(config.scheduler_config().max_tokens_per_batch())
+      .max_seqs_per_batch(config.scheduler_config().max_seqs_per_batch())
+      .max_tokens_per_chunk_for_prefill(
+          config.scheduler_config().max_tokens_per_chunk_for_prefill())
+      .num_speculative_tokens(
+          config.speculative_config().num_speculative_tokens())
+      .speculative_algorithm(
+          config.speculative_config().speculative_algorithm())
+      .speculative_suffix_cache_max_depth(
+          config.speculative_config().speculative_suffix_cache_max_depth())
+      .speculative_suffix_max_spec_factor(
+          config.speculative_config().speculative_suffix_max_spec_factor())
+      .speculative_suffix_max_spec_offset(
+          config.speculative_config().speculative_suffix_max_spec_offset())
+      .speculative_suffix_min_token_prob(
+          config.speculative_config().speculative_suffix_min_token_prob())
+      .speculative_suffix_max_cached_requests(
+          config.speculative_config().speculative_suffix_max_cached_requests())
+      .speculative_suffix_use_tree_spec(
+          config.speculative_config().speculative_suffix_use_tree_spec())
+      .num_request_handling_threads(
+          config.service_config().num_request_handling_threads())
+      .communication_backend(config.parallel_config().communication_backend())
+      .enable_eplb(config.eplb_config().enable_eplb())
+      .redundant_experts_num(config.eplb_config().redundant_experts_num())
+      .eplb_update_interval(config.eplb_config().eplb_update_interval())
+      .eplb_update_threshold(config.eplb_config().eplb_update_threshold())
+      .rank_tablefile(config.eplb_config().rank_tablefile())
+      .expert_parallel_degree(config.eplb_config().expert_parallel_degree())
+      .enable_chunked_prefill(
+          config.scheduler_config().enable_chunked_prefill())
+      .enable_prefill_sp(config.parallel_config().enable_prefill_sp())
+      .master_node_addr(config.distributed_config().master_node_addr())
+      .instance_role(InstanceRole(config.disagg_pd_config().instance_role()))
+      .device_ip(config.distributed_config().device_ip())
+      .transfer_listen_port(static_cast<uint16_t>(
+          config.disagg_pd_config().transfer_listen_port()))
+      .nnodes(config.distributed_config().nnodes())
+      .node_rank(config.distributed_config().node_rank())
+      .dp_size(config.parallel_config().dp_size())
+      .cp_size(config.parallel_config().cp_size())
+      .ep_size(config.parallel_config().ep_size())
+      .tp_size(static_cast<int32_t>(config.parallel_config().tp_size()))
+      .sp_size(static_cast<int32_t>(config.parallel_config().sp_size()))
+      .cfg_size(static_cast<int32_t>(config.parallel_config().cfg_size()))
+      .instance_name(instance_name)
+      .enable_disagg_pd(config.disagg_pd_config().enable_disagg_pd())
+      .enable_pd_ooc(config.disagg_pd_config().enable_pd_ooc())
+      .enable_schedule_overlap(
+          config.scheduler_config().enable_schedule_overlap())
+      .kv_cache_transfer_mode(
+          config.disagg_pd_config().kv_cache_transfer_mode())
+      .etcd_addr(config.distributed_config().etcd_addr())
+      .etcd_namespace(config.distributed_config().etcd_namespace())
+      .enable_service_routing(
+          config.distributed_config().enable_service_routing() ||
+          config.disagg_pd_config().enable_disagg_pd())
+      .tool_call_parser(config.model_config().tool_call_parser())
+      .reasoning_parser(config.model_config().reasoning_parser())
+      .priority_strategy(config.scheduler_config().priority_strategy())
+      .enable_online_preempt_offline(
+          config.scheduler_config().enable_online_preempt_offline())
+      .enable_cache_upload(
+          (config.distributed_config().enable_service_routing() ||
+           config.disagg_pd_config().enable_disagg_pd()) &&
+          config.kv_cache_config().enable_prefix_cache() &&
+          config.kv_cache_store_config().enable_cache_upload())
+      .host_blocks_factor(config.kv_cache_store_config().host_blocks_factor())
+      .enable_kvcache_store(
+          config.kv_cache_store_config().enable_kvcache_store() &&
+          config.kv_cache_config().enable_prefix_cache() &&
+          (config.kv_cache_store_config().host_blocks_factor() > 1.0))
+      .prefetch_timeout(config.kv_cache_store_config().prefetch_timeout())
+      .prefetch_bacth_size(config.kv_cache_store_config().prefetch_bacth_size())
+      .layers_wise_copy_batchs(
+          config.kv_cache_store_config().layers_wise_copy_batchs())
+      .store_protocol(config.kv_cache_store_config().store_protocol())
+      .store_master_server_address(
+          config.kv_cache_store_config().store_master_server_address())
+      .store_metadata_server(
+          config.kv_cache_store_config().store_metadata_server())
+      .store_local_hostname(
+          config.kv_cache_store_config().store_local_hostname())
+      .enable_multi_stream_parallel(
+          config.parallel_config().enable_multi_stream_parallel())
+      .enable_profile_step_time(
+          config.profile_config().enable_profile_step_time())
+      .enable_profile_token_budget(
+          config.profile_config().enable_profile_token_budget())
+      .enable_latency_aware_schedule(
+          config.profile_config().enable_latency_aware_schedule())
+      .profile_max_prompt_length(
+          config.profile_config().profile_max_prompt_length())
+      .enable_profile_kv_blocks(
+          config.profile_config().enable_profile_kv_blocks())
+      .disable_ttft_profiling(config.profile_config().disable_ttft_profiling())
+      .enable_forward_interruption(
+          config.profile_config().enable_forward_interruption())
+      .enable_graph(config.execution_config().enable_graph())
+      .max_global_ttft_ms(config.profile_config().max_global_ttft_ms())
+      .max_global_tpot_ms(config.profile_config().max_global_tpot_ms())
+      .max_requests_per_batch(config.dit_config().max_requests_per_batch())
+      .enable_shm(config.execution_config().enable_shm())
+      .input_shm_size(config.execution_config().input_shm_size())
+      .output_shm_size(config.execution_config().output_shm_size())
+      .beam_width(config.beam_search_config().beam_width())
+      .kv_cache_dtype(config.kv_cache_config().kv_cache_dtype())
+      .rec_worker_max_concurrency(static_cast<int32_t>(
+          config.rec_config().rec_worker_max_concurrency()))
+      .is_local(is_local);
+  return options;
 }
 
 }  // namespace
@@ -230,113 +363,24 @@ int run() {
   // validate flags before creating master
   validate_flags(model_type);
 
+  if (FLAGS_node_rank == 0 && FLAGS_random_seed < 0) {
+    FLAGS_random_seed = std::random_device{}() % (1 << 30);
+  }
+
   // Create Master
-  Options options;
-#if defined(USE_NPU)
-  options.npu_kernel_backend(FLAGS_npu_kernel_backend);
-#endif
-  options.model_path(FLAGS_model)
-      .model_id(FLAGS_model_id)
-      .task_type(FLAGS_task)
-      .devices(FLAGS_devices)
-      .draft_model_path(FLAGS_draft_model)
-      .draft_devices(FLAGS_draft_devices)
-      .backend(FLAGS_backend)
-      .limit_image_per_prompt(FLAGS_limit_image_per_prompt)
-      .block_size(FLAGS_block_size)
-      .max_cache_size(FLAGS_max_cache_size)
-      .max_memory_utilization(FLAGS_max_memory_utilization)
-      .enable_prefix_cache(FLAGS_enable_prefix_cache)
-      .max_tokens_per_batch(FLAGS_max_tokens_per_batch)
-      .max_seqs_per_batch(FLAGS_max_seqs_per_batch)
-      .max_tokens_per_chunk_for_prefill(FLAGS_max_tokens_per_chunk_for_prefill)
-      .num_speculative_tokens(FLAGS_num_speculative_tokens)
-      .speculative_algorithm(FLAGS_speculative_algorithm)
-      .speculative_suffix_cache_max_depth(
-          FLAGS_speculative_suffix_cache_max_depth)
-      .speculative_suffix_max_spec_factor(
-          FLAGS_speculative_suffix_max_spec_factor)
-      .speculative_suffix_max_spec_offset(
-          FLAGS_speculative_suffix_max_spec_offset)
-      .speculative_suffix_min_token_prob(
-          FLAGS_speculative_suffix_min_token_prob)
-      .speculative_suffix_max_cached_requests(
-          FLAGS_speculative_suffix_max_cached_requests)
-      .speculative_suffix_use_tree_spec(FLAGS_speculative_suffix_use_tree_spec)
-      .num_request_handling_threads(FLAGS_num_request_handling_threads)
-      .communication_backend(FLAGS_communication_backend)
-      .enable_eplb(FLAGS_enable_eplb)
-      .redundant_experts_num(FLAGS_redundant_experts_num)
-      .eplb_update_interval(FLAGS_eplb_update_interval)
-      .eplb_update_threshold(FLAGS_eplb_update_threshold)
-      .rank_tablefile(FLAGS_rank_tablefile)
-      .expert_parallel_degree(FLAGS_expert_parallel_degree)
-      .enable_chunked_prefill(FLAGS_enable_chunked_prefill)
-      .enable_prefill_sp(FLAGS_enable_prefill_sp)
-      .master_node_addr(FLAGS_master_node_addr)
-      .instance_role(InstanceRole(FLAGS_instance_role))
-      .device_ip("")
-      .transfer_listen_port(FLAGS_transfer_listen_port)
-      .nnodes(FLAGS_nnodes)
-      .node_rank(FLAGS_node_rank)
-      .dp_size(FLAGS_dp_size)
-      .cp_size(FLAGS_cp_size)
-      .ep_size(FLAGS_ep_size)
-      .tp_size(FLAGS_tp_size)
-      .sp_size(FLAGS_sp_size)
-      .cfg_size(FLAGS_cfg_size)
-      .instance_name(FLAGS_host + ":" + std::to_string(FLAGS_port))
-      .enable_disagg_pd(FLAGS_enable_disagg_pd)
-      .enable_pd_ooc(FLAGS_enable_pd_ooc)
-      .enable_schedule_overlap(FLAGS_enable_schedule_overlap)
-      .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
-      .etcd_addr(FLAGS_etcd_addr)
-      .etcd_namespace(FLAGS_etcd_namespace)
-      .enable_service_routing(FLAGS_enable_service_routing ||
-                              FLAGS_enable_disagg_pd)
-      .tool_call_parser(FLAGS_tool_call_parser)
-      .reasoning_parser(FLAGS_reasoning_parser)
-      .priority_strategy(FLAGS_priority_strategy)
-      .enable_online_preempt_offline(FLAGS_enable_online_preempt_offline)
-      .enable_cache_upload(
-          (FLAGS_enable_service_routing || FLAGS_enable_disagg_pd) &&
-          FLAGS_enable_prefix_cache && FLAGS_enable_cache_upload)
-      .host_blocks_factor(FLAGS_host_blocks_factor)
-      .enable_kvcache_store(FLAGS_enable_kvcache_store &&
-                            FLAGS_enable_prefix_cache &&
-                            (FLAGS_host_blocks_factor > 1.0))
-      .prefetch_timeout(FLAGS_prefetch_timeout)
-      .prefetch_bacth_size(FLAGS_prefetch_bacth_size)
-      .layers_wise_copy_batchs(FLAGS_layers_wise_copy_batchs)
-      .store_protocol(FLAGS_store_protocol)
-      .store_master_server_address(FLAGS_store_master_server_address)
-      .store_metadata_server(FLAGS_store_metadata_server)
-      .store_local_hostname(FLAGS_store_local_hostname)
-      .enable_multi_stream_parallel(FLAGS_enable_multi_stream_parallel)
-      .enable_profile_step_time(FLAGS_enable_profile_step_time)
-      .enable_profile_token_budget(FLAGS_enable_profile_token_budget)
-      .enable_latency_aware_schedule(FLAGS_enable_latency_aware_schedule)
-      .profile_max_prompt_length(FLAGS_profile_max_prompt_length)
-      .enable_profile_kv_blocks(FLAGS_enable_profile_kv_blocks)
-      .disable_ttft_profiling(FLAGS_disable_ttft_profiling)
-      .enable_forward_interruption(FLAGS_enable_forward_interruption)
-      .enable_graph(FLAGS_enable_graph)
-      .max_global_ttft_ms(FLAGS_max_global_ttft_ms)
-      .max_global_tpot_ms(FLAGS_max_global_tpot_ms)
-      .max_requests_per_batch(FLAGS_max_requests_per_batch)
-      .enable_shm(FLAGS_enable_shm)
-      .input_shm_size(FLAGS_input_shm_size)
-      .output_shm_size(FLAGS_output_shm_size)
-      .beam_width(FLAGS_beam_width)
-      .kv_cache_dtype(FLAGS_kv_cache_dtype)
-      .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency)
-      .is_local(is_local);
+  XllmConfig::reload_from_flags();
+  const XllmConfig& config = XllmConfig::get_instance();
+  Options options =
+      create_options(config,
+                     config.service_config().host() + ":" +
+                         std::to_string(config.service_config().port()),
+                     is_local);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));
 
   // master node
   // init XTensor allocator and PhyPagePool for xtensor mode
-  if (FLAGS_enable_xtensor) {
+  if (config.kv_cache_config().enable_xtensor()) {
     // Parse devices
     const auto devices =
         DeviceNameUtils::parse_devices(options.devices().value_or("auto"));
@@ -346,18 +390,21 @@ int run() {
     allocator.init(devices[0]);
 
     // Setup distributed XTensor service for multi-GPU/multi-node
-    if (FLAGS_nnodes > 1) {
+    if (config.distributed_config().nnodes() > 1) {
       xtensor::Options xtensor_options;
       xtensor_options.devices(devices)
-          .nnodes(FLAGS_nnodes)
-          .node_rank(FLAGS_node_rank);
+          .nnodes(config.distributed_config().nnodes())
+          .node_rank(config.distributed_config().node_rank());
       allocator.setup_multi_node_xtensor_dist(
-          xtensor_options, FLAGS_xtensor_master_node_addr, FLAGS_dp_size);
+          xtensor_options,
+          config.distributed_config().xtensor_master_node_addr(),
+          config.parallel_config().dp_size());
     }
 
     // Initialize PhyPagePool on all workers
     int64_t num_pages = allocator.init_phy_page_pools(
-        FLAGS_max_memory_utilization, FLAGS_max_cache_size);
+        config.kv_cache_config().max_memory_utilization(),
+        config.kv_cache_config().max_cache_size());
     if (num_pages <= 0) {
       LOG(FATAL) << "Failed to initialize PhyPagePool";
     }
@@ -367,26 +414,24 @@ int run() {
   std::unique_ptr<Master> master;
   // working node
   if (options.node_rank() != 0) {
-    if (FLAGS_backend == "dit") {
+    if (config.model_config().backend() == "dit") {
       master = std::make_unique<DiTAssistantMaster>(options);
     } else {
       master = std::make_unique<LLMAssistantMaster>(options);
     }
   } else {
-    if (FLAGS_random_seed < 0) {
-      FLAGS_random_seed = std::random_device{}() % (1 << 30);
-    }
     // master node
-    master = create_master(FLAGS_backend, options);
+    master = create_master(config.model_config().backend(), options);
   }
   master->run();
 
   // supported models
-  std::vector<std::string> model_names = {FLAGS_model_id};
+  std::vector<std::string> model_names = {config.model_config().model_id()};
   std::string model_version = default_model_name;
   std::vector<std::string> model_versions = {model_version};
 
-  if (FLAGS_node_rank == 0 || FLAGS_enable_xtensor) {
+  if (config.distributed_config().node_rank() == 0 ||
+      config.kv_cache_config().enable_xtensor()) {
     auto api_service =
         std::make_unique<APIService>(master.get(), model_names, model_versions);
     auto xllm_server =
@@ -394,7 +439,8 @@ int run() {
 
     // start brpc server
     if (!xllm_server->start(std::move(api_service))) {
-      LOG(ERROR) << "Failed to start brpc server on port " << FLAGS_port;
+      LOG(ERROR) << "Failed to start brpc server on port "
+                 << config.service_config().port();
       return -1;
     }
   }
@@ -419,7 +465,7 @@ int main(int argc, char** argv) {
   google::InitGoogleLogging("xllm");
 
   // Check if model path is provided
-  if (FLAGS_model.empty()) {
+  if (::xllm::ModelConfig::get_instance().model().empty()) {
     HelpFormatter::print_error("--model flag is required");
     return 1;
   }

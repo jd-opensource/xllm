@@ -16,6 +16,7 @@ limitations under the License.
 #include "layers/npu/npu_column_parallel_linear_impl.h"
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 namespace xllm {
 namespace layer {
 
@@ -45,7 +46,8 @@ void NpuColumnParallelLinearImpl::param_from_args(
           parallel_args.mapping().Get(atb_speed::base::WORD_EMBED_TP);
       param.tensorParallelInfo.rank = parallelInfo.rank;
       param.tensorParallelInfo.worldSize = parallelInfo.rankIds.size();
-      param.tensorParallelInfo.backend = FLAGS_communication_backend;
+      param.tensorParallelInfo.backend =
+          ::xllm::ParallelConfig::get_instance().communication_backend();
       parallelInfo.InitCommDomain(param.tensorParallelInfo.hcommInfo,
                                   param.tensorParallelInfo.commDomain);
     }
@@ -64,7 +66,7 @@ NpuColumnParallelLinearImpl::NpuColumnParallelLinearImpl(
   dtype_ = c10::typeMetaToScalarType(options.dtype());
   tensor_placeholder_ = torch::zeros({1}).to(options);
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
-  if (FLAGS_enable_manual_loader) {
+  if (::xllm::LoadConfig::get_instance().enable_manual_loader()) {
     loader_ = std::make_unique<ColumParallelLinearLoader>(
         1, context, LoadMode::kManual);
   } else {

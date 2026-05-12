@@ -28,6 +28,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
@@ -50,7 +51,8 @@ bool RemoteWorker::wait_for_server_ready(const std::string& server_address) {
   // Retry until server initialize ready
   int try_count = 0;
   const int sleep_time_second = 3;
-  while (try_count < FLAGS_max_reconnect_count) {
+  while (try_count <
+         ::xllm::ServiceConfig::get_instance().max_reconnect_count()) {
     if (channel_->hello()) {
       LOG(INFO) << "RemoteWorker Hello connected, server_address: "
                 << server_address << ", global_rank_: " << global_rank_;
@@ -62,7 +64,8 @@ bool RemoteWorker::wait_for_server_ready(const std::string& server_address) {
     try_count++;
   }
 
-  if (try_count >= FLAGS_max_reconnect_count) {
+  if (try_count >=
+      ::xllm::ServiceConfig::get_instance().max_reconnect_count()) {
     LOG(ERROR) << "RemoteWorker Hello method failed, global_rank_ is "
                << global_rank_;
     return false;

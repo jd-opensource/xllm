@@ -203,7 +203,7 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
     }
   }
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     pb_forward_output->set_prepared_layer_id(prepared_layer_id);
 
     torch::Tensor expert_load_data_flattened =

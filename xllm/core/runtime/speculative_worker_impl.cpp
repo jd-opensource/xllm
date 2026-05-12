@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "spec_input_builder.h"
 #include "util/slice.h"
 #include "util/timer.h"
@@ -224,7 +225,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   buf.out_token_ids.reserve(total_num_val_tokens);
   buf.out_positions.reserve(total_num_val_tokens);
   buf.out_new_cache_slots.reserve(total_num_val_tokens);
-  if (!FLAGS_enable_atb_spec_kernel) {
+  if (!::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     buf.out_kv_seq_lens.reserve(total_num_val_tokens);
     buf.out_q_seq_lens.reserve(total_num_val_tokens);
     buf.out_q_cu_seq_lens.reserve(total_num_val_tokens);
@@ -253,13 +254,13 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
         row.token_id = -val_idx;
       }
       row.position_offset = val_idx;
-      row.append_kv_len = !FLAGS_enable_atb_spec_kernel;
-      row.append_q_len_one = !FLAGS_enable_atb_spec_kernel;
-      row.append_block_table = !FLAGS_enable_atb_spec_kernel;
+      row.append_kv_len = !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
+      row.append_q_len_one = !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
+      row.append_block_table = !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
       specBuilder::append_decode_row(row_ctx, row, block_size, buf);
     }
 
-    if (FLAGS_enable_atb_spec_kernel) {
+    if (::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
       const int32_t kv_len_after_validation = kv_len + num_speculative_tokens;
       specBuilder::update_kv_seq_lens_and_max(
           atb_kv_seq_lens_vec, kv_len_after_validation, atb_kv_max_seq_len);
@@ -279,7 +280,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
                              token_options,
                              position_options);
   // update the input_params
-  if (!FLAGS_enable_atb_spec_kernel) {
+  if (!::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     input_params.meta.num_sequences = total_num_val_tokens;
     input_params.meta.q_max_seq_len = 1;
     input_params.meta.batch_forward_type = BatchForwardType::DECODE;
@@ -287,7 +288,7 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
     input_params.meta.q_max_seq_len = num_val_tokens;
     input_params.meta.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
   }
-  if (FLAGS_enable_atb_spec_kernel) {
+  if (::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     specBuilder::update_input_params(input_params,
                                      buf,
                                      num_val_tokens,

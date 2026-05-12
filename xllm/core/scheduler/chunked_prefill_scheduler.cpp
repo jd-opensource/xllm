@@ -19,6 +19,7 @@ limitations under the License.
 #include <limits>
 
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/batch/batch_factory.h"
 #include "util/timer.h"
 #include "util/utils.h"
@@ -762,13 +763,16 @@ void ChunkedPrefillScheduler::allocate_shared_blocks_for(Sequence* sequence) {
     size_t total_chunked_size =
         (sequence->num_tokens() + max_tokens_per_chunk_for_prefill - 1) /
         max_tokens_per_chunk_for_prefill;
-    if (total_chunked_size < FLAGS_chunked_match_frequency) {
+    if (total_chunked_size <
+        ::xllm::SchedulerConfig::get_instance().chunked_match_frequency()) {
       kv_cache_manager_->allocate_shared(sequence);
       return;
     }
     size_t prefix_cache_interval =
-        (total_chunked_size + FLAGS_chunked_match_frequency - 1) /
-        FLAGS_chunked_match_frequency;
+        (total_chunked_size +
+         ::xllm::SchedulerConfig::get_instance().chunked_match_frequency() -
+         1) /
+        ::xllm::SchedulerConfig::get_instance().chunked_match_frequency();
     size_t cur_chunked_index = sequence->kv_state().kv_cache_tokens_num() /
                                max_tokens_per_chunk_for_prefill;
     if (cur_chunked_index % prefix_cache_interval == 0) {

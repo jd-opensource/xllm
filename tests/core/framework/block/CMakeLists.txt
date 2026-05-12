@@ -10,7 +10,7 @@ if(USE_NPU)
     DEPS
       :xllm_server
       :block
-      :flags
+      :config
       :kv_cache
       :prefix_cache
       absl::random_random

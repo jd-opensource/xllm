@@ -18,6 +18,7 @@ limitations under the License.
 #include <algorithm>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/platform/device.h"
 #include "flashinfer_planinfo.h"
 #include "flashinfer_workspace.h"
@@ -164,8 +165,8 @@ void XAttentionImpl::run_two_stage_decode(
       /*use_fp16_qk_reduction=*/false,
       /*use_custom_mask=*/false);
   // ===== Shared stage: attend to shared (prompt) KV =====
-  const int64_t unshared_offset =
-      static_cast<int64_t>(FLAGS_max_tokens_per_batch);
+  const int64_t unshared_offset = static_cast<int64_t>(
+      ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch());
   const int64_t shared_kv_capacity =
       std::min(attn_metadata.full_k_cache.size(0), unshared_offset);
 
@@ -425,7 +426,7 @@ void XAttentionImpl::decoder_forward(const AttentionMetadata& attn_metadata,
                                                 attn_metadata.unshared_k_cache,
                                                 attn_metadata.unshared_v_cache,
                                                 attn_metadata.step_tensor);
-  if (FLAGS_enable_xattention_one_stage) {
+  if (::xllm::RecConfig::get_instance().enable_xattention_one_stage()) {
     run_single_stage_decode(attn_metadata, key, query, output);
   } else {
     run_two_stage_decode(attn_metadata, query, output);

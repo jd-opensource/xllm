@@ -29,6 +29,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/model/model_input_params.h"
 #include "util/rec_model_utils.h"
 #if defined(USE_CUDA)
@@ -335,7 +336,7 @@ void RecWorkerImpl::RecWorkPipeline::prepare_work_before_execute(
   // asynchronously scheduled data update streams.
 
   std::optional<std::unique_lock<std::mutex>> lock_guard;
-  if (FLAGS_enable_graph) {
+  if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     auto& capture_lock =
         ::xllm::npu::DeviceCaptureLock::get_instance().get_lock(
             runtime_.worker.device().index());
@@ -412,7 +413,7 @@ std::optional<ForwardOutput> RecWorkerImpl::RecWorkPipeline::step(
 #endif
   }
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     runtime_.eplb_executor->eplb_execute(input.input_params.expert.eplb_info);
   }
 
@@ -433,7 +434,7 @@ std::optional<ForwardOutput> RecWorkerImpl::RecWorkPipeline::step(
   }
 
   ForwardOutput output;
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     output.expert_load_data = runtime_.expert_load_data;
     output.prepared_layer_id = runtime_.eplb_executor->get_ready_layer_id();
     if (output.prepared_layer_id != -1) {
@@ -458,7 +459,7 @@ std::optional<ForwardOutput> RecWorkerImpl::RecWorkPipeline::step(
         }
       }
     }
-    if (FLAGS_enable_eplb) {
+    if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
       return output;
     }
     return std::nullopt;
@@ -538,7 +539,7 @@ RecWorkerImpl::OneRecWorkPipeline::OneRecWorkPipeline(
     : RecWorkPipeline(runtime),
       rec_sampler_(std::make_unique<RecSampler>(pipeline_type)),
       filter_mask_threadpool_(std::make_unique<ThreadPool>(1)) {
-  if (!FLAGS_enable_constrained_decoding) {
+  if (!::xllm::RecConfig::get_instance().enable_constrained_decoding()) {
     return;
   }
 
@@ -648,7 +649,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
       rec_params.has_encoder_output || has_decoder_context;
   std::optional<folly::SemiFuture<torch::Tensor>> filter_mask_future;
   if ((runtime_.worker.driver_ || runtime_.worker.dp_driver_) &&
-      FLAGS_enable_constrained_decoding && constrained_decoding_ != nullptr &&
+      ::xllm::RecConfig::get_instance().enable_constrained_decoding() &&
+      constrained_decoding_ != nullptr &&
       sampling_params.selected_token_idxes.defined()) {
     filter_mask_future = prepare_filter_mask_async(rec_params.generated_tokens);
   }
@@ -780,7 +782,7 @@ RecWorkerImpl::OneRecXAttentionWorkPipeline::OneRecXAttentionWorkPipeline(
   max_decode_step_ = std::max(0, get_rec_multi_round_decode_rounds());
   allocate_unshared_kv_caches();
 
-  if (!FLAGS_enable_constrained_decoding) {
+  if (!::xllm::RecConfig::get_instance().enable_constrained_decoding()) {
     return;
   }
   auto* vocab_dict = get_onerec_vocab_dict(runtime_.worker.model_weights_path_);
@@ -849,7 +851,7 @@ bool RecWorkerImpl::OneRecXAttentionWorkPipeline::can_use_device_constraints(
     int32_t current_step,
     int32_t beam_width) const {
 #if defined(USE_NPU)
-  return FLAGS_enable_constrained_decoding &&
+  return ::xllm::RecConfig::get_instance().enable_constrained_decoding() &&
          constraint_device_tensors_.initialized && current_step >= 0 &&
          current_step < REC_TOKEN_SIZE && beam_width > 0 &&
          sampling_params.selected_token_idxes.defined() &&
@@ -1296,7 +1298,7 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
     const bool use_device_constraints = can_use_device_constraints(
         sampling_params, current_step, request_beam_width);
 #if defined(USE_NPU)
-    if (FLAGS_enable_constrained_decoding &&
+    if (::xllm::RecConfig::get_instance().enable_constrained_decoding() &&
         sampling_params.selected_token_idxes.defined() &&
         !use_device_constraints) {
       LOG_FIRST_N(WARNING, 8)
@@ -1334,7 +1336,8 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
 
     std::optional<folly::SemiFuture<torch::Tensor>> filter_mask_future;
     if ((runtime_.worker.driver_ || runtime_.worker.dp_driver_) &&
-        FLAGS_enable_constrained_decoding && constrained_decoding_ != nullptr &&
+        ::xllm::RecConfig::get_instance().enable_constrained_decoding() &&
+        constrained_decoding_ != nullptr &&
         sampling_params.selected_token_idxes.defined() &&
         !use_device_constraints) {
       filter_mask_future =
@@ -1987,7 +1990,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::allocate_kv_caches_related() {
   cached_current_round_tensor_ = torch::zeros({1}, int_options);
   cached_beam_width_tensor_ = torch::zeros({1}, int_options);
 
-  if (FLAGS_enable_xattention_one_stage) {
+  if (::xllm::RecConfig::get_instance().enable_xattention_one_stage()) {
     return;
   }
 
@@ -2411,7 +2414,8 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_two_stage_round_input(
 // TODO: implement prepare_two_stage_round_input for NPU
 #elif defined(USE_CUDA)
   auto& llm_rec_params = input.input_params.mutable_llmrec_params();
-  CHECK_EQ(FLAGS_enable_xattention_one_stage, false)
+  CHECK_EQ(::xllm::RecConfig::get_instance().enable_xattention_one_stage(),
+           false)
       << "prepare_two_stage_round_input should only be called when "
          "two-stage decode is enabled";
 
@@ -2559,7 +2563,7 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_input_for_current_round(
     const torch::Tensor& top_tokens,
     const BeamSearchTensors& beam_tensors) {
 #if defined(USE_CUDA)
-  if (FLAGS_enable_xattention_one_stage) {
+  if (::xllm::RecConfig::get_instance().enable_xattention_one_stage()) {
     input.input_params.attention.device.paged_kv_indices =
         results.paged_kv_indices;
     input.input_params.attention.device.paged_kv_indptr =
@@ -2614,7 +2618,7 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::compute_next_round_input_async(
   auto future = promise.getSemiFuture();
 
 #if defined(USE_CUDA)
-  if (FLAGS_enable_xattention_one_stage) {
+  if (::xllm::RecConfig::get_instance().enable_xattention_one_stage()) {
     // Capture necessary data for async computation
     auto full_kv_offsets = full_kv_cache_offsets_->full_kv_offsets;
     auto full_kv_mask = full_kv_cache_offsets_->full_kv_mask;
@@ -2808,7 +2812,7 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::FullKvCacheOffsets::FullKvCacheOffsets(
 
 void RecWorkerImpl::initialize_xattention_workspace() {
 #if defined(USE_CUDA)
-  if (FLAGS_enable_xattention_one_stage) {
+  if (::xllm::RecConfig::get_instance().enable_xattention_one_stage()) {
     return;
   }
   ::xllm::layer::xattention::XAttentionWorkspace::get_instance().initialize(
@@ -2850,7 +2854,7 @@ RecWorkerImpl::~RecWorkerImpl() {
   model_.release();
   model_executor_.release();
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     eplb_executor_.release();
   }
 }
@@ -2862,7 +2866,7 @@ bool RecWorkerImpl::init_model(const std::string& model_weights_path,
     return false;
   }
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     work_pipelines_[0]->runtime().expert_load_data = expert_load_data_;
 
     for (size_t i = 1; i < work_pipelines_.size(); ++i) {
@@ -2913,7 +2917,7 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
                                    runtime.worker.device(),
                                    runtime.worker.options_);
 
-    if (FLAGS_enable_eplb) {
+    if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
       runtime.eplb_executor = std::make_unique<EplbExecutor>(
           runtime.model.get(), runtime.worker.device());
     }
@@ -2926,11 +2930,11 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
   model_executor_.reset(work_pipelines_[0]->runtime().executor.get());
 
   // Complete other initialization (EPLB, BeamSearcher, etc.)
-  if (FLAGS_enable_beam_search_kernel) {
+  if (::xllm::BeamSearchConfig::get_instance().enable_beam_search_kernel()) {
     beam_searcher_ = std::make_unique<BeamSearcher>();
   }
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     eplb_executor_.reset(work_pipelines_[0]->runtime().eplb_executor.get());
   }
 
@@ -2971,7 +2975,7 @@ bool RecWorkerImpl::init_onerec_model(ModelContext& context) {
   model_executor_ = std::make_unique<Executor>(
       model_.get(), context.get_model_args(), device_, options_);
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     eplb_executor_ = std::make_unique<EplbExecutor>(model_.get(), device_);
   }
   return true;

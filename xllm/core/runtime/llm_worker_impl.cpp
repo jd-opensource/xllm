@@ -29,6 +29,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
@@ -66,18 +67,18 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
   model_executor_ = std::make_unique<Executor>(
       model_.get(), context.get_model_args(), device_, options_);
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     eplb_executor_ = std::make_unique<EplbExecutor>(model_.get(), device_);
   }
 
-  if (FLAGS_enable_beam_search_kernel) {
+  if (::xllm::BeamSearchConfig::get_instance().enable_beam_search_kernel()) {
     beam_searcher_ = std::make_unique<BeamSearcher>();
   }
   return true;
 }
 
 std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
-  if (FLAGS_enable_manual_loader) {
+  if (::xllm::LoadConfig::get_instance().enable_manual_loader()) {
 #if defined(USE_NPU)
     if (!enable_schedule_overlap() && options_.backend() == "llm") {
       aclrtStream current_stream =
@@ -96,7 +97,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
 
 std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     const ForwardInput& input) {
-  MULTI_MODEL_STEP_LOCK(FLAGS_enable_xtensor);
+  MULTI_MODEL_STEP_LOCK(::xllm::KVCacheConfig::get_instance().enable_xtensor());
 
   Timer timer;
   auto& sampling_params = input.sampling_params;
@@ -126,7 +127,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
 #endif
   }
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     eplb_executor_->eplb_execute(input.input_params.expert.eplb_info);
   }
 
@@ -144,7 +145,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   }
 
   ForwardOutput output;
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     output.expert_load_data = expert_load_data_;
     output.prepared_layer_id = eplb_executor_->get_ready_layer_id();
     if (output.prepared_layer_id != -1) {
@@ -170,7 +171,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
         }
       }
     }
-    if (FLAGS_enable_eplb) {
+    if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
       return output;
     }
     return std::nullopt;

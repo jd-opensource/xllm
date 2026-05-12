@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 
 #if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
@@ -251,7 +252,7 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
 
 #if defined(USE_NPU) || defined(USE_MLU)
   LOG(INFO) << "Create KVCacheTransfer for " << transfer_type << "flag"
-            << FLAGS_kv_cache_transfer_type;
+            << ::xllm::DisaggPDConfig::get_instance().kv_cache_transfer_type();
   if (transfer_type == "LlmDataDist") {
 #if defined(USE_NPU)
     transfer = std::make_shared<LlmDataDistTransfer>(device_ip,
@@ -271,7 +272,7 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
   } else if (transfer_type == "Mooncake") {
     std::shared_ptr<MooncakeKVCacheTransferBase> mooncake_transfer;
 #if defined(USE_NPU)
-    if (FLAGS_enable_xtensor) {
+    if (::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
       auto xtensor_transfer = std::make_shared<MooncakeKVCacheTransferXTensor>(
           device_id, transfer_listen_port, device);
       if (!model_id.empty()) {

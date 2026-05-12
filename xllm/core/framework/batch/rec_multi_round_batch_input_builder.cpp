@@ -27,6 +27,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/util/rec_model_utils.h"
 #include "framework/batch/mposition.h"
 #include "framework/model/model_args.h"
@@ -284,7 +285,8 @@ void RecMultiRoundBatchInputBuilder::extract_tokens_and_positions(
   uint32_t prompt_len = sequence->num_prompt_tokens();
   state_ptr->decode_positions_vec.push_back(static_cast<int32_t>(prompt_len));
 
-  int32_t bw = std::max(1, FLAGS_beam_width);
+  int32_t bw =
+      std::max(1, ::xllm::BeamSearchConfig::get_instance().beam_width());
   const int32_t sel_start =
       static_cast<int32_t>(state_ptr->decode_selected_token_idxes.size());
   state_ptr->decode_selected_token_idxes.reserve(sel_start + bw);
@@ -428,7 +430,8 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
 
   // Rec multi-round specific metadata.
   rec_multi_round_state_.total_steps = get_rec_multi_round_decode_rounds();
-  const int32_t beam_width = FLAGS_beam_width;
+  const int32_t beam_width =
+      ::xllm::BeamSearchConfig::get_instance().beam_width();
   const int32_t total_round = rec_multi_round_state_.total_steps;
   const int32_t current_round = 0;
   std::vector<int64_t> full_kv_shape;
@@ -461,11 +464,13 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
     int64_t head_dim = args_ ? args_->head_dim() : 0;
 
     int32_t decode_rounds = get_rec_multi_round_decode_rounds();
-    full_kv_shape = {FLAGS_max_tokens_per_batch +
-                         FLAGS_max_seqs_per_batch * FLAGS_beam_width *
-                             std::max(0, decode_rounds - 1),
-                     n_kv_heads,
-                     head_dim};
+    full_kv_shape = {
+        ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch() +
+            ::xllm::SchedulerConfig::get_instance().max_seqs_per_batch() *
+                ::xllm::BeamSearchConfig::get_instance().beam_width() *
+                std::max(0, decode_rounds - 1),
+        n_kv_heads,
+        head_dim};
   }
 
   // Decode positions

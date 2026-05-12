@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/common/rotary_embedding_util.h"
 #include "core/layers/npu/npu_glm4_decoder_layer_impl.h"
@@ -59,7 +60,9 @@ class Glm4ModelImpl
         model_args.max_position_embeddings(),
         model_args.rope_theta(),
         options);
-    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
+    int32_t mask_value =
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ? -9984
+                                                                         : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
@@ -118,7 +121,7 @@ class Glm4ModelImpl
     cos_pos = cos_pos.reshape({-1, cos_pos.sizes().back() / 2, 2});
     sin_pos = sin_pos.reshape({-1, sin_pos.sizes().back() / 2, 2});
     torch::Tensor attn_mask;
-    if (FLAGS_enable_chunked_prefill) {
+    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
       int max_kv_seq = input_params.meta.kv_max_seq_len;
       int num_sequences = input_params.meta.num_sequences;
       if (num_sequences > 0) {

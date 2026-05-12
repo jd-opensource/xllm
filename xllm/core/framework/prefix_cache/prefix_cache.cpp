@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 
 namespace xllm {
 
@@ -32,10 +33,10 @@ void xxh3_128bits_hash(const uint8_t* pre_hash_value,
                        const Slice<int32_t>& token_ids,
                        uint8_t* hash_value) {
   if (pre_hash_value == nullptr) {
-    XXH128_hash_t xxh3_128bits_hash_value =
-        XXH3_128bits_withSeed(reinterpret_cast<const void*>(token_ids.data()),
-                              sizeof(int32_t) * token_ids.size(),
-                              FLAGS_xxh3_128bits_seed);
+    XXH128_hash_t xxh3_128bits_hash_value = XXH3_128bits_withSeed(
+        reinterpret_cast<const void*>(token_ids.data()),
+        sizeof(int32_t) * token_ids.size(),
+        ::xllm::KVCacheConfig::get_instance().xxh3_128bits_seed());
     memcpy(
         hash_value, &xxh3_128bits_hash_value, sizeof(xxh3_128bits_hash_value));
   } else {
@@ -51,7 +52,9 @@ void xxh3_128bits_hash(const uint8_t* pre_hash_value,
            sizeof(int32_t) * token_ids.size());
 
     XXH128_hash_t xxh3_128bits_hash_value = XXH3_128bits_withSeed(
-        reinterpret_cast<const void*>(key), data_len, FLAGS_xxh3_128bits_seed);
+        reinterpret_cast<const void*>(key),
+        data_len,
+        ::xllm::KVCacheConfig::get_instance().xxh3_128bits_seed());
     memcpy(
         hash_value, &xxh3_128bits_hash_value, sizeof(xxh3_128bits_hash_value));
   }

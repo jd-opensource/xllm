@@ -20,6 +20,7 @@ limitations under the License.
 #if defined(USE_MLU)
 #include "framework/kv_cache_transfer/mooncake_kv_cache_transfer.h"
 #endif
+#include "core/framework/config/xllm_config.h"
 #include "framework/request/mm_data.h"
 #include "spec_input_builder.h"
 #include "util/env_var.h"
@@ -149,7 +150,8 @@ MTPWorkerImpl::MTPWorkerImpl(const ParallelArgs& parallel_args,
                     options,
                     MTPTargetOptions(options),
                     MTPDraftOptions(options),
-                    FLAGS_enable_opt_validate_probs) {}
+                    ::xllm::SpeculativeConfig::get_instance()
+                        .enable_opt_validate_probs()) {}
 
 MTPWorkerImpl::MTPWorkerImpl(const ParallelArgs& parallel_args,
                              const torch::Device& device,
@@ -181,7 +183,8 @@ bool MTPWorkerImpl::init_model(const std::string& model_weights_path,
       draft_impl_->get_status() == WorkerImpl::Status::LOADED) {
     // Share lm_head and word_embedding between target and draft models
 #if defined(USE_NPU)
-    if (FLAGS_npu_kernel_backend != "TORCH") {
+    if (::xllm::ExecutionConfig::get_instance().npu_kernel_backend() !=
+        "TORCH") {
       auto head = impl_->get_npu_lm_head();
       draft_impl_->set_npu_lm_head(head);
       auto word_embedding = impl_->get_npu_word_embedding();
@@ -256,7 +259,8 @@ bool MTPWorkerImpl::allocate_kv_cache_with_transfer(
         options_.instance_role(),
         context_.get_model_args().model_type());
 #elif defined(USE_MLU)
-    CHECK_EQ(FLAGS_kv_cache_transfer_type, "Mooncake")
+    CHECK_EQ(::xllm::DisaggPDConfig::get_instance().kv_cache_transfer_type(),
+             "Mooncake")
         << "MLU MTP push only supports Mooncake KV transfer.";
     kv_cache_transfer_ = std::make_shared<MooncakeKVCacheTransferDefault>(
         device_.index(),
@@ -685,7 +689,7 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
   buf.out_token_ids.reserve(total_num_val_tokens);
   buf.out_positions.reserve(total_num_val_tokens);
   buf.out_new_cache_slots.reserve(total_num_val_tokens);
-  if (!FLAGS_enable_atb_spec_kernel) {
+  if (!::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     buf.out_kv_seq_lens.reserve(total_num_val_tokens);
     buf.out_q_seq_lens.reserve(total_num_val_tokens);
     buf.out_q_cu_seq_lens.reserve(total_num_val_tokens);
@@ -710,13 +714,13 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
       row.seq_id = seq_id;
       row.token_id = val_idx == 0 ? token_ids[seq_id] : -val_idx;
       row.position_offset = val_idx;
-      row.append_kv_len = !FLAGS_enable_atb_spec_kernel;
-      row.append_q_len_one = !FLAGS_enable_atb_spec_kernel;
-      row.append_block_table = !FLAGS_enable_atb_spec_kernel;
+      row.append_kv_len = !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
+      row.append_q_len_one = !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
+      row.append_block_table = !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
       specBuilder::append_decode_row(row_ctx, row, block_size, buf);
     }
 
-    if (FLAGS_enable_atb_spec_kernel) {
+    if (::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
       const int32_t kv_len_after_validation = kv_len + num_speculative_tokens;
       specBuilder::update_kv_seq_lens_and_max(
           atb_kv_seq_lens_vec, kv_len_after_validation, atb_kv_max_seq_len);
@@ -735,13 +739,13 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
                              buf.out_positions,
                              token_options,
                              position_options);
-  if (!FLAGS_enable_atb_spec_kernel) {
+  if (!::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     input_params.meta.num_sequences = total_num_val_tokens;
     input_params.meta.batch_forward_type = BatchForwardType::DECODE;
   } else {
     input_params.meta.batch_forward_type = BatchForwardType::CHUNKED_PREFILL;
   }
-  if (FLAGS_enable_atb_spec_kernel) {
+  if (::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     specBuilder::update_input_params(input_params,
                                      buf,
                                      num_val_tokens,

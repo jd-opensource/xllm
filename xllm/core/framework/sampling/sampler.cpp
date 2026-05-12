@@ -20,6 +20,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "logits_utils.h"
 #include "sampling_params.h"
 
@@ -110,7 +111,7 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
   output.next_tokens = sample_indices;
 
   if (params.logprobs) {
-    if (FLAGS_enable_qwen3_reranker) {
+    if (::xllm::ModelConfig::get_instance().enable_qwen3_reranker()) {
       int32_t false_id = 2152;  // "no"
       int32_t true_id = 9693;   // "yes"
       auto indices =

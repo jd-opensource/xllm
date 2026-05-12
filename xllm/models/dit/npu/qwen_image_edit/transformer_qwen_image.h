@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #pragma once
+
 #include <glog/logging.h>
 #include <torch/nn/functional/linear.h>
 #include <torch/torch.h>
@@ -27,6 +28,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/dit_cache/dit_cache.h"
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
@@ -1167,7 +1169,7 @@ class AttentionImpl : public torch::nn::Module {
     xllm::dit::SpOptions q_sp_option;
     xllm::dit::SpOptions kv_sp_option;
     xllm::dit::LinearType linear_type = xllm::dit::LinearType::Default;
-    if (FLAGS_sp_size > 1) {
+    if (::xllm::ParallelConfig::get_instance().sp_size() > 1) {
       q_sp_option = xllm::dit::SpOptions(/*head_num=*/heads,
                                          /*head_dim=*/dim_head,
                                          /*hidden_size=*/q_dim,
@@ -1249,7 +1251,7 @@ class AttentionImpl : public torch::nn::Module {
     }
 
     xllm::dit::SpOptions out_sp_option;
-    if (FLAGS_sp_size > 1) {
+    if (::xllm::ParallelConfig::get_instance().sp_size() > 1) {
       out_sp_option = xllm::dit::SpOptions(/*head_num=*/heads,
                                            /*head_dim=*/dim_head,
                                            /*hidden_size=*/q_dim,
@@ -1405,7 +1407,8 @@ class QwenDoubleStreamAttnProcessor2_0Impl : public torch::nn::Module {
 
     // Reshape for multi-head attention
     int64_t heads = attn_->heads_;
-    auto reshape_dims = std::vector<int64_t>{heads / FLAGS_sp_size, -1};
+    auto reshape_dims = std::vector<int64_t>{
+        heads / ::xllm::ParallelConfig::get_instance().sp_size(), -1};
 
     img_query = img_query.unflatten(-1, reshape_dims);
     img_key = img_key.unflatten(-1, reshape_dims);
@@ -1459,7 +1462,7 @@ class QwenDoubleStreamAttnProcessor2_0Impl : public torch::nn::Module {
         joint_query,
         joint_key,
         joint_value,
-        heads / FLAGS_sp_size,
+        heads / ::xllm::ParallelConfig::get_instance().sp_size(),
         /*input_layout=*/"BSND",
         /*pse=*/torch::nullopt,
         /*padding_mask=*/torch::nullopt,
@@ -1996,7 +1999,7 @@ class QwenImageTransformer2DModelImpl : public torch::nn::Module {
       block_attention_kwargs["attention_mask"] = joint_attention_mask;
     }
 
-    if (FLAGS_sp_size > 1) {
+    if (::xllm::ParallelConfig::get_instance().sp_size() > 1) {
       new_hidden_states = split_sequence(new_hidden_states,
                                          /*dim=*/1,
                                          parallel_args_.dit_sp_group_);
@@ -2077,7 +2080,7 @@ class QwenImageTransformer2DModelImpl : public torch::nn::Module {
 
     new_hidden_states = norm_out_->forward(new_hidden_states, temb);
     new_hidden_states = proj_out_->forward(new_hidden_states);
-    if (FLAGS_sp_size > 1) {
+    if (::xllm::ParallelConfig::get_instance().sp_size() > 1) {
       new_hidden_states = gather_sequence(
           new_hidden_states, /*dim=*/1, parallel_args_.dit_sp_group_);
     }

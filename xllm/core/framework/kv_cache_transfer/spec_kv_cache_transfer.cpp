@@ -18,6 +18,8 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 
+#include "core/framework/config/xllm_config.h"
+
 namespace xllm {
 namespace {
 #define CHECK_LDD_RET(ret)  \

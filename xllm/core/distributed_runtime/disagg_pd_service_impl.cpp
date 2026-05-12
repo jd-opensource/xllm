@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/types.h"
+#include "core/framework/config/xllm_config.h"
 #include "distributed_runtime/llm_engine.h"
 #include "framework/request/request_output.h"
 #include "scheduler/disagg_pd_scheduler.h"
@@ -177,7 +178,8 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
         block_ids.push_back(block_id);
       }
       // XTensor mode: calculate and return GlobalXTensor offsets
-      if (FLAGS_enable_xtensor && !block_ids.empty()) {
+      if (::xllm::KVCacheConfig::get_instance().enable_xtensor() &&
+          !block_ids.empty()) {
         std::vector<std::pair<std::vector<uint64_t>, std::vector<uint64_t>>>
             layer_offsets;
         if (engine_->get_xtensor_offsets_for_blocks(

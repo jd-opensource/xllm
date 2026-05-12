@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/request/mm_data_visitor.h"
 #include "platform/device.h"
 
@@ -32,7 +33,7 @@ VlmExecutorImpl::VlmExecutorImpl(CausalLM* model,
       args_(args),
       device_(device),
       options_(options) {
-  if (FLAGS_enable_graph) {
+  if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     llm_executor_ = ExecutorImplFactory::get_instance().create_executor_impl(
         model, args, device, options, Device::type_str());
   }

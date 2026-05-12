@@ -20,6 +20,7 @@ limitations under the License.
 #include <unordered_set>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/util/rec_model_utils.h"
 #include "framework/batch/beam_search.h"
 #include "util/blocking_counter.h"
@@ -455,7 +456,8 @@ void SequencesGroup::generate_multi_round_output(
     out.text = tokenizer.decode(Slice<int32_t>{gen_ids.data(), gen_ids.size()},
                                 sequence_params_.skip_special_tokens);
     out.token_ids = std::move(gen_ids);
-    if (FLAGS_output_rec_logprobs && !out.token_ids.empty()) {
+    if (::xllm::RecConfig::get_instance().output_rec_logprobs() &&
+        !out.token_ids.empty()) {
       float beam_logprob = (b < last_lps.size()) ? last_lps[b] : -9999.0f;
       out.logprobs.emplace();
       auto append_logprob = [&](int32_t token_id) {

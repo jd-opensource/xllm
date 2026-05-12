@@ -35,6 +35,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #if defined(USE_CUDA) || defined(USE_MLU)
 #include "core/platform/numa_utils.h"
 #endif
@@ -82,6 +83,7 @@ void WorkerServer::create_server(
 #if defined(USE_NPU)
   FLAGS_npu_kernel_backend = options.npu_kernel_backend();
 #endif
+  XllmConfig::reload_from_flags();
   Device device(d);
   device.set_device();
   LOG(INFO) << "Create worker server with device: " << device.index();
@@ -235,10 +237,12 @@ void WorkerServer::create_spawn_server(int local_rank,
   const char* num_speculative_tokens_ptr = num_speculative_tokens_str.c_str();
   std::string speculative_algorithm_str = options.speculative_algorithm();
   const char* speculative_algorithm_ptr = speculative_algorithm_str.c_str();
-  const char* communication_backend_ptr = FLAGS_communication_backend.c_str();
+  const char* communication_backend_ptr =
+      ::xllm::ParallelConfig::get_instance().communication_backend().c_str();
   std::string npu_kernel_backend_str = options.npu_kernel_backend();
   const char* npu_kernel_backend_ptr = npu_kernel_backend_str.c_str();
-  const char* rank_tablefile_ptr = FLAGS_rank_tablefile.c_str();
+  const char* rank_tablefile_ptr =
+      ::xllm::EPLBConfig::get_instance().rank_tablefile().c_str();
   const char* worker_type_ptr = worker_type.to_string();
   std::string spawn_worker_bin_path =
       options.spawn_worker_path() + "/spawn_worker";
@@ -382,7 +386,8 @@ bool WorkerServer::sync_master_node(const std::string& master_node_addr,
   int try_count = 0;
   brpc::Controller cntl;
   const int sleep_time_second = 3;
-  while (try_count < FLAGS_max_reconnect_count) {
+  while (try_count <
+         ::xllm::ServiceConfig::get_instance().max_reconnect_count()) {
     cntl.Reset();
     stub.Sync(&cntl, &addr_info, &uids, nullptr);
     if (cntl.Failed()) {
@@ -398,7 +403,8 @@ bool WorkerServer::sync_master_node(const std::string& master_node_addr,
     try_count++;
   }
 
-  if (try_count >= FLAGS_max_reconnect_count) {
+  if (try_count >=
+      ::xllm::ServiceConfig::get_instance().max_reconnect_count()) {
     LOG(ERROR) << "Worker#" << addr_info.global_rank() << " connect to "
                << master_node_addr << " failed."
                << " Error message: " << cntl.ErrorText();

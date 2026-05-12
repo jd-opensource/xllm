@@ -27,6 +27,7 @@ limitations under the License.
 #include "async_response_processor.h"
 #include "common/macros.h"
 #include "common/types.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/batch/batch.h"
 #include "framework/block/kv_cache_manager.h"
 #include "framework/request/priority_comparator.h"
@@ -194,8 +195,9 @@ class ContinuousScheduler : public Scheduler {
 
   KVCacheManager* kv_cache_manager_;
 
-  // a thread safe queue of requests, bounded by FLAGS_request_queue_size
-  // the schedule owns the requests and manages their lifetimes.
+  // a thread safe queue of requests, bounded by
+  // ::xllm::RecConfig::get_instance().request_queue_size() the schedule
+  // owns the requests and manages their lifetimes.
   folly::MPMCQueue<std::shared_ptr<Request>> request_queue_;
 
   // a batch of requests in running state, sorted by priority from high to low.

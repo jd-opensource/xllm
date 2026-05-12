@@ -27,6 +27,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/interruption_bus.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -192,14 +193,14 @@ class LlmModelImplBase : public torch::nn::Module {
         const_cast<ModelInputParams&>(input_params);
     torch::Tensor attn_mask;
     max_seq_len_ =
-        FLAGS_enable_chunked_prefill
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()
             ? std::max(input_params.meta.kv_max_seq_len, max_seq_len_)
             : 128;
     if (model_type_ == "qwen2") {
       attn_mask = attn_mask_.get_attn_mask(
           max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
     } else {
-      if (FLAGS_enable_chunked_prefill) {
+      if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
         int num_sequences = input_params.meta.num_sequences;
         if (num_sequences > 0) {
           std::vector<torch::Tensor> req_mask_vec;

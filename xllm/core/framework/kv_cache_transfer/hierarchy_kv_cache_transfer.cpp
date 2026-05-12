@@ -50,7 +50,7 @@ HierarchyKVCacheTransfer::HierarchyKVCacheTransfer(
   }
 
   if (options_.enable_kvcache_store()) {
-    KVCacheStoreConfig config;
+    KVCacheStoreInitConfig config;
     config.localhost_name = options_.store_local_hostname();
     config.protocol = options_.store_protocol();
     config.metadata_server = options_.store_metadata_server();

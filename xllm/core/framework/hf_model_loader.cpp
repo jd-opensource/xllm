@@ -36,6 +36,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/version_singleton.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/state_dict/rec_vocab_dict.h"
 #include "core/framework/state_dict/safetensors/safetensors.h"
 #include "core/framework/tokenizer/fast_tokenizer.h"
@@ -427,7 +428,8 @@ HFModelLoader::HFModelLoader(const std::string& model_weights_path)
   std::sort(model_weights_files_.begin(), model_weights_files_.end());
 
   threadpool_ = std::make_unique<ThreadPool>(32);
-  if (FLAGS_backend == "rec" && is_onerec_model_type(args_.model_type())) {
+  if (::xllm::ModelConfig::get_instance().backend() == "rec" &&
+      is_onerec_model_type(args_.model_type())) {
     CHECK(load_rec_vocab(model_weights_path))
         << "Failed to load rec content from " << model_weights_path;
   }
@@ -675,7 +677,7 @@ bool HFModelLoader::load_rec_vocab(const std::string& model_weights_path) {
               ->initialize(vocab_full_path))
         << "Failed to initialize vocab dict from " << vocab_full_path;
   } else {
-    if (FLAGS_enable_constrained_decoding) {
+    if (::xllm::RecConfig::get_instance().enable_constrained_decoding()) {
       LOG(ERROR) << "Vocab file is not set for OneRec REC tokenizer under "
                  << model_weights_path
                  << ". Constrained decoding requires `vocab_file` in "

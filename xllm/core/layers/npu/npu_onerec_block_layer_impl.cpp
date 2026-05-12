@@ -23,6 +23,7 @@ limitations under the License.
 #include <set>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/util/rec_model_utils.h"
 namespace xllm {
 namespace layer {
@@ -730,7 +731,9 @@ void NpuOneRecBlockLayerImpl::param_from_args(
   param.enableSwiGLUQuantForSharedExperts = false;
   param.supportLcoc = is_prefill;
   param.supportSpeculate = false;
-  param.enableSplitFuse = FLAGS_enable_chunked_prefill && is_prefill;
+  param.enableSplitFuse =
+      ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() &&
+      is_prefill;
   param.supportLora = false;
   param.loraEnableGMM = false;
   param.enableLogN = false;
@@ -741,7 +744,8 @@ void NpuOneRecBlockLayerImpl::param_from_args(
   param.isOneRecEncoder = !is_decoder_;
   param.use_xattn = is_decoder_ && is_onerec_xattention_mode();
   param.enableOneRecPrefillOnly = use_legacy_onerec_prefill_only_contract();
-  param.backend = FLAGS_communication_backend;
+  param.backend =
+      ::xllm::ParallelConfig::get_instance().communication_backend();
   param.matmulBackend = kEnableOneRecAclnnAttentionLinear
                             ? atb_speed::common::OpBackend::ACLNN
                             : atb_speed::common::OpBackend::ATB;

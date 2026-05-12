@@ -28,6 +28,7 @@ limitations under the License.
 #include <sstream>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request_state.h"
 #include "util/rec_model_utils.h"
@@ -61,7 +62,7 @@ ProfileManager::ProfileManager(Engine* engine, const Options& options)
 
 #if defined(USE_NPU) || defined(USE_CUDA)
   // Warmup ACL graph executor if enabled
-  if (FLAGS_enable_graph) {
+  if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     if (!is_rec_multi_round_mode()) {
       LOG(INFO) << "Starting ACL Graph/CUDA Graph warmup.";
       warmup_for_graph();
@@ -146,7 +147,7 @@ void ProfileManager::eval_batch_latency_prediction(const std::string mode) {
     }
   }
   if (mode == "mix") {
-    if (!FLAGS_enable_chunked_prefill) {
+    if (!::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
       LOG(WARNING) << "When chunked prefill is disabled, mixed prefill and "
                       "decode scenarios will not be tested.";
       return;
@@ -325,7 +326,7 @@ void ProfileManager::profile_step_time(bool if_dump_to_file) {
     }
     train_prefill_time_predictor(time_profiling_data);
   }
-  if (FLAGS_enable_disagg_pd) {
+  if (::xllm::DisaggPDConfig::get_instance().enable_disagg_pd()) {
     LOG(INFO) << "Disagg PD enabled, skip decode time profile.";
     return;
   }
@@ -545,7 +546,8 @@ const ProfileManager::CopyBlockProfile* ProfileManager::find_profile(
 
 int32_t ProfileManager::get_max_copy_block_num(double latency_budget) {
   auto block_size = block_manager_pool_->options().block_size();
-  const CopyBlockProfile* profile = find_profile(FLAGS_model_id, block_size);
+  const CopyBlockProfile* profile =
+      find_profile(::xllm::ModelConfig::get_instance().model_id(), block_size);
 
   double a = 1, b = 0;  // default values
   if (profile) {
@@ -561,7 +563,8 @@ double ProfileManager::predict_copy_blocks_time(
     size_t num_copy_blocks,
     bool if_need_add_constant_term) {
   auto block_size = block_manager_pool_->options().block_size();
-  const CopyBlockProfile* profile = find_profile(FLAGS_model_id, block_size);
+  const CopyBlockProfile* profile =
+      find_profile(::xllm::ModelConfig::get_instance().model_id(), block_size);
 
   double a = 1, b = 0;  // default values
   if (profile) {
@@ -868,7 +871,8 @@ void ProfileManager::warmup_for_graph() {
   // Warmup parameters - align with bucket logic
   // Prefill: align max_tokens_per_batch to bucket
   int32_t prefill_tokens =
-      std::min(FLAGS_max_tokens_per_batch, max_context_len);
+      std::min(::xllm::SchedulerConfig::get_instance().max_tokens_per_batch(),
+               max_context_len);
 
   std::vector<int32_t> decode_seq_lens = {16};
 
@@ -878,7 +882,8 @@ void ProfileManager::warmup_for_graph() {
   // bucket values Bucket values: 1, 2, 4, 8, 16, then 32, 48, 64, ...
   // (multiples of 16)
   std::vector<int32_t> decode_batch_sizes = {1, 2, 4, 8, 16};
-  int32_t max_seqs_per_batch = FLAGS_max_seqs_per_batch;
+  int32_t max_seqs_per_batch =
+      ::xllm::SchedulerConfig::get_instance().max_seqs_per_batch();
   // From 32 onwards, use multiples of 16 (bucket alignment)
   for (int32_t batch_size = 32; batch_size <= max_seqs_per_batch;
        batch_size += 16) {

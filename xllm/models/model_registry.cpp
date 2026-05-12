@@ -22,6 +22,7 @@ limitations under the License.
 #include <unordered_set>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "models.h"
 
 namespace {
@@ -148,11 +149,12 @@ bool resolve_model_registration_name(const std::string& model_type,
                                      std::string* resolved_name,
                                      std::string* error_message) {
 #if defined(USE_NPU)
-  return resolve_model_registration(model_type,
-                                    FLAGS_npu_kernel_backend,
-                                    nullptr,
-                                    resolved_name,
-                                    error_message);
+  return resolve_model_registration(
+      model_type,
+      ::xllm::ExecutionConfig::get_instance().npu_kernel_backend(),
+      nullptr,
+      resolved_name,
+      error_message);
 #else
   return resolve_model_registration(
       model_type, "", nullptr, resolved_name, error_message);

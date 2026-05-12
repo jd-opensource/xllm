@@ -25,6 +25,7 @@ limitations under the License.
 #include <stdexcept>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "platform/stream.h"
 #if defined(USE_CUDA)
 #include <cuda_runtime_api.h>
@@ -1938,7 +1939,7 @@ inline void initialize_device_buffer_session(ReadContext& context,
   }
 
 #if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU)
-  if (!materialize_device_buffer || !FLAGS_use_contiguous_input_buffer) {
+  if (!materialize_device_buffer || !::xllm::ExecutionConfig::get_instance().use_contiguous_input_buffer()) {
     return;
   }
 
@@ -1970,7 +1971,7 @@ inline void initialize_device_buffer_session(ReadContext& context,
         ::xllm::npu::DeviceCaptureLock::get_instance().get_lock(device.index());
     session.capture_lock_guard.emplace(capture_lock);
 #elif defined(USE_CUDA)
-    if (FLAGS_enable_graph) {
+    if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
       auto& replay_lock =
           ::xllm::cuda::DeviceCaptureLock::get_instance().get_read_lock(
               device.index());
@@ -2515,7 +2516,7 @@ void convert_tensor_to_raw_output(
     RawForwardOutput& raw_output) {
   raw_output.prepared_layer_id = prepared_layer_id;
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     torch::Tensor expert_load_data_flattened =
         expert_load_data.view({-1}).contiguous();
     if (expert_load_data_flattened.defined()) {
@@ -2724,7 +2725,7 @@ ForwardSharedMemoryManager::ForwardSharedMemoryManager(const std::string& name,
     : SharedMemoryManager(name, size, is_creator), forward_type_(type) {
   control_ptr_ = static_cast<ControlMetadata*>(base_address());
   metadata_addr_ = static_cast<char*>(base_address()) + sizeof(ControlMetadata);
-  if (FLAGS_use_contiguous_input_buffer) {
+  if (::xllm::ExecutionConfig::get_instance().use_contiguous_input_buffer()) {
     stream_ = std::make_unique<Stream>();
   }
 }

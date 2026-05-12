@@ -20,6 +20,7 @@ limitations under the License.
 #include <cstdint>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 
 namespace xllm {
 namespace vmm {
@@ -118,7 +119,8 @@ void create_phy_mem_handle(PhyMemHandle& phy_mem_handle, int32_t device_id) {
   // Note: cuMemSetAccess is called in map() after cuMemMap, not here
 #endif
   CHECK_EQ(ret, 0) << "Failed to create physical memory handle";
-  FLAGS_phy_page_granularity_size = granularity_size;
+  ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size(
+      granularity_size);
 }
 
 void create_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
@@ -166,7 +168,8 @@ void release_vir_ptr(VirPtr& vir_ptr, size_t aligned_size) {
 void map(VirPtr& vir_ptr, PhyMemHandle& phy_mem_handle, int32_t device_id) {
   map(vir_ptr,
       phy_mem_handle,
-      static_cast<size_t>(FLAGS_phy_page_granularity_size),
+      static_cast<size_t>(
+          ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size()),
       device_id);
 }
 
@@ -209,8 +212,8 @@ void unmap(VirPtr& vir_ptr, size_t aligned_size) {
   // `aclrtMapMem` at the given virtual address. Since we map per-physical-page
   // (granularity_size) at different offsets, we must unmap each mapped segment
   // before releasing the reserved virtual address range.
-  size_t granularity_size =
-      static_cast<size_t>(FLAGS_phy_page_granularity_size);
+  size_t granularity_size = static_cast<size_t>(
+      ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size());
   if (granularity_size == 0) {
     granularity_size = aligned_size;
   }

@@ -36,6 +36,7 @@ limitations under the License.
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/rec_master.h"
 #include "core/distributed_runtime/vlm_master.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/util/closure_guard.h"
 #include "embedding.pb.h"
 #include "image_generation.pb.h"
@@ -64,7 +65,7 @@ APIService::APIService(Master* master,
                        const std::vector<std::string>& model_versions)
     : master_(master) {
   set_model_master(model_names[0], master);
-  if (FLAGS_node_rank != 0) {
+  if (::xllm::DistributedConfig::get_instance().node_rank() != 0) {
     return;
   }
   ServiceImplFactory::create(this, master, model_names, model_versions);
@@ -784,7 +785,7 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
               << " already exists";
     return;
   }
-  if (FLAGS_node_rank == 0) {
+  if (::xllm::DistributedConfig::get_instance().node_rank() == 0) {
     auto llm_master = dynamic_cast<LLMMaster*>(master.get());
     completion_service_impl_->add_model_master(master_options.model_id(),
                                                llm_master);

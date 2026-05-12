@@ -16,6 +16,7 @@ limitations under the License.
 #include "base_loader.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/xtensor/xtensor_allocator.h"
 #include "rolling_weight_buffer.h"
 
@@ -414,7 +415,7 @@ void BaseLoader::allocate_device_storage() {
         << "RollingWeightBuffer slot is null for layer " << layer_index_;
     return;
   }
-  if (FLAGS_enable_xtensor) {
+  if (::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     auto& allocator = XTensorAllocator::get_instance();
     bool ok =
         allocator.allocate_weight(model_id_, device_storage_, storage_size_);
@@ -570,7 +571,8 @@ void BaseLoader::release_device_storage() {
   if (device_storage_ == nullptr) {
     return;
   }
-  if (!FLAGS_enable_xtensor && !rolling_buffer_) {
+  if (!::xllm::KVCacheConfig::get_instance().enable_xtensor() &&
+      !rolling_buffer_) {
     auto ret = aclrtFree(device_storage_);
     if (ret != ACL_SUCCESS) {
       LOG(ERROR) << "aclrtFree failed for BaseLoader, ret=" << ret;

@@ -21,6 +21,7 @@ limitations under the License.
 
 #include <unordered_map>
 
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -700,7 +701,8 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
                        const torch::Tensor& seleted_idxes) {
     auto h = hidden_states;
     // return full embeddings if set flag
-    if (FLAGS_enable_return_mm_full_embeddings) {
+    if (::xllm::ModelConfig::get_instance()
+            .enable_return_mm_full_embeddings()) {
       return h;
     }
 

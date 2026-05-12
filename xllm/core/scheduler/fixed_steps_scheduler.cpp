@@ -30,6 +30,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "distributed_runtime/engine.h"
 #include "framework/batch/batch.h"
 #include "framework/batch/batch_factory.h"
@@ -82,7 +83,8 @@ void FixedStepsScheduler::handle_prefill_requests(
   while (!waiting_priority_queue_.empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 &&
          kv_cache_manager_->kv_cache_utilization() <
-             FLAGS_prefill_scheduling_memory_usage_threshold) {
+             ::xllm::SchedulerConfig::get_instance()
+                 .prefill_scheduling_memory_usage_threshold()) {
     std::shared_ptr<Request> request(waiting_priority_queue_.top());
     if (request->finished() || request->cancelled()) {
       if (requires_kv_cache) {
@@ -443,8 +445,10 @@ bool FixedStepsScheduler::OneRecXAttentionSchedulerPipeline::allocate_kv_cache(
     Sequence* sequence) {
   const size_t num_tokens = sequence->num_tokens();
   size_t max_generated_tokens =
-      FLAGS_max_decode_rounds > 0 ? static_cast<size_t>(FLAGS_max_decode_rounds)
-                                  : kRecDecodeSteps;
+      ::xllm::RecConfig::get_instance().max_decode_rounds() > 0
+          ? static_cast<size_t>(
+                ::xllm::RecConfig::get_instance().max_decode_rounds())
+          : kRecDecodeSteps;
   if (const auto* stopping_checker = sequence->stopping_checker()) {
     max_generated_tokens = std::max(
         max_generated_tokens, stopping_checker->get_max_generated_tokens());

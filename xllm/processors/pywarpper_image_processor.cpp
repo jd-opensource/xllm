@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "butil/synchronization/lock.h"
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 
 namespace py = pybind11;
 
@@ -51,7 +52,8 @@ class __attribute__((visibility("hidden"))) PyWrapperImpl {
         py_lst.append(py::bytes(item.raw_data));
       }
 
-      py::dict res = preprocess_(py_lst, FLAGS_model);
+      py::dict res =
+          preprocess_(py_lst, ::xllm::ModelConfig::get_instance().model());
       data = std::move(MMData(MMType::IMAGE, py::cast<MMDict>(res)));
 
       return true;

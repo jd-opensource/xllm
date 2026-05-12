@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #pragma once
+
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "pipeline_qwenimage_base.h"
 #include "util/tensor_helper.h"
@@ -301,7 +303,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
 
     torch::Tensor images;
 
-    if (FLAGS_dit_debug_print) {
+    if (::xllm::DiTConfig::get_instance().dit_debug_print()) {
       input.debug_print();
     }
 
@@ -483,7 +485,8 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
       torch::Tensor noise_pred;
       torch::Tensor neg_noise_pred;
       torch::Tensor pos_neg_noise_preds;
-      if (FLAGS_cfg_size == 2 && do_true_cfg) {
+      if (::xllm::ParallelConfig::get_instance().cfg_size() == 2 &&
+          do_true_cfg) {
         auto rank = parallel_args_.dit_cfg_group_->rank();
         if (rank == 0) {
           noise_pred = transformer_->forward(latent_model_input,

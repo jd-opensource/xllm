@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "deepseek_v2.h"
 #include "layers/common/attention_metadata_builder.h"
 #include "layers/mlu/deepseek_v32_sp_context.h"
@@ -27,7 +28,7 @@ namespace xllm {
 
 inline std::optional<std::string> validate_deepseek_v32_sp_flags(
     const ParallelArgs& parallel_args) {
-  if (!FLAGS_enable_prefill_sp) {
+  if (!::xllm::ParallelConfig::get_instance().enable_prefill_sp()) {
     return std::nullopt;
   }
   if (parallel_args.dp_size() != 1) {
@@ -66,7 +67,7 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
     auto& attn_metadata = *modified_input_params.attn_metadata;
     std::optional<layer::v32_sp::DeepseekV32SPContext> sp_ctx;
     const bool requested_sequence_parallel =
-        FLAGS_enable_prefill_sp &&
+        ::xllm::ParallelConfig::get_instance().enable_prefill_sp() &&
         input_params.meta.batch_forward_type.no_decode();
     if (requested_sequence_parallel) {
       if (sequence_parallel_group_ == nullptr) {

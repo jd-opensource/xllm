@@ -56,9 +56,29 @@ const OptionCategory kCacheOptions = {"KV CACHE OPTIONS",
                                        "max_memory_utilization",
                                        "kv_cache_dtype"}};
 
-const OptionCategory kMoeModelOptions = {
-    "MOE MODEL OPTIONS",
-    {"dp_size", "ep_size", "expert_parallel_degree"}};
+const OptionCategory kKVCacheStoreOptions = {"KV CACHE STORE OPTIONS",
+                                             {"prefetch_timeout",
+                                              "prefetch_bacth_size",
+                                              "layers_wise_copy_batchs",
+                                              "host_blocks_factor",
+                                              "enable_kvcache_store",
+                                              "enable_cache_upload",
+                                              "store_protocol",
+                                              "store_master_server_address",
+                                              "store_metadata_server",
+                                              "store_local_hostname",
+                                              "enable_control_h2d_block_num"}};
+
+const OptionCategory kMoeModelOptions = {"MOE MODEL OPTIONS",
+                                         {"dp_size", "ep_size"}};
+
+const OptionCategory kEPLBOptions = {"EP LOAD BALANCE OPTIONS",
+                                     {"enable_eplb",
+                                      "redundant_experts_num",
+                                      "eplb_update_interval",
+                                      "eplb_update_threshold",
+                                      "expert_parallel_degree",
+                                      "rank_tablefile"}};
 
 const OptionCategory kDiTModelOptions = {
     "DiT MODEL OPTIONS",
@@ -67,15 +87,13 @@ const OptionCategory kDiTModelOptions = {
 const OptionCategory kDisaggregatedPrefillDecodeOptions = {
     "DISAGGREGATED PREFILL-DECODE OPTIONS",
     {"enable_disagg_pd",
+     "enable_pd_ooc",
      "disagg_pd_port",
      "instance_role",
+     "kv_cache_transfer_type",
      "kv_cache_transfer_mode",
      "device_ip",
      "transfer_listen_port"}};
-
-const OptionCategory kMultiStepDecodeOptions = {
-    "MULTI-STEP DECODE OPTIONS",
-    {"max_decode_rounds", "beam_width"}};
 
 const OptionCategory kMtpOptions = {"SPECULATIVE OPTIONS",
                                     {"draft_model",
@@ -89,21 +107,26 @@ const OptionCategory kMtpOptions = {"SPECULATIVE OPTIONS",
                                      "speculative_suffix_max_cached_requests",
                                      "speculative_suffix_use_tree_spec"}};
 
-const OptionCategory kXllmServiceOptions = {
-    "XLLM-SERVICE OPTIONS",
-    {"etcd_addr", "rank_tablefile", "etcd_namespace"}};
+const OptionCategory kXllmServiceOptions = {"XLLM-SERVICE OPTIONS",
+                                            {"etcd_addr", "etcd_namespace"}};
 
-const OptionCategory kBeamSearchOptions = {
-    "BEAM SEARCH OPTIONS",
-    {"enable_beam_search_kernel", "enable_topk_sorted"}};
+const OptionCategory kBeamSearchOptions = {"BEAM SEARCH OPTIONS",
+                                           {"enable_beam_search_kernel",
+                                            "beam_width",
+                                            "enable_block_copy_kernel",
+                                            "enable_topk_sorted"}};
 
 const OptionCategory kRecOptions = {"REC OPTIONS",
                                     {"enable_rec_fast_sampler",
+                                     "enable_xattention_one_stage",
+                                     "max_decode_rounds",
+                                     "enable_constrained_decoding",
                                      "enable_convert_tokens_to_item",
                                      "enable_extended_item_info",
                                      "enable_output_sku_logprobs",
                                      "each_conversion_threshold",
                                      "total_conversion_threshold",
+                                     "request_queue_size",
                                      "enable_rec_prefill_only",
                                      "output_rec_logprobs"}};
 
@@ -124,10 +147,11 @@ const OptionCategory kOtherOptions = {
 const std::vector<OptionCategory> kOptionCategories = {
     kCommonOptions,
     kCacheOptions,
+    kKVCacheStoreOptions,
     kMoeModelOptions,
+    kEPLBOptions,
     kDiTModelOptions,
     kDisaggregatedPrefillDecodeOptions,
-    kMultiStepDecodeOptions,
     kMtpOptions,
     kXllmServiceOptions,
     kBeamSearchOptions,
@@ -174,8 +198,8 @@ class HelpFormatter {
     }
 
     oss << "For more information and all available options, visit:\n";
-    oss << "  https://github.com/jd-opensource/xllm/blob/main/xllm/core/common/"
-           "global_flags.cpp\n";
+    oss << "  https://github.com/jd-opensource/xllm/blob/main/xllm/core/"
+           "framework/config/\n";
     oss << "Documentation: "
            "https://xllm.readthedocs.io/zh-cn/latest/cli_reference/\n";
 

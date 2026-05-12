@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/common/lm_head.h"
 #include "core/layers/qwen2_5_vision_layer.h"
@@ -629,7 +630,8 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
                        const torch::Tensor& seleted_idxes) {
     auto h = hidden_states;
     // return full embeddings if set flag
-    if (FLAGS_enable_return_mm_full_embeddings) {
+    if (::xllm::ModelConfig::get_instance()
+            .enable_return_mm_full_embeddings()) {
       return h;
     }
 

@@ -20,6 +20,7 @@ limitations under the License.
 #include <mstx/ms_tools_ext.h>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "xllm_atb_layers/models/glm4v/glm4v_encoder.h"
 
 namespace xllm {
@@ -66,7 +67,9 @@ NpuGlm4VisionEncoderLayerImpl::NpuGlm4VisionEncoderLayerImpl(
   loader_ = std::make_unique<Glm4VisionEncoderLoader>(
       WEIGHT_COUNT_PER_LAYER,
       context,
-      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? LoadMode::kManual
+          : LoadMode::kEager);
 }
 
 void NpuGlm4VisionEncoderLayerImpl::merge_loaded_weights() {

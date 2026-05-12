@@ -29,6 +29,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/macros.h"
+#include "core/framework/config/xllm_config.h"
 #include "distributed_runtime/collective_service.h"
 #include "global_xtensor.h"
 #include "phy_page.h"
@@ -104,7 +105,8 @@ void XTensorAllocator::setup_multi_node_xtensor_dist(
     int32_t dp_size) {
   const auto& devices = options.devices();
   const int32_t each_node_ranks = static_cast<int32_t>(devices.size());
-  world_size_ = each_node_ranks * FLAGS_nnodes;
+  world_size_ =
+      each_node_ranks * ::xllm::DistributedConfig::get_instance().nnodes();
   dp_size_ = dp_size;
   tp_size_ = world_size_ / dp_size_;
 
@@ -125,7 +127,7 @@ void XTensorAllocator::setup_multi_node_xtensor_dist(
         i, master_node_addr, dones[i], devices[i], options));
 
     // Only rank0 connects to other workers
-    if (FLAGS_node_rank == 0) {
+    if (::xllm::DistributedConfig::get_instance().node_rank() == 0) {
       std::shared_ptr<CollectiveService> collective_service =
           std::make_shared<CollectiveService>(
               0, world_size_, devices[0].index());
@@ -200,7 +202,9 @@ int64_t XTensorAllocator::init_phy_page_pools(double max_memory_utilization,
       cache_size = std::min(cache_size, max_cache_size);
     }
 
-    int64_t num_pages = cache_size / FLAGS_phy_page_granularity_size;
+    int64_t num_pages =
+        cache_size /
+        ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size();
     LOG(INFO) << "init_phy_page_pools (local): available_memory="
               << available_memory << ", total_memory=" << total_memory
               << ", cache_size=" << cache_size << ", num_pages=" << num_pages;
@@ -258,7 +262,9 @@ int64_t XTensorAllocator::init_phy_page_pools(double max_memory_utilization,
     cache_size = std::min(cache_size, max_cache_size);
   }
 
-  int64_t num_pages = cache_size / FLAGS_phy_page_granularity_size;
+  int64_t num_pages =
+      cache_size /
+      ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size();
   LOG(INFO) << "init_phy_page_pools: min_available_memory="
             << min_available_memory << ", min_total_memory=" << min_total_memory
             << ", cache_size=" << cache_size << ", num_pages=" << num_pages;
@@ -539,7 +545,8 @@ std::vector<torch::Tensor> XTensorAllocator::create_kv_tensors_impl_(
     size *= dim;
   }
 
-  size_t page_size = FLAGS_phy_page_granularity_size;
+  size_t page_size =
+      ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size();
   // Align size to page size (round up)
   if (size % page_size != 0) {
     size_t aligned_size = ((size + page_size - 1) / page_size) * page_size;
@@ -771,10 +778,12 @@ void XTensorAllocator::init_device_() {
   device.init_device_context();
 
   // Create a dummy PhyPage to initialize the granularity size
-  // This will set FLAGS_phy_page_granularity_size
+  // This will set
+  // ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size()
   auto dummy_page = std::make_shared<PhyPage>(dev_);
 
-  size_t chunk_sz = FLAGS_phy_page_granularity_size;
+  size_t chunk_sz =
+      ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size();
   LOG(INFO) << "Device initialized with granularity size: " << chunk_sz
             << " bytes";
 }
@@ -861,7 +870,8 @@ std::pair<uint64_t, uint64_t> XTensorAllocator::get_global_offsets_for_block(
 
   // Calculate the offset within the XTensor for this block
   // The offset must be aligned to page_size
-  size_t page_size = FLAGS_phy_page_granularity_size;
+  size_t page_size =
+      ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size();
   offset_t local_offset =
       static_cast<offset_t>((block_id * block_size / page_size) * page_size);
 

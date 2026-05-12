@@ -32,6 +32,7 @@ limitations under the License.
 #include "common/interruption_bus.h"
 #include "common/metrics.h"
 #include "core/distributed_runtime/master.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
@@ -168,7 +169,8 @@ bool VLMEngine::init_model() {
   LOG(INFO) << "Initializing model with " << args_;
   LOG(INFO) << "Initializing model with quant args: " << quant_args_;
   LOG(INFO) << "Initializing model with tokenizer args: " << tokenizer_args_;
-  LOG(INFO) << "Initializing model with random seed: " << FLAGS_random_seed;
+  LOG(INFO) << "Initializing model with random seed: "
+            << ::xllm::ExecutionConfig::get_instance().random_seed();
 
   // init model for each worker in parallel
   // multiple workers, call async init
@@ -176,7 +178,9 @@ bool VLMEngine::init_model() {
   futures.reserve(worker_clients_num_);
   for (auto& worker : worker_clients_) {
     futures.push_back(worker->init_model_async(
-        model_path, FLAGS_random_seed, MasterStatus::WAKEUP));
+        model_path,
+        ::xllm::ExecutionConfig::get_instance().random_seed(),
+        MasterStatus::WAKEUP));
   }
   // wait for all futures to complete
   auto results = folly::collectAll(futures).get();

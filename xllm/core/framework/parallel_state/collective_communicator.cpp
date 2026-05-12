@@ -31,6 +31,7 @@ limitations under the License.
 #include "musa_process_group.h"
 #endif
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "parallel_args.h"
 #include "process_group.h"
 #include "util/net.h"
@@ -63,7 +64,7 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
   //         global_rank, world_size, device, comm);
 
   // comunicator will be inited in torch.
-  if (FLAGS_npu_kernel_backend == "TORCH") {
+  if (::xllm::ExecutionConfig::get_instance().npu_kernel_backend() == "TORCH") {
     parallel_args_ = std::make_unique<ParallelArgs>(
         global_rank, world_size, dp_size, cp_size, nullptr, ep_size);
     return;
@@ -83,19 +84,22 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
       .pp_size(1)
       .sp_size(1)
       .cp_size(normalized_cp_size);
-  MappingNPU mapping_npu(
-      FLAGS_rank_tablefile, world_size, global_rank, mapping_options);
+  MappingNPU mapping_npu(::xllm::EPLBConfig::get_instance().rank_tablefile(),
+                         world_size,
+                         global_rank,
+                         mapping_options);
   auto mapping_data = mapping_npu.to_json();
   atb_speed::base::Mapping mapping;
   mapping.ParseParam(mapping_data);
-  mapping.InitGlobalCommDomain(FLAGS_communication_backend);
+  mapping.InitGlobalCommDomain(
+      ::xllm::ParallelConfig::get_instance().communication_backend());
   auto moeEpParallelInfo = mapping.Get(atb_speed::base::MOE_EP);
   auto dispatchAndCombinecommDomain =
       atb_speed::GetSingleton<atb_speed::ExternalCommManager>().GetCommDomain(
           moeEpParallelInfo.groupId,
           moeEpParallelInfo.rankIds,
           moeEpParallelInfo.rank,
-          FLAGS_communication_backend,
+          ::xllm::ParallelConfig::get_instance().communication_backend(),
           moeEpParallelInfo.bufferSize,
           false);
   auto dispatchAndCombineHcclComm =
@@ -121,7 +125,7 @@ void CollectiveCommunicator::create_process_groups(
     const std::string& master_addr,
     const torch::Device& device) {
 #if defined(USE_NPU)
-  if (FLAGS_npu_kernel_backend == "ATB") {
+  if (::xllm::ExecutionConfig::get_instance().npu_kernel_backend() == "ATB") {
     return;
   }
 #endif

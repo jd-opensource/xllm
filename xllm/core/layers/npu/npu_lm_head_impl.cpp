@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+
+#include "core/framework/config/xllm_config.h"
 DECLARE_string(rank_tablefile);
 DECLARE_string(communication_backend);
 
@@ -58,7 +60,7 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
       param.linearParallelParam.tensorParallelInfo.commDomain =
           std::to_string(tp_group_id);
       param.linearParallelParam.tensorParallelInfo.backend =
-          FLAGS_communication_backend;
+          ::xllm::ParallelConfig::get_instance().communication_backend();
     } else {
       param.linearParallelParam.parallelType =
           atb_speed::common::COLUMN_PARALLEL;
@@ -68,7 +70,7 @@ void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
       param.linearParallelParam.tensorParallelInfo.worldSize =
           parallelInfo.rankIds.size();
       param.linearParallelParam.tensorParallelInfo.backend =
-          FLAGS_communication_backend;
+          ::xllm::ParallelConfig::get_instance().communication_backend();
       parallelInfo.InitCommDomain(
           param.linearParallelParam.tensorParallelInfo.hcommInfo,
           param.linearParallelParam.tensorParallelInfo.commDomain);
@@ -113,7 +115,9 @@ NpuLmHeadImpl::NpuLmHeadImpl(const ModelContext& context) : BaseLayer(context) {
   loader_ = std::make_unique<LmHeadLoader>(
       1,
       context,
-      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? LoadMode::kManual
+          : LoadMode::kEager);
 }
 
 int64_t NpuLmHeadImpl::init_layer() {

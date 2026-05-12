@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+
+#include "core/framework/config/xllm_config.h"
 // DECLARE_string(rank_tablefile);
 DECLARE_string(communication_backend);
 namespace xllm {
@@ -41,13 +43,15 @@ void NpuWordEmbeddingImpl::param_from_args(
       const int32_t tp_group_id =
           use_local_tp ? (parallel_args.rank() / dp_local_tp_size_) : 0;
       param.tensorParallelInfo.commDomain = std::to_string(tp_group_id);
-      param.tensorParallelInfo.backend = FLAGS_communication_backend;
+      param.tensorParallelInfo.backend =
+          ::xllm::ParallelConfig::get_instance().communication_backend();
     } else {
       atb_speed::common::ParallelInfo parallelInfo =
           parallel_args.mapping().Get(atb_speed::base::ATTN_TP);
       param.tensorParallelInfo.rank = parallelInfo.rank;
       param.tensorParallelInfo.worldSize = parallelInfo.rankIds.size();
-      param.tensorParallelInfo.backend = FLAGS_communication_backend;
+      param.tensorParallelInfo.backend =
+          ::xllm::ParallelConfig::get_instance().communication_backend();
       parallelInfo.InitCommDomain(param.tensorParallelInfo.hcommInfo,
                                   param.tensorParallelInfo.commDomain);
     }
@@ -68,7 +72,9 @@ NpuWordEmbeddingImpl::NpuWordEmbeddingImpl(const ModelContext& context)
   loader_ = std::make_unique<WordEmbeddingLoader>(
       1,
       context,
-      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? LoadMode::kManual
+          : LoadMode::kEager);
 }
 
 int64_t NpuWordEmbeddingImpl::init_layer() {

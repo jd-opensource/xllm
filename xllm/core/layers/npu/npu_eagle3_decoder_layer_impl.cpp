@@ -22,6 +22,7 @@ limitations under the License.
 #include <map>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 
 // #include "attn_mask.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
@@ -44,7 +45,9 @@ void NpuEagle3DecoderLayerImpl::param_from_args(
   param.supportSwiGLU = true;
   param.supportLcoc = isPrefill;  // isPrefill
   param.supportSpeculate = false;
-  param.enableSplitFuse = FLAGS_enable_chunked_prefill && isPrefill;
+  param.enableSplitFuse =
+      ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() &&
+      isPrefill;
   param.supportLora = false;
   param.loraEnableGMM = false;
   param.qkvHasBias = false;
@@ -103,14 +106,17 @@ NpuEagle3DecoderLayerImpl::NpuEagle3DecoderLayerImpl(
   loader_ = std::make_unique<Eagle3DecoderLoader>(
       WEIGHT_COUNT_PER_LAYER,
       context,
-      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? LoadMode::kManual
+          : LoadMode::kEager);
   initialize_quantization_parameters();
 }
 
 void NpuEagle3DecoderLayerImpl::initialize_linear_transpose_type() {
-  auto& at_host_weight_tensors = FLAGS_enable_manual_loader
-                                     ? loader_->get_at_host_weight_tensors()
-                                     : loader_->get_at_weight_tensors();
+  auto& at_host_weight_tensors =
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? loader_->get_at_host_weight_tensors()
+          : loader_->get_at_weight_tensors();
   TransposeType transpose_type =
       check_transpose(at_host_weight_tensors[IN_MLP_W2_WEIGHT]);
   int transpose_value = static_cast<int>(transpose_type);
@@ -300,7 +306,8 @@ void NpuEagle3DecoderLayerImpl::build_node_variant_pack(
           input_params.attention.device.new_cache_slots);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
       internal_tensors_extra_;
-  if (is_prefill && FLAGS_enable_chunked_prefill) {
+  if (is_prefill &&
+      ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 12) =
         atb_speed::Utils::AtTensor2Tensor(
             input_params.attention.device.q_seq_lens);

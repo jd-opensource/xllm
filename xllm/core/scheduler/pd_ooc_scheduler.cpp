@@ -27,6 +27,7 @@ limitations under the License.
 #include "common/interruption_bus.h"
 #include "common/macros.h"
 #include "core/distributed_runtime/pd_ooc_service.h"
+#include "core/framework/config/xllm_config.h"
 #include "disagg_pd.pb.h"
 #include "distributed_runtime/engine.h"
 #include "framework/batch/batch_factory.h"
@@ -136,7 +137,7 @@ void PDOOCScheduler::start_rpc_server() {
       ServerRegistry::get_instance().register_server(server_name_);
   if (!rpc_server->start(std::move(service))) {
     LOG(ERROR) << "Failed to start brpc disagg pd server on port "
-               << FLAGS_disagg_pd_port;
+               << ::xllm::DisaggPDConfig::get_instance().disagg_pd_port();
     return;
   }
 }

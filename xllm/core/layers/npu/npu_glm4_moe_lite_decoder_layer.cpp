@@ -21,6 +21,7 @@ limitations under the License.
 #include <utility>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "layers/common/rotary_embedding_util.h"
 DECLARE_string(rank_tablefile);
 DECLARE_string(communication_backend);
@@ -81,7 +82,9 @@ NpuGlm4MoeDecoderLiteImpl::NpuGlm4MoeDecoderLiteImpl(
       context,
       layer_id_,
       prefill_param_.firstKDenseReplace,
-      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? LoadMode::kManual
+          : LoadMode::kEager);
 
   initialize_tensors(options);
 }
@@ -140,12 +143,15 @@ void NpuGlm4MoeDecoderLiteImpl::initialize_basic_parameters(
     bool is_prefill,
     bool is_prefixcache) {
   param.isFA = false;
-  param.enableFusedMLA = FLAGS_enable_prefix_cache;
+  param.enableFusedMLA =
+      ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
   param.isPrefill = is_prefill;
   param.isBF16 = args.dtype() == "bfloat16";
   param.enablePrefixCache =
-      is_prefill && FLAGS_enable_prefix_cache && is_prefixcache;
-  param.isNzCache = FLAGS_enable_prefix_cache;
+      is_prefill &&
+      ::xllm::KVCacheConfig::get_instance().enable_prefix_cache() &&
+      is_prefixcache;
+  param.isNzCache = ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
   param.enableSwiGLU = true;
   param.enableLcoc = is_prefill;  // false;
 
@@ -153,7 +159,9 @@ void NpuGlm4MoeDecoderLiteImpl::initialize_basic_parameters(
   param.mlpLinearTransposeType = {1, -1, 1, -1};
 
   param.enableSplitFuse =
-      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
+      (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ||
+       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()) &&
+      is_prefill;
 
   param.enableAclGraphPagedAttention = false;
 
@@ -163,8 +171,10 @@ void NpuGlm4MoeDecoderLiteImpl::initialize_basic_parameters(
 
   param.normEps = args.rms_norm_eps();
   // param.rank = parallel_args.rank();
-  param.backend = FLAGS_communication_backend;
-  // param.rankTableFile = FLAGS_rank_tablefile;
+  param.backend =
+      ::xllm::ParallelConfig::get_instance().communication_backend();
+  // param.rankTableFile =
+  // ::xllm::EPLBConfig::get_instance().rank_tablefile();
 
   param.layerId = layer_id_;
   param.numHiddenLayers = args.n_layers();
@@ -260,12 +270,13 @@ void NpuGlm4MoeDecoderLiteImpl::initialize_parallel_parameters(
     const ParallelArgs& parallel_args) {
   param.lmHeadLocalTp = dp_local_tp_size_;
   param.mapping = parallel_args.mapping();
-  param.tensorParallelInfo = {parallel_args.rank(),
-                              parallel_args.world_size(),
-                              FLAGS_communication_backend,
-                              FLAGS_rank_tablefile,
-                              nullptr,
-                              ""};
+  param.tensorParallelInfo = {
+      parallel_args.rank(),
+      parallel_args.world_size(),
+      ::xllm::ParallelConfig::get_instance().communication_backend(),
+      ::xllm::EPLBConfig::get_instance().rank_tablefile(),
+      nullptr,
+      ""};
 
   param.PrintParam();
   param.maxDecodeDpTokenSize = 0;  // TODO
@@ -535,7 +546,8 @@ void NpuGlm4MoeDecoderLiteImpl::build_node_variant_pack(
   }
 
   // if (is_prefill &&
-  //     (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
+  //     (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ||
+  //     ::xllm::KVCacheConfig::get_instance().enable_prefix_cache())) {
   //   node.variantPack.inTensors.at(input_idx) =
   //       atb_speed::Utils::AtTensor2Tensor(input_params.attention.device.q_seq_lens);
   //   node.variantPack.inTensors.at(input_idx).hostData =
@@ -565,7 +577,7 @@ void NpuGlm4MoeDecoderLiteImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(input_idx++) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
-  if (FLAGS_enable_graph && !is_prefill &&
+  if (::xllm::ExecutionConfig::get_instance().enable_graph() && !is_prefill &&
       input_params.graph.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(input_params.graph.tiling_data);

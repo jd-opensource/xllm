@@ -26,6 +26,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/interruption_bus.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
@@ -126,7 +127,7 @@ class MtpModelImplBase : public torch::nn::Module {
 
     torch::Tensor attn_mask;
     // TODO(liangzhiwei20): support prefix cache for deepseek .
-    if (FLAGS_enable_chunked_prefill) {
+    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
       int num_sequences = input_params.meta.num_sequences;
       if (num_sequences > 0) {
         std::vector<torch::Tensor> req_mask_vec;
@@ -147,7 +148,7 @@ class MtpModelImplBase : public torch::nn::Module {
         attn_mask =
             attn_mask_.get_attn_mask(128, h.dtype().toScalarType(), h.device());
       }
-    } else if (model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache &&
+    } else if (model_type_ == "deepseek_v3" && ::xllm::KVCacheConfig::get_instance().enable_prefix_cache() &&
                !input_params.meta.batch_forward_type.is_decode()) {
       attn_mask =
           attn_mask_.get_attn_mask(512, h.dtype().toScalarType(), h.device());

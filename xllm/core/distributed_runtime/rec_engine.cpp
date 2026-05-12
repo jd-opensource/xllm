@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
@@ -278,7 +279,9 @@ bool RecEngine::LlmRecEnginePipeline::init_model_workers(
   futures.reserve(engine_.worker_clients_num_);
   for (auto& worker : engine_.worker_clients_) {
     futures.emplace_back(worker->init_model_async(
-        model_path, FLAGS_random_seed, MasterStatus::WAKEUP));
+        model_path,
+        ::xllm::ExecutionConfig::get_instance().random_seed(),
+        MasterStatus::WAKEUP));
   }
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
@@ -603,7 +606,9 @@ bool RecEngine::OneRecLocalEnginePipeline::init_model_workers(
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
     futures.emplace_back(worker->init_model_async(
-        model_path, FLAGS_random_seed, MasterStatus::WAKEUP));
+        model_path,
+        ::xllm::ExecutionConfig::get_instance().random_seed(),
+        MasterStatus::WAKEUP));
   }
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
@@ -1042,7 +1047,9 @@ bool RecEngine::RecMultiRoundEnginePipeline::init_model_workers(
   futures.reserve(engine_.workers_.size());
   for (auto& worker : engine_.workers_) {
     futures.emplace_back(worker->init_model_async(
-        model_path, FLAGS_random_seed, MasterStatus::WAKEUP));
+        model_path,
+        ::xllm::ExecutionConfig::get_instance().random_seed(),
+        MasterStatus::WAKEUP));
   }
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {

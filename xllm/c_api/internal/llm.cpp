@@ -27,6 +27,7 @@ limitations under the License.
 #include <stdexcept>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "helper.h"
 
 XLLM_CAPI_EXPORT XLLM_LLM_Handler* xllm_llm_create(void) {
@@ -115,11 +116,13 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
         .is_local(true)
         .server_idx(xllm_init_options.server_idx);
 
-    options.enable_graph(FLAGS_enable_graph);
+    options.enable_graph(
+        ::xllm::ExecutionConfig::get_instance().enable_graph());
 
 #if !defined(USE_NPU) && !defined(USE_CUDA)
     FLAGS_enable_block_copy_kernel = false;
 #endif
+    xllm::XllmConfig::reload_from_flags();
 
     handler->master = std::make_unique<xllm::LLMMaster>(options);
     handler->master->run();

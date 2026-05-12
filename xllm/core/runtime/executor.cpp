@@ -16,6 +16,7 @@ limitations under the License.
 #include "executor.h"
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "executor_impl_factory.h"
 #include "platform/device.h"
 
@@ -25,7 +26,8 @@ Executor::Executor(CausalLM* model,
                    const ModelArgs& args,
                    const torch::Device& device,
                    const runtime::Options& options) {
-  std::string backend = (options.backend() != "vlm" && FLAGS_enable_graph)
+  std::string backend = (options.backend() != "vlm" &&
+                         ::xllm::ExecutionConfig::get_instance().enable_graph())
                             ? Device::type_str()
                             : options.backend();
   impl_ = ExecutorImplFactory::get_instance().create_executor_impl(

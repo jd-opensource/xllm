@@ -21,6 +21,7 @@ limitations under the License.
 #include "core/util/rec_model_utils.h"
 #if defined(USE_NPU)
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/layers/common/attention_mask.h"
 #endif
 #include "core/layers/qwen3_decoder_layer.h"
@@ -50,7 +51,9 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
 #if defined(USE_NPU)
-    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
+    int32_t mask_value =
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ? -9984
+                                                                         : 1;
     attn_mask_ = layer::AttentionMask(
         options.device(), options.dtype().toScalarType(), mask_value);
 #endif
@@ -198,7 +201,7 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
     // NOTE: Enabling chunked prefill here is known to cause garbled output in
     // this model. TODO: investigate and fix the output corruption.
     torch::Tensor attn_mask;
-    if (FLAGS_enable_chunked_prefill) {
+    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
       const int32_t max_kv_seq = params.meta.kv_max_seq_len;
       const int32_t num_sequences = params.meta.num_sequences;
       if (num_sequences > 0) {

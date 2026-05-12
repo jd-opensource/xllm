@@ -29,6 +29,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/batch/mposition.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
@@ -494,8 +495,8 @@ void BatchInputBuilder::process_single_sequence(
                       write_block_ids_ptr);
 
   // Input for beam search kernel
-  if (FLAGS_enable_beam_search_kernel && sequence->check_beam_search() &&
-      sequence->num_generated_tokens() > 0) {
+  if (::xllm::BeamSearchConfig::get_instance().enable_beam_search_kernel() &&
+      sequence->check_beam_search() && sequence->num_generated_tokens() > 0) {
     state.acc_logprob_vec.emplace_back(sequence->get_acc_logprob());
   }
 }
@@ -770,7 +771,7 @@ void BatchInputBuilder::process_swap_block_infos(ForwardInput& forward_input) {
 
   auto& input_params = forward_input.input_params;
   auto& swap_blocks = *swap_block_transfer_infos_;
-  if (FLAGS_enable_block_copy_kernel) {
+  if (::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel()) {
     std::sort(swap_blocks.begin(),
               swap_blocks.end(),
               [](const BlockTransferInfo& a, const BlockTransferInfo& b) {

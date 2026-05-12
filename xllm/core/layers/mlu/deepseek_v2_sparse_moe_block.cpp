@@ -19,6 +19,7 @@ limitations under the License.
 #include <utility>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "platform/device.h"
 
@@ -40,7 +41,8 @@ DeepseekV2SparseMoEBlockImpl::DeepseekV2SparseMoEBlockImpl(
     const torch::TensorOptions& options)
     : parallel_args_(parallel_args) {
   enable_deep_ep_ =
-      FLAGS_expert_parallel_degree == 2 && parallel_args_.ep_size() > 1;
+      ::xllm::EPLBConfig::get_instance().expert_parallel_degree() == 2 &&
+      parallel_args_.ep_size() > 1;
   const FusedMoEArgs moe_args{.is_gated = true,
                               .enable_result_reduction = false};
   moe_ = register_module(

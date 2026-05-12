@@ -25,6 +25,7 @@ limitations under the License.
 #include "batch_input_builder.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/util/rec_model_utils.h"
 #include "framework/batch/mposition.h"
 #include "framework/model/model_args.h"
@@ -255,7 +256,8 @@ void Batch::dp_balance_shuffle_seqs() {
   // this shuffle operation is mainly used for npu with 24 cores
   // and specific mla op implementation
   const auto num_npu_cores = 24;  // npu cube core num
-  if (FLAGS_enable_customize_mla_kernel && FLAGS_enable_dp_balance &&
+  if (::xllm::ExecutionConfig::get_instance().enable_customize_mla_kernel() &&
+      ::xllm::ParallelConfig::get_instance().enable_dp_balance() &&
       sequences_.size() > num_npu_cores) {
     std::vector<uint32_t> kv_cache_tokens_num;
     kv_cache_tokens_num.reserve(sequences_.size());
@@ -489,7 +491,9 @@ void Batch::process_sample_output(const RawForwardOutput& raw_output,
       // the output is a single embedding tensor, else it would be a vector of
       // image embeddings
       int64_t output_tensor_size =
-          FLAGS_enable_return_mm_full_embeddings ? 1 : n_images;
+          ::xllm::ModelConfig::get_instance().enable_return_mm_full_embeddings()
+              ? 1
+              : n_images;
       seq_mm_embeddings.reserve(output_tensor_size);
       for (int64_t i = mm_embedding_idx;
            i < mm_embedding_idx + output_tensor_size;
@@ -552,7 +556,8 @@ void Batch::process_sample_output(const RawForwardOutput& raw_output,
     output_targets_.clear();
   }
 
-  if (!FLAGS_enable_schedule_overlap || replace_fake_token) {
+  if (!::xllm::SchedulerConfig::get_instance().enable_schedule_overlap() ||
+      replace_fake_token) {
     process_beam_search();
   }
 }
@@ -681,7 +686,8 @@ void Batch::process_sample_output(const SampleOutput& sample_output,
     output_targets_.clear();
   }
 
-  if (!FLAGS_enable_schedule_overlap || replace_fake_token) {
+  if (!::xllm::SchedulerConfig::get_instance().enable_schedule_overlap() ||
+      replace_fake_token) {
     process_beam_search(force_requested_beam_result_size);
   }
 }
@@ -690,7 +696,7 @@ bool Batch::update_sequence_state(Sequence* seq, bool replace_fake_token) {
   // In chunked prefill case, if enable_schedule_overlap, we need the
   // prefill-or-not state of last stage, otherwise, we need the state
   // of current stage.
-  if (FLAGS_enable_chunked_prefill) {
+  if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
     if (!replace_fake_token && seq->is_chunked_prefill_stage()) {
       seq->pre_scheduled_step_prefill_queue().push(true);
       // if not replace_fake_token, pop out here to avoid endless growth
@@ -714,7 +720,7 @@ void Batch::append_token_for_sequence(Sequence* seq,
   // always append a token, maybe true or fake token
   if (!replace_fake_token) {
     seq->append_token(token);
-    if (FLAGS_enable_chunked_prefill) {
+    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
       seq->pre_scheduled_step_prefill_queue().push(false);
       // if not replace_fake_token, pop out here to avoid endless growth
       if (seq->pre_scheduled_step_prefill_queue().size() > 2) {
@@ -724,7 +730,8 @@ void Batch::append_token_for_sequence(Sequence* seq,
   } else if (!seq->cancelled()) {
     // truely update the real token if replace_fake_token
     seq->update_last_step_token(token, token_idx);
-    if (FLAGS_enable_chunked_prefill && token_idx == 0) {
+    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() &&
+        token_idx == 0) {
       seq->pre_scheduled_step_prefill_queue().pop();
     }
   }

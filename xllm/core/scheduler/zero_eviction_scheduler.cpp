@@ -17,6 +17,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/batch/batch_factory.h"
 #include "util/timer.h"
 #include "util/utils.h"
@@ -117,7 +118,7 @@ void BlockCapacityGuard::compute_reserved_block_num() {
 }
 
 void BlockCapacityGuard::prefix_cache_for_candidate_sequences() {
-  if (FLAGS_enable_prefix_cache) {
+  if (::xllm::KVCacheConfig::get_instance().enable_prefix_cache()) {
     for (auto* sequence : candidate_sequences_) {
       kv_cache_manager_->allocate_shared(sequence);
     }
@@ -125,7 +126,7 @@ void BlockCapacityGuard::prefix_cache_for_candidate_sequences() {
 }
 
 uint32_t BlockCapacityGuard::get_needed_block_num_for_prefill() {
-  if (FLAGS_enable_prefix_cache) {
+  if (::xllm::KVCacheConfig::get_instance().enable_prefix_cache()) {
     return num_reserved_block_for_prefill_;
   }
 
@@ -158,7 +159,7 @@ uint32_t BlockCapacityGuard::num_block_need_to_use_for(
     const Sequence* sequence) {
   constexpr uint32_t MIN_BLOCKS_REQUIRED = 1;
   int32_t remaining_decode_token_num =
-      FLAGS_max_decode_token_per_sequence -
+      ::xllm::SchedulerConfig::get_instance().max_decode_token_per_sequence() -
       (sequence->num_tokens() - sequence->num_prompt_tokens());
   if (remaining_decode_token_num < 0) {
     return MIN_BLOCKS_REQUIRED;
@@ -282,7 +283,7 @@ bool ZeroEvictionScheduler::try_allocate_block_for(
     // deallocation is triggered only when prefix_cache is enabled. This is
     // because if prefix_cache is not enabled, blocks are not actually allocated
     // here.
-    if (FLAGS_enable_prefix_cache) {
+    if (::xllm::KVCacheConfig::get_instance().enable_prefix_cache()) {
       for (auto* seq : *prefill_sequences) {
         // release shared blocks
         kv_cache_manager_->deallocate(seq);
@@ -353,7 +354,8 @@ void ZeroEvictionScheduler::handle_prefill_requests(
   while (!waiting_priority_queue_.empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 &&
          kv_cache_manager_->kv_cache_utilization() <
-             FLAGS_prefill_scheduling_memory_usage_threshold) {
+             ::xllm::SchedulerConfig::get_instance()
+                 .prefill_scheduling_memory_usage_threshold()) {
     std::shared_ptr<Request> request(waiting_priority_queue_.top());
     if (request->finished() || request->cancelled()) {
       kv_cache_manager_->deallocate(request.get());

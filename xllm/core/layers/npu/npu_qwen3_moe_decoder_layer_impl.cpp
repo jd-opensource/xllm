@@ -20,6 +20,7 @@ limitations under the License.
 #include <unordered_set>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 namespace xllm {
 namespace layer {
 
@@ -58,7 +59,9 @@ NpuQwen3MoeDecoderLayerImpl::NpuQwen3MoeDecoderLayerImpl(
   loader_ = std::make_unique<Qwen3MoeDecoderLoader>(
       WEIGHT_COUNT_PER_LAYER,
       context,
-      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? LoadMode::kManual
+          : LoadMode::kEager);
   initialize_tensors(options);
 }
 
@@ -107,16 +110,20 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
   // prefill only feature
   param.enableLcoc = is_prefill;  // false;
   param.enableSplitFuse =
-      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
+      (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ||
+       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()) &&
+      is_prefill;
 
   // decode only feature
-  param.enableAclGraphPagedAttention = FLAGS_enable_graph && !is_prefill;
+  param.enableAclGraphPagedAttention =
+      ::xllm::ExecutionConfig::get_instance().enable_graph() && !is_prefill;
   param.enableInitRoutingV3 = !is_prefill;
 
   // Can be applied to prefill, but has not been tested yet
   param.enableFusedReducesumDiv = !is_prefill;
   param.enableAclnnExternelAddRmsNorm =
-      FLAGS_enable_intralayer_addnorm && !is_prefill;
+      ::xllm::ExecutionConfig::get_instance().enable_intralayer_addnorm() &&
+      !is_prefill;
   param.enableAclnnAddRmsNorm = !is_prefill;
 
   param.swigluBackend = atb_speed::common::OpBackend::ACLNN;
@@ -138,8 +145,10 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
   }
   param.normEps = args.rms_norm_eps();
   param.rank = parallel_args.rank();
-  param.backend = FLAGS_communication_backend;
-  // param.rankTableFile = FLAGS_rank_tablefile;
+  param.backend =
+      ::xllm::ParallelConfig::get_instance().communication_backend();
+  // param.rankTableFile =
+  // ::xllm::EPLBConfig::get_instance().rank_tablefile();
 
   param.layerId = layer_id_;
   param.numHiddenLayers = 0;
@@ -210,12 +219,13 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_parallel_parameters(
     const ParallelArgs& parallel_args) {
   param.lmHeadLocalTp = dp_local_tp_size_;
   param.mapping = parallel_args.mapping();
-  param.tensorParallelInfo = {parallel_args.rank(),
-                              parallel_args.world_size(),
-                              FLAGS_communication_backend,
-                              FLAGS_rank_tablefile,
-                              nullptr,
-                              ""};
+  param.tensorParallelInfo = {
+      parallel_args.rank(),
+      parallel_args.world_size(),
+      ::xllm::ParallelConfig::get_instance().communication_backend(),
+      ::xllm::EPLBConfig::get_instance().rank_tablefile(),
+      nullptr,
+      ""};
 
   param.maxDecodeDpTokenSize = 0;  // TODO
 }
@@ -425,7 +435,8 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
 
   input_idx = WEIGHT_COUNT_PER_LAYER + 16;
   if (is_prefill &&
-      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache)) {
+      (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ||
+       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache())) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(
             input_params.attention.device.q_seq_lens);
@@ -433,14 +444,14 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
         const_cast<int32_t*>(input_params.attention.host.q_seq_lens.data());
   }
 
-  if (FLAGS_enable_graph && !is_prefill &&
+  if (::xllm::ExecutionConfig::get_instance().enable_graph() && !is_prefill &&
       input_params.graph.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(input_params.graph.tiling_data);
   }
 
   if (input_params.meta.batch_forward_type.is_decode() &&
-      FLAGS_enable_intralayer_addnorm && residual.has_value()) {
+      ::xllm::ExecutionConfig::get_instance().enable_intralayer_addnorm() && residual.has_value()) {
     // input
     auto& residual_tensor = residual.value();
     node.variantPack.inTensors.at(input_idx++) =

@@ -22,6 +22,7 @@ limitations under the License.
 #include "common/device_monitor.h"
 #include "core/common/metrics.h"
 #include "core/distributed_runtime/master.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/platform/device.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -86,7 +87,9 @@ bool DiTEngine::init_model() {
   futures.reserve(worker_clients_num_);
   for (auto& worker : worker_clients_) {
     futures.push_back(worker->init_model_async(
-        model_path, FLAGS_random_seed, MasterStatus::WAKEUP));
+        model_path,
+        ::xllm::ExecutionConfig::get_instance().random_seed(),
+        MasterStatus::WAKEUP));
   }
 
   // wait for all futures to complete

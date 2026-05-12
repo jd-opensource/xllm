@@ -31,6 +31,7 @@ limitations under the License.
 #endif
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/kv_cache_transfer/push_route.h"
 #include "framework/xtensor/global_xtensor.h"
 #include "framework/xtensor/xtensor_allocator.h"
@@ -340,7 +341,8 @@ void MooncakeKVCacheTransferDefault::allocate_kv_cache_impl(
 
   // convert memory addrs to torch tensors
   aclFormat npu_format_type =
-      model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache
+      model_type_ == "deepseek_v3" &&
+              ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()
           ? ACL_FORMAT_FRACTAL_NZ
           : ACL_FORMAT_ND;
   auto k_torch_tensors = convert_to_torch_tensor(

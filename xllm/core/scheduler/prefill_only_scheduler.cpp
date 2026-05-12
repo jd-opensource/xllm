@@ -19,6 +19,7 @@ limitations under the License.
 #include <limits>
 
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/batch/batch_factory.h"
 #include "util/timer.h"
 #include "util/utils.h"
@@ -64,7 +65,8 @@ void PrefillOnlyScheduler::handle_prefill_requests(
   while (!waiting_priority_queue.empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 && latency_budget > estimate_latency) {
     if (kv_cache_manager_->kv_cache_utilization() >=
-        FLAGS_prefill_scheduling_memory_usage_threshold) {
+        ::xllm::SchedulerConfig::get_instance()
+            .prefill_scheduling_memory_usage_threshold()) {
       blocks_exhausted = true;
       break;
     }
@@ -261,7 +263,8 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
          remaining_seq_budget > 0 && remaining_token_budget > 0 &&
          latency_budget > estimate_latency) {
     if (kv_cache_manager_->kv_cache_utilization() >=
-        FLAGS_prefill_scheduling_memory_usage_threshold) {
+        ::xllm::SchedulerConfig::get_instance()
+            .prefill_scheduling_memory_usage_threshold()) {
       blocks_exhausted = true;
       break;
     }

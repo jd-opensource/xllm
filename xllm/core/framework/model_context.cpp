@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "platform/device.h"
 #include "util/env_var.h"
 #if defined(USE_NPU)
@@ -39,7 +40,7 @@ bool should_enable_async_tiling_copy_stream() {
   // ATB copy-stream teardown is not reversible for the same context on the
   // current CANN/PTA stack, so contexts that may enter graph capture must not
   // pre-create the helper stream.
-  if (FLAGS_enable_graph) {
+  if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     return false;
   }
   return util::get_bool_env("ATB_USE_TILING_COPY_STREAM", false);

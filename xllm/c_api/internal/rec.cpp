@@ -27,6 +27,7 @@ limitations under the License.
 #include <limits>
 #include <stdexcept>
 
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/model_loader.h"
 #include "core/util/rec_model_utils.h"
 #include "helper.h"
@@ -69,7 +70,8 @@ void apply_multi_round_pipeline_toggles() {
 }
 
 void apply_onerec_pipeline_toggles(xllm::Options* options) {
-  const bool enable_onerec_xattention = FLAGS_max_decode_rounds > 0;
+  const bool enable_onerec_xattention =
+      ::xllm::RecConfig::get_instance().max_decode_rounds() > 0;
   FLAGS_enable_rec_prefill_only = !enable_onerec_xattention;
   FLAGS_enable_constrained_decoding = true;
   FLAGS_enable_prefix_cache = false;
@@ -208,6 +210,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     FLAGS_rec_worker_max_concurrency =
         xllm_init_options.rec_worker_max_concurrency;
     FLAGS_enable_block_copy_kernel = xllm_init_options.enable_block_copy_kernel;
+    xllm::XllmConfig::reload_from_flags();
 
     auto model_loader = xllm::ModelLoader::create(model_path);
     if (model_loader == nullptr) {
@@ -243,25 +246,34 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         return false;
     }
 
-    // Keep dual-source settings aligned with the FLAGS_* values above.
-    options.enable_graph(FLAGS_enable_graph)
-        .beam_width(FLAGS_beam_width)
-        .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency);
-    LOG(INFO) << "REC C API selected pipeline="
-              << get_rec_pipeline_name(pipeline_type)
-              << ", model_type=" << model_args.model_type()
-              << ", enable_rec_prefill_only=" << FLAGS_enable_rec_prefill_only
-              << ", enable_constrained_decoding="
-              << FLAGS_enable_constrained_decoding
-              << ", enable_prefix_cache=" << FLAGS_enable_prefix_cache
-              << ", enable_schedule_overlap=" << FLAGS_enable_schedule_overlap
-              << ", enable_chunked_prefill=" << FLAGS_enable_chunked_prefill
-              << ", enable_rec_fast_sampler=" << FLAGS_enable_rec_fast_sampler
-              << ", max_decode_rounds=" << FLAGS_max_decode_rounds;
-
 #if !defined(USE_NPU) && !defined(USE_CUDA)
     FLAGS_enable_block_copy_kernel = false;
 #endif
+    xllm::XllmConfig::reload_from_flags();
+
+    // Keep dual-source settings aligned with the FLAGS_* values above.
+    options.enable_graph(::xllm::ExecutionConfig::get_instance().enable_graph())
+        .beam_width(::xllm::BeamSearchConfig::get_instance().beam_width())
+        .rec_worker_max_concurrency(
+            ::xllm::RecConfig::get_instance().rec_worker_max_concurrency());
+    LOG(INFO)
+        << "REC C API selected pipeline="
+        << get_rec_pipeline_name(pipeline_type)
+        << ", model_type=" << model_args.model_type()
+        << ", enable_rec_prefill_only="
+        << ::xllm::RecConfig::get_instance().enable_rec_prefill_only()
+        << ", enable_constrained_decoding="
+        << ::xllm::RecConfig::get_instance().enable_constrained_decoding()
+        << ", enable_prefix_cache="
+        << ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()
+        << ", enable_schedule_overlap="
+        << ::xllm::SchedulerConfig::get_instance().enable_schedule_overlap()
+        << ", enable_chunked_prefill="
+        << ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()
+        << ", enable_rec_fast_sampler="
+        << ::xllm::RecConfig::get_instance().enable_rec_fast_sampler()
+        << ", max_decode_rounds="
+        << ::xllm::RecConfig::get_instance().max_decode_rounds();
 
     handler->master = std::make_unique<xllm::RecMaster>(options);
     handler->master->run();

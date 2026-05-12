@@ -29,6 +29,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "distributed_runtime/engine.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/priority_comparator.h"
@@ -81,7 +82,7 @@ inline size_t maybe_align_cp_prefill_tokens(const Sequence* sequence,
   if (sequence == nullptr || cp_size <= 1 || num_tokens == 0) {
     return num_tokens;
   }
-  if (FLAGS_enable_chunked_prefill) {
+  if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
     return num_tokens;
   }
   if (!sequence->is_prefill_stage()) {
@@ -96,7 +97,7 @@ inline size_t maybe_align_cp_prefill_tokens(const Sequence* sequence,
 ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
     : options_(options),
       engine_(engine),
-      request_queue_(FLAGS_request_queue_size),
+      request_queue_(::xllm::RecConfig::get_instance().request_queue_size()),
       waiting_priority_queue_(create_comparator(options.priority_strategy())),
       waiting_priority_queue_offline_(
           create_comparator(options.priority_strategy())) {
@@ -105,7 +106,8 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
   kv_cache_manager_ = engine_->block_manager_pool();
   CHECK(kv_cache_manager_ != nullptr);
 
-  enable_prefix_cache_ = FLAGS_enable_prefix_cache;
+  enable_prefix_cache_ =
+      ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
 
   last_batch_.resize(options_.dp_size());
 
@@ -135,7 +137,8 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
       return;
     }
     xservice_client_->set_scheduler(this);
-    if (FLAGS_enable_xtensor && !options_.enable_disagg_pd()) {
+    if (::xllm::KVCacheConfig::get_instance().enable_xtensor() &&
+        !options_.enable_disagg_pd()) {
       xservice_client_->set_engine(engine_);
       engine_->get_device_info(instance_info_.device_ips, instance_info_.ports);
     }
@@ -252,7 +255,8 @@ void ContinuousScheduler::handle_prefill_requests(
          remaining_token_budget > 0 && latency_budget > estimate_latency) {
     if (!options_.enable_disagg_pd() &&
         kv_cache_manager_->kv_cache_utilization() >=
-            FLAGS_prefill_scheduling_memory_usage_threshold) {
+            ::xllm::SchedulerConfig::get_instance()
+                .prefill_scheduling_memory_usage_threshold()) {
       blocks_exhausted = true;
       break;
     }
@@ -1285,7 +1289,7 @@ void ContinuousScheduler::update_memory_metrics(
         std::to_string(dp_rank),
         static_cast<int64_t>(active_kv_cache_size_in_kilobytes));
 
-    if (FLAGS_enable_chunked_prefill) {
+    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
       MULTI_HISTOGRAM_OBSERVE(decode_active_activation_size_in_kilobytes,
                               std::to_string(dp_rank),
                               active_activation_size_in_kilobytes);

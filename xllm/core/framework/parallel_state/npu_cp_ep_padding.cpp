@@ -22,6 +22,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "util/tensor_helper.h"
 
 namespace xllm {
@@ -50,8 +51,10 @@ CpEpPadding::CpEpPadding(const torch::Tensor& input_ids,
   attn_cp_size_ = mapping_npu["attnCp"]["rankIds"].size();
   input_length_ = std::max<int64_t>(input_ids.numel(), 1);
 
-  is_dynamic_ep_ = FLAGS_expert_parallel_degree == 2 ||
-                   (FLAGS_expert_parallel_degree == 3 && is_prefill);
+  is_dynamic_ep_ =
+      ::xllm::EPLBConfig::get_instance().expert_parallel_degree() == 2 ||
+      (::xllm::EPLBConfig::get_instance().expert_parallel_degree() == 3 &&
+       is_prefill);
 }
 
 CpEpPaddingData CpEpPadding::build() {

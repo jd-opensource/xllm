@@ -19,6 +19,7 @@ limitations under the License.
 
 #include <cmath>
 
+#include "core/framework/config/xllm_config.h"
 #include "kernels/ops_api.h"
 
 namespace {
@@ -538,7 +539,8 @@ std::tuple<torch::Tensor, torch::Tensor> IndexerImpl::run_indexer_select_kernel(
   params.q_scale = std::nullopt;        // empty tensor as q_scale
   params.k_scale_cache = std::nullopt;  // empty tensor as k_scale_cache
   params.index_topk = index_topk_;
-  params.kv_cache_block_size = FLAGS_block_size;
+  params.kv_cache_block_size =
+      ::xllm::KVCacheConfig::get_instance().block_size();
   params.sparse_block_table = ctx.new_block_tables;
   params.sparse_context_lens = ctx.new_context_lens;
 
@@ -615,7 +617,8 @@ IndexerImpl::run_indexer_select_kernel_sp_segmented(
     params.q_scale = std::nullopt;
     params.k_scale_cache = std::nullopt;
     params.index_topk = index_topk_;
-    params.kv_cache_block_size = FLAGS_block_size;
+    params.kv_cache_block_size =
+        ::xllm::KVCacheConfig::get_instance().block_size();
     params.sparse_block_table = out_block_seg;
     params.sparse_context_lens = out_ctx_seg;
     xllm::kernel::masked_indexer_select_paged_kv(params);

@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "comm_channel.h"
 #include "common/health_check_manager.h"
+#include "core/framework/config/xllm_config.h"
 #include "distributed_runtime/collective_service.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -321,7 +322,7 @@ void DistManager::setup_multi_node_workers(
     }
     // Start background health check thread with 3(magic num) second interval
     HealthCheckManager::instance().start_health_check_thread(
-        FLAGS_health_check_interval_ms);
+        ::xllm::ServiceConfig::get_instance().health_check_interval_ms());
 
     LOG(INFO) << "Started cluster health check thread";
   }

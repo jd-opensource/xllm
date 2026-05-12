@@ -22,6 +22,7 @@ limitations under the License.
 #include <map>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
 #include "xllm_atb_layers/models/qwen3_vl/qwen3_vl_encoder.h"
@@ -67,7 +68,9 @@ NpuQwen2VisionEncoderLayerImpl::NpuQwen2VisionEncoderLayerImpl(
   loader_ = std::make_unique<Qwen2VisionEncoderLoader>(
       WEIGHT_COUNT_PER_LAYER,
       context,
-      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+      ::xllm::LoadConfig::get_instance().enable_manual_loader()
+          ? LoadMode::kManual
+          : LoadMode::kEager);
 }
 
 void NpuQwen2VisionEncoderLayerImpl::merge_loaded_weights() {

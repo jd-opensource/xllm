@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/model/model_output.h"
 #include "core/framework/model_context.h"
 #include "core/framework/parallel_state/npu_dp_ep_padding.h"
@@ -141,7 +142,9 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         options);
 
     atb_pos_emb_ = layer::NpuPosEmbedding(context);
-    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
+    int32_t mask_value =
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ? -9984
+                                                                         : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
@@ -166,7 +169,8 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
 
     // Eagle3: layer ids to capture (can be read from layers_to_capture in
     // config.json)
-    if (FLAGS_speculative_algorithm == "Eagle3") {
+    if (::xllm::SpeculativeConfig::get_instance().speculative_algorithm() ==
+        "Eagle3") {
       const auto& layer_ids_from_config = model_args.layers_to_capture();
       if (!layer_ids_from_config.empty()) {
         set_eagle3_layers_to_capture(
@@ -179,8 +183,10 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       const size_t num_captured = layers_to_capture_set_.size();
       const int64_t aux_dim =
           model_args.hidden_size() * static_cast<int64_t>(num_captured);
-      aux_output_buffer_ =
-          torch::empty({FLAGS_max_tokens_per_batch, aux_dim}, options);
+      aux_output_buffer_ = torch::empty(
+          {::xllm::SchedulerConfig::get_instance().max_tokens_per_batch(),
+           aux_dim},
+          options);
     }
   }
 
@@ -275,10 +281,10 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     // for chunked prefill, generate the attn mask.
     if (!input_params.meta.batch_forward_type.is_decode()) {
       max_seq_len_ =
-          FLAGS_enable_chunked_prefill
+          ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()
               ? std::max(input_params.meta.kv_max_seq_len, max_seq_len_)
               : 128;
-      if (FLAGS_enable_chunked_prefill) {
+      if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
         attn_mask = attn_mask_.get_attn_mask(
             max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 
@@ -316,7 +322,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     RollingLayerGuard rolling_guard(rolling_mgr_);
 
     std::optional<torch::Tensor> residual;
-    if (FLAGS_enable_intralayer_addnorm) {
+    if (::xllm::ExecutionConfig::get_instance().enable_intralayer_addnorm()) {
       residual = torch::zeros_like(h);
     }
     const int64_t num_tokens = h.size(0);
@@ -337,8 +343,10 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       if (capture_aux_hidden_states_ &&
           layers_to_capture_set_.count(static_cast<int32_t>(i)) != 0) {
         // auto aux_h = h;
-        auto aux_h =
-            (FLAGS_enable_intralayer_addnorm) ? h + residual.value() : h;
+        auto aux_h = (::xllm::ExecutionConfig::get_instance()
+                          .enable_intralayer_addnorm())
+                         ? h + residual.value()
+                         : h;
         aux_output_buffer_.slice(0, 0, num_tokens)
             .slice(1,
                    static_cast<int64_t>(capture_idx) * hidden_size,
@@ -367,7 +375,8 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       }
     }
 
-    if (FLAGS_enable_intralayer_addnorm) h = h + residual.value();
+    if (::xllm::ExecutionConfig::get_instance().enable_intralayer_addnorm())
+      h = h + residual.value();
     auto hidden_states = norm_(h, 0);
     if (capture_aux_hidden_states_) {
       torch::Tensor aux_hidden_states =

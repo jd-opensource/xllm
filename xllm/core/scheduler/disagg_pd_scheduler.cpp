@@ -25,6 +25,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/macros.h"
+#include "core/framework/config/xllm_config.h"
 #include "disagg_pd.pb.h"
 #include "disagg_pd_scheduler.h"
 #include "distributed_runtime/engine.h"
@@ -104,7 +105,7 @@ void DisaggPDScheduler::initialize_rpc_server(const std::string& server_name) {
     return;
   }
   xservice_client_->set_scheduler(this);
-  if (FLAGS_enable_xtensor) {
+  if (::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     xservice_client_->set_engine(engine_);
   }
 }
@@ -130,7 +131,7 @@ void DisaggPDScheduler::register_instance_info(const std::string& server_name,
 
   // Get total physical pages per worker (for etcd registration)
 #if defined(USE_NPU)
-  if (FLAGS_enable_xtensor) {
+  if (::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     auto& page_allocator = PageAllocator::get_instance();
     if (page_allocator.is_initialized()) {
       instance_info_.total_phy_pages = page_allocator.get_num_total_phy_pages();
@@ -236,7 +237,8 @@ proto::DisaggPDService_Stub* DisaggPDScheduler::create_rpc_channel(
     // create channel to prefill instance
     brpc::Channel* channel = new brpc::Channel();
     brpc::ChannelOptions options;
-    options.timeout_ms = FLAGS_rpc_channel_timeout_ms;
+    options.timeout_ms =
+        ::xllm::ServiceConfig::get_instance().rpc_channel_timeout_ms();
     options.max_retry = 3;
     std::string load_balancer = "";
     if (channel->Init(remote_instances_info_[instance_name].rpc_address.c_str(),
@@ -265,7 +267,7 @@ void DisaggPDScheduler::start_rpc_server() {
       ServerRegistry::get_instance().register_server(server_name_);
   if (!rpc_server->start(std::move(service))) {
     LOG(ERROR) << "Failed to start brpc disagg pd server on port "
-               << FLAGS_disagg_pd_port;
+               << ::xllm::DisaggPDConfig::get_instance().disagg_pd_port();
     return;
   }
 }
@@ -783,7 +785,8 @@ bool DisaggPDScheduler::try_allocate(Sequence* sequence) {
   // When the KV Cache usage reaches the threshold, prefill requests will no
   // longer be scheduled to avoid frequent preemption.
   if (kv_cache_manager_->kv_cache_utilization() <
-      FLAGS_prefill_scheduling_memory_usage_threshold) {
+      ::xllm::SchedulerConfig::get_instance()
+          .prefill_scheduling_memory_usage_threshold()) {
     return kv_cache_manager_->try_allocate(sequence);
   } else {
     return false;

@@ -23,6 +23,7 @@ limitations under the License.
 #include <iterator>
 
 #include "common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/util/http_downloader.h"
 #include "mm_codec.h"
 #include "mm_embedding_handler.h"
@@ -168,7 +169,7 @@ MMErrCode VideoHandler::load(const MMContent& content,
 }
 
 MMErrCode VideoHandler::decode(MMInputItem& input) {
-  if (FLAGS_use_audio_in_video) {
+  if (::xllm::ModelConfig::get_instance().use_audio_in_video()) {
     FFmpegAudioDecoder audio_decoder;
     if (audio_decoder.decode(
             input.raw_data, input.decode_audio, input.audio_meta)) {

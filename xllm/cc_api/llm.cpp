@@ -25,6 +25,7 @@ limitations under the License.
 #include <exception>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "internal.h"
 
 namespace xllm {
@@ -116,6 +117,7 @@ bool LLM::Initialize(const std::string& model_path,
 #if !defined(USE_NPU) && !defined(USE_CUDA)
     FLAGS_enable_block_copy_kernel = false;
 #endif
+    XllmConfig::reload_from_flags();
 
     llm_core_ = new LLMCore();
     llm_core_->master = std::make_unique<LLMMaster>(options);

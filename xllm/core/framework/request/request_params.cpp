@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/instance_name.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/util/uuid.h"
 #include "request.h"
 
@@ -517,7 +518,7 @@ RequestParams::RequestParams(const proto::RerankRequest& request,
   x_request_time = x_rtime;
   max_tokens = 1;
   streaming = false;
-  if (FLAGS_enable_qwen3_reranker) {
+  if (::xllm::ModelConfig::get_instance().enable_qwen3_reranker()) {
     logprobs = true;
   } else {
     is_embeddings = true;

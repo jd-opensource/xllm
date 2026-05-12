@@ -34,6 +34,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/common/xllm_build_info.h"
+#include "core/framework/config/xllm_config.h"
 #include "dit_master.h"
 #if defined(USE_NPU)
 #include "framework/parallel_state/npu_rank_table_env.h"
@@ -185,6 +186,7 @@ Master::Master(const Options& options, EngineType type)
     LOG(FATAL)
         << "Multi-stream parallel is refactoring now, will be supported later.";
   }
+  XllmConfig::reload_from_flags();
   // construct engine
   const auto devices =
       DeviceNameUtils::parse_devices(options_.devices().value_or("auto"));
@@ -450,8 +452,8 @@ std::unique_ptr<Master> create_master(const std::string& backend,
 }
 
 std::unique_ptr<Master> fork_master(Master* master, const Options& options) {
-  // sleep/wakeup/fork_master requires FLAGS_enable_xtensor
-  if (!FLAGS_enable_xtensor) {
+  // sleep/wakeup/fork_master requires --enable_xtensor=true
+  if (!::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     LOG(WARNING) << "fork_master requires xtensor to be enabled";
     return nullptr;
   }

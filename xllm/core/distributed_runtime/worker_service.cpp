@@ -26,6 +26,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/distributed_runtime/comm_channel.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/runtime/params_utils.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/request/sequence.h"
@@ -687,7 +688,8 @@ void WorkerService::GetLastStepResult(
 
             // [num_seq]
             next_tokens = safe_to(sample_output.next_tokens, torch::kCPU, true);
-            if (next_tokens.defined() || FLAGS_enable_eplb) {
+            if (next_tokens.defined() ||
+                ::xllm::EPLBConfig::get_instance().enable_eplb()) {
               // [num_seq] FloatTensor
               logprobs = safe_to(sample_output.logprobs, torch::kCPU, true);
               // [num_seq, topk]
@@ -721,7 +723,8 @@ void WorkerService::GetLastStepResult(
             stream_->synchronize();
           }
 
-          if (next_tokens.defined() || FLAGS_enable_eplb) {
+          if (next_tokens.defined() ||
+              ::xllm::EPLBConfig::get_instance().enable_eplb()) {
             forward_output_to_proto(next_tokens,
                                     logprobs,
                                     top_tokens,

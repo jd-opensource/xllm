@@ -23,6 +23,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/xllm_config.h"
 #include "framework/model/causal_vlm.h"
 #include "util/utils.h"
 #include "vlm_executor_impl.h"
@@ -35,7 +36,8 @@ constexpr uint32_t kMaxGraphTokens = 64;
 
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
 uint32_t get_bucket_num_tokens(uint32_t num_tokens) {
-  if (FLAGS_enable_graph_mode_decode_no_padding) {
+  if (::xllm::ExecutionConfig::get_instance()
+          .enable_graph_mode_decode_no_padding()) {
     return num_tokens;
   }
   const uint32_t graph_step = 16;
@@ -200,7 +202,8 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
                                            const torch::Device& device,
                                            const runtime::Options& options)
     : num_decoding_tokens_(options.num_decoding_tokens()) {
-  const int64_t max_tokens = FLAGS_max_tokens_per_batch;
+  const int64_t max_tokens =
+      ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch();
   const int64_t max_seq_lens = get_seq_lens_capacity(options);
   const int64_t max_seq_len = args.max_position_embeddings();
   const uint32_t block_size = options.block_size();

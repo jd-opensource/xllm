@@ -22,6 +22,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/xllm_config.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_qwen3_decoder_layer_impl.h"
 #include "llm_model_base.h"
@@ -60,7 +61,9 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
         model_args.max_position_embeddings(),
         model_args.rope_theta(),
         options);
-    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
+    int32_t mask_value =
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ? -9984
+                                                                         : 1;
     // encode_attn_mask_ =
     //   layer::AttentionMask(options.device(),
     //   options.dtype()).get_attn_mask(2048, options.device(),
@@ -77,7 +80,8 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
 
     // Eagle3: layer ids to capture (can be read from layers_to_capture in
     // config.json)
-    if (FLAGS_speculative_algorithm == "Eagle3") {
+    if (::xllm::SpeculativeConfig::get_instance().speculative_algorithm() ==
+        "Eagle3") {
       const auto& layer_ids_from_config = model_args.layers_to_capture();
       if (!layer_ids_from_config.empty()) {
         set_eagle3_layers_to_capture(
@@ -89,8 +93,10 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       // num_captured]
       const int64_t num_captured = layers_to_capture_set_.size();
       const int64_t aux_dim = model_args.hidden_size() * num_captured;
-      aux_output_buffer_ =
-          torch::empty({FLAGS_max_tokens_per_batch, aux_dim}, options);
+      aux_output_buffer_ = torch::empty(
+          {::xllm::SchedulerConfig::get_instance().max_tokens_per_batch(),
+           aux_dim},
+          options);
     }
   }
 
@@ -186,7 +192,7 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     torch::Tensor attn_mask;
     // for chunked prefill, generate the attn mask.
     if (!input_params.meta.batch_forward_type.is_decode()) {
-      if (FLAGS_enable_chunked_prefill) {
+      if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
         int max_kv_seq = input_params.meta.kv_max_seq_len;
         int num_sequences = input_params.meta.num_sequences;
         if (num_sequences > 0) {

@@ -20,6 +20,7 @@ limitations under the License.
 #include <c10d/TCPStore.hpp>
 #include <torch_npu/csrc/distributed/ProcessGroupHCCL.hpp>
 
+#include "core/framework/config/xllm_config.h"
 #include "npu_rank_table_env.h"
 #include "platform/device.h"
 
@@ -90,7 +91,8 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
                                    const torch::Device& device)
     : ProcessGroup(global_rank, world_size, device),
       comm_stream_(c10_npu::getNPUStreamFromPool(device.index())) {
-  parallel_state::sync_torch_npu_rank_table_file_env(FLAGS_rank_tablefile);
+  parallel_state::sync_torch_npu_rank_table_file_env(
+      ::xllm::EPLBConfig::get_instance().rank_tablefile());
   c10::intrusive_ptr<c10d_npu::ProcessGroupHCCL::Options> hccl_pg_options =
       c10d_npu::ProcessGroupHCCL::Options::create();
   hccl_pg_options->group_id = group_name;
@@ -123,7 +125,8 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
                                    const torch::Device& device)
     : ProcessGroup(global_rank, world_size, device),
       comm_stream_(c10_npu::getNPUStreamFromPool(device.index())) {
-  parallel_state::sync_torch_npu_rank_table_file_env(FLAGS_rank_tablefile);
+  parallel_state::sync_torch_npu_rank_table_file_env(
+      ::xllm::EPLBConfig::get_instance().rank_tablefile());
   c10::intrusive_ptr<c10d_npu::ProcessGroupHCCL::Options> hccl_pg_options =
       c10d_npu::ProcessGroupHCCL::Options::create();
   hccl_pg_options->group_id = group_name;
@@ -135,7 +138,7 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
     hccl_pg_options->global_ranks_in_group = uint32_ranks;
   }
 
-  if (FLAGS_dit_debug_print) {
+  if (::xllm::DiTConfig::get_instance().dit_debug_print()) {
     std::stringstream ranks_ss;
     ranks_ss << "Group : [" << group_ranks[0];
     for (size_t i = 1; i < group_ranks.size(); i++) {

@@ -27,6 +27,7 @@ limitations under the License.
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/rec_master.h"
 #include "core/distributed_runtime/vlm_master.h"
+#include "core/framework/config/xllm_config.h"
 
 namespace xllm {
 
@@ -65,7 +66,7 @@ void ServiceImplFactory::create(
              create_service_impl<ChatServiceImpl>(llm_master, models);
          self->embedding_service_impl_ =
              create_service_impl<EmbeddingServiceImpl>(llm_master, models);
-         if (FLAGS_enable_qwen3_reranker) {
+         if (::xllm::ModelConfig::get_instance().enable_qwen3_reranker()) {
            self->rerank_service_impl_ =
                create_service_impl<Qwen3RerankServiceImpl>(llm_master, models);
          } else {
