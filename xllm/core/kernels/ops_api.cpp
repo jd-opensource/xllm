@@ -1138,23 +1138,23 @@ std::pair<torch::Tensor, torch::Tensor> chunk_gated_delta_rule(
   auto init_state_prepared =
       params.initial_state.has_value()
           ? std::optional<torch::Tensor>(
-                params.initial_state.value().to(torch::kFloat32).contiguous())
+                params.initial_state.value().to(torch::kBFloat16).contiguous())
           : std::nullopt;
-  auto [h, v_new, final_state] =
-      npu::npu_chunk_gated_delta_rule_fwd_h(k_prepared,
-                                            w,
-                                            u,
-                                            g_cumsum,
-                                            init_state_prepared,
-                                            params.output_final_state,
-                                            chunk_size,
-                                            /*save_new_value=*/true,
-                                            cu_prepared,
-                                            /*chunk_offsets=*/std::nullopt);
+  auto [h, v_new, final_state] = npu::tilelang::chunk_gated_delta_rule_fwd_h(
+      k_prepared.squeeze(0),
+      w.squeeze(0),
+      u.squeeze(0),
+      g_cumsum.squeeze(0),
+      init_state_prepared,
+      params.output_final_state,
+      chunk_size,
+      /*save_new_value=*/true,
+      cu_prepared,
+      /*chunk_offsets=*/std::nullopt);
   auto out = npu::npu_chunk_fwd_o(q_prepared,
                                   k_prepared,
-                                  v_new,
-                                  h,
+                                  v_new.unsqueeze(0),
+                                  h.unsqueeze(0),
                                   g_cumsum,
                                   scale_value,
                                   chunk_size,
