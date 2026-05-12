@@ -12,6 +12,10 @@ class _RequestParamsProxy:
     def _set_field(self, key: str, value: Any) -> None:
         if not hasattr(self._request_params, key):
             raise TypeError(f"Unexpected parameter: {key}")
+        if key == "logprobs" and isinstance(value, int) and not isinstance(value, bool):
+            self._request_params.logprobs = True
+            self._request_params.top_logprobs = value
+            return
         setattr(self._request_params, key, value)
 
     def __getattr__(self, key: str) -> Any:

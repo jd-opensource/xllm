@@ -43,6 +43,8 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("draft_model_path", &Options::draft_model_path_)
       .def_readwrite("draft_devices", &Options::draft_devices_)
       .def_readwrite("backend", &Options::backend_)
+      .def_readwrite("limit_image_per_prompt",
+                     &Options::limit_image_per_prompt_)
       .def_readwrite("block_size", &Options::block_size_)
       .def_readwrite("max_cache_size", &Options::max_cache_size_)
       .def_readwrite("max_memory_utilization",
@@ -54,6 +56,7 @@ PYBIND11_MODULE(xllm_export, m) {
                      &Options::max_tokens_per_chunk_for_prefill_)
       .def_readwrite("num_speculative_tokens",
                      &Options::num_speculative_tokens_)
+      .def_readwrite("speculative_algorithm", &Options::speculative_algorithm_)
       .def_readwrite("num_request_handling_threads",
                      &Options::num_request_handling_threads_)
       .def_readwrite("communication_backend", &Options::communication_backend_)
