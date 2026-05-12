@@ -45,11 +45,11 @@ template <typename T>
 constexpr size_t type_size = sizeof(T);
 
 constexpr size_t sampling_param_fixed_size() {
-  return 5 * type_size<float>      // frequency_penalty, presence_penalty,
-                                   // repetition_penalty, temperature, top_p
-         + 2 * type_size<int64_t>  // top_k, top_logprobs
-         + 3 * type_size<bool>     // logprobs, do_sample, is_embeddings
-         + type_size<int32_t>;     // beam_width
+  return 5 * type_size<float>       // frequency_penalty, presence_penalty,
+                                    // repetition_penalty, temperature, top_p
+         + 2 * type_size<int64_t>   // top_k, top_logprobs
+         + 3 * type_size<bool>      // logprobs, do_sample, is_embeddings
+         + 2 * type_size<int32_t>;  // beam_width, num_return_sequences
 }
 
 constexpr size_t swap_block_info_fixed_size() {
@@ -226,7 +226,8 @@ size_t get_sampling_params_size(const SamplingParameters& params) {
   total += get_tensor_size(params.do_sample);
   total += type_size<bool> * 5    // all_random_sample + all_greedy_sample +
                                   // logprobs + is_embeddings + use_beam_search
-           + type_size<int64_t>;  // max_top_logprobs
+           + type_size<int64_t>   // max_top_logprobs
+           + type_size<int32_t>;  // num_return_sequences
   return total;
 }
 
@@ -447,6 +448,8 @@ inline void write_sampling_param(char*& buffer,
   *reinterpret_cast<bool*>(ptr) = param.is_embeddings;
   ptr += type_size<bool>;
   *reinterpret_cast<int32_t*>(ptr) = param.beam_width;
+  ptr += type_size<int32_t>;
+  *reinterpret_cast<int32_t*>(ptr) = param.num_return_sequences;
   ptr += type_size<int32_t>;
   buffer = ptr;
 }
@@ -949,6 +952,8 @@ inline void read_sampling_param(const char*& buffer,
   ptr += type_size<bool>;
   param.beam_width = *reinterpret_cast<const int32_t*>(ptr);
   ptr += type_size<int32_t>;
+  param.num_return_sequences = *reinterpret_cast<const int32_t*>(ptr);
+  ptr += type_size<int32_t>;
   buffer = ptr;
 }
 
@@ -1289,6 +1294,7 @@ inline void deserialize_raw_forward_input(const char*& buffer,
     read_data(buffer, sampling_params.logprobs, device_buffer);
     read_data(buffer, sampling_params.is_embeddings, device_buffer);
     read_data(buffer, sampling_params.max_top_logprobs, device_buffer);
+    read_data(buffer, sampling_params.num_return_sequences, device_buffer);
     read_data(buffer, sampling_params.use_beam_search, device_buffer);
   }
   // acc_logprob
@@ -1384,6 +1390,7 @@ inline void serialize_raw_forward_input(const RawForwardInput& input,
     write_data(buffer, sampling_params.logprobs);
     write_data(buffer, sampling_params.is_embeddings);
     write_data(buffer, sampling_params.max_top_logprobs);
+    write_data(buffer, sampling_params.num_return_sequences);
     write_data(buffer, sampling_params.use_beam_search);
   }
   // acc_logprob
