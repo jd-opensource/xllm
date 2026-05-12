@@ -22,6 +22,7 @@ limitations under the License.
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/macros.h"
@@ -29,6 +30,29 @@ limitations under the License.
 #include "util/slice.h"
 
 namespace xllm {
+
+struct RecConstraintTables {
+  std::vector<int32_t> first_token_ids;
+
+  // prefix1_values[prefix1_offsets[t0]:prefix1_offsets[t0 + 1]] contains
+  // valid t1 tokens after prefix [t0].
+  std::vector<int32_t> prefix1_offsets;
+  std::vector<int32_t> prefix1_values;
+  // Globally sorted keys aligned with prefix1_values and prefix2_value_offsets.
+  // key = int64_t(t0) * vocab_size + int64_t(t1).
+  std::vector<int64_t> prefix1_pair_keys;
+
+  // prefix2_value_offsets[i:i + 1] is aligned with prefix1_values[i].
+  // It contains valid t2 tokens after prefix [t0, prefix1_values[i]].
+  std::vector<int32_t> prefix2_value_offsets;
+  std::vector<int32_t> prefix2_values;
+
+  int32_t vocab_size = 0;
+  int32_t max_first_degree = 0;
+  int32_t max_prefix1_degree = 0;
+  int32_t max_prefix2_degree = 0;
+};
+
 // A vocab dictionary in generative recommendation scenarios, used for mapping
 // token IDs and item IDs, currently updated with the model version, and
 // real-time updates are not supported.
@@ -87,6 +111,8 @@ class RecVocabDict final {
    */
   const std::unordered_set<int32_t>& get_next_tokens_by_prefix_tokens(
       const Slice<int32_t>& prefix_token_ids) const;
+
+  RecConstraintTables build_constraint_tables(int32_t vocab_size) const;
 
  private:
   // Check if initialization has been successful

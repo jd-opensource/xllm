@@ -17,6 +17,8 @@ cc_library(
     npu_moe_init_routing_v2.cpp
     npu_moe_token_unpermute.cpp
     rope.cpp
+    rec_constrained_topk.cpp
   DEPS
     :torch_npu_kernels
+    xllm_ops
 )
