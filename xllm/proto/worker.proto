@@ -158,6 +158,7 @@ message RequestSamplingParam {
   bool do_sample = 9;
   bool is_embeddings = 10;
   int32 beam_width = 11;
+  int32 num_return_sequences = 12;
 }
 
 message UniqueTokenIds {
