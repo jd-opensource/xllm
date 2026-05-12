@@ -43,6 +43,7 @@ limitations under the License.
 #include "layers/npu/deepseek_v4_rotary_embedding.h"
 #include "models/llm/deepseek_v4.h"
 #include "models/llm/llm_model_base.h"
+#include "models/llm/mtp_model_base.h"
 
 namespace xllm {
 
@@ -80,59 +81,13 @@ inline int32_t deepseek_v4_mtp_normalize_compress_ratio(int32_t ratio) {
   return ratio <= 1 ? 1 : ratio;
 }
 
-class DeepseekV4MultiTokenPredictorLayerImpl : public torch::nn::Module {
+class DeepseekV4MultiTokenPredictorLayerImpl
+    : public MtpDecoderLayerImplBase<layer::DeepseekV4DecoderLayer> {
  public:
   DeepseekV4MultiTokenPredictorLayerImpl(const ModelContext& context,
                                          int32_t layer_index)
-      : model_args_(context.get_model_args()) {
-    auto options = context.get_tensor_options();
-    enorm_ = register_module("enorm", layer::RMSNorm(context));
-    hnorm_ = register_module("hnorm", layer::RMSNorm(context));
-    e_proj_ = register_module(
-        "e_proj",
-        layer::ReplicatedLinear(model_args_.hidden_size(),
-                                model_args_.hidden_size(),
-                                false,
-                                QuantArgs(),
-                                options));
-    h_proj_ = register_module(
-        "h_proj",
-        layer::ReplicatedLinear(model_args_.hidden_size(),
-                                model_args_.hidden_size(),
-                                false,
-                                QuantArgs(),
-                                options));
-
-    const int32_t runtime_layer_index =
-        std::min<int32_t>(layer_index, model_args_.n_layers() - 1);
-    mtp_block_ = register_module(
-        "mtp_block", layer::DeepseekV4DecoderLayer(context, runtime_layer_index));
-
-    hc_mult_ = model_args_.hc_mult();
-    hc_eps_ = static_cast<double>(model_args_.hc_eps());
-    norm_eps_ = static_cast<double>(model_args_.rms_norm_eps());
-    const int64_t hc_dim = hc_mult_ * model_args_.hidden_size();
-    auto hc_options = options.dtype(torch::kFloat32);
-    hc_head_fn_ = register_parameter(
-        "hc_head_fn", torch::empty({hc_mult_, hc_dim}, hc_options), false);
-    hc_head_base_ = register_parameter(
-        "hc_head_base", torch::empty({hc_mult_}, hc_options), false);
-    hc_head_scale_ = register_parameter(
-        "hc_head_scale", torch::empty({1}, hc_options), false);
-  }
-
-  void load_state_dict(const StateDict& state_dict) {
-    e_proj_->load_state_dict(state_dict.get_dict_with_prefix("e_proj."));
-    h_proj_->load_state_dict(state_dict.get_dict_with_prefix("h_proj."));
-    enorm_->load_state_dict(state_dict.get_dict_with_prefix("enorm."));
-    hnorm_->load_state_dict(state_dict.get_dict_with_prefix("hnorm."));
-    mtp_block_->load_state_dict(state_dict);
-    LOAD_WEIGHT(hc_head_fn);
-    LOAD_WEIGHT(hc_head_base);
-    LOAD_WEIGHT(hc_head_scale);
-  }
-
-  void verify_loaded_weights() const {}
+      : MtpDecoderLayerImplBase<layer::DeepseekV4DecoderLayer>(context,
+                                                               layer_index) {}
 
   torch::Tensor forward(torch::Tensor inputs_embeds,
                         torch::Tensor previous_hidden_states,
@@ -141,53 +96,18 @@ class DeepseekV4MultiTokenPredictorLayerImpl : public torch::nn::Module {
                         KVCache& kv_cache,
                         const ModelInputParams& input_params,
                         torch::Tensor tokens) {
-    torch::NoGradGuard no_grad;
-
-    auto [e_norm, _1] = enorm_(inputs_embeds, std::nullopt);
-    auto [h_norm, _2] = hnorm_(previous_hidden_states, std::nullopt);
-    auto hidden_states = e_proj_(e_norm) + h_proj_(h_norm);
-
-    if (hidden_states.dim() == 2) {
-      hidden_states = hidden_states.unsqueeze(1).repeat({1, hc_mult_, 1});
-    }
-
-    auto residual = c10::optional<torch::Tensor>();
-    hidden_states = mtp_block_(hidden_states,
-                               residual,
-                               positions,
-                               attn_metadata,
-                               kv_cache,
-                               input_params,
-                               tokens);
-
-    return hc_head(hidden_states);
+    ModelInputParams modified_input_params = input_params;
+    modified_input_params.input_embedding = previous_hidden_states;
+    std::optional<torch::Tensor> residual;
+    return MtpDecoderLayerImplBase<layer::DeepseekV4DecoderLayer>::forward(
+        inputs_embeds,
+        residual,
+        positions,
+        attn_metadata,
+        kv_cache,
+        modified_input_params,
+        tokens);
   }
-
- private:
-  torch::Tensor hc_head(const torch::Tensor& x) {
-    auto x_float = x.to(torch::kFloat32);
-    auto x_flatten = x_float.flatten(-2, -1);
-    auto rsqrt = torch::rsqrt(x_flatten.pow(2).mean(-1, true) + norm_eps_);
-    auto mixes = torch::matmul(x_flatten, hc_head_fn_.transpose(0, 1));
-    mixes = mixes * rsqrt;
-    auto pre = torch::sigmoid(mixes * hc_head_scale_ + hc_head_base_) + hc_eps_;
-    auto y = (pre.unsqueeze(-1) * x_float).sum(-2);
-    return y.to(x.dtype());
-  }
-
-  const ModelArgs& model_args_;
-  layer::RMSNorm enorm_{nullptr};
-  layer::RMSNorm hnorm_{nullptr};
-  layer::ReplicatedLinear e_proj_{nullptr};
-  layer::ReplicatedLinear h_proj_{nullptr};
-  layer::DeepseekV4DecoderLayer mtp_block_{nullptr};
-  int64_t hc_mult_ = 1;
-  double hc_eps_ = 0.0;
-  double norm_eps_ = 1e-6;
-
-  DEFINE_WEIGHT(hc_head_fn);
-  DEFINE_WEIGHT(hc_head_base);
-  DEFINE_WEIGHT(hc_head_scale);
 };
 TORCH_MODULE(DeepseekV4MultiTokenPredictorLayer);
 
