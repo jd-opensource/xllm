@@ -268,7 +268,12 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   CHECK_GT(padded_num_tokens, 0)
       << "padded_num_tokens must be > 0 when return_capture_params is true";
   const uint32_t actual_num_tokens = tokens.size(0);
-  const int64_t actual_batch_size = infer_actual_batch_size(params);
+  int64_t actual_batch_size = infer_actual_batch_size(params);
+  if (params.batch_forward_type.is_decode()) {
+    const int64_t decode_tokens =
+        std::max<int64_t>(options_.num_decoding_tokens(), 1);
+    actual_batch_size = actual_num_tokens / decode_tokens;
+  }
 
   // Copy data from input parameters to persistent graph tensors
   if (actual_num_tokens > 0) {
@@ -489,6 +494,12 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
     params_for_capture->num_sequences = padded_num_tokens;
     params_for_capture->batch_forward_type = BatchForwardType::DECODE;
+    params_for_capture->enable_cuda_graph = true;
+    if (params_for_capture->dp_global_token_nums.size() > 1) {
+      params_for_capture->dp_global_token_nums =
+          std::vector<int32_t>(params_for_capture->dp_global_token_nums.size(),
+                               static_cast<int32_t>(padded_num_tokens));
+    }
     params_for_capture->new_cache_slots =
         persistent_new_cache_slots(padded_num_tokens);
     params_for_capture->block_tables =

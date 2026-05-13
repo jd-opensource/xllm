@@ -1316,6 +1316,14 @@ inline void deserialize_raw_forward_input(const char*& buffer,
 
   read_tensor(buffer, forward_input.token_ids, device_buffer);
   read_tensor(buffer, forward_input.positions, device_buffer);
+  if (!forward_input.token_ids.defined()) {
+    forward_input.token_ids = torch::empty(
+        {0}, torch::TensorOptions().dtype(torch::kInt).device(device));
+  }
+  if (!forward_input.positions.defined()) {
+    forward_input.positions = torch::empty(
+        {0}, torch::TensorOptions().dtype(torch::kInt).device(device));
+  }
 
   // input_params
   auto& input_params = forward_input.input_params;
@@ -1394,7 +1402,10 @@ inline void deserialize_raw_forward_input(const char*& buffer,
   // acc_logprob
   read_tensor(buffer, forward_input.acc_logprob, device_buffer);
 
-  // All inputs below are host data, no need to handle device-side pointers
+  // The following transfer/eplb payloads are consumed on host. When the
+  // contiguous device input buffer is active, keep its cursor aligned because
+  // graph tensors are read from the same serialized layout afterwards.
+  const char* host_only_start = buffer;
   // transfer_kv_infos
   uint64_t transfer_count;
   read_data(buffer, transfer_count);
@@ -1404,6 +1415,8 @@ inline void deserialize_raw_forward_input(const char*& buffer,
   }
   // eplb_info
   read_eplb_info(buffer, forward_input.eplb_info);
+  safe_advance_buffer(device_buffer,
+                      static_cast<size_t>(buffer - host_only_start));
 
   const char* graph_device_buffer =
       (FLAGS_enable_graph && device_buffer != nullptr) ? device_buffer
