@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <string>
 
-#include "core/kernels/npu/pytorch_npu_helper.h"
+#include "core/kernels/npu/aclnn/pytorch_npu_helper.hpp"
 #include "xllm_ops_api.h"
 
 namespace xllm::kernel::npu {
