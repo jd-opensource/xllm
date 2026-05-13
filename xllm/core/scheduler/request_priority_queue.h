@@ -156,8 +156,8 @@ class HeapQueue final : public RequestPriorityQueue {
 class SetQueue final : public RequestPriorityQueue {
  private:
   using QueueType = std::set<std::shared_ptr<Request>, Comparator>;
-  QueueType queue_;
   Comparator lower_priority_comparator_;
+  QueueType queue_;
 
  public:
   explicit SetQueue(Comparator lower_priority_comparator)

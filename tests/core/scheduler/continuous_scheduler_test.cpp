@@ -11,6 +11,7 @@
 #include "core/common/global_flags.h"
 #include "distributed_runtime/engine.h"
 #include "prefill_only_scheduler.h"
+#include "request_priority_queue.h"
 #include "scheduler_factory.h"
 #include "util/utils.h"
 
@@ -213,6 +214,25 @@ std::shared_ptr<Request> generate_request_with_prompt_tokens(
                          nullptr);
 
   return std::make_shared<Request>("1", "1", "1", std::move(req_state), "1");
+}
+
+TEST(RequestPriorityQueueTest, SetQueueUsesInitializedComparator) {
+  SetQueue queue(create_comparator("priority", true));
+
+  auto requests = generate_request({8, 8},
+                                   {4, 4},
+                                   std::vector<bool>{false, false},
+                                   std::vector<int32_t>{3, 1},
+                                   std::nullopt,
+                                   std::nullopt,
+                                   1024);
+  ASSERT_EQ(requests.size(), 2u);
+
+  EXPECT_NO_THROW(queue.push(requests[0]));
+  EXPECT_NO_THROW(queue.push(requests[1]));
+  EXPECT_EQ(queue.size(), 2u);
+  EXPECT_EQ(queue.top()->priority(), RequestPriority::HIGH);
+  EXPECT_EQ(queue.back()->priority(), RequestPriority::LOW);
 }
 
 // dont not consider speculative decoding.
