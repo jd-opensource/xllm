@@ -213,6 +213,16 @@ inline torch::Tensor deepseek_v4_build_packed_host_buffer(
   return host_buffer;
 }
 
+inline void deepseek_v4_fill_packed_host_buffer(
+    const std::vector<DeepseekV4PackedTensorSpec>& specs,
+    const torch::Tensor& host_buffer) {
+  auto* host_ptr = static_cast<uint8_t*>(host_buffer.data_ptr());
+  for (const auto& spec : specs) {
+    std::memcpy(
+        host_ptr + spec.offset, spec.cpu_tensor.data_ptr(), spec.nbytes);
+  }
+}
+
 inline void deepseek_v4_bind_packed_tensor_views(
     const std::vector<DeepseekV4PackedTensorSpec>& specs,
     const torch::Tensor& device_buffer) {
@@ -287,12 +297,11 @@ inline void deepseek_v4_pack_dsa_metadata_to_device(
 
 struct DeepseekV4GraphMetadataState : ModelGraphMetadataState {
   struct DSAMetadataPersistent {
+    torch::Tensor packed_metadata_host_buffer;
     torch::Tensor packed_metadata_buffer;
     torch::Tensor seq_lens;
     torch::Tensor seq_lens_q;
     torch::Tensor attn_mask;
-    torch::Tensor cos_table;
-    torch::Tensor sin_table;
     torch::Tensor actual_seq_lengths_query;
     torch::Tensor actual_seq_lengths_kv;
     torch::Tensor max_seqlen_q;
@@ -316,6 +325,10 @@ struct DeepseekV4GraphMetadataState : ModelGraphMetadataState {
     torch::Tensor c128_metadata;
     torch::Tensor qli_metadata;
     torch::Tensor hadamard;
+    int64_t c1_metadata_size = 0;
+    int64_t c4_metadata_size = 0;
+    int64_t c128_metadata_size = 0;
+    int64_t qli_metadata_size = 0;
     std::vector<std::vector<torch::Tensor>> block_tables;
     std::vector<std::vector<torch::Tensor>> slot_mappings;
   };
@@ -836,33 +849,48 @@ class DeepseekV4ModelImpl
     return tensor_max_or_zero(fallback_tensor);
   }
 
+  static bool tensor_aliases_storage(const torch::Tensor& lhs,
+                                     const torch::Tensor& rhs) {
+    return lhs.defined() && rhs.defined() && lhs.data_ptr() == rhs.data_ptr() &&
+           lhs.sizes() == rhs.sizes() && lhs.strides() == rhs.strides();
+  }
+
+  static void check_persistent_tensor_compatible(const torch::Tensor& src,
+                                                 const torch::Tensor& dst) {
+    CHECK(dst.sizes() == src.sizes())
+        << "DeepSeek V4 graph metadata tensor size changed from " << dst.sizes()
+        << " to " << src.sizes();
+    CHECK_EQ(dst.scalar_type(), src.scalar_type())
+        << "DeepSeek V4 graph metadata tensor dtype changed";
+    CHECK_EQ(dst.device(), src.device())
+        << "DeepSeek V4 graph metadata tensor device changed";
+  }
+
   static torch::Tensor copy_to_persistent_tensor(const torch::Tensor& src,
                                                  torch::Tensor& dst) {
     if (!src.defined()) {
       return src;
     }
     if (!dst.defined()) {
-      dst = torch::zeros_like(src);
+      dst = torch::empty_like(src);
     } else {
-      CHECK(dst.sizes() == src.sizes())
-          << "DeepSeek V4 graph metadata tensor size changed from "
-          << dst.sizes() << " to " << src.sizes();
-      CHECK_EQ(dst.scalar_type(), src.scalar_type())
-          << "DeepSeek V4 graph metadata tensor dtype changed";
-      CHECK_EQ(dst.device(), src.device())
-          << "DeepSeek V4 graph metadata tensor device changed";
+      check_persistent_tensor_compatible(src, dst);
     }
-    dst.copy_(src, /*non_blocking=*/true);
+    if (!tensor_aliases_storage(src, dst)) {
+      dst.copy_(src, /*non_blocking=*/true);
+    }
     return dst;
   }
 
   static torch::Tensor copy_to_fixed_metadata_tensor(const torch::Tensor& src,
-                                                     torch::Tensor& dst) {
+                                                     torch::Tensor& dst,
+                                                     int64_t& valid_size) {
     if (!src.defined()) {
       return src;
     }
     if (!dst.defined()) {
       dst = torch::zeros({kDeepseekV4DsaMetadataBufferElements}, src.options());
+      valid_size = 0;
     } else {
       CHECK_EQ(dst.numel(), kDeepseekV4DsaMetadataBufferElements)
           << "DeepSeek V4 graph metadata fixed tensor size changed";
@@ -874,12 +902,19 @@ class DeepseekV4ModelImpl
     CHECK_LE(src.numel(), dst.numel())
         << "DeepSeek V4 DSA metadata exceeds graph persistent capacity: src="
         << src.numel() << ", capacity=" << dst.numel();
-    dst.zero_();
-    if (src.numel() > 0) {
-      dst.flatten(0)
-          .slice(/*dim=*/0, /*start=*/0, /*end=*/src.numel())
-          .copy_(src.flatten(0), /*non_blocking=*/true);
+    const int64_t src_numel = src.numel();
+    auto dst_flat = dst.flatten(0);
+    if (src_numel > 0) {
+      auto dst_head = dst_flat.slice(/*dim=*/0, /*start=*/0, /*end=*/src_numel);
+      if (!tensor_aliases_storage(src.flatten(0), dst_head)) {
+        dst_head.copy_(src.flatten(0), /*non_blocking=*/true);
+      }
     }
+    if (valid_size > src_numel) {
+      dst_flat.slice(/*dim=*/0, /*start=*/src_numel, /*end=*/valid_size)
+          .zero_();
+    }
+    valid_size = src_numel;
     return dst;
   }
 
@@ -901,7 +936,21 @@ class DeepseekV4ModelImpl
       return;
     }
 
-    auto host_buffer = deepseek_v4_build_packed_host_buffer(specs, total_bytes);
+    if (!persistent.packed_metadata_host_buffer.defined() ||
+        persistent.packed_metadata_host_buffer.scalar_type() != torch::kUInt8 ||
+        persistent.packed_metadata_host_buffer.device() != torch::kCPU ||
+        persistent.packed_metadata_host_buffer.numel() <
+            static_cast<int64_t>(total_bytes)) {
+      persistent.packed_metadata_host_buffer =
+          torch::empty({static_cast<int64_t>(total_bytes)},
+                       torch::TensorOptions()
+                           .dtype(torch::kUInt8)
+                           .device(torch::kCPU)
+                           .pinned_memory(true));
+    }
+    auto host_buffer = persistent.packed_metadata_host_buffer.slice(
+        /*dim=*/0, /*start=*/0, /*end=*/static_cast<int64_t>(total_bytes));
+    deepseek_v4_fill_packed_host_buffer(specs, host_buffer);
     auto device_options =
         torch::TensorOptions().dtype(torch::kUInt8).device(runtime_device);
     if (!persistent.packed_metadata_buffer.defined()) {
@@ -924,7 +973,8 @@ class DeepseekV4ModelImpl
                /*start=*/0,
                /*end=*/static_cast<int64_t>(total_bytes))
         .copy_(host_buffer, /*non_blocking=*/true);
-    dsa.packed_metadata_buffer = persistent.packed_metadata_buffer;
+    dsa.packed_metadata_buffer = persistent.packed_metadata_buffer.slice(
+        /*dim=*/0, /*start=*/0, /*end=*/static_cast<int64_t>(total_bytes));
     deepseek_v4_bind_packed_tensor_views(specs, dsa.packed_metadata_buffer);
 #else
     (void)persistent;
@@ -1020,10 +1070,6 @@ class DeepseekV4ModelImpl
 
     dsa.attn_mask =
         copy_to_persistent_tensor(dsa.attn_mask, persistent.attn_mask);
-    dsa.cos_table =
-        copy_to_persistent_tensor(dsa.cos_table, persistent.cos_table);
-    dsa.sin_table =
-        copy_to_persistent_tensor(dsa.sin_table, persistent.sin_table);
     dsa.cos = copy_to_persistent_tensor(dsa.cos, persistent.cos);
     dsa.sin = copy_to_persistent_tensor(dsa.sin, persistent.sin);
     dsa.c4_cos = copy_to_persistent_tensor(dsa.c4_cos, persistent.c4_cos);
@@ -1041,14 +1087,18 @@ class DeepseekV4ModelImpl
     dsa.start_pos =
         copy_to_persistent_tensor(dsa.start_pos, persistent.start_pos);
 
-    dsa.c1_metadata =
-        copy_to_fixed_metadata_tensor(dsa.c1_metadata, persistent.c1_metadata);
-    dsa.c4_metadata =
-        copy_to_fixed_metadata_tensor(dsa.c4_metadata, persistent.c4_metadata);
-    dsa.c128_metadata = copy_to_fixed_metadata_tensor(dsa.c128_metadata,
-                                                      persistent.c128_metadata);
-    dsa.qli_metadata = copy_to_fixed_metadata_tensor(dsa.qli_metadata,
-                                                     persistent.qli_metadata);
+    dsa.c1_metadata = copy_to_fixed_metadata_tensor(
+        dsa.c1_metadata, persistent.c1_metadata, persistent.c1_metadata_size);
+    dsa.c4_metadata = copy_to_fixed_metadata_tensor(
+        dsa.c4_metadata, persistent.c4_metadata, persistent.c4_metadata_size);
+    dsa.c128_metadata =
+        copy_to_fixed_metadata_tensor(dsa.c128_metadata,
+                                      persistent.c128_metadata,
+                                      persistent.c128_metadata_size);
+    dsa.qli_metadata =
+        copy_to_fixed_metadata_tensor(dsa.qli_metadata,
+                                      persistent.qli_metadata,
+                                      persistent.qli_metadata_size);
 
     return metadata;
   }
