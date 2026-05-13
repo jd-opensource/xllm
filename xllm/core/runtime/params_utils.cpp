@@ -38,6 +38,21 @@ void aprint(std::vector<T> v, const std::string& name, int global_rank) {
   LOG(INFO) << "GlobalRank = " << global_rank << ", name = " << name
             << ", value = " << value;
 }
+
+void normalize_linear_state_ids(std::vector<int32_t>& linear_state_ids,
+                                int32_t num_sequences) {
+  if (num_sequences <= 0) {
+    linear_state_ids.clear();
+    return;
+  }
+  if (linear_state_ids.empty()) {
+    linear_state_ids.assign(num_sequences, -1);
+    return;
+  }
+  CHECK_EQ(linear_state_ids.size(), static_cast<size_t>(num_sequences))
+      << "linear_state_ids size (" << linear_state_ids.size()
+      << ") must match num_sequences (" << num_sequences << ")";
+}
 }  // namespace
 
 void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
@@ -132,6 +147,10 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   std::vector<int32_t> embedding_ids =
       std::vector<int32_t>(pb_forward_input->embedding_ids().begin(),
                            pb_forward_input->embedding_ids().end());
+  std::vector<int32_t> linear_state_ids =
+      std::vector<int32_t>(pb_forward_input->linear_state_ids().begin(),
+                           pb_forward_input->linear_state_ids().end());
+  normalize_linear_state_ids(linear_state_ids, num_sequences);
   std::vector<int32_t> extra_token_ids =
       std::vector<int32_t>(pb_forward_input->extra_token_ids().begin(),
                            pb_forward_input->extra_token_ids().end());
@@ -171,6 +190,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
     tmp.do_sample = sp.do_sample();
     tmp.is_embeddings = sp.is_embeddings();
     tmp.beam_width = sp.beam_width();
+    tmp.num_return_sequences = sp.num_return_sequences();
     tmp_sampling_params.emplace_back(tmp);
   }
   sampling_params.reserve(tmp_sampling_params.size());
@@ -232,6 +252,7 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.dp_global_token_nums = std::move(dp_global_token_nums);
   input_params.dp_is_decode = std::move(dp_is_decode);
   input_params.embedding_ids = std::move(embedding_ids);
+  input_params.linear_state_ids = std::move(linear_state_ids);
   input_params.request_ids = std::move(request_ids);
   input_params.extra_token_ids = std::move(extra_token_ids);
 
@@ -396,6 +417,7 @@ void forward_input_to_proto(const RawForwardInput& inputs,
     pb_sp.set_do_sample(sp->do_sample);
     pb_sp.set_is_embeddings(sp->is_embeddings);
     pb_sp.set_beam_width(sp->beam_width);
+    pb_sp.set_num_return_sequences(sp->num_return_sequences);
     pb_sampling_params.emplace_back(pb_sp);
   }
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_sampling_params(),
@@ -515,6 +537,8 @@ void forward_input_to_proto(const RawForwardInput& inputs,
 
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_embedding_ids(),
                       inputs.embedding_ids);
+  ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_linear_state_ids(),
+                      inputs.linear_state_ids);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_request_ids(),
                       inputs.request_ids);
   ADD_VECTOR_TO_PROTO(pb_forward_input->mutable_extra_token_ids(),

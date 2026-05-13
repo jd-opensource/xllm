@@ -709,7 +709,12 @@ void ChatServiceImpl::process_async_rpc_impl(
 
     request_params.decode_address = rpc_request.routing().decode_name();
   }
-  // TODO: support stream tool call parser and reasoning parser
+  // Preserve parser-relevant special tokens in decoded output
+  // so tool call detectors can match their control markers.
+  // Aligns with vLLM parser adjust_request behavior.
+  if (!tool_call_parser_format_.empty() && !request_params.tools.empty()) {
+    request_params.skip_special_tokens = false;
+  }
 
   master_->handle_request(std::move(messages),
                           std::move(prompt_tokens),
@@ -797,6 +802,10 @@ void ChatServiceImpl::process_async_impl(std::shared_ptr<ChatCall> call) {
     }
 
     request_params.decode_address = rpc_request.routing().decode_name();
+  }
+
+  if (!tool_call_parser_format_.empty() && !request_params.tools.empty()) {
+    request_params.skip_special_tokens = false;
   }
 
   const bool is_force_reasoning = get_enable_thinking_from_request(

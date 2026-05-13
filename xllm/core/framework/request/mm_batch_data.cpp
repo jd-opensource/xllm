@@ -15,11 +15,11 @@ limitations under the License.
 
 #include "mm_batch_data.h"
 
+#include <cstring>
+
 #include "core/util/tensor_helper.h"
 #include "core/util/utils.h"
 #include "mm_data_visitor.h"
-
-#include <cstring>
 
 namespace xllm {
 
@@ -232,10 +232,9 @@ void mmitem_state_to_proto(const xllm::MMItemState& cpp_state,
   pb_state->set_token_pos_length(cpp_state.token_pos().length);
   pb_state->set_cached_token_num(cpp_state.prefix_cache().cached_token_num);
   if (cpp_state.prefix_cached()) {
-    pb_state->set_prefix_cache_key(
-        std::string(reinterpret_cast<const char*>(
-                        cpp_state.prefix_cache().key.data),
-                    XXH3_128BITS_HASH_VALUE_LEN));
+    pb_state->set_prefix_cache_key(std::string(
+        reinterpret_cast<const char*>(cpp_state.prefix_cache().key.data),
+        XXH3_128BITS_HASH_VALUE_LEN));
   }
 }
 

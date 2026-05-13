@@ -22,7 +22,6 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/interruption_bus.h"
-#include "core/common/rec_model_utils.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -30,6 +29,7 @@ limitations under the License.
 #include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/common/lm_head.h"
 #include "core/layers/common/rms_norm.h"
+#include "core/util/rec_model_utils.h"
 #include "models/model_registry.h"
 
 namespace xllm {
@@ -81,7 +81,7 @@ class LlmModelImplBase : public torch::nn::Module {
       modified_input_params.attn_metadata =
           std::make_shared<layer::AttentionMetadata>(
               layer::AttentionMetadataBuilder::build(modified_input_params,
-                                                     model_args_));
+                                                     model_args_.enable_mla()));
     }
     auto& attn_metadata = *(modified_input_params.attn_metadata);
     if (positions.dim() == 2) {
@@ -121,6 +121,10 @@ class LlmModelImplBase : public torch::nn::Module {
                 attn_metadata,
                 kv_caches[i],
                 modified_input_params);
+      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
+                                              h.device())) {
+        return ModelOutput();
+      }
     }
     auto [hidden_states, residual_out] = norm_(h, residual);
     return ModelOutput(hidden_states, residual_out);

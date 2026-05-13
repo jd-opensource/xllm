@@ -200,20 +200,6 @@ void ModelRegistry::register_causalvlm_factory(const std::string& name,
   }
 }
 
-void ModelRegistry::register_vlm_embedding_factory(
-    const std::string& name,
-    EmbeddingVLMFactory factory) {
-  ModelRegistry* instance = get_instance();
-
-  if (instance->model_registry_[name].embedding_vlm_factory != nullptr) {
-    SAFE_LOG_WARNING("embedding vlm factory for " << name
-                                                  << " already registered.");
-  } else {
-    instance->model_registry_[name].embedding_vlm_factory = factory;
-    instance->model_backend_[name] = "vlm";
-  }
-}
-
 void ModelRegistry::register_mm_embedding_vlm_factory(
     const std::string& name,
     MMEmbeddingVLMFactory factory) {
@@ -319,13 +305,6 @@ CausalVLMFactory ModelRegistry::get_causalvlm_factory(const std::string& name) {
   ModelRegistry* instance = get_instance();
 
   return instance->model_registry_[name].causal_vlm_factory;
-}
-
-EmbeddingVLMFactory ModelRegistry::get_embeddingvlm_factory(
-    const std::string& name) {
-  ModelRegistry* instance = get_instance();
-
-  return instance->model_registry_[name].embedding_vlm_factory;
 }
 
 MMEmbeddingVLMFactory ModelRegistry::get_mm_embedding_vlm_factory(
@@ -437,28 +416,6 @@ std::unique_ptr<CausalVLM> create_vlm_model(const ModelContext& context) {
   }
 
   auto factory = ModelRegistry::get_causalvlm_factory(resolved_name);
-  if (factory) {
-    return factory(context);
-  }
-
-  LOG(ERROR) << "Unsupported model type: "
-             << context.get_model_args().model_type();
-
-  return nullptr;
-}
-
-std::unique_ptr<EmbeddingVLM> create_vlm_embedding_model(
-    const ModelContext& context) {
-  std::string resolved_name;
-  std::string error_message;
-  if (!resolve_model_registration_name(context.get_model_args().model_type(),
-                                       &resolved_name,
-                                       &error_message)) {
-    LOG(ERROR) << error_message;
-    return nullptr;
-  }
-
-  auto factory = ModelRegistry::get_embeddingvlm_factory(resolved_name);
   if (factory) {
     return factory(context);
   }

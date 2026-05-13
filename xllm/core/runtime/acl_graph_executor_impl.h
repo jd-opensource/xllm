@@ -157,6 +157,14 @@ class GraphPersistentParam {
     }
     return persistent_embedding_;
   }
+  torch::Tensor persistent_linear_state_indices(
+      uint32_t actual_batch_size = 0) const {
+    if (actual_batch_size > 0) {
+      return persistent_linear_state_indices_.slice(
+          /*dim=*/0, /*start=*/0, /*end=*/actual_batch_size);
+    }
+    return persistent_linear_state_indices_;
+  }
   torch::Tensor aux_hidden_states(uint32_t actual_tokens = 0) const {
     if (!aux_hidden_states_.defined() || aux_hidden_states_.numel() == 0) {
       return aux_hidden_states_;
@@ -208,6 +216,7 @@ class GraphPersistentParam {
 
   // for mtp model
   torch::Tensor persistent_embedding_;
+  torch::Tensor persistent_linear_state_indices_;
 
   // for mrope (multimodal rotary position embedding)
   bool use_mrope_ = false;
@@ -304,6 +313,9 @@ class AclGraphExecutorImpl : public ExecutorImpl {
                   const torch::Tensor& positions,
                   std::vector<KVCache>& kv_caches,
                   const ModelInputParams& params) override;
+
+  static std::optional<std::pair<torch::Tensor, torch::Tensor>>
+  find_first_full_attention_cache(const std::vector<KVCache>& kv_caches);
 
  private:
   // not own

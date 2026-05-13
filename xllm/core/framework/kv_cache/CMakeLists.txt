@@ -1,61 +1,31 @@
-include(cc_binary)
 include(cc_library)
-include(cc_test)
-
 
 cc_library(
   NAME
     kv_cache
   HDRS
     embedding_cache.h
+    indexed_kv_cache_impl.h
     kv_cache.h
     kv_cache_event.h
-    kv_cache_transfer.h
-    $<$<BOOL:${USE_NPU}>:llm_data_dist_transfer.h>
-    $<$<BOOL:${USE_NPU}>:spec_kv_cache_transfer.h>
-    kv_cache_store.h
-    hierarchy_kv_cache_transfer.h
-    $<$<BOOL:${USE_NPU}>:mooncake_transfer_engine.h>
-    $<$<BOOL:${USE_NPU}>:mooncake_kv_cache_transfer.h>
-    $<$<BOOL:${USE_NPU}>:mooncake_weight_transfer.h>
+    kv_cache_impl.h
+    kv_cache_shape.h
+    kv_cache_utils.h
+    linear_attention_kv_cache_impl.h
+    quantized_kv_cache_impl.h
   SRCS
     embedding_cache.cpp 
+    indexed_kv_cache_impl.cpp
     kv_cache.cpp
-    kv_cache_transfer.cpp
-    $<$<BOOL:${USE_NPU}>:llm_data_dist_transfer.cpp>
-    $<$<BOOL:${USE_NPU}>:spec_kv_cache_transfer.cpp>
-    kv_cache_store.cpp
-    hierarchy_kv_cache_transfer.cpp
-    $<$<BOOL:${USE_NPU}>:mooncake_transfer_engine.cpp>
-    $<$<BOOL:${USE_NPU}>:mooncake_kv_cache_transfer.cpp>
-    $<$<BOOL:${USE_NPU}>:mooncake_weight_transfer.cpp>
+    kv_cache_impl.cpp
+    kv_cache_shape.cpp
+    kv_cache_utils.cpp
+    linear_attention_kv_cache_impl.cpp
+    quantized_kv_cache_impl.cpp
   DEPS
     :common
-    $<$<BOOL:${USE_NPU}>:graph>
+    :xtensor
     glog::glog
-    $<$<BOOL:${USE_NPU}>:llm_datadist>
-    $<$<BOOL:${USE_NPU}>:c_sec>
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
-    mooncake_store
-    $<$<BOOL:${USE_NPU}>:platform_npu>
 )
-
-cc_test(
-  NAME
-    embedding_cache_test
-  SRCS
-    embedding_cache_test.cpp
-  DEPS
-    :xllm_server
-    :kv_cache
-    $<$<BOOL:${USE_NPU}>:xllm_server>
-    GTest::gtest_main
-)
-target_link_libraries(embedding_cache_test
-                      PUBLIC
-                      Python::Python
-                      $<$<BOOL:${USE_NPU}>:ascendcl>
-                      $<$<BOOL:${USE_NPU}>:hccl>
-                      $<$<BOOL:${USE_NPU}>:c_sec>
-                      $<$<BOOL:${USE_NPU}>:nnopbase>)

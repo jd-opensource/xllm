@@ -75,12 +75,11 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   };
 
   // allocate kv cache. blocking call
-  bool allocate_kv_cache(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
+  bool allocate_kv_cache(const KVCacheShape& kv_cache_shape) override;
 
 #if defined(USE_NPU)
   bool allocate_kv_cache_with_transfer(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
+      const KVCacheShape& kv_cache_shape) override;
 #endif
 
   void get_cache_info(uint64_t& cluster_id,

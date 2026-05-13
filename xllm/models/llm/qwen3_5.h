@@ -114,6 +114,24 @@ TORCH_MODULE(Qwen3_5ForCausalLM);
   LOAD_ARG_TEXT_OR_ROOT(linear_num_value_heads, "linear_num_value_heads", 32); \
   LOAD_ARG_TEXT_OR_ROOT(linear_value_head_dim, "linear_value_head_dim", 128);  \
   LOAD_QWEN3_5_ROPE_ARG(partial_rotary_factor, 0.25f);                         \
+  LOAD_ARG_OR(rope_scaling_mrope_section,                                      \
+              "text_config.rope_scaling.mrope_section",                        \
+              std::vector<int64_t>());                                         \
+  LOAD_ARG_OR(rope_scaling_mrope_section,                                      \
+              "text_config.rope_parameters.mrope_section",                     \
+              args->rope_scaling_mrope_section());                             \
+  LOAD_ARG_OR(rope_scaling_mrope_section,                                      \
+              "rope_parameters.mrope_section",                                 \
+              args->rope_scaling_mrope_section());                             \
+  LOAD_ARG_OR(rope_scaling_mrope_interleaved,                                  \
+              "text_config.rope_scaling.mrope_interleaved",                    \
+              false);                                                          \
+  LOAD_ARG_OR(rope_scaling_mrope_interleaved,                                  \
+              "text_config.rope_parameters.mrope_interleaved",                 \
+              args->rope_scaling_mrope_interleaved());                         \
+  LOAD_ARG_OR(rope_scaling_mrope_interleaved,                                  \
+              "rope_parameters.mrope_interleaved",                             \
+              args->rope_scaling_mrope_interleaved());                         \
   LOAD_ARG_TEXT_OR_ROOT(shared_expert_intermediate_size,                       \
                         "shared_expert_intermediate_size",                     \
                         default_shared_expert_intermediate_size);              \
@@ -144,7 +162,9 @@ TORCH_MODULE(Qwen3_5ForCausalLM);
   SET_ARG(n_group, -1);                                                        \
   SET_ARG(topk_group, 0);                                                      \
   SET_ARG(routed_scaling_factor, 1.0f);                                        \
-  SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}))
+  SET_ARG(stop_token_ids,                                                      \
+          std::unordered_set<int32_t>({args->eos_token_id()}));                \
+  LOAD_ARG_TEXT_OR_ROOT(mamba_ssm_dtype, "mamba_ssm_dtype", "float32")
 
 #define LOAD_QWEN3_5_TYPE_AND_DTYPE(default_model_type)         \
   LOAD_ARG_OR(model_type, "model_type", default_model_type);    \

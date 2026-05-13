@@ -18,6 +18,7 @@ limitations under the License.
 #include "core/common/global_flags.h"
 #include "scheduler/chunked_prefill_scheduler.h"
 #include "scheduler/continuous_scheduler.h"
+#include "scheduler/disagg_pd_chunked_prefill_scheduler.h"
 #include "scheduler/disagg_pd_scheduler.h"
 #include "scheduler/dit_scheduler.h"
 #include "scheduler/fixed_steps_scheduler.h"
@@ -28,33 +29,58 @@ limitations under the License.
 
 namespace xllm {
 
-std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
-    Engine* engine,
-    ContinuousScheduler::Options options) {
+SchedulerKind select_scheduler_kind(
+    const ContinuousScheduler::Options& options) {
   if (FLAGS_use_mix_scheduler) {
-    CHECK(options.enable_chunked_prefill())
-        << "mix scheduler requires enabling chunked prefill";
-    return std::make_unique<MixScheduler>(engine, options);
+    return SchedulerKind::MIX;
   }
 
   if (options.enable_disagg_pd()) {
     if (options.enable_pd_ooc()) {
-      return std::make_unique<PDOOCScheduler>(engine, options);
-    } else {
-      return std::make_unique<DisaggPDScheduler>(engine, options);
+      return SchedulerKind::PD_OOC;
     }
+    if (options.enable_chunked_prefill()) {
+      return SchedulerKind::DISAGG_PD_CHUNKED_PREFILL;
+    }
+    return SchedulerKind::DISAGG_PD;
   }
 
   if (options.enable_chunked_prefill()) {
     if (FLAGS_enable_prefill_sp || options.num_speculative_tokens() > 0) {
-      return std::make_unique<PrefillOnlyScheduler>(engine, options);
-    } else {
-      return std::make_unique<ChunkedPrefillScheduler>(engine, options);
+      return SchedulerKind::PREFILL_ONLY;
     }
+    return SchedulerKind::CHUNKED_PREFILL;
   }
 
   if (FLAGS_use_zero_evict) {
-    return std::make_unique<ZeroEvictionScheduler>(engine, options);
+    return SchedulerKind::ZERO_EVICTION;
+  }
+
+  return SchedulerKind::CONTINUOUS;
+}
+
+std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
+    Engine* engine,
+    ContinuousScheduler::Options options) {
+  switch (select_scheduler_kind(options)) {
+    case SchedulerKind::MIX:
+      CHECK(options.enable_chunked_prefill())
+          << "mix scheduler requires enabling chunked prefill";
+      return std::make_unique<MixScheduler>(engine, options);
+    case SchedulerKind::PD_OOC:
+      return std::make_unique<PDOOCScheduler>(engine, options);
+    case SchedulerKind::DISAGG_PD_CHUNKED_PREFILL:
+      return std::make_unique<DisaggPDChunkedPrefillScheduler>(engine, options);
+    case SchedulerKind::DISAGG_PD:
+      return std::make_unique<DisaggPDScheduler>(engine, options);
+    case SchedulerKind::PREFILL_ONLY:
+      return std::make_unique<PrefillOnlyScheduler>(engine, options);
+    case SchedulerKind::CHUNKED_PREFILL:
+      return std::make_unique<ChunkedPrefillScheduler>(engine, options);
+    case SchedulerKind::ZERO_EVICTION:
+      return std::make_unique<ZeroEvictionScheduler>(engine, options);
+    case SchedulerKind::CONTINUOUS:
+      return std::make_unique<ContinuousScheduler>(engine, options);
   }
 
   return std::make_unique<ContinuousScheduler>(engine, options);

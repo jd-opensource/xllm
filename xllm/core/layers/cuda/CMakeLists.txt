@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 cc_library(
   NAME
@@ -8,6 +7,7 @@ cc_library(
     attention.h
     base_attention_impl.h
     flashinfer_attention.h
+    fused_moe.h
     xattention.h
     xattention_planinfo.h
     flashinfer_workspace.h
@@ -19,23 +19,11 @@ cc_library(
     xattention.cpp
     xattention_planinfo.cpp
     flashinfer_attention.cpp
+    fused_moe.cpp
     flashinfer_workspace.cpp
     xattention_workspace.cpp
     flashinfer_planinfo.cpp
   DEPS
+    :cuda_kernels
     :common_layers
 )
-
-cc_test(
-  NAME
-    xattention_test
-  SRCS
-    xattention_test.cpp
-  DEPS
-    :cuda_layers
-    :cuda_kernels
-    torch
-    GTest::gtest_main
-    glog::glog
-)
-target_link_libraries(xattention_test PRIVATE brpc)

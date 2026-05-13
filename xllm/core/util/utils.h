@@ -22,6 +22,7 @@ limitations under the License.
 #include <numeric>
 #include <optional>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 #include "rec.pb.h"
@@ -78,6 +79,12 @@ template <typename T>
 const T& max(const std::vector<T>& vec) {
   if (vec.empty()) LOG(FATAL) << "vector is empty.";
   return *std::max_element(vec.begin(), vec.end());
+}
+
+template <typename T>
+inline std::enable_if_t<std::is_integral_v<T>, T> ceil_div(T value, T divisor) {
+  CHECK_GT(divisor, 0) << "divisor must be positive.";
+  return value / divisor + static_cast<T>(value % divisor != 0);
 }
 
 static inline int64_t align_up(int64_t value, int64_t alignment) {

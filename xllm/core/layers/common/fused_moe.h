@@ -31,7 +31,7 @@ namespace xllm {
 namespace layer {
 
 // FusedMoE common implementation - placeholder for unsupported backends
-// Actual implementation is in layers/mlu/fused_moe.h and layers/ilu/fused_moe.h
+// Actual implementations are in backend-specific fused_moe.h files.
 class FusedMoEImpl : public torch::nn::Module {
  public:
   FusedMoEImpl() = default;

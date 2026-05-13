@@ -130,6 +130,7 @@ void XAttentionImpl::run_two_stage_decode(
         cache.unshared_lse.defined() && cache.unshared_o.defined())
       << "two-stage output cache tensors are not initialized.";
   CHECK(cache.q_cu_seq_lens_shared.defined() &&
+        cache.qo_indptr_expanded.defined() &&
         cache.paged_kv_indptr_expanded.defined() &&
         cache.paged_kv_indices_expanded.defined() &&
         cache.paged_kv_last_page_len_expanded.defined())
@@ -144,6 +145,9 @@ void XAttentionImpl::run_two_stage_decode(
   CHECK_EQ(cache.q_cu_seq_lens_shared.numel(), batch_size + 1)
       << "q_cu_seq_lens_shared size mismatch: expected " << (batch_size + 1)
       << ", got " << cache.q_cu_seq_lens_shared.numel();
+  CHECK_EQ(cache.qo_indptr_expanded.numel(), total_beam + 1)
+      << "qo_indptr_expanded size mismatch: expected " << (total_beam + 1)
+      << ", got " << cache.qo_indptr_expanded.numel();
   CHECK_EQ(cache.paged_kv_indptr_expanded.numel(), total_beam + 1)
       << "paged_kv_indptr_expanded size mismatch: expected " << (total_beam + 1)
       << ", got " << cache.paged_kv_indptr_expanded.numel();
@@ -239,6 +243,7 @@ void XAttentionImpl::run_two_stage_decode(
   unshared_attn_meta.paged_kv_indices = cache.paged_kv_indices_expanded;
   unshared_attn_meta.paged_kv_last_page_len =
       cache.paged_kv_last_page_len_expanded;
+  unshared_attn_meta.qo_indptr = cache.qo_indptr_expanded;
 
   auto& xattention_workspace =
       xllm::layer::xattention::XAttentionWorkspace::get_instance();
@@ -283,22 +288,26 @@ void XAttentionImpl::run_two_stage_decode(
   }
 
   std::optional<torch::Tensor> unshared_lse = cache.unshared_lse;
-  xllm::kernel::cuda::batch_decode(attn_metadata.unshared_plan_info->uri,
-                                   attn_metadata.unshared_plan_info->plan_info,
-                                   float_workspace_buffer,
-                                   unshared_int_workspace_buffer,
-                                   unshared_page_locked_int_workspace_buffer,
-                                   query,
-                                   unshared_k_cache,
-                                   unshared_v_cache,
-                                   unshared_attn_meta.paged_kv_indptr,
-                                   unshared_attn_meta.paged_kv_indices,
-                                   unshared_attn_meta.paged_kv_last_page_len,
-                                   sliding_window_,
-                                   scale_,
-                                   cache.unshared_o,
-                                   unshared_lse,
-                                   /*use_tensor_core=*/false);
+  xllm::kernel::cuda::batch_decode(
+      attn_metadata.unshared_plan_info->uri,
+      attn_metadata.unshared_plan_info->plan_info,
+      float_workspace_buffer,
+      unshared_int_workspace_buffer,
+      unshared_page_locked_int_workspace_buffer,
+      query,
+      unshared_k_cache,
+      unshared_v_cache,
+      unshared_attn_meta.paged_kv_indptr,
+      unshared_attn_meta.paged_kv_indices,
+      unshared_attn_meta.paged_kv_last_page_len,
+      sliding_window_,
+      scale_,
+      cache.unshared_o,
+      unshared_lse,
+      // Keep execution path consistent with the
+      // kernel URI chosen in update_xattention_plan_info.
+      /*use_tensor_core=*/decode_use_tensor_core_,
+      unshared_attn_meta.qo_indptr);
 
   // ===== Combine shared/unshared results =====
   xllm::kernel::cuda::lse_combine(output,

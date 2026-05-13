@@ -83,8 +83,8 @@ static inline void unmap_pages(
   }
 
   for (const auto& entry : mapping) {
-    VirPtr addr = add_vir_ptr_offset(
-        vaddr, static_cast<size_t>(entry.first) * page_size);
+    VirPtr addr =
+        add_vir_ptr_offset(vaddr, static_cast<size_t>(entry.first) * page_size);
     vmm::unmap(addr, page_size);
   }
 }

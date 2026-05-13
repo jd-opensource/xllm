@@ -15,6 +15,9 @@ limitations under the License.
 
 #include "glm4v_image_processor.h"
 
+#include <cfenv>
+#include <cmath>
+
 namespace xllm {
 
 namespace {
@@ -43,15 +46,14 @@ std::optional<Size> smart_resize(int num_frames,
     LOG(ERROR) << "Absolute aspect ratio must be smaller than 200";
     return std::nullopt;
   }
-  int t_bar = static_cast<int>(std::round(
+  int t_bar = static_cast<int>(std::rint(
                   num_frames / static_cast<double>(temporal_factor))) *
               temporal_factor;
   int h_bar =
-      static_cast<int>(std::round(height / static_cast<double>(factor))) *
+      static_cast<int>(std::rint(height / static_cast<double>(factor))) *
       factor;
   int w_bar =
-      static_cast<int>(std::round(width / static_cast<double>(factor))) *
-      factor;
+      static_cast<int>(std::rint(width / static_cast<double>(factor))) * factor;
 
   if (t_bar * h_bar * w_bar > max_pixels) {
     double beta = std::sqrt((num_frames * height * width) /

@@ -31,7 +31,8 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
                            bool enable_result_reduction,
                            const QuantArgs& quant_args,
                            ProcessGroup* process_group,
-                           const torch::TensorOptions& options)
+                           const torch::TensorOptions& options,
+                           const std::string& module_prefix)
     : is_gated_(is_gated),
       intermediate_size_(intermediate_size),
       process_group_(process_group),
@@ -73,13 +74,17 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
   act_ = register_module("act", Activation(hidden_act_, is_gated_));
 
   // 2. down
+  const auto down_proj_quant_args =
+      module_prefix.empty()
+          ? quant_args
+          : quant_args.for_module(module_prefix + ".down_proj");
   down_proj_ = register_module("down_proj",
                                RowParallelLinear(intermediate_size_,
                                                  hidden_size,
                                                  /*bias=*/has_bias,
                                                  /*input_is_parallelized=*/true,
                                                  enable_result_reduction,
-                                                 quant_args,
+                                                 down_proj_quant_args,
                                                  process_group_,
                                                  options,
                                                  down_proj_extra_args));

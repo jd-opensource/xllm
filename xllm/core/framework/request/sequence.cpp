@@ -21,15 +21,19 @@ limitations under the License.
 #include <absl/time/time.h>
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <random>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
 #include "core/framework/request/mm_data_visitor.h"
+#include "core/framework/tokenizer/rec_tokenizer.h"
 #include "core/framework/tokenizer/tokenizer.h"
 #include "core/util/slice.h"
 #include "core/util/tensor_helper.h"
@@ -41,6 +45,59 @@ namespace {
 constexpr size_t kDecoderBosTokenCount = 1;
 constexpr size_t kDecoderMaxTokenCount = kRecTotalSteps + kDecoderBosTokenCount;
 constexpr char kEmptyLogprobsFinishReason[] = "empty_logprobs";
+
+std::vector<int64_t> normalize_rec_item_ids(const std::vector<int64_t>& raw_ids,
+                                            size_t sequence_index) {
+  std::vector<int64_t> item_ids;
+  item_ids.reserve(raw_ids.size());
+  std::unordered_set<int64_t> seen_item_ids;
+  for (const int64_t item_id : raw_ids) {
+    if (seen_item_ids.insert(item_id).second) {
+      item_ids.emplace_back(item_id);
+    }
+  }
+
+  const int32_t each_threshold = FLAGS_each_conversion_threshold;
+  if (each_threshold > 0 &&
+      static_cast<int32_t>(item_ids.size()) > each_threshold) {
+    uint32_t seed = FLAGS_random_seed >= 0
+                        ? static_cast<uint32_t>(FLAGS_random_seed) +
+                              static_cast<uint32_t>(sequence_index)
+                        : std::random_device{}();
+    std::mt19937 generator(seed);
+    std::shuffle(item_ids.begin(), item_ids.end(), generator);
+    item_ids.resize(each_threshold);
+  }
+
+  return item_ids;
+}
+
+std::vector<RecItemInfo> normalize_rec_item_infos(
+    const std::vector<RecItemInfo>& raw_item_infos,
+    size_t sequence_index) {
+  std::vector<RecItemInfo> item_infos;
+  item_infos.reserve(raw_item_infos.size());
+  std::unordered_set<int64_t> seen_item_ids;
+  for (const RecItemInfo& item_info : raw_item_infos) {
+    if (seen_item_ids.insert(item_info.item_id).second) {
+      item_infos.emplace_back(item_info);
+    }
+  }
+
+  const int32_t each_threshold = FLAGS_each_conversion_threshold;
+  if (each_threshold > 0 &&
+      static_cast<int32_t>(item_infos.size()) > each_threshold) {
+    uint32_t seed = FLAGS_random_seed >= 0
+                        ? static_cast<uint32_t>(FLAGS_random_seed) +
+                              static_cast<uint32_t>(sequence_index)
+                        : std::random_device{}();
+    std::mt19937 generator(seed);
+    std::shuffle(item_infos.begin(), item_infos.end(), generator);
+    item_infos.resize(each_threshold);
+  }
+
+  return item_infos;
+}
 }  // namespace
 
 const std::string Sequence::ENCODER_SPARSE_EMBEDDING_NAME = "sparse_embedding";
@@ -97,6 +154,7 @@ void Sequence::generate_onerec_streaming_output(const Slice<int32_t>& ids,
 
 void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
                                       size_t size,
+                                      const Tokenizer& tokenizer,
                                       SequenceOutput& output) const {
   output.index = index_;
   if (output_embedding_.defined()) {
@@ -106,6 +164,52 @@ void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
     output.finish_reason = finish_reason_.to_string();
   }
   output.token_ids = ids.slice(num_prompt_tokens_, size);
+  if (FLAGS_enable_output_sku_logprobs && logprob_state_ != nullptr) {
+    const auto& token_logprobs = logprob_state_->get_logprobs();
+    output.token_ids_logprobs.reserve(output.token_ids.size());
+    for (size_t i = num_prompt_tokens_; i < size; ++i) {
+      if (i < token_logprobs.size()) {
+        output.token_ids_logprobs.emplace_back(token_logprobs[i]);
+      } else {
+        output.token_ids_logprobs.emplace_back();
+      }
+    }
+  }
+  const size_t rec_token_size = static_cast<size_t>(REC_TOKEN_SIZE);
+  if (FLAGS_enable_convert_tokens_to_item &&
+      output.token_ids.size() == rec_token_size) {
+    const Slice<int32_t> token_slice{output.token_ids.data(),
+                                     output.token_ids.size()};
+    if (FLAGS_enable_extended_item_info) {
+      const auto* rec_tokenizer = dynamic_cast<const RecTokenizer*>(&tokenizer);
+      if (rec_tokenizer != nullptr) {
+        std::vector<RecItemInfo> item_infos;
+        const bool ok =
+            rec_tokenizer->decode_item_infos(token_slice, &item_infos);
+        if (ok && !item_infos.empty()) {
+          output.item_infos_list = normalize_rec_item_infos(item_infos, index_);
+          output.item_ids_list.reserve(output.item_infos_list.size());
+          for (const RecItemInfo& item_info : output.item_infos_list) {
+            output.item_ids_list.emplace_back(item_info.item_id);
+          }
+          if (!output.item_infos_list.empty()) {
+            output.item_ids = output.item_ids_list.front();
+            output.item_info = output.item_infos_list.front();
+          }
+        }
+      }
+    } else {
+      std::vector<int64_t> item_ids;
+      const bool ok = tokenizer.decode(
+          token_slice, sequence_params_.skip_special_tokens, &item_ids);
+      if (ok && !item_ids.empty()) {
+        output.item_ids_list = normalize_rec_item_ids(item_ids, index_);
+        if (!output.item_ids_list.empty()) {
+          output.item_ids = output.item_ids_list.front();
+        }
+      }
+    }
+  }
 }
 
 Sequence::Sequence(size_t index,
@@ -177,7 +281,6 @@ Sequence::Sequence(const Sequence& other)
       num_prompt_tokens_(other.num_prompt_tokens_),
       onerec_state_(other.onerec_state_),
       volatile_num_prompt_tokens_(other.volatile_num_prompt_tokens_),
-      embedding_block_(other.embedding_block_),
       request_id_(other.request_id_),
       finished_(other.finished_),
       finish_status_invalidated_(other.finish_status_invalidated_),
@@ -530,7 +633,7 @@ SequenceOutput Sequence::generate_output(const Tokenizer& tokenizer) {
 
   // 3. generate onerec output
   if (is_onerec_model()) {
-    generate_onerec_output(ids, size, output);
+    generate_onerec_output(ids, size, tokenizer, output);
     return output;
   }
 
@@ -583,6 +686,7 @@ void Sequence::reset() {
   timer_.reset();
   is_timeout_set_ = false;
   volatile_num_prompt_tokens_ = num_tokens_;
+  single_block_ = Block();
 }
 
 void Sequence::add_shared_kv_blocks(std::vector<Block>&& blocks) {

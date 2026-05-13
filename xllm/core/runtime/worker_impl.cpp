@@ -21,6 +21,8 @@ limitations under the License.
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+
+#include <algorithm>
 #if defined(USE_NPU)
 #include "acl/acl.h"
 #include "kernels/npu/xllm_ops/xllm_ops_api.h"
@@ -30,7 +32,6 @@ limitations under the License.
 #include <c10/cuda/CUDACachingAllocator.h>
 #endif
 
-#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
@@ -47,16 +48,16 @@ limitations under the License.
 #include "kernels/cuda/cuda_ops_api.h"
 #endif
 #include "core/distributed_runtime/master.h"
+#include "core/runtime/worker_rendezvous.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
-#include "framework/model/npu_cp_ep_padding.h"
 #include "framework/model_loader.h"
+#include "framework/parallel_state/npu_cp_ep_padding.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/xtensor/global_xtensor.h"
 #include "framework/xtensor/xtensor_allocator.h"
 #if defined(USE_NPU)
-#include "framework/kv_cache/mooncake_weight_transfer.h"
 #include "layers/npu/loader/rolling_weight_buffer.h"
 #endif
 #include "util/net.h"
@@ -166,13 +167,16 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   if (FLAGS_enable_rolling_load) {
     load_stream_ = device_.get_stream_from_pool();
   }
+  worker_rendezvous_ =
+      std::make_unique<WorkerRendezvous>(kv_cache_transfer_, weight_transfer_);
+#else
+  worker_rendezvous_ = std::make_unique<WorkerRendezvous>(kv_cache_transfer_);
 #endif
 }
 
 WorkerImpl::~WorkerImpl() = default;
 
-bool WorkerImpl::allocate_kv_cache(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
   const auto& args = context_.get_model_args();
@@ -205,158 +209,26 @@ bool WorkerImpl::allocate_kv_cache(
     }
   }
 
-  // create a KVCache for each layer
-  kv_caches_.reserve(num_layers);
-
-  if (FLAGS_enable_xtensor) {
-    // XTensor mode: create xtensor-backed KV cache tensors.
-    // For hybrid models, we still create full KV cache for all layers
-    // since xtensor has its own memory management
-    auto& allocator = XTensorAllocator::get_instance();
-    const std::string& model_id = options_.model_id();
-    // Create K tensors for all layers
-    auto k_tensors = allocator.create_k_tensors(
-        model_id, kv_cache_shape[0], dtype_, num_layers);
-    // Create V tensors for all layers
-    auto v_tensors = allocator.create_v_tensors(
-        model_id, kv_cache_shape[1], dtype_, num_layers);
-
-    for (int64_t i = 0; i < num_layers; ++i) {
-      auto k_tensor = k_tensors[i];
-      auto v_tensor = v_tensors[i];
-#if defined(USE_NPU)
-      k_tensor = at_npu::native::npu_format_cast(k_tensor, ACL_FORMAT_ND);
-      v_tensor = at_npu::native::npu_format_cast(v_tensor, ACL_FORMAT_ND);
-#endif
-
-      // For xtensor mode, we still use the full KV cache approach
-      kv_caches_.emplace_back(k_tensor, v_tensor);
-    }
-  } else {
-    // Original mode: create torch tensors with optional int8 kv quantization.
-    torch::ScalarType cache_dtype =
-        enable_kv_cache_quant ? torch::kInt8 : dtype_;
-
-    // Helper function to check if a layer is linear attention
-    auto is_linear_attention_layer = [&](int64_t layer_idx) {
-      if (args.full_attention_interval() > 1) {
-        return (layer_idx + 1) % args.full_attention_interval() != 0;
-      }
-      return false;
-    };
-
-    for (int64_t i = 0; i < num_layers; ++i) {
-      bool is_linear_layer = is_linear_attention_layer(i);
-      torch::Tensor key_cache, value_cache, index_cache, conv_cache, ssm_cache;
-      torch::Tensor key_cache_scale, value_cache_scale;
-
-      if (is_linear_layer) {
-        // Linear attention layer: only allocate conv_cache and ssm_cache
-#if defined(USE_NPU)
-        aclFormat npu_format_type = ACL_FORMAT_ND;
-        if (enable_linear_attention) {
-          conv_cache = at_npu::native::npu_format_cast(
-              torch::zeros(kv_cache_shape[2],
-                           torch::dtype(dtype_).device(device_)),
-              2);
-          ssm_cache = at_npu::native::npu_format_cast(
-              torch::zeros(kv_cache_shape[3],
-                           torch::dtype(dtype_).device(device_)),
-              2);
-        }
-#elif defined(USE_ILU) || defined(USE_MLU) || defined(USE_MUSA)
-        if (enable_linear_attention) {
-          conv_cache = torch::zeros(kv_cache_shape[2],
-                                    torch::dtype(dtype_).device(device_));
-          ssm_cache = torch::zeros(kv_cache_shape[3],
-                                   torch::dtype(dtype_).device(device_));
-        }
-#else
-        if (enable_linear_attention) {
-          conv_cache = torch::empty(kv_cache_shape[2],
-                                    torch::dtype(dtype_).device(device_));
-          ssm_cache = torch::empty(kv_cache_shape[3],
-                                   torch::dtype(dtype_).device(device_));
-        }
-#endif
-        // Create empty KVCache with only conv and ssm
-        kv_caches_.emplace_back(
-            torch::empty({0}, torch::dtype(dtype_).device(device_)),
-            torch::empty({0}, torch::dtype(dtype_).device(device_)),
-            conv_cache,
-            ssm_cache);
-      } else {
-        // Full attention layer: allocate key_cache and value_cache only
-#if defined(USE_NPU)
-        aclFormat npu_format_type =
-            context_.get_model_args().model_type() == "deepseek_v3" &&
-                    FLAGS_enable_prefix_cache
-                ? ACL_FORMAT_FRACTAL_NZ
-                : ACL_FORMAT_ND;
-        key_cache = at_npu::native::npu_format_cast(
-            torch::empty(kv_cache_shape[0],
-                         torch::dtype(cache_dtype).device(device_)),
-            npu_format_type);
-        value_cache = at_npu::native::npu_format_cast(
-            torch::empty(kv_cache_shape[1],
-                         torch::dtype(cache_dtype).device(device_)),
-            npu_format_type);
-        if (enable_lighting_indexer) {
-          index_cache = at_npu::native::npu_format_cast(
-              torch::empty(kv_cache_shape[2],
-                           torch::dtype(dtype_).device(device_)),
-              npu_format_type);
-        }
-#elif defined(USE_ILU) || defined(USE_MLU) || defined(USE_MUSA)
-        key_cache = torch::zeros(kv_cache_shape[0],
-                                 torch::dtype(cache_dtype).device(device_));
-        if (!kv_cache_shape[1].empty()) {
-          value_cache = torch::zeros(kv_cache_shape[1],
-                                     torch::dtype(cache_dtype).device(device_));
-        }
-        if (enable_lighting_indexer) {
-          index_cache = torch::zeros(kv_cache_shape[2],
-                                     torch::dtype(dtype_).device(device_));
-        }
-        if (enable_kv_cache_quant) {
-          std::vector<int64_t> key_scale_shape(kv_cache_shape[0].begin(),
-                                               kv_cache_shape[0].end() - 1);
-          key_cache_scale = torch::zeros(
-              key_scale_shape, torch::dtype(torch::kFloat32).device(device_));
-          if (!kv_cache_shape[1].empty()) {
-            std::vector<int64_t> value_scale_shape(kv_cache_shape[1].begin(),
-                                                   kv_cache_shape[1].end() - 1);
-            value_cache_scale =
-                torch::zeros(value_scale_shape,
-                             torch::dtype(torch::kFloat32).device(device_));
-          }
-        }
-#else
-        key_cache = torch::empty(kv_cache_shape[0],
-                                 torch::dtype(cache_dtype).device(device_));
-        if (!kv_cache_shape[1].empty()) {
-          value_cache = torch::empty(kv_cache_shape[1],
-                                     torch::dtype(cache_dtype).device(device_));
-        }
-        if (enable_lighting_indexer) {
-          index_cache = torch::empty(kv_cache_shape[2],
-                                     torch::dtype(dtype_).device(device_));
-        }
-#endif
-        if (enable_kv_cache_quant) {
-          kv_caches_.emplace_back(key_cache,
-                                  value_cache,
-                                  index_cache,
-                                  key_cache_scale,
-                                  value_cache_scale);
-        } else if (enable_lighting_indexer) {
-          kv_caches_.emplace_back(key_cache, value_cache, index_cache);
-        } else {
-          kv_caches_.emplace_back(key_cache, value_cache);
-        }
-      }
-    }
+  // Parse mamba_ssm_dtype if specified for linear attention layers.
+  torch::ScalarType ssm_dtype = dtype_;
+  if (enable_linear_attention) {
+    ssm_dtype = resolve_ssm_dtype(args.mamba_ssm_dtype(), dtype_);
   }
+
+  KVCacheCreateOptions create_options;
+  create_options.device(device_)
+      .dtype(dtype_)
+      .ssm_dtype(ssm_dtype)
+      .num_layers(num_layers)
+      .full_attention_interval(args.full_attention_interval())
+      .model_id(options_.model_id())
+      .model_type(args.model_type())
+      .enable_xtensor(FLAGS_enable_xtensor)
+      .enable_linear_attention(enable_linear_attention)
+      .enable_lighting_indexer(enable_lighting_indexer)
+      .enable_kv_cache_quant(enable_kv_cache_quant);
+
+  allocate_kv_caches(kv_caches_, kv_cache_shape, create_options);
 
 #if defined(USE_CUDA)
   refresh_cuda_block_copy_runtime_state();
@@ -368,7 +240,7 @@ bool WorkerImpl::allocate_kv_cache(
 }
 
 bool WorkerImpl::allocate_kv_cache_with_transfer(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+    const KVCacheShape& kv_cache_shape) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
 
@@ -387,9 +259,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       dtype_,
       kv_caches_,
       num_layers,
-      [this](const std::vector<std::vector<int64_t>>& shape) {
-        this->allocate_kv_cache(shape);
-      },
+      [this](const KVCacheShape& shape) { this->allocate_kv_cache(shape); },
       enable_lighting_indexer,
       context_.get_model_args().model_type(),
       options_.model_id());
@@ -403,7 +273,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
 #if defined(USE_NPU)
 bool WorkerImpl::allocate_kv_cache_with_transfer(
     std::shared_ptr<KVCacheTransfer> kv_cache_transfer,
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+    const KVCacheShape& kv_cache_shape) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
 
@@ -436,7 +306,7 @@ void WorkerImpl::get_cache_info(uint64_t& cluster_id,
                                 std::string& addr,
                                 int64_t& k_cache_id,
                                 int64_t& v_cache_id) {
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
   kv_cache_transfer_->get_cache_info(cluster_id, addr, k_cache_id, v_cache_id);
 #endif
 }
@@ -445,56 +315,24 @@ bool WorkerImpl::link_cluster(const std::vector<uint64_t>& cluster_ids,
                               const std::vector<std::string>& addrs,
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports) {
-#if defined(USE_NPU)
-  for (int32_t i = 0; i < cluster_ids.size(); ++i) {
-    if (!kv_cache_transfer_->link_cluster(
-            cluster_ids[i], addrs[i], device_ips[i], ports[i])) {
-      return false;
-    }
-  }
-#endif
-  return true;
+  return worker_rendezvous_->link_cluster(
+      cluster_ids, addrs, device_ips, ports);
 }
 
 bool WorkerImpl::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                 const std::vector<std::string>& addrs,
                                 const std::vector<std::string>& device_ips,
                                 const std::vector<uint16_t>& ports) {
-#if defined(USE_NPU)
-  for (int32_t i = 0; i < cluster_ids.size(); ++i) {
-    if (!kv_cache_transfer_->unlink_cluster(
-            cluster_ids[i], addrs[i], device_ips[i], ports[i])) {
-      return false;
-    }
-  }
-#endif
-  return true;
+  return worker_rendezvous_->unlink_cluster(
+      cluster_ids, addrs, device_ips, ports);
 }
 
 bool WorkerImpl::link_d2d(const std::string& remote_addr) {
-#if defined(USE_NPU)
-  if (!weight_transfer_) {
-    LOG(ERROR) << "MooncakeWeightTransfer not initialized";
-    return false;
-  }
-  return weight_transfer_->link_d2d(remote_addr);
-#else
-  LOG(ERROR) << "link_d2d requires USE_NPU build";
-  return false;
-#endif
+  return worker_rendezvous_->link_d2d(remote_addr);
 }
 
 bool WorkerImpl::unlink_d2d(const std::string& remote_addr) {
-#if defined(USE_NPU)
-  if (!weight_transfer_) {
-    LOG(ERROR) << "MooncakeWeightTransfer not initialized";
-    return false;
-  }
-  return weight_transfer_->unlink_d2d(remote_addr);
-#else
-  LOG(ERROR) << "unlink_d2d requires USE_NPU build";
-  return false;
-#endif
+  return worker_rendezvous_->unlink_d2d(remote_addr);
 }
 
 std::tuple<int64_t, int64_t> WorkerImpl::estimate_kv_cache_capacity() {
@@ -598,90 +436,104 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     lock_guard.emplace(capture_lock);
   }
 #endif
-  c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
-  processed_input = input.to(device_, dtype_);
-  auto& input_params = processed_input.input_params;
+  const bool use_default_stream =
+      !enable_schedule_overlap() && options_.backend() == "llm";
+  auto prepare_input_on_current_stream = [&]() {
+    processed_input = input.to(device_, dtype_);
+    auto& input_params = processed_input.input_params;
 
-  bool empty_shard = input_params.num_sequences == 0 &&
-                     (!processed_input.token_ids.defined() ||
-                      processed_input.token_ids.numel() == 0);
-  const bool need_fake_input_for_empty_shard =
-      empty_shard && !input_params.batch_forward_type.is_empty() &&
-      (context_.get_parallel_args().cp_size() > 1 ||
-       (context_.get_parallel_args().dp_size() > 1 ||
-        context_.get_parallel_args().ep_size() > 1 ||
-        !context_.get_parallel_args().mapping_data().empty()));
-  if (need_fake_input_for_empty_shard) {
-    auto token_options = processed_input.token_ids.defined()
-                             ? processed_input.token_ids.options()
-                             : torch::TensorOptions().dtype(torch::kInt32);
-    auto position_options = processed_input.positions.defined()
-                                ? processed_input.positions.options()
-                                : torch::TensorOptions().dtype(torch::kInt32);
-    processed_input.token_ids = torch::ones({1}, token_options.device(device_));
-    processed_input.positions =
-        torch::zeros({1}, position_options.device(device_));
-    empty_shard = false;
-  }
-  if (empty_shard) {
-    auto ret = prepare_stream_->synchronize();
-    return;
-  }
-#if defined(USE_NPU)
-  CpPrefillInputs tmp_cp_inputs;
-  if (parallel_args_.cp_size() > 1 &&
-      input.input_params.batch_forward_type.is_prefill()) {
-    tmp_cp_inputs = prepare_cp_prefill_inputs(parallel_args_.cp_size(),
-                                              input.token_ids,
-                                              input.positions,
-                                              input.input_params.q_seq_lens);
-    processed_input.input_params.cp_prefill_inputs = tmp_cp_inputs.to(device_);
-    CpEpPadding cp_ep_padding(
-        input.token_ids,
-        context_.get_model_args().num_experts_per_tok(),
-        context_.get_parallel_args().mapping_data(),
-        /*device=*/device_,
-        dtype_,
-        /*is_prefill=*/input.input_params.batch_forward_type.is_prefill());
-    processed_input.input_params.cp_ep_padding_data = cp_ep_padding.build();
-  }
-#endif
-
-  apply_kv_block_swaps(input_params);
-
-#if defined(USE_NPU)
-  if (context_.get_model_args().enable_mla() &&
-      input_params.batch_forward_type.is_chunked_prefill()) {
-    prepare_mla_prefixcache_inputs(input_params);
-  }
-
-  if (!context_.get_parallel_args().mapping_data().empty() &&
-      !(context_.get_parallel_args().cp_size() > 1) &&
-      (context_.get_parallel_args().dp_size() > 1 ||
-       context_.get_parallel_args().ep_size() > 1)) {
-    torch::Tensor token_size_per_dp_group =
-        torch::tensor(processed_input.input_params.dp_global_token_nums,
-                      torch::TensorOptions()
-                          .device(torch::kCPU)
-                          .dtype(torch::kInt32)
-                          .pinned_memory(true));
-    bool is_prefill =
-        processed_input.input_params.batch_forward_type.is_prefill();
-    DpEpPadding dp_ep_padding(token_size_per_dp_group,
-                              context_.get_model_args().num_experts_per_tok(),
-                              context_.get_parallel_args().mapping_data(),
-                              device_,
-                              dtype_,
-                              is_prefill);
-    processed_input.input_params.dp_ep_padding_data = dp_ep_padding.build();
-    if (FLAGS_enable_eplb) {
-      // expert_load_data_.fill_(0);
-      processed_input.input_params.expert_load_data = expert_load_data_;
+    bool empty_shard = input_params.num_sequences == 0 &&
+                       (!processed_input.token_ids.defined() ||
+                        processed_input.token_ids.numel() == 0);
+    const bool need_fake_input_for_empty_shard =
+        empty_shard && !input_params.batch_forward_type.is_empty() &&
+        (context_.get_parallel_args().cp_size() > 1 ||
+         (context_.get_parallel_args().dp_size() > 1 ||
+          context_.get_parallel_args().ep_size() > 1 ||
+          !context_.get_parallel_args().mapping_data().empty()));
+    if (need_fake_input_for_empty_shard) {
+      auto token_options = processed_input.token_ids.defined()
+                               ? processed_input.token_ids.options()
+                               : torch::TensorOptions().dtype(torch::kInt32);
+      auto position_options = processed_input.positions.defined()
+                                  ? processed_input.positions.options()
+                                  : torch::TensorOptions().dtype(torch::kInt32);
+      processed_input.token_ids =
+          torch::ones({1}, token_options.device(device_));
+      processed_input.positions =
+          torch::zeros({1}, position_options.device(device_));
+      empty_shard = false;
     }
-  }
+    if (empty_shard) {
+      auto ret = prepare_stream_->synchronize();
+      return;
+    }
+#if defined(USE_NPU)
+    CpPrefillInputs tmp_cp_inputs;
+    if (parallel_args_.cp_size() > 1 &&
+        input.input_params.batch_forward_type.is_prefill()) {
+      tmp_cp_inputs = prepare_cp_prefill_inputs(parallel_args_.cp_size(),
+                                                input.token_ids,
+                                                input.positions,
+                                                input.input_params.q_seq_lens);
+      processed_input.input_params.cp_prefill_inputs =
+          tmp_cp_inputs.to(device_);
+      CpEpPadding cp_ep_padding(
+          input.token_ids,
+          context_.get_model_args().num_experts_per_tok(),
+          context_.get_parallel_args().mapping_data(),
+          /*device=*/device_,
+          dtype_,
+          /*is_prefill=*/input.input_params.batch_forward_type.is_prefill());
+      processed_input.input_params.cp_ep_padding_data = cp_ep_padding.build();
+    }
 #endif
 
-  auto ret = prepare_stream_->synchronize();
+    apply_kv_block_swaps(input_params);
+
+#if defined(USE_NPU)
+    if (context_.get_model_args().enable_mla() &&
+        input_params.batch_forward_type.is_chunked_prefill()) {
+      prepare_mla_prefixcache_inputs(input_params);
+    }
+
+    if (!context_.get_parallel_args().mapping_data().empty() &&
+        !(context_.get_parallel_args().cp_size() > 1) &&
+        (context_.get_parallel_args().dp_size() > 1 ||
+         context_.get_parallel_args().ep_size() > 1)) {
+      torch::Tensor token_size_per_dp_group =
+          torch::tensor(processed_input.input_params.dp_global_token_nums,
+                        torch::TensorOptions()
+                            .device(torch::kCPU)
+                            .dtype(torch::kInt32)
+                            .pinned_memory(true));
+      bool is_prefill =
+          processed_input.input_params.batch_forward_type.is_prefill();
+      DpEpPadding dp_ep_padding(token_size_per_dp_group,
+                                context_.get_model_args().num_experts_per_tok(),
+                                context_.get_parallel_args().mapping_data(),
+                                device_,
+                                dtype_,
+                                is_prefill);
+      processed_input.input_params.dp_ep_padding_data = dp_ep_padding.build();
+      if (FLAGS_enable_eplb) {
+        // expert_load_data_.fill_(0);
+        processed_input.input_params.expert_load_data = expert_load_data_;
+      }
+    }
+#endif
+  };
+
+  if (use_default_stream) {
+    prepare_input_on_current_stream();
+  } else {
+    c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
+    prepare_input_on_current_stream();
+  }
+
+  if (!use_default_stream) {
+    prepare_stream_->synchronize();
+  }
 }
 
 void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
@@ -1083,6 +935,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
               {"deepseek_v3", "deepseek_v3_mtp"},
               {"deepseek_v32", "deepseek_v3_mtp"},
               {"glm_moe_dsa", "glm_moe_dsa_mtp"},
+              {"joyai_llm_flash", "joyai_llm_flash_mtp"},
           };
       const std::string& current_type = args.model_type();
       auto it = kModelTypeToMtpType.find(current_type);
@@ -1094,8 +947,6 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     }
   }
 #endif
-
-  args.enable_mla(options_.enable_mla());
 
   // create model context
   dtype_ = dtype;
@@ -1116,14 +967,12 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   }
 
   std::unique_ptr<ScopedAtenLoadThreads> scoped_load_threads;
-  if (tp_world_size > 1) {
-    const int32_t prev_threads = torch::get_num_threads();
-    LOG(INFO) << "Temporarily setting ATen threads to 1 during weight loading"
-              << ", tp_world_size=" << tp_world_size
-              << ", prev_threads=" << prev_threads;
-    scoped_load_threads =
-        std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
-  }
+  const int32_t prev_threads = torch::get_num_threads();
+  LOG(INFO) << "Temporarily setting ATen threads to 1 during weight loading"
+            << ", tp_world_size=" << tp_world_size
+            << ", prev_threads=" << prev_threads;
+  scoped_load_threads =
+      std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
 
   if (master_status == MasterStatus::WAKEUP) {
     this->load_model(std::move(model_loader));
@@ -1179,7 +1028,8 @@ bool WorkerImpl::init_rolling_runtime_state() {
   CHECK(load_stream_ != nullptr) << "load_stream_ is null for rolling load";
 
   // Rolling runtime ownership is moved into model.
-  // Worker provides runtime dependencies and delegates initialization/refresh.
+  // Worker provides runtime dependencies and delegates
+  // initialization/refresh.
   const int32_t n_slots = FLAGS_rolling_load_num_cached_layers;
   const int32_t n_rolling_slots = FLAGS_rolling_load_num_rolling_slots;
   return model_->init_or_refresh_rolling_runtime(load_stream_.get(),
@@ -1196,11 +1046,11 @@ void WorkerImpl::lazy_load_model(std::unique_ptr<ModelLoader> loader) {
 }
 
 folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_async(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+    const KVCacheShape& kv_cache_shape) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
-      [this, &kv_cache_shape, promise = std::move(promise)]() mutable {
+      [this, kv_cache_shape, promise = std::move(promise)]() mutable {
         const bool success = this->allocate_kv_cache(kv_cache_shape);
         promise.setValue(success);
       });
@@ -1208,11 +1058,11 @@ folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_async(
 }
 
 folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_with_transfer_async(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+    const KVCacheShape& kv_cache_shape) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
-      [this, &kv_cache_shape, promise = std::move(promise)]() mutable {
+      [this, kv_cache_shape, promise = std::move(promise)]() mutable {
         const bool success =
             this->allocate_kv_cache_with_transfer(kv_cache_shape);
         promise.setValue(success);
@@ -1234,6 +1084,14 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
                                                   src_v_cache_id,
                                                   src_blocks,
                                                   dst_blocks);
+#elif defined(USE_MLU)
+  (void)src_cluster_id;
+  (void)src_addr;
+  (void)src_k_cache_id;
+  (void)src_v_cache_id;
+  (void)src_blocks;
+  (void)dst_blocks;
+  LOG(FATAL) << "MLU backend does not support PULL kv cache transfer.";
 #endif
   return false;
 }

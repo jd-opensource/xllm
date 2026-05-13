@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 
 add_subdirectory(profile)
@@ -12,6 +11,7 @@ cc_library(
     chunked_prefill_scheduler.h
     zero_eviction_scheduler.h
     continuous_scheduler.h
+    disagg_pd_chunked_prefill_scheduler.h
     disagg_pd_scheduler.h
     pd_ooc_scheduler.h
     async_response_processor.h
@@ -27,6 +27,7 @@ cc_library(
     chunked_prefill_scheduler.cpp
     zero_eviction_scheduler.cpp
     continuous_scheduler.cpp
+    disagg_pd_chunked_prefill_scheduler.cpp
     disagg_pd_scheduler.cpp
     pd_ooc_scheduler.cpp
     async_response_processor.cpp
@@ -37,39 +38,13 @@ cc_library(
     fixed_steps_scheduler.cpp
   DEPS
     :batch
+    :distributed_runtime
     :request
     :runtime
     :profile
+    :pd_topology_guard
     glog::glog
     Folly::folly
     absl::time
     absl::synchronization
 )
-
-cc_test(
-  NAME
-    chunked_prefill_scheduler_test
-    continuous_scheduler_test
-    fixed_steps_scheduler_test
-  SRCS
-    chunked_prefill_scheduler_test.cpp
-    continuous_scheduler_test.cpp
-    fixed_steps_scheduler_test.cpp
-  DEPS
-    :scheduler
-    :xllm_server
-    GTest::gtest_main
-    $<$<BOOL:${USE_NPU}>:nnopbase>
-)
-
-target_link_libraries(chunked_prefill_scheduler_test
-                      PUBLIC
-                      Python::Python
-                      $<$<BOOL:${USE_NPU}>:ascendcl>
-                      $<$<BOOL:${USE_NPU}>:hccl>
-                      $<$<BOOL:${USE_NPU}>:c_sec>)
-
-# Use LINK_GROUP to resolve circular dependency between xtensor and xllm_server
-# This wraps the libraries in --start-group/--end-group
-target_link_libraries(chunked_prefill_scheduler_test PRIVATE
-  "$<LINK_GROUP:RESCAN,xtensor,xllm_server>")

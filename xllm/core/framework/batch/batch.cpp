@@ -25,7 +25,7 @@ limitations under the License.
 #include "batch_input_builder.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
-#include "core/common/rec_model_utils.h"
+#include "core/util/rec_model_utils.h"
 #include "framework/batch/mposition.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
@@ -146,7 +146,7 @@ ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
                             allowed_max_tokens_,
                             input_embeddings_vec_,
                             mm_data_vec_,
-                            swap_block_transfer_infos_,
+                            &swap_block_transfer_infos_,
                             batch_id_,
                             &args,
                             batch_forward_type_,
@@ -159,10 +159,24 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
                                               uint32_t min_decoding_batch_size,
                                               const ModelArgs& args,
                                               ThreadPool* thread_pool) {
-  output_targets_.clear();
   RecType rec_type = RecType::kNone;
   if (!sequence_groups_.empty() && !sequence_groups_[0]->sequences().empty()) {
     rec_type = sequence_groups_[0]->sequences()[0]->rec_type();
+  }
+  output_targets_.clear();
+  if (rec_type == RecType::kOneRec) {
+    if (!sequence_groups_.empty()) {
+      // OneRec REC batches are tracked via sequence_groups_, while output
+      // target generation still walks sequences_. Refresh the flattened
+      // sequence view on every step so token writeback stays aligned after
+      // beam search expands or replaces the group-owned Sequence instances.
+      refresh_sequences_from_groups();
+    }
+    if (use_legacy_onerec_prefill_only_contract()) {
+      refresh_onerec_prefill_output_targets();
+    } else {
+      refresh_output_targets();
+    }
   }
 
   auto builder = RecBatchInputBuilder::create(rec_type,
@@ -170,7 +184,7 @@ ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
                                               allowed_max_tokens_,
                                               input_embeddings_vec_,
                                               mm_data_vec_,
-                                              swap_block_transfer_infos_,
+                                              &swap_block_transfer_infos_,
                                               batch_id_,
                                               &args,
                                               batch_forward_type_,
@@ -343,7 +357,7 @@ RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
                             allowed_max_tokens_,
                             input_embeddings_vec_,
                             mm_data_vec_,
-                            swap_block_transfer_infos_,
+                            &swap_block_transfer_infos_,
                             batch_id_,
                             &args,
                             batch_forward_type_,
@@ -374,6 +388,59 @@ void Batch::refresh_output_targets() {
     const uint32_t n_tokens = token_ids.size();
     const uint32_t n_kv_cache_tokens =
         sequence->kv_state().kv_cache_tokens_num();
+    if (n_tokens <= n_kv_cache_tokens) {
+      continue;
+    }
+
+    CHECK(allowed_max_tokens_[seq_index] > 0);
+    const uint32_t q_seq_len =
+        std::min(n_tokens - n_kv_cache_tokens, allowed_max_tokens_[seq_index]);
+    const uint32_t seq_len = q_seq_len + n_kv_cache_tokens;
+    const auto& sample_slots = sequence->sample_slots();
+
+    if (sample_slots.empty()) {
+      if (seq_len == n_tokens) {
+        output_targets_.push_back({sequence, /*sample_id=*/0, false});
+      }
+      continue;
+    }
+
+    for (const auto& sample_slot : sample_slots) {
+      const uint32_t sample_source_position =
+          get_sample_source_position(sample_slot);
+      if (sample_source_position < n_kv_cache_tokens ||
+          sample_source_position >= seq_len) {
+        continue;
+      }
+      output_targets_.push_back(
+          {sequence, sample_slot.sample_id, /*from_sample_slot=*/true});
+    }
+  }
+}
+
+void Batch::refresh_onerec_prefill_output_targets() {
+  output_targets_.clear();
+  if (sequences_.empty()) {
+    return;
+  }
+
+  for (size_t seq_index = 0; seq_index < sequences_.size(); ++seq_index) {
+    auto* sequence = sequences_[seq_index];
+    if (sequence == nullptr) {
+      continue;
+    }
+
+    const auto token_ids = sequence->tokens();
+    const uint32_t n_tokens = token_ids.size();
+    const uint32_t n_kv_cache_tokens =
+        sequence->kv_state().kv_cache_tokens_num();
+    const bool needs_context_target = sequence->is_onerec_model() &&
+                                      n_tokens == 0 && n_kv_cache_tokens == 0 &&
+                                      sequence->num_decoder_embeddings() > 0;
+    if (needs_context_target) {
+      output_targets_.push_back({sequence, /*sample_id=*/0, false});
+      continue;
+    }
     if (n_tokens <= n_kv_cache_tokens) {
       continue;
     }
@@ -504,7 +571,12 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
   if (beam_width <= 1) {
     return;
   }
-  int32_t total_rounds = get_rec_multi_round_decode_rounds();
+  const int32_t result_width =
+      output.beam_sequence_group.defined()
+          ? static_cast<int32_t>(output.beam_sequence_group.size(1))
+          : beam_width;
+  int32_t total_rounds =
+      static_cast<int32_t>(output.beam_sequence_group.size(2));
   size_t num_groups = sequence_groups_.size();
   if (num_groups == 0) {
     // Fallback: treat sequences_ as single group
@@ -521,14 +593,14 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
 
   std::vector<std::vector<int32_t>> group_flat2d;
   std::vector<float> last_logprobs;
-  group_flat2d.reserve(static_cast<size_t>(beam_width));
-  last_logprobs.reserve(static_cast<size_t>(beam_width));
+  group_flat2d.reserve(static_cast<size_t>(result_width));
+  last_logprobs.reserve(static_cast<size_t>(result_width));
 
   for (size_t g = 0; g < num_groups; ++g) {
     group_flat2d.clear();
     last_logprobs.clear();
 
-    for (int b = 0; b < beam_width; ++b) {
+    for (int b = 0; b < result_width; ++b) {
       std::vector<int32_t> row_tokens;
       row_tokens.reserve(static_cast<size_t>(total_rounds));
       for (int c = 0; c < total_rounds; ++c) {
@@ -547,12 +619,14 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
     Sequence* seq = sequence_groups_.empty()
                         ? sequences[g]
                         : sequence_groups_[g]->sequences()[0].get();
-    seq->set_beam_result(beam_width, total_rounds, group_flat2d, last_logprobs);
+    seq->set_beam_result(
+        result_width, total_rounds, group_flat2d, last_logprobs);
   }
 }
 
 void Batch::process_sample_output(const SampleOutput& sample_output,
-                                  bool replace_fake_token) {
+                                  bool replace_fake_token,
+                                  bool force_requested_beam_result_size) {
   if (sample_output.embeddings.defined()) {
     const int64_t num_seqs = sample_output.embeddings.size(0);
     int64_t output_idx = 0;
@@ -606,7 +680,7 @@ void Batch::process_sample_output(const SampleOutput& sample_output,
   }
 
   if (!FLAGS_enable_schedule_overlap || replace_fake_token) {
-    process_beam_search();
+    process_beam_search(force_requested_beam_result_size);
   }
 }
 
@@ -654,9 +728,9 @@ void Batch::append_token_for_sequence(Sequence* seq,
   }
 }
 
-void Batch::process_beam_search() {
+void Batch::process_beam_search(bool force_requested_result_size) {
   for (auto* sequence_group : sequence_groups_) {
-    sequence_group->process_beam_search();
+    sequence_group->process_beam_search(force_requested_result_size);
   }
 }
 

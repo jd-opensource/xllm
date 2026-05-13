@@ -15,7 +15,11 @@ limitations under the License.
 
 #include "numa_utils.h"
 
+#if defined(USE_CUDA)
 #include <cuda_runtime.h>
+#elif defined(USE_MLU)
+#include <cnrt.h>
+#endif
 #include <glog/logging.h>
 #include <numa.h>
 #include <pthread.h>
@@ -25,6 +29,7 @@ limitations under the License.
 #include <cerrno>
 #include <cstring>
 #include <fstream>
+#include <string>
 
 namespace xllm {
 namespace numa {
@@ -38,9 +43,37 @@ bool read_numa_node(const std::string& numa_path, int32_t* numa_node) {
   if (!numa_file.is_open()) {
     return false;
   }
-  numa_file >> *numa_node;
+  if (!(numa_file >> *numa_node)) {
+    return false;
+  }
   numa_file.close();
   return true;
+}
+
+int32_t get_numa_node_from_sysfs(const std::string& backend,
+                                 int32_t device_index,
+                                 const std::string& pci_bus_id) {
+  std::string numa_path = "/sys/bus/pci/devices/" + pci_bus_id + "/numa_node";
+  LOG(INFO) << backend << " device " << device_index
+            << " NUMA sysfs path: " << numa_path;
+
+  int32_t numa_node = -1;
+  if (read_numa_node(numa_path, &numa_node)) {
+    if (numa_node < 0) {
+      LOG(WARNING) << backend << " device " << device_index << " PCI "
+                   << pci_bus_id
+                   << " has no valid NUMA node in sysfs, skipping NUMA binding";
+      return -1;
+    }
+
+    LOG(INFO) << backend << " device " << device_index << " PCI " << pci_bus_id
+              << " maps to NUMA node " << numa_node;
+    return numa_node;
+  }
+
+  LOG(WARNING) << "Failed to read NUMA node for " << backend << " device "
+               << device_index << " from " << numa_path;
+  return -1;
 }
 
 bool build_cpu_set_for_numa_node(int32_t numa_node,
@@ -79,10 +112,10 @@ bool build_cpu_set_for_numa_node(int32_t numa_node,
     if (!numa_bitmask_isbitset(node_cpu_mask, cpu)) {
       continue;
     }
-    if (has_affinity_constraint && !CPU_ISSET(cpu, &current_affinity)) {
+    if (cpu >= CPU_SETSIZE) {
       continue;
     }
-    if (cpu >= CPU_SETSIZE) {
+    if (has_affinity_constraint && !CPU_ISSET(cpu, &current_affinity)) {
       continue;
     }
 
@@ -146,23 +179,32 @@ int32_t get_device_numa_node(int32_t device_index) {
     return -1;
   }
 
-  // For CUDA devices, read NUMA node from PCI sysfs path.
+#if defined(USE_CUDA)
   char pci_bus_id[32] = {0};
-  if (cudaDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), device_index) ==
-      cudaSuccess) {
-    std::string numa_path =
-        "/sys/bus/pci/devices/" + std::string(pci_bus_id) + "/numa_node";
-    LOG(INFO) << "numa_path: " << numa_path;
-    int32_t numa_node;
-    const bool is_numa_node_valid = read_numa_node(numa_path, &numa_node);
-    if (is_numa_node_valid) {
-      LOG(INFO) << "numa_node: " << numa_node;
-      return numa_node;
-    }
+  cudaError_t ret =
+      cudaDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), device_index);
+  if (ret == cudaSuccess) {
+    return get_numa_node_from_sysfs("CUDA", device_index, pci_bus_id);
   }
 
-  LOG(WARNING) << "Unable to determine NUMA node for CUDA device "
-               << device_index << ", skipping NUMA binding";
+  LOG(WARNING) << "Failed to query PCI bus ID for CUDA device " << device_index
+               << " via cudaDeviceGetPCIBusId: " << cudaGetErrorString(ret)
+               << ", skipping NUMA binding";
+#elif defined(USE_MLU)
+  char pci_bus_id[32] = {0};
+  cnrtRet_t ret =
+      cnrtDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), device_index);
+  if (ret == cnrtSuccess) {
+    return get_numa_node_from_sysfs("MLU", device_index, pci_bus_id);
+  }
+
+  LOG(WARNING) << "Failed to query PCI bus ID for MLU device " << device_index
+               << " via cnrtDeviceGetPCIBusId: " << cnrtGetErrorStr(ret)
+               << ", error code " << ret << ", skipping NUMA binding";
+#else
+  LOG(WARNING) << "Device NUMA detection is not supported for this backend, "
+               << "device index " << device_index << ", skipping NUMA binding";
+#endif
   return -1;
 }
 
@@ -225,9 +267,10 @@ int32_t bind_thread_to_numa_node(int32_t numa_node) {
   }
 
   pthread_t thread = pthread_self();
-  if (pthread_setaffinity_np(thread, sizeof(cpu_set_t), &cpu_set) != 0) {
+  int32_t ret = pthread_setaffinity_np(thread, sizeof(cpu_set_t), &cpu_set);
+  if (ret != 0) {
     LOG(ERROR) << "Failed to bind thread to NUMA node " << numa_node << ": "
-               << strerror(errno);
+               << strerror(ret);
     return -1;
   }
 

@@ -6,7 +6,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from env import set_npu_envs
+from scripts.build_support.env import set_npu_envs
+from scripts.logger import logger
 
 from .common.toolchain import (
     default_tilelang_root,
@@ -230,7 +231,7 @@ def _apply_git_patch(repo_root: Path, patch_path: Path, message: str) -> None:
     if _check_git_patch_state(repo_root, patch_path) == "applied":
         return
     subprocess.check_call(_git_apply_base_cmd(repo_root) + [str(patch_path)])
-    print(message)
+    logger.info(message)
 
 
 def _restore_git_patch(repo_root: Path, patch_path: Path) -> None:
@@ -253,7 +254,7 @@ def _patch_tilelang_install_tree(tilelang_root: str | Path) -> None:
     _apply_git_patch(
         tl_root,
         _tilelang_install_patch_path(),
-        "[INFO] Applied tilelang install patch",
+        "Applied tilelang install patch",
     )
 
 
@@ -357,7 +358,7 @@ def prepare_ascend(*, force: bool = False) -> Path:
     reasons = install_reasons(state, force=force)
 
     if reasons:
-        print("[INFO] Preparing tilelang-ascend: " + "; ".join(reasons))
+        logger.info("Preparing tilelang-ascend: " + "; ".join(reasons))
         _run_tilelang_install(state.tilelang_root, state.cann_set_env)
         prepare_tilelang_import(state.tilelang_root)
         write_tilelang_git_head_cached(state.tilelang_root, state.current_head)
@@ -374,5 +375,5 @@ def prepare_ascend(*, force: bool = False) -> Path:
             f"{state.import_detail}"
         )
 
-    print(f"[INFO] tilelang import success: {state.import_detail}")
+    logger.info(f"tilelang import success: {state.import_detail}")
     return state.tilelang_root

@@ -59,8 +59,8 @@ class Batch {
   void refresh_forward_type();
 
   void set_swap_block_transfer_infos(
-      std::vector<BlockTransferInfo>* swap_block_transfer_infos) {
-    swap_block_transfer_infos_ = swap_block_transfer_infos;
+      std::vector<BlockTransferInfo> swap_block_transfer_infos) {
+    swap_block_transfer_infos_ = std::move(swap_block_transfer_infos);
   }
 
   void set_batch_id() {
@@ -107,7 +107,8 @@ class Batch {
   // The boolean parameter `replace_fake_token` indicates
   // whether the current stage is the second stage.
   void process_sample_output(const SampleOutput& sample_output,
-                             bool replace_fake_token);
+                             bool replace_fake_token,
+                             bool force_requested_beam_result_size = false);
 
   void process_sample_output(const RawForwardOutput& raw_output,
                              bool replace_fake_token);
@@ -148,6 +149,7 @@ class Batch {
   };
 
   void refresh_output_targets();
+  void refresh_onerec_prefill_output_targets();
   bool update_sequence_state(Sequence* seq, bool replace_fake_token);
 
   void append_token_for_sequence(Sequence* seq,
@@ -155,7 +157,7 @@ class Batch {
                                  int token_idx,
                                  bool replace_fake_token);
 
-  void process_beam_search();
+  void process_beam_search(bool force_requested_result_size = false);
   bool has_partial_finished_beam_group() const;
 
   std::unordered_map<uint32_t, uint32_t> cal_seq_exchange_index(
@@ -165,7 +167,7 @@ class Batch {
 
   std::vector<Sequence*> sequences_;
   std::vector<SequencesGroup*> sequence_groups_;
-  std::vector<BlockTransferInfo>* swap_block_transfer_infos_ = nullptr;
+  std::vector<BlockTransferInfo> swap_block_transfer_infos_;
 
   // max number of tokens to process for each sequence
   // default to max value

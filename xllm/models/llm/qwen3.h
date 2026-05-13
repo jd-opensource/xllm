@@ -17,8 +17,8 @@ limitations under the License.
 
 #include <torch/nn/functional/normalization.h>
 
-#include "core/common/rec_model_utils.h"
 #include "core/framework/model/model_output.h"
+#include "core/util/rec_model_utils.h"
 #if defined(USE_NPU)
 #include "core/common/global_flags.h"
 #include "core/layers/common/attention_mask.h"
@@ -55,7 +55,7 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
         options.device(), options.dtype().toScalarType(), mask_value);
 #endif
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
-      auto layer = layer::Qwen3DecoderLayer(context);
+      auto layer = layer::Qwen3DecoderLayer(context, i);
       layers_.push_back(layer);
     }
   }
@@ -172,6 +172,10 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
                 attn_metadata,
                 kv_caches[i],
                 input_params_new);
+      if (!input_params_new.record_layer(static_cast<uint32_t>(i),
+                                         h.device())) {
+        return ModelOutput();
+      }
 
       if (use_deepstack) {
         if (deep_stacks.size() > 0 && i < deep_stacks.size()) {
@@ -218,9 +222,10 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
           max_seq_len_, h.dtype().toScalarType(), h.device());
     }
     return layer::AttentionMetadataBuilder::build(
-        params, model_args_, attn_mask);
+        params, model_args_.enable_mla(), attn_mask);
 #else
-    return layer::AttentionMetadataBuilder::build(params, model_args_);
+    return layer::AttentionMetadataBuilder::build(params,
+                                                  model_args_.enable_mla());
 #endif
   }
 

@@ -23,6 +23,8 @@ limitations under the License.
 #include <filesystem>
 
 #include "api_service/chat_json_parser.h"
+#include "api_service/service_impl_factory.h"
+#include "api_service/serving_mode.h"
 #include "call.h"
 #include "chat.pb.h"
 #include "common.pb.h"
@@ -53,66 +55,19 @@ google::protobuf::Arena* GetArenaWithCheck(
   }
 }
 
-std::string build_sample_backend_error_message() {
-  return "Current backend '" + FLAGS_backend +
-         "' does not support /v1/sample; only llm is supported";
-}
+const char* kSampleNotSupportedError = "/v1/sample is only supported for LLM";
+
 }  // namespace
 
 APIService::APIService(Master* master,
                        const std::vector<std::string>& model_names,
                        const std::vector<std::string>& model_versions)
     : master_(master) {
+  set_model_master(model_names[0], master);
   if (FLAGS_node_rank != 0) {
-    set_model_master(model_names[0], master);
     return;
   }
-  if (FLAGS_backend == "llm") {
-    auto llm_master = dynamic_cast<LLMMaster*>(master);
-    anthropic_service_impl_ =
-        std::make_unique<AnthropicServiceImpl>(llm_master, model_names);
-    completion_service_impl_ =
-        ServiceImplFactory<CompletionServiceImpl>::create_service_impl(
-            llm_master, model_names);
-    sample_service_impl_ =
-        ServiceImplFactory<SampleServiceImpl>::create_service_impl(llm_master,
-                                                                   model_names);
-    chat_service_impl_ =
-        ServiceImplFactory<ChatServiceImpl>::create_service_impl(llm_master,
-                                                                 model_names);
-    embedding_service_impl_ =
-        ServiceImplFactory<EmbeddingServiceImpl>::create_service_impl(
-            llm_master, model_names);
-    if (FLAGS_enable_qwen3_reranker) {
-      rerank_service_impl_ =
-          ServiceImplFactory<Qwen3RerankServiceImpl>::create_service_impl(
-              llm_master, model_names);
-    } else {
-      rerank_service_impl_ =
-          ServiceImplFactory<RerankServiceImpl>::create_service_impl(
-              llm_master, model_names);
-    }
-  } else if (FLAGS_backend == "vlm") {
-    auto vlm_master = dynamic_cast<VLMMaster*>(master);
-    mm_chat_service_impl_ =
-        std::make_unique<MMChatServiceImpl>(vlm_master, model_names);
-    mm_embedding_service_impl_ =
-        std::make_unique<MMEmbeddingServiceImpl>(vlm_master, model_names);
-  } else if (FLAGS_backend == "dit") {
-    image_generation_service_impl_ =
-        std::make_unique<ImageGenerationServiceImpl>(
-            dynamic_cast<DiTMaster*>(master), model_names);
-  } else if (FLAGS_backend == "rec") {
-    auto rec_master = dynamic_cast<RecMaster*>(master);
-    rec_completion_service_impl_ =
-        std::make_unique<RecCompletionServiceImpl>(rec_master, model_names);
-    chat_service_impl_ =
-        std::make_unique<ChatServiceImpl>(rec_master, model_names);
-  }
-  set_model_master(model_names[0], master);
-  models_service_impl_ =
-      ServiceImplFactory<ModelsServiceImpl>::create_service_impl(
-          model_names, model_versions);
+  ServiceImplFactory::create(this, master, model_names, model_versions);
   register_chat_completions_handler();
 }
 
@@ -155,9 +110,9 @@ void APIService::Completions(::google::protobuf::RpcController* controller,
   }
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
 
-  if (FLAGS_backend == "llm") {
+  if (completion_service_impl_) {
     completion_service_impl_->process_async_rpc_impl(request);
-  } else if (FLAGS_backend == "rec") {
+  } else if (rec_completion_service_impl_) {
     auto arena = GetArenaWithCheck<CompletionCall>(response);
     std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
         ctrl,
@@ -202,9 +157,9 @@ void APIService::CompletionsHttp(::google::protobuf::RpcController* controller,
 
   std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
       ctrl, done_guard.release(), req_pb, resp_pb, arena != nullptr);
-  if (FLAGS_backend == "llm") {
+  if (completion_service_impl_) {
     completion_service_impl_->process_async(call);
-  } else if (FLAGS_backend == "rec") {
+  } else if (rec_completion_service_impl_) {
     rec_completion_service_impl_->process_async(call);
   }
 }
@@ -223,11 +178,10 @@ void APIService::Sample(::google::protobuf::RpcController* controller,
   }
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  if (FLAGS_backend != "llm") {
-    ctrl->SetFailed(build_sample_backend_error_message());
+  if (!sample_service_impl_) {
+    ctrl->SetFailed(kSampleNotSupportedError);
     return;
   }
-  CHECK(sample_service_impl_) << " sample service is invalid.";
 
   Status status;
   if (!sample_service_impl_->process_request(*request, response, &status)) {
@@ -250,11 +204,10 @@ void APIService::SampleHttp(::google::protobuf::RpcController* controller,
   }
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
-  if (FLAGS_backend != "llm") {
-    ctrl->SetFailed(build_sample_backend_error_message());
+  if (!sample_service_impl_) {
+    ctrl->SetFailed(kSampleNotSupportedError);
     return;
   }
-  CHECK(sample_service_impl_) << " sample service is invalid.";
 
   auto arena = GetArenaWithCheck<SampleCall>(response);
   auto req_pb =
@@ -360,7 +313,7 @@ void APIService::register_chat_completions_handler() {
           ctrl,
           request,
           response,
-          ChatJsonParser::get("vlm"));
+          ChatJsonParser::get(ServingMode::VLM));
     };
   } else if (chat_service_impl_) {
     chat_completions_handler_ = [this](ClosureGuard& guard,
@@ -373,7 +326,7 @@ void APIService::register_chat_completions_handler() {
           ctrl,
           request,
           response,
-          ChatJsonParser::get(FLAGS_backend));
+          ChatJsonParser::get(ServingMode::LLM));
     };
   }
 }
@@ -413,8 +366,7 @@ void APIService::ChatCompletionsHttp(
   }
 
   if (!chat_completions_handler_) {
-    LOG(ERROR) << "No chat completions handler registered for backend '"
-               << FLAGS_backend << "'";
+    LOG(ERROR) << "No chat completions handler registered";
     return;
   }
 
@@ -479,12 +431,10 @@ void APIService::EmbeddingsHttp(::google::protobuf::RpcController* controller,
                                 const proto::HttpRequest* request,
                                 proto::HttpResponse* response,
                                 ::google::protobuf::Closure* done) {
-  if (FLAGS_backend == "llm") {
-    CHECK(embedding_service_impl_) << " embedding service is invalid.";
+  if (embedding_service_impl_) {
     handle_embedding_request<EmbeddingCall, EmbeddingServiceImpl>(
         embedding_service_impl_, controller, request, response, done);
-  } else if (FLAGS_backend == "vlm") {
-    CHECK(mm_embedding_service_impl_) << " mm embedding service is invalid.";
+  } else if (mm_embedding_service_impl_) {
     handle_embedding_request<MMEmbeddingCall, MMEmbeddingServiceImpl>(
         mm_embedding_service_impl_, controller, request, response, done);
   }
@@ -674,7 +624,7 @@ void handle_anthropic_messages(std::unique_ptr<AnthropicServiceImpl>& service,
   ctrl->request_attachment().copy_to(&attachment, content_len, 0);
 
   auto [preprocess_status, processed_json] =
-      ChatJsonParser::get("anthropic").preprocess(std::move(attachment));
+      ChatJsonParser::anthropic().preprocess(std::move(attachment));
   if (!preprocess_status.ok()) {
     ctrl->SetFailed(preprocess_status.message());
     LOG(ERROR) << "Anthropic JSON preprocessing failed: "
@@ -717,13 +667,12 @@ void APIService::AnthropicMessagesHttp(
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
 
-  if (FLAGS_backend == "llm") {
-    CHECK(anthropic_service_impl_) << " anthropic service is invalid.";
+  if (anthropic_service_impl_) {
     handle_anthropic_messages(
         anthropic_service_impl_, done_guard, ctrl, request, response);
   } else {
-    ctrl->SetFailed("Anthropic messages API is only supported for LLM backend");
-    LOG(ERROR) << "Anthropic messages API is only supported for LLM backend";
+    ctrl->SetFailed("Anthropic messages API is only supported for LLM engine");
+    LOG(ERROR) << "Anthropic messages API is only supported for LLM engine";
   }
 }
 
@@ -795,8 +744,8 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
-  if (FLAGS_backend != "llm") {
-    LOG(ERROR) << "fork master only supports llm backend";
+  if (to_serving_mode(master_->engine_type()) != ServingMode::LLM) {
+    LOG(ERROR) << "fork master only supports LLM engine";
     return;
   }
 

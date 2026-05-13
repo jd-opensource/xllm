@@ -28,8 +28,8 @@ limitations under the License.
 #include "core/common/interruption_bus.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
-#include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
+#include "core/framework/parallel_state/npu_dp_ep_padding.h"
 #include "core/layers/common/attention_mask.h"
 #include "core/layers/npu/npu_block_copy_impl.h"
 #include "core/layers/npu/npu_column_parallel_linear_impl.h"
@@ -68,6 +68,7 @@ class MtpModelImplBase : public torch::nn::Module {
     // MTP extra module
     eh_proj_ =
         register_module("eh_proj", layer::NpuColumnParallelLinear(context));
+    rot_ = register_module("rot", layer::NpuColumnParallelLinear(context));
     enorm_ = register_module("enorm", layer::NpuRMSNorm(context));
     hnorm_ = register_module("hnorm", layer::NpuRMSNorm(context));
     final_norm_ = register_module("final_norm", layer::NpuRMSNorm(context));
@@ -104,7 +105,11 @@ class MtpModelImplBase : public torch::nn::Module {
     if (input_embedding.defined()) {
       h = input_embedding;
     }
-    torch::Tensor hnorm = hnorm_(h, 0);
+    torch::Tensor hnorm_input = h;
+    if (enable_rot_) {
+      hnorm_input = rot_(hnorm_input, /*nodeId=*/0);
+    }
+    torch::Tensor hnorm = hnorm_(hnorm_input, 0);
     CHECK_EQ(enorm.dim(), hnorm.dim());
     CHECK_EQ(enorm.size(0), hnorm.size(0));
     h = torch::cat({enorm, hnorm}, /*dim=*/-1);
@@ -137,6 +142,10 @@ class MtpModelImplBase : public torch::nn::Module {
           req_mask_vec.emplace_back(mask);
         }
         attn_mask = torch::cat(req_mask_vec, 0);
+      } else {
+        // handle dp empty case
+        attn_mask =
+            attn_mask_.get_attn_mask(128, h.dtype().toScalarType(), h.device());
       }
     } else if (model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache &&
                !input_params.batch_forward_type.is_decode()) {
@@ -196,6 +205,15 @@ class MtpModelImplBase : public torch::nn::Module {
 
   // load the weight from the checkpoint
   virtual void load_state_dict(const StateDict& state_dict) {
+    if (state_dict.get_tensor("rot.weight").defined()) {
+      if (!enable_rot_) {
+        LOG(INFO) << "Detected rot.weight in MTP weights, enable optional rot "
+                     "linear before hnorm.";
+      }
+      enable_rot_ = true;
+      rot_->load_state_dict(state_dict.get_dict_with_prefix("rot."));
+    }
+
     // call each layer's load_state_dict function
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->load_state_dict(
@@ -213,6 +231,9 @@ class MtpModelImplBase : public torch::nn::Module {
       layers_[i]->verify_loaded_weights(prefix + "layers." + std::to_string(i) +
                                         ".");
     }
+    if (enable_rot_) {
+      rot_->verify_loaded_weights(prefix + "rot.");
+    }
     eh_proj_->verify_loaded_weights(prefix + "eh_proj.");
     enorm_->verify_loaded_weights(prefix + "enorm.");
     hnorm_->verify_loaded_weights(prefix + "hnorm.");
@@ -222,6 +243,9 @@ class MtpModelImplBase : public torch::nn::Module {
   virtual void merge_loaded_weights() {
     for (int i = 0; i < layers_.size(); i++) {
       layers_[i]->merge_loaded_weights();
+    }
+    if (enable_rot_) {
+      rot_->merge_loaded_weights();
     }
     eh_proj_->merge_loaded_weights();
     enorm_->merge_loaded_weights();
@@ -250,6 +274,7 @@ class MtpModelImplBase : public torch::nn::Module {
   layer::AttentionMask attn_mask_;
 
   // MTP extra modules
+  layer::NpuColumnParallelLinear rot_{nullptr};
   layer::NpuColumnParallelLinear eh_proj_{nullptr};
   layer::NpuRMSNorm enorm_{nullptr};
   layer::NpuRMSNorm hnorm_{nullptr};
@@ -259,6 +284,7 @@ class MtpModelImplBase : public torch::nn::Module {
   std::vector<DecoderLayerType> layers_;
 
   bool layer_forward_interrupted_ = false;
+  bool enable_rot_ = false;
 
  private:
   std::string model_type_;

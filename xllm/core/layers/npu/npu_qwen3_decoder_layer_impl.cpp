@@ -21,7 +21,7 @@ limitations under the License.
 #include <map>
 
 #include "common/global_flags.h"
-#include "common/rec_model_utils.h"
+#include "util/rec_model_utils.h"
 
 // #include "attn_mask.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
@@ -168,19 +168,12 @@ NpuQwen3DecoderLayerImpl::NpuQwen3DecoderLayerImpl(const ModelContext& context)
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
   at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
-  if (FLAGS_enable_manual_loader) {
-    loader_ = std::make_unique<Qwen3DecoderManualLoader>(
-        WEIGHT_COUNT_PER_LAYER,
-        context,
-        prefill_param_.enableIntraLayerAddNorm ||
-            prefill_param_.enableInterLayerAddNorm);
-  } else {
-    loader_ = std::make_unique<Qwen3DecoderLoader>(
-        WEIGHT_COUNT_PER_LAYER,
-        context,
-        prefill_param_.enableIntraLayerAddNorm ||
-            prefill_param_.enableInterLayerAddNorm);
-  }
+  loader_ = std::make_unique<Qwen3DecoderLoader>(
+      WEIGHT_COUNT_PER_LAYER,
+      context,
+      prefill_param_.enableIntraLayerAddNorm ||
+          prefill_param_.enableInterLayerAddNorm,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
 }
 
 int64_t NpuQwen3DecoderLayerImpl::init_layer() {

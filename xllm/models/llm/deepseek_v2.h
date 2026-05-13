@@ -84,7 +84,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
       modified_input_params.attn_metadata =
           std::make_shared<layer::AttentionMetadata>(
               layer::AttentionMetadataBuilder::build(modified_input_params,
-                                                     model_args_));
+                                                     model_args_.enable_mla()));
     }
     auto& attn_metadata = *(modified_input_params.attn_metadata);
     torch::Tensor hidden_states = embed_tokens_(tokens);
@@ -103,6 +103,10 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
                             attn_metadata,
                             kv_caches[i],
                             modified_input_params);
+      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
+                                              hidden_states.device())) {
+        return ModelOutput();
+      }
     }
     auto [h, res] = norm_(hidden_states, residual);
     return ModelOutput(h, res);
@@ -171,16 +175,7 @@ class DeepseekV2ForCausalLMImpl
     : public LlmForCausalLMImplBase<DeepseekV2Model> {
  public:
   DeepseekV2ForCausalLMImpl(const ModelContext& context)
-      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {
-    // Check if prefix cache or chunked prefill is enabled for unsupported
-    // models
-    CHECK(!FLAGS_enable_prefix_cache)
-        << "deepseek_v2 have not supported "
-           "enable_prefix_cache yet. Please disable it.";
-    CHECK(!FLAGS_enable_chunked_prefill)
-        << "deepseek_v2 have not supported "
-           "enable_chunked_prefill yet. Please disable it.";
-  }
+      : LlmForCausalLMImplBase<DeepseekV2Model>(context) {}
 
   void load_model(
       std::unique_ptr<ModelLoader> loader,

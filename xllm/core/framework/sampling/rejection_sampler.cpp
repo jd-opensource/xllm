@@ -105,8 +105,11 @@ RejectionSampler::RejectionSampler(
       rate_controller_(rate_controller),
       enable_fused_kernel_(enable_fused_kernel) {
   CHECK(do_sample.defined());
-  // [batch_size, 1]
-  do_sample_ = do_sample.unsqueeze_(/*dim=*/-1);
+  // Keep a private expanded view and do not mutate the caller-owned tensor.
+  // The same SamplingParameters object is reused later by MTP draft extend.
+  // An in-place unsqueeze here corrupts Sampler::forward() mixed-mode shape
+  // assumptions and can broadcast sampled token ids into 2D.
+  do_sample_ = do_sample.unsqueeze(/*dim=*/-1);
 }
 
 // draft_token_ids: [batch_size, n_speculative_tokens]

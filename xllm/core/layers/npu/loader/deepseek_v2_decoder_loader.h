@@ -12,6 +12,9 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
+
+#pragma once
+
 #include "base_loader.h"
 
 namespace xllm {
@@ -32,13 +35,15 @@ class DeekseekV2DecoderLoader : public BaseLoader {
                           int32_t num_key_value_heads,
                           int32_t v_head_dim,
                           bool prefill_isBF16,
-                          bool decode_isBF16);
+                          bool decode_isBF16,
+                          LoadMode mode = LoadMode::kEager);
 
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights(const std::string& prefix) const override;
-  void merge_loaded_weights() override;
 
  protected:
+  void merge_host_at_weights() override;
+
   void initialize_device_expert_list(int num_device, int num_device_expert);
 
   int extract_expert_index(const std::string& name);
@@ -66,8 +71,6 @@ class DeekseekV2DecoderLoader : public BaseLoader {
                      const std::string& tensor_name,
                      int weight_position,
                      int dim);
-
-  torch::Tensor convert_fp16_to_int64();
 
   void preprocess_linear_for_rope();
 
@@ -100,12 +103,10 @@ class DeekseekV2DecoderLoader : public BaseLoader {
   void merge_experts_weights();
 
   torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts,
-                                      at::Device device,
                                       bool transpose = false);
 
   torch::Tensor merge_experts_weights(std::vector<torch::Tensor>& experts_up,
                                       std::vector<torch::Tensor>& experts_gate,
-                                      at::Device device,
                                       bool transpose = false);
 
   void squeeze_experts_weights();

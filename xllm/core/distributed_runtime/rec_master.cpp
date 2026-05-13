@@ -29,13 +29,13 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "common/metrics.h"
-#include "common/rec_model_utils.h"
 #include "common/types.h"
 #include "framework/request/mm_data.h"
 #include "models/model_registry.h"
 #include "rec_engine.h"
 #include "runtime/xservice_client.h"
 #include "scheduler/scheduler_factory.h"
+#include "util/rec_model_utils.h"
 #include "util/scope_guard.h"
 #include "util/threadpool.h"
 #include "util/utils.h"
@@ -335,6 +335,37 @@ std::shared_ptr<Request> RecMaster::RecMasterPipeline::generate_request(
   return nullptr;
 }
 
+std::shared_ptr<Request>
+RecMaster::RecMasterPipeline::generate_onerec_request_common(
+    std::string prompt,
+    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+    const RequestParams& sp,
+    OutputCallback callback,
+    bool build_stop_checker) {
+  Timer timer;
+  std::vector<int32_t> local_prompt_tokens;
+  MMData processed_mm_data;
+
+  if (!process_onerec_inputs(prompt_tokens,
+                             input_tensors,
+                             master_.model_args_,
+                             &local_prompt_tokens,
+                             &processed_mm_data,
+                             callback)) {
+    return nullptr;
+  }
+
+  COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
+
+  return master_.build_request_common(std::move(prompt),
+                                      std::move(local_prompt_tokens),
+                                      std::move(processed_mm_data),
+                                      sp,
+                                      callback,
+                                      build_stop_checker);
+}
+
 // ============================================================
 // LlmRecMasterPipeline implementation (pure qwen3, no mm_data)
 // ============================================================
@@ -425,38 +456,40 @@ RecMaster::LlmRecWithMmDataMasterPipeline::generate_request(
 }
 
 // ============================================================
-// OneRecMasterPipeline implementation (OneRec with input_tensors)
+// OneRecPrefillOnlyMasterPipeline implementation (OneRec with input_tensors)
 // ============================================================
-RecMaster::OneRecMasterPipeline::OneRecMasterPipeline(RecMaster& master)
+RecMaster::OneRecPrefillOnlyMasterPipeline::OneRecPrefillOnlyMasterPipeline(
+    RecMaster& master)
     : RecMasterPipeline(master) {}
 
-std::shared_ptr<Request> RecMaster::OneRecMasterPipeline::generate_request(
+std::shared_ptr<Request>
+RecMaster::OneRecPrefillOnlyMasterPipeline::generate_request(
     std::string prompt,
     std::optional<std::vector<int>> prompt_tokens,
     std::optional<std::vector<proto::InferInputTensor>> input_tensors,
     const RequestParams& sp,
     OutputCallback callback) {
-  Timer timer;
-  std::vector<int32_t> local_prompt_tokens;
-  MMData processed_mm_data;
+  return generate_onerec_request_common(std::move(prompt),
+                                        std::move(prompt_tokens),
+                                        std::move(input_tensors),
+                                        sp,
+                                        callback,
+                                        /*build_stop_checker=*/false);
+}
 
-  if (!process_onerec_inputs(prompt_tokens,
-                             input_tensors,
-                             master_.model_args_,
-                             &local_prompt_tokens,
-                             &processed_mm_data,
-                             callback)) {
-    return nullptr;
-  }
-
-  COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
-
-  return master_.build_request_common(std::move(prompt),
-                                      std::move(local_prompt_tokens),
-                                      std::move(processed_mm_data),
-                                      sp,
-                                      callback,
-                                      /*build_stop_checker=*/false);
+std::shared_ptr<Request>
+RecMaster::OneRecXAttentionMasterPipeline::generate_request(
+    std::string prompt,
+    std::optional<std::vector<int>> prompt_tokens,
+    std::optional<std::vector<proto::InferInputTensor>> input_tensors,
+    const RequestParams& sp,
+    OutputCallback callback) {
+  return generate_onerec_request_common(std::move(prompt),
+                                        std::move(prompt_tokens),
+                                        std::move(input_tensors),
+                                        sp,
+                                        callback,
+                                        /*build_stop_checker=*/true);
 }
 
 // ============================================================
@@ -472,7 +505,9 @@ std::unique_ptr<RecMaster::RecMasterPipeline> RecMaster::create_pipeline(
     case RecPipelineType::kLlmRecWithMmData:
       return std::make_unique<LlmRecWithMmDataMasterPipeline>(master);
     case RecPipelineType::kOneRecDefault:
-      return std::make_unique<OneRecMasterPipeline>(master);
+      return std::make_unique<OneRecPrefillOnlyMasterPipeline>(master);
+    case RecPipelineType::kOneRecXAttentionPipeline:
+      return std::make_unique<OneRecXAttentionMasterPipeline>(master);
     default:
       LOG(FATAL) << "Unknown RecMaster pipeline type: "
                  << static_cast<int>(type);
@@ -754,6 +789,7 @@ std::shared_ptr<Request> RecMaster::build_request_common(
   sampling_param.top_logprobs = sp.top_logprobs;
   sampling_param.is_embeddings = sp.is_embeddings;
   sampling_param.beam_width = sp.beam_width;
+  sampling_param.num_return_sequences = sp.num_return_sequences;
   if (best_of > sp.n) {
     sampling_param.logprobs = true;
   }

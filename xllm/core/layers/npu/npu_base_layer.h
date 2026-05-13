@@ -39,7 +39,6 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "framework/xtensor/xtensor.h"
 #include "loader/base_loader.h"
-#include "loader/base_manual_loader.h"
 #include "platform/device.h"
 #include "pytorch/adapter/utils/utils.h"
 #include "pytorch/adapter/workspace/workspace.h"
@@ -194,10 +193,13 @@ class BaseLayer : public torch::nn::Module {
     }
   };
 
-  // Returns the loader cast to BaseManualLoader*, or nullptr if the loader is
-  // not a BaseManualLoader (e.g., when enable_manual_loader=false).
-  virtual BaseManualLoader* get_manual_loader() {
-    return dynamic_cast<BaseManualLoader*>(loader_.get());
+  // Returns the loader when it is running in manual mode, otherwise nullptr
+  // (e.g., when enable_manual_loader=false). All manual-mode bookkeeping
+  // (pinned host buffer, rolling buffer, slice metadata, ...) lives directly
+  // on `BaseLoader`.
+  virtual BaseLoader* get_loader() {
+    return (loader_ && loader_->mode() == LoadMode::kManual) ? loader_.get()
+                                                             : nullptr;
   }
 
   virtual int64_t init_layer() { return 0; };

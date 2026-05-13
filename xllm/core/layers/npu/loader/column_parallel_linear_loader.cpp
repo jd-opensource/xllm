@@ -20,26 +20,44 @@ namespace layer {
 
 ColumParallelLinearLoader::ColumParallelLinearLoader(
     uint64_t weight_count,
-    const ModelContext& context)
-    : BaseLoader(weight_count, context) {
+    const ModelContext& context,
+    LoadMode mode)
+    : BaseLoader(weight_count, context, mode) {
   auto options = context.get_tensor_options();
   dtype_ = torch::typeMetaToScalarType(options.dtype());
-  at_weight_tensors_[0] = torch::zeros({1}).to(options);
+  if (load_to_host()) {
+    working_tensors()[0] = torch::zeros(
+        {1}, torch::TensorOptions().dtype(dtype_).device(torch::kCPU));
+  } else {
+    working_tensors()[0] = torch::zeros({1}).to(options);
+  }
 }
 
 void ColumParallelLinearLoader::load_state_dict(const StateDict& state_dict) {
+  const bool to_host = load_to_host();
   if (dp_size_ > 1) {
-    set_weight(
-        state_dict, "weight", 0, 0, dp_local_tp_rank_, dp_local_tp_size_);
+    set_weight(state_dict,
+               "weight",
+               0,
+               0,
+               dp_local_tp_rank_,
+               dp_local_tp_size_,
+               to_host);
   } else {
-    set_weight(state_dict, "weight", 0, 0);
+    set_weight(state_dict, "weight", 0, 0, to_host);
   }
-  at_weight_tensors_[0] = at_weight_tensors_[0].to(dtype_);
+  working_tensors()[0] = working_tensors()[0].to(dtype_);
+}
+
+void ColumParallelLinearLoader::verify_loaded_weights() const {
+  if (mode() == LoadMode::kManual) {
+    verify_loaded_weights("column_parallel_linear");
+  }
 }
 
 void ColumParallelLinearLoader::verify_loaded_weights(
     const std::string& weight_str) const {
-  CHECK(at_weight_tensors_[0].sizes() != std::vector<int64_t>({1}))
+  CHECK(working_tensors()[0].sizes() != std::vector<int64_t>({1}))
       << "weight is not loaded for " << weight_str;
 }
 

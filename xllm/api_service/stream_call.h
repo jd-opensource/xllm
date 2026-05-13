@@ -51,7 +51,8 @@ class StreamCall : public Call {
       pa_ = controller_->CreateProgressiveAttachment();
 
       // Send the first SSE response
-      controller_->http_response().set_content_type("text/event-stream");
+      controller_->http_response().set_content_type(
+          "text/event-stream; charset=utf-8");
       controller_->http_response().set_status_code(200);
       controller_->http_response().SetHeader("Connection", "keep-alive");
       controller_->http_response().SetHeader("Cache-Control", "no-cache");
@@ -59,8 +60,7 @@ class StreamCall : public Call {
       done_->Run();
 
     } else {
-      controller_->http_response().SetHeader("Content-Type",
-                                             "text/javascript; charset=utf-8");
+      controller_->http_response().set_content_type("application/json");
     }
 
     json_options_.bytes_to_base64 = false;

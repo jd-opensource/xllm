@@ -16,8 +16,12 @@ limitations under the License.
 #include "npu_glm4_decoder_layer_impl.h"
 
 #include <glog/logging.h>
+#include <mstx/ms_tools_ext.h>
 
 #include "common/global_flags.h"
+#include "loader/glm4_decoder_loader.h"
+#include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
+#include "torch_npu/csrc/core/npu/NPUException.h"
 
 namespace xllm {
 namespace layer {
@@ -59,6 +63,7 @@ void NpuGlm4DecoderLayerImpl::param_from_args(
   param.usePostMlpLayerNorm = true;
   initialize_quantization_parameters(param);
 }
+
 void NpuGlm4DecoderLayerImpl::initialize_quantization_parameters(
     atb_speed::chatglm::ChatglmLayerParam& param) {
   param.linearDescs = {static_cast<int>(LinearTypeV2::INVALID),
@@ -93,8 +98,11 @@ NpuGlm4DecoderLayerImpl::NpuGlm4DecoderLayerImpl(const ModelContext& context)
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
   at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
-  loader_ =
-      std::make_unique<Glm4DecoderLoader>(WEIGHT_COUNT_PER_LAYER, context);
+
+  loader_ = std::make_unique<Glm4DecoderLoader>(
+      WEIGHT_COUNT_PER_LAYER,
+      context,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
 }
 
 int64_t NpuGlm4DecoderLayerImpl::init_layer() {

@@ -1352,13 +1352,12 @@ struct CausalConv1dUpdateParams {
   torch::Tensor weight;
   bool activation = true;
   std::optional<torch::Tensor> bias = std::nullopt;
-  std::optional<torch::Tensor> cache_seqlens = std::nullopt;
   std::optional<torch::Tensor> conv_state_indices = std::nullopt;
-  std::optional<torch::Tensor> num_accepted_tokens = std::nullopt;
   std::optional<torch::Tensor> query_start_loc = std::nullopt;
   int32_t max_query_len = -1;
-  std::optional<torch::Tensor> intermediate_conv_window = std::nullopt;
   int32_t pad_slot_id = -1;
+  std::optional<torch::Tensor> block_idx_last_scheduled_token;
+  std::optional<torch::Tensor> initial_state_idx;
   bool validate_data = false;
 };
 
@@ -1381,5 +1380,62 @@ struct PartialRotaryEmbeddingParams {
   int64_t rotary_dim;
   torch::Tensor cos_sin_cache;
   bool is_neox_style;
+};
+
+struct FusedQkvzbaSplitReshapeParams {
+  torch::Tensor mixed_qkvz;
+  torch::Tensor mixed_ba;
+  int32_t num_heads_qk;
+  int32_t num_heads_v;
+  int32_t head_qk;
+  int32_t head_v;
+};
+
+struct GemmaRMSNormParams {
+  torch::Tensor x;
+  torch::Tensor gamma;
+  double epsilon;
+  torch::Tensor rstd_out;
+  torch::Tensor norm_out;
+};
+
+struct SplitQkvRmsnormMropeParams {
+  torch::Tensor qkvg;
+  torch::Tensor q_weight;
+  torch::Tensor k_weight;
+  torch::Tensor cos_sin;
+  torch::Tensor gather_pattern;
+  float eps;
+  int64_t num_q_heads;
+  int64_t num_kv_heads;
+  int64_t head_size;
+};
+
+struct ChunkGatedDeltaRuleParams {
+  // Query tensor. Shape: [B, T, Hqk, K]. Dtype: bfloat16.
+  torch::Tensor q;
+  // Key tensor. Shape: [B, T, Hqk, K]. Dtype: bfloat16.
+  torch::Tensor k;
+  // Value tensor. Shape: [B, T, H, V]. Dtype: bfloat16.
+  torch::Tensor v;
+  // Gating tensor. Shape: [B, T, H]. Dtype: float32 or bfloat16.
+  torch::Tensor g;
+  // Beta tensor. Shape: [B, T, H]. Dtype: float32 or bfloat16.
+  torch::Tensor beta;
+  // Optional scale factor for attention. Default: K^(-0.5).
+  std::optional<float> scale = std::nullopt;
+  // Optional initial state tensor. Shape: [N, H, K, V]. Dtype: bfloat16.
+  std::optional<torch::Tensor> initial_state = std::nullopt;
+  // Whether to output the final state.
+  bool output_final_state = false;
+  // Chunk size for processing. Default: 64.
+  int64_t chunk_size = 64;
+  // Optional cumulative sequence lengths. Shape: [num_sequences + 1]. Dtype:
+  // int32.
+  std::optional<torch::Tensor> cu_seqlens = std::nullopt;
+  // Whether input is head-first format. Default: false (batch-first).
+  bool head_first = false;
+  // Whether to apply L2 norm to q and k inside the kernel. Default: false.
+  bool use_qk_l2norm_in_kernel = false;
 };
 }  // namespace xllm::kernel

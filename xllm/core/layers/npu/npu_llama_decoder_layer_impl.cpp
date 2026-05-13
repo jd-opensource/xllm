@@ -51,8 +51,10 @@ NpuLlamaDecoderLayerImpl::NpuLlamaDecoderLayerImpl(const ModelContext& context)
   placeholder_ = atb_speed::Utils::AtTensor2Tensor(
       torch::zeros({1}).to(device_).to(dtype_));
 
-  loader_ =
-      std::make_unique<LlamaDecoderLoader>(WEIGHT_COUNT_PER_LAYER, context);
+  loader_ = std::make_unique<LlamaDecoderLoader>(
+      WEIGHT_COUNT_PER_LAYER,
+      context,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
   at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
 }
 

@@ -58,7 +58,7 @@ class FusedMoEImpl : public torch::nn::Module {
   torch::Tensor forward_shared(const torch::Tensor& hidden_states);
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
-  void load_state_dict(const StateDict& state_dict);
+  virtual void load_state_dict(const StateDict& state_dict);
   void verify_loaded_weights() const;
   bool has_shared() const { return static_cast<bool>(shared_experts_); }
   void init_async(const torch::Tensor& hidden_states) {
@@ -68,7 +68,7 @@ class FusedMoEImpl : public torch::nn::Module {
   Stream* shared_stream() const { return shared_stream_.get(); }
   Stream* routed_stream() const { return routed_stream_.get(); }
 
- private:
+ protected:
   // struct to store the selected expert info
   struct SelectedExpertInfo {
     torch::Tensor reduce_weight;
@@ -88,9 +88,9 @@ class FusedMoEImpl : public torch::nn::Module {
       const torch::Tensor& hidden_states,
       const std::optional<RouteInfo>& route_info);
 
-  void final_comm_allreduce(torch::Tensor& final_hidden_states,
-                            const torch::Tensor& hidden_states,
-                            torch::Tensor& shared_expert_output);
+  virtual void final_comm_allreduce(torch::Tensor& final_hidden_states,
+                                    const torch::Tensor& hidden_states,
+                                    torch::Tensor& shared_expert_output);
 
   // ===== All2All path methods (DeepEP communication mode) =====
   void select_experts_all2all(const torch::Tensor& hidden_states_2d,
@@ -129,7 +129,7 @@ class FusedMoEImpl : public torch::nn::Module {
       int64_t expert_size,
       SelectedExpertInfo& selected_expert_info);
 
- private:
+ protected:
   int64_t num_total_experts_;
   int64_t topk_;
   int64_t hidden_size_;

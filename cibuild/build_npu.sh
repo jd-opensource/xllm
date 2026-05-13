@@ -6,7 +6,7 @@ function error() {
   exit 1
 }
 
-IMAGE="quay.io/jd_xllm/xllm-ai:xllm-dev-a2-x86-20260306"
+IMAGE="quay.io/jd_xllm/xllm-ai:xllm-dev-a2-x86-20260429"
 
 RUN_OPTS=(
   --rm

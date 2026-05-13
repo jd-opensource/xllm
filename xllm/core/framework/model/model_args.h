@@ -59,6 +59,7 @@ struct ModelArgs {
   PROPERTY(std::optional<int64_t>, decoder_n_kv_heads);
 
   PROPERTY(int64_t, vocab_size) = -1;
+  PROPERTY(int64_t, draft_vocab_size) = 0;
 
   PROPERTY(bool, use_qk_norm) = false;
   PROPERTY(float, rms_norm_eps) = 0.0f;
@@ -83,6 +84,7 @@ struct ModelArgs {
   PROPERTY(float, rope_scaling_mscale) = 0.0f;
   PROPERTY(float, rope_scaling_mscale_all_dim) = 0.0f;
   PROPERTY(std::vector<int64_t>, rope_scaling_mrope_section);
+  PROPERTY(bool, rope_scaling_mrope_interleaved) = false;
 
   // the maximum sequence length to use for rotary position embeddings.
   PROPERTY(int64_t, max_position_embeddings) = 0;
@@ -139,6 +141,7 @@ struct ModelArgs {
   PROPERTY(int32_t, kv_lora_rank) = 0;
   // deepseek v3/v3.2 MTP
   PROPERTY(int32_t, num_nextn_predict_layers) = 0;
+  PROPERTY(std::string, mtp_mlp_type) = "moe";
 
   // deepseek v3.2 indexer
   PROPERTY(int32_t, index_head_dim) = 0;
@@ -181,6 +184,7 @@ struct ModelArgs {
   PROPERTY(int32_t, linear_value_head_dim) = 0;
   PROPERTY(int64_t, linear_num_key_heads) = 0;
   PROPERTY(int32_t, linear_num_value_heads) = 0;
+  PROPERTY(std::string, mamba_ssm_dtype);
   PROPERTY(int32_t, shared_expert_intermediate_size) = 0;
   PROPERTY(float, partial_rotary_factor) = 0.0f;
   PROPERTY(std::vector<std::string>, layer_types) = {};
@@ -473,8 +477,8 @@ inline bool is_full_attention_layer(const ModelArgs& args, int64_t layer_id) {
   }
 
   int32_t attention_interval = args.full_attention_interval();
-  if (attention_interval <= 0) {
-    attention_interval = 4;
+  if (attention_interval <= 1) {
+    return true;
   }
   return (layer_id + 1) % attention_interval == 0;
 }

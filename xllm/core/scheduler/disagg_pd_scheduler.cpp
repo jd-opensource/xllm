@@ -19,6 +19,7 @@ limitations under the License.
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
 #include <brpc/server.h>
+#include <glog/logging.h>
 
 #include <random>
 
@@ -28,6 +29,7 @@ limitations under the License.
 #include "disagg_pd_scheduler.h"
 #include "distributed_runtime/engine.h"
 #include "framework/batch/batch_factory.h"
+#include "framework/kv_cache_transfer/pd_topology_guard.h"
 #include "framework/request/request.h"
 #include "framework/request/request_state.h"
 #include "framework/request/sequence.h"
@@ -326,6 +328,45 @@ void DisaggPDScheduler::dispatch_requests() {
     std::vector<std::shared_ptr<Request>> requests;
     requests.emplace_back(request);
     std::string selected_instance = request->state().decode_address;
+
+    const InstanceInfo remote_info =
+        xservice_client_->get_instance_info(selected_instance);
+    if (remote_info.name.empty()) {
+      response_processor_->process_failed_request(
+          request,
+          {StatusCode::UNKNOWN, "failed to fetch remote decode instance info"});
+      continue;
+    }
+    remote_instances_info_[selected_instance] = remote_info;
+
+    const bool enable_mla = engine_->model_args().enable_mla();
+    const PdTopoResult topo_result =
+        check_pd_topo(instance_info_,
+                      remote_info,
+                      options_.kv_cache_transfer_mode(),
+                      enable_mla);
+    const bool allow_pd_topo = topo_result.status == PdTopoStatus::ALLOW_HOMO ||
+                               topo_result.status == PdTopoStatus::ALLOW_HETERO;
+    if (!allow_pd_topo) {
+      if (topo_result.status == PdTopoStatus::INVALID_REMOTE) {
+        remote_instances_info_.erase(selected_instance);
+      }
+      response_processor_->process_failed_request(
+          request,
+          {StatusCode::INVALID_ARGUMENT,
+           "decode instance " + selected_instance +
+               " is incompatible: " + topo_result.reason});
+      continue;
+    }
+    if (topo_result.status == PdTopoStatus::ALLOW_HETERO && VLOG_IS_ON(1)) {
+      const PdTopo local_topo = get_pd_topo(instance_info_);
+      const PdTopo remote_topo = get_pd_topo(remote_info);
+      VLOG(1) << "Allow hetero pd topo guard: local dp/tp="
+              << local_topo.dp_size << "/" << local_topo.tp_size
+              << ", remote dp/tp=" << remote_topo.dp_size << "/"
+              << remote_topo.tp_size;
+    }
+
     proto::DisaggPDService_Stub* stub = create_rpc_channel(selected_instance);
     if (stub == nullptr) {
       response_processor_->process_failed_request(
@@ -467,6 +508,11 @@ void DisaggPDScheduler::dispatch_requests() {
           for (auto& bid : resps.resps()[i].blocks_ids()) {
             info.remote_blocks_ids.emplace_back(bid);
           }
+          const size_t prompt_blocks =
+              (requests[i]->state().prompt_tokens.size() +
+               kv_cache_manager_->block_size() - 1) /
+              kv_cache_manager_->block_size();
+          info.local_blocks_ids.resize(prompt_blocks);
           info.dp_rank = resps.resps()[i].dp_rank();
           // TODO: remote_instances_info_ is not multi-thread safe.
           info.remote_instance_info = remote_instances_info_[selected_instance];

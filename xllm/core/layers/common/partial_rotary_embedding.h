@@ -36,7 +36,7 @@ class PartialRotaryEmbeddingImpl : public torch::nn::Module {
                torch::Tensor& q,
                torch::Tensor& k);
 
-  torch::Tensor get_cos_sin_cache() { return cos_sin_cache_; }
+  torch::Tensor get_cos_sin_cache() const { return cos_sin_cache_; }
 
  private:
   int64_t head_size_;

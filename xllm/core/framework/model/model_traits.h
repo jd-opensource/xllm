@@ -104,6 +104,16 @@ struct has_reload_model_weights_from_device<
         decltype(std::declval<T>()->reload_model_weights_from_device())>>
     : std::true_type {};
 
+template <typename T, typename = void>
+struct has_pooler : std::false_type {};
+
+template <typename T>
+struct has_pooler<T,
+                  std::void_t<decltype(std::declval<T>()->pooler(
+                      std::declval<const torch::Tensor&>(),
+                      std::declval<const torch::Tensor&>()))>>
+    : std::true_type {};
+
 #if defined(USE_NPU)
 template <typename T, typename = void>
 struct has_get_npu_lm_head : std::false_type {};

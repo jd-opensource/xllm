@@ -15,284 +15,118 @@ limitations under the License.
 
 #include "qwen2_decoder_loader.h"
 
+#include "qwen_loader_constants.h"
+
 namespace xllm {
 namespace layer {
 
-enum DecoderLayerTensorId : int {
-  IN_NORM_WEIGHT = 0,      // weight
-  IN_NORM_BIAS = 1,        // bias
-  IN_NORM_NEW_WEIGHT = 2,  // new weight
-  IN_NORM_NEW_BIAS = 3,    // new bias
-
-  IN_Q_WEIGHT = 4,    // weight
-  IN_Q_BIAS = 5,      // bias
-  IN_Q_DEQSCALE = 6,  // deq_scale
-  IN_Q_OFFSET = 7,    // offset
-  IN_Q_SCALE = 8,     // scale
-  IN_Q_COMPRESS_IDX = 9,
-
-  IN_K_WEIGHT = 10,    // weight
-  IN_K_BIAS = 11,      // bias
-  IN_K_DEQSCALE = 12,  // deq_scale
-  IN_K_OFFSET = 13,    // offset
-  IN_K_SCALE = 14,     // scale
-  IN_K_COMPRESS_IDX = 15,
-
-  IN_V_WEIGHT = 16,    // weight
-  IN_V_BIAS = 17,      // bias
-  IN_V_DEQSCALE = 18,  // deq_scale
-  IN_V_OFFSET = 19,    // offset
-  IN_V_SCALE = 20,     // scale
-  IN_V_COMPRESS_IDX = 21,
-
-  IN_ATTENTION_OUT_WEIGHT = 22,    // weight
-  IN_ATTENTION_OUT_BIAS = 23,      // bias
-  IN_ATTENTION_OUT_DEQSCALE = 24,  // deq_scale
-  IN_ATTENTION_OUT_OFFSET = 25,    // offset
-  IN_ATTENTION_OUT_SCALE = 26,     // scale
-  IN_ATTENTION_OUT_COMPRESS_IDX = 27,
-
-  IN_SELFOUT_NORM_WEIGHT = 28,      // weight
-  IN_SELFOUT_NORM_BIAS = 29,        // bias
-  IN_SELFOUT_NORM_NEW_WEIGHT = 30,  // new weight
-  IN_SELFOUT_NORM_NEW_BIAS = 31,    // new bias
-
-  IN_MLP_W2_WEIGHT = 32,    // weight
-  IN_MLP_W2_BIAS = 33,      // bias
-  IN_MLP_W2_DEQSCALE = 34,  // deq_scale
-  IN_MLP_W2_OFFSET = 35,    // offset
-  IN_MLP_W2_SCALE = 36,     // scale
-  IN_MLP_W2_COMPRESS_IDX = 37,
-
-  IN_MLP_W1_WEIGHT = 38,    // weight
-  IN_MLP_W1_BIAS = 39,      // bias
-  IN_MLP_W1_DEQSCALE = 40,  // deq_scale
-  IN_MLP_W1_OFFSET = 41,    // offset
-  IN_MLP_W1_SCALE = 42,     // scale
-  IN_MLP_W1_COMPRESS_IDX = 43,
-
-  IN_MLP_CPROJ_WEIGHT = 44,    // weight
-  IN_MLP_CPROJ_BIAS = 45,      // bias
-  IN_MLP_CPROJ_DEQSCALE = 46,  // deq_scale
-  IN_MLP_CPROJ_OFFSET = 47,    // offset
-  IN_MLP_CPROJ_SCALE = 48,     // scale
-  IN_MLP_CPROJ_COMPRESS_IDX = 49,
-};
-
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING = {
-    {IN_NORM_WEIGHT, "input_layernorm.weight"},
-    {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
-    {IN_Q_BIAS, "self_attn.q_proj.bias"},
-    {IN_K_WEIGHT, "self_attn.k_proj.weight"},
-    {IN_K_BIAS, "self_attn.k_proj.bias"},
-    {IN_V_WEIGHT, "self_attn.v_proj.weight"},
-    {IN_V_BIAS, "self_attn.v_proj.bias"},
-    {IN_ATTENTION_OUT_WEIGHT, "self_attn.o_proj.weight"},
-    {IN_SELFOUT_NORM_WEIGHT, "post_attention_layernorm.weight"},
-    {IN_MLP_W2_WEIGHT, "mlp.gate_proj.weight"},
-    {IN_MLP_W1_WEIGHT, "mlp.up_proj.weight"},
-    {IN_MLP_CPROJ_WEIGHT, "mlp.down_proj.weight"}};
-
-static std::vector<std::pair<int, std::string>> WEIGHT_MAPPING_W8A8 = {
-    {IN_NORM_WEIGHT, "input_layernorm.weight"},
-    {IN_Q_WEIGHT, "self_attn.q_proj.weight"},
-    {IN_Q_BIAS, "self_attn.q_proj.quant_bias"},
-    {IN_Q_DEQSCALE, "self_attn.q_proj.deq_scale"},
-    {IN_Q_OFFSET, "self_attn.q_proj.input_offset"},
-    {IN_Q_SCALE, "self_attn.q_proj.input_scale"},
-    {IN_K_WEIGHT, "self_attn.k_proj.weight"},
-    {IN_K_BIAS, "self_attn.k_proj.quant_bias"},
-    {IN_K_DEQSCALE, "self_attn.k_proj.deq_scale"},
-    {IN_K_OFFSET, "self_attn.k_proj.input_offset"},
-    {IN_K_SCALE, "self_attn.k_proj.input_scale"},
-    {IN_V_WEIGHT, "self_attn.v_proj.weight"},
-    {IN_V_BIAS, "self_attn.v_proj.quant_bias"},
-    {IN_V_DEQSCALE, "self_attn.v_proj.deq_scale"},
-    {IN_V_OFFSET, "self_attn.v_proj.input_offset"},
-    {IN_V_SCALE, "self_attn.v_proj.input_scale"},
-    {IN_ATTENTION_OUT_WEIGHT, "self_attn.o_proj.weight"},
-    {IN_ATTENTION_OUT_BIAS, "self_attn.o_proj.quant_bias"},
-    {IN_ATTENTION_OUT_DEQSCALE, "self_attn.o_proj.deq_scale"},
-    {IN_ATTENTION_OUT_OFFSET, "self_attn.o_proj.input_offset"},
-    {IN_ATTENTION_OUT_SCALE, "self_attn.o_proj.input_scale"},
-    {IN_SELFOUT_NORM_WEIGHT, "post_attention_layernorm.weight"},
-    {IN_MLP_W2_WEIGHT, "mlp.gate_proj.weight"},
-    {IN_MLP_W2_BIAS, "mlp.gate_proj.quant_bias"},
-    {IN_MLP_W2_DEQSCALE, "mlp.gate_proj.deq_scale"},
-    {IN_MLP_W2_OFFSET, "mlp.gate_proj.input_offset"},
-    {IN_MLP_W2_SCALE, "mlp.gate_proj.input_scale"},
-    {IN_MLP_W1_WEIGHT, "mlp.up_proj.weight"},
-    {IN_MLP_W1_BIAS, "mlp.up_proj.quant_bias"},
-    {IN_MLP_W1_DEQSCALE, "mlp.up_proj.deq_scale"},
-    {IN_MLP_W1_OFFSET, "mlp.up_proj.input_offset"},
-    {IN_MLP_W1_SCALE, "mlp.up_proj.input_scale"},
-    {IN_MLP_CPROJ_WEIGHT, "mlp.down_proj.weight"}};
-
-static std::map<int, int> WEIGHT_SHARD = {{IN_Q_WEIGHT, 0},
-                                          {IN_Q_BIAS, 0},
-                                          {IN_K_WEIGHT, 0},
-                                          {IN_K_BIAS, 0},
-                                          {IN_V_WEIGHT, 0},
-                                          {IN_V_BIAS, 0},
-                                          {IN_ATTENTION_OUT_WEIGHT, 1},
-                                          {IN_MLP_W2_WEIGHT, 0},
-                                          {IN_MLP_W1_WEIGHT, 0},
-                                          {IN_MLP_CPROJ_WEIGHT, 1}};
-
-static std::map<int, int> WEIGHT_SHARD_W8A8 = {{IN_Q_WEIGHT, 0},
-                                               {IN_Q_BIAS, 0},
-                                               {IN_Q_DEQSCALE, 0},
-                                               {IN_K_WEIGHT, 0},
-                                               {IN_K_BIAS, 0},
-                                               {IN_K_DEQSCALE, 0},
-                                               {IN_V_WEIGHT, 0},
-                                               {IN_V_BIAS, 0},
-                                               {IN_V_DEQSCALE, 0},
-                                               {IN_ATTENTION_OUT_WEIGHT, 1},
-                                               {IN_MLP_W2_WEIGHT, 0},
-                                               {IN_MLP_W2_BIAS, 0},
-                                               {IN_MLP_W2_DEQSCALE, 0},
-                                               {IN_MLP_W1_WEIGHT, 0},
-                                               {IN_MLP_W1_BIAS, 0},
-                                               {IN_MLP_W1_DEQSCALE, 0},
-                                               {IN_MLP_CPROJ_WEIGHT, 1}};
+using namespace qwen2_decoder_constants;
 
 Qwen2DecoderLoader::Qwen2DecoderLoader(uint64_t weight_count,
-                                       const ModelContext& context)
-    : BaseLoader(weight_count, context) {
+                                       const ModelContext& context,
+                                       LoadMode mode)
+    : BaseLoader(weight_count, context, mode) {
   auto options = context.get_tensor_options();
   device_id_ = options.device().index();
 
-  for (int i = 0; i < weight_count; ++i) {
-    at_weight_tensors_[i] = torch::zeros({1}).to(options);
+  auto& targets = working_tensors();
+  auto target_options = options.device(target_device());
+  for (uint64_t i = 0; i < weight_count; ++i) {
+    targets[i] = torch::zeros({1}, target_options);
   }
 }
 
 void Qwen2DecoderLoader::load_state_dict(const StateDict& state_dict) {
+  const bool to_host = load_to_host();
+  auto& t = working_tensors();
   if (quantize_type_ == "w8a8") {
     for (const auto& [index, name] : WEIGHT_MAPPING_W8A8) {
       if (WEIGHT_SHARD_W8A8.find(index) != WEIGHT_SHARD_W8A8.end()) {
-        set_weight(state_dict, name, index, WEIGHT_SHARD_W8A8[index]);
+        set_weight(state_dict, name, index, WEIGHT_SHARD_W8A8[index], to_host);
       } else {
-        set_weight(state_dict, name, index);
+        set_weight(state_dict, name, index, to_host);
       }
     }
-    at_weight_tensors_[IN_NORM_BIAS] =
-        torch::zeros(at_weight_tensors_[IN_NORM_WEIGHT].sizes(),
-                     at_weight_tensors_[IN_NORM_WEIGHT].options())
-            .to(device_);
-
-    at_weight_tensors_[IN_SELFOUT_NORM_BIAS] =
-        torch::zeros(at_weight_tensors_[IN_SELFOUT_NORM_WEIGHT].sizes(),
-                     at_weight_tensors_[IN_SELFOUT_NORM_WEIGHT].options())
-            .to(device_);
-
+    t[IN_NORM_BIAS] =
+        torch::zeros(t[IN_NORM_WEIGHT].sizes(), t[IN_NORM_WEIGHT].options());
+    t[IN_SELFOUT_NORM_BIAS] = torch::zeros(t[IN_SELFOUT_NORM_WEIGHT].sizes(),
+                                           t[IN_SELFOUT_NORM_WEIGHT].options());
     return;
   }
 
   for (const auto& [index, name] : WEIGHT_MAPPING) {
     if (WEIGHT_SHARD.find(index) != WEIGHT_SHARD.end()) {
-      set_weight(state_dict, name, index, WEIGHT_SHARD[index]);
+      set_weight(state_dict, name, index, WEIGHT_SHARD[index], to_host);
     } else {
-      set_weight(state_dict, name, index);
+      set_weight(state_dict, name, index, to_host);
     }
   }
-}
-
-void Qwen2DecoderLoader::merge_loaded_weights() {
-  if (quantize_type_ == "w8a8") {
-    at_weight_tensors_[IN_ATTENTION_OUT_DEQSCALE] =
-        at_weight_tensors_[IN_ATTENTION_OUT_DEQSCALE].to(torch::kFloat32);
-    at_weight_tensors_[IN_Q_DEQSCALE] =
-        torch::cat({at_weight_tensors_[IN_Q_DEQSCALE],
-                    at_weight_tensors_[IN_K_DEQSCALE],
-                    at_weight_tensors_[IN_V_DEQSCALE]},
-                   0)
-            .to(torch::kFloat32);
-    at_weight_tensors_[IN_K_DEQSCALE] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_V_DEQSCALE] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_K_OFFSET] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_V_OFFSET] = torch::zeros({1}).to(device_);
-
-    at_weight_tensors_[IN_K_SCALE] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_V_SCALE] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_MLP_W2_BIAS] =
-        torch::cat({at_weight_tensors_[IN_MLP_W2_BIAS],
-                    at_weight_tensors_[IN_MLP_W1_BIAS]},
-                   0);
-    at_weight_tensors_[IN_MLP_W1_BIAS] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_MLP_W2_DEQSCALE] =
-        torch::cat({at_weight_tensors_[IN_MLP_W2_DEQSCALE],
-                    at_weight_tensors_[IN_MLP_W1_DEQSCALE]},
-                   0)
-            .to(torch::kFloat32);
-    at_weight_tensors_[IN_MLP_W1_DEQSCALE] = torch::zeros({1}).to(device_);
-
-    at_weight_tensors_[IN_MLP_W1_OFFSET] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_MLP_W1_SCALE] = torch::zeros({1}).to(device_);
-    at_weight_tensors_[IN_Q_OFFSET] =
-        at_weight_tensors_[IN_Q_OFFSET].to(torch::kInt8).to(device_);
-    at_weight_tensors_[IN_ATTENTION_OUT_OFFSET] =
-        at_weight_tensors_[IN_ATTENTION_OUT_OFFSET]
-            .to(torch::kInt8)
-            .to(device_);
-    at_weight_tensors_[IN_MLP_W2_OFFSET] =
-        at_weight_tensors_[IN_MLP_W2_OFFSET].to(torch::kInt8).to(device_);
-    if (device_id_ != 0) {
-      torch::Tensor original_tensor = at_weight_tensors_[IN_ATTENTION_OUT_BIAS];
-      auto shape = original_tensor.sizes();
-      auto dtype = original_tensor.dtype();
-      auto device = original_tensor.device();
-
-      at_weight_tensors_[IN_ATTENTION_OUT_BIAS] = torch::zeros(
-          shape, torch::TensorOptions().dtype(dtype).device(device));
-    }
-  }
-
-  auto new_q_weight = torch::cat({at_weight_tensors_[IN_Q_WEIGHT],
-                                  at_weight_tensors_[IN_K_WEIGHT],
-                                  at_weight_tensors_[IN_V_WEIGHT]},
-                                 0)
-                          .transpose(0, 1);
-
-  at_weight_tensors_[IN_Q_WEIGHT] = at_npu::native::npu_format_cast(
-      new_q_weight.contiguous(), ACL_FORMAT_FRACTAL_NZ);
-
-  at_weight_tensors_[IN_K_WEIGHT] = torch::zeros({1}).to(device_);
-  at_weight_tensors_[IN_V_WEIGHT] = torch::zeros({1}).to(device_);
-
-  auto new_q_bias = torch::cat({at_weight_tensors_[IN_Q_BIAS],
-                                at_weight_tensors_[IN_K_BIAS],
-                                at_weight_tensors_[IN_V_BIAS]},
-                               0);
-  at_weight_tensors_[IN_Q_BIAS] = new_q_bias;
-
-  at_weight_tensors_[IN_K_BIAS] = torch::zeros({1}).to(device_);
-  at_weight_tensors_[IN_V_BIAS] = torch::zeros({1}).to(device_);
-
-  at_weight_tensors_[IN_ATTENTION_OUT_WEIGHT] = at_npu::native::npu_format_cast(
-      at_weight_tensors_[IN_ATTENTION_OUT_WEIGHT].transpose(0, 1).contiguous(),
-      ACL_FORMAT_FRACTAL_NZ);
-
-  auto new_mlp_weight = torch::cat({at_weight_tensors_[IN_MLP_W2_WEIGHT],
-                                    at_weight_tensors_[IN_MLP_W1_WEIGHT]},
-                                   0)
-                            .transpose(0, 1);
-
-  at_weight_tensors_[IN_MLP_W2_WEIGHT] = at_npu::native::npu_format_cast(
-      new_mlp_weight.contiguous(), ACL_FORMAT_FRACTAL_NZ);
-
-  at_weight_tensors_[IN_MLP_W1_WEIGHT] = torch::zeros({1}).to(device_);
-  at_weight_tensors_[IN_MLP_CPROJ_WEIGHT] = at_npu::native::npu_format_cast(
-      at_weight_tensors_[IN_MLP_CPROJ_WEIGHT].transpose(0, 1).contiguous(),
-      ACL_FORMAT_FRACTAL_NZ);
 }
 
 void Qwen2DecoderLoader::verify_loaded_weights() const {
+  const auto& t = working_tensors();
   for (const auto& [index, name] : WEIGHT_MAPPING) {
-    CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
+    CHECK(t[index].sizes() != std::vector<int64_t>({1}))
         << "weight is not loaded for " << name;
   }
+}
+
+void Qwen2DecoderLoader::merge_host_at_weights() {
+  auto& t = working_tensors();
+
+  if (quantize_type_ == "w8a8") {
+    t[IN_ATTENTION_OUT_DEQSCALE] =
+        t[IN_ATTENTION_OUT_DEQSCALE].to(torch::kFloat32);
+    t[IN_Q_DEQSCALE] =
+        torch::cat({t[IN_Q_DEQSCALE], t[IN_K_DEQSCALE], t[IN_V_DEQSCALE]}, 0)
+            .to(torch::kFloat32);
+    t[IN_K_DEQSCALE] = zero_like_working(IN_K_DEQSCALE);
+    t[IN_V_DEQSCALE] = zero_like_working(IN_V_DEQSCALE);
+    t[IN_K_OFFSET] = zero_like_working(IN_K_OFFSET);
+    t[IN_V_OFFSET] = zero_like_working(IN_V_OFFSET);
+    t[IN_K_SCALE] = zero_like_working(IN_K_SCALE);
+    t[IN_V_SCALE] = zero_like_working(IN_V_SCALE);
+    t[IN_MLP_W2_BIAS] = torch::cat({t[IN_MLP_W2_BIAS], t[IN_MLP_W1_BIAS]}, 0);
+    t[IN_MLP_W1_BIAS] = zero_like_working(IN_MLP_W1_BIAS);
+    t[IN_MLP_W2_DEQSCALE] =
+        torch::cat({t[IN_MLP_W2_DEQSCALE], t[IN_MLP_W1_DEQSCALE]}, 0)
+            .to(torch::kFloat32);
+    t[IN_MLP_W1_DEQSCALE] = zero_like_working(IN_MLP_W1_DEQSCALE);
+    t[IN_MLP_W1_OFFSET] = zero_like_working(IN_MLP_W1_OFFSET);
+    t[IN_MLP_W1_SCALE] = zero_like_working(IN_MLP_W1_SCALE);
+    t[IN_Q_OFFSET] = t[IN_Q_OFFSET].to(torch::kInt8);
+    t[IN_ATTENTION_OUT_OFFSET] = t[IN_ATTENTION_OUT_OFFSET].to(torch::kInt8);
+    t[IN_MLP_W2_OFFSET] = t[IN_MLP_W2_OFFSET].to(torch::kInt8);
+    if (device_id_ != 0) {
+      const auto& original = t[IN_ATTENTION_OUT_BIAS];
+      auto shape = original.sizes();
+      auto dtype = original.dtype();
+      t[IN_ATTENTION_OUT_BIAS] = torch::zeros(
+          shape, torch::TensorOptions().dtype(dtype).device(target_device()));
+    }
+  }
+
+  t[IN_Q_WEIGHT] =
+      cast_nz(torch::cat({t[IN_Q_WEIGHT], t[IN_K_WEIGHT], t[IN_V_WEIGHT]}, 0)
+                  .transpose(0, 1),
+              IN_Q_WEIGHT);
+  t[IN_K_WEIGHT] = zero_like_working(IN_K_WEIGHT);
+  t[IN_V_WEIGHT] = zero_like_working(IN_V_WEIGHT);
+
+  t[IN_Q_BIAS] = torch::cat({t[IN_Q_BIAS], t[IN_K_BIAS], t[IN_V_BIAS]}, 0);
+  t[IN_K_BIAS] = zero_like_working(IN_K_BIAS);
+  t[IN_V_BIAS] = zero_like_working(IN_V_BIAS);
+
+  t[IN_ATTENTION_OUT_WEIGHT] = cast_nz(
+      t[IN_ATTENTION_OUT_WEIGHT].transpose(0, 1), IN_ATTENTION_OUT_WEIGHT);
+
+  t[IN_MLP_W2_WEIGHT] = cast_nz(
+      torch::cat({t[IN_MLP_W2_WEIGHT], t[IN_MLP_W1_WEIGHT]}, 0).transpose(0, 1),
+      IN_MLP_W2_WEIGHT);
+  t[IN_MLP_W1_WEIGHT] = zero_like_working(IN_MLP_W1_WEIGHT);
+
+  t[IN_MLP_CPROJ_WEIGHT] =
+      cast_nz(t[IN_MLP_CPROJ_WEIGHT].transpose(0, 1), IN_MLP_CPROJ_WEIGHT);
 }
 
 }  // namespace layer

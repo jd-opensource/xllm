@@ -20,7 +20,6 @@ limitations under the License.
 #include <unordered_set>
 
 #include "common/global_flags.h"
-
 namespace xllm {
 namespace layer {
 
@@ -56,8 +55,10 @@ NpuQwen3MoeDecoderLayerImpl::NpuQwen3MoeDecoderLayerImpl(
 
   param_from_args(prefill_param_, model_args, parallel_args, true);
   param_from_args(decode_param_, model_args, parallel_args, false);
-  loader_ =
-      std::make_unique<Qwen3MoeDecoderLoader>(WEIGHT_COUNT_PER_LAYER, context);
+  loader_ = std::make_unique<Qwen3MoeDecoderLoader>(
+      WEIGHT_COUNT_PER_LAYER,
+      context,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
   initialize_tensors(options);
 }
 

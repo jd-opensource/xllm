@@ -1,6 +1,5 @@
 include(cc_binary)
 include(cc_library)
-include(cc_test)
 
 include_directories(
   ${CMAKE_SOURCE_DIR}/xllm/core/kernels/ascend
@@ -29,20 +28,3 @@ cc_library(
     torch
     :platform
 )
-
-set(TEST_SRCS
-  eplb_policy_test.cpp
-)
-
-cc_test(
-  NAME
-    eplb_policy_test
-  SRCS
-    ${TEST_SRCS}
-  DEPS
-    torch
-    :eplb
-    GTest::gtest_main
-)
-
-target_link_libraries(eplb_policy_test PRIVATE $<$<BOOL:${USE_NPU}>:c_sec>)

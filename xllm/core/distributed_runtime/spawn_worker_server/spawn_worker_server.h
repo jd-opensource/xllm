@@ -40,7 +40,9 @@ class SpawnWorkerServer final {
                              bool enable_prefill_sp,
                              const std::string& task_type,
                              const std::string& worker_type,
-                             const std::string& communication_backend);
+                             const std::string& communication_backend,
+                             const std::string& npu_kernel_backend,
+                             const std::string& rank_tablefile);
 
   ~SpawnWorkerServer();
 

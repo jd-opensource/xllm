@@ -1,5 +1,4 @@
 include(cc_library)
-include(cc_test)
 
 cc_library(
   NAME
@@ -20,6 +19,7 @@ cc_library(
     qwen3_rerank_service_impl.h
     non_stream_call.h
     service_impl_factory.h
+    serving_mode.h
     stream_call.h
     models_service_impl.h
     stream_output_parser.h
@@ -29,6 +29,7 @@ cc_library(
   SRCS
     api_service.cpp
     chat_json_parser.cpp
+    service_impl_factory.cpp
     call.cpp
     completion_service_impl.cpp
     rec_completion_service_impl.cpp
@@ -55,70 +56,3 @@ cc_library(
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
 )
-
-cc_test(
-  NAME
-    anthropic_protocol_test
-  SRCS
-    anthropic_protocol_test.cpp
-  DEPS
-    proto::xllm_proto
-    GTest::gtest
-    GTest::gtest_main
-    nlohmann_json::nlohmann_json
-    glog::glog
-)
-
-# Integration test for Anthropic service - requires running server
-# Tests are prefixed with DISABLED_ in code to skip by default
-# Run manually: ./anthropic_service_test --gtest_also_run_disabled_tests
-cc_test(
-  NAME
-    anthropic_service_test
-  SRCS
-    anthropic_service_test.cpp
-  DEPS
-    GTest::gtest
-    GTest::gtest_main
-    nlohmann_json::nlohmann_json
-    glog::glog
-)
-target_link_libraries(anthropic_service_test PRIVATE brpc leveldb::leveldb OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
-add_dependencies(anthropic_service_test brpc-static)
-
-cc_test(
-  NAME
-    api_service_test
-  SRCS
-    chat_json_parser_test.cpp
-  DEPS
-    api_service
-    GTest::gtest_main
-    nlohmann_json::nlohmann_json
-)
-
-cc_test(
-  NAME
-    sample_service_impl_test
-  SRCS
-    sample_service_impl_test.cpp
-  DEPS
-    api_service
-    GTest::gtest_main
-)
-
-# Integration smoke tests for OpenAI-compatible endpoints. These require a
-# running server and are disabled by default in code.
-cc_test(
-  NAME
-    openai_service_test
-  SRCS
-    openai_service_test.cpp
-  DEPS
-    GTest::gtest
-    GTest::gtest_main
-    nlohmann_json::nlohmann_json
-    glog::glog
-)
-target_link_libraries(openai_service_test PRIVATE brpc leveldb::leveldb OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)
-add_dependencies(openai_service_test brpc-static)

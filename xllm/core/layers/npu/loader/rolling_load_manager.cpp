@@ -21,13 +21,13 @@ limitations under the License.
 
 #include <algorithm>
 
-#include "base_manual_loader.h"
+#include "base_loader.h"
 #include "platform/stream.h"
 
 namespace xllm {
 
 RollingLoadManager::RollingLoadManager(
-    std::vector<layer::BaseManualLoader*> loaders,
+    std::vector<layer::BaseLoader*> loaders,
     std::shared_ptr<layer::RollingWeightBuffer> rolling_buffer,
     Stream* load_stream,
     Stream* compute_stream,

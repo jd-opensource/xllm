@@ -20,7 +20,9 @@ limitations under the License.
 #include <cstdint>
 #include <optional>
 #include <set>
+#include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/macros.h"
@@ -28,6 +30,29 @@ limitations under the License.
 #include "util/slice.h"
 
 namespace xllm {
+
+struct RecConstraintTables {
+  std::vector<int32_t> first_token_ids;
+
+  // prefix1_values[prefix1_offsets[t0]:prefix1_offsets[t0 + 1]] contains
+  // valid t1 tokens after prefix [t0].
+  std::vector<int32_t> prefix1_offsets;
+  std::vector<int32_t> prefix1_values;
+  // Globally sorted keys aligned with prefix1_values and prefix2_value_offsets.
+  // key = int64_t(t0) * vocab_size + int64_t(t1).
+  std::vector<int64_t> prefix1_pair_keys;
+
+  // prefix2_value_offsets[i:i + 1] is aligned with prefix1_values[i].
+  // It contains valid t2 tokens after prefix [t0, prefix1_values[i]].
+  std::vector<int32_t> prefix2_value_offsets;
+  std::vector<int32_t> prefix2_values;
+
+  int32_t vocab_size = 0;
+  int32_t max_first_degree = 0;
+  int32_t max_prefix1_degree = 0;
+  int32_t max_prefix2_degree = 0;
+};
+
 // A vocab dictionary in generative recommendation scenarios, used for mapping
 // token IDs and item IDs, currently updated with the model version, and
 // real-time updates are not supported.
@@ -38,7 +63,7 @@ class RecVocabDict final {
   ~RecVocabDict() {
     initialized_ = false;
     item_to_tokens_map_.clear();
-    tokens_to_items_map_.clear();
+    tokens_to_item_infos_map_.clear();
     prefix_tokens_to_next_tokens_map_.clear();
   }
 
@@ -58,6 +83,9 @@ class RecVocabDict final {
    */
   bool get_items_by_tokens(const RecTokenTriple& rec_token_triple,
                            std::vector<int64_t>* item_ids) const;
+
+  bool get_item_infos_by_tokens(const RecTokenTriple& rec_token_triple,
+                                std::vector<RecItemInfo>* item_infos) const;
 
   /**
    * @brief Get the corresponding token ID triplet through a item id
@@ -84,17 +112,19 @@ class RecVocabDict final {
   const std::unordered_set<int32_t>& get_next_tokens_by_prefix_tokens(
       const Slice<int32_t>& prefix_token_ids) const;
 
+  RecConstraintTables build_constraint_tables(int32_t vocab_size) const;
+
  private:
   // Check if initialization has been successful
   bool initialized_ = false;
 
-  // Convert token to item map, key: token id triplet, value: item id list,
-  // there is a token id triplet corresponding to multiple item IDs, and
-  // boost::hash<RecTokenTriple> will generate ordered triplet hash value
+  // Convert token to item map, key: token id triplet, value: item info list,
+  // there is a token id triplet corresponding to multiple items, and
+  // boost::hash<RecTokenTriple> will generate ordered triplet hash value.
   std::unordered_map<RecTokenTriple,
-                     std::vector<int64_t>,
+                     std::vector<RecItemInfo>,
                      boost::hash<RecTokenTriple>>
-      tokens_to_items_map_;
+      tokens_to_item_infos_map_;
 
   // Convert item to tokens map, key: item id, value: token triplet, there is a
   // item id corresponding to a token id triplet

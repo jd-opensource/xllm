@@ -385,4 +385,17 @@ void fused_indexer_k(const torch::Tensor& x,
                      const std::optional<torch::Tensor>& beta,
                      double eps);
 
+torch::Tensor gated_layer_norm(torch::Tensor& x,
+                               const torch::Tensor& weight,
+                               const torch::Tensor& bias,
+                               double eps,
+                               const std::optional<torch::Tensor>& gate,
+                               int64_t group_size,
+                               bool norm_before_gate);
+
+torch::Tensor gemma_rms_norm(const torch::Tensor& x,
+                             const torch::Tensor& gamma,
+                             double eps,
+                             torch::Tensor& norm_out);
+
 }  // namespace xllm::kernel::mlu

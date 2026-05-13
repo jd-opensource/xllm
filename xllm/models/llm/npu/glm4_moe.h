@@ -16,8 +16,8 @@ limitations under the License.
 #pragma once
 
 #include "core/framework/model/model_output.h"
-#include "core/framework/model/npu_dp_ep_padding.h"
 #include "core/framework/model_context.h"
+#include "core/framework/parallel_state/npu_dp_ep_padding.h"
 #include "core/layers/npu/npu_glm4_moe_decoder_layer.h"
 #include "llm_model_base.h"
 
@@ -74,9 +74,7 @@ class Glm4MoeDecoderLayerImpl : public torch::nn::Module {
     decoder_layer_->reload_weights_from_device();
   }
 
-  layer::BaseManualLoader* get_manual_loader() {
-    return decoder_layer_->get_manual_loader();
-  }
+  layer::BaseLoader* get_loader() { return decoder_layer_->get_loader(); }
 
   void refresh_rolling_weights() { decoder_layer_->refresh_rolling_weights(); }
 
@@ -317,11 +315,11 @@ class Glm4MoeModelImpl : public torch::nn::Module {
     }
   }
 
-  std::vector<layer::BaseManualLoader*> get_decoder_loaders() {
-    std::vector<layer::BaseManualLoader*> loaders;
+  std::vector<layer::BaseLoader*> get_decoder_loaders() {
+    std::vector<layer::BaseLoader*> loaders;
     loaders.reserve(layers_.size());
     for (auto& layer : layers_) {
-      loaders.push_back(layer->get_manual_loader());
+      loaders.push_back(layer->get_loader());
     }
     return loaders;
   }

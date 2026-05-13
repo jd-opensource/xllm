@@ -15,294 +15,26 @@ limitations under the License.
 
 #include "glm4_moe_lite_decoder_loader.h"
 
+#include <glog/logging.h>
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
+
+#include <cctype>
+#include <sstream>
+
+#include "glm_moe_loader_constants.h"
 
 namespace xllm {
 namespace layer {
 
-enum DecoderLayerTensorId : int {
-  IN_INPUT_NORM_WEIGHT = 0,
-  IN_INPUT_NORM_BIAS = 1,
-  IN_INPUT_NORM_NEW_WEIGHT = 2,
-  IN_INPUT_NORM_NEW_BIAS = 3,
-
-  IN_Q_A_WEIGHT = 4,
-  IN_Q_A_BIAS = 5,
-  IN_Q_A_DESCALE = 6,
-  IN_Q_A_OFFSET = 7,
-  IN_Q_A_SCALE = 8,
-  IN_Q_A_COMPRESS_IDX = 9,
-
-  IN_Q_B_WEIGHT = 10,
-  IN_Q_B_BIAS = 11,
-  IN_Q_B_DESCALE = 12,
-  IN_Q_B_OFFSET = 13,
-  IN_Q_B_SCALE = 14,
-  IN_Q_B_COMPRESS_IDX = 15,
-
-  IN_KV_A_WEIGHT = 16,
-  IN_KV_A_BIAS = 17,
-  IN_KV_A_DESCALE = 18,
-  IN_KV_A_OFFSET = 19,
-  IN_KV_A_SCALE = 20,
-  IN_KV_A_COMPRESS_IDX = 21,
-
-  IN_K_B_WEIGHT = 22,
-  IN_K_B_BIAS = 23,
-  IN_K_B_DESCALE = 24,
-  IN_K_B_OFFSET = 25,
-  IN_K_B_SCALE = 26,
-  IN_K_B_COMPRESS_IDX = 27,
-
-  IN_V_B_WEIGHT = 28,
-  IN_V_B_BIAS = 29,
-  IN_V_B_DESCALE = 30,
-  IN_V_B_OFFSET = 31,
-  IN_V_B_SCALE = 32,
-  IN_V_B_COMPRESS_IDX = 33,
-
-  IN_QKV_DENSE_WEIGHT = 34,
-  IN_QKV_DENSE_BIAS = 35,
-  IN_QKV_DENSE_DESCALE = 36,
-  IN_QKV_DENSE_OFFSET = 37,
-  IN_QKV_DENSE_SCALE = 38,
-  IN_QKV_DENSE_COMPRESS_IDX = 39,
-
-  IN_POST_ATTN_NORM_WEIGHT = 40,
-  IN_POST_ATTN_NORM_BIAS = 41,
-  IN_POST_ATTN_NORM_NEW_WEIGHT = 42,
-  IN_POST_ATTN_NORM_NEW_BIAS = 43,
-
-  IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT = 44,
-  IN_MLP_GATEUP_BIAS_SHARED_EXPERT = 45,
-  IN_MLP_GATEUP_DESCALE_SHARED_EXPERT = 46,
-  IN_MLP_GATEUP_OFFSET_SHARED_EXPERT = 47,
-  IN_MLP_GATEUP_SCALE_SHARED_EXPERT = 48,
-  IN_MLP_GATEUP_COMPRESS_IDX_SHARED_EXPERT = 49,
-
-  IN_MLP_DOWN_WEIGHT_SHARED_EXPERT = 50,
-  IN_MLP_DOWN_BIAS_SHARED_EXPERT = 51,
-  IN_MLP_DOWN_DESCALE_SHARED_EXPERT = 52,
-  IN_MLP_DOWN_OFFSET_SHARED_EXPERT = 53,
-  IN_MLP_DOWN_SCALE_SHARED_EXPERT = 54,
-  IN_MLP_DOWN_COMPRESS_IDX_SHARED_EXPERT = 55,
-
-  IN_SHARED_EXPERT_GATE_WEIGHT = 56,
-  IN_SHARED_EXPERT_GATE_BIAS = 57,
-  IN_SHARED_EXPERT_GATE_DESCALE = 58,
-  IN_SHARED_EXPERT_GATE_OFFSET = 59,
-  IN_SHARED_EXPERT_GATE_SCALE = 60,
-  IN_SHARED_EXPERT_GATE_COMPRESS_IDX = 61,
-
-  BLOCK_SPARSE_MOE_GATE_WEIGHT = 62,
-  BLOCK_SPARSE_MOE_GATE_BIAS = 63,
-  BLOCK_SPARSE_MOE_GATE_DESCALE = 64,
-  BLOCK_SPARSE_MOE_GATE_OFFSET = 65,
-  BLOCK_SPARSE_MOE_GATE_SCALE = 66,
-  BLOCK_SPARSE_MOE_GATE_COMPRESS_IDX = 67,
-
-  IN_MLP_GATEUP_WEIGHT = 68,
-  IN_MLP_GATEUP_BIAS = 69,
-  IN_MLP_GATEUP_DESCALE = 70,
-  IN_MLP_GATEUP_OFFSET = 71,
-  IN_MLP_GATEUP_SCALE = 72,
-  IN_MLP_GATEUP_COMPRESS_IDX = 73,
-
-  IN_MLP_DOWN_WEIGHT = 74,
-  IN_MLP_DOWN_BIAS = 75,
-  IN_MLP_DOWN_DESCALE = 76,
-  IN_MLP_DOWN_OFFSET = 77,
-  IN_MLP_DOWN_SCALE = 78,
-  IN_MLP_DOWN_COMPRESS_IDX = 79,
-
-  Q_NORM_WEIGHT = 80,
-  Q_NORM_BIAS = 81,
-  KV_NORM_WEIGHT = 82,
-  KV_NORM_BIAS = 83
-};
-
-static std::unordered_map<std::string, int> WEIGHT_MAPPING = {
-    {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
-    {"post_attention_layernorm.weight", IN_POST_ATTN_NORM_WEIGHT},
-
-    {"self_attn.q_a_proj.weight", IN_Q_A_WEIGHT},
-    {"self_attn.q_a_proj.bias", IN_Q_A_BIAS},
-    {"self_attn.kv_a_proj_with_mqa.weight", IN_KV_A_WEIGHT},
-    {"self_attn.kv_a_proj_with_mqa.bias", IN_KV_A_BIAS},
-
-    {"self_attn.q_b_proj.weight", IN_Q_B_WEIGHT},
-    {"self_attn.q_b_proj.bias", IN_Q_B_BIAS},
-    {"self_attn.kv_b_proj.weight", IN_K_B_WEIGHT},  // set by func set_kv_weight
-    {"self_attn.kv_b_proj.bias", IN_K_B_BIAS},
-
-    {"self_attn.q_a_layernorm.weight", Q_NORM_WEIGHT},
-    {"self_attn.q_a_layernorm.bias", Q_NORM_BIAS},
-    {"self_attn.kv_a_layernorm.weight", KV_NORM_WEIGHT},
-    {"self_attn.kv_a_layernorm.bias", KV_NORM_BIAS},
-
-    {"self_attn.o_proj.weight", IN_QKV_DENSE_WEIGHT},
-    {"self_attn.o_proj.bias", IN_QKV_DENSE_BIAS},
-
-    // mlp or shared expert
-    {"mlp.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.up_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.down_proj.weight", IN_MLP_DOWN_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.up_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.down_proj.weight", IN_MLP_DOWN_WEIGHT_SHARED_EXPERT},
-
-    // MoE Gate
-    {"mlp.gate.weight", BLOCK_SPARSE_MOE_GATE_WEIGHT},
-    {"mlp.gate.e_score_correction_bias", BLOCK_SPARSE_MOE_GATE_BIAS},
-
-    // Expert MLP - Gate/Up projections
-    {"gate_proj.weight", IN_MLP_GATEUP_WEIGHT},
-    {"up_proj.weight", IN_MLP_GATEUP_WEIGHT},
-
-    // Expert MLP - Down projection
-    {"down_proj.weight", IN_MLP_DOWN_WEIGHT},
-
-};
-
-static std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
-    {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
-    {"input_layernorm.bias", IN_INPUT_NORM_NEW_BIAS},
-
-    {"self_attn.q_a_proj.weight", IN_Q_A_WEIGHT},
-    {"self_attn.q_a_proj.quant_bias", IN_Q_A_BIAS},
-    {"self_attn.q_a_proj.deq_scale", IN_Q_A_DESCALE},
-    {"self_attn.q_a_proj.input_offset", IN_Q_A_OFFSET},
-    {"self_attn.q_a_proj.input_scale", IN_Q_A_SCALE},
-
-    {"self_attn.q_a_layernorm.weight", Q_NORM_WEIGHT},
-    {"self_attn.q_a_layernorm.bias", Q_NORM_BIAS},
-
-    {"self_attn.q_proj.weight", IN_Q_B_WEIGHT},
-    {"self_attn.q_b_proj.weight", IN_Q_B_WEIGHT},
-    {"self_attn.q_b_proj.quant_bias", IN_Q_B_BIAS},
-    {"self_attn.q_b_proj.input_scale", IN_Q_B_SCALE},
-    {"self_attn.q_b_proj.deq_scale", IN_Q_B_DESCALE},
-    {"self_attn.q_b_proj.input_offset", IN_Q_B_OFFSET},
-
-    {"self_attn.kv_a_proj_with_mqa.weight", IN_KV_A_WEIGHT},
-    {"self_attn.kv_a_proj_with_mqa.quant_bias", IN_KV_A_BIAS},
-    {"self_attn.kv_a_proj_with_mqa.deq_scale", IN_KV_A_DESCALE},
-    {"self_attn.kv_a_proj_with_mqa.input_offset", IN_KV_A_OFFSET},
-    {"self_attn.kv_a_proj_with_mqa.input_scale", IN_KV_A_SCALE},
-
-    {"self_attn.kv_a_layernorm.weight", KV_NORM_WEIGHT},
-    {"self_attn.kv_a_layernorm.bias", KV_NORM_BIAS},
-
-    {"self_attn.kv_b_proj.weight", IN_K_B_WEIGHT},  // set by func set_kv_weight
-    {"self_attn.kv_b_proj.bias", IN_K_B_BIAS},
-
-    {"self_attn.o_proj.weight", IN_QKV_DENSE_WEIGHT},
-    {"self_attn.o_proj.quant_bias", IN_QKV_DENSE_BIAS},
-    {"self_attn.o_proj.deq_scale", IN_QKV_DENSE_DESCALE},
-    {"self_attn.o_proj.weight_offset", IN_QKV_DENSE_OFFSET},
-    {"self_attn.o_proj.weight_scale", IN_QKV_DENSE_SCALE},
-
-    {"post_attention_layernorm.weight", IN_POST_ATTN_NORM_WEIGHT},
-    {"post_attention_layernorm.bias", IN_POST_ATTN_NORM_NEW_BIAS},
-
-    // mlp
-    {"mlp.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.gate_proj.weight_offset", IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.gate_proj.weight_scale", IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
-
-    {"mlp.up_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.up_proj.weight_offset", IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.up_proj.weight_scale", IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
-
-    {"mlp.down_proj.weight", IN_MLP_DOWN_WEIGHT_SHARED_EXPERT},
-    {"mlp.down_proj.weight_offset", IN_MLP_DOWN_OFFSET_SHARED_EXPERT},
-    {"mlp.down_proj.weight_scale", IN_MLP_DOWN_SCALE_SHARED_EXPERT},
-
-    // shared expert
-    {"mlp.shared_experts.gate_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.gate_proj.weight_offset",
-     IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.shared_experts.gate_proj.weight_scale",
-     IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
-
-    {"mlp.shared_experts.up_proj.weight", IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.up_proj.weight_offset",
-     IN_MLP_GATEUP_OFFSET_SHARED_EXPERT},
-    {"mlp.shared_experts.up_proj.weight_scale",
-     IN_MLP_GATEUP_SCALE_SHARED_EXPERT},
-
-    {"mlp.shared_experts.down_proj.weight", IN_MLP_DOWN_WEIGHT_SHARED_EXPERT},
-    {"mlp.shared_experts.down_proj.weight_offset",
-     IN_MLP_DOWN_OFFSET_SHARED_EXPERT},
-    {"mlp.shared_experts.down_proj.weight_scale",
-     IN_MLP_DOWN_SCALE_SHARED_EXPERT},
-
-    // MoE Gate
-    {"mlp.gate.weight", BLOCK_SPARSE_MOE_GATE_WEIGHT},
-    {"mlp.gate.e_score_correction_bias", BLOCK_SPARSE_MOE_GATE_BIAS},
-
-    {"gate_proj.weight", IN_MLP_GATEUP_WEIGHT},
-    {"gate_proj.weight_offset", IN_MLP_GATEUP_OFFSET},
-    {"gate_proj.weight_scale", IN_MLP_GATEUP_SCALE},
-    {"up_proj.weight", IN_MLP_GATEUP_WEIGHT},
-    {"up_proj.weight_offset", IN_MLP_GATEUP_OFFSET},
-    {"up_proj.weight_scale", IN_MLP_GATEUP_SCALE},
-
-    {"down_proj.weight", IN_MLP_DOWN_WEIGHT},
-    {"down_proj.weight_offset", IN_MLP_DOWN_OFFSET},
-    {"down_proj.weight_scale", IN_MLP_DOWN_SCALE},
-};
-
-static const std::unordered_map<std::string, std::vector<int>>
-    SPECIAL_MULTI_ASSIGN_W8A8 = {
-        {"input_layernorm.weight",
-         {IN_INPUT_NORM_WEIGHT, IN_INPUT_NORM_NEW_WEIGHT}},
-        {"post_attention_layernorm.weight",
-         {IN_POST_ATTN_NORM_WEIGHT, IN_POST_ATTN_NORM_NEW_WEIGHT}},
-};
-
-static const std::map<int, int> WEIGHT_SHARD = {
-    {IN_Q_B_WEIGHT, 0},
-    {IN_Q_B_BIAS, 0},
-    {IN_K_B_WEIGHT, 0},
-    {IN_K_B_BIAS, 0},
-    {IN_QKV_DENSE_WEIGHT, 1},
-
-    {IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT, 0},
-    {IN_MLP_DOWN_WEIGHT_SHARED_EXPERT, 1},
-    {IN_MLP_GATEUP_WEIGHT, 0},
-    {IN_MLP_DOWN_WEIGHT, 1},
-};
-
-static const std::map<int, int> WEIGHT_SHARD_W8A8 = {
-    {IN_Q_B_WEIGHT, 0},
-    {IN_Q_B_BIAS, 0},
-    {IN_Q_B_SCALE, 0},
-    {IN_Q_B_DESCALE, 0},
-    {IN_Q_B_OFFSET, 0},
-    {IN_K_B_WEIGHT, 0},
-    {IN_K_B_BIAS, 0},
-    {IN_K_B_SCALE, 0},
-    {IN_K_B_DESCALE, 0},
-    {IN_K_B_OFFSET, 0},
-    {IN_QKV_DENSE_WEIGHT, 1},
-
-    {IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT, 0},
-    {IN_MLP_GATEUP_OFFSET_SHARED_EXPERT, 0},
-    {IN_MLP_GATEUP_SCALE_SHARED_EXPERT, 0},
-    {IN_MLP_DOWN_WEIGHT_SHARED_EXPERT, 1},
-    {IN_MLP_GATEUP_WEIGHT, 0},
-    {IN_MLP_GATEUP_OFFSET, 0},
-    {IN_MLP_GATEUP_SCALE, 0},
-    {IN_MLP_DOWN_WEIGHT, 1},
-};
+using namespace glm4_moe_lite_decoder_constants;
 
 Glm4MoeDecoderLiteLoader::Glm4MoeDecoderLiteLoader(
     uint64_t weight_count,
     const ModelContext& context,
     int32_t layer_id,
-    int32_t prefill_param_firstKDenseReplace)
-    : BaseLoader(weight_count, context),
+    int32_t prefill_param_firstKDenseReplace,
+    LoadMode mode)
+    : BaseLoader(weight_count, context, mode),
       layer_id_(layer_id),
       prefill_param_firstKDenseReplace_(prefill_param_firstKDenseReplace) {
   auto model_args = context.get_model_args();
@@ -317,11 +49,21 @@ Glm4MoeDecoderLiteLoader::Glm4MoeDecoderLiteLoader(
   v_head_dim_ = model_args.v_head_dim();
   kv_lora_rank_ = model_args.kv_lora_rank();
 
-  tensor_placeholder_ = torch::zeros({1}).to(options);
+  tensor_placeholder_ = torch::zeros({1}, options.device(target_device()));
 
   weight_count_ = WEIGHT_COUNT_PER_LAYER;
 
-  at_weight_tensors_.resize(weight_count_);
+  working_tensors().resize(weight_count_);
+  if (mode == LoadMode::kManual) {
+    // Manual-mode initializes host slots to placeholder zeros so `numel() != 0`
+    // checks in verify_loaded_weights() behave the same as eager mode.
+    auto host_options =
+        torch::TensorOptions().dtype(options.dtype()).device(torch::kCPU);
+    for (uint64_t i = 0; i < weight_count_; ++i) {
+      at_host_weight_tensors_[i] = torch::zeros({1}, host_options);
+    }
+    at_weight_tensors_.resize(weight_count_);
+  }
 
   num_experts_ = model_args.num_experts();
   ep_size_ = parallel_args.ep_size();
@@ -365,9 +107,6 @@ void Glm4MoeDecoderLiteLoader::resize_experts_weights(
 
 void Glm4MoeDecoderLiteLoader::load_state_dict(const StateDict& state_dict) {
   for (const auto& [name, tensor] : state_dict) {
-    bool is_sharded = false;
-    int index = 0;
-
     if (absl::EndsWith(name, "self_attn.q_b_proj.weight")) {
       padding_qb_weight(state_dict, name, tensor);
       continue;
@@ -394,53 +133,47 @@ void Glm4MoeDecoderLiteLoader::load_state_dict(const StateDict& state_dict) {
 }
 
 void Glm4MoeDecoderLiteLoader::verify_loaded_weights() const {
+  const auto& t = working_tensors();
   for (const auto& [name, index] : WEIGHT_MAPPING) {
     if (name == "down_proj.weight" || name == "gate_proj.weight" ||
         name == "up_proj.weight" || name == "mlp.gate.weight" ||
         name == "mlp.gate.e_score_correction_bias") {
       continue;
     }
-    CHECK(at_weight_tensors_[index].numel() != 0)
+    CHECK(t[index].numel() != 0)
         << layer_id_ << "-weight is not loaded for " << name;
   }
 }
 
-void Glm4MoeDecoderLiteLoader::merge_loaded_weights() {
+void Glm4MoeDecoderLiteLoader::merge_host_at_weights() {
   merge_shared_experts_weights();
   if (layer_id_ >= prefill_param_firstKDenseReplace_) {
     merge_experts_weights();
   }
-  at_weight_tensors_[IN_Q_A_WEIGHT] =
-      torch::cat({at_weight_tensors_[IN_KV_A_WEIGHT],
-                  at_weight_tensors_[IN_Q_A_WEIGHT]},
-                 0)
-          .contiguous();
+  auto& t = working_tensors();
+  t[IN_Q_A_WEIGHT] =
+      torch::cat({t[IN_KV_A_WEIGHT], t[IN_Q_A_WEIGHT]}, 0).contiguous();
 
   if (quantize_type_ == "w8a8_dynamic") {
-    at_weight_tensors_[IN_Q_A_BIAS] = at_weight_tensors_[IN_Q_A_BIAS].squeeze();
-    at_weight_tensors_[IN_KV_A_BIAS] =
-        at_weight_tensors_[IN_KV_A_BIAS].squeeze();
+    t[IN_Q_A_BIAS] = t[IN_Q_A_BIAS].squeeze();
+    t[IN_KV_A_BIAS] = t[IN_KV_A_BIAS].squeeze();
 
-    at_weight_tensors_[IN_Q_A_BIAS] =
-        torch::cat(
-            {at_weight_tensors_[IN_KV_A_BIAS], at_weight_tensors_[IN_Q_A_BIAS]},
-            0)
-            .contiguous();
-    at_weight_tensors_[IN_Q_A_DESCALE] =
-        torch::cat({at_weight_tensors_[IN_KV_A_DESCALE],
-                    at_weight_tensors_[IN_Q_A_DESCALE]},
-                   0)
-            .contiguous();
-    at_weight_tensors_[IN_KV_A_DESCALE] = tensor_placeholder_;
+    t[IN_Q_A_BIAS] =
+        torch::cat({t[IN_KV_A_BIAS], t[IN_Q_A_BIAS]}, 0).contiguous();
+    t[IN_Q_A_DESCALE] =
+        torch::cat({t[IN_KV_A_DESCALE], t[IN_Q_A_DESCALE]}, 0).contiguous();
+    t[IN_KV_A_DESCALE] = tensor_placeholder_;
   }
 
-  at_weight_tensors_[IN_Q_A_WEIGHT] =
-      at_npu::native::npu_format_cast(at_weight_tensors_[IN_Q_A_WEIGHT], 29);
-  at_weight_tensors_[IN_Q_B_WEIGHT] =
-      at_npu::native::npu_format_cast(at_weight_tensors_[IN_Q_B_WEIGHT], 29);
+  if (!load_to_host()) {
+    // Manual mode leaves IN_Q_A_WEIGHT and IN_Q_B_WEIGHT in ND host-side;
+    // eager mode applies the NPU NZ format cast directly.
+    t[IN_Q_A_WEIGHT] = at_npu::native::npu_format_cast(t[IN_Q_A_WEIGHT], 29);
+    t[IN_Q_B_WEIGHT] = at_npu::native::npu_format_cast(t[IN_Q_B_WEIGHT], 29);
+  }
 
-  at_weight_tensors_[IN_KV_A_WEIGHT] = tensor_placeholder_;
-  at_weight_tensors_[IN_KV_A_BIAS] = tensor_placeholder_;
+  t[IN_KV_A_WEIGHT] = tensor_placeholder_;
+  t[IN_KV_A_BIAS] = tensor_placeholder_;
 }
 
 void Glm4MoeDecoderLiteLoader::padding_qb_weight(const StateDict& state_dict,
@@ -475,7 +208,7 @@ void Glm4MoeDecoderLiteLoader::padding_qb_weight(const StateDict& state_dict,
                             (num_heads_ - actual_n_heads_) *
                                 (qk_nope_head_dim_ + qk_rope_head_dim_) /
                                 dp_local_tp_size_});
-  tmp_tensor = torch::nn::functional::pad(tmp_tensor, pad).to(device_);
+  tmp_tensor = torch::nn::functional::pad(tmp_tensor, pad).to(target_device());
 
   if (index == BLOCK_SPARSE_MOE_GATE_BIAS) {
     auto min_val = tmp_tensor.min();
@@ -483,16 +216,17 @@ void Glm4MoeDecoderLiteLoader::padding_qb_weight(const StateDict& state_dict,
   }
   correct_tensor_dtype(tmp_tensor, name);
 
+  auto& t = working_tensors();
   if (quantize_type_.compare("w8a8_dynamic") == 0) {
     auto it = SPECIAL_MULTI_ASSIGN_W8A8.find(name);
     if (it != SPECIAL_MULTI_ASSIGN_W8A8.end()) {
       for (int idx : it->second) {
-        at_weight_tensors_[idx] = tmp_tensor;
+        t[idx] = tmp_tensor;
       }
       return;
     }
   }
-  at_weight_tensors_[index] = tmp_tensor;
+  t[index] = tmp_tensor;
 }
 
 void Glm4MoeDecoderLiteLoader::set_kv_weight(const StateDict& state_dict,
@@ -508,14 +242,13 @@ void Glm4MoeDecoderLiteLoader::set_kv_weight(const StateDict& state_dict,
 
   torch::Tensor mutable_tensor;
   if (parallel_args_.world_size() <= 1) {
-    mutable_tensor = state_dict.get_tensor(tensor_name).to(device_);
+    mutable_tensor = state_dict.get_tensor(tensor_name).to(target_device());
     correct_tensor_dtype(mutable_tensor, tensor_name);
   } else {
     mutable_tensor =
         get_sharded_tensor(
             state_dict, tensor_name, dim, dp_local_tp_rank_, dp_local_tp_size_)
-            .to(device_);
-    // mutable_tensor = get_sharded_tensor(state_dict, tensor_name, dim);
+            .to(target_device());
     correct_tensor_dtype(mutable_tensor, tensor_name);
   }
 
@@ -538,8 +271,9 @@ void Glm4MoeDecoderLiteLoader::set_kv_weight(const StateDict& state_dict,
           .slice(1, qk_nope_head_dim_, qk_nope_head_dim_ + v_head_dim_)
           .transpose(1, 2)
           .contiguous();
-  at_weight_tensors_[IN_K_B_WEIGHT] = k_b_proj_preprocessed.to(device_);
-  at_weight_tensors_[IN_V_B_WEIGHT] = v_b_proj_preprocessed.to(device_);
+  auto& t = working_tensors();
+  t[IN_K_B_WEIGHT] = k_b_proj_preprocessed.to(target_device());
+  t[IN_V_B_WEIGHT] = v_b_proj_preprocessed.to(target_device());
 }
 
 void Glm4MoeDecoderLiteLoader::process_expert_weights(
@@ -594,11 +328,11 @@ void Glm4MoeDecoderLiteLoader::process_shared_expert_weights(
   const bool is_sharded = shard_map.count(index);
   tmp_tensor = is_sharded
                    ? get_sharded_tensor(state_dict, name, shard_map.at(index))
-                         .to(device_)
-                   : tensor.to(device_);
+                         .to(target_device())
+                   : tensor.to(target_device());
 
   if (absl::StrContains(name, "down_proj")) {
-    at_weight_tensors_[index] = tmp_tensor;
+    working_tensors()[index] = tmp_tensor;
   } else {
     shared_experts_weights_[name] = tmp_tensor;
   }
@@ -625,10 +359,10 @@ void Glm4MoeDecoderLiteLoader::process_mlp_common_weights(
                                                       shard_map.at(index),
                                                       dp_local_tp_rank_,
                                                       dp_local_tp_size_)
-                                       .to(device_)
-                                 : tensor.to(device_);
+                                       .to(target_device())
+                                 : tensor.to(target_device());
   if (absl::StrContains(name, "down_proj")) {
-    at_weight_tensors_[index] = tmp_tensor;
+    working_tensors()[index] = tmp_tensor;
   } else {
     shared_experts_weights_[name] = tmp_tensor;
   }
@@ -659,8 +393,8 @@ void Glm4MoeDecoderLiteLoader::process_general_weights(
                                                WEIGHT_SHARD_W8A8.at(index),
                                                dp_local_tp_rank_,
                                                dp_local_tp_size_)
-                                .to(device_)
-                          : tensor.to(device_);
+                                .to(target_device())
+                          : tensor.to(target_device());
 
   if (index == BLOCK_SPARSE_MOE_GATE_BIAS) {
     auto min_val = tmp_tensor.min();
@@ -668,16 +402,17 @@ void Glm4MoeDecoderLiteLoader::process_general_weights(
   }
   correct_tensor_dtype(tmp_tensor, name);
 
+  auto& t = working_tensors();
   if (quantize_type_.compare("w8a8_dynamic") == 0) {
     auto it = SPECIAL_MULTI_ASSIGN_W8A8.find(name);
     if (it != SPECIAL_MULTI_ASSIGN_W8A8.end()) {
       for (int idx : it->second) {
-        at_weight_tensors_[idx] = tmp_tensor;
+        t[idx] = tmp_tensor;
       }
       return;
     }
   }
-  at_weight_tensors_[index] = tmp_tensor;
+  t[index] = tmp_tensor;
 }
 
 torch::Tensor Glm4MoeDecoderLiteLoader::get_sharded_tensor(
@@ -696,11 +431,11 @@ torch::Tensor Glm4MoeDecoderLiteLoader::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
     int dim,
-    int loacal_tp_rank,
+    int local_tp_rank,
     int local_tp_size) {
   if (local_tp_size > 1) {
     return state_dict.get_sharded_tensor(
-        name, dim, loacal_tp_rank, local_tp_size);
+        name, dim, local_tp_rank, local_tp_size);
   } else {
     return state_dict.get_tensor(name);
   }
@@ -740,13 +475,13 @@ int Glm4MoeDecoderLiteLoader::extract_expert_index(const std::string& name) {
 }
 
 void Glm4MoeDecoderLiteLoader::merge_shared_experts_weights() {
-  auto merge_and_clear = [this](int index,
-                                torch::Tensor& shared_experts_gate,
-                                torch::Tensor& shared_experts_up) {
-    at_weight_tensors_[index] =
-        torch::cat({shared_experts_gate, shared_experts_up}, 0)
-            .to(device_)
-            .contiguous();
+  auto& t = working_tensors();
+  auto merge_and_clear = [this, &t](int index,
+                                    torch::Tensor& shared_experts_gate,
+                                    torch::Tensor& shared_experts_up) {
+    t[index] = torch::cat({shared_experts_gate, shared_experts_up}, 0)
+                   .to(target_device())
+                   .contiguous();
     shared_experts_gate = tensor_placeholder_;
     shared_experts_up = tensor_placeholder_;
   };
@@ -765,14 +500,14 @@ void Glm4MoeDecoderLiteLoader::merge_shared_experts_weights() {
           IN_MLP_GATEUP_SCALE_SHARED_EXPERT,
           shared_experts_weights_["mlp.shared_experts.gate_proj.weight_scale"],
           shared_experts_weights_["mlp.shared_experts.up_proj.weight_scale"]);
-      at_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT].squeeze();
-      at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT].squeeze();
-      at_weight_tensors_[IN_MLP_DOWN_OFFSET_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_DOWN_OFFSET_SHARED_EXPERT].squeeze();
-      at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_DOWN_SCALE_SHARED_EXPERT].squeeze();
+      t[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT] =
+          t[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT].squeeze();
+      t[IN_MLP_GATEUP_SCALE_SHARED_EXPERT] =
+          t[IN_MLP_GATEUP_SCALE_SHARED_EXPERT].squeeze();
+      t[IN_MLP_DOWN_OFFSET_SHARED_EXPERT] =
+          t[IN_MLP_DOWN_OFFSET_SHARED_EXPERT].squeeze();
+      t[IN_MLP_DOWN_SCALE_SHARED_EXPERT] =
+          t[IN_MLP_DOWN_SCALE_SHARED_EXPERT].squeeze();
     }
   } else {
     merge_and_clear(IN_MLP_GATEUP_WEIGHT_SHARED_EXPERT,
@@ -785,15 +520,16 @@ void Glm4MoeDecoderLiteLoader::merge_shared_experts_weights() {
       merge_and_clear(IN_MLP_GATEUP_SCALE_SHARED_EXPERT,
                       shared_experts_weights_["mlp.gate_proj.weight_scale"],
                       shared_experts_weights_["mlp.up_proj.weight_scale"]);
-      at_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT].squeeze();
-      at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT] =
-          at_weight_tensors_[IN_MLP_GATEUP_SCALE_SHARED_EXPERT].squeeze();
+      t[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT] =
+          t[IN_MLP_GATEUP_OFFSET_SHARED_EXPERT].squeeze();
+      t[IN_MLP_GATEUP_SCALE_SHARED_EXPERT] =
+          t[IN_MLP_GATEUP_SCALE_SHARED_EXPERT].squeeze();
     }
   }
 }
 
 void Glm4MoeDecoderLiteLoader::merge_experts_weights() {
+  auto& t = working_tensors();
   try {
     torch::Tensor mlp_gateup_weight;
     if (quantize_type_.compare("w8a8_dynamic") == 0) {
@@ -802,29 +538,29 @@ void Glm4MoeDecoderLiteLoader::merge_experts_weights() {
                                 experts_weights_["up_proj.weight"],
                                 /*transpose=*/true);
 
-      at_weight_tensors_[IN_MLP_GATEUP_OFFSET] =
+      t[IN_MLP_GATEUP_OFFSET] =
           merge_experts_weights(experts_weights_["gate_proj.weight_offset"],
                                 experts_weights_["up_proj.weight_offset"]);
-      at_weight_tensors_[IN_MLP_GATEUP_SCALE] =
+      t[IN_MLP_GATEUP_SCALE] =
           merge_experts_weights(experts_weights_["gate_proj.weight_scale"],
                                 experts_weights_["up_proj.weight_scale"]);
-      at_weight_tensors_[IN_MLP_GATEUP_WEIGHT] =
-          at_npu::native::npu_format_cast(mlp_gateup_weight, 29);
+      t[IN_MLP_GATEUP_WEIGHT] =
+          load_to_host()
+              ? mlp_gateup_weight
+              : at_npu::native::npu_format_cast(mlp_gateup_weight, 29);
     } else {
       mlp_gateup_weight =
           merge_experts_weights(experts_weights_["gate_proj.weight"],
                                 experts_weights_["up_proj.weight"],
                                 /*transpose=*/false);
-      at_weight_tensors_[IN_MLP_GATEUP_WEIGHT] =
-          at_npu::native::npu_format_cast(mlp_gateup_weight, 2).contiguous();
+      t[IN_MLP_GATEUP_WEIGHT] =
+          load_to_host() ? mlp_gateup_weight.contiguous()
+                         : at_npu::native::npu_format_cast(mlp_gateup_weight, 2)
+                               .contiguous();
     }
   } catch (const std::exception& e) {
     LOG(ERROR) << "[ERROR] Exception in gateup weight processing: " << e.what();
     throw;
-  }
-
-  if (experts_weights_.count("down_proj.weight") > 0) {
-    auto& down_weight = experts_weights_["down_proj.weight"];
   }
 
   try {
@@ -832,13 +568,15 @@ void Glm4MoeDecoderLiteLoader::merge_experts_weights() {
         merge_experts_weights(experts_weights_["down_proj.weight"],
                               /*transpose=*/false);
 
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
+    t[IN_MLP_DOWN_WEIGHT] =
+        load_to_host()
+            ? mlp_down_weight.contiguous()
+            : at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
 
     if (quantize_type_.compare("w8a8_dynamic") == 0) {
-      at_weight_tensors_[IN_MLP_DOWN_OFFSET] =
+      t[IN_MLP_DOWN_OFFSET] =
           merge_experts_weights(experts_weights_["down_proj.weight_offset"]);
-      at_weight_tensors_[IN_MLP_DOWN_SCALE] =
+      t[IN_MLP_DOWN_SCALE] =
           merge_experts_weights(experts_weights_["down_proj.weight_scale"]);
     }
   } catch (const std::exception& e) {
@@ -850,7 +588,7 @@ void Glm4MoeDecoderLiteLoader::merge_experts_weights() {
 torch::Tensor Glm4MoeDecoderLiteLoader::merge_experts_weights(
     std::vector<torch::Tensor>& experts,
     bool transpose) {
-  torch::Tensor merged_tensor = torch::stack(experts, 0).to(device_);
+  torch::Tensor merged_tensor = torch::stack(experts, 0).to(target_device());
   if (transpose) {
     merged_tensor = merged_tensor.transpose(1, 2);
   }
@@ -867,7 +605,8 @@ torch::Tensor Glm4MoeDecoderLiteLoader::merge_experts_weights(
   for (size_t i = 0; i < experts_up.size(); ++i) {
     experts_gate[i] = torch::cat({experts_gate[i], experts_up[i]}, 0);
   }
-  torch::Tensor merged_tensor = torch::stack(experts_gate, 0).to(device_);
+  torch::Tensor merged_tensor =
+      torch::stack(experts_gate, 0).to(target_device());
   if (transpose) {
     merged_tensor = merged_tensor.transpose(1, 2);
   }

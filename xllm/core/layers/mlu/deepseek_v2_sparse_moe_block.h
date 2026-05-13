@@ -77,6 +77,7 @@ class DeepseekV2SparseMoEBlockImpl : public torch::nn::Module {
   PrepOut prep_in(torch::Tensor x,
                   const torch::Tensor& residual,
                   const ModelInputParams& input_params,
+                  const ExecCfg& exec,
                   DeepseekV2AttentionImpl::PostAttnLayout attn_layout) const;
   torch::Tensor gather_in(const PrepOut& prep,
                           const ModelInputParams& input_params) const;

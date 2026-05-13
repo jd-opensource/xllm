@@ -43,7 +43,7 @@ class QWen2ModelImpl : public LlmModelImplBase<layer::Qwen2DecoderLayer> {
         register_module("embed_tokens", layer::WordEmbedding(context));
 
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
-      auto layer = layer::Qwen2DecoderLayer(context);
+      auto layer = layer::Qwen2DecoderLayer(context, i);
       layers_.push_back(layer);
     }
   }

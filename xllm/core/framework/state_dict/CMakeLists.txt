@@ -1,4 +1,3 @@
-include(cc_test)
 include(cc_library)
 
 include_directories(..)
@@ -23,4 +22,3 @@ cc_library(
     Folly::folly
     util
 )
-

@@ -99,6 +99,8 @@ AttentionMetadata build_attention_metadata(
       params.batch_forward_type.is_mixed() ||
       params.batch_forward_type.is_chunked_prefill();
   attn_metadata.is_prefill = params.batch_forward_type.is_prefill();
+
+  // enable_mla is for DeepSeekv32 on mlu device
   if (!attn_metadata.is_prefill || enable_mla) {
     attn_metadata.block_table = params.block_tables;
 #if !defined(USE_NPU)
@@ -114,6 +116,10 @@ AttentionMetadata build_attention_metadata(
   }
   if (params.q_seq_lens.defined()) {
     attn_metadata.q_seq_lens = params.q_seq_lens;
+    torch::Tensor cumsum_tensor =
+        torch::cumsum(attn_metadata.q_seq_lens, 0).to(torch::kInt32);
+    auto zero = torch::zeros({1}, cumsum_tensor.options());
+    attn_metadata.q_cu_seq_lens = torch::cat({zero, cumsum_tensor}, 0);
   }
 #endif
 
@@ -161,6 +167,7 @@ AttentionMetadata build_attention_metadata(
       cache.unshared_lse = llmrec_params.two_stage_unshared_lse;
       cache.unshared_o = llmrec_params.two_stage_unshared_o;
       cache.q_cu_seq_lens_shared = llmrec_params.two_stage_q_cu_seq_lens_shared;
+      cache.qo_indptr_expanded = llmrec_params.two_stage_qo_indptr_expanded;
       cache.paged_kv_indptr_expanded =
           llmrec_params.two_stage_paged_kv_indptr_expanded;
       cache.paged_kv_indices_expanded =
@@ -196,33 +203,18 @@ AttentionMetadata build_attention_metadata(
 
 AttentionMetadata AttentionMetadataBuilder::build(
     const ModelInputParams& params,
-    const std::optional<torch::Tensor>& attn_mask) {
-  return AttentionMetadataBuilder::build(params, "float", attn_mask);
-}
-
-AttentionMetadata AttentionMetadataBuilder::build(
-    const ModelInputParams& params,
-    const ModelArgs& model_args,
+    bool enable_mla,
     const std::optional<torch::Tensor>& attn_mask) {
   return AttentionMetadataBuilder::build(
-      params, model_args, "float", attn_mask);
+      params, enable_mla, "float", attn_mask);
 }
 
 AttentionMetadata AttentionMetadataBuilder::build(
     const ModelInputParams& params,
+    bool enable_mla,
     const std::string& compute_dtype,
     const std::optional<torch::Tensor>& attn_mask) {
-  return build_attention_metadata(
-      params, params.enable_mla, compute_dtype, attn_mask);
-}
-
-AttentionMetadata AttentionMetadataBuilder::build(
-    const ModelInputParams& params,
-    const ModelArgs& model_args,
-    const std::string& compute_dtype,
-    const std::optional<torch::Tensor>& attn_mask) {
-  return build_attention_metadata(
-      params, model_args.enable_mla(), compute_dtype, attn_mask);
+  return build_attention_metadata(params, enable_mla, compute_dtype, attn_mask);
 }
 
 }  // namespace xllm::layer

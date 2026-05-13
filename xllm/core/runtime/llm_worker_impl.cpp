@@ -79,7 +79,15 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
 std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
   if (FLAGS_enable_manual_loader) {
 #if defined(USE_NPU)
-    SET_ATB_EXECUTE_STREAM(compute_stream_, device_, context_);
+    if (!enable_schedule_overlap() && options_.backend() == "llm") {
+      aclrtStream current_stream =
+          c10_npu::getCurrentNPUStream(device_.index()).stream();
+      atb::Context* atb_context =
+          const_cast<atb::Context*>(context_.get_atb_context());
+      atb_context->SetExecuteStream(current_stream);
+    } else {
+      SET_ATB_EXECUTE_STREAM(compute_stream_, device_, context_);
+    }
 #endif
     return step_internal(input);
   }
@@ -101,6 +109,12 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer =
         std::make_shared<NPULayerSynchronizerImpl>(
             context_.get_model_args().n_layers());
+#elif defined(USE_MLU)
+    std::shared_ptr<MLULayerSynchronizerImpl> layer_synchronizer =
+        std::make_shared<MLULayerSynchronizerImpl>(
+            context_.get_model_args().n_layers());
+#endif
+#if defined(USE_NPU) || defined(USE_MLU)
     const_cast<ModelInputParams*>(&(input.input_params))->layer_synchronizer =
         layer_synchronizer;
 

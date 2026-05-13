@@ -35,6 +35,7 @@ class Master {
   virtual ~Master() = default;
   virtual void run() = 0;
   virtual const Options& options() const { return options_; }
+  EngineType engine_type() const { return engine_type_; }
 
   virtual bool sleep() { return false; }
 
@@ -62,6 +63,7 @@ class Master {
 
  protected:
   Options options_;
+  EngineType engine_type_ = EngineType::INVALID;
   std::unique_ptr<Engine> engine_;
   RateLimiter rate_limiter_;
   MasterStatus master_status_{MasterStatus::WAKEUP};

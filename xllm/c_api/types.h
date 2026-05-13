@@ -61,6 +61,30 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
   /** Whether to enable shared memory for model execution */
   bool enable_shm;
 
+  /** Whether to enable graph execution for REC */
+  bool enable_graph;
+
+  /** Whether to enable REC fast sampler */
+  bool enable_rec_fast_sampler;
+
+  /** Whether to enable prefill piecewise graph for REC */
+  bool enable_prefill_piecewise_graph;
+
+  /** Whether to enable xattention one-stage execution for REC */
+  bool enable_xattention_one_stage;
+
+  /** Whether to enable graph-mode decode without padding for REC */
+  bool enable_graph_mode_decode_no_padding;
+
+  /** Whether to enable block copy kernel */
+  bool enable_block_copy_kernel;
+
+  /** Whether to keep REC top-k outputs sorted */
+  bool enable_topk_sorted;
+
+  /** Whether to enable rec prefill only */
+  bool enable_rec_prefill_only;
+
   /** KVCache transfer listen port */
   uint32_t transfer_listen_port;
 
@@ -114,6 +138,12 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
 
   /** Maximum GPU memory utilization ratio for model inference */
   float max_memory_utilization;
+
+  /** Maximum REC worker pipeline concurrency */
+  uint32_t rec_worker_max_concurrency;
+
+  /** FlashInfer attention workspace buffer size in bytes. */
+  uint32_t flashinfer_workspace_buffer_size;
 
   /** Model task type (generate/embed) */
   char task[XLLM_META_STRING_FIELD_MAX_LEN];
@@ -199,6 +229,9 @@ typedef struct XLLM_CAPI_EXPORT XLLM_RequestParams {
 
   /** Beam search width (0 = disable beam search) */
   uint32_t beam_width;
+
+  /** Final number of beam search results to return (0 = use beam_width) */
+  uint32_t num_return_sequences;
 
   /** Number of top log probabilities to return */
   int64_t top_logprobs;
@@ -323,6 +356,37 @@ typedef struct XLLM_CAPI_EXPORT XLLM_Choices {
   size_t entries_size;
 } XLLM_Choices;
 
+/**
+ * @brief REC/OneRec specific output extension aligned by choice index
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_RecOutput {
+  /** Choice index this REC extension belongs to */
+  uint32_t index;
+
+  /** Selected REC item ids for this choice */
+  int64_t* item_ids;
+
+  /** Number of item ids in the item_ids array */
+  size_t item_ids_size;
+
+  /** Token-aligned REC/OneRec logprobs for this choice */
+  float* rec_token_logprobs;
+
+  /** Number of entries in rec_token_logprobs */
+  size_t rec_token_logprobs_size;
+} XLLM_RecOutput;
+
+/**
+ * @brief List of REC/OneRec specific output extensions
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_RecOutputs {
+  /** Pointer to array of REC output entries */
+  XLLM_RecOutput* entries;
+
+  /** Number of entries in the REC output array */
+  size_t entries_size;
+} XLLM_RecOutputs;
+
 #define XLLM_ERROR_INFO_MAX_LEN 512
 
 /**
@@ -352,6 +416,9 @@ typedef struct XLLM_CAPI_EXPORT XLLM_Response {
 
   /** Token usage statistics for the request */
   XLLM_Usage usage;
+
+  /** REC/OneRec specific response extensions */
+  XLLM_RecOutputs rec_outputs;
 } XLLM_Response;
 
 /**

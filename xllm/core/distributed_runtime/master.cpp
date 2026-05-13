@@ -128,7 +128,9 @@ void resolve_npu_kernel_backend_for_options(Options* options) {
 }  // namespace
 
 Master::Master(const Options& options, EngineType type)
-    : options_(options), master_status_(options.master_status()) {
+    : options_(options),
+      engine_type_(type),
+      master_status_(options.master_status()) {
   const auto model_path =
       std::filesystem::path(options_.model_path()).lexically_normal();
   options_.enable_mla(util::should_enable_mla(model_path, options_.backend()));

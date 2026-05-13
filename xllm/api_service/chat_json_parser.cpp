@@ -21,17 +21,18 @@ limitations under the License.
 
 namespace xllm {
 
-const ChatJsonParser& ChatJsonParser::get(const std::string& backend) {
-  if (backend == "vlm") {
+const ChatJsonParser& ChatJsonParser::get(ServingMode mode) {
+  if (mode == ServingMode::VLM) {
     static const VlmChatJsonParser k_vlm_parser;
     return k_vlm_parser;
   }
-  if (backend == "anthropic") {
-    static const AnthropicChatJsonParser k_anthropic_parser;
-    return k_anthropic_parser;
-  }
   static const LlmChatJsonParser k_llm_parser;
   return k_llm_parser;
+}
+
+const ChatJsonParser& ChatJsonParser::anthropic() {
+  static const AnthropicChatJsonParser k_anthropic_parser;
+  return k_anthropic_parser;
 }
 
 std::pair<Status, std::string> VlmChatJsonParser::preprocess(

@@ -30,6 +30,15 @@ struct GatherPlan {
   int64_t shard_tokens = 0;
 };
 
+bool are_dp_tokens_equal(const std::vector<int32_t>& dp_tokens) {
+  return !dp_tokens.empty() &&
+         std::all_of(dp_tokens.begin(),
+                     dp_tokens.end(),
+                     [first_token_num = dp_tokens.front()](int32_t num_tokens) {
+                       return num_tokens == first_token_num;
+                     });
+}
+
 int64_t align_tokens(int64_t tokens, int64_t align) {
   CHECK_GT(align, 0) << "align must be positive";
   int64_t rem = tokens % align;
@@ -131,33 +140,32 @@ torch::Tensor gather_global_tokens(const torch::Tensor& input,
 
   torch::Tensor gathered_tensors =
       args.process_group_->allgather_base_sync(input);
+  torch::Tensor flat_gathered = gathered_tensors.flatten(0, 1).contiguous();
 
   int64_t total_tokens =
       std::accumulate(dp_tokens.begin(), dp_tokens.end(), int64_t{0});
-  auto output_shape = input.sizes().vec();
-  output_shape[0] = total_tokens;
-  torch::Tensor output = torch::empty(output_shape, input.options());
-
-  int64_t offset = 0;
-  for (size_t dp_rank = 0; dp_rank < dp_tokens.size(); ++dp_rank) {
-    int64_t valid_tokens = dp_tokens[dp_rank];
-    int64_t copied_tokens = 0;
-    for (int64_t tp_rank = 0; tp_rank < tp_size && copied_tokens < valid_tokens;
-         ++tp_rank) {
-      int64_t world_rank = dp_rank * tp_size + tp_rank;
-      int64_t copy_tokens =
-          std::min(plan.shard_tokens, valid_tokens - copied_tokens);
-      output.slice(0, offset, offset + copy_tokens)
-          .copy_(gathered_tensors[world_rank].slice(0, 0, copy_tokens));
-      offset += copy_tokens;
-      copied_tokens += copy_tokens;
-    }
-    CHECK_EQ(copied_tokens, valid_tokens)
-        << "failed to rebuild dp rank " << dp_rank << ", expect "
-        << valid_tokens << " tokens, got " << copied_tokens;
+  if (are_dp_tokens_equal(dp_tokens) && flat_gathered.size(0) == total_tokens) {
+    return flat_gathered;
   }
 
-  return output;
+  std::vector<int64_t> valid_rows;
+  valid_rows.reserve(total_tokens);
+  for (size_t dp_rank = 0; dp_rank < dp_tokens.size(); ++dp_rank) {
+    int64_t valid_tokens = dp_tokens[dp_rank];
+    int64_t rank_offset = static_cast<int64_t>(dp_rank) * plan.padded_dp_tokens;
+    CHECK_LE(valid_tokens, plan.padded_dp_tokens)
+        << "dp rank " << dp_rank << " valid_tokens " << valid_tokens
+        << " exceeds padded_dp_tokens " << plan.padded_dp_tokens;
+    for (int64_t token_idx = 0; token_idx < valid_tokens; ++token_idx) {
+      valid_rows.push_back(rank_offset + token_idx);
+    }
+  }
+
+  torch::Tensor row_index = torch::tensor(valid_rows,
+                                          torch::TensorOptions()
+                                              .dtype(torch::kLong)
+                                              .device(flat_gathered.device()));
+  return flat_gathered.index_select(0, row_index);
 }
 
 torch::Tensor unpad_tokens(torch::Tensor x, const PaddingInfo& pad_info) {

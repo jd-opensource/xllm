@@ -32,6 +32,7 @@ limitations under the License.
 #include "common/interruption_bus.h"
 #include "common/metrics.h"
 #include "core/distributed_runtime/master.h"
+#include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/parallel_state/parallel_state.h"
@@ -186,7 +187,7 @@ bool VLMEngine::init_model() {
   return true;
 }
 
-Engine::KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
+KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
   const int64_t max_cache_size = options_.max_cache_size();
   const double max_memory_utilization = options_.max_memory_utilization();
 
@@ -225,77 +226,56 @@ Engine::KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
     cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
   }
 
-  Engine::KVCacheCapacity kv_cache_cap;
-  kv_cache_cap.cache_size_in_bytes = std::max(cache_size_in_bytes, int64_t(0));
-  CHECK_GT(kv_cache_cap.cache_size_in_bytes, 0)
+  KVCacheCapacity kv_cache_cap;
+  kv_cache_cap.cache_size_in_bytes() =
+      std::max(cache_size_in_bytes, int64_t(0));
+  CHECK_GT(kv_cache_cap.cache_size_in_bytes(), 0)
       << "Available kv cache size must be greater than 0";
   GAUGE_SET(total_kv_cache_size_in_kilobytes,
-            kv_cache_cap.cache_size_in_bytes / 1024);
+            kv_cache_cap.cache_size_in_bytes() / 1024);
 
   for (auto& device : options_.devices()) {
     DeviceMonitor::get_instance().set_total_kv_cache_memory(
-        device.index(), kv_cache_cap.cache_size_in_bytes);
+        device.index(), kv_cache_cap.cache_size_in_bytes());
     DeviceMonitor::get_instance().set_total_activation_memory(device.index());
   }
 
   // compute kv cache slot size
   const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
   int64_t slot_size = 0;
-  if (options_.enable_mla()) {
+  if (args_.enable_mla()) {
     slot_size = dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
   } else {
     slot_size = 2 * dtype_size * head_dim_ * n_local_kv_heads_;
   }
-  kv_cache_cap.slot_size = slot_size;
-  kv_cache_cap.n_layers = args_.n_layers();
+  kv_cache_cap.slot_size() = slot_size;
+  kv_cache_cap.n_layers() = args_.n_layers();
+  kv_cache_cap.block_size() = options_.block_size();
 
   // compute kv cache n_blocks
-  const int32_t block_size = options_.block_size();
+  const int64_t block_size = kv_cache_cap.block_size();
   const int64_t block_size_in_bytes = block_size * slot_size;
-  kv_cache_cap.n_blocks = kv_cache_cap.cache_size_in_bytes /
-                          (args_.n_layers() * block_size_in_bytes);
-  CHECK_GT(kv_cache_cap.n_blocks, 0) << "no n_blocks for kv cache";
+  kv_cache_cap.n_blocks() = kv_cache_cap.cache_size_in_bytes() /
+                            (args_.n_layers() * block_size_in_bytes);
+  CHECK_GT(kv_cache_cap.n_blocks(), 0) << "no n_blocks for kv cache";
 
   return kv_cache_cap;
 }
 
-bool VLMEngine::allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap) {
+bool VLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
   LOG(INFO) << "kv cache capacity: "
-            << "bytes: " << kv_cache_cap.cache_size_in_bytes
-            << ", blocks: " << kv_cache_cap.n_blocks
-            << ", slot_size: " << kv_cache_cap.slot_size;
+            << "bytes: " << kv_cache_cap.cache_size_in_bytes()
+            << ", blocks: " << kv_cache_cap.n_blocks()
+            << ", slot_size: " << kv_cache_cap.slot_size();
 
-  const int32_t block_size = options_.block_size();
+  const int32_t block_size = static_cast<int32_t>(kv_cache_cap.block_size());
+  const KVCacheShape kv_cache_shape(kv_cache_cap, args_, dp_local_tp_size_);
 
-  // init kv cache for each worker
-  std::vector<std::vector<int64_t>> kv_cache_shape;
-  kv_cache_shape.reserve(2);
-  if (options_.enable_mla()) {
-    kv_cache_shape.emplace_back(std::vector<int64_t>{
-        kv_cache_cap.n_blocks, block_size, 1, args_.kv_lora_rank()});
-    kv_cache_shape.emplace_back(std::vector<int64_t>{
-        kv_cache_cap.n_blocks, block_size, 1, args_.qk_rope_head_dim()});
-  } else {
-    kv_cache_shape.emplace_back(std::vector<int64_t>{
-        kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
-    kv_cache_shape.emplace_back(std::vector<int64_t>{
-        kv_cache_cap.n_blocks, block_size, n_local_kv_heads_, head_dim_});
-  }
-#if defined(USE_MLU)
-  // transpose kv_cache layout for mlu
-  // default layout: [n_blocks, block_size, n_head, head_dim]
-  // => mlu layout: [n_blocks, n_head, block_size, head_dim]
-  for (auto& shape : kv_cache_shape) {
-    std::swap(shape[1], shape[2]);
-  }
-#endif
-
-  LOG(INFO) << "Initializing k cache with shape: [" << kv_cache_shape[0] << "]";
-  LOG(INFO) << "Initializing v cache with shape: [" << kv_cache_shape[1] << "]";
+  kv_cache_shape.print_shapes();
 
   // initialize block manager
   BlockManagerPool::Options options;
-  options.num_blocks(kv_cache_cap.n_blocks)
+  options.num_blocks(kv_cache_cap.n_blocks())
       .host_num_blocks(0)  // no host cache for vlm engine currently.
       .block_size(block_size)
       .enable_prefix_cache(options_.enable_prefix_cache())

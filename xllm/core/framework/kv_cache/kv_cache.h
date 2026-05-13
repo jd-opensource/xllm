@@ -16,34 +16,32 @@ limitations under the License.
 #pragma once
 #include <torch/torch.h>
 
-#include <cstdint>
-#include <optional>
+#include <memory>
 #include <vector>
 
 #include "common/global_flags.h"
-#include "framework/model/model_input_params.h"
+#include "framework/kv_cache/kv_cache_impl.h"
+#include "framework/kv_cache/kv_cache_shape.h"
+#include "framework/kv_cache/kv_cache_utils.h"
 
 namespace xllm {
+
 class KVCache final {
  public:
-  KVCache() = default;
-  KVCache(torch::Tensor key_cache, torch::Tensor value_cache);
-  KVCache(torch::Tensor key_cache,
-          torch::Tensor value_cache,
-          torch::Tensor index_cache);
-  // Constructor for quantized KV cache with scale tensors
-  KVCache(torch::Tensor key_cache,
-          torch::Tensor value_cache,
-          torch::Tensor index_cache,
-          torch::Tensor key_cache_scale,
-          torch::Tensor value_cache_scale);
-  KVCache(torch::Tensor key_cache,
-          torch::Tensor value_cache,
-          torch::Tensor conv_cache,
-          torch::Tensor ssm_cache);
+  KVCache();
+  explicit KVCache(const KVCacheTensors& tensors);
+  explicit KVCache(const IndexedKVCacheTensors& tensors);
+  explicit KVCache(const LinearAttentionKVCacheTensors& tensors);
+  explicit KVCache(const QuantizedKVCacheTensors& tensors);
+  KVCache(const KVCacheShape& kv_cache_shape,
+          const KVCacheCreateOptions& create_options,
+          int64_t layer_id);
+  KVCache(const KVCache&) = delete;
+  KVCache& operator=(const KVCache&) = delete;
+  KVCache(KVCache&&) noexcept = default;
+  KVCache& operator=(KVCache&&) noexcept = default;
   ~KVCache() = default;
 
-  // TODO: pass in kv_shape and options instead
   torch::Tensor get_k_cache() const;
   torch::Tensor get_v_cache() const;
   torch::Tensor get_index_cache() const;
@@ -56,24 +54,16 @@ class KVCache final {
   torch::Tensor get_ssm_cache() const;
   std::vector<std::vector<int64_t>> get_shapes();
 
-  bool empty() const {
-    return !key_cache_.defined() || !value_cache_.defined();
-  }
+  bool empty() const;
 
   void swap_blocks(torch::Tensor& src_tensor, torch::Tensor& dst_tensor);
 
  private:
-  torch::Tensor key_cache_;
-  torch::Tensor value_cache_;
-  torch::Tensor index_cache_;
-
-  // scale tensors for quantized KV cache (int8)
-  torch::Tensor key_cache_scale_;
-  torch::Tensor value_cache_scale_;
-  // Convolutional state cache for linear-attention layers (conv_state).
-  torch::Tensor conv_cache_;
-  // State space model cache for linear-attention layers (ssm_state).
-  torch::Tensor ssm_cache_;
+  std::unique_ptr<KVCacheImpl> impl_;
 };
+
+void allocate_kv_caches(std::vector<KVCache>& kv_caches,
+                        const KVCacheShape& kv_cache_shape,
+                        const KVCacheCreateOptions& create_options);
 
 }  // namespace xllm

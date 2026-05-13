@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 
+from scripts.logger import logger
+
 from ..bootstrap import PREPARE_ASCEND_COMMAND, prepare_ascend
 
 
@@ -20,9 +22,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     tilelang_root = prepare_ascend(force=args.force)
-    print(f"[INFO] tilelang-ascend is ready under: {tilelang_root}")
-    print("[INFO] Next step: run your usual `python setup.py build ...` or `python setup.py test ...` command.")
-    print(f"[INFO] Re-run this step explicitly with: `{PREPARE_ASCEND_COMMAND}`")
+    logger.info(f"tilelang-ascend is ready under: {tilelang_root}")
+    logger.info("Next step: run your usual `python setup.py build ...` or `python setup.py test ...` command.")
+    logger.info(f"Re-run this step explicitly with: `{PREPARE_ASCEND_COMMAND}`")
 
 
 if __name__ == "__main__":

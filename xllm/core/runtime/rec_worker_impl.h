@@ -23,13 +23,15 @@ limitations under the License.
 #include <optional>
 #include <vector>
 
-#include "common/rec_model_utils.h"
 #include "runtime/llm_worker_impl.h"
+#include "util/rec_model_utils.h"
 #include "util/threadpool.h"
 
 namespace xllm {
 
 class RecSampler;
+class RecConstrainedDecoding;
+struct RecConstraintTables;
 
 class RecWorkerImpl : public LLMWorkerImpl {
   friend class RecWorkPipeline;
@@ -113,14 +115,91 @@ class RecWorkerImpl : public LLMWorkerImpl {
                                      ForwardInput& processed_inputs) override;
   };
 
-  class OneRecWorkPipeline final : public RecWorkPipeline {
+  class OneRecWorkPipeline : public RecWorkPipeline {
    public:
-    explicit OneRecWorkPipeline(RecPipelineRuntime& runtime)
-        : RecWorkPipeline(runtime) {}
+    explicit OneRecWorkPipeline(
+        RecPipelineRuntime& runtime,
+        RecPipelineType pipeline_type = RecPipelineType::kOneRecDefault);
 
     ForwardInput prepare_inputs(Batch& batch) override;
 
+    void prepare_work_before_execute(const ForwardInput& inputs,
+                                     ForwardInput& processed_inputs) override;
+
     std::optional<ForwardOutput> step(const ForwardInput& input) override;
+
+   private:
+    folly::SemiFuture<torch::Tensor> prepare_filter_mask_async(
+        const std::vector<std::vector<int32_t>>& generated_tokens);
+
+    std::unique_ptr<RecSampler> rec_sampler_;
+    std::unique_ptr<RecConstrainedDecoding> constrained_decoding_;
+    std::unique_ptr<ThreadPool> filter_mask_threadpool_;
+  };
+
+  class OneRecXAttentionWorkPipeline final : public RecWorkPipeline {
+   public:
+    explicit OneRecXAttentionWorkPipeline(RecPipelineRuntime& runtime);
+
+    ForwardInput prepare_inputs(Batch& batch) override;
+
+    void prepare_work_before_execute(const ForwardInput& inputs,
+                                     ForwardInput& processed_inputs) override;
+
+    std::optional<ForwardOutput> step(const ForwardInput& input) override;
+
+   private:
+    struct RecConstraintDeviceTensors {
+      torch::Tensor first_token_ids;
+      torch::Tensor prefix1_offsets;
+      torch::Tensor prefix1_values;
+      torch::Tensor prefix1_pair_keys;
+      torch::Tensor prefix2_value_offsets;
+      torch::Tensor prefix2_values;
+      int64_t max_prefix1_degree = 0;
+      int64_t max_prefix2_degree = 0;
+      bool initialized = false;
+    };
+
+    folly::SemiFuture<torch::Tensor> prepare_filter_mask_async(
+        const std::vector<std::vector<int32_t>>& generated_tokens);
+
+    void initialize_constraint_device_tensors(
+        const RecConstraintTables& tables);
+
+    bool can_use_device_constraints(const SamplingParameters& sampling_params,
+                                    int32_t current_step,
+                                    int32_t beam_width) const;
+
+    SampleOutput sample_with_device_constraints(
+        torch::Tensor& logits,
+        const SamplingParameters& sampling_params,
+        const torch::Tensor& sequence_group,
+        int32_t current_step) const;
+
+    void allocate_unshared_kv_caches();
+
+    void prepare_unshared_kv_caches_for_input(
+        const ForwardInput& inputs,
+        OneRecXAttentionParams& onerec_params);
+
+    void execute_cache_select(const torch::Tensor& out_token_index,
+                              const torch::Tensor& out_beam_count_prefix_sums,
+                              OneRecXAttentionParams& onerec_params,
+                              int32_t round,
+                              int32_t batch_size,
+                              int32_t beam_width,
+                              int32_t num_layers);
+
+    std::unique_ptr<RecSampler> rec_sampler_;
+    std::unique_ptr<RecConstrainedDecoding> constrained_decoding_;
+    std::unique_ptr<ThreadPool> filter_mask_threadpool_;
+    RecConstraintDeviceTensors constraint_device_tensors_;
+    std::vector<torch::Tensor> cached_unshared_k_caches_;
+    std::vector<torch::Tensor> cached_unshared_v_caches_;
+    int32_t max_seqs_per_batch_ = 0;
+    int32_t beam_width_ = 1;
+    int32_t max_decode_step_ = 0;
   };
 
   class LlmRecWithMmDataWorkPipeline final : public RecWorkPipeline {
@@ -260,6 +339,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
     torch::Tensor cached_two_stage_unshared_lse_;
     torch::Tensor cached_two_stage_unshared_o_;
     torch::Tensor cached_two_stage_q_cu_seq_lens_shared_;
+    torch::Tensor cached_two_stage_qo_indptr_expanded_;
     torch::Tensor cached_two_stage_paged_kv_indptr_expanded_;
     torch::Tensor cached_two_stage_paged_kv_indices_expanded_;
     torch::Tensor cached_two_stage_paged_kv_last_page_len_expanded_;

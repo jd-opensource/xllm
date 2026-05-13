@@ -42,8 +42,8 @@ MappingNPU::MappingNPU(const std::string rank_table_file,
   num_nodes_ = get_num_nodes();
   world_size_ = world_size;
   local_world_size_ = world_size / num_nodes_;
-  attn_o_proj_tp_.backend("lccl");
-  attn_inner_sp_.backend("lccl");
+  attn_o_proj_tp_.backend("hccl");
+  attn_inner_sp_.backend("hccl");
   parse_parallel_info();
   validate();
   get_tp_group(word_embed_tp_);

@@ -18,6 +18,8 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <cstdint>
+#include <limits>
+#include <utility>
 #include <vector>
 
 #include "util/utils.h"
@@ -29,40 +31,124 @@ EmbeddingCache::EmbeddingCache(int32_t total_nums) {
   decode_tails_.resize(total_nums);
 }
 
-void EmbeddingCache::write(const std::vector<int32_t>& ids,
-                           const torch::Tensor& next_tokens,
-                           const torch::Tensor& embeddings,
-                           const torch::Tensor& probs,
-                           const torch::Tensor& accepted_tokens) {
-  torch::Tensor accepted_tokens_cpu = safe_to(accepted_tokens, torch::kCPU);
-  const bool has_accepted_tokens = accepted_tokens.defined();
+void EmbeddingCache::write_prefill_target_context(
+    const std::vector<int32_t>& ids,
+    const std::vector<std::string>& request_ids,
+    const torch::Tensor& next_tokens,
+    const torch::Tensor& embeddings,
+    const torch::Tensor& selected_token_idxes) {
+  CHECK(next_tokens.defined()) << "prefill target tokens are undefined";
+  CHECK(embeddings.defined()) << "prefill target embeddings are undefined";
+  CHECK_EQ(next_tokens.dim(), 1) << "prefill target tokens should be [batch]";
+  CHECK_EQ(embeddings.dim(), 2)
+      << "prefill target embeddings should be [batch, hidden]";
+  CHECK_EQ(next_tokens.size(0), static_cast<int64_t>(ids.size()))
+      << "prefill target token count mismatch";
+  CHECK(request_ids.empty() || request_ids.size() == ids.size())
+      << "prefill target request id count mismatch";
 
+  torch::Tensor target_embeddings = embeddings;
+  if (target_embeddings.size(0) != static_cast<int64_t>(ids.size())) {
+    CHECK(selected_token_idxes.defined())
+        << "prefill target embedding selection index is undefined";
+    CHECK_EQ(selected_token_idxes.numel(), static_cast<int64_t>(ids.size()))
+        << "prefill target embedding selection count mismatch";
+    torch::Tensor embedding_idxes = selected_token_idxes.to(
+        torch::dtype(torch::kLong).device(target_embeddings.device()));
+    target_embeddings =
+        target_embeddings.index_select(/*dim=*/0, embedding_idxes);
+  }
+  CHECK_EQ(target_embeddings.size(0), static_cast<int64_t>(ids.size()))
+      << "prefill target embedding count mismatch";
+
+  torch::Tensor next_tokens_cpu = safe_to(next_tokens, torch::kCPU);
   for (int32_t i = 0; i < static_cast<int32_t>(ids.size()); ++i) {
-    auto& tail = mutable_tail(ids[i]);
-    tail.token_id = static_cast<int32_t>(next_tokens[i].item<int64_t>());
-    tail.correction_token_id = tail.token_id;
-    tail.correction_position_offset = 0;
-    if (has_accepted_tokens) {
-      if (accepted_tokens_cpu.dim() == 1) {
-        int64_t token = accepted_tokens_cpu[i].item<int64_t>();
-        tail.correction_token_id = static_cast<int32_t>(token);
-      } else {
-        int32_t last_valid_token = -1;
-        int32_t last_valid_idx = -1;
-        const int32_t token_width = accepted_tokens_cpu.size(1);
-        for (int32_t j = 0; j < token_width; ++j) {
-          int64_t token = accepted_tokens_cpu[i][j].item<int64_t>();
-          if (token >= 0) {
-            last_valid_token = static_cast<int32_t>(token);
-            last_valid_idx = j;
-          }
-        }
-        tail.correction_token_id = last_valid_token;
-        tail.correction_position_offset = last_valid_idx;
-      }
+    const int64_t token = next_tokens_cpu[i].item<int64_t>();
+    CHECK_GE(token, 0) << "prefill target token should be valid";
+    CHECK_LE(token, static_cast<int64_t>(std::numeric_limits<int32_t>::max()))
+        << "prefill target token overflow";
+
+    DecodeState state;
+    state.valid = true;
+    if (!request_ids.empty()) {
+      state.request_id = request_ids[i];
     }
-    tail.embedding = embeddings[i];
-    tail.probs = probs[i];
+    state.all_draft_accepted = false;
+    state.token_id = static_cast<int32_t>(token);
+    state.position_offset = 0;
+    state.embedding = target_embeddings[i].detach().cpu();
+
+    DecodeState& tail = mutable_tail(ids[i]);
+    tail = std::move(state);
+  }
+}
+
+void EmbeddingCache::write_target_context(
+    const std::vector<int32_t>& ids,
+    const std::vector<std::string>& request_ids,
+    const torch::Tensor& accepted_tokens,
+    const torch::Tensor& accepted_embeddings,
+    int32_t num_speculative_tokens) {
+  CHECK(accepted_tokens.defined()) << "accepted target tokens are undefined";
+  CHECK(accepted_embeddings.defined())
+      << "accepted target embeddings are undefined";
+  CHECK_EQ(accepted_tokens.dim(), 2)
+      << "accepted target tokens should be [batch, width]";
+  CHECK_EQ(accepted_embeddings.dim(), 3)
+      << "accepted target embeddings should be [batch, width, hidden]";
+  CHECK_EQ(accepted_tokens.size(0), static_cast<int64_t>(ids.size()))
+      << "accepted token batch mismatch";
+  CHECK(request_ids.empty() || request_ids.size() == ids.size())
+      << "accepted request id count mismatch";
+  CHECK_EQ(accepted_embeddings.size(0), static_cast<int64_t>(ids.size()))
+      << "accepted embedding batch mismatch";
+  CHECK_EQ(accepted_tokens.size(1), accepted_embeddings.size(1))
+      << "accepted token/embedding width mismatch";
+  CHECK_GE(num_speculative_tokens, 0) << "invalid speculative token count";
+
+  torch::Tensor accepted_tokens_cpu = safe_to(accepted_tokens, torch::kCPU);
+  for (int32_t i = 0; i < static_cast<int32_t>(ids.size()); ++i) {
+    int32_t accepted_len = 0;
+    int32_t last_token_id = -1;
+    const int32_t token_width =
+        static_cast<int32_t>(accepted_tokens_cpu.size(1));
+    for (int32_t j = 0; j < token_width; ++j) {
+      const int64_t token = accepted_tokens_cpu[i][j].item<int64_t>();
+      if (token < 0) {
+        break;
+      }
+      CHECK_LE(token, static_cast<int64_t>(std::numeric_limits<int32_t>::max()))
+          << "accepted token overflow";
+      last_token_id = static_cast<int32_t>(token);
+      ++accepted_len;
+    }
+    CHECK_GT(accepted_len, 0)
+        << "each sequence must have at least one accepted target token";
+    for (int32_t j = accepted_len; j < token_width; ++j) {
+      const int64_t token = accepted_tokens_cpu[i][j].item<int64_t>();
+      CHECK_LT(token, 0) << "accepted tokens should be a contiguous prefix";
+    }
+
+    const int32_t last_idx = accepted_len - 1;
+    DecodeState state;
+    state.valid = true;
+    if (!request_ids.empty()) {
+      state.request_id = request_ids[i];
+    }
+    state.all_draft_accepted = accepted_len == num_speculative_tokens + 1;
+    state.token_id = last_token_id;
+    state.position_offset = last_idx;
+    state.embedding = accepted_embeddings[i][last_idx].detach().cpu();
+    if (last_idx > 0) {
+      const int64_t prev_token =
+          accepted_tokens_cpu[i][last_idx - 1].item<int64_t>();
+      state.prev_token_id = static_cast<int32_t>(prev_token);
+      state.prev_embedding =
+          accepted_embeddings[i][last_idx - 1].detach().cpu();
+    }
+
+    DecodeState& tail = mutable_tail(ids[i]);
+    tail = std::move(state);
   }
 }
 
@@ -71,66 +157,48 @@ void EmbeddingCache::set_placeholder(
   embedding_placeholder_ = embedding_placeholder;
 }
 
-ForwardOutput EmbeddingCache::read_for_decode(const std::vector<int32_t>& ids) {
-  CHECK(!ids.empty()) << "decode ids should not be empty";
-  std::vector<int32_t> token_ids;
-  std::vector<torch::Tensor> embeddings;
-  std::vector<torch::Tensor> probs;
-  token_ids.reserve(ids.size());
-  embeddings.reserve(ids.size());
-  probs.reserve(ids.size());
-  for (int32_t id : ids) {
-    const auto& item = get_tail(id);
-    CHECK_GE(item.token_id, 0) << "decode entry missing token id";
-    CHECK(item.embedding.defined()) << "decode entry missing embedding";
-    CHECK(item.probs.defined()) << "decode entry missing probs";
-    token_ids.emplace_back(item.token_id);
-    embeddings.emplace_back(item.embedding);
-    probs.emplace_back(item.probs);
-  }
-  ForwardOutput output;
-  output.sample_output.next_tokens = torch::tensor(token_ids, torch::kInt);
-  output.sample_output.embeddings = torch::stack(embeddings);
-  output.sample_output.probs = torch::stack(probs);
-  return output;
+const torch::Tensor& EmbeddingCache::embedding_placeholder() const {
+  return embedding_placeholder_;
 }
 
-std::vector<int32_t> EmbeddingCache::read_correction_tokens(
-    const std::vector<int32_t>& ids) const {
+std::vector<EmbeddingCache::DecodeState> EmbeddingCache::read_decode_states(
+    const std::vector<int32_t>& ids,
+    const std::vector<std::string>& request_ids) const {
   CHECK(!ids.empty()) << "decode ids should not be empty";
-  std::vector<int32_t> tokens;
-  tokens.reserve(ids.size());
-  for (int32_t id : ids) {
-    const auto& item = get_tail(id);
-    CHECK_GE(item.correction_token_id, 0)
-        << "decode entry missing correction token id";
-    tokens.emplace_back(item.correction_token_id);
+  CHECK(request_ids.empty() || request_ids.size() == ids.size())
+      << "decode request id count mismatch";
+  std::vector<DecodeState> states;
+  states.reserve(ids.size());
+  for (int32_t i = 0; i < static_cast<int32_t>(ids.size()); ++i) {
+    const int32_t id = ids[i];
+    const DecodeState& cached_state = get_tail(id);
+    DecodeState state = cached_state;
+    if (state.valid && !request_ids.empty() &&
+        state.request_id != request_ids[i]) {
+      state = DecodeState();
+    }
+    if (!state.valid) {
+      state.token_id = 0;
+      state.position_offset = 0;
+      state.all_draft_accepted = false;
+    } else {
+      CHECK_GE(state.token_id, 0) << "decode entry missing target token id";
+      CHECK(state.embedding.defined())
+          << "decode entry missing target embedding";
+      if (state.prev_token_id >= 0) {
+        CHECK(state.prev_embedding.defined())
+            << "decode entry missing previous target embedding";
+      }
+    }
+    states.emplace_back(std::move(state));
   }
-  return tokens;
-}
-
-std::vector<int32_t> EmbeddingCache::read_position_offsets(
-    const std::vector<int32_t>& ids) const {
-  CHECK(!ids.empty()) << "decode ids should not be empty";
-  std::vector<int32_t> offsets;
-  offsets.reserve(ids.size());
-  for (int32_t id : ids) {
-    const auto& item = get_tail(id);
-    CHECK_GE(item.correction_token_id, 0)
-        << "decode entry missing correction token id";
-    offsets.emplace_back(item.correction_position_offset);
-  }
-  return offsets;
+  return states;
 }
 
 void EmbeddingCache::clear(const std::vector<int32_t>& ids) {
   for (int32_t id : ids) {
-    auto& tail = mutable_tail(id);
-    tail.embedding = torch::Tensor();
-    tail.token_id = -1;
-    tail.correction_token_id = -1;
-    tail.correction_position_offset = 0;
-    tail.probs = torch::Tensor();
+    DecodeState& tail = mutable_tail(id);
+    tail = DecodeState();
   }
 }
 
@@ -147,4 +215,5 @@ const EmbeddingCache::DecodeState& EmbeddingCache::get_tail(
   CHECK_LT(static_cast<size_t>(embedding_id), decode_tails_.size());
   return decode_tails_[embedding_id];
 }
+
 }  // namespace xllm

@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from scripts.logger import logger
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -46,22 +48,29 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.target == "ascend":
         from ..bootstrap import prepare_ascend
+
         prepare_ascend()
         from ..targets.ascend.build import build_kernels
+
+        manifests = build_kernels(
+            output_root=output_root,
+            kernel_names=args.kernels,
+            force=args.force,
+            device=args.device,
+        )
     elif args.target == "cuda":
         from ..targets.cuda.build import build_kernels
+
+        manifests = build_kernels(
+            output_root=output_root,
+            kernel_names=args.kernels,
+            force=args.force,
+        )
     else:
         raise ValueError(f"Unsupported target: {args.target}")
-
-    manifests = build_kernels(
-        output_root=output_root,
-        kernel_names=args.kernels,
-        force=args.force,
-        device=args.device,
-    )
     for manifest in manifests:
-        print(f"[INFO] built {manifest.target}:{manifest.kernel_name}")
-        print(f"[INFO] manifest: {Path(manifest.output_dir) / 'manifest.json'}")
+        logger.info(f"built {manifest.target}:{manifest.kernel_name}")
+        logger.info(f"manifest: {Path(manifest.output_dir) / 'manifest.json'}")
 
 
 if __name__ == "__main__":

@@ -454,9 +454,9 @@ std::shared_ptr<Request> VLMMaster::generate_request(
     return nullptr;
   }
 
-  const std::vector<JsonTool> empty_tools;
   auto prompt =
-      chat_template_->apply(messages, empty_tools, sp.chat_template_kwargs);
+      chat_template_->apply(messages, sp.tools, sp.chat_template_kwargs);
+
   if (!prompt.has_value()) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "Failed to construct prompt from messages");

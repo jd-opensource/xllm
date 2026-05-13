@@ -24,15 +24,13 @@ limitations under the License.
 #include <vector>
 
 #include "common/types.h"
+#include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/xtensor/xtensor.h"
 #include "runtime/forward_params.h"
 #include "runtime/params_utils.h"
 #include "worker.pb.h"
 
 namespace xllm {
-
-static constexpr size_t kKVCacheShapeSizeWithIndex = 3;
-static constexpr size_t kKVCacheShapeSizeWithConvAndSsm = 4;
 
 class CommChannel {
  public:
@@ -43,8 +41,7 @@ class CommChannel {
 
   virtual bool hello();
 
-  virtual bool allocate_kv_cache(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape);
+  virtual bool allocate_kv_cache(const KVCacheShape& kv_cache_shape);
 
   virtual bool get_device_info(std::string& device_ip, uint16_t& port);
 
@@ -93,7 +90,7 @@ class CommChannel {
   virtual bool process_group_test();
 
   virtual bool allocate_kv_cache_with_transfer(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape);
+      const KVCacheShape& kv_cache_shape);
 
   virtual void transfer_kv_blocks(
       const std::vector<BlockTransferInfo>& block_transfer_info,

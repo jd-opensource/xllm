@@ -89,6 +89,7 @@ For wrapper work:
 - handwrite tensor checks, layout transforms, and `build_runtime_specialization(...)`
 - use generated `make_<kernel>_specialization(...)` and `find_<kernel>_kernel_entry(...)`
 - do not handwrite kernel-specific specialization structs or kernel fn typedefs
+- **never use `permute`, `contiguous`, `transpose`, `reshape` (when non-trivial), `clone`, or any operation that triggers a device memory copy in the wrapper**. The wrapper must only pass pointers to existing tensors. If the kernel needs a different layout, handle it inside the kernel itself or require the caller to provide the correct layout.
 
 ## New specialization
 

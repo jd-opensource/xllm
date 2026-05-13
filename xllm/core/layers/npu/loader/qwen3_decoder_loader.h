@@ -27,13 +27,15 @@ class Qwen3DecoderLoader : public BaseLoader {
  public:
   Qwen3DecoderLoader(uint64_t weight_count,
                      const ModelContext& context,
-                     bool enableAddNorm);
+                     bool enableAddNorm,
+                     LoadMode mode = LoadMode::kEager);
 
   void load_state_dict(const StateDict& state_dict) override;
   void verify_loaded_weights() const override;
-  void merge_loaded_weights() override;
 
  protected:
+  void merge_host_at_weights() override;
+
   torch::Tensor at_placeholder_;
   bool enableAddNorm_;
   int rank_id_;

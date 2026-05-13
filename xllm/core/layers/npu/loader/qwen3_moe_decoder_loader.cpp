@@ -15,10 +15,16 @@ limitations under the License.
 
 #include "qwen3_moe_decoder_loader.h"
 
+#include <glog/logging.h>
 #include <torch/torch.h>
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 #include <torch_npu/torch_npu.h>
 
+#include <cctype>
+#include <sstream>
+#include <unordered_set>
+
+#include "qwen_loader_constants.h"
 #include "xllm_atb_layers/core/include/atb_speed/base/hosttensor_binder.h"
 #include "xllm_atb_layers/core/include/atb_speed/base/model.h"
 #include "xllm_atb_layers/core/include/atb_speed/log.h"
@@ -27,195 +33,19 @@ limitations under the License.
 
 namespace xllm {
 namespace layer {
-enum DecoderLayerTensorId : int {
-  IN_INPUT_NORM_WEIGHT = 0,  // [2048]
-  IN_INPUT_NORM_BIAS = 1,
-  IN_INPUT_NORM_NEW_WEIGHT = 2,
-  IN_INPUT_NORM_NEW_BIAS = 3,
-
-  IN_QKV_WEIGHT_0 = 4,  // [4096, 2048]
-  IN_QKV_BIAS_0 = 5,
-  IN_QKV_DESCALE_0 = 6,
-  IN_QKV_OFFSET_0 = 7,
-  IN_QKV_SCALE_0 = 8,
-  IN_QKV_COMPRESS_IDX_0 = 9,
-
-  IN_QKV_WEIGHT_1 = 10,  // [512, 2048]
-  IN_QKV_BIAS_1 = 11,
-  IN_QKV_DESCALE_1 = 12,
-  IN_QKV_OFFSET_1 = 13,
-  IN_QKV_SCALE_1 = 14,
-  IN_QKV_COMPRESS_IDX_1 = 15,
-
-  IN_QKV_WEIGHT_2 = 16,  // [512, 2048]
-  IN_QKV_BIAS_2 = 17,
-  IN_QKV_DESCALE_2 = 18,
-  IN_QKV_OFFSET_2 = 19,
-  IN_QKV_SCALE_2 = 20,
-  IN_QKV_COMPRESS_IDX_2 = 21,
-
-  IN_ATTENTION_OUT_WEIGHT = 22,  // [2048, 4096]
-  IN_ATTENTION_OUT_BIAS = 23,
-  IN_ATTENTION_OUT_DESCALE = 24,
-  IN_ATTENTION_OUT_OFFSET = 25,
-  IN_ATTENTION_OUT_SCALE = 26,
-  IN_ATTENTION_OUT_COMPRESS_IDX = 27,
-
-  IN_Q_NORM_WEIGHT = 28,  // [128]
-  IN_K_NORM_WEIGHT = 29,  // [128]
-
-  IN_SELFATTENTION_OUT_NORM_WEIGHT = 30,  // [2048]
-  IN_SELFATTENTION_OUT_NORM_BIAS = 31,
-  IN_SELFATTENTION_OUT_NEW_NORM_WEIGHT = 32,
-  IN_SELFATTENTION_OUT_NEW_NORM_BIAS = 33,
-
-  IN_BLOCK_SPARSE_MOE_GATE_WEIGHT = 34,  // [128, 2048]
-  IN_BLOCK_SPARSE_MOE_GATE_BIAS = 35,
-  IN_BLOCK_SPARSE_MOE_GATE_DESCALE = 36,
-  IN_BLOCK_SPARSE_MOE_GATE_OFFSET = 37,
-  IN_BLOCK_SPARSE_MOE_GATE_SCALE = 38,
-  IN_BLOCK_SPARSE_MOE_GATE_COMPRESS_IDX = 39,
-
-  IN_MLP_GATEUP_WEIGHT_EXPERT = 40,
-  IN_MLP_GATEUP_BIAS_EXPERT = 41,
-  IN_MLP_GATEUP_DESCALE_EXPERT = 42,
-  IN_MLP_GATEUP_OFFSET_EXPERT = 43,
-  IN_MLP_GATEUP_SCALE_EXPERT = 44,
-  IN_MLP_GATEUP_COMPRESS_IDX_EXPERT = 45,
-
-  IN_MLP_DOWN_WEIGHT_EXPERT = 46,  // [2048, 768]
-  IN_MLP_DOWN_BIAS_EXPERT = 47,
-  IN_MLP_DOWN_DESCALE_EXPERT = 48,
-  IN_MLP_DOWN_OFFSET_EXPERT = 49,
-  IN_MLP_DOWN_SCALE_EXPERT = 50,
-  IN_MLP_DOWN_COMPRESS_IDX_EXPERT = 51,
-
-  IN_MLP_SHARED_GATEUP_WEIGHT = 52,
-  IN_MLP_SHARED_DOWN_WEIGHT = 53,
-  IN_MLP_SHARED_EXPERT_GATE = 54,
-};
-
-static const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
-    {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
-
-    {"self_attn.q_proj.weight", IN_QKV_WEIGHT_0},
-
-    {"self_attn.k_proj.weight", IN_QKV_WEIGHT_1},
-
-    {"self_attn.v_proj.weight", IN_QKV_WEIGHT_2},
-
-    {"self_attn.o_proj.weight", IN_ATTENTION_OUT_WEIGHT},
-
-    {"self_attn.q_norm.weight", IN_Q_NORM_WEIGHT},
-    {"self_attn.k_norm.weight", IN_K_NORM_WEIGHT},
-
-    {"post_attention_layernorm.weight", IN_SELFATTENTION_OUT_NORM_WEIGHT},
-
-    // MoE Gate
-    {"mlp.gate.weight", IN_BLOCK_SPARSE_MOE_GATE_WEIGHT},
-
-    // Expert MLP - Gate/Up projections
-    {"gate_proj.weight", IN_MLP_GATEUP_WEIGHT_EXPERT},
-
-    {"up_proj.weight", IN_MLP_GATEUP_WEIGHT_EXPERT},
-
-    // Expert MLP - Down projection
-    {"down_proj.weight", IN_MLP_DOWN_WEIGHT_EXPERT},
-
-};
-
-static const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
-    {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
-    {"input_layernorm.bias", IN_INPUT_NORM_NEW_BIAS},
-
-    {"self_attn.q_proj.weight", IN_QKV_WEIGHT_0},
-    {"self_attn.q_proj.bias", IN_QKV_BIAS_0},
-    {"self_attn.q_proj.deq_scale", IN_QKV_DESCALE_0},
-    {"self_attn.q_proj.weight_offset", IN_QKV_OFFSET_0},
-    {"self_attn.q_proj.weight_scale", IN_QKV_SCALE_0},
-
-    {"self_attn.k_proj.weight", IN_QKV_WEIGHT_1},
-    {"self_attn.k_proj.bias", IN_QKV_BIAS_1},
-    {"self_attn.k_proj.deq_scale", IN_QKV_DESCALE_1},
-    {"self_attn.k_proj.weight_offset", IN_QKV_OFFSET_1},
-    {"self_attn.k_proj.weight_scale", IN_QKV_SCALE_1},
-
-    {"self_attn.v_proj.weight", IN_QKV_WEIGHT_2},
-    {"self_attn.v_proj.bias", IN_QKV_BIAS_2},
-    {"self_attn.v_proj.deq_scale", IN_QKV_DESCALE_2},
-    {"self_attn.v_proj.weight_offset", IN_QKV_OFFSET_2},
-    {"self_attn.v_proj.weight_scale", IN_QKV_SCALE_2},
-
-    {"self_attn.o_proj.weight", IN_ATTENTION_OUT_WEIGHT},
-    {"self_attn.o_proj.quant_bias", IN_ATTENTION_OUT_BIAS},
-    {"self_attn.o_proj.deq_scale", IN_ATTENTION_OUT_DESCALE},
-    {"self_attn.o_proj.weight_offset", IN_ATTENTION_OUT_OFFSET},
-    {"self_attn.o_proj.weight_scale", IN_ATTENTION_OUT_SCALE},
-
-    {"self_attn.q_norm.weight", IN_Q_NORM_WEIGHT},
-    {"self_attn.k_norm.weight", IN_K_NORM_WEIGHT},
-
-    {"post_attention_layernorm.weight", IN_SELFATTENTION_OUT_NORM_WEIGHT},
-    {"post_attention_layernorm.bias", IN_SELFATTENTION_OUT_NEW_NORM_BIAS},
-
-    // MoE Gate
-    {"mlp.gate.weight", IN_BLOCK_SPARSE_MOE_GATE_WEIGHT},
-
-    {"gate_proj.weight", IN_MLP_GATEUP_WEIGHT_EXPERT},
-    {"gate_proj.weight_offset", IN_MLP_GATEUP_OFFSET_EXPERT},
-    {"gate_proj.weight_scale", IN_MLP_GATEUP_SCALE_EXPERT},
-    {"up_proj.weight", IN_MLP_GATEUP_WEIGHT_EXPERT},
-    {"up_proj.weight_offset", IN_MLP_GATEUP_OFFSET_EXPERT},
-    {"up_proj.weight_scale", IN_MLP_GATEUP_SCALE_EXPERT},
-
-    {"down_proj.weight", IN_MLP_DOWN_WEIGHT_EXPERT},
-    {"down_proj.weight_offset", IN_MLP_DOWN_OFFSET_EXPERT},
-    {"down_proj.weight_scale", IN_MLP_DOWN_SCALE_EXPERT},
-};
-
-static const std::unordered_map<std::string, std::vector<int>>
-    SPECIAL_MULTI_ASSIGN_W8A8 = {
-        {"input_layernorm.weight",
-         {IN_INPUT_NORM_WEIGHT, IN_INPUT_NORM_NEW_WEIGHT}},
-        {"post_attention_layernorm.weight",
-         {IN_SELFATTENTION_OUT_NORM_WEIGHT,
-          IN_SELFATTENTION_OUT_NEW_NORM_WEIGHT}},
-};
-
-static const std::map<int, int> WEIGHT_SHARD = {
-    {IN_QKV_WEIGHT_0, 0},
-    {IN_QKV_WEIGHT_1, 0},
-    {IN_QKV_WEIGHT_2, 0},
-    {IN_ATTENTION_OUT_WEIGHT, 1},
-    {IN_MLP_GATEUP_WEIGHT_EXPERT, 0},
-    {IN_MLP_DOWN_WEIGHT_EXPERT, 1},
-};
-
-static const std::map<int, int> WEIGHT_SHARD_W8A8 = {
-    {IN_QKV_WEIGHT_0, 0},
-    {IN_QKV_OFFSET_0, 0},
-    {IN_QKV_SCALE_0, 0},
-    {IN_QKV_WEIGHT_1, 0},
-    {IN_QKV_OFFSET_1, 0},
-    {IN_QKV_SCALE_1, 0},
-    {IN_QKV_WEIGHT_2, 0},
-    {IN_QKV_OFFSET_2, 0},
-    {IN_QKV_SCALE_2, 0},
-    {IN_ATTENTION_OUT_WEIGHT, 1},
-    {IN_MLP_GATEUP_WEIGHT_EXPERT, 0},
-    {IN_MLP_GATEUP_OFFSET_EXPERT, 0},
-    {IN_MLP_GATEUP_SCALE_EXPERT, 0},
-    {IN_MLP_DOWN_WEIGHT_EXPERT, 1},
-};
+using namespace qwen3_moe_decoder_constants;
 
 Qwen3MoeDecoderLoader::Qwen3MoeDecoderLoader(uint64_t weight_count,
-                                             const ModelContext& context)
-    : BaseLoader(weight_count, context) {
+                                             const ModelContext& context,
+                                             LoadMode mode)
+    : BaseLoader(weight_count, context, mode) {
   auto model_args = context.get_model_args();
   auto options = context.get_tensor_options();
 
-  for (int i = 0; i < weight_count; ++i) {
-    at_weight_tensors_[i] = torch::zeros({1}).to(options);
+  auto& t = working_tensors();
+  auto target_options = options.device(target_device());
+  for (uint64_t i = 0; i < weight_count; ++i) {
+    t[i] = torch::zeros({1}, target_options);
   }
 
   num_experts_ = model_args.num_experts();
@@ -237,9 +67,6 @@ Qwen3MoeDecoderLoader::Qwen3MoeDecoderLoader(uint64_t weight_count,
 
 void Qwen3MoeDecoderLoader::load_state_dict(const StateDict& state_dict) {
   for (const auto& [name, tensor] : state_dict) {
-    bool is_sharded = false;
-    int index = 0;
-
     if (absl::StartsWith(name, "mlp.experts")) {
       process_expert_weights(state_dict, name, tensor);
       continue;
@@ -254,26 +81,27 @@ void Qwen3MoeDecoderLoader::load_state_dict(const StateDict& state_dict) {
   }
 }
 
+void Qwen3MoeDecoderLoader::verify_loaded_weights() const {
+  if (mode() == LoadMode::kManual) {
+    verify_loaded_weights("qwen3_moe");
+  }
+}
+
 void Qwen3MoeDecoderLoader::verify_loaded_weights(
     const std::string& prefix) const {
+  const auto& t = working_tensors();
   for (const auto& [name, index] : WEIGHT_MAPPING) {
     if (name == "down_proj.weight" || name == "gate_proj.weight" ||
         name == "up_proj.weight") {
       continue;
     }
-    CHECK(at_weight_tensors_[index].sizes() != std::vector<int64_t>({1}))
+    CHECK(t[index].sizes() != std::vector<int64_t>({1}))
         << "weight is not loaded for " << name;
   }
 }
 
 void Qwen3MoeDecoderLoader::merge_experts_weights() {
-  if (experts_weights_.count("gate_proj.weight") > 0) {
-    auto& gate_weight = experts_weights_["gate_proj.weight"];
-  }
-
-  if (experts_weights_.count("up_proj.weight") > 0) {
-    auto& up_weight = experts_weights_["up_proj.weight"];
-  }
+  auto& t = working_tensors();
 
   try {
     torch::Tensor mlp_gateup_weight;
@@ -282,10 +110,10 @@ void Qwen3MoeDecoderLoader::merge_experts_weights() {
           merge_experts_weights(experts_weights_["gate_proj.weight"],
                                 experts_weights_["up_proj.weight"],
                                 /*transpose=*/true);
-      at_weight_tensors_[IN_MLP_GATEUP_OFFSET_EXPERT] =
+      t[IN_MLP_GATEUP_OFFSET_EXPERT] =
           merge_experts_weights(experts_weights_["gate_proj.weight_offset"],
                                 experts_weights_["up_proj.weight_offset"]);
-      at_weight_tensors_[IN_MLP_GATEUP_SCALE_EXPERT] =
+      t[IN_MLP_GATEUP_SCALE_EXPERT] =
           merge_experts_weights(experts_weights_["gate_proj.weight_scale"],
                                 experts_weights_["up_proj.weight_scale"]);
     } else {
@@ -294,16 +122,11 @@ void Qwen3MoeDecoderLoader::merge_experts_weights() {
                                 experts_weights_["up_proj.weight"],
                                 /*transpose=*/false);
     }
-    // Moe_grouped_matmul needs a weight of NZ format, default cast for now
-    at_weight_tensors_[IN_MLP_GATEUP_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_gateup_weight, 29).contiguous();
+    t[IN_MLP_GATEUP_WEIGHT_EXPERT] =
+        cast_nz(mlp_gateup_weight, IN_MLP_GATEUP_WEIGHT_EXPERT);
   } catch (const std::exception& e) {
     LOG(ERROR) << "[ERROR] Exception in gateup weight processing: " << e.what();
     throw;
-  }
-
-  if (experts_weights_.count("down_proj.weight") > 0) {
-    auto& down_weight = experts_weights_["down_proj.weight"];
   }
 
   try {
@@ -311,17 +134,14 @@ void Qwen3MoeDecoderLoader::merge_experts_weights() {
         merge_experts_weights(experts_weights_["down_proj.weight"],
                               /*transpose=*/false);
 
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 2).contiguous();
-
     if (quantize_type_.compare("w8a8_dynamic") == 0) {
-      at_weight_tensors_[IN_MLP_DOWN_OFFSET_EXPERT] =
+      t[IN_MLP_DOWN_OFFSET_EXPERT] =
           merge_experts_weights(experts_weights_["down_proj.weight_offset"]);
-      at_weight_tensors_[IN_MLP_DOWN_SCALE_EXPERT] =
+      t[IN_MLP_DOWN_SCALE_EXPERT] =
           merge_experts_weights(experts_weights_["down_proj.weight_scale"]);
     }
-    at_weight_tensors_[IN_MLP_DOWN_WEIGHT_EXPERT] =
-        at_npu::native::npu_format_cast(mlp_down_weight, 29).contiguous();
+    t[IN_MLP_DOWN_WEIGHT_EXPERT] =
+        cast_nz(mlp_down_weight, IN_MLP_DOWN_WEIGHT_EXPERT);
   } catch (const std::exception& e) {
     LOG(ERROR) << "[ERROR] Exception in down weight processing: " << e.what();
     throw;
@@ -331,12 +151,14 @@ void Qwen3MoeDecoderLoader::merge_experts_weights() {
 torch::Tensor Qwen3MoeDecoderLoader::merge_experts_weights(
     std::vector<torch::Tensor>& experts,
     bool transpose) {
-  torch::Tensor merged_tensor = torch::stack(experts, 0).to(device_);
+  torch::Tensor merged_tensor = torch::stack(experts, 0).to(target_device());
   if (transpose) {
     merged_tensor = merged_tensor.transpose(1, 2);
   }
   merged_tensor = merged_tensor.contiguous();
-  experts.clear();
+  for (auto& expert : experts) {
+    expert = torch::Tensor();
+  }
 
   return merged_tensor;
 }
@@ -458,10 +280,10 @@ void Qwen3MoeDecoderLoader::process_mlp_common_weights(
                                                       shard_map.at(index),
                                                       dp_local_tp_rank_,
                                                       dp_local_tp_size_)
-                                       .to(device_)
-                                 : tensor.to(device_);
+                                       .to(target_device())
+                                 : tensor.to(target_device());
   if (absl::StrContains(name, "down_proj")) {
-    at_weight_tensors_[index] = tmp_tensor;
+    working_tensors()[index] = tmp_tensor;
   } else {
     shared_experts_weights_[name] = tmp_tensor;
   }
@@ -510,22 +332,23 @@ void Qwen3MoeDecoderLoader::process_general_weights(
   if (is_sharded) {
     tmp_tensor = get_sharded_tensor(
                      state_dict, name, shard_map.at(index), tp_rank, tp_size)
-                     .to(device_);
+                     .to(target_device());
   } else {
-    tmp_tensor = tensor.to(device_);
+    tmp_tensor = tensor.to(target_device());
   }
 
   correct_tensor_dtype(tmp_tensor, name);
+  auto& t = working_tensors();
   if (quantize_type_.compare("w8a8_dynamic") == 0) {
     auto it = SPECIAL_MULTI_ASSIGN_W8A8.find(name);
     if (it != SPECIAL_MULTI_ASSIGN_W8A8.end()) {
       for (int idx : it->second) {
-        at_weight_tensors_[idx] = tmp_tensor;
+        t[idx] = tmp_tensor;
       }
       return;
     }
   }
-  at_weight_tensors_[index] = tmp_tensor;
+  t[index] = tmp_tensor;
 }
 
 torch::Tensor Qwen3MoeDecoderLoader::get_sharded_tensor(
@@ -544,11 +367,11 @@ torch::Tensor Qwen3MoeDecoderLoader::get_sharded_tensor(
     const StateDict& state_dict,
     const std::string& name,
     int dim,
-    int loacal_tp_rank,
+    int local_tp_rank,
     int local_tp_size) {
   if (local_tp_size > 1) {
     return state_dict.get_sharded_tensor(
-        name, dim, loacal_tp_rank, local_tp_size);
+        name, dim, local_tp_rank, local_tp_size);
   } else {
     return state_dict.get_tensor(name);
   }
@@ -561,77 +384,65 @@ torch::Tensor Qwen3MoeDecoderLoader::merge_experts_weights(
   for (size_t i = 0; i < experts_up.size(); ++i) {
     experts_gate[i] = torch::cat({experts_gate[i], experts_up[i]}, 0);
   }
-  torch::Tensor merged_tensor = torch::stack(experts_gate, 0).to(device_);
+  torch::Tensor merged_tensor =
+      torch::stack(experts_gate, 0).to(target_device());
   if (transpose) {
     merged_tensor = merged_tensor.transpose(1, 2);
   }
   merged_tensor = merged_tensor.contiguous();
-  experts_gate.clear();
-  experts_up.clear();
+  for (auto& expert : experts_gate) {
+    expert = torch::Tensor();
+  }
+  for (auto& expert : experts_up) {
+    expert = torch::Tensor();
+  }
 
   return merged_tensor;
 }
 
-void Qwen3MoeDecoderLoader::merge_loaded_weights() {
+void Qwen3MoeDecoderLoader::merge_host_at_weights() {
   merge_experts_weights();
 
-  at_weight_tensors_[IN_QKV_WEIGHT_0] =
-      torch::cat({at_weight_tensors_[IN_QKV_WEIGHT_0],
-                  at_weight_tensors_[IN_QKV_WEIGHT_1],
-                  at_weight_tensors_[IN_QKV_WEIGHT_2]},
+  auto& t = working_tensors();
+  auto target_options =
+      torch::TensorOptions().dtype(torch::kFloat16).device(target_device());
+  auto zero_fp16 = [&]() { return torch::zeros({1}, target_options); };
+
+  t[IN_QKV_WEIGHT_0] =
+      torch::cat({t[IN_QKV_WEIGHT_0], t[IN_QKV_WEIGHT_1], t[IN_QKV_WEIGHT_2]},
                  0)
           .contiguous();
-  at_weight_tensors_[IN_QKV_WEIGHT_1] =
-      torch::zeros({1}, torch::kFloat16).to(device_);
-  at_weight_tensors_[IN_QKV_WEIGHT_2] =
-      torch::zeros({1}, torch::kFloat16).to(device_);
+  t[IN_QKV_WEIGHT_1] = zero_fp16();
+  t[IN_QKV_WEIGHT_2] = zero_fp16();
 
   if (quantize_type_.compare("w8a8_dynamic") == 0) {
-    at_weight_tensors_[IN_QKV_BIAS_0] =
-        torch::zeros({1}, torch::kFloat16).to(device_);
-    at_weight_tensors_[IN_QKV_BIAS_1] =
-        torch::zeros({1}, torch::kFloat16).to(device_);
-    at_weight_tensors_[IN_QKV_BIAS_2] =
-        torch::zeros({1}, torch::kFloat16).to(device_);
-    at_weight_tensors_[IN_ATTENTION_OUT_BIAS] =
-        torch::zeros({1}, torch::kFloat16).to(device_);
+    t[IN_QKV_BIAS_0] = zero_fp16();
+    t[IN_QKV_BIAS_1] = zero_fp16();
+    t[IN_QKV_BIAS_2] = zero_fp16();
+    t[IN_ATTENTION_OUT_BIAS] = zero_fp16();
 
-    at_weight_tensors_[IN_QKV_DESCALE_0] =
-        torch::zeros({1}, torch::kFloat16).to(device_);
-    at_weight_tensors_[IN_QKV_DESCALE_1] =
-        torch::zeros({1}, torch::kFloat16).to(device_);
-    at_weight_tensors_[IN_QKV_DESCALE_2] =
-        torch::zeros({1}, torch::kFloat16).to(device_);
-    at_weight_tensors_[IN_ATTENTION_OUT_DESCALE] =
-        torch::zeros({1}, torch::kFloat16).to(device_);
+    t[IN_QKV_DESCALE_0] = zero_fp16();
+    t[IN_QKV_DESCALE_1] = zero_fp16();
+    t[IN_QKV_DESCALE_2] = zero_fp16();
+    t[IN_ATTENTION_OUT_DESCALE] = zero_fp16();
 
-    at_weight_tensors_[IN_QKV_OFFSET_0] =
-        torch::cat({at_weight_tensors_[IN_QKV_OFFSET_0],
-                    at_weight_tensors_[IN_QKV_OFFSET_1],
-                    at_weight_tensors_[IN_QKV_OFFSET_2]},
+    t[IN_QKV_OFFSET_0] =
+        torch::cat({t[IN_QKV_OFFSET_0], t[IN_QKV_OFFSET_1], t[IN_QKV_OFFSET_2]},
                    0)
             .contiguous()
             .view(-1);
-    at_weight_tensors_[IN_QKV_OFFSET_1] =
-        torch::zeros({1}, torch::kFloat16).to(device_);
-    at_weight_tensors_[IN_QKV_OFFSET_2] =
-        torch::zeros({1}, torch::kFloat16).to(device_);
-    at_weight_tensors_[IN_ATTENTION_OUT_OFFSET] =
-        at_weight_tensors_[IN_ATTENTION_OUT_OFFSET].contiguous().view(-1);
+    t[IN_QKV_OFFSET_1] = zero_fp16();
+    t[IN_QKV_OFFSET_2] = zero_fp16();
+    t[IN_ATTENTION_OUT_OFFSET] =
+        t[IN_ATTENTION_OUT_OFFSET].contiguous().view(-1);
 
-    at_weight_tensors_[IN_QKV_SCALE_0] =
-        torch::cat({at_weight_tensors_[IN_QKV_SCALE_0],
-                    at_weight_tensors_[IN_QKV_SCALE_1],
-                    at_weight_tensors_[IN_QKV_SCALE_2]},
-                   0)
+    t[IN_QKV_SCALE_0] =
+        torch::cat({t[IN_QKV_SCALE_0], t[IN_QKV_SCALE_1], t[IN_QKV_SCALE_2]}, 0)
             .contiguous()
             .view(-1);
-    at_weight_tensors_[IN_QKV_SCALE_1] =
-        torch::zeros({1}, torch::kFloat16).to(device_);
-    at_weight_tensors_[IN_QKV_SCALE_2] =
-        torch::zeros({1}, torch::kFloat16).to(device_);
-    at_weight_tensors_[IN_ATTENTION_OUT_SCALE] =
-        at_weight_tensors_[IN_ATTENTION_OUT_SCALE].contiguous().view(-1);
+    t[IN_QKV_SCALE_1] = zero_fp16();
+    t[IN_QKV_SCALE_2] = zero_fp16();
+    t[IN_ATTENTION_OUT_SCALE] = t[IN_ATTENTION_OUT_SCALE].contiguous().view(-1);
   }
 }
 

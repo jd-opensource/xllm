@@ -25,7 +25,7 @@ limitations under the License.
 
 #include "common/options.h"
 #include "common/rate_limiter.h"
-#include "framework/chat_template/jinja_chat_template.h"
+#include "framework/chat_template/chat_template.h"
 #include "framework/request/request_output.h"
 #include "framework/request/request_params.h"
 #include "llm_engine.h"
@@ -123,7 +123,7 @@ class LLMMaster : public Master {
   std::unique_ptr<Tokenizer> tokenizer_;
 
   // chat template instance
-  std::unique_ptr<JinjaChatTemplate> chat_template_;
+  std::unique_ptr<ChatTemplate> chat_template_;
 
   // thread for moving forward the scheduler
   std::thread loop_thread_;

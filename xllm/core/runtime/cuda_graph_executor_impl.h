@@ -36,6 +36,7 @@ limitations under the License.
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/model_input_params.h"
+#include "core/kernels/cuda/llm_decode_metadata_update.h"
 #include "core/kernels/cuda/piecewise_graphs.h"
 #include "executor_impl.h"
 #include "executor_impl_factory.h"
@@ -137,6 +138,14 @@ class CudaGraphPersistentParam {
     }
     return persistent_embedding_;
   }
+  torch::Tensor persistent_linear_state_indices(
+      uint32_t actual_batch_size) const {
+    if (actual_batch_size > 0) {
+      return persistent_linear_state_indices_.slice(
+          /*dim=*/0, /*start=*/0, /*end=*/actual_batch_size);
+    }
+    return persistent_linear_state_indices_;
+  }
   torch::Tensor aux_hidden_states(uint32_t actual_tokens) const {
     if (!aux_hidden_states_.defined() || aux_hidden_states_.numel() == 0) {
       return aux_hidden_states_;
@@ -180,8 +189,25 @@ class CudaGraphPersistentParam {
     }
     return persistent_decode_qo_indptr_;
   }
+  torch::Tensor persistent_kv_seq_lens_delta(uint32_t actual_batch_size) const {
+    if (actual_batch_size > 0) {
+      return persistent_kv_seq_lens_delta_.slice(
+          /*dim=*/0, /*start=*/0, /*end=*/actual_batch_size);
+    }
+    return persistent_kv_seq_lens_delta_;
+  }
 
  private:
+  bool can_use_llm_decode_fast_path(const torch::Tensor& tokens,
+                                    const torch::Tensor& positions,
+                                    const ModelInputParams& params) const;
+  void update_llm_decode_metadata_fast_path(const torch::Tensor& tokens,
+                                            const torch::Tensor& positions,
+                                            const ModelInputParams& params,
+                                            uint32_t padded_num_tokens,
+                                            int64_t actual_batch_size,
+                                            int64_t actual_num_tokens);
+
   const ModelArgs& args_;
   const torch::Device& device_;
   const runtime::Options& options_;
@@ -195,6 +221,7 @@ class CudaGraphPersistentParam {
   torch::Tensor q_seq_lens_;
   torch::Tensor kv_seq_lens_;
   torch::Tensor persistent_embedding_;
+  torch::Tensor persistent_linear_state_indices_;
   torch::Tensor aux_hidden_states_;
 
   // FlashInfer decode mode parameters
@@ -202,6 +229,7 @@ class CudaGraphPersistentParam {
   torch::Tensor persistent_paged_kv_indices_;
   torch::Tensor persistent_paged_kv_last_page_len_;
   torch::Tensor persistent_decode_qo_indptr_;
+  torch::Tensor persistent_kv_seq_lens_delta_;
 
   // TODO maybe not used. or use q_cu_seq_lens instead.
   torch::Tensor persistent_chunked_prefill_qo_indptr_;
@@ -287,6 +315,9 @@ class CudaGraphExecutorImpl : public ExecutorImpl {
   // Return current graph executor memory usage in bytes (including persistent
   // parameters). Exposed for tests and diagnostics.
   size_t get_graph_memory_usage_bytes();
+
+  static std::optional<std::pair<torch::Tensor, torch::Tensor>>
+  find_first_full_attention_cache(const std::vector<KVCache>& kv_caches);
 
  private:
   // not own

@@ -114,7 +114,7 @@ LLMMaster::LLMMaster(const Options& options)
 
   // construct chat template
   chat_template_ =
-      std::make_unique<JinjaChatTemplate>(engine_->tokenizer_args());
+      ChatTemplate::create(engine_->tokenizer_args(), model_args_.model_type());
 
   tokenizer_ = engine_->tokenizer()->clone();
   threadpool_ =

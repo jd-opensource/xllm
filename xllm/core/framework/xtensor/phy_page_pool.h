@@ -120,7 +120,6 @@ class PhyPagePool {
 
   // Track which pages are allocated (for segment management)
   std::vector<bool> page_allocated_;
-
 };
 
 }  // namespace xllm

@@ -68,6 +68,12 @@ torch::Tensor rms_norm(const torch::Tensor& input,
                        double eps,
                        const std::string& mode);
 
+void npu_gemma_rms_norm(const torch::Tensor& x,
+                        const torch::Tensor& gamma,
+                        double epsilon,
+                        torch::Tensor& rstd_out,
+                        torch::Tensor& y_out);
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> add_rms_norm(
     const torch::Tensor& x1,
     const torch::Tensor& x2,
@@ -135,4 +141,31 @@ std::pair<torch::Tensor, torch::Tensor> apply_npu_partial_rotary_embedding(
     const torch::Tensor& cos_sin_cache,
     bool is_neox_style);
 
+torch::Tensor npu_recurrent_gated_delta_rule(
+    const torch::Tensor& query,
+    const torch::Tensor& key,
+    const torch::Tensor& value,
+    torch::Tensor& state,
+    const std::optional<torch::Tensor>& beta,
+    const std::optional<double> scale,
+    const std::optional<torch::Tensor>& actual_seq_lengths,
+    const std::optional<torch::Tensor>& ssm_state_indices,
+    const std::optional<torch::Tensor>& num_accepted_tokens,
+    const std::optional<torch::Tensor>& g,
+    const std::optional<torch::Tensor>& gk);
+
+std::tuple<torch::Tensor, torch::Tensor> rec_constrained_topk(
+    const torch::Tensor& logits,
+    const torch::Tensor& sequence_group,
+    const torch::Tensor& first_token_ids,
+    const torch::Tensor& prefix1_offsets,
+    const torch::Tensor& prefix1_values,
+    const torch::Tensor& prefix1_pair_keys,
+    const torch::Tensor& prefix2_value_offsets,
+    const torch::Tensor& prefix2_values,
+    const torch::Tensor& temperatures,
+    int64_t current_step,
+    int64_t top_k,
+    int64_t max_prefix1_degree,
+    int64_t max_prefix2_degree);
 }  // namespace xllm::kernel::npu

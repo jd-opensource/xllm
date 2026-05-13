@@ -71,8 +71,7 @@ bool RemoteWorker::wait_for_server_ready(const std::string& server_address) {
   return true;
 }
 
-bool RemoteWorker::allocate_kv_cache(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+bool RemoteWorker::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
   return channel_->allocate_kv_cache(kv_cache_shape);
 }
 
@@ -217,7 +216,7 @@ folly::SemiFuture<bool> RemoteWorker::init_model_async(
 }
 
 folly::SemiFuture<bool> RemoteWorker::allocate_kv_cache_async(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+    const KVCacheShape& kv_cache_shape) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
@@ -233,7 +232,7 @@ folly::SemiFuture<bool> RemoteWorker::allocate_kv_cache_async(
 }
 
 folly::SemiFuture<bool> RemoteWorker::allocate_kv_cache_with_transfer_async(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+    const KVCacheShape& kv_cache_shape) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(

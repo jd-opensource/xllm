@@ -68,41 +68,9 @@ bool CommChannel::check_health() {
   return resp.ok();
 }
 
-bool CommChannel::allocate_kv_cache(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+bool CommChannel::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
   proto::AllocateKVCacheRequest request;
-
-  auto* shape = request.mutable_kv_cache_shape();
-  shape->mutable_key_shape()->Reserve(kv_cache_shape[0].size());
-  shape->mutable_value_shape()->Reserve(kv_cache_shape[1].size());
-
-  // add key shape
-  for (size_t i = 0; i < kv_cache_shape[0].size(); ++i) {
-    shape->add_key_shape(kv_cache_shape[0][i]);
-  }
-
-  // add value shape
-  for (size_t i = 0; i < kv_cache_shape[1].size(); ++i) {
-    shape->add_value_shape(kv_cache_shape[1][i]);
-  }
-
-  // add index shape if exists
-  if (kv_cache_shape.size() == kKVCacheShapeSizeWithIndex) {
-    shape->mutable_index_shape()->Reserve(kv_cache_shape[2].size());
-    for (size_t i = 0; i < kv_cache_shape[2].size(); ++i) {
-      shape->add_index_shape(kv_cache_shape[2][i]);
-    }
-  } else if (kv_cache_shape.size() == kKVCacheShapeSizeWithConvAndSsm) {
-    // Use for Qwen-3.5, Qwen3-next, etc
-    shape->mutable_conv_shape()->Reserve(kv_cache_shape[2].size());
-    shape->mutable_ssm_shape()->Reserve(kv_cache_shape[3].size());
-    for (size_t i = 0; i < kv_cache_shape[2].size(); ++i) {
-      shape->add_conv_shape(kv_cache_shape[2][i]);
-    }
-    for (size_t i = 0; i < kv_cache_shape[3].size(); ++i) {
-      shape->add_ssm_shape(kv_cache_shape[3][i]);
-    }
-  }
+  kv_cache_shape.to_proto(request.mutable_kv_cache_shape());
   proto::Status s;
   brpc::Controller cntl;
   stub_->AllocateKVCache(&cntl, &request, &s, nullptr);
@@ -331,30 +299,9 @@ bool CommChannel::process_group_test() {
 }
 
 bool CommChannel::allocate_kv_cache_with_transfer(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+    const KVCacheShape& kv_cache_shape) {
   proto::AllocateKVCacheRequest request;
-
-  auto* shape = request.mutable_kv_cache_shape();
-  shape->mutable_key_shape()->Reserve(kv_cache_shape[0].size());
-  shape->mutable_value_shape()->Reserve(kv_cache_shape[1].size());
-
-  // add key shape
-  for (size_t i = 0; i < kv_cache_shape[0].size(); ++i) {
-    shape->add_key_shape(kv_cache_shape[0][i]);
-  }
-
-  // add value shape
-  for (size_t i = 0; i < kv_cache_shape[1].size(); ++i) {
-    shape->add_value_shape(kv_cache_shape[1][i]);
-  }
-
-  // add index shape if exists
-  if (kv_cache_shape.size() > 2) {
-    shape->mutable_index_shape()->Reserve(kv_cache_shape[2].size());
-    for (size_t i = 0; i < kv_cache_shape[2].size(); ++i) {
-      shape->add_index_shape(kv_cache_shape[2][i]);
-    }
-  }
+  kv_cache_shape.to_proto(request.mutable_kv_cache_shape());
 
   proto::Status s;
   brpc::Controller cntl;

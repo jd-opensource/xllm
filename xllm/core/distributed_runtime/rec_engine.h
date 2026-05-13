@@ -20,7 +20,6 @@ limitations under the License.
 #include <memory>
 
 #include "common/macros.h"
-#include "common/rec_model_utils.h"
 #include "distributed_runtime/dist_manager.h"
 #include "engine.h"
 #include "framework/batch/batch.h"
@@ -29,9 +28,12 @@ limitations under the License.
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
 #include "runtime/worker.h"
+#include "util/rec_model_utils.h"
 #include "util/threadpool.h"
 
 namespace xllm {
+
+class KVCacheShape;
 
 class RecEngine : public Engine {
  public:
@@ -66,8 +68,8 @@ class RecEngine : public Engine {
 
     // KV Cache
     virtual int64_t estimate_min_available_memory() = 0;
-    virtual bool allocate_kv_cache(
-        const std::vector<std::vector<int64_t>>& kv_cache_shape) = 0;
+    virtual bool allocate_kv_cache(const KVCacheShape& kv_cache_shape) = 0;
+    virtual int64_t minimal_kv_cache_blocks() const { return 0; }
 
     // Execution
     virtual ForwardOutput step(std::vector<Batch>& batches) = 0;
@@ -91,8 +93,7 @@ class RecEngine : public Engine {
     void process_group_test() override;
     bool init_model_workers(const std::string& model_path) override;
     int64_t estimate_min_available_memory() override;
-    bool allocate_kv_cache(
-        const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
+    bool allocate_kv_cache(const KVCacheShape& kv_cache_shape) override;
     ForwardOutput step(std::vector<Batch>& batches) override;
     std::vector<int64_t> get_active_activation_memory() const override;
     size_t num_workers() const override;
@@ -105,21 +106,47 @@ class RecEngine : public Engine {
   };
 
   // ============================================================
-  // OneRecEnginePipeline: kOneRec via local Worker
+  // OneRecLocalEnginePipeline: shared local-worker logic for OneRec modes
   // ============================================================
-  class OneRecEnginePipeline final : public RecEnginePipeline {
+  class OneRecLocalEnginePipeline : public RecEnginePipeline {
    public:
-    explicit OneRecEnginePipeline(RecEngine& engine);
+    explicit OneRecLocalEnginePipeline(RecEngine& engine);
 
     void setup_workers() override;
     void process_group_test() override;
     bool init_model_workers(const std::string& model_path) override;
     int64_t estimate_min_available_memory() override;
-    bool allocate_kv_cache(
-        const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
-    ForwardOutput step(std::vector<Batch>& batches) override;
+    bool allocate_kv_cache(const KVCacheShape& kv_cache_shape) override;
     std::vector<int64_t> get_active_activation_memory() const override;
     size_t num_workers() const override;
+  };
+
+  // ============================================================
+  // OneRecPrefillOnlyEnginePipeline: legacy kOneRec via local Worker
+  // ============================================================
+  class OneRecPrefillOnlyEnginePipeline final
+      : public OneRecLocalEnginePipeline {
+   public:
+    explicit OneRecPrefillOnlyEnginePipeline(RecEngine& engine);
+
+    int64_t minimal_kv_cache_blocks() const override;
+    ForwardOutput step(std::vector<Batch>& batches) override;
+
+   private:
+    ForwardOutput get_model_output(const ForwardInput& model_inputs);
+  };
+
+  // ============================================================
+  // OneRecXAttentionEnginePipeline: kOneRecXAttentionPipeline via local Worker
+  // Isolated pipeline entry for OneRec xattention path.
+  // ============================================================
+  class OneRecXAttentionEnginePipeline final
+      : public OneRecLocalEnginePipeline {
+   public:
+    explicit OneRecXAttentionEnginePipeline(RecEngine& engine);
+
+    int64_t minimal_kv_cache_blocks() const override;
+    ForwardOutput step(std::vector<Batch>& batches) override;
 
    private:
     ForwardOutput get_model_output(const ForwardInput& model_inputs);
@@ -137,8 +164,7 @@ class RecEngine : public Engine {
     void process_group_test() override;
     bool init_model_workers(const std::string& model_path) override;
     int64_t estimate_min_available_memory() override;
-    bool allocate_kv_cache(
-        const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
+    bool allocate_kv_cache(const KVCacheShape& kv_cache_shape) override;
     ForwardOutput step(std::vector<Batch>& batches) override;
     std::vector<int64_t> get_active_activation_memory() const override;
     size_t num_workers() const override;
@@ -156,8 +182,8 @@ class RecEngine : public Engine {
   // Private methods
   // ============================================================
   bool init_model();
-  Engine::KVCacheCapacity estimate_kv_cache_capacity();
-  bool allocate_kv_cache(const Engine::KVCacheCapacity& kv_cache_cap);
+  KVCacheCapacity estimate_kv_cache_capacity();
+  bool allocate_kv_cache(const KVCacheCapacity& kv_cache_cap);
 
   // ============================================================
   // Member variables
@@ -180,7 +206,7 @@ class RecEngine : public Engine {
   int32_t dp_size_ = 1;
   int32_t dp_local_tp_size_ = 1;
 
-  // OneRec specific (managed by OneRecEnginePipeline)
+  // OneRec specific (managed by prefill-only/xattention local pipelines)
   std::vector<std::unique_ptr<ProcessGroup>> process_groups_;
   std::vector<std::unique_ptr<Worker>> workers_;
 

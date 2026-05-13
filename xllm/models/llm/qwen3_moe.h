@@ -15,9 +15,9 @@ limitations under the License.
 
 #pragma once
 
-#include "core/common/rec_model_utils.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/qwen3_moe_decoder_layer.h"
+#include "core/util/rec_model_utils.h"
 #include "llm_model_base.h"
 
 namespace xllm {
@@ -122,7 +122,7 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
       modified_input_params.attn_metadata =
           std::make_shared<layer::AttentionMetadata>(
               layer::AttentionMetadataBuilder::build(modified_input_params,
-                                                     model_args_));
+                                                     model_args_.enable_mla()));
     }
     auto& attn_metadata = *(modified_input_params.attn_metadata);
     bool only_prefill =
@@ -164,6 +164,10 @@ class Qwen3MoeModelImpl : public LlmModelImplBase<layer::Qwen3MoeDecoderLayer> {
                 attn_metadata,
                 kv_caches[i],
                 modified_input_params);
+      if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
+                                              h.device())) {
+        return ModelOutput();
+      }
 
       if (deep_stack_size && i < deep_stack_size) {
         h = deepstack_process(h, input_params.visual_pos_masks, deep_stacks[i]);

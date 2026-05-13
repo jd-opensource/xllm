@@ -829,7 +829,8 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
     // Build attention metadata before get_input_embeddings
     // (may be needed by multimodal processing)
     params.attn_metadata = std::make_shared<layer::AttentionMetadata>(
-        layer::AttentionMetadataBuilder::build(params));
+        layer::AttentionMetadataBuilder::build(
+            params, context_.get_model_args("text_encoder").enable_mla()));
     params.attn_metadata->is_causal = true;
     params.input_embedding =
         text_encoder_->get_input_embeddings(tokens, params);
@@ -837,9 +838,6 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
       params.graph_buffer.attn_mask =
           attention_mask.view({-1}).to(torch::kFloat32);
     }
-    params.attn_metadata = std::make_shared<layer::AttentionMetadata>(
-        layer::AttentionMetadataBuilder::build(params));
-    params.attn_metadata->is_causal = true;
 
     return params;
   }

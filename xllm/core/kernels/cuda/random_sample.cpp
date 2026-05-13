@@ -60,23 +60,36 @@ std::tuple<int64_t, int64_t> get_seed_and_offset(
 namespace xllm::kernel::cuda {
 
 torch::Tensor random_sample(const torch::Tensor& probs) {
-  CHECK_EQ(probs.dim(), 2) << "probs must be a 2D tensor";
-  const torch::Device device = probs.device();
-  int64_t batch_size = probs.size(0);
-  torch::ScalarType out_dtype = torch::kInt32;
+  CHECK(probs.dim() == 2 || probs.dim() == 3)
+      << "probs must be a 2D or 3D tensor";
+
+  torch::Tensor flat_probs;
+  if (probs.dim() == 3) {
+    flat_probs = probs.reshape({-1, probs.size(2)});
+  } else {
+    flat_probs = probs;
+  }
+
+  const torch::Device device = flat_probs.device();
+  int64_t batch_size = flat_probs.size(0);
+  torch::ScalarType out_dtype = torch::kInt64;
   torch::Tensor samples =
       torch::empty({batch_size}, torch::dtype(out_dtype).device(device));
   auto [seed, offset] = get_seed_and_offset(batch_size, device);
 
   get_function(/*uri=*/"sampling",
                /*func_name=*/"sampling_from_probs")(
-      to_ffi_tensor(probs),
+      to_ffi_tensor(flat_probs),
       to_ffi_tensor(samples),
       /*maybe_indices=*/ffi::Optional<ffi::Tensor>(),
       /*deterministic=*/true,
       /*philox_seed=*/seed,
       /*philox_offset=*/offset);
-  return samples;
+
+  if (probs.dim() == 3) {
+    return samples.reshape({probs.size(0), probs.size(1)});
+  }
+  return samples.flatten();
 }
 
 }  // namespace xllm::kernel::cuda

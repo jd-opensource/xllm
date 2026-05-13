@@ -38,7 +38,8 @@ class DenseMLPImpl : public torch::nn::Module {
                bool enable_result_reduction,
                const QuantArgs& quant_args,
                ProcessGroup* process_group,
-               const torch::TensorOptions& options);
+               const torch::TensorOptions& options,
+               const std::string& module_prefix = "");
 
   torch::Tensor forward(const torch::Tensor& hidden_states);
 

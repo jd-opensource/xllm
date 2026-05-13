@@ -22,6 +22,7 @@ limitations under the License.
 #include "comm_channel.h"
 #include "common/macros.h"
 #include "common/types.h"
+#include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
@@ -52,8 +53,7 @@ class RemoteWorker : public WorkerClient {
 
   virtual std::tuple<int64_t, int64_t> estimate_kv_cache_capacity() override;
 
-  virtual bool allocate_kv_cache(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
+  virtual bool allocate_kv_cache(const KVCacheShape& kv_cache_shape) override;
 
   virtual void get_device_info(std::string& device_ip, uint16_t& port);
 
@@ -98,10 +98,10 @@ class RemoteWorker : public WorkerClient {
   estimate_kv_cache_capacity_async() override;
 
   virtual folly::SemiFuture<bool> allocate_kv_cache_async(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
+      const KVCacheShape& kv_cache_shape) override;
 
   virtual folly::SemiFuture<bool> allocate_kv_cache_with_transfer_async(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape) override;
+      const KVCacheShape& kv_cache_shape) override;
 
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(
       const uint64_t src_cluster_id,

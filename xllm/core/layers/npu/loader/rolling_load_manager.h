@@ -28,8 +28,8 @@ namespace xllm {
 class Stream;
 
 namespace layer {
-class BaseManualLoader;
-}
+class BaseLoader;
+}  // namespace layer
 
 // RollingLoadManager orchestrates the rolling H2D weight pipeline for decoder
 // layers. It keeps N slots in HBM and pipelines compute/load using two sets of
@@ -47,7 +47,7 @@ class BaseManualLoader;
 // already satisfied by a later StreamWaitEvent on the same event object.
 class RollingLoadManager {
  public:
-  RollingLoadManager(std::vector<layer::BaseManualLoader*> loaders,
+  RollingLoadManager(std::vector<layer::BaseLoader*> loaders,
                      std::shared_ptr<layer::RollingWeightBuffer> rolling_buffer,
                      Stream* load_stream,
                      Stream* compute_stream,
@@ -95,7 +95,7 @@ class RollingLoadManager {
   // Return the largest executed layer mapped to this slot, or -1 if none.
   int32_t last_executed_layer_in_slot(int32_t slot, int32_t capped_last) const;
 
-  std::vector<layer::BaseManualLoader*> loaders_;  // non-owning
+  std::vector<layer::BaseLoader*> loaders_;  // non-owning
   std::shared_ptr<layer::RollingWeightBuffer> rolling_buffer_;
   Stream* load_stream_;     // non-owning
   Stream* compute_stream_;  // non-owning

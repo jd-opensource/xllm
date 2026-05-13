@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
+import importlib
+import os
 from pathlib import Path
 
 from ...common.cache import compute_cache_key, is_cache_hit
 from ...common.manifest import KernelAbi, KernelFamilyManifest, KernelVariantManifest
-from ...common.spec import DispatchField, KernelCompileSpec, TilelangKernel
+from ...common.spec import DispatchField, KernelCompileSpec, KernelSpec, TilelangKernel
 from ...common.toolchain import repo_root, run_checked
 from . import abi_entry, kernel_registry, toolchain
 from .kernel_registry import RegisteredKernelFamily
@@ -13,9 +17,86 @@ from .kernels.utils import render_family_registry_inc, render_family_variants_in
 from .toolchain import AscendBuildContext, TILELANG_BISHENG_COMMON_FLAGS
 
 
+@dataclass(frozen=True)
+class _VariantBuildPlan:
+    compile_spec: KernelCompileSpec
+    kernel_spec: KernelSpec
+    generated_source: Path
+    compiled_binary: Path
+    cache_key: str
+
+
+@dataclass(frozen=True)
+class _VariantBuildResult:
+    manifest: KernelVariantManifest
+    kernel_abi: KernelAbi
+
+
+@dataclass(frozen=True)
+class _VariantWorkerArgs:
+    kernel_cls_module: str
+    kernel_cls_name: str
+    plan: _VariantBuildPlan
+    entry_symbol: str
+    bisheng_executable: str
+    bisheng_arch: str
+    include_dirs: tuple[str, ...]
+    toolchain_options: dict
+    fingerprint: dict
+    compile_cwd: str
+
+
 def _variant_entry_symbol(spec: KernelCompileSpec) -> str:
     kernel_entry_name = spec.entry_name or spec.kernel_name
     return f"{kernel_entry_name}__{spec.variant_key}_call"
+
+
+def _run_variant_worker(args: _VariantWorkerArgs) -> _VariantBuildResult:
+    mod = importlib.import_module(args.kernel_cls_module)
+    kernel_cls = getattr(mod, args.kernel_cls_name)
+
+    plan = args.plan
+    compile_spec = plan.compile_spec
+    kernel_spec = plan.kernel_spec
+
+    source = kernel_cls.generate_source(**compile_spec.specialization)
+    rendered_source = abi_entry.rename_variant_internal_symbols(
+        abi_entry.rename_entry_symbol(
+            source, compile_spec.source_entry_symbol, args.entry_symbol
+        ),
+        compile_spec.variant_key,
+    )
+    kernel_abi = abi_entry.parse_kernel_abi(rendered_source, args.entry_symbol)
+    plan.generated_source.write_text(rendered_source, encoding="utf-8")
+
+    compile_cmd = [
+        args.bisheng_executable,
+        f"--npu-arch={args.bisheng_arch}",
+        *TILELANG_BISHENG_COMMON_FLAGS,
+        f"-Dg_tilingKey=g_tilingKey__{compile_spec.variant_key}",
+        *[f"-I{d}" for d in args.include_dirs],
+        str(plan.generated_source),
+        "-c",
+        "-o",
+        str(plan.compiled_binary),
+    ]
+    run_checked(compile_cmd, cwd=args.compile_cwd)
+
+    manifest = KernelVariantManifest(
+        variant_key=compile_spec.variant_key,
+        specialization=dict(compile_spec.specialization),
+        dispatch_values=dict(compile_spec.dispatch_values),
+        generated_source=str(plan.generated_source),
+        compiled_binary=str(plan.compiled_binary),
+        entry_symbol=args.entry_symbol,
+        cache_key=plan.cache_key,
+        toolchain_options=dict(args.toolchain_options),
+        fingerprint=dict(args.fingerprint),
+        compile_definitions=kernel_spec.render_compile_definitions(
+            entry_symbol=args.entry_symbol
+        ),
+    )
+    return _VariantBuildResult(manifest=manifest, kernel_abi=kernel_abi)
 
 
 def _read_family_manifest(path: Path) -> KernelFamilyManifest | None:
@@ -116,7 +197,8 @@ def build_kernel_family(
     existing_manifest = _read_family_manifest(manifest_path)
     dependency_files = _build_dependency_files(family)
 
-    variant_manifests: list[KernelVariantManifest] = []
+    variant_manifest_by_key: dict[str, KernelVariantManifest] = {}
+    uncached_plans: list[_VariantBuildPlan] = []
     family_kernel_abi: KernelAbi | None = None
 
     for compile_spec, kernel_spec in family.spec_pairs:
@@ -167,71 +249,83 @@ def build_kernel_family(
                     "All variants in a TileLang kernel must share the same exported "
                     f"C ABI. Mismatch found in variant {compile_spec.variant_key!r}."
                 )
-            variant_manifests.append(
-                KernelVariantManifest(
-                    variant_key=compile_spec.variant_key,
-                    specialization=dict(compile_spec.specialization),
-                    dispatch_values=dict(compile_spec.dispatch_values),
-                    generated_source=cached_variant.generated_source,
-                    compiled_binary=cached_variant.compiled_binary,
-                    entry_symbol=cached_variant.entry_symbol,
-                    cache_key=cached_variant.cache_key,
-                    toolchain_options=dict(context.toolchain_options),
-                    fingerprint=dict(context.fingerprint),
-                    compile_definitions=kernel_spec.render_compile_definitions(
-                        entry_symbol=cached_variant.entry_symbol
-                    ),
-                )
-            )
-            continue
-
-        source = family.kernel_cls.generate_source(**compile_spec.specialization)
-        entry_symbol = _variant_entry_symbol(compile_spec)
-        rendered_source = abi_entry.rename_variant_internal_symbols(
-            abi_entry.rename_entry_symbol(
-                source, compile_spec.source_entry_symbol, entry_symbol
-            ),
-            compile_spec.variant_key,
-        )
-        kernel_abi = abi_entry.parse_kernel_abi(rendered_source, entry_symbol)
-        if family_kernel_abi is None:
-            family_kernel_abi = kernel_abi
-        elif kernel_abi != family_kernel_abi:
-            raise ValueError(
-                "All variants in a TileLang kernel must share the same exported "
-                f"C ABI. Mismatch found in variant {compile_spec.variant_key!r}."
-            )
-        generated_source.write_text(rendered_source, encoding="utf-8")
-
-        compile_cmd = [
-            context.bisheng_executable,
-            f"--cce-aicore-arch={context.bisheng_arch}",
-            *TILELANG_BISHENG_COMMON_FLAGS,
-            f"-Dg_tilingKey=g_tilingKey__{compile_spec.variant_key}",
-            *[f"-I{include_dir}" for include_dir in context.include_dirs],
-            str(generated_source),
-            "-c",
-            "-o",
-            str(compiled_binary),
-        ]
-        run_checked(compile_cmd, cwd=repo_root())
-
-        variant_manifests.append(
-            KernelVariantManifest(
+            variant_manifest_by_key[compile_spec.variant_key] = KernelVariantManifest(
                 variant_key=compile_spec.variant_key,
-                specialization=compile_spec.specialization,
-                dispatch_values=compile_spec.dispatch_values,
-                generated_source=str(generated_source),
-                compiled_binary=str(compiled_binary),
-                entry_symbol=entry_symbol,
-                cache_key=cache_key,
+                specialization=dict(compile_spec.specialization),
+                dispatch_values=dict(compile_spec.dispatch_values),
+                generated_source=cached_variant.generated_source,
+                compiled_binary=cached_variant.compiled_binary,
+                entry_symbol=cached_variant.entry_symbol,
+                cache_key=cached_variant.cache_key,
                 toolchain_options=dict(context.toolchain_options),
                 fingerprint=dict(context.fingerprint),
                 compile_definitions=kernel_spec.render_compile_definitions(
-                    entry_symbol=entry_symbol
+                    entry_symbol=cached_variant.entry_symbol
                 ),
             )
+            continue
+
+        uncached_plans.append(
+            _VariantBuildPlan(
+                compile_spec=compile_spec,
+                kernel_spec=kernel_spec,
+                generated_source=generated_source,
+                compiled_binary=compiled_binary,
+                cache_key=cache_key,
+            )
         )
+
+    compile_cwd = str(repo_root())
+    kernel_cls_module = family.kernel_cls.__module__
+    kernel_cls_name = family.kernel_cls.__name__
+
+    worker_args_list: list[_VariantWorkerArgs] = []
+    for plan in uncached_plans:
+        worker_args_list.append(
+            _VariantWorkerArgs(
+                kernel_cls_module=kernel_cls_module,
+                kernel_cls_name=kernel_cls_name,
+                plan=plan,
+                entry_symbol=_variant_entry_symbol(plan.compile_spec),
+                bisheng_executable=context.bisheng_executable,
+                bisheng_arch=context.bisheng_arch,
+                include_dirs=tuple(str(d) for d in context.include_dirs),
+                toolchain_options=dict(context.toolchain_options),
+                fingerprint=dict(context.fingerprint),
+                compile_cwd=compile_cwd,
+            )
+        )
+
+    if worker_args_list:
+        max_workers = max(1, os.cpu_count() or 1)
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            future_to_args = {
+                executor.submit(_run_variant_worker, args): args
+                for args in worker_args_list
+            }
+            for future in as_completed(future_to_args):
+                args = future_to_args[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Ascend variant build failed for variant "
+                        f"{args.plan.compile_spec.variant_key!r}"
+                    ) from exc
+                if family_kernel_abi is None:
+                    family_kernel_abi = result.kernel_abi
+                elif result.kernel_abi != family_kernel_abi:
+                    raise ValueError(
+                        "All variants in a TileLang kernel must share the same exported "
+                        "C ABI. Mismatch found in variant "
+                        f"{result.manifest.variant_key!r}."
+                    )
+                variant_manifest_by_key[result.manifest.variant_key] = result.manifest
+
+    variant_manifests: list[KernelVariantManifest] = [
+        variant_manifest_by_key[compile_spec.variant_key]
+        for compile_spec, _ in family.spec_pairs
+    ]
 
     if family_kernel_abi is None:
         raise ValueError(

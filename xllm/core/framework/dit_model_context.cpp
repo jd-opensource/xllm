@@ -74,14 +74,21 @@ const QuantArgs& DiTModelContext::get_quant_args(
   }
 }
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU)
 ModelContext DiTModelContext::get_model_context(
     const std::string& component) const {
+#if defined(USE_NPU)
   return ModelContext(parallel_args_,
                       get_model_args(component),
                       get_quant_args(component),
                       tensor_options_,
                       context_);
+#else
+  return ModelContext(parallel_args_,
+                      get_model_args(component),
+                      get_quant_args(component),
+                      tensor_options_);
+#endif
 }
 #endif
 

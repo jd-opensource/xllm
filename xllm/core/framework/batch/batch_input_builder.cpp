@@ -18,9 +18,13 @@ limitations under the License.
 #include <c10/core/DeviceType.h>
 #include <torch/torch.h>
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "common/global_flags.h"
@@ -45,6 +49,32 @@ uint32_t get_sample_source_position(const SampleSlot& sample_slot) {
     return 0;
   }
   return static_cast<uint32_t>(sample_slot.token_position - 1);
+}
+
+void append_xtensor_offsets(TransferKVInfo* info,
+                            const TransferKVInfo& full_info,
+                            const std::vector<size_t>& remote_idxs) {
+  if (full_info.dst_xtensor_layer_offsets.empty()) {
+    return;
+  }
+
+  info->dst_xtensor_layer_offsets.reserve(
+      full_info.dst_xtensor_layer_offsets.size());
+  for (const XTensorLayerOffsets& full_layer :
+       full_info.dst_xtensor_layer_offsets) {
+    CHECK_EQ(full_layer.k_offsets.size(), full_info.remote_blocks_ids.size());
+    CHECK_EQ(full_layer.v_offsets.size(), full_info.remote_blocks_ids.size());
+    XTensorLayerOffsets layer;
+    layer.k_offsets.reserve(remote_idxs.size());
+    layer.v_offsets.reserve(remote_idxs.size());
+    for (size_t remote_idx : remote_idxs) {
+      CHECK_LT(remote_idx, full_layer.k_offsets.size());
+      CHECK_LT(remote_idx, full_layer.v_offsets.size());
+      layer.k_offsets.emplace_back(full_layer.k_offsets[remote_idx]);
+      layer.v_offsets.emplace_back(full_layer.v_offsets[remote_idx]);
+    }
+    info->dst_xtensor_layer_offsets.emplace_back(std::move(layer));
+  }
 }
 
 }  // namespace
@@ -83,14 +113,66 @@ BatchInputBuilder::BatchInputBuilder(
   state_.batch_forward_type = batch_forward_type;
 }
 
+TransferKVInfo BatchInputBuilder::build_step_transfer_info(
+    const TransferKVInfo& full_info,
+    const std::vector<uint64_t>& local_block_ids,
+    uint32_t n_kv_cache_tokens,
+    uint32_t seq_len,
+    uint32_t block_size) {
+  TransferKVInfo info;
+  info.request_id = full_info.request_id;
+  info.dp_rank = full_info.dp_rank;
+  info.remote_instance_info = full_info.remote_instance_info;
+
+  if (block_size == 0 || local_block_ids.empty() ||
+      full_info.remote_blocks_ids.empty()) {
+    return info;
+  }
+
+  const size_t local_size = local_block_ids.size();
+  const size_t remote_size = full_info.remote_blocks_ids.size();
+  const size_t full_size = full_info.local_blocks_ids.empty()
+                               ? local_size
+                               : full_info.local_blocks_ids.size();
+  const size_t shared_blocks =
+      full_size > remote_size ? full_size - remote_size : 0;
+  const size_t win_begin = static_cast<size_t>(n_kv_cache_tokens / block_size);
+  const size_t win_end =
+      static_cast<size_t>(util::ceil_div(seq_len, block_size));
+  const size_t map_begin = std::max(win_begin, shared_blocks);
+  const size_t map_limit = std::min(local_size, shared_blocks + remote_size);
+  const size_t map_end = std::min(win_end, map_limit);
+
+  if (map_begin >= map_end) {
+    return info;
+  }
+
+  std::vector<size_t> remote_idxs;
+  const size_t block_cnt = map_end - map_begin;
+  info.local_blocks_ids.reserve(block_cnt);
+  info.remote_blocks_ids.reserve(block_cnt);
+  remote_idxs.reserve(block_cnt);
+  for (size_t local_idx = map_begin; local_idx < map_end; ++local_idx) {
+    const size_t remote_idx = local_idx - shared_blocks;
+    info.local_blocks_ids.emplace_back(local_block_ids[local_idx]);
+    info.remote_blocks_ids.emplace_back(
+        full_info.remote_blocks_ids[remote_idx]);
+    remote_idxs.emplace_back(remote_idx);
+  }
+
+  append_xtensor_offsets(&info, full_info, remote_idxs);
+  return info;
+}
+
 ForwardInput BatchInputBuilder::build_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
+  (void)num_decoding_tokens;
+  (void)min_decoding_batch_size;
   // Since dont test multithreaded for ForwardInput, set thread_pool_ to
   // nullptr.
   thread_pool_ = nullptr;
   process_sequences();
-  padding_decode_batch_size(num_decoding_tokens, min_decoding_batch_size);
 
   return state_to_forward_input();
 }
@@ -237,6 +319,9 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.embedding_ids.insert(state_.embedding_ids.end(),
                                 state.embedding_ids.begin(),
                                 state.embedding_ids.end());
+    state_.linear_state_ids.insert(state_.linear_state_ids.end(),
+                                   state.linear_state_ids.begin(),
+                                   state.linear_state_ids.end());
     state_.request_ids.insert(state_.request_ids.end(),
                               state.request_ids.begin(),
                               state.request_ids.end());
@@ -395,12 +480,16 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     }
   }
 
+  // `linear_state_ids` is sequence-scoped metadata and must stay aligned with
+  // logical batch rows even for non-terminal chunked-prefill slices.
+  state.linear_state_ids.emplace_back(sequence->get_single_block_id());
+
   // Add extra token id
   if (n_tokens == seq_len) {
     // last chunk of prefill and decode
     // add -1 as extra token id
     state.extra_token_ids.emplace_back(-1);
-    state.embedding_ids.emplace_back(sequence->get_embedding_id());
+    state.embedding_ids.emplace_back(sequence->get_single_block_id());
     state.request_ids.emplace_back(sequence->request_id());
   } else {
     state.extra_token_ids.emplace_back(token_ids[seq_len]);
@@ -457,21 +546,15 @@ void BatchInputBuilder::setup_kv_cache_info(
       state.new_token_slot_ids.end(), slot_ids.begin(), slot_ids.end());
 
   std::vector<int32_t> block_ids;
-  std::vector<uint64_t> u_block_ids;
+  std::vector<uint64_t> local_block_ids;
   block_ids.reserve(blocks.size());
+  local_block_ids.reserve(blocks.size());
   int32_t block_size = 0;
   auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
-  uint32_t push_size = 0;
-  if (transfer_kv_info.has_value()) {
-    push_size =
-        blocks.size() - transfer_kv_info.value().remote_blocks_ids.size();
-  }
   for (const auto& block : blocks) {
     block_size = block.size();
     block_ids.push_back(block.id());
-    if (block_ids.size() > push_size) {
-      u_block_ids.emplace_back(block.id());
-    }
+    local_block_ids.emplace_back(static_cast<uint64_t>(block.id()));
     state.paged_kv_indices.push_back(block.id());
   }
   state.paged_kv_indptr.push_back(state.paged_kv_indptr.back() + blocks.size());
@@ -488,51 +571,18 @@ void BatchInputBuilder::setup_kv_cache_info(
   }
 
   if (transfer_kv_info.has_value()) {
-    state.transfer_kv_infos.emplace_back(transfer_kv_info.value());
-    state.transfer_kv_infos.back().local_blocks_ids = std::move(u_block_ids);
+    TransferKVInfo step_info = BatchInputBuilder::build_step_transfer_info(
+        transfer_kv_info.value(),
+        local_block_ids,
+        n_kv_cache_tokens,
+        seq_len,
+        static_cast<uint32_t>(block_size));
+    if (!step_info.local_blocks_ids.empty()) {
+      state.transfer_kv_infos.emplace_back(std::move(step_info));
+    }
   }
 
   state.block_tables_vec.emplace_back(std::move(block_ids));
-}
-
-void BatchInputBuilder::padding_decode_batch_size(
-    uint32_t num_decoding_tokens,
-    uint32_t min_decoding_batch_size) {
-  if (num_sequences_ < min_decoding_batch_size) {
-    const uint32_t n_tokens = state_.flatten_tokens_vec.size();
-    // kv_cache is not empty in decoding phase
-    const bool in_decoding_phase = !state_.batch_forward_type.is_prefill();
-    const bool same_num_decoding_tokens =
-        state_.q_max_seq_len == num_decoding_tokens &&
-        n_tokens == num_sequences_ * num_decoding_tokens;
-    if (in_decoding_phase && same_num_decoding_tokens) {
-      // add padding tokens to the batch
-      for (int32_t i = num_sequences_; i < min_decoding_batch_size; ++i) {
-        for (int32_t k = 0; k < num_decoding_tokens; ++k) {
-          state_.flatten_tokens_vec.emplace_back(0);
-          if (!use_mrope_) {
-            state_.flatten_positions_vec.emplace_back(0);
-          } else {
-            state_.mrope_positions_vec.emplace_back(
-                torch::zeros({3, 1}, torch::kInt));
-          }
-          state_.new_token_slot_ids.emplace_back(0);
-        }
-#if defined(USE_NPU) || defined(USE_MUSA)
-        state_.seq_lens.push_back(num_decoding_tokens);
-        state_.q_seq_lens.push_back(num_decoding_tokens);
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
-        state_.seq_lens.push_back(state_.seq_lens.back() + num_decoding_tokens);
-        state_.q_seq_lens.push_back(state_.q_seq_lens.back() +
-                                    num_decoding_tokens);
-#endif
-        state_.block_tables_vec.emplace_back();
-        state_.paged_kv_indices.push_back(0);
-        state_.paged_kv_indptr.push_back(state_.paged_kv_indptr.back() + 1);
-        state_.paged_kv_last_page_len.push_back(1);
-      }
-    }
-  }
 }
 
 ForwardInput BatchInputBuilder::state_to_forward_input() {
@@ -588,6 +638,11 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   }
 
   input_params.embedding_ids = std::move(state_.embedding_ids);
+  input_params.linear_state_ids = std::move(state_.linear_state_ids);
+  if (!input_params.linear_state_ids.empty()) {
+    input_params.linear_state_indices =
+        torch::tensor(input_params.linear_state_ids, torch::kInt);
+  }
   input_params.request_ids = std::move(state_.request_ids);
   input_params.extra_token_ids = std::move(state_.extra_token_ids);
 
@@ -668,6 +723,7 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
       std::move(state_.paged_kv_last_page_len);
 
   raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
+  raw_forward_input.linear_state_ids = std::move(state_.linear_state_ids);
   raw_forward_input.request_ids = std::move(state_.request_ids);
   raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);
   // beam search kernel input

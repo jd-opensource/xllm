@@ -189,12 +189,14 @@ class Sequence final {
   void update_mm_embeddings(const std::vector<torch::Tensor>& mm_embeddings);
   // update embeddings to the sequence
   void update_embeddings(const torch::Tensor& embedding);
-  bool has_embedding_id() const { return embedding_block_.is_valid(); }
-  int32_t get_embedding_id() const { return embedding_block_.id(); }
-  void set_embedding_block(Block embedding_block) {
-    embedding_block_ = std::move(embedding_block);
+  bool has_single_block_id() const { return single_block_.is_valid(); }
+  int32_t get_single_block_id() const {
+    return has_single_block_id() ? single_block_.id() : -1;
   }
-  Block reset_embedding_block() { return std::move(embedding_block_); }
+  void set_single_block(Block&& single_block) {
+    single_block_ = std::move(single_block);
+  }
+  Block reset_single_block() { return std::move(single_block_); }
   const std::string& request_id() const { return request_id_; }
   // get input embedding
   torch::Tensor get_input_embedding() const { return input_embedding_; }
@@ -418,6 +420,7 @@ class Sequence final {
 
   void generate_onerec_output(const Slice<int32_t>& ids,
                               size_t size,
+                              const Tokenizer& tokenizer,
                               SequenceOutput& output) const;
 
   struct OneRecState {
@@ -488,8 +491,9 @@ class Sequence final {
   // In the next execution, we should treat these generated tokens as prompts.
   size_t volatile_num_prompt_tokens_ = 0;
 
-  // embedding block that holds the embedding id.
-  Block embedding_block_;
+  // Scheduler-side logical single-block handle. Transport expands this into
+  // embedding_ids / linear_state_ids as needed by worker-side physical caches.
+  Block single_block_;
 
   // is the sequence finished
   mutable bool finished_ = false;

@@ -1,6 +1,5 @@
 include(cc_library)
 include(cc_binary)
-include(cc_test)
 
 
 cc_library(
@@ -37,6 +36,7 @@ cc_library(
     eagle3_worker_impl.h
     spec_input_builder.h
     forward_shared_memory_manager.h
+    worker_rendezvous.h
   SRCS
     executor.cpp
     executor_impl_factory.cpp
@@ -48,6 +48,7 @@ cc_library(
     $<$<BOOL:${USE_CUDA}>:cuda_graph_executor_impl.cpp>
     worker.cpp
     worker_impl.cpp
+    worker_rendezvous.cpp
     llm_worker_impl.cpp
     vlm_worker_impl.cpp
     dit_worker_impl.cpp
@@ -74,6 +75,9 @@ cc_library(
     :state_dict
     :dit_cache
     :model
+    :parallel_state
+    :kv_cache
+    :kv_cache_transfer
     :models
     :sampler
     :tokenizer
@@ -93,87 +97,3 @@ cc_library(
     proto::xllm_proto
     $<$<BOOL:${USE_MLU}>:torch_mlu>
 )
-
-if(USE_NPU)
-cc_test(
-  NAME
-    acl_graph_executor_test
-  SRCS
-    acl_graph_executor_test.cpp
-  DEPS
-    :xllm_server
-    :runtime
-    :model_loader
-    :batch
-    :block
-    :model
-    :models
-    :sampler
-    :kv_cache
-    GTest::gtest_main
-    torch_npu
-    atb_customize
-)
-target_link_libraries(acl_graph_executor_test
-                      PRIVATE
-                      torch_npu
-                      ascendcl
-                      hccl
-                      c_sec
-                      nnopbase
-                      )
-# Use --whole-archive for spdlog to ensure all symbols are available for xllm_atb_layers
-# This resolves the undefined reference issues in xllm_atb_layers
-target_link_options(acl_graph_executor_test PRIVATE
-  "-Wl,--whole-archive"
-  "${CMAKE_BINARY_DIR}/third_party/spdlog/libspdlog.a"
-  "-Wl,--no-whole-archive")
-endif()
-
-cc_test(
-  NAME
-    spec_input_builder_test
-  SRCS
-    spec_input_builder_test.cpp
-    spec_input_builder.cpp
-  DEPS
-    torch
-    glog::glog
-    proto::xllm_proto
-    GTest::gtest_main
-)
-
-if(USE_MLU)
-cc_test(
-  NAME
-    mlu_graph_executor_test
-  SRCS
-    mlu_graph_executor_test.cpp
-  DEPS
-    :runtime
-    :model_loader
-    :batch
-    :kv_cache
-    :platform
-    GTest::gtest_main
-    torch_mlu
-)
-endif()
-
-if(USE_CUDA)
-cc_test(
-  NAME
-    cuda_graph_executor_test
-  SRCS
-    cuda_graph_executor_test.cpp
-  DEPS
-    :runtime
-    :cuda_layers
-    :batch
-    :block
-    :kv_cache
-    :kernels
-    GTest::gtest_main
-    torch
-)
-endif()

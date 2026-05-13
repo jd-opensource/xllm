@@ -19,6 +19,7 @@ limitations under the License.
 #include <butil/at_exit.h>
 #include <unistd.h>
 
+#include <array>
 #include <csignal>
 
 #include "core/common/global_flags.h"
@@ -30,6 +31,73 @@ namespace {
 volatile std::sig_atomic_t g_quit_flag = 0;
 
 void quit_signal_handler(int /*signum*/) { g_quit_flag = 1; }
+
+constexpr const char* kApiServiceRoutes =
+    "v1/completions => CompletionsHttp,"
+    "v1/sample => SampleHttp,"
+    "v1/chat/completions => ChatCompletionsHttp,"
+    "v1/embeddings => EmbeddingsHttp,"
+    "v1/models => ModelsHttp,"
+    "v1/image/generation => ImageGenerationHttp,"
+    "v1/rerank => RerankHttp,"
+    "v1/messages => AnthropicMessagesHttp,"
+    "v2/repository/index => ModelVersionsHttp,"
+    "fork_master => ForkMasterHttp,"
+    "sleep => SleepHttp,"
+    "wakeup => WakeupHttp,"
+    "link_d2d => LinkD2DHttp,"
+    "unlink_d2d => UnlinkD2DHttp";
+
+constexpr const char* kForkOnlyRoute = "fork_master => ForkMasterHttp";
+
+struct ApiRouteBinding {
+  const char* name;
+  bool (*enabled)();
+  const char* routes;
+};
+
+bool is_master_node() { return FLAGS_node_rank == 0; }
+
+bool is_xtensor_node() { return FLAGS_node_rank != 0 && FLAGS_enable_xtensor; }
+
+const char* get_api_service_routes_for_current_mode() {
+  static constexpr std::array<ApiRouteBinding, 2> kBindings = {{
+      {"master_node", &is_master_node, kApiServiceRoutes},
+      {"xtensor_node", &is_xtensor_node, kForkOnlyRoute},
+  }};
+  for (const auto& binding : kBindings) {
+    if (binding.enabled()) {
+      LOG(INFO) << "Use API route mode: " << binding.name;
+      return binding.routes;
+    }
+  }
+  return nullptr;
+}
+
+void install_quit_signal_handler() {
+  g_quit_flag = 0;
+  struct sigaction sa = {};
+  sa.sa_handler = quit_signal_handler;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGINT, &sa, nullptr);
+  sigaction(SIGTERM, &sa, nullptr);
+}
+
+void wait_for_quit_signal() {
+  while (!g_quit_flag) {
+    sleep(1);
+  }
+}
+
+bool configure_generic_server(brpc::Server* server,
+                              google::protobuf::Service* service,
+                              const std::string& server_name) {
+  if (server->AddService(service, brpc::SERVER_DOESNT_OWN_SERVICE) != 0) {
+    LOG(ERROR) << "Fail to add " << server_name << " service";
+    return false;
+  }
+  return true;
+}
 }  // namespace
 
 XllmServer::XllmServer() { butil::AtExitManager exit_manager; }
@@ -44,33 +112,15 @@ XllmServer::~XllmServer() {
 
 bool XllmServer::start(std::unique_ptr<APIService> service) {
   server_ = std::make_unique<brpc::Server>();
-  if (FLAGS_node_rank == 0) {
-    if (server_->AddService(service.get(),
-                            brpc::SERVER_DOESNT_OWN_SERVICE,
-                            "v1/completions => CompletionsHttp,"
-                            "v1/sample => SampleHttp,"
-                            "v1/chat/completions => ChatCompletionsHttp,"
-                            "v1/embeddings => EmbeddingsHttp,"
-                            "v1/models => ModelsHttp,"
-                            "v1/image/generation => ImageGenerationHttp,"
-                            "v1/rerank => RerankHttp,"
-                            "v1/messages => AnthropicMessagesHttp,"
-                            "v2/repository/index => ModelVersionsHttp,"
-                            "fork_master => ForkMasterHttp,"
-                            "sleep => SleepHttp,"
-                            "wakeup => WakeupHttp,"
-                            "link_d2d => LinkD2DHttp,"
-                            "unlink_d2d => UnlinkD2DHttp") != 0) {
+  if (const char* routes = get_api_service_routes_for_current_mode();
+      routes != nullptr) {
+    if (server_->AddService(
+            service.get(), brpc::SERVER_DOESNT_OWN_SERVICE, routes) != 0) {
       LOG(ERROR) << "Fail to add api service";
       return false;
     }
-  } else if (FLAGS_enable_xtensor) {
-    if (server_->AddService(service.get(),
-                            brpc::SERVER_DOESNT_OWN_SERVICE,
-                            "fork_master => ForkMasterHttp") != 0) {
-      LOG(ERROR) << "Fail to add api service";
-      return false;
-    }
+  } else {
+    LOG(INFO) << "No API routes enabled on current node mode.";
   }
 
   brpc::ServerOptions options;
@@ -99,16 +149,8 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
   LOG(INFO) << "     Waiting for application startup.";
   LOG(INFO) << "     Application startup complete.";
 
-  g_quit_flag = 0;
-  struct sigaction sa = {};
-  sa.sa_handler = quit_signal_handler;
-  sigemptyset(&sa.sa_mask);
-  sigaction(SIGINT, &sa, nullptr);
-  sigaction(SIGTERM, &sa, nullptr);
-
-  while (!g_quit_flag) {
-    sleep(1);
-  }
+  install_quit_signal_handler();
+  wait_for_quit_signal();
 
   LOG(INFO) << "     Shutting down";
   LOG(INFO) << "     Waiting for application shutdown.";
@@ -176,54 +218,18 @@ bool XllmServer::start(std::shared_ptr<CollectiveService> service,
 
 bool XllmServer::start(std::shared_ptr<WorkerService> service,
                        const std::string& addr) {
-  server_ = std::make_unique<brpc::Server>();
-  if (server_->AddService(service.get(), brpc::SERVER_DOESNT_OWN_SERVICE) !=
-      0) {
-    LOG(ERROR) << "Fail to add DistributeWorker service";
-    return false;
-  }
-
-  brpc::ServerOptions options;
-  options.idle_timeout_sec = FLAGS_rpc_idle_timeout_s;
-  options.num_threads = FLAGS_num_threads;
-  listen_address_ = addr;
-  if (server_->Start(addr.c_str(), &options) != 0) {
-    LOG(ERROR) << "Failed to start distribute server on address: " << addr;
-    return false;
-  }
-  listen_port_ = server_->listen_address().port;
-  LOG(INFO) << "DistributeWorker started on address "
-            << server_->listen_address()
-            << ", idle_timeout_sec: " << FLAGS_rpc_idle_timeout_s
-            << ", num_threads: " << FLAGS_num_threads;
-
-  return true;
+  return create_server(static_cast<google::protobuf::Service*>(service.get()),
+                       addr,
+                       -1,
+                       "DistributeWorker");
 }
 
 bool XllmServer::start(std::shared_ptr<XTensorDistService> service,
                        const std::string& addr) {
-  server_ = std::make_unique<brpc::Server>();
-  if (server_->AddService(service.get(), brpc::SERVER_DOESNT_OWN_SERVICE) !=
-      0) {
-    LOG(ERROR) << "Fail to add XTensorDist service";
-    return false;
-  }
-
-  brpc::ServerOptions options;
-  options.idle_timeout_sec = FLAGS_rpc_idle_timeout_s;
-  options.num_threads = FLAGS_num_threads;
-  listen_address_ = addr;
-  if (server_->Start(addr.c_str(), &options) != 0) {
-    LOG(ERROR) << "Failed to start XTensorDist server on address: " << addr;
-    return false;
-  }
-  listen_port_ = server_->listen_address().port;
-  LOG(INFO) << "XTensorDist server started on address "
-            << server_->listen_address()
-            << ", idle_timeout_sec: " << FLAGS_rpc_idle_timeout_s
-            << ", num_threads: " << FLAGS_num_threads;
-
-  return true;
+  return create_server(static_cast<google::protobuf::Service*>(service.get()),
+                       addr,
+                       -1,
+                       "XTensorDist");
 }
 
 bool XllmServer::create_server(google::protobuf::Service* service,
@@ -231,8 +237,7 @@ bool XllmServer::create_server(google::protobuf::Service* service,
                                int port,
                                const std::string& server_name) {
   server_ = std::make_unique<brpc::Server>();
-  if (server_->AddService(service, brpc::SERVER_DOESNT_OWN_SERVICE) != 0) {
-    LOG(ERROR) << "Fail to add " << server_name << " service";
+  if (!configure_generic_server(server_.get(), service, server_name)) {
     return false;
   }
 
@@ -249,17 +254,20 @@ bool XllmServer::create_server(google::protobuf::Service* service,
     }
   } else {
     endpoint = butil::EndPoint(butil::IP_ANY, port);
-    listen_address_ =
-        std::string(butil::endpoint2str(server_->listen_address()).c_str());
   }
-  listen_port_ = port > 0 ? port : server_->listen_address().port;
 
   if (server_->Start(endpoint, &options) != 0) {
     LOG(ERROR) << "Failed to start " << server_name
                << " server on address: " << endpoint;
     return false;
   }
-  LOG(INFO) << server_name << " server started on address " << endpoint
+
+  listen_address_ =
+      std::string(butil::endpoint2str(server_->listen_address()).c_str());
+  listen_port_ = server_->listen_address().port;
+
+  LOG(INFO) << server_name << " server started on address "
+            << server_->listen_address()
             << ", idle_timeout_sec: " << FLAGS_rpc_idle_timeout_s
             << ", num_threads: " << FLAGS_num_threads;
 

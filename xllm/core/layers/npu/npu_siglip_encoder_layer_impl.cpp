@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "npu_siglip_encoder_layer_impl.h"
 
+#include "common/global_flags.h"
 #include "nlohmann/json.hpp"
 
 namespace xllm {

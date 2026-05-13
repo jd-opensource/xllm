@@ -58,4 +58,9 @@ if(USE_ILU)
   endif()
 endif()
 
+## The order of static libraries is important in the CMake build system because the linker processes them strictly from left to right. 
+## -> The linker scans each library only once and extracts object files solely to resolve currently undefined symbols.
+## -> In modern CMake, the best practice is to explicitly declare a target's dependencies, allowing CMake to automatically determine the correct linking order. 
+## -> The following code is added to prevent symbol resolution errors when xllm links against mooncake-related static libraries.
 target_link_libraries(mooncake_store PUBLIC transfer_engine cachelib_memory_allocator)
+target_link_libraries(cachelib_memory_allocator PRIVATE Folly::folly glog::glog)

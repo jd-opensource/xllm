@@ -18,8 +18,6 @@ limitations under the License.
 #include <absl/strings/str_split.h>
 #include <absl/time/clock.h>
 #include <absl/time/time.h>
-#include <folly/executors/GlobalExecutor.h>
-#include <folly/futures/Future.h>
 #include <glog/logging.h>
 #include <unistd.h>
 
@@ -603,88 +601,80 @@ std::vector<bool> XServiceClient::generations(
     }
   }
 
-  struct ServiceCallResult {
-    bool rpc_success = false;
-    std::vector<bool> all_status_ok;
+  // Use brpc semi-synchronous RPC pattern (DoNothing + Join) instead of
+  // folly thread pool. brpc::Join is bthread-aware: it yields the brpc worker
+  // thread via butex_wait, avoiding the deadlock that occurs when
+  // folly::SemiFuture::wait() blocks all brpc workers with a pthread futex.
+  struct AsyncCallContext {
+    std::string service_addr;
+    brpc::Controller cntl;
+    proto::StatusSet resp;
+    proto::DisaggStreamGenerations gens;
+    bool issued = false;
   };
 
+  const size_t num_services = service_requests_map.size();
+  std::vector<AsyncCallContext> contexts(num_services);
   std::vector<std::string> service_order;
-  service_order.reserve(service_requests_map.size());
-  std::vector<folly::SemiFuture<ServiceCallResult>> futures;
-  futures.reserve(service_requests_map.size());
+  service_order.reserve(num_services);
 
-  // send requests to each xllm_service in parallel
+  // Fire all RPCs asynchronously
+  size_t idx = 0;
   for (const auto& pair : service_requests_map) {
-    const std::string service_addr = pair.first;
-    auto gens = std::make_shared<proto::DisaggStreamGenerations>(pair.second);
-    service_order.push_back(service_addr);
+    auto& ctx = contexts[idx++];
+    ctx.service_addr = pair.first;
+    ctx.gens = pair.second;
+    service_order.push_back(ctx.service_addr);
 
-    futures.emplace_back(folly::via(
-        folly::getGlobalCPUExecutor(),
-        [this, service_addr, gens]() -> ServiceCallResult {
-          ServiceCallResult call_result;
+    if (!connect_to_xservice(ctx.service_addr)) {
+      LOG(ERROR) << "Failed to connect target xservice: " << ctx.service_addr;
+      continue;
+    }
 
-          if (!connect_to_xservice(service_addr)) {
-            LOG(ERROR) << "Failed to connect target xservice: " << service_addr;
-            return call_result;
-          }
-
-          proto::StatusSet resp;
-          brpc::Controller cntl;
-          {
-            std::shared_lock<std::shared_mutex> lock(mutex_);
-            auto* service_stub = find_stub_locked(service_addr);
-            if (service_stub == nullptr) {
-              LOG(ERROR) << "No stub available for xservice: " << service_addr;
-              return call_result;
-            }
-            service_stub->Generations(&cntl, gens.get(), &resp, nullptr);
-          }
-
-          if (cntl.Failed()) {
-            LOG(ERROR) << "Fail to response tokens to xservice server "
-                       << service_addr << ", error text: " << cntl.ErrorText();
-            return call_result;
-          }
-
-          call_result.rpc_success = true;
-          call_result.all_status_ok.reserve(resp.all_status_size());
-          for (const auto& status : resp.all_status()) {
-            call_result.all_status_ok.push_back(status.ok());
-          }
-          return call_result;
-        }));
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto* service_stub = find_stub_locked(ctx.service_addr);
+    if (service_stub == nullptr) {
+      LOG(ERROR) << "No stub available for xservice: " << ctx.service_addr;
+      continue;
+    }
+    ctx.issued = true;
+    service_stub->Generations(
+        &ctx.cntl, &ctx.gens, &ctx.resp, brpc::DoNothing());
   }
 
-  auto try_results = folly::collectAll(futures).get();
-  for (size_t i = 0; i < try_results.size(); ++i) {
+  // Wait for all RPCs — bthread-aware, yields brpc worker properly
+  for (auto& ctx : contexts) {
+    if (ctx.issued) {
+      brpc::Join(ctx.cntl.call_id());
+    }
+  }
+
+  // Process results
+  for (size_t i = 0; i < contexts.size(); ++i) {
     const std::string& service_addr = service_order[i];
+    auto& ctx = contexts[i];
     auto index_it = service_outputs_map.find(service_addr);
     CHECK(index_it != service_outputs_map.end())
         << "No output index found for service: " << service_addr;
     const auto& indices = index_it->second;
 
-    if (try_results[i].hasException()) {
-      LOG(ERROR) << "Async call throws exception for xservice: "
-                 << service_addr;
+    if (!ctx.issued || ctx.cntl.Failed()) {
+      if (ctx.cntl.Failed()) {
+        LOG(ERROR) << "Fail to response tokens to xservice server "
+                   << service_addr << ", error text: " << ctx.cntl.ErrorText();
+      }
       mark_service_failed(service_addr);
       continue;
     }
 
-    const auto& call_result = try_results[i].value();
-    if (!call_result.rpc_success) {
-      mark_service_failed(service_addr);
-      continue;
-    }
-
-    CHECK_EQ(call_result.all_status_ok.size(), indices.size())
+    CHECK_EQ(ctx.resp.all_status_size(), static_cast<int>(indices.size()))
         << "The size of status set is not equal to the size of outputs for "
            "service: "
         << service_addr;
 
-    for (size_t j = 0; j < call_result.all_status_ok.size(); ++j) {
+    for (size_t j = 0; j < indices.size(); ++j) {
       size_t original_idx = indices[j];
-      results[original_idx] = call_result.all_status_ok[j];
+      results[original_idx] = ctx.resp.all_status(j).ok();
     }
   }
 

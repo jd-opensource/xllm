@@ -27,7 +27,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
-#include "core/common/rec_model_utils.h"
+#include "core/util/rec_model_utils.h"
 #include "framework/batch/mposition.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
@@ -241,12 +241,16 @@ void RecMultiRoundBatchInputBuilder::extract_tokens_and_positions(
     }
   }
 
+  // `linear_state_ids` is consumed per sequence, so preserve one entry per
+  // logical batch row even when this slice is not the last prefill chunk.
+  base_state.linear_state_ids.push_back(sequence->get_single_block_id());
+
   // Add extra token id
   if (n_tokens == seq_len) {
     // last chunk of prefill and decode
     // add -1 as extra token id
     base_state.extra_token_ids.push_back(-1);
-    base_state.embedding_ids.push_back(sequence->get_embedding_id());
+    base_state.embedding_ids.push_back(sequence->get_single_block_id());
   } else {
     base_state.extra_token_ids.push_back(token_ids[seq_len]);
   }
@@ -357,6 +361,13 @@ ForwardInput RecMultiRoundBatchInputBuilder::state_to_forward_input() {
   if (input_embeddings_vec_.size() != 0) {
     input_params.input_embedding = torch::cat(input_embeddings_vec_);
   }
+  input_params.embedding_ids = std::move(state.embedding_ids);
+  input_params.linear_state_ids = std::move(state.linear_state_ids);
+  if (!input_params.linear_state_ids.empty()) {
+    input_params.linear_state_indices =
+        torch::tensor(input_params.linear_state_ids, torch::kInt);
+  }
+  input_params.extra_token_ids = std::move(state.extra_token_ids);
 
   if (swap_block_transfer_infos_ != nullptr &&
       swap_block_transfer_infos_->size() > 0) {

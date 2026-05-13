@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "common/types.h"
 #include "forward_params.h"
+#include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
@@ -51,8 +52,7 @@ class WorkerClient {
   virtual std::tuple<int64_t, int64_t> estimate_kv_cache_capacity();
 
   // allocate kv cache. blocking call
-  virtual bool allocate_kv_cache(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape);
+  virtual bool allocate_kv_cache(const KVCacheShape& kv_cache_shape);
 
   virtual void get_device_info(std::string& device_ip, uint16_t& port);
 
@@ -98,11 +98,11 @@ class WorkerClient {
 
   // allocate kv cache. async call
   virtual folly::SemiFuture<bool> allocate_kv_cache_async(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape);
+      const KVCacheShape& kv_cache_shape);
 
   // allocate kv cache with kv cache transfer. async call
   virtual folly::SemiFuture<bool> allocate_kv_cache_with_transfer_async(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape);
+      const KVCacheShape& kv_cache_shape);
 
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(
       const uint64_t src_cluster_id,

@@ -1,19 +1,20 @@
-from __future__ import annotations
-
 import tilelang
+import tilelang.language as T
 from typing import Any
 
 from ....common.manifest import KernelAbi, KernelVariantManifest
 from ....common.spec import DispatchField
 
 DEFAULT_ASCEND_PASS_CONFIGS = {
-    tilelang.PassConfigKey.TL_ASCEND_AUTO_SYNC: True,
-    tilelang.PassConfigKey.TL_ASCEND_MEMORY_PLANNING: True,
-    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_SYNC: True,
-    tilelang.PassConfigKey.TL_ASCEND_AUTO_CV_COMBINE: True,
+    # Use raw pass-config strings to avoid hard dependency on
+    # tilelang.PassConfigKey export timing/version.
+    "tl.ascend_auto_sync": True,
+    "tl.ascend_memory_planning": True,
+    "tl.ascend_auto_cross_core_sync": True,
+    "tl.ascend_auto_cv_combine": True,
 }
 
-DEFAULT_ASCEND_BISHENG_ARCH = "dav-c220"
+DEFAULT_ASCEND_BISHENG_ARCH = "dav-2201"
 ASCEND_VEC_CORE_NUM_PROPERTY_KEYS = (
     "vector_core_num",
     "aiv_core_num",
@@ -247,3 +248,70 @@ def render_family_registry_inc(
         ]
     )
     return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# Pipeline sync macros for TileLang Ascend kernels with
+# tl.ascend_auto_sync=False. These helpers keep kernel implementations small
+# and centralize flag-direction naming.
+# ---------------------------------------------------------------------------
+
+
+@T.macro
+def mte2_notify_v(event_id: T.int32):
+    T.set_flag("mte2", "v", event_id)
+
+
+@T.macro
+def v_wait_mte2(event_id: T.int32):
+    T.wait_flag("mte2", "v", event_id)
+
+
+@T.macro
+def v_notify_mte2(event_id: T.int32):
+    T.set_flag("v", "mte2", event_id)
+
+
+@T.macro
+def mte2_wait_v(event_id: T.int32):
+    T.wait_flag("v", "mte2", event_id)
+
+
+@T.macro
+def v_notify_mte3(event_id: T.int32):
+    T.set_flag("v", "mte3", event_id)
+
+
+@T.macro
+def mte3_wait_v(event_id: T.int32):
+    T.wait_flag("v", "mte3", event_id)
+
+
+@T.macro
+def mte3_notify_v(event_id: T.int32):
+    T.set_flag("mte3", "v", event_id)
+
+
+@T.macro
+def v_wait_mte3(event_id: T.int32):
+    T.wait_flag("mte3", "v", event_id)
+
+
+@T.macro
+def mte3_notify_mte2(event_id: T.int32):
+    T.set_flag("mte3", "mte2", event_id)
+
+
+@T.macro
+def mte2_wait_mte3(event_id: T.int32):
+    T.wait_flag("mte3", "mte2", event_id)
+
+
+@T.macro
+def mte2_notify_mte3(event_id: T.int32):
+    T.set_flag("mte2", "mte3", event_id)
+
+
+@T.macro
+def mte3_wait_mte2(event_id: T.int32):
+    T.wait_flag("mte2", "mte3", event_id)

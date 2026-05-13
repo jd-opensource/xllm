@@ -69,9 +69,9 @@ DeepseekV2SparseMoEBlockImpl::PrepOut DeepseekV2SparseMoEBlockImpl::prep_in(
     torch::Tensor x,
     const torch::Tensor& residual,
     const ModelInputParams& input_params,
+    const ExecCfg& exec,
     DeepseekV2AttentionImpl::PostAttnLayout attn_layout) const {
   PrepOut prep;
-  const ExecCfg exec = plan_exec(input_params);
   if (exec.enable_all2all) {
     auto shard =
         shard_attn_out(x,

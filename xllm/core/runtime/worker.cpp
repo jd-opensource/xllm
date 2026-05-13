@@ -85,8 +85,7 @@ bool Worker::init_model(const std::string& model_weights_path,
   return impl_->init_model(model_weights_path, random_seed, master_status);
 }
 
-bool Worker::allocate_kv_cache(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+bool Worker::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
   return impl_->allocate_kv_cache(kv_cache_shape);
 }
 
@@ -161,12 +160,12 @@ folly::SemiFuture<bool> Worker::init_model_async(
 }
 
 folly::SemiFuture<bool> Worker::allocate_kv_cache_async(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+    const KVCacheShape& kv_cache_shape) {
   return impl_->allocate_kv_cache_async(kv_cache_shape);
 }
 
 folly::SemiFuture<bool> Worker::allocate_kv_cache_with_transfer_async(
-    const std::vector<std::vector<int64_t>>& kv_cache_shape) {
+    const KVCacheShape& kv_cache_shape) {
   return impl_->allocate_kv_cache_with_transfer_async(kv_cache_shape);
 }
 

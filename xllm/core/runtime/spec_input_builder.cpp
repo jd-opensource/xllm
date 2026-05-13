@@ -20,10 +20,23 @@ limitations under the License.
 #include <limits>
 
 #include "framework/model/model_input_params.h"
+#include "util/tensor_helper.h"
 
 namespace xllm::specBuilder {
 
 namespace {
+
+template <typename T>
+void pad_2d_vector(std::vector<std::vector<T>>& vec, T pad_value) {
+  size_t max_col_size = 0;
+  for (const std::vector<T>& row : vec) {
+    max_col_size = std::max(max_col_size, row.size());
+  }
+
+  for (std::vector<T>& row : vec) {
+    row.resize(max_col_size, pad_value);
+  }
+}
 
 // Builds cumulative seq-lens layout: [0, l0, l0+l1, ...].
 void push_cumsum(std::vector<int32_t>& vec, int32_t len) {
@@ -44,6 +57,27 @@ int32_t resolve_row_token_id(const DecodeCpuView& view, const RowSpec& row) {
   return view.token_ids[row.seq_id];
 }
 
+Slice<int32_t> get_block_table_slice(const DecodeCpuView& view,
+                                     int32_t seq_id) {
+  CHECK_GE(seq_id, 0) << "invalid seq_id=" << seq_id;
+  CHECK_LT(seq_id, view.num_sequences)
+      << "seq_id out of range for block tables, seq_id=" << seq_id
+      << ", num_sequences=" << view.num_sequences;
+  CHECK_GT(view.block_table_row_stride, 0)
+      << "invalid block table row stride=" << view.block_table_row_stride;
+
+  const size_t row_offset =
+      static_cast<size_t>(seq_id) * view.block_table_row_stride;
+  CHECK_LE(row_offset + static_cast<size_t>(view.block_table_row_stride),
+           view.block_tables_data.size())
+      << "block table row out of range, seq_id=" << seq_id
+      << ", row_offset=" << row_offset
+      << ", row_stride=" << view.block_table_row_stride
+      << ", block_tables_size=" << view.block_tables_data.size();
+  return {view.block_tables_data.data() + row_offset,
+          static_cast<size_t>(view.block_table_row_stride)};
+}
+
 }  // namespace
 
 DecodeCpuView make_decode_cpu_view(const torch::Tensor& token_ids_cpu,
@@ -51,25 +85,26 @@ DecodeCpuView make_decode_cpu_view(const torch::Tensor& token_ids_cpu,
                                    const torch::Tensor& block_tables_cpu,
                                    const Slice<int32_t>& kv_seq_lens_slice) {
   DecodeCpuView view;
-  view.token_ids_cpu = token_ids_cpu;
-  view.positions_cpu = positions_cpu;
-  view.block_tables_cpu = block_tables_cpu;
-  if (view.token_ids_cpu.defined()) {
-    view.token_ids = {view.token_ids_cpu.data_ptr<int32_t>(),
-                      static_cast<size_t>(view.token_ids_cpu.numel())};
+  if (token_ids_cpu.defined()) {
+    view.token_ids = {token_ids_cpu.data_ptr<int32_t>(),
+                      static_cast<size_t>(token_ids_cpu.numel())};
   }
-  view.positions = {view.positions_cpu.data_ptr<int32_t>(),
-                    static_cast<size_t>(view.positions_cpu.numel())};
+  view.positions = {positions_cpu.data_ptr<int32_t>(),
+                    static_cast<size_t>(positions_cpu.numel())};
   view.kv_seq_lens = kv_seq_lens_slice;
-  CHECK(view.block_tables_cpu.defined()) << "block_tables_cpu is undefined";
-  const int64_t num_sequences = view.block_tables_cpu.size(0);
-  view.block_table_slices.reserve(num_sequences);
-  for (int64_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
-    torch::Tensor block_table = view.block_tables_cpu[seq_id];
-    view.block_table_slices.emplace_back(
-        block_table.data_ptr<int32_t>(),
-        static_cast<size_t>(block_table.numel()));
-  }
+  CHECK(block_tables_cpu.defined()) << "block_tables_cpu is undefined";
+  CHECK_EQ(block_tables_cpu.dim(), 2)
+      << "block_tables_cpu must be 2D, got " << block_tables_cpu.sizes();
+  view.block_tables_cpu = block_tables_cpu.contiguous();
+  view.block_tables_data = {view.block_tables_cpu.data_ptr<int32_t>(),
+                            static_cast<size_t>(view.block_tables_cpu.numel())};
+  CHECK_LE(view.block_tables_cpu.size(0),
+           static_cast<int64_t>(std::numeric_limits<int32_t>::max()));
+  CHECK_LE(view.block_tables_cpu.size(1),
+           static_cast<int64_t>(std::numeric_limits<int32_t>::max()));
+  view.num_sequences = static_cast<int32_t>(view.block_tables_cpu.size(0));
+  view.block_table_row_stride =
+      static_cast<int32_t>(view.block_tables_cpu.size(1));
   return view;
 }
 
@@ -123,19 +158,18 @@ void update_kv_seq_lens_and_max(std::vector<int32_t>& kv_seq_lens_vec,
   append_seq_len_by_layout(kv_seq_lens_vec, kv_len);
 }
 
-void append_decode_row(const ModelInputParams& params,
-                       const DecodeCpuView& view,
+void append_decode_row(const DecodeCpuView& view,
                        const RowSpec& row,
                        int32_t block_size,
                        DecodeBuildBuffers& buf) {
   CHECK_GE(row.seq_id, 0);
-  CHECK_LT(row.seq_id, params.num_sequences);
+  CHECK_LT(row.seq_id, view.num_sequences);
   CHECK_LT(static_cast<size_t>(row.seq_id), view.positions.size());
-  CHECK_LT(static_cast<size_t>(row.seq_id), view.block_table_slices.size());
   const int32_t new_position = view.positions[row.seq_id] + row.position_offset;
   CHECK_GE(new_position, 0) << "invalid decode position";
 
-  const Slice<int32_t>& block_table_slice = view.block_table_slices[row.seq_id];
+  const Slice<int32_t> block_table_slice =
+      get_block_table_slice(view, row.seq_id);
 
   // All decode paths can toggle which fields are emitted, so one row builder
   // can serve draft/validate/first-decode/update-last-step scenarios.
@@ -202,8 +236,7 @@ TokenWithOffset resolve_token_with_position_offset(
   return resolved;
 }
 
-void append_decode_row_from_last_step(const ModelInputParams& params,
-                                      const DecodeCpuView& view,
+void append_decode_row_from_last_step(const DecodeCpuView& view,
                                       int32_t seq_id,
                                       int32_t input_token_id,
                                       const Slice<int64_t>& last_step_tokens,
@@ -219,7 +252,7 @@ void append_decode_row_from_last_step(const ModelInputParams& params,
   row.seq_id = seq_id;
   row.token_id = resolved.token_id;
   row.position_offset = resolved.position_offset;
-  append_decode_row(params, view, row, block_size, buf);
+  append_decode_row(view, row, block_size, buf);
 }
 
 torch::Tensor build_q_cu_seq_lens_tensor(const ModelInputParams& params,
@@ -233,6 +266,34 @@ torch::Tensor build_q_cu_seq_lens_tensor(const ModelInputParams& params,
   }
   return torch::tensor(q_cu_seq_lens_vec,
                        torch::dtype(torch::kInt).device(device));
+}
+
+void update_input_params(ModelInputParams& input_params,
+                         DecodeBuildBuffers& buf,
+                         const torch::TensorOptions& int_options,
+                         int32_t q_max_seq_len,
+                         std::vector<int32_t> q_seq_lens_vec,
+                         int32_t kv_max_seq_len,
+                         std::vector<int32_t> kv_seq_lens_vec,
+                         bool update_block_tables,
+                         torch::Device block_tables_device) {
+  input_params.q_max_seq_len = q_max_seq_len;
+  input_params.q_seq_lens_vec = std::move(q_seq_lens_vec);
+  input_params.q_seq_lens =
+      torch::tensor(input_params.q_seq_lens_vec, int_options);
+  input_params.kv_max_seq_len = kv_max_seq_len;
+  input_params.kv_seq_lens_vec = std::move(kv_seq_lens_vec);
+  input_params.kv_seq_lens =
+      torch::tensor(input_params.kv_seq_lens_vec, int_options);
+  input_params.new_cache_slots =
+      torch::tensor(buf.out_new_cache_slots, int_options);
+  input_params.q_cu_seq_lens = build_q_cu_seq_lens_tensor(input_params);
+  if (update_block_tables) {
+    pad_2d_vector(buf.out_block_tables, /*pad_value=*/0);
+    input_params.block_tables =
+        create_2d_tensor(buf.out_block_tables, torch::kInt)
+            .to(block_tables_device);
+  }
 }
 
 namespace draftProbs {

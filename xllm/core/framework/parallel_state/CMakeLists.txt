@@ -1,12 +1,14 @@
 include(cc_library)
-include(cc_test)
 
 cc_library(
   NAME
     parallel_state
   HDRS
     mapping_npu.h
-    dit_mapping_npu.h
+    npu_cp_ep_padding.h
+    npu_cp_prepare.h
+    npu_dp_ep_padding.h
+    dit_mapping.h
     rank_generator.h
     parallel_args.h
     parallel_state.h
@@ -21,7 +23,10 @@ cc_library(
     dit_collective_communicator.h
   SRCS
     mapping_npu.cpp
-    dit_mapping_npu.cpp
+    npu_cp_ep_padding.cpp
+    npu_cp_prepare.cpp
+    npu_dp_ep_padding.cpp
+    dit_mapping.cpp
     parallel_state.cpp
     parallel_state_async.cpp
     process_group.cpp
@@ -37,29 +42,6 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:hccl>
     $<$<BOOL:${USE_NPU}>:hcomm>
     $<$<BOOL:${USE_NPU}>:xllm_atb_layers>
+    gflags::gflags
     glog::glog
 )
-
-if(USE_NPU)
-  cc_test(
-    NAME
-      mapping_npu_test
-    SRCS
-      mapping_npu_test.cpp
-    DEPS
-      parallel_state
-      absl::synchronization
-      absl::time
-      GTest::gtest_main
-      xllm_atb_layers
-      nnopbase
-      ascendcl
-      atb
-      c_sec
-      spdlog::spdlog
-  )
-endif()
-
-if(USE_MLU)
-  add_subdirectory(tests)
-endif()

@@ -142,18 +142,17 @@ bool SpeculativeEngine::init_model() {
 }
 
 bool SpeculativeEngine::allocate_kv_cache() {
-  Engine::KVCacheCapacity target_kv_cache_cap =
-      engine_->estimate_kv_cache_capacity();
+  KVCacheCapacity target_kv_cache_cap = engine_->estimate_kv_cache_capacity();
 
   if (!use_draft_engine_) {
     return engine_->allocate_kv_cache(target_kv_cache_cap);
   }
 
-  Engine::KVCacheCapacity draft_kv_cache_cap =
+  KVCacheCapacity draft_kv_cache_cap =
       draft_engine_->estimate_kv_cache_capacity();
   const int64_t kv_cache_size =
-      std::min(target_kv_cache_cap.cache_size_in_bytes,
-               draft_kv_cache_cap.cache_size_in_bytes);
+      std::min(target_kv_cache_cap.cache_size_in_bytes(),
+               draft_kv_cache_cap.cache_size_in_bytes());
 
   int64_t n_blocks = 0;
   // check if llm and ssm are using same device
@@ -161,20 +160,20 @@ bool SpeculativeEngine::allocate_kv_cache() {
     // on the same device, use the smaller kv cache size
     n_blocks = calculate_kv_cache(
         kv_cache_size,
-        target_kv_cache_cap.n_layers * target_kv_cache_cap.slot_size,
-        draft_kv_cache_cap.n_layers * draft_kv_cache_cap.slot_size);
+        target_kv_cache_cap.n_layers() * target_kv_cache_cap.slot_size(),
+        draft_kv_cache_cap.n_layers() * draft_kv_cache_cap.slot_size());
   } else {
     // on different devices, use the smaller number of blocks
     n_blocks =
-        std::min(target_kv_cache_cap.n_blocks, draft_kv_cache_cap.n_blocks);
+        std::min(target_kv_cache_cap.n_blocks(), draft_kv_cache_cap.n_blocks());
   }
   CHECK_GT(n_blocks, 0) << "no memory for kv cache";
 
   // allocate kv cache
-  target_kv_cache_cap.n_blocks = n_blocks;
-  target_kv_cache_cap.cache_size_in_bytes = kv_cache_size;
-  draft_kv_cache_cap.n_blocks = n_blocks;
-  draft_kv_cache_cap.cache_size_in_bytes = kv_cache_size;
+  target_kv_cache_cap.n_blocks() = n_blocks;
+  target_kv_cache_cap.cache_size_in_bytes() = kv_cache_size;
+  draft_kv_cache_cap.n_blocks() = n_blocks;
+  draft_kv_cache_cap.cache_size_in_bytes() = kv_cache_size;
   return engine_->allocate_kv_cache(target_kv_cache_cap) &&
          draft_engine_->allocate_kv_cache(draft_kv_cache_cap);
 }

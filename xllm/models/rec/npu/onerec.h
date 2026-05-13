@@ -18,29 +18,21 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
-#include <algorithm>
-#include <cmath>
 #include <mutex>
-#include <optional>
+#include <string>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
-#include "core/framework/kv_cache/kv_cache.h"
-#include "core/framework/model/model_input_params.h"
-#include "core/framework/model/model_output.h"
-#include "core/framework/model_context.h"
-#include "core/framework/model_loader.h"
-#include "core/layers/common/lm_head.h"
-#include "core/layers/common/word_embedding.h"
+#include "core/framework/model/rec_causal_lm.h"
 #include "models/model_registry.h"
 #include "models/rec/npu/onerec_npu_impl.h"
 #include "models/rec/rec_model_base.h"
 
 namespace xllm {
 
-class OneRecModelImpl : public torch::nn::Module {
+class OneRecModelImpl final : public torch::nn::Module {
  public:
   explicit OneRecModelImpl(const ModelContext& context) {
     hidden_size_ = context.get_model_args().hidden_size();
@@ -261,7 +253,7 @@ class OneRecModelImpl : public torch::nn::Module {
 };
 TORCH_MODULE(OneRecModel);
 
-class OneRecForConditionalGenerationImpl
+class OneRecForConditionalGenerationImpl final
     : public RecForCausalLMImplBase<OneRecModel> {
  public:
   explicit OneRecForConditionalGenerationImpl(const ModelContext& context)
@@ -270,8 +262,17 @@ class OneRecForConditionalGenerationImpl
   void load_model(std::unique_ptr<ModelLoader> loader,
                   std::string prefix = "model.") override {
     for (const auto& state_dict : loader->get_state_dicts()) {
-      StateDict model_state_dict = state_dict->get_dict_with_prefix(prefix);
-      if (model_state_dict.size() == 0) {
+      StateDict prefixed_state_dict =
+          state_dict->get_dict_with_prefix("module.module3.t5_model.");
+      StateDict model_state_dict =
+          prefixed_state_dict.size() > 0
+              ? prefixed_state_dict
+              : state_dict->get_dict_with_prefix(prefix);
+      if (prefixed_state_dict.size() > 0) {
+        LOG(INFO) << "Detected temporary OneRec checkpoint prefix "
+                  << "`module.module3.t5_model.`; loading weights via the "
+                     "compatibility path.";
+      } else if (model_state_dict.size() == 0) {
         model_state_dict = *state_dict;
       }
       model_->load_state_dict(model_state_dict);
@@ -301,9 +302,9 @@ class OneRecForConditionalGenerationImpl
 };
 TORCH_MODULE(OneRecForConditionalGeneration);
 
-using OneRecCausalLM = CausalLMImpl<OneRecForConditionalGeneration>;
-static_assert(std::is_base_of_v<CausalLM, OneRecCausalLM>,
-              "OneRec must satisfy CausalLM contract.");
+using OneRecCausalLM = RecCausalLMImpl<OneRecForConditionalGeneration>;
+static_assert(std::is_base_of_v<RecCausalLM, OneRecCausalLM>,
+              "OneRec must satisfy RecCausalLM contract.");
 
 REGISTER_REC_MODEL(onerec, OneRecForConditionalGeneration);
 

@@ -41,15 +41,15 @@ class EngineType {
 
   constexpr EngineType(Value v) : value_(v) {}
   EngineType(const std::string& str) {
-    if (str == "LLM") {
+    if (str == "LLM" || str == "llm") {
       value_ = LLM;
-    } else if (str == "SSM") {
+    } else if (str == "SSM" || str == "ssm") {
       value_ = SSM;
-    } else if (str == "VLM") {
+    } else if (str == "VLM" || str == "vlm") {
       value_ = VLM;
-    } else if (str == "DIT") {
+    } else if (str == "DIT" || str == "dit") {
       value_ = DIT;
-    } else if (str == "REC") {
+    } else if (str == "REC" || str == "rec") {
       value_ = REC;
     } else {
       value_ = INVALID;
@@ -198,6 +198,15 @@ struct RawToken {
   std::vector<float> embeddings;  // hidden states
 };
 
+struct RecItemInfo {
+  // The decoded recommendation item id.
+  int64_t item_id = 0;
+  // The DID associated with the recommendation item.
+  std::string did;
+  // The business type associated with the recommendation item.
+  std::string type;
+};
+
 // Weight segment info for D2D transfer (supports non-contiguous allocation)
 // Forward declaration needed by InstanceInfo
 struct WeightSegment {
@@ -288,6 +297,8 @@ struct XTensorLayerOffsets {
 
 struct TransferKVInfo {
   std::string request_id;
+  // Before batch build this may carry the full logical block table length as a
+  // hint. BatchInputBuilder overwrites it with the current step local blocks.
   std::vector<uint64_t> local_blocks_ids;
   std::vector<uint64_t> remote_blocks_ids;
   int32_t dp_rank;

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xllm"
+description = "A high-performance inference system for large language models."
+requires-python = ">=3.10"
+license = { text = "Apache 2.0" }
+authors = [{ name = "xLLM Team", email = "infer@xllm.ai" }]
+dynamic = ["readme", "version"]
+classifiers = [
+  "Intended Audience :: Developers",
+  "Intended Audience :: Education",
+  "Programming Language :: C++",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: POSIX",
+  "License :: OSI Approved :: Apache Software License",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://xllm.readthedocs.io/zh-cn/latest/"
+Documentation = "https://xllm.readthedocs.io/zh-cn/latest/"
+Repository = "https://github.com/jd-opensource/xllm"
+
+[project.scripts]
+xllm = "xllm.launch_xllm:launch_xllm"
+
+[tool.setuptools.dynamic]
+readme = { file = ["README.md"], content-type = "text/markdown" }
+version = { file = ["version.txt"] }

@@ -26,13 +26,16 @@ namespace {
 
 runtime::Options eagle3_main_options(const runtime::Options& options) {
   auto opts = options;
-  opts.enable_schedule_overlap(false).enable_graph_aux_hidden_states(true);
+  opts.enable_schedule_overlap(false)
+      .is_draft_engine(false)
+      .enable_graph_aux_hidden_states(true);
   return opts;
 }
 
 runtime::Options eagle3_draft_options(const runtime::Options& options) {
   auto opts = options;
   opts.enable_schedule_overlap(false)
+      .is_draft_engine(true)
       .num_decoding_tokens(1)
       .num_speculative_tokens(0)
       .enable_graph_aux_hidden_states(false);
@@ -93,10 +96,13 @@ void Eagle3WorkerImpl::process_draft_sample_output(
   MTPWorkerImpl::process_draft_sample_output(sample_output);
 
   // EAGLE-3 specific: map draft token IDs to target token IDs.
-  if (hot_token_id_.defined()) {
-    sample_output.next_tokens =
-        hot_token_id_.index_select(0, sample_output.next_tokens);
+  if (!hot_token_id_.defined() || !sample_output.next_tokens.defined() ||
+      sample_output.next_tokens.numel() == 0) {
+    return;
   }
+
+  sample_output.next_tokens =
+      hot_token_id_.index_select(0, sample_output.next_tokens);
 }
 
 }  // namespace xllm

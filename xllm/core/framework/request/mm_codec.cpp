@@ -15,6 +15,7 @@ limitations under the License.
 ==============================================================================*/
 #include "mm_codec.h"
 
+#include <cmath>
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -82,6 +83,50 @@ struct Reader {
     return pos;
   }
 };
+
+// Downstream multimodal preprocess expects a 3-channel RGB image. For BGRA
+// input, blend alpha onto a white background instead of dropping alpha
+// directly, so transparent regions keep visually stable colors.
+void blend_bgra_to_rgb_with_white_background(const cv::Mat& image,
+                                             cv::Mat& rgb_image) {
+  rgb_image = cv::Mat(image.rows, image.cols, CV_8UC3);
+
+  for (int32_t row = 0; row < image.rows; ++row) {
+    const cv::Vec4b* src_row = image.ptr<cv::Vec4b>(row);
+    cv::Vec3b* dst_row = rgb_image.ptr<cv::Vec3b>(row);
+
+    for (int32_t col = 0; col < image.cols; ++col) {
+      const float alpha = src_row[col][3] / 255.0f;
+      const float blue = src_row[col][0];
+      const float green = src_row[col][1];
+      const float red = src_row[col][2];
+
+      dst_row[col][0] = static_cast<uint8_t>(
+          std::round(red * alpha + 255.0f * (1.0f - alpha)));
+      dst_row[col][1] = static_cast<uint8_t>(
+          std::round(green * alpha + 255.0f * (1.0f - alpha)));
+      dst_row[col][2] = static_cast<uint8_t>(
+          std::round(blue * alpha + 255.0f * (1.0f - alpha)));
+    }
+  }
+}
+
+// OpenCV decodes different image formats into different channel layouts:
+// 1 channel -> GRAY, 3 channels -> BGR, 4 channels -> BGRA. Normalize them
+// here so the decoder path always returns a 3-channel RGB image.
+void convert_decoded_image_to_rgb(const cv::Mat& image, cv::Mat& rgb_image) {
+  const int32_t channels = image.channels();
+
+  if (channels == 4) {
+    blend_bgra_to_rgb_with_white_background(image, rgb_image);
+  } else if (channels == 3) {
+    cv::cvtColor(image, rgb_image, cv::COLOR_BGR2RGB);
+  } else if (channels == 1) {
+    cv::cvtColor(image, rgb_image, cv::COLOR_GRAY2RGB);
+  } else {
+    LOG(FATAL) << "unsupported channel count: " << channels;
+  }
+}
 
 }  // namespace
 
@@ -504,16 +549,19 @@ bool OpenCVImageDecoder::decode(const std::string& raw_data, torch::Tensor& t) {
     LOG(ERROR) << "opencv image decode got empty data";
     return false;
   }
-  cv::Mat image = cv::imdecode(buffer, cv::IMREAD_COLOR);
+  cv::Mat image = cv::imdecode(buffer, cv::IMREAD_UNCHANGED);
   if (image.empty()) {
-    LOG(INFO) << " opencv image decode failed";
+    LOG(INFO) << "opencv image decode failed";
     return false;
   }
 
-  cv::cvtColor(image, image, cv::COLOR_BGR2RGB);  // RGB
+  cv::Mat rgb_image;
+  convert_decoded_image_to_rgb(image, rgb_image);
 
   torch::Tensor tensor =
-      torch::from_blob(image.data, {image.rows, image.cols, 3}, torch::kUInt8);
+      torch::from_blob(rgb_image.data,
+                       {rgb_image.rows, rgb_image.cols, 3},
+                       torch::TensorOptions().dtype(torch::kUInt8));
 
   t = tensor.permute({2, 0, 1}).clone();  // [C, H, W]
   return true;

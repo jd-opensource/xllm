@@ -17,7 +17,9 @@ limitations under the License.
 #include "npu_glm4_vision_encoder_layer_impl.h"
 
 #include <glog/logging.h>
+#include <mstx/ms_tools_ext.h>
 
+#include "common/global_flags.h"
 #include "xllm_atb_layers/models/glm4v/glm4v_encoder.h"
 
 namespace xllm {
@@ -61,8 +63,23 @@ NpuGlm4VisionEncoderLayerImpl::NpuGlm4VisionEncoderLayerImpl(
   param_from_args(encode_param_, model_args, parallel_args);
   atb_weight_tensors_.resize(WEIGHT_COUNT_PER_LAYER);
   dtype_ = c10::typeMetaToScalarType(options.dtype());
-  loader_ = std::make_unique<Glm4VisionEncoderLoader>(WEIGHT_COUNT_PER_LAYER,
-                                                      context);
+  loader_ = std::make_unique<Glm4VisionEncoderLoader>(
+      WEIGHT_COUNT_PER_LAYER,
+      context,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
+}
+
+void NpuGlm4VisionEncoderLayerImpl::merge_loaded_weights() {
+  CHECK(loader_ != nullptr) << "glm4 vision encoder loader is not initialized";
+  loader_->merge_loaded_weights();
+  auto& at_weight_tensors = loader_->get_at_weight_tensors();
+  for (int i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
+    atb_weight_tensors_[i] =
+        atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
+  }
+
+  Device::empty_cache(device_.index());
+  init_layer();
 }
 
 int64_t NpuGlm4VisionEncoderLayerImpl::init_layer() {

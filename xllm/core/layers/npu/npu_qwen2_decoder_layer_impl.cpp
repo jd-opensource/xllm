@@ -156,13 +156,10 @@ NpuQwen2DecoderLayerImpl::NpuQwen2DecoderLayerImpl(const ModelContext& context)
       torch::zeros({1}).to(device_).to(dtype_));
   at_placeholder_ = torch::zeros({1}).to(device_).to(dtype_);
 
-  if (FLAGS_enable_manual_loader) {
-    loader_ = std::make_unique<Qwen2DecoderManualLoader>(WEIGHT_COUNT_PER_LAYER,
-                                                         context);
-  } else {
-    loader_ =
-        std::make_unique<Qwen2DecoderLoader>(WEIGHT_COUNT_PER_LAYER, context);
-  }
+  loader_ = std::make_unique<Qwen2DecoderLoader>(
+      WEIGHT_COUNT_PER_LAYER,
+      context,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
 
   initialize_quantization_parameters();
 }

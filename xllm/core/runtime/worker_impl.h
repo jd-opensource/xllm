@@ -25,9 +25,10 @@ limitations under the License.
 #include "executor.h"
 #include "forward_params.h"
 #include "framework/eplb/eplb_executor.h"
-#include "framework/kv_cache/hierarchy_kv_cache_transfer.h"
-#include "framework/kv_cache/kv_cache_store.h"
-#include "framework/kv_cache/kv_cache_transfer.h"
+#include "framework/kv_cache/kv_cache_shape.h"
+#include "framework/kv_cache_transfer/hierarchy_kv_cache_transfer.h"
+#include "framework/kv_cache_transfer/kv_cache_store.h"
+#include "framework/kv_cache_transfer/kv_cache_transfer.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
@@ -41,11 +42,13 @@ limitations under the License.
 #include "platform/device.h"
 #include "util/threadpool.h"
 #if defined(USE_NPU)
-#include "framework/kv_cache/mooncake_weight_transfer.h"
+#include "framework/kv_cache_transfer/mooncake_weight_transfer.h"
 #include "layers/npu/loader/rolling_load_manager.h"
 #endif
 
 namespace xllm {
+
+class WorkerRendezvous;
 
 class WorkerImpl {
  public:
@@ -75,16 +78,15 @@ class WorkerImpl {
   virtual std::tuple<int64_t, int64_t> estimate_kv_cache_capacity();
 
   // allocate kv cache. blocking call
-  virtual bool allocate_kv_cache(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape);
+  virtual bool allocate_kv_cache(const KVCacheShape& kv_cache_shape);
 
   virtual bool allocate_kv_cache_with_transfer(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape);
+      const KVCacheShape& kv_cache_shape);
 
 #if defined(USE_NPU)
   virtual bool allocate_kv_cache_with_transfer(
       std::shared_ptr<KVCacheTransfer> kv_cache_transfer,
-      const std::vector<std::vector<int64_t>>& kv_cache_shape);
+      const KVCacheShape& kv_cache_shape);
 #endif
 
   virtual void get_device_info(std::string& device_ip, uint16_t& port);
@@ -135,10 +137,10 @@ class WorkerImpl {
 
   // initialize kv cache. async call
   virtual folly::SemiFuture<bool> allocate_kv_cache_async(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape);
+      const KVCacheShape& kv_cache_shape);
 
   virtual folly::SemiFuture<bool> allocate_kv_cache_with_transfer_async(
-      const std::vector<std::vector<int64_t>>& kv_cache_shape);
+      const KVCacheShape& kv_cache_shape);
 
   virtual bool sleep(MasterStatus master_status);
 
@@ -284,6 +286,7 @@ class WorkerImpl {
 
   std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
   std::unique_ptr<HierarchyKVCacheTransfer> hierarchy_kv_cache_transfer_;
+  std::unique_ptr<WorkerRendezvous> worker_rendezvous_;
 
 #if defined(USE_CUDA)
   CudaBlockCopyRuntimeState cuda_block_copy_runtime_state_;

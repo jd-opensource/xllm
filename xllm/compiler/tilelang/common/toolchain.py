@@ -34,9 +34,9 @@ def require_env(name: str) -> str:
 def prepend_pythonpath(env: dict[str, str], path: str) -> None:
     current = env.get("PYTHONPATH", "")
     items = [item for item in current.split(os.pathsep) if item]
-    if path not in items:
-        items.insert(0, path)
-        env["PYTHONPATH"] = os.pathsep.join(items)
+    items = [item for item in items if item != path]
+    items.insert(0, path)
+    env["PYTHONPATH"] = os.pathsep.join(items)
 
 
 def prepare_tilelang_import(tilelang_root: str | Path | None = None) -> Path:
@@ -45,8 +45,11 @@ def prepare_tilelang_import(tilelang_root: str | Path | None = None) -> Path:
     )
     os.environ["TL_ROOT"] = str(tl_root)
     prepend_pythonpath(os.environ, str(tl_root))
-    if str(tl_root) not in sys.path:
-        sys.path.insert(0, str(tl_root))
+    tl_root_str = str(tl_root)
+    # Keep TL_ROOT at sys.path front to avoid resolving the sibling
+    # package xllm/compiler/tilelang as top-level `tilelang`.
+    sys.path = [p for p in sys.path if p != tl_root_str]
+    sys.path.insert(0, tl_root_str)
     os.environ.setdefault("ACL_OP_INIT_MODE", "1")
     return tl_root
 

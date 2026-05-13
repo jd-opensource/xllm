@@ -37,22 +37,13 @@ class AttentionMetadataBuilder {
   // ("float").
   static AttentionMetadata build(
       const ModelInputParams& params,
-      const std::optional<torch::Tensor>& attn_mask = {});
-
-  static AttentionMetadata build(
-      const ModelInputParams& params,
-      const ModelArgs& model_args,
+      bool enable_mla,
       const std::optional<torch::Tensor>& attn_mask = {});
 
   // Build AttentionMetadata from ModelInputParams with specified compute_dtype.
   static AttentionMetadata build(
       const ModelInputParams& params,
-      const std::string& compute_dtype,
-      const std::optional<torch::Tensor>& attn_mask = {});
-
-  static AttentionMetadata build(
-      const ModelInputParams& params,
-      const ModelArgs& model_args,
+      bool enable_mla,
       const std::string& compute_dtype,
       const std::optional<torch::Tensor>& attn_mask = {});
 };

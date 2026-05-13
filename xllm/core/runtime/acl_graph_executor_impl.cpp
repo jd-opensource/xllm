@@ -113,6 +113,8 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   }
   persistent_new_cache_slots_ = torch::zeros(
       {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
+  persistent_linear_state_indices_ = torch::zeros(
+      {max_seqs_per_batch}, torch::dtype(torch::kInt).device(device));
 
   // Sequence length tensors with max_seqs_per_batch
   q_seq_lens_ = torch::zeros({max_seqs_per_batch},
@@ -229,6 +231,19 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   persistent_new_cache_slots_
       .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
       .copy_(params.new_cache_slots, /*non_blocking=*/true);
+  if (!params.linear_state_ids.empty()) {
+    if (params.linear_state_indices.defined()) {
+      persistent_linear_state_indices_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+          .copy_(params.linear_state_indices, /*non_blocking=*/true);
+    } else {
+      persistent_linear_state_indices_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_batch_size)
+          .copy_(
+              torch::tensor(params.linear_state_ids, torch::kInt).to(device_),
+              /*non_blocking=*/true);
+    }
+  }
 
   // Copy block table data
   const int64_t actual_block_table_len = params.block_tables.size(1);
@@ -312,6 +327,14 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
         persistent_new_cache_slots(padded_num_tokens);
     params_for_capture->block_tables =
         persistent_block_tables(padded_num_tokens);
+    if (!params.linear_state_ids.empty()) {
+      params_for_capture->linear_state_ids = params.linear_state_ids;
+      const int32_t padding_linear_state_id = 0;
+      params_for_capture->linear_state_ids.resize(padded_num_tokens,
+                                                  padding_linear_state_id);
+      params_for_capture->linear_state_indices =
+          persistent_linear_state_indices(padded_num_tokens);
+    }
 
     // Only set attn_mask if need_update_attn_mask_ is true
     if (need_update_attn_mask_) {

@@ -17,12 +17,15 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <vector>
+
 #include "attention.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
+#include "kernels/ops_api.h"
 #include "layers/common/linear.h"
 #include "layers/common/partial_rotary_embedding.h"
 #include "layers/common/qwen3_next_rms_norm.h"
@@ -42,7 +45,10 @@ class Qwen3NextAttentionImpl : public torch::nn::Module {
   torch::Tensor forward(const torch::Tensor& positions,
                         const torch::Tensor& hidden_states,
                         const AttentionMetadata& attn_metadata,
-                        KVCache& kv_cache);
+                        KVCache& kv_cache,
+                        const torch::Tensor& mrope_cos_sin);
+
+  torch::Tensor build_mrope_cos_sin(const torch::Tensor& positions) const;
 
   void load_state_dict(const StateDict& state_dict);
 
@@ -57,6 +63,12 @@ class Qwen3NextAttentionImpl : public torch::nn::Module {
   bool attn_output_gate_;
   int32_t layer_id_;
   int32_t rank_;
+  int64_t rotary_dim_;
+  float rms_norm_eps_;
+  bool use_fused_qkv_;
+  bool is_interleaved_;
+  std::vector<int64_t> mrope_section_;
+  torch::Tensor mrope_gather_pattern_;
 
   QKVParallelLinear qkv_proj_{nullptr};
   RowParallelLinear o_proj_{nullptr};

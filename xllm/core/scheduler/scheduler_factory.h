@@ -15,12 +15,29 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
+#include <memory>
+
 #include "runtime/xservice_client.h"
 #include "scheduler/continuous_scheduler.h"
 #include "scheduler/dit_scheduler.h"
 #include "scheduler/fixed_steps_scheduler.h"
 
 namespace xllm {
+
+enum class SchedulerKind : int8_t {
+  CONTINUOUS = 0,
+  CHUNKED_PREFILL = 1,
+  PREFILL_ONLY = 2,
+  MIX = 3,
+  ZERO_EVICTION = 4,
+  DISAGG_PD = 5,
+  DISAGG_PD_CHUNKED_PREFILL = 6,
+  PD_OOC = 7
+};
+
+SchedulerKind select_scheduler_kind(
+    const ContinuousScheduler::Options& options);
 
 std::unique_ptr<ContinuousScheduler> create_continuous_scheduler(
     Engine* engine,

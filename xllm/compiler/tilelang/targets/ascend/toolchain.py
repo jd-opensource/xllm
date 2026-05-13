@@ -4,25 +4,19 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from scripts.logger import logger
+
 from ...common.toolchain import git_head, require_env
 from .kernels.utils import DEFAULT_ASCEND_BISHENG_ARCH
 
 TILELANG_BISHENG_COMMON_FLAGS = [
     "-O2",
-    "-std=gnu++17",
-    "-xcce",
+    "-std=c++17",
+    "-xasc",
     "-fPIC",
-    "-mllvm",
-    "-cce-aicore-stack-size=0x8000",
-    "-mllvm",
-    "-cce-aicore-function-stack-size=0x8000",
-    "-mllvm",
-    "-cce-aicore-record-overflow=true",
-    "-mllvm",
-    "-cce-aicore-addr-transform",
-    "-mllvm",
-    "-cce-aicore-dcci-insert-for-scalar=false",
-    "-DL2_CACHE_HINT",
+    "-Wno-macro-redefined",
+    "-Wno-ignored-attributes",
+    "-Wno-non-c-typedef-for-linkage",
     "-DBACKEND_HYBM",
 ]
 
@@ -60,10 +54,10 @@ def normalize_ascend_device(device: str | None) -> str | None:
 def resolve_bisheng_arch(device: str | None) -> tuple[str | None, str]:
     normalized_device = normalize_ascend_device(device)
     if normalized_device is None:
-        print(
-            "[WARN] TileLang Ascend build did not receive --device. Falling back "
+        logger.warning(
+            "TileLang Ascend build did not receive --device. Falling back "
             f"to default bisheng_arch={DEFAULT_ASCEND_BISHENG_ARCH}. Prefer "
-            "running via xLLM main build path or pass --device a2|a3 explicitly."
+            "running via xLLM main build path or pass `--device npu` explicitly."
         )
         return None, DEFAULT_ASCEND_BISHENG_ARCH
     return normalized_device, ASCEND_DEVICE_TO_BISHENG_ARCH[normalized_device]

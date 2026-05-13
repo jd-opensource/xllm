@@ -119,7 +119,7 @@ std::string extract_ip(const std::string& input) {
   std::string ip;
 
   std::getline(stream, ip, ':');
-  if (ip == "127.0.0.1") {
+  if (ip == "127.0.0.1" || ip == "0.0.0.0" || ip == "localhost") {
     ip = get_local_ip_addr();
   }
   return ip;

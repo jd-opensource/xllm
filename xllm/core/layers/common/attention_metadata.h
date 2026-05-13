@@ -45,6 +45,7 @@ struct XAttentionTwoStageDecodeCache {
 
   // Fixed tensors (values don't change for the same batch/shape)
   torch::Tensor q_cu_seq_lens_shared;             // [batch_size + 1], int32
+  torch::Tensor qo_indptr_expanded;               // [total_beam + 1], int32
   torch::Tensor paged_kv_indptr_expanded;         // [total_beam + 1], int32
   torch::Tensor paged_kv_indices_expanded;        // [total_beam], int32
   torch::Tensor paged_kv_last_page_len_expanded;  // [total_beam], int32

@@ -25,8 +25,9 @@ limitations under the License.
 #include <vector>
 
 #include "common/global_flags.h"
-#include "framework/model/npu_cp_prepare.h"
+#include "framework/parallel_state/npu_cp_prepare.h"
 #include "layers/common/rotary_embedding_util.h"
+#include "loader/deepseek_v32_decoder_loader.h"
 
 namespace xllm {
 namespace layer {
@@ -237,7 +238,8 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
       num_key_value_heads_,
       v_head_dim_,
       prefill_param_.isBF16,
-      decode_param_.isBF16);
+      decode_param_.isBF16,
+      FLAGS_enable_manual_loader ? LoadMode::kManual : LoadMode::kEager);
   initialize_tensors(options);
 }
 
@@ -356,7 +358,9 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_attention_parameters(
   param.kvLoraRank = args.kv_lora_rank();
   param.softmaxScale = sm_scale_;
   // not support in glm_moe_dsa
-  if (quantize_type_ == "w8a8_dynamic" && args.model_type() != "glm_moe_dsa") {
+  bool is_glm_moe_dsa =
+      args.model_type().find("glm_moe_dsa") != std::string::npos;
+  if (quantize_type_ == "w8a8_dynamic" && !is_glm_moe_dsa) {
     param.enableMlaPreprocess = true;
   } else {
     param.enableMlaPreprocess = false;

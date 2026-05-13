@@ -35,7 +35,6 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
-#include "core/common/rec_model_utils.h"
 #include "core/common/version_singleton.h"
 #include "core/framework/state_dict/rec_vocab_dict.h"
 #include "core/framework/state_dict/safetensors/safetensors.h"
@@ -47,13 +46,26 @@ limitations under the License.
 #include "core/platform/device.h"
 #include "core/util/blocking_counter.h"
 #include "core/util/json_reader.h"
+#include "core/util/rec_model_utils.h"
 #include "core/util/scope_guard.h"
 #include "core/util/tensor_helper.h"
+#include "core/util/utils.h"
 #include "models/model_registry.h"
 
 namespace xllm {
 
 namespace {
+
+JsonReader normalize_config_torch_dtype(const JsonReader& reader) {
+  auto config = reader.data();
+  if (!config.contains("torch_dtype") && config.contains("dtype")) {
+    config["torch_dtype"] = config["dtype"];
+  }
+
+  JsonReader normalized_reader;
+  normalized_reader.parse_text(config.dump());
+  return normalized_reader;
+}
 
 bool is_compressed_tensors_fp8_scheme(const nlohmann::json& config) {
   auto type_it = config.find("type");
@@ -113,6 +125,11 @@ bool try_load_compressed_tensors_quant_cfg(const JsonReader& reader,
     auto dynamic_it = input_activations_it->find("dynamic");
     if (dynamic_it != input_activations_it->end() && !dynamic_it->is_null()) {
       quant_args.activation_dynamic() = dynamic_it->get<bool>();
+    }
+    if (const auto ignore = reader.value<std::vector<std::string>>(
+            "quantization_config.ignore");
+        ignore.has_value()) {
+      quant_args.ignored_modules() = *ignore;
     }
     return true;
   }
@@ -747,7 +764,10 @@ bool HFModelLoader::load_model_args(const std::string& model_weights_path) {
                << resolved_model_type;
     return false;
   }
-  model_args_loader(reader, &args_);
+  const JsonReader config_reader = normalize_config_torch_dtype(reader);
+  model_args_loader(config_reader, &args_);
+  args_.enable_mla(
+      util::should_enable_mla(std::filesystem::path(model_weights_path)));
 
   return true;
 }
@@ -760,16 +780,20 @@ bool HFModelLoader::load_quant_args(const std::string& model_weights_path) {
     return false;
   }
 
-  if (!load_quant_cfg(reader, quant_args_)) {
+  const JsonReader config_reader = normalize_config_torch_dtype(reader);
+
+  if (!load_quant_cfg(config_reader, quant_args_)) {
     return false;
   }
 
   // load quantization args for npu if exists
-  if (reader.contains("quantize")) {
-    quant_args_.quantize_type() = reader.value_or<std::string>("quantize", "");
+  if (config_reader.contains("quantize")) {
+    quant_args_.quantize_type() =
+        config_reader.value_or<std::string>("quantize", "");
   }
-  if (reader.contains("torch_dtype")) {
-    quant_args_.torch_dtype() = reader.value_or<std::string>("torch_dtype", "");
+  if (config_reader.contains("torch_dtype")) {
+    quant_args_.torch_dtype() =
+        config_reader.value_or<std::string>("torch_dtype", "");
   }
 
   // awq quantization args

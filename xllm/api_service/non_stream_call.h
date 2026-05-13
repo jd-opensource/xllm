@@ -45,8 +45,7 @@ class NonStreamCall : public Call {
         request_(request),
         response_(response),
         use_arena_(use_arena) {
-    controller_->http_response().SetHeader("Content-Type",
-                                           "text/javascript; charset=utf-8");
+    controller_->http_response().set_content_type("application/json");
 
     json_options_.bytes_to_base64 = false;
     json_options_.jsonify_empty_array = true;

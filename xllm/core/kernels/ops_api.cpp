@@ -18,6 +18,7 @@ limitations under the License.
 #if defined(USE_MLU)
 #include "mlu/mlu_ops_api.h"
 #elif defined(USE_NPU)
+#include "core/kernels/npu/tilelang/tilelang_ops_api.h"
 #include "npu/npu_ops_api.h"
 #include "triton_npu/torch_api/triton_ops_api.h"
 #elif defined(USE_CUDA)
@@ -755,6 +756,14 @@ void fused_indexer_k(FusedIndexerKParams& params) {
 #endif
 }
 
+torch::Tensor l2_norm(torch::Tensor& x, double eps) {
+#if defined(USE_NPU)
+  return npu::npu_l2norm_last_dim(x, eps);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 moe_init_routing_v2(MoeInitRoutingV2Params& params) {
 #if defined(USE_NPU)
@@ -788,12 +797,18 @@ std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
 std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
     FusedGdnGatingParams& params) {
 #if defined(USE_NPU)
-  return npu::npu_fused_gdn_gating(params.A_log,
-                                   params.a,
-                                   params.b,
-                                   params.dt_bias,
-                                   params.beta,
-                                   params.threshold);
+  return npu::tilelang::fused_gdn_gating(params.A_log,
+                                         params.a,
+                                         params.b,
+                                         params.dt_bias,
+                                         params.beta,
+                                         params.threshold);
+  // return npu::npu_fused_gdn_gating(params.A_log,
+  //                                  params.a,
+  //                                  params.b,
+  //                                  params.dt_bias,
+  //                                  params.beta,
+  //                                  params.threshold);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -914,19 +929,19 @@ torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params) {
     CHECK(params.conv_state_indices.value().is_contiguous())
         << "causal_conv1d_update: conv_state_indices must be contiguous.";
   }
-  return npu::npu_causal_conv1d_update(params.x,
-                                       params.conv_state,
-                                       params.weight,
-                                       params.activation,
-                                       params.bias,
-                                       params.cache_seqlens,
-                                       params.conv_state_indices,
-                                       params.num_accepted_tokens,
-                                       params.query_start_loc,
-                                       params.max_query_len,
-                                       params.intermediate_conv_window,
-                                       params.pad_slot_id,
-                                       params.validate_data);
+  return npu::npu_causal_conv1d_update_v2(params.x,
+                                          params.conv_state,
+                                          params.weight,
+                                          params.activation,
+                                          params.bias,
+                                          params.conv_state_indices,
+                                          params.query_start_loc,
+                                          params.max_query_len,
+                                          params.pad_slot_id,
+                                          params.block_idx_last_scheduled_token,
+                                          params.initial_state_idx,
+                                          params.validate_data);
+
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -942,6 +957,14 @@ torch::Tensor gated_layer_norm(GatedLayerNormParams& params) {
                              params.group_size,
                              params.norm_before_gate,
                              params.is_rms_norm);
+#elif defined(USE_MLU)
+  return mlu::gated_layer_norm(params.x,
+                               params.weight,
+                               params.bias,
+                               params.eps,
+                               params.z,
+                               params.group_size,
+                               params.norm_before_gate);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -957,6 +980,120 @@ std::pair<torch::Tensor, torch::Tensor> partial_rotary_embedding(
                                                  params.rotary_dim,
                                                  params.cos_sin_cache,
                                                  params.is_neox_style);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+fused_qkvzba_split_reshape_cat(FusedQkvzbaSplitReshapeParams& params) {
+#if defined(USE_NPU)
+  return npu::npu_fused_qkvzba_split_reshape_cat(params.mixed_qkvz,
+                                                 params.mixed_ba,
+                                                 params.num_heads_qk,
+                                                 params.num_heads_v,
+                                                 params.head_qk,
+                                                 params.head_v);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+void gemma_rms_norm(GemmaRMSNormParams& params) {
+#if defined(USE_NPU)
+  npu::npu_gemma_rms_norm(
+      params.x, params.gamma, params.epsilon, params.rstd_out, params.norm_out);
+#elif defined(USE_MLU)
+  mlu::gemma_rms_norm(params.x, params.gamma, params.epsilon, params.norm_out);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+split_qkv_rmsnorm_mrope(SplitQkvRmsnormMropeParams& params) {
+#if defined(USE_NPU)
+  return npu::tilelang::split_qkv_rmsnorm_mrope(params.qkvg,
+                                                params.q_weight,
+                                                params.k_weight,
+                                                params.cos_sin,
+                                                params.gather_pattern,
+                                                params.eps,
+                                                params.num_q_heads,
+                                                params.num_kv_heads,
+                                                params.head_size);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+bool has_split_qkv_rmsnorm_mrope_specialization(int64_t num_q_heads,
+                                                int64_t num_kv_heads,
+                                                int64_t head_size) {
+#if defined(USE_NPU)
+  return npu::tilelang::has_split_qkv_rmsnorm_mrope_specialization(
+      num_q_heads, num_kv_heads, head_size);
+#else
+  return false;
+#endif
+}
+
+torch::Tensor build_split_qkv_rmsnorm_mrope_gather_pattern(
+    int64_t rope_dim,
+    const std::vector<int64_t>& mrope_section,
+    bool is_interleaved,
+    const torch::Device& device) {
+#if defined(USE_NPU)
+  return npu::tilelang::build_split_qkv_rmsnorm_mrope_gather_pattern(
+      rope_dim, mrope_section, is_interleaved, device);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+std::pair<torch::Tensor, torch::Tensor> chunk_gated_delta_rule(
+    ChunkGatedDeltaRuleParams& params) {
+#if defined(USE_NPU)
+  return npu::npu_chunk_gated_delta_rule(params.q,
+                                         params.k,
+                                         params.v,
+                                         params.g,
+                                         params.beta,
+                                         params.scale,
+                                         params.initial_state,
+                                         params.output_final_state,
+                                         params.cu_seqlens,
+                                         params.head_first,
+                                         params.use_qk_l2norm_in_kernel);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+torch::Tensor recurrent_gated_delta_rule(
+    const torch::Tensor& query,
+    const torch::Tensor& key,
+    const torch::Tensor& value,
+    torch::Tensor& state,
+    const std::optional<torch::Tensor>& beta,
+    const std::optional<double> scale,
+    const std::optional<torch::Tensor>& actual_seq_lengths,
+    const std::optional<torch::Tensor>& ssm_state_indices,
+    const std::optional<torch::Tensor>& num_accepted_tokens,
+    const std::optional<torch::Tensor>& g,
+    const std::optional<torch::Tensor>& gk) {
+#if defined(USE_NPU)
+  return npu::npu_recurrent_gated_delta_rule(query,
+                                             key,
+                                             value,
+                                             state,
+                                             beta,
+                                             scale,
+                                             actual_seq_lengths,
+                                             ssm_state_indices,
+                                             num_accepted_tokens,
+                                             g,
+                                             gk);
 #else
   NOT_IMPLEMENTED();
 #endif

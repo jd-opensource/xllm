@@ -99,6 +99,7 @@ class RecMultiRoundBatchInputBuilder : public RecBatchInputBuilder {
 
     // Additional data
     std::vector<int32_t> embedding_ids;
+    std::vector<int32_t> linear_state_ids;
     std::vector<int32_t> extra_token_ids;
     uint32_t prefill_seq_len = 0;
     std::vector<TransferKVInfo> transfer_kv_infos;

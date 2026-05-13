@@ -188,6 +188,10 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
   rotary_params.cu_query_lens = cu_seq_len;
   rotary_params.max_query_len = max_seqlen;
   xllm::kernel::apply_rotary(rotary_params);
+  q = rotary_params.q.reshape(
+      {B * S, num_attention_heads_per_partition_, head_dim});
+  k = rotary_params.k.reshape(
+      {B * S, num_attention_heads_per_partition_, head_dim});
 
   // q, k, v = (rearrange(x, "b s ... -> (b s) ...") for x in [q, k, v])
   // q and k are already [B*S, H, D] after the reshape above; just
@@ -216,7 +220,7 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
                                    max_seqlen,
                                    max_seqlen,
                                    scale_,
-                                   /*is_causal=*/true,
+                                   /*is_causal=*/false,
                                    /*window_size_left=*/-1,
                                    /*window_size_right=*/-1,
                                    /*compute_dtype=*/"half",

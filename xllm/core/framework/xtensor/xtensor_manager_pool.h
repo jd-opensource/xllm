@@ -62,11 +62,6 @@ class XTensorManagerPool final : public KVCacheManager {
     return nullptr;
   }
 
-  void reset_transfer_infos() override {
-    LOG(FATAL)
-        << "reset_transfer_infos is not implemented for page manager pool";
-  }
-
   uint32_t num_blocks() const override {
     NOT_IMPLEMENTED();
     return 0;

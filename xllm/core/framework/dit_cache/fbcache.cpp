@@ -58,8 +58,8 @@ CacheBlockOut FBCache::on_after_block(const CacheBlockIn& blockin) {
 
   if (can_use_cache(first_hidden_states_residual)) {
     use_cache_ = true;
-    auto [new_hidden, new_encoder] =
-        apply_prev_hidden_states_residual(hidden_states, encoder_hidden_states);
+    auto [new_hidden, new_encoder] = apply_prev_hidden_states_residual(
+        original_hidden_states, encoder_hidden_states);
     output_hidden_states = std::move(new_hidden);
     output_encoder_hidden_states = std::move(new_encoder);
   } else {
