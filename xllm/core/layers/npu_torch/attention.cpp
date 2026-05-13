@@ -22,6 +22,7 @@ limitations under the License.
 #include <vector>
 
 #include "kernels/npu/npu_ops_api.h"
+#include "kernels/npu/xllm_ops/xllm_ops_api.h"
 #include "kernels/ops_api.h"
 
 DECLARE_bool(enable_chunked_prefill);
@@ -31,25 +32,31 @@ namespace layer {
 namespace {
 
 constexpr int64_t kFiaSplitFuseMaskSize = 2048;
+constexpr int64_t kXfaMaxQkRowsPerCall = 128;
 
-std::vector<int64_t> cumulative_lengths(const std::vector<int32_t>& seq_lens) {
+torch::Tensor cumulative_lengths_tensor(const torch::Tensor& seq_lens) {
+  return torch::cumsum(seq_lens, 0).to(torch::kInt32);
+}
+
+std::vector<int64_t> cumulative_lengths(const torch::Tensor& seq_lens) {
+  auto seq_lens_cpu =
+      seq_lens.to(torch::kCPU, torch::kInt32, /*non_blocking=*/false)
+          .contiguous();
+  const auto* seq_lens_ptr = seq_lens_cpu.data_ptr<int32_t>();
   std::vector<int64_t> cu_lens;
-  cu_lens.reserve(seq_lens.size());
+  cu_lens.reserve(seq_lens_cpu.numel());
   int64_t total = 0;
-  for (int32_t seq_len : seq_lens) {
-    total += seq_len;
+  for (int64_t i = 0; i < seq_lens_cpu.numel(); ++i) {
+    total += seq_lens_ptr[i];
     cu_lens.emplace_back(total);
   }
   return cu_lens;
 }
 
-std::vector<int64_t> to_i64_vector(const std::vector<int32_t>& values) {
-  std::vector<int64_t> out;
-  out.reserve(values.size());
-  for (int32_t value : values) {
-    out.emplace_back(value);
-  }
-  return out;
+torch::Tensor int32_tensor_on_device(const std::vector<int32_t>& values,
+                                     const torch::Device& device) {
+  return torch::tensor(values, torch::TensorOptions().dtype(torch::kInt32))
+      .to(device);
 }
 
 torch::Tensor get_fia_split_fuse_attn_mask(const torch::Tensor& query) {
@@ -73,6 +80,73 @@ torch::Tensor get_fia_split_fuse_attn_mask(const torch::Tensor& query) {
           .contiguous();
   mask_cache[cache_key] = mask;
   return mask;
+}
+
+torch::Tensor x_flash_attention_infer_with_query_split(
+    const torch::Tensor& query,
+    const torch::Tensor& key_cache,
+    const torch::Tensor& value_cache,
+    const torch::Tensor& mask,
+    const torch::Tensor& block_table,
+    const torch::Tensor& q_seq_lens,
+    const torch::Tensor& kv_seq_lens,
+    int64_t q_head,
+    int64_t kv_head,
+    double scale) {
+  CHECK_GT(kv_head, 0);
+  CHECK_EQ(q_head % kv_head, 0);
+  const int64_t group_size = q_head / kv_head;
+  const int64_t max_q_len_per_call =
+      std::max<int64_t>(1, kXfaMaxQkRowsPerCall / group_size);
+
+  auto q_seq_lens_cpu =
+      q_seq_lens.to(torch::kCPU, torch::kInt32, /*non_blocking=*/false)
+          .contiguous();
+  auto kv_seq_lens_cpu =
+      kv_seq_lens.to(torch::kCPU, torch::kInt32, /*non_blocking=*/false)
+          .contiguous();
+  CHECK_EQ(q_seq_lens_cpu.numel(), kv_seq_lens_cpu.numel());
+  const auto* q_seq_lens_ptr = q_seq_lens_cpu.data_ptr<int32_t>();
+  const auto* kv_seq_lens_ptr = kv_seq_lens_cpu.data_ptr<int32_t>();
+  const int64_t batch = q_seq_lens_cpu.numel();
+
+  auto output = torch::empty_like(query);
+  int64_t q_offset = 0;
+  const auto device = query.device();
+  for (int64_t seq_idx = 0; seq_idx < batch; ++seq_idx) {
+    const int64_t q_len = q_seq_lens_ptr[seq_idx];
+    const int64_t kv_len = kv_seq_lens_ptr[seq_idx];
+    const int64_t past_kv_len = kv_len - q_len;
+    CHECK_GE(past_kv_len, 0);
+
+    for (int64_t q_start = 0; q_start < q_len; q_start += max_q_len_per_call) {
+      const int64_t sub_q_len =
+          std::min<int64_t>(max_q_len_per_call, q_len - q_start);
+      auto sub_query =
+          query.narrow(0, q_offset + q_start, sub_q_len).contiguous();
+      auto sub_block_table = block_table.narrow(0, seq_idx, 1).contiguous();
+      auto sub_q_lens =
+          int32_tensor_on_device({static_cast<int32_t>(sub_q_len)}, device);
+      auto sub_kv_lens = int32_tensor_on_device(
+          {static_cast<int32_t>(past_kv_len + q_start + sub_q_len)}, device);
+
+      auto sub_output =
+          xllm::kernel::npu::x_flash_attention_infer(sub_query,
+                                                     key_cache,
+                                                     value_cache,
+                                                     mask,
+                                                     sub_block_table,
+                                                     sub_q_lens,
+                                                     sub_kv_lens,
+                                                     q_head,
+                                                     kv_head,
+                                                     scale,
+                                                     "TND");
+      output.narrow(0, q_offset + q_start, sub_q_len).copy_(sub_output);
+    }
+    q_offset += q_len;
+  }
+  return output;
 }
 
 }  // namespace
@@ -142,47 +216,31 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
   output = output.view({-1, num_heads_, head_size_});
 
   if (attn_metadata.is_prefill) {
-    key = key.view({-1, num_kv_heads_, head_size_});
-    value = value.view({-1, num_kv_heads_, head_size_});
-
-    auto fia_result = xllm::kernel::npu::npu_fused_infer_attention(
+    auto xfa_result = x_flash_attention_infer_with_query_split(
         query,
-        key,
-        value,
+        k_cache,
+        v_cache.value(),
         get_fia_split_fuse_attn_mask(query),
-        std::nullopt,
-        cumulative_lengths(attn_metadata.q_seq_lens_vec),
-        cumulative_lengths(attn_metadata.kv_seq_lens_vec),
+        attn_metadata.block_table,
+        attn_metadata.q_seq_lens,
+        attn_metadata.kv_seq_lens,
         num_heads_,
         num_kv_heads_,
-        scale_,
-        0,
-        3,
-        "TND");
-    output.copy_(std::get<0>(fia_result).view_as(output));
+        scale_);
+    output.copy_(xfa_result.view_as(output));
   } else if (attn_metadata.is_chunked_prefill) {
-    auto q_seq_lens = cumulative_lengths(attn_metadata.q_seq_lens_vec);
-    auto kv_seq_lens = to_i64_vector(attn_metadata.kv_seq_lens_vec);
-    auto k = k_cache.view({k_cache.size(0), k_cache.size(1), -1});
-    auto v = v_cache.value().view(
-        {v_cache.value().size(0), v_cache.value().size(1), -1});
-    auto fia_result = xllm::kernel::npu::npu_fused_infer_attention(
+    auto xfa_result = x_flash_attention_infer_with_query_split(
         query,
-        k,
-        v,
+        k_cache,
+        v_cache.value(),
         get_fia_split_fuse_attn_mask(query),
-        attn_metadata.block_table.defined()
-            ? std::make_optional(attn_metadata.block_table)
-            : std::nullopt,
-        q_seq_lens,
-        kv_seq_lens,
+        attn_metadata.block_table,
+        attn_metadata.q_seq_lens,
+        attn_metadata.kv_seq_lens,
         num_heads_,
         num_kv_heads_,
-        scale_,
-        k_cache.size(1),
-        3,
-        "TND");
-    output.copy_(std::get<0>(fia_result).view_as(output));
+        scale_);
+    output.copy_(xfa_result.view_as(output));
   }
 }
 

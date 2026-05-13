@@ -328,11 +328,14 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
     const ModelInputParams& input_params) {
+  const bool is_prefill_like =
+      attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
+
   torch::Tensor qkvz_flat;
   torch::Tensor ba_flat;
   int64_t batch_size = 0;
   int64_t seq_len = 0;
-  if (attn_metadata.is_prefill) {
+  if (is_prefill_like) {
     std::tie(qkvz_flat, ba_flat) = project_flat_inputs(hidden_states);
     batch_size = 1;
     seq_len = qkvz_flat.size(0);
@@ -355,7 +358,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   std::tie(mixed_qkv, z, b, a) =
       xllm::kernel::fused_qkvzba_split_reshape_cat(fused_params);
 
-  if (!attn_metadata.is_prefill) {
+  if (!is_prefill_like) {
     mixed_qkv = mixed_qkv.view({batch_size, seq_len, mixed_qkv.size(-1)});
   }
   z = z.view({batch_size, seq_len, num_v_heads_ / tp_size_, head_v_dim_});
@@ -369,7 +372,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   torch::Tensor linear_state_indices =
       get_linear_state_indices(input_params, mixed_qkv.device());
 
-  if (attn_metadata.is_prefill) {
+  if (is_prefill_like) {
     std::vector<int64_t> linear_state_indices_vec(
         input_params.linear_state_ids.begin(),
         input_params.linear_state_ids.end());
@@ -403,7 +406,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   mixed_qkv = mixed_qkv.view({batch_size, -1, mixed_qkv.size(-1)}).contiguous();
   mixed_qkv = mixed_qkv.transpose(1, 2);
   // Compute gated delta net decay and beta terms.
-  if (attn_metadata.is_prefill) {
+  if (is_prefill_like) {
     xllm::kernel::FusedGdnGatingParams gdn_params;
     gdn_params.A_log = A_log_;
     gdn_params.a = a.contiguous().view({-1, a.size(-1)});
@@ -426,7 +429,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   }
   auto [processed_q, processed_k, processed_v] = process_mixed_qkv(mixed_qkv);
   // Apply chunked or recurrent gated-delta attention and update caches.
-  if (attn_metadata.is_prefill) {
+  if (is_prefill_like) {
     xllm::kernel::ChunkGatedDeltaRuleParams chunk_gated_delta_params;
     chunk_gated_delta_params.q = processed_q;
     chunk_gated_delta_params.k = processed_k;
@@ -436,7 +439,9 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     // Get initial state from ssm_cache for sequences with previous state
     // Shape: [batch_size, num_heads, head_k_dim, head_v_dim]
     torch::Tensor initial_state_tensor =
-        torch::index_select(ssm_cache, 0, linear_state_indices);
+        torch::index_select(ssm_cache, 0, linear_state_indices)
+            .transpose(-1, -2)
+            .contiguous();
     CHECK_EQ(input_params.has_initial_state.size(),
              input_params.linear_state_ids.size())
         << "has_initial_state must be sequence-scoped.";

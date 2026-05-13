@@ -53,4 +53,16 @@ void select_unshared_kv(const torch::Tensor& beam_index,
                         int64_t decode_step,
                         int64_t beam_size,
                         int64_t layer_num);
+
+torch::Tensor x_flash_attention_infer(const torch::Tensor& query,
+                                      const torch::Tensor& key_cache,
+                                      const torch::Tensor& value_cache,
+                                      const torch::Tensor& mask,
+                                      const torch::Tensor& block_table,
+                                      const torch::Tensor& actual_q_lens,
+                                      const torch::Tensor& actual_kv_lens,
+                                      int64_t q_head,
+                                      int64_t kv_head,
+                                      double scale,
+                                      const std::string& layout = "TND");
 }  // namespace xllm::kernel::npu
