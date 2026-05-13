@@ -370,7 +370,8 @@ std::shared_ptr<Request> LLMMaster::generate_request(
     // candidate for beam expansion.
     sampling_param.logprobs = true;
     if (sampling_param.top_logprobs == 0) {
-      sampling_param.top_logprobs = 1;
+      sampling_param.top_logprobs =
+          static_cast<int64_t>(sampling_param.beam_width);
     }
   }
   // sampling_param.do_sample = sp.do_sample;

@@ -15,6 +15,7 @@ from .params import (
     BeamSearchParams,
     PoolingParams,
     SamplingParams,
+    _RequestParamsProxy,
     to_request_params,
     to_request_params_list,
 )
@@ -322,16 +323,24 @@ class LLM:
                 continue
             raise TypeError("prompts must be str or dict with key 'prompt'")
 
+        explicit_fields = (
+            params.explicit_fields()
+            if isinstance(params, _RequestParamsProxy)
+            else set()
+        )
         params = to_request_params(params, default_cls=BeamSearchParams)
         if params.beam_width <= 0:
             raise ValueError("beam_width must be greater than 0")
         else:
             # Beam search relies on top-k logprob candidates from sampler.
-            # Keep this aligned with vLLM's internal default behavior.
-            params.logprobs = True
-            if params.top_logprobs == 0:
-                # if not set top_logprobs, default to returning 2x candidates for better deduplication
-                params.top_logprobs = 2 * params.beam_width
+            # Keep this aligned with the LLM request-path default.
+            if "logprobs" not in explicit_fields:
+                params.logprobs = True
+            if (
+                "top_logprobs" not in explicit_fields
+                and params.top_logprobs == 0
+            ):
+                params.top_logprobs = params.beam_width
 
         outputs = self.generate(parsed_prompts,
                                 request_params=params,
