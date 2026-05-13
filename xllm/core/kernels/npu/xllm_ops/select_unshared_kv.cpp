@@ -16,6 +16,7 @@ limitations under the License.
 #include <c10/core/Device.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+#include <torch_npu/csrc/core/npu/NPUCachingAllocator.h>
 #include <torch_npu/csrc/libs/init_npu.h>
 #include <torch_npu/torch_npu.h>
 
@@ -90,7 +91,8 @@ void select_unshared_kv(const torch::Tensor& beam_index,
   create_acltensor(&block_table_ids, block_table);
 
   int32_t device_id = beam_index.device().index();
-  aclrtStream stream = c10_npu::getCurrentNPUStream(device_id).stream();
+  c10_npu::NPUStream npu_stream = c10_npu::getCurrentNPUStream(device_id);
+  aclrtStream stream = npu_stream.stream();
   uint64_t workspace_size = 0;
   aclOpExecutor* executor = nullptr;
 
@@ -109,24 +111,23 @@ void select_unshared_kv(const torch::Tensor& beam_index,
                                             &executor),
       "select_unshared_kv: failed to get workspace size");
   void* workspace_addr = nullptr;
+  torch::Tensor workspace_tensor;
   if (workspace_size > 0) {
-    CHECK_ACL_SUCCESS(
-        aclrtMalloc(&workspace_addr, workspace_size, ACL_MEM_MALLOC_HUGE_FIRST),
-        "select_unshared_kv: failed to allocate workspace");
+    workspace_tensor = torch::empty({static_cast<int64_t>(workspace_size)},
+                                    torch::TensorOptions()
+                                        .dtype(torch::kUInt8)
+                                        .device(beam_index.device()));
+    workspace_addr = workspace_tensor.data_ptr();
+    c10_npu::NPUCachingAllocator::recordStream(
+        workspace_tensor.storage().data_ptr(), npu_stream);
   }
   CHECK_ACL_SUCCESS(
       aclnnSelectUnsharedKV(workspace_addr, workspace_size, executor, stream),
       "select_unshared_kv: failed to reorder caches");
-  CHECK_ACL_SUCCESS(aclrtSynchronizeStream(stream),
-                    "select_unshared_kv: failed to synchronize stream");
   aclDestroyTensor(beam_index_ids);
   aclDestroyTensor(group_offset_ids);
   aclDestroyTensor(block_table_ids);
   aclDestroyTensorList(x_key_block_list_ids);
   aclDestroyTensorList(x_value_block_list_ids);
-  if (workspace_size > 0) {
-    CHECK_ACL_SUCCESS(aclrtFree(workspace_addr),
-                      "select_unshared_kv: failed to free workspace");
-  }
 }
 }  // namespace xllm::kernel::npu

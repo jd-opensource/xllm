@@ -85,6 +85,10 @@ bool enable_onerec_xattention_stage_timing() {
   return util::get_bool_env("XLLM_DEBUG_ONEREC_XATTN_STAGE_TIMING", false);
 }
 
+bool enable_rec_pipeline_concurrency_debug() {
+  return util::get_bool_env("XLLM_DEBUG_REC_PIPELINE_CONCURRENCY", false);
+}
+
 #if defined(USE_NPU)
 torch::Tensor int32_vector_to_device_tensor(const std::vector<int32_t>& values,
                                             const torch::Device& device) {
@@ -2851,7 +2855,14 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
       << "Unsupported rec model_type: " << model_type;
 
   // Create concurrent pipeline (not base class pipeline)
-  auto pipeline_type = get_rec_pipeline_type(rec_model_kind_);
+  pipeline_type_ = get_rec_pipeline_type(rec_model_kind_);
+#if defined(USE_NPU)
+  CHECK(!(pipeline_type_ == RecPipelineType::kOneRecXAttentionPipeline &&
+          (FLAGS_enable_graph || options_.enable_graph()) &&
+          options_.rec_worker_max_concurrency() > 1))
+      << "NPU OneRec xattention multi-stream does not support graph mode yet. "
+      << "Disable graph mode or set rec_worker_max_concurrency=1.";
+#endif
 
   // Reserve space for model instances
   work_pipelines_.reserve(options_.rec_worker_max_concurrency());
@@ -2885,7 +2896,7 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
           runtime.model.get(), runtime.worker.device());
     }
 
-    work_pipelines_.emplace_back(create_pipeline(pipeline_type, runtime));
+    work_pipelines_.emplace_back(create_pipeline(pipeline_type_, runtime));
     index_queue_.enqueue(i);
   }
 
@@ -2902,7 +2913,8 @@ bool RecWorkerImpl::init_model(ModelContext& context) {
   }
 
   LOG(INFO) << "Created " << work_pipelines_.size()
-            << " pipelines for concurrent execution";
+            << " pipelines for concurrent execution, pipeline_type="
+            << static_cast<int32_t>(pipeline_type_);
   return true;
 }
 
@@ -3007,6 +3019,11 @@ folly::SemiFuture<std::optional<ForwardOutput>> RecWorkerImpl::step_async(
   size_t index;
   index_queue_.wait_dequeue(index);
   auto future = promise.getSemiFuture();
+  if (enable_rec_pipeline_concurrency_debug()) {
+    LOG(INFO) << "RecWorkerImpl leased pipeline, index=" << index
+              << ", max_concurrency=" << options_.rec_worker_max_concurrency()
+              << ", pipeline_type=" << static_cast<int32_t>(pipeline_type_);
+  }
 
   // Use schedule() to assign tasks, letting ThreadPool automatically select
   // idle threads The logic for allocating instance_id happens when the task
@@ -3015,6 +3032,10 @@ folly::SemiFuture<std::optional<ForwardOutput>> RecWorkerImpl::step_async(
       [this, &input, index, promise = std::move(promise)]() mutable {
         auto stream_guard =
             work_pipelines_[index]->runtime().stream->set_stream_guard();
+        if (enable_rec_pipeline_concurrency_debug()) {
+          LOG(INFO) << "RecWorkerImpl running pipeline, index=" << index
+                    << ", stream=" << *work_pipelines_[index]->runtime().stream;
+        }
 
         ForwardInput input_on_device;
         work_pipelines_[index]->prepare_work_before_execute(input,
