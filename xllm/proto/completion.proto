@@ -6,7 +6,7 @@ package xllm.proto;
 import "common.proto";
 import "rec.proto";
 
-// Next ID: 41
+// Next ID: 44
 message CompletionRequest {
   // ID of the model to use. (required)
   // You can use the ListModels endpoint to list available models.
@@ -122,6 +122,9 @@ message CompletionRequest {
   // request trace headers from client.
   optional string x_request_id = 39;
   optional string x_request_time = 40;
+
+  optional int32 prefill_recovery_slo_ms = 42;
+  optional int32 decode_recovery_slo_ms = 43;
 }
 
 message LogProbs {

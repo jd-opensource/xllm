@@ -85,7 +85,7 @@ void install_quit_signal_handler() {
 
 void wait_for_quit_signal() {
   while (!g_quit_flag) {
-    sleep(1);
+    usleep(10 * 1000);
   }
 }
 
@@ -108,6 +108,10 @@ XllmServer::~XllmServer() {
   if (running_thread_ && running_thread_->joinable()) {
     running_thread_->join();
   }
+}
+
+void XllmServer::set_shutdown_hook(std::function<void()> shutdown_hook) {
+  shutdown_hook_ = std::move(shutdown_hook);
 }
 
 bool XllmServer::start(std::unique_ptr<APIService> service) {
@@ -154,6 +158,10 @@ bool XllmServer::start(std::unique_ptr<APIService> service) {
 
   LOG(INFO) << "     Shutting down";
   LOG(INFO) << "     Waiting for application shutdown.";
+
+  if (shutdown_hook_ != nullptr) {
+    shutdown_hook_();
+  }
 
   stop();
 

@@ -26,7 +26,7 @@ message ChatMessage {
 }
 
 
-// Next Id: 45
+// Next Id: 48
 message ChatRequest {
   // ID of the model to use. You can use the ListModels endpoint to list available models.
   string model = 1;
@@ -154,6 +154,9 @@ message ChatRequest {
   // request trace headers from client.
   optional string x_request_id = 43;
   optional string x_request_time = 44;
+
+  optional int32 prefill_recovery_slo_ms = 46;
+  optional int32 decode_recovery_slo_ms = 47;
 }
 
 message ChatLogProbData {

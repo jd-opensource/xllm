@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <functional>
+
 #include "api_service/api_service.h"
 #include "core/distributed_runtime/collective_service.h"
 #include "core/distributed_runtime/disagg_pd_service.h"
@@ -38,6 +40,7 @@ class XllmServer final {
   bool start(std::shared_ptr<WorkerService> service, const std::string& addr);
   bool start(std::shared_ptr<XTensorDistService> service,
              const std::string& addr);
+  void set_shutdown_hook(std::function<void()> shutdown_hook);
 
   void run();
   void stop();
@@ -57,6 +60,7 @@ class XllmServer final {
   bool has_initialized_ = false;
   int listen_port_ = -1;
   std::string listen_address_;
+  std::function<void()> shutdown_hook_;
   std::unique_ptr<brpc::Server> server_;
   std::unique_ptr<std::thread> running_thread_;
 };

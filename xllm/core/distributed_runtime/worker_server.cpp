@@ -46,6 +46,7 @@ limitations under the License.
 #include "framework/state_dict/state_dict.h"
 #include "runtime/forward_params.h"
 #include "runtime/worker.h"
+#include "runtime/xservice_client.h"
 #include "server/xllm_server_registry.h"
 #include "util/net.h"
 #include "util/threadpool.h"
@@ -61,7 +62,11 @@ extern char** environ;
 
 namespace xllm {
 namespace {
-void handle_signal(int signum) { _exit(0); }
+void handle_signal(int signum) {
+  XServiceClient::close_failover_session();
+  signal(signum, SIG_DFL);
+  raise(signum);
+}
 }  // namespace
 
 void WorkerServer::create_server(
@@ -319,6 +324,7 @@ WorkerServer::WorkerServer(int local_worker_idx,
       // worker process should handle SIGTREM and SIGINT signals.
       signal(SIGINT, handle_signal);
       signal(SIGTERM, handle_signal);
+      signal(SIGSEGV, handle_signal);
 
       std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager = nullptr;
       std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager = nullptr;

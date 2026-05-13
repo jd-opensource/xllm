@@ -22,6 +22,8 @@ limitations under the License.
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 #include <unordered_map>
 
 #include "util/env_var.h"
@@ -36,6 +38,12 @@ static std::string ETCD_XSERVICES_KEY_PREFIX =
     "XLLM:SERVICE:";  // all xllm_service registeration prefix
 constexpr const char* kEtcdUsernameEnvVar = "ETCD_USERNAME";
 constexpr const char* kEtcdPasswordEnvVar = "ETCD_PASSWORD";
+constexpr int64_t kFailoverSessionLoopWaitMs = 20;
+constexpr int64_t kFailoverSessionPingIntervalMs = 200;
+constexpr int64_t kFailoverSessionMinRetryBackoffMs = 100;
+constexpr int64_t kFailoverSessionMaxRetryBackoffMs = 5000;
+std::atomic<brpc::StreamId> g_failover_session_signal_stream_id{
+    brpc::INVALID_STREAM_ID};
 static std::unordered_map<xllm_service::proto::InstanceType, std::string>
     ETCD_KEYS_PREFIX_MAP = {
         {xllm_service::proto::InstanceType::DEFAULT, "XLLM:DEFAULT:"},
@@ -69,6 +77,55 @@ bool check_instance_name(const std::string& name) {
 }
 
 }  // namespace
+
+class FailoverSessionClientHandler
+    : public brpc::StreamInputHandler,
+      public std::enable_shared_from_this<FailoverSessionClientHandler> {
+ public:
+  explicit FailoverSessionClientHandler(XServiceClient* client)
+      : client_(client) {}
+
+  int on_received_messages(brpc::StreamId id,
+                           butil::IOBuf* const messages[],
+                           size_t size) override {
+    LOG(WARNING) << "Unexpected payload on xservice failover session, "
+                 << "stream_id=" << id << " message_count=" << size;
+    return 0;
+  }
+
+  void on_idle_timeout(brpc::StreamId id) override {
+    auto self = shared_from_this();
+    client_->on_failover_session_closed(
+        id, ETIMEDOUT, "xservice failover session idle timeout");
+  }
+
+  void on_closed(brpc::StreamId id) override {
+    auto self = shared_from_this();
+    int error_code = 0;
+    std::string error_text;
+    {
+      std::lock_guard<std::mutex> lock(error_mutex_);
+      error_code = error_code_;
+      error_text = error_text_;
+    }
+    client_->on_failover_session_closed(id, error_code, error_text);
+  }
+
+  void on_failed(brpc::StreamId id,
+                 int error_code,
+                 const std::string& error_text) override {
+    auto self = shared_from_this();
+    std::lock_guard<std::mutex> lock(error_mutex_);
+    error_code_ = error_code;
+    error_text_ = error_text;
+  }
+
+ private:
+  XServiceClient* client_;
+  std::mutex error_mutex_;
+  int error_code_ = 0;
+  std::string error_text_;
+};
 
 bool XServiceClient::init(const std::string& etcd_addr,
                           const std::string& instance_name,
@@ -148,6 +205,8 @@ bool XServiceClient::init(const std::string& etcd_addr,
       std::make_unique<std::thread>(&XServiceClient::heartbeat, this);
   reconcile_thread_ = std::make_unique<std::thread>(
       &XServiceClient::reconcile_registration_loop, this);
+  failover_session_thread_ = std::make_unique<std::thread>(
+      &XServiceClient::failover_session_loop, this);
 
   // watch master xllm_service change
   auto master_func = std::bind(&XServiceClient::handle_master_service_watch,
@@ -176,14 +235,76 @@ void XServiceClient::set_scheduler(Scheduler* scheduler) {
 void XServiceClient::set_engine(Engine* engine) { engine_ = engine; }
 
 XServiceClient::~XServiceClient() {
+  bool expected = false;
+  if (!shutdown_started_.compare_exchange_strong(expected, true)) {
+    return;
+  }
+
+  std::string master_addr_to_disconnect;
+  {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    master_addr_to_disconnect = master_xservice_addr_;
+  }
+  LOG(INFO) << "XServiceClient cleanup start"
+            << ", instance=" << instance_name_
+            << ", incarnation_id=" << incarnation_id_
+            << ", master_addr=" << master_addr_to_disconnect;
+
   exited_.store(true);
+  request_failover_session_refresh();
+
+  std::vector<brpc::StreamId> stream_ids;
+  {
+    std::lock_guard<std::mutex> lock(failover_session_mutex_);
+    stream_ids.reserve(failover_session_handlers_.size());
+    for (const auto& [stream_id, handler] : failover_session_handlers_) {
+      stream_ids.push_back(stream_id);
+    }
+    failover_session_stream_id_ = brpc::INVALID_STREAM_ID;
+    g_failover_session_signal_stream_id.store(brpc::INVALID_STREAM_ID,
+                                              std::memory_order_release);
+    failover_session_master_addr_.clear();
+    failover_session_refresh_requested_ = false;
+  }
+  for (brpc::StreamId stream_id : stream_ids) {
+    LOG(INFO) << "XServiceClient closing failover session"
+              << ", stream_id=" << stream_id
+              << ", master_addr=" << master_addr_to_disconnect;
+    brpc::StreamClose(stream_id);
+  }
+
+  if (!master_addr_to_disconnect.empty()) {
+    disconnect_xservice(master_addr_to_disconnect);
+    LOG(INFO) << "XServiceClient disconnected master channel"
+              << ", master_addr=" << master_addr_to_disconnect;
+  }
+
   if (heartbeat_thread_ && heartbeat_thread_->joinable()) {
     heartbeat_thread_->join();
   }
   if (reconcile_thread_ && reconcile_thread_->joinable()) {
     reconcile_thread_->join();
   }
+  if (failover_session_thread_ && failover_session_thread_->joinable()) {
+    failover_session_thread_->join();
+  }
+
+  register_done_.store(false);
+  initialize_done_ = false;
+  LOG(INFO) << "XServiceClient cleanup complete"
+            << ", instance=" << instance_name_
+            << ", incarnation_id=" << incarnation_id_;
 }
+
+__attribute__((noinline, used)) void XServiceClient::close_failover_session() {
+  const brpc::StreamId stream_id = g_failover_session_signal_stream_id.exchange(
+      brpc::INVALID_STREAM_ID, std::memory_order_acq_rel);
+  if (stream_id != brpc::INVALID_STREAM_ID) {
+    brpc::StreamClose(stream_id);
+  }
+}
+
+void XServiceClient::shutdown() { close_failover_session(); }
 
 std::string XServiceClient::get_instance_name() { return instance_name_; }
 
@@ -439,6 +560,221 @@ void XServiceClient::heartbeat() {
                  << master_addr;
     }
   }
+}
+
+void XServiceClient::failover_session_loop() {
+  int64_t retry_backoff_ms = kFailoverSessionMinRetryBackoffMs;
+  auto next_ping_time =
+      std::chrono::steady_clock::now() +
+      std::chrono::milliseconds(kFailoverSessionPingIntervalMs);
+
+  while (!exited_.load()) {
+    if (!register_done_.load()) {
+      std::unique_lock<std::mutex> lock(failover_session_mutex_);
+      failover_session_cv_.wait_for(
+          lock, std::chrono::milliseconds(kFailoverSessionLoopWaitMs));
+      continue;
+    }
+
+    std::string master_addr;
+    {
+      std::shared_lock<std::shared_mutex> lock(mutex_);
+      master_addr = master_xservice_addr_;
+    }
+    if (master_addr.empty()) {
+      std::unique_lock<std::mutex> lock(failover_session_mutex_);
+      failover_session_cv_.wait_for(
+          lock, std::chrono::milliseconds(kFailoverSessionLoopWaitMs));
+      continue;
+    }
+
+    brpc::StreamId active_stream_id = brpc::INVALID_STREAM_ID;
+    std::string active_master_addr;
+    bool refresh_requested = false;
+    {
+      std::lock_guard<std::mutex> lock(failover_session_mutex_);
+      active_stream_id = failover_session_stream_id_;
+      active_master_addr = failover_session_master_addr_;
+      refresh_requested = failover_session_refresh_requested_;
+    }
+
+    if (active_stream_id == brpc::INVALID_STREAM_ID || refresh_requested ||
+        active_master_addr != master_addr) {
+      brpc::StreamId previous_stream_id = brpc::INVALID_STREAM_ID;
+      if (open_failover_session_to_master(master_addr, &previous_stream_id)) {
+        retry_backoff_ms = kFailoverSessionMinRetryBackoffMs;
+        next_ping_time =
+            std::chrono::steady_clock::now() +
+            std::chrono::milliseconds(kFailoverSessionPingIntervalMs);
+        if (previous_stream_id != brpc::INVALID_STREAM_ID) {
+          brpc::StreamClose(previous_stream_id);
+        }
+      } else {
+        std::unique_lock<std::mutex> lock(failover_session_mutex_);
+        failover_session_cv_.wait_for(
+            lock, std::chrono::milliseconds(retry_backoff_ms));
+        retry_backoff_ms =
+            std::min(retry_backoff_ms * 2, kFailoverSessionMaxRetryBackoffMs);
+        continue;
+      }
+    } else if (std::chrono::steady_clock::now() >= next_ping_time) {
+      butil::IOBuf ping;
+      ping.append("ping");
+      const int write_error = brpc::StreamWrite(active_stream_id, ping);
+      if (write_error != 0) {
+        LOG(WARNING) << "Failover session ping failed"
+                     << ", stream_id=" << active_stream_id
+                     << ", master_addr=" << active_master_addr
+                     << ", error_code=" << write_error;
+        brpc::StreamClose(active_stream_id);
+        request_failover_session_refresh();
+      }
+      next_ping_time =
+          std::chrono::steady_clock::now() +
+          std::chrono::milliseconds(kFailoverSessionPingIntervalMs);
+    }
+
+    std::unique_lock<std::mutex> lock(failover_session_mutex_);
+    failover_session_cv_.wait_for(
+        lock, std::chrono::milliseconds(kFailoverSessionLoopWaitMs));
+  }
+
+  std::vector<brpc::StreamId> stream_ids;
+  {
+    std::lock_guard<std::mutex> lock(failover_session_mutex_);
+    failover_session_stream_id_ = brpc::INVALID_STREAM_ID;
+    g_failover_session_signal_stream_id.store(brpc::INVALID_STREAM_ID,
+                                              std::memory_order_release);
+    failover_session_master_addr_.clear();
+    failover_session_refresh_requested_ = false;
+    stream_ids.reserve(failover_session_handlers_.size());
+    for (const auto& [stream_id, handler] : failover_session_handlers_) {
+      stream_ids.push_back(stream_id);
+    }
+  }
+  for (brpc::StreamId stream_id : stream_ids) {
+    brpc::StreamClose(stream_id);
+  }
+  for (int attempt = 0; attempt < 50; ++attempt) {
+    {
+      std::lock_guard<std::mutex> lock(failover_session_mutex_);
+      if (failover_session_handlers_.empty()) {
+        break;
+      }
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+}
+
+bool XServiceClient::open_failover_session_to_master(
+    const std::string& master_addr,
+    brpc::StreamId* previous_stream_id) {
+  if (previous_stream_id == nullptr) {
+    return false;
+  }
+  *previous_stream_id = brpc::INVALID_STREAM_ID;
+
+  if (!connect_to_xservice(master_addr)) {
+    LOG(ERROR) << "Failed to connect to master for failover session: "
+               << master_addr;
+    return false;
+  }
+
+  auto handler = std::make_shared<FailoverSessionClientHandler>(this);
+  brpc::Controller cntl;
+  brpc::StreamOptions stream_options;
+  stream_options.handler = handler.get();
+  stream_options.idle_timeout_ms = -1;
+
+  brpc::StreamId stream_id = brpc::INVALID_STREAM_ID;
+  if (brpc::StreamCreate(&stream_id, cntl, &stream_options) != 0) {
+    LOG(ERROR) << "Failed to create failover session stream to master: "
+               << master_addr;
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(failover_session_mutex_);
+    failover_session_handlers_[stream_id] = handler;
+  }
+
+  xllm_service::proto::FailoverSessionRequest req;
+  req.set_name(instance_name_);
+  req.set_incarnation_id(incarnation_id_);
+  xllm_service::proto::Status resp;
+
+  {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto* master_stub = find_stub_locked(master_addr);
+    if (master_stub == nullptr) {
+      brpc::StreamClose(stream_id);
+      LOG(ERROR) << "No master stub available for failover session: "
+                 << master_addr;
+      return false;
+    }
+    master_stub->OpenFailoverSession(&cntl, &req, &resp, nullptr);
+  }
+
+  if (cntl.Failed() || !resp.ok()) {
+    brpc::StreamClose(stream_id);
+    LOG(ERROR) << "Failed to open failover session to master " << master_addr
+               << ", error="
+               << (cntl.Failed() ? cntl.ErrorText() : "resp_not_ok");
+    return false;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(failover_session_mutex_);
+    *previous_stream_id = failover_session_stream_id_;
+    failover_session_stream_id_ = stream_id;
+    g_failover_session_signal_stream_id.store(stream_id,
+                                              std::memory_order_release);
+    failover_session_master_addr_ = master_addr;
+    failover_session_refresh_requested_ = false;
+  }
+
+  LOG(INFO) << "Opened failover session to master xservice " << master_addr
+            << ", instance=" << instance_name_
+            << ", incarnation_id=" << incarnation_id_
+            << ", stream_id=" << stream_id
+            << ", replaced_stream_id=" << *previous_stream_id;
+  return true;
+}
+
+void XServiceClient::on_failover_session_closed(brpc::StreamId stream_id,
+                                                int error_code,
+                                                const std::string& error_text) {
+  bool was_active = false;
+  {
+    std::lock_guard<std::mutex> lock(failover_session_mutex_);
+    failover_session_handlers_.erase(stream_id);
+    if (failover_session_stream_id_ == stream_id) {
+      failover_session_stream_id_ = brpc::INVALID_STREAM_ID;
+      brpc::StreamId expected_stream_id = stream_id;
+      g_failover_session_signal_stream_id.compare_exchange_strong(
+          expected_stream_id,
+          brpc::INVALID_STREAM_ID,
+          std::memory_order_acq_rel,
+          std::memory_order_acquire);
+      failover_session_master_addr_.clear();
+      failover_session_refresh_requested_ = true;
+      was_active = true;
+    } else if (failover_session_stream_id_ == brpc::INVALID_STREAM_ID) {
+      failover_session_refresh_requested_ = true;
+    }
+  }
+  LOG(INFO) << "Failover session closed"
+            << ", stream_id=" << stream_id << ", was_active=" << was_active
+            << ", error_code=" << error_code << ", error_text=" << error_text;
+  failover_session_cv_.notify_all();
+}
+
+void XServiceClient::request_failover_session_refresh() {
+  {
+    std::lock_guard<std::mutex> lock(failover_session_mutex_);
+    failover_session_refresh_requested_ = true;
+  }
+  failover_session_cv_.notify_all();
 }
 
 std::vector<std::string> XServiceClient::get_static_decode_list() {
@@ -787,6 +1123,8 @@ void XServiceClient::disconnect_xservice(const std::string& xservice_addr) {
       LOG(WARNING) << "Master xservice disconnected: " << master_xservice_addr_;
     }
   }
+  lock.unlock();
+  request_failover_session_refresh();
 }
 
 void XServiceClient::handle_master_service_watch(const etcd::Response& response,
@@ -811,6 +1149,8 @@ void XServiceClient::handle_master_service_watch(const etcd::Response& response,
         master_xservice_addr_ = new_master_addr;
       }
 
+      request_failover_session_refresh();
+
       if (!connect_to_xservice(new_master_addr)) {
         LOG(ERROR) << "Failed to connect to new master: " << new_master_addr;
       }
@@ -821,6 +1161,8 @@ void XServiceClient::handle_master_service_watch(const etcd::Response& response,
                      << master_xservice_addr_;
         master_xservice_addr_.clear();
       }
+      lock.unlock();
+      request_failover_session_refresh();
     }
   }
 }

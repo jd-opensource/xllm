@@ -84,6 +84,11 @@ message HeartbeatRequest {
   string incarnation_id = 6;
 }
 
+message FailoverSessionRequest {
+  string name = 1;
+  string incarnation_id = 2;
+}
+
 message InstanceID {
   string name = 1;
 }
@@ -96,6 +101,7 @@ service XllmRpcService {
   rpc RegisterInstance(InstanceMetaInfo) returns (StatusCode) {}
   rpc GetInstanceInfo(InstanceID) returns (InstanceMetaInfo) {}
   rpc Heartbeat(HeartbeatRequest) returns (Status) {}
+  rpc OpenFailoverSession(FailoverSessionRequest) returns (Status) {}
   rpc GetStaticDecodeList(InstanceID) returns (InstanceIDs) {}
   rpc GetStaticPrefillList(InstanceID) returns (InstanceIDs) {}
   // xllm service receive response from decode instance directly in disagg pd mode.

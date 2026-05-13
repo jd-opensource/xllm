@@ -16,10 +16,13 @@ limitations under the License.
 #pragma once
 
 #include <brpc/channel.h>
+#include <brpc/stream.h>
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <string>
@@ -35,6 +38,7 @@ limitations under the License.
 #include "scheduler/scheduler.h"
 #include "xservice.pb.h"
 namespace xllm {
+class FailoverSessionClientHandler;
 
 class XServiceClient {
  public:
@@ -42,6 +46,7 @@ class XServiceClient {
     static XServiceClient xservice_client;
     return &xservice_client;
   }
+  static void close_failover_session();
 
   ~XServiceClient();
   bool init(const std::string& etcd_addr,
@@ -49,6 +54,7 @@ class XServiceClient {
             const BlockManagerPool* block_manager_pool = nullptr,
             const std::string& etcd_namespace = "",
             uint32_t offload_batch_size = std::numeric_limits<uint32_t>::max());
+  void shutdown();
   void set_scheduler(Scheduler* scheduler);
   void set_engine(Engine* engine);
   bool initialize_done() { return initialize_done_; }
@@ -71,6 +77,8 @@ class XServiceClient {
   }
 
  private:
+  friend class FailoverSessionClientHandler;
+
   bool register_instance_with_retry(const std::string& key,
                                     const std::string& value);
   bool reconcile_registration();
@@ -80,6 +88,13 @@ class XServiceClient {
                                    const uint64_t& prefix_len);
   void handle_xservices_watch(const etcd::Response& response,
                               const uint64_t& prefix_len);
+  void failover_session_loop();
+  bool open_failover_session_to_master(const std::string& master_addr,
+                                       brpc::StreamId* previous_stream_id);
+  void on_failover_session_closed(brpc::StreamId stream_id,
+                                  int error_code,
+                                  const std::string& error_text);
+  void request_failover_session_refresh();
 
   // connect to specific xllm_service
   bool connect_to_xservice(const std::string& xservice_addr);
@@ -100,6 +115,7 @@ class XServiceClient {
   XServiceClient() = default;
 
   std::atomic_bool exited_{false};
+  std::atomic_bool shutdown_started_{false};
   std::atomic_bool register_done_{false};
   bool initialize_done_ = false;
   std::string instance_name_;
@@ -115,14 +131,23 @@ class XServiceClient {
       xservice_stubs_;
   std::unique_ptr<std::thread> heartbeat_thread_;
   std::unique_ptr<std::thread> reconcile_thread_;
+  std::unique_ptr<std::thread> failover_session_thread_;
 
   std::shared_mutex mutex_;
   std::mutex registration_mutex_;
+  std::mutex failover_session_mutex_;
+  std::condition_variable failover_session_cv_;
   brpc::ChannelOptions chan_options_;
   std::unique_ptr<EtcdClient> etcd_client_;
   const BlockManagerPool* block_manager_pool_ = nullptr;  // not own
   Scheduler* scheduler_ = nullptr;                        // not own
   Engine* engine_ = nullptr;  // not own, for xtensor info
+  brpc::StreamId failover_session_stream_id_ = brpc::INVALID_STREAM_ID;
+  std::string failover_session_master_addr_;
+  bool failover_session_refresh_requested_ = false;
+  std::unordered_map<brpc::StreamId,
+                     std::shared_ptr<FailoverSessionClientHandler>>
+      failover_session_handlers_;
 
   std::atomic_uint32_t offload_batch_size_{
       std::numeric_limits<uint32_t>::max()};
