@@ -71,7 +71,8 @@ std::pair<int64_t, int64_t> calculate_dimensions(double target_area,
 
 torch::Tensor randn_tensor(const std::vector<int64_t>& shape,
                            int64_t seed,
-                           torch::TensorOptions& options) {
+                           torch::TensorOptions& options,
+                           torch::ScalarType targetType = torch::kBFloat16) {
   if (shape.empty()) {
     LOG(FATAL) << "Shape must not be empty.";
   }
@@ -79,8 +80,9 @@ torch::Tensor randn_tensor(const std::vector<int64_t>& shape,
   gen = gen.clone();
   gen.set_current_seed(seed);
   torch::Tensor latents;
-  latents = torch::randn(shape, gen, options.device(torch::kCPU));
-  latents = latents.to(options);
+  latents =
+      torch::randn(shape, gen, options.device(torch::kCPU).dtype(targetType));
+  latents = latents.to(options.device());
   return latents;
 }
 
