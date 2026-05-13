@@ -105,6 +105,7 @@ torch::Tensor int64_vector_to_device_tensor(const std::vector<int64_t>& values,
                                  : torch::tensor(values, cpu_options);
   return cpu_tensor.to(device, /*non_blocking=*/false);
 }
+#endif  // defined(USE_NPU)
 
 int32_t get_requested_beam_result_width(const SamplingParameters& params,
                                         int32_t beam_width) {
@@ -313,8 +314,6 @@ void select_final_onerec_beam_results(
       .copy_(new_tokens.unsqueeze(2));
 }
 #endif  // defined(USE_NPU)  // final select helpers
-
-#endif  // defined(USE_NPU)  // tensor helpers + beam-search helpers
 
 }  // namespace
 
