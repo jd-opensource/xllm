@@ -320,15 +320,7 @@ struct DeepseekV4GraphMetadataState : ModelGraphMetadataState {
     torch::Tensor c128_input_cos;
     torch::Tensor c128_input_sin;
     torch::Tensor start_pos;
-    torch::Tensor c1_metadata;
-    torch::Tensor c4_metadata;
-    torch::Tensor c128_metadata;
-    torch::Tensor qli_metadata;
     torch::Tensor hadamard;
-    int64_t c1_metadata_size = 0;
-    int64_t c4_metadata_size = 0;
-    int64_t c128_metadata_size = 0;
-    int64_t qli_metadata_size = 0;
     std::vector<std::vector<torch::Tensor>> block_tables;
     std::vector<std::vector<torch::Tensor>> slot_mappings;
   };
@@ -577,8 +569,6 @@ class DeepseekV4ModelImpl
           dsa, deepseek_v4_state->dsa_metadata_persistent, positions.device());
       prepare_dsa_metadata_for_forward(
           *attn_metadata, positions.device(), /*pack_metadata=*/false);
-      build_precomputed_metadata(*attn_metadata->dsa_metadata,
-                                 modified_input_params);
     }
     input_params.attn_metadata = persist_graph_attention_metadata(
         *deepseek_v4_state, std::move(attn_metadata));
@@ -628,6 +618,9 @@ class DeepseekV4ModelImpl
     if (is_empty_dp_rank) {
       fill_empty_dp_rank_input_params(modified_input_params, kv_caches);
     }
+    if (acl_graph_forward) {
+      normalize_graph_padding(modified_input_params);
+    }
     auto& dp_token_nums = modified_input_params.dp_global_token_nums;
     // DP helper: keep zero entries at least 1 to avoid empty slices/padding
     // in xllm DP utilities. DeepSeek V4 not use DP today.
@@ -652,8 +645,11 @@ class DeepseekV4ModelImpl
       const bool metadata_prepared =
           dsa.c1_metadata.defined() && dsa.c4_metadata.defined() &&
           dsa.c128_metadata.defined() && dsa.qli_metadata.defined();
+      const bool graph_metadata_ready =
+          acl_graph_forward && dsa.packed_metadata_buffer.defined() &&
+          dsa.cos.defined() && dsa.sin.defined() && dsa.start_pos.defined();
 
-      if (metadata_prepared) {
+      if (metadata_prepared || graph_metadata_ready) {
         if (dsa.cos.defined() && dsa.sin.defined()) {
           input_rope_by_ratio[1] = {dsa.cos, dsa.sin};
         }
@@ -662,6 +658,9 @@ class DeepseekV4ModelImpl
         }
         if (dsa.c128_input_cos.defined() && dsa.c128_input_sin.defined()) {
           input_rope_by_ratio[128] = {dsa.c128_input_cos, dsa.c128_input_sin};
+        }
+        if (acl_graph_forward) {
+          build_precomputed_metadata(dsa, modified_input_params);
         }
       } else {
         CHECK(!acl_graph_forward)
@@ -882,42 +881,6 @@ class DeepseekV4ModelImpl
     return dst;
   }
 
-  static torch::Tensor copy_to_fixed_metadata_tensor(const torch::Tensor& src,
-                                                     torch::Tensor& dst,
-                                                     int64_t& valid_size) {
-    if (!src.defined()) {
-      return src;
-    }
-    if (!dst.defined()) {
-      dst = torch::zeros({kDeepseekV4DsaMetadataBufferElements}, src.options());
-      valid_size = 0;
-    } else {
-      CHECK_EQ(dst.numel(), kDeepseekV4DsaMetadataBufferElements)
-          << "DeepSeek V4 graph metadata fixed tensor size changed";
-      CHECK_EQ(dst.scalar_type(), src.scalar_type())
-          << "DeepSeek V4 graph metadata fixed tensor dtype changed";
-      CHECK_EQ(dst.device(), src.device())
-          << "DeepSeek V4 graph metadata fixed tensor device changed";
-    }
-    CHECK_LE(src.numel(), dst.numel())
-        << "DeepSeek V4 DSA metadata exceeds graph persistent capacity: src="
-        << src.numel() << ", capacity=" << dst.numel();
-    const int64_t src_numel = src.numel();
-    auto dst_flat = dst.flatten(0);
-    if (src_numel > 0) {
-      auto dst_head = dst_flat.slice(/*dim=*/0, /*start=*/0, /*end=*/src_numel);
-      if (!tensor_aliases_storage(src.flatten(0), dst_head)) {
-        dst_head.copy_(src.flatten(0), /*non_blocking=*/true);
-      }
-    }
-    if (valid_size > src_numel) {
-      dst_flat.slice(/*dim=*/0, /*start=*/src_numel, /*end=*/valid_size)
-          .zero_();
-    }
-    valid_size = src_numel;
-    return dst;
-  }
-
   static void copy_to_graph_packed_metadata_buffer(
       layer::DSAMetadata& dsa,
       DeepseekV4GraphMetadataState::DSAMetadataPersistent& persistent,
@@ -1086,19 +1049,6 @@ class DeepseekV4ModelImpl
                                                    persistent.c128_input_sin);
     dsa.start_pos =
         copy_to_persistent_tensor(dsa.start_pos, persistent.start_pos);
-
-    dsa.c1_metadata = copy_to_fixed_metadata_tensor(
-        dsa.c1_metadata, persistent.c1_metadata, persistent.c1_metadata_size);
-    dsa.c4_metadata = copy_to_fixed_metadata_tensor(
-        dsa.c4_metadata, persistent.c4_metadata, persistent.c4_metadata_size);
-    dsa.c128_metadata =
-        copy_to_fixed_metadata_tensor(dsa.c128_metadata,
-                                      persistent.c128_metadata,
-                                      persistent.c128_metadata_size);
-    dsa.qli_metadata =
-        copy_to_fixed_metadata_tensor(dsa.qli_metadata,
-                                      persistent.qli_metadata,
-                                      persistent.qli_metadata_size);
 
     return metadata;
   }

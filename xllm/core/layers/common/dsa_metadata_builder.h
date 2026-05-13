@@ -76,6 +76,11 @@ class DSAMetadataBuilder {
   // Compute how many slots a single seq needs for this group.
   static int64_t compute_slot_num(const DSAGroupInfo& gi, int64_t token_len);
 
+  // Count semantic block-table columns and ignore graph-capacity padding.
+  static int32_t effective_block_table_cols(const torch::Tensor& block_table,
+                                            const std::vector<int>& ctx_lens,
+                                            int32_t batch_size);
+
   // Step 2: per-group processing.
   static void process_group(const torch::Tensor& raw_bt,
                             const torch::Tensor& raw_slots,

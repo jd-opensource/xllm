@@ -185,6 +185,9 @@ class GraphPersistentParam {
                                    const torch::Tensor& block_tables,
                                    const ModelInputParams& input_params,
                                    aclrtStream stream);
+  void ensure_persistent_multi_block_tables(size_t manager_num);
+  std::vector<torch::Tensor> persistent_multi_block_tables(
+      uint32_t actual_batch_size = 0) const;
 
   const ModelArgs& args_;
   const torch::Device& device_;
@@ -195,8 +198,10 @@ class GraphPersistentParam {
   torch::Tensor persistent_positions_;
   torch::Tensor persistent_new_cache_slots_;
   torch::Tensor persistent_block_tables_;
+  std::vector<torch::Tensor> persistent_multi_block_tables_;
   torch::Tensor persistent_new_cache_slots_default_;
   torch::Tensor persistent_block_tables_default_;
+  std::vector<torch::Tensor> persistent_multi_block_tables_default_;
   // When q_seq_lens contains values greater than 1(chunked prefill mode or
   // speculative decode mode), the mask needs to be passed to the attention
   // operation

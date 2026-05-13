@@ -299,6 +299,35 @@ int64_t DSAMetadataBuilder::compute_slot_num(const DSAGroupInfo& gi,
   return (n == 0 && token_len > 0) ? bs : n;
 }
 
+int32_t DSAMetadataBuilder::effective_block_table_cols(
+    const torch::Tensor& block_table,
+    const std::vector<int>& ctx_lens,
+    int32_t batch_size) {
+  if (!block_table.defined() || block_table.dim() != 2 ||
+      block_table.size(1) <= 0 || batch_size <= 0) {
+    return 0;
+  }
+  auto bt_acc = block_table.accessor<int32_t, 2>();
+  const int32_t rows =
+      std::min<int32_t>(batch_size, static_cast<int32_t>(block_table.size(0)));
+  const int32_t cols = static_cast<int32_t>(block_table.size(1));
+  int32_t effective_cols = 0;
+  for (int32_t seq = 0; seq < rows; ++seq) {
+    if (seq < static_cast<int32_t>(ctx_lens.size()) && ctx_lens[seq] <= 0) {
+      continue;
+    }
+    int32_t row_cols = 0;
+    for (int32_t col = 0; col < cols; ++col) {
+      if (bt_acc[seq][col] < 0) {
+        break;
+      }
+      row_cols = col + 1;
+    }
+    effective_cols = std::max(effective_cols, row_cols);
+  }
+  return effective_cols > 0 ? effective_cols : cols;
+}
+
 void DSAMetadataBuilder::process_group(const torch::Tensor& raw_bt,
                                        const torch::Tensor& raw_slots,
                                        const DSAGroupInfo& gi,
@@ -445,14 +474,16 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
   auto out_slots_tensor = torch::full({out_slot_rows}, -1, raw_slots.options());
   auto out_slots_acc = out_slots_tensor.accessor<int32_t, 1>();
   auto raw_bt_acc = raw_bt.accessor<int32_t, 2>();
-  const int64_t max_blocks = raw_bt.size(1);
+  const int64_t semantic_cols =
+      effective_block_table_cols(raw_bt, ctx_lens, batch_size);
+  const int64_t storage_cols = raw_bt.size(1);
   const int64_t block_size_i64 = static_cast<int64_t>(block_size);
 
   auto slot_for_position = [&](int32_t seq, int64_t pos) -> int32_t {
-    if (max_blocks <= 0) {
+    if (semantic_cols <= 0) {
       return -1;
     }
-    const int64_t block_idx = (pos / block_size_i64) % max_blocks;
+    const int64_t block_idx = (pos / block_size_i64) % semantic_cols;
     const int32_t block_id = raw_bt_acc[seq][block_idx];
     if (block_id < 0) {
       return -1;
@@ -480,7 +511,7 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
 
   out_slots = out_slots_tensor;
 
-  int32_t current_cols = raw_bt.size(1);
+  const int32_t current_cols = static_cast<int32_t>(semantic_cols);
   int32_t max_dst_len = 0;
   std::vector<int32_t> dst_lens(batch_size);
   for (int32_t s = 0; s < batch_size; ++s) {
@@ -493,8 +524,12 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
     max_dst_len = std::max(max_dst_len, dst_lens[s]);
   }
   max_dst_len = std::max(max_dst_len, current_cols);
+  if (graph_slot_capacity > 0) {
+    max_dst_len =
+        std::max<int32_t>(max_dst_len, static_cast<int32_t>(storage_cols));
+  }
 
-  auto new_bt = torch::zeros({batch_size, max_dst_len}, raw_bt.options());
+  auto new_bt = torch::full({batch_size, max_dst_len}, -1, raw_bt.options());
   auto new_acc = new_bt.accessor<int32_t, 2>();
   auto old_acc = raw_bt.accessor<int32_t, 2>();
 
