@@ -346,6 +346,79 @@ inline int32_t deepseek_v4_normalize_compress_ratio(int32_t ratio) {
   return ratio <= 1 ? 1 : ratio;
 }
 
+inline void deepseek_v4_build_cache_specs(
+    const ModelArgs& model_args,
+    std::vector<std::vector<DSACacheInfo>>& caches_info,
+    std::vector<DSAGroupInfo>& group_infos) {
+  const auto& compress_ratios = model_args.compress_ratios();
+  const int32_t window_size = model_args.window_size();
+  const int32_t base_block_size = 128;
+
+  caches_info.clear();
+  group_infos.clear();
+
+  std::unordered_map<DSAGroupKey, int32_t, DSAGroupKeyHash> group_key_map;
+  auto register_group =
+      [&](DSACacheType type, int32_t ratio, int32_t block_size) -> int32_t {
+    DSAGroupKey key{ratio, type, block_size};
+    auto it = group_key_map.find(key);
+    if (it != group_key_map.end()) {
+      return it->second;
+    }
+    const int32_t gid = static_cast<int32_t>(group_infos.size());
+    group_key_map.emplace(key, gid);
+    group_infos.push_back({type, ratio, block_size});
+    return gid;
+  };
+
+  register_group(DSACacheType::SLIDING_WINDOW, 1, window_size);
+  for (const auto ratio : compress_ratios) {
+    const int32_t cr = deepseek_v4_normalize_compress_ratio(ratio);
+    if (cr == 4 || cr == 128) {
+      register_group(DSACacheType::TOKEN, cr, base_block_size);
+    }
+  }
+
+  caches_info.resize(model_args.n_layers());
+
+  for (int32_t layer_id = 0; layer_id < model_args.n_layers(); ++layer_id) {
+    int32_t cr = (layer_id < static_cast<int32_t>(compress_ratios.size()))
+                     ? compress_ratios[layer_id]
+                     : 1;
+    cr = deepseek_v4_normalize_compress_ratio(cr);
+
+    struct CacheEntry {
+      DSACacheType type;
+      int32_t ratio;
+      int32_t block_size;
+    };
+    std::vector<CacheEntry> layer_caches;
+
+    if (cr == 1) {
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+    } else if (cr == 4) {
+      layer_caches.push_back({DSACacheType::TOKEN, 4, base_block_size});
+      layer_caches.push_back({DSACacheType::TOKEN, 4, base_block_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::TOKEN, 4, base_block_size});
+    } else if (cr == 128) {
+      layer_caches.push_back({DSACacheType::TOKEN, 128, base_block_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+    }
+
+    for (const auto& ce : layer_caches) {
+      const int32_t gid = register_group(ce.type, ce.ratio, ce.block_size);
+      caches_info[layer_id].push_back({gid, ce.type, ce.ratio, ce.block_size});
+    }
+  }
+}
+
 class DeepseekV4ModelImpl
     : public LlmModelImplBase<layer::DeepseekV4DecoderLayer> {
  public:
@@ -439,84 +512,7 @@ class DeepseekV4ModelImpl
       layers_.push_back(layer);
     }
 
-    // Build DSA caches_info from compress_ratios
-    const auto& compress_ratios = model_args.compress_ratios();
-    const int32_t window_size = model_args.window_size();
-    const int32_t base_block_size = 128;  // default block size
-
-    std::unordered_map<DSAGroupKey, int32_t, DSAGroupKeyHash> group_key_map;
-    auto register_group =
-        [&](DSACacheType type, int32_t ratio, int32_t block_size) -> int32_t {
-      DSAGroupKey key{ratio, type, block_size};
-      auto it = group_key_map.find(key);
-      if (it != group_key_map.end()) {
-        return it->second;
-      }
-      const int32_t gid = static_cast<int32_t>(group_infos_.size());
-      group_key_map.emplace(key, gid);
-      group_infos_.push_back({type, ratio, block_size});
-      return gid;
-    };
-
-    // Keep DSA group ids consistent with BlockManagerPool manager order:
-    // 1) sliding-window manager first
-    // 2) token managers in first-seen compress_ratio order
-    register_group(DSACacheType::SLIDING_WINDOW, 1, window_size);
-    for (const auto ratio : compress_ratios) {
-      const int32_t cr = deepseek_v4_normalize_compress_ratio(ratio);
-      if (cr == 4 || cr == 128) {
-        register_group(DSACacheType::TOKEN, cr, base_block_size);
-      }
-    }
-
-    caches_info_.resize(model_args.n_layers());
-
-    for (int32_t layer_id = 0; layer_id < model_args.n_layers(); ++layer_id) {
-      int32_t cr = (layer_id < static_cast<int32_t>(compress_ratios.size()))
-                       ? compress_ratios[layer_id]
-                       : 1;
-      cr = deepseek_v4_normalize_compress_ratio(cr);
-      // Build per-layer cache specs based on compress_ratio
-      struct CacheEntry {
-        DSACacheType type;
-        int32_t ratio;
-        int32_t block_size;
-      };
-      std::vector<CacheEntry> layer_caches;
-
-      if (cr == 1) {
-        // C1: 1 cache (swa)
-        layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
-      } else if (cr == 4) {
-        // C4: 8 caches
-        // compress_kv(TOKEN,4,128), compress_index(TOKEN,4,128),
-        // swa(SW,1,window), kv_state(SW,1,window), score_state(SW,1,window),
-        // idx_kv_state(SW,1,window), idx_score_state(SW,1,window),
-        // indexer_scale(TOKEN,4,128)
-        layer_caches.push_back({DSACacheType::TOKEN, 4, base_block_size});
-        layer_caches.push_back({DSACacheType::TOKEN, 4, base_block_size});
-        layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
-        layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
-        layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
-        layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
-        layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
-        layer_caches.push_back({DSACacheType::TOKEN, 4, base_block_size});
-      } else if (cr == 128) {
-        // C128: 4 caches
-        // compress_kv(TOKEN,128,128), swa(SW,1,window),
-        // kv_state(SW,1,window), score_state(SW,1,window)
-        layer_caches.push_back({DSACacheType::TOKEN, 128, base_block_size});
-        layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
-        layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
-        layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
-      }
-
-      for (const auto& ce : layer_caches) {
-        const int32_t gid = register_group(ce.type, ce.ratio, ce.block_size);
-        caches_info_[layer_id].push_back(
-            {gid, ce.type, ce.ratio, ce.block_size});
-      }
-    }
+    deepseek_v4_build_cache_specs(model_args, caches_info_, group_infos_);
   }
 
   void load_state_dict(const StateDict& state_dict) override {
@@ -812,7 +808,7 @@ class DeepseekV4ModelImpl
     return ModelOutput(hidden_states, residual_out);
   }
 
- private:
+ public:
   static c10::optional<torch::Tensor> as_optional_tensor(
       const torch::Tensor& tensor) {
     if (tensor.defined() && tensor.numel() > 0) {
@@ -969,7 +965,7 @@ class DeepseekV4ModelImpl
     return 0;
   }
 
-  void normalize_graph_padding(ModelInputParams& params) const {
+  static void normalize_graph_padding(ModelInputParams& params) {
     const int64_t actual_batch_size = infer_actual_batch_size(params);
     const int64_t padded_batch_size = params.num_sequences;
     if (actual_batch_size <= 0 || padded_batch_size <= actual_batch_size) {
@@ -1008,9 +1004,10 @@ class DeepseekV4ModelImpl
     return attn_metadata;
   }
 
-  std::shared_ptr<layer::AttentionMetadata> persist_graph_attention_metadata(
+  static std::shared_ptr<layer::AttentionMetadata>
+  persist_graph_attention_metadata(
       DeepseekV4GraphMetadataState& state,
-      std::shared_ptr<layer::AttentionMetadata> metadata) const {
+      std::shared_ptr<layer::AttentionMetadata> metadata) {
     if (!metadata || !metadata->dsa_metadata) {
       return metadata;
     }
