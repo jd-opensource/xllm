@@ -130,12 +130,25 @@ DECLARE_COUNTER(prefix_cache_latency_seconds_evict);
 DECLARE_COUNTER(prefix_cache_match_length_total);
 DECLARE_COUNTER(allocate_blocks_latency_seconds);
 
+DECLARE_COUNTER(prefetch_kvcache_latency_seconds);
+DECLARE_COUNTER(load_kvcache_latency_seconds);
+DECLARE_COUNTER(offload_kvcache_latency_seconds);
+
 // latency of detokenization operations in seconds
 DECLARE_COUNTER(detokenization_latency_seconds_stream);
 DECLARE_COUNTER(detokenization_latency_seconds_non_stream);
 
 DECLARE_HISTOGRAM(prefix_cache_block_matched_rate);
 DECLARE_HISTOGRAM(prefix_cache_block_matched_num);
+
+DECLARE_HISTOGRAM(host_prefix_cache_block_matched_rate);
+DECLARE_HISTOGRAM(host_prefix_cache_block_matched_num);
+
+DECLARE_HISTOGRAM(store_prefix_cache_block_matched_rate);
+DECLARE_HISTOGRAM(store_prefix_cache_block_matched_num);
+
+DECLARE_HISTOGRAM(load_kvcache_block_num);
+DECLARE_HISTOGRAM(offload_kvcache_block_num);
 
 // total number of model execution operations
 DECLARE_COUNTER(num_model_execution_total_eager);

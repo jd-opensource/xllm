@@ -104,6 +104,13 @@
     {
       "name": "openmpi",
       "version>=": "4.1.6"
+    },
+    {
+      "name": "zstd",
+      "version>=": "1.5.5#2"
+    },
+    {
+      "name": "msgpack"
     }
   ],
   "builtin-baseline": "fba75d09065fcc76a25dcf386b1d00d33f5175af"

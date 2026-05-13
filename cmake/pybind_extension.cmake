@@ -98,6 +98,8 @@ function(pybind_extension)
     ${PY_NAME}
     PROPERTIES PREFIX ""
                DEBUG_POSTFIX "${PYTHON_MODULE_DEBUG_POSTFIX}"
-               SUFFIX "${PYTHON_MODULE_EXTENSION}")
+               SUFFIX "${PYTHON_MODULE_EXTENSION}"
+               BUILD_RPATH "$ORIGIN"
+               INSTALL_RPATH "$ORIGIN")
 
 endfunction()

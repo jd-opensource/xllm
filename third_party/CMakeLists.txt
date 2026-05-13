@@ -24,11 +24,18 @@ add_subdirectory(spdlog)
 if(USE_NPU)
   add_subdirectory(torch_npu_ops)
 endif()
-add_subdirectory(Mooncake)
 
-target_include_directories(mooncake_store PUBLIC
+set(USE_VENDORED_PYBIND11 OFF CACHE BOOL
+"Disable Mooncake vendored pybind11 when building via xllm"
+FORCE)
+add_subdirectory(Mooncake)
+if(TARGET mooncake_store)
+  target_include_directories(mooncake_store PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/Mooncake/mooncake-transfer-engine/include
-)
+  )
+else()
+  message(FATAL_ERROR "mooncake_store target was not created")
+endif()
 
 if(USE_ILU)
   if(TARGET cpprest)

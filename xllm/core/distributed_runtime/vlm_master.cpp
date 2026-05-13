@@ -19,6 +19,7 @@ limitations under the License.
 #include <pybind11/pybind11.h>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -54,7 +55,9 @@ VLMMaster::VLMMaster(const Options& options)
     if (!xservice_client->init(options_.etcd_addr().value_or(""),
                                options_.instance_name().value_or(""),
                                engine_->block_manager_pool(),
-                               options_.etcd_namespace().value_or(""))) {
+                               options_.etcd_namespace().value_or(""),
+                               options_.offload_batch_size().value_or(
+                                   std::numeric_limits<uint32_t>::max()))) {
       LOG(FATAL) << "XServiceClient init fail!";
       return;
     }

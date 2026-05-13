@@ -16,6 +16,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <sstream>
@@ -153,6 +154,8 @@ class Options {
   PROPERTY(std::optional<std::string>, etcd_addr);
 
   PROPERTY(std::optional<std::string>, etcd_namespace);
+
+  PROPERTY(std::optional<uint32_t>, offload_batch_size);
 
   PROPERTY(bool, enable_service_routing) = false;
 

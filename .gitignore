@@ -59,3 +59,13 @@ compile_commands.json
 /local
 /logs
 /log
+
+scripts/logs/*
+scripts/kernel_meta/*
+scripts/core_dump/*
+scripts/etcd/etcd*
+scripts/etcd/log.txt
+scripts/etcd/default.etcd/*
+scripts/kvcache_store/*.log
+scripts/kvcache_store/logs/*
+scripts/kvcache_store/__pycache__

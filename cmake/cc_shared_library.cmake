@@ -84,6 +84,10 @@ function(cc_shared_library)
     )
     target_compile_options(${CC_LIB_NAME} PRIVATE ${CC_LIB_COPTS})
     target_compile_definitions(${CC_LIB_NAME} PUBLIC ${CC_LIB_DEFINES})
+    set_target_properties(${CC_LIB_NAME} PROPERTIES
+      BUILD_RPATH "$ORIGIN"
+      INSTALL_RPATH "$ORIGIN"
+    )
   else()
     # Generating header only library
     add_library(${CC_LIB_NAME} INTERFACE)
