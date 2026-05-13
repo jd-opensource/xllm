@@ -180,7 +180,12 @@ class GraphPersistentParam {
   void set_aux_hidden_states(const torch::Tensor& value);
 
  private:
-  // Initialize tiling tensor
+  bool uses_paged_attention_tiling() const {
+    return need_update_attention_plan_ && tiling_data_.defined() &&
+           tiling_data_.numel() > 0;
+  }
+
+  // Initialize ATB context and custom paged attention operation.
   void initialize_paged_attention_plan_context(const torch::Device& device);
 
   // Update attention mask efficiently from input parameters
@@ -193,7 +198,6 @@ class GraphPersistentParam {
                                    const torch::Tensor& block_tables,
                                    const ModelInputParams& input_params,
                                    aclrtStream stream);
-
   const ModelArgs& args_;
   const torch::Device& device_;
   const runtime::Options& options_;
@@ -203,8 +207,6 @@ class GraphPersistentParam {
   torch::Tensor persistent_positions_;
   torch::Tensor persistent_new_cache_slots_;
   torch::Tensor persistent_block_tables_;
-  torch::Tensor persistent_new_cache_slots_default_;
-  torch::Tensor persistent_block_tables_default_;
   // When q_seq_lens contains values greater than 1(chunked prefill mode or
   // speculative decode mode), the mask needs to be passed to the attention
   // operation
@@ -215,8 +217,6 @@ class GraphPersistentParam {
 
   torch::Tensor q_seq_lens_;
   torch::Tensor kv_seq_lens_;
-  torch::Tensor q_seq_lens_default_;
-  torch::Tensor kv_seq_lens_default_;
 
   // for deepseekv3.2
   torch::Tensor q_cu_seq_lens_;

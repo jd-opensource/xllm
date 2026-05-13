@@ -76,16 +76,18 @@ AttentionMetadata build_attention_metadata(
 #endif
 
 #if defined(USE_NPU)
-  // Determine if we should use ACL graph mode:
+  // Determine if we should use ACL graph paged-attention mode:
   // - FLAGS_enable_graph must be enabled
   // - Must be decode phase (not prefill)
-  // - tiling_data must be available
+  // - Graph executor marked this input as graph mode
+  // - tiling_data must be available for CustomPagedAttention
   bool is_decode = !params.batch_forward_type.is_prefill() &&
                    !params.batch_forward_type.is_mixed() &&
                    !params.batch_forward_type.is_chunked_prefill();
-  bool use_acl_graph = FLAGS_enable_graph && is_decode &&
-                       params.graph_buffer.tiling_data.defined();
-  if (use_acl_graph) {
+  bool use_acl_graph_paged_attention =
+      FLAGS_enable_graph && is_decode && params.enable_graph &&
+      params.graph_buffer.tiling_data.defined();
+  if (use_acl_graph_paged_attention) {
     // ACL graph mode: use CustomPagedAttention with tiling_data on device
     attn_metadata.paged_attention_tiling_data = params.graph_buffer.tiling_data;
   }

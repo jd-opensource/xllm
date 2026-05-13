@@ -609,7 +609,6 @@ struct ModelInputParams {
   // multi block manager block_tables for DeepSeek V4
   // vector of (batch_size, max_block_length_i) tensors, one per manager
   std::vector<torch::Tensor> multi_block_tables;
-
   // the indptr of the paged kv-cache
   // used in flashinfer
   // IntTensor: [n_seq + 1]

@@ -78,34 +78,35 @@ class DSAMetadataBuilder {
 
   // Step 2: per-group processing.
   static void process_group(const torch::Tensor& raw_bt,
-                            const torch::Tensor& raw_slots,
                             const DSAGroupInfo& gi,
                             const std::vector<int>& ctx_lens,
                             const std::vector<int>& q_lens,
                             int32_t batch_size,
                             int64_t total_tokens,
                             int64_t graph_slot_capacity,
+                            int32_t block_table_capacity_cols,
                             torch::Tensor& out_bt,
                             torch::Tensor& out_slots);
 
   static void process_token_group(const torch::Tensor& raw_bt,
-                                  const torch::Tensor& raw_slots,
                                   int32_t ratio,
+                                  int32_t block_size,
                                   const std::vector<int>& ctx_lens,
                                   const std::vector<int>& q_lens,
                                   int32_t batch_size,
                                   int64_t total_tokens,
                                   int64_t graph_slot_capacity,
+                                  int32_t block_table_capacity_cols,
                                   torch::Tensor& out_bt,
                                   torch::Tensor& out_slots);
 
   static void process_swa_group(const torch::Tensor& raw_bt,
-                                const torch::Tensor& raw_slots,
                                 int32_t block_size,
                                 const std::vector<int>& ctx_lens,
                                 const std::vector<int>& q_lens,
                                 int32_t batch_size,
                                 int64_t graph_slot_capacity,
+                                int32_t block_table_capacity_cols,
                                 torch::Tensor& out_bt,
                                 torch::Tensor& out_slots);
 
@@ -120,12 +121,6 @@ class DSAMetadataBuilder {
                               int32_t batch_size,
                               int64_t total_tokens,
                               DSAMetadata& dsa_metadata);
-
-  // Build grouped RoPE slices (c4/c128) from position IDs.
-  static void build_group_cos_sin(const torch::Tensor& cos_sin_table,
-                                  const torch::Tensor& pad_positions,
-                                  torch::Tensor& out_cos,
-                                  torch::Tensor& out_sin);
 };
 
 }  // namespace layer
