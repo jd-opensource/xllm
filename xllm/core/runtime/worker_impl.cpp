@@ -258,9 +258,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       dtype_,
       kv_caches_,
       num_layers,
-      [this](const KVCacheShape& shape) {
-        this->allocate_kv_cache(shape);
-      },
+      [this](const KVCacheShape& shape) { this->allocate_kv_cache(shape); },
       enable_lighting_indexer,
       context_.get_model_args().model_type(),
       options_.model_id());

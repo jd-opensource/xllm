@@ -172,8 +172,7 @@ void KVCacheShape::print_shapes() const {
 void KVCacheShape::to_proto(proto::KVCacheShape* proto_shape) const {
   CHECK(proto_shape != nullptr) << "proto_shape must not be nullptr.";
   proto_shape->Clear();
-  add_shape_to_proto(key_cache_shape(),
-                     proto_shape->mutable_key_cache_shape());
+  add_shape_to_proto(key_cache_shape(), proto_shape->mutable_key_cache_shape());
   if (has_value_cache_shape()) {
     add_shape_to_proto(value_cache_shape(),
                        proto_shape->mutable_value_cache_shape());

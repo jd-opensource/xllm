@@ -188,8 +188,8 @@ class DeepSeekV4KVCacheImpl final : public KVCacheImpl {
         swap_tensor_blocks(compress_score_state_, src_tensor, dst_tensor);
     compress_index_kv_state_ =
         swap_tensor_blocks(compress_index_kv_state_, src_tensor, dst_tensor);
-    compress_index_score_state_ = swap_tensor_blocks(
-        compress_index_score_state_, src_tensor, dst_tensor);
+    compress_index_score_state_ =
+        swap_tensor_blocks(compress_index_score_state_, src_tensor, dst_tensor);
   }
 
  private:
@@ -225,8 +225,8 @@ DeepSeekV4KVCacheTensors create_deepseek_v4_kv_cache_tensors(
   const int64_t block_size = create_options.block_size();
   const int64_t window_size = create_options.window_size();
   const int64_t head_dim = create_options.head_dim();
-  const int64_t index_head_dim = std::max<int64_t>(
-      create_options.index_head_dim(), 1);
+  const int64_t index_head_dim =
+      std::max<int64_t>(create_options.index_head_dim(), 1);
   const int64_t n_heads = 1;
   const int64_t index_n_heads = 1;
   const std::vector<int32_t>& compress_ratios =
@@ -250,8 +250,8 @@ DeepSeekV4KVCacheTensors create_deepseek_v4_kv_cache_tensors(
     tensors.swa_cache = torch::empty(
         {swa_count, window_size, n_heads, head_dim}, cache_options);
   } else if (compress_ratio == 4) {
-    tensors.key_cache = torch::empty(
-        {c4_count, block_size, n_heads, head_dim}, cache_options);
+    tensors.key_cache =
+        torch::empty({c4_count, block_size, n_heads, head_dim}, cache_options);
     tensors.index_cache = torch::empty(
         {c4_count, block_size, index_n_heads, index_head_dim}, index_options);
     tensors.indexer_cache_scale =
@@ -294,9 +294,8 @@ DeepSeekV4KVCacheTensors create_deepseek_v4_kv_cache_tensors(
   return tensors;
 }
 
-std::string deepseek_v4_shape_summary(
-    const DeepSeekV4KVCacheTensors& tensors,
-    int32_t compress_ratio) {
+std::string deepseek_v4_shape_summary(const DeepSeekV4KVCacheTensors& tensors,
+                                      int32_t compress_ratio) {
   std::ostringstream summary;
   if (compress_ratio == 1) {
     summary << "swa_cache=" << tensor_shape_string(tensors.swa_cache);
@@ -367,7 +366,9 @@ std::optional<torch::Tensor> KVCache::get_v_cache_scale() const {
   return impl_->get_v_cache_scale();
 }
 
-torch::Tensor KVCache::get_conv_cache() const { return impl_->get_conv_cache(); }
+torch::Tensor KVCache::get_conv_cache() const {
+  return impl_->get_conv_cache();
+}
 
 torch::Tensor KVCache::get_ssm_cache() const { return impl_->get_ssm_cache(); }
 
@@ -462,16 +463,16 @@ void allocate_kv_caches(std::vector<KVCache>& kv_caches,
         << "Linear attention is not supported for XTensor mode.";
 
     XTensorAllocator& allocator = XTensorAllocator::get_instance();
-    std::vector<torch::Tensor> k_tensors = allocator.create_k_tensors(
-        create_options.model_id(),
-        kv_cache_shape.key_cache_shape(),
-        create_options.dtype(),
-        num_layers);
-    std::vector<torch::Tensor> v_tensors = allocator.create_v_tensors(
-        create_options.model_id(),
-        kv_cache_shape.value_cache_shape(),
-        create_options.dtype(),
-        num_layers);
+    std::vector<torch::Tensor> k_tensors =
+        allocator.create_k_tensors(create_options.model_id(),
+                                   kv_cache_shape.key_cache_shape(),
+                                   create_options.dtype(),
+                                   num_layers);
+    std::vector<torch::Tensor> v_tensors =
+        allocator.create_v_tensors(create_options.model_id(),
+                                   kv_cache_shape.value_cache_shape(),
+                                   create_options.dtype(),
+                                   num_layers);
 
     for (int64_t layer_idx = 0; layer_idx < num_layers; ++layer_idx) {
       torch::Tensor k_tensor = k_tensors[layer_idx];

@@ -84,7 +84,8 @@ DeepseekV4GateImpl::DeepseekV4GateImpl(const ModelArgs& args,
   n_routed_experts_ = args.n_routed_experts();
   topk_ = args.n_activated_experts();
   n_hash_layers_ = args.n_hash_layers();
-  route_scale_ = 1.0; // args.routed_scaling_factor(); # TODO: add param for dsv4
+  route_scale_ =
+      1.0;  // args.routed_scaling_factor(); # TODO: add param for dsv4
   score_func_ = args.scoring_func();
   hash_layer_ = layer_id >= 0 && layer_id < n_hash_layers_;
 
@@ -105,7 +106,8 @@ DeepseekV4GateImpl::DeepseekV4GateImpl(const ModelArgs& args,
       torch::empty({n_routed_experts_, hidden_size_}, options),
       /*requires_grad=*/false);
 
-  weight_.set_data(at_npu::native::npu_format_cast(weight_, 29));
+  weight_.set_data(
+      at_npu::native::npu_format_cast(weight_, ACL_FORMAT_FRACTAL_NZ));
 
   if (hash_layer_) {
     const int64_t vocab_size = args.vocab_size();

@@ -442,8 +442,7 @@ struct ModelInputParams {
     params.linear_state_indices = safe_to(linear_state_indices, device, true);
     params.request_ids = std::move(request_ids);
     params.extra_token_ids = std::move(extra_token_ids);
-    params.mtp_shifted_token_ids =
-        safe_to(mtp_shifted_token_ids, device, true);
+    params.mtp_shifted_token_ids = safe_to(mtp_shifted_token_ids, device, true);
     params.dp_ep_padding_data = dp_ep_padding_data;
     params.cp_ep_padding_data
         .attn_padding_idx(

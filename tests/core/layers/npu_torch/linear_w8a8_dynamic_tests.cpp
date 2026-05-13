@@ -23,13 +23,13 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "tests_utils.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "kernels/ops_api.h"
 #include "layers/common/linear.h"
 #include "platform/device.h"
+#include "tests_utils.h"
 
 namespace xllm {
 namespace layer {
@@ -84,8 +84,7 @@ class NpuLinearW8A8TestBase : public ::testing::Test {
   }
 
   void add_quant_desc(const std::string& prefix) {
-    quant_args_.quant_descs()[prefix + ".weight"] =
-        quant_args_.quantize_type();
+    quant_args_.quant_descs()[prefix + ".weight"] = quant_args_.quantize_type();
   }
 
   StateDict make_quant_state_dict(

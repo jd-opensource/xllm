@@ -31,19 +31,19 @@ class CompressorImpl : public torch::nn::Module {
  public:
   CompressorImpl() = default;
   CompressorImpl(int64_t compress_ratio, int64_t head_dim);
-  CompressorImpl(int64_t compress_ratio,
-                 int64_t head_dim,
-                 const torch::TensorOptions& options =
-                     torch::TensorOptions().dtype(torch::kFloat32).device(
-                         torch::kCPU));
-  CompressorImpl(int64_t compress_ratio,
-                 int64_t head_dim,
-                 int64_t rope_head_dim,
-                 int64_t rot_mode,
-                 double norm_eps,
-                 const torch::TensorOptions& options =
-                     torch::TensorOptions().dtype(torch::kFloat32).device(
-                         torch::kCPU));
+  CompressorImpl(
+      int64_t compress_ratio,
+      int64_t head_dim,
+      const torch::TensorOptions& options =
+          torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
+  CompressorImpl(
+      int64_t compress_ratio,
+      int64_t head_dim,
+      int64_t rope_head_dim,
+      int64_t rot_mode,
+      double norm_eps,
+      const torch::TensorOptions& options =
+          torch::TensorOptions().dtype(torch::kFloat32).device(torch::kCPU));
 
   torch::Tensor forward(const DSAMetadata& attn_metadata,
                         torch::Tensor& hidden_states,
