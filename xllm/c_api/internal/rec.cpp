@@ -28,6 +28,7 @@ limitations under the License.
 #include <limits>
 #include <stdexcept>
 
+#include "core/common/global_flags.h"
 #include "core/framework/model_loader.h"
 #include "core/util/rec_model_utils.h"
 #include "core/util/utils.h"
@@ -70,9 +71,11 @@ void apply_multi_round_pipeline_toggles() {
   FLAGS_enable_topk_sorted = false;
 }
 
-void apply_onerec_pipeline_toggles(xllm::Options* options) {
-  const bool enable_onerec_xattention = FLAGS_max_decode_rounds > 0;
-  FLAGS_enable_rec_prefill_only = !enable_onerec_xattention;
+void apply_onerec_pipeline_toggles(xllm::Options* options,
+                                   bool enable_prefill_only) {
+  const bool enable_onerec_xattention =
+      !enable_prefill_only && FLAGS_max_decode_rounds > 0;
+  FLAGS_enable_rec_prefill_only = enable_prefill_only;
   FLAGS_enable_constrained_decoding = true;
   FLAGS_enable_prefix_cache = false;
   FLAGS_enable_schedule_overlap = false;
@@ -297,7 +300,8 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         break;
       case xllm::RecPipelineType::kOneRecDefault:
       case xllm::RecPipelineType::kOneRecXAttentionPipeline:
-        apply_onerec_pipeline_toggles(&options);
+        apply_onerec_pipeline_toggles(
+            &options, xllm_init_options.enable_rec_prefill_only);
         break;
       case xllm::RecPipelineType::kLlmRecDefault:
       case xllm::RecPipelineType::kLlmRecWithMmData:

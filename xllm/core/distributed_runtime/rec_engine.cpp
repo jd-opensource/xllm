@@ -861,8 +861,13 @@ ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::step(
   if (engine_.workers_.empty()) {
     return {};
   }
+  CHECK(engine_.onerec_batch_input_builder_cache_ != nullptr)
+      << "OneRec batch cache is not initialized.";
+  CHECK(!batches.empty()) << "OneRec engine requires at least one batch.";
 
   Timer timer;
+  batches[0].set_onerec_batch_input_builder_cache(
+      engine_.onerec_batch_input_builder_cache_.get());
   auto forward_inputs = engine_.workers_[0]->prepare_inputs(batches[0]);
   COUNTER_ADD(prepare_input_latency_microseconds, timer.elapsed_microseconds());
 
