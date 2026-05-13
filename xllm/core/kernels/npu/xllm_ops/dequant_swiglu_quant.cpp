@@ -15,7 +15,7 @@ limitations under the License.
 
 #include <string>
 
-#include "core/kernels/npu/pytorch_npu_helper.h"
+#include "core/kernels/npu/aclnn/pytorch_npu_helper.hpp"
 #include "xllm_ops_api.h"
 
 namespace xllm::kernel::npu {
@@ -50,9 +50,10 @@ std::tuple<at::Tensor, at::Tensor> construct_dequant_swiglu_quant_output_tensor(
 
 bool is_dequant_swiglu_quant_v2_available() {
   static const bool is_available =
-      GetOpApiFuncAddr("aclnnDequantSwigluQuantV2GetWorkspaceSize") !=
-          nullptr &&
-      GetOpApiFuncAddr("aclnnDequantSwigluQuantV2") != nullptr;
+      aclnn::detail::get_op_api_func_addr(
+          "aclnnDequantSwigluQuantV2GetWorkspaceSize") != nullptr &&
+      aclnn::detail::get_op_api_func_addr("aclnnDequantSwigluQuantV2") !=
+          nullptr;
   return is_available;
 }
 

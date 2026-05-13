@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "core/kernels/npu/pytorch_npu_helper.h"
+#include "core/kernels/npu/aclnn/pytorch_npu_helper.hpp"
 #include "xllm_ops_api.h"
 
 namespace xllm::kernel::npu {
@@ -64,8 +64,9 @@ at::Tensor apply_int4_quantize(const at::Tensor& self,
   // lower than -1.
   const int64_t ascend_quant_axis = axis < -1 ? axis : -1;
   static const bool has_ascend_quant_v3 =
-      GetOpApiFuncAddr("aclnnAscendQuantV3") != nullptr &&
-      GetOpApiFuncAddr("aclnnAscendQuantV3GetWorkspaceSize") != nullptr;
+      aclnn::detail::get_op_api_func_addr("aclnnAscendQuantV3") != nullptr &&
+      aclnn::detail::get_op_api_func_addr(
+          "aclnnAscendQuantV3GetWorkspaceSize") != nullptr;
   std::string quant_model = "round";
   if (has_ascend_quant_v3) {
     EXEC_NPU_CMD(aclnnAscendQuantV3,
