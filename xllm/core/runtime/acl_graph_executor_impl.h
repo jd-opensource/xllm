@@ -232,6 +232,18 @@ class GraphPersistentParam {
   // Flag indicating whether attention plan needs to be updated based on model
   // type
   bool need_update_attention_plan_;
+
+  // Persistent dp/cp ep padding buffers. Pre-allocated in constructor with
+  // max decode capacity so that graph capture and replay always reference
+  // stable device addresses, regardless of actual vs bucket token counts.
+  DpEpPaddingData persistent_dp_ep_padding_;
+  CpEpPaddingData persistent_cp_ep_padding_;
+
+  // Copy src padding data into pre-allocated persistent buffers.
+  void update_persistent_dp_ep_padding(const DpEpPaddingData& src,
+                                       uint32_t padded_tokens);
+  void update_persistent_cp_ep_padding(const CpEpPaddingData& src,
+                                       uint32_t padded_tokens);
 };
 
 // ACL graph executor using libtorch NPUGraph for memory management
