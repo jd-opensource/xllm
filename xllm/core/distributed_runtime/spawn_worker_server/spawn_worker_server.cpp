@@ -64,6 +64,9 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      bool enable_prefill_sp,
                                      const std::string& task_type,
                                      const std::string& worker_type,
+                                     bool enable_speculative_decode,
+                                     int32_t num_speculative_tokens,
+                                     const std::string& speculative_algorithm,
                                      const std::string& communication_backend,
                                      const std::string& npu_kernel_backend,
                                      const std::string& rank_tablefile) {
@@ -76,6 +79,9 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
       .backend(backend)
       .num_decoding_tokens(num_decoding_tokens)
       .enable_prefill_sp(enable_prefill_sp)
+      .enable_speculative_decode(enable_speculative_decode)
+      .num_speculative_tokens(num_speculative_tokens)
+      .speculative_algorithm(speculative_algorithm)
       .enable_schedule_overlap(false)
       .enable_offline_inference(true)
       .master_node_addr(master_node_addr)

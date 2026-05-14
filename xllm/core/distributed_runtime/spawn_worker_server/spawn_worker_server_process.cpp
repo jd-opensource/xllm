@@ -16,6 +16,7 @@ limitations under the License.
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
+#include <cstdint>
 #include <cstdlib>
 
 #include "spawn_worker_server.h"
@@ -33,15 +34,18 @@ limitations under the License.
 // @enable_prefill_sp
 // @task_type
 // @worker_type
+// @enable_speculative_decode
+// @num_speculative_tokens
+// @speculative_algorithm
 // @input_shm_size
 // @output_shm_size
 // @communication_backend
 // @npu_kernel_backend
 // @rank_tablefile
 int main(int argc, char* argv[]) {
-  if (argc < 18) {
+  if (argc < 21) {
     LOG(ERROR)
-        << "Spawn worker process receive wrong args. Need 18 args, receive "
+        << "Spawn worker process receive wrong args. Need 21 args, receive "
         << argc;
     return 1;
   }
@@ -58,11 +62,14 @@ int main(int argc, char* argv[]) {
   int enable_prefill_sp = atoi(argv[10]);
   std::string task_type = std::string(argv[11]);
   std::string worker_type = std::string(argv[12]);
-  uint64_t input_shm_size = atoll(argv[13]);
-  uint64_t output_shm_size = atoll(argv[14]);
-  std::string communication_backend = std::string(argv[15]);
-  std::string npu_kernel_backend = std::string(argv[16]);
-  std::string rank_tablefile = std::string(argv[17]);
+  int32_t enable_speculative_decode = static_cast<int32_t>(atoi(argv[13]));
+  int32_t num_speculative_tokens = static_cast<int32_t>(atoi(argv[14]));
+  std::string speculative_algorithm = std::string(argv[15]);
+  uint64_t input_shm_size = static_cast<uint64_t>(atoll(argv[16]));
+  uint64_t output_shm_size = static_cast<uint64_t>(atoll(argv[17]));
+  std::string communication_backend = std::string(argv[18]);
+  std::string npu_kernel_backend = std::string(argv[19]);
+  std::string rank_tablefile = std::string(argv[20]);
 
   LOG(INFO) << "Spawn worker: "
             << "master_node_addr = " << master_node_addr
@@ -78,6 +85,10 @@ int main(int argc, char* argv[]) {
             << ", enable_prefill_sp = " << (enable_prefill_sp > 0)
             << ", task_type = " << task_type
             << ", worker_type = " << worker_type
+            << ", enable_speculative_decode = "
+            << (enable_speculative_decode > 0)
+            << ", num_speculative_tokens = " << num_speculative_tokens
+            << ", speculative_algorithm = " << speculative_algorithm
             << ", communication_backend = " << communication_backend
             << ", npu_kernel_backend = " << npu_kernel_backend
             << ", rank_tablefile = " << rank_tablefile << "\n";
@@ -96,6 +107,9 @@ int main(int argc, char* argv[]) {
                                  enable_prefill_sp > 0,
                                  task_type,
                                  worker_type,
+                                 enable_speculative_decode > 0,
+                                 num_speculative_tokens,
+                                 speculative_algorithm,
                                  communication_backend,
                                  npu_kernel_backend,
                                  rank_tablefile);

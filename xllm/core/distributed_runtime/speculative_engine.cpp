@@ -55,19 +55,12 @@ SpeculativeEngine::SpeculativeEngine(const runtime::Options& options,
         .is_draft_engine(true);
     draft_engine_ = std::make_unique<LLMEngine>(engine_options, dist_manager_);
 
-    // check if llm and ssm are using the same device
-    for (const auto& target : options.devices()) {
-      for (const auto& draft : options.draft_devices()) {
-        if (target == draft) {
-          share_device_ = true;
-          break;
-        } else {
-          LOG(FATAL)
-              << "Current only support target and draft engine using the "
-                 "same devices";
-        }
-      }
+    // Currently target and draft engines must use the same device list.
+    if (options.devices() != options.draft_devices()) {
+      LOG(FATAL) << "Current only support target and draft engine using the "
+                    "same devices";
     }
+    share_device_ = true;
   }
 }
 

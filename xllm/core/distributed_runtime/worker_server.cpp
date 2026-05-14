@@ -202,28 +202,39 @@ void WorkerServer::create_spawn_server(int local_rank,
                                        const torch::Device& d,
                                        const runtime::Options& options,
                                        WorkerType& worker_type) {
-  auto local_rank_str = std::to_string(local_rank);
+  std::string local_rank_str = std::to_string(local_rank);
   const char* local_rank_ptr = local_rank_str.c_str();
-  auto global_rank_str = std::to_string(parallel_args.rank());
+  std::string global_rank_str = std::to_string(parallel_args.rank());
   const char* global_rank_ptr = global_rank_str.c_str();
-  auto world_size_str = std::to_string(parallel_args.world_size());
+  std::string world_size_str = std::to_string(parallel_args.world_size());
   const char* world_size_ptr = world_size_str.c_str();
-  auto device_idx_str = std::to_string(d.index());
+  std::string device_idx_str = std::to_string(d.index());
   const char* device_idx_ptr = device_idx_str.c_str();
-  auto num_decoding_tokens_str = std::to_string(options.num_decoding_tokens());
+  std::string num_decoding_tokens_str =
+      std::to_string(options.num_decoding_tokens());
   const char* num_decoding_tokens_ptr = num_decoding_tokens_str.c_str();
-  auto block_size_str = std::to_string(options.block_size());
+  std::string block_size_str = std::to_string(options.block_size());
   const char* block_size_ptr = block_size_str.c_str();
-  auto enable_shm_str = std::to_string(options.enable_shm());
+  std::string enable_shm_str = std::to_string(options.enable_shm());
   const char* enable_shm_ptr = enable_shm_str.c_str();
-  auto input_shm_size_str = std::to_string(options.input_shm_size());
+  std::string input_shm_size_str = std::to_string(options.input_shm_size());
   const char* input_shm_size_ptr = input_shm_size_str.c_str();
-  auto output_shm_size_str = std::to_string(options.output_shm_size());
+  std::string output_shm_size_str = std::to_string(options.output_shm_size());
   const char* output_shm_size_ptr = output_shm_size_str.c_str();
-  auto is_local_str = std::to_string(options.is_local());
+  std::string is_local_str = std::to_string(options.is_local());
   const char* is_local_ptr = is_local_str.c_str();
-  auto enable_prefill_sp_str = std::to_string(options.enable_prefill_sp());
+  std::string enable_prefill_sp_str =
+      std::to_string(options.enable_prefill_sp());
   const char* enable_prefill_sp_ptr = enable_prefill_sp_str.c_str();
+  std::string enable_speculative_decode_str =
+      std::to_string(options.enable_speculative_decode());
+  const char* enable_speculative_decode_ptr =
+      enable_speculative_decode_str.c_str();
+  std::string num_speculative_tokens_str =
+      std::to_string(options.num_speculative_tokens());
+  const char* num_speculative_tokens_ptr = num_speculative_tokens_str.c_str();
+  std::string speculative_algorithm_str = options.speculative_algorithm();
+  const char* speculative_algorithm_ptr = speculative_algorithm_str.c_str();
   const char* communication_backend_ptr = FLAGS_communication_backend.c_str();
   std::string npu_kernel_backend_str = options.npu_kernel_backend();
   const char* npu_kernel_backend_ptr = npu_kernel_backend_str.c_str();
@@ -245,6 +256,9 @@ void WorkerServer::create_spawn_server(int local_rank,
                         enable_prefill_sp_ptr,
                         options.task_type().c_str(),
                         worker_type_ptr,
+                        enable_speculative_decode_ptr,
+                        num_speculative_tokens_ptr,
+                        speculative_algorithm_ptr,
                         input_shm_size_ptr,
                         output_shm_size_ptr,
                         communication_backend_ptr,
