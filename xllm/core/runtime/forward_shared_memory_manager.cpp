@@ -2099,6 +2099,7 @@ inline void deserialize_forward_input_payload(
                              input_params.meta.num_sequences);
   read_string_vector(context, input_params.embedding.request_ids);
   read_vector(context, input_params.embedding.extra_token_ids);
+  read_tensor(context, input_params.mtp_shifted_token_ids, stream);
   read_swap_blocks(context, input_params.block_copy.swap_blocks);
   read_tensor(context, input_params.block_copy.src_block_indices, stream);
   read_tensor(context, input_params.block_copy.dst_block_indices, stream);
@@ -2155,6 +2156,18 @@ inline void deserialize_forward_input_payload(
                        input_params.attention.device.block_tables,
                        input_params.attention.host.block_tables,
                        stream);
+  int32_t manager_num = 0;
+  read_data(context, manager_num);
+  CHECK_GE(manager_num, 0) << "multi_block_tables manager num is invalid.";
+  input_params.multi_block_tables.reserve(static_cast<size_t>(manager_num));
+  for (int32_t i = 0; i < manager_num; ++i) {
+    torch::Tensor manager_table;
+    read_tensor(context,
+                manager_table,
+                /*stream=*/nullptr,
+                /*force_host_materialize=*/true);
+    input_params.multi_block_tables.emplace_back(std::move(manager_table));
+  }
 
   read_dit_forward_input(context, input_params.dit_forward_input);
 
@@ -2405,6 +2418,7 @@ inline void serialize_forward_input_sections(
   write_vector(context.descriptor, input_params.embedding.linear_state_ids);
   write_string_vector(context.descriptor, input_params.embedding.request_ids);
   write_vector(context.descriptor, input_params.embedding.extra_token_ids);
+  write_tensor(context, input_params.mtp_shifted_token_ids);
   write_swap_blocks(context, input_params.block_copy.swap_blocks);
   write_tensor(context, input_params.block_copy.src_block_indices);
   write_tensor(context, input_params.block_copy.dst_block_indices);
@@ -2459,6 +2473,11 @@ inline void serialize_forward_input_sections(
       context,
       choose_host_or_device_tensor(input_params.attention.host.block_tables,
                                    input_params.attention.device.block_tables));
+  write_data(context.descriptor,
+             static_cast<int32_t>(input_params.multi_block_tables.size()));
+  for (const auto& manager_table : input_params.multi_block_tables) {
+    write_tensor(context, manager_table);
+  }
 
   write_dit_forward_input(context, input_params.dit_forward_input);
 }

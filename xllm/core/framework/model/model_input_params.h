@@ -854,6 +854,12 @@ struct ModelInputParams {
     params.expert = expert.to(device);
     params.graph = graph.to(device);
     params.dit_forward_input = dit_forward_input.to(device);
+    for (const auto& table : multi_block_tables) {
+      params.multi_block_tables.push_back(
+          safe_to(table, table.options().device(torch::kCPU), true));
+    }
+    params.mtp_shifted_token_ids =
+        safe_to(mtp_shifted_token_ids, device, true);
 
     // rec_params device conversion for both OneRec and LLM-Rec variants
     if (const auto* onerec_xattn = onerec_xattention_params()) {
@@ -955,6 +961,13 @@ struct ModelInputParams {
   MultiModalInput multimodal;
   ExpertInput expert;
   GraphInput graph;
+
+  // Multi block manager block tables for DeepSeek V4.
+  // Each tensor is [batch_size, max_block_len] for one manager.
+  std::vector<torch::Tensor> multi_block_tables;
+
+  // Shifted target token ids for MTP training/evaluation paths.
+  torch::Tensor mtp_shifted_token_ids;
 
   RecModelInputParams rec_params;
 

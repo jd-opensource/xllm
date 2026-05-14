@@ -59,6 +59,8 @@ class BatchInputBuilder {
   void process_sequences();
   void process_sequences_multithreaded();
   ForwardInput state_to_forward_input();
+  void padding_decode_batch_size(uint32_t num_decoding_tokens,
+                                 uint32_t min_decoding_batch_size);
 
   static TransferKVInfo build_step_transfer_info(
       const TransferKVInfo& full_info,
@@ -104,6 +106,9 @@ class BatchInputBuilder {
     // Cache and block data
     std::vector<int32_t> new_token_slot_ids;
     std::vector<std::vector<int32_t>> block_tables_vec;
+    // multi block manager support for DeepSeek V4
+    // [manager_num][batch_size][block_ids]
+    std::vector<std::vector<std::vector<int32_t>>> multi_block_tables_vec;
 
     // beam search kernel input
     std::vector<float> acc_logprob_vec;
@@ -113,6 +118,7 @@ class BatchInputBuilder {
     std::vector<int32_t> linear_state_ids;
     std::vector<std::string> request_ids;
     std::vector<int32_t> extra_token_ids;
+    std::vector<int32_t> mtp_shifted_token_ids;
     std::vector<TransferKVInfo> transfer_kv_infos;
 
     // for continuous kvcache
