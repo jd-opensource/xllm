@@ -114,8 +114,8 @@ class DupUp3DImpl : public torch::nn::Module {
         factor_t_(factor_t),
         factor_s_(factor_s) {
     factor_ = factor_t_ * factor_s_ * factor_s_;
-    TORCH_CHECK(out_channels_ * factor_ % in_channels_ == 0,
-                "out_channels * factor must be divisible by in_channels");
+    CHECK(out_channels_ * factor_ % in_channels_ == 0),
+        "out_channels * factor must be divisible by in_channels";
     repeats_ = out_channels_ * factor_ / in_channels_;
   }
 
@@ -842,7 +842,11 @@ class WanResidualDownBlockImpl : public torch::nn::Module {
     if (downsampler_) {
       x = downsampler_->forward(x, feat_cache, feat_idx);
     }
-    return x + avg_shortcut_->forward(x_copy);
+
+    if (avg_shortcut_) {
+      return x + avg_shortcut_->forward(x_copy);
+    }
+    return x;
   }
 
   void load_state_dict(const StateDict& state_dict) {
@@ -1672,7 +1676,7 @@ class AutoencoderKLWanImpl : public torch::nn::Module {
   int64_t tile_sample_min_width_ = 256;
   int64_t tile_sample_stride_height_ = 192;
   int64_t tile_sample_stride_width_ = 192;
-  std::map<std::string, int64_t> cached_conv_count_;
+  std::unordered_map<std::string, int64_t> cached_conv_count_;
   int64_t conv_num_ = 0;
   std::shared_ptr<std::vector<int64_t>> conv_idx_;
   std::shared_ptr<std::vector<torch::Tensor>> feat_map_;

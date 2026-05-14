@@ -60,8 +60,7 @@ class VideoProcessorImpl : public VAEImageProcessorImpl {
       w = processed.size(3);
       processed = processed.unsqueeze(0);
     } else {
-      throw std::runtime_error("Unsupported video tensor dimension: " +
-                               std::to_string(input_dim));
+      LOG(FATAL) << "Unsupported video tensor dimension: " << input_dim;
     }
 
     int64_t target_h = height.value_or(h);
@@ -111,6 +110,9 @@ class VideoProcessorImpl : public VAEImageProcessorImpl {
       const std::map<float, std::pair<int64_t, int64_t>>& ratios) {
     float ar = static_cast<float>(height) / static_cast<float>(width);
 
+    if (ratios.empty()) {
+      LOG(FATAL) << "ratios map mush not be empty.";
+    }
     auto it = ratios.begin();
     float closest_ratio = it->first;
     float min_diff = std::abs(it->first - ar);
