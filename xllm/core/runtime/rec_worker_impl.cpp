@@ -59,6 +59,10 @@ namespace {
 
 constexpr const char* kOnerecXAttentionSerializeHostStagesEnv =
     "XLLM_ONEREC_XATTN_SERIALIZE_HOST_STAGES";
+constexpr const char* kOnerecXAttentionSerializePrepareEnv =
+    "XLLM_ONEREC_XATTN_SERIALIZE_PREPARE";
+constexpr const char* kOnerecXAttentionSerializeModelForwardEnv =
+    "XLLM_ONEREC_XATTN_SERIALIZE_MODEL_FORWARD";
 
 RecVocabDict* get_onerec_vocab_dict(const std::string& model_weights_path) {
   if (model_weights_path.empty()) {
@@ -94,20 +98,34 @@ bool enable_rec_pipeline_concurrency_debug() {
 }
 
 bool serialize_onerec_xattention_host_stages() {
-  // Experimental performance knob. Keep host serialization enabled by default
-  // because NPU prepare and ATB model launch are not proven thread-safe.
   static const bool serialize_host_stages =
       util::get_bool_env(kOnerecXAttentionSerializeHostStagesEnv, true);
   return serialize_host_stages;
 }
 
+bool serialize_onerec_xattention_prepare() {
+  // Keep serialization enabled by default. The host-stages switch remains a
+  // bulk default, while the per-stage switches isolate lock-off experiments.
+  static const bool serialize_prepare =
+      util::get_bool_env(kOnerecXAttentionSerializePrepareEnv,
+                         serialize_onerec_xattention_host_stages());
+  return serialize_prepare;
+}
+
+bool serialize_onerec_xattention_model_forward() {
+  static const bool serialize_model_forward =
+      util::get_bool_env(kOnerecXAttentionSerializeModelForwardEnv,
+                         serialize_onerec_xattention_host_stages());
+  return serialize_model_forward;
+}
+
 #if defined(USE_NPU)
 bool should_serialize_onerec_xattention_prepare(int64_t max_concurrency) {
-  return max_concurrency > 1 && serialize_onerec_xattention_host_stages();
+  return max_concurrency > 1 && serialize_onerec_xattention_prepare();
 }
 
 bool should_serialize_onerec_xattention_model_forward(int64_t max_concurrency) {
-  return max_concurrency > 1 && serialize_onerec_xattention_host_stages();
+  return max_concurrency > 1 && serialize_onerec_xattention_model_forward();
 }
 #else
 bool should_serialize_onerec_xattention_prepare(int64_t max_concurrency) {
