@@ -21,7 +21,6 @@ limitations under the License.
 #include <iostream>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -32,7 +31,7 @@ limitations under the License.
 
 namespace xllm {
 
-class UniPCMultistepSchedulerImpl : public torch::nn::Module {
+class UniPCMultistepSchedulerImpl final : public torch::nn::Module {
  public:
   explicit UniPCMultistepSchedulerImpl(const ModelContext& context)
       : args_(context.get_model_args()) {
@@ -61,7 +60,7 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
     {
       auto vec = args_.disable_corrector();
       for (auto v : vec) {
-        disable_corrector_.insert(static_cast<int>(v));
+        disable_corrector_.insert(v);
       }
     }
     use_karras_sigmas_ = args_.use_karras_sigmas();
@@ -100,12 +99,12 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
     this_order_ = 1;
   }
 
-  void set_begin_index(int begin_index) { begin_index_ = begin_index; }
+  void set_begin_index(int64_t begin_index) { begin_index_ = begin_index; }
 
   int64_t order() const { return order_; }
 
   void set_timesteps(
-      int num_inference_steps,
+      int64_t num_inference_steps,
       const torch::Device& device = torch::kCPU,
       const std::optional<std::vector<float>>& sigmas = std::nullopt,
       const std::optional<float>& mu = std::nullopt) {
@@ -113,7 +112,7 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
       LOG(FATAL) << "mu must be provided when use_dynamic_shifting is true";
     }
 
-    int num_steps = num_inference_steps;
+    int64_t num_steps = num_inference_steps;
     if (sigmas.has_value()) {
       if (!use_flow_sigmas_) {
         LOG(FATAL) << "Passing `sigmas` is only supported when "
@@ -156,17 +155,17 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
                     "'trailing'";
     }
 
-    // config.json only need use_flow_sigmas, for use_beta_sigmas,
-    // use_exponential_sigmas, use_karras_sigmas are not implemented
     if (use_flow_sigmas_) {
       if (!sigmas.has_value()) {
-        float start = 1.0f;
-        float stop = 1.0f / static_cast<float>(num_train_timesteps_);
+        double start_d = 1.0 - 1.0 / static_cast<double>(num_train_timesteps_);
+        double stop_d = 0.0;
         int N = num_steps;
         std::vector<float> s_vec(N);
         for (int i = 0; i < N; ++i) {
-          s_vec[i] = start + static_cast<float>(i) / static_cast<float>(N) *
-                                 (stop - start);
+          double s = start_d + static_cast<double>(i) / static_cast<double>(N) *
+                                   (stop_d - start_d);
+          s = flow_shift_ * s / (1.0 + (flow_shift_ - 1.0) * s);
+          s_vec[i] = static_cast<float>(s);
         }
         sigmas_tensor =
             torch::from_blob(s_vec.data(), {num_steps}, torch::kFloat32)
@@ -176,10 +175,7 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
       }
 
       if (use_dynamic_shifting_) {
-        sigmas_tensor = time_shift(mu.value(), 1.0f, sigmas_tensor);
-      } else {
-        sigmas_tensor = flow_shift_ * sigmas_tensor /
-                        (1.0f + (flow_shift_ - 1.0f) * sigmas_tensor);
+        sigmas_tensor = time_shift(mu.value(), /*sigma=*/1.0f, sigmas_tensor);
       }
 
       if (shift_terminal_.has_value() && shift_terminal_.value()) {
@@ -238,7 +234,7 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
     }
 
     timesteps_ = timesteps_tensor.to(device);
-    sigmas_ = sigmas_tensor.to(device);
+    sigmas_ = sigmas_tensor;
     num_inference_steps_ = num_steps;
 
     model_outputs_.clear();
@@ -274,6 +270,7 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
         convert_model_output(model_output, sample);
 
     if (use_corrector) {
+      LOG(INFO) << "scheduler step use_corrector";
       sample = multistep_uni_c_bh_update(
           model_output_convert, last_sample_, sample, this_order_);
     }
@@ -295,6 +292,8 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
     }
     this_order_ =
         std::min(this_order_calc, static_cast<int64_t>(lower_order_nums_ + 1));
+
+    LOG(INFO) << "self.this_order = " << this_order_;
 
     last_sample_ = sample;
     torch::Tensor prev_sample =
@@ -321,15 +320,16 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
     torch::Tensor schedule_timesteps = timesteps_.to(original_samples.device());
     torch::Tensor ts = timesteps.to(original_samples.device());
 
-    std::vector<int> step_indices;
+    std::vector<int64_t> step_indices;
     if (!begin_index_.has_value()) {
       for (int i = 0; i < ts.size(0); ++i) {
-        step_indices.push_back(index_for_timestep(ts[i], schedule_timesteps));
+        step_indices.emplace_back(
+            index_for_timestep(ts[i], schedule_timesteps));
       }
     } else if (step_index_.has_value()) {
-      step_indices = std::vector<int>(ts.size(0), step_index_.value());
+      step_indices = std::vector<int64_t>(ts.size(0), step_index_.value());
     } else {
-      step_indices = std::vector<int>(ts.size(0), begin_index_.value());
+      step_indices = std::vector<int64_t>(ts.size(0), begin_index_.value());
     }
 
     torch::Tensor sigma_indices = torch::tensor(
@@ -343,8 +343,8 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
     return alpha_t * original_samples + sigma_t * noise;
   }
 
-  std::optional<int> step_index() const { return step_index_; }
-  std::optional<int> begin_index() const { return begin_index_; }
+  std::optional<int64_t> step_index() const { return step_index_; }
+  std::optional<int64_t> begin_index() const { return begin_index_; }
   const torch::Tensor& timesteps() const { return timesteps_; }
   const torch::Tensor& sigmas() const { return sigmas_; }
   int size() const { return num_train_timesteps_; }
@@ -400,7 +400,7 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
     for (int i = 0; i < num_diffusion_timesteps; ++i) {
       float t1 = static_cast<float>(i) / num_diffusion_timesteps;
       float t2 = static_cast<float>(i + 1) / num_diffusion_timesteps;
-      betas_vec.push_back(
+      betas_vec.emplace_back(
           std::min(1.0f - alpha_bar_fn(t2) / alpha_bar_fn(t1), max_beta));
     }
     return torch::from_blob(
@@ -467,14 +467,14 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
     return stretched_t;
   }
 
-  int index_for_timestep(const torch::Tensor& timestep,
-                         const torch::Tensor& schedule_timesteps) {
+  int64_t index_for_timestep(const torch::Tensor& timestep,
+                             const torch::Tensor& schedule_timesteps) {
     torch::Tensor indices = (schedule_timesteps == timestep).nonzero();
     if (indices.size(0) == 0) {
-      return static_cast<int>(timesteps_.size(0)) - 1;
+      return static_cast<int64_t>(timesteps_.size(0)) - 1;
     }
-    int pos = indices.size(0) > 1 ? 1 : 0;
-    return indices[pos][0].item<int>();
+    int64_t pos = indices.size(0) > 1 ? 1 : 0;
+    return indices[pos][0].item<int64_t>();
   }
 
   void init_step_index(const torch::Tensor& timestep) {
@@ -564,17 +564,17 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
     std::vector<torch::Tensor> rks;
     std::vector<torch::Tensor> D1s;
     for (int64_t i = 1; i < order; ++i) {
-      int si = step_index_.value() - i;
+      int64_t si = step_index_.value() - i;
       torch::Tensor mi = model_outputs_[solver_order_ - 1 - i];
       auto [alpha_si, sigma_si] = sigma_to_alpha_sigma_t(sigmas_[si]);
       torch::Tensor lambda_si = torch::log(alpha_si) - torch::log(sigma_si);
       torch::Tensor rk = (lambda_si - lambda_s0) / h;
-      rks.push_back(rk);
-      D1s.push_back((mi - m0) / rk);
+      rks.emplace_back(rk);
+      D1s.emplace_back((mi - m0) / rk);
     }
 
-    rks.push_back(torch::tensor(1.0f, device));
-    torch::Tensor rks_tensor = torch::stack(rks);
+    rks.emplace_back(torch::tensor(1.0f));
+    torch::Tensor rks_tensor = torch::stack(rks).to(device);
 
     std::vector<torch::Tensor> R;
     std::vector<torch::Tensor> b;
@@ -594,14 +594,14 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
     }
 
     for (int64_t i = 1; i <= order; ++i) {
-      R.push_back(torch::pow(rks_tensor, i - 1));
-      b.push_back(h_phi_k * factorial_i / B_h);
+      R.emplace_back(torch::pow(rks_tensor, i - 1));
+      b.emplace_back(h_phi_k * factorial_i / B_h);
       factorial_i *= (i + 1);
       h_phi_k = h_phi_k / hh - 1.0f / factorial_i;
     }
 
     torch::Tensor R_tensor = torch::stack(R);
-    torch::Tensor b_tensor = torch::stack(b);
+    torch::Tensor b_tensor = torch::stack(b).to(device);
 
     torch::Tensor rhos_p;
     if (D1s.size() > 0) {
@@ -663,17 +663,17 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
     std::vector<torch::Tensor> rks;
     std::vector<torch::Tensor> D1s;
     for (int64_t i = 1; i < order; ++i) {
-      int si = step_index_.value() - (i + 1);
+      int64_t si = step_index_.value() - (i + 1);
       torch::Tensor mi = model_outputs_[solver_order_ - 1 - i];
       auto [alpha_si, sigma_si] = sigma_to_alpha_sigma_t(sigmas_[si]);
       torch::Tensor lambda_si = torch::log(alpha_si) - torch::log(sigma_si);
       torch::Tensor rk = (lambda_si - lambda_s0) / h;
-      rks.push_back(rk);
-      D1s.push_back((mi - m0) / rk);
+      rks.emplace_back(rk);
+      D1s.emplace_back((mi - m0) / rk);
     }
 
-    rks.push_back(torch::tensor(1.0f, device));
-    torch::Tensor rks_tensor = torch::stack(rks);
+    rks.emplace_back(torch::tensor(1.0f));
+    torch::Tensor rks_tensor = torch::stack(rks).to(device);
 
     std::vector<torch::Tensor> R;
     std::vector<torch::Tensor> b;
@@ -693,14 +693,14 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
     }
 
     for (int64_t i = 1; i <= order; ++i) {
-      R.push_back(torch::pow(rks_tensor, i - 1));
-      b.push_back(h_phi_k * factorial_i / B_h);
+      R.emplace_back(torch::pow(rks_tensor, i - 1));
+      b.emplace_back(h_phi_k * factorial_i / B_h);
       factorial_i *= (i + 1);
       h_phi_k = h_phi_k / hh - 1.0f / factorial_i;
     }
 
     torch::Tensor R_tensor = torch::stack(R);
-    torch::Tensor b_tensor = torch::stack(b);
+    torch::Tensor b_tensor = torch::stack(b).to(device);
 
     torch::Tensor rhos_c;
     if (order == 1) {
@@ -779,17 +779,17 @@ class UniPCMultistepSchedulerImpl : public torch::nn::Module {
 
   torch::Tensor timesteps_;
   torch::Tensor sigmas_;
-  int num_inference_steps_ = 0;
+  int64_t num_inference_steps_ = 0;
 
   std::vector<torch::Tensor> model_outputs_;
   std::vector<torch::Tensor> timestep_list_;
   torch::Tensor last_sample_;
   int64_t lower_order_nums_;
   int64_t this_order_;
-  std::unordered_set<int> disable_corrector_;
+  std::unordered_set<int64_t> disable_corrector_;
 
-  std::optional<int> step_index_;
-  std::optional<int> begin_index_;
+  std::optional<int64_t> step_index_;
+  std::optional<int64_t> begin_index_;
 
   int64_t order_ = 1;
   ModelArgs args_;
@@ -816,7 +816,7 @@ REGISTER_MODEL_ARGS(UniPCMultistepScheduler, [&] {
   LOAD_ARG_OR(use_exponential_sigmas, "use_exponential_sigmas", false);
   LOAD_ARG_OR(use_beta_sigmas, "use_beta_sigmas", false);
   LOAD_ARG_OR(use_flow_sigmas, "use_flow_sigmas", true);
-  LOAD_ARG_OR(flow_shift, "flow_shift", 3.0f);
+  LOAD_ARG_OR(flow_shift, "flow_shift", 5.0f);
   LOAD_ARG_OR(timestep_spacing, "timestep_spacing", "linspace");
   LOAD_ARG_OR(steps_offset, "steps_offset", 0);
   LOAD_ARG_OR(final_sigmas_type, "final_sigmas_type", "zero");

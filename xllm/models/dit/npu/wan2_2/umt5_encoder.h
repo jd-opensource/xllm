@@ -1,3 +1,18 @@
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
 #pragma once
 #include <torch/torch.h>
 
@@ -6,7 +21,6 @@
 #include <iostream>
 #include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -38,7 +52,7 @@ class UMT5LayerNormImpl : public T5LayerNormImpl {
 };
 TORCH_MODULE(UMT5LayerNorm);
 
-class UMT5LayerFFNImpl : public torch::nn::Module {
+class UMT5LayerFFNImpl final : public torch::nn::Module {
  public:
   explicit UMT5LayerFFNImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
@@ -166,7 +180,7 @@ class UMT5AttentionImpl : public T5AttentionImpl {
 };
 TORCH_MODULE(UMT5Attention);
 
-class UMT5LayerSelfAttentionImpl : public torch::nn::Module {
+class UMT5LayerSelfAttentionImpl final : public torch::nn::Module {
  public:
   UMT5LayerSelfAttentionImpl(const ModelContext& context,
                              bool has_relative_attention_bias) {
@@ -192,7 +206,7 @@ class UMT5LayerSelfAttentionImpl : public torch::nn::Module {
     torch::Tensor updated_hidden_states = hidden_states + attention_output[0];
 
     std::vector<torch::Tensor> outputs = {updated_hidden_states};
-    outputs.push_back(attention_output[1]);
+    outputs.emplace_back(attention_output[1]);
     return outputs;
   }
 
@@ -214,7 +228,7 @@ class UMT5LayerSelfAttentionImpl : public torch::nn::Module {
 };
 TORCH_MODULE(UMT5LayerSelfAttention);
 
-class UMT5BlockImpl : public torch::nn::Module {
+class UMT5BlockImpl final : public torch::nn::Module {
  public:
   UMT5BlockImpl(const ModelContext& context, bool has_relative_attention_bias) {
     auto model_args = context.get_model_args();
@@ -234,7 +248,7 @@ class UMT5BlockImpl : public torch::nn::Module {
     torch::Tensor curr_hidden_states = self_attention_outputs[0];
     std::vector<torch::Tensor> attention_outputs;
     for (size_t i = 1; i < self_attention_outputs.size(); ++i) {
-      attention_outputs.push_back(self_attention_outputs[i]);
+      attention_outputs.emplace_back(self_attention_outputs[i]);
     }
 
     if (curr_hidden_states.dtype() == torch::kFloat16) {
@@ -248,7 +262,6 @@ class UMT5BlockImpl : public torch::nn::Module {
     }
 
     std::vector<torch::Tensor> outputs = {curr_hidden_states};
-
     return outputs;
   }
 
@@ -283,13 +296,12 @@ class UMT5BlockImpl : public torch::nn::Module {
     return torch::clamp(x, -clamp_value, clamp_value);
   }
 
- private:
   UMT5LayerSelfAttention self_attention_ = nullptr;
   UMT5LayerFFN ff_layer_ = nullptr;
 };
 TORCH_MODULE(UMT5Block);
 
-class UMT5EncoderModelImpl : public torch::nn::Module {
+class UMT5EncoderModelImpl final : public torch::nn::Module {
  public:
   explicit UMT5EncoderModelImpl(const ModelContext& context) {
     auto model_args = context.get_model_args();
@@ -304,7 +316,7 @@ class UMT5EncoderModelImpl : public torch::nn::Module {
       bool has_relative_bias = true;
       auto block = UMT5Block(context, has_relative_bias);
       blocks_->push_back(block);
-      layers_.push_back(block);
+      layers_.emplace_back(block);
     }
     final_layer_norm_ =
         register_module("final_layer_norm", UMT5LayerNorm(context));
@@ -313,14 +325,12 @@ class UMT5EncoderModelImpl : public torch::nn::Module {
   torch::Tensor forward(
       const torch::Tensor& input_ids,
       const std::optional<torch::Tensor>& attention_mask = std::nullopt) {
-    // Prepare input parameters
     auto options = torch::TensorOptions()
                        .dtype(torch::typeMetaToScalarType(input_ids.dtype()))
                        .device(input_ids.device());
 
     torch::Tensor hidden_states = embed_tokens_->forward(input_ids);
-    auto input_shape =
-        hidden_states.sizes();  // (batch_size, seq_length, d_model)
+    auto input_shape = hidden_states.sizes();
     int64_t batch_size = input_shape[0];
     int64_t seq_length = input_shape[1];
     torch::Tensor causal_mask;
@@ -332,8 +342,6 @@ class UMT5EncoderModelImpl : public torch::nn::Module {
            (input_ids > 0).to(options.dtype()).unsqueeze(1).unsqueeze(2)) *
           (-1e4);
     }
-
-    LOG(INFO) << "causal_mask shape" << causal_mask.sizes();
 
     for (size_t i = 0; i < layers_.size(); ++i) {
       torch::Tensor layer_head_mask = torch::Tensor();
