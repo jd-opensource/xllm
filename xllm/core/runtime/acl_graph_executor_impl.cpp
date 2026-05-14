@@ -24,6 +24,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <numeric>
+#include <tuple>
 
 #include "core/common/global_flags.h"
 #ifdef TORCH_HIGHER_THAN_PTA6
@@ -72,6 +73,9 @@ int64_t get_decode_graph_capacity(const runtime::Options& options) {
 }
 
 int64_t infer_actual_batch_size(const ModelInputParams& params) {
+  if (params.actual_num_sequences > 0) {
+    return params.actual_num_sequences;
+  }
   if (params.num_sequences > 0) {
     return params.num_sequences;
   }
@@ -114,6 +118,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   // Determine whether attention plan needs to be updated based on model type
   // Future logic can be extended here for more complex model-specific behavior
   need_update_attention_plan_ = (args.model_type() != "deepseek_v32" &&
+                                 args.model_type() != "deepseek_v4" &&
                                  args.model_type() != "glm_moe_dsa");
 
   // Check if mRoPE is used (for VLM models like qwen2-vl)
@@ -141,27 +146,18 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   }
   persistent_new_cache_slots_ = torch::zeros(
       {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
-  persistent_new_cache_slots_default_ = torch::zeros(
-      {max_tokens_per_batch}, torch::dtype(torch::kInt).device(device));
 
   // Sequence length tensors with max_seqs_per_batch
   q_seq_lens_ = torch::zeros({max_seqs_per_batch},
                              torch::dtype(torch::kInt).device(device));
   kv_seq_lens_ = torch::zeros({max_seqs_per_batch},
                               torch::dtype(torch::kInt).device(device));
-  q_seq_lens_default_ = torch::ones({max_seqs_per_batch},
-                                    torch::dtype(torch::kInt).device(device));
-  kv_seq_lens_default_ = torch::ones({max_seqs_per_batch},
-                                     torch::dtype(torch::kInt).device(device));
 
   // Block table tensors with maximum possible size
   const auto block_size = options.block_size();
   const int64_t max_block_table_len =
       (max_seq_len + block_size - 1) / block_size + 1;
   persistent_block_tables_ =
-      torch::zeros({max_seqs_per_batch, max_block_table_len},
-                   torch::dtype(torch::kInt).device(device));
-  persistent_block_tables_default_ =
       torch::zeros({max_seqs_per_batch, max_block_table_len},
                    torch::dtype(torch::kInt).device(device));
 
@@ -197,6 +193,10 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
 
   // Do not need to create ATB context and custom paged attention operation
   if (args_.head_dim() == 0) {
+    return;
+  }
+
+  if (!need_update_attention_plan_) {
     return;
   }
 
@@ -257,88 +257,6 @@ void zero_tensor_tail(torch::Tensor& tensor,
 }
 }  // namespace
 
-void GraphPersistentParam::ensure_persistent_multi_block_tables(
-    size_t manager_num) {
-  if (manager_num == 0 ||
-      persistent_multi_block_tables_.size() == manager_num) {
-    return;
-  }
-  CHECK(persistent_multi_block_tables_.empty())
-      << "Graph persistent multi_block_tables manager count changed from "
-      << persistent_multi_block_tables_.size() << " to " << manager_num;
-  CHECK(persistent_block_tables_.defined() &&
-        persistent_block_tables_.dim() == 2)
-      << "persistent_block_tables must be initialized before "
-         "multi_block_tables";
-
-  auto table_options = torch::TensorOptions()
-                           .dtype(torch::kInt)
-                           .device(torch::kCPU)
-                           .pinned_memory(true);
-  persistent_multi_block_tables_.reserve(manager_num);
-  for (size_t manager_id = 0; manager_id < manager_num; ++manager_id) {
-    auto table =
-        torch::full(persistent_block_tables_.sizes(), -1, table_options);
-    persistent_multi_block_tables_.push_back(table);
-  }
-}
-
-std::vector<torch::Tensor> GraphPersistentParam::persistent_multi_block_tables(
-    uint32_t actual_batch_size) const {
-  std::vector<torch::Tensor> tables;
-  tables.reserve(persistent_multi_block_tables_.size());
-  for (const auto& table : persistent_multi_block_tables_) {
-    if (actual_batch_size > 0) {
-      tables.push_back(table.slice(
-          /*dim=*/0, /*start=*/0, /*end=*/actual_batch_size));
-    } else {
-      tables.push_back(table);
-    }
-  }
-  return tables;
-}
-
-std::vector<int32_t> GraphPersistentParam::update_persistent_multi_block_tables(
-    const ModelInputParams& params,
-    int64_t actual_batch_size) {
-  std::vector<int32_t> table_cols;
-  if (params.multi_block_tables.empty()) {
-    return table_cols;
-  }
-
-  ensure_persistent_multi_block_tables(params.multi_block_tables.size());
-  table_cols.resize(params.multi_block_tables.size(), 0);
-  for (size_t manager_id = 0; manager_id < params.multi_block_tables.size();
-       ++manager_id) {
-    const auto& src_table = params.multi_block_tables[manager_id];
-    if (actual_batch_size <= 0 || !src_table.defined() || src_table.dim() < 2 ||
-        src_table.numel() == 0) {
-      continue;
-    }
-
-    auto& dst_table = persistent_multi_block_tables_[manager_id];
-    CHECK_LE(src_table.size(1), dst_table.size(1))
-        << "DeepSeek V4 graph multi_block_tables exceeds persistent "
-        << "capacity: manager_id=" << manager_id
-        << ", required_cols=" << src_table.size(1)
-        << ", capacity_cols=" << dst_table.size(1);
-
-    const int64_t rows_to_copy =
-        std::min<int64_t>(actual_batch_size, src_table.size(0));
-    const int64_t cols_to_copy = src_table.size(1);
-    table_cols[manager_id] = static_cast<int32_t>(cols_to_copy);
-    if (rows_to_copy <= 0 || cols_to_copy <= 0) {
-      continue;
-    }
-
-    dst_table.slice(/*dim=*/0, /*start=*/0, /*end=*/rows_to_copy)
-        .slice(/*dim=*/1, /*start=*/0, /*end=*/cols_to_copy)
-        .copy_(src_table.slice(/*dim=*/0, /*start=*/0, /*end=*/rows_to_copy),
-               /*non_blocking=*/true);
-  }
-  return table_cols;
-}
-
 std::optional<ModelInputParams> GraphPersistentParam::update(
     const torch::Tensor& tokens,
     const torch::Tensor& k_cache,
@@ -369,13 +287,10 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
           .copy_(positions, /*non_blocking=*/true);
     }
   }
-  if (q_seq_lens_default_.defined() &&
-      q_seq_lens_default_.sizes() == q_seq_lens_.sizes()) {
-    q_seq_lens_.copy_(q_seq_lens_default_, /*non_blocking=*/true);
-  }
+  int64_t q_copy_len = 0;
   if (actual_batch_size > 0 && params.q_seq_lens.defined() &&
       params.q_seq_lens.dim() >= 1 && params.q_seq_lens.numel() > 0) {
-    const int64_t q_copy_len =
+    q_copy_len =
         std::min<int64_t>(actual_batch_size, params.q_seq_lens.size(0));
     if (q_copy_len > 0) {
       q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/q_copy_len)
@@ -385,13 +300,10 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
                  /*non_blocking=*/true);
     }
   }
-  if (kv_seq_lens_default_.defined() &&
-      kv_seq_lens_default_.sizes() == kv_seq_lens_.sizes()) {
-    kv_seq_lens_.copy_(kv_seq_lens_default_, /*non_blocking=*/true);
-  }
+  int64_t kv_copy_len = 0;
   if (actual_batch_size > 0 && params.kv_seq_lens.defined() &&
       params.kv_seq_lens.dim() >= 1 && params.kv_seq_lens.numel() > 0) {
-    const int64_t kv_copy_len =
+    kv_copy_len =
         std::min<int64_t>(actual_batch_size, params.kv_seq_lens.size(0));
     if (kv_copy_len > 0) {
       kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/kv_copy_len)
@@ -404,13 +316,21 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   // Keep padded decode slots valid for empty/local-short DP shards.
   // These tensors are consumed by ATB setup alongside *_seq_lens_vec.
   const int64_t padded_batch_size = static_cast<int64_t>(padded_num_tokens);
-
-  if (persistent_new_cache_slots_default_.defined() &&
-      persistent_new_cache_slots_default_.sizes() ==
-          persistent_new_cache_slots_.sizes()) {
-    persistent_new_cache_slots_.copy_(persistent_new_cache_slots_default_,
-                                      /*non_blocking=*/true);
+  if (q_copy_len < padded_batch_size) {
+    q_seq_lens_
+        .slice(/*dim=*/0,
+               /*start=*/q_copy_len,
+               /*end=*/padded_batch_size)
+        .fill_(1);
   }
+  if (kv_copy_len < padded_batch_size) {
+    kv_seq_lens_
+        .slice(/*dim=*/0,
+               /*start=*/kv_copy_len,
+               /*end=*/padded_batch_size)
+        .fill_(1);
+  }
+
   if (actual_num_tokens > 0 && params.new_cache_slots.defined() &&
       params.new_cache_slots.dim() >= 1 && params.new_cache_slots.numel() > 0) {
     const int64_t slot_copy_len =
@@ -431,18 +351,16 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
                      static_cast<int64_t>(padded_num_tokens));
   }
 
-  // Copy block table data
-  if (persistent_block_tables_default_.defined() &&
-      persistent_block_tables_default_.sizes() ==
-          persistent_block_tables_.sizes()) {
-    persistent_block_tables_.copy_(persistent_block_tables_default_,
-                                   /*non_blocking=*/true);
-  }
+  // Copy block table data. Do not reset the full persistent tensor each step:
+  // rows/columns observed by the graph are overwritten below or explicitly
+  // zeroed in the active bucket slice.
+  int64_t block_rows_to_copy = 0;
+  int64_t actual_block_table_len = 0;
   if (actual_batch_size > 0 && params.block_tables.defined() &&
       params.block_tables.dim() >= 2 && params.block_tables.numel() > 0) {
-    const int64_t block_rows_to_copy =
+    block_rows_to_copy =
         std::min<int64_t>(actual_batch_size, params.block_tables.size(0));
-    const int64_t actual_block_table_len = params.block_tables.size(1);
+    actual_block_table_len = params.block_tables.size(1);
     if (block_rows_to_copy > 0 && actual_block_table_len > 0) {
       auto slice_persistent_block_tables =
           persistent_block_tables_
@@ -455,13 +373,19 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
           /*non_blocking=*/true);
     }
   }
+  if (block_rows_to_copy > 0 &&
+      actual_block_table_len < persistent_block_tables_.size(1)) {
+    persistent_block_tables_
+        .slice(/*dim=*/0, /*start=*/0, /*end=*/block_rows_to_copy)
+        .slice(/*dim=*/1,
+               /*start=*/actual_block_table_len,
+               /*end=*/persistent_block_tables_.size(1))
+        .zero_();
+  }
   if (actual_batch_size < padded_batch_size) {
     zero_tensor_tail(
         persistent_block_tables_, actual_batch_size, padded_batch_size);
   }
-
-  auto persistent_multi_block_table_cols =
-      update_persistent_multi_block_tables(params, actual_batch_size);
 
   // Update persistent embedding from input_embedding if available
   const auto& embedding = params.input_embedding;
@@ -534,11 +458,11 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     update_attention_mask(params);
   }
 
-  if (tiling_data_.numel() > 0) {
+  if (uses_paged_attention_tiling()) {
     aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
 
-    if (need_update_attention_plan_ && k_cache.defined() && v_cache.defined() &&
-        k_cache.numel() > 0 && v_cache.numel() > 0) {
+    if (k_cache.defined() && v_cache.defined() && k_cache.numel() > 0 &&
+        v_cache.numel() > 0) {
       plan_paged_attention_tiling(
           tokens, k_cache, v_cache, persistent_block_tables_, params, stream);
     }
@@ -578,11 +502,13 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
         persistent_new_cache_slots(padded_num_tokens);
     params_for_capture->block_tables =
         persistent_block_tables(padded_num_tokens);
-    if (!persistent_multi_block_tables_.empty()) {
-      params_for_capture->multi_block_tables =
-          persistent_multi_block_tables(padded_num_tokens);
-      params_for_capture->multi_block_table_cols =
-          std::move(persistent_multi_block_table_cols);
+    if (!params.multi_block_tables.empty()) {
+      CHECK(persistent_block_tables_.defined() &&
+            persistent_block_tables_.dim() == 2)
+          << "persistent_block_tables must be initialized before setting "
+             "multi_block_tables_capacity_cols";
+      params_for_capture->multi_block_tables_capacity_cols =
+          static_cast<int32_t>(persistent_block_tables_.size(1));
     }
 
     // Only set attn_mask if need_update_attn_mask_ is true
@@ -590,7 +516,12 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       params_for_capture->graph_buffer.attn_mask =
           persistent_mask(padded_num_tokens);
     }
-    params_for_capture->graph_buffer.tiling_data = tiling_data();
+    params_for_capture->graph_buffer.acl_graph_mode = true;
+    if (uses_paged_attention_tiling()) {
+      params_for_capture->graph_buffer.tiling_data = tiling_data();
+    } else {
+      params_for_capture->graph_buffer.tiling_data = torch::Tensor();
+    }
     // Set persistent embedding if available
     if (params.input_embedding.defined() && params.input_embedding.dim() >= 2 &&
         persistent_embedding_.defined() && persistent_embedding_.numel() > 0) {

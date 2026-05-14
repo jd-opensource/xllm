@@ -177,7 +177,8 @@ torch::Tensor NpuGlm4DecoderLayerImpl::forward(torch::Tensor& x,
                            << "excute prefill layer fail, error code: " << st;
   } else {
     const bool use_graph_decode_input =
-        FLAGS_enable_graph && input_params.graph_buffer.tiling_data.defined();
+        FLAGS_enable_graph && input_params.graph_buffer.acl_graph_mode &&
+        input_params.graph_buffer.tiling_data.defined();
     auto& decode_node =
         use_graph_decode_input ? decode_graph_node_ : decode_eager_node_;
     build_node_variant_pack(decode_node,

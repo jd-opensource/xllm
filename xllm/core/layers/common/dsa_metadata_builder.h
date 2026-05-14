@@ -71,49 +71,42 @@ class DSAMetadataBuilder {
                                               const DSAGroupInfo& gi,
                                               const std::vector<int>& ctx_lens,
                                               int32_t batch_size,
-                                              int64_t total_tokens,
-                                              int32_t block_table_cols = 0);
+                                              int64_t total_tokens);
 
   // Compute how many slots a single seq needs for this group.
   static int64_t compute_slot_num(const DSAGroupInfo& gi, int64_t token_len);
 
-  // Count semantic block-table columns and ignore graph-capacity padding.
-  static int32_t effective_block_table_cols(const torch::Tensor& block_table,
-                                            const std::vector<int>& ctx_lens,
-                                            int32_t batch_size);
-
   // Step 2: per-group processing.
   static void process_group(const torch::Tensor& raw_bt,
-                            const torch::Tensor& raw_slots,
                             const DSAGroupInfo& gi,
                             const std::vector<int>& ctx_lens,
                             const std::vector<int>& q_lens,
                             int32_t batch_size,
                             int64_t total_tokens,
                             int64_t graph_slot_capacity,
-                            int32_t block_table_cols,
+                            int32_t block_table_capacity_cols,
                             torch::Tensor& out_bt,
                             torch::Tensor& out_slots);
 
   static void process_token_group(const torch::Tensor& raw_bt,
-                                  const torch::Tensor& raw_slots,
                                   int32_t ratio,
+                                  int32_t block_size,
                                   const std::vector<int>& ctx_lens,
                                   const std::vector<int>& q_lens,
                                   int32_t batch_size,
                                   int64_t total_tokens,
                                   int64_t graph_slot_capacity,
+                                  int32_t block_table_capacity_cols,
                                   torch::Tensor& out_bt,
                                   torch::Tensor& out_slots);
 
   static void process_swa_group(const torch::Tensor& raw_bt,
-                                const torch::Tensor& raw_slots,
                                 int32_t block_size,
                                 const std::vector<int>& ctx_lens,
                                 const std::vector<int>& q_lens,
                                 int32_t batch_size,
                                 int64_t graph_slot_capacity,
-                                int32_t block_table_cols,
+                                int32_t block_table_capacity_cols,
                                 torch::Tensor& out_bt,
                                 torch::Tensor& out_slots);
 

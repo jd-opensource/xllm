@@ -103,7 +103,7 @@ inline torch::Tensor maybe_to_device(const torch::Tensor& tensor,
 inline bool deepseek_v4_uses_acl_graph(
     const xllm::ModelInputParams& input_params) {
 #if defined(USE_NPU)
-  return FLAGS_enable_graph && input_params.graph_buffer.tiling_data.defined();
+  return FLAGS_enable_graph && input_params.graph_buffer.acl_graph_mode;
 #else
   (void)input_params;
   return false;
@@ -133,6 +133,19 @@ inline void deepseek_v4_add_packed_tensor(
   if (!tensor.device().is_cpu() || tensor.numel() == 0) {
     tensor = maybe_to_device(tensor, runtime_device);
     return;
+  }
+
+  if (tensor.is_contiguous()) {
+    const size_t nbytes =
+        static_cast<size_t>(tensor.numel() * tensor.element_size());
+    for (auto& spec : specs) {
+      if (spec.cpu_tensor.data_ptr() == tensor.data_ptr() &&
+          spec.nbytes == nbytes && spec.dtype == tensor.scalar_type() &&
+          spec.sizes == tensor.sizes().vec()) {
+        spec.targets.push_back(&tensor);
+        return;
+      }
+    }
   }
 
   auto contiguous = tensor.contiguous();
@@ -309,16 +322,6 @@ struct DeepseekV4GraphMetadataState : ModelGraphMetadataState {
     torch::Tensor input_positions;
     torch::Tensor c4_pad_positions;
     torch::Tensor c128_pad_positions;
-    torch::Tensor cos;
-    torch::Tensor sin;
-    torch::Tensor c4_cos;
-    torch::Tensor c4_sin;
-    torch::Tensor c128_cos;
-    torch::Tensor c128_sin;
-    torch::Tensor c4_input_cos;
-    torch::Tensor c4_input_sin;
-    torch::Tensor c128_input_cos;
-    torch::Tensor c128_input_sin;
     torch::Tensor start_pos;
     torch::Tensor hadamard;
     std::vector<std::vector<torch::Tensor>> block_tables;
@@ -567,8 +570,10 @@ class DeepseekV4ModelImpl
       }
       copy_to_graph_packed_metadata_buffer(
           dsa, deepseek_v4_state->dsa_metadata_persistent, positions.device());
-      prepare_dsa_metadata_for_forward(
-          *attn_metadata, positions.device(), /*pack_metadata=*/false);
+      prepare_dsa_metadata_for_forward(*attn_metadata,
+                                       positions.device(),
+                                       /*pack_metadata=*/false,
+                                       /*build_rope=*/false);
     }
     input_params.attn_metadata = persist_graph_attention_metadata(
         *deepseek_v4_state, std::move(attn_metadata));
@@ -645,23 +650,13 @@ class DeepseekV4ModelImpl
       const bool metadata_prepared =
           dsa.c1_metadata.defined() && dsa.c4_metadata.defined() &&
           dsa.c128_metadata.defined() && dsa.qli_metadata.defined();
-      const bool graph_metadata_ready =
-          acl_graph_forward && dsa.packed_metadata_buffer.defined() &&
-          dsa.cos.defined() && dsa.sin.defined() && dsa.start_pos.defined();
+      const bool graph_metadata_ready = acl_graph_forward &&
+                                        dsa.packed_metadata_buffer.defined() &&
+                                        dsa.start_pos.defined();
 
       if (metadata_prepared || graph_metadata_ready) {
-        if (dsa.cos.defined() && dsa.sin.defined()) {
-          input_rope_by_ratio[1] = {dsa.cos, dsa.sin};
-        }
-        if (dsa.c4_input_cos.defined() && dsa.c4_input_sin.defined()) {
-          input_rope_by_ratio[4] = {dsa.c4_input_cos, dsa.c4_input_sin};
-        }
-        if (dsa.c128_input_cos.defined() && dsa.c128_input_sin.defined()) {
-          input_rope_by_ratio[128] = {dsa.c128_input_cos, dsa.c128_input_sin};
-        }
-        if (acl_graph_forward) {
-          build_precomputed_metadata(dsa, modified_input_params);
-        }
+        prepare_forward_dsa_runtime_metadata(
+            dsa, modified_input_params, acl_graph_forward, input_rope_by_ratio);
       } else {
         CHECK(!acl_graph_forward)
             << "DeepSeek V4 ACL graph requires prebuilt DSA metadata";
@@ -670,81 +665,15 @@ class DeepseekV4ModelImpl
         }
         deepseek_v4_pack_dsa_metadata_to_device(dsa, runtime_device);
 
-        if (dsa_rotary_embedding_) {
-          std::unordered_map<std::string, torch::Tensor> positions_map;
-          // Avoid stale group tensors when attn_metadata is reused across runs.
-          dsa.cos = torch::Tensor();
-          dsa.sin = torch::Tensor();
-          dsa.c4_cos = torch::Tensor();
-          dsa.c4_sin = torch::Tensor();
-          dsa.c128_cos = torch::Tensor();
-          dsa.c128_sin = torch::Tensor();
-
-          auto append_group_positions = [&positions_map](
-                                            const std::string& group,
-                                            const torch::Tensor& positions) {
-            if (!positions.defined() || positions.numel() == 0) {
-              return;
-            }
-            auto group_positions = positions;
-            if (group_positions.scalar_type() != torch::kInt64) {
-              group_positions = group_positions.to(torch::kInt64);
-            }
-            positions_map[group] = group_positions;
-          };
-
-          append_group_positions("default", dsa.input_positions);
-          append_group_positions("c4", dsa.c4_pad_positions);
-          append_group_positions("c128", dsa.c128_pad_positions);
-
-          if (!positions_map.empty()) {
-            auto group_cos_sin = dsa_rotary_embedding_->build(positions_map);
-
-            auto default_it = group_cos_sin.find("default");
-            if (default_it != group_cos_sin.end()) {
-              input_rope_by_ratio[1] = default_it->second;
-              dsa.cos = default_it->second.first;
-              dsa.sin = default_it->second.second;
-            }
-
-            auto c4_it = group_cos_sin.find("c4");
-            if (c4_it != group_cos_sin.end()) {
-              dsa.c4_cos = c4_it->second.first;
-              dsa.c4_sin = c4_it->second.second;
-            }
-
-            auto c128_it = group_cos_sin.find("c128");
-            if (c128_it != group_cos_sin.end()) {
-              dsa.c128_cos = c128_it->second.first;
-              dsa.c128_sin = c128_it->second.second;
-            }
-          }
-
-          if (dsa.input_positions.defined() &&
-              dsa.input_positions.numel() > 0) {
-            auto input_positions = dsa.input_positions;
-            if (input_positions.scalar_type() != torch::kInt64) {
-              input_positions = input_positions.to(torch::kInt64);
-            }
-            // C4/C128 layers still apply main q/kv RoPE at input-token length;
-            // only the RoPE group changes to use the compressed theta.
-            auto input_group_cos_sin = dsa_rotary_embedding_->build(
-                {{"c4", input_positions}, {"c128", input_positions}});
-            auto c4_input_it = input_group_cos_sin.find("c4");
-            if (c4_input_it != input_group_cos_sin.end()) {
-              input_rope_by_ratio[4] = c4_input_it->second;
-            }
-            auto c128_input_it = input_group_cos_sin.find("c128");
-            if (c128_input_it != input_group_cos_sin.end()) {
-              input_rope_by_ratio[128] = c128_input_it->second;
-            }
-          }
-        }
-
         if (dsa.actual_seq_lengths_kv.defined() && dsa.seq_lens_q.defined()) {
           dsa.start_pos =
               (dsa.actual_seq_lengths_kv - dsa.seq_lens_q).to(torch::kInt32);
         }
+        prepare_forward_dsa_runtime_metadata(dsa,
+                                             modified_input_params,
+                                             /*rebuild_precomputed_metadata=*/
+                                             true,
+                                             input_rope_by_ratio);
       }
     }
 
@@ -1013,11 +942,6 @@ class DeepseekV4ModelImpl
                                          dsa_cos_sin_,
                                          caches_info_,
                                          group_infos_));
-    if (attn_metadata->dsa_metadata) {
-      prepare_dsa_metadata_for_forward(*attn_metadata, positions.device());
-      build_precomputed_metadata(*attn_metadata->dsa_metadata,
-                                 modified_input_params);
-    }
     return attn_metadata;
   }
 
@@ -1033,20 +957,6 @@ class DeepseekV4ModelImpl
 
     dsa.attn_mask =
         copy_to_persistent_tensor(dsa.attn_mask, persistent.attn_mask);
-    dsa.cos = copy_to_persistent_tensor(dsa.cos, persistent.cos);
-    dsa.sin = copy_to_persistent_tensor(dsa.sin, persistent.sin);
-    dsa.c4_cos = copy_to_persistent_tensor(dsa.c4_cos, persistent.c4_cos);
-    dsa.c4_sin = copy_to_persistent_tensor(dsa.c4_sin, persistent.c4_sin);
-    dsa.c128_cos = copy_to_persistent_tensor(dsa.c128_cos, persistent.c128_cos);
-    dsa.c128_sin = copy_to_persistent_tensor(dsa.c128_sin, persistent.c128_sin);
-    dsa.c4_input_cos =
-        copy_to_persistent_tensor(dsa.c4_input_cos, persistent.c4_input_cos);
-    dsa.c4_input_sin =
-        copy_to_persistent_tensor(dsa.c4_input_sin, persistent.c4_input_sin);
-    dsa.c128_input_cos = copy_to_persistent_tensor(dsa.c128_input_cos,
-                                                   persistent.c128_input_cos);
-    dsa.c128_input_sin = copy_to_persistent_tensor(dsa.c128_input_sin,
-                                                   persistent.c128_input_sin);
     dsa.start_pos =
         copy_to_persistent_tensor(dsa.start_pos, persistent.start_pos);
 
@@ -1108,9 +1018,114 @@ class DeepseekV4ModelImpl
     }
     return std::max<int64_t>((cache.size(0) + block_size - 1) / block_size, 1);
   }
+  void build_dsa_rope_metadata(
+      layer::DSAMetadata& dsa,
+      std::unordered_map<int32_t, layer::DeepseekV4RotaryEmbedding::CosSinPair>*
+          input_rope_by_ratio = nullptr) const {
+    if (!dsa_rotary_embedding_) {
+      return;
+    }
+
+    std::unordered_map<std::string, torch::Tensor> positions_map;
+    dsa.cos = torch::Tensor();
+    dsa.sin = torch::Tensor();
+    dsa.c4_cos = torch::Tensor();
+    dsa.c4_sin = torch::Tensor();
+    dsa.c128_cos = torch::Tensor();
+    dsa.c128_sin = torch::Tensor();
+    dsa.c4_input_cos = torch::Tensor();
+    dsa.c4_input_sin = torch::Tensor();
+    dsa.c128_input_cos = torch::Tensor();
+    dsa.c128_input_sin = torch::Tensor();
+
+    auto append_group_positions = [&positions_map](
+                                      const std::string& group,
+                                      const torch::Tensor& positions) {
+      if (!positions.defined() || positions.numel() == 0) {
+        return;
+      }
+      auto group_positions = positions;
+      if (group_positions.scalar_type() != torch::kInt64) {
+        group_positions = group_positions.to(torch::kInt64);
+      }
+      positions_map[group] = group_positions;
+    };
+
+    append_group_positions("default", dsa.input_positions);
+    append_group_positions("c4", dsa.c4_pad_positions);
+    append_group_positions("c128", dsa.c128_pad_positions);
+
+    if (!positions_map.empty()) {
+      auto group_cos_sin = dsa_rotary_embedding_->build(positions_map);
+
+      auto default_it = group_cos_sin.find("default");
+      if (default_it != group_cos_sin.end()) {
+        dsa.cos = default_it->second.first;
+        dsa.sin = default_it->second.second;
+        if (input_rope_by_ratio != nullptr) {
+          (*input_rope_by_ratio)[1] = default_it->second;
+        }
+      }
+
+      auto c4_it = group_cos_sin.find("c4");
+      if (c4_it != group_cos_sin.end()) {
+        dsa.c4_cos = c4_it->second.first;
+        dsa.c4_sin = c4_it->second.second;
+      }
+
+      auto c128_it = group_cos_sin.find("c128");
+      if (c128_it != group_cos_sin.end()) {
+        dsa.c128_cos = c128_it->second.first;
+        dsa.c128_sin = c128_it->second.second;
+      }
+    }
+
+    if (dsa.input_positions.defined() && dsa.input_positions.numel() > 0) {
+      auto input_positions = dsa.input_positions;
+      if (input_positions.scalar_type() != torch::kInt64) {
+        input_positions = input_positions.to(torch::kInt64);
+      }
+      // C4/C128 layers still apply main q/kv RoPE at input-token length; only
+      // the RoPE group changes to use the compressed theta.
+      auto input_group_cos_sin = dsa_rotary_embedding_->build(
+          {{"c4", input_positions}, {"c128", input_positions}});
+      auto c4_input_it = input_group_cos_sin.find("c4");
+      if (c4_input_it != input_group_cos_sin.end()) {
+        dsa.c4_input_cos = c4_input_it->second.first;
+        dsa.c4_input_sin = c4_input_it->second.second;
+        if (input_rope_by_ratio != nullptr) {
+          (*input_rope_by_ratio)[4] = c4_input_it->second;
+        }
+      }
+      auto c128_input_it = input_group_cos_sin.find("c128");
+      if (c128_input_it != input_group_cos_sin.end()) {
+        dsa.c128_input_cos = c128_input_it->second.first;
+        dsa.c128_input_sin = c128_input_it->second.second;
+        if (input_rope_by_ratio != nullptr) {
+          (*input_rope_by_ratio)[128] = c128_input_it->second;
+        }
+      }
+    }
+  }
+
+  void prepare_forward_dsa_runtime_metadata(
+      layer::DSAMetadata& dsa,
+      const ModelInputParams& params,
+      bool rebuild_precomputed_metadata,
+      std::unordered_map<int32_t, layer::DeepseekV4RotaryEmbedding::CosSinPair>&
+          input_rope_by_ratio) const {
+    build_dsa_rope_metadata(dsa, &input_rope_by_ratio);
+    if (rebuild_precomputed_metadata || !dsa.c1_metadata.defined() ||
+        !dsa.c4_metadata.defined() || !dsa.c128_metadata.defined() ||
+        !dsa.qli_metadata.defined()) {
+      build_precomputed_metadata(dsa, params);
+    }
+  }
+
   void prepare_dsa_metadata_for_forward(layer::AttentionMetadata& attn_metadata,
                                         const torch::Device& runtime_device,
-                                        bool pack_metadata = true) const {
+                                        bool pack_metadata = true,
+                                        bool build_rope = true) const {
     if (!attn_metadata.dsa_metadata) {
       return;
     }
@@ -1123,76 +1138,8 @@ class DeepseekV4ModelImpl
       deepseek_v4_pack_dsa_metadata_to_device(dsa, runtime_device);
     }
 
-    if (dsa_rotary_embedding_) {
-      std::unordered_map<std::string, torch::Tensor> positions_map;
-      dsa.cos = torch::Tensor();
-      dsa.sin = torch::Tensor();
-      dsa.c4_cos = torch::Tensor();
-      dsa.c4_sin = torch::Tensor();
-      dsa.c128_cos = torch::Tensor();
-      dsa.c128_sin = torch::Tensor();
-      dsa.c4_input_cos = torch::Tensor();
-      dsa.c4_input_sin = torch::Tensor();
-      dsa.c128_input_cos = torch::Tensor();
-      dsa.c128_input_sin = torch::Tensor();
-
-      auto append_group_positions = [&positions_map](
-                                        const std::string& group,
-                                        const torch::Tensor& positions) {
-        if (!positions.defined() || positions.numel() == 0) {
-          return;
-        }
-        auto group_positions = positions;
-        if (group_positions.scalar_type() != torch::kInt64) {
-          group_positions = group_positions.to(torch::kInt64);
-        }
-        positions_map[group] = group_positions;
-      };
-
-      append_group_positions("default", dsa.input_positions);
-      append_group_positions("c4", dsa.c4_pad_positions);
-      append_group_positions("c128", dsa.c128_pad_positions);
-
-      if (!positions_map.empty()) {
-        auto group_cos_sin = dsa_rotary_embedding_->build(positions_map);
-
-        auto default_it = group_cos_sin.find("default");
-        if (default_it != group_cos_sin.end()) {
-          dsa.cos = default_it->second.first;
-          dsa.sin = default_it->second.second;
-        }
-
-        auto c4_it = group_cos_sin.find("c4");
-        if (c4_it != group_cos_sin.end()) {
-          dsa.c4_cos = c4_it->second.first;
-          dsa.c4_sin = c4_it->second.second;
-        }
-
-        auto c128_it = group_cos_sin.find("c128");
-        if (c128_it != group_cos_sin.end()) {
-          dsa.c128_cos = c128_it->second.first;
-          dsa.c128_sin = c128_it->second.second;
-        }
-      }
-
-      if (dsa.input_positions.defined() && dsa.input_positions.numel() > 0) {
-        auto input_positions = dsa.input_positions;
-        if (input_positions.scalar_type() != torch::kInt64) {
-          input_positions = input_positions.to(torch::kInt64);
-        }
-        auto input_group_cos_sin = dsa_rotary_embedding_->build(
-            {{"c4", input_positions}, {"c128", input_positions}});
-        auto c4_input_it = input_group_cos_sin.find("c4");
-        if (c4_input_it != input_group_cos_sin.end()) {
-          dsa.c4_input_cos = c4_input_it->second.first;
-          dsa.c4_input_sin = c4_input_it->second.second;
-        }
-        auto c128_input_it = input_group_cos_sin.find("c128");
-        if (c128_input_it != input_group_cos_sin.end()) {
-          dsa.c128_input_cos = c128_input_it->second.first;
-          dsa.c128_input_sin = c128_input_it->second.second;
-        }
-      }
+    if (build_rope) {
+      build_dsa_rope_metadata(dsa);
     }
 
     if (dsa.actual_seq_lengths_kv.defined() && dsa.seq_lens_q.defined()) {

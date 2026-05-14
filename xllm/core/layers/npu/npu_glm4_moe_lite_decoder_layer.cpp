@@ -556,8 +556,8 @@ void NpuGlm4MoeDecoderLiteImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(input_idx++) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
 
-  if (FLAGS_enable_graph && !is_prefill &&
-      input_params.graph_buffer.tiling_data.defined()) {
+  if (FLAGS_enable_graph && input_params.graph_buffer.acl_graph_mode &&
+      !is_prefill && input_params.graph_buffer.tiling_data.defined()) {
     node.variantPack.inTensors.at(input_idx++) =
         atb_speed::Utils::AtTensor2Tensor(
             input_params.graph_buffer.tiling_data);

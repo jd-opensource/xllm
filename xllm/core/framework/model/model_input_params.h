@@ -345,7 +345,7 @@ struct ModelInputParams {
       params.multi_block_tables.push_back(
           safe_to(t, t.options().device(torch::kCPU), true));
     }
-    params.multi_block_table_cols = multi_block_table_cols;
+    params.multi_block_tables_capacity_cols = multi_block_tables_capacity_cols;
     params.kv_seq_lens_vec = kv_seq_lens_vec;
     params.q_seq_lens_vec = q_seq_lens_vec;
 
@@ -403,6 +403,7 @@ struct ModelInputParams {
 
     // Copy graph_buffer to device
     // params.graph_buffer = safe_to(graph_buffer, device, true);
+    params.graph_buffer.acl_graph_mode = graph_buffer.acl_graph_mode;
     params.graph_buffer.attn_mask =
         safe_to(graph_buffer.attn_mask, device, true);
     params.graph_buffer.tiling_data =
@@ -510,10 +511,11 @@ struct ModelInputParams {
   // multi block manager block_tables for DeepSeek V4
   // vector of (batch_size, max_block_length_i) tensors, one per manager
   std::vector<torch::Tensor> multi_block_tables;
-  // Semantic column count for each multi_block_tables manager. Graph persistent
-  // tables may have a wider storage capacity; DSA builders must ignore stale
-  // values beyond this count.
-  std::vector<int32_t> multi_block_table_cols;
+  // Graph bucket column capacity for DSA metadata built from
+  // multi_block_tables. The input multi_block_tables keep their request-shaped
+  // semantic width; builders use this capacity only to pad graph metadata
+  // outputs.
+  int32_t multi_block_tables_capacity_cols = 0;
 
   // the indptr of the paged kv-cache
   // used in flashinfer
@@ -630,6 +632,7 @@ struct ModelInputParams {
   }
 
   struct GraphBuffer {
+    bool acl_graph_mode = false;
     torch::Tensor attn_mask;
     torch::Tensor tiling_data;
   };
