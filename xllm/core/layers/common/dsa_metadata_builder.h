@@ -71,7 +71,8 @@ class DSAMetadataBuilder {
                                               const DSAGroupInfo& gi,
                                               const std::vector<int>& ctx_lens,
                                               int32_t batch_size,
-                                              int64_t total_tokens);
+                                              int64_t total_tokens,
+                                              int32_t block_table_cols = 0);
 
   // Compute how many slots a single seq needs for this group.
   static int64_t compute_slot_num(const DSAGroupInfo& gi, int64_t token_len);
@@ -90,6 +91,7 @@ class DSAMetadataBuilder {
                             int32_t batch_size,
                             int64_t total_tokens,
                             int64_t graph_slot_capacity,
+                            int32_t block_table_cols,
                             torch::Tensor& out_bt,
                             torch::Tensor& out_slots);
 
@@ -111,6 +113,7 @@ class DSAMetadataBuilder {
                                 const std::vector<int>& q_lens,
                                 int32_t batch_size,
                                 int64_t graph_slot_capacity,
+                                int32_t block_table_cols,
                                 torch::Tensor& out_bt,
                                 torch::Tensor& out_slots);
 

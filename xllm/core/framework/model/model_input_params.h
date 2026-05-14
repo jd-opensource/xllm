@@ -345,6 +345,7 @@ struct ModelInputParams {
       params.multi_block_tables.push_back(
           safe_to(t, t.options().device(torch::kCPU), true));
     }
+    params.multi_block_table_cols = multi_block_table_cols;
     params.kv_seq_lens_vec = kv_seq_lens_vec;
     params.q_seq_lens_vec = q_seq_lens_vec;
 
@@ -509,6 +510,10 @@ struct ModelInputParams {
   // multi block manager block_tables for DeepSeek V4
   // vector of (batch_size, max_block_length_i) tensors, one per manager
   std::vector<torch::Tensor> multi_block_tables;
+  // Semantic column count for each multi_block_tables manager. Graph persistent
+  // tables may have a wider storage capacity; DSA builders must ignore stale
+  // values beyond this count.
+  std::vector<int32_t> multi_block_table_cols;
 
   // the indptr of the paged kv-cache
   // used in flashinfer

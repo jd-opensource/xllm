@@ -192,6 +192,13 @@ void DSAMetadataBuilder::build_dsa_fields(
         << "DSAMetadataBuilder: manager_num(" << manager_num
         << ") exceeds group_infos size(" << group_infos.size()
         << "), cannot align manager/group mapping.";
+    if (!params.multi_block_table_cols.empty()) {
+      CHECK_EQ(static_cast<size_t>(manager_num),
+               params.multi_block_table_cols.size())
+          << "DSAMetadataBuilder: multi_block_table_cols manager count "
+          << "mismatch. manager_num=" << manager_num
+          << ", cols_size=" << params.multi_block_table_cols.size();
+    }
     const int32_t n_layers = static_cast<int32_t>(caches_info.size());
     const auto& ctx_lens = params.kv_seq_lens_vec;
     const int64_t graph_slot_capacity =
@@ -202,17 +209,24 @@ void DSAMetadataBuilder::build_dsa_fields(
     // Step 1: block -> slot expansion per manager
     std::vector<torch::Tensor> mgr_slots(manager_num);
     for (int32_t m = 0; m < manager_num; ++m) {
+      const int32_t block_table_cols = params.multi_block_table_cols.empty()
+                                           ? -1
+                                           : params.multi_block_table_cols[m];
       mgr_slots[m] = expand_blocks_to_slots(active_multi_block_tables[m],
                                             group_infos[m],
                                             ctx_lens,
                                             batch_size,
-                                            total_tokens);
+                                            total_tokens,
+                                            block_table_cols);
     }
 
     // Step 2: per-group processing
     std::vector<torch::Tensor> proc_slots(manager_num);
     std::vector<torch::Tensor> proc_bt(manager_num);
     for (int32_t m = 0; m < manager_num; ++m) {
+      const int32_t block_table_cols = params.multi_block_table_cols.empty()
+                                           ? -1
+                                           : params.multi_block_table_cols[m];
       process_group(active_multi_block_tables[m],
                     mgr_slots[m],
                     group_infos[m],
@@ -221,6 +235,7 @@ void DSAMetadataBuilder::build_dsa_fields(
                     batch_size,
                     total_tokens,
                     graph_slot_capacity,
+                    block_table_cols,
                     proc_bt[m],
                     proc_slots[m]);
     }
@@ -254,12 +269,16 @@ torch::Tensor DSAMetadataBuilder::expand_blocks_to_slots(
     const DSAGroupInfo& gi,
     const std::vector<int>& ctx_lens,
     int32_t batch_size,
-    int64_t total_tokens) {
+    int64_t total_tokens,
+    int32_t block_table_cols) {
   const int32_t bs = gi.block_size;
   auto slots = torch::full({total_tokens}, -1, torch::kInt32);
   auto slots_acc = slots.accessor<int32_t, 1>();
   auto bt_acc = block_table.accessor<int32_t, 2>();
-  const int32_t max_blocks = block_table.size(1);
+  const int32_t max_blocks =
+      block_table_cols >= 0
+          ? std::min<int32_t>(block_table_cols, block_table.size(1))
+          : block_table.size(1);
 
   int64_t start_idx = 0;
   for (int32_t seq = 0; seq < batch_size; ++seq) {
@@ -336,6 +355,7 @@ void DSAMetadataBuilder::process_group(const torch::Tensor& raw_bt,
                                        int32_t batch_size,
                                        int64_t total_tokens,
                                        int64_t graph_slot_capacity,
+                                       int32_t block_table_cols,
                                        torch::Tensor& out_bt,
                                        torch::Tensor& out_slots) {
   if (gi.type == DSACacheType::TOKEN) {
@@ -357,6 +377,7 @@ void DSAMetadataBuilder::process_group(const torch::Tensor& raw_bt,
                       q_lens,
                       batch_size,
                       graph_slot_capacity,
+                      block_table_cols,
                       out_bt,
                       out_slots);
   } else {
@@ -445,6 +466,7 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
                                            const std::vector<int>& q_lens,
                                            int32_t batch_size,
                                            int64_t graph_slot_capacity,
+                                           int32_t block_table_cols,
                                            torch::Tensor& out_bt,
                                            torch::Tensor& out_slots) {
   CHECK_EQ(static_cast<int32_t>(ctx_lens.size()), batch_size)
@@ -475,7 +497,9 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
   auto out_slots_acc = out_slots_tensor.accessor<int32_t, 1>();
   auto raw_bt_acc = raw_bt.accessor<int32_t, 2>();
   const int64_t semantic_cols =
-      effective_block_table_cols(raw_bt, ctx_lens, batch_size);
+      block_table_cols >= 0
+          ? std::min<int64_t>(block_table_cols, raw_bt.size(1))
+          : effective_block_table_cols(raw_bt, ctx_lens, batch_size);
   const int64_t storage_cols = raw_bt.size(1);
   const int64_t block_size_i64 = static_cast<int64_t>(block_size);
 

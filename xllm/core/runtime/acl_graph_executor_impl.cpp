@@ -276,13 +276,10 @@ void GraphPersistentParam::ensure_persistent_multi_block_tables(
                            .device(torch::kCPU)
                            .pinned_memory(true);
   persistent_multi_block_tables_.reserve(manager_num);
-  persistent_multi_block_tables_default_.reserve(manager_num);
   for (size_t manager_id = 0; manager_id < manager_num; ++manager_id) {
     auto table =
         torch::full(persistent_block_tables_.sizes(), -1, table_options);
     persistent_multi_block_tables_.push_back(table);
-    persistent_multi_block_tables_default_.push_back(
-        torch::full(table.sizes(), -1, table.options()));
   }
 }
 
@@ -299,6 +296,47 @@ std::vector<torch::Tensor> GraphPersistentParam::persistent_multi_block_tables(
     }
   }
   return tables;
+}
+
+std::vector<int32_t> GraphPersistentParam::update_persistent_multi_block_tables(
+    const ModelInputParams& params,
+    int64_t actual_batch_size) {
+  std::vector<int32_t> table_cols;
+  if (params.multi_block_tables.empty()) {
+    return table_cols;
+  }
+
+  ensure_persistent_multi_block_tables(params.multi_block_tables.size());
+  table_cols.resize(params.multi_block_tables.size(), 0);
+  for (size_t manager_id = 0; manager_id < params.multi_block_tables.size();
+       ++manager_id) {
+    const auto& src_table = params.multi_block_tables[manager_id];
+    if (actual_batch_size <= 0 || !src_table.defined() || src_table.dim() < 2 ||
+        src_table.numel() == 0) {
+      continue;
+    }
+
+    auto& dst_table = persistent_multi_block_tables_[manager_id];
+    CHECK_LE(src_table.size(1), dst_table.size(1))
+        << "DeepSeek V4 graph multi_block_tables exceeds persistent "
+        << "capacity: manager_id=" << manager_id
+        << ", required_cols=" << src_table.size(1)
+        << ", capacity_cols=" << dst_table.size(1);
+
+    const int64_t rows_to_copy =
+        std::min<int64_t>(actual_batch_size, src_table.size(0));
+    const int64_t cols_to_copy = src_table.size(1);
+    table_cols[manager_id] = static_cast<int32_t>(cols_to_copy);
+    if (rows_to_copy <= 0 || cols_to_copy <= 0) {
+      continue;
+    }
+
+    dst_table.slice(/*dim=*/0, /*start=*/0, /*end=*/rows_to_copy)
+        .slice(/*dim=*/1, /*start=*/0, /*end=*/cols_to_copy)
+        .copy_(src_table.slice(/*dim=*/0, /*start=*/0, /*end=*/rows_to_copy),
+               /*non_blocking=*/true);
+  }
+  return table_cols;
 }
 
 std::optional<ModelInputParams> GraphPersistentParam::update(
@@ -422,50 +460,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
         persistent_block_tables_, actual_batch_size, padded_batch_size);
   }
 
-  if (!persistent_multi_block_tables_.empty()) {
-    for (size_t manager_id = 0;
-         manager_id < persistent_multi_block_tables_.size();
-         ++manager_id) {
-      auto& persistent_table = persistent_multi_block_tables_[manager_id];
-      const auto& default_table =
-          persistent_multi_block_tables_default_[manager_id];
-      if (default_table.defined() &&
-          default_table.sizes() == persistent_table.sizes()) {
-        persistent_table.copy_(default_table, /*non_blocking=*/true);
-      }
-    }
-  }
-
-  if (!params.multi_block_tables.empty()) {
-    ensure_persistent_multi_block_tables(params.multi_block_tables.size());
-    for (size_t manager_id = 0; manager_id < params.multi_block_tables.size();
-         ++manager_id) {
-      auto& persistent_table = persistent_multi_block_tables_[manager_id];
-
-      const auto& src_table = params.multi_block_tables[manager_id];
-      if (actual_batch_size <= 0 || !src_table.defined() ||
-          src_table.dim() < 2 || src_table.numel() == 0) {
-        continue;
-      }
-
-      const int64_t rows_to_copy =
-          std::min<int64_t>(actual_batch_size, src_table.size(0));
-      CHECK_LE(src_table.size(1), persistent_table.size(1))
-          << "DeepSeek V4 graph multi_block_tables exceeds persistent "
-          << "capacity: manager_id=" << manager_id
-          << ", required_cols=" << src_table.size(1)
-          << ", capacity_cols=" << persistent_table.size(1);
-      const int64_t cols_to_copy =
-          std::min<int64_t>(persistent_table.size(1), src_table.size(1));
-      if (rows_to_copy > 0 && cols_to_copy > 0) {
-        persistent_table.slice(/*dim=*/0, /*start=*/0, /*end=*/rows_to_copy)
-            .slice(/*dim=*/1, /*start=*/0, /*end=*/cols_to_copy)
-            .copy_(src_table.slice(/*dim=*/0, /*start=*/0, /*end=*/rows_to_copy)
-                       .slice(/*dim=*/1, /*start=*/0, /*end=*/cols_to_copy),
-                   /*non_blocking=*/true);
-      }
-    }
-  }
+  auto persistent_multi_block_table_cols =
+      update_persistent_multi_block_tables(params, actual_batch_size);
 
   // Update persistent embedding from input_embedding if available
   const auto& embedding = params.input_embedding;
@@ -585,6 +581,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     if (!persistent_multi_block_tables_.empty()) {
       params_for_capture->multi_block_tables =
           persistent_multi_block_tables(padded_num_tokens);
+      params_for_capture->multi_block_table_cols =
+          std::move(persistent_multi_block_table_cols);
     }
 
     // Only set attn_mask if need_update_attn_mask_ is true
