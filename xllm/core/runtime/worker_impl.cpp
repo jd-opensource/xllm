@@ -226,7 +226,12 @@ bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
       .enable_xtensor(FLAGS_enable_xtensor)
       .enable_linear_attention(enable_linear_attention)
       .enable_lighting_indexer(enable_lighting_indexer)
-      .enable_kv_cache_quant(enable_kv_cache_quant);
+      .enable_kv_cache_quant(enable_kv_cache_quant)
+      .block_size(options_.block_size())
+      .head_dim(args.head_dim())
+      .index_head_dim(std::max(args.index_head_dim(), 1))
+      .window_size(std::max(args.window_size(), 1))
+      .compress_ratios(args.compress_ratios());
 
   allocate_kv_caches(kv_caches_, kv_cache_shape, create_options);
 

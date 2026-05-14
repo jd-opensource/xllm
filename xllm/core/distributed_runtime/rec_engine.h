@@ -24,6 +24,7 @@ limitations under the License.
 #include "engine.h"
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
+#include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"

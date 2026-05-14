@@ -230,6 +230,9 @@ struct RawForwardInput {
   std::vector<int32_t> kv_cache_tokens_nums;
   std::vector<int32_t> new_token_slot_ids;
   std::vector<std::vector<int32_t>> block_tables_vec;
+  // multi block manager support for DeepSeek V4
+  // [manager_num][batch_size][block_ids]
+  std::vector<std::vector<std::vector<int32_t>>> multi_block_tables_vec;
   int32_t num_sequences;
   // num tokens of all workers，mainly used for dp case
   std::vector<int32_t> dp_global_token_nums;
@@ -241,6 +244,8 @@ struct RawForwardInput {
   // chunked prefill case of speculative decoding
   // extra token ids for each sequence, and -1 for last chunk
   std::vector<int32_t> extra_token_ids;
+  // Shifted target token ids for MTP training/evaluation paths.
+  std::vector<int32_t> mtp_shifted_token_ids;
   // embedding ids of each sequence
   std::vector<int> embedding_ids;
   // linear state ids of each sequence
@@ -390,6 +395,10 @@ struct RawForwardInput {
     if (!flatten_positions_vec.empty()) {
       outputs.flatten_positions_vec =
           gather_token_level_vector_i32(flatten_positions_vec);
+    }
+    if (!mtp_shifted_token_ids.empty()) {
+      outputs.mtp_shifted_token_ids =
+          gather_token_level_vector_i32(mtp_shifted_token_ids);
     }
 
     auto build_seq_lens = [&](const std::vector<int32_t>& original,

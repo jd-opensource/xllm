@@ -32,6 +32,7 @@ limitations under the License.
 #include "framework/block/block_manager_pool.h"
 #include "framework/eplb/eplb_manager.h"
 #include "framework/eplb/eplb_policy.h"
+#include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"

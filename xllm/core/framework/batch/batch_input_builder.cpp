@@ -22,8 +22,6 @@ limitations under the License.
 #include <cstddef>
 #include <cstdint>
 #include <thread>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -101,11 +99,13 @@ BatchInputBuilder::BatchInputBuilder(
       batch_id_(batch_id),
       cp_size_(std::max(1, cp_size)) {
   // Reserve space for better performance
-  state_.flatten_tokens_vec.reserve(1000);
-  state_.flatten_positions_vec.reserve(1000);
+  const size_t reserve_size = 1024;
+  state_.flatten_tokens_vec.reserve(reserve_size);
+  state_.flatten_positions_vec.reserve(reserve_size);
   state_.mrope_positions_vec.reserve(sequences.size());
   state_.block_tables_vec.reserve(sequences.size());
   state_.acc_logprob_vec.reserve(sequences.size());
+  state_.mtp_shifted_token_ids.reserve(reserve_size);
   if (args_ != nullptr) {
     use_mrope_ = (args_->rope_scaling_rope_type() == "mrope");
   }
@@ -167,12 +167,11 @@ TransferKVInfo BatchInputBuilder::build_step_transfer_info(
 ForwardInput BatchInputBuilder::build_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
-  (void)num_decoding_tokens;
-  (void)min_decoding_batch_size;
   // Since dont test multithreaded for ForwardInput, set thread_pool_ to
   // nullptr.
   thread_pool_ = nullptr;
   process_sequences();
+  padding_decode_batch_size(num_decoding_tokens, min_decoding_batch_size);
 
   return state_to_forward_input();
 }
@@ -328,6 +327,9 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.extra_token_ids.insert(state_.extra_token_ids.end(),
                                   state.extra_token_ids.begin(),
                                   state.extra_token_ids.end());
+    state_.mtp_shifted_token_ids.insert(state_.mtp_shifted_token_ids.end(),
+                                        state.mtp_shifted_token_ids.begin(),
+                                        state.mtp_shifted_token_ids.end());
     state_.transfer_kv_infos.insert(state_.transfer_kv_infos.end(),
                                     state.transfer_kv_infos.begin(),
                                     state.transfer_kv_infos.end());
@@ -345,6 +347,25 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.paged_kv_last_page_len.insert(state_.paged_kv_last_page_len.end(),
                                          state.paged_kv_last_page_len.begin(),
                                          state.paged_kv_last_page_len.end());
+
+    if (!state.multi_block_tables_vec.empty()) {
+      if (state_.multi_block_tables_vec.empty()) {
+        state_.multi_block_tables_vec.resize(
+            state.multi_block_tables_vec.size());
+      }
+      CHECK_EQ(state_.multi_block_tables_vec.size(),
+               state.multi_block_tables_vec.size())
+          << "multi_block_tables manager count mismatch while merging thread "
+             "states. dst_manager_num="
+          << state_.multi_block_tables_vec.size()
+          << ", src_manager_num=" << state.multi_block_tables_vec.size();
+      for (size_t m = 0; m < state.multi_block_tables_vec.size(); ++m) {
+        auto& dst_mgr_tables = state_.multi_block_tables_vec[m];
+        const auto& src_mgr_tables = state.multi_block_tables_vec[m];
+        dst_mgr_tables.insert(
+            dst_mgr_tables.end(), src_mgr_tables.begin(), src_mgr_tables.end());
+      }
+    }
   }
   for (const auto& write_block_ids : thread_write_block_ids) {
     write_block_ids_.insert(write_block_ids.begin(), write_block_ids.end());
@@ -424,6 +445,7 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
                                                      uint32_t padded_seq_len,
                                                      BuilderState* state_ptr) {
   BuilderState& state = state_ptr ? *state_ptr : state_;
+  const size_t seq_token_begin = state.flatten_tokens_vec.size();
 
   const auto& token_ids = sequence->tokens();
   const uint32_t n_tokens = token_ids.size();
@@ -485,6 +507,7 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
   state.linear_state_ids.emplace_back(sequence->get_single_block_id());
 
   // Add extra token id
+  int32_t extra_token_id = -1;
   if (n_tokens == seq_len) {
     // last chunk of prefill and decode
     // add -1 as extra token id
@@ -492,7 +515,25 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     state.embedding_ids.emplace_back(sequence->get_single_block_id());
     state.request_ids.emplace_back(sequence->request_id());
   } else {
-    state.extra_token_ids.emplace_back(token_ids[seq_len]);
+    extra_token_id = token_ids[seq_len];
+    state.extra_token_ids.emplace_back(extra_token_id);
+  }
+
+  if (cp_size_ > 1 && state.batch_forward_type.is_prefill()) {
+    const uint32_t q_len = seq_len - n_kv_cache_tokens;
+    if (q_len > 1) {
+      state.mtp_shifted_token_ids.insert(
+          state.mtp_shifted_token_ids.end(),
+          state.flatten_tokens_vec.begin() + seq_token_begin + 1,
+          state.flatten_tokens_vec.begin() + seq_token_begin + q_len);
+    }
+    state.mtp_shifted_token_ids.emplace_back(extra_token_id);
+    if (padded_seq_len > seq_len) {
+      const int32_t pad_token_id = args_ ? args_->pad_token_id() : 0;
+      state.mtp_shifted_token_ids.insert(state.mtp_shifted_token_ids.end(),
+                                         padded_seq_len - seq_len,
+                                         pad_token_id);
+    }
   }
 }
 
@@ -540,6 +581,35 @@ void BatchInputBuilder::setup_kv_cache_info(
   sequence->kv_state().incr_kv_cache_tokens_num(/*size=*/q_seq_len);
 
   const auto blocks = sequence->kv_state().kv_blocks();
+  const auto composite_blocks = sequence->kv_state().composite_blocks();
+  if (!composite_blocks.empty()) {
+    if (state.multi_block_tables_vec.empty()) {
+      state.multi_block_tables_vec.resize(composite_blocks.size());
+    }
+    CHECK_EQ(state.multi_block_tables_vec.size(), composite_blocks.size())
+        << "composite block manager count mismatch. existing_manager_num="
+        << state.multi_block_tables_vec.size()
+        << ", current_manager_num=" << composite_blocks.size();
+    for (size_t m = 0; m < composite_blocks.size(); ++m) {
+      const auto& composite_block = composite_blocks[m];
+      std::vector<int32_t> block_ids;
+      block_ids.reserve(composite_block.size());
+      for (const auto& block : composite_block) {
+        block_ids.push_back(block.id());
+      }
+      state.multi_block_tables_vec[m].emplace_back(std::move(block_ids));
+    }
+    return;
+  }
+
+  // Keep [manager][batch][block_ids] row-aligned even if a sequence has no
+  // composite blocks.
+  if (!state.multi_block_tables_vec.empty()) {
+    for (auto& mgr_tables : state.multi_block_tables_vec) {
+      mgr_tables.emplace_back(std::vector<int32_t>{});
+    }
+  }
+
   const auto slot_ids =
       sequence->kv_state().kv_cache_slots(n_kv_cache_tokens, seq_len);
   state.new_token_slot_ids.insert(
@@ -585,6 +655,51 @@ void BatchInputBuilder::setup_kv_cache_info(
   state.block_tables_vec.emplace_back(std::move(block_ids));
 }
 
+void BatchInputBuilder::padding_decode_batch_size(
+    uint32_t num_decoding_tokens,
+    uint32_t min_decoding_batch_size) {
+  if (num_sequences_ < min_decoding_batch_size) {
+    const uint32_t n_tokens = state_.flatten_tokens_vec.size();
+    // kv_cache is not empty in decoding phase
+    const bool in_decoding_phase = !state_.batch_forward_type.is_prefill();
+    const bool same_num_decoding_tokens =
+        state_.q_max_seq_len == num_decoding_tokens &&
+        n_tokens == num_sequences_ * num_decoding_tokens;
+    if (in_decoding_phase && same_num_decoding_tokens) {
+      // add padding tokens to the batch
+      for (int32_t i = num_sequences_; i < min_decoding_batch_size; ++i) {
+        for (int32_t k = 0; k < num_decoding_tokens; ++k) {
+          state_.flatten_tokens_vec.emplace_back(0);
+          if (!use_mrope_) {
+            state_.flatten_positions_vec.emplace_back(0);
+          } else {
+            state_.mrope_positions_vec.emplace_back(
+                torch::zeros({3, 1}, torch::kInt));
+          }
+          state_.new_token_slot_ids.emplace_back(0);
+        }
+#if defined(USE_NPU) || defined(USE_MUSA)
+        state_.seq_lens.push_back(num_decoding_tokens);
+        state_.q_seq_lens.push_back(num_decoding_tokens);
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+        state_.seq_lens.push_back(state_.seq_lens.back() + num_decoding_tokens);
+        state_.q_seq_lens.push_back(state_.q_seq_lens.back() +
+                                    num_decoding_tokens);
+#endif
+        state_.block_tables_vec.emplace_back();
+        if (!state_.multi_block_tables_vec.empty()) {
+          for (auto& mgr_tables : state_.multi_block_tables_vec) {
+            mgr_tables.emplace_back(std::vector<int32_t>{});
+          }
+        }
+        state_.paged_kv_indices.push_back(0);
+        state_.paged_kv_indptr.push_back(state_.paged_kv_indptr.back() + 1);
+        state_.paged_kv_last_page_len.push_back(1);
+      }
+    }
+  }
+}
+
 ForwardInput BatchInputBuilder::state_to_forward_input() {
   if (state_.flatten_tokens_vec.empty()) {
     return {};
@@ -605,7 +720,7 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
 
   auto& input_params = forward_input.input_params;
   input_params.batch_forward_type = state_.batch_forward_type;
-  input_params.num_sequences = state_.block_tables_vec.size();
+  input_params.num_sequences = static_cast<int32_t>(num_sequences_);
   input_params.kv_max_seq_len = state_.max_seq_len;
   input_params.q_max_seq_len = state_.q_max_seq_len;
   input_params.kv_seq_lens = torch::tensor(state_.seq_lens, torch::kInt);
@@ -633,6 +748,13 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   input_params.block_tables =
       create_2d_tensor(state_.block_tables_vec, torch::kInt);
 
+  // Setup multi block tables for DeepSeek V4
+  for (auto& mgr_tables : state_.multi_block_tables_vec) {
+    util::pad_2d_vector(mgr_tables, /*pad_value=*/-1);
+    input_params.multi_block_tables.push_back(
+        create_2d_tensor(mgr_tables, torch::kInt));
+  }
+
   if (input_embeddings_vec_.size() != 0) {
     input_params.input_embedding = torch::cat(input_embeddings_vec_);
   }
@@ -645,6 +767,10 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   }
   input_params.request_ids = std::move(state_.request_ids);
   input_params.extra_token_ids = std::move(state_.extra_token_ids);
+  if (!state_.mtp_shifted_token_ids.empty()) {
+    input_params.mtp_shifted_token_ids =
+        torch::tensor(state_.mtp_shifted_token_ids, torch::kInt);
+  }
 
   if (swap_block_transfer_infos_ != nullptr &&
       swap_block_transfer_infos_->size() > 0) {
@@ -712,6 +838,8 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.new_token_slot_ids = std::move(state_.new_token_slot_ids);
   util::pad_2d_vector(state_.block_tables_vec, /*pad_value=*/0);
   raw_forward_input.block_tables_vec = std::move(state_.block_tables_vec);
+  raw_forward_input.multi_block_tables_vec =
+      std::move(state_.multi_block_tables_vec);
   raw_forward_input.num_sequences = num_sequences_;
   // raw_forward_input.dp_global_token_nums = ;
   raw_forward_input.transfer_kv_infos = std::move(state_.transfer_kv_infos);
@@ -726,6 +854,8 @@ RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
   raw_forward_input.linear_state_ids = std::move(state_.linear_state_ids);
   raw_forward_input.request_ids = std::move(state_.request_ids);
   raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);
+  raw_forward_input.mtp_shifted_token_ids =
+      std::move(state_.mtp_shifted_token_ids);
   // beam search kernel input
   if (state_.acc_logprob_vec.size() > 0) {
     raw_forward_input.acc_logprob_vec = std::move(state_.acc_logprob_vec);
@@ -753,65 +883,11 @@ void BatchInputBuilder::process_swap_block_infos(
               [](const BlockTransferInfo& a, const BlockTransferInfo& b) {
                 return a.src_block_id < b.src_block_id;
               });
-#if defined(USE_CUDA)
-    raw_forward_input.swap_blocks.insert(raw_forward_input.swap_blocks.end(),
-                                         swap_blocks.begin(),
-                                         swap_blocks.end());
-
-    if (swap_blocks.size() > 0) {
-      std::vector<int32_t> src_indices, dst_indices, cum_sum;
-      std::unordered_set<int32_t> src_set;
-      std::unordered_map<int32_t, int32_t> dst_to_src;
-      bool has_overlap = false;
-      int32_t current_src = swap_blocks[0].src_block_id;
-      src_indices.reserve(swap_blocks.size());
-      dst_indices.reserve(swap_blocks.size());
-      cum_sum.reserve(swap_blocks.size());
-
-      for (const auto& block : swap_blocks) {
-        src_set.insert(block.src_block_id);
-      }
-
-      src_indices.push_back(swap_blocks[0].src_block_id);
-      dst_indices.push_back(swap_blocks[0].dst_block_id);
-      dst_to_src.emplace(swap_blocks[0].dst_block_id,
-                         swap_blocks[0].src_block_id);
-      if (src_set.count(swap_blocks[0].dst_block_id) > 0 &&
-          swap_blocks[0].dst_block_id != swap_blocks[0].src_block_id) {
-        has_overlap = true;
-      }
-      for (size_t i = 1; i < swap_blocks.size(); i++) {
-        dst_indices.push_back(swap_blocks[i].dst_block_id);
-        auto [it, inserted] = dst_to_src.emplace(swap_blocks[i].dst_block_id,
-                                                 swap_blocks[i].src_block_id);
-        if (!inserted && it->second != swap_blocks[i].src_block_id) {
-          has_overlap = true;
-        }
-        if (src_set.count(swap_blocks[i].dst_block_id) > 0 &&
-            swap_blocks[i].dst_block_id != swap_blocks[i].src_block_id) {
-          has_overlap = true;
-        }
-        if (swap_blocks[i].src_block_id != current_src) {
-          src_indices.push_back(swap_blocks[i].src_block_id);
-          cum_sum.push_back(i);
-          current_src = swap_blocks[i].src_block_id;
-        }
-      }
-      cum_sum.emplace_back(swap_blocks.size());
-
-      if (!has_overlap) {
-        raw_forward_input.src_block_indices = std::move(src_indices);
-        raw_forward_input.dst_block_indices = std::move(dst_indices);
-        raw_forward_input.cum_sum = std::move(cum_sum);
-      }
-    }
-#else
     if (swap_blocks.size() > 0) {
       std::vector<int32_t> src_indices, dst_indices, cum_sum;
       int32_t current_src = swap_blocks[0].src_block_id;
       src_indices.reserve(swap_blocks.size());
       dst_indices.reserve(swap_blocks.size());
-      cum_sum.reserve(swap_blocks.size());
 
       src_indices.push_back(swap_blocks[0].src_block_id);
       dst_indices.push_back(swap_blocks[0].dst_block_id);
@@ -830,7 +906,6 @@ void BatchInputBuilder::process_swap_block_infos(
       raw_forward_input.dst_block_indices = std::move(dst_indices);
       raw_forward_input.cum_sum = std::move(cum_sum);
     }
-#endif
   } else {
     raw_forward_input.swap_blocks.insert(raw_forward_input.swap_blocks.end(),
                                          swap_block_transfer_infos_->begin(),

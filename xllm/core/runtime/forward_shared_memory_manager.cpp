@@ -2033,6 +2033,7 @@ inline void deserialize_raw_forward_input(const char*& buffer,
                              input_params.num_sequences);
   read_string_vector(context, input_params.request_ids);
   read_vector(context, input_params.extra_token_ids);
+  read_tensor(context, input_params.mtp_shifted_token_ids, stream);
   read_swap_blocks(context, input_params.swap_blocks);
   read_tensor(context, input_params.src_block_indices, stream);
   read_tensor(context, input_params.dst_block_indices, stream);
@@ -2105,6 +2106,18 @@ inline void deserialize_raw_forward_input(const char*& buffer,
               /*stream=*/nullptr,
               /*force_host_materialize=*/true);
 #endif
+  int32_t manager_num = 0;
+  read_data(context, manager_num);
+  CHECK_GE(manager_num, 0) << "multi_block_tables manager num is invalid.";
+  input_params.multi_block_tables.reserve(static_cast<size_t>(manager_num));
+  for (int32_t m = 0; m < manager_num; ++m) {
+    torch::Tensor mgr_table;
+    read_tensor(context,
+                mgr_table,
+                /*stream=*/nullptr,
+                /*force_host_materialize=*/true);
+    input_params.multi_block_tables.emplace_back(std::move(mgr_table));
+  }
 
   read_dit_forward_input(context, input_params.dit_forward_input);
 
@@ -2141,6 +2154,7 @@ inline void serialize_raw_forward_input_sections(
   write_vector(context.descriptor, input.linear_state_ids);
   write_string_vector(context.descriptor, input.request_ids);
   write_vector(context.descriptor, input.extra_token_ids);
+  write_vector_to_tensor(context, input.mtp_shifted_token_ids);
   write_swap_blocks(context, input.swap_blocks);
   write_vector_to_tensor(context, input.src_block_indices);
   write_vector_to_tensor(context, input.dst_block_indices);
@@ -2190,6 +2204,11 @@ inline void serialize_raw_forward_input_sections(
 
   write_vector_to_tensor(context, input.new_token_slot_ids);
   write_2d_vector_to_tensor(context, input.block_tables_vec);
+  write_data(context.descriptor,
+             static_cast<int32_t>(input.multi_block_tables_vec.size()));
+  for (const auto& mgr_tables : input.multi_block_tables_vec) {
+    write_2d_vector_to_tensor(context, mgr_tables);
+  }
 
   write_dit_forward_input(context, input.dit_forward_input);
 }
@@ -2403,6 +2422,11 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
   util::pad_2d_vector(raw_input.block_tables_vec, 0);
   input_params.block_tables =
       create_2d_tensor(std::move(raw_input.block_tables_vec), torch::kInt);
+  for (auto& mgr_tables : raw_input.multi_block_tables_vec) {
+    util::pad_2d_vector(mgr_tables, /*pad_value=*/-1);
+    input_params.multi_block_tables.emplace_back(
+        create_2d_tensor(std::move(mgr_tables), torch::kInt));
+  }
 
   input_params.src_block_indices =
       torch::tensor(std::move(raw_input.src_block_indices), tensor_options);
@@ -2414,6 +2438,8 @@ void convert_raw_forward_input_to_forward_input(RawForwardInput& raw_input,
   input_params.swap_blocks = std::move(raw_input.swap_blocks);
   input_params.batch_id = std::move(raw_input.batch_id);
   input_params.extra_token_ids = std::move(raw_input.extra_token_ids);
+  input_params.mtp_shifted_token_ids =
+      torch::tensor(std::move(raw_input.mtp_shifted_token_ids), tensor_options);
 
   input_params.new_cache_slot_offsets = torch::tensor(
       std::move(raw_input.new_cache_slot_offsets), tensor_options);
