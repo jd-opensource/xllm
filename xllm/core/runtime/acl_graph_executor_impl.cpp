@@ -578,7 +578,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     auto slice_like = [](const torch::Tensor& persistent,
                          const torch::Tensor& src) -> torch::Tensor {
       if (!src.defined() || src.numel() == 0 || !persistent.defined()) {
-        return src;
+        return persistent;
       }
       return persistent.slice(/*dim=*/0, /*start=*/0, /*end=*/src.size(0));
     };
