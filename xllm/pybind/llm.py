@@ -331,7 +331,7 @@ class LLM:
         params = to_request_params(params, default_cls=BeamSearchParams)
         if params.beam_width <= 0:
             raise ValueError("beam_width must be greater than 0")
-        else:
+        elif params.beam_width > 1:
             # Beam search relies on top-k logprob candidates from sampler.
             # Keep this aligned with the LLM request-path default.
             if "logprobs" not in explicit_fields:

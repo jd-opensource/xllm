@@ -211,11 +211,12 @@ void KVCacheShape::init_key_cache_shape(const KVCacheCapacity& kv_cache_cap,
   if (model_args.enable_mla()) {
 #if defined(USE_NPU)
     if (model_args.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
-      key_cache_shape_ = std::vector<int64_t>{
-          kv_cache_cap.n_blocks(),
-          util::ceil_div(model_args.kv_lora_rank(), kNzAlignment),
-          kv_cache_cap.block_size(),
-          kNzAlignment};
+      const int64_t kv_lora_rank = model_args.kv_lora_rank();
+      key_cache_shape_ =
+          std::vector<int64_t>{kv_cache_cap.n_blocks(),
+                               util::ceil_div(kv_lora_rank, kNzAlignment),
+                               kv_cache_cap.block_size(),
+                               kNzAlignment};
       return;
     }
 #endif
@@ -242,11 +243,12 @@ void KVCacheShape::init_value_cache_shape(const KVCacheCapacity& kv_cache_cap,
   if (model_args.enable_mla()) {
 #if defined(USE_NPU)
     if (model_args.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
-      value_cache_shape_ = std::vector<int64_t>{
-          kv_cache_cap.n_blocks(),
-          util::ceil_div(model_args.qk_rope_head_dim(), kNzAlignment),
-          kv_cache_cap.block_size(),
-          kNzAlignment};
+      const int64_t qk_rope_head_dim = model_args.qk_rope_head_dim();
+      value_cache_shape_ =
+          std::vector<int64_t>{kv_cache_cap.n_blocks(),
+                               util::ceil_div(qk_rope_head_dim, kNzAlignment),
+                               kv_cache_cap.block_size(),
+                               kNzAlignment};
       return;
     }
 #endif
