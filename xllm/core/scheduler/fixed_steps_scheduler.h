@@ -19,6 +19,7 @@ limitations under the License.
 #include <folly/MPMCQueue.h>
 #include <folly/futures/Future.h>
 
+#include <atomic>
 #include <limits>
 #include <memory>
 #include <queue>
@@ -65,6 +66,18 @@ class FixedStepsScheduler final : public ContinuousScheduler {
     virtual std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
                                               BatchFactory* batch_factory) = 0;
     virtual bool requires_kv_cache() const = 0;
+    virtual size_t max_prefill_requests_per_step(
+        const FixedStepsScheduler& /*scheduler*/) const {
+      return std::numeric_limits<size_t>::max();
+    }
+    virtual bool respects_prefill_memory_threshold(
+        const FixedStepsScheduler& /*scheduler*/) const {
+      return true;
+    }
+    virtual bool should_defer_resource_exhausted(
+        const FixedStepsScheduler& /*scheduler*/) const {
+      return false;
+    }
     // Allocate KV cache for sequence, implemented by each pipeline
     virtual bool allocate_kv_cache(KVCacheManager* kv_cache_manager,
                                    Sequence* sequence) = 0;
@@ -95,6 +108,12 @@ class FixedStepsScheduler final : public ContinuousScheduler {
     std::vector<Batch> create_batches(FixedStepsScheduler& scheduler,
                                       BatchFactory* batch_factory) override;
     bool requires_kv_cache() const override { return true; }
+    size_t max_prefill_requests_per_step(
+        const FixedStepsScheduler& scheduler) const override;
+    bool respects_prefill_memory_threshold(
+        const FixedStepsScheduler& scheduler) const override;
+    bool should_defer_resource_exhausted(
+        const FixedStepsScheduler& scheduler) const override;
     bool allocate_kv_cache(KVCacheManager* kv_cache_manager,
                            Sequence* sequence) override;
   };
@@ -133,6 +152,8 @@ class FixedStepsScheduler final : public ContinuousScheduler {
 
   // Semaphore to control concurrent execution of step()
   std::counting_semaphore<10000> step_semaphore_;
+
+  std::atomic<size_t> in_flight_steps_{0};
 };
 
 }  // namespace xllm

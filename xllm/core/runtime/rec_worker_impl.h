@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <vector>
 
@@ -376,6 +377,9 @@ class RecWorkerImpl : public LLMWorkerImpl {
   RecPipelineType pipeline_type_ = RecPipelineType::kLlmRecDefault;
 
   std::unique_ptr<ThreadPool> step_threadpool_;
+
+  std::mutex onerec_xattention_prepare_mutex_;
+  std::mutex onerec_xattention_model_forward_mutex_;
 
   moodycamel::BlockingConcurrentQueue<size_t> index_queue_;
 };

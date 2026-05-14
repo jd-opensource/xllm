@@ -813,7 +813,11 @@ RecEngine::OneRecXAttentionEnginePipeline::OneRecXAttentionEnginePipeline(
 
 int64_t RecEngine::OneRecXAttentionEnginePipeline::minimal_kv_cache_blocks()
     const {
-  return kMinimalOneRecMetadataKVBlocks;
+  const int64_t max_concurrency =
+      std::max<int64_t>(1, engine_.options_.rec_worker_max_concurrency());
+  // BlockManagerImpl reserves block 0 for padding, so xattention needs one
+  // allocatable metadata block per concurrent scheduler step plus padding.
+  return std::max(kMinimalOneRecMetadataKVBlocks, max_concurrency + 1);
 }
 
 ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::step(

@@ -15,15 +15,21 @@ limitations under the License.
 
 #include "fixed_steps_scheduler.h"
 
+#include <absl/synchronization/notification.h>
 #include <absl/time/time.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <mutex>
+#include <vector>
 
 #include "common/global_flags.h"
 #include "continuous_scheduler.h"
 #include "distributed_runtime/engine.h"
 #include "framework/request/rec_type.h"
+#include "util/scope_guard.h"
 
 namespace xllm {
 
@@ -71,7 +77,16 @@ class FakeEngine : public Engine {
     fake_block_manager_ = std::make_unique<BlockManagerPool>(opt, 1);
   }
   ForwardOutput step(std::vector<Batch>& batch) override {
-    (void)batch;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      ++step_calls_;
+      step_batch_sizes_.emplace_back(
+          batch.empty() ? 0 : batch[0].get_sequences().size());
+      if (step_calls_ >= notify_after_step_calls_ &&
+          !step_calls_ready_.HasBeenNotified()) {
+        step_calls_ready_.Notify();
+      }
+    }
     return ForwardOutput();
   }
   void update_last_step_result(std::vector<Batch>& batch) override {
@@ -94,9 +109,33 @@ class FakeEngine : public Engine {
   }
   bool init() override { return true; }
 
+  int32_t step_calls() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return step_calls_;
+  }
+
+  std::vector<size_t> step_batch_sizes() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return step_batch_sizes_;
+  }
+
+  void notify_after_step_calls(int32_t step_calls) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    notify_after_step_calls_ = step_calls;
+  }
+
+  bool wait_for_step_calls(absl::Duration timeout) const {
+    return step_calls_ready_.WaitForNotificationWithTimeout(timeout);
+  }
+
  private:
   std::unique_ptr<Tokenizer> fake_tokenizer_;
   std::unique_ptr<BlockManagerPool> fake_block_manager_;
+  mutable std::mutex mutex_;
+  int32_t step_calls_ = 0;
+  int32_t notify_after_step_calls_ = std::numeric_limits<int32_t>::max();
+  std::vector<size_t> step_batch_sizes_;
+  mutable absl::Notification step_calls_ready_;
 };
 
 ContinuousScheduler::Options CreateOptions(
@@ -226,6 +265,90 @@ TEST(FixedStepsSchedulerTest, StepCompletesWithRequest) {
   auto requests = GenRequests({32}, {10}, RecType::kOneRec);
   scheduler.add_request(requests[0]);
   EXPECT_NO_THROW(scheduler.step(absl::Milliseconds(500)));
+}
+
+TEST(FixedStepsSchedulerTest,
+     OneRecXAttentionMultiConcurrencyPrepareBatchKeepsOneRequest) {
+  const bool old_enable_prefix_cache = FLAGS_enable_prefix_cache;
+  const int32_t old_max_decode_rounds = FLAGS_max_decode_rounds;
+  const double old_prefill_threshold =
+      FLAGS_prefill_scheduling_memory_usage_threshold;
+  SCOPE_GUARD([&] {
+    FLAGS_enable_prefix_cache = old_enable_prefix_cache;
+    FLAGS_max_decode_rounds = old_max_decode_rounds;
+    FLAGS_prefill_scheduling_memory_usage_threshold = old_prefill_threshold;
+  });
+
+  FLAGS_enable_prefix_cache = false;
+  FLAGS_max_decode_rounds = 2;
+  FLAGS_prefill_scheduling_memory_usage_threshold = 1.0;
+
+  std::unique_ptr<FakeEngine> engine = std::make_unique<FakeEngine>(64, 128);
+  ContinuousScheduler::Options opt = CreateOptions(
+      /*max_tokens_per_batch=*/10000,
+      /*max_seqs_per_batch=*/256,
+      /*dp_size=*/1,
+      /*enable_schedule_overlap=*/false,
+      /*rec_worker_max_concurrency=*/2);
+  FixedStepsScheduler scheduler(engine.get(), opt);
+  std::vector<std::shared_ptr<Request>> requests =
+      GenRequests({1, 1}, {1, 1}, RecType::kOneRec);
+  for (std::shared_ptr<Request>& req : requests) {
+    scheduler.add_request(req);
+  }
+
+  ContinuousScheduler* base = &scheduler;
+  std::vector<Batch> batches = base->prepare_batch_test();
+  ASSERT_FALSE(batches.empty());
+  EXPECT_EQ(batches[0].get_sequences().size(), 1u);
+  EXPECT_EQ(base->get_running_requests().size(), 1u);
+  EXPECT_EQ(base->get_waiting_requests().size(), 1u);
+}
+
+TEST(FixedStepsSchedulerTest,
+     OneRecXAttentionMultiConcurrencySchedulesSeparateSteps) {
+  const bool old_enable_prefix_cache = FLAGS_enable_prefix_cache;
+  const int32_t old_max_decode_rounds = FLAGS_max_decode_rounds;
+  const double old_prefill_threshold =
+      FLAGS_prefill_scheduling_memory_usage_threshold;
+  SCOPE_GUARD([&] {
+    FLAGS_enable_prefix_cache = old_enable_prefix_cache;
+    FLAGS_max_decode_rounds = old_max_decode_rounds;
+    FLAGS_prefill_scheduling_memory_usage_threshold = old_prefill_threshold;
+  });
+
+  FLAGS_enable_prefix_cache = false;
+  FLAGS_max_decode_rounds = 2;
+  FLAGS_prefill_scheduling_memory_usage_threshold = 1.0;
+
+  std::unique_ptr<FakeEngine> engine = std::make_unique<FakeEngine>(3, 128);
+  engine->notify_after_step_calls(2);
+  {
+    ContinuousScheduler::Options opt = CreateOptions(
+        /*max_tokens_per_batch=*/10000,
+        /*max_seqs_per_batch=*/256,
+        /*dp_size=*/1,
+        /*enable_schedule_overlap=*/false,
+        /*rec_worker_max_concurrency=*/2);
+    FixedStepsScheduler scheduler(engine.get(), opt);
+
+    std::vector<std::shared_ptr<Request>> requests =
+        GenRequests({1, 1, 1}, {1, 1, 1}, RecType::kOneRec);
+    for (std::shared_ptr<Request>& req : requests) {
+      scheduler.add_request(req);
+    }
+
+    scheduler.step(absl::ZeroDuration());
+    scheduler.step(absl::ZeroDuration());
+
+    EXPECT_TRUE(engine->wait_for_step_calls(absl::Milliseconds(500)));
+    EXPECT_EQ(engine->step_calls(), 2);
+    const std::vector<size_t> step_batch_sizes = engine->step_batch_sizes();
+    ASSERT_EQ(step_batch_sizes.size(), 2u);
+    EXPECT_EQ(step_batch_sizes[0], 1u);
+    EXPECT_EQ(step_batch_sizes[1], 1u);
+    EXPECT_EQ(scheduler.get_waiting_requests().size(), 1u);
+  }
 }
 
 }  // namespace xllm
