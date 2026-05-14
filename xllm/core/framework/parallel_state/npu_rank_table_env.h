@@ -1,4 +1,4 @@
-/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,14 +15,15 @@ limitations under the License.
 
 #pragma once
 
+#include <string>
+
 namespace xllm {
-namespace layer {
+namespace parallel_state {
 
-struct FusedMoEArgs {
-  bool is_gated = true;
-  bool enable_result_reduction = true;
-  bool skip_gate_load = false;
-};
+// torch_npu ProcessGroupHCCL consumes ranktable through this HCCL environment
+// variable. Keep it in one place so ATB and TORCH routes can share the same
+// user-facing --rank_tablefile option.
+void sync_torch_npu_rank_table_file_env(const std::string& rank_tablefile);
 
-}  // namespace layer
+}  // namespace parallel_state
 }  // namespace xllm

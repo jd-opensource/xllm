@@ -53,6 +53,7 @@ cc_library(
     qwen3_moe_decoder_layer.cpp
   DEPS
     $<$<BOOL:${USE_NPU}>:npu_layers>
+    $<$<BOOL:${USE_NPU}>:npu_torch_layers>
     $<$<BOOL:${USE_ILU}>:ilu_layers>
     $<$<BOOL:${USE_CUDA}>:cuda_layers>
     :common_layers

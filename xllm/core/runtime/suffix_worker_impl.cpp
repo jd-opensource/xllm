@@ -411,7 +411,6 @@ SampleOutput SuffixWorkerImpl::validate(
                                          /*all_greedy_sample=*/true,
                                          target_output.logprobs,
                                          target_output.max_top_logprobs,
-                                         rate_controller_,
                                          enable_fused_kernel_);
 
   SampleOutput sample_output =

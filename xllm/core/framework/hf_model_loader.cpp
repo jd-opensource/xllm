@@ -795,6 +795,133 @@ bool HFModelLoader::load_quant_args(const std::string& model_weights_path) {
     quant_args_.torch_dtype() =
         config_reader.value_or<std::string>("torch_dtype", "");
   }
+  if (auto v = reader.value<std::string>("quantization_config.version")) {
+    quant_args_.quant_version() = v.value();
+  }
+  if (quant_args_.quantize_type().empty() &&
+      boost::iequals(quant_args_.quant_method(), "w4a8_dynamic")) {
+    quant_args_.quantize_type() = "w4a8_dynamic";
+  }
+  bool model_is_w4a8_dynamic =
+      boost::iequals(quant_args_.quantize_type(), "w4a8_dynamic");
+  if (boost::iequals(quant_args_.quantize_type(), "w4a8_dynamic")) {
+    quant_args_.bits() = 8;
+    quant_args_.moe_weight_bits() = 4;
+    quant_args_.activation_dynamic() = true;
+  }
+
+  bool explicit_quant_group_size =
+      reader.contains("quantization_config.group_size");
+
+  // Ascend-style quant description file.
+  // This file provides per-weight quant types, e.g.
+  // "layers.0.attn.wq_a.weight": "W8A8_DYNAMIC".
+  JsonReader quant_desc_reader;
+  const std::string quant_desc_file_path =
+      model_weights_path + "/quant_model_description.json";
+  if (quant_desc_reader.parse(quant_desc_file_path)) {
+    std::unordered_map<std::string, std::string> quant_descs;
+    const auto quant_desc_data = quant_desc_reader.data();
+    bool desc_model_quant_is_w4a8_dynamic = false;
+    bool desc_has_w4a8 = false;
+    bool desc_has_w8a8 = false;
+    bool desc_has_w4a8_dynamic = false;
+    if (!quant_desc_data.is_object()) {
+      LOG(WARNING) << "quant_model_description is not a JSON object: "
+                   << quant_desc_file_path;
+    } else {
+      quant_descs.reserve(quant_desc_data.size());
+      for (auto it = quant_desc_data.begin(); it != quant_desc_data.end();
+           ++it) {
+        if (!it.value().is_string()) {
+          continue;
+        }
+        // Keep only tensor-like keys (contains '.'); skip metadata fields such
+        // as model_quant_type/version.
+        if (it.key().find('.') == std::string::npos) {
+          continue;
+        }
+        const std::string quant_type = it.value().get<std::string>();
+        std::string quant_type_lower = quant_type;
+        boost::algorithm::to_lower(quant_type_lower);
+        if (boost::algorithm::starts_with(quant_type_lower, "w4a8")) {
+          desc_has_w4a8 = true;
+        } else if (boost::algorithm::starts_with(quant_type_lower, "w8a8")) {
+          desc_has_w8a8 = true;
+        }
+        if (boost::iequals(quant_type, "w4a8_dynamic")) {
+          desc_has_w4a8_dynamic = true;
+        }
+        quant_descs.emplace(it.key(), quant_type);
+        std::string mapped_key = it.key();
+        const std::string packed_weight = "weight_packed";
+        if (const auto pos = mapped_key.find(packed_weight);
+            pos != std::string::npos) {
+          mapped_key.replace(pos, packed_weight.size(), "weight");
+          quant_descs.emplace(std::move(mapped_key), quant_type);
+        }
+      }
+    }
+    quant_args_.quant_descs() = std::move(quant_descs);
+    if (desc_has_w4a8) {
+      quant_args_.quant_method() = kQuantMethodAscendInt4;
+    } else if (desc_has_w8a8) {
+      quant_args_.quant_method() = kQuantMethodAscendInt8;
+    }
+    LOG(INFO) << "Loaded quant_model_description from " << quant_desc_file_path
+              << ", quant_desc_count=" << quant_args_.quant_descs().size()
+              << ", quant_method="
+              << (quant_args_.quant_method().empty()
+                      ? "<empty>"
+                      : quant_args_.quant_method());
+
+    if (quant_args_.quantize_type().empty()) {
+      if (auto v = quant_desc_reader.value<std::string>("model_quant_type")) {
+        auto quantize_type = v.value();
+        boost::algorithm::to_lower(quantize_type);
+        quant_args_.quantize_type() = quantize_type;
+        LOG(INFO) << "Fallback quantize_type from quant_model_description: "
+                  << quant_args_.quantize_type();
+      }
+    }
+    desc_model_quant_is_w4a8_dynamic =
+        boost::iequals(quant_args_.quantize_type(), "w4a8_dynamic") ||
+        desc_has_w4a8_dynamic;
+    model_is_w4a8_dynamic =
+        model_is_w4a8_dynamic || desc_model_quant_is_w4a8_dynamic;
+    if (desc_model_quant_is_w4a8_dynamic) {
+      if (quant_args_.quantize_type().empty()) {
+        quant_args_.quantize_type() = "w4a8_dynamic";
+      }
+      quant_args_.bits() = 8;
+      quant_args_.moe_weight_bits() = 4;
+      quant_args_.activation_dynamic() = true;
+    }
+    if (auto v = quant_desc_reader.value<int64_t>("group_size")) {
+      quant_args_.group_size() = v.value();
+      explicit_quant_group_size = true;
+    } else if (desc_model_quant_is_w4a8_dynamic && !explicit_quant_group_size) {
+      // Match vllm-ascend W4A8_DYNAMIC's default. A config value of 0 is still
+      // respected as the per-channel mode.
+      quant_args_.group_size() = 256;
+      explicit_quant_group_size = true;
+    }
+    if (auto v = quant_desc_reader.value<std::string>("version")) {
+      quant_args_.quant_version() = v.value();
+    }
+  }
+  if (model_is_w4a8_dynamic && !explicit_quant_group_size) {
+    quant_args_.group_size() = 256;
+  }
+  if (model_is_w4a8_dynamic && quant_args_.quant_version() != "1.0.0") {
+    LOG(ERROR) << "W4A8_DYNAMIC only supports quant_version 1.0.0, got "
+               << (quant_args_.quant_version().empty()
+                       ? "<empty>"
+                       : quant_args_.quant_version())
+               << ". Please provide quant_model_description.json version "
+                  "\"1.0.0\".";
+    return false;
+  }
 
   // awq quantization args
   JsonReader awq_reader;

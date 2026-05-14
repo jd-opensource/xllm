@@ -17,6 +17,9 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#if defined(USE_MLU)
+#include "framework/kv_cache_transfer/mooncake_kv_cache_transfer.h"
+#endif
 #include "framework/request/mm_data.h"
 #include "spec_input_builder.h"
 #include "util/env_var.h"
@@ -146,7 +149,7 @@ bool MTPWorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
   return target_allocated && draft_allocated;
 }
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
 bool MTPWorkerImpl::allocate_kv_cache_with_transfer(
     const KVCacheShape& kv_cache_shape) {
   const int64_t num_blocks = kv_cache_shape.key_cache_shape()[0];
@@ -154,11 +157,21 @@ bool MTPWorkerImpl::allocate_kv_cache_with_transfer(
   CHECK(draft_impl_ != nullptr);
 
   if (kv_cache_transfer_ == nullptr) {
+#if defined(USE_NPU)
     kv_cache_transfer_ = std::make_shared<SpecKVCacheTransfer>(
         options_.device_ip().value(),
         options_.transfer_listen_port(),
         options_.instance_role(),
         context_.get_model_args().model_type());
+#elif defined(USE_MLU)
+    CHECK_EQ(FLAGS_kv_cache_transfer_type, "Mooncake")
+        << "MLU MTP push only supports Mooncake KV transfer.";
+    kv_cache_transfer_ = std::make_shared<MooncakeKVCacheTransferDefault>(
+        device_.index(),
+        options_.transfer_listen_port(),
+        device_,
+        context_.get_model_args().model_type());
+#endif
 
     int32_t device_id = device_.index();
     kv_cache_transfer_->initialize(device_id);
@@ -852,7 +865,6 @@ SampleOutput MTPWorkerImpl::validate(const SamplingParameters& sampling_params,
                                          sampling_params.all_greedy_sample,
                                          target_output.logprobs,
                                          target_output.max_top_logprobs,
-                                         rate_controller_,
                                          enable_fused_kernel_);
 
   // get the accepted tokens

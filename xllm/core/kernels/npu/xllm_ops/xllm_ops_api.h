@@ -17,11 +17,33 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#ifdef TORCH_HIGHER_THAN_PTA6
+#include <torch_npu/csrc/core/npu/NPUFormat.h>
+#include <torch_npu/csrc/framework/OpCommand.h>
+#else
+#include <torch_npu/csrc/aten/NPUNativeFunctions.h>
+#include <torch_npu/csrc/framework/utils/OpPreparation.h>
+#endif
+
+#include <cstdint>
 #include <optional>
+#include <string>
 #include <tuple>
 #include <vector>
 
 namespace xllm::kernel::npu {
+namespace op_infer {
+constexpr int32_t N = 32;
+// npu tensor max size
+constexpr int32_t SIZE = 8;
+constexpr int32_t INT4_NUMS_IN_INT32_SPACE = 8;
+constexpr int32_t NPU_NSA_COMPRESS_INPUT_DIM_SECOND = 1;
+constexpr int32_t NPU_NSA_COMPRESS_INPUT_DIM_THIRD = 2;
+constexpr int32_t DIM_0 = 0;
+constexpr int32_t DIM_1 = 1;
+constexpr int32_t DIM_2 = 2;
+constexpr int32_t DIM_3 = 3;
+}  // namespace op_infer
 
 void beam_search(const torch::Tensor& logprobs,
                  const torch::Tensor& top_tokens,
@@ -94,4 +116,36 @@ torch::Tensor causal_conv1d(const torch::Tensor& x,
                             int64_t activation_mode,
                             int64_t pad_slot_id,
                             int64_t run_mode);
+
+at::Tensor quant_matmul(const at::Tensor& x1,
+                        const at::Tensor& x2,
+                        const bool transpose2,
+                        const at::Tensor& scale,
+                        const c10::optional<at::Tensor>& offset,
+                        const c10::optional<at::Tensor>& pertoken_scale,
+                        const c10::optional<at::Tensor>& bias,
+                        c10::optional<at::ScalarType> output_dtype);
+
+at::Tensor quantize_per_tensor(const at::Tensor& self,
+                               const at::Tensor& scales,
+                               const at::Tensor& zero_points,
+                               at::ScalarType dtype,
+                               int64_t axis);
+
+std::tuple<at::Tensor, c10::optional<at::Tensor>> dynamic_quant(
+    const at::Tensor& input,
+    const c10::optional<at::Tensor>& smooth_scales,
+    const c10::optional<at::Tensor>& group_index,
+    c10::optional<at::ScalarType> dst_type);
+
+std::tuple<at::Tensor, at::Tensor> dequant_swiglu_quant(
+    const at::Tensor& x,
+    const c10::optional<at::Tensor>& weight_scale,
+    const c10::optional<at::Tensor>& activation_scale,
+    const c10::optional<at::Tensor>& bias,
+    const c10::optional<at::Tensor>& quant_scale,
+    const c10::optional<at::Tensor>& quant_offset,
+    const c10::optional<at::Tensor>& group_index,
+    bool activate_left,
+    int64_t quant_mode);
 }  // namespace xllm::kernel::npu

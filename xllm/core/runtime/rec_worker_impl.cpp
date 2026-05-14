@@ -105,6 +105,7 @@ torch::Tensor int64_vector_to_device_tensor(const std::vector<int64_t>& values,
                                  : torch::tensor(values, cpu_options);
   return cpu_tensor.to(device, /*non_blocking=*/false);
 }
+#endif  // defined(USE_NPU)
 
 int32_t get_requested_beam_result_width(const SamplingParameters& params,
                                         int32_t beam_width) {
@@ -145,7 +146,6 @@ OneRecBeamSearchTensors prepare_onerec_beam_search_tensors(
   return tensors;
 }
 
-#if defined(USE_NPU)
 struct OneRecBeamSearchOutputTensors {
   torch::Tensor out_log_probs;
   torch::Tensor out_token_ids;
@@ -175,6 +175,7 @@ OneRecBeamSearchOutputTensors prepare_onerec_beam_search_output_tensors(
   return tensors;
 }
 
+#if defined(USE_NPU)
 bool can_use_beam_search_rec_final_select(int32_t batch_size,
                                           const torch::Tensor& top_tokens,
                                           int32_t result_width) {
@@ -225,6 +226,7 @@ bool can_use_beam_search_rec_final_select(int32_t batch_size,
          result_width % 32 == 0 && candidate_top_k <= kMaxFinalSelectTopK &&
          result_width * 2 <= kMaxFinalSelectMergeWidth;
 }
+#endif  // defined(USE_NPU)
 
 void select_final_onerec_beam_results(
     const torch::Tensor& acc_logprob,
@@ -312,9 +314,6 @@ void select_final_onerec_beam_results(
       .slice(/*dim=*/2, /*start=*/current_step, /*end=*/current_step + 1)
       .copy_(new_tokens.unsqueeze(2));
 }
-#endif  // defined(USE_NPU)  // final select helpers
-
-#endif  // defined(USE_NPU)  // tensor helpers + beam-search helpers
 
 }  // namespace
 
@@ -1807,26 +1806,53 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
     }
     log_stage_timing("beam_search", round, beam_timer);
 #elif defined(USE_CUDA)
+    Timer beam_timer;
     if (final_round && requested_result_width != beam_width) {
-      LOG(FATAL) << "OneRec xattention final-step result_width != beam_width "
-                    "is not supported on CUDA without a final-step fused "
-                    "selection kernel.";
+      top_tokens =
+          result->sample_output.top_tokens.to(torch::kInt32)
+              .reshape({-1, result->sample_output.top_tokens.size(-1)});
+      top_logprobs = result->sample_output.top_logprobs.reshape(
+          {-1, result->sample_output.top_logprobs.size(-1)});
+      OneRecBeamSearchOutputTensors final_tensors =
+          prepare_onerec_beam_search_output_tensors(batch_size,
+                                                    requested_result_width,
+                                                    total_rounds,
+                                                    runtime_.worker.device());
+      select_final_onerec_beam_results(beam_tensors.acc_logprob,
+                                       beam_tensors.sequence_group,
+                                       top_tokens,
+                                       top_logprobs,
+                                       batch_size,
+                                       beam_width,
+                                       requested_result_width,
+                                       total_rounds,
+                                       round,
+                                       final_tensors);
+      beam_tensors.out_token_ids = std::move(final_tensors.out_token_ids);
+      beam_tensors.out_token_index = std::move(final_tensors.out_token_index);
+      beam_tensors.out_beam_count_prefix_sums =
+          std::move(final_tensors.out_beam_count_prefix_sums);
+      beam_tensors.out_log_probs = std::move(final_tensors.out_log_probs);
+      beam_tensors.out_seqgroup = std::move(final_tensors.out_seqgroup);
+    } else {
+      top_tokens =
+          result->sample_output.top_tokens.to(torch::kInt32)
+              .reshape({-1, result->sample_output.top_tokens.size(-1)});
+      top_logprobs = result->sample_output.top_logprobs.reshape(
+          {-1, result->sample_output.top_logprobs.size(-1)});
+      xllm::kernel::cuda::beam_search(beam_tensors.acc_logprob,
+                                      beam_tensors.sequence_group,
+                                      top_tokens,
+                                      top_logprobs,
+                                      beam_tensors.out_log_probs,
+                                      beam_tensors.out_token_ids,
+                                      beam_tensors.out_token_index,
+                                      beam_tensors.out_beam_count_prefix_sums,
+                                      beam_tensors.out_seqgroup,
+                                      batch_size,
+                                      round);
     }
-    top_tokens = result->sample_output.top_tokens.to(torch::kInt32)
-                     .reshape({-1, result->sample_output.top_tokens.size(-1)});
-    top_logprobs = result->sample_output.top_logprobs.reshape(
-        {-1, result->sample_output.top_logprobs.size(-1)});
-    xllm::kernel::cuda::beam_search(beam_tensors.acc_logprob,
-                                    beam_tensors.sequence_group,
-                                    top_tokens,
-                                    top_logprobs,
-                                    beam_tensors.out_log_probs,
-                                    beam_tensors.out_token_ids,
-                                    beam_tensors.out_token_index,
-                                    beam_tensors.out_beam_count_prefix_sums,
-                                    beam_tensors.out_seqgroup,
-                                    batch_size,
-                                    round);
+    log_stage_timing("beam_search", round, beam_timer);
 #else
     LOG(FATAL) << "OneRec xattention beam search requires NPU or CUDA.";
 #endif

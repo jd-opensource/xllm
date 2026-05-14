@@ -270,7 +270,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   return true;
 }
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
 bool WorkerImpl::allocate_kv_cache_with_transfer(
     std::shared_ptr<KVCacheTransfer> kv_cache_transfer,
     const KVCacheShape& kv_cache_shape) {
@@ -279,8 +279,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
 
   kv_cache_transfer_ = kv_cache_transfer;
 
-  // create a KVCache for each layer
-  const int64_t num_layers = context_.get_model_args().n_layers();
+  const int64_t num_layers = get_num_layers();
   kv_caches_.reserve(num_layers);
   if (is_spec_draft_) {
     kv_cache_transfer_->allocate_kv_cache_spec(
@@ -289,6 +288,10 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
     kv_cache_transfer_->allocate_kv_cache(
         kv_caches_, num_layers, kv_cache_shape, dtype_);
   }
+
+#if defined(USE_MLU)
+  kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
+#endif
 
   init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;

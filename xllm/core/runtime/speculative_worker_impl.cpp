@@ -18,7 +18,6 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "spec_input_builder.h"
-#include "util/env_var.h"
 #include "util/slice.h"
 #include "util/timer.h"
 #include "util/utils.h"
@@ -43,13 +42,6 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(
     : WorkerImpl(parallel_args, device, options) {
   impl_ =
       std::make_unique<LLMWorkerImpl>(parallel_args, device, target_options);
-
-  std::optional<double> fixed_acceptance_rate =
-      util::get_fix_speculative_acceptance_rate();
-  if (fixed_acceptance_rate.has_value()) {
-    rate_controller_ = std::make_shared<RejectionSamplerRateController>(
-        *fixed_acceptance_rate);
-  }
 }
 
 bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,

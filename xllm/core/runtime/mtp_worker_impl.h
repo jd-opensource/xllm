@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "framework/kv_cache/embedding_cache.h"
+#include "framework/kv_cache_transfer/kv_cache_transfer.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache_transfer/spec_kv_cache_transfer.h"
 #endif
@@ -58,7 +59,7 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
 
   bool allocate_kv_cache(const KVCacheShape& kv_cache_shape) override;
 
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_MLU)
   bool allocate_kv_cache_with_transfer(
       const KVCacheShape& kv_cache_shape) override;
 #endif
@@ -138,8 +139,8 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
   // If false, selected-only cache values are restored to dense [B, S, V].
   bool enable_opt_validate_probs_ = false;
 
-#if defined(USE_NPU)
-  std::shared_ptr<SpecKVCacheTransfer> kv_cache_transfer_;
+#if defined(USE_NPU) || defined(USE_MLU)
+  std::shared_ptr<KVCacheTransfer> kv_cache_transfer_;
 #endif
 };
 }  // namespace xllm

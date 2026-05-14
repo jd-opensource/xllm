@@ -503,13 +503,15 @@ class Qwen3MoeForCausalLMImpl
 TORCH_MODULE(Qwen3MoeForCausalLM);
 
 // register the causal model
-REGISTER_CAUSAL_MODEL(qwen3_moe, Qwen3MoeForCausalLM);
+REGISTER_CAUSAL_MODEL_WITH_VARNAME(qwen3_moe_atb,
+                                   qwen3_moe_atb,
+                                   Qwen3MoeForCausalLM);
 
 // register the model args
 // example config:
 // https://huggingface.co/Qwen/Qwen3-30B-A3B/blob/main/config.json
 // https://huggingface.co/Qwen/Qwen3-235B-A22B/blob/main/config.json
-REGISTER_MODEL_ARGS(qwen3_moe, [&] {
+REGISTER_MODEL_ARGS_WITH_VARNAME(qwen3_moe_atb, qwen3_moe_atb, [&] {
   LOAD_ARG_OR(model_type, "model_type", "qwen3_moe");
   LOAD_ARG_OR(dtype, "torch_dtype", "");
   LOAD_ARG_OR(attention_bias, "attention_bias", false);

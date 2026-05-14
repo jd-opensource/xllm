@@ -16,23 +16,97 @@ limitations under the License.
 
 #include "utils.h"
 
+#include <glog/logging.h>
+
+#include <sstream>
+
 namespace xllm {
 
 namespace weight {
+
+namespace {
+std::string tensor_shape(const torch::Tensor& tensor) {
+  if (!tensor.defined()) {
+    return "undef";
+  }
+  std::ostringstream os;
+  os << "[";
+  for (int64_t i = 0; i < tensor.dim(); ++i) {
+    if (i > 0) {
+      os << ", ";
+    }
+    os << tensor.size(i);
+  }
+  os << "]";
+  return os.str();
+}
+
+bool should_relax_quant_vector_shape_check(const std::string& name) {
+  return name == "weight_scale" || name == "weight_offset";
+}
+
+torch::Tensor reshape_quant_vector_if_compatible(const std::string& name,
+                                                 const torch::Tensor& expected,
+                                                 torch::Tensor loaded) {
+  // Some dynamic W8A8 checkpoints store per-channel scale/offset as [N, 1]
+  // while runtime tensors are allocated as [N]. Accept this equivalent shape.
+  if (expected.sizes() == loaded.sizes()) {
+    return loaded;
+  }
+  if (should_relax_quant_vector_shape_check(name) &&
+      expected.numel() == loaded.numel()) {
+    return loaded.reshape(expected.sizes());
+  }
+  return loaded;
+}
+}  // namespace
 
 void load_weight(const StateDict& state_dict,
                  const std::string& name,
                  torch::Tensor& weight,
                  bool& weight_is_loaded) {
   torch::NoGradGuard no_grad;
-  const auto tensor = state_dict.get_tensor(name);
+  auto tensor = state_dict.get_tensor(name);
   if (tensor.defined()) {
+    tensor =
+        reshape_quant_vector_if_compatible(name, weight, std::move(tensor));
     CHECK(!weight_is_loaded)
         << "weight already loaded, name: " << state_dict.prefix() << name;
     CHECK_EQ(weight.sizes(), tensor.sizes())
         << "weight size mismatch for " << state_dict.prefix() << name;
     weight.copy_(tensor);
     weight_is_loaded = true;
+  }
+}
+
+void ensure_parameter_storage(torch::nn::Module* module,
+                              const LazyParameterSpec& spec) {
+  CHECK(module != nullptr) << "module must not be null";
+  CHECK(spec.tensor != nullptr) << "spec.tensor must not be null";
+  CHECK(spec.is_loaded != nullptr) << "spec.is_loaded must not be null";
+
+  const at::ScalarType expected_dtype =
+      c10::typeMetaToScalarType(spec.options.dtype());
+  auto& tensor = *spec.tensor;
+  bool& tensor_is_loaded = *spec.is_loaded;
+  if (!tensor.defined()) {
+    tensor = module->register_parameter(spec.name,
+                                        torch::empty(spec.sizes, spec.options),
+                                        /*requires_grad=*/false);
+    tensor_is_loaded = false;
+    return;
+  }
+  if (tensor.sizes().vec() != spec.sizes ||
+      tensor.scalar_type() != expected_dtype) {
+    tensor.set_data(torch::empty(spec.sizes, spec.options));
+    tensor_is_loaded = false;
+  }
+}
+
+void ensure_parameter_storage(torch::nn::Module* module,
+                              const std::vector<LazyParameterSpec>& specs) {
+  for (const auto& spec : specs) {
+    ensure_parameter_storage(module, spec);
   }
 }
 
@@ -43,9 +117,10 @@ void load_sharded_weight(const StateDict& state_dict,
                          int32_t world_size,
                          torch::Tensor& weight,
                          bool& weight_is_loaded) {
-  const auto tensor =
-      state_dict.get_sharded_tensor(name, dim, rank, world_size);
+  auto tensor = state_dict.get_sharded_tensor(name, dim, rank, world_size);
   if (tensor.defined()) {
+    tensor =
+        reshape_quant_vector_if_compatible(name, weight, std::move(tensor));
     CHECK_EQ(weight.sizes(), tensor.sizes())
         << "weight size mismatch for " << state_dict.prefix() << name;
     weight.copy_(tensor);
@@ -64,6 +139,8 @@ void load_sharded_weight(const StateDict& state_dict,
   auto tensor = state_dict.get_sharded_tensor(name, dim, rank, world_size);
   if (tensor.defined()) {
     tensor = transform_func(tensor);
+    tensor =
+        reshape_quant_vector_if_compatible(name, weight, std::move(tensor));
     CHECK(!weight_is_loaded)
         << "weight already loaded, name: " << state_dict.prefix() << name;
     CHECK_EQ(weight.sizes(), tensor.sizes())
@@ -98,7 +175,9 @@ void load_fused_weight(const StateDict& state_dict,
                                       num_kv_head_replicas);
 
   if (weight_is_loaded) {
-    const auto merged_weight = torch::cat(accumulated_tensors, /*dim=*/dim);
+    auto merged_weight = torch::cat(accumulated_tensors, /*dim=*/dim);
+    merged_weight = reshape_quant_vector_if_compatible(
+        name, weight, std::move(merged_weight));
     CHECK_EQ(weight.sizes(), merged_weight.sizes())
         << "weight size mismatch for " << state_dict.prefix() << name;
     weight.copy_(merged_weight);
@@ -177,7 +256,9 @@ void load_moe_weight(const StateDict& state_dict,
       state_dict, prefixes, name, dim, rank, world_size, accumulated_tensors);
 
   if (weight_is_loaded) {
-    const auto merged_weight = torch::stack(accumulated_tensors);
+    auto merged_weight = torch::stack(accumulated_tensors);
+    merged_weight = reshape_quant_vector_if_compatible(
+        name, weight, std::move(merged_weight));
     CHECK_EQ(weight.sizes(), merged_weight.sizes())
         << "weight size mismatch for " << state_dict.prefix() << "["
         << start_expert_id << ":" << (start_expert_id + num_experts_per_rank)
@@ -213,7 +294,9 @@ void load_moe_all_expert_weight(const StateDict& state_dict,
       state_dict, prefixes, name, dim, rank, world_size, accumulated_tensors);
 
   if (weight_is_loaded) {
-    const auto merged_weight = torch::stack(accumulated_tensors);
+    auto merged_weight = torch::stack(accumulated_tensors);
+    merged_weight = reshape_quant_vector_if_compatible(
+        name, weight, std::move(merged_weight));
     CHECK_EQ(weight.sizes(), merged_weight.sizes())
         << "weight size mismatch for " << state_dict.prefix() << "[" << 0 << ":"
         << (0 + num_total_experts) << "]." << sub_prefix << name;
@@ -265,7 +348,9 @@ void load_moe_fused_weight(const StateDict& state_dict,
     for (size_t idx = 0; idx < num_experts_per_rank; idx++) {
       w13_vec[idx] = torch::cat({w1_tensors[idx], w3_tensors[idx]});
     }
-    const auto merged_weight = torch::stack(w13_vec);
+    auto merged_weight = torch::stack(w13_vec);
+    merged_weight =
+        reshape_quant_vector_if_compatible(name, w13, std::move(merged_weight));
     CHECK_EQ(w13.sizes(), merged_weight.sizes())
         << "weight size mismatch for " << state_dict.prefix() << "["
         << start_expert_id << ":" << (start_expert_id + num_experts_per_rank)
@@ -305,6 +390,8 @@ void load_merged_weight(const StateDict& state_dict,
         tensor.slice(dim, shard_offset, shard_offset + shard_size));
   }
   auto merged_weight = torch::cat(shard_tensors, dim);
+  merged_weight = reshape_quant_vector_if_compatible(
+      name, weight, std::move(merged_weight));
   CHECK_EQ(weight.sizes(), merged_weight.sizes())
       << "weight size mismatch for " << state_dict.prefix() << name;
   weight.copy_(merged_weight);
@@ -362,6 +449,8 @@ void load_merged_weight_v2(const StateDict& state_dict,
   }
 
   auto merged_weight = torch::cat(shard_tensors, dim);
+  merged_weight = reshape_quant_vector_if_compatible(
+      name, weight, std::move(merged_weight));
   CHECK_EQ(weight.sizes(), merged_weight.sizes())
       << "weight size mismatch for " << state_dict.prefix() << name;
   weight.copy_(merged_weight);

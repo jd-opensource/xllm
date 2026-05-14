@@ -20,6 +20,7 @@ limitations under the License.
 #elif defined(USE_NPU)
 #include "core/kernels/npu/tilelang/tilelang_ops_api.h"
 #include "npu/npu_ops_api.h"
+#include "npu/xllm_ops/xllm_ops_api.h"
 #include "triton_npu/torch_api/triton_ops_api.h"
 #elif defined(USE_CUDA)
 #include "cuda/attention_runner.h"
@@ -275,6 +276,9 @@ void fused_layernorm(FusedLayerNormParams& params) {
     params.output =
         npu::rms_norm(params.input, params.weight, params.eps, params.mode);
   }
+  if (params.beta.has_value()) {
+    params.output += params.beta.value();
+  }
 #elif defined(USE_CUDA) || defined(USE_MUSA)
   if (params.residual.has_value()) {
     cuda::fused_add_rms_norm(
@@ -311,6 +315,49 @@ torch::Tensor matmul(MatmulParams& params) {
   return cuda::matmul(params.a, params.b, params.bias);
 #elif defined(USE_ILU)
   return ilu::matmul(params.a, params.b, params.bias);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+torch::Tensor quant_matmul(QuantMatmulParams& params) {
+#if defined(USE_NPU)
+  return npu::quant_matmul(params.x1,
+                           params.x2,
+                           params.transpose2,
+                           params.scale,
+                           params.offset,
+                           params.pertoken_scale,
+                           params.bias,
+                           params.output_dtype);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+torch::Tensor quantize(NpuQuantizeParams& params) {
+#if defined(USE_NPU)
+  CHECK(params.scale.has_value() && params.scale->defined())
+      << "quantize requires params.scale.";
+  return npu::quantize_per_tensor(params.input,
+                                  params.scale.value(),
+                                  params.zero_point.value_or(torch::Tensor()),
+                                  params.output_dtype,
+                                  params.axis);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+std::tuple<torch::Tensor, std::optional<torch::Tensor>> dynamic_quant(
+    NpuQuantizeParams& params) {
+#if defined(USE_NPU)
+  auto [output, scale] = npu::dynamic_quant(
+      params.input, params.smooth_scales, params.group_index, params.dst_type);
+  return std::make_tuple(output,
+                         scale.has_value()
+                             ? std::optional<torch::Tensor>(scale.value())
+                             : std::nullopt);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -382,6 +429,45 @@ torch::Tensor group_gemm(GroupGemmParams& params) {
 #endif
 }
 
+std::tuple<torch::Tensor, torch::Tensor> dequant_swiglu_quant(
+    DequantSwigluQuantParams& params) {
+#if defined(USE_NPU)
+  return npu::dequant_swiglu_quant(params.x,
+                                   params.weight_scale,
+                                   params.activation_scale,
+                                   params.bias,
+                                   params.quant_scale,
+                                   params.quant_offset,
+                                   params.group_index,
+                                   params.activate_left,
+                                   params.quant_mode);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+std::tuple<torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           std::optional<torch::Tensor>,
+           std::optional<torch::Tensor>>
+w4a8_dynamic_moe_preprocess(W4A8DynamicMoePreprocessParams& params) {
+#if defined(USE_NPU)
+  return npu::w4a8_dynamic_moe_preprocess(params.w13_weight,
+                                          params.w2_weight,
+                                          params.w13_weight_scale,
+                                          params.w2_weight_scale,
+                                          params.w13_weight_scale_second,
+                                          params.w2_weight_scale_second,
+                                          params.w13_scale_bias,
+                                          params.w2_scale_bias,
+                                          params.group_size);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
     MoeFusedTopkParams& params) {
 #if defined(USE_MLU)
@@ -401,6 +487,9 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
   auto [topk_weights, topk_ids, row_ids] = npu::apply_moe_gating_topk_softmax(
       params.input, params.finished, params.topk);
   (void)row_ids;
+  if (params.normalize) {
+    topk_weights = topk_weights / topk_weights.sum(-1, true);
+  }
   return std::make_tuple(topk_weights, topk_ids);
 #elif defined(USE_ILU)
   return ilu::moe_active_topk(params.input,

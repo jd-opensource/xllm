@@ -17,22 +17,24 @@ class VLM:
         self,
         model: str,
         task: str = "generate",
-        devices: str = 'auto',
-        draft_model: Optional[str] = None,
-        draft_devices: Optional[str] = None,
+        devices: str = 'npu:0',
+        draft_model: Optional[str] = '',
+        draft_devices: Optional[str] = 'npu:0',
+        limit_image_per_prompt: int = 4,
         block_size: int = 128,
         max_cache_size: int = 0,
-        max_memory_utilization: float = 0.9,
-        disable_prefix_cache: bool = False,
-        max_tokens_per_batch: int = 50000,
-        max_seqs_per_batch: int = 256,
-        max_tokens_per_chunk_for_prefill: int = 512,
+        max_memory_utilization: float = 0.8,
+        enable_prefix_cache: bool = True,
+        max_tokens_per_batch: int = 10240,
+        max_seqs_per_batch: int = 1024,
+        max_tokens_per_chunk_for_prefill: int = -1,
         num_speculative_tokens: int = 0,
+        speculative_algorithm: str = 'MTP',
         num_request_handling_threads: int = 4,
         communication_backend: str = 'hccl',
         rank_tablefile: str = '',
         expert_parallel_degree: int = 0,
-        disable_chunked_prefill: bool = False,
+        enable_chunked_prefill: bool = True,
         enable_prefill_sp: bool = False,
         instance_role: str = 'DEFAULT',
         device_ip: str = '',
@@ -54,6 +56,10 @@ class VLM:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
         signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
 
+        if kwargs:
+            unknown = ", ".join(sorted(kwargs.keys()))
+            raise TypeError(f"Unexpected keyword arguments: {unknown}")
+
         if not os.path.exists(model):
             raise ValueError(f"model {model} not exists")
         self.model = model
@@ -65,25 +71,21 @@ class VLM:
         options.draft_model_path = draft_model
         options.draft_devices = draft_devices
         options.backend ="vlm"
+        options.limit_image_per_prompt = limit_image_per_prompt
         options.block_size = block_size
         options.max_cache_size = max_cache_size
         options.max_memory_utilization = max_memory_utilization
-        if disable_prefix_cache:
-            options.enable_prefix_cache = False
-        else:
-            options.enable_prefix_cache = True
+        options.enable_prefix_cache = enable_prefix_cache
         options.max_tokens_per_batch = max_tokens_per_batch
         options.max_seqs_per_batch = max_seqs_per_batch
         options.max_tokens_per_chunk_for_prefill = max_tokens_per_chunk_for_prefill
         options.num_speculative_tokens = num_speculative_tokens
+        options.speculative_algorithm = speculative_algorithm
         options.num_request_handling_threads = num_request_handling_threads
         options.communication_backend = communication_backend
         options.rank_tablefile = rank_tablefile
         options.expert_parallel_degree = expert_parallel_degree
-        if disable_chunked_prefill:
-            options.enable_chunked_prefill = False
-        else:
-            options.enable_chunked_prefill = True
+        options.enable_chunked_prefill = enable_chunked_prefill
         options.enable_prefill_sp = enable_prefill_sp
         free_port = util.get_free_port()
         options.master_node_addr = "127.0.0.1:" + str(free_port)
@@ -95,7 +97,7 @@ class VLM:
         options.ep_size = ep_size
         options.instance_name = instance_name
         options.enable_disagg_pd = enable_disagg_pd
-        options.enable_schedule_overlap = False
+        options.enable_schedule_overlap = enable_schedule_overlap
         options.kv_cache_transfer_mode = kv_cache_transfer_mode
         options.enable_offline_inference = True
         options.spawn_worker_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))

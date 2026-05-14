@@ -154,6 +154,23 @@ torch::Tensor npu_recurrent_gated_delta_rule(
     const std::optional<torch::Tensor>& g,
     const std::optional<torch::Tensor>& gk);
 
+std::tuple<torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           std::optional<torch::Tensor>,
+           std::optional<torch::Tensor>>
+w4a8_dynamic_moe_preprocess(
+    const torch::Tensor& w13_weight,
+    const torch::Tensor& w2_weight,
+    const torch::Tensor& w13_weight_scale,
+    const torch::Tensor& w2_weight_scale,
+    const std::optional<torch::Tensor>& w13_weight_scale_second,
+    const std::optional<torch::Tensor>& w2_weight_scale_second,
+    const std::optional<torch::Tensor>& w13_scale_bias,
+    const std::optional<torch::Tensor>& w2_scale_bias,
+    int64_t group_size);
+
 std::tuple<torch::Tensor, torch::Tensor> rec_constrained_topk(
     const torch::Tensor& logits,
     const torch::Tensor& sequence_group,
