@@ -276,6 +276,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       n_shared_experts_(model_args.n_shared_experts()),
       is_gated_(moe_args.is_gated),
       skip_gate_load_(moe_args.skip_gate_load),
+      is_deepseek_v4_(model_args.model_type() == "deepseek_v4"),
       renormalize_(model_args.norm_topk_prob() ? 1 : 0),
       hidden_act_(model_args.hidden_act()),
       scoring_func_(model_args.scoring_func()),
@@ -634,6 +635,16 @@ torch::Tensor FusedMoEImpl::select_experts(
     topk_ids = topk_ids.to(torch::kInt32);
   }
 
+  const int64_t local_expert_start = start_expert_id_;
+  const int64_t local_expert_end = start_expert_id_ + num_experts_per_rank_;
+  if (parallel_args_.ep_size() > 1) {
+    // The routing op uses global expert ids, but this rank only contributes
+    // outputs for its active expert range.
+    auto local_expert_mask = torch::logical_and(topk_ids >= local_expert_start,
+                                                topk_ids < local_expert_end);
+    topk_weights = topk_weights * local_expert_mask.to(topk_weights.dtype());
+  }
+
   xllm::kernel::MoeInitRoutingV2Params moe_init_routing_params;
   moe_init_routing_params.x = hidden_states_2d;
   moe_init_routing_params.expert_idx = topk_ids;
@@ -641,13 +652,12 @@ torch::Tensor FusedMoEImpl::select_experts(
   moe_init_routing_params.offset = std::nullopt;
   moe_init_routing_params.active_num = hidden_states_2d.size(0) * topk_;
   moe_init_routing_params.expert_capacity = 0;
-  moe_init_routing_params.expert_num = num_experts_per_rank_;
+  moe_init_routing_params.expert_num = num_total_experts_;
   moe_init_routing_params.drop_pad_mode = 0;
   moe_init_routing_params.expert_tokens_num_type = 1;
   moe_init_routing_params.expert_tokens_num_flag = true;
   moe_init_routing_params.row_idx_type = 0;
-  std::vector<int64_t> expert_range = {
-      start_expert_id_, start_expert_id_ + num_experts_per_rank_};
+  std::vector<int64_t> expert_range = {local_expert_start, local_expert_end};
   moe_init_routing_params.active_expert_range = expert_range;
   moe_init_routing_params.quant_mode = -1;
   // TODO: NPU moe_init_routing_v2 is equivalent to moe_gen_idx +
@@ -655,10 +665,15 @@ torch::Tensor FusedMoEImpl::select_experts(
   auto [expand_hidden_states, expand_row_ids, group_list, dynamic_scale] =
       xllm::kernel::moe_init_routing_v2(moe_init_routing_params);
   (void)dynamic_scale;
+  CHECK_EQ(group_list.size(0), num_experts_per_rank_)
+      << "npu_moe_init_routing_v2 returned " << group_list.size(0)
+      << " groups, expected local experts " << num_experts_per_rank_
+      << " for active expert range [" << local_expert_start << ", "
+      << local_expert_end << ")";
 
   // collect the selected tensor
   selected_expert_info.reduce_weight = topk_weights;
-  selected_expert_info.combine_idx = expand_row_ids;
+  selected_expert_info.combine_idx = expand_row_ids.abs();
   selected_expert_info.token_count_slice = group_list.to(torch::kInt64);
   selected_expert_info.cusum_token_count = group_list;
   return expand_hidden_states;
@@ -857,8 +872,7 @@ torch::Tensor FusedMoEImpl::forward_expert(
         w13_ = w13_.transpose(1, 2);
       }
       group_gemm_params.b = w13_;
-      group_gemm_params.group_list =
-          selected_expert_info.token_count_slice.to(torch::kInt64);
+      group_gemm_params.group_list = selected_expert_info.token_count_slice;
       group_gemm_params.split_item = 2;
       group_gemm_params.group_type = 0;
       group_gemm_params.group_list_type = 1;
@@ -884,8 +898,7 @@ torch::Tensor FusedMoEImpl::forward_expert(
         w2_ = w2_.transpose(1, 2);
       }
       group_gemm_params.b = w2_;
-      group_gemm_params.group_list =
-          selected_expert_info.token_count_slice.to(torch::kInt64);
+      group_gemm_params.group_list = selected_expert_info.token_count_slice;
       group_gemm_params.split_item = 2;
       group_gemm_params.group_type = 0;
       group_gemm_params.group_list_type = 1;
@@ -900,8 +913,8 @@ torch::Tensor FusedMoEImpl::forward_expert(
   moe_combine_params.reduce_weight = selected_expert_info.reduce_weight;
   moe_combine_params.gather_ids = selected_expert_info.combine_idx;
   final_hidden_states = xllm::kernel::moe_combine_result(moe_combine_params);
-  if (shared_output.has_value()) {
-    final_hidden_states = final_hidden_states + shared_output.value();
+  if (is_deepseek_v4_) {
+    final_hidden_states = final_hidden_states * route_scale_;
   }
   // reshape the final hidden states to the original shape
   final_hidden_states = final_hidden_states.reshape(hidden_states_shape);
@@ -912,6 +925,14 @@ torch::Tensor FusedMoEImpl::forward_expert(
   if (parallel_args_.ep_size() > 1) {
     final_hidden_states = parallel_state::reduce(final_hidden_states,
                                                  parallel_args_.moe_ep_group_);
+  }
+  if (shared_output.has_value()) {
+    auto reduced_shared_output = shared_output.value();
+    if (tp_pg_->world_size() > 1) {
+      reduced_shared_output =
+          parallel_state::reduce(reduced_shared_output, tp_pg_);
+    }
+    final_hidden_states = final_hidden_states + reduced_shared_output;
   }
   return final_hidden_states;
 }
@@ -930,8 +951,10 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
   std::optional<torch::Tensor> shared_output = std::nullopt;
   if (n_shared_experts_ > 0) {
     shared_output = shared_experts_(input);
-    if (shared_expert_gate_) {
-      auto gate = torch::sigmoid(shared_expert_gate_->forward(input));
+    if (should_apply_shared_expert_gate(shared_expert_gate_,
+                                        is_deepseek_v4_,
+                                        shared_expert_gate_is_loaded_)) {
+      torch::Tensor gate = torch::sigmoid(shared_expert_gate_->forward(input));
       if (shared_output.has_value()) {
         torch::Tensor res = gate * shared_output.value();
         shared_output = res;
@@ -947,6 +970,74 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
     auto start =
         std::accumulate(dp_tokens.begin(), dp_tokens.begin() + dp_rank, 0);
     auto end = start + dp_tokens[dp_rank];
+    output = output.slice(0, start, end);
+  }
+  return output;
+}
+
+torch::Tensor FusedMoEImpl::forward_with_selected_experts(
+    const torch::Tensor& hidden_states,
+    const torch::Tensor& topk_weights,
+    const torch::Tensor& topk_ids,
+    const ModelInputParams& input_params) {
+  torch::Tensor input = hidden_states;
+  torch::Tensor selected_topk_weights = topk_weights;
+  torch::Tensor selected_topk_ids = topk_ids;
+  bool need_slice = false;
+  if (parallel_args_.dp_size() > 1 && parallel_args_.ep_size() > 1) {
+    input = parallel_state::gather(input,
+                                   parallel_args_.dp_local_process_group_,
+                                   input_params.dp_global_token_nums);
+    selected_topk_weights =
+        parallel_state::gather(selected_topk_weights,
+                               parallel_args_.dp_local_process_group_,
+                               input_params.dp_global_token_nums);
+    selected_topk_ids =
+        parallel_state::gather(selected_topk_ids,
+                               parallel_args_.dp_local_process_group_,
+                               input_params.dp_global_token_nums);
+    need_slice = true;
+  }
+
+  int64_t hidden_rows = input.reshape({-1, input.size(-1)}).size(0);
+  torch::Tensor weights_2d = selected_topk_weights.reshape({-1, topk_});
+  torch::Tensor ids_2d = selected_topk_ids.reshape({-1, topk_});
+  CHECK_EQ(weights_2d.size(0), hidden_rows)
+      << "topk_weights token count mismatch, expected " << hidden_rows
+      << ", got " << weights_2d.size(0);
+  CHECK_EQ(ids_2d.size(0), hidden_rows)
+      << "topk_ids token count mismatch, expected " << hidden_rows << ", got "
+      << ids_2d.size(0);
+
+  preselected_experts_ =
+      std::make_pair(weights_2d.to(input.dtype()), ids_2d.to(torch::kInt32));
+
+  std::optional<torch::Tensor> shared_output = std::nullopt;
+  if (n_shared_experts_ > 0) {
+    shared_output = shared_experts_(input);
+    if (should_apply_shared_expert_gate(shared_expert_gate_,
+                                        is_deepseek_v4_,
+                                        shared_expert_gate_is_loaded_)) {
+      torch::Tensor gate = torch::sigmoid(shared_expert_gate_->forward(input));
+      if (shared_output.has_value()) {
+        torch::Tensor res = gate * shared_output.value();
+        shared_output = res;
+      }
+    }
+  }
+
+  std::vector<int64_t> router_shape = input.sizes().vec();
+  router_shape.back() = num_total_experts_;
+  torch::Tensor router_logits = torch::empty(router_shape, input.options());
+  torch::Tensor output = forward_expert(input, router_logits, shared_output);
+  preselected_experts_ = std::nullopt;
+
+  if (need_slice) {
+    const std::vector<int32_t>& dp_tokens = input_params.dp_global_token_nums;
+    int64_t dp_rank = parallel_args_.dp_local_process_group_->rank();
+    int64_t start = std::accumulate(
+        dp_tokens.begin(), dp_tokens.begin() + dp_rank, int64_t{0});
+    int64_t end = start + dp_tokens[dp_rank];
     output = output.slice(0, start, end);
   }
   return output;
@@ -1157,19 +1248,41 @@ void FusedMoEImpl::load_state_dict(const StateDict& state_dict) {
   resolve_quant_method_from_state_dict(state_dict);
 
   if (n_shared_experts_ > 0) {
-    shared_experts_->load_state_dict(
-        state_dict.get_dict_with_prefix("shared_expert."));
-    auto weight = state_dict.get_tensor("shared_expert_gate.weight");
+    StateDict shared_expert_state =
+        state_dict.get_dict_with_prefix("shared_expert.");
+    if (shared_expert_state.size() == 0) {
+      shared_expert_state = state_dict.get_dict_with_prefix("shared_experts.");
+    }
+    if (shared_expert_state.size() > 0) {
+      if (shared_expert_state.get_tensor("w1.weight").defined() ||
+          shared_expert_state.get_tensor("w1.qweight").defined()) {
+        shared_experts_->load_state_dict(
+            shared_expert_state, {"w1.", "w3."}, "w2.");
+      } else {
+        shared_experts_->load_state_dict(shared_expert_state);
+      }
+    }
+    torch::Tensor weight = state_dict.get_tensor("shared_expert_gate.weight");
+    if (!weight.defined()) {
+      weight = state_dict.get_tensor("shared_experts_gate.weight");
+    }
     if (weight.defined()) {
       weight = weight.reshape({weight.size(0), -1});
       DCHECK_EQ(shared_expert_gate_->weight.sizes(), weight.sizes())
           << "proj weight size mismatch for " << name();
       shared_expert_gate_->weight.data().copy_(weight);
+      shared_expert_gate_is_loaded_ = true;
     }
   }
 
-  gate_->load_state_dict(state_dict.get_dict_with_prefix("gate."));
-  load_e_score_correction_bias(state_dict.get_dict_with_prefix("gate."));
+  // Skip internal gate loading when an external gate module (e.g.
+  // DeepseekV4Gate) already handles expert routing. In that path the decoder
+  // layer calls forward_with_selected_experts(), so this internal gate_ is
+  // never executed and loading its weights would be redundant.
+  if (!skip_gate_load_) {
+    gate_->load_state_dict(state_dict.get_dict_with_prefix("gate."));
+    load_e_score_correction_bias(state_dict.get_dict_with_prefix("gate."));
+  }
   load_experts(state_dict.get_dict_with_prefix("experts."));
   preprocess_w4a8_dynamic_weights();
 }

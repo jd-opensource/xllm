@@ -26,6 +26,8 @@ namespace ffi = tvm::ffi;
 #include <optional>
 #include <string>
 
+#include "dsa_metadata.h"
+
 namespace xllm::layer {
 
 #if defined(USE_CUDA) || defined(USE_MUSA)
@@ -150,6 +152,10 @@ struct AttentionMetadata {
   // If defined, use this instead of kv_seq_lens_host to avoid .to(kCPU)
   // operations that break ACL graph capture.
   torch::Tensor paged_attention_tiling_data;
+
+  // DeepSeek V4 sparse attention metadata (optional).
+  // Built by DSAMetadataBuilder and shared across all layers.
+  std::shared_ptr<DSAMetadata> dsa_metadata;
 #endif
 };
 

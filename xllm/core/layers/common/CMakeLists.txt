@@ -21,6 +21,8 @@ cc_library(
     activation.h
     attention_metadata.h
     attention_metadata_builder.h
+    dsa_metadata.h
+    dsa_metadata_builder.h
     dp_utils.h
     add_matmul.h
     moe_fused_topk.h
@@ -41,6 +43,7 @@ cc_library(
     deep_ep.cpp
     activation.cpp
     attention_metadata_builder.cpp
+    dsa_metadata_builder.cpp
     dp_utils.cpp
     add_matmul.cpp
     moe_fused_topk.cpp
