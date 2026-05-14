@@ -117,30 +117,31 @@ size_t KVCacheState::token_capacity() const {
   size_t capacity = std::numeric_limits<size_t>::max();
   bool has_token_group = false;
   if (composite_group_states_.size() == composite_blocks_.size()) {
-    for (size_t group_id = 0; group_id < composite_group_states_.size();
-         ++group_id) {
-      const KVCacheGroupState& group_state = composite_group_states_[group_id];
+    for (size_t group_index = 0; group_index < composite_group_states_.size();
+         ++group_index) {
+      const KVCacheGroupState& group_state =
+          composite_group_states_[group_index];
       if (!group_state.is_token_group) {
         continue;
       }
-      if (composite_blocks_[group_id].empty()) {
+      if (composite_blocks_[group_index].empty()) {
         continue;
       }
-      const size_t group_capacity =
-          composite_blocks_[group_id].size() *
-          static_cast<size_t>(group_state.tokens_per_block);
+      const size_t group_capacity = composite_blocks_[group_index].size() *
+                                    static_cast<size_t>(group_state.block_size);
       capacity = std::min(capacity, group_capacity);
       has_token_group = true;
     }
     return has_token_group ? capacity : 0;
   }
 
-  for (size_t group_id = 0; group_id < composite_blocks_.size(); ++group_id) {
-    if (composite_blocks_[group_id].empty()) {
+  for (size_t group_index = 0; group_index < composite_blocks_.size();
+       ++group_index) {
+    if (composite_blocks_[group_index].empty()) {
       continue;
     }
-    const size_t group_capacity = composite_blocks_[group_id].size() *
-                                  composite_blocks_[group_id][0].size();
+    const size_t group_capacity = composite_blocks_[group_index].size() *
+                                  composite_blocks_[group_index][0].size();
     capacity = std::min(capacity, group_capacity);
     has_token_group = true;
   }
@@ -182,36 +183,6 @@ std::optional<TransferKVInfo>& KVCacheState::transfer_kv_info() {
 void KVCacheState::clear_composite_blocks() {
   composite_blocks_.clear();
   composite_group_states_.clear();
-}
-
-bool KVCacheState::has_composite_blocks() const {
-  return total_composite_blocks() > 0;
-}
-
-size_t KVCacheState::num_composite_groups() const {
-  if (!composite_group_states_.empty()) {
-    return composite_group_states_.size();
-  }
-  return has_composite_blocks() ? composite_blocks_.size() : 0;
-}
-
-size_t KVCacheState::num_composite_blocks(int32_t group_id) const {
-  if (group_id < 0) {
-    return 0;
-  }
-  const size_t group_index = static_cast<size_t>(group_id);
-  if (group_index >= composite_blocks_.size()) {
-    return 0;
-  }
-  return composite_blocks_[group_index].size();
-}
-
-size_t KVCacheState::total_composite_blocks() const {
-  size_t total_blocks = 0;
-  for (const std::vector<Block>& group_blocks : composite_blocks_) {
-    total_blocks += group_blocks.size();
-  }
-  return total_blocks;
 }
 
 void KVCacheState::reset() {

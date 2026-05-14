@@ -41,12 +41,6 @@ struct SequenceAllocEstimate {
   int64_t bottleneck_free_sequences = 0;
 };
 
-struct BlockAllocatorStats {
-  std::vector<BlockGroupUsage> groups;
-  int64_t bottleneck_free_sequences = 0;
-  double bottleneck_utilization = 0.0;
-};
-
 class SequenceBlockAllocator {
  public:
   virtual ~SequenceBlockAllocator() = default;
@@ -61,7 +55,9 @@ class SequenceBlockAllocator {
   virtual std::vector<BlockGroupUsage> estimate_release(
       const Sequence* sequence) const = 0;
 
-  virtual BlockAllocatorStats stats() const = 0;
+  virtual int64_t bottleneck_free_blocks() const = 0;
+  virtual double bottleneck_utilization() const = 0;
+  virtual int64_t max_used_blocks() const = 0;
 };
 
 class SingleGroupBlockAllocator final : public SequenceBlockAllocator {
@@ -77,7 +73,9 @@ class SingleGroupBlockAllocator final : public SequenceBlockAllocator {
   std::vector<BlockGroupUsage> estimate_release(
       const Sequence* sequence) const override;
 
-  BlockAllocatorStats stats() const override;
+  int64_t bottleneck_free_blocks() const override;
+  double bottleneck_utilization() const override;
+  int64_t max_used_blocks() const override;
 
  private:
   BlockManager* manager_ = nullptr;  // not owned
@@ -93,7 +91,7 @@ class CompositeSequenceBlockAllocator final : public SequenceBlockAllocator {
   struct GroupSpec {
     int32_t group_id = 0;
     GroupKind kind = GroupKind::TOKEN;
-    int32_t tokens_per_block = 0;
+    int32_t block_size = 0;
     int64_t num_blocks = 0;
     int32_t fixed_blocks_per_sequence = 0;
   };
@@ -113,7 +111,9 @@ class CompositeSequenceBlockAllocator final : public SequenceBlockAllocator {
   std::vector<BlockGroupUsage> estimate_release(
       const Sequence* sequence) const override;
 
-  BlockAllocatorStats stats() const override;
+  int64_t bottleneck_free_blocks() const override;
+  double bottleneck_utilization() const override;
+  int64_t max_used_blocks() const override;
 
  private:
   std::vector<int64_t> new_block_counts(

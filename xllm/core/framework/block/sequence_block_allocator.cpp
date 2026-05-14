@@ -17,20 +17,13 @@ limitations under the License.
 
 #include <algorithm>
 #include <limits>
-#include <utility>
 
 #include "framework/block/block_manager_impl.h"
 #include "framework/request/sequence.h"
+#include "util/utils.h"
 
 namespace xllm {
 namespace {
-
-int64_t ceil_div(size_t value, int32_t divisor) {
-  const size_t typed_divisor = static_cast<size_t>(divisor);
-  return static_cast<int64_t>((value + typed_divisor - 1) / typed_divisor);
-}
-
-int64_t block_count(size_t size) { return static_cast<int64_t>(size); }
 
 int64_t releasable_block_count(const Slice<Block>& blocks,
                                bool enable_prefix_cache) {
@@ -44,12 +37,13 @@ int64_t releasable_block_count(const Slice<Block>& blocks,
   return count;
 }
 
-size_t total_blocks(const std::vector<std::vector<Block>>& blocks) {
-  size_t total = 0;
+bool has_allocated_blocks(const std::vector<std::vector<Block>>& blocks) {
   for (const std::vector<Block>& group_blocks : blocks) {
-    total += group_blocks.size();
+    if (!group_blocks.empty()) {
+      return true;
+    }
   }
-  return total;
+  return false;
 }
 
 void fill_bottleneck(SequenceAllocEstimate& estimate) {
@@ -68,14 +62,6 @@ void fill_bottleneck(SequenceAllocEstimate& estimate) {
       bottleneck == std::numeric_limits<int64_t>::max() ? 0 : bottleneck;
 }
 
-double group_utilization(const BlockGroupUsage& group) {
-  if (group.total_blocks == 0) {
-    return 0.0;
-  }
-  return static_cast<double>(group.used_blocks) /
-         static_cast<double>(group.total_blocks);
-}
-
 }  // namespace
 
 SingleGroupBlockAllocator::SingleGroupBlockAllocator(BlockManager* manager)
@@ -85,8 +71,7 @@ bool SingleGroupBlockAllocator::allocate_sequence(Sequence* sequence,
                                                   size_t target_num_tokens) {
   const size_t current_blocks = sequence->kv_state().num_kv_blocks();
   const size_t block_size = manager_->block_size();
-  const size_t needed_blocks =
-      (target_num_tokens + block_size - 1) / block_size;
+  const size_t needed_blocks = util::ceil_div(target_num_tokens, block_size);
   if (needed_blocks <= current_blocks) {
     return true;
   }
@@ -110,15 +95,15 @@ SequenceAllocEstimate SingleGroupBlockAllocator::estimate_allocate(
     size_t target_num_tokens) const {
   const KVCacheState& state = sequence->kv_state();
   const size_t current_blocks = state.num_kv_blocks();
-  const int64_t target_blocks =
-      ceil_div(target_num_tokens, static_cast<int32_t>(manager_->block_size()));
+  const int64_t target_blocks = static_cast<int64_t>(
+      util::ceil_div(target_num_tokens, manager_->block_size()));
   const int64_t needed_blocks = std::max<int64_t>(
       0, target_blocks - static_cast<int64_t>(current_blocks));
 
   SequenceAllocEstimate estimate;
   BlockGroupUsage group;
   group.group_id = 0;
-  group.free_blocks = static_cast<int64_t>(manager_->available_blocks());
+  group.free_blocks = static_cast<int64_t>(manager_->num_free_blocks());
   group.used_blocks = static_cast<int64_t>(manager_->num_used_blocks());
   group.total_blocks = static_cast<int64_t>(manager_->num_total_blocks());
   group.needed_blocks = needed_blocks;
@@ -131,7 +116,7 @@ std::vector<BlockGroupUsage> SingleGroupBlockAllocator::estimate_release(
     const Sequence* sequence) const {
   BlockGroupUsage group;
   group.group_id = 0;
-  group.free_blocks = static_cast<int64_t>(manager_->available_blocks());
+  group.free_blocks = static_cast<int64_t>(manager_->num_free_blocks());
   group.used_blocks = static_cast<int64_t>(manager_->num_used_blocks());
   group.total_blocks = static_cast<int64_t>(manager_->num_total_blocks());
   group.releasable_blocks =
@@ -140,17 +125,16 @@ std::vector<BlockGroupUsage> SingleGroupBlockAllocator::estimate_release(
   return {group};
 }
 
-BlockAllocatorStats SingleGroupBlockAllocator::stats() const {
-  BlockAllocatorStats stats;
-  BlockGroupUsage group;
-  group.group_id = 0;
-  group.free_blocks = static_cast<int64_t>(manager_->num_free_blocks());
-  group.used_blocks = static_cast<int64_t>(manager_->num_used_blocks());
-  group.total_blocks = static_cast<int64_t>(manager_->num_total_blocks());
-  stats.groups.emplace_back(group);
-  stats.bottleneck_free_sequences = group.free_blocks;
-  stats.bottleneck_utilization = group_utilization(group);
-  return stats;
+int64_t SingleGroupBlockAllocator::bottleneck_free_blocks() const {
+  return static_cast<int64_t>(manager_->num_free_blocks());
+}
+
+double SingleGroupBlockAllocator::bottleneck_utilization() const {
+  return manager_->kv_cache_utilization();
+}
+
+int64_t SingleGroupBlockAllocator::max_used_blocks() const {
+  return static_cast<int64_t>(manager_->num_used_blocks());
 }
 
 CompositeSequenceBlockAllocator::CompositeSequenceBlockAllocator(
@@ -158,10 +142,12 @@ CompositeSequenceBlockAllocator::CompositeSequenceBlockAllocator(
   group_specs_ = plan.groups;
   group_managers_.reserve(group_specs_.size());
 
-  for (const GroupSpec& group : group_specs_) {
+  for (size_t i = 0; i < group_specs_.size(); ++i) {
+    const GroupSpec& group = group_specs_[i];
+    CHECK_EQ(group.group_id, static_cast<int32_t>(i));
     BlockManager::Options options;
     options.num_blocks(static_cast<uint32_t>(group.num_blocks))
-        .block_size(group.tokens_per_block)
+        .block_size(group.block_size)
         .enable_prefix_cache(false)
         .enable_cache_upload(false);
     group_managers_.emplace_back(std::make_unique<BlockManagerImpl>(options));
@@ -181,9 +167,8 @@ bool CompositeSequenceBlockAllocator::allocate_sequence(
     group_states->reserve(group_specs_.size());
     for (const GroupSpec& group : group_specs_) {
       KVCacheGroupState group_state;
-      group_state.group_id = group.group_id;
       group_state.is_token_group = group.kind == GroupKind::TOKEN;
-      group_state.tokens_per_block = group.tokens_per_block;
+      group_state.block_size = group.block_size;
       group_states->emplace_back(group_state);
     }
   }
@@ -193,9 +178,9 @@ bool CompositeSequenceBlockAllocator::allocate_sequence(
       new_block_counts(*composite_blocks, target_num_tokens);
   for (size_t i = 0; i < extra_blocks.size(); ++i) {
     const int64_t available_blocks =
-        static_cast<int64_t>(group_managers_[i]->available_blocks());
+        static_cast<int64_t>(group_managers_[i]->num_free_blocks());
     if (extra_blocks[i] > available_blocks) {
-      if (total_blocks(*composite_blocks) == 0) {
+      if (!has_allocated_blocks(*composite_blocks)) {
         sequence->kv_state().clear_composite_blocks();
       }
       return false;
@@ -220,7 +205,7 @@ bool CompositeSequenceBlockAllocator::allocate_sequence(
       group_managers_[i]->deallocate(blocks);
       group_blocks.resize(old_sizes[i]);
     }
-    if (total_blocks(*composite_blocks) == 0) {
+    if (!has_allocated_blocks(*composite_blocks)) {
       sequence->kv_state().clear_composite_blocks();
     }
   };
@@ -272,7 +257,7 @@ SequenceAllocEstimate CompositeSequenceBlockAllocator::estimate_allocate(
     BlockGroupUsage group;
     group.group_id = group_specs_[i].group_id;
     group.free_blocks =
-        static_cast<int64_t>(group_managers_[i]->available_blocks());
+        static_cast<int64_t>(group_managers_[i]->num_free_blocks());
     group.used_blocks =
         static_cast<int64_t>(group_managers_[i]->num_used_blocks());
     group.total_blocks =
@@ -295,44 +280,46 @@ std::vector<BlockGroupUsage> CompositeSequenceBlockAllocator::estimate_release(
     BlockGroupUsage group;
     group.group_id = group_specs_[i].group_id;
     group.free_blocks =
-        static_cast<int64_t>(group_managers_[i]->available_blocks());
+        static_cast<int64_t>(group_managers_[i]->num_free_blocks());
     group.used_blocks =
         static_cast<int64_t>(group_managers_[i]->num_used_blocks());
     group.total_blocks =
         static_cast<int64_t>(group_managers_[i]->num_total_blocks());
     if (i < composite_blocks.size()) {
-      group.releasable_blocks = block_count(composite_blocks[i].size());
+      group.releasable_blocks =
+          static_cast<int64_t>(composite_blocks[i].size());
     }
     usages.emplace_back(group);
   }
   return usages;
 }
 
-BlockAllocatorStats CompositeSequenceBlockAllocator::stats() const {
-  BlockAllocatorStats stats;
-  stats.groups.reserve(group_specs_.size());
+int64_t CompositeSequenceBlockAllocator::bottleneck_free_blocks() const {
   int64_t bottleneck = std::numeric_limits<int64_t>::max();
-  double bottleneck_utilization = 0.0;
-
   for (size_t i = 0; i < group_specs_.size(); ++i) {
-    BlockGroupUsage group;
-    group.group_id = group_specs_[i].group_id;
-    group.free_blocks =
+    const int64_t free_blocks =
         static_cast<int64_t>(group_managers_[i]->num_free_blocks());
-    group.used_blocks =
-        static_cast<int64_t>(group_managers_[i]->num_used_blocks());
-    group.total_blocks =
-        static_cast<int64_t>(group_managers_[i]->num_total_blocks());
-    stats.groups.emplace_back(group);
-    bottleneck = std::min(bottleneck, group.free_blocks);
-    bottleneck_utilization =
-        std::max(bottleneck_utilization, group_utilization(group));
+    bottleneck = std::min(bottleneck, free_blocks);
   }
+  return bottleneck == std::numeric_limits<int64_t>::max() ? 0 : bottleneck;
+}
 
-  stats.bottleneck_free_sequences =
-      bottleneck == std::numeric_limits<int64_t>::max() ? 0 : bottleneck;
-  stats.bottleneck_utilization = bottleneck_utilization;
-  return stats;
+double CompositeSequenceBlockAllocator::bottleneck_utilization() const {
+  double bottleneck = 0.0;
+  for (const std::unique_ptr<BlockManager>& manager : group_managers_) {
+    bottleneck = std::max(bottleneck, manager->kv_cache_utilization());
+  }
+  return bottleneck;
+}
+
+int64_t CompositeSequenceBlockAllocator::max_used_blocks() const {
+  int64_t max_used = 0;
+  for (const std::unique_ptr<BlockManager>& manager : group_managers_) {
+    const int64_t used_blocks =
+        static_cast<int64_t>(manager->num_used_blocks());
+    max_used = std::max(max_used, used_blocks);
+  }
+  return max_used;
 }
 
 std::vector<int64_t> CompositeSequenceBlockAllocator::new_block_counts(
@@ -341,9 +328,10 @@ std::vector<int64_t> CompositeSequenceBlockAllocator::new_block_counts(
   std::vector<int64_t> new_counts(group_specs_.size(), 0);
   for (size_t i = 0; i < group_specs_.size(); ++i) {
     const GroupSpec& group = group_specs_[i];
-    const int64_t current_blocks = i < composite_blocks.size()
-                                       ? block_count(composite_blocks[i].size())
-                                       : 0;
+    const int64_t current_blocks =
+        i < composite_blocks.size()
+            ? static_cast<int64_t>(composite_blocks[i].size())
+            : 0;
     switch (group.kind) {
       case GroupKind::RING:
         if (current_blocks == 0) {
@@ -354,8 +342,8 @@ std::vector<int64_t> CompositeSequenceBlockAllocator::new_block_counts(
         }
         break;
       case GroupKind::TOKEN: {
-        const int64_t target_blocks =
-            ceil_div(target_num_tokens, group.tokens_per_block);
+        const int64_t target_blocks = static_cast<int64_t>(util::ceil_div(
+            target_num_tokens, static_cast<size_t>(group.block_size)));
         new_counts[i] = std::max<int64_t>(0, target_blocks - current_blocks);
         break;
       }
@@ -383,11 +371,9 @@ void CompositeSequenceBlockAllocator::validate_sequence_state(
   CHECK_EQ(group_states.size(), group_specs_.size())
       << "Composite sequence group state must match the plan";
   for (size_t i = 0; i < group_specs_.size(); ++i) {
-    CHECK_EQ(group_states[i].group_id, group_specs_[i].group_id);
     CHECK_EQ(group_states[i].is_token_group,
              group_specs_[i].kind == GroupKind::TOKEN);
-    CHECK_EQ(group_states[i].tokens_per_block,
-             group_specs_[i].tokens_per_block);
+    CHECK_EQ(group_states[i].block_size, group_specs_[i].block_size);
   }
 }
 

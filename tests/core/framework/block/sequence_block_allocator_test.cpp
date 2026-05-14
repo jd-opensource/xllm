@@ -33,13 +33,13 @@ using Plan = CompositeSequenceBlockAllocator::Plan;
 
 GroupSpec make_spec(int32_t group_id,
                     GroupKind kind,
-                    int32_t tokens_per_block,
+                    int32_t block_size,
                     int64_t num_blocks,
                     int32_t fixed_blocks_per_sequence) {
   GroupSpec spec;
   spec.group_id = group_id;
   spec.kind = kind;
-  spec.tokens_per_block = tokens_per_block;
+  spec.block_size = block_size;
   spec.num_blocks = num_blocks;
   spec.fixed_blocks_per_sequence = fixed_blocks_per_sequence;
   return spec;
@@ -50,17 +50,17 @@ Plan make_plan() {
   plan.groups = {
       make_spec(/*group_id=*/0,
                 GroupKind::RING,
-                /*tokens_per_block=*/16,
+                /*block_size=*/16,
                 /*num_blocks=*/4,
                 /*fixed_blocks_per_sequence=*/2),
       make_spec(/*group_id=*/1,
                 GroupKind::TOKEN,
-                /*tokens_per_block=*/4,
+                /*block_size=*/4,
                 /*num_blocks=*/8,
                 /*fixed_blocks_per_sequence=*/0),
       make_spec(/*group_id=*/2,
                 GroupKind::TOKEN,
-                /*tokens_per_block=*/10,
+                /*block_size=*/10,
                 /*num_blocks=*/3,
                 /*fixed_blocks_per_sequence=*/0),
   };
@@ -72,18 +72,35 @@ Plan make_small_plan() {
   plan.groups = {
       make_spec(/*group_id=*/0,
                 GroupKind::RING,
-                /*tokens_per_block=*/16,
+                /*block_size=*/16,
                 /*num_blocks=*/2,
                 /*fixed_blocks_per_sequence=*/2),
       make_spec(/*group_id=*/1,
                 GroupKind::TOKEN,
-                /*tokens_per_block=*/4,
+                /*block_size=*/4,
                 /*num_blocks=*/2,
                 /*fixed_blocks_per_sequence=*/0),
       make_spec(/*group_id=*/2,
                 GroupKind::TOKEN,
-                /*tokens_per_block=*/10,
+                /*block_size=*/10,
                 /*num_blocks=*/1,
+                /*fixed_blocks_per_sequence=*/0),
+  };
+  return plan;
+}
+
+Plan make_sparse_group_id_plan() {
+  Plan plan;
+  plan.groups = {
+      make_spec(/*group_id=*/0,
+                GroupKind::TOKEN,
+                /*block_size=*/4,
+                /*num_blocks=*/2,
+                /*fixed_blocks_per_sequence=*/0),
+      make_spec(/*group_id=*/2,
+                GroupKind::TOKEN,
+                /*block_size=*/4,
+                /*num_blocks=*/2,
                 /*fixed_blocks_per_sequence=*/0),
   };
   return plan;
@@ -113,22 +130,41 @@ std::vector<int32_t> make_tokens_with_suffix(int32_t prefix_first,
   return tokens;
 }
 
+size_t group_block_count(const KVCacheState& kv_state, int32_t group_id) {
+  if (group_id < 0) {
+    return 0;
+  }
+  const size_t group_index = static_cast<size_t>(group_id);
+  if (group_index >= kv_state.composite_blocks().size()) {
+    return 0;
+  }
+  return kv_state.composite_blocks()[group_index].size();
+}
+
+size_t total_group_blocks(const KVCacheState& kv_state) {
+  size_t total_blocks = 0;
+  for (const std::vector<Block>& group_blocks : kv_state.composite_blocks()) {
+    total_blocks += group_blocks.size();
+  }
+  return total_blocks;
+}
+
 Plan make_composite_sum_plan() {
   Plan plan;
   plan.groups = {
       make_spec(/*group_id=*/0,
                 GroupKind::RING,
-                /*tokens_per_block=*/16,
+                /*block_size=*/16,
                 /*num_blocks=*/4,
                 /*fixed_blocks_per_sequence=*/1),
       make_spec(/*group_id=*/1,
                 GroupKind::TOKEN,
-                /*tokens_per_block=*/4,
+                /*block_size=*/4,
                 /*num_blocks=*/6,
                 /*fixed_blocks_per_sequence=*/0),
       make_spec(/*group_id=*/2,
                 GroupKind::TOKEN,
-                /*tokens_per_block=*/8,
+                /*block_size=*/8,
                 /*num_blocks=*/4,
                 /*fixed_blocks_per_sequence=*/0),
   };
@@ -177,19 +213,19 @@ TEST_F(CompositeSequenceBlockAllocatorTest,
   ASSERT_TRUE(allocator.allocate_sequence(&sequence, /*target_num_tokens=*/9));
 
   KVCacheState& kv_state = sequence.kv_state();
-  EXPECT_TRUE(kv_state.has_composite_blocks());
-  ASSERT_EQ(kv_state.num_composite_groups(), 3);
-  EXPECT_EQ(kv_state.num_composite_blocks(/*group_id=*/0), 2);
-  EXPECT_EQ(kv_state.num_composite_blocks(/*group_id=*/1), 3);
-  EXPECT_EQ(kv_state.num_composite_blocks(/*group_id=*/2), 1);
+  EXPECT_GT(total_group_blocks(kv_state), 0);
+  ASSERT_EQ(kv_state.composite_blocks().size(), 3);
+  EXPECT_EQ(group_block_count(kv_state, /*group_id=*/0), 2);
+  EXPECT_EQ(group_block_count(kv_state, /*group_id=*/1), 3);
+  EXPECT_EQ(group_block_count(kv_state, /*group_id=*/2), 1);
   EXPECT_EQ(kv_state.num_kv_blocks(), 0);
   EXPECT_EQ(kv_state.token_capacity(), 10);
 
   ASSERT_TRUE(allocator.allocate_sequence(&sequence, /*target_num_tokens=*/17));
 
-  EXPECT_EQ(kv_state.num_composite_blocks(/*group_id=*/0), 2);
-  EXPECT_EQ(kv_state.num_composite_blocks(/*group_id=*/1), 5);
-  EXPECT_EQ(kv_state.num_composite_blocks(/*group_id=*/2), 2);
+  EXPECT_EQ(group_block_count(kv_state, /*group_id=*/0), 2);
+  EXPECT_EQ(group_block_count(kv_state, /*group_id=*/1), 5);
+  EXPECT_EQ(group_block_count(kv_state, /*group_id=*/2), 2);
   EXPECT_EQ(kv_state.num_kv_blocks(), 0);
   EXPECT_EQ(kv_state.token_capacity(), 20);
 }
@@ -202,11 +238,21 @@ TEST_F(CompositeSequenceBlockAllocatorTest,
   EXPECT_FALSE(allocator.allocate_sequence(&sequence, /*target_num_tokens=*/9));
 
   KVCacheState& kv_state = sequence.kv_state();
-  EXPECT_FALSE(kv_state.has_composite_blocks());
-  EXPECT_EQ(kv_state.num_composite_groups(), 0);
-  EXPECT_EQ(kv_state.total_composite_blocks(), 0);
+  EXPECT_TRUE(kv_state.composite_blocks().empty());
+  EXPECT_TRUE(kv_state.composite_group_states().empty());
+  EXPECT_EQ(total_group_blocks(kv_state), 0);
   EXPECT_EQ(kv_state.num_kv_blocks(), 0);
   EXPECT_EQ(kv_state.token_capacity(), 0);
+}
+
+TEST_F(CompositeSequenceBlockAllocatorTest,
+       ConstructorRejectsNonDenseGroupIds) {
+  EXPECT_DEATH(
+      {
+        CompositeSequenceBlockAllocator allocator(make_sparse_group_id_plan());
+        (void)allocator;
+      },
+      "group.group_id");
 }
 
 TEST_F(CompositeSequenceBlockAllocatorTest,
@@ -220,8 +266,8 @@ TEST_F(CompositeSequenceBlockAllocatorTest,
   allocator.deallocate_sequence(&sequence);
 
   KVCacheState& kv_state = sequence.kv_state();
-  EXPECT_FALSE(kv_state.has_composite_blocks());
-  EXPECT_EQ(kv_state.total_composite_blocks(), 0);
+  EXPECT_TRUE(kv_state.composite_blocks().empty());
+  EXPECT_EQ(total_group_blocks(kv_state), 0);
   EXPECT_EQ(kv_state.kv_cache_tokens_num(), 7);
 }
 
@@ -308,6 +354,16 @@ TEST_F(CompositeSequenceBlockAllocatorTest,
                                 static_cast<size_t>(options.block_size());
   std::vector<Block> cleanup_blocks = pool.allocate(cleanup_tokens, dp_rank);
   EXPECT_EQ(cleanup_blocks.size(), options.num_blocks() - 1);
+}
+
+TEST_F(CompositeSequenceBlockAllocatorTest,
+       SingleGroupUtilizationIsZeroWithOnlyPaddingBlock) {
+  BlockManagerPool::Options options;
+  options.num_blocks(1).block_size(4).enable_prefix_cache(false);
+  BlockManagerPool pool(options, /*dp_size=*/1);
+
+  EXPECT_DOUBLE_EQ(pool.kv_cache_utilization(), 0.0);
+  EXPECT_FLOAT_EQ(pool.get_gpu_cache_usage_perc(), 0.0f);
 }
 
 TEST_F(CompositeSequenceBlockAllocatorTest,
@@ -614,6 +670,53 @@ TEST_F(CompositeSequenceBlockAllocatorTest,
 
   pool.deallocate(&second_candidate);
   pool.deallocate(&first_candidate);
+}
+
+TEST_F(CompositeSequenceBlockAllocatorTest,
+       CompositePoolMetricsUseBottleneckGroups) {
+  BlockManagerPool::Options options;
+  options.num_blocks(1)
+      .block_size(1)
+      .enable_prefix_cache(false)
+      .composite_block_plan(make_composite_sum_plan());
+  BlockManagerPool pool(options, /*dp_size=*/1);
+
+  Sequence first_sequence =
+      make_sequence(/*index=*/0, make_tokens(/*first=*/1, /*count=*/8));
+  ASSERT_TRUE(pool.allocate(&first_sequence));
+  Sequence second_sequence =
+      make_sequence(/*index=*/1, make_tokens(/*first=*/100, /*count=*/8));
+  ASSERT_TRUE(pool.allocate(&second_sequence));
+
+  const std::vector<size_t> free_blocks = pool.num_free_blocks();
+  ASSERT_EQ(free_blocks.size(), 1);
+  EXPECT_EQ(free_blocks[0], 1);
+
+  const std::vector<size_t> used_blocks = pool.num_used_blocks();
+  ASSERT_EQ(used_blocks.size(), 1);
+  EXPECT_EQ(used_blocks[0], 4);
+
+  EXPECT_DOUBLE_EQ(pool.kv_cache_utilization(), 4.0 / 5.0);
+  EXPECT_FLOAT_EQ(pool.get_gpu_cache_usage_perc(),
+                  static_cast<float>(4.0 / 5.0));
+
+  pool.deallocate(&second_sequence);
+  pool.deallocate(&first_sequence);
+}
+
+TEST_F(CompositeSequenceBlockAllocatorTest,
+       CompositePrefixCacheCountMatchesDpSize) {
+  BlockManagerPool::Options options;
+  options.num_blocks(1)
+      .block_size(1)
+      .enable_prefix_cache(true)
+      .composite_block_plan(make_composite_sum_plan());
+  BlockManagerPool pool(options, /*dp_size=*/2);
+
+  const std::vector<size_t> prefix_blocks = pool.num_blocks_in_prefix_cache();
+  ASSERT_EQ(prefix_blocks.size(), 2);
+  EXPECT_EQ(prefix_blocks[0], 0);
+  EXPECT_EQ(prefix_blocks[1], 0);
 }
 
 }  // namespace

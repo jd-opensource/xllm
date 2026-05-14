@@ -116,20 +116,13 @@ void add_single_group_release(int64_t releasable_blocks,
   }
 }
 
-void add_release_capacity(const SequenceBlockAllocator& allocator,
-                          const BlockManager* manager,
-                          int32_t dp_rank,
-                          bool composite_blocks,
-                          bool enable_prefix_cache,
-                          const std::vector<Sequence*>& release_candidates,
-                          std::vector<BlockGroupUsage>& groups) {
-  if (composite_blocks) {
-    add_release_estimates(allocator, dp_rank, release_candidates, groups);
-    return;
-  }
-
+void add_single_group_release(const BlockManager& manager,
+                              int32_t dp_rank,
+                              bool enable_prefix_cache,
+                              const std::vector<Sequence*>& release_candidates,
+                              std::vector<BlockGroupUsage>& groups) {
   const int64_t releasable_blocks = single_group_release_count(
-      *manager, release_candidates, dp_rank, enable_prefix_cache);
+      manager, release_candidates, dp_rank, enable_prefix_cache);
   add_single_group_release(releasable_blocks, groups);
 }
 
@@ -153,7 +146,6 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
 
   for (int32_t i = 0; i < dp_size; ++i) {
     if (options_.composite_block_plan().has_value()) {
-      block_managers_.emplace_back(nullptr);
       allocators_.emplace_back(
           std::make_unique<CompositeSequenceBlockAllocator>(
               options_.composite_block_plan().value()));
@@ -204,11 +196,10 @@ int32_t BlockManagerPool::get_manager_with_max_free_blocks() const {
   }
 
   size_t max_index = 0;
-  int64_t max_free = allocators_[0]->stats().bottleneck_free_sequences;
+  int64_t max_free = allocators_[0]->bottleneck_free_blocks();
 
   for (size_t i = 1; i < allocators_.size(); ++i) {
-    const int64_t current_free =
-        allocators_[i]->stats().bottleneck_free_sequences;
+    const int64_t current_free = allocators_[i]->bottleneck_free_blocks();
     if (current_free > max_free) {
       max_free = current_free;
       max_index = i;
@@ -530,7 +521,6 @@ void BlockManagerPool::allocate_shared(Sequence* sequence) {
     sequence->set_dp_rank(dp_rank);
   }
 
-  CHECK(block_managers_[dp_rank] != nullptr);
   const Slice<Block> existed_shared_blocks =
       sequence->kv_state().kv_blocks().slice(
           0, sequence->kv_state().shared_kv_blocks_num());
@@ -545,7 +535,6 @@ void BlockManagerPool::cache(Sequence* sequence) {
     return;
   }
   int32_t dp_rank = get_dp_rank(sequence);
-  CHECK(block_managers_[dp_rank] != nullptr);
   const Slice<int32_t> token_ids = sequence->cached_tokens();
   std::vector<Block>* blocks = sequence->kv_state().mutable_kv_blocks();
   const size_t shared_blocks_num = sequence->kv_state().shared_kv_blocks_num();
@@ -553,18 +542,15 @@ void BlockManagerPool::cache(Sequence* sequence) {
 }
 
 void BlockManagerPool::get_merged_kvcache_event(KvCacheEvent* event) const {
-  for (int32_t i = 0; i < block_managers_.size(); ++i) {
-    if (block_managers_[i] == nullptr) {
-      continue;
-    }
-    block_managers_[i]->get_merged_kvcache_event(event);
+  for (const std::unique_ptr<BlockManager>& manager : block_managers_) {
+    manager->get_merged_kvcache_event(event);
   }
 }
 
 float BlockManagerPool::get_gpu_cache_usage_perc() const {
   float perc = 0.0;
   for (int32_t i = 0; i < allocators_.size(); ++i) {
-    perc += static_cast<float>(allocators_[i]->stats().bottleneck_utilization);
+    perc += static_cast<float>(allocators_[i]->bottleneck_utilization());
   }
   return perc / allocators_.size();
 }
@@ -575,14 +561,11 @@ int32_t BlockManagerPool::block_size() const { return options_.block_size(); }
 
 std::vector<size_t> BlockManagerPool::num_blocks_in_prefix_cache() const {
   std::vector<size_t> num_blocks_in_prefix_cache(allocators_.size());
-  if (!options_.enable_prefix_cache()) {
+  if (!options_.enable_prefix_cache() ||
+      options_.composite_block_plan().has_value()) {
     return num_blocks_in_prefix_cache;
   }
   for (size_t dp_rank = 0; dp_rank < block_managers_.size(); ++dp_rank) {
-    if (block_managers_[dp_rank] == nullptr) {
-      num_blocks_in_prefix_cache[dp_rank] = 0;
-      continue;
-    }
     num_blocks_in_prefix_cache[dp_rank] =
         block_managers_[dp_rank]->num_blocks_in_prefix_cache();
   }
@@ -592,8 +575,8 @@ std::vector<size_t> BlockManagerPool::num_blocks_in_prefix_cache() const {
 std::vector<size_t> BlockManagerPool::num_free_blocks() const {
   std::vector<size_t> num_free_blocks(allocators_.size());
   for (size_t dp_rank = 0; dp_rank < allocators_.size(); ++dp_rank) {
-    num_free_blocks[dp_rank] = static_cast<size_t>(
-        allocators_[dp_rank]->stats().bottleneck_free_sequences);
+    num_free_blocks[dp_rank] =
+        static_cast<size_t>(allocators_[dp_rank]->bottleneck_free_blocks());
   }
   return num_free_blocks;
 }
@@ -601,19 +584,15 @@ std::vector<size_t> BlockManagerPool::num_free_blocks() const {
 std::vector<size_t> BlockManagerPool::num_used_blocks() const {
   std::vector<size_t> num_used_blocks(allocators_.size());
   for (size_t dp_rank = 0; dp_rank < allocators_.size(); ++dp_rank) {
-    const BlockAllocatorStats stats = allocators_[dp_rank]->stats();
-    int64_t used_blocks = 0;
-    for (const BlockGroupUsage& group : stats.groups) {
-      used_blocks = std::max(used_blocks, group.used_blocks);
-    }
-    num_used_blocks[dp_rank] = static_cast<size_t>(used_blocks);
+    num_used_blocks[dp_rank] =
+        static_cast<size_t>(allocators_[dp_rank]->max_used_blocks());
   }
   return num_used_blocks;
 }
 
 double BlockManagerPool::kv_cache_utilization() const {
   int32_t dp_rank = get_manager_with_max_free_blocks();
-  return allocators_[dp_rank]->stats().bottleneck_utilization;
+  return allocators_[dp_rank]->bottleneck_utilization();
 }
 
 SequenceAllocEstimate BlockManagerPool::estimate_allocate(
@@ -657,32 +636,37 @@ bool BlockManagerPool::can_allocate_after_release(
     size_t target_num_tokens,
     const std::vector<Sequence*>& release_candidates) const {
   const bool composite_blocks = options_.composite_block_plan().has_value();
-  const bool enable_prefix_cache =
-      !composite_blocks && options_.enable_prefix_cache();
   if (target->dp_rank() >= 0) {
     const int32_t dp_rank = target->dp_rank();
     SequenceAllocEstimate estimate =
         allocators_[dp_rank]->estimate_allocate(target, target_num_tokens);
-    add_release_capacity(*allocators_[dp_rank],
-                         block_managers_[dp_rank].get(),
-                         dp_rank,
-                         composite_blocks,
-                         enable_prefix_cache,
-                         release_candidates,
-                         estimate.groups);
+    if (composite_blocks) {
+      add_release_estimates(
+          *allocators_[dp_rank], dp_rank, release_candidates, estimate.groups);
+    } else {
+      add_single_group_release(*block_managers_[dp_rank],
+                               dp_rank,
+                               options_.enable_prefix_cache(),
+                               release_candidates,
+                               estimate.groups);
+    }
     return has_enough_blocks(estimate.groups);
   }
 
   for (size_t dp_rank = 0; dp_rank < allocators_.size(); ++dp_rank) {
     SequenceAllocEstimate estimate =
         allocators_[dp_rank]->estimate_allocate(target, target_num_tokens);
-    add_release_capacity(*allocators_[dp_rank],
-                         block_managers_[dp_rank].get(),
-                         static_cast<int32_t>(dp_rank),
-                         composite_blocks,
-                         enable_prefix_cache,
-                         release_candidates,
-                         estimate.groups);
+    const int32_t rank = static_cast<int32_t>(dp_rank);
+    if (composite_blocks) {
+      add_release_estimates(
+          *allocators_[dp_rank], rank, release_candidates, estimate.groups);
+    } else {
+      add_single_group_release(*block_managers_[dp_rank],
+                               rank,
+                               options_.enable_prefix_cache(),
+                               release_candidates,
+                               estimate.groups);
+    }
     if (has_enough_blocks(estimate.groups)) {
       return true;
     }

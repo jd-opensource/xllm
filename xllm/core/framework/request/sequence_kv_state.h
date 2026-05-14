@@ -26,9 +26,8 @@ limitations under the License.
 namespace xllm {
 
 struct KVCacheGroupState {
-  int32_t group_id = 0;
   bool is_token_group = true;
-  int32_t tokens_per_block = 0;
+  int32_t block_size = 0;
 };
 
 class KVCacheState {
@@ -79,10 +78,6 @@ class KVCacheState {
     return &composite_group_states_;
   }
   void clear_composite_blocks();
-  bool has_composite_blocks() const;
-  size_t num_composite_groups() const;
-  size_t num_composite_blocks(int32_t group_id) const;
-  size_t total_composite_blocks() const;
 
   void set_transfer_kv_info(TransferKVInfo&& info);
   std::optional<TransferKVInfo>& transfer_kv_info();
