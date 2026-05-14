@@ -66,12 +66,6 @@ class KVCacheManager {
   virtual std::vector<size_t> num_free_blocks() const = 0;
   virtual std::vector<size_t> num_used_blocks() const = 0;
   virtual double kv_cache_utilization() const = 0;
-  virtual SequenceAllocEstimate estimate_allocate(
-      const Sequence* sequence,
-      size_t target_num_tokens) const {
-    NOT_IMPLEMENTED();
-    return {};
-  }
   virtual std::vector<BlockGroupUsage> estimate_release(
       const Sequence* sequence) const {
     NOT_IMPLEMENTED();

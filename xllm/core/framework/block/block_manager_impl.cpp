@@ -211,7 +211,6 @@ bool BlockManagerImpl::is_prefix_cached(const Block& block) const {
   if (!options_.enable_prefix_cache()) {
     return false;
   }
-  CHECK(prefix_cache_);
   return prefix_cache_->contains(block);
 }
 

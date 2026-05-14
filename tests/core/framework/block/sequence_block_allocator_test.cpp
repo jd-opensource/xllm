@@ -20,7 +20,6 @@ limitations under the License.
 #include <cstdint>
 #include <vector>
 
-#include "framework/block/block_group.h"
 #include "framework/block/block_manager_pool.h"
 #include "framework/request/incremental_decoder.h"
 #include "framework/request/sequence.h"
@@ -28,12 +27,16 @@ limitations under the License.
 namespace xllm {
 namespace {
 
-BlockGroupSpec make_spec(int32_t group_id,
-                         BlockGroupKind kind,
-                         int32_t tokens_per_block,
-                         int64_t num_blocks,
-                         int32_t fixed_blocks_per_sequence) {
-  BlockGroupSpec spec;
+using GroupKind = CompositeSequenceBlockAllocator::GroupKind;
+using GroupSpec = CompositeSequenceBlockAllocator::GroupSpec;
+using Plan = CompositeSequenceBlockAllocator::Plan;
+
+GroupSpec make_spec(int32_t group_id,
+                    GroupKind kind,
+                    int32_t tokens_per_block,
+                    int64_t num_blocks,
+                    int32_t fixed_blocks_per_sequence) {
+  GroupSpec spec;
   spec.group_id = group_id;
   spec.kind = kind;
   spec.tokens_per_block = tokens_per_block;
@@ -42,21 +45,21 @@ BlockGroupSpec make_spec(int32_t group_id,
   return spec;
 }
 
-CompositeBlockPlan make_plan() {
-  CompositeBlockPlan plan;
+Plan make_plan() {
+  Plan plan;
   plan.groups = {
       make_spec(/*group_id=*/0,
-                BlockGroupKind::RING,
+                GroupKind::RING,
                 /*tokens_per_block=*/16,
                 /*num_blocks=*/4,
                 /*fixed_blocks_per_sequence=*/2),
       make_spec(/*group_id=*/1,
-                BlockGroupKind::TOKEN,
+                GroupKind::TOKEN,
                 /*tokens_per_block=*/4,
                 /*num_blocks=*/8,
                 /*fixed_blocks_per_sequence=*/0),
       make_spec(/*group_id=*/2,
-                BlockGroupKind::TOKEN,
+                GroupKind::TOKEN,
                 /*tokens_per_block=*/10,
                 /*num_blocks=*/3,
                 /*fixed_blocks_per_sequence=*/0),
@@ -64,21 +67,21 @@ CompositeBlockPlan make_plan() {
   return plan;
 }
 
-CompositeBlockPlan make_small_plan() {
-  CompositeBlockPlan plan;
+Plan make_small_plan() {
+  Plan plan;
   plan.groups = {
       make_spec(/*group_id=*/0,
-                BlockGroupKind::RING,
+                GroupKind::RING,
                 /*tokens_per_block=*/16,
                 /*num_blocks=*/2,
                 /*fixed_blocks_per_sequence=*/2),
       make_spec(/*group_id=*/1,
-                BlockGroupKind::TOKEN,
+                GroupKind::TOKEN,
                 /*tokens_per_block=*/4,
                 /*num_blocks=*/2,
                 /*fixed_blocks_per_sequence=*/0),
       make_spec(/*group_id=*/2,
-                BlockGroupKind::TOKEN,
+                GroupKind::TOKEN,
                 /*tokens_per_block=*/10,
                 /*num_blocks=*/1,
                 /*fixed_blocks_per_sequence=*/0),
@@ -110,21 +113,21 @@ std::vector<int32_t> make_tokens_with_suffix(int32_t prefix_first,
   return tokens;
 }
 
-CompositeBlockPlan make_composite_sum_plan() {
-  CompositeBlockPlan plan;
+Plan make_composite_sum_plan() {
+  Plan plan;
   plan.groups = {
       make_spec(/*group_id=*/0,
-                BlockGroupKind::RING,
+                GroupKind::RING,
                 /*tokens_per_block=*/16,
                 /*num_blocks=*/4,
                 /*fixed_blocks_per_sequence=*/1),
       make_spec(/*group_id=*/1,
-                BlockGroupKind::TOKEN,
+                GroupKind::TOKEN,
                 /*tokens_per_block=*/4,
                 /*num_blocks=*/6,
                 /*fixed_blocks_per_sequence=*/0),
       make_spec(/*group_id=*/2,
-                BlockGroupKind::TOKEN,
+                GroupKind::TOKEN,
                 /*tokens_per_block=*/8,
                 /*num_blocks=*/4,
                 /*fixed_blocks_per_sequence=*/0),

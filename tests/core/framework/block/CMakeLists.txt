@@ -4,7 +4,6 @@ cc_test(
   NAME
     block_allocator_test
   SRCS
-    block_group_test.cpp
     sequence_block_allocator_test.cpp
   DEPS
     :block

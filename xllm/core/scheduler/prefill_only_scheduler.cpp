@@ -137,12 +137,7 @@ void PrefillOnlyScheduler::handle_prefill_requests(
           if (!requests_to_evict.empty()) {
             for (auto& request_to_preempt : requests_to_evict) {
               ++num_online_prefill_preempt_offline_requests;
-              kv_cache_manager_->deallocate(request_to_preempt.get());
-              CHECK(running_queue_offline_->erase(request_to_preempt));
-              // add preemptable request to waiting priority queue
-              // TO IMPROVE?: not process this offline request in current batch
-              request_to_preempt->set_preempted();
-              waiting_priority_queue_offline_.push(request_to_preempt);
+              preempt_request(request_to_preempt, running_queue_offline_.get());
             }
             if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
               LOG(ERROR) << "Should be able to allocate after preempting "
@@ -319,12 +314,7 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
           if (!requests_to_evict.empty()) {
             for (auto& request_to_preempt : requests_to_evict) {
               ++num_online_prefill_preempt_offline_requests;
-              kv_cache_manager_->deallocate(request_to_preempt.get());
-              CHECK(running_queue_offline_->erase(request_to_preempt));
-              // add preemptable request to waiting priority queue
-              // TO IMPROVE?: not process this offline request in current batch
-              request_to_preempt->set_preempted();
-              waiting_priority_queue_offline_.push(request_to_preempt);
+              preempt_request(request_to_preempt, running_queue_offline_.get());
             }
             if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
               LOG(ERROR) << "Should be able to allocate after preempting "

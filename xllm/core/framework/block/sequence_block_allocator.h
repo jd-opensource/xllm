@@ -20,19 +20,11 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "framework/block/block_group.h"
 #include "framework/block/block_manager.h"
 
 namespace xllm {
 
 class KVCacheState;
-
-struct BlockAllocatorCapabilities {
-  bool supports_prefix_cache = false;
-  bool supports_cache_upload = false;
-  bool supports_beam_search = false;
-  bool supports_raw_block_alloc = false;
-};
 
 struct BlockGroupUsage {
   int32_t group_id = 0;
@@ -63,16 +55,12 @@ class SequenceBlockAllocator {
                                  size_t target_num_tokens) = 0;
   virtual void deallocate_sequence(Sequence* sequence) = 0;
 
-  virtual void allocate_shared_sequence(Sequence* sequence);
-  virtual void cache_sequence(Sequence* sequence);
-
   virtual SequenceAllocEstimate estimate_allocate(
       const Sequence* sequence,
       size_t target_num_tokens) const = 0;
   virtual std::vector<BlockGroupUsage> estimate_release(
       const Sequence* sequence) const = 0;
 
-  virtual BlockAllocatorCapabilities capabilities() const = 0;
   virtual BlockAllocatorStats stats() const = 0;
 };
 
@@ -82,8 +70,6 @@ class SingleGroupBlockAllocator final : public SequenceBlockAllocator {
 
   bool allocate_sequence(Sequence* sequence, size_t target_num_tokens) override;
   void deallocate_sequence(Sequence* sequence) override;
-  void allocate_shared_sequence(Sequence* sequence) override;
-  void cache_sequence(Sequence* sequence) override;
 
   SequenceAllocEstimate estimate_allocate(
       const Sequence* sequence,
@@ -91,7 +77,6 @@ class SingleGroupBlockAllocator final : public SequenceBlockAllocator {
   std::vector<BlockGroupUsage> estimate_release(
       const Sequence* sequence) const override;
 
-  BlockAllocatorCapabilities capabilities() const override;
   BlockAllocatorStats stats() const override;
 
  private:
@@ -100,7 +85,24 @@ class SingleGroupBlockAllocator final : public SequenceBlockAllocator {
 
 class CompositeSequenceBlockAllocator final : public SequenceBlockAllocator {
  public:
-  explicit CompositeSequenceBlockAllocator(const CompositeBlockPlan& plan);
+  enum class GroupKind : int32_t {
+    TOKEN = 0,
+    RING = 1,
+  };
+
+  struct GroupSpec {
+    int32_t group_id = 0;
+    GroupKind kind = GroupKind::TOKEN;
+    int32_t tokens_per_block = 0;
+    int64_t num_blocks = 0;
+    int32_t fixed_blocks_per_sequence = 0;
+  };
+
+  struct Plan {
+    std::vector<GroupSpec> groups;
+  };
+
+  explicit CompositeSequenceBlockAllocator(const Plan& plan);
 
   bool allocate_sequence(Sequence* sequence, size_t target_num_tokens) override;
   void deallocate_sequence(Sequence* sequence) override;
@@ -111,7 +113,6 @@ class CompositeSequenceBlockAllocator final : public SequenceBlockAllocator {
   std::vector<BlockGroupUsage> estimate_release(
       const Sequence* sequence) const override;
 
-  BlockAllocatorCapabilities capabilities() const override;
   BlockAllocatorStats stats() const override;
 
  private:
@@ -121,7 +122,7 @@ class CompositeSequenceBlockAllocator final : public SequenceBlockAllocator {
   void validate_sequence_state(const KVCacheState& kv_state) const;
 
  private:
-  std::vector<BlockGroupSpec> group_specs_;
+  std::vector<GroupSpec> group_specs_;
   std::vector<std::unique_ptr<BlockManager>> group_managers_;
 };
 

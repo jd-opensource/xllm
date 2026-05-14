@@ -20,7 +20,6 @@ limitations under the License.
 #include <vector>
 
 #include "block_manager.h"
-#include "framework/block/block_group.h"
 #include "framework/block/kv_cache_manager.h"
 #include "framework/block/sequence_block_allocator.h"
 #include "framework/block/single_block_manager.h"
@@ -42,7 +41,7 @@ class BlockManagerPool : public KVCacheManager {
     PROPERTY(int64_t, num_layers) = 0;  // Required when enable_xtensor is true
     PROPERTY(int64_t, slot_size) = 0;   // Memory size per slot (for xtensor)
     PROPERTY(std::string, model_id);    // Model ID for multi-model support
-    PROPERTY(std::optional<CompositeBlockPlan>,
+    PROPERTY(std::optional<CompositeSequenceBlockAllocator::Plan>,
              composite_block_plan) = std::nullopt;
   };
 
@@ -85,9 +84,6 @@ class BlockManagerPool : public KVCacheManager {
   virtual std::vector<size_t> num_free_blocks() const override;
   virtual std::vector<size_t> num_used_blocks() const override;
   virtual double kv_cache_utilization() const override;
-  SequenceAllocEstimate estimate_allocate(
-      const Sequence* sequence,
-      size_t target_num_tokens) const override;
   std::vector<BlockGroupUsage> estimate_release(
       const Sequence* sequence) const override;
   bool can_allocate_after_release(
@@ -106,6 +102,8 @@ class BlockManagerPool : public KVCacheManager {
   int32_t get_manager_with_max_free_blocks() const;
   int32_t get_dp_rank(Sequence* sequence) const;
   int32_t select_dp_rank(Sequence* sequence, size_t target_num_tokens) const;
+  SequenceAllocEstimate estimate_allocate(const Sequence* sequence,
+                                          size_t target_num_tokens) const;
 
   bool process_beam_search(Sequence* sequence, bool need_swap = false);
   bool allocate_single_block(Sequence* sequence, int32_t dp_rank);

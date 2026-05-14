@@ -22,13 +22,12 @@ limitations under the License.
 #include "core/common/types.h"
 #include "core/util/slice.h"
 #include "framework/block/block.h"
-#include "framework/block/block_group.h"
 
 namespace xllm {
 
 struct KVCacheGroupState {
   int32_t group_id = 0;
-  BlockGroupKind kind = BlockGroupKind::TOKEN;
+  bool is_token_group = true;
   int32_t tokens_per_block = 0;
 };
 

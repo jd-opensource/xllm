@@ -117,17 +117,15 @@ size_t KVCacheState::token_capacity() const {
   size_t capacity = std::numeric_limits<size_t>::max();
   bool has_token_group = false;
   if (composite_group_states_.size() == composite_blocks_.size()) {
-    for (const KVCacheGroupState& group_state : composite_group_states_) {
-      if (group_state.kind != BlockGroupKind::TOKEN) {
+    for (size_t group_id = 0; group_id < composite_group_states_.size();
+         ++group_id) {
+      const KVCacheGroupState& group_state = composite_group_states_[group_id];
+      if (!group_state.is_token_group) {
         continue;
       }
-      CHECK_GE(group_state.group_id, 0);
-      const size_t group_id = static_cast<size_t>(group_state.group_id);
-      CHECK_LT(group_id, composite_blocks_.size());
       if (composite_blocks_[group_id].empty()) {
         continue;
       }
-      CHECK_GT(group_state.tokens_per_block, 0);
       const size_t group_capacity =
           composite_blocks_[group_id].size() *
           static_cast<size_t>(group_state.tokens_per_block);
@@ -198,7 +196,9 @@ size_t KVCacheState::num_composite_groups() const {
 }
 
 size_t KVCacheState::num_composite_blocks(int32_t group_id) const {
-  CHECK_GE(group_id, 0);
+  if (group_id < 0) {
+    return 0;
+  }
   const size_t group_index = static_cast<size_t>(group_id);
   if (group_index >= composite_blocks_.size()) {
     return 0;

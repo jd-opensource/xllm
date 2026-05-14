@@ -36,18 +36,17 @@ struct ReleaseEntry {
 
 using BlockReleaseEntries = std::unordered_map<int32_t, ReleaseEntry>;
 
-void add_block_ref(const Block& block, BlockReleaseEntries* entries) {
-  CHECK(entries != nullptr);
+void add_block_ref(const Block& block, BlockReleaseEntries& entries) {
   if (!block.is_valid()) {
     return;
   }
 
-  ReleaseEntry& entry = (*entries)[block.id()];
+  ReleaseEntry& entry = entries[block.id()];
   entry.block = &block;
   ++entry.refs;
 }
 
-void add_block_refs(const Slice<Block>& blocks, BlockReleaseEntries* entries) {
+void add_block_refs(const Slice<Block>& blocks, BlockReleaseEntries& entries) {
   for (const Block& block : blocks) {
     add_block_ref(block, entries);
   }
@@ -63,13 +62,12 @@ int64_t single_group_release_count(
     if (sequence == nullptr || sequence->dp_rank() != dp_rank) {
       continue;
     }
-    add_block_refs(sequence->kv_state().kv_blocks(), &entries);
+    add_block_refs(sequence->kv_state().kv_blocks(), entries);
   }
 
   int64_t count = 0;
   for (const auto& block_entry : entries) {
     const ReleaseEntry& entry = block_entry.second;
-    CHECK(entry.block != nullptr);
     const bool cached =
         enable_prefix_cache && manager.is_prefix_cached(*entry.block);
     const int64_t max_ref_count = entry.refs + (cached ? 1 : 0);
@@ -83,9 +81,8 @@ int64_t single_group_release_count(
 void add_release_estimates(const SequenceBlockAllocator& allocator,
                            int32_t dp_rank,
                            const std::vector<Sequence*>& release_candidates,
-                           std::vector<BlockGroupUsage>* groups) {
-  CHECK(groups != nullptr);
-  for (BlockGroupUsage& group : *groups) {
+                           std::vector<BlockGroupUsage>& groups) {
+  for (BlockGroupUsage& group : groups) {
     for (const Sequence* sequence : release_candidates) {
       if (sequence == nullptr || sequence->dp_rank() != dp_rank) {
         continue;
@@ -111,9 +108,8 @@ bool has_enough_blocks(const std::vector<BlockGroupUsage>& groups) {
 }
 
 void add_single_group_release(int64_t releasable_blocks,
-                              std::vector<BlockGroupUsage>* groups) {
-  CHECK(groups != nullptr);
-  for (BlockGroupUsage& group : *groups) {
+                              std::vector<BlockGroupUsage>& groups) {
+  for (BlockGroupUsage& group : groups) {
     if (group.group_id == 0) {
       group.releasable_blocks += releasable_blocks;
     }
@@ -126,14 +122,12 @@ void add_release_capacity(const SequenceBlockAllocator& allocator,
                           bool composite_blocks,
                           bool enable_prefix_cache,
                           const std::vector<Sequence*>& release_candidates,
-                          std::vector<BlockGroupUsage>* groups) {
-  CHECK(groups != nullptr);
+                          std::vector<BlockGroupUsage>& groups) {
   if (composite_blocks) {
     add_release_estimates(allocator, dp_rank, release_candidates, groups);
     return;
   }
 
-  CHECK(manager != nullptr);
   const int64_t releasable_blocks = single_group_release_count(
       *manager, release_candidates, dp_rank, enable_prefix_cache);
   add_single_group_release(releasable_blocks, groups);
@@ -224,7 +218,6 @@ int32_t BlockManagerPool::get_manager_with_max_free_blocks() const {
 }
 
 int32_t BlockManagerPool::get_dp_rank(Sequence* sequence) const {
-  CHECK(sequence != nullptr);
   if (sequence->dp_rank() >= 0) {
     return sequence->dp_rank();
   }
@@ -233,7 +226,6 @@ int32_t BlockManagerPool::get_dp_rank(Sequence* sequence) const {
 
 int32_t BlockManagerPool::select_dp_rank(Sequence* sequence,
                                          size_t target_num_tokens) const {
-  CHECK(sequence != nullptr);
   if (sequence->dp_rank() >= 0) {
     return sequence->dp_rank();
   }
@@ -525,30 +517,39 @@ bool BlockManagerPool::process_beam_search(Sequence* sequence, bool need_swap) {
 
 void BlockManagerPool::allocate_shared(Sequence* sequence) {
   // only allocate shared blocks for prefill sequences
-  if (options_.enable_prefix_cache()) {
-    int32_t dp_rank = sequence->dp_rank();
-    if (dp_rank < 0) {
-      dp_rank = select_dp_rank(sequence, sequence->num_tokens());
-      CHECK_GE(dp_rank, 0);
-      sequence->set_dp_rank(dp_rank);
-    }
-    CHECK(allocators_[dp_rank]->capabilities().supports_prefix_cache)
-        << "Selected block allocator does not support prefix cache";
-    allocators_[dp_rank]->allocate_shared_sequence(sequence);
+  if (!options_.enable_prefix_cache() ||
+      options_.composite_block_plan().has_value()) {
+    return;
   }
+  int32_t dp_rank = sequence->dp_rank();
+  if (dp_rank < 0) {
+    dp_rank = select_dp_rank(sequence, sequence->num_tokens());
+    if (dp_rank < 0) {
+      return;
+    }
+    sequence->set_dp_rank(dp_rank);
+  }
+
+  CHECK(block_managers_[dp_rank] != nullptr);
+  const Slice<Block> existed_shared_blocks =
+      sequence->kv_state().kv_blocks().slice(
+          0, sequence->kv_state().shared_kv_blocks_num());
+  std::vector<Block> shared_blocks = block_managers_[dp_rank]->allocate_shared(
+      sequence->tokens(), existed_shared_blocks);
+  sequence->add_shared_kv_blocks(std::move(shared_blocks));
 }
 
 void BlockManagerPool::cache(Sequence* sequence) {
-  int32_t dp_rank = get_dp_rank(sequence);
-  if (!options_.enable_prefix_cache() && !options_.enable_cache_upload()) {
+  if ((!options_.enable_prefix_cache() && !options_.enable_cache_upload()) ||
+      options_.composite_block_plan().has_value()) {
     return;
   }
-  const BlockAllocatorCapabilities caps = allocators_[dp_rank]->capabilities();
-  CHECK(!options_.enable_prefix_cache() || caps.supports_prefix_cache)
-      << "Selected block allocator does not support prefix cache";
-  CHECK(!options_.enable_cache_upload() || caps.supports_cache_upload)
-      << "Selected block allocator does not support cache upload";
-  allocators_[dp_rank]->cache_sequence(sequence);
+  int32_t dp_rank = get_dp_rank(sequence);
+  CHECK(block_managers_[dp_rank] != nullptr);
+  const Slice<int32_t> token_ids = sequence->cached_tokens();
+  std::vector<Block>* blocks = sequence->kv_state().mutable_kv_blocks();
+  const size_t shared_blocks_num = sequence->kv_state().shared_kv_blocks_num();
+  block_managers_[dp_rank]->cache(token_ids, *blocks, shared_blocks_num);
 }
 
 void BlockManagerPool::get_merged_kvcache_event(KvCacheEvent* event) const {
@@ -618,7 +619,6 @@ double BlockManagerPool::kv_cache_utilization() const {
 SequenceAllocEstimate BlockManagerPool::estimate_allocate(
     const Sequence* sequence,
     size_t target_num_tokens) const {
-  CHECK(sequence != nullptr);
   if (sequence->dp_rank() >= 0) {
     return allocators_[sequence->dp_rank()]->estimate_allocate(
         sequence, target_num_tokens);
@@ -646,7 +646,6 @@ SequenceAllocEstimate BlockManagerPool::estimate_allocate(
 
 std::vector<BlockGroupUsage> BlockManagerPool::estimate_release(
     const Sequence* sequence) const {
-  CHECK(sequence != nullptr);
   const int32_t dp_rank = sequence->dp_rank() >= 0
                               ? sequence->dp_rank()
                               : get_manager_with_max_free_blocks();
@@ -657,7 +656,6 @@ bool BlockManagerPool::can_allocate_after_release(
     const Sequence* target,
     size_t target_num_tokens,
     const std::vector<Sequence*>& release_candidates) const {
-  CHECK(target != nullptr);
   const bool composite_blocks = options_.composite_block_plan().has_value();
   const bool enable_prefix_cache =
       !composite_blocks && options_.enable_prefix_cache();
@@ -671,7 +669,7 @@ bool BlockManagerPool::can_allocate_after_release(
                          composite_blocks,
                          enable_prefix_cache,
                          release_candidates,
-                         &estimate.groups);
+                         estimate.groups);
     return has_enough_blocks(estimate.groups);
   }
 
@@ -684,7 +682,7 @@ bool BlockManagerPool::can_allocate_after_release(
                          composite_blocks,
                          enable_prefix_cache,
                          release_candidates,
-                         &estimate.groups);
+                         estimate.groups);
     if (has_enough_blocks(estimate.groups)) {
       return true;
     }

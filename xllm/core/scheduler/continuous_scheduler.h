@@ -278,6 +278,9 @@ class ContinuousScheduler : public Scheduler {
       size_t max_handle_num_tokens,
       const Request* excluded_request = nullptr) const;
 
+  void preempt_request(const std::shared_ptr<Request>& request,
+                       DecodePriorityQueue* running_queue);
+
   bool check_if_enough_to_evict(DecodePriorityQueue* running_queue_to_evict,
                                 Sequence* prefill_sequence,
                                 size_t max_handle_num_tokens,

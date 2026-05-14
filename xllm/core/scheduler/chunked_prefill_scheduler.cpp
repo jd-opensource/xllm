@@ -212,11 +212,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       }
       for (auto& request_to_preempt : requests_to_evict) {
         ++num_preempted_requests;
-        kv_cache_manager_->deallocate(request_to_preempt.get());
-        CHECK(running_queue_offline_->erase(request_to_preempt));
-        // add preemptable request to waiting priority queue
-        request_to_preempt->set_preempted();
-        waiting_priority_queue_offline_.push(request_to_preempt);
+        preempt_request(request_to_preempt, running_queue_offline_.get());
       }
       continue;
     } else if (running_queue->size() > 1) {
@@ -237,15 +233,7 @@ void ChunkedPrefillScheduler::handle_running_queue_requests(
       for (auto& request_to_preempt : requests_to_evict) {
         ++num_preempted_requests;
         // TO IMPROVE: kv cache offload to cpu
-        kv_cache_manager_->deallocate(request_to_preempt.get());
-        CHECK(running_queue->erase(request_to_preempt));
-        // add preemptable request to waiting priority queue
-        request_to_preempt->set_preempted();
-        if (request_to_preempt->offline()) {
-          waiting_priority_queue_offline_.push(request_to_preempt);
-        } else {
-          waiting_priority_queue_.push(request_to_preempt);
-        }
+        preempt_request(request_to_preempt, running_queue.get());
       }
 
       continue;
@@ -366,12 +354,7 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
           if (!requests_to_evict.empty()) {
             for (auto& request_to_preempt : requests_to_evict) {
               ++num_preempted_requests;
-              kv_cache_manager_->deallocate(request_to_preempt.get());
-              CHECK(running_queue_offline_->erase(request_to_preempt));
-              // add preemptable request to waiting priority queue
-              // TO IMPROVE?: not process this offline request in current batch
-              request_to_preempt->set_preempted();
-              waiting_priority_queue_offline_.push(request_to_preempt);
+              preempt_request(request_to_preempt, running_queue_offline_.get());
             }
             if (!kv_cache_manager_->allocate(prefill_sequence.get(),
                                              max_handle_num_tokens)) {

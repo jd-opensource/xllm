@@ -258,6 +258,19 @@ bool ContinuousScheduler::check_if_enough_to_evict(
   return !requests_to_evict.empty();
 }
 
+void ContinuousScheduler::preempt_request(
+    const std::shared_ptr<Request>& request,
+    DecodePriorityQueue* running_queue) {
+  kv_cache_manager_->deallocate(request.get());
+  CHECK(running_queue->erase(request));
+  request->set_preempted();
+  if (request->offline()) {
+    waiting_priority_queue_offline_.push(request);
+  } else {
+    waiting_priority_queue_.push(request);
+  }
+}
+
 void ContinuousScheduler::handle_prefill_requests(
     double& latency_budget,
     double& estimate_latency,
@@ -358,12 +371,7 @@ void ContinuousScheduler::handle_prefill_requests(
           if (!requests_to_evict.empty()) {
             for (auto& request_to_preempt : requests_to_evict) {
               ++num_online_prefill_preempt_offline_requests;
-              kv_cache_manager_->deallocate(request_to_preempt.get());
-              CHECK(running_queue_offline_->erase(request_to_preempt));
-              // add preemptable request to waiting priority queue
-              // TO IMPROVE?: not process this offline request in current batch
-              request_to_preempt->set_preempted();
-              waiting_priority_queue_offline_.push(request_to_preempt);
+              preempt_request(request_to_preempt, running_queue_offline_.get());
             }
             if (!kv_cache_manager_->allocate(prefill_sequence.get(),
                                              target_num_tokens)) {
@@ -701,11 +709,7 @@ void ContinuousScheduler::handle_decode_requests(
       }
       for (auto& request_to_preempt : requests_to_evict) {
         ++num_online_decode_preempt_offline_requests;
-        kv_cache_manager_->deallocate(request_to_preempt.get());
-        CHECK(running_queue_offline_->erase(request_to_preempt));
-        // add preemptable request to waiting priority queue
-        request_to_preempt->set_preempted();
-        waiting_priority_queue_offline_.push(request_to_preempt);
+        preempt_request(request_to_preempt, running_queue_offline_.get());
       }
       continue;
     } else if (running_queue->size() > 1) {
@@ -725,17 +729,12 @@ void ContinuousScheduler::handle_decode_requests(
       }
       for (auto& request_to_preempt : requests_to_evict) {
         // TO IMPROVE: kv cache offload to cpu
-        kv_cache_manager_->deallocate(request_to_preempt.get());
-        CHECK(running_queue->erase(request_to_preempt));
-        // add preemptable request to waiting priority queue
-        request_to_preempt->set_preempted();
         if (request_to_preempt->offline()) {
           ++num_offline_decode_preempt_offline_requests;
-          waiting_priority_queue_offline_.push(request_to_preempt);
         } else {
           ++num_online_decode_preempt_online_requests;
-          waiting_priority_queue_.push(request_to_preempt);
         }
+        preempt_request(request_to_preempt, running_queue.get());
       }
 
       continue;
