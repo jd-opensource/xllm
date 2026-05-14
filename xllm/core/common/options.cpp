@@ -80,6 +80,10 @@ std::string Options::to_string() const {
      << ", disable_ttft_profiling: " << disable_ttft_profiling()
      << ", enable_forward_interruption: " << enable_forward_interruption()
      << ", enable_graph: " << enable_graph()
+     << ", enable_graph_mode_decode_no_padding: "
+     << enable_graph_mode_decode_no_padding()
+     << ", enable_prefill_piecewise_graph: " << enable_prefill_piecewise_graph()
+     << ", max_tokens_for_graph_mode: " << max_tokens_for_graph_mode()
      << ", server_idx: " << server_idx();
   ss << "]";
   return ss.str();

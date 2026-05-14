@@ -87,6 +87,13 @@ PYBIND11_MODULE(xllm_export, m) {
                      &Options::disable_ttft_profiling_)
       .def_readwrite("enable_forward_interruption",
                      &Options::enable_forward_interruption_)
+      .def_readwrite("enable_graph", &Options::enable_graph_)
+      .def_readwrite("enable_graph_mode_decode_no_padding",
+                     &Options::enable_graph_mode_decode_no_padding_)
+      .def_readwrite("enable_prefill_piecewise_graph",
+                     &Options::enable_prefill_piecewise_graph_)
+      .def_readwrite("max_tokens_for_graph_mode",
+                     &Options::max_tokens_for_graph_mode_)
       .def_readwrite("enable_offline_inference",
                      &Options::enable_offline_inference_)
       .def_readwrite("spawn_worker_path", &Options::spawn_worker_path_)

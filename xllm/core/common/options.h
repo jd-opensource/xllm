@@ -195,6 +195,12 @@ class Options {
   PROPERTY(bool, enable_forward_interruption) = false;
   // enable CUDA graph/ACL graph for performance optimization
   PROPERTY(bool, enable_graph) = false;
+  // enable graph-mode decode without padding
+  PROPERTY(bool, enable_graph_mode_decode_no_padding) = false;
+  // enable piecewise graph for prefill
+  PROPERTY(bool, enable_prefill_piecewise_graph) = false;
+  // maximum number of tokens for graph execution
+  PROPERTY(int32_t, max_tokens_for_graph_mode) = 2048;
   // all requests use single global ttft
   PROPERTY(int32_t, max_global_ttft_ms) = std::numeric_limits<int32_t>::max();
   // all requests use single global tpot

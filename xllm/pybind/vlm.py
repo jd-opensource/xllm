@@ -47,6 +47,10 @@ class VLM:
         enable_disagg_pd: bool = False,
         enable_schedule_overlap: bool = False,
         kv_cache_transfer_mode: str = 'PUSH',
+        enable_graph: bool = False,
+        enable_graph_mode_decode_no_padding: bool = False,
+        enable_prefill_piecewise_graph: bool = False,
+        max_tokens_for_graph_mode: int = 2048,
         enable_shm: bool = False,
         is_local: bool = True,
         input_shm_size: int = 1024,
@@ -101,6 +105,10 @@ class VLM:
         options.enable_disagg_pd = enable_disagg_pd
         options.enable_schedule_overlap = enable_schedule_overlap
         options.kv_cache_transfer_mode = kv_cache_transfer_mode
+        options.enable_graph = enable_graph
+        options.enable_graph_mode_decode_no_padding = enable_graph_mode_decode_no_padding
+        options.enable_prefill_piecewise_graph = enable_prefill_piecewise_graph
+        options.max_tokens_for_graph_mode = max_tokens_for_graph_mode
         options.enable_offline_inference = True
         options.spawn_worker_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
         options.enable_shm = enable_shm

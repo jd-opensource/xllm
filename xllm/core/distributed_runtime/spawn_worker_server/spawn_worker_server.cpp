@@ -57,12 +57,12 @@ std::string get_backend_from_worker_type(const std::string& worker_type) {
 }  // namespace
 
 SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
-                                     int local_rank,
-                                     int global_rank,
-                                     int world_size,
-                                     int device_idx,
-                                     int num_decoding_tokens,
-                                     int block_size,
+                                     int32_t local_rank,
+                                     int32_t global_rank,
+                                     int32_t world_size,
+                                     int32_t device_idx,
+                                     int32_t num_decoding_tokens,
+                                     int32_t block_size,
                                      bool enable_shm,
                                      uint64_t input_shm_size,
                                      uint64_t output_shm_size,
@@ -75,7 +75,11 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      const std::string& speculative_algorithm,
                                      const std::string& communication_backend,
                                      const std::string& npu_kernel_backend,
-                                     const std::string& rank_tablefile) {
+                                     const std::string& rank_tablefile,
+                                     bool enable_graph,
+                                     bool enable_graph_mode_decode_no_padding,
+                                     bool enable_prefill_piecewise_graph,
+                                     int32_t max_tokens_for_graph_mode) {
   // TODO: pass whole xllm::runtime::Options here from main process.
   xllm::runtime::Options runner_options;
   const std::string backend = get_backend_from_worker_type(worker_type);
@@ -83,19 +87,24 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                           << worker_type;
   runner_options.block_size(block_size)
       .backend(backend)
+      .world_size(world_size)
       .num_decoding_tokens(num_decoding_tokens)
       .enable_prefill_sp(enable_prefill_sp)
       .enable_speculative_decode(enable_speculative_decode)
       .num_speculative_tokens(num_speculative_tokens)
       .speculative_algorithm(speculative_algorithm)
-      .enable_schedule_overlap(false)
-      .enable_offline_inference(true)
+      .enable_schedule_overlap(/*enable_schedule_overlap=*/false)
+      .enable_offline_inference(/*enable_offline_inference=*/true)
       .master_node_addr(master_node_addr)
       .enable_shm(enable_shm)
       .input_shm_size(input_shm_size)
       .output_shm_size(output_shm_size)
       .is_local(is_local)
       .npu_kernel_backend(npu_kernel_backend)
+      .enable_graph(enable_graph)
+      .enable_graph_mode_decode_no_padding(enable_graph_mode_decode_no_padding)
+      .enable_prefill_piecewise_graph(enable_prefill_piecewise_graph)
+      .max_tokens_for_graph_mode(max_tokens_for_graph_mode)
       .task_type(task_type);
   SchedulerConfig::get_instance().enable_schedule_overlap(false);
   ParallelConfig::get_instance()
@@ -137,9 +146,9 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   ParallelArgs parallel_args(global_rank,
                              world_size,
                              /* dp_size = */ 1,
-                             /*cp_size = */ 1,
-                             /*process_group = */ nullptr,
-                             /*ep_size = */ 1);
+                             /* cp_size = */ 1,
+                             /* process_group = */ nullptr,
+                             /* ep_size = */ 1);
   worker_server_ = std::make_unique<WorkerServer>(local_rank,
                                                   master_node_addr,
                                                   done_,

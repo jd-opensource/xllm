@@ -20,7 +20,7 @@ from .params import (
 
 
 class BeamSearchOutput:
-    def __init__(self, output: RequestOutput):
+    def __init__(self, output: RequestOutput) -> None:
         self.prompt = output.prompt
         self.sequences = output.outputs
         self.status = output.status
@@ -29,7 +29,7 @@ class BeamSearchOutput:
 
 
 class EmbeddingOutputs:
-    def __init__(self, output: RequestOutput):
+    def __init__(self, output: RequestOutput) -> None:
         embedding = []
         if output.outputs and len(output.outputs) > 0:
             embedding = output.outputs[0].embeddings
@@ -38,7 +38,7 @@ class EmbeddingOutputs:
 
 
 class EmbeddingOutput:
-    def __init__(self, output: RequestOutput):
+    def __init__(self, output: RequestOutput) -> None:
         self.prompt = output.prompt
         self.outputs = EmbeddingOutputs(output)
         self.status = output.status
@@ -94,6 +94,10 @@ class LLM:
         kv_cache_transfer_mode: str = 'PUSH',
         disable_ttft_profiling: bool = False,
         enable_forward_interruption: bool = False,
+        enable_graph: bool = False,
+        enable_graph_mode_decode_no_padding: bool = False,
+        enable_prefill_piecewise_graph: bool = False,
+        max_tokens_for_graph_mode: int = 2048,
         enable_shm: bool = False,
         is_local: bool = True,
         input_shm_size: int = 1024,
@@ -167,6 +171,10 @@ class LLM:
         options.kv_cache_transfer_mode = kv_cache_transfer_mode
         options.disable_ttft_profiling = disable_ttft_profiling
         options.enable_forward_interruption = enable_forward_interruption
+        options.enable_graph = enable_graph
+        options.enable_graph_mode_decode_no_padding = enable_graph_mode_decode_no_padding
+        options.enable_prefill_piecewise_graph = enable_prefill_piecewise_graph
+        options.max_tokens_for_graph_mode = max_tokens_for_graph_mode
         options.enable_offline_inference = True
         options.spawn_worker_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
         options.enable_shm = enable_shm

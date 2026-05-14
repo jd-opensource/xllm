@@ -241,6 +241,12 @@ Master::Master(const Options& options, EngineType type)
         .dp_size(options.dp_size())
         .ep_size(options.ep_size())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
+        .enable_graph(options_.enable_graph())
+        .enable_graph_mode_decode_no_padding(
+            options_.enable_graph_mode_decode_no_padding())
+        .enable_prefill_piecewise_graph(
+            options_.enable_prefill_piecewise_graph())
+        .max_tokens_for_graph_mode(options_.max_tokens_for_graph_mode())
         .max_tokens_per_chunk_for_prefill(
             options_.max_tokens_per_chunk_for_prefill());
 
@@ -248,7 +254,8 @@ Master::Master(const Options& options, EngineType type)
     engine_ = std::move(engine);
   } else if (type == EngineType::SSM) {
     // create a speculative engine if draft model path is provided
-    const auto draft_model_path = options_.draft_model_path().value_or("");
+    const std::string draft_model_path =
+        options_.draft_model_path().value_or("");
     const bool use_suffix_spec = options_.speculative_algorithm() == "Suffix";
     CHECK(use_suffix_spec || !draft_model_path.empty())
         << "draft model path is required unless --speculative_algorithm=Suffix";
@@ -305,7 +312,13 @@ Master::Master(const Options& options, EngineType type)
         .enable_shm(options_.enable_shm())
         .input_shm_size(options_.input_shm_size() * 1024 * 1024)
         .output_shm_size(options_.output_shm_size() * 1024 * 1024)
-        .is_local(options_.is_local());
+        .is_local(options_.is_local())
+        .enable_graph(options_.enable_graph())
+        .enable_graph_mode_decode_no_padding(
+            options_.enable_graph_mode_decode_no_padding())
+        .enable_prefill_piecewise_graph(
+            options_.enable_prefill_piecewise_graph())
+        .max_tokens_for_graph_mode(options_.max_tokens_for_graph_mode());
 
     if (options_.device_ip().has_value()) {
       spec_options.device_ip(options_.device_ip().value());
@@ -366,6 +379,12 @@ Master::Master(const Options& options, EngineType type)
         .output_shm_size(options_.output_shm_size() * 1024 * 1024)
         .is_local(options_.is_local())
         .server_idx(options_.server_idx())
+        .enable_graph(options_.enable_graph())
+        .enable_graph_mode_decode_no_padding(
+            options_.enable_graph_mode_decode_no_padding())
+        .enable_prefill_piecewise_graph(
+            options_.enable_prefill_piecewise_graph())
+        .max_tokens_for_graph_mode(options_.max_tokens_for_graph_mode())
         .kv_cache_dtype(options_.kv_cache_dtype())
         .model_id(options_.model_id());
 
@@ -404,6 +423,11 @@ Master::Master(const Options& options, EngineType type)
         .beam_width(options_.beam_width())
         .max_tokens_per_batch(options_.max_tokens_per_batch())
         .enable_graph(options_.enable_graph())
+        .enable_graph_mode_decode_no_padding(
+            options_.enable_graph_mode_decode_no_padding())
+        .enable_prefill_piecewise_graph(
+            options_.enable_prefill_piecewise_graph())
+        .max_tokens_for_graph_mode(options_.max_tokens_for_graph_mode())
         .max_tokens_per_chunk_for_prefill(
             options_.max_tokens_per_chunk_for_prefill())
         .rec_worker_max_concurrency(options_.rec_worker_max_concurrency());
