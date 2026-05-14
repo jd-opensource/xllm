@@ -182,10 +182,10 @@ TORCH_MODULE(WanTimestepEmbedding);
 
 class WanTimestepsImpl : public torch::nn::Module {
  public:
-  WanTimestepsImpl(int64_t num_channels,
-                   bool flip_sin_to_cos = true,
-                   float downscale_freq_shift = 0.0,
-                   int64_t scale = 1)
+  explicit WanTimestepsImpl(int64_t num_channels,
+                            bool flip_sin_to_cos = true,
+                            float downscale_freq_shift = 0.0,
+                            int64_t scale = 1)
       : num_channels_(num_channels),
         flip_sin_to_cos_(flip_sin_to_cos),
         downscale_freq_shift_(downscale_freq_shift),
@@ -206,7 +206,7 @@ class WanTimestepsImpl : public torch::nn::Module {
   int64_t scale_;
 
   torch::Tensor get_timestep_embedding(const torch::Tensor& timesteps,
-                                       int embedding_dim,
+                                       int64_t embedding_dim,
                                        bool flip_sin_to_cos = false,
                                        float downscale_freq_shift = 1.0f,
                                        float scale = 1.0f,
@@ -319,20 +319,29 @@ class WanFeedForwardImpl : public torch::nn::Module {
     int64_t actual_dim_out = (dim_out > 0) ? dim_out : dim;
 
     if (activation_fn == "gelu") {
-      act_fn_ = register_module(
-          "act_fn",
-          WanGELU(
-              dim, actual_inner_dim, false, with_bias, context, parallel_args));
+      act_fn_ = register_module("act_fn",
+                                WanGELU(dim,
+                                        actual_inner_dim,
+                                        /*approximate*/ false,
+                                        with_bias,
+                                        context,
+                                        parallel_args));
     } else if (activation_fn == "gelu-approximate") {
-      act_fn_ = register_module(
-          "act_fn",
-          WanGELU(
-              dim, actual_inner_dim, true, with_bias, context, parallel_args));
+      act_fn_ = register_module("act_fn",
+                                WanGELU(dim,
+                                        actual_inner_dim,
+                                        /*approximate*/ true,
+                                        with_bias,
+                                        context,
+                                        parallel_args));
     } else {
-      act_fn_ = register_module(
-          "act_fn",
-          WanGELU(
-              dim, actual_inner_dim, true, with_bias, context, parallel_args));
+      act_fn_ = register_module("act_fn",
+                                WanGELU(dim,
+                                        actual_inner_dim,
+                                        /*approximate*/ true,
+                                        with_bias,
+                                        context,
+                                        parallel_args));
     }
 
     dropout_ = register_module("dropout", torch::nn::Dropout(dropout));
@@ -694,7 +703,6 @@ class WanAttentionImpl : public torch::nn::Module {
       hidden_states_img = at_npu_attention(query, key_img, value_img);
     }
     hidden_states = at_npu_attention(query, key, value);
-    ;
     if (hidden_states_img.defined()) {
       hidden_states = hidden_states + hidden_states_img;
     }
@@ -1473,7 +1481,7 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
 };
 TORCH_MODULE(WanTransformer3DModel);
 
-class Wan22DiTModelImpl : public torch::nn::Module {
+class Wan22DiTModelImpl final : public torch::nn::Module {
  public:
   explicit Wan22DiTModelImpl(const ModelContext& context)
       : options_(context.get_tensor_options()) {
