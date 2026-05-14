@@ -283,7 +283,8 @@ TEST(FixedStepsSchedulerTest,
   FLAGS_max_decode_rounds = 2;
   FLAGS_prefill_scheduling_memory_usage_threshold = 1.0;
 
-  std::unique_ptr<FakeEngine> engine = std::make_unique<FakeEngine>(64, 128);
+  std::unique_ptr<FakeEngine> engine =
+      std::make_unique<FakeEngine>(/*num_blocks=*/64, /*block_size=*/128);
   ContinuousScheduler::Options opt = CreateOptions(
       /*max_tokens_per_batch=*/10000,
       /*max_seqs_per_batch=*/256,
@@ -291,8 +292,8 @@ TEST(FixedStepsSchedulerTest,
       /*enable_schedule_overlap=*/false,
       /*rec_worker_max_concurrency=*/2);
   FixedStepsScheduler scheduler(engine.get(), opt);
-  std::vector<std::shared_ptr<Request>> requests =
-      GenRequests({1, 1}, {1, 1}, RecType::kOneRec);
+  std::vector<std::shared_ptr<Request>> requests = GenRequests(
+      /*prompt_lens=*/{1, 1}, /*max_tokens=*/{1, 1}, RecType::kOneRec);
   for (std::shared_ptr<Request>& req : requests) {
     scheduler.add_request(req);
   }
@@ -321,8 +322,9 @@ TEST(FixedStepsSchedulerTest,
   FLAGS_max_decode_rounds = 2;
   FLAGS_prefill_scheduling_memory_usage_threshold = 1.0;
 
-  std::unique_ptr<FakeEngine> engine = std::make_unique<FakeEngine>(3, 128);
-  engine->notify_after_step_calls(2);
+  std::unique_ptr<FakeEngine> engine =
+      std::make_unique<FakeEngine>(/*num_blocks=*/3, /*block_size=*/128);
+  engine->notify_after_step_calls(/*step_calls=*/2);
   {
     ContinuousScheduler::Options opt = CreateOptions(
         /*max_tokens_per_batch=*/10000,
@@ -333,7 +335,9 @@ TEST(FixedStepsSchedulerTest,
     FixedStepsScheduler scheduler(engine.get(), opt);
 
     std::vector<std::shared_ptr<Request>> requests =
-        GenRequests({1, 1, 1}, {1, 1, 1}, RecType::kOneRec);
+        GenRequests(/*prompt_lens=*/{1, 1, 1},
+                    /*max_tokens=*/{1, 1, 1},
+                    RecType::kOneRec);
     for (std::shared_ptr<Request>& req : requests) {
       scheduler.add_request(req);
     }

@@ -30,11 +30,12 @@ limitations under the License.
 
 namespace xllm {
 
-// Keep one cache per scheduler thread: multi-concurrency OneRec xattention can
-// prepare multiple batches concurrently.
+// Use Meyers' Singleton pattern to avoid static initialization order fiasco
+// This ensures the cache is initialized on first use, after all dependencies
+// (like PyTorch runtime) are properly initialized.
 OneRecBatchInputBuilder::HighPerformanceCache&
 OneRecBatchInputBuilder::get_perf_cache() {
-  thread_local HighPerformanceCache cache;
+  static HighPerformanceCache cache;
   cache.ensure_tensors_initialized();
   return cache;
 }

@@ -3060,7 +3060,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> RecWorkerImpl::step_async(
   // idle threads The logic for allocating instance_id happens when the task
   // executes (see lambda below)
   step_threadpool_->schedule_with_tid(
-      [this, &input, index, promise = std::move(promise)]() mutable {
+      [this, input, index, promise = std::move(promise)]() mutable {
         auto stream_guard =
             work_pipelines_[index]->runtime().stream->set_stream_guard();
         SCOPE_GUARD([this, index] { index_queue_.enqueue(index); });
@@ -3074,6 +3074,8 @@ folly::SemiFuture<std::optional<ForwardOutput>> RecWorkerImpl::step_async(
             c10_npu::getCurrentNPUStream(device_.index()).stream();
         atb::Context* atb_context = const_cast<atb::Context*>(
             work_pipelines_[index]->runtime().context->get_atb_context());
+        CHECK(atb_context != nullptr)
+            << "ATB context is null for pipeline " << index;
         atb_context->SetExecuteStream(current_stream);
 #endif
 
