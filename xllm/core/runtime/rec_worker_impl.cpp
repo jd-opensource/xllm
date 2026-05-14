@@ -57,6 +57,9 @@ namespace xllm {
 
 namespace {
 
+constexpr const char* kOnerecXAttentionSerializeHostStagesEnv =
+    "XLLM_ONEREC_XATTN_SERIALIZE_HOST_STAGES";
+
 RecVocabDict* get_onerec_vocab_dict(const std::string& model_weights_path) {
   if (model_weights_path.empty()) {
     return nullptr;
@@ -90,13 +93,21 @@ bool enable_rec_pipeline_concurrency_debug() {
   return util::get_bool_env("XLLM_DEBUG_REC_PIPELINE_CONCURRENCY", false);
 }
 
+bool serialize_onerec_xattention_host_stages() {
+  // Experimental performance knob. Keep host serialization enabled by default
+  // because NPU prepare and ATB model launch are not proven thread-safe.
+  static const bool serialize_host_stages =
+      util::get_bool_env(kOnerecXAttentionSerializeHostStagesEnv, true);
+  return serialize_host_stages;
+}
+
 #if defined(USE_NPU)
 bool should_serialize_onerec_xattention_prepare(int64_t max_concurrency) {
-  return max_concurrency > 1;
+  return max_concurrency > 1 && serialize_onerec_xattention_host_stages();
 }
 
 bool should_serialize_onerec_xattention_model_forward(int64_t max_concurrency) {
-  return max_concurrency > 1;
+  return max_concurrency > 1 && serialize_onerec_xattention_host_stages();
 }
 #else
 bool should_serialize_onerec_xattention_prepare(int64_t max_concurrency) {
