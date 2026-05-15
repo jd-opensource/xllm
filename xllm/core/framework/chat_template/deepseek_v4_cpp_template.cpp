@@ -498,7 +498,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
                            bool drop_thinking,
                            const std::string& reasoning_effort) {
   if (index < 0 || index >= static_cast<int32_t>(messages.size())) {
-    throw std::runtime_error("Message index out of range");
+    LOG(FATAL) << "Message index out of range";
   }
 
   std::string prompt;
@@ -540,7 +540,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
     }
   } else if (role == kRoleDeveloper) {
     if (content.empty()) {
-      throw std::runtime_error("Developer message content is empty");
+      LOG(FATAL) << "Developer message content is empty";
     }
     std::string dev_content = std::string(kUserSpToken) + content;
     if (tools.is_array() && !tools.empty()) {
@@ -579,16 +579,15 @@ std::string render_message(const nlohmann::ordered_json& messages,
   } else if (role == kRoleLatestReminder) {
     prompt += std::string(kLatestReminderSpToken) + content;
   } else if (role == kRoleTool) {
-    throw std::runtime_error(
-        "deepseek_v4 merges tool messages into "
-        "user; please preprocess with "
-        "merge_tool_messages()");
+    LOG(FATAL) << "deepseek_v4 merges tool messages into user; please "
+                  "preprocess with merge_tool_messages()";
   } else if (role == kRoleAssistant) {
     std::string thinking_part;
     std::string tc_content;
 
     std::vector<nlohmann::ordered_json> tcs;
     if (msg.contains("tool_calls") && msg["tool_calls"].is_array()) {
+      tcs.reserve(msg["tool_calls"].size());
       for (const auto& tc : msg["tool_calls"]) {
         tcs.emplace_back(tc);
       }
@@ -616,7 +615,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
       prompt += thinking_part + summary_content + tc_content + kEosToken;
     }
   } else {
-    throw std::runtime_error("Unknown role: " + role);
+    LOG(FATAL) << "Unknown role: " + role;
   }
 
   // Transition: append Assistant + thinking token
@@ -634,7 +633,7 @@ std::string render_message(const nlohmann::ordered_json& messages,
   if (!task.empty()) {
     auto it = task_sp_tokens().find(task);
     if (it == task_sp_tokens().end()) {
-      throw std::runtime_error("Invalid task: " + task);
+      LOG(FATAL) << "Invalid task: " + task;
     }
     if (task != "action") {
       prompt += it->second;
