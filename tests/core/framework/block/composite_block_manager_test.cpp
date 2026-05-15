@@ -363,4 +363,61 @@ TEST(CompositeBlockManagerTest, SlidingWindowBlockOrderStaysStable) {
   manager.deallocate_sequence(&seq);
 }
 
+TEST(CompositeBlockManagerTest, DeallocateSliceDispatchesToOwnerManagers) {
+  BlockManager::Options opts =
+      MakeCompositeOptions(4096, kBaseBlockSize, 128, 4);
+  opts.enable_prefix_cache(false);
+  CompositeBlockManager manager(opts);
+
+  Sequence seq = MakeTestSequence(0, {1});
+  EXPECT_TRUE(manager.allocate_for_sequence(&seq, 1500));
+  EXPECT_GT(manager.num_used_blocks(), 0u);
+
+  std::vector<Block> flat_blocks;
+  for (const auto& manager_blocks : seq.kv_state().composite_blocks()) {
+    flat_blocks.insert(
+        flat_blocks.end(), manager_blocks.begin(), manager_blocks.end());
+  }
+
+  manager.deallocate(flat_blocks);
+  EXPECT_EQ(manager.num_used_blocks(), 0u);
+
+  seq.reset();
+}
+
+TEST(CompositeBlockManagerTest,
+     DeallocateSliceDispatchesWithoutInflatingRefCount) {
+  BlockManager::Options opts =
+      MakeCompositeOptions(4096, kBaseBlockSize, 128, 4);
+  CompositeBlockManager manager(opts);
+
+  Sequence seq = MakeTestSequence(0, {1});
+  EXPECT_TRUE(manager.allocate_for_sequence(&seq, 1500));
+  EXPECT_GT(manager.num_used_blocks(), 0u);
+
+  std::vector<const Block*> flat_blocks;
+  for (const auto& manager_blocks : seq.kv_state().composite_blocks()) {
+    for (const auto& block : manager_blocks) {
+      flat_blocks.push_back(&block);
+    }
+  }
+
+  for (const Block* block : flat_blocks) {
+    ASSERT_NE(block, nullptr);
+    EXPECT_EQ(block->ref_count(), 1u);
+  }
+
+  for (const Block* block : flat_blocks) {
+    manager.deallocate(Slice<Block>(block, 1));
+  }
+  EXPECT_EQ(manager.num_used_blocks(), 0u);
+
+  for (const Block* block : flat_blocks) {
+    ASSERT_NE(block, nullptr);
+    EXPECT_EQ(block->ref_count(), 1u);
+  }
+
+  seq.reset();
+}
+
 }  // namespace xllm

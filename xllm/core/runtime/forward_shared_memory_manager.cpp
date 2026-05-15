@@ -118,13 +118,10 @@ inline size_t get_vector_size(const std::vector<T>& vec) {
 template <typename T>
 size_t get_vector_to_tensor_size(const std::vector<T>& vec) {
   uint64_t size = type_size<uint64_t>;  // ndim
-  if (vec.size() == 0) {
-    return size;
-  }
-  size += type_size<uint64_t>;        // shape
-  size += type_size<int8_t>;          // dtype
-  size += type_size<uint64_t>;        // databytes
-  size += vec.size() * type_size<T>;  // data
+  size += type_size<uint64_t>;          // shape
+  size += type_size<int8_t>;            // dtype
+  size += type_size<uint64_t>;          // databytes
+  size += vec.size() * type_size<T>;    // data
   return size;
 }
 
@@ -548,13 +545,7 @@ inline void write_vector(RawInputSectionCursor& cursor,
 template <typename T>
 void write_vector_to_tensor(char*& buffer, const std::vector<T>& vec) {
   // write ndim
-  uint64_t ndim;
-  if (vec.empty()) {
-    ndim = 0;
-    write_data(buffer, ndim);
-    return;
-  }
-  ndim = 1;
+  uint64_t ndim = 1;
   write_data(buffer, ndim);
   // write shape
   write_data(buffer, vec.size());
@@ -565,21 +556,16 @@ void write_vector_to_tensor(char*& buffer, const std::vector<T>& vec) {
   const uint64_t data_bytes = vec.size() * type_size<T>;
   write_data(buffer, data_bytes);
   // write vec data
-  std::memcpy(buffer, vec.data(), data_bytes);
-  buffer += data_bytes;
+  if (data_bytes > 0) {
+    std::memcpy(buffer, vec.data(), data_bytes);
+    buffer += data_bytes;
+  }
 }
 
 template <typename T>
 void write_vector_to_tensor(RawInputSerializeContext& context,
                             const std::vector<T>& vec) {
-  uint64_t ndim;
-  if (vec.empty()) {
-    ndim = 0;
-    write_data(context.descriptor, ndim);
-    return;
-  }
-
-  ndim = 1;
+  uint64_t ndim = 1;
   write_data(context.descriptor, ndim);
   write_data(context.descriptor, vec.size());
 
@@ -1225,6 +1211,13 @@ inline torch::Tensor materialize_tensor_from_current_cursor(
     const TensorMeta& meta,
     DeviceBufferSession& session,
     Stream* stream) {
+  if (meta.data_bytes == 0) {
+    torch::Device device = session.owner_buffer.defined()
+                               ? session.owner_buffer.device()
+                               : torch::Device(torch::kCPU);
+    return torch::empty(
+        meta.shape, torch::TensorOptions().dtype(meta.dtype).device(device));
+  }
   const char* device_buffer = session.device_cursor;
 #if defined(USE_NPU)
   return get_tensor_from_blob(meta.shape, meta.dtype, device_buffer);
@@ -1387,7 +1380,9 @@ inline void read_tensor_and_vector(ReadContext& context,
             .device(torch::kCPU)
             .pinned_memory(true));
   }
-  std::memcpy(vec.data(), context.tensor_cursor, meta.data_bytes);
+  if (meta.data_bytes > 0) {
+    std::memcpy(vec.data(), context.tensor_cursor, meta.data_bytes);
+  }
   advance_tensor_cursors(context,
                          get_aligned_tensor_arena_bytes(meta.data_bytes));
 }
@@ -2129,7 +2124,7 @@ inline void serialize_raw_forward_input_sections(
     const RawForwardInput& input,
     RawInputSerializeContext& context) {
   write_vector_to_tensor(context, input.flatten_tokens_vec);
-  if (!input.flatten_positions_vec.empty()) {
+  if (!input.flatten_positions_vec.empty() || input.m_positions_vec.empty()) {
     write_vector_to_tensor(context, input.flatten_positions_vec);
   } else {
     write_2d_vector_to_tensor(context, input.m_positions_vec);

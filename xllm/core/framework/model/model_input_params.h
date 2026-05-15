@@ -411,6 +411,7 @@ struct ModelInputParams {
     ModelInputParams params;
     params.batch_forward_type = batch_forward_type;
     params.num_sequences = num_sequences;
+    params.actual_num_sequences = actual_num_sequences;
     params.kv_max_seq_len = kv_max_seq_len;
     params.q_max_seq_len = q_max_seq_len;
 
@@ -585,6 +586,7 @@ struct ModelInputParams {
 
   // total number of sequences in the batch
   int32_t num_sequences = 0;
+  int32_t actual_num_sequences = 0;
 
   // max length for qkv.
   int32_t kv_max_seq_len = 0;
@@ -767,8 +769,8 @@ struct ModelInputParams {
   // Using shared_ptr with forward declaration to avoid circular dependency
   std::shared_ptr<layer::AttentionMetadata> attn_metadata;
 
-  // Flag for CUDA graph capture mode
-  bool enable_cuda_graph = false;
+  // Flag for graph capture/replay mode.
+  bool enable_graph = false;
 };
 
 }  // namespace xllm

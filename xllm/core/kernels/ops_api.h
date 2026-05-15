@@ -120,6 +120,19 @@ torch::Tensor l2_norm(torch::Tensor& x, double eps = 1e-6);
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 moe_init_routing_v2(MoeInitRoutingV2Params& params);
 
+std::tuple<torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor>
+moe_distribute_dispatch_v2(MoeDistributeDispatchV2Params& params);
+
+torch::Tensor moe_distribute_combine_v2(MoeDistributeCombineV2Params& params);
+
+bool has_moe_distribute_dispatch_combine_v2();
+
 // FP8 scaled quantize: quantizes input tensor to FP8 e4m3 format
 // Returns: (quantized_output, scale)
 std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(

@@ -19,6 +19,8 @@ cc_library(
     npu_gemma_rms_norm.cpp
     npu_grouped_matmul.cpp
     npu_moe_gating_topk_softmax.cpp
+    npu_moe_distribute_combine_v2.cpp
+    npu_moe_distribute_dispatch_v2.cpp
     npu_moe_init_routing_v2.cpp
     npu_moe_token_unpermute.cpp
     rope.cpp
@@ -30,4 +32,5 @@ cc_library(
     :torch_npu_kernels
     :tilelang_kernels
     xllm_ops
+    opapi
 )

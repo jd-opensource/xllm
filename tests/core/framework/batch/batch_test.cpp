@@ -829,6 +829,39 @@ TEST(BatchTest, SharedMemoryRoundTripPreservesAndDefaultsLinearStateIds) {
             std::vector<int32_t>({-1, -1}));
 }
 
+TEST(BatchTest, SharedMemoryRoundTripPreservesEmptyRankTensors) {
+  RawForwardInput raw_input;
+  raw_input.batch_forward_type = BatchForwardType::DECODE;
+  raw_input.num_sequences = 0;
+
+  bool is_creator = false;
+  auto shm_name =
+      ForwardSharedMemoryManager::create_unique_name("batch_test_empty_rank",
+                                                     /*dp_group=*/0,
+                                                     ForwardType::RAW_INPUT,
+                                                     /*rank=*/0);
+  ForwardSharedMemoryManager writer_manager(
+      shm_name, 1 << 20, is_creator, ForwardType::RAW_INPUT);
+  bool is_reader_creator = false;
+  ForwardSharedMemoryManager reader_manager(
+      shm_name, 1 << 20, is_reader_creator, ForwardType::RAW_INPUT);
+  ASSERT_TRUE(writer_manager.raw_input_write(raw_input));
+
+  ForwardInput from_shm;
+  reader_manager.raw_input_read(from_shm, torch::Device(torch::kCPU));
+
+  EXPECT_TRUE(from_shm.token_ids.defined());
+  EXPECT_EQ(from_shm.token_ids.numel(), 0);
+  EXPECT_EQ(from_shm.token_ids.dim(), 1);
+  EXPECT_TRUE(from_shm.positions.defined());
+  EXPECT_EQ(from_shm.positions.numel(), 0);
+  EXPECT_EQ(from_shm.positions.dim(), 1);
+  EXPECT_TRUE(from_shm.input_params.q_seq_lens.defined());
+  EXPECT_EQ(from_shm.input_params.q_seq_lens.numel(), 0);
+  EXPECT_TRUE(from_shm.input_params.kv_seq_lens.defined());
+  EXPECT_EQ(from_shm.input_params.kv_seq_lens.numel(), 0);
+}
+
 TEST(BatchTest, SampleRequestProcessesAllMatchedRawOutputs) {
   torch::Device device(Device::type_torch(), 0);
   const uint32_t n_blocks = 8;
