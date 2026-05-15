@@ -15,6 +15,7 @@ cc_test(
     qwen2_attention_test.cpp
     qwen2_vision_attention_test.cpp
   DEPS
+    :config
     :common_layers
     :mlu_layers
     :block
@@ -37,6 +38,7 @@ cc_test(
     deepseek_v2_sparse_moe_block_test.cpp
     tests_utils.cpp
   DEPS
+    :config
     :common_layers
     :mlu_layers
     :parallel_state
@@ -78,6 +80,7 @@ cc_test(
     fused_moe_all2all_test.cpp
     tests_utils.cpp
   DEPS
+    :config
     :common_layers
     :mlu_layers
     :parallel_state
@@ -96,6 +99,7 @@ cc_test(
     deepseek_v2_attention_multi_device_test.cpp
     tests_utils.cpp
   DEPS
+    :config
     :block
     :mlu_layers
     :parallel_state

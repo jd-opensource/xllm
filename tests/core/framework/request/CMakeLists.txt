@@ -6,6 +6,7 @@ cc_test(
   SRCS
     sample_slot_test.cpp
   DEPS
+    :config
     :request
     GTest::gtest
     GTest::gtest_main

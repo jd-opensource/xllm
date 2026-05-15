@@ -6,6 +6,7 @@ cc_test (
   SRCS
     chat_template_test.cpp
   DEPS
+    :config
     :chat_template
     :jinja_chat_template
     :deepseek_v32_cpp_template

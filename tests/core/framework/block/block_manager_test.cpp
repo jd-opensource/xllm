@@ -21,7 +21,7 @@ limitations under the License.
 
 #include "block_manager_impl.h"
 #include "block_manager_pool.h"
-#include "common/global_flags.h"
+#include "core/framework/config/scheduler_config.h"
 #include "framework/request/incremental_decoder.h"
 
 namespace xllm {
@@ -229,7 +229,8 @@ TEST(BlockManagerTest, Basic) {
 }
 
 TEST(BlockManagerPoolTest, AllocateAssignsSingleBlockWhenEnabled) {
-  ScopedValue<int32_t> max_seqs_guard(&FLAGS_max_seqs_per_batch, 0);
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 0);
 
   BlockManagerPool::Options options;
   options.num_blocks(8).host_num_blocks(0).block_size(1).enable_prefix_cache(
@@ -244,7 +245,8 @@ TEST(BlockManagerPoolTest, AllocateAssignsSingleBlockWhenEnabled) {
 }
 
 TEST(BlockManagerPoolTest, DeallocateReleasesSingleBlockId) {
-  ScopedValue<int32_t> max_seqs_guard(&FLAGS_max_seqs_per_batch, 0);
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 0);
 
   BlockManagerPool::Options options;
   options.num_blocks(8).host_num_blocks(0).block_size(1).enable_prefix_cache(
@@ -265,7 +267,8 @@ TEST(BlockManagerPoolTest, DeallocateReleasesSingleBlockId) {
 
 TEST(BlockManagerPoolTest, TryAllocateKvFailureRollsBackSingleBlock) {
   // unified scheduler-side single-block pool has 2 ids.
-  ScopedValue<int32_t> max_seqs_guard(&FLAGS_max_seqs_per_batch, 0);
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 0);
 
   BlockManagerPool::Options options;
   options.num_blocks(3).host_num_blocks(0).block_size(1).enable_prefix_cache(
@@ -291,7 +294,8 @@ TEST(BlockManagerPoolTest, TryAllocateKvFailureRollsBackSingleBlock) {
 }
 
 TEST(BlockManagerPoolTest, AllocateAssignsSingleBlockWhenLinearStateDisabled) {
-  ScopedValue<int32_t> max_seqs_guard(&FLAGS_max_seqs_per_batch, 2);
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
 
   BlockManagerPool::Options options;
   options.num_blocks(8).host_num_blocks(0).block_size(1).enable_prefix_cache(
@@ -304,7 +308,8 @@ TEST(BlockManagerPoolTest, AllocateAssignsSingleBlockWhenLinearStateDisabled) {
 }
 
 TEST(BlockManagerPoolTest, SequenceCopyDoesNotReuseSingleBlockSlot) {
-  ScopedValue<int32_t> max_seqs_guard(&FLAGS_max_seqs_per_batch, 2);
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
 
   BlockManagerPool::Options options;
   options.num_blocks(8).host_num_blocks(0).block_size(1).enable_prefix_cache(

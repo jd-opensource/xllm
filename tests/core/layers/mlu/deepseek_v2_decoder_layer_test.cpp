@@ -22,7 +22,7 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "common/global_flags.h"
+#include "core/framework/config/eplb_config.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
@@ -924,11 +924,13 @@ struct QuantCase {
 class ExpertDegreeGuard {
  public:
   explicit ExpertDegreeGuard(int32_t value)
-      : saved_(FLAGS_expert_parallel_degree) {
-    FLAGS_expert_parallel_degree = value;
+      : saved_(EPLBConfig::get_instance().expert_parallel_degree()) {
+    EPLBConfig::get_instance().expert_parallel_degree(value);
   }
 
-  ~ExpertDegreeGuard() { FLAGS_expert_parallel_degree = saved_; }
+  ~ExpertDegreeGuard() {
+    EPLBConfig::get_instance().expert_parallel_degree(saved_);
+  }
 
  private:
   int32_t saved_;

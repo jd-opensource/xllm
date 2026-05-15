@@ -9,6 +9,7 @@ cc_test(
     continuous_scheduler_test.cpp
     fixed_steps_scheduler_test.cpp
   DEPS
+    :config
     :scheduler
     :xllm_server
     GTest::gtest_main

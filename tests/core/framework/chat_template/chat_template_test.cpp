@@ -15,13 +15,11 @@ limitations under the License.
 
 #include "framework/chat_template/chat_template.h"
 
-#include <gflags/gflags.h>
 #include <gtest/gtest.h>
 
+#include "core/framework/config/model_config.h"
 #include "framework/chat_template/deepseek_v32_cpp_template.h"
 #include "framework/chat_template/jinja_chat_template.h"
-
-DECLARE_bool(use_cpp_chat_template);
 
 namespace xllm {
 namespace {
@@ -29,11 +27,13 @@ namespace {
 class ScopedUseCppChatTemplate final {
  public:
   explicit ScopedUseCppChatTemplate(bool enabled)
-      : old_value_(FLAGS_use_cpp_chat_template) {
-    FLAGS_use_cpp_chat_template = enabled;
+      : old_value_(ModelConfig::get_instance().use_cpp_chat_template()) {
+    ModelConfig::get_instance().use_cpp_chat_template(enabled);
   }
 
-  ~ScopedUseCppChatTemplate() { FLAGS_use_cpp_chat_template = old_value_; }
+  ~ScopedUseCppChatTemplate() {
+    ModelConfig::get_instance().use_cpp_chat_template(old_value_);
+  }
 
  private:
   bool old_value_;

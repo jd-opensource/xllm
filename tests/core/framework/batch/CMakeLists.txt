@@ -6,6 +6,7 @@ cc_test(
   SRCS
     batch_test.cpp
   DEPS
+    :config
     :batch
     absl::time
     GTest::gtest_main

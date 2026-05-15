@@ -25,7 +25,7 @@ limitations under the License.
 #include <vector>
 
 #include "batch_input_builder.h"
-#include "common/global_flags.h"
+#include "core/framework/config/scheduler_config.h"
 #include "framework/block/block.h"
 #include "framework/block/block_manager_impl.h"
 #include "framework/kv_cache/kv_cache.h"
@@ -1311,8 +1311,9 @@ TEST(BatchTest, SampleRequestFallsBackToEmptyPlaceholderOnPartialRawOutputs) {
 }
 
 TEST(BatchTest, KeepTargetsForOverlapReplacement) {
-  const bool old_enable_schedule_overlap = FLAGS_enable_schedule_overlap;
-  FLAGS_enable_schedule_overlap = true;
+  const bool old_enable_schedule_overlap =
+      SchedulerConfig::get_instance().enable_schedule_overlap();
+  SchedulerConfig::get_instance().enable_schedule_overlap(true);
 
   torch::Device device(Device::type_torch(), 0);
   const uint32_t n_blocks = 8;
@@ -1363,12 +1364,14 @@ TEST(BatchTest, KeepTargetsForOverlapReplacement) {
   EXPECT_EQ(seq.tokens()[seq.num_prompt_tokens()], 101);
   EXPECT_TRUE(seq.finished());
 
-  FLAGS_enable_schedule_overlap = old_enable_schedule_overlap;
+  SchedulerConfig::get_instance().enable_schedule_overlap(
+      old_enable_schedule_overlap);
 }
 
 TEST(BatchTest, OverlapMTPReplacementSkipsPreemptedSequenceWithoutKVBlocks) {
-  const bool old_enable_schedule_overlap = FLAGS_enable_schedule_overlap;
-  FLAGS_enable_schedule_overlap = true;
+  const bool old_enable_schedule_overlap =
+      SchedulerConfig::get_instance().enable_schedule_overlap();
+  SchedulerConfig::get_instance().enable_schedule_overlap(true);
 
   torch::Device device(Device::type_torch(), 0);
   const uint32_t n_blocks = 8;
@@ -1431,7 +1434,8 @@ TEST(BatchTest, OverlapMTPReplacementSkipsPreemptedSequenceWithoutKVBlocks) {
   EXPECT_EQ(seq.num_generated_tokens(), 1);
   EXPECT_EQ(seq.tokens()[seq.num_prompt_tokens()], 101);
 
-  FLAGS_enable_schedule_overlap = old_enable_schedule_overlap;
+  SchedulerConfig::get_instance().enable_schedule_overlap(
+      old_enable_schedule_overlap);
 }
 
 TEST(BatchTest, DPBalanceShuffle) {

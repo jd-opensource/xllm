@@ -8,7 +8,8 @@
 #include <optional>
 
 #include "chunked_prefill_scheduler.h"
-#include "core/common/global_flags.h"
+#include "core/framework/config/parallel_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "distributed_runtime/engine.h"
 #include "prefill_only_scheduler.h"
 #include "scheduler_factory.h"
@@ -68,17 +69,18 @@ class FakeEngine : public Engine {
   std::unique_ptr<BlockManagerPool> fake_block_manager_;
 };
 
-class ScopedBoolFlagValue {
+template <typename T>
+class ScopedConfigValue final {
  public:
-  ScopedBoolFlagValue(bool& flag, bool value) : flag_(flag), old_(flag) {
-    flag_ = value;
+  ScopedConfigValue(T& value, T new_value) : value_(value), old_(value) {
+    value_ = new_value;
   }
 
-  ~ScopedBoolFlagValue() { flag_ = old_; }
+  ~ScopedConfigValue() { value_ = old_; }
 
  private:
-  bool& flag_;
-  bool old_;
+  T& value_;
+  T old_;
 };
 
 ContinuousScheduler::Options create_scheduler_options(
@@ -248,7 +250,8 @@ void set_chunk_kv(const std::shared_ptr<Request>& request, size_t kv_tokens) {
 
 TEST(ContinuousSchedulerFactoryTest,
      ChunkedPrefillWithoutSPUsesChunkedScheduler) {
-  ScopedBoolFlagValue enable_sp(FLAGS_enable_prefill_sp, false);
+  ScopedConfigValue<bool> enable_sp(
+      ParallelConfig::get_instance().enable_prefill_sp(), false);
   ContinuousScheduler::Options opt =
       create_scheduler_options(10000, 256, 0, 1024, 1);
   opt.enable_chunked_prefill() = true;
@@ -262,7 +265,8 @@ TEST(ContinuousSchedulerFactoryTest,
 
 TEST(ContinuousSchedulerFactoryTest,
      ChunkedPrefillWithSPUsesPrefillOnlyScheduler) {
-  ScopedBoolFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
+  ScopedConfigValue<bool> enable_sp(
+      ParallelConfig::get_instance().enable_prefill_sp(), true);
   ContinuousScheduler::Options opt =
       create_scheduler_options(10000, 256, 0, 1024, 1);
   opt.enable_chunked_prefill() = true;
@@ -276,7 +280,8 @@ TEST(ContinuousSchedulerFactoryTest,
 
 TEST(ContinuousSchedulerFactoryTest,
      ChunkedPrefillWithSPAndSpeculativeUsesPrefillOnlyScheduler) {
-  ScopedBoolFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
+  ScopedConfigValue<bool> enable_sp(
+      ParallelConfig::get_instance().enable_prefill_sp(), true);
   ContinuousScheduler::Options opt =
       create_scheduler_options(10000, 256, 4, 1024, 1);
   opt.enable_chunked_prefill() = true;
@@ -290,7 +295,8 @@ TEST(ContinuousSchedulerFactoryTest,
 
 TEST(ContinuousSchedulerFactoryTest,
      ChunkedPrefillWithSPDoesNotBuildMixedBatch) {
-  ScopedBoolFlagValue enable_sp(FLAGS_enable_prefill_sp, true);
+  ScopedConfigValue<bool> enable_sp(
+      ParallelConfig::get_instance().enable_prefill_sp(), true);
   ContinuousScheduler::Options opt = create_scheduler_options(8, 8, 0, 4, 1);
   opt.enable_chunked_prefill() = true;
 
@@ -334,7 +340,8 @@ TEST(ContinuousSchedulerFactoryTest,
 }
 
 TEST(SchedulerFactoryTest, DisaggPDChunkedPrefillKind) {
-  ScopedBoolFlagValue use_mix_scheduler(FLAGS_use_mix_scheduler, false);
+  ScopedConfigValue<bool> use_mix_scheduler(
+      SchedulerConfig::get_instance().use_mix_scheduler(), false);
   ContinuousScheduler::Options opt =
       create_scheduler_options(10000, 256, 2, 1024, 1);
   opt.enable_disagg_pd() = true;
@@ -346,7 +353,8 @@ TEST(SchedulerFactoryTest, DisaggPDChunkedPrefillKind) {
 }
 
 TEST(SchedulerFactoryTest, DisaggPDOOCKeepsPDOOCKind) {
-  ScopedBoolFlagValue use_mix_scheduler(FLAGS_use_mix_scheduler, false);
+  ScopedConfigValue<bool> use_mix_scheduler(
+      SchedulerConfig::get_instance().use_mix_scheduler(), false);
   ContinuousScheduler::Options opt =
       create_scheduler_options(10000, 256, 0, 1024, 1);
   opt.enable_disagg_pd() = true;
@@ -423,7 +431,10 @@ TEST(ContinuousSchedulerTest, OnPrefillPreemptOffDecode) {
   // set chunked max_tokens budgets 10000 per step
   ContinuousScheduler::Options opt = create_scheduler_options(
       10000, 256, 0, max_tokens_per_chunk_for_prefill, 1);
-  FLAGS_prefill_scheduling_memory_usage_threshold = 2;  // release threshold
+  ScopedConfigValue<double> memory_threshold(
+      SchedulerConfig::get_instance()
+          .prefill_scheduling_memory_usage_threshold(),
+      2.0);
 
   {
     // 1. two offline decode requests then one online prefill request
