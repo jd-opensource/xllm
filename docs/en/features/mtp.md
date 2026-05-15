@@ -250,8 +250,12 @@ import os
 from safetensors import safe_open
 from safetensors.torch import save_file
 
-orig_dir = '/path/to/DeepSeek-V3-w8a8-temp'
-quant_dir = '/path/to/DeepSeek-V3-w8a8-mtp'
+if len(sys.argv) < 3:
+    print("Usage: python3 rescue_mtp.py <orig_dir> <quant_dir>")
+    sys.exit(1)
+
+orig_dir = sys.argv[1]
+quant_dir = sys.argv[2]
 
 # Find original tensor file
 orig_tensor_file = f'{orig_dir}/model.safetensors'
