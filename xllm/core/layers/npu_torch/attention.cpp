@@ -18,7 +18,6 @@ limitations under the License.
 #include "kernels/npu/npu_ops_api.h"
 #include "kernels/ops_api.h"
 
-DECLARE_bool(enable_chunked_prefill);
 namespace xllm {
 namespace layer {
 

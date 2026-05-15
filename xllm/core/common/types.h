@@ -305,7 +305,7 @@ struct TransferKVInfo {
   InstanceInfo remote_instance_info;
 
   // XTensor mode: destination offsets from D-node (per-layer)
-  // Only populated when FLAGS_enable_xtensor is true
+  // Only populated when KVCacheConfig::enable_xtensor is true.
   std::vector<XTensorLayerOffsets> dst_xtensor_layer_offsets;
 };
 

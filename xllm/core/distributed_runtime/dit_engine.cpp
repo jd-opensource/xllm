@@ -50,8 +50,8 @@ DiTEngine::DiTEngine(const runtime::Options& options,
         << "All devices should be the same type";
 
 #if defined(USE_NPU)
-    FLAGS_enable_atb_comm_multiprocess =
-        options.enable_offline_inference() || (options.nnodes() > 1);
+    ExecutionConfig::set_enable_atb_comm_multiprocess(
+        options.enable_offline_inference() || (options.nnodes() > 1));
 #endif
   }
 

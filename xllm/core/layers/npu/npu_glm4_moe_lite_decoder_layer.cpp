@@ -15,17 +15,11 @@ limitations under the License.
 
 #include "npu_glm4_moe_lite_decoder_layer.h"
 
-#include <gflags/gflags.h>
-
 #include <boost/algorithm/string.hpp>
 #include <utility>
 
-#include "common/global_flags.h"
 #include "core/framework/config/xllm_config.h"
 #include "layers/common/rotary_embedding_util.h"
-DECLARE_string(rank_tablefile);
-DECLARE_string(communication_backend);
-DECLARE_int32(expert_parallel_degree);
 
 namespace xllm {
 namespace layer {

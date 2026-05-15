@@ -43,24 +43,7 @@ XllmConfig& XllmConfig::get_instance() {
   return config;
 }
 
-void XllmConfig::reload_from_flags() {
-  ServiceConfig::reload_from_flags();
-  ModelConfig::reload_from_flags();
-  LoadConfig::reload_from_flags();
-  KVCacheConfig::reload_from_flags();
-  KVCacheStoreConfig::reload_from_flags();
-  BeamSearchConfig::reload_from_flags();
-  SchedulerConfig::reload_from_flags();
-  ParallelConfig::reload_from_flags();
-  EPLBConfig::reload_from_flags();
-  DistributedConfig::reload_from_flags();
-  DisaggPDConfig::reload_from_flags();
-  SpeculativeConfig::reload_from_flags();
-  ProfileConfig::reload_from_flags();
-  ExecutionConfig::reload_from_flags();
-  DiTConfig::reload_from_flags();
-  RecConfig::reload_from_flags();
-
+void XllmConfig::reload_from_configs() {
   XllmConfig config;
   config.service_config(ServiceConfig::get_instance())
       .model_config(ModelConfig::get_instance())
@@ -79,6 +62,27 @@ void XllmConfig::reload_from_flags() {
       .dit_config(DiTConfig::get_instance())
       .rec_config(RecConfig::get_instance());
   XllmConfig::get_instance() = config;
+}
+
+void XllmConfig::reload_from_flags() {
+  ServiceConfig::reload_from_flags();
+  ModelConfig::reload_from_flags();
+  LoadConfig::reload_from_flags();
+  KVCacheConfig::reload_from_flags();
+  KVCacheStoreConfig::reload_from_flags();
+  BeamSearchConfig::reload_from_flags();
+  SchedulerConfig::reload_from_flags();
+  ParallelConfig::reload_from_flags();
+  EPLBConfig::reload_from_flags();
+  DistributedConfig::reload_from_flags();
+  DisaggPDConfig::reload_from_flags();
+  SpeculativeConfig::reload_from_flags();
+  ProfileConfig::reload_from_flags();
+  ExecutionConfig::reload_from_flags();
+  DiTConfig::reload_from_flags();
+  RecConfig::reload_from_flags();
+
+  XllmConfig::reload_from_configs();
 }
 
 }  // namespace xllm

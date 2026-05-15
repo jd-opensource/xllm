@@ -33,7 +33,6 @@ limitations under the License.
 #include <memory>
 #include <utility>
 
-#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "core/framework/config/xllm_config.h"
 #if defined(USE_CUDA) || defined(USE_MLU)
@@ -79,11 +78,12 @@ void WorkerServer::create_server(
     WorkerType worker_type,
     std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
     std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
-  FLAGS_enable_prefill_sp = options.enable_prefill_sp();
+  ParallelConfig::get_instance().enable_prefill_sp(options.enable_prefill_sp());
 #if defined(USE_NPU)
-  FLAGS_npu_kernel_backend = options.npu_kernel_backend();
+  ExecutionConfig::get_instance().npu_kernel_backend(
+      options.npu_kernel_backend());
 #endif
-  XllmConfig::reload_from_flags();
+  XllmConfig::reload_from_configs();
   Device device(d);
   device.set_device();
   LOG(INFO) << "Create worker server with device: " << device.index();

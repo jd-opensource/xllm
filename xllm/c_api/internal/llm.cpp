@@ -26,7 +26,6 @@ limitations under the License.
 #include <exception>
 #include <stdexcept>
 
-#include "core/common/global_flags.h"
 #include "core/framework/config/xllm_config.h"
 #include "helper.h"
 
@@ -120,9 +119,9 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
         ::xllm::ExecutionConfig::get_instance().enable_graph());
 
 #if !defined(USE_NPU) && !defined(USE_CUDA)
-    FLAGS_enable_block_copy_kernel = false;
+    xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel(false);
 #endif
-    xllm::XllmConfig::reload_from_flags();
+    xllm::XllmConfig::reload_from_configs();
 
     handler->master = std::make_unique<xllm::LLMMaster>(options);
     handler->master->run();

@@ -21,7 +21,6 @@ limitations under the License.
 #include <signal.h>
 #include <unistd.h>
 
-#include "core/common/global_flags.h"
 #include "core/distributed_runtime/worker_server.h"
 #include "core/framework/config/xllm_config.h"
 #include "core/platform/device.h"
@@ -92,12 +91,13 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
       .is_local(is_local)
       .npu_kernel_backend(npu_kernel_backend)
       .task_type(task_type);
-  FLAGS_enable_schedule_overlap = false;
-  FLAGS_enable_prefill_sp = enable_prefill_sp;
-  FLAGS_master_node_addr = master_node_addr;
-  FLAGS_block_size = block_size;
-  FLAGS_communication_backend = communication_backend;
-  FLAGS_rank_tablefile = rank_tablefile;
+  SchedulerConfig::get_instance().enable_schedule_overlap(false);
+  ParallelConfig::get_instance()
+      .enable_prefill_sp(enable_prefill_sp)
+      .communication_backend(communication_backend);
+  DistributedConfig::get_instance().master_node_addr(master_node_addr);
+  KVCacheConfig::get_instance().block_size(block_size);
+  EPLBConfig::get_instance().rank_tablefile(rank_tablefile);
 
   const std::string device_type = xllm::Device::type_str();
   const std::string device_str = device_type + ":" + std::to_string(device_idx);
@@ -106,9 +106,10 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
 
 #if defined(USE_NPU)
   device.init_device_context();
-  FLAGS_enable_atb_comm_multiprocess = true;
+  ExecutionConfig::get_instance().npu_kernel_backend(npu_kernel_backend);
+  ExecutionConfig::set_enable_atb_comm_multiprocess(true);
 #endif
-  XllmConfig::reload_from_flags();
+  XllmConfig::reload_from_configs();
 
 #if defined(USE_CUDA) || defined(USE_MLU)
   // Bind worker process to the same NUMA node as the device

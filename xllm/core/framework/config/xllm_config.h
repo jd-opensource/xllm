@@ -46,6 +46,7 @@ class XllmConfig final {
 
   static XllmConfig from_flags();
   static void reload_from_flags();
+  static void reload_from_configs();
 
   PROPERTY(ServiceConfig, service_config);
 

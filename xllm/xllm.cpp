@@ -22,10 +22,10 @@ limitations under the License.
 #include <csignal>
 #include <filesystem>
 #include <memory>
+#include <random>
 #include <unordered_set>
 
 #include "api_service/api_service.h"
-#include "core/common/global_flags.h"
 #include "core/common/help_formatter.h"
 #include "core/common/instance_name.h"
 #include "core/common/metrics.h"
@@ -56,38 +56,43 @@ static const std::unordered_set<std::string> cpp_template_supported_model_set =
 
 namespace {
 
-void fix_mlu_disagg_pd_flags() {
-  if (FLAGS_kv_cache_transfer_type != "Mooncake") {
+void fix_mlu_disagg_pd_config() {
+  DisaggPDConfig& disagg_pd_config = DisaggPDConfig::get_instance();
+  KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
+  SchedulerConfig& scheduler_config = SchedulerConfig::get_instance();
+  if (disagg_pd_config.kv_cache_transfer_type() != "Mooncake") {
     LOG(WARNING) << "MLU disaggregated PD requires "
                  << "kv_cache_transfer_type=Mooncake; forcing from "
-                 << FLAGS_kv_cache_transfer_type << " to Mooncake.";
-    FLAGS_kv_cache_transfer_type = "Mooncake";
+                 << disagg_pd_config.kv_cache_transfer_type()
+                 << " to Mooncake.";
+    disagg_pd_config.kv_cache_transfer_type("Mooncake");
   }
-  if (FLAGS_kv_cache_transfer_mode != "PUSH") {
+  if (disagg_pd_config.kv_cache_transfer_mode() != "PUSH") {
     LOG(WARNING) << "MLU disaggregated PD requires "
                  << "kv_cache_transfer_mode=PUSH; forcing from "
-                 << FLAGS_kv_cache_transfer_mode << " to PUSH.";
-    FLAGS_kv_cache_transfer_mode = "PUSH";
+                 << disagg_pd_config.kv_cache_transfer_mode() << " to PUSH.";
+    disagg_pd_config.kv_cache_transfer_mode("PUSH");
   }
-  if (FLAGS_kv_cache_dtype != "auto") {
+  if (kv_cache_config.kv_cache_dtype() != "auto") {
     LOG(WARNING) << "MLU disaggregated PD requires kv_cache_dtype=auto; "
-                 << "forcing from " << FLAGS_kv_cache_dtype << " to auto.";
-    FLAGS_kv_cache_dtype = "auto";
+                 << "forcing from " << kv_cache_config.kv_cache_dtype()
+                 << " to auto.";
+    kv_cache_config.kv_cache_dtype("auto");
   }
-  if (FLAGS_enable_schedule_overlap) {
+  if (scheduler_config.enable_schedule_overlap()) {
     LOG(WARNING) << "MLU disaggregated PD does not support schedule overlap; "
                  << "forcing enable_schedule_overlap=false.";
-    FLAGS_enable_schedule_overlap = false;
+    scheduler_config.enable_schedule_overlap(false);
   }
-  if (FLAGS_enable_prefix_cache) {
+  if (kv_cache_config.enable_prefix_cache()) {
     LOG(WARNING) << "MLU disaggregated PD does not support prefix cache; "
                  << "forcing enable_prefix_cache=false.";
-    FLAGS_enable_prefix_cache = false;
+    kv_cache_config.enable_prefix_cache(false);
   }
-  if (FLAGS_enable_pd_ooc) {
+  if (disagg_pd_config.enable_pd_ooc()) {
     LOG(WARNING) << "MLU disaggregated PD does not support pd_ooc; "
                  << "forcing enable_pd_ooc=false.";
-    FLAGS_enable_pd_ooc = false;
+    disagg_pd_config.enable_pd_ooc(false);
   }
 }
 
@@ -231,66 +236,77 @@ void shutdown_handler(int signal) {
   exit(1);
 }
 
-void validate_flags(const std::string& model_type) {
-  if (FLAGS_backend.empty()) {
+void validate_config(const std::string& model_type) {
+  ModelConfig& model_config = ModelConfig::get_instance();
+  LoadConfig& load_config = LoadConfig::get_instance();
+  KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
+  SchedulerConfig& scheduler_config = SchedulerConfig::get_instance();
+  ParallelConfig& parallel_config = ParallelConfig::get_instance();
+  DisaggPDConfig& disagg_pd_config = DisaggPDConfig::get_instance();
+
+  if (model_config.backend().empty()) {
     LOG(FATAL) << "Model is not supported currently, model type: "
                << model_type;
   }
-  if (FLAGS_enable_prefill_sp &&
+  if (parallel_config.enable_prefill_sp() &&
       !prefill_sp_supported_model_set.contains(model_type)) {
     LOG(FATAL) << "enable_prefill_sp is not supported for model_type="
                << model_type;
   }
 #if defined(USE_MLU)
   // Disable enable_schedule_overlap for VLM models on MLU backend
-  if (FLAGS_enable_schedule_overlap && FLAGS_backend == "vlm") {
+  if (scheduler_config.enable_schedule_overlap() &&
+      model_config.backend() == "vlm") {
     LOG(WARNING) << "enable_schedule_overlap is not supported for VLM models "
                     "on MLU backend. "
                  << "Disabling enable_schedule_overlap.";
-    FLAGS_enable_schedule_overlap = false;
+    scheduler_config.enable_schedule_overlap(false);
   }
   // TODO: support other block sizes in the future
-  if (FLAGS_block_size != 16 && FLAGS_block_size != 1 &&
-      FLAGS_backend != "dit") {
+  if (kv_cache_config.block_size() != 16 && kv_cache_config.block_size() != 1 &&
+      model_config.backend() != "dit") {
     LOG(FATAL) << "Currently, block_size must be 16 for MLU backend, we will "
                   "support other block sizes in the future.";
   }
-  if (FLAGS_enable_disagg_pd) {
-    if (FLAGS_backend != "llm") {
+  if (disagg_pd_config.enable_disagg_pd()) {
+    if (model_config.backend() != "llm") {
       LOG(FATAL) << "MLU disaggregated PD only supports backend=llm.";
     }
-    fix_mlu_disagg_pd_flags();
+    fix_mlu_disagg_pd_config();
   }
 #endif
 
 #if defined(USE_NPU)
   // enable_xtensor / enable_rolling_load imply enable_manual_loader
-  if ((FLAGS_enable_xtensor || FLAGS_enable_rolling_load) &&
-      !FLAGS_enable_manual_loader) {
+  if ((kv_cache_config.enable_xtensor() || load_config.enable_rolling_load()) &&
+      !load_config.enable_manual_loader()) {
     LOG(WARNING) << "enable_xtensor or enable_rolling_load requires "
                     "enable_manual_loader; forcing enable_manual_loader=true.";
-    FLAGS_enable_manual_loader = true;
+    load_config.enable_manual_loader(true);
   }
-  if (FLAGS_enable_rolling_load && FLAGS_rolling_load_num_cached_layers < 1) {
+  if (load_config.enable_rolling_load() &&
+      load_config.rolling_load_num_cached_layers() < 1) {
     LOG(FATAL) << "rolling_load_num_cached_layers must be >= 1.";
   }
-  if (FLAGS_enable_rolling_load && FLAGS_rolling_load_num_rolling_slots < -1) {
+  if (load_config.enable_rolling_load() &&
+      load_config.rolling_load_num_rolling_slots() < -1) {
     LOG(FATAL) << "rolling_load_num_rolling_slots must be >= -1.";
   }
-  if (FLAGS_enable_rolling_load && FLAGS_rolling_load_num_rolling_slots >= 0 &&
-      FLAGS_rolling_load_num_rolling_slots >
-          FLAGS_rolling_load_num_cached_layers) {
+  if (load_config.enable_rolling_load() &&
+      load_config.rolling_load_num_rolling_slots() >= 0 &&
+      load_config.rolling_load_num_rolling_slots() >
+          load_config.rolling_load_num_cached_layers()) {
     LOG(FATAL) << "rolling_load_num_rolling_slots must be <= "
                << "rolling_load_num_cached_layers.";
   }
 #else
-  if (FLAGS_enable_xtensor) {
+  if (kv_cache_config.enable_xtensor()) {
     LOG(FATAL) << "enable_xtensor is only supported on NPU.";
   }
-  if (FLAGS_enable_manual_loader) {
+  if (load_config.enable_manual_loader()) {
     LOG(FATAL) << "enable_manual_loader is only supported on NPU.";
   }
-  if (FLAGS_enable_rolling_load) {
+  if (load_config.enable_rolling_load()) {
     LOG(FATAL) << "enable_rolling_load is only supported on NPU.";
   }
 #endif
@@ -302,73 +318,81 @@ void validate_flags(const std::string& model_type) {
 }
 
 int run() {
+  ModelConfig& model_config = ModelConfig::get_instance();
+  KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
+  BeamSearchConfig& beam_search_config = BeamSearchConfig::get_instance();
+  SchedulerConfig& scheduler_config = SchedulerConfig::get_instance();
+  DistributedConfig& distributed_config = DistributedConfig::get_instance();
+  ServiceConfig& service_config = ServiceConfig::get_instance();
+  ExecutionConfig& execution_config = ExecutionConfig::get_instance();
+
   // check if model path exists
-  if (!std::filesystem::exists(FLAGS_model)) {
-    LOG(FATAL) << "Model path " << FLAGS_model << " does not exist.";
+  if (!std::filesystem::exists(model_config.model())) {
+    LOG(FATAL) << "Model path " << model_config.model() << " does not exist.";
   }
 
   std::filesystem::path model_path =
-      std::filesystem::path(FLAGS_model).lexically_normal();
+      std::filesystem::path(model_config.model()).lexically_normal();
   const std::string default_model_name = xllm::util::get_model_name(model_path);
 
-  if (FLAGS_model_id.empty()) {
+  if (model_config.model_id().empty()) {
     // use last part of the path as model id
-    FLAGS_model_id = default_model_name;
+    model_config.model_id(default_model_name);
   }
 
-  if (FLAGS_backend.empty()) {
-    FLAGS_backend = xllm::util::get_model_backend(model_path);
+  if (model_config.backend().empty()) {
+    model_config.backend(xllm::util::get_model_backend(model_path));
   }
 
-  if (FLAGS_host.empty()) {
+  if (service_config.host().empty()) {
     // set the host to the local IP when the host is empty
-    FLAGS_host = net::get_local_ip_addr();
+    service_config.host(net::get_local_ip_addr());
   }
 
-  bool is_local = false;
-  if (FLAGS_host != "" &&
-      net::extract_ip(FLAGS_master_node_addr) == FLAGS_host) {
-    is_local = true;
-  } else {
-    is_local = false;
-  }
+  const bool is_local =
+      !service_config.host().empty() &&
+      net::extract_ip(distributed_config.master_node_addr()) ==
+          service_config.host();
 
   LOG(INFO) << "set worker role to "
             << (is_local ? "local worker" : "remote worker");
 
-  if (FLAGS_backend == "vlm") {
-    FLAGS_enable_prefix_cache = false;
-    FLAGS_enable_chunked_prefill = false;
+  if (model_config.backend() == "vlm") {
+    kv_cache_config.enable_prefix_cache(false);
+    scheduler_config.enable_chunked_prefill(false);
   }
 
   // if max_tokens_per_chunk_for_prefill is not set, set its value to
   // max_tokens_per_batch
-  if (FLAGS_max_tokens_per_chunk_for_prefill < 0) {
-    FLAGS_max_tokens_per_chunk_for_prefill = FLAGS_max_tokens_per_batch;
+  if (scheduler_config.max_tokens_per_chunk_for_prefill() < 0) {
+    scheduler_config.max_tokens_per_chunk_for_prefill(
+        scheduler_config.max_tokens_per_batch());
   }
 
 // disable block copy kernel on unsupported backends
 #if !defined(USE_NPU) && !defined(USE_CUDA)
-  FLAGS_enable_block_copy_kernel = false;
+  beam_search_config.enable_block_copy_kernel(false);
 #endif
   std::string model_type = "";
-  if (FLAGS_backend != "dit") {
+  if (model_config.backend() != "dit") {
     model_type = xllm::util::get_model_type(model_path);
-    FLAGS_tool_call_parser = function_call::FunctionCallParser::get_parser_auto(
-        FLAGS_tool_call_parser, model_type);
-    FLAGS_reasoning_parser =
-        ReasoningParser::get_parser_auto(FLAGS_reasoning_parser, model_type);
+    model_config.tool_call_parser(
+        function_call::FunctionCallParser::get_parser_auto(
+            model_config.tool_call_parser(), model_type));
+    model_config.reasoning_parser(ReasoningParser::get_parser_auto(
+        model_config.reasoning_parser(), model_type));
   }
 
-  // validate flags before creating master
-  validate_flags(model_type);
+  // validate config before creating master
+  validate_config(model_type);
 
-  if (FLAGS_node_rank == 0 && FLAGS_random_seed < 0) {
-    FLAGS_random_seed = std::random_device{}() % (1 << 30);
+  if (distributed_config.node_rank() == 0 &&
+      execution_config.random_seed() < 0) {
+    execution_config.random_seed(std::random_device{}() % (1 << 30));
   }
 
   // Create Master
-  XllmConfig::reload_from_flags();
+  XllmConfig::reload_from_configs();
   const XllmConfig& config = XllmConfig::get_instance();
   Options options =
       create_options(config,
@@ -461,6 +485,7 @@ int main(int argc, char** argv) {
   FLAGS_alsologtostderr = true;
   FLAGS_minloglevel = 0;
   google::ParseCommandLineFlags(&argc, &argv, true);
+  XllmConfig::reload_from_flags();
 
   google::InitGoogleLogging("xllm");
 

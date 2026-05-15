@@ -15,12 +15,9 @@ limitations under the License.
 
 #include "npu_lm_head_impl.h"
 
-#include <gflags/gflags.h>
 #include <glog/logging.h>
 
 #include "core/framework/config/xllm_config.h"
-DECLARE_string(rank_tablefile);
-DECLARE_string(communication_backend);
 
 namespace xllm {
 namespace layer {

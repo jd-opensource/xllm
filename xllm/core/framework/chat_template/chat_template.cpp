@@ -15,15 +15,12 @@ limitations under the License.
 
 #include "framework/chat_template/chat_template.h"
 
-#include <gflags/gflags.h>
 #include <glog/logging.h>
 
 #include "core/framework/config/xllm_config.h"
 #include "framework/chat_template/deepseek_v32_cpp_template.h"
 #include "framework/chat_template/deepseek_v4_cpp_template.h"
 #include "framework/chat_template/jinja_chat_template.h"
-
-DECLARE_bool(use_cpp_chat_template);
 
 namespace xllm {
 

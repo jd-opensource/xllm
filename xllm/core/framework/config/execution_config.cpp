@@ -95,7 +95,8 @@ ExecutionConfig ExecutionConfig::from_flags() {
       .random_seed(FLAGS_random_seed)
       .enable_customize_mla_kernel(FLAGS_enable_customize_mla_kernel);
 #if defined(USE_NPU)
-  config.npu_kernel_backend(FLAGS_npu_kernel_backend)
+  config.enable_atb_comm_multiprocess(FLAGS_enable_atb_comm_multiprocess)
+      .npu_kernel_backend(FLAGS_npu_kernel_backend)
       .enable_intralayer_addnorm(FLAGS_enable_intralayer_addnorm);
 #endif
   return config;
@@ -109,5 +110,12 @@ ExecutionConfig& ExecutionConfig::get_instance() {
 void ExecutionConfig::reload_from_flags() {
   ExecutionConfig::get_instance() = ExecutionConfig::from_flags();
 }
+
+#if defined(USE_NPU)
+void ExecutionConfig::set_enable_atb_comm_multiprocess(bool enabled) {
+  ExecutionConfig::get_instance().enable_atb_comm_multiprocess(enabled);
+  FLAGS_enable_atb_comm_multiprocess = enabled;
+}
+#endif
 
 }  // namespace xllm

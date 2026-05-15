@@ -31,6 +31,9 @@ class ExecutionConfig final {
 
   static ExecutionConfig from_flags();
   static void reload_from_flags();
+#if defined(USE_NPU)
+  static void set_enable_atb_comm_multiprocess(bool enabled);
+#endif
 
   PROPERTY(bool, enable_graph) = false;
 
@@ -55,6 +58,8 @@ class ExecutionConfig final {
   PROPERTY(bool, enable_customize_mla_kernel) = false;
 
 #if defined(USE_NPU)
+  PROPERTY(bool, enable_atb_comm_multiprocess) = false;
+
   PROPERTY(std::string, npu_kernel_backend) = "AUTO";
 
   PROPERTY(bool, enable_intralayer_addnorm) = false;

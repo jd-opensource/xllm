@@ -15,11 +15,7 @@ limitations under the License.
 
 #include "npu_glm4_moe_decoder_layer.h"
 
-#include "common/global_flags.h"
 #include "core/framework/config/xllm_config.h"
-DECLARE_string(rank_tablefile);
-DECLARE_string(communication_backend);
-DECLARE_int32(expert_parallel_degree);
 
 namespace xllm {
 namespace layer {

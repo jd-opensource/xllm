@@ -28,7 +28,6 @@ limitations under the License.
 #include <memory>
 
 #include "common/device_monitor.h"
-#include "common/global_flags.h"
 #include "common/interruption_bus.h"
 #include "common/metrics.h"
 #include "common/options.h"
@@ -93,8 +92,8 @@ LLMEngine::LLMEngine(const runtime::Options& options,
     CHECK_EQ(device.type(), device_type)
         << "All devices should be the same type";
 #if defined(USE_NPU)
-    FLAGS_enable_atb_comm_multiprocess =
-        options.enable_offline_inference() || (options.nnodes() > 1);
+    ExecutionConfig::set_enable_atb_comm_multiprocess(
+        options.enable_offline_inference() || (options.nnodes() > 1));
 #endif
   }
 

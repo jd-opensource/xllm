@@ -30,7 +30,6 @@ limitations under the License.
 #include <thread>
 #include <utility>
 
-#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/common/xllm_build_info.h"
@@ -105,10 +104,13 @@ namespace {
 
 #if defined(USE_NPU)
 void validate_rank_tablefile_backend() {
-  if (!FLAGS_rank_tablefile.empty() && FLAGS_communication_backend != "hccl") {
+  const EPLBConfig& eplb_config = EPLBConfig::get_instance();
+  const ParallelConfig& parallel_config = ParallelConfig::get_instance();
+  if (!eplb_config.rank_tablefile().empty() &&
+      parallel_config.communication_backend() != "hccl") {
     LOG(FATAL) << "--rank_tablefile requires --communication_backend=hccl, "
                << "but got --communication_backend="
-               << FLAGS_communication_backend;
+               << parallel_config.communication_backend();
   }
 }
 
@@ -131,7 +133,7 @@ void resolve_npu_kernel_backend_for_options(Options* options) {
   }
 
   options->npu_kernel_backend(effective_backend);
-  FLAGS_npu_kernel_backend = effective_backend;
+  ExecutionConfig::get_instance().npu_kernel_backend(effective_backend);
   LOG(INFO) << "Resolved npu_kernel_backend=" << effective_backend
             << " for model_type=" << model_type;
 }
@@ -148,45 +150,51 @@ Master::Master(const Options& options, EngineType type)
   options_.enable_mla(util::should_enable_mla(model_path, options_.backend()));
   print_startup_banner(model_path, options_.backend(), options_.node_rank());
   LOG(INFO) << "Master init options: " << options_.to_string();
-  FLAGS_enable_prefill_sp = options_.enable_prefill_sp();
+  ParallelConfig::get_instance().enable_prefill_sp(
+      options_.enable_prefill_sp());
 
   // Allow brpc receive SIGTREM and SIGINT signal.
   brpc::FLAGS_graceful_quit_on_sigterm = true;
   brpc::FLAGS_graceful_quit_on_sighup = true;
 
 #if defined(USE_NPU)
+  EPLBConfig& eplb_config = EPLBConfig::get_instance();
+  ParallelConfig& parallel_config = ParallelConfig::get_instance();
   if (options.rank_tablefile().has_value()) {
-    FLAGS_rank_tablefile = options.rank_tablefile().value();
+    eplb_config.rank_tablefile(options.rank_tablefile().value());
   }
   if (options.communication_backend().has_value()) {
-    FLAGS_communication_backend = options.communication_backend().value();
+    parallel_config.communication_backend(
+        options.communication_backend().value());
   }
   validate_rank_tablefile_backend();
-  parallel_state::sync_torch_npu_rank_table_file_env(FLAGS_rank_tablefile);
+  parallel_state::sync_torch_npu_rank_table_file_env(
+      eplb_config.rank_tablefile());
   if (options.expert_parallel_degree().has_value()) {
-    FLAGS_expert_parallel_degree = options.expert_parallel_degree().value();
+    eplb_config.expert_parallel_degree(
+        options.expert_parallel_degree().value());
   }
   if (options.enable_eplb().has_value()) {
-    FLAGS_enable_eplb = options.enable_eplb().value();
+    eplb_config.enable_eplb(options.enable_eplb().value());
   }
   if (options.redundant_experts_num().has_value()) {
-    FLAGS_redundant_experts_num = options.redundant_experts_num().value();
+    eplb_config.redundant_experts_num(options.redundant_experts_num().value());
   }
   if (options.eplb_update_interval().has_value()) {
-    FLAGS_eplb_update_interval = options.eplb_update_interval().value();
+    eplb_config.eplb_update_interval(options.eplb_update_interval().value());
   }
   if (options.eplb_update_threshold().has_value()) {
-    FLAGS_eplb_update_threshold = options.eplb_update_threshold().value();
+    eplb_config.eplb_update_threshold(options.eplb_update_threshold().value());
   }
   resolve_npu_kernel_backend_for_options(&options_);
 #endif
-  FLAGS_enable_multi_stream_parallel =
-      options.enable_multi_stream_parallel() && (options.nnodes() > 1);
-  if (FLAGS_enable_multi_stream_parallel) {
+  ParallelConfig::get_instance().enable_multi_stream_parallel(
+      options.enable_multi_stream_parallel() && (options.nnodes() > 1));
+  if (ParallelConfig::get_instance().enable_multi_stream_parallel()) {
     LOG(FATAL)
         << "Multi-stream parallel is refactoring now, will be supported later.";
   }
-  XllmConfig::reload_from_flags();
+  XllmConfig::reload_from_configs();
   // construct engine
   const auto devices =
       DeviceNameUtils::parse_devices(options_.devices().value_or("auto"));

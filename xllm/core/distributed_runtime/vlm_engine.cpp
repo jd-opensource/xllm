@@ -28,7 +28,6 @@ limitations under the License.
 #include <memory>
 
 #include "common/device_monitor.h"
-#include "common/global_flags.h"
 #include "common/interruption_bus.h"
 #include "common/metrics.h"
 #include "core/distributed_runtime/master.h"
@@ -61,8 +60,8 @@ VLMEngine::VLMEngine(const runtime::Options& options,
         << "All devices should be the same type";
   }
 #if defined(USE_NPU)
-  FLAGS_enable_atb_comm_multiprocess =
-      options.enable_offline_inference() || (options.nnodes() > 1);
+  ExecutionConfig::set_enable_atb_comm_multiprocess(
+      options.enable_offline_inference() || (options.nnodes() > 1));
 #endif
 
   // setup all workers and create worker clients in nnode_rank=0 engine side.

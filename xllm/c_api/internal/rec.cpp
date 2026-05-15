@@ -52,31 +52,37 @@ const char* get_rec_pipeline_name(xllm::RecPipelineType pipeline_type) {
 }
 
 void reset_pipeline_runtime_toggles() {
-  FLAGS_enable_rec_fast_sampler = false;
-  FLAGS_enable_prefill_piecewise_graph = false;
-  FLAGS_enable_xattention_one_stage = false;
-  FLAGS_enable_graph_mode_decode_no_padding = false;
-  FLAGS_enable_rec_prefill_only = false;
-  FLAGS_enable_constrained_decoding = false;
-  FLAGS_enable_topk_sorted = false;
+  xllm::RecConfig::get_instance()
+      .enable_rec_fast_sampler(false)
+      .enable_xattention_one_stage(false)
+      .enable_rec_prefill_only(false)
+      .enable_constrained_decoding(false);
+  xllm::ExecutionConfig::get_instance()
+      .enable_prefill_piecewise_graph(false)
+      .enable_graph_mode_decode_no_padding(false);
+  xllm::BeamSearchConfig::get_instance().enable_topk_sorted(false);
 }
 
 void apply_multi_round_pipeline_toggles() {
-  FLAGS_enable_rec_fast_sampler = true;
-  FLAGS_enable_prefill_piecewise_graph = true;
-  FLAGS_enable_xattention_one_stage = false;
-  FLAGS_enable_graph_mode_decode_no_padding = true;
-  FLAGS_enable_topk_sorted = false;
+  xllm::RecConfig::get_instance()
+      .enable_rec_fast_sampler(true)
+      .enable_xattention_one_stage(false);
+  xllm::ExecutionConfig::get_instance()
+      .enable_prefill_piecewise_graph(true)
+      .enable_graph_mode_decode_no_padding(true);
+  xllm::BeamSearchConfig::get_instance().enable_topk_sorted(false);
 }
 
 void apply_onerec_pipeline_toggles(xllm::Options* options) {
   const bool enable_onerec_xattention =
       ::xllm::RecConfig::get_instance().max_decode_rounds() > 0;
-  FLAGS_enable_rec_prefill_only = !enable_onerec_xattention;
-  FLAGS_enable_constrained_decoding = true;
-  FLAGS_enable_prefix_cache = false;
-  FLAGS_enable_schedule_overlap = false;
-  FLAGS_enable_chunked_prefill = false;
+  xllm::RecConfig::get_instance()
+      .enable_rec_prefill_only(!enable_onerec_xattention)
+      .enable_constrained_decoding(true);
+  xllm::KVCacheConfig::get_instance().enable_prefix_cache(false);
+  xllm::SchedulerConfig::get_instance()
+      .enable_schedule_overlap(false)
+      .enable_chunked_prefill(false);
 
   options->enable_prefix_cache(false)
       .enable_schedule_overlap(false)
@@ -84,7 +90,7 @@ void apply_onerec_pipeline_toggles(xllm::Options* options) {
 
   if (!enable_onerec_xattention) {
     // Legacy OneRec keeps the historical fixed decode-step behavior.
-    FLAGS_max_decode_rounds = 0;
+    xllm::RecConfig::get_instance().max_decode_rounds(0);
   }
 }
 
@@ -177,23 +183,6 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         .is_local(true)
         .server_idx(xllm_init_options.server_idx);
 
-    // @TODO: Currently, gflags are configured through hard coding, which needs
-    // to be improved in the future. For example, a separate gflags
-    // configuration file can be provided to the so for setting gflags.
-    //
-    // REC so still has two configuration paths:
-    // - some request/runtime code reads FLAGS_* directly
-    // - master/worker construction reads xllm::Options
-    //
-    // The fields copied from init options below are read from FLAGS_* today.
-    // beam_width/block_size/max_tokens/max_seqs are also represented in
-    // Options, so duplicated values must stay aligned.
-    FLAGS_beam_width = xllm_init_options.beam_width;
-    FLAGS_max_decode_rounds = xllm_init_options.max_decode_rounds;
-    FLAGS_max_seqs_per_batch = xllm_init_options.max_seqs_per_batch;
-    FLAGS_max_tokens_per_batch = xllm_init_options.max_tokens_per_batch;
-    FLAGS_block_size = xllm_init_options.block_size;
-    FLAGS_enable_rec_prefill_only = xllm_init_options.enable_rec_prefill_only;
     if (xllm_init_options.flashinfer_workspace_buffer_size >
         static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
       LOG(ERROR) << "flashinfer_workspace_buffer_size["
@@ -201,16 +190,30 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
                  << "] exceeds supported int32 range";
       return false;
     }
-    FLAGS_flashinfer_workspace_buffer_size = static_cast<int32_t>(
-        xllm_init_options.flashinfer_workspace_buffer_size);
-    FLAGS_enable_prefix_cache = xllm_init_options.enable_prefix_cache;
-    FLAGS_enable_schedule_overlap = xllm_init_options.enable_schedule_overlap;
-    FLAGS_enable_chunked_prefill = xllm_init_options.enable_chunked_prefill;
-    FLAGS_enable_graph = xllm_init_options.enable_graph;
-    FLAGS_rec_worker_max_concurrency =
-        xllm_init_options.rec_worker_max_concurrency;
-    FLAGS_enable_block_copy_kernel = xllm_init_options.enable_block_copy_kernel;
-    xllm::XllmConfig::reload_from_flags();
+    xllm::BeamSearchConfig::get_instance()
+        .beam_width(xllm_init_options.beam_width)
+        .enable_block_copy_kernel(xllm_init_options.enable_block_copy_kernel);
+    xllm::RecConfig::get_instance()
+        .max_decode_rounds(xllm_init_options.max_decode_rounds)
+        .enable_rec_prefill_only(xllm_init_options.enable_rec_prefill_only)
+        .rec_worker_max_concurrency(
+            xllm_init_options.rec_worker_max_concurrency);
+    xllm::SchedulerConfig::get_instance()
+        .max_seqs_per_batch(xllm_init_options.max_seqs_per_batch)
+        .max_tokens_per_batch(xllm_init_options.max_tokens_per_batch)
+        .max_tokens_per_chunk_for_prefill(
+            xllm_init_options.max_tokens_per_chunk_for_prefill)
+        .enable_schedule_overlap(xllm_init_options.enable_schedule_overlap)
+        .enable_chunked_prefill(xllm_init_options.enable_chunked_prefill);
+    xllm::KVCacheConfig::get_instance()
+        .block_size(xllm_init_options.block_size)
+        .enable_prefix_cache(xllm_init_options.enable_prefix_cache);
+    xllm::ModelConfig::get_instance().flashinfer_workspace_buffer_size(
+        static_cast<int32_t>(
+            xllm_init_options.flashinfer_workspace_buffer_size));
+    xllm::ExecutionConfig::get_instance().enable_graph(
+        xllm_init_options.enable_graph);
+    xllm::XllmConfig::reload_from_configs();
 
     auto model_loader = xllm::ModelLoader::create(model_path);
     if (model_loader == nullptr) {
@@ -247,11 +250,11 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     }
 
 #if !defined(USE_NPU) && !defined(USE_CUDA)
-    FLAGS_enable_block_copy_kernel = false;
+    xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel(false);
 #endif
-    xllm::XllmConfig::reload_from_flags();
+    xllm::XllmConfig::reload_from_configs();
 
-    // Keep dual-source settings aligned with the FLAGS_* values above.
+    // Keep dual-source settings aligned with the Config values above.
     options.enable_graph(::xllm::ExecutionConfig::get_instance().enable_graph())
         .beam_width(::xllm::BeamSearchConfig::get_instance().beam_width())
         .rec_worker_max_concurrency(

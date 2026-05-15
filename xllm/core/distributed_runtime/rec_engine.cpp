@@ -23,7 +23,6 @@ limitations under the License.
 #include <map>
 #include <memory>
 
-#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "core/framework/config/xllm_config.h"
 #include "framework/kv_cache/kv_cache_shape.h"
@@ -100,8 +99,8 @@ bool RecEngine::init_model() {
   // LlmRec-specific initialization
   if (rec_model_kind_ == RecModelKind::kLlmRec) {
 #if defined(USE_NPU)
-    FLAGS_enable_atb_comm_multiprocess =
-        options_.enable_offline_inference() || (options_.nnodes() > 1);
+    ExecutionConfig::set_enable_atb_comm_multiprocess(
+        options_.enable_offline_inference() || (options_.nnodes() > 1));
 #endif
 
     auto master_node_addr = options_.master_node_addr().value_or("");
