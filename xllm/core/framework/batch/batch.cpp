@@ -348,9 +348,9 @@ std::unordered_map<uint32_t, uint32_t> Batch::cal_seq_exchange_index(
   return index_shift;
 }
 
-RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
-                                             ThreadPool* thread_pool,
-                                             int32_t cp_size) {
+ForwardInput Batch::prepare_forward_input(const ModelArgs& args,
+                                          ThreadPool* thread_pool,
+                                          int32_t cp_size) {
   dp_balance_shuffle_seqs();
   refresh_output_targets();
   BatchInputBuilder builder(sequences_,
@@ -363,13 +363,15 @@ RawForwardInput Batch::prepare_forward_input(const ModelArgs& args,
                             batch_forward_type_,
                             cp_size,
                             thread_pool);
-  auto raw_input = builder.build_raw_forward_input();
+  ForwardInput forward_input =
+      builder.build_forward_input(/*num_decoding_tokens=*/0,
+                                  /*min_decoding_batch_size=*/0);
   if (has_partial_finished_beam_group()) {
     // Beam-search kernel assumes fixed beam width per group. When only part of
     // a group is active, fall back to software beam merge.
-    raw_input.acc_logprob_vec.clear();
+    forward_input.sampling_params.acc_logprob = torch::Tensor();
   }
-  return raw_input;
+  return forward_input;
 }
 
 void Batch::refresh_output_targets() {

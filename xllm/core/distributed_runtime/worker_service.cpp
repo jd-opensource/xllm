@@ -190,7 +190,7 @@ void WorkerService::create_polling_shm_thread(
         Timer timer;
         while (true) {
           ForwardInput fwd_input;
-          input_shm_manager->raw_input_read(fwd_input, device_);
+          input_shm_manager->input_read(fwd_input, device_);
           timer.reset();
           // model output variables
           torch::Tensor next_tokens;
@@ -592,15 +592,12 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
 
         Timer timer;
         ForwardInput forward_input;
-        if (pb_forward_input->has_packed_input()) {
-          packed_proto_to_forward_input(pb_forward_input->packed_input(),
-                                        forward_input,
-                                        device_,
-                                        stream_.get());
-        } else {
-          proto_to_forward_input(
-              pb_forward_input, forward_input, options_.num_decoding_tokens());
-        }
+        CHECK(pb_forward_input->has_packed_input())
+            << "ForwardInput must be sent via packed_input";
+        packed_proto_to_forward_input(pb_forward_input->packed_input(),
+                                      forward_input,
+                                      device_,
+                                      stream_.get());
 
         // model output
         torch::Tensor next_tokens;

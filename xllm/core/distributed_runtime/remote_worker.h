@@ -127,8 +127,8 @@ class RemoteWorker : public WorkerClient {
   virtual folly::SemiFuture<std::optional<ForwardOutput>> step_async(
       const ForwardInput& inputs) override;
 
-  virtual folly::SemiFuture<std::optional<RawForwardOutput>> step_async(
-      const RawForwardInput& inputs) override;
+  virtual folly::SemiFuture<std::optional<RawForwardOutput>> step_remote_async(
+      const ForwardInput& inputs) override;
 
   virtual folly::SemiFuture<folly::Unit> process_group_test_async() override;
 

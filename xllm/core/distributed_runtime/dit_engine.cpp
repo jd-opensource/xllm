@@ -111,8 +111,8 @@ DiTForwardOutput DiTEngine::step(std::vector<DiTBatch>& batches) {
 
   Timer timer;
   auto dit_forward_input = batches[0].prepare_forward_input();
-  RawForwardInput raw_forward_input;
-  raw_forward_input.dit_forward_input = dit_forward_input;
+  ForwardInput forward_input;
+  forward_input.input_params.dit_forward_input = dit_forward_input;
   COUNTER_ADD(prepare_input_latency_seconds, timer.elapsed_seconds());
 
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
@@ -120,7 +120,7 @@ DiTForwardOutput DiTEngine::step(std::vector<DiTBatch>& batches) {
 
   for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
     futures.emplace_back(
-        worker_clients_[worker_rank]->step_async(raw_forward_input));
+        worker_clients_[worker_rank]->step_remote_async(forward_input));
   }
 
   // wait for the all future to complete

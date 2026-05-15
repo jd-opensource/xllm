@@ -282,7 +282,7 @@ bool CommChannel::pull_kv_blocks(const uint64_t src_cluster_id,
 }
 
 void CommChannel::execute_model_async(
-    const RawForwardInput& input,
+    const ForwardInput& input,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
   execute_model_with_brpc(input, promise);
 }
@@ -530,21 +530,16 @@ bool CommChannel::get_active_activation_memory_async(
 }
 
 bool CommChannel::execute_model_with_brpc(
-    const RawForwardInput& input,
+    const ForwardInput& input,
     folly::Promise<std::optional<RawForwardOutput>>& promise) {
-  // convert to proto::ForwardInput
   proto::ForwardInput pb_forward_input;
-  if (FLAGS_use_contiguous_input_buffer) {
-    auto* packed_input = pb_forward_input.mutable_packed_input();
-    if (!raw_forward_input_to_packed_proto(input, packed_input)) {
-      pb_forward_input.clear_packed_input();
-      forward_input_to_proto(input, &pb_forward_input);
-    }
-  } else {
-    forward_input_to_proto(input, &pb_forward_input);
+  auto* packed_input = pb_forward_input.mutable_packed_input();
+  if (!forward_input_to_packed_proto(input, packed_input)) {
+    LOG(ERROR) << "failed to pack ForwardInput for remote execution";
+    promise.setValue(std::optional<RawForwardOutput>(std::nullopt));
+    return false;
   }
 
-  // call ExecuteModel with callback
   auto done = new ExecuteModelClosure();
   done->promise = std::move(promise);
   stub_->ExecuteModel(&done->cntl, &pb_forward_input, &done->pb_output, done);

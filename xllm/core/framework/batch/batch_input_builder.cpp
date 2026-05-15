@@ -36,7 +36,6 @@ limitations under the License.
 #include "framework/sampling/sampling_params.h"
 #include "runtime/params_utils.h"
 #include "util/blocking_counter.h"
-#include "util/slice.h"
 #include "util/tensor_helper.h"
 #include "util/threadpool.h"
 #include "util/utils.h"
@@ -96,6 +95,76 @@ std::vector<int32_t> build_q_cu_seq_lens_vec(
   q_cu_seq_lens.assign(q_seq_lens.begin() + 1, q_seq_lens.end());
 #endif
   return q_cu_seq_lens;
+}
+
+struct BlockCopyKernelInputData {
+  std::vector<int32_t> src_indices;
+  std::vector<int32_t> dst_indices;
+  std::vector<int32_t> cum_sum;
+  bool has_overlap = false;
+};
+
+BlockCopyKernelInputData build_block_copy_kernel_input_data(
+    const std::vector<BlockTransferInfo>& swap_blocks,
+    bool detect_overlap) {
+  BlockCopyKernelInputData input_data;
+  if (swap_blocks.empty()) {
+    return input_data;
+  }
+
+  int32_t current_src = swap_blocks[0].src_block_id;
+  input_data.src_indices.reserve(swap_blocks.size());
+  input_data.dst_indices.reserve(swap_blocks.size());
+  input_data.cum_sum.reserve(swap_blocks.size());
+
+  std::unordered_set<int32_t> src_set;
+  std::unordered_map<int32_t, int32_t> dst_to_src;
+  if (detect_overlap) {
+    for (const auto& block : swap_blocks) {
+      src_set.insert(block.src_block_id);
+    }
+  }
+
+  input_data.src_indices.push_back(swap_blocks[0].src_block_id);
+  input_data.dst_indices.push_back(swap_blocks[0].dst_block_id);
+  if (detect_overlap) {
+    dst_to_src.emplace(swap_blocks[0].dst_block_id,
+                       swap_blocks[0].src_block_id);
+    if (src_set.count(swap_blocks[0].dst_block_id) > 0 &&
+        swap_blocks[0].dst_block_id != swap_blocks[0].src_block_id) {
+      input_data.has_overlap = true;
+    }
+  }
+
+  for (size_t i = 1; i < swap_blocks.size(); ++i) {
+    input_data.dst_indices.push_back(swap_blocks[i].dst_block_id);
+    if (detect_overlap) {
+      auto [it, inserted] = dst_to_src.emplace(swap_blocks[i].dst_block_id,
+                                               swap_blocks[i].src_block_id);
+      if (!inserted && it->second != swap_blocks[i].src_block_id) {
+        input_data.has_overlap = true;
+      }
+      if (src_set.count(swap_blocks[i].dst_block_id) > 0 &&
+          swap_blocks[i].dst_block_id != swap_blocks[i].src_block_id) {
+        input_data.has_overlap = true;
+      }
+    }
+    if (swap_blocks[i].src_block_id != current_src) {
+      input_data.src_indices.push_back(swap_blocks[i].src_block_id);
+      input_data.cum_sum.push_back(static_cast<int32_t>(i));
+      current_src = swap_blocks[i].src_block_id;
+    }
+  }
+  input_data.cum_sum.emplace_back(static_cast<int32_t>(swap_blocks.size()));
+  return input_data;
+}
+
+torch::Tensor build_pinned_int_tensor(const std::vector<int32_t>& values) {
+  return torch::tensor(values,
+                       torch::TensorOptions()
+                           .dtype(torch::kInt)
+                           .device(torch::kCPU)
+                           .pinned_memory(true));
 }
 
 }  // namespace
@@ -190,17 +259,9 @@ ForwardInput BatchInputBuilder::build_forward_input(
     uint32_t min_decoding_batch_size) {
   (void)num_decoding_tokens;
   (void)min_decoding_batch_size;
-  // Since dont test multithreaded for ForwardInput, set thread_pool_ to
-  // nullptr.
-  thread_pool_ = nullptr;
   process_sequences();
 
   return state_to_forward_input();
-}
-
-RawForwardInput BatchInputBuilder::build_raw_forward_input() {
-  process_sequences();
-  return state_to_raw_forward_input();
 }
 
 void BatchInputBuilder::process_sequences() {
@@ -679,14 +740,10 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   }
   input_params.embedding.request_ids = std::move(state_.request_ids);
   input_params.embedding.extra_token_ids = std::move(state_.extra_token_ids);
+  input_params.meta.batch_id = batch_id_;
 
-  if (swap_block_transfer_infos_ != nullptr &&
-      swap_block_transfer_infos_->size() > 0) {
-    input_params.block_copy.swap_blocks.insert(
-        input_params.block_copy.swap_blocks.end(),
-        swap_block_transfer_infos_->begin(),
-        swap_block_transfer_infos_->end());
-  }
+  forward_input.transfer_kv_infos = std::move(state_.transfer_kv_infos);
+  process_swap_block_infos(forward_input);
 
   CHECK_EQ(state_.sampling_params.size(), state_.selected_token_idxes.size());
   // Setup sampling parameters
@@ -705,172 +762,52 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   return forward_input;
 }
 
-RawForwardInput BatchInputBuilder::state_to_raw_forward_input() {
-  if (state_.flatten_tokens_vec.empty()) {
-    return {};
-  }
-  RawForwardInput raw_forward_input;
-  raw_forward_input.flatten_tokens_vec = std::move(state_.flatten_tokens_vec);
-  if (!use_mrope_) {
-    raw_forward_input.flatten_positions_vec =
-        std::move(state_.flatten_positions_vec);
-  } else {
-    auto m_positions = torch::cat(state_.mrope_positions_vec, 1);
-    for (int64_t idx = 0; idx < m_positions.size(0); ++idx) {
-      torch::Tensor position = m_positions[idx];
-      Slice<int32_t> position_slice = {position.data_ptr<int32_t>(),
-                                       static_cast<size_t>(position.size(0))};
-      raw_forward_input.m_positions_vec.push_back(position_slice);
-    }
-  }
-
-  raw_forward_input.sampling_params = std::move(state_.sampling_params);
-  raw_forward_input.selected_token_idxes =
-      std::move(state_.selected_token_idxes);
-  raw_forward_input.sample_idxes = std::move(state_.sample_idxes);
-  util::pad_2d_vector<int64_t>(state_.unique_token_ids_vec, /*pad_value=*/0);
-  raw_forward_input.unique_token_ids_vec =
-      std::move(state_.unique_token_ids_vec);
-  util::pad_2d_vector(state_.unique_token_counts_vec, /*pad_value=*/0);
-  raw_forward_input.unique_token_counts_vec =
-      std::move(state_.unique_token_counts_vec);
-  raw_forward_input.unique_token_lens_vec =
-      std::move(state_.unique_token_lens_vec);
-  raw_forward_input.batch_forward_type = state_.batch_forward_type;
-  raw_forward_input.max_seq_len = state_.max_seq_len;
-  raw_forward_input.q_max_seq_len = state_.q_max_seq_len;
-  raw_forward_input.seq_lens = std::move(state_.seq_lens);
-  raw_forward_input.q_cu_seq_lens = build_q_cu_seq_lens_vec(state_.q_seq_lens);
-  raw_forward_input.q_seq_lens = std::move(state_.q_seq_lens);
-  raw_forward_input.kv_cache_tokens_nums =
-      std::move(state_.kv_cache_tokens_nums);
-
-  raw_forward_input.new_token_slot_ids = std::move(state_.new_token_slot_ids);
-  util::pad_2d_vector(state_.block_tables_vec, /*pad_value=*/0);
-  raw_forward_input.block_tables_vec = std::move(state_.block_tables_vec);
-  raw_forward_input.num_sequences = num_sequences_;
-  // raw_forward_input.dp_global_token_nums = ;
-  raw_forward_input.transfer_kv_infos = std::move(state_.transfer_kv_infos);
-
-  // for flashinfer
-  raw_forward_input.paged_kv_indptr = std::move(state_.paged_kv_indptr);
-  raw_forward_input.paged_kv_indices = std::move(state_.paged_kv_indices);
-  raw_forward_input.paged_kv_last_page_len =
-      std::move(state_.paged_kv_last_page_len);
-
-  raw_forward_input.embedding_ids = std::move(state_.embedding_ids);
-  raw_forward_input.linear_state_ids = std::move(state_.linear_state_ids);
-  raw_forward_input.request_ids = std::move(state_.request_ids);
-  raw_forward_input.extra_token_ids = std::move(state_.extra_token_ids);
-  // beam search kernel input
-  if (state_.acc_logprob_vec.size() > 0) {
-    raw_forward_input.acc_logprob_vec = std::move(state_.acc_logprob_vec);
-  }
-
-  raw_forward_input.mm_data.batch(mm_data_vec_);
-
-  process_swap_block_infos(raw_forward_input);
-  raw_forward_input.batch_id = batch_id_;
-
-  return raw_forward_input;
-}
-
-void BatchInputBuilder::process_swap_block_infos(
-    RawForwardInput& raw_forward_input) {
+void BatchInputBuilder::process_swap_block_infos(ForwardInput& forward_input) {
   if (swap_block_transfer_infos_ == nullptr ||
-      swap_block_transfer_infos_->size() == 0) {
+      swap_block_transfer_infos_->empty()) {
     return;
   }
 
+  auto& input_params = forward_input.input_params;
+  auto& swap_blocks = *swap_block_transfer_infos_;
   if (FLAGS_enable_block_copy_kernel) {
-    auto& swap_blocks = *swap_block_transfer_infos_;
     std::sort(swap_blocks.begin(),
               swap_blocks.end(),
               [](const BlockTransferInfo& a, const BlockTransferInfo& b) {
                 return a.src_block_id < b.src_block_id;
               });
 #if defined(USE_CUDA)
-    raw_forward_input.swap_blocks.insert(raw_forward_input.swap_blocks.end(),
-                                         swap_blocks.begin(),
-                                         swap_blocks.end());
-
-    if (swap_blocks.size() > 0) {
-      std::vector<int32_t> src_indices, dst_indices, cum_sum;
-      std::unordered_set<int32_t> src_set;
-      std::unordered_map<int32_t, int32_t> dst_to_src;
-      bool has_overlap = false;
-      int32_t current_src = swap_blocks[0].src_block_id;
-      src_indices.reserve(swap_blocks.size());
-      dst_indices.reserve(swap_blocks.size());
-      cum_sum.reserve(swap_blocks.size());
-
-      for (const auto& block : swap_blocks) {
-        src_set.insert(block.src_block_id);
-      }
-
-      src_indices.push_back(swap_blocks[0].src_block_id);
-      dst_indices.push_back(swap_blocks[0].dst_block_id);
-      dst_to_src.emplace(swap_blocks[0].dst_block_id,
-                         swap_blocks[0].src_block_id);
-      if (src_set.count(swap_blocks[0].dst_block_id) > 0 &&
-          swap_blocks[0].dst_block_id != swap_blocks[0].src_block_id) {
-        has_overlap = true;
-      }
-      for (size_t i = 1; i < swap_blocks.size(); i++) {
-        dst_indices.push_back(swap_blocks[i].dst_block_id);
-        auto [it, inserted] = dst_to_src.emplace(swap_blocks[i].dst_block_id,
-                                                 swap_blocks[i].src_block_id);
-        if (!inserted && it->second != swap_blocks[i].src_block_id) {
-          has_overlap = true;
-        }
-        if (src_set.count(swap_blocks[i].dst_block_id) > 0 &&
-            swap_blocks[i].dst_block_id != swap_blocks[i].src_block_id) {
-          has_overlap = true;
-        }
-        if (swap_blocks[i].src_block_id != current_src) {
-          src_indices.push_back(swap_blocks[i].src_block_id);
-          cum_sum.push_back(i);
-          current_src = swap_blocks[i].src_block_id;
-        }
-      }
-      cum_sum.emplace_back(swap_blocks.size());
-
-      if (!has_overlap) {
-        raw_forward_input.src_block_indices = std::move(src_indices);
-        raw_forward_input.dst_block_indices = std::move(dst_indices);
-        raw_forward_input.cum_sum = std::move(cum_sum);
-      }
+    input_params.block_copy.swap_blocks.insert(
+        input_params.block_copy.swap_blocks.end(),
+        swap_blocks.begin(),
+        swap_blocks.end());
+    const BlockCopyKernelInputData kernel_input =
+        build_block_copy_kernel_input_data(swap_blocks,
+                                           /*detect_overlap=*/true);
+    if (!kernel_input.has_overlap) {
+      input_params.block_copy.src_block_indices =
+          build_pinned_int_tensor(kernel_input.src_indices);
+      input_params.block_copy.dst_block_indices =
+          build_pinned_int_tensor(kernel_input.dst_indices);
+      input_params.block_copy.cum_sum =
+          build_pinned_int_tensor(kernel_input.cum_sum);
     }
 #else
-    if (swap_blocks.size() > 0) {
-      std::vector<int32_t> src_indices, dst_indices, cum_sum;
-      int32_t current_src = swap_blocks[0].src_block_id;
-      src_indices.reserve(swap_blocks.size());
-      dst_indices.reserve(swap_blocks.size());
-      cum_sum.reserve(swap_blocks.size());
-
-      src_indices.push_back(swap_blocks[0].src_block_id);
-      dst_indices.push_back(swap_blocks[0].dst_block_id);
-      for (size_t i = 1; i < swap_blocks.size(); i++) {
-        dst_indices.push_back(swap_blocks[i].dst_block_id);
-        if (swap_blocks[i].src_block_id != current_src) {
-          src_indices.push_back(swap_blocks[i].src_block_id);
-          cum_sum.push_back(i);
-          current_src = swap_blocks[i].src_block_id;
-        }
-      }
-      cum_sum.emplace_back(swap_blocks.size());
-
-      raw_forward_input.swap_blocks.clear();
-      raw_forward_input.src_block_indices = std::move(src_indices);
-      raw_forward_input.dst_block_indices = std::move(dst_indices);
-      raw_forward_input.cum_sum = std::move(cum_sum);
-    }
+    const BlockCopyKernelInputData kernel_input =
+        build_block_copy_kernel_input_data(swap_blocks,
+                                           /*detect_overlap=*/false);
+    input_params.block_copy.src_block_indices =
+        build_pinned_int_tensor(kernel_input.src_indices);
+    input_params.block_copy.dst_block_indices =
+        build_pinned_int_tensor(kernel_input.dst_indices);
+    input_params.block_copy.cum_sum =
+        build_pinned_int_tensor(kernel_input.cum_sum);
 #endif
   } else {
-    raw_forward_input.swap_blocks.insert(raw_forward_input.swap_blocks.end(),
-                                         swap_block_transfer_infos_->begin(),
-                                         swap_block_transfer_infos_->end());
+    input_params.block_copy.swap_blocks.insert(
+        input_params.block_copy.swap_blocks.end(),
+        swap_blocks.begin(),
+        swap_blocks.end());
   }
 }
 }  // namespace xllm

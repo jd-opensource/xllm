@@ -40,6 +40,7 @@ limitations under the License.
 #include "framework/xtensor/phy_page_pool.h"
 #include "framework/xtensor/xtensor_allocator.h"
 #include "runtime/llm_worker_impl.h"
+#include "runtime/params_utils.h"
 #include "runtime/worker.h"
 #include "server/xllm_server_registry.h"
 #include "util/env_var.h"
@@ -988,26 +989,27 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
       << "Split DP batch failed with dp_size as " << dp_size_
       << " and actual batch size as " << batch.size() << ".";
 
-  auto raw_forward_inputs = prepare_inputs(batch);
-  DCHECK(dp_size_ == raw_forward_inputs.size())
-      << "The processed raw forward inputs size " << raw_forward_inputs.size()
+  auto forward_inputs = prepare_inputs(batch);
+  DCHECK(dp_size_ == forward_inputs.size())
+      << "The processed forward inputs size " << forward_inputs.size()
       << " is not equal to dp size " << dp_size_ << ".";
 
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
 
-  std::vector<std::vector<RawForwardInput>> cp_partitioned_inputs(dp_size_);
+  std::vector<std::vector<ForwardInput>> cp_partitioned_inputs(dp_size_);
 
   if (cp_size_ > 1) {
     for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-      if (!raw_forward_inputs[dp_rank].batch_forward_type.is_prefill()) {
+      if (!forward_inputs[dp_rank]
+               .input_params.meta.batch_forward_type.is_prefill()) {
         continue;
       }
       auto& inputs_per_cp = cp_partitioned_inputs[dp_rank];
       inputs_per_cp.reserve(cp_size_);
       for (uint32_t cp_rank = 0; cp_rank < cp_size_; ++cp_rank) {
-        inputs_per_cp.emplace_back(
-            raw_forward_inputs[dp_rank].cp_partition(cp_rank, cp_size_));
+        inputs_per_cp.emplace_back(cp_partition_forward_input(
+            forward_inputs[dp_rank], cp_rank, cp_size_));
       }
     }
   }
@@ -1015,9 +1017,10 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   // update dp related global paramters and then execute model
   for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
     const int32_t dp_rank = worker_rank / dp_local_size_;
-    const RawForwardInput* input_to_send = &raw_forward_inputs[dp_rank];
+    const ForwardInput* input_to_send = &forward_inputs[dp_rank];
     if (cp_size_ > 1 &&
-        raw_forward_inputs[dp_rank].batch_forward_type.is_prefill()) {
+        forward_inputs[dp_rank]
+            .input_params.meta.batch_forward_type.is_prefill()) {
       const int32_t local_rank_in_dp_group = worker_rank % dp_local_size_;
       const int32_t cp_rank = local_rank_in_dp_group / dp_local_tp_size_;
       CHECK_GE(cp_rank, 0);
@@ -1025,7 +1028,7 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
       input_to_send = &cp_partitioned_inputs[dp_rank][cp_rank];
     }
     futures.emplace_back(
-        worker_clients_[worker_rank]->step_async(*input_to_send));
+        worker_clients_[worker_rank]->step_remote_async(*input_to_send));
   }
 
   // wait for the all future to complete
@@ -1166,9 +1169,8 @@ void LLMEngine::process_eplb_data(
   eplb_manager_->update_expert_load(tensors);
 }
 
-std::vector<RawForwardInput> LLMEngine::prepare_inputs(
-    std::vector<Batch>& batch) {
-  std::vector<RawForwardInput> batched_inputs;
+std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
+  std::vector<ForwardInput> batched_inputs;
   batched_inputs.reserve(dp_size_ * cp_size_);
   // some dp related variables
   std::vector<int32_t> dp_global_token_nums(dp_size_);
@@ -1183,16 +1185,19 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
     batched_inputs.emplace_back(std::move(batch[dp_rank].prepare_forward_input(
         args_, threadpool_.get(), cp_size_)));
     dp_global_token_nums[dp_rank] =
-        batched_inputs[dp_rank].flatten_tokens_vec.size();
+        static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());
     if (batch_forward_type.is_empty() &&
-        !batched_inputs[dp_rank].batch_forward_type.is_empty()) {
-      batch_forward_type = batched_inputs[dp_rank].batch_forward_type;
+        !batched_inputs[dp_rank]
+             .input_params.meta.batch_forward_type.is_empty()) {
+      batch_forward_type =
+          batched_inputs[dp_rank].input_params.meta.batch_forward_type;
       if (batch_forward_type.is_chunked_prefill()) {
         batch_forward_type = BatchForwardType::PREFILL;
       }
     }
-    dp_is_decode[dp_rank] = batch_forward_type.is_decode() &&
-                            batched_inputs[dp_rank].q_max_seq_len == 1;
+    dp_is_decode[dp_rank] =
+        batch_forward_type.is_decode() &&
+        batched_inputs[dp_rank].input_params.meta.q_max_seq_len == 1;
   }
 
   // eplb related
@@ -1203,13 +1208,16 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
 
   // update dp_global_token_nums and batch_forward_type
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs[dp_rank].dp_global_token_nums = dp_global_token_nums;
-    batched_inputs[dp_rank].dp_is_decode = dp_is_decode;
+    batched_inputs[dp_rank].input_params.parallel.dp_global_token_nums =
+        dp_global_token_nums;
+    batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
     if (FLAGS_enable_eplb) {
-      batched_inputs[dp_rank].eplb_info = eplb_info;
+      batched_inputs[dp_rank].input_params.expert.eplb_info = eplb_info;
     }
-    if (batched_inputs[dp_rank].batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].batch_forward_type = batch_forward_type;
+    if (batched_inputs[dp_rank]
+            .input_params.meta.batch_forward_type.is_empty()) {
+      batched_inputs[dp_rank].input_params.meta.batch_forward_type =
+          batch_forward_type;
     }
   }
 

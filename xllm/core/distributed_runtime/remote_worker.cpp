@@ -175,15 +175,14 @@ folly::SemiFuture<std::optional<ForwardOutput>> RemoteWorker::step_async(
   return folly::makeSemiFuture(std::optional<ForwardOutput>(std::nullopt));
 }
 
-folly::SemiFuture<std::optional<RawForwardOutput>> RemoteWorker::step_async(
-    const RawForwardInput& input) {
+folly::SemiFuture<std::optional<RawForwardOutput>>
+RemoteWorker::step_remote_async(const ForwardInput& input) {
   folly::Promise<std::optional<RawForwardOutput>> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule(
       [this, input = std::move(input), promise = std::move(promise)]() mutable {
         channel_->execute_model_async(input, promise);
       });
-
   return future;
 }
 

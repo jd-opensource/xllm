@@ -52,8 +52,6 @@ class BatchInputBuilder {
   ForwardInput build_forward_input(uint32_t num_decoding_tokens,
                                    uint32_t min_decoding_batch_size);
 
-  RawForwardInput build_raw_forward_input();
-
  private:
   friend class BatchInputBuilderTestPeer;
 
@@ -61,7 +59,6 @@ class BatchInputBuilder {
   void process_sequences();
   void process_sequences_multithreaded();
   ForwardInput state_to_forward_input();
-  RawForwardInput state_to_raw_forward_input();
 
   static TransferKVInfo build_step_transfer_info(
       const TransferKVInfo& full_info,
@@ -70,7 +67,7 @@ class BatchInputBuilder {
       uint32_t seq_len,
       uint32_t block_size);
 
-  void process_swap_block_infos(RawForwardInput& raw_forward_input);
+  void process_swap_block_infos(ForwardInput& forward_input);
 
   // State management
   struct BuilderState {
