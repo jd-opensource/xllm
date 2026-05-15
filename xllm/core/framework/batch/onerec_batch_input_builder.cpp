@@ -30,12 +30,11 @@ limitations under the License.
 
 namespace xllm {
 
-// Use Meyers' Singleton pattern to avoid static initialization order fiasco
-// This ensures the cache is initialized on first use, after all dependencies
-// (like PyTorch runtime) are properly initialized.
+// Keep the cache per scheduler thread. OneRec xattention multi-stream can build
+// multiple inputs concurrently, and CacheData is mutated during construction.
 OneRecBatchInputBuilder::HighPerformanceCache&
 OneRecBatchInputBuilder::get_perf_cache() {
-  static HighPerformanceCache cache;
+  thread_local HighPerformanceCache cache;
   cache.ensure_tensors_initialized();
   return cache;
 }
@@ -59,7 +58,7 @@ OneRecBatchInputBuilder::OneRecBatchInputBuilder(
       args_(args),
       batch_forward_type_(batch_forward_type),
       thread_pool_(thread_pool) {
-  // Get references to function-local statics (safe initialization)
+  // Reset only this thread's reusable scratch vectors.
   auto& perf_cache = get_perf_cache();
   perf_cache.memory_pool.reset();
 }
@@ -67,7 +66,7 @@ OneRecBatchInputBuilder::OneRecBatchInputBuilder(
 ForwardInput OneRecBatchInputBuilder::build_rec_forward_input(
     uint32_t num_decoding_tokens,
     uint32_t min_decoding_batch_size) {
-  // Get reference to function-local static cache (safe initialization)
+  // Get this thread's reusable scratch cache.
   auto& perf_cache = get_perf_cache();
 
   // ========== Global constant cache ==========

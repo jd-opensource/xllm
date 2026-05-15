@@ -63,6 +63,8 @@ constexpr const char* kOnerecXAttentionSerializePrepareEnv =
     "XLLM_ONEREC_XATTN_SERIALIZE_PREPARE";
 constexpr const char* kOnerecXAttentionSerializeModelForwardEnv =
     "XLLM_ONEREC_XATTN_SERIALIZE_MODEL_FORWARD";
+constexpr const char* kOnerecXAttentionLockTimingEnv =
+    "XLLM_DEBUG_ONEREC_XATTN_LOCK_TIMING";
 
 RecVocabDict* get_onerec_vocab_dict(const std::string& model_weights_path) {
   if (model_weights_path.empty()) {
@@ -91,6 +93,12 @@ bool enable_onerec_selected_token_cpu_check() {
 
 bool enable_onerec_xattention_stage_timing() {
   return util::get_bool_env("XLLM_DEBUG_ONEREC_XATTN_STAGE_TIMING", false);
+}
+
+bool enable_onerec_xattention_lock_timing() {
+  static const bool enable_lock_timing =
+      util::get_bool_env(kOnerecXAttentionLockTimingEnv, false);
+  return enable_lock_timing;
 }
 
 bool enable_rec_pipeline_concurrency_debug() {
@@ -1124,10 +1132,37 @@ void RecWorkerImpl::OneRecXAttentionWorkPipeline::prepare_work_before_execute(
     ForwardInput& processed_inputs) {
   std::unique_lock<std::mutex> prepare_lock(
       runtime_.worker.onerec_xattention_prepare_mutex_, std::defer_lock);
-  if (should_serialize_onerec_xattention_prepare(
-          runtime_.worker.options_.rec_worker_max_concurrency())) {
-    prepare_lock.lock();
+  const bool serialize_prepare = should_serialize_onerec_xattention_prepare(
+      runtime_.worker.options_.rec_worker_max_concurrency());
+  const bool trace_lock_timing = enable_onerec_xattention_lock_timing();
+  double prepare_lock_wait_us = 0.0;
+  std::optional<Timer> prepare_lock_wait_timer;
+  if (trace_lock_timing) {
+    prepare_lock_wait_timer.emplace();
   }
+  if (serialize_prepare) {
+    prepare_lock.lock();
+    if (prepare_lock_wait_timer.has_value()) {
+      prepare_lock_wait_us = prepare_lock_wait_timer->elapsed_microseconds();
+    }
+  }
+  std::optional<Timer> prepare_lock_hold_timer;
+  if (trace_lock_timing) {
+    prepare_lock_hold_timer.emplace();
+  }
+  SCOPE_GUARD([&] {
+    if (!trace_lock_timing) {
+      return;
+    }
+    const double prepare_elapsed_us =
+        prepare_lock_hold_timer->elapsed_microseconds();
+    LOG(INFO) << "OneRec xattention lock timing, stage=prepare, serialize="
+              << serialize_prepare << ", wait_us=" << prepare_lock_wait_us
+              << ", elapsed_us=" << prepare_elapsed_us << ", lock_hold_us="
+              << (serialize_prepare ? prepare_elapsed_us : 0.0)
+              << ", max_concurrency="
+              << runtime_.worker.options_.rec_worker_max_concurrency();
+  });
 
   const bool trace_stage_timing = enable_onerec_xattention_stage_timing();
   Timer prepare_timer;
@@ -1140,7 +1175,20 @@ void RecWorkerImpl::OneRecXAttentionWorkPipeline::prepare_work_before_execute(
               << ", elapsed_us=" << prepare_timer.elapsed_microseconds();
     prepare_timer.reset();
   };
+  std::optional<Timer> prepare_host_timer;
+  if (trace_lock_timing) {
+    prepare_host_timer.emplace();
+  }
+  auto log_prepare_host_timing = [&](const char* stage_name) {
+    if (!trace_lock_timing) {
+      return;
+    }
+    LOG(INFO) << "OneRec xattention prepare host timing, stage=" << stage_name
+              << ", elapsed_us=" << prepare_host_timer->elapsed_microseconds();
+    prepare_host_timer->reset();
+  };
   RecWorkPipeline::prepare_work_before_execute(inputs, processed_inputs);
+  log_prepare_host_timing("base_to_device");
   log_prepare_timing("base_to_device");
 
 #if defined(USE_NPU)
@@ -1225,6 +1273,7 @@ void RecWorkerImpl::OneRecXAttentionWorkPipeline::prepare_work_before_execute(
                     torch::TensorOptions()
                         .dtype(torch::kInt32)
                         .device(runtime_.worker.device()));
+  log_prepare_host_timing("cache_prepare");
   log_prepare_timing("cache_prepare");
 
   const int32_t beam_width =
@@ -1253,18 +1302,21 @@ void RecWorkerImpl::OneRecXAttentionWorkPipeline::prepare_work_before_execute(
   }
 
   if (!onerec_params.decoder_context_embedding.defined()) {
+    log_prepare_host_timing("metadata_prepare");
     log_prepare_timing("metadata_prepare");
     return;
   }
 
   if (onerec_params.decoder_context_embedding.scalar_type() ==
       runtime_.worker.dtype()) {
+    log_prepare_host_timing("metadata_prepare");
     log_prepare_timing("metadata_prepare");
     return;
   }
 
   onerec_params.decoder_context_embedding =
       onerec_params.decoder_context_embedding.to(runtime_.worker.dtype());
+  log_prepare_host_timing("metadata_prepare");
   log_prepare_timing("metadata_prepare");
 }
 
@@ -1454,12 +1506,43 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
       std::unique_lock<std::mutex> forward_lock(
           runtime_.worker.onerec_xattention_model_forward_mutex_,
           std::defer_lock);
-      if (should_serialize_onerec_xattention_model_forward(
-              runtime_.worker.options_.rec_worker_max_concurrency())) {
-        forward_lock.lock();
+      const bool serialize_model_forward =
+          should_serialize_onerec_xattention_model_forward(
+              runtime_.worker.options_.rec_worker_max_concurrency());
+      const bool trace_lock_timing = enable_onerec_xattention_lock_timing();
+      double forward_lock_wait_us = 0.0;
+      std::optional<Timer> forward_lock_wait_timer;
+      if (trace_lock_timing) {
+        forward_lock_wait_timer.emplace();
       }
-      return runtime_.executor->forward(
+      if (serialize_model_forward) {
+        forward_lock.lock();
+        if (forward_lock_wait_timer.has_value()) {
+          forward_lock_wait_us =
+              forward_lock_wait_timer->elapsed_microseconds();
+        }
+      }
+      std::optional<Timer> forward_lock_hold_timer;
+      if (trace_lock_timing) {
+        forward_lock_hold_timer.emplace();
+      }
+      auto model_output = runtime_.executor->forward(
           tokens, positions, runtime_.worker.kv_caches_, params);
+      if (trace_lock_timing) {
+        const double forward_elapsed_us =
+            forward_lock_hold_timer->elapsed_microseconds();
+        LOG(INFO) << "OneRec xattention lock timing, stage=model_forward, "
+                  << "serialize=" << serialize_model_forward
+                  << ", wait_us=" << forward_lock_wait_us
+                  << ", elapsed_us=" << forward_elapsed_us << ", lock_hold_us="
+                  << (serialize_model_forward ? forward_elapsed_us : 0.0)
+                  << ", max_concurrency="
+                  << runtime_.worker.options_.rec_worker_max_concurrency()
+                  << ", round=" << get_onerec_decode_round(*round_params)
+                  << ", rec_stage="
+                  << static_cast<int32_t>(round_params->rec_stage);
+      }
+      return model_output;
     };
 
     torch::Tensor hidden_states;

@@ -42,6 +42,14 @@ namespace xllm {
 namespace {
 
 constexpr int64_t kMinimalOneRecMetadataKVBlocks = 2;
+constexpr const char* kOnerecXAttentionLockTimingEnv =
+    "XLLM_DEBUG_ONEREC_XATTN_LOCK_TIMING";
+
+bool enable_onerec_xattention_lock_timing() {
+  static const bool enable_lock_timing =
+      util::get_bool_env(kOnerecXAttentionLockTimingEnv, false);
+  return enable_lock_timing;
+}
 
 }  // namespace
 
@@ -828,7 +836,12 @@ ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::step(
 
   Timer timer;
   auto forward_inputs = engine_.workers_[0]->prepare_inputs(batches[0]);
-  COUNTER_ADD(prepare_input_latency_microseconds, timer.elapsed_microseconds());
+  const double prepare_inputs_us = timer.elapsed_microseconds();
+  COUNTER_ADD(prepare_input_latency_microseconds, prepare_inputs_us);
+  if (enable_onerec_xattention_lock_timing()) {
+    LOG(INFO) << "OneRec xattention engine host timing, "
+              << "stage=prepare_inputs, elapsed_us=" << prepare_inputs_us;
+  }
 
   if (!forward_inputs.token_ids.defined()) {
     return {};
@@ -836,8 +849,12 @@ ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::step(
 
   timer.reset();
   const auto& output = get_model_output(forward_inputs);
-  COUNTER_ADD(rec_first_token_latency_microseconds,
-              timer.elapsed_microseconds());
+  const double model_output_us = timer.elapsed_microseconds();
+  COUNTER_ADD(rec_first_token_latency_microseconds, model_output_us);
+  if (enable_onerec_xattention_lock_timing()) {
+    LOG(INFO) << "OneRec xattention engine host timing, "
+              << "stage=get_model_output, elapsed_us=" << model_output_us;
+  }
 
   timer.reset();
   if (output.beam_sequence_group.defined() &&
@@ -846,7 +863,12 @@ ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::step(
   } else {
     batches[0].process_sample_output(output.sample_output, false);
   }
-  COUNTER_ADD(rec_sampling_latency_microseconds, timer.elapsed_microseconds());
+  const double process_output_us = timer.elapsed_microseconds();
+  COUNTER_ADD(rec_sampling_latency_microseconds, process_output_us);
+  if (enable_onerec_xattention_lock_timing()) {
+    LOG(INFO) << "OneRec xattention engine host timing, "
+              << "stage=process_output, elapsed_us=" << process_output_us;
+  }
 
   batches[0].finish();
   return output;
@@ -858,6 +880,7 @@ ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::get_model_output(
       util::get_bool_env("XLLM_DEBUG_ONEREC_ENGINE_TRACE", false);
   const bool trace_stage_timing =
       util::get_bool_env("XLLM_DEBUG_ONEREC_XATTN_STAGE_TIMING", false);
+  const bool trace_lock_timing = enable_onerec_xattention_lock_timing();
   Timer engine_timer;
   auto log_engine_stage = [&](const char* stage_name,
                               const torch::Tensor& tensor = torch::Tensor()) {
@@ -869,10 +892,10 @@ ForwardOutput RecEngine::OneRecXAttentionEnginePipeline::get_model_output(
               << (tensor.defined() ? tensor.sizes() : c10::IntArrayRef{});
   };
   auto log_engine_timing = [&](const char* stage_name) {
-    if (!trace_stage_timing) {
+    if (!trace_stage_timing && !trace_lock_timing) {
       return;
     }
-    LOG(INFO) << "OneRec xattention engine timing, stage=" << stage_name
+    LOG(INFO) << "OneRec xattention engine host timing, stage=" << stage_name
               << ", elapsed_us=" << engine_timer.elapsed_microseconds();
     engine_timer.reset();
   };
