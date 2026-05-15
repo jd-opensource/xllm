@@ -237,12 +237,14 @@ DeepSeekV4KVCacheTensors create_deepseek_v4_kv_cache_tensors(
 
   const torch::TensorOptions cache_options =
       torch::dtype(create_options.dtype()).device(create_options.device());
+  const DeepSeekV4CachePolicy cache_policy =
+      get_dsv4_cache_policy(create_options.dtype());
   const torch::TensorOptions index_options =
-      torch::dtype(torch::kInt8).device(create_options.device());
+      torch::dtype(cache_policy.index_dtype).device(create_options.device());
   const torch::TensorOptions state_options =
       torch::dtype(torch::kFloat32).device(create_options.device());
   const torch::TensorOptions scale_options =
-      torch::dtype(torch::kFloat16).device(create_options.device());
+      torch::dtype(cache_policy.scale_dtype).device(create_options.device());
 
   DeepSeekV4KVCacheTensors tensors;
   if (compress_ratio == 1) {
@@ -253,8 +255,10 @@ DeepSeekV4KVCacheTensors create_deepseek_v4_kv_cache_tensors(
         torch::empty({c4_count, block_size, n_heads, head_dim}, cache_options);
     tensors.index_cache = torch::empty(
         {c4_count, block_size, index_n_heads, index_head_dim}, index_options);
-    tensors.indexer_cache_scale =
-        torch::empty({c4_count, block_size, 1}, scale_options);
+    if (cache_policy.has_indexer_cache_scale) {
+      tensors.indexer_cache_scale =
+          torch::empty({c4_count, block_size, 1}, scale_options);
+    }
     tensors.swa_cache =
         torch::empty({swa_count, block_size, n_heads, head_dim}, cache_options);
     tensors.compress_kv_state =

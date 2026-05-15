@@ -620,11 +620,16 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     const int64_t token_mem = std::max(
         int64_t(0), kv_cache_cap.cache_size_in_bytes() - constant_swa_bytes);
 
-    // 3) bytes per token block (per layer): c4 = key+index+scale; c128 = key
-    // only
+    // 3) bytes per token block (per layer): c4 = key+index+optional scale;
+    // c128 = key only.
+    const DeepSeekV4CachePolicy cache_policy = get_dsv4_cache_policy(dtype_);
+    const int64_t scale_bytes = cache_policy.has_indexer_cache_scale
+                                    ? cache_policy.scale_dtype_size
+                                    : 0;
     const int64_t bytes_per_c4_block =
         block_size *
-        (head_dim * dtype_size + index_head_dim * 1 + 2 * 2);  // scale float16
+        (head_dim * dtype_size +
+         index_head_dim * cache_policy.index_dtype_size + scale_bytes);
     const int64_t bytes_per_c128_block = block_size * head_dim * dtype_size;
 
     kv_cache_cap.c4_count(0);
