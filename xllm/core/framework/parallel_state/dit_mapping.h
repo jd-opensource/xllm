@@ -47,7 +47,8 @@ class DiTMapping final {
   void validate();
 
   void set_group_by_type(ParallelInfo& parallel_info,
-                         const std::string& group_type);
+                         const std::string& group_type,
+                         std::vector<std::vector<int32_t>> rank_per_group);
 
   std::tuple<int32_t, int32_t> get_current_group_id(
       const std::vector<std::vector<int>>& rank_per_group,
@@ -67,6 +68,5 @@ class DiTMapping final {
   ParallelInfo tp_ = ParallelInfo();
   ParallelInfo cfg_ = ParallelInfo();
   ParallelInfo dp_ = ParallelInfo();
-  std::unique_ptr<RankGenerator> rank_generator_{nullptr};
 };
 }  // namespace xllm

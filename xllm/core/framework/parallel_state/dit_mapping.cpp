@@ -19,6 +19,8 @@ limitations under the License.
 
 namespace xllm {
 
+bool RankGenerator::initialized_ = false;
+
 DiTMapping::DiTMapping(const int32_t world_size,
                        const int32_t rank,
                        const Options& options)
@@ -29,16 +31,17 @@ DiTMapping::DiTMapping(const int32_t world_size,
   dp_.backend("hccl");
   parse_parallel_info();
   validate();
-  rank_generator_ =
-      std::make_unique<RankGenerator>(tp_.group_size(),
-                                      sp_.group_size(),
-                                      cfg_.group_size(),
-                                      dp_.group_size(),
-                                      /*group_order=*/"tp-sp-cfg-dp");
-  set_group_by_type(tp_, "tp");
-  set_group_by_type(sp_, "sp");
-  set_group_by_type(cfg_, "cfg");
-  set_group_by_type(dp_, "dp");
+  RankGenerator::init(world_size);
+  std::vector<int32_t> group_ranks = {
+      tp_.group_size(), sp_.group_size(), cfg_.group_size(), dp_.group_size()};
+  std::vector<std::string> group_order = {"tp", "sp", "cfg", "dp"};
+  auto ranks_mapping =
+      RankGenerator::getInstance().get_ranks_mapping(group_ranks, group_order);
+
+  set_group_by_type(tp_, "tp", ranks_mapping->at("tp"));
+  set_group_by_type(sp_, "sp", ranks_mapping->at("sp"));
+  set_group_by_type(cfg_, "cfg", ranks_mapping->at("cfg"));
+  set_group_by_type(dp_, "dp", ranks_mapping->at("dp"));
 }
 
 void DiTMapping::parse_parallel_info() {
@@ -84,9 +87,10 @@ void DiTMapping::validate() {
                                        ". Please check `cfg` .";
 }
 
-void DiTMapping::set_group_by_type(ParallelInfo& parallel_info,
-                                   const std::string& group_type) {
-  auto rank_per_group = rank_generator_->get_ranks(group_type);
+void DiTMapping::set_group_by_type(
+    ParallelInfo& parallel_info,
+    const std::string& group_type,
+    std::vector<std::vector<int32_t>> rank_per_group) {
   parallel_info.rank_per_group(rank_per_group);
   auto group_size = rank_per_group[0].size();
   parallel_info.num_group(world_size_ / group_size);
