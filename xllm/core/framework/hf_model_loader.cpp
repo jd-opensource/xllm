@@ -786,11 +786,19 @@ bool HFModelLoader::load_quant_args(const std::string& model_weights_path) {
     return false;
   }
 
+  const auto& config_data = reader.data();
+  const bool has_quantization_config =
+      config_data.contains("quantization_config") &&
+      config_data["quantization_config"].is_object();
+
   // load quantization args for npu if exists
   if (config_reader.contains("quantize")) {
     quant_args_.quantize_type() =
         config_reader.value_or<std::string>("quantize", "");
   }
+  const bool has_explicit_quantize = !quant_args_.quantize_type().empty();
+  const bool has_explicit_quant_config =
+      has_explicit_quantize || has_quantization_config;
   if (config_reader.contains("torch_dtype")) {
     quant_args_.torch_dtype() =
         config_reader.value_or<std::string>("torch_dtype", "");
@@ -819,7 +827,16 @@ bool HFModelLoader::load_quant_args(const std::string& model_weights_path) {
   JsonReader quant_desc_reader;
   const std::string quant_desc_file_path =
       model_weights_path + "/quant_model_description.json";
-  if (quant_desc_reader.parse(quant_desc_file_path)) {
+  const bool has_external_quant_config =
+      std::filesystem::exists(model_weights_path + "/quant_config.json") ||
+      std::filesystem::exists(model_weights_path + "/quantize_config.json");
+  const bool can_load_quant_desc =
+      has_explicit_quant_config || has_external_quant_config;
+  if (!can_load_quant_desc && std::filesystem::exists(quant_desc_file_path)) {
+    LOG(WARNING) << "Ignoring " << quant_desc_file_path
+                 << " because no explicit quantization config was found.";
+  }
+  if (can_load_quant_desc && quant_desc_reader.parse(quant_desc_file_path)) {
     std::unordered_map<std::string, std::string> quant_descs;
     const auto quant_desc_data = quant_desc_reader.data();
     bool desc_model_quant_is_w4a8_dynamic = false;
