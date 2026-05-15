@@ -36,7 +36,8 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/version_singleton.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/model_config.h"
+#include "core/framework/config/rec_config.h"
 #include "core/framework/state_dict/rec_vocab_dict.h"
 #include "core/framework/state_dict/safetensors/safetensors.h"
 #include "core/framework/tokenizer/fast_tokenizer.h"

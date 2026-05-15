@@ -20,7 +20,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/instance_name.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/model_config.h"
 #include "core/util/uuid.h"
 #include "request.h"
 

@@ -19,7 +19,7 @@ limitations under the License.
 #include <limits>
 
 #include "common/metrics.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "framework/batch/batch_factory.h"
 #include "util/timer.h"
 #include "util/utils.h"

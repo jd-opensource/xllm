@@ -26,7 +26,6 @@ limitations under the License.
 #include <vector>
 
 #include "common/types.h"
-#include "core/framework/config/xllm_config.h"
 #include "options.h"
 #include "phy_page.h"
 #include "xtensor.h"

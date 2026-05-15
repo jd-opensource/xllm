@@ -23,7 +23,8 @@ limitations under the License.
 #include <set>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/parallel_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/util/rec_model_utils.h"
 namespace xllm {
 namespace layer {

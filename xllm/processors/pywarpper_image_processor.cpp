@@ -20,7 +20,7 @@ limitations under the License.
 
 #include "butil/synchronization/lock.h"
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/model_config.h"
 
 namespace py = pybind11;
 

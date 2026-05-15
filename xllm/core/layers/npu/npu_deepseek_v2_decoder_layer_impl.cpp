@@ -21,7 +21,11 @@ limitations under the License.
 #include <utility>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "layers/common/rotary_embedding_util.h"
 #include "loader/deepseek_v2_decoder_loader.h"
 

@@ -19,7 +19,7 @@ limitations under the License.
 
 #include <cmath>
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/kv_cache_config.h"
 #include "kernels/ops_api.h"
 
 namespace {

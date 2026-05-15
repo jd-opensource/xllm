@@ -25,7 +25,9 @@ limitations under the License.
 #include <vector>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "framework/parallel_state/npu_cp_prepare.h"
 #include "layers/common/rotary_embedding_util.h"
 #include "loader/deepseek_v32_decoder_loader.h"

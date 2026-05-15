@@ -23,7 +23,7 @@ limitations under the License.
 #include <torch_npu/csrc/framework/utils/OpPreparation.h>
 #endif
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/execution_config.h"
 
 namespace xllm {
 namespace layer {

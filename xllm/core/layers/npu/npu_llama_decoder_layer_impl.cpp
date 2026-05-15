@@ -21,7 +21,8 @@ limitations under the License.
 #include <map>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/layers/common/attention_mask.h"
 #include "loader/llama_decoder_loader.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"

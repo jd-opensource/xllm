@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <tuple>
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "kernels/ops_api.h"
 
 namespace xllm {

@@ -27,7 +27,7 @@ limitations under the License.
 #include "common/interruption_bus.h"
 #include "common/macros.h"
 #include "core/distributed_runtime/pd_ooc_service.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/disagg_pd_config.h"
 #include "disagg_pd.pb.h"
 #include "distributed_runtime/engine.h"
 #include "framework/batch/batch_factory.h"

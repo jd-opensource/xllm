@@ -20,7 +20,8 @@ limitations under the License.
 #include <c10d/TCPStore.hpp>
 #include <torch_npu/csrc/distributed/ProcessGroupHCCL.hpp>
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/dit_config.h"
+#include "core/framework/config/eplb_config.h"
 #include "npu_rank_table_env.h"
 #include "platform/device.h"
 

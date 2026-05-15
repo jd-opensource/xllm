@@ -23,7 +23,7 @@ limitations under the License.
 #include <iterator>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/model_config.h"
 #include "core/util/http_downloader.h"
 #include "mm_codec.h"
 #include "mm_embedding_handler.h"

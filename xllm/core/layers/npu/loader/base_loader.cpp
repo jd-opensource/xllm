@@ -16,7 +16,7 @@ limitations under the License.
 #include "base_loader.h"
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/kv_cache_config.h"
 #include "framework/xtensor/xtensor_allocator.h"
 #include "rolling_weight_buffer.h"
 

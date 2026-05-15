@@ -16,7 +16,7 @@ limitations under the License.
 #include "executor.h"
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/execution_config.h"
 #include "executor_impl_factory.h"
 #include "platform/device.h"
 

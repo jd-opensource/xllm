@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/layers/common/rotary_embedding_util.h"
 #include "glm4_moe.h"
 #include "mtp_model_base.h"

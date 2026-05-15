@@ -27,7 +27,12 @@ limitations under the License.
 #include <limits>
 #include <stdexcept>
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/beam_search_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/model_config.h"
+#include "core/framework/config/rec_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/framework/model_loader.h"
 #include "core/util/rec_model_utils.h"
 #include "helper.h"
@@ -213,8 +218,6 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
             xllm_init_options.flashinfer_workspace_buffer_size));
     xllm::ExecutionConfig::get_instance().enable_graph(
         xllm_init_options.enable_graph);
-    xllm::XllmConfig::reload_from_configs();
-
     auto model_loader = xllm::ModelLoader::create(model_path);
     if (model_loader == nullptr) {
       LOG(ERROR) << "Failed to create model loader for path: " << model_path;
@@ -252,8 +255,6 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
 #if !defined(USE_NPU) && !defined(USE_CUDA)
     xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel(false);
 #endif
-    xllm::XllmConfig::reload_from_configs();
-
     // Keep dual-source settings aligned with the Config values above.
     options.enable_graph(::xllm::ExecutionConfig::get_instance().enable_graph())
         .beam_width(::xllm::BeamSearchConfig::get_instance().beam_width())

@@ -31,7 +31,9 @@ limitations under the License.
 #include "musa_process_group.h"
 #endif
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "parallel_args.h"
 #include "process_group.h"
 #include "util/net.h"

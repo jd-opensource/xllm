@@ -28,7 +28,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "core/framework/dit_cache/dit_cache.h"
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"

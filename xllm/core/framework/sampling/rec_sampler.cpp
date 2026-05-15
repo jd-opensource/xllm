@@ -23,7 +23,9 @@ limitations under the License.
 #include <tuple>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/beam_search_config.h"
+#include "core/framework/config/model_config.h"
+#include "core/framework/config/rec_config.h"
 #include "logits_utils.h"
 #include "sampler.h"
 #if defined(USE_CUDA)

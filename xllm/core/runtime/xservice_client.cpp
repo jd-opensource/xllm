@@ -24,7 +24,8 @@ limitations under the License.
 #include <algorithm>
 #include <unordered_map>
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/distributed_config.h"
+#include "core/framework/config/service_config.h"
 #include "util/env_var.h"
 #include "util/hash_util.h"
 #include "util/net.h"

@@ -22,7 +22,8 @@ limitations under the License.
 #include <map>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/scheduler_config.h"
 
 // #include "attn_mask.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"

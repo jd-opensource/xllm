@@ -20,7 +20,7 @@ limitations under the License.
 #include <mstx/ms_tools_ext.h>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/load_config.h"
 #include "xllm_atb_layers/models/glm4v/glm4v_encoder.h"
 
 namespace xllm {

@@ -28,7 +28,10 @@ limitations under the License.
 #include <sstream>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/disagg_pd_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/model_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request_state.h"
 #include "util/rec_model_utils.h"

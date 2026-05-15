@@ -16,7 +16,8 @@ limitations under the License.
 #include "scheduler/scheduler_factory.h"
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/parallel_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "scheduler/chunked_prefill_scheduler.h"
 #include "scheduler/continuous_scheduler.h"
 #include "scheduler/disagg_pd_chunked_prefill_scheduler.h"

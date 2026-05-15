@@ -18,7 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/distributed_config.h"
 #include "distributed_runtime/collective_service.h"
 #include "options.h"
 #include "remote_xtensor_manager.h"

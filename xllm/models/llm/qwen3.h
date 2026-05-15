@@ -21,7 +21,7 @@ limitations under the License.
 #include "core/util/rec_model_utils.h"
 #if defined(USE_NPU)
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/layers/common/attention_mask.h"
 #endif
 #include "core/layers/qwen3_decoder_layer.h"

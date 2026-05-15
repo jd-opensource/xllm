@@ -18,7 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/kv_cache_config.h"
 #include "core/util/tensor_helper.h"
 #include "phy_page_pool.h"
 #include "platform/vmm_api.h"

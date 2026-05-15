@@ -14,7 +14,8 @@ limitations under the License.
 ==============================================================================*/
 #pragma once
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/dit_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "pipeline_qwenimage_base.h"
 #include "util/tensor_helper.h"

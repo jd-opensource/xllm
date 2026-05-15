@@ -18,7 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/execution_config.h"
 #include "cuda_ops_api.h"
 #include "global_capture_instance.h"
 

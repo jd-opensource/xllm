@@ -18,7 +18,7 @@ limitations under the License.
 #include <string>
 #include <unordered_map>
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/parallel_config.h"
 
 namespace xllm::dit {
 

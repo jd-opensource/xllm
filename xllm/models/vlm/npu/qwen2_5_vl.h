@@ -21,7 +21,7 @@ limitations under the License.
 
 #include <unordered_map>
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/model_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"

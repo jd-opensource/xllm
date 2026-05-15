@@ -18,7 +18,12 @@ limitations under the License.
 #include <boost/algorithm/string.hpp>
 #include <utility>
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/parallel_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "layers/common/rotary_embedding_util.h"
 
 namespace xllm {

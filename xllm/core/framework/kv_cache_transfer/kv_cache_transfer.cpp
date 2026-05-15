@@ -18,7 +18,8 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/disagg_pd_config.h"
+#include "core/framework/config/kv_cache_config.h"
 
 #if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>

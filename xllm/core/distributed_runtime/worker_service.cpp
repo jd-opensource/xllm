@@ -26,7 +26,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/distributed_runtime/comm_channel.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/eplb_config.h"
 #include "core/runtime/params_utils.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/request/sequence.h"

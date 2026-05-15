@@ -30,7 +30,7 @@ limitations under the License.
 #include "completion.pb.h"
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/rec_master.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/rec_config.h"
 #include "core/framework/request/request_output.h"
 
 #ifdef likely

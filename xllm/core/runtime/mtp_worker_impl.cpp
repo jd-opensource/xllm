@@ -20,7 +20,9 @@ limitations under the License.
 #if defined(USE_MLU)
 #include "framework/kv_cache_transfer/mooncake_kv_cache_transfer.h"
 #endif
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/disagg_pd_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/speculative_config.h"
 #include "framework/request/mm_data.h"
 #include "spec_input_builder.h"
 #include "util/env_var.h"

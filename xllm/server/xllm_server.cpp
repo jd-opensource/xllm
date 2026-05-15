@@ -23,7 +23,10 @@ limitations under the License.
 #include <csignal>
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/disagg_pd_config.h"
+#include "core/framework/config/distributed_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/service_config.h"
 #include "health_reporter.h"
 
 namespace xllm {

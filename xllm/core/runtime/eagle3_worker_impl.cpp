@@ -18,7 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/speculative_config.h"
 #include "framework/model_loader.h"
 
 namespace xllm {

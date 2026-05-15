@@ -22,7 +22,7 @@ limitations under the License.
 #include <unordered_set>
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/execution_config.h"
 #include "models.h"
 
 namespace {

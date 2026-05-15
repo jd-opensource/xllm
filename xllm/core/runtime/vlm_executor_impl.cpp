@@ -19,7 +19,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/execution_config.h"
 #include "framework/request/mm_data_visitor.h"
 #include "platform/device.h"
 

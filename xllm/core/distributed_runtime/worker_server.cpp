@@ -34,7 +34,10 @@ limitations under the License.
 #include <utility>
 
 #include "common/metrics.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/parallel_config.h"
+#include "core/framework/config/service_config.h"
 #if defined(USE_CUDA) || defined(USE_MLU)
 #include "core/platform/numa_utils.h"
 #endif
@@ -83,7 +86,6 @@ void WorkerServer::create_server(
   ExecutionConfig::get_instance().npu_kernel_backend(
       options.npu_kernel_backend());
 #endif
-  XllmConfig::reload_from_configs();
   Device device(d);
   device.set_device();
   LOG(INFO) << "Create worker server with device: " << device.index();

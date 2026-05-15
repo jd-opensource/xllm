@@ -18,7 +18,8 @@ limitations under the License.
 #include <algorithm>
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/rec_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/platform/device.h"
 #include "flashinfer_planinfo.h"
 #include "flashinfer_workspace.h"

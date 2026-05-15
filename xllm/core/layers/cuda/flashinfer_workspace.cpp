@@ -18,7 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/model_config.h"
 
 namespace xllm::layer::flashinfer {
 

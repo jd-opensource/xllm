@@ -19,7 +19,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/types.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/kv_cache_config.h"
 #include "distributed_runtime/llm_engine.h"
 #include "framework/request/request_output.h"
 #include "scheduler/disagg_pd_scheduler.h"

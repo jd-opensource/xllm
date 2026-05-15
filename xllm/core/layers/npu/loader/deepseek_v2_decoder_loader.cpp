@@ -16,7 +16,7 @@ limitations under the License.
 
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/eplb_config.h"
 #include "deepseek_decoder_loader_constants.h"
 
 namespace xllm {

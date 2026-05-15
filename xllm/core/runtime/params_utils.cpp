@@ -20,6 +20,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/macros.h"
 #include "common/metrics.h"
+#include "core/framework/config/eplb_config.h"
 #include "framework/request/mm_batch_data.h"
 #include "util/timer.h"
 #include "util/utils.h"

@@ -29,7 +29,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/dit_config.h"
 #include "core/framework/dit_model_loader.h"
 #include "core/platform/device.h"
 #include "framework/dit_cache/dit_cache.h"

@@ -24,7 +24,7 @@ limitations under the License.
 #include <utility>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/beam_search_config.h"
 #include "cuda.h"
 #include "topk_last_dim.cuh"
 

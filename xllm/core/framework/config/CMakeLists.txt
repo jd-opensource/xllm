@@ -20,7 +20,6 @@ cc_library(
     scheduler_config.h
     service_config.h
     speculative_config.h
-    xllm_config.h
   SRCS
     beam_search_config.cpp
     kv_cache_config.cpp
@@ -38,7 +37,6 @@ cc_library(
     scheduler_config.cpp
     service_config.cpp
     speculative_config.cpp
-    xllm_config.cpp
   DEPS
     gflags::gflags
 )

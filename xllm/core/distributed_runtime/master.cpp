@@ -33,7 +33,10 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/common/xllm_build_info.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "dit_master.h"
 #if defined(USE_NPU)
 #include "framework/parallel_state/npu_rank_table_env.h"
@@ -194,7 +197,6 @@ Master::Master(const Options& options, EngineType type)
     LOG(FATAL)
         << "Multi-stream parallel is refactoring now, will be supported later.";
   }
-  XllmConfig::reload_from_configs();
   // construct engine
   const auto devices =
       DeviceNameUtils::parse_devices(options_.devices().value_or("auto"));

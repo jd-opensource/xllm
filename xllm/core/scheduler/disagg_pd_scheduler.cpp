@@ -25,7 +25,10 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/macros.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/disagg_pd_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/scheduler_config.h"
+#include "core/framework/config/service_config.h"
 #include "disagg_pd.pb.h"
 #include "disagg_pd_scheduler.h"
 #include "distributed_runtime/engine.h"

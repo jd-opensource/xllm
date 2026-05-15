@@ -19,7 +19,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/eplb_config.h"
 #include "util/tensor_helper.h"
 
 namespace xllm {

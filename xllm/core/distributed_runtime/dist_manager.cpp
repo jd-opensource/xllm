@@ -19,7 +19,7 @@ limitations under the License.
 
 #include "comm_channel.h"
 #include "common/health_check_manager.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/service_config.h"
 #include "distributed_runtime/collective_service.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/parallel_state/parallel_state.h"

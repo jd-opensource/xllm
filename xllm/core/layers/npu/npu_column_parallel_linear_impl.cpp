@@ -16,7 +16,8 @@ limitations under the License.
 #include "layers/npu/npu_column_parallel_linear_impl.h"
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/parallel_config.h"
 namespace xllm {
 namespace layer {
 

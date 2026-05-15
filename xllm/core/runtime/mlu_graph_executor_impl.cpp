@@ -23,7 +23,8 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "framework/model/causal_vlm.h"
 #include "util/utils.h"
 #include "vlm_executor_impl.h"

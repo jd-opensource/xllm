@@ -33,7 +33,22 @@ limitations under the License.
 #include "core/common/types.h"
 #include "core/distributed_runtime/dit_master.h"
 #include "core/distributed_runtime/master.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/beam_search_config.h"
+#include "core/framework/config/disagg_pd_config.h"
+#include "core/framework/config/distributed_config.h"
+#include "core/framework/config/dit_config.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/kv_cache_store_config.h"
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/model_config.h"
+#include "core/framework/config/parallel_config.h"
+#include "core/framework/config/profile_config.h"
+#include "core/framework/config/rec_config.h"
+#include "core/framework/config/scheduler_config.h"
+#include "core/framework/config/service_config.h"
+#include "core/framework/config/speculative_config.h"
 #include "core/framework/xtensor/global_xtensor.h"
 #include "core/framework/xtensor/options.h"
 #include "core/framework/xtensor/xtensor_allocator.h"
@@ -96,134 +111,135 @@ void fix_mlu_disagg_pd_config() {
   }
 }
 
-Options create_options(const XllmConfig& config,
-                       const std::string& instance_name,
-                       bool is_local) {
+Options create_options(const std::string& instance_name, bool is_local) {
+  const ServiceConfig& service_config = ServiceConfig::get_instance();
+  const ModelConfig& model_config = ModelConfig::get_instance();
+  const KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
+  const KVCacheStoreConfig& kv_cache_store_config =
+      KVCacheStoreConfig::get_instance();
+  const BeamSearchConfig& beam_search_config = BeamSearchConfig::get_instance();
+  const SchedulerConfig& scheduler_config = SchedulerConfig::get_instance();
+  const ParallelConfig& parallel_config = ParallelConfig::get_instance();
+  const EPLBConfig& eplb_config = EPLBConfig::get_instance();
+  const DistributedConfig& distributed_config =
+      DistributedConfig::get_instance();
+  const DisaggPDConfig& disagg_pd_config = DisaggPDConfig::get_instance();
+  const SpeculativeConfig& speculative_config =
+      SpeculativeConfig::get_instance();
+  const ProfileConfig& profile_config = ProfileConfig::get_instance();
+  const ExecutionConfig& execution_config = ExecutionConfig::get_instance();
+  const DiTConfig& dit_config = DiTConfig::get_instance();
+  const RecConfig& rec_config = RecConfig::get_instance();
+
   Options options;
 #if defined(USE_NPU)
-  options.npu_kernel_backend(config.execution_config().npu_kernel_backend());
+  options.npu_kernel_backend(execution_config.npu_kernel_backend());
 #endif
-  options.model_path(config.model_config().model())
-      .model_id(config.model_config().model_id())
-      .task_type(config.model_config().task())
-      .devices(config.model_config().devices())
-      .draft_model_path(config.speculative_config().draft_model())
-      .draft_devices(config.speculative_config().draft_devices())
-      .backend(config.model_config().backend())
-      .limit_image_per_prompt(config.model_config().limit_image_per_prompt())
-      .block_size(config.kv_cache_config().block_size())
-      .max_cache_size(config.kv_cache_config().max_cache_size())
-      .max_memory_utilization(config.kv_cache_config().max_memory_utilization())
-      .enable_prefix_cache(config.kv_cache_config().enable_prefix_cache())
-      .max_tokens_per_batch(config.scheduler_config().max_tokens_per_batch())
-      .max_seqs_per_batch(config.scheduler_config().max_seqs_per_batch())
+  options.model_path(model_config.model())
+      .model_id(model_config.model_id())
+      .task_type(model_config.task())
+      .devices(model_config.devices())
+      .draft_model_path(speculative_config.draft_model())
+      .draft_devices(speculative_config.draft_devices())
+      .backend(model_config.backend())
+      .limit_image_per_prompt(model_config.limit_image_per_prompt())
+      .block_size(kv_cache_config.block_size())
+      .max_cache_size(kv_cache_config.max_cache_size())
+      .max_memory_utilization(kv_cache_config.max_memory_utilization())
+      .enable_prefix_cache(kv_cache_config.enable_prefix_cache())
+      .max_tokens_per_batch(scheduler_config.max_tokens_per_batch())
+      .max_seqs_per_batch(scheduler_config.max_seqs_per_batch())
       .max_tokens_per_chunk_for_prefill(
-          config.scheduler_config().max_tokens_per_chunk_for_prefill())
-      .num_speculative_tokens(
-          config.speculative_config().num_speculative_tokens())
-      .speculative_algorithm(
-          config.speculative_config().speculative_algorithm())
+          scheduler_config.max_tokens_per_chunk_for_prefill())
+      .num_speculative_tokens(speculative_config.num_speculative_tokens())
+      .speculative_algorithm(speculative_config.speculative_algorithm())
       .speculative_suffix_cache_max_depth(
-          config.speculative_config().speculative_suffix_cache_max_depth())
+          speculative_config.speculative_suffix_cache_max_depth())
       .speculative_suffix_max_spec_factor(
-          config.speculative_config().speculative_suffix_max_spec_factor())
+          speculative_config.speculative_suffix_max_spec_factor())
       .speculative_suffix_max_spec_offset(
-          config.speculative_config().speculative_suffix_max_spec_offset())
+          speculative_config.speculative_suffix_max_spec_offset())
       .speculative_suffix_min_token_prob(
-          config.speculative_config().speculative_suffix_min_token_prob())
+          speculative_config.speculative_suffix_min_token_prob())
       .speculative_suffix_max_cached_requests(
-          config.speculative_config().speculative_suffix_max_cached_requests())
+          speculative_config.speculative_suffix_max_cached_requests())
       .speculative_suffix_use_tree_spec(
-          config.speculative_config().speculative_suffix_use_tree_spec())
+          speculative_config.speculative_suffix_use_tree_spec())
       .num_request_handling_threads(
-          config.service_config().num_request_handling_threads())
-      .communication_backend(config.parallel_config().communication_backend())
-      .enable_eplb(config.eplb_config().enable_eplb())
-      .redundant_experts_num(config.eplb_config().redundant_experts_num())
-      .eplb_update_interval(config.eplb_config().eplb_update_interval())
-      .eplb_update_threshold(config.eplb_config().eplb_update_threshold())
-      .rank_tablefile(config.eplb_config().rank_tablefile())
-      .expert_parallel_degree(config.eplb_config().expert_parallel_degree())
-      .enable_chunked_prefill(
-          config.scheduler_config().enable_chunked_prefill())
-      .enable_prefill_sp(config.parallel_config().enable_prefill_sp())
-      .master_node_addr(config.distributed_config().master_node_addr())
-      .instance_role(InstanceRole(config.disagg_pd_config().instance_role()))
-      .device_ip(config.distributed_config().device_ip())
-      .transfer_listen_port(static_cast<uint16_t>(
-          config.disagg_pd_config().transfer_listen_port()))
-      .nnodes(config.distributed_config().nnodes())
-      .node_rank(config.distributed_config().node_rank())
-      .dp_size(config.parallel_config().dp_size())
-      .cp_size(config.parallel_config().cp_size())
-      .ep_size(config.parallel_config().ep_size())
-      .tp_size(static_cast<int32_t>(config.parallel_config().tp_size()))
-      .sp_size(static_cast<int32_t>(config.parallel_config().sp_size()))
-      .cfg_size(static_cast<int32_t>(config.parallel_config().cfg_size()))
+          service_config.num_request_handling_threads())
+      .communication_backend(parallel_config.communication_backend())
+      .enable_eplb(eplb_config.enable_eplb())
+      .redundant_experts_num(eplb_config.redundant_experts_num())
+      .eplb_update_interval(eplb_config.eplb_update_interval())
+      .eplb_update_threshold(eplb_config.eplb_update_threshold())
+      .rank_tablefile(eplb_config.rank_tablefile())
+      .expert_parallel_degree(eplb_config.expert_parallel_degree())
+      .enable_chunked_prefill(scheduler_config.enable_chunked_prefill())
+      .enable_prefill_sp(parallel_config.enable_prefill_sp())
+      .master_node_addr(distributed_config.master_node_addr())
+      .instance_role(InstanceRole(disagg_pd_config.instance_role()))
+      .device_ip(distributed_config.device_ip())
+      .transfer_listen_port(
+          static_cast<uint16_t>(disagg_pd_config.transfer_listen_port()))
+      .nnodes(distributed_config.nnodes())
+      .node_rank(distributed_config.node_rank())
+      .dp_size(parallel_config.dp_size())
+      .cp_size(parallel_config.cp_size())
+      .ep_size(parallel_config.ep_size())
+      .tp_size(static_cast<int32_t>(parallel_config.tp_size()))
+      .sp_size(static_cast<int32_t>(parallel_config.sp_size()))
+      .cfg_size(static_cast<int32_t>(parallel_config.cfg_size()))
       .instance_name(instance_name)
-      .enable_disagg_pd(config.disagg_pd_config().enable_disagg_pd())
-      .enable_pd_ooc(config.disagg_pd_config().enable_pd_ooc())
-      .enable_schedule_overlap(
-          config.scheduler_config().enable_schedule_overlap())
-      .kv_cache_transfer_mode(
-          config.disagg_pd_config().kv_cache_transfer_mode())
-      .etcd_addr(config.distributed_config().etcd_addr())
-      .etcd_namespace(config.distributed_config().etcd_namespace())
-      .enable_service_routing(
-          config.distributed_config().enable_service_routing() ||
-          config.disagg_pd_config().enable_disagg_pd())
-      .tool_call_parser(config.model_config().tool_call_parser())
-      .reasoning_parser(config.model_config().reasoning_parser())
-      .priority_strategy(config.scheduler_config().priority_strategy())
+      .enable_disagg_pd(disagg_pd_config.enable_disagg_pd())
+      .enable_pd_ooc(disagg_pd_config.enable_pd_ooc())
+      .enable_schedule_overlap(scheduler_config.enable_schedule_overlap())
+      .kv_cache_transfer_mode(disagg_pd_config.kv_cache_transfer_mode())
+      .etcd_addr(distributed_config.etcd_addr())
+      .etcd_namespace(distributed_config.etcd_namespace())
+      .enable_service_routing(distributed_config.enable_service_routing() ||
+                              disagg_pd_config.enable_disagg_pd())
+      .tool_call_parser(model_config.tool_call_parser())
+      .reasoning_parser(model_config.reasoning_parser())
+      .priority_strategy(scheduler_config.priority_strategy())
       .enable_online_preempt_offline(
-          config.scheduler_config().enable_online_preempt_offline())
-      .enable_cache_upload(
-          (config.distributed_config().enable_service_routing() ||
-           config.disagg_pd_config().enable_disagg_pd()) &&
-          config.kv_cache_config().enable_prefix_cache() &&
-          config.kv_cache_store_config().enable_cache_upload())
-      .host_blocks_factor(config.kv_cache_store_config().host_blocks_factor())
-      .enable_kvcache_store(
-          config.kv_cache_store_config().enable_kvcache_store() &&
-          config.kv_cache_config().enable_prefix_cache() &&
-          (config.kv_cache_store_config().host_blocks_factor() > 1.0))
-      .prefetch_timeout(config.kv_cache_store_config().prefetch_timeout())
-      .prefetch_bacth_size(config.kv_cache_store_config().prefetch_bacth_size())
-      .layers_wise_copy_batchs(
-          config.kv_cache_store_config().layers_wise_copy_batchs())
-      .store_protocol(config.kv_cache_store_config().store_protocol())
+          scheduler_config.enable_online_preempt_offline())
+      .enable_cache_upload((distributed_config.enable_service_routing() ||
+                            disagg_pd_config.enable_disagg_pd()) &&
+                           kv_cache_config.enable_prefix_cache() &&
+                           kv_cache_store_config.enable_cache_upload())
+      .host_blocks_factor(kv_cache_store_config.host_blocks_factor())
+      .enable_kvcache_store(kv_cache_store_config.enable_kvcache_store() &&
+                            kv_cache_config.enable_prefix_cache() &&
+                            (kv_cache_store_config.host_blocks_factor() > 1.0))
+      .prefetch_timeout(kv_cache_store_config.prefetch_timeout())
+      .prefetch_bacth_size(kv_cache_store_config.prefetch_bacth_size())
+      .layers_wise_copy_batchs(kv_cache_store_config.layers_wise_copy_batchs())
+      .store_protocol(kv_cache_store_config.store_protocol())
       .store_master_server_address(
-          config.kv_cache_store_config().store_master_server_address())
-      .store_metadata_server(
-          config.kv_cache_store_config().store_metadata_server())
-      .store_local_hostname(
-          config.kv_cache_store_config().store_local_hostname())
+          kv_cache_store_config.store_master_server_address())
+      .store_metadata_server(kv_cache_store_config.store_metadata_server())
+      .store_local_hostname(kv_cache_store_config.store_local_hostname())
       .enable_multi_stream_parallel(
-          config.parallel_config().enable_multi_stream_parallel())
-      .enable_profile_step_time(
-          config.profile_config().enable_profile_step_time())
-      .enable_profile_token_budget(
-          config.profile_config().enable_profile_token_budget())
+          parallel_config.enable_multi_stream_parallel())
+      .enable_profile_step_time(profile_config.enable_profile_step_time())
+      .enable_profile_token_budget(profile_config.enable_profile_token_budget())
       .enable_latency_aware_schedule(
-          config.profile_config().enable_latency_aware_schedule())
-      .profile_max_prompt_length(
-          config.profile_config().profile_max_prompt_length())
-      .enable_profile_kv_blocks(
-          config.profile_config().enable_profile_kv_blocks())
-      .disable_ttft_profiling(config.profile_config().disable_ttft_profiling())
-      .enable_forward_interruption(
-          config.profile_config().enable_forward_interruption())
-      .enable_graph(config.execution_config().enable_graph())
-      .max_global_ttft_ms(config.profile_config().max_global_ttft_ms())
-      .max_global_tpot_ms(config.profile_config().max_global_tpot_ms())
-      .max_requests_per_batch(config.dit_config().max_requests_per_batch())
-      .enable_shm(config.execution_config().enable_shm())
-      .input_shm_size(config.execution_config().input_shm_size())
-      .output_shm_size(config.execution_config().output_shm_size())
-      .beam_width(config.beam_search_config().beam_width())
-      .kv_cache_dtype(config.kv_cache_config().kv_cache_dtype())
-      .rec_worker_max_concurrency(static_cast<int32_t>(
-          config.rec_config().rec_worker_max_concurrency()))
+          profile_config.enable_latency_aware_schedule())
+      .profile_max_prompt_length(profile_config.profile_max_prompt_length())
+      .enable_profile_kv_blocks(profile_config.enable_profile_kv_blocks())
+      .disable_ttft_profiling(profile_config.disable_ttft_profiling())
+      .enable_forward_interruption(profile_config.enable_forward_interruption())
+      .enable_graph(execution_config.enable_graph())
+      .max_global_ttft_ms(profile_config.max_global_ttft_ms())
+      .max_global_tpot_ms(profile_config.max_global_tpot_ms())
+      .max_requests_per_batch(dit_config.max_requests_per_batch())
+      .enable_shm(execution_config.enable_shm())
+      .input_shm_size(execution_config.input_shm_size())
+      .output_shm_size(execution_config.output_shm_size())
+      .beam_width(beam_search_config.beam_width())
+      .kv_cache_dtype(kv_cache_config.kv_cache_dtype())
+      .rec_worker_max_concurrency(
+          static_cast<int32_t>(rec_config.rec_worker_max_concurrency()))
       .is_local(is_local);
   return options;
 }
@@ -322,6 +338,7 @@ int run() {
   KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
   BeamSearchConfig& beam_search_config = BeamSearchConfig::get_instance();
   SchedulerConfig& scheduler_config = SchedulerConfig::get_instance();
+  ParallelConfig& parallel_config = ParallelConfig::get_instance();
   DistributedConfig& distributed_config = DistributedConfig::get_instance();
   ServiceConfig& service_config = ServiceConfig::get_instance();
   ExecutionConfig& execution_config = ExecutionConfig::get_instance();
@@ -392,19 +409,15 @@ int run() {
   }
 
   // Create Master
-  XllmConfig::reload_from_configs();
-  const XllmConfig& config = XllmConfig::get_instance();
-  Options options =
-      create_options(config,
-                     config.service_config().host() + ":" +
-                         std::to_string(config.service_config().port()),
-                     is_local);
+  Options options = create_options(
+      service_config.host() + ":" + std::to_string(service_config.port()),
+      is_local);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));
 
   // master node
   // init XTensor allocator and PhyPagePool for xtensor mode
-  if (config.kv_cache_config().enable_xtensor()) {
+  if (kv_cache_config.enable_xtensor()) {
     // Parse devices
     const auto devices =
         DeviceNameUtils::parse_devices(options.devices().value_or("auto"));
@@ -414,21 +427,21 @@ int run() {
     allocator.init(devices[0]);
 
     // Setup distributed XTensor service for multi-GPU/multi-node
-    if (config.distributed_config().nnodes() > 1) {
+    if (distributed_config.nnodes() > 1) {
       xtensor::Options xtensor_options;
       xtensor_options.devices(devices)
-          .nnodes(config.distributed_config().nnodes())
-          .node_rank(config.distributed_config().node_rank());
+          .nnodes(distributed_config.nnodes())
+          .node_rank(distributed_config.node_rank());
       allocator.setup_multi_node_xtensor_dist(
           xtensor_options,
-          config.distributed_config().xtensor_master_node_addr(),
-          config.parallel_config().dp_size());
+          distributed_config.xtensor_master_node_addr(),
+          parallel_config.dp_size());
     }
 
     // Initialize PhyPagePool on all workers
-    int64_t num_pages = allocator.init_phy_page_pools(
-        config.kv_cache_config().max_memory_utilization(),
-        config.kv_cache_config().max_cache_size());
+    int64_t num_pages =
+        allocator.init_phy_page_pools(kv_cache_config.max_memory_utilization(),
+                                      kv_cache_config.max_cache_size());
     if (num_pages <= 0) {
       LOG(FATAL) << "Failed to initialize PhyPagePool";
     }
@@ -438,24 +451,23 @@ int run() {
   std::unique_ptr<Master> master;
   // working node
   if (options.node_rank() != 0) {
-    if (config.model_config().backend() == "dit") {
+    if (model_config.backend() == "dit") {
       master = std::make_unique<DiTAssistantMaster>(options);
     } else {
       master = std::make_unique<LLMAssistantMaster>(options);
     }
   } else {
     // master node
-    master = create_master(config.model_config().backend(), options);
+    master = create_master(model_config.backend(), options);
   }
   master->run();
 
   // supported models
-  std::vector<std::string> model_names = {config.model_config().model_id()};
+  std::vector<std::string> model_names = {model_config.model_id()};
   std::string model_version = default_model_name;
   std::vector<std::string> model_versions = {model_version};
 
-  if (config.distributed_config().node_rank() == 0 ||
-      config.kv_cache_config().enable_xtensor()) {
+  if (distributed_config.node_rank() == 0 || kv_cache_config.enable_xtensor()) {
     auto api_service =
         std::make_unique<APIService>(master.get(), model_names, model_versions);
     auto xllm_server =
@@ -464,7 +476,7 @@ int run() {
     // start brpc server
     if (!xllm_server->start(std::move(api_service))) {
       LOG(ERROR) << "Failed to start brpc server on port "
-                 << config.service_config().port();
+                 << service_config.port();
       return -1;
     }
   }
@@ -485,7 +497,6 @@ int main(int argc, char** argv) {
   FLAGS_alsologtostderr = true;
   FLAGS_minloglevel = 0;
   google::ParseCommandLineFlags(&argc, &argv, true);
-  XllmConfig::reload_from_flags();
 
   google::InitGoogleLogging("xllm");
 

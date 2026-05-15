@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/dit_config.h"
 
 class RankGenerator {
  public:

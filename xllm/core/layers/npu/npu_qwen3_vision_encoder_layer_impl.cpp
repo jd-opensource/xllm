@@ -22,7 +22,7 @@ limitations under the License.
 #include <map>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/load_config.h"
 #include "torch_npu/csrc/core/npu/NPUCachingAllocator.h"
 #include "torch_npu/csrc/core/npu/NPUException.h"
 #include "xllm_atb_layers/models/qwen3_vl/qwen3_vl_encoder.h"

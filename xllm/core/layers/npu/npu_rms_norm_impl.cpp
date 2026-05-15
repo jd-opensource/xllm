@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/load_config.h"
 
 namespace xllm {
 namespace layer {

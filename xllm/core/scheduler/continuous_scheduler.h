@@ -27,7 +27,7 @@ limitations under the License.
 #include "async_response_processor.h"
 #include "common/macros.h"
 #include "common/types.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/rec_config.h"
 #include "framework/batch/batch.h"
 #include "framework/block/kv_cache_manager.h"
 #include "framework/request/priority_comparator.h"

@@ -30,7 +30,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/types.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/kv_cache_config.h"
 #include "virt_page.h"
 #include "xtensor.h"  // For offset_t type definition
 

@@ -18,7 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/execution_config.h"
 #include "platform/device.h"
 #include "util/env_var.h"
 #if defined(USE_NPU)

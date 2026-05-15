@@ -19,7 +19,7 @@ limitations under the License.
 #include <utility>
 
 #include "common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/eplb_config.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "platform/device.h"
 

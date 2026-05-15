@@ -19,7 +19,7 @@ limitations under the License.
 #include <string_view>
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/xllm_config.h"
+#include "core/framework/config/rec_config.h"
 
 namespace xllm {
 
