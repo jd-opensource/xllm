@@ -634,8 +634,8 @@ struct ModelInputParams {
   // Using shared_ptr with forward declaration to avoid circular dependency
   std::shared_ptr<layer::AttentionMetadata> attn_metadata;
 
-  // Flag for CUDA graph capture mode
-  bool enable_cuda_graph = false;
+  // Flag for graph capture/replay mode.
+  bool enable_graph = false;
 };
 
 }  // namespace xllm

@@ -15,7 +15,6 @@ limitations under the License.
 
 #pragma once
 
-#include <ATen/ops/cat.h>
 #include <absl/strings/str_join.h>
 #include <glog/logging.h>
 
@@ -184,10 +183,6 @@ inline void deepseek_v4_collect_cpu_metadata_tensors(
     }
   }
   deepseek_v4_add_packed_tensor(dsa.hadamard, runtime_device, specs);
-  deepseek_v4_add_packed_tensor(dsa.c1_metadata, runtime_device, specs);
-  deepseek_v4_add_packed_tensor(dsa.c4_metadata, runtime_device, specs);
-  deepseek_v4_add_packed_tensor(dsa.c128_metadata, runtime_device, specs);
-  deepseek_v4_add_packed_tensor(dsa.qli_metadata, runtime_device, specs);
 }
 
 inline size_t deepseek_v4_layout_packed_tensor_specs(
@@ -294,10 +289,24 @@ struct DeepseekV4GraphMetadataState : ModelGraphMetadataState {
   struct DSAMetadataPersistent {
     torch::Tensor packed_metadata_host_buffer;
     torch::Tensor packed_metadata_buffer;
-    torch::Tensor device_metadata_buffer;
-    torch::Tensor device_metadata_staging_buffer;
-    torch::Tensor device_metadata_zero_buffer;
-    std::vector<int64_t> device_metadata_layout_signature;
+    torch::Tensor attn_mask;
+    torch::Tensor cos_table;
+    torch::Tensor sin_table;
+    torch::Tensor cos;
+    torch::Tensor sin;
+    torch::Tensor c4_cos;
+    torch::Tensor c4_sin;
+    torch::Tensor c128_cos;
+    torch::Tensor c128_sin;
+    torch::Tensor c4_input_cos;
+    torch::Tensor c4_input_sin;
+    torch::Tensor c128_input_cos;
+    torch::Tensor c128_input_sin;
+    torch::Tensor start_pos;
+    torch::Tensor c1_metadata;
+    torch::Tensor c4_metadata;
+    torch::Tensor c128_metadata;
+    torch::Tensor qli_metadata;
   };
 
   DSAMetadataPersistent dsa_metadata_persistent;
@@ -542,13 +551,12 @@ class DeepseekV4ModelImpl
       if (dsa_hadamard_.defined()) {
         dsa.hadamard = dsa_hadamard_;
       }
-      build_precomputed_metadata(*attn_metadata->dsa_metadata,
-                                 modified_input_params,
-                                 /*force_cpu_output=*/true);
       copy_to_graph_packed_metadata_buffer(
           dsa, deepseek_v4_state->dsa_metadata_persistent, positions.device());
       prepare_dsa_metadata_for_forward(
           *attn_metadata, positions.device(), /*pack_metadata=*/false);
+      build_precomputed_metadata(*attn_metadata->dsa_metadata,
+                                 modified_input_params);
     }
     input_params.attn_metadata = persist_graph_attention_metadata(
         *deepseek_v4_state, std::move(attn_metadata));
@@ -819,191 +827,51 @@ class DeepseekV4ModelImpl
     return tensor_max_or_zero(fallback_tensor);
   }
 
-  struct DeepseekV4DeviceTensorSpec {
-    torch::Tensor src;
-    torch::Tensor* target = nullptr;
-    std::vector<int64_t> sizes;
-    torch::ScalarType dtype = torch::kUInt8;
-    size_t offset = 0;
-    size_t src_nbytes = 0;
-    size_t nbytes = 0;
-  };
-
-  static void add_device_metadata_tensor(
-      torch::Tensor& tensor,
-      std::vector<DeepseekV4DeviceTensorSpec>& specs,
-      int64_t fixed_numel = 0) {
-    if (!tensor.defined()) {
-      return;
+  static torch::Tensor copy_to_persistent_tensor(const torch::Tensor& src,
+                                                 torch::Tensor& dst) {
+    if (!src.defined()) {
+      return src;
     }
-    auto src = tensor.contiguous();
-    const int64_t target_numel = fixed_numel > 0 ? fixed_numel : src.numel();
-    CHECK_LE(src.numel(), target_numel)
-        << "DeepSeek V4 graph metadata exceeds persistent capacity: src="
-        << src.numel() << ", capacity=" << target_numel;
-    DeepseekV4DeviceTensorSpec spec;
-    spec.src = src;
-    spec.target = &tensor;
-    spec.sizes =
-        fixed_numel > 0 ? std::vector<int64_t>{fixed_numel} : src.sizes().vec();
-    spec.dtype = src.scalar_type();
-    spec.src_nbytes = static_cast<size_t>(src.numel() * src.element_size());
-    spec.nbytes = static_cast<size_t>(target_numel * src.element_size());
-    specs.push_back(std::move(spec));
-  }
-
-  static torch::Tensor make_packed_device_view(
-      const DeepseekV4DeviceTensorSpec& spec,
-      const torch::Tensor& device_buffer) {
-    const auto* device_ptr =
-        static_cast<const uint8_t*>(device_buffer.data_ptr());
-    return get_tensor_from_blob(
-        spec.sizes, spec.dtype, device_ptr + spec.offset);
-  }
-
-  static std::vector<int64_t> build_device_metadata_layout_signature(
-      const std::vector<DeepseekV4DeviceTensorSpec>& specs) {
-    std::vector<int64_t> signature;
-    for (const auto& spec : specs) {
-      signature.push_back(static_cast<int64_t>(spec.offset));
-      signature.push_back(static_cast<int64_t>(spec.nbytes));
-      signature.push_back(static_cast<int64_t>(spec.dtype));
-      signature.push_back(static_cast<int64_t>(spec.sizes.size()));
-      for (const auto size : spec.sizes) {
-        signature.push_back(size);
-      }
-    }
-    return signature;
-  }
-
-  static void pack_graph_device_metadata(
-      layer::DSAMetadata& dsa,
-      DeepseekV4GraphMetadataState::DSAMetadataPersistent& persistent) {
-    std::vector<DeepseekV4DeviceTensorSpec> specs;
-    add_device_metadata_tensor(dsa.attn_mask, specs);
-    add_device_metadata_tensor(dsa.cos_table, specs);
-    add_device_metadata_tensor(dsa.sin_table, specs);
-    add_device_metadata_tensor(dsa.cos, specs);
-    add_device_metadata_tensor(dsa.sin, specs);
-    add_device_metadata_tensor(dsa.c4_cos, specs);
-    add_device_metadata_tensor(dsa.c4_sin, specs);
-    add_device_metadata_tensor(dsa.c128_cos, specs);
-    add_device_metadata_tensor(dsa.c128_sin, specs);
-    add_device_metadata_tensor(dsa.c4_input_cos, specs);
-    add_device_metadata_tensor(dsa.c4_input_sin, specs);
-    add_device_metadata_tensor(dsa.c128_input_cos, specs);
-    add_device_metadata_tensor(dsa.c128_input_sin, specs);
-    add_device_metadata_tensor(dsa.start_pos, specs);
-
-    size_t total_bytes = 0;
-    for (auto& spec : specs) {
-      total_bytes = deepseek_v4_align_up(total_bytes, 64);
-      spec.offset = total_bytes;
-      total_bytes += spec.nbytes;
-    }
-    if (total_bytes == 0) {
-      return;
-    }
-    auto layout_signature = build_device_metadata_layout_signature(specs);
-
-    auto device_options = torch::TensorOptions()
-                              .dtype(torch::kUInt8)
-                              .device(specs.front().src.device());
-    if (!persistent.device_metadata_buffer.defined()) {
-      persistent.device_metadata_buffer =
-          torch::empty({static_cast<int64_t>(total_bytes)}, device_options);
-      persistent.device_metadata_staging_buffer =
-          torch::empty({static_cast<int64_t>(total_bytes)}, device_options);
-      persistent.device_metadata_zero_buffer =
-          torch::zeros({static_cast<int64_t>(total_bytes)}, device_options);
-      persistent.device_metadata_layout_signature = std::move(layout_signature);
+    if (!dst.defined()) {
+      dst = torch::zeros_like(src);
     } else {
-      CHECK_EQ(persistent.device_metadata_buffer.scalar_type(), torch::kUInt8)
-          << "DeepSeek V4 graph device metadata dtype changed";
-      CHECK_EQ(persistent.device_metadata_buffer.device(),
-               specs.front().src.device())
-          << "DeepSeek V4 graph device metadata device changed";
-      CHECK_EQ(persistent.device_metadata_buffer.numel(),
-               static_cast<int64_t>(total_bytes))
-          << "DeepSeek V4 graph device metadata buffer size changed: "
-          << "required=" << total_bytes
-          << ", capacity=" << persistent.device_metadata_buffer.numel();
-      CHECK(persistent.device_metadata_staging_buffer.defined())
-          << "DeepSeek V4 graph device metadata staging buffer is not "
-             "initialized";
-      CHECK_EQ(persistent.device_metadata_staging_buffer.scalar_type(),
-               torch::kUInt8)
-          << "DeepSeek V4 graph device metadata staging buffer dtype changed";
-      CHECK_EQ(persistent.device_metadata_staging_buffer.device(),
-               specs.front().src.device())
-          << "DeepSeek V4 graph device metadata staging buffer device changed";
-      CHECK_GE(persistent.device_metadata_staging_buffer.numel(),
-               static_cast<int64_t>(total_bytes))
-          << "DeepSeek V4 graph device metadata staging buffer is too small: "
-          << "required=" << total_bytes
-          << ", capacity=" << persistent.device_metadata_staging_buffer.numel();
-      CHECK(persistent.device_metadata_zero_buffer.defined())
-          << "DeepSeek V4 graph device metadata zero buffer is not initialized";
-      CHECK_EQ(persistent.device_metadata_zero_buffer.scalar_type(),
-               torch::kUInt8)
-          << "DeepSeek V4 graph device metadata zero buffer dtype changed";
-      CHECK_EQ(persistent.device_metadata_zero_buffer.device(),
-               specs.front().src.device())
-          << "DeepSeek V4 graph device metadata zero buffer device changed";
-      CHECK_GE(persistent.device_metadata_zero_buffer.numel(),
-               static_cast<int64_t>(total_bytes))
-          << "DeepSeek V4 graph device metadata zero buffer is too small: "
-          << "required=" << total_bytes
-          << ", capacity=" << persistent.device_metadata_zero_buffer.numel();
-      CHECK(persistent.device_metadata_layout_signature == layout_signature)
-          << "DeepSeek V4 graph device metadata layout changed";
+      CHECK(dst.sizes() == src.sizes())
+          << "DeepSeek V4 graph metadata tensor size changed from "
+          << dst.sizes() << " to " << src.sizes();
+      CHECK_EQ(dst.scalar_type(), src.scalar_type())
+          << "DeepSeek V4 graph metadata tensor dtype changed";
+      CHECK_EQ(dst.device(), src.device())
+          << "DeepSeek V4 graph metadata tensor device changed";
     }
+    dst.copy_(src, /*non_blocking=*/true);
+    return dst;
+  }
 
-    std::vector<torch::Tensor> packed_segments;
-    packed_segments.reserve(specs.size() * 2);
-    size_t packed_bytes = 0;
-    for (const auto& spec : specs) {
-      if (spec.offset > packed_bytes) {
-        packed_segments.push_back(persistent.device_metadata_zero_buffer.slice(
-            /*dim=*/0,
-            /*start=*/static_cast<int64_t>(packed_bytes),
-            /*end=*/static_cast<int64_t>(spec.offset)));
-        packed_bytes = spec.offset;
-      }
-      if (spec.nbytes == 0) {
-        continue;
-      }
-      if (spec.src_nbytes > 0) {
-        auto src_bytes = view_as_dtype(spec.src, torch::kUInt8).flatten(0);
-        packed_segments.push_back(src_bytes);
-      }
-      if (spec.nbytes > spec.src_nbytes) {
-        packed_segments.push_back(persistent.device_metadata_zero_buffer.slice(
-            /*dim=*/0,
-            /*start=*/0,
-            /*end=*/static_cast<int64_t>(spec.nbytes - spec.src_nbytes)));
-      }
-      packed_bytes = spec.offset + spec.nbytes;
-      *spec.target =
-          make_packed_device_view(spec, persistent.device_metadata_buffer);
+  static torch::Tensor copy_to_fixed_metadata_tensor(const torch::Tensor& src,
+                                                     torch::Tensor& dst) {
+    if (!src.defined()) {
+      return src;
     }
-    if (packed_bytes < total_bytes) {
-      packed_segments.push_back(persistent.device_metadata_zero_buffer.slice(
-          /*dim=*/0,
-          /*start=*/static_cast<int64_t>(packed_bytes),
-          /*end=*/static_cast<int64_t>(total_bytes)));
+    if (!dst.defined()) {
+      dst = torch::zeros({kDeepseekV4DsaMetadataBufferElements}, src.options());
+    } else {
+      CHECK_EQ(dst.numel(), kDeepseekV4DsaMetadataBufferElements)
+          << "DeepSeek V4 graph metadata fixed tensor size changed";
+      CHECK_EQ(dst.scalar_type(), src.scalar_type())
+          << "DeepSeek V4 graph metadata fixed tensor dtype changed";
+      CHECK_EQ(dst.device(), src.device())
+          << "DeepSeek V4 graph metadata fixed tensor device changed";
     }
-
-    auto packed_staging = persistent.device_metadata_staging_buffer.slice(
-        /*dim=*/0,
-        /*start=*/0,
-        /*end=*/static_cast<int64_t>(total_bytes));
-    at::cat_out(packed_staging, packed_segments, /*dim=*/0);
-    persistent.device_metadata_buffer
-        .slice(/*dim=*/0,
-               /*start=*/0,
-               /*end=*/static_cast<int64_t>(total_bytes))
-        .copy_(packed_staging, /*non_blocking=*/true);
+    CHECK_LE(src.numel(), dst.numel())
+        << "DeepSeek V4 DSA metadata exceeds graph persistent capacity: src="
+        << src.numel() << ", capacity=" << dst.numel();
+    dst.zero_();
+    if (src.numel() > 0) {
+      dst.flatten(0)
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/src.numel())
+          .copy_(src.flatten(0), /*non_blocking=*/true);
+    }
+    return dst;
   }
 
   static void copy_to_graph_packed_metadata_buffer(
@@ -1109,7 +977,7 @@ class DeepseekV4ModelImpl
 
   void normalize_graph_metadata_input_params(ModelInputParams& params) const {
     int64_t metadata_batch_size = params.actual_num_sequences;
-    if (params.enable_cuda_graph || params.graph_buffer.tiling_data.defined()) {
+    if (params.enable_graph || params.graph_buffer.tiling_data.defined()) {
       metadata_batch_size =
           std::max<int64_t>(metadata_batch_size, params.num_sequences);
     }
@@ -1192,7 +1060,36 @@ class DeepseekV4ModelImpl
     auto& dsa = *metadata->dsa_metadata;
     auto& persistent = state.dsa_metadata_persistent;
 
-    pack_graph_device_metadata(dsa, persistent);
+    dsa.attn_mask =
+        copy_to_persistent_tensor(dsa.attn_mask, persistent.attn_mask);
+    dsa.cos_table =
+        copy_to_persistent_tensor(dsa.cos_table, persistent.cos_table);
+    dsa.sin_table =
+        copy_to_persistent_tensor(dsa.sin_table, persistent.sin_table);
+    dsa.cos = copy_to_persistent_tensor(dsa.cos, persistent.cos);
+    dsa.sin = copy_to_persistent_tensor(dsa.sin, persistent.sin);
+    dsa.c4_cos = copy_to_persistent_tensor(dsa.c4_cos, persistent.c4_cos);
+    dsa.c4_sin = copy_to_persistent_tensor(dsa.c4_sin, persistent.c4_sin);
+    dsa.c128_cos = copy_to_persistent_tensor(dsa.c128_cos, persistent.c128_cos);
+    dsa.c128_sin = copy_to_persistent_tensor(dsa.c128_sin, persistent.c128_sin);
+    dsa.c4_input_cos =
+        copy_to_persistent_tensor(dsa.c4_input_cos, persistent.c4_input_cos);
+    dsa.c4_input_sin =
+        copy_to_persistent_tensor(dsa.c4_input_sin, persistent.c4_input_sin);
+    dsa.c128_input_cos = copy_to_persistent_tensor(dsa.c128_input_cos,
+                                                   persistent.c128_input_cos);
+    dsa.c128_input_sin = copy_to_persistent_tensor(dsa.c128_input_sin,
+                                                   persistent.c128_input_sin);
+    dsa.start_pos =
+        copy_to_persistent_tensor(dsa.start_pos, persistent.start_pos);
+    dsa.c1_metadata =
+        copy_to_fixed_metadata_tensor(dsa.c1_metadata, persistent.c1_metadata);
+    dsa.c4_metadata =
+        copy_to_fixed_metadata_tensor(dsa.c4_metadata, persistent.c4_metadata);
+    dsa.c128_metadata = copy_to_fixed_metadata_tensor(dsa.c128_metadata,
+                                                      persistent.c128_metadata);
+    dsa.qli_metadata = copy_to_fixed_metadata_tensor(dsa.qli_metadata,
+                                                     persistent.qli_metadata);
 
     return metadata;
   }
@@ -1353,235 +1250,15 @@ class DeepseekV4ModelImpl
     return *std::max_element(values.begin(), values.end());
   }
 
-  static int64_t compressed_metadata_max_seqlen(int64_t max_seqlen_kv,
-                                                int64_t cmp_ratio) {
-    return std::max<int64_t>(max_seqlen_kv, std::max<int64_t>(cmp_ratio, 1));
-  }
-
-  static int64_t effective_sparse_topk(int64_t sparse_topk,
-                                       int64_t max_seqlen_kv,
-                                       int64_t cmp_ratio) {
-    const int64_t ratio = std::max<int64_t>(cmp_ratio, 1);
-    const int64_t compressed_len =
-        std::max<int64_t>((max_seqlen_kv + ratio - 1) / ratio, 1);
-    return std::max<int64_t>(std::min<int64_t>(sparse_topk, compressed_len), 1);
-  }
-
-  static void set_sparse_metadata_value(std::vector<int32_t>& metadata,
-                                        int64_t core_idx,
-                                        int64_t meta_idx,
-                                        int32_t value) {
-    static constexpr int64_t kFaMetadataSize = 8;
-    const int64_t offset = core_idx * kFaMetadataSize + meta_idx;
-    CHECK_GE(offset, 0);
-    CHECK_LT(offset, static_cast<int64_t>(metadata.size()));
-    metadata[static_cast<size_t>(offset)] = value;
-  }
-
-  static torch::Tensor tensor_from_metadata(std::vector<int32_t>& metadata) {
-    auto options =
-        torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
-    return torch::from_blob(
-               metadata.data(), {kDeepseekV4DsaMetadataBufferElements}, options)
-        .clone()
-        .pin_memory();
-  }
-
-  static torch::Tensor build_sparse_sharedkv_metadata_cpu(
-      const std::vector<int32_t>& q_seq_lens,
-      const std::vector<int32_t>& kv_seq_lens,
-      int64_t num_heads_q,
-      int64_t num_heads_kv,
-      int64_t max_seqlen_kv,
-      int64_t cmp_ratio,
-      int64_t cmp_topk,
-      int64_t ori_win_left) {
-    static constexpr int64_t kAicCoreNum = 36;
-    static constexpr int64_t kAivCoreNum = 72;
-    static constexpr int64_t kMetadataElements = 1024;
-    static constexpr int64_t kFaMetadataSize = 8;
-    static constexpr int64_t kFaCoreEnableIndex = 0;
-    static constexpr int64_t kFaBn2EndIndex = 4;
-    static constexpr int64_t kFaMEndIndex = 5;
-    static constexpr int64_t kFaS2EndIndex = 6;
-    static constexpr int64_t kFdCoreEnableIndex = 0;
-    static constexpr int64_t kFdMetadataOffset = kAicCoreNum * kFaMetadataSize;
-    static constexpr int64_t kFdMetadataSize = 8;
-
-    CHECK_GT(num_heads_kv, 0);
-    const int64_t group_size = std::max<int64_t>(num_heads_q / num_heads_kv, 1);
-    const int64_t s1_block_len = cmp_topk > 0 ? 1 : 128 / group_size;
-    const int64_t m_base_size =
-        std::max<int64_t>(group_size * std::max<int64_t>(s1_block_len, 1), 1);
-    const int64_t s2_base_size = 512;
-    const int64_t batch_size = static_cast<int64_t>(kv_seq_lens.size());
-    CHECK_GT(batch_size, 0);
-    CHECK_GE(static_cast<int64_t>(q_seq_lens.size()), batch_size);
-
-    int64_t total_blocks = 0;
-    for (int64_t b = 0; b < batch_size; ++b) {
-      const int64_t q_len = std::max<int64_t>(q_seq_lens[b], 0);
-      const int64_t kv_len = std::max<int64_t>(kv_seq_lens[b], 0);
-      if (q_len == 0 || kv_len == 0) {
-        continue;
-      }
-      const int64_t s1_blocks =
-          (q_len * group_size + m_base_size - 1) / m_base_size;
-      for (int64_t s1_idx = 0; s1_idx < s1_blocks; ++s1_idx) {
-        const int64_t s1_first = (s1_idx * m_base_size) / group_size;
-        const int64_t s1_last = std::min<int64_t>(
-            ((s1_idx + 1) * m_base_size - 1) / group_size, q_len - 1);
-        const int64_t s2_first =
-            std::max<int64_t>(s1_first - (q_len - kv_len + ori_win_left), 0);
-        const int64_t s2_last = std::min<int64_t>(s1_last, kv_len - 1);
-        int64_t row_blocks = 0;
-        if (s2_last >= s2_first) {
-          row_blocks += (s2_last - s2_first) / s2_base_size + 1;
-        }
-        if (cmp_ratio > 1) {
-          int64_t compressed_len = (std::max<int64_t>(s2_last, 0) + 1) /
-                                   std::max<int64_t>(cmp_ratio, 1);
-          if (cmp_topk > 0) {
-            compressed_len = std::min<int64_t>(compressed_len, cmp_topk);
-          }
-          compressed_len = std::min<int64_t>(compressed_len, max_seqlen_kv);
-          if (compressed_len > 0) {
-            row_blocks += (compressed_len + s2_base_size - 1) / s2_base_size;
-          }
-        }
-        total_blocks += row_blocks;
-      }
-    }
-
-    std::vector<int32_t> metadata(kMetadataElements, 0);
-    if (total_blocks == 0) {
-      set_sparse_metadata_value(
-          metadata, 0, kFaCoreEnableIndex, static_cast<int32_t>(1));
-      set_sparse_metadata_value(
-          metadata,
-          0,
-          kFaBn2EndIndex,
-          static_cast<int32_t>(batch_size * num_heads_kv));
-    } else {
-      set_sparse_metadata_value(
-          metadata, 0, kFaCoreEnableIndex, static_cast<int32_t>(1));
-      set_sparse_metadata_value(
-          metadata,
-          0,
-          kFaBn2EndIndex,
-          static_cast<int32_t>(batch_size * num_heads_kv));
-      set_sparse_metadata_value(metadata, 0, kFaMEndIndex, 0);
-      set_sparse_metadata_value(metadata, 0, kFaS2EndIndex, 0);
-    }
-
-    for (int64_t core = 1; core < kAicCoreNum; ++core) {
-      set_sparse_metadata_value(
-          metadata, core, kFaCoreEnableIndex, static_cast<int32_t>(0));
-    }
-    for (int64_t core = 0; core < kAivCoreNum; ++core) {
-      const int64_t offset =
-          kFdMetadataOffset + core * kFdMetadataSize + kFdCoreEnableIndex;
-      CHECK_LT(offset, static_cast<int64_t>(metadata.size()));
-      metadata[static_cast<size_t>(offset)] = 0;
-    }
-
-    static_assert(kMetadataElements == kDeepseekV4DsaMetadataBufferElements);
-    return tensor_from_metadata(metadata);
-  }
-
-  static void set_qli_metadata_value(std::vector<int32_t>& metadata,
-                                     int64_t core_idx,
-                                     int64_t meta_idx,
-                                     int32_t value,
-                                     bool is_aiv = false) {
-    static constexpr int64_t kAicCoreNum = 36;
-    static constexpr int64_t kMetadataSize = 8;
-    const int64_t base = is_aiv ? kAicCoreNum * kMetadataSize : 0;
-    const int64_t offset = base + core_idx * kMetadataSize + meta_idx;
-    CHECK_GE(offset, 0);
-    CHECK_LT(offset, static_cast<int64_t>(metadata.size()));
-    metadata[static_cast<size_t>(offset)] = value;
-  }
-
-  static torch::Tensor build_quant_lightning_indexer_metadata_cpu(
-      int64_t batch_size,
-      int64_t num_heads_k) {
-    static constexpr int64_t kAicCoreNum = 36;
-    static constexpr int64_t kAivCoreNum = 72;
-    static constexpr int64_t kMetadataElements = 1024;
-    static constexpr int64_t kLiCoreEnableIndex = 0;
-    static constexpr int64_t kLiBn2EndIndex = 4;
-    static constexpr int64_t kLiMEndIndex = 5;
-    static constexpr int64_t kLiS2EndIndex = 6;
-    static constexpr int64_t kLdCoreEnableIndex = 0;
-
-    CHECK_GT(batch_size, 0);
-    CHECK_GT(num_heads_k, 0);
-
-    std::vector<int32_t> metadata(kMetadataElements, 0);
-    set_qli_metadata_value(
-        metadata, 0, kLiCoreEnableIndex, static_cast<int32_t>(1));
-    set_qli_metadata_value(metadata,
-                           0,
-                           kLiBn2EndIndex,
-                           static_cast<int32_t>(batch_size * num_heads_k));
-    set_qli_metadata_value(metadata, 0, kLiMEndIndex, 0);
-    set_qli_metadata_value(metadata, 0, kLiS2EndIndex, 0);
-
-    for (int64_t core = 1; core < kAicCoreNum; ++core) {
-      set_qli_metadata_value(
-          metadata, core, kLiCoreEnableIndex, static_cast<int32_t>(0));
-    }
-    for (int64_t core = 0; core < kAivCoreNum; ++core) {
-      set_qli_metadata_value(metadata,
-                             core,
-                             kLdCoreEnableIndex,
-                             static_cast<int32_t>(0),
-                             /*is_aiv=*/true);
-    }
-
-    static_assert(kMetadataElements == kDeepseekV4DsaMetadataBufferElements);
-    return tensor_from_metadata(metadata);
-  }
-
-  static std::vector<int32_t> query_lens_from_cu(
-      const torch::Tensor& actual_seq_lengths_query,
-      int64_t batch_size) {
-    auto query_cu =
-        actual_seq_lengths_query.to(torch::kCPU).to(torch::kInt32).contiguous();
-    std::vector<int32_t> lens(static_cast<size_t>(batch_size), 1);
-    auto accessor = query_cu.accessor<int32_t, 1>();
-    for (int64_t i = 0; i < batch_size; ++i) {
-      lens[static_cast<size_t>(i)] = std::max<int32_t>(
-          accessor[i + 1] - accessor[i], static_cast<int32_t>(1));
-    }
-    return lens;
-  }
-
-  static std::vector<int32_t> lens_from_tensor(const torch::Tensor& lens_tensor,
-                                               int64_t batch_size) {
-    auto cpu_lens = lens_tensor.to(torch::kCPU).to(torch::kInt32).contiguous();
-    std::vector<int32_t> lens(static_cast<size_t>(batch_size), 1);
-    auto accessor = cpu_lens.accessor<int32_t, 1>();
-    for (int64_t i = 0; i < batch_size; ++i) {
-      lens[static_cast<size_t>(i)] =
-          std::max<int32_t>(accessor[i], static_cast<int32_t>(1));
-    }
-    return lens;
-  }
-
   void build_precomputed_metadata(layer::DSAMetadata& dsa,
-                                  const ModelInputParams& params,
-                                  bool force_cpu_output = false) const {
+                                  const ModelInputParams& params) const {
     dsa.c1_metadata = torch::Tensor();
     dsa.c4_metadata = torch::Tensor();
     dsa.c128_metadata = torch::Tensor();
     dsa.qli_metadata = torch::Tensor();
 
     torch::Device metadata_device(torch::kCPU);
-    if (force_cpu_output) {
-      metadata_device = torch::Device(torch::kCPU);
-    } else if (dsa.input_positions.defined()) {
+    if (dsa.input_positions.defined()) {
       metadata_device = dsa.input_positions.device();
     } else if (dsa.seq_lens_q.defined()) {
       metadata_device = dsa.seq_lens_q.device();
@@ -1611,40 +1288,88 @@ class DeepseekV4ModelImpl
         params.kv_max_seq_len, vector_max_or_zero(params.kv_seq_lens_vec));
     const int64_t ori_win_left = std::max<int64_t>(window_size_ - 1, 0);
     const int64_t sparse_topk = std::max<int64_t>(index_topk_, 1);
-    const int64_t c4_max_seqlen_kv =
-        compressed_metadata_max_seqlen(max_seqlen_kv, 4);
-    const int64_t c128_max_seqlen_kv =
-        compressed_metadata_max_seqlen(max_seqlen_kv, 128);
-    const int64_t c4_sparse_topk =
-        effective_sparse_topk(sparse_topk, max_seqlen_kv, 4);
-    auto q_seq_lens =
-        query_lens_from_cu(dsa.actual_seq_lengths_query, batch_size);
-    auto kv_seq_lens = lens_from_tensor(dsa.actual_seq_lengths_kv, batch_size);
-    auto c1_metadata_cpu = build_sparse_sharedkv_metadata_cpu(q_seq_lens,
-                                                              kv_seq_lens,
-                                                              tp_num_heads_,
-                                                              1,
-                                                              max_seqlen_kv,
-                                                              1,
-                                                              0,
-                                                              ori_win_left);
-    auto c4_metadata_cpu = build_sparse_sharedkv_metadata_cpu(q_seq_lens,
-                                                              kv_seq_lens,
-                                                              tp_num_heads_,
-                                                              1,
-                                                              c4_max_seqlen_kv,
-                                                              4,
-                                                              c4_sparse_topk,
-                                                              ori_win_left);
-    auto c128_metadata_cpu =
-        build_sparse_sharedkv_metadata_cpu(q_seq_lens,
-                                           kv_seq_lens,
-                                           tp_num_heads_,
-                                           1,
-                                           c128_max_seqlen_kv,
-                                           128,
-                                           0,
-                                           ori_win_left);
+    const bool is_prefill = params.q_max_seq_len > 1;
+
+    const char* layout_kv = "PA_ND";
+    auto cu_seqlens_ori_kv_opt =
+        is_prefill ? as_optional_tensor(dsa.actual_seq_lengths_query)
+                   : c10::optional<torch::Tensor>(c10::nullopt);
+
+    xllm::kernel::SparseAttnSharedkvMetadataParams c1_params;
+    c1_params.num_heads_q = tp_num_heads_;
+    c1_params.num_heads_kv = 1;
+    c1_params.head_dim = head_dim_;
+    c1_params.cu_seqlens_q = as_optional_tensor(dsa.actual_seq_lengths_query);
+    c1_params.cu_seqlens_ori_kv = cu_seqlens_ori_kv_opt;
+    c1_params.cu_seqlens_cmp_kv = c10::nullopt;
+    c1_params.seqused_q = c10::nullopt;
+    c1_params.seqused_kv = as_optional_tensor(dsa.actual_seq_lengths_kv);
+    c1_params.batch_size = batch_size;
+    c1_params.max_seqlen_q = max_seqlen_q;
+    c1_params.max_seqlen_kv = max_seqlen_kv;
+    c1_params.ori_topk = 0;
+    c1_params.cmp_topk = 0;
+    c1_params.cmp_ratio = 1;
+    c1_params.ori_mask_mode = 4;
+    c1_params.cmp_mask_mode = 3;
+    c1_params.ori_win_left = ori_win_left;
+    c1_params.ori_win_right = 0;
+    c1_params.layout_q = "TND";
+    c1_params.layout_kv = layout_kv;
+    c1_params.has_ori_kv = true;
+    c1_params.has_cmp_kv = false;
+    dsa.c1_metadata = xllm::kernel::sparse_attn_sharedkv_metadata(c1_params);
+
+    xllm::kernel::SparseAttnSharedkvMetadataParams c4_params;
+    c4_params.num_heads_q = tp_num_heads_;
+    c4_params.num_heads_kv = 1;
+    c4_params.head_dim = head_dim_;
+    c4_params.cu_seqlens_q = as_optional_tensor(dsa.actual_seq_lengths_query);
+    c4_params.cu_seqlens_ori_kv = cu_seqlens_ori_kv_opt;
+    c4_params.cu_seqlens_cmp_kv = c10::nullopt;
+    c4_params.seqused_q = c10::nullopt;
+    c4_params.seqused_kv = as_optional_tensor(dsa.actual_seq_lengths_kv);
+    c4_params.batch_size = batch_size;
+    c4_params.max_seqlen_q = max_seqlen_q;
+    c4_params.max_seqlen_kv = max_seqlen_kv;
+    c4_params.ori_topk = 0;
+    c4_params.cmp_topk = sparse_topk;
+    c4_params.cmp_ratio = 4;
+    c4_params.ori_mask_mode = 4;
+    c4_params.cmp_mask_mode = 3;
+    c4_params.ori_win_left = ori_win_left;
+    c4_params.ori_win_right = 0;
+    c4_params.layout_q = "TND";
+    c4_params.layout_kv = layout_kv;
+    c4_params.has_ori_kv = true;
+    c4_params.has_cmp_kv = true;
+    dsa.c4_metadata = xllm::kernel::sparse_attn_sharedkv_metadata(c4_params);
+
+    xllm::kernel::SparseAttnSharedkvMetadataParams c128_params;
+    c128_params.num_heads_q = tp_num_heads_;
+    c128_params.num_heads_kv = 1;
+    c128_params.head_dim = head_dim_;
+    c128_params.cu_seqlens_q = as_optional_tensor(dsa.actual_seq_lengths_query);
+    c128_params.cu_seqlens_ori_kv = cu_seqlens_ori_kv_opt;
+    c128_params.cu_seqlens_cmp_kv = c10::nullopt;
+    c128_params.seqused_q = c10::nullopt;
+    c128_params.seqused_kv = as_optional_tensor(dsa.actual_seq_lengths_kv);
+    c128_params.batch_size = batch_size;
+    c128_params.max_seqlen_q = max_seqlen_q;
+    c128_params.max_seqlen_kv = max_seqlen_kv;
+    c128_params.ori_topk = 0;
+    c128_params.cmp_topk = 0;
+    c128_params.cmp_ratio = 128;
+    c128_params.ori_mask_mode = 4;
+    c128_params.cmp_mask_mode = 3;
+    c128_params.ori_win_left = ori_win_left;
+    c128_params.ori_win_right = 0;
+    c128_params.layout_q = "TND";
+    c128_params.layout_kv = layout_kv;
+    c128_params.has_ori_kv = true;
+    c128_params.has_cmp_kv = true;
+    dsa.c128_metadata =
+        xllm::kernel::sparse_attn_sharedkv_metadata(c128_params);
 
     torch::Tensor query_lens;
     if (dsa.actual_seq_lengths_query.defined() &&
@@ -1669,22 +1394,6 @@ class DeepseekV4ModelImpl
 
     if (!query_lens.defined() || !key_lens.defined() ||
         query_lens.numel() == 0 || key_lens.numel() == 0) {
-      auto sparse_metadata_cpu =
-          torch::cat({c1_metadata_cpu, c4_metadata_cpu, c128_metadata_cpu}, 0);
-      auto sparse_metadata = sparse_metadata_cpu.to(metadata_device,
-                                                    /*non_blocking=*/true);
-      dsa.c1_metadata =
-          sparse_metadata.slice(/*dim=*/0,
-                                /*start=*/0,
-                                /*end=*/kDeepseekV4DsaMetadataBufferElements);
-      dsa.c4_metadata = sparse_metadata.slice(
-          /*dim=*/0,
-          /*start=*/kDeepseekV4DsaMetadataBufferElements,
-          /*end=*/2 * kDeepseekV4DsaMetadataBufferElements);
-      dsa.c128_metadata = sparse_metadata.slice(
-          /*dim=*/0,
-          /*start=*/2 * kDeepseekV4DsaMetadataBufferElements,
-          /*end=*/3 * kDeepseekV4DsaMetadataBufferElements);
       return;
     }
 
@@ -1695,29 +1404,34 @@ class DeepseekV4ModelImpl
            "local tp size. global_index_num_heads="
         << global_index_num_heads << ", local_tp_size=" << dp_local_tp_size_;
     const int64_t qli_batch_size = std::max<int64_t>(key_lens.size(0), 1);
-    auto qli_metadata_cpu =
-        build_quant_lightning_indexer_metadata_cpu(qli_batch_size, 1);
+    const int64_t index_head_dim =
+        std::max<int64_t>(index_head_dim_ > 0 ? index_head_dim_ : head_dim_, 1);
+    const int64_t qli_max_seqlen_q = std::max<int64_t>(
+        params.q_max_seq_len, vector_max_or_zero(params.q_seq_lens_vec));
+    const int64_t qli_max_seqlen_k = std::max<int64_t>(
+        params.kv_max_seq_len, vector_max_or_zero(params.kv_seq_lens_vec));
 
-    auto metadata_cpu = torch::cat(
-        {c1_metadata_cpu, c4_metadata_cpu, c128_metadata_cpu, qli_metadata_cpu},
-        0);
-    auto metadata = metadata_cpu.to(metadata_device, /*non_blocking=*/true);
-    dsa.c1_metadata =
-        metadata.slice(/*dim=*/0,
-                       /*start=*/0,
-                       /*end=*/kDeepseekV4DsaMetadataBufferElements);
-    dsa.c4_metadata =
-        metadata.slice(/*dim=*/0,
-                       /*start=*/kDeepseekV4DsaMetadataBufferElements,
-                       /*end=*/2 * kDeepseekV4DsaMetadataBufferElements);
-    dsa.c128_metadata = metadata.slice(
-        /*dim=*/0,
-        /*start=*/2 * kDeepseekV4DsaMetadataBufferElements,
-        /*end=*/3 * kDeepseekV4DsaMetadataBufferElements);
-    dsa.qli_metadata = metadata.slice(
-        /*dim=*/0,
-        /*start=*/3 * kDeepseekV4DsaMetadataBufferElements,
-        /*end=*/4 * kDeepseekV4DsaMetadataBufferElements);
+    xllm::kernel::QuantLightningIndexerMetadataParams qli_params;
+    qli_params.num_heads_q = global_index_num_heads;
+    qli_params.num_heads_k = 1;
+    qli_params.head_dim = index_head_dim;
+    qli_params.query_quant_mode = 0;
+    qli_params.key_quant_mode = 0;
+    qli_params.actual_seq_lengths_query = as_optional_tensor(query_lens);
+    qli_params.actual_seq_lengths_key = as_optional_tensor(key_lens);
+    qli_params.batch_size = qli_batch_size;
+    qli_params.max_seqlen_q = qli_max_seqlen_q;
+    qli_params.max_seqlen_k = qli_max_seqlen_k;
+    qli_params.layout_query = "TND";
+    qli_params.layout_key = "PA_BSND";
+    qli_params.sparse_count = sparse_topk;
+    qli_params.sparse_mode = 3;
+    qli_params.pre_tokens = std::numeric_limits<int64_t>::max();
+    qli_params.next_tokens = std::numeric_limits<int64_t>::max();
+    qli_params.cmp_ratio = 4;
+    qli_params.device = query_lens.device().str();
+    dsa.qli_metadata =
+        xllm::kernel::quant_lightning_indexer_metadata(qli_params);
   }
 
   void log_layer_weight_mem_stats() const {

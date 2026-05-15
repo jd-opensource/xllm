@@ -128,8 +128,9 @@ AttentionMetadata build_attention_metadata(
   attn_metadata.is_causal =
       attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
 
-  // Copy enable_cuda_graph flag from params
-  attn_metadata.enable_cuda_graph = params.enable_cuda_graph;
+  // Copy graph mode flag from params. AttentionMetadata keeps the historical
+  // CUDA-oriented name for CUDA/MUSA attention plan handling.
+  attn_metadata.enable_cuda_graph = params.enable_graph;
 
 #if defined(USE_CUDA) || defined(USE_MUSA)
   if (attn_metadata.is_causal && !attn_metadata.enable_cuda_graph) {

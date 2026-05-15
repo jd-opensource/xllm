@@ -128,7 +128,7 @@ void DSAMetadataBuilder::build_dsa_fields(
 
   dsa.input_positions = positions;
   const bool is_acl_graph =
-      params.enable_cuda_graph || params.graph_buffer.tiling_data.defined();
+      params.enable_graph || params.graph_buffer.tiling_data.defined();
   const torch::Device metadata_device(torch::kCPU);
 
   // Build per-batch sequence length metadata.
@@ -590,7 +590,7 @@ void DSAMetadataBuilder::build_positions(const ModelInputParams& params,
   auto input_positions = dsa_metadata.input_positions;
   int64_t num_tokens = input_positions.size(0);
   const bool is_acl_graph =
-      params.enable_cuda_graph || params.graph_buffer.tiling_data.defined();
+      params.enable_graph || params.graph_buffer.tiling_data.defined();
   const auto target_device = input_positions.device();
   const auto pos_dtype = input_positions.scalar_type();
   auto cpu_options =

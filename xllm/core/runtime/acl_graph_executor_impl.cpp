@@ -65,10 +65,10 @@ std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
 int64_t get_decode_graph_capacity(const runtime::Options& options) {
   CHECK_GT(options.num_decoding_tokens(), 0)
       << "num_decoding_tokens must be > 0 for graph capacity";
-  if (FLAGS_enable_atb_spec_kernel) {
-    return options.max_seqs_per_batch();
+  if (options.enable_speculative_decode() && !options.is_draft_engine()) {
+    return options.max_seqs_per_batch() * options.num_decoding_tokens();
   }
-  return options.max_seqs_per_batch() * options.num_decoding_tokens();
+  return options.max_seqs_per_batch();
 }
 
 int64_t infer_actual_batch_size(const ModelInputParams& params) {
@@ -119,9 +119,14 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   // Check if mRoPE is used (for VLM models like qwen2-vl)
   use_mrope_ = !args.rope_scaling_mrope_section().empty();
 
-  // Use max_tokens_per_batch for first dimension size
-  // num_decode_tokens
+  // Use max_tokens_per_batch for general token-shaped persistent buffers.
+  // These buffers may participate in both decode replay and the Qwen3.5
+  // spec-verify graph path, so they keep the broader scheduler upper bound.
   const int64_t max_tokens_per_batch = FLAGS_max_tokens_per_batch;
+  // Graph-mode token capacity is narrower than max_tokens_per_batch: ACL graph
+  // only serves decode / spec-verify batches, so the relevant row upper bound
+  // comes from decode graph capacity instead.
+  const int64_t max_graph_tokens = get_decode_graph_capacity(options);
   // num_sequences
   const int64_t max_seqs_per_batch = get_decode_graph_capacity(options);
   auto tensor_options = torch::TensorOptions().device(device);
@@ -176,18 +181,21 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   hidden_states_ = torch::zeros({max_tokens_per_batch, args.hidden_size()},
                                 torch::dtype(dtype).device(device));
 
-  // Initialize persistent_mask_ if need_update_attn_mask is true
+  // Initialize persistent_mask_ only for model types that need to update an
+  // explicit attention mask in graph mode. Unlike generic token buffers, the
+  // mask is only consumed by decode / spec-verify graphs, so size it by graph
+  // token capacity instead of the much larger max_tokens_per_batch prefill
+  // budget.
   if (need_update_attn_mask_) {
-    persistent_mask_ = torch::zeros({max_tokens_per_batch, max_seq_len},
+    persistent_mask_ = torch::zeros({max_graph_tokens, max_seq_len},
                                     torch::dtype(dtype).device(device));
-    persistent_mask_zero_template_ =
-        torch::zeros({max_tokens_per_batch, max_seq_len},
-                     torch::dtype(dtype).device(device));
+    persistent_mask_zero_template_ = torch::zeros(
+        {max_graph_tokens, max_seq_len}, torch::dtype(dtype).device(device));
     const float mask_fill_value = (dtype == torch::kFloat16)
                                       ? -std::numeric_limits<float>::infinity()
                                       : -9984.0f;
     persistent_mask_fill_template_ =
-        torch::full({max_tokens_per_batch, max_seq_len},
+        torch::full({max_graph_tokens, max_seq_len},
                     mask_fill_value,
                     torch::dtype(dtype).device(device));
   }
@@ -494,7 +502,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
     params_for_capture->num_sequences = padded_num_tokens;
     params_for_capture->batch_forward_type = BatchForwardType::DECODE;
-    params_for_capture->enable_cuda_graph = true;
+    params_for_capture->enable_graph = true;
     if (params_for_capture->dp_global_token_nums.size() > 1) {
       params_for_capture->dp_global_token_nums =
           std::vector<int32_t>(params_for_capture->dp_global_token_nums.size(),
@@ -900,8 +908,9 @@ void GraphPersistentParam::update_attention_mask(
 
   // Check if num_tokens is within bounds
   CHECK_LE(num_tokens, persistent_mask_.size(0))
-      << "num_tokens (" << num_tokens << ") exceeds max_tokens_per_batch ("
-      << persistent_mask_.size(0) << ")";
+      << "num_tokens (" << num_tokens
+      << ") exceeds graph attention-mask capacity (" << persistent_mask_.size(0)
+      << ")";
 
   // Get slice for actual num_tokens (compatible with both chunked and
   // non-chunked)
