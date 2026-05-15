@@ -184,7 +184,7 @@ rm -f *.index.json
 
 mv mtp_layer_parameters.safetensors model.safetensors
 
-cat << 'EOF' > /root/make_index.py
+cat << 'EOF' > /path/to/workspace/make_index.py
 import json
 from safetensors import safe_open
 
@@ -210,7 +210,7 @@ with open(f'{model_dir}/model.safetensors.index.json', 'w') as f:
 print("Perfect index file created successfully!")
 EOF
 
-python3 /root/make_index.py
+python3 /path/to/workspace/make_index.py
 ```
 
 ### Install Ascend's ModelSlim toolkit for quantization
@@ -243,7 +243,7 @@ python3 quant_deepseek_w8a8.py --model_path /path/to/DeepSeek-V3-w8a8-temp --sav
 ### Rescue the quantized draft model weights
 
 ```bash
-cat << 'EOF' > /root/rescue_mtp.py
+cat << 'EOF' > /path/to/workspace/rescue_mtp.py
 import json
 import glob
 import os
@@ -303,7 +303,7 @@ else:
 EOF
 
 # Run the script
-python3 /root/rescue_mtp.py
+python3 /path/to/workspace/rescue_mtp.py
 ```
 
 ### Delete the temporary draft model
