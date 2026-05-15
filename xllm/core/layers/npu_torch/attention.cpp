@@ -198,7 +198,7 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
   query = query.view({-1, num_heads_, head_size_});
   output = output.view({-1, num_heads_, head_size_});
 
-  if (attn_metadata.is_prefill) {
+  if (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill) {
     auto xfa_result = x_flash_attention_infer_with_query_split(
         query,
         k_cache,
@@ -211,17 +211,6 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
         num_kv_heads_,
         scale_);
     output.copy_(xfa_result.view_as(output));
-  } else if (attn_metadata.is_chunked_prefill) {
-    xllm::kernel::npu::batch_chunked_paged_prefill(
-        query,
-        k_cache,
-        v_cache.value(),
-        scale_,
-        attn_metadata.block_table,
-        attn_metadata.kv_seq_lens_host,
-        attn_metadata.attn_mask,
-        attn_metadata.q_seq_lens_host,
-        output);
   }
 }
 
