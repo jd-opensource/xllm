@@ -223,7 +223,6 @@ DeepSeekV4KVCacheTensors create_deepseek_v4_kv_cache_tensors(
   const int64_t c4_count = pool_counts[1];
   const int64_t c128_count = pool_counts[2];
   const int64_t block_size = create_options.block_size();
-  const int64_t window_size = create_options.window_size();
   const int64_t head_dim = create_options.head_dim();
   const int64_t index_head_dim =
       std::max<int64_t>(create_options.index_head_dim(), 1);
@@ -247,8 +246,8 @@ DeepSeekV4KVCacheTensors create_deepseek_v4_kv_cache_tensors(
 
   DeepSeekV4KVCacheTensors tensors;
   if (compress_ratio == 1) {
-    tensors.swa_cache = torch::empty(
-        {swa_count, window_size, n_heads, head_dim}, cache_options);
+    tensors.swa_cache =
+        torch::empty({swa_count, block_size, n_heads, head_dim}, cache_options);
   } else if (compress_ratio == 4) {
     tensors.key_cache =
         torch::empty({c4_count, block_size, n_heads, head_dim}, cache_options);
@@ -256,8 +255,8 @@ DeepSeekV4KVCacheTensors create_deepseek_v4_kv_cache_tensors(
         {c4_count, block_size, index_n_heads, index_head_dim}, index_options);
     tensors.indexer_cache_scale =
         torch::empty({c4_count, block_size, 1}, scale_options);
-    tensors.swa_cache = torch::empty(
-        {swa_count, window_size, n_heads, head_dim}, cache_options);
+    tensors.swa_cache =
+        torch::empty({swa_count, block_size, n_heads, head_dim}, cache_options);
     tensors.compress_kv_state =
         torch::empty({swa_count, block_size, 2 * head_dim}, state_options);
     tensors.compress_score_state =
@@ -269,15 +268,15 @@ DeepSeekV4KVCacheTensors create_deepseek_v4_kv_cache_tensors(
   } else if (compress_ratio == 128) {
     tensors.key_cache = torch::empty(
         {c128_count, block_size, n_heads, head_dim}, cache_options);
-    tensors.swa_cache = torch::empty(
-        {swa_count, window_size, n_heads, head_dim}, cache_options);
+    tensors.swa_cache =
+        torch::empty({swa_count, block_size, n_heads, head_dim}, cache_options);
     tensors.compress_kv_state =
         torch::empty({swa_count, block_size, head_dim}, state_options);
     tensors.compress_score_state =
         torch::empty({swa_count, block_size, head_dim}, state_options);
   } else {
-    tensors.swa_cache = torch::empty(
-        {swa_count, window_size, n_heads, head_dim}, cache_options);
+    tensors.swa_cache =
+        torch::empty({swa_count, block_size, n_heads, head_dim}, cache_options);
   }
 
   tensors.key_cache = cast_to_nd_format(tensors.key_cache);

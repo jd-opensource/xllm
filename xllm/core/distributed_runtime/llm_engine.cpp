@@ -591,7 +591,7 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     }
 
     // 1) Size of all caches that use swa_count (tied to max_seqs_per_batch).
-    // c1 layer: 1 cache — swa (swa_count, window_size, 1, head_dim)
+    // c1 layer: 1 cache — swa (swa_count, block_size, 1, head_dim)
     // c4 layer: 5 caches use swa — swa_cache, compress_kv_state,
     // compress_score_state,
     //           compress_index_kv_state, compress_index_score_state (shapes
@@ -599,17 +599,17 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     // c128 layer: 3 caches use swa — swa_cache, compress_kv_state,
     // compress_score_state
     const int64_t swa_bytes_per_c1_layer =
-        kv_cache_cap.swa_count() * window_size * head_dim * dtype_size;
+        kv_cache_cap.swa_count() * block_size * head_dim * dtype_size;
     const int64_t swa_bytes_per_c4_layer =
         kv_cache_cap.swa_count() *
-        (window_size * head_dim * dtype_size +
+        (block_size * head_dim * dtype_size +
          block_size * (2 * head_dim * float32_size) *
              2 +  // kv_state + score_state
          block_size * (2 * index_head_dim * float32_size) *
              2);  // index_kv + index_score
     const int64_t swa_bytes_per_c128_layer =
         kv_cache_cap.swa_count() *
-        (window_size * head_dim * dtype_size +
+        (block_size * head_dim * dtype_size +
          block_size * head_dim * float32_size * 2);  // kv_state + score_state
 
     const int64_t constant_swa_bytes = n_c1_layers * swa_bytes_per_c1_layer +
@@ -792,7 +792,7 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       manager_compress_ratios.push_back(ratio);
     }
 
-    options.window_size(std::max(args_.window_size(), 1))
+    options.sliding_window_size(std::max(args_.window_size(), 1))
         .manager_types(std::move(manager_types))
         .compress_ratios(std::move(manager_compress_ratios))
         .max_seqs_per_batch(options_.max_seqs_per_batch());

@@ -44,7 +44,7 @@ BlockManager::Options MakeCompositeOptions(uint32_t base_num_blocks,
   BlockManager::Options opts;
   opts.num_blocks(base_num_blocks)
       .block_size(block_size)
-      .window_size(window_size)
+      .sliding_window_size(window_size)
       .max_seqs_per_batch(max_seqs_per_batch)
       .manager_types({kManagerTypeSlidingWindowBlockManager,
                       kManagerTypeBlockManagerImpl,

@@ -46,8 +46,10 @@ class BlockManager {
     PROPERTY(bool, enable_prefix_cache) = true;
     PROPERTY(bool, enable_disagg_pd) = false;
     PROPERTY(bool, enable_cache_upload) = false;
-    // For SlidingWindowBlockManager: blocks to allocate per sequence.
-    PROPERTY(uint32_t, window_size) = 0;
+    // Token-level sliding window size for composite SWA allocation.
+    PROPERTY(uint32_t, sliding_window_size) = 0;
+    // SWA/cache-state block rows allocated per sequence.
+    PROPERTY(uint32_t, swa_blocks_per_seq) = 0;
     // For CompositeBlockManager (passed from upstream).
     PROPERTY(std::vector<uint32_t>, manager_types) = {};
     PROPERTY(std::vector<uint32_t>, compress_ratios) = {};

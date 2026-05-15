@@ -19,14 +19,15 @@ namespace xllm {
 
 SlidingWindowBlockManager::SlidingWindowBlockManager(const Options& options)
     : BlockManagerImpl(options) {
-  CHECK_GT(options_.window_size(), 0u) << "window_size must be positive";
+  CHECK_GT(options_.swa_blocks_per_seq(), 0u)
+      << "swa_blocks_per_seq must be positive";
 }
 
 std::vector<Block> SlidingWindowBlockManager::allocate(size_t num_blocks) {
-  if (num_blocks != options_.window_size()) {
+  if (num_blocks != options_.swa_blocks_per_seq()) {
     return {};
   }
-  return BlockManagerImpl::allocate(options_.window_size());
+  return BlockManagerImpl::allocate(options_.swa_blocks_per_seq());
 }
 
 }  // namespace xllm

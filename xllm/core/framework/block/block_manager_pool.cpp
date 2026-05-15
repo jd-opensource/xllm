@@ -44,7 +44,7 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
       .enable_cache_upload(options_.host_num_blocks() > 0
                                ? false
                                : options_.enable_cache_upload())
-      .window_size(options_.window_size())
+      .sliding_window_size(options_.sliding_window_size())
       .manager_types(options_.manager_types())
       .compress_ratios(options_.compress_ratios())
       .max_seqs_per_batch(options_.max_seqs_per_batch());
