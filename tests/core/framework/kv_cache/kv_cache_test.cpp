@@ -29,9 +29,20 @@ std::vector<int64_t> shape_vec(const torch::Tensor& tensor) {
   return tensor.sizes().vec();
 }
 
+std::vector<int64_t> dsv4_block_shape(int64_t block_count,
+                                      int64_t block_size,
+                                      int64_t n_heads,
+                                      int64_t head_dim) {
+#if defined(USE_MLU)
+  return {block_count, n_heads, block_size, head_dim};
+#else
+  return {block_count, block_size, n_heads, head_dim};
+#endif
+}
+
 }  // namespace
 
-TEST(KVCacheTest, DeepSeekV4SwaCacheUsesBlockRows) {
+TEST(KVCacheTest, DeepSeekV4FourDimCachesUseDeviceLayout) {
   constexpr int64_t kSwaCount = 10;
   constexpr int64_t kC4Count = 32;
   constexpr int64_t kC128Count = 1;
@@ -66,19 +77,35 @@ TEST(KVCacheTest, DeepSeekV4SwaCacheUsesBlockRows) {
   ASSERT_EQ(caches.size(), 3u);
 
   EXPECT_EQ(shape_vec(caches[0].get_swa_cache()),
-            (std::vector<int64_t>{kSwaCount, kBlockSize, 1, kHeadDim}));
+            dsv4_block_shape(kSwaCount, kBlockSize, 1, kHeadDim));
   EXPECT_FALSE(caches[0].get_compress_kv_state().defined());
 
+  EXPECT_EQ(shape_vec(caches[1].get_k_cache()),
+            dsv4_block_shape(kC4Count, kBlockSize, 1, kHeadDim));
+  EXPECT_EQ(shape_vec(caches[1].get_index_cache()),
+            dsv4_block_shape(kC4Count, kBlockSize, 1, kIndexHeadDim));
   EXPECT_EQ(shape_vec(caches[1].get_swa_cache()),
-            (std::vector<int64_t>{kSwaCount, kBlockSize, 1, kHeadDim}));
+            dsv4_block_shape(kSwaCount, kBlockSize, 1, kHeadDim));
+  if (caches[1].get_indexer_cache_scale().defined()) {
+    EXPECT_EQ(shape_vec(caches[1].get_indexer_cache_scale()),
+              (std::vector<int64_t>{kC4Count, kBlockSize, 1}));
+  }
   EXPECT_EQ(shape_vec(caches[1].get_compress_kv_state()),
+            (std::vector<int64_t>{kSwaCount, kBlockSize, 2 * kHeadDim}));
+  EXPECT_EQ(shape_vec(caches[1].get_compress_score_state()),
             (std::vector<int64_t>{kSwaCount, kBlockSize, 2 * kHeadDim}));
   EXPECT_EQ(shape_vec(caches[1].get_compress_index_kv_state()),
             (std::vector<int64_t>{kSwaCount, kBlockSize, 2 * kIndexHeadDim}));
+  EXPECT_EQ(shape_vec(caches[1].get_compress_index_score_state()),
+            (std::vector<int64_t>{kSwaCount, kBlockSize, 2 * kIndexHeadDim}));
 
+  EXPECT_EQ(shape_vec(caches[2].get_k_cache()),
+            dsv4_block_shape(kC128Count, kBlockSize, 1, kHeadDim));
   EXPECT_EQ(shape_vec(caches[2].get_swa_cache()),
-            (std::vector<int64_t>{kSwaCount, kBlockSize, 1, kHeadDim}));
+            dsv4_block_shape(kSwaCount, kBlockSize, 1, kHeadDim));
   EXPECT_EQ(shape_vec(caches[2].get_compress_kv_state()),
+            (std::vector<int64_t>{kSwaCount, kBlockSize, kHeadDim}));
+  EXPECT_EQ(shape_vec(caches[2].get_compress_score_state()),
             (std::vector<int64_t>{kSwaCount, kBlockSize, kHeadDim}));
 }
 
