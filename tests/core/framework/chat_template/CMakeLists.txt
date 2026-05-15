@@ -11,7 +11,6 @@ cc_test (
     :jinja_chat_template
     :deepseek_v32_cpp_template
     GTest::gtest_main
-    gflags
 )
 
 cc_test(
