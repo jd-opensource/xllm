@@ -33,11 +33,41 @@ namespace {
 
 constexpr int64_t kFiaSplitFuseMaskSize = 2048;
 constexpr int64_t kXfaMaxQkRowsPerCall = 128;
+constexpr int64_t kXfaMaxExtraInfoNodes = 24;
+constexpr int64_t kXfaMaxKvStackLen = 512;
+
+struct XfaQuerySlice {
+  int64_t seq_idx = 0;
+  int64_t q_start = 0;
+  int64_t q_len = 0;
+  int64_t kv_len = 0;
+  int64_t core_count = 1;
+};
 
 torch::Tensor int32_tensor_on_device(const std::vector<int32_t>& values,
                                      const torch::Device& device) {
   return torch::tensor(values, torch::TensorOptions().dtype(torch::kInt32))
       .to(device);
+}
+
+torch::Tensor int64_tensor_on_device(const std::vector<int64_t>& values,
+                                     const torch::Device& device) {
+  return torch::tensor(values, torch::TensorOptions().dtype(torch::kInt64))
+      .to(device);
+}
+
+int64_t div_up(int64_t value, int64_t divisor) {
+  return (value + divisor - 1) / divisor;
+}
+
+int64_t xfa_core_count_for_slice(int64_t kv_len,
+                                 int64_t kv_head,
+                                 int64_t block_size) {
+  const int64_t block_stack_num =
+      std::max<int64_t>(1, kXfaMaxKvStackLen / block_size);
+  const int64_t kv_blocks = div_up(kv_len, block_size);
+  const int64_t s2_blocks = div_up(kv_blocks, block_stack_num);
+  return s2_blocks <= 1 ? 1 : kv_head;
 }
 
 torch::Tensor get_fia_split_fuse_attn_mask(const torch::Tensor& query) {
@@ -71,6 +101,8 @@ torch::Tensor x_flash_attention_infer_with_query_split(
     const torch::Tensor& block_table,
     const torch::Tensor& q_seq_lens,
     const torch::Tensor& kv_seq_lens,
+    const torch::Tensor& q_seq_lens_host,
+    const torch::Tensor& kv_seq_lens_host,
     int64_t q_head,
     int64_t kv_head,
     double scale) {
@@ -81,11 +113,19 @@ torch::Tensor x_flash_attention_infer_with_query_split(
       std::max<int64_t>(1, kXfaMaxQkRowsPerCall / group_size);
 
   auto q_seq_lens_cpu =
-      q_seq_lens.to(torch::kCPU, torch::kInt32, /*non_blocking=*/false)
-          .contiguous();
+      q_seq_lens_host.defined()
+          ? q_seq_lens_host
+                .to(torch::kCPU, torch::kInt32, /*non_blocking=*/false)
+                .contiguous()
+          : q_seq_lens.to(torch::kCPU, torch::kInt32, /*non_blocking=*/false)
+                .contiguous();
   auto kv_seq_lens_cpu =
-      kv_seq_lens.to(torch::kCPU, torch::kInt32, /*non_blocking=*/false)
-          .contiguous();
+      kv_seq_lens_host.defined()
+          ? kv_seq_lens_host
+                .to(torch::kCPU, torch::kInt32, /*non_blocking=*/false)
+                .contiguous()
+          : kv_seq_lens.to(torch::kCPU, torch::kInt32, /*non_blocking=*/false)
+                .contiguous();
   CHECK_EQ(q_seq_lens_cpu.numel(), kv_seq_lens_cpu.numel());
   const auto* q_seq_lens_ptr = q_seq_lens_cpu.data_ptr<int32_t>();
   const auto* kv_seq_lens_ptr = kv_seq_lens_cpu.data_ptr<int32_t>();
@@ -93,6 +133,7 @@ torch::Tensor x_flash_attention_infer_with_query_split(
 
   auto output = torch::empty_like(query);
   int64_t q_offset = 0;
+  std::vector<XfaQuerySlice> slices;
   const auto device = query.device();
   for (int64_t seq_idx = 0; seq_idx < batch; ++seq_idx) {
     const int64_t q_len = q_seq_lens_ptr[seq_idx];
@@ -103,29 +144,66 @@ torch::Tensor x_flash_attention_infer_with_query_split(
     for (int64_t q_start = 0; q_start < q_len; q_start += max_q_len_per_call) {
       const int64_t sub_q_len =
           std::min<int64_t>(max_q_len_per_call, q_len - q_start);
-      auto sub_query =
-          query.narrow(0, q_offset + q_start, sub_q_len).contiguous();
-      auto sub_block_table = block_table.narrow(0, seq_idx, 1).contiguous();
-      auto sub_q_lens =
-          int32_tensor_on_device({static_cast<int32_t>(sub_q_len)}, device);
-      auto sub_kv_lens = int32_tensor_on_device(
-          {static_cast<int32_t>(past_kv_len + q_start + sub_q_len)}, device);
-
-      auto sub_output =
-          xllm::kernel::npu::x_flash_attention_infer(sub_query,
-                                                     key_cache,
-                                                     value_cache,
-                                                     mask,
-                                                     sub_block_table,
-                                                     sub_q_lens,
-                                                     sub_kv_lens,
-                                                     q_head,
-                                                     kv_head,
-                                                     scale,
-                                                     "TND");
-      output.narrow(0, q_offset + q_start, sub_q_len).copy_(sub_output);
+      const int64_t sub_kv_len = past_kv_len + q_start + sub_q_len;
+      const int64_t core_count =
+          xfa_core_count_for_slice(sub_kv_len, kv_head, key_cache.size(1));
+      CHECK_LE(core_count, kXfaMaxExtraInfoNodes)
+          << "x_flash_attention_infer query slice needs too many cores";
+      slices.push_back(
+          {seq_idx, q_offset + q_start, sub_q_len, sub_kv_len, core_count});
     }
     q_offset += q_len;
+  }
+
+  for (size_t group_start = 0; group_start < slices.size();) {
+    size_t group_end = group_start;
+    int64_t core_count = 0;
+    while (group_end < slices.size() &&
+           core_count + slices[group_end].core_count <= kXfaMaxExtraInfoNodes) {
+      core_count += slices[group_end].core_count;
+      ++group_end;
+    }
+
+    const int64_t q_start = slices[group_start].q_start;
+    const int64_t q_end =
+        slices[group_end - 1].q_start + slices[group_end - 1].q_len;
+    auto group_query = query.narrow(0, q_start, q_end - q_start).contiguous();
+
+    std::vector<int32_t> group_q_lens;
+    std::vector<int32_t> group_kv_lens;
+    std::vector<int64_t> block_indices;
+    group_q_lens.reserve(group_end - group_start);
+    group_kv_lens.reserve(group_end - group_start);
+    block_indices.reserve(group_end - group_start);
+    int32_t q_cu_len = 0;
+    for (size_t idx = group_start; idx < group_end; ++idx) {
+      q_cu_len += static_cast<int32_t>(slices[idx].q_len);
+      group_q_lens.push_back(q_cu_len);
+      group_kv_lens.push_back(static_cast<int32_t>(slices[idx].kv_len));
+      block_indices.push_back(slices[idx].seq_idx);
+    }
+
+    auto group_block_table =
+        block_table
+            .index_select(0, int64_tensor_on_device(block_indices, device))
+            .contiguous();
+    auto group_q_lens_tensor = int32_tensor_on_device(group_q_lens, device);
+    auto group_kv_lens_tensor = int32_tensor_on_device(group_kv_lens, device);
+
+    auto group_output =
+        xllm::kernel::npu::x_flash_attention_infer(group_query,
+                                                   key_cache,
+                                                   value_cache,
+                                                   mask,
+                                                   group_block_table,
+                                                   group_q_lens_tensor,
+                                                   group_kv_lens_tensor,
+                                                   q_head,
+                                                   kv_head,
+                                                   scale,
+                                                   "TND");
+    output.narrow(0, q_start, q_end - q_start).copy_(group_output);
+    group_start = group_end;
   }
   return output;
 }
@@ -207,6 +285,8 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
         attn_metadata.block_table,
         attn_metadata.q_seq_lens,
         attn_metadata.kv_seq_lens,
+        attn_metadata.q_seq_lens_host,
+        attn_metadata.kv_seq_lens_host,
         num_heads_,
         num_kv_heads_,
         scale_);

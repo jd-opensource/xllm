@@ -586,7 +586,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
         conv_weight.transpose(0, 1).contiguous();
     xllm::kernel::CausalConv1dUpdateParams conv1d_params;
     conv1d_params.x = mixed_qkv.reshape({-1, mixed_qkv.size(-1)});
-    conv1d_params.conv_state = conv_cache;
+    conv1d_params.conv_state = conv_cache.transpose(1, 2);
     conv1d_params.weight = conv_weight_for_update;
     conv1d_params.conv_state_indices = logical_state_indices;
     conv1d_params.block_idx_last_scheduled_token =
