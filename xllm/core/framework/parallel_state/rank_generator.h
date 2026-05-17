@@ -52,8 +52,8 @@ class RankGenerator {
 
   std::shared_ptr<
       std::unordered_map<std::string, std::vector<std::vector<int32_t>>>>
-  get_ranks_mapping(const std::vector<int32_t>& group_ranks,
-                    const std::vector<std::string>& group_order) {
+  get_ranks_mapping(std::vector<int32_t>& group_ranks,
+                    std::vector<std::string>& group_order) {
     CHECK(!group_ranks.empty() && group_ranks.size() != 0)
         << "The RankGenerator expected to initialize with group_ranks that "
            "contains the ranks of sub groups"
@@ -71,9 +71,16 @@ class RankGenerator {
 
     bool is_single_group = (group_ranks.size() == 1);
     if (is_single_group && group_ranks[0] != world_size_) {
+      if (world_size_ % group_ranks[0] != 0) {
+        LOG(FATAL) << "The world_size could not be divided by vae_size, "
+                   << "got world_size: " << world_size_
+                   << ", vae_size: " << group_ranks[0] << ".";
+      }
       LOG(WARNING) << "The sub group size does not equal world_size"
                    << ", we will assign the " << group_order[0]
                    << ", with sub group size: " << group_ranks[0];
+      group_ranks.emplace_back(world_size_ / group_ranks[0]);
+      group_order.emplace_back("place_holder");
     } else if (world_size_ != product_size) {
       LOG(FATAL) << "The world_size does not equals the product of sub "
                     "group sizes, "

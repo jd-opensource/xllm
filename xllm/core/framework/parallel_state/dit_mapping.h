@@ -34,6 +34,8 @@ class DiTMapping final {
     PROPERTY(int32_t, dit_sp_size) = -1;
     // dp size
     PROPERTY(int32_t, dit_dp_size) = -1;
+    // vae size
+    PROPERTY(int32_t, dit_vae_size) = -1;
   };
 
   DiTMapping(const int32_t world_size,
@@ -68,5 +70,6 @@ class DiTMapping final {
   ParallelInfo tp_ = ParallelInfo();
   ParallelInfo cfg_ = ParallelInfo();
   ParallelInfo dp_ = ParallelInfo();
+  ParallelInfo vae_ = ParallelInfo();
 };
 }  // namespace xllm

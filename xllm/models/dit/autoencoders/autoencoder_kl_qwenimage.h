@@ -1627,24 +1627,23 @@ class AutoencoderKLQwenImageImpl : public torch::nn::Module {
       auto weight_a = 1.0 - static_cast<double>(y) / blend_extent;
       auto weight_b = static_cast<double>(y) / blend_extent;
 
-      auto a_slice = a.index(
-          {torch::indexing::Slice(),
-           torch::indexing::Slice(),
-           torch::indexing::Slice(),
-           torch::indexing::Slice(-blend_extent + y, -blend_extent + y + 1),
-           torch::indexing::Slice()});
+      auto a_slice = a.index({torch::indexing::Slice(),
+                              torch::indexing::Slice(),
+                              torch::indexing::Slice(),
+                              -blend_extent + y,
+                              torch::indexing::Slice()});
 
       auto b_slice = result_b.index({torch::indexing::Slice(),
                                      torch::indexing::Slice(),
                                      torch::indexing::Slice(),
-                                     torch::indexing::Slice(y, y + 1),
+                                     y,
                                      torch::indexing::Slice()});
 
       auto blended = a_slice * weight_a + b_slice * weight_b;
       result_b.index_put_({torch::indexing::Slice(),
                            torch::indexing::Slice(),
                            torch::indexing::Slice(),
-                           torch::indexing::Slice(y, y + 1),
+                           y,
                            torch::indexing::Slice()},
                           blended);
     }
@@ -1662,25 +1661,24 @@ class AutoencoderKLQwenImageImpl : public torch::nn::Module {
       auto weight_a = 1.0 - static_cast<double>(x) / blend_extent;
       auto weight_b = static_cast<double>(x) / blend_extent;
 
-      auto a_slice = a.index(
-          {torch::indexing::Slice(),
-           torch::indexing::Slice(),
-           torch::indexing::Slice(),
-           torch::indexing::Slice(),
-           torch::indexing::Slice(-blend_extent + x, -blend_extent + x + 1)});
+      auto a_slice = a.index({torch::indexing::Slice(),
+                              torch::indexing::Slice(),
+                              torch::indexing::Slice(),
+                              torch::indexing::Slice(),
+                              -blend_extent + x});
 
       auto b_slice = result_b.index({torch::indexing::Slice(),
                                      torch::indexing::Slice(),
                                      torch::indexing::Slice(),
                                      torch::indexing::Slice(),
-                                     torch::indexing::Slice(x, x + 1)});
+                                     x});
 
       auto blended = a_slice * weight_a + b_slice * weight_b;
       result_b.index_put_({torch::indexing::Slice(),
                            torch::indexing::Slice(),
                            torch::indexing::Slice(),
                            torch::indexing::Slice(),
-                           torch::indexing::Slice(x, x + 1)},
+                           x},
                           blended);
     }
 

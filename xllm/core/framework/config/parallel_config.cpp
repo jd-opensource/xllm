@@ -40,6 +40,8 @@ DEFINE_int64(cfg_size,
              "Classifier-free guidiance parallelism size, only used for DiT "
              "model.");
 
+DEFINE_int64(vae_size, 1, "Vae patch parallelism size");
+
 DEFINE_string(
     communication_backend,
     "hccl",

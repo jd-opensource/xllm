@@ -65,6 +65,12 @@ DEFINE_int64(dit_generation_image_area_max,
              0,
              "Maximum allowed image area (width * height) for image generation "
              "requests. If set to 0, there is no limit.");
+// --- dit vae tiling ---
+
+DEFINE_bool(
+    enable_dit_vae_tiling,
+    false,
+    "whether enable vae tiling, currently only support qwen-image-edit-plus");
 
 namespace xllm {
 

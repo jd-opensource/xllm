@@ -349,7 +349,11 @@ DECLARE_int64(dit_sp_communication_overlap);
 
 DECLARE_int64(dit_generation_image_area_max);
 
+DECLARE_int64(vae_size);
+
 DECLARE_bool(dit_debug_print);
+
+DECLARE_bool(enable_dit_vae_tiling);
 
 DECLARE_bool(use_audio_in_video);
 
