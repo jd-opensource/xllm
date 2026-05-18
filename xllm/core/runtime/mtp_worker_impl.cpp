@@ -21,7 +21,7 @@ limitations under the License.
 #include "framework/kv_cache_transfer/mooncake_kv_cache_transfer.h"
 #endif
 #include "core/framework/config/disagg_pd_config.h"
-#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/speculative_config.h"
 #include "framework/request/mm_data.h"
 #include "spec_input_builder.h"
@@ -185,8 +185,7 @@ bool MTPWorkerImpl::init_model(const std::string& model_weights_path,
       draft_impl_->get_status() == WorkerImpl::Status::LOADED) {
     // Share lm_head and word_embedding between target and draft models
 #if defined(USE_NPU)
-    if (::xllm::ExecutionConfig::get_instance().npu_kernel_backend() !=
-        "TORCH") {
+    if (::xllm::KernelConfig::get_instance().npu_kernel_backend() != "TORCH") {
       auto head = impl_->get_npu_lm_head();
       draft_impl_->set_npu_lm_head(head);
       auto word_embedding = impl_->get_npu_word_embedding();

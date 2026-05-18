@@ -22,6 +22,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "core/framework/config/eplb_config.h"
 #include "core/framework/config/execution_config.h"
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
@@ -127,7 +128,7 @@ void NpuQwen3MoeDecoderLayerImpl::initialize_basic_parameters(
   // Can be applied to prefill, but has not been tested yet
   param.enableFusedReducesumDiv = !is_prefill;
   param.enableAclnnExternelAddRmsNorm =
-      ::xllm::ExecutionConfig::get_instance().enable_intralayer_addnorm() &&
+      ::xllm::KernelConfig::get_instance().enable_intralayer_addnorm() &&
       !is_prefill;
   param.enableAclnnAddRmsNorm = !is_prefill;
 

@@ -11,6 +11,7 @@ cc_library(
     dit_config.h
     eplb_config.h
     execution_config.h
+    kernel_config.h
     kv_cache_store_config.h
     load_config.h
     model_config.h
@@ -28,6 +29,7 @@ cc_library(
     dit_config.cpp
     eplb_config.cpp
     execution_config.cpp
+    kernel_config.cpp
     kv_cache_store_config.cpp
     load_config.cpp
     model_config.cpp

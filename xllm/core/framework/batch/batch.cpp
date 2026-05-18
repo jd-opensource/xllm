@@ -25,7 +25,7 @@ limitations under the License.
 #include "batch_input_builder.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
-#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/model_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
@@ -259,7 +259,7 @@ void Batch::dp_balance_shuffle_seqs() {
   // this shuffle operation is mainly used for npu with 24 cores
   // and specific mla op implementation
   const auto num_npu_cores = 24;  // npu cube core num
-  if (::xllm::ExecutionConfig::get_instance().enable_customize_mla_kernel() &&
+  if (::xllm::KernelConfig::get_instance().enable_customize_mla_kernel() &&
       ::xllm::ParallelConfig::get_instance().enable_dp_balance() &&
       sequences_.size() > num_npu_cores) {
     std::vector<uint32_t> kv_cache_tokens_num;

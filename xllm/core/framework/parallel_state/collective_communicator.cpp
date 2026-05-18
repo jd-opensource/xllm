@@ -32,7 +32,7 @@ limitations under the License.
 #endif
 #include "common/global_flags.h"
 #include "core/framework/config/eplb_config.h"
-#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "parallel_args.h"
 #include "process_group.h"
@@ -66,7 +66,7 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
   //         global_rank, world_size, device, comm);
 
   // comunicator will be inited in torch.
-  if (::xllm::ExecutionConfig::get_instance().npu_kernel_backend() == "TORCH") {
+  if (::xllm::KernelConfig::get_instance().npu_kernel_backend() == "TORCH") {
     parallel_args_ = std::make_unique<ParallelArgs>(
         global_rank, world_size, dp_size, cp_size, nullptr, ep_size);
     return;
@@ -127,7 +127,7 @@ void CollectiveCommunicator::create_process_groups(
     const std::string& master_addr,
     const torch::Device& device) {
 #if defined(USE_NPU)
-  if (::xllm::ExecutionConfig::get_instance().npu_kernel_backend() == "ATB") {
+  if (::xllm::KernelConfig::get_instance().npu_kernel_backend() == "ATB") {
     return;
   }
 #endif

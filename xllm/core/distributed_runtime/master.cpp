@@ -34,7 +34,7 @@ limitations under the License.
 #include "common/types.h"
 #include "core/common/xllm_build_info.h"
 #include "core/framework/config/eplb_config.h"
-#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "dit_master.h"
@@ -136,7 +136,7 @@ void resolve_npu_kernel_backend_for_options(Options* options) {
   }
 
   options->npu_kernel_backend(effective_backend);
-  ExecutionConfig::get_instance().npu_kernel_backend(effective_backend);
+  KernelConfig::get_instance().npu_kernel_backend(effective_backend);
   LOG(INFO) << "Resolved npu_kernel_backend=" << effective_backend
             << " for model_type=" << model_type;
 }

@@ -15,7 +15,7 @@ limitations under the License.
 
 #pragma once
 
-#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/speculative_config.h"
 #include "core/framework/model/model_output.h"
@@ -324,7 +324,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     RollingLayerGuard rolling_guard(rolling_mgr_);
 
     std::optional<torch::Tensor> residual;
-    if (::xllm::ExecutionConfig::get_instance().enable_intralayer_addnorm()) {
+    if (::xllm::KernelConfig::get_instance().enable_intralayer_addnorm()) {
       residual = torch::zeros_like(h);
     }
     const int64_t num_tokens = h.size(0);
@@ -345,10 +345,10 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       if (capture_aux_hidden_states_ &&
           layers_to_capture_set_.count(static_cast<int32_t>(i)) != 0) {
         // auto aux_h = h;
-        auto aux_h = (::xllm::ExecutionConfig::get_instance()
-                          .enable_intralayer_addnorm())
-                         ? h + residual.value()
-                         : h;
+        auto aux_h =
+            (::xllm::KernelConfig::get_instance().enable_intralayer_addnorm())
+                ? h + residual.value()
+                : h;
         aux_output_buffer_.slice(0, 0, num_tokens)
             .slice(1,
                    static_cast<int64_t>(capture_idx) * hidden_size,
@@ -377,7 +377,7 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
       }
     }
 
-    if (::xllm::ExecutionConfig::get_instance().enable_intralayer_addnorm())
+    if (::xllm::KernelConfig::get_instance().enable_intralayer_addnorm())
       h = h + residual.value();
     auto hidden_states = norm_(h, 0);
     if (capture_aux_hidden_states_) {

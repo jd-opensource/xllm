@@ -35,7 +35,7 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "core/framework/config/eplb_config.h"
-#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/service_config.h"
 #if defined(USE_CUDA) || defined(USE_MLU)
@@ -83,8 +83,7 @@ void WorkerServer::create_server(
     std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
   ParallelConfig::get_instance().enable_prefill_sp(options.enable_prefill_sp());
 #if defined(USE_NPU)
-  ExecutionConfig::get_instance().npu_kernel_backend(
-      options.npu_kernel_backend());
+  KernelConfig::get_instance().npu_kernel_backend(options.npu_kernel_backend());
 #endif
   Device device(d);
   device.set_device();

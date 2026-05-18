@@ -22,7 +22,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "core/framework/config/eplb_config.h"
-#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
@@ -203,7 +203,7 @@ NpuDeepseekV2DecoderLayerImpl::NpuDeepseekV2DecoderLayerImpl(
   param_from_args(decode_param_, model_args, parallel_args, false, false);
   param_from_args(decode_mla_param_, model_args, parallel_args, false, false);
   decode_mla_param_.enableCustomizeMla =
-      ::xllm::ExecutionConfig::get_instance().enable_customize_mla_kernel();
+      ::xllm::KernelConfig::get_instance().enable_customize_mla_kernel();
 
   loader_ = std::make_unique<DeekseekV2DecoderLoader>(
       WEIGHT_COUNT_PER_LAYER,
@@ -811,8 +811,7 @@ torch::Tensor NpuDeepseekV2DecoderLayerImpl::forward(
     // customize mla kernel. once detect any input exceed the limit, fall back
     // to default kernel.
     const int num_tokens_limit = 230;
-    if (!::xllm::ExecutionConfig::get_instance()
-             .enable_customize_mla_kernel() ||
+    if (!::xllm::KernelConfig::get_instance().enable_customize_mla_kernel() ||
         num_tokens >= num_tokens_limit) {
       build_node_variant_pack(decode_node_,
                               x,

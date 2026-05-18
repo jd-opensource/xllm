@@ -301,8 +301,6 @@ DECLARE_int32(flashinfer_workspace_buffer_size);
 
 DECLARE_int32(random_seed);
 
-DECLARE_bool(enable_customize_mla_kernel);
-
 DECLARE_string(dit_cache_policy);
 
 DECLARE_int64(dit_cache_warmup_steps);
@@ -335,7 +333,10 @@ DECLARE_bool(dit_debug_print);
 
 DECLARE_bool(use_audio_in_video);
 
+// --- kernel config ---
 #if defined(USE_NPU)
+DECLARE_bool(enable_customize_mla_kernel);
+
 DECLARE_string(npu_kernel_backend);
 
 DECLARE_bool(enable_intralayer_addnorm);

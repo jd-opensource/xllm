@@ -25,7 +25,7 @@ limitations under the License.
 #include "core/distributed_runtime/worker_server.h"
 #include "core/framework/config/distributed_config.h"
 #include "core/framework/config/eplb_config.h"
-#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
@@ -112,7 +112,7 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
 
 #if defined(USE_NPU)
   device.init_device_context();
-  ExecutionConfig::get_instance().npu_kernel_backend(npu_kernel_backend);
+  KernelConfig::get_instance().npu_kernel_backend(npu_kernel_backend);
   FLAGS_enable_atb_comm_multiprocess = true;
 #endif
 #if defined(USE_CUDA) || defined(USE_MLU)

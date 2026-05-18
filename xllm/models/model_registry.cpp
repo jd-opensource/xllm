@@ -22,7 +22,7 @@ limitations under the License.
 #include <unordered_set>
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kernel_config.h"
 #include "models.h"
 
 namespace {
@@ -151,7 +151,7 @@ bool resolve_model_registration_name(const std::string& model_type,
 #if defined(USE_NPU)
   return resolve_model_registration(
       model_type,
-      ::xllm::ExecutionConfig::get_instance().npu_kernel_backend(),
+      ::xllm::KernelConfig::get_instance().npu_kernel_backend(),
       nullptr,
       resolved_name,
       error_message);

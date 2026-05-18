@@ -66,18 +66,6 @@ DEFINE_uint64(output_shm_size,
 
 DEFINE_int32(random_seed, -1, "Random seed for random number generator.");
 
-DEFINE_bool(enable_customize_mla_kernel, false, "enable customize mla kernel");
-
-#if defined(USE_NPU)
-DEFINE_string(npu_kernel_backend,
-              "AUTO",
-              "NPU kernel backend. Supported options: AUTO, ATB, TORCH.");
-
-DEFINE_bool(enable_intralayer_addnorm,
-            false,
-            "enable fused intralayer addnorm ops.");
-#endif
-
 namespace xllm {
 
 ExecutionConfig ExecutionConfig::from_flags() {
@@ -92,12 +80,7 @@ ExecutionConfig ExecutionConfig::from_flags() {
       .use_contiguous_input_buffer(FLAGS_use_contiguous_input_buffer)
       .input_shm_size(FLAGS_input_shm_size)
       .output_shm_size(FLAGS_output_shm_size)
-      .random_seed(FLAGS_random_seed)
-      .enable_customize_mla_kernel(FLAGS_enable_customize_mla_kernel);
-#if defined(USE_NPU)
-  config.npu_kernel_backend(FLAGS_npu_kernel_backend)
-      .enable_intralayer_addnorm(FLAGS_enable_intralayer_addnorm);
-#endif
+      .random_seed(FLAGS_random_seed);
   return config;
 }
 

@@ -39,6 +39,7 @@ limitations under the License.
 #include "core/framework/config/dit_config.h"
 #include "core/framework/config/eplb_config.h"
 #include "core/framework/config/execution_config.h"
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/kv_cache_store_config.h"
 #include "core/framework/config/load_config.h"
@@ -128,12 +129,13 @@ Options create_options(const std::string& instance_name, bool is_local) {
       SpeculativeConfig::get_instance();
   const ProfileConfig& profile_config = ProfileConfig::get_instance();
   const ExecutionConfig& execution_config = ExecutionConfig::get_instance();
+  const KernelConfig& kernel_config = KernelConfig::get_instance();
   const DiTConfig& dit_config = DiTConfig::get_instance();
   const RecConfig& rec_config = RecConfig::get_instance();
 
   Options options;
 #if defined(USE_NPU)
-  options.npu_kernel_backend(execution_config.npu_kernel_backend());
+  options.npu_kernel_backend(kernel_config.npu_kernel_backend());
 #endif
   options.model_path(model_config.model())
       .model_id(model_config.model_id())
