@@ -28,6 +28,7 @@ limitations under the License.
 #include <stdexcept>
 
 #include "core/framework/model_loader.h"
+#include "core/util/cpu_affinity.h"
 #include "core/util/rec_model_utils.h"
 #include "helper.h"
 
@@ -124,6 +125,9 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
   if (!handler || !model_path || !devices) return false;
 
   try {
+    xllm::CpuAffinity::get_instance().set_cpu_affinity(
+        init_options->cpu_affinity);
+
     XLLM_InitOptions xllm_init_options;
     xllm::helper::set_init_options(
         xllm::helper::BackendType::REC, init_options, &xllm_init_options);
@@ -268,10 +272,13 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
 
     size_t cpu_cores = std::thread::hardware_concurrency();
     size_t thread_num = std::clamp((cpu_cores == 0) ? 8 : cpu_cores / 2,
-                                   static_cast<size_t>(4),
+                                   static_cast<size_t>(8),
                                    static_cast<size_t>(16));
-    handler->executor =
-        std::make_unique<folly::CPUThreadPoolExecutor>(thread_num);
+
+    auto thread_factory = std::make_shared<xllm::CpuAffinityThreadFactory>(
+        /*prefix=*/"XllmRecExec");
+    handler->executor = std::make_unique<folly::CPUThreadPoolExecutor>(
+        thread_num, std::move(thread_factory));
 
     std::filesystem::path model_path_fs =
         std::filesystem::path(model_path).lexically_normal();

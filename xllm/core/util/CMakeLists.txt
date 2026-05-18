@@ -9,6 +9,7 @@ cc_library(
     blockingconcurrentqueue.h
     closure_guard.h
     concurrentqueue.h
+    cpu_affinity.h
     device_name_utils.h
     double_buffer.h
     env_var.h
@@ -35,6 +36,7 @@ cc_library(
     uuid.h
     shared_memory_manager.h
   SRCS
+    cpu_affinity.cpp
     device_name_utils.cpp
     env_var.cpp
     http_downloader.cpp
@@ -51,6 +53,7 @@ cc_library(
     uuid.cpp
     shared_memory_manager.cpp
   DEPS
+    Folly::folly
     torch
     brpc
     OpenSSL::SSL
