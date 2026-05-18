@@ -109,14 +109,17 @@ AttentionMetadata build_attention_metadata(
   }
   // Provide capture-time host seq_lens for NPU kernels. ACL graph replay must
   // rely on fixed-address device inputs such as tiling_data, not mutable host
-  // tensors.
-  if (!params.q_seq_lens_vec.empty()) {
-    attn_metadata.q_seq_lens_host =
-        torch::tensor(params.q_seq_lens_vec, torch::kInt);
-  }
-  if (!params.kv_seq_lens_vec.empty()) {
-    attn_metadata.kv_seq_lens_host =
-        torch::tensor(params.kv_seq_lens_vec, torch::kInt);
+  // tensors. Skip host tensor creation in graph mode to avoid unnecessary
+  // CPU memory allocation and copy overhead on every decode step.
+  if (!use_acl_graph) {
+    if (!params.q_seq_lens_vec.empty()) {
+      attn_metadata.q_seq_lens_host =
+          torch::tensor(params.q_seq_lens_vec, torch::kInt);
+    }
+    if (!params.kv_seq_lens_vec.empty()) {
+      attn_metadata.kv_seq_lens_host =
+          torch::tensor(params.kv_seq_lens_vec, torch::kInt);
+    }
   }
 #endif
   attn_metadata.is_chunked_prefill =
