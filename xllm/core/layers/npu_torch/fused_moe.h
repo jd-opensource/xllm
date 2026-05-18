@@ -129,6 +129,7 @@ class FusedMoEImpl : public torch::nn::Module {
   void validate_resolved_quant_method() const;
   void ensure_quant_weight_layout();
   void preprocess_w4a8_dynamic_weights();
+  void clear_w4a8_dynamic_source_weight_cache();
 };
 TORCH_MODULE(FusedMoE);
 

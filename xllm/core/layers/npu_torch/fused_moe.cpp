@@ -567,6 +567,12 @@ void FusedMoEImpl::resolve_quant_method_from_state_dict(
     const StateDict& state_dict) {
   resolved_moe_quant_method_ =
       resolve_moe_quant_method(quant_args_, state_dict);
+  if (w4a8_dynamic_preprocessed_ &&
+      is_w4a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+    // Preprocessed W4A8 routed weights are already in runtime-packed layout.
+    // Later checkpoint shards must not restore the load-time tensor layout.
+    return;
+  }
   if (is_supported_dynamic_moe_quant_method(resolved_moe_quant_method_)) {
     validate_resolved_quant_method();
     ensure_quant_weight_layout();
@@ -1059,6 +1065,36 @@ void FusedMoEImpl::preprocess_w4a8_dynamic_weights() {
     w2_scale_bias_is_loaded_ = true;
   }
   w4a8_dynamic_preprocessed_ = true;
+  clear_w4a8_dynamic_source_weight_cache();
+}
+
+void FusedMoEImpl::clear_w4a8_dynamic_source_weight_cache() {
+  w1_ = torch::Tensor();
+  w3_ = torch::Tensor();
+  w1_scale_ = torch::Tensor();
+  w3_scale_ = torch::Tensor();
+  w1_scale_second_ = torch::Tensor();
+  w3_scale_second_ = torch::Tensor();
+  w1_scale_bias_ = torch::Tensor();
+  w3_scale_bias_ = torch::Tensor();
+
+  w1_is_loaded_ = false;
+  w3_is_loaded_ = false;
+  w1_scale_is_loaded_ = false;
+  w3_scale_is_loaded_ = false;
+  w1_scale_second_is_loaded_ = false;
+  w3_scale_second_is_loaded_ = false;
+  w1_scale_bias_is_loaded_ = false;
+  w3_scale_bias_is_loaded_ = false;
+
+  w1_list_.clear();
+  w3_list_.clear();
+  w1_scale_list_.clear();
+  w3_scale_list_.clear();
+  w1_scale_second_list_.clear();
+  w3_scale_second_list_.clear();
+  w1_scale_bias_list_.clear();
+  w3_scale_bias_list_.clear();
 }
 
 void FusedMoEImpl::load_experts(const StateDict& state_dict) {
@@ -1066,6 +1102,12 @@ void FusedMoEImpl::load_experts(const StateDict& state_dict) {
   const int64_t world_size = tp_pg_->world_size();
   const int64_t start_expert_id = start_expert_id_;
   const int64_t num_experts_per_rank = num_experts_per_rank_;
+  if (w4a8_dynamic_preprocessed_ &&
+      is_w4a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+    // Routed expert weights have been fully materialized and packed.
+    // Subsequent shards may still carry shared-expert tensors only.
+    return;
+  }
   std::vector<std::string> prefixes = {"gate_proj.", "up_proj."};
   if (is_smoothquant_) {
     LOAD_MOE_FUSED_WEIGHT("qweight", w1, w3, w13);
