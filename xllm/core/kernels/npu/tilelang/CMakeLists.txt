@@ -137,6 +137,11 @@ tilelang_register_runtime_kernel(
   WRAPPER_SRCS split_qkv_rmsnorm_mrope_wrapper.cpp
 )
 
+tilelang_register_runtime_kernel(
+  NAME chunk_gated_delta_rule_fwd_h
+  WRAPPER_SRCS chunk_gated_delta_rule_fwd_h_wrapper.cpp
+)
+
 cc_library(
   NAME
     tilelang_kernels
@@ -167,4 +172,52 @@ target_link_libraries(tilelang_kernels
     "$ENV{NPU_HOME_PATH}/lib64/libmmpa.so"
     m
     dl
+)
+
+cc_test(
+  NAME
+    rope_wrapper_test
+  SRCS
+    rope_wrapper_test.cpp
+  DEPS
+    :tilelang_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
+)
+
+cc_test(
+  NAME
+    fused_gdn_gating_wrapper_test
+  SRCS
+    fused_gdn_gating_wrapper_test.cpp
+  DEPS
+    :tilelang_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
+)
+
+cc_test(
+  NAME
+    split_qkv_rmsnorm_mrope_wrapper_test
+  SRCS
+    split_qkv_rmsnorm_mrope_wrapper_test.cpp
+  DEPS
+    :tilelang_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
+)
+
+cc_test(
+  NAME
+    chunk_gated_delta_rule_fwd_h_wrapper_test
+  SRCS
+    chunk_gated_delta_rule_fwd_h_wrapper_test.cpp
+  DEPS
+    :tilelang_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
 )
