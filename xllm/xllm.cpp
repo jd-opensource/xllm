@@ -72,6 +72,26 @@ static const std::unordered_set<std::string> cpp_template_supported_model_set =
 
 namespace {
 
+void initialize_configs() {
+  BeamSearchConfig::get_instance().initialize();
+  DisaggPDConfig::get_instance().initialize();
+  DistributedConfig::get_instance().initialize();
+  DiTConfig::get_instance().initialize();
+  EPLBConfig::get_instance().initialize();
+  ExecutionConfig::get_instance().initialize();
+  KernelConfig::get_instance().initialize();
+  KVCacheConfig::get_instance().initialize();
+  KVCacheStoreConfig::get_instance().initialize();
+  LoadConfig::get_instance().initialize();
+  ModelConfig::get_instance().initialize();
+  ParallelConfig::get_instance().initialize();
+  ProfileConfig::get_instance().initialize();
+  RecConfig::get_instance().initialize();
+  SchedulerConfig::get_instance().initialize();
+  ServiceConfig::get_instance().initialize();
+  SpeculativeConfig::get_instance().initialize();
+}
+
 void fix_mlu_disagg_pd_config() {
   DisaggPDConfig& disagg_pd_config = DisaggPDConfig::get_instance();
   KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
@@ -499,6 +519,7 @@ int main(int argc, char** argv) {
   FLAGS_alsologtostderr = true;
   FLAGS_minloglevel = 0;
   google::ParseCommandLineFlags(&argc, &argv, true);
+  initialize_configs();
 
   google::InitGoogleLogging("xllm");
 

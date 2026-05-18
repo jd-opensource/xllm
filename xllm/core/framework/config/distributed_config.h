@@ -29,8 +29,8 @@ class DistributedConfig final {
 
   static DistributedConfig& get_instance();
 
-  static DistributedConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(std::string, master_node_addr) = "127.0.0.1:19888";
 

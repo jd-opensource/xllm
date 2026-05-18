@@ -28,8 +28,8 @@ class ExecutionConfig final {
 
   static ExecutionConfig& get_instance();
 
-  static ExecutionConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(bool, enable_graph) = false;
 

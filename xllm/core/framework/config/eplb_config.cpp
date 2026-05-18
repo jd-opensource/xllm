@@ -33,24 +33,20 @@ DEFINE_string(rank_tablefile, "", "ATB HCCL rank table file.");
 
 namespace xllm {
 
-EPLBConfig EPLBConfig::from_flags() {
-  EPLBConfig config;
-  config.enable_eplb(FLAGS_enable_eplb)
+void EPLBConfig::from_flags() {
+  enable_eplb(FLAGS_enable_eplb)
       .redundant_experts_num(FLAGS_redundant_experts_num)
       .eplb_update_interval(FLAGS_eplb_update_interval)
       .eplb_update_threshold(FLAGS_eplb_update_threshold)
       .expert_parallel_degree(FLAGS_expert_parallel_degree)
       .rank_tablefile(FLAGS_rank_tablefile);
-  return config;
 }
 
 EPLBConfig& EPLBConfig::get_instance() {
-  static EPLBConfig config = EPLBConfig::from_flags();
+  static EPLBConfig config;
   return config;
 }
 
-void EPLBConfig::reload_from_flags() {
-  EPLBConfig::get_instance() = EPLBConfig::from_flags();
-}
+void EPLBConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

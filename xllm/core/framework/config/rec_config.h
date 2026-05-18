@@ -28,8 +28,8 @@ class RecConfig final {
 
   static RecConfig& get_instance();
 
-  static RecConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(bool, enable_rec_fast_sampler) = true;
 

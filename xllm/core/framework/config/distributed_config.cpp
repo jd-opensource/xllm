@@ -49,9 +49,8 @@ DEFINE_int32(etcd_ttl, 3, "Time to live for etcd.");
 
 namespace xllm {
 
-DistributedConfig DistributedConfig::from_flags() {
-  DistributedConfig config;
-  config.master_node_addr(FLAGS_master_node_addr)
+void DistributedConfig::from_flags() {
+  master_node_addr(FLAGS_master_node_addr)
       .xtensor_master_node_addr(FLAGS_xtensor_master_node_addr)
       .nnodes(FLAGS_nnodes)
       .node_rank(FLAGS_node_rank)
@@ -61,16 +60,13 @@ DistributedConfig DistributedConfig::from_flags() {
       .enable_service_routing(FLAGS_enable_service_routing)
       .heart_beat_interval(FLAGS_heart_beat_interval)
       .etcd_ttl(FLAGS_etcd_ttl);
-  return config;
 }
 
 DistributedConfig& DistributedConfig::get_instance() {
-  static DistributedConfig config = DistributedConfig::from_flags();
+  static DistributedConfig config;
   return config;
 }
 
-void DistributedConfig::reload_from_flags() {
-  DistributedConfig::get_instance() = DistributedConfig::from_flags();
-}
+void DistributedConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

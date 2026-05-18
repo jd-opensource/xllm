@@ -29,8 +29,8 @@ class DisaggPDConfig final {
 
   static DisaggPDConfig& get_instance();
 
-  static DisaggPDConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(bool, enable_disagg_pd) = false;
 

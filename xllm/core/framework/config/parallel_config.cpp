@@ -59,9 +59,8 @@ DEFINE_bool(
 
 namespace xllm {
 
-ParallelConfig ParallelConfig::from_flags() {
-  ParallelConfig config;
-  config.dp_size(FLAGS_dp_size)
+void ParallelConfig::from_flags() {
+  dp_size(FLAGS_dp_size)
       .ep_size(FLAGS_ep_size)
       .cp_size(FLAGS_cp_size)
       .tp_size(FLAGS_tp_size)
@@ -72,16 +71,13 @@ ParallelConfig ParallelConfig::from_flags() {
       .enable_multi_stream_parallel(FLAGS_enable_multi_stream_parallel)
       .micro_batch_num(FLAGS_micro_batch_num)
       .enable_dp_balance(FLAGS_enable_dp_balance);
-  return config;
 }
 
 ParallelConfig& ParallelConfig::get_instance() {
-  static ParallelConfig config = ParallelConfig::from_flags();
+  static ParallelConfig config;
   return config;
 }
 
-void ParallelConfig::reload_from_flags() {
-  ParallelConfig::get_instance() = ParallelConfig::from_flags();
-}
+void ParallelConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

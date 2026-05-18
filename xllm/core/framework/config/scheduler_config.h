@@ -29,8 +29,8 @@ class SchedulerConfig final {
 
   static SchedulerConfig& get_instance();
 
-  static SchedulerConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(int32_t, max_tokens_per_batch) = 10240;
 

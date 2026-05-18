@@ -57,9 +57,8 @@ DEFINE_bool(enable_forward_interruption,
 
 namespace xllm {
 
-ProfileConfig ProfileConfig::from_flags() {
-  ProfileConfig config;
-  config.enable_profile_step_time(FLAGS_enable_profile_step_time)
+void ProfileConfig::from_flags() {
+  enable_profile_step_time(FLAGS_enable_profile_step_time)
       .enable_profile_token_budget(FLAGS_enable_profile_token_budget)
       .enable_latency_aware_schedule(FLAGS_enable_latency_aware_schedule)
       .profile_max_prompt_length(FLAGS_profile_max_prompt_length)
@@ -68,16 +67,13 @@ ProfileConfig ProfileConfig::from_flags() {
       .enable_profile_kv_blocks(FLAGS_enable_profile_kv_blocks)
       .disable_ttft_profiling(FLAGS_disable_ttft_profiling)
       .enable_forward_interruption(FLAGS_enable_forward_interruption);
-  return config;
 }
 
 ProfileConfig& ProfileConfig::get_instance() {
-  static ProfileConfig config = ProfileConfig::from_flags();
+  static ProfileConfig config;
   return config;
 }
 
-void ProfileConfig::reload_from_flags() {
-  ProfileConfig::get_instance() = ProfileConfig::from_flags();
-}
+void ProfileConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

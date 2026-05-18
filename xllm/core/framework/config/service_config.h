@@ -29,8 +29,8 @@ class ServiceConfig final {
 
   static ServiceConfig& get_instance();
 
-  static ServiceConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(std::string, host);
 

@@ -29,8 +29,8 @@ class SpeculativeConfig final {
 
   static SpeculativeConfig& get_instance();
 
-  static SpeculativeConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(std::string, draft_model);
 

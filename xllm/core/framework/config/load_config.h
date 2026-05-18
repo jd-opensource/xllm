@@ -28,8 +28,8 @@ class LoadConfig final {
 
   static LoadConfig& get_instance();
 
-  static LoadConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(bool, enable_manual_loader) = false;
 

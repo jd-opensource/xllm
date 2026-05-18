@@ -74,9 +74,8 @@ DEFINE_bool(enable_starve_prevent,
 
 namespace xllm {
 
-SchedulerConfig SchedulerConfig::from_flags() {
-  SchedulerConfig config;
-  config.max_tokens_per_batch(FLAGS_max_tokens_per_batch)
+void SchedulerConfig::from_flags() {
+  max_tokens_per_batch(FLAGS_max_tokens_per_batch)
       .max_seqs_per_batch(FLAGS_max_seqs_per_batch)
       .enable_schedule_overlap(FLAGS_enable_schedule_overlap)
       .prefill_scheduling_memory_usage_threshold(
@@ -92,16 +91,13 @@ SchedulerConfig SchedulerConfig::from_flags() {
       .aggressive_coeff(FLAGS_aggressive_coeff)
       .starve_threshold(FLAGS_starve_threshold)
       .enable_starve_prevent(FLAGS_enable_starve_prevent);
-  return config;
 }
 
 SchedulerConfig& SchedulerConfig::get_instance() {
-  static SchedulerConfig config = SchedulerConfig::from_flags();
+  static SchedulerConfig config;
   return config;
 }
 
-void SchedulerConfig::reload_from_flags() {
-  SchedulerConfig::get_instance() = SchedulerConfig::from_flags();
-}
+void SchedulerConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

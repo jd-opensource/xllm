@@ -28,8 +28,8 @@ class KernelConfig final {
 
   static KernelConfig& get_instance();
 
-  static KernelConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
 #if defined(USE_NPU)
   PROPERTY(bool, enable_customize_mla_kernel) = false;

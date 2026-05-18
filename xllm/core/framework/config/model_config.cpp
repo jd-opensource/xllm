@@ -78,9 +78,8 @@ DEFINE_bool(use_cpp_chat_template,
 
 namespace xllm {
 
-ModelConfig ModelConfig::from_flags() {
-  ModelConfig config;
-  config.model_id(FLAGS_model_id)
+void ModelConfig::from_flags() {
+  model_id(FLAGS_model_id)
       .model(FLAGS_model)
       .backend(FLAGS_backend)
       .task(FLAGS_task)
@@ -93,16 +92,13 @@ ModelConfig ModelConfig::from_flags() {
       .flashinfer_workspace_buffer_size(FLAGS_flashinfer_workspace_buffer_size)
       .use_audio_in_video(FLAGS_use_audio_in_video)
       .use_cpp_chat_template(FLAGS_use_cpp_chat_template);
-  return config;
 }
 
 ModelConfig& ModelConfig::get_instance() {
-  static ModelConfig config = ModelConfig::from_flags();
+  static ModelConfig config;
   return config;
 }
 
-void ModelConfig::reload_from_flags() {
-  ModelConfig::get_instance() = ModelConfig::from_flags();
-}
+void ModelConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

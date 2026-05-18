@@ -45,25 +45,21 @@ DEFINE_int32(transfer_listen_port, 26000, "The KVCacheTranfer listen port.");
 
 namespace xllm {
 
-DisaggPDConfig DisaggPDConfig::from_flags() {
-  DisaggPDConfig config;
-  config.enable_disagg_pd(FLAGS_enable_disagg_pd)
+void DisaggPDConfig::from_flags() {
+  enable_disagg_pd(FLAGS_enable_disagg_pd)
       .enable_pd_ooc(FLAGS_enable_pd_ooc)
       .disagg_pd_port(FLAGS_disagg_pd_port)
       .instance_role(FLAGS_instance_role)
       .kv_cache_transfer_type(FLAGS_kv_cache_transfer_type)
       .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
       .transfer_listen_port(FLAGS_transfer_listen_port);
-  return config;
 }
 
 DisaggPDConfig& DisaggPDConfig::get_instance() {
-  static DisaggPDConfig config = DisaggPDConfig::from_flags();
+  static DisaggPDConfig config;
   return config;
 }
 
-void DisaggPDConfig::reload_from_flags() {
-  DisaggPDConfig::get_instance() = DisaggPDConfig::from_flags();
-}
+void DisaggPDConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

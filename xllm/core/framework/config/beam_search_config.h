@@ -28,8 +28,8 @@ class BeamSearchConfig final {
 
   static BeamSearchConfig& get_instance();
 
-  static BeamSearchConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(bool, enable_beam_search_kernel) = false;
 

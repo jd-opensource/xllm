@@ -57,9 +57,8 @@ DEFINE_int64(
 
 namespace xllm {
 
-KVCacheConfig KVCacheConfig::from_flags() {
-  KVCacheConfig config;
-  config.block_size(FLAGS_block_size)
+void KVCacheConfig::from_flags() {
+  block_size(FLAGS_block_size)
       .max_cache_size(FLAGS_max_cache_size)
       .max_memory_utilization(FLAGS_max_memory_utilization)
       .kv_cache_dtype(FLAGS_kv_cache_dtype)
@@ -67,16 +66,13 @@ KVCacheConfig KVCacheConfig::from_flags() {
       .xxh3_128bits_seed(FLAGS_xxh3_128bits_seed)
       .enable_xtensor(FLAGS_enable_xtensor)
       .phy_page_granularity_size(FLAGS_phy_page_granularity_size);
-  return config;
 }
 
 KVCacheConfig& KVCacheConfig::get_instance() {
-  static KVCacheConfig config = KVCacheConfig::from_flags();
+  static KVCacheConfig config;
   return config;
 }
 
-void KVCacheConfig::reload_from_flags() {
-  KVCacheConfig::get_instance() = KVCacheConfig::from_flags();
-}
+void KVCacheConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

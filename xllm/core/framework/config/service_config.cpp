@@ -56,9 +56,8 @@ DEFINE_int32(health_check_interval_ms,
 
 namespace xllm {
 
-ServiceConfig ServiceConfig::from_flags() {
-  ServiceConfig config;
-  config.host(FLAGS_host)
+void ServiceConfig::from_flags() {
+  host(FLAGS_host)
       .port(FLAGS_port)
       .rpc_idle_timeout_s(FLAGS_rpc_idle_timeout_s)
       .rpc_channel_timeout_ms(FLAGS_rpc_channel_timeout_ms)
@@ -68,16 +67,13 @@ ServiceConfig ServiceConfig::from_flags() {
       .num_request_handling_threads(FLAGS_num_request_handling_threads)
       .num_response_handling_threads(FLAGS_num_response_handling_threads)
       .health_check_interval_ms(FLAGS_health_check_interval_ms);
-  return config;
 }
 
 ServiceConfig& ServiceConfig::get_instance() {
-  static ServiceConfig config = ServiceConfig::from_flags();
+  static ServiceConfig config;
   return config;
 }
 
-void ServiceConfig::reload_from_flags() {
-  ServiceConfig::get_instance() = ServiceConfig::from_flags();
-}
+void ServiceConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

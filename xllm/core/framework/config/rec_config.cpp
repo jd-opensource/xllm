@@ -81,9 +81,8 @@ DEFINE_uint32(rec_worker_max_concurrency,
 
 namespace xllm {
 
-RecConfig RecConfig::from_flags() {
-  RecConfig config;
-  config.enable_rec_fast_sampler(FLAGS_enable_rec_fast_sampler)
+void RecConfig::from_flags() {
+  enable_rec_fast_sampler(FLAGS_enable_rec_fast_sampler)
       .enable_rec_prefill_only(FLAGS_enable_rec_prefill_only)
       .enable_xattention_one_stage(FLAGS_enable_xattention_one_stage)
       .max_decode_rounds(FLAGS_max_decode_rounds)
@@ -96,16 +95,13 @@ RecConfig RecConfig::from_flags() {
       .total_conversion_threshold(FLAGS_total_conversion_threshold)
       .request_queue_size(FLAGS_request_queue_size)
       .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency);
-  return config;
 }
 
 RecConfig& RecConfig::get_instance() {
-  static RecConfig config = RecConfig::from_flags();
+  static RecConfig config;
   return config;
 }
 
-void RecConfig::reload_from_flags() {
-  RecConfig::get_instance() = RecConfig::from_flags();
-}
+void RecConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

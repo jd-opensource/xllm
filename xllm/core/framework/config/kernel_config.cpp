@@ -31,23 +31,19 @@ DEFINE_bool(enable_intralayer_addnorm,
 
 namespace xllm {
 
-KernelConfig KernelConfig::from_flags() {
-  KernelConfig config;
+void KernelConfig::from_flags() {
 #if defined(USE_NPU)
-  config.enable_customize_mla_kernel(FLAGS_enable_customize_mla_kernel)
+  enable_customize_mla_kernel(FLAGS_enable_customize_mla_kernel)
       .npu_kernel_backend(FLAGS_npu_kernel_backend)
       .enable_intralayer_addnorm(FLAGS_enable_intralayer_addnorm);
 #endif
-  return config;
 }
 
 KernelConfig& KernelConfig::get_instance() {
-  static KernelConfig config = KernelConfig::from_flags();
+  static KernelConfig config;
   return config;
 }
 
-void KernelConfig::reload_from_flags() {
-  KernelConfig::get_instance() = KernelConfig::from_flags();
-}
+void KernelConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

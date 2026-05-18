@@ -29,8 +29,8 @@ class ParallelConfig final {
 
   static ParallelConfig& get_instance();
 
-  static ParallelConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(int32_t, dp_size) = 1;
 

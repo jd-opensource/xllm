@@ -29,8 +29,8 @@ class ModelConfig final {
 
   static ModelConfig& get_instance();
 
-  static ModelConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(std::string, model_id);
 

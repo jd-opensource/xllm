@@ -62,9 +62,8 @@ DEFINE_bool(dit_debug_print,
 
 namespace xllm {
 
-DiTConfig DiTConfig::from_flags() {
-  DiTConfig config;
-  config.max_requests_per_batch(FLAGS_max_requests_per_batch)
+void DiTConfig::from_flags() {
+  max_requests_per_batch(FLAGS_max_requests_per_batch)
       .dit_cache_policy(FLAGS_dit_cache_policy)
       .dit_cache_warmup_steps(FLAGS_dit_cache_warmup_steps)
       .dit_cache_n_derivatives(FLAGS_dit_cache_n_derivatives)
@@ -77,16 +76,13 @@ DiTConfig DiTConfig::from_flags() {
       .dit_cache_end_blocks(FLAGS_dit_cache_end_blocks)
       .dit_sp_communication_overlap(FLAGS_dit_sp_communication_overlap)
       .dit_debug_print(FLAGS_dit_debug_print);
-  return config;
 }
 
 DiTConfig& DiTConfig::get_instance() {
-  static DiTConfig config = DiTConfig::from_flags();
+  static DiTConfig config;
   return config;
 }
 
-void DiTConfig::reload_from_flags() {
-  DiTConfig::get_instance() = DiTConfig::from_flags();
-}
+void DiTConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

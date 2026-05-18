@@ -61,9 +61,8 @@ DEFINE_bool(enable_control_h2d_block_num,
 
 namespace xllm {
 
-KVCacheStoreConfig KVCacheStoreConfig::from_flags() {
-  KVCacheStoreConfig config;
-  config.prefetch_timeout(FLAGS_prefetch_timeout)
+void KVCacheStoreConfig::from_flags() {
+  prefetch_timeout(FLAGS_prefetch_timeout)
       .prefetch_bacth_size(FLAGS_prefetch_bacth_size)
       .layers_wise_copy_batchs(FLAGS_layers_wise_copy_batchs)
       .host_blocks_factor(FLAGS_host_blocks_factor)
@@ -74,16 +73,13 @@ KVCacheStoreConfig KVCacheStoreConfig::from_flags() {
       .store_metadata_server(FLAGS_store_metadata_server)
       .store_local_hostname(FLAGS_store_local_hostname)
       .enable_control_h2d_block_num(FLAGS_enable_control_h2d_block_num);
-  return config;
 }
 
 KVCacheStoreConfig& KVCacheStoreConfig::get_instance() {
-  static KVCacheStoreConfig config = KVCacheStoreConfig::from_flags();
+  static KVCacheStoreConfig config;
   return config;
 }
 
-void KVCacheStoreConfig::reload_from_flags() {
-  KVCacheStoreConfig::get_instance() = KVCacheStoreConfig::from_flags();
-}
+void KVCacheStoreConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

@@ -29,8 +29,8 @@ class ProfileConfig final {
 
   static ProfileConfig& get_instance();
 
-  static ProfileConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(bool, enable_profile_step_time) = false;
 

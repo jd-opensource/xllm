@@ -29,8 +29,8 @@ class DiTConfig final {
 
   static DiTConfig& get_instance();
 
-  static DiTConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(int32_t, max_requests_per_batch) = 1;
 

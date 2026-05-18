@@ -39,22 +39,18 @@ DEFINE_bool(enable_topk_sorted,
 
 namespace xllm {
 
-BeamSearchConfig BeamSearchConfig::from_flags() {
-  BeamSearchConfig config;
-  config.enable_beam_search_kernel(FLAGS_enable_beam_search_kernel)
+void BeamSearchConfig::from_flags() {
+  enable_beam_search_kernel(FLAGS_enable_beam_search_kernel)
       .beam_width(FLAGS_beam_width)
       .enable_block_copy_kernel(FLAGS_enable_block_copy_kernel)
       .enable_topk_sorted(FLAGS_enable_topk_sorted);
-  return config;
 }
 
 BeamSearchConfig& BeamSearchConfig::get_instance() {
-  static BeamSearchConfig config = BeamSearchConfig::from_flags();
+  static BeamSearchConfig config;
   return config;
 }
 
-void BeamSearchConfig::reload_from_flags() {
-  BeamSearchConfig::get_instance() = BeamSearchConfig::from_flags();
-}
+void BeamSearchConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

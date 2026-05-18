@@ -29,8 +29,8 @@ class KVCacheConfig final {
 
   static KVCacheConfig& get_instance();
 
-  static KVCacheConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(int32_t, block_size) = 128;
 

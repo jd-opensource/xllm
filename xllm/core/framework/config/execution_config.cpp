@@ -68,9 +68,8 @@ DEFINE_int32(random_seed, -1, "Random seed for random number generator.");
 
 namespace xllm {
 
-ExecutionConfig ExecutionConfig::from_flags() {
-  ExecutionConfig config;
-  config.enable_graph(FLAGS_enable_graph)
+void ExecutionConfig::from_flags() {
+  enable_graph(FLAGS_enable_graph)
       .enable_graph_mode_decode_no_padding(
           FLAGS_enable_graph_mode_decode_no_padding)
       .enable_prefill_piecewise_graph(FLAGS_enable_prefill_piecewise_graph)
@@ -81,16 +80,13 @@ ExecutionConfig ExecutionConfig::from_flags() {
       .input_shm_size(FLAGS_input_shm_size)
       .output_shm_size(FLAGS_output_shm_size)
       .random_seed(FLAGS_random_seed);
-  return config;
 }
 
 ExecutionConfig& ExecutionConfig::get_instance() {
-  static ExecutionConfig config = ExecutionConfig::from_flags();
+  static ExecutionConfig config;
   return config;
 }
 
-void ExecutionConfig::reload_from_flags() {
-  ExecutionConfig::get_instance() = ExecutionConfig::from_flags();
-}
+void ExecutionConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

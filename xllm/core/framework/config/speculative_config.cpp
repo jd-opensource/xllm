@@ -68,9 +68,8 @@ DEFINE_bool(enable_atb_spec_kernel,
 
 namespace xllm {
 
-SpeculativeConfig SpeculativeConfig::from_flags() {
-  SpeculativeConfig config;
-  config.draft_model(FLAGS_draft_model)
+void SpeculativeConfig::from_flags() {
+  draft_model(FLAGS_draft_model)
       .draft_devices(FLAGS_draft_devices)
       .num_speculative_tokens(FLAGS_num_speculative_tokens)
       .speculative_algorithm(FLAGS_speculative_algorithm)
@@ -87,16 +86,13 @@ SpeculativeConfig SpeculativeConfig::from_flags() {
       .speculative_suffix_use_tree_spec(FLAGS_speculative_suffix_use_tree_spec)
       .enable_opt_validate_probs(FLAGS_enable_opt_validate_probs)
       .enable_atb_spec_kernel(FLAGS_enable_atb_spec_kernel);
-  return config;
 }
 
 SpeculativeConfig& SpeculativeConfig::get_instance() {
-  static SpeculativeConfig config = SpeculativeConfig::from_flags();
+  static SpeculativeConfig config;
   return config;
 }
 
-void SpeculativeConfig::reload_from_flags() {
-  SpeculativeConfig::get_instance() = SpeculativeConfig::from_flags();
-}
+void SpeculativeConfig::initialize() { from_flags(); }
 
 }  // namespace xllm

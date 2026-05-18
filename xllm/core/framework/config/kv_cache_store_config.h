@@ -29,8 +29,8 @@ class KVCacheStoreConfig final {
 
   static KVCacheStoreConfig& get_instance();
 
-  static KVCacheStoreConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(uint32_t, prefetch_timeout) = 0;
 

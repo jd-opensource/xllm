@@ -29,8 +29,8 @@ class EPLBConfig final {
 
   static EPLBConfig& get_instance();
 
-  static EPLBConfig from_flags();
-  static void reload_from_flags();
+  void from_flags();
+  void initialize();
 
   PROPERTY(bool, enable_eplb) = false;
 

@@ -51,23 +51,19 @@ DEFINE_bool(
 
 namespace xllm {
 
-LoadConfig LoadConfig::from_flags() {
-  LoadConfig config;
-  config.enable_manual_loader(FLAGS_enable_manual_loader)
+void LoadConfig::from_flags() {
+  enable_manual_loader(FLAGS_enable_manual_loader)
       .enable_rolling_load(FLAGS_enable_rolling_load)
       .rolling_load_num_cached_layers(FLAGS_rolling_load_num_cached_layers)
       .rolling_load_num_rolling_slots(FLAGS_rolling_load_num_rolling_slots)
       .enable_prefetch_weight(FLAGS_enable_prefetch_weight);
-  return config;
 }
 
 LoadConfig& LoadConfig::get_instance() {
-  static LoadConfig config = LoadConfig::from_flags();
+  static LoadConfig config;
   return config;
 }
 
-void LoadConfig::reload_from_flags() {
-  LoadConfig::get_instance() = LoadConfig::from_flags();
-}
+void LoadConfig::initialize() { from_flags(); }
 
 }  // namespace xllm
