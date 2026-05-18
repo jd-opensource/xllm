@@ -241,12 +241,10 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
     torch::ScalarType dtype,
     std::vector<xllm::KVCache>& kv_caches,
     int64_t num_layers,
-    std::function<void(const KVCacheShape&)> allocate_kv_cache_func,
+    AllocateKVCacheFunc allocate_kv_cache_func,
     bool enable_lighting_indexer,
     const std::string& model_type,
     const std::string& model_id) {
-  static_cast<void>(allocate_kv_cache_func);
-
   std::shared_ptr<KVCacheTransfer> transfer;
 
   int32_t device_id = device.index();
@@ -262,10 +260,11 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
                                                      model_type,
                                                      enable_lighting_indexer);
 
-    kv_caches.reserve(num_layers);
-
     transfer->initialize(device_id);
-    transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);
+    CHECK(allocate_kv_cache_func(kv_cache_shape,
+                                 /*use_huge_page_allocator=*/true))
+        << "Allocate KV cache failed.";
+    transfer->register_kv_cache(kv_caches, kv_cache_shape, dtype);
 #else
     LOG(FATAL) << "LlmDataDist is not supported on MLU backend.";
 #endif

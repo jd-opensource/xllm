@@ -77,6 +77,12 @@ class KVCacheTransfer {
                                  const KVCacheShape& kv_cache_shape,
                                  const torch::ScalarType dtype) {};
 
+  virtual void register_kv_cache_spec(std::vector<xllm::KVCache>& kv_caches,
+                                      const KVCacheShape& kv_cache_shape,
+                                      const torch::ScalarType dtype) {
+    NOT_IMPLEMENTED();
+  };
+
   virtual void get_cache_info(uint64_t& cluster_id,
                               std::string& addr,
                               int64_t& key_cache_id,
@@ -143,6 +149,9 @@ class KVCacheTransfer {
 
 class KVCacheTransferFactory {
  public:
+  using AllocateKVCacheFunc =
+      std::function<bool(const KVCacheShape&, bool use_huge_page_allocator)>;
+
   static std::shared_ptr<KVCacheTransfer> create(
       const std::string& transfer_type,
       const std::string& device_ip,
@@ -153,7 +162,7 @@ class KVCacheTransferFactory {
       torch::ScalarType dtype,
       std::vector<xllm::KVCache>& kv_caches,
       int64_t num_layers,
-      std::function<void(const KVCacheShape&)> allocate_kv_cache_func,
+      AllocateKVCacheFunc allocate_kv_cache_func,
       bool enable_lighting_indexer,
       const std::string& model_type = "",
       const std::string& model_id = "");

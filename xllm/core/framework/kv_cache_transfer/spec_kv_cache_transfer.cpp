@@ -24,10 +24,6 @@ namespace {
   CHECK(ret == LLM_SUCCESS) \
       << "Call LlmDataDist function failed, ret = " << std::hex << ret
 
-#define CHECK_ACL_RET(ret)  \
-  CHECK(ret == ACL_SUCCESS) \
-      << "Call ACL function failed, ret = " << std::hex << ret
-
 const std::map<torch::ScalarType, ge::DataType> kScalarTypeToDtype = {
     {torch::kBool, ge::DT_BOOL},
     {torch::kByte, ge::DT_UINT8},
@@ -48,41 +44,35 @@ SpecKVCacheTransfer::SpecKVCacheTransfer(const std::string& device_ip,
                                          const std::string& model_type)
     : LlmDataDistTransfer(device_ip, listen_port, instance_role, model_type) {}
 
-void SpecKVCacheTransfer::allocate_kv_cache(
+void SpecKVCacheTransfer::register_kv_cache(
     std::vector<xllm::KVCache>& kv_caches,
-    const int64_t num_layers,
     const KVCacheShape& kv_cache_shape,
     torch::ScalarType dtype) {
-  allocate_kv_cache_internal(kv_caches,
-                             num_layers,
-                             kv_cache_shape,
-                             dtype,
-                             /*is_spec*/ false,
-                             k_cache_,
-                             v_cache_);
+  register_kv_cache_internal(
+      kv_caches, kv_cache_shape, dtype, /*is_spec*/ false, k_cache_, v_cache_);
 }
 
-void SpecKVCacheTransfer::allocate_kv_cache_spec(
+void SpecKVCacheTransfer::register_kv_cache_spec(
     std::vector<xllm::KVCache>& kv_caches,
-    const int64_t num_layers,
     const KVCacheShape& kv_cache_shape,
     torch::ScalarType dtype) {
-  allocate_kv_cache_internal(kv_caches,
-                             num_layers,
+  register_kv_cache_internal(kv_caches,
                              kv_cache_shape,
                              dtype,
                              /*is_spec*/ true,
                              spec_k_cache_,
                              spec_v_cache_);
 }
-void SpecKVCacheTransfer::allocate_kv_cache_internal(
+
+void SpecKVCacheTransfer::register_kv_cache_internal(
     std::vector<xllm::KVCache>& kv_caches,
-    const int64_t num_layers,
     const KVCacheShape& kv_cache_shape,
     torch::ScalarType dtype,
     bool is_spec,
     Cache& k_cache,
     Cache& v_cache) {
+  CHECK(!kv_caches.empty()) << "KV caches must be allocated before register.";
+  const int64_t num_layers = static_cast<int64_t>(kv_caches.size());
   const std::vector<int64_t>& key_cache_shape =
       kv_cache_shape.key_cache_shape();
   const std::vector<int64_t>& value_cache_shape =
@@ -98,54 +88,30 @@ void SpecKVCacheTransfer::allocate_kv_cache_internal(
   CHECK(it != kScalarTypeToDtype.cend()) << "Unsupport data type : " << dtype;
   auto ge_dtype = it->second;
 
-  // calculate the size of kv cache for each layer
-  auto data_size = torch::elementSize(dtype);
-  int64_t k_cache_size_per_layer = std::accumulate(key_cache_shape.begin(),
-                                                   key_cache_shape.end(),
-                                                   data_size,
-                                                   std::multiplies<int64_t>());
-  int64_t v_cache_size_per_layer = std::accumulate(value_cache_shape.begin(),
-                                                   value_cache_shape.end(),
-                                                   data_size,
-                                                   std::multiplies<int64_t>());
-
-  // allocate device memory for kv cache
   std::vector<uint64_t> k_cache_addrs;
   std::vector<uint64_t> v_cache_addrs;
+  k_cache.tensor_addrs.clear();
+  v_cache.tensor_addrs.clear();
   k_cache_addrs.reserve(num_layers);
   v_cache_addrs.reserve(num_layers);
   k_cache.tensor_addrs.reserve(num_layers);
   v_cache.tensor_addrs.reserve(num_layers);
   for (int64_t i = 0; i < num_layers; ++i) {
-    void* k_cache_buffer = nullptr;
-    void* v_cache_buffer = nullptr;
-    CHECK_ACL_RET(aclrtMalloc(
-        &k_cache_buffer, k_cache_size_per_layer, ACL_MEM_MALLOC_HUGE_ONLY));
-    CHECK_ACL_RET(aclrtMalloc(
-        &v_cache_buffer, v_cache_size_per_layer, ACL_MEM_MALLOC_HUGE_ONLY));
+    torch::Tensor key_cache = kv_caches[i].get_k_cache();
+    torch::Tensor value_cache = kv_caches[i].get_v_cache();
+    CHECK(key_cache.defined() && key_cache.numel() > 0)
+        << "key cache is not allocated at layer " << i;
+    CHECK(value_cache.defined() && value_cache.numel() > 0)
+        << "value cache is not allocated at layer " << i;
 
+    void* k_cache_buffer = key_cache.data_ptr();
+    void* v_cache_buffer = value_cache.data_ptr();
     k_cache_addrs.emplace_back(reinterpret_cast<uint64_t>(k_cache_buffer));
     v_cache_addrs.emplace_back(reinterpret_cast<uint64_t>(v_cache_buffer));
     k_cache.tensor_addrs.emplace_back(
         reinterpret_cast<uintptr_t>(k_cache_buffer));
     v_cache.tensor_addrs.emplace_back(
         reinterpret_cast<uintptr_t>(v_cache_buffer));
-  }
-
-  // convert memory addrs to torch tensors
-  aclFormat npu_format_type =
-      model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache
-          ? ACL_FORMAT_FRACTAL_NZ
-          : ACL_FORMAT_ND;
-  auto k_torch_tensors = convert_to_torch_tensor(
-      key_cache_shape, dtype, k_cache.tensor_addrs, npu_format_type);
-  auto v_torch_tensors = convert_to_torch_tensor(
-      value_cache_shape, dtype, v_cache.tensor_addrs, npu_format_type);
-  torch::Tensor key_cache, value_cache;
-  for (int64_t i = 0; i < num_layers; ++i) {
-    key_cache = k_torch_tensors[i];
-    value_cache = v_torch_tensors[i];
-    kv_caches.emplace_back(KVCacheTensors{key_cache, value_cache});
   }
 
   // register key cache
@@ -172,15 +138,10 @@ void SpecKVCacheTransfer::allocate_kv_cache_internal(
 }
 
 void SpecKVCacheTransfer::free_kv_cache() {
-  auto free_cache = [](const std::vector<uintptr_t>& tensor_addrs) {
-    for (auto tensor_addr : tensor_addrs) {
-      CHECK_ACL_RET(aclrtFree(reinterpret_cast<void*>(tensor_addr)));
-    }
-  };
-  free_cache(k_cache_.tensor_addrs);
-  free_cache(v_cache_.tensor_addrs);
-  free_cache(spec_k_cache_.tensor_addrs);
-  free_cache(spec_v_cache_.tensor_addrs);
+  k_cache_.tensor_addrs.clear();
+  v_cache_.tensor_addrs.clear();
+  spec_k_cache_.tensor_addrs.clear();
+  spec_v_cache_.tensor_addrs.clear();
 }
 
 bool SpecKVCacheTransfer::pull_kv_blocks(

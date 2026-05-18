@@ -202,7 +202,8 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
 
 WorkerImpl::~WorkerImpl() = default;
 
-bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
+bool WorkerImpl::allocate_kv_cache_storage(const KVCacheShape& kv_cache_shape,
+                                           bool use_huge_page_allocator) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
   const auto& args = context_.get_model_args();
@@ -253,12 +254,23 @@ bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
       .enable_linear_attention(enable_linear_attention)
       .enable_lighting_indexer(enable_lighting_indexer)
       .enable_kv_cache_quant(enable_kv_cache_quant);
+#if defined(USE_NPU)
+  create_options.enable_kv_cache_huge_page_allocator(use_huge_page_allocator);
+#endif
 
   allocate_kv_caches(kv_caches_, kv_cache_shape, create_options);
 
 #if defined(USE_CUDA)
   refresh_cuda_block_copy_runtime_state();
 #endif
+
+  return true;
+}
+
+bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
+  if (!allocate_kv_cache_storage(kv_cache_shape)) {
+    return false;
+  }
 
   init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;
@@ -270,7 +282,6 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
 
-  int32_t device_id = device_.index();
   // create a KVCache for each layer
   const int64_t num_layers = context_.get_model_args().n_layers();
   const bool enable_lighting_indexer =
@@ -285,7 +296,9 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       dtype_,
       kv_caches_,
       num_layers,
-      [this](const KVCacheShape& shape) { this->allocate_kv_cache(shape); },
+      [this](const KVCacheShape& shape, bool use_huge_page_allocator) {
+        return this->allocate_kv_cache_storage(shape, use_huge_page_allocator);
+      },
       enable_lighting_indexer,
       context_.get_model_args().model_type(),
       options_.model_id());
@@ -305,14 +318,16 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
 
   kv_cache_transfer_ = kv_cache_transfer;
 
-  const int64_t num_layers = get_num_layers();
-  kv_caches_.reserve(num_layers);
+  if (!allocate_kv_cache_storage(kv_cache_shape,
+                                 /*use_huge_page_allocator=*/true)) {
+    return false;
+  }
+
   if (is_spec_draft_) {
-    kv_cache_transfer_->allocate_kv_cache_spec(
-        kv_caches_, num_layers, kv_cache_shape, dtype_);
+    kv_cache_transfer_->register_kv_cache_spec(
+        kv_caches_, kv_cache_shape, dtype_);
   } else {
-    kv_cache_transfer_->allocate_kv_cache(
-        kv_caches_, num_layers, kv_cache_shape, dtype_);
+    kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
   }
 
 #if defined(USE_MLU)

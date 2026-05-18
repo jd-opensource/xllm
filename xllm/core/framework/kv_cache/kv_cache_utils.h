@@ -74,6 +74,9 @@ struct KVCacheCreateOptions {
   PROPERTY(bool, enable_linear_attention) = false;
   PROPERTY(bool, enable_lighting_indexer) = false;
   PROPERTY(bool, enable_kv_cache_quant) = false;
+#if defined(USE_NPU)
+  PROPERTY(bool, enable_kv_cache_huge_page_allocator) = false;
+#endif
 };
 
 struct KVCacheTensors {

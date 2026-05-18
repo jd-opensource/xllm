@@ -75,11 +75,12 @@ void LlmDataDistTransfer::initialize(int32_t device_id) {
 
 void LlmDataDistTransfer::finalize() { llm_data_dist_->Finalize(); }
 
-void LlmDataDistTransfer::allocate_kv_cache(
+void LlmDataDistTransfer::register_kv_cache(
     std::vector<xllm::KVCache>& kv_caches,
-    const int64_t num_layers,
     const KVCacheShape& kv_cache_shape,
     torch::ScalarType dtype) {
+  CHECK(!kv_caches.empty()) << "KV caches must be allocated before register.";
+  const int64_t num_layers = static_cast<int64_t>(kv_caches.size());
   num_layers_ = num_layers;
   const std::vector<int64_t>& key_cache_shape =
       kv_cache_shape.key_cache_shape();
@@ -92,29 +93,17 @@ void LlmDataDistTransfer::allocate_kv_cache(
   CHECK(it != kScalarTypeToDtype.cend()) << "Unsupport data type : " << dtype;
   auto ge_dtype = it->second;
 
-  // calculate the size of kv cache for each layer
-  auto data_size = torch::elementSize(dtype);
-  int64_t k_cache_size_per_layer = data_size;
-  for (int64_t i = 0; i < key_cache_shape.size(); ++i) {
-    k_cache_size_per_layer *= key_cache_shape[i];
-  }
-  int64_t v_cache_size_per_layer = data_size;
-  for (int64_t i = 0; i < value_cache_shape.size(); ++i) {
-    v_cache_size_per_layer *= value_cache_shape[i];
-  }
-  int64_t index_cache_size_per_layer = data_size;
   if (enable_lighting_indexer_) {
     CHECK(kv_cache_shape.has_index_cache_shape())
         << "index_cache_shape is required when lighting indexer is enabled.";
-    for (int64_t i = 0; i < index_cache_shape.size(); ++i) {
-      index_cache_size_per_layer *= index_cache_shape[i];
-    }
   }
 
-  // allocate device memory for kv cache
   std::vector<uint64_t> k_cache_addrs;
   std::vector<uint64_t> v_cache_addrs;
   std::vector<uint64_t> index_cache_addrs;
+  k_cache_.tensor_addrs.clear();
+  v_cache_.tensor_addrs.clear();
+  index_cache_.tensor_addrs.clear();
   k_cache_addrs.reserve(num_layers);
   v_cache_addrs.reserve(num_layers);
   k_cache_.tensor_addrs.reserve(num_layers);
@@ -125,15 +114,15 @@ void LlmDataDistTransfer::allocate_kv_cache(
   }
 
   for (int64_t i = 0; i < num_layers; ++i) {
-    void* k_cache_buffer = nullptr;
-    void* v_cache_buffer = nullptr;
-    auto acl_ret = aclrtMalloc(
-        &k_cache_buffer, k_cache_size_per_layer, ACL_MEM_MALLOC_HUGE_ONLY);
-    CHECK(acl_ret == ACL_SUCCESS) << "aclrtMalloc k cache failed.";
-    acl_ret = aclrtMalloc(
-        &v_cache_buffer, v_cache_size_per_layer, ACL_MEM_MALLOC_HUGE_ONLY);
-    CHECK(acl_ret == ACL_SUCCESS) << "aclrtMalloc v cache failed.";
+    torch::Tensor key_cache = kv_caches[i].get_k_cache();
+    torch::Tensor value_cache = kv_caches[i].get_v_cache();
+    CHECK(key_cache.defined() && key_cache.numel() > 0)
+        << "key cache is not allocated at layer " << i;
+    CHECK(value_cache.defined() && value_cache.numel() > 0)
+        << "value cache is not allocated at layer " << i;
 
+    void* k_cache_buffer = key_cache.data_ptr();
+    void* v_cache_buffer = value_cache.data_ptr();
     k_cache_addrs.emplace_back(reinterpret_cast<uint64_t>(k_cache_buffer));
     v_cache_addrs.emplace_back(reinterpret_cast<uint64_t>(v_cache_buffer));
     k_cache_.tensor_addrs.emplace_back(
@@ -142,43 +131,14 @@ void LlmDataDistTransfer::allocate_kv_cache(
         reinterpret_cast<uintptr_t>(v_cache_buffer));
 
     if (enable_lighting_indexer_) {
-      void* index_cache_buffer = nullptr;
-      acl_ret = aclrtMalloc(&index_cache_buffer,
-                            index_cache_size_per_layer,
-                            ACL_MEM_MALLOC_HUGE_ONLY);
-      CHECK(acl_ret == ACL_SUCCESS) << "aclrtMalloc index cache failed.";
+      torch::Tensor index_cache = kv_caches[i].get_index_cache();
+      CHECK(index_cache.defined() && index_cache.numel() > 0)
+          << "index cache is not allocated at layer " << i;
+      void* index_cache_buffer = index_cache.data_ptr();
       index_cache_addrs.emplace_back(
           reinterpret_cast<uint64_t>(index_cache_buffer));
       index_cache_.tensor_addrs.emplace_back(
           reinterpret_cast<uintptr_t>(index_cache_buffer));
-    }
-  }
-
-  // convert memory addrs to torch tensors
-  aclFormat npu_format_type =
-      model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache
-          ? ACL_FORMAT_FRACTAL_NZ
-          : ACL_FORMAT_ND;
-
-  auto k_torch_tensors = convert_to_torch_tensor(
-      key_cache_shape, dtype, k_cache_.tensor_addrs, npu_format_type);
-  auto v_torch_tensors = convert_to_torch_tensor(
-      value_cache_shape, dtype, v_cache_.tensor_addrs, npu_format_type);
-  std::vector<torch::Tensor> index_torch_tensors;
-  if (enable_lighting_indexer_) {
-    index_torch_tensors = convert_to_torch_tensor(
-        index_cache_shape, dtype, index_cache_.tensor_addrs, npu_format_type);
-  }
-  torch::Tensor key_cache, value_cache, index_cache;
-  for (int64_t i = 0; i < num_layers; ++i) {
-    key_cache = k_torch_tensors[i];
-    value_cache = v_torch_tensors[i];
-    if (enable_lighting_indexer_) {
-      index_cache = index_torch_tensors[i];
-      kv_caches.emplace_back(IndexedKVCacheTensors{
-          KVCacheTensors{key_cache, value_cache}, index_cache});
-    } else {
-      kv_caches.emplace_back(KVCacheTensors{key_cache, value_cache});
     }
   }
 
@@ -218,19 +178,9 @@ void LlmDataDistTransfer::allocate_kv_cache(
 }
 
 void LlmDataDistTransfer::free_kv_cache() {
-  for (auto& k_cache_buffer : k_cache_.tensor_addrs) {
-    aclrtFree(reinterpret_cast<void*>(k_cache_buffer));
-  }
-
-  for (auto& v_cache_buffer : v_cache_.tensor_addrs) {
-    aclrtFree(reinterpret_cast<void*>(v_cache_buffer));
-  }
-
-  if (enable_lighting_indexer_) {
-    for (auto& index_cache_buffer : index_cache_.tensor_addrs) {
-      aclrtFree(reinterpret_cast<void*>(index_cache_buffer));
-    }
-  }
+  k_cache_.tensor_addrs.clear();
+  v_cache_.tensor_addrs.clear();
+  index_cache_.tensor_addrs.clear();
 }
 
 void LlmDataDistTransfer::get_cache_info(uint64_t& cluster_id,
