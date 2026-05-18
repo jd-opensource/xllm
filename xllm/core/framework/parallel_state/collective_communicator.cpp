@@ -258,8 +258,11 @@ void CollectiveCommunicator::create_process_groups(
     port += tp_size;
   }
 
-  if (ep_size > 1) {
-    int moe_tp_size = world_size / ep_size;
+  int32_t moe_tp_size = world_size / ep_size;
+  CHECK_EQ(moe_tp_size * ep_size, world_size);
+  if (ep_size == 1) {
+    parallel_args_->moe_tp_group_ = process_group_.get();
+  } else {
     port_offset = global_rank / moe_tp_size + 1;
     moe_tp_group_ = create_process_group(global_rank,
                                          world_size,

@@ -283,9 +283,14 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   const std::string& topk_method = model_args.topk_method();
   int64_t ep_size = parallel_args.ep_size();
   int64_t ep_rank = 0;
-  if (ep_size > 1) {
-    ep_rank = parallel_args.moe_ep_group_->rank();
+  if (parallel_args.moe_tp_group_ != nullptr) {
     tp_pg_ = parallel_args.moe_tp_group_;
+  }
+  CHECK(tp_pg_ != nullptr) << "FusedMoE requires a valid MoE TP group.";
+  if (ep_size > 1) {
+    CHECK(parallel_args.moe_ep_group_ != nullptr)
+        << "FusedMoE requires a valid MoE EP group when ep_size > 1.";
+    ep_rank = parallel_args.moe_ep_group_->rank();
   }
 
   // calculate the number of experts per rank
@@ -978,7 +983,7 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
                                     const ModelInputParams& input_params) {
   auto input = hidden_states;
   bool need_slice = false;
-  if (parallel_args_.dp_size() > 1 && parallel_args_.ep_size() > 1) {
+  if (should_gather_dp_inputs_for_moe()) {
     input = parallel_state::gather(input,
                                    parallel_args_.dp_local_process_group_,
                                    input_params.dp_global_token_nums);
@@ -1010,6 +1015,10 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
     output = output.slice(0, start, end);
   }
   return output;
+}
+
+bool FusedMoEImpl::should_gather_dp_inputs_for_moe() const {
+  return parallel_args_.dp_size() > 1;
 }
 
 bool FusedMoEImpl::can_use_ep2_dispatch_combine(
@@ -1279,7 +1288,7 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts(
   }
 
   bool need_slice = false;
-  if (parallel_args_.dp_size() > 1 && parallel_args_.ep_size() > 1) {
+  if (should_gather_dp_inputs_for_moe()) {
     input = parallel_state::gather(input,
                                    parallel_args_.dp_local_process_group_,
                                    input_params.dp_global_token_nums);
