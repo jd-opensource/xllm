@@ -457,7 +457,8 @@ void NpuQwen3MoeDecoderLayerImpl::build_node_variant_pack(
   }
 
   if (input_params.meta.batch_forward_type.is_decode() &&
-      ::xllm::ExecutionConfig::get_instance().enable_intralayer_addnorm() && residual.has_value()) {
+      ::xllm::KernelConfig::get_instance().enable_intralayer_addnorm() &&
+      residual.has_value()) {
     // input
     auto& residual_tensor = residual.value();
     node.variantPack.inTensors.at(input_idx++) =

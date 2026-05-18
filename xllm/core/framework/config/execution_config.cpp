@@ -54,7 +54,7 @@ DEFINE_bool(enable_shm,
 DEFINE_bool(use_contiguous_input_buffer,
             true,
             "Whether to use contiguous device input buffer for executing "
-            "model. Currently only effective when enable_shm is true.");
+            "model.");
 
 DEFINE_uint64(input_shm_size,
               1024,

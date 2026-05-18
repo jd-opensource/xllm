@@ -28,6 +28,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "framework/block/block.h"
 #include "framework/block/block_manager_impl.h"
+#include "framework/config/beam_search_config.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/request/stopping_checker.h"
@@ -660,8 +661,9 @@ TEST(BatchTest, ForwardInputPackedRoundTripPreservesTransportFields) {
 }
 
 TEST(BatchTest, ForwardInputBlockCopyKernelFieldsMatchExpectedLayout) {
-  const bool old_enable_block_copy_kernel = FLAGS_enable_block_copy_kernel;
-  FLAGS_enable_block_copy_kernel = true;
+  const bool old_enable_block_copy_kernel =
+      ::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel();
+  ::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel(true);
 
   BlockManager::Options options;
   options.num_blocks(8).block_size(4);
@@ -723,7 +725,8 @@ TEST(BatchTest, ForwardInputBlockCopyKernelFieldsMatchExpectedLayout) {
   EXPECT_TRUE(forward_input.input_params.block_copy.swap_blocks.empty());
 #endif
 
-  FLAGS_enable_block_copy_kernel = old_enable_block_copy_kernel;
+  ::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel(
+      old_enable_block_copy_kernel);
 }
 
 TEST(BatchTest, ForwardInputCpPartitionMatchesExpectedLayout) {

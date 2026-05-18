@@ -349,9 +349,11 @@ void validate_config(const std::string& model_type) {
   }
 #endif
 
-  if (!(FLAGS_use_cpp_chat_template &&
+  if (!(ModelConfig::get_instance().use_cpp_chat_template() &&
         cpp_template_supported_model_set.contains(model_type))) {
-    FLAGS_use_cpp_chat_template = false;
+    ModelConfig::get_instance().use_cpp_chat_template(false);
+    LOG(WARNING) << "use_cpp_chat_template is not supported for model_type="
+                 << model_type << ", forcing use_cpp_chat_template=false.";
   }
 }
 
