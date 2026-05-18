@@ -519,9 +519,10 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   torch::Tensor linear_state_base_indices =
       build_linear_state_base_indices(logical_state_indices, checkpoint_stride);
   const bool use_spec_verify = input_params.is_spec_verify;
+  bool is_any_prefill =
+      attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
 
-  if (!use_spec_verify && attn_metadata.is_prefill &&
-      !attn_metadata.is_chunked_prefill) {
+  if (!use_spec_verify && is_any_prefill) {
     torch::IntArrayRef num_accepted_tokens_opt;
     std::vector<int64_t> linear_state_indices_vec(
         input_params.linear_state_ids.begin(),
@@ -543,8 +544,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
 
     mixed_qkv = reshape_qkvz_with_pad(attn_metadata, mixed_qkv);
     mixed_qkv = mixed_qkv.transpose(1, 2);
-  } else if (!use_spec_verify && !attn_metadata.is_prefill &&
-             checkpoint_stride == 1 && !attn_metadata.is_chunked_prefill) {
+  } else if (!use_spec_verify && !is_any_prefill && checkpoint_stride == 1) {
     torch::IntArrayRef num_accepted_tokens_opt;
     torch::IntArrayRef has_initial_state;
     std::vector<int64_t> linear_state_indices_vec(
@@ -664,7 +664,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
                                          attn_metadata.q_cu_seq_lens,
                                          attn_metadata.q_seq_lens_vec,
                                          scale);
-  } else if (attn_metadata.is_prefill && !attn_metadata.is_chunked_prefill) {
+  } else if (is_any_prefill) {
     CHECK_GE(attn_metadata.q_seq_lens_vec.size(),
              static_cast<size_t>(batch_size))
         << "q_seq_lens_vec must be populated for Qwen3.5 prefill.";
@@ -710,6 +710,12 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
         initial_state_tensor.select(0, static_cast<int64_t>(i)).fill_(0.0);
       }
     }
+
+    if (!fla_ssm_state_layout && attn_metadata.is_chunked_prefill) {
+      initial_state_tensor =
+          initial_state_tensor.transpose(-1, -2).contiguous();
+    }
+
     chunk_gated_delta_params.initial_state = initial_state_tensor;
     chunk_gated_delta_params.output_final_state = true;
     chunk_gated_delta_params.cu_seqlens = attn_metadata.q_cu_seq_lens;
@@ -732,16 +738,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
                                        : last_recurrent_state.transpose(-1, -2);
     ssm_cache.index_put_({linear_state_base_indices},
                          state_to_store.to(ssm_cache.dtype()));
-  } else if (attn_metadata.is_prefill) {
-    std::tie(core_attn_out, last_recurrent_state) =
-        torch_chunk_gated_delta_rule(
-            processed_q, processed_k, processed_v, g, beta);
-    torch::Tensor state_to_store = fla_ssm_state_layout
-                                       ? last_recurrent_state
-                                       : last_recurrent_state.transpose(-1, -2);
-    ssm_cache.index_put_({linear_state_base_indices},
-                         state_to_store.to(ssm_cache.dtype()));
-  } else if (checkpoint_stride > 1 || attn_metadata.is_chunked_prefill) {
+  } else if (checkpoint_stride > 1) {
     auto ssm_state =
         torch::index_select(ssm_cache, 0, linear_state_base_indices);
     if (!fla_ssm_state_layout) {

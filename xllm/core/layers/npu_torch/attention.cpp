@@ -91,24 +91,46 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
     key = key.view({-1, num_kv_heads_, head_size_});
     value = value.view({-1, num_kv_heads_, head_size_});
 
-    xllm::kernel::npu::batch_prefill(query,
-                                     key,
-                                     value,
-                                     attn_metadata.attn_mask,
-                                     attn_metadata.kv_seq_lens_host,
-                                     scale_,
-                                     output);
-  } else if (attn_metadata.is_chunked_prefill) {
-    xllm::kernel::npu::batch_chunked_paged_prefill(
+    auto fia_result = xllm::kernel::npu::npu_fused_infer_attention(
         query,
-        k_cache,
-        v_cache.value(),
+        key,
+        value,
+        attn_metadata.fia_attn_mask.defined()
+            ? std::make_optional(attn_metadata.fia_attn_mask)
+            : std::nullopt,
+        std::nullopt,
+        attn_metadata.q_cu_seq_lens_host_vec,
+        attn_metadata.kv_cu_seq_lens_host_vec,
+        num_heads_,
+        num_kv_heads_,
         scale_,
-        attn_metadata.block_table,
-        attn_metadata.kv_seq_lens_host,
-        attn_metadata.attn_mask,
-        attn_metadata.q_seq_lens_host,
-        output);
+        0,
+        3,
+        "TND");
+    output.copy_(std::get<0>(fia_result).view_as(output));
+  } else if (attn_metadata.is_chunked_prefill) {
+    auto k = k_cache.view({k_cache.size(0), k_cache.size(1), -1});
+    auto v = v_cache.value().view(
+        {v_cache.value().size(0), v_cache.value().size(1), -1});
+    auto fia_result = xllm::kernel::npu::npu_fused_infer_attention(
+        query,
+        k,
+        v,
+        attn_metadata.fia_attn_mask.defined()
+            ? std::make_optional(attn_metadata.fia_attn_mask)
+            : std::nullopt,
+        attn_metadata.block_table.defined()
+            ? std::make_optional(attn_metadata.block_table)
+            : std::nullopt,
+        attn_metadata.q_cu_seq_lens_host_vec,
+        attn_metadata.kv_seq_lens_host_vec,
+        num_heads_,
+        num_kv_heads_,
+        scale_,
+        k_cache.size(1),
+        3,
+        "TND");
+    output.copy_(std::get<0>(fia_result).view_as(output));
   }
 }
 

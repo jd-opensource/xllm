@@ -162,6 +162,13 @@ struct AttentionMetadata {
   // For ACL graph execution - fixed-address device tiling data for
   // CustomPagedAttention replay.
   torch::Tensor paged_attention_tiling_data;
+  // Pre-computed attention mask for npu_fused_infer_attention.
+  torch::Tensor fia_attn_mask;
+  // Host vectors for npu_fused_infer_attention (kernel requires host memory).
+  std::vector<int64_t> q_cu_seq_lens_host_vec;
+  std::vector<int64_t> kv_cu_seq_lens_host_vec;
+  // Non-cumulative per-sequence lengths for chunked_prefill mode.
+  std::vector<int64_t> kv_seq_lens_host_vec;
 #endif
 };
 
