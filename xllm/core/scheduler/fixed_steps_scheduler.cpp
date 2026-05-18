@@ -22,10 +22,10 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 
 #include "common/metrics.h"
 #include "common/types.h"
@@ -36,9 +36,26 @@ limitations under the License.
 #include "framework/request/rec_type.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
+#include "util/env_var.h"
 #include "util/rec_model_utils.h"
+#include "util/scope_guard.h"
+#include "util/timer.h"
 
 namespace xllm {
+
+namespace {
+
+bool enable_rec_pipeline_concurrency_debug() {
+  return util::get_bool_env("XLLM_DEBUG_REC_PIPELINE_CONCURRENCY", false);
+}
+
+bool enable_onerec_xattention_lock_timing() {
+  static const bool enable_lock_timing =
+      util::get_bool_env("XLLM_DEBUG_ONEREC_XATTN_LOCK_TIMING", false);
+  return enable_lock_timing;
+}
+
+}  // namespace
 
 FixedStepsScheduler::FixedStepsScheduler(Engine* engine, const Options& options)
     : ContinuousScheduler(engine, options),
@@ -79,10 +96,23 @@ void FixedStepsScheduler::handle_prefill_requests(
   bool blocks_exhausted = false;
   const bool requires_kv_cache =
       scheduler_pipeline_ && scheduler_pipeline_->requires_kv_cache();
+  const size_t max_prefill_requests_per_step =
+      scheduler_pipeline_ != nullptr
+          ? std::max<size_t>(
+                1, scheduler_pipeline_->max_prefill_requests_per_step(*this))
+          : std::numeric_limits<size_t>::max();
+  const auto can_schedule_under_kv_threshold = [this]() {
+    if (scheduler_pipeline_ == nullptr ||
+        !scheduler_pipeline_->respects_prefill_memory_threshold(*this)) {
+      return true;
+    }
+    return kv_cache_manager_->kv_cache_utilization() <
+           FLAGS_prefill_scheduling_memory_usage_threshold;
+  };
   while (!waiting_priority_queue_.empty() && remaining_seq_budget > 0 &&
          remaining_token_budget > 0 &&
-         kv_cache_manager_->kv_cache_utilization() <
-             FLAGS_prefill_scheduling_memory_usage_threshold) {
+         running_requests_.size() < max_prefill_requests_per_step &&
+         can_schedule_under_kv_threshold()) {
     std::shared_ptr<Request> request(waiting_priority_queue_.top());
     if (request->finished() || request->cancelled()) {
       if (requires_kv_cache) {
@@ -168,8 +198,13 @@ void FixedStepsScheduler::handle_prefill_requests(
                                       prefill_sequences_budget.end());
   }
 
+  const bool resource_temporarily_exhausted =
+      blocks_exhausted || !can_schedule_under_kv_threshold();
+  const bool should_defer_resource_exhausted =
+      resource_temporarily_exhausted && scheduler_pipeline_ != nullptr &&
+      scheduler_pipeline_->should_defer_resource_exhausted(*this);
   if (running_sequences_.empty() && !waiting_priority_queue_.empty() &&
-      running_queue_->empty()) {
+      !should_defer_resource_exhausted && running_queue_->empty()) {
     LOG(ERROR)
         << "Request prompt is too long, no enough budget/memory to schedule "
            "a single sequence.";
@@ -338,7 +373,18 @@ ScheduleResult FixedStepsScheduler::schedule_request(
 void FixedStepsScheduler::step(const absl::Duration& timeout) {
   if (!options_.enable_schedule_overlap()) {
     // get a new batch of requests
+    const bool trace_lock_timing = enable_onerec_xattention_lock_timing();
+    const bool trace_multistream_timing =
+        trace_lock_timing && options_.rec_worker_max_concurrency() > 1;
+    std::optional<Timer> schedule_timer;
+    if (trace_multistream_timing) {
+      schedule_timer.emplace();
+    }
     ScheduleResult result = schedule_request(timeout);
+    double schedule_request_us = 0.0;
+    if (schedule_timer.has_value()) {
+      schedule_request_us = schedule_timer->elapsed_microseconds();
+    }
     bool all_empty =
         std::all_of(result.batches.begin(),
                     result.batches.end(),
@@ -346,16 +392,48 @@ void FixedStepsScheduler::step(const absl::Duration& timeout) {
     if (all_empty) {
       return;
     }
+    const size_t batch_request_count =
+        result.batches.empty() ? 0 : result.batches[0].get_sequences().size();
+    if (trace_multistream_timing) {
+      LOG(INFO) << "OneRec xattention scheduler host timing, "
+                << "stage=schedule_request, elapsed_us=" << schedule_request_us
+                << ", batch_request_count=" << batch_request_count
+                << ", waiting_requests=" << waiting_priority_queue_.size()
+                << ", in_flight_steps="
+                << in_flight_steps_.load(std::memory_order_acquire);
+    }
 
     // Submit task to thread pool for asynchronous execution
     // After engine_->step() completes, process finished/cancelled requests
     auto function = [this,
+                     trace_lock_timing,
+                     batch_request_count,
                      batches = std::move(result.batches),
                      requests = std::move(result.requests),
                      sequences = std::move(result.sequences)]() mutable {
+      SCOPE_GUARD([this] {
+        if (options_.rec_worker_max_concurrency() > 1) {
+          in_flight_steps_.fetch_sub(1, std::memory_order_acq_rel);
+          step_semaphore_.release();
+        }
+      });
+      std::optional<Timer> engine_step_timer;
+      if (trace_lock_timing && options_.rec_worker_max_concurrency() > 1) {
+        engine_step_timer.emplace();
+      }
       engine_->step(batches);
+      if (trace_lock_timing && options_.rec_worker_max_concurrency() > 1) {
+        LOG(INFO) << "OneRec xattention scheduler host timing, "
+                  << "stage=engine_step, elapsed_us="
+                  << engine_step_timer->elapsed_microseconds()
+                  << ", batch_request_count=" << batch_request_count;
+      }
 
       // After step completes, check and process finished/cancelled requests
+      std::optional<Timer> response_timer;
+      if (trace_lock_timing && options_.rec_worker_max_concurrency() > 1) {
+        response_timer.emplace();
+      }
       std::vector<std::shared_ptr<Request>> finished_requests;
       for (auto& request : requests) {
         if (request) {
@@ -371,14 +449,41 @@ void FixedStepsScheduler::step(const absl::Duration& timeout) {
       if (!finished_requests.empty()) {
         response_processor_->process_completed_requests(finished_requests);
       }
-
-      if (options_.rec_worker_max_concurrency() > 1) {
-        step_semaphore_.release();
+      if (trace_lock_timing && options_.rec_worker_max_concurrency() > 1) {
+        LOG(INFO) << "OneRec xattention scheduler host timing, "
+                  << "stage=process_finished_requests, elapsed_us="
+                  << response_timer->elapsed_microseconds()
+                  << ", finished_requests=" << finished_requests.size();
       }
     };
 
     if (options_.rec_worker_max_concurrency() > 1) {
+      std::optional<Timer> semaphore_timer;
+      if (trace_lock_timing) {
+        semaphore_timer.emplace();
+      }
       step_semaphore_.acquire();
+      double semaphore_wait_us = 0.0;
+      if (semaphore_timer.has_value()) {
+        semaphore_wait_us = semaphore_timer->elapsed_microseconds();
+      }
+      const size_t previous_in_flight =
+          in_flight_steps_.fetch_add(1, std::memory_order_acq_rel);
+      if (trace_lock_timing) {
+        LOG(INFO) << "OneRec xattention scheduler host timing, "
+                  << "stage=semaphore_acquire, elapsed_us=" << semaphore_wait_us
+                  << ", previous_in_flight=" << previous_in_flight
+                  << ", max_concurrency="
+                  << options_.rec_worker_max_concurrency();
+      }
+      if (enable_rec_pipeline_concurrency_debug()) {
+        LOG(INFO) << "FixedStepsScheduler submit async step, "
+                  << "scheduler_concurrency="
+                  << options_.rec_worker_max_concurrency()
+                  << ", previous_in_flight=" << previous_in_flight
+                  << ", batch_request_count=" << batch_request_count
+                  << ", waiting_requests=" << waiting_priority_queue_.size();
+      }
       step_threadpool_->schedule(function);
     } else {
       function();
@@ -438,6 +543,14 @@ FixedStepsScheduler::OneRecXAttentionSchedulerPipeline::create_batches(
       scheduler.kv_cache_manager_->get_swap_block_transfer_infos());
 }
 
+size_t FixedStepsScheduler::OneRecXAttentionSchedulerPipeline::
+    max_prefill_requests_per_step(const FixedStepsScheduler& scheduler) const {
+  if (scheduler.options_.rec_worker_max_concurrency() > 1) {
+    return 1;
+  }
+  return std::numeric_limits<size_t>::max();
+}
+
 bool FixedStepsScheduler::OneRecXAttentionSchedulerPipeline::allocate_kv_cache(
     KVCacheManager* kv_cache_manager,
     Sequence* sequence) {
@@ -456,6 +569,19 @@ bool FixedStepsScheduler::OneRecXAttentionSchedulerPipeline::allocate_kv_cache(
   }
   return kv_cache_manager->allocate(sequence,
                                     num_tokens + max_generated_tokens);
+}
+
+bool FixedStepsScheduler::OneRecXAttentionSchedulerPipeline::
+    respects_prefill_memory_threshold(
+        const FixedStepsScheduler& scheduler) const {
+  return scheduler.options_.rec_worker_max_concurrency() <= 1;
+}
+
+bool FixedStepsScheduler::OneRecXAttentionSchedulerPipeline::
+    should_defer_resource_exhausted(
+        const FixedStepsScheduler& scheduler) const {
+  return scheduler.options_.rec_worker_max_concurrency() > 1 &&
+         scheduler.in_flight_steps_.load(std::memory_order_acquire) > 0;
 }
 
 std::vector<Batch>

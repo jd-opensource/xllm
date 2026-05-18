@@ -16,6 +16,7 @@ limitations under the License.
 #include <c10/core/Device.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+#include <torch_npu/csrc/core/npu/NPUCachingAllocator.h>
 #include <torch_npu/csrc/libs/init_npu.h>
 #include <torch_npu/torch_npu.h>
 
@@ -178,7 +179,8 @@ void beam_search_rec(const torch::Tensor& logprobs,
   aclTensor* out_beam_count_prefix_sums_ids = nullptr;
   aclTensor* out_sequence_ids = nullptr;
   int32_t device_id = logprobs.device().index();
-  aclrtStream stream = c10_npu::getCurrentNPUStream(device_id).stream();
+  c10_npu::NPUStream npu_stream = c10_npu::getCurrentNPUStream(device_id);
+  aclrtStream stream = npu_stream.stream();
 
   create_acltensor(&logprobs_ids, logprobs);
   create_acltensor(&top_tokens_ids, top_tokens);
@@ -209,17 +211,18 @@ void beam_search_rec(const torch::Tensor& logprobs,
                                            &executor),
       "beam_search_rec: failed to get workspace size for REC beam search");
   void* workspace_addr = nullptr;
+  torch::Tensor workspace_tensor;
   if (workspace_size > 0) {
-    CHECK_ACL_SUCCESS(
-        aclrtMalloc(&workspace_addr, workspace_size, ACL_MEM_MALLOC_HUGE_FIRST),
-        "beam_search_rec: failed to allocate workspace for REC beam search");
+    workspace_tensor = torch::empty(
+        {static_cast<int64_t>(workspace_size)},
+        torch::TensorOptions().dtype(torch::kUInt8).device(logprobs.device()));
+    workspace_addr = workspace_tensor.data_ptr();
+    c10_npu::NPUCachingAllocator::recordStream(
+        workspace_tensor.storage().data_ptr(), npu_stream);
   }
   CHECK_ACL_SUCCESS(
       aclnnBeamSearchGroup(workspace_addr, workspace_size, executor, stream),
       "beam_search_rec: failed to execute REC beam search");
-  CHECK_ACL_SUCCESS(
-      aclrtSynchronizeStream(stream),
-      "beam_search_rec: failed to synchronize stream for REC beam search");
   aclDestroyTensor(logprobs_ids);
   aclDestroyTensor(top_tokens_ids);
   aclDestroyTensor(top_logprobs_ids);
@@ -229,11 +232,6 @@ void beam_search_rec(const torch::Tensor& logprobs,
   aclDestroyTensor(out_log_probs_ids);
   aclDestroyTensor(out_beam_count_prefix_sums_ids);
   aclDestroyTensor(out_sequence_ids);
-  if (workspace_size > 0) {
-    CHECK_ACL_SUCCESS(
-        aclrtFree(workspace_addr),
-        "beam_search_rec: failed to free workspace for REC beam search");
-  }
 }
 
 void beam_search_rec(const torch::Tensor& logprobs,
