@@ -851,13 +851,28 @@ class DeepseekV4ModelImpl
     if (!dst.defined()) {
       dst = torch::zeros_like(src);
     } else {
-      CHECK(dst.sizes() == src.sizes())
-          << "DeepSeek V4 graph metadata tensor size changed from "
-          << dst.sizes() << " to " << src.sizes();
       CHECK_EQ(dst.scalar_type(), src.scalar_type())
           << "DeepSeek V4 graph metadata tensor dtype changed";
       CHECK_EQ(dst.device(), src.device())
           << "DeepSeek V4 graph metadata tensor device changed";
+      if (dst.sizes() != src.sizes()) {
+        bool can_copy_into_capacity = dst.dim() == src.dim() && src.dim() > 0 &&
+                                      src.size(0) <= dst.size(0);
+        for (int64_t dim = 1; can_copy_into_capacity && dim < src.dim();
+             ++dim) {
+          can_copy_into_capacity = dst.size(dim) == src.size(dim);
+        }
+        CHECK(can_copy_into_capacity)
+            << "DeepSeek V4 graph metadata tensor size changed from "
+            << dst.sizes() << " to " << src.sizes();
+        // ACL graph metadata uses prefix-valid bucket buffers: replay may
+        // rebuild src after trimming padding, while dst keeps capture capacity.
+        // Copy the valid prefix and clear the padded tail to avoid stale data.
+        dst.zero_();
+        dst.slice(/*dim=*/0, /*start=*/0, /*end=*/src.size(0))
+            .copy_(src, /*non_blocking=*/true);
+        return dst;
+      }
     }
     dst.copy_(src, /*non_blocking=*/true);
     return dst;
