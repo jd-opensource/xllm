@@ -518,6 +518,8 @@ bool torch_to_proto(const torch::Tensor& torch_tensor,
     return false;
   }
 
+  // Ensure contiguous (NCHW) layout before serializing raw bytes
+  auto contig_tensor = torch_tensor.contiguous();
   torch::ScalarType torch_dtype = torch_tensor.scalar_type();
   std::string proto_datatype = torch_datatype_to_proto(torch_dtype);
   if (proto_datatype.empty()) {
@@ -568,7 +570,7 @@ bool torch_to_proto(const torch::Tensor& torch_tensor,
       break;
     case torch::kBFloat16: {
       // Need to convert bfloat16 to uint8_t for storage
-      auto bfloat16_ptr = torch_tensor.data_ptr<torch::BFloat16>();
+      auto bfloat16_ptr = contig_tensor.data_ptr<torch::BFloat16>();
       uint8_t* uint8_ptr = reinterpret_cast<uint8_t*>(bfloat16_ptr);
       torch::Tensor uint8_tensor =
           torch::from_blob(uint8_ptr,
@@ -581,7 +583,7 @@ bool torch_to_proto(const torch::Tensor& torch_tensor,
     }
     case torch::kHalf: {
       // Need to convert float16 to uint8_t for storage
-      auto float16_ptr = torch_tensor.data_ptr<torch::Half>();
+      auto float16_ptr = contig_tensor.data_ptr<torch::Half>();
       uint8_t* uint8_ptr = reinterpret_cast<uint8_t*>(float16_ptr);
       torch::Tensor uint8_tensor = torch::from_blob(
           uint8_ptr,
