@@ -20,6 +20,7 @@ limitations under the License.
 #include <sys/sysinfo.h>
 
 #include "common/device_monitor.h"
+#include "core/common/global_flags.h"
 #include "core/common/metrics.h"
 #include "core/distributed_runtime/master.h"
 #include "core/framework/config/execution_config.h"
@@ -50,8 +51,8 @@ DiTEngine::DiTEngine(const runtime::Options& options,
         << "All devices should be the same type";
 
 #if defined(USE_NPU)
-    ExecutionConfig::set_enable_atb_comm_multiprocess(
-        options.enable_offline_inference() || (options.nnodes() > 1));
+    FLAGS_enable_atb_comm_multiprocess =
+        options.enable_offline_inference() || (options.nnodes() > 1);
 #endif
   }
 

@@ -31,6 +31,7 @@ limitations under the License.
 #include "common/interruption_bus.h"
 #include "common/metrics.h"
 #include "common/options.h"
+#include "core/common/global_flags.h"
 #include "core/framework/config/eplb_config.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
@@ -96,8 +97,8 @@ LLMEngine::LLMEngine(const runtime::Options& options,
     CHECK_EQ(device.type(), device_type)
         << "All devices should be the same type";
 #if defined(USE_NPU)
-    ExecutionConfig::set_enable_atb_comm_multiprocess(
-        options.enable_offline_inference() || (options.nnodes() > 1));
+    FLAGS_enable_atb_comm_multiprocess =
+        options.enable_offline_inference() || (options.nnodes() > 1);
 #endif
   }
 

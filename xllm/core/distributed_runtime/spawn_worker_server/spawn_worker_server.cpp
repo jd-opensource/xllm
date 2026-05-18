@@ -21,6 +21,7 @@ limitations under the License.
 #include <signal.h>
 #include <unistd.h>
 
+#include "core/common/global_flags.h"
 #include "core/distributed_runtime/worker_server.h"
 #include "core/framework/config/distributed_config.h"
 #include "core/framework/config/eplb_config.h"
@@ -112,7 +113,7 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
 #if defined(USE_NPU)
   device.init_device_context();
   ExecutionConfig::get_instance().npu_kernel_backend(npu_kernel_backend);
-  ExecutionConfig::set_enable_atb_comm_multiprocess(true);
+  FLAGS_enable_atb_comm_multiprocess = true;
 #endif
 #if defined(USE_CUDA) || defined(USE_MLU)
   // Bind worker process to the same NUMA node as the device
