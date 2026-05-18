@@ -515,6 +515,7 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
   kv_cache_cap.slot_size() = slot_size;
   kv_cache_cap.index_slot_size() = index_slot_size;
+  kv_cache_cap.scale_slot_size() = scale_slot_size;
   kv_cache_cap.linear_slot_size() = linear_slot_size;
   kv_cache_cap.n_layers() = args_.n_layers();
   kv_cache_cap.block_size() = options_.block_size();
@@ -574,6 +575,8 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
             << readable_size(kv_cache_cap.cache_size_in_bytes())
             << ", blocks: " << kv_cache_cap.n_blocks()
             << ", slot_size: " << kv_cache_cap.slot_size()
+            << ", index_slot_size: " << kv_cache_cap.index_slot_size()
+            << ", scale_slot_size: " << kv_cache_cap.scale_slot_size()
             << ", linear_slot_size: " << kv_cache_cap.linear_slot_size()
             << ", linear_blocks: " << kv_cache_cap.num_linear_state_blocks()
             << ", reserved_linear_bytes: "

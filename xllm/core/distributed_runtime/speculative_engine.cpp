@@ -151,10 +151,7 @@ bool SpeculativeEngine::allocate_kv_cache() {
   // check if llm and ssm are using same device
   if (share_device_) {
     // on the same device, use the smaller kv cache size
-    n_blocks = calculate_kv_cache(
-        kv_cache_size,
-        target_kv_cache_cap.n_layers() * target_kv_cache_cap.slot_size(),
-        draft_kv_cache_cap.n_layers() * draft_kv_cache_cap.slot_size());
+    n_blocks = calculate_kv_cache(target_kv_cache_cap, draft_kv_cache_cap);
   } else {
     // on different devices, use the smaller number of blocks
     n_blocks =
@@ -176,15 +173,67 @@ ForwardOutput SpeculativeEngine::step(std::vector<Batch>& batches) {
   return engine_->step(batches);
 }
 
-int64_t SpeculativeEngine::calculate_kv_cache(int64_t cache_size_in_bytes,
-                                              int64_t target_size,
-                                              int64_t draft_size) const {
-  CHECK_GT(cache_size_in_bytes, 0) << "no memory for kv cache";
-  const int32_t block_size = options_.block_size();
+int64_t SpeculativeEngine::calculate_kv_cache(
+    const KVCacheCapacity& target_kv_cache_cap,
+    const KVCacheCapacity& draft_kv_cache_cap) const {
+  CHECK_GT(target_kv_cache_cap.cache_size_in_bytes(), 0)
+      << "no memory for target kv cache";
+  CHECK_GT(draft_kv_cache_cap.cache_size_in_bytes(), 0)
+      << "no memory for draft kv cache";
+  CHECK_EQ(target_kv_cache_cap.block_size(), draft_kv_cache_cap.block_size())
+      << "target and draft kv cache block size must be the same";
 
-  // compute the number of blocks
-  const int64_t block_size_in_bytes = block_size * (target_size + draft_size);
-  return cache_size_in_bytes / block_size_in_bytes;
+  const int64_t block_size = target_kv_cache_cap.block_size();
+  CHECK_GT(block_size, 0) << "kv cache block size must be greater than 0";
+
+  const int64_t cache_size_in_bytes =
+      std::min(target_kv_cache_cap.cache_size_in_bytes(),
+               draft_kv_cache_cap.cache_size_in_bytes());
+  const int64_t linear_cache_size_in_bytes =
+      target_kv_cache_cap.linear_cache_size_in_bytes();
+  CHECK_GT(cache_size_in_bytes, linear_cache_size_in_bytes)
+      << "no memory left for speculative full-attention kv cache after "
+         "reserving target linear state cache, cache_size: "
+      << cache_size_in_bytes
+      << ", linear_cache_size: " << linear_cache_size_in_bytes;
+
+  const int64_t target_full_attention_slot_size =
+      target_kv_cache_cap.slot_size() + target_kv_cache_cap.index_slot_size() +
+      target_kv_cache_cap.scale_slot_size();
+  const int64_t draft_full_attention_slot_size =
+      draft_kv_cache_cap.slot_size() + draft_kv_cache_cap.index_slot_size() +
+      draft_kv_cache_cap.scale_slot_size();
+  CHECK_LE(draft_full_attention_slot_size, target_full_attention_slot_size)
+      << "draft full-attention kv cache slot size must not exceed target slot "
+         "size because the current speculative worker allocates draft KV "
+         "tensors with the target KVCacheShape";
+  // The current speculative worker allocates draft KV tensors with the
+  // target KVCacheShape, so draft physical allocation uses target slot size.
+  const int64_t draft_allocated_full_attention_slot_size =
+      target_full_attention_slot_size;
+  CHECK_GT(target_full_attention_slot_size, 0)
+      << "target full-attention kv cache slot size must be greater than 0";
+  CHECK_GT(draft_allocated_full_attention_slot_size, 0)
+      << "draft full-attention kv cache slot size must be greater than 0";
+
+  const int64_t target_full_attention_layers =
+      std::max<int64_t>(target_kv_cache_cap.num_full_attention_layers(), 1);
+  // Draft model has no linear-attention layers in the current MTP/Eagle path.
+  const int64_t draft_full_attention_layers = draft_kv_cache_cap.n_layers();
+  const int64_t target_full_attention_block_size_in_bytes =
+      block_size * target_full_attention_layers *
+      target_full_attention_slot_size;
+  const int64_t draft_full_attention_block_size_in_bytes =
+      block_size * draft_full_attention_layers *
+      draft_allocated_full_attention_slot_size;
+  const int64_t full_attention_block_size_in_bytes =
+      target_full_attention_block_size_in_bytes +
+      draft_full_attention_block_size_in_bytes;
+  CHECK_GT(full_attention_block_size_in_bytes, 0)
+      << "speculative kv cache block size in bytes must be greater than 0";
+
+  return (cache_size_in_bytes - linear_cache_size_in_bytes) /
+         full_attention_block_size_in_bytes;
 }
 
 void SpeculativeEngine::update_last_step_result(std::vector<Batch>& batch) {

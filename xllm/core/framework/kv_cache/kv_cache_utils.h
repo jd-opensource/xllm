@@ -49,6 +49,9 @@ struct KVCacheCapacity {
   // for index cache
   PROPERTY(int64_t, index_slot_size) = 0;
 
+  // for kv cache quantization scale cache
+  PROPERTY(int64_t, scale_slot_size) = 0;
+
   // for linear attention
   PROPERTY(int64_t, linear_slot_size) = 0;
   PROPERTY(int64_t, linear_cache_size_in_bytes) = 0;
