@@ -97,28 +97,44 @@ bool SpecKVCacheTransfer::pull_kv_blocks(
 bool SpecKVCacheTransfer::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
-    bool is_spec_draft) {
+    bool is_spec_draft,
+    int32_t kv_split_rank,
+    int32_t kv_split_size) {
   if (is_spec_draft) {
-    return push_kv_blocks_spec(merged_kv_infos, layer_synchronizer);
+    return push_kv_blocks_spec(
+        merged_kv_infos, layer_synchronizer, kv_split_rank, kv_split_size);
   } else {
-    return push_kv_blocks_internal(
-        merged_kv_infos, layer_synchronizer, layer_registered_caches_);
+    return push_kv_blocks_internal(merged_kv_infos,
+                                   layer_synchronizer,
+                                   layer_registered_caches_,
+                                   kv_split_rank,
+                                   kv_split_size);
   }
 }
 
 bool SpecKVCacheTransfer::push_kv_blocks_spec(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
-    std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer) {
-  return push_kv_blocks_internal(
-      merged_kv_infos, layer_synchronizer, spec_layer_registered_caches_);
+    std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
+    int32_t kv_split_rank,
+    int32_t kv_split_size) {
+  return push_kv_blocks_internal(merged_kv_infos,
+                                 layer_synchronizer,
+                                 spec_layer_registered_caches_,
+                                 kv_split_rank,
+                                 kv_split_size);
 }
 
 bool SpecKVCacheTransfer::push_kv_blocks_internal(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
-    const LayerRegisteredCaches& layer_registered_caches) {
-  return push_layer_registered_caches(
-      layer_registered_caches, merged_kv_infos, layer_synchronizer);
+    const LayerRegisteredCaches& layer_registered_caches,
+    int32_t kv_split_rank,
+    int32_t kv_split_size) {
+  return push_layer_registered_caches(layer_registered_caches,
+                                      merged_kv_infos,
+                                      layer_synchronizer,
+                                      kv_split_rank,
+                                      kv_split_size);
 }
 
 folly::SemiFuture<bool> SpecKVCacheTransfer::push_kv_blocks_async(
@@ -129,17 +145,36 @@ folly::SemiFuture<bool> SpecKVCacheTransfer::push_kv_blocks_async(
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this,
-                        &transfer_kv_infos,
+                        transfer_kv_infos,
                         &parallel_args,
                         layer_synchronizer,
                         is_spec_draft,
                         promise = std::move(promise)]() mutable {
     std::unordered_map<std::string, KVCacheInfo> merged_kv_infos;
-    merge_kv_blocks(merged_kv_infos, transfer_kv_infos, parallel_args);
+    std::vector<TransferKVInfo> filtered_kv_infos;
+    const std::vector<TransferKVInfo>* kv_infos = &transfer_kv_infos;
+    // When the KV cache is actually sharded across ranks
+    // (kv_split_size_effective > 1), filter remote_blocks_ids down to this
+    // rank's slice. When kv_split_size==1 each rank holds the full replica and
+    // we keep the legacy 1:1 remote_blocks_ids mapping.
+    const int32_t kv_split_size = parallel_args.kv_split_size_effective();
+    if (kv_split_size > 1) {
+      filtered_kv_infos = filter_kv_split_infos(
+          parallel_args.kv_split_rank(), kv_split_size, *kv_infos);
+      kv_infos = &filtered_kv_infos;
+      if (kv_infos->empty()) {
+        promise.setValue(true);
+        return;
+      }
+    }
+    merge_kv_blocks(merged_kv_infos, *kv_infos, parallel_args);
     bool success = true;
     if (!merged_kv_infos.empty()) {
-      success = this->push_kv_blocks(
-          merged_kv_infos, layer_synchronizer, is_spec_draft);
+      success = this->push_kv_blocks(merged_kv_infos,
+                                     layer_synchronizer,
+                                     is_spec_draft,
+                                     parallel_args.kv_split_rank(),
+                                     parallel_args.kv_split_size_effective());
     }
     promise.setValue(success);
   });
@@ -150,11 +185,16 @@ void SpecKVCacheTransfer::merge_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     const std::vector<TransferKVInfo>& transfer_kv_infos,
     const ParallelArgs& parallel_args) {
-  // Obtain the parallel parameters of the source instance
+  // Obtain the parallel parameters of the source instance. CP-aware: the
+  // per-DP worker count is cp_size * tp_size, so the real TP size used for
+  // tp_rank arithmetic must exclude CP, otherwise CP rank > 0 workers would
+  // produce out-of-range tp ranks and the linked_dp_ranks filter below would
+  // silently drop pushes (see CP + PD-disagg bringup notes).
   int32_t src_rank = parallel_args.rank();
   int32_t src_dp_size = parallel_args.dp_size();
+  int32_t src_cp_size = parallel_args.cp_size();
   int32_t src_world_size = parallel_args.world_size();
-  int32_t src_tp_size = src_world_size / src_dp_size;
+  int32_t src_tp_size = src_world_size / src_dp_size / src_cp_size;
   int32_t src_dp_local_tp_rank = src_rank % src_tp_size;
   for (auto& info : transfer_kv_infos) {
     // Obtain the parallel parameters of the destination instance.

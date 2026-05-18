@@ -161,6 +161,11 @@ const torch::Tensor& EmbeddingCache::embedding_placeholder() const {
   return embedding_placeholder_;
 }
 
+void EmbeddingCache::set_probs_placeholder(
+    const torch::Tensor& probs_placeholder) {
+  probs_placeholder_ = probs_placeholder;
+}
+
 std::vector<EmbeddingCache::DecodeState> EmbeddingCache::read_decode_states(
     const std::vector<int32_t>& ids,
     const std::vector<std::string>& request_ids) const {

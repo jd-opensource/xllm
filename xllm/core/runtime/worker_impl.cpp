@@ -58,6 +58,7 @@ limitations under the License.
 #include "core/runtime/worker_rendezvous.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
+#include "runtime/cp_input_partition.h"
 #include "framework/model_loader.h"
 #include "framework/parallel_state/npu_cp_ep_padding.h"
 #include "framework/sampling/sampler.h"
@@ -468,6 +469,144 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
   return inputs;
 }
 
+torch::Tensor WorkerImpl::recompute_new_cache_slots(const ForwardInput& input) {
+  auto old_cache_slots = input.input_params.attention.device.new_cache_slots;
+  int64_t numel = old_cache_slots.numel();
+  // The logical block stride that BlockManager hands out is
+  // `block_size * kv_split_size_effective` (see llm_engine init). When KV is
+  // not split (kv_split_size == 1) the stride collapses back to block_size.
+  const int32_t kv_split_size = parallel_args_.kv_split_size_effective();
+  const int block_size_total = options_.block_size() * kv_split_size;
+  // tp_size is still derived from cp_size because the worker rank layout
+  // (`dp_rank * (cp*tp) + cp_rank*tp + tp_rank`) is CP-shaped, independent of
+  // KV split width.
+  const int32_t tp_size = parallel_args_.world_size() /
+                          (parallel_args_.dp_size() * parallel_args_.cp_size());
+  // KV-shard ownership predicate: block whose sub-index inside the logical
+  // block matches this rank's KV-split rank (degenerates to "this rank only"
+  // when kv_split_size == 1, since sub_block_idx is always 0 there).
+  const int32_t owner_kv_split_rank = parallel_args_.kv_split_rank();
+
+  torch::Tensor indices = torch::arange(numel, torch::kCPU);
+  torch::Tensor block_offset = indices % block_size_total;
+  torch::Tensor sub_block_idx =
+      torch::floor_divide(block_offset, options_.block_size());
+  torch::Tensor mask = (sub_block_idx == owner_kv_split_rank);
+  torch::Tensor valid_indices = torch::nonzero(mask).squeeze();
+
+  torch::Tensor new_cache_slots = torch::full_like(old_cache_slots, -1);
+  if (valid_indices.numel() > 0) {
+    torch::Tensor old_slotid =
+        old_cache_slots.index_select(0, valid_indices).to(torch::kInt);
+    torch::Tensor block_id = torch::floor_divide(old_slotid, block_size_total);
+    torch::Tensor block_offset_mod = old_slotid % options_.block_size();
+    torch::Tensor new_slotid =
+        block_id * options_.block_size() + block_offset_mod;
+    new_cache_slots.index_put_({valid_indices},
+                               new_slotid.to(new_cache_slots.scalar_type()));
+  }
+  return new_cache_slots;
+}
+
+torch::Tensor WorkerImpl::compute_in_prefix_slots(const ForwardInput& input) {
+  // Unify prefix-cache hits and chunked-prefill progression by deriving the
+  // number of prefix blocks from `kv_cache_tokens_nums` (already-cached tokens
+  // for each sequence at the start of this forward), instead of relying on
+  // `shared_blocks_num` which only counts prefix-cache hits and does not grow
+  // across chunks.
+  const auto& block_tables = input.input_params.attention.device.block_tables;
+  const auto& kv_cache_tokens_nums =
+      input.input_params.attention.device.kv_cache_tokens_nums;
+  const int32_t block_size = options_.block_size();
+  // Stride here is the KV-split width (how many ranks the KV is sharded
+  // across), NOT cp_size. When kv_split_size == 1 each rank holds the full
+  // prefix and we emit ALL prefix blocks; when kv_split_size == cp_size this
+  // reduces to the legacy round-robin behavior byte-for-byte.
+  const int32_t kv_split_size =
+      std::max(1, parallel_args_.kv_split_size_effective());
+  const int32_t kv_split_rank = parallel_args_.kv_split_rank();
+
+  CHECK(block_tables.defined() && block_tables.dim() == 2)
+      << "block_tables must be a 2D tensor in compute_in_prefix_slots.";
+  CHECK_EQ(block_tables.size(0), kv_cache_tokens_nums.numel())
+      << "block_tables rows (" << block_tables.size(0)
+      << ") must match kv_cache_tokens_nums numel ("
+      << kv_cache_tokens_nums.numel() << ").";
+  CHECK_GT(block_size, 0);
+
+  const int64_t num_sequences = block_tables.size(0);
+  std::vector<int32_t> in_prefix_slots_vec;
+  // HCCL AllGather and downstream ATB Gather op cannot accept a [0]-shaped
+  // tensor; emit at least one padding slot when the batch contributes none.
+  if (num_sequences == 0) {
+    in_prefix_slots_vec.push_back(0);
+    return torch::tensor(in_prefix_slots_vec, torch::kInt);
+  }
+
+  auto block_tables_acc = block_tables.accessor<int32_t, 2>();
+  auto kv_cache_tokens_acc = kv_cache_tokens_nums.accessor<int32_t, 1>();
+
+  // Per-rank prefix count = total_prefix_tokens / kv_split_size. This matches
+  // the legacy behavior byte-for-byte when kv_split_size == cp_size (rank
+  // emits the first `prefix_blocks` entries of block_tables; the ATB reshape
+  // assumes a [kv_split_size, local_len, ...] layout for the subsequent
+  // AllGather). When kv_split_size == 1 every rank emits the FULL prefix
+  // (prefix_blocks == kv_cache_tokens / block_size) and the ATB layer skips
+  // the prefix AllGather entirely (see S6).
+  // (void)kv_split_rank to silence -Wunused-variable on the kv_split_size==1
+  // path; the rank is implicit there.
+  (void)kv_split_rank;
+  in_prefix_slots_vec.reserve(num_sequences * block_size);
+  for (int64_t i = 0; i < num_sequences; ++i) {
+    const int32_t prefix_tokens = kv_cache_tokens_acc[i] / kv_split_size;
+    const int32_t prefix_blocks = prefix_tokens / block_size;
+    if (prefix_blocks <= 0) {
+      in_prefix_slots_vec.push_back(0);
+      continue;
+    }
+    for (int32_t j = 0; j < prefix_blocks; j++) {
+      const int32_t physical_block = block_tables_acc[i][j];
+      const int32_t base_slot = physical_block * block_size;
+      for (int32_t k = 0; k < block_size; ++k) {
+        in_prefix_slots_vec.push_back(base_slot + k);
+      }
+    }
+  }
+  return torch::tensor(in_prefix_slots_vec, torch::kInt);
+}
+
+/*
+torch::Tensor WorkerImpl::compute_in_prefix_slots(const ForwardInput& input) {
+  auto block_tables = input.input_params.block_tables;
+  auto shared_blocks_num = input.input_params.shared_blocks_num;
+
+  CHECK(block_tables.size(0) == shared_blocks_num.size())
+    << "block_tables dim0 is " << block_tables.size(0)
+    << "shared_blocks_num size is " << shared_blocks_num.size();
+
+  std::vector<int32_t> in_prefix_slots_vec;
+  auto block_tables_accessor = block_tables.accessor<int32_t, 2>();
+
+  int64_t rows = block_tables_accessor.size(0);
+  int64_t cols = block_tables_accessor.size(1);
+
+  for (int64_t i = 0; i < rows; ++i) {
+    if (shared_blocks_num[i] == 0) {
+      in_prefix_slots_vec.push_back(0);
+      continue;
+    }
+    for (int64_t j = 0; j < shared_blocks_num[i]; ++j) {
+      for (int64_t k = 0; k < options_.block_size(); k++) {
+        in_prefix_slots_vec.push_back(block_tables_accessor[i][j] *
+options_.block_size() + k);
+      }
+    }
+  }
+  torch::Tensor in_prefix_slots = torch::tensor(in_prefix_slots_vec,
+torch::kInt); return in_prefix_slots;
+}
+*/
+
 void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
                                              ForwardInput& processed_input) {
 #if defined(USE_NPU)
@@ -488,87 +627,111 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     lock_guard.emplace(capture_lock);
   }
 #endif
-  const bool use_default_stream =
-      !enable_schedule_overlap() && options_.backend() == "llm";
-  auto prepare_input_on_current_stream = [&]() {
-    processed_input = input.to(device_, dtype_);
-    auto& input_params = processed_input.input_params;
+  c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
+
+  // CP partition is now done worker-side (formerly engine-side in
+  // LLMEngine::step). torch::Tensor fields are handles, so assigning new
+  // tensors to `cp_input` does not mutate `input`.
+  // IMPORTANT: every downstream NPU-side prepare call (prepare_cp_prefill_inputs,
+  // CpEpPadding, recompute_new_cache_slots, compute_in_prefix_slots) reads
+  // from the per-rank slice and therefore MUST consume `cp_input.*`, not the
+  // pre-partition `input.*`.
+  // The `!input.cp_partitioned` guard is critical for nested step_async paths
+  // (MTP target/draft sub-workers) that re-enter prepare_work_before_execute
+  // on already-partitioned device tensors; see ForwardInput::cp_partitioned.
+  ForwardInput cp_input = input;
+  const bool needs_cp_partition = parallel_args_.cp_size() > 1 &&
+                                  input.input_params.meta.batch_forward_type
+                                      .no_decode() &&
+                                  !input.cp_partitioned;
+  if (needs_cp_partition) {
+    cp::cp_partition_inplace(cp_input,
+                             parallel_args_.cp_rank(),
+                             parallel_args_.cp_size());
+    cp_input.cp_partitioned = true;
+  }
+  processed_input = cp_input.to(device_, dtype_);
 
 #if defined(USE_NPU)
-    CpPrefillInputs tmp_cp_inputs;
-    if (parallel_args_.cp_size() > 1 &&
-        input.input_params.meta.batch_forward_type.is_prefill()) {
-      tmp_cp_inputs = prepare_cp_prefill_inputs(
-          parallel_args_.cp_size(),
-          input.token_ids,
-          input.positions,
-          input.input_params.attention.device.q_seq_lens);
-      processed_input.input_params.parallel.cp_prefill_inputs =
-          tmp_cp_inputs.to(device_);
-      CpEpPadding cp_ep_padding(
-          input.token_ids,
-          context_.get_model_args().num_experts_per_tok(),
-          context_.get_parallel_args().mapping_data(),
-          /*device=*/device_,
-          dtype_,
-          /*is_prefill=*/
-          input.input_params.meta.batch_forward_type.is_prefill());
-      processed_input.input_params.parallel.cp_ep_padding_data =
-          cp_ep_padding.build();
-    }
+  const bool needs_kv_split_prep =
+      needs_cp_partition && util::enable_kvcache_split();
+  CpPrefillInputs tmp_cp_inputs;
+  if (needs_cp_partition) {
+    tmp_cp_inputs = prepare_cp_prefill_inputs(
+        parallel_args_.cp_size(),
+        cp_input.host_token_ids(),
+        cp_input.host_positions(),
+        cp_input.input_params.attention.device.q_seq_lens,
+        util::enable_kvcache_split(),
+        cp_input.input_params.attention.host.kv_cache_tokens_nums,
+        options_.block_size(),
+        parallel_args_.kv_split_size_effective());
+    processed_input.input_params.parallel.cp_prefill_inputs =
+        tmp_cp_inputs.to(device_);
+    CpEpPadding cp_ep_padding(
+        cp_input.host_token_ids(),
+        context_.get_model_args().num_experts_per_tok(),
+        context_.get_parallel_args().mapping_data(),
+        /*device=*/device_,
+        dtype_,
+        /*is_prefill=*/
+        cp_input.input_params.meta.batch_forward_type.no_decode());
+    processed_input.input_params.parallel.cp_ep_padding_data =
+        cp_ep_padding.build();
+  }
+
+  if (needs_kv_split_prep) {
+    torch::Tensor new_cache_slots = recompute_new_cache_slots(cp_input);
+    processed_input.input_params.attention.device.new_cache_slots =
+        new_cache_slots.to(device_);
+
+    torch::Tensor in_prefix_slots = compute_in_prefix_slots(cp_input);
+    processed_input.input_params.attention.device.in_prefix_slots =
+        in_prefix_slots.to(device_);
+  }
 #endif
 
-    apply_kv_block_swaps(input_params);
+  auto& input_params = processed_input.input_params;
+
+  apply_kv_block_swaps(input_params);
 
 #if defined(USE_NPU)
-    if (context_.get_model_args().enable_mla() &&
-        input_params.meta.batch_forward_type.is_chunked_prefill()) {
-      prepare_mla_prefixcache_inputs(input_params);
-    }
+  if (context_.get_model_args().enable_mla() &&
+      input_params.meta.batch_forward_type.is_chunked_prefill()) {
+    prepare_mla_prefixcache_inputs(input_params);
+  }
 
-    if (!context_.get_parallel_args().mapping_data().empty() &&
-        !(context_.get_parallel_args().cp_size() > 1) &&
-        (context_.get_parallel_args().dp_size() > 1 ||
-         context_.get_parallel_args().ep_size() > 1)) {
-      torch::Tensor token_size_per_dp_group = torch::tensor(
-          processed_input.input_params.parallel.dp_global_token_nums,
-          torch::TensorOptions()
-              .device(torch::kCPU)
-              .dtype(torch::kInt32)
-              .pinned_memory(true));
-      bool is_prefill =
-          processed_input.input_params.meta.batch_forward_type.is_prefill();
-      DpEpPadding dp_ep_padding(token_size_per_dp_group,
-                                context_.get_model_args().num_experts_per_tok(),
-                                context_.get_parallel_args().mapping_data(),
-                                device_,
-                                dtype_,
-                                is_prefill);
-      processed_input.input_params.parallel.dp_ep_padding_data =
-          dp_ep_padding.build();
-      if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
-        // expert_load_data_.fill_(0);
-        processed_input.input_params.expert.expert_load_data =
-            expert_load_data_;
-      }
+  if (!context_.get_parallel_args().mapping_data().empty() &&
+      !(context_.get_parallel_args().cp_size() > 1) &&
+      (context_.get_parallel_args().dp_size() > 1 ||
+       context_.get_parallel_args().ep_size() > 1)) {
+    torch::Tensor token_size_per_dp_group = torch::tensor(
+        processed_input.input_params.parallel.dp_global_token_nums,
+        torch::TensorOptions()
+            .device(torch::kCPU)
+            .dtype(torch::kInt32)
+            .pinned_memory(true));
+    bool is_prefill =
+        processed_input.input_params.meta.batch_forward_type.is_prefill();
+    DpEpPadding dp_ep_padding(token_size_per_dp_group,
+                              context_.get_model_args().num_experts_per_tok(),
+                              context_.get_parallel_args().mapping_data(),
+                              device_,
+                              dtype_,
+                              is_prefill);
+    processed_input.input_params.parallel.dp_ep_padding_data =
+        dp_ep_padding.build();
+    if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
+      processed_input.input_params.expert.expert_load_data = expert_load_data_;
     }
+  }
 
-    if (has_linear_attention_layers(context_.get_model_args())) {
-      prepare_input_params_for_linear_attention(processed_input.input_params);
-    }
+  if (has_linear_attention_layers(context_.get_model_args())) {
+    prepare_input_params_for_linear_attention(processed_input.input_params);
+  }
 #endif
-  };
 
-  if (use_default_stream) {
-    prepare_input_on_current_stream();
-  } else {
-    c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
-    prepare_input_on_current_stream();
-  }
-
-  if (!use_default_stream) {
-    prepare_stream_->synchronize();
-  }
+  auto ret = prepare_stream_->synchronize();
 }
 
 void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {

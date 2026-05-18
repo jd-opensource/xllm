@@ -16,15 +16,86 @@ limitations under the License.
 
 #include "scheduler/chunked_prefill_scheduler.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <limits>
+#include <numeric>
 
+#include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "framework/batch/batch_factory.h"
 #include "util/timer.h"
 #include "util/utils.h"
 
 namespace xllm {
+
+namespace {
+
+// LCM helper (std::lcm is C++17; the existing codebase already uses
+// std::gcd elsewhere, so we depend on that and inline the lcm to avoid
+// header churn). Returns 0 when either argument is 0 so callers can use
+// the result as a multiplier safely.
+inline size_t lcm_size_t(size_t a, size_t b) {
+  if (a == 0 || b == 0) {
+    return 0;
+  }
+  return (a / std::gcd(a, b)) * b;
+}
+
+// Round a chunked-prefill chunk size DOWN to a multiple of
+// `lcm(2 * cp_size, kv_split_size * block_size)`. Two constraints stack
+// here after the KV-split / CP decoupling refactor:
+//   (a) `num_tokens % (2 * cp_size) == 0` so that worker-side
+//       `cp_partition_inplace` produces two equally-sized halves per CP rank
+//       (this is the constraint BatchInputBuilder used to enforce via
+//       q_seq_len right-padding to 2*cp_size; we now push it to chunk
+//       granularity so it is satisfied without padding).
+//   (b) `prefix_len % (kv_split_size * block_size) == 0` so the KV-shard
+//       prefix geometry (compute_in_prefix_slots / compute_prefix_rank_geometry)
+//       stays aligned at block boundaries across chunks. When KV split is
+//       off (kv_split_size == 1) this term collapses to block_size and only
+//       constraint (a) effectively governs.
+//
+// The function intentionally does NOTHING and returns `num_tokens` when:
+//   - cp_size <= 1 AND kv_split_size <= 1 (no constraints at all)
+//   - block_size <= 0 (degenerate config)
+//   - num_tokens == 0
+//   - The current chunk is the LAST one for this sequence (i.e.
+//     num_tokens >= remaining_in_seq). The final chunk's residual is
+//     handled by BatchInputBuilder's q_seq_len right-padding to 2*cp_size.
+//   - num_tokens is already smaller than the alignment unit. Aligning down
+//     to zero would starve the chunk; the caller's downstream budgets
+//     stay coherent if we leave the chunk as-is.
+inline size_t maybe_align_cp_chunk_tokens(size_t num_tokens,
+                                          int32_t cp_size,
+                                          int32_t kv_split_size,
+                                          int32_t block_size,
+                                          size_t remaining_in_seq) {
+  if (cp_size <= 1 && kv_split_size <= 1) {
+    return num_tokens;
+  }
+  if (block_size <= 0 || num_tokens == 0) {
+    return num_tokens;
+  }
+  if (num_tokens >= remaining_in_seq) {
+    return num_tokens;
+  }
+  const size_t cp_term =
+      cp_size > 1 ? static_cast<size_t>(2) * static_cast<size_t>(cp_size) : 1;
+  const size_t kv_term =
+      kv_split_size > 1
+          ? static_cast<size_t>(kv_split_size) * static_cast<size_t>(block_size)
+          : 1;
+  const size_t alignment = lcm_size_t(cp_term, kv_term);
+  if (alignment == 0 || num_tokens < alignment) {
+    return num_tokens;
+  }
+  return (num_tokens / alignment) * alignment;
+}
+
+}  // namespace
 
 ChunkedPrefillScheduler::ChunkedPrefillScheduler(Engine* engine,
                                                  const Options& options)
@@ -260,6 +331,18 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
   // they may contian many sequences, so we should check here.
   while (!waiting_priority_queue->empty() && remaining_token_budget > 0 &&
          latency_budget > estimate_latency && remaining_seq_budget > 0) {
+    // Memory-utilization short-circuit (added by the CP PR): when not in
+    // disagg-PD mode, refuse to admit additional waiting prefill requests
+    // once KV-cache utilization crosses the threshold so that decode tail
+    // latency stays bounded. In disagg-PD the prefill instance has its own
+    // memory budgeting, so we skip this check.
+    if (!options_.enable_disagg_pd() &&
+        kv_cache_manager_->kv_cache_utilization() >=
+            FLAGS_prefill_scheduling_memory_usage_threshold) {
+      blocks_exhausted = true;
+      break;
+    }
+
     std::shared_ptr<Request> request(waiting_priority_queue->top());
     if (request->finished() || request->cancelled()) {
       kv_cache_manager_->deallocate(request.get());
@@ -298,6 +381,29 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
                    remaining_token_budget - allocated_tokens);
 
       num_tokens = std::min(assume_max_tokens, num_tokens);
+
+      // CP-aware chunk alignment: when CP is enabled and this is not the
+      // last chunk for the sequence, snap the chunk size down to a multiple
+      // of cp_size * block_size so worker-side cp_partition produces
+      // balanced former/latter chunks and the prefix-cache invariant
+      // `prefix_len % (cp_size * block_size) == 0` is maintained chunk to
+      // chunk (see cp_kv_split.md §6.7). For non-CP, this is a no-op.
+      const size_t kv_cache_tokens_num_for_align =
+          prefill_sequence->kv_state().kv_cache_tokens_num();
+      const size_t remaining_in_seq =
+          prefill_sequence->num_tokens() > kv_cache_tokens_num_for_align
+              ? prefill_sequence->num_tokens() - kv_cache_tokens_num_for_align
+              : 0;
+      // kv_split_size: FLAGS_kv_split_size > 0 takes priority (independent of
+      // cp_size); otherwise fall back to cp_size for legacy parity. We read
+      // FLAGS directly here because the scheduler holds no ParallelArgs.
+      const int32_t kv_split_for_align =
+          ::xllm::ParallelConfig::get_instance().kv_split_size_effective();
+      num_tokens = maybe_align_cp_chunk_tokens(num_tokens,
+                                               options_.cp_size(),
+                                               kv_split_for_align,
+                                               kv_cache_manager_->block_size(),
+                                               remaining_in_seq);
 
       if (remaining_token_budget < allocated_tokens + num_tokens ||
           remaining_seq_budget < allocated_seqs + 1) {
@@ -520,6 +626,9 @@ std::vector<Batch> ChunkedPrefillScheduler::prepare_batch() {
   std::vector<std::shared_ptr<Request>> finished_requests;
   for (auto it = running_requests_.rbegin(); it != running_requests_.rend();
        ++it) {
+    if (*it == nullptr) {
+      continue;
+    }
     std::shared_ptr<Request> request = *it;
     request->update_connection_status();
     if (request->finished() || request->cancelled()) {

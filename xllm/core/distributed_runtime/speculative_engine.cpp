@@ -281,9 +281,10 @@ bool SpeculativeEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
                                      const std::vector<std::string>& addrs,
                                      const std::vector<std::string>& device_ips,
                                      const std::vector<uint16_t>& ports,
-                                     const int32_t src_dp_size) {
+                                     const int32_t src_dp_size,
+                                     const int32_t src_cp_size) {
   return engine_->link_cluster(
-      cluster_ids, addrs, device_ips, ports, src_dp_size);
+      cluster_ids, addrs, device_ips, ports, src_dp_size, src_cp_size);
 };
 
 bool SpeculativeEngine::unlink_cluster(
@@ -291,8 +292,9 @@ bool SpeculativeEngine::unlink_cluster(
     const std::vector<std::string>& addrs,
     const std::vector<std::string>& device_ips,
     const std::vector<uint16_t>& ports,
-    const int32_t dp_size) {
+    const int32_t src_dp_size,
+    const int32_t src_cp_size) {
   return engine_->unlink_cluster(
-      cluster_ids, addrs, device_ips, ports, dp_size);
+      cluster_ids, addrs, device_ips, ports, src_dp_size, src_cp_size);
 };
 }  // namespace xllm

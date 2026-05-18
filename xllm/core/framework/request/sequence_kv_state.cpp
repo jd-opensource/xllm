@@ -166,6 +166,7 @@ std::optional<TransferKVInfo>& KVCacheState::transfer_kv_info() {
 void KVCacheState::reset() {
   kv_cache_tokens_num_ = 0;
   num_owned_shared_blocks_ = 0;
+  pushed_local_block_count_ = 0;
   blocks_.clear();
   composite_blocks_.clear();
   transfer_kv_info_.reset();

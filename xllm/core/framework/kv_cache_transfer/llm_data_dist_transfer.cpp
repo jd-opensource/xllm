@@ -15,9 +15,11 @@ limitations under the License.
 
 #include "framework/kv_cache_transfer/llm_data_dist_transfer.h"
 
+#include <chrono>
 #include <glog/logging.h>
 
 #include "common/macros.h"
+#include "core/framework/config/disagg_pd_config.h"
 #include "util/net.h"
 
 namespace xllm {
@@ -190,9 +192,15 @@ bool LlmDataDistTransfer::pull_kv_blocks(
 bool LlmDataDistTransfer::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
-    bool is_spec_draft) {
-  return push_layer_registered_caches(
-      layer_registered_caches_, merged_kv_infos, layer_synchronizer);
+    bool is_spec_draft,
+    int32_t kv_split_rank,
+    int32_t kv_split_size) {
+  (void)is_spec_draft;
+  return push_layer_registered_caches(layer_registered_caches_,
+                                      merged_kv_infos,
+                                      layer_synchronizer,
+                                      kv_split_rank,
+                                      kv_split_size);
 }
 
 RegisteredCache LlmDataDistTransfer::register_cache_tensor(
@@ -249,43 +257,73 @@ void LlmDataDistTransfer::register_layer_registered_caches(
 bool LlmDataDistTransfer::push_layer_registered_caches(
     const LayerRegisteredCaches& layer_registered_caches,
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
-    std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer) {
+    std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
+    int32_t kv_split_rank,
+    int32_t kv_split_size) {
+  const int64_t num_layers =
+      static_cast<int64_t>(layer_registered_caches.size());
+  // BuildPushSchedule deterministically orders (layer, dst) tuples and applies
+  // rank-rotated dst order when kv_push_dst_rotate is on and kv_split_size>1.
+  // Passing (0, 1) degenerates to legacy layer-major sorted-dst order.
+  const auto schedule = BuildPushSchedule(
+      merged_kv_infos, kv_split_rank, kv_split_size, num_layers);
+
+  const bool timing_log_on =
+      ::xllm::DisaggPDConfig::get_instance().kv_push_timing_log();
+  const auto wall_start = std::chrono::steady_clock::now();
+
   bool result = true;
-  for (int64_t layer_index = 0;
-       layer_index < static_cast<int64_t>(layer_registered_caches.size());
-       ++layer_index) {
-    // Wait for the KV cache computation of this layer to complete.
-    layer_synchronizer->synchronize_layer(layer_index);
-    // Push the KV Cache computed at this layer for all requests to the
-    // designated worker.
+  int64_t cur_layer = -1;
+  for (const auto& step : schedule) {
+    if (step.layer != cur_layer) {
+      // Wait for the KV cache computation of this layer to complete.
+      layer_synchronizer->synchronize_layer(step.layer);
+      cur_layer = step.layer;
+    }
+    const KVCacheInfo& kv_info = *step.dst;
+    if (kv_info.src_blocks.empty()) {
+      continue;
+    }
+
+    const auto step_start = std::chrono::steady_clock::now();
     for (const RegisteredCache& registered_cache :
-         layer_registered_caches[layer_index]) {
-      for (const auto& pair : merged_kv_infos) {
-        const KVCacheInfo& kv_info = pair.second;
-        if (kv_info.src_blocks.size() == 0) {
-          continue;
-        }
+         layer_registered_caches[step.layer]) {
+      CacheIndex cache_index{kv_info.dst_cluster_id,
+                             registered_cache.cache.cache_id};
+      KvCacheExtParam ext_param{};
+      ext_param.src_layer_range = {0, 0};
+      ext_param.dst_layer_range = {0, 0};
+      ext_param.tensor_num_per_layer = 1;
 
-        CacheIndex cache_index{kv_info.dst_cluster_id,
-                               registered_cache.cache.cache_id};
-        KvCacheExtParam ext_param{};
-        ext_param.src_layer_range = {0, 0};
-        ext_param.dst_layer_range = {0, 0};
-        ext_param.tensor_num_per_layer = 1;
-
-        auto ret = llm_data_dist_->PushKvBlocks(registered_cache.cache,
-                                                cache_index,
-                                                kv_info.src_blocks,
-                                                kv_info.dst_blocks,
-                                                ext_param);
-        if (ret != LLM_SUCCESS) {
-          LOG(ERROR) << "PushKvBlocks failed, layer = " << layer_index
-                     << ", role = " << registered_cache.role.to_string()
-                     << ", ret = " << std::hex << ret;
-          result = false;
-        }
+      auto ret = llm_data_dist_->PushKvBlocks(registered_cache.cache,
+                                              cache_index,
+                                              kv_info.src_blocks,
+                                              kv_info.dst_blocks,
+                                              ext_param);
+      if (ret != LLM_SUCCESS) {
+        LOG(ERROR) << "PushKvBlocks failed, layer = " << step.layer
+                   << ", role = " << registered_cache.role.to_string()
+                   << ", ret = " << std::hex << ret;
+        result = false;
       }
     }
+    if (timing_log_on) {
+      const auto step_us =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - step_start)
+              .count();
+      LOG(INFO) << "push_kv_blocks step: layer=" << step.layer
+                << " dst=" << (step.dst_key ? *step.dst_key : std::string{})
+                << " src_blocks=" << kv_info.src_blocks.size()
+                << " elapsed_us=" << step_us;
+    }
+  }
+  if (timing_log_on) {
+    const auto total_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                              std::chrono::steady_clock::now() - wall_start)
+                              .count();
+    LOG(INFO) << "push_kv_blocks total: steps=" << schedule.size()
+              << " total_us=" << total_us;
   }
   return result;
 }

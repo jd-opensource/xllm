@@ -460,6 +460,7 @@ struct ForwardInput {
     inputs.device_input_buffer = device_input_buffer;
     inputs.input_host_buffer_has_layout = input_host_buffer_has_layout;
     inputs.device_tensors_ready = true;
+    inputs.cp_partitioned = cp_partitioned;
     return inputs;
   }
 
@@ -522,6 +523,7 @@ struct ForwardInput {
     inputs.transfer_kv_infos = transfer_kv_infos;
     inputs.step_decode = step_decode;
     inputs.skip_sampling_for_logits_only = skip_sampling_for_logits_only;
+    inputs.cp_partitioned = cp_partitioned;
   }
 
   void set_host_views(ForwardInput& inputs) const {
@@ -595,8 +597,12 @@ struct ForwardInput {
   // already point to the device-side views for execution. Worker prepare can
   // then skip rebuilding/H2D in ForwardInput::to().
   bool device_tensors_ready = false;
+
+  // True once cp::cp_partition_inplace has produced the per-CP-rank slice.
+  bool cp_partitioned = false;
 };
 
+#if 0  // Legacy engine-side CP partition; superseded by cp::cp_partition_inplace.
 inline ForwardInput cp_partition_forward_input(const ForwardInput& input,
                                                int32_t cp_rank,
                                                int32_t cp_size) {
@@ -879,6 +885,7 @@ inline ForwardInput cp_partition_forward_input(const ForwardInput& input,
   output.device_tensors_ready = false;
   return output;
 }
+#endif
 
 // output after forward execution
 struct ForwardOutput {

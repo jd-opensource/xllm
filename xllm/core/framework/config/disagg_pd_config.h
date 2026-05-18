@@ -66,6 +66,10 @@ class DisaggPDConfig final {
   PROPERTY(std::string, kv_cache_transfer_mode) = "PUSH";
 
   PROPERTY(int32_t, transfer_listen_port) = 26000;
+
+  PROPERTY(bool, kv_push_dst_rotate) = true;
+
+  PROPERTY(bool, kv_push_timing_log) = false;
 };
 
 }  // namespace xllm

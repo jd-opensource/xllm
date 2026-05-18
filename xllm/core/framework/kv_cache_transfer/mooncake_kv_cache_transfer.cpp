@@ -15,9 +15,13 @@ limitations under the License.
 
 #include "framework/kv_cache_transfer/mooncake_kv_cache_transfer.h"
 
+#include <chrono>
 #include <glog/logging.h>
 
 #include <numeric>
+
+#include "common/global_flags.h"
+#include "core/framework/config/disagg_pd_config.h"
 #include <unordered_set>
 
 #if defined(USE_NPU)
@@ -507,24 +511,54 @@ void MooncakeKVCacheTransferDefault::merge_kv_blocks(
 bool MooncakeKVCacheTransferDefault::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
-    bool is_spec_draft) {
+    bool is_spec_draft,
+    int32_t kv_split_rank,
+    int32_t kv_split_size) {
   const BufLayout& layout = is_spec_draft ? spec_layout_ : main_layout_;
   CHECK(layout.registered) << "KV cache is not registered.";
   const int64_t num_layers = layout.num_layers;
-  for (int64_t layer_index = 0; layer_index < num_layers; ++layer_index) {
-    layer_synchronizer->synchronize_layer(layer_index);
-    for (const auto& pair : merged_kv_infos) {
-      std::vector<int64_t> layer_ids = {layer_index};
-      std::vector<int64_t> buf_ids = get_buf_ids(layer_ids, is_spec_draft);
-      const KVCacheInfo& kv_info = pair.second;
-      auto ret = mooncake_te_->push_memory_blocks(
-          kv_info.dst_addr, kv_info.src_blocks, kv_info.dst_blocks, buf_ids);
-      if (!ret) {
-        LOG(ERROR) << "Push kv blocks failed, layer = " << layer_index
-                   << ", ret = " << ret;
-        return false;
-      }
+
+  const auto schedule =
+      BuildPushSchedule(merged_kv_infos, kv_split_rank, kv_split_size, num_layers);
+
+  const auto wall_start = std::chrono::steady_clock::now();
+  int64_t cur_layer = -1;
+  for (const auto& step : schedule) {
+    if (step.layer != cur_layer) {
+      layer_synchronizer->synchronize_layer(step.layer);
+      cur_layer = step.layer;
     }
+    const KVCacheInfo& kv_info = *step.dst;
+    std::vector<int64_t> layer_ids = {step.layer};
+    std::vector<int64_t> buf_ids = get_buf_ids(layer_ids, is_spec_draft);
+
+    const auto step_start = std::chrono::steady_clock::now();
+    auto ret = mooncake_te_->push_memory_blocks(
+        kv_info.dst_addr, kv_info.src_blocks, kv_info.dst_blocks, buf_ids);
+    if (!ret) {
+      LOG(ERROR) << "Push kv blocks failed, layer = " << step.layer
+                 << ", ret = " << ret;
+      return false;
+    }
+    if (::xllm::DisaggPDConfig::get_instance().kv_push_timing_log()) {
+      const auto step_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                               std::chrono::steady_clock::now() - step_start)
+                               .count();
+      LOG(INFO) << "[KVPUSH_MOONCAKE] rank=" << kv_split_rank << "/"
+                << kv_split_size << " layer=" << step.layer
+                << " dst=" << (step.dst_key ? *step.dst_key : std::string{})
+                << " src_blocks=" << kv_info.src_blocks.size()
+                << " us=" << step_us;
+    }
+  }
+  if (::xllm::DisaggPDConfig::get_instance().kv_push_timing_log()) {
+    const auto total_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                              std::chrono::steady_clock::now() - wall_start)
+                              .count();
+    LOG(INFO) << "[KVPUSH_MOONCAKE_TOTAL] rank=" << kv_split_rank << "/"
+              << kv_split_size << " num_layers=" << num_layers
+              << " num_dsts=" << merged_kv_infos.size()
+              << " total_us=" << total_us;
   }
   return true;
 }
@@ -646,9 +680,12 @@ bool MooncakeKVCacheTransferXTensor::pull_kv_blocks(
 bool MooncakeKVCacheTransferXTensor::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
-    bool is_spec_draft) {
+    bool is_spec_draft,
+    int32_t kv_split_rank,
+    int32_t kv_split_size) {
   (void)is_spec_draft;
-  return push_kv_blocks_impl(merged_kv_infos, layer_synchronizer);
+  return push_kv_blocks_impl(merged_kv_infos, layer_synchronizer,
+                             kv_split_rank, kv_split_size);
 }
 
 bool MooncakeKVCacheTransferXTensor::pull_kv_blocks_impl(
@@ -716,82 +753,109 @@ bool MooncakeKVCacheTransferXTensor::pull_kv_blocks_impl(
 
 bool MooncakeKVCacheTransferXTensor::push_kv_blocks_impl(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
-    std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer) {
+    std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
+    int32_t kv_split_rank,
+    int32_t kv_split_size) {
   if (model_id_.empty()) {
     LOG(ERROR) << "model_id not set for XTensor mode push";
     return false;
   }
 
   auto& allocator = XTensorAllocator::get_instance();
+  const auto schedule =
+      BuildPushSchedule(merged_kv_infos, kv_split_rank, kv_split_size, num_layers_);
 
-  for (int64_t layer_index = 0; layer_index < num_layers_; ++layer_index) {
-    // Wait for the KV cache computation of this layer to complete.
-    layer_synchronizer->synchronize_layer(layer_index);
+  const auto wall_start = std::chrono::steady_clock::now();
+  int64_t cur_layer = -1;
+  for (const auto& step : schedule) {
+    if (step.layer != cur_layer) {
+      layer_synchronizer->synchronize_layer(step.layer);
+      cur_layer = step.layer;
+    }
+    const KVCacheInfo& kv_info = *step.dst;
 
-    // Push the KV Cache computed at this layer for all requests
-    for (const auto& pair : merged_kv_infos) {
-      const KVCacheInfo& kv_info = pair.second;
+    // Check if we have XTensor offsets from D-node
+    bool has_dst_offsets =
+        !kv_info.dst_xtensor_layer_offsets.empty() &&
+        static_cast<size_t>(step.layer) <
+            kv_info.dst_xtensor_layer_offsets.size();
 
-      // Check if we have XTensor offsets from D-node
-      bool has_dst_offsets = !kv_info.dst_xtensor_layer_offsets.empty() &&
-                             static_cast<size_t>(layer_index) <
-                                 kv_info.dst_xtensor_layer_offsets.size();
+    std::vector<uint64_t> src_offsets;
+    std::vector<uint64_t> dst_offsets;
+    src_offsets.reserve(kv_info.src_blocks.size() * 2);
+    dst_offsets.reserve(kv_info.dst_blocks.size() * 2);
 
-      std::vector<uint64_t> src_offsets;
-      std::vector<uint64_t> dst_offsets;
-      src_offsets.reserve(kv_info.src_blocks.size() * 2);
-      dst_offsets.reserve(kv_info.dst_blocks.size() * 2);
-
-      for (size_t i = 0; i < kv_info.src_blocks.size(); ++i) {
-        // Source block -> GlobalXTensor offsets (calculate locally on P-node)
-        auto [src_k_off, src_v_off] = allocator.get_global_offsets_for_block(
-            model_id_, layer_index, kv_info.src_blocks[i], size_per_block_);
-        if (src_k_off == UINT64_MAX || src_v_off == UINT64_MAX) {
-          LOG(ERROR) << "Failed to get source offsets for block "
-                     << kv_info.src_blocks[i] << " at layer " << layer_index;
-          return false;
-        }
-
-        // Destination offsets: use offsets from D-node if available
-        uint64_t dst_k_off, dst_v_off;
-        if (has_dst_offsets) {
-          const auto& layer_offsets =
-              kv_info.dst_xtensor_layer_offsets[layer_index];
-          if (i < layer_offsets.k_offsets.size() &&
-              i < layer_offsets.v_offsets.size()) {
-            dst_k_off = layer_offsets.k_offsets[i];
-            dst_v_off = layer_offsets.v_offsets[i];
-          } else {
-            LOG(ERROR) << "XTensor offset index out of range for block " << i
-                       << " at layer " << layer_index;
-            return false;
-          }
-        } else {
-          LOG(ERROR) << "No XTensor destination offsets from D-node for layer "
-                     << layer_index;
-          return false;
-        }
-
-        // K cache offsets
-        src_offsets.push_back(src_k_off);
-        dst_offsets.push_back(dst_k_off);
-        // V cache offsets
-        src_offsets.push_back(src_v_off);
-        dst_offsets.push_back(dst_v_off);
-      }
-      auto* xtensor_te =
-          static_cast<MooncakeTransferEngine*>(mooncake_te_.get());
-      auto ret = xtensor_te->move_memory_by_global_offsets(
-          kv_info.dst_addr,
-          src_offsets,
-          dst_offsets,
-          size_per_block_,
-          MooncakeTransferEngine::MoveOpcode::WRITE);
-      if (!ret) {
-        LOG(ERROR) << "push_kv_blocks_impl failed at layer " << layer_index;
+    for (size_t i = 0; i < kv_info.src_blocks.size(); ++i) {
+      // Source block -> GlobalXTensor offsets (calculate locally on P-node)
+      auto [src_k_off, src_v_off] = allocator.get_global_offsets_for_block(
+          model_id_, step.layer, kv_info.src_blocks[i], size_per_block_);
+      if (src_k_off == UINT64_MAX || src_v_off == UINT64_MAX) {
+        LOG(ERROR) << "Failed to get source offsets for block "
+                   << kv_info.src_blocks[i] << " at layer " << step.layer;
         return false;
       }
+
+      // Destination offsets: use offsets from D-node if available
+      uint64_t dst_k_off, dst_v_off;
+      if (has_dst_offsets) {
+        const auto& layer_offsets =
+            kv_info.dst_xtensor_layer_offsets[step.layer];
+        if (i < layer_offsets.k_offsets.size() &&
+            i < layer_offsets.v_offsets.size()) {
+          dst_k_off = layer_offsets.k_offsets[i];
+          dst_v_off = layer_offsets.v_offsets[i];
+        } else {
+          LOG(ERROR) << "XTensor offset index out of range for block " << i
+                     << " at layer " << step.layer;
+          return false;
+        }
+      } else {
+        LOG(ERROR) << "No XTensor destination offsets from D-node for layer "
+                   << step.layer;
+        return false;
+      }
+
+      // K cache offsets
+      src_offsets.push_back(src_k_off);
+      dst_offsets.push_back(dst_k_off);
+      // V cache offsets
+      src_offsets.push_back(src_v_off);
+      dst_offsets.push_back(dst_v_off);
     }
+    auto* xtensor_te =
+        static_cast<MooncakeTransferEngine*>(mooncake_te_.get());
+
+    const auto step_start = std::chrono::steady_clock::now();
+    auto ret = xtensor_te->move_memory_by_global_offsets(
+        kv_info.dst_addr,
+        src_offsets,
+        dst_offsets,
+        size_per_block_,
+        MooncakeTransferEngine::MoveOpcode::WRITE);
+    if (!ret) {
+      LOG(ERROR) << "push_kv_blocks_impl failed at layer " << step.layer;
+      return false;
+    }
+    if (::xllm::DisaggPDConfig::get_instance().kv_push_timing_log()) {
+      const auto step_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                               std::chrono::steady_clock::now() - step_start)
+                               .count();
+      LOG(INFO) << "[KVPUSH_XTENSOR] rank=" << kv_split_rank << "/"
+                << kv_split_size << " layer=" << step.layer
+                << " dst=" << (step.dst_key ? *step.dst_key : std::string{})
+                << " src_blocks=" << kv_info.src_blocks.size()
+                << " us=" << step_us;
+    }
+  }
+
+  if (::xllm::DisaggPDConfig::get_instance().kv_push_timing_log()) {
+    const auto total_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                              std::chrono::steady_clock::now() - wall_start)
+                              .count();
+    LOG(INFO) << "[KVPUSH_XTENSOR_TOTAL] rank=" << kv_split_rank << "/"
+              << kv_split_size << " num_layers=" << num_layers_
+              << " num_dsts=" << merged_kv_infos.size()
+              << " total_us=" << total_us;
   }
 
   VLOG(1) << "push_kv_blocks_impl success, num_layers=" << num_layers_;

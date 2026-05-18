@@ -79,13 +79,15 @@ class SpeculativeEngine : public Engine {
                     const std::vector<std::string>& addrs,
                     const std::vector<std::string>& device_ips,
                     const std::vector<uint16_t>& ports,
-                    const int32_t src_dp_size) override;
+                    const int32_t src_dp_size,
+                    const int32_t src_cp_size = 1) override;
 
   bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                       const std::vector<std::string>& addrs,
                       const std::vector<std::string>& device_ips,
                       const std::vector<uint16_t>& ports,
-                      const int32_t dp_size) override;
+                      const int32_t src_dp_size,
+                      const int32_t src_cp_size = 1) override;
 
  protected:
   SpeculativeEngine(const runtime::Options& options, bool use_draft_engine);

@@ -50,6 +50,15 @@ DEFINE_string(kv_cache_transfer_mode,
 
 DEFINE_int32(transfer_listen_port, 26000, "The KVCacheTranfer listen port.");
 
+DEFINE_bool(kv_push_dst_rotate,
+            true,
+            "Rotate the dst-worker traversal order in push_kv_blocks per "
+            "KV-split rank to spread incast across D workers.");
+
+DEFINE_bool(kv_push_timing_log,
+            false,
+            "Emit per-step and per-call timing logs for push_kv_blocks.");
+
 namespace xllm {
 namespace {
 
@@ -66,7 +75,9 @@ void DisaggPDConfig::from_flags() {
       .instance_role(FLAGS_instance_role)
       .kv_cache_transfer_type(FLAGS_kv_cache_transfer_type)
       .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
-      .transfer_listen_port(FLAGS_transfer_listen_port);
+      .transfer_listen_port(FLAGS_transfer_listen_port)
+      .kv_push_dst_rotate(FLAGS_kv_push_dst_rotate)
+      .kv_push_timing_log(FLAGS_kv_push_timing_log);
 }
 
 void DisaggPDConfig::from_json(const JsonReader& json) {

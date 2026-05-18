@@ -398,6 +398,9 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.new_token_slot_ids.insert(state_.new_token_slot_ids.end(),
                                      state.new_token_slot_ids.begin(),
                                      state.new_token_slot_ids.end());
+    state_.shared_blocks_num.insert(state_.shared_blocks_num.end(),
+                                    state.shared_blocks_num.begin(),
+                                    state.shared_blocks_num.end());
     state_.embedding_ids.insert(state_.embedding_ids.end(),
                                 state.embedding_ids.begin(),
                                 state.embedding_ids.end());
@@ -472,11 +475,10 @@ void BatchInputBuilder::process_single_sequence(
   uint32_t padded_q_seq_len = q_seq_len;
   // Continuous scheduler can enlarge token budget for CP prefill padding.
   // Keep physical q_len aligned to 2 * cp_size to match later cp_partition.
-  if (cp_size_ > 1 && state.batch_forward_type.is_prefill()) {
+  if (cp_size_ > 1 && state.batch_forward_type.no_decode()) {
     const uint32_t aligned_q_seq_len =
         xllm::util::align_up(q_seq_len, cp_size_ * 2);
-    padded_q_seq_len =
-        std::min(allowed_max_tokens_[seq_index], aligned_q_seq_len);
+    padded_q_seq_len = aligned_q_seq_len;
   }
   const uint32_t logical_seq_len = q_seq_len + n_kv_cache_tokens;
   const uint32_t seq_len = padded_q_seq_len + n_kv_cache_tokens;
@@ -601,7 +603,12 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     state.extra_token_ids.emplace_back(extra_token_id);
   }
 
-  if (cp_size_ > 1 && state.batch_forward_type.is_prefill()) {
+  // Build MTP shifted token ids for both pure prefill and chunked-prefill
+  // (no_decode) when CP is enabled. The shift-by-1 layout is required by the
+  // CP-aware MTP loss computation across both layouts; using is_prefill()
+  // here (upstream default) would miss chunked-prefill chunks and produce
+  // mis-aligned logits when CP > 1.
+  if (cp_size_ > 1 && state.batch_forward_type.no_decode()) {
     const uint32_t q_len = seq_len - n_kv_cache_tokens;
     if (q_len > 1) {
       state.mtp_shifted_token_ids.insert(
@@ -696,17 +703,15 @@ void BatchInputBuilder::setup_kv_cache_info(
       sequence->kv_state().kv_cache_slots(n_kv_cache_tokens, seq_len);
   state.new_token_slot_ids.insert(
       state.new_token_slot_ids.end(), slot_ids.begin(), slot_ids.end());
+  const auto shared_blocks_num = sequence->kv_state().shared_kv_blocks_num();
+  state.shared_blocks_num.emplace_back(shared_blocks_num);
 
   std::vector<int32_t> block_ids;
-  std::vector<uint64_t> local_block_ids;
   block_ids.reserve(blocks.size());
-  local_block_ids.reserve(blocks.size());
   int32_t block_size = 0;
-  auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
   for (const auto& block : blocks) {
     block_size = block.size();
     block_ids.push_back(block.id());
-    local_block_ids.emplace_back(static_cast<uint64_t>(block.id()));
     state.paged_kv_indices.push_back(block.id());
   }
   state.paged_kv_indptr.push_back(state.paged_kv_indptr.back() + blocks.size());
@@ -722,16 +727,42 @@ void BatchInputBuilder::setup_kv_cache_info(
     write_block_ids.insert(*iter);
   }
 
+  auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
   if (transfer_kv_info.has_value()) {
-    TransferKVInfo step_info = BatchInputBuilder::build_step_transfer_info(
-        transfer_kv_info.value(),
-        local_block_ids,
-        n_kv_cache_tokens,
-        seq_len,
-        static_cast<uint32_t>(block_size));
-    if (!step_info.local_blocks_ids.empty()) {
-      state.transfer_kv_infos.emplace_back(std::move(step_info));
+    const auto& all_remote = transfer_kv_info.value().remote_blocks_ids;
+    uint32_t prev_pushed = sequence->kv_state().pushed_local_block_count();
+    uint32_t cur_count = static_cast<uint32_t>(blocks.size());
+
+    std::vector<uint64_t> new_local, new_remote;
+    new_local.reserve(cur_count - prev_pushed);
+    new_remote.reserve(cur_count - prev_pushed);
+    // Stride here is the LOCAL (P-side) KV-split width: one local logical
+    // block of P maps to `stride` sub-blocks on D, because P's BlockManager
+    // logical block_size is `block_size * kv_split_size_effective` (see
+    // llm_engine init). Use `kv_split_size_effective()` (NOT
+    // `prefill_kv_split_size_effective()`), which is the local instance's
+    // value and falls back to FLAGS_cp_size when FLAGS_kv_split_size is
+    // unset - this matches the legacy `FLAGS_cp_size` behavior byte-for-byte.
+    // (`prefill_kv_split_size_effective()` is a D-side concept: it tells D
+    // how many sub-block ids per local block were written by the remote P,
+    // and is irrelevant inside the P process itself.)
+    const uint32_t kv_split_stride =
+        static_cast<uint32_t>(util::kv_split_size_effective());
+    for (uint32_t k = prev_pushed; k < cur_count; ++k) {
+      new_local.push_back(blocks[k].id());
+      for (uint32_t j = 0; j < kv_split_stride; j++) {
+        if (k * kv_split_stride + j < all_remote.size()) {
+          new_remote.push_back(all_remote[k * kv_split_stride + j]);
+        }
+      }
     }
+
+    if (!new_local.empty()) {
+      state.transfer_kv_infos.emplace_back(transfer_kv_info.value());
+      state.transfer_kv_infos.back().local_blocks_ids = std::move(new_local);
+      state.transfer_kv_infos.back().remote_blocks_ids = std::move(new_remote);
+    }
+    sequence->kv_state().set_pushed_local_block_count(cur_count);
   }
 
   state.block_tables_vec.emplace_back(std::move(block_ids));
@@ -759,6 +790,9 @@ void BatchInputBuilder::padding_decode_batch_size(
                 torch::zeros({3, 1}, torch::kInt));
           }
           state_.new_token_slot_ids.emplace_back(0);
+          // Keep shared_blocks_num row-aligned for the decoder-padding rows
+          // so CP / KV-shard prefix-cache consumers index by sequence index.
+          state_.shared_blocks_num.emplace_back(0);
         }
 #if defined(USE_NPU) || defined(USE_MUSA)
         state_.seq_lens.push_back(num_decoding_tokens);
@@ -862,11 +896,19 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   }
   input_params.embedding.request_ids = std::move(state_.request_ids);
   input_params.embedding.extra_token_ids = std::move(state_.extra_token_ids);
-  input_params.meta.batch_id = batch_id_;
+  input_params.embedding.shared_blocks_num =
+      std::move(state_.shared_blocks_num);
   if (!state_.mtp_shifted_token_ids.empty()) {
-    input_params.mtp_shifted_token_ids =
+    // Write both the upstream "root" path (consumed by non-CP MTP code paths
+    // and by the existing shm serializer) and the CP-specific embedding path
+    // (consumed by cp_input_partition + mtp_worker_impl). Both tensors share
+    // storage via from_blob; the cost is one extra tensor handle, not a copy.
+    auto mtp_tensor =
         torch::tensor(state_.mtp_shifted_token_ids, torch::kInt);
+    input_params.embedding.mtp_shifted_token_ids = mtp_tensor;
+    input_params.mtp_shifted_token_ids = mtp_tensor;
   }
+  input_params.meta.batch_id = batch_id_;
 
   forward_input.transfer_kv_infos = std::move(state_.transfer_kv_infos);
   process_swap_block_infos(forward_input);
