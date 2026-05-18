@@ -484,8 +484,6 @@ void MTPWorkerImpl::build_decode_step_view(
   torch::Tensor positions_cpu = safe_to(input.positions, torch::kCPU);
   Slice<int32_t> input_token_ids = {token_ids_cpu.data_ptr<int32_t>(),
                                     static_cast<size_t>(token_ids_cpu.numel())};
-  decode_view.block_tables_cpu =
-      safe_to(input.input_params.block_tables, torch::kCPU);
   Slice<int32_t> input_positions = {positions_cpu.data_ptr<int32_t>(),
                                     static_cast<size_t>(positions_cpu.numel())};
 
@@ -520,17 +518,47 @@ void MTPWorkerImpl::build_decode_step_view(
                                           current_kv_len);
   }
 
-  decode_view.block_tables_cpu = decode_view.block_tables_cpu.contiguous();
-  decode_view.block_tables_data = {
-      decode_view.block_tables_cpu.data_ptr<int32_t>(),
-      static_cast<size_t>(decode_view.block_tables_cpu.numel())};
-  CHECK_EQ(decode_view.block_tables_cpu.dim(), 2)
-      << "decode context block tables must be 2D, got "
-      << decode_view.block_tables_cpu.sizes();
-  decode_view.num_sequences =
-      static_cast<int32_t>(decode_view.block_tables_cpu.size(0));
-  decode_view.block_table_row_stride =
-      static_cast<int32_t>(decode_view.block_tables_cpu.size(1));
+  if (input.input_params.block_tables.defined()) {
+    decode_view.block_tables_cpu =
+        safe_to(input.input_params.block_tables, torch::kCPU).contiguous();
+    CHECK_EQ(decode_view.block_tables_cpu.dim(), 2)
+        << "decode context block tables must be 2D, got "
+        << decode_view.block_tables_cpu.sizes();
+    const int64_t num_block_table_rows = decode_view.block_tables_cpu.size(0);
+    decode_view.block_table_slices.reserve(num_block_table_rows);
+    for (int64_t seq_id = 0; seq_id < num_block_table_rows; ++seq_id) {
+      torch::Tensor block_table = decode_view.block_tables_cpu[seq_id];
+      decode_view.block_table_slices.emplace_back(
+          block_table.data_ptr<int32_t>(),
+          static_cast<size_t>(block_table.numel()));
+    }
+  } else {
+    decode_view.model_managed_multiblock =
+        !input.input_params.multi_block_tables.empty();
+    decode_view.multi_block_tables_cpu.reserve(
+        input.input_params.multi_block_tables.size());
+    for (const torch::Tensor& block_table :
+         input.input_params.multi_block_tables) {
+      decode_view.multi_block_tables_cpu.emplace_back(
+          safe_to(block_table, torch::kCPU).contiguous());
+    }
+    decode_view.multi_block_table_slices.resize(
+        decode_view.multi_block_tables_cpu.size());
+    for (size_t m = 0; m < decode_view.multi_block_tables_cpu.size(); ++m) {
+      CHECK_EQ(decode_view.multi_block_tables_cpu[m].dim(), 2)
+          << "decode context multi_block_tables[" << m << "] must be 2D, got "
+          << decode_view.multi_block_tables_cpu[m].sizes();
+      const int64_t num_block_table_rows =
+          decode_view.multi_block_tables_cpu[m].size(0);
+      decode_view.multi_block_table_slices[m].reserve(num_block_table_rows);
+      for (int64_t seq_id = 0; seq_id < num_block_table_rows; ++seq_id) {
+        torch::Tensor block_table = decode_view.multi_block_tables_cpu[m][seq_id];
+        decode_view.multi_block_table_slices[m].emplace_back(
+            block_table.data_ptr<int32_t>(),
+            static_cast<size_t>(block_table.numel()));
+      }
+    }
+  }
   decode_view.token_ids = decode_view.token_ids_vec;
   decode_view.positions = decode_view.positions_vec;
   decode_view.kv_seq_lens = decode_view.kv_seq_lens_vec;
@@ -726,7 +754,8 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
                                    std::move(buf.out_q_seq_lens),
                                    buf.kv_max_seq_len,
                                    std::move(buf.out_kv_seq_lens),
-                                   /*update_block_tables=*/true);
+                                   /*update_block_tables=*/true,
+                                   device_);
   input_params.input_embedding = torch::stack(expanded_embeddings).to(device_);
 
   if (!input_params.dp_global_token_nums.empty()) {

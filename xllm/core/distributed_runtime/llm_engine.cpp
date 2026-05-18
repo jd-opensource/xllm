@@ -545,7 +545,7 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   // all swa-related cache size from cache_size_in_bytes, then compute
   // c4_count / c128_count (c4_count = 32 * c128_count).
   // cache_size_in_bytes is already the full available device memory.
-  if (args_.model_type() == "deepseek_v4") {
+  if (util::is_deepseek_v4_model_type(args_.model_type())) {
     const int64_t max_seqs =
         static_cast<int64_t>(std::max(options_.max_seqs_per_batch(), 1));
     const int32_t block_size = options_.block_size();
@@ -575,12 +575,12 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     }
 
     // 1) Size of all caches that use swa_count (tied to max_seqs_per_batch).
-    // c1 layer: 1 cache — swa (swa_count, window_size, 1, head_dim)
-    // c4 layer: 5 caches use swa — swa_cache, compress_kv_state,
+    // c1 layer: 1 cache 鈥?swa (swa_count, window_size, 1, head_dim)
+    // c4 layer: 5 caches use swa 鈥?swa_cache, compress_kv_state,
     // compress_score_state,
     //           compress_index_kv_state, compress_index_score_state (shapes
     //           with block_size, float32)
-    // c128 layer: 3 caches use swa — swa_cache, compress_kv_state,
+    // c128 layer: 3 caches use swa 鈥?swa_cache, compress_kv_state,
     // compress_score_state
     const int64_t swa_bytes_per_c1_layer =
         kv_cache_cap.swa_count() * window_size * head_dim * dtype_size;
@@ -722,7 +722,7 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
 
   // init kv cache for each worker
   const KVCacheShape kv_cache_shape(kv_cache_cap, args_, dp_local_tp_size_);
-  if (args_.model_type() == "deepseek_v4") {
+  if (util::is_deepseek_v4_model_type(args_.model_type())) {
     LOG(INFO) << "Initializing DSV4 kv cache with shape: [swa_count="
               << kv_cache_cap.swa_count()
               << ", c4_count=" << kv_cache_cap.c4_count()
@@ -746,7 +746,7 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .num_layers(args_.n_layers())
       .slot_size(kv_cache_cap.slot_size())
       .model_id(options_.model_id());
-  if (args_.model_type() == "deepseek_v4") {
+  if (util::is_deepseek_v4_model_type(args_.model_type())) {
     constexpr uint32_t kManagerTypeBlockManagerImpl = 0;
     constexpr uint32_t kManagerTypeSlidingWindowBlockManager = 1;
 
