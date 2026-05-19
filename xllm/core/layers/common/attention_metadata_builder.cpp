@@ -70,7 +70,7 @@ AttentionMetadata build_attention_metadata(
 
 #if defined(USE_CUDA) || defined(USE_NPU)
   // Use explicit attn_mask if provided; otherwise fall back to
-  // graph_buffer.attn_mask (e.g. Qwen2_5_VL sets graph_buffer.attn_mask for
+  // graph.attn_mask (e.g. Qwen2_5_VL sets graph.attn_mask for
   // LongCat text encoding)
   std::optional<torch::Tensor> mask_to_use = attn_mask;
   if (!mask_to_use.has_value() && params.graph.attn_mask.defined()) {
@@ -82,16 +82,17 @@ AttentionMetadata build_attention_metadata(
 #endif
 
 #if defined(USE_NPU)
-  // Determine if we should use ACL graph mode:
-  // - --enable_graph=true
-  // - Must be decode phase (not prefill)
-  // - tiling_data must be available
+  // Determine if we should use ACL graph paged-attention mode:
+  // - global graph is enabled
+  // - this input is a graph capture/replay input
+  // - decode phase uses CustomPagedAttention tiling data
   bool is_decode = !params.meta.batch_forward_type.is_prefill() &&
                    !params.meta.batch_forward_type.is_mixed() &&
                    !params.meta.batch_forward_type.is_chunked_prefill();
-  bool use_acl_graph = ::xllm::ExecutionConfig::get_instance().enable_graph() &&
-                       is_decode && params.graph.tiling_data.defined();
-  if (use_acl_graph) {
+  bool use_acl_graph_paged_attention =
+      ::xllm::ExecutionConfig::get_instance().enable_graph() && is_decode &&
+      params.enable_graph && params.graph.tiling_data.defined();
+  if (use_acl_graph_paged_attention) {
     // ACL graph mode: use CustomPagedAttention with tiling_data on device
     attn_metadata.paged_attention_tiling_data = params.graph.tiling_data;
   }
