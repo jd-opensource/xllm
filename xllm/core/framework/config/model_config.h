@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,25 @@ class ModelConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "MODEL OPTIONS",
+        {"model_id",
+         "model",
+         "backend",
+         "task",
+         "devices",
+         "limit_image_per_prompt",
+         "reasoning_parser",
+         "tool_call_parser",
+         "enable_qwen3_reranker",
+         "enable_return_mm_full_embeddings",
+         "flashinfer_workspace_buffer_size",
+         "use_audio_in_video",
+         "use_cpp_chat_template"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(std::string, model_id);
 

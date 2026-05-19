@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,23 @@ class ParallelConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "PARALLEL OPTIONS",
+        {"dp_size",
+         "ep_size",
+         "cp_size",
+         "tp_size",
+         "sp_size",
+         "cfg_size",
+         "communication_backend",
+         "enable_prefill_sp",
+         "enable_multi_stream_parallel",
+         "micro_batch_num",
+         "enable_dp_balance"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(int32_t, dp_size) = 1;
 

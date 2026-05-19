@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,27 @@ class SchedulerConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "SCHEDULER OPTIONS",
+        {"max_tokens_per_batch",
+         "max_seqs_per_batch",
+         "enable_schedule_overlap",
+         "prefill_scheduling_memory_usage_threshold",
+         "enable_chunked_prefill",
+         "max_tokens_per_chunk_for_prefill",
+         "chunked_match_frequency",
+         "use_zero_evict",
+         "max_decode_token_per_sequence",
+         "priority_strategy",
+         "use_mix_scheduler",
+         "enable_online_preempt_offline",
+         "aggressive_coeff",
+         "starve_threshold",
+         "enable_starve_prevent"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(int32_t, max_tokens_per_batch) = 10240;
 

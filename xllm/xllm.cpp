@@ -26,7 +26,6 @@ limitations under the License.
 #include <unordered_set>
 
 #include "api_service/api_service.h"
-#include "core/common/help_formatter.h"
 #include "core/common/instance_name.h"
 #include "core/common/metrics.h"
 #include "core/common/options.h"
@@ -39,6 +38,7 @@ limitations under the License.
 #include "core/framework/config/dit_config.h"
 #include "core/framework/config/eplb_config.h"
 #include "core/framework/config/execution_config.h"
+#include "core/framework/config/help_formatter.h"
 #include "core/framework/config/kernel_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/kv_cache_store_config.h"

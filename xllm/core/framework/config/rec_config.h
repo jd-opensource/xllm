@@ -18,6 +18,7 @@ limitations under the License.
 #include <cstdint>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -30,6 +31,25 @@ class RecConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "REC OPTIONS",
+        {"enable_rec_fast_sampler",
+         "enable_rec_prefill_only",
+         "enable_xattention_one_stage",
+         "max_decode_rounds",
+         "enable_constrained_decoding",
+         "output_rec_logprobs",
+         "enable_convert_tokens_to_item",
+         "enable_output_sku_logprobs",
+         "enable_extended_item_info",
+         "each_conversion_threshold",
+         "total_conversion_threshold",
+         "request_queue_size",
+         "rec_worker_max_concurrency"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(bool, enable_rec_fast_sampler) = true;
 

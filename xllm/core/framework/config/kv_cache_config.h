@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,20 @@ class KVCacheConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "KV CACHE OPTIONS",
+        {"block_size",
+         "max_cache_size",
+         "max_memory_utilization",
+         "kv_cache_dtype",
+         "enable_prefix_cache",
+         "xxh3_128bits_seed",
+         "enable_xtensor",
+         "phy_page_granularity_size"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(int32_t, block_size) = 128;
 

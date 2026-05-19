@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,21 @@ class DistributedConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {"DISTRIBUTED OPTIONS",
+                                                   {"master_node_addr",
+                                                    "xtensor_master_node_addr",
+                                                    "nnodes",
+                                                    "node_rank",
+                                                    "device_ip",
+                                                    "etcd_addr",
+                                                    "etcd_namespace",
+                                                    "enable_service_routing",
+                                                    "heart_beat_interval",
+                                                    "etcd_ttl"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(std::string, master_node_addr) = "127.0.0.1:19888";
 

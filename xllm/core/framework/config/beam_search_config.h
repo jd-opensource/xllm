@@ -18,6 +18,7 @@ limitations under the License.
 #include <cstdint>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -30,6 +31,15 @@ class BeamSearchConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {"BEAM SEARCH OPTIONS",
+                                                   {"enable_beam_search_kernel",
+                                                    "beam_width",
+                                                    "enable_block_copy_kernel",
+                                                    "enable_topk_sorted"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(bool, enable_beam_search_kernel) = false;
 

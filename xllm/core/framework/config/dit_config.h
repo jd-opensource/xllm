@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,24 @@ class DiTConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "DiT MODEL OPTIONS",
+        {"max_requests_per_batch",
+         "dit_cache_policy",
+         "dit_cache_warmup_steps",
+         "dit_cache_n_derivatives",
+         "dit_cache_skip_interval_steps",
+         "dit_cache_residual_diff_threshold",
+         "dit_cache_start_steps",
+         "dit_cache_end_steps",
+         "dit_cache_start_blocks",
+         "dit_cache_end_blocks",
+         "dit_sp_communication_overlap",
+         "dit_debug_print"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(int32_t, max_requests_per_batch) = 1;
 

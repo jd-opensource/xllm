@@ -19,6 +19,7 @@ limitations under the License.
 #include <limits>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,21 @@ class ProfileConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "PROFILE OPTIONS",
+        {"enable_profile_step_time",
+         "enable_profile_token_budget",
+         "enable_latency_aware_schedule",
+         "profile_max_prompt_length",
+         "max_global_ttft_ms",
+         "max_global_tpot_ms",
+         "enable_profile_kv_blocks",
+         "disable_ttft_profiling",
+         "enable_forward_interruption"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(bool, enable_profile_step_time) = false;
 

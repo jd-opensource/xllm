@@ -16,38 +16,13 @@ limitations under the License.
 #pragma once
 
 #include <string>
-
-#include "core/common/macros.h"
-#include "core/framework/config/option_category.h"
+#include <vector>
 
 namespace xllm {
 
-class KernelConfig final {
- public:
-  KernelConfig() = default;
-  ~KernelConfig() = default;
-
-  static KernelConfig& get_instance();
-
-  void from_flags();
-  void initialize();
-
-  [[nodiscard]] static const OptionCategory& option_category() {
-    static const OptionCategory kOptionCategory = {
-        "KERNEL OPTIONS",
-        {"enable_customize_mla_kernel",
-         "npu_kernel_backend",
-         "enable_intralayer_addnorm"}};
-    return kOptionCategory;
-  }
-
-#if defined(USE_NPU)
-  PROPERTY(bool, enable_customize_mla_kernel) = false;
-
-  PROPERTY(std::string, npu_kernel_backend) = "AUTO";
-
-  PROPERTY(bool, enable_intralayer_addnorm) = false;
-#endif
+struct OptionCategory {
+  std::string category_name;
+  std::vector<std::string> option_names;
 };
 
 }  // namespace xllm

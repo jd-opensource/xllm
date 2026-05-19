@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,23 @@ class KVCacheStoreConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "KV CACHE STORE OPTIONS",
+        {"prefetch_timeout",
+         "prefetch_bacth_size",
+         "layers_wise_copy_batchs",
+         "host_blocks_factor",
+         "enable_kvcache_store",
+         "enable_cache_upload",
+         "store_protocol",
+         "store_master_server_address",
+         "store_metadata_server",
+         "store_local_hostname",
+         "enable_control_h2d_block_num"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(uint32_t, prefetch_timeout) = 0;
 

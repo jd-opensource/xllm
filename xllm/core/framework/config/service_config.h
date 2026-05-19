@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,22 @@ class ServiceConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "SERVICE OPTIONS",
+        {"host",
+         "port",
+         "rpc_idle_timeout_s",
+         "rpc_channel_timeout_ms",
+         "max_reconnect_count",
+         "num_threads",
+         "max_concurrent_requests",
+         "num_request_handling_threads",
+         "num_response_handling_threads",
+         "health_check_interval_ms"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(std::string, host);
 

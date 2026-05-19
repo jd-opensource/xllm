@@ -18,6 +18,7 @@ limitations under the License.
 #include <cstdint>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -30,6 +31,17 @@ class LoadConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "LOAD OPTIONS",
+        {"enable_manual_loader",
+         "enable_rolling_load",
+         "rolling_load_num_cached_layers",
+         "rolling_load_num_rolling_slots",
+         "enable_prefetch_weight"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(bool, enable_manual_loader) = false;
 

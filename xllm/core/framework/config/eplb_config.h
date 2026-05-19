@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,17 @@ class EPLBConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {"EP LOAD BALANCE OPTIONS",
+                                                   {"enable_eplb",
+                                                    "redundant_experts_num",
+                                                    "eplb_update_interval",
+                                                    "eplb_update_threshold",
+                                                    "expert_parallel_degree",
+                                                    "rank_tablefile"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(bool, enable_eplb) = false;
 

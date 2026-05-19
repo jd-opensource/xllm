@@ -19,6 +19,7 @@ limitations under the License.
 #include <string>
 
 #include "core/common/macros.h"
+#include "core/framework/config/option_category.h"
 
 namespace xllm {
 
@@ -31,6 +32,24 @@ class SpeculativeConfig final {
 
   void from_flags();
   void initialize();
+
+  [[nodiscard]] static const OptionCategory& option_category() {
+    static const OptionCategory kOptionCategory = {
+        "SPECULATIVE OPTIONS",
+        {"draft_model",
+         "draft_devices",
+         "num_speculative_tokens",
+         "speculative_algorithm",
+         "speculative_suffix_cache_max_depth",
+         "speculative_suffix_max_spec_factor",
+         "speculative_suffix_max_spec_offset",
+         "speculative_suffix_min_token_prob",
+         "speculative_suffix_max_cached_requests",
+         "speculative_suffix_use_tree_spec",
+         "enable_opt_validate_probs",
+         "enable_atb_spec_kernel"}};
+    return kOptionCategory;
+  }
 
   PROPERTY(std::string, draft_model);
 
