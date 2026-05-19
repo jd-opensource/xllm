@@ -247,6 +247,14 @@ class RecWorkerImpl : public LLMWorkerImpl {
                              int32_t round,
                              int32_t batch_size);
 
+    void execute_final_beam_search(const torch::Tensor& top_tokens,
+                                   const torch::Tensor& top_logprobs,
+                                   BeamSearchTensors& beam_tensors,
+                                   int32_t round,
+                                   int32_t batch_size,
+                                   int32_t beam_width,
+                                   int32_t requested_result_width);
+
     // Execute cache select kernel
     void execute_cache_select(const BeamSearchTensors& beam_tensors,
                               ForwardInput& input,
