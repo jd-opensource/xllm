@@ -304,6 +304,7 @@ void Qwen3GatedDeltaNetBaseImpl::load_common_state_dict(
   if (auto w = state_dict.get_tensor("conv1d.weight"); w.defined()) {
     conv1d_->load_state_dict(
         StateDict({{"weight", w.squeeze(1)}}), shard_tensor_count, shard_sizes);
+    conv1d_->weight().set_(conv1d_->weight().transpose(0, 1).contiguous());
   }
   o_proj_->load_state_dict(state_dict.get_dict_with_prefix("out_proj."));
   if (auto w = state_dict.get_tensor("norm.weight"); w.defined()) {
@@ -359,38 +360,31 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   auto device = mixed_qkv.device();
   auto conv_weight = conv1d_->weight();
   auto linear_state_indices = get_linear_state_indices(input_params, device);
+  torch::IntArrayRef num_accepted_tokens_opt;
+  torch::IntArrayRef has_initial_state;
+  std::vector<int64_t> linear_state_indices_vec(
+      input_params.embedding.linear_state_ids.begin(),
+      input_params.embedding.linear_state_ids.end());
+  int64_t run_mode = 1;
   if (attn_metadata.is_prefill) {
-    torch::IntArrayRef num_accepted_tokens_opt;
-    torch::Tensor conv_weight_T = conv_weight.transpose(0, 1).contiguous();
-    std::vector<int64_t> linear_state_indices_vec(
-        input_params.embedding.linear_state_ids.begin(),
-        input_params.embedding.linear_state_ids.end());
-    mixed_qkv = xllm::kernel::causal_conv1d(
-        mixed_qkv,
-        conv_weight_T,
-        conv_cache,
-        std::optional<torch::Tensor>(),  // bias (no bias for qwen3)
-        torch::IntArrayRef(input_params.parallel.query_start_loc),
-        torch::IntArrayRef(linear_state_indices_vec),
-        torch::IntArrayRef(input_params.parallel.has_initial_state),
-        num_accepted_tokens_opt,
-        1,   // activation_mode
-        -1,  // pad_slot_id
-        0    // run mode  0:fn, 1:update
-    );
-  } else {
-    xllm::kernel::CausalConv1dUpdateParams conv1d_params;
-    conv1d_params.x = mixed_qkv.reshape({-1, mixed_qkv.size(-1)});
-    conv1d_params.conv_state = conv_cache;
-    conv1d_params.weight = conv_weight;
-    conv1d_params.conv_state_indices = linear_state_indices;
-    conv1d_params.block_idx_last_scheduled_token =
-        std::optional<torch::Tensor>();
-    conv1d_params.initial_state_idx = std::optional<torch::Tensor>();
-    conv1d_params.query_start_loc = attn_metadata.q_cu_seq_lens;
-    conv1d_params.max_query_len = attn_metadata.max_query_len;
-    mixed_qkv = xllm::kernel::causal_conv1d_update(conv1d_params);
+    run_mode = 0;
+    has_initial_state =
+        torch::IntArrayRef(input_params.parallel.has_initial_state);
   }
+
+  mixed_qkv = xllm::kernel::causal_conv1d(
+      mixed_qkv,
+      conv_weight,
+      conv_cache,
+      std::optional<torch::Tensor>(),  // bias (no bias for qwen3)
+      torch::IntArrayRef(input_params.parallel.query_start_loc),
+      torch::IntArrayRef(linear_state_indices_vec),
+      has_initial_state,
+      num_accepted_tokens_opt,
+      1,        // activation_mode
+      -1,       // pad_slot_id
+      run_mode  // run mode  0:fn, 1:update
+  );
 
   // Reshape back to 3D [batch_size, dim, seq_len]
   mixed_qkv = mixed_qkv.view({batch_size, -1, mixed_qkv.size(-1)}).contiguous();
