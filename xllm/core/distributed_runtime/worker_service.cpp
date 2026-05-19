@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -35,6 +35,28 @@ limitations under the License.
 #include "util/timer.h"
 
 namespace xllm {
+namespace {
+
+int32_t get_num_decode_seqs_for_schedule_overlap(const ForwardInput& input) {
+  if (input.sampling_params.sample_idxes.defined()) {
+    return static_cast<int32_t>(input.sampling_params.sample_idxes.size(0));
+  }
+
+  if (!input.input_host_buffer_has_layout) {
+    return 0;
+  }
+
+  ForwardInput unpacked_input;
+  const bool unpacked = detail::unpack_from_input_host_buffer(
+      input, torch::Device(torch::kCPU), unpacked_input);
+  if (!unpacked || !unpacked_input.sampling_params.sample_idxes.defined()) {
+    return 0;
+  }
+  return static_cast<int32_t>(
+      unpacked_input.sampling_params.sample_idxes.size(0));
+}
+
+}  // namespace
 
 WorkerService::WorkerService(runtime::Options options,
                              const torch::Device& device)
@@ -170,7 +192,8 @@ void WorkerService::step(ForwardInput& fwd_input,
     auto int_options = torch::TensorOptions().device(torch::kCPU);
     if (worker_->is_driver()) {
       // construct fake output tensor
-      int32_t num_decode_seqs = fwd_input.sampling_params.sample_idxes.size(0);
+      int32_t num_decode_seqs =
+          get_num_decode_seqs_for_schedule_overlap(fwd_input);
       next_tokens = torch::arange(
           -1, -1 * (num_decode_seqs + 1), -1, int_options.dtype(torch::kInt32));
       std::move(future).deferValue([](auto&&) {});

@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -77,6 +77,10 @@ bool unpack_from_input_host_buffer(const ForwardInput& input,
                                    torch::ScalarType dtype,
                                    ForwardInput& output,
                                    bool materialize_device_buffer);
+
+bool unpack_from_input_host_buffer(const ForwardInput& input,
+                                   const torch::Device& device,
+                                   ForwardInput& output);
 
 struct ForwardInputBufferEntry {
   torch::Tensor host_tensor;

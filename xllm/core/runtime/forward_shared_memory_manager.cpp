@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -2678,6 +2678,16 @@ bool unpack_from_input_host_buffer(const ForwardInput& input,
   output.input_host_buffer_has_layout = false;
   output.device_tensors_ready = false;
   return true;
+}
+
+bool unpack_from_input_host_buffer(const ForwardInput& input,
+                                   const torch::Device& device,
+                                   ForwardInput& output) {
+  return unpack_from_input_host_buffer(input,
+                                       device,
+                                       torch::kFloat32,
+                                       output,
+                                       /*materialize_device_buffer=*/false);
 }
 
 bool try_to_device_from_input_host_buffer(const ForwardInput& input,
