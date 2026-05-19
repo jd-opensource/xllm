@@ -81,12 +81,12 @@ torch::Tensor infer_softmax_lse(const torch::Tensor& query,
   return torch::Tensor();
 }
 
-c10::optional<torch::Tensor> to_c10_optional_tensor(
+std::optional<torch::Tensor> to_optional_tensor(
     const std::optional<torch::Tensor>& tensor_opt) {
   if (tensor_opt.has_value() && tensor_opt.value().defined()) {
     return tensor_opt.value();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 }  // namespace
@@ -123,22 +123,22 @@ std::tuple<torch::Tensor, torch::Tensor> npu_fused_infer_attention(
 
   std::vector<torch::Tensor> key_tensors_vec{key};
   std::vector<torch::Tensor> value_tensors_vec{value};
-  at::TensorList key_tensors(key_tensors_vec);
-  at::TensorList value_tensors(value_tensors_vec);
+  torch::TensorList key_tensors(key_tensors_vec);
+  torch::TensorList value_tensors(value_tensors_vec);
 
-  c10::optional<torch::Tensor> none_tensor = c10::nullopt;
-  c10::optional<torch::Tensor> atten_mask_tensor =
-      to_c10_optional_tensor(atten_mask);
-  c10::optional<torch::Tensor> block_table_tensor =
-      to_c10_optional_tensor(block_table);
+  std::optional<torch::Tensor> none_tensor = std::nullopt;
+  std::optional<torch::Tensor> atten_mask_tensor =
+      to_optional_tensor(atten_mask);
+  std::optional<torch::Tensor> block_table_tensor =
+      to_optional_tensor(block_table);
 
-  at::IntArrayRef actual_seq_lengths_ref(actual_seq_lengths);
-  at::IntArrayRef actual_seq_lengths_kv_ref(actual_seq_lengths_kv);
-  c10::optional<at::IntArrayRef> actual_seq_lengths_opt =
+  torch::IntArrayRef actual_seq_lengths_ref(actual_seq_lengths);
+  torch::IntArrayRef actual_seq_lengths_kv_ref(actual_seq_lengths_kv);
+  std::optional<torch::IntArrayRef> actual_seq_lengths_opt =
       actual_seq_lengths_ref;
-  c10::optional<at::IntArrayRef> actual_seq_lengths_kv_opt =
+  std::optional<torch::IntArrayRef> actual_seq_lengths_kv_opt =
       actual_seq_lengths_kv_ref;
-  c10::optional<at::IntArrayRef> none_int_array = c10::nullopt;
+  std::optional<torch::IntArrayRef> none_int_array = std::nullopt;
 
   std::string layout = input_layout;
   char* input_layout_ptr = const_cast<char*>(layout.c_str());

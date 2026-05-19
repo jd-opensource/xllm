@@ -118,6 +118,49 @@ AttentionMetadata build_attention_metadata(
     attn_metadata.kv_seq_lens_host =
         torch::tensor(params.kv_seq_lens_vec, torch::kInt);
   }
+  if (!params.q_seq_lens_vec.empty()) {
+    std::vector<int64_t> q_cu;
+    q_cu.reserve(params.q_seq_lens_vec.size());
+    int64_t total = 0;
+    for (int32_t len : params.q_seq_lens_vec) {
+      total += len;
+      q_cu.emplace_back(total);
+    }
+    attn_metadata.q_cu_seq_lens_host_vec = std::move(q_cu);
+  }
+  if (!params.kv_seq_lens_vec.empty()) {
+    std::vector<int64_t> kv_cu;
+    kv_cu.reserve(params.kv_seq_lens_vec.size());
+    int64_t total = 0;
+    for (int32_t len : params.kv_seq_lens_vec) {
+      total += len;
+      kv_cu.emplace_back(total);
+    }
+    attn_metadata.kv_cu_seq_lens_host_vec = std::move(kv_cu);
+    // Non-cumulative per-sequence lengths for chunked_prefill mode.
+    attn_metadata.kv_seq_lens_host_vec.reserve(params.kv_seq_lens_vec.size());
+    for (int32_t len : params.kv_seq_lens_vec) {
+      attn_metadata.kv_seq_lens_host_vec.emplace_back(len);
+    }
+  }
+  if (!is_decode &&
+      !attn_metadata.use_expanded_decode_for_spec_verify_attention) {
+    constexpr int64_t kFiaSplitFuseMaskSize = 2048;
+    auto cpu_options = torch::TensorOptions().dtype(torch::kFloat32);
+    torch::Device mask_device = torch::kCPU;
+    if (params.q_seq_lens.defined()) {
+      mask_device = params.q_seq_lens.device();
+    } else if (params.input_embedding.defined()) {
+      mask_device = params.input_embedding.device();
+    }
+    attn_metadata.fia_attn_mask =
+        torch::triu(torch::ones({kFiaSplitFuseMaskSize, kFiaSplitFuseMaskSize},
+                                cpu_options),
+                    1)
+            .to(torch::kInt8)
+            .to(mask_device)
+            .contiguous();
+  }
 #endif
   attn_metadata.is_chunked_prefill =
       params.batch_forward_type.is_mixed() ||

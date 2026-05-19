@@ -455,17 +455,32 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       q_cu_seq_lens_ = torch::zeros({max_seqs_per_batch + 1},
                                     torch::dtype(torch::kInt).device(device_));
     }
-    const bool use_query_start_loc =
-        params.is_spec_verify && is_qwen3_5_model_type(args_.model_type());
+    const bool use_qwen3_5_query_start_loc =
+        is_qwen3_5_model_type(args_.model_type());
+    const bool input_has_leading_zero =
+        params.is_spec_verify && use_qwen3_5_query_start_loc;
     const int64_t required_q_cu_seq_lens =
-        actual_batch_size + (use_query_start_loc ? 1 : 0);
+        actual_batch_size + (input_has_leading_zero ? 1 : 0);
     CHECK_GE(params.q_cu_seq_lens.numel(), required_q_cu_seq_lens)
         << "q_cu_seq_lens does not have enough entries for ACL graph execution";
-    q_cu_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/required_q_cu_seq_lens)
-        .copy_(params.q_cu_seq_lens.slice(/*dim=*/0,
-                                          /*start=*/0,
-                                          /*end=*/required_q_cu_seq_lens),
-               /*non_blocking=*/true);
+    if (use_qwen3_5_query_start_loc && !input_has_leading_zero) {
+      // Normal Qwen3.5 decode input carries cumsum without the leading zero,
+      // while update kernels expect query_start_loc-style [0, cumsum...].
+      q_cu_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/1).zero_();
+      q_cu_seq_lens_
+          .slice(/*dim=*/0, /*start=*/1, /*end=*/actual_batch_size + 1)
+          .copy_(params.q_cu_seq_lens.slice(/*dim=*/0,
+                                            /*start=*/0,
+                                            /*end=*/actual_batch_size),
+                 /*non_blocking=*/true);
+    } else {
+      q_cu_seq_lens_
+          .slice(/*dim=*/0, /*start=*/0, /*end=*/required_q_cu_seq_lens)
+          .copy_(params.q_cu_seq_lens.slice(/*dim=*/0,
+                                            /*start=*/0,
+                                            /*end=*/required_q_cu_seq_lens),
+                 /*non_blocking=*/true);
+    }
     if (padded_batch_size > actual_batch_size) {
       int32_t offset = actual_num_tokens;
       std::vector<int32_t> padded_q_cu_seq_lens;
@@ -477,9 +492,9 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
         padded_q_cu_seq_lens.emplace_back(offset);
       }
       const int64_t padding_start =
-          actual_batch_size + (use_query_start_loc ? 1 : 0);
+          actual_batch_size + (use_qwen3_5_query_start_loc ? 1 : 0);
       const int64_t padding_end =
-          padded_batch_size + (use_query_start_loc ? 1 : 0);
+          padded_batch_size + (use_qwen3_5_query_start_loc ? 1 : 0);
       q_cu_seq_lens_
           .slice(/*dim=*/0,
                  /*start=*/padding_start,
@@ -600,12 +615,12 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
     // Set q_cu_seq_lens if available
     if (params.q_cu_seq_lens.defined()) {
-      const bool use_query_start_loc =
-          params.is_spec_verify && is_qwen3_5_model_type(args_.model_type());
+      const bool use_qwen3_5_query_start_loc =
+          is_qwen3_5_model_type(args_.model_type());
       params_for_capture->q_cu_seq_lens = q_cu_seq_lens_.slice(
           /*dim=*/0,
           /*start=*/0,
-          /*end=*/padded_batch_size + (use_query_start_loc ? 1 : 0));
+          /*end=*/padded_batch_size + (use_qwen3_5_query_start_loc ? 1 : 0));
     }
 
     return params_for_capture;

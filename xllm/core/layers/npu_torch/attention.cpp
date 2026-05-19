@@ -16,6 +16,7 @@ limitations under the License.
 #include "attention.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -91,6 +92,15 @@ torch::Tensor get_fia_split_fuse_attn_mask(const torch::Tensor& query) {
           .contiguous();
   mask_cache[cache_key] = mask;
   return mask;
+}
+
+bool env_flag_enabled(const char* name) {
+  const char* value = std::getenv(name);
+  return value != nullptr && std::string(value) == "1";
+}
+
+bool use_x_flash_decode() {
+  return !env_flag_enabled("XLLM_DISABLE_XFLASH_DECODE");
 }
 
 torch::Tensor x_flash_attention_infer_with_query_split(
@@ -208,6 +218,80 @@ torch::Tensor x_flash_attention_infer_with_query_split(
   return output;
 }
 
+torch::Tensor x_flash_attention_infer_decode_with_batch_split(
+    const torch::Tensor& query,
+    const torch::Tensor& key_cache,
+    const torch::Tensor& value_cache,
+    const torch::Tensor& mask,
+    const torch::Tensor& block_table,
+    const torch::Tensor& kv_seq_lens,
+    int64_t q_head,
+    int64_t kv_head,
+    double scale) {
+  CHECK_EQ(query.dim(), 3)
+      << "decode query must be [batch, q_heads, head_size]";
+  auto kv_seq_lens_cpu =
+      kv_seq_lens.to(torch::kCPU, torch::kInt32, /*non_blocking=*/false)
+          .contiguous();
+  CHECK_EQ(query.size(0), kv_seq_lens_cpu.numel());
+  const auto* kv_seq_lens_ptr = kv_seq_lens_cpu.data_ptr<int32_t>();
+  const int64_t batch = query.size(0);
+  const auto device = query.device();
+  auto output = torch::empty_like(query);
+
+  for (int64_t group_start = 0; group_start < batch;) {
+    int64_t group_end = group_start;
+    int64_t core_count = 0;
+    while (group_end < batch) {
+      const int64_t kv_len = kv_seq_lens_ptr[group_end];
+      const int64_t seq_core_count =
+          xfa_core_count_for_slice(kv_len, kv_head, key_cache.size(1));
+      CHECK_LE(seq_core_count, kXfaMaxExtraInfoNodes)
+          << "x_flash_attention_infer decode request needs too many cores";
+      if (group_end > group_start &&
+          core_count + seq_core_count > kXfaMaxExtraInfoNodes) {
+        break;
+      }
+      core_count += seq_core_count;
+      ++group_end;
+    }
+
+    const int64_t group_batch = group_end - group_start;
+    std::vector<int32_t> group_q_lens;
+    std::vector<int32_t> group_kv_lens;
+    group_q_lens.reserve(group_batch);
+    group_kv_lens.reserve(group_batch);
+    int32_t q_cu_len = 0;
+    for (int64_t idx = group_start; idx < group_end; ++idx) {
+      ++q_cu_len;
+      group_q_lens.push_back(q_cu_len);
+      group_kv_lens.push_back(kv_seq_lens_ptr[idx]);
+    }
+
+    auto group_query = query.narrow(0, group_start, group_batch).contiguous();
+    auto group_block_table =
+        block_table.narrow(0, group_start, group_batch).contiguous();
+    auto group_q_lens_tensor = int32_tensor_on_device(group_q_lens, device);
+    auto group_kv_lens_tensor = int32_tensor_on_device(group_kv_lens, device);
+
+    auto group_output =
+        xllm::kernel::npu::x_flash_attention_infer(group_query,
+                                                   key_cache,
+                                                   value_cache,
+                                                   mask,
+                                                   group_block_table,
+                                                   group_q_lens_tensor,
+                                                   group_kv_lens_tensor,
+                                                   q_head,
+                                                   kv_head,
+                                                   scale,
+                                                   "TND");
+    output.narrow(0, group_start, group_batch).copy_(group_output);
+    group_start = group_end;
+  }
+  return output;
+}
+
 }  // namespace
 
 AttentionImpl::AttentionImpl(int64_t num_heads,
@@ -318,6 +402,22 @@ void AttentionImpl::decoder_forward(torch::Tensor& query,
   } else {
     // Fallback if host tensor isn't prepared.
     kv_seq_lens = attn_metadata.kv_seq_lens;
+  }
+
+  if (!tiling_data.defined() && v_cache.has_value() && use_x_flash_decode()) {
+    auto decode_query = query.view({-1, num_heads_, head_size_});
+    auto xfa_result = x_flash_attention_infer_decode_with_batch_split(
+        decode_query,
+        k_cache,
+        v_cache.value(),
+        get_fia_split_fuse_attn_mask(decode_query),
+        block_table,
+        kv_seq_lens,
+        num_heads_,
+        num_kv_heads_,
+        scale_);
+    output.copy_(xfa_result.view_as(output));
+    return;
   }
 
   if (tiling_data.defined()) {
