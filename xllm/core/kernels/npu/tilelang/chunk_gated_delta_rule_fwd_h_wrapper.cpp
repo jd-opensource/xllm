@@ -35,56 +35,12 @@ namespace xllm::kernel::npu::tilelang {
 namespace {
 
 constexpr int32_t kCompileBT = 64;
-constexpr int32_t kNSpecializationMin = 1;
-constexpr int32_t kNSpecializationStep = 1;
 
 bool is_supported_initial_state_dtype(torch::ScalarType dtype) {
   return dtype == torch::kBFloat16 || dtype == torch::kFloat32;
 }
 
 #include XLLM_TL_CHUNK_GATED_DELTA_RULE_FWD_H_REGISTRY_INC
-
-int32_t max_compiled_n(int32_t H,
-                       int32_t Hg,
-                       int32_t K,
-                       int32_t V,
-                       TilelangDType dtype) {
-  int32_t max_n = 0;
-  for (const auto& entry : kChunkGatedDeltaRuleFwdHRegistry) {
-    const auto& spec = entry.spec;
-    if (spec.H == H && spec.Hg == Hg && spec.K == K && spec.V == V &&
-        spec.dtype == dtype) {
-      max_n = std::max(max_n, spec.N);
-    }
-  }
-  return max_n;
-}
-
-int32_t select_launch_n(int64_t actual_n,
-                        int32_t H,
-                        int32_t Hg,
-                        int32_t K,
-                        int32_t V,
-                        TilelangDType dtype) {
-  CHECK_GT(actual_n, 0)
-      << "TileLang chunk_gated_delta_rule_fwd_h: actual_n must be > 0";
-  const int32_t max_n = max_compiled_n(H, Hg, K, V, dtype);
-  CHECK_GT(max_n, 0)
-      << "TileLang chunk_gated_delta_rule_fwd_h: no compiled N variant for "
-      << "H=" << H << ", Hg=" << Hg << ", K=" << K << ", V=" << V
-      << ", dtype=" << static_cast<int>(dtype);
-  CHECK_GE(max_n, kNSpecializationMin)
-      << "TileLang chunk_gated_delta_rule_fwd_h: compiled N variants must "
-      << "be >= " << kNSpecializationMin;
-
-  const int64_t capped = std::min<int64_t>(actual_n, max_n);
-  int64_t rounded_up =
-      ((capped + kNSpecializationStep - 1) / kNSpecializationStep) *
-      kNSpecializationStep;
-  rounded_up = std::max<int64_t>(rounded_up, kNSpecializationMin);
-  rounded_up = std::min<int64_t>(rounded_up, max_n);
-  return static_cast<int32_t>(rounded_up);
-}
 
 void check_supported(const torch::Tensor& k,
                      const torch::Tensor& w,
@@ -148,7 +104,6 @@ void check_supported(const torch::Tensor& k,
 }
 
 ChunkGatedDeltaRuleFwdHSpecialization build_runtime_specialization(
-    int32_t compiled_n,
     const torch::Tensor& k,
     const torch::Tensor& u) {
   CHECK_EQ(k.dim(), 3);
@@ -160,34 +115,11 @@ ChunkGatedDeltaRuleFwdHSpecialization build_runtime_specialization(
   const TilelangDType dtype = to_tilelang_dtype(k.scalar_type());
 
   return make_chunk_gated_delta_rule_fwd_h_specialization(
-      ChunkGatedDeltaRuleFwdHN{compiled_n},
       ChunkGatedDeltaRuleFwdHH{H},
       ChunkGatedDeltaRuleFwdHHg{Hg},
       ChunkGatedDeltaRuleFwdHK{K},
       ChunkGatedDeltaRuleFwdHV{V},
       ChunkGatedDeltaRuleFwdHDType{dtype});
-}
-
-const auto* find_entry_with_fallback(
-    ChunkGatedDeltaRuleFwdHSpecialization specialization) {
-  const auto* entry =
-      find_chunk_gated_delta_rule_fwd_h_kernel_entry(specialization);
-  if (entry != nullptr) {
-    return entry;
-  }
-  int32_t fallback_n = specialization.N - kNSpecializationStep;
-  while (fallback_n >= kNSpecializationMin && entry == nullptr) {
-    specialization = make_chunk_gated_delta_rule_fwd_h_specialization(
-        ChunkGatedDeltaRuleFwdHN{fallback_n},
-        ChunkGatedDeltaRuleFwdHH{specialization.H},
-        ChunkGatedDeltaRuleFwdHHg{specialization.Hg},
-        ChunkGatedDeltaRuleFwdHK{specialization.K},
-        ChunkGatedDeltaRuleFwdHV{specialization.V},
-        ChunkGatedDeltaRuleFwdHDType{specialization.dtype});
-    entry = find_chunk_gated_delta_rule_fwd_h_kernel_entry(specialization);
-    fallback_n -= kNSpecializationStep;
-  }
-  return entry;
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
@@ -205,24 +137,14 @@ run_tilelang_chunk_gated_delta_rule_fwd_h(
   const int64_t Hg = k.size(1);
   const int64_t K = k.size(2);
   const int64_t V = u.size(2);
-  const TilelangDType dtype = to_tilelang_dtype(k.scalar_type());
 
-  const int32_t compiled_n = select_launch_n(actual_n,
-                                             static_cast<int32_t>(H),
-                                             static_cast<int32_t>(Hg),
-                                             static_cast<int32_t>(K),
-                                             static_cast<int32_t>(V),
-                                             dtype);
-
-  int32_t actual_nt_max = 0;
+  int64_t actual_nt_max = 0;
   {
-    auto cu_cpu = cu_seqlens.cpu().contiguous();
-    auto cu_ptr = cu_cpu.data_ptr<int32_t>();
-    for (int64_t i = 0; i < actual_n; ++i) {
-      const int32_t seq_len = cu_ptr[i + 1] - cu_ptr[i];
-      const int32_t nt_i = (seq_len + kCompileBT - 1) / kCompileBT;
-      actual_nt_max = std::max(actual_nt_max, nt_i);
-    }
+    const auto seq_lens =
+        cu_seqlens.slice(0, 1, cu_seqlens.size(0)) -
+        cu_seqlens.slice(0, 0, cu_seqlens.size(0) - 1);
+    const auto nt_per_seq = (seq_lens + kCompileBT - 1) / kCompileBT;
+    actual_nt_max = nt_per_seq.max().item<int64_t>();
   }
   CHECK_GT(actual_nt_max, 0)
       << "TileLang chunk_gated_delta_rule_fwd_h: actual_nt_max must be > 0";
@@ -231,35 +153,44 @@ run_tilelang_chunk_gated_delta_rule_fwd_h(
   const auto options_fp32 = k.options().dtype(torch::kFloat32);
 
   const int32_t V_half = static_cast<int32_t>(V) / 2;
+  const int64_t actual_n_i64 = static_cast<int64_t>(actual_n);
   const int64_t t_total_i64 = static_cast<int64_t>(t_total);
   const int64_t actual_nt_i64 = static_cast<int64_t>(actual_nt_max);
 
-  auto h_out = torch::empty({compiled_n, actual_nt_i64, H, K, V}, options_bf16);
+  auto h_out = torch::empty({actual_n_i64, actual_nt_i64, H, K, V}, options_bf16);
   auto v_new_out = torch::empty({t_total_i64, H, V}, options_bf16);
-  auto h0 = torch::zeros({compiled_n, H, K, V}, options_bf16);
+  auto h0 = torch::zeros({actual_n_i64, H, K, V}, options_bf16);
   if (initial_state.has_value()) {
-    h0.narrow(0, 0, actual_n).copy_(initial_state.value().to(torch::kBFloat16));
+    const auto& state = initial_state.value();
+    CHECK_EQ(state.size(0), actual_n)
+        << "TileLang chunk_gated_delta_rule_fwd_h: "
+        << "initial_state batch size mismatch, expected " << actual_n
+        << ", got " << state.size(0);
+    CHECK_EQ(state.size(1), H)
+        << "TileLang chunk_gated_delta_rule_fwd_h: "
+        << "initial_state H mismatch";
+    CHECK_EQ(state.size(2), K)
+        << "TileLang chunk_gated_delta_rule_fwd_h: "
+        << "initial_state K mismatch";
+    CHECK_EQ(state.size(3), V)
+        << "TileLang chunk_gated_delta_rule_fwd_h: "
+        << "initial_state V mismatch";
+    h0.copy_(state.to(torch::kBFloat16));
   }
-  auto ht = torch::zeros({compiled_n, H, K, V}, options_fp32);
+  auto ht = torch::zeros({actual_n_i64, H, K, V}, options_fp32);
 
   auto ws_wh =
-      torch::empty({compiled_n, H, 2, kCompileBT, V_half}, options_fp32);
+      torch::empty({actual_n_i64, H, 2, kCompileBT, V_half}, options_fp32);
   auto ws_vnew =
-      torch::empty({compiled_n, H, 2, kCompileBT, V_half}, options_bf16);
-  auto ws_hupd = torch::empty({compiled_n, H, 2, K, V_half}, options_fp32);
-  auto ws_h = torch::empty({compiled_n, H, 2, K, V_half}, options_bf16);
+      torch::empty({actual_n_i64, H, 2, kCompileBT, V_half}, options_bf16);
+  auto ws_hupd = torch::empty({actual_n_i64, H, 2, K, V_half}, options_fp32);
+  auto ws_h = torch::empty({actual_n_i64, H, 2, K, V_half}, options_bf16);
 
   auto cu_prepared = cu_seqlens.to(torch::kInt32).contiguous();
-  if (static_cast<int64_t>(compiled_n) > actual_n) {
-    auto cu_padded = torch::empty({compiled_n + 1}, cu_prepared.options());
-    cu_padded.narrow(0, 0, actual_n + 1).copy_(cu_prepared);
-    cu_padded.narrow(0, actual_n + 1, compiled_n - actual_n)
-        .fill_(static_cast<int32_t>(t_total));
-    cu_prepared = cu_padded;
-  }
 
-  auto specialization = build_runtime_specialization(compiled_n, k, u);
-  const auto* entry = find_entry_with_fallback(specialization);
+  auto specialization = build_runtime_specialization(k, u);
+  const auto* entry =
+      find_chunk_gated_delta_rule_fwd_h_kernel_entry(specialization);
   CHECK(entry != nullptr)
       << "TileLang chunk_gated_delta_rule_fwd_h: no compiled variant. "
       << "Available variants: "
@@ -280,15 +211,14 @@ run_tilelang_chunk_gated_delta_rule_fwd_h(
             static_cast<uint8_t*>(ws_vnew.data_ptr()),
             static_cast<uint8_t*>(ws_hupd.data_ptr()),
             static_cast<uint8_t*>(ws_h.data_ptr()),
+            static_cast<int64_t>(actual_n),
             static_cast<int64_t>(actual_nt_max),
             static_cast<int64_t>(t_total),
             stream);
 
-  auto h_sliced = h_out.narrow(0, 0, actual_n);
-  auto ht_sliced =
-      output_final_state ? ht.narrow(0, 0, actual_n) : torch::Tensor();
+  auto ht_sliced = output_final_state ? ht : torch::Tensor();
 
-  return {h_sliced, v_new_out, ht_sliced};
+  return {h_out, v_new_out, ht_sliced};
 }
 
 }  // namespace

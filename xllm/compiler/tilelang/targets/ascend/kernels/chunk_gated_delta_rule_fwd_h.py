@@ -6,6 +6,7 @@ from tilelang import language as T
 import torch
 
 from ....common.spec import DispatchField, TilelangKernel, register_kernel
+from .utils import detect_vec_core_num
 
 tilelang.cache.clear_cache()
 
@@ -17,12 +18,9 @@ COMPILE_BT = 64
 DEFAULT_DTYPE = "bf16"
 DEFAULT_ACCUM_DTYPE = "float32"
 
-N_SPECIALIZATION_MIN = 1
-N_SPECIALIZATION_MAX = 32
-N_SPECIALIZATION_STEP = 1
-N_SPECIALIZATIONS = tuple(
-    range(N_SPECIALIZATION_MIN, N_SPECIALIZATION_MAX + 1, N_SPECIALIZATION_STEP)
-)
+VEC_NUM = 2
+VEC_CORE_NUM = detect_vec_core_num()
+CUBE_BLOCK_NUM = VEC_CORE_NUM // VEC_NUM
 
 _AOT_PASS_CONFIGS = {
     "tl.ascend_auto_sync": False,
@@ -63,7 +61,6 @@ def _prepare_chunk_offsets(
 # 2. AOT Build Function
 # ==========================================
 def _build_chunk_gated_delta_rule_fwd_h_kernel(
-    N: int,
     H: int,
     Hg: int,
     K: int,
@@ -78,6 +75,7 @@ def _build_chunk_gated_delta_rule_fwd_h_kernel(
     V_half = V // 2
     input_dtype = "bfloat16"
 
+    N_sym = T.symbolic("n_batch")
     NT_sym = T.symbolic("nt")
     T_total_sym = T.symbolic("total_t")
 
@@ -88,26 +86,27 @@ def _build_chunk_gated_delta_rule_fwd_h_kernel(
 
     @T.prim_func
     def main(
-        h: T.Tensor([N, NT_sym, H, K, V], input_dtype),
+        h: T.Tensor([N_sym, NT_sym, H, K, V], input_dtype),
         k: T.Tensor([T_total_sym, Hg, K], input_dtype),
         v: T.Tensor([T_total_sym, H, V], input_dtype),
         w: T.Tensor([T_total_sym, H, K], input_dtype),
         g: T.Tensor([T_total_sym, H], accum_dtype),
         v_new: T.Tensor([T_total_sym, H, V], input_dtype),
-        h0: T.Tensor([N, H, K, V], input_dtype),
-        ht: T.Tensor([N, H, K, V], accum_dtype),
-        cu_seqlens: T.Tensor([N + 1], "int32"),
-        ws_wh: T.Tensor([N, H, 2, bt, V_half], accum_dtype),
-        ws_vnew: T.Tensor([N, H, 2, bt, V_half], input_dtype),
-        ws_hupd: T.Tensor([N, H, 2, K, V_half], accum_dtype),
-        ws_h: T.Tensor([N, H, 2, K, V_half], input_dtype),
+        h0: T.Tensor([N_sym, H, K, V], input_dtype),
+        ht: T.Tensor([N_sym, H, K, V], accum_dtype),
+        cu_seqlens: T.Tensor([N_sym + 1], "int32"),
+        ws_wh: T.Tensor([N_sym, H, 2, bt, V_half], accum_dtype),
+        ws_vnew: T.Tensor([N_sym, H, 2, bt, V_half], input_dtype),
+        ws_hupd: T.Tensor([N_sym, H, 2, K, V_half], accum_dtype),
+        ws_h: T.Tensor([N_sym, H, 2, K, V_half], input_dtype),
     ):
-        with T.Kernel(N * H, is_npu=True) as (cid, vid):
-            i_n = cid // H
-            i_h = cid % H
-
-            hg_ratio = H // Hg
-            k_head = i_h // hg_ratio
+        total_tasks = CUBE_BLOCK_NUM
+        with T.Kernel(total_tasks, is_npu=True) as (cid, vid):
+            total_pairs = N_sym * H
+            pairs_per_core = T.ceildiv(total_pairs, total_tasks)
+            pair_start = cid * pairs_per_core
+            pairs_left = T.if_then_else(total_pairs > pair_start, total_pairs - pair_start, 0)
+            num_pairs = T.if_then_else(pairs_left < pairs_per_core, pairs_left, pairs_per_core)
 
             h_state_ub = T.alloc_ub([2, K // 2, V_half], input_dtype)
             h_state_ub_float = T.alloc_ub([2, K // 2, V_half], accum_dtype)
@@ -129,312 +128,320 @@ def _build_chunk_gated_delta_rule_fwd_h_kernel(
             v_new_l1 = T.alloc_L1([2, bt, V_half], input_dtype)
             hupd_frag = T.alloc_L0C([2, K, V_half], accum_dtype)
 
-            with T.Scope("C"):
-                bos = cu_seqlens[i_n]
-                eos = cu_seqlens[i_n + 1]
-                T_len = eos - bos
-                NT_i = T.ceildiv(T_len, bt)
+            for pair_idx in T.serial(num_pairs):
+                global_idx = pair_start + pair_idx
+                i_n = global_idx // H
+                i_h = global_idx % H
 
-                actual_len = T.if_then_else(T_len < bt, T_len, bt)
-                T.copy(w[bos : bos + actual_len, i_h, :], w_chunk_l1[0, :, :])
-                T.copy(k[bos : bos + actual_len, k_head, :], k_chunk_l1[0, :, :])
-                T.set_flag("mte2", "m", 0)
+                hg_ratio = H // Hg
+                k_head = i_h // hg_ratio
 
-                for i in T.serial(NT_i):
-                    pid = i % 2
-                    next_pid = (i + 1) % 2
-                    chunk_start_next = bos + (i + 1) * bt
+                with T.Scope("C"):
+                    bos = cu_seqlens[i_n]
+                    eos = cu_seqlens[i_n + 1]
+                    T_len = eos - bos
+                    NT_i = T.ceildiv(T_len, bt)
 
-                    chunk_len = T.if_then_else(i * bt + bt > T_len, T_len - i * bt, bt)
+                    actual_len = T.if_then_else(T_len < bt, T_len, bt)
+                    T.copy(w[bos : bos + actual_len, i_h, :], w_chunk_l1[0, :, :])
+                    T.copy(k[bos : bos + actual_len, k_head, :], k_chunk_l1[0, :, :])
+                    T.set_flag("mte2", "m", 0)
 
-                    if i + 1 < NT_i:
-                        next_len = T.if_then_else(
-                            (i + 1) * bt + bt > T_len, T_len - (i + 1) * bt, bt
-                        )
+                    for i in T.serial(NT_i):
+                        pid = i % 2
+                        next_pid = (i + 1) % 2
+                        chunk_start_next = bos + (i + 1) * bt
+
+                        chunk_len = T.if_then_else(i * bt + bt > T_len, T_len - i * bt, bt)
+
+                        if i + 1 < NT_i:
+                            next_len = T.if_then_else(
+                                (i + 1) * bt + bt > T_len, T_len - (i + 1) * bt, bt
+                            )
+                            T.copy(
+                                w[chunk_start_next : chunk_start_next + next_len, i_h, :],
+                                w_chunk_l1[next_pid, :, :],
+                            )
+                            T.copy(
+                                k[
+                                    chunk_start_next : chunk_start_next + next_len,
+                                    k_head,
+                                    :,
+                                ],
+                                k_chunk_l1[next_pid, :, :],
+                            )
+                            T.set_flag("mte2", "m", next_pid)
+
+                        # w @ h
+                        T.wait_flag("mte2", "m", pid)
+                        for j in T.serial(2):
+                            T.wait_cross_flag(SEM_H_V2C + j)
+                            T.copy(ws_h[i_n, i_h, j, :, :], h_state_l1[j, :, :])
+                            T.set_flag("mte2", "m", 2)
+                            T.wait_flag("mte2", "m", 2)
+                            T.gemm_v0(
+                                w_chunk_l1[pid, :, :],
+                                h_state_l1[j, :, :],
+                                wh_frag[j, :, :],
+                                init=True,
+                            )
+                            T.set_flag("m", "fix", 3)
+                            T.wait_flag("m", "fix", 3)
+                            T.copy(wh_frag[j, :, :], ws_wh[i_n, i_h, j, :, :])
+                            T.set_cross_flag("FIX", SEM_WH_C2V + j)
+
+                        # k @ v_new
+                        for j in T.serial(2):
+                            T.wait_cross_flag(SEM_VNEW_V2C + j)
+                            T.copy(ws_vnew[i_n, i_h, j, :chunk_len, :], v_new_l1[j, :, :])
+                            T.set_flag("mte2", "m", 4)
+                            T.wait_flag("mte2", "m", 4)
+                            T.gemm_v0(
+                                k_chunk_l1[pid, :, :],
+                                v_new_l1[j, :, :],
+                                hupd_frag[j, :, :],
+                                transpose_A=True,
+                                init=True,
+                            )
+                            T.set_flag("m", "fix", 5)
+                            T.wait_flag("m", "fix", 5)
+                            T.copy(hupd_frag[j, :, :], ws_hupd[i_n, i_h, j, :, :])
+                            T.set_cross_flag("FIX", SEM_HUPD_C2V + j)
+
+                with T.Scope("V"):
+                    bos = cu_seqlens[i_n]
+                    eos = cu_seqlens[i_n + 1]
+                    T_len = eos - bos
+                    NT_i = T.ceildiv(T_len, bt)
+
+                    for j in T.serial(2):
                         T.copy(
-                            w[chunk_start_next : chunk_start_next + next_len, i_h, :],
-                            w_chunk_l1[next_pid, :, :],
-                        )
-                        T.copy(
-                            k[
-                                chunk_start_next : chunk_start_next + next_len,
-                                k_head,
-                                :,
+                            h0[
+                                i_n,
+                                i_h,
+                                K // 2 * vid : K // 2 * vid + K // 2,
+                                j * V_half : (j + 1) * V_half,
                             ],
-                            k_chunk_l1[next_pid, :, :],
+                            h_state_ub[j, :, :],
                         )
-                        T.set_flag("mte2", "m", next_pid)
+                        T.set_flag("mte2", "v", 12)
+                        T.wait_flag("mte2", "v", 12)
+                        T.copy(h_state_ub[j, :, :], h_state_ub_float[j, :, :])
 
-                    # w @ h
-                    T.wait_flag("mte2", "m", pid)
-                    for j in T.serial(2):
-                        T.wait_cross_flag(SEM_H_V2C + j)
-                        T.copy(ws_h[i_n, i_h, j, :, :], h_state_l1[j, :, :])
-                        T.set_flag("mte2", "m", 2)
-                        T.wait_flag("mte2", "m", 2)
-                        T.gemm_v0(
-                            w_chunk_l1[pid, :, :],
-                            h_state_l1[j, :, :],
-                            wh_frag[j, :, :],
-                            init=True,
-                        )
-                        T.set_flag("m", "fix", 3)
-                        T.wait_flag("m", "fix", 3)
-                        T.copy(wh_frag[j, :, :], ws_wh[i_n, i_h, j, :, :])
-                        T.set_cross_flag("FIX", SEM_WH_C2V + j)
-
-                    # k @ v_new
-                    for j in T.serial(2):
-                        T.wait_cross_flag(SEM_VNEW_V2C + j)
-                        T.copy(ws_vnew[i_n, i_h, j, :chunk_len, :], v_new_l1[j, :, :])
-                        T.set_flag("mte2", "m", 4)
-                        T.wait_flag("mte2", "m", 4)
-                        T.gemm_v0(
-                            k_chunk_l1[pid, :, :],
-                            v_new_l1[j, :, :],
-                            hupd_frag[j, :, :],
-                            transpose_A=True,
-                            init=True,
-                        )
-                        T.set_flag("m", "fix", 5)
-                        T.wait_flag("m", "fix", 5)
-                        T.copy(hupd_frag[j, :, :], ws_hupd[i_n, i_h, j, :, :])
-                        T.set_cross_flag("FIX", SEM_HUPD_C2V + j)
-
-            with T.Scope("V"):
-                bos = cu_seqlens[i_n]
-                eos = cu_seqlens[i_n + 1]
-                T_len = eos - bos
-                NT_i = T.ceildiv(T_len, bt)
-
-                for j in T.serial(2):
-                    T.copy(
-                        h0[
-                            i_n,
-                            i_h,
-                            K // 2 * vid : K // 2 * vid + K // 2,
-                            j * V_half : (j + 1) * V_half,
-                        ],
-                        h_state_ub[j, :, :],
-                    )
-                    T.set_flag("mte2", "v", 12)
-                    T.wait_flag("mte2", "v", 12)
-                    T.copy(h_state_ub[j, :, :], h_state_ub_float[j, :, :])
-
-                chunk_len = T.if_then_else(T_len < bt, T_len, bt)
-                vec_chunk_len = T.if_then_else(
-                    vid == 0, T.min(bt // 2, chunk_len), T.max(chunk_len - bt // 2, 0)
-                )
-                vec_start_in_chunk = T.if_then_else(vid == 0, 0, bt // 2)
-                vec_global_start = bos + vec_start_in_chunk
-
-                for j in T.serial(2):
-                    T.copy(
-                        v[
-                            vec_global_start : vec_global_start + vec_chunk_len,
-                            i_h,
-                            j * V_half : (j + 1) * V_half,
-                        ],
-                        v_chunk_ub[0, j, :, :],
-                    )
-                if use_g:
-                    T.copy(
-                        g[vec_global_start : vec_global_start + vec_chunk_len, i_h],
-                        g_chunk_ub[0, :],
-                    )
-                T.set_flag("mte2", "v", 2)
-
-                for i in T.serial(NT_i):
-                    pid = i % 2
-                    next_pid = (i + 1) % 2
-                    v_flag_pid = pid + 2
-                    v_flag_next = next_pid + 2
-                    g_start = bos + i * bt
-                    g_start_next = bos + (i + 1) * bt
-
-                    chunk_len = T.if_then_else(i * bt + bt > T_len, T_len - i * bt, bt)
+                    chunk_len = T.if_then_else(T_len < bt, T_len, bt)
                     vec_chunk_len = T.if_then_else(
-                        vid == 0,
-                        T.min(bt // 2, chunk_len),
-                        T.max(chunk_len - bt // 2, 0),
+                        vid == 0, T.min(bt // 2, chunk_len), T.max(chunk_len - bt // 2, 0)
                     )
                     vec_start_in_chunk = T.if_then_else(vid == 0, 0, bt // 2)
+                    vec_global_start = bos + vec_start_in_chunk
 
-                    # v[t+1], g[t+1]
-                    if i + 1 < NT_i:
-                        next_chunk_len = T.if_then_else(
-                            (i + 1) * bt + bt > T_len, T_len - (i + 1) * bt, bt
+                    for j in T.serial(2):
+                        T.copy(
+                            v[
+                                vec_global_start : vec_global_start + vec_chunk_len,
+                                i_h,
+                                j * V_half : (j + 1) * V_half,
+                            ],
+                            v_chunk_ub[0, j, :, :],
                         )
-                        next_vec_start_in_chunk = T.if_then_else(vid == 0, 0, bt // 2)
-                        next_vec_chunk_len = T.if_then_else(
+                    if use_g:
+                        T.copy(
+                            g[vec_global_start : vec_global_start + vec_chunk_len, i_h],
+                            g_chunk_ub[0, :],
+                        )
+                    T.set_flag("mte2", "v", 2)
+
+                    for i in T.serial(NT_i):
+                        pid = i % 2
+                        next_pid = (i + 1) % 2
+                        v_flag_pid = pid + 2
+                        v_flag_next = next_pid + 2
+                        g_start = bos + i * bt
+                        g_start_next = bos + (i + 1) * bt
+
+                        chunk_len = T.if_then_else(i * bt + bt > T_len, T_len - i * bt, bt)
+                        vec_chunk_len = T.if_then_else(
                             vid == 0,
-                            T.min(bt // 2, next_chunk_len),
-                            T.max(next_chunk_len - bt // 2, 0),
+                            T.min(bt // 2, chunk_len),
+                            T.max(chunk_len - bt // 2, 0),
                         )
-                        next_vec_global_start = g_start_next + next_vec_start_in_chunk
+                        vec_start_in_chunk = T.if_then_else(vid == 0, 0, bt // 2)
 
+                        # v[t+1], g[t+1]
+                        if i + 1 < NT_i:
+                            next_chunk_len = T.if_then_else(
+                                (i + 1) * bt + bt > T_len, T_len - (i + 1) * bt, bt
+                            )
+                            next_vec_start_in_chunk = T.if_then_else(vid == 0, 0, bt // 2)
+                            next_vec_chunk_len = T.if_then_else(
+                                vid == 0,
+                                T.min(bt // 2, next_chunk_len),
+                                T.max(next_chunk_len - bt // 2, 0),
+                            )
+                            next_vec_global_start = g_start_next + next_vec_start_in_chunk
+
+                            for j in T.serial(2):
+                                T.copy(
+                                    v[
+                                        next_vec_global_start : next_vec_global_start
+                                        + next_vec_chunk_len,
+                                        i_h,
+                                        j * V_half : (j + 1) * V_half,
+                                    ],
+                                    v_chunk_ub[next_pid, j, :, :],
+                                )
+                            if use_g:
+                                T.copy(
+                                    g[
+                                        next_vec_global_start : next_vec_global_start
+                                        + next_vec_chunk_len,
+                                        i_h,
+                                    ],
+                                    g_chunk_ub[next_pid, :],
+                                )
+                            T.set_flag("mte2", "v", v_flag_next)
+
+                        # h to cube
                         for j in T.serial(2):
+                            T.copy(h_state_ub_float[j, :, :], h_state_ub[j, :, :])
+                            T.set_flag("v", "mte3", 11)
+                            T.wait_flag("v", "mte3", 11)
                             T.copy(
-                                v[
-                                    next_vec_global_start : next_vec_global_start
-                                    + next_vec_chunk_len,
+                                h_state_ub[j, :, :],
+                                ws_h[i_n, i_h, j, K // 2 * vid : K // 2 * vid + K // 2, :],
+                            )
+                            T.set_cross_flag("MTE3", SEM_H_V2C + j)
+                            # save h[t]
+                            T.copy(
+                                h_state_ub[j, :, :],
+                                h[
+                                    i_n,
+                                    i,
                                     i_h,
+                                    K // 2 * vid : K // 2 * vid + K // 2,
                                     j * V_half : (j + 1) * V_half,
                                 ],
-                                v_chunk_ub[next_pid, j, :, :],
                             )
+
+                        T.wait_flag("mte2", "v", v_flag_pid)
+                        # prepare gating
                         if use_g:
-                            T.copy(
-                                g[
-                                    next_vec_global_start : next_vec_global_start
-                                    + next_vec_chunk_len,
-                                    i_h,
-                                ],
-                                g_chunk_ub[next_pid, :],
+                            g_last = T.if_then_else(
+                                i * bt + bt <= T_len,
+                                g[g_start + bt - 1, i_h],
+                                g[g_start + T_len - i * bt - 1, i_h],
                             )
-                        T.set_flag("mte2", "v", v_flag_next)
 
-                    # h to cube
-                    for j in T.serial(2):
-                        T.copy(h_state_ub_float[j, :, :], h_state_ub[j, :, :])
-                        T.set_flag("v", "mte3", 11)
-                        T.wait_flag("v", "mte3", 11)
-                        T.copy(
-                            h_state_ub[j, :, :],
-                            ws_h[i_n, i_h, j, K // 2 * vid : K // 2 * vid + K // 2, :],
-                        )
-                        T.set_cross_flag("MTE3", SEM_H_V2C + j)
-                        # save h[t]
-                        T.copy(
-                            h_state_ub[j, :, :],
-                            h[
-                                i_n,
-                                i,
-                                i_h,
-                                K // 2 * vid : K // 2 * vid + K // 2,
-                                j * V_half : (j + 1) * V_half,
-                            ],
-                        )
+                            T.tile.fill(g_exp_ub, g_last)
+                            T.set_flag("mte2", "v", 4)
+                            T.wait_flag("mte2", "v", 4)
+                            T.tile.sub(g_exp_ub, g_exp_ub, g_chunk_ub[pid, :])
+                            T.tile.exp(g_exp_ub, g_exp_ub)
+                            T.tile.broadcast(g_exp_ub_broc, g_exp_ub, axis=1)
 
-                    T.wait_flag("mte2", "v", v_flag_pid)
-                    # prepare gating
-                    if use_g:
-                        g_last = T.if_then_else(
-                            i * bt + bt <= T_len,
-                            g[g_start + bt - 1, i_h],
-                            g[g_start + T_len - i * bt - 1, i_h],
-                        )
+                            T.tile.fill(g_last_scalar, g_last)
+                            T.tile.exp(g_last_scalar, g_last_scalar)
 
-                        T.tile.fill(g_exp_ub, g_last)
-                        T.set_flag("mte2", "v", 4)
-                        T.wait_flag("mte2", "v", 4)
-                        T.tile.sub(g_exp_ub, g_exp_ub, g_chunk_ub[pid, :])
-                        T.tile.exp(g_exp_ub, g_exp_ub)
-                        T.tile.broadcast(g_exp_ub_broc, g_exp_ub, axis=1)
+                        for j in T.serial(2):
+                            T.copy(v_chunk_ub[pid, j, :, :], v_chunk_ub_float[j, :, :])
 
-                        T.tile.fill(g_last_scalar, g_last)
-                        T.tile.exp(g_last_scalar, g_last_scalar)
+                            # v_new = v - w @ h
+                            T.wait_cross_flag(SEM_WH_C2V + j)
+                            T.copy(
+                                ws_wh[
+                                    i_n,
+                                    i_h,
+                                    j,
+                                    vec_start_in_chunk : vec_start_in_chunk + bt // 2,
+                                    :,
+                                ],
+                                wh_ub_float[j, :, :],
+                            )
+                            T.set_flag("mte2", "v", 5)
+                            T.wait_flag("mte2", "v", 5)
+                            T.tile.sub(
+                                v_chunk_ub_float[j, :, :],
+                                v_chunk_ub_float[j, :, :],
+                                wh_ub_float[j, :, :],
+                            )
 
-                    for j in T.serial(2):
-                        T.copy(v_chunk_ub[pid, j, :, :], v_chunk_ub_float[j, :, :])
+                            if save_new_value:
+                                T.copy(v_chunk_ub_float[j, :, :], v_chunk_ub[pid, j, :, :])
+                                T.set_flag("v", "mte3", 6)
+                                T.wait_flag("v", "mte3", 6)
+                                T.copy(
+                                    v_chunk_ub[pid, j, :vec_chunk_len, :],
+                                    v_new[
+                                        g_start + vec_start_in_chunk : g_start
+                                        + vec_start_in_chunk
+                                        + vec_chunk_len,
+                                        i_h,
+                                        j * V_half : j * V_half + V_half,
+                                    ],
+                                )
 
-                        # v_new = v - w @ h
-                        T.wait_cross_flag(SEM_WH_C2V + j)
-                        T.copy(
-                            ws_wh[
-                                i_n,
-                                i_h,
-                                j,
-                                vec_start_in_chunk : vec_start_in_chunk + bt // 2,
-                                :,
-                            ],
-                            wh_ub_float[j, :, :],
-                        )
-                        T.set_flag("mte2", "v", 5)
-                        T.wait_flag("mte2", "v", 5)
-                        T.tile.sub(
-                            v_chunk_ub_float[j, :, :],
-                            v_chunk_ub_float[j, :, :],
-                            wh_ub_float[j, :, :],
-                        )
+                            if use_g:
+                                # v_new *= exp(g_last - g)
+                                T.tile.mul(
+                                    v_chunk_ub_float[j, :, :],
+                                    v_chunk_ub_float[j, :, :],
+                                    g_exp_ub_broc,
+                                )
+                                # h *= exp(g_last)
+                                T.tile.mul(
+                                    h_state_ub_float[j, :, :],
+                                    h_state_ub_float[j, :, :],
+                                    g_last_scalar[0],
+                                )
 
-                        if save_new_value:
+                            T.set_flag("mte3", "v", 7)
+                            T.wait_flag("mte3", "v", 7)
                             T.copy(v_chunk_ub_float[j, :, :], v_chunk_ub[pid, j, :, :])
-                            T.set_flag("v", "mte3", 6)
-                            T.wait_flag("v", "mte3", 6)
+                            T.set_flag("v", "mte3", 8)
+                            T.wait_flag("v", "mte3", 8)
                             T.copy(
-                                v_chunk_ub[pid, j, :vec_chunk_len, :],
-                                v_new[
-                                    g_start + vec_start_in_chunk : g_start
-                                    + vec_start_in_chunk
-                                    + vec_chunk_len,
+                                v_chunk_ub[pid, j, :, :],
+                                ws_vnew[
+                                    i_n,
                                     i_h,
-                                    j * V_half : j * V_half + V_half,
+                                    j,
+                                    vec_start_in_chunk : vec_start_in_chunk + bt // 2,
+                                    :,
                                 ],
                             )
+                            T.set_cross_flag("MTE3", SEM_VNEW_V2C + j)
 
-                        if use_g:
-                            # v_new *= exp(g_last - g)
-                            T.tile.mul(
-                                v_chunk_ub_float[j, :, :],
-                                v_chunk_ub_float[j, :, :],
-                                g_exp_ub_broc,
+                        for j in T.serial(2):
+                            # h += k @ v_new
+                            T.wait_cross_flag(SEM_HUPD_C2V + j)
+                            T.copy(
+                                ws_hupd[
+                                    i_n, i_h, j, K // 2 * vid : K // 2 * vid + K // 2, :
+                                ],
+                                hupd_ub_float[j, :, :],
                             )
-                            # h *= exp(g_last)
-                            T.tile.mul(
+                            T.set_flag("mte2", "v", 9)
+                            T.wait_flag("mte2", "v", 9)
+                            T.tile.add(
                                 h_state_ub_float[j, :, :],
                                 h_state_ub_float[j, :, :],
-                                g_last_scalar[0],
+                                hupd_ub_float[j, :, :],
                             )
 
-                        T.set_flag("mte3", "v", 7)
-                        T.wait_flag("mte3", "v", 7)
-                        T.copy(v_chunk_ub_float[j, :, :], v_chunk_ub[pid, j, :, :])
-                        T.set_flag("v", "mte3", 8)
-                        T.wait_flag("v", "mte3", 8)
-                        T.copy(
-                            v_chunk_ub[pid, j, :, :],
-                            ws_vnew[
-                                i_n,
-                                i_h,
-                                j,
-                                vec_start_in_chunk : vec_start_in_chunk + bt // 2,
-                                :,
-                            ],
-                        )
-                        T.set_cross_flag("MTE3", SEM_VNEW_V2C + j)
+                        T.set_flag("v", "mte3", 10)
+                        T.wait_flag("v", "mte3", 10)
 
-                    for j in T.serial(2):
-                        # h += k @ v_new
-                        T.wait_cross_flag(SEM_HUPD_C2V + j)
-                        T.copy(
-                            ws_hupd[
-                                i_n, i_h, j, K // 2 * vid : K // 2 * vid + K // 2, :
-                            ],
-                            hupd_ub_float[j, :, :],
-                        )
-                        T.set_flag("mte2", "v", 9)
-                        T.wait_flag("mte2", "v", 9)
-                        T.tile.add(
-                            h_state_ub_float[j, :, :],
-                            h_state_ub_float[j, :, :],
-                            hupd_ub_float[j, :, :],
-                        )
-
-                    T.set_flag("v", "mte3", 10)
-                    T.wait_flag("v", "mte3", 10)
-
-                if store_final_state:
-                    for j in T.serial(2):
-                        T.copy(
-                            h_state_ub_float[j, :, :],
-                            ht[
-                                i_n,
-                                i_h,
-                                K // 2 * vid : K // 2 * vid + K // 2,
-                                j * V_half : (j + 1) * V_half,
-                            ],
-                        )
+                    if store_final_state:
+                        for j in T.serial(2):
+                            T.copy(
+                                h_state_ub_float[j, :, :],
+                                ht[
+                                    i_n,
+                                    i_h,
+                                    K // 2 * vid : K // 2 * vid + K // 2,
+                                    j * V_half : (j + 1) * V_half,
+                                ],
+                            )
 
     return main
 
@@ -443,7 +450,6 @@ def _build_chunk_gated_delta_rule_fwd_h_kernel(
 class ChunkGatedDeltaRuleFwdHKernel(TilelangKernel):
     KERNEL_NAME = "chunk_gated_delta_rule_fwd_h"
     DISPATCH_SCHEMA = [
-        DispatchField("N", "int32"),
         DispatchField("H", "int32"),
         DispatchField("Hg", "int32"),
         DispatchField("K", "int32"),
@@ -452,31 +458,36 @@ class ChunkGatedDeltaRuleFwdHKernel(TilelangKernel):
     ]
     SPECIALIZATIONS = [
         {
-            "variant_key": f"n{n}_h{hv}_hg{hg}_k{k}_v{v}_bf16",
-            "N": n,
+            "variant_key": f"h{hv}_hg{hg}_k{k}_v{v}_bf16",
             "H": hv,
             "Hg": hg,
             "K": k,
             "V": v,
             "dtype": DEFAULT_DTYPE,
         }
-        for n in N_SPECIALIZATIONS
-        for hv, hg, k, v in [
-            (16, 1, 128, 128),
-            (8, 1, 128, 128),
-            (32, 16, 128, 128),
-        ]
+        for hv, hg, k, v in sorted(
+            {
+                (h // tp, hg // tp, k, v)
+                for h, hg, k, v in [
+                    (16, 16, 128, 128),
+                    (32, 16, 128, 128),
+                    (48, 16, 128, 128),
+                    (64, 16, 128, 128),
+                ]
+                for tp in [1, 2, 4, 8]
+                if h % tp == 0 and hg % tp == 0 and h // tp >= hg // tp
+            }
+        )
     ]
 
     @staticmethod
-    def generate_source(N: int, H: int, Hg: int, K: int, V: int, dtype: str) -> str:
+    def generate_source(H: int, Hg: int, K: int, V: int, dtype: str) -> str:
         if dtype != DEFAULT_DTYPE:
             raise ValueError(
                 f"chunk_gated_delta_rule_fwd_h only supports dtype={DEFAULT_DTYPE}, got {dtype}"
             )
         tilelang.disable_cache()
         tilelang_kernel = _build_chunk_gated_delta_rule_fwd_h_kernel(
-            N=N,
             H=H,
             Hg=Hg,
             K=K,
@@ -491,13 +502,10 @@ class ChunkGatedDeltaRuleFwdHKernel(TilelangKernel):
 
 @tilelang.jit(workspace_idx=[9, 10, 11, 12], pass_configs=pass_configs)
 def chunk_gated_delta_rule_fwd_kernel_jit(
-    N: int,
     H: int,
-    T_total: int,
     Hg: int,
     K: int,
     V: int,
-    NT_max: int,
     BT: int = 64,
     USE_G: bool = True,
     STORE_FINAL_STATE: bool = True,
@@ -506,7 +514,6 @@ def chunk_gated_delta_rule_fwd_kernel_jit(
     accum_dtype: str = "float32",
 ):
     return _build_chunk_gated_delta_rule_fwd_h_kernel(
-        N=N,
         H=H,
         Hg=Hg,
         K=K,
@@ -582,13 +589,10 @@ def chunk_gated_delta_rule_fwd_h(
 
     # --- 3. Kernel invocation ---
     ker = chunk_gated_delta_rule_fwd_kernel_jit(
-        N,
         H,
-        T_total,
         Hg,
         K,
         V,
-        NT_max,
         BT=BT,
         USE_G=USE_G,
         STORE_FINAL_STATE=output_final_state,
@@ -793,7 +797,6 @@ if __name__ == "__main__":
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(
             ChunkGatedDeltaRuleFwdHKernel.generate_source(
-                N=args.B,
                 H=args.H,
                 Hg=args.Hg,
                 K=args.K,
