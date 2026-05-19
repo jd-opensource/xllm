@@ -13,10 +13,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <c10/core/Device.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
+#include <torch_npu/csrc/core/npu/NPUStream.h>
+#include <torch_npu/csrc/libs/init_npu.h>
+#include <torch_npu/torch_npu.h>
 
-#include "core/kernels/npu/aclnn/pytorch_npu_helper.hpp"
+#include "acl/acl.h"
+#include "aclnn_onerec_final_beam_select.h"
+#include "core/common/macros.h"
 #include "core/kernels/npu/utils.h"
 #include "xllm_ops_api.h"
 
@@ -55,16 +61,65 @@ void run_beam_search_rec_final(const torch::Tensor& logprobs,
   // metadata is not consumed after this kernel.
   out_beam_count_prefix_sums.zero_();
 
-  EXEC_NPU_CMD(aclnnOnerecFinalBeamSelect,
-               logprobs,
-               top_tokens,
-               top_logprobs,
-               sequence_group,
-               current_step,
-               out_token_ids,
-               out_token_index,
-               out_log_probs,
-               out_sequence);
+  aclTensor* logprobs_ids = nullptr;
+  aclTensor* top_tokens_ids = nullptr;
+  aclTensor* top_logprobs_ids = nullptr;
+  aclTensor* sequence_group_ids = nullptr;
+  aclTensor* out_token_ids_ids = nullptr;
+  aclTensor* out_token_index_ids = nullptr;
+  aclTensor* out_log_probs_ids = nullptr;
+  aclTensor* out_sequence_ids = nullptr;
+  int32_t device_id = logprobs.device().index();
+  aclrtStream stream = c10_npu::getCurrentNPUStream(device_id).stream();
+
+  create_acltensor(&logprobs_ids, logprobs);
+  create_acltensor(&top_tokens_ids, top_tokens);
+  create_acltensor(&top_logprobs_ids, top_logprobs);
+  create_acltensor(&sequence_group_ids, sequence_group);
+  create_acltensor(&out_token_ids_ids, out_token_ids);
+  create_acltensor(&out_token_index_ids, out_token_index);
+  create_acltensor(&out_log_probs_ids, out_log_probs);
+  create_acltensor(&out_sequence_ids, out_sequence);
+
+  uint64_t workspace_size = 0;
+  aclOpExecutor* executor = nullptr;
+  CHECK_ACL_SUCCESS(
+      aclnnOnerecFinalBeamSelectGetWorkspaceSize(logprobs_ids,
+                                                 top_tokens_ids,
+                                                 top_logprobs_ids,
+                                                 sequence_group_ids,
+                                                 current_step,
+                                                 out_token_ids_ids,
+                                                 out_token_index_ids,
+                                                 out_log_probs_ids,
+                                                 out_sequence_ids,
+                                                 &workspace_size,
+                                                 &executor),
+      "beam_search_rec_final: failed to get workspace size");
+  void* workspace_addr = nullptr;
+  if (workspace_size > 0) {
+    CHECK_ACL_SUCCESS(
+        aclrtMalloc(&workspace_addr, workspace_size, ACL_MEM_MALLOC_HUGE_FIRST),
+        "beam_search_rec_final: failed to allocate workspace");
+  }
+  CHECK_ACL_SUCCESS(aclnnOnerecFinalBeamSelect(
+                        workspace_addr, workspace_size, executor, stream),
+                    "beam_search_rec_final: failed to execute kernel");
+  CHECK_ACL_SUCCESS(aclrtSynchronizeStream(stream),
+                    "beam_search_rec_final: failed to synchronize stream");
+
+  aclDestroyTensor(logprobs_ids);
+  aclDestroyTensor(top_tokens_ids);
+  aclDestroyTensor(top_logprobs_ids);
+  aclDestroyTensor(sequence_group_ids);
+  aclDestroyTensor(out_token_ids_ids);
+  aclDestroyTensor(out_token_index_ids);
+  aclDestroyTensor(out_log_probs_ids);
+  aclDestroyTensor(out_sequence_ids);
+  if (workspace_size > 0) {
+    CHECK_ACL_SUCCESS(aclrtFree(workspace_addr),
+                      "beam_search_rec_final: failed to free workspace");
+  }
 }
 
 }  // namespace xllm::kernel::npu
