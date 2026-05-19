@@ -2206,6 +2206,17 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
     const auto& sampling_params = round > 0
                                       ? mutable_input.decoder_sampling_params
                                       : mutable_input.sampling_params;
+    SamplingParameters round_sampling_params = sampling_params;
+    const bool final_round = round == total_rounds - 1;
+    const int32_t requested_result_width =
+        get_requested_beam_result_width(round_sampling_params, beam_width);
+    const bool output_logprobs = sampling_params.logprobs;
+    const int64_t output_max_top_logprobs = sampling_params.max_top_logprobs;
+    if (final_round && requested_result_width != beam_width) {
+      round_sampling_params.max_top_logprobs = std::max<int64_t>(
+          round_sampling_params.max_top_logprobs, requested_result_width);
+      round_sampling_params.logprobs = true;
+    }
 
     // Prepare round input according to the active backend.
 #if defined(USE_NPU)
@@ -2234,7 +2245,7 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
     if (sampling_params.selected_token_idxes.defined()) {
       logits = runtime_.model->logits(hidden_states,
                                       sampling_params.selected_token_idxes);
-      sample_output = rec_sampler_->forward(logits, sampling_params);
+      sample_output = rec_sampler_->forward(logits, round_sampling_params);
     }
 
     if (sample_output.top_tokens.defined() &&
@@ -2254,21 +2265,34 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
       top_tokens = sample_output.top_tokens.to(torch::kInt32);
       top_logprobs = sample_output.top_logprobs;
 #else
+      const int64_t candidate_top_k = sample_output.top_tokens.size(-1);
       top_tokens = sample_output.top_tokens.to(torch::kInt32)
-                       .reshape({-1, step_meta->beam_width});
-      top_logprobs = sample_output.top_logprobs.reshape({-1, beam_width});
+                       .reshape({-1, candidate_top_k});
+      top_logprobs = sample_output.top_logprobs.reshape({-1, candidate_top_k});
 #endif
-      execute_beam_search(
-          top_tokens, top_logprobs, beam_tensors, round, batch_size);
+      if (final_round && requested_result_width != beam_width) {
+        execute_final_beam_search(top_tokens,
+                                  top_logprobs,
+                                  beam_tensors,
+                                  round,
+                                  batch_size,
+                                  beam_width,
+                                  requested_result_width);
+      } else {
+        execute_beam_search(
+            top_tokens, top_logprobs, beam_tensors, round, batch_size);
+      }
 
       if (round > 0 && round < total_rounds - 1) {
         execute_cache_select(
             beam_tensors, mutable_input, round, beam_width, num_layers);
       }
 
-      if (round == total_rounds - 1) {
+      if (final_round) {
         build_final_output(
             logits, sample_output, sampling_params, beam_tensors, output);
+        output.logprobs = output_logprobs;
+        output.max_top_logprobs = output_max_top_logprobs;
       }
     }
   }
@@ -2342,6 +2366,76 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_beam_search(
                                   batch_size,
                                   round);
 #endif
+  std::swap(beam_tensors.sequence_group, beam_tensors.out_seqgroup);
+  std::swap(beam_tensors.acc_logprob, beam_tensors.out_log_probs);
+}
+
+void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_final_beam_search(
+    const torch::Tensor& top_tokens,
+    const torch::Tensor& top_logprobs,
+    BeamSearchTensors& beam_tensors,
+    int32_t round,
+    int32_t batch_size,
+    int32_t beam_width,
+    int32_t requested_result_width) {
+  OneRecBeamSearchOutputTensors final_tensors =
+      prepare_onerec_beam_search_output_tensors(
+          batch_size,
+          requested_result_width,
+          static_cast<int32_t>(beam_tensors.sequence_group.size(2)),
+          runtime_.worker.device());
+
+#if defined(USE_NPU)
+  if (can_use_beam_search_rec_final_select(
+          batch_size, top_tokens, requested_result_width)) {
+    xllm::kernel::npu::beam_search_rec(
+        /*logprobs=*/beam_tensors.acc_logprob,
+        /*top_tokens=*/top_tokens,
+        /*top_logprobs=*/top_logprobs,
+        /*sequence_group=*/beam_tensors.sequence_group,
+        /*current_step=*/static_cast<int64_t>(round),
+        /*result_width=*/requested_result_width,
+        /*out_token_ids=*/final_tensors.out_token_ids,
+        /*out_token_index=*/final_tensors.out_token_index,
+        /*out_log_probs=*/final_tensors.out_log_probs,
+        /*out_beam_count_prefix_sums=*/final_tensors.out_beam_count_prefix_sums,
+        /*out_sequence=*/final_tensors.out_seqgroup);
+  } else {
+    select_final_onerec_beam_results(
+        beam_tensors.acc_logprob,
+        beam_tensors.sequence_group,
+        top_tokens,
+        top_logprobs,
+        batch_size,
+        beam_width,
+        requested_result_width,
+        static_cast<int32_t>(beam_tensors.sequence_group.size(2)),
+        round,
+        final_tensors);
+  }
+#elif defined(USE_CUDA)
+  select_final_onerec_beam_results(
+      beam_tensors.acc_logprob,
+      beam_tensors.sequence_group,
+      top_tokens,
+      top_logprobs,
+      batch_size,
+      beam_width,
+      requested_result_width,
+      static_cast<int32_t>(beam_tensors.sequence_group.size(2)),
+      round,
+      final_tensors);
+#else
+  LOG(FATAL) << "Rec multi-round final beam search requires NPU or CUDA.";
+#endif
+
+  beam_tensors.out_token_ids = std::move(final_tensors.out_token_ids);
+  beam_tensors.out_token_index = std::move(final_tensors.out_token_index);
+  beam_tensors.out_beam_count_prefix_sums =
+      std::move(final_tensors.out_beam_count_prefix_sums);
+  beam_tensors.out_log_probs = std::move(final_tensors.out_log_probs);
+  beam_tensors.out_seqgroup = std::move(final_tensors.out_seqgroup);
+
   std::swap(beam_tensors.sequence_group, beam_tensors.out_seqgroup);
   std::swap(beam_tensors.acc_logprob, beam_tensors.out_log_probs);
 }
