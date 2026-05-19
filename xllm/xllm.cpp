@@ -43,6 +43,7 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/kv_cache_store_config.h"
 #include "core/framework/config/load_config.h"
+#include "core/framework/config/mlu_disagg_pd_config.h"
 #include "core/framework/config/model_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/profile_config.h"
@@ -93,40 +94,8 @@ void fix_mlu_disagg_pd_config() {
   DisaggPDConfig& disagg_pd_config = DisaggPDConfig::get_instance();
   KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
   SchedulerConfig& scheduler_config = SchedulerConfig::get_instance();
-  if (disagg_pd_config.kv_cache_transfer_type() != "Mooncake") {
-    LOG(WARNING) << "MLU disaggregated PD requires "
-                 << "kv_cache_transfer_type=Mooncake; forcing from "
-                 << disagg_pd_config.kv_cache_transfer_type()
-                 << " to Mooncake.";
-    disagg_pd_config.kv_cache_transfer_type("Mooncake");
-  }
-  if (disagg_pd_config.kv_cache_transfer_mode() != "PUSH") {
-    LOG(WARNING) << "MLU disaggregated PD requires "
-                 << "kv_cache_transfer_mode=PUSH; forcing from "
-                 << disagg_pd_config.kv_cache_transfer_mode() << " to PUSH.";
-    disagg_pd_config.kv_cache_transfer_mode("PUSH");
-  }
-  if (kv_cache_config.kv_cache_dtype() != "auto") {
-    LOG(WARNING) << "MLU disaggregated PD requires kv_cache_dtype=auto; "
-                 << "forcing from " << kv_cache_config.kv_cache_dtype()
-                 << " to auto.";
-    kv_cache_config.kv_cache_dtype("auto");
-  }
-  if (scheduler_config.enable_schedule_overlap()) {
-    LOG(WARNING) << "MLU disaggregated PD does not support schedule overlap; "
-                 << "forcing enable_schedule_overlap=false.";
-    scheduler_config.enable_schedule_overlap(false);
-  }
-  if (kv_cache_config.enable_prefix_cache()) {
-    LOG(WARNING) << "MLU disaggregated PD does not support prefix cache; "
-                 << "forcing enable_prefix_cache=false.";
-    kv_cache_config.enable_prefix_cache(false);
-  }
-  if (disagg_pd_config.enable_pd_ooc()) {
-    LOG(WARNING) << "MLU disaggregated PD does not support pd_ooc; "
-                 << "forcing enable_pd_ooc=false.";
-    disagg_pd_config.enable_pd_ooc(false);
-  }
+  normalize_mlu_disagg_pd_config(
+      disagg_pd_config, kv_cache_config, scheduler_config);
 }
 
 Options create_options(const std::string& instance_name, bool is_local) {
