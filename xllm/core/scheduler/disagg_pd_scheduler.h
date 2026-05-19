@@ -102,6 +102,8 @@ class DisaggPDScheduler : public ChunkedPrefillScheduler {
 
   void profile_tpot();
 
+  void cache_prefill_blocks(Request* request);
+
   // check remote instance info, if not exist, get from master service
   bool check_remote_instance_info(const std::string& instance_name);
 

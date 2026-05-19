@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <algorithm>
 
+#include "core/framework/config/scheduler_config.h"
 #include "framework/batch/batch_factory.h"
 #include "util/utils.h"
 
@@ -61,22 +62,40 @@ PDChunkBudget pick_pd_chunk_budget(size_t kv_tokens,
 DisaggPDChunkedPrefillScheduler::DisaggPDChunkedPrefillScheduler(
     Engine* engine,
     const Options& options)
-    : DisaggPDScheduler(engine, options) {
-  // Prefix cache is supported only on the DECODE instance, where it is
-  // required for best_of_n: expanded sequences (seq[1..best_of-1]) hit the
-  // first sequence's prompt KV blocks via prefix cache. PREFILL and MIX
-  // instances under chunked-prefill PD are not yet wired up for it.
-  const bool is_decode =
-      options_.instance_role().has_value() &&
-      options_.instance_role().value() == InstanceRole::DECODE;
-  if (!is_decode) {
-    CHECK(!enable_prefix_cache_)
-        << "disagg pd chunked prefill scheduler only supports prefix cache "
-        << "on the DECODE instance (current role="
-        << (options_.instance_role().has_value()
-                ? options_.instance_role().value().to_string()
-                : "<unset>")
-        << ").";
+    : DisaggPDScheduler(engine, options) {}
+
+void DisaggPDChunkedPrefillScheduler::match_prefix_blocks(Sequence* sequence) {
+  CHECK(sequence != nullptr);
+  if (!enable_prefix_cache_) {
+    return;
+  }
+
+  if (sequence->kv_state().num_kv_blocks() == 0) {
+    kv_cache_manager_->allocate_shared(sequence);
+    return;
+  }
+  if (!sequence->is_chunked_prefill_stage()) {
+    return;
+  }
+
+  const size_t max_tokens_per_chunk = static_cast<size_t>(
+      std::max(options_.max_tokens_per_chunk_for_prefill(), 64));
+  const size_t total_chunked_size =
+      util::ceil_div(sequence->num_tokens(), max_tokens_per_chunk);
+  const int32_t match_frequency =
+      ::xllm::SchedulerConfig::get_instance().chunked_match_frequency();
+  CHECK_GT(match_frequency, 0);
+  if (total_chunked_size < static_cast<size_t>(match_frequency)) {
+    kv_cache_manager_->allocate_shared(sequence);
+    return;
+  }
+
+  const size_t prefix_cache_interval =
+      util::ceil_div(total_chunked_size, static_cast<size_t>(match_frequency));
+  const size_t cur_chunked_index =
+      sequence->kv_state().kv_cache_tokens_num() / max_tokens_per_chunk;
+  if (cur_chunked_index % prefix_cache_interval == 0) {
+    kv_cache_manager_->allocate_shared(sequence);
   }
 }
 
@@ -85,6 +104,8 @@ bool DisaggPDChunkedPrefillScheduler::alloc_chunk(Sequence* sequence,
                                                   size_t* actual_tokens) {
   CHECK(sequence != nullptr);
   CHECK(actual_tokens != nullptr);
+
+  match_prefix_blocks(sequence);
 
   const size_t kv_tokens = sequence->kv_cache_tokens_num();
   const PDChunkBudget budget = pick_pd_chunk_budget(

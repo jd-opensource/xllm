@@ -201,6 +201,15 @@ void DisaggPDScheduler::profile_tpot() {
   }
 }
 
+void DisaggPDScheduler::cache_prefill_blocks(Request* request) {
+  CHECK(request != nullptr);
+  for (auto& sequence : request->sequences()) {
+    if (sequence->if_cache_block_for_prefill()) {
+      kv_cache_manager_->cache(sequence.get());
+    }
+  }
+}
+
 // TODO: maybe we should consider update info case even if info already exists
 // in local.
 bool DisaggPDScheduler::check_remote_instance_info(
@@ -684,7 +693,8 @@ void DisaggPDScheduler::prefill_send_first_generation() {
       brpc::Controller cntl;
       stub->FirstGeneration(&cntl, &gens, &resp, nullptr);
 
-      if (cntl.Failed() || !resp.ok()) {
+      const bool sent_first_generation = !cntl.Failed() && resp.ok();
+      if (!sent_first_generation) {
         LOG(ERROR) << "Failed to send first generation to decode instance : "
                    << request->state().decode_address
                    << ", error text : " << cntl.ErrorText()
@@ -696,6 +706,9 @@ void DisaggPDScheduler::prefill_send_first_generation() {
         req_to_channel_map_.erase(request->request_id());
       }
       response_processor_->wait_completion();
+      if (sent_first_generation) {
+        cache_prefill_blocks(request.get());
+      }
       kv_cache_manager_->deallocate(request.get());
     }
   });

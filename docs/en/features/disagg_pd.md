@@ -76,9 +76,10 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
     - `etcd_addr` must match the `etcd_addr` of `xllm_service`
 
 ## Notice
-On the Prefill instance of disaggregated PD, prefix cache is not supported with the current chunked-prefill PD scheduler and must be disabled:
+With the chunked-prefill PD scheduler, the Prefill instance supports prefix cache. When enabled, the scheduler matches existing prefix-cache blocks before calculating the current chunk budget, so cached prompt blocks are not recomputed:
 ```shell
---enable_prefix_cache=false
+--enable_chunked_prefill=true
+--enable_prefix_cache=true
 ```
 
 ## Decode instance: prefix cache is supported (recommended)
