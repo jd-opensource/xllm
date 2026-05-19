@@ -254,9 +254,12 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
         row.token_id = -val_idx;
       }
       row.position_offset = val_idx;
-      row.append_kv_len = !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
-      row.append_q_len_one = !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
-      row.append_block_table = !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
+      row.append_kv_len =
+          !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
+      row.append_q_len_one =
+          !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
+      row.append_block_table =
+          !::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
       specBuilder::append_decode_row(row_ctx, row, block_size, buf);
     }
 

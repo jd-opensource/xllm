@@ -330,7 +330,8 @@ void NpuQwen2DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 10) =
       atb_speed::Utils::AtTensor2Tensor(
           input_params.attention.device.new_cache_slots);
-  if (is_prefill && ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
+  if (is_prefill &&
+      ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 11) =
         atb_speed::Utils::AtTensor2Tensor(
             input_params.attention.device.q_seq_lens);

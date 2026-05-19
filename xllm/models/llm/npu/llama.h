@@ -159,9 +159,10 @@ class LlamaModelImpl : public torch::nn::Module {
     // std::max(max_of_seq.item<int>(), max_seq_len_);
     torch::Tensor max_of_seq =
         torch::max(input_params.attention.device.kv_seq_lens);
-    max_seq_len_ = ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()
-                       ? std::max(max_of_seq.item<int>(), max_seq_len_)
-                       : 128;
+    max_seq_len_ =
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()
+            ? std::max(max_of_seq.item<int>(), max_seq_len_)
+            : 128;
     auto attn_mask = attn_mask_.get_attn_mask(
         max_seq_len_, cos_pos.dtype().toScalarType(), cos_pos.device());
 

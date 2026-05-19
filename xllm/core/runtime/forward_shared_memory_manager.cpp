@@ -1940,7 +1940,8 @@ inline void initialize_device_buffer_session(ReadContext& context,
   }
 
 #if defined(USE_NPU) || defined(USE_CUDA) || defined(USE_MLU)
-  if (!materialize_device_buffer || !::xllm::ExecutionConfig::get_instance().use_contiguous_input_buffer()) {
+  if (!materialize_device_buffer ||
+      !::xllm::ExecutionConfig::get_instance().use_contiguous_input_buffer()) {
     return;
   }
 
