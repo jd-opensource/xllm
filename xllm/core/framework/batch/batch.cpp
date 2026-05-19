@@ -619,8 +619,9 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
       }
       group_flat2d.emplace_back(std::move(row_tokens));
       if (has_logprobs) {
-        // logprobs is flattened [batch * beam_width]
-        int logprob_idx = static_cast<int>(g) * beam_width + b;
+        // logprobs is flattened [batch * result_width] for multi-round widened
+        // final output.
+        int logprob_idx = static_cast<int>(g) * result_width + b;
         last_logprobs.push_back(
             output.beam_search_output.out_logprobs[logprob_idx].item<float>());
       }
