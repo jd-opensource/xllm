@@ -123,6 +123,20 @@ bool should_apply_shared_expert_gate(
   return true;
 }
 
+bool has_w_style_shared_expert_weights(const StateDict& state_dict) {
+  static const std::vector<std::string> kSharedExpertWeightPrefixes = {
+      "w1.", "w2.", "w3."};
+  for (const auto& item : state_dict) {
+    const std::string& name = item.first;
+    for (const std::string& prefix : kSharedExpertWeightPrefixes) {
+      if (name.rfind(prefix, 0) == 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // Qwen3.5-MoE fused checkpoint fallback helpers.
 bool load_fused_gate_up_fallback(const StateDict& state_dict,
                                  int64_t rank,
@@ -1282,8 +1296,7 @@ void FusedMoEImpl::load_state_dict(const StateDict& state_dict) {
       shared_expert_state = state_dict.get_dict_with_prefix("shared_experts.");
     }
     if (shared_expert_state.size() > 0) {
-      if (shared_expert_state.get_tensor("w1.weight").defined() ||
-          shared_expert_state.get_tensor("w1.qweight").defined()) {
+      if (has_w_style_shared_expert_weights(shared_expert_state)) {
         shared_experts_->load_state_dict(
             shared_expert_state, {"w1.", "w3."}, "w2.");
       } else {
