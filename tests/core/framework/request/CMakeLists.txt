@@ -21,3 +21,13 @@ cc_test(
     :request
     GTest::gtest_main
 )
+
+cc_test(
+  NAME
+    sequence_kv_state_test
+  SRCS
+    sequence_kv_state_test.cpp
+  DEPS
+    :request
+    GTest::gtest_main
+)

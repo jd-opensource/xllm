@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <cstddef>
 #include <optional>
 #include <vector>
 
@@ -79,6 +80,10 @@ class KVCacheState {
     pushed_local_block_count_ = n;
   }
 
+  size_t next_transfer_block_idx() const;
+  void set_next_transfer_block_idx(size_t idx);
+  void advance_transfer_block_idx(size_t idx);
+
   void reset();
 
   void process_beam_search(std::optional<Block> new_block = std::nullopt);
@@ -98,6 +103,9 @@ class KVCacheState {
 
   // transfer kv info for disaggregated PD mode.
   std::optional<TransferKVInfo> transfer_kv_info_;
+
+  // next logical prompt block index that needs PD PUSH transfer.
+  size_t next_transfer_block_idx_ = 0;
 
   // shared blocks number of the sequence.
   uint32_t num_owned_shared_blocks_ = 0;

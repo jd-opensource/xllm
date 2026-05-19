@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "sequence_kv_state.h"
 
+#include <algorithm>
+
 namespace xllm {
 
 namespace {
@@ -163,6 +165,18 @@ std::optional<TransferKVInfo>& KVCacheState::transfer_kv_info() {
   return transfer_kv_info_;
 }
 
+size_t KVCacheState::next_transfer_block_idx() const {
+  return next_transfer_block_idx_;
+}
+
+void KVCacheState::set_next_transfer_block_idx(size_t idx) {
+  next_transfer_block_idx_ = idx;
+}
+
+void KVCacheState::advance_transfer_block_idx(size_t idx) {
+  next_transfer_block_idx_ = std::max(next_transfer_block_idx_, idx);
+}
+
 void KVCacheState::reset() {
   kv_cache_tokens_num_ = 0;
   num_owned_shared_blocks_ = 0;
@@ -170,6 +184,7 @@ void KVCacheState::reset() {
   blocks_.clear();
   composite_blocks_.clear();
   transfer_kv_info_.reset();
+  next_transfer_block_idx_ = 0;
 }
 
 void KVCacheState::process_beam_search(std::optional<Block> new_block) {

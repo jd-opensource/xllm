@@ -207,9 +207,13 @@ BatchInputBuilder::BatchInputBuilder(
 TransferKVInfo BatchInputBuilder::build_step_transfer_info(
     const TransferKVInfo& full_info,
     const std::vector<uint64_t>& local_block_ids,
-    uint32_t n_kv_cache_tokens,
+    size_t next_transfer_block_idx,
     uint32_t seq_len,
-    uint32_t block_size) {
+    uint32_t block_size,
+    size_t* advanced_transfer_block_idx) {
+  CHECK(advanced_transfer_block_idx != nullptr);
+  *advanced_transfer_block_idx = next_transfer_block_idx;
+
   TransferKVInfo info;
   info.request_id = full_info.request_id;
   info.dp_rank = full_info.dp_rank;
@@ -217,40 +221,44 @@ TransferKVInfo BatchInputBuilder::build_step_transfer_info(
   info.local_linear_state_ids = full_info.local_linear_state_ids;
   info.remote_linear_state_ids = full_info.remote_linear_state_ids;
 
-  if (block_size == 0 || local_block_ids.empty() ||
-      full_info.remote_blocks_ids.empty()) {
+  if (block_size == 0 || local_block_ids.empty()) {
     return info;
   }
 
   const size_t local_size = local_block_ids.size();
   const size_t remote_size = full_info.remote_blocks_ids.size();
-  const size_t full_size = full_info.local_blocks_ids.empty()
-                               ? local_size
-                               : full_info.local_blocks_ids.size();
-  const size_t shared_blocks =
-      full_size > remote_size ? full_size - remote_size : 0;
-  const size_t win_begin = static_cast<size_t>(n_kv_cache_tokens / block_size);
+  const size_t win_begin = next_transfer_block_idx;
   const size_t win_end =
       static_cast<size_t>(util::ceil_div(seq_len, block_size));
-  const size_t map_begin = std::max(win_begin, shared_blocks);
-  const size_t map_limit = std::min(local_size, shared_blocks + remote_size);
-  const size_t map_end = std::min(win_end, map_limit);
+  const size_t map_end = std::min(win_end, local_size);
+  const size_t remote_stride =
+      static_cast<size_t>(util::kv_split_stride_for_kv_transfer());
+  const size_t remote_end = map_end * remote_stride;
+  CHECK_GE(remote_size, remote_end)
+      << "remote block coverage shortage, request_id=" << full_info.request_id
+      << ", remote_size=" << remote_size << ", remote_end=" << remote_end;
 
-  if (map_begin >= map_end) {
+  const size_t stable_end = static_cast<size_t>(seq_len / block_size);
+  *advanced_transfer_block_idx =
+      std::max(next_transfer_block_idx, std::min(stable_end, map_end));
+
+  if (win_begin >= map_end) {
     return info;
   }
 
   std::vector<size_t> remote_idxs;
-  const size_t block_cnt = map_end - map_begin;
+  const size_t block_cnt = map_end - win_begin;
   info.local_blocks_ids.reserve(block_cnt);
-  info.remote_blocks_ids.reserve(block_cnt);
-  remote_idxs.reserve(block_cnt);
-  for (size_t local_idx = map_begin; local_idx < map_end; ++local_idx) {
-    const size_t remote_idx = local_idx - shared_blocks;
+  info.remote_blocks_ids.reserve(block_cnt * remote_stride);
+  remote_idxs.reserve(block_cnt * remote_stride);
+  for (size_t local_idx = win_begin; local_idx < map_end; ++local_idx) {
     info.local_blocks_ids.emplace_back(local_block_ids[local_idx]);
-    info.remote_blocks_ids.emplace_back(
-        full_info.remote_blocks_ids[remote_idx]);
-    remote_idxs.emplace_back(remote_idx);
+    for (size_t offset = 0; offset < remote_stride; ++offset) {
+      const size_t remote_idx = local_idx * remote_stride + offset;
+      info.remote_blocks_ids.emplace_back(
+          full_info.remote_blocks_ids[remote_idx]);
+      remote_idxs.emplace_back(remote_idx);
+    }
   }
 
   append_xtensor_offsets(&info, full_info, remote_idxs);
@@ -704,11 +712,14 @@ void BatchInputBuilder::setup_kv_cache_info(
       state.new_token_slot_ids.end(), slot_ids.begin(), slot_ids.end());
 
   std::vector<int32_t> block_ids;
+  std::vector<uint64_t> local_block_ids;
   block_ids.reserve(blocks.size());
+  local_block_ids.reserve(blocks.size());
   int32_t block_size = 0;
   for (const auto& block : blocks) {
     block_size = block.size();
     block_ids.push_back(block.id());
+    local_block_ids.emplace_back(static_cast<uint64_t>(block.id()));
     state.paged_kv_indices.push_back(block.id());
   }
   state.paged_kv_indptr.push_back(state.paged_kv_indptr.back() + blocks.size());
@@ -726,44 +737,21 @@ void BatchInputBuilder::setup_kv_cache_info(
 
   auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
   if (transfer_kv_info.has_value()) {
-    const auto& all_remote = transfer_kv_info.value().remote_blocks_ids;
-    const auto& all_remote_linear_state_ids =
-        transfer_kv_info.value().remote_linear_state_ids;
-    uint32_t prev_pushed = sequence->kv_state().pushed_local_block_count();
-    uint32_t cur_count = static_cast<uint32_t>(blocks.size());
-
-    std::vector<uint64_t> new_local, new_remote;
-    new_local.reserve(cur_count - prev_pushed);
-    new_remote.reserve(cur_count - prev_pushed);
-    // Stride matches the prefill instance KV-split width: P uses local
-    // kv_split_size; decode uses --prefill_kv_split_size only (see
-    // util::kv_split_stride_for_kv_transfer).
-    const uint32_t kv_split_stride =
-        static_cast<uint32_t>(util::kv_split_stride_for_kv_transfer());
-    for (uint32_t k = prev_pushed; k < cur_count; ++k) {
-      new_local.push_back(blocks[k].id());
-      for (uint32_t j = 0; j < kv_split_stride; j++) {
-        if (k * kv_split_stride + j < all_remote.size()) {
-          new_remote.push_back(all_remote[k * kv_split_stride + j]);
-        }
-      }
+    const size_t next_transfer_block_idx =
+        sequence->kv_state().next_transfer_block_idx();
+    size_t advanced_transfer_block_idx = next_transfer_block_idx;
+    TransferKVInfo step_info = BatchInputBuilder::build_step_transfer_info(
+        transfer_kv_info.value(),
+        local_block_ids,
+        next_transfer_block_idx,
+        seq_len,
+        static_cast<uint32_t>(block_size),
+        &advanced_transfer_block_idx);
+    sequence->kv_state().advance_transfer_block_idx(
+        advanced_transfer_block_idx);
+    if (!step_info.local_blocks_ids.empty()) {
+      state.transfer_kv_infos.emplace_back(std::move(step_info));
     }
-
-    if (!new_local.empty()) {
-      state.transfer_kv_infos.emplace_back(transfer_kv_info.value());
-      state.transfer_kv_infos.back().local_blocks_ids = std::move(new_local);
-      state.transfer_kv_infos.back().remote_blocks_ids = std::move(new_remote);
-      state.transfer_kv_infos.back().local_linear_state_ids.clear();
-      state.transfer_kv_infos.back().remote_linear_state_ids.clear();
-      const int32_t linear_state_id = sequence->get_single_block_id();
-      if (linear_state_id >= 0 && !all_remote_linear_state_ids.empty()) {
-        state.transfer_kv_infos.back().local_linear_state_ids.emplace_back(
-            linear_state_id);
-        state.transfer_kv_infos.back().remote_linear_state_ids =
-            all_remote_linear_state_ids;
-      }
-    }
-    sequence->kv_state().set_pushed_local_block_count(cur_count);
   }
 
   state.block_tables_vec.emplace_back(std::move(block_ids));

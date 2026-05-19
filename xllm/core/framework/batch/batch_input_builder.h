@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -65,9 +66,10 @@ class BatchInputBuilder {
   static TransferKVInfo build_step_transfer_info(
       const TransferKVInfo& full_info,
       const std::vector<uint64_t>& local_block_ids,
-      uint32_t n_kv_cache_tokens,
+      size_t next_transfer_block_idx,
       uint32_t seq_len,
-      uint32_t block_size);
+      uint32_t block_size,
+      size_t* advanced_transfer_block_idx);
 
   void process_swap_block_infos(ForwardInput& forward_input);
 
