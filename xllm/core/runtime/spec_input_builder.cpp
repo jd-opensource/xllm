@@ -97,6 +97,7 @@ void fill_multi_block_and_slot_view(DecodeCpuView& view,
   }
 }
 
+// Builds cumulative seq-lens layout: [0, l0, l0+l1, ...].
 void push_cumsum(std::vector<int32_t>& vec, int32_t len) {
   if (vec.empty()) {
     vec.emplace_back(0);
@@ -104,6 +105,7 @@ void push_cumsum(std::vector<int32_t>& vec, int32_t len) {
   vec.emplace_back(vec.back() + len);
 }
 
+// Resolves a row token from either input token_ids[seq_id] or row.token_id.
 int32_t resolve_row_token_id(const DecodeCpuView& view, const RowSpec& row) {
   if (!row.use_input_token) {
     return row.token_id;
@@ -189,6 +191,8 @@ void append_decode_row(const DecodeCpuView& view,
   const int32_t new_position = view.positions[row.seq_id] + row.position_offset;
   CHECK_GE(new_position, 0) << "invalid decode position";
 
+  // All decode paths can toggle which fields are emitted, so one row builder
+  // can serve draft/validate/first-decode/update-last-step scenarios.
   if (row.append_token) {
     buf.out_token_ids.emplace_back(resolve_row_token_id(view, row));
   }
@@ -280,6 +284,8 @@ void append_decode_row_from_last_step(const DecodeCpuView& view,
                                       int32_t last_step_decode_num,
                                       int32_t block_size,
                                       DecodeBuildBuffers& buf) {
+  // Placeholder tokens (-1/-2/...) are resolved from last-step outputs first,
+  // then appended via the same row builder used by all decode paths.
   const TokenWithOffset resolved = resolve_token_with_position_offset(
       input_token_id, seq_id, last_step_tokens, last_step_decode_num);
 

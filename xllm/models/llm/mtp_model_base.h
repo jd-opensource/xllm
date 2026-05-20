@@ -52,6 +52,7 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
 
     projection_type_ = get_mtp_projection_type(model_args_);
 
+    // register submodules
     enorm_ = register_module("enorm", layer::RMSNorm(context));
     hnorm_ = register_module("hnorm", layer::RMSNorm(context));
     if (projection_type_ == MtpProjectionType::ADD_EH_PROJ) {
@@ -59,23 +60,24 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
           "e_proj",
           layer::ReplicatedLinear(model_args_.hidden_size(),
                                   model_args_.hidden_size(),
-                                  false,
-                                  QuantArgs(),
+                                  /*bias=*/false,
+                                  /*QuantArgs=*/QuantArgs(),
                                   options));
       h_proj_ = register_module(
           "h_proj",
           layer::ReplicatedLinear(model_args_.hidden_size(),
                                   model_args_.hidden_size(),
-                                  false,
-                                  QuantArgs(),
+                                  /*bias=*/false,
+                                  /*QuantArgs=*/QuantArgs(),
                                   options));
     } else {
+      // no quantization for eh_proj
       eh_proj_ = register_module(
           "eh_proj",
           layer::ReplicatedLinear(model_args_.hidden_size() * 2,
                                   model_args_.hidden_size(),
-                                  false,
-                                  QuantArgs(),
+                                  /*bias=*/false,
+                                  /*QuantArgs=*/QuantArgs(),
                                   options));
     }
     const int32_t decoder_layer_index = is_deepseek_v4_mtp_model(model_args_)
@@ -107,9 +109,11 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
                         const ModelInputParams& input_params,
                         const std::optional<torch::Tensor>& input_ids =
                             std::nullopt) {
+    // Layer norm on token inputs
     auto enorm_out = std::get<0>(enorm_(embed));
 
     torch::Tensor embedding_data = input_params.input_embedding;
+    // for dummy data parallel run, we set a empty embedding
     if (attn_metadata.is_dummy) {
       embedding_data = torch::zeros({embed.size(0), model_args_.hidden_size()},
                                     embed.options());
@@ -123,6 +127,7 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
     if (projection_type_ == MtpProjectionType::ADD_EH_PROJ) {
       hidden_states = e_proj_(enorm_out) + h_proj_(previous_hidden_states);
     } else {
+      // Concatenate along last dimension and project
       hidden_states = eh_proj_(torch::cat({enorm_out, previous_hidden_states},
                                           -1));
     }
@@ -132,6 +137,7 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
           {1, model_args_.hc_mult(), 1});
     }
 
+    // Pass through mtp block
     if constexpr (std::is_invocable_v<DecoderLayerType,
                                       torch::Tensor&,
                                       std::optional<torch::Tensor>&,
@@ -230,10 +236,12 @@ class MtpModelImplBase : public torch::nn::Module {
       mtp_num_layers = 1;
     }
 
+    // get mtp start and end layer index
     mtp_start_layer_idx_ = model_args_.n_layers();
     mtp_end_layer_idx_ = mtp_start_layer_idx_ + mtp_num_layers;
     mtp_layers_.reserve(mtp_num_layers);
 
+    // create mtp layers
     for (int32_t i = mtp_start_layer_idx_; i < mtp_end_layer_idx_; ++i) {
       auto mtp_layer = DecoderLayerType(context, i);
       mtp_layers_.push_back(mtp_layer);
@@ -261,10 +269,12 @@ class MtpModelImplBase : public torch::nn::Module {
     return embed_tokens_(input_ids);
   }
 
+  // Provide batched signature to satisfy callers that pass vectors
   ModelOutput forward(torch::Tensor tokens,
                       torch::Tensor positions,
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& input_params) {
+    // for dp, if tokens is empty, set tokens to 1 and positions to 0
     ModelInputParams modified_input_params = input_params;
     if (dp_size_ > 1) {
       if (tokens.numel() == 0) {
