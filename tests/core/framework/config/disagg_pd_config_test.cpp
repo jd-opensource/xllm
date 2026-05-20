@@ -13,13 +13,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "core/framework/config/mlu_disagg_pd_config.h"
+#include "core/framework/config/disagg_pd_config.h"
 
 #include <gtest/gtest.h>
 
 #include <string>
 
-#include "core/framework/config/disagg_pd_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/scheduler_config.h"
 
@@ -51,7 +50,7 @@ void expect_forced_defaults(const DisaggPDConfig& disagg_pd_config,
   EXPECT_FALSE(scheduler_config.enable_schedule_overlap());
 }
 
-TEST(MluDisaggPDConfigTest, KeepsPrefixCacheForPrefillSideRoles) {
+TEST(DisaggPDConfigTest, KeepsMluPrefixCacheForPrefillSideRoles) {
   const PrefixRoleCase cases[] = {
       {"PREFILL", true},
       {"MIX", true},
@@ -67,8 +66,7 @@ TEST(MluDisaggPDConfigTest, KeepsPrefixCacheForPrefillSideRoles) {
     set_unsupported_values(
         &disagg_pd_config, &kv_cache_config, &scheduler_config);
 
-    normalize_mlu_disagg_pd_config(
-        disagg_pd_config, kv_cache_config, scheduler_config);
+    disagg_pd_config.normalize_mlu(kv_cache_config, scheduler_config);
 
     SCOPED_TRACE(test_case.role);
     expect_forced_defaults(disagg_pd_config, kv_cache_config, scheduler_config);

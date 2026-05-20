@@ -15,9 +15,9 @@ cc_test(
 
 cc_test(
   NAME
-    mlu_disagg_pd_config_test
+    disagg_pd_config_test
   SRCS
-    mlu_disagg_pd_config_test.cpp
+    disagg_pd_config_test.cpp
   DEPS
     :config
     GTest::gtest_main

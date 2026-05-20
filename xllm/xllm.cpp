@@ -43,7 +43,6 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/kv_cache_store_config.h"
 #include "core/framework/config/load_config.h"
-#include "core/framework/config/mlu_disagg_pd_config.h"
 #include "core/framework/config/model_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/profile_config.h"
@@ -88,14 +87,6 @@ void initialize_configs() {
   SchedulerConfig::get_instance().initialize();
   ServiceConfig::get_instance().initialize();
   SpeculativeConfig::get_instance().initialize();
-}
-
-void fix_mlu_disagg_pd_config() {
-  DisaggPDConfig& disagg_pd_config = DisaggPDConfig::get_instance();
-  KVCacheConfig& kv_cache_config = KVCacheConfig::get_instance();
-  SchedulerConfig& scheduler_config = SchedulerConfig::get_instance();
-  normalize_mlu_disagg_pd_config(
-      disagg_pd_config, kv_cache_config, scheduler_config);
 }
 
 Options create_options(const std::string& instance_name, bool is_local) {
@@ -276,7 +267,7 @@ void validate_config(const std::string& model_type) {
     if (model_config.backend() != "llm") {
       LOG(FATAL) << "MLU disaggregated PD only supports backend=llm.";
     }
-    fix_mlu_disagg_pd_config();
+    disagg_pd_config.normalize_mlu(kv_cache_config, scheduler_config);
   }
 #endif
 

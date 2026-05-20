@@ -16,7 +16,6 @@ cc_library(
     kernel_config.h
     kv_cache_store_config.h
     load_config.h
-    mlu_disagg_pd_config.h
     model_config.h
     option_category.h
     parallel_config.h
@@ -37,7 +36,6 @@ cc_library(
     kernel_config.cpp
     kv_cache_store_config.cpp
     load_config.cpp
-    mlu_disagg_pd_config.cpp
     model_config.cpp
     parallel_config.cpp
     profile_config.cpp
