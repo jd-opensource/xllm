@@ -81,6 +81,7 @@ void ParallelConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(tp_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(sp_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(cfg_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(vae_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(communication_backend);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_prefill_sp);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_mm_encoder_dp);
@@ -96,6 +97,7 @@ void ParallelConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(tp_size);
   XLLM_CONFIG_ASSIGN_FROM_JSON(sp_size);
   XLLM_CONFIG_ASSIGN_FROM_JSON(cfg_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(vae_size);
   XLLM_CONFIG_ASSIGN_FROM_JSON(communication_backend);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_prefill_sp);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_mm_encoder_dp);
@@ -114,6 +116,8 @@ void ParallelConfig::append_config_json(
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, sp_size);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, cfg_size);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, vae_size);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, communication_backend);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
