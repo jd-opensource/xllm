@@ -195,7 +195,7 @@ struct Options {
   PROPERTY(std::string, store_local_hostname) = "";
 
   // Prefetch from kvcache store copy batch size
-  PROPERTY(uint32_t, prefetch_bacth_size) = 2;
+  PROPERTY(uint32_t, prefetch_batch_size) = 2;
 
   // Layer wise H2D copy batchs
   PROPERTY(uint32_t, layers_wise_copy_batchs) = 4;

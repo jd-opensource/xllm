@@ -432,7 +432,7 @@ void WorkerService::PrefetchFromStorage(
 
   brpc::StreamId stream_id;
   brpc::StreamOptions stream_options;
-  stream_options.idle_timeout_ms = 5 * options_.prefetch_bacth_size();
+  stream_options.idle_timeout_ms = 5 * options_.prefetch_batch_size();
   if (brpc::StreamAccept(&stream_id, *cntl, &stream_options) != 0) {
     resp->set_ok(false);
     LOG(ERROR) << "Failed to accept stream!";
@@ -450,16 +450,16 @@ void WorkerService::PrefetchFromStorage(
     bool is_completed = false;
 
     for (size_t i = 0; i < transfer_slice.size();
-         i += options_.prefetch_bacth_size()) {
+         i += options_.prefetch_batch_size()) {
       auto current_slice = transfer_slice.slice(
           i,
-          std::min(i + options_.prefetch_bacth_size(), transfer_slice.size()));
+          std::min(i + options_.prefetch_batch_size(), transfer_slice.size()));
 
       auto success_cnt =
           worker_->transfer_kv_blocks(UNINITIALIZED_BATCH_ID, current_slice);
 
       if (success_cnt != current_slice.size() ||
-          (i + options_.prefetch_bacth_size()) >= transfer_slice.size()) {
+          (i + options_.prefetch_batch_size()) >= transfer_slice.size()) {
         is_completed = true;
       }
 

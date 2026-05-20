@@ -27,6 +27,7 @@ cc_library(
     $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>>:numa_utils.cpp>
   DEPS
     torch
+    glog::glog
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:ascendcl>
     $<$<BOOL:${USE_MLU}>:torch_mlu>

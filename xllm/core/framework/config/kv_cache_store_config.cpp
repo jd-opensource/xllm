@@ -22,7 +22,7 @@ DEFINE_uint32(prefetch_timeout,
               0,
               "Prefetch timeout for prefetch from kv cache store.");
 
-DEFINE_uint32(prefetch_bacth_size,
+DEFINE_uint32(prefetch_batch_size,
               2,
               "Prefetch from kvcache store copy batch size.");
 
@@ -64,7 +64,7 @@ namespace xllm {
 
 void KVCacheStoreConfig::from_flags() {
   prefetch_timeout(FLAGS_prefetch_timeout)
-      .prefetch_bacth_size(FLAGS_prefetch_bacth_size)
+      .prefetch_batch_size(FLAGS_prefetch_batch_size)
       .layers_wise_copy_batchs(FLAGS_layers_wise_copy_batchs)
       .host_blocks_factor(FLAGS_host_blocks_factor)
       .enable_kvcache_store(FLAGS_enable_kvcache_store)
@@ -79,8 +79,8 @@ void KVCacheStoreConfig::from_flags() {
 void KVCacheStoreConfig::from_json(const JsonReader& json) {
   prefetch_timeout(
       json.value_or<uint32_t>("prefetch_timeout", prefetch_timeout()))
-      .prefetch_bacth_size(
-          json.value_or<uint32_t>("prefetch_bacth_size", prefetch_bacth_size()))
+      .prefetch_batch_size(
+          json.value_or<uint32_t>("prefetch_batch_size", prefetch_batch_size()))
       .layers_wise_copy_batchs(json.value_or<uint32_t>(
           "layers_wise_copy_batchs", layers_wise_copy_batchs()))
       .host_blocks_factor(

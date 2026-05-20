@@ -231,7 +231,7 @@ Options create_options(const std::string& instance_name, bool is_local) {
                             kv_cache_config.enable_prefix_cache() &&
                             (kv_cache_store_config.host_blocks_factor() > 1.0))
       .prefetch_timeout(kv_cache_store_config.prefetch_timeout())
-      .prefetch_bacth_size(kv_cache_store_config.prefetch_bacth_size())
+      .prefetch_batch_size(kv_cache_store_config.prefetch_batch_size())
       .layers_wise_copy_batchs(kv_cache_store_config.layers_wise_copy_batchs())
       .store_protocol(kv_cache_store_config.store_protocol())
       .store_master_server_address(
