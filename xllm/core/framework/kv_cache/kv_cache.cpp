@@ -34,6 +34,7 @@ limitations under the License.
 #endif
 #endif
 
+#include "framework/kv_cache/deepseek_v4_cache_policy.h"
 #include "framework/kv_cache/indexed_kv_cache_impl.h"
 #include "framework/kv_cache/linear_attention_kv_cache_impl.h"
 #include "framework/kv_cache/quantized_kv_cache_impl.h"

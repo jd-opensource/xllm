@@ -19,6 +19,7 @@ limitations under the License.
 
 #include <set>
 
+#include "framework/block/block_utils.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 #include "framework/request/stopping_checker.h"
@@ -61,14 +62,6 @@ constexpr uint32_t kBlockSizeRatio4 = kBaseBlockSize * kCompressRatio4;
 // Sub-manager 2 (ratio 128): block_size = 128*128 = 16384.
 constexpr uint32_t kBlockSizeRatio128 = kBaseBlockSize * kCompressRatio128;
 
-inline uint32_t ComputeSlidingWindowBlocksPerSequence(
-    uint32_t sliding_window_size,
-    uint32_t block_size) {
-  CHECK_GT(sliding_window_size, 0u);
-  CHECK_GT(block_size, 0u);
-  return (sliding_window_size - 1) / block_size + 1;
-}
-
 inline size_t CeilBlocks(size_t num_tokens, size_t block_size) {
   return (num_tokens + block_size - 1) / block_size;
 }
@@ -107,8 +100,8 @@ TEST(CompositeBlockManagerTest, AllocateForSequence_SingleSeq) {
   const uint32_t base_num_blocks = 4096;  // ratio-4: 1024 blocks, ratio-128: 32
   const uint32_t window_size = 128;
   const uint32_t max_seqs_per_batch = 4;
-  const uint32_t sliding_window_blocks_per_sequence =
-      ComputeSlidingWindowBlocksPerSequence(window_size, base_block_size);
+  const uint32_t sliding_window_blocks_per_sequence = static_cast<uint32_t>(
+      get_swa_blocks_per_seq(window_size, base_block_size));
 
   BlockManager::Options opts = MakeCompositeOptions(
       base_num_blocks, base_block_size, window_size, max_seqs_per_batch);
@@ -158,8 +151,8 @@ TEST(CompositeBlockManagerTest, AllocateForSequence_DifferentBatchSeqs) {
   const uint32_t base_num_blocks = 4096;
   const uint32_t window_size = 128;
   const uint32_t max_seqs_per_batch = 4;
-  const uint32_t sliding_window_blocks_per_sequence =
-      ComputeSlidingWindowBlocksPerSequence(window_size, kBaseBlockSize);
+  const uint32_t sliding_window_blocks_per_sequence = static_cast<uint32_t>(
+      get_swa_blocks_per_seq(window_size, kBaseBlockSize));
 
   BlockManager::Options opts = MakeCompositeOptions(
       base_num_blocks, kBaseBlockSize, window_size, max_seqs_per_batch);
@@ -209,8 +202,8 @@ TEST(CompositeBlockManagerTest, AllocateForSequence_GrowSameSeq) {
   const uint32_t base_num_blocks = 4096;
   const uint32_t window_size = 128;
   const uint32_t max_seqs_per_batch = 4;
-  const uint32_t sliding_window_blocks_per_sequence =
-      ComputeSlidingWindowBlocksPerSequence(window_size, kBaseBlockSize);
+  const uint32_t sliding_window_blocks_per_sequence = static_cast<uint32_t>(
+      get_swa_blocks_per_seq(window_size, kBaseBlockSize));
 
   BlockManager::Options opts = MakeCompositeOptions(
       base_num_blocks, kBaseBlockSize, window_size, max_seqs_per_batch);
@@ -275,8 +268,8 @@ TEST(CompositeBlockManagerTest, TokenIncrease_AddsBlocksIncrementally) {
   const uint32_t base_num_blocks = 4096;
   const uint32_t window_size = 128;
   const uint32_t max_seqs_per_batch = 4;
-  const uint32_t sliding_window_blocks_per_sequence =
-      ComputeSlidingWindowBlocksPerSequence(window_size, kBaseBlockSize);
+  const uint32_t sliding_window_blocks_per_sequence = static_cast<uint32_t>(
+      get_swa_blocks_per_seq(window_size, kBaseBlockSize));
 
   BlockManager::Options opts = MakeCompositeOptions(
       base_num_blocks, kBaseBlockSize, window_size, max_seqs_per_batch);
@@ -324,8 +317,8 @@ TEST(CompositeBlockManagerTest, SlidingWindowBlockOrderStaysStable) {
   const uint32_t base_num_blocks = 4096;
   const uint32_t window_size = 128;
   const uint32_t max_seqs_per_batch = 4;
-  const uint32_t sliding_window_blocks_per_sequence =
-      ComputeSlidingWindowBlocksPerSequence(window_size, kBaseBlockSize);
+  const uint32_t sliding_window_blocks_per_sequence = static_cast<uint32_t>(
+      get_swa_blocks_per_seq(window_size, kBaseBlockSize));
 
   BlockManager::Options opts = MakeCompositeOptions(
       base_num_blocks, kBaseBlockSize, window_size, max_seqs_per_batch);

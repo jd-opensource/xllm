@@ -135,29 +135,6 @@ struct DeepSeekV4KVCacheTensors {
   torch::Tensor compress_index_score_state;
 };
 
-struct DeepSeekV4CachePolicy {
-  torch::ScalarType index_dtype = torch::kInt8;
-  int64_t index_dtype_size = 1;
-  bool has_indexer_cache_scale = true;
-  torch::ScalarType scale_dtype = torch::kFloat16;
-  int64_t scale_dtype_size = 2;
-};
-
-inline DeepSeekV4CachePolicy get_dsv4_cache_policy(
-    torch::ScalarType model_dtype) {
-  DeepSeekV4CachePolicy policy;
-#if defined(USE_MLU)
-  policy.index_dtype = model_dtype;
-  policy.index_dtype_size = get_dtype_size(model_dtype);
-  policy.has_indexer_cache_scale = false;
-  policy.scale_dtype_size = 0;
-#else
-  policy.index_dtype_size = get_dtype_size(policy.index_dtype);
-  policy.scale_dtype_size = get_dtype_size(policy.scale_dtype);
-#endif
-  return policy;
-}
-
 // for qwen3.5
 bool is_linear_attention_layer(int64_t layer_idx,
                                int64_t full_attention_interval);

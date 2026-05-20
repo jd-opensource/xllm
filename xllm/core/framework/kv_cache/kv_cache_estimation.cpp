@@ -1,0 +1,299 @@
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
+#include "framework/kv_cache/kv_cache_estimation.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <vector>
+
+#include "framework/block/block_utils.h"
+#include "framework/kv_cache/deepseek_v4_cache_policy.h"
+#include "framework/model/model_args.h"
+#include "util/tensor_helper.h"
+
+namespace xllm {
+namespace {
+
+constexpr int32_t kNzAlignment = 16;
+
+int64_t kv_cache_dtype_size(const std::string& kv_cache_dtype,
+                            int64_t model_dtype_size) {
+  if (kv_cache_dtype == "auto") {
+    return model_dtype_size;
+  }
+  if (kv_cache_dtype == "int8") {
+    return 1;
+  }
+  if (kv_cache_dtype == "fp8_e4m3" || kv_cache_dtype == "fp8_e5m2") {
+    return 1;
+  }
+  return model_dtype_size;
+}
+
+int64_t kv_slot_size(const ModelArgs& model_args,
+                     const KVCacheEstimateOptions& options,
+                     int64_t cache_dtype_size) {
+  if (model_args.enable_mla()) {
+#if defined(USE_NPU)
+    if (model_args.model_type() == "deepseek_v3" &&
+        options.enable_prefix_cache) {
+      return cache_dtype_size *
+             ((model_args.kv_lora_rank() + kNzAlignment - 1) / kNzAlignment +
+              (model_args.qk_rope_head_dim() + kNzAlignment - 1) /
+                  kNzAlignment) *
+             kNzAlignment;
+    }
+#endif
+    return cache_dtype_size *
+           (model_args.kv_lora_rank() + model_args.qk_rope_head_dim());
+  }
+
+  return 2 * cache_dtype_size * model_args.head_dim() *
+         options.n_local_kv_heads;
+}
+
+int64_t index_slot_size(const ModelArgs& model_args, int64_t dtype_size) {
+  if (model_args.index_n_heads() <= 0) {
+    return 0;
+  }
+
+  const int64_t index_n_head = 1;
+  return dtype_size * index_n_head * model_args.index_head_dim();
+}
+
+int64_t scale_slot_size(const ModelArgs& model_args,
+                        const KVCacheEstimateOptions& options) {
+  if (options.kv_cache_dtype == "auto") {
+    return 0;
+  }
+  if (model_args.enable_mla()) {
+    return sizeof(float);
+  }
+  return 2 * sizeof(float) * options.n_local_kv_heads;
+}
+
+int64_t linear_slot_size(const ModelArgs& model_args,
+                         const KVCacheEstimateOptions& options,
+                         int64_t dtype_size) {
+  if (model_args.linear_num_value_heads() <= 0) {
+    return 0;
+  }
+
+  const int64_t head_k_dim = model_args.linear_key_head_dim();
+  const int64_t head_v_dim = model_args.linear_value_head_dim();
+  const int64_t ssm_dtype_size =
+      resolve_ssm_dtype_size(model_args.mamba_ssm_dtype(), dtype_size);
+
+  const int64_t linear_ssm_slot_size =
+      ssm_dtype_size * options.n_local_linear_v_heads * head_k_dim * head_v_dim;
+  const int64_t linear_conv_slot_size =
+      dtype_size *
+      (head_k_dim * options.n_local_linear_k_heads * 2 +
+       head_v_dim * options.n_local_linear_v_heads) *
+      (model_args.linear_conv_kernel_dim() - 1);
+  return linear_ssm_slot_size + linear_conv_slot_size;
+}
+
+void init_dsv4_counts(const ModelArgs& model_args,
+                      const KVCacheEstimateOptions& options,
+                      KVCacheCapacity* kv_cache_cap) {
+  const int64_t max_seqs =
+      std::max(options.max_seqs_per_batch, static_cast<int64_t>(1));
+  const int64_t block_size = options.block_size;
+  const int64_t window_size = std::max(model_args.window_size(), 1);
+  const int64_t swa_blocks_per_seq =
+      get_swa_blocks_per_seq(window_size, block_size);
+  kv_cache_cap->swa_count(swa_blocks_per_seq * max_seqs + 2);
+  const int64_t head_dim = model_args.head_dim();
+  const int64_t index_head_dim = std::max(model_args.index_head_dim(), 1);
+  const std::vector<int32_t>& compress_ratios = model_args.compress_ratios();
+  const int64_t float32_size = 4;
+  const int64_t dtype_size =
+      static_cast<int64_t>(torch::elementSize(options.dtype));
+
+  int64_t n_c1_layers = 0;
+  int64_t n_c4_layers = 0;
+  int64_t n_c128_layers = 0;
+  for (int64_t i = 0; i < model_args.n_layers(); ++i) {
+    const int32_t ratio = (i < static_cast<int64_t>(compress_ratios.size()))
+                              ? compress_ratios[static_cast<size_t>(i)]
+                              : 1;
+    if (ratio == 1) {
+      ++n_c1_layers;
+    } else if (ratio == 4) {
+      ++n_c4_layers;
+    } else if (ratio == 128) {
+      ++n_c128_layers;
+    }
+  }
+
+  const int64_t swa_bytes_per_c1_layer =
+      kv_cache_cap->swa_count() * block_size * head_dim * dtype_size;
+  const int64_t swa_bytes_per_c4_layer =
+      kv_cache_cap->swa_count() *
+      (block_size * head_dim * dtype_size +
+       block_size * (2 * head_dim * float32_size) * 2 +
+       block_size * (2 * index_head_dim * float32_size) * 2);
+  const int64_t swa_bytes_per_c128_layer =
+      kv_cache_cap->swa_count() * (block_size * head_dim * dtype_size +
+                                   block_size * head_dim * float32_size * 2);
+
+  const int64_t constant_swa_bytes = n_c1_layers * swa_bytes_per_c1_layer +
+                                     n_c4_layers * swa_bytes_per_c4_layer +
+                                     n_c128_layers * swa_bytes_per_c128_layer;
+  const int64_t token_mem =
+      std::max(static_cast<int64_t>(0),
+               kv_cache_cap->cache_size_in_bytes() - constant_swa_bytes);
+
+  const DeepSeekV4CachePolicy cache_policy =
+      get_dsv4_cache_policy(options.dtype);
+  const int64_t scale_bytes =
+      cache_policy.has_indexer_cache_scale ? cache_policy.scale_dtype_size : 0;
+  const int64_t bytes_per_c4_block =
+      block_size *
+      (head_dim * dtype_size + index_head_dim * cache_policy.index_dtype_size +
+       scale_bytes);
+  const int64_t bytes_per_c128_block = block_size * head_dim * dtype_size;
+
+  kv_cache_cap->c4_count(0);
+  kv_cache_cap->c128_count(0);
+  if (n_c4_layers > 0 && n_c128_layers > 0) {
+    const int64_t denom = 32 * n_c4_layers * bytes_per_c4_block +
+                          n_c128_layers * bytes_per_c128_block;
+    if (denom > 0 && token_mem > 0) {
+      kv_cache_cap->c128_count(token_mem / denom);
+      kv_cache_cap->c4_count(32 * kv_cache_cap->c128_count());
+    }
+  } else if (n_c4_layers > 0) {
+    const int64_t denom_c4 = n_c4_layers * bytes_per_c4_block;
+    if (denom_c4 > 0 && token_mem > 0) {
+      kv_cache_cap->c4_count(token_mem / denom_c4);
+    }
+  } else if (n_c128_layers > 0) {
+    const int64_t denom_c128 = n_c128_layers * bytes_per_c128_block;
+    if (denom_c128 > 0 && token_mem > 0) {
+      kv_cache_cap->c128_count(token_mem / denom_c128);
+    }
+  }
+
+  CHECK_GT(kv_cache_cap->swa_count(), 0) << "DSV4 swa_count must be > 0";
+  if (n_c4_layers > 0) {
+    CHECK_GT(kv_cache_cap->c4_count(), 0)
+        << "DSV4 c4_count must be > 0 when compress_ratio=4 layers exist";
+  }
+  if (n_c128_layers > 0) {
+    CHECK_GT(kv_cache_cap->c128_count(), 0)
+        << "DSV4 c128_count must be > 0 when compress_ratio=128 layers "
+           "exist";
+  }
+
+  int64_t manager_base_blocks = 0;
+  if (n_c4_layers > 0) {
+    manager_base_blocks =
+        std::max(manager_base_blocks, kv_cache_cap->c4_count() * 4);
+  }
+  if (n_c128_layers > 0) {
+    manager_base_blocks =
+        std::max(manager_base_blocks, kv_cache_cap->c128_count() * 128);
+  }
+  kv_cache_cap->n_blocks(std::max<int64_t>(manager_base_blocks, 1));
+}
+
+void init_standard_counts(const ModelArgs& model_args,
+                          const KVCacheEstimateOptions& options,
+                          KVCacheCapacity* kv_cache_cap) {
+  kv_cache_cap->num_linear_state_blocks(options.max_seqs_per_batch + 2);
+  for (int64_t layer_id = 0; layer_id < kv_cache_cap->n_layers(); ++layer_id) {
+    if (is_full_attention_layer(model_args, layer_id)) {
+      ++kv_cache_cap->num_full_attention_layers();
+    } else {
+      ++kv_cache_cap->num_linear_attention_layers();
+    }
+  }
+
+  const int64_t block_size = kv_cache_cap->block_size();
+  const int64_t block_size_in_bytes =
+      block_size *
+      (kv_cache_cap->slot_size() + kv_cache_cap->index_slot_size() +
+       kv_cache_cap->scale_slot_size());
+  kv_cache_cap->linear_cache_size_in_bytes(
+      kv_cache_cap->num_linear_attention_layers() *
+      kv_cache_cap->num_linear_state_blocks() *
+      kv_cache_cap->linear_slot_size());
+  const int64_t available_full_cache_size_in_bytes =
+      kv_cache_cap->cache_size_in_bytes() -
+      kv_cache_cap->linear_cache_size_in_bytes();
+  if (kv_cache_cap->linear_slot_size() > 0) {
+    CHECK_GT(kv_cache_cap->cache_size_in_bytes(),
+             kv_cache_cap->linear_cache_size_in_bytes())
+        << "failed to reserve linear state cache for linear-attention "
+           "layers: "
+        << "max_seqs_per_batch (" << options.max_seqs_per_batch
+        << ") is too large. Please reduce max_seqs_per_batch to less than "
+        << kv_cache_cap->cache_size_in_bytes() /
+                   (kv_cache_cap->num_linear_attention_layers() *
+                    kv_cache_cap->linear_slot_size()) -
+               2;
+  }
+  CHECK_GT(available_full_cache_size_in_bytes, 0)
+      << "no memory left for full-attention kv cache after reserving linear "
+         "state cache";
+  const int64_t full_attention_layers =
+      std::max<int64_t>(kv_cache_cap->num_full_attention_layers(), 1);
+  kv_cache_cap->n_blocks(available_full_cache_size_in_bytes /
+                         (full_attention_layers * block_size_in_bytes));
+  CHECK_GT(kv_cache_cap->n_blocks(), 0) << "no n_blocks for kv cache";
+}
+
+}  // namespace
+
+KVCacheCapacity estimate_kv_cache_capacity(
+    const ModelArgs& model_args,
+    const KVCacheEstimateOptions& options) {
+  KVCacheCapacity kv_cache_cap;
+  kv_cache_cap
+      .cache_size_in_bytes(
+          std::max(options.cache_size_in_bytes, static_cast<int64_t>(0)))
+      .block_size(options.block_size);
+  CHECK_GT(kv_cache_cap.cache_size_in_bytes(), 0)
+      << "Available kv cache size must be greater than 0";
+
+  const int64_t dtype_size = static_cast<int64_t>(
+      torch::scalarTypeToTypeMeta(options.dtype).itemsize());
+  const int64_t cache_dtype_size =
+      kv_cache_dtype_size(options.kv_cache_dtype, dtype_size);
+
+  kv_cache_cap.slot_size(kv_slot_size(model_args, options, cache_dtype_size))
+      .index_slot_size(index_slot_size(model_args, dtype_size))
+      .scale_slot_size(scale_slot_size(model_args, options))
+      .linear_slot_size(linear_slot_size(model_args, options, dtype_size))
+      .n_layers(model_args.n_layers())
+      .block_size(options.block_size);
+#if !defined(USE_NPU)
+  if (options.is_draft_engine) {
+    kv_cache_cap.n_layers(model_args.num_nextn_predict_layers());
+  }
+#endif
+
+  if (model_args.model_type() == "deepseek_v4") {
+    init_dsv4_counts(model_args, options, &kv_cache_cap);
+  } else {
+    init_standard_counts(model_args, options, &kv_cache_cap);
+  }
+  return kv_cache_cap;
+}
+
+}  // namespace xllm

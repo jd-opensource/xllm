@@ -2,6 +2,29 @@ include(cc_library)
 
 cc_library(
   NAME
+    deepseek_v4_cache_policy
+  HDRS
+    deepseek_v4_cache_policy.h
+  DEPS
+    torch
+)
+
+cc_library(
+  NAME
+    kv_cache_estimation
+  HDRS
+    kv_cache_estimation.h
+  SRCS
+    kv_cache_estimation.cpp
+  DEPS
+    :deepseek_v4_cache_policy
+    :block_utils
+    glog::glog
+    torch
+)
+
+cc_library(
+  NAME
     kv_cache
   HDRS
     embedding_cache.h
@@ -24,7 +47,10 @@ cc_library(
     linear_attention_kv_cache_impl.cpp
     quantized_kv_cache_impl.cpp
   DEPS
+    :block_utils
     :common
+    :deepseek_v4_cache_policy
+    :kv_cache_estimation
     :xtensor
     glog::glog
     torch

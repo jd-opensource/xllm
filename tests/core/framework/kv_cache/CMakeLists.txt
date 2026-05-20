@@ -19,6 +19,16 @@ target_link_libraries(embedding_cache_test
 
 cc_test(
   NAME
+    kv_cache_estimation_test
+  SRCS
+    kv_cache_estimation_test.cpp
+  DEPS
+    :kv_cache_estimation
+    GTest::gtest_main
+)
+
+cc_test(
+  NAME
     kv_cache_test
   SRCS
     kv_cache_test.cpp

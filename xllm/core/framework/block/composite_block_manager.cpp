@@ -18,6 +18,7 @@ limitations under the License.
 #include <algorithm>
 
 #include "block_manager_impl.h"
+#include "framework/block/block_utils.h"
 #include "framework/kv_cache/kv_cache_event.h"
 #include "sliding_window_block_manager.h"
 
@@ -27,16 +28,6 @@ namespace {
 
 constexpr uint32_t kManagerTypeBlockManagerImpl = 0;
 constexpr uint32_t kManagerTypeSlidingWindowBlockManager = 1;
-
-uint32_t get_swa_blocks_per_seq(uint32_t sliding_window_size,
-                                uint32_t block_size) {
-  CHECK_GT(sliding_window_size, 0u) << "sliding_window_size must be positive";
-  CHECK_GT(block_size, 0u) << "block_size must be positive";
-  // Align with vLLM/vllm-ascend sliding-window semantics: keep enough
-  // contiguous KV blocks to cover `sliding_window - 1` history tokens plus
-  // the current block being written.
-  return (sliding_window_size - 1) / block_size + 1;
-}
 
 }  // namespace
 
@@ -63,8 +54,8 @@ CompositeBlockManager::CompositeBlockManager(
       sub_managers_.push_back(std::make_unique<BlockManagerImpl>(opts));
     } else if (type == kManagerTypeSlidingWindowBlockManager) {
       const uint32_t swa_blocks_per_seq =
-          get_swa_blocks_per_seq(options_.sliding_window_size(),
-                                 static_cast<uint32_t>(options_.block_size()));
+          static_cast<uint32_t>(get_swa_blocks_per_seq(
+              options_.sliding_window_size(), options_.block_size()));
       const uint32_t max_seqs = std::max(options_.max_seqs_per_batch(), 1u);
       const uint32_t swa_total_blocks = swa_blocks_per_seq * max_seqs + 2;
       opts.num_blocks(swa_total_blocks).swa_blocks_per_seq(swa_blocks_per_seq);

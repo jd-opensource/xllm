@@ -36,8 +36,8 @@ limitations under the License.
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
-#include "core/framework/config/scheduler_config.h"
 #include "framework/block/hierarchy_block_manager_pool.h"
+#include "framework/kv_cache/kv_cache_estimation.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
@@ -53,38 +53,8 @@ limitations under the License.
 #include "util/tensor_helper.h"
 #include "util/utils.h"
 
-namespace {
-int64_t get_kv_cache_dtype_size_in_bytes(const std::string& kv_cache_dtype,
-                                         int64_t model_dtype_size) {
-  if (kv_cache_dtype == "auto") {
-    return model_dtype_size;
-  }
-  if (kv_cache_dtype == "int8") {
-    return 1;
-  }
-  // for future: fp8_e4m3, fp8_e5m2, etc. -> 1 byte
-  if (kv_cache_dtype == "fp8_e4m3" || kv_cache_dtype == "fp8_e5m2") {
-    return 1;
-  }
-  return model_dtype_size;
-}
-
-int64_t compute_sliding_window_blocks_per_sequence(int64_t sliding_window_size,
-                                                   int64_t block_size) {
-  CHECK_GT(sliding_window_size, 0) << "sliding_window_size must be positive";
-  CHECK_GT(block_size, 0) << "block_size must be positive";
-  // Align with vLLM/vllm-ascend sliding-window allocation: keep enough
-  // blocks to cover `sliding_window - 1` history tokens and the current
-  // block.
-  return (sliding_window_size - 1) / block_size + 1;
-}
-
-}  // namespace
-
 namespace xllm {
 
-// Defines a npu memory alignment constant with 16-byte alignment
-constexpr int32_t NZ_ALIGNMENT = 16;
 // Extra weight pages reserved for mapping/alignment overhead.
 constexpr size_t kXTensorWeightPageSafetyMargin = 20;
 
@@ -454,11 +424,23 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     }
   }
 
-  KVCacheCapacity kv_cache_cap;
-  kv_cache_cap.cache_size_in_bytes(std::max(cache_size_in_bytes, int64_t(0)))
-      .block_size(options_.block_size());
-  CHECK_GT(kv_cache_cap.cache_size_in_bytes(), 0)
-      << "Available kv cache size must be greater than 0";
+  KVCacheEstimateOptions estimate_options;
+  estimate_options.dtype = dtype_;
+  estimate_options.kv_cache_dtype = options_.kv_cache_dtype();
+  estimate_options.cache_size_in_bytes = cache_size_in_bytes;
+  estimate_options.block_size = options_.block_size();
+  estimate_options.world_size = dp_local_tp_size_;
+  estimate_options.n_local_kv_heads = n_local_kv_heads_;
+  estimate_options.n_local_linear_k_heads = n_local_linear_k_heads_;
+  estimate_options.n_local_linear_v_heads = n_local_linear_v_heads_;
+  estimate_options.max_seqs_per_batch =
+      static_cast<int64_t>(options_.max_seqs_per_batch());
+  estimate_options.is_draft_engine = options_.is_draft_engine();
+  estimate_options.enable_prefix_cache =
+      ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
+
+  KVCacheCapacity kv_cache_cap =
+      ::xllm::estimate_kv_cache_capacity(args_, estimate_options);
   GAUGE_SET(total_kv_cache_size_in_kilobytes,
             kv_cache_cap.cache_size_in_bytes() / 1024);
 
@@ -468,262 +450,6 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     DeviceMonitor::get_instance().set_total_activation_memory(device.index());
   }
 
-  // compute kv cache slot size
-  const bool enable_kv_cache_quant = options_.kv_cache_dtype() != "auto";
-  const int64_t cache_dtype_size = get_kv_cache_dtype_size_in_bytes(
-      options_.kv_cache_dtype(),
-      static_cast<int64_t>(torch::scalarTypeToTypeMeta(dtype_).itemsize()));
-  // Model dtype size for Indexer Cache (always uses original precision)
-  const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
-
-  int64_t slot_size = 0;
-  int64_t index_slot_size = 0;
-  int64_t scale_slot_size =
-      0;  // Extra overhead for scale tensors in quant mode
-
-  if (options_.enable_mla()) {
-#if defined(USE_NPU)
-    if (args_.model_type() == "deepseek_v3" &&
-        ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()) {
-      slot_size =
-          cache_dtype_size *
-          ((args_.kv_lora_rank() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT +
-           (args_.qk_rope_head_dim() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT) *
-          NZ_ALIGNMENT;
-    } else {
-      slot_size =
-          cache_dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
-    }
-#else
-    slot_size =
-        cache_dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
-#endif
-  } else {
-    slot_size = 2 * cache_dtype_size * head_dim_ * n_local_kv_heads_;
-  }
-
-  // Indexer Cache always uses original precision (not quantized)
-  if (args_.index_n_heads() > 0) {
-    int index_n_head = 1;
-    index_slot_size = dtype_size * index_n_head * args_.index_head_dim();
-  }
-
-  // Calculate scale tensor overhead for quantized KV cache (per-token bytes).
-  // worker_impl allocates scale as kv_cache_shape with last dim removed.
-  // Standard attention: K scale [num_blocks, n_kv_heads, block_size], V same
-  // => per token: n_kv_heads floats for K + n_kv_heads for V.
-  // MLA: key scale [num_blocks, 1, block_size] => one float per token.
-  if (enable_kv_cache_quant) {
-    if (args_.enable_mla()) {
-      // MLA scale shape is [num_blocks, 1, block_size] -> one float per token
-      scale_slot_size = sizeof(float);
-    } else {
-      // Standard attention: separate K and V scales
-      // K scale: [n_kv_heads, block_size], V scale: [n_kv_heads, block_size]
-      scale_slot_size = 2 * sizeof(float) * n_local_kv_heads_;
-    }
-  }
-  // For qwen3_next linear-attention layers.
-  int64_t linear_slot_size = 0;
-  if (args_.linear_num_value_heads() > 0) {
-    int64_t head_k_dim = args_.linear_key_head_dim();
-    int64_t head_v_dim = args_.linear_value_head_dim();
-
-    // Parse mamba_ssm_dtype if specified
-    int64_t ssm_dtype_size =
-        resolve_ssm_dtype_size(args_.mamba_ssm_dtype(), dtype_size);
-
-    int64_t linear_ssm_slot_size =
-        ssm_dtype_size * n_local_linear_v_heads_ * head_k_dim * head_v_dim;
-    int64_t linear_conv_slot_size = dtype_size *
-                                    (head_k_dim * n_local_linear_k_heads_ * 2 +
-                                     head_v_dim * n_local_linear_v_heads_) *
-                                    (args_.linear_conv_kernel_dim() - 1);
-    linear_slot_size = linear_ssm_slot_size + linear_conv_slot_size;
-  }
-  kv_cache_cap.slot_size() = slot_size;
-  kv_cache_cap.index_slot_size() = index_slot_size;
-  kv_cache_cap.scale_slot_size() = scale_slot_size;
-  kv_cache_cap.linear_slot_size() = linear_slot_size;
-  kv_cache_cap.n_layers() = args_.n_layers();
-  kv_cache_cap.block_size() = options_.block_size();
-#if !defined(USE_NPU)
-  // this adoption is because the allocation of kv cache is based on
-  //  the number of layers, and the draft engine is using the same model as the
-  //  target engine.
-  // so we need to override the number of layers for the draft engine.
-  if (options_.is_draft_engine()) {
-    kv_cache_cap.n_layers(args_.num_nextn_predict_layers());
-  }
-#endif
-
-  // DeepSeek V4: compute swa_count (from max_seqs_per_batch), then subtract
-  // all swa-related cache size from cache_size_in_bytes, then compute
-  // c4_count / c128_count (c4_count = 32 * c128_count).
-  // cache_size_in_bytes is already the full available device memory.
-  if (args_.model_type() == "deepseek_v4") {
-    const int64_t max_seqs =
-        static_cast<int64_t>(std::max(options_.max_seqs_per_batch(), 1));
-    const int32_t block_size = options_.block_size();
-    const int32_t window_size = std::max(args_.window_size(), 1);
-    const int64_t sliding_window_blocks_per_sequence =
-        compute_sliding_window_blocks_per_sequence(window_size, block_size);
-    kv_cache_cap.swa_count(sliding_window_blocks_per_sequence * max_seqs + 2);
-    const int64_t head_dim = args_.head_dim();
-    const int32_t index_head_dim = std::max(args_.index_head_dim(), 1);
-    const auto& compress_ratios = args_.compress_ratios();
-    const int64_t float32_size = 4;
-
-    int64_t n_c1_layers = 0;
-    int64_t n_c4_layers = 0;
-    int64_t n_c128_layers = 0;
-    for (int64_t i = 0; i < args_.n_layers(); ++i) {
-      const int32_t ratio = (i < static_cast<int64_t>(compress_ratios.size()))
-                                ? compress_ratios[static_cast<size_t>(i)]
-                                : 1;
-      if (ratio == 1) {
-        ++n_c1_layers;
-      } else if (ratio == 4) {
-        ++n_c4_layers;
-      } else if (ratio == 128) {
-        ++n_c128_layers;
-      }
-    }
-
-    // 1) Size of all caches that use swa_count (tied to max_seqs_per_batch).
-    // c1 layer: 1 cache — swa (swa_count, block_size, 1, head_dim)
-    // c4 layer: 5 caches use swa — swa_cache, compress_kv_state,
-    // compress_score_state,
-    //           compress_index_kv_state, compress_index_score_state (shapes
-    //           with block_size, float32)
-    // c128 layer: 3 caches use swa — swa_cache, compress_kv_state,
-    // compress_score_state
-    const int64_t swa_bytes_per_c1_layer =
-        kv_cache_cap.swa_count() * block_size * head_dim * dtype_size;
-    const int64_t swa_bytes_per_c4_layer =
-        kv_cache_cap.swa_count() *
-        (block_size * head_dim * dtype_size +
-         block_size * (2 * head_dim * float32_size) *
-             2 +  // kv_state + score_state
-         block_size * (2 * index_head_dim * float32_size) *
-             2);  // index_kv + index_score
-    const int64_t swa_bytes_per_c128_layer =
-        kv_cache_cap.swa_count() *
-        (block_size * head_dim * dtype_size +
-         block_size * head_dim * float32_size * 2);  // kv_state + score_state
-
-    const int64_t constant_swa_bytes = n_c1_layers * swa_bytes_per_c1_layer +
-                                       n_c4_layers * swa_bytes_per_c4_layer +
-                                       n_c128_layers * swa_bytes_per_c128_layer;
-
-    // 2) Remainder is for token pools (c4_count / c128_count).
-    const int64_t token_mem = std::max(
-        int64_t(0), kv_cache_cap.cache_size_in_bytes() - constant_swa_bytes);
-
-    // 3) bytes per token block (per layer): c4 = key+index+optional scale;
-    // c128 = key only.
-    const DeepSeekV4CachePolicy cache_policy = get_dsv4_cache_policy(dtype_);
-    const int64_t scale_bytes = cache_policy.has_indexer_cache_scale
-                                    ? cache_policy.scale_dtype_size
-                                    : 0;
-    const int64_t bytes_per_c4_block =
-        block_size *
-        (head_dim * dtype_size +
-         index_head_dim * cache_policy.index_dtype_size + scale_bytes);
-    const int64_t bytes_per_c128_block = block_size * head_dim * dtype_size;
-
-    kv_cache_cap.c4_count(0);
-    kv_cache_cap.c128_count(0);
-    if (n_c4_layers > 0 && n_c128_layers > 0) {
-      // Coupled mode: keep C4/C128 token pools aligned with 32:1 ratio.
-      const int64_t denom = 32 * n_c4_layers * bytes_per_c4_block +
-                            n_c128_layers * bytes_per_c128_block;
-      if (denom > 0 && token_mem > 0) {
-        kv_cache_cap.c128_count(token_mem / denom);
-        kv_cache_cap.c4_count(32 * kv_cache_cap.c128_count());
-      }
-    } else if (n_c4_layers > 0) {
-      // Only C4 layers exist.
-      const int64_t denom_c4 = n_c4_layers * bytes_per_c4_block;
-      if (denom_c4 > 0 && token_mem > 0) {
-        kv_cache_cap.c4_count(token_mem / denom_c4);
-      }
-    } else if (n_c128_layers > 0) {
-      // Only C128 layers exist.
-      const int64_t denom_c128 = n_c128_layers * bytes_per_c128_block;
-      if (denom_c128 > 0 && token_mem > 0) {
-        kv_cache_cap.c128_count(token_mem / denom_c128);
-      }
-    }
-    CHECK_GT(kv_cache_cap.swa_count(), 0) << "DSV4 swa_count must be > 0";
-    if (n_c4_layers > 0) {
-      CHECK_GT(kv_cache_cap.c4_count(), 0)
-          << "DSV4 c4_count must be > 0 when compress_ratio=4 layers exist";
-    }
-    if (n_c128_layers > 0) {
-      CHECK_GT(kv_cache_cap.c128_count(), 0)
-          << "DSV4 c128_count must be > 0 when compress_ratio=128 layers "
-             "exist";
-    }
-
-    // Composite token managers derive their own pool sizes via:
-    //   num_blocks / ratio.
-    // Back-compute a valid common base num_blocks for ratio-4/128 pools.
-    int64_t manager_base_blocks = 0;
-    if (n_c4_layers > 0) {
-      manager_base_blocks =
-          std::max(manager_base_blocks, kv_cache_cap.c4_count() * 4);
-    }
-    if (n_c128_layers > 0) {
-      manager_base_blocks =
-          std::max(manager_base_blocks, kv_cache_cap.c128_count() * 128);
-    }
-    kv_cache_cap.n_blocks(std::max<int64_t>(manager_base_blocks, 1));
-
-  } else {
-    kv_cache_cap.num_linear_state_blocks() =
-        ::xllm::SchedulerConfig::get_instance().max_seqs_per_batch() + 2;
-    for (int64_t layer_id = 0; layer_id < kv_cache_cap.n_layers(); ++layer_id) {
-      if (is_full_attention_layer(args_, layer_id)) {
-        ++kv_cache_cap.num_full_attention_layers();
-      } else {
-        ++kv_cache_cap.num_linear_attention_layers();
-      }
-    }
-
-    // compute kv cache n_blocks
-    const int64_t block_size = kv_cache_cap.block_size();
-    const int64_t block_size_in_bytes =
-        block_size * (slot_size + index_slot_size + scale_slot_size);
-    kv_cache_cap.linear_cache_size_in_bytes() =
-        kv_cache_cap.num_linear_attention_layers() *
-        kv_cache_cap.num_linear_state_blocks() *
-        kv_cache_cap.linear_slot_size();
-    const int64_t available_full_cache_size_in_bytes =
-        kv_cache_cap.cache_size_in_bytes() -
-        kv_cache_cap.linear_cache_size_in_bytes();
-    if (kv_cache_cap.linear_slot_size() > 0) {
-      CHECK_GT(kv_cache_cap.cache_size_in_bytes(),
-               kv_cache_cap.linear_cache_size_in_bytes())
-          << "failed to reserve linear state cache for linear-attention "
-             "layers: "
-          << "max_seqs_per_batch ("
-          << ::xllm::SchedulerConfig::get_instance().max_seqs_per_batch()
-          << ") is too large. Please reduce max_seqs_per_batch to less than "
-          << kv_cache_cap.cache_size_in_bytes() /
-                     (kv_cache_cap.num_linear_attention_layers() *
-                      kv_cache_cap.linear_slot_size()) -
-                 2;
-    }
-    CHECK_GT(available_full_cache_size_in_bytes, 0)
-        << "no memory left for full-attention kv cache after reserving linear "
-           "state cache";
-    const int64_t full_attention_layers =
-        std::max<int64_t>(kv_cache_cap.num_full_attention_layers(), 1);
-    kv_cache_cap.n_blocks() = available_full_cache_size_in_bytes /
-                              (full_attention_layers * block_size_in_bytes);
-    CHECK_GT(kv_cache_cap.n_blocks(), 0) << "no n_blocks for kv cache";
-  }
   return kv_cache_cap;
 }
 
