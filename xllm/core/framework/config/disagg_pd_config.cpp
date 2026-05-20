@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/disagg_pd_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_bool(enable_disagg_pd,
             false,
@@ -55,11 +56,31 @@ void DisaggPDConfig::from_flags() {
       .transfer_listen_port(FLAGS_transfer_listen_port);
 }
 
+void DisaggPDConfig::from_json(const JsonReader& json) {
+  enable_disagg_pd(json.value_or<bool>("enable_disagg_pd", enable_disagg_pd()))
+      .enable_pd_ooc(json.value_or<bool>("enable_pd_ooc", enable_pd_ooc()))
+      .disagg_pd_port(
+          json.value_or<int32_t>("disagg_pd_port", disagg_pd_port()))
+      .instance_role(
+          json.value_or<std::string>("instance_role", instance_role()))
+      .kv_cache_transfer_type(json.value_or<std::string>(
+          "kv_cache_transfer_type", kv_cache_transfer_type()))
+      .kv_cache_transfer_mode(json.value_or<std::string>(
+          "kv_cache_transfer_mode", kv_cache_transfer_mode()))
+      .transfer_listen_port(json.value_or<int32_t>("transfer_listen_port",
+                                                   transfer_listen_port()));
+}
+
 DisaggPDConfig& DisaggPDConfig::get_instance() {
   static DisaggPDConfig config;
   return config;
 }
 
-void DisaggPDConfig::initialize() { from_flags(); }
+void DisaggPDConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

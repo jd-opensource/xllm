@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/load_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_bool(enable_manual_loader,
             false,
@@ -59,11 +60,29 @@ void LoadConfig::from_flags() {
       .enable_prefetch_weight(FLAGS_enable_prefetch_weight);
 }
 
+void LoadConfig::from_json(const JsonReader& json) {
+  enable_manual_loader(
+      json.value_or<bool>("enable_manual_loader", enable_manual_loader()))
+      .enable_rolling_load(
+          json.value_or<bool>("enable_rolling_load", enable_rolling_load()))
+      .rolling_load_num_cached_layers(json.value_or<int32_t>(
+          "rolling_load_num_cached_layers", rolling_load_num_cached_layers()))
+      .rolling_load_num_rolling_slots(json.value_or<int32_t>(
+          "rolling_load_num_rolling_slots", rolling_load_num_rolling_slots()))
+      .enable_prefetch_weight(json.value_or<bool>("enable_prefetch_weight",
+                                                  enable_prefetch_weight()));
+}
+
 LoadConfig& LoadConfig::get_instance() {
   static LoadConfig config;
   return config;
 }
 
-void LoadConfig::initialize() { from_flags(); }
+void LoadConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

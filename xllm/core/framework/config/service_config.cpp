@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/service_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_string(host, "", "Host name for brpc server.");
 
@@ -69,11 +70,36 @@ void ServiceConfig::from_flags() {
       .health_check_interval_ms(FLAGS_health_check_interval_ms);
 }
 
+void ServiceConfig::from_json(const JsonReader& json) {
+  host(json.value_or<std::string>("host", host()))
+      .port(json.value_or<int32_t>("port", port()))
+      .rpc_idle_timeout_s(
+          json.value_or<int32_t>("rpc_idle_timeout_s", rpc_idle_timeout_s()))
+      .rpc_channel_timeout_ms(json.value_or<int32_t>("rpc_channel_timeout_ms",
+                                                     rpc_channel_timeout_ms()))
+      .max_reconnect_count(
+          json.value_or<int32_t>("max_reconnect_count", max_reconnect_count()))
+      .num_threads(json.value_or<int32_t>("num_threads", num_threads()))
+      .max_concurrent_requests(json.value_or<int32_t>(
+          "max_concurrent_requests", max_concurrent_requests()))
+      .num_request_handling_threads(json.value_or<int32_t>(
+          "num_request_handling_threads", num_request_handling_threads()))
+      .num_response_handling_threads(json.value_or<int32_t>(
+          "num_response_handling_threads", num_response_handling_threads()))
+      .health_check_interval_ms(json.value_or<int32_t>(
+          "health_check_interval_ms", health_check_interval_ms()));
+}
+
 ServiceConfig& ServiceConfig::get_instance() {
   static ServiceConfig config;
   return config;
 }
 
-void ServiceConfig::initialize() { from_flags(); }
+void ServiceConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

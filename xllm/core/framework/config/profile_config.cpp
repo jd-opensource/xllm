@@ -18,6 +18,7 @@ limitations under the License.
 #include <limits>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_bool(enable_profile_step_time,
             false,
@@ -69,11 +70,37 @@ void ProfileConfig::from_flags() {
       .enable_forward_interruption(FLAGS_enable_forward_interruption);
 }
 
+void ProfileConfig::from_json(const JsonReader& json) {
+  enable_profile_step_time(json.value_or<bool>("enable_profile_step_time",
+                                               enable_profile_step_time()))
+      .enable_profile_token_budget(json.value_or<bool>(
+          "enable_profile_token_budget", enable_profile_token_budget()))
+      .enable_latency_aware_schedule(json.value_or<bool>(
+          "enable_latency_aware_schedule", enable_latency_aware_schedule()))
+      .profile_max_prompt_length(json.value_or<int32_t>(
+          "profile_max_prompt_length", profile_max_prompt_length()))
+      .max_global_ttft_ms(
+          json.value_or<int32_t>("max_global_ttft_ms", max_global_ttft_ms()))
+      .max_global_tpot_ms(
+          json.value_or<int32_t>("max_global_tpot_ms", max_global_tpot_ms()))
+      .enable_profile_kv_blocks(json.value_or<bool>("enable_profile_kv_blocks",
+                                                    enable_profile_kv_blocks()))
+      .disable_ttft_profiling(json.value_or<bool>("disable_ttft_profiling",
+                                                  disable_ttft_profiling()))
+      .enable_forward_interruption(json.value_or<bool>(
+          "enable_forward_interruption", enable_forward_interruption()));
+}
+
 ProfileConfig& ProfileConfig::get_instance() {
   static ProfileConfig config;
   return config;
 }
 
-void ProfileConfig::initialize() { from_flags(); }
+void ProfileConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

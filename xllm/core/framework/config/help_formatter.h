@@ -46,7 +46,10 @@ namespace xllm {
 class HelpFormatter {
  public:
   [[nodiscard]] static const std::vector<OptionCategory>& option_categories() {
+    static const OptionCategory kConfigOptionCategory = {"CONFIG OPTIONS",
+                                                         {"config_json_file"}};
     static const std::vector<OptionCategory> kOptionCategories = {
+        kConfigOptionCategory,
         ServiceConfig::option_category(),
         ModelConfig::option_category(),
         LoadConfig::option_category(),

@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/rec_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_bool(
     enable_rec_fast_sampler,
@@ -97,11 +98,45 @@ void RecConfig::from_flags() {
       .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency);
 }
 
+void RecConfig::from_json(const JsonReader& json) {
+  enable_rec_fast_sampler(
+      json.value_or<bool>("enable_rec_fast_sampler", enable_rec_fast_sampler()))
+      .enable_rec_prefill_only(json.value_or<bool>("enable_rec_prefill_only",
+                                                   enable_rec_prefill_only()))
+      .enable_xattention_one_stage(json.value_or<bool>(
+          "enable_xattention_one_stage", enable_xattention_one_stage()))
+      .max_decode_rounds(
+          json.value_or<int32_t>("max_decode_rounds", max_decode_rounds()))
+      .enable_constrained_decoding(json.value_or<bool>(
+          "enable_constrained_decoding", enable_constrained_decoding()))
+      .output_rec_logprobs(
+          json.value_or<bool>("output_rec_logprobs", output_rec_logprobs()))
+      .enable_convert_tokens_to_item(json.value_or<bool>(
+          "enable_convert_tokens_to_item", enable_convert_tokens_to_item()))
+      .enable_output_sku_logprobs(json.value_or<bool>(
+          "enable_output_sku_logprobs", enable_output_sku_logprobs()))
+      .enable_extended_item_info(json.value_or<bool>(
+          "enable_extended_item_info", enable_extended_item_info()))
+      .each_conversion_threshold(json.value_or<int32_t>(
+          "each_conversion_threshold", each_conversion_threshold()))
+      .total_conversion_threshold(json.value_or<int32_t>(
+          "total_conversion_threshold", total_conversion_threshold()))
+      .request_queue_size(
+          json.value_or<int32_t>("request_queue_size", request_queue_size()))
+      .rec_worker_max_concurrency(json.value_or<uint32_t>(
+          "rec_worker_max_concurrency", rec_worker_max_concurrency()));
+}
+
 RecConfig& RecConfig::get_instance() {
   static RecConfig config;
   return config;
 }
 
-void RecConfig::initialize() { from_flags(); }
+void RecConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

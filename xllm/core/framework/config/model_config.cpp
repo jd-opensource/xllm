@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_string(model_id, "", "hf model name.");
 
@@ -117,11 +118,42 @@ void ModelConfig::normalize_cpp_chat_template(const std::string& model_type) {
                << model_type << ", forcing use_cpp_chat_template=false.";
 }
 
+void ModelConfig::from_json(const JsonReader& json) {
+  model_id(json.value_or<std::string>("model_id", model_id()))
+      .model(json.value_or<std::string>("model", model()))
+      .backend(json.value_or<std::string>("backend", backend()))
+      .task(json.value_or<std::string>("task", task()))
+      .devices(json.value_or<std::string>("devices", devices()))
+      .limit_image_per_prompt(json.value_or<int32_t>("limit_image_per_prompt",
+                                                     limit_image_per_prompt()))
+      .reasoning_parser(
+          json.value_or<std::string>("reasoning_parser", reasoning_parser()))
+      .tool_call_parser(
+          json.value_or<std::string>("tool_call_parser", tool_call_parser()))
+      .enable_qwen3_reranker(
+          json.value_or<bool>("enable_qwen3_reranker", enable_qwen3_reranker()))
+      .enable_return_mm_full_embeddings(
+          json.value_or<bool>("enable_return_mm_full_embeddings",
+                              enable_return_mm_full_embeddings()))
+      .flashinfer_workspace_buffer_size(
+          json.value_or<int32_t>("flashinfer_workspace_buffer_size",
+                                 flashinfer_workspace_buffer_size()))
+      .use_audio_in_video(
+          json.value_or<bool>("use_audio_in_video", use_audio_in_video()))
+      .use_cpp_chat_template(json.value_or<bool>("use_cpp_chat_template",
+                                                 use_cpp_chat_template()));
+}
+
 ModelConfig& ModelConfig::get_instance() {
   static ModelConfig config;
   return config;
 }
 
-void ModelConfig::initialize() { from_flags(); }
+void ModelConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/kernel_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 #if defined(USE_NPU)
 DEFINE_bool(enable_customize_mla_kernel, false, "enable customize mla kernel");
@@ -39,11 +40,28 @@ void KernelConfig::from_flags() {
 #endif
 }
 
+void KernelConfig::from_json(const JsonReader& json) {
+#if defined(USE_NPU)
+  enable_customize_mla_kernel(
+      json.value_or<bool>("enable_customize_mla_kernel",
+                          enable_customize_mla_kernel()))
+      .npu_kernel_backend(json.value_or<std::string>("npu_kernel_backend",
+                                                     npu_kernel_backend()))
+      .enable_intralayer_addnorm(json.value_or<bool>(
+          "enable_intralayer_addnorm", enable_intralayer_addnorm()));
+#endif
+}
+
 KernelConfig& KernelConfig::get_instance() {
   static KernelConfig config;
   return config;
 }
 
-void KernelConfig::initialize() { from_flags(); }
+void KernelConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

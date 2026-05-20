@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/execution_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_bool(
     enable_graph,
@@ -82,11 +83,37 @@ void ExecutionConfig::from_flags() {
       .random_seed(FLAGS_random_seed);
 }
 
+void ExecutionConfig::from_json(const JsonReader& json) {
+  enable_graph(json.value_or<bool>("enable_graph", enable_graph()))
+      .enable_graph_mode_decode_no_padding(
+          json.value_or<bool>("enable_graph_mode_decode_no_padding",
+                              enable_graph_mode_decode_no_padding()))
+      .enable_prefill_piecewise_graph(json.value_or<bool>(
+          "enable_prefill_piecewise_graph", enable_prefill_piecewise_graph()))
+      .enable_graph_vmm_pool(
+          json.value_or<bool>("enable_graph_vmm_pool", enable_graph_vmm_pool()))
+      .max_tokens_for_graph_mode(json.value_or<int32_t>(
+          "max_tokens_for_graph_mode", max_tokens_for_graph_mode()))
+      .enable_shm(json.value_or<bool>("enable_shm", enable_shm()))
+      .use_contiguous_input_buffer(json.value_or<bool>(
+          "use_contiguous_input_buffer", use_contiguous_input_buffer()))
+      .input_shm_size(
+          json.value_or<uint64_t>("input_shm_size", input_shm_size()))
+      .output_shm_size(
+          json.value_or<uint64_t>("output_shm_size", output_shm_size()))
+      .random_seed(json.value_or<int32_t>("random_seed", random_seed()));
+}
+
 ExecutionConfig& ExecutionConfig::get_instance() {
   static ExecutionConfig config;
   return config;
 }
 
-void ExecutionConfig::initialize() { from_flags(); }
+void ExecutionConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

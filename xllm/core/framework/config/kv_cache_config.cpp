@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_int32(block_size,
              128,
@@ -68,11 +69,33 @@ void KVCacheConfig::from_flags() {
       .phy_page_granularity_size(FLAGS_phy_page_granularity_size);
 }
 
+void KVCacheConfig::from_json(const JsonReader& json) {
+  block_size(json.value_or<int32_t>("block_size", block_size()))
+      .max_cache_size(
+          json.value_or<int64_t>("max_cache_size", max_cache_size()))
+      .max_memory_utilization(json.value_or<double>("max_memory_utilization",
+                                                    max_memory_utilization()))
+      .kv_cache_dtype(
+          json.value_or<std::string>("kv_cache_dtype", kv_cache_dtype()))
+      .enable_prefix_cache(
+          json.value_or<bool>("enable_prefix_cache", enable_prefix_cache()))
+      .xxh3_128bits_seed(
+          json.value_or<uint32_t>("xxh3_128bits_seed", xxh3_128bits_seed()))
+      .enable_xtensor(json.value_or<bool>("enable_xtensor", enable_xtensor()))
+      .phy_page_granularity_size(json.value_or<int64_t>(
+          "phy_page_granularity_size", phy_page_granularity_size()));
+}
+
 KVCacheConfig& KVCacheConfig::get_instance() {
   static KVCacheConfig config;
   return config;
 }
 
-void KVCacheConfig::initialize() { from_flags(); }
+void KVCacheConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

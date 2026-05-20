@@ -23,6 +23,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class ProfileConfig final {
  public:
   ProfileConfig() = default;
@@ -31,6 +33,7 @@ class ProfileConfig final {
   static ProfileConfig& get_instance();
 
   void from_flags();
+  void from_json(const JsonReader& json);
   void initialize();
 
   [[nodiscard]] static const OptionCategory& option_category() {

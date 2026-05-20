@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <gflags/gflags.h>
 
+DECLARE_string(config_json_file);
+
 DECLARE_string(host);
 
 DECLARE_int32(port);

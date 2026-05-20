@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/speculative_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_string(draft_model, "", "draft hf model path to the model file.");
 
@@ -88,11 +89,48 @@ void SpeculativeConfig::from_flags() {
       .enable_atb_spec_kernel(FLAGS_enable_atb_spec_kernel);
 }
 
+void SpeculativeConfig::from_json(const JsonReader& json) {
+  draft_model(json.value_or<std::string>("draft_model", draft_model()))
+      .draft_devices(
+          json.value_or<std::string>("draft_devices", draft_devices()))
+      .num_speculative_tokens(json.value_or<int32_t>("num_speculative_tokens",
+                                                     num_speculative_tokens()))
+      .speculative_algorithm(json.value_or<std::string>(
+          "speculative_algorithm", speculative_algorithm()))
+      .speculative_suffix_cache_max_depth(
+          json.value_or<int32_t>("speculative_suffix_cache_max_depth",
+                                 speculative_suffix_cache_max_depth()))
+      .speculative_suffix_max_spec_factor(
+          json.value_or<double>("speculative_suffix_max_spec_factor",
+                                speculative_suffix_max_spec_factor()))
+      .speculative_suffix_max_spec_offset(
+          json.value_or<double>("speculative_suffix_max_spec_offset",
+                                speculative_suffix_max_spec_offset()))
+      .speculative_suffix_min_token_prob(
+          json.value_or<double>("speculative_suffix_min_token_prob",
+                                speculative_suffix_min_token_prob()))
+      .speculative_suffix_max_cached_requests(
+          json.value_or<int32_t>("speculative_suffix_max_cached_requests",
+                                 speculative_suffix_max_cached_requests()))
+      .speculative_suffix_use_tree_spec(
+          json.value_or<bool>("speculative_suffix_use_tree_spec",
+                              speculative_suffix_use_tree_spec()))
+      .enable_opt_validate_probs(json.value_or<bool>(
+          "enable_opt_validate_probs", enable_opt_validate_probs()))
+      .enable_atb_spec_kernel(json.value_or<bool>("enable_atb_spec_kernel",
+                                                  enable_atb_spec_kernel()));
+}
+
 SpeculativeConfig& SpeculativeConfig::get_instance() {
   static SpeculativeConfig config;
   return config;
 }
 
-void SpeculativeConfig::initialize() { from_flags(); }
+void SpeculativeConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

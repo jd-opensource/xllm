@@ -23,6 +23,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class ModelConfig final {
  public:
   ModelConfig() = default;
@@ -31,6 +33,7 @@ class ModelConfig final {
   static ModelConfig& get_instance();
 
   void from_flags();
+  void from_json(const JsonReader& json);
   void initialize();
   void normalize_cpp_chat_template(const std::string& model_type);
 

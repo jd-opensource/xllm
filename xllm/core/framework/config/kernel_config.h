@@ -22,6 +22,8 @@ limitations under the License.
 
 namespace xllm {
 
+class JsonReader;
+
 class KernelConfig final {
  public:
   KernelConfig() = default;
@@ -30,6 +32,7 @@ class KernelConfig final {
   static KernelConfig& get_instance();
 
   void from_flags();
+  void from_json(const JsonReader& json);
   void initialize();
 
   [[nodiscard]] static const OptionCategory& option_category() {

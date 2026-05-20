@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/beam_search_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_bool(enable_beam_search_kernel,
             false,
@@ -46,11 +47,26 @@ void BeamSearchConfig::from_flags() {
       .enable_topk_sorted(FLAGS_enable_topk_sorted);
 }
 
+void BeamSearchConfig::from_json(const JsonReader& json) {
+  enable_beam_search_kernel(json.value_or<bool>("enable_beam_search_kernel",
+                                                enable_beam_search_kernel()))
+      .beam_width(json.value_or<int32_t>("beam_width", beam_width()))
+      .enable_block_copy_kernel(json.value_or<bool>("enable_block_copy_kernel",
+                                                    enable_block_copy_kernel()))
+      .enable_topk_sorted(
+          json.value_or<bool>("enable_topk_sorted", enable_topk_sorted()));
+}
+
 BeamSearchConfig& BeamSearchConfig::get_instance() {
   static BeamSearchConfig config;
   return config;
 }
 
-void BeamSearchConfig::initialize() { from_flags(); }
+void BeamSearchConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_int32(max_tokens_per_batch, 10240, "Max number of tokens per batch.");
 
@@ -93,11 +94,50 @@ void SchedulerConfig::from_flags() {
       .enable_starve_prevent(FLAGS_enable_starve_prevent);
 }
 
+void SchedulerConfig::from_json(const JsonReader& json) {
+  max_tokens_per_batch(
+      json.value_or<int32_t>("max_tokens_per_batch", max_tokens_per_batch()))
+      .max_seqs_per_batch(
+          json.value_or<int32_t>("max_seqs_per_batch", max_seqs_per_batch()))
+      .enable_schedule_overlap(json.value_or<bool>("enable_schedule_overlap",
+                                                   enable_schedule_overlap()))
+      .prefill_scheduling_memory_usage_threshold(
+          json.value_or<double>("prefill_scheduling_memory_usage_threshold",
+                                prefill_scheduling_memory_usage_threshold()))
+      .enable_chunked_prefill(json.value_or<bool>("enable_chunked_prefill",
+                                                  enable_chunked_prefill()))
+      .max_tokens_per_chunk_for_prefill(
+          json.value_or<int32_t>("max_tokens_per_chunk_for_prefill",
+                                 max_tokens_per_chunk_for_prefill()))
+      .chunked_match_frequency(json.value_or<int32_t>(
+          "chunked_match_frequency", chunked_match_frequency()))
+      .use_zero_evict(json.value_or<bool>("use_zero_evict", use_zero_evict()))
+      .max_decode_token_per_sequence(json.value_or<int32_t>(
+          "max_decode_token_per_sequence", max_decode_token_per_sequence()))
+      .priority_strategy(
+          json.value_or<std::string>("priority_strategy", priority_strategy()))
+      .use_mix_scheduler(
+          json.value_or<bool>("use_mix_scheduler", use_mix_scheduler()))
+      .enable_online_preempt_offline(json.value_or<bool>(
+          "enable_online_preempt_offline", enable_online_preempt_offline()))
+      .aggressive_coeff(
+          json.value_or<double>("aggressive_coeff", aggressive_coeff()))
+      .starve_threshold(
+          json.value_or<double>("starve_threshold", starve_threshold()))
+      .enable_starve_prevent(json.value_or<bool>("enable_starve_prevent",
+                                                 enable_starve_prevent()));
+}
+
 SchedulerConfig& SchedulerConfig::get_instance() {
   static SchedulerConfig config;
   return config;
 }
 
-void SchedulerConfig::initialize() { from_flags(); }
+void SchedulerConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

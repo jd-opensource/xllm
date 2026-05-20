@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/dit_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_int32(max_requests_per_batch, 1, "Max number of request per batch.");
 
@@ -78,11 +79,44 @@ void DiTConfig::from_flags() {
       .dit_debug_print(FLAGS_dit_debug_print);
 }
 
+void DiTConfig::from_json(const JsonReader& json) {
+  max_requests_per_batch(json.value_or<int32_t>("max_requests_per_batch",
+                                                max_requests_per_batch()))
+      .dit_cache_policy(
+          json.value_or<std::string>("dit_cache_policy", dit_cache_policy()))
+      .dit_cache_warmup_steps(json.value_or<int64_t>("dit_cache_warmup_steps",
+                                                     dit_cache_warmup_steps()))
+      .dit_cache_n_derivatives(json.value_or<int64_t>(
+          "dit_cache_n_derivatives", dit_cache_n_derivatives()))
+      .dit_cache_skip_interval_steps(json.value_or<int64_t>(
+          "dit_cache_skip_interval_steps", dit_cache_skip_interval_steps()))
+      .dit_cache_residual_diff_threshold(
+          json.value_or<double>("dit_cache_residual_diff_threshold",
+                                dit_cache_residual_diff_threshold()))
+      .dit_cache_start_steps(json.value_or<int64_t>("dit_cache_start_steps",
+                                                    dit_cache_start_steps()))
+      .dit_cache_end_steps(
+          json.value_or<int64_t>("dit_cache_end_steps", dit_cache_end_steps()))
+      .dit_cache_start_blocks(json.value_or<int64_t>("dit_cache_start_blocks",
+                                                     dit_cache_start_blocks()))
+      .dit_cache_end_blocks(json.value_or<int64_t>("dit_cache_end_blocks",
+                                                   dit_cache_end_blocks()))
+      .dit_sp_communication_overlap(json.value_or<int64_t>(
+          "dit_sp_communication_overlap", dit_sp_communication_overlap()))
+      .dit_debug_print(
+          json.value_or<bool>("dit_debug_print", dit_debug_print()));
+}
+
 DiTConfig& DiTConfig::get_instance() {
   static DiTConfig config;
   return config;
 }
 
-void DiTConfig::initialize() { from_flags(); }
+void DiTConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm

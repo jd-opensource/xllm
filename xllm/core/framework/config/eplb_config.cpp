@@ -16,6 +16,7 @@ limitations under the License.
 #include "core/framework/config/eplb_config.h"
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
 
 DEFINE_bool(enable_eplb, false, "Whether to use expert parallel load balance.");
 
@@ -42,11 +43,30 @@ void EPLBConfig::from_flags() {
       .rank_tablefile(FLAGS_rank_tablefile);
 }
 
+void EPLBConfig::from_json(const JsonReader& json) {
+  enable_eplb(json.value_or<bool>("enable_eplb", enable_eplb()))
+      .redundant_experts_num(json.value_or<int32_t>("redundant_experts_num",
+                                                    redundant_experts_num()))
+      .eplb_update_interval(json.value_or<int64_t>("eplb_update_interval",
+                                                   eplb_update_interval()))
+      .eplb_update_threshold(json.value_or<double>("eplb_update_threshold",
+                                                   eplb_update_threshold()))
+      .expert_parallel_degree(json.value_or<int32_t>("expert_parallel_degree",
+                                                     expert_parallel_degree()))
+      .rank_tablefile(
+          json.value_or<std::string>("rank_tablefile", rank_tablefile()));
+}
+
 EPLBConfig& EPLBConfig::get_instance() {
   static EPLBConfig config;
   return config;
 }
 
-void EPLBConfig::initialize() { from_flags(); }
+void EPLBConfig::initialize() {
+  from_flags();
+  if (!FLAGS_config_json_file.empty()) {
+    from_json(config::load_json_file(FLAGS_config_json_file));
+  }
+}
 
 }  // namespace xllm
