@@ -56,9 +56,12 @@ const OptionCategory kCacheOptions = {"KV CACHE OPTIONS",
                                        "max_memory_utilization",
                                        "kv_cache_dtype"}};
 
-const OptionCategory kMoeModelOptions = {
-    "MOE MODEL OPTIONS",
-    {"dp_size", "ep_size", "expert_parallel_degree"}};
+const OptionCategory kMoeModelOptions = {"MOE MODEL OPTIONS",
+                                         {"dp_size",
+                                          "ep_size",
+                                          "expert_parallel_degree",
+                                          "enable_fused_mc2",
+                                          "enable_fused_moe_gmm_swiglu"}};
 
 const OptionCategory kDiTModelOptions = {
     "DiT MODEL OPTIONS",

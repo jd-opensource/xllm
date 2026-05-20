@@ -150,6 +150,10 @@ DECLARE_double(prefill_scheduling_memory_usage_threshold);
 
 DECLARE_int32(expert_parallel_degree);
 
+DECLARE_int32(enable_fused_mc2);
+
+DECLARE_bool(enable_fused_moe_gmm_swiglu);
+
 DECLARE_int32(max_reconnect_count);
 
 DECLARE_bool(enable_customize_mla_kernel);

@@ -143,6 +143,20 @@ class FusedMoEImpl : public torch::nn::Module {
   bool should_gather_dp_inputs_for_moe() const;
   bool can_use_ep2_dispatch_combine(const ModelInputParams& input_params,
                                     const torch::Tensor& hidden_states) const;
+  int32_t fused_mc2_mode() const;
+  bool prepare_dispatch_ffn_combine_inputs();
+  bool prepare_dispatch_gmm_combine_decode_inputs();
+  torch::Tensor forward_with_dispatch_ffn_combine(
+      const torch::Tensor& input_2d,
+      const torch::Tensor& weights_2d,
+      const torch::Tensor& ids_2d,
+      at::IntArrayRef hidden_states_shape);
+  torch::Tensor forward_with_dispatch_gmm_combine_decode(
+      const torch::Tensor& input_2d,
+      const torch::Tensor& weights_2d,
+      const torch::Tensor& ids_2d,
+      at::IntArrayRef hidden_states_shape,
+      int64_t global_bs);
   torch::Tensor forward_with_selected_experts_ep2(
       const torch::Tensor& hidden_states,
       const torch::Tensor& topk_weights,
@@ -151,6 +165,10 @@ class FusedMoEImpl : public torch::nn::Module {
   const std::string& get_moe_ep_group_name();
 
   bool enable_ep2_dispatch_combine_ = false;
+  bool dispatch_ffn_combine_prepared_ = false;
+  bool dispatch_gmm_combine_decode_prepared_ = false;
+  torch::Tensor dispatch_ffn_w13_scale_;
+  torch::Tensor dispatch_ffn_w2_scale_;
   std::string moe_ep_group_name_;
 };
 TORCH_MODULE(FusedMoE);

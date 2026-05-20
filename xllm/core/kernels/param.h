@@ -277,6 +277,12 @@ struct FusedLayerNormParams {
   bool dynamic_quant = false;
 };
 
+struct RmsNormDynamicQuantParams {
+  torch::Tensor input;
+  torch::Tensor weight;
+  double eps;
+};
+
 // Matmul parameters
 struct MatmulParams {
   // Left input tensor A. Must be 2D or 3D. Must have same dimension as b.
@@ -459,6 +465,29 @@ struct DequantSwigluQuantParams {
   bool activate_left = true;
   // Quantization mode: 0 static quant, 1 dynamic quant.
   int64_t quant_mode = 1;
+};
+
+struct GroupedMatmulSwigluQuantParams {
+  // Quantized activation tensor.
+  // Shape: [total_tokens, hidden_size]. Dtype: int8. Format: ND.
+  torch::Tensor x;
+  // W13 expert weight tensor in NPU FRACTAL_NZ format.
+  // Logical shape: [num_experts, hidden_size, intermediate_size * 2].
+  // Dtype: int8.
+  torch::Tensor weight;
+  // Cumulative token count per local expert.
+  // Shape: [num_experts]. Dtype: int64.
+  torch::Tensor group_list;
+  // W13 dequant scale.
+  // Shape: [num_experts, intermediate_size * 2]. Dtype: float32/fp16/bf16.
+  torch::Tensor weight_scale;
+  // Per-token activation scale from dynamic quant.
+  // Shape: [total_tokens]. Dtype: float32.
+  torch::Tensor x_scale;
+  // Optional matrix bias. Reserved by the underlying operator.
+  std::optional<torch::Tensor> bias;
+  // Optional asymmetric dequant offset. Reserved by the underlying operator.
+  std::optional<torch::Tensor> offset;
 };
 
 // Ascend W4A8_DYNAMIC MoE weight post-load processing for version 1.0.0.
@@ -1359,6 +1388,55 @@ struct MoeDistributeCombineV2Params {
   int64_t global_bs = 0;
   int64_t comm_quant_mode = 0;
   std::string comm_alg;
+};
+
+struct DispatchFFNCombineParams {
+  // Input hidden states. Shape: [num_tokens, hidden_size].
+  // Dtype: fp16/bf16 for W8A8 dynamic path.
+  torch::Tensor x;
+  // First/second expert weights as TensorList. For W8A8 int8 path the fused
+  // CANN op expects NZ-formatted int8 weights.
+  torch::TensorList weight1;
+  torch::TensorList weight2;
+  // Expert ids. Shape: [num_tokens, topk], dtype int32.
+  torch::Tensor expert_ids;
+  // W8A8 scales as TensorList. CANN DispatchFFNCombine expects the int64
+  // bit-packed representation used by vLLM/sgl wrappers, not raw fp32 scales.
+  torch::TensorList scale1;
+  torch::TensorList scale2;
+  // Router probabilities. Shape: [num_tokens, topk], dtype fp32.
+  torch::Tensor probs;
+  // HCCL communication group name.
+  std::string group;
+  int64_t max_output_size = 0;
+  double swiglu_limit = 0.0;
+  // Optional preallocated outputs. If absent, wrapper allocates them.
+  std::optional<torch::Tensor> output = std::nullopt;
+  std::optional<torch::Tensor> expert_token_nums = std::nullopt;
+};
+
+struct DispatchGmmCombineDecodeParams {
+  // Input hidden states. Shape: [num_tokens, hidden_size].
+  torch::Tensor x;
+  // Expert ids after routing. Shape: [num_tokens, topk], dtype int32.
+  torch::Tensor expert_ids;
+  // W8A8 expert weights and fp32 scales in TensorList form.
+  torch::TensorList gmm1_permuted_weight;
+  torch::TensorList gmm1_permuted_weight_scale;
+  torch::TensorList gmm2_weight;
+  torch::TensorList gmm2_weight_scale;
+  // Router probabilities. Shape: [num_tokens, topk], dtype fp32.
+  torch::Tensor expert_scales;
+  std::optional<torch::Tensor> expert_smooth_scales = std::nullopt;
+  std::optional<torch::Tensor> x_active_mask = std::nullopt;
+  std::string group_ep;
+  int64_t ep_rank_size = 1;
+  int64_t ep_rank_id = 0;
+  int64_t moe_expert_num = 1;
+  int64_t shared_expert_num = 0;
+  int64_t shared_expert_rank_num = 0;
+  int64_t quant_mode = 0;
+  int64_t global_bs = 0;
 };
 
 // FP8 scaled quantize parameters

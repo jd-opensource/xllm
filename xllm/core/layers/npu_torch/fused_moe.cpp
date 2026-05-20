@@ -24,10 +24,18 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#ifdef TORCH_HIGHER_THAN_PTA6
+#include <torch_npu/csrc/aten/CustomFunctions.h>
+#include <torch_npu/csrc/core/npu/NPUFormat.h>
+#else
+#include <torch_npu/csrc/aten/NPUNativeFunctions.h>
+#endif
+
 #include "common/global_flags.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
 #include "layers/common/dp_utils.h"
+#include "platform/device.h"
 
 namespace xllm {
 namespace layer {
@@ -100,6 +108,52 @@ bool is_supported_dynamic_moe_quant_method(
     const std::optional<std::string>& quant_method) {
   return is_w8a8_dynamic_quant_method(quant_method) ||
          is_w4a8_dynamic_quant_method(quant_method);
+}
+
+torch::Tensor convert_fp32_scale_to_int64(const torch::Tensor& scale) {
+  return scale.to(torch::kFloat32).view(torch::kInt32).to(torch::kInt64);
+}
+
+int64_t get_tensor_npu_format(const torch::Tensor& tensor) {
+#ifdef TORCH_HIGHER_THAN_PTA6
+  return at_npu::native::get_npu_format(tensor);
+#else
+  return at_npu::native::NPUNativeFunctions::get_npu_format(tensor);
+#endif
+}
+
+torch::Tensor npu_format_cast(const torch::Tensor& tensor, int64_t format) {
+#ifdef TORCH_HIGHER_THAN_PTA6
+  return at_npu::native::npu_format_cast(tensor, format);
+#else
+  return at_npu::native::NPUNativeFunctions::npu_format_cast(tensor, format);
+#endif
+}
+
+void empty_cache_for_tensor(const torch::Tensor& tensor) {
+  if (!tensor.defined() || tensor.device().is_cpu() ||
+      tensor.device().index() < 0) {
+    return;
+  }
+  xllm::Device::empty_cache(static_cast<int32_t>(tensor.device().index()));
+}
+
+bool maybe_trans_nz(torch::Tensor& weight) {
+  if (weight.device().is_cpu() ||
+      get_tensor_npu_format(weight) == ACL_FORMAT_FRACTAL_NZ) {
+    return false;
+  }
+  weight.set_data(npu_format_cast(weight, ACL_FORMAT_FRACTAL_NZ));
+  empty_cache_for_tensor(weight);
+  return true;
+}
+
+void ensure_contiguous_for_fused_mc2(torch::Tensor& weight) {
+  if (weight.is_contiguous()) {
+    return;
+  }
+  weight.set_data(weight.contiguous());
+  empty_cache_for_tensor(weight);
 }
 
 bool should_apply_shared_expert_gate(
@@ -631,7 +685,7 @@ void FusedMoEImpl::ensure_group_gemm_weight_layout(torch::Tensor& weight,
 
   if (!prepared) {
     if (weight.size(1) == output_dim && weight.size(2) == input_dim) {
-      weight = weight.transpose(1, 2);
+      weight.set_data(weight.transpose(1, 2));
     } else if (weight.size(1) == input_dim && weight.size(2) == output_dim) {
       // Already in grouped-matmul [expert, input, output] layout.
     } else {
@@ -775,7 +829,26 @@ torch::Tensor FusedMoEImpl::forward_expert(
                                     local_intermediate_size_ * 2,
                                     "w13");
 
-    {
+    // Step 5-6: first grouped matmul + fused dequant + swiglu + quant.
+    torch::Tensor act_quantized;
+    torch::Tensor act_scale;
+    if (FLAGS_enable_fused_moe_gmm_swiglu) {
+      CHECK(is_gated_ && (hidden_act_ == "silu" || hidden_act_ == "swiglu"))
+          << "--enable_fused_moe_gmm_swiglu requires gated SiLU/SwiGLU MoE, "
+          << "got is_gated=" << (is_gated_ ? "true" : "false")
+          << ", hidden_act=" << hidden_act_;
+      maybe_trans_nz(w13_);
+
+      xllm::kernel::GroupedMatmulSwigluQuantParams params;
+      params.x = quantized_expand_hidden_states;
+      params.weight = w13_;
+      params.group_list =
+          torch::cumsum(selected_expert_info.token_count_slice, 0);
+      params.weight_scale = w13_scale_;
+      params.x_scale = pertoken_scale.value();
+      std::tie(act_quantized, act_scale) =
+          xllm::kernel::grouped_matmul_swiglu_quant(params);
+    } else {
       std::vector<torch::Tensor> x_list = {quantized_expand_hidden_states};
       std::vector<torch::Tensor> weight_list = {w13_};
       xllm::kernel::GroupGemmParams group_gemm_params;
@@ -787,12 +860,7 @@ torch::Tensor FusedMoEImpl::forward_expert(
       group_gemm_params.group_list_type = 1;
       group_gemm_params.output_dtype = torch::kInt32;
       gemm1_out = xllm::kernel::group_gemm(group_gemm_params);
-    }
 
-    // Step 6: fused dequant + swiglu + quant.
-    torch::Tensor act_quantized;
-    torch::Tensor act_scale;
-    {
       xllm::kernel::DequantSwigluQuantParams params;
       params.x = gemm1_out;
       params.weight_scale = w13_scale_;
@@ -1047,9 +1115,6 @@ bool FusedMoEImpl::can_use_ep2_dispatch_combine(
   if (!enable_ep2_dispatch_combine_) {
     return false;
   }
-  if (!all_dp_ranks_are_decode(input_params)) {
-    return false;
-  }
   if (hidden_states.scalar_type() != torch::kHalf &&
       hidden_states.scalar_type() != torch::kBFloat16) {
     return false;
@@ -1064,7 +1129,201 @@ bool FusedMoEImpl::can_use_ep2_dispatch_combine(
   if (is_w4a8_dynamic_quant_method(resolved_moe_quant_method_)) {
     return false;
   }
+  const int32_t mode = fused_mc2_mode();
+  if (mode == 1) {
+    return is_w8a8_dynamic_quant_method(resolved_moe_quant_method_) &&
+           xllm::kernel::has_dispatch_ffn_combine() && w13_is_loaded_ &&
+           w2_is_loaded_ && w13_scale_is_loaded_ && w2_scale_is_loaded_ &&
+           hidden_act_ == xllm::kernel::kActModeSilu && is_gated_;
+  }
+  if (!all_dp_ranks_are_decode(input_params)) {
+    return false;
+  }
+  if (mode == 2) {
+    return is_w8a8_dynamic_quant_method(resolved_moe_quant_method_) &&
+           xllm::kernel::has_dispatch_gmm_combine_decode() && w13_is_loaded_ &&
+           w2_is_loaded_ && w13_scale_is_loaded_ && w2_scale_is_loaded_ &&
+           hidden_act_ == xllm::kernel::kActModeSilu && is_gated_;
+  }
   return xllm::kernel::has_moe_distribute_dispatch_combine_v2();
+}
+
+int32_t FusedMoEImpl::fused_mc2_mode() const {
+  CHECK_GE(FLAGS_enable_fused_mc2, 0)
+      << "--enable_fused_mc2 must be 0, 1, or 2.";
+  CHECK_LE(FLAGS_enable_fused_mc2, 2)
+      << "--enable_fused_mc2 must be 0, 1, or 2.";
+  return FLAGS_enable_fused_mc2;
+}
+
+bool FusedMoEImpl::prepare_dispatch_ffn_combine_inputs() {
+  if (fused_mc2_mode() != 1) {
+    return false;
+  }
+  if (!is_w8a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+    return false;
+  }
+  if (!xllm::kernel::has_dispatch_ffn_combine()) {
+    return false;
+  }
+  if (!(w13_is_loaded_ && w2_is_loaded_ && w13_scale_is_loaded_ &&
+        w2_scale_is_loaded_)) {
+    return false;
+  }
+  if (hidden_act_ != xllm::kernel::kActModeSilu || !is_gated_) {
+    return false;
+  }
+  if (dispatch_ffn_combine_prepared_) {
+    return true;
+  }
+
+  ensure_group_gemm_weight_layout(w13_,
+                                  w13_group_gemm_layout_prepared_,
+                                  hidden_size_,
+                                  local_intermediate_size_ * 2,
+                                  "w13");
+  ensure_group_gemm_weight_layout(w2_,
+                                  w2_group_gemm_layout_prepared_,
+                                  local_intermediate_size_,
+                                  hidden_size_,
+                                  "w2");
+  ensure_contiguous_for_fused_mc2(w13_);
+  ensure_contiguous_for_fused_mc2(w2_);
+  empty_cache_for_tensor(w13_);
+  empty_cache_for_tensor(w2_);
+  maybe_trans_nz(w13_);
+  maybe_trans_nz(w2_);
+  w13_group_gemm_layout_prepared_ = false;
+  w2_group_gemm_layout_prepared_ = false;
+  dispatch_ffn_w13_scale_ =
+      convert_fp32_scale_to_int64(w13_scale_).contiguous();
+  dispatch_ffn_w2_scale_ = convert_fp32_scale_to_int64(w2_scale_).contiguous();
+  empty_cache_for_tensor(dispatch_ffn_w13_scale_);
+  empty_cache_for_tensor(dispatch_ffn_w2_scale_);
+  dispatch_ffn_combine_prepared_ = true;
+  return true;
+}
+
+bool FusedMoEImpl::prepare_dispatch_gmm_combine_decode_inputs() {
+  if (fused_mc2_mode() != 2) {
+    return false;
+  }
+  if (!is_w8a8_dynamic_quant_method(resolved_moe_quant_method_)) {
+    return false;
+  }
+  if (!xllm::kernel::has_dispatch_gmm_combine_decode()) {
+    return false;
+  }
+  if (!(w13_is_loaded_ && w2_is_loaded_ && w13_scale_is_loaded_ &&
+        w2_scale_is_loaded_)) {
+    return false;
+  }
+  if (hidden_act_ != xllm::kernel::kActModeSilu || !is_gated_) {
+    return false;
+  }
+  if (dispatch_gmm_combine_decode_prepared_) {
+    return true;
+  }
+
+  ensure_group_gemm_weight_layout(w13_,
+                                  w13_group_gemm_layout_prepared_,
+                                  hidden_size_,
+                                  local_intermediate_size_ * 2,
+                                  "w13");
+  ensure_group_gemm_weight_layout(w2_,
+                                  w2_group_gemm_layout_prepared_,
+                                  local_intermediate_size_,
+                                  hidden_size_,
+                                  "w2");
+  ensure_contiguous_for_fused_mc2(w13_);
+  ensure_contiguous_for_fused_mc2(w2_);
+  empty_cache_for_tensor(w13_);
+  empty_cache_for_tensor(w2_);
+  maybe_trans_nz(w13_);
+  maybe_trans_nz(w2_);
+  w13_group_gemm_layout_prepared_ = false;
+  w2_group_gemm_layout_prepared_ = false;
+  w13_scale_ = w13_scale_.to(torch::kFloat32).contiguous();
+  w2_scale_ = w2_scale_.contiguous();
+  empty_cache_for_tensor(w13_scale_);
+  empty_cache_for_tensor(w2_scale_);
+  dispatch_gmm_combine_decode_prepared_ = true;
+  return true;
+}
+
+torch::Tensor FusedMoEImpl::forward_with_dispatch_ffn_combine(
+    const torch::Tensor& input_2d,
+    const torch::Tensor& weights_2d,
+    const torch::Tensor& ids_2d,
+    at::IntArrayRef hidden_states_shape) {
+  std::vector<torch::Tensor> weight1_list = {w13_};
+  std::vector<torch::Tensor> weight2_list = {w2_};
+  std::vector<torch::Tensor> scale1_list = {dispatch_ffn_w13_scale_};
+  std::vector<torch::Tensor> scale2_list = {dispatch_ffn_w2_scale_};
+
+  xllm::kernel::DispatchFFNCombineParams params;
+  params.x = input_2d;
+  params.weight1 = torch::TensorList(weight1_list);
+  params.weight2 = torch::TensorList(weight2_list);
+  params.expert_ids = ids_2d;
+  params.scale1 = torch::TensorList(scale1_list);
+  params.scale2 = torch::TensorList(scale2_list);
+  params.probs = weights_2d;
+  params.group = get_moe_ep_group_name();
+  params.max_output_size = 65536;
+  params.swiglu_limit = is_deepseek_v4_ ? 10.0 : 0.0;
+  params.output = torch::empty_like(input_2d);
+  params.expert_token_nums = torch::empty(
+      {num_experts_per_rank_}, ids_2d.options().dtype(torch::kInt32));
+
+  torch::Tensor final_hidden_states_2d;
+  torch::Tensor expert_token_nums;
+  std::tie(final_hidden_states_2d, expert_token_nums) =
+      xllm::kernel::dispatch_ffn_combine(params);
+  (void)expert_token_nums;
+  if (is_deepseek_v4_) {
+    final_hidden_states_2d = final_hidden_states_2d * route_scale_;
+  }
+  return final_hidden_states_2d.reshape(hidden_states_shape);
+}
+
+torch::Tensor FusedMoEImpl::forward_with_dispatch_gmm_combine_decode(
+    const torch::Tensor& input_2d,
+    const torch::Tensor& weights_2d,
+    const torch::Tensor& ids_2d,
+    at::IntArrayRef hidden_states_shape,
+    int64_t global_bs) {
+  std::vector<torch::Tensor> weight1_list = {w13_};
+  std::vector<torch::Tensor> weight2_list = {w2_};
+  std::vector<torch::Tensor> scale1_list = {w13_scale_};
+  std::vector<torch::Tensor> scale2_list = {w2_scale_};
+
+  xllm::kernel::DispatchGmmCombineDecodeParams params;
+  params.x = input_2d;
+  params.expert_ids = ids_2d;
+  params.gmm1_permuted_weight = torch::TensorList(weight1_list);
+  params.gmm1_permuted_weight_scale = torch::TensorList(scale1_list);
+  params.gmm2_weight = torch::TensorList(weight2_list);
+  params.gmm2_weight_scale = torch::TensorList(scale2_list);
+  params.expert_scales = weights_2d;
+  params.group_ep = get_moe_ep_group_name();
+  params.ep_rank_size = parallel_args_.moe_ep_group_->world_size();
+  params.ep_rank_id = parallel_args_.moe_ep_group_->rank();
+  params.moe_expert_num = num_total_experts_;
+  params.shared_expert_num = 0;
+  params.shared_expert_rank_num = 0;
+  params.quant_mode = 0;
+  params.global_bs = global_bs;
+
+  torch::Tensor final_hidden_states_2d;
+  torch::Tensor expert_token_nums;
+  std::tie(final_hidden_states_2d, expert_token_nums) =
+      xllm::kernel::dispatch_gmm_combine_decode(params);
+  (void)expert_token_nums;
+  if (is_deepseek_v4_) {
+    final_hidden_states_2d = final_hidden_states_2d * route_scale_;
+  }
+  return final_hidden_states_2d.reshape(hidden_states_shape);
 }
 
 const std::string& FusedMoEImpl::get_moe_ep_group_name() {
@@ -1083,6 +1342,9 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
     const torch::Tensor& topk_ids,
     const ModelInputParams& input_params) {
   (void)input_params;
+  prepare_dispatch_ffn_combine_inputs();
+  prepare_dispatch_gmm_combine_decode_inputs();
+
   const auto hidden_states_shape = hidden_states.sizes();
   auto input_2d =
       hidden_states.reshape({-1, hidden_states.size(-1)}).contiguous();
@@ -1106,6 +1368,14 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
                                 int64_t{0});
   }
 
+  if (dispatch_ffn_combine_prepared_) {
+    return forward_with_dispatch_ffn_combine(
+        input_2d, weights_2d, ids_2d, hidden_states_shape);
+  }
+  if (dispatch_gmm_combine_decode_prepared_) {
+    return forward_with_dispatch_gmm_combine_decode(
+        input_2d, weights_2d, ids_2d, hidden_states_shape, global_bs);
+  }
   xllm::kernel::MoeDistributeDispatchV2Params dispatch_params;
   dispatch_params.x = input_2d;
   dispatch_params.expert_ids = ids_2d;
@@ -1156,7 +1426,25 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
                                     quantized_expand_hidden_states.size(1),
                                     local_intermediate_size_ * 2,
                                     "w13");
-    {
+
+    torch::Tensor act_quantized;
+    torch::Tensor act_scale;
+    if (FLAGS_enable_fused_moe_gmm_swiglu) {
+      CHECK(is_gated_ && (hidden_act_ == "silu" || hidden_act_ == "swiglu"))
+          << "--enable_fused_moe_gmm_swiglu requires gated SiLU/SwiGLU MoE, "
+          << "got is_gated=" << (is_gated_ ? "true" : "false")
+          << ", hidden_act=" << hidden_act_;
+      maybe_trans_nz(w13_);
+
+      xllm::kernel::GroupedMatmulSwigluQuantParams params;
+      params.x = quantized_expand_hidden_states;
+      params.weight = w13_;
+      params.group_list = torch::cumsum(group_list.to(torch::kInt64), 0);
+      params.weight_scale = w13_scale_;
+      params.x_scale = pertoken_scale.value();
+      std::tie(act_quantized, act_scale) =
+          xllm::kernel::grouped_matmul_swiglu_quant(params);
+    } else {
       std::vector<torch::Tensor> x_list = {quantized_expand_hidden_states};
       std::vector<torch::Tensor> weight_list = {w13_};
       xllm::kernel::GroupGemmParams group_gemm_params;
@@ -1168,11 +1456,7 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
       group_gemm_params.group_list_type = 1;
       group_gemm_params.output_dtype = torch::kInt32;
       gemm1_out = xllm::kernel::group_gemm(group_gemm_params);
-    }
 
-    torch::Tensor act_quantized;
-    torch::Tensor act_scale;
-    {
       xllm::kernel::DequantSwigluQuantParams params;
       params.x = gemm1_out;
       params.weight_scale = w13_scale_;

@@ -99,6 +99,19 @@ void load_moe_weight(const StateDict& state_dict,
                      torch::Tensor& weight,
                      bool& weight_is_loaded);
 
+void load_moe_weight(const StateDict& state_dict,
+                     const std::string& sub_prefix,
+                     const std::string& name,
+                     TensorTransform transform_func,
+                     int64_t dim,
+                     int64_t rank,
+                     int64_t world_size,
+                     int64_t start_expert_id,
+                     int64_t num_experts_per_rank,
+                     std::vector<torch::Tensor>& accumulated_tensors,
+                     torch::Tensor& weight,
+                     bool& weight_is_loaded);
+
 void load_moe_all_expert_weight(const StateDict& state_dict,
                                 const std::string& sub_prefix,
                                 const std::string& name,
@@ -113,6 +126,21 @@ void load_moe_all_expert_weight(const StateDict& state_dict,
 void load_moe_fused_weight(const StateDict& state_dict,
                            const std::vector<std::string>& prefixes,
                            const std::string& name,
+                           int64_t rank,
+                           int64_t world_size,
+                           int64_t start_expert_id,
+                           int64_t num_experts_per_rank,
+                           std::vector<torch::Tensor>& w1_tensors,
+                           std::vector<torch::Tensor>& w3_tensors,
+                           torch::Tensor& w13,
+                           bool& w1_is_loaded,
+                           bool& w3_is_loaded,
+                           bool& w13_is_loaded);
+
+void load_moe_fused_weight(const StateDict& state_dict,
+                           const std::vector<std::string>& prefixes,
+                           const std::string& name,
+                           TensorTransform transform_func,
                            int64_t rank,
                            int64_t world_size,
                            int64_t start_expert_id,
@@ -213,6 +241,20 @@ void load_merged_weight_v2(const StateDict& state_dict,
                           name##_,                  \
                           name##_is_loaded_);
 
+#define LOAD_MOE_WEIGHT_TRANSFORM(sub_prefix, key, name, transform, dim) \
+  weight::load_moe_weight(state_dict,                                    \
+                          sub_prefix,                                    \
+                          key,                                           \
+                          transform,                                     \
+                          dim,                                           \
+                          rank,                                          \
+                          world_size,                                    \
+                          start_expert_id,                               \
+                          num_experts_per_rank,                          \
+                          name##_list_,                                  \
+                          name##_,                                       \
+                          name##_is_loaded_);
+
 #define LOAD_MOE_ALL_EXPERT_WEIGHT(sub_prefix, key, name, dim) \
   weight::load_moe_all_expert_weight(state_dict,               \
                                      sub_prefix,               \
@@ -238,6 +280,22 @@ void load_merged_weight_v2(const StateDict& state_dict,
                                 w13##_,               \
                                 w1##_is_loaded_,      \
                                 w3##_is_loaded_,      \
+                                w13##_is_loaded_);
+
+#define LOAD_MOE_FUSED_WEIGHT_TRANSFORM(key, w1, w3, w13, transform) \
+  weight::load_moe_fused_weight(state_dict,                          \
+                                prefixes,                            \
+                                key,                                 \
+                                transform,                           \
+                                rank,                                \
+                                world_size,                          \
+                                start_expert_id,                     \
+                                num_experts_per_rank,                \
+                                w1##_list_,                          \
+                                w3##_list_,                          \
+                                w13##_,                              \
+                                w1##_is_loaded_,                     \
+                                w3##_is_loaded_,                     \
                                 w13##_is_loaded_);
 
 #define LOAD_MERGED_WEIGHT(name, dim)            \

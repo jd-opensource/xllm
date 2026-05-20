@@ -18,29 +18,11 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include <sstream>
-
 namespace xllm {
 
 namespace weight {
 
 namespace {
-std::string tensor_shape(const torch::Tensor& tensor) {
-  if (!tensor.defined()) {
-    return "undef";
-  }
-  std::ostringstream os;
-  os << "[";
-  for (int64_t i = 0; i < tensor.dim(); ++i) {
-    if (i > 0) {
-      os << ", ";
-    }
-    os << tensor.size(i);
-  }
-  os << "]";
-  return os.str();
-}
-
 bool should_relax_quant_vector_shape_check(const std::string& name) {
   return name == "weight_scale" || name == "weight_offset";
 }
@@ -243,6 +225,32 @@ void load_moe_weight(const StateDict& state_dict,
                      std::vector<torch::Tensor>& accumulated_tensors,
                      torch::Tensor& weight,
                      bool& weight_is_loaded) {
+  load_moe_weight(state_dict,
+                  sub_prefix,
+                  name,
+                  nullptr,
+                  dim,
+                  rank,
+                  world_size,
+                  start_expert_id,
+                  num_experts_per_rank,
+                  accumulated_tensors,
+                  weight,
+                  weight_is_loaded);
+}
+
+void load_moe_weight(const StateDict& state_dict,
+                     const std::string& sub_prefix,
+                     const std::string& name,
+                     TensorTransform transform_func,
+                     int64_t dim,
+                     int64_t rank,
+                     int64_t world_size,
+                     int64_t start_expert_id,
+                     int64_t num_experts_per_rank,
+                     std::vector<torch::Tensor>& accumulated_tensors,
+                     torch::Tensor& weight,
+                     bool& weight_is_loaded) {
   // return if the weight is already loaded
   if (weight_is_loaded) {
     return;
@@ -264,7 +272,11 @@ void load_moe_weight(const StateDict& state_dict,
         << "weight size mismatch for " << state_dict.prefix() << "["
         << start_expert_id << ":" << (start_expert_id + num_experts_per_rank)
         << "]." << sub_prefix << name;
-    weight.copy_(reshaped_weight);
+    if (transform_func) {
+      weight.set_data(transform_func(reshaped_weight));
+    } else {
+      weight.copy_(reshaped_weight);
+    }
     // release the memory for weight_list
     accumulated_tensors.clear();
   }
@@ -320,6 +332,36 @@ void load_moe_fused_weight(const StateDict& state_dict,
                            bool& w1_is_loaded,
                            bool& w3_is_loaded,
                            bool& w13_is_loaded) {
+  load_moe_fused_weight(state_dict,
+                        prefixes,
+                        name,
+                        nullptr,
+                        rank,
+                        world_size,
+                        start_expert_id,
+                        num_experts_per_rank,
+                        w1_tensors,
+                        w3_tensors,
+                        w13,
+                        w1_is_loaded,
+                        w3_is_loaded,
+                        w13_is_loaded);
+}
+
+void load_moe_fused_weight(const StateDict& state_dict,
+                           const std::vector<std::string>& prefixes,
+                           const std::string& name,
+                           TensorTransform transform_func,
+                           int64_t rank,
+                           int64_t world_size,
+                           int64_t start_expert_id,
+                           int64_t num_experts_per_rank,
+                           std::vector<torch::Tensor>& w1_tensors,
+                           std::vector<torch::Tensor>& w3_tensors,
+                           torch::Tensor& w13,
+                           bool& w1_is_loaded,
+                           bool& w3_is_loaded,
+                           bool& w13_is_loaded) {
   // return if the weight is already loaded
   if (w13_is_loaded) {
     return;
@@ -352,28 +394,15 @@ void load_moe_fused_weight(const StateDict& state_dict,
     const auto merged_weight = torch::stack(w13_vec);
     const auto reshaped_weight =
         reshape_quant_vector_if_compatible(name, w13, merged_weight);
-    if (w13.sizes() != reshaped_weight.sizes()) {
-      std::ostringstream debug_msg;
-      debug_msg << "weight size mismatch for " << state_dict.prefix() << "["
-                << start_expert_id << ":"
-                << (start_expert_id + num_experts_per_rank) << "].{"
-                << prefixes[0] << ", " << prefixes[1] << "}." << name
-                << " | expected(w13)=" << tensor_shape(w13)
-                << ", merged=" << tensor_shape(merged_weight)
-                << ", rank/world=" << rank << "/" << world_size;
-      if (!w1_tensors.empty() && w1_tensors[0].defined()) {
-        debug_msg << ", first_w1=" << tensor_shape(w1_tensors[0]);
-      }
-      if (!w3_tensors.empty() && w3_tensors[0].defined()) {
-        debug_msg << ", first_w3=" << tensor_shape(w3_tensors[0]);
-      }
-      LOG(ERROR) << "[MOE_LOAD_DEBUG] " << debug_msg.str();
-    }
     CHECK_EQ(w13.sizes(), reshaped_weight.sizes())
         << "weight size mismatch for " << state_dict.prefix() << "["
         << start_expert_id << ":" << (start_expert_id + num_experts_per_rank)
         << "].{" << prefixes[0] << ", " << prefixes[1] << "}." << name;
-    w13.copy_(reshaped_weight);
+    if (transform_func) {
+      w13.set_data(transform_func(reshaped_weight));
+    } else {
+      w13.copy_(reshaped_weight);
+    }
 
     // release the memory for weight_list
     w1_tensors.clear();
