@@ -93,8 +93,8 @@ KVCacheConfig& KVCacheConfig::get_instance() {
 
 void KVCacheConfig::initialize() {
   from_flags();
-  if (!FLAGS_config_json_file.empty()) {
-    from_json(config::load_json_file(FLAGS_config_json_file));
+  if (const auto& json_config = config::get_parsed_json_config()) {
+    from_json(*json_config);
   }
 }
 

@@ -36,6 +36,15 @@ inline constexpr std::string_view kInlineConfig = R"json({
   "max_seqs_per_batch": 64
 })json";
 
+inline constexpr std::string_view kUpdatedConfig = R"json({
+  "block_size": 32,
+  "max_tokens_per_batch": 4096
+})json";
+
+inline constexpr std::string_view kMalformedConfig = R"json({
+  "block_size":
+})json";
+
 class ConfigJsonFileFlagGuard final {
  public:
   explicit ConfigJsonFileFlagGuard(const std::string& config_json_file)
@@ -48,6 +57,12 @@ class ConfigJsonFileFlagGuard final {
  private:
   std::string old_config_json_file_;
 };
+
+void write_config_file(const std::filesystem::path& config_path,
+                       std::string_view config_json) {
+  std::ofstream config_file(config_path);
+  config_file << config_json;
+}
 
 TEST(ConfigJsonTest, FromJsonUsesParsedOverrides) {
   const JsonReader json = config::parse_json_string(kInlineConfig);
@@ -73,10 +88,7 @@ TEST(ConfigJsonTest, FromJsonUsesParsedOverrides) {
 TEST(ConfigJsonTest, InitializeLoadsConfigJsonFileFromFlag) {
   const std::filesystem::path config_path =
       std::filesystem::temp_directory_path() / "xllm_config_json_test.json";
-  {
-    std::ofstream config_file(config_path);
-    config_file << kInlineConfig;
-  }
+  write_config_file(config_path, kInlineConfig);
 
   ConfigJsonFileFlagGuard flag_guard(config_path.string());
 
@@ -88,6 +100,48 @@ TEST(ConfigJsonTest, InitializeLoadsConfigJsonFileFromFlag) {
 
   EXPECT_EQ(kv_cache_config.block_size(), 16);
   EXPECT_EQ(scheduler_config.max_tokens_per_batch(), 8192);
+
+  std::filesystem::remove(config_path);
+}
+
+TEST(ConfigJsonTest, InitializeReusesCachedConfigJsonForSameFile) {
+  const std::filesystem::path config_path =
+      std::filesystem::temp_directory_path() /
+      "xllm_config_json_test_cached.json";
+  write_config_file(config_path, kInlineConfig);
+
+  ConfigJsonFileFlagGuard flag_guard(config_path.string());
+
+  KVCacheConfig kv_cache_config;
+  kv_cache_config.initialize();
+
+  write_config_file(config_path, kUpdatedConfig);
+
+  SchedulerConfig scheduler_config;
+  scheduler_config.initialize();
+
+  EXPECT_EQ(kv_cache_config.block_size(), 16);
+  EXPECT_EQ(scheduler_config.max_tokens_per_batch(), 8192);
+
+  std::filesystem::remove(config_path);
+}
+
+TEST(ConfigJsonTest, MalformedJsonFileKeepsFlagDefaults) {
+  const std::filesystem::path config_path =
+      std::filesystem::temp_directory_path() /
+      "xllm_config_json_test_malformed.json";
+  write_config_file(config_path, kMalformedConfig);
+
+  ConfigJsonFileFlagGuard flag_guard(config_path.string());
+
+  KVCacheConfig kv_cache_config;
+  kv_cache_config.initialize();
+
+  SchedulerConfig scheduler_config;
+  scheduler_config.initialize();
+
+  EXPECT_EQ(kv_cache_config.block_size(), 128);
+  EXPECT_EQ(scheduler_config.max_tokens_per_batch(), 10240);
 
   std::filesystem::remove(config_path);
 }
