@@ -131,29 +131,6 @@ inline bool is_mla_model_type(std::string_view model_type) {
   return mla_model_type_set().contains(std::string(model_type));
 }
 
-inline bool has_mtp_model_type_marker(std::string_view model_type) {
-  return model_type.find("mtp") != std::string_view::npos;
-}
-
-inline bool starts_with_model_type(std::string_view model_type,
-                                   std::string_view target_model_type) {
-  return model_type.size() >= target_model_type.size() &&
-         model_type.compare(
-             0, target_model_type.size(), target_model_type) == 0;
-}
-
-inline bool is_target_mtp_model_type(std::string_view model_type,
-                                     std::string_view target_model_type) {
-  return starts_with_model_type(model_type, target_model_type) &&
-         has_mtp_model_type_marker(model_type);
-}
-
-inline bool is_deepseek_v4_model_type(std::string_view model_type) {
-  constexpr std::string_view kTargetModelType = "deepseek_v4";
-  return model_type == kTargetModelType ||
-         is_target_mtp_model_type(model_type, kTargetModelType);
-}
-
 inline std::string get_model_name(
     const std::filesystem::path& normalized_model_path) {
   std::string model_name;

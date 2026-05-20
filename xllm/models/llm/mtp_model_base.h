@@ -20,7 +20,6 @@ limitations under the License.
 #include <algorithm>
 #include <optional>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #include "core/framework/state_dict/utils.h"
@@ -32,7 +31,7 @@ namespace xllm {
 enum class MtpProjectionType { CONCAT_EH_PROJ, ADD_EH_PROJ };
 
 inline bool is_deepseek_v4_mtp_model(const ModelArgs& model_args) {
-  return util::is_target_mtp_model_type(model_args.model_type(), "deepseek_v4");
+  return model_args.model_type() == "deepseek_v4_mtp";
 }
 
 inline MtpProjectionType get_mtp_projection_type(const ModelArgs& model_args) {
@@ -80,13 +79,8 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
                                   /*QuantArgs=*/QuantArgs(),
                                   options));
     }
-    const int32_t decoder_layer_index = is_deepseek_v4_mtp_model(model_args_)
-                                            ? std::min<int32_t>(
-                                                  layer_index,
-                                                  model_args_.n_layers() - 1)
-                                            : layer_index;
     mtp_block_ = register_module("mtp_block",
-                                 DecoderLayerType(context, decoder_layer_index));
+                                 DecoderLayerType(context, layer_index));
 
     if (is_deepseek_v4_mtp_model(model_args_)) {
       const int64_t hc_mult = model_args_.hc_mult();
@@ -106,9 +100,7 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
                         torch::Tensor positions,
                         const layer::AttentionMetadata& attn_metadata,
                         KVCache& kv_cache,
-                        const ModelInputParams& input_params,
-                        const std::optional<torch::Tensor>& input_ids =
-                            std::nullopt) {
+                        const ModelInputParams& input_params) {
     // Layer norm on token inputs
     auto enorm_out = std::get<0>(enorm_(embed));
 
@@ -138,29 +130,12 @@ class MtpDecoderLayerImplBase : public torch::nn::Module {
     }
 
     // Pass through mtp block
-    if constexpr (std::is_invocable_v<DecoderLayerType,
-                                      torch::Tensor&,
-                                      std::optional<torch::Tensor>&,
-                                      torch::Tensor&,
-                                      const layer::AttentionMetadata&,
-                                      KVCache&,
-                                      const ModelInputParams&,
-                                      const std::optional<torch::Tensor>&>) {
-      hidden_states = mtp_block_(hidden_states,
-                                 residual,
-                                 positions,
-                                 attn_metadata,
-                                 kv_cache,
-                                 input_params,
-                                 input_ids);
-    } else {
-      hidden_states = mtp_block_(hidden_states,
-                                 residual,
-                                 positions,
-                                 attn_metadata,
-                                 kv_cache,
-                                 input_params);
-    }
+    hidden_states = mtp_block_(hidden_states,
+                               residual,
+                               positions,
+                               attn_metadata,
+                               kv_cache,
+                               input_params);
 
     if (is_deepseek_v4_mtp_model(model_args_)) {
       auto x_float = hidden_states.to(torch::kFloat32);
@@ -311,8 +286,7 @@ class MtpModelImplBase : public torch::nn::Module {
                             positions,
                             attn_metadata,
                             kv_caches[i],
-                            modified_input_params,
-                            tokens);
+                            modified_input_params);
       if (!modified_input_params.record_layer(static_cast<uint32_t>(i),
                                               hidden_states.device())) {
         return ModelOutput();

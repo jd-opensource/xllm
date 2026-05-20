@@ -414,7 +414,8 @@ void allocate_kv_caches(std::vector<KVCache>& kv_caches,
   const int64_t num_layers = create_options.num_layers();
   kv_caches.reserve(num_layers);
 
-  if (util::is_deepseek_v4_model_type(create_options.model_type())) {
+  if (create_options.model_type() == "deepseek_v4" ||
+      create_options.model_type() == "deepseek_v4_mtp") {
     std::vector<int32_t> layer_compress_ratios;
     layer_compress_ratios.reserve(static_cast<size_t>(num_layers));
     std::map<int32_t, std::string> ratio_shape_summaries;
