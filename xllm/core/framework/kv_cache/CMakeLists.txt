@@ -27,6 +27,7 @@ cc_library(
   NAME
     kv_cache
   HDRS
+    deepseek_v4_kv_cache_impl.h
     embedding_cache.h
     indexed_kv_cache_impl.h
     kv_cache.h
@@ -38,6 +39,7 @@ cc_library(
     linear_attention_kv_cache_impl.h
     quantized_kv_cache_impl.h
   SRCS
+    deepseek_v4_kv_cache_impl.cpp
     embedding_cache.cpp 
     indexed_kv_cache_impl.cpp
     kv_cache.cpp
