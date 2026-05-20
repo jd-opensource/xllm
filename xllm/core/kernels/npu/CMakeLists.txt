@@ -7,6 +7,7 @@ cc_library(
     npu_kernels
   HDRS
     npu_ops_api.h
+    aclnn/pytorch_npu_helper.hpp
   SRCS
     active.cpp
     attention.cpp
