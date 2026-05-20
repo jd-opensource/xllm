@@ -138,6 +138,11 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     } else {
       h = npu_embed_tokens_(tokens, 0);
     }
+
+    std::shared_ptr<torch::Tensor> residual =
+        std::make_shared<torch::Tensor>(torch::zeros_like(h, h.options()));
+    set_residual(residual);
+
     if (use_deepstack) {
       deep_stacks =
           input_params.multimodal.deep_stacks;  // [num_deepstack, hidden_size]

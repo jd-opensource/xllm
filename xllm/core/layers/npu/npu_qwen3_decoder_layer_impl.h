@@ -61,6 +61,11 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
                         std::atomic<bool>* event_flag = nullptr,
                         int node_id = 0);
 
+  void set_layer_id(int32_t layer_id) override {
+    prefill_param_.layerId = layer_id;
+    decode_param_.layerId = layer_id;
+  }
+
  private:
   void param_from_args(atb_speed::qwen::QwenLayerParam& param,
                        const ModelArgs& args,
@@ -97,6 +102,7 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
   atb_speed::qwen::QwenLayerParam decode_graph_param_;
   atb_speed::qwen::QwenLayerParam decode_eager_param_;
   atb::Tensor internal_tensors_;
+  atb::Tensor residual_tensors_;
   atb::Tensor placeholder_;
 
   at::Tensor decode_attn_mask_;
@@ -106,6 +112,7 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
   int device_id_;
   int32_t layer_id_;
   int rank_id_;
+  int32_t num_hidden_layers_;
   std::vector<std::shared_ptr<at::Tensor>> prefill_tensor_storage_;
   std::vector<std::shared_ptr<at::Tensor>> decode_tensor_storage_;
   std::vector<std::shared_ptr<std::vector<int>>> prefill_vector_storage_;
