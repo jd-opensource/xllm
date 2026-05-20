@@ -112,7 +112,9 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
       last_token_ids.data_ptr<int64_t>(),
       static_cast<size_t>(last_token_ids.numel())};
 
+  // Determine how many tokens were decoded in the last step
   int32_t last_step_decode_num = 1;
+  // If the output is 2D, it means multiple tokens were generated per sequence
   if (last_step_output_.sample_output.next_tokens.dim() == 2) {
     last_step_decode_num = last_step_output_.sample_output.next_tokens.size(1);
   }

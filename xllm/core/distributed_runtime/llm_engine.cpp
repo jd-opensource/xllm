@@ -575,12 +575,12 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     }
 
     // 1) Size of all caches that use swa_count (tied to max_seqs_per_batch).
-    // c1 layer: 1 cache 鈥?swa (swa_count, window_size, 1, head_dim)
-    // c4 layer: 5 caches use swa 鈥?swa_cache, compress_kv_state,
+    // c1 layer: 1 cache -- swa (swa_count, window_size, 1, head_dim)
+    // c4 layer: 5 caches use swa -- swa_cache, compress_kv_state,
     // compress_score_state,
     //           compress_index_kv_state, compress_index_score_state (shapes
     //           with block_size, float32)
-    // c128 layer: 3 caches use swa 鈥?swa_cache, compress_kv_state,
+    // c128 layer: 3 caches use swa -- swa_cache, compress_kv_state,
     // compress_score_state
     const int64_t swa_bytes_per_c1_layer =
         kv_cache_cap.swa_count() * window_size * head_dim * dtype_size;

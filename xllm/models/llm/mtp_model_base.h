@@ -24,8 +24,8 @@ limitations under the License.
 #include <vector>
 
 #include "core/framework/state_dict/utils.h"
-#include "core/util/utils.h"
 #include "llm_model_base.h"
+#include "core/util/utils.h"
 
 namespace xllm {
 
@@ -277,9 +277,9 @@ class MtpModelImplBase : public torch::nn::Module {
     // for dp, if tokens is empty, set tokens to 1 and positions to 0
     ModelInputParams modified_input_params = input_params;
     if (dp_size_ > 1) {
-      if (tokens.numel() == 0) {
-        tokens = torch::tensor({0}).to(torch::kInt32).to(device_);
-        positions = torch::tensor({0}).to(torch::kInt32).to(device_);
+      if (tokens.sizes() == 0) {
+        tokens = torch::tensor({1}).to(torch::kInt32).to(device_);
+        positions = torch::tensor({1}).to(torch::kInt32).to(device_);
       }
       auto& dp_token_nums = modified_input_params.dp_global_token_nums;
       std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);

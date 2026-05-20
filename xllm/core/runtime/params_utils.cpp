@@ -254,6 +254,10 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   // multi block manager support for DeepSeek V4
   for (int m = 0; m < pb_forward_input->multi_block_tables_vec().size(); ++m) {
     const auto& mgr = pb_forward_input->multi_block_tables_vec()[m];
+    CHECK_EQ(static_cast<size_t>(mgr.block_tables().size()),
+             static_cast<size_t>(input_params.num_sequences))
+        << "multi_block_tables[" << m << "] size (" << mgr.block_tables().size()
+        << ") must match num_sequences (" << input_params.num_sequences << ")";
     std::vector<std::vector<int32_t>> mgr_tables;
     mgr_tables.reserve(mgr.block_tables().size());
     for (int s = 0; s < mgr.block_tables().size(); ++s) {
