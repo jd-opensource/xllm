@@ -645,6 +645,25 @@ torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
   return output;
 }
 
+bool ColumnParallelLinearImpl::uses_w8a8_dynamic_quant() const {
+  return is_w8a8_dynamic_quant(resolved_weight_quant_method_);
+}
+
+torch::Tensor ColumnParallelLinearImpl::w8a8_dynamic_weight_scale() const {
+  CHECK(uses_w8a8_dynamic_quant())
+      << "w8a8_dynamic_weight_scale requires w8a8_dynamic quant method.";
+  CHECK(weight_scale_is_loaded_ && weight_scale_.defined())
+      << "weight_scale is required for w8a8_dynamic quant matmul.";
+  return weight_scale_;
+}
+
+std::optional<torch::Tensor> ColumnParallelLinearImpl::bias() const {
+  if (bias_.defined()) {
+    return bias_;
+  }
+  return std::nullopt;
+}
+
 // load the weight from the checkpoint
 void ColumnParallelLinearImpl::load_state_dict(const StateDict& state_dict) {
   const int64_t rank = world_size_ == 1 ? 0 : rank_;
@@ -1480,7 +1499,9 @@ ReplicatedLinearImpl::ReplicatedLinearImpl(
     const QuantArgs& quant_args,
     const torch::TensorOptions& options,
     const LinearExtraArgs& linear_extra_args)
-    : quant_args_(quant_args), options_(options) {
+    : quant_args_(quant_args),
+      options_(options),
+      output_dtype_(c10::typeMetaToScalarType(options.dtype())) {
   (void)linear_extra_args;
   if (!quant_args_.quant_descs().empty()) {
     // quant_descs is not empty: default initialize weight as kInt8.
@@ -1541,6 +1562,29 @@ torch::Tensor ReplicatedLinearImpl::forward(torch::Tensor input) {
 
   auto output = xllm::kernel::matmul(matmul_params);
   return output;
+}
+
+bool ReplicatedLinearImpl::uses_w8a8_dynamic_quant() const {
+  return is_w8a8_dynamic_quant(resolved_weight_quant_method_);
+}
+
+torch::Tensor ReplicatedLinearImpl::w8a8_dynamic_weight_scale() const {
+  CHECK(uses_w8a8_dynamic_quant())
+      << "w8a8_dynamic_weight_scale requires w8a8_dynamic quant method.";
+  CHECK(weight_scale_is_loaded_ && weight_scale_.defined())
+      << "weight_scale is required for w8a8_dynamic quant matmul.";
+  return weight_scale_;
+}
+
+at::ScalarType ReplicatedLinearImpl::output_dtype() const {
+  return output_dtype_;
+}
+
+std::optional<torch::Tensor> ReplicatedLinearImpl::bias() const {
+  if (bias_.defined()) {
+    return bias_;
+  }
+  return std::nullopt;
 }
 
 // load the weight from the checkpoint
