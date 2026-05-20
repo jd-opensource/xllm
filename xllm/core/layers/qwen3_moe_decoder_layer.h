@@ -22,6 +22,8 @@ limitations under the License.
 #include "layers/mlu/fused_moe.h"
 #elif defined(USE_ILU)
 #include "layers/ilu/fused_moe.h"
+#elif defined(USE_CUDA)
+#include "layers/cuda/fused_moe.h"
 #else
 #include "layers/common/fused_moe.h"
 #endif

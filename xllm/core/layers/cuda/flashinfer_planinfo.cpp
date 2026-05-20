@@ -60,6 +60,17 @@ static ffi::Array<int64_t> deep_copy_plan_info(const ffi::Array<int64_t>& src) {
   return ffi::Array<int64_t>(temp_vec.begin(), temp_vec.end());
 }
 
+static torch::Tensor get_kv_len_arr_host(const AttentionMetadata& attn_meta) {
+  if (attn_meta.kv_seq_lens.defined()) {
+    return attn_meta.kv_seq_lens.to(torch::kCPU);
+  }
+
+  CHECK(attn_meta.kv_cu_seq_lens.defined())
+      << "kv_seq_lens or kv_cu_seq_lens must be defined.";
+  torch::Tensor kv_cu_seq_lens_host = attn_meta.kv_cu_seq_lens.to(torch::kCPU);
+  return kv_cu_seq_lens_host.slice(0, 1) - kv_cu_seq_lens_host.slice(0, 0, -1);
+}
+
 void update_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
                               const std::string& backend,
                               const AttentionMetadata& attn_meta,
@@ -208,7 +219,7 @@ void update_chunked_prefill_plan_info(std::shared_ptr<PlanInfo> plan_info,
 
   torch::Tensor paged_kv_indptr_host =
       attn_meta.paged_kv_indptr.to(torch::kCPU);
-  torch::Tensor kv_len_arr_host = attn_meta.kv_seq_lens.to(torch::kCPU);
+  torch::Tensor kv_len_arr_host = get_kv_len_arr_host(attn_meta);
 
   const int64_t total_num_rows = qo_indptr_host[-1].item<int64_t>();
 

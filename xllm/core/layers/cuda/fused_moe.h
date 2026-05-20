@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,21 +17,22 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include "dense_mlp.h"
+#include <string>
+#include <vector>
+
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
-#include "fused_moe_base.h"
-#include "linear.h"
+#include "layers/common/fused_moe_base.h"
+#include "layers/common/linear.h"
+#include "layers/common/moe_fused_topk.h"
 
 namespace xllm {
 namespace layer {
 
-// FusedMoE common implementation - placeholder for unsupported backends
-// Actual implementations are in backend-specific fused_moe.h files.
 class FusedMoEImpl : public torch::nn::Module {
  public:
   FusedMoEImpl() = default;
@@ -42,11 +43,33 @@ class FusedMoEImpl : public torch::nn::Module {
                const torch::TensorOptions& options);
 
   torch::Tensor forward_experts(const torch::Tensor& hidden_states,
-                                const torch::Tensor& router_logits,
-                                bool enable_all2all_communication);
+                                torch::Tensor router_logits);
   torch::Tensor forward(const torch::Tensor& hidden_states,
                         const ModelInputParams& input_params);
   void load_state_dict(const StateDict& state_dict);
+
+ private:
+  int64_t num_total_experts_;
+  int64_t hidden_size_;
+
+  int64_t num_experts_per_rank_;
+  int64_t start_expert_id_;
+  int32_t ep_size_;
+  int32_t ep_rank_;
+
+  ReplicatedLinear gate_{nullptr};
+  MoEFusedTopk fused_topk_{nullptr};
+
+  torch::TensorOptions options_;
+  ProcessGroup* tp_pg_ = nullptr;
+  ProcessGroup* ep_pg_ = nullptr;
+
+  DEFINE_WEIGHT(w13);
+  DEFINE_FUSED_WEIGHT(w1);
+  DEFINE_FUSED_WEIGHT(w3);
+  DEFINE_FUSED_WEIGHT(w2);
+
+  void load_experts(const StateDict& state_dict);
 };
 TORCH_MODULE(FusedMoE);
 
