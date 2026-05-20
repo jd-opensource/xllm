@@ -224,10 +224,12 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
   input_params.batch_forward_type =
       BatchForwardType(pb_forward_input->batch_forward_type());
   input_params.num_sequences = pb_forward_input->num_sequences();
-  CHECK_EQ(block_tables_vec.size(),
-           static_cast<size_t>(input_params.num_sequences))
-      << "block_tables_vec size (" << block_tables_vec.size()
-      << ") must match num_sequences (" << input_params.num_sequences << ")";
+  if (!block_tables_vec.empty()) {
+    CHECK_EQ(block_tables_vec.size(),
+             static_cast<size_t>(input_params.num_sequences))
+        << "block_tables_vec size (" << block_tables_vec.size()
+        << ") must match num_sequences (" << input_params.num_sequences << ")";
+  }
   input_params.kv_max_seq_len = pb_forward_input->max_seq_len();
   input_params.q_max_seq_len = pb_forward_input->q_max_seq_len();
   input_params.kv_seq_lens = torch::tensor(seq_lens, tensor_options);
