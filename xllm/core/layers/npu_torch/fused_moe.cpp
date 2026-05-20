@@ -278,7 +278,9 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       skip_gate_load_(moe_args.skip_gate_load),
       renormalize_(model_args.norm_topk_prob() ? 1 : 0),
       hidden_act_(model_args.hidden_act()),
-      scoring_func_(model_args.scoring_func()),
+      scoring_func_(model_args.scoring_func().empty()
+                        ? std::string("softmax")
+                        : model_args.scoring_func()),
       is_smoothquant_(quant_args.quant_method() == "smoothquant"),
       quant_args_(quant_args),
       parallel_args_(parallel_args),
@@ -618,20 +620,45 @@ torch::Tensor FusedMoEImpl::select_experts(
         << hidden_states_2d.size(0) << ", got " << topk_ids.size(0);
     topk_weights = topk_weights.to(hidden_states_2d.dtype());
   } else {
-    // prepare the parameters for select_experts
-    xllm::kernel::MoeFusedTopkParams moe_active_topk_params;
-    moe_active_topk_params.input = router_logits_2d;
-    moe_active_topk_params.topk = topk_;
-    // moe_active_topk_params.num_expert_group = num_expert_group_;
-    // moe_active_topk_params.topk_group = topk_group_;
-    moe_active_topk_params.normalize = static_cast<bool>(renormalize_);
-    // moe_active_topk_params.normed_by = "topk_logit";
-    moe_active_topk_params.scoring_func = scoring_func_;
-    // moe_active_topk_params.route_scale = route_scale_;
-    // moe_active_topk_params.e_score_correction_bias = e_score_correction_bias;
-    std::tie(topk_weights, topk_ids) =
-        xllm::kernel::moe_active_topk(moe_active_topk_params);
-    topk_ids = topk_ids.to(torch::kInt32);
+    // Use NPU fused kernel for simple softmax routing without bias.
+    if (scoring_func_ == "softmax" && !e_score_correction_bias_.defined()) {
+      xllm::kernel::MoeFusedTopkParams moe_active_topk_params;
+      moe_active_topk_params.input = router_logits_2d;
+      moe_active_topk_params.topk = topk_;
+      moe_active_topk_params.normalize = static_cast<bool>(renormalize_);
+      moe_active_topk_params.scoring_func = scoring_func_;
+      std::tie(topk_weights, topk_ids) =
+          xllm::kernel::moe_active_topk(moe_active_topk_params);
+      topk_ids = topk_ids.to(torch::kInt32);
+    } else {
+      // PyTorch-based routing for sigmoid scoring, routing bias, etc.
+      auto logits_f32 = router_logits_2d.to(torch::kFloat32);
+      torch::Tensor routing_scores;
+      if (scoring_func_ == "sigmoid") {
+        routing_scores = torch::sigmoid(logits_f32);
+      } else {
+        routing_scores = torch::softmax(logits_f32, /*dim=*/-1);
+      }
+
+      auto choice_scores = routing_scores;
+      if (e_score_correction_bias_.defined()) {
+        choice_scores = choice_scores + e_score_correction_bias_;
+      }
+
+      auto topk_result = torch::topk(choice_scores,
+                                     topk_,
+                                     /*dim=*/-1,
+                                     /*largest=*/true,
+                                     /*sorted=*/false);
+      topk_ids = std::get<1>(topk_result).to(torch::kInt32).contiguous();
+      topk_weights = routing_scores.gather(
+          /*dim=*/1, topk_ids.to(torch::kLong).contiguous());
+
+      if (renormalize_) {
+        topk_weights = topk_weights / (topk_weights.sum(-1, true) + 1e-6);
+      }
+      topk_weights = topk_weights.contiguous();
+    }
   }
 
   xllm::kernel::MoeInitRoutingV2Params moe_init_routing_params;

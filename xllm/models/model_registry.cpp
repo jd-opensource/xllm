@@ -73,7 +73,8 @@ bool is_torch_only_model_type(const std::string& model_type) {
       "qwen3_5_moe_text",
       "qwen3_5_mtp",
       "qwen3_5_moe_mtp",
-      "qwen3_next"};
+      "qwen3_next",
+      "minimax_m2"};
   return kTorchOnlyModelTypes.count(model_type) != 0;
 }
 #endif
