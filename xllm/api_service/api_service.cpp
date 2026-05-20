@@ -158,13 +158,12 @@ void APIService::Completions(::google::protobuf::RpcController* controller,
   if (FLAGS_backend == "llm") {
     completion_service_impl_->process_async_rpc_impl(request);
   } else if (FLAGS_backend == "rec") {
-    auto arena = GetArenaWithCheck<CompletionCall>(response);
     std::shared_ptr<Call> call = std::make_shared<CompletionCall>(
         ctrl,
         done_guard.release(),
         const_cast<proto::CompletionRequest*>(request),
         response,
-        arena != nullptr);
+        /*use_arena=*/true);
     rec_completion_service_impl_->process_async(call);
   }
 }
