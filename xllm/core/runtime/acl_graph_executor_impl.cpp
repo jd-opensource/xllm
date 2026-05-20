@@ -26,7 +26,6 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/framework/config/execution_config.h"
-#include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/speculative_config.h"
 #ifdef TORCH_HIGHER_THAN_PTA6
 #include <torch_npu/csrc/framework/OpCommand.h>
@@ -99,8 +98,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
 
   // Use max_tokens_per_batch for first dimension size
   // num_decode_tokens
-  const int64_t max_tokens_per_batch =
-      ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch();
+  const int64_t max_tokens_per_batch = options.max_tokens_per_batch();
   // num_sequences
   const int64_t max_seqs_per_batch = get_decode_graph_capacity(options);
   auto tensor_options = torch::TensorOptions().device(device);
@@ -185,8 +183,7 @@ void GraphPersistentParam::set_aux_hidden_states(const torch::Tensor& value) {
   if (aux_hidden_states_.numel() == 0) {
     // Lazy initialization: create aux_hidden_states tensor if not already
     // created
-    const int64_t max_tokens_per_batch =
-        ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch();
+    const int64_t max_tokens_per_batch = options_.max_tokens_per_batch();
     auto shape = value.sizes().vec();
     shape[0] = max_tokens_per_batch;
     torch::Dtype dtype = util::parse_dtype(args_.dtype(), device_);
@@ -303,8 +300,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
 
     // Initialize persistent_embedding_ if needed and not already initialized
     if (persistent_embedding_.numel() == 0) {
-      const int64_t max_tokens_per_batch =
-          ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch();
+      const int64_t max_tokens_per_batch = options_.max_tokens_per_batch();
       const int64_t embedding_dim = embedding.size(1);
       torch::Dtype dtype = util::parse_dtype(args_.dtype(), device_);
       persistent_embedding_ =

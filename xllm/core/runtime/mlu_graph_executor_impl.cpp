@@ -24,7 +24,6 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "core/framework/config/execution_config.h"
-#include "core/framework/config/scheduler_config.h"
 #include "framework/model/causal_vlm.h"
 #include "util/utils.h"
 #include "vlm_executor_impl.h"
@@ -203,8 +202,7 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
                                            const torch::Device& device,
                                            const runtime::Options& options)
     : num_decoding_tokens_(options.num_decoding_tokens()) {
-  const int64_t max_tokens =
-      ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch();
+  const int64_t max_tokens = options.max_tokens_per_batch();
   const int64_t max_seq_lens = get_seq_lens_capacity(options);
   const int64_t max_seq_len = args.max_position_embeddings();
   const uint32_t block_size = options.block_size();

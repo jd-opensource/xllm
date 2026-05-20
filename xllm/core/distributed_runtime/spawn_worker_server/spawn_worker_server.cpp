@@ -63,6 +63,8 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      int32_t device_idx,
                                      int32_t num_decoding_tokens,
                                      int32_t block_size,
+                                     int32_t max_tokens_per_batch,
+                                     int32_t max_seqs_per_batch,
                                      bool enable_shm,
                                      uint64_t input_shm_size,
                                      uint64_t output_shm_size,
@@ -88,6 +90,8 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   runner_options.block_size(block_size)
       .backend(backend)
       .world_size(world_size)
+      .max_tokens_per_batch(max_tokens_per_batch)
+      .max_seqs_per_batch(max_seqs_per_batch)
       .num_decoding_tokens(num_decoding_tokens)
       .enable_prefill_sp(enable_prefill_sp)
       .enable_speculative_decode(enable_speculative_decode)
@@ -106,7 +110,10 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
       .enable_prefill_piecewise_graph(enable_prefill_piecewise_graph)
       .max_tokens_for_graph_mode(max_tokens_for_graph_mode)
       .task_type(task_type);
-  SchedulerConfig::get_instance().enable_schedule_overlap(false);
+  SchedulerConfig::get_instance()
+      .max_tokens_per_batch(max_tokens_per_batch)
+      .max_seqs_per_batch(max_seqs_per_batch)
+      .enable_schedule_overlap(false);
   ParallelConfig::get_instance()
       .enable_prefill_sp(enable_prefill_sp)
       .communication_backend(communication_backend);

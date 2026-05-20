@@ -120,6 +120,7 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
       .profile_max_prompt_length(options.profile_max_prompt_length())
       .enable_profile_kv_blocks(options.enable_profile_kv_blocks())
       .max_tokens_per_batch(options.max_tokens_per_batch())
+      .max_seqs_per_batch(options.max_seqs_per_batch())
       .max_global_tpot_ms(options.max_global_tpot_ms())
       .max_global_ttft_ms(options.max_global_ttft_ms())
       .enable_profile_token_budget(options.enable_profile_token_budget());

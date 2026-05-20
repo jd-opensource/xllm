@@ -29,6 +29,8 @@ limitations under the License.
 // @device_idx
 // @num_decoding_tokens
 // @block_size
+// @max_tokens_per_batch
+// @max_seqs_per_batch
 // @enable_shm
 // @is_local
 // @enable_prefill_sp
@@ -47,9 +49,9 @@ limitations under the License.
 // @enable_prefill_piecewise_graph
 // @max_tokens_for_graph_mode
 int main(int argc, char* argv[]) {
-  if (argc < 25) {
+  if (argc < 27) {
     LOG(ERROR)
-        << "Spawn worker process receive wrong args. Need 25 args, receive "
+        << "Spawn worker process receive wrong args. Need 27 args, receive "
         << argc;
     return 1;
   }
@@ -61,25 +63,27 @@ int main(int argc, char* argv[]) {
   int32_t device_idx = static_cast<int32_t>(atoi(argv[5]));
   int32_t num_decoding_tokens = static_cast<int32_t>(atoi(argv[6]));
   int32_t block_size = static_cast<int32_t>(atoi(argv[7]));
-  int32_t enable_shm = static_cast<int32_t>(atoi(argv[8]));
-  int32_t is_local = static_cast<int32_t>(atoi(argv[9]));
-  int32_t enable_prefill_sp = static_cast<int32_t>(atoi(argv[10]));
-  std::string task_type = std::string(argv[11]);
-  std::string worker_type = std::string(argv[12]);
-  int32_t enable_speculative_decode = static_cast<int32_t>(atoi(argv[13]));
-  int32_t num_speculative_tokens = static_cast<int32_t>(atoi(argv[14]));
-  std::string speculative_algorithm = std::string(argv[15]);
-  uint64_t input_shm_size = static_cast<uint64_t>(atoll(argv[16]));
-  uint64_t output_shm_size = static_cast<uint64_t>(atoll(argv[17]));
-  std::string communication_backend = std::string(argv[18]);
-  std::string npu_kernel_backend = std::string(argv[19]);
-  std::string rank_tablefile = std::string(argv[20]);
-  bool enable_graph = static_cast<int32_t>(atoi(argv[21])) > 0;
+  int32_t max_tokens_per_batch = static_cast<int32_t>(atoi(argv[8]));
+  int32_t max_seqs_per_batch = static_cast<int32_t>(atoi(argv[9]));
+  int32_t enable_shm = static_cast<int32_t>(atoi(argv[10]));
+  int32_t is_local = static_cast<int32_t>(atoi(argv[11]));
+  int32_t enable_prefill_sp = static_cast<int32_t>(atoi(argv[12]));
+  std::string task_type = std::string(argv[13]);
+  std::string worker_type = std::string(argv[14]);
+  int32_t enable_speculative_decode = static_cast<int32_t>(atoi(argv[15]));
+  int32_t num_speculative_tokens = static_cast<int32_t>(atoi(argv[16]));
+  std::string speculative_algorithm = std::string(argv[17]);
+  uint64_t input_shm_size = static_cast<uint64_t>(atoll(argv[18]));
+  uint64_t output_shm_size = static_cast<uint64_t>(atoll(argv[19]));
+  std::string communication_backend = std::string(argv[20]);
+  std::string npu_kernel_backend = std::string(argv[21]);
+  std::string rank_tablefile = std::string(argv[22]);
+  bool enable_graph = static_cast<int32_t>(atoi(argv[23])) > 0;
   bool enable_graph_mode_decode_no_padding =
-      static_cast<int32_t>(atoi(argv[22])) > 0;
+      static_cast<int32_t>(atoi(argv[24])) > 0;
   bool enable_prefill_piecewise_graph =
-      static_cast<int32_t>(atoi(argv[23])) > 0;
-  int32_t max_tokens_for_graph_mode = static_cast<int32_t>(atoi(argv[24]));
+      static_cast<int32_t>(atoi(argv[25])) > 0;
+  int32_t max_tokens_for_graph_mode = static_cast<int32_t>(atoi(argv[26]));
 
   LOG(INFO)
       << "Spawn worker: "
@@ -88,6 +92,8 @@ int main(int argc, char* argv[]) {
       << ", device_idx = " << device_idx
       << ", num_decoding_tokens = " << num_decoding_tokens
       << ", block_size = " << block_size
+      << ", max_tokens_per_batch = " << max_tokens_per_batch
+      << ", max_seqs_per_batch = " << max_seqs_per_batch
       << ", enable_shm = " << (enable_shm > 0)
       << ", input_shm_size = " << input_shm_size
       << ", output_shm_size = " << output_shm_size
@@ -113,6 +119,8 @@ int main(int argc, char* argv[]) {
                                  device_idx,
                                  num_decoding_tokens,
                                  block_size,
+                                 max_tokens_per_batch,
+                                 max_seqs_per_batch,
                                  enable_shm > 0,
                                  input_shm_size,
                                  output_shm_size,
