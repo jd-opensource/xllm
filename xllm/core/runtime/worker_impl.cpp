@@ -326,14 +326,14 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
     return false;
   }
 
+#if defined(USE_NPU)
   if (is_spec_draft_) {
     kv_cache_transfer_->register_kv_cache_spec(
         kv_caches_, kv_cache_shape, dtype_);
   } else {
     kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
   }
-
-#if defined(USE_MLU)
+#else
   kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
 #endif
 
