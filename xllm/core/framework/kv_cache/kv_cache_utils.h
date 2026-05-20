@@ -25,6 +25,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
+#include "util/tensor_helper.h"
 
 #if defined(USE_NPU)
 #ifdef TORCH_HIGHER_THAN_PTA6
@@ -142,21 +143,17 @@ struct DeepSeekV4CachePolicy {
   int64_t scale_dtype_size = 2;
 };
 
-inline int64_t get_dsv4_dtype_size(torch::ScalarType dtype) {
-  return static_cast<int64_t>(torch::scalarTypeToTypeMeta(dtype).itemsize());
-}
-
 inline DeepSeekV4CachePolicy get_dsv4_cache_policy(
     torch::ScalarType model_dtype) {
   DeepSeekV4CachePolicy policy;
 #if defined(USE_MLU)
   policy.index_dtype = model_dtype;
-  policy.index_dtype_size = get_dsv4_dtype_size(model_dtype);
+  policy.index_dtype_size = get_dtype_size(model_dtype);
   policy.has_indexer_cache_scale = false;
   policy.scale_dtype_size = 0;
 #else
-  policy.index_dtype_size = get_dsv4_dtype_size(policy.index_dtype);
-  policy.scale_dtype_size = get_dsv4_dtype_size(policy.scale_dtype);
+  policy.index_dtype_size = get_dtype_size(policy.index_dtype);
+  policy.scale_dtype_size = get_dtype_size(policy.scale_dtype);
 #endif
   return policy;
 }

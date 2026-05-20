@@ -431,20 +431,19 @@ void BatchInputBuilder::process_sequences_multithreaded() {
                                          state.paged_kv_last_page_len.begin(),
                                          state.paged_kv_last_page_len.end());
 
-    if (!state.multi_block_tables_vec.empty()) {
-      if (state_.multi_block_tables_vec.empty()) {
-        state_.multi_block_tables_vec.resize(
-            state.multi_block_tables_vec.size());
+    if (!state.multi_block_tables.empty()) {
+      if (state_.multi_block_tables.empty()) {
+        state_.multi_block_tables.resize(state.multi_block_tables.size());
       }
-      CHECK_EQ(state_.multi_block_tables_vec.size(),
-               state.multi_block_tables_vec.size())
+      CHECK_EQ(state_.multi_block_tables.size(),
+               state.multi_block_tables.size())
           << "multi_block_tables manager count mismatch while merging thread "
              "states. dst_manager_num="
-          << state_.multi_block_tables_vec.size()
-          << ", src_manager_num=" << state.multi_block_tables_vec.size();
-      for (size_t m = 0; m < state.multi_block_tables_vec.size(); ++m) {
-        auto& dst_mgr_tables = state_.multi_block_tables_vec[m];
-        const auto& src_mgr_tables = state.multi_block_tables_vec[m];
+          << state_.multi_block_tables.size()
+          << ", src_manager_num=" << state.multi_block_tables.size();
+      for (size_t m = 0; m < state.multi_block_tables.size(); ++m) {
+        auto& dst_mgr_tables = state_.multi_block_tables[m];
+        const auto& src_mgr_tables = state.multi_block_tables[m];
         dst_mgr_tables.insert(
             dst_mgr_tables.end(), src_mgr_tables.begin(), src_mgr_tables.end());
       }
@@ -666,12 +665,12 @@ void BatchInputBuilder::setup_kv_cache_info(
   const auto blocks = sequence->kv_state().kv_blocks();
   const auto composite_blocks = sequence->kv_state().composite_blocks();
   if (!composite_blocks.empty()) {
-    if (state.multi_block_tables_vec.empty()) {
-      state.multi_block_tables_vec.resize(composite_blocks.size());
+    if (state.multi_block_tables.empty()) {
+      state.multi_block_tables.resize(composite_blocks.size());
     }
-    CHECK_EQ(state.multi_block_tables_vec.size(), composite_blocks.size())
+    CHECK_EQ(state.multi_block_tables.size(), composite_blocks.size())
         << "composite block manager count mismatch. existing_manager_num="
-        << state.multi_block_tables_vec.size()
+        << state.multi_block_tables.size()
         << ", current_manager_num=" << composite_blocks.size();
     for (size_t m = 0; m < composite_blocks.size(); ++m) {
       const auto& composite_block = composite_blocks[m];
@@ -680,15 +679,15 @@ void BatchInputBuilder::setup_kv_cache_info(
       for (const auto& block : composite_block) {
         block_ids.push_back(block.id());
       }
-      state.multi_block_tables_vec[m].emplace_back(std::move(block_ids));
+      state.multi_block_tables[m].emplace_back(std::move(block_ids));
     }
     return;
   }
 
   // Keep [manager][batch][block_ids] row-aligned even if a sequence has no
   // composite blocks.
-  if (!state.multi_block_tables_vec.empty()) {
-    for (auto& mgr_tables : state.multi_block_tables_vec) {
+  if (!state.multi_block_tables.empty()) {
+    for (auto& mgr_tables : state.multi_block_tables) {
       mgr_tables.emplace_back(std::vector<int32_t>{});
     }
   }
@@ -770,8 +769,8 @@ void BatchInputBuilder::padding_decode_batch_size(
                                     num_decoding_tokens);
 #endif
         state_.block_tables_vec.emplace_back();
-        if (!state_.multi_block_tables_vec.empty()) {
-          for (auto& mgr_tables : state_.multi_block_tables_vec) {
+        if (!state_.multi_block_tables.empty()) {
+          for (auto& mgr_tables : state_.multi_block_tables) {
             mgr_tables.emplace_back(std::vector<int32_t>{});
           }
         }
@@ -845,7 +844,7 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
       input_params.attention.device.block_tables;
 
   // Setup multi block tables for DeepSeek V4
-  for (auto& mgr_tables : state_.multi_block_tables_vec) {
+  for (auto& mgr_tables : state_.multi_block_tables) {
     util::pad_2d_vector(mgr_tables, /*pad_value=*/-1);
     input_params.multi_block_tables.push_back(
         create_2d_tensor(mgr_tables, torch::kInt));

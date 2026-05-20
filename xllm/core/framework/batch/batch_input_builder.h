@@ -108,7 +108,7 @@ class BatchInputBuilder {
     std::vector<std::vector<int32_t>> block_tables_vec;
     // multi block manager support for DeepSeek V4
     // [manager_num][batch_size][block_ids]
-    std::vector<std::vector<std::vector<int32_t>>> multi_block_tables_vec;
+    std::vector<std::vector<std::vector<int32_t>>> multi_block_tables;
 
     // beam search kernel input
     std::vector<float> acc_logprob_vec;
