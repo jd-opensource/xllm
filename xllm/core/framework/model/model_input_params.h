@@ -420,6 +420,12 @@ struct ModelInputParams {
         safe_to(graph_buffer.attn_mask, device, true);
     params.graph_buffer.tiling_data =
         safe_to(graph_buffer.tiling_data, device, true);
+    params.graph_buffer.xfa_q_cu_seq_lens =
+        safe_to(graph_buffer.xfa_q_cu_seq_lens, device, true);
+    params.graph_buffer.xfa_extra_tiling =
+        safe_to(graph_buffer.xfa_extra_tiling, device, true);
+    params.graph_buffer.xfa_attn_mask =
+        safe_to(graph_buffer.xfa_attn_mask, device, true);
 
     // params for flashinfer
     params.paged_kv_indptr = safe_to(paged_kv_indptr, device);
@@ -666,6 +672,9 @@ struct ModelInputParams {
   struct GraphBuffer {
     torch::Tensor attn_mask;
     torch::Tensor tiling_data;
+    torch::Tensor xfa_q_cu_seq_lens;
+    torch::Tensor xfa_extra_tiling;
+    torch::Tensor xfa_attn_mask;
     bool use_expanded_decode_for_spec_verify_attention = false;
     torch::Tensor expanded_kv_seq_lens;
     torch::Tensor expanded_block_tables;

@@ -103,6 +103,24 @@ bool use_x_flash_decode() {
   return !env_flag_enabled("XLLM_DISABLE_XFLASH_DECODE");
 }
 
+bool use_x_flash_prefill() {
+  return !env_flag_enabled("XLLM_DISABLE_XFLASH_PREFILL");
+}
+
+bool use_x_flash_prefill_grouping() {
+  return !env_flag_enabled("XLLM_DISABLE_XFLASH_PREFILL_GROUPING");
+}
+
+bool allow_long_kv_x_flash_prefill_grouping() {
+  return env_flag_enabled("XLLM_ENABLE_XFLASH_LONG_PREFILL_GROUPING");
+}
+
+bool can_group_x_flash_prefill_slice(const XfaQuerySlice& slice) {
+  // Long-KV multi-core grouping must stay behind an explicit validation flag.
+  return use_x_flash_prefill_grouping() &&
+         (slice.core_count == 1 || allow_long_kv_x_flash_prefill_grouping());
+}
+
 torch::Tensor x_flash_attention_infer_with_query_split(
     const torch::Tensor& query,
     const torch::Tensor& key_cache,
@@ -165,33 +183,36 @@ torch::Tensor x_flash_attention_infer_with_query_split(
     q_offset += q_len;
   }
 
-  for (size_t group_start = 0; group_start < slices.size();) {
-    size_t group_end = group_start;
+  std::vector<char> consumed(slices.size(), false);
+  auto has_seq_in_group = [&](const std::vector<size_t>& group_indices,
+                              int64_t seq_idx) {
+    return std::any_of(
+        group_indices.begin(), group_indices.end(), [&](size_t idx) {
+          return slices[idx].seq_idx == seq_idx;
+        });
+  };
+  auto run_group = [&](const std::vector<size_t>& group_indices) {
+    CHECK(!group_indices.empty());
     int64_t core_count = 0;
-    while (group_end < slices.size() &&
-           core_count + slices[group_end].core_count <= kXfaMaxExtraInfoNodes) {
-      core_count += slices[group_end].core_count;
-      ++group_end;
-    }
-
-    const int64_t q_start = slices[group_start].q_start;
-    const int64_t q_end =
-        slices[group_end - 1].q_start + slices[group_end - 1].q_len;
-    auto group_query = query.narrow(0, q_start, q_end - q_start).contiguous();
-
+    std::vector<torch::Tensor> query_parts;
     std::vector<int32_t> group_q_lens;
     std::vector<int32_t> group_kv_lens;
     std::vector<int64_t> block_indices;
-    group_q_lens.reserve(group_end - group_start);
-    group_kv_lens.reserve(group_end - group_start);
-    block_indices.reserve(group_end - group_start);
+    query_parts.reserve(group_indices.size());
+    group_q_lens.reserve(group_indices.size());
+    group_kv_lens.reserve(group_indices.size());
+    block_indices.reserve(group_indices.size());
     int32_t q_cu_len = 0;
-    for (size_t idx = group_start; idx < group_end; ++idx) {
-      q_cu_len += static_cast<int32_t>(slices[idx].q_len);
+    for (size_t idx : group_indices) {
+      const auto& slice = slices[idx];
+      core_count += slice.core_count;
+      query_parts.push_back(query.narrow(0, slice.q_start, slice.q_len));
+      q_cu_len += static_cast<int32_t>(slice.q_len);
       group_q_lens.push_back(q_cu_len);
-      group_kv_lens.push_back(static_cast<int32_t>(slices[idx].kv_len));
-      block_indices.push_back(slices[idx].seq_idx);
+      group_kv_lens.push_back(static_cast<int32_t>(slice.kv_len));
+      block_indices.push_back(slice.seq_idx);
     }
+    auto group_query = torch::cat(query_parts, /*dim=*/0).contiguous();
 
     auto group_block_table =
         block_table
@@ -212,8 +233,63 @@ torch::Tensor x_flash_attention_infer_with_query_split(
                                                    kv_head,
                                                    scale,
                                                    "TND");
-    output.narrow(0, q_start, q_end - q_start).copy_(group_output);
-    group_start = group_end;
+    int64_t group_output_offset = 0;
+    for (size_t idx : group_indices) {
+      const auto& slice = slices[idx];
+      output.narrow(0, slice.q_start, slice.q_len)
+          .copy_(group_output.narrow(0, group_output_offset, slice.q_len));
+      group_output_offset += slice.q_len;
+    }
+  };
+
+  for (size_t group_start = 0; group_start < slices.size();) {
+    while (group_start < slices.size() && consumed[group_start]) {
+      ++group_start;
+    }
+    if (group_start >= slices.size()) {
+      break;
+    }
+
+    std::vector<size_t> group_indices{group_start};
+    int64_t core_count = slices[group_start].core_count;
+    const int64_t group_q_len = slices[group_start].q_len;
+    const int64_t group_kv_len = slices[group_start].kv_len;
+    const int64_t group_core_count = slices[group_start].core_count;
+    const bool groupable = can_group_x_flash_prefill_slice(slices[group_start]);
+
+    if (groupable && group_core_count > 1) {
+      // Long-KV multi-core grouping is only safe across distinct requests.
+      for (size_t idx = group_start + 1; idx < slices.size(); ++idx) {
+        if (consumed[idx] || slices[idx].q_len != group_q_len ||
+            slices[idx].kv_len != group_kv_len ||
+            slices[idx].core_count != group_core_count ||
+            has_seq_in_group(group_indices, slices[idx].seq_idx)) {
+          continue;
+        }
+        if (core_count + slices[idx].core_count > kXfaMaxExtraInfoNodes) {
+          break;
+        }
+        core_count += slices[idx].core_count;
+        group_indices.push_back(idx);
+      }
+    } else {
+      size_t group_end = group_start + 1;
+      while (groupable && group_end < slices.size() && !consumed[group_end] &&
+             slices[group_end].q_len == group_q_len &&
+             slices[group_end].core_count == group_core_count &&
+             core_count + slices[group_end].core_count <=
+                 kXfaMaxExtraInfoNodes) {
+        core_count += slices[group_end].core_count;
+        group_indices.push_back(group_end);
+        ++group_end;
+      }
+    }
+
+    run_group(group_indices);
+    for (size_t idx : group_indices) {
+      consumed[idx] = true;
+    }
+    ++group_start;
   }
   return output;
 }
@@ -292,6 +368,48 @@ torch::Tensor x_flash_attention_infer_decode_with_batch_split(
   return output;
 }
 
+torch::Tensor x_flash_attention_infer_decode_for_graph(
+    const torch::Tensor& query,
+    const torch::Tensor& key_cache,
+    const torch::Tensor& value_cache,
+    const torch::Tensor& mask,
+    const torch::Tensor& block_table,
+    const torch::Tensor& q_cu_seq_lens,
+    const torch::Tensor& kv_seq_lens,
+    const torch::Tensor& extra_tiling,
+    int64_t q_head,
+    int64_t kv_head,
+    double scale) {
+  CHECK_EQ(query.dim(), 3)
+      << "decode query must be [batch, q_heads, head_size]";
+  CHECK(q_cu_seq_lens.defined())
+      << "graph decode requires device q cumulative seq lens";
+  CHECK(kv_seq_lens.defined()) << "graph decode requires device kv seq lens";
+  CHECK(extra_tiling.defined()) << "graph decode requires fixed extra tiling";
+  auto actual_q_lens = q_cu_seq_lens;
+  if (actual_q_lens.numel() == query.size(0) + 1) {
+    actual_q_lens =
+        actual_q_lens.narrow(/*dim=*/0, /*start=*/1, /*length=*/query.size(0));
+  }
+  CHECK_EQ(actual_q_lens.numel(), query.size(0));
+  CHECK_EQ(kv_seq_lens.numel(), query.size(0));
+  CHECK_EQ(actual_q_lens.scalar_type(), torch::kInt32);
+  CHECK_EQ(kv_seq_lens.scalar_type(), torch::kInt32);
+  return xllm::kernel::npu::x_flash_attention_infer_with_extra_tiling(
+      query,
+      key_cache,
+      value_cache,
+      mask,
+      block_table,
+      actual_q_lens,
+      kv_seq_lens,
+      extra_tiling,
+      q_head,
+      kv_head,
+      scale,
+      "TND");
+}
+
 }  // namespace
 
 AttentionImpl::AttentionImpl(int64_t num_heads,
@@ -360,7 +478,47 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
   query = query.view({-1, num_heads_, head_size_});
   output = output.view({-1, num_heads_, head_size_});
 
+  auto run_fia_prefill = [&]() {
+    if (attn_metadata.is_prefill) {
+      auto key_view = key.view({-1, num_kv_heads_, head_size_});
+      auto value_view = value.view({-1, num_kv_heads_, head_size_});
+      auto fallback_output = torch::empty_like(query);
+      xllm::kernel::npu::batch_prefill(
+          query,
+          key_view,
+          value_view,
+          attn_metadata.fia_attn_mask.defined()
+              ? attn_metadata.fia_attn_mask
+              : get_fia_split_fuse_attn_mask(query),
+          attn_metadata.q_seq_lens,
+          scale_,
+          fallback_output);
+      return fallback_output;
+    }
+
+    auto fallback_output = torch::empty_like(query);
+    xllm::kernel::npu::batch_chunked_paged_prefill(
+        query,
+        k_cache,
+        v_cache.value(),
+        scale_,
+        attn_metadata.block_table,
+        attn_metadata.kv_seq_lens,
+        attn_metadata.fia_attn_mask.defined()
+            ? attn_metadata.fia_attn_mask
+            : get_fia_split_fuse_attn_mask(query),
+        attn_metadata.q_seq_lens,
+        fallback_output);
+    return fallback_output;
+  };
+
   if (attn_metadata.is_prefill || attn_metadata.is_chunked_prefill) {
+    if (!use_x_flash_prefill()) {
+      auto fia_result = run_fia_prefill();
+      output.copy_(fia_result.view_as(output));
+      return;
+    }
+
     auto xfa_result = x_flash_attention_infer_with_query_split(
         query,
         k_cache,
@@ -392,11 +550,15 @@ void AttentionImpl::decoder_forward(torch::Tensor& query,
   if (attn_metadata.use_expanded_decode_for_spec_verify_attention) {
     block_table = attn_metadata.expanded_block_table;
     tiling_data = attn_metadata.expanded_paged_attention_tiling_data;
-    if (attn_metadata.expanded_kv_seq_lens_host.defined()) {
+    if (tiling_data.defined()) {
+      kv_seq_lens = attn_metadata.expanded_kv_seq_lens;
+    } else if (attn_metadata.expanded_kv_seq_lens_host.defined()) {
       kv_seq_lens = attn_metadata.expanded_kv_seq_lens_host;
     } else {
       kv_seq_lens = attn_metadata.expanded_kv_seq_lens;
     }
+  } else if (tiling_data.defined()) {
+    kv_seq_lens = attn_metadata.kv_seq_lens;
   } else if (attn_metadata.kv_seq_lens_host.defined()) {
     kv_seq_lens = attn_metadata.kv_seq_lens_host;
   } else {
@@ -404,18 +566,36 @@ void AttentionImpl::decoder_forward(torch::Tensor& query,
     kv_seq_lens = attn_metadata.kv_seq_lens;
   }
 
-  if (!tiling_data.defined() && v_cache.has_value() && use_x_flash_decode()) {
+  if (v_cache.has_value() && use_x_flash_decode()) {
     auto decode_query = query.view({-1, num_heads_, head_size_});
-    auto xfa_result = x_flash_attention_infer_decode_with_batch_split(
-        decode_query,
-        k_cache,
-        v_cache.value(),
-        get_fia_split_fuse_attn_mask(decode_query),
-        block_table,
-        kv_seq_lens,
-        num_heads_,
-        num_kv_heads_,
-        scale_);
+    torch::Tensor xfa_result;
+    if (tiling_data.defined()) {
+      xfa_result = x_flash_attention_infer_decode_for_graph(
+          decode_query,
+          k_cache,
+          v_cache.value(),
+          attn_metadata.xfa_attn_mask.defined()
+              ? attn_metadata.xfa_attn_mask
+              : get_fia_split_fuse_attn_mask(decode_query),
+          block_table,
+          attn_metadata.xfa_q_cu_seq_lens,
+          kv_seq_lens,
+          attn_metadata.xfa_extra_tiling,
+          num_heads_,
+          num_kv_heads_,
+          scale_);
+    } else {
+      xfa_result = x_flash_attention_infer_decode_with_batch_split(
+          decode_query,
+          k_cache,
+          v_cache.value(),
+          get_fia_split_fuse_attn_mask(decode_query),
+          block_table,
+          kv_seq_lens,
+          num_heads_,
+          num_kv_heads_,
+          scale_);
+    }
     output.copy_(xfa_result.view_as(output));
     return;
   }

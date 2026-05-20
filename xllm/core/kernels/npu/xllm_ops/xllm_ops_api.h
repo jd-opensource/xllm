@@ -65,4 +65,31 @@ torch::Tensor x_flash_attention_infer(const torch::Tensor& query,
                                       int64_t kv_head,
                                       double scale,
                                       const std::string& layout = "TND");
+
+torch::Tensor x_flash_attention_infer_with_extra_tiling(
+    const torch::Tensor& query,
+    const torch::Tensor& key_cache,
+    const torch::Tensor& value_cache,
+    const torch::Tensor& mask,
+    const torch::Tensor& block_table,
+    const torch::Tensor& actual_q_lens,
+    const torch::Tensor& actual_kv_lens,
+    const torch::Tensor& extra_tiling,
+    int64_t q_head,
+    int64_t kv_head,
+    double scale,
+    const std::string& layout = "TND");
+
+int64_t x_flash_attention_extra_tiling_int32_count();
+
+int64_t x_flash_attention_decode_group_size(int64_t kv_head);
+
+void update_x_flash_attention_extra_tiling(
+    const std::vector<int32_t>& actual_q_lens,
+    const std::vector<int32_t>& actual_kv_lens,
+    int64_t q_head,
+    int64_t kv_head,
+    int64_t block_size,
+    int64_t head_size,
+    torch::Tensor& extra_tiling);
 }  // namespace xllm::kernel::npu

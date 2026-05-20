@@ -118,6 +118,9 @@ class GraphPersistentParam {
     return persistent_mask_;
   }
   const torch::Tensor& tiling_data() const { return tiling_data_; }
+  const torch::Tensor& xfa_q_cu_seq_lens() const { return xfa_q_cu_seq_lens_; }
+  const torch::Tensor& xfa_extra_tiling() const { return xfa_extra_tiling_; }
+  const torch::Tensor& xfa_attn_mask() const { return xfa_attn_mask_; }
   torch::Tensor hidden_states(uint32_t actual_tokens = 0) const {
     if (actual_tokens > 0) {
       return hidden_states_.slice(
@@ -201,6 +204,11 @@ class GraphPersistentParam {
                                    const ModelInputParams& input_params,
                                    aclrtStream stream);
 
+  void update_x_flash_attention_extra_tiling(
+      const ModelInputParams& input_params,
+      uint32_t padded_batch_size,
+      const torch::Tensor& k_cache);
+
   std::vector<int32_t> update_expanded_spec_decode_attention(
       const ModelInputParams& input_params,
       uint32_t actual_num_tokens,
@@ -229,6 +237,7 @@ class GraphPersistentParam {
 
   // for deepseekv3.2
   torch::Tensor q_cu_seq_lens_;
+  torch::Tensor xfa_q_cu_seq_lens_;
 
   // for mtp model
   torch::Tensor persistent_embedding_;
@@ -248,6 +257,8 @@ class GraphPersistentParam {
 
   // Persistent paged attention tiling tensor on device
   torch::Tensor tiling_data_;
+  torch::Tensor xfa_extra_tiling_;
+  torch::Tensor xfa_attn_mask_;
 
   // Cached attention parameters
   int32_t num_head_;

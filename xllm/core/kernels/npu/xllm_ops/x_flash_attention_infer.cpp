@@ -88,7 +88,7 @@ torch::Tensor make_extra_tiling(const torch::Tensor& actual_q_lens,
   const auto* kv_lens = kv_lens_cpu.data_ptr<int32_t>();
   const int64_t batch = actual_q_lens.numel();
 
-  SplitKvExtraInfo extra_info;
+  SplitKvExtraInfo extra_info{};
   for (uint32_t i = 0; i < kMaxExtraInfoNodes; ++i) {
     extra_info.core_info[i].start_b_idx = std::numeric_limits<uint32_t>::max();
   }
@@ -154,6 +154,81 @@ torch::Tensor make_extra_tiling(const torch::Tensor& actual_q_lens,
   return extra_tiling_cpu.to(actual_q_lens.device(), /*non_blocking=*/false);
 }
 
+torch::Tensor make_extra_tiling_from_host_lens(
+    const std::vector<int32_t>& actual_q_lens,
+    const std::vector<int32_t>& actual_kv_lens,
+    int64_t q_head,
+    int64_t kv_head,
+    int64_t block_size,
+    int64_t head_size) {
+  CHECK_EQ(actual_q_lens.size(), actual_kv_lens.size())
+      << "actual_q_lens and actual_kv_lens must have the same length";
+  CHECK_GT(actual_q_lens.size(), 0) << "batch size must be positive";
+  CHECK_GT(q_head, 0) << "q_head must be positive";
+  CHECK_GT(kv_head, 0) << "kv_head must be positive";
+  CHECK_EQ(q_head % kv_head, 0) << "q_head must be divisible by kv_head";
+  CHECK_GT(block_size, 0) << "block_size must be positive";
+  CHECK_GT(head_size, 0) << "head_size must be positive";
+
+  SplitKvExtraInfo extra_info{};
+  for (uint32_t i = 0; i < kMaxExtraInfoNodes; ++i) {
+    extra_info.core_info[i].start_b_idx = std::numeric_limits<uint32_t>::max();
+  }
+
+  const uint32_t block_stack_num =
+      std::max<uint32_t>(1, kMaxKvStackLen / static_cast<uint32_t>(block_size));
+  uint32_t core_idx = 0;
+  uint32_t split_node_idx = 0;
+
+  for (int64_t batch_idx = 0;
+       batch_idx < static_cast<int64_t>(actual_q_lens.size());
+       ++batch_idx) {
+    const uint32_t kv_seq_len =
+        static_cast<uint32_t>(actual_kv_lens[batch_idx]);
+    const uint32_t kv_blocks =
+        (kv_seq_len + static_cast<uint32_t>(block_size) - 1) /
+        static_cast<uint32_t>(block_size);
+    const uint32_t s2_blocks =
+        (kv_blocks + block_stack_num - 1) / block_stack_num;
+
+    if (s2_blocks <= 1) {
+      CHECK_LT(core_idx, kMaxExtraInfoNodes)
+          << "x_flash_attention_infer extra_tiling core_info overflow";
+      auto& core = extra_info.core_info[core_idx++];
+      core.start_b_idx = static_cast<uint32_t>(batch_idx);
+      core.start_n1_idx = 0;
+      core.start_s2_idx = 0;
+      core.end_b_idx = static_cast<uint32_t>(batch_idx);
+      core.end_n1_idx = static_cast<uint32_t>(kv_head - 1);
+      core.end_s2_idx = s2_blocks;
+      continue;
+    }
+
+    for (uint32_t kv_head_idx = 0; kv_head_idx < static_cast<uint32_t>(kv_head);
+         ++kv_head_idx) {
+      CHECK_LT(core_idx, kMaxExtraInfoNodes)
+          << "x_flash_attention_infer extra_tiling core_info overflow";
+      auto& core = extra_info.core_info[core_idx++];
+      core.start_b_idx = static_cast<uint32_t>(batch_idx);
+      core.start_n1_idx = kv_head_idx;
+      core.start_s2_idx = 0;
+      core.end_b_idx = static_cast<uint32_t>(batch_idx);
+      core.end_n1_idx = kv_head_idx;
+      core.end_s2_idx = s2_blocks;
+    }
+  }
+  extra_info.total_split_node_num = split_node_idx;
+
+  const int64_t int32_count =
+      (sizeof(SplitKvExtraInfo) + sizeof(int32_t) - 1) / sizeof(int32_t);
+  auto extra_tiling_cpu =
+      torch::empty({int32_count}, torch::TensorOptions().dtype(torch::kInt32));
+  std::memcpy(extra_tiling_cpu.data_ptr<int32_t>(),
+              &extra_info,
+              sizeof(SplitKvExtraInfo));
+  return extra_tiling_cpu;
+}
+
 }  // namespace
 
 namespace xllm::kernel::npu {
@@ -184,15 +259,60 @@ torch::Tensor x_flash_attention_infer(const torch::Tensor& query,
   CHECK_EQ(actual_q_lens.scalar_type(), torch::kInt32);
   CHECK_EQ(actual_kv_lens.scalar_type(), torch::kInt32);
 
-  torch::Tensor output = torch::empty_like(query);
   torch::Tensor extra_tiling = make_extra_tiling(actual_q_lens,
                                                  actual_kv_lens,
                                                  q_head,
                                                  kv_head,
                                                  key_cache.size(1),
                                                  key_cache.size(3));
+  return x_flash_attention_infer_with_extra_tiling(query,
+                                                   key_cache,
+                                                   value_cache,
+                                                   mask,
+                                                   block_table,
+                                                   actual_q_lens,
+                                                   actual_kv_lens,
+                                                   extra_tiling,
+                                                   q_head,
+                                                   kv_head,
+                                                   scale,
+                                                   layout);
+}
+
+torch::Tensor x_flash_attention_infer_with_extra_tiling(
+    const torch::Tensor& query,
+    const torch::Tensor& key_cache,
+    const torch::Tensor& value_cache,
+    const torch::Tensor& mask,
+    const torch::Tensor& block_table,
+    const torch::Tensor& actual_q_lens,
+    const torch::Tensor& actual_kv_lens,
+    const torch::Tensor& extra_tiling,
+    int64_t q_head,
+    int64_t kv_head,
+    double scale,
+    const std::string& layout) {
+  check_tensor(query, "query", "x_flash_attention_infer");
+  check_tensor(key_cache, "key_cache", "x_flash_attention_infer");
+  check_tensor(value_cache, "value_cache", "x_flash_attention_infer");
+  check_tensor(mask, "mask", "x_flash_attention_infer");
+  check_tensor(block_table, "block_table", "x_flash_attention_infer");
+  check_tensor(actual_q_lens, "actual_q_lens", "x_flash_attention_infer");
+  check_tensor(actual_kv_lens, "actual_kv_lens", "x_flash_attention_infer");
+  check_tensor(extra_tiling, "extra_tiling", "x_flash_attention_infer");
+  CHECK_EQ(query.dim(), 3) << "query must be [tokens, q_heads, head_size]";
+  CHECK_EQ(key_cache.dim(), 4)
+      << "key_cache must be [blocks, block_size, kv_heads, head_size]";
+  CHECK_EQ(value_cache.dim(), 4)
+      << "value_cache must be [blocks, block_size, kv_heads, head_size]";
+  CHECK_EQ(actual_q_lens.scalar_type(), torch::kInt32);
+  CHECK_EQ(actual_kv_lens.scalar_type(), torch::kInt32);
+  CHECK_EQ(extra_tiling.scalar_type(), torch::kInt32);
+  CHECK_GE(extra_tiling.numel(), x_flash_attention_extra_tiling_int32_count());
+
   std::string layout_attr = layout;
   char* layout_attr_ptr = const_cast<char*>(layout_attr.c_str());
+  torch::Tensor output = torch::empty(query.sizes(), query.options());
 
   EXEC_NPU_CMD(aclnnXFlashAttentionInfer,
                query,
@@ -209,6 +329,31 @@ torch::Tensor x_flash_attention_infer(const torch::Tensor& query,
                scale,
                output);
   return output;
+}
+
+int64_t x_flash_attention_extra_tiling_int32_count() {
+  return (sizeof(SplitKvExtraInfo) + sizeof(int32_t) - 1) / sizeof(int32_t);
+}
+
+int64_t x_flash_attention_decode_group_size(int64_t kv_head) {
+  CHECK_GT(kv_head, 0);
+  return kMaxExtraInfoNodes / kv_head;
+}
+
+void update_x_flash_attention_extra_tiling(
+    const std::vector<int32_t>& actual_q_lens,
+    const std::vector<int32_t>& actual_kv_lens,
+    int64_t q_head,
+    int64_t kv_head,
+    int64_t block_size,
+    int64_t head_size,
+    torch::Tensor& extra_tiling) {
+  auto next_extra_tiling = make_extra_tiling_from_host_lens(
+      actual_q_lens, actual_kv_lens, q_head, kv_head, block_size, head_size);
+  CHECK_GE(extra_tiling.numel(), next_extra_tiling.numel())
+      << "x_flash_attention_infer persistent extra_tiling is too small";
+  extra_tiling.slice(/*dim=*/0, /*start=*/0, /*end=*/next_extra_tiling.numel())
+      .copy_(next_extra_tiling, /*non_blocking=*/false);
 }
 
 }  // namespace xllm::kernel::npu
