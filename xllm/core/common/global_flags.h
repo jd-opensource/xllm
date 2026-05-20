@@ -134,6 +134,8 @@ DECLARE_bool(enable_graph_vmm_pool);
 
 DECLARE_int32(max_tokens_for_graph_mode);
 
+DECLARE_int32(acl_graph_decode_batch_size_limit);
+
 DECLARE_bool(enable_chunked_prefill);
 
 DECLARE_string(master_node_addr);
@@ -346,6 +348,8 @@ DECLARE_bool(enable_customize_mla_kernel);
 DECLARE_string(npu_kernel_backend);
 
 DECLARE_bool(enable_intralayer_addnorm);
+
+DECLARE_int32(enable_fused_mc2);
 #endif
 
 // --- chat template config ---

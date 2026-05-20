@@ -419,7 +419,7 @@ void CollectiveCommunicator::create_process_groups(
   }
 
 #if defined(USE_NPU)
-  if (FLAGS_npu_kernel_backend == "TORCH" &&
+  if (::xllm::KernelConfig::get_instance().npu_kernel_backend() == "TORCH" &&
       FLAGS_expert_parallel_degree == 2 && ep_size == world_size) {
     auto dispatch_and_combine_comm = create_dispatch_and_combine_comm(
         global_rank, world_size, dp_size, ep_size, cp_size);

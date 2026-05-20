@@ -42,6 +42,9 @@ void dequant_from_paged_cache(ReshapeFromCacheParams& params);
 
 void fused_layernorm(FusedLayerNormParams& params);
 
+std::tuple<torch::Tensor, torch::Tensor> rms_norm_dynamic_quant(
+    RmsNormDynamicQuantParams& params);
+
 torch::Tensor matmul(MatmulParams& params);
 
 torch::Tensor quant_matmul(QuantMatmulParams& params);
@@ -132,6 +135,16 @@ moe_distribute_dispatch_v2(MoeDistributeDispatchV2Params& params);
 torch::Tensor moe_distribute_combine_v2(MoeDistributeCombineV2Params& params);
 
 bool has_moe_distribute_dispatch_combine_v2();
+
+std::tuple<torch::Tensor, torch::Tensor> dispatch_ffn_combine(
+    DispatchFFNCombineParams& params);
+
+bool has_dispatch_ffn_combine();
+
+std::tuple<torch::Tensor, torch::Tensor> dispatch_gmm_combine_decode(
+    DispatchGmmCombineDecodeParams& params);
+
+bool has_dispatch_gmm_combine_decode();
 
 // FP8 scaled quantize: quantizes input tensor to FP8 e4m3 format
 // Returns: (quantized_output, scale)

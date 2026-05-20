@@ -305,6 +305,15 @@ void fused_layernorm(FusedLayerNormParams& params) {
 #endif
 }
 
+std::tuple<torch::Tensor, torch::Tensor> rms_norm_dynamic_quant(
+    RmsNormDynamicQuantParams& params) {
+#if defined(USE_NPU)
+  return npu::rms_norm_dynamic_quant(params.input, params.weight, params.eps);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 torch::Tensor matmul(MatmulParams& params) {
 #if defined(USE_MLU)
   return mlu::matmul(
@@ -941,6 +950,68 @@ torch::Tensor moe_distribute_combine_v2(MoeDistributeCombineV2Params& params) {
 bool has_moe_distribute_dispatch_combine_v2() {
 #if defined(USE_NPU)
   return npu::has_moe_distribute_dispatch_combine_v2();
+#else
+  return false;
+#endif
+}
+
+std::tuple<torch::Tensor, torch::Tensor> dispatch_ffn_combine(
+    DispatchFFNCombineParams& params) {
+#if defined(USE_NPU)
+  return npu::apply_npu_dispatch_ffn_combine(params.x,
+                                             params.weight1,
+                                             params.weight2,
+                                             params.expert_ids,
+                                             params.scale1,
+                                             params.scale2,
+                                             params.probs,
+                                             params.group,
+                                             params.max_output_size,
+                                             params.swiglu_limit,
+                                             params.output,
+                                             params.expert_token_nums);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+bool has_dispatch_ffn_combine() {
+#if defined(USE_NPU)
+  return npu::has_dispatch_ffn_combine();
+#else
+  return false;
+#endif
+}
+
+std::tuple<torch::Tensor, torch::Tensor> dispatch_gmm_combine_decode(
+    DispatchGmmCombineDecodeParams& params) {
+#if defined(USE_NPU)
+  return npu::apply_npu_dispatch_gmm_combine_decode(
+      params.x,
+      params.expert_ids,
+      params.gmm1_permuted_weight,
+      params.gmm1_permuted_weight_scale,
+      params.gmm2_weight,
+      params.gmm2_weight_scale,
+      params.expert_scales,
+      params.expert_smooth_scales,
+      params.x_active_mask,
+      params.group_ep,
+      params.ep_rank_size,
+      params.ep_rank_id,
+      params.moe_expert_num,
+      params.shared_expert_num,
+      params.shared_expert_rank_num,
+      params.quant_mode,
+      params.global_bs);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
+bool has_dispatch_gmm_combine_decode() {
+#if defined(USE_NPU)
+  return npu::has_dispatch_gmm_combine_decode();
 #else
   return false;
 #endif

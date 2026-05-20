@@ -108,6 +108,7 @@ int64_t infer_actual_batch_size(const ModelInputParams& params) {
   }
   return 0;
 }
+
 }  // namespace
 
 // GraphPersistentParam implementation
@@ -1292,22 +1293,6 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   }
   // Keep actual n_tokens for replay output slicing.
   const uint32_t n_tokens = tokens_tensor.size(/*dim=*/0);
-  const uint32_t actual_batch_size = n_tokens / options_.num_decoding_tokens();
-
-  // Large decode batches create too many/too large ACL graphs and may OOM.
-  // Fall back to eager mode when batch size exceeds the safety threshold.
-  const uint32_t decode_batch_size_limit = static_cast<uint32_t>(
-      std::max<int32_t>(1, options_.max_seqs_per_batch()));
-  if (actual_batch_size > decode_batch_size_limit) {
-    LOG_FIRST_N(WARNING, 1)
-        << "Falling back to eager mode because decode batch_size ("
-        << actual_batch_size << ") > " << decode_batch_size_limit
-        << "; ACL graph is disabled for this request size to avoid OOM. "
-        << "This message is logged only once. "
-        << "Monitor counter 'num_model_execution_total_eager' for frequency.";
-    COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
-  }
 
   const uint32_t bucket_num_tokens = get_bucket_num_tokens(graph_num_tokens);
 

@@ -15,8 +15,11 @@ limitations under the License.
 
 #include "core/framework/config/kernel_config.h"
 
+#include <glog/logging.h>
+
 #include "core/common/global_flags.h"
 #include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/eplb_config.h"
 
 #if defined(USE_NPU)
 DEFINE_bool(enable_customize_mla_kernel, false, "enable customize mla kernel");
@@ -28,15 +31,40 @@ DEFINE_string(npu_kernel_backend,
 DEFINE_bool(enable_intralayer_addnorm,
             false,
             "enable fused intralayer addnorm ops.");
+
+DEFINE_int32(enable_fused_mc2,
+             -1,
+             "Fused MC2 mode for NPU EP MoE. -1 uses auto default, 0 "
+             "disables fused MC2, 1 uses DispatchFFNCombine, 2 uses "
+             "DispatchGmmCombineDecode.");
 #endif
 
 namespace xllm {
+namespace {
+
+#if defined(USE_NPU)
+int32_t resolve_fused_mc2_mode(int32_t mode) {
+  CHECK_GE(mode, -1) << "--enable_fused_mc2 must be -1, 0, 1, or 2.";
+  CHECK_LE(mode, 2) << "--enable_fused_mc2 must be -1, 0, 1, or 2.";
+
+  if (mode != -1) {
+    return mode;
+  }
+  if (EPLBConfig::get_instance().expert_parallel_degree() == 2) {
+    return 1;
+  }
+  return 0;
+}
+#endif
+
+}  // namespace
 
 void KernelConfig::from_flags() {
 #if defined(USE_NPU)
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_customize_mla_kernel);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(npu_kernel_backend);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_intralayer_addnorm);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_fused_mc2);
 #endif
 }
 
@@ -45,6 +73,7 @@ void KernelConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_customize_mla_kernel);
   XLLM_CONFIG_ASSIGN_FROM_JSON(npu_kernel_backend);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_intralayer_addnorm);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_fused_mc2);
 #endif
 }
 
@@ -58,6 +87,8 @@ void KernelConfig::append_config_json(
       config_json, default_config, npu_kernel_backend);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_intralayer_addnorm);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_fused_mc2);
 #endif
 }
 
@@ -71,6 +102,9 @@ void KernelConfig::initialize() {
   if (const auto& json_config = config::get_parsed_json_config()) {
     from_json(*json_config);
   }
+#if defined(USE_NPU)
+  enable_fused_mc2(resolve_fused_mc2_mode(enable_fused_mc2()));
+#endif
 }
 
 }  // namespace xllm

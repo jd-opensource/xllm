@@ -352,4 +352,8 @@ void npu_inplace_partial_rotary_mul(torch::Tensor& x,
                                     const torch::Tensor& r2,
                                     c10::string_view rotary_mode,
                                     at::IntArrayRef partial_slice);
+
+void scatter_nd_update(torch::Tensor& var,
+                       const torch::Tensor& indices,
+                       const torch::Tensor& updates);
 }  // namespace xllm::kernel::npu

@@ -209,6 +209,11 @@ Options create_options(const std::string& instance_name, bool is_local) {
       .disable_ttft_profiling(profile_config.disable_ttft_profiling())
       .enable_forward_interruption(profile_config.enable_forward_interruption())
       .enable_graph(execution_config.enable_graph())
+      .enable_graph_mode_decode_no_padding(
+          execution_config.enable_graph_mode_decode_no_padding())
+      .enable_prefill_piecewise_graph(
+          execution_config.enable_prefill_piecewise_graph())
+      .max_tokens_for_graph_mode(execution_config.max_tokens_for_graph_mode())
       .max_global_ttft_ms(profile_config.max_global_ttft_ms())
       .max_global_tpot_ms(profile_config.max_global_tpot_ms())
       .max_requests_per_batch(dit_config.max_requests_per_batch())

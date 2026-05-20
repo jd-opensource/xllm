@@ -68,6 +68,11 @@ torch::Tensor rms_norm(const torch::Tensor& input,
                        double eps,
                        const std::string& mode);
 
+std::tuple<torch::Tensor, torch::Tensor> rms_norm_dynamic_quant(
+    const torch::Tensor& input,
+    const torch::Tensor& weight,
+    double eps);
+
 void npu_gemma_rms_norm(const torch::Tensor& x,
                         const torch::Tensor& gamma,
                         double epsilon,
@@ -185,6 +190,43 @@ torch::Tensor apply_npu_moe_distribute_combine_v2(
     const std::string& comm_alg);
 
 bool has_moe_distribute_dispatch_combine_v2();
+
+std::tuple<torch::Tensor, torch::Tensor> apply_npu_dispatch_ffn_combine(
+    const torch::Tensor& x,
+    const torch::TensorList weight1,
+    const torch::TensorList weight2,
+    const torch::Tensor& expert_ids,
+    const torch::TensorList scale1,
+    const torch::TensorList scale2,
+    const torch::Tensor& probs,
+    const std::string& group,
+    int64_t max_output_size,
+    double swiglu_limit,
+    const std::optional<torch::Tensor>& output,
+    const std::optional<torch::Tensor>& expert_token_nums);
+
+bool has_dispatch_ffn_combine();
+
+std::tuple<torch::Tensor, torch::Tensor> apply_npu_dispatch_gmm_combine_decode(
+    const torch::Tensor& x,
+    const torch::Tensor& expert_ids,
+    const torch::TensorList gmm1_permuted_weight,
+    const torch::TensorList gmm1_permuted_weight_scale,
+    const torch::TensorList gmm2_weight,
+    const torch::TensorList gmm2_weight_scale,
+    const torch::Tensor& expert_scales,
+    const std::optional<torch::Tensor>& expert_smooth_scales,
+    const std::optional<torch::Tensor>& x_active_mask,
+    const std::string& group_ep,
+    int64_t ep_rank_size,
+    int64_t ep_rank_id,
+    int64_t moe_expert_num,
+    int64_t shared_expert_num,
+    int64_t shared_expert_rank_num,
+    int64_t quant_mode,
+    int64_t global_bs);
+
+bool has_dispatch_gmm_combine_decode();
 
 std::pair<torch::Tensor, torch::Tensor> apply_npu_partial_rotary_embedding(
     const torch::Tensor& positions,

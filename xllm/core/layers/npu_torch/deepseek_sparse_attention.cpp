@@ -32,6 +32,31 @@ namespace xllm {
 namespace layer {
 namespace {
 
+struct Dsv4PreprocessOutputs {
+  torch::Tensor qr;
+  std::optional<torch::Tensor> qr_pertoken_scale;
+  torch::Tensor q;
+  torch::Tensor kv;
+};
+
+torch::Tensor w8a8_dynamic_linear_forward(
+    const torch::Tensor& quantized_input,
+    const torch::Tensor& weight,
+    const torch::Tensor& weight_scale,
+    const torch::Tensor& pertoken_scale,
+    const std::optional<torch::Tensor>& bias,
+    at::ScalarType output_dtype) {
+  xllm::kernel::QuantMatmulParams params;
+  params.x1 = quantized_input;
+  params.x2 = weight;
+  params.transpose2 = true;
+  params.scale = weight_scale;
+  params.pertoken_scale = pertoken_scale;
+  params.bias = bias;
+  params.output_dtype = output_dtype;
+  return xllm::kernel::quant_matmul(params);
+}
+
 struct DsaCacheMapping {
   int64_t cmp_cache_idx = -1;
   int64_t index_cache_idx = -1;
@@ -203,7 +228,8 @@ void scatter_by_slot(torch::Tensor& cache,
     auto valid_mask = slots_slice.ge(0).unsqueeze(1);
     auto old_values = cache_2d.index_select(/*dim=*/0, safe_slots);
     auto safe_values = torch::where(valid_mask, value_slice, old_values);
-    cache_2d.index_copy_(/*dim=*/0, safe_slots, safe_values);
+    xllm::kernel::npu::scatter_nd_update(
+        cache_2d, safe_slots.reshape({-1, 1}), safe_values);
     return;
   }
 
@@ -303,6 +329,66 @@ std::tuple<torch::Tensor, torch::Tensor> build_prefill_pa_nd_kv(
   auto table = table_cpu.to(
       block_table_hint.defined() ? block_table_hint.device() : kv.device());
   return {packed_kv, table};
+}
+
+Dsv4PreprocessOutputs run_dsv4_preprocess_fallback(
+    ReplicatedLinear& q_a_proj,
+    RMSNorm& q_layernorm,
+    ColumnParallelLinear& q_b_proj,
+    ReplicatedLinear& kv_proj,
+    RMSNorm& kv_layernorm,
+    const torch::Tensor& hidden_states,
+    int64_t n_local_heads,
+    int64_t head_dim,
+    int64_t qk_head_dim,
+    int64_t nope_head_dim,
+    int64_t rope_head_dim,
+    double eps,
+    const torch::Tensor& q_rms_gamma,
+    const torch::Tensor& cos,
+    const torch::Tensor& sin) {
+  Dsv4PreprocessOutputs outputs;
+
+  auto q_down = q_a_proj->forward(hidden_states);
+  if (q_b_proj->uses_w8a8_dynamic_quant()) {
+    xllm::kernel::RmsNormDynamicQuantParams rms_quant_params;
+    rms_quant_params.input = q_down;
+    rms_quant_params.weight = q_layernorm->weight();
+    rms_quant_params.eps = eps;
+    torch::Tensor q_pertoken_scale;
+    std::tie(outputs.qr, q_pertoken_scale) =
+        xllm::kernel::rms_norm_dynamic_quant(rms_quant_params);
+    outputs.qr_pertoken_scale = q_pertoken_scale;
+    outputs.q =
+        w8a8_dynamic_linear_forward(outputs.qr,
+                                    q_b_proj->weight(),
+                                    q_b_proj->w8a8_dynamic_weight_scale(),
+                                    q_pertoken_scale,
+                                    q_b_proj->bias(),
+                                    hidden_states.scalar_type())
+            .view({-1, n_local_heads, head_dim});
+  } else {
+    outputs.qr = std::get<0>(q_layernorm->forward(q_down));
+    outputs.q =
+        q_b_proj->forward(outputs.qr).view({-1, n_local_heads, head_dim});
+  }
+
+  xllm::kernel::FusedLayerNormParams q_rmsnorm_params;
+  q_rmsnorm_params.input = outputs.q;
+  q_rmsnorm_params.weight = q_rms_gamma;
+  q_rmsnorm_params.mode = "rmsnorm";
+  q_rmsnorm_params.eps = eps;
+  xllm::kernel::fused_layernorm(q_rmsnorm_params);
+  outputs.q = q_rmsnorm_params.output;
+
+  auto kv_down = kv_proj->forward(hidden_states);
+  outputs.kv = std::get<0>(kv_layernorm->forward(kv_down));
+  outputs.kv = outputs.kv.view({-1, 1, qk_head_dim});
+
+  apply_partial_rope(outputs.q, nope_head_dim, rope_head_dim, cos, sin);
+  apply_partial_rope(outputs.kv, nope_head_dim, rope_head_dim, cos, sin);
+
+  return outputs;
 }
 
 AttentionMetadata build_indexer_attention_metadata(
@@ -530,30 +616,28 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
 
   auto [c1_metadata, c4_metadata, c128_metadata, qli_metadata] =
       compress_metadata;
-
-  // 1) q projection + q rmsnorm
-  auto q_down = q_a_proj_->forward(hidden_states);
-  auto qr = std::get<0>(q_layernorm_->forward(q_down));
-  auto q = q_b_proj_->forward(qr).view({-1, n_local_heads_, head_dim_});
-
-  xllm::kernel::FusedLayerNormParams q_rmsnorm_params;
-  q_rmsnorm_params.input = q;
-  q_rmsnorm_params.weight = q_rms_gamma_;
-  q_rmsnorm_params.mode = "rmsnorm";
-  q_rmsnorm_params.eps = eps_;
-  xllm::kernel::fused_layernorm(q_rmsnorm_params);
-  q = q_rmsnorm_params.output;
-
-  // 2) kv projection
-  auto kv_down = kv_proj_->forward(hidden_states);
-  auto kv = std::get<0>(kv_layernorm_->forward(kv_down));
-  kv = kv.view({-1, 1, qk_head_dim_});
-
-  // 3) RoPE (q and kv)
   auto cos = attn_metadata.cos;
   auto sin = attn_metadata.sin;
-  apply_partial_rope(q, nope_head_dim_, rope_head_dim_, cos, sin);
-  apply_partial_rope(kv, nope_head_dim_, rope_head_dim_, cos, sin);
+  Dsv4PreprocessOutputs preprocess_outputs =
+      run_dsv4_preprocess_fallback(q_a_proj_,
+                                   q_layernorm_,
+                                   q_b_proj_,
+                                   kv_proj_,
+                                   kv_layernorm_,
+                                   hidden_states,
+                                   n_local_heads_,
+                                   head_dim_,
+                                   qk_head_dim_,
+                                   nope_head_dim_,
+                                   rope_head_dim_,
+                                   eps_,
+                                   q_rms_gamma_,
+                                   cos,
+                                   sin);
+  auto qr = preprocess_outputs.qr;
+  auto qr_pertoken_scale = preprocess_outputs.qr_pertoken_scale;
+  auto q = preprocess_outputs.q;
+  auto kv = preprocess_outputs.kv;
 
   // 4) resolve per-layer cache mapping
   const int64_t compress_ratio_i = static_cast<int64_t>(compress_ratio_);
@@ -698,6 +782,7 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
     compress_topk_idxs =
         indexer_->select_qli(hidden_states,
                              qr,
+                             qr_pertoken_scale,
                              index_cache,
                              &indexer_cache_scale,
                              indexer_metadata,
