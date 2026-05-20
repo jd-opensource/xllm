@@ -105,6 +105,8 @@ DECLARE_int64(sp_size);
 
 DECLARE_int64(cfg_size);
 
+DECLARE_int64(vae_size);
+
 DECLARE_bool(enable_prefill_sp);
 
 DECLARE_bool(enable_mm_encoder_dp);

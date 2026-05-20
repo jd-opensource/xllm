@@ -26,12 +26,10 @@ limitations under the License.
 namespace xllm {
 
 /*
-group_ranks: the rank sizes of the subprocess groups
-group_order: the priority of the subprocess groups, the group with a
+group_ranks: the rank sizes of the sub groups
+group_order: the priority of the sub groups, the group with a
     higher priority will be assigned closer rank ids.
 world_size: the global world_size
-
-the
 */
 class RankGenerator {
  public:

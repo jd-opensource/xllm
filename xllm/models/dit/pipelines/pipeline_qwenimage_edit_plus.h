@@ -74,7 +74,11 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
     prompt_template_encode_start_idx_ = 64;
     default_sample_size_ = 128;
 
-    vae_ = AutoencoderKLQwenImage(context.get_model_context("vae"));
+    vae_ = AutoencoderKLQwenImage(context.get_model_context("vae"),
+                                  parallel_args_);
+    if (::xllm::DiTConfig::get_instance().enable_dit_vae_tiling()) {
+      vae_->enable_tiling();
+    }
     transformer_ = QwenImageTransformer2DModel(
         context.get_model_context("transformer"), parallel_args_);
     scheduler_ =

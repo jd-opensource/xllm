@@ -140,15 +140,6 @@ inline size_t get_tensor_size(const torch::Tensor& tensor) {
   return size;
 }
 
-inline size_t get_vector_tensor_size(
-    const std::vector<torch::Tensor>& tensor_vec) {
-  size_t size = type_size<int32_t>;  // tensor_num
-  for (const auto& tensor : tensor_vec) {
-    size += get_tensor_size(tensor);
-  }
-  return size;
-}
-
 template <typename T>
 inline size_t get_2d_vector_size(const std::vector<std::vector<T>>& vec2d) {
   size_t size = type_size<uint64_t>;
@@ -325,6 +316,15 @@ inline size_t get_mm_batch_data_size(const MMBatchData& mm_data) {
   return total;
 }
 
+inline size_t get_vector_tensor_size(
+    const std::vector<torch::Tensor>& tensor_vec) {
+  size_t size = type_size<int32_t>;  // vector size
+  for (const auto& tensor : tensor_vec) {
+    size += get_tensor_size(tensor);
+  }
+  return size;
+}
+
 // calculate dit input size
 inline size_t get_dit_generation_params_size(
     const DiTGenerationParams& params) {
@@ -370,15 +370,6 @@ inline size_t get_dit_forward_input_size(const DiTForwardInput& input) {
   // Generation params
   size += get_dit_generation_params_size(input.generation_params);
 
-  return size;
-}
-
-inline size_t get_vector_tensor_size(
-    const std::vector<torch::Tensor>& tensor_vec) {
-  size_t size = type_size<int32_t>;  // vector size
-  for (const auto& tensor : tensor_vec) {
-    size += get_tensor_size(tensor);
-  }
   return size;
 }
 
@@ -2587,7 +2578,7 @@ inline void serialize_forward_input_sections(
     write_tensor(context, manager_table);
   }
 
-  if (FLAGS_backend == "dit") { 
+  if (FLAGS_backend == "dit") {
     write_dit_forward_input(context, input_params.dit_forward_input);
   }
 }

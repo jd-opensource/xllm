@@ -28,6 +28,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "core/common/global_flags.h"
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
@@ -1381,15 +1382,18 @@ struct DecoderOutput {
 
 class AutoencoderKLQwenImageImpl : public torch::nn::Module {
  public:
-  AutoencoderKLQwenImageImpl(const ModelContext& context)
+  AutoencoderKLQwenImageImpl(const ModelContext& context,
+                             const ParallelArgs& parallel_args)
       : args_(context.get_model_args()),
+        options_(context.get_tensor_options()),
         z_dim_(context.get_model_args().z_dim()),
         temperal_downsample_(context.get_model_args().temperal_downsample()),
         base_dim_(context.get_model_args().base_dim()),
         dim_mult_(context.get_model_args().dim_mult()),
         num_res_blocks_(context.get_model_args().num_res_blocks()),
         attn_scales_(context.get_model_args().attn_scales()),
-        dropout_(context.get_model_args().dropout()) {
+        dropout_(context.get_model_args().dropout()),
+        parallel_args_(parallel_args) {
     temperal_upsample_ = std::vector<bool>(temperal_downsample_.rbegin(),
                                            temperal_downsample_.rend());
 
@@ -1685,6 +1689,36 @@ class AutoencoderKLQwenImageImpl : public torch::nn::Module {
     return result_b;
   }
 
+  void pad_to_size(torch::Tensor& input, int64_t target_h, int64_t target_w) {
+    int64_t input_h = input.size(3);
+    int64_t input_w = input.size(4);
+
+    int64_t pad_top = (target_h - input_h) / 2;
+    int64_t pad_bottom = target_h - input_h - pad_top;
+    int64_t pad_left = (target_w - input_w) / 2;
+    int64_t pad_right = target_w - input_w - pad_left;
+
+    input = torch::nn::functional::pad(
+        input,
+        torch::nn::functional::PadFuncOptions(
+            {pad_left, pad_right, pad_top, pad_bottom})
+            .mode(torch::kConstant)
+            .value(0));
+  }
+
+  void unpad_to_size(torch::Tensor& padded,
+                     int64_t original_h,
+                     int64_t original_w) {
+    int64_t current_h = padded.size(3);
+    int64_t current_w = padded.size(4);
+
+    int64_t pad_top = (current_h - original_h) / 2;
+    int64_t pad_left = (current_w - original_w) / 2;
+
+    padded = padded.slice(3, pad_top, pad_top + original_h)
+                 .slice(4, pad_left, pad_left + original_w);
+  }
+
   torch::Tensor tiled_encode(const torch::Tensor& x) {
     auto sizes = x.sizes();
     auto b = sizes[0], c = sizes[1], num_frames = sizes[2], height = sizes[3],
@@ -1707,44 +1741,173 @@ class AutoencoderKLQwenImageImpl : public torch::nn::Module {
 
     std::vector<std::vector<torch::Tensor>> rows;
 
+    // dispatch rows to different ranks
+    ProcessGroup* vae_group = parallel_args_.dit_vae_group_;
+    int32_t group_size = vae_group->world_size();
+    int32_t local_rank = vae_group->rank();
+    bool use_vae_parallel = false;
+
+    // num of patchs on different devices
+    std::vector<int64_t> num_rank_patchs;
+    num_rank_patchs.reserve(group_size);
+
+    int32_t local_rows = 0;
+    int32_t remainder_local_rows = 0;
+
+    int32_t row_start = 0;
+    int32_t row_end = 0;
+    int32_t row_size = 0;
+    if (group_size > 1) {
+      int32_t num_rows = height / tile_sample_stride_height_;
+      int32_t remainder_row = (height % tile_sample_stride_height_) > 0 ? 1 : 0;
+      int32_t global_rows = num_rows + remainder_row;
+      local_rows = global_rows / group_size;
+      remainder_local_rows = global_rows % group_size;
+      row_start = local_rows * local_rank + (local_rank < remainder_local_rows
+                                                 ? local_rank
+                                                 : remainder_local_rows);
+      row_end = row_start + local_rows +
+                ((local_rank) < remainder_local_rows ? 1 : 0);
+      use_vae_parallel = local_rows > 1;
+    }
+
+    // Save tensor and tensor shapes for vae parallel situations.
+    int32_t row_counter = 0;
+    std::vector<torch::Tensor> shape_tensors;
+    std::vector<torch::Tensor> patch_tensors;
+
     for (int64_t i = 0; i < height; i += tile_sample_stride_height_) {
-      std::vector<torch::Tensor> row;
+      if ((use_vae_parallel && row_counter >= row_start &&
+           row_counter < row_end) ||
+          !use_vae_parallel) {
+        std::vector<torch::Tensor> row;
+        for (int64_t j = 0; j < width; j += tile_sample_stride_width_) {
+          clear_cache();
+          std::vector<torch::Tensor> time_frames;
+          auto frame_range = 1 + (num_frames - 1) / 4;
 
-      for (int64_t j = 0; j < width; j += tile_sample_stride_width_) {
-        clear_cache();
-        std::vector<torch::Tensor> time_frames;
-        auto frame_range = 1 + (num_frames - 1) / 4;
+          for (int64_t k = 0; k < frame_range; k++) {
+            enc_conv_idx_->at(0) = 0;
+            torch::Tensor tile;
 
-        for (int64_t k = 0; k < frame_range; k++) {
-          enc_conv_idx_->at(0) = 0;
-          torch::Tensor tile;
+            if (k == 0) {
+              tile = x.index(
+                  {torch::indexing::Slice(),
+                   torch::indexing::Slice(),
+                   torch::indexing::Slice(0, 1),
+                   torch::indexing::Slice(i, i + tile_sample_min_height_),
+                   torch::indexing::Slice(j, j + tile_sample_min_width_)});
+            } else {
+              tile = x.index(
+                  {torch::indexing::Slice(),
+                   torch::indexing::Slice(),
+                   torch::indexing::Slice(1 + 4 * (k - 1), 1 + 4 * k),
+                   torch::indexing::Slice(i, i + tile_sample_min_height_),
+                   torch::indexing::Slice(j, j + tile_sample_min_width_)});
+            }
 
-          if (k == 0) {
-            tile = x.index(
-                {torch::indexing::Slice(),
-                 torch::indexing::Slice(),
-                 torch::indexing::Slice(0, 1),
-                 torch::indexing::Slice(i, i + tile_sample_min_height_),
-                 torch::indexing::Slice(j, j + tile_sample_min_width_)});
-          } else {
-            tile = x.index(
-                {torch::indexing::Slice(),
-                 torch::indexing::Slice(),
-                 torch::indexing::Slice(1 + 4 * (k - 1), 1 + 4 * k),
-                 torch::indexing::Slice(i, i + tile_sample_min_height_),
-                 torch::indexing::Slice(j, j + tile_sample_min_width_)});
+            auto encoded_tile =
+                encoder_->forward(tile, enc_feat_map_, enc_conv_idx_);
+            auto quantized_tile = quant_conv_->forward(encoded_tile);
+            time_frames.push_back(quantized_tile);
           }
 
-          auto encoded_tile =
-              encoder_->forward(tile, enc_feat_map_, enc_conv_idx_);
-          auto quantized_tile = quant_conv_->forward(encoded_tile);
-          time_frames.push_back(quantized_tile);
+          if (use_vae_parallel) {
+            patch_tensors.emplace_back(torch::cat(time_frames, 2));
+            shape_tensors.emplace_back(
+                torch::tensor(patch_tensors.back().sizes(), options_)
+                    .unsqueeze(0));
+          } else {
+            row.push_back(torch::cat(time_frames, 2));
+          }
         }
 
-        row.push_back(torch::cat(time_frames, 2));
+        if (!use_vae_parallel) {
+          rows.push_back(row);
+        } else if (row_size == 0) {
+          row_size = patch_tensors.size();
+        }
       }
-      rows.push_back(row);
+      row_counter += 1;
     }
+
+    if (use_vae_parallel) {
+      // calculate num of patchs on different ranks
+      for (int32_t rank = 0; rank < group_size; rank++) {
+        int64_t rank_patch =
+            row_size * (local_rows + ((rank) < remainder_local_rows ? 1 : 0));
+        num_rank_patchs.emplace_back(rank_patch);
+      }
+
+      std::vector<torch::Tensor> gather_shapes;
+      gather_shapes.reserve(group_size);
+      for (int32_t rank = 0; rank < group_size; rank++) {
+        gather_shapes.emplace_back(
+            torch::empty({num_rank_patchs[rank], 5}, options_));
+        gather_shapes.back().print();
+      }
+      auto shape_tensor = torch::cat(shape_tensors, /*dim=*/0);
+      // gather shapes of patchs on different ranks
+      vae_group->allgather(shape_tensor, gather_shapes);
+
+      // use the shape of first patch as uniform shape
+      // we will pad the patchs to the same size to apply all gather
+      auto uniform_shape = gather_shapes[0][0];
+      auto pb = uniform_shape[0].item<int64_t>(),
+           pc = uniform_shape[1].item<int64_t>(),
+           pf = uniform_shape[2].item<int64_t>(),
+           ph = uniform_shape[3].item<int64_t>(),
+           pw = uniform_shape[4].item<int64_t>();
+
+      for (auto& patch : patch_tensors) {
+        pad_to_size(patch, ph, pw);
+      }
+
+      // cat the patchs alone the last dim
+      auto merged_local_patch = torch::cat(patch_tensors, /*dim=*/4);
+
+      std::vector<torch::Tensor> gather_patchs;
+      for (int32_t rank = 0; rank < group_size; rank++) {
+        auto rank_pw = num_rank_patchs[rank] * pw;
+        gather_patchs.emplace_back(
+            torch::empty({pb, pc, pf, ph, rank_pw}, options_));
+      }
+
+      // gather patchs on different ranks
+      vae_group->allgather(merged_local_patch, gather_patchs);
+
+      // chunk patchs to the rows
+      for (int32_t rank = 0; rank < group_size; rank++) {
+        auto& rank_patch = gather_patchs[rank];
+        auto rank_rows = num_rank_patchs[rank] / row_size;
+        std::vector<torch::Tensor> patchs =
+            rank_patch.chunk(num_rank_patchs[rank], -1);
+        auto& origin_shape = gather_shapes[rank];
+        int32_t patch_index = 0;
+        for (int i = 0; i < rank_rows; i++) {
+          std::vector<torch::Tensor> row;
+          for (int j = 0; j < row_size; j++) {
+            if (patch_index >= patchs.size() ||
+                patch_index >= origin_shape.size(0)) {
+              LOG(FATAL) << "Patch index " << patch_index
+                         << " is out of bounds for patchs (size "
+                         << patchs.size() << ") or origin_shape (size "
+                         << origin_shape.size(0) << ").";
+            }
+            // unpad patchs to origin size;
+            unpad_to_size(patchs[patch_index],
+                          origin_shape[patch_index][3].item<int64_t>(),
+                          origin_shape[patch_index][4].item<int64_t>());
+            patchs[patch_index].print();
+            row.emplace_back(patchs[patch_index]);
+            patch_index++;
+          }
+          // push back to rows;
+          rows.push_back(row);
+        }
+      }
+    }
+
     clear_cache();
 
     std::vector<torch::Tensor> result_rows;
@@ -1956,6 +2119,8 @@ class AutoencoderKLQwenImageImpl : public torch::nn::Module {
   QwenImageDecoder3d decoder_{nullptr};
 
   ModelArgs args_;
+  const ParallelArgs parallel_args_;
+  torch::TensorOptions options_;
 };
 
 TORCH_MODULE(AutoencoderKLQwenImage);
