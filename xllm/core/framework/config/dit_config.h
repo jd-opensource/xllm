@@ -54,7 +54,8 @@ class DiTConfig final {
          "dit_sp_communication_overlap",
          "dit_debug_print",
          "dit_generation_image_area_max",
-         "dit_vae_image_size"}};
+         "dit_vae_image_size",
+         "enable_dit_vae_tiling"}};
     return kOptionCategory;
   }
 
@@ -85,6 +86,8 @@ class DiTConfig final {
   PROPERTY(int64_t, dit_generation_image_area_max) = 0;
 
   PROPERTY(int64_t, dit_vae_image_size) = 1048576;
+
+  PROPERTY(bool, enable_dit_vae_tiling) = false;
 };
 
 }  // namespace xllm
