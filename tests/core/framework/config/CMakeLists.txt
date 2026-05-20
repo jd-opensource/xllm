@@ -5,8 +5,10 @@ cc_test(
     config_json_test
   SRCS
     config_json_test.cpp
+  DATA
+    config_test.json
   DEPS
     :config
-    util
+    :util
     GTest::gtest_main
 )
