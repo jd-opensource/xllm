@@ -1,13 +1,11 @@
-import json
 import os
 import signal
 import sys
 import time
 import uuid
-from . import util
+from . import utils
 from typing import Any, Dict, List, Optional, Sequence, Union
 
-import xllm_export
 from xllm_export import (LLMMaster, VLMMaster, Options, RequestOutput,
                          RequestParams)
 from .errors import ValidationError
@@ -19,42 +17,6 @@ from .params import (
     to_request_params,
     to_request_params_list,
 )
-
-def _read_json(path: str) -> Dict[str, object]:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _infer_model_backend(model_path: str) -> str:
-    model_index_path = os.path.join(model_path, "model_index.json")
-    if os.path.exists(model_index_path):
-        data = _read_json(model_index_path)
-        if "_diffusers_version" in data:
-            return "dit"
-
-    config_path = os.path.join(model_path, "config.json")
-    if not os.path.exists(config_path):
-        raise ValueError(
-            "config.json or model_index.json is required for backend detection"
-        )
-    data = _read_json(config_path)
-    model_type = data.get("model_type") or data.get("model_name")
-    if not model_type:
-        raise ValueError("config.json must contain model_type or model_name")
-
-    get_backend = getattr(xllm_export, "get_model_backend", None)
-    if not callable(get_backend):
-        raise ValueError(
-            "xllm_export.get_model_backend is not available. "
-            "Please rebuild xllm_export or explicitly specify backend."
-        )
-    try:
-        backend = get_backend(model_type)
-    except Exception as exc:
-        raise ValueError(f"Failed to resolve backend for model_type: {model_type}") from exc
-    if not backend:
-        raise ValueError(f"Unsupported model_type: {model_type}")
-    return backend
 
 
 class BeamSearchOutput:
@@ -137,6 +99,7 @@ class LLM:
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
         kv_cache_dtype: str = 'auto',
+        use_cpp_chat_template: bool = True,
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -154,11 +117,14 @@ class LLM:
         if not os.path.exists(model):
             raise ValueError(f"model {model} not exists")
 
-        backend = _infer_model_backend(model)
+        model_type, backend = utils._infer_model_type_and_backend(model)
         if backend == "dit":
             raise ValueError("LLM does not support DiT backend models")
         if backend == "vlm" and task != "generate":
             raise ValueError("VLM backend only supports generate task in LLM")
+        if model_type is None:
+            raise ValueError("model_type is required for offline inference")
+        utils._configure_cpp_chat_template(use_cpp_chat_template, model_type)
 
         options = Options()
         options.model_path = model
@@ -186,7 +152,7 @@ class LLM:
         if master_node_addr:
             options.master_node_addr = master_node_addr
         else:
-            free_port = util.get_free_port()
+            free_port = utils.get_free_port()
             options.master_node_addr = "127.0.0.1:" + str(free_port)
         options.device_ip = device_ip
         options.transfer_listen_port = transfer_listen_port
@@ -218,7 +184,7 @@ class LLM:
         try:
             #os.kill(os.getpid(), signal.SIGTERM)
             #os.kill(os.getpid(), signal.SIGKILL)
-            util.terminate_process(os.getpid())
+            utils.terminate_process(os.getpid())
         except Exception as e:
             pass
 

@@ -2,7 +2,7 @@ import os
 import signal
 import sys
 import time
-from . import util
+from . import utils
 from typing import Any, List, Optional, Union
 
 from xllm_export import (LLMMaster, Options, RequestOutput,
@@ -39,6 +39,7 @@ class Embedding:
         is_local: bool = True,
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
+        use_cpp_chat_template: bool = True,
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -50,6 +51,8 @@ class Embedding:
 
         if not os.path.exists(model):
             raise ValueError(f"model {model} not exists")
+
+        model_type = utils._infer_model_type(model)
 
         options = Options()
         options.model_path = model
@@ -73,7 +76,7 @@ class Embedding:
         options.expert_parallel_degree = expert_parallel_degree
         options.enable_chunked_prefill = enable_chunked_prefill
         options.enable_prefill_sp = enable_prefill_sp
-        free_port = util.get_free_port()
+        free_port = utils.get_free_port()
         options.master_node_addr = "127.0.0.1:" + str(free_port)
         options.nnodes = nnodes
         options.node_rank = node_rank
@@ -87,13 +90,14 @@ class Embedding:
         options.is_local = is_local
         options.input_shm_size = input_shm_size
         options.output_shm_size = output_shm_size
+        utils._configure_cpp_chat_template(use_cpp_chat_template, model_type)
         self.master = LLMMaster(options)
 
     def finish(self) -> None:
         try:
             #os.kill(os.getpid(), signal.SIGTERM)
             #os.kill(os.getpid(), signal.SIGKILL)
-            util.terminate_process(os.getpid())
+            utils.terminate_process(os.getpid())
         except Exception as e:
             pass
 

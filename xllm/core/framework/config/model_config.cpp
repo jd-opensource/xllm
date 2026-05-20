@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "core/framework/config/model_config.h"
 
+#include <glog/logging.h>
+
 #include "core/common/global_flags.h"
 
 DEFINE_string(model_id, "", "hf model name.");
@@ -77,6 +79,13 @@ DEFINE_bool(use_cpp_chat_template,
             "Set to false to fallback to Jinja for debugging.");
 
 namespace xllm {
+namespace {
+
+bool is_cpp_chat_template_supported_model(const std::string& model_type) {
+  return model_type == "deepseek_v32" || model_type == "deepseek_v4";
+}
+
+}  // namespace
 
 void ModelConfig::from_flags() {
   model_id(FLAGS_model_id)
@@ -92,6 +101,20 @@ void ModelConfig::from_flags() {
       .flashinfer_workspace_buffer_size(FLAGS_flashinfer_workspace_buffer_size)
       .use_audio_in_video(FLAGS_use_audio_in_video)
       .use_cpp_chat_template(FLAGS_use_cpp_chat_template);
+}
+
+void ModelConfig::normalize_cpp_chat_template(const std::string& model_type) {
+  if (!use_cpp_chat_template()) {
+    return;
+  }
+
+  if (is_cpp_chat_template_supported_model(model_type)) {
+    return;
+  }
+
+  use_cpp_chat_template(false);
+  LOG(WARNING) << "use_cpp_chat_template is not supported for model_type="
+               << model_type << ", forcing use_cpp_chat_template=false.";
 }
 
 ModelConfig& ModelConfig::get_instance() {

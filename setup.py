@@ -704,7 +704,7 @@ if __name__ == "__main__":
         zip_safe=False,
         py_modules=["xllm/launch_xllm", "xllm/__init__",
                     "xllm/pybind/llm", "xllm/pybind/vlm",
-                    "xllm/pybind/embedding", "xllm/pybind/util",
+                    "xllm/pybind/embedding", "xllm/pybind/utils",
                     "xllm/pybind/args", "xllm/pybind/params",
                     "xllm/pybind/errors", "xllm/pybind/mm_utils"],
         python_requires=">=3.10",

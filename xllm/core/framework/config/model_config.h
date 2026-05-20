@@ -31,6 +31,7 @@ class ModelConfig final {
 
   void from_flags();
   void initialize();
+  void normalize_cpp_chat_template(const std::string& model_type);
 
   PROPERTY(std::string, model_id);
 

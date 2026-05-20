@@ -24,6 +24,7 @@ limitations under the License.
 #include "core/common/types.h"
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/vlm_master.h"
+#include "core/framework/config/model_config.h"
 #include "core/framework/request/mm_data.h"
 #include "core/framework/request/request_output.h"
 #include "core/framework/request/request_params.h"
@@ -355,6 +356,15 @@ PYBIND11_MODULE(xllm_export, m) {
   m.def("get_model_backend",
         &ModelRegistry::get_model_backend,
         py::arg("model_type"));
+  m.def(
+      "configure_cpp_chat_template",
+      [](bool use_cpp_chat_template, const std::string& model_type) {
+        ModelConfig::get_instance().use_cpp_chat_template(
+            use_cpp_chat_template);
+        ModelConfig::get_instance().normalize_cpp_chat_template(model_type);
+      },
+      py::arg("use_cpp_chat_template"),
+      py::arg("model_type"));
 }
 
 }  // namespace xllm

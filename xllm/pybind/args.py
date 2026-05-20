@@ -57,6 +57,7 @@ class ArgumentParser:
         self.parser.add_argument('--input_shm_size', type=int, default=1024, help='The size of input shared memory in MB.')
         self.parser.add_argument('--output_shm_size', type=int, default=128, help='The size of output shared memory in MB.')
         self.parser.add_argument('--kv_cache_dtype', type=str, default='auto', help='KV cache data type. "auto" (default) aligns with model dtype, "int8" enables INT8 quantization (MLU only).')
+        self.parser.add_argument('--use_cpp_chat_template', nargs='?', const=True, default=True, type=_str_to_bool, help='Whether to use native C++ chat template for supported models.')
 
     def parse_args(self) -> Namespace:
         return self.parser.parse_args()

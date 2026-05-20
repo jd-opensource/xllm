@@ -67,9 +67,6 @@ static const std::unordered_set<std::string> prefill_sp_supported_model_set = {
     "deepseek_v32",
     "glm_moe_dsa"};
 
-static const std::unordered_set<std::string> cpp_template_supported_model_set =
-    {"deepseek_v32", "deepseek_v4"};
-
 namespace {
 
 void initialize_configs() {
@@ -349,12 +346,7 @@ void validate_config(const std::string& model_type) {
   }
 #endif
 
-  if (!(ModelConfig::get_instance().use_cpp_chat_template() &&
-        cpp_template_supported_model_set.contains(model_type))) {
-    ModelConfig::get_instance().use_cpp_chat_template(false);
-    LOG(WARNING) << "use_cpp_chat_template is not supported for model_type="
-                 << model_type << ", forcing use_cpp_chat_template=false.";
-  }
+  model_config.normalize_cpp_chat_template(model_type);
 }
 
 int run() {
