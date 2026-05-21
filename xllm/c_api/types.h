@@ -181,8 +181,32 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
   /** Whether to enable constrained decoding for REC */
   bool enable_constrained_decoding;
 
+  /** Whether to convert token ids to item ids in REC response */
+  bool enable_convert_tokens_to_item;
+
+  /** Whether to output token-aligned logprobs tensor in REC response */
+  bool enable_output_sku_logprobs;
+
+  /** Whether to enable extended item info parsing and output tensors */
+  bool enable_extended_item_info;
+
+  /** Maximum items emitted for each REC token triplet */
+  int32_t each_conversion_threshold;
+
+  /** Maximum total items emitted in one REC response */
+  int32_t total_conversion_threshold;
+
   /** Maximum REC worker pipeline concurrency */
   uint32_t rec_worker_max_concurrency;
+
+  /**
+   * Relative filename of the constrained decoding filter file (e.g.
+   * `beam_search_filter.bin`), resolved against the model weights directory
+   * with the same semantics as `vocab_file` in tokenizer_config.json. When
+   * non-empty, this value takes priority over `vocab_file` in
+   * tokenizer_config.json. Empty string = fall back to tokenizer_config.json.
+   */
+  char constrained_decoding_filter_path[XLLM_META_STRING_FIELD_MAX_LEN];
 } XLLM_InitLLMOptions;
 
 /**

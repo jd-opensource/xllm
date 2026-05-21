@@ -110,6 +110,8 @@ const OptionCategory kRecOptions = {"REC OPTIONS",
                                      "each_conversion_threshold",
                                      "total_conversion_threshold",
                                      "enable_rec_prefill_only",
+                                     "enable_constrained_decoding",
+                                     "constrained_decoding_filter_path",
                                      "output_rec_logprobs"}};
 
 const OptionCategory kPrefixCacheOptions = {
