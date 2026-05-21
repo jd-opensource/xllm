@@ -14,7 +14,6 @@ limitations under the License.
 ==============================================================================*/
 
 #pragma once
-#include <torch/torch.h>
 
 #include <memory>
 #include <vector>
@@ -52,6 +51,7 @@ class KVCache final {
 
   torch::Tensor get_conv_cache() const;
   torch::Tensor get_ssm_cache() const;
+  std::vector<KVCacheTensor> get_cache_tensors() const;
   std::vector<std::vector<int64_t>> get_shapes();
 
   bool empty() const;

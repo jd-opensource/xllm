@@ -10,6 +10,7 @@ cc_library(
     kv_cache_event.h
     kv_cache_impl.h
     kv_cache_shape.h
+    kv_cache_tensor_role.h
     kv_cache_utils.h
     linear_attention_kv_cache_impl.h
     quantized_kv_cache_impl.h

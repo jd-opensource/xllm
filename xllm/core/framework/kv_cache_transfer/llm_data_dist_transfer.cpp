@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
-#include "core/framework/config/kv_cache_config.h"
+#include "common/macros.h"
 #include "util/net.h"
 
 namespace xllm {
@@ -34,6 +34,12 @@ const std::map<torch::ScalarType, ge::DataType> kScalarTypeToDtype = {
     {torch::kFloat, ge::DT_FLOAT},
     {torch::kDouble, ge::DT_DOUBLE},
 };
+
+ge::DataType dtype_to_ge_dtype(torch::ScalarType dtype) {
+  const auto& it = kScalarTypeToDtype.find(dtype);
+  CHECK(it != kScalarTypeToDtype.cend()) << "Unsupport data type : " << dtype;
+  return it->second;
+}
 
 LlmDataDistTransfer::LlmDataDistTransfer(const std::string& device_ip,
                                          const uint16_t listen_port,
@@ -80,117 +86,20 @@ void LlmDataDistTransfer::register_kv_cache(
     std::vector<xllm::KVCache>& kv_caches,
     const KVCacheShape& kv_cache_shape,
     torch::ScalarType dtype) {
-  CHECK(!kv_caches.empty()) << "KV caches must be allocated before register.";
-  const int64_t num_layers = static_cast<int64_t>(kv_caches.size());
-  num_layers_ = num_layers;
-  const std::vector<int64_t>& key_cache_shape =
-      kv_cache_shape.key_cache_shape();
-  const std::vector<int64_t>& value_cache_shape =
-      kv_cache_shape.value_cache_shape();
-  const std::vector<int64_t>& index_cache_shape =
-      kv_cache_shape.index_cache_shape();
-
-  const auto& it = kScalarTypeToDtype.find(dtype);
-  CHECK(it != kScalarTypeToDtype.cend()) << "Unsupport data type : " << dtype;
-  auto ge_dtype = it->second;
-
-  if (enable_lighting_indexer_) {
-    CHECK(kv_cache_shape.has_index_cache_shape())
-        << "index_cache_shape is required when lighting indexer is enabled.";
-  }
-
-  std::vector<uint64_t> k_cache_addrs;
-  std::vector<uint64_t> v_cache_addrs;
-  std::vector<uint64_t> index_cache_addrs;
-  k_cache_.tensor_addrs.clear();
-  v_cache_.tensor_addrs.clear();
-  index_cache_.tensor_addrs.clear();
-  k_cache_addrs.reserve(num_layers);
-  v_cache_addrs.reserve(num_layers);
-  k_cache_.tensor_addrs.reserve(num_layers);
-  v_cache_.tensor_addrs.reserve(num_layers);
-  if (enable_lighting_indexer_) {
-    index_cache_addrs.reserve(num_layers);
-    index_cache_.tensor_addrs.reserve(num_layers);
-  }
-
-  for (int64_t i = 0; i < num_layers; ++i) {
-    torch::Tensor key_cache = kv_caches[i].get_k_cache();
-    torch::Tensor value_cache = kv_caches[i].get_v_cache();
-    CHECK(key_cache.defined() && key_cache.numel() > 0)
-        << "key cache is not allocated at layer " << i;
-    CHECK(value_cache.defined() && value_cache.numel() > 0)
-        << "value cache is not allocated at layer " << i;
-
-    void* k_cache_buffer = key_cache.data_ptr();
-    void* v_cache_buffer = value_cache.data_ptr();
-    k_cache_addrs.emplace_back(reinterpret_cast<uint64_t>(k_cache_buffer));
-    v_cache_addrs.emplace_back(reinterpret_cast<uint64_t>(v_cache_buffer));
-    k_cache_.tensor_addrs.emplace_back(
-        reinterpret_cast<uintptr_t>(k_cache_buffer));
-    v_cache_.tensor_addrs.emplace_back(
-        reinterpret_cast<uintptr_t>(v_cache_buffer));
-
-    if (enable_lighting_indexer_) {
-      torch::Tensor index_cache = kv_caches[i].get_index_cache();
-      CHECK(index_cache.defined() && index_cache.numel() > 0)
-          << "index cache is not allocated at layer " << i;
-      void* index_cache_buffer = index_cache.data_ptr();
-      index_cache_addrs.emplace_back(
-          reinterpret_cast<uint64_t>(index_cache_buffer));
-      index_cache_.tensor_addrs.emplace_back(
-          reinterpret_cast<uintptr_t>(index_cache_buffer));
-    }
-  }
-
-  // register key cache
-  CacheDesc& k_cache_desc = k_cache_.cache_desc;
-  k_cache_desc.num_tensors = num_layers;
-  k_cache_desc.data_type = ge_dtype;
-  k_cache_desc.shape = key_cache_shape;
-  auto ret = llm_data_dist_->RegisterKvCache(
-      k_cache_desc, k_cache_addrs, {}, k_cache_.cache_id);
-  CHECK(ret == LLM_SUCCESS)
-      << "Register key cache failed, ret = " << std::hex << ret;
-
-  // register value cache
-  CacheDesc& v_cache_desc = v_cache_.cache_desc;
-  v_cache_desc.num_tensors = num_layers;
-  v_cache_desc.data_type = ge_dtype;
-  v_cache_desc.shape = value_cache_shape;
-  ret = llm_data_dist_->RegisterKvCache(
-      v_cache_desc, v_cache_addrs, {}, v_cache_.cache_id);
-  CHECK(ret == LLM_SUCCESS)
-      << "Register value cache failed, ret = " << std::hex << ret;
-
-  LOG(INFO) << "Register KV cache success.";
-
-  if (enable_lighting_indexer_) {
-    // register index cache
-    CacheDesc& index_cache_desc = index_cache_.cache_desc;
-    index_cache_desc.num_tensors = num_layers;
-    index_cache_desc.data_type = ge_dtype;
-    index_cache_desc.shape = index_cache_shape;
-    ret = llm_data_dist_->RegisterKvCache(
-        index_cache_desc, index_cache_addrs, {}, index_cache_.cache_id);
-    CHECK(ret == LLM_SUCCESS)
-        << "Register index cache failed, ret = " << std::hex << ret;
-  }
+  UNUSED_PARAMETER(kv_cache_shape);
+  UNUSED_PARAMETER(dtype);
+  register_layer_registered_caches(kv_caches, layer_registered_caches_);
 }
 
-void LlmDataDistTransfer::free_kv_cache() {
-  k_cache_.tensor_addrs.clear();
-  v_cache_.tensor_addrs.clear();
-  index_cache_.tensor_addrs.clear();
-}
+void LlmDataDistTransfer::free_kv_cache() { layer_registered_caches_.clear(); }
 
 void LlmDataDistTransfer::get_cache_info(uint64_t& cluster_id,
                                          std::string& addr,
                                          int64_t& key_cache_id,
                                          int64_t& value_cache_id) {
   cluster_id = cluster_id_;
-  key_cache_id = k_cache_.cache_id;
-  value_cache_id = v_cache_.cache_id;
+  key_cache_id = 0;
+  value_cache_id = 0;
 }
 
 bool LlmDataDistTransfer::link_cluster(const uint64_t cluster_id,
@@ -251,72 +160,128 @@ bool LlmDataDistTransfer::pull_kv_blocks(
     const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks) {
-  CacheIndex k_cache_index{src_cluster_id, src_k_cache_id};
-  CacheIndex v_cache_index{src_cluster_id, src_v_cache_id};
-  auto k_ret = llm_data_dist_->PullKvBlocks(
-      k_cache_index, k_cache_, src_blocks, dst_blocks);
-  auto v_ret = llm_data_dist_->PullKvBlocks(
-      v_cache_index, v_cache_, src_blocks, dst_blocks);
-  if (k_ret != LLM_SUCCESS || v_ret != LLM_SUCCESS) {
-    LOG(ERROR) << "PullKvBlocks failed, k_ret = " << std::hex << k_ret
-               << ", v_ret = " << std::hex << v_ret;
-    return false;
+  bool result = true;
+  for (int64_t layer_id = 0;
+       layer_id < static_cast<int64_t>(layer_registered_caches_.size());
+       ++layer_id) {
+    const auto& registered_caches = layer_registered_caches_[layer_id];
+    for (const RegisteredCache& registered_cache : registered_caches) {
+      CacheIndex cache_index{src_cluster_id, registered_cache.cache.cache_id};
+      KvCacheExtParam ext_param{};
+      ext_param.src_layer_range = {0, 0};
+      ext_param.dst_layer_range = {0, 0};
+      ext_param.tensor_num_per_layer = 1;
+      auto ret = llm_data_dist_->PullKvBlocks(cache_index,
+                                              registered_cache.cache,
+                                              src_blocks,
+                                              dst_blocks,
+                                              ext_param);
+      if (ret != LLM_SUCCESS) {
+        LOG(ERROR) << "PullKvBlocks failed, layer = " << layer_id
+                   << ", role = " << registered_cache.role.to_string()
+                   << ", ret = " << std::hex << ret;
+        result = false;
+      }
+    }
   }
-  return true;
+  return result;
 }
 
 bool LlmDataDistTransfer::push_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
     bool is_spec_draft) {
+  return push_layer_registered_caches(
+      layer_registered_caches_, merged_kv_infos, layer_synchronizer);
+}
+
+RegisteredCache LlmDataDistTransfer::register_cache_tensor(
+    int64_t layer_id,
+    const KVCacheTensor& cache_tensor) {
+  const torch::Tensor& tensor = cache_tensor.tensor;
+  CHECK(tensor.defined() && tensor.numel() > 0)
+      << cache_tensor.role.to_string() << " cache is not allocated at layer "
+      << layer_id;
+
+  auto tensor_addr = reinterpret_cast<uintptr_t>(tensor.data_ptr());
+  std::vector<uint64_t> addrs = {static_cast<uint64_t>(tensor_addr)};
+
+  RegisteredCache registered_cache{cache_tensor.role, Cache{}};
+  registered_cache.cache.tensor_addrs = {tensor_addr};
+
+  CacheDesc& desc = registered_cache.cache.cache_desc;
+  desc.num_tensors = 1;
+  desc.data_type = dtype_to_ge_dtype(tensor.scalar_type());
+  desc.shape = tensor.sizes().vec();
+
+  auto ret = llm_data_dist_->RegisterKvCache(
+      desc, addrs, {}, registered_cache.cache.cache_id);
+  CHECK(ret == LLM_SUCCESS)
+      << "Register " << cache_tensor.role.to_string()
+      << " cache failed at layer " << layer_id << ", ret = " << std::hex << ret;
+
+  LOG(INFO) << "Registered " << cache_tensor.role.to_string()
+            << " cache, layer = " << layer_id
+            << ", cache_id = " << registered_cache.cache.cache_id;
+  return registered_cache;
+}
+
+void LlmDataDistTransfer::register_layer_registered_caches(
+    std::vector<xllm::KVCache>& kv_caches,
+    LayerRegisteredCaches& layer_registered_caches) {
+  CHECK(!kv_caches.empty()) << "KV caches must be allocated before register.";
+  const int64_t num_layers = static_cast<int64_t>(kv_caches.size());
+
+  layer_registered_caches.clear();
+  layer_registered_caches.resize(kv_caches.size());
+
+  for (int64_t layer_id = 0; layer_id < num_layers; ++layer_id) {
+    for (const KVCacheTensor& cache_tensor :
+         kv_caches[layer_id].get_cache_tensors()) {
+      layer_registered_caches[layer_id].emplace_back(
+          register_cache_tensor(layer_id, cache_tensor));
+    }
+    CHECK(!layer_registered_caches[layer_id].empty())
+        << "No cache tensor registered at layer " << layer_id;
+  }
+}
+
+bool LlmDataDistTransfer::push_layer_registered_caches(
+    const LayerRegisteredCaches& layer_registered_caches,
+    std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
+    std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer) {
   bool result = true;
-  for (int64_t layer_index = 0; layer_index < num_layers_; ++layer_index) {
+  for (int64_t layer_index = 0;
+       layer_index < static_cast<int64_t>(layer_registered_caches.size());
+       ++layer_index) {
     // Wait for the KV cache computation of this layer to complete.
     layer_synchronizer->synchronize_layer(layer_index);
     // Push the KV Cache computed at this layer for all requests to the
     // designated worker.
-    for (const auto& pair : merged_kv_infos) {
-      const KVCacheInfo& kv_info = pair.second;
-      if (kv_info.src_blocks.size() == 0) {
-        continue;
-      }
+    for (const RegisteredCache& registered_cache :
+         layer_registered_caches[layer_index]) {
+      for (const auto& pair : merged_kv_infos) {
+        const KVCacheInfo& kv_info = pair.second;
+        if (kv_info.src_blocks.size() == 0) {
+          continue;
+        }
 
-      CacheIndex k_cache_index{kv_info.dst_cluster_id, kv_info.dst_k_cache_id};
-      CacheIndex v_cache_index{kv_info.dst_cluster_id, kv_info.dst_v_cache_id};
-      CacheIndex index_cache_index{kv_info.dst_cluster_id,
-                                   index_cache_.cache_id};
-      KvCacheExtParam ext_param{};
-      ext_param.src_layer_range =
-          std::pair<int32_t, int32_t>(layer_index, layer_index);
-      ext_param.dst_layer_range =
-          std::pair<int32_t, int32_t>(layer_index, layer_index);
-      ext_param.tensor_num_per_layer = 1;
+        CacheIndex cache_index{kv_info.dst_cluster_id,
+                               registered_cache.cache.cache_id};
+        KvCacheExtParam ext_param{};
+        ext_param.src_layer_range = {0, 0};
+        ext_param.dst_layer_range = {0, 0};
+        ext_param.tensor_num_per_layer = 1;
 
-      auto k_ret = llm_data_dist_->PushKvBlocks(k_cache_,
-                                                k_cache_index,
+        auto ret = llm_data_dist_->PushKvBlocks(registered_cache.cache,
+                                                cache_index,
                                                 kv_info.src_blocks,
                                                 kv_info.dst_blocks,
                                                 ext_param);
-      auto v_ret = llm_data_dist_->PushKvBlocks(v_cache_,
-                                                v_cache_index,
-                                                kv_info.src_blocks,
-                                                kv_info.dst_blocks,
-                                                ext_param);
-      if (k_ret != LLM_SUCCESS || v_ret != LLM_SUCCESS) {
-        LOG(ERROR) << "PushKvBlocks failed, layer = " << layer_index
-                   << ", k_ret = " << std::hex << k_ret
-                   << ", v_ret = " << std::hex << v_ret;
-        result = false;
-      }
-      if (enable_lighting_indexer_) {
-        auto index_ret = llm_data_dist_->PushKvBlocks(index_cache_,
-                                                      index_cache_index,
-                                                      kv_info.src_blocks,
-                                                      kv_info.dst_blocks,
-                                                      ext_param);
-        if (index_ret != LLM_SUCCESS) {
+        if (ret != LLM_SUCCESS) {
           LOG(ERROR) << "PushKvBlocks failed, layer = " << layer_index
-                     << ", index_ret = " << std::hex << index_ret;
+                     << ", role = " << registered_cache.role.to_string()
+                     << ", ret = " << std::hex << ret;
           result = false;
         }
       }

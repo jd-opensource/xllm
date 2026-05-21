@@ -36,6 +36,8 @@ limitations under the License.
 #endif
 #endif
 
+#include "framework/kv_cache/kv_cache_tensor_role.h"
+
 namespace xllm {
 
 class KVCacheShape;
@@ -101,6 +103,11 @@ struct QuantizedKVCacheTensors {
 struct LinearAttentionKVCacheTensors {
   torch::Tensor conv_cache;
   torch::Tensor ssm_cache;
+};
+
+struct KVCacheTensor {
+  KVCacheTensorRole role;
+  torch::Tensor tensor;
 };
 
 // for qwen3.5

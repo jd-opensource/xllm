@@ -23,6 +23,13 @@ namespace xllm {
 
 using namespace llm_datadist;
 
+struct RegisteredCache {
+  KVCacheTensorRole role;
+  Cache cache;
+};
+
+using LayerRegisteredCaches = std::vector<std::vector<RegisteredCache>>;
+
 class LlmDataDistTransfer : public KVCacheTransfer {
  public:
   LlmDataDistTransfer(const std::string& device_ip,
@@ -75,20 +82,30 @@ class LlmDataDistTransfer : public KVCacheTransfer {
                                   const uint16_t& remote_port);
 
  protected:
+  RegisteredCache register_cache_tensor(int64_t layer_id,
+                                        const KVCacheTensor& cache_tensor);
+
+  void register_layer_registered_caches(
+      std::vector<xllm::KVCache>& kv_caches,
+      LayerRegisteredCaches& layer_registered_caches);
+
+  bool push_layer_registered_caches(
+      const LayerRegisteredCaches& layer_registered_caches,
+      std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
+      std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer);
+
+ protected:
   uint64_t cluster_id_;
   std::string host_ip_;
   std::string device_ip_;
   uint16_t listen_port_;
-  int64_t num_layers_;
   bool enable_mla_ = false;
   bool enable_lighting_indexer_ = false;
   std::string model_type_;
   std::unordered_set<uint64_t> linked_cluster_ids;
 
   std::shared_ptr<LlmDataDist> llm_data_dist_;
-  Cache k_cache_;
-  Cache v_cache_;
-  Cache index_cache_;
+  LayerRegisteredCaches layer_registered_caches_;
 };
 
 }  // namespace xllm

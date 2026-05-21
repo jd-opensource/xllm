@@ -39,12 +39,9 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
                               const KVCacheShape& kv_cache_shape,
                               const torch::ScalarType dtype) override;
 
-  void register_kv_cache_internal(std::vector<xllm::KVCache>& kv_caches,
-                                  const KVCacheShape& kv_cache_shape,
-                                  torch::ScalarType dtype,
-                                  bool is_spec,
-                                  Cache& k_cache,
-                                  Cache& v_cache);
+  void register_kv_cache_internal(
+      std::vector<xllm::KVCache>& kv_caches,
+      LayerRegisteredCaches& layer_registered_caches);
 
   void free_kv_cache() override;
 
@@ -73,9 +70,7 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
   bool push_kv_blocks_internal(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       std::shared_ptr<NPULayerSynchronizerImpl>& layer_synchronizer,
-      int64_t num_layers,
-      const Cache& k_cache,
-      const Cache& v_cache);
+      const LayerRegisteredCaches& layer_registered_caches);
 
   void merge_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
@@ -83,10 +78,7 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
       const ParallelArgs& parallel_args) override;
 
  private:
-  int64_t spec_num_layers_;
-
-  Cache spec_k_cache_;
-  Cache spec_v_cache_;
+  LayerRegisteredCaches spec_layer_registered_caches_;
 };
 
 }  // namespace xllm
