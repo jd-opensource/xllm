@@ -53,6 +53,9 @@ torch::Tensor cast_to_nd_format(const torch::Tensor& tensor) {
     return tensor;
   }
 #if defined(USE_NPU)
+  if (!tensor.device().is_privateuseone()) {
+    return tensor;
+  }
   return at_npu::native::npu_format_cast(tensor, ACL_FORMAT_ND);
 #else
   return tensor;

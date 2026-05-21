@@ -804,7 +804,7 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
 
   auto& input_params = forward_input.input_params;
   input_params.meta.batch_forward_type = state_.batch_forward_type;
-  input_params.meta.num_sequences = state_.block_tables_vec.size();
+  input_params.meta.num_sequences = static_cast<int32_t>(num_sequences_);
   input_params.meta.kv_max_seq_len = state_.max_seq_len;
   input_params.meta.q_max_seq_len = state_.q_max_seq_len;
   input_params.attention.device.kv_seq_lens =
