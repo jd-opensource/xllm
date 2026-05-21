@@ -28,15 +28,17 @@ limitations under the License.
 #include <memory>
 
 #include "common/device_monitor.h"
-#include "common/global_flags.h"
 #include "common/interruption_bus.h"
 #include "common/metrics.h"
+#include "core/common/global_flags.h"
 #include "core/distributed_runtime/master.h"
+#include "core/framework/config/execution_config.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/parallel_state/parallel_state.h"
 #include "runtime/llm_worker_impl.h"
+#include "runtime/params_utils.h"
 #include "runtime/worker.h"
 #include "util/env_var.h"
 #include "util/pretty_print.h"
@@ -167,7 +169,8 @@ bool VLMEngine::init_model() {
   LOG(INFO) << "Initializing model with " << args_;
   LOG(INFO) << "Initializing model with quant args: " << quant_args_;
   LOG(INFO) << "Initializing model with tokenizer args: " << tokenizer_args_;
-  LOG(INFO) << "Initializing model with random seed: " << FLAGS_random_seed;
+  LOG(INFO) << "Initializing model with random seed: "
+            << ::xllm::ExecutionConfig::get_instance().random_seed();
 
   // init model for each worker in parallel
   // multiple workers, call async init
@@ -175,7 +178,9 @@ bool VLMEngine::init_model() {
   futures.reserve(worker_clients_num_);
   for (auto& worker : worker_clients_) {
     futures.push_back(worker->init_model_async(
-        model_path, FLAGS_random_seed, MasterStatus::WAKEUP));
+        model_path,
+        ::xllm::ExecutionConfig::get_instance().random_seed(),
+        MasterStatus::WAKEUP));
   }
   // wait for all futures to complete
   auto results = folly::collectAll(futures).get();
@@ -309,10 +314,10 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
       << "Split DP batch failed with dp_size as " << dp_size_
       << " and actual batch size as " << batch.size() << ".";
 
-  auto raw_forward_inputs = prepare_inputs(batch);
+  auto forward_inputs = prepare_inputs(batch);
 
-  DCHECK(dp_size_ == raw_forward_inputs.size())
-      << "The processed raw forward inputs size " << raw_forward_inputs.size()
+  DCHECK(dp_size_ == forward_inputs.size())
+      << "The processed forward inputs size " << forward_inputs.size()
       << " is not equal to dp size " << dp_size_ << ".";
 
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
@@ -321,8 +326,8 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
   // update dp related global paramters and then execute model
   for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
     auto dp_rank = worker_rank / dp_local_tp_size_;
-    futures.emplace_back(
-        worker_clients_[worker_rank]->step_async(raw_forward_inputs[dp_rank]));
+    futures.emplace_back(worker_clients_[worker_rank]->step_remote_async(
+        forward_inputs[dp_rank]));
   }
 
   // wait for the all future to complete
@@ -430,9 +435,8 @@ std::vector<int64_t> VLMEngine::get_active_activation_memory() const {
   return active_activation_memories;
 }
 
-std::vector<RawForwardInput> VLMEngine::prepare_inputs(
-    std::vector<Batch>& batch) {
-  std::vector<RawForwardInput> batched_inputs;
+std::vector<ForwardInput> VLMEngine::prepare_inputs(std::vector<Batch>& batch) {
+  std::vector<ForwardInput> batched_inputs;
   batched_inputs.reserve(dp_size_);
   // some dp related variables
   std::vector<int32_t> dp_global_token_nums(dp_size_);
@@ -454,22 +458,28 @@ std::vector<RawForwardInput> VLMEngine::prepare_inputs(
           batch[dp_rank].prepare_forward_input(args_, threadpool_.get())));
     }
     dp_global_token_nums[dp_rank] =
-        batched_inputs[dp_rank].flatten_tokens_vec.size();
+        static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());
     if (batch_forward_type.is_empty() &&
-        !batched_inputs[dp_rank].batch_forward_type.is_empty()) {
-      batch_forward_type = batched_inputs[dp_rank].batch_forward_type;
+        !batched_inputs[dp_rank]
+             .input_params.meta.batch_forward_type.is_empty()) {
+      batch_forward_type =
+          batched_inputs[dp_rank].input_params.meta.batch_forward_type;
     }
     dp_is_decode[dp_rank] =
-        batched_inputs[dp_rank].batch_forward_type.is_decode() &&
-        batched_inputs[dp_rank].q_max_seq_len == 1;
+        batched_inputs[dp_rank]
+            .input_params.meta.batch_forward_type.is_decode() &&
+        batched_inputs[dp_rank].input_params.meta.q_max_seq_len == 1;
   }
 
   // update dp_global_token_nums and batch_forward_type
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs[dp_rank].dp_global_token_nums = dp_global_token_nums;
-    batched_inputs[dp_rank].dp_is_decode = dp_is_decode;
-    if (batched_inputs[dp_rank].batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].batch_forward_type = batch_forward_type;
+    batched_inputs[dp_rank].input_params.parallel.dp_global_token_nums =
+        dp_global_token_nums;
+    if (batched_inputs[dp_rank]
+            .input_params.meta.batch_forward_type.is_empty()) {
+      batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
+      batched_inputs[dp_rank].input_params.meta.batch_forward_type =
+          batch_forward_type;
     }
   }
 

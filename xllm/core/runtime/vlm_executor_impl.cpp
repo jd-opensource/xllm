@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/execution_config.h"
 #include "framework/request/mm_data_visitor.h"
 #include "platform/device.h"
 
@@ -32,7 +33,7 @@ VlmExecutorImpl::VlmExecutorImpl(CausalLM* model,
       args_(args),
       device_(device),
       options_(options) {
-  if (FLAGS_enable_graph) {
+  if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     llm_executor_ = ExecutorImplFactory::get_instance().create_executor_impl(
         model, args, device, options, Device::type_str());
   }
@@ -52,7 +53,7 @@ ModelOutput VlmExecutorImpl::run(const torch::Tensor& tokens,
                                  std::vector<KVCache>& kv_caches,
                                  const ModelInputParams& params) {
   torch::NoGradGuard no_grad;
-  auto& mm_data = params.mm_data;
+  auto& mm_data = params.multimodal.mm_data;
   EncoderInputGatherVisitor input_gather;
   mm_data.foreach (input_gather);
   CHECK(input_gather.finish(mm_data));
@@ -67,7 +68,8 @@ ModelOutput VlmExecutorImpl::run(const torch::Tensor& tokens,
   mm_data.foreach (gather);
   CHECK(gather.finish(mm_data));
 
-  params.input_embedding = model_->get_input_embeddings(tokens, params);
+  params.embedding.input_embedding =
+      model_->get_input_embeddings(tokens, params);
 
   if (llm_executor_) {
     return llm_executor_->run(tokens, positions, kv_caches, params);

@@ -53,10 +53,15 @@ class ArgumentParser:
         self.parser.add_argument('--kv_cache_transfer_mode', type=str, default='PUSH', help='The mode of kv cache transfer(e.g. PUSH, PULL).')
         self.parser.add_argument('--disable_ttft_profiling', nargs='?', const=True, default=False, type=_str_to_bool, help='Whether to disable TTFT profiling.')
         self.parser.add_argument('--enable_forward_interruption', nargs='?', const=True, default=False, type=_str_to_bool, help='Whether to enable forward interruption.')
+        self.parser.add_argument('--enable_graph', nargs='?', const=True, default=False, type=_str_to_bool, help='Whether to enable graph execution for offline inference.')
+        self.parser.add_argument('--enable_graph_mode_decode_no_padding', nargs='?', const=True, default=False, type=_str_to_bool, help='Whether to enable graph-mode decode without padding for offline inference.')
+        self.parser.add_argument('--enable_prefill_piecewise_graph', nargs='?', const=True, default=False, type=_str_to_bool, help='Whether to enable prefill piecewise graph for offline inference.')
+        self.parser.add_argument('--max_tokens_for_graph_mode', type=int, default=2048, help='Maximum number of tokens for graph execution.')
         self.parser.add_argument('--enable_shm', nargs='?', const=True, default=False, type=_str_to_bool, help='Use shared memory for inter-process communication in the single-machine multi-GPU scenario.')
         self.parser.add_argument('--input_shm_size', type=int, default=1024, help='The size of input shared memory in MB.')
         self.parser.add_argument('--output_shm_size', type=int, default=128, help='The size of output shared memory in MB.')
         self.parser.add_argument('--kv_cache_dtype', type=str, default='auto', help='KV cache data type. "auto" (default) aligns with model dtype, "int8" enables INT8 quantization (MLU only).')
+        self.parser.add_argument('--use_cpp_chat_template', nargs='?', const=True, default=True, type=_str_to_bool, help='Whether to use native C++ chat template for supported models.')
 
     def parse_args(self) -> Namespace:
         return self.parser.parse_args()

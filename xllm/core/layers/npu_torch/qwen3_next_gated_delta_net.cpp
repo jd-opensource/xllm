@@ -75,6 +75,12 @@ Qwen3NextGatedDeltaNetImpl::project_padded_inputs(
           reshape_qkvz_with_pad(attn_metadata, ba)};
 }
 
+std::pair<torch::Tensor, torch::Tensor>
+Qwen3NextGatedDeltaNetImpl::project_flat_inputs(
+    const torch::Tensor& hidden_states) {
+  return {qkvz_proj_->forward(hidden_states), ba_proj_->forward(hidden_states)};
+}
+
 void Qwen3NextGatedDeltaNetImpl::load_state_dict(const StateDict& state_dict) {
   load_projection_state_dict(state_dict);
   load_common_state_dict(state_dict);

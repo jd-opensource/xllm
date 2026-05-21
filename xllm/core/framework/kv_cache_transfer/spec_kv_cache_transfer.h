@@ -31,18 +31,15 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
 
   virtual ~SpecKVCacheTransfer() = default;
 
-  void allocate_kv_cache(std::vector<xllm::KVCache>& kv_caches,
-                         const int64_t num_layers,
+  void register_kv_cache(std::vector<xllm::KVCache>& kv_caches,
                          const KVCacheShape& kv_cache_shape,
                          const torch::ScalarType dtype) override;
 
-  void allocate_kv_cache_spec(std::vector<xllm::KVCache>& kv_caches,
-                              const int64_t num_layers,
+  void register_kv_cache_spec(std::vector<xllm::KVCache>& kv_caches,
                               const KVCacheShape& kv_cache_shape,
-                              torch::ScalarType dtype) override;
+                              const torch::ScalarType dtype) override;
 
-  void allocate_kv_cache_internal(std::vector<xllm::KVCache>& kv_caches,
-                                  const int64_t num_layers,
+  void register_kv_cache_internal(std::vector<xllm::KVCache>& kv_caches,
                                   const KVCacheShape& kv_cache_shape,
                                   torch::ScalarType dtype,
                                   bool is_spec,

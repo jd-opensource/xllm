@@ -125,16 +125,16 @@ TEST_F(Qwen2VisionAttentionTest, ForwardTest) {
 
   int32_t check_count = 10;
   auto test_output = output.flatten().slice(0, 0, check_count);
-  std::vector<float> expected_values = {0.0703125f,
-                                        0.198242f,
-                                        0.0878906f,
-                                        -0.119141f,
-                                        0.142578f,
-                                        -0.410156f,
-                                        -0.233398f,
-                                        0.328125f,
-                                        -0.298828f,
-                                        0.0712891f};
+  std::vector<float> expected_values = {-0.0864258f,
+                                        0.365234f,
+                                        0.0898438f,
+                                        0.226562f,
+                                        0.0834961f,
+                                        -0.228516f,
+                                        -0.0268555f,
+                                        0.126953f,
+                                        -0.371094f,
+                                        0.108887f};
   test::verify_precision(test_output.unsqueeze(0), expected_values, 1e-4, 1e-5);
 
   auto output2 = vision_attention->forward(

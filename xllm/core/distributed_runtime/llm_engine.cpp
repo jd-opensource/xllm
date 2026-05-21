@@ -28,10 +28,15 @@ limitations under the License.
 #include <memory>
 
 #include "common/device_monitor.h"
-#include "common/global_flags.h"
 #include "common/interruption_bus.h"
 #include "common/metrics.h"
 #include "common/options.h"
+#include "core/common/global_flags.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "framework/block/hierarchy_block_manager_pool.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
@@ -40,6 +45,7 @@ limitations under the License.
 #include "framework/xtensor/phy_page_pool.h"
 #include "framework/xtensor/xtensor_allocator.h"
 #include "runtime/llm_worker_impl.h"
+#include "runtime/params_utils.h"
 #include "runtime/worker.h"
 #include "server/xllm_server_registry.h"
 #include "util/env_var.h"
@@ -144,7 +150,7 @@ bool LLMEngine::init(MasterStatus master_status) {
     return false;
   }
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     int32_t num_layers = args_.n_layers() - args_.first_k_dense_replace();
     int32_t num_experts = args_.n_routed_experts();
     eplb_manager_ = std::make_unique<EplbManager>(
@@ -163,7 +169,8 @@ bool LLMEngine::init(MasterStatus master_status) {
   // If master_status is not MasterStatus::WAKEUP, put the model to sleep after
   // initialization
   // This allows KV cache allocation to complete first, then releases resources
-  if (FLAGS_enable_xtensor && master_status != MasterStatus::WAKEUP) {
+  if (::xllm::KVCacheConfig::get_instance().enable_xtensor() &&
+      master_status != MasterStatus::WAKEUP) {
     const std::string& model_id = options_.model_id();
     if (!PageAllocator::get_instance().sleep_model(
             model_id, /*skip_weight_release=*/true)) {
@@ -235,10 +242,11 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   LOG(INFO) << "Initializing model with " << args_;
   LOG(INFO) << "Initializing model with quant args: " << quant_args_;
   LOG(INFO) << "Initializing model with tokenizer args: " << tokenizer_args_;
-  LOG(INFO) << "Initializing model with random seed: " << FLAGS_random_seed;
+  LOG(INFO) << "Initializing model with random seed: "
+            << ::xllm::ExecutionConfig::get_instance().random_seed();
 
   // Initialize PageAllocator if using XTensor mode (before using it)
-  if (FLAGS_enable_xtensor) {
+  if (::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     auto& page_allocator = PageAllocator::get_instance();
     if (!page_allocator.is_initialized()) {
       auto& phy_pool = PhyPagePool::get_instance();
@@ -276,7 +284,8 @@ bool LLMEngine::init_model(MasterStatus master_status) {
     int64_t weight_size_per_tp =
         (total_weight_size + dp_local_tp_size_ - 1) / dp_local_tp_size_;
 
-    size_t page_size = FLAGS_phy_page_granularity_size;
+    size_t page_size =
+        ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size();
     size_t num_pages = (weight_size_per_tp + page_size - 1) / page_size +
                        kXTensorWeightPageSafetyMargin;
 
@@ -309,8 +318,10 @@ bool LLMEngine::init_model(MasterStatus master_status) {
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
   for (auto& worker : worker_clients_) {
-    futures.push_back(
-        worker->init_model_async(model_path, FLAGS_random_seed, master_status));
+    futures.push_back(worker->init_model_async(
+        model_path,
+        ::xllm::ExecutionConfig::get_instance().random_seed(),
+        master_status));
   }
   // wait for all futures to complete
   auto results = folly::collectAll(futures).get();
@@ -334,7 +345,7 @@ int64_t LLMEngine::get_effective_xtensor_weight_size(
     return kInvalidWeightSize;
   }
 
-  if (!FLAGS_enable_rolling_load) {
+  if (!::xllm::LoadConfig::get_instance().enable_rolling_load()) {
     return all_size;
   }
 
@@ -360,17 +371,19 @@ int64_t LLMEngine::get_effective_xtensor_weight_size(
     return kInvalidWeightSize;
   }
   const int64_t rolling_buffer_size =
-      FLAGS_rolling_load_num_cached_layers * max_layer_size;
+      ::xllm::LoadConfig::get_instance().rolling_load_num_cached_layers() *
+      max_layer_size;
   const int64_t total_weight_size = non_decoder_size + rolling_buffer_size;
 
-  LOG(INFO) << "XTensor rolling_load weight budget: total=" << all_size
-            << ", non_decoder=" << non_decoder_size
-            << ", all_decoder=" << all_decoder_size
-            << ", max_layer=" << max_layer_size
-            << ", rolling_buffer=" << rolling_buffer_size << " ("
-            << FLAGS_rolling_load_num_cached_layers << " slots x "
-            << max_layer_size << " bytes/max-layer)"
-            << ", effective=" << total_weight_size;
+  LOG(INFO)
+      << "XTensor rolling_load weight budget: total=" << all_size
+      << ", non_decoder=" << non_decoder_size
+      << ", all_decoder=" << all_decoder_size
+      << ", max_layer=" << max_layer_size
+      << ", rolling_buffer=" << rolling_buffer_size << " ("
+      << ::xllm::LoadConfig::get_instance().rolling_load_num_cached_layers()
+      << " slots x " << max_layer_size << " bytes/max-layer)"
+      << ", effective=" << total_weight_size;
   return total_weight_size;
 }
 
@@ -380,16 +393,19 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
 
   int64_t cache_size_in_bytes = std::numeric_limits<int64_t>::max();
 
-  if (FLAGS_enable_xtensor) {
+  if (::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     // For xtensor mode, use PhyPagePool's total pages * page_size
     auto& phy_pool = PhyPagePool::get_instance();
     CHECK(phy_pool.is_initialized()) << "PhyPagePool not initialized";
-    cache_size_in_bytes = static_cast<int64_t>(phy_pool.num_total()) *
-                          FLAGS_phy_page_granularity_size;
-    LOG(INFO) << "XTensor mode: available memory from PhyPagePool: "
-              << readable_size(cache_size_in_bytes)
-              << " (pages: " << phy_pool.num_total()
-              << ", page_size: " << FLAGS_phy_page_granularity_size << ")";
+    cache_size_in_bytes =
+        static_cast<int64_t>(phy_pool.num_total()) *
+        ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size();
+    LOG(INFO)
+        << "XTensor mode: available memory from PhyPagePool: "
+        << readable_size(cache_size_in_bytes)
+        << " (pages: " << phy_pool.num_total() << ", page_size: "
+        << ::xllm::KVCacheConfig::get_instance().phy_page_granularity_size()
+        << ")";
   } else {
     // Original logic: query each worker for available memory
     std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
@@ -456,7 +472,8 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
 
   if (options_.enable_mla()) {
 #if defined(USE_NPU)
-    if (args_.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
+    if (args_.model_type() == "deepseek_v3" &&
+        ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()) {
       slot_size =
           cache_dtype_size *
           ((args_.kv_lora_rank() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT +
@@ -515,6 +532,7 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
   kv_cache_cap.slot_size() = slot_size;
   kv_cache_cap.index_slot_size() = index_slot_size;
+  kv_cache_cap.scale_slot_size() = scale_slot_size;
   kv_cache_cap.linear_slot_size() = linear_slot_size;
   kv_cache_cap.n_layers() = args_.n_layers();
   kv_cache_cap.block_size() = options_.block_size();
@@ -528,7 +546,8 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   }
 #endif
 
-  kv_cache_cap.num_linear_state_blocks() = FLAGS_max_seqs_per_batch + 2;
+  kv_cache_cap.num_linear_state_blocks() =
+      ::xllm::SchedulerConfig::get_instance().max_seqs_per_batch() + 2;
   for (int64_t layer_id = 0; layer_id < kv_cache_cap.n_layers(); ++layer_id) {
     if (is_full_attention_layer(args_, layer_id)) {
       ++kv_cache_cap.num_full_attention_layers();
@@ -551,7 +570,8 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     CHECK_GT(kv_cache_cap.cache_size_in_bytes(),
              kv_cache_cap.linear_cache_size_in_bytes())
         << "failed to reserve linear state cache for linear-attention layers: "
-        << "max_seqs_per_batch (" << FLAGS_max_seqs_per_batch
+        << "max_seqs_per_batch ("
+        << ::xllm::SchedulerConfig::get_instance().max_seqs_per_batch()
         << ") is too large. Please reduce max_seqs_per_batch to less than "
         << kv_cache_cap.cache_size_in_bytes() /
                    (kv_cache_cap.num_linear_attention_layers() *
@@ -574,6 +594,8 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
             << readable_size(kv_cache_cap.cache_size_in_bytes())
             << ", blocks: " << kv_cache_cap.n_blocks()
             << ", slot_size: " << kv_cache_cap.slot_size()
+            << ", index_slot_size: " << kv_cache_cap.index_slot_size()
+            << ", scale_slot_size: " << kv_cache_cap.scale_slot_size()
             << ", linear_slot_size: " << kv_cache_cap.linear_slot_size()
             << ", linear_blocks: " << kv_cache_cap.num_linear_state_blocks()
             << ", reserved_linear_bytes: "
@@ -597,11 +619,13 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .host_num_blocks(kv_cache_cap.n_blocks() * options_.host_blocks_factor())
       .enable_linear_state(enable_gdn_attention)
       .enable_prefix_cache(
-          FLAGS_enable_xtensor ? false : options_.enable_prefix_cache())
+          ::xllm::KVCacheConfig::get_instance().enable_xtensor()
+              ? false
+              : options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_cache_upload(options_.enable_cache_upload())
       .enable_kvcache_store(options_.enable_kvcache_store())
-      .enable_xtensor(FLAGS_enable_xtensor)
+      .enable_xtensor(::xllm::KVCacheConfig::get_instance().enable_xtensor())
       .num_layers(args_.n_layers())
       .slot_size(kv_cache_cap.slot_size())
       .model_id(options_.model_id());
@@ -770,7 +794,7 @@ void LLMEngine::get_xtensor_info(
     std::vector<size_t>& worker_free_phy_pages,
     std::unordered_map<std::string, std::vector<WeightSegment>>&
         model_weight_segments) {
-  if (!FLAGS_enable_xtensor) {
+  if (!::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     return;
   }
 
@@ -988,26 +1012,27 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
       << "Split DP batch failed with dp_size as " << dp_size_
       << " and actual batch size as " << batch.size() << ".";
 
-  auto raw_forward_inputs = prepare_inputs(batch);
-  DCHECK(dp_size_ == raw_forward_inputs.size())
-      << "The processed raw forward inputs size " << raw_forward_inputs.size()
+  auto forward_inputs = prepare_inputs(batch);
+  DCHECK(dp_size_ == forward_inputs.size())
+      << "The processed forward inputs size " << forward_inputs.size()
       << " is not equal to dp size " << dp_size_ << ".";
 
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
 
-  std::vector<std::vector<RawForwardInput>> cp_partitioned_inputs(dp_size_);
+  std::vector<std::vector<ForwardInput>> cp_partitioned_inputs(dp_size_);
 
   if (cp_size_ > 1) {
     for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-      if (!raw_forward_inputs[dp_rank].batch_forward_type.is_prefill()) {
+      if (!forward_inputs[dp_rank]
+               .input_params.meta.batch_forward_type.is_prefill()) {
         continue;
       }
       auto& inputs_per_cp = cp_partitioned_inputs[dp_rank];
       inputs_per_cp.reserve(cp_size_);
       for (uint32_t cp_rank = 0; cp_rank < cp_size_; ++cp_rank) {
-        inputs_per_cp.emplace_back(
-            raw_forward_inputs[dp_rank].cp_partition(cp_rank, cp_size_));
+        inputs_per_cp.emplace_back(cp_partition_forward_input(
+            forward_inputs[dp_rank], cp_rank, cp_size_));
       }
     }
   }
@@ -1015,9 +1040,10 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   // update dp related global paramters and then execute model
   for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
     const int32_t dp_rank = worker_rank / dp_local_size_;
-    const RawForwardInput* input_to_send = &raw_forward_inputs[dp_rank];
+    const ForwardInput* input_to_send = &forward_inputs[dp_rank];
     if (cp_size_ > 1 &&
-        raw_forward_inputs[dp_rank].batch_forward_type.is_prefill()) {
+        forward_inputs[dp_rank]
+            .input_params.meta.batch_forward_type.is_prefill()) {
       const int32_t local_rank_in_dp_group = worker_rank % dp_local_size_;
       const int32_t cp_rank = local_rank_in_dp_group / dp_local_tp_size_;
       CHECK_GE(cp_rank, 0);
@@ -1025,13 +1051,14 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
       input_to_send = &cp_partitioned_inputs[dp_rank][cp_rank];
     }
     futures.emplace_back(
-        worker_clients_[worker_rank]->step_async(*input_to_send));
+        worker_clients_[worker_rank]->step_remote_async(*input_to_send));
   }
 
   // wait for the all future to complete
   auto results = folly::collectAll(futures).get();
 
-  if (FLAGS_enable_eplb && !options_.enable_schedule_overlap()) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb() &&
+      !options_.enable_schedule_overlap()) {
     process_eplb_data(results);
   }
 
@@ -1082,7 +1109,7 @@ void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
   // because the experts on each worker are different,
   // and the tokens load of all experts needs to be returned to engine.
   // so we can not skip any worker.
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     stride = 1;
   }
 
@@ -1094,7 +1121,7 @@ void LLMEngine::update_last_step_result(std::vector<Batch>& last_batch) {
   // wait for the all future to complete
   auto last_step_results = folly::collectAll(futures).get();
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     process_eplb_data(last_step_results);
   }
 
@@ -1144,8 +1171,9 @@ void LLMEngine::setup_workers(const runtime::Options& options) {
 void LLMEngine::process_eplb_data(
     const std::vector<folly::Try<std::optional<RawForwardOutput>>>& results) {
   int32_t num_layers = args_.n_layers() - args_.first_k_dense_replace();
-  int32_t num_device_experts = args_.n_routed_experts() / worker_clients_num_ +
-                               FLAGS_redundant_experts_num;
+  int32_t num_device_experts =
+      args_.n_routed_experts() / worker_clients_num_ +
+      ::xllm::EPLBConfig::get_instance().redundant_experts_num();
   std::vector<torch::Tensor> tensors;
   std::vector<int32_t> layer_ids(results.size(), -1);
   tensors.reserve(worker_clients_num_);
@@ -1166,9 +1194,8 @@ void LLMEngine::process_eplb_data(
   eplb_manager_->update_expert_load(tensors);
 }
 
-std::vector<RawForwardInput> LLMEngine::prepare_inputs(
-    std::vector<Batch>& batch) {
-  std::vector<RawForwardInput> batched_inputs;
+std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
+  std::vector<ForwardInput> batched_inputs;
   batched_inputs.reserve(dp_size_ * cp_size_);
   // some dp related variables
   std::vector<int32_t> dp_global_token_nums(dp_size_);
@@ -1183,33 +1210,39 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
     batched_inputs.emplace_back(std::move(batch[dp_rank].prepare_forward_input(
         args_, threadpool_.get(), cp_size_)));
     dp_global_token_nums[dp_rank] =
-        batched_inputs[dp_rank].flatten_tokens_vec.size();
+        static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());
     if (batch_forward_type.is_empty() &&
-        !batched_inputs[dp_rank].batch_forward_type.is_empty()) {
-      batch_forward_type = batched_inputs[dp_rank].batch_forward_type;
+        !batched_inputs[dp_rank]
+             .input_params.meta.batch_forward_type.is_empty()) {
+      batch_forward_type =
+          batched_inputs[dp_rank].input_params.meta.batch_forward_type;
       if (batch_forward_type.is_chunked_prefill()) {
         batch_forward_type = BatchForwardType::PREFILL;
       }
     }
-    dp_is_decode[dp_rank] = batch_forward_type.is_decode() &&
-                            batched_inputs[dp_rank].q_max_seq_len == 1;
+    dp_is_decode[dp_rank] =
+        batch_forward_type.is_decode() &&
+        batched_inputs[dp_rank].input_params.meta.q_max_seq_len == 1;
   }
 
   // eplb related
   EplbInfo eplb_info;
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     eplb_info = eplb_manager_->get_eplb_info();
   }
 
   // update dp_global_token_nums and batch_forward_type
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-    batched_inputs[dp_rank].dp_global_token_nums = dp_global_token_nums;
-    batched_inputs[dp_rank].dp_is_decode = dp_is_decode;
-    if (FLAGS_enable_eplb) {
-      batched_inputs[dp_rank].eplb_info = eplb_info;
+    batched_inputs[dp_rank].input_params.parallel.dp_global_token_nums =
+        dp_global_token_nums;
+    batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
+    if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
+      batched_inputs[dp_rank].input_params.expert.eplb_info = eplb_info;
     }
-    if (batched_inputs[dp_rank].batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].batch_forward_type = batch_forward_type;
+    if (batched_inputs[dp_rank]
+            .input_params.meta.batch_forward_type.is_empty()) {
+      batched_inputs[dp_rank].input_params.meta.batch_forward_type =
+          batch_forward_type;
     }
   }
 
@@ -1217,9 +1250,10 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
 }
 
 bool LLMEngine::sleep(MasterStatus master_status) {
-  // sleep/wakeup/fork_master requires FLAGS_enable_xtensor
-  if (!FLAGS_enable_xtensor) {
-    LOG(WARNING) << "sleep requires FLAGS_enable_xtensor to be enabled";
+  // sleep/wakeup/fork_master requires
+  // ::xllm::KVCacheConfig::get_instance().enable_xtensor()
+  if (!::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
+    LOG(WARNING) << "sleep requires --enable_xtensor=true";
     return false;
   }
 
@@ -1259,9 +1293,10 @@ bool LLMEngine::sleep(MasterStatus master_status) {
 }
 
 bool LLMEngine::wakeup(const WakeupOptions& options) {
-  // sleep/wakeup/fork_master requires FLAGS_enable_xtensor
-  if (!FLAGS_enable_xtensor) {
-    LOG(WARNING) << "wakeup requires FLAGS_enable_xtensor to be enabled";
+  // sleep/wakeup/fork_master requires
+  // ::xllm::KVCacheConfig::get_instance().enable_xtensor()
+  if (!::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
+    LOG(WARNING) << "wakeup requires --enable_xtensor=true";
     return false;
   }
 
@@ -1324,7 +1359,7 @@ bool LLMEngine::get_xtensor_offsets_for_blocks(
     const std::vector<int32_t>& block_ids,
     std::vector<std::pair<std::vector<uint64_t>, std::vector<uint64_t>>>&
         layer_offsets) {
-  if (!FLAGS_enable_xtensor) {
+  if (!::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     return false;
   }
 

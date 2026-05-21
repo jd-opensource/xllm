@@ -257,7 +257,7 @@ class FluxFillPipelineImpl : public FluxPipelineBaseImpl {
     } else {
       image_latents = torch::cat({image_latents}, 0);
     }
-    auto noise = randn_tensor(shape, seed, options_);
+    auto noise = xllm::dit::randn_tensor(shape, seed, options_);
     latents = scheduler_->scale_noise(image_latents, timesteps, noise);
     latents = pack_latents(
         latents.value(), batch_size, num_channels_latents, height, width);

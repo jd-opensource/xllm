@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -69,7 +70,9 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
             model_args_.hidden_size(), model_args_.rms_norm_eps(), options));
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
-    int32_t mask_value = FLAGS_enable_chunked_prefill ? -9984 : 1;
+    int32_t mask_value =
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ? -9984
+                                                                         : 1;
     attn_mask_ = layer::AttentionMask(options.device(),
                                       options.dtype().toScalarType(),
                                       /*mask_value=*/mask_value);
@@ -155,12 +158,12 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
 
  protected:
   torch::Tensor build_attention_mask(const ModelInputParams& input_params) {
-    max_seq_len_ = std::max(input_params.kv_max_seq_len, max_seq_len_);
-    if (!FLAGS_enable_chunked_prefill) {
+    max_seq_len_ = std::max(input_params.meta.kv_max_seq_len, max_seq_len_);
+    if (!::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
       return attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
     }
 
-    const int32_t num_sequences = input_params.num_sequences;
+    const int32_t num_sequences = input_params.meta.num_sequences;
     if (num_sequences <= 0) {
       return attn_mask_.get_attn_mask(max_seq_len_, dtype_, device_);
     }
@@ -169,8 +172,8 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
     req_mask_vec.reserve(num_sequences);
     for (int32_t j = 0; j < num_sequences; ++j) {
       req_mask_vec.emplace_back(
-          attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                     input_params.kv_seq_lens_vec[j],
+          attn_mask_.gen_append_mask(input_params.attention.host.q_seq_lens[j],
+                                     input_params.attention.host.kv_seq_lens[j],
                                      max_seq_len_,
                                      dtype_,
                                      device_));

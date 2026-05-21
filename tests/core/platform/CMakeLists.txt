@@ -8,7 +8,7 @@ if(USE_NPU OR USE_CUDA OR USE_ILU)
       shared_vmm_allocator_test.cpp
     DEPS
       :platform
-      :flags
+      :config
       GTest::gtest_main
       glog::glog
   )

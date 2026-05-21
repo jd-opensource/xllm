@@ -112,10 +112,10 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerClient::step_async(
   return worker_->step_async(input);
 }
 
-folly::SemiFuture<std::optional<RawForwardOutput>> WorkerClient::step_async(
-    const RawForwardInput& inputs) {
-  LOG(FATAL) << "Worker Method step_async with RawForwardInput param is "
-                "UnImplemented.";
+folly::SemiFuture<std::optional<RawForwardOutput>>
+WorkerClient::step_remote_async(const ForwardInput& input) {
+  LOG(FATAL) << "WorkerClient Method step_remote_async with ForwardInput "
+                "param is UnImplemented.";
   return folly::makeSemiFuture(std::optional<RawForwardOutput>(std::nullopt));
 }
 

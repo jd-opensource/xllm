@@ -1,0 +1,72 @@
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    https://github.com/jd-opensource/xllm/blob/main/LICENSE
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+==============================================================================*/
+
+#include "core/framework/config/eplb_config.h"
+
+#include "core/common/global_flags.h"
+#include "core/framework/config/config_json_utils.h"
+
+DEFINE_bool(enable_eplb, false, "Whether to use expert parallel load balance.");
+
+DEFINE_int32(redundant_experts_num,
+             1,
+             "Number of redundant experts on per device.");
+
+DEFINE_int64(eplb_update_interval, 1000, "EPLB update rate.");
+
+DEFINE_double(eplb_update_threshold, 0.8, "EPLB update threshold.");
+
+DEFINE_int32(expert_parallel_degree, 0, "Expert parallel degree.");
+
+DEFINE_string(rank_tablefile, "", "ATB HCCL rank table file.");
+
+namespace xllm {
+
+void EPLBConfig::from_flags() {
+  enable_eplb(FLAGS_enable_eplb)
+      .redundant_experts_num(FLAGS_redundant_experts_num)
+      .eplb_update_interval(FLAGS_eplb_update_interval)
+      .eplb_update_threshold(FLAGS_eplb_update_threshold)
+      .expert_parallel_degree(FLAGS_expert_parallel_degree)
+      .rank_tablefile(FLAGS_rank_tablefile);
+}
+
+void EPLBConfig::from_json(const JsonReader& json) {
+  enable_eplb(json.value_or<bool>("enable_eplb", enable_eplb()))
+      .redundant_experts_num(json.value_or<int32_t>("redundant_experts_num",
+                                                    redundant_experts_num()))
+      .eplb_update_interval(json.value_or<int64_t>("eplb_update_interval",
+                                                   eplb_update_interval()))
+      .eplb_update_threshold(json.value_or<double>("eplb_update_threshold",
+                                                   eplb_update_threshold()))
+      .expert_parallel_degree(json.value_or<int32_t>("expert_parallel_degree",
+                                                     expert_parallel_degree()))
+      .rank_tablefile(
+          json.value_or<std::string>("rank_tablefile", rank_tablefile()));
+}
+
+EPLBConfig& EPLBConfig::get_instance() {
+  static EPLBConfig config;
+  return config;
+}
+
+void EPLBConfig::initialize() {
+  from_flags();
+  if (const auto& json_config = config::get_parsed_json_config()) {
+    from_json(*json_config);
+  }
+}
+
+}  // namespace xllm

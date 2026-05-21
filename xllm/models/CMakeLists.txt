@@ -12,8 +12,10 @@ cc_library(
   HDRS
     model_registry.h
     models.h
+    dit/utils/lanczos_resample.h
   SRCS
     model_registry.cpp
+    dit/utils/lanczos_resample.cpp
   DEPS
     :model
     :model_context

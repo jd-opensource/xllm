@@ -26,10 +26,15 @@ if(USE_NPU)
     OUTPUT_STRIP_TRAILING_WHITESPACE
     ERROR_QUIET
   )
-  if(DEFINED ENV{ASCEND_HOME_PATH} AND NOT "$ENV{ASCEND_HOME_PATH}" STREQUAL "")
-    set(XLLM_OPS_MARKER_PATH "$ENV{ASCEND_HOME_PATH}/opp/vendors/xllm/.xllm_ops_git_head")
+
+  if(DEFINED ENV{ASCEND_OPP_PATH} AND NOT "$ENV{ASCEND_OPP_PATH}" STREQUAL "")
+    set(XLLM_OPS_MARKER_PATH "$ENV{ASCEND_OPP_PATH}/vendors/xllm/.xllm_ops_git_head")
   else()
-    set(XLLM_OPS_MARKER_PATH "/usr/local/Ascend/ascend-toolkit/latest/opp/vendors/xllm/.xllm_ops_git_head")
+    message(FATAL_ERROR "ASCEND_OPP_PATH is not initialized for NPU build.")
+  endif()
+
+  if(DEFINED ENV{XLLM_OPS_GIT_HEAD_CACHED})
+    set(XLLM_OPS_GIT_HEAD_CACHED "$ENV{XLLM_OPS_GIT_HEAD_CACHED}")
   endif()
 
   if(NOT DEFINED XLLM_OPS_GIT_HEAD_CACHED OR NOT XLLM_OPS_GIT_HEAD STREQUAL XLLM_OPS_GIT_HEAD_CACHED)

@@ -32,40 +32,31 @@ limitations under the License.
 #include "core/framework/state_dict/state_dict.h"
 #include "core/layers/common/add_matmul.h"
 #include "framework/model_context.h"
+#include "models/dit/utils/common_util.h"
 #include "models/model_registry.h"
+
 // VAE model compatible with huggingface weights
 // ref to:
 // https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/autoencoders/autoencoder_kl.py
 
 namespace xllm {
 
-torch::Tensor randn_tensor(const std::vector<int64_t>& shape,
-                           int64_t seed,
-                           torch::TensorOptions& options) {
-  if (shape.empty()) {
-    LOG(FATAL) << "Shape must not be empty.";
-  }
-  at::Generator gen = at::detail::createCPUGenerator();
-  gen = gen.clone();
-  gen.set_current_seed(seed);
-  torch::Tensor latents;
-  latents = torch::randn(shape, gen, options.device(torch::kCPU));
-  latents = latents.to(options);
-  return latents;
-}
-
 class VAEImageProcessorImpl : public torch::nn::Module {
  public:
-  explicit VAEImageProcessorImpl(ModelContext context,
-                                 bool do_resize = true,
-                                 bool do_normalize = true,
-                                 bool do_binarize = false,
-                                 bool do_convert_rgb = false,
-                                 bool do_convert_grayscale = false,
-                                 int64_t latent_channels = 4) {
+  explicit VAEImageProcessorImpl(
+      ModelContext context,
+      bool do_resize = true,
+      bool do_normalize = true,
+      bool do_binarize = false,
+      bool do_convert_rgb = false,
+      bool do_convert_grayscale = false,
+      int64_t latent_channels = 4,
+      std::optional<int64_t> scale_factor = std::nullopt) {
     const auto& model_args = context.get_model_args();
     options_ = context.get_tensor_options();
-    scale_factor_ = 1 << model_args.block_out_channels().size();
+    scale_factor_ = scale_factor.has_value()
+                        ? scale_factor.value()
+                        : 1 << model_args.block_out_channels().size();
     latent_channels_ = latent_channels;
     do_resize_ = do_resize;
     do_normalize_ = do_normalize;
@@ -85,7 +76,7 @@ class VAEImageProcessorImpl : public torch::nn::Module {
       const torch::Tensor& image,
       std::optional<int64_t> height = std::nullopt,
       std::optional<int64_t> width = std::nullopt,
-      const std::string& resize_mode = "default",
+      const std::string& resize_mode = "lanczos",
       std::optional<std::tuple<int64_t, int64_t, int64_t, int64_t>>
           crop_coords = std::nullopt) {
     torch::Tensor processed = image.clone();
@@ -113,14 +104,26 @@ class VAEImageProcessorImpl : public torch::nn::Module {
                                      torch::indexing::Slice(x1, x2)});
       }
     }
-    int channel = processed.size(1);
+    int64_t channel = processed.size(1);
     if (channel == latent_channels_) {
       return image;
     }
     auto [target_h, target_w] =
         get_default_height_width(processed, height, width);
     if (do_resize_) {
-      processed = resize(processed, target_h, target_w);
+      if (resize_mode == "lanczos") {
+        processed = lanczos_resize(processed, target_h, target_w);
+      } else if (resize_mode == "default") {
+        processed = resize(processed,
+                           {target_h, target_w},
+                           /*resample=*/3,  // BICUBIC (approximate LANCZOS)
+                           /*antialias=*/true);
+      } else {
+        LOG(FATAL)
+            << "Currently only support two resize methods, 'lanczos' and "
+               "'default'"
+            << ", but got: " << resize_mode;
+      }
     }
 
     if (do_normalize_) {
@@ -180,19 +183,69 @@ class VAEImageProcessorImpl : public torch::nn::Module {
     return (tensor * 0.5 + 0.5).clamp(0.0, 1.0);
   }
 
+ public:
   torch::Tensor resize(const torch::Tensor& image,
-                       int64_t target_height,
-                       int64_t target_width) const {
-    return torch::nn::functional::interpolate(
-        image,
-        torch::nn::functional::InterpolateFuncOptions()
-            .size(std::vector<int64_t>{target_height, target_width})
-            .mode(torch::kNearest));
+                       const std::vector<int64_t>& size,
+                       size_t resample,
+                       bool antialias) {
+    if (image.dim() != 4) {
+      LOG(FATAL) << "Input image must be a 4D tensor (B x C x H x W).";
+    }
+    auto options = torch::nn::functional::InterpolateFuncOptions()
+                       .size(size)
+                       .align_corners(false)
+                       .antialias(antialias);
+    switch (resample) {
+      case 1:
+        options.mode(torch::kNearest);
+        break;
+      case 2:
+        options.mode(torch::kBilinear);
+        break;
+      case 3:
+        options.mode(torch::kBicubic);
+        break;
+      default:
+        LOG(FATAL) << "Invalid resample value. Must be one of 1, 2, or 3.";
+    }
+    return torch::nn::functional::interpolate(image, options);
+  }
+
+  torch::Tensor lanczos_resize(torch::Tensor image,
+                               int64_t height,
+                               int64_t width) {
+    auto options = image.options();
+
+    image = image.cpu().to(torch::kFloat32);
+
+    // BCHW || CHW
+    bool has_batch = (image.dim() == 4);
+    if (has_batch) {
+      image = image.squeeze(0);  // [C, H, W]
+    }
+
+    image = image.permute({1, 2, 0}).contiguous();  // [H, W, C]
+
+    int64_t h = image.size(0), w = image.size(1), c = image.size(2);
+
+    torch::Tensor out = torch::empty({height, width, c}, torch::kFloat32);
+    lanczos::resize_f32(image.data_ptr<float>(),
+                        static_cast<int32_t>(w),
+                        static_cast<int32_t>(h),
+                        static_cast<int32_t>(c),
+                        static_cast<int32_t>(width),
+                        static_cast<int32_t>(height),
+                        out.data_ptr<float>());
+
+    out = out.permute({2, 0, 1});  // [C, dstH, dstW]
+    out = out.to(options);
+
+    return has_batch ? out.unsqueeze(0) : out;  // BCHW 或 CHW
   }
 
  private:
-  int scale_factor_ = 8;
-  int latent_channels_ = 4;
+  int64_t scale_factor_ = 8;
+  int64_t latent_channels_ = 4;
   bool do_resize_ = true;
   bool do_normalize_ = true;
   bool do_binarize_ = false;
@@ -888,7 +941,7 @@ class DiagonalGaussianDistribution {
   torch::Tensor sample(int64_t seed) const {
     torch::TensorOptions options = mean_.options();
     std::vector<int64_t> shape(mean_.sizes().begin(), mean_.sizes().end());
-    return mean_ + std_ * randn_tensor(shape, seed, options);
+    return mean_ + std_ * xllm::dit::randn_tensor(shape, seed, options);
   }
 
   torch::Tensor kl(const std::optional<DiagonalGaussianDistribution>& other =

@@ -70,6 +70,7 @@ if(USE_CUDA)
     SRCS
       cuda_graph_executor_test.cpp
     DEPS
+      :config
       :runtime
       :cuda_layers
       :batch

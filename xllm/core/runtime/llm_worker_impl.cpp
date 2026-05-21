@@ -29,6 +29,10 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/common/global_flags.h"
+#include "core/framework/config/beam_search_config.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/load_config.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
@@ -66,18 +70,18 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
   model_executor_ = std::make_unique<Executor>(
       model_.get(), context.get_model_args(), device_, options_);
 
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     eplb_executor_ = std::make_unique<EplbExecutor>(model_.get(), device_);
   }
 
-  if (FLAGS_enable_beam_search_kernel) {
+  if (::xllm::BeamSearchConfig::get_instance().enable_beam_search_kernel()) {
     beam_searcher_ = std::make_unique<BeamSearcher>();
   }
   return true;
 }
 
 std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
-  if (FLAGS_enable_manual_loader) {
+  if (::xllm::LoadConfig::get_instance().enable_manual_loader()) {
 #if defined(USE_NPU)
     if (!enable_schedule_overlap() && options_.backend() == "llm") {
       aclrtStream current_stream =
@@ -96,7 +100,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
 
 std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     const ForwardInput& input) {
-  MULTI_MODEL_STEP_LOCK(FLAGS_enable_xtensor);
+  MULTI_MODEL_STEP_LOCK(::xllm::KVCacheConfig::get_instance().enable_xtensor());
 
   Timer timer;
   auto& sampling_params = input.sampling_params;
@@ -115,8 +119,8 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
             context_.get_model_args().n_layers());
 #endif
 #if defined(USE_NPU) || defined(USE_MLU)
-    const_cast<ModelInputParams*>(&(input.input_params))->layer_synchronizer =
-        layer_synchronizer;
+    const_cast<ModelInputParams*>(&(input.input_params))
+        ->parallel.layer_synchronizer = layer_synchronizer;
 
     futures.emplace_back(
         kv_cache_transfer_->push_kv_blocks_async(input.transfer_kv_infos,
@@ -126,8 +130,8 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
 #endif
   }
 
-  if (FLAGS_enable_eplb) {
-    eplb_executor_->eplb_execute(input.eplb_info);
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
+    eplb_executor_->eplb_execute(input.input_params.expert.eplb_info);
   }
 
   // call model executor forward to get hidden states
@@ -144,7 +148,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   }
 
   ForwardOutput output;
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     output.expert_load_data = expert_load_data_;
     output.prepared_layer_id = eplb_executor_->get_ready_layer_id();
     if (output.prepared_layer_id != -1) {
@@ -170,7 +174,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
         }
       }
     }
-    if (FLAGS_enable_eplb) {
+    if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
       return output;
     }
     return std::nullopt;
@@ -187,10 +191,11 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
 
       // beam search kernel
       BeamSearchOutput beam_search_output;
-      if (sampling_params.use_beam_search && input.acc_logprob.defined() &&
-          input.acc_logprob.numel() > 0) {
+      if (sampling_params.use_beam_search &&
+          sampling_params.acc_logprob.defined() &&
+          sampling_params.acc_logprob.numel() > 0) {
         beam_search_output =
-            beam_searcher_->forward(input.acc_logprob,
+            beam_searcher_->forward(sampling_params.acc_logprob,
                                     sample_output.top_tokens,
                                     sample_output.top_logprobs);
       }
@@ -209,7 +214,8 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     } else {
       embeddings = model_output.hidden_states;
     }
-    if (!input.input_params.batch_forward_type.is_decode() && !is_spec_draft_) {
+    if (!input.input_params.meta.batch_forward_type.is_decode() &&
+        !is_spec_draft_) {
       output.sample_output.embeddings = embeddings;
     } else if (sampling_params.selected_token_idxes.defined()) {
       output.sample_output.embeddings = embeddings.index_select(

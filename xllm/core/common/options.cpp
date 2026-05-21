@@ -70,7 +70,7 @@ std::string Options::to_string() const {
      << ", enable_cache_upload: " << enable_cache_upload()
      << ", enable_kvcache_store: " << enable_kvcache_store()
      << ", prefetch_timeout: " << prefetch_timeout()
-     << ", prefetch_bacth_size: " << prefetch_bacth_size()
+     << ", prefetch_batch_size: " << prefetch_batch_size()
      << ", layers_wise_copy_batchs: " << layers_wise_copy_batchs()
      << ", store_protocol: " << store_protocol()
      << ", store_master_server_address: " << store_master_server_address()
@@ -80,6 +80,10 @@ std::string Options::to_string() const {
      << ", disable_ttft_profiling: " << disable_ttft_profiling()
      << ", enable_forward_interruption: " << enable_forward_interruption()
      << ", enable_graph: " << enable_graph()
+     << ", enable_graph_mode_decode_no_padding: "
+     << enable_graph_mode_decode_no_padding()
+     << ", enable_prefill_piecewise_graph: " << enable_prefill_piecewise_graph()
+     << ", max_tokens_for_graph_mode: " << max_tokens_for_graph_mode()
      << ", server_idx: " << server_idx();
   ss << "]";
   return ss.str();

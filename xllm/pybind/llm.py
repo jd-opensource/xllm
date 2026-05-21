@@ -1,13 +1,11 @@
-import json
 import os
 import signal
 import sys
 import time
 import uuid
-from . import util
+from . import utils
 from typing import Any, Dict, List, Optional, Sequence, Union
 
-import xllm_export
 from xllm_export import (LLMMaster, VLMMaster, Options, RequestOutput,
                          RequestParams)
 from .errors import ValidationError
@@ -15,49 +13,14 @@ from .params import (
     BeamSearchParams,
     PoolingParams,
     SamplingParams,
+    _RequestParamsProxy,
     to_request_params,
     to_request_params_list,
 )
 
-def _read_json(path: str) -> Dict[str, object]:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _infer_model_backend(model_path: str) -> str:
-    model_index_path = os.path.join(model_path, "model_index.json")
-    if os.path.exists(model_index_path):
-        data = _read_json(model_index_path)
-        if "_diffusers_version" in data:
-            return "dit"
-
-    config_path = os.path.join(model_path, "config.json")
-    if not os.path.exists(config_path):
-        raise ValueError(
-            "config.json or model_index.json is required for backend detection"
-        )
-    data = _read_json(config_path)
-    model_type = data.get("model_type") or data.get("model_name")
-    if not model_type:
-        raise ValueError("config.json must contain model_type or model_name")
-
-    get_backend = getattr(xllm_export, "get_model_backend", None)
-    if not callable(get_backend):
-        raise ValueError(
-            "xllm_export.get_model_backend is not available. "
-            "Please rebuild xllm_export or explicitly specify backend."
-        )
-    try:
-        backend = get_backend(model_type)
-    except Exception as exc:
-        raise ValueError(f"Failed to resolve backend for model_type: {model_type}") from exc
-    if not backend:
-        raise ValueError(f"Unsupported model_type: {model_type}")
-    return backend
-
 
 class BeamSearchOutput:
-    def __init__(self, output: RequestOutput):
+    def __init__(self, output: RequestOutput) -> None:
         self.prompt = output.prompt
         self.sequences = output.outputs
         self.status = output.status
@@ -66,7 +29,7 @@ class BeamSearchOutput:
 
 
 class EmbeddingOutputs:
-    def __init__(self, output: RequestOutput):
+    def __init__(self, output: RequestOutput) -> None:
         embedding = []
         if output.outputs and len(output.outputs) > 0:
             embedding = output.outputs[0].embeddings
@@ -75,7 +38,7 @@ class EmbeddingOutputs:
 
 
 class EmbeddingOutput:
-    def __init__(self, output: RequestOutput):
+    def __init__(self, output: RequestOutput) -> None:
         self.prompt = output.prompt
         self.outputs = EmbeddingOutputs(output)
         self.status = output.status
@@ -131,11 +94,16 @@ class LLM:
         kv_cache_transfer_mode: str = 'PUSH',
         disable_ttft_profiling: bool = False,
         enable_forward_interruption: bool = False,
+        enable_graph: bool = False,
+        enable_graph_mode_decode_no_padding: bool = False,
+        enable_prefill_piecewise_graph: bool = False,
+        max_tokens_for_graph_mode: int = 2048,
         enable_shm: bool = False,
         is_local: bool = True,
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
         kv_cache_dtype: str = 'auto',
+        use_cpp_chat_template: bool = True,
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -153,11 +121,14 @@ class LLM:
         if not os.path.exists(model):
             raise ValueError(f"model {model} not exists")
 
-        backend = _infer_model_backend(model)
+        model_type, backend = utils._infer_model_type_and_backend(model)
         if backend == "dit":
             raise ValueError("LLM does not support DiT backend models")
         if backend == "vlm" and task != "generate":
             raise ValueError("VLM backend only supports generate task in LLM")
+        if model_type is None:
+            raise ValueError("model_type is required for offline inference")
+        utils._configure_cpp_chat_template(use_cpp_chat_template, model_type)
 
         options = Options()
         options.model_path = model
@@ -185,7 +156,7 @@ class LLM:
         if master_node_addr:
             options.master_node_addr = master_node_addr
         else:
-            free_port = util.get_free_port()
+            free_port = utils.get_free_port()
             options.master_node_addr = "127.0.0.1:" + str(free_port)
         options.device_ip = device_ip
         options.transfer_listen_port = transfer_listen_port
@@ -200,6 +171,10 @@ class LLM:
         options.kv_cache_transfer_mode = kv_cache_transfer_mode
         options.disable_ttft_profiling = disable_ttft_profiling
         options.enable_forward_interruption = enable_forward_interruption
+        options.enable_graph = enable_graph
+        options.enable_graph_mode_decode_no_padding = enable_graph_mode_decode_no_padding
+        options.enable_prefill_piecewise_graph = enable_prefill_piecewise_graph
+        options.max_tokens_for_graph_mode = max_tokens_for_graph_mode
         options.enable_offline_inference = True
         options.spawn_worker_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
         options.enable_shm = enable_shm
@@ -217,7 +192,7 @@ class LLM:
         try:
             #os.kill(os.getpid(), signal.SIGTERM)
             #os.kill(os.getpid(), signal.SIGKILL)
-            util.terminate_process(os.getpid())
+            utils.terminate_process(os.getpid())
         except Exception as e:
             pass
 
@@ -330,16 +305,24 @@ class LLM:
                 continue
             raise TypeError("prompts must be str or dict with key 'prompt'")
 
+        explicit_fields = (
+            params.explicit_fields()
+            if isinstance(params, _RequestParamsProxy)
+            else set()
+        )
         params = to_request_params(params, default_cls=BeamSearchParams)
         if params.beam_width <= 0:
             raise ValueError("beam_width must be greater than 0")
-        else:
+        elif params.beam_width > 1:
             # Beam search relies on top-k logprob candidates from sampler.
-            # Keep this aligned with vLLM's internal default behavior.
-            params.logprobs = True
-            if params.top_logprobs == 0:
-                # if not set top_logprobs, default to returning 2x candidates for better deduplication
-                params.top_logprobs = 2 * params.beam_width
+            # Keep this aligned with the LLM request-path default.
+            if "logprobs" not in explicit_fields:
+                params.logprobs = True
+            if (
+                "top_logprobs" not in explicit_fields
+                and params.top_logprobs == 0
+            ):
+                params.top_logprobs = params.beam_width
 
         outputs = self.generate(parsed_prompts,
                                 request_params=params,

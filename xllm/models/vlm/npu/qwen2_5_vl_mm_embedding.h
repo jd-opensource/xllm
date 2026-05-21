@@ -49,7 +49,7 @@ class Qwen2_5_VLForMMEmbeddingImpl : public torch::nn::Module {
 
   MMDict encode(const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
-    const auto& mm_data = input_params.mm_data;
+    const auto& mm_data = input_params.multimodal.mm_data;
 
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))

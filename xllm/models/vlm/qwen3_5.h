@@ -120,11 +120,11 @@ class Qwen3_5ModelImpl final
         tokens = torch::tensor({1}).to(torch::kInt32).to(tokens.device());
         positions = torch::tensor({1}).to(torch::kInt32).to(positions.device());
       }
-      auto& dp_token_nums = input_params_new.dp_global_token_nums;
+      auto& dp_token_nums = input_params_new.parallel.dp_global_token_nums;
       std::replace(dp_token_nums.begin(), dp_token_nums.end(), 0, 1);
     }
 
-    auto inputs_embeds = input_params.input_embedding;
+    auto inputs_embeds = input_params.embedding.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
       h = inputs_embeds;

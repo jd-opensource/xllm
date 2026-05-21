@@ -18,6 +18,8 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "common/global_flags.h"
+#include "core/framework/config/disagg_pd_config.h"
+#include "core/framework/config/kv_cache_config.h"
 
 #if defined(USE_NPU)
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
@@ -241,19 +243,17 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
     torch::ScalarType dtype,
     std::vector<xllm::KVCache>& kv_caches,
     int64_t num_layers,
-    std::function<void(const KVCacheShape&)> allocate_kv_cache_func,
+    AllocateKVCacheFunc allocate_kv_cache_func,
     bool enable_lighting_indexer,
     const std::string& model_type,
     const std::string& model_id) {
-  static_cast<void>(allocate_kv_cache_func);
-
   std::shared_ptr<KVCacheTransfer> transfer;
 
   int32_t device_id = device.index();
 
 #if defined(USE_NPU) || defined(USE_MLU)
   LOG(INFO) << "Create KVCacheTransfer for " << transfer_type << "flag"
-            << FLAGS_kv_cache_transfer_type;
+            << ::xllm::DisaggPDConfig::get_instance().kv_cache_transfer_type();
   if (transfer_type == "LlmDataDist") {
 #if defined(USE_NPU)
     transfer = std::make_shared<LlmDataDistTransfer>(device_ip,
@@ -262,17 +262,18 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
                                                      model_type,
                                                      enable_lighting_indexer);
 
-    kv_caches.reserve(num_layers);
-
     transfer->initialize(device_id);
-    transfer->allocate_kv_cache(kv_caches, num_layers, kv_cache_shape, dtype);
+    CHECK(allocate_kv_cache_func(kv_cache_shape,
+                                 /*use_huge_page_allocator=*/true))
+        << "Allocate KV cache failed.";
+    transfer->register_kv_cache(kv_caches, kv_cache_shape, dtype);
 #else
     LOG(FATAL) << "LlmDataDist is not supported on MLU backend.";
 #endif
   } else if (transfer_type == "Mooncake") {
     std::shared_ptr<MooncakeKVCacheTransferBase> mooncake_transfer;
 #if defined(USE_NPU)
-    if (FLAGS_enable_xtensor) {
+    if (::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
       auto xtensor_transfer = std::make_shared<MooncakeKVCacheTransferXTensor>(
           device_id, transfer_listen_port, device);
       if (!model_id.empty()) {

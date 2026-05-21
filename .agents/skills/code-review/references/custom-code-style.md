@@ -295,8 +295,8 @@ for (int32_t i = 0; i < num_layers; ++i) {
 ## 10. Global Flags
 
 - **Do not overuse `FLAGS_` global variables**. Prefer passing configuration through constructor parameters or config structs. Only use global flags for top-level, process-wide settings.
-- **Register new flags in `help_formatter.h`**. When adding a new global flag, always add a corresponding entry in `help_formatter.h` so it appears in `--help` output.
-
+- **Register new flags in their config category**. When adding a flag under `xllm/core/framework/config/`, add it to that config class's `option_category()` so `core/framework/config/help_formatter.h` can print it in `--help`.
+- **Keep config defaults explicit**. Primitive `PROPERTY` fields such as `bool`, `int32_t`, `int64_t`, and `double` must keep an in-class default matching the corresponding `DEFINE_*` default.
 ---
 
 ## 11. Python-Specific Rules

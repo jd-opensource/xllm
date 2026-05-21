@@ -20,6 +20,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/instance_name.h"
+#include "core/framework/config/model_config.h"
 #include "core/util/uuid.h"
 #include "request.h"
 
@@ -50,6 +51,15 @@ std::string generate_rerank_request_id() {
 std::string generate_anthropic_chat_request_id() {
   return "anthropiccmpl-" + InstanceName::name()->get_name_hash() + "-" +
          short_uuid.random();
+}
+
+void apply_beam_search_logprobs_default(
+    RequestParams& params,
+    bool probability_params_explicitly_set) {
+  if (params.beam_width > 1 && !probability_params_explicitly_set) {
+    params.logprobs = true;
+    params.top_logprobs = static_cast<int64_t>(params.beam_width);
+  }
 }
 
 // Handle tool_choice conversion from Anthropic format to internal format
@@ -225,6 +235,8 @@ RequestParams::RequestParams(const proto::CompletionRequest& request,
   if (request.has_num_return_sequences()) {
     num_return_sequences = request.num_return_sequences();
   }
+  apply_beam_search_logprobs_default(
+      *this, /*probability_params_explicitly_set=*/request.has_logprobs());
   if (request.has_add_special_tokens()) {
     add_special_tokens = request.add_special_tokens();
   } else {
@@ -420,6 +432,10 @@ void init_from_chat_request(RequestParams& params, const ChatRequest& request) {
   if (request.has_num_return_sequences()) {
     params.num_return_sequences = request.num_return_sequences();
   }
+  apply_beam_search_logprobs_default(
+      params,
+      /*probability_params_explicitly_set=*/
+      request.has_logprobs() || request.has_top_logprobs());
 
   if (request.has_add_special_tokens()) {
     params.add_special_tokens = request.add_special_tokens();
@@ -502,7 +518,7 @@ RequestParams::RequestParams(const proto::RerankRequest& request,
   x_request_time = x_rtime;
   max_tokens = 1;
   streaming = false;
-  if (FLAGS_enable_qwen3_reranker) {
+  if (::xllm::ModelConfig::get_instance().enable_qwen3_reranker()) {
     logprobs = true;
   } else {
     is_embeddings = true;

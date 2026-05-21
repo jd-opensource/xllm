@@ -1,7 +1,7 @@
 import os
 import signal
 import sys
-from . import util
+from . import utils
 from typing import List, Optional, Union, Dict, Any
 from xllm_export import (VLMMaster, Options, RequestOutput,
                          RequestParams, MMData)
@@ -47,10 +47,15 @@ class VLM:
         enable_disagg_pd: bool = False,
         enable_schedule_overlap: bool = False,
         kv_cache_transfer_mode: str = 'PUSH',
+        enable_graph: bool = False,
+        enable_graph_mode_decode_no_padding: bool = False,
+        enable_prefill_piecewise_graph: bool = False,
+        max_tokens_for_graph_mode: int = 2048,
         enable_shm: bool = False,
         is_local: bool = True,
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
+        use_cpp_chat_template: bool = True,
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -63,6 +68,7 @@ class VLM:
         if not os.path.exists(model):
             raise ValueError(f"model {model} not exists")
         self.model = model
+        model_type = utils._infer_model_type(model)
 
         options = Options()
         options.model_path = model
@@ -87,7 +93,7 @@ class VLM:
         options.expert_parallel_degree = expert_parallel_degree
         options.enable_chunked_prefill = enable_chunked_prefill
         options.enable_prefill_sp = enable_prefill_sp
-        free_port = util.get_free_port()
+        free_port = utils.get_free_port()
         options.master_node_addr = "127.0.0.1:" + str(free_port)
         options.device_ip = device_ip
         options.transfer_listen_port = transfer_listen_port
@@ -99,19 +105,24 @@ class VLM:
         options.enable_disagg_pd = enable_disagg_pd
         options.enable_schedule_overlap = enable_schedule_overlap
         options.kv_cache_transfer_mode = kv_cache_transfer_mode
+        options.enable_graph = enable_graph
+        options.enable_graph_mode_decode_no_padding = enable_graph_mode_decode_no_padding
+        options.enable_prefill_piecewise_graph = enable_prefill_piecewise_graph
+        options.max_tokens_for_graph_mode = max_tokens_for_graph_mode
         options.enable_offline_inference = True
         options.spawn_worker_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
         options.enable_shm = enable_shm
         options.is_local = is_local
         options.input_shm_size = input_shm_size
         options.output_shm_size = output_shm_size
+        utils._configure_cpp_chat_template(use_cpp_chat_template, model_type)
         self.master = VLMMaster(options)
 
     def finish(self) -> None:
         try:
             #os.kill(os.getpid(), signal.SIGTERM)
             #os.kill(os.getpid(), signal.SIGKILL)
-            util.terminate_process(os.getpid())
+            utils.terminate_process(os.getpid())
         except Exception as e:
             pass
 

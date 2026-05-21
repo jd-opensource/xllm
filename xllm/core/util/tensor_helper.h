@@ -351,15 +351,19 @@ inline torch::Tensor get_tensor_from_blob(const std::vector<int64_t>& dims,
 
   tensor.set_(storage, 0, dims);
   return tensor;
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_MLU)
   auto options = torch::TensorOptions()
                      .dtype(dtype)
+#if defined(USE_CUDA)
                      .device(torch::kCUDA)
+#else
+                     .device(torch::kPrivateUse1)
+#endif
                      .requires_grad(
                          /*requires_grad=*/false);
   return torch::from_blob(const_cast<void*>(dev_addr), dims, options);
 #else
-  LOG(FATAL) << "get_tensor_from_blob only supports NPU and CUDA devices";
+  LOG(FATAL) << "get_tensor_from_blob only supports NPU, CUDA and MLU devices";
 #endif
 }
 
@@ -367,13 +371,17 @@ inline torch::Tensor get_tensor_from_blob(const std::vector<int64_t>& dims,
                                           const torch::ScalarType dtype,
                                           const void* dev_addr,
                                           const torch::Tensor& owner) {
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_MLU)
   CHECK(owner.defined())
-      << "get_tensor_from_blob requires a valid owner tensor on CUDA";
+      << "get_tensor_from_blob requires a valid owner tensor";
 
   auto options = torch::TensorOptions()
                      .dtype(dtype)
+#if defined(USE_CUDA)
                      .device(torch::kCUDA)
+#else
+                     .device(torch::kPrivateUse1)
+#endif
                      .requires_grad(
                          /*requires_grad=*/false);
   auto owner_ref = owner;

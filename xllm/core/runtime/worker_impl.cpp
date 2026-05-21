@@ -42,6 +42,13 @@ limitations under the License.
 #include "common/device_monitor.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
+#include "core/framework/config/beam_search_config.h"
+#include "core/framework/config/disagg_pd_config.h"
+#include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/load_config.h"
+#include "core/framework/config/speculative_config.h"
 #if defined(USE_NPU)
 #include "platform/npu/device_capture_lock.h"
 #elif defined(USE_CUDA)
@@ -118,6 +125,28 @@ class ScopedAtenLoadThreads {
   bool active_ = false;
 };
 
+#if defined(USE_NPU)
+void prepare_input_params_for_linear_attention(ModelInputParams& input_params) {
+  int64_t batch_size = input_params.attention.device.block_tables.size(0);
+  input_params.parallel.query_start_loc.resize(batch_size + 1, 0);
+  for (int64_t i = 0; i < batch_size; ++i) {
+    int64_t seq_len =
+        static_cast<int64_t>(input_params.attention.host.q_seq_lens[i]);
+    input_params.parallel.query_start_loc[i + 1] =
+        input_params.parallel.query_start_loc[i] + seq_len;
+  }
+
+  torch::Tensor has_initial_state_tensor =
+      input_params.attention.device.kv_cache_tokens_nums > 0;
+  torch::Tensor has_initial_state_int64 =
+      has_initial_state_tensor.contiguous().to(torch::kCPU).to(torch::kInt64);
+  input_params.parallel.has_initial_state =
+      std::vector<int64_t>(has_initial_state_int64.data_ptr<int64_t>(),
+                           has_initial_state_int64.data_ptr<int64_t>() +
+                               has_initial_state_int64.size(0));
+}
+#endif
+
 }  // namespace
 
 WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
@@ -144,15 +173,15 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   sampler_ = std::make_unique<Sampler>();
 
 #if !defined(USE_NPU) && !defined(USE_CUDA)
-  if (FLAGS_enable_block_copy_kernel) {
+  if (::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel()) {
     LOG(WARNING) << "enable_block_copy_kernel is only supported on NPU/CUDA; "
                     "forcing enable_block_copy_kernel=false.";
-    FLAGS_enable_block_copy_kernel = false;
+    ::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel(false);
   }
 #endif
 
 #if defined(USE_NPU)
-  if (FLAGS_enable_xtensor) {
+  if (::xllm::KVCacheConfig::get_instance().enable_xtensor()) {
     if (!weight_transfer_) {
       weight_transfer_ = std::make_unique<MooncakeWeightTransfer>(
           options_.transfer_listen_port(), device_.unwrap());
@@ -164,7 +193,7 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
       LOG(ERROR) << "Failed to register GlobalXTensor";
     }
   }
-  if (FLAGS_enable_rolling_load) {
+  if (::xllm::LoadConfig::get_instance().enable_rolling_load()) {
     load_stream_ = device_.get_stream_from_pool();
   }
   worker_rendezvous_ =
@@ -176,7 +205,8 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
 
 WorkerImpl::~WorkerImpl() = default;
 
-bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
+bool WorkerImpl::allocate_kv_cache_storage(const KVCacheShape& kv_cache_shape,
+                                           bool use_huge_page_allocator) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
   const auto& args = context_.get_model_args();
@@ -223,16 +253,27 @@ bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
       .full_attention_interval(args.full_attention_interval())
       .model_id(options_.model_id())
       .model_type(args.model_type())
-      .enable_xtensor(FLAGS_enable_xtensor)
+      .enable_xtensor(::xllm::KVCacheConfig::get_instance().enable_xtensor())
       .enable_linear_attention(enable_linear_attention)
       .enable_lighting_indexer(enable_lighting_indexer)
       .enable_kv_cache_quant(enable_kv_cache_quant);
+#if defined(USE_NPU)
+  create_options.enable_kv_cache_huge_page_allocator(use_huge_page_allocator);
+#endif
 
   allocate_kv_caches(kv_caches_, kv_cache_shape, create_options);
 
 #if defined(USE_CUDA)
   refresh_cuda_block_copy_runtime_state();
 #endif
+
+  return true;
+}
+
+bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
+  if (!allocate_kv_cache_storage(kv_cache_shape)) {
+    return false;
+  }
 
   init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;
@@ -244,13 +285,12 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
 
-  int32_t device_id = device_.index();
   // create a KVCache for each layer
   const int64_t num_layers = context_.get_model_args().n_layers();
   const bool enable_lighting_indexer =
       context_.get_model_args().index_n_heads() > 0;
   kv_cache_transfer_ = KVCacheTransferFactory::create(
-      FLAGS_kv_cache_transfer_type,
+      ::xllm::DisaggPDConfig::get_instance().kv_cache_transfer_type(),
       options_.device_ip().value(),
       options_.transfer_listen_port(),
       options_.instance_role(),
@@ -259,7 +299,9 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       dtype_,
       kv_caches_,
       num_layers,
-      [this](const KVCacheShape& shape) { this->allocate_kv_cache(shape); },
+      [this](const KVCacheShape& shape, bool use_huge_page_allocator) {
+        return this->allocate_kv_cache_storage(shape, use_huge_page_allocator);
+      },
       enable_lighting_indexer,
       context_.get_model_args().model_type(),
       options_.model_id());
@@ -279,17 +321,19 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
 
   kv_cache_transfer_ = kv_cache_transfer;
 
-  const int64_t num_layers = get_num_layers();
-  kv_caches_.reserve(num_layers);
-  if (is_spec_draft_) {
-    kv_cache_transfer_->allocate_kv_cache_spec(
-        kv_caches_, num_layers, kv_cache_shape, dtype_);
-  } else {
-    kv_cache_transfer_->allocate_kv_cache(
-        kv_caches_, num_layers, kv_cache_shape, dtype_);
+  if (!allocate_kv_cache_storage(kv_cache_shape,
+                                 /*use_huge_page_allocator=*/true)) {
+    return false;
   }
 
-#if defined(USE_MLU)
+#if defined(USE_NPU)
+  if (is_spec_draft_) {
+    kv_cache_transfer_->register_kv_cache_spec(
+        kv_caches_, kv_cache_shape, dtype_);
+  } else {
+    kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
+  }
+#else
   kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
 #endif
 
@@ -390,7 +434,7 @@ void WorkerImpl::update_last_step_output(
     last_step_output_ = std::move(output.value());
     last_step_output_valid_ = true;
   } else {
-    if (FLAGS_enable_eplb) {
+    if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
       last_step_output_ = std::move(output.value());
     }
     last_step_output_valid_ = false;
@@ -432,7 +476,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   // asynchronously scheduled data update streams.
 
   std::optional<std::unique_lock<std::mutex>> lock_guard;
-  if (FLAGS_enable_graph) {
+  if (::xllm::ExecutionConfig::get_instance().enable_graph()) {
     auto& capture_lock =
         ::xllm::npu::DeviceCaptureLock::get_instance().get_lock(
             device_.index());
@@ -474,12 +518,13 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 #if defined(USE_NPU)
     CpPrefillInputs tmp_cp_inputs;
     if (parallel_args_.cp_size() > 1 &&
-        input.input_params.batch_forward_type.is_prefill()) {
-      tmp_cp_inputs = prepare_cp_prefill_inputs(parallel_args_.cp_size(),
-                                                input.token_ids,
-                                                input.positions,
-                                                input.input_params.q_seq_lens);
-      processed_input.input_params.cp_prefill_inputs =
+        input.input_params.meta.batch_forward_type.is_prefill()) {
+      tmp_cp_inputs = prepare_cp_prefill_inputs(
+          parallel_args_.cp_size(),
+          input.token_ids,
+          input.positions,
+          input.input_params.attention.device.q_seq_lens);
+      processed_input.input_params.parallel.cp_prefill_inputs =
           tmp_cp_inputs.to(device_);
       CpEpPadding cp_ep_padding(
           input.token_ids,
@@ -487,8 +532,10 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
           context_.get_parallel_args().mapping_data(),
           /*device=*/device_,
           dtype_,
-          /*is_prefill=*/input.input_params.batch_forward_type.is_prefill());
-      processed_input.input_params.cp_ep_padding_data = cp_ep_padding.build();
+          /*is_prefill=*/
+          input.input_params.meta.batch_forward_type.is_prefill());
+      processed_input.input_params.parallel.cp_ep_padding_data =
+          cp_ep_padding.build();
     }
 #endif
 
@@ -496,7 +543,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 
 #if defined(USE_NPU)
     if (context_.get_model_args().enable_mla() &&
-        input_params.batch_forward_type.is_chunked_prefill()) {
+        input_params.meta.batch_forward_type.is_chunked_prefill()) {
       prepare_mla_prefixcache_inputs(input_params);
     }
 
@@ -504,25 +551,31 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
         !(context_.get_parallel_args().cp_size() > 1) &&
         (context_.get_parallel_args().dp_size() > 1 ||
          context_.get_parallel_args().ep_size() > 1)) {
-      torch::Tensor token_size_per_dp_group =
-          torch::tensor(processed_input.input_params.dp_global_token_nums,
-                        torch::TensorOptions()
-                            .device(torch::kCPU)
-                            .dtype(torch::kInt32)
-                            .pinned_memory(true));
+      torch::Tensor token_size_per_dp_group = torch::tensor(
+          processed_input.input_params.parallel.dp_global_token_nums,
+          torch::TensorOptions()
+              .device(torch::kCPU)
+              .dtype(torch::kInt32)
+              .pinned_memory(true));
       bool is_prefill =
-          processed_input.input_params.batch_forward_type.is_prefill();
+          processed_input.input_params.meta.batch_forward_type.is_prefill();
       DpEpPadding dp_ep_padding(token_size_per_dp_group,
                                 context_.get_model_args().num_experts_per_tok(),
                                 context_.get_parallel_args().mapping_data(),
                                 device_,
                                 dtype_,
                                 is_prefill);
-      processed_input.input_params.dp_ep_padding_data = dp_ep_padding.build();
-      if (FLAGS_enable_eplb) {
+      processed_input.input_params.parallel.dp_ep_padding_data =
+          dp_ep_padding.build();
+      if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
         // expert_load_data_.fill_(0);
-        processed_input.input_params.expert_load_data = expert_load_data_;
+        processed_input.input_params.expert.expert_load_data =
+            expert_load_data_;
       }
+    }
+
+    if (has_linear_attention_layers(context_.get_model_args())) {
+      prepare_input_params_for_linear_attention(processed_input.input_params);
     }
 #endif
   };
@@ -541,7 +594,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 
 void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
 #if defined(USE_CUDA)
-  if (FLAGS_enable_block_copy_kernel &&
+  if (::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel() &&
       can_use_cuda_block_copy_kernel(input_params)) {
     execute_cuda_block_copy_kernel(input_params);
     return;
@@ -549,11 +602,12 @@ void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
 #endif
 
 #if defined(USE_NPU)
-  if (input_params.swap_blocks.size() == 0 || FLAGS_enable_block_copy_kernel) {
+  if (input_params.block_copy.swap_blocks.size() == 0 ||
+      ::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel()) {
     return;
   }
 #elif defined(USE_CUDA)
-  if (input_params.swap_blocks.size() == 0) {
+  if (input_params.block_copy.swap_blocks.size() == 0) {
     return;
   }
 #else
@@ -562,10 +616,10 @@ void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
 
 #if defined(USE_NPU) || defined(USE_CUDA)
   std::vector<int64_t> src_indices, dst_indices;
-  src_indices.reserve(input_params.swap_blocks.size());
-  dst_indices.reserve(input_params.swap_blocks.size());
+  src_indices.reserve(input_params.block_copy.swap_blocks.size());
+  dst_indices.reserve(input_params.block_copy.swap_blocks.size());
 
-  for (const auto& block : input_params.swap_blocks) {
+  for (const auto& block : input_params.block_copy.swap_blocks) {
     src_indices.push_back(block.src_block_id);
     dst_indices.push_back(block.dst_block_id);
   }
@@ -583,7 +637,8 @@ void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
 #if defined(USE_CUDA)
 void WorkerImpl::refresh_cuda_block_copy_runtime_state() {
   cuda_block_copy_runtime_state_ = {};
-  if (!FLAGS_enable_block_copy_kernel || kv_caches_.empty()) {
+  if (!::xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel() ||
+      kv_caches_.empty()) {
     return;
   }
 
@@ -636,12 +691,12 @@ void WorkerImpl::refresh_cuda_block_copy_runtime_state() {
 bool WorkerImpl::can_use_cuda_block_copy_kernel(
     const ModelInputParams& input_params) const {
   return cuda_block_copy_runtime_state_.valid() &&
-         input_params.src_block_indices.defined() &&
-         input_params.dst_block_indices.defined() &&
-         input_params.cum_sum.defined() &&
-         input_params.src_block_indices.numel() > 0 &&
-         input_params.dst_block_indices.numel() > 0 &&
-         input_params.cum_sum.numel() > 0;
+         input_params.block_copy.src_block_indices.defined() &&
+         input_params.block_copy.dst_block_indices.defined() &&
+         input_params.block_copy.cum_sum.defined() &&
+         input_params.block_copy.src_block_indices.numel() > 0 &&
+         input_params.block_copy.dst_block_indices.numel() > 0 &&
+         input_params.block_copy.cum_sum.numel() > 0;
 }
 
 void WorkerImpl::execute_cuda_block_copy_kernel(
@@ -650,9 +705,9 @@ void WorkerImpl::execute_cuda_block_copy_kernel(
   xllm::kernel::cuda::block_copy(
       cuda_block_copy_runtime_state_.k_cache_ptrs_device,
       cuda_block_copy_runtime_state_.v_cache_ptrs_device,
-      input_params.src_block_indices,
-      input_params.dst_block_indices,
-      input_params.cum_sum,
+      input_params.block_copy.src_block_indices,
+      input_params.block_copy.dst_block_indices,
+      input_params.block_copy.cum_sum,
       cuda_block_copy_runtime_state_.numel_per_block,
       kv_caches_.front().get_k_cache().scalar_type());
 }
@@ -679,14 +734,14 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
       promise.setValue(output);
     } else {
       if (last_step_output_valid_ && input.token_ids.numel() > 0 &&
-          input.input_params.batch_forward_type.has_decode()) {
+          input.input_params.meta.batch_forward_type.has_decode()) {
         // replace step i model input with true output of step i-1
         input = update_input_by_last_step_output(input);
       }
 
       const auto output = this->step(input);
       if (output.has_value()) {
-        if (is_driver() || FLAGS_enable_eplb) {
+        if (is_driver() || ::xllm::EPLBConfig::get_instance().enable_eplb()) {
           std::unique_lock<std::mutex> lock(mtx_);
           cv_.wait(lock, [this] { return !is_recorded_; });
           update_last_step_output(output);
@@ -696,7 +751,7 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
           update_last_step_output(output);
         }
       } else {
-        if (is_driver() || FLAGS_enable_eplb) {
+        if (is_driver() || ::xllm::EPLBConfig::get_instance().enable_eplb()) {
           std::unique_lock<std::mutex> lock(mtx_);
           cv_.wait(lock, [this] { return !is_recorded_; });
           last_step_output_valid_ = false;
@@ -716,7 +771,8 @@ ForwardOutput WorkerImpl::get_last_step_result() {
   ForwardOutput output;
   std::unique_lock<std::mutex> lock(mtx_);
   cv_.wait(lock, [this] { return is_recorded_; });
-  if (last_step_output_valid_ || FLAGS_enable_eplb) {
+  if (last_step_output_valid_ ||
+      ::xllm::EPLBConfig::get_instance().enable_eplb()) {
     output = last_step_output_;
   }
   is_recorded_ = false;
@@ -782,7 +838,8 @@ bool WorkerImpl::wakeup(const WakeupOptions& options) {
 bool WorkerImpl::wakeup_local(const WakeupOptions& options) {
   if (options.master_status == MasterStatus::LIGHT_SLEEP) {
 #if defined(USE_NPU)
-    if (FLAGS_enable_rolling_load && !is_spec_draft_) {
+    if (::xllm::LoadConfig::get_instance().enable_rolling_load() &&
+        !is_spec_draft_) {
       // Reuse rolling runtime state and refresh rolling initialization on
       // wakeup without re-reading checkpoint in LIGHT_SLEEP.
       if (!init_rolling_runtime_state()) {
@@ -805,9 +862,9 @@ bool WorkerImpl::wakeup_local(const WakeupOptions& options) {
 #if defined(USE_NPU)
 bool WorkerImpl::wakeup_from_remote_weights(const WakeupOptions& options) {
   // Prefer segment-based transfer if available, fallback to legacy offsets.
-  if (FLAGS_enable_rolling_load) {
-    LOG(ERROR)
-        << "Remote weight wakeup does not support FLAGS_enable_rolling_load";
+  if (::xllm::LoadConfig::get_instance().enable_rolling_load()) {
+    LOG(ERROR) << "Remote weight wakeup does not support "
+                  "::xllm::LoadConfig::get_instance().enable_rolling_load()";
     return false;
   }
 
@@ -877,7 +934,7 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
                             int32_t random_seed,
                             MasterStatus master_status) {
   // set same random seed for all worker
-  FLAGS_random_seed = random_seed;
+  ::xllm::ExecutionConfig::get_instance().random_seed(random_seed);
   device_.set_seed(random_seed);
 
   auto model_loader = ModelLoader::create(model_weights_path);
@@ -902,7 +959,8 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   }
 
 #if defined(USE_NPU)
-  if (options_.enable_speculative_decode() && FLAGS_enable_atb_spec_kernel) {
+  if (options_.enable_speculative_decode() &&
+      ::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     args.num_speculative_tokens(options_.num_speculative_tokens());
   } else if (options_.enable_speculative_decode() &&
              options_.num_speculative_tokens() == 0 &&
@@ -989,12 +1047,12 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
   }
 
   status_ = Status::LOADED;
-  if (FLAGS_enable_eplb) {
+  if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     // todo: support xtensor
     int32_t num_layers = args.n_layers() - args.first_k_dense_replace();
     int32_t num_device_experts =
         args.n_routed_experts() / context_.get_parallel_args().world_size() +
-        FLAGS_redundant_experts_num;
+        ::xllm::EPLBConfig::get_instance().redundant_experts_num();
     expert_load_data_ = torch::zeros({num_layers, num_device_experts})
                             .to(torch::kInt64)
                             .to(device_)
@@ -1008,7 +1066,8 @@ void WorkerImpl::load_model(std::unique_ptr<ModelLoader> loader) {
 #if defined(USE_NPU)
   // Rolling mode uses host-pinned weights as the single source of truth:
   // lazy_load_model -> init_rolling_runtime_state() to finish rolling init.
-  if (FLAGS_enable_rolling_load && !is_spec_draft_) {
+  if (::xllm::LoadConfig::get_instance().enable_rolling_load() &&
+      !is_spec_draft_) {
     model_->lazy_load_model(std::move(loader));
     CHECK(init_rolling_runtime_state())
         << "Failed to initialize rolling runtime state during load_model";
@@ -1023,7 +1082,8 @@ void WorkerImpl::load_model(std::unique_ptr<ModelLoader> loader) {
 bool WorkerImpl::init_rolling_runtime_state() {
   // Draft model (speculative decoding) has only 1 decoder layer, skip rolling
   // load.
-  if (!FLAGS_enable_rolling_load || is_spec_draft_) {
+  if (!::xllm::LoadConfig::get_instance().enable_rolling_load() ||
+      is_spec_draft_) {
     return true;
   }
 
@@ -1033,8 +1093,10 @@ bool WorkerImpl::init_rolling_runtime_state() {
   // Rolling runtime ownership is moved into model.
   // Worker provides runtime dependencies and delegates
   // initialization/refresh.
-  const int32_t n_slots = FLAGS_rolling_load_num_cached_layers;
-  const int32_t n_rolling_slots = FLAGS_rolling_load_num_rolling_slots;
+  const int32_t n_slots =
+      ::xllm::LoadConfig::get_instance().rolling_load_num_cached_layers();
+  const int32_t n_rolling_slots =
+      ::xllm::LoadConfig::get_instance().rolling_load_num_rolling_slots();
   return model_->init_or_refresh_rolling_runtime(load_stream_.get(),
                                                  compute_stream_.get(),
                                                  n_slots,
@@ -1140,35 +1202,38 @@ void WorkerImpl::init_hierarchy_kv_cache_transfer() {
 }
 void WorkerImpl::prepare_mla_prefixcache_inputs(
     ModelInputParams& input_params) {
-  int32_t sum_prefix = input_params.kv_cache_tokens_nums.sum().item<int>();
-  input_params.history_compressed_kv =
+  int32_t sum_prefix =
+      input_params.attention.device.kv_cache_tokens_nums.sum().item<int>();
+  input_params.attention.device.history_compressed_kv =
       torch::empty({sum_prefix, context_.get_model_args().kv_lora_rank()},
                    torch::TensorOptions().dtype(dtype_).pinned_memory(true))
           .to(device_);
 
-  input_params.history_k_rope =
+  input_params.attention.device.history_k_rope =
       torch::empty({sum_prefix, context_.get_model_args().qk_rope_head_dim()},
                    torch::TensorOptions().dtype(dtype_).pinned_memory(true))
           .to(device_);
   ;
 
-  input_params.ring_cur_seqlen =
-      torch::stack({input_params.q_seq_lens, input_params.q_seq_lens})
+  input_params.attention.device.ring_cur_seqlen =
+      torch::stack({input_params.attention.device.q_seq_lens,
+                    input_params.attention.device.q_seq_lens})
           .to(device_);
 
-  input_params.ring_cache_seqlen =
-      torch::stack({input_params.q_seq_lens,
-                    input_params.kv_cache_tokens_nums.to(device_)})
+  input_params.attention.device.ring_cache_seqlen =
+      torch::stack(
+          {input_params.attention.device.q_seq_lens,
+           input_params.attention.device.kv_cache_tokens_nums.to(device_)})
           .to(device_);
 
   torch::Tensor ring_cur_seqlen_host =
-      input_params.ring_cur_seqlen.cpu().contiguous();
+      input_params.attention.device.ring_cur_seqlen.cpu().contiguous();
   torch::Tensor ring_cache_seqlen_host =
-      input_params.ring_cache_seqlen.cpu().contiguous();
-  input_params.ring_cur_seqlen_host = std::vector<int>(
+      input_params.attention.device.ring_cache_seqlen.cpu().contiguous();
+  input_params.attention.host.ring_cur_seqlen = std::vector<int>(
       ring_cur_seqlen_host.data_ptr<int>(),
       ring_cur_seqlen_host.data_ptr<int>() + ring_cur_seqlen_host.numel());
-  input_params.ring_cache_seqlen_host = std::vector<int>(
+  input_params.attention.host.ring_cache_seqlen = std::vector<int>(
       ring_cache_seqlen_host.data_ptr<int>(),
       ring_cache_seqlen_host.data_ptr<int>() + ring_cache_seqlen_host.numel());
 }

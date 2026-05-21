@@ -19,6 +19,7 @@ limitations under the License.
 #include "engine.h"
 #include "framework/batch/batch.h"
 #include "framework/block/block_manager_pool.h"
+#include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/model/model_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
@@ -94,9 +95,8 @@ class SpeculativeEngine : public Engine {
 
   bool allocate_kv_cache();
 
-  int64_t calculate_kv_cache(int64_t cache_size_in_bytes,
-                             int64_t target_size,
-                             int64_t draft_size) const;
+  int64_t calculate_kv_cache(const KVCacheCapacity& target_kv_cache_cap,
+                             const KVCacheCapacity& draft_kv_cache_cap) const;
 
   // dtype
   torch::ScalarType dtype_;

@@ -26,7 +26,8 @@ limitations under the License.
 #include <exception>
 #include <stdexcept>
 
-#include "core/common/global_flags.h"
+#include "core/framework/config/beam_search_config.h"
+#include "core/framework/config/execution_config.h"
 #include "helper.h"
 
 XLLM_CAPI_EXPORT XLLM_LLM_Handler* xllm_llm_create(void) {
@@ -115,12 +116,12 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
         .is_local(true)
         .server_idx(xllm_init_options.server_idx);
 
-    options.enable_graph(FLAGS_enable_graph);
+    options.enable_graph(
+        ::xllm::ExecutionConfig::get_instance().enable_graph());
 
 #if !defined(USE_NPU) && !defined(USE_CUDA)
-    FLAGS_enable_block_copy_kernel = false;
+    xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel(false);
 #endif
-
     handler->master = std::make_unique<xllm::LLMMaster>(options);
     handler->master->run();
 

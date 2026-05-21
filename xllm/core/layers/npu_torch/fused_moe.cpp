@@ -923,7 +923,7 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
   if (parallel_args_.dp_size() > 1 && parallel_args_.ep_size() > 1) {
     input = parallel_state::gather(input,
                                    parallel_args_.dp_local_process_group_,
-                                   input_params.dp_global_token_nums);
+                                   input_params.parallel.dp_global_token_nums);
     need_slice = true;
   }
 
@@ -942,7 +942,7 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
   auto output = forward_expert(input, router_logits, shared_output);
 
   if (need_slice) {
-    const auto& dp_tokens = input_params.dp_global_token_nums;
+    const auto& dp_tokens = input_params.parallel.dp_global_token_nums;
     const int64_t dp_rank = parallel_args_.dp_local_process_group_->rank();
     auto start =
         std::accumulate(dp_tokens.begin(), dp_tokens.begin() + dp_rank, 0);

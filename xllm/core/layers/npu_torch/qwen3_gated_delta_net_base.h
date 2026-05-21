@@ -54,6 +54,8 @@ class Qwen3GatedDeltaNetBaseImpl : public torch::nn::Module {
   virtual std::pair<torch::Tensor, torch::Tensor> project_padded_inputs(
       const torch::Tensor& hidden_states,
       const AttentionMetadata& attn_metadata) = 0;
+  virtual std::pair<torch::Tensor, torch::Tensor> project_flat_inputs(
+      const torch::Tensor& hidden_states) = 0;
 
   void load_common_state_dict(const StateDict& state_dict);
   void verify_common_loaded_weights(const std::string& prefix) const;

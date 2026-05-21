@@ -138,6 +138,19 @@ Qwen3_5GatedDeltaNetImpl::project_padded_inputs(
           merge_ba_from_split_activations(b_proj, a_proj)};
 }
 
+std::pair<torch::Tensor, torch::Tensor>
+Qwen3_5GatedDeltaNetImpl::project_flat_inputs(
+    const torch::Tensor& hidden_states) {
+  auto qkv = in_proj_qkv_->forward(hidden_states).unsqueeze(0);
+  auto z_proj = in_proj_z_->forward(hidden_states).unsqueeze(0);
+  auto b_proj = in_proj_b_->forward(hidden_states).unsqueeze(0);
+  auto a_proj = in_proj_a_->forward(hidden_states).unsqueeze(0);
+  auto qkvz = merge_qkvz_from_split_activations(qkv, z_proj);
+  auto ba = merge_ba_from_split_activations(b_proj, a_proj);
+  return {qkvz.view({hidden_states.size(0), qkvz.size(-1)}).contiguous(),
+          ba.view({hidden_states.size(0), ba.size(-1)}).contiguous()};
+}
+
 void Qwen3_5GatedDeltaNetImpl::load_projection_state_dict(
     const StateDict& state_dict) {
   auto in_proj_qkv_state_dict = state_dict.get_dict_with_prefix("in_proj_qkv.");

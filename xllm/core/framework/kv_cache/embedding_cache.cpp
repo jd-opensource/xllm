@@ -76,7 +76,7 @@ void EmbeddingCache::write_prefill_target_context(
     state.all_draft_accepted = false;
     state.token_id = static_cast<int32_t>(token);
     state.position_offset = 0;
-    state.embedding = target_embeddings[i].detach().cpu();
+    state.embedding = target_embeddings[i].detach().clone();
 
     DecodeState& tail = mutable_tail(ids[i]);
     tail = std::move(state);
@@ -138,13 +138,13 @@ void EmbeddingCache::write_target_context(
     state.all_draft_accepted = accepted_len == num_speculative_tokens + 1;
     state.token_id = last_token_id;
     state.position_offset = last_idx;
-    state.embedding = accepted_embeddings[i][last_idx].detach().cpu();
+    state.embedding = accepted_embeddings[i][last_idx].detach().clone();
     if (last_idx > 0) {
       const int64_t prev_token =
           accepted_tokens_cpu[i][last_idx - 1].item<int64_t>();
       state.prev_token_id = static_cast<int32_t>(prev_token);
       state.prev_embedding =
-          accepted_embeddings[i][last_idx - 1].detach().cpu();
+          accepted_embeddings[i][last_idx - 1].detach().clone();
     }
 
     DecodeState& tail = mutable_tail(ids[i]);

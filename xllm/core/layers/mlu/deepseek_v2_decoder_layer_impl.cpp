@@ -235,7 +235,7 @@ bool DeepseekV2DecoderLayerImpl::can_keep_local_output(
 bool DeepseekV2DecoderLayerImpl::can_sp_chunk(
     const ModelInputParams& input_params) const {
   return sequence_parallel_context_ != nullptr && sp_ffn_chunk_size_ > 0 &&
-         input_params.batch_forward_type.no_decode();
+         input_params.meta.batch_forward_type.no_decode();
 }
 
 torch::Tensor DeepseekV2DecoderLayerImpl::comm_out(

@@ -24,7 +24,7 @@ limitations under the License.
 #include <atomic>
 #include <exception>
 
-#include "core/common/global_flags.h"
+#include "core/framework/config/beam_search_config.h"
 #include "internal.h"
 
 namespace xllm {
@@ -114,9 +114,8 @@ bool LLM::Initialize(const std::string& model_path,
         .server_idx(init_options.server_idx);
 
 #if !defined(USE_NPU) && !defined(USE_CUDA)
-    FLAGS_enable_block_copy_kernel = false;
+    BeamSearchConfig::get_instance().enable_block_copy_kernel(false);
 #endif
-
     llm_core_ = new LLMCore();
     llm_core_->master = std::make_unique<LLMMaster>(options);
     llm_core_->master->run();

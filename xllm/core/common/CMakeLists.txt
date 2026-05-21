@@ -19,13 +19,13 @@ cc_library(
     version_singleton.h
   SRCS
     etcd_client.cpp
-    global_flags.cpp
     metrics.cpp
     $<$<BOOL:${USE_NPU}>:mspti_helper.cpp>
     options.cpp
     rate_limiter.cpp
     device_monitor.cpp
   DEPS
+    :config
     util
     absl::random_random
     absl::strings
@@ -38,17 +38,6 @@ cc_library(
     etcd-cpp-api
     $<$<BOOL:${USE_MLU}>:torch_mlu>
     $<$<BOOL:${USE_MUSA}>:torch_musa>
-)
-
-cc_library(
-  NAME
-    flags
-  HDRS
-    global_flags.h
-  SRCS
-    global_flags.cpp
-  DEPS
-    gflags::gflags
 )
 
 target_link_libraries(common PRIVATE OpenSSL::SSL OpenSSL::Crypto protobuf::libprotobuf)

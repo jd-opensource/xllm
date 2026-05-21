@@ -49,6 +49,9 @@ struct KVCacheCapacity {
   // for index cache
   PROPERTY(int64_t, index_slot_size) = 0;
 
+  // for kv cache quantization scale cache
+  PROPERTY(int64_t, scale_slot_size) = 0;
+
   // for linear attention
   PROPERTY(int64_t, linear_slot_size) = 0;
   PROPERTY(int64_t, linear_cache_size_in_bytes) = 0;
@@ -74,6 +77,9 @@ struct KVCacheCreateOptions {
   PROPERTY(bool, enable_linear_attention) = false;
   PROPERTY(bool, enable_lighting_indexer) = false;
   PROPERTY(bool, enable_kv_cache_quant) = false;
+#if defined(USE_NPU)
+  PROPERTY(bool, enable_kv_cache_huge_page_allocator) = false;
+#endif
 };
 
 struct KVCacheTensors {

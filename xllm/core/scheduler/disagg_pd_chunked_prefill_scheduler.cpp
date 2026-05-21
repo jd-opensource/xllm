@@ -96,14 +96,14 @@ void DisaggPDChunkedPrefillScheduler::schedule_waiting_prefill(
     if (request->finished() || request->cancelled()) {
       kv_cache_manager_->deallocate(request.get());
       done.emplace_back(request);
-      queue.pop();
+      queue.pop_top();
       continue;
     }
 
     CHECK(!request->sequences().empty());
     if (!kv_cache_manager_->update_prefetch_result(
             request, options_.prefetch_timeout())) {
-      queue.pop();
+      queue.pop_top();
       queue.push(request);
       break;
     }
@@ -113,7 +113,7 @@ void DisaggPDChunkedPrefillScheduler::schedule_waiting_prefill(
     if (!alloc_chunk(sequence, remaining_token_budget, &actual_tokens)) {
       if (running_sequences_.empty() &&
           exceeds_block_capacity(sequence, kv_cache_manager_)) {
-        queue.pop();
+        queue.pop_top();
         kv_cache_manager_->deallocate(request.get());
         LOG(ERROR) << "Request prompt is too long, no enough resource to "
                       "schedule a single pd chunked prefill sequence.";
@@ -123,13 +123,13 @@ void DisaggPDChunkedPrefillScheduler::schedule_waiting_prefill(
              "No enough resource to schedule a single pd chunked prefill "
              "sequence"});
       } else {
-        queue.pop();
+        queue.pop_top();
         queue.push(request);
       }
       break;
     }
 
-    queue.pop();
+    queue.pop_top();
     running_requests_.emplace_back(request);
     running_sequences_.emplace_back(sequence);
     running_sequences_budgets_.emplace_back(actual_tokens);
@@ -156,9 +156,9 @@ std::vector<Batch> DisaggPDChunkedPrefillScheduler::prepare_batch() {
     }
 
     if (request->offline()) {
-      waiting_priority_queue_offline_.push(request);
+      waiting_priority_queue_offline_->push(request);
     } else {
-      waiting_priority_queue_.push(request);
+      waiting_priority_queue_->push(request);
     }
   }
 
@@ -180,9 +180,9 @@ std::vector<Batch> DisaggPDChunkedPrefillScheduler::prepare_batch() {
 
     if (running->is_chunked_prefill_stage()) {
       if (running->offline()) {
-        waiting_priority_queue_offline_.push(running);
+        waiting_priority_queue_offline_->push(running);
       } else {
-        waiting_priority_queue_.push(running);
+        waiting_priority_queue_->push(running);
       }
       *it = nullptr;
     }
@@ -201,11 +201,11 @@ std::vector<Batch> DisaggPDChunkedPrefillScheduler::prepare_batch() {
   running_requests_.reserve(max_seq_budget);
   running_sequences_.reserve(max_seq_budget);
   running_sequences_budgets_.reserve(max_seq_budget);
-  schedule_waiting_prefill(waiting_priority_queue_,
+  schedule_waiting_prefill(*waiting_priority_queue_,
                            remaining_token_budget,
                            remaining_seq_budget,
                            done);
-  schedule_waiting_prefill(waiting_priority_queue_offline_,
+  schedule_waiting_prefill(*waiting_priority_queue_offline_,
                            remaining_token_budget,
                            remaining_seq_budget,
                            done);

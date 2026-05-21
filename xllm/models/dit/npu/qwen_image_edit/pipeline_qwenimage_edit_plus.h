@@ -13,8 +13,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #pragma once
+
+#include "core/framework/config/dit_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "pipeline_qwenimage_base.h"
+#include "util/tensor_helper.h"
 
 #define CONDITION_IMAGE_SIZE 147456
 #define VAE_IMAGE_SIZE 1048576
@@ -57,13 +61,15 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
         FlowMatchEulerDiscreteScheduler(context.get_model_context("scheduler"));
 
     vae_image_processor_ =
-        xllm::dit::VAEImageProcessor(context.get_model_context("vae"),
-                                     true,
-                                     true,
-                                     false,
-                                     false,
-                                     false,
-                                     latent_channels_);
+        xllm::VAEImageProcessor(context.get_model_context("vae"),
+                                /*do_resize=*/true,
+                                /*do_normalize=*/true,
+                                /*do_binarize=*/false,
+                                /*do_convert_rgb=*/false,
+                                /*do_convert_grayscale=*/false,
+                                latent_channels_,
+                                /*scale_factor=*/vae_scale_factor_ * 2);
+
     register_module("vae", vae_);
     register_module("scheduler", scheduler_);
     register_module("transformer", transformer_);
@@ -132,8 +138,9 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
       prompt_embeds_mask = prompt_embeds_mask.view(
           {batch_size * num_images_per_prompt, seq_len});
     } else {
-      prompt_embeds_mask =
-          torch::ones({prompt_embeds.size(0), prompt_embeds.size(1)});
+      prompt_embeds_mask = torch::ones(
+          {prompt_embeds.size(0), prompt_embeds.size(1)},
+          torch::TensorOptions().device(device_).dtype(torch::kLong));
     }
   }
 
@@ -221,7 +228,6 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     torch::Tensor image_latents;
     if (!images.empty()) {
       std::vector<torch::Tensor> all_image_latents;
-
       for (const auto& image : images) {
         auto current_image = image.to(options);
         torch::Tensor current_image_latents;
@@ -298,7 +304,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
 
     torch::Tensor images;
 
-    if (FLAGS_dit_debug_print) {
+    if (::xllm::DiTConfig::get_instance().dit_debug_print()) {
       input.debug_print();
     }
 
@@ -361,7 +367,6 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     std::vector<torch::Tensor> vae_images;
     std::vector<std::pair<int64_t, int64_t>> condition_image_sizes;
     std::vector<std::pair<int64_t, int64_t>> vae_image_sizes;
-
     if (images.defined() && !(images.size(1) == latent_channels_)) {
       for (size_t i = 0; i < image_list.size(); i++) {
         aspect_ratio =
@@ -372,10 +377,12 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
             xllm::dit::calculate_dimensions(VAE_IMAGE_SIZE, aspect_ratio);
         condition_image_sizes.push_back({condition_width, condition_height});
         vae_image_sizes.push_back({vae_width, vae_height});
-
         auto img = image_list[i].unsqueeze(0);
         auto condition_img = vae_image_processor_->resize(
-            img, condition_height, condition_width);
+            img,
+            {condition_height, condition_width},
+            /*resample=*/3,  // BICUBIC (approximate LANCZOS)
+            /*antialias=*/true);
         auto vae_img =
             vae_image_processor_->preprocess(img, vae_height, vae_width)
                 .unsqueeze(2);
@@ -432,10 +439,12 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     }
 
     std::vector<float> new_sigmas;
+    double start = 1.0;
+    double end = 1.0 / static_cast<double>(num_inference_steps);
     for (int64_t i = 0; i < num_inference_steps; ++i) {
-      new_sigmas.push_back(1.0f - static_cast<float>(i) /
-                                      (num_inference_steps - 1) *
-                                      (1.0f - 1.0f / num_inference_steps));
+      double v = start + (end - start) * static_cast<double>(i) /
+                             (num_inference_steps - 1);
+      new_sigmas.push_back(static_cast<float>(v));
     }
 
     int64_t image_seq_len = final_latents.size(1);
@@ -461,50 +470,6 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     if (do_true_cfg && negative_prompt_embeds_mask.defined()) {
       negative_txt_seq_lens = negative_prompt_embeds_mask.sum(1);
     }
-    /*
-    if (prompt_embeds.size(1) % FLAGS_sp_size != 0) {
-      int64_t pad_len =
-          FLAGS_sp_size - prompt_embeds.size(1) % FLAGS_sp_size;
-      std::vector<int64_t> pad_with = {
-          0,
-          0,  // 第3维�~Hhe   ight�~I�        ~Mpad
-          0,
-          pad_len,  // 第 2维�~Hchannels�~I�~I~M�~P~Npad
-          0,
-          0};  // 第1维�~Hbatch�~I�~Mpad
-      std::vector<int64_t> pad_with_mask = {
-          // 第3维�~Hhe   ight�~I�        ~Mpad
-          0,
-          pad_len,  // 第 2维�~Hchannels�~I�~I~M�~P~Npad
-          0,
-          0};  // 第1维�~Hbatch�~I�~Mpad
-      prompt_embeds = torch::pad(prompt_embeds, pad_with, "constant", 0);
-      prompt_embeds_mask =
-          torch::pad(prompt_embeds_mask, pad_with_mask, "constant", 0);
-    }
-
-    if (negative_prompt_embeds.size(1) % FLAGS_sp_size != 0) {
-      int64_t pad_len = FLAGS_sp_size -
-                        negative_prompt_embeds.size(1) % FLAGS_sp_size;
-      std::vector<int64_t> pad_with = {
-          0,
-          0,  // 第3维�~Hhe   ight�~I�        ~Mpad
-          0,
-          pad_len,  // 第 2维�~Hchannels�~I�~I~M�~P~Npad
-          0,
-          0};  // 第1维�~Hbatch�~I�~Mpad
-      std::vector<int64_t> pad_with_mask = {
-          // 第3维�~Hhe   ight�~I�        ~Mpad
-          0,
-          pad_len,  // 第 2维�~Hchannels�~I�~I~M�~P~Npad
-          0,
-          0};
-      negative_prompt_embeds =
-          torch::pad(negative_prompt_embeds, pad_with, "constant", 0);
-      negative_prompt_embeds_mask =
-          torch::pad(negative_prompt_embeds_mask, pad_with_mask, "constant", 0);
-    }
-    */
     scheduler_->set_begin_index(0);
     for (int64_t i = 0; i < timesteps.size(0); ++i) {
       auto t = timesteps[i];
@@ -521,7 +486,8 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
       torch::Tensor noise_pred;
       torch::Tensor neg_noise_pred;
       torch::Tensor pos_neg_noise_preds;
-      if (FLAGS_cfg_size == 2 && do_true_cfg) {
+      if (::xllm::ParallelConfig::get_instance().cfg_size() == 2 &&
+          do_true_cfg) {
         auto rank = parallel_args_.dit_cfg_group_->rank();
         if (rank == 0) {
           noise_pred = transformer_->forward(latent_model_input,
@@ -596,7 +562,6 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
         final_latents = final_latents.to(latents_dtype);
       }
     }
-
     current_timestep_ = torch::Tensor();
 
     torch::Tensor output_image;
@@ -615,7 +580,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
 
     unpacked_latents = unpacked_latents / latents_std + latents_mean;
     output_image = vae_->decode(unpacked_latents).sample.squeeze(2);
-    output_image = vae_image_processor_->postprocess(output_image, "pil");
+    output_image = vae_image_processor_->postprocess(output_image);
     auto output = std::vector<torch::Tensor>{{output_image}};
     DiTForwardOutput out;
     out.tensors = output;

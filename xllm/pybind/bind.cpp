@@ -24,6 +24,7 @@ limitations under the License.
 #include "core/common/types.h"
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/vlm_master.h"
+#include "core/framework/config/model_config.h"
 #include "core/framework/request/mm_data.h"
 #include "core/framework/request/request_output.h"
 #include "core/framework/request/request_params.h"
@@ -86,6 +87,13 @@ PYBIND11_MODULE(xllm_export, m) {
                      &Options::disable_ttft_profiling_)
       .def_readwrite("enable_forward_interruption",
                      &Options::enable_forward_interruption_)
+      .def_readwrite("enable_graph", &Options::enable_graph_)
+      .def_readwrite("enable_graph_mode_decode_no_padding",
+                     &Options::enable_graph_mode_decode_no_padding_)
+      .def_readwrite("enable_prefill_piecewise_graph",
+                     &Options::enable_prefill_piecewise_graph_)
+      .def_readwrite("max_tokens_for_graph_mode",
+                     &Options::max_tokens_for_graph_mode_)
       .def_readwrite("enable_offline_inference",
                      &Options::enable_offline_inference_)
       .def_readwrite("spawn_worker_path", &Options::spawn_worker_path_)
@@ -355,6 +363,15 @@ PYBIND11_MODULE(xllm_export, m) {
   m.def("get_model_backend",
         &ModelRegistry::get_model_backend,
         py::arg("model_type"));
+  m.def(
+      "configure_cpp_chat_template",
+      [](bool use_cpp_chat_template, const std::string& model_type) {
+        ModelConfig::get_instance().use_cpp_chat_template(
+            use_cpp_chat_template);
+        ModelConfig::get_instance().normalize_cpp_chat_template(model_type);
+      },
+      py::arg("use_cpp_chat_template"),
+      py::arg("model_type"));
 }
 
 }  // namespace xllm

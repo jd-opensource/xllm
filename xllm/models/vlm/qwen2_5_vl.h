@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include "core/framework/config/model_config.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/common/lm_head.h"
 #include "core/layers/qwen2_5_vision_layer.h"
@@ -494,7 +495,7 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       const ModelInputParams& input_params,
       std::optional<Qwen2_5_VLImageInputs>& image_inputs,
       std::optional<Qwen2_5_VLVideoInputs>& video_inputs) {
-    const auto& mm_data = input_params.mm_data;
+    const auto& mm_data = input_params.multimodal.mm_data;
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
       pixel_values = res.value();
@@ -585,7 +586,7 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
 
   torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
                                      const ModelInputParams& input_params) {
-    const auto& mm_data = input_params.mm_data;
+    const auto& mm_data = input_params.multimodal.mm_data;
     torch::Tensor multimodal_embeds;
     if (const auto& emb = mm_data.get<torch::Tensor>("embedding")) {
       multimodal_embeds = emb.value();
@@ -629,7 +630,8 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
                        const torch::Tensor& seleted_idxes) {
     auto h = hidden_states;
     // return full embeddings if set flag
-    if (FLAGS_enable_return_mm_full_embeddings) {
+    if (::xllm::ModelConfig::get_instance()
+            .enable_return_mm_full_embeddings()) {
       return h;
     }
 

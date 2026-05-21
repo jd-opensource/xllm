@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ limitations under the License.
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/distributed_runtime/comm_channel.h"
+#include "core/framework/config/eplb_config.h"
 #include "core/runtime/params_utils.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/request/sequence.h"
@@ -35,6 +36,28 @@ limitations under the License.
 #include "util/timer.h"
 
 namespace xllm {
+namespace {
+
+int32_t get_num_decode_seqs_for_schedule_overlap(const ForwardInput& input) {
+  if (input.sampling_params.sample_idxes.defined()) {
+    return static_cast<int32_t>(input.sampling_params.sample_idxes.size(0));
+  }
+
+  if (!input.input_host_buffer_has_layout) {
+    return 0;
+  }
+
+  ForwardInput unpacked_input;
+  const bool unpacked = detail::unpack_from_input_host_buffer(
+      input, torch::Device(torch::kCPU), unpacked_input);
+  if (!unpacked || !unpacked_input.sampling_params.sample_idxes.defined()) {
+    return 0;
+  }
+  return static_cast<int32_t>(
+      unpacked_input.sampling_params.sample_idxes.size(0));
+}
+
+}  // namespace
 
 WorkerService::WorkerService(runtime::Options options,
                              const torch::Device& device)
@@ -170,7 +193,8 @@ void WorkerService::step(ForwardInput& fwd_input,
     auto int_options = torch::TensorOptions().device(torch::kCPU);
     if (worker_->is_driver()) {
       // construct fake output tensor
-      int32_t num_decode_seqs = fwd_input.sampling_params.sample_idxes.size(0);
+      int32_t num_decode_seqs =
+          get_num_decode_seqs_for_schedule_overlap(fwd_input);
       next_tokens = torch::arange(
           -1, -1 * (num_decode_seqs + 1), -1, int_options.dtype(torch::kInt32));
       std::move(future).deferValue([](auto&&) {});
@@ -190,7 +214,7 @@ void WorkerService::create_polling_shm_thread(
         Timer timer;
         while (true) {
           ForwardInput fwd_input;
-          input_shm_manager->raw_input_read(fwd_input, device_);
+          input_shm_manager->input_read(fwd_input, device_);
           timer.reset();
           // model output variables
           torch::Tensor next_tokens;
@@ -408,7 +432,7 @@ void WorkerService::PrefetchFromStorage(
 
   brpc::StreamId stream_id;
   brpc::StreamOptions stream_options;
-  stream_options.idle_timeout_ms = 5 * options_.prefetch_bacth_size();
+  stream_options.idle_timeout_ms = 5 * options_.prefetch_batch_size();
   if (brpc::StreamAccept(&stream_id, *cntl, &stream_options) != 0) {
     resp->set_ok(false);
     LOG(ERROR) << "Failed to accept stream!";
@@ -426,16 +450,16 @@ void WorkerService::PrefetchFromStorage(
     bool is_completed = false;
 
     for (size_t i = 0; i < transfer_slice.size();
-         i += options_.prefetch_bacth_size()) {
+         i += options_.prefetch_batch_size()) {
       auto current_slice = transfer_slice.slice(
           i,
-          std::min(i + options_.prefetch_bacth_size(), transfer_slice.size()));
+          std::min(i + options_.prefetch_batch_size(), transfer_slice.size()));
 
       auto success_cnt =
           worker_->transfer_kv_blocks(UNINITIALIZED_BATCH_ID, current_slice);
 
       if (success_cnt != current_slice.size() ||
-          (i + options_.prefetch_bacth_size()) >= transfer_slice.size()) {
+          (i + options_.prefetch_batch_size()) >= transfer_slice.size()) {
         is_completed = true;
       }
 
@@ -592,8 +616,12 @@ void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
 
         Timer timer;
         ForwardInput forward_input;
-        proto_to_forward_input(
-            pb_forward_input, forward_input, options_.num_decoding_tokens());
+        CHECK(pb_forward_input->has_packed_input())
+            << "ForwardInput must be sent via packed_input";
+        packed_proto_to_forward_input(pb_forward_input->packed_input(),
+                                      forward_input,
+                                      device_,
+                                      stream_.get());
 
         // model output
         torch::Tensor next_tokens;
@@ -683,7 +711,8 @@ void WorkerService::GetLastStepResult(
 
             // [num_seq]
             next_tokens = safe_to(sample_output.next_tokens, torch::kCPU, true);
-            if (next_tokens.defined() || FLAGS_enable_eplb) {
+            if (next_tokens.defined() ||
+                ::xllm::EPLBConfig::get_instance().enable_eplb()) {
               // [num_seq] FloatTensor
               logprobs = safe_to(sample_output.logprobs, torch::kCPU, true);
               // [num_seq, topk]
@@ -717,7 +746,8 @@ void WorkerService::GetLastStepResult(
             stream_->synchronize();
           }
 
-          if (next_tokens.defined() || FLAGS_enable_eplb) {
+          if (next_tokens.defined() ||
+              ::xllm::EPLBConfig::get_instance().enable_eplb()) {
             forward_output_to_proto(next_tokens,
                                     logprobs,
                                     top_tokens,

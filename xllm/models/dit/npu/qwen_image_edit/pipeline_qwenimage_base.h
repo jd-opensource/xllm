@@ -30,6 +30,7 @@ limitations under the License.
 #include "core/framework/state_dict/state_dict.h"
 #include "core/framework/state_dict/utils.h"
 #include "framework/parallel_state/parallel_state.h"
+#include "models/dit/autoencoder_kl.h"
 #include "models/dit/flowmatch_euler_discrete_scheduler.h"
 #include "models/dit/utils/common_util.h"
 #include "models/model_registry.h"
@@ -44,7 +45,7 @@ class QwenImagePipelineBaseImpl : public torch::nn::Module {
   torch::ScalarType dtype_;
   torch::TensorOptions options_;
   AutoencoderKLQwenImage vae_{nullptr};
-  xllm::dit::VAEImageProcessor vae_image_processor_{nullptr};
+  xllm::VAEImageProcessor vae_image_processor_{nullptr};
   std::unique_ptr<Qwen2VLImageProcessor> qwen_image_processor_{nullptr};
   QwenImageTransformer2DModel transformer_{nullptr};
   std::unique_ptr<Tokenizer> qwen_tokenizer_;

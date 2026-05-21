@@ -151,7 +151,7 @@ class SimpleCausalLM : public CausalLM {
     LOG(INFO) << "SimpleCausalLM forward_impl, tokens: " << tokens.sizes()
               << ", positions: " << positions.sizes()
               << ", kv_caches: " << kv_caches.size()
-              << ", params: " << params.num_sequences;
+              << ", params: " << params.meta.num_sequences;
     const int64_t num_tokens = tokens.size(0);
     const int64_t hidden_size = args_.hidden_size();
 
@@ -169,28 +169,29 @@ class SimpleCausalLM : public CausalLM {
     auto output = linear_->forward(combined);
 
     // Add some computation using other params to make it more realistic
-    // if (params.kv_seq_lens.defined()) {
+    // if (params.attention.device.kv_seq_lens.defined()) {
     //   // Use kv_seq_lens in computation
-    //   auto kv_lens_sum = torch::sum(params.kv_seq_lens);
+    //   auto kv_lens_sum = torch::sum(params.attention.device.kv_seq_lens);
     //   output = output + kv_lens_sum * kv_scale_;
     // }
 
-    // if (params.q_seq_lens.defined()) {
+    // if (params.attention.device.q_seq_lens.defined()) {
     //   // Use q_seq_lens in computation
-    //   auto q_lens_sum = torch::sum(params.q_seq_lens);
+    //   auto q_lens_sum = torch::sum(params.attention.device.q_seq_lens);
     //   output = output + q_lens_sum * q_scale_;
     // }
 
-    if (params.new_cache_slots.defined()) {
+    if (params.attention.device.new_cache_slots.defined()) {
       // Use new_cache_slots in computation
-      auto cache_slots_sum = torch::sum(params.new_cache_slots);
+      auto cache_slots_sum =
+          torch::sum(params.attention.device.new_cache_slots);
       output = output + cache_slots_sum * cache_scale_;
     }
 
-    if (params.block_tables.defined() && !kv_caches.empty()) {
+    if (params.attention.device.block_tables.defined() && !kv_caches.empty()) {
       // Use block_tables to do embedding lookup from kv_cache - Rec multi-round
       // computation Calculate max_seq_len from actual seq_len tensor
-      auto max_seq_len = torch::max(params.kv_seq_lens);
+      auto max_seq_len = torch::max(params.attention.device.kv_seq_lens);
 
       // Calculate max_block_nums_per_seq
       auto max_block_nums_per_seq = torch::ceil(max_seq_len / block_size_);
@@ -200,14 +201,14 @@ class SimpleCausalLM : public CausalLM {
           first_full_attention_cache(kv_caches).get_k_cache();
 
       // Create col_indices and mask
-      int64_t block_table_len = params.block_tables.size(1);
+      int64_t block_table_len = params.attention.device.block_tables.size(1);
       auto col_indices = torch::arange(
           block_table_len, torch::dtype(torch::kInt64).device(device_));
       auto mask = col_indices < (max_block_nums_per_seq - scalar_one_);
 
       // Directly compute embedding
-      auto kv_embeddings =
-          torch::embedding(kv_cache_tensor, params.block_tables);
+      auto kv_embeddings = torch::embedding(
+          kv_cache_tensor, params.attention.device.block_tables);
 
       // Apply mask and sum
       auto kv_embeddings_masked = kv_embeddings * mask.view({1, -1, 1});
@@ -430,14 +431,18 @@ TEST_F(AclGraphExecutorTest, GraphExecutorVsEagerExecution) {
             << std::endl;
   std::cout << "forward_input.positions: " << forward_input.positions
             << std::endl;
-  std::cout << "forward_input.input_params.q_seq_lens: "
-            << forward_input.input_params.q_seq_lens << std::endl;
-  std::cout << "forward_input.input_params.kv_seq_lens: "
-            << forward_input.input_params.kv_seq_lens << std::endl;
-  std::cout << "forward_input.input_params.new_cache_slots: "
-            << forward_input.input_params.new_cache_slots << std::endl;
-  std::cout << "forward_input.input_params.block_tables: "
-            << forward_input.input_params.block_tables << std::endl;
+  std::cout << "forward_input.input_params.attention.device.q_seq_lens: "
+            << forward_input.input_params.attention.device.q_seq_lens
+            << std::endl;
+  std::cout << "forward_input.input_params.attention.device.kv_seq_lens: "
+            << forward_input.input_params.attention.device.kv_seq_lens
+            << std::endl;
+  std::cout << "forward_input.input_params.attention.device.new_cache_slots: "
+            << forward_input.input_params.attention.device.new_cache_slots
+            << std::endl;
+  std::cout << "forward_input.input_params.attention.device.block_tables: "
+            << forward_input.input_params.attention.device.block_tables
+            << std::endl;
   // Test eager execution (direct model forward)
   auto eager_model_output = model_->forward({forward_input.token_ids},
                                             {forward_input.positions},
@@ -683,12 +688,12 @@ TEST_F(AclGraphExecutorTest, BatchInputCarriesLinearStateIds) {
 
   auto forward_input = batch->prepare_forward_input(
       options_.num_decoding_tokens(), 0, model_args_);
-  ASSERT_EQ(forward_input.input_params.num_sequences, 1);
-  ASSERT_EQ(forward_input.input_params.linear_state_ids.size(), 1);
-  EXPECT_EQ(forward_input.input_params.linear_state_ids[0],
+  ASSERT_EQ(forward_input.input_params.meta.num_sequences, 1);
+  ASSERT_EQ(forward_input.input_params.embedding.linear_state_ids.size(), 1);
+  EXPECT_EQ(forward_input.input_params.embedding.linear_state_ids[0],
             expected_linear_state_id);
-  ASSERT_EQ(forward_input.input_params.embedding_ids.size(), 1);
-  EXPECT_EQ(forward_input.input_params.embedding_ids[0],
+  ASSERT_EQ(forward_input.input_params.embedding.embedding_ids.size(), 1);
+  EXPECT_EQ(forward_input.input_params.embedding.embedding_ids[0],
             expected_linear_state_id);
 }
 

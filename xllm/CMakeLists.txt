@@ -60,7 +60,7 @@ if(GENERATE_SO)
       c_api/internal/rec.cpp
       c_api/internal/helper.cpp
     DEPS
-      :flags
+      :config
       :master
       absl::strings
       Boost::serialization
@@ -78,7 +78,7 @@ else()
     SRCS
       xllm.cpp
     DEPS
-      :flags
+      :config
       :xllm_server
       :master
       absl::strings

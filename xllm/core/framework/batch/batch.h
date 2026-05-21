@@ -92,10 +92,10 @@ class Batch {
                                          const ModelArgs& args,
                                          ThreadPool* thread_pool = nullptr);
 
-  // Convert Batch to pb type, which will be pass to remote worker.
-  RawForwardInput prepare_forward_input(const ModelArgs& args,
-                                        ThreadPool* thread_pool,
-                                        int32_t cp_size = 1);
+  // Prepare ForwardInput for distributed transport.
+  ForwardInput prepare_forward_input(const ModelArgs& args,
+                                     ThreadPool* thread_pool,
+                                     int32_t cp_size = 1);
 
   // process output
   //

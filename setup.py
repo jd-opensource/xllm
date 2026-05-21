@@ -633,7 +633,7 @@ if __name__ == "__main__":
         device = get_device_type()
     logger.info(f"🚀 Build xllm with CPU arch: {arch} and target device: {device}")
 
-    pre_build()
+    pre_build(device)
 
     generate_so = config['generate_so']
     test_name = config.get('test_name')
@@ -704,7 +704,7 @@ if __name__ == "__main__":
         zip_safe=False,
         py_modules=["xllm/launch_xllm", "xllm/__init__",
                     "xllm/pybind/llm", "xllm/pybind/vlm",
-                    "xllm/pybind/embedding", "xllm/pybind/util",
+                    "xllm/pybind/embedding", "xllm/pybind/utils",
                     "xllm/pybind/args", "xllm/pybind/params",
                     "xllm/pybind/errors", "xllm/pybind/mm_utils"],
         python_requires=">=3.10",

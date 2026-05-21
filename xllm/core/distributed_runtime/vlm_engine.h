@@ -57,7 +57,7 @@ class VLMEngine : public Engine {
   bool init_model();
   KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const KVCacheCapacity& kv_cache_cap);
-  std::vector<RawForwardInput> prepare_inputs(std::vector<Batch>& batch);
+  std::vector<ForwardInput> prepare_inputs(std::vector<Batch>& batch);
   void setup_workers(const runtime::Options& options);
   void process_group_test();
 

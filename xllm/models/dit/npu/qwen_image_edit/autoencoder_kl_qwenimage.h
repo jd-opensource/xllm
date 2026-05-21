@@ -156,15 +156,18 @@ class QwenImageRMS_normImpl : public torch::nn::Module {
       }
       return output;
     } else {
-      auto output = torch::nn::functional::normalize(
-                        x,
-                        torch::nn::functional::NormalizeFuncOptions().dim(
-                            channel_first_ ? 1 : -1)) *
-                    scale_ * weight_;
+      torch::Tensor normalized =
+          torch::nn::functional::normalize(
+              x.to(torch::kFloat),
+              torch::nn::functional::NormalizeFuncOptions().dim(
+                  channel_first_ ? 1 : -1))
+              .to(x.dtype());
+
       if (is_bias_) {
-        output = output + bias_;
+        return normalized * scale_ * weight_ + bias_;
+      } else {
+        return normalized * scale_ * weight_;
       }
-      return output;
     }
   }
 

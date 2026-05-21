@@ -99,7 +99,7 @@ class RecEngine : public Engine {
     size_t num_workers() const override;
 
    private:
-    std::vector<RawForwardInput> prepare_inputs(std::vector<Batch>& batch);
+    std::vector<ForwardInput> prepare_inputs(std::vector<Batch>& batch);
 
     // Get max tokens from batch for dynamic step control
     size_t get_max_steps_from_batch(std::vector<Batch>& batches) const;

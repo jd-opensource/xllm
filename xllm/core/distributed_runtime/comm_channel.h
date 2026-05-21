@@ -84,7 +84,7 @@ class CommChannel {
                               const std::vector<uint64_t>& dst_blocks);
 
   virtual void execute_model_async(
-      const RawForwardInput& input,
+      const ForwardInput& input,
       folly::Promise<std::optional<RawForwardOutput>>& promise);
 
   virtual bool process_group_test();
@@ -122,7 +122,7 @@ class CommChannel {
 
  protected:
   bool execute_model_with_brpc(
-      const RawForwardInput& input,
+      const ForwardInput& input,
       folly::Promise<std::optional<RawForwardOutput>>& promise);
 
  private:

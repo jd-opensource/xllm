@@ -203,7 +203,7 @@ class XTensorAllocator {
   // ============== PD Disaggregation Support (XTensor Mode) ==============
 
   // Convert a block_id to GlobalXTensor offsets for KV cache transfer.
-  // This is only used when FLAGS_enable_xtensor is true for PD disaggregation.
+  // This is only used when --enable_xtensor=true for PD disaggregation.
   //
   // Parameters:
   //   model_id: Model identifier

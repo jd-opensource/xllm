@@ -260,8 +260,6 @@ void ensure_w8a8_params_for_linear_load(
     int64_t shared_input_param_size,
     W8A8LinearParamRefs refs) {
   std::vector<weight::LazyParameterSpec> specs;
-  const int64_t out_features = refs.weight.size(0);
-  const int64_t in_features = refs.weight.size(1);
   auto push = [&](torch::Tensor& tensor,
                   bool& tensor_is_loaded,
                   const char* name,
@@ -279,6 +277,10 @@ void ensure_w8a8_params_for_linear_load(
       // checkpoint). The weights were initialized as kInt8 in the constructor;
       // re-register them back to the original dtype so that the subsequent
       // load_experts can copy the checkpoint weights correctly.
+      CHECK(refs.weight.defined())
+          << "weight must be registered before lazy quant fallback";
+      const int64_t out_features = refs.weight.size(0);
+      const int64_t in_features = refs.weight.size(1);
       specs.reserve(1);
       push(refs.weight,
            refs.weight_is_loaded,
@@ -292,6 +294,8 @@ void ensure_w8a8_params_for_linear_load(
 
   CHECK(refs.weight.defined())
       << "weight must be registered before lazy quant init";
+  const int64_t out_features = refs.weight.size(0);
+  const int64_t in_features = refs.weight.size(1);
 
   specs.reserve(4);
   if (is_w8a8_quant(resolved_weight_quant_method)) {
