@@ -237,6 +237,9 @@ struct XLLM_CAPI_EXPORT XLLM_Usage {
 
   // The total number of tokens used in the request (prompt + completion).
   int32_t total_tokens;
+
+  // The number of prompt tokens served from prefix cache.
+  int32_t cached_tokens;
 };
 
 struct XLLM_CAPI_EXPORT XLLM_LogProbData {

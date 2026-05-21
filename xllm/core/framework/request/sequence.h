@@ -176,6 +176,8 @@ class Sequence final {
                     host_kv_state_.kv_cache_tokens_num());
   }
 
+  size_t num_cached_tokens() const;
+
   // add a new token id to the sequence and update the count
   // the token would be discarded if the sequence is still in prefill stage
   void append_token(const Token& token);
@@ -407,6 +409,8 @@ class Sequence final {
 
  private:
   void record_first_token(const Token& token);
+  size_t current_num_cached_tokens() const;
+  void record_cached_tokens();
 
   SequenceOutputType output_type();
   void generate_embeddings_output(SequenceOutput& output);
@@ -481,6 +485,10 @@ class Sequence final {
 
   // the length of the prompt tokens
   size_t num_prompt_tokens_ = 0;
+
+  // Prefix-cache hits must survive KV block release until final usage is
+  // emitted.
+  size_t num_cached_tokens_ = 0;
 
   std::optional<OneRecState> onerec_state_;
 

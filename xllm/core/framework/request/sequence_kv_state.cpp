@@ -38,6 +38,13 @@ size_t KVCacheState::shared_kv_blocks_num() const {
   return num_owned_shared_blocks_;
 }
 
+size_t KVCacheState::shared_kv_tokens_num() const {
+  if (blocks_.empty() || num_owned_shared_blocks_ == 0) {
+    return 0;
+  }
+  return num_owned_shared_blocks_ * blocks_[0].size();
+}
+
 size_t KVCacheState::kv_cache_tokens_num() const {
   return kv_cache_tokens_num_;
 }

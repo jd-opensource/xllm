@@ -354,4 +354,52 @@ TEST(BlockManagerPoolTest, SequenceCopyDoesNotReuseSingleBlockSlot) {
   EXPECT_NE(GetSingleBlockIdOrFail(clone), GetSingleBlockIdOrFail(src));
 }
 
+TEST(BlockManagerPoolTest, PrefixCacheHitsAreReportedAsCachedTokens) {
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
+
+  BlockManagerPool::Options options;
+  options.num_blocks(16).host_num_blocks(0).block_size(4).enable_prefix_cache(
+      true);
+  BlockManagerPool pool(options, /*dp_size=*/1);
+
+  {
+    Sequence seq1 =
+        MakeSequence(0, /*prompt_tokens=*/{1, 2, 3, 4, 5, 6, 7, 8, 9});
+    ASSERT_TRUE(pool.allocate(&seq1));
+    seq1.kv_state().set_kv_cache_tokens_num(seq1.num_prompt_tokens());
+    EXPECT_EQ(seq1.num_cached_tokens(), 0);
+    pool.cache(&seq1);
+
+    Sequence seq2 =
+        MakeSequence(0, /*prompt_tokens=*/{1, 2, 3, 4, 5, 6, 7, 8, 10});
+    ASSERT_TRUE(pool.allocate(&seq2));
+
+    EXPECT_EQ(seq2.num_cached_tokens(), 8);
+    EXPECT_LE(seq2.num_cached_tokens(), seq2.num_prompt_tokens());
+    EXPECT_EQ(seq2.num_cached_tokens() % options.block_size(), 0);
+  }
+
+  int32_t dp_rank = 0;
+  auto eviction_blocks =
+      pool.allocate((options.num_blocks() - 1) * options.block_size(), dp_rank);
+  EXPECT_EQ(eviction_blocks.size(), options.num_blocks() - 1);
+  EXPECT_EQ(pool.num_blocks_in_prefix_cache()[0], 0);
+}
+
+TEST(BlockManagerPoolTest, PrefixCacheDisabledReportsZeroCachedTokens) {
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 2);
+
+  BlockManagerPool::Options options;
+  options.num_blocks(16).host_num_blocks(0).block_size(4).enable_prefix_cache(
+      false);
+  BlockManagerPool pool(options, /*dp_size=*/1);
+
+  Sequence seq = MakeSequence(0, /*prompt_tokens=*/{1, 2, 3, 4, 5, 6, 7, 8, 9});
+  ASSERT_TRUE(pool.allocate(&seq));
+
+  EXPECT_EQ(seq.num_cached_tokens(), 0);
+}
+
 }  // namespace xllm

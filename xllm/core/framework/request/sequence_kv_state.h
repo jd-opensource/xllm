@@ -33,6 +33,7 @@ class KVCacheState {
   void incr_kv_cache_tokens_num(size_t num);
   // get the number of shared blocks.
   size_t shared_kv_blocks_num() const;
+  size_t shared_kv_tokens_num() const;
 
   void add_kv_blocks(const std::vector<Block>& new_blocks);
   void add_shared_kv_blocks(std::vector<Block>&& blocks,

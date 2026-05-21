@@ -373,9 +373,7 @@ bool send_delta_to_client_brpc(
     response.set_created(created_time);
     response.set_model(model);
     auto* proto_usage = response.mutable_usage();
-    proto_usage->set_prompt_tokens(usage.num_prompt_tokens);
-    proto_usage->set_completion_tokens(usage.num_generated_tokens);
-    proto_usage->set_total_tokens(usage.num_total_tokens);
+    api_service::set_proto_usage(proto_usage, usage);
     if (!call->write(response)) {
       return false;
     }
@@ -460,9 +458,7 @@ bool send_result_to_client_brpc(std::shared_ptr<ChatCall> call,
   if (req_output.usage.has_value()) {
     const auto& usage = req_output.usage.value();
     auto* proto_usage = response.mutable_usage();
-    proto_usage->set_prompt_tokens(usage.num_prompt_tokens);
-    proto_usage->set_completion_tokens(usage.num_generated_tokens);
-    proto_usage->set_total_tokens(usage.num_total_tokens);
+    api_service::set_proto_usage(proto_usage, usage);
   }
 
   return call->write_and_finish(response);

@@ -299,6 +299,9 @@ typedef struct XLLM_CAPI_EXPORT XLLM_Usage {
 
   /** Total tokens used (prompt + completion) */
   int32_t total_tokens;
+
+  /** Number of prompt tokens served from prefix cache */
+  int32_t cached_tokens;
 } XLLM_Usage;
 
 /**

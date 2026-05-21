@@ -547,6 +547,8 @@ std::vector<bool> XServiceClient::generations(
       proto_usage->set_num_generated_tokens(
           output.usage.value().num_generated_tokens);
       proto_usage->set_num_total_tokens(output.usage.value().num_total_tokens);
+      proto_usage->set_num_cached_tokens(
+          output.usage.value().num_cached_tokens);
     }
     req->mutable_outputs()->Reserve(output.outputs.size());
     for (auto& seq_output : output.outputs) {

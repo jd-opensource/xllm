@@ -219,14 +219,18 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("num_prompt_tokens", &Usage::num_prompt_tokens)
       .def_readwrite("num_generated_tokens", &Usage::num_generated_tokens)
       .def_readwrite("num_total_tokens", &Usage::num_total_tokens)
+      .def_readwrite("num_cached_tokens", &Usage::num_cached_tokens)
       .def_property_readonly(
           "prompt_tokens",
           [](const Usage& self) { return self.num_prompt_tokens; })
       .def_property_readonly(
           "completion_tokens",
           [](const Usage& self) { return self.num_generated_tokens; })
-      .def_property_readonly("total_tokens", [](const Usage& self) {
-        return self.num_total_tokens;
+      .def_property_readonly(
+          "total_tokens",
+          [](const Usage& self) { return self.num_total_tokens; })
+      .def_property_readonly("cached_tokens", [](const Usage& self) {
+        return self.num_cached_tokens;
       });
   // 5. export RequestOutput
   py::class_<RequestOutput>(m, "RequestOutput")

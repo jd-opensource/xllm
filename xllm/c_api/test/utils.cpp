@@ -473,12 +473,14 @@ void PbToXllmUsage(const c_api_test::XLLM_Usage& pb, XLLM_Usage* out) {
   out->prompt_tokens = pb.prompt_tokens();
   out->completion_tokens = pb.completion_tokens();
   out->total_tokens = pb.total_tokens();
+  out->cached_tokens = pb.cached_tokens();
 }
 
 void XllmUsageToPb(const XLLM_Usage& in, c_api_test::XLLM_Usage* pb) {
   pb->set_prompt_tokens(in.prompt_tokens);
   pb->set_completion_tokens(in.completion_tokens);
   pb->set_total_tokens(in.total_tokens);
+  pb->set_cached_tokens(in.cached_tokens);
 }
 
 void PbToXllmLogProbs(const c_api_test::XLLM_LogProbs& pb,

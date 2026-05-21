@@ -289,6 +289,7 @@ Sequence::Sequence(const Sequence& other)
       num_tokens_(other.num_tokens_),
       token_to_count_map_(other.token_to_count_map_),
       num_prompt_tokens_(other.num_prompt_tokens_),
+      num_cached_tokens_(other.num_cached_tokens_),
       onerec_state_(other.onerec_state_),
       volatile_num_prompt_tokens_(other.volatile_num_prompt_tokens_),
       request_id_(other.request_id_),
@@ -690,8 +691,38 @@ void Sequence::add_host_kv_blocks(const std::vector<Block>& blocks) {
   host_kv_state_.add_kv_blocks(blocks);
 }
 
+size_t Sequence::current_num_cached_tokens() const {
+  size_t cached_tokens = std::max(kv_state_.shared_kv_tokens_num(),
+                                  host_kv_state_.shared_kv_tokens_num());
+  if (cached_tokens <= num_prompt_tokens_) {
+    return cached_tokens;
+  }
+
+  size_t block_size = 0;
+  if (kv_state_.shared_kv_blocks_num() > 0 && kv_state_.num_kv_blocks() > 0) {
+    block_size = kv_state_.kv_blocks()[0].size();
+  } else if (host_kv_state_.shared_kv_blocks_num() > 0 &&
+             host_kv_state_.num_kv_blocks() > 0) {
+    block_size = host_kv_state_.kv_blocks()[0].size();
+  }
+  if (block_size == 0) {
+    return 0;
+  }
+  return (num_prompt_tokens_ / block_size) * block_size;
+}
+
+void Sequence::record_cached_tokens() {
+  num_cached_tokens_ =
+      std::max(num_cached_tokens_, current_num_cached_tokens());
+}
+
+size_t Sequence::num_cached_tokens() const {
+  return std::max(num_cached_tokens_, current_num_cached_tokens());
+}
+
 // release all cache blocks
 void Sequence::reset() {
+  record_cached_tokens();
   kv_state_.reset();
   host_kv_state_.reset();
   timer_.reset();
@@ -702,10 +733,12 @@ void Sequence::reset() {
 
 void Sequence::add_shared_kv_blocks(std::vector<Block>&& blocks) {
   kv_state_.add_shared_kv_blocks(std::move(blocks), num_tokens_);
+  record_cached_tokens();
 }
 
 void Sequence::add_shared_host_kv_blocks(std::vector<Block>&& blocks) {
   host_kv_state_.add_shared_kv_blocks(std::move(blocks), num_tokens_);
+  record_cached_tokens();
 }
 
 bool Sequence::finished() const {
@@ -805,6 +838,7 @@ bool Sequence::update_prefetch_result(uint32_t timeout, uint32_t& success_cnt) {
     host_kv_state_.incr_kv_cache_tokens_num(
         success_cnt * host_kv_state_.kv_blocks()[0].size());
     host_kv_state_.incr_shared_kv_blocks_num(success_cnt);
+    record_cached_tokens();
   }
   prefetch_results_.clear();
   return true;
