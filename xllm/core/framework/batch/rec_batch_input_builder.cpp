@@ -37,7 +37,7 @@ std::unique_ptr<RecBatchInputBuilder> RecBatchInputBuilder::create(
     uint64_t batch_id,
     const ModelArgs* args,
     BatchForwardType batch_forward_type,
-    ThreadPool* thread_pool,
+    MPMCThreadPool* thread_pool,
     OneRecBatchInputBuilderCache* onerec_cache) {
   switch (rec_type) {
     case RecType::kOneRec:
