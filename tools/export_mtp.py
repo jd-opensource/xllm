@@ -1,5 +1,5 @@
 """
-Export MTP layer for multiple model types (DeepSeek-V3, DeepSeek-V3.2, DeepSeek-R1, GLM4.5, GLM4.7, Qwen3.5 etc.).
+Export MTP layer for multiple model types (DeepSeek-V3, DeepSeek-V3.2, DeepSeek-R1, DeepSeek-V4, GLM4.5, GLM4.7, Qwen3.5 etc.).
 The exported model can be used for speculative decoding.
 
 Usage:
@@ -11,6 +11,9 @@ Usage:
 
     # DeepSeek R1
     python3 export_mtp.py --input-dir /path/to/DeepSeek-R1 --output-dir /path/to/DeepSeek-R1-mtp
+
+    # DeepSeek V4
+    python3 export_mtp.py --input-dir /path/to/DeepSeek-V4 --output-dir /path/to/DeepSeek-V4-mtp
 
     # GLM4 MoE
     python3 export_mtp.py --input-dir /path/to/GLM-4.5-Air --output-dir /path/to/GLM-4.5-Air-mtp
@@ -33,7 +36,6 @@ import torch
 from safetensors import safe_open
 from safetensors.torch import save_file
 from transformers import AutoConfig
-
 from scripts.logger import logger
 
 
@@ -123,29 +125,19 @@ def detect_model_type(config: ConfigView) -> str:
     architectures = config.get("architectures", [])
     architecture_names = [str(arch).lower() for arch in architectures]
     model_names = [model_type, text_model_type, *architecture_names]
-    
-    # Check for DeepSeek models
-    # Note: DeepSeek V3, V3.2, and R1 may all have model_type="deepseek_v3" in config
-    # V3.2 can be distinguished by index_head_dim, index_n_heads, index_topk fields
+
     if "deepseek" in model_type or any("deepseek" in arch for arch in architecture_names):
-        # Check for V3.2 specific fields (index_head_dim, index_n_heads, index_topk)
+        if "v4" in model_type or any("v4" in arch for arch in architecture_names):
+            return "deepseek_v4"
         if config.has_nested("index_head_dim") or config.has_nested("index_n_heads") or config.has_nested("index_topk"):
-            # V3.2 has these fields, use deepseek_v32 for MTP export
             return "deepseek_v32"
-        else:
-            # V3 or R1 (both use deepseek_v3 for MTP export)
-            return "deepseek_v3"
-    
-    # Check for GLM4
+        return "deepseek_v3"
+
     if "glm4" in model_type or any("glm4" in arch for arch in architecture_names):
-        # Check if it's MoE variant
         if _is_positive_config_value(config.get("n_routed_experts")):
             return "glm4_moe"
-        else:
-            return "glm4"
+        return "glm4"
 
-    # Check for Qwen3.5 / Qwen3.5 MoE. Some Qwen3.5 checkpoints keep the
-    # language-model fields under text_config and root model_type as qwen3_5.
     if any("qwen3_5" in name for name in model_names):
         if any("moe" in name for name in model_names):
             return "qwen3_5_moe"
@@ -154,11 +146,10 @@ def detect_model_type(config: ConfigView) -> str:
         if _is_positive_config_value(config.get_nested("text_config.num_experts")):
             return "qwen3_5_moe"
         return "qwen3_5"
-    
-    # Fallback: try to infer from model_type
+
     if model_type:
         return model_type
-    
+
     raise ValueError(f"Unable to detect model type from config. model_type={model_type}, architectures={architectures}")
 
 
@@ -167,19 +158,19 @@ def get_mtp_layer_id(config: ConfigView, model_type: str) -> int:
     num_hidden_layers = config.get("num_hidden_layers", config.get_nested("text_config.num_hidden_layers"))
     if num_hidden_layers is None:
         raise ValueError("'num_hidden_layers' not found in model config.")
-    
-    # For DeepSeek V3/V3.2/R1, GLM4, and GLM DSA, MTP layer is the last layer.
+
     if model_type in LEGACY_LAYER_MTP_MODEL_TYPES:
         return int(num_hidden_layers)
-    
+
     raise ValueError(f"Unsupported model type for MTP export: {model_type}")
 
 
 def get_mtp_model_type(model_type: str) -> str:
     """Get the MTP model type name for the output config."""
     mapping = {
-        "deepseek_v3": "deepseek_v3_mtp",  # Used for V3 and R1
-        "deepseek_v32": "deepseek_v32_mtp",  # Used for V3.2
+        "deepseek_v3": "deepseek_v3_mtp",
+        "deepseek_v32": "deepseek_v32_mtp",
+        "deepseek_v4": "deepseek_v4_mtp",
         "glm4_moe": "glm4_moe_mtp",
         "glm_moe_dsa": "glm_moe_dsa_mtp",
         "qwen3_5": "qwen3_5_mtp",
@@ -193,8 +184,9 @@ def get_mtp_model_type(model_type: str) -> str:
 def get_mtp_architecture(model_type: str) -> str:
     """Get the architecture name for the output config."""
     mapping = {
-        "deepseek_v3": "DeepseekMTPForCausalLM",  # Used for V3 and R1
-        "deepseek_v32": "DeepseekV32MtpForCausalLM",  # Used for V3.2
+        "deepseek_v3": "DeepseekMTPForCausalLM",
+        "deepseek_v32": "DeepseekV32MtpForCausalLM",
+        "deepseek_v4": "DeepseekV4MtpForCausalLM",
         "glm4_moe": "Glm4MoeMtpForCausalLM",
         "glm_moe_dsa": "GlmMoeDsaMtpForCausalLM",
         "qwen3_5": "Qwen3_5MtpForCausalLM",
@@ -240,28 +232,29 @@ def update_and_save_config(config: ConfigView, output_dir: str, model_type: str,
     new_config = config.to_dict()
     mtp_model_type = get_mtp_model_type(model_type)
     mtp_architecture = get_mtp_architecture(model_type)
-    
-    # Common updates for all models
+
     updates = {
         "num_hidden_layers": mtp_layer_count,
         "num_nextn_predict_layers": mtp_layer_count,
         "architectures": [mtp_architecture],
         "model_type": mtp_model_type,
         "quantization_config": "",
+        "first_k_dense_replace": 0,
     }
-    
-    # Keep consistent with MTP exported config requirements.
-    updates["first_k_dense_replace"] = 0
+
+    if model_type == "deepseek_v4":
+        updates["num_hash_layers"] = 0
+
     if model_type in QWEN3_5_EXPORT_MODEL_TYPES:
         updates["mtp_num_hidden_layers"] = mtp_layer_count
-    
+
     new_config.update(updates)
 
     if model_type in QWEN3_5_EXPORT_MODEL_TYPES and isinstance(new_config.get("text_config"), dict):
         new_config["text_config"]["num_hidden_layers"] = mtp_layer_count
         new_config["text_config"]["mtp_num_hidden_layers"] = mtp_layer_count
         new_config["text_config"]["layer_types"] = ["full_attention"] * mtp_layer_count
-    
+
     with open(os.path.join(output_dir, "config.json"), "w") as f:
         json.dump(new_config, f, indent=2, ensure_ascii=False, sort_keys=True)
 
@@ -273,6 +266,50 @@ def copy_non_safetensors_files(input_dir: str, output_dir: str) -> None:
             dst_file_path = os.path.join(output_dir, filename)
             shutil.copy2(src_file_path, dst_file_path)
     logger.info(f"All non-safetensors files have been copied to {output_dir}")
+
+
+def get_mtp_weight_prefix(config: ConfigView, model_type: str) -> str:
+    if model_type == "deepseek_v4":
+        return "mtp.0."
+    return f"model.layers.{get_mtp_layer_id(config, model_type)}"
+
+
+def map_mtp_key(key: str, prefix: str, model_type: str) -> str | None:
+    if key == "rot.weight":
+        return "model.rot.weight"
+
+    if not key.startswith(prefix):
+        return None
+
+    if model_type == "deepseek_v4":
+        return key.replace(prefix, "model.layers.0.", 1)
+
+    if any(special in key for special in ["embed_tokens", "shared_head", "enorm", "hnorm", "eh_proj"]):
+        return key.replace(prefix, "model", 1)
+    return key.replace(prefix, "model.layers.0", 1)
+
+
+def update_quant_model_description(input_dir: str, output_dir: str, prefix: str, model_type: str) -> None:
+    filename = "quant_model_description.json"
+    input_path = os.path.join(input_dir, filename)
+    output_path = os.path.join(output_dir, filename)
+
+    if not os.path.exists(input_path):
+        return
+
+    with open(input_path, encoding="utf-8") as f:
+        quant_desc = json.load(f)
+
+    updated_desc = {}
+    for key, value in quant_desc.items():
+        new_key = map_mtp_key(key, prefix, model_type)
+        if new_key is not None:
+            updated_desc[new_key] = value
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(updated_desc, f, indent=2, ensure_ascii=False, sort_keys=True)
+
+    logger.info(f"Updated {filename} with {len(updated_desc)} MTP entries")
 
 
 def save_params_and_index(params: dict[str, torch.Tensor], output_dir: str) -> None:
@@ -321,11 +358,11 @@ def block_dequant(
     return x_dq_block.to(torch.bfloat16)
 
 
-def export_mtp_layer_parameters(input_dir: str, output_dir: str, mtp_layer_id: int, model_type: str) -> None:
+def export_mtp_layer_parameters(input_dir: str, output_dir: str, config: ConfigView, model_type: str) -> None:
     """Export MTP layer parameters for the specified model type."""
-    prefix = f"model.layers.{mtp_layer_id}"
+    prefix = get_mtp_weight_prefix(config, model_type)
     params = {}
-    
+
     for filename in os.listdir(input_dir):
         if not filename.endswith(".safetensors"):
             continue
@@ -335,21 +372,17 @@ def export_mtp_layer_parameters(input_dir: str, output_dir: str, mtp_layer_id: i
 
         try:
             with safe_open(file_path, framework="pt") as f:
-                matching_keys = [k for k in f.keys() if k.startswith(prefix)]
+                matching_keys = [k for k in f.keys() if k == "rot.weight" or k.startswith(prefix)]
 
                 if not matching_keys:
                     logger.info(f"  No parameters starting with '{prefix}' found")
                     continue
 
                 for key in matching_keys:
-                    # Handle special keys that should be at model level
-                    if any(special in key for special in ["embed_tokens", "shared_head", "enorm", "hnorm", "eh_proj"]):
-                        new_key = key.replace(prefix, "model")
-                    else:
-                        # Map to layer 0 for MTP model
-                        new_key = key.replace(prefix, "model.layers.0")
+                    new_key = map_mtp_key(key, prefix, model_type)
+                    if new_key is None:
+                        continue
                     params[new_key] = f.get_tensor(key)
-
         except Exception:
             logger.exception(f"  Error processing {filename}")
             raise
@@ -357,8 +390,7 @@ def export_mtp_layer_parameters(input_dir: str, output_dir: str, mtp_layer_id: i
     if params:
         new_params = {}
         for key, w_tensor in params.items():
-            # Handle block-wise quantization for DeepSeek models (V3, V3.2, R1)
-            if "weight_scale_inv" in key and model_type in ["deepseek_v3", "deepseek_v32"]:
+            if "weight_scale_inv" in key and model_type in ["deepseek_v3", "deepseek_v32", "deepseek_v4"]:
                 weight_scale = w_tensor
                 weight_key = key.replace("weight_scale_inv", "weight")
                 if weight_key in params:
@@ -371,7 +403,7 @@ def export_mtp_layer_parameters(input_dir: str, output_dir: str, mtp_layer_id: i
         save_params_and_index(params, output_dir)
     else:
         logger.info("No matching parameters found.")
-        raise ValueError(f"No MTP layer parameters found at layer {mtp_layer_id}")
+        raise ValueError(f"No MTP layer parameters found with prefix '{prefix}'")
 
 
 def _get_qwen3_5_mtp_relative_key(key: str) -> str | None:
@@ -443,7 +475,7 @@ def export_qwen3_5_mtp_parameters(input_dir: str, output_dir: str, config: Confi
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Export MTP layer parameters for multiple model types (DeepSeek-V3, DeepSeek-V3.2, DeepSeek-R1, GLM4, Qwen3.5, etc.)"
+        description="Export MTP layer parameters for multiple model types (DeepSeek-V3, DeepSeek-V3.2, DeepSeek-R1, DeepSeek-V4, GLM4, Qwen3.5, etc.)"
     )
     parser.add_argument(
         "--input-dir",
@@ -461,43 +493,34 @@ if __name__ == "__main__":
         "--model-type",
         type=str,
         default=None,
-        help="Model type (deepseek_v3, deepseek_v32, glm4_moe, glm_moe_dsa, qwen3_5, qwen3_5_moe). If not specified, will auto-detect. Note: DeepSeek V3 and R1 use 'deepseek_v3', V3.2 uses 'deepseek_v32'.",
+        help="Model type (deepseek_v3, deepseek_v32, deepseek_v4, glm4_moe, glm_moe_dsa, qwen3_5, qwen3_5_moe). If not specified, will auto-detect. Note: DeepSeek V3 and R1 use 'deepseek_v3', V3.2 uses 'deepseek_v32', V4 uses 'deepseek_v4'.",
     )
     args = parser.parse_args()
 
-    # Load config
     config = load_config(args.input_dir)
-    
-    # Detect or use specified model type
+
     if args.model_type:
         model_type = args.model_type.lower()
     else:
         model_type = detect_model_type(config)
-    
+
     logger.info(f"Detected model type: {model_type}")
-    
-    # Verify MTP support
+
     mtp_layer_count = get_mtp_layer_count(config, model_type)
     if model_type not in QWEN3_5_EXPORT_MODEL_TYPES and mtp_layer_count != 1:
         raise ValueError(f"Only 1 MTP layer is supported, but found {mtp_layer_count}.")
-    
+
     logger.info(f"MTP layer count: {mtp_layer_count}")
-    
-    # Create output directory
+
     os.makedirs(args.output_dir, exist_ok=True)
-    
-    # Copy non-safetensors files
     copy_non_safetensors_files(args.input_dir, args.output_dir)
-    
-    # Update and save config
     update_and_save_config(config, args.output_dir, model_type, mtp_layer_count)
-    
-    # Export MTP layer parameters
+
     if model_type in QWEN3_5_EXPORT_MODEL_TYPES:
         export_qwen3_5_mtp_parameters(args.input_dir, args.output_dir, config)
     else:
-        mtp_layer_id = get_mtp_layer_id(config, model_type)
-        logger.info(f"MTP layer ID: {mtp_layer_id}")
-        export_mtp_layer_parameters(args.input_dir, args.output_dir, mtp_layer_id, model_type)
-    
+        prefix = get_mtp_weight_prefix(config, model_type)
+        update_quant_model_description(args.input_dir, args.output_dir, prefix, model_type)
+        export_mtp_layer_parameters(args.input_dir, args.output_dir, config, model_type)
+
     logger.info(f"MTP model exported successfully to: {args.output_dir}")

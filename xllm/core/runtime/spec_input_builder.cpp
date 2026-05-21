@@ -22,6 +22,8 @@ limitations under the License.
 
 #include "framework/model/model_input_params.h"
 #include "runtime/forward_params.h"
+#include "util/tensor_helper.h"
+#include "util/utils.h"
 
 namespace xllm::specBuilder {
 
@@ -103,6 +105,29 @@ torch::Tensor create_flat_2d_tensor(const std::vector<int32_t>& values,
   return tensor;
 }
 
+void fill_multi_block_table_slices(DecodeRowContext& ctx) {
+  ctx.model_managed_multiblock = !ctx.multi_block_tables_owner.empty();
+  ctx.multi_block_tables.resize(ctx.multi_block_tables_owner.size());
+  for (size_t m = 0; m < ctx.multi_block_tables_owner.size(); ++m) {
+    const torch::Tensor& manager_table = ctx.multi_block_tables_owner[m];
+    CHECK(manager_table.defined())
+        << "multi_block_tables[" << m << "] is undefined";
+    CHECK_EQ(manager_table.dim(), 2)
+        << "multi_block_tables[" << m << "] must be 2D, got "
+        << manager_table.sizes();
+    CHECK_LE(ctx.num_sequences, manager_table.size(0))
+        << "num_sequences exceeds multi_block_tables[" << m
+        << "] rows, num_sequences=" << ctx.num_sequences
+        << ", rows=" << manager_table.size(0);
+    ctx.multi_block_tables[m].reserve(static_cast<size_t>(ctx.num_sequences));
+    for (int32_t seq_id = 0; seq_id < ctx.num_sequences; ++seq_id) {
+      torch::Tensor row = manager_table[seq_id];
+      ctx.multi_block_tables[m].emplace_back(row.data_ptr<int32_t>(),
+                                             static_cast<size_t>(row.numel()));
+    }
+  }
+}
+
 }  // namespace
 
 int32_t calc_slot_id(int32_t position,
@@ -179,6 +204,20 @@ DecodeRowContext make_decode_row_context(const ForwardInput& input) {
       << ctx.positions.size() << ", num_sequences=" << ctx.num_sequences;
 
   ctx.kv_seq_lens = get_kv_seq_lens(input);
+  if (!input.input_params.multi_block_tables.empty()) {
+    ctx.multi_block_tables_owner.reserve(
+        input.input_params.multi_block_tables.size());
+    for (const torch::Tensor& block_table :
+         input.input_params.multi_block_tables) {
+      torch::Tensor cpu_block_table = block_table.device().is_cpu()
+                                          ? block_table
+                                          : block_table.to(torch::kCPU);
+      ctx.multi_block_tables_owner.emplace_back(cpu_block_table.contiguous());
+    }
+    fill_multi_block_table_slices(ctx);
+    return ctx;
+  }
+
   CHECK(input.input_params.attention.host.block_tables.defined())
       << "host block_tables must be defined for decode row build";
   ctx.block_tables_owner =
@@ -206,17 +245,46 @@ void append_decode_row(const DecodeRowContext& ctx,
   const int32_t new_position = ctx.positions[row.seq_id] + row.position_offset;
   CHECK_GE(new_position, 0) << "invalid decode position";
 
-  const Slice<int32_t> block_table_slice =
-      get_block_table_slice(ctx, row.seq_id);
-
   // All decode paths can toggle which fields are emitted, so one row builder
   // can serve draft/validate/first-decode/update-last-step scenarios.
   if (row.append_token) {
     buf.out_token_ids.emplace_back(resolve_row_token_id(ctx, row));
   }
   buf.out_positions.emplace_back(new_position);
-  buf.out_new_cache_slots.emplace_back(
-      calc_slot_id(new_position, block_table_slice, block_size));
+  if (ctx.model_managed_multiblock) {
+    buf.out_new_cache_slots.emplace_back(0);
+    if (row.append_block_table) {
+      if (buf.out_multi_block_tables.size() < ctx.multi_block_tables.size()) {
+        buf.out_multi_block_tables.resize(ctx.multi_block_tables.size());
+      }
+      for (size_t m = 0; m < ctx.multi_block_tables.size(); ++m) {
+        CHECK_LT(static_cast<size_t>(row.seq_id),
+                 ctx.multi_block_tables[m].size());
+        const Slice<int32_t>& block_table_slice =
+            ctx.multi_block_tables[m][row.seq_id];
+        buf.out_multi_block_tables[m].emplace_back(block_table_slice.begin(),
+                                                   block_table_slice.end());
+      }
+    }
+  } else {
+    const Slice<int32_t> block_table_slice =
+        get_block_table_slice(ctx, row.seq_id);
+    buf.out_new_cache_slots.emplace_back(
+        calc_slot_id(new_position, block_table_slice, block_size));
+    if (row.append_block_table) {
+      if (buf.out_block_table_stride == 0) {
+        buf.out_block_table_stride =
+            static_cast<int32_t>(block_table_slice.size());
+      }
+      CHECK_EQ(buf.out_block_table_stride,
+               static_cast<int32_t>(block_table_slice.size()))
+          << "block table stride mismatch";
+      buf.out_block_tables.insert(buf.out_block_tables.end(),
+                                  block_table_slice.begin(),
+                                  block_table_slice.end());
+      ++buf.out_block_table_rows;
+    }
+  }
 
   if (row.append_kv_len) {
     int32_t kv_len =
@@ -226,19 +294,6 @@ void append_decode_row(const DecodeRowContext& ctx,
   }
   if (row.append_q_len_one) {
     append_q_seq_len(buf.out_q_seq_lens, buf.out_q_cu_seq_lens, 1);
-  }
-  if (row.append_block_table) {
-    if (buf.out_block_table_stride == 0) {
-      buf.out_block_table_stride =
-          static_cast<int32_t>(block_table_slice.size());
-    }
-    CHECK_EQ(buf.out_block_table_stride,
-             static_cast<int32_t>(block_table_slice.size()))
-        << "block table stride mismatch";
-    buf.out_block_tables.insert(buf.out_block_tables.end(),
-                                block_table_slice.begin(),
-                                block_table_slice.end());
-    ++buf.out_block_table_rows;
   }
 }
 
@@ -342,10 +397,24 @@ void update_input_params(ModelInputParams& input_params,
   input_params.attention.host.new_cache_slots =
       std::move(buf.out_new_cache_slots);
   if (update_block_tables) {
-    input_params.attention.host.block_tables =
-        create_flat_2d_tensor(buf.out_block_tables,
-                              buf.out_block_table_rows,
-                              buf.out_block_table_stride);
+    if (!buf.out_multi_block_tables.empty()) {
+      input_params.multi_block_tables.clear();
+      input_params.multi_block_tables.reserve(
+          buf.out_multi_block_tables.size());
+      for (std::vector<std::vector<int32_t>>& manager_tables :
+           buf.out_multi_block_tables) {
+        util::pad_2d_vector(manager_tables, /*pad_value=*/-1);
+        input_params.multi_block_tables.emplace_back(
+            create_2d_tensor(manager_tables, torch::kInt));
+      }
+      input_params.attention.host.block_tables = torch::Tensor();
+    } else {
+      input_params.attention.host.block_tables =
+          create_flat_2d_tensor(buf.out_block_tables,
+                                buf.out_block_table_rows,
+                                buf.out_block_table_stride);
+      input_params.multi_block_tables.clear();
+    }
   }
 }
 

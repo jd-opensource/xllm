@@ -346,6 +346,77 @@ inline int32_t deepseek_v4_normalize_compress_ratio(int32_t ratio) {
   return ratio <= 1 ? 1 : ratio;
 }
 
+inline void deepseek_v4_build_cache_specs(
+    const ModelArgs& model_args,
+    std::vector<std::vector<DSACacheInfo>>& caches_info,
+    std::vector<DSAGroupInfo>& group_infos) {
+  const auto& compress_ratios = model_args.compress_ratios();
+  const int32_t window_size = model_args.window_size();
+  const int32_t base_block_size = 128;
+  CHECK_EQ(FLAGS_block_size, base_block_size)
+      << "DeepSeek V4 currently only supports block_size=128.";
+
+  std::unordered_map<DSAGroupKey, int32_t, DSAGroupKeyHash> group_key_map;
+  auto register_group =
+      [&](DSACacheType type, int32_t ratio, int32_t block_size) -> int32_t {
+    DSAGroupKey key{ratio, type, block_size};
+    auto it = group_key_map.find(key);
+    if (it != group_key_map.end()) {
+      return it->second;
+    }
+    const int32_t gid = static_cast<int32_t>(group_infos.size());
+    group_key_map.emplace(key, gid);
+    group_infos.push_back({type, ratio, block_size});
+    return gid;
+  };
+
+  register_group(DSACacheType::SLIDING_WINDOW, 1, window_size);
+  for (const int32_t ratio : compress_ratios) {
+    const int32_t cr = deepseek_v4_normalize_compress_ratio(ratio);
+    if (cr == 4 || cr == 128) {
+      register_group(DSACacheType::TOKEN, cr, base_block_size);
+    }
+  }
+
+  caches_info.resize(model_args.n_layers());
+  for (int32_t layer_id = 0; layer_id < model_args.n_layers(); ++layer_id) {
+    int32_t cr = (layer_id < static_cast<int32_t>(compress_ratios.size()))
+                     ? compress_ratios[layer_id]
+                     : 1;
+    cr = deepseek_v4_normalize_compress_ratio(cr);
+
+    struct CacheEntry {
+      DSACacheType type;
+      int32_t ratio;
+      int32_t block_size;
+    };
+    std::vector<CacheEntry> layer_caches;
+
+    if (cr == 1) {
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+    } else if (cr == 4) {
+      layer_caches.push_back({DSACacheType::TOKEN, 4, base_block_size});
+      layer_caches.push_back({DSACacheType::TOKEN, 4, base_block_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::TOKEN, 4, base_block_size});
+    } else if (cr == 128) {
+      layer_caches.push_back({DSACacheType::TOKEN, 128, base_block_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+      layer_caches.push_back({DSACacheType::SLIDING_WINDOW, 1, window_size});
+    }
+
+    for (const auto& ce : layer_caches) {
+      const int32_t gid = register_group(ce.type, ce.ratio, ce.block_size);
+      caches_info[layer_id].push_back({gid, ce.type, ce.ratio, ce.block_size});
+    }
+  }
+}
+
 class DeepseekV4ModelImpl
     : public LlmModelImplBase<layer::DeepseekV4DecoderLayer> {
  public:

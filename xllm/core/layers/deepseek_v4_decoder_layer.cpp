@@ -150,6 +150,8 @@ void DeepseekV4DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
   LOAD_WEIGHT(hc_ffn_scale);
 }
 
+void DeepseekV4DecoderLayerImpl::verify_loaded_weights() const {}
+
 DeepseekV4LayerWeightMemStats DeepseekV4DecoderLayerImpl::get_weight_mem_stats()
     const {
   DeepseekV4LayerWeightMemStats stats;

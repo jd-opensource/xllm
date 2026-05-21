@@ -509,7 +509,7 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .num_layers(args_.n_layers())
       .slot_size(kv_cache_cap.slot_size())
       .model_id(options_.model_id());
-  if (args_.model_type() == "deepseek_v4") {
+  if (util::is_deepseek_v4_model_type(args_.model_type())) {
     constexpr uint32_t kManagerTypeBlockManagerImpl = 0;
     constexpr uint32_t kManagerTypeSlidingWindowBlockManager = 1;
 
