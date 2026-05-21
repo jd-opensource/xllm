@@ -612,8 +612,24 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
                                        n_c128_layers * swa_bytes_per_c128_layer;
 
     // 2) Remainder is for token pools (c4_count / c128_count).
-    const int64_t token_mem = std::max(
-        int64_t(0), kv_cache_cap.cache_size_in_bytes() - constant_swa_bytes);
+    const int64_t token_mem =
+        kv_cache_cap.cache_size_in_bytes() - constant_swa_bytes;
+    CHECK_GT(token_mem, 0)
+        << "DSV4 has no memory left for token KV pools after reserving SWA "
+           "cache. This usually means swa_cache is too large for the current "
+           "KV cache budget. Please reduce --max_tokens_per_batch or "
+           "--max_seqs_per_batch, reduce the configured model max_seq_len if "
+           "it is capped too high, or increase available KV cache memory "
+           "(for example by raising --max_memory_utilization or removing an "
+           "overly small --max_cache_size). Details: cache_size="
+        << readable_size(kv_cache_cap.cache_size_in_bytes())
+        << ", reserved_swa=" << readable_size(constant_swa_bytes)
+        << ", token_mem=" << readable_size(token_mem)
+        << ", swa_blocks_per_seq=" << sliding_window_blocks_per_sequence
+        << ", swa_count=" << kv_cache_cap.swa_count()
+        << ", max_seqs_per_batch=" << max_seqs
+        << ", max_tokens_per_batch=" << options_.max_tokens_per_batch()
+        << ", sliding_window=" << window_size << ", block_size=" << block_size;
 
     // 3) bytes per token block (per layer): c4 = key+index+scale; c128 = key
     // only
@@ -648,12 +664,29 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     CHECK_GT(kv_cache_cap.swa_count(), 0) << "DSV4 swa_count must be > 0";
     if (n_c4_layers > 0) {
       CHECK_GT(kv_cache_cap.c4_count(), 0)
-          << "DSV4 c4_count must be > 0 when compress_ratio=4 layers exist";
+          << "DSV4 c4_count must be > 0 when compress_ratio=4 layers exist. "
+             "The remaining token KV memory is too small after reserving SWA "
+             "cache. Please reduce --max_tokens_per_batch or "
+             "--max_seqs_per_batch, or increase available KV cache memory. "
+             "Details: token_mem="
+          << readable_size(token_mem)
+          << ", swa_blocks_per_seq=" << sliding_window_blocks_per_sequence
+          << ", swa_count=" << kv_cache_cap.swa_count()
+          << ", max_seqs_per_batch=" << max_seqs
+          << ", max_tokens_per_batch=" << options_.max_tokens_per_batch();
     }
     if (n_c128_layers > 0) {
       CHECK_GT(kv_cache_cap.c128_count(), 0)
           << "DSV4 c128_count must be > 0 when compress_ratio=128 layers "
-             "exist";
+             "exist. The remaining token KV memory is too small after "
+             "reserving SWA cache. Please reduce --max_tokens_per_batch or "
+             "--max_seqs_per_batch, or increase available KV cache memory. "
+             "Details: token_mem="
+          << readable_size(token_mem)
+          << ", swa_blocks_per_seq=" << sliding_window_blocks_per_sequence
+          << ", swa_count=" << kv_cache_cap.swa_count()
+          << ", max_seqs_per_batch=" << max_seqs
+          << ", max_tokens_per_batch=" << options_.max_tokens_per_batch();
     }
 
     // Composite token managers derive their own pool sizes via:
@@ -1372,6 +1405,26 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
         args_, threadpool_.get(), cp_size_)));
     dp_global_token_nums[dp_rank] =
         batched_inputs[dp_rank].flatten_tokens_vec.size();
+    if (util::is_deepseek_v4_model_type(args_.model_type())) {
+      const int64_t actual_scheduled_tokens =
+          static_cast<int64_t>(
+              batched_inputs[dp_rank].flatten_tokens_vec.size());
+      const int64_t max_tokens_per_batch =
+          static_cast<int64_t>(options_.max_tokens_per_batch());
+      CHECK_LE(actual_scheduled_tokens, max_tokens_per_batch)
+          << "DSV4 actual scheduled tokens exceed max_tokens_per_batch used "
+             "for SWA cache allocation. This can make swa_blocks_per_seq "
+             "smaller than the block/table consumer needs and may cause SWA KV "
+             "rows to be overwritten or read from the wrong position. Please "
+             "increase --max_tokens_per_batch, reduce the scheduler batch "
+             "token load, or check chunked-prefill padding. Details: dp_rank="
+          << dp_rank << ", actual_scheduled_tokens=" << actual_scheduled_tokens
+          << ", max_tokens_per_batch=" << max_tokens_per_batch
+          << ", q_max_seq_len=" << batched_inputs[dp_rank].q_max_seq_len
+          << ", kv_max_seq_len=" << batched_inputs[dp_rank].max_seq_len
+          << ", batch_forward_type="
+          << batched_inputs[dp_rank].batch_forward_type.to_string();
+    }
     if (batch_forward_type.is_empty() &&
         !batched_inputs[dp_rank].batch_forward_type.is_empty()) {
       batch_forward_type = batched_inputs[dp_rank].batch_forward_type;
