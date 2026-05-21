@@ -40,7 +40,11 @@ class BlockManagerPool : public KVCacheManager {
     PROPERTY(int64_t, slot_size) = 0;   // Memory size per slot (for xtensor)
     PROPERTY(std::string, model_id);    // Model ID for multi-model support
     // For SlidingWindowBlockManager.
+    // window_size is the base retained block count; sliding_window_size is
+    // the semantic window size in tokens.
     PROPERTY(uint32_t, window_size) = 0;
+    PROPERTY(uint32_t, sliding_window_size) = 0;
+    PROPERTY(uint32_t, max_tokens_per_batch) = 0;
     // For CompositeBlockManager.
     PROPERTY(std::vector<uint32_t>, manager_types) = {};
     PROPERTY(std::vector<uint32_t>, compress_ratios) = {};

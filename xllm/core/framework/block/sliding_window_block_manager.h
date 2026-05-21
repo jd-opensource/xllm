@@ -19,14 +19,12 @@ limitations under the License.
 
 namespace xllm {
 
-// Allocates exactly options_.window_size() blocks per sequence.
-// Used as a sub-manager of CompositeBlockManager.
+// Sliding-window sub-manager used by CompositeBlockManager.
 class SlidingWindowBlockManager : public BlockManagerImpl {
  public:
   explicit SlidingWindowBlockManager(const Options& options);
   ~SlidingWindowBlockManager() override = default;
 
-  // Only allocation of window_size() blocks is allowed.
   std::vector<Block> allocate(size_t num_blocks) override;
 
   uint32_t window_size() const { return options_.window_size(); }

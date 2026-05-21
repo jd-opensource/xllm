@@ -64,20 +64,42 @@ int64_t get_kv_cache_dtype_size_in_bytes(const std::string& kv_cache_dtype,
   return model_dtype_size;
 }
 
-int64_t compute_sliding_window_blocks_per_sequence(
+int64_t compute_sliding_window_base_blocks_per_sequence(
     int64_t sliding_window_size,
     int64_t block_size,
-    int64_t max_num_batched_tokens,
     int64_t max_model_len) {
   CHECK_GT(sliding_window_size, 0) << "sliding_window_size must be positive";
   CHECK_GT(block_size, 0) << "block_size must be positive";
+  int64_t effective_window_size = sliding_window_size;
+  if (max_model_len > 0) {
+    effective_window_size = std::min(effective_window_size, max_model_len);
+  }
+  return (effective_window_size - 1 + block_size - 1) / block_size + 1;
+}
+
+int64_t compute_effective_sliding_window_size(int64_t sliding_window_size,
+                                              int64_t max_model_len) {
+  CHECK_GT(sliding_window_size, 0) << "sliding_window_size must be positive";
+  if (max_model_len <= 0) {
+    return sliding_window_size;
+  }
+  return std::min(sliding_window_size, max_model_len);
+}
+
+int64_t compute_swa_total_blocks(int64_t sliding_window_size,
+                                 int64_t block_size,
+                                 int64_t max_num_batched_tokens,
+                                 int64_t max_seqs,
+                                 int64_t max_model_len) {
   CHECK_GT(max_num_batched_tokens, 0)
       << "max_num_batched_tokens must be positive";
-  int64_t num_tokens = sliding_window_size - 1 + max_num_batched_tokens;
-  if (max_model_len > 0) {
-    num_tokens = std::min(num_tokens, max_model_len);
-  }
-  return (num_tokens + block_size - 1) / block_size + 1;
+  CHECK_GT(max_seqs, 0) << "max_seqs must be positive";
+  const int64_t base_blocks_per_sequence =
+      compute_sliding_window_base_blocks_per_sequence(
+          sliding_window_size, block_size, max_model_len);
+  const int64_t burst_blocks =
+      (max_num_batched_tokens + block_size - 1) / block_size;
+  return base_blocks_per_sequence * max_seqs + burst_blocks + max_seqs + 2;
 }
 
 }  // namespace
@@ -557,13 +579,15 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
         static_cast<int64_t>(std::max(options_.max_seqs_per_batch(), 1));
     const int32_t block_size = options_.block_size();
     const int32_t window_size = std::max(args_.window_size(), 1);
-    const int64_t sliding_window_blocks_per_sequence =
-        compute_sliding_window_blocks_per_sequence(
-            window_size,
-            block_size,
-            std::max<int64_t>(options_.max_tokens_per_batch(), 1),
-            args_.max_seq_len());
-    kv_cache_cap.swa_count(sliding_window_blocks_per_sequence * max_seqs + 2);
+    const int64_t sliding_window_base_blocks_per_sequence =
+        compute_sliding_window_base_blocks_per_sequence(
+            window_size, block_size, args_.max_seq_len());
+    kv_cache_cap.swa_count(compute_swa_total_blocks(
+        window_size,
+        block_size,
+        std::max<int64_t>(options_.max_tokens_per_batch(), 1),
+        max_seqs,
+        args_.max_seq_len()));
     const int64_t head_dim = args_.head_dim();
     const int32_t index_head_dim = std::max(args_.index_head_dim(), 1);
     const auto& compress_ratios = args_.compress_ratios();
@@ -625,7 +649,8 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
         << readable_size(kv_cache_cap.cache_size_in_bytes())
         << ", reserved_swa=" << readable_size(constant_swa_bytes)
         << ", token_mem=" << readable_size(token_mem)
-        << ", swa_blocks_per_seq=" << sliding_window_blocks_per_sequence
+        << ", swa_base_blocks_per_seq="
+        << sliding_window_base_blocks_per_sequence
         << ", swa_count=" << kv_cache_cap.swa_count()
         << ", max_seqs_per_batch=" << max_seqs
         << ", max_tokens_per_batch=" << options_.max_tokens_per_batch()
@@ -669,8 +694,8 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
              "cache. Please reduce --max_tokens_per_batch or "
              "--max_seqs_per_batch, or increase available KV cache memory. "
              "Details: token_mem="
-          << readable_size(token_mem)
-          << ", swa_blocks_per_seq=" << sliding_window_blocks_per_sequence
+          << readable_size(token_mem) << ", swa_base_blocks_per_seq="
+          << sliding_window_base_blocks_per_sequence
           << ", swa_count=" << kv_cache_cap.swa_count()
           << ", max_seqs_per_batch=" << max_seqs
           << ", max_tokens_per_batch=" << options_.max_tokens_per_batch();
@@ -682,8 +707,8 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
              "reserving SWA cache. Please reduce --max_tokens_per_batch or "
              "--max_seqs_per_batch, or increase available KV cache memory. "
              "Details: token_mem="
-          << readable_size(token_mem)
-          << ", swa_blocks_per_seq=" << sliding_window_blocks_per_sequence
+          << readable_size(token_mem) << ", swa_base_blocks_per_seq="
+          << sliding_window_base_blocks_per_sequence
           << ", swa_count=" << kv_cache_cap.swa_count()
           << ", max_seqs_per_batch=" << max_seqs
           << ", max_tokens_per_batch=" << options_.max_tokens_per_batch();
@@ -814,14 +839,15 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       manager_compress_ratios.push_back(ratio);
     }
 
-    const uint32_t sliding_window_blocks_per_sequence =
-        static_cast<uint32_t>(compute_sliding_window_blocks_per_sequence(
-            std::max(args_.window_size(), 1),
-            block_size,
-            std::max<int64_t>(options_.max_tokens_per_batch(), 1),
-            args_.max_seq_len()));
+    const uint32_t sliding_window_base_blocks_per_sequence =
+        static_cast<uint32_t>(compute_sliding_window_base_blocks_per_sequence(
+            std::max(args_.window_size(), 1), block_size, args_.max_seq_len()));
 
-    options.window_size(sliding_window_blocks_per_sequence)
+    options.window_size(sliding_window_base_blocks_per_sequence)
+        .sliding_window_size(
+            static_cast<uint32_t>(compute_effective_sliding_window_size(
+                std::max(args_.window_size(), 1), args_.max_seq_len())))
+        .max_tokens_per_batch(options_.max_tokens_per_batch())
         .manager_types(std::move(manager_types))
         .compress_ratios(std::move(manager_compress_ratios))
         .max_seqs_per_batch(options_.max_seqs_per_batch());
@@ -1406,16 +1432,16 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
     dp_global_token_nums[dp_rank] =
         batched_inputs[dp_rank].flatten_tokens_vec.size();
     if (util::is_deepseek_v4_model_type(args_.model_type())) {
-      const int64_t actual_scheduled_tokens =
-          static_cast<int64_t>(
-              batched_inputs[dp_rank].flatten_tokens_vec.size());
+      const int64_t actual_scheduled_tokens = static_cast<int64_t>(
+          batched_inputs[dp_rank].flatten_tokens_vec.size());
       const int64_t max_tokens_per_batch =
           static_cast<int64_t>(options_.max_tokens_per_batch());
       CHECK_LE(actual_scheduled_tokens, max_tokens_per_batch)
           << "DSV4 actual scheduled tokens exceed max_tokens_per_batch used "
-             "for SWA cache allocation. This can make swa_blocks_per_seq "
-             "smaller than the block/table consumer needs and may cause SWA KV "
-             "rows to be overwritten or read from the wrong position. Please "
+             "for SWA cache allocation. This can make the shared SWA burst "
+             "pool smaller than the block/table consumer needs and may cause "
+             "SWA KV rows to be overwritten or read from the wrong position. "
+             "Please "
              "increase --max_tokens_per_batch, reduce the scheduler batch "
              "token load, or check chunked-prefill padding. Details: dp_rank="
           << dp_rank << ", actual_scheduled_tokens=" << actual_scheduled_tokens

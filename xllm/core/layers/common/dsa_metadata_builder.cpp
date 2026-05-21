@@ -503,7 +503,11 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
     if (semantic_cols <= 0) {
       return -1;
     }
-    const int64_t block_idx = (pos / block_size_i64) % semantic_cols;
+    const int64_t logical_block_idx = pos / block_size_i64;
+    if (logical_block_idx >= semantic_cols) {
+      return -1;
+    }
+    const int64_t block_idx = logical_block_idx;
     const int32_t block_id = raw_bt_acc[seq][block_idx];
     if (block_id < 0) {
       return -1;
@@ -553,12 +557,8 @@ void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
       continue;
     }
     const int32_t retained_cols = std::min(current_cols, dst_lens[s]);
-    const int32_t start_col = dst_lens[s] - retained_cols;
     for (int32_t j = 0; j < retained_cols; ++j) {
-      const int32_t logical_col = start_col + j;
-      // Keep the read-side block table aligned with slot_for_position().
-      const int32_t physical_col = logical_col % current_cols;
-      new_acc[s][logical_col] = old_acc[s][physical_col];
+      new_acc[s][j] = old_acc[s][j];
     }
   }
   out_bt = new_bt;

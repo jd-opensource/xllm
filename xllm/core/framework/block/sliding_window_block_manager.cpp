@@ -23,10 +23,7 @@ SlidingWindowBlockManager::SlidingWindowBlockManager(const Options& options)
 }
 
 std::vector<Block> SlidingWindowBlockManager::allocate(size_t num_blocks) {
-  if (num_blocks != options_.window_size()) {
-    return {};
-  }
-  return BlockManagerImpl::allocate(options_.window_size());
+  return BlockManagerImpl::allocate(num_blocks);
 }
 
 }  // namespace xllm

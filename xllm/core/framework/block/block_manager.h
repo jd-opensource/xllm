@@ -46,8 +46,12 @@ class BlockManager {
     PROPERTY(bool, enable_prefix_cache) = true;
     PROPERTY(bool, enable_disagg_pd) = false;
     PROPERTY(bool, enable_cache_upload) = false;
-    // For SlidingWindowBlockManager: blocks to allocate per sequence.
+    // For SlidingWindowBlockManager: base blocks retained per sequence.
     PROPERTY(uint32_t, window_size) = 0;
+    // Semantic sliding-window size in tokens.
+    PROPERTY(uint32_t, sliding_window_size) = 0;
+    // For dynamic sliding-window managers: maximum scheduled tokens per batch.
+    PROPERTY(uint32_t, max_tokens_per_batch) = 0;
     // For CompositeBlockManager (passed from upstream).
     PROPERTY(std::vector<uint32_t>, manager_types) = {};
     PROPERTY(std::vector<uint32_t>, compress_ratios) = {};

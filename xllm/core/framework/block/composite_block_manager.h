@@ -23,7 +23,7 @@ limitations under the License.
 namespace xllm {
 
 // BlockManager composed of multiple sub-managers, created from options.
-// manager_type: 0 = BlockManagerImpl, 2 = SlidingWindowBlockManager.
+// manager_type: 0 = BlockManagerImpl, 1 = SlidingWindowBlockManager.
 // Options come from BlockManager::Options (passed from upstream via
 // BlockManagerPool).
 class CompositeBlockManager : public BlockManager {
