@@ -159,7 +159,7 @@ class DeepseekV2ModelImpl : public torch::nn::Module {
       }
     }
 
-    auto inputs_embeds = input_params.input_embedding;
+    auto inputs_embeds = input_params.embedding.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
       h = inputs_embeds;

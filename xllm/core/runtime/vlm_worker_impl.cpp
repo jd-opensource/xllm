@@ -57,7 +57,7 @@ bool VLMWorkerImpl::init_model(ModelContext& context) {
 std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& input) {
   Timer timer;
   const bool empty_shard =
-      input.input_params.num_sequences == 0 &&
+      input.input_params.meta.num_sequences == 0 &&
       (!input.token_ids.defined() || input.token_ids.numel() == 0);
   if (empty_shard) {
     return ForwardOutput{};

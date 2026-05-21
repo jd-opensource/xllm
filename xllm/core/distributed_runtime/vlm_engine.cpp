@@ -338,9 +338,9 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
   for (auto worker_rank = 0; worker_rank < worker_clients_num_;
        worker_rank += dp_local_tp_size_) {
     auto result = results[worker_rank].value();
-    const bool empty_shard =
-        batch[dp_rank].size() == 0 &&
-        raw_forward_inputs[dp_rank].flatten_tokens_vec.empty();
+    const bool empty_shard = batch[dp_rank].size() == 0 &&
+                             (!forward_inputs[dp_rank].token_ids.defined() ||
+                              forward_inputs[dp_rank].token_ids.numel() == 0);
     if (empty_shard) {
       ++dp_rank;
       continue;
@@ -449,9 +449,9 @@ std::vector<ForwardInput> VLMEngine::prepare_inputs(std::vector<Batch>& batch) {
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     if (batch[dp_rank].empty()) {
       // Use value-initialization to zero primitive fields for empty shard.
-      RawForwardInput empty_input{};
-      empty_input.batch_forward_type = BatchForwardType();
-      empty_input.batch_id = UNINITIALIZED_BATCH_ID;
+      ForwardInput empty_input;
+      empty_input.input_params.meta.batch_forward_type = BatchForwardType();
+      empty_input.input_params.meta.batch_id = UNINITIALIZED_BATCH_ID;
       batched_inputs.emplace_back(std::move(empty_input));
     } else {
       batched_inputs.emplace_back(std::move(
@@ -475,9 +475,9 @@ std::vector<ForwardInput> VLMEngine::prepare_inputs(std::vector<Batch>& batch) {
   for (auto dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
     batched_inputs[dp_rank].input_params.parallel.dp_global_token_nums =
         dp_global_token_nums;
+    batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
     if (batched_inputs[dp_rank]
             .input_params.meta.batch_forward_type.is_empty()) {
-      batched_inputs[dp_rank].input_params.parallel.dp_is_decode = dp_is_decode;
       batched_inputs[dp_rank].input_params.meta.batch_forward_type =
           batch_forward_type;
     }

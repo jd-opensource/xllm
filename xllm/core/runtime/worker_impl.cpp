@@ -489,11 +489,11 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     processed_input = input.to(device_, dtype_);
     auto& input_params = processed_input.input_params;
 
-    bool empty_shard = input_params.num_sequences == 0 &&
+    bool empty_shard = input_params.meta.num_sequences == 0 &&
                        (!processed_input.token_ids.defined() ||
                         processed_input.token_ids.numel() == 0);
     const bool need_fake_input_for_empty_shard =
-        empty_shard && !input_params.batch_forward_type.is_empty() &&
+        empty_shard && !input_params.meta.batch_forward_type.is_empty() &&
         (context_.get_parallel_args().cp_size() > 1 ||
          (context_.get_parallel_args().dp_size() > 1 ||
           context_.get_parallel_args().ep_size() > 1 ||
