@@ -131,19 +131,19 @@ void CompositeBlockManager::deallocate_sequence(Sequence* seq) {
   }
 }
 
-void CompositeBlockManager::deallocate(const Slice<Block>& blocks) {
-  LOG(FATAL) << "CompositeBlockManager::deallocate is not implemented";
+void CompositeBlockManager::deallocate(const Slice<Block>& /*blocks*/) {
+  NOT_IMPLEMENTED();
 }
 
-std::vector<Block> CompositeBlockManager::allocate(size_t num_blocks) {
-  LOG(FATAL) << "CompositeBlockManager::allocate is not implemented";
+std::vector<Block> CompositeBlockManager::allocate(size_t /*num_blocks*/) {
+  NOT_IMPLEMENTED();
   return {};
 }
 
 std::vector<Block> CompositeBlockManager::allocate_shared(
-    const Slice<int32_t>& tokens_ids,
-    const Slice<Block>& existed_shared_blocks) {
-  LOG(FATAL) << "CompositeBlockManager::allocate_shared is not implemented";
+    const Slice<int32_t>& /*tokens_ids*/,
+    const Slice<Block>& /*existed_shared_blocks*/) {
+  NOT_IMPLEMENTED();
   return {};
 }
 

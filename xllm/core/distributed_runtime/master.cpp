@@ -157,7 +157,7 @@ Master::Master(const Options& options, EngineType type)
                       "CompositeBlockManager yet, fallback to "
                       "enable_prefix_cache=false";
       options_.enable_prefix_cache(false);
-      FLAGS_enable_prefix_cache = false;
+      KVCacheConfig::get_instance().enable_prefix_cache(false);
     }
   }
   options_.enable_mla(util::should_enable_mla(model_path, options_.backend()));
