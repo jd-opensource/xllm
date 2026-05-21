@@ -64,14 +64,20 @@ int64_t get_kv_cache_dtype_size_in_bytes(const std::string& kv_cache_dtype,
   return model_dtype_size;
 }
 
-int64_t compute_sliding_window_blocks_per_sequence(int64_t sliding_window_size,
-                                                   int64_t block_size) {
+int64_t compute_sliding_window_blocks_per_sequence(
+    int64_t sliding_window_size,
+    int64_t block_size,
+    int64_t max_num_batched_tokens,
+    int64_t max_model_len) {
   CHECK_GT(sliding_window_size, 0) << "sliding_window_size must be positive";
   CHECK_GT(block_size, 0) << "block_size must be positive";
-  // Align with vLLM/vllm-ascend sliding-window allocation: keep enough
-  // blocks to cover `sliding_window - 1` history tokens and the current
-  // block.
-  return (sliding_window_size - 1) / block_size + 1;
+  CHECK_GT(max_num_batched_tokens, 0)
+      << "max_num_batched_tokens must be positive";
+  int64_t num_tokens = sliding_window_size - 1 + max_num_batched_tokens;
+  if (max_model_len > 0) {
+    num_tokens = std::min(num_tokens, max_model_len);
+  }
+  return (num_tokens + block_size - 1) / block_size + 1;
 }
 
 }  // namespace
@@ -552,7 +558,11 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     const int32_t block_size = options_.block_size();
     const int32_t window_size = std::max(args_.window_size(), 1);
     const int64_t sliding_window_blocks_per_sequence =
-        compute_sliding_window_blocks_per_sequence(window_size, block_size);
+        compute_sliding_window_blocks_per_sequence(
+            window_size,
+            block_size,
+            std::max<int64_t>(options_.max_tokens_per_batch(), 1),
+            args_.max_seq_len());
     kv_cache_cap.swa_count(sliding_window_blocks_per_sequence * max_seqs + 2);
     const int64_t head_dim = args_.head_dim();
     const int32_t index_head_dim = std::max(args_.index_head_dim(), 1);
@@ -771,7 +781,14 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       manager_compress_ratios.push_back(ratio);
     }
 
-    options.window_size(std::max(args_.window_size(), 1))
+    const uint32_t sliding_window_blocks_per_sequence =
+        static_cast<uint32_t>(compute_sliding_window_blocks_per_sequence(
+            std::max(args_.window_size(), 1),
+            block_size,
+            std::max<int64_t>(options_.max_tokens_per_batch(), 1),
+            args_.max_seq_len()));
+
+    options.window_size(sliding_window_blocks_per_sequence)
         .manager_types(std::move(manager_types))
         .compress_ratios(std::move(manager_compress_ratios))
         .max_seqs_per_batch(options_.max_seqs_per_batch());
