@@ -239,6 +239,7 @@ Master::Master(const Options& options, EngineType type)
         .dp_size(options.dp_size())
         .ep_size(options.ep_size())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
+        .max_tokens_per_batch(options_.max_tokens_per_batch())
         .max_tokens_per_chunk_for_prefill(
             options_.max_tokens_per_chunk_for_prefill());
 
@@ -289,6 +290,7 @@ Master::Master(const Options& options, EngineType type)
         .enable_prefill_sp(options_.enable_prefill_sp())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
+        .max_tokens_per_batch(options_.max_tokens_per_batch())
         .max_tokens_per_chunk_for_prefill(
             options_.max_tokens_per_chunk_for_prefill())
         .instance_role(options_.instance_role())
@@ -340,6 +342,7 @@ Master::Master(const Options& options, EngineType type)
         .cp_size(options_.cp_size())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
+        .max_tokens_per_batch(options_.max_tokens_per_batch())
         .max_tokens_per_chunk_for_prefill(
             options_.max_tokens_per_chunk_for_prefill())
         .instance_role(options_.instance_role())
