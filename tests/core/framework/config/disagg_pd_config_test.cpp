@@ -30,14 +30,14 @@ struct PrefixRoleCase {
   bool keep_prefix_cache;
 };
 
-void set_unsupported_values(DisaggPDConfig* disagg_pd_config,
-                            KVCacheConfig* kv_cache_config,
-                            SchedulerConfig* scheduler_config) {
-  disagg_pd_config->kv_cache_transfer_type("LlmDataDist")
+void set_unsupported_values(DisaggPDConfig& disagg_pd_config,
+                            KVCacheConfig& kv_cache_config,
+                            SchedulerConfig& scheduler_config) {
+  disagg_pd_config.kv_cache_transfer_type("LlmDataDist")
       .kv_cache_transfer_mode("PULL")
       .enable_pd_ooc(true);
-  kv_cache_config->kv_cache_dtype("fp8").enable_prefix_cache(true);
-  scheduler_config->enable_schedule_overlap(true);
+  kv_cache_config.kv_cache_dtype("fp8").enable_prefix_cache(true);
+  scheduler_config.enable_schedule_overlap(true);
 }
 
 void expect_forced_defaults(const DisaggPDConfig& disagg_pd_config,
@@ -63,8 +63,7 @@ TEST(DisaggPDConfigTest, KeepsMluPrefixCacheForPrefillSideRoles) {
     KVCacheConfig kv_cache_config;
     SchedulerConfig scheduler_config;
     disagg_pd_config.instance_role(test_case.role);
-    set_unsupported_values(
-        &disagg_pd_config, &kv_cache_config, &scheduler_config);
+    set_unsupported_values(disagg_pd_config, kv_cache_config, scheduler_config);
 
     disagg_pd_config.normalize_mlu(kv_cache_config, scheduler_config);
 
