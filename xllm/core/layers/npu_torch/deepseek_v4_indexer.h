@@ -50,6 +50,7 @@ class DeepseekV4IndexerImpl : public torch::nn::Module {
   torch::Tensor select_qli(
       const torch::Tensor& x,
       const torch::Tensor& qr,
+      const std::optional<torch::Tensor>& qr_pertoken_scale,
       torch::Tensor& index_cache,
       torch::Tensor* quant_index_cache,
       const AttentionMetadata& attn_metadata,
@@ -69,6 +70,7 @@ class DeepseekV4IndexerImpl : public torch::nn::Module {
   torch::Tensor select_qli(
       const torch::Tensor& x,
       const torch::Tensor& qr,
+      const std::optional<torch::Tensor>& qr_pertoken_scale,
       torch::Tensor& index_cache,
       const AttentionMetadata& attn_metadata,
       const std::optional<torch::Tensor>& cos = std::nullopt,
@@ -85,6 +87,9 @@ class DeepseekV4IndexerImpl : public torch::nn::Module {
           nullptr);
 
   torch::Tensor build_query(const torch::Tensor& qr);
+  torch::Tensor build_query(
+      const torch::Tensor& qr,
+      const std::optional<torch::Tensor>& qr_pertoken_scale);
 
   torch::Tensor build_weights(const torch::Tensor& x);
 

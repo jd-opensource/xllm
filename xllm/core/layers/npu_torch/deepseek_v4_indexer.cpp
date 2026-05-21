@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "kernels/ops_api.h"
+#include "xllm/core/kernels/npu/xllm_ops/xllm_ops_api.h"
 
 namespace xllm {
 namespace layer {
@@ -86,61 +87,100 @@ torch::Tensor rotate_activation_with_hadamard(const torch::Tensor& x,
   return out;
 }
 
+struct SlotScatterPlan {
+  torch::Tensor slots_slice;
+  torch::Tensor safe_indices;
+  int64_t update_rows = 0;
+};
+
+SlotScatterPlan prepare_slot_scatter_plan(const torch::Tensor& slot_mapping,
+                                          int64_t value_rows,
+                                          const c10::Device& device) {
+  SlotScatterPlan plan;
+  if (!slot_mapping.defined() || slot_mapping.numel() == 0 || value_rows <= 0) {
+    return plan;
+  }
+
+  torch::Tensor slots = slot_mapping.reshape({-1}).to(torch::kLong).to(device);
+  plan.update_rows = std::min<int64_t>(slots.size(0), value_rows);
+  if (plan.update_rows <= 0) {
+    return plan;
+  }
+
+  plan.slots_slice =
+      slots.slice(/*dim=*/0, /*start=*/0, /*end=*/plan.update_rows);
+  if (!device.is_cpu()) {
+    plan.safe_indices = plan.slots_slice.clamp_min(0).reshape({-1, 1});
+  }
+  return plan;
+}
+
 // Scatter a row-major tensor into a flattened cache according to slot ids.
 // Each valid slot in `slot_mapping` selects the destination row for the same
 // row in `value`; negative slots are treated as padding and ignored.
+void scatter_rows_by_prepared_slot(torch::Tensor& cache,
+                                   const SlotScatterPlan& plan,
+                                   const torch::Tensor& value) {
+  if (!cache.defined() || !value.defined() || !plan.slots_slice.defined()) {
+    return;
+  }
+  if (plan.update_rows <= 0 || value.numel() == 0) {
+    return;
+  }
+
+  auto value_2d = value.reshape({-1, value.size(value.dim() - 1)});
+  auto cache_2d = cache.view({-1, value_2d.size(1)});
+  const int64_t update_rows =
+      std::min<int64_t>(plan.update_rows, value_2d.size(0));
+  if (update_rows <= 0) {
+    return;
+  }
+
+  torch::Tensor slots_slice =
+      plan.slots_slice.slice(/*dim=*/0, /*start=*/0, /*end=*/update_rows);
+  torch::Tensor value_slice =
+      value_2d.slice(/*dim=*/0, /*start=*/0, /*end=*/update_rows);
+
+  if (!cache.device().is_cpu()) {
+    torch::Tensor safe_indices =
+        plan.safe_indices.defined()
+            ? plan.safe_indices.slice(/*dim=*/0,
+                                      /*start=*/0,
+                                      /*end=*/update_rows)
+            : slots_slice.clamp_min(0).reshape({-1, 1});
+    xllm::kernel::npu::scatter_nd_update(cache_2d, safe_indices, value_slice);
+    return;
+  }
+
+  // Negative slots mean "unused" entries in the metadata. Skip them so the
+  // caller can pass padded or partially-filled mappings safely.
+  torch::Tensor valid_mask = slots_slice.ge(0);
+  torch::Tensor valid_slots = slots_slice.index({valid_mask});
+  if (valid_slots.numel() == 0) {
+    return;
+  }
+
+  torch::Tensor valid_values = value_slice.index({valid_mask});
+  const int64_t cache_rows = cache_2d.size(0);
+  const int64_t max_slot = valid_slots.max().item<int64_t>();
+  CHECK_LT(max_slot, cache_rows)
+      << "scatter_rows_by_slot slot index out of range: max_slot=" << max_slot
+      << ", cache_rows=" << cache_rows << ", value_shape=" << value.sizes();
+  // Write the valid rows into the flattened cache view.
+  cache_2d.index_copy_(/*dim=*/0, valid_slots, valid_values);
+}
+
 void scatter_rows_by_slot(torch::Tensor& cache,
                           const torch::Tensor& slot_mapping,
                           const torch::Tensor& value) {
   if (!cache.defined() || !slot_mapping.defined() || !value.defined()) {
     return;
   }
-  if (slot_mapping.numel() == 0 || value.numel() == 0) {
-    return;
-  }
 
-  auto value_2d = value.reshape({-1, value.size(value.dim() - 1)});
-  auto cache_2d = cache.view({-1, value_2d.size(1)});
-  // slot_mapping and value are both flattened to row-major form. We only
-  // update the rows that have matching source data.
-  auto slots = slot_mapping.reshape({-1}).to(torch::kLong).to(cache.device());
-  const int64_t update_rows =
-      std::min<int64_t>(slots.size(0), value_2d.size(0));
-  if (update_rows <= 0) {
-    return;
-  }
-
-  auto slots_slice = slots.slice(/*dim=*/0, /*start=*/0, /*end=*/update_rows);
-  auto value_slice =
-      value_2d.slice(/*dim=*/0, /*start=*/0, /*end=*/update_rows);
-
-  if (!cache.device().is_cpu()) {
-    auto safe_slots = slots_slice.clamp_min(0);
-    auto valid_mask = slots_slice.ge(0).unsqueeze(1);
-    auto old_values = cache_2d.index_select(/*dim=*/0, safe_slots);
-    auto safe_values = torch::where(valid_mask, value_slice, old_values);
-    cache_2d.index_copy_(/*dim=*/0, safe_slots, safe_values);
-    return;
-  }
-
-  // Negative slots mean "unused" entries in the metadata. Skip them so the
-  // caller can pass padded or partially-filled mappings safely.
-  auto valid_mask = slots_slice.ge(0);
-  auto valid_slots = slots_slice.index({valid_mask});
-  if (valid_slots.numel() == 0) {
-    return;
-  }
-
-  auto valid_values = value_slice.index({valid_mask});
-  const int64_t cache_rows = cache_2d.size(0);
-  const int64_t max_slot = valid_slots.max().item<int64_t>();
-  CHECK_LT(max_slot, cache_rows)
-      << "scatter_rows_by_slot slot index out of range: max_slot=" << max_slot
-      << ", cache_rows=" << cache_rows
-      << ", slot_shape=" << slot_mapping.sizes()
-      << ", value_shape=" << value.sizes();
-  // Write the valid rows into the flattened cache view.
-  cache_2d.index_copy_(/*dim=*/0, valid_slots, valid_values);
+  torch::Tensor value_2d = value.reshape({-1, value.size(value.dim() - 1)});
+  SlotScatterPlan plan =
+      prepare_slot_scatter_plan(slot_mapping, value_2d.size(0), cache.device());
+  scatter_rows_by_prepared_slot(cache, plan, value);
 }
 
 torch::Tensor apply_partial_rope(torch::Tensor q,
@@ -185,6 +225,18 @@ torch::Tensor apply_partial_rope(torch::Tensor q,
 
 std::tuple<torch::Tensor, torch::Tensor> dynamic_quant_int8(
     const torch::Tensor& input) {
+  if (!input.device().is_cpu()) {
+    xllm::kernel::NpuQuantizeParams quant_params;
+    quant_params.input = input;
+
+    torch::Tensor quant;
+    std::optional<torch::Tensor> scale;
+    std::tie(quant, scale) = xllm::kernel::dynamic_quant(quant_params);
+    CHECK(scale.has_value() && scale->defined())
+        << "DeepseekV4Indexer dynamic_quant must return scale.";
+    return {quant, scale.value()};
+  }
+
   auto max_abs = input.abs().amax(-1, true).to(torch::kFloat32);
   auto safe_max = torch::where(max_abs > 0, max_abs, torch::ones_like(max_abs));
   auto scale = safe_max / 127.0;
@@ -262,6 +314,26 @@ torch::Tensor DeepseekV4IndexerImpl::build_query(const torch::Tensor& qr) {
   return q;
 }
 
+torch::Tensor DeepseekV4IndexerImpl::build_query(
+    const torch::Tensor& qr,
+    const std::optional<torch::Tensor>& qr_pertoken_scale) {
+  CHECK(qr.defined()) << "DeepseekV4Indexer::build_query: qr is undefined";
+  if (wq_b_->uses_w8a8_dynamic_quant() && qr_pertoken_scale.has_value() &&
+      qr_pertoken_scale->defined()) {
+    xllm::kernel::QuantMatmulParams params;
+    params.x1 = qr;
+    params.x2 = wq_b_->weight();
+    params.transpose2 = true;
+    params.scale = wq_b_->w8a8_dynamic_weight_scale();
+    params.pertoken_scale = qr_pertoken_scale;
+    params.bias = wq_b_->bias();
+    params.output_dtype = wq_b_->output_dtype();
+    auto q = xllm::kernel::quant_matmul(params);
+    return q.view({q.size(0), n_heads_, head_dim_});
+  }
+  return build_query(qr);
+}
+
 torch::Tensor DeepseekV4IndexerImpl::build_weights(const torch::Tensor& x) {
   CHECK(x.defined()) << "DeepseekV4Indexer::build_weights: x is undefined";
   return weights_proj_->forward(x) * indexer_softmax_mul_head_dim_sqrt_;
@@ -321,6 +393,7 @@ std::tuple<torch::Tensor, torch::Tensor> DeepseekV4IndexerImpl::forward(
 torch::Tensor DeepseekV4IndexerImpl::select_qli(
     const torch::Tensor& x,
     const torch::Tensor& qr,
+    const std::optional<torch::Tensor>& qr_pertoken_scale,
     torch::Tensor& index_cache,
     torch::Tensor* quant_index_cache,
     const AttentionMetadata& attn_metadata,
@@ -338,7 +411,7 @@ torch::Tensor DeepseekV4IndexerImpl::select_qli(
       << "DeepseekV4Indexer::select_qli: index_cache is undefined";
 
   (void)with_prefill;
-  auto q = build_query(qr);
+  auto q = build_query(qr, qr_pertoken_scale);
   if (cos.has_value() && sin.has_value()) {
     const int64_t rope_start_dim =
         std::max<int64_t>(head_dim_ - rope_head_dim_, 0);
@@ -371,10 +444,13 @@ torch::Tensor DeepseekV4IndexerImpl::select_qli(
   }
 
   if (kv.numel() > 0) {
-    scatter_rows_by_slot(index_cache, attn_metadata.slot_mapping, kv_quant);
+    torch::Tensor kv_quant_2d =
+        kv_quant.reshape({-1, kv_quant.size(kv_quant.dim() - 1)});
+    SlotScatterPlan scatter_plan = prepare_slot_scatter_plan(
+        attn_metadata.slot_mapping, kv_quant_2d.size(0), index_cache.device());
+    scatter_rows_by_prepared_slot(index_cache, scatter_plan, kv_quant);
     if (quant_index_cache != nullptr && quant_index_cache->defined()) {
-      scatter_rows_by_slot(
-          *quant_index_cache, attn_metadata.slot_mapping, kv_scale);
+      scatter_rows_by_prepared_slot(*quant_index_cache, scatter_plan, kv_scale);
     }
   }
 
@@ -460,6 +536,7 @@ torch::Tensor DeepseekV4IndexerImpl::select_qli(
 torch::Tensor DeepseekV4IndexerImpl::select_qli(
     const torch::Tensor& x,
     const torch::Tensor& qr,
+    const std::optional<torch::Tensor>& qr_pertoken_scale,
     torch::Tensor& index_cache,
     const AttentionMetadata& attn_metadata,
     const std::optional<torch::Tensor>& cos,
@@ -474,6 +551,7 @@ torch::Tensor DeepseekV4IndexerImpl::select_qli(
     std::tuple<torch::Tensor, torch::Tensor>* compressor_block_tables) {
   return select_qli(x,
                     qr,
+                    qr_pertoken_scale,
                     index_cache,
                     /*quant_index_cache=*/nullptr,
                     attn_metadata,

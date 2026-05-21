@@ -151,6 +151,15 @@ std::tuple<at::Tensor, at::Tensor> dequant_swiglu_quant(
     bool activate_left,
     int64_t quant_mode);
 
+std::tuple<at::Tensor, at::Tensor> grouped_matmul_swiglu_quant(
+    const at::Tensor& x,
+    const at::Tensor& weight,
+    const at::Tensor& group_list,
+    const at::Tensor& weight_scale,
+    const at::Tensor& x_scale,
+    const c10::optional<at::Tensor>& bias,
+    const c10::optional<at::Tensor>& offset);
+
 at::Tensor hc_post(const at::Tensor& x,
                    const at::Tensor& residual,
                    const at::Tensor& post,
@@ -364,4 +373,8 @@ void npu_inplace_partial_rotary_mul(torch::Tensor& x,
                                     const torch::Tensor& r2,
                                     c10::string_view rotary_mode,
                                     at::IntArrayRef partial_slice);
+
+void scatter_nd_update(torch::Tensor& var,
+                       const torch::Tensor& indices,
+                       const torch::Tensor& updates);
 }  // namespace xllm::kernel::npu

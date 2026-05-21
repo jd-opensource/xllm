@@ -239,6 +239,16 @@ DEFINE_double(eplb_update_threshold, 0.8, "EPLB update threshold.");
 
 DEFINE_int32(expert_parallel_degree, 0, "Expert parallel degree.");
 
+DEFINE_int32(enable_fused_mc2,
+             0,
+             "Fused MC2 mode for NPU EP MoE. 0 disables fused MC2, 1 uses "
+             "DispatchFFNCombine, 2 uses DispatchGmmCombineDecode.");
+
+DEFINE_bool(
+    enable_fused_moe_gmm_swiglu,
+    false,
+    "Whether to fuse W8A8 MoE grouped matmul1 and dequant+swiglu+quant.");
+
 DEFINE_string(rank_tablefile, "", "ATB HCCL rank table file.");
 
 // --- profile config ---
