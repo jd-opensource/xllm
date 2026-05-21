@@ -67,9 +67,7 @@ KVCacheShape::KVCacheShape(const KVCacheCapacity& kv_cache_cap,
   CHECK_GT(kv_cache_cap.block_size(), 0) << "block_size must be positive.";
 
   if (model_args.model_type() == "deepseek_v4") {
-    key_cache_shape_ = std::vector<int64_t>{kv_cache_cap.swa_count(),
-                                            kv_cache_cap.c4_count(),
-                                            kv_cache_cap.c128_count()};
+    init_dsv4_pool_shape(kv_cache_cap);
     return;
   }
 
@@ -148,6 +146,11 @@ bool KVCacheShape::has_ssm_cache_shape() const {
 }
 
 void KVCacheShape::print_shapes() const {
+  if (shape_kind_ == ShapeKind::DSV4_POOL) {
+    print_dsv4_pool_shape();
+    return;
+  }
+
   if (has_key_cache_shape()) {
     LOG(INFO) << "Initializing k cache with shape: [" << key_cache_shape()
               << "]";
@@ -168,6 +171,24 @@ void KVCacheShape::print_shapes() const {
     LOG(INFO) << "Initializing ssm cache with shape: [" << ssm_cache_shape()
               << "]";
   }
+}
+
+void KVCacheShape::init_dsv4_pool_shape(const KVCacheCapacity& kv_cache_cap) {
+  shape_kind_ = ShapeKind::DSV4_POOL;
+  key_cache_shape_ = std::vector<int64_t>{kv_cache_cap.swa_count(),
+                                          kv_cache_cap.c4_count(),
+                                          kv_cache_cap.c128_count()};
+}
+
+void KVCacheShape::print_dsv4_pool_shape() const {
+  CHECK(has_key_cache_shape())
+      << "DeepSeek V4 cache shape must contain cache pool counts.";
+  const std::vector<int64_t>& pool_counts = key_cache_shape();
+  CHECK_GE(pool_counts.size(), 3)
+      << "DeepSeek V4 cache shape must be [swa_count, c4_count, c128_count].";
+  LOG(INFO) << "Initializing DSV4 kv cache with shape: [swa_count="
+            << pool_counts[0] << ", c4_count=" << pool_counts[1]
+            << ", c128_count=" << pool_counts[2] << "]";
 }
 
 void KVCacheShape::to_proto(proto::KVCacheShape* proto_shape) const {

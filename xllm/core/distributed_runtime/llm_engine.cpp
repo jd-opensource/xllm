@@ -473,14 +473,7 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
 
   // init kv cache for each worker
   const KVCacheShape kv_cache_shape(kv_cache_cap, args_, dp_local_tp_size_);
-  if (args_.model_type() == "deepseek_v4") {
-    LOG(INFO) << "Initializing DSV4 kv cache with shape: [swa_count="
-              << kv_cache_cap.swa_count()
-              << ", c4_count=" << kv_cache_cap.c4_count()
-              << ", c128_count=" << kv_cache_cap.c128_count() << "]";
-  } else {
-    kv_cache_shape.print_shapes();
-  }
+  kv_cache_shape.print_shapes();
 
   // initialize block manager
   BlockManagerPool::Options options;
