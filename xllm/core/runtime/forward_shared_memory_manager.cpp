@@ -2111,7 +2111,10 @@ inline void deserialize_raw_forward_input(const char*& buffer,
                 mgr_table,
                 /*stream=*/nullptr,
                 /*force_host_materialize=*/true);
-    input_params.multi_block_tables.emplace_back(std::move(mgr_table));
+    // Clone to decouple from shared memory buffer. With schedule_overlap the
+    // buffer may be overwritten by the next step while the worker is still
+    // reading multi_block_tables (which stay on CPU for DSA metadata).
+    input_params.multi_block_tables.emplace_back(mgr_table.clone());
   }
 
   read_dit_forward_input(context, input_params.dit_forward_input);

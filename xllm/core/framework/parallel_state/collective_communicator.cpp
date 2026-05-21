@@ -48,11 +48,11 @@ struct DispatchAndCombineComm {
   HcclComm comm = nullptr;
 };
 
-DispatchAndCombineComm create_dispatch_and_combine_comm(int global_rank,
-                                                        int world_size,
-                                                        int dp_size,
-                                                        int ep_size,
-                                                        int cp_size) {
+DispatchAndCombineComm create_dispatch_and_combine_mapping(int global_rank,
+                                                           int world_size,
+                                                           int dp_size,
+                                                           int ep_size,
+                                                           int cp_size) {
   const int32_t normalized_cp_size = cp_size > 0 ? cp_size : 1;
   const int32_t attn_tp_size = world_size / (dp_size * normalized_cp_size);
 
@@ -70,26 +70,6 @@ DispatchAndCombineComm create_dispatch_and_combine_comm(int global_rank,
   DispatchAndCombineComm result;
   result.mapping_data = mapping_npu.to_json();
   result.mapping.ParseParam(result.mapping_data);
-  result.mapping.InitGlobalCommDomain(FLAGS_communication_backend);
-
-  auto moe_ep_parallel_info = result.mapping.Get(atb_speed::base::MOE_EP);
-  const bool moe_ep_is_world =
-      moe_ep_parallel_info.rankIds.size() == static_cast<size_t>(world_size);
-  const uint32_t comm_buffer_size =
-      moe_ep_is_world ? 0 : moe_ep_parallel_info.bufferSize;
-  const bool reuse_comm_domain = moe_ep_is_world;
-  result.domain =
-      atb_speed::GetSingleton<atb_speed::ExternalCommManager>().GetCommDomain(
-          moe_ep_parallel_info.groupId,
-          moe_ep_parallel_info.rankIds,
-          moe_ep_parallel_info.rank,
-          FLAGS_communication_backend,
-          comm_buffer_size,
-          0,
-          reuse_comm_domain);
-  result.comm =
-      atb_speed::GetSingleton<atb_speed::ExternalCommManager>().GetCommPtr(
-          result.domain);
   return result;
 }
 
@@ -348,8 +328,12 @@ void CollectiveCommunicator::create_process_groups(
 #if defined(USE_NPU)
   if (FLAGS_npu_kernel_backend == "TORCH" &&
       FLAGS_expert_parallel_degree == 2 && ep_size == world_size) {
-    auto dispatch_and_combine_comm = create_dispatch_and_combine_comm(
+    auto dispatch_and_combine_comm = create_dispatch_and_combine_mapping(
         global_rank, world_size, dp_size, ep_size, cp_size);
+    CHECK(parallel_args_->moe_ep_group_ != nullptr)
+        << "DeepSeek-V4 EP2 dispatch/combine requires moe_ep_group.";
+    dispatch_and_combine_comm.domain =
+        parallel_args_->moe_ep_group_->hccl_comm_name();
     parallel_args_->mapping_data(dispatch_and_combine_comm.mapping_data);
     parallel_args_->mapping(dispatch_and_combine_comm.mapping);
     parallel_args_->dispatchAndCombinecommDomain(
