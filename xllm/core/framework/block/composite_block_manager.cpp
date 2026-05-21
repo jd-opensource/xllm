@@ -28,17 +28,6 @@ namespace {
 constexpr uint32_t kManagerTypeBlockManagerImpl = 0;
 constexpr uint32_t kManagerTypeSlidingWindowBlockManager = 1;
 
-uint32_t compute_sliding_window_blocks_per_sequence(
-    uint32_t sliding_window_size,
-    uint32_t block_size) {
-  CHECK_GT(sliding_window_size, 0u) << "sliding_window_size must be positive";
-  CHECK_GT(block_size, 0u) << "block_size must be positive";
-  // Align with vLLM/vllm-ascend sliding-window semantics: keep enough
-  // contiguous KV blocks to cover `sliding_window - 1` history tokens plus
-  // the current block being written.
-  return (sliding_window_size - 1) / block_size + 1;
-}
-
 }  // namespace
 
 CompositeBlockManager::CompositeBlockManager(
@@ -64,9 +53,9 @@ CompositeBlockManager::CompositeBlockManager(
       sub_managers_.push_back(std::make_unique<BlockManagerImpl>(opts));
     } else if (type == kManagerTypeSlidingWindowBlockManager) {
       const uint32_t sliding_window_blocks_per_sequence =
-          compute_sliding_window_blocks_per_sequence(
-              options_.window_size(),
-              static_cast<uint32_t>(options_.block_size()));
+          options_.window_size();
+      CHECK_GT(sliding_window_blocks_per_sequence, 0u)
+          << "sliding_window_blocks_per_sequence must be positive";
       const uint32_t max_seqs = std::max(options_.max_seqs_per_batch(), 1u);
       const uint32_t swa_total_blocks =
           sliding_window_blocks_per_sequence * max_seqs + 2;
@@ -76,7 +65,6 @@ CompositeBlockManager::CompositeBlockManager(
           << "CompositeBlockManager uses sliding-window "
              "allocation: blocks_per_sequence="
           << sliding_window_blocks_per_sequence
-          << ", sliding_window_size=" << options_.window_size()
           << ", block_size=" << options_.block_size()
           << ", total_blocks=" << swa_total_blocks << ", max_seqs=" << max_seqs
           << ". This keeps SW block ids within the physical SW cache rows.";

@@ -61,14 +61,6 @@ constexpr uint32_t kBlockSizeRatio4 = kBaseBlockSize * kCompressRatio4;
 // Sub-manager 2 (ratio 128): block_size = 128*128 = 16384.
 constexpr uint32_t kBlockSizeRatio128 = kBaseBlockSize * kCompressRatio128;
 
-inline uint32_t ComputeSlidingWindowBlocksPerSequence(
-    uint32_t sliding_window_size,
-    uint32_t block_size) {
-  CHECK_GT(sliding_window_size, 0u);
-  CHECK_GT(block_size, 0u);
-  return (sliding_window_size - 1) / block_size + 1;
-}
-
 inline size_t CeilBlocks(size_t num_tokens, size_t block_size) {
   return (num_tokens + block_size - 1) / block_size;
 }
@@ -105,13 +97,14 @@ Sequence MakeTestSequence(size_t index,
 TEST(CompositeBlockManagerTest, AllocateForSequence_SingleSeq) {
   const uint32_t base_block_size = kBaseBlockSize;
   const uint32_t base_num_blocks = 4096;  // ratio-4: 1024 blocks, ratio-128: 32
-  const uint32_t window_size = 128;
+  const uint32_t sliding_window_blocks_per_sequence = 12;
   const uint32_t max_seqs_per_batch = 4;
-  const uint32_t sliding_window_blocks_per_sequence =
-      ComputeSlidingWindowBlocksPerSequence(window_size, base_block_size);
 
-  BlockManager::Options opts = MakeCompositeOptions(
-      base_num_blocks, base_block_size, window_size, max_seqs_per_batch);
+  BlockManager::Options opts =
+      MakeCompositeOptions(base_num_blocks,
+                           base_block_size,
+                           sliding_window_blocks_per_sequence,
+                           max_seqs_per_batch);
 
   CompositeBlockManager manager(opts);
   EXPECT_TRUE(manager.is_composite());
@@ -126,8 +119,7 @@ TEST(CompositeBlockManagerTest, AllocateForSequence_SingleSeq) {
       seq.kv_state().composite_blocks();
   ASSERT_EQ(composite.size(), 3u);
 
-  // Sub-manager 0: SlidingWindow, block count derived from window_size and
-  // block_size.
+  // Sub-manager 0: SlidingWindow, block count is provided by window_size.
   EXPECT_EQ(composite[0].size(), sliding_window_blocks_per_sequence);
   for (const auto& b : composite[0]) {
     EXPECT_TRUE(b.is_valid());
@@ -156,13 +148,14 @@ TEST(CompositeBlockManagerTest, AllocateForSequence_SingleSeq) {
 
 TEST(CompositeBlockManagerTest, AllocateForSequence_DifferentBatchSeqs) {
   const uint32_t base_num_blocks = 4096;
-  const uint32_t window_size = 128;
+  const uint32_t sliding_window_blocks_per_sequence = 12;
   const uint32_t max_seqs_per_batch = 4;
-  const uint32_t sliding_window_blocks_per_sequence =
-      ComputeSlidingWindowBlocksPerSequence(window_size, kBaseBlockSize);
 
-  BlockManager::Options opts = MakeCompositeOptions(
-      base_num_blocks, kBaseBlockSize, window_size, max_seqs_per_batch);
+  BlockManager::Options opts =
+      MakeCompositeOptions(base_num_blocks,
+                           kBaseBlockSize,
+                           sliding_window_blocks_per_sequence,
+                           max_seqs_per_batch);
   CompositeBlockManager manager(opts);
 
   // Seq1: 1024 tokens. Ratio 4: ceil(1024/512)=2; ratio 128:
@@ -207,13 +200,14 @@ TEST(CompositeBlockManagerTest, AllocateForSequence_DifferentBatchSeqs) {
 
 TEST(CompositeBlockManagerTest, AllocateForSequence_GrowSameSeq) {
   const uint32_t base_num_blocks = 4096;
-  const uint32_t window_size = 128;
+  const uint32_t sliding_window_blocks_per_sequence = 12;
   const uint32_t max_seqs_per_batch = 4;
-  const uint32_t sliding_window_blocks_per_sequence =
-      ComputeSlidingWindowBlocksPerSequence(window_size, kBaseBlockSize);
 
-  BlockManager::Options opts = MakeCompositeOptions(
-      base_num_blocks, kBaseBlockSize, window_size, max_seqs_per_batch);
+  BlockManager::Options opts =
+      MakeCompositeOptions(base_num_blocks,
+                           kBaseBlockSize,
+                           sliding_window_blocks_per_sequence,
+                           max_seqs_per_batch);
   CompositeBlockManager manager(opts);
 
   Sequence seq = MakeTestSequence(0, {1, 2, 3});
@@ -243,7 +237,7 @@ TEST(CompositeBlockManagerTest, AllocateForSequence_GrowSameSeq) {
 
 TEST(CompositeBlockManagerTest, AllocateContinuesAfterSatisfiedTokenManager) {
   BlockManager::Options opts =
-      MakeCompositeOptions(4096, kBaseBlockSize, 128, 4);
+      MakeCompositeOptions(4096, kBaseBlockSize, 12, 4);
   opts.compress_ratios({0, 128, 4});
   CompositeBlockManager manager(opts);
 
@@ -264,7 +258,7 @@ TEST(CompositeBlockManagerTest, AllocateContinuesAfterSatisfiedTokenManager) {
 
 TEST(CompositeBlockManagerTest, AllocateForSequence_NullSeqReturnsFalse) {
   BlockManager::Options opts =
-      MakeCompositeOptions(4096, kBaseBlockSize, 128, 4);
+      MakeCompositeOptions(4096, kBaseBlockSize, 12, 4);
   CompositeBlockManager manager(opts);
   EXPECT_FALSE(manager.allocate_for_sequence(nullptr, 10));
 }
@@ -273,13 +267,14 @@ TEST(CompositeBlockManagerTest, AllocateForSequence_NullSeqReturnsFalse) {
 // adds blocks (only appends new blocks; existing block ids are preserved).
 TEST(CompositeBlockManagerTest, TokenIncrease_AddsBlocksIncrementally) {
   const uint32_t base_num_blocks = 4096;
-  const uint32_t window_size = 128;
+  const uint32_t sliding_window_blocks_per_sequence = 12;
   const uint32_t max_seqs_per_batch = 4;
-  const uint32_t sliding_window_blocks_per_sequence =
-      ComputeSlidingWindowBlocksPerSequence(window_size, kBaseBlockSize);
 
-  BlockManager::Options opts = MakeCompositeOptions(
-      base_num_blocks, kBaseBlockSize, window_size, max_seqs_per_batch);
+  BlockManager::Options opts =
+      MakeCompositeOptions(base_num_blocks,
+                           kBaseBlockSize,
+                           sliding_window_blocks_per_sequence,
+                           max_seqs_per_batch);
   CompositeBlockManager manager(opts);
 
   Sequence seq = MakeTestSequence(0, {1});
@@ -322,13 +317,14 @@ TEST(CompositeBlockManagerTest, TokenIncrease_AddsBlocksIncrementally) {
 
 TEST(CompositeBlockManagerTest, SlidingWindowBlockOrderStaysStable) {
   const uint32_t base_num_blocks = 4096;
-  const uint32_t window_size = 128;
+  const uint32_t sliding_window_blocks_per_sequence = 12;
   const uint32_t max_seqs_per_batch = 4;
-  const uint32_t sliding_window_blocks_per_sequence =
-      ComputeSlidingWindowBlocksPerSequence(window_size, kBaseBlockSize);
 
-  BlockManager::Options opts = MakeCompositeOptions(
-      base_num_blocks, kBaseBlockSize, window_size, max_seqs_per_batch);
+  BlockManager::Options opts =
+      MakeCompositeOptions(base_num_blocks,
+                           kBaseBlockSize,
+                           sliding_window_blocks_per_sequence,
+                           max_seqs_per_batch);
   CompositeBlockManager manager(opts);
 
   Sequence seq = MakeTestSequence(0, {1});
@@ -365,7 +361,7 @@ TEST(CompositeBlockManagerTest, SlidingWindowBlockOrderStaysStable) {
 
 TEST(CompositeBlockManagerTest, DeallocateSliceDispatchesToOwnerManagers) {
   BlockManager::Options opts =
-      MakeCompositeOptions(4096, kBaseBlockSize, 128, 4);
+      MakeCompositeOptions(4096, kBaseBlockSize, 12, 4);
   opts.enable_prefix_cache(false);
   CompositeBlockManager manager(opts);
 
@@ -388,7 +384,7 @@ TEST(CompositeBlockManagerTest, DeallocateSliceDispatchesToOwnerManagers) {
 TEST(CompositeBlockManagerTest,
      DeallocateSliceDispatchesWithoutInflatingRefCount) {
   BlockManager::Options opts =
-      MakeCompositeOptions(4096, kBaseBlockSize, 128, 4);
+      MakeCompositeOptions(4096, kBaseBlockSize, 12, 4);
   CompositeBlockManager manager(opts);
 
   Sequence seq = MakeTestSequence(0, {1});

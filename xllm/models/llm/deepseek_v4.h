@@ -412,7 +412,8 @@ class DeepseekV4ModelImpl
     norm_eps_ = static_cast<double>(model_args.rms_norm_eps());
 
     num_heads_ = model_args.n_heads();
-    head_dim_ = model_args.head_dim();
+    // head_dim_ = model_args.head_dim();
+    head_dim_ = model_args.o_lora_rank() + model_args.qk_rope_head_dim();
     dp_local_tp_size_ =
         std::max<int64_t>(parallel_args.world_size() /
                               std::max<int64_t>(parallel_args.dp_size(), 1),
