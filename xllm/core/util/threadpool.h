@@ -16,7 +16,9 @@ limitations under the License.
 #pragma once
 #include <folly/Function.h>
 
+#include <memory>
 #include <thread>
+#include <vector>
 
 #include "concurrent_queue.h"
 #include "util/blocking_counter.h"
@@ -39,8 +41,27 @@ class ThreadPool final {
   ThreadPool(ThreadPool&&) = delete;
   ThreadPool& operator=(ThreadPool&&) = delete;
 
-  explicit ThreadPool(size_t num_threads);
-  explicit ThreadPool(size_t num_threads, Runnable init_func);
+  explicit ThreadPool(size_t num_threads,
+                      bool cpu_binding = false,
+                      const char* fn = nullptr,
+                      int32_t ln = 0,
+                      const std::string& pool_name = "");
+  explicit ThreadPool(size_t num_threads,
+                      Runnable init_func,
+                      bool cpu_binding = false,
+                      const char* fn = nullptr,
+                      int32_t ln = 0,
+                      const std::string& pool_name = "");
+  // Bind each worker thread to the corresponding CPU core in cpu_cores.
+  // cpu_cores[i] is the CPU core ID for thread i. If cpu_cores is empty,
+  // no binding is performed. If cpu_cores.size() does not equal num_threads,
+  // a warning will be logged and CPU core binding will be skipped.
+  explicit ThreadPool(size_t num_threads,
+                      Runnable init_func,
+                      std::vector<int32_t> cpu_cores,
+                      const char* fn = nullptr,
+                      int32_t ln = 0,
+                      const std::string& pool_name = "");
 
   // schedule a runnable to be executed
   int32_t schedule(Runnable runnable);
@@ -57,13 +78,15 @@ class ThreadPool final {
 
  private:
   void internal_loop(size_t tid,
-                     Runnable* init_func,
-                     BlockingCounter* block_counter);
+                     std::shared_ptr<Runnable> init_func,
+                     std::shared_ptr<BlockingCounter> block_counter,
+                     int32_t cpu_core);
 
   std::vector<std::thread> threads_;
   std::vector<ConcurrentQueue<Runnable>> queues_;
 
   std::atomic<size_t> index_{0};
+  std::string pool_name_;
 };
 
 }  // namespace xllm

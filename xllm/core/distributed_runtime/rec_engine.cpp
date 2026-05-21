@@ -140,7 +140,8 @@ bool RecEngine::init_model() {
   pipeline_->process_group_test();
 
   if (!threadpool_) {
-    threadpool_ = std::make_unique<ThreadPool>(16);
+    threadpool_ = std::make_unique<ThreadPool>(
+        16, true, __FILE__, __LINE__, "rec_engine_pool");
   }
   // Compute KV cache config (shared logic)
   const int32_t world_size = static_cast<int32_t>(options_.devices().size());
@@ -724,6 +725,7 @@ ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
   CHECK(!batches.empty()) << "OneRec engine requires at least one batch.";
 
   Timer timer;
+  Timer timer_total;
   // OneRec does not need refresh_forward_type
   batches[0].set_onerec_batch_input_builder_cache(
       engine_.onerec_batch_input_builder_cache_.get());
@@ -773,6 +775,11 @@ ForwardOutput RecEngine::OneRecPrefillOnlyEnginePipeline::step(
   }
 
   batches[0].finish();
+
+  VLOG(1) << "OneRec batch size " << batches.size() << ", sequence size "
+          << batches[0].size() << ", infer took "
+          << timer_total.elapsed_milliseconds() << "ms.";
+
   return decode_output;
 }
 

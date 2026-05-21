@@ -58,7 +58,8 @@ const XLLM_InitOptions XLLM_INIT_LLM_OPTIONS_DEFAULT = {
     .kv_cache_transfer_mode = "PUSH",
     .log_dir = "",
     .draft_model = "",
-    .draft_devices = ""};
+    .draft_devices = "",
+    .cpu_affinity = ""};
 
 const XLLM_RequestParams XLLM_LLM_REQUEST_PARAMS_DEFAULT = {
     .echo = false,
@@ -138,7 +139,8 @@ const XLLM_InitOptions XLLM_INIT_REC_OPTIONS_DEFAULT = {
     .each_conversion_threshold = 1,
     .total_conversion_threshold = 256,
     .rec_worker_max_concurrency = 1,
-    .constrained_decoding_filter_path = ""};
+    .constrained_decoding_filter_path = "",
+    .cpu_affinity = ""};
 
 const XLLM_RequestParams XLLM_REC_REQUEST_PARAMS_DEFAULT = {
     .echo = false,
