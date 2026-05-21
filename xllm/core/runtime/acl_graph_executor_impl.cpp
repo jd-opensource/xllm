@@ -425,6 +425,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
         std::max<int64_t>(options_.num_decoding_tokens(), 1);
     actual_batch_size = actual_num_tokens / decode_tokens;
   }
+  // MTP model support: actual_metadata_rows is not always equal to actual_batch_size
   const int64_t padded_batch_size = static_cast<int64_t>(padded_num_tokens);
   const int64_t actual_metadata_rows = std::min<int64_t>(
       padded_batch_size,
@@ -666,7 +667,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
         std::make_optional<ModelInputParams>(params);
     // Set persistent buffers in params_for_capture
     params_for_capture->actual_num_sequences =
-        static_cast<int32_t>(actual_batch_size);
+        static_cast<int32_t>(actual_metadata_rows);
     params_for_capture->kv_seq_lens = kv_seq_lens(padded_num_tokens);
     params_for_capture->q_seq_lens = q_seq_lens(padded_num_tokens);
     params_for_capture->kv_seq_lens_vec.resize(padded_num_tokens);

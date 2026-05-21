@@ -458,37 +458,10 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
 #endif
   }
 
-  static int64_t infer_actual_batch_size(const ModelInputParams& params) {
-    if (params.actual_num_sequences > 0) {
-      return params.actual_num_sequences;
-    }
-    if (!params.kv_seq_lens_vec.empty()) {
-      return static_cast<int64_t>(params.kv_seq_lens_vec.size());
-    }
-    if (!params.q_seq_lens_vec.empty()) {
-      return static_cast<int64_t>(params.q_seq_lens_vec.size());
-    }
-    if (params.kv_seq_lens.defined() && params.kv_seq_lens.dim() >= 1) {
-      return params.kv_seq_lens.size(0);
-    }
-    if (params.q_seq_lens.defined() && params.q_seq_lens.dim() >= 1) {
-      return params.q_seq_lens.size(0);
-    }
-    if (params.block_tables.defined() && params.block_tables.dim() >= 2) {
-      return params.block_tables.size(0);
-    }
-    for (const auto& block_table : params.multi_block_tables) {
-      if (block_table.defined() && block_table.dim() >= 2) {
-        return block_table.size(0);
-      }
-    }
-    return 0;
-  }
-
   void normalize_graph_metadata_input_params(ModelInputParams& params) const {
-    const int64_t actual_batch_size =
-        std::max<int64_t>(infer_actual_batch_size(params), 0);
-    int64_t metadata_batch_size = params.actual_num_sequences;
+    int64_t actual_metadata_rows = std::max<int64_t>(params.actual_num_sequences,
+                                                    0);
+    int64_t metadata_batch_size = actual_metadata_rows;
     if (params.enable_graph) {
       metadata_batch_size =
           std::max<int64_t>(metadata_batch_size, params.num_sequences);
@@ -496,9 +469,11 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
     if (metadata_batch_size <= 0) {
       metadata_batch_size = 1;
     }
+    actual_metadata_rows = std::min<int64_t>(actual_metadata_rows,
+                                             metadata_batch_size);
 
     auto trim_lens_vec = [metadata_batch_size,
-                          actual_batch_size](std::vector<int>& lens) {
+                          actual_metadata_rows](std::vector<int>& lens) {
       if (lens.empty()) {
         lens.assign(static_cast<size_t>(metadata_batch_size), 0);
       } else if (static_cast<int64_t>(lens.size()) < metadata_batch_size) {
@@ -506,19 +481,13 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
       } else {
         lens.resize(static_cast<size_t>(metadata_batch_size));
       }
-      for (int64_t i = 0; i < static_cast<int64_t>(lens.size()); ++i) {
-        if (i < actual_batch_size) {
-          lens[static_cast<size_t>(i)] = std::max<int>(lens[i], 1);
-        } else {
-          lens[static_cast<size_t>(i)] = 0;
-        }
-      }
+      std::fill(lens.begin() + actual_metadata_rows, lens.end(), 0);
     };
 
     trim_lens_vec(params.kv_seq_lens_vec);
     trim_lens_vec(params.q_seq_lens_vec);
     params.num_sequences = static_cast<int32_t>(metadata_batch_size);
-    params.actual_num_sequences = static_cast<int32_t>(metadata_batch_size);
+    params.actual_num_sequences = static_cast<int32_t>(actual_metadata_rows);
   }
 
   std::shared_ptr<layer::AttentionMetadata> persist_graph_attention_metadata(
@@ -545,6 +514,7 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
                                .device(torch::kCPU)
                                .pinned_memory(true);
     params.num_sequences = 1;
+    params.actual_num_sequences = 1;
     params.kv_max_seq_len = std::max<uint32_t>(params.kv_max_seq_len, 1);
     params.q_max_seq_len = std::max<uint32_t>(params.q_max_seq_len, 1);
     params.kv_seq_lens_vec = {1};
