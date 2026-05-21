@@ -48,7 +48,8 @@ TEST(ConcurrentBlockManagerTest, ContinuesPrefixCacheFromExistingBlocks) {
   const int32_t second_block_id = seed_blocks[1].id();
 
   std::vector<Block> existed_blocks;
-  existed_blocks.push_back(std::move(seed_blocks[0]));
+  existed_blocks.reserve(1);
+  existed_blocks.emplace_back(std::move(seed_blocks[0]));
 
   std::vector<Block> tail_blocks;
   tail_blocks.push_back(std::move(seed_blocks[1]));
