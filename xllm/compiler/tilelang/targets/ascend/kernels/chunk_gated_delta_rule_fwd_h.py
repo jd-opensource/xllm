@@ -136,6 +136,7 @@ def _build_chunk_gated_delta_rule_fwd_h_kernel(
                 hg_ratio = H // Hg
                 k_head = i_h // hg_ratio
 
+                T.barrier_all()
                 with T.Scope("C"):
                     bos = cu_seqlens[i_n]
                     eos = cu_seqlens[i_n + 1]
