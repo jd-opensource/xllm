@@ -23,6 +23,7 @@ limitations under the License.
 #include <torch_npu/torch_npu.h>
 
 #include <algorithm>
+#include <cmath>
 #include <numeric>
 #include <tuple>
 
@@ -35,6 +36,7 @@ limitations under the License.
 #endif
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
+#include "core/platform/device.h"
 #include "core/util/utils.h"
 #include "platform/npu/device_capture_lock.h"
 
@@ -70,6 +72,39 @@ int64_t get_decode_graph_capacity(const runtime::Options& options) {
     return options.max_seqs_per_batch() * options.num_decoding_tokens();
   }
   return options.max_seqs_per_batch();
+}
+
+float get_dp_ep_all2all_buffer_factor(int64_t length) {
+  const std::vector<std::pair<int64_t, float>> length_thresholds = {
+      {1048576, 1.32f},
+      {524288, 1.4f},
+      {262144, 1.53f},
+      {131072, 1.8f},
+      {32768, 3.0f},
+      {8192, 5.2f},
+      {0, 8.0f}};
+
+  for (const auto& threshold : length_thresholds) {
+    if (length >= threshold.first) {
+      return threshold.second;
+    }
+  }
+  return 8.0f;
+}
+
+int64_t get_dp_ep_padding_buffer_capacity(const ModelArgs& args,
+                                          const runtime::Options& options) {
+  const int64_t dp_size = std::max<int64_t>(options.dp_size(), 1);
+  const int64_t graph_capacity = get_decode_graph_capacity(options);
+  const int64_t topk = std::max<int64_t>(args.num_experts_per_tok(), 1);
+  const int64_t base_length = graph_capacity * topk;
+  const int64_t global_length = base_length * dp_size;
+  const float buffer_factor = get_dp_ep_all2all_buffer_factor(global_length);
+  const int64_t moe_buffer_capacity =
+      static_cast<int64_t>(std::ceil(base_length * buffer_factor));
+  const int64_t aligned_moe_buffer_capacity =
+      ((moe_buffer_capacity + dp_size - 1) / dp_size) * dp_size;
+  return std::max(graph_capacity * dp_size, aligned_moe_buffer_capacity);
 }
 
 int64_t infer_actual_batch_size(const ModelInputParams& params) {
@@ -203,6 +238,36 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   q_cu_seq_lens_ = torch::zeros({max_seqs_per_batch + 1},
                                 torch::dtype(torch::kInt).device(device));
 
+  // Pre-allocate persistent dp/cp ep padding buffers with maximum capacity.
+  const int64_t padding_buf_capacity =
+      get_dp_ep_padding_buffer_capacity(args, options);
+  auto int_opts = torch::dtype(torch::kInt32).device(device);
+
+  persistent_dp_ep_padding_
+      .attn_padding_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .attn_unpadding_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .ffn_padding_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .ffn_unpadding_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .lm_head_skip_padding_token_indices(
+          torch::zeros({padding_buf_capacity}, int_opts))
+      .gather_prenorm_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .padding_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .un_padding_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .dynamic_ep_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .moe_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .expert_array(torch::zeros({padding_buf_capacity, 1}, int_opts))
+      .post_lmhead_gather_indices(
+          torch::zeros({padding_buf_capacity}, int_opts));
+
+  persistent_cp_ep_padding_
+      .attn_padding_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .attn_unpadding_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .ffn_padding_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .ffn_unpadding_idx(torch::zeros({padding_buf_capacity}, int_opts))
+      .lm_head_skip_padding_token_indices(
+          torch::zeros({padding_buf_capacity}, int_opts))
+      .gather_prenorm_idx(torch::zeros({padding_buf_capacity}, int_opts));
+
   // Do not need to create ATB context and custom paged attention operation
   if (args_.head_dim() == 0) {
     return;
@@ -213,6 +278,80 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
   }
 
   initialize_paged_attention_plan_context(device);
+}
+
+namespace {
+// Copy src into a pre-allocated persistent buffer. The buffer must already be
+// large enough (allocated in GraphPersistentParam constructor).
+void copy_into_persistent(torch::Tensor& persistent, const torch::Tensor& src) {
+  if (!src.defined() || src.numel() == 0 || !persistent.defined()) {
+    return;
+  }
+  CHECK_LE(src.size(0), persistent.size(0))
+      << "dp_ep_padding persistent buffer overflow: src size " << src.size(0)
+      << " exceeds pre-allocated capacity " << persistent.size(0);
+  persistent.slice(/*dim=*/0, /*start=*/0, /*end=*/src.size(0))
+      .copy_(src, /*non_blocking=*/true);
+}
+}  // namespace
+
+void GraphPersistentParam::update_persistent_dp_ep_padding(
+    const DpEpPaddingData& src,
+    uint32_t /*padded_tokens*/) {
+  // Skip when dp ep padding is not enabled. When enabled, build() always
+  // populates attn_padding_idx first, so it is a reliable signal.
+  if (!src.attn_padding_idx().defined() ||
+      src.attn_padding_idx().numel() == 0) {
+    return;
+  }
+  copy_into_persistent(persistent_dp_ep_padding_.attn_padding_idx(),
+                       src.attn_padding_idx());
+  copy_into_persistent(persistent_dp_ep_padding_.attn_unpadding_idx(),
+                       src.attn_unpadding_idx());
+  copy_into_persistent(persistent_dp_ep_padding_.ffn_padding_idx(),
+                       src.ffn_padding_idx());
+  copy_into_persistent(persistent_dp_ep_padding_.ffn_unpadding_idx(),
+                       src.ffn_unpadding_idx());
+  copy_into_persistent(
+      persistent_dp_ep_padding_.lm_head_skip_padding_token_indices(),
+      src.lm_head_skip_padding_token_indices());
+  copy_into_persistent(persistent_dp_ep_padding_.gather_prenorm_idx(),
+                       src.gather_prenorm_idx());
+  copy_into_persistent(persistent_dp_ep_padding_.padding_idx(),
+                       src.padding_idx());
+  copy_into_persistent(persistent_dp_ep_padding_.un_padding_idx(),
+                       src.un_padding_idx());
+  copy_into_persistent(persistent_dp_ep_padding_.dynamic_ep_idx(),
+                       src.dynamic_ep_idx());
+  copy_into_persistent(persistent_dp_ep_padding_.moe_idx(), src.moe_idx());
+  copy_into_persistent(persistent_dp_ep_padding_.expert_array(),
+                       src.expert_array());
+  copy_into_persistent(persistent_dp_ep_padding_.post_lmhead_gather_indices(),
+                       src.post_lmhead_gather_indices());
+}
+
+void GraphPersistentParam::update_persistent_cp_ep_padding(
+    const CpEpPaddingData& src,
+    uint32_t /*padded_tokens*/) {
+  // Skip when cp ep padding is not enabled. When enabled, build() always
+  // populates attn_padding_idx first, so it is a reliable signal.
+  if (!src.attn_padding_idx().defined() ||
+      src.attn_padding_idx().numel() == 0) {
+    return;
+  }
+  copy_into_persistent(persistent_cp_ep_padding_.attn_padding_idx(),
+                       src.attn_padding_idx());
+  copy_into_persistent(persistent_cp_ep_padding_.attn_unpadding_idx(),
+                       src.attn_unpadding_idx());
+  copy_into_persistent(persistent_cp_ep_padding_.ffn_padding_idx(),
+                       src.ffn_padding_idx());
+  copy_into_persistent(persistent_cp_ep_padding_.ffn_unpadding_idx(),
+                       src.ffn_unpadding_idx());
+  copy_into_persistent(
+      persistent_cp_ep_padding_.lm_head_skip_padding_token_indices(),
+      src.lm_head_skip_padding_token_indices());
+  copy_into_persistent(persistent_cp_ep_padding_.gather_prenorm_idx(),
+                       src.gather_prenorm_idx());
 }
 
 GraphPersistentParam::~GraphPersistentParam() {
@@ -302,6 +441,23 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       persistent_positions_
           .slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
           .copy_(positions, /*non_blocking=*/true);
+    }
+  }
+  // Zero out padded position slots to prevent stale values from previous
+  // replays causing out-of-bounds access in rotary embedding.
+  const int64_t graph_num_tokens =
+      persistent_positions_.size(use_mrope_ ? 1 : 0);
+  if (actual_num_tokens < graph_num_tokens) {
+    if (use_mrope_) {
+      persistent_positions_
+          .slice(
+              /*dim=*/1, /*start=*/actual_num_tokens, /*end=*/graph_num_tokens)
+          .zero_();
+    } else {
+      persistent_positions_
+          .slice(
+              /*dim=*/0, /*start=*/actual_num_tokens, /*end=*/graph_num_tokens)
+          .zero_();
     }
   }
   int64_t q_copy_len = 0;
@@ -494,6 +650,12 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
   }
 
+  // Update persistent dp/cp ep padding buffers. For capture this ensures
+  // stable device addresses are recorded by the graph; for replay this
+  // refreshes the data at those same addresses before graph_.replay().
+  update_persistent_dp_ep_padding(params.dp_ep_padding_data, padded_num_tokens);
+  update_persistent_cp_ep_padding(params.cp_ep_padding_data, padded_num_tokens);
+
   // Return ModelInputParams with persistent buffer references if requested
   if (return_capture_params) {
     std::optional<ModelInputParams> params_for_capture =
@@ -557,6 +719,81 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
           q_cu_seq_lens_.slice(/*dim=*/0,
                                /*start=*/0,
                                /*end=*/padded_batch_size);
+    }
+
+    // Replace dp/cp ep padding with slices of persistent buffers so that
+    // the graph records stable device addresses.  Each slice has the same
+    // size as the original tensor but points into the persistent buffer.
+    // dp ep and cp ep are mutually exclusive; when neither is enabled the
+    // src fields are all undefined and we leave dst untouched so that the
+    // captured graph behaves identically to eager mode.
+    auto slice_like = [](const torch::Tensor& persistent,
+                         const torch::Tensor& src) -> torch::Tensor {
+      if (!src.defined() || src.numel() == 0 || !persistent.defined()) {
+        return persistent;
+      }
+      return persistent.slice(/*dim=*/0, /*start=*/0, /*end=*/src.size(0));
+    };
+
+    const auto& src_dp = params.dp_ep_padding_data;
+    if (src_dp.attn_padding_idx().defined() &&
+        src_dp.attn_padding_idx().numel() > 0) {
+      auto& dst_dp = params_for_capture->dp_ep_padding_data;
+      dst_dp.attn_padding_idx(
+          slice_like(persistent_dp_ep_padding_.attn_padding_idx(),
+                     src_dp.attn_padding_idx()));
+      dst_dp.attn_unpadding_idx(
+          slice_like(persistent_dp_ep_padding_.attn_unpadding_idx(),
+                     src_dp.attn_unpadding_idx()));
+      dst_dp.ffn_padding_idx(
+          slice_like(persistent_dp_ep_padding_.ffn_padding_idx(),
+                     src_dp.ffn_padding_idx()));
+      dst_dp.ffn_unpadding_idx(
+          slice_like(persistent_dp_ep_padding_.ffn_unpadding_idx(),
+                     src_dp.ffn_unpadding_idx()));
+      dst_dp.lm_head_skip_padding_token_indices(slice_like(
+          persistent_dp_ep_padding_.lm_head_skip_padding_token_indices(),
+          src_dp.lm_head_skip_padding_token_indices()));
+      dst_dp.gather_prenorm_idx(
+          slice_like(persistent_dp_ep_padding_.gather_prenorm_idx(),
+                     src_dp.gather_prenorm_idx()));
+      dst_dp.padding_idx(slice_like(persistent_dp_ep_padding_.padding_idx(),
+                                    src_dp.padding_idx()));
+      dst_dp.un_padding_idx(slice_like(
+          persistent_dp_ep_padding_.un_padding_idx(), src_dp.un_padding_idx()));
+      dst_dp.dynamic_ep_idx(slice_like(
+          persistent_dp_ep_padding_.dynamic_ep_idx(), src_dp.dynamic_ep_idx()));
+      dst_dp.moe_idx(
+          slice_like(persistent_dp_ep_padding_.moe_idx(), src_dp.moe_idx()));
+      dst_dp.expert_array(slice_like(persistent_dp_ep_padding_.expert_array(),
+                                     src_dp.expert_array()));
+      dst_dp.post_lmhead_gather_indices(
+          slice_like(persistent_dp_ep_padding_.post_lmhead_gather_indices(),
+                     src_dp.post_lmhead_gather_indices()));
+    }
+
+    const auto& src_cp = params.cp_ep_padding_data;
+    if (src_cp.attn_padding_idx().defined() &&
+        src_cp.attn_padding_idx().numel() > 0) {
+      auto& dst_cp = params_for_capture->cp_ep_padding_data;
+      dst_cp.attn_padding_idx(
+          slice_like(persistent_cp_ep_padding_.attn_padding_idx(),
+                     src_cp.attn_padding_idx()));
+      dst_cp.attn_unpadding_idx(
+          slice_like(persistent_cp_ep_padding_.attn_unpadding_idx(),
+                     src_cp.attn_unpadding_idx()));
+      dst_cp.ffn_padding_idx(
+          slice_like(persistent_cp_ep_padding_.ffn_padding_idx(),
+                     src_cp.ffn_padding_idx()));
+      dst_cp.ffn_unpadding_idx(
+          slice_like(persistent_cp_ep_padding_.ffn_unpadding_idx(),
+                     src_cp.ffn_unpadding_idx()));
+      dst_cp.lm_head_skip_padding_token_indices(slice_like(
+          persistent_cp_ep_padding_.lm_head_skip_padding_token_indices(),
+          src_cp.lm_head_skip_padding_token_indices()));
+      dst_cp.gather_prenorm_idx(
+          slice_like(persistent_cp_ep_padding_.gather_prenorm_idx(),
+                     src_cp.gather_prenorm_idx()));
     }
 
     return params_for_capture;
@@ -1083,6 +1320,7 @@ bool AclGraph::capture(CausalLM* model,
   // executing simultaneously, which would trigger synchronous operations
   // that conflict with capture mode
   auto device_idx = tensor_options.device().index();
+  Device::empty_cache(device_idx);
 
   bool need_restore_stream = false;
   graph_stream_ = stream;
@@ -1280,16 +1518,21 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   }
   // Keep actual n_tokens for replay output slicing.
   const uint32_t n_tokens = tokens_tensor.size(/*dim=*/0);
-  const uint32_t actual_batch_size = n_tokens / options_.num_decoding_tokens();
+  const uint32_t local_batch_size = n_tokens / options_.num_decoding_tokens();
+  const uint32_t global_batch_size =
+      graph_num_tokens / options_.num_decoding_tokens();
 
   // Large decode batches create too many/too large ACL graphs and may OOM.
   // Fall back to eager mode when batch size exceeds the safety threshold.
+  // Use global_batch_size so all DP ranks make the same decision and stay in
+  // sync on HCCL collectives.
   const uint32_t decode_batch_size_limit = static_cast<uint32_t>(
-      std::max<int32_t>(1, options_.max_seqs_per_batch()));
-  if (actual_batch_size > decode_batch_size_limit) {
+      std::max(1, FLAGS_acl_graph_decode_batch_size_limit));
+  if (global_batch_size > decode_batch_size_limit) {
     LOG_FIRST_N(WARNING, 1)
-        << "Falling back to eager mode because decode batch_size ("
-        << actual_batch_size << ") > " << decode_batch_size_limit
+        << "Falling back to eager mode because decode batch_size (global="
+        << global_batch_size << ", local=" << local_batch_size << ") > "
+        << decode_batch_size_limit
         << "; ACL graph is disabled for this request size to avoid OOM. "
         << "This message is logged only once. "
         << "Monitor counter 'num_model_execution_total_eager' for frequency.";
@@ -1345,14 +1588,23 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   auto graph = std::make_unique<AclGraph>(*persistent_param_, device_.index());
   VLOG(kGraphExecutorLogVerboseLevel)
       << "AclGraphExecutorImpl::run() in capture mode";
-  bool capture_success = graph->capture(model_,
-                                        args_,
-                                        options_,
-                                        tokens_tensor,
-                                        positions_tensor,
-                                        params_single,
-                                        kv_caches,
-                                        bucket_num_tokens);
+  bool capture_success = false;
+  try {
+    capture_success = graph->capture(model_,
+                                     args_,
+                                     options_,
+                                     tokens_tensor,
+                                     positions_tensor,
+                                     params_single,
+                                     kv_caches,
+                                     bucket_num_tokens);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "ACL graph capture threw exception for bucket num_tokens="
+               << bucket_num_tokens << ": " << e.what()
+               << ". Falling back to eager mode.";
+    COUNTER_INC(num_model_execution_total_eager);
+    return model_->forward(tokens, positions, kv_caches, params);
+  }
 
   if (capture_success) {
     LOG(INFO) << "Lazy capturing ACL graph for bucket num_tokens: "

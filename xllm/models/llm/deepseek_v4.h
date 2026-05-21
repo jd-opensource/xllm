@@ -24,10 +24,8 @@ limitations under the License.
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <iomanip>
 #include <limits>
 #include <memory>
-#include <sstream>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -69,27 +67,6 @@ inline torch::Tensor deepseek_v4_create_hadamard_matrix(
     matrix = torch::cat({top, bottom}, 0);
   }
   return matrix;
-}
-
-inline std::string deepseek_v4_format_bytes(int64_t bytes) {
-  static constexpr const char* kUnits[] = {"B", "KiB", "MiB", "GiB", "TiB"};
-  double value = static_cast<double>(bytes);
-  int unit_idx = 0;
-  while (value >= 1024.0 && unit_idx < 4) {
-    value /= 1024.0;
-    ++unit_idx;
-  }
-
-  std::ostringstream os;
-  if (value < 10.0 && unit_idx > 0) {
-    os << std::fixed << std::setprecision(2);
-  } else if (value < 100.0 && unit_idx > 0) {
-    os << std::fixed << std::setprecision(1);
-  } else {
-    os << std::fixed << std::setprecision(0);
-  }
-  os << value << " " << kUnits[unit_idx];
-  return os.str();
 }
 
 inline torch::Tensor maybe_to_device(const torch::Tensor& tensor,
@@ -656,8 +633,6 @@ class DeepseekV4ModelImpl
     CHECK(input_params.attn_metadata)
         << "DeepSeek V4 ACL graph requires DSA metadata";
   }
-
-  void log_weight_mem_stats() const { log_layer_weight_mem_stats(); }
 
   ModelOutput forward(torch::Tensor tokens,
                       torch::Tensor positions,
@@ -1492,47 +1467,6 @@ class DeepseekV4ModelImpl
         xllm::kernel::quant_lightning_indexer_metadata(qli_params);
   }
 
-  void log_layer_weight_mem_stats() const {
-    int64_t total_bytes = 0;
-    int64_t attn_bytes = 0;
-    int64_t expert_bytes = 0;
-    int64_t hc_bytes = 0;
-    int64_t other_bytes = 0;
-
-    for (size_t i = 0; i < layers_.size(); ++i) {
-      const auto stats = layers_[i]->get_weight_mem_stats();
-      total_bytes += stats.total_bytes;
-      attn_bytes += stats.attn_bytes;
-      expert_bytes += stats.expert_bytes;
-      hc_bytes += stats.hc_bytes;
-      other_bytes += stats.other_bytes;
-
-      LOG(INFO) << "[WEIGHT_MEM][DeepseekV4] layer=" << i
-                << " total=" << deepseek_v4_format_bytes(stats.total_bytes)
-                << " (" << stats.total_bytes << " B)"
-                << ", attn=" << deepseek_v4_format_bytes(stats.attn_bytes)
-                << " (" << stats.attn_bytes << " B)"
-                << ", expert=" << deepseek_v4_format_bytes(stats.expert_bytes)
-                << " (" << stats.expert_bytes << " B)"
-                << ", hc_=" << deepseek_v4_format_bytes(stats.hc_bytes) << " ("
-                << stats.hc_bytes << " B)"
-                << ", other=" << deepseek_v4_format_bytes(stats.other_bytes)
-                << " (" << stats.other_bytes << " B)";
-    }
-
-    LOG(INFO) << "[WEIGHT_MEM][DeepseekV4][Summary] layers=" << layers_.size()
-              << ", total=" << deepseek_v4_format_bytes(total_bytes) << " ("
-              << total_bytes << " B)"
-              << ", attn=" << deepseek_v4_format_bytes(attn_bytes) << " ("
-              << attn_bytes << " B)"
-              << ", expert=" << deepseek_v4_format_bytes(expert_bytes) << " ("
-              << expert_bytes << " B)"
-              << ", hc_=" << deepseek_v4_format_bytes(hc_bytes) << " ("
-              << hc_bytes << " B)"
-              << ", other=" << deepseek_v4_format_bytes(other_bytes) << " ("
-              << other_bytes << " B)";
-  }
-
   torch::Tensor hc_head(const torch::Tensor& x) {
     auto x_float = x.to(torch::kFloat32);
     auto x_flatten = x_float.flatten(-2, -1);
@@ -1585,7 +1519,6 @@ class DeepseekV4ForCausalLMImpl
                   std::string prefix = "model.") override {
     LlmForCausalLMImplBase<DeepseekV4Model>::load_model(std::move(loader),
                                                         std::move(prefix));
-    this->model_->log_weight_mem_stats();
   }
 
   bool requires_graph_forward_metadata() {

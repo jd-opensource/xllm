@@ -35,8 +35,8 @@ limitations under the License.
 #include "framework/parallel_state/parallel_state.h"
 #include "kernels/ops_api.h"
 #include "layers/common/dp_utils.h"
-#include "util/utils.h"
 #include "platform/device.h"
+#include "util/utils.h"
 
 namespace xllm {
 namespace layer {
@@ -1365,9 +1365,10 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
   int64_t global_bs = input_2d.size(0) * ep_world_size;
   if (parallel_args_.dp_size() > 1 &&
       !input_params.dp_global_token_nums.empty()) {
-    global_bs = std::accumulate(input_params.dp_global_token_nums.begin(),
-                                input_params.dp_global_token_nums.end(),
-                                int64_t{0});
+    // NOTE: aclnnMoeDistributeDispatchV2 only supports globalBS=0 (auto) or
+    // globalBS=max(bs_on_all_ranks)*epWorldSize. Using 0 to let the operator
+    // calculate the correct value automatically.
+    global_bs = 0;
   }
 
   if (dispatch_ffn_combine_prepared_) {

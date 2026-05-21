@@ -34,6 +34,7 @@ limitations under the License.
 #include "common/options.h"
 #include "framework/block/hierarchy_block_manager_pool.h"
 #include "framework/kv_cache/kv_cache_shape.h"
+#include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
 #include "framework/xtensor/page_allocator.h"
@@ -467,7 +468,7 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
 
   if (options_.enable_mla()) {
 #if defined(USE_NPU)
-    if (args_.model_type() == "deepseek_v3" && FLAGS_enable_prefix_cache) {
+    if (use_npu_nz_kv_cache_layout(args_.model_type())) {
       slot_size =
           cache_dtype_size *
           ((args_.kv_lora_rank() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT +

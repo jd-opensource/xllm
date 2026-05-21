@@ -24,28 +24,6 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-namespace {
-
-int64_t tensor_bytes(const torch::Tensor& tensor) {
-  if (!tensor.defined()) {
-    return 0;
-  }
-  return tensor.numel() * tensor.element_size();
-}
-
-int64_t module_registered_tensor_bytes(const torch::nn::Module& module) {
-  int64_t total_bytes = 0;
-  for (const auto& item : module.named_parameters(/*recurse=*/true)) {
-    total_bytes += tensor_bytes(item.value());
-  }
-  for (const auto& item : module.named_buffers(/*recurse=*/true)) {
-    total_bytes += tensor_bytes(item.value());
-  }
-  return total_bytes;
-}
-
-}  // namespace
-
 DeepseekV4DecoderLayerImpl::DeepseekV4DecoderLayerImpl(
     const ModelContext& context,
     int32_t layer_id) {
@@ -151,38 +129,6 @@ void DeepseekV4DecoderLayerImpl::load_state_dict(const StateDict& state_dict) {
 }
 
 void DeepseekV4DecoderLayerImpl::verify_loaded_weights() const {}
-
-DeepseekV4LayerWeightMemStats DeepseekV4DecoderLayerImpl::get_weight_mem_stats()
-    const {
-  DeepseekV4LayerWeightMemStats stats;
-
-  if (attention_) {
-    stats.attn_bytes = module_registered_tensor_bytes(*attention_) +
-                       attention_->non_registered_weight_bytes();
-  }
-
-  if (moe_mlp_) {
-    stats.expert_bytes += module_registered_tensor_bytes(*moe_mlp_);
-  }
-  if (gate_) {
-    stats.expert_bytes += module_registered_tensor_bytes(*gate_);
-  }
-
-  stats.hc_bytes = tensor_bytes(hc_attn_fn_) + tensor_bytes(hc_ffn_fn_) +
-                   tensor_bytes(hc_attn_base_) + tensor_bytes(hc_ffn_base_) +
-                   tensor_bytes(hc_attn_scale_) + tensor_bytes(hc_ffn_scale_);
-
-  stats.total_bytes = module_registered_tensor_bytes(*this);
-  if (attention_) {
-    stats.total_bytes += attention_->non_registered_weight_bytes();
-  }
-
-  const int64_t categorized =
-      stats.attn_bytes + stats.expert_bytes + stats.hc_bytes;
-  stats.other_bytes = std::max<int64_t>(stats.total_bytes - categorized, 0);
-
-  return stats;
-}
 
 torch::Tensor DeepseekV4DecoderLayerImpl::forward(
     torch::Tensor& x,

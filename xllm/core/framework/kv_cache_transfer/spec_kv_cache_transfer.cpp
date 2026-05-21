@@ -18,6 +18,8 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch_npu/csrc/core/npu/NPUFormat.h>
 
+#include "framework/kv_cache/kv_cache_utils.h"
+
 namespace xllm {
 namespace {
 #define CHECK_LDD_RET(ret)  \
@@ -133,10 +135,7 @@ void SpecKVCacheTransfer::allocate_kv_cache_internal(
   }
 
   // convert memory addrs to torch tensors
-  aclFormat npu_format_type =
-      model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache
-          ? ACL_FORMAT_FRACTAL_NZ
-          : ACL_FORMAT_ND;
+  aclFormat npu_format_type = get_npu_kv_cache_format(model_type_);
   auto k_torch_tensors = convert_to_torch_tensor(
       key_cache_shape, dtype, k_cache.tensor_addrs, npu_format_type);
   auto v_torch_tensors = convert_to_torch_tensor(
