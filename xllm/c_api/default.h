@@ -130,6 +130,8 @@ const XLLM_InitOptions XLLM_INIT_REC_OPTIONS_DEFAULT = {
     .enable_graph_mode_decode_no_padding = true,
     .enable_block_copy_kernel = false,
     .enable_topk_sorted = false,
+    .enable_rec_prefill_only = false,
+    .enable_constrained_decoding = true,
     .rec_worker_max_concurrency = 2};
 
 const XLLM_RequestParams XLLM_REC_REQUEST_PARAMS_DEFAULT = {

@@ -161,6 +161,9 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         xllm_init_options.enable_graph_mode_decode_no_padding;
     FLAGS_enable_block_copy_kernel = xllm_init_options.enable_block_copy_kernel;
     FLAGS_enable_topk_sorted = xllm_init_options.enable_topk_sorted;
+    FLAGS_enable_rec_prefill_only = xllm_init_options.enable_rec_prefill_only;
+    FLAGS_enable_constrained_decoding =
+        xllm_init_options.enable_constrained_decoding;
 
     // Keep dual-source settings aligned with the FLAGS_* values above.
     options.enable_graph(FLAGS_enable_graph)
