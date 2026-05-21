@@ -95,6 +95,25 @@ void DisaggPDConfig::from_json(const JsonReader& json) {
                                                    transfer_listen_port()));
 }
 
+void DisaggPDConfig::append_config_json(
+    nlohmann::ordered_json& config_json) const {
+  const DisaggPDConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_disagg_pd);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_pd_ooc);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, disagg_pd_port);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, instance_role);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, kv_cache_transfer_type);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, kv_cache_transfer_mode);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, transfer_listen_port);
+}
+
 DisaggPDConfig& DisaggPDConfig::get_instance() {
   static DisaggPDConfig config;
   return config;

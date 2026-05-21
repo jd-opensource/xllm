@@ -86,6 +86,27 @@ void KVCacheConfig::from_json(const JsonReader& json) {
           "phy_page_granularity_size", phy_page_granularity_size()));
 }
 
+void KVCacheConfig::append_config_json(
+    nlohmann::ordered_json& config_json) const {
+  const KVCacheConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, block_size);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, max_cache_size);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, max_memory_utilization);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, kv_cache_dtype);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_prefix_cache);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, xxh3_128bits_seed);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_xtensor);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, phy_page_granularity_size);
+}
+
 KVCacheConfig& KVCacheConfig::get_instance() {
   static KVCacheConfig config;
   return config;

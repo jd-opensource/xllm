@@ -57,6 +57,22 @@ void EPLBConfig::from_json(const JsonReader& json) {
           json.value_or<std::string>("rank_tablefile", rank_tablefile()));
 }
 
+void EPLBConfig::append_config_json(nlohmann::ordered_json& config_json) const {
+  const EPLBConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_eplb);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, redundant_experts_num);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, eplb_update_interval);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, eplb_update_threshold);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, expert_parallel_degree);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, rank_tablefile);
+}
+
 EPLBConfig& EPLBConfig::get_instance() {
   static EPLBConfig config;
   return config;

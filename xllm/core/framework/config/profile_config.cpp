@@ -91,6 +91,29 @@ void ProfileConfig::from_json(const JsonReader& json) {
           "enable_forward_interruption", enable_forward_interruption()));
 }
 
+void ProfileConfig::append_config_json(
+    nlohmann::ordered_json& config_json) const {
+  const ProfileConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_profile_step_time);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_profile_token_budget);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_latency_aware_schedule);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, profile_max_prompt_length);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, max_global_ttft_ms);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, max_global_tpot_ms);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_profile_kv_blocks);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, disable_ttft_profiling);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_forward_interruption);
+}
+
 ProfileConfig& ProfileConfig::get_instance() {
   static ProfileConfig config;
   return config;

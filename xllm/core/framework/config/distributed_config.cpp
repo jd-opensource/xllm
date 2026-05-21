@@ -81,6 +81,30 @@ void DistributedConfig::from_json(const JsonReader& json) {
       .etcd_ttl(json.value_or<int32_t>("etcd_ttl", etcd_ttl()));
 }
 
+void DistributedConfig::append_config_json(
+    nlohmann::ordered_json& config_json) const {
+  const DistributedConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, master_node_addr);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, xtensor_master_node_addr);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, nnodes);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, node_rank);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, device_ip);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, etcd_addr);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, etcd_namespace);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_service_routing);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, heart_beat_interval);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, etcd_ttl);
+}
+
 DistributedConfig& DistributedConfig::get_instance() {
   static DistributedConfig config;
   return config;

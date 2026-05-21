@@ -57,6 +57,19 @@ void BeamSearchConfig::from_json(const JsonReader& json) {
           json.value_or<bool>("enable_topk_sorted", enable_topk_sorted()));
 }
 
+void BeamSearchConfig::append_config_json(
+    nlohmann::ordered_json& config_json) const {
+  const BeamSearchConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_beam_search_kernel);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, beam_width);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_block_copy_kernel);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_topk_sorted);
+}
+
 BeamSearchConfig& BeamSearchConfig::get_instance() {
   static BeamSearchConfig config;
   return config;

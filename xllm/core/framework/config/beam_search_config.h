@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
+#include <nlohmann/json_fwd.hpp>
 
 #include "core/common/macros.h"
 #include "core/framework/config/option_category.h"
@@ -33,6 +34,7 @@ class BeamSearchConfig final {
 
   void from_flags();
   void from_json(const JsonReader& json);
+  void append_config_json(nlohmann::ordered_json& config_json) const;
   void initialize();
 
   [[nodiscard]] static const OptionCategory& option_category() {
@@ -48,7 +50,11 @@ class BeamSearchConfig final {
 
   PROPERTY(int32_t, beam_width) = 1;
 
+#if defined(USE_NPU) || defined(USE_CUDA)
+  PROPERTY(bool, enable_block_copy_kernel) = true;
+#else
   PROPERTY(bool, enable_block_copy_kernel) = false;
+#endif
 
   PROPERTY(bool, enable_topk_sorted) = true;
 };

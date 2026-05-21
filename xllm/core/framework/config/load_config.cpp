@@ -73,6 +73,20 @@ void LoadConfig::from_json(const JsonReader& json) {
                                                   enable_prefetch_weight()));
 }
 
+void LoadConfig::append_config_json(nlohmann::ordered_json& config_json) const {
+  const LoadConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_manual_loader);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_rolling_load);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, rolling_load_num_cached_layers);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, rolling_load_num_rolling_slots);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_prefetch_weight);
+}
+
 LoadConfig& LoadConfig::get_instance() {
   static LoadConfig config;
   return config;

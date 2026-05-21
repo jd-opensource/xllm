@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
+#include <nlohmann/json_fwd.hpp>
 #include <string>
 
 #include "core/common/macros.h"
@@ -34,6 +35,7 @@ class ModelConfig final {
 
   void from_flags();
   void from_json(const JsonReader& json);
+  void append_config_json(nlohmann::ordered_json& config_json) const;
   void initialize();
   void normalize_cpp_chat_template(const std::string& model_type);
 

@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -29,4 +30,20 @@ JsonReader parse_json_string(std::string_view config_json);
 
 const std::optional<JsonReader>& get_parsed_json_config();
 
+void dump_startup_config();
+
 }  // namespace xllm::config
+
+#define APPEND_JSON_VALUE_IF_NOT_DEFAULT(       \
+    config_json, key, value, default_value)     \
+  do {                                          \
+    const auto& config_json_value = (value);    \
+    if (config_json_value != (default_value)) { \
+      (config_json)[key] = config_json_value;   \
+    }                                           \
+  } while (false)
+
+#define APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT( \
+    config_json, default_config, property)       \
+  APPEND_JSON_VALUE_IF_NOT_DEFAULT(              \
+      config_json, #property, property(), (default_config).property())

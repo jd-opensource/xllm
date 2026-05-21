@@ -90,6 +90,29 @@ void ServiceConfig::from_json(const JsonReader& json) {
           "health_check_interval_ms", health_check_interval_ms()));
 }
 
+void ServiceConfig::append_config_json(
+    nlohmann::ordered_json& config_json) const {
+  const ServiceConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, host);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, port);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, rpc_idle_timeout_s);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, rpc_channel_timeout_ms);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, max_reconnect_count);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, num_threads);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, max_concurrent_requests);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, num_request_handling_threads);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, num_response_handling_threads);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, health_check_interval_ms);
+}
+
 ServiceConfig& ServiceConfig::get_instance() {
   static ServiceConfig config;
   return config;

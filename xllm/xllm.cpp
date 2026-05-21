@@ -33,6 +33,7 @@ limitations under the License.
 #include "core/distributed_runtime/dit_master.h"
 #include "core/distributed_runtime/master.h"
 #include "core/framework/config/beam_search_config.h"
+#include "core/framework/config/config_json_utils.h"
 #include "core/framework/config/disagg_pd_config.h"
 #include "core/framework/config/distributed_config.h"
 #include "core/framework/config/dit_config.h"
@@ -382,6 +383,10 @@ int run() {
   if (distributed_config.node_rank() == 0 &&
       execution_config.random_seed() < 0) {
     execution_config.random_seed(std::random_device{}() % (1 << 30));
+  }
+
+  if (distributed_config.node_rank() == 0) {
+    config::dump_startup_config();
   }
 
   // Create Master

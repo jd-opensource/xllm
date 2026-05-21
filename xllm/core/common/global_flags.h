@@ -19,6 +19,10 @@ limitations under the License.
 
 DECLARE_string(config_json_file);
 
+DECLARE_bool(enable_dump_config_json);
+
+DECLARE_string(dump_config_json_file);
+
 DECLARE_string(host);
 
 DECLARE_int32(port);

@@ -46,5 +46,6 @@ cc_library(
   DEPS
     gflags::gflags
     glog::glog
+    nlohmann_json::nlohmann_json
     :util
 )

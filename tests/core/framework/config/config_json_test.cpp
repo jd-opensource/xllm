@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <filesystem>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
 
@@ -58,10 +59,61 @@ class ConfigJsonFileFlagGuard final {
   std::string old_config_json_file_;
 };
 
+class DumpConfigJsonFlagGuard final {
+ public:
+  explicit DumpConfigJsonFlagGuard(const std::string& dump_config_json_file)
+      : old_enable_dump_config_json_(FLAGS_enable_dump_config_json),
+        old_dump_config_json_file_(FLAGS_dump_config_json_file) {
+    FLAGS_dump_config_json_file = dump_config_json_file;
+  }
+
+  ~DumpConfigJsonFlagGuard() {
+    FLAGS_enable_dump_config_json = old_enable_dump_config_json_;
+    FLAGS_dump_config_json_file = old_dump_config_json_file_;
+  }
+
+ private:
+  bool old_enable_dump_config_json_;
+  std::string old_dump_config_json_file_;
+};
+
+class StartupConfigGuard final {
+ public:
+  StartupConfigGuard()
+      : kv_cache_config_(KVCacheConfig::get_instance()),
+        scheduler_config_(SchedulerConfig::get_instance()),
+        old_block_size_(kv_cache_config_.block_size()),
+        old_enable_prefix_cache_(kv_cache_config_.enable_prefix_cache()),
+        old_max_tokens_per_batch_(scheduler_config_.max_tokens_per_batch()),
+        old_enable_chunked_prefill_(
+            scheduler_config_.enable_chunked_prefill()) {}
+
+  ~StartupConfigGuard() {
+    kv_cache_config_.block_size(old_block_size_)
+        .enable_prefix_cache(old_enable_prefix_cache_);
+    scheduler_config_.max_tokens_per_batch(old_max_tokens_per_batch_)
+        .enable_chunked_prefill(old_enable_chunked_prefill_);
+  }
+
+ private:
+  KVCacheConfig& kv_cache_config_;
+  SchedulerConfig& scheduler_config_;
+  int32_t old_block_size_;
+  bool old_enable_prefix_cache_;
+  int32_t old_max_tokens_per_batch_;
+  bool old_enable_chunked_prefill_;
+};
+
 void write_config_file(const std::filesystem::path& config_path,
                        std::string_view config_json) {
   std::ofstream config_file(config_path);
   config_file << config_json;
+}
+
+nlohmann::ordered_json read_json_file(const std::filesystem::path& file_path) {
+  std::ifstream input_file(file_path);
+  EXPECT_TRUE(input_file.is_open()) << file_path;
+  return nlohmann::ordered_json::parse(input_file);
 }
 
 std::filesystem::path config_test_file_path() {
@@ -220,6 +272,50 @@ TEST(ConfigJsonTest, MissingJsonFileKeepsFlagDefaults) {
   EXPECT_DOUBLE_EQ(kv_cache_config.max_memory_utilization(), 0.8);
   EXPECT_EQ(scheduler_config.max_tokens_per_batch(), 10240);
   EXPECT_EQ(scheduler_config.max_seqs_per_batch(), 1024);
+}
+
+TEST(ConfigJsonTest, DumpStartupConfigSkipsWhenDisabled) {
+  const std::filesystem::path dump_path =
+      std::filesystem::temp_directory_path() /
+      "xllm_dump_config_json_test_disabled.json";
+  std::filesystem::remove(dump_path);
+  DumpConfigJsonFlagGuard flag_guard(dump_path.string());
+  FLAGS_enable_dump_config_json = false;
+
+  config::dump_startup_config();
+
+  EXPECT_FALSE(std::filesystem::exists(dump_path));
+}
+
+TEST(ConfigJsonTest, DumpStartupConfigWritesNonDefaultValuesOnly) {
+  const std::filesystem::path dump_path =
+      std::filesystem::temp_directory_path() /
+      "xllm_dump_config_json_test_non_default.json";
+  std::filesystem::remove(dump_path);
+  DumpConfigJsonFlagGuard flag_guard(dump_path.string());
+  StartupConfigGuard startup_config_guard;
+
+  KVCacheConfig::get_instance().block_size(256).enable_prefix_cache(false);
+  SchedulerConfig::get_instance()
+      .max_tokens_per_batch(2048)
+      .enable_chunked_prefill(false);
+  FLAGS_enable_dump_config_json = true;
+
+  config::dump_startup_config();
+
+  ASSERT_TRUE(std::filesystem::exists(dump_path));
+  const nlohmann::ordered_json config_json = read_json_file(dump_path);
+  EXPECT_EQ(config_json.at("block_size").get<int32_t>(), 256);
+  EXPECT_FALSE(config_json.at("enable_prefix_cache").get<bool>());
+  EXPECT_EQ(config_json.at("max_tokens_per_batch").get<int32_t>(), 2048);
+  EXPECT_FALSE(config_json.at("enable_chunked_prefill").get<bool>());
+
+  EXPECT_FALSE(config_json.contains("max_cache_size"));
+  EXPECT_FALSE(config_json.contains("kv_cache_dtype"));
+  EXPECT_FALSE(config_json.contains("max_seqs_per_batch"));
+  EXPECT_FALSE(config_json.contains("priority_strategy"));
+
+  std::filesystem::remove(dump_path);
 }
 
 }  // namespace

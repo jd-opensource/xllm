@@ -104,6 +104,31 @@ void ExecutionConfig::from_json(const JsonReader& json) {
       .random_seed(json.value_or<int32_t>("random_seed", random_seed()));
 }
 
+void ExecutionConfig::append_config_json(
+    nlohmann::ordered_json& config_json) const {
+  const ExecutionConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_graph);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_graph_mode_decode_no_padding);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_prefill_piecewise_graph);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_graph_vmm_pool);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, max_tokens_for_graph_mode);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_shm);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, use_contiguous_input_buffer);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, input_shm_size);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, output_shm_size);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, random_seed);
+}
+
 ExecutionConfig& ExecutionConfig::get_instance() {
   static ExecutionConfig config;
   return config;

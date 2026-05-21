@@ -121,6 +121,35 @@ void SpeculativeConfig::from_json(const JsonReader& json) {
                                                   enable_atb_spec_kernel()));
 }
 
+void SpeculativeConfig::append_config_json(
+    nlohmann::ordered_json& config_json) const {
+  const SpeculativeConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, draft_model);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, draft_devices);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, num_speculative_tokens);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, speculative_algorithm);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, speculative_suffix_cache_max_depth);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, speculative_suffix_max_spec_factor);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, speculative_suffix_max_spec_offset);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, speculative_suffix_min_token_prob);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, speculative_suffix_max_cached_requests);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, speculative_suffix_use_tree_spec);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_opt_validate_probs);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_atb_spec_kernel);
+}
+
 SpeculativeConfig& SpeculativeConfig::get_instance() {
   static SpeculativeConfig config;
   return config;

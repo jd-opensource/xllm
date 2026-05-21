@@ -101,6 +101,33 @@ void KVCacheStoreConfig::from_json(const JsonReader& json) {
           "enable_control_h2d_block_num", enable_control_h2d_block_num()));
 }
 
+void KVCacheStoreConfig::append_config_json(
+    nlohmann::ordered_json& config_json) const {
+  const KVCacheStoreConfig default_config;
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, prefetch_timeout);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, prefetch_batch_size);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, layers_wise_copy_batchs);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, host_blocks_factor);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_kvcache_store);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_cache_upload);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, store_protocol);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, store_master_server_address);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, store_metadata_server);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, store_local_hostname);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_control_h2d_block_num);
+}
+
 KVCacheStoreConfig& KVCacheStoreConfig::get_instance() {
   static KVCacheStoreConfig config;
   return config;

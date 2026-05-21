@@ -16,6 +16,7 @@ limitations under the License.
 #pragma once
 
 #include <cstdint>
+#include <nlohmann/json_fwd.hpp>
 
 #include "core/common/macros.h"
 #include "core/framework/config/option_category.h"
@@ -33,6 +34,7 @@ class LoadConfig final {
 
   void from_flags();
   void from_json(const JsonReader& json);
+  void append_config_json(nlohmann::ordered_json& config_json) const;
   void initialize();
 
   [[nodiscard]] static const OptionCategory& option_category() {
