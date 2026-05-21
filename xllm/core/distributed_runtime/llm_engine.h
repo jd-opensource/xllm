@@ -108,14 +108,14 @@ class LLMEngine : public Engine {
                     const std::vector<std::string>& device_ips,
                     const std::vector<uint16_t>& ports,
                     const int32_t src_dp_size,
-                    const int32_t src_cp_size = 1) override;
+                    const int32_t src_kv_split_size = 1) override;
 
   bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                       const std::vector<std::string>& addrs,
                       const std::vector<std::string>& device_ips,
                       const std::vector<uint16_t>& ports,
                       const int32_t src_dp_size,
-                      const int32_t src_cp_size = 1) override;
+                      const int32_t src_kv_split_size = 1) override;
 
   // D2D link for weight transfer - each worker links to one remote addr
   bool link_d2d(const std::vector<std::string>& device_ips) override;

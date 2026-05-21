@@ -48,6 +48,7 @@ limitations under the License.
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/speculative_config.h"
 #if defined(USE_NPU)
 #include "platform/npu/device_capture_lock.h"
@@ -509,14 +510,19 @@ torch::Tensor WorkerImpl::recompute_new_cache_slots(const ForwardInput& input) {
 }
 
 torch::Tensor WorkerImpl::compute_in_prefix_slots(const ForwardInput& input) {
-  // Unify prefix-cache hits and chunked-prefill progression by deriving the
-  // number of prefix blocks from `kv_cache_tokens_nums` (already-cached tokens
-  // for each sequence at the start of this forward), instead of relying on
-  // `shared_blocks_num` which only counts prefix-cache hits and does not grow
-  // across chunks.
-  const auto& block_tables = input.input_params.attention.device.block_tables;
-  const auto& kv_cache_tokens_nums =
+  // Derive prefix block count from `kv_cache_tokens_nums` (already-cached tokens
+  // at the start of this forward), which covers prefix-cache hits and chunked
+  // prefill progression.
+  torch::Tensor block_tables = input.input_params.attention.device.block_tables;
+  torch::Tensor kv_cache_tokens_nums =
       input.input_params.attention.device.kv_cache_tokens_nums;
+  if (block_tables.defined() && !block_tables.device().is_cpu()) {
+    block_tables = block_tables.to(torch::kCPU);
+  }
+  if (kv_cache_tokens_nums.defined() &&
+      !kv_cache_tokens_nums.device().is_cpu()) {
+    kv_cache_tokens_nums = kv_cache_tokens_nums.to(torch::kCPU);
+  }
   const int32_t block_size = options_.block_size();
   // Stride here is the KV-split width (how many ranks the KV is sharded
   // across), NOT cp_size. When kv_split_size == 1 each rank holds the full
@@ -575,38 +581,6 @@ torch::Tensor WorkerImpl::compute_in_prefix_slots(const ForwardInput& input) {
   return torch::tensor(in_prefix_slots_vec, torch::kInt);
 }
 
-/*
-torch::Tensor WorkerImpl::compute_in_prefix_slots(const ForwardInput& input) {
-  auto block_tables = input.input_params.block_tables;
-  auto shared_blocks_num = input.input_params.shared_blocks_num;
-
-  CHECK(block_tables.size(0) == shared_blocks_num.size())
-    << "block_tables dim0 is " << block_tables.size(0)
-    << "shared_blocks_num size is " << shared_blocks_num.size();
-
-  std::vector<int32_t> in_prefix_slots_vec;
-  auto block_tables_accessor = block_tables.accessor<int32_t, 2>();
-
-  int64_t rows = block_tables_accessor.size(0);
-  int64_t cols = block_tables_accessor.size(1);
-
-  for (int64_t i = 0; i < rows; ++i) {
-    if (shared_blocks_num[i] == 0) {
-      in_prefix_slots_vec.push_back(0);
-      continue;
-    }
-    for (int64_t j = 0; j < shared_blocks_num[i]; ++j) {
-      for (int64_t k = 0; k < options_.block_size(); k++) {
-        in_prefix_slots_vec.push_back(block_tables_accessor[i][j] *
-options_.block_size() + k);
-      }
-    }
-  }
-  torch::Tensor in_prefix_slots = torch::tensor(in_prefix_slots_vec,
-torch::kInt); return in_prefix_slots;
-}
-*/
-
 void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
                                              ForwardInput& processed_input) {
 #if defined(USE_NPU)
@@ -631,61 +605,112 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 
   // CP partition is now done worker-side (formerly engine-side in
   // LLMEngine::step). torch::Tensor fields are handles, so assigning new
-  // tensors to `cp_input` does not mutate `input`.
+  // tensors to the CP working copy does not mutate `input`.
   // IMPORTANT: every downstream NPU-side prepare call (prepare_cp_prefill_inputs,
   // CpEpPadding, recompute_new_cache_slots, compute_in_prefix_slots) reads
-  // from the per-rank slice and therefore MUST consume `cp_input.*`, not the
-  // pre-partition `input.*`.
+  // from the per-rank slice and therefore MUST consume the CP working copy, not
+  // the pre-partition `input.*`.
   // The `!input.cp_partitioned` guard is critical for nested step_async paths
   // (MTP target/draft sub-workers) that re-enter prepare_work_before_execute
   // on already-partitioned device tensors; see ForwardInput::cp_partitioned.
-  ForwardInput cp_input = input;
-  const bool needs_cp_partition = parallel_args_.cp_size() > 1 &&
-                                  input.input_params.meta.batch_forward_type
-                                      .no_decode() &&
-                                  !input.cp_partitioned;
+  // Prefill-side CP (partition + ATB cp tensors) applies to PREFILL,
+  // CHUNKED_PREFILL, and MIXED. `no_decode()` wrongly excludes MIXED.
+  const bool needs_cp_prefill_side =
+      parallel_args_.cp_size() > 1 &&
+      !input.input_params.meta.batch_forward_type.is_decode();
+  const bool needs_cp_partition =
+      needs_cp_prefill_side && !input.cp_partitioned;
+  std::optional<ForwardInput> cp_input;
+  if (needs_cp_prefill_side) {
+    cp_input.emplace(input);
+  }
+#if defined(USE_NPU)
+  if (needs_cp_prefill_side) {
+    ForwardInput& cp_working = *cp_input;
+    // RPC packed_input only carries input_host_buffer until unpack; partition
+    // and prepare_cp_prefill_inputs need materialized token_ids / seq_lens.
+    if (cp_working.input_host_buffer_has_layout &&
+        (!cp_working.token_ids.defined() ||
+         cp_working.token_ids.numel() == 0)) {
+      ForwardInput unpacked;
+      if (detail::unpack_from_input_host_buffer(
+              cp_working, torch::Device(torch::kCPU), unpacked)) {
+        unpacked.cp_partitioned = cp_working.cp_partitioned;
+        cp_working = std::move(unpacked);
+        cp_working.input_host_buffer_has_layout = false;
+      } else {
+        LOG(ERROR) << "[CP_PREP] unpack_from_input_host_buffer failed before "
+                      "cp_partition (cp_rank="
+                   << parallel_args_.cp_rank() << ")";
+      }
+    }
+  }
+#endif
   if (needs_cp_partition) {
-    cp::cp_partition_inplace(cp_input,
+    ForwardInput& cp_working = *cp_input;
+    const int64_t tokens_before =
+        cp_working.token_ids.defined() ? cp_working.token_ids.numel() : 0;
+    cp::cp_partition_inplace(cp_working,
                              parallel_args_.cp_rank(),
                              parallel_args_.cp_size());
-    cp_input.cp_partitioned = true;
+    const int64_t tokens_after =
+        cp_working.token_ids.defined() ? cp_working.token_ids.numel() : 0;
+    // Mark partitioned only when slice materialized (packed RPC used to skip
+    // partition on empty token_ids yet still set this flag).
+    if (tokens_after > 0) {
+      cp_working.cp_partitioned = true;
+    } else {
+      LOG(ERROR) << "[CP_PREP] cp_partition_inplace produced no tokens "
+                    "(before="
+                 << tokens_before << " cp_rank=" << parallel_args_.cp_rank()
+                 << " host_buffer_has_layout="
+                 << cp_working.input_host_buffer_has_layout << ")";
+    }
   }
-  processed_input = cp_input.to(device_, dtype_);
+  const ForwardInput& prep_for_device =
+      needs_cp_prefill_side ? *cp_input : input;
+  processed_input = prep_for_device.to(device_, dtype_);
 
 #if defined(USE_NPU)
   const bool needs_kv_split_prep =
-      needs_cp_partition && util::enable_kvcache_split();
+      needs_cp_prefill_side && util::enable_kvcache_split();
+  const bool needs_in_prefix_slots =
+      needs_cp_prefill_side &&
+      (needs_kv_split_prep ||
+       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
+       ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill());
   CpPrefillInputs tmp_cp_inputs;
-  if (needs_cp_partition) {
+  if (needs_cp_prefill_side && !input.cp_partitioned) {
+    const ForwardInput& cp_working = *cp_input;
     tmp_cp_inputs = prepare_cp_prefill_inputs(
         parallel_args_.cp_size(),
-        cp_input.host_token_ids(),
-        cp_input.host_positions(),
-        cp_input.input_params.attention.device.q_seq_lens,
+        cp_working.host_token_ids(),
+        cp_working.host_positions(),
+        cp_working.input_params.attention.device.q_seq_lens,
         util::enable_kvcache_split(),
-        cp_input.input_params.attention.host.kv_cache_tokens_nums,
+        cp_working.input_params.attention.host.kv_cache_tokens_nums,
         options_.block_size(),
         parallel_args_.kv_split_size_effective());
     processed_input.input_params.parallel.cp_prefill_inputs =
         tmp_cp_inputs.to(device_);
     CpEpPadding cp_ep_padding(
-        cp_input.host_token_ids(),
+        cp_working.host_token_ids(),
         context_.get_model_args().num_experts_per_tok(),
         context_.get_parallel_args().mapping_data(),
         /*device=*/device_,
         dtype_,
-        /*is_prefill=*/
-        cp_input.input_params.meta.batch_forward_type.no_decode());
+        /*is_prefill=*/needs_cp_prefill_side);
     processed_input.input_params.parallel.cp_ep_padding_data =
         cp_ep_padding.build();
   }
 
   if (needs_kv_split_prep) {
-    torch::Tensor new_cache_slots = recompute_new_cache_slots(cp_input);
+    torch::Tensor new_cache_slots = recompute_new_cache_slots(*cp_input);
     processed_input.input_params.attention.device.new_cache_slots =
         new_cache_slots.to(device_);
-
-    torch::Tensor in_prefix_slots = compute_in_prefix_slots(cp_input);
+  }
+  if (needs_in_prefix_slots) {
+    torch::Tensor in_prefix_slots = compute_in_prefix_slots(*cp_input);
     processed_input.input_params.attention.device.in_prefix_slots =
         in_prefix_slots.to(device_);
   }

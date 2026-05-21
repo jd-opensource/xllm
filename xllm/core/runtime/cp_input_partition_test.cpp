@@ -136,6 +136,23 @@ TEST(CpInputPartitionTest, CpPartitionedFlagPropagatesThroughCopy) {
   EXPECT_TRUE(moved.cp_partitioned);
 }
 
+TEST(CpInputPartitionTest, MixedBatchPartitionsLikePrefill) {
+  std::vector<int32_t> tokens(8);
+  std::iota(tokens.begin(), tokens.end(), 100);
+  std::vector<int32_t> positions(8);
+  std::iota(positions.begin(), positions.end(), 0);
+
+  auto rank0 = make_forward_input(tokens,
+                                  positions,
+                                  /*q_seq_lens=*/{8},
+                                  /*selected_idxes=*/{},
+                                  /*mtp_shifted=*/{},
+                                  BatchForwardType::MIXED);
+  cp_partition_inplace(rank0, /*cp_rank=*/0, /*cp_size=*/2);
+  EXPECT_EQ(tensor_to_vec(rank0.token_ids),
+            std::vector<int32_t>({100, 101, 106, 107}));
+}
+
 TEST(CpInputPartitionTest, NoOpWhenDecode) {
   auto fi = make_forward_input({1, 2, 3, 4},
                                {0, 1, 2, 3},

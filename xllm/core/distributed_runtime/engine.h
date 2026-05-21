@@ -126,7 +126,7 @@ class Engine {
                             const std::vector<std::string>& device_ips,
                             const std::vector<uint16_t>& ports,
                             const int32_t src_dp_size,
-                            const int32_t src_cp_size = 1) {
+                            const int32_t src_kv_split_size = 1) {
     NOT_IMPLEMENTED();
     return false;
   };
@@ -136,7 +136,7 @@ class Engine {
                               const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports,
                               const int32_t src_dp_size,
-                              const int32_t src_cp_size = 1) {
+                              const int32_t src_kv_split_size = 1) {
     NOT_IMPLEMENTED();
     return false;
   };

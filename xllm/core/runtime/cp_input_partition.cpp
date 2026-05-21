@@ -87,6 +87,34 @@ torch::Tensor gather_token_level_tensor(const torch::Tensor& src,
   return src.index_select(0, gather_indices);
 }
 
+// CP partition uses CPU gather indices and host-side seq-len vectors. Inputs
+// that already went through ForwardInput::to(NPU) (e.g. MTP prefill with
+// device_tensors_ready) must be brought back to CPU here; otherwise
+// index_select triggers "Expected NPU tensor" on torch_npu.
+void ensure_cpu_for_cp_partition(ForwardInput& input) {
+  auto to_cpu_if_needed = [](const char* /*name*/, torch::Tensor& tensor) {
+    if (tensor.defined() && !tensor.device().is_cpu()) {
+      tensor = tensor.to(torch::kCPU);
+    }
+  };
+
+  to_cpu_if_needed("token_ids", input.token_ids);
+  to_cpu_if_needed("positions", input.positions);
+  to_cpu_if_needed("mtp_shifted_token_ids",
+                   input.input_params.embedding.mtp_shifted_token_ids);
+  to_cpu_if_needed("selected_token_idxes",
+                   input.sampling_params.selected_token_idxes);
+
+  auto& attn_dev = input.input_params.attention.device;
+  to_cpu_if_needed("attention.device.q_seq_lens", attn_dev.q_seq_lens);
+  to_cpu_if_needed("attention.device.kv_seq_lens", attn_dev.kv_seq_lens);
+  to_cpu_if_needed("attention.device.q_cu_seq_lens", attn_dev.q_cu_seq_lens);
+
+  input.token_ids_host = input.token_ids;
+  input.positions_host = input.positions;
+  input.device_tensors_ready = false;
+}
+
 }  // namespace
 
 void cp_partition_inplace(ForwardInput& input,
@@ -95,7 +123,9 @@ void cp_partition_inplace(ForwardInput& input,
   if (cp_size <= 1) {
     return;
   }
-  if (!input.input_params.meta.batch_forward_type.no_decode()) {
+  // MIXED (chunked prefill + decode) still runs the prefill ATB node and needs
+  // per-CP-rank token slices; only pure DECODE batches skip partition.
+  if (input.input_params.meta.batch_forward_type.is_decode()) {
     return;
   }
   const int32_t num_sequences = input.input_params.meta.num_sequences;
@@ -103,12 +133,26 @@ void cp_partition_inplace(ForwardInput& input,
     return;
   }
   if (!input.token_ids.defined() || input.token_ids.numel() == 0) {
+    LOG(ERROR) << "[CP_PARTITION] cp_partition_inplace skipped: token_ids "
+                  "empty/undefined cp_rank="
+               << cp_rank << " cp_size=" << cp_size
+               << " host_buffer_has_layout="
+               << input.input_host_buffer_has_layout
+               << " device_tensors_ready=" << input.device_tensors_ready
+               << " host_token_ids_defined="
+               << input.host_token_ids().defined()
+               << " host_token_ids_numel="
+               << (input.host_token_ids().defined()
+                       ? input.host_token_ids().numel()
+                       : 0);
     return;
   }
 
   CHECK_GT(cp_size, 0);
   CHECK_GE(cp_rank, 0);
   CHECK_LT(cp_rank, cp_size);
+
+  ensure_cpu_for_cp_partition(input);
 
   const int64_t token_num = input.token_ids.numel();
   const int32_t num_chunks = cp_size * 2;

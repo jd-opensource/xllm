@@ -23,8 +23,13 @@ namespace xllm {
 SpecKVCacheTransfer::SpecKVCacheTransfer(const std::string& device_ip,
                                          const uint16_t listen_port,
                                          const InstanceRole& instance_role,
-                                         const std::string& model_type)
-    : LlmDataDistTransfer(device_ip, listen_port, instance_role, model_type) {}
+                                         const std::string& model_type,
+                                         bool enable_lighting_indexer)
+    : LlmDataDistTransfer(device_ip,
+                          listen_port,
+                          instance_role,
+                          model_type,
+                          enable_lighting_indexer) {}
 
 void SpecKVCacheTransfer::register_kv_cache(
     std::vector<xllm::KVCache>& kv_caches,

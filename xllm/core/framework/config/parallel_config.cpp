@@ -24,11 +24,6 @@ DEFINE_int32(ep_size, 1, "Expert parallel size for MoE model.");
 
 DEFINE_int32(cp_size, 1, "Context parallel size for DSA attention.");
 
-DEFINE_int32(prefill_cp_size,
-             1,
-             "CP size of the prefill instance. Used by decode instances to "
-             "establish connections with all CP ranks on the prefill side.");
-
 DEFINE_int32(kv_split_size,
              0,
              "KV-cache split width. 0 falls back to cp_size (legacy); 1 means "
@@ -38,8 +33,10 @@ DEFINE_int32(kv_split_size,
 
 DEFINE_int32(prefill_kv_split_size,
              0,
-             "KV split size of the prefill instance. 0 means follow "
-             "prefill_cp_size for backward compatibility.");
+             "KV-cache split width of the remote prefill instance. Set on "
+             "decode nodes in PD mode so D can match P logical block layout "
+             "(link_cluster stride and remote_blocks_ids expansion). 0 falls "
+             "back to local cp_size.");
 
 DEFINE_int64(tp_size, 1, "Tensor parallelism size, only used for DiT model.");
 
@@ -81,7 +78,6 @@ void ParallelConfig::from_flags() {
   dp_size(FLAGS_dp_size)
       .ep_size(FLAGS_ep_size)
       .cp_size(FLAGS_cp_size)
-      .prefill_cp_size(FLAGS_prefill_cp_size)
       .kv_split_size(FLAGS_kv_split_size)
       .prefill_kv_split_size(FLAGS_prefill_kv_split_size)
       .tp_size(FLAGS_tp_size)

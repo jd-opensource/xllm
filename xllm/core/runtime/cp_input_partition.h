@@ -31,7 +31,8 @@ namespace xllm::cp {
 //
 // Trigger conditions (no-op otherwise):
 //   - cp_size > 1
-//   - input.input_params.batch_forward_type.no_decode() (prefill / chunked
+//   - !input.input_params.batch_forward_type.is_decode() (prefill / chunked
+//     prefill / mixed; pure decode is skipped)
 //     prefill batches; decode batches keep the global view)
 //   - input.input_params.num_sequences > 0
 //   - input.token_ids is defined and non-empty
@@ -52,7 +53,6 @@ namespace xllm::cp {
 //   - input_params.new_cache_slots / new_cache_slot_offsets
 //   - input_params.block_tables
 //   - input_params.kv_cache_tokens_nums(_host)
-//   - input_params.shared_blocks_num
 //   - input_params.dp_global_token_nums / dp_is_decode
 //   - transfer_kv_infos
 //

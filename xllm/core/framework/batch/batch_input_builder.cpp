@@ -398,9 +398,6 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.new_token_slot_ids.insert(state_.new_token_slot_ids.end(),
                                      state.new_token_slot_ids.begin(),
                                      state.new_token_slot_ids.end());
-    state_.shared_blocks_num.insert(state_.shared_blocks_num.end(),
-                                    state.shared_blocks_num.begin(),
-                                    state.shared_blocks_num.end());
     state_.embedding_ids.insert(state_.embedding_ids.end(),
                                 state.embedding_ids.begin(),
                                 state.embedding_ids.end());
@@ -703,8 +700,6 @@ void BatchInputBuilder::setup_kv_cache_info(
       sequence->kv_state().kv_cache_slots(n_kv_cache_tokens, seq_len);
   state.new_token_slot_ids.insert(
       state.new_token_slot_ids.end(), slot_ids.begin(), slot_ids.end());
-  const auto shared_blocks_num = sequence->kv_state().shared_kv_blocks_num();
-  state.shared_blocks_num.emplace_back(shared_blocks_num);
 
   std::vector<int32_t> block_ids;
   block_ids.reserve(blocks.size());
@@ -736,18 +731,11 @@ void BatchInputBuilder::setup_kv_cache_info(
     std::vector<uint64_t> new_local, new_remote;
     new_local.reserve(cur_count - prev_pushed);
     new_remote.reserve(cur_count - prev_pushed);
-    // Stride here is the LOCAL (P-side) KV-split width: one local logical
-    // block of P maps to `stride` sub-blocks on D, because P's BlockManager
-    // logical block_size is `block_size * kv_split_size_effective` (see
-    // llm_engine init). Use `kv_split_size_effective()` (NOT
-    // `prefill_kv_split_size_effective()`), which is the local instance's
-    // value and falls back to FLAGS_cp_size when FLAGS_kv_split_size is
-    // unset - this matches the legacy `FLAGS_cp_size` behavior byte-for-byte.
-    // (`prefill_kv_split_size_effective()` is a D-side concept: it tells D
-    // how many sub-block ids per local block were written by the remote P,
-    // and is irrelevant inside the P process itself.)
-    const uint32_t kv_split_stride =
-        static_cast<uint32_t>(util::kv_split_size_effective());
+    // Stride matches the prefill instance KV-split width: P uses local
+    // kv_split_size; decode uses --prefill_kv_split_size only (see
+    // util::kv_split_stride_for_kv_transfer).
+    const uint32_t kv_split_stride = static_cast<uint32_t>(
+        util::kv_split_stride_for_kv_transfer());
     for (uint32_t k = prev_pushed; k < cur_count; ++k) {
       new_local.push_back(blocks[k].id());
       for (uint32_t j = 0; j < kv_split_stride; j++) {
@@ -790,9 +778,6 @@ void BatchInputBuilder::padding_decode_batch_size(
                 torch::zeros({3, 1}, torch::kInt));
           }
           state_.new_token_slot_ids.emplace_back(0);
-          // Keep shared_blocks_num row-aligned for the decoder-padding rows
-          // so CP / KV-shard prefix-cache consumers index by sequence index.
-          state_.shared_blocks_num.emplace_back(0);
         }
 #if defined(USE_NPU) || defined(USE_MUSA)
         state_.seq_lens.push_back(num_decoding_tokens);
@@ -896,8 +881,6 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
   }
   input_params.embedding.request_ids = std::move(state_.request_ids);
   input_params.embedding.extra_token_ids = std::move(state_.extra_token_ids);
-  input_params.embedding.shared_blocks_num =
-      std::move(state_.shared_blocks_num);
   if (!state_.mtp_shifted_token_ids.empty()) {
     // Write both the upstream "root" path (consumed by non-CP MTP code paths
     // and by the existing shm serializer) and the CP-specific embedding path

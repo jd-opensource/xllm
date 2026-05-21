@@ -854,19 +854,11 @@ bool DisaggPDScheduler::link_instance(
                              device_ips,
                              ports,
                              dp_size,
-                             ::xllm::ParallelConfig::get_instance()
-                                 .prefill_cp_size())) {
+                             util::prefill_kv_split_size_effective())) {
     LOG(ERROR) << "Link instance failed, instance_name: " << instance_name;
     return false;
   }
-  // We do NOT change the engine link API on purpose (the user explicitly
-  // deferred the FLAGS_prefill_cp_size cleanup). We log the effective KV-split
-  // width so mismatch between P and D is easy to spot in production logs.
-  // batch_input_builder uses the same `prefill_kv_split_size_effective()` to
-  // compute the stride when expanding remote_blocks_ids per local block.
   LOG(INFO) << "Successfully linked instance, instance_name: " << instance_name
-            << ", prefill_cp_size: "
-            << ::xllm::ParallelConfig::get_instance().prefill_cp_size()
             << ", prefill_kv_split_size: "
             << util::prefill_kv_split_size_effective();
   linked_instance_.emplace(instance_name);
@@ -899,8 +891,7 @@ bool DisaggPDScheduler::unlink_instance(
                                device_ips,
                                ports,
                                dp_size,
-                               ::xllm::ParallelConfig::get_instance()
-                                 .prefill_cp_size())) {
+                               util::prefill_kv_split_size_effective())) {
     LOG(ERROR) << "Unlink instance failed, instance_name: " << instance_name;
     return false;
   }

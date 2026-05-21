@@ -2099,12 +2099,11 @@ inline void deserialize_forward_input_payload(
                              input_params.meta.num_sequences);
   read_string_vector(context, input_params.embedding.request_ids);
   read_vector(context, input_params.embedding.extra_token_ids);
-  // Keep BOTH the upstream root mtp_shifted_token_ids field (consumed by
-  // non-CP MTP paths + minimax/qwen3-next models) AND the CP-side
-  // embedding.mtp_shifted_token_ids (consumed by cp_input_partition +
-  // mtp_worker_impl). shared_blocks_num is CP/KV-shard prefix-cache only.
+  // Keep upstream's root mtp_shifted_token_ids serialization (consumed by
+  // non-CP MTP paths + minimax / qwen3-next models). The CP path additionally
+  // reads embedding.mtp_shifted_token_ids below. shared_blocks_num was
+  // dropped by the CP polish commit (no live worker consumer).
   read_tensor(context, input_params.mtp_shifted_token_ids, stream);
-  read_vector(context, input_params.embedding.shared_blocks_num);
   read_tensor(context, input_params.embedding.mtp_shifted_token_ids, stream);
   read_swap_blocks(context, input_params.block_copy.swap_blocks);
   read_tensor(context, input_params.block_copy.src_block_indices, stream);
@@ -2425,10 +2424,8 @@ inline void serialize_forward_input_sections(
   write_string_vector(context.descriptor, input_params.embedding.request_ids);
   write_vector(context.descriptor, input_params.embedding.extra_token_ids);
   // Mirror the read_* layout: write root + embedding mtp paths so the
-  // deserializer sees both fields in the legacy + CP layouts. Order MUST
-  // match the corresponding read_* sequence above.
+  // deserializer sees both fields. Order MUST match the read_* sequence.
   write_tensor(context, input_params.mtp_shifted_token_ids);
-  write_vector(context.descriptor, input_params.embedding.shared_blocks_num);
   write_tensor(context, input_params.embedding.mtp_shifted_token_ids);
   write_swap_blocks(context, input_params.block_copy.swap_blocks);
   write_tensor(context, input_params.block_copy.src_block_indices);

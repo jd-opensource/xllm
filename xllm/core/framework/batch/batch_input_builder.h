@@ -109,11 +109,6 @@ class BatchInputBuilder {
     // multi block manager support for DeepSeek V4
     // [manager_num][batch_size][block_ids]
     std::vector<std::vector<std::vector<int32_t>>> multi_block_tables;
-    // Number of prefix-cache "shared" blocks at the front of each sequence's
-    // block table. Needed by the CP / KV-shard prefix-cache path so the worker
-    // can split block_tables into (prefix, owned) ranges without recomputing
-    // from kv_cache_tokens_num. Defaults to 0 for non-prefix-cache batches.
-    std::vector<uint64_t> shared_blocks_num;
 
     // beam search kernel input
     std::vector<float> acc_logprob_vec;
@@ -155,8 +150,6 @@ class BatchInputBuilder {
       uint32_t q_seq_len,
       BuilderState* state_ptr = nullptr,
       std::unordered_set<int32_t>* write_block_ids_ptr = nullptr);
-  void padding_decode_batch_size(uint32_t num_decoding_tokens,
-                                 uint32_t min_decoding_batch_size);
 
   // Input data
   const std::vector<Sequence*>& sequences_;

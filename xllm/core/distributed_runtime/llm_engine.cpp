@@ -719,21 +719,21 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
                              const std::vector<std::string>& device_ips,
                              const std::vector<uint16_t>& ports,
                              const int32_t src_dp_size,
-                             const int32_t src_cp_size) {
-  // When src_cp_size > 1 (P node has CP enabled), each D worker must connect
-  // to all CP ranks on the P side that share the same TP rank.
+                             const int32_t src_kv_split_size) {
+  // When src_kv_split_size > 1 (P node KV-split / CP width), each D worker must
+  // connect to all matching ranks on the P side that share the same TP rank.
   //
   // P worker layout: rank = dp * (cp_size * tp_size) + cp * tp_size + tp_rank
   //   src_cp_tp_size = src_world_size / src_dp_size  (= cp_size * tp_size)
-  //   src_tp_size    = src_cp_tp_size / src_cp_size  (actual TP size)
+  //   src_tp_size    = src_cp_tp_size / src_kv_split_size  (actual TP size)
   //
   // D worker tp_rank = worker_rank % dst_tp_size
   // D worker connects to P workers:
-  //   dp_i * src_cp_tp_size + cp_j * src_tp_size + d_tp_rank
-  //   for all dp_i in [0, src_dp_size), cp_j in [0, src_cp_size)
+  //   dp_i * src_cp_tp_size + split_j * src_tp_size + d_tp_rank
+  //   for all dp_i in [0, src_dp_size), split_j in [0, src_kv_split_size)
   int32_t src_world_size = static_cast<int32_t>(cluster_ids.size());
   int32_t src_cp_tp_size = src_world_size / src_dp_size;
-  int32_t src_tp_size = src_cp_tp_size / src_cp_size;
+  int32_t src_tp_size = src_cp_tp_size / src_kv_split_size;
   int32_t dst_tp_size =
       static_cast<int32_t>(worker_clients_num_) / static_cast<int32_t>(dp_size_);
 
@@ -746,14 +746,15 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
     std::vector<std::string> target_addrs;
     std::vector<std::string> target_device_ips;
     std::vector<uint16_t> target_ports;
-    target_cluster_ids.reserve(src_dp_size * src_cp_size);
-    target_addrs.reserve(src_dp_size * src_cp_size);
-    target_device_ips.reserve(src_dp_size * src_cp_size);
-    target_ports.reserve(src_dp_size * src_cp_size);
+    target_cluster_ids.reserve(src_dp_size * src_kv_split_size);
+    target_addrs.reserve(src_dp_size * src_kv_split_size);
+    target_device_ips.reserve(src_dp_size * src_kv_split_size);
+    target_ports.reserve(src_dp_size * src_kv_split_size);
 
     for (int32_t dp_i = 0; dp_i < src_dp_size; ++dp_i) {
-      for (int32_t cp_j = 0; cp_j < src_cp_size; ++cp_j) {
-        int32_t p_idx = dp_i * src_cp_tp_size + cp_j * src_tp_size + d_tp_rank;
+      for (int32_t split_j = 0; split_j < src_kv_split_size; ++split_j) {
+        int32_t p_idx =
+            dp_i * src_cp_tp_size + split_j * src_tp_size + d_tp_rank;
         target_cluster_ids.emplace_back(cluster_ids[p_idx]);
         target_addrs.emplace_back(addrs[p_idx]);
         target_device_ips.emplace_back(device_ips[p_idx]);
@@ -791,12 +792,12 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                const std::vector<std::string>& device_ips,
                                const std::vector<uint16_t>& ports,
                                const int32_t src_dp_size,
-                               const int32_t src_cp_size) {
-  // Symmetric to link_cluster: each D worker disconnects from all CP ranks on
-  // the P side that share the same TP rank.
+                               const int32_t src_kv_split_size) {
+  // Symmetric to link_cluster: each D worker disconnects from all KV-split
+  // ranks on the P side that share the same TP rank.
   int32_t src_world_size = static_cast<int32_t>(cluster_ids.size());
   int32_t src_cp_tp_size = src_world_size / src_dp_size;
-  int32_t src_tp_size = src_cp_tp_size / src_cp_size;
+  int32_t src_tp_size = src_cp_tp_size / src_kv_split_size;
   int32_t dst_tp_size =
       static_cast<int32_t>(worker_clients_num_) / static_cast<int32_t>(dp_size_);
 
@@ -809,14 +810,15 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
     std::vector<std::string> target_addrs;
     std::vector<std::string> target_device_ips;
     std::vector<uint16_t> target_ports;
-    target_cluster_ids.reserve(src_dp_size * src_cp_size);
-    target_addrs.reserve(src_dp_size * src_cp_size);
-    target_device_ips.reserve(src_dp_size * src_cp_size);
-    target_ports.reserve(src_dp_size * src_cp_size);
+    target_cluster_ids.reserve(src_dp_size * src_kv_split_size);
+    target_addrs.reserve(src_dp_size * src_kv_split_size);
+    target_device_ips.reserve(src_dp_size * src_kv_split_size);
+    target_ports.reserve(src_dp_size * src_kv_split_size);
 
     for (int32_t dp_i = 0; dp_i < src_dp_size; ++dp_i) {
-      for (int32_t cp_j = 0; cp_j < src_cp_size; ++cp_j) {
-        int32_t p_idx = dp_i * src_cp_tp_size + cp_j * src_tp_size + d_tp_rank;
+      for (int32_t split_j = 0; split_j < src_kv_split_size; ++split_j) {
+        int32_t p_idx =
+            dp_i * src_cp_tp_size + split_j * src_tp_size + d_tp_rank;
         target_cluster_ids.emplace_back(cluster_ids[p_idx]);
         target_addrs.emplace_back(addrs[p_idx]);
         target_device_ips.emplace_back(device_ips[p_idx]);

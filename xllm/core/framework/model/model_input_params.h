@@ -719,8 +719,6 @@ struct ModelEmbeddingInput {
   // extra token ids for each sequence, and -1 for last chunk
   std::vector<int32_t> extra_token_ids;
 
-  std::vector<uint64_t> shared_blocks_num;
-
   // Precomputed shifted token ids for MTP prefill, aligned with tokens.
   torch::Tensor mtp_shifted_token_ids;
 
@@ -732,7 +730,6 @@ struct ModelEmbeddingInput {
     out.linear_state_indices = safe_to(linear_state_indices, device, true);
     out.request_ids = request_ids;
     out.extra_token_ids = extra_token_ids;
-    out.shared_blocks_num = shared_blocks_num;
     out.mtp_shifted_token_ids = safe_to(mtp_shifted_token_ids, device, true);
     return out;
   }
