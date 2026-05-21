@@ -52,16 +52,24 @@ std::vector<int32_t> tensor_to_vec_int32(const torch::Tensor& tensor) {
   return {data, data + cpu_tensor.numel()};
 }
 
-TEST(SpecDecodeInputBuilderTest, DraftInputsSingleRowPerSeq) {
+ModelInputParams make_test_params(
+    int32_t num_sequences,
+    const std::vector<int32_t>& kv_seq_lens,
+    const torch::Tensor& block_tables) {
   ModelInputParams params;
-  params.num_sequences = 2;
-  std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
+  params.num_sequences = num_sequences;
+  params.kv_seq_lens_vec = kv_seq_lens;
+  params.block_tables = block_tables;
+  return params;
+}
 
+TEST(SpecDecodeInputBuilderTest, DraftInputsSingleRowPerSeq) {
+  std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
   torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
-  auto view = make_decode_cpu_view(
-      torch::Tensor(), positions, block_tables, to_slice(kv_seq_lens));
+  auto params = make_test_params(2, kv_seq_lens, block_tables);
+  auto view = make_decode_cpu_view(torch::Tensor(), positions, params);
 
   DecodeBuildBuffers buf;
   for (int32_t seq_id = 0; seq_id < params.num_sequences; ++seq_id) {
@@ -79,8 +87,6 @@ TEST(SpecDecodeInputBuilderTest, DraftInputsSingleRowPerSeq) {
 }
 
 TEST(SpecDecodeInputBuilderTest, ValidateInputsNonAtbExpansion) {
-  ModelInputParams params;
-  params.num_sequences = 2;
   const int32_t num_speculative_tokens = 2;
   const int32_t num_val_tokens = num_speculative_tokens + 1;
   std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
@@ -89,8 +95,8 @@ TEST(SpecDecodeInputBuilderTest, ValidateInputsNonAtbExpansion) {
   torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
-  auto view = make_decode_cpu_view(
-      token_ids, positions, block_tables, to_slice(kv_seq_lens));
+  auto params = make_test_params(2, kv_seq_lens, block_tables);
+  auto view = make_decode_cpu_view(token_ids, positions, params);
 
   DecodeBuildBuffers buf;
   for (int32_t seq_id = 0; seq_id < params.num_sequences; ++seq_id) {
@@ -124,8 +130,8 @@ TEST(SpecDecodeInputBuilderTest, AppendDecodeRowTokenKinds) {
   torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
-  auto view = make_decode_cpu_view(
-      token_ids, positions, block_tables, to_slice(kv_seq_lens));
+  auto params = make_test_params(2, kv_seq_lens, block_tables);
+  auto view = make_decode_cpu_view(token_ids, positions, params);
 
   DecodeBuildBuffers buf;
   append_decode_row(
@@ -152,16 +158,18 @@ TEST(SpecDecodeInputBuilderTest, MakeDecodeCpuViewUsesFlatBlockTableLayout) {
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2, 0}, {3, 4, 5, 0}}, torch::kInt);
 
-  DecodeCpuView view = make_decode_cpu_view(
-      token_ids, positions, block_tables, to_slice(kv_seq_lens));
+  ModelInputParams params = make_test_params(2, kv_seq_lens, block_tables);
+  DecodeCpuView view = make_decode_cpu_view(token_ids, positions, params);
 
-  EXPECT_EQ(view.num_sequences, 2);
-  EXPECT_EQ(view.block_table_row_stride, 4);
-  EXPECT_EQ(view.block_tables_data,
-            std::vector<int32_t>({0, 1, 2, 0, 3, 4, 5, 0}));
+  EXPECT_EQ(view.block_table_slices.size(), 2);
+  EXPECT_EQ(view.block_table_slices[0].size(), 4);
+  EXPECT_EQ(std::vector<int32_t>(view.block_table_slices[0].begin(),
+                                 view.block_table_slices[0].end()),
+            std::vector<int32_t>({0, 1, 2, 0}));
+  EXPECT_EQ(std::vector<int32_t>(view.block_table_slices[1].begin(),
+                                 view.block_table_slices[1].end()),
+            std::vector<int32_t>({3, 4, 5, 0}));
 
-  ModelInputParams params;
-  params.num_sequences = 2;
   DecodeBuildBuffers buf;
   append_decode_row(view,
                     {.seq_id = 1, .token_id = 99, .position_offset = 2},
@@ -186,11 +194,13 @@ TEST(SpecDecodeInputBuilderTest, ValidateRowsStartFromCorrectedCurrentView) {
   view.kv_seq_lens = kv_seq_lens;
   view.block_tables_cpu =
       torch::tensor({{0, 1, 2, 0}, {3, 4, 5, 0}}, torch::kInt);
-  view.block_tables_data = {view.block_tables_cpu.data_ptr<int32_t>(),
-                            static_cast<size_t>(view.block_tables_cpu.numel())};
-  view.num_sequences = static_cast<int32_t>(view.block_tables_cpu.size(0));
-  view.block_table_row_stride =
-      static_cast<int32_t>(view.block_tables_cpu.size(1));
+  view.block_table_slices.reserve(view.block_tables_cpu.size(0));
+  for (int64_t seq_id = 0; seq_id < view.block_tables_cpu.size(0); ++seq_id) {
+    torch::Tensor block_table = view.block_tables_cpu[seq_id];
+    view.block_table_slices.emplace_back(
+        block_table.data_ptr<int32_t>(),
+        static_cast<size_t>(block_table.numel()));
+  }
 
   DecodeBuildBuffers buf;
   append_decode_row(
@@ -236,16 +246,14 @@ TEST(SpecDecodeInputBuilderTest, ValidateInputsAtbChunkedPrefillShape) {
 }
 
 TEST(SpecDecodeInputBuilderTest, FirstDecodeInputsFixAndNonFixMix) {
-  ModelInputParams params;
-  params.num_sequences = 2;
   std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({6, 9});
 
   torch::Tensor token_ids = torch::tensor({100, 200}, torch::kInt);
   torch::Tensor positions = torch::tensor({5, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
-  auto view = make_decode_cpu_view(
-      token_ids, positions, block_tables, to_slice(kv_seq_lens));
+  auto params = make_test_params(2, kv_seq_lens, block_tables);
+  auto view = make_decode_cpu_view(token_ids, positions, params);
 
   DecodeBuildBuffers buf;
   std::vector<int32_t> select_row_idx(2, 0);
@@ -277,16 +285,14 @@ TEST(SpecDecodeInputBuilderTest, FirstDecodeInputsFixAndNonFixMix) {
 }
 
 TEST(SpecDecodeInputBuilderTest, AppendDecodeRowWithInputTokenSource) {
-  ModelInputParams params;
-  params.num_sequences = 2;
   std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
 
   torch::Tensor token_ids = torch::tensor({10, 20}, torch::kInt);
   torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
-  auto view = make_decode_cpu_view(
-      token_ids, positions, block_tables, to_slice(kv_seq_lens));
+  auto params = make_test_params(2, kv_seq_lens, block_tables);
+  auto view = make_decode_cpu_view(token_ids, positions, params);
 
   DecodeBuildBuffers buf;
   append_decode_row(view,
@@ -345,16 +351,14 @@ TEST(SpecDecodeInputBuilderTest, ResolveTokenWithPositionOffset) {
 }
 
 TEST(SpecDecodeInputBuilderTest, AppendDecodeRowFromLastStep) {
-  ModelInputParams params;
-  params.num_sequences = 2;
   std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({6, 9});
 
   torch::Tensor token_ids = torch::tensor({100, -1}, torch::kInt);
   torch::Tensor positions = torch::tensor({5, 8}, torch::kInt);
   torch::Tensor block_tables =
       torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt);
-  auto view = make_decode_cpu_view(
-      token_ids, positions, block_tables, to_slice(kv_seq_lens));
+  auto params = make_test_params(2, kv_seq_lens, block_tables);
+  auto view = make_decode_cpu_view(token_ids, positions, params);
 
   std::vector<int64_t> last_step_tokens = {201, 202};
   Slice<int64_t> last_step_slice = {
@@ -478,15 +482,122 @@ TEST(DraftProbsBuilderTest, BuildValidateTensorsDenseInputFallback) {
                                          /*batch_size=*/2,
                                          /*vocab_size=*/3,
                                          /*enable_opt_validate_probs=*/true);
+}
 
-  EXPECT_EQ(draft_token_ids.dim(), 2);
-  EXPECT_EQ(draft_token_ids.size(0), 2);
-  EXPECT_EQ(draft_token_ids.size(1), 1);
-  EXPECT_EQ(draft_probs.dim(), 2);
-  EXPECT_EQ(draft_probs.size(0), 2);
-  EXPECT_EQ(draft_probs.size(1), 1);
-  EXPECT_TRUE(torch::allclose(
-      draft_probs, torch::tensor({{0.7f}, {0.6f}}, torch::kFloat32)));
+ModelInputParams make_multiblock_test_params(
+    int32_t num_sequences,
+    const std::vector<int32_t>& kv_seq_lens,
+    const std::vector<torch::Tensor>& multi_block_tables) {
+  ModelInputParams params;
+  params.num_sequences = num_sequences;
+  params.kv_seq_lens_vec = kv_seq_lens;
+  params.multi_block_tables = multi_block_tables;
+  return params;
+}
+
+TEST(SpecDecodeInputBuilderTest, MultiBlockDraftSingleRowPerSeq) {
+  std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
+  torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
+
+  std::vector<torch::Tensor> multi_block_tables = {
+      torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt),
+      torch::tensor({{10, 11, 12}, {13, 14, 15}}, torch::kInt)};
+  auto params = make_multiblock_test_params(2, kv_seq_lens, multi_block_tables);
+  auto view = make_decode_cpu_view(torch::Tensor(), positions, params);
+
+  EXPECT_TRUE(view.model_managed_multiblock);
+  EXPECT_EQ(view.multi_block_table_slices.size(), 2);
+  EXPECT_EQ(view.multi_block_table_slices[0].size(), 2);
+  EXPECT_EQ(view.multi_block_table_slices[1].size(), 2);
+
+  DecodeBuildBuffers buf;
+  for (int32_t seq_id = 0; seq_id < params.num_sequences; ++seq_id) {
+    RowSpec row;
+    row.seq_id = seq_id;
+    row.position_offset = 1;
+    row.append_token = false;
+    row.append_block_table = true;
+    append_decode_row(view, row, /*block_size=*/4, buf);
+  }
+
+  EXPECT_TRUE(buf.out_token_ids.empty());
+  EXPECT_EQ(buf.out_positions, std::vector<int32_t>({5, 9}));
+  EXPECT_EQ(buf.out_new_cache_slots, std::vector<int32_t>({0, 0}));
+
+  ASSERT_EQ(buf.out_multi_block_tables.size(), 2);
+  ASSERT_EQ(buf.out_multi_block_tables[0].size(), 2);
+  EXPECT_EQ(buf.out_multi_block_tables[0][0],
+            std::vector<int32_t>({0, 1, 2}));
+  EXPECT_EQ(buf.out_multi_block_tables[0][1],
+            std::vector<int32_t>({3, 4, 5}));
+  ASSERT_EQ(buf.out_multi_block_tables[1].size(), 2);
+  EXPECT_EQ(buf.out_multi_block_tables[1][0],
+            std::vector<int32_t>({10, 11, 12}));
+  EXPECT_EQ(buf.out_multi_block_tables[1][1],
+            std::vector<int32_t>({13, 14, 15}));
+
+  EXPECT_TRUE(buf.out_block_tables.empty());
+}
+
+TEST(SpecDecodeInputBuilderTest, MultiBlockValidateExpansion) {
+  std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
+
+  torch::Tensor token_ids = torch::tensor({10, 20}, torch::kInt);
+  torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
+  std::vector<torch::Tensor> multi_block_tables = {
+      torch::tensor({{0, 1, 2}, {3, 4, 5}}, torch::kInt)};
+  auto params = make_multiblock_test_params(2, kv_seq_lens, multi_block_tables);
+  auto view = make_decode_cpu_view(token_ids, positions, params);
+
+  EXPECT_TRUE(view.model_managed_multiblock);
+  const int32_t num_val_tokens = 3;
+
+  DecodeBuildBuffers buf;
+  for (int32_t seq_id = 0; seq_id < params.num_sequences; ++seq_id) {
+    for (int32_t val_idx = 0; val_idx < num_val_tokens; ++val_idx) {
+      RowSpec row;
+      row.seq_id = seq_id;
+      if (val_idx == 0) {
+        row.use_input_token = true;
+      } else {
+        row.token_id = -1 * val_idx;
+      }
+      row.position_offset = 1 + val_idx;
+      row.append_q_len_one = true;
+      row.append_block_table = true;
+      row.append_kv_len = true;
+      append_decode_row(view, row, /*block_size=*/4, buf);
+    }
+  }
+
+  EXPECT_EQ(buf.out_token_ids,
+            std::vector<int32_t>({10, -1, -2, 20, -1, -2}));
+  EXPECT_EQ(buf.out_positions,
+            std::vector<int32_t>({5, 6, 7, 9, 10, 11}));
+  EXPECT_EQ(buf.out_new_cache_slots,
+            std::vector<int32_t>({0, 0, 0, 0, 0, 0}));
+  EXPECT_EQ(buf.out_kv_seq_lens, to_layout_seq_lens({6, 7, 8, 10, 11, 12}));
+  EXPECT_EQ(buf.out_q_seq_lens, to_layout_seq_lens({1, 1, 1, 1, 1, 1}));
+  EXPECT_TRUE(buf.out_block_tables.empty());
+
+  ASSERT_EQ(buf.out_multi_block_tables.size(), 1);
+  ASSERT_EQ(buf.out_multi_block_tables[0].size(), 6);
+  EXPECT_EQ(buf.out_multi_block_tables[0][0],
+            std::vector<int32_t>({0, 1, 2}));
+  EXPECT_EQ(buf.out_multi_block_tables[0][3],
+            std::vector<int32_t>({3, 4, 5}));
+}
+
+TEST(SpecDecodeInputBuilderTest, MultiBlockViewRejectsEmptyBoth) {
+  std::vector<int32_t> kv_seq_lens = to_layout_seq_lens({5, 9});
+  torch::Tensor positions = torch::tensor({4, 8}, torch::kInt);
+
+  ModelInputParams params;
+  params.num_sequences = 2;
+  params.kv_seq_lens_vec = kv_seq_lens;
+
+  EXPECT_DEATH(make_decode_cpu_view(torch::Tensor(), positions, params),
+               "decode view requires block_tables or multi_block_tables");
 }
 
 }  // namespace

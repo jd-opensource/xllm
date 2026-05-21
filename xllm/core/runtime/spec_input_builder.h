@@ -32,16 +32,19 @@ namespace specBuilder {
 // CPU-side decoded input view used by builder helpers.
 // It keeps block-table ownership plus lightweight slices for fast row access.
 struct DecodeCpuView {
+  torch::Tensor token_ids_cpu;
+  torch::Tensor positions_cpu;
   torch::Tensor block_tables_cpu;
+  std::vector<torch::Tensor> multi_block_tables_cpu;
   std::vector<int32_t> token_ids_vec;
   std::vector<int32_t> positions_vec;
   std::vector<int32_t> kv_seq_lens_vec;
   Slice<int32_t> token_ids;
   Slice<int32_t> positions;
   Slice<int32_t> kv_seq_lens;
-  Slice<int32_t> block_tables_data;
-  int32_t num_sequences = 0;
-  int32_t block_table_row_stride = 0;
+  std::vector<Slice<int32_t>> block_table_slices;
+  std::vector<std::vector<Slice<int32_t>>> multi_block_table_slices;
+  bool model_managed_multiblock = false;
 };
 
 // Aggregated output vectors produced by row builders.
@@ -53,6 +56,7 @@ struct DecodeBuildBuffers {
   std::vector<int32_t> out_q_seq_lens;
   std::vector<int32_t> out_new_cache_slots;
   std::vector<std::vector<int32_t>> out_block_tables;
+  std::vector<std::vector<std::vector<int32_t>>> out_multi_block_tables;
   int32_t kv_max_seq_len = 0;
 };
 
@@ -81,8 +85,7 @@ struct TokenWithOffset {
 // Creates a CPU decode view from tensors and kv_seq_lens layout.
 DecodeCpuView make_decode_cpu_view(const torch::Tensor& token_ids_cpu,
                                    const torch::Tensor& positions_cpu,
-                                   const torch::Tensor& block_tables_cpu,
-                                   const Slice<int32_t>& kv_seq_lens_slice);
+                                   const ModelInputParams& params);
 
 // Appends one logical decode row into output buffers.
 void append_decode_row(const DecodeCpuView& view,
