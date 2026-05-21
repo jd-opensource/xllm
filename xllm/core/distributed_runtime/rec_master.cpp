@@ -749,7 +749,8 @@ std::shared_ptr<Request> RecMaster::build_request_common(
     const RequestParams& sp,
     OutputCallback callback,
     bool build_stop_checker) {
-  int32_t max_context_len = model_args_.max_position_embeddings();
+  const int32_t max_context_len = model_args_.max_position_embeddings();
+  int32_t prompt_token_limit = max_context_len;
   if (!options_.enable_chunked_prefill()) {
     int32_t max_tokens_per_req = options_.max_tokens_per_batch();
     if (rec_type_ == RecType::kLlmRec && is_rec_multi_round_mode()) {
@@ -757,9 +758,9 @@ std::shared_ptr<Request> RecMaster::build_request_common(
           << "max_seqs_per_batch must be greater than 0 in multi-round mode";
       max_tokens_per_req /= options_.max_seqs_per_batch();
     }
-    max_context_len = std::min(max_context_len, max_tokens_per_req);
+    prompt_token_limit = std::min(prompt_token_limit, max_tokens_per_req);
   }
-  if (prompt_tokens.size() >= max_context_len) {
+  if (prompt_tokens.size() >= prompt_token_limit) {
     LOG(ERROR) << "Prompt is too long: " << prompt_tokens.size();
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, "Prompt is too long");
     return nullptr;
