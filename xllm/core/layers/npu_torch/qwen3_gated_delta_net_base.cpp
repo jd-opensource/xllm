@@ -15,9 +15,6 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
-#include <atomic>
-#include <cstdlib>
-#include <sstream>
 #include <tuple>
 
 #include "xllm/core/kernels/ops_api.h"
@@ -26,30 +23,6 @@ namespace xllm {
 namespace layer {
 
 namespace {
-bool qwen35_gdn_debug_enabled() {
-  const char* value = std::getenv("XLLM_DEBUG_QWEN35_GDN");
-  if (value == nullptr) {
-    return false;
-  }
-  std::string flag(value);
-  return flag == "1" || flag == "true" || flag == "TRUE" || flag == "on" ||
-         flag == "ON";
-}
-
-template <typename T>
-void append_vector(std::ostringstream& oss,
-                   const char* name,
-                   const std::vector<T>& values) {
-  oss << " " << name << "=[";
-  for (size_t i = 0; i < values.size(); ++i) {
-    if (i != 0) {
-      oss << ",";
-    }
-    oss << values[i];
-  }
-  oss << "]";
-}
-
 torch::Tensor l2norm(const torch::Tensor& x, int64_t dim, double eps = 1e-6) {
   auto norm = torch::sqrt(torch::sum(torch::square(x), dim, true) + eps);
   return x / norm;
@@ -548,27 +521,6 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   const bool use_spec_verify = input_params.is_spec_verify;
   bool is_any_prefill =
       attn_metadata.is_prefill || attn_metadata.is_chunked_prefill;
-  if (qwen35_gdn_debug_enabled() &&
-      (attn_metadata.is_chunked_prefill || batch_size > 1)) {
-    static std::atomic<int> log_count{0};
-    const int current = log_count.fetch_add(1);
-    if (current < 160) {
-      std::ostringstream oss;
-      oss << "qwen35_gdn meta idx=" << current
-          << " is_prefill=" << attn_metadata.is_prefill
-          << " is_chunked_prefill=" << attn_metadata.is_chunked_prefill
-          << " is_spec_verify=" << use_spec_verify
-          << " batch_size=" << batch_size << " seq_len=" << seq_len
-          << " max_query_len=" << attn_metadata.max_query_len
-          << " checkpoint_stride=" << checkpoint_stride;
-      append_vector(oss, "q_lens", attn_metadata.q_seq_lens_vec);
-      append_vector(oss, "kv_lens", attn_metadata.kv_seq_lens_vec);
-      append_vector(oss, "query_start_loc", input_params.query_start_loc);
-      append_vector(oss, "linear_state_ids", input_params.linear_state_ids);
-      append_vector(oss, "has_initial_state", input_params.has_initial_state);
-      LOG(INFO) << oss.str();
-    }
-  }
 
   if (!use_spec_verify && is_any_prefill) {
     torch::IntArrayRef num_accepted_tokens_opt;
