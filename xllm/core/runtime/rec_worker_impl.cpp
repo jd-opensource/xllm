@@ -568,7 +568,7 @@ RecWorkerImpl::OneRecWorkPipeline::OneRecWorkPipeline(
 }
 
 ForwardInput RecWorkerImpl::OneRecWorkPipeline::prepare_inputs(Batch& batch) {
-  ThreadPool* thread_pool =
+  MPMCThreadPool* thread_pool =
       runtime_.worker.input_builder_thread_pool_
           ? runtime_.worker.input_builder_thread_pool_.get()
           : nullptr;
@@ -1065,7 +1065,7 @@ void RecWorkerImpl::OneRecXAttentionWorkPipeline::execute_cache_select(
 
 ForwardInput RecWorkerImpl::OneRecXAttentionWorkPipeline::prepare_inputs(
     Batch& batch) {
-  ThreadPool* thread_pool =
+  MPMCThreadPool* thread_pool =
       runtime_.worker.input_builder_thread_pool_
           ? runtime_.worker.input_builder_thread_pool_.get()
           : nullptr;
@@ -1928,7 +1928,7 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::LlmRecMultiRoundPipeline(
 
 ForwardInput RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_inputs(
     Batch& batch) {
-  ThreadPool* thread_pool =
+  MPMCThreadPool* thread_pool =
       runtime_.worker.input_builder_thread_pool_
           ? runtime_.worker.input_builder_thread_pool_.get()
           : nullptr;
@@ -2857,10 +2857,8 @@ RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
             << options_.rec_worker_max_concurrency();
   const int64_t num_threads = std::max<int64_t>(
       1, util::get_int_env("XLLM_REC_INPUT_BUILDER_THREADS", 16));
-  input_builder_thread_pool_ = std::make_shared<ThreadPool>(
-      /*num_threads=*/static_cast<size_t>(num_threads),
-      /*cpu_binding=*/false,
-      /*pool_name=*/"RecWorkerImpl.input_builder");
+  input_builder_thread_pool_ =
+      std::make_shared<MPMCThreadPool>(static_cast<size_t>(num_threads));
 }
 
 RecWorkerImpl::~RecWorkerImpl() {

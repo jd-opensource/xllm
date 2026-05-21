@@ -42,7 +42,7 @@ class OneRecBatchInputBuilder : public RecBatchInputBuilder {
       const uint64_t batch_id,
       const ModelArgs* args,
       BatchForwardType batch_forward_type,
-      ThreadPool* thread_pool = nullptr);
+      MPMCThreadPool* thread_pool = nullptr);
 
  public:
   ForwardInput build_rec_forward_input(
@@ -57,7 +57,7 @@ class OneRecBatchInputBuilder : public RecBatchInputBuilder {
   std::vector<BlockTransferInfo>* swap_block_transfer_infos_ = nullptr;
   const uint64_t batch_id_;
   const ModelArgs* args_ = nullptr;
-  ThreadPool* thread_pool_ = nullptr;
+  MPMCThreadPool* thread_pool_ = nullptr;
   BatchForwardType batch_forward_type_;
   // High performance cache system
   struct HighPerformanceCache {

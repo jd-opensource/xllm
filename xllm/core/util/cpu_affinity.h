@@ -18,6 +18,8 @@ limitations under the License.
 #include <folly/Executor.h>
 #include <folly/Range.h>
 #include <folly/executors/thread_factory/NamedThreadFactory.h>
+#include <sched.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <cstddef>
@@ -42,6 +44,12 @@ class CpuAffinity final {
   void set_cpu_affinity(const std::string& cpu_affinity);
 
   void clear_cpu_affinity();
+
+  // Get the number of available CPU cores.
+  static int32_t get_available_cpu_cores_count();
+
+  // Get the list of available CPU IDs.
+  static std::vector<int32_t> get_available_cpu_ids();
 
   int32_t next_cpu_core();
 
