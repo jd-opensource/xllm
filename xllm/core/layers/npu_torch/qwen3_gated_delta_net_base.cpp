@@ -482,6 +482,8 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
     const ModelInputParams& input_params) {
+  // Save original hidden_states size for potential padding later
+  const int64_t original_num_tokens = hidden_states.size(0);
   auto [qkvz_padded, ba_padded] =
       project_padded_inputs(hidden_states, attn_metadata);
   int64_t batch_size = qkvz_padded.size(0);
@@ -811,8 +813,15 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   auto rearranged_norm =
       norm_out.reshape({norm_out.size(0), norm_out.size(1) * norm_out.size(2)});
   rearranged_norm = reshape_qkvz_unpad(attn_metadata, rearranged_norm);
-  auto attn_output = o_proj_->forward(rearranged_norm);
-  return attn_output;
+  // For chunked prefill or spec verify, reshape_qkvz_with_pad may pad each
+  // batch to max_len, causing output tokens > original_num_tokens. We need to
+  // slice back to original_num_tokens to match residual shape for add_rms_norm.
+  if (rearranged_norm.size(0) > original_num_tokens) {
+    // Slice excess padding tokens
+    rearranged_norm =
+        rearranged_norm.slice(0, 0, original_num_tokens).contiguous();
+  }
+  return o_proj_->forward(rearranged_norm);
 }
 
 torch::Tensor Qwen3GatedDeltaNetBaseImpl::reshape_qkvz_unpad(

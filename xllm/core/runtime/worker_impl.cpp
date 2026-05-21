@@ -116,6 +116,7 @@ class ScopedAtenLoadThreads {
   bool active_ = false;
 };
 
+#if defined(USE_NPU)
 void prepare_input_params_for_linear_attention(ModelInputParams& input_params) {
   int64_t batch_size = input_params.block_tables.size(0);
   input_params.query_start_loc.resize(batch_size + 1, 0);
@@ -134,6 +135,7 @@ void prepare_input_params_for_linear_attention(ModelInputParams& input_params) {
                            has_initial_state_int64.data_ptr<int64_t>() +
                                has_initial_state_int64.size(0));
 }
+#endif
 
 }  // namespace
 
