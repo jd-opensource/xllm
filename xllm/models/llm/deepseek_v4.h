@@ -617,7 +617,17 @@ class DeepseekV4ModelImpl
         << "DeepSeek V4 received incompatible graph metadata state";
     auto modified_input_params = input_params;
     if (modified_input_params.actual_num_sequences == 0) {
-      fill_empty_dp_rank_input_params(modified_input_params);
+      // Graph metadata must keep the bucket-shaped sequence count used during
+      // capture/replay. The normal empty-DP fallback intentionally shrinks the
+      // request to one dummy token for eager/forward execution; using it here
+      // would capture a too-small packed metadata buffer and later replay can
+      // exceed that persistent capacity when another DP shard has real tokens.
+      if (modified_input_params.enable_graph &&
+          modified_input_params.num_sequences > 0) {
+        fill_empty_dp_rank_graph_metadata_input_params(modified_input_params);
+      } else {
+        fill_empty_dp_rank_input_params(modified_input_params);
+      }
     }
     normalize_graph_metadata_input_params(modified_input_params);
     auto& dp_token_nums = modified_input_params.dp_global_token_nums;
@@ -1106,6 +1116,39 @@ class DeepseekV4ModelImpl
       block_num = std::max<int64_t>(block_num, 1);
       params.multi_block_tables.push_back(
           torch::zeros({1, block_num}, cpu_int_options));
+    }
+  }
+
+  void fill_empty_dp_rank_graph_metadata_input_params(
+      ModelInputParams& params) const {
+    const int64_t metadata_batch_size =
+        std::max<int64_t>(params.num_sequences, 1);
+    params.num_sequences = static_cast<int32_t>(metadata_batch_size);
+    params.kv_max_seq_len = std::max<uint32_t>(params.kv_max_seq_len, 1);
+    params.q_max_seq_len = std::max<uint32_t>(params.q_max_seq_len, 1);
+
+    auto pad_lens_vec = [metadata_batch_size](std::vector<int>& lens) {
+      lens.resize(static_cast<size_t>(metadata_batch_size), 1);
+      for (auto& len : lens) {
+        len = std::max<int>(len, 1);
+      }
+    };
+    pad_lens_vec(params.kv_seq_lens_vec);
+    pad_lens_vec(params.q_seq_lens_vec);
+
+    if (!params.multi_block_tables.empty()) {
+      return;
+    }
+
+    auto cpu_int_options = torch::TensorOptions()
+                               .dtype(torch::kInt32)
+                               .device(torch::kCPU)
+                               .pinned_memory(true);
+    const int32_t manager_num = static_cast<int32_t>(group_infos_.size());
+    params.multi_block_tables.reserve(manager_num);
+    for (int32_t manager_id = 0; manager_id < manager_num; ++manager_id) {
+      params.multi_block_tables.push_back(
+          torch::zeros({metadata_batch_size, 1}, cpu_int_options));
     }
   }
 
