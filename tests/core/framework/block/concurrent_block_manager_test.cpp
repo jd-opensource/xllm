@@ -52,7 +52,8 @@ TEST(ConcurrentBlockManagerTest, ContinuesPrefixCacheFromExistingBlocks) {
   existed_blocks.emplace_back(std::move(seed_blocks[0]));
 
   std::vector<Block> tail_blocks;
-  tail_blocks.push_back(std::move(seed_blocks[1]));
+  tail_blocks.reserve(1);
+  tail_blocks.emplace_back(std::move(seed_blocks[1]));
   manager.cache(tail_blocks);
   manager.deallocate(tail_blocks);
   tail_blocks.clear();
