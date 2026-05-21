@@ -40,7 +40,7 @@ TEST(ConcurrentBlockManagerTest, ContinuesPrefixCacheFromExistingBlocks) {
   ConcurrentBlockManagerImpl manager(options);
 
   std::vector<int32_t> token_ids = {11, 12, 13, 14};
-  std::vector<Block> seed_blocks = manager.allocate(2);
+  std::vector<Block> seed_blocks = manager.allocate(/*num_blocks=*/2);
   ASSERT_EQ(seed_blocks.size(), 2);
   PrefixCache::compute_hash_keys(token_ids, seed_blocks);
 
