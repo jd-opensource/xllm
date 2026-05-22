@@ -46,6 +46,22 @@ cc_test(
     GTest::gtest_main
 )
 
+cc_test(
+  NAME
+    cp_input_partition_test
+  SRCS
+    cp_input_partition_test.cpp
+    "${PROJECT_SOURCE_DIR}/xllm/core/runtime/cp_input_partition.cpp"
+  DEPS
+    torch
+    $<$<BOOL:${USE_NPU}>:torch_npu>
+    :platform
+    :request
+    glog::glog
+    proto::xllm_proto
+    GTest::gtest_main
+)
+
 if(USE_MLU)
   cc_test(
     NAME
