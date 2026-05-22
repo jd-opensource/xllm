@@ -206,9 +206,7 @@ class BaseLayer : public torch::nn::Module {
 
   virtual void run_task(std::string taskName, std::function<int()> task) const;
 
-  virtual void set_residual(std::shared_ptr<torch::Tensor> residual) {
-    residual_ = residual;
-  };
+  virtual void set_residual(torch::Tensor residual) { residual_ = residual; };
 
   virtual void set_layer_id(int32_t layer_id) {};
 
@@ -220,7 +218,7 @@ class BaseLayer : public torch::nn::Module {
   torch::ScalarType dtype_;
   std::vector<int32_t> placeholder_vec_;
   std::vector<int32_t> placeholder_vec_zero_;
-  std::shared_ptr<torch::Tensor> residual_{nullptr};
+  torch::Tensor residual_;
   xllm::ParallelArgs parallel_args_;
   std::function<void(const std::string&, std::function<int()>)> run_task_func_;
   std::string quantize_type_;

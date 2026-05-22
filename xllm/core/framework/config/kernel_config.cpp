@@ -37,6 +37,13 @@ DEFINE_int32(enable_fused_mc2,
              "Fused MC2 mode for NPU EP MoE. -1 uses auto default, 0 "
              "disables fused MC2, 1 uses DispatchFFNCombine, 2 uses "
              "DispatchGmmCombineDecode.");
+DEFINE_bool(enable_interlayer_addnorm,
+            false,
+            "enable fused interlayer addnorm ops.");
+
+DEFINE_bool(enable_split_rmsnorm_rope,
+            false,
+            "enable fused split rmsnorm rope ops.");
 #endif
 
 namespace xllm {
@@ -65,6 +72,8 @@ void KernelConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(npu_kernel_backend);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_intralayer_addnorm);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_fused_mc2);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_interlayer_addnorm);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_split_rmsnorm_rope);
 #endif
 }
 
@@ -74,6 +83,8 @@ void KernelConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(npu_kernel_backend);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_intralayer_addnorm);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_fused_mc2);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_interlayer_addnorm);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_split_rmsnorm_rope);
 #endif
 }
 

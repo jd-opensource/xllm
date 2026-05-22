@@ -22,6 +22,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/speculative_config.h"
 #include "core/framework/model/model_output.h"
@@ -139,9 +140,15 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
       h = npu_embed_tokens_(tokens, 0);
     }
 
-    std::shared_ptr<torch::Tensor> residual =
-        std::make_shared<torch::Tensor>(torch::zeros_like(h, h.options()));
-    set_residual(residual);
+    // This residual tensor would be shared by all the layers, as the
+    // current layer would use the output residual from previous layer,
+    // the layer could use the residual through local variable
+    // without passing the residual tensor to the layer.
+    torch::Tensor residual;
+    if (::xllm::KernelConfig::get_instance().enable_interlayer_addnorm()) {
+      residual = torch::zeros_like(h, h.options());
+      set_residual(residual);
+    }
 
     if (use_deepstack) {
       deep_stacks =

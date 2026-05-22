@@ -123,7 +123,7 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
     decoder_layer_->refresh_rolling_weights();
   }
 
-  virtual void set_residual(std::shared_ptr<torch::Tensor> residual) {
+  virtual void set_residual(torch::Tensor residual) {
     decoder_layer_->set_residual(residual);
   }
 
@@ -365,7 +365,7 @@ class LlmModelImplBase : public torch::nn::Module {
     npu_embed_tokens_ = npu_word_embedding;
   }
 
-  virtual void set_residual(std::shared_ptr<torch::Tensor> residual) {
+  virtual void set_residual(torch::Tensor residual) {
     for (auto& layer : layers_) {
       layer->set_residual(residual);
     }

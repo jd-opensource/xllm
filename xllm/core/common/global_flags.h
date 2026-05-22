@@ -354,6 +354,10 @@ DECLARE_string(npu_kernel_backend);
 DECLARE_bool(enable_intralayer_addnorm);
 
 DECLARE_int32(enable_fused_mc2);
+
+DECLARE_bool(enable_interlayer_addnorm);
+
+DECLARE_bool(enable_split_rmsnorm_rope);
 #endif
 
 // --- chat template config ---

@@ -43,7 +43,9 @@ class KernelConfig final {
         {"enable_customize_mla_kernel",
          "npu_kernel_backend",
          "enable_intralayer_addnorm",
-         "enable_fused_mc2"}};
+         "enable_fused_mc2",
+         "enable_interlayer_addnorm",
+         "enable_split_rmsnorm_rope"}};
     return kOptionCategory;
   }
 
@@ -55,6 +57,10 @@ class KernelConfig final {
   PROPERTY(bool, enable_intralayer_addnorm) = false;
 
   PROPERTY(int32_t, enable_fused_mc2) = 0;
+
+  PROPERTY(bool, enable_interlayer_addnorm) = false;
+
+  PROPERTY(bool, enable_split_rmsnorm_rope) = false;
 #endif
 };
 

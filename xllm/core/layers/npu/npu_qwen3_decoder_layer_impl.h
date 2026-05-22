@@ -63,7 +63,8 @@ class NpuQwen3DecoderLayerImpl : public BaseLayer {
 
   void set_layer_id(int32_t layer_id) override {
     prefill_param_.layerId = layer_id;
-    decode_param_.layerId = layer_id;
+    decode_graph_param_.layerId = layer_id;
+    decode_eager_param_.layerId = layer_id;
   }
 
  private:
