@@ -385,16 +385,26 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   // [batch * seq_len, dim] to match kernel expectations for run_mode=1.
   // Also build per-token query_start_loc that covers all tokens including
   // padding entries, since input_params.parallel.query_start_loc only covers
-  // actual requests.
+  // actual requests. Similarly expand linear_state_indices_vec so each token
+  // maps to the correct conv cache slot.
   torch::Tensor mixed_qkv_input = mixed_qkv;
   std::vector<int64_t> query_start_loc_decode;
+  std::vector<int64_t> linear_state_indices_vec_decode;
   if (!attn_metadata.is_prefill && mixed_qkv.dim() == 3) {
     int64_t num_tokens = batch_size * seq_len;
     mixed_qkv_input = mixed_qkv.view({num_tokens, mixed_qkv.size(-1)});
 
-    query_start_loc_decode.reserve(num_tokens + 1);
+    query_start_loc_decode.reserve(static_cast<size_t>(num_tokens + 1));
     for (int64_t i = 0; i <= num_tokens; ++i) {
-      query_start_loc_decode.push_back(i);
+      query_start_loc_decode.emplace_back(i);
+    }
+
+    linear_state_indices_vec_decode.reserve(static_cast<size_t>(num_tokens));
+    for (int64_t i = 0; i < batch_size; ++i) {
+      for (int64_t j = 0; j < seq_len; ++j) {
+        linear_state_indices_vec_decode.emplace_back(
+            linear_state_indices_vec[i]);
+      }
     }
   }
 
@@ -403,13 +413,18 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
           ? query_start_loc_decode
           : input_params.parallel.query_start_loc;
 
+  const std::vector<int64_t>& linear_state_indices_to_use =
+      !attn_metadata.is_prefill && !linear_state_indices_vec_decode.empty()
+          ? linear_state_indices_vec_decode
+          : linear_state_indices_vec;
+
   mixed_qkv = xllm::kernel::causal_conv1d(
       mixed_qkv_input,
       conv_weight,
       conv_cache,
       std::optional<torch::Tensor>(),  // bias (no bias for qwen3)
       torch::IntArrayRef(query_start_loc_to_use),
-      torch::IntArrayRef(linear_state_indices_vec),
+      torch::IntArrayRef(linear_state_indices_to_use),
       has_initial_state,
       num_accepted_tokens_opt,
       1,        // activation_mode
