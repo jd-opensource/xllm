@@ -335,7 +335,7 @@ ForwardOutput VLMEngine::step(std::vector<Batch>& batch) {
 
   assert(dp_size_ == worker_clients_num_ / dp_local_tp_size_);
   size_t dp_rank = 0;
-  for (auto worker_rank = 0; worker_rank < worker_clients_num_;
+  for (int32_t worker_rank = 0; worker_rank < worker_clients_num_;
        worker_rank += dp_local_tp_size_) {
     auto result = results[worker_rank].value();
     const bool empty_shard = batch[dp_rank].size() == 0 &&

@@ -24,6 +24,8 @@ limitations under the License.
 namespace xllm {
 
 class JsonReader;
+class KVCacheConfig;
+class SchedulerConfig;
 
 class DisaggPDConfig final {
  public:
@@ -35,6 +37,8 @@ class DisaggPDConfig final {
   void from_flags();
   void from_json(const JsonReader& json);
   void initialize();
+  void normalize_mlu(KVCacheConfig& kv_cache_config,
+                     SchedulerConfig& scheduler_config);
 
   [[nodiscard]] static const OptionCategory& option_category() {
     static const OptionCategory kOptionCategory = {
@@ -62,6 +66,10 @@ class DisaggPDConfig final {
   PROPERTY(std::string, kv_cache_transfer_mode) = "PUSH";
 
   PROPERTY(int32_t, transfer_listen_port) = 26000;
+
+  PROPERTY(bool, kv_push_dst_rotate) = true;
+
+  PROPERTY(bool, kv_push_timing_log) = false;
 };
 
 }  // namespace xllm

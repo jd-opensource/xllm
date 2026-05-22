@@ -71,8 +71,14 @@ bool CommChannel::check_health() {
 }
 
 bool CommChannel::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
+  if (!kv_cache_shape.has_key_cache_shape() ||
+      kv_cache_shape.key_cache_shape().empty()) {
+    LOG(ERROR) << "allocate_kv_cache failed: key cache shape is empty";
+    return false;
+  }
   proto::AllocateKVCacheRequest request;
   kv_cache_shape.to_proto(request.mutable_kv_cache_shape());
+
   proto::Status s;
   brpc::Controller cntl;
   stub_->AllocateKVCache(&cntl, &request, &s, nullptr);
@@ -302,6 +308,12 @@ bool CommChannel::process_group_test() {
 
 bool CommChannel::allocate_kv_cache_with_transfer(
     const KVCacheShape& kv_cache_shape) {
+  if (!kv_cache_shape.has_key_cache_shape() ||
+      kv_cache_shape.key_cache_shape().empty()) {
+    LOG(ERROR)
+        << "AllocateKVCacheWithTransfer failed: key cache shape is empty";
+    return false;
+  }
   proto::AllocateKVCacheRequest request;
   kv_cache_shape.to_proto(request.mutable_kv_cache_shape());
 

@@ -32,6 +32,7 @@ limitations under the License.
 #include "framework/block/block_manager_pool.h"
 #include "framework/eplb/eplb_manager.h"
 #include "framework/eplb/eplb_policy.h"
+#include "framework/kv_cache/kv_cache_utils.h"
 #include "framework/quant_args.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "framework/tokenizer/tokenizer_args.h"
@@ -106,13 +107,15 @@ class LLMEngine : public Engine {
                     const std::vector<std::string>& addrs,
                     const std::vector<std::string>& device_ips,
                     const std::vector<uint16_t>& ports,
-                    const int32_t src_dp_size) override;
+                    const int32_t src_dp_size,
+                    const int32_t src_kv_split_size = 1) override;
 
   bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                       const std::vector<std::string>& addrs,
                       const std::vector<std::string>& device_ips,
                       const std::vector<uint16_t>& ports,
-                      const int32_t dp_size) override;
+                      const int32_t src_dp_size,
+                      const int32_t src_kv_split_size = 1) override;
 
   // D2D link for weight transfer - each worker links to one remote addr
   bool link_d2d(const std::vector<std::string>& device_ips) override;

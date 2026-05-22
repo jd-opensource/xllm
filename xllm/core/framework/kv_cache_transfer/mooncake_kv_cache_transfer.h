@@ -97,7 +97,9 @@ class MooncakeKVCacheTransferDefault final
   bool push_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
-      bool is_spec_draft) override;
+      bool is_spec_draft,
+      int32_t kv_split_rank,
+      int32_t kv_split_size) override;
 
  private:
   // Mooncake assigns buffer ids in registration order. Main KV cache registers
@@ -164,7 +166,9 @@ class MooncakeKVCacheTransferXTensor final
   bool push_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
-      bool is_spec_draft) override;
+      bool is_spec_draft,
+      int32_t kv_split_rank,
+      int32_t kv_split_size) override;
 
  private:
   void allocate_kv_cache_impl(std::vector<xllm::KVCache>& kv_caches,
@@ -181,7 +185,9 @@ class MooncakeKVCacheTransferXTensor final
 
   bool push_kv_blocks_impl(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
-      std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer);
+      std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
+      int32_t kv_split_rank,
+      int32_t kv_split_size);
 
   std::string model_id_;
 };

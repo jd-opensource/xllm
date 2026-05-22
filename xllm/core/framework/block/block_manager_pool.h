@@ -39,6 +39,12 @@ class BlockManagerPool : public KVCacheManager {
     PROPERTY(int64_t, num_layers) = 0;  // Required when enable_xtensor is true
     PROPERTY(int64_t, slot_size) = 0;   // Memory size per slot (for xtensor)
     PROPERTY(std::string, model_id);    // Model ID for multi-model support
+    // Token-level sliding window size for CompositeBlockManager.
+    PROPERTY(uint32_t, sliding_window_size) = 0;
+    // For CompositeBlockManager.
+    PROPERTY(std::vector<uint32_t>, manager_types) = {};
+    PROPERTY(std::vector<uint32_t>, compress_ratios) = {};
+    PROPERTY(uint32_t, max_seqs_per_batch) = 0;
   };
 
   explicit BlockManagerPool(const Options& options, int32_t dp_size = 1);

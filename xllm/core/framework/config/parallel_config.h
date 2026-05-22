@@ -59,6 +59,13 @@ class ParallelConfig final {
 
   PROPERTY(int32_t, cp_size) = 1;
 
+  // 0 means follow cp_size (legacy KV-split width).
+  PROPERTY(int32_t, kv_split_size) = 0;
+
+  // KV-split width of the remote prefill instance (decode-side PD only).
+  // 0 falls back to local cp_size when unset.
+  PROPERTY(int32_t, prefill_kv_split_size) = 0;
+
   PROPERTY(int64_t, tp_size) = 1;
 
   PROPERTY(int64_t, sp_size) = 1;
@@ -74,6 +81,14 @@ class ParallelConfig final {
   PROPERTY(int32_t, micro_batch_num) = 1;
 
   PROPERTY(bool, enable_dp_balance) = false;
+
+  [[nodiscard]] int32_t kv_split_size_effective() const noexcept {
+    return kv_split_size_ > 0 ? kv_split_size_ : cp_size_;
+  }
+
+  [[nodiscard]] int32_t prefill_kv_split_size_effective() const noexcept {
+    return prefill_kv_split_size_ > 0 ? prefill_kv_split_size_ : cp_size_;
+  }
 };
 
 }  // namespace xllm

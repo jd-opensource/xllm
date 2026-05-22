@@ -149,6 +149,25 @@ struct ModelArgs {
   PROPERTY(int32_t, index_topk) = 0;
   PROPERTY(bool, indexer_rope_interleave) = false;
 
+  // deepseek v4
+  PROPERTY(int32_t, rope_head_dim) = 0;
+  PROPERTY(int32_t, o_lora_rank) = 0;
+  PROPERTY(int32_t, o_groups) = 0;
+  PROPERTY(std::vector<int32_t>, compress_ratios);
+  PROPERTY(float, compress_rope_theta) = 0.0f;
+  PROPERTY(int32_t, window_size) = 0;
+  PROPERTY(int32_t, n_activated_experts) = 0;
+  PROPERTY(int32_t, n_hash_layers) = 0;
+  PROPERTY(float, factor) = 0.0f;
+  PROPERTY(float, beta_fast) = 0.0f;
+  PROPERTY(float, beta_slow) = 0.0f;
+  PROPERTY(std::string, scale_fmt);
+  PROPERTY(int32_t, hc_mult) = 0;
+  PROPERTY(int32_t, hc_sinkhorn_iters) = 0;
+  PROPERTY(float, hc_eps) = 1e-6f;
+  PROPERTY(int64_t, max_batch_size) = 0;
+  PROPERTY(int64_t, max_seq_len) = 0;
+
   PROPERTY(int32_t, vision_start_token_id) = 0;
   PROPERTY(int32_t, vision_end_token_id) = 0;
   PROPERTY(int32_t, vision_token_id) = 0;
@@ -333,21 +352,21 @@ struct ModelArgs {
   PROPERTY(std::vector<double>, mm_image_normalize_std) = {};
 
   // KIMI_K25
-  PROPERTY(int, mm_init_pos_emb_width) = 64;
-  PROPERTY(int, mm_init_pos_emb_height) = 64;
-  PROPERTY(int, mm_init_pos_emb_time) = 4;
-  PROPERTY(int, mm_km_in_patch_limit) = 16384;
-  PROPERTY(int, mm_km_patch_size) = 14;
+  PROPERTY(int64_t, mm_init_pos_emb_width) = 64;
+  PROPERTY(int64_t, mm_init_pos_emb_height) = 64;
+  PROPERTY(int64_t, mm_init_pos_emb_time) = 4;
+  PROPERTY(int64_t, mm_km_in_patch_limit) = 16384;
+  PROPERTY(int64_t, mm_km_patch_size) = 14;
   PROPERTY(std::vector<int64_t>, mm_km_image_mean) = {};
   PROPERTY(std::vector<int64_t>, mm_km_image_std) = {};
-  PROPERTY(int, mm_km_merge_kernel_size) = 2;
-  PROPERTY(int, mm_km_fixed_output_tokens) = -1;
-  PROPERTY(int, mm_km_patch_limit_on_one_side) = 512;
-  PROPERTY(int, mm_km_in_patch_limit_each_frame) = 4096;
-  PROPERTY(int, mm_km_in_patch_limit_video) = 200;
+  PROPERTY(int64_t, mm_km_merge_kernel_size) = 2;
+  PROPERTY(int64_t, mm_km_fixed_output_tokens) = -1;
+  PROPERTY(int64_t, mm_km_patch_limit_on_one_side) = 512;
+  PROPERTY(int64_t, mm_km_in_patch_limit_each_frame) = 4096;
+  PROPERTY(int64_t, mm_km_in_patch_limit_video) = 200;
   PROPERTY(float, mm_km_sample_fps) = 2.0;
-  PROPERTY(int, mm_km_max_num_frames_each_video) = 2;
-  PROPERTY(int, mm_km_temporal_merge_kernel_size) = 4;
+  PROPERTY(int64_t, mm_km_max_num_frames_each_video) = 2;
+  PROPERTY(int64_t, mm_km_temporal_merge_kernel_size) = 4;
   PROPERTY(std::string, mm_km_timestamp_mode) = "hh:mm:ss.fff";
 
   // GLM
@@ -503,6 +522,10 @@ inline std::ostream& operator<<(std::ostream& os, const ModelArgs& args) {
   os << ", hidden_size: " << args.hidden_size();
   os << ", hidden_act: " << args.hidden_act();
   os << ", intermediate_size: " << args.intermediate_size();
+  os << ", moe_intermediate_size: " << args.moe_intermediate_size();
+  os << ", n_routed_experts: " << args.n_routed_experts();
+  os << ", n_activated_experts: " << args.n_activated_experts();
+  os << ", num_experts_per_tok: " << args.num_experts_per_tok();
   os << ", n_layers: " << args.n_layers();
   os << ", n_encoder_layers: " << args.n_encoder_layers();
   os << ", head_dim: " << args.head_dim();

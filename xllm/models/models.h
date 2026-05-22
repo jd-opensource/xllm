@@ -35,6 +35,7 @@ limitations under the License.
 #include "llm/npu/kimi_k2.h"                  // IWYU pragma: keep
 #include "llm/npu/llama.h"                    // IWYU pragma: keep
 #include "llm/npu/llama3.h"                   // IWYU pragma: keep
+#include "llm/npu/minimax_m2.h"               // IWYU pragma: keep
 #include "llm/npu/oxygen.h"                   // IWYU pragma: keep
 #include "llm/npu/qwen2.h"                    // IWYU pragma: keep
 #include "llm/npu/qwen3.h"                    // IWYU pragma: keep
@@ -86,6 +87,7 @@ limitations under the License.
 #include "llm/qwen3.h"      // IWYU pragma: keep
 #include "llm/qwen3_moe.h"  // IWYU pragma: keep
 #elif defined(USE_CUDA)
+#include "dit/pipeline_longcat_audiodit.h"    // IWYU pragma: keep
 #include "dit/pipeline_longcat_image.h"       // IWYU pragma: keep
 #include "dit/pipeline_longcat_image_edit.h"  // IWYU pragma: keep
 #include "llm/qwen2.h"                        // IWYU pragma: keep

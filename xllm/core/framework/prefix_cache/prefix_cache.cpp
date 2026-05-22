@@ -40,12 +40,9 @@ void xxh3_128bits_hash(const uint8_t* pre_hash_value,
     memcpy(
         hash_value, &xxh3_128bits_hash_value, sizeof(xxh3_128bits_hash_value));
   } else {
-    uint8_t key[1024];
-
     int32_t data_len =
         sizeof(int32_t) * token_ids.size() + XXH3_128BITS_HASH_VALUE_LEN;
-    CHECK_GT(sizeof(key), data_len) << "key size is too small";
-
+    uint8_t* key = new uint8_t[data_len];
     memcpy(key, pre_hash_value, XXH3_128BITS_HASH_VALUE_LEN);
     memcpy(key + XXH3_128BITS_HASH_VALUE_LEN,
            reinterpret_cast<const void*>(token_ids.data()),
@@ -57,6 +54,7 @@ void xxh3_128bits_hash(const uint8_t* pre_hash_value,
         ::xllm::KVCacheConfig::get_instance().xxh3_128bits_seed());
     memcpy(
         hash_value, &xxh3_128bits_hash_value, sizeof(xxh3_128bits_hash_value));
+    delete[] key;
   }
 }
 

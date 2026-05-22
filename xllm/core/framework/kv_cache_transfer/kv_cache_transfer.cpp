@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "framework/kv_cache_transfer/kv_cache_transfer.h"
 
+#include <algorithm>
 #include <glog/logging.h>
 
 #include "common/global_flags.h"
@@ -63,6 +64,86 @@ folly::SemiFuture<bool> KVCacheTransfer::pull_kv_blocks_async(
   return future;
 }
 
+#if defined(USE_NPU)
+// In KV-split mode, local_blocks_ids already contains only this KV-split
+// rank's physical blocks. remote_blocks_ids holds the full D-side
+// total_blocks entries; this rank maps local_block[k] to
+// remote_blocks_ids[kv_split_rank + k * kv_split_size]. The function rebuilds
+// remote_blocks_ids accordingly and drops infos with no local blocks.
+std::vector<TransferKVInfo> filter_kv_split_infos(
+    int32_t kv_split_rank,
+    int32_t kv_split_size,
+    const std::vector<TransferKVInfo>& kv_infos) {
+  std::vector<TransferKVInfo> filtered_kv_infos;
+  for (const auto& kv_info : kv_infos) {
+    if (kv_info.local_blocks_ids.empty()) {
+      continue;
+    }
+    const size_t n_local = kv_info.local_blocks_ids.size();
+    TransferKVInfo filtered = kv_info;
+    filtered.remote_blocks_ids.clear();
+    filtered.remote_blocks_ids.reserve(n_local);
+    for (size_t k = 0; k < n_local; ++k) {
+      const size_t remote_idx = static_cast<size_t>(kv_split_rank) +
+                                k * static_cast<size_t>(kv_split_size);
+      if (remote_idx >= kv_info.remote_blocks_ids.size()) {
+        break;
+      }
+      filtered.remote_blocks_ids.push_back(
+          kv_info.remote_blocks_ids[remote_idx]);
+    }
+    if (!filtered.remote_blocks_ids.empty()) {
+      filtered_kv_infos.push_back(std::move(filtered));
+    }
+  }
+  return filtered_kv_infos;
+}
+#endif
+
+std::vector<KVCacheTransfer::PushStep> KVCacheTransfer::BuildPushSchedule(
+    const std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
+    int32_t kv_split_rank,
+    int32_t kv_split_size,
+    int64_t num_layers) {
+  std::vector<PushStep> schedule;
+  if (merged_kv_infos.empty() || num_layers <= 0) {
+    return schedule;
+  }
+
+  // Sort by key for determinism; the legacy `unordered_map` traversal had
+  // nondeterministic but cross-rank-aligned order, which is exactly what
+  // caused the N-to-1 incast.
+  std::vector<const std::string*> keys;
+  keys.reserve(merged_kv_infos.size());
+  for (const auto& kv : merged_kv_infos) {
+    keys.push_back(&kv.first);
+  }
+  std::sort(keys.begin(), keys.end(),
+            [](const std::string* a, const std::string* b) { return *a < *b; });
+
+  const size_t n = keys.size();
+  const int32_t cp = std::max<int32_t>(1, kv_split_size);
+  size_t offset = 0;
+  if (::xllm::DisaggPDConfig::get_instance().kv_push_dst_rotate() && cp > 1 &&
+      n > 0) {
+    // rank * n / cp gives evenly spaced starts in [0, n); when n % cp == 0
+    // (typical PD topology), each rank lands on a distinct dst.
+    offset = (static_cast<size_t>(std::max<int32_t>(0, kv_split_rank)) * n) /
+             static_cast<size_t>(cp);
+    offset %= n;
+  }
+
+  schedule.reserve(static_cast<size_t>(num_layers) * n);
+  for (int64_t layer = 0; layer < num_layers; ++layer) {
+    for (size_t dd = 0; dd < n; ++dd) {
+      const std::string* key = keys[(dd + offset) % n];
+      schedule.push_back(
+          PushStep{layer, &merged_kv_infos.at(*key), key});
+    }
+  }
+  return schedule;
+}
+
 #if defined(USE_NPU) || defined(USE_MLU)
 folly::SemiFuture<bool> KVCacheTransfer::push_kv_blocks_async(
     const std::vector<TransferKVInfo>& transfer_kv_infos,
@@ -72,17 +153,35 @@ folly::SemiFuture<bool> KVCacheTransfer::push_kv_blocks_async(
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this,
-                        &transfer_kv_infos,
+                        transfer_kv_infos,
                         &parallel_args,
                         layer_synchronizer,
                         is_spec_draft,
                         promise = std::move(promise)]() mutable {
     std::unordered_map<std::string, KVCacheInfo> merged_kv_infos;
-    merge_kv_blocks(merged_kv_infos, transfer_kv_infos, parallel_args);
+    std::vector<TransferKVInfo> filtered_kv_infos;
+    const std::vector<TransferKVInfo>* kv_infos = &transfer_kv_infos;
+    // Filter when KV is actually sharded across ranks. When kv_split_size==1
+    // (each CP rank holds a full KV replica) the filter degenerates to a copy,
+    // so we skip it and let each rank consume remote_blocks_ids 1:1.
+    const int32_t kv_split_size = parallel_args.kv_split_size_effective();
+    if (kv_split_size > 1) {
+      filtered_kv_infos = filter_kv_split_infos(
+          parallel_args.kv_split_rank(), kv_split_size, *kv_infos);
+      kv_infos = &filtered_kv_infos;
+      if (kv_infos->empty()) {
+        promise.setValue(true);
+        return;
+      }
+    }
+    merge_kv_blocks(merged_kv_infos, *kv_infos, parallel_args);
     bool success = true;
     if (!merged_kv_infos.empty()) {
-      success = this->push_kv_blocks(
-          merged_kv_infos, layer_synchronizer, is_spec_draft);
+      success = this->push_kv_blocks(merged_kv_infos,
+                                     layer_synchronizer,
+                                     is_spec_draft,
+                                     parallel_args.kv_split_rank(),
+                                     parallel_args.kv_split_size_effective());
     }
     promise.setValue(success);
   });
@@ -94,11 +193,18 @@ void KVCacheTransfer::merge_kv_blocks(
     std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
     const std::vector<TransferKVInfo>& transfer_kv_infos,
     const ParallelArgs& parallel_args) {
-  // Obtain the parallel parameters of the source instance
+  // Obtain the parallel parameters of the source instance.
+  // When CP is enabled on the P side, the per-DP worker count is
+  // cp_size * tp_size. We need the *actual* TP size (excluding CP) so that
+  // src_dp_local_tp_rank correctly reflects only the TP dimension.
+  // Using cp_size * tp_size here would make CP rank > 0 workers appear to
+  // have a tp_rank >= dst_world_size, causing the linked_dp_ranks filter to
+  // skip all requests for those workers.
   int32_t src_rank = parallel_args.rank();
   int32_t src_dp_size = parallel_args.dp_size();
+  int32_t src_cp_size = parallel_args.cp_size();
   int32_t src_world_size = parallel_args.world_size();
-  int32_t src_tp_size = src_world_size / src_dp_size;
+  int32_t src_tp_size = src_world_size / src_dp_size / src_cp_size;
   int32_t src_dp_local_tp_rank = src_rank % src_tp_size;
   for (auto& info : transfer_kv_infos) {
     // Obtain the parallel parameters of the destination instance.

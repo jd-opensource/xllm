@@ -24,8 +24,10 @@ limitations under the License.
 #include <random>
 
 #include "common/global_flags.h"
+#include "util/utils.h"
 #include "common/macros.h"
 #include "core/framework/config/disagg_pd_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/service_config.h"
@@ -46,7 +48,7 @@ limitations under the License.
 namespace xllm {
 
 DisaggPDScheduler::DisaggPDScheduler(Engine* engine, const Options& options)
-    : ContinuousScheduler(engine, options), server_name_("DisaggPDServer") {
+    : ChunkedPrefillScheduler(engine, options), server_name_("DisaggPDServer") {
   if (!options_.instance_role().has_value()) {
     LOG(FATAL) << "Instance type is not set in disagg pd mode.";
   }
@@ -277,10 +279,21 @@ void DisaggPDScheduler::start_rpc_server() {
 
 void DisaggPDScheduler::step(const absl::Duration& timeout) {
   ContinuousScheduler::step(timeout);
-  // send first generation token to decode instance
-  if (options_.instance_role() != InstanceRole::DECODE && last_step_prefill_) {
+  // Send first generation token to decode instance.
+  // Always check (not gated on last_step_prefill_) because
+  // ChunkedPrefillScheduler does not set that flag and a chunked prefill
+  // may complete at any step. prefill_send_first_generation() internally
+  // checks num_generated_tokens() == 1 so spurious calls are harmless.
+  if (options_.instance_role() != InstanceRole::DECODE) {
     prefill_send_first_generation();
   }
+}
+
+std::vector<Batch> DisaggPDScheduler::prepare_batch() {
+  if (options_.enable_chunked_prefill()) {
+    return ChunkedPrefillScheduler::prepare_batch();
+  }
+  return ContinuousScheduler::prepare_batch();
 }
 
 bool DisaggPDScheduler::add_request(std::shared_ptr<Request>& request) {
@@ -662,6 +675,7 @@ void DisaggPDScheduler::prefill_send_first_generation() {
         std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
         req_to_channel_map_.erase(request->request_id());
       }
+      response_processor_->wait_completion();
       kv_cache_manager_->deallocate(request.get());
     }
   });
@@ -835,11 +849,18 @@ bool DisaggPDScheduler::link_instance(
     const std::vector<uint16_t>& ports,
     const int32_t dp_size) {
   std::lock_guard<std::mutex> lock(linked_instances_mutex_);
-  if (!engine_->link_cluster(cluster_ids, addrs, device_ips, ports, dp_size)) {
+  if (!engine_->link_cluster(cluster_ids,
+                             addrs,
+                             device_ips,
+                             ports,
+                             dp_size,
+                             util::prefill_kv_split_size_effective())) {
     LOG(ERROR) << "Link instance failed, instance_name: " << instance_name;
     return false;
   }
-  LOG(INFO) << "Successfully linked instance, instance_name: " << instance_name;
+  LOG(INFO) << "Successfully linked instance, instance_name: " << instance_name
+            << ", prefill_kv_split_size: "
+            << util::prefill_kv_split_size_effective();
   linked_instance_.emplace(instance_name);
   return true;
 }
@@ -865,8 +886,12 @@ bool DisaggPDScheduler::unlink_instance(
   }
 
   std::lock_guard<std::mutex> lock(linked_instances_mutex_);
-  if (!engine_->unlink_cluster(
-          cluster_ids, addrs, device_ips, ports, dp_size)) {
+  if (!engine_->unlink_cluster(cluster_ids,
+                               addrs,
+                               device_ips,
+                               ports,
+                               dp_size,
+                               util::prefill_kv_split_size_effective())) {
     LOG(ERROR) << "Unlink instance failed, instance_name: " << instance_name;
     return false;
   }

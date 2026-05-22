@@ -217,6 +217,8 @@ bool MTPWorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
   // init_model() must run first so dtype_/embedding_size_ are initialized.
   embedding_cache_ = std::make_shared<EmbeddingCache>(num_blocks);
   if (embedding_cache_) {
+    embedding_cache_->set_probs_placeholder(
+        torch::ones({}, torch::dtype(torch::kFloat32).device(torch::kCPU)));
     int64_t size = get_embedding_placeholder_size();
     if (size > 0) {
       embedding_cache_->set_placeholder(
@@ -258,7 +260,8 @@ bool MTPWorkerImpl::allocate_kv_cache_with_transfer(
         options_.device_ip().value(),
         options_.transfer_listen_port(),
         options_.instance_role(),
-        context_.get_model_args().model_type());
+        context_.get_model_args().model_type(),
+        context_.get_model_args().index_n_heads() > 0);
 #elif defined(USE_MLU)
     CHECK_EQ(::xllm::DisaggPDConfig::get_instance().kv_cache_transfer_type(),
              "Mooncake")
@@ -294,6 +297,8 @@ bool MTPWorkerImpl::allocate_kv_cache_with_transfer(
 
   embedding_cache_ = std::make_shared<EmbeddingCache>(num_blocks);
   if (embedding_cache_) {
+    embedding_cache_->set_probs_placeholder(
+        torch::ones({}, torch::dtype(torch::kFloat32).device(device_)));
     int64_t size = get_embedding_placeholder_size();
     if (size > 0) {
       embedding_cache_->set_placeholder(
@@ -376,7 +381,6 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_prefill(
                                     output.sample_output.next_tokens,
                                     prefill_input.token_ids.options());
   }
-
   // generate kv cache for draft model
   timer.reset();
   auto draft_future = draft_impl_->step_async(prefill_input);
@@ -406,6 +410,14 @@ void MTPWorkerImpl::prepare_prefill_inputs(const ForwardInput& input,
   c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
   prefill_input = input.to(device_, dtype_);
   auto& input_params = prefill_input.input_params;
+  if (options_.cp_size() > 1) {
+    CHECK(input_params.embedding.mtp_shifted_token_ids.defined());
+    CHECK_EQ(input_params.embedding.mtp_shifted_token_ids.numel(),
+             prefill_input.token_ids.numel());
+    prefill_input.token_ids = input_params.embedding.mtp_shifted_token_ids;
+    return;
+  }
+
   auto& extra_token_ids = input_params.embedding.extra_token_ids;
 
   const torch::Tensor& token_ids = input.token_ids_host;

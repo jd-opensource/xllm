@@ -37,6 +37,7 @@ cc_library(
     spec_input_builder.h
     forward_shared_memory_manager.h
     worker_rendezvous.h
+    cp_input_partition.h
   SRCS
     executor.cpp
     executor_impl_factory.cpp
@@ -65,6 +66,7 @@ cc_library(
     eagle3_worker_impl.cpp
     spec_input_builder.cpp
     forward_shared_memory_manager.cpp
+    cp_input_partition.cpp
   DEPS
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
@@ -96,4 +98,20 @@ cc_library(
     absl::flat_hash_map
     proto::xllm_proto
     $<$<BOOL:${USE_MLU}>:torch_mlu>
+)
+
+cc_test(
+  NAME
+    cp_input_partition_test
+  SRCS
+    cp_input_partition_test.cpp
+    cp_input_partition.cpp
+  DEPS
+    torch
+    $<$<BOOL:${USE_NPU}>:torch_npu>
+    :platform
+    :request
+    glog::glog
+    proto::xllm_proto
+    GTest::gtest_main
 )

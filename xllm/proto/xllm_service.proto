@@ -10,6 +10,7 @@ import "sample.proto";
 import "chat.proto";
 import "embedding.proto";
 import "image_generation.proto";
+import "audio_generation.proto";
 import "rerank.proto";
 import "models.proto";
 import "anthropic.proto";
@@ -64,6 +65,9 @@ service XllmAPIService {
 
   rpc ImageGeneration(ImageGenerationRequest) returns (ImageGenerationResponse);
   rpc ImageGenerationHttp(HttpRequest) returns (HttpResponse);
+
+  rpc AudioGeneration(AudioGenerationRequest) returns (AudioGenerationResponse);
+  rpc AudioGenerationHttp(HttpRequest) returns (HttpResponse);
 
   rpc Rerank (RerankRequest) returns (RerankResponse);
   rpc RerankHttp (HttpRequest) returns (HttpResponse);

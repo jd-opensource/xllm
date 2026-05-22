@@ -15,8 +15,14 @@ limitations under the License.
 
 #include "core/framework/config/disagg_pd_config.h"
 
+#include <glog/logging.h>
+
+#include <string>
+
 #include "core/common/global_flags.h"
 #include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/scheduler_config.h"
 
 DEFINE_bool(enable_disagg_pd,
             false,
@@ -44,7 +50,23 @@ DEFINE_string(kv_cache_transfer_mode,
 
 DEFINE_int32(transfer_listen_port, 26000, "The KVCacheTranfer listen port.");
 
+DEFINE_bool(kv_push_dst_rotate,
+            true,
+            "Rotate the dst-worker traversal order in push_kv_blocks per "
+            "KV-split rank to spread incast across D workers.");
+
+DEFINE_bool(kv_push_timing_log,
+            false,
+            "Emit per-step and per-call timing logs for push_kv_blocks.");
+
 namespace xllm {
+namespace {
+
+bool supports_prefix_cache(const std::string& instance_role) {
+  return instance_role == "PREFILL" || instance_role == "MIX";
+}
+
+}  // namespace
 
 void DisaggPDConfig::from_flags() {
   enable_disagg_pd(FLAGS_enable_disagg_pd)
@@ -53,7 +75,9 @@ void DisaggPDConfig::from_flags() {
       .instance_role(FLAGS_instance_role)
       .kv_cache_transfer_type(FLAGS_kv_cache_transfer_type)
       .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
-      .transfer_listen_port(FLAGS_transfer_listen_port);
+      .transfer_listen_port(FLAGS_transfer_listen_port)
+      .kv_push_dst_rotate(FLAGS_kv_push_dst_rotate)
+      .kv_push_timing_log(FLAGS_kv_push_timing_log);
 }
 
 void DisaggPDConfig::from_json(const JsonReader& json) {
@@ -80,6 +104,45 @@ void DisaggPDConfig::initialize() {
   from_flags();
   if (const auto& json_config = config::get_parsed_json_config()) {
     from_json(*json_config);
+  }
+}
+
+void DisaggPDConfig::normalize_mlu(KVCacheConfig& kv_cache_config,
+                                   SchedulerConfig& scheduler_config) {
+  if (kv_cache_transfer_type() != "Mooncake") {
+    LOG(WARNING) << "MLU disaggregated PD requires "
+                 << "kv_cache_transfer_type=Mooncake; forcing from "
+                 << kv_cache_transfer_type() << " to Mooncake.";
+    kv_cache_transfer_type("Mooncake");
+  }
+  if (kv_cache_transfer_mode() != "PUSH") {
+    LOG(WARNING) << "MLU disaggregated PD requires "
+                 << "kv_cache_transfer_mode=PUSH; forcing from "
+                 << kv_cache_transfer_mode() << " to PUSH.";
+    kv_cache_transfer_mode("PUSH");
+  }
+  if (kv_cache_config.kv_cache_dtype() != "auto") {
+    LOG(WARNING) << "MLU disaggregated PD requires kv_cache_dtype=auto; "
+                 << "forcing from " << kv_cache_config.kv_cache_dtype()
+                 << " to auto.";
+    kv_cache_config.kv_cache_dtype("auto");
+  }
+  if (scheduler_config.enable_schedule_overlap()) {
+    LOG(WARNING) << "MLU disaggregated PD does not support schedule overlap; "
+                 << "forcing enable_schedule_overlap=false.";
+    scheduler_config.enable_schedule_overlap(false);
+  }
+  if (kv_cache_config.enable_prefix_cache() &&
+      !supports_prefix_cache(instance_role())) {
+    LOG(WARNING) << "MLU disaggregated PD role " << instance_role()
+                 << " does not support prefix cache; "
+                 << "forcing enable_prefix_cache=false.";
+    kv_cache_config.enable_prefix_cache(false);
+  }
+  if (enable_pd_ooc()) {
+    LOG(WARNING) << "MLU disaggregated PD does not support pd_ooc; "
+                 << "forcing enable_pd_ooc=false.";
+    enable_pd_ooc(false);
   }
 }
 

@@ -207,6 +207,11 @@ struct DiTForwardInput {
     if (control_image.defined()) {
       input.control_image = control_image.to(device, dtype);
     }
+
+    if (prompt_audio.defined()) {
+      input.prompt_audio = prompt_audio.to(device, torch::kFloat32);
+    }
+
     return input;
   }
 
@@ -243,6 +248,13 @@ struct DiTForwardInput {
   torch::Tensor negative_pooled_prompt_embeds;
 
   torch::Tensor latents;
+
+  // Optional prompt audio for voice cloning (LongCat-AudioDiT)
+  // Shape: (batch, 1, num_samples) at 24kHz
+  torch::Tensor prompt_audio;
+
+  // Transcript of the prompt audio — used for duration estimation only.
+  std::string audio_prompt_text;
 
   // generation params
   DiTGenerationParams generation_params;

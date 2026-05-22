@@ -6,6 +6,9 @@ cc_library(
   HDRS
     fused_moe.h
     attention.h
+    minimax_m2_decode_layer.h
+    minimax_rms_norm.h
+    minimax_m2_attention.h
     qwen3_gated_delta_net_base.h
     qwen3_next_attention.h
     qwen3_next_gated_delta_net.h
@@ -16,6 +19,9 @@ cc_library(
   SRCS
     fused_moe.cpp
     attention.cpp
+    minimax_m2_decode_layer.cpp
+    minimax_rms_norm.cpp
+    minimax_m2_attention.cpp
     qwen3_gated_delta_net_base.cpp
     qwen3_next_attention.cpp
     qwen3_next_gated_delta_net.cpp
@@ -25,4 +31,5 @@ cc_library(
     qwen3_5_decoder_layer_impl.cpp
   DEPS
     :common_layers
+    :npu_layers
 )

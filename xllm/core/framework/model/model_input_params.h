@@ -369,6 +369,11 @@ struct AttentionDeviceInput {
   torch::Tensor ring_cur_seqlen;
   torch::Tensor ring_cache_seqlen;
 
+  // Per-rank prefix slot index for KV-split prefix AllGather (see
+  // WorkerImpl::compute_in_prefix_slots). Must propagate in to(device) because
+  // nested worker paths skip recomputation when cp_partitioned is true.
+  torch::Tensor in_prefix_slots;
+
   AttentionDeviceInput to(const torch::Device& device) const {
     AttentionDeviceInput out;
     out.q_seq_lens = safe_to(q_seq_lens, device, true);
@@ -390,6 +395,7 @@ struct AttentionDeviceInput {
     out.history_k_rope = safe_to(history_k_rope, device);
     out.ring_cur_seqlen = safe_to(ring_cur_seqlen, device);
     out.ring_cache_seqlen = safe_to(ring_cache_seqlen, device);
+    out.in_prefix_slots = safe_to(in_prefix_slots, device, true);
     return out;
   }
 };
@@ -713,6 +719,9 @@ struct ModelEmbeddingInput {
   // extra token ids for each sequence, and -1 for last chunk
   std::vector<int32_t> extra_token_ids;
 
+  // Precomputed shifted token ids for MTP prefill, aligned with tokens.
+  torch::Tensor mtp_shifted_token_ids;
+
   ModelEmbeddingInput to(const torch::Device& device) const {
     ModelEmbeddingInput out;
     out.input_embedding = safe_to(input_embedding, device);
@@ -721,6 +730,7 @@ struct ModelEmbeddingInput {
     out.linear_state_indices = safe_to(linear_state_indices, device, true);
     out.request_ids = request_ids;
     out.extra_token_ids = extra_token_ids;
+    out.mtp_shifted_token_ids = safe_to(mtp_shifted_token_ids, device, true);
     return out;
   }
 };
@@ -801,7 +811,15 @@ struct ParallelInput {
                     device,
                     true))
         .gather_prenorm_idx(
-            safe_to(cp_ep_padding_data.gather_prenorm_idx(), device, true));
+            safe_to(cp_ep_padding_data.gather_prenorm_idx(), device, true))
+        .padding_idx(safe_to(cp_ep_padding_data.padding_idx(), device, true))
+        .un_padding_idx(
+            safe_to(cp_ep_padding_data.un_padding_idx(), device, true))
+        .dynamic_ep_idx(
+            safe_to(cp_ep_padding_data.dynamic_ep_idx(), device, true))
+        .moe_idx(safe_to(cp_ep_padding_data.moe_idx(), device, true))
+        .expert_array(
+            safe_to(cp_ep_padding_data.expert_array(), device, true));
     out.cp_prefill_inputs = cp_prefill_inputs.to(device);
 #if defined(USE_NPU) || defined(USE_MLU)
     out.layer_synchronizer = layer_synchronizer;
@@ -854,6 +872,12 @@ struct ModelInputParams {
     params.expert = expert.to(device);
     params.graph = graph.to(device);
     params.dit_forward_input = dit_forward_input.to(device);
+    for (const auto& table : multi_block_tables) {
+      params.multi_block_tables.push_back(
+          safe_to(table, table.options().device(torch::kCPU), true));
+    }
+    params.mtp_shifted_token_ids =
+        safe_to(mtp_shifted_token_ids, device, true);
 
     // rec_params device conversion for both OneRec and LLM-Rec variants
     if (const auto* onerec_xattn = onerec_xattention_params()) {
@@ -955,6 +979,13 @@ struct ModelInputParams {
   MultiModalInput multimodal;
   ExpertInput expert;
   GraphInput graph;
+
+  // Multi block manager block tables for DeepSeek V4.
+  // Each tensor is [batch_size, max_block_len] for one manager.
+  std::vector<torch::Tensor> multi_block_tables;
+
+  // Shifted target token ids for MTP training/evaluation paths.
+  torch::Tensor mtp_shifted_token_ids;
 
   RecModelInputParams rec_params;
 
