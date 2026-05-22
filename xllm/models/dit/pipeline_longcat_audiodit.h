@@ -355,7 +355,7 @@ class LongCatAudioDiTPipelineImpl final : public torch::nn::Module {
     torch::TensorOptions noise_opts =
         torch::dtype(torch::kFloat32).device(device);
     std::vector<int64_t> noise_shape = {batch_size, max_dur, vae_->latent_dim_};
-    torch::Tensor y0 = randn_tensor(noise_shape, seed, noise_opts);
+    torch::Tensor y0 = xllm::dit::randn_tensor(noise_shape, seed, noise_opts);
 
     // ── 7. ODE Euler solve ───────────────────────────────────────────────────
     int64_t steps = (gp.audio_steps > 0) ? gp.audio_steps : 16;

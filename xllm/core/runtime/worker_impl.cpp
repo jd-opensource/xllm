@@ -59,13 +59,13 @@ limitations under the License.
 #include "core/runtime/worker_rendezvous.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_input_params.h"
-#include "runtime/cp_input_partition.h"
 #include "framework/model_loader.h"
 #include "framework/parallel_state/npu_cp_ep_padding.h"
 #include "framework/sampling/sampler.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/xtensor/global_xtensor.h"
 #include "framework/xtensor/xtensor_allocator.h"
+#include "runtime/cp_input_partition.h"
 #if defined(USE_NPU)
 #include "layers/npu/loader/rolling_weight_buffer.h"
 #endif
@@ -470,6 +470,7 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
   return inputs;
 }
 
+#if defined(USE_NPU)
 torch::Tensor WorkerImpl::recompute_new_cache_slots(const ForwardInput& input) {
   auto old_cache_slots = input.input_params.attention.device.new_cache_slots;
   int64_t numel = old_cache_slots.numel();
@@ -477,12 +478,7 @@ torch::Tensor WorkerImpl::recompute_new_cache_slots(const ForwardInput& input) {
   // `block_size * kv_split_size_effective` (see llm_engine init). When KV is
   // not split (kv_split_size == 1) the stride collapses back to block_size.
   const int32_t kv_split_size = parallel_args_.kv_split_size_effective();
-  const int block_size_total = options_.block_size() * kv_split_size;
-  // tp_size is still derived from cp_size because the worker rank layout
-  // (`dp_rank * (cp*tp) + cp_rank*tp + tp_rank`) is CP-shaped, independent of
-  // KV split width.
-  const int32_t tp_size = parallel_args_.world_size() /
-                          (parallel_args_.dp_size() * parallel_args_.cp_size());
+  const int32_t block_size_total = options_.block_size() * kv_split_size;
   // KV-shard ownership predicate: block whose sub-index inside the logical
   // block matches this rank's KV-split rank (degenerates to "this rank only"
   // when kv_split_size == 1, since sub_block_idx is always 0 there).
@@ -510,9 +506,9 @@ torch::Tensor WorkerImpl::recompute_new_cache_slots(const ForwardInput& input) {
 }
 
 torch::Tensor WorkerImpl::compute_in_prefix_slots(const ForwardInput& input) {
-  // Derive prefix block count from `kv_cache_tokens_nums` (already-cached tokens
-  // at the start of this forward), which covers prefix-cache hits and chunked
-  // prefill progression.
+  // Derive prefix block count from `kv_cache_tokens_nums` (already-cached
+  // tokens at the start of this forward), which covers prefix-cache hits and
+  // chunked prefill progression.
   torch::Tensor block_tables = input.input_params.attention.device.block_tables;
   torch::Tensor kv_cache_tokens_nums =
       input.input_params.attention.device.kv_cache_tokens_nums;
@@ -580,6 +576,7 @@ torch::Tensor WorkerImpl::compute_in_prefix_slots(const ForwardInput& input) {
   }
   return torch::tensor(in_prefix_slots_vec, torch::kInt);
 }
+#endif
 
 void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
                                              ForwardInput& processed_input) {
@@ -606,13 +603,13 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   // CP partition is now done worker-side (formerly engine-side in
   // LLMEngine::step). torch::Tensor fields are handles, so assigning new
   // tensors to the CP working copy does not mutate `input`.
-  // IMPORTANT: every downstream NPU-side prepare call (prepare_cp_prefill_inputs,
-  // CpEpPadding, recompute_new_cache_slots, compute_in_prefix_slots) reads
-  // from the per-rank slice and therefore MUST consume the CP working copy, not
-  // the pre-partition `input.*`.
-  // The `!input.cp_partitioned` guard is critical for nested step_async paths
-  // (MTP target/draft sub-workers) that re-enter prepare_work_before_execute
-  // on already-partitioned device tensors; see ForwardInput::cp_partitioned.
+  // IMPORTANT: every downstream NPU-side prepare call
+  // (prepare_cp_prefill_inputs, CpEpPadding, recompute_new_cache_slots,
+  // compute_in_prefix_slots) reads from the per-rank slice and therefore MUST
+  // consume the CP working copy, not the pre-partition `input.*`. The
+  // `!input.cp_partitioned` guard is critical for nested step_async paths (MTP
+  // target/draft sub-workers) that re-enter prepare_work_before_execute on
+  // already-partitioned device tensors; see ForwardInput::cp_partitioned.
   // Prefill-side CP (partition + ATB cp tensors) applies to PREFILL,
   // CHUNKED_PREFILL, and MIXED. `no_decode()` wrongly excludes MIXED.
   const bool needs_cp_prefill_side =
@@ -650,9 +647,8 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     ForwardInput& cp_working = *cp_input;
     const int64_t tokens_before =
         cp_working.token_ids.defined() ? cp_working.token_ids.numel() : 0;
-    cp::cp_partition_inplace(cp_working,
-                             parallel_args_.cp_rank(),
-                             parallel_args_.cp_size());
+    cp::cp_partition_inplace(
+        cp_working, parallel_args_.cp_rank(), parallel_args_.cp_size());
     const int64_t tokens_after =
         cp_working.token_ids.defined() ? cp_working.token_ids.numel() : 0;
     // Mark partitioned only when slice materialized (packed RPC used to skip
@@ -693,13 +689,12 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
         parallel_args_.kv_split_size_effective());
     processed_input.input_params.parallel.cp_prefill_inputs =
         tmp_cp_inputs.to(device_);
-    CpEpPadding cp_ep_padding(
-        cp_working.host_token_ids(),
-        context_.get_model_args().num_experts_per_tok(),
-        context_.get_parallel_args().mapping_data(),
-        /*device=*/device_,
-        dtype_,
-        /*is_prefill=*/needs_cp_prefill_side);
+    CpEpPadding cp_ep_padding(cp_working.host_token_ids(),
+                              context_.get_model_args().num_experts_per_tok(),
+                              context_.get_parallel_args().mapping_data(),
+                              /*device=*/device_,
+                              dtype_,
+                              /*is_prefill=*/needs_cp_prefill_side);
     processed_input.input_params.parallel.cp_ep_padding_data =
         cp_ep_padding.build();
   }
