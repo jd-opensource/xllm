@@ -1437,7 +1437,8 @@ std::vector<RawForwardInput> LLMEngine::prepare_inputs(
         args_, threadpool_.get(), cp_size_)));
     dp_global_token_nums[dp_rank] =
         batched_inputs[dp_rank].flatten_tokens_vec.size();
-    if (util::is_deepseek_v4_model_type(args_.model_type())) {
+    if (args_.model_type() == "deepseek_v4" ||
+        args_.model_type() == "deepseek_v4_mtp") {
       const int64_t actual_scheduled_tokens = static_cast<int64_t>(
           batched_inputs[dp_rank].flatten_tokens_vec.size());
       const int64_t max_tokens_per_batch =
