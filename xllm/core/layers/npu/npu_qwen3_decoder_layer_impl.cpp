@@ -111,6 +111,7 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
         ::xllm::KVCacheConfig::get_instance().block_size() == 128;
   }
   num_hidden_layers_ = args.n_layers();
+  param.enableSplitRmsNormRope = false;
 }
 
 void NpuQwen3DecoderLayerImpl::initialize_parallel_parameters(
