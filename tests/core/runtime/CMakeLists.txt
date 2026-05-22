@@ -51,14 +51,8 @@ cc_test(
     cp_input_partition_test
   SRCS
     cp_input_partition_test.cpp
-    "${PROJECT_SOURCE_DIR}/xllm/core/runtime/cp_input_partition.cpp"
   DEPS
-    torch
-    $<$<BOOL:${USE_NPU}>:torch_npu>
-    :platform
-    :request
-    glog::glog
-    proto::xllm_proto
+    :runtime
     GTest::gtest_main
 )
 
