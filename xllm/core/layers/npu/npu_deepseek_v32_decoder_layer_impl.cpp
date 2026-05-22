@@ -27,7 +27,9 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "core/framework/config/eplb_config.h"
 #include "core/framework/config/load_config.h"
+#include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/parallel_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "framework/parallel_state/npu_cp_prepare.h"
 #include "layers/common/rotary_embedding_util.h"
 #include "loader/deepseek_v32_decoder_loader.h"
@@ -342,6 +344,19 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
   }
   param.maskfree = true;  // TODO
   param.enableSwiGLUQuantForSharedExperts = false;
+  if ((::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
+       ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) &&
+      ::xllm::ParallelConfig::get_instance().cp_size() > 1 && is_prefill) {
+    param.enablePrefixCacheCP = true;
+    // When kv_split_size collapses to 1 (each CP rank owns a full KV replica)
+    // the ATB prefix AllGather is replaced by an identity reshape so the
+    // downstream SparseFlashAttention input contract stays unchanged.
+    // See `sparse_latent_attention.cpp::AddPrefixConcatCpNode` and S6 in the
+    // KV-split / CP decoupling plan. The default (kv_split_size == cp_size)
+    // keeps this false, preserving legacy behavior byte-for-byte.
+    param.enablePrefixCacheLocal =
+        (parallel_args.kv_split_size_effective() == 1);
+  }
   num_key_value_heads_ = static_cast<int>(args.n_kv_heads().value());
   qk_nope_head_dim_ = args.qk_nope_head_dim();
   v_head_dim_ = args.v_head_dim();
@@ -438,7 +453,11 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
   param.enableATBGateMatmul = true;
 
   param.enableIndexGmm = false;
-  param.enableLcocAll2All = param.isPrefill && dp_size_ == 1;
+  // LCOC fused all2all path is unstable under ACL graph launch in current
+  // runtime; keep it for eager mode and fall back to the standard dynamic-ep
+  // path when graph is enabled.
+  param.enableLcocAll2All =
+      param.isPrefill && cp_size_ == 1 && dp_size_ == 1 && !FLAGS_enable_graph;
 
   if (layer_id_ >= param.firstKDenseReplace) {
     param.enableQkvdownDp = false;
@@ -844,7 +863,9 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   // set micro batch 0 input part
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER) = internal_tensor_;
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 1) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.expert_array());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.expert_array()
+                                            : dp_ep_padding.expert_array());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 2) =
       atb_speed::Utils::AtTensor2Tensor(expert_group_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 3) =
@@ -954,13 +975,21 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 25) =
       atb_speed::Utils::AtTensor2Tensor(at_in_device_expert_count_);
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 26) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.padding_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.padding_idx()
+                                            : dp_ep_padding.padding_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 27) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.un_padding_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.un_padding_idx()
+                                            : dp_ep_padding.un_padding_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 28) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.dynamic_ep_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.dynamic_ep_idx()
+                                            : dp_ep_padding.dynamic_ep_idx());
   node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 29) =
-      atb_speed::Utils::AtTensor2Tensor(dp_ep_padding.moe_idx());
+      atb_speed::Utils::AtTensor2Tensor(use_cp_ep_padding
+                                            ? cp_ep_padding.moe_idx()
+                                            : dp_ep_padding.moe_idx());
   if (::xllm::EPLBConfig::get_instance().enable_eplb() &&
       layer_id_ >= decode_param_.firstKDenseReplace) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 30) =
@@ -1013,6 +1042,12 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 40) =
         atb_speed::Utils::AtTensor2Tensor(
             cp_inputs.actual_seq_lengths_key_next);
+    if (::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
+        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 41) =
+          atb_speed::Utils::AtTensor2Tensor(
+              input_params.attention.device.in_prefix_slots);
+    }
   }
 
   node.variantPack.outTensors.at(0) = internal_tensor_;

@@ -181,6 +181,7 @@ void Request::update_connection_status() {
     return;
   }
   Call* call = state_.call_.value();
+  CHECK(call != nullptr);
   bool is_disconnected = call->is_disconnected();
   if (!is_disconnected) {
     return;

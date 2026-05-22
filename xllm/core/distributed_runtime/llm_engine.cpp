@@ -36,8 +36,10 @@ limitations under the License.
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "framework/block/hierarchy_block_manager_pool.h"
+#include "framework/kv_cache/kv_cache_estimation.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
 #include "framework/model_loader.h"
@@ -53,27 +55,8 @@ limitations under the License.
 #include "util/tensor_helper.h"
 #include "util/utils.h"
 
-namespace {
-int64_t get_kv_cache_dtype_size_in_bytes(const std::string& kv_cache_dtype,
-                                         int64_t model_dtype_size) {
-  if (kv_cache_dtype == "auto") {
-    return model_dtype_size;
-  }
-  if (kv_cache_dtype == "int8") {
-    return 1;
-  }
-  // for future: fp8_e4m3, fp8_e5m2, etc. -> 1 byte
-  if (kv_cache_dtype == "fp8_e4m3" || kv_cache_dtype == "fp8_e5m2") {
-    return 1;
-  }
-  return model_dtype_size;
-}
-}  // namespace
-
 namespace xllm {
 
-// Defines a npu memory alignment constant with 16-byte alignment
-constexpr int32_t NZ_ALIGNMENT = 16;
 // Extra weight pages reserved for mapping/alignment overhead.
 constexpr size_t kXTensorWeightPageSafetyMargin = 20;
 
@@ -443,11 +426,23 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     }
   }
 
-  KVCacheCapacity kv_cache_cap;
-  kv_cache_cap.cache_size_in_bytes() =
-      std::max(cache_size_in_bytes, int64_t(0));
-  CHECK_GT(kv_cache_cap.cache_size_in_bytes(), 0)
-      << "Available kv cache size must be greater than 0";
+  KVCacheEstimateOptions estimate_options;
+  estimate_options.dtype = dtype_;
+  estimate_options.kv_cache_dtype = options_.kv_cache_dtype();
+  estimate_options.cache_size_in_bytes = cache_size_in_bytes;
+  estimate_options.block_size = options_.block_size();
+  estimate_options.world_size = dp_local_tp_size_;
+  estimate_options.n_local_kv_heads = n_local_kv_heads_;
+  estimate_options.n_local_linear_k_heads = n_local_linear_k_heads_;
+  estimate_options.n_local_linear_v_heads = n_local_linear_v_heads_;
+  estimate_options.max_seqs_per_batch =
+      static_cast<int64_t>(options_.max_seqs_per_batch());
+  estimate_options.is_draft_engine = options_.is_draft_engine();
+  estimate_options.enable_prefix_cache =
+      ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
+
+  KVCacheCapacity kv_cache_cap =
+      ::xllm::estimate_kv_cache_capacity(args_, estimate_options);
   GAUGE_SET(total_kv_cache_size_in_kilobytes,
             kv_cache_cap.cache_size_in_bytes() / 1024);
 
@@ -457,135 +452,6 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     DeviceMonitor::get_instance().set_total_activation_memory(device.index());
   }
 
-  // compute kv cache slot size
-  const bool enable_kv_cache_quant = options_.kv_cache_dtype() != "auto";
-  const int64_t cache_dtype_size = get_kv_cache_dtype_size_in_bytes(
-      options_.kv_cache_dtype(),
-      static_cast<int64_t>(torch::scalarTypeToTypeMeta(dtype_).itemsize()));
-  // Model dtype size for Indexer Cache (always uses original precision)
-  const int64_t dtype_size = torch::scalarTypeToTypeMeta(dtype_).itemsize();
-
-  int64_t slot_size = 0;
-  int64_t index_slot_size = 0;
-  int64_t scale_slot_size =
-      0;  // Extra overhead for scale tensors in quant mode
-
-  if (options_.enable_mla()) {
-#if defined(USE_NPU)
-    if (args_.model_type() == "deepseek_v3" &&
-        ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()) {
-      slot_size =
-          cache_dtype_size *
-          ((args_.kv_lora_rank() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT +
-           (args_.qk_rope_head_dim() + NZ_ALIGNMENT - 1) / NZ_ALIGNMENT) *
-          NZ_ALIGNMENT;
-    } else {
-      slot_size =
-          cache_dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
-    }
-#else
-    slot_size =
-        cache_dtype_size * (args_.kv_lora_rank() + args_.qk_rope_head_dim());
-#endif
-  } else {
-    slot_size = 2 * cache_dtype_size * head_dim_ * n_local_kv_heads_;
-  }
-
-  // Indexer Cache always uses original precision (not quantized)
-  if (args_.index_n_heads() > 0) {
-    int index_n_head = 1;
-    index_slot_size = dtype_size * index_n_head * args_.index_head_dim();
-  }
-
-  // Calculate scale tensor overhead for quantized KV cache (per-token bytes).
-  // worker_impl allocates scale as kv_cache_shape with last dim removed.
-  // Standard attention: K scale [num_blocks, n_kv_heads, block_size], V same
-  // => per token: n_kv_heads floats for K + n_kv_heads for V.
-  // MLA: key scale [num_blocks, 1, block_size] => one float per token.
-  if (enable_kv_cache_quant) {
-    if (args_.enable_mla()) {
-      // MLA scale shape is [num_blocks, 1, block_size] -> one float per token
-      scale_slot_size = sizeof(float);
-    } else {
-      // Standard attention: separate K and V scales
-      // K scale: [n_kv_heads, block_size], V scale: [n_kv_heads, block_size]
-      scale_slot_size = 2 * sizeof(float) * n_local_kv_heads_;
-    }
-  }
-  // For qwen3_next linear-attention layers.
-  int64_t linear_slot_size = 0;
-  if (args_.linear_num_value_heads() > 0) {
-    int64_t head_k_dim = args_.linear_key_head_dim();
-    int64_t head_v_dim = args_.linear_value_head_dim();
-
-    // Parse mamba_ssm_dtype if specified
-    int64_t ssm_dtype_size =
-        resolve_ssm_dtype_size(args_.mamba_ssm_dtype(), dtype_size);
-
-    int64_t linear_ssm_slot_size =
-        ssm_dtype_size * n_local_linear_v_heads_ * head_k_dim * head_v_dim;
-    int64_t linear_conv_slot_size = dtype_size *
-                                    (head_k_dim * n_local_linear_k_heads_ * 2 +
-                                     head_v_dim * n_local_linear_v_heads_) *
-                                    (args_.linear_conv_kernel_dim() - 1);
-    linear_slot_size = linear_ssm_slot_size + linear_conv_slot_size;
-  }
-  kv_cache_cap.slot_size() = slot_size;
-  kv_cache_cap.index_slot_size() = index_slot_size;
-  kv_cache_cap.scale_slot_size() = scale_slot_size;
-  kv_cache_cap.linear_slot_size() = linear_slot_size;
-  kv_cache_cap.n_layers() = args_.n_layers();
-  kv_cache_cap.block_size() = options_.block_size();
-#if !defined(USE_NPU)
-  // this adoption is because the allocation of kv cache is based on
-  //  the number of layers, and the draft engine is using the same model as the
-  //  target engine.
-  // so we need to override the number of layers for the draft engine.
-  if (options_.is_draft_engine()) {
-    kv_cache_cap.n_layers() = args_.num_nextn_predict_layers();
-  }
-#endif
-
-  kv_cache_cap.num_linear_state_blocks() =
-      ::xllm::SchedulerConfig::get_instance().max_seqs_per_batch() + 2;
-  for (int64_t layer_id = 0; layer_id < kv_cache_cap.n_layers(); ++layer_id) {
-    if (is_full_attention_layer(args_, layer_id)) {
-      ++kv_cache_cap.num_full_attention_layers();
-    } else {
-      ++kv_cache_cap.num_linear_attention_layers();
-    }
-  }
-
-  // compute kv cache n_blocks
-  const int64_t block_size = kv_cache_cap.block_size();
-  const int64_t block_size_in_bytes =
-      block_size * (slot_size + index_slot_size + scale_slot_size);
-  kv_cache_cap.linear_cache_size_in_bytes() =
-      kv_cache_cap.num_linear_attention_layers() *
-      kv_cache_cap.num_linear_state_blocks() * kv_cache_cap.linear_slot_size();
-  const int64_t available_full_cache_size_in_bytes =
-      kv_cache_cap.cache_size_in_bytes() -
-      kv_cache_cap.linear_cache_size_in_bytes();
-  if (kv_cache_cap.linear_slot_size() > 0) {
-    CHECK_GT(kv_cache_cap.cache_size_in_bytes(),
-             kv_cache_cap.linear_cache_size_in_bytes())
-        << "failed to reserve linear state cache for linear-attention layers: "
-        << "max_seqs_per_batch ("
-        << ::xllm::SchedulerConfig::get_instance().max_seqs_per_batch()
-        << ") is too large. Please reduce max_seqs_per_batch to less than "
-        << kv_cache_cap.cache_size_in_bytes() /
-                   (kv_cache_cap.num_linear_attention_layers() *
-                    kv_cache_cap.linear_slot_size()) -
-               2;
-  }
-  CHECK_GT(available_full_cache_size_in_bytes, 0)
-      << "no memory left for full-attention kv cache after reserving linear "
-         "state cache";
-  const int64_t full_attention_layers =
-      std::max<int64_t>(kv_cache_cap.num_full_attention_layers(), 1);
-  kv_cache_cap.n_blocks() = available_full_cache_size_in_bytes /
-                            (full_attention_layers * block_size_in_bytes);
-  CHECK_GT(kv_cache_cap.n_blocks(), 0) << "no n_blocks for kv cache";
   return kv_cache_cap;
 }
 
@@ -609,13 +475,19 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
 
   // init kv cache for each worker
   const KVCacheShape kv_cache_shape(kv_cache_cap, args_, dp_local_tp_size_);
-
   kv_cache_shape.print_shapes();
 
   // initialize block manager
+  // Logical block size = physical block_size * kv_split_size. When kv_split is
+  // off (kv_split_size == 1) this collapses back to plain block_size so each
+  // CP rank reserves slots for the full KV - that is the price we pay for
+  // skipping the prefix AllGather.
+  const int32_t kv_split_size_eff =
+      ::xllm::ParallelConfig::get_instance().kv_split_size_effective();
   BlockManagerPool::Options options;
   options.num_blocks(kv_cache_cap.n_blocks())
-      .block_size(block_size)
+      .block_size(kv_split_size_eff > 1 ? block_size * kv_split_size_eff
+                                        : block_size)
       .host_num_blocks(kv_cache_cap.n_blocks() * options_.host_blocks_factor())
       .enable_linear_state(enable_gdn_attention)
       .enable_prefix_cache(
@@ -629,6 +501,35 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .num_layers(args_.n_layers())
       .slot_size(kv_cache_cap.slot_size())
       .model_id(options_.model_id());
+  if (args_.model_type() == "deepseek_v4") {
+    constexpr uint32_t kManagerTypeBlockManagerImpl = 0;
+    constexpr uint32_t kManagerTypeSlidingWindowBlockManager = 1;
+
+    std::vector<uint32_t> manager_types{kManagerTypeSlidingWindowBlockManager};
+    std::vector<uint32_t> manager_compress_ratios{
+        0};  // unused for sliding window manager
+    std::vector<uint32_t> token_manager_ratios;
+    token_manager_ratios.reserve(2);
+    for (const int32_t ratio : args_.compress_ratios()) {
+      if (ratio == 4 || ratio == 128) {
+        const uint32_t ratio_u32 = static_cast<uint32_t>(ratio);
+        if (std::find(token_manager_ratios.begin(),
+                      token_manager_ratios.end(),
+                      ratio_u32) == token_manager_ratios.end()) {
+          token_manager_ratios.push_back(ratio_u32);
+        }
+      }
+    }
+    for (const uint32_t ratio : token_manager_ratios) {
+      manager_types.push_back(kManagerTypeBlockManagerImpl);
+      manager_compress_ratios.push_back(ratio);
+    }
+
+    options.sliding_window_size(std::max(args_.window_size(), 1))
+        .manager_types(std::move(manager_types))
+        .compress_ratios(std::move(manager_compress_ratios))
+        .max_seqs_per_batch(options_.max_seqs_per_batch());
+  }
 
   if (options_.host_blocks_factor() > 1.0 || options_.enable_kvcache_store()) {
     kv_cache_manager_ =
@@ -817,54 +718,65 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
                              const std::vector<std::string>& addrs,
                              const std::vector<std::string>& device_ips,
                              const std::vector<uint16_t>& ports,
-                             const int32_t src_dp_size) {
-  // Indicate which worker in the dp group in prefill the current worker needs
-  // to connect to. First, we connect the rank 0 workers in each DP. Then,
-  // increment the ranks sequentially.
-  int32_t src_dp_worker_index = 0;
-  int32_t src_world_size = cluster_ids.size();
-  int32_t src_tp_size = src_world_size / src_dp_size;
+                             const int32_t src_dp_size,
+                             const int32_t src_kv_split_size) {
+  // When src_kv_split_size > 1 (P node KV-split / CP width), each D worker must
+  // connect to all matching ranks on the P side that share the same TP rank.
+  //
+  // P worker layout: rank = dp * (cp_size * tp_size) + cp * tp_size + tp_rank
+  //   src_cp_tp_size = src_world_size / src_dp_size  (= cp_size * tp_size)
+  //   src_tp_size    = src_cp_tp_size / src_kv_split_size  (actual TP size)
+  //
+  // D worker tp_rank = worker_rank % dst_tp_size
+  // D worker connects to P workers:
+  //   dp_i * src_cp_tp_size + split_j * src_tp_size + d_tp_rank
+  //   for all dp_i in [0, src_dp_size), split_j in [0, src_kv_split_size)
+  int32_t src_world_size = static_cast<int32_t>(cluster_ids.size());
+  int32_t src_cp_tp_size = src_world_size / src_dp_size;
+  int32_t src_tp_size = src_cp_tp_size / src_kv_split_size;
+  int32_t dst_tp_size =
+      static_cast<int32_t>(worker_clients_num_) / static_cast<int32_t>(dp_size_);
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
-  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
-       ++worker_rank) {
-    // The worker for decoding needs to establish a connection for each dp group
-    // in prefill.
-    std::vector<uint64_t> dp_cluster_ids;
-    std::vector<std::string> dp_addrs;
-    std::vector<std::string> dp_device_ips;
-    std::vector<uint16_t> dp_ports;
-    dp_cluster_ids.reserve(src_dp_size);
-    dp_addrs.reserve(src_dp_size);
-    dp_device_ips.reserve(src_dp_size);
-    dp_ports.reserve(src_dp_size);
-    for (int32_t i = 0; i < src_dp_size; ++i) {
-      int32_t src_worker_index = i * src_tp_size + src_dp_worker_index;
-      dp_cluster_ids.emplace_back(cluster_ids[src_worker_index]);
-      dp_addrs.emplace_back(addrs[src_worker_index]);
-      dp_device_ips.emplace_back(device_ips[src_worker_index]);
-      dp_ports.emplace_back(ports[src_worker_index]);
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
+    int32_t d_tp_rank = static_cast<int32_t>(worker_rank) % dst_tp_size;
+
+    std::vector<uint64_t> target_cluster_ids;
+    std::vector<std::string> target_addrs;
+    std::vector<std::string> target_device_ips;
+    std::vector<uint16_t> target_ports;
+    target_cluster_ids.reserve(src_dp_size * src_kv_split_size);
+    target_addrs.reserve(src_dp_size * src_kv_split_size);
+    target_device_ips.reserve(src_dp_size * src_kv_split_size);
+    target_ports.reserve(src_dp_size * src_kv_split_size);
+
+    for (int32_t dp_i = 0; dp_i < src_dp_size; ++dp_i) {
+      for (int32_t split_j = 0; split_j < src_kv_split_size; ++split_j) {
+        int32_t p_idx =
+            dp_i * src_cp_tp_size + split_j * src_tp_size + d_tp_rank;
+        target_cluster_ids.emplace_back(cluster_ids[p_idx]);
+        target_addrs.emplace_back(addrs[p_idx]);
+        target_device_ips.emplace_back(device_ips[p_idx]);
+        target_ports.emplace_back(ports[p_idx]);
+      }
     }
-    // Increment the rank.
-    src_dp_worker_index = (src_dp_worker_index + 1) % src_tp_size;
 
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
     link_threadpool_->schedule([this,
                                 promise = std::move(promise),
                                 worker_rank,
-                                dp_cluster_ids = std::move(dp_cluster_ids),
-                                dp_addrs = std::move(dp_addrs),
-                                dp_device_ips = std::move(dp_device_ips),
-                                dp_ports = std::move(dp_ports)]() mutable {
+                                target_cluster_ids = std::move(target_cluster_ids),
+                                target_addrs = std::move(target_addrs),
+                                target_device_ips = std::move(target_device_ips),
+                                target_ports = std::move(target_ports)]() mutable {
       promise.setValue(worker_clients_[worker_rank]->link_cluster(
-          dp_cluster_ids, dp_addrs, dp_device_ips, dp_ports));
+          target_cluster_ids, target_addrs, target_device_ips, target_ports));
     });
     futures.emplace_back(std::move(future));
   }
 
-  // wait for all futures to complete
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
     if (!result.value()) {
@@ -879,51 +791,56 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                const std::vector<std::string>& addrs,
                                const std::vector<std::string>& device_ips,
                                const std::vector<uint16_t>& ports,
-                               const int32_t src_dp_size) {
-  // Indicate which worker in the dp group in prefill the current worker needs
-  // to unlink.
-  int32_t src_dp_worker_index = 0;
-  int32_t src_world_size = cluster_ids.size();
-  int32_t src_tp_size = src_world_size / src_dp_size;
+                               const int32_t src_dp_size,
+                               const int32_t src_kv_split_size) {
+  // Symmetric to link_cluster: each D worker disconnects from all KV-split
+  // ranks on the P side that share the same TP rank.
+  int32_t src_world_size = static_cast<int32_t>(cluster_ids.size());
+  int32_t src_cp_tp_size = src_world_size / src_dp_size;
+  int32_t src_tp_size = src_cp_tp_size / src_kv_split_size;
+  int32_t dst_tp_size =
+      static_cast<int32_t>(worker_clients_num_) / static_cast<int32_t>(dp_size_);
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
-  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
-       ++worker_rank) {
-    // The worker for decoding needs to unlink for each dp group in prefill.
-    std::vector<uint64_t> dp_cluster_ids;
-    std::vector<std::string> dp_addrs;
-    std::vector<std::string> dp_device_ips;
-    std::vector<uint16_t> dp_ports;
-    dp_cluster_ids.reserve(src_dp_size);
-    dp_addrs.reserve(src_dp_size);
-    dp_device_ips.reserve(src_dp_size);
-    dp_ports.reserve(src_dp_size);
-    for (int32_t i = 0; i < src_dp_size; ++i) {
-      int32_t src_worker_index = i * src_tp_size + src_dp_worker_index;
-      dp_cluster_ids.emplace_back(cluster_ids[src_worker_index]);
-      dp_addrs.emplace_back(addrs[src_worker_index]);
-      dp_device_ips.emplace_back(device_ips[src_worker_index]);
-      dp_ports.emplace_back(ports[src_worker_index]);
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
+    int32_t d_tp_rank = static_cast<int32_t>(worker_rank) % dst_tp_size;
+
+    std::vector<uint64_t> target_cluster_ids;
+    std::vector<std::string> target_addrs;
+    std::vector<std::string> target_device_ips;
+    std::vector<uint16_t> target_ports;
+    target_cluster_ids.reserve(src_dp_size * src_kv_split_size);
+    target_addrs.reserve(src_dp_size * src_kv_split_size);
+    target_device_ips.reserve(src_dp_size * src_kv_split_size);
+    target_ports.reserve(src_dp_size * src_kv_split_size);
+
+    for (int32_t dp_i = 0; dp_i < src_dp_size; ++dp_i) {
+      for (int32_t split_j = 0; split_j < src_kv_split_size; ++split_j) {
+        int32_t p_idx =
+            dp_i * src_cp_tp_size + split_j * src_tp_size + d_tp_rank;
+        target_cluster_ids.emplace_back(cluster_ids[p_idx]);
+        target_addrs.emplace_back(addrs[p_idx]);
+        target_device_ips.emplace_back(device_ips[p_idx]);
+        target_ports.emplace_back(ports[p_idx]);
+      }
     }
-    src_dp_worker_index = (src_dp_worker_index + 1) % src_tp_size;
 
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
     link_threadpool_->schedule([this,
                                 promise = std::move(promise),
                                 worker_rank,
-                                dp_cluster_ids = std::move(dp_cluster_ids),
-                                dp_addrs = std::move(dp_addrs),
-                                dp_device_ips = std::move(dp_device_ips),
-                                dp_ports = std::move(dp_ports)]() mutable {
+                                target_cluster_ids = std::move(target_cluster_ids),
+                                target_addrs = std::move(target_addrs),
+                                target_device_ips = std::move(target_device_ips),
+                                target_ports = std::move(target_ports)]() mutable {
       promise.setValue(worker_clients_[worker_rank]->unlink_cluster(
-          dp_cluster_ids, dp_addrs, dp_device_ips, dp_ports));
+          target_cluster_ids, target_addrs, target_device_ips, target_ports));
     });
     futures.emplace_back(std::move(future));
   }
 
-  // wait for all futures to complete
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
     if (!result.value()) {
@@ -1020,38 +937,12 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   std::vector<folly::SemiFuture<std::optional<RawForwardOutput>>> futures;
   futures.reserve(worker_clients_num_);
 
-  std::vector<std::vector<ForwardInput>> cp_partitioned_inputs(dp_size_);
-
-  if (cp_size_ > 1) {
-    for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
-      if (!forward_inputs[dp_rank]
-               .input_params.meta.batch_forward_type.is_prefill()) {
-        continue;
-      }
-      auto& inputs_per_cp = cp_partitioned_inputs[dp_rank];
-      inputs_per_cp.reserve(cp_size_);
-      for (uint32_t cp_rank = 0; cp_rank < cp_size_; ++cp_rank) {
-        inputs_per_cp.emplace_back(cp_partition_forward_input(
-            forward_inputs[dp_rank], cp_rank, cp_size_));
-      }
-    }
-  }
-
-  // update dp related global paramters and then execute model
+  // CP partitioning is performed worker-side in
+  // WorkerImpl::prepare_work_before_execute (see runtime/cp_input_partition).
   for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
     const int32_t dp_rank = worker_rank / dp_local_size_;
-    const ForwardInput* input_to_send = &forward_inputs[dp_rank];
-    if (cp_size_ > 1 &&
-        forward_inputs[dp_rank]
-            .input_params.meta.batch_forward_type.is_prefill()) {
-      const int32_t local_rank_in_dp_group = worker_rank % dp_local_size_;
-      const int32_t cp_rank = local_rank_in_dp_group / dp_local_tp_size_;
-      CHECK_GE(cp_rank, 0);
-      CHECK_LT(cp_rank, static_cast<int32_t>(cp_size_));
-      input_to_send = &cp_partitioned_inputs[dp_rank][cp_rank];
-    }
     futures.emplace_back(
-        worker_clients_[worker_rank]->step_remote_async(*input_to_send));
+        worker_clients_[worker_rank]->step_remote_async(forward_inputs[dp_rank]));
   }
 
   // wait for the all future to complete

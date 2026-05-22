@@ -180,6 +180,14 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
    * Empty string = use the same devices as main model
    */
   char draft_devices[XLLM_META_STRING_FIELD_MAX_LEN];
+
+  // CPU affinity settings, format be like:
+  // 1,2,3
+  // meaing ith thread attach to logical processor 1,2,3
+  // or
+  // 1-8
+  // meaning ith thread will be attached to first 8 logical processors
+  char cpu_affinity[XLLM_META_STRING_FIELD_MAX_LEN];
 } XLLM_InitLLMOptions;
 
 /**

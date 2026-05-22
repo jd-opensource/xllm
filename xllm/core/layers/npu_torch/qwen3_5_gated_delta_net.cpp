@@ -123,17 +123,15 @@ torch::Tensor Qwen3_5GatedDeltaNetImpl::merge_ba_from_split_activations(
 }
 
 std::pair<torch::Tensor, torch::Tensor>
-Qwen3_5GatedDeltaNetImpl::project_padded_inputs(
-    const torch::Tensor& hidden_states,
-    const AttentionMetadata& attn_metadata) {
-  auto qkv = reshape_qkvz_with_pad(attn_metadata,
-                                   in_proj_qkv_->forward(hidden_states));
-  auto z_proj =
-      reshape_qkvz_with_pad(attn_metadata, in_proj_z_->forward(hidden_states));
-  auto b_proj =
-      reshape_qkvz_with_pad(attn_metadata, in_proj_b_->forward(hidden_states));
-  auto a_proj =
-      reshape_qkvz_with_pad(attn_metadata, in_proj_a_->forward(hidden_states));
+Qwen3_5GatedDeltaNetImpl::project_decode_inputs(
+    const torch::Tensor& hidden_states) {
+  const auto reshape_projection = [](const torch::Tensor& projection) {
+    return projection.view({projection.size(0), -1, projection.size(-1)});
+  };
+  auto qkv = reshape_projection(in_proj_qkv_->forward(hidden_states));
+  auto z_proj = reshape_projection(in_proj_z_->forward(hidden_states));
+  auto b_proj = reshape_projection(in_proj_b_->forward(hidden_states));
+  auto a_proj = reshape_projection(in_proj_a_->forward(hidden_states));
   return {merge_qkvz_from_split_activations(qkv, z_proj),
           merge_ba_from_split_activations(b_proj, a_proj)};
 }

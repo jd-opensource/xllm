@@ -43,7 +43,11 @@ struct DiTGenerationParams {
            max_sequence_length == other.max_sequence_length &&
            strength == other.strength &&
            enable_cfg_renorm == other.enable_cfg_renorm &&
-           cfg_renorm_min == other.cfg_renorm_min;
+           cfg_renorm_min == other.cfg_renorm_min &&
+           audio_duration_frames == other.audio_duration_frames &&
+           audio_steps == other.audio_steps &&
+           audio_guidance_method == other.audio_guidance_method &&
+           audio_sampling_rate == other.audio_sampling_rate;
   }
 
   bool operator!=(const DiTGenerationParams& other) const {
@@ -71,6 +75,19 @@ struct DiTGenerationParams {
   bool enable_cfg_renorm = true;
 
   float cfg_renorm_min = 0.0f;
+
+  // Audio generation params (for LongCat-AudioDiT)
+  // Target duration in latent frames (prompt + gen). 0 means use max_duration.
+  int32_t audio_duration_frames = 0;
+
+  // Number of ODE Euler steps for audio generation
+  int32_t audio_steps = 16;
+
+  // Guidance method: "cfg" or "apg"
+  std::string audio_guidance_method = "cfg";
+
+  // Audio sample rate in Hz, read from model config.json (sampling_rate).
+  int32_t audio_sampling_rate = 24000;
 };
 
 struct DiTInputParams {
@@ -98,13 +115,20 @@ struct DiTInputParams {
 
   torch::Tensor image;
 
-  torch::Tensor condition_image;
+  std::vector<torch::Tensor> images;
 
   torch::Tensor control_image;
 
   torch::Tensor mask_image;
 
   torch::Tensor masked_image_latent;
+
+  // Prompt audio for voice cloning (LongCat-AudioDiT).
+  // Float32 PCM, shape (1, num_samples), mono 24 kHz.
+  torch::Tensor prompt_audio;
+
+  // Transcript of the prompt audio (for duration estimation).
+  std::string audio_prompt_text;
 };
 
 struct DiTRequestState {

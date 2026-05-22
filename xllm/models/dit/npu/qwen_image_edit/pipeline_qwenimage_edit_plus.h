@@ -277,9 +277,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     auto seed = generation_params.seed >= 0 ? generation_params.seed : 42;
 
     auto prompts = input.prompts;
-    auto prompts_2 = input.prompts_2;
     auto negative_prompts = input.negative_prompts;
-    auto negative_prompts_2 = input.negative_prompts_2;
     auto latents = input.latents;
     if (latents.defined()) {
       latents = latents.to(options_.device(), dtype_);
@@ -289,7 +287,6 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     if (prompt_embeds.defined()) {
       prompt_embeds = prompt_embeds.to(options_.device(), dtype_);
     }
-    auto pooled_prompt_embeds = input.pooled_prompt_embeds;
     torch::Tensor prompt_embeds_mask;
 
     auto negative_prompt_embeds = input.negative_prompt_embeds;
@@ -297,56 +294,41 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
       negative_prompt_embeds =
           negative_prompt_embeds.to(options_.device(), dtype_);
     }
-    auto negative_pooled_prompt_embeds = input.negative_pooled_prompt_embeds;
     torch::Tensor negative_prompt_embeds_mask;
-
-    std::vector<torch::Tensor> image_list;
-
-    torch::Tensor images;
 
     if (::xllm::DiTConfig::get_instance().dit_debug_print()) {
       input.debug_print();
     }
 
-    if (input.images.defined()) {
-      images = input.images.to(options_.device(), dtype_);
-      if (input.images.dim() == 3) {
-        image_list.emplace_back(images);
-      } else if (input.images.dim() == 4) {
-        if (input.images.size(0) > 1) {
-          LOG(ERROR) << "currently dit models doesn't support batch inference"
-                     << "batch size: " << input.images.size(0);
-        }
-        image_list.emplace_back(images[0]);
-      } else {
-        LOG(ERROR)
-            << "image inputs are expected to be a 4 dim tensor, but got: "
-            << input.images.dim() << "s tensor";
-      }
-    } else {
-      LOG(ERROR) << "QwenImageEditPlus pipeline expected to have "
-                 << "image inputs";
+    if (input.images_list.empty()) {
+      LOG(FATAL) << "QwenImageEditPlus pipeline expected to have "
+                 << "image inputs in images_list";
     }
 
-    torch::Tensor conditional_images;
-    if (input.condition_images.defined()) {
-      conditional_images = input.condition_images.to(options_.device(), dtype_);
-      if (input.condition_images.dim() == 3) {
-        image_list.emplace_back(conditional_images);
-      } else if (input.condition_images.dim() == 4) {
-        if (input.condition_images.size(0) > 1) {
-          LOG(ERROR) << "currently dit models doesn't support batch inference"
-                     << "batch size: " << input.condition_images.size(0);
-        }
-        image_list.emplace_back(conditional_images[0]);
-      } else {
+    std::vector<torch::Tensor> image_list;
+    image_list.reserve(input.images_list.size());
+
+    for (const auto& images : input.images_list) {
+      auto img = images.to(options_.device(), dtype_);
+      if (img.dim() != 4) {
         LOG(ERROR)
             << "image inputs are expected to be a 4 dim tensor, but got: "
-            << input.condition_images.dim() << "s tensor";
+            << img.dim() << "d tensor";
+        continue;
       }
+      if (img.size(0) > 1) {
+        LOG(ERROR) << "currently QwenImageEdit doesn't support batch inference"
+                   << "batch size: " << img.size(0);
+      }
+      image_list.emplace_back(img[0]);
     }
-    double height_size = images.size(2);
-    double width_size = images.size(3);
+
+    if (image_list.empty()) {
+      LOG(FATAL) << "No valid images found in images_list. ";
+    }
+
+    double height_size = static_cast<double>(image_list[0].size(1));
+    double width_size = static_cast<double>(image_list[0].size(2));
     int64_t num_images_per_prompt = 1;
 
     double aspect_ratio = width_size / height_size;
@@ -367,7 +349,7 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
     std::vector<torch::Tensor> vae_images;
     std::vector<std::pair<int64_t, int64_t>> condition_image_sizes;
     std::vector<std::pair<int64_t, int64_t>> vae_image_sizes;
-    if (images.defined() && !(images.size(1) == latent_channels_)) {
+    if (!image_list.empty() && image_list[0].size(0) != latent_channels_) {
       for (size_t i = 0; i < image_list.size(); i++) {
         aspect_ratio =
             static_cast<double>(image_list[i].size(2)) / image_list[i].size(1);
@@ -392,7 +374,8 @@ class QwenImageEditPlusPipelineImpl : public QwenImagePipelineBaseImpl {
       }
     }
 
-    bool has_neg_prompt = negative_prompts.size() > 0;
+    bool has_neg_prompt =
+        negative_prompts.size() > 0 || negative_prompt_embeds.defined();
 
     bool do_true_cfg = (true_cfg_scale > 1.0) && has_neg_prompt;
     // inplace update prompt_embeds and prompt_embeds_mask

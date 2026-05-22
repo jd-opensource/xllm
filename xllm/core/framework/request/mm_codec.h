@@ -60,6 +60,7 @@ class FFmpegAudioDecoder {
 
   bool decode(const std::string& raw_data,
               torch::Tensor& t,
-              AudioMetadata& meta);
+              AudioMetadata& meta,
+              int64_t target_sr = 16000);
 };
 }  // namespace xllm

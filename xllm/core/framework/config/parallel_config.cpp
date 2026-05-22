@@ -24,6 +24,20 @@ DEFINE_int32(ep_size, 1, "Expert parallel size for MoE model.");
 
 DEFINE_int32(cp_size, 1, "Context parallel size for DSA attention.");
 
+DEFINE_int32(kv_split_size,
+             0,
+             "KV-cache split width. 0 falls back to cp_size (legacy); 1 means "
+             "no KV split (each CP rank stores full KV, skips prefix "
+             "AllGather); other K (K divides cp_size) means KV is sharded "
+             "across K ranks while token-CP still uses cp_size.");
+
+DEFINE_int32(prefill_kv_split_size,
+             0,
+             "KV-cache split width of the remote prefill instance. Set on "
+             "decode nodes in PD mode so D can match P logical block layout "
+             "(link_cluster stride and remote_blocks_ids expansion). 0 falls "
+             "back to local cp_size.");
+
 DEFINE_int64(tp_size, 1, "Tensor parallelism size, only used for DiT model.");
 
 DEFINE_int64(sp_size, 1, "Sequence parallelism size, only used for DiT model.");
@@ -64,6 +78,8 @@ void ParallelConfig::from_flags() {
   dp_size(FLAGS_dp_size)
       .ep_size(FLAGS_ep_size)
       .cp_size(FLAGS_cp_size)
+      .kv_split_size(FLAGS_kv_split_size)
+      .prefill_kv_split_size(FLAGS_prefill_kv_split_size)
       .tp_size(FLAGS_tp_size)
       .sp_size(FLAGS_sp_size)
       .cfg_size(FLAGS_cfg_size)

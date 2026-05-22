@@ -34,6 +34,7 @@ limitations under the License.
 #include "framework/request/stopping_checker.h"
 #include "framework/sampling/sampling_params.h"
 #include "platform/device.h"
+#include "runtime/cp_input_partition.h"
 #include "runtime/forward_shared_memory_manager.h"
 #include "runtime/params_utils.h"
 #include "util/tensor_helper.h"
@@ -774,8 +775,8 @@ TEST(BatchTest, ForwardInputCpPartitionMatchesExpectedLayout) {
       forward_builder.build_forward_input(/*num_decoding_tokens=*/1,
                                           /*min_decoding_batch_size=*/0);
 
-  ForwardInput cp_forward_input =
-      cp_partition_forward_input(forward_input, /*cp_rank=*/0, /*cp_size=*/2);
+  ForwardInput cp_forward_input = forward_input;
+  cp::cp_partition_inplace(cp_forward_input, /*cp_rank=*/0, /*cp_size=*/2);
 
   EXPECT_TRUE(
       equal(cp_forward_input.token_ids, std::vector<int32_t>({1, 2, 7, 8})));

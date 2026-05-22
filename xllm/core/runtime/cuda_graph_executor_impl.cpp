@@ -31,7 +31,6 @@ limitations under the License.
 #include "core/common/metrics.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/rec_config.h"
-#include "core/framework/config/scheduler_config.h"
 #include "core/layers/common/attention_metadata.h"
 #include "core/layers/common/attention_metadata_builder.h"
 #include "core/layers/cuda/flashinfer_planinfo.h"
@@ -113,8 +112,7 @@ CudaGraphPersistentParam::CudaGraphPersistentParam(
     const runtime::Options& options)
     : args_(args), device_(device), options_(options) {
   // Use max_tokens_per_batch for first dimension size
-  const int64_t max_tokens_per_batch =
-      ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch();
+  const int64_t max_tokens_per_batch = options.max_tokens_per_batch();
   // num_sequences
   int64_t max_seqs_per_batch;
   if (is_rec_multi_round_mode()) {
@@ -269,8 +267,7 @@ void CudaGraphPersistentParam::set_aux_hidden_states(
   if (aux_hidden_states_.numel() == 0) {
     // Lazy initialization: create aux_hidden_states tensor if not already
     // created
-    const int64_t max_tokens_per_batch =
-        ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch();
+    const int64_t max_tokens_per_batch = options_.max_tokens_per_batch();
     auto shape = value.sizes().vec();
     shape[0] = max_tokens_per_batch;
     torch::ScalarType dtype = util::parse_dtype(args_.dtype(), device_);
@@ -488,8 +485,7 @@ std::optional<ModelInputParams> CudaGraphPersistentParam::update(
 
     // Initialize persistent_embedding_ if needed and not already initialized
     if (persistent_embedding_.numel() == 0) {
-      const int64_t max_tokens_per_batch =
-          ::xllm::SchedulerConfig::get_instance().max_tokens_per_batch();
+      const int64_t max_tokens_per_batch = options_.max_tokens_per_batch();
       const int64_t embedding_dim = embedding.size(1);
       torch::ScalarType dtype = util::parse_dtype(args_.dtype(), device_);
       persistent_embedding_ =

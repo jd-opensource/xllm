@@ -150,6 +150,16 @@ Master::Master(const Options& options, EngineType type)
       master_status_(options.master_status()) {
   const auto model_path =
       std::filesystem::path(options_.model_path()).lexically_normal();
+  if (options_.enable_prefix_cache() && options_.backend() == "llm") {
+    const std::string model_type = util::get_model_type(model_path);
+    if (model_type == "deepseek_v4") {
+      LOG(WARNING) << "deepseek_v4 does not support prefix cache with "
+                      "CompositeBlockManager yet, fallback to "
+                      "enable_prefix_cache=false";
+      options_.enable_prefix_cache(false);
+      KVCacheConfig::get_instance().enable_prefix_cache(false);
+    }
+  }
   options_.enable_mla(util::should_enable_mla(model_path, options_.backend()));
   print_startup_banner(model_path, options_.backend(), options_.node_rank());
   LOG(INFO) << "Master init options: " << options_.to_string();
@@ -240,6 +250,7 @@ Master::Master(const Options& options, EngineType type)
         .node_rank(options.node_rank())
         .dp_size(options.dp_size())
         .ep_size(options.ep_size())
+        .max_tokens_per_batch(options_.max_tokens_per_batch())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
         .enable_graph(options_.enable_graph())
         .enable_graph_mode_decode_no_padding(
@@ -296,7 +307,9 @@ Master::Master(const Options& options, EngineType type)
         .dp_size(options.dp_size())
         .ep_size(options.ep_size())
         .enable_prefill_sp(options_.enable_prefill_sp())
+        .cp_size(options.cp_size())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
+        .max_tokens_per_batch(options_.max_tokens_per_batch())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
         .max_tokens_per_chunk_for_prefill(
             options_.max_tokens_per_chunk_for_prefill())
@@ -354,6 +367,7 @@ Master::Master(const Options& options, EngineType type)
         .enable_prefill_sp(options_.enable_prefill_sp())
         .cp_size(options_.cp_size())
         .enable_chunked_prefill(options_.enable_chunked_prefill())
+        .max_tokens_per_batch(options_.max_tokens_per_batch())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
         .max_tokens_per_chunk_for_prefill(
             options_.max_tokens_per_chunk_for_prefill())

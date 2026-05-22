@@ -27,14 +27,14 @@ limitations under the License.
 #include "framework/request/request.h"
 #include "framework/tokenizer/tokenizer.h"
 #include "runtime/xservice_client.h"
-#include "scheduler/continuous_scheduler.h"
+#include "scheduler/chunked_prefill_scheduler.h"
 #include "server/xllm_server_registry.h"
 #include "util/blockingconcurrentqueue.h"
 #include "util/threadpool.h"
 
 namespace xllm {
 
-class DisaggPDScheduler : public ContinuousScheduler {
+class DisaggPDScheduler : public ChunkedPrefillScheduler {
  public:
   DisaggPDScheduler(Engine* engine, const Options& options);
 
@@ -45,6 +45,8 @@ class DisaggPDScheduler : public ContinuousScheduler {
   };
 
   void step(const absl::Duration& timeout) override;
+
+  std::vector<Batch> prepare_batch() override;
 
   bool add_request(std::shared_ptr<Request>& request) override;
 

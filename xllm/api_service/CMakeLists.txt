@@ -14,6 +14,7 @@ cc_library(
     anthropic_service_impl.h
     sample_service_impl.h
     embedding_service_impl.h
+    audio_generation_service_impl.h
     image_generation_service_impl.h
     rerank_service_impl.h
     qwen3_rerank_service_impl.h
@@ -37,6 +38,7 @@ cc_library(
     anthropic_service_impl.cpp
     sample_service_impl.cpp
     embedding_service_impl.cpp
+    audio_generation_service_impl.cpp
     image_generation_service_impl.cpp
     models_service_impl.cpp
     rerank_service_impl.cpp

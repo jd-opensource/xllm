@@ -69,6 +69,8 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
   if (::xllm::KernelConfig::get_instance().npu_kernel_backend() == "TORCH") {
     parallel_args_ = std::make_unique<ParallelArgs>(
         global_rank, world_size, dp_size, cp_size, nullptr, ep_size);
+    parallel_args_->kv_split_size(
+        ::xllm::ParallelConfig::get_instance().kv_split_size());
     return;
   }
 
@@ -78,6 +80,12 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
   // refactored later.
   const int32_t normalized_cp_size = cp_size > 0 ? cp_size : 1;
   const int32_t attn_tp_size = world_size / (dp_size * normalized_cp_size);
+  // FLAGS_kv_split_size: 0 -> leave Options::kv_split_size = -1 so that
+  // MappingNPU falls back to cp_size (legacy byte-equivalent). >0 -> propagate
+  // verbatim; MappingNPU::validate() enforces divisibility against cp_size.
+  const int32_t kv_split_size =
+      ::xllm::ParallelConfig::get_instance().kv_split_size();
+  const int32_t mapping_kv_split_size = kv_split_size > 0 ? kv_split_size : -1;
   MappingNPU::Options mapping_options;
   mapping_options.dp_size(dp_size)
       .tp_size(attn_tp_size)
@@ -85,7 +93,8 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
       .moe_ep_size(ep_size)
       .pp_size(1)
       .sp_size(1)
-      .cp_size(normalized_cp_size);
+      .cp_size(normalized_cp_size)
+      .kv_split_size(mapping_kv_split_size);
   MappingNPU mapping_npu(::xllm::EPLBConfig::get_instance().rank_tablefile(),
                          world_size,
                          global_rank,
@@ -117,28 +126,35 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
                                                   mapping,
                                                   dispatchAndCombinecommDomain,
                                                   dispatchAndCombineHcclComm);
+  parallel_args_->kv_split_size(
+      ::xllm::ParallelConfig::get_instance().kv_split_size());
 #else
   parallel_args_ = std::make_unique<ParallelArgs>(
       global_rank, world_size, dp_size, cp_size, nullptr, ep_size);
+  parallel_args_->kv_split_size(
+      ::xllm::ParallelConfig::get_instance().kv_split_size());
 #endif
 }
 
 void CollectiveCommunicator::create_process_groups(
     const std::string& master_addr,
     const torch::Device& device) {
+  int global_rank = parallel_args_->rank();
+  int world_size = parallel_args_->world_size();
+  int dp_size = parallel_args_->dp_size();
+  int ep_size = parallel_args_->ep_size();
+  int cp_size = parallel_args_->cp_size();
+
+  std::string host;
+  int port;
+  net::parse_host_port_from_addr(master_addr, host, port);
+
 #if defined(USE_NPU)
   if (::xllm::KernelConfig::get_instance().npu_kernel_backend() == "ATB") {
     return;
   }
 #endif
-  std::string host;
-  int port;
-  net::parse_host_port_from_addr(master_addr, host, port);
 
-  int global_rank = parallel_args_->rank();
-  int world_size = parallel_args_->world_size();
-  int dp_size = parallel_args_->dp_size();
-  int ep_size = parallel_args_->ep_size();
   process_group_ = create_process_group(global_rank,
                                         world_size,
                                         world_size,

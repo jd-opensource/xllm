@@ -33,6 +33,8 @@ class SpawnWorkerServer final {
                              int32_t device_idx,
                              int32_t num_decoding_tokens,
                              int32_t block_size,
+                             int32_t max_tokens_per_batch,
+                             int32_t max_seqs_per_batch,
                              bool enable_shm,
                              uint64_t input_shm_size,
                              uint64_t output_shm_size,

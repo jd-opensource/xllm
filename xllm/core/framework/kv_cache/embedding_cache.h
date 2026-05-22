@@ -50,6 +50,10 @@ class EmbeddingCache final {
     // position_offset - 1 when a 2-row draft extend is required.
     int32_t prev_token_id = -1;
     torch::Tensor prev_embedding;
+
+    int32_t correction_token_id = 0;  // accepted token for step correction
+    int32_t correction_position_offset = 0;
+    torch::Tensor probs;
   };
 
   EmbeddingCache(int32_t total_nums);
@@ -81,6 +85,7 @@ class EmbeddingCache final {
   // PD first decode. MTP uses hidden_size; Eagle3 uses 3 * hidden_size.
   void set_placeholder(const torch::Tensor& embedding_placeholder);
   const torch::Tensor& embedding_placeholder() const;
+  void set_probs_placeholder(const torch::Tensor& probs_placeholder);
 
   // Non-failing read used by PD first decode. Missing entries are materialized
   // as fake target states so workers can follow the normal decode path.
@@ -93,6 +98,8 @@ class EmbeddingCache final {
  private:
   std::vector<DecodeState> decode_tails_;
   torch::Tensor embedding_placeholder_;
+  torch::Tensor probs_placeholder_;
+  int32_t token_id_placeholder_ = 0;
 
   DecodeState& mutable_tail(int32_t embedding_id);
   const DecodeState& get_tail(int32_t embedding_id) const;

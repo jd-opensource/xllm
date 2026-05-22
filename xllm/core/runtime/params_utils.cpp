@@ -340,8 +340,11 @@ bool dit_forward_input_to_proto(const DiTForwardInput& dit_inputs,
   torch_tensor_to_proto_tensor(dit_inputs.images,
                                pb_dit_inputs->mutable_images());
 
-  torch_tensor_to_proto_tensor(dit_inputs.condition_images,
-                               pb_dit_inputs->mutable_condition_images());
+  auto* pb_images_list =
+      pb_dit_inputs->mutable_images_list()->mutable_tensors();
+  for (const auto& tensor : dit_inputs.images_list) {
+    torch_tensor_to_proto_tensor(tensor, pb_images_list->Add());
+  }
 
   torch_tensor_to_proto_tensor(dit_inputs.mask_images,
                                pb_dit_inputs->mutable_mask_images());
@@ -367,6 +370,13 @@ bool dit_forward_input_to_proto(const DiTForwardInput& dit_inputs,
 
   torch_tensor_to_proto_tensor(dit_inputs.latents,
                                pb_dit_inputs->mutable_latents());
+
+  torch_tensor_to_proto_tensor(dit_inputs.prompt_audio,
+                               pb_dit_inputs->mutable_prompt_audio());
+
+  if (!dit_inputs.audio_prompt_text.empty()) {
+    pb_dit_inputs->set_audio_prompt_text(dit_inputs.audio_prompt_text);
+  }
 
   if (!generation_params_to_proto(dit_inputs.generation_params,
                                   pb_dit_inputs->mutable_generation_params())) {
@@ -427,9 +437,12 @@ bool proto_to_dit_forward_input(const proto::DiTForwardInput& pb_dit_inputs,
     dit_inputs.images = util::proto_to_torch(pb_dit_inputs.images());
   }
 
-  if (pb_dit_inputs.has_condition_images()) {
-    dit_inputs.condition_images =
-        util::proto_to_torch(pb_dit_inputs.condition_images());
+  if (pb_dit_inputs.has_images_list()) {
+    dit_inputs.images_list.reserve(
+        pb_dit_inputs.images_list().tensors().size());
+    for (const auto& pb_tensor : pb_dit_inputs.images_list().tensors()) {
+      dit_inputs.images_list.emplace_back(util::proto_to_torch(pb_tensor));
+    }
   }
 
   if (pb_dit_inputs.has_mask_images()) {
@@ -474,6 +487,14 @@ bool proto_to_dit_forward_input(const proto::DiTForwardInput& pb_dit_inputs,
                                   dit_inputs.generation_params)) {
     LOG(ERROR) << "Failed to convert generation_params";
     return false;
+  }
+
+  if (pb_dit_inputs.has_prompt_audio()) {
+    dit_inputs.prompt_audio =
+        util::proto_to_torch(pb_dit_inputs.prompt_audio());
+  }
+  if (pb_dit_inputs.has_audio_prompt_text()) {
+    dit_inputs.audio_prompt_text = pb_dit_inputs.audio_prompt_text();
   }
 
   return true;

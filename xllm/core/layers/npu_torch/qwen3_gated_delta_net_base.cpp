@@ -337,12 +337,11 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     batch_size = 1;
     seq_len = qkvz_flat.size(0);
   } else {
-    auto [qkvz_padded, ba_padded] =
-        project_padded_inputs(hidden_states, attn_metadata);
-    batch_size = qkvz_padded.size(0);
-    seq_len = qkvz_padded.size(1);
-    qkvz_flat = qkvz_padded.view({batch_size * seq_len, qkvz_padded.size(-1)});
-    ba_flat = ba_padded.view({batch_size * seq_len, ba_padded.size(-1)});
+    auto [qkvz_decode, ba_decode] = project_decode_inputs(hidden_states);
+    batch_size = qkvz_decode.size(0);
+    seq_len = qkvz_decode.size(1);
+    qkvz_flat = qkvz_decode.view({batch_size * seq_len, qkvz_decode.size(-1)});
+    ba_flat = ba_decode.view({batch_size * seq_len, ba_decode.size(-1)});
   }
   xllm::kernel::FusedQkvzbaSplitReshapeParams fused_params;
   fused_params.mixed_qkvz = qkvz_flat;
@@ -489,30 +488,8 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   // Project the normalized attention output back to hidden size.
   auto rearranged_norm =
       norm_out.reshape({norm_out.size(0), norm_out.size(1) * norm_out.size(2)});
-  if (!attn_metadata.is_prefill) {
-    rearranged_norm = reshape_qkvz_unpad(attn_metadata, rearranged_norm);
-  }
   auto attn_output = o_proj_->forward(rearranged_norm);
   return attn_output;
-}
-
-torch::Tensor Qwen3GatedDeltaNetBaseImpl::reshape_qkvz_unpad(
-    const AttentionMetadata& attn_metadata,
-    const torch::Tensor& padded_qkvz) const {
-  if (!attn_metadata.is_prefill) {
-    return padded_qkvz;
-  }
-  std::vector<torch::Tensor> valid_batches;
-  int64_t bs = attn_metadata.q_seq_lens.size(0);
-  int64_t max_len = attn_metadata.max_query_len;
-  const auto& ori_seq_lens = attn_metadata.q_seq_lens;
-  auto reshaped_qkvz = padded_qkvz.view({bs, max_len, -1});
-  for (int64_t b = 0; b < bs; ++b) {
-    int64_t ori_len = ori_seq_lens[b].template item<int64_t>();
-    torch::Tensor valid_batch = reshaped_qkvz[b].slice(0, 0, ori_len);
-    valid_batches.push_back(valid_batch);
-  }
-  return torch::cat(valid_batches, 0).contiguous();
 }
 
 torch::Tensor Qwen3GatedDeltaNetBaseImpl::get_linear_state_indices(
@@ -526,36 +503,6 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::get_linear_state_indices(
   return torch::tensor(
       input_params.embedding.linear_state_ids,
       torch::TensorOptions().dtype(torch::kInt).device(device));
-}
-
-torch::Tensor Qwen3GatedDeltaNetBaseImpl::reshape_qkvz_with_pad(
-    const AttentionMetadata& attn_metadata,
-    const torch::Tensor& qkvz) const {
-  int64_t bs = attn_metadata.q_seq_lens.size(0);
-  int64_t max_len = attn_metadata.max_query_len;
-  const auto& start_loc = attn_metadata.q_seq_lens;
-  if (!attn_metadata.is_prefill) {
-    return qkvz.view({qkvz.size(0), -1, qkvz.size(-1)});
-  }
-  std::vector<torch::Tensor> batches;
-  int64_t idx = 0;
-  for (int64_t b = 0; b < bs; ++b) {
-    int64_t cur_len = start_loc[b].template item<int64_t>();
-    torch::Tensor batch = qkvz.slice(0, idx, idx + cur_len).contiguous();
-    idx = idx + cur_len;
-    if (batch.size(0) != max_len) {
-      batch = batch.size(0) > max_len
-                  ? batch.slice(0, 0, max_len).contiguous()
-                  : torch::nn::functional::pad(
-                        batch,
-                        torch::nn::functional::PadFuncOptions(
-                            {0, 0, 0, max_len - batch.size(0)}))
-                        .contiguous();
-    }
-    batches.push_back(batch);
-  }
-  auto ret = torch::stack(batches, 0).contiguous();
-  return ret;
 }
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>

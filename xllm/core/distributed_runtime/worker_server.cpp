@@ -228,6 +228,12 @@ void WorkerServer::create_spawn_server(int32_t local_rank,
   const char* num_decoding_tokens_ptr = num_decoding_tokens_str.c_str();
   std::string block_size_str = std::to_string(options.block_size());
   const char* block_size_ptr = block_size_str.c_str();
+  std::string max_tokens_per_batch_str =
+      std::to_string(options.max_tokens_per_batch());
+  const char* max_tokens_per_batch_ptr = max_tokens_per_batch_str.c_str();
+  std::string max_seqs_per_batch_str =
+      std::to_string(options.max_seqs_per_batch());
+  const char* max_seqs_per_batch_ptr = max_seqs_per_batch_str.c_str();
   std::string enable_shm_str = std::to_string(options.enable_shm());
   const char* enable_shm_ptr = enable_shm_str.c_str();
   std::string input_shm_size_str = std::to_string(options.input_shm_size());
@@ -280,6 +286,8 @@ void WorkerServer::create_spawn_server(int32_t local_rank,
                         device_idx_ptr,
                         num_decoding_tokens_ptr,
                         block_size_ptr,
+                        max_tokens_per_batch_ptr,
+                        max_seqs_per_batch_ptr,
                         enable_shm_ptr,
                         is_local_ptr,
                         enable_prefill_sp_ptr,

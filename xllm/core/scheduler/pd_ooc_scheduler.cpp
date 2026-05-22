@@ -317,26 +317,34 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
   size_t num_online_decode_preempt_offline_requests = 0;
   // TO IMPROVE?: handle online decode request before prefill offline request
   bool previous_idle = (step_status_ == StepStatus::IDLE);
-  handle_prefill_requests(latency_budget,
-                          estimate_latency,
-                          remaining_token_budget,
-                          remaining_seq_budget,
-                          waiting_priority_queue_.get(),
-                          num_online_prefill_preempt_offline_requests,
-                          finished_requests);
+  // The CP PR makes DisaggPDScheduler inherit ChunkedPrefillScheduler so the
+  // chunked-prefill code path is shared across all PD-disagg subclasses. That
+  // private 11-arg ChunkedPrefillScheduler::handle_prefill_requests in turn
+  // name-hides the 7-arg virtual one defined on ContinuousScheduler. We need
+  // the latter here (PD-OOC has its own budgeting and never goes through the
+  // chunked-prefill helper), so call it through the base class explicitly.
+  ContinuousScheduler::handle_prefill_requests(
+      latency_budget,
+      estimate_latency,
+      remaining_token_budget,
+      remaining_seq_budget,
+      waiting_priority_queue_.get(),
+      num_online_prefill_preempt_offline_requests,
+      finished_requests);
   if (!running_sequences_.empty()) {
     step_status_ = StepStatus::ONLINE_PREFILL;
     VLOG(1) << "Set step status to ONLINE PREFILL";
   } else {
     // In PD OOC mode, a batch can only consist entirely of online requests or
     // entirely of offline requests
-    handle_prefill_requests(latency_budget,
-                            estimate_latency,
-                            remaining_token_budget,
-                            remaining_seq_budget,
-                            waiting_priority_queue_offline_.get(),
-                            num_online_prefill_preempt_offline_requests,
-                            finished_requests);
+    ContinuousScheduler::handle_prefill_requests(
+        latency_budget,
+        estimate_latency,
+        remaining_token_budget,
+        remaining_seq_budget,
+        waiting_priority_queue_offline_.get(),
+        num_online_prefill_preempt_offline_requests,
+        finished_requests);
     if (!running_sequences_.empty()) {
       step_status_ = StepStatus::OFFLINE_PREFILL;
       VLOG(1) << "Set step status to OFFLINE PREFILL";

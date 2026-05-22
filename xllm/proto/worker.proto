@@ -211,7 +211,7 @@ message DiTForwardInput {
   
   // Tensor fields
   Tensor images = 6;
-  Tensor condition_images = 7;
+  TensorList images_list = 7;
   Tensor mask_images = 8;
   Tensor control_image = 9;
   Tensor masked_image_latents = 10;
@@ -223,6 +223,10 @@ message DiTForwardInput {
   
   // generation params
   DiTGenerationParams generation_params = 16;
+
+  // Voice cloning fields (LongCat-AudioDiT)
+  optional Tensor prompt_audio = 17;
+  optional string audio_prompt_text = 18;
 }
 
 message DiTForwardOutput {

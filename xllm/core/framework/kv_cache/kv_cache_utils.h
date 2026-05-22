@@ -25,6 +25,7 @@ limitations under the License.
 #include <vector>
 
 #include "common/macros.h"
+#include "util/tensor_helper.h"
 
 #if defined(USE_NPU)
 #ifdef TORCH_HIGHER_THAN_PTA6
@@ -35,6 +36,8 @@ limitations under the License.
 #include <torch_npu/csrc/framework/utils/OpPreparation.h>
 #endif
 #endif
+
+#include "framework/kv_cache/kv_cache_tensor_role.h"
 
 namespace xllm {
 
@@ -59,6 +62,12 @@ struct KVCacheCapacity {
   PROPERTY(int64_t, num_linear_state_blocks) = 0;
   PROPERTY(int64_t, num_full_attention_layers) = 0;
   PROPERTY(int64_t, num_linear_attention_layers) = 0;
+
+  // DeepSeek V4 uses separate block pools for sliding-window and compressed
+  // caches. These fields are only meaningful for deepseek_v4.
+  PROPERTY(int64_t, swa_count) = 0;
+  PROPERTY(int64_t, c4_count) = 0;
+  PROPERTY(int64_t, c128_count) = 0;
 };
 
 struct KVCacheCreateOptions {
@@ -80,6 +89,13 @@ struct KVCacheCreateOptions {
 #if defined(USE_NPU)
   PROPERTY(bool, enable_kv_cache_huge_page_allocator) = false;
 #endif
+
+  // DeepSeek V4 cache allocation metadata.
+  PROPERTY(int64_t, block_size) = 0;
+  PROPERTY(int64_t, head_dim) = 0;
+  PROPERTY(int64_t, index_head_dim) = 0;
+  PROPERTY(int64_t, window_size) = 0;
+  PROPERTY(std::vector<int32_t>, compress_ratios);
 };
 
 struct KVCacheTensors {
@@ -101,6 +117,22 @@ struct QuantizedKVCacheTensors {
 struct LinearAttentionKVCacheTensors {
   torch::Tensor conv_cache;
   torch::Tensor ssm_cache;
+};
+
+struct KVCacheTensor {
+  KVCacheTensorRole role;
+  torch::Tensor tensor;
+};
+
+struct DeepSeekV4KVCacheTensors {
+  torch::Tensor key_cache;
+  torch::Tensor index_cache;
+  torch::Tensor indexer_cache_scale;
+  torch::Tensor swa_cache;
+  torch::Tensor compress_kv_state;
+  torch::Tensor compress_score_state;
+  torch::Tensor compress_index_kv_state;
+  torch::Tensor compress_index_score_state;
 };
 
 // for qwen3.5

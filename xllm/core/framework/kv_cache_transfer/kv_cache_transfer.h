@@ -37,6 +37,20 @@ using KVPushSynchronizerImpl = NPULayerSynchronizerImpl;
 using KVPushSynchronizerImpl = MLULayerSynchronizerImpl;
 #endif
 
+// In KV-split mode, filters and remaps remote_blocks_ids so that each KV-split
+// rank only sees the remote blocks assigned to it. When `kv_split_size == 1`
+// the caller should skip this entirely (every rank holds the full KV replica
+// and `remote_blocks_ids` is 1:1 with `local_blocks_ids`).
+//
+// Note: prior to the KV-split / CP decoupling refactor this was named
+// filter_cp_kv_infos and gated on cp_size>1. The behavior is identical when
+// kv_split_size == cp_size (the legacy default), so callers that pass cp_rank
+// / cp_size keep working byte-for-byte.
+std::vector<TransferKVInfo> filter_kv_split_infos(
+    int32_t kv_split_rank,
+    int32_t kv_split_size,
+    const std::vector<TransferKVInfo>& kv_infos);
+
 class KVCacheTransfer {
  public:
   struct KVCacheInfo {
@@ -51,6 +65,32 @@ class KVCacheTransfer {
     // dst_xtensor_layer_offsets[layer_id] = {k_offsets, v_offsets}
     std::vector<XTensorLayerOffsets> dst_xtensor_layer_offsets;
   };
+
+  // A single (layer, dst) push slot. The schedule produced by
+  // `BuildPushSchedule` always lists layers in strict ascending order; the
+  // order of dsts within a layer is rank-rotated to spread N-to-1 incast.
+  // `dst_key` is the merged_kv_infos key (for logging only).
+  struct PushStep {
+    int64_t layer;
+    const KVCacheInfo* dst;
+    const std::string* dst_key;
+  };
+
+  // Build the per-rank push schedule. When `FLAGS_kv_push_dst_rotate` is on
+  // and `kv_split_size > 1`, dst order rotates by `rank * |dsts| / cp` so
+  // sibling P ranks in the same cp_group hit different D workers at each
+  // slot (assuming |dsts| >= cp). Otherwise the schedule degenerates to
+  // layer-major + sorted-dst order, byte-equivalent to the legacy
+  // `for layer { for dst : unordered_map }` loop (modulo determinism).
+  // `kv_split_rank` / `kv_split_size` are the local instance's KV-split
+  // identity (typically `parallel_args.kv_split_rank() /
+  // kv_split_size_effective()`). They are needed to rank-rotate the dst
+  // order; pass (0, 1) to keep the legacy behavior.
+  static std::vector<PushStep> BuildPushSchedule(
+      const std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
+      int32_t kv_split_rank,
+      int32_t kv_split_size,
+      int64_t num_layers);
 
   KVCacheTransfer() = default;
   virtual ~KVCacheTransfer() = default;
@@ -131,7 +171,9 @@ class KVCacheTransfer {
   virtual bool push_kv_blocks(
       std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
       std::shared_ptr<KVPushSynchronizerImpl>& layer_synchronizer,
-      bool is_spec_draft) = 0;
+      bool is_spec_draft,
+      int32_t kv_split_rank,
+      int32_t kv_split_size) = 0;
 #endif
 
 #if defined(USE_NPU)

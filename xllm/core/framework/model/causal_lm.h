@@ -74,6 +74,17 @@ class CausalLM : public torch::nn::Module {
   virtual torch::Tensor logits(const torch::Tensor& hidden_states,
                                const torch::Tensor& seleted_idxes) = 0;
 
+  // hidden_states: [num_tokens, hidden_size]
+  // seleted_idxes: [num_tokens]
+  // out_hidden: [num_selected_tokens, hidden_size]
+  // returns: [num_selected_tokens, vocab_size]
+  virtual torch::Tensor logits(const torch::Tensor& hidden_states,
+                               const torch::Tensor& seleted_idxes,
+                               torch::Tensor& out_hidden) {
+    NOT_IMPLEMENTED();
+    return torch::Tensor();
+  }
+
   virtual void load_model(std::unique_ptr<ModelLoader> loader) = 0;
 
   virtual torch::Device device() const = 0;
@@ -156,6 +167,16 @@ class CausalLMImpl : public CausalLM {
   torch::Tensor logits(const torch::Tensor& hidden_states,
                        const torch::Tensor& seleted_idxes) override {
     return model_->logits(hidden_states, seleted_idxes);
+  }
+
+  torch::Tensor logits(const torch::Tensor& hidden_states,
+                       const torch::Tensor& seleted_idxes,
+                       torch::Tensor& out_hidden) override {
+    if constexpr (detail::has_logits_with_hidden<Model>::value) {
+      return model_->logits(hidden_states, seleted_idxes, out_hidden);
+    } else {
+      return CausalLM::logits(hidden_states, seleted_idxes, out_hidden);
+    }
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader) override {

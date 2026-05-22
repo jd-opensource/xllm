@@ -21,6 +21,7 @@ limitations under the License.
 #include <unordered_map>
 
 #include "anthropic_service_impl.h"
+#include "audio_generation_service_impl.h"
 #include "chat_service_impl.h"
 #include "completion_service_impl.h"
 #include "embedding_service_impl.h"
@@ -92,6 +93,16 @@ class APIService : public proto::XllmAPIService {
                        ::google::protobuf::Closure* done) override;
 
   void ImageGenerationHttp(::google::protobuf::RpcController* controller,
+                           const proto::HttpRequest* request,
+                           proto::HttpResponse* response,
+                           ::google::protobuf::Closure* done) override;
+
+  void AudioGeneration(::google::protobuf::RpcController* controller,
+                       const proto::AudioGenerationRequest* request,
+                       proto::AudioGenerationResponse* response,
+                       ::google::protobuf::Closure* done) override;
+
+  void AudioGenerationHttp(::google::protobuf::RpcController* controller,
                            const proto::HttpRequest* request,
                            proto::HttpResponse* response,
                            ::google::protobuf::Closure* done) override;
@@ -204,6 +215,7 @@ class APIService : public proto::XllmAPIService {
   std::unique_ptr<MMEmbeddingServiceImpl> mm_embedding_service_impl_;
   std::unique_ptr<ModelsServiceImpl> models_service_impl_;
   std::unique_ptr<ImageGenerationServiceImpl> image_generation_service_impl_;
+  std::unique_ptr<AudioGenerationServiceImpl> audio_generation_service_impl_;
   std::unique_ptr<RerankServiceImpl> rerank_service_impl_;
   std::unique_ptr<RecCompletionServiceImpl> rec_completion_service_impl_;
 };
