@@ -418,22 +418,13 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     bool return_capture_params) {
   CHECK_GT(padded_num_tokens, 0)
       << "padded_num_tokens must be > 0 when return_capture_params is true";
-  const uint32_t actual_num_tokens = tokens.size(0);
+  const int64_t actual_num_tokens = tokens.size(0);
   int64_t actual_batch_size = infer_actual_batch_size(params);
   if (params.batch_forward_type.is_decode()) {
     const int64_t decode_tokens =
         std::max<int64_t>(options_.num_decoding_tokens(), 1);
     actual_batch_size = actual_num_tokens / decode_tokens;
   }
-  // actual_num_sequences: number of sequence rows carrying real token data.
-  //   Normal decode: actual_batch_size (= num_requests).
-  //   MTP validate:  params.num_sequences (= num_requests * (1 + num_spec_tokens)),
-  //                  which is larger than actual_batch_size.
-  const int64_t padded_num_sequences = static_cast<int64_t>(padded_num_tokens);
-  const int64_t actual_num_sequences = std::min<int64_t>(
-      padded_num_sequences,
-      std::max<int64_t>(actual_batch_size, params.num_sequences));
-
   // Copy data from input parameters to persistent graph tensors
   if (actual_num_tokens > 0) {
     persistent_tokens_.slice(/*dim=*/0, /*start=*/0, /*end=*/actual_num_tokens)
@@ -469,10 +460,10 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
   }
   int64_t q_copy_len = 0;
-  if (actual_num_sequences > 0 && params.q_seq_lens.defined() &&
+  if (actual_num_tokens > 0 && params.q_seq_lens.defined() &&
       params.q_seq_lens.dim() >= 1 && params.q_seq_lens.numel() > 0) {
     q_copy_len =
-        std::min<int64_t>(actual_num_sequences, params.q_seq_lens.size(0));
+        std::min<int64_t>(actual_num_tokens, params.q_seq_lens.size(0));
     if (q_copy_len > 0) {
       q_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/q_copy_len)
           .copy_(params.q_seq_lens.slice(/*dim=*/0,
@@ -482,10 +473,10 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
   }
   int64_t kv_copy_len = 0;
-  if (actual_num_sequences > 0 && params.kv_seq_lens.defined() &&
+  if (actual_num_tokens > 0 && params.kv_seq_lens.defined() &&
       params.kv_seq_lens.dim() >= 1 && params.kv_seq_lens.numel() > 0) {
     kv_copy_len =
-        std::min<int64_t>(actual_num_sequences, params.kv_seq_lens.size(0));
+        std::min<int64_t>(actual_num_tokens, params.kv_seq_lens.size(0));
     if (kv_copy_len > 0) {
       kv_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/kv_copy_len)
           .copy_(params.kv_seq_lens.slice(/*dim=*/0,
@@ -496,18 +487,18 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   }
   // Keep padded decode slots valid for empty/local-short DP shards.
   // These tensors are consumed by ATB setup alongside *_seq_lens_vec.
-  if (q_copy_len < padded_num_sequences) {
+  if (q_copy_len < static_cast<int64_t>(padded_num_tokens)) {
     q_seq_lens_
         .slice(/*dim=*/0,
                /*start=*/q_copy_len,
-               /*end=*/padded_num_sequences)
+               /*end=*/static_cast<int64_t>(padded_num_tokens))
         .fill_(1);
   }
-  if (kv_copy_len < padded_num_sequences) {
+  if (kv_copy_len < static_cast<int64_t>(padded_num_tokens)) {
     kv_seq_lens_
         .slice(/*dim=*/0,
                /*start=*/kv_copy_len,
-               /*end=*/padded_num_sequences)
+               /*end=*/static_cast<int64_t>(padded_num_tokens))
         .fill_(1);
   }
 
@@ -558,10 +549,10 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   // zeroed in the active bucket slice.
   int64_t block_rows_to_copy = 0;
   int64_t actual_block_table_len = 0;
-  if (actual_num_sequences > 0 && params.block_tables.defined() &&
+  if (actual_num_tokens > 0 && params.block_tables.defined() &&
       params.block_tables.dim() >= 2 && params.block_tables.numel() > 0) {
     block_rows_to_copy =
-        std::min<int64_t>(actual_num_sequences, params.block_tables.size(0));
+        std::min<int64_t>(actual_num_tokens, params.block_tables.size(0));
     actual_block_table_len = params.block_tables.size(1);
     if (block_rows_to_copy > 0 && actual_block_table_len > 0) {
       auto slice_persistent_block_tables =
@@ -584,9 +575,10 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
                /*end=*/persistent_block_tables_.size(1))
         .zero_();
   }
-  if (actual_num_sequences < padded_num_sequences) {
-    zero_tensor_tail(
-        persistent_block_tables_, actual_num_sequences, padded_num_sequences);
+  if (actual_num_tokens < static_cast<int64_t>(padded_num_tokens)) {
+    zero_tensor_tail(persistent_block_tables_,
+                     actual_num_tokens,
+                     static_cast<int64_t>(padded_num_tokens));
   }
 
   // Update persistent embedding from input_embedding if available
@@ -618,8 +610,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   const int64_t q_cu_size = (has_q_cu && params.q_cu_seq_lens.numel() > 0)
                                 ? params.q_cu_seq_lens.size(0)
                                 : 0;
-  const int64_t q_cu_copy_len =
-      std::min<int64_t>(actual_num_sequences, q_cu_size);
+  const int64_t q_cu_copy_len = std::min<int64_t>(actual_num_tokens, q_cu_size);
   if (q_cu_copy_len > 0) {
     q_cu_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/q_cu_copy_len)
         .copy_(params.q_cu_seq_lens.slice(/*dim=*/0,
@@ -627,10 +618,11 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
                                           /*end=*/q_cu_copy_len),
                /*non_blocking=*/true);
   }
-  if (padded_num_sequences > q_cu_copy_len) {
-    auto tail_q_seq_lens = q_seq_lens_.slice(/*dim=*/0,
-                                             /*start=*/q_cu_copy_len,
-                                             /*end=*/padded_num_sequences);
+  if (static_cast<int64_t>(padded_num_tokens) > q_cu_copy_len) {
+    auto tail_q_seq_lens = q_seq_lens_.slice(
+        /*dim=*/0,
+        /*start=*/q_cu_copy_len,
+        /*end=*/static_cast<int64_t>(padded_num_tokens));
     auto tail_cu = torch::cumsum(tail_q_seq_lens, /*dim=*/0);
     if (q_cu_copy_len > 0) {
       auto last_prefix = q_cu_seq_lens_.slice(/*dim=*/0,
@@ -639,7 +631,9 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       tail_cu = tail_cu + last_prefix;
     }
     q_cu_seq_lens_
-        .slice(/*dim=*/0, /*start=*/q_cu_copy_len, /*end=*/padded_num_sequences)
+        .slice(/*dim=*/0,
+               /*start=*/q_cu_copy_len,
+               /*end=*/static_cast<int64_t>(padded_num_tokens))
         .copy_(tail_cu, /*non_blocking=*/true);
   }
 
@@ -669,25 +663,23 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     std::optional<ModelInputParams> params_for_capture =
         std::make_optional<ModelInputParams>(params);
 
-    // actual_num_sequences tells the model's normalize function how many
-    // sequence rows carry real data.  For MTP validate this can be larger
-    // than actual_batch_size because one request expands to
-    // (1 + num_speculative_tokens) token rows.
     params_for_capture->actual_num_sequences =
-        static_cast<int32_t>(actual_num_sequences);
+        static_cast<int32_t>(actual_num_tokens);
     params_for_capture->kv_seq_lens = kv_seq_lens(padded_num_tokens);
     params_for_capture->q_seq_lens = q_seq_lens(padded_num_tokens);
 
-    // Copy real seq_lens rows [0, actual_num_sequences), fill padding
-    // rows [actual_num_sequences, padded_num_sequences) with 1 so that the
+    // Copy real seq_lens rows [0, actual_num_tokens), fill padding
+    // rows [actual_num_tokens, padded_num_tokens) with 1 so that the
     // graph-captured forward sees valid (non-zero) seq_lens everywhere.
     params_for_capture->kv_seq_lens_vec.resize(padded_num_tokens);
     params_for_capture->q_seq_lens_vec.resize(padded_num_tokens);
-    for (int64_t i = 0; i < actual_num_sequences; ++i) {
+    for (int64_t i = 0; i < actual_num_tokens; ++i) {
       params_for_capture->kv_seq_lens_vec[i] = params.kv_seq_lens_vec[i];
       params_for_capture->q_seq_lens_vec[i] = params.q_seq_lens_vec[i];
     }
-    for (int64_t i = actual_num_sequences; i < padded_num_sequences; ++i) {
+    for (int64_t i = actual_num_tokens;
+         i < static_cast<int64_t>(padded_num_tokens);
+         ++i) {
       params_for_capture->kv_seq_lens_vec[i] = 1;
       params_for_capture->q_seq_lens_vec[i] = 1;
     }
@@ -730,9 +722,10 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     // Set q_cu_seq_lens if available
     if (params.q_cu_seq_lens.defined()) {
       params_for_capture->q_cu_seq_lens =
-          q_cu_seq_lens_.slice(/*dim=*/0,
-                               /*start=*/0,
-                               /*end=*/padded_num_sequences);
+          q_cu_seq_lens_.slice(
+              /*dim=*/0,
+              /*start=*/0,
+              /*end=*/static_cast<int64_t>(padded_num_tokens));
     }
 
     // Replace dp/cp ep padding with slices of persistent buffers so that

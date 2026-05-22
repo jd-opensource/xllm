@@ -213,7 +213,9 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
                       const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
 
-    if (!tokens.defined() || tokens.numel() == 0) {
+    const bool is_empty_dp_rank = !tokens.defined() || tokens.numel() == 0;
+
+    if (is_empty_dp_rank) {
       tokens = torch::tensor(
           {0}, torch::TensorOptions().dtype(torch::kInt32).device(device_));
       positions = torch::tensor(
@@ -222,7 +224,12 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
 
     const torch::Device runtime_device = tokens.device();
 
-    torch::Tensor previous_hidden_states = input_params.input_embedding;
+    auto modified_input_params = input_params;
+    if (is_empty_dp_rank) {
+      fill_empty_dp_rank_input_params(modified_input_params);
+    }
+
+    torch::Tensor previous_hidden_states = modified_input_params.input_embedding;
     CHECK(previous_hidden_states.defined())
         << "input_params.input_embedding must be defined for MTP model";
 
@@ -249,7 +256,6 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
                                torch::zeros_like(hidden_states.index({mask})));
     }
 
-    auto modified_input_params = input_params;
     if (acl_graph_forward) {
       DeepseekV4ModelImpl::normalize_graph_metadata_input_params(
           modified_input_params);
@@ -315,6 +321,7 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
     if (modified_input_params.actual_num_sequences == 0) {
       fill_empty_dp_rank_input_params(modified_input_params);
     }
+
     DeepseekV4ModelImpl::normalize_graph_metadata_input_params(
         modified_input_params);
     auto& dp_token_nums = modified_input_params.dp_global_token_nums;
@@ -364,6 +371,16 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
     params.kv_cache_tokens_nums_host = {1};
     params.new_cache_slots = torch::tensor({0}, cpu_int_options);
     params.block_tables = torch::zeros({1, 1}, cpu_int_options);
+
+    if (!params.input_embedding.defined()) {
+      auto options = torch::TensorOptions()
+                         .dtype(torch::kBFloat16)
+                         .device(device_);
+      params.input_embedding = torch::zeros(
+          {static_cast<int64_t>(params.num_sequences),
+           model_args_.hidden_size()},
+          options);
+    }
 
     if (!params.multi_block_tables.empty()) {
       return;
