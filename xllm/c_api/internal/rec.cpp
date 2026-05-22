@@ -28,13 +28,37 @@ limitations under the License.
 #include <limits>
 #include <stdexcept>
 
+#include "core/framework/model_loader.h"
+#include "core/util/rec_model_utils.h"
 #include "helper.h"
+
+namespace {
+
+const char* get_rec_pipeline_name(xllm::RecPipelineType pipeline_type) {
+  switch (pipeline_type) {
+    case xllm::RecPipelineType::kLlmRecDefault:
+      return "LlmRecEnginePipeline";
+    case xllm::RecPipelineType::kLlmRecWithMmData:
+      return "LlmRecWithMmData";
+    case xllm::RecPipelineType::kLlmRecMultiRoundPipeline:
+      return "RecMultiRoundEnginePipeline";
+    case xllm::RecPipelineType::kOneRecDefault:
+      return "OneRecPrefillOnlyEnginePipeline";
+    case xllm::RecPipelineType::kOneRecXAttentionPipeline:
+      return "OneRecXAttentionEnginePipeline";
+    default:
+      return "UnknownRecPipeline";
+  }
+}
+
+}  // namespace
 
 XLLM_CAPI_EXPORT XLLM_REC_Handler* xllm_rec_create(void) {
   XLLM_REC_Handler* handler = new XLLM_REC_Handler();
   CHECK(nullptr != handler);
 
   handler->initialized = false;
+  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
 
   return handler;
 }
@@ -45,6 +69,7 @@ XLLM_CAPI_EXPORT void xllm_rec_destroy(XLLM_REC_Handler* handler) {
   handler->master.reset();
   handler->executor.reset();
   handler->model_ids.clear();
+  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
   handler->initialized = false;
 
   delete handler;
@@ -67,12 +92,6 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     XLLM_InitOptions xllm_init_options;
     xllm::helper::set_init_options(
         xllm::helper::BackendType::REC, init_options, &xllm_init_options);
-
-    const bool is_onerec_model =
-        should_apply_onerec_embedded_defaults(model_path);
-    if (is_onerec_model) {
-      normalize_onerec_embedded_init_options(&xllm_init_options);
-    }
 
     std::string log_dir(xllm_init_options.log_dir);
     if (!log_dir.empty()) {
@@ -164,14 +183,46 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     FLAGS_enable_rec_prefill_only = xllm_init_options.enable_rec_prefill_only;
     FLAGS_enable_constrained_decoding =
         xllm_init_options.enable_constrained_decoding;
+    FLAGS_constrained_decoding_filter_path =
+        xllm_init_options.constrained_decoding_filter_path;
+    FLAGS_enable_convert_tokens_to_item =
+        xllm_init_options.enable_convert_tokens_to_item;
+    FLAGS_enable_output_sku_logprobs =
+        xllm_init_options.enable_output_sku_logprobs;
+    FLAGS_enable_extended_item_info =
+        xllm_init_options.enable_extended_item_info;
+    FLAGS_each_conversion_threshold =
+        xllm_init_options.each_conversion_threshold;
+    FLAGS_total_conversion_threshold =
+        xllm_init_options.total_conversion_threshold;
+
+    auto model_loader = xllm::ModelLoader::create(model_path);
+    if (model_loader == nullptr) {
+      LOG(ERROR) << "Failed to create model loader for path: " << model_path;
+      return false;
+    }
+    const auto& model_args = model_loader->model_args();
+    const xllm::RecModelKind rec_model_kind =
+        xllm::get_rec_model_kind(model_args.model_type());
+    if (rec_model_kind == xllm::RecModelKind::kNone) {
+      LOG(ERROR) << "Unsupported rec model_type: " << model_args.model_type();
+      return false;
+    }
+    const xllm::RecPipelineType pipeline_type =
+        xllm::get_rec_pipeline_type(rec_model_kind);
 
     // Keep dual-source settings aligned with the FLAGS_* values above.
     options.enable_graph(FLAGS_enable_graph)
         .beam_width(FLAGS_beam_width)
         .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency);
     LOG(INFO) << "REC C API selected pipeline="
+              << get_rec_pipeline_name(pipeline_type)
+              << ", model_type=" << model_args.model_type()
+              << ", enable_rec_prefill_only=" << FLAGS_enable_rec_prefill_only
               << ", enable_constrained_decoding="
               << FLAGS_enable_constrained_decoding
+              << ", constrained_decoding_filter_path=\""
+              << FLAGS_constrained_decoding_filter_path << "\""
               << ", enable_prefix_cache=" << FLAGS_enable_prefix_cache
               << ", enable_schedule_overlap=" << FLAGS_enable_schedule_overlap
               << ", enable_chunked_prefill=" << FLAGS_enable_chunked_prefill
@@ -200,6 +251,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     }
     handler->model_ids.clear();
     handler->model_ids.emplace_back(model_id);
+    handler->pipeline_type = pipeline_type;
 
     handler->initialized = true;
 
@@ -211,6 +263,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
   handler->master.reset();
   handler->executor.reset();
   handler->model_ids.clear();
+  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
   handler->initialized = false;
 
   return false;

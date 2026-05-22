@@ -297,6 +297,7 @@ DECLARE_int64(dit_cache_skip_interval_steps);
 DECLARE_double(dit_cache_residual_diff_threshold);
 
 DECLARE_bool(enable_constrained_decoding);
+DECLARE_string(constrained_decoding_filter_path);
 DECLARE_bool(enable_convert_tokens_to_item);
 DECLARE_bool(enable_output_sku_logprobs);
 DECLARE_bool(enable_extended_item_info);

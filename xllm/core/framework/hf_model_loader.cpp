@@ -659,36 +659,48 @@ int64_t HFModelLoader::get_max_decoder_layer_weight_size() const {
 }
 
 bool HFModelLoader::load_rec_vocab(const std::string& model_weights_path) {
-  if (!tokenizer_args_.vocab_file().empty()) {
-    std::filesystem::path path = model_weights_path;
-    std::string model_version = path.filename();
-    std::string vocab_full_path =
-        path.append(tokenizer_args_.vocab_file()).string();
+  const std::string model_version =
+      std::filesystem::path(model_weights_path).filename().string();
+
+  std::string vocab_file;
+  std::string vocab_source;
+  if (!FLAGS_constrained_decoding_filter_path.empty()) {
+    vocab_file = FLAGS_constrained_decoding_filter_path;
+    vocab_source = "FLAGS_constrained_decoding_filter_path";
+  } else if (!tokenizer_args_.vocab_file().empty()) {
+    vocab_file = tokenizer_args_.vocab_file();
+    vocab_source = "tokenizer_config.json::vocab_file";
+  }
+
+  if (!vocab_file.empty()) {
+    const std::string vocab_full_path =
+        (std::filesystem::path(model_weights_path) / vocab_file).string();
 
     LOG(INFO) << "Model_version: " << model_version
-              << ", vocab_full_path: " << vocab_full_path;
+              << ", vocab_full_path: " << vocab_full_path
+              << ", vocab_source: " << vocab_source;
 
     CHECK(nullptr != VersionSingleton<RecVocabDict>::GetInstance(model_version))
         << "Failed to get vocab dict instance";
     CHECK(VersionSingleton<RecVocabDict>::GetInstance(model_version)
               ->initialize(vocab_full_path))
         << "Failed to initialize vocab dict from " << vocab_full_path;
-  } else {
-    if (FLAGS_enable_constrained_decoding) {
-      LOG(ERROR) << "Vocab file is not set for OneRec REC tokenizer under "
-                 << model_weights_path
-                 << ". Constrained decoding requires `vocab_file` in "
-                    "tokenizer_config.json.";
-      return false;
-    }
-
-    LOG(WARNING) << "Vocab file is not set for OneRec REC tokenizer under "
-                 << model_weights_path
-                 << ". Skip vocab dict initialization because constrained "
-                    "decoding is disabled.";
     return true;
   }
 
+  if (FLAGS_enable_constrained_decoding) {
+    LOG(ERROR) << "Vocab file is not set for OneRec REC tokenizer under "
+               << model_weights_path
+               << ". Constrained decoding requires either "
+                  "`--constrained_decoding_filter_path` or the `vocab_file` "
+                  "field in tokenizer_config.json.";
+    return false;
+  }
+
+  LOG(WARNING) << "Vocab file is not set for OneRec REC tokenizer under "
+               << model_weights_path
+               << ". Skip vocab dict initialization because constrained "
+                  "decoding is disabled.";
   return true;
 }
 

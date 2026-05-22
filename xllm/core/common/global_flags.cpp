@@ -635,6 +635,15 @@ DEFINE_bool(enable_constrained_decoding,
             "that the output meets specific format or structural requirements "
             "through pre-defined rules.");
 
+DEFINE_string(constrained_decoding_filter_path,
+              "",
+              "Relative filename of the constrained decoding filter file used "
+              "by REC/OneRec (resolved against the model weights directory, "
+              "same semantics as `vocab_file` in tokenizer_config.json). When "
+              "set, this value takes priority over the `vocab_file` field in "
+              "tokenizer_config.json. Leave empty to fall back to "
+              "tokenizer_config.json.");
+
 DEFINE_bool(enable_convert_tokens_to_item,
             false,
             "Enable token ids conversion to item id in REC/OneRec response.");
