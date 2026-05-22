@@ -35,6 +35,7 @@ limitations under the License.
 #include "core/framework/request/mm_data_visitor.h"
 #include "core/framework/tokenizer/rec_tokenizer.h"
 #include "core/framework/tokenizer/tokenizer.h"
+#include "core/util/rec_model_utils.h"
 #include "core/util/slice.h"
 #include "core/util/tensor_helper.h"
 #include "rec_type.h"
@@ -45,59 +46,6 @@ namespace {
 constexpr size_t kDecoderBosTokenCount = 1;
 constexpr size_t kDecoderMaxTokenCount = kRecTotalSteps + kDecoderBosTokenCount;
 constexpr char kEmptyLogprobsFinishReason[] = "empty_logprobs";
-
-std::vector<int64_t> normalize_rec_item_ids(const std::vector<int64_t>& raw_ids,
-                                            size_t sequence_index) {
-  std::vector<int64_t> item_ids;
-  item_ids.reserve(raw_ids.size());
-  std::unordered_set<int64_t> seen_item_ids;
-  for (const int64_t item_id : raw_ids) {
-    if (seen_item_ids.insert(item_id).second) {
-      item_ids.emplace_back(item_id);
-    }
-  }
-
-  const int32_t each_threshold = FLAGS_each_conversion_threshold;
-  if (each_threshold > 0 &&
-      static_cast<int32_t>(item_ids.size()) > each_threshold) {
-    uint32_t seed = FLAGS_random_seed >= 0
-                        ? static_cast<uint32_t>(FLAGS_random_seed) +
-                              static_cast<uint32_t>(sequence_index)
-                        : std::random_device{}();
-    std::mt19937 generator(seed);
-    std::shuffle(item_ids.begin(), item_ids.end(), generator);
-    item_ids.resize(each_threshold);
-  }
-
-  return item_ids;
-}
-
-std::vector<RecItemInfo> normalize_rec_item_infos(
-    const std::vector<RecItemInfo>& raw_item_infos,
-    size_t sequence_index) {
-  std::vector<RecItemInfo> item_infos;
-  item_infos.reserve(raw_item_infos.size());
-  std::unordered_set<int64_t> seen_item_ids;
-  for (const RecItemInfo& item_info : raw_item_infos) {
-    if (seen_item_ids.insert(item_info.item_id).second) {
-      item_infos.emplace_back(item_info);
-    }
-  }
-
-  const int32_t each_threshold = FLAGS_each_conversion_threshold;
-  if (each_threshold > 0 &&
-      static_cast<int32_t>(item_infos.size()) > each_threshold) {
-    uint32_t seed = FLAGS_random_seed >= 0
-                        ? static_cast<uint32_t>(FLAGS_random_seed) +
-                              static_cast<uint32_t>(sequence_index)
-                        : std::random_device{}();
-    std::mt19937 generator(seed);
-    std::shuffle(item_infos.begin(), item_infos.end(), generator);
-    item_infos.resize(each_threshold);
-  }
-
-  return item_infos;
-}
 }  // namespace
 
 const std::string Sequence::ENCODER_SPARSE_EMBEDDING_NAME = "sparse_embedding";

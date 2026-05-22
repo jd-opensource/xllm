@@ -20,6 +20,8 @@ limitations under the License.
 #include <unordered_set>
 
 #include "common/global_flags.h"
+#include "core/common/types.h"
+#include "core/framework/tokenizer/rec_tokenizer.h"
 #include "core/util/rec_model_utils.h"
 #include "framework/batch/beam_search.h"
 #include "util/blocking_counter.h"
@@ -402,6 +404,70 @@ void SequencesGroup::generate_multi_round_output(
     if (fr.has_value()) {
       out.finish_reason = fr.value();
     }
+
+    // Multi-round decode emits N x REC_TOKEN_SIZE tokens per beam (one item
+    // triple per round). Decode them into item_ids/item_infos so the c_api
+    // and downstream consumers see the same view as the single-round path
+    // (Sequence::generate_onerec_output).
+    if (FLAGS_enable_convert_tokens_to_item) {
+      const size_t triple_size = static_cast<size_t>(REC_TOKEN_SIZE);
+      const size_t token_count = out.token_ids.size();
+      if (triple_size > 0 && token_count >= triple_size &&
+          token_count % triple_size == 0) {
+        if (FLAGS_enable_extended_item_info) {
+          const auto* rec_tokenizer =
+              dynamic_cast<const RecTokenizer*>(&tokenizer);
+          if (rec_tokenizer != nullptr) {
+            std::vector<RecItemInfo> aggregated_infos;
+            aggregated_infos.reserve(token_count / triple_size);
+            for (size_t off = 0; off < token_count; off += triple_size) {
+              const Slice<int32_t> triple{out.token_ids.data() + off,
+                                          triple_size};
+              std::vector<RecItemInfo> infos;
+              if (rec_tokenizer->decode_item_infos(triple, &infos) &&
+                  !infos.empty()) {
+                aggregated_infos.insert(aggregated_infos.end(),
+                                        std::make_move_iterator(infos.begin()),
+                                        std::make_move_iterator(infos.end()));
+              }
+            }
+            if (!aggregated_infos.empty()) {
+              out.item_infos_list =
+                  normalize_rec_item_infos(aggregated_infos, i);
+              out.item_ids_list.reserve(out.item_infos_list.size());
+              for (const RecItemInfo& info : out.item_infos_list) {
+                out.item_ids_list.emplace_back(info.item_id);
+              }
+              if (!out.item_infos_list.empty()) {
+                out.item_ids = out.item_infos_list.front().item_id;
+                out.item_info = out.item_infos_list.front();
+              }
+            }
+          }
+        } else {
+          std::vector<int64_t> aggregated_ids;
+          aggregated_ids.reserve(token_count / triple_size);
+          for (size_t off = 0; off < token_count; off += triple_size) {
+            const Slice<int32_t> triple{out.token_ids.data() + off,
+                                        triple_size};
+            std::vector<int64_t> ids;
+            if (tokenizer.decode(
+                    triple, sequence_params_.skip_special_tokens, &ids) &&
+                !ids.empty()) {
+              aggregated_ids.insert(
+                  aggregated_ids.end(), ids.begin(), ids.end());
+            }
+          }
+          if (!aggregated_ids.empty()) {
+            out.item_ids_list = normalize_rec_item_ids(aggregated_ids, i);
+            if (!out.item_ids_list.empty()) {
+              out.item_ids = out.item_ids_list.front();
+            }
+          }
+        }
+      }
+    }
+
     outputs.push_back(std::move(out));
   }
 }

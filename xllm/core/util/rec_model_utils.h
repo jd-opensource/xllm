@@ -15,10 +15,15 @@ limitations under the License.
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <random>
 #include <string_view>
+#include <unordered_set>
+#include <vector>
 
 #include "core/common/global_flags.h"
+#include "core/common/types.h"
 
 namespace xllm {
 
@@ -97,6 +102,65 @@ inline constexpr RecModelKind get_rec_model_kind(std::string_view model_type) {
     return RecModelKind::kLlmRec;
   }
   return RecModelKind::kNone;
+}
+
+// Dedup + optional shuffle/truncate to `each_conversion_threshold`.
+// Shared between single-round (Sequence::generate_onerec_output) and
+// multi-round (SequencesGroup::generate_multi_round_output) item assembly so
+// that downstream c_api / consumers see consistent item_ids regardless of the
+// decode pipeline.
+inline std::vector<int64_t> normalize_rec_item_ids(
+    const std::vector<int64_t>& raw_ids,
+    size_t sequence_index) {
+  std::vector<int64_t> item_ids;
+  item_ids.reserve(raw_ids.size());
+  std::unordered_set<int64_t> seen_item_ids;
+  for (const int64_t item_id : raw_ids) {
+    if (seen_item_ids.insert(item_id).second) {
+      item_ids.emplace_back(item_id);
+    }
+  }
+
+  const int32_t each_threshold = FLAGS_each_conversion_threshold;
+  if (each_threshold > 0 &&
+      static_cast<int32_t>(item_ids.size()) > each_threshold) {
+    uint32_t seed = FLAGS_random_seed >= 0
+                        ? static_cast<uint32_t>(FLAGS_random_seed) +
+                              static_cast<uint32_t>(sequence_index)
+                        : std::random_device{}();
+    std::mt19937 generator(seed);
+    std::shuffle(item_ids.begin(), item_ids.end(), generator);
+    item_ids.resize(each_threshold);
+  }
+
+  return item_ids;
+}
+
+inline std::vector<RecItemInfo> normalize_rec_item_infos(
+    const std::vector<RecItemInfo>& raw_item_infos,
+    size_t sequence_index) {
+  std::vector<RecItemInfo> item_infos;
+  item_infos.reserve(raw_item_infos.size());
+  std::unordered_set<int64_t> seen_item_ids;
+  for (const RecItemInfo& item_info : raw_item_infos) {
+    if (seen_item_ids.insert(item_info.item_id).second) {
+      item_infos.emplace_back(item_info);
+    }
+  }
+
+  const int32_t each_threshold = FLAGS_each_conversion_threshold;
+  if (each_threshold > 0 &&
+      static_cast<int32_t>(item_infos.size()) > each_threshold) {
+    uint32_t seed = FLAGS_random_seed >= 0
+                        ? static_cast<uint32_t>(FLAGS_random_seed) +
+                              static_cast<uint32_t>(sequence_index)
+                        : std::random_device{}();
+    std::mt19937 generator(seed);
+    std::shuffle(item_infos.begin(), item_infos.end(), generator);
+    item_infos.resize(each_threshold);
+  }
+
+  return item_infos;
 }
 
 }  // namespace xllm
