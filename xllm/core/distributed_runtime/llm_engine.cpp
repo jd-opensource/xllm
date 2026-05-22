@@ -97,18 +97,12 @@ LLMEngine::LLMEngine(const runtime::Options& options,
   dp_local_tp_size_ = dp_local_size_ / cp_size_;
 
   // create ThreadPool for link cluster
-  link_threadpool_ = std::make_unique<ThreadPool>(
-      /*num_threads=*/worker_clients_num_,
-      /*cpu_binding=*/false,
-      /*pool_name=*/"LLMEngine.link");
+  link_threadpool_ = std::make_unique<ThreadPool>(worker_clients_num_);
 
   process_group_test();
 
   // init thread pool
-  threadpool_ = std::make_unique<ThreadPool>(
-      /*num_threads=*/16,
-      /*cpu_binding=*/false,
-      /*pool_name=*/"LLMEngine.forward_input");
+  threadpool_ = std::make_unique<ThreadPool>(16);
 }
 
 void LLMEngine::process_group_test() {
@@ -575,6 +569,11 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       futures.push_back(worker->allocate_kv_cache_async(kv_cache_shape));
     }
   } else {
+    if (!options_.device_ip().has_value()) {
+      LOG(ERROR)
+          << "KVCacheTransfer required device_ip, current value is empty.";
+      return false;
+    }
     for (auto& worker : worker_clients_) {
       futures.push_back(
           worker->allocate_kv_cache_with_transfer_async(kv_cache_shape));
@@ -593,16 +592,15 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
   return true;
 }
 
-bool LLMEngine::pull_kv_blocks(
-    const int32_t src_dp_size,
-    const int32_t src_dp_rank,
-    const std::vector<uint64_t>& src_cluster_ids,
-    const std::vector<std::string>& src_addrs,
-    const std::vector<uint64_t>& src_blocks,
-    const int32_t dst_dp_rank,
-    const std::vector<uint64_t>& dst_blocks,
-    const std::vector<uint64_t>& src_linear_state_ids,
-    const std::vector<uint64_t>& dst_linear_state_ids) {
+bool LLMEngine::pull_kv_blocks(const int32_t src_dp_size,
+                               const int32_t src_dp_rank,
+                               const std::vector<uint64_t>& src_cluster_ids,
+                               const std::vector<std::string>& src_addrs,
+                               const std::vector<int64_t>& src_k_cache_ids,
+                               const std::vector<int64_t>& src_v_cache_ids,
+                               const std::vector<uint64_t>& src_blocks,
+                               const int32_t dst_dp_rank,
+                               const std::vector<uint64_t>& dst_blocks) {
   int32_t src_world_size = src_cluster_ids.size();
   int32_t src_tp_size = src_world_size / src_dp_size;
   int32_t dst_world_size = options_.nnodes();
@@ -620,10 +618,10 @@ bool LLMEngine::pull_kv_blocks(
     results.push_back(worker_clients_[dst_worker_rank]->pull_kv_blocks(
         src_cluster_ids[src_worker_rank],
         src_addrs[src_worker_rank],
+        src_k_cache_ids[src_worker_rank],
+        src_v_cache_ids[src_worker_rank],
         src_blocks,
-        dst_blocks,
-        src_linear_state_ids,
-        dst_linear_state_ids));
+        dst_blocks));
   }
 
   for (bool result : results) {
@@ -673,21 +671,46 @@ void LLMEngine::prefetch_from_storage(
   }
 }
 
+void LLMEngine::get_device_info(std::vector<std::string>& device_ips,
+                                std::vector<uint16_t>& ports) {
+  if (worker_device_ips_.size() != worker_clients_num_ ||
+      worker_ports_.size() != worker_clients_num_) {
+    worker_device_ips_.reserve(worker_clients_num_);
+    worker_ports_.reserve(worker_clients_num_);
+    for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
+         ++worker_rank) {
+      std::string device_ip;
+      uint16_t port;
+      worker_clients_[worker_rank]->get_device_info(device_ip, port);
+      worker_device_ips_.emplace_back(std::move(device_ip));
+      worker_ports_.emplace_back(port);
+    }
+  }
+
+  device_ips = worker_device_ips_;
+  ports = worker_ports_;
+}
+
 void LLMEngine::get_cache_info(std::vector<uint64_t>& cluster_ids,
                                std::vector<std::string>& addrs,
-                               std::vector<uint16_t>& ports) {
+                               std::vector<int64_t>& k_cache_ids,
+                               std::vector<int64_t>& v_cache_ids) {
   cluster_ids.reserve(worker_clients_num_);
   addrs.reserve(worker_clients_num_);
-  ports.reserve(worker_clients_num_);
+  k_cache_ids.reserve(worker_clients_num_);
+  v_cache_ids.reserve(worker_clients_num_);
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
-    uint64_t cluster_id = 0;
+    uint64_t cluster_id;
     std::string addr;
-    uint16_t port = 0;
-    worker_clients_[worker_rank]->get_cache_info(cluster_id, addr, port);
+    int64_t k_cache_id;
+    int64_t v_cache_id;
+    worker_clients_[worker_rank]->get_cache_info(
+        cluster_id, addr, k_cache_id, v_cache_id);
     cluster_ids.emplace_back(cluster_id);
-    addrs.emplace_back(std::move(addr));
-    ports.emplace_back(port);
+    addrs.emplace_back(addr);
+    k_cache_ids.emplace_back(k_cache_id);
+    v_cache_ids.emplace_back(v_cache_id);
   }
 }
 
@@ -716,53 +739,64 @@ void LLMEngine::get_xtensor_info(
 
 bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
                              const std::vector<std::string>& addrs,
+                             const std::vector<std::string>& device_ips,
                              const std::vector<uint16_t>& ports,
                              const int32_t src_dp_size,
                              const int32_t src_kv_split_size) {
-  // Each D worker connects to all P workers that share the same TP rank.
-  // P layout: rank = dp_i * src_cp_tp_size + split_j * src_tp_size + tp_rank
-  // D workers cycle through tp_rank in [0, src_tp_size) round-robin.
-  // Requires: D-side dp_local_tp_size_ == src_tp_size.
+  // When src_kv_split_size > 1 (P node KV-split / CP width), each D worker must
+  // connect to all matching ranks on the P side that share the same TP rank.
+  //
+  // P worker layout: rank = dp * (cp_size * tp_size) + cp * tp_size + tp_rank
+  //   src_cp_tp_size = src_world_size / src_dp_size  (= cp_size * tp_size)
+  //   src_tp_size    = src_cp_tp_size / src_kv_split_size  (actual TP size)
+  //
+  // D worker tp_rank = worker_rank % dst_tp_size
+  // D worker connects to P workers:
+  //   dp_i * src_cp_tp_size + split_j * src_tp_size + d_tp_rank
+  //   for all dp_i in [0, src_dp_size), split_j in [0, src_kv_split_size)
   int32_t src_world_size = static_cast<int32_t>(cluster_ids.size());
   int32_t src_cp_tp_size = src_world_size / src_dp_size;
   int32_t src_tp_size = src_cp_tp_size / src_kv_split_size;
-  int32_t src_dp_worker_index = 0;
+  int32_t dst_tp_size =
+      static_cast<int32_t>(worker_clients_num_) / static_cast<int32_t>(dp_size_);
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
-  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
-       ++worker_rank) {
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
+    int32_t d_tp_rank = static_cast<int32_t>(worker_rank) % dst_tp_size;
+
     std::vector<uint64_t> target_cluster_ids;
     std::vector<std::string> target_addrs;
+    std::vector<std::string> target_device_ips;
     std::vector<uint16_t> target_ports;
     target_cluster_ids.reserve(src_dp_size * src_kv_split_size);
     target_addrs.reserve(src_dp_size * src_kv_split_size);
+    target_device_ips.reserve(src_dp_size * src_kv_split_size);
     target_ports.reserve(src_dp_size * src_kv_split_size);
 
     for (int32_t dp_i = 0; dp_i < src_dp_size; ++dp_i) {
       for (int32_t split_j = 0; split_j < src_kv_split_size; ++split_j) {
         int32_t p_idx =
-            dp_i * src_cp_tp_size + split_j * src_tp_size + src_dp_worker_index;
+            dp_i * src_cp_tp_size + split_j * src_tp_size + d_tp_rank;
         target_cluster_ids.emplace_back(cluster_ids[p_idx]);
         target_addrs.emplace_back(addrs[p_idx]);
+        target_device_ips.emplace_back(device_ips[p_idx]);
         target_ports.emplace_back(ports[p_idx]);
       }
     }
 
-    src_dp_worker_index = (src_dp_worker_index + 1) % src_tp_size;
-
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
-    link_threadpool_->schedule(
-        [this,
-         promise = std::move(promise),
-         worker_rank,
-         target_cluster_ids = std::move(target_cluster_ids),
-         target_addrs = std::move(target_addrs),
-         target_ports = std::move(target_ports)]() mutable {
-          promise.setValue(worker_clients_[worker_rank]->link_cluster(
-              target_cluster_ids, target_addrs, target_ports));
-        });
+    link_threadpool_->schedule([this,
+                                promise = std::move(promise),
+                                worker_rank,
+                                target_cluster_ids = std::move(target_cluster_ids),
+                                target_addrs = std::move(target_addrs),
+                                target_device_ips = std::move(target_device_ips),
+                                target_ports = std::move(target_ports)]() mutable {
+      promise.setValue(worker_clients_[worker_rank]->link_cluster(
+          target_cluster_ids, target_addrs, target_device_ips, target_ports));
+    });
     futures.emplace_back(std::move(future));
   }
 
@@ -778,50 +812,55 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
 
 bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                const std::vector<std::string>& addrs,
+                               const std::vector<std::string>& device_ips,
                                const std::vector<uint16_t>& ports,
                                const int32_t src_dp_size,
                                const int32_t src_kv_split_size) {
-  // Symmetric to link_cluster; uses the same rank mapping.
+  // Symmetric to link_cluster: each D worker disconnects from all KV-split
+  // ranks on the P side that share the same TP rank.
   int32_t src_world_size = static_cast<int32_t>(cluster_ids.size());
   int32_t src_cp_tp_size = src_world_size / src_dp_size;
   int32_t src_tp_size = src_cp_tp_size / src_kv_split_size;
-  int32_t src_dp_worker_index = 0;
+  int32_t dst_tp_size =
+      static_cast<int32_t>(worker_clients_num_) / static_cast<int32_t>(dp_size_);
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
-  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
-       ++worker_rank) {
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
+    int32_t d_tp_rank = static_cast<int32_t>(worker_rank) % dst_tp_size;
+
     std::vector<uint64_t> target_cluster_ids;
     std::vector<std::string> target_addrs;
+    std::vector<std::string> target_device_ips;
     std::vector<uint16_t> target_ports;
     target_cluster_ids.reserve(src_dp_size * src_kv_split_size);
     target_addrs.reserve(src_dp_size * src_kv_split_size);
+    target_device_ips.reserve(src_dp_size * src_kv_split_size);
     target_ports.reserve(src_dp_size * src_kv_split_size);
 
     for (int32_t dp_i = 0; dp_i < src_dp_size; ++dp_i) {
       for (int32_t split_j = 0; split_j < src_kv_split_size; ++split_j) {
         int32_t p_idx =
-            dp_i * src_cp_tp_size + split_j * src_tp_size + src_dp_worker_index;
+            dp_i * src_cp_tp_size + split_j * src_tp_size + d_tp_rank;
         target_cluster_ids.emplace_back(cluster_ids[p_idx]);
         target_addrs.emplace_back(addrs[p_idx]);
+        target_device_ips.emplace_back(device_ips[p_idx]);
         target_ports.emplace_back(ports[p_idx]);
       }
     }
 
-    src_dp_worker_index = (src_dp_worker_index + 1) % src_tp_size;
-
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
-    link_threadpool_->schedule(
-        [this,
-         promise = std::move(promise),
-         worker_rank,
-         target_cluster_ids = std::move(target_cluster_ids),
-         target_addrs = std::move(target_addrs),
-         target_ports = std::move(target_ports)]() mutable {
-          promise.setValue(worker_clients_[worker_rank]->unlink_cluster(
-              target_cluster_ids, target_addrs, target_ports));
-        });
+    link_threadpool_->schedule([this,
+                                promise = std::move(promise),
+                                worker_rank,
+                                target_cluster_ids = std::move(target_cluster_ids),
+                                target_addrs = std::move(target_addrs),
+                                target_device_ips = std::move(target_device_ips),
+                                target_ports = std::move(target_ports)]() mutable {
+      promise.setValue(worker_clients_[worker_rank]->unlink_cluster(
+          target_cluster_ids, target_addrs, target_device_ips, target_ports));
+    });
     futures.emplace_back(std::move(future));
   }
 
@@ -835,9 +874,9 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return true;
 }
 
-bool LLMEngine::link_d2d(const std::vector<std::string>& remote_addrs) {
-  if (remote_addrs.size() != worker_clients_num_) {
-    LOG(ERROR) << "remote_addrs size " << remote_addrs.size()
+bool LLMEngine::link_d2d(const std::vector<std::string>& device_ips) {
+  if (device_ips.size() != worker_clients_num_) {
+    LOG(ERROR) << "device_ips size " << device_ips.size()
                << " != worker_clients_num " << worker_clients_num_;
     return false;
   }
@@ -847,7 +886,7 @@ bool LLMEngine::link_d2d(const std::vector<std::string>& remote_addrs) {
 
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
-    std::string remote_addr = remote_addrs[worker_rank];
+    std::string remote_addr = device_ips[worker_rank];
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
     link_threadpool_->schedule([this,
@@ -869,9 +908,9 @@ bool LLMEngine::link_d2d(const std::vector<std::string>& remote_addrs) {
   return true;
 }
 
-bool LLMEngine::unlink_d2d(const std::vector<std::string>& remote_addrs) {
-  if (remote_addrs.size() != worker_clients_num_) {
-    LOG(ERROR) << "remote_addrs size " << remote_addrs.size()
+bool LLMEngine::unlink_d2d(const std::vector<std::string>& device_ips) {
+  if (device_ips.size() != worker_clients_num_) {
+    LOG(ERROR) << "device_ips size " << device_ips.size()
                << " != worker_clients_num " << worker_clients_num_;
     return false;
   }
@@ -881,7 +920,7 @@ bool LLMEngine::unlink_d2d(const std::vector<std::string>& remote_addrs) {
 
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
-    std::string remote_addr = remote_addrs[worker_rank];
+    std::string remote_addr = device_ips[worker_rank];
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
     link_threadpool_->schedule([this,
@@ -925,8 +964,8 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   // WorkerImpl::prepare_work_before_execute (see runtime/cp_input_partition).
   for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
     const int32_t dp_rank = worker_rank / dp_local_size_;
-    futures.emplace_back(worker_clients_[worker_rank]->step_remote_async(
-        forward_inputs[dp_rank]));
+    futures.emplace_back(
+        worker_clients_[worker_rank]->step_remote_async(forward_inputs[dp_rank]));
   }
 
   // wait for the all future to complete
