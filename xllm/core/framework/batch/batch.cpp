@@ -158,7 +158,7 @@ ForwardInput Batch::prepare_forward_input(uint32_t num_decoding_tokens,
 ForwardInput Batch::prepare_rec_forward_input(uint32_t num_decoding_tokens,
                                               uint32_t min_decoding_batch_size,
                                               const ModelArgs& args,
-                                              ThreadPool* thread_pool) {
+                                              MPMCThreadPool* thread_pool) {
   RecType rec_type = RecType::kNone;
   if (!sequence_groups_.empty() && !sequence_groups_[0]->sequences().empty()) {
     rec_type = sequence_groups_[0]->sequences()[0]->rec_type();

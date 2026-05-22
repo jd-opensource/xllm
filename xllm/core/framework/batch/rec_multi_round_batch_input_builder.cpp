@@ -52,7 +52,7 @@ RecMultiRoundBatchInputBuilder::RecMultiRoundBatchInputBuilder(
     const uint64_t batch_id,
     const ModelArgs* args,
     BatchForwardType batch_forward_type,
-    ThreadPool* thread_pool)
+    MPMCThreadPool* thread_pool)
     : allowed_max_tokens_(allowed_max_tokens),
       input_embeddings_vec_(input_embeddings_vec),
       mm_data_vec_(mm_data_vec),

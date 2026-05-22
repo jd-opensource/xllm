@@ -96,7 +96,7 @@ class Batch {
   ForwardInput prepare_rec_forward_input(uint32_t num_decoding_tokens,
                                          uint32_t min_decoding_batch_size,
                                          const ModelArgs& args,
-                                         ThreadPool* thread_pool = nullptr);
+                                         MPMCThreadPool* thread_pool = nullptr);
 
   // Convert Batch to pb type, which will be pass to remote worker.
   RawForwardInput prepare_forward_input(const ModelArgs& args,

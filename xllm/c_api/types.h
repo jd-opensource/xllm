@@ -207,6 +207,14 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
    * tokenizer_config.json. Empty string = fall back to tokenizer_config.json.
    */
   char constrained_decoding_filter_path[XLLM_META_STRING_FIELD_MAX_LEN];
+
+  // CPU affinity settings, format be like:
+  // 1,2,3
+  // meaing ith thread attach to logical processor 1,2,3
+  // or
+  // 1-8
+  // meaning ith thread will be attached to first 8 logical processors
+  char cpu_affinity[XLLM_META_STRING_FIELD_MAX_LEN];
 } XLLM_InitLLMOptions;
 
 /**
