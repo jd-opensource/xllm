@@ -311,6 +311,45 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InferInputTensorDesc {
 } XLLM_InferInputTensorDesc;
 
 /**
+ * @brief Raw output tensor returned to the embedded caller.
+ *
+ * This is the proto-free counterpart of xllm::proto::InferOutputTensor so
+ * embedded callers (e.g. 9n-predictor) can consume model outputs without
+ * paying for CompletionResponse serialize/parse and RepeatedField copies.
+ *
+ * Memory is owned by the enclosing XLLM_Response and is freed by
+ * xllm_*_free_response().
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_InferOutputTensor {
+  /** Tensor name, e.g. "rec_result". Owned by XLLM_Response. */
+  const char* name;
+
+  /** Numeric DataType, identical to xllm::proto::DataType. */
+  int32_t data_type;
+
+  /** Row-major shape dimensions. Owned by XLLM_Response. */
+  const int64_t* shape;
+
+  /** Rank of shape. */
+  size_t shape_len;
+
+  /** Raw row-major tensor buffer. Owned by XLLM_Response. */
+  const void* data;
+
+  /** Number of elements (product of shape, == byte_size / element_size). */
+  size_t num_elements;
+} XLLM_InferOutputTensor;
+
+/**
+ * @brief List of raw output tensors (proto-free path).
+ * @note When entries_size == 0, callers should not access entries.
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_InferOutputTensors {
+  XLLM_InferOutputTensor* entries;
+  size_t entries_size;
+} XLLM_InferOutputTensors;
+
+/**
  * @brief API response status codes
  */
 typedef enum XLLM_CAPI_EXPORT XLLM_StatusCode {
@@ -472,8 +511,22 @@ typedef struct XLLM_CAPI_EXPORT XLLM_Response {
   XLLM_RecOutputs rec_outputs;
 
   /**
-   * Serialized xllm::proto::CompletionResponse payload.
-   * Embedded callers can parse it to access output_tensors.
+   * Raw output tensors aligned with xllm::proto::CompletionResponse
+   * output_tensors. Populated for REC_COMPLETIONS / LLM_COMPLETIONS so that
+   * embedded callers can consume tensor data with a single memcpy instead
+   * of paying for CompletionResponse serialize / parse + RepeatedField copy.
+   *
+   * When entries_size == 0 the proto fallback (completion_response_proto)
+   * may still be populated; embedded callers should prefer this field when
+   * non-empty.
+   */
+  XLLM_InferOutputTensors output_tensors;
+
+  /**
+   * Serialized xllm::proto::CompletionResponse payload (legacy fallback).
+   * Deprecated: prefer output_tensors above. Left for backward compatibility
+   * with old embedded callers; default builds populate output_tensors and
+   * leave this field NULL / size 0.
    */
   char* completion_response_proto;
 

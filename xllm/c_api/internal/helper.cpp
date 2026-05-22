@@ -53,13 +53,144 @@ void set_completion_logprobs(
   }
 }
 
-bool serialize_completion_response_proto(const InferenceType inference_type,
-                                         const RequestOutput& req_output,
-                                         const std::string& request_id,
-                                         int64_t created_time,
-                                         const std::string& model,
-                                         std::string* serialized,
-                                         std::string* error_info) {
+// Populate the raw (proto-free) output_tensors view on XLLM_Response from
+// RequestOutput. Mirrors the intent of serialize_completion_response_proto for
+// the rec_result tensor, but emits a single contiguous host buffer per tensor
+// (one memcpy) instead of going through proto::CompletionResponse,
+// SerializeToString, and the caller's ParseFromArray + RepeatedField copies.
+//
+// Layout / dtype:
+//   - FLAGS_enable_convert_tokens_to_item == true
+//       name        = "rec_result"
+//       data_type   = proto::DataType::INT64
+//       shape       = {#valid_items}   // outputs without item_ids are skipped
+//       num_elements= #valid_items
+//       data        = req_output.outputs[i].item_ids (one per choice that has
+//       it)
+//   - FLAGS_enable_convert_tokens_to_item == false
+//       name        = "rec_result"
+//       data_type   = proto::DataType::INT32
+//       shape       = {#outputs, token_ids_size}
+//       num_elements= #outputs * token_ids_size
+//       data        = row-major concat of req_output.outputs[i].token_ids
+//
+// IMPORTANT: shape and num_elements MUST stay in lockstep; the embedded raw
+// path on the caller side rejects shape/num_elements mismatches as an
+// integrity error. In the convert_to_item branch this means we shrink BOTH
+// shape[0] and num_elements down to the number of choices that actually
+// carry an item_id (which can legitimately be 0 - e.g. when no beam produced
+// a valid item under constrained decoding). The buffer allocation still uses
+// the upper bound so we can always memcpy in place.
+//
+// Returns true if a tensor was populated; false otherwise.
+bool populate_raw_output_tensors(const InferenceType inference_type,
+                                 const RequestOutput& req_output,
+                                 XLLM_Response* response) {
+  if (response == nullptr) {
+    return false;
+  }
+  if (inference_type != InferenceType::REC_COMPLETIONS) {
+    // LLM path historically had no output_tensors; keep parity.
+    return false;
+  }
+  if (req_output.outputs.empty()) {
+    return false;
+  }
+
+  const bool convert_to_item = FLAGS_enable_convert_tokens_to_item;
+
+  const size_t num_outputs = req_output.outputs.size();
+  size_t rank = 0;
+  // alloc_elems: upper bound used to size the data buffer. May exceed the
+  // final num_elements when fewer than num_outputs outputs carry item_ids.
+  size_t alloc_elems = 0;
+  size_t token_dim = 0;
+  int32_t data_type = 0;
+  size_t elem_size = 0;
+
+  if (convert_to_item) {
+    rank = 1;
+    alloc_elems = num_outputs;
+    data_type = static_cast<int32_t>(proto::DataType::INT64);
+    elem_size = sizeof(int64_t);
+  } else {
+    rank = 2;
+    token_dim = req_output.outputs.front().token_ids.size();
+    alloc_elems = num_outputs * token_dim;
+    data_type = static_cast<int32_t>(proto::DataType::INT32);
+    elem_size = sizeof(int32_t);
+  }
+
+  auto* entries = new XLLM_InferOutputTensor[1]();
+  CHECK(nullptr != entries);
+  auto* shape = new int64_t[rank]();
+  CHECK(nullptr != shape);
+  auto* data = alloc_elems > 0 ? new char[alloc_elems * elem_size]() : nullptr;
+  if (alloc_elems > 0) {
+    CHECK(nullptr != data);
+  }
+  constexpr const char* kRecResultName = "rec_result";
+  auto* name_buf = new char[std::strlen(kRecResultName) + 1];
+  CHECK(nullptr != name_buf);
+  std::memcpy(name_buf, kRecResultName, std::strlen(kRecResultName) + 1);
+
+  size_t actual_elems = 0;
+  if (convert_to_item) {
+    auto* dst = reinterpret_cast<int64_t*>(data);
+    size_t written = 0;
+    for (size_t i = 0; i < num_outputs; ++i) {
+      const auto& seq_output = req_output.outputs[i];
+      if (seq_output.item_ids.has_value()) {
+        dst[written++] = seq_output.item_ids.value();
+      }
+    }
+    // Keep shape and num_elements consistent. Empty (written == 0) is a
+    // valid state - downstream gets an empty [0]-shaped int64 tensor.
+    shape[0] = static_cast<int64_t>(written);
+    actual_elems = written;
+  } else {
+    shape[0] = static_cast<int64_t>(num_outputs);
+    shape[1] = static_cast<int64_t>(token_dim);
+    auto* dst = reinterpret_cast<int32_t*>(data);
+    for (size_t i = 0; i < num_outputs; ++i) {
+      const auto& seq_output = req_output.outputs[i];
+      // Defensive: clamp to the row width so we never overrun.
+      const size_t row = std::min(token_dim, seq_output.token_ids.size());
+      if (row > 0) {
+        std::memcpy(dst + i * token_dim,
+                    seq_output.token_ids.data(),
+                    row * sizeof(int32_t));
+      }
+    }
+    actual_elems = alloc_elems;
+  }
+
+  entries[0].name = name_buf;
+  entries[0].data_type = data_type;
+  entries[0].shape = shape;
+  entries[0].shape_len = rank;
+  entries[0].data = data;
+  entries[0].num_elements = actual_elems;
+
+  response->output_tensors.entries = entries;
+  response->output_tensors.entries_size = 1;
+  return true;
+}
+
+// Legacy proto path retained for callers that still consume
+// XLLM_Response.completion_response_proto. The default
+// handle_inference_request path no longer invokes this function; embedded
+// callers should consume XLLM_Response.output_tensors instead. Marked
+// [[maybe_unused]] so dropping the last call site does not produce a
+// -Wunused-function warning.
+[[maybe_unused]] bool serialize_completion_response_proto(
+    const InferenceType inference_type,
+    const RequestOutput& req_output,
+    const std::string& request_id,
+    int64_t created_time,
+    const std::string& model,
+    std::string* serialized,
+    std::string* error_info) {
   if (serialized == nullptr) {
     if (error_info != nullptr) {
       *error_info = "serialized proto output is null";
@@ -255,6 +386,8 @@ XLLM_Response* build_error_response(const std::string& request_id,
   XLLM_SET_META_STRING_FIELD(response->id, request_id);
   response->completion_response_proto = nullptr;
   response->completion_response_proto_size = 0;
+  response->output_tensors.entries = nullptr;
+  response->output_tensors.entries_size = 0;
 
   LOG(ERROR) << "Request [" << request_id << "] error: " << error_info
              << " (code: " << static_cast<int>(response->status_code) << ")";
@@ -277,6 +410,8 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
   XLLM_SET_META_STRING_FIELD(response->model, model);
   response->completion_response_proto = nullptr;
   response->completion_response_proto_size = 0;
+  response->output_tensors.entries = nullptr;
+  response->output_tensors.entries_size = 0;
 
   if (inference_type == InferenceType::LLM_COMPLETIONS ||
       inference_type == InferenceType::REC_COMPLETIONS) {
@@ -488,27 +623,12 @@ XLLM_Response* handle_inference_request(
               if (response != nullptr &&
                   (inference_type == InferenceType::LLM_COMPLETIONS ||
                    inference_type == InferenceType::REC_COMPLETIONS)) {
-                std::string serialized;
-                std::string error_info;
-                if (serialize_completion_response_proto(inference_type,
-                                                        req_output,
-                                                        request_id,
-                                                        created_time,
-                                                        model_id,
-                                                        &serialized,
-                                                        &error_info)) {
-                  response->completion_response_proto_size = serialized.size();
-                  response->completion_response_proto =
-                      new char[response->completion_response_proto_size + 1];
-                  memcpy(response->completion_response_proto,
-                         serialized.data(),
-                         response->completion_response_proto_size);
-                  response->completion_response_proto
-                      [response->completion_response_proto_size] = '\0';
-                } else {
-                  LOG(WARNING) << "serialize_completion_response_proto failed: "
-                               << error_info;
-                }
+                // Default fast path: hand back raw output tensors so the
+                // embedded caller can memcpy directly into its own tensors,
+                // avoiding CompletionResponse serialize / parse and a
+                // RepeatedField round trip.
+                populate_raw_output_tensors(
+                    inference_type, req_output, response);
               }
 
               locked_promise->setValue(response);
@@ -689,6 +809,30 @@ void xllm_free_response(XLLM_Response* resp) {
     resp->rec_outputs.entries = nullptr;
   }
   resp->rec_outputs.entries_size = 0;
+
+  if (nullptr != resp->output_tensors.entries) {
+    for (size_t i = 0; i < resp->output_tensors.entries_size; ++i) {
+      XLLM_InferOutputTensor& ot = resp->output_tensors.entries[i];
+      if (nullptr != ot.name) {
+        delete[] const_cast<char*>(ot.name);
+        ot.name = nullptr;
+      }
+      if (nullptr != ot.shape) {
+        delete[] const_cast<int64_t*>(ot.shape);
+        ot.shape = nullptr;
+      }
+      if (nullptr != ot.data) {
+        delete[] reinterpret_cast<char*>(const_cast<void*>(ot.data));
+        ot.data = nullptr;
+      }
+      ot.shape_len = 0;
+      ot.num_elements = 0;
+    }
+    delete[] resp->output_tensors.entries;
+    resp->output_tensors.entries = nullptr;
+  }
+  resp->output_tensors.entries_size = 0;
+
   delete resp;
 
   return;
@@ -1173,9 +1317,13 @@ bool convert_c_infer_input_tensors_to_onerec_mm_data(
         torch::from_blob(const_cast<void*>(tensor_desc.data),
                          dims,
                          torch::TensorOptions().dtype(scalar_type));
-    if (scalar_type == torch::kBFloat16) {
-      tensor = tensor.clone();
-    } else {
+    // The C API is synchronous (handle_inference_request blocks on
+    // future.get()), so the caller-provided buffer outlives every downstream
+    // consumer of this tensor. We therefore avoid the unconditional
+    // host->host clone() for bf16 inputs and let the from_blob view alias the
+    // caller's buffer directly. fp16/fp32 still requires a single
+    // alloc + dtype cast via .to(bf16) so OneRec sees its expected dtype.
+    if (scalar_type != torch::kBFloat16) {
       tensor = tensor.to(torch::kBFloat16);
     }
 
