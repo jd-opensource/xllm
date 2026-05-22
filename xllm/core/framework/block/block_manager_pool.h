@@ -49,6 +49,7 @@ class BlockManagerPool : public KVCacheManager {
     PROPERTY(std::vector<uint32_t>, manager_types) = {};
     PROPERTY(std::vector<uint32_t>, compress_ratios) = {};
     PROPERTY(uint32_t, max_seqs_per_batch) = 0;
+    PROPERTY(uint32_t, num_single_blocks) = 0;
   };
 
   explicit BlockManagerPool(const Options& options, int32_t dp_size = 1);

@@ -25,6 +25,7 @@ limitations under the License.
 #include <boost/algorithm/string.hpp>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <memory>
 
 #include "common/device_monitor.h"
@@ -814,7 +815,8 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .enable_xtensor(FLAGS_enable_xtensor)
       .num_layers(args_.n_layers())
       .slot_size(kv_cache_cap.slot_size())
-      .model_id(options_.model_id());
+      .model_id(options_.model_id())
+      .max_seqs_per_batch(options_.max_seqs_per_batch());
   if (util::is_deepseek_v4_model_type(args_.model_type())) {
     constexpr uint32_t kManagerTypeBlockManagerImpl = 0;
     constexpr uint32_t kManagerTypeSlidingWindowBlockManager = 1;
@@ -850,7 +852,9 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
         .max_tokens_per_batch(options_.max_tokens_per_batch())
         .manager_types(std::move(manager_types))
         .compress_ratios(std::move(manager_compress_ratios))
-        .max_seqs_per_batch(options_.max_seqs_per_batch());
+        .max_seqs_per_batch(options_.max_seqs_per_batch())
+        .num_single_blocks(static_cast<uint32_t>(std::min<int64_t>(
+            kv_cache_cap.swa_count(), std::numeric_limits<uint32_t>::max())));
   }
 
   if (options_.host_blocks_factor() > 1.0 || options_.enable_kvcache_store()) {
