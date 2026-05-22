@@ -958,37 +958,54 @@ class DeepseekV4ModelImpl
 #endif
   }
 
+  // Normalize metadata vectors for graph mode (bucket-padded) forward.
+  //
+  // Key concepts:
+  //   actual_metadata_rows  -- rows that carry real token data.
+  //                            For normal decode: = num_requests.
+  //                            For MTP validate:  = num_requests * (1 + num_spec_tokens).
+  //   padded_metadata_rows  -- total rows after bucket padding.
+  //                            >= actual_metadata_rows, rounded up to decode bucket.
+  //   Rows in [actual_metadata_rows, padded_metadata_rows) are bucket padding
+  //   and must be zeroed so DSAMetadataBuilder treats them as inactive.
+  //
+  // Example (normal decode, 2 requests, bucket size 4):
+  //   actual_metadata_rows = 2, padded_metadata_rows = 4
+  //   kv_seq_lens_vec = [23, 24, 0, 0]
+  //
+  // Example (MTP validate, 1 request, num_speculative_tokens=1, bucket 4):
+  //   actual_metadata_rows = 1*(1+1) = 2, padded_metadata_rows = 4
+  //   kv_seq_lens_vec = [23, 24, 0, 0]
+  //   Both rows are real; num_speculative_tokens is from speculative config.
   void normalize_graph_metadata_input_params(ModelInputParams& params) const {
     int64_t actual_metadata_rows = std::max<int64_t>(params.actual_num_sequences,
                                                     0);
-    int64_t metadata_batch_size = actual_metadata_rows;
+    int64_t padded_metadata_rows = actual_metadata_rows;
     if (params.enable_graph) {
-      metadata_batch_size =
-          std::max<int64_t>(metadata_batch_size, params.num_sequences);
+      padded_metadata_rows =
+          std::max<int64_t>(padded_metadata_rows, params.num_sequences);
     }
-    if (metadata_batch_size <= 0) {
-      metadata_batch_size = 1;
+    if (padded_metadata_rows <= 0) {
+      padded_metadata_rows = 1;
     }
     actual_metadata_rows = std::min<int64_t>(actual_metadata_rows,
-                                             metadata_batch_size);
+                                             padded_metadata_rows);
 
-    auto trim_lens_vec = [metadata_batch_size,
+    auto trim_lens_vec = [padded_metadata_rows,
                           actual_metadata_rows](std::vector<int>& lens) {
       if (lens.empty()) {
-        lens.assign(static_cast<size_t>(metadata_batch_size), 0);
-      } else if (static_cast<int64_t>(lens.size()) < metadata_batch_size) {
-        lens.resize(static_cast<size_t>(metadata_batch_size), 0);
+        lens.assign(static_cast<size_t>(padded_metadata_rows), 0);
+      } else if (static_cast<int64_t>(lens.size()) < padded_metadata_rows) {
+        lens.resize(static_cast<size_t>(padded_metadata_rows), 0);
       } else {
-        lens.resize(static_cast<size_t>(metadata_batch_size));
+        lens.resize(static_cast<size_t>(padded_metadata_rows));
       }
       std::fill(lens.begin() + actual_metadata_rows, lens.end(), 0);
     };
 
-    // Graph forward tensors are padded to the decode bucket. Build metadata
-    // for the same padded row count so compressor/attention inputs agree.
     trim_lens_vec(params.kv_seq_lens_vec);
     trim_lens_vec(params.q_seq_lens_vec);
-    params.num_sequences = static_cast<int32_t>(metadata_batch_size);
+    params.num_sequences = static_cast<int32_t>(padded_metadata_rows);
     params.actual_num_sequences = static_cast<int32_t>(actual_metadata_rows);
   }
 
