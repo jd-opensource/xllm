@@ -39,7 +39,7 @@ ReasoningDetector::ReasoningDetector(const std::string& think_start_token,
       in_reasoning_(force_reasoning),
       stream_reasoning_(stream_reasoning) {}
 
-ReasoningResult ReasoningDetector::detect_and_parse(std::string& text) {
+ReasoningResult ReasoningDetector::detect_and_parse(const std::string& text) {
   bool in_reasoning =
       in_reasoning_ || absl::StrContains(text, think_start_token_);
 
@@ -64,7 +64,7 @@ ReasoningResult ReasoningDetector::detect_and_parse(std::string& text) {
   return ReasoningResult(normal_text, reasoning_text);
 }
 
-ReasoningResult ReasoningDetector::parse_streaming_increment(
+ReasoningResult ReasoningDetector::parse_streaming_increment(const 
     std::string& new_text) {
   buffer_.append(new_text.data(), new_text.size());
   std::string current_text = buffer_;

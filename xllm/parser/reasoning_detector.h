@@ -43,7 +43,7 @@ class ReasoningDetector {
 
   // Detects and parses reasoning sections in the provided text. Returns both
   // reasoning content and normal text separately.
-  ReasoningResult detect_and_parse(std::string& text);
+  ReasoningResult detect_and_parse(const std::string& text);
 
   // Streaming incremental parsing for reasoning content.
   // Handles partial reasoning tags and content.
@@ -52,7 +52,7 @@ class ReasoningDetector {
   //     Accumulates reasoning content until the end tag is found
   // If stream_reasoning is True:
   //     Streams reasoning content as it arrives
-  ReasoningResult parse_streaming_increment(std::string& new_text);
+  ReasoningResult parse_streaming_increment(const std::string& new_text);
 
  protected:
   std::string think_start_token_;
