@@ -840,6 +840,8 @@ class DeepseekV4ModelImpl
     return tensor_max_or_zero(fallback_tensor);
   }
 
+ public:
+  // TODO: Common Funcs for both dsv4/dsv4_mtp. Suggests move shared DeepSeek V4 graph metadata utilities out of DeepseekV4ModelImpl.
   static bool tensor_aliases_storage(const torch::Tensor& lhs,
                                      const torch::Tensor& rhs) {
     return lhs.defined() && rhs.defined() && lhs.data_ptr() == rhs.data_ptr() &&
@@ -977,7 +979,7 @@ class DeepseekV4ModelImpl
   //   actual_metadata_rows = 1*(1+1) = 2, padded_metadata_rows = 4
   //   kv_seq_lens_vec = [23, 24, 0, 0]
   //   Both rows are real; num_speculative_tokens is from speculative config.
-  void normalize_graph_metadata_input_params(ModelInputParams& params) const {
+  static void normalize_graph_metadata_input_params(ModelInputParams& params) {
     int64_t actual_metadata_rows = std::max<int64_t>(params.actual_num_sequences,
                                                     0);
     int64_t padded_metadata_rows = actual_metadata_rows;
@@ -1025,9 +1027,10 @@ class DeepseekV4ModelImpl
     return attn_metadata;
   }
 
-  std::shared_ptr<layer::AttentionMetadata> persist_graph_attention_metadata(
+  static std::shared_ptr<layer::AttentionMetadata>
+  persist_graph_attention_metadata(
       DeepseekV4GraphMetadataState& state,
-      std::shared_ptr<layer::AttentionMetadata> metadata) const {
+      std::shared_ptr<layer::AttentionMetadata> metadata) {
     if (!metadata || !metadata->dsa_metadata) {
       return metadata;
     }
@@ -1043,6 +1046,7 @@ class DeepseekV4ModelImpl
     return metadata;
   }
 
+ private:
   void fill_empty_dp_rank_input_params(
       ModelInputParams& params,
       const std::vector<KVCache>* kv_caches = nullptr) const {
@@ -1077,7 +1081,7 @@ class DeepseekV4ModelImpl
                                                          kv_caches->front());
       }
       block_num = std::max<int64_t>(block_num, 1);
-      params.multi_block_tables.push_back(
+      params.multi_block_tables.emplace_back(
           torch::zeros({1, block_num}, cpu_int_options));
     }
   }

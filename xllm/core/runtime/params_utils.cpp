@@ -229,6 +229,17 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
              static_cast<size_t>(input_params.num_sequences))
         << "block_tables_vec size (" << block_tables_vec.size()
         << ") must match num_sequences (" << input_params.num_sequences << ")";
+  } else {
+    // support for mutli_block_tables
+    for (int32_t m = 0; m < pb_forward_input->multi_block_tables_vec().size();
+         ++m) {
+      const auto& mgr = pb_forward_input->multi_block_tables_vec()[m];
+      CHECK_EQ(static_cast<size_t>(mgr.block_tables().size()),
+               static_cast<size_t>(input_params.num_sequences))
+          << "multi_block_tables[" << m << "] size ("
+          << mgr.block_tables().size() << ") must match num_sequences ("
+          << input_params.num_sequences << ")";
+    }
   }
   input_params.kv_max_seq_len = pb_forward_input->max_seq_len();
   input_params.q_max_seq_len = pb_forward_input->q_max_seq_len();
@@ -258,12 +269,9 @@ void proto_to_forward_input(const proto::ForwardInput* pb_forward_input,
       std::move(create_2d_tensor(block_tables_vec, torch::kInt));
 
   // multi block manager support for DeepSeek V4
-  for (int m = 0; m < pb_forward_input->multi_block_tables_vec().size(); ++m) {
+  for (int32_t m = 0; m < pb_forward_input->multi_block_tables_vec().size();
+       ++m) {
     const auto& mgr = pb_forward_input->multi_block_tables_vec()[m];
-    CHECK_EQ(static_cast<size_t>(mgr.block_tables().size()),
-             static_cast<size_t>(input_params.num_sequences))
-        << "multi_block_tables[" << m << "] size (" << mgr.block_tables().size()
-        << ") must match num_sequences (" << input_params.num_sequences << ")";
     std::vector<std::vector<int32_t>> mgr_tables;
     mgr_tables.reserve(mgr.block_tables().size());
     for (int s = 0; s < mgr.block_tables().size(); ++s) {
