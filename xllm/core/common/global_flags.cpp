@@ -577,7 +577,7 @@ DEFINE_string(tool_call_parser,
               "",
               "Specify the parser for handling tool-call interactions(e.g. "
               "auto, qwen25, qwen3, qwen35, qwen3_coder, kimi_k2, "
-              "deepseekv3, glm45, glm47, glm5).");
+              "deepseekv3, deepseekv32, deepseekv4, glm45, glm47, glm5).");
 
 // --- qwen3 reranker config ---
 
@@ -737,7 +737,7 @@ DEFINE_int32(beam_width, 1, "Beam width for beam search.");
 DEFINE_bool(use_cpp_chat_template,
             true,
             "Use native C++ chat template for supported models "
-            "(e.g. deepseek_v32) instead of Jinja. "
+            "(e.g. deepseek_v32, deepseek_v4) instead of Jinja. "
             "Set to false to fallback to Jinja for debugging.");
 
 // --- health check config ---
