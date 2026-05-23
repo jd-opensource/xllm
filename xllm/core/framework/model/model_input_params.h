@@ -373,6 +373,7 @@ struct ModelInputParams {
     params.extra_token_ids = std::move(extra_token_ids);
     params.is_spec_verify = is_spec_verify;
     params.num_accepted_tokens = safe_to(num_accepted_tokens, device, true);
+    params.num_accepted_tokens_vec = std::move(num_accepted_tokens_vec);
     params.dp_ep_padding_data = dp_ep_padding_data;
     params.cp_ep_padding_data
         .attn_padding_idx(
@@ -585,6 +586,7 @@ struct ModelInputParams {
 
   bool is_spec_verify = false;
   torch::Tensor num_accepted_tokens;
+  std::vector<int64_t> num_accepted_tokens_vec;
 
   // swap
   std::vector<BlockTransferInfo> swap_blocks;

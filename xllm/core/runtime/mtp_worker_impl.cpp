@@ -548,6 +548,8 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
   }
   input_params.num_accepted_tokens =
       torch::tensor(accepted_prefix_lengths, int_options);
+  input_params.num_accepted_tokens_vec.assign(accepted_prefix_lengths.begin(),
+                                              accepted_prefix_lengths.end());
 }
 
 void MTPWorkerImpl::fill_validate_input_from_draft_outputs(
