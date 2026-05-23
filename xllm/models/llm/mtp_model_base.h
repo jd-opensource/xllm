@@ -31,7 +31,9 @@ namespace xllm {
 enum class MtpProjectionType { CONCAT_EH_PROJ, ADD_EH_PROJ };
 
 inline bool is_deepseek_v4_mtp_model(const ModelArgs& model_args) {
-  return model_args.model_type() == "deepseek_v4_mtp";
+  return util::is_taget_model_type(model_args.model_type(),
+                                   /*target=*/"deepseek_v4_mtp",
+                                   /*match_mtp=*/false);
 }
 
 inline MtpProjectionType get_mtp_projection_type(const ModelArgs& model_args) {

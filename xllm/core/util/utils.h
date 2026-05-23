@@ -131,6 +131,20 @@ inline bool is_mla_model_type(std::string_view model_type) {
   return mla_model_type_set().contains(std::string(model_type));
 }
 
+inline bool is_taget_model_type(std::string_view model_type,
+                                std::string_view target,
+                                bool match_mtp) {
+  if (model_type == target) {
+    return true;
+  }
+  if (!match_mtp) {
+    return false;
+  }
+  std::string target_mtp(target);
+  target_mtp += "_mtp";
+  return model_type == target_mtp;
+}
+
 inline std::string get_model_name(
     const std::filesystem::path& normalized_model_path) {
   std::string model_name;
