@@ -106,7 +106,7 @@ TEST_F(DeepseekV4IndexerTest, DsaTokenSlotsTrackCurrentDecodeStep) {
          "slots";
 }
 
-TEST_F(DeepseekV4IndexerTest, DsaSwaBlockTableWrapsWithLogicalPosition) {
+TEST_F(DeepseekV4IndexerTest, DsaSwaBlockTableUsesLogicalColumnsWithoutWrap) {
   ModelInputParams params;
   params.batch_forward_type = BatchForwardType::DECODE;
   params.num_sequences = 1;
@@ -139,10 +139,10 @@ TEST_F(DeepseekV4IndexerTest, DsaSwaBlockTableWrapsWithLogicalPosition) {
   ASSERT_EQ(dsa.slot_mappings[0].size(), 1);
 
   const auto expected_bt = torch::tensor(
-      {{0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 10}}, torch::kInt32);
+      {{10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, -1}}, torch::kInt32);
   EXPECT_TRUE(torch::equal(dsa.block_tables[0][0].cpu(), expected_bt));
 
-  const auto expected_slot = torch::tensor({10 * 128}, torch::kInt32);
+  const auto expected_slot = torch::tensor({-1}, torch::kInt32);
   EXPECT_TRUE(torch::equal(dsa.slot_mappings[0][0].cpu(), expected_slot));
 }
 

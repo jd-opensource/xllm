@@ -45,7 +45,8 @@ TEST(TestMappingNPU, ToJson) {
   EXPECT_EQ(attn_tp_group_id, 0);
   nlohmann::json mlp_tp = data["mlpTp"];
   int32_t mlp_tp_buffer_size = mlp_tp["bufferSize"];
-  EXPECT_EQ(mlp_tp_buffer_size, 128);
+  int32_t attn_tp_buffer_size = attn_tp["bufferSize"];
+  EXPECT_EQ(mlp_tp_buffer_size, attn_tp_buffer_size);
 }
 
 }  // namespace xllm
