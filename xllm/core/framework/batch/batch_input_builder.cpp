@@ -734,8 +734,8 @@ void BatchInputBuilder::setup_kv_cache_info(
     // Stride matches the prefill instance KV-split width: P uses local
     // kv_split_size; decode uses --prefill_kv_split_size only (see
     // util::kv_split_stride_for_kv_transfer).
-    const uint32_t kv_split_stride = static_cast<uint32_t>(
-        util::kv_split_stride_for_kv_transfer());
+    const uint32_t kv_split_stride =
+        static_cast<uint32_t>(util::kv_split_stride_for_kv_transfer());
     for (uint32_t k = prev_pushed; k < cur_count; ++k) {
       new_local.push_back(blocks[k].id());
       for (uint32_t j = 0; j < kv_split_stride; j++) {
@@ -886,8 +886,7 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
     // and by the existing shm serializer) and the CP-specific embedding path
     // (consumed by cp_input_partition + mtp_worker_impl). Both tensors share
     // storage via from_blob; the cost is one extra tensor handle, not a copy.
-    auto mtp_tensor =
-        torch::tensor(state_.mtp_shifted_token_ids, torch::kInt);
+    auto mtp_tensor = torch::tensor(state_.mtp_shifted_token_ids, torch::kInt);
     input_params.embedding.mtp_shifted_token_ids = mtp_tensor;
     input_params.mtp_shifted_token_ids = mtp_tensor;
   }

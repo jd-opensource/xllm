@@ -219,9 +219,7 @@ inline int32_t kv_split_stride_for_kv_transfer() {
   return kv_split_size_effective();
 }
 
-inline bool enable_kvcache_split(void) {
-  return kv_split_size_effective() > 1;
-}
+inline bool enable_kvcache_split(void) { return kv_split_size_effective() > 1; }
 
 }  // namespace util
 }  // namespace xllm

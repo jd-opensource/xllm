@@ -602,7 +602,8 @@ struct ForwardInput {
   bool cp_partitioned = false;
 };
 
-#if 0  // Legacy engine-side CP partition; superseded by cp::cp_partition_inplace.
+#if 0  // Legacy engine-side CP partition; superseded by
+       // cp::cp_partition_inplace.
 inline ForwardInput cp_partition_forward_input(const ForwardInput& input,
                                                int32_t cp_rank,
                                                int32_t cp_size) {

@@ -818,8 +818,7 @@ struct ParallelInput {
         .dynamic_ep_idx(
             safe_to(cp_ep_padding_data.dynamic_ep_idx(), device, true))
         .moe_idx(safe_to(cp_ep_padding_data.moe_idx(), device, true))
-        .expert_array(
-            safe_to(cp_ep_padding_data.expert_array(), device, true));
+        .expert_array(safe_to(cp_ep_padding_data.expert_array(), device, true));
     out.cp_prefill_inputs = cp_prefill_inputs.to(device);
 #if defined(USE_NPU) || defined(USE_MLU)
     out.layer_synchronizer = layer_synchronizer;
@@ -876,8 +875,7 @@ struct ModelInputParams {
       params.multi_block_tables.push_back(
           safe_to(table, table.options().device(torch::kCPU), true));
     }
-    params.mtp_shifted_token_ids =
-        safe_to(mtp_shifted_token_ids, device, true);
+    params.mtp_shifted_token_ids = safe_to(mtp_shifted_token_ids, device, true);
 
     // rec_params device conversion for both OneRec and LLM-Rec variants
     if (const auto* onerec_xattn = onerec_xattention_params()) {

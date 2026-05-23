@@ -72,8 +72,12 @@ class KVCacheState {
   void set_transfer_kv_info(TransferKVInfo&& info);
   std::optional<TransferKVInfo>& transfer_kv_info();
 
-  uint32_t pushed_local_block_count() const { return pushed_local_block_count_; }
-  void set_pushed_local_block_count(uint32_t n) { pushed_local_block_count_ = n; }
+  uint32_t pushed_local_block_count() const {
+    return pushed_local_block_count_;
+  }
+  void set_pushed_local_block_count(uint32_t n) {
+    pushed_local_block_count_ = n;
+  }
 
   void reset();
 

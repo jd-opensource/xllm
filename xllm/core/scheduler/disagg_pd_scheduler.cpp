@@ -24,11 +24,10 @@ limitations under the License.
 #include <random>
 
 #include "common/global_flags.h"
-#include "util/utils.h"
 #include "common/macros.h"
 #include "core/framework/config/disagg_pd_config.h"
-#include "core/framework/config/parallel_config.h"
 #include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/service_config.h"
 #include "disagg_pd.pb.h"
@@ -44,6 +43,7 @@ limitations under the License.
 #include "scheduler/chunked_prefill_scheduler.h"
 #include "scheduler/continuous_scheduler.h"
 #include "util/env_var.h"
+#include "util/utils.h"
 
 namespace xllm {
 

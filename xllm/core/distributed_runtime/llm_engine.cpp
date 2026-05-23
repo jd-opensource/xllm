@@ -734,12 +734,13 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
   int32_t src_world_size = static_cast<int32_t>(cluster_ids.size());
   int32_t src_cp_tp_size = src_world_size / src_dp_size;
   int32_t src_tp_size = src_cp_tp_size / src_kv_split_size;
-  int32_t dst_tp_size =
-      static_cast<int32_t>(worker_clients_num_) / static_cast<int32_t>(dp_size_);
+  int32_t dst_tp_size = static_cast<int32_t>(worker_clients_num_) /
+                        static_cast<int32_t>(dp_size_);
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
-  for (size_t worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
+       ++worker_rank) {
     int32_t d_tp_rank = static_cast<int32_t>(worker_rank) % dst_tp_size;
 
     std::vector<uint64_t> target_cluster_ids;
@@ -767,10 +768,13 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
     link_threadpool_->schedule([this,
                                 promise = std::move(promise),
                                 worker_rank,
-                                target_cluster_ids = std::move(target_cluster_ids),
+                                target_cluster_ids =
+                                    std::move(target_cluster_ids),
                                 target_addrs = std::move(target_addrs),
-                                target_device_ips = std::move(target_device_ips),
-                                target_ports = std::move(target_ports)]() mutable {
+                                target_device_ips =
+                                    std::move(target_device_ips),
+                                target_ports =
+                                    std::move(target_ports)]() mutable {
       promise.setValue(worker_clients_[worker_rank]->link_cluster(
           target_cluster_ids, target_addrs, target_device_ips, target_ports));
     });
@@ -798,12 +802,13 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   int32_t src_world_size = static_cast<int32_t>(cluster_ids.size());
   int32_t src_cp_tp_size = src_world_size / src_dp_size;
   int32_t src_tp_size = src_cp_tp_size / src_kv_split_size;
-  int32_t dst_tp_size =
-      static_cast<int32_t>(worker_clients_num_) / static_cast<int32_t>(dp_size_);
+  int32_t dst_tp_size = static_cast<int32_t>(worker_clients_num_) /
+                        static_cast<int32_t>(dp_size_);
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
-  for (size_t worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
+  for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
+       ++worker_rank) {
     int32_t d_tp_rank = static_cast<int32_t>(worker_rank) % dst_tp_size;
 
     std::vector<uint64_t> target_cluster_ids;
@@ -831,10 +836,13 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
     link_threadpool_->schedule([this,
                                 promise = std::move(promise),
                                 worker_rank,
-                                target_cluster_ids = std::move(target_cluster_ids),
+                                target_cluster_ids =
+                                    std::move(target_cluster_ids),
                                 target_addrs = std::move(target_addrs),
-                                target_device_ips = std::move(target_device_ips),
-                                target_ports = std::move(target_ports)]() mutable {
+                                target_device_ips =
+                                    std::move(target_device_ips),
+                                target_ports =
+                                    std::move(target_ports)]() mutable {
       promise.setValue(worker_clients_[worker_rank]->unlink_cluster(
           target_cluster_ids, target_addrs, target_device_ips, target_ports));
     });
@@ -941,8 +949,8 @@ ForwardOutput LLMEngine::step(std::vector<Batch>& batch) {
   // WorkerImpl::prepare_work_before_execute (see runtime/cp_input_partition).
   for (auto worker_rank = 0; worker_rank < worker_clients_num_; ++worker_rank) {
     const int32_t dp_rank = worker_rank / dp_local_size_;
-    futures.emplace_back(
-        worker_clients_[worker_rank]->step_remote_async(forward_inputs[dp_rank]));
+    futures.emplace_back(worker_clients_[worker_rank]->step_remote_async(
+        forward_inputs[dp_rank]));
   }
 
   // wait for the all future to complete
