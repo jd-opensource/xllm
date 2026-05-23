@@ -49,6 +49,14 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
       .compress_ratios(options_.compress_ratios())
       .max_seqs_per_batch(options_.max_seqs_per_batch());
 
+  const uint32_t max_single_block_sequences =
+      options_.max_seqs_per_batch() > 0
+          ? options_.max_seqs_per_batch()
+          : static_cast<uint32_t>(std::max(FLAGS_max_seqs_per_batch, 0));
+  const uint32_t num_single_blocks = std::max<uint32_t>(
+      options_.num_single_blocks(), max_single_block_sequences + 2);
+  CHECK_GT(num_single_blocks, 0u) << "num_single_blocks must be positive";
+
   for (int32_t i = 0; i < dp_size; ++i) {
     if (options_.enable_xtensor()) {
       // Use XTensorBlockManagerImpl for xtensor mode.
@@ -82,7 +90,7 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
     // pool. Worker-side embedding and linear-state caches remain physically
     // separate and are addressed via transport fields.
     single_block_managers_.emplace_back(std::make_unique<SingleBlockManager>(
-        /*num_blocks=*/FLAGS_max_seqs_per_batch + 2,
+        /*num_blocks=*/num_single_blocks,
         /*resource_name=*/"single block",
         /*exhaustion_message=*/"No more single-block ids available"));
   }
@@ -130,7 +138,13 @@ bool BlockManagerPool::allocate_single_block(Sequence* sequence,
 
   auto single_blocks = single_block_managers_[dp_rank]->allocate(1);
   if (single_blocks.empty()) {
-    LOG(ERROR) << "Failed to allocate single block!";
+    const auto* manager = single_block_managers_[dp_rank].get();
+    LOG(ERROR) << "Failed to allocate single block! dp_rank=" << dp_rank
+               << ", free=" << manager->num_free_blocks()
+               << ", used=" << manager->num_used_blocks()
+               << ", total=" << manager->num_total_blocks()
+               << ", max_seqs_per_batch=" << options_.max_seqs_per_batch()
+               << ", configured_single_blocks=" << options_.num_single_blocks();
     return false;
   }
   sequence->set_single_block(std::move(single_blocks[0]));
@@ -169,6 +183,7 @@ void BlockManagerPool::deallocate(Sequence* sequence) {
   if (block_managers_[dp_rank]->is_composite()) {
     // TODO: not supporte prefix cache for composite manager yet.
     block_managers_[dp_rank]->deallocate_sequence(sequence);
+    deallocate_single_block(sequence, dp_rank);
     sequence->reset();
     return;
   }
@@ -214,8 +229,14 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
 
   if (block_managers_[dp_rank]->is_composite()) {
     // TODO: not supporte prefix cache for composite manager yet.
-    return block_managers_[dp_rank]->allocate_for_sequence(sequence,
-                                                           num_tokens);
+    if (!block_managers_[dp_rank]->allocate_for_sequence(sequence,
+                                                         num_tokens)) {
+      if (needs_single_block) {
+        deallocate_single_block(sequence, dp_rank);
+      }
+      return false;
+    }
+    return true;
   }
 
   // first try to allocate shared blocks
