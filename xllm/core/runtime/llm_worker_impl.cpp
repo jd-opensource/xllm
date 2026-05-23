@@ -80,6 +80,21 @@ LLMWorkerImpl::LLMWorkerImpl(const ParallelArgs& parallel_args,
 bool LLMWorkerImpl::init_model(ModelContext& context) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
 
+#if defined(USE_CUDA)
+  // Ensure FlashinferWorkspace is initialized on the calling thread before
+  // constructing model layers. When called synchronously from
+  // SpeculativeWorkerImpl (e.g. MTP target/draft setup), init_model runs on
+  // the MTP worker's thread (T_MTP) rather than on the LLMWorkerImpl's own
+  // threadpool thread (T_worker) where the scheduled initialize() runs.
+  // FlashinferWorkspace is thread_local, so T_MTP's instance must be
+  // explicitly initialized here; otherwise FlashInferAttentionImpl captures
+  // an undefined int_workspace_buffer_ and crashes at prefill time.
+  auto& ws = ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance();
+  if (!ws.get_int_workspace_buffer().defined()) {
+    ws.initialize(device_);
+  }
+#endif
+
   // Try to create a causal LM model
   model_ = create_llm_model(context);
 

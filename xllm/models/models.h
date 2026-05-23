@@ -94,6 +94,7 @@ limitations under the License.
 #include "dit/pipelines/pipeline_longcat_image.h"       // IWYU pragma: keep
 #include "dit/pipelines/pipeline_longcat_image_edit.h"  // IWYU pragma: keep
 #include "llm/mimo.h"                                   // IWYU pragma: keep
+#include "llm/mimo_mtp.h"                               // IWYU pragma: keep
 #include "llm/qwen2.h"                                  // IWYU pragma: keep
 #include "llm/qwen3.h"                                  // IWYU pragma: keep
 #include "llm/qwen3_moe.h"                              // IWYU pragma: keep

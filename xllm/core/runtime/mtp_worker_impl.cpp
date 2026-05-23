@@ -461,6 +461,10 @@ bool is_qwen3_5_target_model_type(const std::string& model_type) {
          model_type.rfind("qwen3_5_", 0) == 0;
 }
 
+bool is_mimo_target_model_type(const std::string& model_type) {
+  return model_type == "mimo";
+}
+
 #if defined(USE_NPU)
 std::string read_model_type_from_config(const std::string& model_weights_path) {
   JsonReader reader;
@@ -625,6 +629,23 @@ bool MTPWorkerImpl::use_qwen3_5_spec_verify_path() const {
          impl_->get_status() != WorkerImpl::Status::UNINITIALIZED &&
          is_qwen3_5_target_model_type(
              impl_->context_.get_model_args().model_type());
+}
+
+// MiMo MTP validation requires chunked-prefill mode (same as Qwen3.5) to
+// avoid the read-before-write race in FlashInfer batch-decode: validation
+// token 1 (at position p+1) must attend to the KV written by token 0 (at
+// position p) within the same batch call, but all-reads-then-all-writes
+// ordering means it reads garbage.  Chunked prefill executes tokens causally
+// so token 1 always sees token 0's committed KV.
+bool MTPWorkerImpl::use_mimo_spec_verify_path() const {
+  return impl_ != nullptr &&
+         impl_->get_status() != WorkerImpl::Status::UNINITIALIZED &&
+         is_mimo_target_model_type(
+             impl_->context_.get_model_args().model_type());
+}
+
+bool MTPWorkerImpl::use_chunked_prefill_spec_verify_path() const {
+  return use_qwen3_5_spec_verify_path() || use_mimo_spec_verify_path();
 }
 
 bool MTPWorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
@@ -914,7 +935,7 @@ void MTPWorkerImpl::prepare_prefill_inputs(const ForwardInput& input,
 std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
     const ForwardInput& raw_input) {
   ForwardInput input = raw_input;
-  if (use_qwen3_5_spec_verify_path()) {
+  if (use_chunked_prefill_spec_verify_path()) {
     stabilize_decode_host_tensors(input);
   }
   const int32_t num_speculative_tokens = options_.num_speculative_tokens();
@@ -1176,7 +1197,7 @@ void MTPWorkerImpl::update_decode_step_input(
     int32_t current_kv_len = specBuilder::calc_kv_len(
         input.input_params.attention.host.kv_seq_lens, seq_id, position_offset);
     int32_t expected_kv_len = current_position + 1;
-    if (use_qwen3_5_spec_verify_path()) {
+    if (use_chunked_prefill_spec_verify_path()) {
       const torch::Tensor& block_tables =
           input.input_params.attention.host.block_tables;
       if (block_tables.defined() && block_tables.dim() == 2 &&
@@ -1205,10 +1226,12 @@ void MTPWorkerImpl::update_decode_step_input(
         }
       }
     }
-    if (use_qwen3_5_spec_verify_path() && current_kv_len < expected_kv_len) {
-      // Qwen3.5 MTP can receive a scheduler KV length that has not yet caught
-      // up with the speculative placeholder resolved into current_position.
-      // Normalize only the lag explainable by the current speculative step.
+    if (use_chunked_prefill_spec_verify_path() &&
+        current_kv_len < expected_kv_len) {
+      // Qwen3.5/MiMo MTP can receive a scheduler KV length that has not yet
+      // caught up with the speculative placeholder resolved into
+      // current_position. Normalize only the lag explainable by the current
+      // speculative step.
       CHECK_LE(expected_kv_len - current_kv_len,
                options_.num_speculative_tokens() + 1)
           << "decode context kv_len lag is too large, seq_id=" << seq_id
@@ -1216,7 +1239,8 @@ void MTPWorkerImpl::update_decode_step_input(
           << ", current_kv_len=" << current_kv_len;
       current_kv_len = expected_kv_len;
     }
-    if (use_qwen3_5_spec_verify_path() && current_kv_len > expected_kv_len) {
+    if (use_chunked_prefill_spec_verify_path() &&
+        current_kv_len > expected_kv_len) {
       // The first decode step can carry the prompt KV length while the decode
       // position is still initialized to zero. Align the position to the KV
       // context before building the MTP draft input.
@@ -1269,7 +1293,7 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
   Slice<int32_t> kv_seq_lens = input.input_params.attention.host.kv_seq_lens;
   const bool use_atb_spec_kernel =
       ::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel() ||
-      use_qwen3_5_spec_verify_path();
+      use_chunked_prefill_spec_verify_path();
   specBuilder::DecodeBuildBuffers buf;
   buf.out_token_ids.reserve(total_num_val_tokens);
   buf.out_positions.reserve(total_num_val_tokens);
@@ -1356,7 +1380,7 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
     token_num *= num_val_tokens;
   }
 
-  if (use_qwen3_5_spec_verify_path()) {
+  if (use_chunked_prefill_spec_verify_path()) {
     input_params.embedding.input_embedding = torch::Tensor();
     input_params.is_spec_verify = true;
     if (!input_params.attention.host.q_seq_lens.empty()) {
