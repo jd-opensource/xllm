@@ -265,6 +265,28 @@ TEST(BlockManagerPoolTest, DeallocateReleasesSingleBlockId) {
   EXPECT_EQ(GetSingleBlockIdOrFail(seq2), id1);
 }
 
+TEST(BlockManagerPoolTest, SingleBlockCapacityUsesOptionsMaxSeqs) {
+  ScopedValue<int32_t> max_seqs_guard(
+      &SchedulerConfig::get_instance().max_seqs_per_batch(), 0);
+
+  BlockManagerPool::Options options;
+  options.num_blocks(16)
+      .host_num_blocks(0)
+      .block_size(1)
+      .enable_prefix_cache(false)
+      .max_seqs_per_batch(4);
+  ASSERT_TRUE(EnableLinearStateOrFail(options));
+  BlockManagerPool pool(options, /*dp_size=*/1);
+
+  std::vector<Sequence> sequences;
+  sequences.reserve(4);
+  for (size_t i = 0; i < 4; ++i) {
+    sequences.emplace_back(MakeSequence(i, /*prompt_tokens=*/{1}));
+    EXPECT_TRUE(pool.allocate(&sequences.back()));
+    EXPECT_TRUE(HasSingleBlockIdOrFail(sequences.back()));
+  }
+}
+
 TEST(BlockManagerPoolTest, TryAllocateKvFailureRollsBackSingleBlock) {
   // unified scheduler-side single-block pool has 2 ids.
   ScopedValue<int32_t> max_seqs_guard(

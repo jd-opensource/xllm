@@ -268,6 +268,49 @@ TEST(CompositeBlockManagerTest, AllocateForSequence_NullSeqReturnsFalse) {
   EXPECT_FALSE(manager.allocate_for_sequence(nullptr, 10));
 }
 
+TEST(CompositeBlockManagerTest, FailedGrowthRollsBackNewBlocks) {
+  BlockManager::Options opts = MakeCompositeOptions(/*base_num_blocks=*/256,
+                                                    kBaseBlockSize,
+                                                    /*window_size=*/12,
+                                                    /*max_seqs_per_batch=*/4);
+  CompositeBlockManager manager(opts);
+
+  Sequence seq = MakeTestSequence(0, {1});
+  ASSERT_TRUE(manager.allocate_for_sequence(&seq, 1024));
+  const size_t used_before = manager.num_used_blocks();
+  const auto& before = seq.kv_state().composite_blocks();
+  ASSERT_EQ(before.size(), 3u);
+  const size_t swa_blocks_before = before[0].size();
+  const size_t c4_blocks_before = before[1].size();
+  const size_t c128_blocks_before = before[2].size();
+
+  EXPECT_FALSE(manager.allocate_for_sequence(&seq, 4096));
+  EXPECT_EQ(manager.num_used_blocks(), used_before);
+
+  const auto& after = seq.kv_state().composite_blocks();
+  ASSERT_EQ(after.size(), 3u);
+  EXPECT_EQ(after[0].size(), swa_blocks_before);
+  EXPECT_EQ(after[1].size(), c4_blocks_before);
+  EXPECT_EQ(after[2].size(), c128_blocks_before);
+
+  manager.deallocate_sequence(&seq);
+}
+
+TEST(CompositeBlockManagerTest, DeallocateToleratesRolledBackEmptySequence) {
+  BlockManager::Options opts = MakeCompositeOptions(/*base_num_blocks=*/128,
+                                                    kBaseBlockSize,
+                                                    /*window_size=*/12,
+                                                    /*max_seqs_per_batch=*/4);
+  CompositeBlockManager manager(opts);
+
+  Sequence seq = MakeTestSequence(0, {1});
+
+  EXPECT_FALSE(manager.allocate_for_sequence(&seq, 4096));
+  EXPECT_NO_FATAL_FAILURE(manager.deallocate_sequence(&seq));
+  EXPECT_TRUE(seq.kv_state().composite_blocks().empty());
+  EXPECT_EQ(manager.num_used_blocks(), 0u);
+}
+
 // Verifies that when seq token count increases, CompositeBlockManager correctly
 // adds blocks (only appends new blocks; existing block ids are preserved).
 TEST(CompositeBlockManagerTest, TokenIncrease_AddsBlocksIncrementally) {

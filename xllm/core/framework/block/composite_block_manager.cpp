@@ -99,7 +99,26 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
   }
   std::vector<std::vector<Block>>* composite =
       seq->kv_state().mutable_composite_blocks();
+  const size_t original_manager_count = composite->size();
   composite->resize(sub_managers_.size());
+  std::vector<size_t> original_sizes(composite->size(), 0);
+  for (size_t i = 0; i < composite->size(); ++i) {
+    original_sizes[i] = composite->at(i).size();
+  }
+
+  auto rollback_new_blocks = [&]() {
+    for (size_t i = 0; i < composite->size(); ++i) {
+      auto& manager_blocks = composite->at(i);
+      if (manager_blocks.size() <= original_sizes[i]) {
+        continue;
+      }
+      sub_managers_[i]->deallocate(
+          Slice<Block>(manager_blocks.data() + original_sizes[i],
+                       manager_blocks.size() - original_sizes[i]));
+      manager_blocks.resize(original_sizes[i]);
+    }
+    composite->resize(original_manager_count);
+  };
 
   auto& swa_blocks = composite->at(0);
   const size_t block_size = sub_managers_[0]->block_size();
@@ -130,6 +149,7 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
         sub_managers_[0]->allocate(swa_blocks_needed - old_size);
     if (blocks.size() != swa_blocks_needed - old_size) {
       swa_blocks.resize(old_size);
+      composite->resize(original_manager_count);
       return false;
     }
     std::move(blocks.begin(), blocks.end(), swa_blocks.begin() + old_size);
@@ -147,6 +167,7 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
 
     const auto blocks = sub_managers_[i]->allocate(num_additional_blocks);
     if (blocks.size() != num_additional_blocks) {
+      rollback_new_blocks();
       return false;
     }
 
@@ -162,7 +183,8 @@ void CompositeBlockManager::deallocate_sequence(Sequence* seq) {
   }
   const std::vector<std::vector<Block>>& composite =
       seq->kv_state().composite_blocks();
-  for (size_t i = 0; i < sub_managers_.size(); ++i) {
+  const size_t n = std::min(composite.size(), sub_managers_.size());
+  for (size_t i = 0; i < n; ++i) {
     if (!composite[i].empty()) {
       sub_managers_[i]->deallocate(composite[i]);
     }
