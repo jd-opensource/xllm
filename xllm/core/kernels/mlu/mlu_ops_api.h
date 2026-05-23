@@ -160,7 +160,11 @@ void masked_indexer_select_paged_kv(
     const std::optional<torch::Tensor>& q_scale,
     const std::optional<torch::Tensor>& k_scale_cache,
     const torch::Tensor& sparse_block_table,
-    const torch::Tensor& sparse_context_lens);
+    const torch::Tensor& sparse_context_lens,
+    bool is_score_float = false,
+    int64_t compress_ratio = 1,
+    const std::optional<torch::Tensor>& kv_cache_block_table_offset =
+        std::nullopt);
 
 void fused_layernorm(const torch::Tensor& input,
                      torch::Tensor& output,

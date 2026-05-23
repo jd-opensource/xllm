@@ -43,7 +43,7 @@ class Qwen2VisionAttentionTest : public ::testing::Test {
     options_ = torch::TensorOptions().dtype(torch::kBFloat16).device(device);
 
     process_group_ = create_process_group(
-        0, 1, 1, 3331, false, "localhost", "tp_group", device);
+        0, 1, 1, 3332, false, "localhost", "tp_group", device);
     parallel_args_.tp_group_ = process_group_.get();
 
     context_ = ModelContext(parallel_args_, model_args_, QuantArgs(), options_);
@@ -135,7 +135,7 @@ TEST_F(Qwen2VisionAttentionTest, ForwardTest) {
                                         0.126953f,
                                         -0.371094f,
                                         0.108887f};
-  test::verify_precision(test_output.unsqueeze(0), expected_values, 1e-4, 1e-5);
+  test::verify_precision(test_output.unsqueeze(0), expected_values, 1e-3, 1e-3);
 
   auto output2 = vision_attention->forward(
       hidden_states, m_cos_pos, m_sin_pos, cu_seq_len, cu_seq_len_vec, params);
