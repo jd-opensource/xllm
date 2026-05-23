@@ -123,6 +123,10 @@ void DiTRequest::handle_forward_output(torch::Tensor output) {
   output_.tensors = torch::chunk(output, count);
 }
 
+void DiTRequest::handle_forward_text_output(const std::string& text) {
+  output_.text_output.push_back(text);
+}
+
 const DiTRequestOutput DiTRequest::generate_output() {
   DiTRequestOutput output;
   output.request_id = request_id_;
@@ -130,6 +134,17 @@ const DiTRequestOutput DiTRequest::generate_output() {
   output.status = Status(StatusCode::OK);
   output.finished = finished();
   output.cancelled = false;
+
+  // Text diffusion models (e.g., Cola-DLM) produce text output directly.
+  if (!output_.text_output.empty()) {
+    for (const auto& text : output_.text_output) {
+      DiTGenerationOutput result;
+      result.seed = state_.generation_params().seed;
+      result.text = text;
+      output.outputs.push_back(result);
+    }
+    return output;
+  }
 
   const bool is_audio =
       !output_.tensors.empty() && output_.tensors[0].dim() <= 2;

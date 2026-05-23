@@ -88,6 +88,23 @@ message Parameters {
 
   // Output type, either "base64" or "url"
   // optional string output_type = 12;
+
+  // Text diffusion parameters (for Cola-DLM and similar models)
+
+  // Maximum number of new tokens to generate (text diffusion)
+  optional int32 max_new_tokens = 13;
+
+  // Number of diffusion steps for text generation
+  optional int32 diffusion_steps = 14;
+
+  // Sampling temperature (0.0 = greedy)
+  optional float temperature = 15;
+
+  // Top-k sampling (0 = disabled)
+  optional int32 top_k = 16;
+
+  // Top-p (nucleus) sampling (1.0 = disabled)
+  optional float top_p = 17;
 }
 
 // Request structure for image generation tasks using FLUX models
@@ -119,6 +136,9 @@ message ImageGenData {
 
   // Seed used for generating this image
   int64 seed = 5;
+
+  // Generated text (for text diffusion models like Cola-DLM)
+  optional string text = 6;
 }
 
 // Output container for image generation task results

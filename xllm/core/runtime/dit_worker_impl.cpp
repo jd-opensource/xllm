@@ -163,8 +163,12 @@ folly::SemiFuture<bool> DiTWorkerImpl::init_model_async(
 std::optional<ForwardOutput> DiTWorkerImpl::step(const ForwardInput& inputs) {
   torch::DeviceGuard device_guard(device_);
   Timer timer;
+  // Trigger lazy deserialization for packed ForwardInput (brpc path).
+  // packed_proto_to_forward_input only stores raw bytes; actual field
+  // population (including dit_forward_input) happens inside ForwardInput::to().
+  auto device_inputs = inputs.to(device_, dtype_);
   auto output = dit_model_executor_->forward(
-      inputs.input_params.dit_forward_input.to(device_, dtype_));
+      device_inputs.input_params.dit_forward_input);
 
   auto ret = device_.synchronize_default_stream();
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());

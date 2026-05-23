@@ -66,7 +66,10 @@ struct DiTGenerationParams {
 
   uint32_t num_images_per_prompt = 1;
 
-  int64_t seed = 0;
+  // Seed for noise generation.  -1 means "not set" (stochastic / per-request
+  // counter).  0 and positive values are deterministic base seeds matching the
+  // official COLA_INFER_PER_SAMPLE_NOISE_SEED formula.
+  int64_t seed = -1;
 
   int32_t max_sequence_length = 512;
 
@@ -88,6 +91,13 @@ struct DiTGenerationParams {
 
   // Audio sample rate in Hz, read from model config.json (sampling_rate).
   int32_t audio_sampling_rate = 24000;
+
+  // Text diffusion generation params (for Cola-DLM)
+  int32_t max_new_tokens = 256;
+  int32_t diffusion_steps = 16;
+  float temperature = 0.0f;
+  int32_t top_k = 0;
+  float top_p = 1.0f;
 };
 
 struct DiTInputParams {

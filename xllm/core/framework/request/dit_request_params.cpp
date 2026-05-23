@@ -95,6 +95,8 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
   // input params
   const auto& input = request.input();
   input_params.prompt = input.prompt();
+  LOG(INFO) << "DiTRequestParams: model=" << model << ", prompt='"
+            << input_params.prompt << "'";
   if (input.has_prompt_2()) {
     input_params.prompt_2 = input.prompt_2();
   }
@@ -208,6 +210,22 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
   }
   if (params.has_cfg_renorm_min()) {
     generation_params.cfg_renorm_min = params.cfg_renorm_min();
+  }
+  // Text diffusion parameters (Cola-DLM)
+  if (params.has_max_new_tokens()) {
+    generation_params.max_new_tokens = params.max_new_tokens();
+  }
+  if (params.has_diffusion_steps()) {
+    generation_params.diffusion_steps = params.diffusion_steps();
+  }
+  if (params.has_temperature()) {
+    generation_params.temperature = params.temperature();
+  }
+  if (params.has_top_k()) {
+    generation_params.top_k = params.top_k();
+  }
+  if (params.has_top_p()) {
+    generation_params.top_p = params.top_p();
   }
 }
 

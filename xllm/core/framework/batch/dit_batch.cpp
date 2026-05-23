@@ -208,6 +208,15 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
 }
 
 void DiTBatch::process_forward_output(const DiTForwardOutput& output) {
+  // Text diffusion models produce text output directly.
+  if (!output.text_output.empty()) {
+    CHECK(request_vec_.size() == output.text_output.size());
+    for (int idx = 0; idx < request_vec_.size(); ++idx) {
+      auto& request = request_vec_[idx];
+      request->handle_forward_text_output(output.text_output[idx]);
+    }
+    return;
+  }
   CHECK(request_vec_.size() == output.tensors.size());
   for (int idx = 0; idx < request_vec_.size(); ++idx) {
     auto& request = request_vec_[idx];
