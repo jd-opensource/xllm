@@ -95,6 +95,8 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
   // input params
   const auto& input = request.input();
   input_params.prompt = input.prompt();
+  LOG(INFO) << "DiTRequestParams: model=" << model << ", prompt='"
+            << input_params.prompt << "'";
   if (input.has_prompt_2()) {
     input_params.prompt_2 = input.prompt_2();
   }

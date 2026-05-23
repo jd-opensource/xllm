@@ -230,7 +230,8 @@ message DiTForwardInput {
 }
 
 message DiTForwardOutput {
-  TensorList tensors = 1; 
+  TensorList tensors = 1;
+  repeated string text_output = 2;
 }
 
 message DiTGenerationParams {

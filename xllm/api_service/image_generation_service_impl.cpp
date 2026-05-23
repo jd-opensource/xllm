@@ -48,10 +48,15 @@ bool send_result_to_client_brpc(std::shared_ptr<ImageGenerationCall> call,
   for (const auto& output : outputs) {
     auto* proto_result = proto_output->add_results();
 
-    image.clear();
-    butil::Base64Encode(output.image, &image);
-
-    proto_result->set_image(image);
+    if (!output.text.empty()) {
+      // Text diffusion model output
+      proto_result->set_text(output.text);
+    } else {
+      // Image/audio output
+      image.clear();
+      butil::Base64Encode(output.image, &image);
+      proto_result->set_image(image);
+    }
     proto_result->set_width(output.width);
     proto_result->set_height(output.height);
     proto_result->set_seed(output.seed);

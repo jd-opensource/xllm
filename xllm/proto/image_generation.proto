@@ -119,6 +119,9 @@ message ImageGenData {
 
   // Seed used for generating this image
   int64 seed = 5;
+
+  // Generated text (for text diffusion models like Cola-DLM)
+  optional string text = 6;
 }
 
 // Output container for image generation task results

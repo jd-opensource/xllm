@@ -88,6 +88,7 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
                              const torch::Tensor& out_tokens,
                              const torch::Tensor& out_logprobs,
                              const std::vector<torch::Tensor>& dit_images,
+                             const std::vector<std::string>& dit_text_output,
                              proto::ForwardOutput* pb_forward_output) {
   Timer timer;
   int32_t num_seqs = next_tokens.size(0);
@@ -242,6 +243,12 @@ void forward_output_to_proto(const torch::Tensor& next_tokens,
     TORCH_TENSOR_VEC_TO_PROTO_TENSOR_LIST(
         pb_forward_output->mutable_dit_forward_output()->mutable_tensors(),
         dit_images);
+  }
+  if (!dit_text_output.empty()) {
+    auto* pb_dit_output = pb_forward_output->mutable_dit_forward_output();
+    for (const auto& text : dit_text_output) {
+      pb_dit_output->add_text_output(text);
+    }
   }
   COUNTER_ADD(proto_latency_seconds_o2proto, timer.elapsed_seconds());
   return;
@@ -539,6 +546,11 @@ bool proto_to_dit_forward_output(const proto::DiTForwardOutput& pb_dit_outputs,
     torch_tensor_vec.emplace_back(std::move(torch_tensor));
   }
   dit_outputs.tensors = std::move(torch_tensor_vec);
+
+  // Deserialize text_output for text diffusion models
+  dit_outputs.text_output.assign(pb_dit_outputs.text_output().begin(),
+                                 pb_dit_outputs.text_output().end());
+
   return true;
 }
 
