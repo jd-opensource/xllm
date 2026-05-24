@@ -524,8 +524,133 @@ DiTModelLoader::DiTModelLoader(const std::string& model_root_path)
     // Read model_type from config.json and register the root as "model".
     std::filesystem::path config_json_path = root_path / "config.json";
     if (!std::filesystem::exists(config_json_path)) {
+      // Auto-discovery: scan subdirectories for config.json + safetensors.
+      // This handles models like Cola-DLM where the directory structure is:
+      //   model_root/cola_dit/config.json + safetensors
+      //   model_root/cola_vae/config.json + safetensors
+      // without a model_index.json at the root.
+      // Also handles nested layouts like:
+      //   model_root/cola_dlm/cola_dit/config.json + safetensors
+      //   model_root/cola_dlm/cola_vae/config.json + safetensors
+      bool discovered = false;
+      std::vector<std::string> discovered_component_types;
+
+      // Helper lambda to try loading a component from a directory
+      auto try_discover_component = [&](const std::filesystem::path& dir_path,
+                                        const std::string& comp_name) -> bool {
+        std::filesystem::path cfg = dir_path / "config.json";
+        if (!std::filesystem::exists(cfg)) return false;
+        bool has_weights = false;
+        for (const auto& f : std::filesystem::directory_iterator(dir_path)) {
+          if (f.path().extension() == ".safetensors") {
+            has_weights = true;
+            break;
+          }
+        }
+        if (!has_weights) return false;
+        JsonReader reader;
+        if (!reader.parse(cfg.string())) return false;
+        auto mt = reader.value<std::string>("model_type");
+        const std::string component_type =
+            mt.has_value() ? mt.value() : comp_name;
+        name_to_loader_[comp_name] = std::make_unique<DiTFolderLoader>(
+            dir_path.string(), comp_name, component_type);
+        discovered_component_types.push_back(component_type);
+        if (!discovered) {
+          discovered = true;
+          LOG(INFO) << "DiTModelLoader: auto-discovered component '"
+                    << comp_name << "' with model_type='" << component_type
+                    << "'";
+        }
+        return true;
+      };
+
+      // First pass: check direct subdirectories
+      for (const auto& entry : std::filesystem::directory_iterator(root_path)) {
+        if (!entry.is_directory()) continue;
+        const std::string dir_name = entry.path().filename().string();
+        if (dir_name.empty() || dir_name[0] == '.') continue;
+        try_discover_component(entry.path(), dir_name);
+      }
+
+      // Second pass: if nothing found, check nested subdirectories
+      // (e.g. model_root/cola_dlm/cola_dit/)
+      if (!discovered) {
+        for (const auto& entry :
+             std::filesystem::directory_iterator(root_path)) {
+          if (!entry.is_directory()) continue;
+          const std::string dir_name = entry.path().filename().string();
+          if (dir_name.empty() || dir_name[0] == '.') continue;
+          for (const auto& nested_entry :
+               std::filesystem::directory_iterator(entry.path())) {
+            if (!nested_entry.is_directory()) continue;
+            const std::string nested_name =
+                nested_entry.path().filename().string();
+            if (nested_name.empty() || nested_name[0] == '.') continue;
+            try_discover_component(nested_entry.path(), nested_name);
+          }
+        }
+      }
+
+      if (discovered) {
+        // Try to find a registered model type that matches the discovered
+        // components. For example, if we found "cola_dit" and "cola_vae",
+        // look for "cola_dlm" in the registry.
+        // Strategy: try various patterns and check if the result is registered.
+        for (const auto& comp_type : discovered_component_types) {
+          // Pattern 1: Remove "_dit" suffix (e.g., "cola_dit" -> "cola")
+          if (comp_type.size() > 4 &&
+              comp_type.substr(comp_type.size() - 4) == "_dit") {
+            std::string prefix = comp_type.substr(0, comp_type.size() - 4);
+            // Try prefix directly
+            if (ModelRegistry::has_dit_model_factory(prefix)) {
+              set_model_type(prefix);
+              LOG(INFO) << "DiTModelLoader: matched registered model type '"
+                        << prefix << "' from component '" << comp_type << "'";
+              return;
+            }
+            // Try common suffixes: _dlm, _dit, _diffusion, _model
+            for (const auto& suffix :
+                 {"_dlm", "_dit", "_diffusion", "_model"}) {
+              std::string candidate = prefix + suffix;
+              if (ModelRegistry::has_dit_model_factory(candidate)) {
+                set_model_type(candidate);
+                LOG(INFO) << "DiTModelLoader: matched registered model type '"
+                          << candidate << "' from component '" << comp_type
+                          << "'";
+                return;
+              }
+            }
+          }
+          // Pattern 2: Remove "_vae" suffix (e.g., "cola_vae" -> "cola")
+          if (comp_type.size() > 4 &&
+              comp_type.substr(comp_type.size() - 4) == "_vae") {
+            std::string prefix = comp_type.substr(0, comp_type.size() - 4);
+            if (ModelRegistry::has_dit_model_factory(prefix)) {
+              set_model_type(prefix);
+              LOG(INFO) << "DiTModelLoader: matched registered model type '"
+                        << prefix << "' from component '" << comp_type << "'";
+              return;
+            }
+            for (const auto& suffix :
+                 {"_dlm", "_dit", "_diffusion", "_model"}) {
+              std::string candidate = prefix + suffix;
+              if (ModelRegistry::has_dit_model_factory(candidate)) {
+                set_model_type(candidate);
+                LOG(INFO) << "DiTModelLoader: matched registered model type '"
+                          << candidate << "' from component '" << comp_type
+                          << "'";
+                return;
+              }
+            }
+          }
+        }
+        // Fallback: use the first component type
+        set_model_type(discovered_component_types[0]);
+        return;
+      }
       LOG(FATAL) << "DiTModelLoader: neither model_index.json nor config.json "
-                    "found in: "
+                    "found, and no component subdirectories discovered in: "
                  << model_root_path_;
     }
     JsonReader cfg_reader;

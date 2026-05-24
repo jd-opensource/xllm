@@ -155,9 +155,56 @@ inline std::string get_model_name(
 
 inline std::string get_model_type(const std::filesystem::path& model_path) {
   JsonReader reader;
+
+  // Try model_index.json first (DiT models like Cola-DLM, Flux, LongCat)
+  std::filesystem::path model_index_path = model_path / "model_index.json";
+  if (std::filesystem::exists(model_index_path)) {
+    if (reader.parse(model_index_path)) {
+      if (auto v = reader.value<std::string>("_class_name")) {
+        return v.value();
+      }
+    }
+  }
+
   std::filesystem::path config_json_path = model_path / "config.json";
 
   if (!std::filesystem::exists(config_json_path)) {
+    // Auto-discovery: scan subdirectories for config.json with model_type.
+    // Handles models like Cola-DLM where components are in subdirectories
+    // without a root config.json or model_index.json.
+    // Also handles nested layouts like Cola-DLM where the structure is:
+    //   model_root/cola_dlm/cola_dit/config.json
+    //   model_root/cola_dlm/cola_vae/config.json
+    for (const auto& entry : std::filesystem::directory_iterator(model_path)) {
+      if (!entry.is_directory()) continue;
+      const std::string dir_name = entry.path().filename().string();
+      if (dir_name.empty() || dir_name[0] == '.') continue;
+      // Check this subdirectory for config.json
+      std::filesystem::path sub_config = entry.path() / "config.json";
+      if (std::filesystem::exists(sub_config)) {
+        JsonReader sub_reader;
+        if (sub_reader.parse(sub_config.string())) {
+          if (auto v = sub_reader.value<std::string>("model_type")) {
+            return v.value();
+          }
+        }
+      }
+      // If not found, check nested subdirectories (e.g. cola_dlm/cola_dit/)
+      for (const auto& nested_entry :
+           std::filesystem::directory_iterator(entry.path())) {
+        if (!nested_entry.is_directory()) continue;
+        const std::string nested_name = nested_entry.path().filename().string();
+        if (nested_name.empty() || nested_name[0] == '.') continue;
+        std::filesystem::path nested_config =
+            nested_entry.path() / "config.json";
+        if (!std::filesystem::exists(nested_config)) continue;
+        JsonReader nested_reader;
+        if (!nested_reader.parse(nested_config.string())) continue;
+        if (auto v = nested_reader.value<std::string>("model_type")) {
+          return v.value();
+        }
+      }
+    }
     LOG(FATAL) << "Please check config.json or model_index.json file, one of "
                   "them should exist in the model path: "
                << model_path;
@@ -184,8 +231,44 @@ inline std::string get_model_backend(const std::filesystem::path& model_path) {
     if (reader.value<std::string>("_diffusers_version").has_value()) {
       return "dit";
     }
+    // DiT models that are not diffusers-based (e.g. Cola-DLM) may have
+    // _class_name but no _diffusers_version. Treat them as dit backend.
+    if (reader.value<std::string>("_class_name").has_value()) {
+      return "dit";
+    }
     LOG(FATAL) << "Please check model_index.json file in model path: "
                << model_path << ", it should contain _diffusers_version key.";
+  }
+
+  // Check if this looks like a DiT model with component subdirectories
+  // (e.g. Cola-DLM with cola_dit/cola_vae subdirectories)
+  for (const auto& entry : std::filesystem::directory_iterator(model_path)) {
+    if (!entry.is_directory()) continue;
+    const std::string dir_name = entry.path().filename().string();
+    if (dir_name.empty() || dir_name[0] == '.') continue;
+    std::filesystem::path sub_config = entry.path() / "config.json";
+    if (std::filesystem::exists(sub_config)) {
+      // Found a subdirectory with config.json - check for safetensors
+      for (const auto& f : std::filesystem::directory_iterator(entry.path())) {
+        if (f.path().extension() == ".safetensors") {
+          return "dit";
+        }
+      }
+    }
+    // Also check nested subdirectories
+    for (const auto& nested :
+         std::filesystem::directory_iterator(entry.path())) {
+      if (!nested.is_directory()) continue;
+      std::filesystem::path nested_config = nested.path() / "config.json";
+      if (std::filesystem::exists(nested_config)) {
+        for (const auto& f :
+             std::filesystem::directory_iterator(nested.path())) {
+          if (f.path().extension() == ".safetensors") {
+            return "dit";
+          }
+        }
+      }
+    }
   }
 
   return ModelRegistry::get_model_backend(get_model_type(model_path));

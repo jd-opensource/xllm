@@ -37,6 +37,9 @@ struct DiTGenerationOutput {
   // the generated audio as raw WAV bytes (audio models only).
   std::string audio;
 
+  // the generated text (text diffusion models like Cola-DLM).
+  std::string text;
+
   // the height of the generated image.
   int32_t height;
 

@@ -88,6 +88,13 @@ struct DiTGenerationParams {
 
   // Audio sample rate in Hz, read from model config.json (sampling_rate).
   int32_t audio_sampling_rate = 24000;
+
+  // Text diffusion generation params (for Cola-DLM)
+  int32_t max_new_tokens = 256;
+  int32_t diffusion_steps = 16;
+  float temperature = 0.0f;
+  int32_t top_k = 0;
+  float top_p = 1.0f;
 };
 
 struct DiTInputParams {

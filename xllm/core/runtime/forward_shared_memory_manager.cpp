@@ -359,7 +359,8 @@ inline size_t get_dit_forward_input_size(const DiTForwardInput& input) {
 }
 
 inline size_t get_dit_forward_output_size(const DiTForwardOutput& output) {
-  return get_vector_tensor_size(output.tensors);
+  return get_vector_tensor_size(output.tensors) +
+         get_string_vector_size(output.text_output);
 }
 
 template <typename T>
@@ -1041,6 +1042,7 @@ inline void write_dit_forward_input(RawInputSerializeContext& context,
 inline void write_dit_forward_output(char*& buffer,
                                      const DiTForwardOutput& output) {
   write_vector_tensor(buffer, output.tensors);
+  write_string_vector(buffer, output.text_output);
 }
 
 inline void safe_advance_buffer(const char*& buffer, size_t offset) {
@@ -1943,6 +1945,7 @@ inline void read_dit_forward_input(ReadContext& context,
 inline void read_dit_forward_output(const char*& buffer,
                                     DiTForwardOutput& output) {
   read_vector_tensor(buffer, output.tensors);
+  read_string_vector(buffer, output.text_output);
 }
 
 inline void initialize_device_buffer_session(ReadContext& context,
@@ -2555,6 +2558,7 @@ void convert_tensor_to_raw_output(
     const torch::Tensor& embeddings,
     const std::vector<torch::Tensor>& mm_embeddings,
     const std::vector<torch::Tensor>& dit_images,
+    const std::vector<std::string>& dit_text_output,
     const torch::Tensor& expert_load_data,
     int32_t prepared_layer_id,
     const torch::Tensor& src_seq_idxes,
@@ -2600,6 +2604,7 @@ void convert_tensor_to_raw_output(
   raw_output.outputs.reserve(num_seqs);
   raw_output.mm_embeddings = mm_embeddings;
   raw_output.dit_forward_output.tensors = dit_images;
+  raw_output.dit_forward_output.text_output = dit_text_output;
   for (int32_t output_idx = 0; output_idx < num_seqs; ++output_idx) {
     RawSampleOutput raw_sample_output;
 
@@ -2882,6 +2887,7 @@ bool ForwardSharedMemoryManager::raw_output_write(
     const torch::Tensor& embeddings,
     const std::vector<torch::Tensor>& mm_embeddings,
     const std::vector<torch::Tensor>& dit_images,
+    const std::vector<std::string>& dit_text_output,
     const torch::Tensor& expert_load_data,
     int32_t prepared_layer_id,
     const torch::Tensor& src_seq_idxes,
@@ -2895,6 +2901,7 @@ bool ForwardSharedMemoryManager::raw_output_write(
                                embeddings,
                                mm_embeddings,
                                dit_images,
+                               dit_text_output,
                                expert_load_data,
                                prepared_layer_id,
                                src_seq_idxes,
