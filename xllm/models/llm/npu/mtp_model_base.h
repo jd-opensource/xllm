@@ -31,6 +31,7 @@ limitations under the License.
 #include "core/framework/model_context.h"
 #include "core/framework/parallel_state/npu_dp_ep_padding.h"
 #include "core/layers/common/attention_mask.h"
+#include "core/layers/npu/loader/parallel_layer_loader.h"
 #include "core/layers/npu/npu_block_copy_impl.h"
 #include "core/layers/npu/npu_column_parallel_linear_impl.h"
 #include "core/layers/npu/npu_lm_head_impl.h"
@@ -241,8 +242,26 @@ class MtpModelImplBase : public torch::nn::Module {
   }
 
   virtual void merge_loaded_weights() {
-    for (int i = 0; i < layers_.size(); i++) {
-      layers_[i]->merge_loaded_weights();
+    const int num_layers = static_cast<int>(layers_.size());
+    const int parallelism =
+        xllm::npu::model::resolve_load_parallelism(num_layers);
+    const bool parallel = xllm::npu::model::should_run_parallel(
+        num_layers, parallelism, [&](int i) {
+          return layers_[i]->supports_parallel_manual_loading();
+        });
+    if (parallel) {
+      xllm::npu::model::parallel_prepare_serial_finalize(
+          num_layers,
+          parallelism,
+          [&](int i) { layers_[i]->prepare_manual_loader_weights(); },
+          [&](int i) { layers_[i]->finalize_manual_loader_loaded_weights(); },
+          "mtp_merge_loaded_weights");
+    } else {
+      xllm::npu::model::parallel_run_per_layer(
+          num_layers,
+          /*parallelism=*/0,
+          [&](int i) { layers_[i]->merge_loaded_weights(); },
+          "mtp_merge_loaded_weights");
     }
     if (enable_rot_) {
       rot_->merge_loaded_weights();

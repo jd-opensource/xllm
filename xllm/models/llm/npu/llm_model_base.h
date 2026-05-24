@@ -20,6 +20,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <chrono>
 #include <memory>
 #include <string>
 #include <typeinfo>
@@ -34,6 +35,7 @@ limitations under the License.
 #include "core/framework/model_context.h"
 #include "core/layers/common/attention_mask.h"
 #include "core/layers/npu/loader/base_loader.h"
+#include "core/layers/npu/loader/parallel_layer_loader.h"
 #include "core/layers/npu/loader/rolling_load_manager.h"
 #include "core/layers/npu/loader/rolling_weight_buffer.h"
 #include "core/layers/npu/npu_block_copy_impl.h"
@@ -119,6 +121,28 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
 
   virtual void refresh_rolling_weights() {
     decoder_layer_->refresh_rolling_weights();
+  }
+
+  // ----------- manual-loader parallel-load phase forwarding -----------
+  // Phase 1 is delegated to the decoder; `block_copy_` is intentionally not
+  // touched during Phase 1 -- its `merge_loaded_weights` is run in Phase 2
+  // (main thread, in layer order) to preserve the existing init sequence.
+  virtual bool supports_parallel_manual_loading() const {
+    return decoder_layer_->supports_parallel_manual_loading();
+  }
+
+  virtual void prepare_manual_loader_weights() {
+    decoder_layer_->prepare_manual_loader_weights();
+  }
+
+  virtual void finalize_manual_loader_loaded_weights() {
+    decoder_layer_->finalize_manual_loader_loaded_weights();
+    block_copy_->merge_loaded_weights();
+  }
+
+  virtual void finalize_manual_loader_pinned_host() {
+    decoder_layer_->finalize_manual_loader_pinned_host();
+    block_copy_->merge_loaded_weights();
   }
 
  private:
@@ -284,8 +308,26 @@ class LlmModelImplBase : public torch::nn::Module {
   virtual void merge_loaded_weights() {
     npu_embed_tokens_->merge_loaded_weights();
 
-    for (int i = 0; i < layers_.size(); i++) {
-      layers_[i]->merge_loaded_weights();
+    const int num_layers = static_cast<int>(layers_.size());
+    const int parallelism =
+        xllm::npu::model::resolve_load_parallelism(num_layers);
+    const bool parallel = xllm::npu::model::should_run_parallel(
+        num_layers, parallelism, [&](int i) {
+          return layers_[i]->supports_parallel_manual_loading();
+        });
+    if (parallel) {
+      xllm::npu::model::parallel_prepare_serial_finalize(
+          num_layers,
+          parallelism,
+          [&](int i) { layers_[i]->prepare_manual_loader_weights(); },
+          [&](int i) { layers_[i]->finalize_manual_loader_loaded_weights(); },
+          "merge_loaded_weights");
+    } else {
+      xllm::npu::model::parallel_run_per_layer(
+          num_layers,
+          /*parallelism=*/0,
+          [&](int i) { layers_[i]->merge_loaded_weights(); },
+          "merge_loaded_weights");
     }
     norm_->merge_loaded_weights();
   }
@@ -321,8 +363,26 @@ class LlmModelImplBase : public torch::nn::Module {
 
   virtual void merge_and_move_pinned_host() {
     npu_embed_tokens_->merge_and_move_pinned_host();
-    for (int i = 0; i < layers_.size(); i++) {
-      layers_[i]->merge_and_move_pinned_host();
+    const int num_layers = static_cast<int>(layers_.size());
+    const int parallelism =
+        xllm::npu::model::resolve_load_parallelism(num_layers);
+    const bool parallel = xllm::npu::model::should_run_parallel(
+        num_layers, parallelism, [&](int i) {
+          return layers_[i]->supports_parallel_manual_loading();
+        });
+    if (parallel) {
+      xllm::npu::model::parallel_prepare_serial_finalize(
+          num_layers,
+          parallelism,
+          [&](int i) { layers_[i]->prepare_manual_loader_weights(); },
+          [&](int i) { layers_[i]->finalize_manual_loader_pinned_host(); },
+          "merge_and_move_pinned_host");
+    } else {
+      xllm::npu::model::parallel_run_per_layer(
+          num_layers,
+          /*parallelism=*/0,
+          [&](int i) { layers_[i]->merge_and_move_pinned_host(); },
+          "merge_and_move_pinned_host");
     }
     norm_->merge_and_move_pinned_host();
   }
@@ -435,6 +495,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
   virtual void load_model(
       std::unique_ptr<ModelLoader> loader,
       std::string prefix = "model." /*llm model weight prefix*/) {
+    const auto t_start = std::chrono::steady_clock::now();
     for (const auto& state_dict : loader->get_state_dicts()) {
       // The same model_type may come from checkpoints with different top-level
       // weight prefixes. Try these candidate prefixes in order to improve
@@ -466,6 +527,12 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     model_->merge_loaded_weights();
     // test
     npu_lm_head_->merge_loaded_weights();
+    const double total_ms = std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - t_start)
+                                .count();
+    LOG(INFO) << "[weight_load] load_model total=" << total_ms
+              << "ms mode=eager prefix=" << prefix
+              << " parallelism_gflag=" << FLAGS_weight_load_parallelism;
   }
 
   virtual void lazy_load_model(
@@ -475,6 +542,7 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
       LOG(INFO) << "Model weights are already kept on host.";
       return;
     }
+    const auto t_start = std::chrono::steady_clock::now();
     for (const auto& state_dict : loader->get_state_dicts()) {
       model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
       if (tie_word_embeddings) {
@@ -494,6 +562,12 @@ class LlmForCausalLMImplBase : public torch::nn::Module {
     npu_lm_head_->merge_and_move_pinned_host();
 
     keep_host_weights = true;
+    const double total_ms = std::chrono::duration<double, std::milli>(
+                                std::chrono::steady_clock::now() - t_start)
+                                .count();
+    LOG(INFO) << "[weight_load] load_model total=" << total_ms
+              << "ms mode=lazy prefix=" << prefix
+              << " parallelism_gflag=" << FLAGS_weight_load_parallelism;
   }
 
   virtual void free_model_weights() {

@@ -493,6 +493,16 @@ DEFINE_bool(enable_manual_loader,
             "transfer. Required by enable_rolling_load; also implied by "
             "enable_xtensor.");
 
+DEFINE_int32(
+    weight_load_parallelism,
+    0,
+    "Worker-thread parallelism for NPU manual-loader decoder merge phase. "
+    "  -1 = serial (legacy): everything runs on the main thread. "
+    "   0 = auto (default): "
+    "       min(num_cores/4, num_layers/4, 8), clamped to [1, 32]. "
+    "  >0 = fixed window size (worker threads). "
+    "Ignored when no decoder layer uses a manual-mode loader.");
+
 DEFINE_bool(
     enable_xtensor,
     false,

@@ -354,19 +354,38 @@ void BaseLoader::merge_loaded_weights() {
   // `merge_loaded_weights` directly and never reach this body; unified
   // (mode-aware) loaders override `merge_host_at_weights` and rely on this
   // dispatch to handle both modes.
-  merge_host_at_weights();
   if (mode_ == LoadMode::kManual) {
-    init_weight_slices();
-    copy_weights_to_device();
-    init_device_at_weights();
+    prepare_host_weights();
+    finalize_loaded_weights();
+  } else {
+    merge_host_at_weights();
   }
 }
 
 void BaseLoader::merge_and_move_pinned_host() {
   CHECK(mode_ == LoadMode::kManual)
       << "merge_and_move_pinned_host is only valid in manual loader mode";
+  prepare_host_weights();
+  finalize_pinned_host();
+}
+
+void BaseLoader::prepare_host_weights() {
+  CHECK(mode_ == LoadMode::kManual)
+      << "prepare_host_weights is only valid in manual loader mode";
   merge_host_at_weights();
   init_weight_slices();
+}
+
+void BaseLoader::finalize_loaded_weights() {
+  CHECK(mode_ == LoadMode::kManual)
+      << "finalize_loaded_weights is only valid in manual loader mode";
+  copy_weights_to_device();
+  init_device_at_weights();
+}
+
+void BaseLoader::finalize_pinned_host() {
+  CHECK(mode_ == LoadMode::kManual)
+      << "finalize_pinned_host is only valid in manual loader mode";
   copy_weights_to_pinned_host();
 }
 

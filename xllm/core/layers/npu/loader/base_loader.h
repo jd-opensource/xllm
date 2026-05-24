@@ -130,6 +130,23 @@ class BaseLoader {
   virtual void init_device_at_weights();
   virtual void init_weight_slices();
 
+  // ---------------- manual-mode phase split (parallel loader) -------------
+  // Phase 1 (parallelisable on a worker thread):
+  //   pure host-side work, only touches `at_host_weight_tensors_` and
+  //   `weight_slices_` / `nz_indices_` / `storage_size_` on this loader.
+  //   Asserts in eager mode.
+  virtual void prepare_host_weights();
+
+  // Phase 2 (must run on the main thread, in layer order):
+  //   allocates device storage, does H2D copy and rebuilds device tensor
+  //   views. Asserts in eager mode.
+  virtual void finalize_loaded_weights();
+
+  // Phase 2 for the pinned-host (lazy / sleep-wakeup) path:
+  //   allocates the pinned host buffer and packs the staged tensors into it,
+  //   no device-side state is touched. Asserts in eager mode.
+  virtual void finalize_pinned_host();
+
  protected:
   struct WeightSlice {
     uint64_t offset = 0;

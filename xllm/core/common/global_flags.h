@@ -239,6 +239,8 @@ DECLARE_int32(max_requests_per_batch);
 
 DECLARE_bool(enable_manual_loader);
 
+DECLARE_int32(weight_load_parallelism);
+
 DECLARE_bool(enable_xtensor);
 
 DECLARE_int64(phy_page_granularity_size);

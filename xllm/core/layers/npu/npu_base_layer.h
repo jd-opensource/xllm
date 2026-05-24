@@ -193,6 +193,57 @@ class BaseLayer : public torch::nn::Module {
     }
   };
 
+  // ----------------- manual-loader parallel-load phase API -----------------
+  // The model layer uses these to drive a two-phase, sliding-window pipeline
+  // for decoder weight loading. Phase 1 runs on a worker thread and only
+  // touches host-side state owned by this layer's `loader_`. Phase 2 runs on
+  // the main thread, in layer order, and is allowed to touch NPU streams /
+  // ATB graph state / per-layer ATen storage descriptors.
+
+  // True iff this layer is eligible for parallel manual-loader merge. Defaults
+  // to "loader exists and runs in manual mode". Subclasses that own sibling
+  // modules (e.g. `block_copy_`) which must also be quiet during Phase 1
+  // should still return true here -- those sibling modules are handled by
+  // LayerImpl-level `finalize_manual_loader_*` overrides, not by gating
+  // Phase 1.
+  virtual bool supports_parallel_manual_loading() const {
+    return loader_ != nullptr && loader_->mode() == LoadMode::kManual;
+  }
+
+  // Phase 1: pure CPU work on this layer's loader (safe to run on a worker
+  // thread). No-op when there is no loader (capability check should have
+  // caught this before scheduling).
+  virtual void prepare_manual_loader_weights() {
+    if (loader_) {
+      loader_->prepare_host_weights();
+    }
+  }
+
+  // Phase 2 for the device-resident path (eager-style `merge_loaded_weights`):
+  // finalize H2D copy + rebuild ATB tensor views + per-layer init. Mirrors
+  // the body of `merge_loaded_weights` minus the host prepare step.
+  virtual void finalize_manual_loader_loaded_weights() {
+    if (loader_) {
+      loader_->finalize_loaded_weights();
+      auto& at_weight_tensors = loader_->get_at_weight_tensors();
+      for (int i = 0; i < atb_weight_tensors_.size(); i++) {
+        atb_weight_tensors_[i] =
+            atb_speed::Utils::AtTensor2Tensor(at_weight_tensors[i]);
+      }
+      Device::empty_cache(device_.index());
+      init_layer();
+    }
+  }
+
+  // Phase 2 for the pinned-host path (lazy load / sleep-wakeup):
+  // pack into pinned host and do per-layer init.
+  virtual void finalize_manual_loader_pinned_host() {
+    if (loader_) {
+      loader_->finalize_pinned_host();
+      init_layer();
+    }
+  }
+
   // Returns the loader when it is running in manual mode, otherwise nullptr
   // (e.g., when enable_manual_loader=false). All manual-mode bookkeeping
   // (pinned host buffer, rolling buffer, slice metadata, ...) lives directly

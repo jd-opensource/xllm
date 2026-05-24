@@ -149,16 +149,52 @@ class JoyAILLMFlashModelImpl : public torch::nn::Module {
 
   void merge_loaded_weights() {
     npu_embed_tokens_->merge_loaded_weights();
-    for (size_t i = 0; i < layers_.size(); i++) {
-      layers_[i]->merge_loaded_weights();
+    const int num_layers = static_cast<int>(layers_.size());
+    const int parallelism =
+        xllm::npu::model::resolve_load_parallelism(num_layers);
+    const bool parallel = xllm::npu::model::should_run_parallel(
+        num_layers, parallelism, [&](int i) {
+          return layers_[i]->supports_parallel_manual_loading();
+        });
+    if (parallel) {
+      xllm::npu::model::parallel_prepare_serial_finalize(
+          num_layers,
+          parallelism,
+          [&](int i) { layers_[i]->prepare_manual_loader_weights(); },
+          [&](int i) { layers_[i]->finalize_manual_loader_loaded_weights(); },
+          "merge_loaded_weights");
+    } else {
+      xllm::npu::model::parallel_run_per_layer(
+          num_layers,
+          /*parallelism=*/0,
+          [&](int i) { layers_[i]->merge_loaded_weights(); },
+          "merge_loaded_weights");
     }
     norm_->merge_loaded_weights();
   }
 
   void merge_and_move_pinned_host() {
     npu_embed_tokens_->merge_and_move_pinned_host();
-    for (size_t i = 0; i < layers_.size(); i++) {
-      layers_[i]->merge_and_move_pinned_host();
+    const int num_layers = static_cast<int>(layers_.size());
+    const int parallelism =
+        xllm::npu::model::resolve_load_parallelism(num_layers);
+    const bool parallel = xllm::npu::model::should_run_parallel(
+        num_layers, parallelism, [&](int i) {
+          return layers_[i]->supports_parallel_manual_loading();
+        });
+    if (parallel) {
+      xllm::npu::model::parallel_prepare_serial_finalize(
+          num_layers,
+          parallelism,
+          [&](int i) { layers_[i]->prepare_manual_loader_weights(); },
+          [&](int i) { layers_[i]->finalize_manual_loader_pinned_host(); },
+          "merge_and_move_pinned_host");
+    } else {
+      xllm::npu::model::parallel_run_per_layer(
+          num_layers,
+          /*parallelism=*/0,
+          [&](int i) { layers_[i]->merge_and_move_pinned_host(); },
+          "merge_and_move_pinned_host");
     }
     norm_->merge_and_move_pinned_host();
   }

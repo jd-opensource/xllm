@@ -56,6 +56,7 @@ cc_library(
     loader/rms_norm_loader.h
     loader/siglip_encoder_loader.h
     loader/base_loader.h
+    loader/parallel_layer_loader.h
     loader/rolling_weight_buffer.h
     loader/rolling_load_manager.h
   SRCS
@@ -107,6 +108,7 @@ cc_library(
     loader/rms_norm_loader.cpp
     loader/siglip_encoder_loader.cpp
     loader/base_loader.cpp
+    loader/parallel_layer_loader.cpp
     loader/rolling_weight_buffer.cpp
     loader/rolling_load_manager.cpp
   DEPS

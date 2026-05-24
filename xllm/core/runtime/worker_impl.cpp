@@ -967,13 +967,23 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     tp_world_size = parallel_args_.tp_group_->world_size();
   }
 
+  // NPU manual loader now opts into per-layer parallelism; let ATen keep its
+  // default thread count so each Phase 1 worker can also use ATen intra-op
+  // parallelism. MLU still benefits from ATen=1 (long-running policy), so
+  // keep the scoped clamp on that backend only. CUDA/ILU follow MLU's
+  // historical behaviour for now.
+#if defined(USE_MLU)
   std::unique_ptr<ScopedAtenLoadThreads> scoped_load_threads;
   const int32_t prev_threads = torch::get_num_threads();
-  LOG(INFO) << "Temporarily setting ATen threads to 1 during weight loading"
+  LOG(INFO) << "[MLU] Temporarily setting ATen threads to 1 during weight "
+               "loading"
             << ", tp_world_size=" << tp_world_size
             << ", prev_threads=" << prev_threads;
   scoped_load_threads =
       std::make_unique<ScopedAtenLoadThreads>(/*target_threads=*/1);
+#else
+  (void)tp_world_size;  // unused outside MLU branch
+#endif
 
   if (master_status == MasterStatus::WAKEUP) {
     this->load_model(std::move(model_loader));
@@ -981,10 +991,12 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
     this->lazy_load_model(std::move(model_loader));
   }
 
+#if defined(USE_MLU)
   if (scoped_load_threads) {
-    LOG(INFO) << "Weight loading completed, restored ATen threads="
+    LOG(INFO) << "[MLU] Weight loading completed, restored ATen threads="
               << torch::get_num_threads();
   }
+#endif
 
   status_ = Status::LOADED;
   if (FLAGS_enable_eplb) {
