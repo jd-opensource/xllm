@@ -571,6 +571,13 @@ std::optional<ForwardOutput> MTPWorkerImpl::run_validate(
   Timer timer;
   timer.reset();
   auto future = impl_->step_async(validate_input);
+
+  DraftExtendPrepareContext draft_extend_context;
+  if (!input.input_params.embedding_ids.empty()) {
+    prepare_draft_extend_context(
+        input, options_.num_speculative_tokens() + 1, draft_extend_context);
+  }
+
   ForwardOutput target_output = std::move(future).get().value();
   COUNTER_ADD(speculative_execution_latency_seconds_target,
               timer.elapsed_seconds());
@@ -584,7 +591,11 @@ std::optional<ForwardOutput> MTPWorkerImpl::run_validate(
 
   // update cache and clear embeddings
   timer.reset();
-  run_draft_extend(input, val_output);
+  if (draft_extend_context.prepared) {
+    run_draft_extend(input, val_output, draft_extend_context);
+  } else {
+    run_draft_extend(input, val_output);
+  }
   COUNTER_ADD(speculative_execution_latency_seconds_draft,
               timer.elapsed_seconds());
 
@@ -620,22 +631,65 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
     const ForwardInput& base_input,
     const SampleOutput& validate_output,
     ForwardInput& extend_input) {
-  extend_input = base_input.to(device_, dtype_);
-  auto& input_params = extend_input.input_params;
+  DraftExtendPrepareContext context;
+  prepare_draft_extend_context(
+      base_input, validate_output.next_tokens.size(1), context);
+  finish_draft_extend_inputs(context, validate_output, extend_input);
+}
+
+void MTPWorkerImpl::prepare_draft_extend_context(
+    const ForwardInput& base_input,
+    int32_t num_val_tokens,
+    DraftExtendPrepareContext& context) {
+  CHECK_GT(num_val_tokens, 0) << "num_val_tokens must be positive";
+
+  context.extend_input = base_input.to(device_, dtype_);
+  auto& input_params = context.extend_input.input_params;
   const int32_t num_sequences = input_params.num_sequences;
 
   const int32_t block_size = options_.block_size();
+  context.token_ids_cpu = safe_to(base_input.token_ids, torch::kCPU);
+  context.positions_cpu = safe_to(base_input.positions, torch::kCPU);
+  context.block_tables_cpu = safe_to(input_params.block_tables, torch::kCPU);
+  auto view = specBuilder::make_decode_cpu_view(context.token_ids_cpu,
+                                                context.positions_cpu,
+                                                context.block_tables_cpu,
+                                                input_params.kv_seq_lens_vec);
+
+  context.input_token_ids.reserve(num_sequences);
+  context.num_sequences = num_sequences;
+  context.num_val_tokens = num_val_tokens;
+  context.block_size = block_size;
+  context.use_chunked_prefill = FLAGS_enable_atb_spec_kernel;
+
+  for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
+    const int32_t input_token_id = view.token_ids[seq_id];
+    CHECK_GE(input_token_id, 0);
+    context.input_token_ids.emplace_back(input_token_id);
+  }
+
+  context.prepared = true;
+}
+
+void MTPWorkerImpl::finish_draft_extend_inputs(
+    const DraftExtendPrepareContext& context,
+    const SampleOutput& validate_output,
+    ForwardInput& extend_input) {
+  CHECK(context.prepared) << "draft extend context is not prepared";
+  extend_input = context.extend_input;
+  auto& input_params = extend_input.input_params;
+  const int32_t num_sequences = context.num_sequences;
+
   torch::TensorOptions int_options = extend_input.token_ids.options();
-  torch::Tensor token_ids = safe_to(base_input.token_ids, torch::kCPU);
-  torch::Tensor positions = safe_to(base_input.positions, torch::kCPU);
-  torch::Tensor block_tables = safe_to(input_params.block_tables, torch::kCPU);
-  auto view = specBuilder::make_decode_cpu_view(
-      token_ids, positions, block_tables, input_params.kv_seq_lens_vec);
   torch::Tensor accepted_tokens =
       safe_to(validate_output.next_tokens, torch::kCPU);
   const auto accepted_embeddings = validate_output.embeddings;
   constexpr int32_t num_extend_tokens = 2;
-  const bool use_chunked_prefill = FLAGS_enable_atb_spec_kernel;
+  const bool use_chunked_prefill = context.use_chunked_prefill;
+  auto view = specBuilder::make_decode_cpu_view(context.token_ids_cpu,
+                                                context.positions_cpu,
+                                                context.block_tables_cpu,
+                                                input_params.kv_seq_lens_vec);
 
   specBuilder::DecodeBuildBuffers buf;
   buf.out_token_ids.reserve(num_sequences * num_extend_tokens);
@@ -654,26 +708,6 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
   selected_row_idx.reserve(num_sequences);
 
   for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
-    auto add_row = [&](int32_t token_id,
-                       int32_t relative_offset,
-                       const torch::Tensor& embedding) {
-      specBuilder::RowSpec row;
-      row.seq_id = seq_id;
-      row.token_id = token_id;
-      row.position_offset = relative_offset;
-      row.append_kv_len = !use_chunked_prefill;
-      row.append_q_len_one = !use_chunked_prefill;
-      row.append_block_table = !use_chunked_prefill;
-      specBuilder::append_decode_row(input_params, view, row, block_size, buf);
-      if (embedding.defined()) {
-        expanded_embeddings.emplace_back(embedding.to(device_));
-      } else {
-        expanded_embeddings.emplace_back(
-            torch::zeros({get_embedding_placeholder_size()},
-                         torch::dtype(dtype_).device(device_)));
-      }
-    };
-
     int32_t last_idx = -1;
     int32_t last_token_id = 0;
     for (int32_t i = 0; i < accepted_tokens.size(1); ++i) {
@@ -685,9 +719,10 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
     }
     CHECK_GE(last_idx, 0)
         << "each sequence must have at least one accepted token";
+    CHECK_LT(last_idx, context.num_val_tokens)
+        << "accepted token index exceeds prepared draft extend candidates";
 
-    int32_t prev_token_id = view.token_ids[seq_id];
-    CHECK_GE(prev_token_id, 0);
+    int32_t prev_token_id = context.input_token_ids[seq_id];
     torch::Tensor prev_embedding = torch::Tensor();
     const int32_t prev_idx = last_idx - 1;
     if (prev_idx >= 0) {
@@ -698,10 +733,25 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
     }
     torch::Tensor last_embedding = accepted_embeddings[seq_id][last_idx];
 
+    buf.out_token_ids.emplace_back(prev_token_id);
+    buf.out_token_ids.emplace_back(last_token_id);
+
+    auto add_row = [&](int32_t relative_offset) {
+      specBuilder::RowSpec row;
+      row.seq_id = seq_id;
+      row.position_offset = relative_offset;
+      row.append_token = false;
+      row.append_kv_len = !use_chunked_prefill;
+      row.append_q_len_one = !use_chunked_prefill;
+      row.append_block_table = !use_chunked_prefill;
+      specBuilder::append_decode_row(
+          input_params, view, row, context.block_size, buf);
+    };
+
     const int32_t prev_offset = (last_idx > 0) ? (last_idx - 1) : -1;
     const int32_t last_offset = last_idx;
-    add_row(prev_token_id, prev_offset, prev_embedding);
-    add_row(last_token_id, last_offset, last_embedding);
+    add_row(prev_offset);
+    add_row(last_offset);
     if (use_chunked_prefill) {
       specBuilder::append_seq_len_by_layout(buf.out_q_seq_lens,
                                             num_extend_tokens);
@@ -710,6 +760,15 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
       specBuilder::update_kv_seq_lens_and_max(
           buf.out_kv_seq_lens, kv_len, buf.kv_max_seq_len);
     }
+
+    if (prev_embedding.defined()) {
+      expanded_embeddings.emplace_back(prev_embedding.to(device_));
+    } else {
+      expanded_embeddings.emplace_back(
+          torch::zeros({get_embedding_placeholder_size()},
+                       torch::dtype(dtype_).device(device_)));
+    }
+    expanded_embeddings.emplace_back(last_embedding.to(device_));
     selected_row_idx.emplace_back(num_extend_tokens * seq_id + 1);
   }
 
@@ -773,6 +832,32 @@ void MTPWorkerImpl::run_draft_extend(const ForwardInput& input,
 
   ForwardInput extend_input;
   prepare_draft_extend_inputs(input, validate_output, extend_input);
+  auto extend_future = draft_impl_->step_async(extend_input);
+  auto extend_output_opt = std::move(extend_future).get();
+  CHECK(extend_output_opt.has_value()) << "draft extend output is empty";
+  ForwardOutput extend_output = std::move(extend_output_opt.value());
+  process_draft_sample_output(extend_output.sample_output);
+  auto& sample_output = extend_output.sample_output;
+  embedding_cache_->write(input.input_params.embedding_ids,
+                          sample_output.next_tokens,
+                          sample_output.embeddings,
+                          sample_output.probs,
+                          validate_output.next_tokens);
+}
+
+void MTPWorkerImpl::run_draft_extend(const ForwardInput& input,
+                                     const SampleOutput& validate_output,
+                                     const DraftExtendPrepareContext& context) {
+  CHECK(!input.input_params.embedding_ids.empty())
+      << "draft extend requires non-empty embedding_ids";
+  CHECK(validate_output.next_tokens.defined())
+      << "draft extend requires validate next_tokens";
+  CHECK(validate_output.embeddings.defined())
+      << "draft extend requires validate embeddings";
+  CHECK(context.prepared) << "draft extend context is not prepared";
+
+  ForwardInput extend_input;
+  finish_draft_extend_inputs(context, validate_output, extend_input);
   auto extend_future = draft_impl_->step_async(extend_input);
   auto extend_output_opt = std::move(extend_future).get();
   CHECK(extend_output_opt.has_value()) << "draft extend output is empty";

@@ -15,6 +15,8 @@ limitations under the License.
 
 #pragma once
 
+#include <vector>
+
 #include "framework/kv_cache/embedding_cache.h"
 #if defined(USE_NPU)
 #include "framework/kv_cache_transfer/spec_kv_cache_transfer.h"
@@ -116,9 +118,33 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
                                    const SampleOutput& validate_output,
                                    ForwardInput& extend_input);
 
+  struct DraftExtendPrepareContext {
+    ForwardInput extend_input;
+    torch::Tensor token_ids_cpu;
+    torch::Tensor positions_cpu;
+    torch::Tensor block_tables_cpu;
+    std::vector<int32_t> input_token_ids;
+    int32_t num_sequences = 0;
+    int32_t num_val_tokens = 0;
+    int32_t block_size = 0;
+    bool use_chunked_prefill = false;
+    bool prepared = false;
+  };
+
+  void prepare_draft_extend_context(const ForwardInput& base_input,
+                                    int32_t num_val_tokens,
+                                    DraftExtendPrepareContext& context);
+
+  void finish_draft_extend_inputs(const DraftExtendPrepareContext& context,
+                                  const SampleOutput& validate_output,
+                                  ForwardInput& extend_input);
+
   // Run one draft extend forward and write next-step seed into embedding cache.
   void run_draft_extend(const ForwardInput& input,
                         const SampleOutput& validate_output);
+  void run_draft_extend(const ForwardInput& input,
+                        const SampleOutput& validate_output,
+                        const DraftExtendPrepareContext& context);
 
  protected:
   // Draft model worker
