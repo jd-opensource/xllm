@@ -720,29 +720,19 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
                              const std::vector<uint16_t>& ports,
                              const int32_t src_dp_size,
                              const int32_t src_kv_split_size) {
-  // When src_kv_split_size > 1 (P node KV-split / CP width), each D worker must
-  // connect to all matching ranks on the P side that share the same TP rank.
-  //
-  // P worker layout: rank = dp * (cp_size * tp_size) + cp * tp_size + tp_rank
-  //   src_cp_tp_size = src_world_size / src_dp_size  (= cp_size * tp_size)
-  //   src_tp_size    = src_cp_tp_size / src_kv_split_size  (actual TP size)
-  //
-  // D worker tp_rank = worker_rank % dst_tp_size
-  // D worker connects to P workers:
-  //   dp_i * src_cp_tp_size + split_j * src_tp_size + d_tp_rank
-  //   for all dp_i in [0, src_dp_size), split_j in [0, src_kv_split_size)
+  // Each D worker connects to all P workers that share the same TP rank.
+  // P layout: rank = dp_i * src_cp_tp_size + split_j * src_tp_size + tp_rank
+  // D workers cycle through tp_rank in [0, src_tp_size) round-robin.
+  // Requires: D-side dp_local_tp_size_ == src_tp_size.
   int32_t src_world_size = static_cast<int32_t>(cluster_ids.size());
   int32_t src_cp_tp_size = src_world_size / src_dp_size;
   int32_t src_tp_size = src_cp_tp_size / src_kv_split_size;
-  int32_t dst_tp_size = static_cast<int32_t>(worker_clients_num_) /
-                        static_cast<int32_t>(dp_size_);
+  int32_t src_dp_worker_index = 0;
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
-    int32_t d_tp_rank = static_cast<int32_t>(worker_rank) % dst_tp_size;
-
     std::vector<uint64_t> target_cluster_ids;
     std::vector<std::string> target_addrs;
     std::vector<std::string> target_device_ips;
@@ -755,13 +745,15 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
     for (int32_t dp_i = 0; dp_i < src_dp_size; ++dp_i) {
       for (int32_t split_j = 0; split_j < src_kv_split_size; ++split_j) {
         int32_t p_idx =
-            dp_i * src_cp_tp_size + split_j * src_tp_size + d_tp_rank;
+            dp_i * src_cp_tp_size + split_j * src_tp_size + src_dp_worker_index;
         target_cluster_ids.emplace_back(cluster_ids[p_idx]);
         target_addrs.emplace_back(addrs[p_idx]);
         target_device_ips.emplace_back(device_ips[p_idx]);
         target_ports.emplace_back(ports[p_idx]);
       }
     }
+
+    src_dp_worker_index = (src_dp_worker_index + 1) % src_tp_size;
 
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
@@ -797,20 +789,16 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                const std::vector<uint16_t>& ports,
                                const int32_t src_dp_size,
                                const int32_t src_kv_split_size) {
-  // Symmetric to link_cluster: each D worker disconnects from all KV-split
-  // ranks on the P side that share the same TP rank.
+  // Symmetric to link_cluster; uses the same rank mapping.
   int32_t src_world_size = static_cast<int32_t>(cluster_ids.size());
   int32_t src_cp_tp_size = src_world_size / src_dp_size;
   int32_t src_tp_size = src_cp_tp_size / src_kv_split_size;
-  int32_t dst_tp_size = static_cast<int32_t>(worker_clients_num_) /
-                        static_cast<int32_t>(dp_size_);
+  int32_t src_dp_worker_index = 0;
 
   std::vector<folly::SemiFuture<bool>> futures;
   futures.reserve(worker_clients_num_);
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
-    int32_t d_tp_rank = static_cast<int32_t>(worker_rank) % dst_tp_size;
-
     std::vector<uint64_t> target_cluster_ids;
     std::vector<std::string> target_addrs;
     std::vector<std::string> target_device_ips;
@@ -823,13 +811,15 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
     for (int32_t dp_i = 0; dp_i < src_dp_size; ++dp_i) {
       for (int32_t split_j = 0; split_j < src_kv_split_size; ++split_j) {
         int32_t p_idx =
-            dp_i * src_cp_tp_size + split_j * src_tp_size + d_tp_rank;
+            dp_i * src_cp_tp_size + split_j * src_tp_size + src_dp_worker_index;
         target_cluster_ids.emplace_back(cluster_ids[p_idx]);
         target_addrs.emplace_back(addrs[p_idx]);
         target_device_ips.emplace_back(device_ips[p_idx]);
         target_ports.emplace_back(ports[p_idx]);
       }
     }
+
+    src_dp_worker_index = (src_dp_worker_index + 1) % src_tp_size;
 
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
