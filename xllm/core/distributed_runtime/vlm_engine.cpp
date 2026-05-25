@@ -110,6 +110,8 @@ void VLMEngine::process_group_test() {
 #endif
 }
 
+bool VLMEngine::init(MasterStatus master_status) { return init(); }
+
 bool VLMEngine::init() {
   if (!init_model()) {
     LOG(ERROR) << "Failed to init model from: " << options_.model_path();

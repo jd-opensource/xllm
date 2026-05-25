@@ -36,6 +36,7 @@ class EngineType {
     VLM = 2,
     DIT = 3,
     REC = 4,
+    VLMSSM = 5,
     INVALID = -1,
   };
 

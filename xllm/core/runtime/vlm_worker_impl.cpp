@@ -96,6 +96,23 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& input) {
     output.logprobs = sampling_params.logprobs;
     output.max_top_logprobs = sampling_params.max_top_logprobs;
   }
+
+  if (options_.enable_speculative_decode()) {
+    torch::Tensor embeddings;
+    if (model_output.aux_hidden_states.defined()) {
+      embeddings = model_output.aux_hidden_states;
+    } else {
+      embeddings = model_output.hidden_states;
+    }
+    if (!input.input_params.meta.batch_forward_type.is_decode() &&
+        !is_spec_draft_) {
+      output.sample_output.embeddings = embeddings;
+    } else if (sampling_params.selected_token_idxes.defined()) {
+      output.sample_output.embeddings = embeddings.index_select(
+          /*dim=*/0, sampling_params.selected_token_idxes);
+    }
+  }
+
   auto ret = device_.synchronize_default_stream();
   return output;
 }

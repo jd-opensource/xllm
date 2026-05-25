@@ -431,12 +431,14 @@ void force_atb_spec_kernel_for_qwen3_5_mtp(
 
 MTPWorkerImpl::MTPWorkerImpl(const ParallelArgs& parallel_args,
                              const torch::Device& device,
-                             const runtime::Options& options)
+                             const runtime::Options& options,
+                             WorkerType worker_type)
     : MTPWorkerImpl(parallel_args,
                     device,
                     options,
                     MTPTargetOptions(options),
                     MTPDraftOptions(options),
+                    worker_type,
                     ::xllm::SpeculativeConfig::get_instance()
                         .enable_opt_validate_probs()) {}
 
@@ -445,8 +447,13 @@ MTPWorkerImpl::MTPWorkerImpl(const ParallelArgs& parallel_args,
                              const runtime::Options& options,
                              const runtime::Options& target_options,
                              const runtime::Options& draft_options,
+                             WorkerType worker_type,
                              bool enable_opt_validate_probs)
-    : SpeculativeWorkerImpl(parallel_args, device, options, target_options),
+    : SpeculativeWorkerImpl(parallel_args,
+                            device,
+                            options,
+                            target_options,
+                            worker_type),
       enable_opt_validate_probs_(enable_opt_validate_probs) {
   draft_impl_ =
       std::make_unique<LLMWorkerImpl>(parallel_args, device, draft_options);
@@ -716,14 +723,11 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_prefill(
           .value();
   COUNTER_ADD(speculative_execution_latency_seconds_target,
               timer.elapsed_seconds());
-
   // MTP path that depends on hidden states.
   ForwardInput prefill_input;
   prepare_prefill_inputs(input, prefill_input);
-
   // prepare input for draft model
   auto& embeddings = output.sample_output.embeddings;
-
   if (embeddings.defined()) {
     prefill_input.input_params.embedding.input_embedding = embeddings.clone();
   }
@@ -921,17 +925,14 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
     }
     std::optional<ForwardOutput> draft_output_opt = run_llm_no_sync_impl(
         *draft_impl_, current_draft_input, *prepare_stream_, *compute_stream_);
-
     // Overlap next-step input preparation with async draft forward.
     if (draft_idx == num_speculative_tokens - 1) {
       prepare_validate_inputs(input, validate_input);
     } else {
       prepare_draft_inputs(input, next_step_input, draft_idx + 1);
     }
-
     CHECK(draft_output_opt.has_value())
         << "draft output is empty in speculative step";
-
     draft_outputs.emplace_back(std::move(draft_output_opt.value()));
     if (reuse_mtp_topk_indices) {
       mtp_topk_indices = draft_outputs.back().dsa_topk_indices;
@@ -940,7 +941,6 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
     if (draft_idx == num_speculative_tokens - 1) {
       continue;
     }
-
     const SampleOutput& last_output = draft_outputs.back().sample_output;
     current_draft_input = next_step_input;
     set_token_ids_device_tensor(current_draft_input,

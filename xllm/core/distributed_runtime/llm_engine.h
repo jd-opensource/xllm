@@ -137,6 +137,7 @@ class LLMEngine : public Engine {
 
  private:
   friend class SpeculativeEngine;
+  friend class SpeculativeVLMEngine;
   // setup workers internal
   void setup_workers(const runtime::Options& options);
   bool init_model(MasterStatus master_status = MasterStatus::WAKEUP);

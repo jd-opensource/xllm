@@ -181,6 +181,36 @@ class WorkerImpl {
     return context_.get_model_args().hidden_size();
   }
 
+#if defined(USE_NPU)
+  virtual layer::NpuLmHead get_npu_lm_head() {
+    return model_->get_npu_lm_head();
+  }
+
+  virtual void set_npu_lm_head(layer::NpuLmHead& head) {
+    model_->set_npu_lm_head(head);
+  }
+
+  virtual layer::NpuWordEmbedding get_npu_word_embedding() {
+    return model_->get_npu_word_embedding();
+  }
+
+  virtual void set_npu_word_embedding(layer::NpuWordEmbedding& embedding) {
+    model_->set_npu_word_embedding(embedding);
+  }
+#endif
+
+  virtual layer::LmHead get_lm_head() { return model_->get_lm_head(); }
+
+  virtual void set_lm_head(layer::LmHead& head) { model_->set_lm_head(head); }
+
+  virtual layer::WordEmbedding get_word_embedding() {
+    return model_->get_word_embedding();
+  }
+
+  virtual void set_word_embedding(layer::WordEmbedding& embedding) {
+    model_->set_word_embedding(embedding);
+  }
+
   bool enable_schedule_overlap() const {
     return options_.enable_schedule_overlap_;
   }

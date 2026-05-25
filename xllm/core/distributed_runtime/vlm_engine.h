@@ -48,12 +48,15 @@ class VLMEngine : public Engine {
 
   bool init() override;
 
+  bool init(MasterStatus master_status) override;
+
   void update_last_step_result(std::vector<Batch>& batch) override;
 
   // return the active activation memory
   std::vector<int64_t> get_active_activation_memory() const override;
 
  private:
+  friend class SpeculativeVLMEngine;
   bool init_model();
   KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const KVCacheCapacity& kv_cache_cap);

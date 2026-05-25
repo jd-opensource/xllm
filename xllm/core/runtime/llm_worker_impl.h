@@ -94,7 +94,6 @@ class LLMWorkerImpl : public WorkerImpl {
   void set_word_embedding(layer::WordEmbedding& embedding) {
     model_->set_word_embedding(embedding);
   };
-
  protected:
   std::unique_ptr<BeamSearcher> beam_searcher_;
 };

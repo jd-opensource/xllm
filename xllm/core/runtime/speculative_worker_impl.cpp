@@ -63,18 +63,28 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(
     const ParallelArgs& parallel_args,
     const torch::Device& device,
     const runtime::Options& options,
-    const runtime::Options& target_options)
+    const runtime::Options& target_options,
+    WorkerType worker_type)
     : WorkerImpl(parallel_args, device, options) {
-  impl_ =
-      std::make_unique<LLMWorkerImpl>(parallel_args, device, target_options);
+  if (worker_type == WorkerType::LLM) {
+    auto worker =
+        std::make_unique<LLMWorkerImpl>(parallel_args, device, target_options);
+    vlm_impl_ = std::move(worker);
+  } else if (worker_type == WorkerType::VLM) {
+    auto worker =
+        std::make_unique<VLMWorkerImpl>(parallel_args, device, target_options);
+    impl_ = std::move(worker);
+  }
 }
 
 bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
                                        int32_t random_seed,
                                        MasterStatus master_status) {
   // Base class only loads the target model.
+  LOG(INFO) << "Inside Speculative Worker ";
   bool result = true;
   if (impl_->get_status() == WorkerImpl::Status::UNINITIALIZED) {
+    LOG(INFO) << "Calling workerimpl init model ";
     result = impl_->WorkerImpl::init_model(
         model_weights_path, random_seed, master_status);
     if (result) {

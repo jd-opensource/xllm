@@ -456,6 +456,7 @@ int run() {
   }
 
   std::unique_ptr<Master> master;
+  LOG(INFO) << "master before initialzie: " << master.get();
   // working node
   if (options.node_rank() != 0) {
     if (model_config.backend() == "dit") {
@@ -470,7 +471,7 @@ int run() {
     master = create_master(model_config.backend(), options);
   }
   master->run();
-
+  LOG(INFO) << "master afer initialzie: " << master.get();
   // supported models
   std::vector<std::string> model_names = {model_config.model_id()};
   std::string model_version = default_model_name;

@@ -24,7 +24,8 @@ class Eagle3WorkerImpl : public MTPWorkerImpl {
  public:
   Eagle3WorkerImpl(const ParallelArgs& parallel_args,
                    const torch::Device& device,
-                   const runtime::Options& options);
+                   const runtime::Options& options,
+                   WorkerType worker_type);
 
   ~Eagle3WorkerImpl() override = default;
 

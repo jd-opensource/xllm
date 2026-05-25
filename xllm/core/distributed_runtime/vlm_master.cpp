@@ -43,6 +43,11 @@ limitations under the License.
 #include "vlm_engine.h"
 
 namespace xllm {
+bool should_use_ssm_engine(const Options& options) {
+  return !options.draft_model_path().value_or("").empty() ||
+         (options.speculative_algorithm() == "Suffix" &&
+          options.num_speculative_tokens() > 0);
+}
 
 namespace {
 
@@ -64,7 +69,9 @@ std::vector<Message> build_user_messages_from_image_urls(
 }  // namespace
 
 VLMMaster::VLMMaster(const Options& options)
-    : Master(options, EngineType::VLM) {
+    : Master(options,
+             should_use_ssm_engine(options) ? EngineType::VLMSSM
+                                            : EngineType::VLM) {
   CHECK(engine_->init());
 
   model_args_ = engine_->model_args();

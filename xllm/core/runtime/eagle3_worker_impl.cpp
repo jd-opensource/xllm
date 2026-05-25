@@ -39,7 +39,9 @@ runtime::Options eagle3_draft_options(const runtime::Options& options) {
       .is_draft_engine(true)
       .num_decoding_tokens(1)
       .num_speculative_tokens(0)
-      .enable_graph_aux_hidden_states(false);
+      .enable_graph_aux_hidden_states(false)
+      .backend("llm");
+  LOG(INFO) << "backend is: " << opts.backend();
   return opts;
 }
 
@@ -47,12 +49,14 @@ runtime::Options eagle3_draft_options(const runtime::Options& options) {
 
 Eagle3WorkerImpl::Eagle3WorkerImpl(const ParallelArgs& parallel_args,
                                    const torch::Device& device,
-                                   const runtime::Options& options)
+                                   const runtime::Options& options,
+                                   WorkerType worker_type)
     : MTPWorkerImpl(parallel_args,
                     device,
                     options,
                     eagle3_main_options(options),
                     eagle3_draft_options(options),
+                    worker_type,
                     ::xllm::SpeculativeConfig::get_instance()
                         .enable_opt_validate_probs()) {}
 
