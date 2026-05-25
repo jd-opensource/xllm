@@ -15,11 +15,14 @@ limitations under the License.
 ==============================================================================*/
 #include "mm_codec.h"
 
+#include <algorithm>
 #include <cmath>
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/opt.h>
 #include <libavutil/samplefmt.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
@@ -633,6 +636,384 @@ bool FFmpegAudioDecoder::decode(const std::string& raw_data,
     return false;
   }
   return true;
+}
+
+// ---- MemoryMediaWriter (in-memory encoding base class) ----
+
+namespace {
+
+struct MemWriteCtx {
+  std::vector<uint8_t>* buf;
+  int64_t pos;
+};
+
+struct Writer {
+  static int32_t write(void* opaque, uint8_t* buf, int32_t buf_size) {
+    auto* mc = static_cast<MemWriteCtx*>(opaque);
+    int64_t end_pos = mc->pos + buf_size;
+    if (end_pos > static_cast<int64_t>(mc->buf->size())) {
+      mc->buf->resize(static_cast<size_t>(end_pos), 0);
+    }
+    std::memcpy(mc->buf->data() + mc->pos, buf, static_cast<size_t>(buf_size));
+    mc->pos = end_pos;
+    return buf_size;
+  }
+
+  static int64_t seek(void* opaque, int64_t offset, int32_t whence) {
+    auto* mc = static_cast<MemWriteCtx*>(opaque);
+    if (whence == AVSEEK_SIZE) {
+      return static_cast<int64_t>(mc->buf->size());
+    }
+    int64_t pos = 0;
+    switch (whence) {
+      case SEEK_SET:
+        pos = offset;
+        break;
+      case SEEK_CUR:
+        pos = mc->pos + offset;
+        break;
+      case SEEK_END:
+        pos = static_cast<int64_t>(mc->buf->size()) + offset;
+        break;
+      default:
+        return AVERROR(EINVAL);
+    }
+    if (pos < 0) {
+      return AVERROR(EINVAL);
+    }
+    mc->pos = pos;
+    return pos;
+  }
+};
+
+}  // namespace
+
+class MemoryMediaWriter {
+ public:
+  MemoryMediaWriter() = default;
+
+  virtual ~MemoryMediaWriter() {
+    if (pkt_) {
+      av_packet_free(&pkt_);
+    }
+    if (codec_ctx_) {
+      avcodec_free_context(&codec_ctx_);
+    }
+    if (fmt_ctx_) {
+      if (!finished_) {
+        av_write_trailer(fmt_ctx_);
+      }
+      avformat_free_context(fmt_ctx_);
+    }
+    if (avio_ctx_) {
+      av_freep(&avio_ctx_->buffer);
+      avio_context_free(&avio_ctx_);
+    }
+  }
+
+ protected:
+  bool init(const char* format,
+            AVCodecID codec_id,
+            int32_t width,
+            int32_t height,
+            double fps,
+            AVPixelFormat pix_fmt,
+            AVDictionary** opts = nullptr) {
+    const AVCodec* codec = avcodec_find_encoder(codec_id);
+    if (!codec) {
+      LOG(ERROR) << "MemoryMediaWriter: encoder not found, codec_id="
+                 << avcodec_get_name(codec_id);
+      return false;
+    }
+
+    constexpr int32_t avio_buf_sz = 1 << 16;
+    uint8_t* avio_buf =
+        static_cast<uint8_t*>(av_malloc(static_cast<size_t>(avio_buf_sz)));
+    if (!avio_buf) {
+      return false;
+    }
+
+    avio_ctx_ = avio_alloc_context(avio_buf,
+                                   avio_buf_sz,
+                                   1,
+                                   &write_ctx_,
+                                   nullptr,
+                                   &Writer::write,
+                                   &Writer::seek);
+    if (!avio_ctx_) {
+      av_freep(reinterpret_cast<void**>(&avio_buf));
+      return false;
+    }
+    avio_ctx_->seekable = AVIO_SEEKABLE_NORMAL;
+
+    const AVOutputFormat* fmt = av_guess_format(format, nullptr, nullptr);
+    if (!fmt) {
+      LOG(ERROR) << "MemoryMediaWriter: no muxer for " << format;
+      return false;
+    }
+
+    if (avformat_alloc_output_context2(&fmt_ctx_, fmt, nullptr, nullptr) < 0 ||
+        !fmt_ctx_) {
+      return false;
+    }
+    fmt_ctx_->pb = avio_ctx_;
+    fmt_ctx_->flags |= AVFMT_FLAG_CUSTOM_IO;
+
+    codec_ctx_ = avcodec_alloc_context3(codec);
+    if (!codec_ctx_) {
+      return false;
+    }
+
+    codec_ctx_->width = width;
+    codec_ctx_->height = height;
+    codec_ctx_->time_base = {1, static_cast<int32_t>(std::llround(fps))};
+    codec_ctx_->framerate = {static_cast<int32_t>(std::llround(fps)), 1};
+    codec_ctx_->pix_fmt = pix_fmt;
+
+    if (fmt_ctx_->oformat->flags & AVFMT_GLOBALHEADER) {
+      codec_ctx_->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    }
+
+    if (avcodec_open2(codec_ctx_, codec, opts) < 0) {
+      LOG(ERROR) << "MemoryMediaWriter: avcodec_open2 failed for "
+                 << codec->name;
+      return false;
+    }
+
+    stream_ = avformat_new_stream(fmt_ctx_, nullptr);
+    if (!stream_) {
+      return false;
+    }
+    stream_->time_base = codec_ctx_->time_base;
+    if (avcodec_parameters_from_context(stream_->codecpar, codec_ctx_) < 0) {
+      return false;
+    }
+
+    if (avformat_write_header(fmt_ctx_, nullptr) < 0) {
+      LOG(ERROR) << "MemoryMediaWriter: avformat_write_header failed";
+      return false;
+    }
+
+    pkt_ = av_packet_alloc();
+    if (!pkt_) {
+      return false;
+    }
+
+    LOG(INFO) << "MemoryMediaWriter: initialized " << codec->name << " ["
+              << format << "] " << width << "x" << height << " @ " << fps
+              << " fps";
+    return true;
+  }
+
+  bool send_frame(AVFrame* frame) {
+    if (avcodec_send_frame(codec_ctx_, frame) < 0) {
+      return false;
+    }
+    return drain_packets();
+  }
+
+  bool finish() {
+    avcodec_send_frame(codec_ctx_, nullptr);
+    if (!drain_packets()) {
+      return false;
+    }
+    av_write_trailer(fmt_ctx_);
+    finished_ = true;
+    return true;
+  }
+
+  std::vector<uint8_t> take_output() { return std::move(out_buf_); }
+
+  AVCodecContext* codec_ctx() { return codec_ctx_; }
+  AVStream* stream() { return stream_; }
+
+  bool drain_packets() {
+    while (avcodec_receive_packet(codec_ctx_, pkt_) == 0) {
+      av_packet_rescale_ts(pkt_, codec_ctx_->time_base, stream_->time_base);
+      pkt_->stream_index = stream_->index;
+      if (av_interleaved_write_frame(fmt_ctx_, pkt_) < 0) {
+        av_packet_unref(pkt_);
+        return false;
+      }
+      av_packet_unref(pkt_);
+    }
+    return true;
+  }
+
+  AVFormatContext* fmt_ctx_ = nullptr;
+  AVIOContext* avio_ctx_ = nullptr;
+  AVCodecContext* codec_ctx_ = nullptr;
+  AVPacket* pkt_ = nullptr;
+  AVStream* stream_ = nullptr;
+  MemWriteCtx write_ctx_{&out_buf_, 0};
+  std::vector<uint8_t> out_buf_;
+  bool finished_ = false;
+};
+
+class MemoryVideoWriter final : public MemoryMediaWriter {
+ public:
+  MemoryVideoWriter() = default;
+
+  ~MemoryVideoWriter() {
+    if (sws_ctx_) {
+      sws_freeContext(sws_ctx_);
+    }
+    if (yuv_frame_) {
+      av_frame_free(&yuv_frame_);
+    }
+  }
+
+  bool write(const torch::Tensor& video,
+             double fps,
+             const std::string& format,
+             std::string& raw_data) {
+    if (video.dim() != 4 || video.size(1) != 3) {
+      LOG(ERROR) << "MemoryVideoWriter: expects [T,C,H,W] with C=3, got "
+                 << video.sizes();
+      return false;
+    }
+    if (video.scalar_type() != torch::kFloat32 || !video.device().is_cpu()) {
+      LOG(ERROR) << "MemoryVideoWriter: expects cpu float32 tensor";
+      return false;
+    }
+
+    const int64_t T = video.size(0);
+    const int64_t H = video.size(2);
+    const int64_t W = video.size(3);
+    if (T == 0 || H == 0 || W == 0) {
+      LOG(ERROR) << "MemoryVideoWriter: empty dimensions T=" << T << " H=" << H
+                 << " W=" << W;
+      return false;
+    }
+
+    AVCodecID codec_id;
+    AVPixelFormat pix_fmt;
+    AVDictionary* opts = nullptr;
+
+    if (format == "avi") {
+      codec_id = AV_CODEC_ID_MJPEG;
+      pix_fmt = AV_PIX_FMT_YUVJ420P;
+    } else {
+      const AVCodec* x264_codec = avcodec_find_encoder_by_name("libx264");
+
+      if (x264_codec) {
+        codec_id = x264_codec->id;
+        pix_fmt = AV_PIX_FMT_YUV420P;
+        av_dict_set(&opts, "crf", "18", 0);
+        av_dict_set(&opts, "preset", "medium", 0);
+        av_dict_set(&opts, "profile", "high", 0);
+        av_dict_set(&opts, "level", "4.1", 0);
+        LOG(INFO) << "Using libx264 H.264 encoder with CRF=18";
+      } else {
+        codec_id = AV_CODEC_ID_MPEG4;
+        pix_fmt = AV_PIX_FMT_YUV420P;
+        av_dict_set(&opts, "mbd", "2", 0);
+        LOG(WARNING) << "libx264 not available, using MPEG4 fallback";
+      }
+    }
+
+    if (!init(format.c_str(),
+              codec_id,
+              static_cast<int32_t>(W),
+              static_cast<int32_t>(H),
+              fps,
+              pix_fmt,
+              &opts)) {
+      if (opts) av_dict_free(&opts);
+      return false;
+    }
+    if (opts) av_dict_free(&opts);
+
+    sws_ctx_ = sws_getContext(static_cast<int32_t>(W),
+                              static_cast<int32_t>(H),
+                              AV_PIX_FMT_RGB24,
+                              static_cast<int32_t>(W),
+                              static_cast<int32_t>(H),
+                              pix_fmt,
+                              SWS_BILINEAR,
+                              nullptr,
+                              nullptr,
+                              nullptr);
+    if (!sws_ctx_) {
+      LOG(ERROR) << "MemoryVideoWriter: sws_getContext failed";
+      return false;
+    }
+
+    yuv_frame_ = av_frame_alloc();
+    if (!yuv_frame_) {
+      return false;
+    }
+    yuv_frame_->format = pix_fmt;
+    yuv_frame_->width = static_cast<int32_t>(W);
+    yuv_frame_->height = static_cast<int32_t>(H);
+    if (av_frame_get_buffer(yuv_frame_, 0) < 0) {
+      return false;
+    }
+
+    auto video_acc = video.accessor<float, 4>();
+    const int64_t stride = W * 3;
+    std::vector<uint8_t> rgb_buf(static_cast<size_t>(H * stride));
+    int64_t pts = 0;
+
+    for (int64_t t = 0; t < T; ++t) {
+      for (int64_t y = 0; y < H; ++y) {
+        for (int64_t x = 0; x < W; ++x) {
+          rgb_buf[static_cast<size_t>(y * stride + x * 3 + 0)] =
+              static_cast<uint8_t>(
+                  std::clamp(video_acc[t][0][y][x] * 255.0f, 0.0f, 255.0f));
+          rgb_buf[static_cast<size_t>(y * stride + x * 3 + 1)] =
+              static_cast<uint8_t>(
+                  std::clamp(video_acc[t][1][y][x] * 255.0f, 0.0f, 255.0f));
+          rgb_buf[static_cast<size_t>(y * stride + x * 3 + 2)] =
+              static_cast<uint8_t>(
+                  std::clamp(video_acc[t][2][y][x] * 255.0f, 0.0f, 255.0f));
+        }
+      }
+
+      const uint8_t* src_data[1] = {rgb_buf.data()};
+      int32_t src_linesize[1] = {static_cast<int32_t>(stride)};
+
+      if (av_frame_make_writable(yuv_frame_) < 0) {
+        return false;
+      }
+      sws_scale(sws_ctx_,
+                src_data,
+                src_linesize,
+                0,
+                static_cast<int32_t>(H),
+                yuv_frame_->data,
+                yuv_frame_->linesize);
+      yuv_frame_->pts = pts++;
+
+      if (!send_frame(yuv_frame_)) {
+        return false;
+      }
+    }
+
+    if (!finish()) {
+      return false;
+    }
+
+    auto out = take_output();
+    raw_data.assign(out.begin(), out.end());
+
+    LOG(INFO) << "MemoryVideoWriter: encoded " << T << " frames (" << W << "x"
+              << H << ") at " << fps << " fps [" << format << "], output "
+              << out.size() << " bytes";
+    return true;
+  }
+
+ private:
+  SwsContext* sws_ctx_ = nullptr;
+  AVFrame* yuv_frame_ = nullptr;
+};
+
+bool FFmpegVideoEncoder::encode(const torch::Tensor& video,
+                                double fps,
+                                const std::string& format,
+                                std::string& raw_data) {
+  MemoryVideoWriter writer;
+  return writer.write(video, fps, format, raw_data);
 }
 
 }  // namespace xllm

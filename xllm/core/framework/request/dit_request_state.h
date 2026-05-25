@@ -47,7 +47,14 @@ struct DiTGenerationParams {
            audio_duration_frames == other.audio_duration_frames &&
            audio_steps == other.audio_steps &&
            audio_guidance_method == other.audio_guidance_method &&
-           audio_sampling_rate == other.audio_sampling_rate;
+           audio_sampling_rate == other.audio_sampling_rate &&
+           num_videos_per_prompt == other.num_videos_per_prompt &&
+           num_frames == other.num_frames &&
+           force_video_output == other.force_video_output &&
+           video_fps == other.video_fps &&
+           guidance_scale_2 == other.guidance_scale_2 &&
+           seconds == other.seconds && boundary_ratio == other.boundary_ratio &&
+           flow_shift == other.flow_shift;
   }
 
   bool operator!=(const DiTGenerationParams& other) const {
@@ -65,6 +72,8 @@ struct DiTGenerationParams {
   float guidance_scale = 3.5;
 
   uint32_t num_images_per_prompt = 1;
+
+  uint32_t num_videos_per_prompt = 1;
 
   int64_t seed = 0;
 
@@ -88,6 +97,20 @@ struct DiTGenerationParams {
 
   // Audio sample rate in Hz, read from model config.json (sampling_rate).
   int32_t audio_sampling_rate = 24000;
+
+  int32_t num_frames = 81;
+
+  bool force_video_output = false;
+
+  double video_fps = 8.0;
+
+  float guidance_scale_2 = 1.0;
+
+  int32_t seconds = 5;
+
+  float boundary_ratio = 0.9f;
+
+  float flow_shift = 1.0f;
 };
 
 struct DiTInputParams {
@@ -119,9 +142,16 @@ struct DiTInputParams {
 
   torch::Tensor control_image;
 
+  torch::Tensor condition_image;
+
   torch::Tensor mask_image;
 
   torch::Tensor masked_image_latent;
+
+  // Video-specific input fields
+  torch::Tensor last_image;
+
+  torch::Tensor image_embeds;
 
   // Prompt audio for voice cloning (LongCat-AudioDiT).
   // Float32 PCM, shape (1, num_samples), mono 24 kHz.

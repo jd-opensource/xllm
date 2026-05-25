@@ -328,7 +328,14 @@ inline size_t get_dit_generation_params_size(
                4  // true_cfg_scale, guidance_scale, strength, cfg_renorm_min
          + type_size<uint32_t>  // num_images_per_prompt
          + type_size<int64_t>   // seed
-         + type_size<bool>;     // enable_cfg_renorm
+         + type_size<bool>      // enable_cfg_renorm
+         + type_size<int32_t>   // num_frames
+         + type_size<bool>      // force_video_output
+         + type_size<double>    // video_fps
+         + type_size<float> *   // guidance_scale_2, boundary_ratio, flow_shift
+               3 +
+         type_size<int32_t>      // seconds
+         + type_size<uint32_t>;  // num_videos_per_prompt
 }
 
 inline size_t get_dit_forward_input_size(const DiTForwardInput& input) {
@@ -351,6 +358,8 @@ inline size_t get_dit_forward_input_size(const DiTForwardInput& input) {
   size += get_tensor_size(input.negative_prompt_embeds);
   size += get_tensor_size(input.negative_pooled_prompt_embeds);
   size += get_tensor_size(input.latents);
+  size += get_tensor_size(input.last_images);
+  size += get_tensor_size(input.image_embeds);
 
   // Generation params
   size += get_dit_generation_params_size(input.generation_params);
@@ -975,6 +984,14 @@ inline void write_dit_generation_params(char*& buffer,
   write_data(buffer, params.strength);
   write_data(buffer, params.enable_cfg_renorm);
   write_data(buffer, params.cfg_renorm_min);
+  write_data(buffer, params.num_frames);
+  write_data(buffer, params.force_video_output);
+  write_data(buffer, params.video_fps);
+  write_data(buffer, params.guidance_scale_2);
+  write_data(buffer, params.seconds);
+  write_data(buffer, params.boundary_ratio);
+  write_data(buffer, params.flow_shift);
+  write_data(buffer, params.num_videos_per_prompt);
 }
 
 inline void write_dit_generation_params(RawInputSerializeContext& context,
@@ -990,6 +1007,14 @@ inline void write_dit_generation_params(RawInputSerializeContext& context,
   write_data(context.descriptor, params.strength);
   write_data(context.descriptor, params.enable_cfg_renorm);
   write_data(context.descriptor, params.cfg_renorm_min);
+  write_data(context.descriptor, params.num_frames);
+  write_data(context.descriptor, params.force_video_output);
+  write_data(context.descriptor, params.video_fps);
+  write_data(context.descriptor, params.guidance_scale_2);
+  write_data(context.descriptor, params.seconds);
+  write_data(context.descriptor, params.boundary_ratio);
+  write_data(context.descriptor, params.flow_shift);
+  write_data(context.descriptor, params.num_videos_per_prompt);
 }
 
 inline void write_dit_forward_input(char*& buffer,
@@ -1011,6 +1036,8 @@ inline void write_dit_forward_input(char*& buffer,
   write_tensor(buffer, input.negative_prompt_embeds);
   write_tensor(buffer, input.negative_pooled_prompt_embeds);
   write_tensor(buffer, input.latents);
+  write_tensor(buffer, input.last_images);
+  write_tensor(buffer, input.image_embeds);
 
   write_dit_generation_params(buffer, input.generation_params);
 }
@@ -1847,6 +1874,14 @@ inline void read_dit_generation_params(const char*& buffer,
   read_data(buffer, params.strength);
   read_data(buffer, params.enable_cfg_renorm);
   read_data(buffer, params.cfg_renorm_min);
+  read_data(buffer, params.num_frames);
+  read_data(buffer, params.force_video_output);
+  read_data(buffer, params.video_fps);
+  read_data(buffer, params.guidance_scale_2);
+  read_data(buffer, params.seconds);
+  read_data(buffer, params.boundary_ratio);
+  read_data(buffer, params.flow_shift);
+  read_data(buffer, params.num_videos_per_prompt);
 }
 
 inline void read_dit_generation_params(ReadContext& context,
@@ -1862,6 +1897,14 @@ inline void read_dit_generation_params(ReadContext& context,
   read_data(context, params.strength);
   read_data(context, params.enable_cfg_renorm);
   read_data(context, params.cfg_renorm_min);
+  read_data(context, params.num_frames);
+  read_data(context, params.force_video_output);
+  read_data(context, params.video_fps);
+  read_data(context, params.guidance_scale_2);
+  read_data(context, params.seconds);
+  read_data(context, params.boundary_ratio);
+  read_data(context, params.flow_shift);
+  read_data(context, params.num_videos_per_prompt);
 }
 
 inline void read_dit_forward_input(const char*& buffer,
@@ -1883,6 +1926,8 @@ inline void read_dit_forward_input(const char*& buffer,
   read_tensor(buffer, input.negative_prompt_embeds);
   read_tensor(buffer, input.negative_pooled_prompt_embeds);
   read_tensor(buffer, input.latents);
+  read_tensor(buffer, input.last_images);
+  read_tensor(buffer, input.image_embeds);
 
   read_dit_generation_params(buffer, input.generation_params);
 }

@@ -63,4 +63,17 @@ class FFmpegAudioDecoder {
               AudioMetadata& meta,
               int64_t target_sr = 16000);
 };
+
+class FFmpegVideoEncoder final {
+ public:
+  FFmpegVideoEncoder() = default;
+  ~FFmpegVideoEncoder() = default;
+
+  // Encode video tensor [T, C, H, W] (float32, RGB, 0-1 range) with explicit
+  // container format ("mp4", "avi", etc.).
+  bool encode(const torch::Tensor& video,
+              double fps,
+              const std::string& format,
+              std::string& raw_data);
+};
 }  // namespace xllm

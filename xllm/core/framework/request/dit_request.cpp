@@ -117,9 +117,11 @@ void DiTRequest::log_statistic(double total_latency) {
 void DiTRequest::handle_forward_output(torch::Tensor output) {
   // Pipeline already chunks by batch size along dim 0 before calling here.
   // For image models, also split by num_images_per_prompt.
+  // For video models, split by num_images_per_prompt * num_videos_per_prompt.
   // For audio models, num_images_per_prompt defaults to 1 so this is a no-op.
   const int32_t count =
-      static_cast<int32_t>(state_.generation_params().num_images_per_prompt);
+      static_cast<int32_t>(state_.generation_params().num_images_per_prompt *
+                           state_.generation_params().num_videos_per_prompt);
   output_.tensors = torch::chunk(output, count);
 }
 
@@ -142,8 +144,10 @@ const DiTRequestOutput DiTRequest::generate_output() {
   }
 
   const int32_t count =
-      static_cast<int32_t>(state_.generation_params().num_images_per_prompt);
+      static_cast<int32_t>(state_.generation_params().num_images_per_prompt *
+                           state_.generation_params().num_videos_per_prompt);
   OpenCVImageEncoder image_encoder;
+  FFmpegVideoEncoder video_encoder;
   for (size_t idx = 0; idx < count; ++idx) {
     torch::Tensor output_tensor =
         output_.tensors[idx].squeeze(0).cpu().to(torch::kFloat32).contiguous();
@@ -152,6 +156,16 @@ const DiTRequestOutput DiTRequest::generate_output() {
       encode_wav(samples,
                  state_.generation_params().audio_sampling_rate,
                  result.audio);
+    } else if (output_tensor.dim() == 4 ||
+               state_.generation_params().force_video_output) {
+      video_encoder.encode(output_tensor,
+                           state_.generation_params().video_fps,
+                           "mp4",
+                           result.image);
+      result.num_frames = output_tensor.dim() == 4
+                              ? static_cast<int32_t>(output_tensor.size(0))
+                              : 0;
+      result.video_fps = state_.generation_params().video_fps;
     } else {
       image_encoder.encode(output_tensor, result.image);
     }

@@ -42,6 +42,7 @@ limitations under the License.
 #include "image_generation.pb.h"
 #include "models.pb.h"
 #include "service_impl_factory.h"
+#include "video_generation.pb.h"
 #include "xllm_metrics.h"
 namespace xllm {
 
@@ -531,6 +532,52 @@ void APIService::AudioGenerationHttp(
       std::make_shared<AudioGenerationCall>(
           ctrl, done_guard.release(), req_pb, resp_pb, arena != nullptr);
   audio_generation_service_impl_->process_async(call);
+}
+
+void APIService::VideoGeneration(::google::protobuf::RpcController* controller,
+                                 const proto::VideoGenerationRequest* request,
+                                 proto::VideoGenerationResponse* response,
+                                 ::google::protobuf::Closure* done) {
+  // TODO with xllm-service
+}
+
+void APIService::VideoGenerationHttp(
+    ::google::protobuf::RpcController* controller,
+    const proto::HttpRequest* request,
+    proto::HttpResponse* response,
+    ::google::protobuf::Closure* done) {
+  xllm::ClosureGuard done_guard(
+      done,
+      std::bind(request_in_metric, nullptr),
+      std::bind(request_out_metric, (void*)controller));
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto arena = GetArenaWithCheck<VideoGenerationCall>(response);
+  auto req_pb =
+      google::protobuf::Arena::CreateMessage<proto::VideoGenerationRequest>(
+          arena);
+  auto resp_pb =
+      google::protobuf::Arena::CreateMessage<proto::VideoGenerationResponse>(
+          arena);
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  std::string error;
+  json2pb::Json2PbOptions options;
+  butil::IOBuf& buf = ctrl->request_attachment();
+  butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+  auto st = json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
+  if (!st) {
+    ctrl->SetFailed(error);
+    LOG(ERROR) << "parse json to proto failed: " << error;
+    return;
+  }
+  std::shared_ptr<VideoGenerationCall> call =
+      std::make_shared<VideoGenerationCall>(
+          ctrl, done_guard.release(), req_pb, resp_pb, arena != nullptr);
+  video_generation_service_impl_->process_async(call);
 }
 
 void APIService::Rerank(::google::protobuf::RpcController* controller,

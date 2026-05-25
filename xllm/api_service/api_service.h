@@ -31,6 +31,7 @@ limitations under the License.
 #include "rec_completion_service_impl.h"
 #include "rerank_service_impl.h"
 #include "sample_service_impl.h"
+#include "video_generation_service_impl.h"
 #include "xllm_service.pb.h"
 
 namespace xllm {
@@ -103,6 +104,16 @@ class APIService : public proto::XllmAPIService {
                        ::google::protobuf::Closure* done) override;
 
   void AudioGenerationHttp(::google::protobuf::RpcController* controller,
+                           const proto::HttpRequest* request,
+                           proto::HttpResponse* response,
+                           ::google::protobuf::Closure* done) override;
+
+  void VideoGeneration(::google::protobuf::RpcController* controller,
+                       const proto::VideoGenerationRequest* request,
+                       proto::VideoGenerationResponse* response,
+                       ::google::protobuf::Closure* done) override;
+
+  void VideoGenerationHttp(::google::protobuf::RpcController* controller,
                            const proto::HttpRequest* request,
                            proto::HttpResponse* response,
                            ::google::protobuf::Closure* done) override;
@@ -216,6 +227,7 @@ class APIService : public proto::XllmAPIService {
   std::unique_ptr<ModelsServiceImpl> models_service_impl_;
   std::unique_ptr<ImageGenerationServiceImpl> image_generation_service_impl_;
   std::unique_ptr<AudioGenerationServiceImpl> audio_generation_service_impl_;
+  std::unique_ptr<VideoGenerationServiceImpl> video_generation_service_impl_;
   std::unique_ptr<RerankServiceImpl> rerank_service_impl_;
   std::unique_ptr<RecCompletionServiceImpl> rec_completion_service_impl_;
 };

@@ -29,8 +29,8 @@ namespace xllm {
 namespace {
 thread_local ShortUUID short_uuid;
 
-std::string generate_image_generation_request_id() {
-  return "imggen-" + InstanceName::name()->get_name_hash() + "-" +
+std::string generate_request_id(const std::string& prefix) {
+  return prefix + InstanceName::name()->get_name_hash() + "-" +
          short_uuid.random();
 }
 
@@ -72,115 +72,110 @@ bool decode_prompt_audio(const std::string& b64_audio,
 
 }  // namespace
 
-std::pair<int, int> splitResolution(const std::string& s) {
+std::pair<int, int> split_resolution(const std::string& s) {
   size_t pos = s.find('*');
   int width = std::stoi(s.substr(0, pos));
   int height = std::stoi(s.substr(pos + 1));
   return {width, height};
 }
 
-DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
-                                   const std::string& x_rid,
-                                   const std::string& x_rtime) {
-  if (request.has_request_id()) {
-    request_id = request.request_id();
-  } else {
-    request_id = generate_image_generation_request_id();
+// Decode a base64-encoded image string into a torch tensor via OpenCV.
+bool decode_base64_image(const std::string& base64, torch::Tensor& out) {
+  std::string raw_bytes;
+  if (!butil::Base64Decode(base64, &raw_bytes)) {
+    LOG(ERROR) << "Base64 decode failed";
+    return false;
   }
-  x_request_id = x_rid;
-  x_request_time = x_rtime;
+  OpenCVImageDecoder decoder;
+  if (!decoder.decode(raw_bytes, out)) {
+    LOG(ERROR) << "Image decode failed";
+    return false;
+  }
+  return true;
+}
 
-  model = request.model();
-
-  // input params
-  const auto& input = request.input();
+// Shared helper: populate DiTInputParams from an image-like input proto.
+template <typename InputProto>
+void fill_input_params(DiTInputParams& input_params, const InputProto& input) {
+  // Fields common to both proto::Input and proto::VideoInput
   input_params.prompt = input.prompt();
-  if (input.has_prompt_2()) {
-    input_params.prompt_2 = input.prompt_2();
-  }
   if (input.has_negative_prompt()) {
     input_params.negative_prompt = input.negative_prompt();
   }
-  if (input.has_negative_prompt_2()) {
-    input_params.negative_prompt_2 = input.negative_prompt_2();
-  }
-
   if (input.has_prompt_embed()) {
     input_params.prompt_embed = util::proto_to_torch(input.prompt_embed());
-  }
-  if (input.has_pooled_prompt_embed()) {
-    input_params.pooled_prompt_embed =
-        util::proto_to_torch(input.pooled_prompt_embed());
   }
   if (input.has_negative_prompt_embed()) {
     input_params.negative_prompt_embed =
         util::proto_to_torch(input.negative_prompt_embed());
   }
-  if (input.has_negative_pooled_prompt_embed()) {
-    input_params.negative_pooled_prompt_embed =
-        util::proto_to_torch(input.negative_pooled_prompt_embed());
-  }
-  if (input.has_latent()) {
-    input_params.latent = util::proto_to_torch(input.latent());
-  }
-
-  if (input.has_masked_image_latent()) {
-    input_params.masked_image_latent =
-        util::proto_to_torch(input.masked_image_latent());
-  }
-
-  OpenCVImageDecoder decoder;
   if (input.has_image()) {
-    std::string raw_bytes;
-    if (!butil::Base64Decode(input.image(), &raw_bytes)) {
-      LOG(ERROR) << "Base64 image decode failed";
+    decode_base64_image(input.image(), input_params.image);
+  }
+
+  // Image-only fields (proto::Input)
+  if constexpr (std::is_same_v<InputProto, proto::Input>) {
+    if (input.has_prompt_2()) {
+      input_params.prompt_2 = input.prompt_2();
     }
-    if (!decoder.decode(raw_bytes, input_params.image)) {
-      LOG(ERROR) << "Image decode failed.";
+    if (input.has_negative_prompt_2()) {
+      input_params.negative_prompt_2 = input.negative_prompt_2();
+    }
+    if (input.has_pooled_prompt_embed()) {
+      input_params.pooled_prompt_embed =
+          util::proto_to_torch(input.pooled_prompt_embed());
+    }
+    if (input.has_negative_pooled_prompt_embed()) {
+      input_params.negative_pooled_prompt_embed =
+          util::proto_to_torch(input.negative_pooled_prompt_embed());
+    }
+    if (input.has_latent()) {
+      input_params.latent = util::proto_to_torch(input.latent());
+    }
+    if (input.has_masked_image_latent()) {
+      input_params.masked_image_latent =
+          util::proto_to_torch(input.masked_image_latent());
+    }
+    if (input.has_mask_image()) {
+      decode_base64_image(input.mask_image(), input_params.mask_image);
+    }
+    input_params.images.reserve(input.images().size());
+    for (const auto& image : input.images()) {
+      torch::Tensor tensor;
+      if (!decode_base64_image(image, tensor)) {
+        continue;
+      }
+      input_params.images.emplace_back(std::move(tensor));
+    }
+    if (input.has_condition_image()) {
+      decode_base64_image(input.condition_image(),
+                          input_params.condition_image);
+    }
+    if (input.has_control_image()) {
+      decode_base64_image(input.control_image(), input_params.control_image);
     }
   }
 
-  input_params.images.reserve(input.images().size());
-  for (const auto& image : input.images()) {
-    std::string binary;
-    if (!butil::Base64Decode(image, &binary)) {
-      LOG(ERROR) << "Base64 image decode failed";
-      continue;
+  // Video-only fields (proto::VideoInput)
+  if constexpr (std::is_same_v<InputProto, proto::VideoInput>) {
+    if (input.has_last_image()) {
+      decode_base64_image(input.last_image(), input_params.last_image);
     }
-    torch::Tensor tensor;
-    if (!decoder.decode(binary, tensor)) {
-      LOG(ERROR) << "Image decode failed.";
-      continue;
-    }
-    input_params.images.emplace_back(std::move(tensor));
-  }
-
-  if (input.has_mask_image()) {
-    std::string raw_bytes;
-    if (!butil::Base64Decode(input.mask_image(), &raw_bytes)) {
-      LOG(ERROR) << "Base64 mask_image decode failed";
-    }
-    if (!decoder.decode(raw_bytes, input_params.mask_image)) {
-      LOG(ERROR) << "Mask_image decode failed.";
+    if (input.has_image_embeds()) {
+      input_params.image_embeds = util::proto_to_torch(input.image_embeds());
     }
   }
+}
 
-  if (input.has_control_image()) {
-    std::string raw_bytes;
-    if (!butil::Base64Decode(input.control_image(), &raw_bytes)) {
-      LOG(ERROR) << "Base64 control_image decode failed";
-    }
-    if (!decoder.decode(raw_bytes, input_params.control_image)) {
-      LOG(ERROR) << "Control_image decode failed.";
-    }
-  }
-
-  // generation params
-  const auto& params = request.parameters();
+// Shared helper: populate generation params from a parameters proto.
+// Both ImageParameters and VideoParameters share most fields.
+template <typename ParamsProto>
+void fill_generation_params(DiTGenerationParams& generation_params,
+                            const ParamsProto& params) {
   if (params.has_size()) {
-    auto size = splitResolution(params.size());
-    generation_params.width = size.first;
-    generation_params.height = size.second;
+    auto [w, h] = split_resolution(params.size());
+    generation_params.width = w;
+    generation_params.height = h;
   }
   if (params.has_num_inference_steps()) {
     generation_params.num_inference_steps = params.num_inference_steps();
@@ -191,26 +186,52 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
   if (params.has_guidance_scale()) {
     generation_params.guidance_scale = params.guidance_scale();
   }
-  if (params.has_num_images_per_prompt()) {
-    generation_params.num_images_per_prompt =
-        static_cast<uint32_t>(params.num_images_per_prompt());
-  } else {
-    generation_params.num_images_per_prompt = 1;
-  }
   if (params.has_seed()) {
     generation_params.seed = params.seed();
   }
   if (params.has_max_sequence_length()) {
     generation_params.max_sequence_length = params.max_sequence_length();
   }
-  if (params.has_enable_cfg_renorm()) {
-    generation_params.enable_cfg_renorm = params.enable_cfg_renorm();
-  }
-  if (params.has_cfg_renorm_min()) {
-    generation_params.cfg_renorm_min = params.cfg_renorm_min();
+  if constexpr (std::is_same_v<ParamsProto, proto::Parameters>) {
+    if (params.has_enable_cfg_renorm()) {
+      generation_params.enable_cfg_renorm = params.enable_cfg_renorm();
+    }
+    if (params.has_cfg_renorm_min()) {
+      generation_params.cfg_renorm_min = params.cfg_renorm_min();
+    }
   }
 }
 
+// ---------------------------------------------------------------------------
+// Image generation constructor
+// ---------------------------------------------------------------------------
+DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
+                                   const std::string& x_rid,
+                                   const std::string& x_rtime) {
+  request_id = request.has_request_id() ? request.request_id()
+                                        : generate_request_id("imggen-");
+  x_request_id = x_rid;
+  x_request_time = x_rtime;
+  model = request.model();
+
+  if (request.has_input()) {
+    fill_input_params(input_params, request.input());
+  }
+
+  generation_params.num_images_per_prompt = 1;
+  if (request.has_parameters()) {
+    const auto& params = request.parameters();
+    fill_generation_params(generation_params, params);
+    if (params.has_num_images_per_prompt()) {
+      generation_params.num_images_per_prompt =
+          static_cast<uint32_t>(params.num_images_per_prompt());
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Audio generation constructor
+// ---------------------------------------------------------------------------
 DiTRequestParams::DiTRequestParams(const proto::AudioGenerationRequest& request,
                                    const std::string& x_rid,
                                    const std::string& x_rtime) {
@@ -259,6 +280,52 @@ DiTRequestParams::DiTRequestParams(const proto::AudioGenerationRequest& request,
   }
   if (input.has_prompt_text()) {
     input_params.audio_prompt_text = input.prompt_text();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Video generation constructor
+// ---------------------------------------------------------------------------
+DiTRequestParams::DiTRequestParams(const proto::VideoGenerationRequest& request,
+                                   const std::string& x_rid,
+                                   const std::string& x_rtime) {
+  request_id = request.has_request_id() ? request.request_id()
+                                        : generate_request_id("vidgen-");
+  x_request_id = x_rid;
+  x_request_time = x_rtime;
+  model = request.model();
+
+  generation_params.force_video_output = true;
+
+  if (request.has_input()) {
+    fill_input_params(input_params, request.input());
+  }
+
+  if (request.has_parameters()) {
+    const auto& params = request.parameters();
+    fill_generation_params(generation_params, params);
+    if (params.has_num_videos_per_prompt()) {
+      generation_params.num_videos_per_prompt =
+          static_cast<uint32_t>(params.num_videos_per_prompt());
+    }
+    if (params.has_num_frames()) {
+      generation_params.num_frames = params.num_frames();
+    }
+    if (params.has_fps()) {
+      generation_params.video_fps = params.fps();
+    }
+    if (params.has_guidance_scale_2()) {
+      generation_params.guidance_scale_2 = params.guidance_scale_2();
+    }
+    if (params.has_seconds()) {
+      generation_params.seconds = params.seconds();
+    }
+    if (params.has_boundary_ratio()) {
+      generation_params.boundary_ratio = params.boundary_ratio();
+    }
+    if (params.has_flow_shift()) {
+      generation_params.flow_shift = params.flow_shift();
+    }
   }
 }
 

@@ -370,6 +370,10 @@ bool dit_forward_input_to_proto(const DiTForwardInput& dit_inputs,
 
   torch_tensor_to_proto_tensor(dit_inputs.latents,
                                pb_dit_inputs->mutable_latents());
+  torch_tensor_to_proto_tensor(dit_inputs.last_images,
+                               pb_dit_inputs->mutable_last_images());
+  torch_tensor_to_proto_tensor(dit_inputs.image_embeds,
+                               pb_dit_inputs->mutable_image_embeds());
 
   torch_tensor_to_proto_tensor(dit_inputs.prompt_audio,
                                pb_dit_inputs->mutable_prompt_audio());
@@ -408,6 +412,18 @@ bool generation_params_to_proto(
       dit_generation_params.enable_cfg_renorm);
   pb_dit_generation_params->set_cfg_renorm_min(
       dit_generation_params.cfg_renorm_min);
+  pb_dit_generation_params->set_num_frames(dit_generation_params.num_frames);
+  pb_dit_generation_params->set_force_video_output(
+      dit_generation_params.force_video_output);
+  pb_dit_generation_params->set_video_fps(dit_generation_params.video_fps);
+  pb_dit_generation_params->set_guidance_scale_2(
+      dit_generation_params.guidance_scale_2);
+  pb_dit_generation_params->set_seconds(dit_generation_params.seconds);
+  pb_dit_generation_params->set_boundary_ratio(
+      dit_generation_params.boundary_ratio);
+  pb_dit_generation_params->set_flow_shift(dit_generation_params.flow_shift);
+  pb_dit_generation_params->set_num_videos_per_prompt(
+      dit_generation_params.num_videos_per_prompt);
   return true;
 }
 
@@ -482,6 +498,13 @@ bool proto_to_dit_forward_input(const proto::DiTForwardInput& pb_dit_inputs,
   if (pb_dit_inputs.has_latents()) {
     dit_inputs.latents = util::proto_to_torch(pb_dit_inputs.latents());
   }
+  if (pb_dit_inputs.has_last_images()) {
+    dit_inputs.last_images = util::proto_to_torch(pb_dit_inputs.last_images());
+  }
+  if (pb_dit_inputs.has_image_embeds()) {
+    dit_inputs.image_embeds =
+        util::proto_to_torch(pb_dit_inputs.image_embeds());
+  }
 
   if (!proto_to_generation_params(pb_dit_inputs.generation_params(),
                                   dit_inputs.generation_params)) {
@@ -522,6 +545,18 @@ bool proto_to_generation_params(
       pb_dit_generation_params.enable_cfg_renorm();
   dit_generation_params.cfg_renorm_min =
       pb_dit_generation_params.cfg_renorm_min();
+  dit_generation_params.num_frames = pb_dit_generation_params.num_frames();
+  dit_generation_params.force_video_output =
+      pb_dit_generation_params.force_video_output();
+  dit_generation_params.video_fps = pb_dit_generation_params.video_fps();
+  dit_generation_params.guidance_scale_2 =
+      pb_dit_generation_params.guidance_scale_2();
+  dit_generation_params.seconds = pb_dit_generation_params.seconds();
+  dit_generation_params.boundary_ratio =
+      pb_dit_generation_params.boundary_ratio();
+  dit_generation_params.flow_shift = pb_dit_generation_params.flow_shift();
+  dit_generation_params.num_videos_per_prompt =
+      pb_dit_generation_params.num_videos_per_prompt();
   return true;
 }
 
