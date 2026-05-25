@@ -66,7 +66,9 @@ KVCacheShape::KVCacheShape(const KVCacheCapacity& kv_cache_cap,
   CHECK_GT(world_size, 0) << "world_size must be positive.";
   CHECK_GT(kv_cache_cap.block_size(), 0) << "block_size must be positive.";
 
-  if (util::is_deepseek_v4_model_type(model_args.model_type())) {
+  if (util::is_taget_model_type(model_args.model_type(),
+                                /*target=*/"deepseek_v4",
+                                /*match_mtp=*/true)) {
     key_cache_shape_ = std::vector<int64_t>{kv_cache_cap.swa_count(),
                                             kv_cache_cap.c4_count(),
                                             kv_cache_cap.c128_count()};
