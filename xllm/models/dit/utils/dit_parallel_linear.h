@@ -188,7 +188,7 @@ class DiTParallelLinearImpl : public torch::nn::Module {
         return forward_tp(input);
       default:
         LOG(FATAL) << "DiTParallelLinear: unknown LinearType "
-                   << static_cast<int>(linear_type_);
+                   << static_cast<int64_t>(linear_type_);
         return input;
     }
   }

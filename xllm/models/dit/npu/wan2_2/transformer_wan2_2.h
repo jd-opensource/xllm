@@ -210,8 +210,8 @@ class WanTimestepsImpl : public torch::nn::Module {
                                        bool flip_sin_to_cos = false,
                                        float downscale_freq_shift = 1.0f,
                                        float scale = 1.0f,
-                                       int max_period = 10000) {
-    int half_dim = embedding_dim / 2;
+                                       int64_t max_period = 10000) {
+    int64_t half_dim = embedding_dim / 2;
     auto exponent = -std::log(static_cast<float>(max_period)) *
                     torch::arange(0,
                                   half_dim,
@@ -1079,7 +1079,7 @@ class WanTransformerBlockImpl : public torch::nn::Module {
  public:
   explicit WanTransformerBlockImpl(const ModelContext& context,
                                    const ParallelArgs& parallel_args,
-                                   int block_idx = 0)
+                                   int64_t block_idx = 0)
       : options_(context.get_tensor_options()),
         parallel_args_(parallel_args),
         block_idx_(block_idx) {
@@ -1207,7 +1207,7 @@ class WanTransformerBlockImpl : public torch::nn::Module {
   float eps_;
   int64_t added_kv_proj_dim_;
   bool cross_attn_norm_;
-  int block_idx_ = 0;
+  int64_t block_idx_ = 0;
   std::string qk_norm_;
 
   FP32LayerNorm norm1_{nullptr};
@@ -1269,7 +1269,7 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
     transformer_layers_.reserve(num_layers_);
     for (int64_t i = 0; i < num_layers_; ++i) {
       auto block =
-          WanTransformerBlock(context, parallel_args, static_cast<int>(i));
+          WanTransformerBlock(context, parallel_args, static_cast<int64_t>(i));
       blocks_->push_back(block);
       transformer_layers_.push_back(block);
     }
