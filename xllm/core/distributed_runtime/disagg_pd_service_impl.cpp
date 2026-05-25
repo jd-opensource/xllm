@@ -38,10 +38,18 @@ DisaggPDServiceImpl::DisaggPDServiceImpl(DisaggPDScheduler* scheduler,
 
 std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
     const proto::DisaggRequest& req) {
-  // create a new request
-  // TODO: Should to support best_of > 1 case, now we only consider
-  // to allocate blocks for the first sequence in the request.
-  // But request maybe expend_sequence in running stage.
+  // TODO: support best_of > 1 in disaggregated PD mode.
+  // The current prefill instance only allocates blocks for the first
+  // sequence, so an expanded request would have under-allocated KV cache
+  // for the remaining sequences. Reject upfront instead of producing
+  // silently wrong outputs.
+  if (req.best_of() > 1) {
+    LOG(ERROR) << "best_of > 1 is not supported in disaggregated PD mode, "
+               << "request_id=" << req.req_id()
+               << ", best_of=" << req.best_of();
+    return nullptr;
+  }
+
   std::string prompt = req.prompt();
   std::vector<int> prompt_tokens(req.prompt_tokens().begin(),
                                  req.prompt_tokens().end());

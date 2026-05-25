@@ -151,10 +151,13 @@ void SequencesGroup::generate_outputs(std::vector<SequenceOutput>& outputs,
     for (size_t i = 0; i < sequences_.size(); ++i) {
       const int32_t generated_tokens_num =
           sequences_[i]->num_generated_tokens();
+      // Use lowest() (negative) instead of min() (smallest positive) so
+      // candidates that produced no tokens do not outrank real samples
+      // (real average logprobs are negative).
       const float average_logprob =
           generated_tokens_num > 0
               ? sequences_[i]->get_acc_logprob() / generated_tokens_num
-              : std::numeric_limits<float>::min();
+              : std::numeric_limits<float>::lowest();
       logprobs_vec.emplace_back(average_logprob, i);
     }
     std::sort(logprobs_vec.begin(),

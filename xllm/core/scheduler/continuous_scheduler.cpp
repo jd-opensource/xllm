@@ -392,8 +392,9 @@ void ContinuousScheduler::handle_prefill_requests(
 
     const size_t num_sequences = request->sequences().size();
     if (!request->preempted()) {
-      CHECK(num_sequences == 1)
-          << "Waiting request should have only one sequence.";
+      CHECK(num_sequences == 1 || num_sequences == request->best_of())
+          << "Waiting request should have either 1 or best_of("
+          << request->best_of() << ") sequences, got " << num_sequences;
     }
 
     if (!kv_cache_manager_->update_prefetch_result(
