@@ -339,7 +339,6 @@ DECLARE_int64(dit_generation_image_area_max);
 
 DECLARE_bool(dit_debug_print);
 
-DECLARE_int32(num_return_sequences);
 DECLARE_bool(use_audio_in_video);
 
 // --- kernel config ---

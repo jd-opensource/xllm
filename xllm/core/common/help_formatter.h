@@ -80,7 +80,7 @@ const OptionCategory kDisaggregatedPrefillDecodeOptions = {
 
 const OptionCategory kMultiStepDecodeOptions = {
     "MULTI-STEP DECODE OPTIONS",
-    {"max_decode_rounds", "beam_width", "num_return_sequences"}};
+    {"max_decode_rounds", "beam_width"}};
 
 const OptionCategory kMtpOptions = {"SPECULATIVE OPTIONS",
                                     {"draft_model",
