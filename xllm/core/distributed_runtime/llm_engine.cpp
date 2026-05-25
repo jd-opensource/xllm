@@ -466,7 +466,6 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
     DeviceMonitor::get_instance().set_total_activation_memory(device.index());
   }
 
-
   return kv_cache_cap;
 }
 
