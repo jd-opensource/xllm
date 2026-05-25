@@ -1869,6 +1869,7 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
                                       beam_tensors.out_beam_count_prefix_sums,
                                       beam_tensors.out_seqgroup,
                                       batch_size,
+                                      requested_result_width,
                                       round);
     }
     log_stage_timing("beam_search", round, beam_timer);
@@ -2286,6 +2287,7 @@ std::optional<ForwardOutput> RecWorkerImpl::LlmRecMultiRoundPipeline::step(
                             beam_tensors,
                             round,
                             batch_size,
+                            requested_result_width,
                             total_rounds);
       }
 
@@ -2329,7 +2331,6 @@ RecWorkerImpl::LlmRecMultiRoundPipeline::prepare_beam_search_tensors(
   tensors.out_token_index = torch::zeros({num_seq, 1}, int_options);
   tensors.out_beam_count_prefix_sums = torch::zeros({num_seq, 1}, int_options);
   tensors.out_seqgroup = torch::zeros_like(tensors.sequence_group);
-  tensors.use_beam_top = false;
   return tensors;
 }
 
@@ -2339,8 +2340,10 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_beam_search(
     BeamSearchTensors& beam_tensors,
     int32_t round,
     int32_t batch_size,
+    int32_t requested_result_width,
     int32_t total_rounds) {
 #if defined(USE_NPU)
+  (void)requested_result_width;
   (void)total_rounds;
   if (round == 0) {
     beam_tensors.out_token_ids.copy_(top_tokens.reshape({-1, 1}));
@@ -2373,10 +2376,11 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_beam_search(
                                   beam_tensors.out_beam_count_prefix_sums,
                                   beam_tensors.out_seqgroup,
                                   batch_size,
+                                  requested_result_width,
                                   round);
+#endif
   std::swap(beam_tensors.sequence_group, beam_tensors.out_seqgroup);
   std::swap(beam_tensors.acc_logprob, beam_tensors.out_log_probs);
-#endif
 }
 
 void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_final_beam_search(

@@ -222,7 +222,7 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search_impl(
     uint32_t batch_size,
     uint32_t beam_size,
     uint32_t top_k,
-    uint32_t beam_top,
+    uint32_t num_return_sequences,
     torch::Device device,
     bool is_largest = true,
     bool sorted = false) {
@@ -231,10 +231,10 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search_impl(
   // create output tensor, output type is the same as input type
   auto output_dtype = combined_probs.dtype();
   auto top_k_probs =
-      torch::empty({batch_size, beam_top},
+      torch::empty({batch_size, num_return_sequences},
                    torch::TensorOptions().dtype(output_dtype).device(device));
   auto top_k_indices =
-      torch::empty({batch_size, beam_top},
+      torch::empty({batch_size, num_return_sequences},
                    torch::TensorOptions().dtype(torch::kInt32).device(device));
 
   // get CUDA stream
@@ -244,7 +244,7 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search_impl(
   auto workspace_size = reduce_topk::invokeComputeTopkLastDimWorkspaceSize<T>(
       static_cast<SizeType32>(batch_size),
       static_cast<SizeType32>(beam_size * top_k),
-      static_cast<SizeType32>(beam_top),
+      static_cast<SizeType32>(num_return_sequences),
       is_largest,
       sorted);  // is_largest = true
 
@@ -255,16 +255,17 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search_impl(
 
   // call TensorRT-LLM's topK function
   // note: the data type of combined_probs must match the template parameter T
-  reduce_topk::invokeTopkLastDim<T>(static_cast<SizeType32>(batch_size),
-                                    static_cast<SizeType32>(beam_size * top_k),
-                                    static_cast<SizeType32>(beam_top),
-                                    is_largest,  // is_largest = true
-                                    combined_probs.data_ptr<T>(),
-                                    top_k_probs.data_ptr<T>(),
-                                    top_k_indices.data_ptr<int32_t>(),
-                                    workspace.data_ptr<uint8_t>(),
-                                    stream,
-                                    sorted);
+  reduce_topk::invokeTopkLastDim<T>(
+      static_cast<SizeType32>(batch_size),
+      static_cast<SizeType32>(beam_size * top_k),
+      static_cast<SizeType32>(num_return_sequences),
+      is_largest,  // is_largest = true
+      combined_probs.data_ptr<T>(),
+      top_k_probs.data_ptr<T>(),
+      top_k_indices.data_ptr<int32_t>(),
+      workspace.data_ptr<uint8_t>(),
+      stream,
+      sorted);
 
   // synchronize CUDA stream
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -279,7 +280,7 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search_impl<half>(
     uint32_t batch_size,
     uint32_t beam_size,
     uint32_t top_k,
-    uint32_t beam_top,
+    uint32_t num_return_sequences,
     torch::Device device,
     bool is_largest,
     bool sorted) {
@@ -288,10 +289,10 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search_impl<half>(
   // create output tensor, output type is the same as input type
   auto output_dtype = combined_probs.dtype();
   auto top_k_probs =
-      torch::empty({batch_size, beam_top},
+      torch::empty({batch_size, num_return_sequences},
                    torch::TensorOptions().dtype(output_dtype).device(device));
   auto top_k_indices =
-      torch::empty({batch_size, beam_top},
+      torch::empty({batch_size, num_return_sequences},
                    torch::TensorOptions().dtype(torch::kInt32).device(device));
 
   // get CUDA stream
@@ -302,7 +303,7 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search_impl<half>(
       reduce_topk::invokeComputeTopkLastDimWorkspaceSize<half>(
           static_cast<SizeType32>(batch_size),
           static_cast<SizeType32>(beam_size * top_k),
-          static_cast<SizeType32>(beam_top),
+          static_cast<SizeType32>(num_return_sequences),
           is_largest,
           sorted);  // is_largest = true
 
@@ -316,7 +317,7 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search_impl<half>(
   reduce_topk::invokeTopkLastDim<half>(
       static_cast<SizeType32>(batch_size),
       static_cast<SizeType32>(beam_size * top_k),
-      static_cast<SizeType32>(beam_top),
+      static_cast<SizeType32>(num_return_sequences),
       is_largest,  // is_largest = true
       reinterpret_cast<half const*>(combined_probs.data_ptr<at::Half>()),
       reinterpret_cast<half*>(top_k_probs.data_ptr<at::Half>()),
@@ -339,7 +340,7 @@ compute_topk_for_beam_search_impl<__nv_bfloat16>(torch::Tensor combined_probs,
                                                  uint32_t batch_size,
                                                  uint32_t beam_size,
                                                  uint32_t top_k,
-                                                 uint32_t beam_top,
+                                                 uint32_t num_return_sequences,
                                                  torch::Device device,
                                                  bool is_largest = true,
                                                  bool sorted = false) {
@@ -348,10 +349,10 @@ compute_topk_for_beam_search_impl<__nv_bfloat16>(torch::Tensor combined_probs,
   // create output tensor, output type is the same as input type
   auto output_dtype = combined_probs.dtype();
   auto top_k_probs =
-      torch::empty({batch_size, beam_top},
+      torch::empty({batch_size, num_return_sequences},
                    torch::TensorOptions().dtype(output_dtype).device(device));
   auto top_k_indices =
-      torch::empty({batch_size, beam_top},
+      torch::empty({batch_size, num_return_sequences},
                    torch::TensorOptions().dtype(torch::kInt32).device(device));
 
   // get CUDA stream
@@ -362,7 +363,7 @@ compute_topk_for_beam_search_impl<__nv_bfloat16>(torch::Tensor combined_probs,
       reduce_topk::invokeComputeTopkLastDimWorkspaceSize<__nv_bfloat16>(
           static_cast<SizeType32>(batch_size),
           static_cast<SizeType32>(beam_size * top_k),
-          static_cast<SizeType32>(beam_top),
+          static_cast<SizeType32>(num_return_sequences),
           is_largest,
           sorted);  // is_largest = true
 
@@ -376,7 +377,7 @@ compute_topk_for_beam_search_impl<__nv_bfloat16>(torch::Tensor combined_probs,
   reduce_topk::invokeTopkLastDim<__nv_bfloat16>(
       static_cast<SizeType32>(batch_size),
       static_cast<SizeType32>(beam_size * top_k),
-      static_cast<SizeType32>(beam_top),
+      static_cast<SizeType32>(num_return_sequences),
       is_largest,  // is_largest = true
       reinterpret_cast<__nv_bfloat16 const*>(
           combined_probs.data_ptr<at::BFloat16>()),
@@ -400,7 +401,7 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search(
     uint32_t batch_size,
     uint32_t beam_size,
     uint32_t top_k,
-    uint32_t beam_top,
+    uint32_t num_return_sequences,
     torch::Device device,
     bool is_largest = true,
     bool sorted = false) {
@@ -413,7 +414,7 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search(
                                                     batch_size,
                                                     beam_size,
                                                     top_k,
-                                                    beam_top,
+                                                    num_return_sequences,
                                                     device,
                                                     is_largest,
                                                     sorted);
@@ -424,7 +425,7 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search(
                                                    batch_size,
                                                    beam_size,
                                                    top_k,
-                                                   beam_top,
+                                                   num_return_sequences,
                                                    device,
                                                    is_largest,
                                                    sorted);
@@ -432,14 +433,15 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search(
 #ifdef ENABLE_BF16
     // ensure type match
     combined_probs = combined_probs.to(torch::kBFloat16).contiguous();
-    return compute_topk_for_beam_search_impl<__nv_bfloat16>(combined_probs,
-                                                            batch_size,
-                                                            beam_size,
-                                                            top_k,
-                                                            beam_top,
-                                                            device,
-                                                            is_largest,
-                                                            sorted);
+    return compute_topk_for_beam_search_impl<__nv_bfloat16>(
+        combined_probs,
+        batch_size,
+        beam_size,
+        top_k,
+        num_return_sequences,
+        device,
+        is_largest,
+        sorted);
 #else
     // if BF16 is not supported, convert to float32
     combined_probs = combined_probs.to(torch::kFloat32).contiguous();
@@ -447,7 +449,7 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search(
                                                     batch_size,
                                                     beam_size,
                                                     top_k,
-                                                    beam_top,
+                                                    num_return_sequences,
                                                     device,
                                                     is_largest,
                                                     sorted);
@@ -459,7 +461,7 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search(
                                                     batch_size,
                                                     beam_size,
                                                     top_k,
-                                                    beam_top,
+                                                    num_return_sequences,
                                                     device,
                                                     is_largest,
                                                     sorted);
@@ -597,7 +599,7 @@ void beam_search_init(torch::Tensor top_tokens,
 //           output updates, and sequence group updates
 template <typename T>
 __global__ void beam_search_step_kernel(
-    const int32_t* __restrict__ beam_top_k_indices,  // [batch_size, beam_size]
+    const int32_t* __restrict__ selected_k_indices,  // [batch_size, beam_size]
     const T* __restrict__ new_probs,                 // [batch_size, beam_size]
     const int32_t* __restrict__ top_tokens,    // [batch_size, beam_size, top_k]
     const int32_t* __restrict__ in_seq_group,  // [batch_size, beam_size,
@@ -622,7 +624,7 @@ __global__ void beam_search_step_kernel(
   const uint32_t flat_idx = batch_idx * beam_size + beam_idx;
 
   // Read index and compute parent_beam, token_in_beam
-  const int32_t idx = beam_top_k_indices[flat_idx];
+  const int32_t idx = selected_k_indices[flat_idx];
   const int32_t parent_beam = idx / static_cast<int32_t>(top_k);
   const int32_t token_in_beam = idx % static_cast<int32_t>(top_k);
 
@@ -655,7 +657,7 @@ __global__ void beam_search_step_kernel(
 // Performs argsort + gather + post-processing in one kernel
 template <typename T>
 __global__ void beam_search_step_with_sort_kernel(
-    const int32_t* __restrict__ beam_top_k_indices_in,  // [batch_size,
+    const int32_t* __restrict__ selected_k_indices_in,  // [batch_size,
                                                         // beam_size]
     const T* __restrict__ new_probs_in,        // [batch_size, beam_size]
     const int32_t* __restrict__ top_tokens,    // [batch_size, beam_size,
@@ -686,7 +688,7 @@ __global__ void beam_search_step_with_sort_kernel(
   // Load indices and probs into shared memory
   const uint32_t base_idx = batch_idx * beam_size;
   for (uint32_t i = threadIdx.x; i < beam_size; i += blockDim.x) {
-    shared_indices[i] = beam_top_k_indices_in[base_idx + i];
+    shared_indices[i] = selected_k_indices_in[base_idx + i];
     shared_probs[i] = new_probs_in[base_idx + i];
     shared_order[i] = i;
   }
@@ -749,7 +751,7 @@ __global__ void beam_search_step_with_sort_kernel(
 
 // Host function to launch beam search step kernel
 template <typename T, typename TorchType>
-void launch_beam_search_step_kernel(torch::Tensor beam_top_k_indices,
+void launch_beam_search_step_kernel(torch::Tensor selected_k_indices,
                                     torch::Tensor new_probs,
                                     torch::Tensor top_tokens,
                                     torch::Tensor in_sequence_group,
@@ -772,7 +774,7 @@ void launch_beam_search_step_kernel(torch::Tensor beam_top_k_indices,
 
     beam_search_step_with_sort_kernel<T>
         <<<batch_size, threads_per_block, shared_mem_size, stream>>>(
-            beam_top_k_indices.data_ptr<int32_t>(),
+            selected_k_indices.data_ptr<int32_t>(),
             reinterpret_cast<T*>(new_probs.data_ptr<TorchType>()),
             top_tokens.data_ptr<int32_t>(),
             in_sequence_group.data_ptr<int32_t>(),
@@ -787,17 +789,17 @@ void launch_beam_search_step_kernel(torch::Tensor beam_top_k_indices,
             current_step);
   } else if (need_sort) {
     // For larger beam sizes, use PyTorch's argsort + gather, then fused kernel
-    auto ordered_indices = beam_top_k_indices.argsort(1, false);
+    auto ordered_indices = selected_k_indices.argsort(1, false);
     new_probs = new_probs.gather(1, ordered_indices.to(torch::kInt64));
-    beam_top_k_indices =
-        beam_top_k_indices.gather(1, ordered_indices.to(torch::kInt64));
+    selected_k_indices =
+        selected_k_indices.gather(1, ordered_indices.to(torch::kInt64));
 
     constexpr uint32_t kBlockSize = 256;
     const uint32_t total_elements = batch_size * beam_size;
     const uint32_t num_blocks = (total_elements + kBlockSize - 1) / kBlockSize;
 
     beam_search_step_kernel<T><<<num_blocks, kBlockSize, 0, stream>>>(
-        beam_top_k_indices.data_ptr<int32_t>(),
+        selected_k_indices.data_ptr<int32_t>(),
         reinterpret_cast<T*>(new_probs.data_ptr<TorchType>()),
         top_tokens.data_ptr<int32_t>(),
         in_sequence_group.data_ptr<int32_t>(),
@@ -817,7 +819,7 @@ void launch_beam_search_step_kernel(torch::Tensor beam_top_k_indices,
     const uint32_t num_blocks = (total_elements + kBlockSize - 1) / kBlockSize;
 
     beam_search_step_kernel<T><<<num_blocks, kBlockSize, 0, stream>>>(
-        beam_top_k_indices.data_ptr<int32_t>(),
+        selected_k_indices.data_ptr<int32_t>(),
         reinterpret_cast<T*>(new_probs.data_ptr<TorchType>()),
         top_tokens.data_ptr<int32_t>(),
         in_sequence_group.data_ptr<int32_t>(),
@@ -834,8 +836,8 @@ void launch_beam_search_step_kernel(torch::Tensor beam_top_k_indices,
 }
 
 void beam_search_step(torch::Tensor top_tokens,
-                      torch::Tensor beam_top_k_indices,
-                      torch::Tensor beam_top_k_logprobs,
+                      torch::Tensor selected_k_indices,
+                      torch::Tensor selected_k_logprobs,
                       torch::Tensor in_sequence_group,
                       torch::Tensor out_acc_logprob,
                       torch::Tensor out_token_ids,
@@ -848,11 +850,11 @@ void beam_search_step(torch::Tensor top_tokens,
                       uint32_t current_step) {
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   bool need_sort = (current_step < total_rounds - 1);
-  auto dtype = beam_top_k_logprobs.dtype();
+  auto dtype = selected_k_logprobs.dtype();
 
   if (dtype == torch::kFloat32) {
-    launch_beam_search_step_kernel<float, float>(beam_top_k_indices,
-                                                 beam_top_k_logprobs,
+    launch_beam_search_step_kernel<float, float>(selected_k_indices,
+                                                 selected_k_logprobs,
                                                  top_tokens,
                                                  in_sequence_group,
                                                  out_acc_logprob,
@@ -867,8 +869,8 @@ void beam_search_step(torch::Tensor top_tokens,
                                                  need_sort,
                                                  stream);
   } else if (dtype == torch::kFloat16 || dtype == torch::kHalf) {
-    launch_beam_search_step_kernel<half, at::Half>(beam_top_k_indices,
-                                                   beam_top_k_logprobs,
+    launch_beam_search_step_kernel<half, at::Half>(selected_k_indices,
+                                                   selected_k_logprobs,
                                                    top_tokens,
                                                    in_sequence_group,
                                                    out_acc_logprob,
@@ -885,8 +887,8 @@ void beam_search_step(torch::Tensor top_tokens,
   } else if (dtype == torch::kBFloat16) {
 #ifdef ENABLE_BF16
     launch_beam_search_step_kernel<__nv_bfloat16, at::BFloat16>(
-        beam_top_k_indices,
-        beam_top_k_logprobs,
+        selected_k_indices,
+        selected_k_logprobs,
         top_tokens,
         in_sequence_group,
         out_acc_logprob,
@@ -902,8 +904,8 @@ void beam_search_step(torch::Tensor top_tokens,
         stream);
 #else
     launch_beam_search_step_kernel<float, float>(
-        beam_top_k_indices,
-        beam_top_k_logprobs.to(torch::kFloat32),
+        selected_k_indices,
+        selected_k_logprobs.to(torch::kFloat32),
         top_tokens,
         in_sequence_group,
         out_acc_logprob.to(torch::kFloat32),
@@ -920,8 +922,8 @@ void beam_search_step(torch::Tensor top_tokens,
 #endif
   } else {
     launch_beam_search_step_kernel<float, float>(
-        beam_top_k_indices,
-        beam_top_k_logprobs.to(torch::kFloat32),
+        selected_k_indices,
+        selected_k_logprobs.to(torch::kFloat32),
         top_tokens,
         in_sequence_group,
         out_acc_logprob.to(torch::kFloat32),
@@ -945,34 +947,40 @@ void beam_search_step(torch::Tensor top_tokens,
 //           output updates, and sequence group updates
 template <typename T>
 __global__ void beam_search_last_step_kernel(
-    const int32_t* __restrict__ beam_top_k_indices,  // [batch_size, beam_top]
-    const T* __restrict__ new_probs,                 // [batch_size, beam_top]
+    const int32_t* __restrict__ selected_k_indices,  // [batch_size,
+                                                     // num_return_sequences]
+    const T* __restrict__ new_probs,                 // [batch_size,
+                                                     // num_return_sequences]
     const int32_t* __restrict__ top_tokens,    // [batch_size, beam_size, top_k]
     const int32_t* __restrict__ in_seq_group,  // [batch_size, beam_size,
                                                // total_rounds]
-    T* __restrict__ out_acc_logprob,           // [batch_size, beam_top]
-    int32_t* __restrict__ out_token_ids,       // [batch_size, beam_top]
-    int32_t* __restrict__ out_token_index,     // [batch_size, beam_top]
-    int32_t* __restrict__ out_seq_group,       // [batch_size, beam_top,
+    T* __restrict__ out_acc_logprob,           // [batch_size,
+                                               // num_return_sequences]
+    int32_t* __restrict__ out_token_ids,       // [batch_size,
+                                               // num_return_sequences]
+    int32_t* __restrict__ out_token_index,     // [batch_size,
+                                               // num_return_sequences]
+    int32_t* __restrict__ out_seq_group,       // [batch_size,
+                                               // num_return_sequences,
                                                // total_rounds]
     uint32_t batch_size,
     uint32_t beam_size,
     uint32_t top_k,
-    uint32_t beam_top,
+    uint32_t num_return_sequences,
     uint32_t total_rounds,
     uint32_t current_step) {
   const uint32_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-  const uint32_t total_elements = batch_size * beam_top;
+  const uint32_t total_elements = batch_size * num_return_sequences;
 
   if (tid >= total_elements) {
     return;
   }
-  const uint32_t batch_idx = tid / beam_top;
-  const uint32_t beam_idx = tid % beam_top;
-  const uint32_t flat_idx = batch_idx * beam_top + beam_idx;
+  const uint32_t batch_idx = tid / num_return_sequences;
+  const uint32_t beam_idx = tid % num_return_sequences;
+  const uint32_t flat_idx = batch_idx * num_return_sequences + beam_idx;
 
   // Read index and compute parent_beam, token_in_beam
-  const int32_t idx = beam_top_k_indices[flat_idx];
+  const int32_t idx = selected_k_indices[flat_idx];
   const int32_t parent_beam = idx / static_cast<int32_t>(top_k);
   const int32_t token_in_beam = idx % static_cast<int32_t>(top_k);
 
@@ -991,7 +999,7 @@ __global__ void beam_search_last_step_kernel(
   const uint32_t src_seq_base =
       batch_idx * beam_size * total_rounds + parent_beam * total_rounds;
   const uint32_t dst_seq_base =
-      batch_idx * beam_top * total_rounds + beam_idx * total_rounds;
+      batch_idx * num_return_sequences * total_rounds + beam_idx * total_rounds;
 
   for (uint32_t s = 0; s < current_step; ++s) {
     out_seq_group[dst_seq_base + s] = in_seq_group[src_seq_base + s];
@@ -1003,7 +1011,7 @@ __global__ void beam_search_last_step_kernel(
 
 // Host function to launch beam search step kernel
 template <typename T, typename TorchType>
-void launch_beam_search_last_step_kernel(torch::Tensor beam_top_k_indices,
+void launch_beam_search_last_step_kernel(torch::Tensor selected_k_indices,
                                          torch::Tensor new_probs,
                                          torch::Tensor top_tokens,
                                          torch::Tensor in_sequence_group,
@@ -1014,15 +1022,15 @@ void launch_beam_search_last_step_kernel(torch::Tensor beam_top_k_indices,
                                          uint32_t batch_size,
                                          uint32_t beam_size,
                                          uint32_t top_k,
-                                         uint32_t beam_top,
+                                         uint32_t num_return_sequences,
                                          uint32_t total_rounds,
                                          uint32_t current_step,
                                          cudaStream_t stream) {
   constexpr uint32_t kBlockSize = 256;
-  const uint32_t total_elements = batch_size * beam_top;
+  const uint32_t total_elements = batch_size * num_return_sequences;
   const uint32_t num_blocks = (total_elements + kBlockSize - 1) / kBlockSize;
   beam_search_last_step_kernel<T><<<num_blocks, kBlockSize, 0, stream>>>(
-      beam_top_k_indices.data_ptr<int32_t>(),
+      selected_k_indices.data_ptr<int32_t>(),
       reinterpret_cast<T*>(new_probs.data_ptr<TorchType>()),
       top_tokens.data_ptr<int32_t>(),
       in_sequence_group.data_ptr<int32_t>(),
@@ -1033,14 +1041,14 @@ void launch_beam_search_last_step_kernel(torch::Tensor beam_top_k_indices,
       batch_size,
       beam_size,
       top_k,
-      beam_top,
+      num_return_sequences,
       total_rounds,
       current_step);
 }
 
 void beam_search_last_step(torch::Tensor top_tokens,
-                           torch::Tensor beam_top_k_indices,
-                           torch::Tensor beam_top_k_logprobs,
+                           torch::Tensor selected_k_indices,
+                           torch::Tensor selected_k_logprobs,
                            torch::Tensor in_sequence_group,
                            torch::Tensor out_acc_logprob,
                            torch::Tensor out_token_ids,
@@ -1049,14 +1057,14 @@ void beam_search_last_step(torch::Tensor top_tokens,
                            uint32_t batch_size,
                            uint32_t beam_size,
                            uint32_t top_k,
-                           uint32_t beam_top,
+                           uint32_t num_return_sequences,
                            uint32_t total_rounds,
                            uint32_t current_step) {
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  auto dtype = beam_top_k_logprobs.dtype();
+  auto dtype = selected_k_logprobs.dtype();
   if (dtype == torch::kFloat32) {
-    launch_beam_search_last_step_kernel<float, float>(beam_top_k_indices,
-                                                      beam_top_k_logprobs,
+    launch_beam_search_last_step_kernel<float, float>(selected_k_indices,
+                                                      selected_k_logprobs,
                                                       top_tokens,
                                                       in_sequence_group,
                                                       out_acc_logprob,
@@ -1066,13 +1074,13 @@ void beam_search_last_step(torch::Tensor top_tokens,
                                                       batch_size,
                                                       beam_size,
                                                       top_k,
-                                                      beam_top,
+                                                      num_return_sequences,
                                                       total_rounds,
                                                       current_step,
                                                       stream);
   } else if (dtype == torch::kFloat16 || dtype == torch::kHalf) {
-    launch_beam_search_last_step_kernel<half, at::Half>(beam_top_k_indices,
-                                                        beam_top_k_logprobs,
+    launch_beam_search_last_step_kernel<half, at::Half>(selected_k_indices,
+                                                        selected_k_logprobs,
                                                         top_tokens,
                                                         in_sequence_group,
                                                         out_acc_logprob,
@@ -1082,15 +1090,15 @@ void beam_search_last_step(torch::Tensor top_tokens,
                                                         batch_size,
                                                         beam_size,
                                                         top_k,
-                                                        beam_top,
+                                                        num_return_sequences,
                                                         total_rounds,
                                                         current_step,
                                                         stream);
 #ifdef ENABLE_BF16
   } else if (dtype == torch::kBFloat16) {
     launch_beam_search_last_step_kernel<__nv_bfloat16, at::BFloat16>(
-        beam_top_k_indices,
-        beam_top_k_logprobs,
+        selected_k_indices,
+        selected_k_logprobs,
         top_tokens,
         in_sequence_group,
         out_acc_logprob,
@@ -1100,15 +1108,15 @@ void beam_search_last_step(torch::Tensor top_tokens,
         batch_size,
         beam_size,
         top_k,
-        beam_top,
+        num_return_sequences,
         total_rounds,
         current_step,
         stream);
 #endif
   } else {
     launch_beam_search_last_step_kernel<float, float>(
-        beam_top_k_indices,
-        beam_top_k_logprobs.to(torch::kFloat32),
+        selected_k_indices,
+        selected_k_logprobs.to(torch::kFloat32),
         top_tokens,
         in_sequence_group,
         out_acc_logprob.to(torch::kFloat32),
@@ -1118,7 +1126,7 @@ void beam_search_last_step(torch::Tensor top_tokens,
         batch_size,
         beam_size,
         top_k,
-        beam_top,
+        num_return_sequences,
         total_rounds,
         current_step,
         stream);
@@ -1137,16 +1145,17 @@ void beam_search(torch::Tensor acc_logprob,
                  torch::Tensor out_beam_count_prefix_sums,
                  torch::Tensor out_sequence_group,
                  uint32_t batch_size,
+                 uint32_t num_return_sequences,
                  uint32_t current_step) {
+  (void)out_beam_count_prefix_sums;
   torch::Device device = acc_logprob.device();
 
   uint32_t beam_size = in_sequence_group.size(1);
 
   uint32_t top_k = top_tokens.size(1);
   uint32_t total_rounds = in_sequence_group.size(2);
-  uint32_t num_return_sequences = (FLAGS_num_return_sequences > beam_size)
-                                      ? FLAGS_num_return_sequences
-                                      : beam_size;
+  num_return_sequences =
+      num_return_sequences > beam_size ? num_return_sequences : beam_size;
   //   CHECK_EQ(beam_size, top_k) << "beam_size must be equal with top_k.";
 
   if (current_step == 0) {
@@ -1168,7 +1177,7 @@ void beam_search(torch::Tensor acc_logprob,
     auto combined_probs = (acc_logprob + top_logprobs)
                               .view({batch_size, beam_size * top_k})
                               .contiguous();
-    auto [beam_top_logprobs, beam_top_indices] =
+    auto [selected_logprobs, selected_indices] =
         compute_topk_for_beam_search(combined_probs,
                                      batch_size,
                                      beam_size,
@@ -1177,10 +1186,10 @@ void beam_search(torch::Tensor acc_logprob,
                                      device,
                                      true,
                                      true);
-    // Step 2: update beam_top result
+    // Step 2: update the widened final result
     beam_search_last_step(top_tokens,
-                          beam_top_indices,
-                          beam_top_logprobs,
+                          selected_indices,
+                          selected_logprobs,
                           in_sequence_group,
                           out_acc_logprob,
                           out_token_ids,
@@ -1189,7 +1198,7 @@ void beam_search(torch::Tensor acc_logprob,
                           batch_size,
                           beam_size,
                           top_k,
-                          beam_top,
+                          num_return_sequences,
                           total_rounds,
                           current_step);
   } else {
@@ -1201,7 +1210,7 @@ void beam_search(torch::Tensor acc_logprob,
         (acc_logprob + top_logprobs).view({batch_size, beam_size * top_k});
 
     // Use optimized topk function
-    auto [beam_top_k_logprobs, beam_top_k_indices] =
+    auto [selected_k_logprobs, selected_k_indices] =
         compute_topk_for_beam_search(combined_probs,
                                      batch_size,
                                      beam_size,
@@ -1213,8 +1222,8 @@ void beam_search(torch::Tensor acc_logprob,
 
     // Step 2: Launch fused post-processing kernel
     beam_search_step(top_tokens,
-                     beam_top_k_indices,
-                     beam_top_k_logprobs,
+                     selected_k_indices,
+                     selected_k_logprobs,
                      in_sequence_group,
                      out_acc_logprob,
                      out_token_ids,
