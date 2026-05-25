@@ -29,15 +29,22 @@
 #pragma once
 
 #include <cooperative_groups.h>
+#if !defined(USE_DCU)
 #include <cooperative_groups/reduce.h>
+#endif
 #include <cuda_runtime.h>
 #include <cuda_runtime_api.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/transform_iterator.h>
 
+#if !defined(USE_DCU)
 #include <cub/cub.cuh>
 #include <cuda/atomic>
 #include <cuda/std/limits>
+#else
+#include <hipcub/hipcub.hpp>
+namespace cub = hipcub;
+#endif
 #include <limits>
 #include <type_traits>
 
@@ -184,7 +191,9 @@ __host__ __device__ IdxT calc_buf_len(IdxT len) {
   // size to 256 bytes to avoid alignment issues
   static_assert(is_a_power_of_two(sizeof(T)));
   static_assert(is_a_power_of_two(sizeof(IdxT)));
-  constexpr IdxT aligned = 256 / std::min(sizeof(T), sizeof(IdxT));
+  constexpr size_t min_type_size =
+      sizeof(T) < sizeof(IdxT) ? sizeof(T) : sizeof(IdxT);
+  constexpr IdxT aligned = static_cast<IdxT>(256 / min_type_size);
   buf_len = buf_len & (~(aligned - 1));
   return buf_len;
 }
@@ -588,8 +597,10 @@ __device__ void last_filter(T const* in_buf,
   IdxT* p_out_cnt = &counter->out_cnt;
   IdxT* p_out_back_cnt = &counter->out_back_cnt;
   IdxT* p_equal = out_idx + k - num_of_kth_needed;
+#if !defined(USE_DCU)
   ::cuda::atomic_ref<IdxT, ::cuda::thread_scope_block> ref_last(
       p_equal[num_of_kth_needed - 1]);
+#endif
   for (IdxT i = threadIdx.x; i < current_len; i += blockDim.x) {
     const T value = in_buf[i];
     auto const bits = (twiddle_in(value, select_min) >> start_bit) << start_bit;
@@ -611,7 +622,13 @@ __device__ void last_filter(T const* in_buf,
         }
       }
       if constexpr (prioritize_smaller_indice) {
+#if defined(USE_DCU)
+        if (new_idx < __hip_atomic_load(&p_equal[num_of_kth_needed - 1],
+                                        __ATOMIC_RELAXED,
+                                        __HIP_MEMORY_SCOPE_WORKGROUP)) {
+#else
         if (new_idx < ref_last.load(::cuda::memory_order_relaxed)) {
+#endif
           for (int j = 0; j < num_of_kth_needed; j++) {
             IdxT pre_idx = atomicMin(&p_equal[j], new_idx);
             if (pre_idx > new_idx) {
@@ -666,7 +683,9 @@ __global__ void last_filter_kernel(T const* in,
   IdxT* p_out_cnt = &counter->out_cnt;
   IdxT* p_out_back_cnt = &counter->out_back_cnt;
   IdxT* p_equal = out_idx + k - num_of_kth_needed;
+#if !defined(USE_DCU)
   ::cuda::atomic_ref<IdxT> ref_last(p_equal[num_of_kth_needed - 1]);
+#endif
   auto f = [k,
             select_min,
             kth_value_bits,
@@ -676,8 +695,12 @@ __global__ void last_filter_kernel(T const* in,
             in_idx_buf,
             out,
             out_idx,
-            p_equal,
-            ref_last](T value, IdxT i) {
+            p_equal
+#if !defined(USE_DCU)
+            ,
+            ref_last
+#endif
+  ](T value, IdxT i) {
     const auto bits = (twiddle_in(value, select_min) >> start_bit) << start_bit;
     if (bits < kth_value_bits) {
       IdxT pos = atomicAdd(p_out_cnt, static_cast<IdxT>(1));
@@ -694,7 +717,13 @@ __global__ void last_filter_kernel(T const* in,
         }
       }
       if constexpr (prioritize_smaller_indice) {
+#if defined(USE_DCU)
+        if (new_idx < __hip_atomic_load(&p_equal[num_of_kth_needed - 1],
+                                        __ATOMIC_RELAXED,
+                                        __HIP_MEMORY_SCOPE_WORKGROUP)) {
+#else
         if (new_idx < ref_last.load(::cuda::memory_order_relaxed)) {
+#endif
           for (int j = 0; j < num_of_kth_needed; j++) {
             IdxT pre_idx = atomicMin(&p_equal[j], new_idx);
             if (pre_idx > new_idx) {
@@ -888,8 +917,12 @@ __global__ void radix_kernel(T const* in,
     if (pass == num_passes - 1) {
       const volatile IdxT num_of_kth_needed = counter->k;
       for (IdxT i = threadIdx.x; i < num_of_kth_needed; i += blockDim.x) {
+#if defined(USE_DCU)
+        out_idx[k - num_of_kth_needed + i] = std::numeric_limits<IdxT>::max();
+#else
         out_idx[k - num_of_kth_needed + i] =
             ::cuda::std::numeric_limits<IdxT>::max();
+#endif
       }
       __syncthreads();
       if constexpr (fused_last_filter) {
@@ -1085,7 +1118,7 @@ __device__ void filter_and_histogram_for_one_block(T const* in_buf,
           (twiddle_in(value, select_min) >> previous_start_bit)
           << previous_start_bit;
       if (previous_bits == kth_value_bits) {
-#if CUDART_VERSION < 12000
+#if !defined(USE_DCU) && CUDART_VERSION < 12000
         // Avoiding potential compiler bug in CUDA 11
         volatile
 #endif
@@ -1201,8 +1234,12 @@ __global__ void radix_topk_one_block_kernel(T const* in,
       if constexpr (prioritize_smaller_indice) {
         const IdxT num_of_kth_needed = counter.k;
         for (IdxT i = threadIdx.x; i < num_of_kth_needed; i += blockDim.x) {
+#if defined(USE_DCU)
+          out_idx[k - num_of_kth_needed + i] = std::numeric_limits<IdxT>::max();
+#else
           out_idx[k - num_of_kth_needed + i] =
               ::cuda::std::numeric_limits<IdxT>::max();
+#endif
         }
         __syncthreads();
       }
@@ -1247,13 +1284,24 @@ __device__ __forceinline__ T negativeInfinity() {
 
 template <>
 __device__ __forceinline__ half negativeInfinity<half>() {
+#if !defined(USE_DCU)
   return -CUDART_INF_FP16;
+#else
+  return static_cast<half>(-INFINITY);
+#endif
 }
 
+#if !defined(USE_DCU)
 template <>
 __device__ __forceinline__ __nv_bfloat16 negativeInfinity<__nv_bfloat16>() {
   return -CUDART_INF_BF16;
 }
+#else
+template <>
+__device__ __forceinline__ hip_bfloat16 negativeInfinity<hip_bfloat16>() {
+  return static_cast<hip_bfloat16>(-INFINITY);
+}
+#endif
 
 /****************TopK kernel for candidate number<= 128 and K <= 8
  * **************** */
@@ -1677,10 +1725,11 @@ void standalone_stable_radix_topk_one_block_(void* buf,
     }
   }
 
-  air_topk_stable::
-      radix_topk_one_block_kernel<T, IdxT, BitsPerPass, BlockSize, true>
-      <<<batch_size, BlockSize, 0, stream>>>(
-          in, in_idx, len, k, topk_out, topk_out_idx, select_min, bufs);
+  auto one_block_kernel = air_topk_stable::
+      radix_topk_one_block_kernel<T, IdxT, BitsPerPass, BlockSize, true>;
+
+  one_block_kernel<<<batch_size, BlockSize, 0, stream>>>(
+      in, in_idx, len, k, topk_out, topk_out_idx, select_min, bufs);
 
   T* idx_sort_out = sorted ? sort_in : out;
   IdxT* idx_sort_out_idx = sorted ? sort_in_idx : out_idx;

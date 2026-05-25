@@ -22,7 +22,9 @@ limitations under the License.
 #include <torch/all.h>
 
 #include <cub/util_type.cuh>
+#if !defined(USE_DCU)
 #include <cuda/functional>
+#endif
 
 #include "kernels/cuda/device_utils.cuh"
 
@@ -31,6 +33,12 @@ using cub_kvp = cub::KeyValuePair<int, float>;
 namespace {
 
 using namespace xllm::kernel::cuda;
+
+#if defined(USE_DCU)
+static constexpr unsigned long long kSoftmaxFullMask = 0xffffffffffffffffULL;
+#else
+static constexpr unsigned int kSoftmaxFullMask = 0xffffffffU;
+#endif
 
 // ====================== Softmax things ===============================
 // We have our own implementation of softmax here so we can support transposing
@@ -176,7 +184,7 @@ __launch_bounds__(TPB) __global__
   const int thread_read_offset = blockIdx.x * num_experts;
   float row_sum_for_renormalize = 0;
   // Each loop finds the top 2 elements,
-  // thus requiring only ⌈k/2⌉ loops (calculated as (k + 1) / 2).
+  // thus requiring only ceil(k / 2) loops (calculated as (k + 1) / 2).
   for (int k_idx = 0; k_idx < (k + TopKPair::PAIR - 1) / TopKPair::PAIR;
        ++k_idx) {
     // Initializing the top 2 elements by the minimum value.
@@ -479,7 +487,7 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__
     // butterfly reduce with (lane id ^ mask)
     thread_max = max(thread_max,
                      XLLM_SHFL_XOR_SYNC_WIDTH(
-                         0xffffffff, thread_max, mask, THREADS_PER_ROW));
+                         kSoftmaxFullMask, thread_max, mask, THREADS_PER_ROW));
   }
 
   // From this point, thread max in all the threads have the max within the row.
@@ -496,8 +504,8 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__
 // reduce, we use a bufferfly pattern.
 #pragma unroll
   for (int mask = THREADS_PER_ROW / 2; mask > 0; mask /= 2) {
-    row_sum +=
-        XLLM_SHFL_XOR_SYNC_WIDTH(0xffffffff, row_sum, mask, THREADS_PER_ROW);
+    row_sum += XLLM_SHFL_XOR_SYNC_WIDTH(
+        kSoftmaxFullMask, row_sum, mask, THREADS_PER_ROW);
   }
 
   // From this point, all threads have the max and the sum for their rows in the
@@ -550,10 +558,10 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__
 // their max with -inf and the warp can run more iterations...
 #pragma unroll
     for (int mask = THREADS_PER_ROW / 2; mask > 0; mask /= 2) {
-      float other_max =
-          XLLM_SHFL_XOR_SYNC_WIDTH(0xffffffff, max_val, mask, THREADS_PER_ROW);
-      int other_expert =
-          XLLM_SHFL_XOR_SYNC_WIDTH(0xffffffff, expert, mask, THREADS_PER_ROW);
+      float other_max = XLLM_SHFL_XOR_SYNC_WIDTH(
+          kSoftmaxFullMask, max_val, mask, THREADS_PER_ROW);
+      int other_expert = XLLM_SHFL_XOR_SYNC_WIDTH(
+          kSoftmaxFullMask, expert, mask, THREADS_PER_ROW);
 
       // We want lower indices to "win" in every thread so we break ties this
       // way
@@ -835,6 +843,21 @@ void topk_softmax(torch::Tensor& topk_weights,   // [num_tokens, topk]
         bias_ptr,
         stream);
   } else if (dtype == at::ScalarType::BFloat16) {
+#if defined(USE_DCU)
+    topk_gating_softmax_kernel_launcher<hip_bfloat16>(
+        reinterpret_cast<const hip_bfloat16*>(
+            gating_output.data_ptr<at::BFloat16>()),
+        topk_weights.data_ptr<float>(),
+        topk_indices.data_ptr<int>(),
+        softmax_workspace.data_ptr<float>(),
+        num_tokens,
+        num_experts,
+        topk,
+        renormalize,
+        moe_softcapping_f,
+        bias_ptr,
+        stream);
+#else
     topk_gating_softmax_kernel_launcher<__nv_bfloat16>(
         reinterpret_cast<const __nv_bfloat16*>(
             gating_output.data_ptr<at::BFloat16>()),
@@ -848,6 +871,7 @@ void topk_softmax(torch::Tensor& topk_weights,   // [num_tokens, topk]
         moe_softcapping_f,
         bias_ptr,
         stream);
+#endif
   } else {
     LOG(FATAL) << "Unsupported gating_output dtype: " << dtype;
   }

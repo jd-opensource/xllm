@@ -34,6 +34,39 @@ using half = __half;
 namespace xllm::kernel::cuda {
 
 template <typename T>
+inline size_t invoke_topk_workspace_size(SizeType32 batch_size,
+                                         SizeType32 input_length,
+                                         SizeType32 k,
+                                         bool is_largest,
+                                         bool sorted) {
+  return reduce_topk::invokeComputeTopkLastDimWorkspaceSize<T>(
+      batch_size, input_length, k, is_largest, sorted);
+}
+
+template <typename KernelT>
+inline void invoke_topk_last_dim(SizeType32 batch_size,
+                                 SizeType32 input_length,
+                                 SizeType32 k,
+                                 bool is_largest,
+                                 const void* input,
+                                 void* output_values,
+                                 void* output_indices,
+                                 void* workspace,
+                                 cudaStream_t stream,
+                                 bool sorted) {
+  reduce_topk::invokeTopkLastDim<KernelT>(batch_size,
+                                          input_length,
+                                          k,
+                                          is_largest,
+                                          input,
+                                          output_values,
+                                          output_indices,
+                                          workspace,
+                                          stream,
+                                          sorted);
+}
+
+template <typename T>
 std::pair<torch::Tensor, torch::Tensor> compute_topk_general_impl(
     torch::Tensor input,
     uint32_t batch_size,
@@ -53,27 +86,27 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_general_impl(
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  auto workspace_size = reduce_topk::invokeComputeTopkLastDimWorkspaceSize<T>(
-      static_cast<SizeType32>(batch_size),
-      static_cast<SizeType32>(input_length),
-      static_cast<SizeType32>(k),
-      true,
-      sorted);
+  auto workspace_size =
+      invoke_topk_workspace_size<T>(static_cast<SizeType32>(batch_size),
+                                    static_cast<SizeType32>(input_length),
+                                    static_cast<SizeType32>(k),
+                                    true,
+                                    sorted);
 
   auto workspace =
       torch::empty({static_cast<int64_t>(workspace_size)},
                    torch::TensorOptions().dtype(torch::kUInt8).device(device));
 
-  reduce_topk::invokeTopkLastDim<T>(static_cast<SizeType32>(batch_size),
-                                    static_cast<SizeType32>(input_length),
-                                    static_cast<SizeType32>(k),
-                                    true,
-                                    input.data_ptr<T>(),
-                                    top_k_values.data_ptr<T>(),
-                                    top_k_indices.data_ptr<int32_t>(),
-                                    workspace.data_ptr<uint8_t>(),
-                                    stream,
-                                    sorted);
+  invoke_topk_last_dim<T>(static_cast<SizeType32>(batch_size),
+                          static_cast<SizeType32>(input_length),
+                          static_cast<SizeType32>(k),
+                          true,
+                          input.data_ptr<T>(),
+                          top_k_values.data_ptr<T>(),
+                          top_k_indices.data_ptr<int32_t>(),
+                          workspace.data_ptr<uint8_t>(),
+                          stream,
+                          sorted);
 
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -101,27 +134,26 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_general_impl<half>(
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   auto workspace_size =
-      reduce_topk::invokeComputeTopkLastDimWorkspaceSize<half>(
-          static_cast<SizeType32>(batch_size),
-          static_cast<SizeType32>(input_length),
-          static_cast<SizeType32>(k),
-          true,
-          sorted);
+      invoke_topk_workspace_size<half>(static_cast<SizeType32>(batch_size),
+                                       static_cast<SizeType32>(input_length),
+                                       static_cast<SizeType32>(k),
+                                       true,
+                                       sorted);
 
   auto workspace =
       torch::empty({static_cast<int64_t>(workspace_size)},
                    torch::TensorOptions().dtype(torch::kUInt8).device(device));
 
-  reduce_topk::invokeTopkLastDim<half>(static_cast<SizeType32>(batch_size),
-                                       static_cast<SizeType32>(input_length),
-                                       static_cast<SizeType32>(k),
-                                       true,
-                                       input.data_ptr<at::Half>(),
-                                       top_k_values.data_ptr<at::Half>(),
-                                       top_k_indices.data_ptr<int32_t>(),
-                                       workspace.data_ptr<uint8_t>(),
-                                       stream,
-                                       sorted);
+  invoke_topk_last_dim<half>(static_cast<SizeType32>(batch_size),
+                             static_cast<SizeType32>(input_length),
+                             static_cast<SizeType32>(k),
+                             true,
+                             input.data_ptr<at::Half>(),
+                             top_k_values.data_ptr<at::Half>(),
+                             top_k_indices.data_ptr<int32_t>(),
+                             workspace.data_ptr<uint8_t>(),
+                             stream,
+                             sorted);
 
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -150,29 +182,27 @@ compute_topk_general_impl<__nv_bfloat16>(torch::Tensor input,
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  auto workspace_size =
-      reduce_topk::invokeComputeTopkLastDimWorkspaceSize<__nv_bfloat16>(
-          static_cast<SizeType32>(batch_size),
-          static_cast<SizeType32>(input_length),
-          static_cast<SizeType32>(k),
-          true,
-          sorted);
+  auto workspace_size = invoke_topk_workspace_size<__nv_bfloat16>(
+      static_cast<SizeType32>(batch_size),
+      static_cast<SizeType32>(input_length),
+      static_cast<SizeType32>(k),
+      true,
+      sorted);
 
   auto workspace =
       torch::empty({static_cast<int64_t>(workspace_size)},
                    torch::TensorOptions().dtype(torch::kUInt8).device(device));
 
-  reduce_topk::invokeTopkLastDim<__nv_bfloat16>(
-      static_cast<SizeType32>(batch_size),
-      static_cast<SizeType32>(input_length),
-      static_cast<SizeType32>(k),
-      true,
-      input.data_ptr<__nv_bfloat16>(),
-      top_k_values.data_ptr<__nv_bfloat16>(),
-      top_k_indices.data_ptr<int32_t>(),
-      workspace.data_ptr<uint8_t>(),
-      stream,
-      sorted);
+  invoke_topk_last_dim<__nv_bfloat16>(static_cast<SizeType32>(batch_size),
+                                      static_cast<SizeType32>(input_length),
+                                      static_cast<SizeType32>(k),
+                                      true,
+                                      input.data_ptr<__nv_bfloat16>(),
+                                      top_k_values.data_ptr<__nv_bfloat16>(),
+                                      top_k_indices.data_ptr<int32_t>(),
+                                      workspace.data_ptr<uint8_t>(),
+                                      stream,
+                                      sorted);
 
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
@@ -315,7 +345,7 @@ std::pair<torch::Tensor, torch::Tensor> compute_topk_for_beam_search_impl<half>(
 
   // call TensorRT-LLM's topK function
   // use at::Half for data_ptr, then cast to half* for CUDA kernel
-  reduce_topk::invokeTopkLastDim<half>(
+  invoke_topk_last_dim<half>(
       static_cast<SizeType32>(batch_size),
       static_cast<SizeType32>(beam_size * top_k),
       static_cast<SizeType32>(num_return_sequences),
@@ -375,7 +405,7 @@ compute_topk_for_beam_search_impl<__nv_bfloat16>(torch::Tensor combined_probs,
 
   // call TensorRT-LLM's topK function
   // use at::BFloat16 for data_ptr, then cast to __nv_bfloat16* for CUDA kernel
-  reduce_topk::invokeTopkLastDim<__nv_bfloat16>(
+  invoke_topk_last_dim<__nv_bfloat16>(
       static_cast<SizeType32>(batch_size),
       static_cast<SizeType32>(beam_size * top_k),
       static_cast<SizeType32>(num_return_sequences),

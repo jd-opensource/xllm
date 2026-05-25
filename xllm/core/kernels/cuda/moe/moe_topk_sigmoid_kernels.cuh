@@ -22,13 +22,21 @@ limitations under the License.
 #include <torch/all.h>
 
 #include <cub/util_type.cuh>
+#if !defined(USE_DCU)
 #include <cuda/functional>
+#endif
 
 #include "kernels/cuda/device_utils.cuh"
 
 namespace {
 
 using namespace xllm::kernel::cuda;
+
+#if defined(USE_DCU)
+static constexpr unsigned long long kSigmoidFullMask = 0xffffffffffffffffULL;
+#else
+static constexpr unsigned int kSigmoidFullMask = 0xffffffffU;
+#endif
 
 // ====================== Sigmoid things ===============================
 // We have our own implementation of sigmoid here so we can support transposing
@@ -319,10 +327,10 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__
 // their max with -inf and the warp can run more iterations...
 #pragma unroll
     for (int mask = THREADS_PER_ROW / 2; mask > 0; mask /= 2) {
-      float other_max =
-          XLLM_SHFL_XOR_SYNC_WIDTH(0xffffffff, max_val, mask, THREADS_PER_ROW);
-      int other_expert =
-          XLLM_SHFL_XOR_SYNC_WIDTH(0xffffffff, expert, mask, THREADS_PER_ROW);
+      float other_max = XLLM_SHFL_XOR_SYNC_WIDTH(
+          kSigmoidFullMask, max_val, mask, THREADS_PER_ROW);
+      int other_expert = XLLM_SHFL_XOR_SYNC_WIDTH(
+          kSigmoidFullMask, expert, mask, THREADS_PER_ROW);
 
       // We want lower indices to "win" in every thread so we break ties this
       // way
@@ -583,6 +591,20 @@ void topk_sigmoid(torch::Tensor& topk_weights,   // [num_tokens, topk]
         bias_ptr,
         stream);
   } else if (dtype == at::ScalarType::BFloat16) {
+#if defined(USE_DCU)
+    topk_gating_sigmoid_kernel_launcher<hip_bfloat16>(
+        reinterpret_cast<const hip_bfloat16*>(
+            gating_output.data_ptr<at::BFloat16>()),
+        topk_weights.data_ptr<float>(),
+        topk_indices.data_ptr<int>(),
+        sigmoid_workspace.data_ptr<float>(),
+        num_tokens,
+        num_experts,
+        topk,
+        renormalize,
+        bias_ptr,
+        stream);
+#else
     topk_gating_sigmoid_kernel_launcher<__nv_bfloat16>(
         reinterpret_cast<const __nv_bfloat16*>(
             gating_output.data_ptr<at::BFloat16>()),
@@ -595,6 +617,7 @@ void topk_sigmoid(torch::Tensor& topk_weights,   // [num_tokens, topk]
         renormalize,
         bias_ptr,
         stream);
+#endif
   } else {
     LOG(FATAL) << "Unsupported gating_output dtype: " << dtype;
   }

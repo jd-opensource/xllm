@@ -22,24 +22,26 @@ limitations under the License.
 // ref to:
 // https://github.com/vllm-project/vllm/blob/main/csrc/type_convert.cuh
 
-/* Converter structs for the conversion from torch types to HIP/CUDA types,
+/* Converter helpers for the conversion from torch types to HIP/CUDA types,
    and the associated type conversions within HIP/CUDA. These helpers need
    to be implemented for now because the relevant type conversion
    operators/constructors are not consistently implemented by HIP/CUDA, so
    a generic conversion via type casts cannot be implemented.
 
-   Each struct should have the member static constexpr bool `exists`:
+   Each helper should have the member static constexpr bool `exists`:
    If false, the optimized kernel is not used for the corresponding torch type.
-   If true, the struct should be fully defined as shown in the examples below.
+   If true, the helper should be fully defined as shown in the examples below.
  */
 namespace xllm::kernel::cuda {
 template <typename torch_type>
-struct _typeConvert {
+class _typeConvert {
+ public:
   static constexpr bool exists = false;
 };
 
 template <>
-struct _typeConvert<float> {
+class _typeConvert<float> {
+ public:
   static constexpr bool exists = true;
   using hip_type = float;
   using packed_hip_type = float2;
@@ -54,10 +56,13 @@ struct _typeConvert<float> {
   }
 };
 
+#if !defined(USE_DCU)
+
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12000)
 // CUDA < 12.0 runs into issues with packed type conversion
 template <>
-struct _typeConvert<c10::Half> {
+class _typeConvert<c10::Half> {
+ public:
   static constexpr bool exists = true;
   using hip_type = __half;
   using packed_hip_type = __half2;
@@ -80,7 +85,8 @@ struct _typeConvert<c10::Half> {
 // CUDA_ARCH < 800 does not have BF16 support
 // ROCm 7.0+ supports bfloat16
 template <>
-struct _typeConvert<c10::BFloat16> {
+class _typeConvert<c10::BFloat16> {
+ public:
   static constexpr bool exists = true;
   using hip_type = __nv_bfloat16;
   using packed_hip_type = __nv_bfloat162;
@@ -101,13 +107,61 @@ struct _typeConvert<c10::BFloat16> {
 #endif  // defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
 #endif  // defined(CUDA_VERSION) && (CUDA_VERSION >= 12000)
 
-/* Vector POD struct to generate vectorized and packed FP16/BF16 ops
+/* Vector helper to generate vectorized and packed FP16/BF16 ops
    for appropriate specializations of fused_add_rms_norm_kernel.
    Only functions that are necessary in that kernel are implemented.
    Alignment to 16 bytes is required to use 128-bit global memory ops.
  */
+
+#else  // USE_DCU
+
+template <>
+class _typeConvert<c10::Half> {
+ public:
+  static constexpr bool exists = true;
+  using hip_type = __half;
+  using packed_hip_type = __half2;
+
+  __device__ static __forceinline__ float convert(hip_type x) {
+    return __half2float(x);
+  }
+  __device__ static __forceinline__ float2 convert(packed_hip_type x) {
+    return __half22float2(x);
+  }
+  __device__ static __forceinline__ hip_type convert(float x) {
+    return __float2half_rn(x);
+  }
+  __device__ static __forceinline__ packed_hip_type convert(float2 x) {
+    return __float22half2_rn(x);
+  }
+};
+
+template <>
+class _typeConvert<c10::BFloat16> {
+ public:
+  static constexpr bool exists = true;
+  using hip_type = __hip_bfloat16;
+  using packed_hip_type = __hip_bfloat162;
+
+  __device__ static __forceinline__ float convert(hip_type x) {
+    return __bfloat162float(x);
+  }
+  __device__ static __forceinline__ float2 convert(packed_hip_type x) {
+    return __bfloat1622float2(x);
+  }
+  __device__ static __forceinline__ hip_type convert(float x) {
+    return __float2bfloat16(x);
+  }
+  __device__ static __forceinline__ packed_hip_type convert(float2 x) {
+    return __float22bfloat162_rn(x);
+  }
+};
+
+#endif  // USE_DCU
+
 template <typename scalar_t, int width>
-struct alignas(16) _f16Vec {
+class alignas(16) _f16Vec {
+ public:
   /* Not theoretically necessary that width is a power of 2 but should
      almost always be the case for optimization purposes */
   static_assert(width > 0 && (width & (width - 1)) == 0,

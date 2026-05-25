@@ -16,6 +16,7 @@ limitations under the License.
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/cuda.h>
 
+#include <cstdint>
 #include <cub/cub.cuh>
 
 #include "cuda_ops_api.h"
@@ -39,19 +40,23 @@ namespace {
 using namespace xllm::kernel::cuda;
 
 template <typename scalar_t>
-__global__ void rms_norm_kernel(
-    scalar_t* __restrict__ out,          // [..., hidden_size]
-    const scalar_t* __restrict__ input,  // [..., hidden_size]
-    const int64_t input_stride,
-    const scalar_t* __restrict__ weight,  // [hidden_size]
-    const float epsilon,
-    const int num_tokens,
-    const int hidden_size) {
+__global__
+#if defined(USE_DCU)
+__launch_bounds__(1024, 1)
+#endif
+    void rms_norm_kernel(
+        scalar_t* __restrict__ out,          // [..., hidden_size]
+        const scalar_t* __restrict__ input,  // [..., hidden_size]
+        const int64_t input_stride,
+        const scalar_t* __restrict__ weight,  // [hidden_size]
+        const float epsilon,
+        const int num_tokens,
+        const int hidden_size) {
   __shared__ float s_variance;
   float variance = 0.0f;
 
   for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
-    const float x = (float)input[blockIdx.x * input_stride + idx];
+    const float x = static_cast<float>(input[blockIdx.x * input_stride + idx]);
     variance += x * x;
   }
 
@@ -65,9 +70,9 @@ __global__ void rms_norm_kernel(
   __syncthreads();
 
   for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
-    float x = (float)input[blockIdx.x * input_stride + idx];
+    float x = static_cast<float>(input[blockIdx.x * input_stride + idx]);
     out[blockIdx.x * hidden_size + idx] =
-        ((scalar_t)(x * s_variance)) * weight[idx];
+        (static_cast<scalar_t>(x * s_variance)) * weight[idx];
   }
 }
 
@@ -76,15 +81,19 @@ __global__ void rms_norm_kernel(
    packed and vectorized operations, which help with the
    memory latency bottleneck. */
 template <typename scalar_t, int width>
-__global__ std::enable_if_t<(width > 0) && _typeConvert<scalar_t>::exists>
-fused_add_rms_norm_kernel(
-    scalar_t* __restrict__ input,  // [..., hidden_size]
-    const int64_t input_stride,
-    scalar_t* __restrict__ residual,      // [..., hidden_size]
-    const scalar_t* __restrict__ weight,  // [hidden_size]
-    const float epsilon,
-    const int num_tokens,
-    const int hidden_size) {
+__global__
+#if defined(USE_DCU)
+__launch_bounds__(1024, 1)
+#endif
+    std::
+        enable_if_t<(width > 0) && _typeConvert<scalar_t>::exists> fused_add_rms_norm_kernel(
+            scalar_t* __restrict__ input,  // [..., hidden_size]
+            const int64_t input_stride,
+            scalar_t* __restrict__ residual,      // [..., hidden_size]
+            const scalar_t* __restrict__ weight,  // [hidden_size]
+            const float epsilon,
+            const int num_tokens,
+            const int hidden_size) {
   // Sanity checks on our vector struct and type-punned pointer arithmetic
   static_assert(std::is_pod_v<_f16Vec<scalar_t, width>>);
   static_assert(sizeof(_f16Vec<scalar_t, width>) == sizeof(scalar_t) * width);
@@ -136,21 +145,24 @@ fused_add_rms_norm_kernel(
  */
 template <typename scalar_t, int width>
 __global__ std::enable_if_t<(width == 0) || !_typeConvert<scalar_t>::exists>
-fused_add_rms_norm_kernel(
-    scalar_t* __restrict__ input,  // [..., hidden_size]
-    const int64_t input_stride,
-    scalar_t* __restrict__ residual,      // [..., hidden_size]
-    const scalar_t* __restrict__ weight,  // [hidden_size]
-    const float epsilon,
-    const int num_tokens,
-    const int hidden_size) {
+#if defined(USE_DCU)
+__launch_bounds__(1024, 1)
+#endif
+    fused_add_rms_norm_kernel(
+        scalar_t* __restrict__ input,  // [..., hidden_size]
+        const int64_t input_stride,
+        scalar_t* __restrict__ residual,      // [..., hidden_size]
+        const scalar_t* __restrict__ weight,  // [hidden_size]
+        const float epsilon,
+        const int num_tokens,
+        const int hidden_size) {
   __shared__ float s_variance;
   float variance = 0.0f;
 
   for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
     scalar_t z = input[blockIdx.x * input_stride + idx];
     z += residual[blockIdx.x * hidden_size + idx];
-    float x = (float)z;
+    float x = static_cast<float>(z);
     variance += x * x;
     residual[blockIdx.x * hidden_size + idx] = z;
   }
@@ -165,9 +177,9 @@ fused_add_rms_norm_kernel(
   __syncthreads();
 
   for (int idx = threadIdx.x; idx < hidden_size; idx += blockDim.x) {
-    float x = (float)residual[blockIdx.x * hidden_size + idx];
+    float x = static_cast<float>(residual[blockIdx.x * hidden_size + idx]);
     input[blockIdx.x * input_stride + idx] =
-        ((scalar_t)(x * s_variance)) * weight[idx];
+        (static_cast<scalar_t>(x * s_variance)) * weight[idx];
   }
 }
 
@@ -484,15 +496,15 @@ void fused_add_rms_norm(torch::Tensor& input,     // [..., hidden_size]
   auto inp_ptr = reinterpret_cast<std::uintptr_t>(input.data_ptr());
   auto res_ptr = reinterpret_cast<std::uintptr_t>(residual.data_ptr());
   auto wt_ptr = reinterpret_cast<std::uintptr_t>(weight.data_ptr());
-  constexpr int vector_width = 8;
-  constexpr int req_alignment_bytes =
-      vector_width * 2;  // vector_width * sizeof(bfloat16 or float16) (float32
+  constexpr int kVectorWidth = 8;
+  constexpr int kReqAlignmentBytes =
+      kVectorWidth * 2;  // kVectorWidth * sizeof(bfloat16 or float16) (float32
                          // falls back to non-vectorized version anyway)
-  bool ptrs_are_aligned = inp_ptr % req_alignment_bytes == 0 &&
-                          res_ptr % req_alignment_bytes == 0 &&
-                          wt_ptr % req_alignment_bytes == 0;
+  bool ptrs_are_aligned = inp_ptr % kReqAlignmentBytes == 0 &&
+                          res_ptr % kReqAlignmentBytes == 0 &&
+                          wt_ptr % kReqAlignmentBytes == 0;
   bool offsets_are_multiple_of_vector_width =
-      hidden_size % vector_width == 0 && input_stride % vector_width == 0;
+      hidden_size % kVectorWidth == 0 && input_stride % kVectorWidth == 0;
   if (ptrs_are_aligned && offsets_are_multiple_of_vector_width) {
     LAUNCH_FUSED_ADD_RMS_NORM(8);
   } else {
@@ -571,14 +583,14 @@ void fused_add_rms_norm_static_fp8_quant(
   auto inp_ptr = reinterpret_cast<std::uintptr_t>(input.data_ptr());
   auto res_ptr = reinterpret_cast<std::uintptr_t>(residual.data_ptr());
   auto wt_ptr = reinterpret_cast<std::uintptr_t>(weight.data_ptr());
-  constexpr int vector_width = 8;
-  constexpr int req_alignment_bytes = vector_width * 2;
+  constexpr int kVectorWidth = 8;
+  constexpr int kReqAlignmentBytes = kVectorWidth * 2;
 
-  bool ptrs_are_aligned = inp_ptr % req_alignment_bytes == 0 &&
-                          res_ptr % req_alignment_bytes == 0 &&
-                          wt_ptr % req_alignment_bytes == 0;
+  bool ptrs_are_aligned = inp_ptr % kReqAlignmentBytes == 0 &&
+                          res_ptr % kReqAlignmentBytes == 0 &&
+                          wt_ptr % kReqAlignmentBytes == 0;
   bool offsets_are_multiple_of_vector_width =
-      hidden_size % vector_width == 0 && input_stride % vector_width == 0;
+      hidden_size % kVectorWidth == 0 && input_stride % kVectorWidth == 0;
 
   if (ptrs_are_aligned && offsets_are_multiple_of_vector_width) {
     LAUNCH_FUSED_ADD_RMS_NORM_STATIC_FP8_QUANT(8);

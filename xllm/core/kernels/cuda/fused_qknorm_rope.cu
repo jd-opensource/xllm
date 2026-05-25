@@ -21,7 +21,11 @@ limitations under the License.
 #include <cmath>
 #include <type_traits>
 
+#if !defined(USE_DCU)
 #include "cuda_ops_api.h"
+#else
+#include "dcu_ops_api.h"
+#endif
 #include "type_convert.cuh"
 #include "utils.h"
 
@@ -30,7 +34,11 @@ using at::device_of;
 // Borrowed from:
 // https://github.com/vllm-project/vllm/blob/022f3cea5327cc720a325c50931e1edcfdf2d32b/csrc/fused_qknorm_rope_kernel.cu
 
-constexpr uint32_t kFinalMask = 0xffffffffu;
+#if defined(USE_DCU)
+static constexpr unsigned long long kFinalMask = 0xffffffffffffffffULL;
+#else
+static constexpr unsigned int kFinalMask = 0xffffffffU;
+#endif
 
 namespace {
 
@@ -62,6 +70,18 @@ __inline__ __device__ T warp_reduce_sum(T val) {
   return val;
 }
 
+#if defined(USE_DCU)
+template <typename T>
+__device__ __forceinline__ T xllm_ldg(const T* ptr) {
+  return *ptr;
+}
+#else
+template <typename T>
+__device__ __forceinline__ T xllm_ldg(const T* ptr) {
+  return __ldg(ptr);
+}
+#endif
+
 template <typename T>
 inline __device__ __host__ T div_up(T m, T n) {
   return (m + n - 1) / n;
@@ -89,7 +109,7 @@ __global__ void fused_qknorm_rope_kernel(
     int const num_tokens,            // Number of tokens
     int const rotary_dim             // Dimension for RoPE
 ) {
-#if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ < 800
+#if (!defined(__CUDA_ARCH__) || __CUDA_ARCH__ < 800) && !defined(USE_DCU)
   if constexpr ((std::is_same_v<scalar_t_in, c10::BFloat16>) ||
                 std::is_same_v<scalar_t_cache, c10::BFloat16>) {
     return;
@@ -227,9 +247,9 @@ __global__ void fused_qknorm_rope_kernel(
 
           int const half_dim = dim_idx / 2;
           float const cos_val =
-              CacheConverter::convert(__ldg(cos_ptr + half_dim));
+              CacheConverter::convert(xllm_ldg(cos_ptr + half_dim));
           float const sin_val =
-              CacheConverter::convert(__ldg(sin_ptr + half_dim));
+              CacheConverter::convert(xllm_ldg(sin_ptr + half_dim));
 
           elements[idx0] = val0 * cos_val - val1 * sin_val;
           elements[idx1] = val0 * sin_val + val1 * cos_val;
@@ -251,8 +271,8 @@ __global__ void fused_qknorm_rope_kernel(
 
           dim_idx = (dim_idx * 2) % rotary_dim;
           int half_dim = dim_idx / 2;
-          float cos_val = CacheConverter::convert(__ldg(cos_ptr + half_dim));
-          float sin_val = CacheConverter::convert(__ldg(sin_ptr + half_dim));
+          float cos_val = CacheConverter::convert(xllm_ldg(cos_ptr + half_dim));
+          float sin_val = CacheConverter::convert(xllm_ldg(sin_ptr + half_dim));
 
           elements[i] = elements[i] * cos_val + elements2[i] * sin_val;
         }
@@ -275,7 +295,7 @@ __global__ void fused_qknorm_rope_kernel(
       *reinterpret_cast<vec_T*>(&qkv[offsetThread]) = vec;
     }
 
-#if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ < 800
+#if (!defined(__CUDA_ARCH__) || __CUDA_ARCH__ < 800) && !defined(USE_DCU)
   }
 #endif
 }

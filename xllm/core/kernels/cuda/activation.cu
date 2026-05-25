@@ -15,6 +15,8 @@ limitations under the License.
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/cuda.h>
 
+#include <cstdint>
+
 #include "cuda_ops_api.h"
 
 // ref to:
@@ -22,9 +24,21 @@ limitations under the License.
 
 namespace {
 
+#if defined(USE_DCU)
+template <typename T>
+__device__ __forceinline__ T xllm_ldg(const T* ptr) {
+  return *ptr;
+}
+template <>
+__device__ __forceinline__ c10::Half xllm_ldg<c10::Half>(const c10::Half* ptr) {
+  return *ptr;
+}
+#define XLLM_LDG(arg) xllm_ldg(arg)
+#else
+
 // Use read-only cache load for CUDA kernels.
 #define XLLM_LDG(arg) __ldg(arg)
-
+#endif
 template <typename scalar_t,
           scalar_t (*ACT_FN)(const scalar_t&),
           bool act_first>
@@ -43,11 +57,14 @@ __device__ __forceinline__ bool is_16byte_aligned(const void* ptr) {
 template <typename scalar_t,
           scalar_t (*ACT_FN)(const scalar_t&),
           bool act_first>
-__global__ void act_and_mul_kernel(
-    scalar_t* __restrict__ out,          // [..., d]
-    const scalar_t* __restrict__ input,  // [..., 2, d]
-    const int d) {
-  constexpr int VEC_SIZE = 16 / sizeof(scalar_t);
+__global__ void
+#if defined(USE_DCU)
+__launch_bounds__(1024, 1)
+#endif
+    act_and_mul_kernel(scalar_t* __restrict__ out,          // [..., d]
+                       const scalar_t* __restrict__ input,  // [..., 2, d]
+                       const int d) {
+  constexpr int kVecSize = 16 / sizeof(scalar_t);
   const int64_t token_idx = blockIdx.x;
   const scalar_t* x_ptr = input + token_idx * 2 * d;
   const scalar_t* y_ptr = x_ptr + d;
@@ -58,13 +75,13 @@ __global__ void act_and_mul_kernel(
   const bool aligned = is_16byte_aligned(x_ptr) && is_16byte_aligned(y_ptr) &&
                        is_16byte_aligned(out_ptr);
 
-  if (aligned && d >= VEC_SIZE) {
+  if (aligned && d >= kVecSize) {
     // Fast path: 128-bit vectorized loop
     const int4* x_vec = reinterpret_cast<const int4*>(x_ptr);
     const int4* y_vec = reinterpret_cast<const int4*>(y_ptr);
     int4* out_vec = reinterpret_cast<int4*>(out_ptr);
-    const int num_vecs = d / VEC_SIZE;
-    const int vec_end = num_vecs * VEC_SIZE;
+    const int num_vecs = d / kVecSize;
+    const int vec_end = num_vecs * kVecSize;
 
     for (int i = threadIdx.x; i < num_vecs; i += blockDim.x) {
       int4 x = XLLM_LDG(&x_vec[i]), y = XLLM_LDG(&y_vec[i]), r;
@@ -72,7 +89,7 @@ __global__ void act_and_mul_kernel(
       auto* yp = reinterpret_cast<scalar_t*>(&y);
       auto* rp = reinterpret_cast<scalar_t*>(&r);
 #pragma unroll
-      for (int j = 0; j < VEC_SIZE; j++) {
+      for (int j = 0; j < kVecSize; j++) {
         rp[j] = compute<scalar_t, ACT_FN, act_first>(xp[j], yp[j]);
       }
       out_vec[i] = r;
@@ -95,7 +112,8 @@ __global__ void act_and_mul_kernel(
 template <typename T>
 __device__ __forceinline__ T silu_kernel(const T& x) {
   // x * sigmoid(x)
-  return (T)(((float)x) / (1.0f + expf((float)-x)));
+  const float f = static_cast<float>(x);
+  return static_cast<T>(f / (1.0f + expf(-f)));
 }
 
 template <typename T>
@@ -103,9 +121,9 @@ __device__ __forceinline__ T gelu_kernel(const T& x) {
   // Equivalent to PyTorch GELU with 'none' approximation.
   // Refer to:
   // https://github.com/pytorch/pytorch/blob/8ac9b20d4b090c213799e81acf48a55ea8d437d6/aten/src/ATen/native/cuda/ActivationGeluKernel.cu#L36-L38
-  const float f = (float)x;
-  constexpr float ALPHA = M_SQRT1_2;
-  return (T)(f * 0.5f * (1.0f + ::erf(f * ALPHA)));
+  const float f = static_cast<float>(x);
+  constexpr float kAlpha = M_SQRT1_2;
+  return static_cast<T>(f * 0.5f * (1.0f + ::erf(f * kAlpha)));
 }
 
 template <typename T>
@@ -113,12 +131,12 @@ __device__ __forceinline__ T gelu_tanh_kernel(const T& x) {
   // Equivalent to PyTorch GELU with 'tanh' approximation.
   // Refer to:
   // https://github.com/pytorch/pytorch/blob/8ac9b20d4b090c213799e81acf48a55ea8d437d6/aten/src/ATen/native/cuda/ActivationGeluKernel.cu#L25-L30
-  const float f = (float)x;
-  constexpr float BETA = M_SQRT2 * M_2_SQRTPI * 0.5f;
-  constexpr float KAPPA = 0.044715;
+  const float f = static_cast<float>(x);
+  constexpr float kBeta = M_SQRT2 * M_2_SQRTPI * 0.5f;
+  constexpr float kKappa = 0.044715;
   float x_cube = f * f * f;
-  float inner = BETA * (f + KAPPA * x_cube);
-  return (T)(0.5f * f * (1.0f + ::tanhf(inner)));
+  float inner = kBeta * (f + kKappa * x_cube);
+  return static_cast<T>(0.5f * f * (1.0f + ::tanhf(inner)));
 }
 
 #define LAUNCH_ACTIVATION_GATE_KERNEL(KERNEL, ACT_FIRST)                   \

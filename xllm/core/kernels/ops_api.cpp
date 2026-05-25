@@ -30,6 +30,9 @@ limitations under the License.
 #elif defined(USE_MUSA)
 #include "cuda/cuda_ops_api.h"
 #include "musa/musa_ops_api.h"
+#elif defined(USE_DCU)
+#include "cuda/cuda_ops_api.h"
+#include "dcu/dcu_ops_api.h"
 #endif
 
 #include <numeric>
@@ -54,24 +57,23 @@ void apply_rotary(RotaryParams& params) {
 #elif defined(USE_NPU)
   npu::apply_rotary(
       params.q, params.k, params.cos_sin, params.position_ids.value());
-#elif defined(USE_CUDA) || defined(USE_MUSA)
+#elif defined(USE_CUDA) || defined(USE_MUSA) || defined(USE_DCU)
   bool is_neox = !params.interleaved;
   torch::Tensor pos_ids;
   torch::Tensor cos_sin;
 
   if (params.position_ids.has_value()) {
-    // positions is already int64 on CUDA/MUSA (pre-converted in
+    // positions is already int64 on CUDA/MUSA/DCU (pre-converted in
     // ForwardInput::to).
     pos_ids = params.position_ids.value().to(torch::kInt64);
   } else if (params.cu_query_lens.has_value()) {
     auto cu = params.cu_query_lens.value().to(torch::kInt64);
-    CHECK(cu.numel() >= 2) << "apply_rotary (CUDA): cu_query_lens must have at "
-                              "least 2 elements when "
-                              "position_ids is not provided.";
+    CHECK(cu.numel() >= 2)
+        << "apply_rotary: cu_query_lens must have at least 2 elements when "
+           "position_ids is not provided.";
     int64_t seq_len = cu[1].item<int64_t>() - cu[0].item<int64_t>();
-    CHECK(seq_len > 0)
-        << "apply_rotary (CUDA): invalid sequence length inferred from "
-           "cu_query_lens when position_ids is not provided.";
+    CHECK(seq_len > 0) << "apply_rotary: invalid sequence length inferred from "
+                          "cu_query_lens when position_ids is not provided.";
     pos_ids = torch::arange(seq_len,
                             torch::TensorOptions()
                                 .dtype(torch::kInt64)
@@ -83,7 +85,7 @@ void apply_rotary(RotaryParams& params) {
     // This handles cases like LongCat-Image-Edit where rotary embedding
     // is applied uniformly across all sequence positions.
     int64_t seq_len = params.q.size(0);
-    CHECK(seq_len > 0) << "apply_rotary (CUDA): cannot infer valid sequence "
+    CHECK(seq_len > 0) << "apply_rotary: cannot infer valid sequence "
                           "length from q tensor.";
     pos_ids = torch::arange(seq_len,
                             torch::TensorOptions()
@@ -106,10 +108,9 @@ void apply_rotary(RotaryParams& params) {
     auto sin = cos_sin_vec[2];
     cos_sin = torch::cat({cos, sin}, -1);
   } else {
-    LOG(FATAL) << "apply_rotary (CUDA): neither cos_sin nor cos/sin "
+    LOG(FATAL) << "apply_rotary: neither cos_sin nor cos/sin "
                   "provided; cannot infer cos_sin.";
   }
-
   cuda::rotary_embedding(pos_ids, params.q, params.k, cos_sin, is_neox);
 #elif defined(USE_ILU)
   torch::Tensor ilu_cos_sin;
@@ -140,7 +141,7 @@ void active(ActivationParams& params) {
               params.expert_size);
 #elif defined(USE_NPU)
   params.output = npu::active(params.input, params.act_mode);
-#elif defined(USE_CUDA) || defined(USE_MUSA)
+#elif defined(USE_CUDA) || defined(USE_MUSA) || defined(USE_DCU)
   cuda::act_and_mul(params.output, params.input, params.act_mode);
 #elif defined(USE_ILU)
   ilu::act_and_mul(params.output, params.input, params.act_mode);
@@ -163,7 +164,7 @@ void reshape_paged_cache(ReshapePagedCacheParams& params) {
                            params.k_cache,
                            params.v_cache,
                            params.slot_mapping);
-#elif defined(USE_CUDA) || defined(USE_MUSA)
+#elif defined(USE_CUDA) || defined(USE_MUSA) || defined(USE_DCU)
   cuda::reshape_paged_cache(params.slot_mapping,
                             params.key,
                             params.value.value_or(torch::Tensor()),
@@ -279,7 +280,7 @@ void fused_layernorm(FusedLayerNormParams& params) {
   if (params.beta.has_value()) {
     params.output += params.beta.value();
   }
-#elif defined(USE_CUDA) || defined(USE_MUSA)
+#elif defined(USE_CUDA) || defined(USE_MUSA) || defined(USE_DCU)
   if (params.residual.has_value()) {
     cuda::fused_add_rms_norm(
         params.input, params.residual.value(), params.weight, params.eps);
@@ -324,6 +325,8 @@ torch::Tensor matmul(MatmulParams& params) {
   return cuda::matmul(params.a, params.b, params.bias);
 #elif defined(USE_ILU)
   return ilu::matmul(params.a, params.b, params.bias);
+#elif defined(USE_DCU)
+  return dcu::matmul(params.a, params.b, params.bias);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -511,7 +514,7 @@ std::tuple<torch::Tensor, torch::Tensor> moe_active_topk(
                               params.scoring_func,
                               params.route_scale,
                               params.e_score_correction_bias);
-#elif defined(USE_CUDA) || defined(USE_MUSA)
+#elif defined(USE_CUDA) || defined(USE_MUSA) || defined(USE_DCU)
   return cuda::moe_fused_topk(params.input,
                               params.topk,
                               params.normalize,
@@ -714,6 +717,8 @@ torch::Tensor random_sample(RandomSampleParams& params) {
   return mlu::random_sample(params.logits);
 #elif defined(USE_CUDA)
   return cuda::random_sample(params.logits);
+#elif defined(USE_DCU)
+  return dcu::random_sample(params.logits);
 #else
   NOT_IMPLEMENTED();
 #endif
