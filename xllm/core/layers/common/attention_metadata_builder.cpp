@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <numeric>
 
 #include "attention_metadata.h"
@@ -34,6 +35,7 @@ AttentionMetadata build_attention_metadata(
     const ModelInputParams& params,
     bool enable_mla,
     const std::string& compute_dtype,
+    const std::optional<torch::Device>& device,
     const std::optional<torch::Tensor>& attn_mask) {
   // MLA mode still affects which shared tensors must be materialized for
   // attention execution, but the flag itself is no longer carried in metadata.
@@ -173,8 +175,21 @@ AttentionMetadata build_attention_metadata(
 
   attn_metadata.is_dummy = (params.meta.q_max_seq_len == 0);
   if (attn_metadata.is_dummy) {
-    attn_metadata.slot_mapping =
-        torch::tensor({1}, params.attention.device.new_cache_slots.options());
+    torch::TensorOptions options = torch::TensorOptions().dtype(torch::kInt);
+    if (params.attention.device.new_cache_slots.defined()) {
+      options = params.attention.device.new_cache_slots.options();
+    } else {
+      CHECK(device.has_value())
+          << "dummy attention requires device when new_cache_slots is "
+             "undefined";
+      options = options.device(device.value());
+    }
+    attn_metadata.slot_mapping = torch::tensor({1}, options);
+    attn_metadata.q_cu_seq_lens = torch::tensor({0, 1}, options);
+    attn_metadata.q_seq_lens = torch::tensor({1}, options);
+    attn_metadata.kv_seq_lens = torch::tensor({1}, options);
+    attn_metadata.max_query_len = 1;
+    attn_metadata.max_seq_len = std::max<int64_t>(attn_metadata.max_seq_len, 1);
   }
 
   // Set is_causal: true for prefill (causal attention), false for decode
@@ -253,17 +268,20 @@ AttentionMetadata build_attention_metadata(
 AttentionMetadata AttentionMetadataBuilder::build(
     const ModelInputParams& params,
     bool enable_mla,
-    const std::optional<torch::Tensor>& attn_mask) {
+    const std::optional<torch::Tensor>& attn_mask,
+    const std::optional<torch::Device>& device) {
   return AttentionMetadataBuilder::build(
-      params, enable_mla, "float", attn_mask);
+      params, enable_mla, "float", attn_mask, device);
 }
 
 AttentionMetadata AttentionMetadataBuilder::build(
     const ModelInputParams& params,
     bool enable_mla,
     const std::string& compute_dtype,
-    const std::optional<torch::Tensor>& attn_mask) {
-  return build_attention_metadata(params, enable_mla, compute_dtype, attn_mask);
+    const std::optional<torch::Tensor>& attn_mask,
+    const std::optional<torch::Device>& device) {
+  return build_attention_metadata(
+      params, enable_mla, compute_dtype, device, attn_mask);
 }
 
 }  // namespace xllm::layer

@@ -46,6 +46,7 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
  public:
   explicit DeepseekV32ModelImpl(const ModelContext& context)
       : DeepseekV2ModelImpl(context),
+        device_(context.get_tensor_options().device()),
         sequence_parallel_group_(context.get_parallel_args().sp_group_),
         parallel_world_size_(context.get_parallel_args().world_size()) {
     const auto sp_config_error =
@@ -62,7 +63,10 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
       modified_input_params.attn_metadata =
           std::make_shared<layer::AttentionMetadata>(
               layer::AttentionMetadataBuilder::build(modified_input_params,
-                                                     model_args_.enable_mla()));
+                                                     model_args_.enable_mla(),
+                                                     /*compute_dtype=*/"half",
+                                                     /*attn_mask=*/std::nullopt,
+                                                     /*device=*/device_));
     }
     auto& attn_metadata = *modified_input_params.attn_metadata;
     std::optional<layer::v32_sp::DeepseekV32SPContext> sp_ctx;
@@ -134,6 +138,7 @@ class DeepseekV32ModelImpl : public DeepseekV2ModelImpl {
   }
 
  private:
+  torch::Device device_;
   ProcessGroup* sequence_parallel_group_ = nullptr;
   int32_t parallel_world_size_ = 1;
   const layer::v32_sp::DeepseekV32SPContext* active_sequence_parallel_context_ =
