@@ -205,6 +205,8 @@ DECLARE_uint32(prefetch_timeout);
 
 DECLARE_uint32(prefetch_batch_size);
 
+DECLARE_uint32(prefetch_bacth_size);
+
 DECLARE_uint32(layers_wise_copy_batchs);
 
 DECLARE_double(host_blocks_factor);
@@ -334,6 +336,9 @@ DECLARE_int64(dit_sp_communication_overlap);
 DECLARE_bool(dit_debug_print);
 
 DECLARE_bool(use_audio_in_video);
+
+// --- mistral prompt to message config ---
+DECLARE_bool(enable_mistral_prompt_to_message);
 
 // --- kernel config ---
 #if defined(USE_NPU)
