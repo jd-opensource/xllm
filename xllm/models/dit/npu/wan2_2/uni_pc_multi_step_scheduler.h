@@ -135,7 +135,7 @@ class UniPCMultistepSchedulerImpl final : public torch::nn::Module {
     } else if (timestep_spacing_ == "leading") {
       int64_t step_ratio = num_train_timesteps_ / (num_steps + 1);
       std::vector<int64_t> ts_vec(num_steps);
-      for (int i = 0; i < num_steps; ++i) {
+      for (int64_t i = 0; i < num_steps; ++i) {
         ts_vec[num_steps - 1 - i] =
             static_cast<int64_t>((i + 1) * step_ratio) + steps_offset_;
       }
@@ -144,7 +144,7 @@ class UniPCMultistepSchedulerImpl final : public torch::nn::Module {
     } else if (timestep_spacing_ == "trailing") {
       float step_ratio = static_cast<float>(num_train_timesteps_) / num_steps;
       std::vector<int64_t> ts_vec(num_steps);
-      for (int i = 0; i < num_steps; ++i) {
+      for (int64_t i = 0; i < num_steps; ++i) {
         ts_vec[i] =
             static_cast<int64_t>(num_train_timesteps_ - i * step_ratio) - 1;
       }
@@ -159,9 +159,9 @@ class UniPCMultistepSchedulerImpl final : public torch::nn::Module {
       if (!sigmas.has_value()) {
         double start_d = 1.0 - 1.0 / static_cast<double>(num_train_timesteps_);
         double stop_d = 0.0;
-        int N = num_steps;
+        int64_t N = num_steps;
         std::vector<float> s_vec(N);
-        for (int i = 0; i < N; ++i) {
+        for (int64_t i = 0; i < N; ++i) {
           double s = start_d + static_cast<double>(i) / static_cast<double>(N) *
                                    (stop_d - start_d);
           s = flow_shift_ * s / (1.0 + (flow_shift_ - 1.0) * s);
@@ -275,7 +275,7 @@ class UniPCMultistepSchedulerImpl final : public torch::nn::Module {
           model_output_convert, last_sample_, sample, this_order_);
     }
 
-    for (int i = 0; i < solver_order_ - 1; ++i) {
+    for (int64_t i = 0; i < solver_order_ - 1; ++i) {
       model_outputs_[i] = model_outputs_[i + 1];
       timestep_list_[i] = timestep_list_[i + 1];
     }
@@ -322,7 +322,7 @@ class UniPCMultistepSchedulerImpl final : public torch::nn::Module {
 
     std::vector<int64_t> step_indices;
     if (!begin_index_.has_value()) {
-      for (int i = 0; i < ts.size(0); ++i) {
+      for (int64_t i = 0; i < ts.size(0); ++i) {
         step_indices.emplace_back(
             index_for_timestep(ts[i], schedule_timesteps));
       }
@@ -347,7 +347,7 @@ class UniPCMultistepSchedulerImpl final : public torch::nn::Module {
   std::optional<int64_t> begin_index() const { return begin_index_; }
   const torch::Tensor& timesteps() const { return timesteps_; }
   const torch::Tensor& sigmas() const { return sigmas_; }
-  int size() const { return num_train_timesteps_; }
+  int64_t size() const { return num_train_timesteps_; }
 
  private:
   void init_betas() {
@@ -390,14 +390,14 @@ class UniPCMultistepSchedulerImpl final : public torch::nn::Module {
     sigmas_all_ = torch::sqrt((1 - alphas_cumprod_) / alphas_cumprod_);
   }
 
-  torch::Tensor betas_for_alpha_bar(int num_diffusion_timesteps) {
+  torch::Tensor betas_for_alpha_bar(int64_t num_diffusion_timesteps) {
     auto alpha_bar_fn = [](float t) -> float {
       return std::pow(std::cos((t + 0.008f) / 1.008f * M_PI / 2.0f), 2);
     };
 
     std::vector<float> betas_vec;
     float max_beta = 0.999f;
-    for (int i = 0; i < num_diffusion_timesteps; ++i) {
+    for (int64_t i = 0; i < num_diffusion_timesteps; ++i) {
       float t1 = static_cast<float>(i) / num_diffusion_timesteps;
       float t2 = static_cast<float>(i + 1) / num_diffusion_timesteps;
       betas_vec.emplace_back(
