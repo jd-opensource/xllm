@@ -22,10 +22,6 @@ DEFINE_int32(max_tokens_per_batch, 10240, "Max number of tokens per batch.");
 
 DEFINE_int32(max_seqs_per_batch, 1024, "Max number of sequences per batch.");
 
-DEFINE_int32(max_concurrent_requests,
-             200,
-             "Max number of concurrent requests.");
-
 DEFINE_bool(enable_schedule_overlap,
             false,
             "Whether to enable schedule overlap.");
