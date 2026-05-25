@@ -6,6 +6,7 @@ option(USE_MLU "Enable MLU support" OFF)
 option(USE_ILU "Enable ILU support" OFF)
 option(USE_CUDA "Enable CUDA support" OFF)
 option(USE_MUSA "Enable MUSA support" OFF)
+option(USE_DCU "Enable DCU support" OFF)
 add_compile_definitions(YLT_ENABLE_IBV)
 add_definitions(-DYLT_ENABLE_IBV)
 set(YLT_ENABLE_IBV ON)
@@ -117,6 +118,21 @@ function(parse_make_options options prefix)
   endforeach()
 endfunction()
 
+# Remove matching entries from a target's interface property (compile options / definitions).
+function(_dcu_patch_target target prop)
+  get_target_property(_vals ${target} ${prop})
+  if(NOT _vals)
+    return()
+  endif()
+  set(_new ${_vals})
+  foreach(_rx IN LISTS ARGN)
+    list(FILTER _new EXCLUDE REGEX "${_rx}")
+  endforeach()
+  if(NOT "${_new}" STREQUAL "${_vals}")
+    set_property(TARGET ${target} PROPERTY ${prop} ${_new})
+  endif()
+endfunction()
+
 # Set default build type
 if(NOT CMAKE_BUILD_TYPE)
   message(STATUS "Build type not set - defaulting to Release")
@@ -134,6 +150,7 @@ else()
   set(USE_CXX11_ABI 0)
   message(STATUS "Using the pre C++-11 ABI.")
 endif()
+
 
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
@@ -216,6 +233,15 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 if(USE_CUDA)
   project("xllm" LANGUAGES C CXX CUDA)
   find_package(CUDAToolkit REQUIRED)
+elseif(USE_DCU)
+  project("xllm" LANGUAGES C CXX HIP)
+  if(DEFINED ENV{DCU_PATH} AND NOT "$ENV{DCU_PATH}" STREQUAL "")
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{DCU_PATH}")
+    set(DCU_ROOT "$ENV{DCU_PATH}")
+  else()
+    list(APPEND CMAKE_PREFIX_PATH "/opt/dtk")
+    set(DCU_ROOT "/opt/dtk")
+  endif()
 elseif(USE_MUSA)
   project("xllm" LANGUAGES C CXX MUSA)
   add_compile_options(
@@ -297,7 +323,36 @@ endif()
 # Important Note: Always invoke find_package for other dependencies
 # before including libtorch, as doing so afterwards may lead to
 # unexpected linker errors.
-if (DEFINED ENV{LIBTORCH_ROOT})
+if(USE_DCU)
+  find_package(Python COMPONENTS Interpreter REQUIRED)
+  execute_process(
+    COMMAND ${Python_EXECUTABLE} -c "import torch; print(torch.utils.cmake_prefix_path)"
+    OUTPUT_VARIABLE TORCH_CMAKE_PREFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  list(PREPEND CMAKE_PREFIX_PATH "${TORCH_CMAKE_PREFIX}")
+
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" -c "import os, torch; print(os.path.dirname(torch.__file__))"
+    OUTPUT_VARIABLE TORCH_PKG_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+
+  set(TORCH_LIB_DIR "${TORCH_PKG_DIR}/lib")
+  get_filename_component(_TORCH_PARENT "${TORCH_PKG_DIR}" DIRECTORY)
+  set(TORCH_BUNDLED_LIB_DIR "${_TORCH_PARENT}/torch.libs")
+
+  set(_TORCH_EXTRA_DIRS "")
+  if(EXISTS "${TORCH_LIB_DIR}")
+    list(APPEND _TORCH_EXTRA_DIRS "${TORCH_LIB_DIR}")
+  endif()
+  if(EXISTS "${TORCH_BUNDLED_LIB_DIR}")
+    list(APPEND _TORCH_EXTRA_DIRS "${TORCH_BUNDLED_LIB_DIR}")
+  endif()
+
+  find_package(Torch REQUIRED)
+  message(STATUS "Using ROCm PyTorch from: ${TORCH_CMAKE_PREFIX}")
+elseif (DEFINED ENV{LIBTORCH_ROOT})
   find_package(Torch REQUIRED HINTS "$ENV{LIBTORCH_ROOT}")
   message(STATUS "Using libtorch at $ENV{LIBTORCH_ROOT}")
 else()
@@ -314,14 +369,26 @@ else()
     set(LIBTORCH_SOURCE_DIR ${FETCHCONTENT_BASE_DIR}/libtorch-src)
   endif()
 
-  FetchContent_Declare(libtorch 
-    URL ${LIBTORCH_URL} 
+  FetchContent_Declare(libtorch
+    URL ${LIBTORCH_URL}
     SOURCE_DIR ${LIBTORCH_SOURCE_DIR}
   )
   FetchContent_MakeAvailable(libtorch)
-  
+
   find_package(Torch REQUIRED PATHS ${LIBTORCH_SOURCE_DIR} NO_DEFAULT_PATH)
   message(STATUS "Downloading and using libtorch 2.1.0 for CPU at ${LIBTORCH_SOURCE_DIR}")
+endif()
+
+if(USE_DCU AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  # Patch imported targets: remove flags that break __half/__half2 arithmetic in HIP.
+  get_property(_imported_targets DIRECTORY PROPERTY IMPORTED_TARGETS)
+  foreach(_t IN LISTS _imported_targets)
+    _dcu_patch_target(${_t} INTERFACE_COMPILE_OPTIONS
+        "^-Wno-duplicate-decl-specifier$"
+        "^-std=c\\+\\+17$"
+        "^-D__HIP_NO_HALF_(OPERATORS|CONVERSIONS)__"
+    )
+  endforeach()
 endif()
 
 if(USE_NPU)
@@ -541,6 +608,38 @@ if(USE_ILU)
   )
 endif()
 
+if(USE_DCU)
+  add_definitions(-DUSE_DCU)
+  set(CMAKE_VERBOSE_MAKEFILE ON)
+
+  include_directories($ENV{PYTHON_INCLUDE_PATH})
+  include_directories( SYSTEM
+      $ENV{PYTORCH_INSTALL_PATH}/include
+      $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/api/include
+  )
+
+  link_directories(
+    $ENV{PYTHON_LIB_PATH}
+    $ENV{PYTORCH_INSTALL_PATH}/lib
+    ${DCU_ROOT}/lib
+    ${DCU_ROOT}/lib64
+    ${TORCH_LIB_DIR}
+    ${TORCH_BUNDLED_LIB_DIR}
+  )
+
+  foreach(_dir IN LISTS _TORCH_EXTRA_DIRS)
+    add_link_options("-Wl,-rpath-link,${_dir}")
+  endforeach()
+
+  list(APPEND CMAKE_BUILD_RPATH ${_TORCH_EXTRA_DIRS})
+  list(APPEND CMAKE_INSTALL_RPATH ${_TORCH_EXTRA_DIRS})
+
+  # Recommended to set explicitly for known target DCUs, e.g. gfx936 / gfx938
+  if(DEFINED ENV{PYTORCH_ROCM_ARCH} AND NOT "$ENV{PYTORCH_ROCM_ARCH}" STREQUAL "")
+    set(CMAKE_HIP_ARCHITECTURES "$ENV{PYTORCH_ROCM_ARCH}" CACHE STRING "dcu arch list")
+  endif()
+endif()
+
 # check if USE_CXX11_ABI is set correctly
 # if (DEFINED USE_CXX11_ABI)
 #   parse_make_options(${TORCH_CXX_FLAGS} "TORCH_CXX_FLAGS")
@@ -554,7 +653,13 @@ endif()
 
 # carry over torch flags to the rest of the project
 message(STATUS "TORCH_CXX_FLAGS: ${TORCH_CXX_FLAGS}")
-add_compile_options(${TORCH_CXX_FLAGS})
+if(USE_DCU)
+  set(_filtered_flags ${TORCH_CXX_FLAGS})
+  list(FILTER _filtered_flags EXCLUDE REGEX "^-D__HIP_NO_HALF_(OPERATORS|CONVERSIONS)__")
+  add_compile_options(${_filtered_flags})
+else()
+  add_compile_options(${TORCH_CXX_FLAGS})
+endif()
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DC10_USE_GLOG")
 
@@ -609,9 +714,11 @@ endif()
 
 # add subdirectories
 # Configure third_party first so xllm can link against real CMake targets.
+# add subdirectories
+# Configure third_party first so xllm can link against real CMake targets.
+
 add_subdirectory(third_party)
 if(TARGET brpc-static AND NOT TARGET brpc)
-  # Expose a canonical target name used across xllm/CMakeLists.
   add_library(brpc ALIAS brpc-static)
 endif()
 add_subdirectory(xllm)

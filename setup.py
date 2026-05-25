@@ -23,6 +23,7 @@ from scripts.build_support.env import (
     set_mlu_envs,
     set_musa_envs,
     set_npu_envs,
+    set_dcu_envs,
 )
 from scripts.build_support.utils import (
     check_and_install_pre_commit,
@@ -114,7 +115,7 @@ def _stage_triton_npu_runtime_binaries(base_dir: str, extdir: str, device: str) 
             f"No Triton NPU runtime binaries were found under: {source_dir}"
         )
     print(f"[INFO] staged {copied_count} Triton NPU runtime asset(s) into {dest_dir}")
-        
+
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
         super().__init__(name, sources=[])
@@ -184,13 +185,19 @@ class ExtBuild(build_ext):
         default_jobs = os.cpu_count() or 1
         max_jobs: str = os.getenv("MAX_JOBS", str(default_jobs))
         max_jobs_int: int = int(max_jobs)
-        
+
         # Limit archive (ar/ranlib) concurrency to avoid file locking conflicts.
         # The ar tool requires exclusive access to archive files (.a files) when
         # creating or updating static libraries. When multiple ar processes attempt
         # to modify the same archive file simultaneously, they compete for file locks,
         # which can cause deadlocks and hang the build process.
         archive_jobs: int = min(8, max(1, max_jobs_int // 4))
+
+        if self.device is None:
+            raise ValueError("Please set --device to npu, mlu, cuda, dcu, ilu or musa.")
+        if self.arch is None:
+            raise ValueError("Please set --arch to x86 or arm.")
+
         cmake_args: list[str] = [
             "-G",
             "Ninja",
@@ -207,11 +214,6 @@ class ExtBuild(build_ext):
             f"-DCMAKE_JOB_POOLS=archive={archive_jobs}",
         ]
 
-        if self.device is None:
-            raise ValueError("Please set --device to npu or mlu or cuda or ilu or musa.")
-        if self.arch is None:
-            raise ValueError("Please set --arch to x86 or arm.")
-
         if self.device == "npu":
             cmake_args += ["-DUSE_NPU=ON"]
             set_npu_envs()
@@ -223,9 +225,35 @@ class ExtBuild(build_ext):
             torch_cuda_architectures = os.getenv("TORCH_CUDA_ARCH_LIST")
             if not torch_cuda_architectures:
                 raise ValueError("Please set TORCH_CUDA_ARCH_LIST environment variable, e.g. export TORCH_CUDA_ARCH_LIST=\"8.0 8.9 9.0 10.0 12.0\"")
-            cmake_args += ["-DUSE_CUDA=ON", 
+            cmake_args += ["-DUSE_CUDA=ON",
                            f"-DTORCH_CUDA_ARCH_LIST={torch_cuda_architectures}"]
             set_cuda_envs()
+
+        elif self.device == "dcu":
+            import torch
+
+            if getattr(torch.version, "hip", None):
+                dcu_arch = os.getenv("PYTORCH_ROCM_ARCH") or os.getenv("CMAKE_HIP_ARCHITECTURES")
+                cmake_args += [
+                    "-DUSE_DCU=ON",
+                    f"-DROCM_PATH={os.getenv('DCU_PATH', '/opt/dtk')}",
+                ]
+                if dcu_arch:
+                    cmake_args += [f"-DCMAKE_HIP_ARCHITECTURES={dcu_arch}"]
+
+                # Pass FLASH_ATTENTION_LIB to CMake so the DCU layers can
+                # link against libflash_attention.so (prefix prefill/decode).
+                flash_attn_lib = os.getenv("FLASH_ATTENTION_LIB")
+                if flash_attn_lib:
+                    cmake_args += [f"-DFLASH_ATTENTION_LIB={flash_attn_lib}"]
+
+                set_dcu_envs()
+            else:
+                raise RuntimeError(
+                    "DCU build requires a HIP/ROCm PyTorch environment. "
+                    "Please install a PyTorch build with torch.version.hip set, "
+                    "or choose a different --device."
+                )
         elif self.device == "ilu":
             cmake_args += ["-DUSE_ILU=ON"]
             set_ilu_envs()
@@ -235,7 +263,7 @@ class ExtBuild(build_ext):
             global BUILD_TEST_FILE
             BUILD_TEST_FILE = False
         else:
-            raise ValueError("Please set --device to npu or mlu or cuda or ilu or musa.")
+            raise ValueError("Please set --device to npu, mlu, cuda, dcu, ilu or musa.")
 
         product: str = "xllm"
         if self.generate_so:
@@ -254,7 +282,7 @@ class ExtBuild(build_ext):
             cmake_args += ["-DUSE_CXX11_ABI=ON", "-D_GLIBCXX_USE_CXX11_ABI=1"]
         else:
             cmake_args += ["-DUSE_CXX11_ABI=OFF", "-D_GLIBCXX_USE_CXX11_ABI=0"]
-        
+
         build_args = ["--config", build_type]
         build_args += ["-j" + max_jobs]
 
@@ -278,28 +306,32 @@ class ExtBuild(build_ext):
         cmake_dir = get_cmake_dir()
         subprocess.check_call(["cmake", self.base_dir] + cmake_args, cwd=cmake_dir, env=env)
 
-        base_build_args = build_args
-        # add build target to speed up the build process
-        build_args += ["--target", ext.name, "xllm"]
+        base_build_args = list(build_args)
+        build_args = base_build_args + ["--target", ext.name, "xllm"]
         subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
-
-        os.makedirs(os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"), exist_ok=True)
-        shutil.copy(
-            os.path.join(extdir, product),
-            os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"),
-        )
 
         _stage_triton_npu_runtime_binaries(self.base_dir, extdir, self.device)
 
         if BUILD_EXPORT:
             # build export module
             build_args = base_build_args + ["--target export_module"]
-            subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
+        product_path = os.path.join(extdir, product)
+        if os.path.exists(product_path):
+            os.makedirs(os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"), exist_ok=True)
+            shutil.copy(
+                product_path,
+                os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"),
+            )
+        else:
+            print(f"Skip copying product because it was not built: {product_path}")
+
+        if BUILD_EXPORT:
+            build_args = base_build_args + ["--target", "export_module"]
+            subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir,)
 
         if BUILD_TEST_FILE:
-            # build tests target
-            build_args = base_build_args + ["--target all_tests"]
-            subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
+            build_args = base_build_args + ["--target", "all_tests"]
+            subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir,)
 
 class ExtBuildSingleTest(ExtBuild):
     """Inherit ExtBuild, used to build and run a single test"""
@@ -342,13 +374,13 @@ class ExtBuildSingleTest(ExtBuild):
             os.path.join(extdir, self.test_name),
             os.path.join(cmake_dir, "xllm", "core", self.test_name),
         ]
-        
+
         # Check possible paths first
         for path in possible_paths:
             if os.path.exists(path) and os.access(path, os.X_OK):
                 test_executable = path
                 break
-        
+
         # If not found, try recursive search in build directory
         if not test_executable:
             for root, dirs, files in os.walk(cmake_dir):
@@ -357,7 +389,7 @@ class ExtBuildSingleTest(ExtBuild):
                     if os.access(candidate, os.X_OK):
                         test_executable = candidate
                         break
-        
+
         if not test_executable:
             # If not found, try using ctest to run
             logger.warning(f"⚠️  Could not find test executable {self.test_name}, trying ctest...")
@@ -445,7 +477,7 @@ class BuildDistWheel(bdist_wheel):
 class TestUT(Command):
     description = "Run all testing binary."
     user_options = []
-    
+
     # Whitelist: tests that must run sequentially (not in parallel with others)
     # Add test names here if they use fork() or have device initialization conflicts
     # Note: Use test case name patterns (from gtest), not executable names
@@ -481,7 +513,7 @@ class TestUT(Command):
                 text=True,
                 bufsize=1,
             )
-            
+
             if process.stdout is None:
                 raise RuntimeError("Failed to capture subprocess stdout for streaming.")
 
@@ -491,20 +523,20 @@ class TestUT(Command):
                 sys.stdout.write(line)
                 sys.stdout.flush()
                 output_lines.append(line)
-            
+
             return_code: int = process.wait()
-            
+
             # Warn if no tests were found, but don't fail (some backends may not compile certain tests)
             if warn_if_no_tests and return_code == 0:
                 output_text: str = ''.join(output_lines)
                 if 'No tests were found' in output_text:
                     logger.warning("No tests matched the pattern (this is OK for some backends).")
                     return
-            
+
             if return_code != 0:
                 logger.error(error_message)
                 raise subprocess.CalledProcessError(return_code, cmd)
-        
+
         try:
             # Step 1: Run all tests EXCEPT sequential ones in parallel
             if self.SEQUENTIAL_TESTS:
@@ -524,7 +556,7 @@ class TestUT(Command):
                     ['ctest', '--parallel', test_parallel, '--repeat', 'until-pass:5'],
                     "Parallel tests failed."
                 )
-            
+
             # Step 2: Run sequential tests one by one
             for idx, test_name in enumerate(self.SEQUENTIAL_TESTS, start=2):
                 logger.info("=" * 80)
@@ -537,7 +569,7 @@ class TestUT(Command):
                     f"Sequential test {test_name} failed.",
                     warn_if_no_tests=True
                 )
-            
+
             logger.info("=" * 80)
             logger.info("All tests passed!")
             logger.info("=" * 80)
@@ -580,11 +612,11 @@ class SingleTest(Command):
         build_ext.arch = self.arch
         build_ext.generate_so = self.generate_so
         build_ext.finalize_options()
-        
+
         # Ensure extension modules are set
         if not hasattr(build_ext, 'extensions') or not build_ext.extensions:
             build_ext.extensions = self.distribution.ext_modules
-        
+
         # Run build
         build_ext.run()
 
@@ -594,18 +626,18 @@ def parse_arguments() -> dict[str, Any]:
         epilog='Example: python setup.py build',
         usage='%(prog)s [COMMAND] [OPTIONS]'
     )
-    
+
     parser.add_argument(
         'setup_args',
         nargs='*',
         metavar='argparse.REMAINDER',
         help='setup command (build, test, bdist_wheel, etc.)'
     )
-    
+
     parser.add_argument(
         '--device',
         type=str.lower,
-        choices=['auto', 'npu', 'mlu', 'cuda', 'ilu', 'musa'],
+        choices=['auto', 'npu', 'mlu', 'cuda', 'ilu', 'musa', 'dcu'],
         default='auto',
         help='Device type: npu, mlu, ilu, cuda or musa (case-insensitive)'
     )
@@ -616,7 +648,7 @@ def parse_arguments() -> dict[str, Any]:
         default='false',
         help='Whether to generate so or binary'
     )
-    
+
     parser.add_argument(
         '--test-name',
         type=str,
@@ -625,9 +657,9 @@ def parse_arguments() -> dict[str, Any]:
     )
 
     args = parser.parse_args()
-    
+
     sys.argv = [sys.argv[0]] + args.setup_args
-    
+
     generate_so = args.generate_so.lower() in ('true', '1', 'yes', 'y', 'on')
 
     return {
@@ -657,7 +689,7 @@ if __name__ == "__main__":
         BUILD_TEST_FILE = False
     if "SKIP_EXPORT" in os.environ:
         BUILD_EXPORT = False
-    
+
     version = get_version()
 
     # check and install git pre-commit
