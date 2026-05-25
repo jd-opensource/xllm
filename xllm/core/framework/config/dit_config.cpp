@@ -61,6 +61,11 @@ DEFINE_bool(dit_debug_print,
             false,
             "whether print the debug info for dit models");
 
+DEFINE_int64(dit_generation_image_area_max,
+             0,
+             "Maximum allowed image area (width * height) for image generation "
+             "requests. If set to 0, there is no limit.");
+
 namespace xllm {
 
 void DiTConfig::from_flags() {
@@ -76,7 +81,8 @@ void DiTConfig::from_flags() {
       .dit_cache_start_blocks(FLAGS_dit_cache_start_blocks)
       .dit_cache_end_blocks(FLAGS_dit_cache_end_blocks)
       .dit_sp_communication_overlap(FLAGS_dit_sp_communication_overlap)
-      .dit_debug_print(FLAGS_dit_debug_print);
+      .dit_debug_print(FLAGS_dit_debug_print)
+      .dit_generation_image_area_max(FLAGS_dit_generation_image_area_max);
 }
 
 void DiTConfig::from_json(const JsonReader& json) {
@@ -104,7 +110,9 @@ void DiTConfig::from_json(const JsonReader& json) {
       .dit_sp_communication_overlap(json.value_or<int64_t>(
           "dit_sp_communication_overlap", dit_sp_communication_overlap()))
       .dit_debug_print(
-          json.value_or<bool>("dit_debug_print", dit_debug_print()));
+          json.value_or<bool>("dit_debug_print", dit_debug_print()))
+      .dit_generation_image_area_max(json.value_or<int64_t>(
+          "dit_generation_image_area_max", dit_generation_image_area_max()));
 }
 
 DiTConfig& DiTConfig::get_instance() {

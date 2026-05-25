@@ -15,14 +15,14 @@ limitations under the License.
 
 #include "framework/kv_cache_transfer/mooncake_kv_cache_transfer.h"
 
-#include <chrono>
 #include <glog/logging.h>
 
+#include <chrono>
 #include <numeric>
+#include <unordered_set>
 
 #include "common/global_flags.h"
 #include "core/framework/config/disagg_pd_config.h"
-#include <unordered_set>
 
 #if defined(USE_NPU)
 #ifdef TORCH_HIGHER_THAN_PTA6
@@ -518,8 +518,8 @@ bool MooncakeKVCacheTransferDefault::push_kv_blocks(
   CHECK(layout.registered) << "KV cache is not registered.";
   const int64_t num_layers = layout.num_layers;
 
-  const auto schedule =
-      BuildPushSchedule(merged_kv_infos, kv_split_rank, kv_split_size, num_layers);
+  const auto schedule = BuildPushSchedule(
+      merged_kv_infos, kv_split_rank, kv_split_size, num_layers);
 
   const auto wall_start = std::chrono::steady_clock::now();
   int64_t cur_layer = -1;
@@ -541,9 +541,10 @@ bool MooncakeKVCacheTransferDefault::push_kv_blocks(
       return false;
     }
     if (::xllm::DisaggPDConfig::get_instance().kv_push_timing_log()) {
-      const auto step_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                               std::chrono::steady_clock::now() - step_start)
-                               .count();
+      const auto step_us =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - step_start)
+              .count();
       LOG(INFO) << "[KVPUSH_MOONCAKE] rank=" << kv_split_rank << "/"
                 << kv_split_size << " layer=" << step.layer
                 << " dst=" << (step.dst_key ? *step.dst_key : std::string{})
@@ -684,8 +685,8 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks(
     int32_t kv_split_rank,
     int32_t kv_split_size) {
   (void)is_spec_draft;
-  return push_kv_blocks_impl(merged_kv_infos, layer_synchronizer,
-                             kv_split_rank, kv_split_size);
+  return push_kv_blocks_impl(
+      merged_kv_infos, layer_synchronizer, kv_split_rank, kv_split_size);
 }
 
 bool MooncakeKVCacheTransferXTensor::pull_kv_blocks_impl(
@@ -762,8 +763,8 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_impl(
   }
 
   auto& allocator = XTensorAllocator::get_instance();
-  const auto schedule =
-      BuildPushSchedule(merged_kv_infos, kv_split_rank, kv_split_size, num_layers_);
+  const auto schedule = BuildPushSchedule(
+      merged_kv_infos, kv_split_rank, kv_split_size, num_layers_);
 
   const auto wall_start = std::chrono::steady_clock::now();
   int64_t cur_layer = -1;
@@ -775,10 +776,9 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_impl(
     const KVCacheInfo& kv_info = *step.dst;
 
     // Check if we have XTensor offsets from D-node
-    bool has_dst_offsets =
-        !kv_info.dst_xtensor_layer_offsets.empty() &&
-        static_cast<size_t>(step.layer) <
-            kv_info.dst_xtensor_layer_offsets.size();
+    bool has_dst_offsets = !kv_info.dst_xtensor_layer_offsets.empty() &&
+                           static_cast<size_t>(step.layer) <
+                               kv_info.dst_xtensor_layer_offsets.size();
 
     std::vector<uint64_t> src_offsets;
     std::vector<uint64_t> dst_offsets;
@@ -822,8 +822,7 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_impl(
       src_offsets.push_back(src_v_off);
       dst_offsets.push_back(dst_v_off);
     }
-    auto* xtensor_te =
-        static_cast<MooncakeTransferEngine*>(mooncake_te_.get());
+    auto* xtensor_te = static_cast<MooncakeTransferEngine*>(mooncake_te_.get());
 
     const auto step_start = std::chrono::steady_clock::now();
     auto ret = xtensor_te->move_memory_by_global_offsets(
@@ -837,9 +836,10 @@ bool MooncakeKVCacheTransferXTensor::push_kv_blocks_impl(
       return false;
     }
     if (::xllm::DisaggPDConfig::get_instance().kv_push_timing_log()) {
-      const auto step_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                               std::chrono::steady_clock::now() - step_start)
-                               .count();
+      const auto step_us =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - step_start)
+              .count();
       LOG(INFO) << "[KVPUSH_XTENSOR] rank=" << kv_split_rank << "/"
                 << kv_split_size << " layer=" << step.layer
                 << " dst=" << (step.dst_key ? *step.dst_key : std::string{})

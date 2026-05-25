@@ -17,18 +17,26 @@ limitations under the License.
 
 #include "core/framework/model/model_output.h"
 #include "core/layers/common/lm_head.h"
-#include "core/layers/common/qwen3_next_rms_norm.h"
-#include "core/layers/common/rms_norm.h"
-#include "core/layers/mlu/qwen3_5_decoder_layer.h"
-#include "core/layers/qwen3_vision_layer.h"
-#include "models/llm/llm_model_base.h"
 #include "models/model_registry.h"
 #include "models/vlm/qwen3_vl_base.h"
+
+#if defined(USE_NPU)
+#include "models/llm/qwen3_5.h"
+#include "models/vlm/npu/qwen3_vl.h"
+#elif defined(USE_MLU)
+#include "core/layers/common/qwen3_next_rms_norm.h"
+#include "core/layers/common/rms_norm.h"
+#include "core/layers/qwen3_5_decoder_layer.h"
+#include "core/layers/qwen3_vision_layer.h"
+#include "models/llm/llm_model_base.h"
 #include "processors/input_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
 #include "qwen3_vl.h"
+#endif
 
 namespace xllm {
+#if !defined(USE_NPU)
+
 class Qwen3_5ModelImpl final
     : public LlmModelImplBase<layer::Qwen3_5DecoderLayer> {
  public:
@@ -193,8 +201,16 @@ class Qwen3_5ForCausalLMImpl : public LlmForCausalLMImplBase<Qwen3_5Model> {
 };
 TORCH_MODULE(Qwen3_5ForCausalLM);
 
+#endif  // !defined(USE_NPU)
+
+#if defined(USE_NPU)
+using Qwen3_5_VisionTransformer = npu::model::Qwen3_VisionTransformer;
+#else
+using Qwen3_5_VisionTransformer = Qwen3_VisionTransformer;
+#endif
+
 using Qwen3_5ForConditionalGenerationImpl =
-    Qwen3VLForConditionalGenerationBase<Qwen3_VisionTransformer,
+    Qwen3VLForConditionalGenerationBase<Qwen3_5_VisionTransformer,
                                         Qwen3_5ForCausalLM>;
 TORCH_MODULE(Qwen3_5ForConditionalGeneration);
 
@@ -211,6 +227,7 @@ TORCH_MODULE(Qwen3_5ForConditionalGeneration);
   LOAD_ARG_OR(                                                                 \
       max_position_embeddings, "text_config.max_position_embeddings", 262144); \
   LOAD_ARG_OR(rms_norm_eps, "text_config.rms_norm_eps", 1e-6);                 \
+  LOAD_ARG_OR(bos_token_id, "text_config.bos_token_id", 151643);               \
   LOAD_ARG_OR(eos_token_id, "text_config.eos_token_id", 248044);               \
   LOAD_ARG_OR(                                                                 \
       rope_theta, "text_config.rope_parameters.rope_theta", 10000000.0f);      \
@@ -223,34 +240,50 @@ TORCH_MODULE(Qwen3_5ForConditionalGeneration);
   LOAD_ARG_OR(                                                                 \
       linear_value_head_dim, "text_config.linear_value_head_dim", 128);        \
   LOAD_ARG_OR(linear_num_key_heads, "text_config.linear_num_key_heads", 16);   \
-  LOAD_ARG_OR(                                                                 \
-      linear_num_value_heads, "text_config.linear_num_value_heads", 48);       \
+  LOAD_ARG_OR(linear_num_value_heads,                                          \
+              "text_config.linear_num_value_heads",                            \
+              static_cast<int32_t>(args->n_heads() * 2));                      \
   LOAD_ARG_OR(                                                                 \
       full_attention_interval, "text_config.full_attention_interval", 4);      \
-  LOAD_ARG_OR(attn_output_gate, "text_config.attn_output_gate", false);        \
+  LOAD_ARG_OR(attn_output_gate, "text_config.attn_output_gate", true);         \
   LOAD_ARG_OR(                                                                 \
       num_nextn_predict_layers, "text_config.mtp_num_hidden_layers", 0);       \
+  LOAD_ARG_OR(num_nextn_predict_layers,                                        \
+              "text_config.num_nextn_predict_layers",                          \
+              args->num_nextn_predict_layers());                               \
   LOAD_ARG_OR(attention_bias, "text_config.attention_bias", false);            \
   LOAD_ARG_OR(attention_dropout, "text_config.attention_dropout", 0.0f);       \
   LOAD_ARG_OR(initializer_range, "text_config.initializer_range", 0.02f);      \
   LOAD_ARG_OR(                                                                 \
       mlp_only_layers, "text_config.mlp_only_layers", std::vector<int32_t>()); \
-  LOAD_ARG(rope_scaling_mrope_section,                                         \
-           "text_config.rope_parameters.mrope_section");                       \
+  LOAD_ARG_OR(rope_scaling_mrope_section,                                      \
+              "text_config.rope_parameters.mrope_section",                     \
+              std::vector<int64_t>({11, 11, 10}));                             \
+  LOAD_ARG_OR(rope_scaling_mrope_interleaved,                                  \
+              "text_config.rope_parameters.mrope_interleaved",                 \
+              true);                                                           \
   LOAD_ARG_OR(rope_scaling_rope_type,                                          \
               "text_config.rope_parameters.rope_type",                         \
               "default");                                                      \
+  if (args->rope_scaling_rope_type() == "default") {                           \
+    args->rope_scaling_rope_type() = "mrope";                                  \
+  }                                                                            \
   LOAD_ARG_OR(partial_rotary_factor,                                           \
               "text_config.rope_parameters.partial_rotary_factor",             \
-              0.25f)
+              0.25f);                                                          \
+  LOAD_ARG_OR(mamba_ssm_dtype, "text_config.mamba_ssm_dtype", "float32")
 
 #define LOAD_QWEN3_5_VISION_ARGS()                                             \
   LOAD_ARG_OR(image_token_id, "image_token_id", 248056);                       \
   LOAD_ARG_OR(video_token_id, "video_token_id", 248057);                       \
   LOAD_ARG_OR(vision_start_token_id, "vision_start_token_id", 248053);         \
   LOAD_ARG_OR(vision_end_token_id, "vision_end_token_id", 248054);             \
-  LOAD_ARG(mm_deepstack_visual_indexes,                                        \
-           "vision_config.deepstack_visual_indexes");                          \
+  LOAD_ARG_OR(mm_deepstack_visual_indexes,                                     \
+              "vision_config.deepstack_visual_indexes",                        \
+              std::vector<int64_t>());                                         \
+  if (!args->mm_deepstack_visual_indexes().empty()) {                          \
+    LOG(FATAL) << "qwen3_5 VLM does not support DeepStack visual indexes";     \
+  }                                                                            \
   LOAD_ARG_OR(mm_num_hidden_layers, "vision_config.depth", 27);                \
   LOAD_ARG_OR(mm_hidden_act, "vision_config.hidden_act", "gelu_pytorch_tanh"); \
   LOAD_ARG_OR(mm_hidden_size, "vision_config.hidden_size", 1152);              \
@@ -261,28 +294,44 @@ TORCH_MODULE(Qwen3_5ForConditionalGeneration);
   LOAD_ARG_OR(mm_num_position_embeddings,                                      \
               "vision_config.num_position_embeddings",                         \
               2304);                                                           \
-  LOAD_ARG_OR(mm_projection_dim, "vision_config.out_hidden_size", 5120);       \
+  LOAD_ARG_OR(mm_projection_dim,                                               \
+              "vision_config.out_hidden_size",                                 \
+              args->hidden_size());                                            \
   LOAD_ARG_OR(mm_patch_size, "vision_config.patch_size", 16);                  \
   LOAD_ARG_OR(mm_spatial_merge_size, "vision_config.spatial_merge_size", 2);   \
   LOAD_ARG_OR(mm_temporal_patch_size, "vision_config.temporal_patch_size", 2); \
   LOAD_ARG_OR_FUNC(mm_head_dim, "head_dim", [&] {                              \
     return args->mm_hidden_size() / args->mm_num_attention_heads();            \
-  });                                                                          \
-  LOAD_ARG_OR(                                                                 \
-      rope_scaling_rope_type, "vision_config.rope_scaling.type", "mrope")
+  })
 
-REGISTER_INPUT_PROCESSOR(qwen3_5, Qwen2_5_VLInputProcessor);
+#if defined(USE_NPU)
+using Qwen3_5InputProcessor = Qwen3_VLInputProcessor;
+using Qwen3_5ImageProcessor = Qwen3VLImageProcessor;
+#else
+using Qwen3_5InputProcessor = Qwen2_5_VLInputProcessor;
+using Qwen3_5ImageProcessor = Qwen2VLImageProcessor;
+#endif
+
+// qwen3_5/qwen3_5_moe are multimodal entry points. On NPU, text-only serving
+// uses qwen3_5_text/qwen3_5_moe_text from llm/qwen3_5.h because the VLM
+// request protocol currently requires array-form chat content.
+REGISTER_INPUT_PROCESSOR(qwen3_5, Qwen3_5InputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_5, Qwen3_5ForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(qwen3_5, Qwen2VLImageProcessor);
+REGISTER_IMAGE_PROCESSOR(qwen3_5, Qwen3_5ImageProcessor);
 REGISTER_MODEL_ARGS(qwen3_5, [&] {
   LOAD_QWEN3_5_COMMON_ARGS();
   LOAD_QWEN3_5_VISION_ARGS();
+
+  SET_ARG(num_experts, 0);
+  SET_ARG(n_routed_experts, 0);
+  SET_ARG(n_shared_experts, 0);
+
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
 
-REGISTER_INPUT_PROCESSOR(qwen3_5_moe, Qwen2_5_VLInputProcessor);
+REGISTER_INPUT_PROCESSOR(qwen3_5_moe, Qwen3_5InputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_5_moe, Qwen3_5ForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(qwen3_5_moe, Qwen2VLImageProcessor);
+REGISTER_IMAGE_PROCESSOR(qwen3_5_moe, Qwen3_5ImageProcessor);
 REGISTER_MODEL_ARGS(qwen3_5_moe, [&] {
   LOAD_QWEN3_5_COMMON_ARGS();
   LOAD_QWEN3_5_VISION_ARGS();
@@ -295,7 +344,6 @@ REGISTER_MODEL_ARGS(qwen3_5_moe, [&] {
               "text_config.shared_expert_intermediate_size",
               512);
   LOAD_ARG_OR(norm_topk_prob, "text_config.norm_topk_prob", true);
-
   LOAD_ARG_OR(
       n_routed_experts, "text_config.n_routed_experts", args->num_experts());
   SET_ARG(n_shared_experts,
@@ -308,5 +356,8 @@ REGISTER_MODEL_ARGS(qwen3_5_moe, [&] {
 
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
 });
+
+#undef LOAD_QWEN3_5_VISION_ARGS
+#undef LOAD_QWEN3_5_COMMON_ARGS
 
 }  // namespace xllm

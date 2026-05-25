@@ -61,9 +61,8 @@ CpEpPadding::CpEpPadding(const torch::Tensor& input_ids,
                           mapping_npu_["moeEpSize"].get<int64_t>() > 1;
   const int32_t expert_parallel_degree =
       ::xllm::EPLBConfig::get_instance().expert_parallel_degree();
-  is_dynamic_ep_ =
-      has_moe_ep && (expert_parallel_degree == 2 ||
-                     (expert_parallel_degree == 3 && is_prefill));
+  is_dynamic_ep_ = has_moe_ep && (expert_parallel_degree == 2 ||
+                                  (expert_parallel_degree == 3 && is_prefill));
 }
 
 CpEpPaddingData CpEpPadding::build() {

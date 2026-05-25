@@ -368,7 +368,7 @@ int run() {
 #endif
   std::string model_type = "";
   if (model_config.backend() != "dit") {
-    model_type = xllm::util::get_model_type(model_path);
+    model_type = xllm::util::get_model_type(model_path, model_config.backend());
     model_config.tool_call_parser(
         function_call::FunctionCallParser::get_parser_auto(
             model_config.tool_call_parser(), model_type));

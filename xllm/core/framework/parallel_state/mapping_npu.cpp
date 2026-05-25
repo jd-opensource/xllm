@@ -169,9 +169,8 @@ void MappingNPU::parse_parallel_info() {
   // mirrors attnCp byte-for-byte (legacy behavior, no extra HCCL domain).
   const int32_t cp_group_size =
       attn_cp_.group_size() > 0 ? attn_cp_.group_size() : 1;
-  const int32_t kv_split_group_size = options_.kv_split_size() > 0
-                                          ? options_.kv_split_size()
-                                          : cp_group_size;
+  const int32_t kv_split_group_size =
+      options_.kv_split_size() > 0 ? options_.kv_split_size() : cp_group_size;
   attn_kv_split_.group_size(kv_split_group_size);
   attn_kv_split_.backend("hccl");
 
@@ -216,8 +215,8 @@ void MappingNPU::validate() {
   const int32_t cp_sz = std::max(1, attn_cp_.group_size());
   CHECK(kv_split >= 1) << "kv_split size must be >= 1, got " << kv_split;
   CHECK(kv_split <= cp_sz)
-      << "kv_split_size (" << kv_split << ") must not exceed cp_size ("
-      << cp_sz << ") in this version; cross-attnCp KV split is unsupported.";
+      << "kv_split_size (" << kv_split << ") must not exceed cp_size (" << cp_sz
+      << ") in this version; cross-attnCp KV split is unsupported.";
   CHECK(cp_sz % kv_split == 0)
       << "cp_size (" << cp_sz << ") must be divisible by kv_split_size ("
       << kv_split << ").";
@@ -347,11 +346,11 @@ void MappingNPU::get_dp_group(ParallelInfo& parallel_info) {
 }
 
 void MappingNPU::get_kv_split_group(ParallelInfo& parallel_info) {
-  // Reuse the get_dp_group stride layout. The stride is world_size / group_size,
-  // so when group_size == attn_cp_.group_size() the produced rank_per_group is
-  // identical to attn_cp_'s and ATB will de-dup the HCCL commDomain. When
-  // group_size == 1 each rank is its own single-element group, i.e. no
-  // collective communication will be issued for KV split.
+  // Reuse the get_dp_group stride layout. The stride is world_size /
+  // group_size, so when group_size == attn_cp_.group_size() the produced
+  // rank_per_group is identical to attn_cp_'s and ATB will de-dup the HCCL
+  // commDomain. When group_size == 1 each rank is its own single-element group,
+  // i.e. no collective communication will be issued for KV split.
   get_dp_group(parallel_info);
 }
 

@@ -19,28 +19,24 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
-#include <type_traits>
-#include <vector>
-
-#include "rec.pb.h"
-#include "slice.h"
-#include "tensor.pb.h"
-#include "worker.pb.h"
-
-// -------------------
-#include <filesystem>
-#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <vector>
 
 #include "core/framework/config/disagg_pd_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/util/json_reader.h"
+#include "core/util/model_config_utils.h"
 #include "models/model_registry.h"
+#include "rec.pb.h"
+#include "slice.h"
+#include "tensor.pb.h"
+#include "worker.pb.h"
 
 namespace xllm {
 namespace util {
@@ -154,28 +150,6 @@ inline std::string get_model_name(
   return model_name;
 }
 
-inline std::string get_model_type(const std::filesystem::path& model_path) {
-  JsonReader reader;
-  std::filesystem::path config_json_path = model_path / "config.json";
-
-  if (!std::filesystem::exists(config_json_path)) {
-    LOG(FATAL) << "Please check config.json or model_index.json file, one of "
-                  "them should exist in the model path: "
-               << model_path;
-  }
-
-  reader.parse(config_json_path);
-  auto model_type = reader.value<std::string>("model_type");
-  if (!model_type.has_value()) {
-    model_type = reader.value<std::string>("model_name");
-  }
-  if (!model_type.has_value()) {
-    LOG(FATAL) << "Please check config.json file in model path: " << model_path
-               << ", it should contain model_type or model_name key.";
-  }
-  return model_type.value();
-}
-
 inline std::string get_model_backend(const std::filesystem::path& model_path) {
   JsonReader reader;
   std::filesystem::path model_index_json_path = model_path / "model_index.json";
@@ -200,7 +174,7 @@ inline bool should_enable_mla(
   if (resolved_backend == "dit") {
     return false;
   }
-  return is_mla_model_type(get_model_type(model_path));
+  return is_mla_model_type(get_model_type(model_path, backend));
 }
 
 inline int32_t kv_split_size_effective(void) {

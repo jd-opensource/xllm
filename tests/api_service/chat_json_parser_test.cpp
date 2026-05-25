@@ -51,14 +51,19 @@ class PreprocessChatJsonTest : public ::testing::Test {
 // =============================================================================
 
 TEST_F(PreprocessChatJsonTest, PassThroughNonArrayContent) {
-  // String content should pass through unchanged
   std::string input = R"({
     "messages": [{"role": "user", "content": "Hello"}]
+  })";
+  std::string expected_vlm_output = R"({
+    "messages": [{
+      "role": "user",
+      "content": [{"type": "text", "text": "Hello"}]
+    }]
   })";
   LlmChatJsonParser llm_parser;
   VlmChatJsonParser vlm_parser;
   expect_success(input, llm_parser, input);
-  expect_success(input, vlm_parser, input);
+  expect_success(input, vlm_parser, expected_vlm_output);
 }
 
 TEST_F(PreprocessChatJsonTest, PassThroughNoMessages) {

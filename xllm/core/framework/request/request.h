@@ -57,11 +57,6 @@ class Request : public RequestBase {
 
   bool cancelled() const { return cancelled_.load(std::memory_order_relaxed); }
 
-  // Get the elapsed time since the request was created.
-  double elapsed_seconds() const {
-    return absl::ToDoubleSeconds(absl::Now() - created_time_);
-  }
-
   RequestOutput generate_output(const Tokenizer& tokenizer,
                                 ThreadPool* thread_pool = nullptr);
 

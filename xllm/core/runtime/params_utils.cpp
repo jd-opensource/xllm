@@ -337,61 +337,51 @@ bool dit_forward_input_to_proto(const DiTForwardInput& dit_inputs,
   ADD_VECTOR_TO_PROTO(pb_dit_inputs->mutable_negative_prompts_2(),
                       dit_inputs.negative_prompts_2);
 
-  if (dit_inputs.images.defined()) {
-    torch_tensor_to_proto_tensor(dit_inputs.images,
-                                 pb_dit_inputs->mutable_images());
+  torch_tensor_to_proto_tensor(dit_inputs.images,
+                               pb_dit_inputs->mutable_images());
+
+  auto* pb_images_list =
+      pb_dit_inputs->mutable_images_list()->mutable_tensors();
+  for (const auto& tensor : dit_inputs.images_list) {
+    torch_tensor_to_proto_tensor(tensor, pb_images_list->Add());
   }
-  if (dit_inputs.condition_images.defined()) {
-    torch_tensor_to_proto_tensor(dit_inputs.condition_images,
-                                 pb_dit_inputs->mutable_condition_images());
-  }
-  if (dit_inputs.mask_images.defined()) {
-    torch_tensor_to_proto_tensor(dit_inputs.mask_images,
-                                 pb_dit_inputs->mutable_mask_images());
-  }
-  if (dit_inputs.control_image.defined()) {
-    torch_tensor_to_proto_tensor(dit_inputs.control_image,
-                                 pb_dit_inputs->mutable_control_image());
-  }
-  if (dit_inputs.masked_image_latents.defined()) {
-    torch_tensor_to_proto_tensor(dit_inputs.masked_image_latents,
-                                 pb_dit_inputs->mutable_masked_image_latents());
-  }
-  if (dit_inputs.prompt_embeds.defined()) {
-    torch_tensor_to_proto_tensor(dit_inputs.prompt_embeds,
-                                 pb_dit_inputs->mutable_prompt_embeds());
-  }
-  if (dit_inputs.pooled_prompt_embeds.defined()) {
-    torch_tensor_to_proto_tensor(dit_inputs.pooled_prompt_embeds,
-                                 pb_dit_inputs->mutable_pooled_prompt_embeds());
-  }
-  if (dit_inputs.negative_prompt_embeds.defined()) {
-    torch_tensor_to_proto_tensor(
-        dit_inputs.negative_prompt_embeds,
-        pb_dit_inputs->mutable_negative_prompt_embeds());
-  }
-  if (dit_inputs.negative_pooled_prompt_embeds.defined()) {
-    torch_tensor_to_proto_tensor(
-        dit_inputs.negative_pooled_prompt_embeds,
-        pb_dit_inputs->mutable_negative_pooled_prompt_embeds());
-  }
-  if (dit_inputs.latents.defined()) {
-    torch_tensor_to_proto_tensor(dit_inputs.latents,
-                                 pb_dit_inputs->mutable_latents());
+
+  torch_tensor_to_proto_tensor(dit_inputs.mask_images,
+                               pb_dit_inputs->mutable_mask_images());
+
+  torch_tensor_to_proto_tensor(dit_inputs.control_image,
+                               pb_dit_inputs->mutable_control_image());
+
+  torch_tensor_to_proto_tensor(dit_inputs.masked_image_latents,
+                               pb_dit_inputs->mutable_masked_image_latents());
+
+  torch_tensor_to_proto_tensor(dit_inputs.prompt_embeds,
+                               pb_dit_inputs->mutable_prompt_embeds());
+
+  torch_tensor_to_proto_tensor(dit_inputs.pooled_prompt_embeds,
+                               pb_dit_inputs->mutable_pooled_prompt_embeds());
+
+  torch_tensor_to_proto_tensor(dit_inputs.negative_prompt_embeds,
+                               pb_dit_inputs->mutable_negative_prompt_embeds());
+
+  torch_tensor_to_proto_tensor(
+      dit_inputs.negative_pooled_prompt_embeds,
+      pb_dit_inputs->mutable_negative_pooled_prompt_embeds());
+
+  torch_tensor_to_proto_tensor(dit_inputs.latents,
+                               pb_dit_inputs->mutable_latents());
+
+  torch_tensor_to_proto_tensor(dit_inputs.prompt_audio,
+                               pb_dit_inputs->mutable_prompt_audio());
+
+  if (!dit_inputs.audio_prompt_text.empty()) {
+    pb_dit_inputs->set_audio_prompt_text(dit_inputs.audio_prompt_text);
   }
 
   if (!generation_params_to_proto(dit_inputs.generation_params,
                                   pb_dit_inputs->mutable_generation_params())) {
     LOG(ERROR) << "Failed to convert generation_params";
     return false;
-  }
-
-  if (dit_inputs.prompt_audio.defined()) {
-    torch_tensor_to_proto_tensor(dit_inputs.prompt_audio,
-                                 pb_dit_inputs->mutable_prompt_audio());
-  }
-  if (!dit_inputs.audio_prompt_text.empty()) {
-    pb_dit_inputs->set_audio_prompt_text(dit_inputs.audio_prompt_text);
   }
 
   return true;
@@ -447,9 +437,12 @@ bool proto_to_dit_forward_input(const proto::DiTForwardInput& pb_dit_inputs,
     dit_inputs.images = util::proto_to_torch(pb_dit_inputs.images());
   }
 
-  if (pb_dit_inputs.has_condition_images()) {
-    dit_inputs.condition_images =
-        util::proto_to_torch(pb_dit_inputs.condition_images());
+  if (pb_dit_inputs.has_images_list()) {
+    dit_inputs.images_list.reserve(
+        pb_dit_inputs.images_list().tensors().size());
+    for (const auto& pb_tensor : pb_dit_inputs.images_list().tensors()) {
+      dit_inputs.images_list.emplace_back(util::proto_to_torch(pb_tensor));
+    }
   }
 
   if (pb_dit_inputs.has_mask_images()) {

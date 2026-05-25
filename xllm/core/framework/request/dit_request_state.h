@@ -115,7 +115,7 @@ struct DiTInputParams {
 
   torch::Tensor image;
 
-  torch::Tensor condition_image;
+  std::vector<torch::Tensor> images;
 
   torch::Tensor control_image;
 

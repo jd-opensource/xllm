@@ -99,7 +99,12 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
             input_params,
             model_args_.enable_mla(),
             build_attention_mask(input_params));
-    torch::Tensor h = embed_tokens_(tokens);
+    torch::Tensor h;
+    if (input_params.embedding.input_embedding.defined()) {
+      h = input_params.embedding.input_embedding;
+    } else {
+      h = embed_tokens_(tokens);
+    }
 
     torch::Tensor mrope_cos_sin;
     for (const auto& layer : layers_) {
@@ -235,53 +240,28 @@ class Qwen3HybridForCausalLMImplBase : public torch::nn::Module {
   }
 
   void load_model(std::unique_ptr<ModelLoader> loader) {
-    auto has_model_weights = [](const StateDict& dict) {
-      return dict.get_tensor("embed_tokens.weight").defined() ||
-             dict.get_dict_with_prefix("layers.").size() > 0 ||
-             dict.get_tensor("norm.weight").defined();
-    };
+    load_model(std::move(loader), "model.", "lm_head.");
+  }
+
+  void load_model(std::unique_ptr<ModelLoader> loader,
+                  const std::string& model_prefix) {
+    load_model(std::move(loader), model_prefix, "lm_head.");
+  }
+
+  void load_model(std::unique_ptr<ModelLoader> loader,
+                  const std::string& model_prefix,
+                  const std::string& lm_head_prefix) {
     auto has_lm_head_weights = [](const StateDict& dict) {
       return dict.get_tensor("weight").defined() ||
              dict.get_tensor("qweight").defined();
     };
 
     for (const auto& state_dict : loader->get_state_dicts()) {
-      auto model_state_dict = state_dict->get_dict_with_prefix("model.");
-      if (!has_model_weights(model_state_dict)) {
-        auto language_model_state_dict =
-            state_dict->get_dict_with_prefix("language_model.model.");
-        if (has_model_weights(language_model_state_dict)) {
-          model_state_dict = language_model_state_dict;
-        } else {
-          auto wrapped_language_model_state_dict =
-              state_dict->get_dict_with_prefix("model.language_model.");
-          if (has_model_weights(wrapped_language_model_state_dict)) {
-            model_state_dict = wrapped_language_model_state_dict;
-          }
-        }
-      }
+      auto model_state_dict = state_dict->get_dict_with_prefix(model_prefix);
       model_->load_state_dict(model_state_dict);
 
-      auto lm_head_state_dict = state_dict->get_dict_with_prefix("lm_head.");
-      if (!has_lm_head_weights(lm_head_state_dict)) {
-        auto language_model_lm_head_state_dict =
-            state_dict->get_dict_with_prefix("language_model.lm_head.");
-        if (has_lm_head_weights(language_model_lm_head_state_dict)) {
-          lm_head_state_dict = language_model_lm_head_state_dict;
-        } else {
-          auto wrapped_language_model_lm_head_state_dict =
-              state_dict->get_dict_with_prefix("model.language_model.lm_head.");
-          if (has_lm_head_weights(wrapped_language_model_lm_head_state_dict)) {
-            lm_head_state_dict = wrapped_language_model_lm_head_state_dict;
-          } else {
-            auto wrapped_lm_head_state_dict =
-                state_dict->get_dict_with_prefix("model.lm_head.");
-            if (has_lm_head_weights(wrapped_lm_head_state_dict)) {
-              lm_head_state_dict = wrapped_lm_head_state_dict;
-            }
-          }
-        }
-      }
+      auto lm_head_state_dict =
+          state_dict->get_dict_with_prefix(lm_head_prefix);
       if (!has_lm_head_weights(lm_head_state_dict) && tie_word_embeddings_) {
         auto tied_lm_head_state_dict =
             model_state_dict.get_dict_with_prefix("embed_tokens.");
@@ -291,8 +271,7 @@ class Qwen3HybridForCausalLMImplBase : public torch::nn::Module {
       }
       lm_head_->load_state_dict(lm_head_state_dict);
     }
-
-    model_->verify_loaded_weights("model.");
+    model_->verify_loaded_weights(model_prefix);
   }
 
   virtual void prepare_expert_weight(int32_t layer_id,

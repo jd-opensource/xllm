@@ -470,6 +470,7 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
   return inputs;
 }
 
+#if defined(USE_NPU)
 torch::Tensor WorkerImpl::recompute_new_cache_slots(const ForwardInput& input) {
   auto old_cache_slots = input.input_params.attention.device.new_cache_slots;
   int64_t numel = old_cache_slots.numel();
@@ -477,12 +478,7 @@ torch::Tensor WorkerImpl::recompute_new_cache_slots(const ForwardInput& input) {
   // `block_size * kv_split_size_effective` (see llm_engine init). When KV is
   // not split (kv_split_size == 1) the stride collapses back to block_size.
   const int32_t kv_split_size = parallel_args_.kv_split_size_effective();
-  const int block_size_total = options_.block_size() * kv_split_size;
-  // tp_size is still derived from cp_size because the worker rank layout
-  // (`dp_rank * (cp*tp) + cp_rank*tp + tp_rank`) is CP-shaped, independent of
-  // KV split width.
-  const int32_t tp_size = parallel_args_.world_size() /
-                          (parallel_args_.dp_size() * parallel_args_.cp_size());
+  const int32_t block_size_total = options_.block_size() * kv_split_size;
   // KV-shard ownership predicate: block whose sub-index inside the logical
   // block matches this rank's KV-split rank (degenerates to "this rank only"
   // when kv_split_size == 1, since sub_block_idx is always 0 there).
@@ -580,6 +576,7 @@ torch::Tensor WorkerImpl::compute_in_prefix_slots(const ForwardInput& input) {
   }
   return torch::tensor(in_prefix_slots_vec, torch::kInt);
 }
+#endif
 
 void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
                                              ForwardInput& processed_input) {
@@ -602,7 +599,8 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   }
 #endif
 
-  c10::StreamGuard streamGuard = prepare_stream_->set_stream_guard();
+  const bool use_default_stream =
+      !enable_schedule_overlap() && options_.backend() == "llm";
 
   // CP partition is now done worker-side (formerly engine-side in
   // LLMEngine::step). torch::Tensor fields are handles, so assigning new
@@ -669,7 +667,6 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
   }
   const ForwardInput& prep_for_device =
       needs_cp_prefill_side ? *cp_input : input;
-  processed_input = prep_for_device.to(device_, dtype_);
 
 #if defined(USE_NPU)
   const bool needs_kv_split_prep =
@@ -679,109 +676,126 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
       (needs_kv_split_prep ||
        ::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill());
-  CpPrefillInputs tmp_cp_inputs;
-  if (needs_cp_prefill_side && !input.cp_partitioned) {
-    const ForwardInput& cp_working = *cp_input;
-    tmp_cp_inputs = prepare_cp_prefill_inputs(
-        parallel_args_.cp_size(),
-        cp_working.host_token_ids(),
-        cp_working.host_positions(),
-        cp_working.input_params.attention.device.q_seq_lens,
-        util::enable_kvcache_split(),
-        cp_working.input_params.attention.host.kv_cache_tokens_nums,
-        options_.block_size(),
-        parallel_args_.kv_split_size_effective());
-    processed_input.input_params.parallel.cp_prefill_inputs =
-        tmp_cp_inputs.to(device_);
-    CpEpPadding cp_ep_padding(cp_working.host_token_ids(),
-                              context_.get_model_args().num_experts_per_tok(),
-                              context_.get_parallel_args().mapping_data(),
-                              /*device=*/device_,
-                              dtype_,
-                              /*is_prefill=*/needs_cp_prefill_side);
-    processed_input.input_params.parallel.cp_ep_padding_data =
-        cp_ep_padding.build();
-  }
-
-  if (needs_kv_split_prep) {
-    torch::Tensor new_cache_slots = recompute_new_cache_slots(*cp_input);
-    processed_input.input_params.attention.device.new_cache_slots =
-        new_cache_slots.to(device_);
-  }
-  if (needs_in_prefix_slots) {
-    torch::Tensor in_prefix_slots = compute_in_prefix_slots(*cp_input);
-    processed_input.input_params.attention.device.in_prefix_slots =
-        in_prefix_slots.to(device_);
-  }
 #endif
 
-  auto& input_params = processed_input.input_params;
-
-  bool empty_shard = input_params.meta.num_sequences == 0 &&
-                     (!processed_input.token_ids.defined() ||
-                      processed_input.token_ids.numel() == 0);
-  const bool need_fake_input_for_empty_shard =
-      empty_shard && !input_params.meta.batch_forward_type.is_empty() &&
-      (context_.get_parallel_args().cp_size() > 1 ||
-       (context_.get_parallel_args().dp_size() > 1 ||
-        context_.get_parallel_args().ep_size() > 1 ||
-        !context_.get_parallel_args().mapping_data().empty()));
-  if (need_fake_input_for_empty_shard) {
-    auto token_options = processed_input.token_ids.defined()
-                             ? processed_input.token_ids.options()
-                             : torch::TensorOptions().dtype(torch::kInt32);
-    auto position_options = processed_input.positions.defined()
-                                ? processed_input.positions.options()
-                                : torch::TensorOptions().dtype(torch::kInt32);
-    processed_input.token_ids = torch::ones({1}, token_options.device(device_));
-    processed_input.positions =
-        torch::zeros({1}, position_options.device(device_));
-    empty_shard = false;
-  }
-  if (empty_shard) {
-    auto ret = prepare_stream_->synchronize();
-    return;
-  }
-
-  apply_kv_block_swaps(input_params);
+  auto prepare_device_on_stream = [&]() {
+    processed_input = prep_for_device.to(device_, dtype_);
 
 #if defined(USE_NPU)
-  if (context_.get_model_args().enable_mla() &&
-      input_params.meta.batch_forward_type.is_chunked_prefill()) {
-    prepare_mla_prefixcache_inputs(input_params);
-  }
-
-  if (!context_.get_parallel_args().mapping_data().empty() &&
-      !(context_.get_parallel_args().cp_size() > 1) &&
-      (context_.get_parallel_args().dp_size() > 1 ||
-       context_.get_parallel_args().ep_size() > 1)) {
-    torch::Tensor token_size_per_dp_group = torch::tensor(
-        processed_input.input_params.parallel.dp_global_token_nums,
-        torch::TensorOptions()
-            .device(torch::kCPU)
-            .dtype(torch::kInt32)
-            .pinned_memory(true));
-    bool is_prefill =
-        processed_input.input_params.meta.batch_forward_type.is_prefill();
-    DpEpPadding dp_ep_padding(token_size_per_dp_group,
-                              context_.get_model_args().num_experts_per_tok(),
-                              context_.get_parallel_args().mapping_data(),
-                              device_,
-                              dtype_,
-                              is_prefill);
-    processed_input.input_params.parallel.dp_ep_padding_data =
-        dp_ep_padding.build();
-    if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
-      processed_input.input_params.expert.expert_load_data = expert_load_data_;
+    CpPrefillInputs tmp_cp_inputs;
+    if (needs_cp_prefill_side && !input.cp_partitioned) {
+      const ForwardInput& cp_working = *cp_input;
+      tmp_cp_inputs = prepare_cp_prefill_inputs(
+          parallel_args_.cp_size(),
+          cp_working.host_token_ids(),
+          cp_working.host_positions(),
+          cp_working.input_params.attention.device.q_seq_lens,
+          util::enable_kvcache_split(),
+          cp_working.input_params.attention.host.kv_cache_tokens_nums,
+          options_.block_size(),
+          parallel_args_.kv_split_size_effective());
+      processed_input.input_params.parallel.cp_prefill_inputs =
+          tmp_cp_inputs.to(device_);
+      CpEpPadding cp_ep_padding(cp_working.host_token_ids(),
+                                context_.get_model_args().num_experts_per_tok(),
+                                context_.get_parallel_args().mapping_data(),
+                                /*device=*/device_,
+                                dtype_,
+                                /*is_prefill=*/needs_cp_prefill_side);
+      processed_input.input_params.parallel.cp_ep_padding_data =
+          cp_ep_padding.build();
     }
-  }
 
-  if (has_linear_attention_layers(context_.get_model_args())) {
-    prepare_input_params_for_linear_attention(processed_input.input_params);
-  }
+    if (needs_kv_split_prep) {
+      torch::Tensor new_cache_slots = recompute_new_cache_slots(*cp_input);
+      processed_input.input_params.attention.device.new_cache_slots =
+          new_cache_slots.to(device_);
+    }
+    if (needs_in_prefix_slots) {
+      torch::Tensor in_prefix_slots = compute_in_prefix_slots(*cp_input);
+      processed_input.input_params.attention.device.in_prefix_slots =
+          in_prefix_slots.to(device_);
+    }
 #endif
 
-  auto ret = prepare_stream_->synchronize();
+    auto& input_params = processed_input.input_params;
+
+    bool empty_shard = input_params.meta.num_sequences == 0 &&
+                       (!processed_input.token_ids.defined() ||
+                        processed_input.token_ids.numel() == 0);
+    const bool need_fake_input_for_empty_shard =
+        empty_shard && !input_params.meta.batch_forward_type.is_empty() &&
+        (context_.get_parallel_args().cp_size() > 1 ||
+         (context_.get_parallel_args().dp_size() > 1 ||
+          context_.get_parallel_args().ep_size() > 1 ||
+          !context_.get_parallel_args().mapping_data().empty()));
+    if (need_fake_input_for_empty_shard) {
+      auto token_options = processed_input.token_ids.defined()
+                               ? processed_input.token_ids.options()
+                               : torch::TensorOptions().dtype(torch::kInt32);
+      auto position_options = processed_input.positions.defined()
+                                  ? processed_input.positions.options()
+                                  : torch::TensorOptions().dtype(torch::kInt32);
+      processed_input.token_ids =
+          torch::ones({1}, token_options.device(device_));
+      processed_input.positions =
+          torch::zeros({1}, position_options.device(device_));
+      empty_shard = false;
+    }
+    if (empty_shard) {
+      return;
+    }
+
+    apply_kv_block_swaps(input_params);
+
+#if defined(USE_NPU)
+    if (context_.get_model_args().enable_mla() &&
+        input_params.meta.batch_forward_type.is_chunked_prefill()) {
+      prepare_mla_prefixcache_inputs(input_params);
+    }
+
+    if (!context_.get_parallel_args().mapping_data().empty() &&
+        !(context_.get_parallel_args().cp_size() > 1) &&
+        (context_.get_parallel_args().dp_size() > 1 ||
+         context_.get_parallel_args().ep_size() > 1)) {
+      torch::Tensor token_size_per_dp_group = torch::tensor(
+          processed_input.input_params.parallel.dp_global_token_nums,
+          torch::TensorOptions()
+              .device(torch::kCPU)
+              .dtype(torch::kInt32)
+              .pinned_memory(true));
+      bool is_prefill =
+          processed_input.input_params.meta.batch_forward_type.is_prefill();
+      DpEpPadding dp_ep_padding(token_size_per_dp_group,
+                                context_.get_model_args().num_experts_per_tok(),
+                                context_.get_parallel_args().mapping_data(),
+                                device_,
+                                dtype_,
+                                is_prefill);
+      processed_input.input_params.parallel.dp_ep_padding_data =
+          dp_ep_padding.build();
+      if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
+        processed_input.input_params.expert.expert_load_data =
+            expert_load_data_;
+      }
+    }
+
+    if (has_linear_attention_layers(context_.get_model_args())) {
+      prepare_input_params_for_linear_attention(processed_input.input_params);
+    }
+#endif
+  };
+
+  if (use_default_stream) {
+    prepare_device_on_stream();
+  } else {
+    c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
+    prepare_device_on_stream();
+  }
+
+  if (!use_default_stream) {
+    prepare_stream_->synchronize();
+  }
 }
 
 void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
@@ -1159,9 +1173,9 @@ bool WorkerImpl::init_model(const std::string& model_weights_path,
              args.num_nextn_predict_layers() != 0) {
     const std::string& current_type = args.model_type();
     const char* mtp_model_type = nullptr;
-    if (current_type == "qwen3_5") {
+    if (current_type == "qwen3_5_text") {
       mtp_model_type = "qwen3_5_mtp";
-    } else if (current_type == "qwen3_5_moe") {
+    } else if (current_type == "qwen3_5_moe_text") {
       mtp_model_type = "qwen3_5_moe_mtp";
     }
     if (mtp_model_type != nullptr) {

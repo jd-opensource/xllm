@@ -1,5 +1,4 @@
 /* Copyright 2026 The xLLM Authors. All Rights Reserved.
-Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,22 +15,8 @@ limitations under the License.
 
 #pragma once
 
-#include <filesystem>
-#include <optional>
-#include <string>
-
-namespace xllm {
-
-class JsonReader;
-
-namespace util {
-
-std::string get_model_type(const JsonReader& reader,
-                           const std::filesystem::path& model_path,
-                           std::optional<std::string> backend = std::nullopt);
-
-std::string get_model_type(const std::filesystem::path& model_path,
-                           std::optional<std::string> backend = std::nullopt);
-
-}  // namespace util
-}  // namespace xllm
+#if defined(USE_NPU)
+#include "layers/npu_torch/qwen3_5_decoder_layer_impl.h"
+#elif defined(USE_MLU)
+#include "layers/mlu/qwen3_5_decoder_layer.h"
+#endif

@@ -61,11 +61,11 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
   std::vector<torch::Tensor> negative_pooled_prompt_embeds;
 
   std::vector<torch::Tensor> images;
-  std::vector<torch::Tensor> condition_images;
   std::vector<torch::Tensor> mask_images;
   std::vector<torch::Tensor> control_images;
   std::vector<torch::Tensor> latents;
   std::vector<torch::Tensor> masked_image_latents;
+
   const auto batch_size = request_vec_.size();
   prompt_embeds.reserve(batch_size);
   pooled_prompt_embeds.reserve(batch_size);
@@ -76,6 +76,11 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
   control_images.reserve(batch_size);
   latents.reserve(batch_size);
   masked_image_latents.reserve(batch_size);
+
+  std::vector<torch::Tensor> images_list;
+  size_t images_size = request_vec_[0]->state().input_params().images.size();
+  bool images_size_valid = images_size > 0;
+
   for (const auto& request : request_vec_) {
     const auto& generation_params = request->state().generation_params();
     if (input.generation_params != generation_params) {
@@ -107,8 +112,11 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
 
     images.emplace_back(input_params.image);
     mask_images.emplace_back(input_params.mask_image);
-    condition_images.emplace_back(input_params.condition_image);
     control_images.emplace_back(input_params.control_image);
+
+    if (input_params.images.size() != images_size) {
+      images_size_valid = false;
+    }
 
     // Voice cloning: prompt_audio is per-request (batch_size==1 in practice).
     // Forward the first defined tensor; multi-batch voice cloning is not
@@ -142,8 +150,26 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
     input.images = torch::stack(images);
   }
 
-  if (check_tensors_valid(condition_images)) {
-    input.condition_images = torch::stack(condition_images);
+  if (images_size_valid) {
+    images_list.reserve(images_size);
+    std::vector<torch::Tensor> vec;
+    vec.reserve(request_vec_.size());
+
+    bool all_valid = true;
+    for (size_t idx = 0; idx < images_size; ++idx) {
+      vec.clear();
+      for (const auto& req : request_vec_) {
+        vec.emplace_back(req->state().input_params().images[idx]);
+      }
+      if (!check_tensors_valid(vec)) {
+        all_valid = false;
+        break;
+      }
+      images_list.emplace_back(torch::stack(vec));
+    }
+    if (all_valid) {
+      input.images_list = std::move(images_list);
+    }
   }
 
   if (check_tensors_valid(mask_images)) {

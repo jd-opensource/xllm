@@ -21,7 +21,6 @@ limitations under the License.
 #include <limits>
 #include <numeric>
 
-#include "common/global_flags.h"
 #include "common/metrics.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
@@ -53,10 +52,10 @@ inline size_t lcm_size_t(size_t a, size_t b) {
 //       q_seq_len right-padding to 2*cp_size; we now push it to chunk
 //       granularity so it is satisfied without padding).
 //   (b) `prefix_len % (kv_split_size * block_size) == 0` so the KV-shard
-//       prefix geometry (compute_in_prefix_slots / compute_prefix_rank_geometry)
-//       stays aligned at block boundaries across chunks. When KV split is
-//       off (kv_split_size == 1) this term collapses to block_size and only
-//       constraint (a) effectively governs.
+//       prefix geometry (compute_in_prefix_slots /
+//       compute_prefix_rank_geometry) stays aligned at block boundaries across
+//       chunks. When KV split is off (kv_split_size == 1) this term collapses
+//       to block_size and only constraint (a) effectively governs.
 //
 // The function intentionally does NOTHING and returns `num_tokens` when:
 //   - cp_size <= 1 AND kv_split_size <= 1 (no constraints at all)
@@ -338,7 +337,8 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
     // memory budgeting, so we skip this check.
     if (!options_.enable_disagg_pd() &&
         kv_cache_manager_->kv_cache_utilization() >=
-            FLAGS_prefill_scheduling_memory_usage_threshold) {
+            SchedulerConfig::get_instance()
+                .prefill_scheduling_memory_usage_threshold()) {
       blocks_exhausted = true;
       break;
     }

@@ -139,8 +139,7 @@ void cp_partition_inplace(ForwardInput& input,
                << " host_buffer_has_layout="
                << input.input_host_buffer_has_layout
                << " device_tensors_ready=" << input.device_tensors_ready
-               << " host_token_ids_defined="
-               << input.host_token_ids().defined()
+               << " host_token_ids_defined=" << input.host_token_ids().defined()
                << " host_token_ids_numel="
                << (input.host_token_ids().defined()
                        ? input.host_token_ids().numel()
@@ -223,11 +222,9 @@ void cp_partition_inplace(ForwardInput& input,
   }
   CHECK_EQ(old_seq_offsets.back(), token_num);
 
-  auto gather_indices =
-      torch::tensor(gather_vec,
-                    torch::TensorOptions()
-                        .dtype(torch::kInt64)
-                        .device(torch::kCPU));
+  auto gather_indices = torch::tensor(
+      gather_vec,
+      torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
 
   input.token_ids =
       gather_token_level_tensor(input.token_ids, gather_indices, token_num);
@@ -246,7 +243,8 @@ void cp_partition_inplace(ForwardInput& input,
   attention.host.q_seq_lens = new_q_lens;
   attention.host.kv_seq_lens = new_kv_lens;
   attention.device.q_seq_lens = torch::tensor(new_q_lens, cpu_int32_options());
-  attention.device.kv_seq_lens = torch::tensor(new_kv_lens, cpu_int32_options());
+  attention.device.kv_seq_lens =
+      torch::tensor(new_kv_lens, cpu_int32_options());
 
   std::vector<int32_t> cu;
   cu.reserve(cp_q_lens.size());
@@ -275,8 +273,7 @@ void cp_partition_inplace(ForwardInput& input,
           static_cast<int64_t>(upper - old_seq_offsets.begin()) - 1;
       seq_idx = std::max<int64_t>(
           0,
-          std::min<int64_t>(seq_idx,
-                            static_cast<int64_t>(num_sequences) - 1));
+          std::min<int64_t>(seq_idx, static_cast<int64_t>(num_sequences) - 1));
       selected_seq_idx[i] = seq_idx;
 
       const int64_t seq_start = old_seq_offsets[seq_idx];
@@ -316,9 +313,8 @@ void cp_partition_inplace(ForwardInput& input,
       const int64_t chunk_id = token_pos / chunk_len;
       const int64_t offset = token_pos % chunk_len;
       const int64_t rank_id =
-          chunk_id >= cp_size
-              ? static_cast<int64_t>(2 * cp_size) - chunk_id - 1
-              : chunk_id;
+          chunk_id >= cp_size ? static_cast<int64_t>(2 * cp_size) - chunk_id - 1
+                              : chunk_id;
       const int64_t remap_idx = token_num_per_rank * rank_id +
                                 seq_prefix_per_rank[seq_idx] +
                                 (chunk_id / cp_size) * chunk_len + offset;

@@ -50,7 +50,8 @@ class DiTConfig final {
          "dit_cache_start_blocks",
          "dit_cache_end_blocks",
          "dit_sp_communication_overlap",
-         "dit_debug_print"}};
+         "dit_debug_print"
+         "dit_generation_image_area_max"}};
     return kOptionCategory;
   }
 
@@ -77,6 +78,8 @@ class DiTConfig final {
   PROPERTY(int64_t, dit_sp_communication_overlap) = 1;
 
   PROPERTY(bool, dit_debug_print) = false;
+
+  PROPERTY(int64_t, dit_generation_image_area_max) = 0;
 };
 
 }  // namespace xllm

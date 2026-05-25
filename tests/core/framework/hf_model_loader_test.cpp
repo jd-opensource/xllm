@@ -17,11 +17,13 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
 #include <string>
 #include <type_traits>
 
 #include "core/framework/model/rec_causal_lm.h"
 #include "core/platform/device.h"
+#include "core/util/model_config_utils.h"
 #include "models/model_registry.h"
 
 namespace xllm {
@@ -82,6 +84,57 @@ class DummyRecCausalLM final : public RecCausalLM {
 };
 
 }  // namespace
+
+TEST(HFModelLoaderTest, Qwen35DenseBackendAwareModelTypeSelection) {
+  JsonReader reader;
+  ASSERT_TRUE(reader.parse_text(R"json(
+    {
+      "architectures": ["Qwen3_5ForConditionalGeneration"],
+      "image_token_id": 248056,
+      "model_type": "qwen3_5",
+      "text_config": {
+        "model_type": "qwen3_5_text"
+      },
+      "video_token_id": 248057,
+      "vision_config": {
+        "model_type": "qwen3_5"
+      }
+    }
+  )json"));
+
+  const std::filesystem::path fake_model_path("/tmp/Qwen3.5-9B");
+  EXPECT_EQ(util::get_model_type(reader, fake_model_path), "qwen3_5_text");
+  EXPECT_EQ(util::get_model_type(reader, fake_model_path, "llm"),
+            "qwen3_5_text");
+  EXPECT_EQ(util::get_model_type(reader, fake_model_path, "vlm"), "qwen3_5");
+}
+
+TEST(HFModelLoaderTest, Qwen35MoeBackendAwareModelTypeSelection) {
+  JsonReader reader;
+  ASSERT_TRUE(reader.parse_text(R"json(
+    {
+      "architectures": ["Qwen3_5MoeForConditionalGeneration"],
+      "image_token_id": 248056,
+      "model_type": "qwen3_5_moe",
+      "text_config": {
+        "model_type": "qwen3_5_moe_text",
+        "num_experts": 256,
+        "num_experts_per_tok": 8
+      },
+      "video_token_id": 248057,
+      "vision_config": {
+        "model_type": "qwen3_5_moe"
+      }
+    }
+  )json"));
+
+  const std::filesystem::path fake_model_path("/tmp/Qwen3.5-MoE");
+  EXPECT_EQ(util::get_model_type(reader, fake_model_path), "qwen3_5_moe_text");
+  EXPECT_EQ(util::get_model_type(reader, fake_model_path, "llm"),
+            "qwen3_5_moe_text");
+  EXPECT_EQ(util::get_model_type(reader, fake_model_path, "vlm"),
+            "qwen3_5_moe");
+}
 
 TEST(HFModelLoaderTest, LoadCompressedTensorsFp8StaticConfig) {
   JsonReader reader;

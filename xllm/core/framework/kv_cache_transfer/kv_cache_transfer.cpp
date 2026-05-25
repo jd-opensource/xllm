@@ -15,8 +15,9 @@ limitations under the License.
 
 #include "framework/kv_cache_transfer/kv_cache_transfer.h"
 
-#include <algorithm>
 #include <glog/logging.h>
+
+#include <algorithm>
 
 #include "common/global_flags.h"
 #include "core/framework/config/disagg_pd_config.h"
@@ -64,7 +65,6 @@ folly::SemiFuture<bool> KVCacheTransfer::pull_kv_blocks_async(
   return future;
 }
 
-#if defined(USE_NPU)
 // In KV-split mode, local_blocks_ids already contains only this KV-split
 // rank's physical blocks. remote_blocks_ids holds the full D-side
 // total_blocks entries; this rank maps local_block[k] to
@@ -98,7 +98,6 @@ std::vector<TransferKVInfo> filter_kv_split_infos(
   }
   return filtered_kv_infos;
 }
-#endif
 
 std::vector<KVCacheTransfer::PushStep> KVCacheTransfer::BuildPushSchedule(
     const std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
@@ -118,7 +117,8 @@ std::vector<KVCacheTransfer::PushStep> KVCacheTransfer::BuildPushSchedule(
   for (const auto& kv : merged_kv_infos) {
     keys.push_back(&kv.first);
   }
-  std::sort(keys.begin(), keys.end(),
+  std::sort(keys.begin(),
+            keys.end(),
             [](const std::string* a, const std::string* b) { return *a < *b; });
 
   const size_t n = keys.size();
@@ -137,8 +137,7 @@ std::vector<KVCacheTransfer::PushStep> KVCacheTransfer::BuildPushSchedule(
   for (int64_t layer = 0; layer < num_layers; ++layer) {
     for (size_t dd = 0; dd < n; ++dd) {
       const std::string* key = keys[(dd + offset) % n];
-      schedule.push_back(
-          PushStep{layer, &merged_kv_infos.at(*key), key});
+      schedule.push_back(PushStep{layer, &merged_kv_infos.at(*key), key});
     }
   }
   return schedule;

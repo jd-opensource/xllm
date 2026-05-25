@@ -82,12 +82,16 @@ struct DiTForwardInput {
       os << "undefined" << std::endl;
     }
 
-    os << "condition_images: ";
-    if (condition_images.defined()) {
-      os << condition_images.sizes() << std::endl;
-    } else {
-      os << "undefined" << std::endl;
+    os << "images_list: [";
+    for (size_t i = 0; i < images_list.size(); ++i) {
+      if (images_list[i].defined()) {
+        os << images_list[i].sizes();
+      } else {
+        os << "undefined";
+      }
+      if (i < images_list.size() - 1) os << ", ";
     }
+    os << "]" << std::endl;
 
     os << "mask_images: ";
     if (mask_images.defined()) {
@@ -200,8 +204,8 @@ struct DiTForwardInput {
       input.mask_images = mask_images.to(device, dtype);
     }
 
-    if (condition_images.defined()) {
-      input.condition_images = condition_images.to(device, dtype);
+    for (auto& img : input.images_list) {
+      img = img.to(device, dtype);
     }
 
     if (control_image.defined()) {
@@ -231,7 +235,7 @@ struct DiTForwardInput {
 
   torch::Tensor images;
 
-  torch::Tensor condition_images;
+  std::vector<torch::Tensor> images_list;
 
   torch::Tensor mask_images;
 

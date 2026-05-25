@@ -110,8 +110,7 @@ ForwardInput make_forward_input(
 }
 
 TEST(CpInputPartitionTest, NoOpWhenCpSizeOne) {
-  auto fi =
-      make_forward_input({1, 2, 3, 4}, {0, 1, 2, 3}, /*q_seq_lens=*/{4});
+  auto fi = make_forward_input({1, 2, 3, 4}, {0, 1, 2, 3}, /*q_seq_lens=*/{4});
   auto orig_tokens = tensor_to_vec(fi.token_ids);
   auto orig_q_seq = fi.input_params.attention.host.q_seq_lens;
 
@@ -191,15 +190,13 @@ TEST(CpInputPartitionTest, SingleSequenceCp2EvenLength) {
   cp_partition_inplace(rank0, /*cp_rank=*/0, /*cp_size=*/2);
   EXPECT_EQ(tensor_to_vec(rank0.token_ids),
             std::vector<int32_t>({100, 101, 106, 107}));
-  EXPECT_EQ(tensor_to_vec(rank0.positions),
-            std::vector<int32_t>({0, 1, 6, 7}));
+  EXPECT_EQ(tensor_to_vec(rank0.positions), std::vector<int32_t>({0, 1, 6, 7}));
 
   auto rank1 = make_forward_input(tokens, positions, {8});
   cp_partition_inplace(rank1, /*cp_rank=*/1, /*cp_size=*/2);
   EXPECT_EQ(tensor_to_vec(rank1.token_ids),
             std::vector<int32_t>({102, 103, 104, 105}));
-  EXPECT_EQ(tensor_to_vec(rank1.positions),
-            std::vector<int32_t>({2, 3, 4, 5}));
+  EXPECT_EQ(tensor_to_vec(rank1.positions), std::vector<int32_t>({2, 3, 4, 5}));
 }
 
 TEST(CpInputPartitionTest, MultiSequenceUnevenLengths) {
@@ -217,8 +214,7 @@ TEST(CpInputPartitionTest, MultiSequenceUnevenLengths) {
   auto rank0 = make_forward_input(tokens, positions, {5, 6});
   cp_partition_inplace(rank0, 0, 2);
   // seq0 contributes [0,1], seq1 contributes [5,6]
-  EXPECT_EQ(tensor_to_vec(rank0.token_ids),
-            std::vector<int32_t>({0, 1, 5, 6}));
+  EXPECT_EQ(tensor_to_vec(rank0.token_ids), std::vector<int32_t>({0, 1, 5, 6}));
   EXPECT_EQ(rank0.input_params.attention.host.q_seq_lens,
             to_layout_seq_lens({2, 2}));
 

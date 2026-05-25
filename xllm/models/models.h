@@ -58,6 +58,7 @@ limitations under the License.
 #include "vlm/npu/qwen3_vl.h"                 // IWYU pragma: keep
 #include "vlm/npu/qwen3_vl_mm_embedding.h"    // IWYU pragma: keep
 #include "vlm/npu/qwen3_vl_moe.h"             // IWYU pragma: keep
+#include "vlm/qwen3_5.h"                      // IWYU pragma: keep
 
 #elif defined(USE_MLU)
 #include "dit/pipeline_flux.h"          // IWYU pragma: keep

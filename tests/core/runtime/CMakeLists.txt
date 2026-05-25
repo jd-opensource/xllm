@@ -46,6 +46,16 @@ cc_test(
     GTest::gtest_main
 )
 
+cc_test(
+  NAME
+    cp_input_partition_test
+  SRCS
+    cp_input_partition_test.cpp
+  DEPS
+    :runtime
+    GTest::gtest_main
+)
+
 if(USE_MLU)
   cc_test(
     NAME

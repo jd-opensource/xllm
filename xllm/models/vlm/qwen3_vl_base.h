@@ -43,6 +43,8 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
     language_model_ = register_module("language_model", LanguageModel(context));
   }
 
+  virtual ~Qwen3VLForConditionalGenerationBase() = default;
+
   void prepare_encoder_input(const ModelInputParams& input_params,
                              std::optional<Qwen3_VLImageInputs>& image_inputs,
                              std::optional<Qwen3_VLVideoInputs>& video_inputs) {
@@ -200,6 +202,11 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
       visual_->load_state_dict(
           state_dict->get_dict_with_prefix("model.visual."));
     }
+
+#if defined(USE_NPU)
+    visual_->verify_loaded_weights("model.visual.");
+    visual_->merge_loaded_weights();
+#endif
 
     if (!model_args_.image_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");

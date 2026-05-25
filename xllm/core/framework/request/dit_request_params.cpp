@@ -19,6 +19,7 @@ limitations under the License.
 #include "butil/base64.h"
 #include "core/common/instance_name.h"
 #include "core/common/macros.h"
+#include "core/framework/config/dit_config.h"
 #include "core/util/utils.h"
 #include "core/util/uuid.h"
 #include "mm_codec.h"
@@ -139,14 +140,19 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
     }
   }
 
-  if (input.has_condition_image()) {
-    std::string raw_bytes;
-    if (!butil::Base64Decode(input.condition_image(), &raw_bytes)) {
+  input_params.images.reserve(input.images().size());
+  for (const auto& image : input.images()) {
+    std::string binary;
+    if (!butil::Base64Decode(image, &binary)) {
       LOG(ERROR) << "Base64 image decode failed";
+      continue;
     }
-    if (!decoder.decode(raw_bytes, input_params.condition_image)) {
+    torch::Tensor tensor;
+    if (!decoder.decode(binary, tensor)) {
       LOG(ERROR) << "Image decode failed.";
+      continue;
     }
+    input_params.images.emplace_back(std::move(tensor));
   }
 
   if (input.has_mask_image()) {
@@ -258,9 +264,33 @@ DiTRequestParams::DiTRequestParams(const proto::AudioGenerationRequest& request,
 
 bool DiTRequestParams::verify_params(
     std::function<bool(DiTRequestOutput)> callback) const {
-  if (input_params.prompt.empty()) {
+  if (input_params.prompt.empty() && !input_params.prompt_embed.defined()) {
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, "prompt is empty");
     return false;
+  }
+
+  if (generation_params.width < 0 || generation_params.height < 0) {
+    CALLBACK_WITH_ERROR(
+        StatusCode::INVALID_ARGUMENT,
+        "Invalid image dimensions: width and height must be non-negative.");
+    return false;
+  }
+
+  // Check if the image area exceeds the maximum allowed area.
+  if (::xllm::DiTConfig::get_instance().dit_generation_image_area_max() > 0) {
+    int64_t area = static_cast<int64_t>(generation_params.width) *
+                   static_cast<int64_t>(generation_params.height);
+    if (area >
+        ::xllm::DiTConfig::get_instance().dit_generation_image_area_max()) {
+      CALLBACK_WITH_ERROR(
+          StatusCode::INVALID_ARGUMENT,
+          "Requested image area (" + std::to_string(area) +
+              ") exceeds the maximum allowed area (" +
+              std::to_string(::xllm::DiTConfig::get_instance()
+                                 .dit_generation_image_area_max()) +
+              ").");
+      return false;
+    }
   }
 
   return true;
