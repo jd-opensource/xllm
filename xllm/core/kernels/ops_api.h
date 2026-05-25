@@ -158,6 +158,41 @@ torch::Tensor gated_layer_norm(GatedLayerNormParams& params);
 
 std::pair<torch::Tensor, torch::Tensor> partial_rotary_embedding(
     PartialRotaryEmbeddingParams& params);
+torch::Tensor hc_post(HcPostParams& params);
+
+std::tuple<torch::Tensor, torch::Tensor> quant_lightning_indexer(
+    QuantLightningIndexerParams& params);
+
+torch::Tensor hc_pre_inv_rms(HcPreInvRmsParams& params);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> hc_pre_sinkhorn(
+    HcPreSinkhornParams& params);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> hc_pre(
+    HcPreParams& params);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> moe_gating_top_k_hash(
+    MoeGatingTopKHashParams& params);
+
+std::tuple<torch::Tensor, torch::Tensor> sparse_attn_sharedkv(
+    SparseAttnSharedkvParams& params);
+
+torch::Tensor sparse_flash_attention(SparseFlashAttentionParams& params);
+
+std::tuple<torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor>
+compressor(CompressorParams& params);
+
+torch::Tensor quant_lightning_indexer_metadata(
+    QuantLightningIndexerMetadataParams& params);
+
+torch::Tensor sparse_attn_sharedkv_metadata(
+    SparseAttnSharedkvMetadataParams& params);
+
+void npu_inplace_partial_rotary_mul(NpuInplacePartialRotaryMulParams& params);
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 fused_qkvzba_split_reshape_cat(FusedQkvzbaSplitReshapeParams& params);
