@@ -35,6 +35,8 @@ limitations under the License.
 #include <c10/cuda/CUDAStream.h>
 #elif defined(USE_MUSA)
 #include <c10/musa/MUSAGuard.h>
+#elif defined(USE_DCU)
+#include <c10/hip/HIPStream.h>
 #endif
 
 #include "core/platform/stream_event.h"
@@ -59,6 +61,8 @@ class Stream {
   Stream(c10::cuda::CUDAStream stream, const int32_t timeout = -1);
 #elif defined(USE_MUSA)
   Stream(c10::musa::MUSAStream stream, const int32_t timeout = -1);
+#elif defined(USE_DCU)
+  Stream(c10::hip::HIPStream stream, const int32_t timeout = -1);
 #endif
 
   int synchronize() const;
@@ -73,6 +77,8 @@ class Stream {
   c10::cuda::CUDAStream* get_stream() { return &stream_; }
 #elif defined(USE_MUSA)
   c10::musa::MUSAStream* get_stream() { return &stream_; }
+#elif defined(USE_DCU)
+  c10::hip::HIPStream* get_stream() { return &stream_; }
 #endif
   void wait_stream(const Stream& other_stream);
   StreamEventPtr record_event() const;
@@ -90,6 +96,8 @@ class Stream {
   c10::cuda::CUDAStream stream_;
 #elif defined(USE_MUSA)
   c10::musa::MUSAStream stream_;
+#elif defined(USE_DCU)
+  c10::hip::HIPStream stream_;
 #endif
   const int32_t timeout_;
 };

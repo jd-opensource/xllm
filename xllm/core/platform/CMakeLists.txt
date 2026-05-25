@@ -18,7 +18,7 @@ cc_library(
     $<$<BOOL:${USE_CUDA}>:cuda/cuda_utils.h>
     $<$<BOOL:${USE_CUDA}>:cuda_profiler.h>
     $<$<BOOL:${USE_CUDA}>:torch_profiler.h>
-    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>>:numa_utils.h>
+    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_DCU}>>:numa_utils.h>
   SRCS
     stream.cpp
     device.cpp
@@ -28,7 +28,7 @@ cc_library(
     $<$<BOOL:${USE_MLU}>:mlu/mlu_tensor_alloc.cpp>
     $<$<BOOL:${USE_CUDA}>:cuda_profiler.cpp>
     $<$<BOOL:${USE_CUDA}>:torch_profiler.cpp>
-    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>>:numa_utils.cpp>
+    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_DCU}>>:numa_utils.cpp>
   DEPS
     torch
     glog::glog
@@ -39,8 +39,14 @@ cc_library(
     $<$<BOOL:${USE_MLU}>:cndrv>
     $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_ILU}>>:cuda>
     $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_ILU}>>:cudart>
-    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_ILU}>>:numa>
+    $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_ILU}>,$<BOOL:${USE_DCU}>>:numa>
     $<$<BOOL:${USE_MUSA}>:musa>
     $<$<BOOL:${USE_MUSA}>:musart>
     $<$<BOOL:${USE_NPU}>:platform_npu>
+    $<$<BOOL:${USE_DCU}>:hip::host>
+
 )
+
+if(USE_DCU)
+    target_compile_definitions(platform PUBLIC _GLIBCXX_USE_CXX11_ABI=${USE_CXX11_ABI})
+endif()

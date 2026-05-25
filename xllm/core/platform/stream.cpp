@@ -41,6 +41,8 @@ c10::Stream to_c10_stream(const c10::cuda::CUDAStream& stream) {
 c10::Stream to_c10_stream(const c10::musa::MUSAStream& stream) {
   return stream;
 }
+#elif defined(USE_DCU)
+c10::Stream to_c10_stream(const c10::hip::HIPStream& stream) { return stream; }
 #endif
 
 }  // namespace
@@ -57,6 +59,9 @@ Stream::Stream(const int32_t timeout)
 #elif defined(USE_MUSA)
 Stream::Stream(const int32_t timeout)
     : stream_(c10::musa::getStreamFromPool()), timeout_(timeout) {}
+#elif defined(USE_DCU)
+Stream::Stream(const int32_t timeout)
+    : stream_(c10::hip::getStreamFromPool()), timeout_(timeout) {}
 #endif
 
 #if defined(USE_NPU)
@@ -71,6 +76,9 @@ Stream::Stream(c10::cuda::CUDAStream stream, const int32_t timeout)
 #elif defined(USE_MUSA)
 Stream::Stream(c10::musa::MUSAStream stream, const int32_t timeout)
     : stream_(stream), timeout_(timeout) {}
+#elif defined(USE_DCU)
+Stream::Stream(c10::hip::HIPStream stream, const int32_t timeout)
+    : stream_(stream), timeout_(timeout) {}
 #endif
 
 int Stream::synchronize() const {
@@ -79,17 +87,19 @@ int Stream::synchronize() const {
 #elif defined(USE_MLU)
   stream_.unwrap().synchronize();
   return 0;
-#elif defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA)
+#elif defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA) || \
+    defined(USE_DCU)
   stream_.synchronize();
   return 0;
 #else
   LOG(FATAL) << "Not supported backend, currently we support 'npu', 'cuda', "
-                "'mlu', 'musa'.";
+                "'mlu', 'musa','dcu'.";
 #endif
 }
 
 c10::StreamGuard Stream::set_stream_guard() const {
-#if defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA)
+#if defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA) || \
+    defined(USE_DCU)
   return c10::StreamGuard(stream_);
 #else
   return c10::StreamGuard(stream_.unwrap());
@@ -191,7 +201,7 @@ std::ostream& operator<<(std::ostream& os, const Stream& stream) {
   // MLUStream output: device index and stream id
   os << "MLUStream[device=" << stream.stream_.device_index()
      << ", stream_id=" << stream.stream_.id() << "]";
-#elif defined(USE_CUDA) || defined(USE_ILU)
+#elif defined(USE_CUDA) || defined(USE_ILU) || defined(USE_DCU)
   // For CUDA, use the existing operator<< from c10::cuda::CUDAStream
   os << stream.stream_;
 #else
