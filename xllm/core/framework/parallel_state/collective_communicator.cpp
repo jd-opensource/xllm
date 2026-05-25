@@ -23,7 +23,7 @@ limitations under the License.
 #include "xllm_atb_layers/core/include/atb_speed/utils/singleton.h"
 #elif defined(USE_MLU)
 #include "mlu_process_group.h"
-#elif defined(USE_CUDA)
+#elif defined(USE_CUDA) || defined(USE_DCU)
 #include "cuda_process_group.h"
 #elif defined(USE_ILU)
 #include "ilu_process_group.h"

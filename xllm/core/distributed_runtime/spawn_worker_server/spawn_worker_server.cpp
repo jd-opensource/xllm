@@ -30,7 +30,7 @@ limitations under the License.
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/platform/device.h"
-#if defined(USE_CUDA) || defined(USE_MLU)
+#if defined(USE_CUDA) || defined(USE_MLU) || defined(USE_DCU)
 #include "core/platform/numa_utils.h"
 #endif
 #include "core/runtime/options.h"
@@ -133,7 +133,7 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
   KernelConfig::get_instance().npu_kernel_backend(npu_kernel_backend);
   FLAGS_enable_atb_comm_multiprocess = true;
 #endif
-#if defined(USE_CUDA) || defined(USE_MLU)
+#if defined(USE_CUDA) || defined(USE_MLU) || defined(USE_DCU)
   // Bind worker process to the same NUMA node as the device
   // This prevents the process from spanning across NUMA nodes, which would
   // significantly degrade memory access and other performance aspects

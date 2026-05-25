@@ -144,7 +144,8 @@ void RecMultiRoundBatchInputBuilder::process_single_sequence(
 #if defined(USE_NPU)
   base_state.seq_lens.push_back(seq_len);
   base_state.q_seq_lens.push_back(q_seq_len);
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
+    defined(USE_DCU)
   base_state.seq_lens.push_back(base_state.seq_lens.back() + seq_len);
   base_state.q_seq_lens.push_back(base_state.q_seq_lens.back() + q_seq_len);
 #endif
@@ -319,7 +320,7 @@ void RecMultiRoundBatchInputBuilder::setup_kv_cache_info(
   }
   state.block_tables_vec.emplace_back(std::move(block_ids));
 #elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
-    defined(USE_MUSA)
+    defined(USE_MUSA) || defined(USE_DCU)
   // TODO: refactor this branch when NPU multi-round xattention lands.
   RecMultiRoundBuilderState& state = rec_multi_round_state_;
   BuilderState& base_state = state.base_state;

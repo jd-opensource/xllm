@@ -405,7 +405,8 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.kv_cache_tokens_nums.insert(state_.kv_cache_tokens_nums.end(),
                                        state.kv_cache_tokens_nums.begin(),
                                        state.kv_cache_tokens_nums.end());
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
+    defined(USE_DCU)
     int32_t seq_len_offset = state_.seq_lens.back();
     // skip the first element which is 0
     for (size_t i = 1; i < state.seq_lens.size(); ++i) {
@@ -518,7 +519,8 @@ void BatchInputBuilder::process_single_sequence(
 #if defined(USE_NPU)
   state.seq_lens.push_back(seq_len);
   state.q_seq_lens.push_back(padded_q_seq_len);
-#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU)
+#elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
+    defined(USE_DCU)
   state.seq_lens.push_back(state.seq_lens.back() + seq_len);
   state.q_seq_lens.push_back(state.q_seq_lens.back() + padded_q_seq_len);
 #endif

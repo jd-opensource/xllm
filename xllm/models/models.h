@@ -101,6 +101,10 @@ limitations under the License.
 #include "vlm/qwen3_vl_moe.h"                           // IWYU pragma: keep
 #elif defined(USE_MUSA)
 #include "llm/musa/qwen3.h"  // IWYU pragma: keep
+#elif defined(USE_DCU)
+#include "llm/qwen2.h"
+#include "llm/qwen3.h"
+#include "llm/qwen3_moe.h"
 #else
 #error "Unsupported device type, only support NPU, CUDA, MLU, ILU and MUSA now."
 #endif

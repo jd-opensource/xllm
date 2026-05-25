@@ -85,7 +85,7 @@ class RecMultiRoundBatchInputBuilder : public RecBatchInputBuilder {
     std::vector<int32_t> seq_lens;
     std::vector<int32_t> q_seq_lens;
 #elif defined(USE_MLU) || defined(USE_CUDA) || defined(USE_ILU) || \
-    defined(USE_MUSA)
+    defined(USE_MUSA) || defined(USE_DCU)
     std::vector<int32_t> seq_lens = {0};    // cu_seq_lens
     std::vector<int32_t> q_seq_lens = {0};  // q_cu_seq_len
 #endif

@@ -60,7 +60,11 @@ class ExecutionConfig final {
 
   PROPERTY(bool, enable_prefill_piecewise_graph) = false;
 
+#if defined(USE_DCU)
+  PROPERTY(bool, enable_graph_vmm_pool) = false;
+#else
   PROPERTY(bool, enable_graph_vmm_pool) = true;
+#endif
 
   PROPERTY(int32_t, max_tokens_for_graph_mode) = 2048;
 
