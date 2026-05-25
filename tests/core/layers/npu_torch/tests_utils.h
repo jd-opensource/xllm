@@ -44,7 +44,7 @@ inline c10::intrusive_ptr<c10d::Work> make_completed_work() {
 }
 
 // Mock Backend for testing - minimal implementation for tp=1 tests
-class MockBackend : public c10d::Backend {
+class MockBackend final : public c10d::Backend {
  public:
   MockBackend(int64_t rank, int64_t world_size)
       : c10d::Backend(rank, world_size), rank_(rank), world_size_(world_size) {}

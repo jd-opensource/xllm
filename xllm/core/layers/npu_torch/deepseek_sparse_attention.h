@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <tuple>
 
@@ -49,7 +50,7 @@ using KVState = std::tuple<torch::Tensor,
 class DSAttentionImpl : public torch::nn::Module {
  public:
   DSAttentionImpl() = default;
-  DSAttentionImpl(const ModelContext& context, int32_t layer_id = -1);
+  explicit DSAttentionImpl(const ModelContext& context, int32_t layer_id = -1);
   DSAttentionImpl(const ModelArgs& args,
                   const QuantArgs& quant_args,
                   const ParallelArgs& parallel_args,

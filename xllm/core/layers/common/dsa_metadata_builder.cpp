@@ -78,7 +78,7 @@ void DSAMetadataBuilder::build_dsa_fields(
     DSAMetadata& dsa) {
   const int32_t batch_size =
       static_cast<int32_t>(params.attention.host.kv_seq_lens.size());
-  std::vector<int> q_lens_vec;
+  std::vector<int32_t> q_lens_vec;
   q_lens_vec.reserve(batch_size);
 
   dsa.input_positions = positions;
@@ -149,7 +149,9 @@ void DSAMetadataBuilder::build_dsa_fields(
     const int32_t n_layers = static_cast<int32_t>(caches_info.size());
     const auto& ctx_lens = params.attention.host.kv_seq_lens;
     int64_t total_tokens = 0;
-    for (auto len : ctx_lens) total_tokens += len;
+    for (int32_t len : ctx_lens) {
+      total_tokens += len;
+    }
 
     // Step 1: block -> slot expansion per manager
     std::vector<torch::Tensor> mgr_slots(manager_num);
@@ -219,7 +221,7 @@ void DSAMetadataBuilder::build_dsa_fields(
 torch::Tensor DSAMetadataBuilder::expand_blocks_to_slots(
     const torch::Tensor& block_table,
     const DSAGroupInfo& gi,
-    const std::vector<int>& ctx_lens,
+    const std::vector<int32_t>& ctx_lens,
     int32_t batch_size,
     int64_t total_tokens) {
   const int32_t bs = gi.block_size;
@@ -265,8 +267,8 @@ int64_t DSAMetadataBuilder::compute_slot_num(const DSAGroupInfo& gi,
 void DSAMetadataBuilder::process_group(const torch::Tensor& raw_bt,
                                        const torch::Tensor& raw_slots,
                                        const DSAGroupInfo& gi,
-                                       const std::vector<int>& ctx_lens,
-                                       const std::vector<int>& q_lens,
+                                       const std::vector<int32_t>& ctx_lens,
+                                       const std::vector<int32_t>& q_lens,
                                        int32_t batch_size,
                                        int64_t total_tokens,
                                        torch::Tensor& out_bt,
@@ -297,15 +299,16 @@ void DSAMetadataBuilder::process_group(const torch::Tensor& raw_bt,
   }
 }
 
-void DSAMetadataBuilder::process_token_group(const torch::Tensor& raw_bt,
-                                             const torch::Tensor& raw_slots,
-                                             int32_t ratio,
-                                             const std::vector<int>& ctx_lens,
-                                             const std::vector<int>& q_lens,
-                                             int32_t batch_size,
-                                             int64_t total_tokens,
-                                             torch::Tensor& out_bt,
-                                             torch::Tensor& out_slots) {
+void DSAMetadataBuilder::process_token_group(
+    const torch::Tensor& raw_bt,
+    const torch::Tensor& raw_slots,
+    int32_t ratio,
+    const std::vector<int32_t>& ctx_lens,
+    const std::vector<int32_t>& q_lens,
+    int32_t batch_size,
+    int64_t total_tokens,
+    torch::Tensor& out_bt,
+    torch::Tensor& out_slots) {
   CHECK_EQ(static_cast<int32_t>(ctx_lens.size()), batch_size)
       << "process_token_group requires ctx_lens.size == batch_size, got "
       << ctx_lens.size() << " vs " << batch_size;
@@ -365,8 +368,8 @@ void DSAMetadataBuilder::process_token_group(const torch::Tensor& raw_bt,
 void DSAMetadataBuilder::process_swa_group(const torch::Tensor& raw_bt,
                                            const torch::Tensor& raw_slots,
                                            int32_t block_size,
-                                           const std::vector<int>& ctx_lens,
-                                           const std::vector<int>& q_lens,
+                                           const std::vector<int32_t>& ctx_lens,
+                                           const std::vector<int32_t>& q_lens,
                                            int32_t batch_size,
                                            torch::Tensor& out_bt,
                                            torch::Tensor& out_slots) {

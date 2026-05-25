@@ -67,11 +67,12 @@ class DSAMetadataBuilder {
       DSAMetadata& dsa_metadata);
 
   // Step 1: expand block_table to slot array for one manager.
-  static torch::Tensor expand_blocks_to_slots(const torch::Tensor& block_table,
-                                              const DSAGroupInfo& gi,
-                                              const std::vector<int>& ctx_lens,
-                                              int32_t batch_size,
-                                              int64_t total_tokens);
+  static torch::Tensor expand_blocks_to_slots(
+      const torch::Tensor& block_table,
+      const DSAGroupInfo& gi,
+      const std::vector<int32_t>& ctx_lens,
+      int32_t batch_size,
+      int64_t total_tokens);
 
   // Compute how many slots a single seq needs for this group.
   static int64_t compute_slot_num(const DSAGroupInfo& gi, int64_t token_len);
@@ -80,8 +81,8 @@ class DSAMetadataBuilder {
   static void process_group(const torch::Tensor& raw_bt,
                             const torch::Tensor& raw_slots,
                             const DSAGroupInfo& gi,
-                            const std::vector<int>& ctx_lens,
-                            const std::vector<int>& q_lens,
+                            const std::vector<int32_t>& ctx_lens,
+                            const std::vector<int32_t>& q_lens,
                             int32_t batch_size,
                             int64_t total_tokens,
                             torch::Tensor& out_bt,
@@ -90,8 +91,8 @@ class DSAMetadataBuilder {
   static void process_token_group(const torch::Tensor& raw_bt,
                                   const torch::Tensor& raw_slots,
                                   int32_t ratio,
-                                  const std::vector<int>& ctx_lens,
-                                  const std::vector<int>& q_lens,
+                                  const std::vector<int32_t>& ctx_lens,
+                                  const std::vector<int32_t>& q_lens,
                                   int32_t batch_size,
                                   int64_t total_tokens,
                                   torch::Tensor& out_bt,
@@ -100,8 +101,8 @@ class DSAMetadataBuilder {
   static void process_swa_group(const torch::Tensor& raw_bt,
                                 const torch::Tensor& raw_slots,
                                 int32_t block_size,
-                                const std::vector<int>& ctx_lens,
-                                const std::vector<int>& q_lens,
+                                const std::vector<int32_t>& ctx_lens,
+                                const std::vector<int32_t>& q_lens,
                                 int32_t batch_size,
                                 torch::Tensor& out_bt,
                                 torch::Tensor& out_slots);

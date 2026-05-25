@@ -20,6 +20,7 @@ limitations under the License.
 #include <cmath>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <tuple>
 #include <vector>
 
@@ -42,11 +43,11 @@ struct DsaCacheMapping {
   int64_t index_score_state_cache_idx = -1;
 };
 
-c10::optional<torch::Tensor> as_optional(const torch::Tensor& tensor) {
+std::optional<torch::Tensor> as_optional(const torch::Tensor& tensor) {
   if (tensor.defined() && tensor.numel() > 0) {
-    return c10::optional<torch::Tensor>(tensor);
+    return std::optional<torch::Tensor>(tensor);
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 torch::Tensor get_layer_cache_tensor(
@@ -718,7 +719,7 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
   }
 
   // 7) sparse shared-kv attention
-  c10::optional<torch::Tensor> sparse_metadata = c10::nullopt;
+  std::optional<torch::Tensor> sparse_metadata = std::nullopt;
   if (compress_ratio_i == 1) {
     sparse_metadata = as_optional(c1_metadata);
   } else if (compress_ratio_i == 4) {
@@ -731,7 +732,7 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
       << "DSAttention requires precomputed sparse metadata for compress_ratio="
       << compress_ratio_i;
 
-  c10::optional<torch::Tensor> cu_seqlens_ori_kv_for_attn = c10::nullopt;
+  std::optional<torch::Tensor> cu_seqlens_ori_kv_for_attn = std::nullopt;
   if (isprefill) {
     // Prefill packs ori_kv into temporary PA_ND blocks; pass the same
     // cu-seqlens shape used by vllm-ascend and the precomputed metadata.
@@ -743,19 +744,19 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
       /*q=*/q,
       /*ori_kv=*/as_optional(ori_kv_for_attn),
       /*cmp_kv=*/compress_ratio_i > 1 ? as_optional(cmp_kv_for_attn)
-                                      : c10::nullopt,
-      /*ori_sparse_indices=*/c10::nullopt,
+                                      : std::nullopt,
+      /*ori_sparse_indices=*/std::nullopt,
       /*cmp_sparse_indices=*/
-      compress_ratio_i == 4 ? as_optional(compress_topk_idxs) : c10::nullopt,
+      compress_ratio_i == 4 ? as_optional(compress_topk_idxs) : std::nullopt,
       /*ori_block_table=*/as_optional(ori_block_table_for_attn),
       /*cmp_block_table=*/
-      compress_ratio_i > 1 ? as_optional(cmp_block_table) : c10::nullopt,
+      compress_ratio_i > 1 ? as_optional(cmp_block_table) : std::nullopt,
       /*cu_seqlens_q=*/as_optional(attn_metadata.actual_seq_lengths_query),
       /*cu_seqlens_ori_kv=*/cu_seqlens_ori_kv_for_attn,
-      /*cu_seqlens_cmp_kv=*/c10::nullopt,
-      /*seqused_q=*/c10::nullopt,
+      /*cu_seqlens_cmp_kv=*/std::nullopt,
+      /*seqused_q=*/std::nullopt,
       /*seqused_kv=*/as_optional(attn_metadata.actual_seq_lengths_kv),
-      /*sinks=*/attn_sink_loaded_ ? as_optional(attn_sink_) : c10::nullopt,
+      /*sinks=*/attn_sink_loaded_ ? as_optional(attn_sink_) : std::nullopt,
       /*metadata=*/sparse_metadata,
       /*softmax_scale=*/softmax_scale_,
       /*cmp_ratio=*/compress_ratio_i,

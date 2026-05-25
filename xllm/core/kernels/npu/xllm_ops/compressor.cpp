@@ -13,6 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include <glog/logging.h>
 #include <torch/library.h>
 
 #include "core/kernels/npu/aclnn/pytorch_npu_helper.hpp"
@@ -33,7 +34,7 @@ construct_compressor_output_tensor(const at::Tensor& x,
   constexpr int32_t DIM_2 = 2;
   constexpr int32_t DIM_3 = 3;
   constexpr int32_t VALUE_0 = 0;
-  auto x_dim = x.dim();
+  int64_t x_dim = x.dim();
   at::SmallVector<int64_t, 8> cmp_kv_size;
   at::SmallVector<int64_t, 8> wkv_proj_size;
   at::SmallVector<int64_t, 8> softmax_res_size;
@@ -44,7 +45,7 @@ construct_compressor_output_tensor(const at::Tensor& x,
   at::Tensor softmax_res;
   at::Tensor norm_x;
   at::Tensor norm_rstd;
-  auto cmp_s = 0;
+  int64_t cmp_s = 0;
   if (x_dim == DIM_3) {
     cmp_s = (x.size(1) + cmp_ratio - 1) / cmp_ratio;
     cmp_kv_size = {x.size(0), cmp_s, norm_weight.size(0)};
@@ -111,27 +112,20 @@ compressor(const at::Tensor& x,
   constexpr int32_t DIM_3 = 3;
   constexpr int32_t VALUE_0 = 0;
   // construct the output tensor
-  auto x_dim = x.dim();
-  TORCH_CHECK(x_dim == DIM_2 || x_dim == DIM_3,
-              "x dim num[",
-              x_dim,
-              "] should be 2 or 3");
+  int64_t x_dim = x.dim();
+  CHECK(x_dim == DIM_2 || x_dim == DIM_3)
+      << "x dim num[" << x_dim << "] should be 2 or 3";
 
-  auto norm_weight_dim = norm_weight.dim();
-  TORCH_CHECK(norm_weight_dim == DIM_1,
-              "norm_weight dim num[",
-              norm_weight_dim,
-              "] should be 1");
+  int64_t norm_weight_dim = norm_weight.dim();
+  CHECK(norm_weight_dim == DIM_1)
+      << "norm_weight dim num[" << norm_weight_dim << "] should be 1";
 
-  auto rope_sin_dim = rope_sin.dim();
-  TORCH_CHECK(rope_sin_dim == x_dim,
-              "rope_sin dim num[",
-              rope_sin_dim,
-              "] should be equal to x dim num[",
-              x_dim,
-              "]");
+  int64_t rope_sin_dim = rope_sin.dim();
+  CHECK(rope_sin_dim == x_dim)
+      << "rope_sin dim num[" << rope_sin_dim
+      << "] should be equal to x dim num[" << x_dim << "]";
 
-  TORCH_CHECK(cmp_ratio != VALUE_0, "cmp_ratio should not be 0");
+  CHECK(cmp_ratio != VALUE_0) << "cmp_ratio should not be 0";
 
   std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
       output = construct_compressor_output_tensor(

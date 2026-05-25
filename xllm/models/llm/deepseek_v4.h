@@ -25,6 +25,7 @@ limitations under the License.
 #include <iomanip>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <tuple>
 #include <unordered_map>
@@ -96,16 +97,19 @@ inline torch::Tensor maybe_to_device(const torch::Tensor& tensor,
 }
 
 // Group key: (ratio, type, block_size) -> group_id
-struct DSAGroupKey {
+class DSAGroupKey {
+ public:
   int32_t ratio;
   DSACacheType type;
   int32_t block_size;
+
   bool operator==(const DSAGroupKey& o) const {
     return ratio == o.ratio && type == o.type && block_size == o.block_size;
   }
 };
 
-struct DSAGroupKeyHash {
+class DSAGroupKeyHash {
+ public:
   size_t operator()(const DSAGroupKey& k) const {
     size_t h = std::hash<int32_t>()(k.ratio);
     h ^= std::hash<int32_t>()(static_cast<int32_t>(k.type)) << 16;

@@ -54,13 +54,13 @@ construct_quant_lightning_indexer_output_tensor(const at::Tensor& query,
   TORCH_CHECK(sparse_count > 0,
               "sparse count should be greater than 0, but now is ",
               sparse_count);
-  int64_t keyHeadNum =
+  int64_t key_head_num =
       (key_layout_str == "TND") ? key.size(DIM_1) : key.size(DIM_2);
   if (query_layout_str == "BSND") {
     output_size = {
-        query.size(DIM_0), query.size(DIM_1), keyHeadNum, sparse_count};
+        query.size(DIM_0), query.size(DIM_1), key_head_num, sparse_count};
   } else {
-    output_size = {query.size(DIM_0), keyHeadNum, sparse_count};
+    output_size = {query.size(DIM_0), key_head_num, sparse_count};
   }
   at::Tensor sparse_indices_out =
       at::zeros(output_size, query.options().dtype(at::kInt));
