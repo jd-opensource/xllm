@@ -91,3 +91,21 @@ if(USE_CUDA)
       torch
   )
 endif()
+
+if(USE_DCU)
+  cc_test(
+    NAME
+      dcu_graph_executor_test
+    SRCS
+      dcu_graph_executor_test.cpp
+    DEPS
+      :runtime
+      :batch
+      :block
+      :kv_cache
+      :kernels
+      GTest::gtest_main
+      torch
+      hip::host
+  )
+endif()
