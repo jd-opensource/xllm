@@ -20,15 +20,16 @@ limitations under the License.
 #include <string>
 #include <tuple>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
-#include "../../common/tests/tests_utils.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "kernels/ops_api.h"
 #include "layers/common/linear.h"
 #include "platform/device.h"
+#include "tests_utils.h"
 
 namespace xllm {
 namespace layer {
@@ -80,6 +81,16 @@ class NpuLinearW8A8TestBase : public ::testing::Test {
     auto offset = test::seeded_tensor(
         key, {out_features}, torch::kFloat32, options_.device());
     return offset * 0.2f - 0.1f;
+  }
+
+  void add_quant_desc(const std::string& prefix) {
+    quant_args_.quant_descs()[prefix + ".weight"] = quant_args_.quantize_type();
+  }
+
+  StateDict make_quant_state_dict(
+      std::unordered_map<std::string, torch::Tensor> weight_dict,
+      const std::string& prefix) {
+    return StateDict(std::move(weight_dict), prefix + ".");
   }
 
   // weight_offset is still loaded to verify checkpoint compatibility, but the
@@ -213,6 +224,8 @@ TEST_F(NpuLinearW8A8DynamicTest, ColumnParallelLinearLoadAndForward) {
   const int64_t batch_size = 3;
   const int64_t in_features = 16;
   const int64_t out_features = 12;
+  const std::string prefix = "npu.linear.column";
+  add_quant_desc(prefix);
 
   auto linear =
       ColumnParallelLinear(ColumnParallelLinearImpl(in_features,
@@ -237,7 +250,7 @@ TEST_F(NpuLinearW8A8DynamicTest, ColumnParallelLinearLoadAndForward) {
       {"weight_offset", weight_offset},
       {"bias", bias},
   };
-  StateDict state_dict(weight_dict);
+  StateDict state_dict = make_quant_state_dict(std::move(weight_dict), prefix);
   linear->load_state_dict(state_dict);
 
   EXPECT_EQ(linear->weight().scalar_type(), torch::kInt8);
@@ -255,6 +268,8 @@ TEST_F(NpuLinearW8A8DynamicTest, RowParallelLinearLoadAndForward) {
   const int64_t batch_size = 4;
   const int64_t in_features = 20;
   const int64_t out_features = 10;
+  const std::string prefix = "npu.linear.row";
+  add_quant_desc(prefix);
 
   auto linear =
       RowParallelLinear(RowParallelLinearImpl(in_features,
@@ -279,7 +294,7 @@ TEST_F(NpuLinearW8A8DynamicTest, RowParallelLinearLoadAndForward) {
       {"weight_offset", weight_offset},
       {"bias", bias},
   };
-  StateDict state_dict(weight_dict);
+  StateDict state_dict = make_quant_state_dict(std::move(weight_dict), prefix);
   linear->load_state_dict(state_dict);
 
   EXPECT_EQ(linear->weight().scalar_type(), torch::kInt8);
@@ -297,6 +312,8 @@ TEST_F(NpuLinearW8A8DynamicTest, ReplicatedLinearLoadAndForward) {
   const int64_t batch_size = 2;
   const int64_t in_features = 14;
   const int64_t out_features = 9;
+  const std::string prefix = "npu.linear.rep";
+  add_quant_desc(prefix);
 
   auto linear = ReplicatedLinear(ReplicatedLinearImpl(
       in_features, out_features, /*bias=*/true, quant_args_, options_));
@@ -314,7 +331,7 @@ TEST_F(NpuLinearW8A8DynamicTest, ReplicatedLinearLoadAndForward) {
       {"weight_offset", weight_offset},
       {"bias", bias},
   };
-  StateDict state_dict(weight_dict);
+  StateDict state_dict = make_quant_state_dict(std::move(weight_dict), prefix);
   linear->load_state_dict(state_dict);
 
   EXPECT_EQ(linear->weight().scalar_type(), torch::kInt8);
@@ -336,6 +353,8 @@ TEST_F(NpuLinearW8A8DynamicTest, QKVParallelLinearLoadAndForward) {
   const int64_t head_size = 4;
   const int64_t num_kv_head_replicas = 1;
   const int64_t out_features = (num_heads + num_kv_heads * 2) * head_size;
+  const std::string prefix = "npu.linear.qkv";
+  add_quant_desc(prefix);
 
   auto linear = QKVParallelLinear(QKVParallelLinearImpl(hidden_size,
                                                         num_heads,
@@ -361,7 +380,7 @@ TEST_F(NpuLinearW8A8DynamicTest, QKVParallelLinearLoadAndForward) {
       {"weight_offset", weight_offset},
       {"bias", bias},
   };
-  StateDict state_dict(weight_dict);
+  StateDict state_dict = make_quant_state_dict(std::move(weight_dict), prefix);
   linear->load_state_dict(state_dict);
 
   EXPECT_EQ(linear->weight().scalar_type(), torch::kInt8);
