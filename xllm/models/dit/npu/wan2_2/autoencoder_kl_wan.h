@@ -28,11 +28,11 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "../../autoencoder_kl.h"
 #include "core/framework/dit_model_loader.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/state_dict/state_dict.h"
 #include "framework/model_context.h"
+#include "models/dit/autoencoder_kl.h"
 #include "models/model_registry.h"
 #include "processors/input_processor.h"
 #include "processors/pywarpper_image_processor.h"
