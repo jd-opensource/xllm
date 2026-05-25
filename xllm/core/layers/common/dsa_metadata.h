@@ -117,6 +117,11 @@ struct DSAMetadata {
   // hadamard: Hadamard transform matrix
   torch::Tensor hadamard;
 
+  // Owns the device storage for non-graph DSA metadata tensors packed into a
+  // single host-to-device transfer. Individual metadata tensors may be views
+  // into this buffer.
+  torch::Tensor packed_metadata_buffer;
+
   // Cache spec per layer
   // caches_info[layer_id][cache_idx] = {group_id, type, ratio, block_size}
   // Points to model-owned data; valid for the lifetime of the model.
