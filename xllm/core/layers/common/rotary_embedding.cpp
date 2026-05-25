@@ -44,7 +44,7 @@ RotaryEmbeddingImpl::RotaryEmbeddingImpl(int64_t rotary_dim,
 
   // Pre-compute [cos_half, sin_half] format used by the CUDA/ILU/MUSA kernels.
   const auto dev = Device::type_str();
-  if (dev == "cuda" || dev == "ilu" || dev == "musa") {
+  if (dev == "cuda" || dev == "ilu" || dev == "musa" || dev == "dcu") {
     auto chunks = cos_sin_cache_.chunk(4, -1);
     precomputed_cos_sin_cache_ =
         torch::cat({chunks[0], chunks[2]}, -1).contiguous();
@@ -62,7 +62,8 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& q,
   if (is_prompt) {
     discrete = false;
     if (Device::type_str() == "cuda" || Device::type_str() == "npu" ||
-        Device::type_str() == "ilu" || Device::type_str() == "musa") {
+        Device::type_str() == "ilu" || Device::type_str() == "musa" ||
+        Device::type_str() == "dcu") {
       position_ids = positions;
     }
   } else {
@@ -99,7 +100,7 @@ void RotaryEmbeddingImpl::forward(torch::Tensor& input,
   if (is_prompt) {
     discrete = false;
     if (Device::type_str() == "cuda" || Device::type_str() == "npu" ||
-        Device::type_str() == "ilu") {
+        Device::type_str() == "ilu" || Device::type_str() == "dcu") {
       position_ids = positions;
     }
   } else {
@@ -251,7 +252,7 @@ DeepseekScalingRotaryEmbeddingImpl::DeepseekScalingRotaryEmbeddingImpl(
 
   // Pre-compute [cos_half, sin_half] format used by the CUDA/ILU/MUSA kernels.
   const auto dev = Device::type_str();
-  if (dev == "cuda" || dev == "ilu" || dev == "musa") {
+  if (dev == "cuda" || dev == "ilu" || dev == "musa" || dev == "dcu") {
     auto chunks = cos_sin_cache_.chunk(4, -1);
     precomputed_cos_sin_cache_ =
         torch::cat({chunks[0], chunks[2]}, -1).contiguous();

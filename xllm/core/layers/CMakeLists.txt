@@ -11,6 +11,8 @@ elseif(USE_CUDA)
   add_subdirectory(cuda)
 elseif(USE_MUSA)
   add_subdirectory(musa)
+elseif(USE_DCU)
+  add_subdirectory(dcu)
 endif()
 
 add_subdirectory(common)
