@@ -64,20 +64,18 @@ namespace {
 void handle_signal(int signum) { _exit(0); }
 }  // namespace
 
-void WorkerServer::create_server(
-    const runtime::Options& options,
-    std::atomic<bool>& done,
-    const std::string& master_node_addr,
-    const torch::Device& d,
-    int world_size,
-    int global_rank,
-    int32_t dp_size,
-    int local_rank,
-    int32_t ep_size,
-    int32_t cp_size,
-    WorkerType worker_type,
-    std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager,
-    std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager) {
+void WorkerServer::create_server(const runtime::Options& options,
+                                 std::atomic<bool>& done,
+                                 const std::string& master_node_addr,
+                                 const torch::Device& d,
+                                 ParallelArgs startup_parallel_args,
+                                 int world_size,
+                                 int global_rank,
+                                 int32_t dp_size,
+                                 int local_rank,
+                                 int32_t ep_size,
+                                 int32_t cp_size,
+                                 WorkerType worker_type) {
   FLAGS_enable_prefill_sp = options.enable_prefill_sp();
 #if defined(USE_NPU)
   FLAGS_npu_kernel_backend = options.npu_kernel_backend();
@@ -85,6 +83,11 @@ void WorkerServer::create_server(
   Device device(d);
   device.set_device();
   LOG(INFO) << "Create worker server with device: " << device.index();
+
+  std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager = nullptr;
+  std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager = nullptr;
+  prepare_shm(
+      startup_parallel_args, options, input_shm_manager, output_shm_manager);
 
 #if defined(USE_CUDA) || defined(USE_MLU)
   // Bind worker thread to the same NUMA node as the device
@@ -320,11 +323,6 @@ WorkerServer::WorkerServer(int local_worker_idx,
       signal(SIGINT, handle_signal);
       signal(SIGTERM, handle_signal);
 
-      std::unique_ptr<ForwardSharedMemoryManager> input_shm_manager = nullptr;
-      std::unique_ptr<ForwardSharedMemoryManager> output_shm_manager = nullptr;
-      prepare_shm(
-          parallel_args, options, input_shm_manager, output_shm_manager);
-
       // start worker in a thread.
       worker_thread_ =
           std::make_unique<std::thread>(&WorkerServer::create_server,
@@ -333,15 +331,14 @@ WorkerServer::WorkerServer(int local_worker_idx,
                                         std::ref(done),
                                         master_node_addr,
                                         d,
+                                        parallel_args,
                                         parallel_args.world_size(),
                                         parallel_args.rank(),
                                         parallel_args.dp_size(),
                                         local_worker_idx,
                                         parallel_args.ep_size(),
                                         parallel_args.cp_size(),
-                                        worker_type,
-                                        std::move(input_shm_manager),
-                                        std::move(output_shm_manager));
+                                        worker_type);
     }
   } else {
     // TODO: support other model type later.
