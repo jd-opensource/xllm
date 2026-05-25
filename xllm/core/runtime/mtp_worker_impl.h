@@ -56,6 +56,8 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
                   int32_t random_seed,
                   MasterStatus master_status) override;
 
+  std::tuple<int64_t, int64_t> estimate_kv_cache_capacity() override;
+
   bool allocate_kv_cache(const KVCacheShape& kv_cache_shape) override;
 
 #if defined(USE_NPU) || defined(USE_MLU)

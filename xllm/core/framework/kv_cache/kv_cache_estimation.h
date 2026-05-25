@@ -43,6 +43,19 @@ struct KVCacheEstimateOptions {
   bool enable_prefix_cache = false;
 };
 
+struct Dsv4KVCacheEstimateCost {
+  int64_t swa_count = 0;
+  int64_t n_c4_layers = 0;
+  int64_t n_c128_layers = 0;
+  int64_t constant_swa_bytes = 0;
+  int64_t token_unit_bytes = 0;
+  int64_t manager_blocks_per_unit = 1;
+};
+
+Dsv4KVCacheEstimateCost estimate_dsv4_kv_cache_cost(
+    const ModelArgs& model_args,
+    const KVCacheEstimateOptions& options);
+
 KVCacheCapacity estimate_kv_cache_capacity(
     const ModelArgs& model_args,
     const KVCacheEstimateOptions& options);
