@@ -89,6 +89,9 @@ AttentionMetadata build_attention_metadata(
         params.graph_buffer.expanded_block_tables;
     attn_metadata.expanded_paged_attention_tiling_data =
         params.graph_buffer.expanded_tiling_data;
+    attn_metadata.xfa_q_cu_seq_lens = params.graph_buffer.xfa_q_cu_seq_lens;
+    attn_metadata.xfa_extra_tiling = params.graph_buffer.xfa_extra_tiling;
+    attn_metadata.xfa_attn_mask = params.graph_buffer.xfa_attn_mask;
     if (!params.graph_buffer.expanded_kv_seq_lens_vec.empty()) {
       attn_metadata.expanded_kv_seq_lens_host = torch::tensor(
           params.graph_buffer.expanded_kv_seq_lens_vec, torch::kInt);
@@ -106,6 +109,9 @@ AttentionMetadata build_attention_metadata(
   if (use_acl_graph) {
     // ACL graph mode: use CustomPagedAttention with tiling_data on device
     attn_metadata.paged_attention_tiling_data = params.graph_buffer.tiling_data;
+    attn_metadata.xfa_q_cu_seq_lens = params.graph_buffer.xfa_q_cu_seq_lens;
+    attn_metadata.xfa_extra_tiling = params.graph_buffer.xfa_extra_tiling;
+    attn_metadata.xfa_attn_mask = params.graph_buffer.xfa_attn_mask;
   }
   // Provide capture-time host seq_lens for NPU kernels. ACL graph replay must
   // rely on fixed-address device inputs such as tiling_data, not mutable host
@@ -167,14 +173,17 @@ AttentionMetadata build_attention_metadata(
       params.batch_forward_type.is_chunked_prefill();
   attn_metadata.is_prefill = params.batch_forward_type.is_prefill();
 
-  // enable_mla is for DeepSeekv32 on mlu device
+#if defined(USE_NPU)
+  attn_metadata.block_table = params.block_tables;
+#else
   if (!attn_metadata.is_prefill || enable_mla) {
     attn_metadata.block_table = params.block_tables;
-#if !defined(USE_NPU) && !defined(USE_CUDA)
+#if !defined(USE_CUDA)
     attn_metadata.kv_seq_lens = torch::diff(params.kv_seq_lens);  // kv seqlens
     attn_metadata.q_seq_lens = torch::diff(params.q_seq_lens);    // q seqlens
 #endif
   }
+#endif
 #if defined(USE_NPU)
   // NPU path uses per-sequence lengths (not cumulative), so no diff.
   // Ensure per-sequence lengths are available for NPU kernels in all phases.

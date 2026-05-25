@@ -13,6 +13,7 @@ cc_library(
     beam_search.cpp
     select_unshared_kv.cpp
     beam_search_rec.cpp
+    x_flash_attention_infer.cpp
   DEPS
     atb
     torch_npu

@@ -34,6 +34,7 @@ limitations under the License.
 #endif
 #include "core/common/global_flags.h"
 #include "core/common/metrics.h"
+#include "core/kernels/npu/xllm_ops/xllm_ops_api.h"
 #include "core/util/utils.h"
 #include "platform/npu/device_capture_lock.h"
 
@@ -51,6 +52,7 @@ namespace xllm::npu {
 namespace {
 constexpr uint64_t kSpecVerifyGraphKeyMask = 1ull << 63;
 constexpr uint64_t kSpecVerifyQMaxSeqLenShift = 32;
+constexpr int64_t kFiaSplitFuseMaskSize = 2048;
 
 std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
     const std::vector<KVCache>& kv_caches) {
@@ -170,6 +172,18 @@ GraphPersistentParam::GraphPersistentParam(const ModelArgs& args,
     persistent_mask_ = torch::zeros({max_graph_tokens, max_seq_len},
                                     torch::dtype(dtype).device(device));
   }
+  xfa_extra_tiling_ = torch::zeros(
+      {xllm::kernel::npu::x_flash_attention_extra_tiling_int32_count()},
+      torch::dtype(torch::kInt32).device(device));
+  xfa_attn_mask_ =
+      torch::triu(torch::ones({kFiaSplitFuseMaskSize, kFiaSplitFuseMaskSize},
+                              torch::TensorOptions()
+                                  .dtype(torch::kFloat32)
+                                  .device(torch::kCPU)),
+                  1)
+          .to(torch::kInt8)
+          .to(device)
+          .contiguous();
 
   // Do not need to create ATB context and custom paged attention operation
   if (args_.head_dim() == 0) {
@@ -447,9 +461,10 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
         .slice(/*dim=*/0, /*start=*/0, /*end=*/embedding_tokens)
         .copy_(embedding, /*non_blocking=*/true);
   }
-  // Update q_cu_seq_lens only if params.q_cu_seq_lens is defined
+  // Preserve the historical q_cu_seq_lens semantics for Qwen3.5 GDN/conv
+  // update kernels. x_flash_attention graph replay uses a separate
+  // query-start buffer below.
   if (params.q_cu_seq_lens.defined()) {
-    // Lazy initialization: if q_cu_seq_lens_ is not initialized, initialize it
     if (q_cu_seq_lens_.numel() == 0) {
       const int64_t max_seqs_per_batch = get_decode_graph_capacity(options_);
       q_cu_seq_lens_ = torch::zeros({max_seqs_per_batch + 1},
@@ -464,8 +479,6 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     CHECK_GE(params.q_cu_seq_lens.numel(), required_q_cu_seq_lens)
         << "q_cu_seq_lens does not have enough entries for ACL graph execution";
     if (use_qwen3_5_query_start_loc && !input_has_leading_zero) {
-      // Normal Qwen3.5 decode input carries cumsum without the leading zero,
-      // while update kernels expect query_start_loc-style [0, cumsum...].
       q_cu_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/1).zero_();
       q_cu_seq_lens_
           .slice(/*dim=*/0, /*start=*/1, /*end=*/actual_batch_size + 1)
@@ -527,6 +540,48 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   if (use_expanded_spec_decode_attention) {
     expanded_kv_seq_lens_vec = update_expanded_spec_decode_attention(
         params, actual_num_tokens, padded_num_tokens, actual_batch_size);
+  }
+  if (xfa_q_cu_seq_lens_.numel() == 0) {
+    const int64_t max_graph_tokens = get_decode_graph_capacity(options_);
+    xfa_q_cu_seq_lens_ = torch::zeros(
+        {max_graph_tokens + 1}, torch::dtype(torch::kInt).device(device_));
+  }
+  xfa_q_cu_seq_lens_.slice(/*dim=*/0, /*start=*/0, /*end=*/1).zero_();
+  int32_t xfa_q_offset = 0;
+  std::vector<int32_t> xfa_q_cu_seq_lens_vec;
+  if (use_expanded_spec_decode_attention) {
+    xfa_q_cu_seq_lens_vec.reserve(padded_num_tokens);
+    for (uint32_t i = 0; i < padded_num_tokens; ++i) {
+      ++xfa_q_offset;
+      xfa_q_cu_seq_lens_vec.emplace_back(xfa_q_offset);
+    }
+  } else {
+    xfa_q_cu_seq_lens_vec.reserve(padded_batch_size);
+    for (int64_t i = 0; i < padded_batch_size; ++i) {
+      xfa_q_offset += padded_q_seq_lens_vec[i];
+      xfa_q_cu_seq_lens_vec.emplace_back(xfa_q_offset);
+    }
+  }
+  xfa_q_cu_seq_lens_
+      .slice(/*dim=*/0,
+             /*start=*/1,
+             /*end=*/static_cast<int64_t>(xfa_q_cu_seq_lens_vec.size()) + 1)
+      .copy_(torch::tensor(xfa_q_cu_seq_lens_vec, torch::kInt).to(device_),
+             /*non_blocking=*/true);
+
+  ModelInputParams xfa_params = params;
+  if (use_expanded_spec_decode_attention) {
+    xfa_params.num_sequences = padded_num_tokens;
+    xfa_params.kv_seq_lens_vec = expanded_kv_seq_lens_vec;
+    xfa_params.q_seq_lens_vec = std::vector<int32_t>(padded_num_tokens, 1);
+  } else {
+    xfa_params.num_sequences = padded_batch_size;
+    xfa_params.kv_seq_lens_vec = padded_kv_seq_lens_vec;
+    xfa_params.q_seq_lens_vec = padded_q_seq_lens_vec;
+  }
+  if (k_cache.defined() && k_cache.numel() > 0) {
+    update_x_flash_attention_extra_tiling(
+        xfa_params, xfa_params.num_sequences, k_cache);
   }
   if (tiling_data_.numel() > 0) {
     aclrtStream stream = c10_npu::getCurrentNPUStream().stream();
@@ -591,6 +646,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
           persistent_mask(padded_num_tokens);
     }
     params_for_capture->graph_buffer.tiling_data = tiling_data();
+    params_for_capture->graph_buffer.xfa_extra_tiling = xfa_extra_tiling();
+    params_for_capture->graph_buffer.xfa_attn_mask = xfa_attn_mask();
     // Set persistent embedding if available
     if (params.input_embedding.defined()) {
       params_for_capture->input_embedding =
@@ -612,15 +669,19 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       params_for_capture->graph_buffer.expanded_tiling_data = tiling_data();
       params_for_capture->graph_buffer.expanded_kv_seq_lens_vec =
           expanded_kv_seq_lens_vec;
+      params_for_capture->graph_buffer.xfa_q_cu_seq_lens =
+          xfa_q_cu_seq_lens().slice(/*dim=*/0,
+                                    /*start=*/0,
+                                    /*end=*/padded_num_tokens + 1);
+    } else {
+      params_for_capture->graph_buffer.xfa_q_cu_seq_lens =
+          xfa_q_cu_seq_lens().slice(/*dim=*/0,
+                                    /*start=*/0,
+                                    /*end=*/padded_batch_size + 1);
     }
-    // Set q_cu_seq_lens if available
-    if (params.q_cu_seq_lens.defined()) {
-      const bool use_qwen3_5_query_start_loc =
-          is_qwen3_5_model_type(args_.model_type());
+    if (q_cu_seq_lens_.defined() && q_cu_seq_lens_.numel() > 0) {
       params_for_capture->q_cu_seq_lens = q_cu_seq_lens_.slice(
-          /*dim=*/0,
-          /*start=*/0,
-          /*end=*/padded_batch_size + (use_qwen3_5_query_start_loc ? 1 : 0));
+          /*dim=*/0, /*start=*/0, /*end=*/padded_batch_size + 1);
     }
 
     return params_for_capture;
@@ -963,6 +1024,41 @@ void GraphPersistentParam::plan_paged_attention_tiling(
                        ACL_MEMCPY_HOST_TO_DEVICE,
                        stream);
   CHECK_EQ(acl_status, ACL_SUCCESS) << "Failed to copy tiling buffer to device";
+}
+
+void GraphPersistentParam::update_x_flash_attention_extra_tiling(
+    const ModelInputParams& input_params,
+    uint32_t padded_batch_size,
+    const torch::Tensor& k_cache) {
+  CHECK(k_cache.defined() && k_cache.dim() == 4)
+      << "x_flash_attention graph extra tiling needs valid k_cache";
+  const int dp_local_tp_size = options_.world_size() / options_.dp_size();
+  const int64_t q_head = args_.n_heads() / dp_local_tp_size;
+  const int64_t kv_head = std::max<int64_t>(
+      1, args_.n_kv_heads().value_or(args_.n_heads()) / dp_local_tp_size);
+  std::vector<int32_t> q_lens;
+  std::vector<int32_t> kv_lens;
+  q_lens.reserve(padded_batch_size);
+  kv_lens.reserve(padded_batch_size);
+  for (uint32_t i = 0; i < padded_batch_size; ++i) {
+    CHECK_LT(i, input_params.q_seq_lens_vec.size())
+        << "q_seq_lens_vec is shorter than padded_batch_size";
+    CHECK_LT(i, input_params.kv_seq_lens_vec.size())
+        << "kv_seq_lens_vec is shorter than padded_batch_size";
+    const int32_t q_len = input_params.q_seq_lens_vec[i];
+    const int32_t kv_len = input_params.kv_seq_lens_vec[i];
+    CHECK_EQ(q_len, 1)
+        << "x_flash_attention graph decode path expects q_len == 1";
+    q_lens.emplace_back(static_cast<int32_t>(i + 1));
+    kv_lens.emplace_back(kv_len);
+  }
+  xllm::kernel::npu::update_x_flash_attention_extra_tiling(q_lens,
+                                                           kv_lens,
+                                                           q_head,
+                                                           kv_head,
+                                                           k_cache.size(1),
+                                                           k_cache.size(3),
+                                                           xfa_extra_tiling_);
 }
 
 void GraphPersistentParam::update_attention_mask(

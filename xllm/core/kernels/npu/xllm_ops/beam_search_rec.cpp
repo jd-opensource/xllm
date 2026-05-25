@@ -83,6 +83,9 @@ void beam_search_rec(const torch::Tensor& logprobs,
   create_acltensor(&out_beam_count_prefix_sums_ids, out_beam_count_prefix_sums);
   create_acltensor(&out_sequence_ids, out_sequence);
 
+  CHECK_GT(top_tokens.dim(), 0)
+      << "beam_search_rec: top_tokens must have at least one dimension";
+  const int64_t top_k = top_tokens.size(-1);
   uint64_t workspace_size = 0;
   aclOpExecutor* executor = nullptr;
   CHECK_ACL_SUCCESS(
@@ -91,6 +94,7 @@ void beam_search_rec(const torch::Tensor& logprobs,
                                            top_logprobs_ids,
                                            sequence_group_ids,
                                            current_step,
+                                           top_k,
                                            out_token_ids_ids,
                                            out_token_index_ids,
                                            out_log_probs_ids,
