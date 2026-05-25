@@ -33,6 +33,7 @@ limitations under the License.
 #include <utility>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/execution_config.h"
 #include "core/framework/state_dict/utils.h"
 #include "core/kernels/ops_api.h"
 #include "core/layers/common/dsa_metadata.h"
@@ -81,7 +82,8 @@ inline torch::Tensor maybe_to_device(const torch::Tensor& tensor,
 inline bool deepseek_v4_uses_acl_graph(
     const xllm::ModelInputParams& input_params) {
 #if defined(USE_NPU)
-  return FLAGS_enable_graph && input_params.enable_graph;
+  return ::xllm::ExecutionConfig::get_instance().enable_graph() &&
+         input_params.enable_graph;
 #else
   (void)input_params;
   return false;
