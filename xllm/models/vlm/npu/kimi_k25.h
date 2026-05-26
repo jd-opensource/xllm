@@ -224,8 +224,10 @@ class KimiK2_5_VLInputProcessor : public InputProcessor {
       CHECK(vision_end_it != prompt.end())
           << "missing media end token after media content";
       auto media_pad_begin = std::next(vision_content_it);
-      uint32_t offset = std::distance(prompt.begin(), media_pad_begin);
-      uint32_t length = std::distance(media_pad_begin, vision_end_it);
+      int32_t offset =
+          static_cast<int32_t>(std::distance(prompt.begin(), media_pad_begin));
+      int32_t length =
+          static_cast<int32_t>(std::distance(media_pad_begin, vision_end_it));
 
       CHECK_LT(global_mm_index, mm_items.size())
           << "media span count exceeds mm item count";

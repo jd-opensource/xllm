@@ -225,16 +225,22 @@ std::optional<xllm::MMDict> proto_to_mmdict(const ProtoMap& pb_dict) {
   return cpp_dict;
 }
 
-void mmitem_state_to_proto(const xllm::MMItemState& cpp_state,
+bool mmitem_state_to_proto(const xllm::MMItemState& cpp_state,
                            proto::MMItemState* pb_state) {
   pb_state->set_token_pos_offset(cpp_state.token_pos().offset);
   pb_state->set_token_pos_length(cpp_state.token_pos().length);
-  pb_state->set_cached_token_num(cpp_state.prefix_cache().cached_token_num);
-  if (cpp_state.prefix_cached()) {
-    pb_state->set_prefix_cache_key(std::string(
-        reinterpret_cast<const char*>(cpp_state.prefix_cache().key.data),
-        XXH3_128BITS_HASH_VALUE_LEN));
+  if (cpp_state.mm_token_mask().defined() &&
+      !util::torch_to_proto(cpp_state.mm_token_mask(),
+                            pb_state->mutable_mm_token_mask())) {
+    LOG(ERROR) << "Failed to convert MMItemState mm_token_mask";
+    return false;
   }
+  pb_state->set_schedule_data_key(std::string(
+      reinterpret_cast<const char*>(cpp_state.schedule_data().key.data),
+      XXH3_128BITS_HASH_VALUE_LEN));
+  pb_state->set_schedule_data_start_pos(cpp_state.schedule_data().start_pos);
+  pb_state->set_schedule_data_end_pos(cpp_state.schedule_data().end_pos);
+  return true;
 }
 
 bool proto_to_mmitem_state(const proto::MMItemState& pb_state,
@@ -246,26 +252,34 @@ bool proto_to_mmitem_state(const proto::MMItemState& pb_state,
 
   cpp_state->mutable_token_pos().offset = pb_state.token_pos_offset();
   cpp_state->mutable_token_pos().length = pb_state.token_pos_length();
-  cpp_state->mutable_prefix_cache().cached_token_num =
-      pb_state.cached_token_num();
 
-  std::memset(cpp_state->mutable_prefix_cache().key.data,
-              0,
-              XXH3_128BITS_HASH_VALUE_LEN);
-  const auto& prefix_cache_key = pb_state.prefix_cache_key();
-  if (!prefix_cache_key.empty()) {
-    if (prefix_cache_key.size() != XXH3_128BITS_HASH_VALUE_LEN) {
-      LOG(ERROR) << "Invalid MMItemState prefix cache key size: "
-                 << prefix_cache_key.size();
+  if (pb_state.has_mm_token_mask()) {
+    torch::Tensor mm_token_mask =
+        util::proto_to_torch(pb_state.mm_token_mask());
+    if (!mm_token_mask.defined()) {
+      LOG(ERROR) << "Failed to convert PB MMItemState mm_token_mask";
       return false;
     }
-    std::memcpy(cpp_state->mutable_prefix_cache().key.data,
-                prefix_cache_key.data(),
-                XXH3_128BITS_HASH_VALUE_LEN);
-  } else if (pb_state.cached_token_num() > 0) {
-    LOG(ERROR) << "MMItemState has cached tokens but no prefix cache key";
-    return false;
+    cpp_state->mutable_mm_token_mask() = std::move(mm_token_mask);
   }
+
+  std::memset(cpp_state->mutable_schedule_data().key.data,
+              0,
+              XXH3_128BITS_HASH_VALUE_LEN);
+  const std::string& schedule_data_key = pb_state.schedule_data_key();
+  if (!schedule_data_key.empty()) {
+    if (schedule_data_key.size() != XXH3_128BITS_HASH_VALUE_LEN) {
+      LOG(ERROR) << "Invalid MMItemState schedule_data key size: "
+                 << schedule_data_key.size();
+      return false;
+    }
+    std::memcpy(cpp_state->mutable_schedule_data().key.data,
+                schedule_data_key.data(),
+                XXH3_128BITS_HASH_VALUE_LEN);
+  }
+  cpp_state->mutable_schedule_data().start_pos =
+      pb_state.schedule_data_start_pos();
+  cpp_state->mutable_schedule_data().end_pos = pb_state.schedule_data_end_pos();
 
   return true;
 }
@@ -278,11 +292,15 @@ bool mmdata_item_to_proto(const xllm::MMDataItem& cpp_item,
   }
 
   pb_item->set_type(cpp_item.type());
+  pb_item->set_seq_index(cpp_item.seq_index());
   if (!mmdict_to_proto(cpp_item.data(), pb_item->mutable_dict())) {
     LOG(ERROR) << "Failed to convert MMDataItem dict";
     return false;
   }
-  mmitem_state_to_proto(cpp_item.state(), pb_item->mutable_state());
+  if (!mmitem_state_to_proto(cpp_item.state(), pb_item->mutable_state())) {
+    LOG(ERROR) << "Failed to convert MMDataItem state";
+    return false;
+  }
 
   return true;
 }
@@ -297,6 +315,7 @@ std::optional<xllm::MMDataItem> proto_to_mmdata_item(
 
   xllm::MMType type{static_cast<xllm::MMType::Value>(pb_item.type())};
   xllm::MMDataItem cpp_item(type, std::move(*dict_opt));
+  cpp_item.set_seq_index(pb_item.seq_index());
   if (!proto_to_mmitem_state(pb_item.state(), &cpp_item.mutable_state())) {
     return std::nullopt;
   }

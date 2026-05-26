@@ -191,14 +191,17 @@ message MMValue {
 message MMItemState {
   uint32 token_pos_offset = 1;
   uint32 token_pos_length = 2;
-  bytes prefix_cache_key = 3;
-  uint32 cached_token_num = 4;
+  Tensor mm_token_mask = 3;
+  bytes schedule_data_key = 4;
+  int32 schedule_data_start_pos = 5;
+  int32 schedule_data_end_pos = 6;
 }
 
 message MMDataItem {
   uint32 type = 1;
   map<string, MMValue> dict = 2;
   MMItemState state = 3;
+  int32 seq_index = 4;
 }
 
 // Preserve the original per-request MMData item vector over brpc/proto.
