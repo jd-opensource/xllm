@@ -1077,6 +1077,8 @@ void FusedMoEImpl::clear_w4a8_dynamic_source_weight_cache() {
   w3_scale_second_ = torch::Tensor();
   w1_scale_bias_ = torch::Tensor();
   w3_scale_bias_ = torch::Tensor();
+  w13_scale_second_ = torch::Tensor();
+  w2_scale_second_ = torch::Tensor();
 
   w1_is_loaded_ = false;
   w3_is_loaded_ = false;
@@ -1086,6 +1088,8 @@ void FusedMoEImpl::clear_w4a8_dynamic_source_weight_cache() {
   w3_scale_second_is_loaded_ = false;
   w1_scale_bias_is_loaded_ = false;
   w3_scale_bias_is_loaded_ = false;
+  w13_scale_second_is_loaded_ = false;
+  w2_scale_second_is_loaded_ = false;
 
   w1_list_.clear();
   w3_list_.clear();
@@ -1095,6 +1099,8 @@ void FusedMoEImpl::clear_w4a8_dynamic_source_weight_cache() {
   w3_scale_second_list_.clear();
   w1_scale_bias_list_.clear();
   w3_scale_bias_list_.clear();
+  w13_scale_second_list_.clear();
+  w2_scale_second_list_.clear();
 }
 
 void FusedMoEImpl::load_experts(const StateDict& state_dict) {
