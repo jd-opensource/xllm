@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <mutex>
 #include <vector>
 
 #include "attention.h"
@@ -53,6 +54,8 @@ class Qwen3NextAttentionImpl : public torch::nn::Module {
   void load_state_dict(const StateDict& state_dict);
 
  private:
+  std::mutex load_state_dict_mutex_;
+
   int64_t num_heads_;
   int64_t num_kv_heads_;
   int64_t num_kv_head_replicas_;
@@ -67,9 +70,6 @@ class Qwen3NextAttentionImpl : public torch::nn::Module {
   float rms_norm_eps_;
   bool use_fused_qkv_;
   bool is_interleaved_;
-  bool qkv_weight_reordered_ = false;
-  bool q_norm_weight_adjusted_ = false;
-  bool k_norm_weight_adjusted_ = false;
   std::vector<int64_t> mrope_section_;
   torch::Tensor mrope_gather_pattern_;
 
