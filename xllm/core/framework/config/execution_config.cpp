@@ -70,38 +70,29 @@ DEFINE_int32(random_seed, -1, "Random seed for random number generator.");
 namespace xllm {
 
 void ExecutionConfig::from_flags() {
-  enable_graph(FLAGS_enable_graph)
-      .enable_graph_mode_decode_no_padding(
-          FLAGS_enable_graph_mode_decode_no_padding)
-      .enable_prefill_piecewise_graph(FLAGS_enable_prefill_piecewise_graph)
-      .enable_graph_vmm_pool(FLAGS_enable_graph_vmm_pool)
-      .max_tokens_for_graph_mode(FLAGS_max_tokens_for_graph_mode)
-      .enable_shm(FLAGS_enable_shm)
-      .use_contiguous_input_buffer(FLAGS_use_contiguous_input_buffer)
-      .input_shm_size(FLAGS_input_shm_size)
-      .output_shm_size(FLAGS_output_shm_size)
-      .random_seed(FLAGS_random_seed);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_graph);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_graph_mode_decode_no_padding);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_prefill_piecewise_graph);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_graph_vmm_pool);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_tokens_for_graph_mode);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_shm);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(use_contiguous_input_buffer);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(input_shm_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(output_shm_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(random_seed);
 }
 
 void ExecutionConfig::from_json(const JsonReader& json) {
-  enable_graph(json.value_or<bool>("enable_graph", enable_graph()))
-      .enable_graph_mode_decode_no_padding(
-          json.value_or<bool>("enable_graph_mode_decode_no_padding",
-                              enable_graph_mode_decode_no_padding()))
-      .enable_prefill_piecewise_graph(json.value_or<bool>(
-          "enable_prefill_piecewise_graph", enable_prefill_piecewise_graph()))
-      .enable_graph_vmm_pool(
-          json.value_or<bool>("enable_graph_vmm_pool", enable_graph_vmm_pool()))
-      .max_tokens_for_graph_mode(json.value_or<int32_t>(
-          "max_tokens_for_graph_mode", max_tokens_for_graph_mode()))
-      .enable_shm(json.value_or<bool>("enable_shm", enable_shm()))
-      .use_contiguous_input_buffer(json.value_or<bool>(
-          "use_contiguous_input_buffer", use_contiguous_input_buffer()))
-      .input_shm_size(
-          json.value_or<uint64_t>("input_shm_size", input_shm_size()))
-      .output_shm_size(
-          json.value_or<uint64_t>("output_shm_size", output_shm_size()))
-      .random_seed(json.value_or<int32_t>("random_seed", random_seed()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_graph);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_graph_mode_decode_no_padding);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_prefill_piecewise_graph);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_graph_vmm_pool);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_tokens_for_graph_mode);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_shm);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(use_contiguous_input_buffer);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(input_shm_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(output_shm_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(random_seed);
 }
 
 void ExecutionConfig::append_config_json(

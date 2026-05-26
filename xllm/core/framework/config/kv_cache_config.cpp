@@ -59,31 +59,25 @@ DEFINE_int64(
 namespace xllm {
 
 void KVCacheConfig::from_flags() {
-  block_size(FLAGS_block_size)
-      .max_cache_size(FLAGS_max_cache_size)
-      .max_memory_utilization(FLAGS_max_memory_utilization)
-      .kv_cache_dtype(FLAGS_kv_cache_dtype)
-      .enable_prefix_cache(FLAGS_enable_prefix_cache)
-      .xxh3_128bits_seed(FLAGS_xxh3_128bits_seed)
-      .enable_xtensor(FLAGS_enable_xtensor)
-      .phy_page_granularity_size(FLAGS_phy_page_granularity_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(block_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_cache_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_memory_utilization);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(kv_cache_dtype);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_prefix_cache);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(xxh3_128bits_seed);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_xtensor);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(phy_page_granularity_size);
 }
 
 void KVCacheConfig::from_json(const JsonReader& json) {
-  block_size(json.value_or<int32_t>("block_size", block_size()))
-      .max_cache_size(
-          json.value_or<int64_t>("max_cache_size", max_cache_size()))
-      .max_memory_utilization(json.value_or<double>("max_memory_utilization",
-                                                    max_memory_utilization()))
-      .kv_cache_dtype(
-          json.value_or<std::string>("kv_cache_dtype", kv_cache_dtype()))
-      .enable_prefix_cache(
-          json.value_or<bool>("enable_prefix_cache", enable_prefix_cache()))
-      .xxh3_128bits_seed(
-          json.value_or<uint32_t>("xxh3_128bits_seed", xxh3_128bits_seed()))
-      .enable_xtensor(json.value_or<bool>("enable_xtensor", enable_xtensor()))
-      .phy_page_granularity_size(json.value_or<int64_t>(
-          "phy_page_granularity_size", phy_page_granularity_size()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(block_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_cache_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_memory_utilization);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(kv_cache_dtype);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_prefix_cache);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(xxh3_128bits_seed);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_xtensor);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(phy_page_granularity_size);
 }
 
 void KVCacheConfig::append_config_json(

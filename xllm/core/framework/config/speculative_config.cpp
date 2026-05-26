@@ -70,55 +70,34 @@ DEFINE_bool(enable_atb_spec_kernel,
 namespace xllm {
 
 void SpeculativeConfig::from_flags() {
-  draft_model(FLAGS_draft_model)
-      .draft_devices(FLAGS_draft_devices)
-      .num_speculative_tokens(FLAGS_num_speculative_tokens)
-      .speculative_algorithm(FLAGS_speculative_algorithm)
-      .speculative_suffix_cache_max_depth(
-          FLAGS_speculative_suffix_cache_max_depth)
-      .speculative_suffix_max_spec_factor(
-          FLAGS_speculative_suffix_max_spec_factor)
-      .speculative_suffix_max_spec_offset(
-          FLAGS_speculative_suffix_max_spec_offset)
-      .speculative_suffix_min_token_prob(
-          FLAGS_speculative_suffix_min_token_prob)
-      .speculative_suffix_max_cached_requests(
-          FLAGS_speculative_suffix_max_cached_requests)
-      .speculative_suffix_use_tree_spec(FLAGS_speculative_suffix_use_tree_spec)
-      .enable_opt_validate_probs(FLAGS_enable_opt_validate_probs)
-      .enable_atb_spec_kernel(FLAGS_enable_atb_spec_kernel);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(draft_model);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(draft_devices);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(num_speculative_tokens);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(speculative_algorithm);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(speculative_suffix_cache_max_depth);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(speculative_suffix_max_spec_factor);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(speculative_suffix_max_spec_offset);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(speculative_suffix_min_token_prob);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(speculative_suffix_max_cached_requests);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(speculative_suffix_use_tree_spec);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_opt_validate_probs);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_atb_spec_kernel);
 }
 
 void SpeculativeConfig::from_json(const JsonReader& json) {
-  draft_model(json.value_or<std::string>("draft_model", draft_model()))
-      .draft_devices(
-          json.value_or<std::string>("draft_devices", draft_devices()))
-      .num_speculative_tokens(json.value_or<int32_t>("num_speculative_tokens",
-                                                     num_speculative_tokens()))
-      .speculative_algorithm(json.value_or<std::string>(
-          "speculative_algorithm", speculative_algorithm()))
-      .speculative_suffix_cache_max_depth(
-          json.value_or<int32_t>("speculative_suffix_cache_max_depth",
-                                 speculative_suffix_cache_max_depth()))
-      .speculative_suffix_max_spec_factor(
-          json.value_or<double>("speculative_suffix_max_spec_factor",
-                                speculative_suffix_max_spec_factor()))
-      .speculative_suffix_max_spec_offset(
-          json.value_or<double>("speculative_suffix_max_spec_offset",
-                                speculative_suffix_max_spec_offset()))
-      .speculative_suffix_min_token_prob(
-          json.value_or<double>("speculative_suffix_min_token_prob",
-                                speculative_suffix_min_token_prob()))
-      .speculative_suffix_max_cached_requests(
-          json.value_or<int32_t>("speculative_suffix_max_cached_requests",
-                                 speculative_suffix_max_cached_requests()))
-      .speculative_suffix_use_tree_spec(
-          json.value_or<bool>("speculative_suffix_use_tree_spec",
-                              speculative_suffix_use_tree_spec()))
-      .enable_opt_validate_probs(json.value_or<bool>(
-          "enable_opt_validate_probs", enable_opt_validate_probs()))
-      .enable_atb_spec_kernel(json.value_or<bool>("enable_atb_spec_kernel",
-                                                  enable_atb_spec_kernel()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(draft_model);
+  // don't read rank-related config
+  // XLLM_CONFIG_ASSIGN_FROM_JSON(draft_devices);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(num_speculative_tokens);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(speculative_algorithm);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(speculative_suffix_cache_max_depth);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(speculative_suffix_max_spec_factor);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(speculative_suffix_max_spec_offset);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(speculative_suffix_min_token_prob);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(speculative_suffix_max_cached_requests);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(speculative_suffix_use_tree_spec);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_opt_validate_probs);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_atb_spec_kernel);
 }
 
 void SpeculativeConfig::append_config_json(
@@ -126,8 +105,9 @@ void SpeculativeConfig::append_config_json(
   const SpeculativeConfig default_config;
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, draft_model);
-  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
-      config_json, default_config, draft_devices);
+  // don't dump rank-related config
+  //  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+  //      config_json, default_config, draft_devices);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, num_speculative_tokens);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

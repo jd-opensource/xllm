@@ -51,34 +51,30 @@ DEFINE_int32(etcd_ttl, 3, "Time to live for etcd.");
 namespace xllm {
 
 void DistributedConfig::from_flags() {
-  master_node_addr(FLAGS_master_node_addr)
-      .xtensor_master_node_addr(FLAGS_xtensor_master_node_addr)
-      .nnodes(FLAGS_nnodes)
-      .node_rank(FLAGS_node_rank)
-      .device_ip(FLAGS_device_ip)
-      .etcd_addr(FLAGS_etcd_addr)
-      .etcd_namespace(FLAGS_etcd_namespace)
-      .enable_service_routing(FLAGS_enable_service_routing)
-      .heart_beat_interval(FLAGS_heart_beat_interval)
-      .etcd_ttl(FLAGS_etcd_ttl);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(master_node_addr);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(xtensor_master_node_addr);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(nnodes);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(node_rank);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(device_ip);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(etcd_addr);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(etcd_namespace);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_service_routing);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(heart_beat_interval);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(etcd_ttl);
 }
 
 void DistributedConfig::from_json(const JsonReader& json) {
-  master_node_addr(
-      json.value_or<std::string>("master_node_addr", master_node_addr()))
-      .xtensor_master_node_addr(json.value_or<std::string>(
-          "xtensor_master_node_addr", xtensor_master_node_addr()))
-      .nnodes(json.value_or<int32_t>("nnodes", nnodes()))
-      .node_rank(json.value_or<int32_t>("node_rank", node_rank()))
-      .device_ip(json.value_or<std::string>("device_ip", device_ip()))
-      .etcd_addr(json.value_or<std::string>("etcd_addr", etcd_addr()))
-      .etcd_namespace(
-          json.value_or<std::string>("etcd_namespace", etcd_namespace()))
-      .enable_service_routing(json.value_or<bool>("enable_service_routing",
-                                                  enable_service_routing()))
-      .heart_beat_interval(
-          json.value_or<double>("heart_beat_interval", heart_beat_interval()))
-      .etcd_ttl(json.value_or<int32_t>("etcd_ttl", etcd_ttl()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(master_node_addr);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(xtensor_master_node_addr);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(nnodes);
+  // don't read rank-related config
+  // XLLM_CONFIG_ASSIGN_FROM_JSON(node_rank);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(device_ip);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(etcd_addr);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(etcd_namespace);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_service_routing);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(heart_beat_interval);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(etcd_ttl);
 }
 
 void DistributedConfig::append_config_json(
@@ -89,8 +85,9 @@ void DistributedConfig::append_config_json(
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, xtensor_master_node_addr);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, nnodes);
-  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
-      config_json, default_config, node_rank);
+  // don't dump rank-related config
+  //   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+  //       config_json, default_config, node_rank);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, device_ip);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

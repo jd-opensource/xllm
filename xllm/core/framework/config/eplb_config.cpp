@@ -35,26 +35,21 @@ DEFINE_string(rank_tablefile, "", "ATB HCCL rank table file.");
 namespace xllm {
 
 void EPLBConfig::from_flags() {
-  enable_eplb(FLAGS_enable_eplb)
-      .redundant_experts_num(FLAGS_redundant_experts_num)
-      .eplb_update_interval(FLAGS_eplb_update_interval)
-      .eplb_update_threshold(FLAGS_eplb_update_threshold)
-      .expert_parallel_degree(FLAGS_expert_parallel_degree)
-      .rank_tablefile(FLAGS_rank_tablefile);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_eplb);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(redundant_experts_num);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(eplb_update_interval);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(eplb_update_threshold);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(expert_parallel_degree);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(rank_tablefile);
 }
 
 void EPLBConfig::from_json(const JsonReader& json) {
-  enable_eplb(json.value_or<bool>("enable_eplb", enable_eplb()))
-      .redundant_experts_num(json.value_or<int32_t>("redundant_experts_num",
-                                                    redundant_experts_num()))
-      .eplb_update_interval(json.value_or<int64_t>("eplb_update_interval",
-                                                   eplb_update_interval()))
-      .eplb_update_threshold(json.value_or<double>("eplb_update_threshold",
-                                                   eplb_update_threshold()))
-      .expert_parallel_degree(json.value_or<int32_t>("expert_parallel_degree",
-                                                     expert_parallel_degree()))
-      .rank_tablefile(
-          json.value_or<std::string>("rank_tablefile", rank_tablefile()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_eplb);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(redundant_experts_num);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(eplb_update_interval);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(eplb_update_threshold);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(expert_parallel_degree);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(rank_tablefile);
 }
 
 void EPLBConfig::append_config_json(nlohmann::ordered_json& config_json) const {

@@ -59,36 +59,27 @@ DEFINE_bool(enable_forward_interruption,
 namespace xllm {
 
 void ProfileConfig::from_flags() {
-  enable_profile_step_time(FLAGS_enable_profile_step_time)
-      .enable_profile_token_budget(FLAGS_enable_profile_token_budget)
-      .enable_latency_aware_schedule(FLAGS_enable_latency_aware_schedule)
-      .profile_max_prompt_length(FLAGS_profile_max_prompt_length)
-      .max_global_ttft_ms(FLAGS_max_global_ttft_ms)
-      .max_global_tpot_ms(FLAGS_max_global_tpot_ms)
-      .enable_profile_kv_blocks(FLAGS_enable_profile_kv_blocks)
-      .disable_ttft_profiling(FLAGS_disable_ttft_profiling)
-      .enable_forward_interruption(FLAGS_enable_forward_interruption);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_profile_step_time);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_profile_token_budget);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_latency_aware_schedule);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(profile_max_prompt_length);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_global_ttft_ms);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_global_tpot_ms);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_profile_kv_blocks);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(disable_ttft_profiling);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_forward_interruption);
 }
 
 void ProfileConfig::from_json(const JsonReader& json) {
-  enable_profile_step_time(json.value_or<bool>("enable_profile_step_time",
-                                               enable_profile_step_time()))
-      .enable_profile_token_budget(json.value_or<bool>(
-          "enable_profile_token_budget", enable_profile_token_budget()))
-      .enable_latency_aware_schedule(json.value_or<bool>(
-          "enable_latency_aware_schedule", enable_latency_aware_schedule()))
-      .profile_max_prompt_length(json.value_or<int32_t>(
-          "profile_max_prompt_length", profile_max_prompt_length()))
-      .max_global_ttft_ms(
-          json.value_or<int32_t>("max_global_ttft_ms", max_global_ttft_ms()))
-      .max_global_tpot_ms(
-          json.value_or<int32_t>("max_global_tpot_ms", max_global_tpot_ms()))
-      .enable_profile_kv_blocks(json.value_or<bool>("enable_profile_kv_blocks",
-                                                    enable_profile_kv_blocks()))
-      .disable_ttft_profiling(json.value_or<bool>("disable_ttft_profiling",
-                                                  disable_ttft_profiling()))
-      .enable_forward_interruption(json.value_or<bool>(
-          "enable_forward_interruption", enable_forward_interruption()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_profile_step_time);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_profile_token_budget);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_latency_aware_schedule);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(profile_max_prompt_length);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_global_ttft_ms);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_global_tpot_ms);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_profile_kv_blocks);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(disable_ttft_profiling);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_forward_interruption);
 }
 
 void ProfileConfig::append_config_json(

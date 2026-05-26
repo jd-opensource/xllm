@@ -58,43 +58,39 @@ DEFINE_int32(health_check_interval_ms,
 namespace xllm {
 
 void ServiceConfig::from_flags() {
-  host(FLAGS_host)
-      .port(FLAGS_port)
-      .rpc_idle_timeout_s(FLAGS_rpc_idle_timeout_s)
-      .rpc_channel_timeout_ms(FLAGS_rpc_channel_timeout_ms)
-      .max_reconnect_count(FLAGS_max_reconnect_count)
-      .num_threads(FLAGS_num_threads)
-      .max_concurrent_requests(FLAGS_max_concurrent_requests)
-      .num_request_handling_threads(FLAGS_num_request_handling_threads)
-      .num_response_handling_threads(FLAGS_num_response_handling_threads)
-      .health_check_interval_ms(FLAGS_health_check_interval_ms);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(host);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(port);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(rpc_idle_timeout_s);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(rpc_channel_timeout_ms);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_reconnect_count);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(num_threads);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_concurrent_requests);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(num_request_handling_threads);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(num_response_handling_threads);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(health_check_interval_ms);
 }
 
 void ServiceConfig::from_json(const JsonReader& json) {
-  host(json.value_or<std::string>("host", host()))
-      .port(json.value_or<int32_t>("port", port()))
-      .rpc_idle_timeout_s(
-          json.value_or<int32_t>("rpc_idle_timeout_s", rpc_idle_timeout_s()))
-      .rpc_channel_timeout_ms(json.value_or<int32_t>("rpc_channel_timeout_ms",
-                                                     rpc_channel_timeout_ms()))
-      .max_reconnect_count(
-          json.value_or<int32_t>("max_reconnect_count", max_reconnect_count()))
-      .num_threads(json.value_or<int32_t>("num_threads", num_threads()))
-      .max_concurrent_requests(json.value_or<int32_t>(
-          "max_concurrent_requests", max_concurrent_requests()))
-      .num_request_handling_threads(json.value_or<int32_t>(
-          "num_request_handling_threads", num_request_handling_threads()))
-      .num_response_handling_threads(json.value_or<int32_t>(
-          "num_response_handling_threads", num_response_handling_threads()))
-      .health_check_interval_ms(json.value_or<int32_t>(
-          "health_check_interval_ms", health_check_interval_ms()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(host);
+  // don't read rank-related config
+  // XLLM_CONFIG_ASSIGN_FROM_JSON(port);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(rpc_idle_timeout_s);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(rpc_channel_timeout_ms);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_reconnect_count);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(num_threads);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_concurrent_requests);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(num_request_handling_threads);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(num_response_handling_threads);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(health_check_interval_ms);
 }
 
 void ServiceConfig::append_config_json(
     nlohmann::ordered_json& config_json) const {
   const ServiceConfig default_config;
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, host);
-  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, port);
+  // don't dump rank-related config
+  //  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config,
+  //  port);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, rpc_idle_timeout_s);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

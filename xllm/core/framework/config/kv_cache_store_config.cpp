@@ -63,42 +63,31 @@ DEFINE_bool(enable_control_h2d_block_num,
 namespace xllm {
 
 void KVCacheStoreConfig::from_flags() {
-  prefetch_timeout(FLAGS_prefetch_timeout)
-      .prefetch_batch_size(FLAGS_prefetch_batch_size)
-      .layers_wise_copy_batchs(FLAGS_layers_wise_copy_batchs)
-      .host_blocks_factor(FLAGS_host_blocks_factor)
-      .enable_kvcache_store(FLAGS_enable_kvcache_store)
-      .enable_cache_upload(FLAGS_enable_cache_upload)
-      .store_protocol(FLAGS_store_protocol)
-      .store_master_server_address(FLAGS_store_master_server_address)
-      .store_metadata_server(FLAGS_store_metadata_server)
-      .store_local_hostname(FLAGS_store_local_hostname)
-      .enable_control_h2d_block_num(FLAGS_enable_control_h2d_block_num);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(prefetch_timeout);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(prefetch_batch_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(layers_wise_copy_batchs);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(host_blocks_factor);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_kvcache_store);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_cache_upload);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(store_protocol);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(store_master_server_address);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(store_metadata_server);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(store_local_hostname);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_control_h2d_block_num);
 }
 
 void KVCacheStoreConfig::from_json(const JsonReader& json) {
-  prefetch_timeout(
-      json.value_or<uint32_t>("prefetch_timeout", prefetch_timeout()))
-      .prefetch_batch_size(
-          json.value_or<uint32_t>("prefetch_batch_size", prefetch_batch_size()))
-      .layers_wise_copy_batchs(json.value_or<uint32_t>(
-          "layers_wise_copy_batchs", layers_wise_copy_batchs()))
-      .host_blocks_factor(
-          json.value_or<double>("host_blocks_factor", host_blocks_factor()))
-      .enable_kvcache_store(
-          json.value_or<bool>("enable_kvcache_store", enable_kvcache_store()))
-      .enable_cache_upload(
-          json.value_or<bool>("enable_cache_upload", enable_cache_upload()))
-      .store_protocol(
-          json.value_or<std::string>("store_protocol", store_protocol()))
-      .store_master_server_address(json.value_or<std::string>(
-          "store_master_server_address", store_master_server_address()))
-      .store_metadata_server(json.value_or<std::string>(
-          "store_metadata_server", store_metadata_server()))
-      .store_local_hostname(json.value_or<std::string>("store_local_hostname",
-                                                       store_local_hostname()))
-      .enable_control_h2d_block_num(json.value_or<bool>(
-          "enable_control_h2d_block_num", enable_control_h2d_block_num()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(prefetch_timeout);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(prefetch_batch_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(layers_wise_copy_batchs);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(host_blocks_factor);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_kvcache_store);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_cache_upload);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(store_protocol);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(store_master_server_address);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(store_metadata_server);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(store_local_hostname);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_control_h2d_block_num);
 }
 
 void KVCacheStoreConfig::append_config_json(

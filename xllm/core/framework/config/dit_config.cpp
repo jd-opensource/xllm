@@ -69,50 +69,35 @@ DEFINE_int64(dit_generation_image_area_max,
 namespace xllm {
 
 void DiTConfig::from_flags() {
-  max_requests_per_batch(FLAGS_max_requests_per_batch)
-      .dit_cache_policy(FLAGS_dit_cache_policy)
-      .dit_cache_warmup_steps(FLAGS_dit_cache_warmup_steps)
-      .dit_cache_n_derivatives(FLAGS_dit_cache_n_derivatives)
-      .dit_cache_skip_interval_steps(FLAGS_dit_cache_skip_interval_steps)
-      .dit_cache_residual_diff_threshold(
-          FLAGS_dit_cache_residual_diff_threshold)
-      .dit_cache_start_steps(FLAGS_dit_cache_start_steps)
-      .dit_cache_end_steps(FLAGS_dit_cache_end_steps)
-      .dit_cache_start_blocks(FLAGS_dit_cache_start_blocks)
-      .dit_cache_end_blocks(FLAGS_dit_cache_end_blocks)
-      .dit_sp_communication_overlap(FLAGS_dit_sp_communication_overlap)
-      .dit_debug_print(FLAGS_dit_debug_print)
-      .dit_generation_image_area_max(FLAGS_dit_generation_image_area_max);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_requests_per_batch);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dit_cache_policy);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dit_cache_warmup_steps);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dit_cache_n_derivatives);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dit_cache_skip_interval_steps);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dit_cache_residual_diff_threshold);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dit_cache_start_steps);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dit_cache_end_steps);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dit_cache_start_blocks);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dit_cache_end_blocks);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dit_sp_communication_overlap);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dit_debug_print);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dit_generation_image_area_max);
 }
 
 void DiTConfig::from_json(const JsonReader& json) {
-  max_requests_per_batch(json.value_or<int32_t>("max_requests_per_batch",
-                                                max_requests_per_batch()))
-      .dit_cache_policy(
-          json.value_or<std::string>("dit_cache_policy", dit_cache_policy()))
-      .dit_cache_warmup_steps(json.value_or<int64_t>("dit_cache_warmup_steps",
-                                                     dit_cache_warmup_steps()))
-      .dit_cache_n_derivatives(json.value_or<int64_t>(
-          "dit_cache_n_derivatives", dit_cache_n_derivatives()))
-      .dit_cache_skip_interval_steps(json.value_or<int64_t>(
-          "dit_cache_skip_interval_steps", dit_cache_skip_interval_steps()))
-      .dit_cache_residual_diff_threshold(
-          json.value_or<double>("dit_cache_residual_diff_threshold",
-                                dit_cache_residual_diff_threshold()))
-      .dit_cache_start_steps(json.value_or<int64_t>("dit_cache_start_steps",
-                                                    dit_cache_start_steps()))
-      .dit_cache_end_steps(
-          json.value_or<int64_t>("dit_cache_end_steps", dit_cache_end_steps()))
-      .dit_cache_start_blocks(json.value_or<int64_t>("dit_cache_start_blocks",
-                                                     dit_cache_start_blocks()))
-      .dit_cache_end_blocks(json.value_or<int64_t>("dit_cache_end_blocks",
-                                                   dit_cache_end_blocks()))
-      .dit_sp_communication_overlap(json.value_or<int64_t>(
-          "dit_sp_communication_overlap", dit_sp_communication_overlap()))
-      .dit_debug_print(
-          json.value_or<bool>("dit_debug_print", dit_debug_print()))
-      .dit_generation_image_area_max(json.value_or<int64_t>(
-          "dit_generation_image_area_max", dit_generation_image_area_max()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_requests_per_batch);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dit_cache_policy);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dit_cache_warmup_steps);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dit_cache_n_derivatives);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dit_cache_skip_interval_steps);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dit_cache_residual_diff_threshold);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dit_cache_start_steps);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dit_cache_end_steps);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dit_cache_start_blocks);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dit_cache_end_blocks);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dit_sp_communication_overlap);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dit_debug_print);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dit_generation_image_area_max);
 }
 
 void DiTConfig::append_config_json(nlohmann::ordered_json& config_json) const {

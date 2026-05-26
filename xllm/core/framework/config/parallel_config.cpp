@@ -75,38 +75,33 @@ DEFINE_bool(
 namespace xllm {
 
 void ParallelConfig::from_flags() {
-  dp_size(FLAGS_dp_size)
-      .ep_size(FLAGS_ep_size)
-      .cp_size(FLAGS_cp_size)
-      .kv_split_size(FLAGS_kv_split_size)
-      .prefill_kv_split_size(FLAGS_prefill_kv_split_size)
-      .tp_size(FLAGS_tp_size)
-      .sp_size(FLAGS_sp_size)
-      .cfg_size(FLAGS_cfg_size)
-      .communication_backend(FLAGS_communication_backend)
-      .enable_prefill_sp(FLAGS_enable_prefill_sp)
-      .enable_multi_stream_parallel(FLAGS_enable_multi_stream_parallel)
-      .micro_batch_num(FLAGS_micro_batch_num)
-      .enable_dp_balance(FLAGS_enable_dp_balance);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(dp_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(ep_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(cp_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(kv_split_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(prefill_kv_split_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(tp_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(sp_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(cfg_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(communication_backend);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_prefill_sp);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_multi_stream_parallel);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(micro_batch_num);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_dp_balance);
 }
 
 void ParallelConfig::from_json(const JsonReader& json) {
-  dp_size(json.value_or<int32_t>("dp_size", dp_size()))
-      .ep_size(json.value_or<int32_t>("ep_size", ep_size()))
-      .cp_size(json.value_or<int32_t>("cp_size", cp_size()))
-      .tp_size(json.value_or<int64_t>("tp_size", tp_size()))
-      .sp_size(json.value_or<int64_t>("sp_size", sp_size()))
-      .cfg_size(json.value_or<int64_t>("cfg_size", cfg_size()))
-      .communication_backend(json.value_or<std::string>(
-          "communication_backend", communication_backend()))
-      .enable_prefill_sp(
-          json.value_or<bool>("enable_prefill_sp", enable_prefill_sp()))
-      .enable_multi_stream_parallel(json.value_or<bool>(
-          "enable_multi_stream_parallel", enable_multi_stream_parallel()))
-      .micro_batch_num(
-          json.value_or<int32_t>("micro_batch_num", micro_batch_num()))
-      .enable_dp_balance(
-          json.value_or<bool>("enable_dp_balance", enable_dp_balance()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(dp_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(ep_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(cp_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(tp_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(sp_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(cfg_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(communication_backend);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_prefill_sp);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_multi_stream_parallel);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(micro_batch_num);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_dp_balance);
 }
 
 void ParallelConfig::append_config_json(

@@ -83,48 +83,35 @@ DEFINE_uint32(rec_worker_max_concurrency,
 namespace xllm {
 
 void RecConfig::from_flags() {
-  enable_rec_fast_sampler(FLAGS_enable_rec_fast_sampler)
-      .enable_rec_prefill_only(FLAGS_enable_rec_prefill_only)
-      .enable_xattention_one_stage(FLAGS_enable_xattention_one_stage)
-      .max_decode_rounds(FLAGS_max_decode_rounds)
-      .enable_constrained_decoding(FLAGS_enable_constrained_decoding)
-      .output_rec_logprobs(FLAGS_output_rec_logprobs)
-      .enable_convert_tokens_to_item(FLAGS_enable_convert_tokens_to_item)
-      .enable_output_sku_logprobs(FLAGS_enable_output_sku_logprobs)
-      .enable_extended_item_info(FLAGS_enable_extended_item_info)
-      .each_conversion_threshold(FLAGS_each_conversion_threshold)
-      .total_conversion_threshold(FLAGS_total_conversion_threshold)
-      .request_queue_size(FLAGS_request_queue_size)
-      .rec_worker_max_concurrency(FLAGS_rec_worker_max_concurrency);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_rec_fast_sampler);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_rec_prefill_only);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_xattention_one_stage);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_decode_rounds);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_constrained_decoding);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(output_rec_logprobs);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_convert_tokens_to_item);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_output_sku_logprobs);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_extended_item_info);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(each_conversion_threshold);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(total_conversion_threshold);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(request_queue_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(rec_worker_max_concurrency);
 }
 
 void RecConfig::from_json(const JsonReader& json) {
-  enable_rec_fast_sampler(
-      json.value_or<bool>("enable_rec_fast_sampler", enable_rec_fast_sampler()))
-      .enable_rec_prefill_only(json.value_or<bool>("enable_rec_prefill_only",
-                                                   enable_rec_prefill_only()))
-      .enable_xattention_one_stage(json.value_or<bool>(
-          "enable_xattention_one_stage", enable_xattention_one_stage()))
-      .max_decode_rounds(
-          json.value_or<int32_t>("max_decode_rounds", max_decode_rounds()))
-      .enable_constrained_decoding(json.value_or<bool>(
-          "enable_constrained_decoding", enable_constrained_decoding()))
-      .output_rec_logprobs(
-          json.value_or<bool>("output_rec_logprobs", output_rec_logprobs()))
-      .enable_convert_tokens_to_item(json.value_or<bool>(
-          "enable_convert_tokens_to_item", enable_convert_tokens_to_item()))
-      .enable_output_sku_logprobs(json.value_or<bool>(
-          "enable_output_sku_logprobs", enable_output_sku_logprobs()))
-      .enable_extended_item_info(json.value_or<bool>(
-          "enable_extended_item_info", enable_extended_item_info()))
-      .each_conversion_threshold(json.value_or<int32_t>(
-          "each_conversion_threshold", each_conversion_threshold()))
-      .total_conversion_threshold(json.value_or<int32_t>(
-          "total_conversion_threshold", total_conversion_threshold()))
-      .request_queue_size(
-          json.value_or<int32_t>("request_queue_size", request_queue_size()))
-      .rec_worker_max_concurrency(json.value_or<uint32_t>(
-          "rec_worker_max_concurrency", rec_worker_max_concurrency()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_rec_fast_sampler);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_rec_prefill_only);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_xattention_one_stage);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_decode_rounds);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_constrained_decoding);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(output_rec_logprobs);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_convert_tokens_to_item);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_output_sku_logprobs);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_extended_item_info);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(each_conversion_threshold);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(total_conversion_threshold);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(request_queue_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(rec_worker_max_concurrency);
 }
 
 void RecConfig::append_config_json(nlohmann::ordered_json& config_json) const {

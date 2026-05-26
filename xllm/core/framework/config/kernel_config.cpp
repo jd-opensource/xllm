@@ -34,21 +34,17 @@ namespace xllm {
 
 void KernelConfig::from_flags() {
 #if defined(USE_NPU)
-  enable_customize_mla_kernel(FLAGS_enable_customize_mla_kernel)
-      .npu_kernel_backend(FLAGS_npu_kernel_backend)
-      .enable_intralayer_addnorm(FLAGS_enable_intralayer_addnorm);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_customize_mla_kernel);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(npu_kernel_backend);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_intralayer_addnorm);
 #endif
 }
 
 void KernelConfig::from_json(const JsonReader& json) {
 #if defined(USE_NPU)
-  enable_customize_mla_kernel(
-      json.value_or<bool>("enable_customize_mla_kernel",
-                          enable_customize_mla_kernel()))
-      .npu_kernel_backend(json.value_or<std::string>("npu_kernel_backend",
-                                                     npu_kernel_backend()))
-      .enable_intralayer_addnorm(json.value_or<bool>(
-          "enable_intralayer_addnorm", enable_intralayer_addnorm()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_customize_mla_kernel);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(npu_kernel_backend);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_intralayer_addnorm);
 #endif
 }
 

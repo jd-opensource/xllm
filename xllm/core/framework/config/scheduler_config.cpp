@@ -76,56 +76,39 @@ DEFINE_bool(enable_starve_prevent,
 namespace xllm {
 
 void SchedulerConfig::from_flags() {
-  max_tokens_per_batch(FLAGS_max_tokens_per_batch)
-      .max_seqs_per_batch(FLAGS_max_seqs_per_batch)
-      .enable_schedule_overlap(FLAGS_enable_schedule_overlap)
-      .prefill_scheduling_memory_usage_threshold(
-          FLAGS_prefill_scheduling_memory_usage_threshold)
-      .enable_chunked_prefill(FLAGS_enable_chunked_prefill)
-      .max_tokens_per_chunk_for_prefill(FLAGS_max_tokens_per_chunk_for_prefill)
-      .chunked_match_frequency(FLAGS_chunked_match_frequency)
-      .use_zero_evict(FLAGS_use_zero_evict)
-      .max_decode_token_per_sequence(FLAGS_max_decode_token_per_sequence)
-      .priority_strategy(FLAGS_priority_strategy)
-      .use_mix_scheduler(FLAGS_use_mix_scheduler)
-      .enable_online_preempt_offline(FLAGS_enable_online_preempt_offline)
-      .aggressive_coeff(FLAGS_aggressive_coeff)
-      .starve_threshold(FLAGS_starve_threshold)
-      .enable_starve_prevent(FLAGS_enable_starve_prevent);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_tokens_per_batch);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_seqs_per_batch);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_schedule_overlap);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(prefill_scheduling_memory_usage_threshold);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_chunked_prefill);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_tokens_per_chunk_for_prefill);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(chunked_match_frequency);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(use_zero_evict);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_decode_token_per_sequence);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(priority_strategy);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(use_mix_scheduler);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_online_preempt_offline);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(aggressive_coeff);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(starve_threshold);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_starve_prevent);
 }
 
 void SchedulerConfig::from_json(const JsonReader& json) {
-  max_tokens_per_batch(
-      json.value_or<int32_t>("max_tokens_per_batch", max_tokens_per_batch()))
-      .max_seqs_per_batch(
-          json.value_or<int32_t>("max_seqs_per_batch", max_seqs_per_batch()))
-      .enable_schedule_overlap(json.value_or<bool>("enable_schedule_overlap",
-                                                   enable_schedule_overlap()))
-      .prefill_scheduling_memory_usage_threshold(
-          json.value_or<double>("prefill_scheduling_memory_usage_threshold",
-                                prefill_scheduling_memory_usage_threshold()))
-      .enable_chunked_prefill(json.value_or<bool>("enable_chunked_prefill",
-                                                  enable_chunked_prefill()))
-      .max_tokens_per_chunk_for_prefill(
-          json.value_or<int32_t>("max_tokens_per_chunk_for_prefill",
-                                 max_tokens_per_chunk_for_prefill()))
-      .chunked_match_frequency(json.value_or<int32_t>(
-          "chunked_match_frequency", chunked_match_frequency()))
-      .use_zero_evict(json.value_or<bool>("use_zero_evict", use_zero_evict()))
-      .max_decode_token_per_sequence(json.value_or<int32_t>(
-          "max_decode_token_per_sequence", max_decode_token_per_sequence()))
-      .priority_strategy(
-          json.value_or<std::string>("priority_strategy", priority_strategy()))
-      .use_mix_scheduler(
-          json.value_or<bool>("use_mix_scheduler", use_mix_scheduler()))
-      .enable_online_preempt_offline(json.value_or<bool>(
-          "enable_online_preempt_offline", enable_online_preempt_offline()))
-      .aggressive_coeff(
-          json.value_or<double>("aggressive_coeff", aggressive_coeff()))
-      .starve_threshold(
-          json.value_or<double>("starve_threshold", starve_threshold()))
-      .enable_starve_prevent(json.value_or<bool>("enable_starve_prevent",
-                                                 enable_starve_prevent()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_tokens_per_batch);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_seqs_per_batch);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_schedule_overlap);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(prefill_scheduling_memory_usage_threshold);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_chunked_prefill);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_tokens_per_chunk_for_prefill);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(chunked_match_frequency);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(use_zero_evict);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_decode_token_per_sequence);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(priority_strategy);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(use_mix_scheduler);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_online_preempt_offline);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(aggressive_coeff);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(starve_threshold);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_starve_prevent);
 }
 
 void SchedulerConfig::append_config_json(

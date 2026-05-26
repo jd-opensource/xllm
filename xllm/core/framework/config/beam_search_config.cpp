@@ -41,20 +41,17 @@ DEFINE_bool(enable_topk_sorted,
 namespace xllm {
 
 void BeamSearchConfig::from_flags() {
-  enable_beam_search_kernel(FLAGS_enable_beam_search_kernel)
-      .beam_width(FLAGS_beam_width)
-      .enable_block_copy_kernel(FLAGS_enable_block_copy_kernel)
-      .enable_topk_sorted(FLAGS_enable_topk_sorted);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_beam_search_kernel);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(beam_width);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_block_copy_kernel);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_topk_sorted);
 }
 
 void BeamSearchConfig::from_json(const JsonReader& json) {
-  enable_beam_search_kernel(json.value_or<bool>("enable_beam_search_kernel",
-                                                enable_beam_search_kernel()))
-      .beam_width(json.value_or<int32_t>("beam_width", beam_width()))
-      .enable_block_copy_kernel(json.value_or<bool>("enable_block_copy_kernel",
-                                                    enable_block_copy_kernel()))
-      .enable_topk_sorted(
-          json.value_or<bool>("enable_topk_sorted", enable_topk_sorted()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_beam_search_kernel);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(beam_width);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_block_copy_kernel);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_topk_sorted);
 }
 
 void BeamSearchConfig::append_config_json(

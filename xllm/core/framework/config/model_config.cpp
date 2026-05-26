@@ -89,19 +89,19 @@ bool is_cpp_chat_template_supported_model(const std::string& model_type) {
 }  // namespace
 
 void ModelConfig::from_flags() {
-  model_id(FLAGS_model_id)
-      .model(FLAGS_model)
-      .backend(FLAGS_backend)
-      .task(FLAGS_task)
-      .devices(FLAGS_devices)
-      .limit_image_per_prompt(FLAGS_limit_image_per_prompt)
-      .reasoning_parser(FLAGS_reasoning_parser)
-      .tool_call_parser(FLAGS_tool_call_parser)
-      .enable_qwen3_reranker(FLAGS_enable_qwen3_reranker)
-      .enable_return_mm_full_embeddings(FLAGS_enable_return_mm_full_embeddings)
-      .flashinfer_workspace_buffer_size(FLAGS_flashinfer_workspace_buffer_size)
-      .use_audio_in_video(FLAGS_use_audio_in_video)
-      .use_cpp_chat_template(FLAGS_use_cpp_chat_template);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(model_id);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(model);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(backend);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(task);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(devices);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(limit_image_per_prompt);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(reasoning_parser);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(tool_call_parser);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_qwen3_reranker);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_return_mm_full_embeddings);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(flashinfer_workspace_buffer_size);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(use_audio_in_video);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(use_cpp_chat_template);
 }
 
 void ModelConfig::normalize_cpp_chat_template(const std::string& model_type) {
@@ -119,29 +119,20 @@ void ModelConfig::normalize_cpp_chat_template(const std::string& model_type) {
 }
 
 void ModelConfig::from_json(const JsonReader& json) {
-  model_id(json.value_or<std::string>("model_id", model_id()))
-      .model(json.value_or<std::string>("model", model()))
-      .backend(json.value_or<std::string>("backend", backend()))
-      .task(json.value_or<std::string>("task", task()))
-      .devices(json.value_or<std::string>("devices", devices()))
-      .limit_image_per_prompt(json.value_or<int32_t>("limit_image_per_prompt",
-                                                     limit_image_per_prompt()))
-      .reasoning_parser(
-          json.value_or<std::string>("reasoning_parser", reasoning_parser()))
-      .tool_call_parser(
-          json.value_or<std::string>("tool_call_parser", tool_call_parser()))
-      .enable_qwen3_reranker(
-          json.value_or<bool>("enable_qwen3_reranker", enable_qwen3_reranker()))
-      .enable_return_mm_full_embeddings(
-          json.value_or<bool>("enable_return_mm_full_embeddings",
-                              enable_return_mm_full_embeddings()))
-      .flashinfer_workspace_buffer_size(
-          json.value_or<int32_t>("flashinfer_workspace_buffer_size",
-                                 flashinfer_workspace_buffer_size()))
-      .use_audio_in_video(
-          json.value_or<bool>("use_audio_in_video", use_audio_in_video()))
-      .use_cpp_chat_template(json.value_or<bool>("use_cpp_chat_template",
-                                                 use_cpp_chat_template()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(model_id);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(model);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(backend);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(task);
+  // don't read rank-related config
+  // XLLM_CONFIG_ASSIGN_FROM_JSON(devices);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(limit_image_per_prompt);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(reasoning_parser);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(tool_call_parser);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_qwen3_reranker);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_return_mm_full_embeddings);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(flashinfer_workspace_buffer_size);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(use_audio_in_video);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(use_cpp_chat_template);
 }
 
 void ModelConfig::append_config_json(
@@ -152,7 +143,9 @@ void ModelConfig::append_config_json(
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, model);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, backend);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, task);
-  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, devices);
+  // don't dump rank-related config
+  //  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config,
+  //  devices);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, limit_image_per_prompt);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

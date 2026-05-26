@@ -53,24 +53,19 @@ DEFINE_bool(
 namespace xllm {
 
 void LoadConfig::from_flags() {
-  enable_manual_loader(FLAGS_enable_manual_loader)
-      .enable_rolling_load(FLAGS_enable_rolling_load)
-      .rolling_load_num_cached_layers(FLAGS_rolling_load_num_cached_layers)
-      .rolling_load_num_rolling_slots(FLAGS_rolling_load_num_rolling_slots)
-      .enable_prefetch_weight(FLAGS_enable_prefetch_weight);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_manual_loader);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_rolling_load);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(rolling_load_num_cached_layers);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(rolling_load_num_rolling_slots);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_prefetch_weight);
 }
 
 void LoadConfig::from_json(const JsonReader& json) {
-  enable_manual_loader(
-      json.value_or<bool>("enable_manual_loader", enable_manual_loader()))
-      .enable_rolling_load(
-          json.value_or<bool>("enable_rolling_load", enable_rolling_load()))
-      .rolling_load_num_cached_layers(json.value_or<int32_t>(
-          "rolling_load_num_cached_layers", rolling_load_num_cached_layers()))
-      .rolling_load_num_rolling_slots(json.value_or<int32_t>(
-          "rolling_load_num_rolling_slots", rolling_load_num_rolling_slots()))
-      .enable_prefetch_weight(json.value_or<bool>("enable_prefetch_weight",
-                                                  enable_prefetch_weight()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_manual_loader);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_rolling_load);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(rolling_load_num_cached_layers);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(rolling_load_num_rolling_slots);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_prefetch_weight);
 }
 
 void LoadConfig::append_config_json(nlohmann::ordered_json& config_json) const {

@@ -19,6 +19,7 @@ limitations under the License.
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 #include "core/util/json_reader.h"
 
@@ -47,3 +48,14 @@ void dump_startup_config();
     config_json, default_config, property)       \
   APPEND_JSON_VALUE_IF_NOT_DEFAULT(              \
       config_json, #property, property(), (default_config).property())
+
+#define XLLM_CONFIG_ASSIGN_FROM_FLAG(property) \
+  do {                                         \
+    property(FLAGS_##property);                \
+  } while (false)
+
+#define XLLM_CONFIG_ASSIGN_FROM_JSON(property)                               \
+  do {                                                                       \
+    property(json.value_or<std::decay_t<decltype(property())>>(#property,    \
+                                                               property())); \
+  } while (false)

@@ -69,30 +69,25 @@ bool supports_prefix_cache(const std::string& instance_role) {
 }  // namespace
 
 void DisaggPDConfig::from_flags() {
-  enable_disagg_pd(FLAGS_enable_disagg_pd)
-      .enable_pd_ooc(FLAGS_enable_pd_ooc)
-      .disagg_pd_port(FLAGS_disagg_pd_port)
-      .instance_role(FLAGS_instance_role)
-      .kv_cache_transfer_type(FLAGS_kv_cache_transfer_type)
-      .kv_cache_transfer_mode(FLAGS_kv_cache_transfer_mode)
-      .transfer_listen_port(FLAGS_transfer_listen_port)
-      .kv_push_dst_rotate(FLAGS_kv_push_dst_rotate)
-      .kv_push_timing_log(FLAGS_kv_push_timing_log);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_disagg_pd);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_pd_ooc);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(disagg_pd_port);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(instance_role);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(kv_cache_transfer_type);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(kv_cache_transfer_mode);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(transfer_listen_port);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(kv_push_dst_rotate);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(kv_push_timing_log);
 }
 
 void DisaggPDConfig::from_json(const JsonReader& json) {
-  enable_disagg_pd(json.value_or<bool>("enable_disagg_pd", enable_disagg_pd()))
-      .enable_pd_ooc(json.value_or<bool>("enable_pd_ooc", enable_pd_ooc()))
-      .disagg_pd_port(
-          json.value_or<int32_t>("disagg_pd_port", disagg_pd_port()))
-      .instance_role(
-          json.value_or<std::string>("instance_role", instance_role()))
-      .kv_cache_transfer_type(json.value_or<std::string>(
-          "kv_cache_transfer_type", kv_cache_transfer_type()))
-      .kv_cache_transfer_mode(json.value_or<std::string>(
-          "kv_cache_transfer_mode", kv_cache_transfer_mode()))
-      .transfer_listen_port(json.value_or<int32_t>("transfer_listen_port",
-                                                   transfer_listen_port()));
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_disagg_pd);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_pd_ooc);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(disagg_pd_port);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(instance_role);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(kv_cache_transfer_type);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(kv_cache_transfer_mode);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(transfer_listen_port);
 }
 
 void DisaggPDConfig::append_config_json(
