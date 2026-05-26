@@ -28,6 +28,14 @@ DEFINE_string(npu_kernel_backend,
 DEFINE_bool(enable_intralayer_addnorm,
             false,
             "enable fused intralayer addnorm ops.");
+
+DEFINE_bool(enable_interlayer_addnorm,
+            false,
+            "enable fused interlayer addnorm ops.");
+
+DEFINE_bool(enable_split_rmsnorm_rope,
+            false,
+            "enable fused split rmsnorm rope ops.");
 #endif
 
 namespace xllm {
@@ -36,7 +44,9 @@ void KernelConfig::from_flags() {
 #if defined(USE_NPU)
   enable_customize_mla_kernel(FLAGS_enable_customize_mla_kernel)
       .npu_kernel_backend(FLAGS_npu_kernel_backend)
-      .enable_intralayer_addnorm(FLAGS_enable_intralayer_addnorm);
+      .enable_intralayer_addnorm(FLAGS_enable_intralayer_addnorm)
+      .enable_interlayer_addnorm(FLAGS_enable_interlayer_addnorm)
+      .enable_split_rmsnorm_rope(FLAGS_enable_split_rmsnorm_rope);
 #endif
 }
 
@@ -48,7 +58,11 @@ void KernelConfig::from_json(const JsonReader& json) {
       .npu_kernel_backend(json.value_or<std::string>("npu_kernel_backend",
                                                      npu_kernel_backend()))
       .enable_intralayer_addnorm(json.value_or<bool>(
-          "enable_intralayer_addnorm", enable_intralayer_addnorm()));
+          "enable_intralayer_addnorm", enable_intralayer_addnorm()))
+      .enable_interlayer_addnorm(json.value_or<bool>(
+          "enable_interlayer_addnorm", enable_interlayer_addnorm()))
+      .enable_split_rmsnorm_rope(json.value_or<bool>(
+          "enable_split_rmsnorm_rope", enable_split_rmsnorm_rope()));
 #endif
 }
 

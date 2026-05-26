@@ -57,6 +57,7 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
     // register submodules
     decoder_layer_ = register_module("decoder_layer", DecoderType(context));
     block_copy_ = register_module("block_copy", layer::NpuBlockCopy(context));
+    decoder_layer_->set_layer_id(layer_id_);
   }
 
   virtual torch::Tensor forward(torch::Tensor& x,
@@ -120,6 +121,10 @@ class LlmDecoderLayerImplBase : public torch::nn::Module {
 
   virtual void refresh_rolling_weights() {
     decoder_layer_->refresh_rolling_weights();
+  }
+
+  virtual void set_residual(std::shared_ptr<torch::Tensor> residual) {
+    decoder_layer_->set_residual(residual);
   }
 
  private:
@@ -358,6 +363,12 @@ class LlmModelImplBase : public torch::nn::Module {
   virtual void set_npu_word_embedding(
       layer::NpuWordEmbedding& npu_word_embedding) {
     npu_embed_tokens_ = npu_word_embedding;
+  }
+
+  virtual void set_residual(std::shared_ptr<torch::Tensor> residual) {
+    for (auto& layer : layers_) {
+      layer->set_residual(residual);
+    }
   }
 
  protected:

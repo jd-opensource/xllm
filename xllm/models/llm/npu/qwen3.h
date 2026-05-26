@@ -22,6 +22,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/global_flags.h"
+#include "core/framework/config/kernel_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/config/speculative_config.h"
 #include "core/framework/model/model_output.h"
@@ -148,6 +149,14 @@ class QWen3ModelImpl : public LlmModelImplBase<QWen3DecoderLayer> {
     } else {
       h = npu_embed_tokens_(tokens, 0);
     }
+
+    std::shared_ptr<torch::Tensor> residual = nullptr;
+    if (::xllm::KernelConfig::get_instance().enable_interlayer_addnorm()) {
+      residual =
+          std::make_shared<torch::Tensor>(torch::zeros_like(h, h.options()));
+      set_residual(residual);
+    }
+
     if (use_deepstack) {
       deep_stacks =
           input_params.multimodal.deep_stacks;  // [num_deepstack, hidden_size]

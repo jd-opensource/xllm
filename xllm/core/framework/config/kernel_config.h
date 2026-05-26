@@ -42,7 +42,9 @@ class KernelConfig final {
         "KERNEL OPTIONS",
         {"enable_customize_mla_kernel",
          "npu_kernel_backend",
-         "enable_intralayer_addnorm"}};
+         "enable_intralayer_addnorm",
+         "enable_interlayer_addnorm",
+         "enable_split_rmsnorm_rope"}};
     return kOptionCategory;
   }
 
@@ -52,6 +54,10 @@ class KernelConfig final {
   PROPERTY(std::string, npu_kernel_backend) = "AUTO";
 
   PROPERTY(bool, enable_intralayer_addnorm) = false;
+
+  PROPERTY(bool, enable_interlayer_addnorm) = false;
+
+  PROPERTY(bool, enable_split_rmsnorm_rope) = false;
 #endif
 };
 
