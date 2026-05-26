@@ -174,13 +174,17 @@ folly::SemiFuture<bool> Worker::pull_kv_blocks_async(
     const int64_t src_k_cache_id,
     const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   return impl_->pull_kv_blocks_async(src_cluster_id,
                                      src_addr,
                                      src_k_cache_id,
                                      src_v_cache_id,
                                      src_blocks,
-                                     dst_blocks);
+                                     dst_blocks,
+                                     src_linear_state_ids,
+                                     dst_linear_state_ids);
 }
 
 uint32_t Worker::transfer_kv_blocks(

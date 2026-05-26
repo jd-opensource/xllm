@@ -66,13 +66,18 @@ bool SpecKVCacheTransfer::pull_kv_blocks(
     const int64_t src_k_cache_id,
     const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
-    const std::vector<uint64_t>& dst_blocks) {
-  const bool base_success = LlmDataDistTransfer::pull_kv_blocks(src_cluster_id,
-                                                                src_addr,
-                                                                src_k_cache_id,
-                                                                src_v_cache_id,
-                                                                src_blocks,
-                                                                dst_blocks);
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
+  const bool base_success =
+      LlmDataDistTransfer::pull_kv_blocks(src_cluster_id,
+                                          src_addr,
+                                          src_k_cache_id,
+                                          src_v_cache_id,
+                                          src_blocks,
+                                          dst_blocks,
+                                          src_linear_state_ids,
+                                          dst_linear_state_ids);
   bool spec_success = true;
   for (int64_t layer_id = 0;
        layer_id < static_cast<int64_t>(spec_layer_registered_caches_.size());
@@ -247,6 +252,13 @@ void SpecKVCacheTransfer::merge_kv_blocks(
         kv_info.dst_blocks.insert(kv_info.dst_blocks.end(),
                                   info.remote_blocks_ids.begin(),
                                   info.remote_blocks_ids.end());
+        kv_info.src_linear_state_ids.insert(kv_info.src_linear_state_ids.end(),
+                                            info.local_linear_state_ids.begin(),
+                                            info.local_linear_state_ids.end());
+        kv_info.dst_linear_state_ids.insert(
+            kv_info.dst_linear_state_ids.end(),
+            info.remote_linear_state_ids.begin(),
+            info.remote_linear_state_ids.end());
         merged_kv_infos[key] = std::move(kv_info);
       } else {
         merged_kv_infos[key].src_blocks.insert(
@@ -257,6 +269,14 @@ void SpecKVCacheTransfer::merge_kv_blocks(
             merged_kv_infos[key].dst_blocks.end(),
             info.remote_blocks_ids.begin(),
             info.remote_blocks_ids.end());
+        merged_kv_infos[key].src_linear_state_ids.insert(
+            merged_kv_infos[key].src_linear_state_ids.end(),
+            info.local_linear_state_ids.begin(),
+            info.local_linear_state_ids.end());
+        merged_kv_infos[key].dst_linear_state_ids.insert(
+            merged_kv_infos[key].dst_linear_state_ids.end(),
+            info.remote_linear_state_ids.begin(),
+            info.remote_linear_state_ids.end());
       }
     }
   }

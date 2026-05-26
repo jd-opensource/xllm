@@ -165,6 +165,7 @@ void DisaggPDServiceImpl::decode_recv_new_requests(
 
       auto dp_rank = sequence->dp_rank();
       resp->set_dp_rank(dp_rank);
+      resp->set_linear_state_id(sequence->get_single_block_id());
 
       size_t shared_num = sequence->kv_state().shared_kv_blocks_num();
       auto blocks = sequence->kv_state().kv_blocks();
@@ -234,6 +235,7 @@ void DisaggPDServiceImpl::decode_recv_first_generation(
                                      gen.v_cache_ids().end());
     std::vector<uint64_t> block_ids(gen.block_ids().begin(),
                                     gen.block_ids().end());
+    int32_t linear_state_id = gen.linear_state_id();
 
     bool success = scheduler_->decode_recv_first_generation(
         gen.req_id(),
@@ -249,6 +251,7 @@ void DisaggPDServiceImpl::decode_recv_first_generation(
         std::move(k_cache_ids),
         std::move(v_cache_ids),
         std::move(block_ids),
+        linear_state_id,
         gen.dp_size(),
         gen.dp_rank());
     if (!success) {

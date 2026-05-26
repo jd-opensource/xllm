@@ -446,10 +446,14 @@ bool MooncakeKVCacheTransferDefault::pull_kv_blocks(
     const int64_t src_k_cache_id,
     const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   (void)src_cluster_id;
   (void)src_k_cache_id;
   (void)src_v_cache_id;
+  (void)src_linear_state_ids;
+  (void)dst_linear_state_ids;
   std::vector<int64_t> layer_ids;
   // Pull path is used by target/main KV cache blocks, not spec draft blocks.
   const bool is_spec_draft = false;
@@ -671,10 +675,14 @@ bool MooncakeKVCacheTransferXTensor::pull_kv_blocks(
     const int64_t src_k_cache_id,
     const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   (void)src_cluster_id;
   (void)src_k_cache_id;
   (void)src_v_cache_id;
+  (void)src_linear_state_ids;
+  (void)dst_linear_state_ids;
   return pull_kv_blocks_impl(src_addr, src_blocks, dst_blocks);
 }
 

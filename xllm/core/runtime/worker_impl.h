@@ -152,7 +152,9 @@ class WorkerImpl {
       int64_t src_k_cache_id,
       int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
-      const std::vector<uint64_t>& dst_blocks);
+      const std::vector<uint64_t>& dst_blocks,
+      const std::vector<uint64_t>& src_linear_state_ids = {},
+      const std::vector<uint64_t>& dst_linear_state_ids = {});
 
   virtual uint32_t transfer_kv_blocks(
       const uint64_t batch_id,

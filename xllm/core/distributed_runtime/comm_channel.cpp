@@ -265,12 +265,15 @@ bool CommChannel::estimate_kv_cache_capacity(int64_t& available_memory,
   return true;
 }
 
-bool CommChannel::pull_kv_blocks(const uint64_t src_cluster_id,
-                                 const std::string& src_addr,
-                                 const int64_t src_k_cache_id,
-                                 const int64_t src_v_cache_id,
-                                 const std::vector<uint64_t>& src_blocks,
-                                 const std::vector<uint64_t>& dst_blocks) {
+bool CommChannel::pull_kv_blocks(
+    const uint64_t src_cluster_id,
+    const std::string& src_addr,
+    const int64_t src_k_cache_id,
+    const int64_t src_v_cache_id,
+    const std::vector<uint64_t>& src_blocks,
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   proto::PullKVCacheRequest request;
   request.set_cluster_id(src_cluster_id);
   request.set_addr(src_addr);
@@ -279,6 +282,10 @@ bool CommChannel::pull_kv_blocks(const uint64_t src_cluster_id,
 
   ADD_VECTOR_TO_PROTO(request.mutable_src_blocks(), src_blocks);
   ADD_VECTOR_TO_PROTO(request.mutable_dst_blocks(), dst_blocks);
+  ADD_VECTOR_TO_PROTO(request.mutable_src_linear_state_ids(),
+                      src_linear_state_ids);
+  ADD_VECTOR_TO_PROTO(request.mutable_dst_linear_state_ids(),
+                      dst_linear_state_ids);
 
   proto::Status s;
   brpc::Controller cntl;

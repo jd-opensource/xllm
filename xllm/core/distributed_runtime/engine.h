@@ -64,15 +64,18 @@ class Engine {
   virtual std::vector<int64_t> get_active_activation_memory() const = 0;
 
   // P/D
-  virtual bool pull_kv_blocks(const int32_t src_dp_size,
-                              const int32_t src_dp_rank,
-                              const std::vector<uint64_t>& src_cluster_ids,
-                              const std::vector<std::string>& src_addrs,
-                              const std::vector<int64_t>& src_k_cache_ids,
-                              const std::vector<int64_t>& src_v_cache_ids,
-                              const std::vector<uint64_t>& src_blocks,
-                              const int32_t dst_dp_rank,
-                              const std::vector<uint64_t>& dst_blocks) {
+  virtual bool pull_kv_blocks(
+      const int32_t src_dp_size,
+      const int32_t src_dp_rank,
+      const std::vector<uint64_t>& src_cluster_ids,
+      const std::vector<std::string>& src_addrs,
+      const std::vector<int64_t>& src_k_cache_ids,
+      const std::vector<int64_t>& src_v_cache_ids,
+      const std::vector<uint64_t>& src_blocks,
+      const int32_t dst_dp_rank,
+      const std::vector<uint64_t>& dst_blocks,
+      const std::vector<uint64_t>& src_linear_state_ids = {},
+      const std::vector<uint64_t>& dst_linear_state_ids = {}) {
     NOT_IMPLEMENTED();
     return false;
   };

@@ -1303,14 +1303,18 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
     int64_t src_k_cache_id,
     int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
 #if defined(USE_NPU)
   return kv_cache_transfer_->pull_kv_blocks_async(src_cluster_id,
                                                   src_addr,
                                                   src_k_cache_id,
                                                   src_v_cache_id,
                                                   src_blocks,
-                                                  dst_blocks);
+                                                  dst_blocks,
+                                                  src_linear_state_ids,
+                                                  dst_linear_state_ids);
 #elif defined(USE_MLU)
   (void)src_cluster_id;
   (void)src_addr;
@@ -1318,6 +1322,8 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
   (void)src_v_cache_id;
   (void)src_blocks;
   (void)dst_blocks;
+  (void)src_linear_state_ids;
+  (void)dst_linear_state_ids;
   LOG(FATAL) << "MLU backend does not support PULL kv cache transfer.";
 #endif
   return false;

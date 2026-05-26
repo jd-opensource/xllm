@@ -44,6 +44,10 @@ ge::DataType dtype_to_ge_dtype(torch::ScalarType dtype) {
   return it->second;
 }
 
+bool is_linear_state_cache(KVCacheTensorRole role) {
+  return role == KVCacheTensorRole::CONV || role == KVCacheTensorRole::SSM;
+}
+
 LlmDataDistTransfer::LlmDataDistTransfer(const std::string& device_ip,
                                          const uint16_t listen_port,
                                          const InstanceRole& instance_role,
@@ -162,23 +166,35 @@ bool LlmDataDistTransfer::pull_kv_blocks(
     const int64_t src_k_cache_id,
     const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   bool result = true;
   for (int64_t layer_id = 0;
        layer_id < static_cast<int64_t>(layer_registered_caches_.size());
        ++layer_id) {
     const auto& registered_caches = layer_registered_caches_[layer_id];
     for (const RegisteredCache& registered_cache : registered_caches) {
+      const bool linear_state_cache =
+          is_linear_state_cache(registered_cache.role);
+      const std::vector<uint64_t>& src_ids =
+          linear_state_cache ? src_linear_state_ids : src_blocks;
+      const std::vector<uint64_t>& dst_ids =
+          linear_state_cache ? dst_linear_state_ids : dst_blocks;
+      if (src_ids.empty() || dst_ids.empty()) {
+        VLOG(5) << "Skip PullKvBlocks, layer = " << layer_id
+                << ", role = " << registered_cache.role.to_string()
+                << ", src_ids = " << src_ids.size()
+                << ", dst_ids = " << dst_ids.size();
+        continue;
+      }
       CacheIndex cache_index{src_cluster_id, registered_cache.cache.cache_id};
       KvCacheExtParam ext_param{};
       ext_param.src_layer_range = {0, 0};
       ext_param.dst_layer_range = {0, 0};
       ext_param.tensor_num_per_layer = 1;
-      auto ret = llm_data_dist_->PullKvBlocks(cache_index,
-                                              registered_cache.cache,
-                                              src_blocks,
-                                              dst_blocks,
-                                              ext_param);
+      auto ret = llm_data_dist_->PullKvBlocks(
+          cache_index, registered_cache.cache, src_ids, dst_ids, ext_param);
       if (ret != LLM_SUCCESS) {
         LOG(ERROR) << "PullKvBlocks failed, layer = " << layer_id
                    << ", role = " << registered_cache.role.to_string()
@@ -229,9 +245,6 @@ RegisteredCache LlmDataDistTransfer::register_cache_tensor(
       << "Register " << cache_tensor.role.to_string()
       << " cache failed at layer " << layer_id << ", ret = " << std::hex << ret;
 
-  LOG(INFO) << "Registered " << cache_tensor.role.to_string()
-            << " cache, layer = " << layer_id
-            << ", cache_id = " << registered_cache.cache.cache_id;
   return registered_cache;
 }
 
@@ -282,13 +295,28 @@ bool LlmDataDistTransfer::push_layer_registered_caches(
       cur_layer = step.layer;
     }
     const KVCacheInfo& kv_info = *step.dst;
-    if (kv_info.src_blocks.empty()) {
+    if (kv_info.src_blocks.empty() && kv_info.src_linear_state_ids.empty()) {
       continue;
     }
 
     const auto step_start = std::chrono::steady_clock::now();
     for (const RegisteredCache& registered_cache :
          layer_registered_caches[step.layer]) {
+      const bool linear_state_cache =
+          is_linear_state_cache(registered_cache.role);
+      const std::vector<uint64_t>& src_ids = linear_state_cache
+                                                 ? kv_info.src_linear_state_ids
+                                                 : kv_info.src_blocks;
+      const std::vector<uint64_t>& dst_ids = linear_state_cache
+                                                 ? kv_info.dst_linear_state_ids
+                                                 : kv_info.dst_blocks;
+      if (src_ids.empty() || dst_ids.empty()) {
+        VLOG(5) << "Skip PushKvBlocks, layer = " << step.layer
+                << ", role = " << registered_cache.role.to_string()
+                << ", src_ids = " << src_ids.size()
+                << ", dst_ids = " << dst_ids.size();
+        continue;
+      }
       CacheIndex cache_index{kv_info.dst_cluster_id,
                              registered_cache.cache.cache_id};
       KvCacheExtParam ext_param{};
@@ -296,11 +324,8 @@ bool LlmDataDistTransfer::push_layer_registered_caches(
       ext_param.dst_layer_range = {0, 0};
       ext_param.tensor_num_per_layer = 1;
 
-      auto ret = llm_data_dist_->PushKvBlocks(registered_cache.cache,
-                                              cache_index,
-                                              kv_info.src_blocks,
-                                              kv_info.dst_blocks,
-                                              ext_param);
+      auto ret = llm_data_dist_->PushKvBlocks(
+          registered_cache.cache, cache_index, src_ids, dst_ids, ext_param);
       if (ret != LLM_SUCCESS) {
         LOG(ERROR) << "PushKvBlocks failed, layer = " << step.layer
                    << ", role = " << registered_cache.role.to_string()

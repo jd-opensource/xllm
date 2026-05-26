@@ -60,6 +60,8 @@ class KVCacheTransfer {
     int64_t dst_v_cache_id;
     std::vector<uint64_t> src_blocks;
     std::vector<uint64_t> dst_blocks;
+    std::vector<uint64_t> src_linear_state_ids;
+    std::vector<uint64_t> dst_linear_state_ids;
 
     // XTensor mode: destination offsets from D-node (per-layer)
     // dst_xtensor_layer_offsets[layer_id] = {k_offsets, v_offsets}
@@ -139,12 +141,15 @@ class KVCacheTransfer {
                               const uint16_t port,
                               bool force_flag = true) = 0;
 
-  virtual bool pull_kv_blocks(const uint64_t src_cluster_id,
-                              const std::string& src_addr,
-                              const int64_t src_k_cache_id,
-                              const int64_t src_v_cache_id,
-                              const std::vector<uint64_t>& src_blocks,
-                              const std::vector<uint64_t>& dst_blocks) = 0;
+  virtual bool pull_kv_blocks(
+      const uint64_t src_cluster_id,
+      const std::string& src_addr,
+      const int64_t src_k_cache_id,
+      const int64_t src_v_cache_id,
+      const std::vector<uint64_t>& src_blocks,
+      const std::vector<uint64_t>& dst_blocks,
+      const std::vector<uint64_t>& src_linear_state_ids,
+      const std::vector<uint64_t>& dst_linear_state_ids) = 0;
 
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(
       const uint64_t src_cluster_id,
@@ -152,7 +157,9 @@ class KVCacheTransfer {
       const int64_t src_k_cache_id,
       const int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
-      const std::vector<uint64_t>& dst_blocks);
+      const std::vector<uint64_t>& dst_blocks,
+      const std::vector<uint64_t>& src_linear_state_ids,
+      const std::vector<uint64_t>& dst_linear_state_ids);
 
 #if defined(USE_NPU) || defined(USE_MLU)
   virtual folly::SemiFuture<bool> push_kv_blocks_async(

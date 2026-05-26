@@ -866,6 +866,10 @@ void PDOOCScheduler::dispatch_requests() {
           for (auto& bid : resps.resps()[i].blocks_ids()) {
             info.remote_blocks_ids.emplace_back(bid);
           }
+          if (resps.resps()[i].linear_state_id() >= 0) {
+            info.remote_linear_state_ids.emplace_back(
+                resps.resps()[i].linear_state_id());
+          }
           info.dp_rank = resps.resps()[i].dp_rank();
           // TODO: remote_instances_info_ is not multi-thread safe.
           info.remote_instance_info = remote_instances_info_[selected_instance];
@@ -976,6 +980,8 @@ void PDOOCScheduler::prefill_send_first_generation() {
           block_ids.push_back(block.id());
         }
         ADD_VECTOR_TO_PROTO(gen->mutable_block_ids(), block_ids);
+        gen->set_linear_state_id(
+            request->sequences()[0]->get_single_block_id());
         gen->set_dp_size(instance_info_.dp_size);
         gen->set_dp_rank(request->sequences()[0]->dp_rank());
       }
@@ -1055,6 +1061,7 @@ bool PDOOCScheduler::decode_recv_multi_generations(
     std::vector<int64_t> src_k_cache_ids,
     std::vector<int64_t> src_v_cache_ids,
     std::vector<uint64_t> src_block_ids,
+    int32_t src_linear_state_id,
     int32_t src_dp_size,
     int32_t src_dp_rank) {
   // push to request_queue_, and will be executed by engine.
@@ -1110,6 +1117,14 @@ bool PDOOCScheduler::decode_recv_multi_generations(
     for (const auto& block : blocks) {
       dst_block_ids.push_back(block.id());
     }
+    std::vector<uint64_t> src_linear_state_ids;
+    std::vector<uint64_t> dst_linear_state_ids;
+    if (src_linear_state_id >= 0 &&
+        request->sequences()[0]->get_single_block_id() >= 0) {
+      src_linear_state_ids.emplace_back(src_linear_state_id);
+      dst_linear_state_ids.emplace_back(
+          request->sequences()[0]->get_single_block_id());
+    }
 
     int32_t dst_dp_rank = request->sequences()[0]->dp_rank();
     engine_->pull_kv_blocks(src_dp_size,
@@ -1120,7 +1135,9 @@ bool PDOOCScheduler::decode_recv_multi_generations(
                             src_v_cache_ids,
                             src_block_ids,
                             dst_dp_rank,
-                            dst_block_ids);
+                            dst_block_ids,
+                            src_linear_state_ids,
+                            dst_linear_state_ids);
   }
 
   request_queue_.write(request);
@@ -1268,6 +1285,10 @@ void PDOOCScheduler::dispatch_offline_requests() {
         for (auto& bid : resps.resps()[0].blocks_ids()) {
           info.remote_blocks_ids.emplace_back(bid);
         }
+        if (resps.resps()[0].linear_state_id() >= 0) {
+          info.remote_linear_state_ids.emplace_back(
+              resps.resps()[0].linear_state_id());
+        }
         info.dp_rank = resps.resps()[0].dp_rank();
         info.remote_instance_info = remote_instances_info_[target_instance];
         sequence->kv_state().set_transfer_kv_info(std::move(info));
@@ -1396,6 +1417,7 @@ void PDOOCScheduler::prefill_send_multi_generations() {
         for (const auto& block : blocks) {
           multi_req->mutable_block_ids()->Add(block.id());
         }
+        multi_req->set_linear_state_id(sequence->get_single_block_id());
         multi_req->set_dp_size(instance_info_.dp_size);
         multi_req->set_dp_rank(sequence->dp_rank());
       }

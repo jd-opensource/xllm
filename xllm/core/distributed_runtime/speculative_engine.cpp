@@ -253,7 +253,9 @@ bool SpeculativeEngine::pull_kv_blocks(
     const std::vector<int64_t>& src_v_cache_ids,
     const std::vector<uint64_t>& src_blocks,
     const int32_t dst_dp_rank,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   return engine_->pull_kv_blocks(src_dp_size,
                                  src_dp_rank,
                                  src_cluster_ids,
@@ -262,7 +264,9 @@ bool SpeculativeEngine::pull_kv_blocks(
                                  src_v_cache_ids,
                                  src_blocks,
                                  dst_dp_rank,
-                                 dst_blocks);
+                                 dst_blocks,
+                                 src_linear_state_ids,
+                                 dst_linear_state_ids);
 };
 
 void SpeculativeEngine::get_device_info(std::vector<std::string>& device_ips,

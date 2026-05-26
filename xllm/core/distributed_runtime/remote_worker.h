@@ -76,12 +76,15 @@ class RemoteWorker : public WorkerClient {
   virtual bool link_d2d(const std::string& remote_addr) override;
   virtual bool unlink_d2d(const std::string& remote_addr) override;
 
-  virtual bool pull_kv_blocks(const uint64_t src_cluster_id,
-                              const std::string& src_addr,
-                              const int64_t src_k_cache_id,
-                              const int64_t src_v_cache_id,
-                              const std::vector<uint64_t>& src_blocks,
-                              const std::vector<uint64_t>& dst_blocks);
+  virtual bool pull_kv_blocks(
+      const uint64_t src_cluster_id,
+      const std::string& src_addr,
+      const int64_t src_k_cache_id,
+      const int64_t src_v_cache_id,
+      const std::vector<uint64_t>& src_blocks,
+      const std::vector<uint64_t>& dst_blocks,
+      const std::vector<uint64_t>& src_linear_state_ids = {},
+      const std::vector<uint64_t>& dst_linear_state_ids = {}) override;
 
   // prepare input request
   virtual ForwardInput prepare_inputs(Batch& batch) override;
@@ -109,7 +112,9 @@ class RemoteWorker : public WorkerClient {
       const int64_t src_k_cache_id,
       const int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
-      const std::vector<uint64_t>& dst_blocks);
+      const std::vector<uint64_t>& dst_blocks,
+      const std::vector<uint64_t>& src_linear_state_ids = {},
+      const std::vector<uint64_t>& dst_linear_state_ids = {}) override;
 
   virtual folly::SemiFuture<uint32_t> transfer_kv_blocks(
       const std::vector<BlockTransferInfo>& block_transfer_info) override;

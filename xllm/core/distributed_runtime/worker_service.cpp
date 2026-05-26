@@ -396,12 +396,18 @@ void WorkerService::PullKVCache(::google::protobuf::RpcController* controller,
                                      req->src_blocks().end());
     std::vector<uint64_t> dst_blocks(req->dst_blocks().begin(),
                                      req->dst_blocks().end());
+    std::vector<uint64_t> src_linear_state_ids(
+        req->src_linear_state_ids().begin(), req->src_linear_state_ids().end());
+    std::vector<uint64_t> dst_linear_state_ids(
+        req->dst_linear_state_ids().begin(), req->dst_linear_state_ids().end());
     auto future = worker_->pull_kv_blocks_async(src_cluster_id,
                                                 addr,
                                                 src_k_cache_id,
                                                 src_v_cache_id,
                                                 src_blocks,
-                                                dst_blocks);
+                                                dst_blocks,
+                                                src_linear_state_ids,
+                                                dst_linear_state_ids);
     bool status = std::move(future).get();
     resp->set_ok(status);
   });

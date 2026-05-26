@@ -129,18 +129,23 @@ std::tuple<int64_t, int64_t> RemoteWorker::estimate_kv_cache_capacity() {
   return result;
 }
 
-bool RemoteWorker::pull_kv_blocks(const uint64_t src_cluster_id,
-                                  const std::string& src_addr,
-                                  const int64_t src_k_cache_id,
-                                  const int64_t src_v_cache_id,
-                                  const std::vector<uint64_t>& src_blocks,
-                                  const std::vector<uint64_t>& dst_blocks) {
+bool RemoteWorker::pull_kv_blocks(
+    const uint64_t src_cluster_id,
+    const std::string& src_addr,
+    const int64_t src_k_cache_id,
+    const int64_t src_v_cache_id,
+    const std::vector<uint64_t>& src_blocks,
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   return channel_->pull_kv_blocks(src_cluster_id,
                                   src_addr,
                                   src_k_cache_id,
                                   src_v_cache_id,
                                   src_blocks,
-                                  dst_blocks);
+                                  dst_blocks,
+                                  src_linear_state_ids,
+                                  dst_linear_state_ids);
 }
 
 ForwardInput RemoteWorker::prepare_inputs(Batch& batch) {
@@ -255,7 +260,9 @@ folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
     const int64_t src_k_cache_id,
     const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this,
@@ -263,15 +270,19 @@ folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
                         src_addr,
                         src_k_cache_id,
                         src_v_cache_id,
-                        &src_blocks,
-                        &dst_blocks,
+                        src_blocks,
+                        dst_blocks,
+                        src_linear_state_ids,
+                        dst_linear_state_ids,
                         promise = std::move(promise)]() mutable {
     if (!channel_->pull_kv_blocks(src_cluster_id,
                                   src_addr,
                                   src_k_cache_id,
                                   src_v_cache_id,
                                   src_blocks,
-                                  dst_blocks)) {
+                                  dst_blocks,
+                                  src_linear_state_ids,
+                                  dst_linear_state_ids)) {
       LOG(ERROR) << "PullKVCache failed";
       promise.setValue(false);
     } else {

@@ -214,6 +214,8 @@ TransferKVInfo BatchInputBuilder::build_step_transfer_info(
   info.request_id = full_info.request_id;
   info.dp_rank = full_info.dp_rank;
   info.remote_instance_info = full_info.remote_instance_info;
+  info.local_linear_state_ids = full_info.local_linear_state_ids;
+  info.remote_linear_state_ids = full_info.remote_linear_state_ids;
 
   if (block_size == 0 || local_block_ids.empty() ||
       full_info.remote_blocks_ids.empty()) {
@@ -725,6 +727,8 @@ void BatchInputBuilder::setup_kv_cache_info(
   auto& transfer_kv_info = sequence->kv_state().transfer_kv_info();
   if (transfer_kv_info.has_value()) {
     const auto& all_remote = transfer_kv_info.value().remote_blocks_ids;
+    const auto& all_remote_linear_state_ids =
+        transfer_kv_info.value().remote_linear_state_ids;
     uint32_t prev_pushed = sequence->kv_state().pushed_local_block_count();
     uint32_t cur_count = static_cast<uint32_t>(blocks.size());
 
@@ -749,6 +753,15 @@ void BatchInputBuilder::setup_kv_cache_info(
       state.transfer_kv_infos.emplace_back(transfer_kv_info.value());
       state.transfer_kv_infos.back().local_blocks_ids = std::move(new_local);
       state.transfer_kv_infos.back().remote_blocks_ids = std::move(new_remote);
+      state.transfer_kv_infos.back().local_linear_state_ids.clear();
+      state.transfer_kv_infos.back().remote_linear_state_ids.clear();
+      const int32_t linear_state_id = sequence->get_single_block_id();
+      if (linear_state_id >= 0 && !all_remote_linear_state_ids.empty()) {
+        state.transfer_kv_infos.back().local_linear_state_ids.emplace_back(
+            linear_state_id);
+        state.transfer_kv_infos.back().remote_linear_state_ids =
+            all_remote_linear_state_ids;
+      }
     }
     sequence->kv_state().set_pushed_local_block_count(cur_count);
   }

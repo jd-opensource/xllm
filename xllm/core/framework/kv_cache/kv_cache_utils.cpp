@@ -218,16 +218,29 @@ LinearAttentionKVCacheTensors create_linear_attention_kv_cache_tensors(
   LinearAttentionKVCacheTensors tensors;
 
 #if defined(USE_NPU)
-  tensors.conv_cache = at_npu::native::npu_format_cast(
-      torch::zeros(
-          kv_cache_shape.conv_cache_shape(),
-          torch::dtype(create_options.dtype()).device(create_options.device())),
-      ACL_FORMAT_ND);
-  tensors.ssm_cache = at_npu::native::npu_format_cast(
-      torch::zeros(kv_cache_shape.ssm_cache_shape(),
-                   torch::dtype(create_options.ssm_dtype())
-                       .device(create_options.device())),
-      ACL_FORMAT_ND);
+  if (create_options.enable_kv_cache_huge_page_allocator()) {
+    tensors.conv_cache =
+        alloc_npu_huge_page_tensor(kv_cache_shape.conv_cache_shape(),
+                                   create_options.dtype(),
+                                   ACL_FORMAT_ND);
+    tensors.conv_cache.zero_();
+    tensors.ssm_cache =
+        alloc_npu_huge_page_tensor(kv_cache_shape.ssm_cache_shape(),
+                                   create_options.ssm_dtype(),
+                                   ACL_FORMAT_ND);
+    tensors.ssm_cache.zero_();
+  } else {
+    tensors.conv_cache = at_npu::native::npu_format_cast(
+        torch::zeros(kv_cache_shape.conv_cache_shape(),
+                     torch::dtype(create_options.dtype())
+                         .device(create_options.device())),
+        ACL_FORMAT_ND);
+    tensors.ssm_cache = at_npu::native::npu_format_cast(
+        torch::zeros(kv_cache_shape.ssm_cache_shape(),
+                     torch::dtype(create_options.ssm_dtype())
+                         .device(create_options.device())),
+        ACL_FORMAT_ND);
+  }
 #else
   tensors.conv_cache = torch::zeros(
       kv_cache_shape.conv_cache_shape(),

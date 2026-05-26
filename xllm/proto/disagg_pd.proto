@@ -92,6 +92,8 @@ message DisaggResponse {
   // Layout: [layer0_block0_k, layer0_block0_v, layer0_block1_k, layer0_block1_v, ...]
   //         [layer1_block0_k, layer1_block0_v, ...]
   repeated XTensorLayerOffsets xtensor_layer_offsets = 5;
+  // Sequence-scoped cache row used by linear attention caches.
+  int32 linear_state_id = 6;
 }
 
 // XTensor mode: offsets for one layer
@@ -226,6 +228,8 @@ message DisaggGenerationsRequest {
   int32 dp_rank = 10;
   string x_request_id = 11;
   string x_request_time = 12;
+  // Sequence-scoped cache row used by linear attention caches.
+  int32 linear_state_id = 13;
 }
 
 message DisaggGenerationsRequests {

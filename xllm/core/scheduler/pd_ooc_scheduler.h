@@ -74,6 +74,7 @@ class PDOOCScheduler : public DisaggPDScheduler {
       std::vector<int64_t> src_k_cache_ids,
       std::vector<int64_t> src_v_cache_ids,
       std::vector<uint64_t> src_block_ids,
+      int32_t src_linear_state_id,
       int32_t src_dp_size,
       int32_t src_dp_rank);
 

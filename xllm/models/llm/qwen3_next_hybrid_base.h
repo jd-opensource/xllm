@@ -117,6 +117,13 @@ class Qwen3HybridModelImplBase : public Qwen3HybridModelModule {
                          kv_caches[i],
                          input_params,
                          mrope_cos_sin);
+#if defined(USE_NPU)
+      if (input_params.parallel.layer_synchronizer != nullptr &&
+          !input_params.parallel.layer_synchronizer->record_event(
+              static_cast<int64_t>(i), device_.index())) {
+        return ModelOutput();
+      }
+#endif
     }
     auto [hidden_states, residual_out] = norm_->forward(h, residual);
     h = hidden_states;

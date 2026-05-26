@@ -526,6 +526,10 @@ void DisaggPDScheduler::dispatch_requests() {
           for (auto& bid : resps.resps()[i].blocks_ids()) {
             info.remote_blocks_ids.emplace_back(bid);
           }
+          if (resps.resps()[i].linear_state_id() >= 0) {
+            info.remote_linear_state_ids.emplace_back(
+                resps.resps()[i].linear_state_id());
+          }
           const size_t prompt_blocks =
               (requests[i]->state().prompt_tokens.size() +
                kv_cache_manager_->block_size() - 1) /
@@ -647,6 +651,8 @@ void DisaggPDScheduler::prefill_send_first_generation() {
           block_ids.push_back(block.id());
         }
         ADD_VECTOR_TO_PROTO(gen->mutable_block_ids(), block_ids);
+        gen->set_linear_state_id(
+            request->sequences()[0]->get_single_block_id());
         gen->set_dp_size(instance_info_.dp_size);
         gen->set_dp_rank(request->sequences()[0]->dp_rank());
       }
@@ -720,6 +726,7 @@ bool DisaggPDScheduler::decode_recv_first_generation(
     std::vector<int64_t> src_k_cache_ids,
     std::vector<int64_t> src_v_cache_ids,
     std::vector<uint64_t> src_block_ids,
+    int32_t src_linear_state_id,
     int32_t src_dp_size,
     int32_t src_dp_rank) {
   // push to request_queue_, and will be executed by engine.
@@ -781,6 +788,14 @@ bool DisaggPDScheduler::decode_recv_first_generation(
     for (const auto& block : blocks) {
       dst_block_ids.push_back(block.id());
     }
+    std::vector<uint64_t> src_linear_state_ids;
+    std::vector<uint64_t> dst_linear_state_ids;
+    if (src_linear_state_id >= 0 &&
+        request->sequences()[0]->get_single_block_id() >= 0) {
+      src_linear_state_ids.emplace_back(src_linear_state_id);
+      dst_linear_state_ids.emplace_back(
+          request->sequences()[0]->get_single_block_id());
+    }
 
     int32_t dst_dp_rank = request->sequences()[0]->dp_rank();
     engine_->pull_kv_blocks(src_dp_size,
@@ -791,7 +806,9 @@ bool DisaggPDScheduler::decode_recv_first_generation(
                             src_v_cache_ids,
                             src_block_ids,
                             dst_dp_rank,
-                            dst_block_ids);
+                            dst_block_ids,
+                            src_linear_state_ids,
+                            dst_linear_state_ids);
   }
 
   request_queue_.write(request);

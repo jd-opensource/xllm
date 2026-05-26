@@ -75,6 +75,8 @@ message PullKVCacheRequest {
   int64 v_cache_id = 3;
   repeated uint64 src_blocks = 4;
   repeated uint64 dst_blocks = 5;
+  repeated uint64 src_linear_state_ids = 7;
+  repeated uint64 dst_linear_state_ids = 8;
 }
 
 enum TransferType {
@@ -138,6 +140,9 @@ message TransferKVInfo {
   // XTensor mode: destination offsets from D-node (per-layer)
   // Each XTensorLayerOffsets contains K/V offsets for all blocks at one layer
   repeated XTensorLayerOffsets dst_xtensor_layer_offsets = 6;
+  // Sequence-scoped cache rows used by linear attention caches.
+  repeated uint64 local_linear_state_ids = 7;
+  repeated uint64 remote_linear_state_ids = 8;
 }
 
 message EplbInfo {

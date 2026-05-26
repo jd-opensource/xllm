@@ -224,6 +224,8 @@ inline size_t get_transfer_kv_info_size(const TransferKVInfo& info) {
   return get_string_size(info.request_id) +
          get_vector_size(info.local_blocks_ids) +
          get_vector_size(info.remote_blocks_ids) +
+         get_vector_size(info.local_linear_state_ids) +
+         get_vector_size(info.remote_linear_state_ids) +
          type_size<int32_t>  // dp_rank
          + get_instance_info_size(info.remote_instance_info) +
          get_xtensor_layer_offsets_size(info.dst_xtensor_layer_offsets);
@@ -755,6 +757,8 @@ inline void write_transfer_kv_info(char*& buffer, const TransferKVInfo& info) {
   write_string(buffer, info.request_id);
   write_vector(buffer, info.local_blocks_ids);
   write_vector(buffer, info.remote_blocks_ids);
+  write_vector(buffer, info.local_linear_state_ids);
+  write_vector(buffer, info.remote_linear_state_ids);
   write_data(buffer, info.dp_rank);
   write_instance_info(buffer, info.remote_instance_info);
   write_xtensor_layer_offsets(buffer, info.dst_xtensor_layer_offsets);
@@ -765,6 +769,8 @@ inline void write_transfer_kv_info(RawInputSerializeContext& context,
   write_string(context.descriptor, info.request_id);
   write_vector(context.descriptor, info.local_blocks_ids);
   write_vector(context.descriptor, info.remote_blocks_ids);
+  write_vector(context.descriptor, info.local_linear_state_ids);
+  write_vector(context.descriptor, info.remote_linear_state_ids);
   write_data(context.descriptor, info.dp_rank);
   write_instance_info(context, info.remote_instance_info);
   write_xtensor_layer_offsets(context, info.dst_xtensor_layer_offsets);
@@ -1567,6 +1573,8 @@ inline void read_transfer_kv_info(const char*& buffer, TransferKVInfo& info) {
   read_string(buffer, info.request_id);
   read_vector(buffer, info.local_blocks_ids);
   read_vector(buffer, info.remote_blocks_ids);
+  read_vector(buffer, info.local_linear_state_ids);
+  read_vector(buffer, info.remote_linear_state_ids);
   read_data(buffer, info.dp_rank);
   read_instance_info(buffer, info.remote_instance_info);
   read_xtensor_layer_offsets(buffer, info.dst_xtensor_layer_offsets);
@@ -1576,6 +1584,8 @@ inline void read_transfer_kv_info(ReadContext& context, TransferKVInfo& info) {
   read_string(context, info.request_id);
   read_vector(context, info.local_blocks_ids);
   read_vector(context, info.remote_blocks_ids);
+  read_vector(context, info.local_linear_state_ids);
+  read_vector(context, info.remote_linear_state_ids);
   read_data(context, info.dp_rank);
   read_instance_info(context, info.remote_instance_info);
   read_xtensor_layer_offsets(context, info.dst_xtensor_layer_offsets);

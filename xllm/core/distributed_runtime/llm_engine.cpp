@@ -569,15 +569,18 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
   return true;
 }
 
-bool LLMEngine::pull_kv_blocks(const int32_t src_dp_size,
-                               const int32_t src_dp_rank,
-                               const std::vector<uint64_t>& src_cluster_ids,
-                               const std::vector<std::string>& src_addrs,
-                               const std::vector<int64_t>& src_k_cache_ids,
-                               const std::vector<int64_t>& src_v_cache_ids,
-                               const std::vector<uint64_t>& src_blocks,
-                               const int32_t dst_dp_rank,
-                               const std::vector<uint64_t>& dst_blocks) {
+bool LLMEngine::pull_kv_blocks(
+    const int32_t src_dp_size,
+    const int32_t src_dp_rank,
+    const std::vector<uint64_t>& src_cluster_ids,
+    const std::vector<std::string>& src_addrs,
+    const std::vector<int64_t>& src_k_cache_ids,
+    const std::vector<int64_t>& src_v_cache_ids,
+    const std::vector<uint64_t>& src_blocks,
+    const int32_t dst_dp_rank,
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   int32_t src_world_size = src_cluster_ids.size();
   int32_t src_tp_size = src_world_size / src_dp_size;
   int32_t dst_world_size = options_.nnodes();
@@ -598,7 +601,9 @@ bool LLMEngine::pull_kv_blocks(const int32_t src_dp_size,
         src_k_cache_ids[src_worker_rank],
         src_v_cache_ids[src_worker_rank],
         src_blocks,
-        dst_blocks));
+        dst_blocks,
+        src_linear_state_ids,
+        dst_linear_state_ids));
   }
 
   for (bool result : results) {

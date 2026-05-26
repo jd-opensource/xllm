@@ -79,18 +79,23 @@ std::tuple<int64_t, int64_t> WorkerClient::estimate_kv_cache_capacity() {
   return worker_->estimate_kv_cache_capacity();
 }
 
-bool WorkerClient::pull_kv_blocks(const uint64_t src_cluster_id,
-                                  const std::string& src_addr,
-                                  const int64_t src_k_cache_id,
-                                  const int64_t src_v_cache_id,
-                                  const std::vector<uint64_t>& src_blocks,
-                                  const std::vector<uint64_t>& dst_blocks) {
+bool WorkerClient::pull_kv_blocks(
+    const uint64_t src_cluster_id,
+    const std::string& src_addr,
+    const int64_t src_k_cache_id,
+    const int64_t src_v_cache_id,
+    const std::vector<uint64_t>& src_blocks,
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   auto future = worker_->pull_kv_blocks_async(src_cluster_id,
                                               src_addr,
                                               src_k_cache_id,
                                               src_v_cache_id,
                                               src_blocks,
-                                              dst_blocks);
+                                              dst_blocks,
+                                              src_linear_state_ids,
+                                              dst_linear_state_ids);
   return std::move(future).get();
 }
 
@@ -148,13 +153,17 @@ folly::SemiFuture<bool> WorkerClient::pull_kv_blocks_async(
     const int64_t src_k_cache_id,
     const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   return worker_->pull_kv_blocks_async(src_cluster_id,
                                        src_addr,
                                        src_k_cache_id,
                                        src_v_cache_id,
                                        src_blocks,
-                                       dst_blocks);
+                                       dst_blocks,
+                                       src_linear_state_ids,
+                                       dst_linear_state_ids);
 }
 
 folly::SemiFuture<uint32_t> WorkerClient::transfer_kv_blocks(

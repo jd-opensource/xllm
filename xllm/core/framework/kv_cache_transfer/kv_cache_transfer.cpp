@@ -43,7 +43,9 @@ folly::SemiFuture<bool> KVCacheTransfer::pull_kv_blocks_async(
     const int64_t src_k_cache_id,
     const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
-    const std::vector<uint64_t>& dst_blocks) {
+    const std::vector<uint64_t>& dst_blocks,
+    const std::vector<uint64_t>& src_linear_state_ids,
+    const std::vector<uint64_t>& dst_linear_state_ids) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
   threadpool_.schedule([this,
@@ -51,15 +53,19 @@ folly::SemiFuture<bool> KVCacheTransfer::pull_kv_blocks_async(
                         src_addr,
                         src_k_cache_id,
                         src_v_cache_id,
-                        &src_blocks,
-                        &dst_blocks,
+                        src_blocks,
+                        dst_blocks,
+                        src_linear_state_ids,
+                        dst_linear_state_ids,
                         promise = std::move(promise)]() mutable {
     const bool success = pull_kv_blocks(src_cluster_id,
                                         src_addr,
                                         src_k_cache_id,
                                         src_v_cache_id,
                                         src_blocks,
-                                        dst_blocks);
+                                        dst_blocks,
+                                        src_linear_state_ids,
+                                        dst_linear_state_ids);
     promise.setValue(success);
   });
   return future;
@@ -76,23 +82,27 @@ std::vector<TransferKVInfo> filter_kv_split_infos(
     const std::vector<TransferKVInfo>& kv_infos) {
   std::vector<TransferKVInfo> filtered_kv_infos;
   for (const auto& kv_info : kv_infos) {
-    if (kv_info.local_blocks_ids.empty()) {
+    if (kv_info.local_blocks_ids.empty() &&
+        kv_info.local_linear_state_ids.empty()) {
       continue;
     }
     const size_t n_local = kv_info.local_blocks_ids.size();
     TransferKVInfo filtered = kv_info;
     filtered.remote_blocks_ids.clear();
-    filtered.remote_blocks_ids.reserve(n_local);
-    for (size_t k = 0; k < n_local; ++k) {
-      const size_t remote_idx = static_cast<size_t>(kv_split_rank) +
-                                k * static_cast<size_t>(kv_split_size);
-      if (remote_idx >= kv_info.remote_blocks_ids.size()) {
-        break;
+    if (n_local > 0) {
+      filtered.remote_blocks_ids.reserve(n_local);
+      for (size_t k = 0; k < n_local; ++k) {
+        const size_t remote_idx = static_cast<size_t>(kv_split_rank) +
+                                  k * static_cast<size_t>(kv_split_size);
+        if (remote_idx >= kv_info.remote_blocks_ids.size()) {
+          break;
+        }
+        filtered.remote_blocks_ids.emplace_back(
+            kv_info.remote_blocks_ids[remote_idx]);
       }
-      filtered.remote_blocks_ids.push_back(
-          kv_info.remote_blocks_ids[remote_idx]);
     }
-    if (!filtered.remote_blocks_ids.empty()) {
+    if (!filtered.remote_blocks_ids.empty() ||
+        !filtered.remote_linear_state_ids.empty()) {
       filtered_kv_infos.push_back(std::move(filtered));
     }
   }
@@ -251,6 +261,13 @@ void KVCacheTransfer::merge_kv_blocks(
         kv_info.dst_blocks.insert(kv_info.dst_blocks.end(),
                                   info.remote_blocks_ids.begin(),
                                   info.remote_blocks_ids.end());
+        kv_info.src_linear_state_ids.insert(kv_info.src_linear_state_ids.end(),
+                                            info.local_linear_state_ids.begin(),
+                                            info.local_linear_state_ids.end());
+        kv_info.dst_linear_state_ids.insert(
+            kv_info.dst_linear_state_ids.end(),
+            info.remote_linear_state_ids.begin(),
+            info.remote_linear_state_ids.end());
 
         // XTensor mode: copy destination offsets
         if (!info.dst_xtensor_layer_offsets.empty()) {
@@ -267,6 +284,14 @@ void KVCacheTransfer::merge_kv_blocks(
             merged_kv_infos[key].dst_blocks.end(),
             info.remote_blocks_ids.begin(),
             info.remote_blocks_ids.end());
+        merged_kv_infos[key].src_linear_state_ids.insert(
+            merged_kv_infos[key].src_linear_state_ids.end(),
+            info.local_linear_state_ids.begin(),
+            info.local_linear_state_ids.end());
+        merged_kv_infos[key].dst_linear_state_ids.insert(
+            merged_kv_infos[key].dst_linear_state_ids.end(),
+            info.remote_linear_state_ids.begin(),
+            info.remote_linear_state_ids.end());
 
         // XTensor mode: merge destination offsets (append to each layer)
         if (!info.dst_xtensor_layer_offsets.empty()) {
