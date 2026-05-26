@@ -69,9 +69,7 @@ class DisaggPDConfig final {
 
   PROPERTY(int32_t, transfer_listen_port) = 26000;
 
-  PROPERTY(bool, kv_push_dst_rotate) = true;
-
-  PROPERTY(bool, kv_push_timing_log) = false;
+  PROPERTY(bool, kv_push_dst_rotate) = false;
 };
 
 }  // namespace xllm

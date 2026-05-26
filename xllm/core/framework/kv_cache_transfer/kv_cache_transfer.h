@@ -66,31 +66,9 @@ class KVCacheTransfer {
     std::vector<XTensorLayerOffsets> dst_xtensor_layer_offsets;
   };
 
-  // A single (layer, dst) push slot. The schedule produced by
-  // `BuildPushSchedule` always lists layers in strict ascending order; the
-  // order of dsts within a layer is rank-rotated to spread N-to-1 incast.
-  // `dst_key` is the merged_kv_infos key (for logging only).
-  struct PushStep {
-    int64_t layer;
-    const KVCacheInfo* dst;
-    const std::string* dst_key;
-  };
-
-  // Build the per-rank push schedule. When `FLAGS_kv_push_dst_rotate` is on
-  // and `kv_split_size > 1`, dst order rotates by `rank * |dsts| / cp` so
-  // sibling P ranks in the same cp_group hit different D workers at each
-  // slot (assuming |dsts| >= cp). Otherwise the schedule degenerates to
-  // layer-major + sorted-dst order, byte-equivalent to the legacy
-  // `for layer { for dst : unordered_map }` loop (modulo determinism).
-  // `kv_split_rank` / `kv_split_size` are the local instance's KV-split
-  // identity (typically `parallel_args.kv_split_rank() /
-  // kv_split_size_effective()`). They are needed to rank-rotate the dst
-  // order; pass (0, 1) to keep the legacy behavior.
-  static std::vector<PushStep> BuildPushSchedule(
-      const std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
-      int32_t kv_split_rank,
-      int32_t kv_split_size,
-      int64_t num_layers);
+  static std::vector<std::string> rotate_dst_rank(
+      const std::vector<std::string>& keys,
+      int32_t kv_split_rank);
 
   KVCacheTransfer() = default;
   virtual ~KVCacheTransfer() = default;
