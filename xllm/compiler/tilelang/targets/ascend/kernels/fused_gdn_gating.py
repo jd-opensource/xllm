@@ -213,9 +213,6 @@ def build_fused_gdn_gating_kernel(
                 beta_fp32_ub = T.alloc_shared(
                     (rows_per_iter, ub_tensor_dim), acc_dtype
                 )
-                sigmoid_tmp_ub = T.alloc_ub(
-                    (rows_per_iter, ub_tensor_dim), mask_dtype
-                )
                 softplus_cmp_mask_ub = T.alloc_ub(
                     (rows_per_iter, compare_select_mask_bytes), mask_dtype
                 )
@@ -309,7 +306,7 @@ def build_fused_gdn_gating_kernel(
                             x_ub, b_half_ub, "CAST_NONE", multi_count
                         )
                         T.tile.sigmoid(
-                            beta_fp32_ub, x_ub, sigmoid_tmp_ub
+                            beta_fp32_ub, x_ub
                         )
                         T.tile.mul(x_ub, neg_exp_A_ub, beta_x_ub)
                         T.tile.cast(
@@ -406,7 +403,7 @@ def build_fused_gdn_gating_kernel(
                             x_ub, b_half_ub, "CAST_NONE", multi_count
                         )
                         T.tile.sigmoid(
-                            beta_fp32_ub, x_ub, sigmoid_tmp_ub
+                            beta_fp32_ub, x_ub
                         )
                         T.tile.mul(x_ub, neg_exp_A_ub, beta_x_ub)
                         T.tile.cast(
