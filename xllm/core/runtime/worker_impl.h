@@ -199,7 +199,8 @@ class WorkerImpl {
   void init_hierarchy_kv_cache_transfer();
 
   bool allocate_kv_cache_storage(const KVCacheShape& kv_cache_shape,
-                                 bool use_huge_page_allocator = false);
+                                 bool use_huge_page_allocator = false,
+                                 bool enable_raw_device_allocator = false);
 
   // Get the effective number of layers based on whether this is a spec draft
   // model

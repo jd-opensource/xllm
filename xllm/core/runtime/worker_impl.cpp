@@ -207,7 +207,8 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
 WorkerImpl::~WorkerImpl() = default;
 
 bool WorkerImpl::allocate_kv_cache_storage(const KVCacheShape& kv_cache_shape,
-                                           bool use_huge_page_allocator) {
+                                           bool use_huge_page_allocator,
+                                           bool enable_raw_device_allocator) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
   const auto& args = context_.get_model_args();
@@ -258,6 +259,7 @@ bool WorkerImpl::allocate_kv_cache_storage(const KVCacheShape& kv_cache_shape,
       .enable_linear_attention(enable_linear_attention)
       .enable_lighting_indexer(enable_lighting_indexer)
       .enable_kv_cache_quant(enable_kv_cache_quant)
+      .enable_raw_device_allocator(enable_raw_device_allocator)
       .block_size(options_.block_size())
       .head_dim(args.head_dim())
       .index_head_dim(std::max(args.index_head_dim(), 1))
@@ -327,7 +329,8 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   kv_cache_transfer_ = kv_cache_transfer;
 
   if (!allocate_kv_cache_storage(kv_cache_shape,
-                                 /*use_huge_page_allocator=*/true)) {
+                                 /*use_huge_page_allocator=*/true,
+                                 /*enable_raw_device_allocator=*/true)) {
     return false;
   }
 

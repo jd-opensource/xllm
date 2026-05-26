@@ -22,6 +22,9 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "framework/kv_cache/kv_cache_shape.h"
+#if defined(USE_MLU)
+#include "platform/mlu/mlu_tensor_alloc.h"
+#endif
 #if defined(USE_NPU)
 #include "acl/acl.h"
 #endif
@@ -103,7 +106,28 @@ KVCacheTensors create_kv_cache_tensors(
     const KVCacheShape& kv_cache_shape,
     const KVCacheCreateOptions& create_options) {
   KVCacheTensors tensors;
-#if defined(USE_NPU)
+#if defined(USE_MLU)
+  if (create_options.enable_raw_device_allocator()) {
+    tensors.key_cache = mlu::alloc_zero_tensor(kv_cache_shape.key_cache_shape(),
+                                               create_options.dtype(),
+                                               create_options.device());
+    if (kv_cache_shape.has_value_cache_shape()) {
+      tensors.value_cache =
+          mlu::alloc_zero_tensor(kv_cache_shape.value_cache_shape(),
+                                 create_options.dtype(),
+                                 create_options.device());
+    }
+  } else {
+    tensors.key_cache = torch::zeros(
+        kv_cache_shape.key_cache_shape(),
+        torch::dtype(create_options.dtype()).device(create_options.device()));
+    if (!kv_cache_shape.value_cache_shape().empty()) {
+      tensors.value_cache = torch::zeros(
+          kv_cache_shape.value_cache_shape(),
+          torch::dtype(create_options.dtype()).device(create_options.device()));
+    }
+  }
+#elif defined(USE_NPU)
   const aclFormat npu_format_type =
       get_npu_kv_cache_format(create_options.model_type());
   if (create_options.enable_kv_cache_huge_page_allocator()) {
@@ -151,7 +175,18 @@ IndexedKVCacheTensors create_indexed_kv_cache_tensors(
   tensors.kv_cache_tensors =
       create_kv_cache_tensors(kv_cache_shape, create_options);
 
-#if defined(USE_NPU)
+#if defined(USE_MLU)
+  if (create_options.enable_raw_device_allocator()) {
+    tensors.index_cache =
+        mlu::alloc_zero_tensor(kv_cache_shape.index_cache_shape(),
+                               create_options.dtype(),
+                               create_options.device());
+  } else {
+    tensors.index_cache = torch::zeros(
+        kv_cache_shape.index_cache_shape(),
+        torch::dtype(create_options.dtype()).device(create_options.device()));
+  }
+#elif defined(USE_NPU)
   const aclFormat npu_format_type =
       get_npu_kv_cache_format(create_options.model_type());
   if (create_options.enable_kv_cache_huge_page_allocator()) {
