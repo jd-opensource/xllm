@@ -24,7 +24,6 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
-#include "core/framework/config/rec_config.h"
 #include "core/framework/config/scheduler_config.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "layers/cuda/flashinfer_workspace.h"
@@ -40,16 +39,94 @@ struct DecodeTestInput {
   torch::Tensor value;
 };
 
+constexpr int32_t kTestBatchSize = 4;
+constexpr int32_t kTestBeamWidth = 128;
+constexpr int32_t kTestNumHeads = 16;
+constexpr int32_t kTestNumKvHeads = 8;
+constexpr int32_t kTestHeadDim = 128;
+constexpr int32_t kTestSharedSeqLen = 300;
+constexpr int32_t kTestMaxDecodeStep = 2;
+constexpr int32_t kTestCurrentStep = 1;
+
+torch::Tensor build_reference_output(const DecodeTestInput& input) {
+  const int64_t total_beam = input.query.size(0);
+  const int64_t shared_len = kTestSharedSeqLen;
+  const int64_t seq_len = shared_len + kTestCurrentStep + 1;
+  const int64_t group_size = kTestNumHeads / kTestNumKvHeads;
+
+  auto float_opts = torch::TensorOptions()
+                        .dtype(torch::kFloat32)
+                        .device(input.query.device());
+  torch::Tensor query =
+      input.query.view({total_beam, kTestNumHeads, kTestHeadDim})
+          .to(torch::kFloat32);
+  torch::Tensor key = input.attn_metadata.full_k_cache.clone();
+  torch::Tensor value = input.attn_metadata.full_v_cache.clone();
+  torch::Tensor current_key =
+      input.key.view({total_beam, kTestNumKvHeads, kTestHeadDim});
+  torch::Tensor current_value =
+      input.value.view({total_beam, kTestNumKvHeads, kTestHeadDim});
+  torch::Tensor output =
+      torch::empty({total_beam, kTestNumHeads * kTestHeadDim}, float_opts);
+
+  const float scale = 1.0f / std::sqrt(static_cast<float>(kTestHeadDim));
+  for (int64_t beam_idx = 0; beam_idx < total_beam; ++beam_idx) {
+    const int64_t slot_id =
+        shared_len + beam_idx * kTestMaxDecodeStep + kTestCurrentStep;
+    key.select(0, slot_id).copy_(current_key.select(0, beam_idx));
+    value.select(0, slot_id).copy_(current_value.select(0, beam_idx));
+  }
+  torch::Tensor shared_key = key.slice(0, 0, shared_len);
+  torch::Tensor shared_value = value.slice(0, 0, shared_len);
+
+  for (int64_t beam_idx = 0; beam_idx < total_beam; ++beam_idx) {
+    torch::Tensor beam_key =
+        torch::empty({seq_len, kTestNumKvHeads, kTestHeadDim}, float_opts);
+    torch::Tensor beam_value =
+        torch::empty({seq_len, kTestNumKvHeads, kTestHeadDim}, float_opts);
+
+    beam_key.slice(/*dim=*/0, /*start=*/0, /*end=*/shared_len)
+        .copy_(shared_key);
+    beam_value.slice(/*dim=*/0, /*start=*/0, /*end=*/shared_len)
+        .copy_(shared_value);
+
+    const int64_t beam_base = shared_len + beam_idx * kTestMaxDecodeStep;
+    beam_key.slice(/*dim=*/0, /*start=*/shared_len, /*end=*/seq_len)
+        .copy_(key.slice(0, beam_base, beam_base + kTestCurrentStep + 1));
+    beam_value.slice(/*dim=*/0, /*start=*/shared_len, /*end=*/seq_len)
+        .copy_(value.slice(0, beam_base, beam_base + kTestCurrentStep + 1));
+
+    torch::Tensor key_rep =
+        beam_key.unsqueeze(2)
+            .expand({seq_len, kTestNumKvHeads, group_size, kTestHeadDim})
+            .reshape({seq_len, kTestNumHeads, kTestHeadDim});
+    torch::Tensor value_rep =
+        beam_value.unsqueeze(2)
+            .expand({seq_len, kTestNumKvHeads, group_size, kTestHeadDim})
+            .reshape({seq_len, kTestNumHeads, kTestHeadDim});
+
+    torch::Tensor scores =
+        torch::einsum("hd,shd->hs", {query.select(0, beam_idx), key_rep}) *
+        scale;
+    torch::Tensor attn = torch::softmax(scores, /*dim=*/-1);
+    torch::Tensor beam_output = torch::einsum("hs,shd->hd", {attn, value_rep})
+                                    .reshape({kTestNumHeads * kTestHeadDim});
+    output.select(0, beam_idx).copy_(beam_output);
+  }
+
+  return output.to(input.query.scalar_type());
+}
+
 class XAttentionDecodeCompareTest : public ::testing::Test {
  protected:
-  static constexpr int32_t kBatchSize = 4;
-  static constexpr int32_t kBeamWidth = 128;
-  static constexpr int32_t kNumHeads = 16;
-  static constexpr int32_t kNumKvHeads = 8;
-  static constexpr int32_t kHeadDim = 128;
-  static constexpr int32_t kSharedSeqLen = 300;
-  static constexpr int32_t kMaxDecodeStep = 2;
-  static constexpr int32_t kCurrentStep = 1;
+  static constexpr int32_t kBatchSize = kTestBatchSize;
+  static constexpr int32_t kBeamWidth = kTestBeamWidth;
+  static constexpr int32_t kNumHeads = kTestNumHeads;
+  static constexpr int32_t kNumKvHeads = kTestNumKvHeads;
+  static constexpr int32_t kHeadDim = kTestHeadDim;
+  static constexpr int32_t kSharedSeqLen = kTestSharedSeqLen;
+  static constexpr int32_t kMaxDecodeStep = kTestMaxDecodeStep;
+  static constexpr int32_t kCurrentStep = kTestCurrentStep;
 
   void SetUp() override {
     if (!torch::cuda::is_available()) {
@@ -199,8 +276,7 @@ class XAttentionDecodeCompareTest : public ::testing::Test {
     return input;
   }
 
-  torch::Tensor run_decode_once(DecodeTestInput& input, bool enable_two_stage) {
-    RecConfig::get_instance().enable_xattention_one_stage(!enable_two_stage);
+  torch::Tensor run_two_stage_decode_once(DecodeTestInput& input) {
     SchedulerConfig::get_instance().max_tokens_per_batch(kSharedSeqLen);
 
     XAttentionImpl attention(
@@ -224,33 +300,30 @@ class XAttentionDecodeCompareTest : public ::testing::Test {
     return std::get<0>(result).clone();
   }
 
-  void compare_single_and_two_stage(torch::ScalarType dtype,
-                                    double atol,
-                                    double rtol) {
+  void compare_two_stage_with_reference(torch::ScalarType dtype,
+                                        double atol,
+                                        double rtol) {
     constexpr int64_t kSeed = 20260303;
     torch::manual_seed(kSeed);
     torch::cuda::manual_seed_all(kSeed);
-    auto single_input = create_decode_test_input(dtype);
+    auto input = create_decode_test_input(dtype);
     torch::manual_seed(kSeed);
     torch::cuda::manual_seed_all(kSeed);
-    auto two_stage_input = create_decode_test_input(dtype);
+    auto reference_input = create_decode_test_input(dtype);
+    reference_input.query.copy_(input.query);
+    reference_input.key.copy_(input.key);
+    reference_input.value.copy_(input.value);
 
-    two_stage_input.query.copy_(single_input.query);
-    two_stage_input.key.copy_(single_input.key);
-    two_stage_input.value.copy_(single_input.value);
-
-    auto single_output =
-        run_decode_once(single_input, /*enable_two_stage=*/false);
-    auto two_stage_output =
-        run_decode_once(two_stage_input, /*enable_two_stage=*/true);
+    auto reference_output = build_reference_output(reference_input);
+    auto two_stage_output = run_two_stage_decode_once(input);
 
     auto abs_diff =
-        (single_output - two_stage_output).abs().to(torch::kFloat32);
+        (reference_output - two_stage_output).abs().to(torch::kFloat32);
     const double max_abs_diff = abs_diff.max().item<double>();
     const double mean_abs_diff = abs_diff.mean().item<double>();
 
-    EXPECT_TRUE(torch::allclose(single_output, two_stage_output, rtol, atol))
-        << "single-stage and two-stage decode outputs mismatch: "
+    EXPECT_TRUE(torch::allclose(reference_output, two_stage_output, rtol, atol))
+        << "reference and two-stage decode outputs mismatch: "
         << "max_abs_diff=" << max_abs_diff
         << ", mean_abs_diff=" << mean_abs_diff << ", atol=" << atol
         << ", rtol=" << rtol;
@@ -263,16 +336,16 @@ class XAttentionDecodeCompareTest : public ::testing::Test {
   torch::Device device_{torch::kCPU};
 };
 
-TEST_F(XAttentionDecodeCompareTest, SingleVsTwoStageFp16) {
-  compare_single_and_two_stage(torch::kFloat16,
-                               /*atol=*/2e-3,
-                               /*rtol=*/2e-3);
+TEST_F(XAttentionDecodeCompareTest, TwoStageFp16) {
+  compare_two_stage_with_reference(torch::kFloat16,
+                                   /*atol=*/2e-3,
+                                   /*rtol=*/2e-3);
 }
 
-TEST_F(XAttentionDecodeCompareTest, SingleVsTwoStageBf16) {
-  compare_single_and_two_stage(torch::kBFloat16,
-                               /*atol=*/2e-2,
-                               /*rtol=*/2e-2);
+TEST_F(XAttentionDecodeCompareTest, TwoStageBf16) {
+  compare_two_stage_with_reference(torch::kBFloat16,
+                                   /*atol=*/2e-2,
+                                   /*rtol=*/2e-2);
 }
 
 }  // namespace

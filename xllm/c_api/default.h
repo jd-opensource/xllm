@@ -95,7 +95,6 @@ const XLLM_InitOptions XLLM_INIT_REC_OPTIONS_DEFAULT = {
     .enable_graph = true,
     .enable_rec_fast_sampler = true,
     .enable_prefill_piecewise_graph = true,
-    .enable_xattention_one_stage = false,
     .enable_graph_mode_decode_no_padding = true,
     .enable_block_copy_kernel = false,
     .enable_topk_sorted = false,

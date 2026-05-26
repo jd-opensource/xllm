@@ -277,8 +277,6 @@ DECLARE_bool(enable_rec_prefill_only);
 
 DECLARE_bool(output_rec_logprobs);
 
-DECLARE_bool(enable_xattention_one_stage);
-
 DECLARE_int32(max_decode_rounds);
 
 DECLARE_bool(enable_constrained_decoding);

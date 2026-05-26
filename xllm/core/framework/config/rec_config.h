@@ -42,7 +42,6 @@ class RecConfig final {
         "REC OPTIONS",
         {"enable_rec_fast_sampler",
          "enable_rec_prefill_only",
-         "enable_xattention_one_stage",
          "max_decode_rounds",
          "enable_constrained_decoding",
          "output_rec_logprobs",
@@ -59,8 +58,6 @@ class RecConfig final {
   PROPERTY(bool, enable_rec_fast_sampler) = true;
 
   PROPERTY(bool, enable_rec_prefill_only) = false;
-
-  PROPERTY(bool, enable_xattention_one_stage) = false;
 
   PROPERTY(int32_t, max_decode_rounds) = 0;
 

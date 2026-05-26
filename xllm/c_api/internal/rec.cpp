@@ -60,7 +60,6 @@ const char* get_rec_pipeline_name(xllm::RecPipelineType pipeline_type) {
 void reset_pipeline_runtime_toggles() {
   xllm::RecConfig::get_instance()
       .enable_rec_fast_sampler(false)
-      .enable_xattention_one_stage(false)
       .enable_rec_prefill_only(false)
       .enable_constrained_decoding(false);
   xllm::ExecutionConfig::get_instance()
@@ -71,8 +70,7 @@ void reset_pipeline_runtime_toggles() {
 
 void apply_multi_round_pipeline_toggles() {
   xllm::RecConfig::get_instance()
-      .enable_rec_fast_sampler(true)
-      .enable_xattention_one_stage(false);
+      .enable_rec_fast_sampler(true);
   xllm::ExecutionConfig::get_instance()
       .enable_prefill_piecewise_graph(true)
       .enable_graph_mode_decode_no_padding(true);
