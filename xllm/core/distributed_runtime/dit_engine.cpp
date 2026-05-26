@@ -61,7 +61,10 @@ DiTEngine::DiTEngine(const runtime::Options& options,
   worker_clients_num_ = worker_clients_.size();
 
   // init thread pool
-  threadpool_ = std::make_unique<ThreadPool>(16);
+  threadpool_ = std::make_unique<ThreadPool>(
+      /*num_threads=*/16,
+      /*cpu_binding=*/false,
+      /*pool_name=*/"DiTEngine.forward_input");
 }
 
 void DiTEngine::setup_workers(const runtime::Options& options) {

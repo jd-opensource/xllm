@@ -115,7 +115,9 @@ bool RecEngine::init_model() {
 
   if (!threadpool_) {
     threadpool_ = std::make_unique<ThreadPool>(
-        16, true, __FILE__, __LINE__, "rec_engine_pool");
+        /*num_threads=*/16,
+        /*cpu_binding=*/true,
+        /*pool_name=*/"rec_engine_pool");
   }
   // Compute KV cache config (shared logic)
   const int32_t world_size = static_cast<int32_t>(options_.devices().size());

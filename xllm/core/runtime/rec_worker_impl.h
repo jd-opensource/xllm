@@ -348,7 +348,9 @@ class RecWorkerImpl : public LLMWorkerImpl {
     std::unique_ptr<RecSampler> rec_sampler_;
 
     // for async scheduler
-    ThreadPool threadpool_;
+    ThreadPool threadpool_{/*num_threads=*/1,
+                           /*cpu_binding=*/false,
+                           /*pool_name=*/"RecWorkPipeline.schedule"};
 
     int32_t max_seqs_per_batch_;
     int32_t max_tokens_per_batch_;

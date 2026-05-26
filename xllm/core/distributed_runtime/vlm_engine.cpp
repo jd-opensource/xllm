@@ -78,7 +78,10 @@ VLMEngine::VLMEngine(const runtime::Options& options,
   process_group_test();
 
   // init thread pool
-  threadpool_ = std::make_unique<ThreadPool>(16);
+  threadpool_ = std::make_unique<ThreadPool>(
+      /*num_threads=*/16,
+      /*cpu_binding=*/false,
+      /*pool_name=*/"VLMEngine.forward_input");
 }
 
 void VLMEngine::process_group_test() {

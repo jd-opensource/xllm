@@ -134,7 +134,9 @@ class Worker {
 
  private:
   WorkerImpl* impl_ = nullptr;
-  ThreadPool threadpool_;
+  ThreadPool threadpool_{/*num_threads=*/1,
+                         /*cpu_binding=*/false,
+                         /*pool_name=*/"Worker.async"};
 };
 
 }  // namespace xllm

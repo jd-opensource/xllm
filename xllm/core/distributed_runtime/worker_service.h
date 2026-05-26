@@ -172,7 +172,9 @@ class WorkerService : public proto::DistributeWorker {
 
   std::unique_ptr<ThreadPool> threadpool_;
 
-  ThreadPool copy_threadpool_{5};
+  ThreadPool copy_threadpool_{/*num_threads=*/5,
+                              /*cpu_binding=*/false,
+                              /*pool_name=*/"WorkerService.copy"};
 };
 
 }  // namespace xllm

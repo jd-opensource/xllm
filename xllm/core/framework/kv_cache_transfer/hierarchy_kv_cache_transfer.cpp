@@ -38,9 +38,15 @@ HierarchyKVCacheTransfer::HierarchyKVCacheTransfer(
   device_.set_device();
   device_.init_device_context();
   h2d_threadpool_ = std::make_unique<ThreadPool>(
-      2, [this]() mutable { device_.set_device(); });
+      /*num_threads=*/2,
+      /*init_func=*/[this]() mutable { device_.set_device(); },
+      /*cpu_binding=*/false,
+      /*pool_name=*/"HierarchyKVCacheTransfer.h2d");
   d2h_threadpool_ = std::make_unique<ThreadPool>(
-      5, [this]() mutable { device_.set_device(); });
+      /*num_threads=*/5,
+      /*init_func=*/[this]() mutable { device_.set_device(); },
+      /*cpu_binding=*/false,
+      /*pool_name=*/"HierarchyKVCacheTransfer.d2h");
   for (int i = 0; i < h2d_threadpool_->size() + d2h_threadpool_->size(); i++) {
     copy_stream_.enqueue(device_.get_stream_from_pool(TIMEOUT_MS));
   }

@@ -66,7 +66,10 @@ WorkerService::WorkerService(runtime::Options options,
   device_.init_device_context();
   stream_ = device_.get_stream_from_pool();
   threadpool_ = std::make_unique<ThreadPool>(
-      4, [this]() mutable { device_.set_device(); });
+      /*num_threads=*/4,
+      /*init_func=*/[this]() mutable { device_.set_device(); },
+      /*cpu_binding=*/false,
+      /*pool_name=*/"WorkerService.request");
 }
 
 WorkerService::WorkerService(runtime::Options options,
@@ -80,7 +83,10 @@ WorkerService::WorkerService(runtime::Options options,
   device_.init_device_context();
   stream_ = device_.get_stream_from_pool();
   threadpool_ = std::make_unique<ThreadPool>(
-      4, [this]() mutable { device_.set_device(); });
+      /*num_threads=*/4,
+      /*init_func=*/[this]() mutable { device_.set_device(); },
+      /*cpu_binding=*/false,
+      /*pool_name=*/"WorkerService.request");
 }
 
 WorkerService::~WorkerService() = default;

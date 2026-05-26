@@ -429,7 +429,10 @@ HFModelLoader::HFModelLoader(const std::string& model_weights_path)
   // sort the model weights files by name
   std::sort(model_weights_files_.begin(), model_weights_files_.end());
 
-  threadpool_ = std::make_unique<ThreadPool>(32);
+  threadpool_ = std::make_unique<ThreadPool>(
+      /*num_threads=*/32,
+      /*cpu_binding=*/false,
+      /*pool_name=*/"HFModelLoader.load_weights");
   if (::xllm::ModelConfig::get_instance().backend() == "rec" &&
       is_onerec_model_type(args_.model_type())) {
     CHECK(load_rec_vocab(model_weights_path))

@@ -541,7 +541,10 @@ RecWorkerImpl::OneRecWorkPipeline::OneRecWorkPipeline(
     RecPipelineType pipeline_type)
     : RecWorkPipeline(runtime),
       rec_sampler_(std::make_unique<RecSampler>(pipeline_type)),
-      filter_mask_threadpool_(std::make_unique<ThreadPool>(1)) {
+      filter_mask_threadpool_(std::make_unique<ThreadPool>(
+          /*num_threads=*/1,
+          /*cpu_binding=*/false,
+          /*pool_name=*/"OneRecWorkPipeline.filter_mask")) {
   if (!::xllm::RecConfig::get_instance().enable_constrained_decoding()) {
     return;
   }
@@ -779,7 +782,10 @@ RecWorkerImpl::OneRecXAttentionWorkPipeline::OneRecXAttentionWorkPipeline(
     : RecWorkPipeline(runtime),
       rec_sampler_(std::make_unique<RecSampler>(
           RecPipelineType::kOneRecXAttentionPipeline)),
-      filter_mask_threadpool_(std::make_unique<ThreadPool>(1)) {
+      filter_mask_threadpool_(std::make_unique<ThreadPool>(
+          /*num_threads=*/1,
+          /*cpu_binding=*/false,
+          /*pool_name=*/"OneRecXAttentionWorkPipeline.filter_mask")) {
   max_seqs_per_batch_ = runtime_.worker.options_.max_seqs_per_batch();
   beam_width_ = std::max<int32_t>(1, runtime_.worker.options_.beam_width());
   max_decode_step_ = std::max(0, get_rec_multi_round_decode_rounds());
@@ -2834,21 +2840,27 @@ RecWorkerImpl::RecWorkerImpl(const ParallelArgs& parallel_args,
   }
 
   step_threadpool_ = std::make_unique<ThreadPool>(
-      options_.rec_worker_max_concurrency(), [this]() mutable {
+      /*num_threads=*/options_.rec_worker_max_concurrency(),
+      /*init_func=*/
+      [this]() mutable {
         device_.set_device();
 #if defined(USE_CUDA)
         ::xllm::layer::flashinfer::FlashinferWorkspace::get_instance()
             .initialize(device_);
         initialize_xattention_workspace();
 #endif
-      });
+      },
+      /*cpu_binding=*/false,
+      /*pool_name=*/"RecWorkerImpl.step");
 
   LOG(INFO) << "RecWorkerImpl constructor: "
             << options_.rec_worker_max_concurrency();
   const int64_t num_threads = std::max<int64_t>(
       1, util::get_int_env("XLLM_REC_INPUT_BUILDER_THREADS", 16));
-  input_builder_thread_pool_ =
-      std::make_shared<ThreadPool>(static_cast<size_t>(num_threads));
+  input_builder_thread_pool_ = std::make_shared<ThreadPool>(
+      /*num_threads=*/static_cast<size_t>(num_threads),
+      /*cpu_binding=*/false,
+      /*pool_name=*/"RecWorkerImpl.input_builder");
 }
 
 RecWorkerImpl::~RecWorkerImpl() {

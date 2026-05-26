@@ -33,7 +33,9 @@ class PrefixCacheWithUpload final : public PrefixCache {
   void save_event_async(const bool is_insert, std::vector<XXH3Key>& keys);
 
  private:
-  ThreadPool threadpool_;
+  ThreadPool threadpool_{/*num_threads=*/1,
+                         /*cpu_binding=*/false,
+                         /*pool_name=*/"PrefixCacheWithUpload.upload"};
 
   std::mutex mutex_;
   DoubleBuffer<KvCacheEvent> db_kvcache_events_;

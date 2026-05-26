@@ -159,9 +159,13 @@ class RemoteWorker : public WorkerClient {
   int32_t global_rank_;
   // connection resource
   std::unique_ptr<CommChannel> channel_;
-  ThreadPool threadpool_;
+  ThreadPool threadpool_{/*num_threads=*/1,
+                         /*cpu_binding=*/false,
+                         /*pool_name=*/"RemoteWorker.request"};
   // copy working thread
-  ThreadPool copy_threadpool_{4};
+  ThreadPool copy_threadpool_{/*num_threads=*/4,
+                              /*cpu_binding=*/false,
+                              /*pool_name=*/"RemoteWorker.copy"};
   const torch::Device device_;
 };
 }  // namespace xllm

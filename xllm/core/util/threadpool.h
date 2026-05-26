@@ -17,6 +17,7 @@ limitations under the License.
 #include <folly/Function.h>
 
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -43,14 +44,10 @@ class ThreadPool final {
 
   explicit ThreadPool(size_t num_threads,
                       bool cpu_binding = false,
-                      const char* fn = nullptr,
-                      int32_t ln = 0,
                       const std::string& pool_name = "");
   explicit ThreadPool(size_t num_threads,
                       Runnable init_func,
                       bool cpu_binding = false,
-                      const char* fn = nullptr,
-                      int32_t ln = 0,
                       const std::string& pool_name = "");
   // Bind each worker thread to the corresponding CPU core in cpu_cores.
   // cpu_cores[i] is the CPU core ID for thread i. If cpu_cores is empty,
@@ -59,8 +56,6 @@ class ThreadPool final {
   explicit ThreadPool(size_t num_threads,
                       Runnable init_func,
                       std::vector<int32_t> cpu_cores,
-                      const char* fn = nullptr,
-                      int32_t ln = 0,
                       const std::string& pool_name = "");
 
   // schedule a runnable to be executed

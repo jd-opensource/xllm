@@ -184,7 +184,9 @@ class KVCacheTransfer {
 
  protected:
   // working thread
-  ThreadPool threadpool_;
+  ThreadPool threadpool_{/*num_threads=*/1,
+                         /*cpu_binding=*/false,
+                         /*pool_name=*/"KVCacheTransfer.async"};
 };
 
 class KVCacheTransferFactory {

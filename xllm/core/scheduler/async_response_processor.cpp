@@ -36,8 +36,18 @@ AsyncResponseProcessor::AsyncResponseProcessor(
     const Tokenizer* tokenizer,
     const std::optional<InstanceRole>& role,
     bool enable_service_routing)
-    : response_threadpool_(::xllm::ServiceConfig::get_instance()
-                               .num_response_handling_threads()),
+    : response_threadpool_(
+          /*num_threads=*/::xllm::ServiceConfig::get_instance()
+              .num_response_handling_threads(),
+          /*cpu_binding=*/false,
+          /*pool_name=*/"AsyncResponseProcessor.response"),
+      rpc_threadpool_(/*num_threads=*/1,
+                      /*cpu_binding=*/false,
+                      /*pool_name=*/"AsyncResponseProcessor.rpc"),
+      generate_output_threadpool_(
+          /*num_threads=*/16,
+          /*cpu_binding=*/false,
+          /*pool_name=*/"AsyncResponseProcessor.generate_output"),
       tokenizer_(tokenizer->clone()),
       role_(role.value_or(InstanceRole::DEFAULT)),
       enable_batch_response_(enable_service_routing) {}

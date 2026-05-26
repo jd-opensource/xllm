@@ -149,7 +149,9 @@ class DisaggPDScheduler : public ChunkedPrefillScheduler {
       prefill_request_queue_offline_;
 
   // use threadpool to handle prefill-completed request
-  ThreadPool prefill_threadpool_;
+  ThreadPool prefill_threadpool_{/*num_threads=*/1,
+                                 /*cpu_binding=*/false,
+                                 /*pool_name=*/"DisaggPDScheduler.prefill"};
 
   // related decode instance name(ID) list
   std::vector<std::string> decode_inst_names_;

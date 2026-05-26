@@ -95,12 +95,18 @@ LLMEngine::LLMEngine(const runtime::Options& options,
   dp_local_tp_size_ = dp_local_size_ / cp_size_;
 
   // create ThreadPool for link cluster
-  link_threadpool_ = std::make_unique<ThreadPool>(worker_clients_num_);
+  link_threadpool_ = std::make_unique<ThreadPool>(
+      /*num_threads=*/worker_clients_num_,
+      /*cpu_binding=*/false,
+      /*pool_name=*/"LLMEngine.link");
 
   process_group_test();
 
   // init thread pool
-  threadpool_ = std::make_unique<ThreadPool>(16);
+  threadpool_ = std::make_unique<ThreadPool>(
+      /*num_threads=*/16,
+      /*cpu_binding=*/false,
+      /*pool_name=*/"LLMEngine.forward_input");
 }
 
 void LLMEngine::process_group_test() {

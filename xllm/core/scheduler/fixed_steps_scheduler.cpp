@@ -47,7 +47,9 @@ FixedStepsScheduler::FixedStepsScheduler(Engine* engine, const Options& options)
       step_semaphore_(
           static_cast<std::ptrdiff_t>(options.rec_worker_max_concurrency())) {
   step_threadpool_ = std::make_unique<ThreadPool>(
-      static_cast<size_t>(options.rec_worker_max_concurrency()));
+      /*num_threads=*/static_cast<size_t>(options.rec_worker_max_concurrency()),
+      /*cpu_binding=*/false,
+      /*pool_name=*/"FixedStepsScheduler.step");
 }
 
 bool FixedStepsScheduler::add_request(std::shared_ptr<Request>& request) {

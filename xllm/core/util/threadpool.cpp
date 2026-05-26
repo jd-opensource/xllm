@@ -22,31 +22,33 @@ limitations under the License.
 #include "core/util/cpu_affinity.h"
 
 namespace xllm {
+namespace {
+
+void log_threadpool_creation(size_t num_threads,
+                             const std::string& pool_name,
+                             const std::string& extra_info) {
+  const std::string display_pool_name =
+      pool_name.empty() ? "<unnamed>" : pool_name;
+  LOG(INFO) << "ThreadPool created, thread count " << num_threads
+            << ", pool name " << display_pool_name << extra_info << ".";
+}
+
+}  // namespace
 
 ThreadPool::ThreadPool(size_t num_threads,
                        bool cpu_binding,
-                       const char* fn,
-                       int32_t ln,
                        const std::string& pool_name)
-    : ThreadPool(num_threads, nullptr, cpu_binding, fn, ln, pool_name) {}
+    : ThreadPool(num_threads, nullptr, cpu_binding, pool_name) {}
 
 ThreadPool::ThreadPool(size_t num_threads,
                        Runnable init_func,
                        bool cpu_binding,
-                       //  std::vector<int32_t> cpu_cores,
-                       const char* fn,
-                       int32_t ln,
                        const std::string& pool_name)
     : queues_(num_threads), pool_name_(pool_name) {
-  if (fn) {
-    LOG(INFO) << "ThreadPool thread count " << num_threads << " in file " << fn
-              << " line " << ln << ", pool name " << pool_name
-              << ", cpu_binding " << (cpu_binding ? "true." : "false.");
-  } else {
-    LOG(INFO) << "ThreadPool thread count " << num_threads << ", pool name "
-              << pool_name << ", cpu_binding "
-              << (cpu_binding ? "true." : " false.");
-  }
+  log_threadpool_creation(
+      num_threads,
+      pool_name,
+      cpu_binding ? ", cpu_binding true" : ", cpu_binding false");
 
   std::shared_ptr<Runnable> shared_init;
   if (init_func) {
@@ -67,17 +69,11 @@ ThreadPool::ThreadPool(size_t num_threads,
 ThreadPool::ThreadPool(size_t num_threads,
                        Runnable init_func,
                        std::vector<int32_t> cpu_cores,
-                       const char* fn,
-                       int32_t ln,
                        const std::string& pool_name)
     : queues_(num_threads), pool_name_(pool_name) {
-  if (fn) {
-    LOG(INFO) << "ThreadPool thread count " << num_threads << " in file " << fn
-              << " line " << ln << ", pool name " << pool_name;
-  } else {
-    LOG(INFO) << "ThreadPool thread count " << num_threads << ", pool name "
-              << pool_name;
-  }
+  log_threadpool_creation(num_threads,
+                          pool_name,
+                          ", cpu_cores " + std::to_string(cpu_cores.size()));
 
   // if (!cpu_cores.empty() && cpu_cores.size() != num_threads) {
   //   LOG(WARNING) << "ThreadPool: cpu_cores.size() (" << cpu_cores.size()
