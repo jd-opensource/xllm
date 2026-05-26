@@ -34,7 +34,6 @@ class APIServiceImpl {
   APIServiceImpl(const std::vector<std::string>& models)
       : models_(models.begin(), models.end()) {
     CHECK(!models_.empty());
-    LOG(INFO) << "model is not empty";
   }
   virtual ~APIServiceImpl() = default;
 

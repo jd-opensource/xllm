@@ -41,7 +41,6 @@ runtime::Options eagle3_draft_options(const runtime::Options& options) {
       .num_speculative_tokens(0)
       .enable_graph_aux_hidden_states(false)
       .backend("llm");
-  LOG(INFO) << "backend is: " << opts.backend();
   return opts;
 }
 
@@ -109,6 +108,38 @@ void Eagle3WorkerImpl::process_draft_sample_output(
 
   sample_output.next_tokens =
       hot_token_id_.index_select(0, sample_output.next_tokens);
+}
+
+void Eagle3WorkerImpl::check_draft_input_embedding(
+    const torch::Tensor& embedding,
+    const std::string& phase) const {
+  if (!embedding.defined()) {
+    return;
+  }
+
+  const int64_t expected_hidden_size =
+      3 * context_.get_model_args().hidden_size();
+  const int64_t draft_hidden_size =
+      draft_impl_ == nullptr ? 0 : draft_impl_->hidden_size();
+  CHECK_EQ(embedding.dim(), 2)
+      << "Eagle3 " << phase << " embedding must be a 2-D tensor, got dim "
+      << embedding.dim();
+  if (phase == "decode") {
+    CHECK(embedding.size(-1) == expected_hidden_size ||
+          embedding.size(-1) == draft_hidden_size)
+        << "Eagle3 " << phase
+        << " embedding hidden size mismatch, expected 3 * target hidden size "
+        << expected_hidden_size << " or draft hidden size "
+        << draft_hidden_size << ", got " << embedding.size(-1);
+    return;
+  }
+
+  CHECK_EQ(embedding.size(-1), expected_hidden_size)
+      << "Eagle3 " << phase
+      << " embedding hidden size mismatch, expected 3 * target hidden size "
+      << expected_hidden_size << ", got " << embedding.size(-1)
+      << ". Check that target model captures three aux hidden-state layers "
+         "for Eagle3.";
 }
 
 }  // namespace xllm

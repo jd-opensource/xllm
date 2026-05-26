@@ -56,7 +56,8 @@ class VLMEngine : public Engine {
   std::vector<int64_t> get_active_activation_memory() const override;
 
  private:
-  friend class SpeculativeVLMEngine;
+  template <typename TargetEngine>
+  friend class SpeculativeEngineBase;
   bool init_model();
   KVCacheCapacity estimate_kv_cache_capacity();
   bool allocate_kv_cache(const KVCacheCapacity& kv_cache_cap);

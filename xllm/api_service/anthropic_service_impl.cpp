@@ -640,7 +640,6 @@ AnthropicServiceImpl::AnthropicServiceImpl(
           master->options().reasoning_parser().value_or("")) {}
 =======
           master_->options().reasoning_parser().value_or("")) {
-  LOG(INFO) << "master inside service: " << master;
   CHECK(master_ != nullptr);
 }
 >>>>>>> adb3147c (feat: template support vlm mtp.)

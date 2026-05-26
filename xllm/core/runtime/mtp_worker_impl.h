@@ -20,6 +20,7 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "framework/kv_cache_transfer/spec_kv_cache_transfer.h"
 #endif
+#include "runtime/llm_worker_impl.h"
 #include "runtime/speculative_worker_impl.h"
 
 namespace xllm {
@@ -92,6 +93,12 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
   // Hook for algorithm-specific draft output post-processing during decode.
   // Default MTP behavior always compresses probs for cache storage.
   virtual void process_draft_sample_output(SampleOutput& sample_output);
+
+  virtual void check_draft_input_embedding(const torch::Tensor& embedding,
+                                           const std::string& phase) const {
+    (void)embedding;
+    (void)phase;
+  }
 
   SampleOutput validate(const SamplingParameters& sampling_params,
                         const torch::Tensor& draft_token_ids,

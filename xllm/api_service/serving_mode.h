@@ -36,7 +36,6 @@ enum class ServingMode : int8_t {
 inline ServingMode to_serving_mode(EngineType engine_type) {
   switch (static_cast<EngineType::Value>(engine_type)) {
     case EngineType::VLM:
-    case EngineType::VLMSSM:
       return ServingMode::VLM;
     case EngineType::DIT:
       return ServingMode::DIT;

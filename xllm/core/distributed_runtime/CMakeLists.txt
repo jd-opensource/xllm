@@ -21,7 +21,6 @@ cc_library(
     vlm_engine.h
     vlm_master.h
     speculative_engine.h
-    speculative_vlm_engine.h
     rec_engine.h
     rec_master.h
     disagg_pd_service.h
@@ -43,7 +42,6 @@ cc_library(
     vlm_engine.cpp
     vlm_master.cpp
     speculative_engine.cpp
-    speculative_vlm_engine.cpp
     rec_engine.cpp
     rec_master.cpp
     disagg_pd_service.cpp

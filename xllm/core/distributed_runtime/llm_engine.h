@@ -136,8 +136,8 @@ class LLMEngine : public Engine {
           layer_offsets) override;
 
  private:
-  friend class SpeculativeEngine;
-  friend class SpeculativeVLMEngine;
+  template <typename TargetEngine>
+  friend class SpeculativeEngineBase;
   // setup workers internal
   void setup_workers(const runtime::Options& options);
   bool init_model(MasterStatus master_status = MasterStatus::WAKEUP);

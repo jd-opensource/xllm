@@ -72,6 +72,8 @@ class Master {
   RateLimiter* get_rate_limiter() { return &rate_limiter_; }
 
  protected:
+  void set_engine_type(EngineType engine_type) { engine_type_ = engine_type; }
+
   Options options_;
   EngineType engine_type_ = EngineType::INVALID;
   std::unique_ptr<Engine> engine_;

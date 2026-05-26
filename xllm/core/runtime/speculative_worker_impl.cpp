@@ -18,6 +18,8 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "core/framework/config/speculative_config.h"
+#include "runtime/llm_worker_impl.h"
+#include "runtime/vlm_worker_impl.h"
 #include "spec_input_builder.h"
 #include "util/slice.h"
 #include "util/timer.h"
@@ -43,12 +45,12 @@ torch::Tensor make_cpu_int_tensor(const std::vector<int32_t>& values) {
 
 void set_token_position_tensors(ForwardInput& input,
                                 const std::vector<int32_t>& token_ids,
-                                const std::vector<int32_t>& positions,
+                                const torch::Tensor& positions,
                                 const torch::TensorOptions& token_options,
                                 const torch::TensorOptions& position_options) {
   input.device_tensors_ready = false;
   input.token_ids_host = make_cpu_int_tensor(token_ids);
-  input.positions_host = make_cpu_int_tensor(positions);
+  input.positions_host = positions;
   input.token_ids = safe_to(input.token_ids_host, token_options, true);
   input.positions = safe_to(input.positions_host, position_options, true);
 }
@@ -67,13 +69,14 @@ SpeculativeWorkerImpl::SpeculativeWorkerImpl(
     WorkerType worker_type)
     : WorkerImpl(parallel_args, device, options) {
   if (worker_type == WorkerType::LLM) {
-    auto worker =
+    target_impl_ =
         std::make_unique<LLMWorkerImpl>(parallel_args, device, target_options);
-    vlm_impl_ = std::move(worker);
   } else if (worker_type == WorkerType::VLM) {
-    auto worker =
+    target_impl_ =
         std::make_unique<VLMWorkerImpl>(parallel_args, device, target_options);
-    impl_ = std::move(worker);
+  } else {
+    LOG(FATAL) << "Unsupported speculative worker type: "
+               << worker_type.to_string();
   }
 }
 
@@ -81,31 +84,30 @@ bool SpeculativeWorkerImpl::init_model(const std::string& model_weights_path,
                                        int32_t random_seed,
                                        MasterStatus master_status) {
   // Base class only loads the target model.
-  LOG(INFO) << "Inside Speculative Worker ";
   bool result = true;
-  if (impl_->get_status() == WorkerImpl::Status::UNINITIALIZED) {
-    LOG(INFO) << "Calling workerimpl init model ";
-    result = impl_->WorkerImpl::init_model(
+  CHECK(target_impl_ != nullptr);
+  if (target_impl_->get_status() == WorkerImpl::Status::UNINITIALIZED) {
+    result = target_impl_->WorkerImpl::init_model(
         model_weights_path, random_seed, master_status);
     if (result) {
-      dtype_ = impl_->dtype();
-      embedding_size_ = impl_->hidden_size();
+      dtype_ = target_impl_->dtype();
+      embedding_size_ = target_impl_->hidden_size();
     }
   }
   enable_fused_kernel_ =
-      impl_->get_optimization_config().enable_fused_spec_kernel;
+      target_impl_->get_optimization_config().enable_fused_spec_kernel;
   return result;
 }
 
 bool SpeculativeWorkerImpl::allocate_kv_cache(
     const KVCacheShape& kv_cache_shape) {
-  return impl_->allocate_kv_cache(kv_cache_shape);
+  return target_impl_->allocate_kv_cache(kv_cache_shape);
 }
 
 #if defined(USE_NPU)
 bool SpeculativeWorkerImpl::allocate_kv_cache_with_transfer(
     const KVCacheShape& kv_cache_shape) {
-  return impl_->allocate_kv_cache_with_transfer(kv_cache_shape);
+  return target_impl_->allocate_kv_cache_with_transfer(kv_cache_shape);
 }
 #endif
 
@@ -148,7 +150,12 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
 
   specBuilder::DecodeBuildBuffers buf;
   buf.out_token_ids.reserve(num_sequences);
-  buf.out_positions.reserve(num_sequences);
+  // Preserve the mRoPE [3, N] position layout when the incoming decode input
+  // uses it. Decode tokens are text-only, but keeping the shape stable avoids
+  // switching RoPE paths and is friendlier to future graph capture/replay.
+  buf.out_positions.reserve(inputs.positions_host.dim() == 2
+                                ? static_cast<size_t>(num_sequences) * 3
+                                : static_cast<size_t>(num_sequences));
   buf.out_kv_seq_lens.reserve(num_sequences);
   buf.out_new_cache_slots.reserve(num_sequences);
   specBuilder::DecodeRowContext row_ctx =
@@ -166,12 +173,12 @@ ForwardInput SpeculativeWorkerImpl::update_input_by_last_step_output(
 
   CHECK_EQ(buf.out_new_cache_slots.size(), buf.out_token_ids.size())
       << "step-update kv slots/tokens mismatch";
-  CHECK_EQ(buf.out_positions.size(), buf.out_token_ids.size())
+  CHECK_EQ(specBuilder::position_column_count(buf), buf.out_token_ids.size())
       << "step-update positions/tokens mismatch";
 
   set_token_position_tensors(new_inputs,
                              buf.out_token_ids,
-                             buf.out_positions,
+                             specBuilder::make_positions_tensor(buf),
                              inputs.token_ids.options(),
                              inputs.positions.options());
   // update the input_params
@@ -230,11 +237,15 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
       specBuilder::make_decode_row_context(input);
 
   Slice<int32_t> token_ids = tensor_slice(input.token_ids_host);
-  Slice<int32_t> positions = tensor_slice(input.positions_host);
   Slice<int32_t> kv_seq_lens = input.input_params.attention.host.kv_seq_lens;
   specBuilder::DecodeBuildBuffers buf;
   buf.out_token_ids.reserve(total_num_val_tokens);
-  buf.out_positions.reserve(total_num_val_tokens);
+  // Preserve the mRoPE [3, N] position layout when the incoming decode input
+  // uses it. Decode tokens are text-only, but keeping the shape stable avoids
+  // switching RoPE paths and is friendlier to future graph capture/replay.
+  buf.out_positions.reserve(input.positions_host.dim() == 2
+                                ? static_cast<size_t>(total_num_val_tokens) * 3
+                                : static_cast<size_t>(total_num_val_tokens));
   buf.out_new_cache_slots.reserve(total_num_val_tokens);
   if (!::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel()) {
     buf.out_kv_seq_lens.reserve(total_num_val_tokens);
@@ -249,12 +260,15 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
   std::vector<int32_t> atb_q_cu_seq_lens_vec = {};
   int32_t atb_kv_max_seq_len = 0;
   for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
-    int32_t start_position = positions[seq_id];
     int32_t kv_len =
         specBuilder::calc_kv_len(kv_seq_lens, seq_id, /*offset=*/0);
-    CHECK_EQ(start_position + 1, kv_len)
-        << "validate position/kv_len mismatch, seq_id=" << seq_id
-        << ", start_position=" << start_position << ", kv_len=" << kv_len;
+    if (input.positions_host.dim() != 2) {
+      Slice<int32_t> positions = tensor_slice(input.positions_host);
+      int32_t start_position = positions[seq_id];
+      CHECK_EQ(start_position + 1, kv_len)
+          << "validate position/kv_len mismatch, seq_id=" << seq_id
+          << ", start_position=" << start_position << ", kv_len=" << kv_len;
+    }
 
     for (int32_t val_idx = 0; val_idx < num_val_tokens; ++val_idx) {
       specBuilder::RowSpec row;
@@ -285,12 +299,12 @@ void SpeculativeWorkerImpl::prepare_validate_inputs(
 
   CHECK_EQ(buf.out_new_cache_slots.size(), buf.out_token_ids.size())
       << "validate kv slots/tokens mismatch";
-  CHECK_EQ(buf.out_positions.size(), buf.out_token_ids.size())
+  CHECK_EQ(specBuilder::position_column_count(buf), buf.out_token_ids.size())
       << "validate positions/tokens mismatch";
 
   set_token_position_tensors(validate_input,
                              buf.out_token_ids,
-                             buf.out_positions,
+                             specBuilder::make_positions_tensor(buf),
                              token_options,
                              position_options);
   // update the input_params

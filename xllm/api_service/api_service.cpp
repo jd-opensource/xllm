@@ -110,17 +110,12 @@ APIService::APIService(Master* master,
                        const std::vector<std::string>& model_names,
                        const std::vector<std::string>& model_versions)
     : master_(master) {
-  LOG(INFO) << "here 1";
   set_model_master(model_names[0], master);
-  LOG(INFO) << "here 2";
   if (::xllm::DistributedConfig::get_instance().node_rank() != 0) {
     return;
   }
-  LOG(INFO) << "here 3";
   ServiceImplFactory::create(this, master, model_names, model_versions);
-  LOG(INFO) << "here 4";
   register_chat_completions_handler();
-  LOG(INFO) << "here 5";
 }
 
 void APIService::set_model_master(const std::string& model_id, Master* master) {
