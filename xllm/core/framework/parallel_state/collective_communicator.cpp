@@ -286,12 +286,20 @@ void CollectiveCommunicator::create_process_groups(
   if (ep_size > 1) {
     int moe_tp_size = world_size / ep_size;
     port_offset = global_rank / moe_tp_size + 1;
+    std::string moe_tp_host = host;
+#if defined(USE_NPU)
+    if (::xllm::KernelConfig::get_instance().npu_kernel_backend() == "TORCH") {
+      const int32_t moe_tp_group_start =
+          (global_rank / moe_tp_size) * moe_tp_size;
+      moe_tp_host = get_rank_table_server_host(moe_tp_group_start, host);
+    }
+#endif
     moe_tp_group_ = create_process_group(global_rank,
                                          world_size,
                                          moe_tp_size,
                                          port + port_offset,
                                          false,
-                                         host,
+                                         moe_tp_host,
                                          "moe_tp_group",
                                          device);
     parallel_args_->moe_tp_group_ = moe_tp_group_.get();

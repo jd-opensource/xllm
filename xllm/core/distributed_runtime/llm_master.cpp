@@ -313,12 +313,13 @@ std::shared_ptr<Request> LLMMaster::generate_request(
 
   COUNTER_ADD(tokenization_latency_seconds, timer.elapsed_seconds());
 
-  int32_t max_context_len = model_args_.max_position_embeddings();
+  const int32_t max_context_len = model_args_.max_position_embeddings();
+  int32_t prompt_token_limit = max_context_len;
   if (!options_.enable_chunked_prefill()) {
-    max_context_len =
-        std::min(max_context_len, options_.max_tokens_per_batch());
+    prompt_token_limit =
+        std::min(prompt_token_limit, options_.max_tokens_per_batch());
   }
-  if (local_prompt_tokens.size() >= max_context_len) {
+  if (local_prompt_tokens.size() >= prompt_token_limit) {
     LOG(ERROR) << "Prompt is too long: " << local_prompt_tokens.size();
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
                         "Prompt is too long",
