@@ -52,9 +52,16 @@ class ConcurrentBlockManagerImpl : public BlockManagerImpl {
   // get the block utilization.
   double kv_cache_utilization() const override;
 
+  size_t num_used_blocks() const override;
+
+  void free(int32_t block_id) override;
+
+  Block allocate() override;
+
  private:
-  // mutex for disagg prefill/decode mode
-  mutable std::mutex mutex_;
+  // Prefix cache eviction can release Blocks while allocator APIs hold the
+  // manager lock, so free() must be able to re-enter from the same thread.
+  mutable std::recursive_mutex mutex_;
 };
 
 }  // namespace xllm

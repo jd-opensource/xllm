@@ -15,7 +15,9 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdint>
+#include <thread>
 #include <vector>
 
 #include "concurrent_block_manager_impl.h"
@@ -78,6 +80,45 @@ TEST(ConcurrentBlockManagerTest, ContinuesPrefixCacheFromExistingBlocks) {
 
   EXPECT_EQ(manager.num_blocks_in_prefix_cache(), 0);
   EXPECT_EQ(manager.num_free_blocks(), manager.num_total_blocks());
+}
+
+TEST(ConcurrentBlockManagerTest, AllocatesWhileBlocksReleaseConcurrently) {
+  BlockManager::Options options;
+  options.num_blocks(65).block_size(2).enable_prefix_cache(false);
+  ConcurrentBlockManagerImpl manager(options);
+
+  constexpr int32_t kNumThreads = 8;
+  constexpr int32_t kNumIterations = 10000;
+  std::atomic<bool> start{false};
+  std::vector<std::thread> workers;
+  workers.reserve(static_cast<size_t>(kNumThreads));
+
+  for (int32_t i = 0; i < kNumThreads; ++i) {
+    workers.emplace_back([&manager, &start, kNumIterations]() {
+      while (!start.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+      }
+
+      for (int32_t iter = 0; iter < kNumIterations; ++iter) {
+        std::vector<Block> blocks = manager.allocate(/*num_blocks=*/1);
+        if (blocks.empty()) {
+          std::this_thread::yield();
+          continue;
+        }
+
+        manager.deallocate(blocks);
+        blocks.clear();
+      }
+    });
+  }
+
+  start.store(true, std::memory_order_release);
+  for (std::thread& worker : workers) {
+    worker.join();
+  }
+
+  EXPECT_EQ(manager.num_free_blocks(), manager.num_total_blocks());
+  EXPECT_EQ(manager.num_used_blocks(), 0);
 }
 
 }  // namespace xllm
