@@ -99,10 +99,11 @@ std::vector<torch::Tensor> Qwen2VisionAttentionImpl::split_qkv(
   return {q, k, v};
 }
 
-namespace {
-
-int32_t get_max_sequence_length(const std::vector<int32_t>& cu_seq_len_vec) {
-  CHECK_GE(cu_seq_len_vec.size(), static_cast<size_t>(2));
+int32_t Qwen2VisionAttentionImpl::get_max_sequence_length(
+    const std::vector<int32_t>& cu_seq_len_vec) {
+  if (cu_seq_len_vec.size() < static_cast<size_t>(2)) {
+    return 0;
+  }
   int32_t max_seq_len = 0;
   for (size_t i = 1; i < cu_seq_len_vec.size(); ++i) {
     CHECK_GE(cu_seq_len_vec[i], cu_seq_len_vec[i - 1]);
@@ -111,6 +112,8 @@ int32_t get_max_sequence_length(const std::vector<int32_t>& cu_seq_len_vec) {
   }
   return max_seq_len;
 }
+
+namespace {
 
 #if defined(USE_CUDA)
 // Pure PyTorch scaled dot-product attention for Qwen2 vision.

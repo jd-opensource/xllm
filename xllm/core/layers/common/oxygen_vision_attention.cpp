@@ -15,29 +15,12 @@ limitations under the License.
 
 #include "oxygen_vision_attention.h"
 
-#include <algorithm>
-
 #if defined(USE_MLU)
 #include "kernels/mlu/mlu_ops_api.h"
 #endif
 #include "kernels/ops_api.h"
 namespace xllm {
 namespace layer {
-
-namespace {
-
-int32_t get_max_sequence_length(const std::vector<int32_t>& cu_seq_len_vec) {
-  CHECK_GE(cu_seq_len_vec.size(), static_cast<size_t>(2));
-  int32_t max_seq_len = 0;
-  for (size_t i = 1; i < cu_seq_len_vec.size(); ++i) {
-    CHECK_GE(cu_seq_len_vec[i], cu_seq_len_vec[i - 1]);
-    max_seq_len =
-        std::max(max_seq_len, cu_seq_len_vec[i] - cu_seq_len_vec[i - 1]);
-  }
-  return max_seq_len;
-}
-
-}  // namespace
 
 OxygenVisionAttentionImpl::OxygenVisionAttentionImpl(
     const ModelContext& context)

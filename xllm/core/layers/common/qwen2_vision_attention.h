@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <vector>
+
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
@@ -44,6 +46,8 @@ class Qwen2VisionAttentionImpl : public torch::nn::Module {
 
  protected:
   std::vector<torch::Tensor> split_qkv(const torch::Tensor& qkv);
+  static int32_t get_max_sequence_length(
+      const std::vector<int32_t>& cu_seq_len_vec);
 
   int64_t hidden_size_per_attention_head_;
   int64_t num_attention_heads_per_partition_;
