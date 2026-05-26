@@ -356,12 +356,9 @@ void WorkerImpl::get_device_info(std::string& device_ip, uint16_t& port) {
   port = options_.transfer_listen_port();
 }
 
-void WorkerImpl::get_cache_info(uint64_t& cluster_id,
-                                std::string& addr,
-                                int64_t& k_cache_id,
-                                int64_t& v_cache_id) {
+void WorkerImpl::get_cache_info(uint64_t& cluster_id, std::string& addr) {
 #if defined(USE_NPU) || defined(USE_MLU)
-  kv_cache_transfer_->get_cache_info(cluster_id, addr, k_cache_id, v_cache_id);
+  kv_cache_transfer_->get_cache_info(cluster_id, addr);
 #endif
 }
 
@@ -1344,8 +1341,6 @@ folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_with_transfer_async(
 folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
     uint64_t src_cluster_id,
     const std::string& src_addr,
-    int64_t src_k_cache_id,
-    int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& src_linear_state_ids,
@@ -1353,8 +1348,6 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
 #if defined(USE_NPU)
   return kv_cache_transfer_->pull_kv_blocks_async(src_cluster_id,
                                                   src_addr,
-                                                  src_k_cache_id,
-                                                  src_v_cache_id,
                                                   src_blocks,
                                                   dst_blocks,
                                                   src_linear_state_ids,
@@ -1362,8 +1355,6 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
 #elif defined(USE_MLU)
   (void)src_cluster_id;
   (void)src_addr;
-  (void)src_k_cache_id;
-  (void)src_v_cache_id;
   (void)src_blocks;
   (void)dst_blocks;
   (void)src_linear_state_ids;

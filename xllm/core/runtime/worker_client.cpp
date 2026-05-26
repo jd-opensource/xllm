@@ -46,11 +46,8 @@ void WorkerClient::get_device_info(std::string& device_ip, uint16_t& port) {
   worker_->get_device_info(device_ip, port);
 }
 
-void WorkerClient::get_cache_info(uint64_t& cluster_id,
-                                  std::string& addr,
-                                  int64_t& k_cache_id,
-                                  int64_t& v_cache_id) {
-  worker_->get_cache_info(cluster_id, addr, k_cache_id, v_cache_id);
+void WorkerClient::get_cache_info(uint64_t& cluster_id, std::string& addr) {
+  worker_->get_cache_info(cluster_id, addr);
 }
 
 bool WorkerClient::link_cluster(const std::vector<uint64_t>& cluster_ids,
@@ -82,16 +79,12 @@ std::tuple<int64_t, int64_t> WorkerClient::estimate_kv_cache_capacity() {
 bool WorkerClient::pull_kv_blocks(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
-    const int64_t src_k_cache_id,
-    const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& src_linear_state_ids,
     const std::vector<uint64_t>& dst_linear_state_ids) {
   auto future = worker_->pull_kv_blocks_async(src_cluster_id,
                                               src_addr,
-                                              src_k_cache_id,
-                                              src_v_cache_id,
                                               src_blocks,
                                               dst_blocks,
                                               src_linear_state_ids,
@@ -150,16 +143,12 @@ folly::SemiFuture<bool> WorkerClient::allocate_kv_cache_with_transfer_async(
 folly::SemiFuture<bool> WorkerClient::pull_kv_blocks_async(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
-    const int64_t src_k_cache_id,
-    const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& src_linear_state_ids,
     const std::vector<uint64_t>& dst_linear_state_ids) {
   return worker_->pull_kv_blocks_async(src_cluster_id,
                                        src_addr,
-                                       src_k_cache_id,
-                                       src_v_cache_id,
                                        src_blocks,
                                        dst_blocks,
                                        src_linear_state_ids,

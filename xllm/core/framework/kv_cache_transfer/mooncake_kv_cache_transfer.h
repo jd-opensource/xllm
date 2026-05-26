@@ -32,10 +32,7 @@ class MooncakeKVCacheTransferBase : public KVCacheTransfer {
 
   void initialize(int32_t device_id) override;
 
-  void get_cache_info(uint64_t& cluster_id,
-                      std::string& addr,
-                      int64_t& key_cache_id,
-                      int64_t& value_cache_id) override;
+  void get_cache_info(uint64_t& cluster_id, std::string& addr) override;
 
   bool link_cluster(const uint64_t cluster_id,
                     const std::string& remote_addr,
@@ -85,8 +82,6 @@ class MooncakeKVCacheTransferDefault final
   bool pull_kv_blocks(
       const uint64_t src_cluster_id,
       const std::string& src_addr,
-      const int64_t src_k_cache_id,
-      const int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks,
       const std::vector<uint64_t>& src_linear_state_ids,
@@ -162,8 +157,6 @@ class MooncakeKVCacheTransferXTensor final
   bool pull_kv_blocks(
       const uint64_t src_cluster_id,
       const std::string& src_addr,
-      const int64_t src_k_cache_id,
-      const int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks,
       const std::vector<uint64_t>& src_linear_state_ids,

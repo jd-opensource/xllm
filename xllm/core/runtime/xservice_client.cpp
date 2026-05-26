@@ -328,12 +328,6 @@ InstanceInfo XServiceClient::get_instance_info(
   for (auto& addr : resp.addrs()) {
     result.addrs.emplace_back(addr);
   }
-  for (auto& k_cache_id : resp.k_cache_ids()) {
-    result.k_cache_ids.emplace_back(k_cache_id);
-  }
-  for (auto& v_cache_id : resp.v_cache_ids()) {
-    result.v_cache_ids.emplace_back(v_cache_id);
-  }
   result.dp_size = resp.dp_size();
   for (auto& ip : resp.device_ips()) {
     result.device_ips.emplace_back(ip);

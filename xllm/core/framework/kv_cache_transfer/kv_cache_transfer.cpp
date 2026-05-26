@@ -40,8 +40,6 @@ namespace xllm {
 folly::SemiFuture<bool> KVCacheTransfer::pull_kv_blocks_async(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
-    const int64_t src_k_cache_id,
-    const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& src_linear_state_ids,
@@ -51,8 +49,6 @@ folly::SemiFuture<bool> KVCacheTransfer::pull_kv_blocks_async(
   threadpool_.schedule([this,
                         src_cluster_id,
                         src_addr,
-                        src_k_cache_id,
-                        src_v_cache_id,
                         src_blocks,
                         dst_blocks,
                         src_linear_state_ids,
@@ -60,8 +56,6 @@ folly::SemiFuture<bool> KVCacheTransfer::pull_kv_blocks_async(
                         promise = std::move(promise)]() mutable {
     const bool success = pull_kv_blocks(src_cluster_id,
                                         src_addr,
-                                        src_k_cache_id,
-                                        src_v_cache_id,
                                         src_blocks,
                                         dst_blocks,
                                         src_linear_state_ids,
@@ -242,19 +236,13 @@ void KVCacheTransfer::merge_kv_blocks(
          i += src_tp_size) {
       uint64_t dst_cluster_id = info.remote_instance_info.cluster_ids[i];
       auto& dst_addr = info.remote_instance_info.addrs[i];
-      int64_t k_cache_id = info.remote_instance_info.k_cache_ids[i];
-      int64_t v_cache_id = info.remote_instance_info.v_cache_ids[i];
-      std::string key = std::to_string(dst_cluster_id) + "_" + dst_addr + "_" +
-                        std::to_string(k_cache_id) + "_" +
-                        std::to_string(v_cache_id);
+      std::string key = std::to_string(dst_cluster_id) + "_" + dst_addr;
       // Merge all kv blocks with the same destination worker into a single
       // vector.
       if (merged_kv_infos.find(key) == merged_kv_infos.end()) {
         KVCacheInfo kv_info;
         kv_info.dst_cluster_id = dst_cluster_id;
         kv_info.dst_addr = dst_addr;
-        kv_info.dst_k_cache_id = k_cache_id;
-        kv_info.dst_v_cache_id = v_cache_id;
         kv_info.src_blocks.insert(kv_info.src_blocks.end(),
                                   info.local_blocks_ids.begin(),
                                   info.local_blocks_ids.end());

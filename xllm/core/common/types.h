@@ -224,8 +224,6 @@ struct InstanceInfo {
   // remote kv cache info
   std::vector<uint64_t> cluster_ids;
   std::vector<std::string> addrs;
-  std::vector<int64_t> k_cache_ids;
-  std::vector<int64_t> v_cache_ids;
   int32_t dp_size;
   // device network info
   std::vector<std::string> device_ips;
@@ -265,8 +263,6 @@ struct InstanceInfo {
     }
     json_val["cluster_ids"] = cluster_ids;
     json_val["addrs"] = addrs;
-    json_val["k_cache_ids"] = k_cache_ids;
-    json_val["v_cache_ids"] = v_cache_ids;
     json_val["dp_size"] = dp_size;
     json_val["device_ips"] = device_ips;
     json_val["ports"] = ports;

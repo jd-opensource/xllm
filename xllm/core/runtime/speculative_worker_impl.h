@@ -82,11 +82,8 @@ class SpeculativeWorkerImpl : public WorkerImpl {
       const KVCacheShape& kv_cache_shape) override;
 #endif
 
-  void get_cache_info(uint64_t& cluster_id,
-                      std::string& addr,
-                      int64_t& k_cache_id,
-                      int64_t& v_cache_id) override {
-    impl_->get_cache_info(cluster_id, addr, k_cache_id, v_cache_id);
+  void get_cache_info(uint64_t& cluster_id, std::string& addr) override {
+    impl_->get_cache_info(cluster_id, addr);
   };
 
   // prepare input for execution
@@ -106,16 +103,12 @@ class SpeculativeWorkerImpl : public WorkerImpl {
   folly::SemiFuture<bool> pull_kv_blocks_async(
       const uint64_t src_cluster_id,
       const std::string& src_addr,
-      const int64_t src_k_cache_id,
-      const int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks,
       const std::vector<uint64_t>& src_linear_state_ids = {},
       const std::vector<uint64_t>& dst_linear_state_ids = {}) override {
     return impl_->pull_kv_blocks_async(src_cluster_id,
                                        src_addr,
-                                       src_k_cache_id,
-                                       src_v_cache_id,
                                        src_blocks,
                                        dst_blocks,
                                        src_linear_state_ids,

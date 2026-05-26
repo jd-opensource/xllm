@@ -371,13 +371,9 @@ void WorkerService::GetCacheInfo(::google::protobuf::RpcController* controller,
     brpc::ClosureGuard done_guard(done);
     uint64_t cluster_id;
     std::string addr;
-    int64_t k_cache_id;
-    int64_t v_cache_id;
-    worker_->get_cache_info(cluster_id, addr, k_cache_id, v_cache_id);
+    worker_->get_cache_info(cluster_id, addr);
     resp->set_cluster_id(cluster_id);
     resp->set_addr(addr);
-    resp->set_k_cache_id(k_cache_id);
-    resp->set_v_cache_id(v_cache_id);
   });
   return;
 }
@@ -390,8 +386,6 @@ void WorkerService::PullKVCache(::google::protobuf::RpcController* controller,
     brpc::ClosureGuard done_guard(done);
     uint64_t src_cluster_id = req->cluster_id();
     std::string addr = req->addr();
-    int64_t src_k_cache_id = req->k_cache_id();
-    int64_t src_v_cache_id = req->v_cache_id();
     std::vector<uint64_t> src_blocks(req->src_blocks().begin(),
                                      req->src_blocks().end());
     std::vector<uint64_t> dst_blocks(req->dst_blocks().begin(),
@@ -402,8 +396,6 @@ void WorkerService::PullKVCache(::google::protobuf::RpcController* controller,
         req->dst_linear_state_ids().begin(), req->dst_linear_state_ids().end());
     auto future = worker_->pull_kv_blocks_async(src_cluster_id,
                                                 addr,
-                                                src_k_cache_id,
-                                                src_v_cache_id,
                                                 src_blocks,
                                                 dst_blocks,
                                                 src_linear_state_ids,

@@ -91,10 +91,7 @@ class WorkerImpl {
 
   virtual void get_device_info(std::string& device_ip, uint16_t& port);
 
-  virtual void get_cache_info(uint64_t& cluster_id,
-                              std::string& addr,
-                              int64_t& k_cache_id,
-                              int64_t& v_cache_id);
+  virtual void get_cache_info(uint64_t& cluster_id, std::string& addr);
 
   virtual bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                             const std::vector<std::string>& addrs,
@@ -149,8 +146,6 @@ class WorkerImpl {
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(
       uint64_t src_cluster_id,
       const std::string& src_addr,
-      int64_t src_k_cache_id,
-      int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks,
       const std::vector<uint64_t>& src_linear_state_ids = {},

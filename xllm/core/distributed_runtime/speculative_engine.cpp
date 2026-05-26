@@ -249,8 +249,6 @@ bool SpeculativeEngine::pull_kv_blocks(
     const int32_t src_dp_rank,
     const std::vector<uint64_t>& src_cluster_ids,
     const std::vector<std::string>& src_addrs,
-    const std::vector<int64_t>& src_k_cache_ids,
-    const std::vector<int64_t>& src_v_cache_ids,
     const std::vector<uint64_t>& src_blocks,
     const int32_t dst_dp_rank,
     const std::vector<uint64_t>& dst_blocks,
@@ -260,8 +258,6 @@ bool SpeculativeEngine::pull_kv_blocks(
                                  src_dp_rank,
                                  src_cluster_ids,
                                  src_addrs,
-                                 src_k_cache_ids,
-                                 src_v_cache_ids,
                                  src_blocks,
                                  dst_dp_rank,
                                  dst_blocks,
@@ -275,10 +271,8 @@ void SpeculativeEngine::get_device_info(std::vector<std::string>& device_ips,
 };
 
 void SpeculativeEngine::get_cache_info(std::vector<uint64_t>& cluster_ids,
-                                       std::vector<std::string>& addrs,
-                                       std::vector<int64_t>& k_cache_ids,
-                                       std::vector<int64_t>& v_cache_ids) {
-  engine_->get_cache_info(cluster_ids, addrs, k_cache_ids, v_cache_ids);
+                                       std::vector<std::string>& addrs) {
+  engine_->get_cache_info(cluster_ids, addrs);
 };
 
 bool SpeculativeEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,

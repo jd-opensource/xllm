@@ -82,11 +82,8 @@ void RemoteWorker::get_device_info(std::string& device_ip, uint16_t& port) {
   channel_->get_device_info(device_ip, port);
 }
 
-void RemoteWorker::get_cache_info(uint64_t& cluster_id,
-                                  std::string& addr,
-                                  int64_t& k_cache_id,
-                                  int64_t& v_cache_id) {
-  channel_->get_cache_info(cluster_id, addr, k_cache_id, v_cache_id);
+void RemoteWorker::get_cache_info(uint64_t& cluster_id, std::string& addr) {
+  channel_->get_cache_info(cluster_id, addr);
 }
 
 bool RemoteWorker::link_cluster(const std::vector<uint64_t>& cluster_ids,
@@ -132,16 +129,12 @@ std::tuple<int64_t, int64_t> RemoteWorker::estimate_kv_cache_capacity() {
 bool RemoteWorker::pull_kv_blocks(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
-    const int64_t src_k_cache_id,
-    const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& src_linear_state_ids,
     const std::vector<uint64_t>& dst_linear_state_ids) {
   return channel_->pull_kv_blocks(src_cluster_id,
                                   src_addr,
-                                  src_k_cache_id,
-                                  src_v_cache_id,
                                   src_blocks,
                                   dst_blocks,
                                   src_linear_state_ids,
@@ -257,8 +250,6 @@ folly::SemiFuture<bool> RemoteWorker::allocate_kv_cache_with_transfer_async(
 folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
-    const int64_t src_k_cache_id,
-    const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& src_linear_state_ids,
@@ -268,8 +259,6 @@ folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
   threadpool_.schedule([this,
                         src_cluster_id,
                         src_addr,
-                        src_k_cache_id,
-                        src_v_cache_id,
                         src_blocks,
                         dst_blocks,
                         src_linear_state_ids,
@@ -277,8 +266,6 @@ folly::SemiFuture<bool> RemoteWorker::pull_kv_blocks_async(
                         promise = std::move(promise)]() mutable {
     if (!channel_->pull_kv_blocks(src_cluster_id,
                                   src_addr,
-                                  src_k_cache_id,
-                                  src_v_cache_id,
                                   src_blocks,
                                   dst_blocks,
                                   src_linear_state_ids,

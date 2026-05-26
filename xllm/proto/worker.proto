@@ -71,8 +71,6 @@ message D2DLinkWorkerRequest {
 message PullKVCacheRequest {
   uint64 cluster_id = 1;
   string addr = 6;
-  int64 k_cache_id = 2;
-  int64 v_cache_id = 3;
   repeated uint64 src_blocks = 4;
   repeated uint64 dst_blocks = 5;
   repeated uint64 src_linear_state_ids = 7;
@@ -109,8 +107,6 @@ message DeviceInfo {
 message CacheInfo {
   uint64 cluster_id = 1;
   string addr = 4;
-  int64 k_cache_id = 2;
-  int64 v_cache_id = 3;
 }
 
 message ClusterInfo {
@@ -126,8 +122,6 @@ message InstanceInfo {
   string type = 3;
   repeated uint64 cluster_ids = 4;
   repeated string addrs = 8;
-  repeated int64 k_cache_ids = 5;
-  repeated int64 v_cache_ids = 6;
   int32 dp_size = 7;
 }
 

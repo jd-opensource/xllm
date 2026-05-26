@@ -49,8 +49,6 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
   bool pull_kv_blocks(
       const uint64_t src_cluster_id,
       const std::string& src_addr,
-      const int64_t src_k_cache_id,
-      const int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks,
       const std::vector<uint64_t>& src_linear_state_ids,

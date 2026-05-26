@@ -126,10 +126,7 @@ void DisaggPDScheduler::register_instance_info(const std::string& server_name,
             << ", instance rpc_address = " << instance_info_.rpc_address
             << ", instance type = " << instance_info_.type;
 
-  engine->get_cache_info(instance_info_.cluster_ids,
-                         instance_info_.addrs,
-                         instance_info_.k_cache_ids,
-                         instance_info_.v_cache_ids);
+  engine->get_cache_info(instance_info_.cluster_ids, instance_info_.addrs);
   instance_info_.dp_size = options_.dp_size();
 
   engine->get_device_info(instance_info_.device_ips, instance_info_.ports);
@@ -639,10 +636,6 @@ void DisaggPDScheduler::prefill_send_first_generation() {
         ADD_VECTOR_TO_PROTO(gen->mutable_cluster_ids(),
                             instance_info_.cluster_ids);
         ADD_VECTOR_TO_PROTO(gen->mutable_addrs(), instance_info_.addrs);
-        ADD_VECTOR_TO_PROTO(gen->mutable_k_cache_ids(),
-                            instance_info_.k_cache_ids);
-        ADD_VECTOR_TO_PROTO(gen->mutable_v_cache_ids(),
-                            instance_info_.v_cache_ids);
 
         const auto blocks = request->sequences()[0]->kv_state().kv_blocks();
         std::vector<uint64_t> block_ids;
@@ -723,8 +716,6 @@ bool DisaggPDScheduler::decode_recv_first_generation(
     const std::string& kv_cache_transfer_mode,
     std::vector<uint64_t> src_cluster_ids,
     std::vector<std::string> src_addrs,
-    std::vector<int64_t> src_k_cache_ids,
-    std::vector<int64_t> src_v_cache_ids,
     std::vector<uint64_t> src_block_ids,
     int32_t src_linear_state_id,
     int32_t src_dp_size,
@@ -802,8 +793,6 @@ bool DisaggPDScheduler::decode_recv_first_generation(
                             src_dp_rank,
                             src_cluster_ids,
                             src_addrs,
-                            src_k_cache_ids,
-                            src_v_cache_ids,
                             src_block_ids,
                             dst_dp_rank,
                             dst_block_ids,

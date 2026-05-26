@@ -47,11 +47,8 @@ namespace xllm {
 namespace {
 
 std::string get_merge_key(const uint64_t dst_cluster_id,
-                          const std::string& dst_addr,
-                          const int64_t k_cache_id,
-                          const int64_t v_cache_id) {
-  return std::to_string(dst_cluster_id) + "_" + dst_addr + "_" +
-         std::to_string(k_cache_id) + "_" + std::to_string(v_cache_id);
+                          const std::string& dst_addr) {
+  return std::to_string(dst_cluster_id) + "_" + dst_addr;
 }
 
 void merge_xtensor_offsets(
@@ -87,18 +84,13 @@ void merge_kv_info(
     const int32_t dst_rank) {
   uint64_t dst_cluster_id = info.remote_instance_info.cluster_ids[dst_rank];
   const std::string& dst_addr = info.remote_instance_info.addrs[dst_rank];
-  int64_t k_cache_id = info.remote_instance_info.k_cache_ids[dst_rank];
-  int64_t v_cache_id = info.remote_instance_info.v_cache_ids[dst_rank];
-  std::string key =
-      get_merge_key(dst_cluster_id, dst_addr, k_cache_id, v_cache_id);
+  std::string key = get_merge_key(dst_cluster_id, dst_addr);
 
   auto it = merged_kv_infos.find(key);
   if (it == merged_kv_infos.end()) {
     KVCacheTransfer::KVCacheInfo kv_info;
     kv_info.dst_cluster_id = dst_cluster_id;
     kv_info.dst_addr = dst_addr;
-    kv_info.dst_k_cache_id = k_cache_id;
-    kv_info.dst_v_cache_id = v_cache_id;
     kv_info.src_blocks.reserve(info.local_blocks_ids.size());
     kv_info.src_blocks.insert(kv_info.src_blocks.end(),
                               info.local_blocks_ids.begin(),
@@ -153,13 +145,9 @@ void MooncakeKVCacheTransferBase::initialize(int32_t device_id) {
 }
 
 void MooncakeKVCacheTransferBase::get_cache_info(uint64_t& cluster_id,
-                                                 std::string& addr,
-                                                 int64_t& key_cache_id,
-                                                 int64_t& value_cache_id) {
+                                                 std::string& addr) {
   cluster_id = cluster_id_;
   addr = addr_;
-  key_cache_id = 0;
-  value_cache_id = 0;
 
   LOG(INFO) << "get_cache_info success, cluster_id=" << cluster_id_
             << ", addr=" << addr_;
@@ -443,15 +431,11 @@ void MooncakeKVCacheTransferDefault::register_kv_cache_impl(
 bool MooncakeKVCacheTransferDefault::pull_kv_blocks(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
-    const int64_t src_k_cache_id,
-    const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& src_linear_state_ids,
     const std::vector<uint64_t>& dst_linear_state_ids) {
   (void)src_cluster_id;
-  (void)src_k_cache_id;
-  (void)src_v_cache_id;
   (void)src_linear_state_ids;
   (void)dst_linear_state_ids;
   std::vector<int64_t> layer_ids;
@@ -672,15 +656,11 @@ void MooncakeKVCacheTransferXTensor::register_kv_cache_impl() {
 bool MooncakeKVCacheTransferXTensor::pull_kv_blocks(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
-    const int64_t src_k_cache_id,
-    const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& src_linear_state_ids,
     const std::vector<uint64_t>& dst_linear_state_ids) {
   (void)src_cluster_id;
-  (void)src_k_cache_id;
-  (void)src_v_cache_id;
   (void)src_linear_state_ids;
   (void)dst_linear_state_ids;
   return pull_kv_blocks_impl(src_addr, src_blocks, dst_blocks);

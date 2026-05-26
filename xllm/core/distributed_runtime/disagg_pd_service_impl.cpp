@@ -237,10 +237,6 @@ void DisaggPDServiceImpl::decode_recv_first_generation(
     std::vector<uint64_t> cluster_ids(gen.cluster_ids().begin(),
                                       gen.cluster_ids().end());
     std::vector<std::string> addrs(gen.addrs().begin(), gen.addrs().end());
-    std::vector<int64_t> k_cache_ids(gen.k_cache_ids().begin(),
-                                     gen.k_cache_ids().end());
-    std::vector<int64_t> v_cache_ids(gen.v_cache_ids().begin(),
-                                     gen.v_cache_ids().end());
     std::vector<uint64_t> block_ids(gen.block_ids().begin(),
                                     gen.block_ids().end());
     int32_t linear_state_id = gen.linear_state_id();
@@ -256,8 +252,6 @@ void DisaggPDServiceImpl::decode_recv_first_generation(
         gen.kv_cache_transfer_mode(),
         std::move(cluster_ids),
         std::move(addrs),
-        std::move(k_cache_ids),
-        std::move(v_cache_ids),
         std::move(block_ids),
         linear_state_id,
         gen.dp_size(),

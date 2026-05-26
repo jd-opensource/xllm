@@ -107,10 +107,7 @@ bool CommChannel::get_device_info(std::string& device_ip, uint16_t& port) {
   return true;
 }
 
-bool CommChannel::get_cache_info(uint64_t& cluster_id,
-                                 std::string& addr,
-                                 int64_t& k_cache_id,
-                                 int64_t& v_cache_id) {
+bool CommChannel::get_cache_info(uint64_t& cluster_id, std::string& addr) {
   proto::Empty req;
   proto::CacheInfo resp;
   brpc::Controller cntl;
@@ -123,8 +120,6 @@ bool CommChannel::get_cache_info(uint64_t& cluster_id,
 
   cluster_id = resp.cluster_id();
   addr = resp.addr();
-  k_cache_id = resp.k_cache_id();
-  v_cache_id = resp.v_cache_id();
   return true;
 }
 
@@ -268,8 +263,6 @@ bool CommChannel::estimate_kv_cache_capacity(int64_t& available_memory,
 bool CommChannel::pull_kv_blocks(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
-    const int64_t src_k_cache_id,
-    const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& src_linear_state_ids,
@@ -277,8 +270,6 @@ bool CommChannel::pull_kv_blocks(
   proto::PullKVCacheRequest request;
   request.set_cluster_id(src_cluster_id);
   request.set_addr(src_addr);
-  request.set_k_cache_id(src_k_cache_id);
-  request.set_v_cache_id(src_v_cache_id);
 
   ADD_VECTOR_TO_PROTO(request.mutable_src_blocks(), src_blocks);
   ADD_VECTOR_TO_PROTO(request.mutable_dst_blocks(), dst_blocks);

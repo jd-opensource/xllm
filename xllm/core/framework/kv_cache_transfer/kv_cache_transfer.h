@@ -56,8 +56,6 @@ class KVCacheTransfer {
   struct KVCacheInfo {
     uint64_t dst_cluster_id;
     std::string dst_addr;
-    int64_t dst_k_cache_id;
-    int64_t dst_v_cache_id;
     std::vector<uint64_t> src_blocks;
     std::vector<uint64_t> dst_blocks;
     std::vector<uint64_t> src_linear_state_ids;
@@ -125,10 +123,7 @@ class KVCacheTransfer {
     NOT_IMPLEMENTED();
   };
 
-  virtual void get_cache_info(uint64_t& cluster_id,
-                              std::string& addr,
-                              int64_t& key_cache_id,
-                              int64_t& value_cache_id) = 0;
+  virtual void get_cache_info(uint64_t& cluster_id, std::string& addr) = 0;
 
   virtual bool link_cluster(const uint64_t cluster_id,
                             const std::string& remote_addr,
@@ -144,8 +139,6 @@ class KVCacheTransfer {
   virtual bool pull_kv_blocks(
       const uint64_t src_cluster_id,
       const std::string& src_addr,
-      const int64_t src_k_cache_id,
-      const int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks,
       const std::vector<uint64_t>& src_linear_state_ids,
@@ -154,8 +147,6 @@ class KVCacheTransfer {
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(
       const uint64_t src_cluster_id,
       const std::string& src_addr,
-      const int64_t src_k_cache_id,
-      const int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks,
       const std::vector<uint64_t>& src_linear_state_ids,

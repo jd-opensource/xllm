@@ -574,8 +574,6 @@ bool LLMEngine::pull_kv_blocks(
     const int32_t src_dp_rank,
     const std::vector<uint64_t>& src_cluster_ids,
     const std::vector<std::string>& src_addrs,
-    const std::vector<int64_t>& src_k_cache_ids,
-    const std::vector<int64_t>& src_v_cache_ids,
     const std::vector<uint64_t>& src_blocks,
     const int32_t dst_dp_rank,
     const std::vector<uint64_t>& dst_blocks,
@@ -598,8 +596,6 @@ bool LLMEngine::pull_kv_blocks(
     results.push_back(worker_clients_[dst_worker_rank]->pull_kv_blocks(
         src_cluster_ids[src_worker_rank],
         src_addrs[src_worker_rank],
-        src_k_cache_ids[src_worker_rank],
-        src_v_cache_ids[src_worker_rank],
         src_blocks,
         dst_blocks,
         src_linear_state_ids,
@@ -674,25 +670,16 @@ void LLMEngine::get_device_info(std::vector<std::string>& device_ips,
 }
 
 void LLMEngine::get_cache_info(std::vector<uint64_t>& cluster_ids,
-                               std::vector<std::string>& addrs,
-                               std::vector<int64_t>& k_cache_ids,
-                               std::vector<int64_t>& v_cache_ids) {
+                               std::vector<std::string>& addrs) {
   cluster_ids.reserve(worker_clients_num_);
   addrs.reserve(worker_clients_num_);
-  k_cache_ids.reserve(worker_clients_num_);
-  v_cache_ids.reserve(worker_clients_num_);
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
     uint64_t cluster_id;
     std::string addr;
-    int64_t k_cache_id;
-    int64_t v_cache_id;
-    worker_clients_[worker_rank]->get_cache_info(
-        cluster_id, addr, k_cache_id, v_cache_id);
+    worker_clients_[worker_rank]->get_cache_info(cluster_id, addr);
     cluster_ids.emplace_back(cluster_id);
     addrs.emplace_back(addr);
-    k_cache_ids.emplace_back(k_cache_id);
-    v_cache_ids.emplace_back(v_cache_id);
   }
 }
 

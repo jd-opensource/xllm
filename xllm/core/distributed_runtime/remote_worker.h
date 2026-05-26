@@ -57,10 +57,7 @@ class RemoteWorker : public WorkerClient {
 
   virtual void get_device_info(std::string& device_ip, uint16_t& port);
 
-  virtual void get_cache_info(uint64_t& cluster_id,
-                              std::string& addr,
-                              int64_t& k_cache_id,
-                              int64_t& v_cache_id);
+  virtual void get_cache_info(uint64_t& cluster_id, std::string& addr);
 
   virtual bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                             const std::vector<std::string>& addrs,
@@ -79,8 +76,6 @@ class RemoteWorker : public WorkerClient {
   virtual bool pull_kv_blocks(
       const uint64_t src_cluster_id,
       const std::string& src_addr,
-      const int64_t src_k_cache_id,
-      const int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks,
       const std::vector<uint64_t>& src_linear_state_ids = {},
@@ -109,8 +104,6 @@ class RemoteWorker : public WorkerClient {
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(
       const uint64_t src_cluster_id,
       const std::string& src_addr,
-      const int64_t src_k_cache_id,
-      const int64_t src_v_cache_id,
       const std::vector<uint64_t>& src_blocks,
       const std::vector<uint64_t>& dst_blocks,
       const std::vector<uint64_t>& src_linear_state_ids = {},

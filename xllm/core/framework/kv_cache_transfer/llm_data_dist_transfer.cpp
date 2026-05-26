@@ -101,12 +101,9 @@ void LlmDataDistTransfer::register_kv_cache(
 void LlmDataDistTransfer::free_kv_cache() { layer_registered_caches_.clear(); }
 
 void LlmDataDistTransfer::get_cache_info(uint64_t& cluster_id,
-                                         std::string& addr,
-                                         int64_t& key_cache_id,
-                                         int64_t& value_cache_id) {
+                                         std::string& addr) {
   cluster_id = cluster_id_;
-  key_cache_id = 0;
-  value_cache_id = 0;
+  addr.clear();
 }
 
 bool LlmDataDistTransfer::link_cluster(const uint64_t cluster_id,
@@ -163,8 +160,6 @@ bool LlmDataDistTransfer::unlink_cluster(const uint64_t& cluster_id,
 bool LlmDataDistTransfer::pull_kv_blocks(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
-    const int64_t src_k_cache_id,
-    const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& src_linear_state_ids,

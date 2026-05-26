@@ -48,8 +48,6 @@ TransferKVInfo make_info(int32_t dst_dp_size,
     info.remote_instance_info.cluster_ids.emplace_back(
         static_cast<uint64_t>(100 + i));
     info.remote_instance_info.addrs.emplace_back("addr_" + std::to_string(i));
-    info.remote_instance_info.k_cache_ids.emplace_back(200 + i);
-    info.remote_instance_info.v_cache_ids.emplace_back(300 + i);
   }
 
   return info;
@@ -69,8 +67,6 @@ void expect_same_merge(
     const KVCacheTransfer::KVCacheInfo& rhs_info = it->second;
     EXPECT_EQ(lhs_info.dst_cluster_id, rhs_info.dst_cluster_id);
     EXPECT_EQ(lhs_info.dst_addr, rhs_info.dst_addr);
-    EXPECT_EQ(lhs_info.dst_k_cache_id, rhs_info.dst_k_cache_id);
-    EXPECT_EQ(lhs_info.dst_v_cache_id, rhs_info.dst_v_cache_id);
     EXPECT_EQ(lhs_info.src_blocks, rhs_info.src_blocks);
     EXPECT_EQ(lhs_info.dst_blocks, rhs_info.dst_blocks);
   }
@@ -128,8 +124,6 @@ TEST(MooncakeKVCacheTransferDefaultTest, OwnerRankMergesSingleDst) {
   const KVCacheTransfer::KVCacheInfo& kv_info = merged_kv_infos.begin()->second;
   EXPECT_EQ(kv_info.dst_cluster_id, 102U);
   EXPECT_EQ(kv_info.dst_addr, "addr_2");
-  EXPECT_EQ(kv_info.dst_k_cache_id, 202);
-  EXPECT_EQ(kv_info.dst_v_cache_id, 302);
   EXPECT_EQ(kv_info.src_blocks, info.local_blocks_ids);
   EXPECT_EQ(kv_info.dst_blocks, info.remote_blocks_ids);
 }
@@ -149,8 +143,6 @@ TEST(MooncakeKVCacheTransferDefaultTest, WrappedOwnerRankKeepsMerge) {
   const KVCacheTransfer::KVCacheInfo& kv_info = merged_kv_infos.begin()->second;
   EXPECT_EQ(kv_info.dst_cluster_id, 105U);
   EXPECT_EQ(kv_info.dst_addr, "addr_5");
-  EXPECT_EQ(kv_info.dst_k_cache_id, 205);
-  EXPECT_EQ(kv_info.dst_v_cache_id, 305);
   EXPECT_EQ(kv_info.src_blocks, info.local_blocks_ids);
   EXPECT_EQ(kv_info.dst_blocks, info.remote_blocks_ids);
 }

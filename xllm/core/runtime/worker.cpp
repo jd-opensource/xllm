@@ -92,11 +92,8 @@ void Worker::get_device_info(std::string& device_ip, uint16_t& port) {
   impl_->get_device_info(device_ip, port);
 }
 
-void Worker::get_cache_info(uint64_t& cluster_id,
-                            std::string& addr,
-                            int64_t& k_cache_id,
-                            int64_t& v_cache_id) {
-  impl_->get_cache_info(cluster_id, addr, k_cache_id, v_cache_id);
+void Worker::get_cache_info(uint64_t& cluster_id, std::string& addr) {
+  impl_->get_cache_info(cluster_id, addr);
 }
 
 bool Worker::link_cluster(const std::vector<uint64_t>& cluster_ids,
@@ -171,16 +168,12 @@ folly::SemiFuture<bool> Worker::allocate_kv_cache_with_transfer_async(
 folly::SemiFuture<bool> Worker::pull_kv_blocks_async(
     const uint64_t src_cluster_id,
     const std::string& src_addr,
-    const int64_t src_k_cache_id,
-    const int64_t src_v_cache_id,
     const std::vector<uint64_t>& src_blocks,
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& src_linear_state_ids,
     const std::vector<uint64_t>& dst_linear_state_ids) {
   return impl_->pull_kv_blocks_async(src_cluster_id,
                                      src_addr,
-                                     src_k_cache_id,
-                                     src_v_cache_id,
                                      src_blocks,
                                      dst_blocks,
                                      src_linear_state_ids,

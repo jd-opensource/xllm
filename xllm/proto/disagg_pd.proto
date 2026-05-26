@@ -120,8 +120,6 @@ message XTensorLayerOffsets {
 //   string kv_cache_transfer_mode = 7;
 //   repeated uint64 cluster_ids = 8;
 //   repeated string addrs = 14;
-//   repeated int64 k_cache_ids = 9;
-//   repeated int64 v_cache_ids = 10;
 //   repeated int32 block_ids = 11;
 //   int32 dp_size = 12;
 //   int32 dp_rank = 13;
@@ -221,8 +219,6 @@ message DisaggGenerationsRequest {
   string kv_cache_transfer_mode = 3;
   repeated uint64 cluster_ids = 4;
   repeated string addrs = 5;
-  repeated int64 k_cache_ids = 6;
-  repeated int64 v_cache_ids = 7;
   repeated int32 block_ids = 8;
   int32 dp_size = 9;
   int32 dp_rank = 10;

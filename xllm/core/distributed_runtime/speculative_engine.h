@@ -62,8 +62,6 @@ class SpeculativeEngine : public Engine {
       const int32_t src_dp_rank,
       const std::vector<uint64_t>& src_cluster_ids,
       const std::vector<std::string>& src_addrs,
-      const std::vector<int64_t>& src_k_cache_ids,
-      const std::vector<int64_t>& src_v_cache_ids,
       const std::vector<uint64_t>& src_blocks,
       const int32_t dst_dp_rank,
       const std::vector<uint64_t>& dst_blocks,
@@ -74,9 +72,7 @@ class SpeculativeEngine : public Engine {
                        std::vector<uint16_t>& ports) override;
 
   void get_cache_info(std::vector<uint64_t>& cluster_ids,
-                      std::vector<std::string>& addrs,
-                      std::vector<int64_t>& k_cache_ids,
-                      std::vector<int64_t>& v_cache_ids) override;
+                      std::vector<std::string>& addrs) override;
 
   bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                     const std::vector<std::string>& addrs,
