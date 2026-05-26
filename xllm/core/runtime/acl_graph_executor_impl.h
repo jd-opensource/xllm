@@ -22,6 +22,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "core/common/macros.h"
 #include "core/framework/kv_cache/kv_cache.h"
@@ -202,17 +203,24 @@ class GraphPersistentParam {
   torch::Tensor persistent_positions_;
   torch::Tensor persistent_new_cache_slots_;
   torch::Tensor persistent_block_tables_;
+  torch::Tensor persistent_new_cache_slots_default_;
+  torch::Tensor persistent_block_tables_default_;
   // When q_seq_lens contains values greater than 1(chunked prefill mode or
   // speculative decode mode), the mask needs to be passed to the attention
   // operation
   torch::Tensor persistent_mask_;
+  torch::Tensor persistent_mask_zero_template_;
+  torch::Tensor persistent_mask_fill_template_;
   torch::Tensor hidden_states_;
 
   torch::Tensor q_seq_lens_;
   torch::Tensor kv_seq_lens_;
+  torch::Tensor q_seq_lens_default_;
+  torch::Tensor kv_seq_lens_default_;
 
   // for deepseekv3.2
   torch::Tensor q_cu_seq_lens_;
+  torch::Tensor q_cu_seq_lens_default_;
 
   // for mtp model
   torch::Tensor persistent_embedding_;
@@ -254,6 +262,8 @@ class AclGraph {
     initialize_capture_stream(device_index);
   }
 
+  ~AclGraph();
+
   // Capture computation graph for given bucket num_tokens
   bool capture(CausalLM* model,
                const ModelArgs& args,
@@ -265,7 +275,9 @@ class AclGraph {
                uint32_t bucket_num_tokens);
 
   // Replay captured graph with new input data
-  ModelOutput replay(const torch::Tensor& tokens,
+  ModelOutput replay(CausalLM* model,
+                     const ModelArgs& args,
+                     const torch::Tensor& tokens,
                      const torch::Tensor& positions,
                      std::vector<KVCache>& kv_cache,
                      const ModelInputParams& params);
@@ -281,6 +293,7 @@ class AclGraph {
 
   // Initialize capture stream if not already initialized
   void initialize_capture_stream(c10::DeviceIndex device_index);
+  void make_current_stream_wait_for_graph(aclrtStream current_stream);
 
   // NPUGraph with mempool for managing temporary tensors during forward pass
   c10_npu::NPUGraph graph_;
@@ -289,9 +302,12 @@ class AclGraph {
   // Reference to persistent parameters (shared across multiple AclGraph
   // instances)
   GraphPersistentParam& persistent_param_;
+  std::unique_ptr<ModelGraphMetadataState> model_graph_metadata_state_;
 
-  // Cached capture stream, initialized on first capture
+  // Fallback non-default stream for capture when callers are on default stream.
   std::optional<c10_npu::NPUStream> capture_stream_;
+  aclrtStream graph_stream_ = nullptr;
+  aclrtEvent replay_done_event_ = nullptr;
   c10::DeviceIndex device_index_;
 };
 

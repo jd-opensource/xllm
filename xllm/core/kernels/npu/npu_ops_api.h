@@ -132,6 +132,60 @@ apply_npu_moe_init_routing_v2(const torch::Tensor& x,
                               torch::IntArrayRef active_expert_range,
                               int row_idx_type);
 
+std::tuple<torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor>
+apply_npu_moe_distribute_dispatch_v2(
+    const torch::Tensor& x,
+    const torch::Tensor& expert_ids,
+    const std::optional<torch::Tensor>& expert_scales,
+    const std::optional<torch::Tensor>& x_active_mask,
+    const std::optional<torch::Tensor>& scales,
+    const std::string& group_ep,
+    int64_t ep_world_size,
+    int64_t ep_rank_id,
+    int64_t moe_expert_num,
+    const std::string& group_tp,
+    int64_t tp_world_size,
+    int64_t tp_rank_id,
+    int64_t expert_shard_type,
+    int64_t shared_expert_num,
+    int64_t shared_expert_rank_num,
+    int64_t quant_mode,
+    int64_t global_bs,
+    int64_t expert_token_nums_type,
+    const std::string& comm_alg);
+
+torch::Tensor apply_npu_moe_distribute_combine_v2(
+    const torch::Tensor& expand_x,
+    const torch::Tensor& expert_ids,
+    const torch::Tensor& assist_info_for_combine,
+    const torch::Tensor& ep_send_counts,
+    const torch::Tensor& expert_scales,
+    const std::optional<torch::Tensor>& tp_send_counts,
+    const std::optional<torch::Tensor>& x_active_mask,
+    const std::optional<torch::Tensor>& expand_scales,
+    const std::optional<torch::Tensor>& shared_expert_x,
+    const std::string& group_ep,
+    int64_t ep_world_size,
+    int64_t ep_rank_id,
+    int64_t moe_expert_num,
+    const std::string& group_tp,
+    int64_t tp_world_size,
+    int64_t tp_rank_id,
+    int64_t expert_shard_type,
+    int64_t shared_expert_num,
+    int64_t shared_expert_rank_num,
+    int64_t global_bs,
+    int64_t comm_quant_mode,
+    const std::string& comm_alg);
+
+bool has_moe_distribute_dispatch_combine_v2();
+
 std::pair<torch::Tensor, torch::Tensor> apply_npu_partial_rotary_embedding(
     const torch::Tensor& positions,
     torch::Tensor& query,

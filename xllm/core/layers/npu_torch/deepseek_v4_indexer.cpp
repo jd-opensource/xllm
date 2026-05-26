@@ -114,14 +114,23 @@ void scatter_rows_by_slot(torch::Tensor& cache,
   auto value_slice =
       value_2d.slice(/*dim=*/0, /*start=*/0, /*end=*/update_rows);
 
-  // Negative slots mean "unused" entries in the metadata. Skip them so the
-  // caller can pass padded or partially-filled mappings safely.
-  auto valid_mask = slots_slice.ge(0);
-  if (!valid_mask.any().item<bool>()) {
+  if (!cache.device().is_cpu()) {
+    auto safe_slots = slots_slice.clamp_min(0);
+    auto valid_mask = slots_slice.ge(0).unsqueeze(1);
+    auto old_values = cache_2d.index_select(/*dim=*/0, safe_slots);
+    auto safe_values = torch::where(valid_mask, value_slice, old_values);
+    cache_2d.index_copy_(/*dim=*/0, safe_slots, safe_values);
     return;
   }
 
+  // Negative slots mean "unused" entries in the metadata. Skip them so the
+  // caller can pass padded or partially-filled mappings safely.
+  auto valid_mask = slots_slice.ge(0);
   auto valid_slots = slots_slice.index({valid_mask});
+  if (valid_slots.numel() == 0) {
+    return;
+  }
+
   auto valid_values = value_slice.index({valid_mask});
   const int64_t cache_rows = cache_2d.size(0);
   const int64_t max_slot = valid_slots.max().item<int64_t>();

@@ -245,7 +245,7 @@ ModelInputParams MakeDecodeParams(const torch::Device& device) {
   p.meta.num_sequences = 1;
   p.meta.kv_max_seq_len = 4;
   p.meta.q_max_seq_len = 1;
-  p.enable_cuda_graph = false;  // executor will set metadata->enable_cuda_graph
+  p.enable_graph = false;  // executor will set metadata->enable_cuda_graph
 
   auto iopt = torch::TensorOptions().dtype(torch::kInt32).device(device);
   // cumulative lengths (cu_seq_lens)
@@ -275,7 +275,7 @@ ModelInputParams MakePrefillParams(const torch::Device& device,
   p.meta.num_sequences = 1;
   p.meta.kv_max_seq_len = num_tokens;
   p.meta.q_max_seq_len = num_tokens;
-  p.enable_cuda_graph = false;  // executor will set metadata->enable_cuda_graph
+  p.enable_graph = false;  // executor will set metadata->enable_cuda_graph
 
   auto iopt = torch::TensorOptions().dtype(torch::kInt32).device(device);
   // cumulative lengths (cu_seq_lens)
@@ -358,7 +358,7 @@ ModelInputParams make_multi_sequence_decode_params(
   p.meta.num_sequences = 2;
   p.meta.kv_max_seq_len = 9;
   p.meta.q_max_seq_len = 1;
-  p.enable_cuda_graph = false;
+  p.enable_graph = false;
 
   torch::TensorOptions iopt =
       torch::TensorOptions().dtype(torch::kInt32).device(device);

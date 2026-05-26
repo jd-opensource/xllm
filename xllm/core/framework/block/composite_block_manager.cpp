@@ -131,8 +131,48 @@ void CompositeBlockManager::deallocate_sequence(Sequence* seq) {
   }
 }
 
-void CompositeBlockManager::deallocate(const Slice<Block>& /*blocks*/) {
-  NOT_IMPLEMENTED();
+void CompositeBlockManager::deallocate(const Slice<Block>& blocks) {
+  if (blocks.empty()) {
+    return;
+  }
+
+  size_t run_start = 0;
+  BlockManager* run_manager = nullptr;
+  for (size_t i = 0; i < blocks.size(); ++i) {
+    const auto& block = blocks[i];
+    if (!block.is_valid()) {
+      if (run_manager != nullptr) {
+        run_manager->deallocate(blocks.slice(run_start, i));
+        run_manager = nullptr;
+      }
+      run_start = i + 1;
+      continue;
+    }
+    BlockManager* manager = block.manager();
+    CHECK(manager != nullptr)
+        << "CompositeBlockManager got a valid block without owner manager";
+    const auto it =
+        std::find_if(sub_managers_.begin(),
+                     sub_managers_.end(),
+                     [manager](const std::unique_ptr<BlockManager>& sub_mgr) {
+                       return sub_mgr.get() == manager;
+                     });
+    CHECK(it != sub_managers_.end())
+        << "CompositeBlockManager cannot deallocate block " << block.id()
+        << " from a manager outside this composite manager";
+
+    if (run_manager == nullptr) {
+      run_manager = manager;
+      run_start = i;
+    } else if (run_manager != manager) {
+      run_manager->deallocate(blocks.slice(run_start, i));
+      run_manager = manager;
+      run_start = i;
+    }
+  }
+  if (run_manager != nullptr) {
+    run_manager->deallocate(blocks.slice(run_start, blocks.size()));
+  }
 }
 
 std::vector<Block> CompositeBlockManager::allocate(size_t /*num_blocks*/) {

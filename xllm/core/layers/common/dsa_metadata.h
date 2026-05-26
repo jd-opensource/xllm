@@ -68,6 +68,9 @@ struct DSAMetadata {
   int32_t layer_id = 0;
   // num_speculative_tokens: number of speculative decoding tokens
   int32_t num_speculative_tokens = 0;
+  // True when the metadata is consumed by ACL graph forward. Debug paths must
+  // not perform host/device copies in this mode.
+  bool is_acl_graph = false;
 
   // cp_input_dict: context-parallel inputs placeholder (reserved, optional)
   std::unordered_map<std::string, torch::Tensor> cp_input_dict;
@@ -80,6 +83,11 @@ struct DSAMetadata {
   torch::Tensor c4_sin;
   torch::Tensor c128_cos;
   torch::Tensor c128_sin;
+  // Main q/kv RoPE tensors for compressed layers at input-token length.
+  torch::Tensor c4_input_cos;
+  torch::Tensor c4_input_sin;
+  torch::Tensor c128_input_cos;
+  torch::Tensor c128_input_sin;
   torch::Tensor start_pos;
 
   // Multi-manager block tables and slot mappings
@@ -87,6 +95,11 @@ struct DSAMetadata {
   // Same-group caches share the same underlying tensor (no copy).
   std::vector<std::vector<torch::Tensor>> block_tables;
   std::vector<std::vector<torch::Tensor>> slot_mappings;
+
+  // Host-side max lengths cached alongside the tensors so graph code can
+  // avoid scalar reads from device tensors.
+  int64_t max_query_len = 0;
+  int64_t max_seq_len = 0;
 
   // Sequence length metadata
   // actual_seq_lengths_kv: (batch_size,) — per-seq kv context length

@@ -694,6 +694,7 @@ struct BlockTransferInfo {
 struct BatchInputMeta {
   BatchForwardType batch_forward_type;
   int32_t num_sequences = 0;
+  int32_t actual_num_sequences = 0;
   int32_t kv_max_seq_len = 0;
   int32_t q_max_seq_len = 0;
   uint64_t batch_id = 0;
@@ -1048,8 +1049,8 @@ struct ModelInputParams {
   // Using shared_ptr with forward declaration to avoid circular dependency
   std::shared_ptr<layer::AttentionMetadata> attn_metadata;
 
-  // Flag for CUDA graph capture mode
-  bool enable_cuda_graph = false;
+  // Flag for graph capture/replay mode.
+  bool enable_graph = false;
 };
 
 }  // namespace xllm

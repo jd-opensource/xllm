@@ -50,7 +50,6 @@ at::Tensor quant_lightning_indexer_metadata(
     int64_t next_tokens,
     int64_t cmp_ratio,
     const c10::string_view device) {
-  constexpr int64_t OUTPUT_SIZE = 1024;
   at::Device output_device = at::Device(std::string(device));
   if (actual_seq_lengths_query.has_value()) {
     output_device = actual_seq_lengths_query.value().device();
@@ -58,8 +57,9 @@ at::Tensor quant_lightning_indexer_metadata(
     output_device = actual_seq_lengths_key.value().device();
   }
 
-  at::Tensor output = torch::zeros(
-      {OUTPUT_SIZE}, torch::dtype(torch::kInt32).device(output_device));
+  at::Tensor output =
+      torch::zeros({kDsaMetadataBufferElements},
+                   torch::dtype(torch::kInt32).device(output_device));
   auto actual_seq_lengths_query_val =
       get_valid_tensor(actual_seq_lengths_query, output_device);
   auto actual_seq_lengths_key_val =

@@ -60,21 +60,11 @@ class BlockManagerImpl : public BlockManager {
   size_t num_free_blocks() const override { return num_free_blocks_; }
 
   // used blocks num
-  size_t num_used_blocks() const override {
-    if (options_.enable_prefix_cache()) {
-      return num_used_blocks_;
-    } else {
-      return num_total_blocks() - num_free_blocks_;
-    }
-  }
+  size_t num_used_blocks() const override { return num_used_blocks_; }
 
   // current kv cache utilization.
   double kv_cache_utilization() const override {
-    if (options_.enable_prefix_cache()) {
-      return static_cast<double>(num_used_blocks_) / num_total_blocks();
-    } else {
-      return 1 - static_cast<double>(num_free_blocks_) / num_total_blocks();
-    }
+    return static_cast<double>(num_used_blocks_) / num_total_blocks();
   }
 
   // call BlockManager to free block used by Block.

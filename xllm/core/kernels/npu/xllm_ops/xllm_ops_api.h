@@ -32,6 +32,8 @@ limitations under the License.
 #include <vector>
 
 namespace xllm::kernel::npu {
+inline constexpr int64_t kDsaMetadataBufferElements = 1024;
+
 namespace op_infer {
 constexpr int32_t N = 32;
 // npu tensor max size
