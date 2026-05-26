@@ -236,10 +236,13 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     handler->master = std::make_unique<xllm::RecMaster>(options);
     handler->master->run();
 
-    size_t cpu_cores = std::thread::hardware_concurrency();
-    size_t thread_num = std::clamp((cpu_cores == 0) ? 8 : cpu_cores / 2,
-                                   static_cast<size_t>(8),
-                                   static_cast<size_t>(16));
+    size_t available_cpu_cores_count =
+        static_cast<size_t>(xllm::CpuAffinity::get_available_cpu_cores_count());
+    LOG(INFO) << "Available CPU cores count " << available_cpu_cores_count;
+    size_t thread_num = std::clamp(
+        (available_cpu_cores_count == 0) ? 8 : available_cpu_cores_count / 2,
+        static_cast<size_t>(8),
+        static_cast<size_t>(16));
 
     auto thread_factory = std::make_shared<xllm::CpuAffinityThreadFactory>(
         /*prefix=*/"XllmRecExec");
