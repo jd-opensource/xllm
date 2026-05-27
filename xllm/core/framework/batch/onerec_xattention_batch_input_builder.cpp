@@ -132,7 +132,7 @@ ForwardInput OneRecXAttentionBatchInputBuilder::build_rec_forward_input(
   step_meta.batch_size = batch_size;
   step_meta.beam_width = beam_width;
   step_meta.current_round = 0;
-  step_meta.total_round = std::max(1, get_rec_multi_round_decode_rounds() + 1);
+  step_meta.total_round = std::max(1, get_rec_multi_round_decode_rounds());
   step_meta.decode_positions_vec = std::move(decode_positions_vec);
 
   if (args_ != nullptr) {
