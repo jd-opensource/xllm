@@ -69,7 +69,7 @@ CpPrefillInputs prepare_cp_prefill_inputs(
     const torch::Tensor& input_ids,
     const torch::Tensor& position_ids,
     const torch::Tensor& input_lengths,
-    bool enable_kvcache_split,
+    bool have_prefix_slots,
     const std::vector<int32_t>& kv_cache_tokens_per_seq,
     int block_size,
     int kv_split_size = -1);

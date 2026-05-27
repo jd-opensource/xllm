@@ -708,8 +708,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
       needs_cp_prefill_side && util::enable_kvcache_split();
   const bool needs_in_prefix_slots =
       needs_cp_prefill_side &&
-      (needs_kv_split_prep ||
-       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
+      (::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill());
 #endif
 
@@ -725,7 +724,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
           cp_working.host_token_ids(),
           cp_working.host_positions(),
           cp_working.input_params.attention.device.q_seq_lens,
-          util::enable_kvcache_split(),
+          needs_in_prefix_slots,
           cp_working.input_params.attention.host.kv_cache_tokens_nums,
           options_.block_size(),
           parallel_args_.kv_split_size_effective());

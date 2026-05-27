@@ -415,7 +415,7 @@ CpPrefillInputs prepare_cp_prefill_inputs(
     const torch::Tensor& input_ids,
     const torch::Tensor& position_ids,
     const torch::Tensor& input_lengths,
-    bool enable_kvcache_split,
+    bool have_prefix_slots,
     const std::vector<int32_t>& kv_cache_tokens_per_seq,
     int block_size,
     int kv_split_size) {
@@ -459,7 +459,7 @@ CpPrefillInputs prepare_cp_prefill_inputs(
   auto actual_seq_lengths_kv_cp_prev = position_ids_prev.to(torch::kInt32);
   auto actual_seq_lengths_kv_cp_next = position_ids_next.to(torch::kInt32);
 
-  if (enable_kvcache_split) {
+  if (have_prefix_slots) {
     // Strip the per-seq full-prefix length from the SFA-logical KV lengths to
     // obtain how much each seq's prev/next half needs from merged_kv's current
     // segment. Prefix-less seqs get prefix_kv_len_total == 0 and fall through
