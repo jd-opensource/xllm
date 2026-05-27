@@ -11,6 +11,7 @@ cc_library(
     forward_params.h
     dit_forward_params.h
     params_utils.h
+    rec_beam_utils.h
     executor.h
     executor_impl.h
     executor_impl_factory.h
@@ -140,6 +141,17 @@ cc_test(
     torch
     glog::glog
     proto::xllm_proto
+    GTest::gtest_main
+)
+
+cc_test(
+  NAME
+    rec_beam_utils_test
+  SRCS
+    rec_beam_utils_test.cpp
+  DEPS
+    torch
+    glog::glog
     GTest::gtest_main
 )
 
