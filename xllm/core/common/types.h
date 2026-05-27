@@ -225,8 +225,7 @@ struct InstanceInfo {
   std::vector<uint64_t> cluster_ids;
   std::vector<std::string> addrs;
   int32_t dp_size;
-  // device network info
-  std::vector<std::string> device_ips;
+  // transfer listen ports
   std::vector<uint16_t> ports;
   // ttft profiling data
   std::vector<std::pair<int32_t, double>> ttft_profiling_data;
@@ -264,7 +263,6 @@ struct InstanceInfo {
     json_val["cluster_ids"] = cluster_ids;
     json_val["addrs"] = addrs;
     json_val["dp_size"] = dp_size;
-    json_val["device_ips"] = device_ips;
     json_val["ports"] = ports;
     json_val["ttft_profiling_data"] = ttft_profiling_data;
     json_val["tpot_profiling_data"] = tpot_profiling_data;

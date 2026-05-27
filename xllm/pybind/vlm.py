@@ -37,7 +37,6 @@ class VLM:
         enable_chunked_prefill: bool = True,
         enable_prefill_sp: bool = False,
         instance_role: str = 'DEFAULT',
-        device_ip: str = '',
         transfer_listen_port: int = 26000,
         nnodes: int = 1,
         node_rank: int = 0,
@@ -95,7 +94,6 @@ class VLM:
         options.enable_prefill_sp = enable_prefill_sp
         free_port = utils.get_free_port()
         options.master_node_addr = "127.0.0.1:" + str(free_port)
-        options.device_ip = device_ip
         options.transfer_listen_port = transfer_listen_port
         options.nnodes = nnodes
         options.node_rank = node_rank

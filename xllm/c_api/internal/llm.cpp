@@ -101,7 +101,6 @@ XLLM_CAPI_EXPORT bool xllm_llm_initialize(
         .enable_chunked_prefill(xllm_init_options.enable_chunked_prefill)
         .enable_prefill_sp(xllm_init_options.enable_prefill_sp)
         .master_node_addr(xllm_init_options.master_node_addr)
-        .device_ip(xllm_init_options.device_ip)
         .transfer_listen_port(xllm_init_options.transfer_listen_port)
         .nnodes(xllm_init_options.nnodes)
         .node_rank(xllm_init_options.node_rank)

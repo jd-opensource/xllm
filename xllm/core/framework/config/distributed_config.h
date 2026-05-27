@@ -44,7 +44,6 @@ class DistributedConfig final {
                                                     "xtensor_master_node_addr",
                                                     "nnodes",
                                                     "node_rank",
-                                                    "device_ip",
                                                     "etcd_addr",
                                                     "etcd_namespace",
                                                     "enable_service_routing",
@@ -60,8 +59,6 @@ class DistributedConfig final {
   PROPERTY(int32_t, nnodes) = 1;
 
   PROPERTY(int32_t, node_rank) = 0;
-
-  PROPERTY(std::string, device_ip);
 
   PROPERTY(std::string, etcd_addr);
 

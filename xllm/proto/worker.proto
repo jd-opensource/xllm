@@ -99,19 +99,14 @@ message TransferStatus {
  uint32 success_cnt = 1;
 }
 
-message DeviceInfo {
-  string device_ip = 1;
-  uint32 listen_port = 2;
-}
-
 message CacheInfo {
   uint64 cluster_id = 1;
+  uint32 listen_port = 2;
   string addr = 4;
 }
 
 message ClusterInfo {
   repeated uint64 cluster_ids = 1;
-  repeated string device_ips = 2;
   repeated uint32 ports = 3;
   repeated string addrs = 4;
 }
@@ -341,7 +336,6 @@ service DistributeWorker {
   rpc AllocateKVCache (AllocateKVCacheRequest) returns (Status);
   rpc AllocateKVCacheWithTransfer(AllocateKVCacheRequest) returns (Status) {}
   rpc PullKVCache(PullKVCacheRequest) returns (Status) {}
-  rpc GetDeviceInfo(Empty) returns (DeviceInfo) {}
   rpc GetCacheInfo(Empty) returns (CacheInfo) {}
   rpc LinkCluster(ClusterInfo) returns (Status) {}
   rpc UnlinkCluster(ClusterInfo) returns (Status) {}

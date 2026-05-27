@@ -24,8 +24,7 @@ using namespace llm_datadist;
 
 class SpecKVCacheTransfer : public LlmDataDistTransfer {
  public:
-  SpecKVCacheTransfer(const std::string& device_ip,
-                      const uint16_t listen_port,
+  SpecKVCacheTransfer(const uint16_t listen_port,
                       const InstanceRole& instance_role,
                       const std::string& model_type = "",
                       bool enable_lighting_indexer = false);

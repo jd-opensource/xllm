@@ -127,12 +127,10 @@ class KVCacheTransfer {
 
   virtual bool link_cluster(const uint64_t cluster_id,
                             const std::string& remote_addr,
-                            const std::string& device_ip,
                             const uint16_t port) = 0;
 
   virtual bool unlink_cluster(const uint64_t& cluster_id,
                               const std::string& remote_addr,
-                              const std::string& device_ip,
                               const uint16_t port,
                               bool force_flag = true) = 0;
 
@@ -196,7 +194,6 @@ class KVCacheTransferFactory {
 
   static std::shared_ptr<KVCacheTransfer> create(
       const std::string& transfer_type,
-      const std::string& device_ip,
       uint16_t transfer_listen_port,
       InstanceRole instance_role,
       const Device& device,

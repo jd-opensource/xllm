@@ -42,26 +42,22 @@ bool WorkerClient::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
   return worker_->allocate_kv_cache(kv_cache_shape);
 }
 
-void WorkerClient::get_device_info(std::string& device_ip, uint16_t& port) {
-  worker_->get_device_info(device_ip, port);
-}
-
-void WorkerClient::get_cache_info(uint64_t& cluster_id, std::string& addr) {
-  worker_->get_cache_info(cluster_id, addr);
+void WorkerClient::get_cache_info(uint64_t& cluster_id,
+                                  std::string& addr,
+                                  uint16_t& port) {
+  worker_->get_cache_info(cluster_id, addr, port);
 }
 
 bool WorkerClient::link_cluster(const std::vector<uint64_t>& cluster_ids,
                                 const std::vector<std::string>& addrs,
-                                const std::vector<std::string>& device_ips,
                                 const std::vector<uint16_t>& ports) {
-  return worker_->link_cluster(cluster_ids, addrs, device_ips, ports);
+  return worker_->link_cluster(cluster_ids, addrs, ports);
 }
 
 bool WorkerClient::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                   const std::vector<std::string>& addrs,
-                                  const std::vector<std::string>& device_ips,
                                   const std::vector<uint16_t>& ports) {
-  return worker_->unlink_cluster(cluster_ids, addrs, device_ips, ports);
+  return worker_->unlink_cluster(cluster_ids, addrs, ports);
 }
 
 bool WorkerClient::link_d2d(const std::string& remote_addr) {

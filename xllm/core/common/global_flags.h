@@ -159,8 +159,6 @@ DECLARE_int32(nnodes);
 
 DECLARE_int32(node_rank);
 
-DECLARE_string(device_ip);
-
 DECLARE_int32(max_concurrent_requests);
 
 DECLARE_bool(enable_schedule_overlap);

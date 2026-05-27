@@ -40,7 +40,6 @@ class ArgumentParser:
         self.parser.add_argument('--enable_prefill_sp', nargs='?', const=True, default=False, type=_str_to_bool, help='Enable prefill-only sequence parallel.')
         self.parser.add_argument('--master_node_addr', type=str, default='', help='The master address for multi-node distributed serving(e.g. 10.18.1.1:9999).')
         self.parser.add_argument('--instance_role', type=str, default='DEFAULT', help='The role of instance(e.g. DEFAULT, PREFILL, DECODE, MIX).')
-        self.parser.add_argument('--device_ip', type=str, default='', help='The device ip.')
         self.parser.add_argument('--transfer_listen_port', type=int, default=26000, help='The KVCacheTranfer listen port.')
         self.parser.add_argument('--nnodes', type=int, default=1, help='The number of multi-nodes.')
         self.parser.add_argument('--node_rank', type=int, default=0, help='The node rank.')

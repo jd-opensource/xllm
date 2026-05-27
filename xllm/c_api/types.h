@@ -154,9 +154,6 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
   /** Instance role (DEFAULT/PREFILL/DECODE/MIX) */
   char instance_role[XLLM_META_STRING_FIELD_MAX_LEN];
 
-  /** Device IP address for NPU communication */
-  char device_ip[XLLM_META_STRING_FIELD_MAX_LEN];
-
   /** Master address for multi-node distributed serving (e.g. 10.18.1.1:9999) */
   char master_node_addr[XLLM_META_STRING_FIELD_MAX_LEN];
 

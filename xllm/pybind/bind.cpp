@@ -81,7 +81,6 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("instance_role", &Options::instance_role_)
       .def_readwrite("kv_cache_transfer_mode",
                      &Options::kv_cache_transfer_mode_)
-      .def_readwrite("device_ip", &Options::device_ip_)
       .def_readwrite("transfer_listen_port", &Options::transfer_listen_port_)
       .def_readwrite("disable_ttft_profiling",
                      &Options::disable_ttft_profiling_)

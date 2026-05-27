@@ -8,7 +8,6 @@ import "common.proto";
 
 message ClusterInfos {
   repeated uint64 cluster_ids = 1;
-  repeated string device_ips = 2;
   repeated uint32 ports = 3;
   int32 dp_size = 4;
   repeated string addrs = 5;
@@ -236,7 +235,6 @@ message InstanceClusterInfo {
   string instance_name = 1;
   repeated uint64 cluster_ids = 2;
   repeated string addrs = 3;
-  repeated string device_ips = 4;
   repeated uint32 ports = 5;
   int32 dp_size = 6;
 }

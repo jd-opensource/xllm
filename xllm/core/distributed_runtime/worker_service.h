@@ -85,11 +85,6 @@ class WorkerService : public proto::DistributeWorker {
                            proto::Status* resp,
                            google::protobuf::Closure* done) override;
 
-  void GetDeviceInfo(::google::protobuf::RpcController* controller,
-                     const proto::Empty* req,
-                     proto::DeviceInfo* resp,
-                     ::google::protobuf::Closure* done) override;
-
   void GetCacheInfo(::google::protobuf::RpcController* controller,
                     const proto::Empty* req,
                     proto::CacheInfo* resp,

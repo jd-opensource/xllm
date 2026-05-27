@@ -91,11 +91,9 @@ class LLMEngine : public Engine {
       std::vector<std::shared_ptr<std::atomic<uint32_t>>>* prefetch_results)
       override;
 
-  void get_device_info(std::vector<std::string>& device_ips,
-                       std::vector<uint16_t>& ports) override;
-
   void get_cache_info(std::vector<uint64_t>& cluster_ids,
-                      std::vector<std::string>& addrs) override;
+                      std::vector<std::string>& addrs,
+                      std::vector<uint16_t>& ports) override;
 
   void get_xtensor_info(
       std::vector<size_t>& worker_free_phy_pages,
@@ -104,22 +102,20 @@ class LLMEngine : public Engine {
 
   bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                     const std::vector<std::string>& addrs,
-                    const std::vector<std::string>& device_ips,
                     const std::vector<uint16_t>& ports,
                     const int32_t src_dp_size,
                     const int32_t src_kv_split_size = 1) override;
 
   bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                       const std::vector<std::string>& addrs,
-                      const std::vector<std::string>& device_ips,
                       const std::vector<uint16_t>& ports,
                       const int32_t src_dp_size,
                       const int32_t src_kv_split_size = 1) override;
 
   // D2D link for weight transfer - each worker links to one remote addr
-  bool link_d2d(const std::vector<std::string>& device_ips) override;
+  bool link_d2d(const std::vector<std::string>& remote_addrs) override;
 
-  bool unlink_d2d(const std::vector<std::string>& device_ips) override;
+  bool unlink_d2d(const std::vector<std::string>& remote_addrs) override;
 
   std::shared_ptr<DistManager> get_dist_manager() { return dist_manager_; };
 
@@ -196,9 +192,6 @@ class LLMEngine : public Engine {
   // avoid creating a new thread pool for each batch.
   // NOTE: Perhaps it can be optimized to create a global thread pool.
   std::unique_ptr<ThreadPool> threadpool_ = nullptr;
-
-  std::vector<std::string> worker_device_ips_;
-  std::vector<uint16_t> worker_ports_;
 
   bool layer_forward_interrupted_ = false;
 

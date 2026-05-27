@@ -353,7 +353,6 @@ std::vector<torch::Tensor> KVCacheTransfer::convert_to_torch_tensor(
 
 std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
     const std::string& transfer_type,
-    const std::string& device_ip,
     uint16_t transfer_listen_port,
     InstanceRole instance_role,
     const Device& device,
@@ -374,8 +373,7 @@ std::shared_ptr<KVCacheTransfer> KVCacheTransferFactory::create(
             << ::xllm::DisaggPDConfig::get_instance().kv_cache_transfer_type();
   if (transfer_type == "LlmDataDist") {
 #if defined(USE_NPU)
-    transfer = std::make_shared<LlmDataDistTransfer>(device_ip,
-                                                     transfer_listen_port,
+    transfer = std::make_shared<LlmDataDistTransfer>(transfer_listen_port,
                                                      instance_role,
                                                      model_type,
                                                      enable_lighting_indexer);

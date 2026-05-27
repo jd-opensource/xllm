@@ -146,8 +146,6 @@ class Options {
 
   PROPERTY(std::string, kv_cache_transfer_mode) = "PUSH";
 
-  PROPERTY(std::optional<std::string>, device_ip);
-
   PROPERTY(uint16_t, transfer_listen_port) = 26000;
 
   PROPERTY(std::optional<std::string>, etcd_addr);

@@ -48,7 +48,7 @@ message MasterWeightSegmentList {
 
 message D2DLinkRequest {
   string model_id = 1;
-  repeated string device_ips = 2;
+  repeated string remote_addrs = 2;
 }
 
 service XllmAPIService {

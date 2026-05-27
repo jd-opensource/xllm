@@ -552,11 +552,6 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       futures.push_back(worker->allocate_kv_cache_async(kv_cache_shape));
     }
   } else {
-    if (!options_.device_ip().has_value()) {
-      LOG(ERROR)
-          << "KVCacheTransfer required device_ip, current value is empty.";
-      return false;
-    }
     for (auto& worker : worker_clients_) {
       futures.push_back(
           worker->allocate_kv_cache_with_transfer_async(kv_cache_shape));
@@ -655,37 +650,21 @@ void LLMEngine::prefetch_from_storage(
   }
 }
 
-void LLMEngine::get_device_info(std::vector<std::string>& device_ips,
-                                std::vector<uint16_t>& ports) {
-  if (worker_device_ips_.size() != worker_clients_num_ ||
-      worker_ports_.size() != worker_clients_num_) {
-    worker_device_ips_.reserve(worker_clients_num_);
-    worker_ports_.reserve(worker_clients_num_);
-    for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
-         ++worker_rank) {
-      std::string device_ip;
-      uint16_t port;
-      worker_clients_[worker_rank]->get_device_info(device_ip, port);
-      worker_device_ips_.emplace_back(std::move(device_ip));
-      worker_ports_.emplace_back(port);
-    }
-  }
-
-  device_ips = worker_device_ips_;
-  ports = worker_ports_;
-}
-
 void LLMEngine::get_cache_info(std::vector<uint64_t>& cluster_ids,
-                               std::vector<std::string>& addrs) {
+                               std::vector<std::string>& addrs,
+                               std::vector<uint16_t>& ports) {
   cluster_ids.reserve(worker_clients_num_);
   addrs.reserve(worker_clients_num_);
+  ports.reserve(worker_clients_num_);
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
-    uint64_t cluster_id;
+    uint64_t cluster_id = 0;
     std::string addr;
-    worker_clients_[worker_rank]->get_cache_info(cluster_id, addr);
+    uint16_t port = 0;
+    worker_clients_[worker_rank]->get_cache_info(cluster_id, addr, port);
     cluster_ids.emplace_back(cluster_id);
-    addrs.emplace_back(addr);
+    addrs.emplace_back(std::move(addr));
+    ports.emplace_back(port);
   }
 }
 
@@ -714,7 +693,6 @@ void LLMEngine::get_xtensor_info(
 
 bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
                              const std::vector<std::string>& addrs,
-                             const std::vector<std::string>& device_ips,
                              const std::vector<uint16_t>& ports,
                              const int32_t src_dp_size,
                              const int32_t src_kv_split_size) {
@@ -733,11 +711,9 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
        ++worker_rank) {
     std::vector<uint64_t> target_cluster_ids;
     std::vector<std::string> target_addrs;
-    std::vector<std::string> target_device_ips;
     std::vector<uint16_t> target_ports;
     target_cluster_ids.reserve(src_dp_size * src_kv_split_size);
     target_addrs.reserve(src_dp_size * src_kv_split_size);
-    target_device_ips.reserve(src_dp_size * src_kv_split_size);
     target_ports.reserve(src_dp_size * src_kv_split_size);
 
     for (int32_t dp_i = 0; dp_i < src_dp_size; ++dp_i) {
@@ -746,7 +722,6 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
             dp_i * src_cp_tp_size + split_j * src_tp_size + src_dp_worker_index;
         target_cluster_ids.emplace_back(cluster_ids[p_idx]);
         target_addrs.emplace_back(addrs[p_idx]);
-        target_device_ips.emplace_back(device_ips[p_idx]);
         target_ports.emplace_back(ports[p_idx]);
       }
     }
@@ -755,19 +730,16 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
 
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
-    link_threadpool_->schedule([this,
-                                promise = std::move(promise),
-                                worker_rank,
-                                target_cluster_ids =
-                                    std::move(target_cluster_ids),
-                                target_addrs = std::move(target_addrs),
-                                target_device_ips =
-                                    std::move(target_device_ips),
-                                target_ports =
-                                    std::move(target_ports)]() mutable {
-      promise.setValue(worker_clients_[worker_rank]->link_cluster(
-          target_cluster_ids, target_addrs, target_device_ips, target_ports));
-    });
+    link_threadpool_->schedule(
+        [this,
+         promise = std::move(promise),
+         worker_rank,
+         target_cluster_ids = std::move(target_cluster_ids),
+         target_addrs = std::move(target_addrs),
+         target_ports = std::move(target_ports)]() mutable {
+          promise.setValue(worker_clients_[worker_rank]->link_cluster(
+              target_cluster_ids, target_addrs, target_ports));
+        });
     futures.emplace_back(std::move(future));
   }
 
@@ -783,7 +755,6 @@ bool LLMEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
 
 bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                const std::vector<std::string>& addrs,
-                               const std::vector<std::string>& device_ips,
                                const std::vector<uint16_t>& ports,
                                const int32_t src_dp_size,
                                const int32_t src_kv_split_size) {
@@ -799,11 +770,9 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
        ++worker_rank) {
     std::vector<uint64_t> target_cluster_ids;
     std::vector<std::string> target_addrs;
-    std::vector<std::string> target_device_ips;
     std::vector<uint16_t> target_ports;
     target_cluster_ids.reserve(src_dp_size * src_kv_split_size);
     target_addrs.reserve(src_dp_size * src_kv_split_size);
-    target_device_ips.reserve(src_dp_size * src_kv_split_size);
     target_ports.reserve(src_dp_size * src_kv_split_size);
 
     for (int32_t dp_i = 0; dp_i < src_dp_size; ++dp_i) {
@@ -812,7 +781,6 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
             dp_i * src_cp_tp_size + split_j * src_tp_size + src_dp_worker_index;
         target_cluster_ids.emplace_back(cluster_ids[p_idx]);
         target_addrs.emplace_back(addrs[p_idx]);
-        target_device_ips.emplace_back(device_ips[p_idx]);
         target_ports.emplace_back(ports[p_idx]);
       }
     }
@@ -821,19 +789,16 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
 
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
-    link_threadpool_->schedule([this,
-                                promise = std::move(promise),
-                                worker_rank,
-                                target_cluster_ids =
-                                    std::move(target_cluster_ids),
-                                target_addrs = std::move(target_addrs),
-                                target_device_ips =
-                                    std::move(target_device_ips),
-                                target_ports =
-                                    std::move(target_ports)]() mutable {
-      promise.setValue(worker_clients_[worker_rank]->unlink_cluster(
-          target_cluster_ids, target_addrs, target_device_ips, target_ports));
-    });
+    link_threadpool_->schedule(
+        [this,
+         promise = std::move(promise),
+         worker_rank,
+         target_cluster_ids = std::move(target_cluster_ids),
+         target_addrs = std::move(target_addrs),
+         target_ports = std::move(target_ports)]() mutable {
+          promise.setValue(worker_clients_[worker_rank]->unlink_cluster(
+              target_cluster_ids, target_addrs, target_ports));
+        });
     futures.emplace_back(std::move(future));
   }
 
@@ -847,9 +812,9 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return true;
 }
 
-bool LLMEngine::link_d2d(const std::vector<std::string>& device_ips) {
-  if (device_ips.size() != worker_clients_num_) {
-    LOG(ERROR) << "device_ips size " << device_ips.size()
+bool LLMEngine::link_d2d(const std::vector<std::string>& remote_addrs) {
+  if (remote_addrs.size() != worker_clients_num_) {
+    LOG(ERROR) << "remote_addrs size " << remote_addrs.size()
                << " != worker_clients_num " << worker_clients_num_;
     return false;
   }
@@ -859,7 +824,7 @@ bool LLMEngine::link_d2d(const std::vector<std::string>& device_ips) {
 
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
-    std::string remote_addr = device_ips[worker_rank];
+    std::string remote_addr = remote_addrs[worker_rank];
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
     link_threadpool_->schedule([this,
@@ -881,9 +846,9 @@ bool LLMEngine::link_d2d(const std::vector<std::string>& device_ips) {
   return true;
 }
 
-bool LLMEngine::unlink_d2d(const std::vector<std::string>& device_ips) {
-  if (device_ips.size() != worker_clients_num_) {
-    LOG(ERROR) << "device_ips size " << device_ips.size()
+bool LLMEngine::unlink_d2d(const std::vector<std::string>& remote_addrs) {
+  if (remote_addrs.size() != worker_clients_num_) {
+    LOG(ERROR) << "remote_addrs size " << remote_addrs.size()
                << " != worker_clients_num " << worker_clients_num_;
     return false;
   }
@@ -893,7 +858,7 @@ bool LLMEngine::unlink_d2d(const std::vector<std::string>& device_ips) {
 
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
-    std::string remote_addr = device_ips[worker_rank];
+    std::string remote_addr = remote_addrs[worker_rank];
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
     link_threadpool_->schedule([this,

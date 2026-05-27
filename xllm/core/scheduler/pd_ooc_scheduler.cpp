@@ -1497,17 +1497,12 @@ void PDOOCScheduler::build_disagg_requests(
   }
 
   // Add cluster info
-  std::vector<std::string> device_ips;
-  std::vector<uint16_t> ports;
-  engine_->get_device_info(device_ips, ports);
   reqs.mutable_cluster_infos()->mutable_cluster_ids()->Add(
       instance_info_.cluster_ids.begin(), instance_info_.cluster_ids.end());
   reqs.mutable_cluster_infos()->mutable_addrs()->Add(
       instance_info_.addrs.begin(), instance_info_.addrs.end());
-  reqs.mutable_cluster_infos()->mutable_device_ips()->Add(device_ips.begin(),
-                                                          device_ips.end());
-  reqs.mutable_cluster_infos()->mutable_ports()->Add(ports.begin(),
-                                                     ports.end());
+  reqs.mutable_cluster_infos()->mutable_ports()->Add(
+      instance_info_.ports.begin(), instance_info_.ports.end());
   reqs.mutable_cluster_infos()->set_dp_size(options_.dp_size());
 }
 

@@ -31,7 +31,6 @@ message InstanceMetaInfo {
   repeated uint64 cluster_ids = 4;
   int32 dp_size = 7;
   repeated string addrs = 8;
-  repeated string device_ips = 9;
   repeated uint32 ports = 10;
   string incarnation_id = 11;
   uint64 register_ts_ms = 12;

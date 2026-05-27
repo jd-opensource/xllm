@@ -56,7 +56,6 @@ std::string Options::to_string() const {
      << ", enable_prefill_sp: " << enable_prefill_sp()
      << ", master_node_addr: " << master_node_addr().value_or("null")
      << ", instance_role: " << instance_role().to_string()
-     << ", device_ip: " << device_ip().value_or("null")
      << ", transfer_listen_port: " << transfer_listen_port()
      << ", nnodes: " << nnodes() << ", node_rank: " << node_rank()
      << ", enable_schedule_overlap: " << enable_schedule_overlap()

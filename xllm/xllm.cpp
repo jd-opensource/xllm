@@ -158,7 +158,6 @@ Options create_options(const std::string& instance_name, bool is_local) {
       .enable_prefill_sp(parallel_config.enable_prefill_sp())
       .master_node_addr(distributed_config.master_node_addr())
       .instance_role(InstanceRole(disagg_pd_config.instance_role()))
-      .device_ip(distributed_config.device_ip())
       .transfer_listen_port(
           static_cast<uint16_t>(disagg_pd_config.transfer_listen_port()))
       .nnodes(distributed_config.nnodes())

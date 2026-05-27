@@ -144,7 +144,9 @@ ContinuousScheduler::ContinuousScheduler(Engine* engine, const Options& options)
     if (::xllm::KVCacheConfig::get_instance().enable_xtensor() &&
         !options_.enable_disagg_pd()) {
       xservice_client_->set_engine(engine_);
-      engine_->get_device_info(instance_info_.device_ips, instance_info_.ports);
+      engine_->get_cache_info(instance_info_.cluster_ids,
+                              instance_info_.addrs,
+                              instance_info_.ports);
     }
   }
 

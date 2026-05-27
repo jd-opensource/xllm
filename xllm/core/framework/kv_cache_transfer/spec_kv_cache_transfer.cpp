@@ -20,13 +20,11 @@ limitations under the License.
 #include "common/macros.h"
 
 namespace xllm {
-SpecKVCacheTransfer::SpecKVCacheTransfer(const std::string& device_ip,
-                                         const uint16_t listen_port,
+SpecKVCacheTransfer::SpecKVCacheTransfer(const uint16_t listen_port,
                                          const InstanceRole& instance_role,
                                          const std::string& model_type,
                                          bool enable_lighting_indexer)
-    : LlmDataDistTransfer(device_ip,
-                          listen_port,
+    : LlmDataDistTransfer(listen_port,
                           instance_role,
                           model_type,
                           enable_lighting_indexer) {}

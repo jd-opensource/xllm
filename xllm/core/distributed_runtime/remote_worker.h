@@ -55,19 +55,17 @@ class RemoteWorker : public WorkerClient {
 
   virtual bool allocate_kv_cache(const KVCacheShape& kv_cache_shape) override;
 
-  virtual void get_device_info(std::string& device_ip, uint16_t& port);
-
-  virtual void get_cache_info(uint64_t& cluster_id, std::string& addr);
+  virtual void get_cache_info(uint64_t& cluster_id,
+                              std::string& addr,
+                              uint16_t& port) override;
 
   virtual bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                             const std::vector<std::string>& addrs,
-                            const std::vector<std::string>& device_ips,
-                            const std::vector<uint16_t>& ports);
+                            const std::vector<uint16_t>& ports) override;
 
   virtual bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                               const std::vector<std::string>& addrs,
-                              const std::vector<std::string>& device_ips,
-                              const std::vector<uint16_t>& ports);
+                              const std::vector<uint16_t>& ports) override;
 
   // D2D link for weight transfer
   virtual bool link_d2d(const std::string& remote_addr) override;

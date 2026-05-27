@@ -377,9 +377,11 @@ void WorkerService::GetCacheInfo(::google::protobuf::RpcController* controller,
     brpc::ClosureGuard done_guard(done);
     uint64_t cluster_id;
     std::string addr;
-    worker_->get_cache_info(cluster_id, addr);
+    uint16_t listen_port;
+    worker_->get_cache_info(cluster_id, addr, listen_port);
     resp->set_cluster_id(cluster_id);
     resp->set_addr(addr);
+    resp->set_listen_port(listen_port);
   });
   return;
 }
@@ -492,21 +494,6 @@ void WorkerService::PrefetchFromStorage(
   return;
 }
 
-void WorkerService::GetDeviceInfo(::google::protobuf::RpcController* controller,
-                                  const proto::Empty* req,
-                                  proto::DeviceInfo* resp,
-                                  ::google::protobuf::Closure* done) {
-  threadpool_->schedule([this, controller, req, resp, done]() mutable {
-    brpc::ClosureGuard done_guard(done);
-    std::string device_ip;
-    uint16_t listen_port;
-    worker_->get_device_info(device_ip, listen_port);
-    resp->set_device_ip(device_ip);
-    resp->set_listen_port(listen_port);
-  });
-  return;
-}
-
 void WorkerService::LinkCluster(::google::protobuf::RpcController* controller,
                                 const proto::ClusterInfo* req,
                                 proto::Status* resp,
@@ -516,11 +503,9 @@ void WorkerService::LinkCluster(::google::protobuf::RpcController* controller,
     std::vector<uint64_t> cluster_ids(req->cluster_ids().begin(),
                                       req->cluster_ids().end());
     std::vector<std::string> addrs(req->addrs().begin(), req->addrs().end());
-    std::vector<std::string> device_ips(req->device_ips().begin(),
-                                        req->device_ips().end());
     std::vector<uint16_t> ports(req->ports().begin(), req->ports().end());
 
-    bool status = worker_->link_cluster(cluster_ids, addrs, device_ips, ports);
+    bool status = worker_->link_cluster(cluster_ids, addrs, ports);
     resp->set_ok(status);
   });
   return;
@@ -535,12 +520,9 @@ void WorkerService::UnlinkCluster(::google::protobuf::RpcController* controller,
     std::vector<uint64_t> cluster_ids(req->cluster_ids().begin(),
                                       req->cluster_ids().end());
     std::vector<std::string> addrs(req->addrs().begin(), req->addrs().end());
-    std::vector<std::string> device_ips(req->device_ips().begin(),
-                                        req->device_ips().end());
     std::vector<uint16_t> ports(req->ports().begin(), req->ports().end());
 
-    bool status =
-        worker_->unlink_cluster(cluster_ids, addrs, device_ips, ports);
+    bool status = worker_->unlink_cluster(cluster_ids, addrs, ports);
     resp->set_ok(status);
   });
   return;

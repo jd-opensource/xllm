@@ -43,11 +43,11 @@ class Master {
 
   virtual bool wakeup(const WakeupOptions& options) { return false; }
 
-  virtual bool link_d2d(const std::vector<std::string>& device_ips) {
+  virtual bool link_d2d(const std::vector<std::string>& remote_addrs) {
     return false;
   }
 
-  virtual bool unlink_d2d(const std::vector<std::string>& device_ips) {
+  virtual bool unlink_d2d(const std::vector<std::string>& remote_addrs) {
     return false;
   }
 

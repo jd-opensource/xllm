@@ -59,18 +59,14 @@ class Worker {
   // allocate kv cache. blocking call
   bool allocate_kv_cache(const KVCacheShape& kv_cache_shape);
 
-  void get_device_info(std::string& device_ip, uint16_t& port);
-
-  void get_cache_info(uint64_t& cluster_id, std::string& addr);
+  void get_cache_info(uint64_t& cluster_id, std::string& addr, uint16_t& port);
 
   bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                     const std::vector<std::string>& addrs,
-                    const std::vector<std::string>& device_ips,
                     const std::vector<uint16_t>& ports);
 
   bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                       const std::vector<std::string>& addrs,
-                      const std::vector<std::string>& device_ips,
                       const std::vector<uint16_t>& ports);
 
   // D2D link for weight transfer

@@ -126,10 +126,9 @@ void DisaggPDScheduler::register_instance_info(const std::string& server_name,
             << ", instance rpc_address = " << instance_info_.rpc_address
             << ", instance type = " << instance_info_.type;
 
-  engine->get_cache_info(instance_info_.cluster_ids, instance_info_.addrs);
+  engine->get_cache_info(
+      instance_info_.cluster_ids, instance_info_.addrs, instance_info_.ports);
   instance_info_.dp_size = options_.dp_size();
-
-  engine->get_device_info(instance_info_.device_ips, instance_info_.ports);
 
   // Get total physical pages per worker (for etcd registration)
 #if defined(USE_NPU)
@@ -465,17 +464,12 @@ void DisaggPDScheduler::dispatch_requests() {
       req->set_skip_special_tokens(requests[i]->state().skip_special_tokens);
       //*reqs.mutable_reqs()->Add() = req;
     }
-    std::vector<std::string> device_ips;
-    std::vector<uint16_t> ports;
-    engine_->get_device_info(device_ips, ports);
     reqs.mutable_cluster_infos()->mutable_cluster_ids()->Add(
         instance_info_.cluster_ids.begin(), instance_info_.cluster_ids.end());
     reqs.mutable_cluster_infos()->mutable_addrs()->Add(
         instance_info_.addrs.begin(), instance_info_.addrs.end());
-    reqs.mutable_cluster_infos()->mutable_device_ips()->Add(device_ips.begin(),
-                                                            device_ips.end());
-    reqs.mutable_cluster_infos()->mutable_ports()->Add(ports.begin(),
-                                                       ports.end());
+    reqs.mutable_cluster_infos()->mutable_ports()->Add(
+        instance_info_.ports.begin(), instance_info_.ports.end());
     reqs.mutable_cluster_infos()->set_dp_size(options_.dp_size());
 
     // TODO: sync rpc here currently
@@ -847,17 +841,14 @@ void DisaggPDScheduler::get_latency_metrics(std::vector<int64_t>& ttft,
   tbt = std::move(recent_tbt_);
 }
 
-bool DisaggPDScheduler::link_instance(
-    const std::string& instance_name,
-    const std::vector<uint64_t>& cluster_ids,
-    const std::vector<std::string>& addrs,
-    const std::vector<std::string>& device_ips,
-    const std::vector<uint16_t>& ports,
-    const int32_t dp_size) {
+bool DisaggPDScheduler::link_instance(const std::string& instance_name,
+                                      const std::vector<uint64_t>& cluster_ids,
+                                      const std::vector<std::string>& addrs,
+                                      const std::vector<uint16_t>& ports,
+                                      const int32_t dp_size) {
   std::lock_guard<std::mutex> lock(linked_instances_mutex_);
   if (!engine_->link_cluster(cluster_ids,
                              addrs,
-                             device_ips,
                              ports,
                              dp_size,
                              util::prefill_kv_split_size_effective())) {
@@ -875,7 +866,6 @@ bool DisaggPDScheduler::unlink_instance(
     const std::string& instance_name,
     const std::vector<uint64_t>& cluster_ids,
     const std::vector<std::string>& addrs,
-    const std::vector<std::string>& device_ips,
     const std::vector<uint16_t>& ports,
     const int32_t dp_size) {
   // Clear received requests from this instance
@@ -894,7 +884,6 @@ bool DisaggPDScheduler::unlink_instance(
   std::lock_guard<std::mutex> lock(linked_instances_mutex_);
   if (!engine_->unlink_cluster(cluster_ids,
                                addrs,
-                               device_ips,
                                ports,
                                dp_size,
                                util::prefill_kv_split_size_effective())) {

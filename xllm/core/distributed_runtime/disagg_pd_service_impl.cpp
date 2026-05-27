@@ -273,14 +273,12 @@ void DisaggPDServiceImpl::link_instance(
                                     request->cluster_ids().end());
   std::vector<std::string> addrs(request->addrs().begin(),
                                  request->addrs().end());
-  std::vector<std::string> device_ips(request->device_ips().begin(),
-                                      request->device_ips().end());
   std::vector<uint16_t> ports(request->ports().begin(), request->ports().end());
   int32_t dp_size = request->dp_size();
 
   // Call scheduler's link_instance method
   bool success = scheduler_->link_instance(
-      request->instance_name(), cluster_ids, addrs, device_ips, ports, dp_size);
+      request->instance_name(), cluster_ids, addrs, ports, dp_size);
 
   if (!success) {
     LOG(ERROR) << "Failed to link instance: " << request->instance_name();
@@ -299,14 +297,12 @@ void DisaggPDServiceImpl::unlink_instance(
                                     request->cluster_ids().end());
   std::vector<std::string> addrs(request->addrs().begin(),
                                  request->addrs().end());
-  std::vector<std::string> device_ips(request->device_ips().begin(),
-                                      request->device_ips().end());
   std::vector<uint16_t> ports(request->ports().begin(), request->ports().end());
   int32_t dp_size = request->dp_size();
 
   // Call scheduler's unlink_instance method
   bool success = scheduler_->unlink_instance(
-      request->instance_name(), cluster_ids, addrs, device_ips, ports, dp_size);
+      request->instance_name(), cluster_ids, addrs, ports, dp_size);
 
   if (!success) {
     LOG(ERROR) << "Failed to unlink instance: " << request->instance_name();

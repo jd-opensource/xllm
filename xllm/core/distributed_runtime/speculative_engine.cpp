@@ -265,34 +265,27 @@ bool SpeculativeEngine::pull_kv_blocks(
                                  dst_linear_state_ids);
 };
 
-void SpeculativeEngine::get_device_info(std::vector<std::string>& device_ips,
-                                        std::vector<uint16_t>& ports) {
-  engine_->get_device_info(device_ips, ports);
-};
-
 void SpeculativeEngine::get_cache_info(std::vector<uint64_t>& cluster_ids,
-                                       std::vector<std::string>& addrs) {
-  engine_->get_cache_info(cluster_ids, addrs);
+                                       std::vector<std::string>& addrs,
+                                       std::vector<uint16_t>& ports) {
+  engine_->get_cache_info(cluster_ids, addrs, ports);
 };
 
 bool SpeculativeEngine::link_cluster(const std::vector<uint64_t>& cluster_ids,
                                      const std::vector<std::string>& addrs,
-                                     const std::vector<std::string>& device_ips,
                                      const std::vector<uint16_t>& ports,
                                      const int32_t src_dp_size,
                                      const int32_t src_kv_split_size) {
   return engine_->link_cluster(
-      cluster_ids, addrs, device_ips, ports, src_dp_size, src_kv_split_size);
+      cluster_ids, addrs, ports, src_dp_size, src_kv_split_size);
 };
 
-bool SpeculativeEngine::unlink_cluster(
-    const std::vector<uint64_t>& cluster_ids,
-    const std::vector<std::string>& addrs,
-    const std::vector<std::string>& device_ips,
-    const std::vector<uint16_t>& ports,
-    const int32_t src_dp_size,
-    const int32_t src_kv_split_size) {
+bool SpeculativeEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
+                                       const std::vector<std::string>& addrs,
+                                       const std::vector<uint16_t>& ports,
+                                       const int32_t src_dp_size,
+                                       const int32_t src_kv_split_size) {
   return engine_->unlink_cluster(
-      cluster_ids, addrs, device_ips, ports, src_dp_size, src_kv_split_size);
+      cluster_ids, addrs, ports, src_dp_size, src_kv_split_size);
 };
 }  // namespace xllm

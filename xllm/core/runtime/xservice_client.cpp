@@ -329,9 +329,6 @@ InstanceInfo XServiceClient::get_instance_info(
     result.addrs.emplace_back(addr);
   }
   result.dp_size = resp.dp_size();
-  for (auto& ip : resp.device_ips()) {
-    result.device_ips.emplace_back(ip);
-  }
   for (auto& port : resp.ports()) {
     result.ports.emplace_back(port);
   }

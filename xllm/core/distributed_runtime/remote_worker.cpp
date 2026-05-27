@@ -78,26 +78,22 @@ bool RemoteWorker::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
   return channel_->allocate_kv_cache(kv_cache_shape);
 }
 
-void RemoteWorker::get_device_info(std::string& device_ip, uint16_t& port) {
-  channel_->get_device_info(device_ip, port);
-}
-
-void RemoteWorker::get_cache_info(uint64_t& cluster_id, std::string& addr) {
-  channel_->get_cache_info(cluster_id, addr);
+void RemoteWorker::get_cache_info(uint64_t& cluster_id,
+                                  std::string& addr,
+                                  uint16_t& port) {
+  channel_->get_cache_info(cluster_id, addr, port);
 }
 
 bool RemoteWorker::link_cluster(const std::vector<uint64_t>& cluster_ids,
                                 const std::vector<std::string>& addrs,
-                                const std::vector<std::string>& device_ips,
                                 const std::vector<uint16_t>& ports) {
-  return channel_->link_cluster(cluster_ids, addrs, device_ips, ports);
+  return channel_->link_cluster(cluster_ids, addrs, ports);
 }
 
 bool RemoteWorker::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                   const std::vector<std::string>& addrs,
-                                  const std::vector<std::string>& device_ips,
                                   const std::vector<uint16_t>& ports) {
-  return channel_->unlink_cluster(cluster_ids, addrs, device_ips, ports);
+  return channel_->unlink_cluster(cluster_ids, addrs, ports);
 }
 
 bool RemoteWorker::link_d2d(const std::string& remote_addr) {

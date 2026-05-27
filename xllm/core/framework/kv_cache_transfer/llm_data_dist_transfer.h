@@ -32,8 +32,7 @@ using LayerRegisteredCaches = std::vector<std::vector<RegisteredCache>>;
 
 class LlmDataDistTransfer : public KVCacheTransfer {
  public:
-  LlmDataDistTransfer(const std::string& device_ip,
-                      const uint16_t listen_port,
+  LlmDataDistTransfer(const uint16_t listen_port,
                       const InstanceRole& instance_role,
                       const std::string& model_type = "",
                       bool enable_lighting_indexer = false);
@@ -53,12 +52,10 @@ class LlmDataDistTransfer : public KVCacheTransfer {
 
   virtual bool link_cluster(const uint64_t cluster_id,
                             const std::string& remote_addr,
-                            const std::string& device_ip,
                             const uint16_t port) override;
 
   virtual bool unlink_cluster(const uint64_t& cluster_id,
                               const std::string& remote_addr,
-                              const std::string& device_ip,
                               const uint16_t port,
                               bool force_flag = true) override;
 
@@ -99,7 +96,6 @@ class LlmDataDistTransfer : public KVCacheTransfer {
  protected:
   uint64_t cluster_id_;
   std::string host_ip_;
-  std::string device_ip_;
   uint16_t listen_port_;
   bool enable_mla_ = false;
   bool enable_lighting_indexer_ = false;

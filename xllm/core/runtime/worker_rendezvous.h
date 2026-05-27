@@ -41,12 +41,10 @@ class WorkerRendezvous final {
 
   bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                     const std::vector<std::string>& addrs,
-                    const std::vector<std::string>& device_ips,
                     const std::vector<uint16_t>& ports);
 
   bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                       const std::vector<std::string>& addrs,
-                      const std::vector<std::string>& device_ips,
                       const std::vector<uint16_t>& ports);
 
   bool link_d2d(const std::string& remote_addr);
@@ -55,7 +53,6 @@ class WorkerRendezvous final {
  private:
   bool validate_cluster_endpoints(const std::vector<uint64_t>& cluster_ids,
                                   const std::vector<std::string>& addrs,
-                                  const std::vector<std::string>& device_ips,
                                   const std::vector<uint16_t>& ports) const;
 
   const std::shared_ptr<KVCacheTransfer>& kv_cache_transfer_;

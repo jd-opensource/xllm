@@ -86,14 +86,12 @@ class DisaggPDScheduler : public ChunkedPrefillScheduler {
   bool link_instance(const std::string& instance_name,
                      const std::vector<uint64_t>& cluster_ids,
                      const std::vector<std::string>& addrs,
-                     const std::vector<std::string>& device_ips,
                      const std::vector<uint16_t>& ports,
                      const int32_t dp_size);
 
   bool unlink_instance(const std::string& instance_name,
                        const std::vector<uint64_t>& cluster_ids,
                        const std::vector<std::string>& addrs,
-                       const std::vector<std::string>& device_ips,
                        const std::vector<uint16_t>& ports,
                        const int32_t dp_size);
 

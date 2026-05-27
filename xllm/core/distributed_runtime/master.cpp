@@ -334,10 +334,6 @@ Master::Master(const Options& options, EngineType type)
             options_.enable_prefill_piecewise_graph())
         .max_tokens_for_graph_mode(options_.max_tokens_for_graph_mode());
 
-    if (options_.device_ip().has_value()) {
-      spec_options.device_ip(options_.device_ip().value());
-    }
-
     if (use_suffix_spec) {
       engine_ = std::make_unique<SuffixSpeculativeEngine>(spec_options);
     } else {
@@ -403,9 +399,6 @@ Master::Master(const Options& options, EngineType type)
         .kv_cache_dtype(options_.kv_cache_dtype())
         .model_id(options_.model_id());
 
-    if (options_.device_ip().has_value()) {
-      eng_options.device_ip(options_.device_ip().value());
-    }
     engine_ = std::make_unique<LLMEngine>(eng_options);
   } else if (type == EngineType::REC) {
     options_.enable_schedule_overlap(false);

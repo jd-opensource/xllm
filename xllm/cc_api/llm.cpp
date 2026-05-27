@@ -94,7 +94,6 @@ bool LLM::Initialize(const std::string& model_path,
         .enable_chunked_prefill(init_options.enable_chunked_prefill)
         .enable_prefill_sp(init_options.enable_prefill_sp)
         .master_node_addr(init_options.master_node_addr)
-        .device_ip(init_options.device_ip)
         .transfer_listen_port(init_options.transfer_listen_port)
         .nnodes(init_options.nnodes)
         .node_rank(init_options.node_rank)

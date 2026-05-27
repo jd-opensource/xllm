@@ -67,7 +67,6 @@ DEFINE_double(max_memory_utilization, 0.55, "");
 DEFINE_string(init_task, "generate", "XLLM_InitOptions.task");
 DEFINE_string(communication_backend, "lccl", "");
 DEFINE_string(instance_role, "DEFAULT", "");
-DEFINE_string(device_ip, "", "");
 DEFINE_string(master_node_addr, "127.0.0.1:18899", "");
 DEFINE_string(xservice_addr, "", "");
 DEFINE_string(instance_name, "", "");
@@ -179,7 +178,6 @@ void ApplyGflagsToXllmInitOptions(XLLM_InitOptions* o) {
               XLLM_META_STRING_FIELD_MAX_LEN);
   CopyToFixed(
       o->instance_role, FLAGS_instance_role, XLLM_META_STRING_FIELD_MAX_LEN);
-  CopyToFixed(o->device_ip, FLAGS_device_ip, XLLM_META_STRING_FIELD_MAX_LEN);
   CopyToFixed(o->master_node_addr,
               FLAGS_master_node_addr,
               XLLM_META_STRING_FIELD_MAX_LEN);

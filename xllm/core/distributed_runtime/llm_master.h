@@ -88,9 +88,9 @@ class LLMMaster : public Master {
 
   bool wakeup(const WakeupOptions& options) override;
 
-  bool link_d2d(const std::vector<std::string>& device_ips) override;
+  bool link_d2d(const std::vector<std::string>& remote_addrs) override;
 
-  bool unlink_d2d(const std::vector<std::string>& device_ips) override;
+  bool unlink_d2d(const std::vector<std::string>& remote_addrs) override;
 
  private:
   std::shared_ptr<Request> generate_request(

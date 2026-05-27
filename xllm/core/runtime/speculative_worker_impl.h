@@ -52,22 +52,16 @@ class SpeculativeWorkerImpl : public WorkerImpl {
                   int32_t random_seed,
                   MasterStatus master_status) override;
 
-  void get_device_info(std::string& device_ip, uint16_t& port) override {
-    impl_->get_device_info(device_ip, port);
-  };
-
   bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                     const std::vector<std::string>& addrs,
-                    const std::vector<std::string>& device_ips,
                     const std::vector<uint16_t>& ports) override {
-    return impl_->link_cluster(cluster_ids, addrs, device_ips, ports);
+    return impl_->link_cluster(cluster_ids, addrs, ports);
   };
 
   bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                       const std::vector<std::string>& addrs,
-                      const std::vector<std::string>& device_ips,
                       const std::vector<uint16_t>& ports) override {
-    return impl_->unlink_cluster(cluster_ids, addrs, device_ips, ports);
+    return impl_->unlink_cluster(cluster_ids, addrs, ports);
   };
 
   std::tuple<int64_t, int64_t> estimate_kv_cache_capacity() override {
@@ -82,8 +76,10 @@ class SpeculativeWorkerImpl : public WorkerImpl {
       const KVCacheShape& kv_cache_shape) override;
 #endif
 
-  void get_cache_info(uint64_t& cluster_id, std::string& addr) override {
-    impl_->get_cache_info(cluster_id, addr);
+  void get_cache_info(uint64_t& cluster_id,
+                      std::string& addr,
+                      uint16_t& port) override {
+    impl_->get_cache_info(cluster_id, addr, port);
   };
 
   // prepare input for execution

@@ -91,23 +91,9 @@ bool CommChannel::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
   return true;
 }
 
-bool CommChannel::get_device_info(std::string& device_ip, uint16_t& port) {
-  proto::Empty req;
-  proto::DeviceInfo resp;
-  brpc::Controller cntl;
-
-  stub_->GetDeviceInfo(&cntl, &req, &resp, nullptr);
-  if (cntl.Failed()) {
-    LOG(ERROR) << "GetDeviceInfo failed: " << cntl.ErrorText();
-    return false;
-  }
-
-  device_ip = resp.device_ip();
-  port = resp.listen_port();
-  return true;
-}
-
-bool CommChannel::get_cache_info(uint64_t& cluster_id, std::string& addr) {
+bool CommChannel::get_cache_info(uint64_t& cluster_id,
+                                 std::string& addr,
+                                 uint16_t& port) {
   proto::Empty req;
   proto::CacheInfo resp;
   brpc::Controller cntl;
@@ -120,23 +106,21 @@ bool CommChannel::get_cache_info(uint64_t& cluster_id, std::string& addr) {
 
   cluster_id = resp.cluster_id();
   addr = resp.addr();
+  port = static_cast<uint16_t>(resp.listen_port());
   return true;
 }
 
 bool CommChannel::link_cluster(const std::vector<uint64_t>& cluster_ids,
                                const std::vector<std::string>& addrs,
-                               const std::vector<std::string>& device_ips,
                                const std::vector<uint16_t>& ports) {
   proto::ClusterInfo cluster_info;
   cluster_info.mutable_cluster_ids()->Reserve(cluster_ids.size());
   cluster_info.mutable_addrs()->Reserve(addrs.size());
-  cluster_info.mutable_device_ips()->Reserve(device_ips.size());
   cluster_info.mutable_ports()->Reserve(ports.size());
 
   for (size_t i = 0; i < cluster_ids.size(); ++i) {
     cluster_info.add_cluster_ids(cluster_ids[i]);
     cluster_info.add_addrs(addrs[i]);
-    cluster_info.add_device_ips(device_ips[i]);
     cluster_info.add_ports(ports[i]);
   }
 
@@ -153,18 +137,15 @@ bool CommChannel::link_cluster(const std::vector<uint64_t>& cluster_ids,
 
 bool CommChannel::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                  const std::vector<std::string>& addrs,
-                                 const std::vector<std::string>& device_ips,
                                  const std::vector<uint16_t>& ports) {
   proto::ClusterInfo cluster_info;
   cluster_info.mutable_cluster_ids()->Reserve(cluster_ids.size());
   cluster_info.mutable_addrs()->Reserve(addrs.size());
-  cluster_info.mutable_device_ips()->Reserve(device_ips.size());
   cluster_info.mutable_ports()->Reserve(ports.size());
 
   for (size_t i = 0; i < cluster_ids.size(); ++i) {
     cluster_info.add_cluster_ids(cluster_ids[i]);
     cluster_info.add_addrs(addrs[i]);
-    cluster_info.add_device_ips(device_ips[i]);
     cluster_info.add_ports(ports[i]);
   }
 

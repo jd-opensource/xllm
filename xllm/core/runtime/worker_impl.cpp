@@ -69,7 +69,6 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "layers/npu/loader/rolling_weight_buffer.h"
 #endif
-#include "util/net.h"
 #include "util/tensor_helper.h"
 #include "util/threadpool.h"
 #include "util/timer.h"
@@ -298,7 +297,6 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       context_.get_model_args().index_n_heads() > 0;
   kv_cache_transfer_ = KVCacheTransferFactory::create(
       ::xllm::DisaggPDConfig::get_instance().kv_cache_transfer_type(),
-      options_.device_ip().value(),
       options_.transfer_listen_port(),
       options_.instance_role(),
       device_,
@@ -350,32 +348,29 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
 }
 #endif
 
-void WorkerImpl::get_device_info(std::string& device_ip, uint16_t& port) {
-  // device_ip = options_.device_ip().value();
-  device_ip = net::get_local_ip_addr();
-  port = options_.transfer_listen_port();
-}
-
-void WorkerImpl::get_cache_info(uint64_t& cluster_id, std::string& addr) {
+void WorkerImpl::get_cache_info(uint64_t& cluster_id,
+                                std::string& addr,
+                                uint16_t& port) {
+  cluster_id = 0;
+  addr.clear();
 #if defined(USE_NPU) || defined(USE_MLU)
-  kv_cache_transfer_->get_cache_info(cluster_id, addr);
+  if (kv_cache_transfer_) {
+    kv_cache_transfer_->get_cache_info(cluster_id, addr);
+  }
 #endif
+  port = options_.transfer_listen_port();
 }
 
 bool WorkerImpl::link_cluster(const std::vector<uint64_t>& cluster_ids,
                               const std::vector<std::string>& addrs,
-                              const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports) {
-  return worker_rendezvous_->link_cluster(
-      cluster_ids, addrs, device_ips, ports);
+  return worker_rendezvous_->link_cluster(cluster_ids, addrs, ports);
 }
 
 bool WorkerImpl::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                                 const std::vector<std::string>& addrs,
-                                const std::vector<std::string>& device_ips,
                                 const std::vector<uint16_t>& ports) {
-  return worker_rendezvous_->unlink_cluster(
-      cluster_ids, addrs, device_ips, ports);
+  return worker_rendezvous_->unlink_cluster(cluster_ids, addrs, ports);
 }
 
 bool WorkerImpl::link_d2d(const std::string& remote_addr) {

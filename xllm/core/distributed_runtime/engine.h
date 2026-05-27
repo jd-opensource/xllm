@@ -100,13 +100,9 @@ class Engine {
     NOT_IMPLEMENTED();
   };
 
-  virtual void get_device_info(std::vector<std::string>& device_ips,
-                               std::vector<uint16_t>& ports) {
-    NOT_IMPLEMENTED();
-  };
-
   virtual void get_cache_info(std::vector<uint64_t>& cluster_ids,
-                              std::vector<std::string>& addrs) {
+                              std::vector<std::string>& addrs,
+                              std::vector<uint16_t>& ports) {
     NOT_IMPLEMENTED();
   };
 
@@ -122,7 +118,6 @@ class Engine {
 
   virtual bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                             const std::vector<std::string>& addrs,
-                            const std::vector<std::string>& device_ips,
                             const std::vector<uint16_t>& ports,
                             const int32_t src_dp_size,
                             const int32_t src_kv_split_size = 1) {
@@ -132,7 +127,6 @@ class Engine {
 
   virtual bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                               const std::vector<std::string>& addrs,
-                              const std::vector<std::string>& device_ips,
                               const std::vector<uint16_t>& ports,
                               const int32_t src_dp_size,
                               const int32_t src_kv_split_size = 1) {
@@ -140,14 +134,13 @@ class Engine {
     return false;
   };
 
-  // D2D link for weight transfer - each worker links to one remote addr
-  // device_ips: one ip per worker, in worker order
-  virtual bool link_d2d(const std::vector<std::string>& device_ips) {
+  // D2D link for weight transfer - each worker links to one remote addr.
+  virtual bool link_d2d(const std::vector<std::string>& remote_addrs) {
     NOT_IMPLEMENTED();
     return false;
   };
 
-  virtual bool unlink_d2d(const std::vector<std::string>& device_ips) {
+  virtual bool unlink_d2d(const std::vector<std::string>& remote_addrs) {
     NOT_IMPLEMENTED();
     return false;
   };

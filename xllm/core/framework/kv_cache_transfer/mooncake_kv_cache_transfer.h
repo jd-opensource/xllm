@@ -36,12 +36,10 @@ class MooncakeKVCacheTransferBase : public KVCacheTransfer {
 
   bool link_cluster(const uint64_t cluster_id,
                     const std::string& remote_addr,
-                    const std::string& device_ip,
                     const uint16_t port) override;
 
   bool unlink_cluster(const uint64_t& cluster_id,
                       const std::string& remote_addr,
-                      const std::string& device_ip,
                       const uint16_t port,
                       bool force_flag = false) override;
 

@@ -32,8 +32,6 @@ DEFINE_int32(nnodes, 1, "The number of multi-nodes.");
 
 DEFINE_int32(node_rank, 0, "The node rank.");
 
-DEFINE_string(device_ip, "", "The device IP address for KV cache transfer.");
-
 DEFINE_string(etcd_addr, "", "Etcd adderss for save instance meta info.");
 
 DEFINE_string(etcd_namespace,
@@ -55,7 +53,6 @@ void DistributedConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(xtensor_master_node_addr);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(nnodes);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(node_rank);
-  XLLM_CONFIG_ASSIGN_FROM_FLAG(device_ip);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(etcd_addr);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(etcd_namespace);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_service_routing);
@@ -69,7 +66,6 @@ void DistributedConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(nnodes);
   // don't read rank-related config
   // XLLM_CONFIG_ASSIGN_FROM_JSON(node_rank);
-  XLLM_CONFIG_ASSIGN_FROM_JSON(device_ip);
   XLLM_CONFIG_ASSIGN_FROM_JSON(etcd_addr);
   XLLM_CONFIG_ASSIGN_FROM_JSON(etcd_namespace);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_service_routing);
@@ -88,8 +84,6 @@ void DistributedConfig::append_config_json(
   // don't dump rank-related config
   //   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
   //       config_json, default_config, node_rank);
-  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
-      config_json, default_config, device_ip);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, etcd_addr);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

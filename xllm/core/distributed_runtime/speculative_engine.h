@@ -68,22 +68,18 @@ class SpeculativeEngine : public Engine {
       const std::vector<uint64_t>& src_linear_state_ids = {},
       const std::vector<uint64_t>& dst_linear_state_ids = {}) override;
 
-  void get_device_info(std::vector<std::string>& device_ips,
-                       std::vector<uint16_t>& ports) override;
-
   void get_cache_info(std::vector<uint64_t>& cluster_ids,
-                      std::vector<std::string>& addrs) override;
+                      std::vector<std::string>& addrs,
+                      std::vector<uint16_t>& ports) override;
 
   bool link_cluster(const std::vector<uint64_t>& cluster_ids,
                     const std::vector<std::string>& addrs,
-                    const std::vector<std::string>& device_ips,
                     const std::vector<uint16_t>& ports,
                     const int32_t src_dp_size,
                     const int32_t src_kv_split_size = 1) override;
 
   bool unlink_cluster(const std::vector<uint64_t>& cluster_ids,
                       const std::vector<std::string>& addrs,
-                      const std::vector<std::string>& device_ips,
                       const std::vector<uint16_t>& ports,
                       const int32_t src_dp_size,
                       const int32_t src_kv_split_size = 1) override;

@@ -157,9 +157,6 @@ struct Options {
   // support `PUSH` and `PULL`
   PROPERTY(std::string, kv_cache_transfer_mode) = "PUSH";
 
-  // device_ip needed in disaggregated prefill and decode execution.
-  PROPERTY(std::optional<std::string>, device_ip);
-
   // transfer_listen_port needed in disaggregated prefill and decode execution.
   PROPERTY(uint16_t, transfer_listen_port) = 26000;
 

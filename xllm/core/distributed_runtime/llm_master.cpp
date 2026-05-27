@@ -552,12 +552,12 @@ bool LLMMaster::wakeup(const WakeupOptions& options) {
   return engine_->wakeup(opts);
 }
 
-bool LLMMaster::link_d2d(const std::vector<std::string>& device_ips) {
-  return engine_->link_d2d(device_ips);
+bool LLMMaster::link_d2d(const std::vector<std::string>& remote_addrs) {
+  return engine_->link_d2d(remote_addrs);
 }
 
-bool LLMMaster::unlink_d2d(const std::vector<std::string>& device_ips) {
-  return engine_->unlink_d2d(device_ips);
+bool LLMMaster::unlink_d2d(const std::vector<std::string>& remote_addrs) {
+  return engine_->unlink_d2d(remote_addrs);
 }
 
 LLMAssistantMaster::LLMAssistantMaster(const Options& options)

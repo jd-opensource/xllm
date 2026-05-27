@@ -257,7 +257,6 @@ bool MTPWorkerImpl::allocate_kv_cache_with_transfer(
   if (kv_cache_transfer_ == nullptr) {
 #if defined(USE_NPU)
     kv_cache_transfer_ = std::make_shared<SpecKVCacheTransfer>(
-        options_.device_ip().value(),
         options_.transfer_listen_port(),
         options_.instance_role(),
         context_.get_model_args().model_type(),

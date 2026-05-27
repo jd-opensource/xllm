@@ -48,13 +48,11 @@ bool is_linear_state_cache(KVCacheTensorRole role) {
   return role == KVCacheTensorRole::CONV || role == KVCacheTensorRole::SSM;
 }
 
-LlmDataDistTransfer::LlmDataDistTransfer(const std::string& device_ip,
-                                         const uint16_t listen_port,
+LlmDataDistTransfer::LlmDataDistTransfer(const uint16_t listen_port,
                                          const InstanceRole& instance_role,
                                          const std::string& model_type,
                                          bool enable_lighting_indexer)
-    : device_ip_(device_ip),
-      listen_port_(listen_port),
+    : listen_port_(listen_port),
       enable_lighting_indexer_(enable_lighting_indexer),
       model_type_(model_type),
       KVCacheTransfer() {
@@ -103,12 +101,11 @@ void LlmDataDistTransfer::free_kv_cache() { layer_registered_caches_.clear(); }
 void LlmDataDistTransfer::get_cache_info(uint64_t& cluster_id,
                                          std::string& addr) {
   cluster_id = cluster_id_;
-  addr.clear();
+  addr = host_ip_;
 }
 
 bool LlmDataDistTransfer::link_cluster(const uint64_t cluster_id,
                                        const std::string& remote_addr,
-                                       const std::string& device_ip,
                                        const uint16_t port) {
   if (linked_cluster_ids.find(cluster_id) != linked_cluster_ids.end()) {
     // The cluster is connected.
@@ -117,7 +114,7 @@ bool LlmDataDistTransfer::link_cluster(const uint64_t cluster_id,
 
   std::vector<llm_datadist::Status> rets;
   std::vector<ClusterInfo> clusters;
-  ClusterInfo cluster_info = create_cluster_info(cluster_id, device_ip, port);
+  ClusterInfo cluster_info = create_cluster_info(cluster_id, remote_addr, port);
   clusters.emplace_back(std::move(cluster_info));
 
   auto ret = llm_data_dist_->LinkLlmClusters(
@@ -126,7 +123,7 @@ bool LlmDataDistTransfer::link_cluster(const uint64_t cluster_id,
     LOG(ERROR) << "LinkLlmClusters failed, ret = " << std::hex << ret;
     return false;
   }
-  LOG(INFO) << "LinkLlmClusters success, ip : " << device_ip
+  LOG(INFO) << "LinkLlmClusters success, ip : " << remote_addr
             << ", port : " << port;
   linked_cluster_ids.insert(cluster_id);
 
@@ -135,13 +132,12 @@ bool LlmDataDistTransfer::link_cluster(const uint64_t cluster_id,
 
 bool LlmDataDistTransfer::unlink_cluster(const uint64_t& cluster_id,
                                          const std::string& remote_addr,
-                                         const std::string& remote_ip,
                                          const uint16_t remote_port,
                                          bool force_flag) {
   std::vector<llm_datadist::Status> rets;
   std::vector<ClusterInfo> clusters;
   ClusterInfo cluster_info =
-      create_cluster_info(cluster_id, remote_ip, remote_port);
+      create_cluster_info(cluster_id, remote_addr, remote_port);
   clusters.emplace_back(std::move(cluster_info));
 
   auto ret =
@@ -150,7 +146,7 @@ bool LlmDataDistTransfer::unlink_cluster(const uint64_t& cluster_id,
     LOG(ERROR) << "UnlinkLlmClusters failed, ret = " << std::hex << ret;
     return false;
   }
-  LOG(INFO) << "UnlinkLlmClusters success, ip : " << remote_ip
+  LOG(INFO) << "UnlinkLlmClusters success, ip : " << remote_addr
             << ", port : " << remote_port;
   linked_cluster_ids.erase(cluster_id);
 

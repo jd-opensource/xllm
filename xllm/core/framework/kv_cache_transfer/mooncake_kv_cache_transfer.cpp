@@ -155,7 +155,6 @@ void MooncakeKVCacheTransferBase::get_cache_info(uint64_t& cluster_id,
 
 bool MooncakeKVCacheTransferBase::link_cluster(const uint64_t cluster_id,
                                                const std::string& remote_addr,
-                                               const std::string& device_ip,
                                                const uint16_t port) {
   LOG(INFO) << "link_cluster, cluster_id=" << cluster_id
             << ", remote_addr=" << remote_addr;
@@ -165,7 +164,6 @@ bool MooncakeKVCacheTransferBase::link_cluster(const uint64_t cluster_id,
 
 bool MooncakeKVCacheTransferBase::unlink_cluster(const uint64_t& cluster_id,
                                                  const std::string& remote_addr,
-                                                 const std::string& device_ip,
                                                  const uint16_t port,
                                                  bool force_flag) {
   LOG(INFO) << "unlink_cluster, cluster_id=" << cluster_id

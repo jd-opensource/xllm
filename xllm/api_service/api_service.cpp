@@ -1069,7 +1069,7 @@ void APIService::LinkD2D(::google::protobuf::RpcController* controller,
     return;
   }
   bool status = master->link_d2d(
-      {request->device_ips().begin(), request->device_ips().end()});
+      {request->remote_addrs().begin(), request->remote_addrs().end()});
   response->set_ok(status);
 }
 
@@ -1108,7 +1108,7 @@ void APIService::LinkD2DHttp(::google::protobuf::RpcController* controller,
     return;
   }
   bool status = master->link_d2d(
-      {req_pb->device_ips().begin(), req_pb->device_ips().end()});
+      {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()});
   resp_pb->set_ok(status);
 
   json2pb::Pb2JsonOptions json_options;
@@ -1139,7 +1139,7 @@ void APIService::UnlinkD2D(::google::protobuf::RpcController* controller,
     return;
   }
   bool status = master->unlink_d2d(
-      {request->device_ips().begin(), request->device_ips().end()});
+      {request->remote_addrs().begin(), request->remote_addrs().end()});
   response->set_ok(status);
 }
 
@@ -1178,7 +1178,7 @@ void APIService::UnlinkD2DHttp(::google::protobuf::RpcController* controller,
     return;
   }
   bool status = master->unlink_d2d(
-      {req_pb->device_ips().begin(), req_pb->device_ips().end()});
+      {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()});
   resp_pb->set_ok(status);
 
   json2pb::Pb2JsonOptions json_options;
