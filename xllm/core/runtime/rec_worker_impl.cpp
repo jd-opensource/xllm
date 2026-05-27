@@ -50,6 +50,7 @@ limitations under the License.
 #include "framework/sampling/rec_sampler.h"
 #include "framework/state_dict/rec_vocab_dict.h"
 #include "models/model_registry.h"
+#include "runtime/rec_beam_utils.h"
 #include "util/env_var.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
@@ -1762,10 +1763,13 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
       top_tokens =
           result->sample_output.top_tokens.to(torch::kInt32).reshape({-1, 1});
       top_logprobs = result->sample_output.top_logprobs.reshape({-1, 1});
-      beam_tensors.out_token_ids.copy_(top_tokens);
-      beam_tensors.out_log_probs.copy_(top_logprobs);
-      beam_tensors.out_seqgroup.select(/*dim=*/2, /*index=*/0)
-          .copy_(top_tokens.reshape({-1}));
+      runtime::detail::write_first_round_beam_outputs(
+          top_tokens,
+          top_logprobs,
+          batch_size,
+          beam_tensors.out_token_ids,
+          beam_tensors.out_log_probs,
+          beam_tensors.out_seqgroup);
     } else if (final_round && requested_result_width != beam_width) {
       top_tokens = result->sample_output.top_tokens.to(torch::kInt32);
       top_logprobs = result->sample_output.top_logprobs;
@@ -2346,10 +2350,13 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_beam_search(
   (void)requested_result_width;
   (void)total_rounds;
   if (round == 0) {
-    beam_tensors.out_token_ids.copy_(top_tokens.reshape({-1, 1}));
-    beam_tensors.out_log_probs.copy_(top_logprobs.reshape({-1, 1}));
-    beam_tensors.out_seqgroup.select(/*dim=*/2, /*index=*/0)
-        .copy_(top_tokens.reshape({-1}));
+    runtime::detail::write_first_round_beam_outputs(
+        top_tokens.reshape({-1, 1}),
+        top_logprobs.reshape({-1, 1}),
+        batch_size,
+        beam_tensors.out_token_ids,
+        beam_tensors.out_log_probs,
+        beam_tensors.out_seqgroup);
   } else {
     xllm::kernel::npu::beam_search_rec(
         /*logprobs=*/beam_tensors.acc_logprob,
