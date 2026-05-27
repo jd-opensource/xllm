@@ -16,6 +16,7 @@ cc_library(
     fused_layernorm.cpp
     matmul.cpp
     npu_causal_conv1d.cpp
+    npu_fused_infer_attention.cpp
     npu_gemma_rms_norm.cpp
     npu_grouped_matmul.cpp
     npu_moe_gating_topk_softmax.cpp

@@ -17,7 +17,9 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <optional>
+#include <string>
 #include <tuple>
+#include <vector>
 
 #include "custom_functions_npu/atb_common.h"
 
@@ -44,6 +46,22 @@ void batch_decode(const torch::Tensor& query,
                   const torch::Tensor& block_table,
                   const torch::Tensor& seq_lens,
                   torch::Tensor& output);
+
+std::tuple<torch::Tensor, torch::Tensor> npu_fused_infer_attention(
+    const torch::Tensor& query,
+    const torch::Tensor& key,
+    const torch::Tensor& value,
+    const std::optional<torch::Tensor>& atten_mask,
+    const std::optional<torch::Tensor>& block_table,
+    const std::vector<int64_t>& actual_seq_lengths,
+    const std::vector<int64_t>& actual_seq_lengths_kv,
+    int64_t num_heads,
+    int64_t num_key_value_heads,
+    double scale,
+    int64_t block_size,
+    int64_t sparse_mode,
+    const std::string& input_layout,
+    bool softmax_lse_flag = false);
 
 // Custom batch decode for ACL graph execution
 // This variant uses CustomPagedAttention to avoid .to(kCPU) operations
