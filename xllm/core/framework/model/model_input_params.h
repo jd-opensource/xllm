@@ -32,11 +32,11 @@ limitations under the License.
 #if defined(USE_MLU)
 #include "platform/mlu/mlu_layer_synchronizer.h"
 #endif
+#include "core/framework/multimodal/mm_batch_data.h"
 #include "framework/batch/batch_forward_type.h"
 #include "framework/parallel_state/npu_cp_ep_padding.h"
 #include "framework/parallel_state/npu_cp_prepare.h"
 #include "framework/parallel_state/npu_dp_ep_padding.h"
-#include "framework/request/mm_batch_data.h"
 #include "runtime/dit_forward_params.h"
 #include "util/hash_util.h"
 #include "util/tensor_helper.h"

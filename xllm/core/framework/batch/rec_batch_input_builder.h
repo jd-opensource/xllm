@@ -21,8 +21,8 @@ limitations under the License.
 #include <memory>
 #include <vector>
 
+#include "core/framework/multimodal/mm_data.h"
 #include "framework/model/model_args.h"
-#include "framework/request/mm_data.h"
 #include "framework/request/rec_type.h"
 #include "framework/request/sequences_group.h"
 #include "runtime/forward_params.h"

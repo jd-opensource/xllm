@@ -26,7 +26,7 @@ limitations under the License.
 #include "core/framework/config/disagg_pd_config.h"
 #include "core/framework/config/kernel_config.h"
 #include "core/framework/config/speculative_config.h"
-#include "framework/request/mm_data.h"
+#include "core/framework/multimodal/mm_data.h"
 #include "spec_input_builder.h"
 #include "util/json_reader.h"
 #include "util/slice.h"

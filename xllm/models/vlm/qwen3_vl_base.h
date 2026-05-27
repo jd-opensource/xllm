@@ -16,7 +16,7 @@ limitations under the License.
 #pragma once
 
 #include "core/framework/model/model_output.h"
-#include "core/framework/request/mm_data_item.h"
+#include "core/framework/multimodal/mm_data_item.h"
 #include "core/layers/common/lm_head.h"
 #include "models/model_registry.h"
 

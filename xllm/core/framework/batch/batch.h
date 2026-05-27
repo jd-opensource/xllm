@@ -23,8 +23,8 @@ limitations under the License.
 #include <limits>
 #include <vector>
 
+#include "core/framework/multimodal/mm_data.h"
 #include "framework/batch/batch_forward_type.h"
-#include "framework/request/mm_data.h"
 #include "framework/request/request.h"
 #include "framework/request/sequence.h"
 #include "framework/request/sequences_group.h"

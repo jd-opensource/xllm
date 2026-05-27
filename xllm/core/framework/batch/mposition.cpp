@@ -17,8 +17,8 @@ limitations under the License.
 
 #include <absl/strings/match.h>
 
+#include "core/framework/multimodal/mm_batch_data.h"
 #include "framework/model/model_args.h"
-#include "framework/request/mm_batch_data.h"
 #include "framework/request/sequence.h"
 
 namespace xllm {

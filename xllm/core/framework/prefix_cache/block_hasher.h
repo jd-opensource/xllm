@@ -18,7 +18,7 @@ limitations under the License.
 #include <cstdint>
 #include <memory>
 
-#include "framework/request/mm_data.h"
+#include "core/framework/multimodal/mm_data.h"
 #include "util/hash_util.h"
 #include "util/slice.h"
 

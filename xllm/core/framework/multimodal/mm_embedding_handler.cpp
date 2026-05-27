@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "mm_embedding_handler.h"
 
+#include "core/common/types.h"
 #include "core/util/utils.h"
 #include "mm_input.h"
 

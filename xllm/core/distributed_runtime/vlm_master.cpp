@@ -26,10 +26,10 @@ limitations under the License.
 
 #include "common/metrics.h"
 #include "core/common/message.h"
+#include "core/framework/multimodal/mm_data.h"
+#include "core/framework/multimodal/mm_input.h"
 #include "framework/chat_template/jinja_chat_template.h"
 #include "framework/model/model_args.h"
-#include "framework/request/mm_data.h"
-#include "framework/request/mm_input.h"
 #include "framework/request/request.h"
 #include "models/model_registry.h"
 #include "runtime/xservice_client.h"

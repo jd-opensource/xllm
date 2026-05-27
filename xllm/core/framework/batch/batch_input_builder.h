@@ -25,7 +25,7 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "framework/request/mm_data.h"
+#include "core/framework/multimodal/mm_data.h"
 #include "framework/request/sequence.h"
 #include "runtime/forward_params.h"
 #include "util/threadpool.h"

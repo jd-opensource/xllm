@@ -25,7 +25,7 @@ limitations under the License.
 #include "core/distributed_runtime/llm_master.h"
 #include "core/distributed_runtime/vlm_master.h"
 #include "core/framework/config/model_config.h"
-#include "core/framework/request/mm_data.h"
+#include "core/framework/multimodal/mm_data.h"
 #include "core/framework/request/request_output.h"
 #include "core/framework/request/request_params.h"
 #include "core/framework/request/sample_slot.h"

@@ -22,7 +22,7 @@ limitations under the License.
 #include <thread>
 
 #include "common/metrics.h"
-#include "request/mm_data.h"
+#include "core/framework/multimodal/mm_data.h"
 
 namespace xllm {
 

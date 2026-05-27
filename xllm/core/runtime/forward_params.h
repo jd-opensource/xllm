@@ -28,10 +28,10 @@ limitations under the License.
 #include <vector>
 
 #include "common/types.h"
+#include "core/framework/multimodal/mm_batch_data.h"
+#include "core/framework/multimodal/mm_data.h"
 #include "framework/config/execution_config.h"
 #include "framework/model/model_input_params.h"
-#include "framework/request/mm_batch_data.h"
-#include "framework/request/mm_data.h"
 #include "framework/sampling/beam_searcher.h"
 #include "framework/sampling/sampling_params.h"
 #include "platform/device.h"

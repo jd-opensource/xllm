@@ -23,7 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "batch_input_builder.h"
-#include "framework/request/mm_data.h"
+#include "core/framework/multimodal/mm_data.h"
 #include "framework/request/sequence.h"
 #include "framework/request/sequences_group.h"
 #include "rec_batch_input_builder.h"

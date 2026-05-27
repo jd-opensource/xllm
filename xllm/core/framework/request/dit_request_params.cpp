@@ -20,9 +20,9 @@ limitations under the License.
 #include "core/common/instance_name.h"
 #include "core/common/macros.h"
 #include "core/framework/config/dit_config.h"
+#include "core/framework/multimodal/mm_codec.h"
 #include "core/util/utils.h"
 #include "core/util/uuid.h"
-#include "mm_codec.h"
 #include "request.h"
 
 namespace xllm {

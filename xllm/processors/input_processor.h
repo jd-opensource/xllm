@@ -19,8 +19,8 @@ limitations under the License.
 
 #include <string>
 
-#include "core/framework/request/mm_data.h"
-#include "framework/request/mm_input.h"
+#include "core/framework/multimodal/mm_data.h"
+#include "core/framework/multimodal/mm_input.h"
 
 namespace xllm {
 

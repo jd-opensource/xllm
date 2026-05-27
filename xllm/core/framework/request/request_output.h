@@ -53,11 +53,6 @@ struct LogProb : public LogProbData {
   std::optional<std::vector<LogProbData>> top_logprobs;
 };
 
-struct EmbeddingOutput {
-  torch::Tensor embedding;
-  std::unordered_map<std::string, torch::Tensor> metadata;
-};
-
 struct SequenceOutput {
   // the index of the sequence in the request.
   size_t index;
