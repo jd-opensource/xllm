@@ -178,6 +178,9 @@ std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
 std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
     FusedRecurrentGatedDeltaRuleParams& params);
 
+torch::Tensor fused_sigmoid_gating_delta_rule_update(
+    FusedSigmoidGatingDeltaRuleUpdateParams& params);
+
 torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params);
 
 torch::Tensor gated_layer_norm(GatedLayerNormParams& params);

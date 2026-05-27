@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <vector>
+
 #if defined(USE_CUDA) || defined(USE_MUSA)
 #include <tvm/ffi/container/array.h>
 namespace ffi = tvm::ffi;
@@ -73,6 +75,8 @@ struct AttentionMetadata {
   torch::Tensor kv_cu_seq_lens;
   torch::Tensor kv_seq_lens;
   torch::Tensor q_seq_lens;
+  std::vector<int32_t> kv_seq_lens_vec;
+  std::vector<int32_t> q_seq_lens_vec;
   torch::Tensor block_table;
   torch::Tensor slot_mapping;
   int64_t max_query_len;
@@ -84,6 +88,14 @@ struct AttentionMetadata {
   bool is_dummy;
   // Whether to apply causal mask. Default: true.
   bool is_causal = true;
+
+  // Spec-verify ACL graph can run full attention as expanded decode while GDN
+  // layers keep the original spec-verify metadata.
+  bool use_expanded_decode_for_spec_verify_attention = false;
+  torch::Tensor expanded_kv_seq_lens;
+  torch::Tensor expanded_block_table;
+  torch::Tensor expanded_paged_attention_tiling_data;
+  torch::Tensor expanded_kv_seq_lens_host;
 
   // for mrope
   torch::Tensor mrope_cos;
@@ -151,10 +163,11 @@ struct AttentionMetadata {
 
 #if defined(USE_NPU)
   // for npu
+  bool is_spec_verify = false;
+  torch::Tensor q_seq_lens_host;
   torch::Tensor kv_seq_lens_host;
-  // For ACL graph execution - tiling data for CustomPagedAttention.
-  // If defined, use this instead of kv_seq_lens_host to avoid .to(kCPU)
-  // operations that break ACL graph capture.
+  // For ACL graph execution - fixed-address device tiling data for
+  // CustomPagedAttention replay.
   torch::Tensor paged_attention_tiling_data;
   // Pre-computed attention mask for npu_fused_infer_attention.
   torch::Tensor fia_attn_mask;

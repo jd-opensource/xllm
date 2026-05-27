@@ -85,12 +85,28 @@ int64_t scale_slot_size(const ModelArgs& model_args,
   return 2 * sizeof(float) * options.n_local_kv_heads;
 }
 
+bool is_qwen3_5_target_model_type(const std::string& model_type) {
+  return model_type == "qwen3_5" || model_type == "qwen3_5_moe" ||
+         model_type == "qwen3_5_text" || model_type == "qwen3_5_moe_text" ||
+         model_type.rfind("qwen3_5_", 0) == 0;
+}
+
+bool enable_qwen3_5_spec_verify(const ModelArgs& model_args,
+                                const KVCacheEstimateOptions& options) {
+  return options.num_speculative_tokens > 0 && !options.is_draft_engine &&
+         is_qwen3_5_target_model_type(model_args.model_type());
+}
+
 int64_t linear_slot_size(const ModelArgs& model_args,
                          const KVCacheEstimateOptions& options,
                          int64_t dtype_size) {
   if (model_args.linear_num_value_heads() <= 0) {
     return 0;
   }
+  const int64_t num_speculative_tokens =
+      enable_qwen3_5_spec_verify(model_args, options)
+          ? options.num_speculative_tokens
+          : 0;
 
   const int64_t head_k_dim = model_args.linear_key_head_dim();
   const int64_t head_v_dim = model_args.linear_value_head_dim();
@@ -99,12 +115,15 @@ int64_t linear_slot_size(const ModelArgs& model_args,
 
   const int64_t linear_ssm_slot_size =
       ssm_dtype_size * options.n_local_linear_v_heads * head_k_dim * head_v_dim;
+  const int64_t linear_conv_state_len =
+      model_args.linear_conv_kernel_dim() - 1 + num_speculative_tokens;
   const int64_t linear_conv_slot_size =
       dtype_size *
       (head_k_dim * options.n_local_linear_k_heads * 2 +
        head_v_dim * options.n_local_linear_v_heads) *
-      (model_args.linear_conv_kernel_dim() - 1);
-  return linear_ssm_slot_size + linear_conv_slot_size;
+      linear_conv_state_len;
+  return linear_conv_slot_size +
+         linear_ssm_slot_size * (num_speculative_tokens + 1);
 }
 
 void init_dsv4_counts(const ModelArgs& model_args,
@@ -282,6 +301,13 @@ KVCacheCapacity estimate_kv_cache_capacity(
       .linear_slot_size(linear_slot_size(model_args, options, dtype_size))
       .n_layers(model_args.n_layers())
       .block_size(options.block_size);
+  const int64_t num_speculative_tokens =
+      enable_qwen3_5_spec_verify(model_args, options)
+          ? options.num_speculative_tokens
+          : 0;
+  kv_cache_cap.linear_conv_state_len(model_args.linear_conv_kernel_dim() - 1 +
+                                     num_speculative_tokens);
+  kv_cache_cap.linear_ssm_checkpoint_stride(num_speculative_tokens + 1);
 #if !defined(USE_NPU)
   if (options.is_draft_engine) {
     kv_cache_cap.n_layers(model_args.num_nextn_predict_layers());

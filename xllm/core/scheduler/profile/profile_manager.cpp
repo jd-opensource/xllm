@@ -32,6 +32,7 @@ limitations under the License.
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/model_config.h"
 #include "core/framework/config/scheduler_config.h"
+#include "core/framework/config/speculative_config.h"
 #include "framework/batch/batch_factory.h"
 #include "framework/request/request_state.h"
 #include "util/rec_model_utils.h"
@@ -648,7 +649,14 @@ std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
 
   RequestState req_state(prompt_token_ids);
   req_state.enable_schedule_overlap = options_.enable_schedule_overlap();
-  req_state.seq_capacity = total_length + 1;
+  const int32_t num_speculative_tokens =
+      ::xllm::SpeculativeConfig::get_instance().num_speculative_tokens();
+  size_t seq_capacity = static_cast<size_t>(total_length) +
+                        static_cast<size_t>(num_speculative_tokens) + 1;
+  if (options_.enable_schedule_overlap()) {
+    seq_capacity += static_cast<size_t>(num_speculative_tokens) + 1;
+  }
+  req_state.seq_capacity = seq_capacity;
   auto request = std::make_shared<Request>(
       /*request_id=*/"",
       /*x_request_id=*/"",
@@ -657,7 +665,7 @@ std::shared_ptr<Request> ProfileManager::generate_single_decode_request(
 
   auto* sequence = request->sequences()[0].get();
   if (!block_manager_pool_->BlockManagerPool::allocate(sequence,
-                                                       total_length + 1)) {
+                                                       seq_capacity)) {
     LOG(FATAL) << "Profiling decode step time failed! Not enough blocks, total "
                   "length: "
                << total_length;

@@ -127,6 +127,14 @@ class Qwen3_5MtpModelImpl : public Qwen3HybridModelImplBase {
     torch::Tensor mtp_hidden = fc_(torch::cat({embedding, hidden}, -1));
 
     CHECK_EQ(kv_caches.size(), layers_.size());
+    torch::Tensor mrope_cos_sin;
+    for (const auto& layer : layers_) {
+      mrope_cos_sin = layer->build_mrope_cos_sin(positions);
+      if (mrope_cos_sin.defined()) {
+        break;
+      }
+    }
+
     std::optional<torch::Tensor> residual = std::nullopt;
     for (size_t i = 0; i < layers_.size(); ++i) {
       mtp_hidden = layers_[i]->forward(mtp_hidden,
@@ -134,7 +142,8 @@ class Qwen3_5MtpModelImpl : public Qwen3HybridModelImplBase {
                                        positions,
                                        attn_metadata,
                                        kv_caches[i],
-                                       input_params);
+                                       input_params,
+                                       mrope_cos_sin);
     }
     auto [new_mtp_hidden, new_res] = norm_->forward(mtp_hidden, residual);
     mtp_hidden = new_mtp_hidden;

@@ -20,8 +20,6 @@ limitations under the License.
 #include "core/framework/model/model_output.h"
 #include "core/util/rec_model_utils.h"
 #if defined(USE_NPU)
-#include "core/common/global_flags.h"
-#include "core/framework/config/scheduler_config.h"
 #include "core/layers/common/attention_mask.h"
 #endif
 #include "core/layers/qwen3_decoder_layer.h"
@@ -51,11 +49,10 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
     embed_tokens_ =
         register_module("embed_tokens", layer::WordEmbedding(context));
 #if defined(USE_NPU)
-    int32_t mask_value =
-        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill() ? -9984
-                                                                         : 1;
     attn_mask_ = layer::AttentionMask(
-        options.device(), options.dtype().toScalarType(), mask_value);
+        options.device(), options.dtype().toScalarType(), /*mask_value=*/-9984);
+    dense_attn_mask_ = layer::AttentionMask(
+        options.device(), options.dtype().toScalarType(), /*mask_value=*/1);
 #endif
     for (int32_t i = 0; i < model_args.n_layers(); i++) {
       auto layer = layer::Qwen3DecoderLayer(context, i);
@@ -186,37 +183,41 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
       const ModelInputParams& params,
       const torch::Tensor& h) {
 #if defined(USE_NPU)
+    if (params.graph.attn_mask.defined()) {
+      return layer::AttentionMetadataBuilder::build(
+          params, model_args_.enable_mla(), params.graph.attn_mask);
+    }
     max_seq_len_ = std::max(params.meta.kv_max_seq_len, max_seq_len_);
-    // NOTE: Enabling chunked prefill here is known to cause garbled output in
-    // this model. TODO: investigate and fix the output corruption.
-    torch::Tensor attn_mask;
-    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
-      const int32_t max_kv_seq = params.meta.kv_max_seq_len;
-      const int32_t num_sequences = params.meta.num_sequences;
-      if (num_sequences > 0) {
-        std::vector<torch::Tensor> req_mask_vec;
-        req_mask_vec.reserve(num_sequences);
+    const bool use_append_mask =
+        params.is_spec_verify || params.meta.batch_forward_type.is_mixed() ||
+        params.meta.batch_forward_type.is_chunked_prefill();
+    if (!use_append_mask) {
+      return layer::AttentionMetadataBuilder::build(
+          params,
+          model_args_.enable_mla(),
+          dense_attn_mask_.get_attn_mask(
+              max_seq_len_, h.dtype().toScalarType(), h.device()));
+    }
+    const int32_t num_sequences = params.meta.num_sequences;
+    if (num_sequences <= 0) {
+      return layer::AttentionMetadataBuilder::build(
+          params,
+          model_args_.enable_mla(),
+          dense_attn_mask_.get_attn_mask(
+              max_seq_len_, h.dtype().toScalarType(), h.device()));
+    }
 
-        for (int32_t j = 0; j < num_sequences; ++j) {
-          auto mask =
-              attn_mask_.gen_append_mask(params.attention.host.q_seq_lens[j],
-                                         params.attention.host.kv_seq_lens[j],
-                                         max_kv_seq,
-                                         h.dtype().toScalarType(),
-                                         h.device());
-          req_mask_vec.emplace_back(mask);
-        }
-        attn_mask = torch::cat(req_mask_vec, 0);
-      } else {
-        attn_mask = attn_mask_.get_attn_mask(
-            max_seq_len_, h.dtype().toScalarType(), h.device());
-      }
-    } else {
-      attn_mask = attn_mask_.get_attn_mask(
-          max_seq_len_, h.dtype().toScalarType(), h.device());
+    std::vector<torch::Tensor> req_mask_vec;
+    req_mask_vec.reserve(num_sequences);
+    const int32_t max_kv_seq = params.meta.kv_max_seq_len;
+    for (int32_t j = 0; j < num_sequences; ++j) {
+      const int32_t q_len = params.attention.host.q_seq_lens[j];
+      const int32_t kv_len = params.attention.host.kv_seq_lens[j];
+      req_mask_vec.emplace_back(attn_mask_.gen_append_mask(
+          q_len, kv_len, max_kv_seq, h.dtype().toScalarType(), h.device()));
     }
     return layer::AttentionMetadataBuilder::build(
-        params, model_args_.enable_mla(), attn_mask);
+        params, model_args_.enable_mla(), torch::cat(req_mask_vec, 0));
 #else
     return layer::AttentionMetadataBuilder::build(params,
                                                   model_args_.enable_mla());
@@ -226,6 +227,7 @@ class QWen3ModelImpl : public LlmModelImplBase<layer::Qwen3DecoderLayer> {
  private:
 #if defined(USE_NPU)
   layer::AttentionMask attn_mask_;
+  layer::AttentionMask dense_attn_mask_;
 #endif
 };
 TORCH_MODULE(QWen3Model);

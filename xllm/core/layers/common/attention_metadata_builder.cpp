@@ -18,6 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include <numeric>
+#include <vector>
 
 #include "attention_metadata.h"
 #include "core/common/global_flags.h"
@@ -54,6 +55,8 @@ AttentionMetadata build_attention_metadata(
                               params.attention.host.kv_seq_lens.end(),
                               int64_t{0});
   }
+  attn_metadata.kv_seq_lens_vec = params.attention.host.kv_seq_lens;
+  attn_metadata.q_seq_lens_vec = params.attention.host.q_seq_lens;
   attn_metadata.slot_mapping = params.attention.device.new_cache_slots;
   attn_metadata.compute_dtype = compute_dtype;
 
@@ -70,7 +73,7 @@ AttentionMetadata build_attention_metadata(
 
 #if defined(USE_CUDA) || defined(USE_NPU)
   // Use explicit attn_mask if provided; otherwise fall back to
-  // graph.attn_mask (e.g. Qwen2_5_VL sets graph.attn_mask for
+  // graph_buffer.attn_mask (e.g. Qwen2_5_VL sets graph_buffer.attn_mask for
   // LongCat text encoding)
   std::optional<torch::Tensor> mask_to_use = attn_mask;
   if (!mask_to_use.has_value() && params.graph.attn_mask.defined()) {
@@ -82,21 +85,41 @@ AttentionMetadata build_attention_metadata(
 #endif
 
 #if defined(USE_NPU)
-  // Determine if we should use ACL graph paged-attention mode:
-  // - global graph is enabled
-  // - this input is a graph capture/replay input
-  // - decode phase uses CustomPagedAttention tiling data
+  attn_metadata.is_spec_verify = params.is_spec_verify;
+  attn_metadata.use_expanded_decode_for_spec_verify_attention =
+      params.graph.use_expanded_decode_for_spec_verify_attention;
+  if (attn_metadata.use_expanded_decode_for_spec_verify_attention) {
+    attn_metadata.expanded_kv_seq_lens = params.graph.expanded_kv_seq_lens;
+    attn_metadata.expanded_block_table = params.graph.expanded_block_tables;
+    attn_metadata.expanded_paged_attention_tiling_data =
+        params.graph.expanded_tiling_data;
+    if (!params.graph.expanded_kv_seq_lens_vec.empty()) {
+      attn_metadata.expanded_kv_seq_lens_host =
+          torch::tensor(params.graph.expanded_kv_seq_lens_vec, torch::kInt);
+    }
+  }
+  // Determine if we should use ACL graph mode:
+  // - --enable_graph=true
+  // - Must be decode phase or spec-verify chunked prefill
+  // - tiling_data must be available
   bool is_decode = !params.meta.batch_forward_type.is_prefill() &&
                    !params.meta.batch_forward_type.is_mixed() &&
                    !params.meta.batch_forward_type.is_chunked_prefill();
-  bool use_acl_graph_paged_attention =
-      ::xllm::ExecutionConfig::get_instance().enable_graph() && is_decode &&
-      params.enable_graph && params.graph.tiling_data.defined();
-  if (use_acl_graph_paged_attention) {
+  bool is_spec_verify_chunked_prefill =
+      params.is_spec_verify &&
+      params.meta.batch_forward_type.is_chunked_prefill();
+  bool use_acl_graph = ::xllm::ExecutionConfig::get_instance().enable_graph() &&
+                       params.enable_graph &&
+                       (is_decode || is_spec_verify_chunked_prefill) &&
+                       params.graph.tiling_data.defined();
+  if (use_acl_graph) {
     // ACL graph mode: use CustomPagedAttention with tiling_data on device
     attn_metadata.paged_attention_tiling_data = params.graph.tiling_data;
   }
-  // Provide host seq_lens for NPU kernels (required by CustomPagedAttention).
+  if (!params.attention.host.q_seq_lens.empty()) {
+    attn_metadata.q_seq_lens_host =
+        torch::tensor(params.attention.host.q_seq_lens, torch::kInt);
+  }
   if (!params.attention.host.kv_seq_lens.empty()) {
     attn_metadata.kv_seq_lens_host =
         torch::tensor(params.attention.host.kv_seq_lens, torch::kInt);
@@ -123,19 +146,19 @@ AttentionMetadata build_attention_metadata(
   }
   if (!is_decode) {
     constexpr int64_t kFiaSplitFuseMaskSize = 2048;
-    auto cpu_options = torch::TensorOptions().dtype(torch::kFloat32);
     torch::Device mask_device = torch::kCPU;
     if (params.attention.device.q_seq_lens.defined()) {
       mask_device = params.attention.device.q_seq_lens.device();
     } else if (params.embedding.input_embedding.defined()) {
       mask_device = params.embedding.input_embedding.device();
     }
+    torch::TensorOptions mask_options =
+        torch::TensorOptions().dtype(torch::kFloat32).device(mask_device);
     attn_metadata.fia_attn_mask =
         torch::triu(torch::ones({kFiaSplitFuseMaskSize, kFiaSplitFuseMaskSize},
-                                cpu_options),
+                                mask_options),
                     1)
             .to(torch::kInt8)
-            .to(mask_device)
             .contiguous();
   }
 #endif
@@ -164,10 +187,19 @@ AttentionMetadata build_attention_metadata(
     attn_metadata.q_seq_lens = params.attention.device.q_seq_lens;
     CHECK(params.attention.device.q_cu_seq_lens.defined())
         << "q_cu_seq_lens must be provided by upstream";
-    auto zero =
-        torch::zeros({1}, params.attention.device.q_cu_seq_lens.options());
-    attn_metadata.q_cu_seq_lens =
-        torch::cat({zero, params.attention.device.q_cu_seq_lens}, 0);
+    const bool q_cu_has_leading_zero =
+        !params.attention.host.q_cu_seq_lens.empty() &&
+        params.attention.host.q_cu_seq_lens.front() == 0;
+    if (params.graph.tiling_data.defined()) {
+      attn_metadata.q_cu_seq_lens = params.attention.device.q_cu_seq_lens;
+    } else if (q_cu_has_leading_zero) {
+      attn_metadata.q_cu_seq_lens = params.attention.device.q_cu_seq_lens;
+    } else {
+      auto zero =
+          torch::zeros({1}, params.attention.device.q_cu_seq_lens.options());
+      attn_metadata.q_cu_seq_lens =
+          torch::cat({zero, params.attention.device.q_cu_seq_lens}, 0);
+    }
   }
 #endif
 

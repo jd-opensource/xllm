@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "attention.h"
 
+#include "core/framework/config/speculative_config.h"
 #include "kernels/npu/npu_ops_api.h"
 #include "kernels/ops_api.h"
 
@@ -65,7 +66,9 @@ std::tuple<torch::Tensor, std::optional<torch::Tensor>> AttentionImpl::forward(
   reshape_paged_cache_params.slot_mapping = attn_metadata.slot_mapping;
   xllm::kernel::reshape_paged_cache(reshape_paged_cache_params);
 
-  if (only_prefill) {
+  if (attn_metadata.use_expanded_decode_for_spec_verify_attention) {
+    decoder_forward(query, output, k_cache, v_cache, attn_metadata);
+  } else if (only_prefill) {
     prefill_forward(query, key, value, output, k_cache, v_cache, attn_metadata);
   } else {
     decoder_forward(query, output, k_cache, v_cache, attn_metadata);
@@ -107,28 +110,48 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
         "TND");
     output.copy_(std::get<0>(fia_result).view_as(output));
   } else if (attn_metadata.is_chunked_prefill) {
-    torch::Tensor k = k_cache.view({k_cache.size(0), k_cache.size(1), -1});
-    torch::Tensor v = v_cache.value().view(
-        {v_cache.value().size(0), v_cache.value().size(1), -1});
-    auto fia_result = xllm::kernel::npu::npu_fused_infer_attention(
-        query,
-        k,
-        v,
-        attn_metadata.fia_attn_mask.defined()
-            ? std::make_optional(attn_metadata.fia_attn_mask)
-            : std::nullopt,
-        attn_metadata.block_table.defined()
-            ? std::make_optional(attn_metadata.block_table)
-            : std::nullopt,
-        attn_metadata.q_cu_seq_lens_host_vec,
-        attn_metadata.kv_seq_lens_host_vec,
-        num_heads_,
-        num_kv_heads_,
-        scale_,
-        /*block_size=*/k_cache.size(1),
-        /*sparse_mode=*/3,
-        "TND");
-    output.copy_(std::get<0>(fia_result).view_as(output));
+    const bool speculative_enabled =
+        ::xllm::SpeculativeConfig::get_instance().num_speculative_tokens() > 0;
+    if (speculative_enabled) {
+      torch::Tensor kv_seq_lens = attn_metadata.kv_seq_lens_host.defined()
+                                      ? attn_metadata.kv_seq_lens_host
+                                      : attn_metadata.kv_seq_lens;
+      torch::Tensor q_seq_lens = attn_metadata.q_seq_lens_host.defined()
+                                     ? attn_metadata.q_seq_lens_host
+                                     : attn_metadata.q_seq_lens;
+      xllm::kernel::npu::batch_chunked_paged_prefill(query,
+                                                     k_cache,
+                                                     v_cache.value(),
+                                                     scale_,
+                                                     attn_metadata.block_table,
+                                                     kv_seq_lens,
+                                                     attn_metadata.attn_mask,
+                                                     q_seq_lens,
+                                                     output);
+    } else {
+      torch::Tensor k = k_cache.view({k_cache.size(0), k_cache.size(1), -1});
+      torch::Tensor v = v_cache.value().view(
+          {v_cache.value().size(0), v_cache.value().size(1), -1});
+      auto fia_result = xllm::kernel::npu::npu_fused_infer_attention(
+          query,
+          k,
+          v,
+          attn_metadata.fia_attn_mask.defined()
+              ? std::make_optional(attn_metadata.fia_attn_mask)
+              : std::nullopt,
+          attn_metadata.block_table.defined()
+              ? std::make_optional(attn_metadata.block_table)
+              : std::nullopt,
+          attn_metadata.q_cu_seq_lens_host_vec,
+          attn_metadata.kv_seq_lens_host_vec,
+          num_heads_,
+          num_kv_heads_,
+          scale_,
+          /*block_size=*/k_cache.size(1),
+          /*sparse_mode=*/3,
+          "TND");
+      output.copy_(std::get<0>(fia_result).view_as(output));
+    }
   }
 }
 
@@ -141,32 +164,41 @@ void AttentionImpl::decoder_forward(torch::Tensor& query,
   output = output.view({-1, 1, num_heads_, head_size_});
 
   torch::Tensor kv_seq_lens;
-  if (attn_metadata.kv_seq_lens_host.defined()) {
+  torch::Tensor block_table = attn_metadata.block_table;
+  torch::Tensor tiling_data = attn_metadata.paged_attention_tiling_data;
+  if (attn_metadata.use_expanded_decode_for_spec_verify_attention) {
+    block_table = attn_metadata.expanded_block_table;
+    tiling_data = attn_metadata.expanded_paged_attention_tiling_data;
+    if (attn_metadata.expanded_kv_seq_lens_host.defined()) {
+      kv_seq_lens = attn_metadata.expanded_kv_seq_lens_host;
+    } else {
+      kv_seq_lens = attn_metadata.expanded_kv_seq_lens;
+    }
+  } else if (attn_metadata.kv_seq_lens_host.defined()) {
     kv_seq_lens = attn_metadata.kv_seq_lens_host;
   } else {
     // Fallback if host tensor isn't prepared.
     kv_seq_lens = attn_metadata.kv_seq_lens;
   }
 
-  if (attn_metadata.paged_attention_tiling_data.defined()) {
+  if (tiling_data.defined()) {
     // Use CustomPagedAttention for ACL graph mode to avoid .to(kCPU) operations
 
-    xllm::kernel::npu::batch_decode_acl_graph(
-        query,
-        k_cache,
-        v_cache.value_or(torch::Tensor()),
-        scale_,
-        attn_metadata.block_table,
-        kv_seq_lens,
-        attn_metadata.paged_attention_tiling_data,
-        output);
+    xllm::kernel::npu::batch_decode_acl_graph(query,
+                                              k_cache,
+                                              v_cache.value_or(torch::Tensor()),
+                                              scale_,
+                                              block_table,
+                                              kv_seq_lens,
+                                              tiling_data,
+                                              output);
   } else {
     // Standard PagedAttention path
     xllm::kernel::npu::batch_decode(query,
                                     k_cache,
                                     v_cache.value_or(torch::Tensor()),
                                     scale_,
-                                    attn_metadata.block_table,
+                                    block_table,
                                     kv_seq_lens,
                                     output);
   }

@@ -128,23 +128,63 @@ class ScopedAtenLoadThreads {
 
 #if defined(USE_NPU)
 void prepare_input_params_for_linear_attention(ModelInputParams& input_params) {
-  int64_t batch_size = input_params.attention.device.block_tables.size(0);
+  const std::vector<int32_t>& host_q_seq_lens =
+      input_params.attention.host.q_seq_lens;
+  const bool has_leading_zero =
+      !host_q_seq_lens.empty() && host_q_seq_lens.front() == 0 &&
+      host_q_seq_lens.size() ==
+          static_cast<size_t>(input_params.meta.num_sequences + 1);
+  int64_t batch_size = static_cast<int64_t>(
+      has_leading_zero ? host_q_seq_lens.size() - 1 : host_q_seq_lens.size());
+  if (batch_size == 0) {
+    batch_size = input_params.meta.num_sequences;
+  }
+  if (batch_size == 0 && input_params.attention.device.block_tables.defined()) {
+    batch_size = input_params.attention.device.block_tables.size(0);
+  }
   input_params.parallel.query_start_loc.resize(batch_size + 1, 0);
   for (int64_t i = 0; i < batch_size; ++i) {
     int64_t seq_len =
-        static_cast<int64_t>(input_params.attention.host.q_seq_lens[i]);
+        has_leading_zero
+            ? static_cast<int64_t>(host_q_seq_lens[static_cast<size_t>(i + 1)] -
+                                   host_q_seq_lens[static_cast<size_t>(i)])
+            : static_cast<int64_t>(host_q_seq_lens[static_cast<size_t>(i)]);
     input_params.parallel.query_start_loc[i + 1] =
         input_params.parallel.query_start_loc[i] + seq_len;
   }
 
   torch::Tensor has_initial_state_tensor =
       input_params.attention.device.kv_cache_tokens_nums > 0;
-  torch::Tensor has_initial_state_int64 =
-      has_initial_state_tensor.contiguous().to(torch::kCPU).to(torch::kInt64);
-  input_params.parallel.has_initial_state =
-      std::vector<int64_t>(has_initial_state_int64.data_ptr<int64_t>(),
-                           has_initial_state_int64.data_ptr<int64_t>() +
-                               has_initial_state_int64.size(0));
+  torch::Tensor has_initial_state_int64 = has_initial_state_tensor.contiguous()
+                                              .view({-1})
+                                              .to(torch::kCPU)
+                                              .to(torch::kInt64);
+  const int64_t has_initial_state_size = has_initial_state_int64.size(0);
+  CHECK_GT(has_initial_state_size, 0)
+      << "kv_cache_tokens_nums must not be empty for linear attention";
+  CHECK(batch_size == has_initial_state_size ||
+        batch_size % has_initial_state_size == 0)
+      << "kv_cache_tokens_nums size must match or evenly divide active batch "
+      << "size, kv_cache_tokens_nums_size=" << has_initial_state_size
+      << ", batch_size=" << batch_size;
+  if (batch_size == has_initial_state_size) {
+    input_params.parallel.has_initial_state = std::vector<int64_t>(
+        has_initial_state_int64.data_ptr<int64_t>(),
+        has_initial_state_int64.data_ptr<int64_t>() + batch_size);
+    return;
+  }
+
+  const int64_t repeat_count = batch_size / has_initial_state_size;
+  input_params.parallel.has_initial_state.clear();
+  input_params.parallel.has_initial_state.reserve(batch_size);
+  const int64_t* has_initial_state_ptr =
+      has_initial_state_int64.data_ptr<int64_t>();
+  for (int64_t i = 0; i < has_initial_state_size; ++i) {
+    for (int64_t repeat_idx = 0; repeat_idx < repeat_count; ++repeat_idx) {
+      input_params.parallel.has_initial_state.push_back(
+          has_initial_state_ptr[i]);
+    }
+  }
 }
 #endif
 

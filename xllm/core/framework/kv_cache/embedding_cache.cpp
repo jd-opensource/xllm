@@ -110,6 +110,8 @@ void EmbeddingCache::write_target_context(
   for (int32_t i = 0; i < static_cast<int32_t>(ids.size()); ++i) {
     int32_t accepted_len = 0;
     int32_t last_token_id = -1;
+    int32_t correction_token = -1;
+    int32_t correction_offset = -1;
     const int32_t token_width =
         static_cast<int32_t>(accepted_tokens_cpu.size(1));
     for (int32_t j = 0; j < token_width; ++j) {
@@ -120,6 +122,8 @@ void EmbeddingCache::write_target_context(
       CHECK_LE(token, static_cast<int64_t>(std::numeric_limits<int32_t>::max()))
           << "accepted token overflow";
       last_token_id = static_cast<int32_t>(token);
+      correction_token = static_cast<int32_t>(token);
+      correction_offset = j;
       ++accepted_len;
     }
     CHECK_GT(accepted_len, 0)
@@ -138,6 +142,8 @@ void EmbeddingCache::write_target_context(
     state.all_draft_accepted = accepted_len == num_speculative_tokens + 1;
     state.token_id = last_token_id;
     state.position_offset = last_idx;
+    state.correction_token_id = correction_token;
+    state.correction_position_offset = correction_offset;
     state.embedding = accepted_embeddings[i][last_idx].detach().clone();
     if (last_idx > 0) {
       const int64_t prev_token =
@@ -198,6 +204,20 @@ std::vector<EmbeddingCache::DecodeState> EmbeddingCache::read_decode_states(
     states.emplace_back(std::move(state));
   }
   return states;
+}
+
+std::vector<int32_t> EmbeddingCache::read_accepted_prefix_lengths(
+    const std::vector<int32_t>& ids) const {
+  CHECK(!ids.empty()) << "decode ids should not be empty";
+  std::vector<int32_t> accepted_prefix_lengths;
+  accepted_prefix_lengths.reserve(ids.size());
+  for (int32_t id : ids) {
+    const DecodeState& state = get_tail(id);
+    CHECK_GE(state.correction_token_id, 0)
+        << "decode entry missing correction token id";
+    accepted_prefix_lengths.emplace_back(state.correction_position_offset + 1);
+  }
+  return accepted_prefix_lengths;
 }
 
 void EmbeddingCache::clear(const std::vector<int32_t>& ids) {

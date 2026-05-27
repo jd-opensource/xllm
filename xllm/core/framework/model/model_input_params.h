@@ -848,11 +848,22 @@ struct ExpertInput {
 struct GraphInput {
   torch::Tensor attn_mask;
   torch::Tensor tiling_data;
+  bool use_expanded_decode_for_spec_verify_attention = false;
+  torch::Tensor expanded_kv_seq_lens;
+  torch::Tensor expanded_block_tables;
+  torch::Tensor expanded_tiling_data;
+  std::vector<int32_t> expanded_kv_seq_lens_vec;
 
   GraphInput to(const torch::Device& device) const {
     GraphInput out;
     out.attn_mask = safe_to(attn_mask, device, true);
     out.tiling_data = safe_to(tiling_data, device, true);
+    out.use_expanded_decode_for_spec_verify_attention =
+        use_expanded_decode_for_spec_verify_attention;
+    out.expanded_kv_seq_lens = safe_to(expanded_kv_seq_lens, device, true);
+    out.expanded_block_tables = safe_to(expanded_block_tables, device, true);
+    out.expanded_tiling_data = safe_to(expanded_tiling_data, device, true);
+    out.expanded_kv_seq_lens_vec = expanded_kv_seq_lens_vec;
     return out;
   }
 };
@@ -869,11 +880,19 @@ struct ModelInputParams {
     params.expert = expert.to(device);
     params.graph = graph.to(device);
     params.dit_forward_input = dit_forward_input.to(device);
+    params.is_spec_verify = is_spec_verify;
+    params.num_accepted_tokens = safe_to(num_accepted_tokens, device, true);
     for (const auto& table : multi_block_tables) {
       params.multi_block_tables.push_back(
           safe_to(table, table.options().device(torch::kCPU), true));
     }
     params.mtp_shifted_token_ids = safe_to(mtp_shifted_token_ids, device, true);
+    if (!params.embedding.linear_state_indices.defined() &&
+        !params.embedding.linear_state_ids.empty()) {
+      params.embedding.linear_state_indices =
+          torch::tensor(params.embedding.linear_state_ids, torch::kInt)
+              .to(device);
+    }
 
     // rec_params device conversion for both OneRec and LLM-Rec variants
     if (const auto* onerec_xattn = onerec_xattention_params()) {
@@ -913,6 +932,10 @@ struct ModelInputParams {
     LOG(INFO) << "ModelInputParams: dp_global_token_nums is "
               << parallel.dp_global_token_nums
               << ", dp_is_decode: " << parallel.dp_is_decode;
+    LOG(INFO) << "ModelInputParams: is_spec_verify is " << is_spec_verify;
+    print_tensor(num_accepted_tokens,
+                 "ModelInputParams: num_accepted_tokens",
+                 /*max_elements=*/4);
 
     if (const auto* onerec_xattn = onerec_xattention_params()) {
       LOG(INFO) << "ModelInputParams: has onerec_xattention_params";
@@ -982,6 +1005,8 @@ struct ModelInputParams {
 
   // Shifted target token ids for MTP training/evaluation paths.
   torch::Tensor mtp_shifted_token_ids;
+  bool is_spec_verify = false;
+  torch::Tensor num_accepted_tokens;
 
   RecModelInputParams rec_params;
 

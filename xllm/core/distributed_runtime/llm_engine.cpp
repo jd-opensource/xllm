@@ -443,6 +443,8 @@ KVCacheCapacity LLMEngine::estimate_kv_cache_capacity() {
   estimate_options.n_local_linear_v_heads = n_local_linear_v_heads_;
   estimate_options.max_seqs_per_batch =
       static_cast<int64_t>(options_.max_seqs_per_batch());
+  estimate_options.num_speculative_tokens =
+      static_cast<int64_t>(options_.num_speculative_tokens());
   estimate_options.is_draft_engine = options_.is_draft_engine();
   estimate_options.enable_prefix_cache =
       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();

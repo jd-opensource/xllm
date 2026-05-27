@@ -166,6 +166,14 @@ class GraphPersistentParam {
     }
     return persistent_linear_state_indices_;
   }
+  torch::Tensor persistent_num_accepted_tokens(
+      uint32_t actual_batch_size = 0) const {
+    if (actual_batch_size > 0) {
+      return persistent_num_accepted_tokens_.slice(
+          /*dim=*/0, /*start=*/0, /*end=*/actual_batch_size);
+    }
+    return persistent_num_accepted_tokens_;
+  }
   torch::Tensor aux_hidden_states(uint32_t actual_tokens = 0) const {
     if (!aux_hidden_states_.defined() || aux_hidden_states_.numel() == 0) {
       return aux_hidden_states_;
@@ -185,7 +193,7 @@ class GraphPersistentParam {
            tiling_data_.numel() > 0;
   }
 
-  // Initialize ATB context and custom paged attention operation.
+  // Initialize tiling tensor
   void initialize_paged_attention_plan_context(const torch::Device& device);
 
   // Update attention mask efficiently from input parameters
@@ -198,6 +206,13 @@ class GraphPersistentParam {
                                    const torch::Tensor& block_tables,
                                    const ModelInputParams& input_params,
                                    aclrtStream stream);
+
+  std::vector<int32_t> update_expanded_spec_decode_attention(
+      const ModelInputParams& input_params,
+      uint32_t actual_num_tokens,
+      uint32_t padded_num_tokens,
+      int64_t actual_batch_size);
+
   const ModelArgs& args_;
   const torch::Device& device_;
   const runtime::Options& options_;
@@ -207,6 +222,9 @@ class GraphPersistentParam {
   torch::Tensor persistent_positions_;
   torch::Tensor persistent_new_cache_slots_;
   torch::Tensor persistent_block_tables_;
+  torch::Tensor persistent_new_cache_slots_default_;
+  torch::Tensor persistent_block_tables_default_;
+  torch::Tensor persistent_expanded_block_tables_;
   // When q_seq_lens contains values greater than 1(chunked prefill mode or
   // speculative decode mode), the mask needs to be passed to the attention
   // operation
@@ -217,6 +235,9 @@ class GraphPersistentParam {
 
   torch::Tensor q_seq_lens_;
   torch::Tensor kv_seq_lens_;
+  torch::Tensor q_seq_lens_default_;
+  torch::Tensor kv_seq_lens_default_;
+  torch::Tensor expanded_kv_seq_lens_;
 
   // for deepseekv3.2
   torch::Tensor q_cu_seq_lens_;
@@ -225,6 +246,7 @@ class GraphPersistentParam {
   // for mtp model
   torch::Tensor persistent_embedding_;
   torch::Tensor persistent_linear_state_indices_;
+  torch::Tensor persistent_num_accepted_tokens_;
 
   // for mrope (multimodal rotary position embedding)
   bool use_mrope_ = false;
@@ -341,8 +363,8 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   torch::Device device_;
   runtime::Options options_;
 
-  // Lazy-loaded ACL graphs for different num_tokens
-  absl::flat_hash_map<uint32_t, std::unique_ptr<AclGraph>> graphs_;
+  // Lazy-loaded ACL graphs for different num_tokens.
+  absl::flat_hash_map<uint64_t, std::unique_ptr<AclGraph>> graphs_;
 
   // Persistent parameters shared across all AclGraph instances
   std::unique_ptr<GraphPersistentParam> persistent_param_;
@@ -351,6 +373,9 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   // For num_tokens < 8: use 1, 2, 4, 8
   // For num_tokens >= 8: use multiples of 8
   uint32_t get_bucket_num_tokens(uint32_t num_tokens) const;
+
+  uint64_t get_graph_key(uint32_t bucket_num_tokens,
+                         const ModelInputParams& params) const;
 };
 REGISTER_EXECUTOR("npu", AclGraphExecutorImpl);
 }  // namespace xllm::npu

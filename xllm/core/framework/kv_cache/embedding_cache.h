@@ -92,6 +92,8 @@ class EmbeddingCache final {
   std::vector<DecodeState> read_decode_states(
       const std::vector<int32_t>& embedding_ids,
       const std::vector<std::string>& request_ids) const;
+  std::vector<int32_t> read_accepted_prefix_lengths(
+      const std::vector<int32_t>& embedding_ids) const;
 
   void clear(const std::vector<int32_t>& embedding_ids);
 
