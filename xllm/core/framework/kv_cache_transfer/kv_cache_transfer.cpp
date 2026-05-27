@@ -174,7 +174,7 @@ void KVCacheTransfer::merge_kv_blocks(
   // skip all requests for those workers.
   int32_t src_rank = parallel_args.rank();
   int32_t src_dp_size = parallel_args.dp_size();
-  int32_t src_kv_split_size = parallel_args.kv_split_size();
+  int32_t src_kv_split_size = parallel_args.kv_split_size_effective();
   int32_t src_world_size = parallel_args.world_size();
   int32_t src_tp_size = src_world_size / src_dp_size / src_kv_split_size;
   int32_t src_dp_local_tp_rank = src_rank % src_tp_size;
