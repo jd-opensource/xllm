@@ -22,7 +22,7 @@ limitations under the License.
 
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
-#include "framework/request/mm_data.h"
+#include "framework/multimodal/mm_data.h"
 #include "framework/request/sequence.h"
 #include "framework/request/sequences_group.h"
 #include "rec_batch_input_builder.h"

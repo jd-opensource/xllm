@@ -19,7 +19,7 @@ limitations under the License.
 
 #include <string>
 
-#include "core/framework/request/mm_data.h"
+#include "core/framework/multimodal/mm_data.h"
 
 namespace xllm {
 

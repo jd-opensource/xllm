@@ -20,7 +20,6 @@ limitations under the License.
 
 #include "core/common/message.h"
 #include "core/common/types.h"
-#include "core/framework/request/request.h"
 #include "mm_type.h"
 
 namespace xllm {

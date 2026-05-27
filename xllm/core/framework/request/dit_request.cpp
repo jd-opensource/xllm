@@ -27,7 +27,7 @@ limitations under the License.
 #include <vector>
 
 #include "api_service/call.h"
-#include "mm_codec.h"
+#include "core/framework/multimodal/mm_codec.h"
 
 namespace xllm {
 namespace {

@@ -16,6 +16,8 @@ limitations under the License.
 
 #pragma once
 
+#include <torch/torch.h>
+
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -422,4 +424,10 @@ inline constexpr const char* LLM_REC_INPUT_TOKENS = "llm_rec_input_tokens";
 inline constexpr const char* LLM_REC_INPUT_INDICES = "llm_rec_input_indices";
 inline constexpr const char* LLM_REC_INPUT_EMBEDDING =
     "llm_rec_input_embedding";
+
+struct EmbeddingOutput {
+  torch::Tensor embedding;
+  std::unordered_map<std::string, torch::Tensor> metadata;
+};
+
 }  // namespace xllm

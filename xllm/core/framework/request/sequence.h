@@ -27,13 +27,13 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/types.h"
+#include "core/framework/multimodal/mm_data.h"
 #include "core/framework/sampling/sampling_params.h"
 #include "core/framework/tokenizer/tokenizer.h"
 #include "core/util/slice.h"
 #include "finish_reason.h"
 #include "framework/block/block.h"
 #include "incremental_decoder.h"
-#include "mm_data.h"
 #include "rec_type.h"
 #include "request_output.h"
 #include "sample_slot.h"

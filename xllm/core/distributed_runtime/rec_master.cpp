@@ -30,7 +30,7 @@ limitations under the License.
 #include "common/macros.h"
 #include "common/metrics.h"
 #include "common/types.h"
-#include "framework/request/mm_data.h"
+#include "framework/multimodal/mm_data.h"
 #include "models/model_registry.h"
 #include "rec_engine.h"
 #include "runtime/xservice_client.h"

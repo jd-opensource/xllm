@@ -20,7 +20,7 @@ limitations under the License.
 #include <utility>
 
 #include "core/framework/model/model_args.h"
-#include "core/framework/request/mm_data.h"
+#include "core/framework/multimodal/mm_data.h"
 #include "processors/input_processor.h"
 
 namespace xllm {
