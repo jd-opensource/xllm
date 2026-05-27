@@ -552,12 +552,26 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
     std::vector<int64_t> linear_state_indices_vec(
         input_params.linear_state_ids.begin(),
         input_params.linear_state_ids.end());
+    const std::vector<int64_t>* qsl_ptr = &input_params.query_start_loc;
+    std::vector<int64_t> padded_query_start_loc;
+    const int64_t actual_qsl_size =
+        static_cast<int64_t>(input_params.query_start_loc.size());
+    const int64_t target_qsl_size = batch_size + 1;
+    if (actual_qsl_size < target_qsl_size) {
+      padded_query_start_loc = input_params.query_start_loc;
+      const int64_t last_val = padded_query_start_loc.back();
+      for (int64_t i = actual_qsl_size; i < target_qsl_size; ++i) {
+        padded_query_start_loc.push_back(last_val + (i - actual_qsl_size + 1));
+      }
+      qsl_ptr = &padded_query_start_loc;
+    }
+
     mixed_qkv = xllm::kernel::causal_conv1d(
         mixed_qkv,
         conv_weight,
         conv_cache,
         std::optional<torch::Tensor>(),  // bias (no bias for qwen3)
-        torch::IntArrayRef(input_params.query_start_loc),
+        torch::IntArrayRef(*qsl_ptr),
         torch::IntArrayRef(linear_state_indices_vec),
         has_initial_state,
         num_accepted_tokens_opt,
