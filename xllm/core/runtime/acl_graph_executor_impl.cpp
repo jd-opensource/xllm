@@ -24,7 +24,6 @@ limitations under the License.
 
 #include <algorithm>
 #include <numeric>
-#include <tuple>
 
 #include "core/common/global_flags.h"
 #include "core/framework/config/execution_config.h"
@@ -81,9 +80,6 @@ int64_t get_decode_graph_capacity(const runtime::Options& options) {
 }
 
 int64_t infer_actual_batch_size(const ModelInputParams& params) {
-  if (params.meta.actual_num_sequences > 0) {
-    return params.meta.actual_num_sequences;
-  }
   if (params.meta.num_sequences > 0) {
     return params.meta.num_sequences;
   }
