@@ -277,6 +277,9 @@ void WorkerServer::create_spawn_server(int32_t local_rank,
   const char* npu_kernel_backend_ptr = npu_kernel_backend_str.c_str();
   const char* rank_tablefile_ptr =
       ::xllm::EPLBConfig::get_instance().rank_tablefile().c_str();
+  std::string max_encoder_cache_size_str =
+      std::to_string(options.max_encoder_cache_size());
+  const char* max_encoder_cache_size_ptr = max_encoder_cache_size_str.c_str();
   const char* worker_type_ptr = worker_type.to_string();
   std::string spawn_worker_bin_path =
       options.spawn_worker_path() + "/spawn_worker";
@@ -308,6 +311,7 @@ void WorkerServer::create_spawn_server(int32_t local_rank,
                         enable_graph_mode_decode_no_padding_ptr,
                         enable_prefill_piecewise_graph_ptr,
                         max_tokens_for_graph_mode_ptr,
+                        max_encoder_cache_size_ptr,
                         nullptr};
   pid_t pid;
   int status = posix_spawnp(

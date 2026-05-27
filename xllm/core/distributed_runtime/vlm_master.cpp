@@ -17,8 +17,10 @@ limitations under the License.
 
 #include <glog/logging.h>
 #include <pybind11/pybind11.h>
+#include <signal.h>
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -504,6 +506,36 @@ bool VLMMaster::build_mm_data_from_image_urls(
   input_processor_->hash_mm_items(mm_inputs, mm_data);
 
   return true;
+}
+
+volatile bool VLMAssistantMaster::running_ = false;
+
+VLMAssistantMaster::VLMAssistantMaster(const Options& options)
+    : Master(options, EngineType::VLM) {
+  auto master_node_addr = options_.master_node_addr().value_or("");
+  if (master_node_addr.empty()) {
+    LOG(FATAL)
+        << "MultiNodeEngine required master_node_addr, current value is empty.";
+    return;
+  }
+  running_ = true;
+}
+
+VLMAssistantMaster::~VLMAssistantMaster() {
+  if (loop_thread_.joinable()) {
+    loop_thread_.join();
+  }
+}
+
+void VLMAssistantMaster::run() {
+  signal(SIGINT, VLMAssistantMaster::handle_signal);
+  signal(SIGTERM, VLMAssistantMaster::handle_signal);
+
+  loop_thread_ = std::thread([this]() {
+    while (running_) {
+      std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+  });
 }
 
 }  // namespace xllm

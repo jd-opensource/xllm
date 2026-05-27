@@ -51,6 +51,8 @@ DECLARE_string(kv_cache_dtype);
 
 DECLARE_bool(enable_prefix_cache);
 
+DECLARE_int64(max_encoder_cache_size);
+
 DECLARE_uint32(xxh3_128bits_seed);
 
 DECLARE_int32(max_tokens_per_batch);

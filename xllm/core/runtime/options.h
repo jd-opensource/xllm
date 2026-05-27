@@ -56,6 +56,9 @@ struct Options {
   // enable prefix cache
   PROPERTY(bool, enable_prefix_cache) = true;
 
+  // maximum encoder cache size in MB (0 disables encoder cache)
+  PROPERTY(int64_t, max_encoder_cache_size) = 0;
+
   // number of decoding tokens per sequence
   // in speculative decoding, it is the number of speculative tokens + 1
   PROPERTY(int64_t, num_decoding_tokens) = 1;

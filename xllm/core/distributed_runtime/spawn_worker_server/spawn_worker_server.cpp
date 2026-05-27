@@ -81,7 +81,8 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
                                      bool enable_graph,
                                      bool enable_graph_mode_decode_no_padding,
                                      bool enable_prefill_piecewise_graph,
-                                     int32_t max_tokens_for_graph_mode) {
+                                     int32_t max_tokens_for_graph_mode,
+                                     int64_t max_encoder_cache_size) {
   // TODO: pass whole xllm::runtime::Options here from main process.
   xllm::runtime::Options runner_options;
   const std::string backend = get_backend_from_worker_type(worker_type);
@@ -109,7 +110,8 @@ SpawnWorkerServer::SpawnWorkerServer(const std::string& master_node_addr,
       .enable_graph_mode_decode_no_padding(enable_graph_mode_decode_no_padding)
       .enable_prefill_piecewise_graph(enable_prefill_piecewise_graph)
       .max_tokens_for_graph_mode(max_tokens_for_graph_mode)
-      .task_type(task_type);
+      .task_type(task_type)
+      .max_encoder_cache_size(max_encoder_cache_size);
   SchedulerConfig::get_instance()
       .max_tokens_per_batch(max_tokens_per_batch)
       .max_seqs_per_batch(max_seqs_per_batch)

@@ -76,6 +76,7 @@ cc_library(
     :platform
     :model_context
     :request
+    :encoder_cache
     :state_dict
     :dit_cache
     :model

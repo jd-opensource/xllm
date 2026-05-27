@@ -48,6 +48,7 @@ class ModelConfig final {
          "task",
          "devices",
          "limit_image_per_prompt",
+         "max_encoder_cache_size",
          "reasoning_parser",
          "tool_call_parser",
          "enable_qwen3_reranker",
@@ -68,7 +69,9 @@ class ModelConfig final {
 
   PROPERTY(std::string, devices) = "npu:0";
 
-  PROPERTY(int32_t, limit_image_per_prompt) = 4;
+  PROPERTY(int32_t, limit_image_per_prompt) = 8;
+
+  PROPERTY(int64_t, max_encoder_cache_size) = 0;
 
   PROPERTY(std::string, reasoning_parser);
 

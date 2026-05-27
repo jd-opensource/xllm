@@ -129,4 +129,24 @@ class UpdateMMItemScheduleStateVisitor : public MMDataItem::IVisitor {
   int32_t seq_idx_ = 0;
 };
 
+class EncoderCache;
+
+class EncoderCacheLookupVisitor : public MMDataItem::IVisitor {
+ public:
+  explicit EncoderCacheLookupVisitor(EncoderCache* cache);
+  bool visit(MMDataItem& item) override;
+
+ private:
+  EncoderCache* cache_;
+};
+
+class EncoderCacheInsertVisitor : public MMDataItem::IVisitor {
+ public:
+  explicit EncoderCacheInsertVisitor(EncoderCache* cache);
+  bool visit(MMDataItem& item) override;
+
+ private:
+  EncoderCache* cache_;
+};
+
 }  // namespace xllm
