@@ -67,8 +67,19 @@ ENABLE_DECODE_RESPONSE_TO_SERVICE=true ./xllm_master_serving --etcd_addr="127.0.
     - `etcd_addr`需与`xllm_service`的`etcd_addr`相同
 
 !!! warning "注意事项"
-    PD分离目前不支持开启prefix cache及chunked prefill功能，需要通过以下参数关闭
+    PD分离的Prefill实例与chunked prefill的Prefill实例目前不支持prefix cache，需要通过以下参数关闭
     ``` shell
     --enable_prefix_cache=false
-    --enable_chunked_prefill=false
     ```
+
+!!! tip "Decode实例开启prefix cache（推荐）"
+    从xLLM v0.x开始，Decode实例支持开启prefix cache。**当请求带 `best_of > 1` 时（best-of-N采样），Decode实例必须开启prefix cache**，否则请求会被拒绝。开启后扩展出的候选序列会通过prefix cache复用第一条序列的prompt KV，避免重复算力与显存浪费。
+    ``` shell
+    --enable_prefix_cache=true
+    ```
+
+!!! info "PD分离下的best_of_n支持"
+    - **必要条件**：Decode实例 `--enable_prefix_cache=true`；任意请求 `best_of > 1` + Decode `enable_prefix_cache=false` 会被拒绝并返回错误。
+    - **流程**：Prefill实例只对第一条序列做prefill并把KV发到Decode；Decode实例在收到first token后通过prefix cache将prompt KV共享给扩展出的 `best_of-1` 条候选序列。
+    - **MLU平台**：暂不支持 PD + best_of_n（受 `normalize_mlu` 限制）。
+    - **`best_of != n`时**：流式输出仍会被强制关闭（与non-PD行为一致）。

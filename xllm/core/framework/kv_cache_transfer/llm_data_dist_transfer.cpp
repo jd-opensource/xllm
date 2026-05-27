@@ -57,28 +57,31 @@ LlmDataDistTransfer::LlmDataDistTransfer(const uint16_t listen_port,
       enable_lighting_indexer_(enable_lighting_indexer),
       model_type_(model_type),
       KVCacheTransfer() {
-  LlmRole role;
   if (instance_role == InstanceRole::PREFILL) {
     LOG(INFO) << "Create LlmDataDistTransfer for prefill instance.";
-    role = LlmRole::kPrompt;
+    role_ = LlmRole::kPrompt;
   } else if (instance_role == InstanceRole::DECODE) {
     LOG(INFO) << "Create LlmDataDistTransfer for decode instance.";
-    role = LlmRole::kDecoder;
+    role_ = LlmRole::kDecoder;
   } else {
     LOG(INFO) << "Create LlmDataDistTransfer for mix instance.";
-    role = LlmRole::kMix;
+    role_ = LlmRole::kMix;
   }
   host_ip_ = net::get_local_ip_addr();
+  CHECK(!host_ip_.empty()) << "Failed to get NPU/host IP for LlmDataDist.";
   cluster_id_ = net::convert_ip_port_to_uint64(host_ip_, listen_port);
-  llm_data_dist_ = std::make_shared<LlmDataDist>(cluster_id_, role);
+  llm_data_dist_ = std::make_shared<LlmDataDist>(cluster_id_, role_);
 }
 
 void LlmDataDistTransfer::initialize(int32_t device_id) {
   std::map<AscendString, AscendString> options;
   options[OPTION_DEVICE_ID] = std::to_string(device_id).c_str();
 
-  std::string local_ip_info = host_ip_ + ":" + std::to_string(listen_port_);
-  options[OPTION_LISTEN_IP_INFO] = local_ip_info.c_str();
+  // Prompt(Prefill) must publish listen endpoint; Decoder only needs device_id.
+  if (role_ == LlmRole::kPrompt) {
+    std::string local_ip_info = host_ip_ + ":" + std::to_string(listen_port_);
+    options[OPTION_LISTEN_IP_INFO] = local_ip_info.c_str();
+  }
 
   auto ret = llm_data_dist_->Initialize(options);
   CHECK(ret == LLM_SUCCESS)

@@ -184,12 +184,11 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
   while (request_queue_.read(request)) {
     CHECK(request);
 
-    // expand sequences to the target number if prefix cache is disabled.
-    if (!enable_prefix_cache_) {
-      // expand sequences to the target number
-      request->expand_sequences(false);
-    }
-
+    // In disagg PD, expansion of best_of_n sequences is always handled
+    // on the DECODE instance (where prefix cache lets seq[1..best_of-1]
+    // reuse seq[0]'s prompt KV). On the PREFILL/MIX instance we keep a
+    // single sequence -- expanding here would waste N x prefill compute
+    // on candidates that are never shipped to the DECODE instance.
     if (request->sequences()[0]->kv_state().kv_cache_tokens_num() == 0) {
       if (request->offline()) {
         int current_offline_decode_bs =

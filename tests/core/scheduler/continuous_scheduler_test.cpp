@@ -217,6 +217,39 @@ std::shared_ptr<Request> generate_request_with_prompt_tokens(
   return std::make_shared<Request>("1", "1", "1", std::move(req_state), "1");
 }
 
+std::shared_ptr<Request> generate_request_with_best_of(
+    const std::vector<int32_t>& prompt_token_ids,
+    int32_t max_tokens,
+    int32_t max_context_len,
+    size_t n,
+    size_t best_of) {
+  RequestSamplingParam sampling_param;
+  SchedulerParam scheduler_param;
+
+  StoppingChecker stopping_checker;
+  stopping_checker.set_max_generated_tokens(max_tokens);
+  stopping_checker.set_max_context_len(max_context_len);
+  stopping_checker.set_ignore_eos(true);
+
+  RequestState req_state("x",
+                         prompt_token_ids,
+                         sampling_param,
+                         scheduler_param,
+                         stopping_checker,
+                         prompt_token_ids.size() + 30000,
+                         n,
+                         best_of,
+                         false,
+                         false,
+                         false,
+                         false,
+                         false,
+                         nullptr,
+                         nullptr);
+
+  return std::make_shared<Request>("1", "1", "1", std::move(req_state), "1");
+}
+
 // dont not consider speculative decoding.
 void update_requests(std::vector<std::shared_ptr<Request>> requests) {
   for (auto req : requests) {
@@ -758,6 +791,90 @@ TEST(BlockManagerPoolTest, AllocateFailureRollsBackSharedPrefixBlocks) {
   EXPECT_EQ(later_sequence->kv_state().num_kv_blocks(), 1);
 
   (void)engine.release();
+}
+
+TEST(ContinuousSchedulerTest,
+     PDDecodeBestOfNExpandsAndSharesPromptViaPrefixCache) {
+  // Disagg PD decode instance flow:
+  //   1. request arrives from the prefill instance with kv_cache_tokens_num
+  //      already advanced (try_allocate + append_token(first_token)).
+  //   2. ContinuousScheduler::prepare_batch must short-circuit the waiting
+  //      queue and push directly into running_requests_.
+  //   3. handle_running_requests must trigger expand_sequences(true) and
+  //      cache(seq[0]) so the expanded seq[1..best_of-1] can hit the
+  //      shared prompt blocks via prefix cache.
+  ContinuousScheduler::Options opt =
+      create_scheduler_options(1024, 16, 0, 1024, 1);
+  auto engine =
+      std::make_unique<FakeEngine>(32, 4, /*enable_prefix_cache=*/true);
+  auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+  BlockManagerPool* block_manager_pool = engine->block_manager_pool();
+
+  constexpr size_t kBestOf = 4;
+  constexpr size_t kN = 2;
+  auto request = generate_request_with_best_of({1, 2, 3, 4, 5, 6, 7, 8},
+                                               /*max_tokens=*/4,
+                                               /*max_context_len=*/30000,
+                                               kN,
+                                               kBestOf);
+
+  Sequence* seq0 = request->sequences()[0].get();
+  ASSERT_TRUE(block_manager_pool->try_allocate(seq0));
+  ASSERT_EQ(seq0->kv_state().kv_cache_tokens_num(), seq0->num_prompt_tokens());
+  Token first(42);
+  seq0->append_token(first);
+
+  scheduler->add_request(request);
+
+  auto batch = scheduler->prepare_batch_test();
+  EXPECT_EQ(batch.size(), 1);
+  EXPECT_EQ(request->sequences().size(), kBestOf);
+  EXPECT_EQ(batch[0].size(), kBestOf);
+
+  for (size_t i = 1; i < kBestOf; ++i) {
+    EXPECT_GT(request->sequences()[i]->kv_state().shared_kv_blocks_num(), 0u)
+        << "expanded seq " << i
+        << " should reuse seq[0] prompt blocks via prefix cache";
+  }
+
+  scheduler.reset();
+  (void)engine.release();
+}
+
+TEST(ContinuousSchedulerTest, PDDecodeBestOfOneSkipsExpansionAndShares) {
+  // Sanity check: best_of==n==1 should not trigger any expansion, and the
+  // request should still flow through the PD-decode short-circuit.
+  auto request = generate_request_with_best_of({1, 2, 3, 4, 5, 6, 7, 8},
+                                               /*max_tokens=*/4,
+                                               /*max_context_len=*/30000,
+                                               /*n=*/1,
+                                               /*best_of=*/1);
+  Sequence* seq0 = request->sequences()[0].get();
+
+  ContinuousScheduler::Options opt =
+      create_scheduler_options(1024, 16, 0, 1024, 1);
+  // Prefix cache is not under test here; disabling it avoids teardown putting
+  // blocks into the prefix-cache table instead of the free list.
+  auto engine =
+      std::make_unique<FakeEngine>(32, 4, /*enable_prefix_cache=*/false);
+  auto scheduler = std::make_unique<ContinuousScheduler>(engine.get(), opt);
+  BlockManagerPool* block_manager_pool = engine->block_manager_pool();
+
+  ASSERT_TRUE(block_manager_pool->try_allocate(seq0));
+  ASSERT_EQ(seq0->kv_state().kv_cache_tokens_num(), seq0->num_prompt_tokens());
+  Token first(42);
+  seq0->append_token(first);
+
+  scheduler->add_request(request);
+
+  auto batch = scheduler->prepare_batch_test();
+  EXPECT_EQ(batch.size(), 1);
+  EXPECT_EQ(request->sequences().size(), 1u);
+  EXPECT_EQ(batch[0].size(), 1u);
+
+  // prepare_batch may allocate extra decode blocks; release them before engine
+  // teardown (BlockManagerImpl checks all blocks are on the free list).
+  block_manager_pool->deallocate_without_cache(seq0);
 }
 
 }  // namespace xllm

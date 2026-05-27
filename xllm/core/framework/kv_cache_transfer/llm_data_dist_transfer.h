@@ -100,6 +100,7 @@ class LlmDataDistTransfer : public KVCacheTransfer {
   bool enable_mla_ = false;
   bool enable_lighting_indexer_ = false;
   std::string model_type_;
+  LlmRole role_ = LlmRole::kMix;
   std::unordered_set<uint64_t> linked_cluster_ids;
 
   std::shared_ptr<LlmDataDist> llm_data_dist_;

@@ -62,8 +62,22 @@ DisaggPDChunkedPrefillScheduler::DisaggPDChunkedPrefillScheduler(
     Engine* engine,
     const Options& options)
     : DisaggPDScheduler(engine, options) {
-  CHECK(!enable_prefix_cache_)
-      << "disagg pd chunked prefill scheduler does not support prefix cache";
+  // Prefix cache is supported only on the DECODE instance, where it is
+  // required for best_of_n: expanded sequences (seq[1..best_of-1]) hit the
+  // first sequence's prompt KV blocks via prefix cache. PREFILL and MIX
+  // instances under chunked-prefill PD are not yet wired up for it.
+  const bool is_decode =
+      options_.instance_role().has_value() &&
+      options_.instance_role().value() == InstanceRole::DECODE;
+  if (!is_decode) {
+    CHECK(!enable_prefix_cache_)
+        << "disagg pd chunked prefill scheduler only supports prefix cache "
+        << "on the DECODE instance (current role="
+        << (options_.instance_role().has_value()
+                ? options_.instance_role().value().to_string()
+                : "<unset>")
+        << ").";
+  }
 }
 
 bool DisaggPDChunkedPrefillScheduler::alloc_chunk(Sequence* sequence,
@@ -151,10 +165,10 @@ std::vector<Batch> DisaggPDChunkedPrefillScheduler::prepare_batch() {
   std::shared_ptr<Request> request;
   while (request_queue_.read(request)) {
     CHECK(request);
-    if (!enable_prefix_cache_) {
-      request->expand_sequences(/*shared_prefix=*/false);
-    }
-
+    // PREFILL/MIX path in disagg PD only handles the first sequence.
+    // For best_of_n, expansion to best_of sequences is deferred to the
+    // DECODE instance (where prefix cache lets seq[1..best_of-1] reuse
+    // seq[0]'s prompt KV). Expanding here would waste N x prefill compute.
     if (request->offline()) {
       waiting_priority_queue_offline_->push(request);
     } else {

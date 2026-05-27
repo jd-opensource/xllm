@@ -38,13 +38,14 @@ DisaggPDServiceImpl::DisaggPDServiceImpl(DisaggPDScheduler* scheduler,
 
 std::shared_ptr<Request> DisaggPDServiceImpl::generate_request(
     const proto::DisaggRequest& req) {
-  // TODO: support best_of > 1 in disaggregated PD mode.
-  // The current prefill instance only allocates blocks for the first
-  // sequence, so an expanded request would have under-allocated KV cache
-  // for the remaining sequences. Reject upfront instead of producing
-  // silently wrong outputs.
-  if (req.best_of() > 1) {
-    LOG(ERROR) << "best_of > 1 is not supported in disaggregated PD mode, "
+  // best_of > 1 in disaggregated PD requires prefix cache on the decode
+  // instance: only the first sequence's KV is pulled from prefill, and
+  // the remaining best_of-1 sequences are expanded locally and reuse the
+  // first sequence's prompt KV via prefix cache.
+  if (req.best_of() > 1 &&
+      !::xllm::KVCacheConfig::get_instance().enable_prefix_cache()) {
+    LOG(ERROR) << "best_of > 1 in disaggregated PD mode requires "
+               << "enable_prefix_cache=true on the decode instance, "
                << "request_id=" << req.req_id()
                << ", best_of=" << req.best_of();
     return nullptr;
