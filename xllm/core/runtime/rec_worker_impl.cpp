@@ -179,6 +179,18 @@ OneRecBeamSearchOutputTensors prepare_onerec_beam_search_output_tensors(
   return tensors;
 }
 
+template <typename BeamSearchTensorsT>
+void assign_final_onerec_beam_outputs(
+    BeamSearchTensorsT& beam_tensors,
+    OneRecBeamSearchOutputTensors&& final_tensors) {
+  beam_tensors.out_token_ids = std::move(final_tensors.out_token_ids);
+  beam_tensors.out_token_index = std::move(final_tensors.out_token_index);
+  beam_tensors.out_beam_count_prefix_sums =
+      std::move(final_tensors.out_beam_count_prefix_sums);
+  beam_tensors.out_log_probs = std::move(final_tensors.out_log_probs);
+  beam_tensors.out_seqgroup = std::move(final_tensors.out_seqgroup);
+}
+
 #if defined(USE_NPU)
 bool can_use_beam_search_rec_final_select(int32_t batch_size,
                                           const torch::Tensor& top_tokens,
@@ -317,6 +329,69 @@ void select_final_onerec_beam_results(
   output_tensors.out_seqgroup
       .slice(/*dim=*/2, /*start=*/current_step, /*end=*/current_step + 1)
       .copy_(new_tokens.unsqueeze(2));
+}
+
+template <typename BeamSearchTensorsT>
+void fill_final_onerec_beam_outputs(const torch::Tensor& top_tokens,
+                                    const torch::Tensor& top_logprobs,
+                                    BeamSearchTensorsT& beam_tensors,
+                                    int32_t current_step,
+                                    int32_t batch_size,
+                                    int32_t beam_width,
+                                    int32_t requested_result_width,
+                                    const torch::Device& device) {
+  OneRecBeamSearchOutputTensors final_tensors =
+      prepare_onerec_beam_search_output_tensors(
+          batch_size,
+          requested_result_width,
+          static_cast<int32_t>(beam_tensors.sequence_group.size(2)),
+          device);
+
+#if defined(USE_NPU)
+  if (can_use_beam_search_rec_final_select(
+          batch_size, top_tokens, requested_result_width)) {
+    xllm::kernel::npu::beam_search_rec(
+        /*logprobs=*/beam_tensors.acc_logprob,
+        /*top_tokens=*/top_tokens,
+        /*top_logprobs=*/top_logprobs,
+        /*sequence_group=*/beam_tensors.sequence_group,
+        /*current_step=*/static_cast<int64_t>(current_step),
+        /*result_width=*/requested_result_width,
+        /*out_token_ids=*/final_tensors.out_token_ids,
+        /*out_token_index=*/final_tensors.out_token_index,
+        /*out_log_probs=*/final_tensors.out_log_probs,
+        /*out_beam_count_prefix_sums=*/final_tensors.out_beam_count_prefix_sums,
+        /*out_sequence=*/final_tensors.out_seqgroup);
+  } else {
+    select_final_onerec_beam_results(
+        beam_tensors.acc_logprob,
+        beam_tensors.sequence_group,
+        top_tokens,
+        top_logprobs,
+        batch_size,
+        beam_width,
+        requested_result_width,
+        static_cast<int32_t>(beam_tensors.sequence_group.size(2)),
+        current_step,
+        final_tensors);
+  }
+#elif defined(USE_CUDA)
+  select_final_onerec_beam_results(
+      beam_tensors.acc_logprob,
+      beam_tensors.sequence_group,
+      top_tokens,
+      top_logprobs,
+      batch_size,
+      beam_width,
+      requested_result_width,
+      static_cast<int32_t>(beam_tensors.sequence_group.size(2)),
+      current_step,
+      final_tensors);
+#else
+  LOG(FATAL) << "Rec multi-round final beam search requires NPU or CUDA.";
+#endif
+
+  assign_final_onerec_beam_outputs(beam_tensors, std::move(final_tensors));
 }
 
 }  // namespace
@@ -1764,44 +1839,14 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
     } else if (final_round && requested_result_width != beam_width) {
       top_tokens = result->sample_output.top_tokens.to(torch::kInt32);
       top_logprobs = result->sample_output.top_logprobs;
-      OneRecBeamSearchOutputTensors final_tensors =
-          prepare_onerec_beam_search_output_tensors(batch_size,
-                                                    requested_result_width,
-                                                    total_rounds,
-                                                    runtime_.worker.device());
-      if (can_use_beam_search_rec_final_select(
-              batch_size, top_tokens, requested_result_width)) {
-        xllm::kernel::npu::beam_search_rec(
-            /*logprobs=*/beam_tensors.acc_logprob,
-            /*top_tokens=*/top_tokens,
-            /*top_logprobs=*/top_logprobs,
-            /*sequence_group=*/beam_tensors.sequence_group,
-            /*current_step=*/static_cast<int64_t>(round),
-            /*result_width=*/requested_result_width,
-            /*out_token_ids=*/final_tensors.out_token_ids,
-            /*out_token_index=*/final_tensors.out_token_index,
-            /*out_log_probs=*/final_tensors.out_log_probs,
-            /*out_beam_count_prefix_sums=*/
-            final_tensors.out_beam_count_prefix_sums,
-            /*out_sequence=*/final_tensors.out_seqgroup);
-      } else {
-        select_final_onerec_beam_results(beam_tensors.acc_logprob,
-                                         beam_tensors.sequence_group,
-                                         top_tokens,
-                                         top_logprobs,
-                                         batch_size,
-                                         beam_width,
-                                         requested_result_width,
-                                         total_rounds,
-                                         round,
-                                         final_tensors);
-      }
-      beam_tensors.out_token_ids = std::move(final_tensors.out_token_ids);
-      beam_tensors.out_token_index = std::move(final_tensors.out_token_index);
-      beam_tensors.out_beam_count_prefix_sums =
-          std::move(final_tensors.out_beam_count_prefix_sums);
-      beam_tensors.out_log_probs = std::move(final_tensors.out_log_probs);
-      beam_tensors.out_seqgroup = std::move(final_tensors.out_seqgroup);
+      fill_final_onerec_beam_outputs(top_tokens,
+                                     top_logprobs,
+                                     beam_tensors,
+                                     round,
+                                     batch_size,
+                                     beam_width,
+                                     requested_result_width,
+                                     runtime_.worker.device());
     } else {
       top_tokens = result->sample_output.top_tokens.to(torch::kInt32);
       top_logprobs = result->sample_output.top_logprobs;
@@ -1827,27 +1872,14 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecXAttentionWorkPipeline::step(
               .reshape({-1, result->sample_output.top_tokens.size(-1)});
       top_logprobs = result->sample_output.top_logprobs.reshape(
           {-1, result->sample_output.top_logprobs.size(-1)});
-      OneRecBeamSearchOutputTensors final_tensors =
-          prepare_onerec_beam_search_output_tensors(batch_size,
-                                                    requested_result_width,
-                                                    total_rounds,
-                                                    runtime_.worker.device());
-      select_final_onerec_beam_results(beam_tensors.acc_logprob,
-                                       beam_tensors.sequence_group,
-                                       top_tokens,
-                                       top_logprobs,
-                                       batch_size,
-                                       beam_width,
-                                       requested_result_width,
-                                       total_rounds,
-                                       round,
-                                       final_tensors);
-      beam_tensors.out_token_ids = std::move(final_tensors.out_token_ids);
-      beam_tensors.out_token_index = std::move(final_tensors.out_token_index);
-      beam_tensors.out_beam_count_prefix_sums =
-          std::move(final_tensors.out_beam_count_prefix_sums);
-      beam_tensors.out_log_probs = std::move(final_tensors.out_log_probs);
-      beam_tensors.out_seqgroup = std::move(final_tensors.out_seqgroup);
+      fill_final_onerec_beam_outputs(top_tokens,
+                                     top_logprobs,
+                                     beam_tensors,
+                                     round,
+                                     batch_size,
+                                     beam_width,
+                                     requested_result_width,
+                                     runtime_.worker.device());
     } else {
       top_tokens =
           result->sample_output.top_tokens.to(torch::kInt32)
@@ -2387,63 +2419,14 @@ void RecWorkerImpl::LlmRecMultiRoundPipeline::execute_final_beam_search(
     int32_t batch_size,
     int32_t beam_width,
     int32_t requested_result_width) {
-  OneRecBeamSearchOutputTensors final_tensors =
-      prepare_onerec_beam_search_output_tensors(
-          batch_size,
-          requested_result_width,
-          static_cast<int32_t>(beam_tensors.sequence_group.size(2)),
-          runtime_.worker.device());
-
-#if defined(USE_NPU)
-  if (can_use_beam_search_rec_final_select(
-          batch_size, top_tokens, requested_result_width)) {
-    xllm::kernel::npu::beam_search_rec(
-        /*logprobs=*/beam_tensors.acc_logprob,
-        /*top_tokens=*/top_tokens,
-        /*top_logprobs=*/top_logprobs,
-        /*sequence_group=*/beam_tensors.sequence_group,
-        /*current_step=*/static_cast<int64_t>(round),
-        /*result_width=*/requested_result_width,
-        /*out_token_ids=*/final_tensors.out_token_ids,
-        /*out_token_index=*/final_tensors.out_token_index,
-        /*out_log_probs=*/final_tensors.out_log_probs,
-        /*out_beam_count_prefix_sums=*/final_tensors.out_beam_count_prefix_sums,
-        /*out_sequence=*/final_tensors.out_seqgroup);
-  } else {
-    select_final_onerec_beam_results(
-        beam_tensors.acc_logprob,
-        beam_tensors.sequence_group,
-        top_tokens,
-        top_logprobs,
-        batch_size,
-        beam_width,
-        requested_result_width,
-        static_cast<int32_t>(beam_tensors.sequence_group.size(2)),
-        round,
-        final_tensors);
-  }
-#elif defined(USE_CUDA)
-  select_final_onerec_beam_results(
-      beam_tensors.acc_logprob,
-      beam_tensors.sequence_group,
-      top_tokens,
-      top_logprobs,
-      batch_size,
-      beam_width,
-      requested_result_width,
-      static_cast<int32_t>(beam_tensors.sequence_group.size(2)),
-      round,
-      final_tensors);
-#else
-  LOG(FATAL) << "Rec multi-round final beam search requires NPU or CUDA.";
-#endif
-
-  beam_tensors.out_token_ids = std::move(final_tensors.out_token_ids);
-  beam_tensors.out_token_index = std::move(final_tensors.out_token_index);
-  beam_tensors.out_beam_count_prefix_sums =
-      std::move(final_tensors.out_beam_count_prefix_sums);
-  beam_tensors.out_log_probs = std::move(final_tensors.out_log_probs);
-  beam_tensors.out_seqgroup = std::move(final_tensors.out_seqgroup);
+  fill_final_onerec_beam_outputs(top_tokens,
+                                 top_logprobs,
+                                 beam_tensors,
+                                 round,
+                                 batch_size,
+                                 beam_width,
+                                 requested_result_width,
+                                 runtime_.worker.device());
 
   std::swap(beam_tensors.sequence_group, beam_tensors.out_seqgroup);
   std::swap(beam_tensors.acc_logprob, beam_tensors.out_log_probs);

@@ -621,7 +621,7 @@ void Batch::process_beam_sequence_group(const ForwardOutput& output) {
       if (has_logprobs) {
         // logprobs is flattened [batch * result_width] for multi-round widened
         // final output.
-        int logprob_idx = static_cast<int>(g) * result_width + b;
+        int32_t logprob_idx = static_cast<int32_t>(g) * result_width + b;
         last_logprobs.push_back(
             output.beam_search_output.out_logprobs[logprob_idx].item<float>());
       }

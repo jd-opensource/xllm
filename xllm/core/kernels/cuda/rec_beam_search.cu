@@ -343,8 +343,8 @@ compute_topk_for_beam_search_impl<__nv_bfloat16>(torch::Tensor combined_probs,
                                                  uint32_t top_k,
                                                  uint32_t num_return_sequences,
                                                  torch::Device device,
-                                                 bool is_largest = true,
-                                                 bool sorted = false) {
+                                                 bool is_largest,
+                                                 bool sorted) {
   combined_probs = combined_probs.contiguous();
 
   // create output tensor, output type is the same as input type
