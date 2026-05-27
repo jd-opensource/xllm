@@ -23,7 +23,6 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "runtime/forward_params.h"
 #include "util/tensor_helper.h"
-#include "util/utils.h"
 
 namespace xllm::specBuilder {
 
@@ -83,6 +82,18 @@ Slice<int32_t> get_block_table_slice(const DecodeRowContext& ctx,
       << ", block_tables_size=" << ctx.block_tables.size();
   return {ctx.block_tables.data() + row_offset,
           static_cast<size_t>(ctx.block_table_stride)};
+}
+
+template <typename T>
+void pad_2d_vector(std::vector<std::vector<T>>& vec, T pad_value) {
+  size_t max_col_size = 0;
+  for (const std::vector<T>& row : vec) {
+    max_col_size = std::max(max_col_size, row.size());
+  }
+
+  for (std::vector<T>& row : vec) {
+    row.resize(max_col_size, pad_value);
+  }
 }
 
 torch::Tensor create_flat_2d_tensor(const std::vector<int32_t>& values,
@@ -403,7 +414,7 @@ void update_input_params(ModelInputParams& input_params,
           buf.out_multi_block_tables.size());
       for (std::vector<std::vector<int32_t>>& manager_tables :
            buf.out_multi_block_tables) {
-        util::pad_2d_vector(manager_tables, /*pad_value=*/-1);
+        pad_2d_vector(manager_tables, /*pad_value=*/-1);
         input_params.multi_block_tables.emplace_back(
             create_2d_tensor(manager_tables, torch::kInt));
       }
@@ -476,9 +487,9 @@ std::pair<torch::Tensor, torch::Tensor> build_validate_tensors(
         extract_selected_probs(draft_probs_steps[i], draft_token_ids)
             .view({batch_size, 1});
 
-    token_ids_vec.push_back(draft_token_ids);
+    token_ids_vec.emplace_back(draft_token_ids);
     if (enable_opt_validate_probs) {
-      probs_vec.push_back(selected_probs);
+      probs_vec.emplace_back(selected_probs);
     } else {
       auto dense_probs =
           torch::zeros({batch_size, 1, vocab_size}, selected_probs.options());
@@ -486,7 +497,7 @@ std::pair<torch::Tensor, torch::Tensor> build_validate_tensors(
           /*dim=*/-1,
           draft_token_ids.unsqueeze(-1),
           selected_probs.unsqueeze(-1));
-      probs_vec.push_back(dense_probs);
+      probs_vec.emplace_back(dense_probs);
     }
   }
 
