@@ -652,17 +652,33 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
   Timer timer;
   runtime_.worker.device_.set_device();
 
-  const auto& sampling_params = input.sampling_params;
-  const auto& input_params = input.input_params;
+  ForwardInput& mutable_input = const_cast<ForwardInput&>(input);
+  const auto& sampling_params = mutable_input.sampling_params;
 
-  const auto* onerec_params = input_params.onerec_params();
+  const auto* onerec_params = mutable_input.input_params.onerec_params();
   CHECK(onerec_params != nullptr) << "OneRec requires rec_params.";
 
   const OneRecModelInputParams& rec_params = *onerec_params;
+  OneRecModelInputParams& mutable_onerec_params =
+      mutable_input.input_params.mutable_onerec_params();
   const bool has_decoder_context =
       rec_params.decoder_context_embedding.defined();
   const bool has_encoder_context =
       rec_params.has_encoder_output || has_decoder_context;
+  const bool has_encoder_output = rec_params.has_encoder_output;
+  auto run_onerec_forward = [&](const torch::Tensor& token_ids,
+                                const torch::Tensor& positions,
+                                bool is_encoder_forward,
+                                bool forward_has_encoder_output,
+                                bool is_hybrid_mode) {
+    mutable_onerec_params.is_encoder_forward = is_encoder_forward;
+    mutable_onerec_params.has_encoder_output = forward_has_encoder_output;
+    mutable_onerec_params.is_hybrid_mode = is_hybrid_mode;
+    return runtime_.executor->forward(token_ids,
+                                      positions,
+                                      runtime_.worker.kv_caches_,
+                                      mutable_input.input_params);
+  };
   std::optional<folly::SemiFuture<torch::Tensor>> filter_mask_future;
   if ((runtime_.worker.driver_ || runtime_.worker.dp_driver_) &&
       FLAGS_enable_constrained_decoding && constrained_decoding_ != nullptr &&
@@ -677,14 +693,12 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
         LOG(ERROR) << "OneRec prefill requires encoder context.";
         return std::nullopt;
       }
-      ModelInputParams decoder_params = input_params;
-      decoder_params.mutable_onerec_params().is_encoder_forward = false;
-      decoder_params.mutable_onerec_params().has_encoder_output =
-          rec_params.has_encoder_output;
-      auto model_output = runtime_.executor->forward(input.token_ids,
-                                                     input.positions,
-                                                     runtime_.worker.kv_caches_,
-                                                     decoder_params);
+      auto model_output = run_onerec_forward(mutable_input.token_ids,
+                                             mutable_input.positions,
+                                             /*is_encoder_forward=*/false,
+                                             /*forward_has_encoder_output=*/
+                                             has_encoder_output,
+                                             /*is_hybrid_mode=*/false);
       hidden_states = model_output.hidden_states;
     } else {
       const bool has_sparse_embedding =
@@ -697,34 +711,29 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
         return std::nullopt;
       }
 
-      ModelInputParams encoder_params = input_params;
-      auto& mutable_onerec_params = encoder_params.mutable_onerec_params();
-      mutable_onerec_params.is_encoder_forward = true;
-      mutable_onerec_params.is_hybrid_mode = has_sparse_embedding;
-
       torch::Tensor encoder_tokens;
       if (has_sparse_embedding) {
         encoder_tokens = rec_params.encoder_sparse_embedding;
       } else {
-        mutable_onerec_params.is_hybrid_mode = false;
         encoder_tokens = rec_params.encoder_token_ids;
       }
 
       auto encoder_output =
-          runtime_.executor->forward(encoder_tokens,
-                                     rec_params.encoder_positions,
-                                     runtime_.worker.kv_caches_,
-                                     encoder_params);
+          run_onerec_forward(encoder_tokens,
+                             rec_params.encoder_positions,
+                             /*is_encoder_forward=*/true,
+                             /*forward_has_encoder_output=*/
+                             has_encoder_output,
+                             /*is_hybrid_mode=*/has_sparse_embedding);
 
-      ModelInputParams decoder_params = input_params;
-      auto& decoder_onerec_params = decoder_params.mutable_onerec_params();
-      decoder_onerec_params.is_encoder_forward = false;
-      decoder_onerec_params.has_encoder_output =
+      const bool decoder_has_encoder_output =
           encoder_output.hidden_states.defined();
-      auto model_output = runtime_.executor->forward(input.token_ids,
-                                                     input.positions,
-                                                     runtime_.worker.kv_caches_,
-                                                     decoder_params);
+      auto model_output = run_onerec_forward(mutable_input.token_ids,
+                                             mutable_input.positions,
+                                             /*is_encoder_forward=*/false,
+                                             /*forward_has_encoder_output=*/
+                                             decoder_has_encoder_output,
+                                             /*is_hybrid_mode=*/false);
       hidden_states = model_output.hidden_states;
     }
   } else {
@@ -732,14 +741,12 @@ std::optional<ForwardOutput> RecWorkerImpl::OneRecWorkPipeline::step(
       LOG(ERROR) << "OneRec decode requires encoder context.";
       return std::nullopt;
     }
-    ModelInputParams decoder_params = input_params;
-    decoder_params.mutable_onerec_params().is_encoder_forward = false;
-    decoder_params.mutable_onerec_params().has_encoder_output =
-        rec_params.has_encoder_output;
-    auto model_output = runtime_.executor->forward(input.token_ids,
-                                                   input.positions,
-                                                   runtime_.worker.kv_caches_,
-                                                   decoder_params);
+    auto model_output =
+        run_onerec_forward(mutable_input.token_ids,
+                           mutable_input.positions,
+                           /*is_encoder_forward=*/false,
+                           /*forward_has_encoder_output=*/has_encoder_output,
+                           /*is_hybrid_mode=*/false);
     hidden_states = model_output.hidden_states;
   }
 
@@ -794,7 +801,8 @@ RecWorkerImpl::OneRecXAttentionWorkPipeline::OneRecXAttentionWorkPipeline(
       filter_mask_threadpool_(std::make_unique<ThreadPool>(1)) {
   max_seqs_per_batch_ = runtime_.worker.options_.max_seqs_per_batch();
   beam_width_ = std::max<int32_t>(1, runtime_.worker.options_.beam_width());
-  max_decode_step_ = std::max(0, get_rec_multi_round_decode_rounds());
+  max_decode_step_ =
+      std::max<int32_t>(0, get_rec_multi_round_decode_rounds() - 1);
   allocate_unshared_kv_caches();
 
   if (!FLAGS_enable_constrained_decoding) {
