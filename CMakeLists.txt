@@ -37,10 +37,17 @@ if(USE_NPU)
     set(XLLM_OPS_GIT_HEAD_CACHED "$ENV{XLLM_OPS_GIT_HEAD_CACHED}")
   endif()
 
+  if(DEFINED ENV{XLLM_OPS_BUILD_DIR})
+    get_filename_component(XLLM_OPS_BUILD_DIR "$ENV{XLLM_OPS_BUILD_DIR}" ABSOLUTE)
+  else()
+    set(XLLM_OPS_BUILD_DIR "${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build")
+  endif()
+
   if(NOT DEFINED XLLM_OPS_GIT_HEAD_CACHED OR NOT XLLM_OPS_GIT_HEAD STREQUAL XLLM_OPS_GIT_HEAD_CACHED)
     message(STATUS "xllm_ops git HEAD changed; running precompile via execute_process")
     execute_process(
-      COMMAND bash ${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build.sh
+      COMMAND ${CMAKE_COMMAND} -E env "XLLM_OPS_BUILD_DIR=${XLLM_OPS_BUILD_DIR}"
+              bash ${CMAKE_SOURCE_DIR}/third_party/xllm_ops/build.sh
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/xllm_ops
       RESULT_VARIABLE XLLM_OPS_RESULT
     )
