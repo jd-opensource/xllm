@@ -59,6 +59,48 @@ google::protobuf::Arena* GetArenaWithCheck(
 
 const char* kSampleNotSupportedError = "/v1/sample is only supported for LLM";
 
+// Shared dispatch for brpc-typed (non-Http) APIs that follow the standard
+// service_impl -> process_async pattern.  Performs argument validation,
+// instantiates the appropriate Call wrapper from the typed proto request and
+// hands it off to the corresponding service implementation.
+//
+// `service_name` is the human readable endpoint name used in error messages
+// when the corresponding service implementation is not available (for example,
+// invoking /v1/images/generations against an LLM master).
+template <typename CallT, typename Service>
+void process_typed_brpc_request(std::unique_ptr<Service>& service_impl,
+                                ::google::protobuf::RpcController* controller,
+                                const typename CallT::ReqType* request,
+                                typename CallT::ResType* response,
+                                ::google::protobuf::Closure* done,
+                                const char* service_name) {
+  xllm::ClosureGuard done_guard(
+      done,
+      std::bind(request_in_metric, nullptr),
+      std::bind(request_out_metric, (void*)controller));
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  if (!service_impl) {
+    std::string msg =
+        std::string(service_name) + " service is not available on this server";
+    ctrl->SetFailed(msg);
+    LOG(ERROR) << msg;
+    return;
+  }
+
+  auto arena = GetArenaWithCheck<CallT>(response);
+  // brpc passes the request as `const`, but downstream Call wrappers only read
+  // from it.  We cast away constness so the Call can hold a non-const pointer.
+  auto req_pb = const_cast<typename CallT::ReqType*>(request);
+  std::shared_ptr<Call> call = std::make_shared<CallT>(
+      ctrl, done_guard.release(), req_pb, response, arena != nullptr);
+  service_impl->process_async(call);
+}
+
 }  // namespace
 
 APIService::APIService(Master* master,
@@ -380,7 +422,36 @@ void APIService::Embeddings(::google::protobuf::RpcController* controller,
                             const proto::EmbeddingRequest* request,
                             proto::EmbeddingResponse* response,
                             ::google::protobuf::Closure* done) {
-  // TODO with xllm-service
+  xllm::ClosureGuard done_guard(
+      done,
+      std::bind(request_in_metric, nullptr),
+      std::bind(request_out_metric, (void*)controller));
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  if (!embedding_service_impl_) {
+    const char* msg =
+        "Embeddings brpc API only supports the text embedding service. "
+        "Use /v1/embeddings http endpoint for multimodal embeddings.";
+    ctrl->SetFailed(msg);
+    LOG(ERROR) << msg;
+    return;
+  }
+
+  auto arena = GetArenaWithCheck<EmbeddingCall>(response);
+  // The brpc-typed request is passed as const, but downstream code only reads
+  // from it (after defaulting the encoding format below).
+  auto req_pb = const_cast<proto::EmbeddingRequest*>(request);
+  if (req_pb->encoding_format().empty()) {
+    req_pb->set_encoding_format("float");
+  }
+
+  std::shared_ptr<Call> call = std::make_shared<EmbeddingCall>(
+      ctrl, done_guard.release(), req_pb, response, arena != nullptr);
+  embedding_service_impl_->process_async(call);
 }
 
 namespace {
@@ -446,7 +517,13 @@ void APIService::ImageGeneration(::google::protobuf::RpcController* controller,
                                  const proto::ImageGenerationRequest* request,
                                  proto::ImageGenerationResponse* response,
                                  ::google::protobuf::Closure* done) {
-  // TODO with xllm-service
+  process_typed_brpc_request<ImageGenerationCall, ImageGenerationServiceImpl>(
+      image_generation_service_impl_,
+      controller,
+      request,
+      response,
+      done,
+      "ImageGeneration");
 }
 
 void APIService::ImageGenerationHttp(
@@ -492,7 +569,13 @@ void APIService::AudioGeneration(::google::protobuf::RpcController* controller,
                                  const proto::AudioGenerationRequest* request,
                                  proto::AudioGenerationResponse* response,
                                  ::google::protobuf::Closure* done) {
-  // TODO with xllm-service
+  process_typed_brpc_request<AudioGenerationCall, AudioGenerationServiceImpl>(
+      audio_generation_service_impl_,
+      controller,
+      request,
+      response,
+      done,
+      "AudioGeneration");
 }
 
 void APIService::AudioGenerationHttp(
@@ -538,7 +621,13 @@ void APIService::VideoGeneration(::google::protobuf::RpcController* controller,
                                  const proto::VideoGenerationRequest* request,
                                  proto::VideoGenerationResponse* response,
                                  ::google::protobuf::Closure* done) {
-  // TODO with xllm-service
+  process_typed_brpc_request<VideoGenerationCall, VideoGenerationServiceImpl>(
+      video_generation_service_impl_,
+      controller,
+      request,
+      response,
+      done,
+      "VideoGeneration");
 }
 
 void APIService::VideoGenerationHttp(
@@ -584,7 +673,8 @@ void APIService::Rerank(::google::protobuf::RpcController* controller,
                         const proto::RerankRequest* request,
                         proto::RerankResponse* response,
                         ::google::protobuf::Closure* done) {
-  // TODO with xllm-service
+  process_typed_brpc_request<RerankCall, RerankServiceImpl>(
+      rerank_service_impl_, controller, request, response, done, "Rerank");
 }
 
 void APIService::RerankHttp(::google::protobuf::RpcController* controller,
@@ -802,11 +892,78 @@ bool APIService::ParseForkMasterRequest(const proto::MasterInfos* request,
   return true;
 }
 
+bool APIService::do_fork_master(const proto::MasterInfos& request,
+                                std::string* error_message) {
+  if (to_serving_mode(master_->engine_type()) != ServingMode::LLM) {
+    *error_message = "fork master only supports LLM engine";
+    return false;
+  }
+
+  Options master_options;
+  if (!ParseForkMasterRequest(&request, master_options)) {
+    *error_message = "Failed to parse fork master request";
+    return false;
+  }
+
+  if (has_model_master(master_options.model_id())) {
+    *error_message =
+        "Master for model " + master_options.model_id() + " already exists";
+    LOG(INFO) << *error_message;
+    return true;
+  }
+
+  auto master = fork_master(master_, master_options);
+  if (!master) {
+    *error_message = "Failed to fork master: " + master_options.model_id();
+    return false;
+  }
+
+  // CAS: only succeed if num_concurrent_requests == 0.
+  if (master->is_sleeping() &&
+      !master->get_rate_limiter()->try_set_sleeping()) {
+    // Notice: this branch is only entered in exceptional cases.
+    int32_t num_requests =
+        master->get_rate_limiter()->get_num_concurrent_requests();
+    LOG(FATAL) << "Cannot sleep model " << request.model_id() << " with "
+               << num_requests << " in-flight requests";
+    *error_message = "Cannot sleep model with in-flight requests";
+    return false;
+  }
+
+  if (!add_model_master_if_absent(master_options.model_id(), master.get())) {
+    *error_message =
+        "Master for model " + master_options.model_id() + " already exists";
+    LOG(INFO) << *error_message;
+    return true;
+  }
+  if (::xllm::DistributedConfig::get_instance().node_rank() == 0) {
+    auto llm_master = dynamic_cast<LLMMaster*>(master.get());
+    completion_service_impl_->add_model_master(master_options.model_id(),
+                                               llm_master);
+    chat_service_impl_->add_model_master(master_options.model_id(), llm_master);
+  }
+  master.release();
+  return true;
+}
+
 void APIService::ForkMaster(::google::protobuf::RpcController* controller,
                             const proto::MasterInfos* request,
                             proto::Status* response,
                             ::google::protobuf::Closure* done) {
-  // TODO with xllm-service
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  std::string error_message;
+  bool ok = do_fork_master(*request, &error_message);
+  response->set_ok(ok);
+  if (!ok) {
+    LOG(ERROR) << "fork_master failed: " << error_message;
+    ctrl->SetFailed(error_message);
+  }
 }
 
 void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
@@ -823,7 +980,6 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
   auto arena = response->GetArena();
   auto req_pb =
       google::protobuf::Arena::CreateMessage<proto::MasterInfos>(arena);
-  auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
 
@@ -838,60 +994,74 @@ void APIService::ForkMasterHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
-  if (to_serving_mode(master_->engine_type()) != ServingMode::LLM) {
-    LOG(ERROR) << "fork master only supports LLM engine";
-    return;
+  std::string error_message;
+  if (!do_fork_master(*req_pb, &error_message)) {
+    LOG(ERROR) << "fork_master failed: " << error_message;
+    ctrl->SetFailed(error_message);
+  }
+}
+
+bool APIService::do_sleep(const proto::MasterInfos& request,
+                          std::string* error_message) {
+  const auto req_master_status = MasterStatus(request.master_status());
+  if (req_master_status != MasterStatus::LIGHT_SLEEP &&
+      req_master_status != MasterStatus::DEEP_SLEEP) {
+    LOG(ERROR) << "Invalid sleep status: " << request.master_status();
+    *error_message = "Invalid sleep status";
+    return false;
   }
 
-  Options master_options;
-  if (!ParseForkMasterRequest(req_pb, master_options)) {
-    LOG(ERROR) << "Failed to parse fork master request";
-    return;
+  Master* master = get_model_master(request.model_id());
+  if (master == nullptr) {
+    LOG(ERROR) << "Master for model " << request.model_id() << " not found";
+    *error_message = "Master for model not found";
+    return false;
   }
-
-  if (has_model_master(master_options.model_id())) {
-    LOG(INFO) << "Master for model " << master_options.model_id()
-              << " already exists";
-    return;
-  }
-
-  auto master = fork_master(master_, master_options);
-  if (!master) {
-    LOG(ERROR) << "Failed to fork master: " << master_options.model_id();
-    return;
+  if (master->is_sleeping()) {
+    LOG(INFO) << "Master for model " << request.model_id()
+              << " is already sleeping";
+    *error_message = "Master for model is already sleeping";
+    return false;
   }
 
   // CAS: only succeed if num_concurrent_requests == 0.
-  if (master->is_sleeping() &&
-      !master->get_rate_limiter()->try_set_sleeping()) {
-    // Notice: this branch is only entered in exceptional cases.
+  if (!master->get_rate_limiter()->try_set_sleeping()) {
     int32_t num_requests =
         master->get_rate_limiter()->get_num_concurrent_requests();
-    LOG(FATAL) << "Cannot sleep model " << req_pb->model_id() << " with "
+    LOG(ERROR) << "Cannot sleep model " << request.model_id() << " with "
                << num_requests << " in-flight requests";
-    ctrl->SetFailed("Cannot sleep model with in-flight requests");
-    return;
+    *error_message = "Cannot sleep model with in-flight requests";
+    return false;
   }
 
-  if (!add_model_master_if_absent(master_options.model_id(), master.get())) {
-    LOG(INFO) << "Master for model " << master_options.model_id()
-              << " already exists";
-    return;
+  auto master_status = master->get_master_status();
+  master->set_master_status(req_master_status);
+  if (!master->sleep()) {
+    master->set_master_status(master_status);
+    LOG(ERROR) << "Failed to sleep model " << request.model_id();
+    *error_message = "Failed to sleep model";
+    return false;
   }
-  if (::xllm::DistributedConfig::get_instance().node_rank() == 0) {
-    auto llm_master = dynamic_cast<LLMMaster*>(master.get());
-    completion_service_impl_->add_model_master(master_options.model_id(),
-                                               llm_master);
-    chat_service_impl_->add_model_master(master_options.model_id(), llm_master);
-  }
-  master.release();
+  return true;
 }
 
 void APIService::Sleep(::google::protobuf::RpcController* controller,
                        const proto::MasterInfos* request,
                        proto::Status* response,
                        ::google::protobuf::Closure* done) {
-  // TODO with xllm-service
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  std::string error_message;
+  bool ok = do_sleep(*request, &error_message);
+  response->set_ok(ok);
+  if (!ok) {
+    ctrl->SetFailed(error_message);
+  }
 }
 
 void APIService::SleepHttp(::google::protobuf::RpcController* controller,
@@ -907,7 +1077,6 @@ void APIService::SleepHttp(::google::protobuf::RpcController* controller,
   auto arena = response->GetArena();
   auto req_pb =
       google::protobuf::Arena::CreateMessage<proto::MasterInfos>(arena);
-  auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
 
@@ -922,53 +1091,86 @@ void APIService::SleepHttp(::google::protobuf::RpcController* controller,
     return;
   }
 
-  const auto req_master_status = MasterStatus(req_pb->master_status());
-  if (req_master_status != MasterStatus::LIGHT_SLEEP &&
-      req_master_status != MasterStatus::DEEP_SLEEP) {
-    LOG(ERROR) << "Invalid sleep status: " << req_pb->master_status();
-    ctrl->SetFailed("Invalid sleep status");
-    return;
-  }
-
-  Master* master = get_model_master(req_pb->model_id());
-  if (master == nullptr) {
-    LOG(ERROR) << "Master for model " << req_pb->model_id() << " not found";
-    ctrl->SetFailed("Master for model not found");
-    return;
-  }
-  if (master->is_sleeping()) {
-    LOG(INFO) << "Master for model " << req_pb->model_id()
-              << " is already sleeping";
-    ctrl->SetFailed("Master for model is already sleeping");
-    return;
-  }
-
-  // CAS: only succeed if num_concurrent_requests == 0.
-  if (!master->get_rate_limiter()->try_set_sleeping()) {
-    int32_t num_requests =
-        master->get_rate_limiter()->get_num_concurrent_requests();
-    LOG(ERROR) << "Cannot sleep model " << req_pb->model_id() << " with "
-               << num_requests << " in-flight requests";
-    ctrl->SetFailed("Cannot sleep model with in-flight requests");
-    return;
-  }
-
-  auto master_status = master->get_master_status();
-  master->set_master_status(req_master_status);
-  if (!master->sleep()) {
-    master->set_master_status(master_status);
-    LOG(ERROR) << "Failed to sleep model " << req_pb->model_id();
-    ctrl->SetFailed("Failed to sleep model");
-    return;
+  std::string error_message;
+  if (!do_sleep(*req_pb, &error_message)) {
+    ctrl->SetFailed(error_message);
   }
   // Success: return HTTP 200 with empty body
+}
+
+bool APIService::do_wakeup(const proto::MasterInfos& request,
+                           std::string* error_message) {
+  Master* master = get_model_master(request.model_id());
+  if (master == nullptr) {
+    LOG(ERROR) << "Master for model " << request.model_id() << " not found";
+    *error_message = "Master for model not found";
+    return false;
+  }
+  if (!master->is_sleeping()) {
+    LOG(INFO) << "Master for model " << request.model_id()
+              << " is already awake";
+    *error_message = "Master for model is already awake";
+    return false;
+  }
+
+  // Check if remote weight transfer is requested
+  if (request.remote_addrs_size() > 0) {
+    WakeupOptions wakeup_options;
+    wakeup_options.remote_addrs.assign(request.remote_addrs().begin(),
+                                       request.remote_addrs().end());
+    if (request.src_weight_segments_size() > 0) {
+      for (const auto& seg_list : request.src_weight_segments()) {
+        std::vector<WeightSegment> segments;
+        segments.reserve(seg_list.segments_size());
+        for (const auto& proto_seg : seg_list.segments()) {
+          segments.emplace_back(proto_seg.offset(), proto_seg.size());
+        }
+        wakeup_options.src_weight_segments.push_back(std::move(segments));
+      }
+    }
+    if (!master->wakeup(wakeup_options)) {
+      LOG(ERROR) << "Failed to wakeup model " << request.model_id()
+                 << " with remote weight transfer";
+      *error_message = "Failed to wakeup model with remote weight transfer";
+      return false;
+    }
+  } else {
+    if (!master->wakeup()) {
+      LOG(ERROR) << "Failed to wakeup model " << request.model_id();
+      *error_message = "Failed to wakeup model";
+      return false;
+    }
+  }
+
+  // Restore rate limiter from sleeping state
+  if (!master->get_rate_limiter()->try_wakeup()) {
+    LOG(ERROR) << "Failed to restore rate limiter for model "
+               << request.model_id();
+    *error_message = "Failed to restore rate limiter";
+    return false;
+  }
+
+  master->set_master_status(MasterStatus::WAKEUP);
+  return true;
 }
 
 void APIService::Wakeup(::google::protobuf::RpcController* controller,
                         const proto::MasterInfos* request,
                         proto::Status* response,
                         ::google::protobuf::Closure* done) {
-  // TODO with xllm-service
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+  std::string error_message;
+  bool ok = do_wakeup(*request, &error_message);
+  response->set_ok(ok);
+  if (!ok) {
+    ctrl->SetFailed(error_message);
+  }
 }
 
 void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
@@ -984,7 +1186,6 @@ void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
   auto arena = response->GetArena();
   auto req_pb =
       google::protobuf::Arena::CreateMessage<proto::MasterInfos>(arena);
-  auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
 
@@ -998,57 +1199,11 @@ void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
     LOG(ERROR) << "parse json to proto failed: " << error;
     return;
   }
-  Master* master = get_model_master(req_pb->model_id());
-  if (master == nullptr) {
-    LOG(ERROR) << "Master for model " << req_pb->model_id() << " not found";
-    ctrl->SetFailed("Master for model not found");
-    return;
-  }
-  if (!master->is_sleeping()) {
-    LOG(INFO) << "Master for model " << req_pb->model_id()
-              << " is already awake";
-    ctrl->SetFailed("Master for model is already awake");
-    return;
-  }
 
-  // Check if remote weight transfer is requested
-  if (req_pb->remote_addrs_size() > 0) {
-    WakeupOptions wakeup_options;
-    wakeup_options.remote_addrs.assign(req_pb->remote_addrs().begin(),
-                                       req_pb->remote_addrs().end());
-    if (req_pb->src_weight_segments_size() > 0) {
-      for (const auto& seg_list : req_pb->src_weight_segments()) {
-        std::vector<WeightSegment> segments;
-        segments.reserve(seg_list.segments_size());
-        for (const auto& proto_seg : seg_list.segments()) {
-          segments.emplace_back(proto_seg.offset(), proto_seg.size());
-        }
-        wakeup_options.src_weight_segments.push_back(std::move(segments));
-      }
-    }
-    if (!master->wakeup(wakeup_options)) {
-      LOG(ERROR) << "Failed to wakeup model " << req_pb->model_id()
-                 << " with remote weight transfer";
-      ctrl->SetFailed("Failed to wakeup model with remote weight transfer");
-      return;
-    }
-  } else {
-    if (!master->wakeup()) {
-      LOG(ERROR) << "Failed to wakeup model " << req_pb->model_id();
-      ctrl->SetFailed("Failed to wakeup model");
-      return;
-    }
+  std::string error_message;
+  if (!do_wakeup(*req_pb, &error_message)) {
+    ctrl->SetFailed(error_message);
   }
-
-  // Restore rate limiter from sleeping state
-  if (!master->get_rate_limiter()->try_wakeup()) {
-    LOG(ERROR) << "Failed to restore rate limiter for model "
-               << req_pb->model_id();
-    ctrl->SetFailed("Failed to restore rate limiter");
-    return;
-  }
-
-  master->set_master_status(MasterStatus::WAKEUP);
   // Success: return HTTP 200 with empty body
 }
 

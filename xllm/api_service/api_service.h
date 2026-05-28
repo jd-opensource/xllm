@@ -213,6 +213,15 @@ class APIService : public proto::XllmAPIService {
   bool add_model_master_if_absent(const std::string& model_id, Master* master);
   Master* get_model_master(const std::string& model_id) const;
 
+  // Core action helpers shared between brpc-typed and Http variants.
+  // Each returns true on success. On failure, the human readable reason is
+  // written to `error_message` so the caller can either set the HTTP response
+  // body or call `brpc::Controller::SetFailed`.
+  bool do_fork_master(const proto::MasterInfos& request,
+                      std::string* error_message);
+  bool do_sleep(const proto::MasterInfos& request, std::string* error_message);
+  bool do_wakeup(const proto::MasterInfos& request, std::string* error_message);
+
   Master* master_;
   ChatHttpHandler chat_completions_handler_;
   mutable std::shared_mutex masters_mutex_;
