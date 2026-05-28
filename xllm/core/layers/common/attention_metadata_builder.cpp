@@ -32,6 +32,17 @@ namespace xllm::layer {
 
 namespace {
 
+torch::TensorOptions int32_options_like(const torch::Tensor& preferred,
+                                        const torch::Tensor& fallback) {
+  if (preferred.defined()) {
+    return preferred.options().dtype(torch::kInt32);
+  }
+  if (fallback.defined()) {
+    return fallback.options().dtype(torch::kInt32);
+  }
+  return torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU);
+}
+
 AttentionMetadata build_attention_metadata(
     const ModelInputParams& params,
     bool enable_mla,
@@ -187,30 +198,30 @@ AttentionMetadata build_attention_metadata(
   }
   if (params.attention.device.q_seq_lens.defined()) {
     attn_metadata.q_seq_lens = params.attention.device.q_seq_lens;
-    CHECK(params.attention.device.q_cu_seq_lens.defined())
-        << "q_cu_seq_lens must be provided by upstream";
+    torch::Tensor q_cu_seq_lens = params.attention.device.q_cu_seq_lens;
+    if (!q_cu_seq_lens.defined()) {
+      q_cu_seq_lens = torch::cumsum(attn_metadata.q_seq_lens, 0);
+    }
+    q_cu_seq_lens = q_cu_seq_lens.to(torch::kInt32);
     const bool q_cu_has_leading_zero =
         !params.attention.host.q_cu_seq_lens.empty() &&
         params.attention.host.q_cu_seq_lens.front() == 0;
-    if (params.graph.tiling_data.defined()) {
-      attn_metadata.q_cu_seq_lens = params.attention.device.q_cu_seq_lens;
-    } else if (q_cu_has_leading_zero) {
-      attn_metadata.q_cu_seq_lens = params.attention.device.q_cu_seq_lens;
+    if (params.graph.tiling_data.defined() || q_cu_has_leading_zero) {
+      attn_metadata.q_cu_seq_lens = q_cu_seq_lens;
     } else {
-      auto zero =
-          torch::zeros({1}, params.attention.device.q_cu_seq_lens.options());
-      attn_metadata.q_cu_seq_lens =
-          torch::cat({zero, params.attention.device.q_cu_seq_lens}, 0);
+      torch::Tensor zero = torch::zeros({1}, q_cu_seq_lens.options());
+      attn_metadata.q_cu_seq_lens = torch::cat({zero, q_cu_seq_lens}, 0);
     }
   }
 #endif
 
   attn_metadata.is_dummy = (params.meta.q_max_seq_len == 0);
   if (attn_metadata.is_dummy) {
-    torch::TensorOptions options = torch::TensorOptions().dtype(torch::kInt);
-    if (params.attention.device.new_cache_slots.defined()) {
-      options = params.attention.device.new_cache_slots.options();
-    } else {
+    torch::TensorOptions options =
+        int32_options_like(params.attention.device.new_cache_slots,
+                           params.attention.device.q_seq_lens);
+    if (!params.attention.device.new_cache_slots.defined() &&
+        !params.attention.device.q_seq_lens.defined()) {
       CHECK(device.has_value())
           << "dummy attention requires device when new_cache_slots is "
              "undefined";

@@ -142,6 +142,9 @@ struct DeepSeekV4KVCacheTensors {
 bool is_linear_attention_layer(int64_t layer_idx,
                                int64_t full_attention_interval);
 
+// Whether NPU KV cache should use FRACTAL_NZ layout for a model type.
+bool use_npu_nz_kv_cache_layout(const std::string& model_type);
+
 KVCacheTensors create_kv_cache_tensors(
     const KVCacheShape& kv_cache_shape,
     const KVCacheCreateOptions& create_options);

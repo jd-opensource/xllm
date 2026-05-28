@@ -1143,6 +1143,9 @@ bool FusedMoEImpl::can_use_ep2_dispatch_combine(
   }
   const int32_t mode = fused_mc2_mode();
   if (mode == 1) {
+    if (input_params.enable_graph && !dispatch_ffn_combine_prepared_) {
+      return false;
+    }
     return is_w8a8_dynamic_quant_method(resolved_moe_quant_method_) &&
            xllm::kernel::has_dispatch_ffn_combine() && w13_is_loaded_ &&
            w2_is_loaded_ && w13_scale_is_loaded_ && w2_scale_is_loaded_ &&
@@ -1152,6 +1155,9 @@ bool FusedMoEImpl::can_use_ep2_dispatch_combine(
     return false;
   }
   if (mode == 2) {
+    if (input_params.enable_graph && !dispatch_gmm_combine_decode_prepared_) {
+      return false;
+    }
     return is_w8a8_dynamic_quant_method(resolved_moe_quant_method_) &&
            xllm::kernel::has_dispatch_gmm_combine_decode() && w13_is_loaded_ &&
            w2_is_loaded_ && w13_scale_is_loaded_ && w2_scale_is_loaded_ &&
@@ -1352,7 +1358,6 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
     const torch::Tensor& topk_weights,
     const torch::Tensor& topk_ids,
     const ModelInputParams& input_params) {
-  (void)input_params;
   prepare_dispatch_ffn_combine_inputs();
   prepare_dispatch_gmm_combine_decode_inputs();
 
@@ -1374,10 +1379,10 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
   int64_t global_bs = input_2d.size(0) * ep_world_size;
   if (parallel_args_.dp_size() > 1 &&
       !input_params.parallel.dp_global_token_nums.empty()) {
-    global_bs =
-        std::accumulate(input_params.parallel.dp_global_token_nums.begin(),
-                        input_params.parallel.dp_global_token_nums.end(),
-                        int64_t{0});
+    // The dispatch/combine operators accept 0 as auto global batch size.
+    // Explicit sums are wrong for uneven DP batches such as graph warmup with
+    // one active DP rank and one empty DP rank.
+    global_bs = 0;
   }
 
   if (dispatch_ffn_combine_prepared_) {

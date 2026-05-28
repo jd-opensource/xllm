@@ -21,8 +21,8 @@ limitations under the License.
 #include <cstddef>
 #include <utility>
 
-#include "common/global_flags.h"
 #include "core/framework/config/kv_cache_config.h"
+#include "framework/kv_cache/kv_cache_utils.h"
 #include "util/utils.h"
 #include "worker.pb.h"
 
@@ -239,8 +239,7 @@ void KVCacheShape::init_key_cache_shape(const KVCacheCapacity& kv_cache_cap,
                                         int64_t world_size) {
   if (model_args.enable_mla()) {
 #if defined(USE_NPU)
-    if (model_args.model_type() == "deepseek_v3" &&
-        ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()) {
+    if (use_npu_nz_kv_cache_layout(model_args.model_type())) {
       key_cache_shape_ = std::vector<int64_t>{
           kv_cache_cap.n_blocks(),
           util::ceil_div(model_args.kv_lora_rank(), kNzAlignment),
@@ -271,8 +270,7 @@ void KVCacheShape::init_value_cache_shape(const KVCacheCapacity& kv_cache_cap,
                                           int64_t world_size) {
   if (model_args.enable_mla()) {
 #if defined(USE_NPU)
-    if (model_args.model_type() == "deepseek_v3" &&
-        ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()) {
+    if (use_npu_nz_kv_cache_layout(model_args.model_type())) {
       value_cache_shape_ = std::vector<int64_t>{
           kv_cache_cap.n_blocks(),
           util::ceil_div(model_args.qk_rope_head_dim(), kNzAlignment),

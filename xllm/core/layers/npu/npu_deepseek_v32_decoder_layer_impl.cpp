@@ -24,8 +24,8 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
-#include "common/global_flags.h"
 #include "core/framework/config/eplb_config.h"
+#include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
@@ -343,7 +343,10 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_basic_parameters(
     param.enableSpeculate = true;
   }
   param.maskfree = true;  // TODO
-  param.enableSwiGLUQuantForSharedExperts = false;
+  const bool is_shared_expert_layer =
+      layer_id_ >= args.first_k_dense_replace() && args.n_shared_experts() > 0;
+  param.enableSwiGLUQuantForSharedExperts =
+      quantize_type_ == "w8a8_dynamic" && is_shared_expert_layer;
   if ((::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) &&
       ::xllm::ParallelConfig::get_instance().cp_size() > 1 && is_prefill) {
@@ -457,7 +460,8 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
   // runtime; keep it for eager mode and fall back to the standard dynamic-ep
   // path when graph is enabled.
   param.enableLcocAll2All =
-      param.isPrefill && cp_size_ == 1 && dp_size_ == 1 && !FLAGS_enable_graph;
+      param.isPrefill && cp_size_ == 1 && dp_size_ == 1 &&
+      !::xllm::ExecutionConfig::get_instance().enable_graph();
 
   if (layer_id_ >= param.firstKDenseReplace) {
     param.enableQkvdownDp = false;

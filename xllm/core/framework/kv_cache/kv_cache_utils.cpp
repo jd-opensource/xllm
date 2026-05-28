@@ -19,7 +19,6 @@ limitations under the License.
 
 #include <limits>
 
-#include "common/global_flags.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #if defined(USE_MLU)
@@ -100,6 +99,11 @@ bool is_linear_attention_layer(int64_t layer_idx,
     return false;
   }
   return (layer_idx + 1) % full_attention_interval != 0;
+}
+
+bool use_npu_nz_kv_cache_layout(const std::string& model_type) {
+  return (model_type == "deepseek_v3" || model_type == "deepseek_v3_mtp") &&
+         ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
 }
 
 KVCacheTensors create_kv_cache_tensors(
@@ -290,10 +294,8 @@ LinearAttentionKVCacheTensors create_linear_attention_kv_cache_tensors(
 
 #if defined(USE_NPU)
 aclFormat get_npu_kv_cache_format(const std::string& model_type) {
-  return model_type == "deepseek_v3" &&
-                 ::xllm::KVCacheConfig::get_instance().enable_prefix_cache()
-             ? ACL_FORMAT_FRACTAL_NZ
-             : ACL_FORMAT_ND;
+  return use_npu_nz_kv_cache_layout(model_type) ? ACL_FORMAT_FRACTAL_NZ
+                                                : ACL_FORMAT_ND;
 }
 #endif
 

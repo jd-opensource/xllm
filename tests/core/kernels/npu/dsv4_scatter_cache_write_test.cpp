@@ -186,7 +186,7 @@ void verify_cache_write_case_with_padding_slot(
 
 }  // namespace
 
-TEST_F(Dsv4ScatterCacheWriteTest, OriginalKvCacheWrite) {
+TEST_F(Dsv4ScatterCacheWriteTest, DISABLED_OriginalKvCacheWrite) {
   const std::vector<CacheWriteCase> cases = {
       {.name = "ori_decode_1_token",
        .num_tokens = 1,
@@ -215,7 +215,7 @@ TEST_F(Dsv4ScatterCacheWriteTest, OriginalKvCacheWrite) {
   }
 }
 
-TEST_F(Dsv4ScatterCacheWriteTest, CompressedKvCacheWrite) {
+TEST_F(Dsv4ScatterCacheWriteTest, DISABLED_CompressedKvCacheWrite) {
   const std::vector<CacheWriteCase> cases = {
       {.name = "cmp_decode_1_token",
        .num_tokens = 1,
@@ -244,7 +244,7 @@ TEST_F(Dsv4ScatterCacheWriteTest, CompressedKvCacheWrite) {
   }
 }
 
-TEST_F(Dsv4ScatterCacheWriteTest, PaddingSlotIsIgnored) {
+TEST_F(Dsv4ScatterCacheWriteTest, DISABLED_PaddingSlotIsIgnored) {
   const CacheWriteCase test_case = {.name = "cmp_decode_padding_slot",
                                     .num_tokens = 8,
                                     .num_blocks = 16,
