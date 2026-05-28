@@ -21,6 +21,24 @@ def get_cpu_arch() -> str:
     else:
         raise ValueError(f"❌ Unsupported architecture: {arch}")
 
+def get_ascend_platform() -> str:
+    set_npu_envs()
+
+    import acl
+
+    acl.init()
+    soc_name = acl.get_soc_name().upper()
+    if "910B" in soc_name:
+        return "a2"
+    if "ASCEND910_93" in soc_name or "910C" in soc_name:
+        return "a3"
+    if "ASCEND950" in soc_name:
+        return "a5"
+    if "910" in soc_name:
+        return "a2"
+    raise ValueError(f"Unsupported Ascend SoC for TileLang wheel: {soc_name}")
+
+
 # get device type
 def get_device_type() -> str:
     import torch

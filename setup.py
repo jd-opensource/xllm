@@ -26,6 +26,7 @@ from scripts.build_support.env import (
 )
 from scripts.build_support.utils import (
     check_and_install_pre_commit,
+    get_ascend_platform,
     get_base_dir,
     get_cmake_dir,
     get_cpu_arch,
@@ -42,9 +43,19 @@ BUILD_TEST_FILE: bool = True
 BUILD_EXPORT: bool = True
 
 
+def _ensure_tilelang_ascend_ready(target_platform: str, arch: str) -> None:
+    compiler_parent = os.path.join(get_base_dir(), "xllm")
+    if compiler_parent not in sys.path:
+        sys.path.insert(0, compiler_parent)
+    from compiler.tilelang.bootstrap import prepare_ascend
+
+    prepare_ascend(target_platform, arch)
+
+
 def _maybe_compile_tilelang_kernels(device: str) -> None:
     if device != "npu":
         return
+    target_platform = get_ascend_platform()
 
     output_root = os.path.join(get_cmake_dir(), "xllm", "compiler", "tilelang")
     os.makedirs(output_root, exist_ok=True)
@@ -60,6 +71,8 @@ def _maybe_compile_tilelang_kernels(device: str) -> None:
         "ascend",
         "--output-root",
         output_root,
+        "--device",
+        target_platform,
     ]
     logger.info("compiling TileLang kernels via source-tree launcher")
     subprocess.check_call(cmd, cwd=base_dir, env=env)
@@ -631,8 +644,11 @@ if __name__ == "__main__":
     device = config['device']
     if device == 'auto':
         device = get_device_type()
+    target_platform = get_ascend_platform() if device == "npu" else None
     logger.info(f"🚀 Build xllm with CPU arch: {arch} and target device: {device}")
 
+    if device == "npu":
+        _ensure_tilelang_ascend_ready(target_platform, arch)
     pre_build(device)
 
     generate_so = config['generate_so']
