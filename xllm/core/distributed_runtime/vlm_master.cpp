@@ -449,6 +449,7 @@ std::shared_ptr<Request> VLMMaster::generate_request(
     return nullptr;
   }
 
+  mm_inputs.set_mm_config(sp.mm_config);
   MMData mm_data;
   if (!mm_inputs.empty() && !image_processor_->process(mm_inputs, mm_data)) {
     LOG(ERROR) << " image processor process failed.";

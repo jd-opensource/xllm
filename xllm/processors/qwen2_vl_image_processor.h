@@ -46,10 +46,14 @@ class Qwen2VLImageProcessor : public ImageProcessor {
                                                  int32_t max_pixels) const;
 
  private:
-  bool process_images(std::vector<torch::Tensor> images, MMData& mm_datas);
+  bool process_images(std::vector<torch::Tensor> images,
+                      MMData& mm_datas,
+                      const std::optional<MMConfig>& mm_config);
   bool process_image(torch::Tensor image,
                      torch::Tensor& pixel_values,
-                     torch::Tensor& thw);
+                     torch::Tensor& thw,
+                     int32_t min_pixels,
+                     int32_t max_pixels);
 
   bool process_images_embedding(
       const std::vector<EmbeddingOutput>& images_embedding,
@@ -57,11 +61,16 @@ class Qwen2VLImageProcessor : public ImageProcessor {
 
   bool process_videos(std::vector<torch::Tensor> videos,
                       std::vector<VideoMetadata> video_meta_list,
-                      MMData& mm_datas);
+                      MMData& mm_datas,
+                      const std::optional<MMConfig>& mm_config);
   bool process_video(torch::Tensor video,
                      VideoMetadata& metadata,
                      torch::Tensor& pixel_values,
-                     torch::Tensor& thw);
+                     torch::Tensor& thw,
+                     int32_t min_pixels,
+                     int32_t max_pixels,
+                     int32_t num_frames,
+                     double set_fps);
   virtual torch::Tensor sample_frames(const VideoMetadata& metadata,
                                       int32_t temporal_patch_size,
                                       int32_t min_frames,
@@ -95,6 +104,9 @@ class Qwen2VLImageProcessor : public ImageProcessor {
 
   int32_t min_frames_ = 4;
   int32_t max_frames_ = 768;
+
+  int32_t num_frames_ = -1;
+  double set_fps_ = 2.0;
 };
 
 }  // namespace xllm

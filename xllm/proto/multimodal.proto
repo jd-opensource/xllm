@@ -31,6 +31,15 @@ message MMInputData {
   optional Embedding audio_embedding = 8;
 }
 
+message MMConfig {
+  optional int32 max_pixels = 1;
+  optional int32 min_pixels = 2;
+  optional int32 video_max_pixels = 3;
+  optional int32 video_min_pixels = 4;
+  optional int32 num_frames = 5;
+  optional double fps = 6;
+}
+
 message MMChatMessage {
   // the role of the messages author. One of "system", "user", "assistant".
   optional string role = 1;
@@ -42,7 +51,7 @@ message MMChatMessage {
   optional string tool_call_id = 4;
 }
 
-// Next Id: 43
+// Next Id: 44
 message MMChatRequest {
 
   // ID of the model to use. You can use the ListModels endpoint to list available models.
@@ -166,4 +175,6 @@ message MMChatRequest {
 
   // xllm_service rpc addr(ip:rpc_port) that forwards this request.
   optional string source_xservice_addr = 41;
+
+  optional MMConfig mm_config = 43;
 }

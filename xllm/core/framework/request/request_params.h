@@ -28,6 +28,7 @@ limitations under the License.
 #include "common/macros.h"
 #include "completion.pb.h"
 #include "core/common/macros.h"
+#include "core/common/message.h"
 #include "core/common/types.h"
 #include "embedding.pb.h"
 #include "multimodal.pb.h"
@@ -170,6 +171,8 @@ struct RequestParams {
   bool is_sample_request = false;
 
   std::vector<SampleSlot> sample_slots;
+
+  std::optional<MMConfig> mm_config;
 };
 
 }  // namespace xllm

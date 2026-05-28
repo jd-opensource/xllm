@@ -169,6 +169,7 @@ Qwen2VLImageProcessor::Qwen2VLImageProcessor(const ModelArgs& args) {
 }
 
 bool Qwen2VLImageProcessor::process(const MMInput& inputs, MMData& datas) {
+  const auto& mm_config = inputs.mm_config();
   for (const auto& input_item : inputs) {
     std::vector<torch::Tensor> images;
     std::vector<EmbeddingInput> images_embedding;
@@ -208,14 +209,14 @@ bool Qwen2VLImageProcessor::process(const MMInput& inputs, MMData& datas) {
     }
 
     if (!images.empty()) {
-      if (!this->process_images(images, datas)) {
+      if (!this->process_images(images, datas, mm_config)) {
         LOG(ERROR) << " process image failed.";
         return false;
       }
     }
 
     if (!videos.empty()) {
-      if (!this->process_videos(videos, video_meta_list, datas)) {
+      if (!this->process_videos(videos, video_meta_list, datas, mm_config)) {
         LOG(ERROR) << " process video failed.";
         return false;
       }
@@ -244,13 +245,28 @@ bool Qwen2VLImageProcessor::process_images_embedding(
   return true;
 }
 
-bool Qwen2VLImageProcessor::process_images(std::vector<torch::Tensor> images,
-                                           MMData& mm_datas) {
+bool Qwen2VLImageProcessor::process_images(
+    std::vector<torch::Tensor> images,
+    MMData& mm_datas,
+    const std::optional<MMConfig>& mm_config) {
+  int32_t min_pixels = min_pixels_;
+  int32_t max_pixels = max_pixels_;
+
+  if (mm_config) {
+    if (mm_config->min_pixels) {
+      min_pixels = std::max(min_pixels_, *mm_config->min_pixels);
+    }
+
+    if (mm_config->max_pixels && *mm_config->max_pixels > min_pixels) {
+      max_pixels = std::min(max_pixels_, *mm_config->max_pixels);
+    }
+  }
+
   torch::Tensor pixel_values;
   torch::Tensor thw;
 
   for (const auto& img : images) {
-    if (!this->process_image(img, pixel_values, thw)) {
+    if (!this->process_image(img, pixel_values, thw, min_pixels, max_pixels)) {
       LOG(ERROR)
           << "Failed to process image. The shape(channels, height, width) is: "
           << img.sizes();
@@ -266,7 +282,9 @@ bool Qwen2VLImageProcessor::process_images(std::vector<torch::Tensor> images,
 
 bool Qwen2VLImageProcessor::process_image(torch::Tensor image,
                                           torch::Tensor& pixel_values,
-                                          torch::Tensor& thw) {
+                                          torch::Tensor& thw,
+                                          int32_t min_pixels,
+                                          int32_t max_pixels) {
   auto shape = image.sizes();
   auto resized_height = shape[1];
   auto resized_width = shape[2];
@@ -278,8 +296,8 @@ bool Qwen2VLImageProcessor::process_image(torch::Tensor image,
     auto size = smart_resize_image(resized_height,
                                    resized_width,
                                    patch_size_ * merge_size_,
-                                   min_pixels_,
-                                   max_pixels_);
+                                   min_pixels,
+                                   max_pixels);
     // size_["shortest_edge"],
     // size_["longest_edge"]);
     if (!size) {
@@ -337,7 +355,31 @@ bool Qwen2VLImageProcessor::process_image(torch::Tensor image,
 bool Qwen2VLImageProcessor::process_videos(
     std::vector<torch::Tensor> videos,
     std::vector<VideoMetadata> video_meta_list,
-    MMData& mm_datas) {
+    MMData& mm_datas,
+    const std::optional<MMConfig>& mm_config) {
+  int32_t min_pixels = min_pixels_;
+  int32_t max_pixels = max_pixels_;
+  int32_t num_frames = num_frames_;
+  double set_fps = set_fps_;
+
+  if (mm_config) {
+    if (mm_config->min_pixels) {
+      min_pixels = std::max(min_pixels_, *mm_config->min_pixels);
+    }
+
+    if (mm_config->max_pixels && *mm_config->max_pixels > min_pixels) {
+      max_pixels = std::min(max_pixels_, *mm_config->max_pixels);
+    }
+
+    if (mm_config->num_frames.value_or(0) > 0) {
+      num_frames = *mm_config->num_frames;
+      set_fps = 0.0;
+    } else if (mm_config->fps.value_or(0.0) > 0.0) {
+      set_fps = *mm_config->fps;
+      num_frames = -1;
+    }
+  }
+
   torch::Tensor pixel_values;
   torch::Tensor thw;
 
@@ -347,7 +389,14 @@ bool Qwen2VLImageProcessor::process_videos(
   for (size_t i = 0; i < video_size; ++i) {
     auto& vid = videos[i];
     auto& metadata = video_meta_list[i];
-    if (!this->process_video(vid, metadata, pixel_values, thw)) {
+    if (!this->process_video(vid,
+                             metadata,
+                             pixel_values,
+                             thw,
+                             min_pixels,
+                             max_pixels,
+                             num_frames,
+                             set_fps)) {
       LOG(ERROR) << "Failed to process video. The shape(num_frames, channels, "
                     "height, width) is: "
                  << vid.sizes();
@@ -373,7 +422,11 @@ bool Qwen2VLImageProcessor::process_videos(
 bool Qwen2VLImageProcessor::process_video(torch::Tensor origin_video,
                                           VideoMetadata& metadata,
                                           torch::Tensor& pixel_values,
-                                          torch::Tensor& thw) {
+                                          torch::Tensor& thw,
+                                          int32_t min_pixels,
+                                          int32_t max_pixels,
+                                          int32_t num_frames,
+                                          double set_fps) {
   if (origin_video.dim() != 4) {
     LOG(FATAL) << "video must be TCHW";
   }
@@ -384,8 +437,8 @@ bool Qwen2VLImageProcessor::process_video(torch::Tensor origin_video,
                                   temporal_patch_size_,
                                   min_frames_,
                                   max_frames_,
-                                  /*num_frames=*/-1,
-                                  /*set_fps=*/2.0);
+                                  num_frames,
+                                  set_fps);
   } else {
     indices = torch::arange(
         0, origin_video.size(0), torch::TensorOptions().dtype(torch::kInt32));
@@ -421,8 +474,8 @@ bool Qwen2VLImageProcessor::process_video(torch::Tensor origin_video,
                                    resized_width,
                                    temporal_patch_size_,
                                    patch_size_ * merge_size_,
-                                   min_pixels_,
-                                   max_pixels_);
+                                   min_pixels,
+                                   max_pixels);
     if (!size) {
       return false;
     }
