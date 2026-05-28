@@ -679,8 +679,8 @@ if __name__ == "__main__":
         long_description_content_type="text/markdown",
         url="https://github.com/jd-opensource/xllm",
         project_urls={
-            "Homepage": "https://xllm.readthedocs.io/zh-cn/latest/",
-            "Documentation": "https://xllm.readthedocs.io/zh-cn/latest/",
+            "Homepage": "https://xllm-ai.com/",
+            "Documentation": "https://docs.xllm-ai.com/",
         },
         classifiers=[
             "Intended Audience :: Developers",

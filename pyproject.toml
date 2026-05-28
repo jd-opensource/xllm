@@ -24,8 +24,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://xllm.readthedocs.io/zh-cn/latest/"
-Documentation = "https://xllm.readthedocs.io/zh-cn/latest/"
+Homepage = "https://docs.xllm-ai.com/"
+Documentation = "https://docs.xllm-ai.com/"
 Repository = "https://github.com/jd-opensource/xllm"
 
 [project.scripts]
