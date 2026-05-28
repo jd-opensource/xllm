@@ -706,7 +706,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 #if defined(USE_NPU)
   const bool needs_kv_split_prep =
       needs_cp_prefill_side && util::enable_kvcache_split();
-  const bool needs_in_prefix_slots =
+  const bool have_prefix_slots =
       needs_cp_prefill_side &&
       (::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill());
@@ -724,7 +724,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
           cp_working.host_token_ids(),
           cp_working.host_positions(),
           cp_working.input_params.attention.device.q_seq_lens,
-          needs_in_prefix_slots,
+          have_prefix_slots,
           cp_working.input_params.attention.host.kv_cache_tokens_nums,
           options_.block_size(),
           parallel_args_.kv_split_size_effective());
@@ -745,7 +745,7 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
       processed_input.input_params.attention.device.new_cache_slots =
           new_cache_slots.to(device_);
     }
-    if (needs_in_prefix_slots) {
+    if (have_prefix_slots) {
       torch::Tensor in_prefix_slots = compute_in_prefix_slots(*cp_input);
       processed_input.input_params.attention.device.in_prefix_slots =
           in_prefix_slots.to(device_);
