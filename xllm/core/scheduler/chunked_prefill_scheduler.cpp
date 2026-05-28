@@ -337,7 +337,11 @@ void ChunkedPrefillScheduler::handle_prefill_requests(
     // memory budgeting, so we skip this check.
     if (!options_.enable_disagg_pd() &&
         kv_cache_manager_->kv_cache_utilization() >=
+<<<<<<< Updated upstream
             SchedulerConfig::get_instance()
+=======
+            ::xllm::SchedulerConfig::get_instance()
+>>>>>>> Stashed changes
                 .prefill_scheduling_memory_usage_threshold()) {
       blocks_exhausted = true;
       break;
