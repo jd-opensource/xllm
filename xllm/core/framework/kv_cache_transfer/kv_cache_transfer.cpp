@@ -83,6 +83,7 @@ std::vector<TransferKVInfo> filter_kv_split_infos(
     const size_t n_local = kv_info.local_blocks_ids.size();
     TransferKVInfo filtered = kv_info;
     filtered.remote_blocks_ids.clear();
+    size_t mapped_local = 0;
     if (n_local > 0) {
       filtered.remote_blocks_ids.reserve(n_local);
       for (size_t k = 0; k < n_local; ++k) {
@@ -93,8 +94,19 @@ std::vector<TransferKVInfo> filter_kv_split_infos(
         }
         filtered.remote_blocks_ids.emplace_back(
             kv_info.remote_blocks_ids[remote_idx]);
+        ++mapped_local;
       }
     }
+    // local_block[k] maps to remote_blocks_ids[kv_split_rank + k *
+    // kv_split_size]. When the strided remote index runs past the D-side block
+    // list (the prompt spans multiple logical blocks and the last one is not
+    // full, which only happens for kv_split_rank > 0), the loop above stops
+    // early. local_blocks_ids must then be truncated to the blocks that
+    // actually got a remote target; otherwise src/dst counts differ and
+    // PushKvBlocks rejects the whole transfer, leaving decode with
+    // un-transferred KV (-> repetition). The dropped tail blocks correspond to
+    // tokens beyond the prompt length, so the truncation is loss-free.
+    filtered.local_blocks_ids.resize(mapped_local);
     if (!filtered.remote_blocks_ids.empty() ||
         !filtered.remote_linear_state_ids.empty()) {
       filtered_kv_infos.push_back(std::move(filtered));
