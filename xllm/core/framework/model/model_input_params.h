@@ -341,6 +341,7 @@ struct AttentionHostInput {
   std::vector<int32_t> q_seq_lens;
   std::vector<int32_t> q_cu_seq_lens;
   std::vector<int32_t> kv_seq_lens;
+  std::vector<int32_t> kv_cu_seq_lens;
   std::vector<int32_t> new_cache_slots;
   std::vector<int32_t> kv_cache_tokens_nums;
   std::vector<int32_t> ring_cur_seqlen;

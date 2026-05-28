@@ -28,6 +28,19 @@ cc_test(
     GTest::gtest_main
 )
 
+cc_test(
+  NAME
+    deepseek_v4_dsa_metadata_builder_test
+  SRCS
+    dsa_metadata_builder_mlu_test.cpp
+  DEPS
+    :mlu_layers
+    :common_layers
+    glog::glog
+    torch
+    GTest::gtest_main
+)
+
 # MoE Gate unit test for MLU (uses layers/mlu/moe_gate)
 cc_test(
   NAME

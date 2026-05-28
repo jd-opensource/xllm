@@ -9,6 +9,8 @@ cc_library(
     deepseek_v2_decoder_layer_impl.h
     deepseek_v2_sparse_moe_block.h
     indexer.h
+    deepseek_v4/dsa_cache_mapping.h
+    deepseek_v4/dsa_metadata_builder_mlu.h
     deepseek_v32_sp_context.h
     deepseek_v32_sp_plan.h
     moe_gate.h
@@ -23,6 +25,7 @@ cc_library(
     deepseek_v2_decoder_layer_impl.cpp
     deepseek_v2_sparse_moe_block.cpp
     indexer.cpp
+    deepseek_v4/dsa_metadata_builder_mlu.cpp
     moe_gate.cpp
     fused_moe.cpp
     fused_moe_base.cpp

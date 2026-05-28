@@ -84,7 +84,7 @@ AttentionMetadata build_attention_metadata(
   attn_metadata.unshared_plan_info = std::make_shared<PlanInfo>();
 #endif
 
-#if defined(USE_CUDA) || defined(USE_NPU)
+#if defined(USE_CUDA) || defined(USE_NPU) || defined(USE_MLU)
   // Use explicit attn_mask if provided; otherwise fall back to
   // graph_buffer.attn_mask (e.g. Qwen2_5_VL sets graph_buffer.attn_mask for
   // LongCat text encoding)
@@ -180,7 +180,7 @@ AttentionMetadata build_attention_metadata(
       params.meta.batch_forward_type.is_chunked_prefill();
   attn_metadata.is_prefill = params.meta.batch_forward_type.is_prefill();
 
-  // enable_mla is for DeepSeekv32 on mlu device
+  // MLA-family MLU paths require per-sequence q/kv lengths during prefill.
   if (!attn_metadata.is_prefill || enable_mla) {
     attn_metadata.block_table = params.attention.device.block_tables;
 #if !defined(USE_NPU) && !defined(USE_CUDA)

@@ -47,6 +47,12 @@ struct DSAGroupInfo {
 
 namespace layer {
 
+struct DSACompressedAttentionMetadata {
+  torch::Tensor context_lens;
+  torch::Tensor block_table_for_attn;
+  int64_t max_context_len = 0;
+};
+
 // DSAMetadata contains DeepSeek V4 sparse attention specific metadata,
 // aligned with Python DSAMetadata(AttentionMetadata) class.
 // It is built once at the beginning of model forward pass and reused by
@@ -75,6 +81,7 @@ struct DSAMetadata {
   // cp_input_dict: context-parallel inputs placeholder (reserved, optional)
   std::unordered_map<std::string, torch::Tensor> cp_input_dict;
 
+  // NPU-only DSA metadata fields.
   // RoPE caches selected for the current layer's q/kv/output RoPE.
   torch::Tensor cos;
   torch::Tensor sin;
@@ -134,6 +141,43 @@ struct DSAMetadata {
   // single host-to-device transfer. Individual metadata tensors may be views
   // into this buffer.
   torch::Tensor packed_metadata_buffer;
+
+  std::unordered_map<int64_t, torch::Tensor> cmp_slots_dict;
+
+  // Host-side batch metadata for MLU small operators.
+  // query_start_offsets: [0, cumsum(seq_lens_q)].
+  std::vector<int64_t> query_start_offsets;
+  // start_pos_vec[i] = actual_seq_lengths_kv[i] - seq_lens_q[i].
+  std::vector<int64_t> start_pos_vec;
+  // SWA window plan derived from start_pos_vec and model window_size.
+  // swa_start_pos_vec[i] is the absolute first token retained for sequence i.
+  std::vector<int64_t> swa_start_pos_vec;
+  // swa_history_lens: per-sequence persisted SWA history to read before q.
+  torch::Tensor swa_history_lens;
+  // swa_context_lens: per-query-token local context length from swa_start.
+  torch::Tensor swa_context_lens;
+  int64_t swa_max_history_len = 0;
+  int64_t swa_max_context_len = 0;
+
+  // MLU-only canonical sequence lengths consumed by DSA operators.
+  // q_cu_seq_lens / kv_cu_seq_lens: (batch_size+1,) with leading 0.
+  torch::Tensor q_cu_seq_lens;
+  torch::Tensor kv_cu_seq_lens;
+  // kv_seq_lens / q_seq_lens: (batch_size,) per-sequence lengths.
+  torch::Tensor kv_seq_lens;
+  torch::Tensor q_seq_lens;
+  // index_c4_seq_lens: (batch_size,) compressed kv lengths for indexer.
+  torch::Tensor index_c4_seq_lens;
+  int64_t index_total_c4_len = 0;
+  int64_t index_max_c4_len = 0;
+
+  // MLU-only ratio=128 compressed attention final decode inputs.
+  // Built once per model forward before layer iteration.
+  DSACompressedAttentionMetadata c128_attn_metadata;
+
+  // MLU-only RoPE cos/sin tables (shared across all layers, set per forward).
+  torch::Tensor compressed_cos_table;
+  torch::Tensor compressed_sin_table;
 
   // Cache spec per layer
   // caches_info[layer_id][cache_idx] = {group_id, type, ratio, block_size}

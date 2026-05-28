@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <cstdint>
 #include <vector>
 
 namespace xllm {
@@ -29,41 +30,25 @@ namespace layer {
 struct AttentionMetadata;
 struct DSAMetadata;
 
-// Builder class for DSAMetadata.
-// Builds a complete AttentionMetadata (with dsa_metadata populated) from
-// ModelInputParams and model-specific data.  This replaces the need for a
-// separate AttentionMetadataBuilder::build() call in DeepSeek V4.
-class DSAMetadataBuilder {
+// MLU DeepSeek V4 builder for DSAMetadata.
+class DSAMetadataBuilderMlu final {
  public:
-  // Build a complete AttentionMetadata with DSAMetadata populated inside.
-  // Internally constructs the base AttentionMetadata fields (q_cu_seq_lens,
-  // block_table, slot_mapping, etc.) and the DSA-specific fields (RoPE,
-  // block tables, slot mappings, sequence lengths, compressed positions).
-  //
-  //   params: batch-level model input params
-  //   positions: token position IDs tensor
-  //   dsa_cos_sin: precomputed RoPE cos/sin table (optional, can be undefined)
-  //   caches_info: per-layer cache specs [layer_id][cache_idx]
-  //   group_infos: per-group info [group_id]
   static AttentionMetadata build(
       const ModelInputParams& params,
       const torch::Tensor& positions,
-      const torch::Tensor& dsa_cos_sin,
       const std::vector<std::vector<DSACacheInfo>>& caches_info,
       const std::vector<DSAGroupInfo>& group_infos,
-      const torch::Tensor& dsa_c4_cos_sin = torch::Tensor(),
-      const torch::Tensor& dsa_c128_cos_sin = torch::Tensor());
+      int64_t window_size);
 
  private:
   // Build DSA-specific fields into dsa_metadata.
   static void build_dsa_fields(
       const ModelInputParams& params,
+      const AttentionMetadata& attn_metadata,
       const torch::Tensor& positions,
-      const torch::Tensor& dsa_cos_sin,
-      const torch::Tensor& dsa_c4_cos_sin,
-      const torch::Tensor& dsa_c128_cos_sin,
       const std::vector<std::vector<DSACacheInfo>>& caches_info,
       const std::vector<DSAGroupInfo>& group_infos,
+      int64_t window_size,
       DSAMetadata& dsa_metadata);
 
   // Step 1: expand block_table to slot array for one manager.
@@ -77,15 +62,13 @@ class DSAMetadataBuilder {
   // Compute how many slots a single seq needs for this group.
   static int64_t compute_slot_num(const DSAGroupInfo& gi, int64_t token_len);
 
-  // Step 2: per-group processing.
+  // Per-group processing.
   static void process_group(const torch::Tensor& raw_bt,
                             const DSAGroupInfo& gi,
                             const std::vector<int32_t>& ctx_lens,
                             const std::vector<int32_t>& q_lens,
                             int32_t batch_size,
                             int64_t total_tokens,
-                            int64_t graph_slot_capacity,
-                            int32_t block_table_capacity_cols,
                             torch::Tensor& out_bt,
                             torch::Tensor& out_slots);
 
@@ -96,8 +79,6 @@ class DSAMetadataBuilder {
                                   const std::vector<int32_t>& q_lens,
                                   int32_t batch_size,
                                   int64_t total_tokens,
-                                  int64_t graph_slot_capacity,
-                                  int32_t block_table_capacity_cols,
                                   torch::Tensor& out_bt,
                                   torch::Tensor& out_slots);
 
@@ -106,22 +87,29 @@ class DSAMetadataBuilder {
                                 const std::vector<int32_t>& ctx_lens,
                                 const std::vector<int32_t>& q_lens,
                                 int32_t batch_size,
-                                int64_t graph_slot_capacity,
-                                int32_t block_table_capacity_cols,
                                 torch::Tensor& out_bt,
                                 torch::Tensor& out_slots);
 
-  // Build actual_seq_lengths_kv and actual_seq_lengths_query.
-  static void build_seq_lengths(const ModelInputParams& params,
-                                const torch::Device& target_device,
+  static void build_c128_meta(DSAMetadata& dsa_metadata,
+                              const std::vector<torch::Tensor>& proc_bt,
+                              const std::vector<DSAGroupInfo>& group_infos,
+                              int32_t batch_size);
+
+  // Build sequence length tensors and host-side MLU batch metadata.
+  static void build_seq_lengths(const AttentionMetadata& attn_metadata,
                                 int32_t batch_size,
-                                DSAMetadata& dsa_metadata);
+                                DSAMetadata& dsa_metadata,
+                                std::vector<int32_t>& q_lens_vec,
+                                std::vector<int32_t>& kv_lens_vec);
+
+  static void build_swa_plan(DSAMetadata& dsa_metadata,
+                             const std::vector<int32_t>& q_lens_vec,
+                             int64_t window_size);
 
   // Build input_positions, c4_pad_positions, c128_pad_positions.
   static void build_positions(const ModelInputParams& params,
                               int32_t batch_size,
                               DSAMetadata& dsa_metadata);
 };
-
 }  // namespace layer
 }  // namespace xllm

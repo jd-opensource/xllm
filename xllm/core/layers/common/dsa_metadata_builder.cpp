@@ -160,8 +160,7 @@ void DSAMetadataBuilder::build_dsa_fields(
   }
 
   if (positions.defined()) {
-    const int64_t total_tokens = positions.numel();
-    build_positions(params, batch_size, total_tokens, dsa);
+    build_positions(params, batch_size, dsa);
   }
 
   (void)dsa_c4_cos_sin;
@@ -651,7 +650,6 @@ void DSAMetadataBuilder::build_seq_lengths(const ModelInputParams& params,
 
 void DSAMetadataBuilder::build_positions(const ModelInputParams& params,
                                          int32_t batch_size,
-                                         int64_t total_tokens,
                                          DSAMetadata& dsa_metadata) {
   if (!dsa_metadata.input_positions.defined()) return;
 
