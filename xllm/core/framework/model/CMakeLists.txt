@@ -9,9 +9,15 @@ cc_library(
     causal_vlm.h
     dit_model.h
     mm_embedding_vlm.h
+    model_input.h
+    model_input_factory.h
+    model_input_param_groups.h
     model_args.h
     model_input_params.h
   SRCS
+    model_input.cpp
+    model_input_factory.cpp
+    model_input_param_groups.cpp
   DEPS
     :common
     :common_layers
@@ -23,4 +29,14 @@ cc_library(
     torch
     torch_python
     $<$<BOOL:${USE_NPU}>:platform_npu>
+)
+
+cc_test(
+  NAME
+    model_input_factory_test
+  SRCS
+    model_input_factory_test.cpp
+  DEPS
+    model
+    GTest::gtest_main
 )
