@@ -835,9 +835,9 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return true;
 }
 
-bool LLMEngine::link_d2d(const std::vector<std::string>& device_ips) {
-  if (device_ips.size() != worker_clients_num_) {
-    LOG(ERROR) << "device_ips size " << device_ips.size()
+bool LLMEngine::link_d2d(const std::vector<std::string>& remote_addrs) {
+  if (remote_addrs.size() != worker_clients_num_) {
+    LOG(ERROR) << "remote_addrs size " << remote_addrs.size()
                << " != worker_clients_num " << worker_clients_num_;
     return false;
   }
@@ -847,7 +847,7 @@ bool LLMEngine::link_d2d(const std::vector<std::string>& device_ips) {
 
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
-    std::string remote_addr = device_ips[worker_rank];
+    std::string remote_addr = remote_addrs[worker_rank];
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
     link_threadpool_->schedule([this,
@@ -869,9 +869,9 @@ bool LLMEngine::link_d2d(const std::vector<std::string>& device_ips) {
   return true;
 }
 
-bool LLMEngine::unlink_d2d(const std::vector<std::string>& device_ips) {
-  if (device_ips.size() != worker_clients_num_) {
-    LOG(ERROR) << "device_ips size " << device_ips.size()
+bool LLMEngine::unlink_d2d(const std::vector<std::string>& remote_addrs) {
+  if (remote_addrs.size() != worker_clients_num_) {
+    LOG(ERROR) << "remote_addrs size " << remote_addrs.size()
                << " != worker_clients_num " << worker_clients_num_;
     return false;
   }
@@ -881,7 +881,7 @@ bool LLMEngine::unlink_d2d(const std::vector<std::string>& device_ips) {
 
   for (size_t worker_rank = 0; worker_rank < worker_clients_num_;
        ++worker_rank) {
-    std::string remote_addr = device_ips[worker_rank];
+    std::string remote_addr = remote_addrs[worker_rank];
     folly::Promise<bool> promise;
     auto future = promise.getSemiFuture();
     link_threadpool_->schedule([this,

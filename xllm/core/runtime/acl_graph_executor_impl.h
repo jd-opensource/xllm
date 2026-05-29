@@ -134,7 +134,7 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   torch::Device device_;
   runtime::Options options_;
 
-  // Lazy-loaded ACL graphs for different graph keys.
+  // Lazy-loaded ACL graphs for different token buckets.
   absl::flat_hash_map<uint64_t, std::unique_ptr<AclGraph>> graphs_;
 
   // Persistent parameters shared across all AclGraph instances
@@ -144,9 +144,6 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   // For num_tokens < 8: use 1, 2, 4, 8
   // For num_tokens >= 8: use multiples of 8
   uint32_t get_bucket_num_tokens(uint32_t num_tokens) const;
-
-  uint64_t get_graph_key(uint32_t bucket_num_tokens,
-                         const ModelInputParams& params) const;
 };
 REGISTER_EXECUTOR("npu", AclGraphExecutorImpl);
 }  // namespace xllm::npu
