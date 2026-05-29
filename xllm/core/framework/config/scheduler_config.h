@@ -43,7 +43,6 @@ class SchedulerConfig final {
         "SCHEDULER OPTIONS",
         {"max_tokens_per_batch",
          "max_seqs_per_batch",
-         "max_concurrent_requests",
          "enable_schedule_overlap",
          "prefill_scheduling_memory_usage_threshold",
          "enable_chunked_prefill",
@@ -63,8 +62,6 @@ class SchedulerConfig final {
   PROPERTY(int32_t, max_tokens_per_batch) = 10240;
 
   PROPERTY(int32_t, max_seqs_per_batch) = 1024;
-
-  PROPERTY(int32_t, max_concurrent_requests) = 200;
 
   PROPERTY(bool, enable_schedule_overlap) = false;
 
