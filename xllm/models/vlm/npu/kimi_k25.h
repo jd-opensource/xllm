@@ -360,7 +360,7 @@ class KimiK2_5_VisionBlockImpl : public torch::nn::Module {
     torch::Tensor sin_pos;
   };
 
-  torch::Tensor forward(BlockInput& block_input, int node_id) {
+  torch::Tensor forward(BlockInput& block_input, int32_t node_id) {
     auto seqlens = torch::diff(block_input.cu_seqlens);
     auto seqlens_cpu = seqlens.cpu().to(torch::kInt32).contiguous();
     std::vector<int> seqlens_vec(

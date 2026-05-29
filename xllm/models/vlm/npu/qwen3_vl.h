@@ -481,18 +481,9 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     return torch::cat(outputs, 0);
   }
 
-  // input_params is accepted to match the shared base-template / CUDA encoder
-  // call (visual_(pixels, grid, input_params)); the default keeps the
-  // NPU-internal 2-arg call sites and run_dp_encoder (which call
-  // visual_(pixels, grid)) working. A defaulted parameter is used instead of an
-  // overload because torch::nn::ModuleHolder::operator() derives forward's
-  // return type via return_type_of_forward_t, which breaks when forward is
-  // overloaded. The NPU vision encoder handles dp mode separately through
-  // run_dp_encoder and does not consume input_params here.
-  torch::Tensor forward(
-      torch::Tensor hidden_states,
-      torch::Tensor grid_thw,  // [batch,thw]
-      const ModelInputParams& /*input_params*/ = ModelInputParams()) {
+  torch::Tensor forward(torch::Tensor hidden_states,
+                        torch::Tensor grid_thw  // [batch,thw]
+  ) {
     hidden_states = patch_embed_(hidden_states);
     auto pos_embeds = fast_pos_embed_interpolate(grid_thw);
     hidden_states = hidden_states + pos_embeds;

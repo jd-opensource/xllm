@@ -54,7 +54,7 @@ torch::Tensor OxygenVisionLayerImpl::forward(
     torch::Tensor& m_sin_pos,
     torch::Tensor& cu_seq_len,
     std::vector<int32_t>& cu_seq_len_vec,
-    int node_id) {
+    int32_t node_id) {
   auto norm_output1 = std::get<0>(norm1_(hidden_states));
   auto output =
       hidden_states +

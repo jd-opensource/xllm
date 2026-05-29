@@ -114,10 +114,8 @@ TEST_F(Qwen2VisionAttentionTest, ForwardTest) {
                                        torch::kBFloat16,
                                        options_.device());
 
-  // Create ModelInputParams
-  ModelInputParams params;
   auto output = vision_attention->forward(
-      hidden_states, m_cos_pos, m_sin_pos, cu_seq_len, cu_seq_len_vec, params);
+      hidden_states, m_cos_pos, m_sin_pos, cu_seq_len, cu_seq_len_vec);
   xllm::Device device(options_.device());
   device.synchronize_default_stream();
 
@@ -138,7 +136,7 @@ TEST_F(Qwen2VisionAttentionTest, ForwardTest) {
   test::verify_precision(test_output.unsqueeze(0), expected_values, 1e-3, 1e-3);
 
   auto output2 = vision_attention->forward(
-      hidden_states, m_cos_pos, m_sin_pos, cu_seq_len, cu_seq_len_vec, params);
+      hidden_states, m_cos_pos, m_sin_pos, cu_seq_len, cu_seq_len_vec);
   device.synchronize_default_stream();
   ASSERT_TRUE(torch::allclose(output.flatten().to(torch::kFloat32),
                               output2.flatten().to(torch::kFloat32),

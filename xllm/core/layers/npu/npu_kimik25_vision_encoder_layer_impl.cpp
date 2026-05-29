@@ -139,7 +139,7 @@ torch::Tensor NpuKimik25VisionEncoderLayerImpl::forward(
     torch::Tensor& sin_pos,
     torch::Tensor& cu_seqlen,
     std::vector<int>& cu_seqlen_vec,
-    int node_id,
+    int32_t node_id,
     aclrtEvent* event,
     std::atomic<bool>* event_flag) {
   atb::Status st;

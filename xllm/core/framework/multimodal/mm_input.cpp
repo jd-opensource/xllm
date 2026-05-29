@@ -38,7 +38,7 @@ bool is_url_type(const std::string& type) {
   return type == "image_url" || type == "video_url" || type == "audio_url";
 }
 
-bool is_valid_binary_data_url(std::string_view url) {
+bool is_binary_data_url(std::string_view url) {
   constexpr std::string_view kPrefix = "data:";
   constexpr std::string_view kMarker = ";binary,";
 
@@ -49,20 +49,10 @@ bool is_valid_binary_data_url(std::string_view url) {
   if (pos == std::string_view::npos) {
     return false;
   }
-  const auto tail = url.substr(pos + kMarker.size());
-  if (tail.empty()) {
-    return false;
-  }
-  return std::all_of(tail.begin(), tail.end(), [](unsigned char c) {
-    return std::isdigit(c);
-  });
+  return true;
 }
 
 size_t parse_binary_url_size(std::string_view url) {
-  if (!is_valid_binary_data_url(url)) {
-    LOG(ERROR) << "invalid binary data url: " << url;
-    return 0;
-  }
   constexpr std::string_view kMarker = ";binary,";
   const auto tail = url.substr(url.find(kMarker) + kMarker.size());
   size_t size = 0;
@@ -74,14 +64,25 @@ size_t parse_binary_url_size(std::string_view url) {
 }
 
 MMPayload slice_payload(const MMContent& item, MMPayload& payload) {
-  size_t size = 0;
+  std::string_view url;
   if (item.type == "image_url") {
-    size = parse_binary_url_size(item.image_url.url);
+    url = item.image_url.url;
   } else if (item.type == "video_url") {
-    size = parse_binary_url_size(item.video_url.url);
+    url = item.video_url.url;
   } else if (item.type == "audio_url") {
-    size = parse_binary_url_size(item.audio_url.url);
+    url = item.audio_url.url;
+  } else {
+    return {};
   }
+
+  // Only binary data urls (e.g. "data:image/jpeg;binary,1024") consume bytes
+  // from the shared payload. http(s), base64 data urls, and local/file://
+  // paths are loaded by the per-modality handler later, so leave them alone.
+  if (!is_binary_data_url(url)) {
+    return {};
+  }
+
+  const size_t size = parse_binary_url_size(url);
   if (size == 0) {
     return {};
   }
@@ -97,7 +98,9 @@ MMPayload slice_payload(const MMContent& item, MMPayload& payload) {
 
 MMInputTransfer::MMInputTransfer() {
   mm_handlers_ = std::make_unique<MMHandlerSet>();
-  threadpool_ = std::make_unique<ThreadPool>(/*num_threads=*/16);
+  threadpool_ = std::make_unique<ThreadPool>(/*num_threads=*/16,
+                                             /*cpu_binding=*/false,
+                                             /*name=*/"MMInputTransfer");
 }
 
 MMInputTransfer::~MMInputTransfer() {}
