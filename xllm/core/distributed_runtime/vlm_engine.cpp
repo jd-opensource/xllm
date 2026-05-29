@@ -34,6 +34,7 @@ limitations under the License.
 #include "core/distributed_runtime/master.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "framework/kv_cache/kv_cache_estimation.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
@@ -256,6 +257,8 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
   estimate_options.n_local_linear_v_heads = n_local_linear_v_heads_;
   estimate_options.max_seqs_per_batch =
       static_cast<int64_t>(options_.max_seqs_per_batch());
+  estimate_options.max_concurrent_requests = static_cast<int64_t>(
+      ::xllm::SchedulerConfig::get_instance().max_concurrent_requests());
   estimate_options.is_draft_engine = options_.is_draft_engine();
   estimate_options.enable_prefix_cache =
       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
