@@ -37,6 +37,7 @@ struct KVCacheEstimateOptions {
   int64_t n_local_linear_v_heads = 0;
   int64_t max_seqs_per_batch = 0;
   int64_t num_speculative_tokens = 0;
+  int64_t max_tokens_per_batch = 0;
   bool is_draft_engine = false;
   bool enable_prefix_cache = false;
 };

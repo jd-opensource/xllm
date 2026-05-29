@@ -141,15 +141,15 @@ TEST(KVCacheEstimationTest, EstimatesDeepSeekV4Pools) {
 
   KVCacheCapacity capacity = estimate_kv_cache_capacity(model_args, options);
 
-  EXPECT_EQ(capacity.swa_count(), 14);
+  EXPECT_EQ(capacity.swa_count(), 19);
 #if defined(USE_MLU)
+  EXPECT_EQ(capacity.c4_count(), 64);
+  EXPECT_EQ(capacity.c128_count(), 2);
+  EXPECT_EQ(capacity.n_blocks(), 256);
+#else
   EXPECT_EQ(capacity.c4_count(), 96);
   EXPECT_EQ(capacity.c128_count(), 3);
   EXPECT_EQ(capacity.n_blocks(), 384);
-#else
-  EXPECT_EQ(capacity.c4_count(), 160);
-  EXPECT_EQ(capacity.c128_count(), 5);
-  EXPECT_EQ(capacity.n_blocks(), 640);
 #endif
 }
 

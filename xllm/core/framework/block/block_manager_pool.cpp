@@ -45,6 +45,8 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
                                ? false
                                : options_.enable_cache_upload())
       .sliding_window_size(options_.sliding_window_size())
+      .swa_blocks_per_seq(options_.swa_blocks_per_seq())
+      .max_tokens_per_batch(options_.max_tokens_per_batch())
       .manager_types(options_.manager_types())
       .compress_ratios(options_.compress_ratios())
       .max_seqs_per_batch(options_.max_seqs_per_batch())

@@ -20,6 +20,7 @@ cc_library(
     :deepseek_v4_cache_policy
     :block_utils
     glog::glog
+    proto::xllm_proto
     torch
 )
 

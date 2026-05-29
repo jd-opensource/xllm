@@ -23,6 +23,7 @@ limitations under the License.
 #include "framework/kv_cache/deepseek_v4_cache_policy.h"
 #include "framework/model/model_args.h"
 #include "util/tensor_helper.h"
+#include "util/utils.h"
 
 namespace xllm {
 namespace {
@@ -48,7 +49,8 @@ int64_t kv_slot_size(const ModelArgs& model_args,
                      int64_t cache_dtype_size) {
   if (model_args.enable_mla()) {
 #if defined(USE_NPU)
-    if (model_args.model_type() == "deepseek_v3" &&
+    if ((model_args.model_type() == "deepseek_v3" ||
+         model_args.model_type() == "deepseek_v3_mtp") &&
         options.enable_prefix_cache) {
       return cache_dtype_size *
              ((model_args.kv_lora_rank() + kNzAlignment - 1) / kNzAlignment +
@@ -132,10 +134,18 @@ void init_dsv4_counts(const ModelArgs& model_args,
   const int64_t max_seqs =
       std::max(options.max_seqs_per_batch, static_cast<int64_t>(1));
   const int64_t block_size = options.block_size;
-  const int64_t window_size = std::max(model_args.window_size(), 1);
+  const int64_t semantic_window = std::max(model_args.window_size(), 1);
+  const int64_t max_model_len = model_args.max_seq_len();
+  const int64_t window_size =
+      max_model_len > 0 ? std::min<int64_t>(semantic_window, max_model_len)
+                        : semantic_window;
   const int64_t swa_blocks_per_seq =
       get_swa_blocks_per_seq(window_size, block_size);
-  kv_cache_cap->swa_count(swa_blocks_per_seq * max_seqs + 2);
+  const int64_t burst_blocks = util::ceil_div(
+      std::max(options.max_tokens_per_batch, static_cast<int64_t>(1)),
+      block_size);
+  kv_cache_cap->swa_count(swa_blocks_per_seq * max_seqs + burst_blocks +
+                          max_seqs + 2);
   const int64_t head_dim = model_args.head_dim();
   const int64_t index_head_dim = std::max(model_args.index_head_dim(), 1);
   const std::vector<int32_t>& compress_ratios = model_args.compress_ratios();

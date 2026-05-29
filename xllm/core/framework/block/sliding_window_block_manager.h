@@ -19,14 +19,12 @@ limitations under the License.
 
 namespace xllm {
 
-// Allocates exactly options_.swa_blocks_per_seq() blocks per sequence.
-// Used as a sub-manager of CompositeBlockManager.
+// Sliding-window sub-manager used by CompositeBlockManager.
 class SlidingWindowBlockManager : public BlockManagerImpl {
  public:
   explicit SlidingWindowBlockManager(const Options& options);
   ~SlidingWindowBlockManager() override = default;
 
-  // Only allocation of swa_blocks_per_seq() blocks is allowed.
   std::vector<Block> allocate(size_t num_blocks) override;
 
   uint32_t swa_blocks_per_seq() const { return options_.swa_blocks_per_seq(); }

@@ -49,8 +49,10 @@ class BlockManager {
     PROPERTY(bool, enable_cache_upload) = false;
     // Token-level sliding window size for composite SWA allocation.
     PROPERTY(uint32_t, sliding_window_size) = 0;
-    // SWA/cache-state block rows allocated per sequence.
+    // Base SWA/cache-state block rows retained per sequence.
     PROPERTY(uint32_t, swa_blocks_per_seq) = 0;
+    // Scheduler token budget used to size the shared SWA burst pool.
+    PROPERTY(uint32_t, max_tokens_per_batch) = 0;
     // For CompositeBlockManager (passed from upstream).
     PROPERTY(std::vector<uint32_t>, manager_types) = {};
     PROPERTY(std::vector<uint32_t>, compress_ratios) = {};
