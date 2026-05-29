@@ -360,9 +360,7 @@ class KimiK2_5_VisionBlockImpl : public torch::nn::Module {
     torch::Tensor sin_pos;
   };
 
-  torch::Tensor forward(BlockInput& block_input,
-                        ModelInputParams& input_params,
-                        int node_id) {
+  torch::Tensor forward(BlockInput& block_input, int node_id) {
     auto seqlens = torch::diff(block_input.cu_seqlens);
     auto seqlens_cpu = seqlens.cpu().to(torch::kInt32).contiguous();
     std::vector<int> seqlens_vec(
@@ -384,7 +382,6 @@ class KimiK2_5_VisionBlockImpl : public torch::nn::Module {
                           block_input.sin_pos,
                           seqlens,
                           seqlens_vec,
-                          input_params,
                           node_id);
   }
 
@@ -792,8 +789,7 @@ class KimiK2_5_VisionEncoderImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor hidden_states,
-                        torch::Tensor grid_thw,  // [batch,thw]
-                        const ModelInputParams& input_params) {
+                        torch::Tensor grid_thw) {  // [batch,thw]
     // Align with MoonViT3dEncoder:
     // rope_freqs_cis + cu_seqlens + max_seqlen are prepared once and reused
     // across all encoder blocks.
@@ -837,14 +833,11 @@ class KimiK2_5_VisionEncoderImpl : public torch::nn::Module {
     CHECK_EQ(sin_pos.size(0), hidden_states.size(0))
         << "sin_pos and hidden_states token count mismatch";
 
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
     KimiK2_5_VisionBlockImpl::BlockInput block_input{
         hidden_states, cu_seqlens, max_seqlen, cos_pos, sin_pos};
 
     for (int idx = 0; idx < blocks_->size(); ++idx) {
-      block_input.hidden_states =
-          layers_[idx](block_input, input_params_new, idx);
+      block_input.hidden_states = layers_[idx](block_input, idx);
     }
     return final_layernorm_(block_input.hidden_states);
   }
@@ -950,10 +943,9 @@ class KimiK2_5_VisionTransformerImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor hidden_states,
-                        torch::Tensor grid_thw,  // [batch,thw]
-                        const ModelInputParams& input_params) {
+                        torch::Tensor grid_thw) {  // [batch,thw]
     hidden_states = patch_embed_(hidden_states, grid_thw);
-    hidden_states = encoder_(hidden_states, grid_thw, input_params);
+    hidden_states = encoder_(hidden_states, grid_thw);
     // Align with MoonViT3dPretrainedModel:
     // return vision tower output after tpool patch merge.
     return tpool_patch_merger(hidden_states, grid_thw);
@@ -1068,10 +1060,8 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
           pixel_values_videos, video_grid_thw, second_per_grid_ts};
   }
 
-  std::vector<torch::Tensor> process_vision_features(
-      torch::Tensor pixel_values,
-      torch::Tensor grid_thws,
-      const ModelInputParams& input_params) {
+  std::vector<torch::Tensor> process_vision_features(torch::Tensor pixel_values,
+                                                     torch::Tensor grid_thws) {
     int n = grid_thws.size(0);
     auto n_patches_each_media = grid_thws.prod(-1);
     int max_infer_batch = std::max(n_patches_each_media.max().item<int>(),
@@ -1102,7 +1092,7 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
         }
         auto group_input =
             pixel_values.slice(0, pre_sum, pre_sum + group_n_patches);
-        auto group_output = visual_(group_input, group_grid_thw, input_params);
+        auto group_output = visual_(group_input, group_grid_thw);
         features.push_back(mm_projector_ ? mm_projector_(group_output)
                                          : group_output);
         pre_sum += group_n_patches;
@@ -1119,7 +1109,7 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       }
       auto group_input =
           pixel_values.slice(0, pre_sum, pre_sum + group_n_patches);
-      auto group_output = visual_(group_input, group_grid_thw, input_params);
+      auto group_output = visual_(group_input, group_grid_thw);
       features.push_back(mm_projector_ ? mm_projector_(group_output)
                                        : group_output);
     }
@@ -1145,8 +1135,7 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
             grid_thw.scalar_type() == torch::kInt64)
           << "image_grid_thw must be int tensor, got dtype="
           << grid_thw.scalar_type();
-      auto image_features =
-          process_vision_features(pixel_values, grid_thw, input_params);
+      auto image_features = process_vision_features(pixel_values, grid_thw);
       auto image_embeds = torch::cat(image_features, 0);
       auto image_tokens =
           (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)

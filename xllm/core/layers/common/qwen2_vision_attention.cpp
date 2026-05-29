@@ -164,8 +164,7 @@ torch::Tensor Qwen2VisionAttentionImpl::forward(
     torch::Tensor& m_cos_pos,
     torch::Tensor& m_sin_pos,
     torch::Tensor& cu_seq_len,
-    std::vector<int32_t>& cu_seq_len_vec,
-    ModelInputParams& params) {
+    std::vector<int32_t>& cu_seq_len_vec) {
   // 1. qkv projection
   auto qkv = qkv_proj_->forward(hidden_states);
   // 2. split qkv

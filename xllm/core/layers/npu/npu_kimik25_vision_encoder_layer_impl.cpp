@@ -139,20 +139,13 @@ torch::Tensor NpuKimik25VisionEncoderLayerImpl::forward(
     torch::Tensor& sin_pos,
     torch::Tensor& cu_seqlen,
     std::vector<int>& cu_seqlen_vec,
-    ModelInputParams& input_params,
     int node_id,
     aclrtEvent* event,
     std::atomic<bool>* event_flag) {
   atb::Status st;
 
-  build_node_variant_pack(encode_node_,
-                          x,
-                          cos_pos,
-                          sin_pos,
-                          cu_seqlen,
-                          cu_seqlen_vec,
-                          input_params,
-                          true);
+  build_node_variant_pack(
+      encode_node_, x, cos_pos, sin_pos, cu_seqlen, cu_seqlen_vec, true);
   // mstxRangeEnd(id);
   st = execute_node(encode_node_, node_id);
   LOG_IF(FATAL, st != 0) << model_name_
@@ -167,7 +160,6 @@ void NpuKimik25VisionEncoderLayerImpl::build_node_variant_pack(
     torch::Tensor& sin_pos,
     torch::Tensor& cu_seqlen,
     std::vector<int>& cu_seqlen_vec,
-    ModelInputParams& input_params,
     bool is_prefill) {
   internal_tensors_ = atb_speed::Utils::AtTensor2Tensor(x);
 

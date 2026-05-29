@@ -20,7 +20,6 @@ limitations under the License.
 #include <vector>
 
 #include "framework/model/model_args.h"
-#include "framework/model/model_input_params.h"
 #include "framework/model_context.h"
 #include "framework/parallel_state/parallel_args.h"
 #include "framework/quant_args.h"
@@ -39,8 +38,7 @@ class Qwen2VisionAttentionImpl : public torch::nn::Module {
                                 torch::Tensor& m_cos_pos,
                                 torch::Tensor& m_sin_pos,
                                 torch::Tensor& cu_seq_len,
-                                std::vector<int32_t>& cu_seq_len_vec,
-                                ModelInputParams& input_params);
+                                std::vector<int32_t>& cu_seq_len_vec);
 
   void load_state_dict(const StateDict& state_dict);
 

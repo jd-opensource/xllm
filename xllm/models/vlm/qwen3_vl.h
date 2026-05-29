@@ -436,8 +436,7 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor hidden_states,
-                        torch::Tensor grid_thw,  // [batch,thw]
-                        const ModelInputParams& input_params) {
+                        torch::Tensor grid_thw) {  // [batch,thw]
     hidden_states = patch_embed_(hidden_states);
     auto pos_embeds = fast_pos_embed_interpolate(grid_thw);
     hidden_states = hidden_states + pos_embeds;
@@ -458,8 +457,6 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     m_sin = rotary_pos_emb.sin().type_as(hidden_states);
     m_sin = m_sin.repeat({1, 2});
 
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
     std::vector<int> cu_seqlens_vec(
         cu_seqlens_cpu.data_ptr<int>(),  // full seqlen vec
@@ -467,13 +464,8 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     std::vector<torch::Tensor> deepstack_feature_lists;
     deepstack_feature_lists.reserve(deepstack_visual_indexes_.size());
     for (int idx = 0; idx < layers_.size(); ++idx) {
-      hidden_states = layers_[idx](hidden_states,
-                                   m_cos,
-                                   m_sin,
-                                   cu_seqlens,
-                                   cu_seqlens_vec,
-                                   input_params_new,
-                                   idx);
+      hidden_states = layers_[idx](
+          hidden_states, m_cos, m_sin, cu_seqlens, cu_seqlens_vec, idx);
       auto it = std::find(deepstack_visual_indexes_.begin(),
                           deepstack_visual_indexes_.end(),
                           idx);
