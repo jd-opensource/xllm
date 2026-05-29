@@ -299,7 +299,8 @@ torch::Tensor DeepseekV2DecoderLayerImpl::forward(
     torch::Tensor& positions,
     const AttentionMetadata& attn_metadata,
     KVCache& kv_cache,
-    const ModelInputParams& input_params) {
+    const ModelInputParams& input_params,
+    const std::optional<torch::Tensor>&) {
   // Pre-attention norm
   residual = x;
   x = std::get<0>(input_norm_->forward(x));
