@@ -80,10 +80,18 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
     MMDict multimodal_embeds;
     auto merge_size = model_args_.mm_image_merge_size();
     if (image_input) {
+#if defined(USE_NPU)
+      // NPU visual encoder keeps a two-argument forward; request context is
+      // handled by the NPU VLM wrapper before invoking the visual module.
+      auto image_embeds =
+          visual_(image_input->pixel_values.to(options_),
+                  image_input->image_grid_thw.to(options_.device()));
+#else
       auto image_embeds =
           visual_(image_input->pixel_values.to(options_),
                   image_input->image_grid_thw.to(options_.device()),
                   input_params);
+#endif
 
       auto image_tokens =
           (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
@@ -98,10 +106,18 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
           image_embeds.split(image_tokens_vec, /*dim=*/0);
     }
     if (video_input) {
+#if defined(USE_NPU)
+      // NPU visual encoder keeps a two-argument forward; request context is
+      // handled by the NPU VLM wrapper before invoking the visual module.
+      auto video_embeds =
+          visual_(video_input->pixel_values_videos.to(options_),
+                  video_input->video_grid_thw.to(options_.device()));
+#else
       auto video_embeds =
           visual_(video_input->pixel_values_videos.to(options_),
                   video_input->video_grid_thw.to(options_.device()),
                   input_params);
+#endif
 
       auto video_tokens =
           (video_input->video_grid_thw.prod(-1) / merge_size / merge_size)
