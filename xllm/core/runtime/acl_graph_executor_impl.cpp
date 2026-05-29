@@ -678,7 +678,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
     params_for_capture->meta.num_sequences = padded_num_tokens;
     params_for_capture->meta.batch_forward_type = BatchForwardType::DECODE;
-    params_for_capture->enable_cuda_graph = true;
+    params_for_capture->enable_graph = true;
     if (params_for_capture->parallel.dp_global_token_nums.size() > 1) {
       params_for_capture->parallel.dp_global_token_nums =
           std::vector<int32_t>(
@@ -1394,7 +1394,6 @@ ModelOutput AclGraph::replay(CausalLM* model,
                              const torch::Tensor& positions,
                              std::vector<KVCache>& kv_cache,
                              const ModelInputParams& params) {
-  (void)args;
   const uint32_t actual_num_tokens = tokens.size(0);
   CHECK_LE(actual_num_tokens, num_tokens_)
       << "num_tokens mismatch: expected <= " << num_tokens_ << ", got "

@@ -834,6 +834,7 @@ class DeepseekV4ModelImpl
         {0}, torch::dtype(torch::kInt32).device(reference.device())));
   }
 
+ private:
   static int64_t tensor_max_or_zero(const torch::Tensor& tensor) {
     if (!tensor.defined() || tensor.numel() == 0) {
       return 0;
@@ -849,6 +850,7 @@ class DeepseekV4ModelImpl
     return tensor_max_or_zero(fallback_tensor);
   }
 
+ public:
   static bool tensor_aliases_storage(const torch::Tensor& lhs,
                                      const torch::Tensor& rhs) {
     return lhs.defined() && rhs.defined() && lhs.data_ptr() == rhs.data_ptr() &&
@@ -891,7 +893,6 @@ class DeepseekV4ModelImpl
     }
     return dst;
   }
-
   static void copy_to_graph_packed_metadata_buffer(
       layer::DSAMetadata& dsa,
       DeepseekV4GraphMetadataState::DSAMetadataPersistent& persistent,
@@ -967,6 +968,7 @@ class DeepseekV4ModelImpl
 #endif
   }
 
+ private:
   void normalize_graph_metadata_input_params(ModelInputParams& params) const {
     int64_t actual_metadata_rows =
         std::max<int64_t>(params.meta.actual_num_sequences, 0);

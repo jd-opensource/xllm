@@ -337,7 +337,7 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
       if (dsa_hadamard_.defined()) {
         dsa.hadamard = dsa_hadamard_;
       }
-      copy_to_graph_packed_metadata_buffer(
+      DeepseekV4ModelImpl::copy_to_graph_packed_metadata_buffer(
           dsa, dsa_state->dsa_metadata_persistent, positions.device());
       prepare_for_forward(*attn_metadata,
                           positions.device(),
@@ -433,10 +433,10 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
 
     auto& dsa = *metadata->dsa_metadata;
     auto& persistent = state.dsa_metadata_persistent;
-    dsa.attn_mask =
-        copy_to_persistent_tensor(dsa.attn_mask, persistent.attn_mask);
-    dsa.start_pos =
-        copy_to_persistent_tensor(dsa.start_pos, persistent.start_pos);
+    dsa.attn_mask = DeepseekV4ModelImpl::copy_to_persistent_tensor(
+        dsa.attn_mask, persistent.attn_mask);
+    dsa.start_pos = DeepseekV4ModelImpl::copy_to_persistent_tensor(
+        dsa.start_pos, persistent.start_pos);
     return metadata;
   }
 
