@@ -893,6 +893,7 @@ class DeepseekV4ModelImpl
     }
     return dst;
   }
+
   static void copy_to_graph_packed_metadata_buffer(
       layer::DSAMetadata& dsa,
       DeepseekV4GraphMetadataState::DSAMetadataPersistent& persistent,

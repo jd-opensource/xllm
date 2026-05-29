@@ -273,7 +273,7 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
                                         dsa.packed_metadata_buffer.defined() &&
                                         dsa.start_pos.defined();
       if (graph_metadata_ready) {
-        build_rope_metadata(dsa);
+        build_dsa_rope_metadata(dsa);
         build_precomputed_metadata(dsa, modified_input_params);
       }
     }
@@ -554,7 +554,7 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
     }
 
     if (build_rope) {
-      build_rope_metadata(dsa);
+      build_dsa_rope_metadata(dsa);
     }
 
     if (dsa.actual_seq_lengths_kv.defined() && dsa.seq_lens_q.defined()) {
@@ -565,7 +565,7 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
     build_precomputed_metadata(dsa, input_params);
   }
 
-  void build_rope_metadata(layer::DSAMetadata& dsa) const {
+  void build_dsa_rope_metadata(layer::DSAMetadata& dsa) const {
     if (!dsa_rotary_embedding_) {
       return;
     }
