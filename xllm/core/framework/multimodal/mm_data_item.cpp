@@ -52,7 +52,7 @@ void MMDataItem::get(const MMKey& key, std::vector<torch::Tensor>& vec) const {
 void MMDataItem::debug_print() const {
   const std::string type_str = type_.to_string().value_or("none");
   LOG(INFO) << "MMDataItem"
-            << " type=" << type_str << " seq_index=" << seq_index_
+            << " type=" << type_str << " seq_index=" << state_.seq_index()
             << " data_count=" << data_.size();
   LOG(INFO) << "  token_pos"
             << " offset=" << state_.token_pos().offset

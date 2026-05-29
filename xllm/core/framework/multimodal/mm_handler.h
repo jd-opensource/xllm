@@ -61,10 +61,10 @@ class ImageHandler : public MMHandlerBase {
   ImageHandler() = default;
   ~ImageHandler() = default;
 
-  virtual MMErrCode load(const MMContent& content,
-                         MMInputItem& input,
-                         MMPayload& payload) override;
-  virtual MMErrCode decode(MMInputItem& input) override;
+  MMErrCode load(const MMContent& content,
+                 MMInputItem& input,
+                 MMPayload& payload) override;
+  MMErrCode decode(MMInputItem& input) override;
 
  private:
   std::string dataurl_prefix_{"data:image"};
@@ -75,10 +75,10 @@ class VideoHandler : public MMHandlerBase {
   VideoHandler() = default;
   ~VideoHandler() = default;
 
-  virtual MMErrCode load(const MMContent& content,
-                         MMInputItem& input,
-                         MMPayload& payload) override;
-  virtual MMErrCode decode(MMInputItem& input) override;
+  MMErrCode load(const MMContent& content,
+                 MMInputItem& input,
+                 MMPayload& payload) override;
+  MMErrCode decode(MMInputItem& input) override;
 
  private:
   std::string dataurl_prefix_{"data:video"};
@@ -89,10 +89,10 @@ class AudioHandler : public MMHandlerBase {
   AudioHandler() = default;
   ~AudioHandler() = default;
 
-  virtual MMErrCode load(const MMContent& content,
-                         MMInputItem& input,
-                         MMPayload& payload) override;
-  virtual MMErrCode decode(MMInputItem& input) override;
+  MMErrCode load(const MMContent& content,
+                 MMInputItem& input,
+                 MMPayload& payload) override;
+  MMErrCode decode(MMInputItem& input) override;
 
  private:
   std::string dataurl_prefix_{"data:audio"};

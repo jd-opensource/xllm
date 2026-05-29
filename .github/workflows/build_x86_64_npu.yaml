@@ -118,9 +118,6 @@ jobs:
           find .git/modules -type f -name '*.lock' -print -delete || true
         fi
 
-        rm -rf .git/modules/third_party/tilelang-ascend
-        rm -rf third_party/tilelang-ascend
-
     - name: Checkout Code
       timeout-minutes: 5
       uses: actions/checkout@v4

@@ -21,6 +21,7 @@ limitations under the License.
 
 #include <unordered_map>
 
+#include "core/common/global_flags.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -29,6 +30,7 @@ limitations under the License.
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "models/llm/npu/qwen2.h"
 #include "models/model_registry.h"
+#include "models/vlm/utils/multimodal_utils.h"
 #include "processors/qwen2_vl_image_processor.h"
 #include "processors/qwen2_vl_input_processor.h"
 #include "qwen2_5_vl.h"
@@ -48,15 +50,9 @@ class Qwen2_VisionBlockImpl : public torch::nn::Module {
                         torch::Tensor& m_sin_pos,
                         torch::Tensor& cu_seq_len,
                         std::vector<int>& cu_seq_len_vec,
-                        ModelInputParams& input_params,
                         int node_id) {
-    return encoder_layer_(x,
-                          m_cos_pos,
-                          m_sin_pos,
-                          cu_seq_len,
-                          cu_seq_len_vec,
-                          input_params,
-                          node_id);
+    return encoder_layer_(
+        x, m_cos_pos, m_sin_pos, cu_seq_len, cu_seq_len_vec, node_id);
   }
 
   // load the weight from the checkpoint
@@ -363,8 +359,7 @@ class Qwen2_VisionTransformerImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor hidden_states,
-                        torch::Tensor grid_thw,  // [batch,thw]
-                        const ModelInputParams& input_params) {
+                        torch::Tensor grid_thw) {  // [batch,thw]
     // patchify
     // hidden_states = x.to(device=self.device, dtype=self.dtype);
     hidden_states = patch_embed_(hidden_states);
@@ -388,20 +383,13 @@ class Qwen2_VisionTransformerImpl : public torch::nn::Module {
     m_cos = m_cos.repeat({1, 2});
     m_sin = rotary_pos_emb.sin().type_as(hidden_states);
     m_sin = m_sin.repeat({1, 2});
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
     std::vector<int> cu_seqlens_vec(
         cu_seqlens_cpu.data_ptr<int>(),  // full seqlen vec
         cu_seqlens_cpu.data_ptr<int>() + cu_seqlens_cpu.numel());
     for (int idx = 0; idx < blocks_->size(); ++idx) {
-      hidden_states = layers_[idx](hidden_states,
-                                   m_cos,
-                                   m_sin,
-                                   cu_seqlens,
-                                   cu_seqlens_vec,
-                                   input_params_new,
-                                   idx);
+      hidden_states = layers_[idx](
+          hidden_states, m_cos, m_sin, cu_seqlens, cu_seqlens_vec, idx);
     }
     // adapter
     hidden_states = merger_(hidden_states);
@@ -472,7 +460,17 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
   Qwen2_VLForConditionalGenerationImpl(const ModelContext& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
-    visual_ = register_module("visual", Qwen2_VisionTransformer(context));
+    encoder_dp_group_ = context.get_parallel_args().encoder_dp_group_;
+    use_encoder_dp_ =
+        encoder_dp_group_ != nullptr && encoder_dp_group_->world_size() > 1;
+    if (use_encoder_dp_) {
+      ModelContext visual_context = context.with_parallel_args(ParallelArgs(
+          /*rank=*/0, /*world_size=*/1, /*process_group=*/nullptr));
+      visual_ =
+          register_module("visual", Qwen2_VisionTransformer(visual_context));
+    } else {
+      visual_ = register_module("visual", Qwen2_VisionTransformer(context));
+    }
 
     language_model_ =
         register_module("language_model", QWen2ForCausalLM(context));
@@ -515,24 +513,26 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
     std::optional<Qwen2_VLImageInputs> image_input;
     std::optional<Qwen2_VLVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
-    auto merge_size = model_args_.mm_image_merge_size();
     MMDict multimodal_embeds;
     if (image_input) {
-      // visual
-      auto image_embeds = visual_(image_input->pixel_values.to(options_),
-                                  image_input->image_grid_thw,
-                                  input_params);
-      auto image_tokens =
-          (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
-              .cpu()
-              .contiguous()
-              .to(torch::kLong);
-
-      std::vector<int64_t> image_tokens_vec(
-          image_tokens.data_ptr<int64_t>(),
-          image_tokens.data_ptr<int64_t>() + image_tokens.numel());
-      multimodal_embeds["image|embedding"] =
-          image_embeds.split(image_tokens_vec, /*dim=*/0);
+      torch::Tensor image_pixels = image_input->pixel_values.to(options_);
+      torch::Tensor image_grid =
+          image_input->image_grid_thw.to(options_.device());
+      std::vector<int32_t> image_token_nums =
+          get_mm_token_nums(input_params.multimodal.mm_data, MMType::IMAGE);
+      if (!use_encoder_dp_) {
+        auto image_embeds = visual_(image_pixels, image_grid);
+        multimodal_embeds["image|embedding"] =
+            split_by_token_nums(image_embeds, image_token_nums);
+      } else {
+        multimodal_embeds["image|embedding"] =
+            run_dp_encoder(visual_,
+                           image_pixels,
+                           image_grid,
+                           image_token_nums,
+                           model_args_.mm_projection_dim(),
+                           encoder_dp_group_);
+      }
     }
     return multimodal_embeds;
   }
@@ -617,6 +617,8 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
  private:
   ModelArgs model_args_;
   torch::TensorOptions options_;
+  ProcessGroup* encoder_dp_group_ = nullptr;
+  bool use_encoder_dp_ = false;
 
   Qwen2_VisionTransformer visual_{nullptr};
   QWen2ForCausalLM language_model_{nullptr};

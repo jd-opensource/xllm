@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <atb/atb_infer.h>
 
+#include "core/common/global_flags.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
@@ -26,6 +27,7 @@ limitations under the License.
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "models/llm/npu/qwen3_moe.h"
 #include "models/model_registry.h"
+#include "models/vlm/utils/multimodal_utils.h"
 #include "processors/qwen2_vl_image_processor.h"
 #include "processors/qwen2_vl_input_processor.h"
 #include "qwen2_5_vl.h"
@@ -41,7 +43,17 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
   Qwen3_VLMoeForConditionalGenerationImpl(const ModelContext& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
-    visual_ = register_module("visual", Qwen3_VisionTransformer(context));
+    encoder_dp_group_ = context.get_parallel_args().encoder_dp_group_;
+    use_encoder_dp_ =
+        encoder_dp_group_ != nullptr && encoder_dp_group_->world_size() > 1;
+    if (use_encoder_dp_) {
+      ModelContext visual_context = context.with_parallel_args(ParallelArgs(
+          /*rank=*/0, /*world_size=*/1, /*process_group=*/nullptr));
+      visual_ =
+          register_module("visual", Qwen3_VisionTransformer(visual_context));
+    } else {
+      visual_ = register_module("visual", Qwen3_VisionTransformer(context));
+    }
 
     language_model_ =
         register_module("language_model", Qwen3MoeForCausalLM(context));
@@ -80,42 +92,40 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
     prepare_encoder_input(input_params, image_input, video_input);
 
     MMDict multimodal_embeds;
-    auto merge_size = model_args_.mm_image_merge_size();
     if (image_input) {
-      auto image_embeds =
-          visual_(image_input->pixel_values.to(options_),
-                  image_input->image_grid_thw.to(options_.device()),
-                  input_params);
-
-      auto image_tokens =
-          (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
-              .cpu()
-              .contiguous()
-              .to(torch::kLong);
-
-      std::vector<int64_t> image_tokens_vec(
-          image_tokens.data_ptr<int64_t>(),
-          image_tokens.data_ptr<int64_t>() + image_tokens.numel());
-      multimodal_embeds["image|embedding"] =
-          image_embeds.split(image_tokens_vec, /*dim=*/0);
+      torch::Tensor image_pixels = image_input->pixel_values.to(options_);
+      torch::Tensor image_grid =
+          image_input->image_grid_thw.to(options_.device());
+      std::vector<int32_t> image_token_nums =
+          get_mm_token_nums(input_params.multimodal.mm_data, MMType::IMAGE);
+      if (!use_encoder_dp_) {
+        auto image_embeds = visual_(image_pixels, image_grid);
+        multimodal_embeds["image|embedding"] =
+            split_by_token_nums(image_embeds, image_token_nums);
+      } else {
+        const int32_t image_feature_dim =
+            model_args_.mm_projection_dim() *
+            static_cast<int32_t>(
+                model_args_.mm_deepstack_visual_indexes().size() + 1);
+        multimodal_embeds["image|embedding"] =
+            run_dp_encoder(visual_,
+                           image_pixels,
+                           image_grid,
+                           image_token_nums,
+                           image_feature_dim,
+                           encoder_dp_group_);
+      }
     }
     if (video_input) {
-      auto video_embeds =
-          visual_(video_input->pixel_values_videos.to(options_),
-                  video_input->video_grid_thw.to(options_.device()),
-                  input_params);
-
-      auto video_tokens =
-          (video_input->video_grid_thw.prod(-1) / merge_size / merge_size)
-              .cpu()
-              .contiguous()
-              .to(torch::kLong);
-
-      std::vector<int64_t> video_tokens_vec(
-          video_tokens.data_ptr<int64_t>(),
-          video_tokens.data_ptr<int64_t>() + video_tokens.numel());
+      torch::Tensor video_pixels =
+          video_input->pixel_values_videos.to(options_);
+      torch::Tensor video_grid =
+          video_input->video_grid_thw.to(options_.device());
+      std::vector<int32_t> video_token_nums =
+          get_mm_token_nums(input_params.multimodal.mm_data, MMType::VIDEO);
+      auto video_embeds = visual_(video_pixels, video_grid);
       multimodal_embeds["video|embedding"] =
-          video_embeds.split(video_tokens_vec, /*dim=*/0);
+          split_by_token_nums(video_embeds, video_token_nums);
     }
     return multimodal_embeds;
   }
@@ -223,6 +233,8 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
  private:
   ModelArgs model_args_;
   torch::TensorOptions options_;
+  ProcessGroup* encoder_dp_group_ = nullptr;
+  bool use_encoder_dp_ = false;
   Qwen3_VisionTransformer visual_{nullptr};
   Qwen3MoeForCausalLM language_model_{nullptr};
 };

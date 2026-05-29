@@ -48,8 +48,8 @@ class Options {
   // model backend
   PROPERTY(std::string, backend);
 
-  // max image num per prompt, default 4
-  PROPERTY(int32_t, limit_image_per_prompt) = 4;
+  // max image num per prompt, default 8
+  PROPERTY(int32_t, limit_image_per_prompt) = 8;
 
   // block size, default 128
   PROPERTY(int32_t, block_size) = 128;
@@ -62,6 +62,9 @@ class Options {
   PROPERTY(double, max_memory_utilization) = 0.9;
 
   PROPERTY(bool, enable_prefix_cache) = true;
+
+  // maximum encoder cache size in MB (0 disables encoder cache)
+  PROPERTY(int64_t, max_encoder_cache_size) = 0;
 
   // max tokens num per batch
   PROPERTY(int32_t, max_tokens_per_batch) = 20480;

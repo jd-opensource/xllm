@@ -16,8 +16,10 @@ cc_library(
   SRCS
     model_registry.cpp
     dit/utils/lanczos_resample.cpp
+    vlm/utils/multimodal_utils.cpp
   DEPS
     :model
+    :parallel_state
     :model_context
     :dit_cache
     :model_loader

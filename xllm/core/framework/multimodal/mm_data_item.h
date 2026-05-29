@@ -100,8 +100,6 @@ class MMDataItem {
   const MMItemState& state() const { return state_; }
   MMItemState& mutable_state() { return state_; }
   const MMMetadata& metadata() const { return metadata_; }
-  void set_seq_index(int32_t seq_index) { seq_index_ = seq_index; }
-  int32_t seq_index() const { return seq_index_; }
   void debug_print() const;
 
  private:
@@ -109,7 +107,6 @@ class MMDataItem {
   MMDict data_;
   MMMetadata metadata_;
   MMItemState state_;
-  int32_t seq_index_ = -1;
 };
 
 }  // namespace xllm

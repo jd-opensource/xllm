@@ -59,7 +59,6 @@ class NpuGlm4VisionEncoderLayerImpl : public BaseLayer {
                         torch::Tensor& sin_pos,
                         torch::Tensor& cu_seqlen,
                         std::vector<int>& cu_seqlen_vec,
-                        ModelInputParams& input_params,
                         int node_id = 0,
                         aclrtEvent* event = nullptr,
                         std::atomic<bool>* event_flag = nullptr);
@@ -69,7 +68,6 @@ class NpuGlm4VisionEncoderLayerImpl : public BaseLayer {
                                torch::Tensor& sin_pos,
                                torch::Tensor& cu_seqlen,
                                std::vector<int>& cu_seqlen_vec,
-                               ModelInputParams& input_params,
                                bool is_prefill);
 
   void param_from_args(atb_speed::glm::VisionEncoderLayerParam& param,

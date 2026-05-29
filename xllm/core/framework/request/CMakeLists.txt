@@ -45,6 +45,7 @@ cc_library(
   DEPS
     :kv_cache
     :prefix_cache
+    :encoder_cache
     :block
     :tokenizer
     :chat_template

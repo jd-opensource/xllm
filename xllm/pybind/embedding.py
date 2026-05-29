@@ -14,7 +14,7 @@ class Embedding:
         self,
         model: str,
         devices: str = 'npu:0',
-        limit_image_per_prompt: int = 4,
+        limit_image_per_prompt: int = 8,
         block_size: int = 128,
         max_cache_size: int = 0,
         max_memory_utilization: float = 0.8,

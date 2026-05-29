@@ -210,6 +210,8 @@ bool VLMEngine::init_model() {
 KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
   const int64_t max_cache_size = options_.max_cache_size();
   const double max_memory_utilization = options_.max_memory_utilization();
+  const int64_t encoder_cache_reserved_bytes =
+      options_.max_encoder_cache_size() * 1024 * 1024;
 
   std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
   futures.reserve(worker_clients_num_);
@@ -230,7 +232,9 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
               << ": available memory: " << readable_size(available_memory)
               << ", total memory: " << readable_size(total_memory)
               << ". Using max_memory_utilization: " << max_memory_utilization
-              << ", max_cache_size: " << readable_size(max_cache_size);
+              << ", max_cache_size: " << readable_size(max_cache_size)
+              << ", encoder_cache_reserved: "
+              << readable_size(encoder_cache_reserved_bytes);
     GAUGE_SET(weight_size_in_kilobytes,
               (total_memory - available_memory) / 1024);
     GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
@@ -243,6 +247,9 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
     if (max_cache_size > 0) {
       available_memory = std::min(available_memory, max_cache_size);
     }
+
+    available_memory -= encoder_cache_reserved_bytes;
+
     cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
   }
 

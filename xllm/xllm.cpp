@@ -32,6 +32,7 @@ limitations under the License.
 #include "core/common/types.h"
 #include "core/distributed_runtime/dit_master.h"
 #include "core/distributed_runtime/master.h"
+#include "core/distributed_runtime/vlm_master.h"
 #include "core/framework/config/beam_search_config.h"
 #include "core/framework/config/config_json_utils.h"
 #include "core/framework/config/disagg_pd_config.h"
@@ -123,6 +124,7 @@ Options create_options(const std::string& instance_name, bool is_local) {
       .draft_devices(speculative_config.draft_devices())
       .backend(model_config.backend())
       .limit_image_per_prompt(model_config.limit_image_per_prompt())
+      .max_encoder_cache_size(model_config.max_encoder_cache_size())
       .block_size(kv_cache_config.block_size())
       .max_cache_size(kv_cache_config.max_cache_size())
       .max_memory_utilization(kv_cache_config.max_memory_utilization())
@@ -252,6 +254,9 @@ void validate_config(const std::string& model_type) {
       !prefill_sp_supported_model_set.contains(model_type)) {
     LOG(FATAL) << "enable_prefill_sp is not supported for model_type="
                << model_type;
+  }
+  if (model_config.max_encoder_cache_size() < 0) {
+    LOG(FATAL) << "max_encoder_cache_size must be >= 0.";
   }
 #if defined(USE_MLU)
   // Disable enable_schedule_overlap for VLM models on MLU backend
@@ -433,6 +438,8 @@ int run() {
   if (options.node_rank() != 0) {
     if (model_config.backend() == "dit") {
       master = std::make_unique<DiTAssistantMaster>(options);
+    } else if (FLAGS_backend == "vlm") {
+      master = std::make_unique<VLMAssistantMaster>(options);
     } else {
       master = std::make_unique<LLMAssistantMaster>(options);
     }

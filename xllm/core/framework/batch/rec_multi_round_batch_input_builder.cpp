@@ -209,13 +209,6 @@ void RecMultiRoundBatchInputBuilder::extract_tokens_and_positions(
     ++adjusted_token_to_count_map[token_ids[j]];
   }
 
-  // Handle MRope positions
-  if (use_mrope_) {
-    const auto& args = *args_;
-    MPositionHelper helper(*sequence, args);
-    base_state.mrope_positions_vec.push_back(helper.get_positions());
-  }
-
   // Process each token
   for (uint32_t j = n_kv_cache_tokens; j < seq_len; ++j) {
     base_state.flatten_tokens_vec.push_back(token_ids[j]);
