@@ -35,14 +35,6 @@ limitations under the License.
 namespace xllm {
 namespace layer {
 
-struct DeepseekV4LayerWeightMemStats {
-  int64_t attn_bytes = 0;
-  int64_t expert_bytes = 0;
-  int64_t hc_bytes = 0;
-  int64_t other_bytes = 0;
-  int64_t total_bytes = 0;
-};
-
 class DeepseekV4DecoderLayerImpl : public torch::nn::Module {
  public:
   explicit DeepseekV4DecoderLayerImpl(const ModelContext& context,
@@ -50,7 +42,6 @@ class DeepseekV4DecoderLayerImpl : public torch::nn::Module {
 
   void load_state_dict(const StateDict& state_dict);
   void verify_loaded_weights() const;
-  DeepseekV4LayerWeightMemStats get_weight_mem_stats() const;
 
   torch::Tensor forward(
       torch::Tensor& x,
