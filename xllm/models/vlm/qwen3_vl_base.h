@@ -15,6 +15,9 @@ limitations under the License.
 
 #pragma once
 
+#include <type_traits>
+#include <utility>
+
 #include "core/framework/model/model_output.h"
 #include "core/framework/multimodal/mm_data_item.h"
 #include "core/layers/common/lm_head.h"
@@ -80,18 +83,10 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
     MMDict multimodal_embeds;
     auto merge_size = model_args_.mm_image_merge_size();
     if (image_input) {
-#if defined(USE_NPU)
-      // NPU visual encoder keeps a two-argument forward; request context is
-      // handled by the NPU VLM wrapper before invoking the visual module.
-      auto image_embeds =
-          visual_(image_input->pixel_values.to(options_),
-                  image_input->image_grid_thw.to(options_.device()));
-#else
-      auto image_embeds =
-          visual_(image_input->pixel_values.to(options_),
-                  image_input->image_grid_thw.to(options_.device()),
-                  input_params);
-#endif
+      torch::Tensor image_embeds =
+          get_visual_embeds(image_input->pixel_values.to(options_),
+                            image_input->image_grid_thw.to(options_.device()),
+                            input_params);
 
       auto image_tokens =
           (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
@@ -106,18 +101,10 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
           image_embeds.split(image_tokens_vec, /*dim=*/0);
     }
     if (video_input) {
-#if defined(USE_NPU)
-      // NPU visual encoder keeps a two-argument forward; request context is
-      // handled by the NPU VLM wrapper before invoking the visual module.
-      auto video_embeds =
-          visual_(video_input->pixel_values_videos.to(options_),
-                  video_input->video_grid_thw.to(options_.device()));
-#else
-      auto video_embeds =
-          visual_(video_input->pixel_values_videos.to(options_),
-                  video_input->video_grid_thw.to(options_.device()),
-                  input_params);
-#endif
+      torch::Tensor video_embeds =
+          get_visual_embeds(video_input->pixel_values_videos.to(options_),
+                            video_input->video_grid_thw.to(options_.device()),
+                            input_params);
 
       auto video_tokens =
           (video_input->video_grid_thw.prod(-1) / merge_size / merge_size)
@@ -234,6 +221,25 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
 
   void set_word_embedding(layer::WordEmbedding& word_embedding) {
     language_model_->set_word_embedding(word_embedding);
+  }
+
+ private:
+  torch::Tensor get_visual_embeds(torch::Tensor pixel_values,
+                                  torch::Tensor grid_thw,
+                                  const ModelInputParams& input_params) {
+    if constexpr (std::is_invocable_v<VisionTransformer&,
+                                      torch::Tensor,
+                                      torch::Tensor,
+                                      const ModelInputParams&>) {
+      return visual_(
+          std::move(pixel_values), std::move(grid_thw), input_params);
+    } else {
+      static_assert(
+          std::is_invocable_v<VisionTransformer&, torch::Tensor, torch::Tensor>,
+          "VisionTransformer must accept either two tensor arguments or two "
+          "tensor arguments plus ModelInputParams.");
+      return visual_(std::move(pixel_values), std::move(grid_thw));
+    }
   }
 
  protected:
