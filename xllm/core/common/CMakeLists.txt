@@ -25,6 +25,7 @@ cc_library(
     rate_limiter.cpp
     device_monitor.cpp
   DEPS
+    proto::xllm_proto
     :config
     util
     absl::random_random

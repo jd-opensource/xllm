@@ -34,13 +34,13 @@ endif()
 
 option(GENERATE_SO "Enable compile to generate .so" OFF)
 
+add_subdirectory(proto)
 add_subdirectory(api_service)
 add_subdirectory(core)
 add_subdirectory(function_call)
 add_subdirectory(models)
 add_subdirectory(parser)
 add_subdirectory(processors)
-add_subdirectory(proto)
 add_subdirectory(pybind)
 add_subdirectory(server)
 
