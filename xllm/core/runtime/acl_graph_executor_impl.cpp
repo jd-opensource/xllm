@@ -193,6 +193,7 @@ AclGraph::~AclGraph() {
 }
 
 void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
+  const int32_t device_index_int = to_int32_device_index(device_index);
   // Get a secondary stream from high-priority pool for graph capture.
   // This is required because NPUGraph::capture_begin() enforces that capture
   // must be performed on a non-default stream (see
@@ -204,7 +205,7 @@ void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
       << "Failed to create ACL graph replay completion event";
   LOG(INFO) << "Initialized capture_stream: " << capture_stream_.value()
             << ", id: " << capture_stream_.value().id()
-            << ", device_index: " << device_index;
+            << ", device_index: " << device_index_int;
 }
 
 void AclGraph::make_current_stream_wait_for_graph(aclrtStream current_stream) {

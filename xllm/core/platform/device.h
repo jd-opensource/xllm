@@ -81,4 +81,12 @@ class Device {
   static bool support_sm120a_;
 };
 
+inline int32_t to_int32_device_index(c10::DeviceIndex device_index) {
+  return static_cast<int32_t>(device_index);
+}
+
+inline int32_t to_int32_device_index(const torch::Device& device) {
+  return to_int32_device_index(static_cast<c10::DeviceIndex>(device.index()));
+}
+
 }  // namespace xllm

@@ -30,6 +30,8 @@ limitations under the License.
 #include <type_traits>
 #include <unordered_map>
 
+#include "platform/device.h"
+
 #if defined(__CUDACC__) || defined(_NVHPC_CUDA)
 #define HOST_DEVICE_INLINE __host__ __device__ __forceinline__
 #define DEVICE_INLINE __device__ __forceinline__
@@ -146,8 +148,9 @@ inline void bind_tvmffi_stream_to_current_torch_stream(
       reinterpret_cast<void*>(cur.stream()),
       &original_stream);
   if (rc != 0) {
+    const int32_t device_index = to_int32_device_index(device.index());
     LOG(WARNING) << "[tvmffi.stream] failed to set stream, rc=" << rc
-                 << " dev=" << device.index();
+                 << " dev=" << device_index;
   }
 }
 }  // namespace xllm::kernel::cuda
