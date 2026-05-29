@@ -468,6 +468,10 @@ class TestUT(Command):
         pass
 
     def run_ctest(self, cmake_dir: str) -> int:
+        default_parallel: int = max(os.cpu_count() or 1, 8)
+        test_parallel: str = os.getenv("CTEST_PARALLEL", str(default_parallel))
+        logger.info(f"Test parallelism: {test_parallel} (set CTEST_PARALLEL to override)")
+
         def run_subprocess_with_streaming(
             cmd: list[str],
             error_message: str,
@@ -514,7 +518,7 @@ class TestUT(Command):
                 logger.info(f"Running tests in parallel (excluding: {', '.join(self.SEQUENTIAL_TESTS)})...")
                 logger.info("=" * 80)
                 run_subprocess_with_streaming(
-                    ['ctest', '--parallel', '8', '--repeat', 'until-pass:5', '-E', exclude_pattern],
+                    ['ctest', '--parallel', test_parallel, '--repeat', 'until-pass:5', '-E', exclude_pattern],
                     "Parallel tests failed."
                 )
             else:
@@ -522,7 +526,7 @@ class TestUT(Command):
                 logger.info("Running all tests in parallel...")
                 logger.info("=" * 80)
                 run_subprocess_with_streaming(
-                    ['ctest', '--parallel', '8', '--repeat', 'until-pass:5'],
+                    ['ctest', '--parallel', test_parallel, '--repeat', 'until-pass:5'],
                     "Parallel tests failed."
                 )
             
