@@ -44,6 +44,14 @@ DEFINE_bool(enable_interlayer_addnorm,
 DEFINE_bool(enable_split_rmsnorm_rope,
             false,
             "enable fused split rmsnorm rope ops.");
+
+DEFINE_bool(enable_qwen3_dense_aclnn_matmul,
+            false,
+            "enable ACLNN matmul backend for Qwen3 dense ATB layers.");
+
+DEFINE_bool(enable_qwen3_dense_aclnn_swiglu,
+            false,
+            "enable ACLNN SwiGLU backend for Qwen3 dense ATB layers.");
 #endif
 
 namespace xllm {
@@ -74,6 +82,8 @@ void KernelConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_fused_mc2);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_interlayer_addnorm);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_split_rmsnorm_rope);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_qwen3_dense_aclnn_matmul);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_qwen3_dense_aclnn_swiglu);
 #endif
 }
 
@@ -85,6 +95,8 @@ void KernelConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_fused_mc2);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_interlayer_addnorm);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_split_rmsnorm_rope);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_qwen3_dense_aclnn_matmul);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(enable_qwen3_dense_aclnn_swiglu);
 #endif
 }
 
@@ -100,6 +112,14 @@ void KernelConfig::append_config_json(
       config_json, default_config, enable_intralayer_addnorm);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, enable_fused_mc2);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_interlayer_addnorm);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_split_rmsnorm_rope);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_qwen3_dense_aclnn_matmul);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, enable_qwen3_dense_aclnn_swiglu);
 #endif
 }
 

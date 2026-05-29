@@ -95,6 +95,14 @@ void NpuQwen3DecoderLayerImpl::param_from_args(
       ::xllm::LoadConfig::get_instance().enable_prefetch_weight();
   param.enableAclGraphPagedAttention =
       ::xllm::ExecutionConfig::get_instance().enable_graph() && !isPrefill;
+  if (::xllm::KernelConfig::get_instance()
+          .enable_qwen3_dense_aclnn_matmul()) {
+    param.matmulBackend = atb_speed::common::OpBackend::ACLNN;
+  }
+  if (::xllm::KernelConfig::get_instance()
+          .enable_qwen3_dense_aclnn_swiglu()) {
+    param.swigluBackend = atb_speed::common::OpBackend::ACLNN;
+  }
   initialize_parallel_parameters(param, parallel_args);
   initialize_quantization_parameters(param);
 
