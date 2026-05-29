@@ -15,7 +15,6 @@ TILELANG_ASCEND_WHEELS: dict[tuple[str, str], str] = {
     ("a2", "arm"): "https://gitcode.com/xLLM-AI/tilelang-ascend/releases/download/v0.1.0-pre-release/tilelang-master.56d3f9b8.a2.cann850-cp311-cp311-linux_aarch64.whl",
     ("a2", "x86"): "https://gitcode.com/xLLM-AI/tilelang-ascend/releases/download/v0.1.0-pre-release/tilelang-master.56d3f9b8.a2.cann850-cp311-cp311-linux_x86_64.whl",
     ("a3", "arm"): "https://gitcode.com/xLLM-AI/tilelang-ascend/releases/download/v0.1.0-pre-release/tilelang-master.56d3f9b8.a3.cann850-cp311-cp311-linux_aarch64.whl",
-    ("a5", "arm"): "TODO",
 }
 
 

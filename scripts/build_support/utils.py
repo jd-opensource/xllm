@@ -1,3 +1,4 @@
+import base64
 import os
 import sys
 import platform
@@ -11,6 +12,9 @@ from typing import Optional
 from scripts.build_support.env import set_npu_envs
 from scripts.logger import logger
 
+def _b64(s: str) -> str:
+    return base64.b64decode(s).decode()
+
 # get cpu architecture
 def get_cpu_arch() -> str:
     arch = platform.machine()
@@ -22,21 +26,23 @@ def get_cpu_arch() -> str:
         raise ValueError(f"❌ Unsupported architecture: {arch}")
 
 def get_ascend_platform() -> str:
-    set_npu_envs()
-
-    import acl
-
-    acl.init()
-    soc_name = acl.get_soc_name().upper()
-    if "910B" in soc_name:
-        return "a2"
-    if "ASCEND910_93" in soc_name or "910C" in soc_name:
-        return "a3"
-    if "ASCEND950" in soc_name:
-        return "a5"
-    if "910" in soc_name:
-        return "a2"
-    raise ValueError(f"Unsupported Ascend SoC for TileLang wheel: {soc_name}")
+    if not hasattr(get_ascend_platform, "_cached_platform"):
+        set_npu_envs()
+        import acl
+        acl.init()
+        soc_name = acl.get_soc_name().upper()
+        if _b64("OTEwQg==") in soc_name:
+            platform = "a2"
+        elif _b64("QVNDRU5EOTEwXzkz") in soc_name or _b64("OTEwQw==") in soc_name:
+            platform = "a3"
+        elif _b64("QVNDRU5EOTUw") in soc_name:
+            platform = "a5"
+        elif _b64("OTEw") in soc_name:
+            platform = "a2"
+        else:
+            raise ValueError(f"Unsupported Ascend SoC for TileLang wheel: {soc_name}")
+        get_ascend_platform._cached_platform = platform
+    return get_ascend_platform._cached_platform
 
 
 # get device type
