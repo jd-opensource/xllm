@@ -60,8 +60,7 @@ CompositeBlockManager::CompositeBlockManager(
       sub_managers_.push_back(std::make_unique<BlockManagerImpl>(opts));
     } else if (type == kManagerTypeSlidingWindowBlockManager) {
       const uint32_t swa_blocks_per_seq = options_.swa_blocks_per_seq();
-      CHECK_GT(swa_blocks_per_seq, 0u)
-          << "swa_blocks_per_seq must be positive";
+      CHECK_GT(swa_blocks_per_seq, 0u) << "swa_blocks_per_seq must be positive";
       CHECK_GT(options_.block_size(), 0) << "block_size must be positive";
       const uint32_t sliding_window_size =
           std::max(options_.sliding_window_size(), 1u);
@@ -125,20 +124,11 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
   const size_t cached_tokens = seq->kv_state().kv_cache_tokens_num();
   const size_t sliding_window_tokens =
       std::max<size_t>(sub_managers_[0]->options().sliding_window_size(), 1);
-  if (sliding_window_tokens > 0 && cached_tokens >= sliding_window_tokens) {
+  size_t release_blocks = 0;
+  if (cached_tokens >= sliding_window_tokens) {
     const size_t skipped_tokens = cached_tokens - sliding_window_tokens + 1;
     const size_t skipped_blocks = skipped_tokens / block_size;
-    const size_t release_blocks = std::min(skipped_blocks, swa_blocks.size());
-    std::vector<Block> blocks_to_release;
-    blocks_to_release.reserve(release_blocks);
-    for (size_t j = 0; j < release_blocks; ++j) {
-      if (swa_blocks[j].is_valid()) {
-        blocks_to_release.emplace_back(std::move(swa_blocks[j]));
-      }
-    }
-    if (!blocks_to_release.empty()) {
-      sub_managers_[0]->deallocate(blocks_to_release);
-    }
+    release_blocks = std::min(skipped_blocks, swa_blocks.size());
   }
 
   const size_t swa_blocks_needed = (num_tokens + block_size - 1) / block_size;
@@ -173,6 +163,18 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
 
     composite->at(i).insert(
         composite->at(i).end(), blocks.begin(), blocks.end());
+  }
+  if (release_blocks > 0) {
+    std::vector<Block> blocks_to_release;
+    blocks_to_release.reserve(release_blocks);
+    for (size_t j = 0; j < release_blocks; ++j) {
+      if (swa_blocks[j].is_valid()) {
+        blocks_to_release.emplace_back(std::move(swa_blocks[j]));
+      }
+    }
+    if (!blocks_to_release.empty()) {
+      sub_managers_[0]->deallocate(blocks_to_release);
+    }
   }
   return true;
 }

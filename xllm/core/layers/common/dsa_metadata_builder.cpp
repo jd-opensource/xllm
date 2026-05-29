@@ -84,11 +84,11 @@ AttentionMetadata DSAMetadataBuilder::build(
     const torch::Tensor& dsa_c4_cos_sin,
     const torch::Tensor& dsa_c128_cos_sin) {
   // 1. Build base AttentionMetadata (q_cu_seq_lens, block_table, etc.)
-  AttentionMetadata attn_metadata = AttentionMetadataBuilder::build(
-      params,
-      /*enable_mla=*/false,
-      /*attn_mask=*/{},
-      infer_metadata_device(params, positions));
+  AttentionMetadata attn_metadata =
+      AttentionMetadataBuilder::build(params,
+                                      /*enable_mla=*/false,
+                                      /*attn_mask=*/{},
+                                      infer_metadata_device(params, positions));
 
   // 2. Build DSA-specific fields
   auto dsa_metadata = std::make_shared<DSAMetadata>();

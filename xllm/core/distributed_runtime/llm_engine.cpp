@@ -543,9 +543,8 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
     const int64_t effective_window =
         max_model_len > 0 ? std::min<int64_t>(semantic_window, max_model_len)
                           : semantic_window;
-    const uint32_t swa_blocks_per_seq =
-        static_cast<uint32_t>(get_swa_blocks_per_seq(effective_window,
-                                                     block_size));
+    const uint32_t swa_blocks_per_seq = static_cast<uint32_t>(
+        get_swa_blocks_per_seq(effective_window, block_size));
 
     options.sliding_window_size(static_cast<uint32_t>(effective_window))
         .swa_blocks_per_seq(swa_blocks_per_seq)
@@ -1084,8 +1083,8 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
     dp_global_token_nums[dp_rank] =
         static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());
     if (util::is_deepseek_v4_model_type(args_.model_type())) {
-      const int64_t actual_scheduled_tokens =
-          static_cast<int64_t>(batched_inputs[dp_rank].host_token_ids().numel());
+      const int64_t actual_scheduled_tokens = static_cast<int64_t>(
+          batched_inputs[dp_rank].host_token_ids().numel());
       const int64_t max_tokens_per_batch =
           static_cast<int64_t>(options_.max_tokens_per_batch());
       CHECK_LE(actual_scheduled_tokens, max_tokens_per_batch)

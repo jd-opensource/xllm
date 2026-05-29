@@ -283,6 +283,13 @@ TEST(CompositeBlockManagerTest, FailedGrowthRollsBackNewBlocks) {
   const size_t swa_blocks_before = before[0].size();
   const size_t c4_blocks_before = before[1].size();
   const size_t c128_blocks_before = before[2].size();
+  std::vector<int32_t> swa_ids_before;
+  swa_ids_before.reserve(before[0].size());
+  for (const auto& block : before[0]) {
+    ASSERT_TRUE(block.is_valid());
+    swa_ids_before.push_back(block.id());
+  }
+  seq.kv_state().incr_kv_cache_tokens_num(1024);
 
   EXPECT_FALSE(manager.allocate_for_sequence(&seq, 4096));
   EXPECT_EQ(manager.num_used_blocks(), used_before);
@@ -292,6 +299,11 @@ TEST(CompositeBlockManagerTest, FailedGrowthRollsBackNewBlocks) {
   EXPECT_EQ(after[0].size(), swa_blocks_before);
   EXPECT_EQ(after[1].size(), c4_blocks_before);
   EXPECT_EQ(after[2].size(), c128_blocks_before);
+  ASSERT_EQ(after[0].size(), swa_ids_before.size());
+  for (size_t i = 0; i < after[0].size(); ++i) {
+    EXPECT_TRUE(after[0][i].is_valid());
+    EXPECT_EQ(after[0][i].id(), swa_ids_before[i]);
+  }
 
   manager.deallocate_sequence(&seq);
 }
