@@ -202,7 +202,7 @@ class Qwen3VLForConditionalGenerationBase : public torch::nn::Module {
     visual_->merge_loaded_weights();
 #endif
 
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_.encoder_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
   }

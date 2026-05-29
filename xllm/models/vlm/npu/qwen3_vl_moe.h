@@ -28,9 +28,8 @@ limitations under the License.
 #include "models/llm/npu/qwen3_moe.h"
 #include "models/model_registry.h"
 #include "models/vlm/utils/multimodal_utils.h"
-#include "processors/qwen2_vl_image_processor.h"
-#include "processors/qwen2_vl_input_processor.h"
-#include "qwen2_5_vl.h"
+#include "processors/qwen3_vl_image_processor.h"
+#include "processors/qwen3_vl_input_processor.h"
 #include "qwen3_vl.h"
 
 namespace xllm::npu::model {
@@ -210,7 +209,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
     visual_->verify_loaded_weights("model.visual.");
     visual_->merge_loaded_weights();
 
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_.encoder_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
   }
@@ -240,9 +239,9 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Qwen3_VLMoeForConditionalGeneration);
 
-REGISTER_INPUT_PROCESSOR(qwen3_vl_moe, Qwen2_5_VLInputProcessor);
+REGISTER_INPUT_PROCESSOR(qwen3_vl_moe, Qwen3_VLInputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_vl_moe, Qwen3_VLMoeForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(qwen3_vl_moe, Qwen2VLImageProcessor);
+REGISTER_IMAGE_PROCESSOR(qwen3_vl_moe, Qwen3VLImageProcessor);
 // register the model args
 REGISTER_MODEL_ARGS(qwen3_vl_moe, [&] {
   // text config

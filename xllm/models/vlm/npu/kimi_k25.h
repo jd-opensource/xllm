@@ -1233,7 +1233,7 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
       mm_projector_->merge_loaded_weights();
     }
 
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_.encoder_embedding_mode()) {
       LOG(INFO) << "loading llm weight...";
       language_model_->load_model_with_prefixes(std::move(loader),
                                                 "language_model.model.",

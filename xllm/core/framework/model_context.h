@@ -85,8 +85,8 @@ class ModelContext {
   }
 #endif
 
-  void set_image_embedding_mode(bool image_embedding_mode) {
-    model_args_.image_embedding_mode() = image_embedding_mode;
+  void set_encoder_embedding_mode(bool encoder_embedding_mode) {
+    model_args_.encoder_embedding_mode() = encoder_embedding_mode;
   }
 
   const std::string& get_model_id() const { return model_id_; }

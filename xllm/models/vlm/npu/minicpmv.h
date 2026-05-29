@@ -1047,7 +1047,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
   void load_model(std::unique_ptr<ModelLoader> loader) {
     // load weight
     for (const auto& state_dict : loader->get_state_dicts()) {
-      if (!model_args_.image_embedding_mode()) {
+      if (!model_args_.encoder_embedding_mode()) {
         if (use_vision_adapter_)
           mlp_->load_state_dict(state_dict->get_dict_with_prefix("mlp."));
       }
@@ -1059,7 +1059,7 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
                                 "llm.");  // llm. weight name prefix
 
     // verify
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_.encoder_embedding_mode()) {
       if (use_vision_adapter_) mlp_->verify_loaded_weights("mlp.");
     }
     resampler_->verify_loaded_weights("resampler.");

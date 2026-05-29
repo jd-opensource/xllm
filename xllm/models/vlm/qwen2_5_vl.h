@@ -621,7 +621,7 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
           std::vector<std::string>{"visual.", "model.visual."}));
     }
 
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_.encoder_embedding_mode()) {
       language_model_->load_model(std::move(loader));
     }
   }

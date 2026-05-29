@@ -172,7 +172,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
     }
     visual_->verify_loaded_weights("model.visual.");
     visual_->merge_loaded_weights();
-    if (!model_args_.image_embedding_mode()) {
+    if (!model_args_.encoder_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
   }

@@ -46,7 +46,7 @@ bool VLMWorkerImpl::init_model(ModelContext& context) {
   CHECK(model_ == nullptr) << "Model is already initialized.";
 
   // initialize model
-  context.set_image_embedding_mode(false);
+  context.set_encoder_embedding_mode(false);
   model_ = create_vlm_model(context);
   CHECK(model_ != nullptr) << "Failed to create model.";
   model_executor_ = std::make_unique<Executor>(
