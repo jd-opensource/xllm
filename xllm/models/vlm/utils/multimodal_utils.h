@@ -22,8 +22,8 @@ limitations under the License.
 #include <utility>
 #include <vector>
 
+#include "core/framework/multimodal/mm_batch_data.h"
 #include "core/framework/parallel_state/parallel_state.h"
-#include "core/framework/request/mm_batch_data.h"
 
 namespace xllm {
 
