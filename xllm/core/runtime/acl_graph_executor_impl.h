@@ -134,7 +134,7 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   torch::Device device_;
   runtime::Options options_;
 
-  // Lazy-loaded ACL graphs for different token buckets.
+  // Lazy-loaded ACL graphs for different graph keys.
   absl::flat_hash_map<uint64_t, std::unique_ptr<AclGraph>> graphs_;
 
   // Persistent parameters shared across all AclGraph instances
