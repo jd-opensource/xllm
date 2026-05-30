@@ -1,4 +1,4 @@
-﻿/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2025 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -371,10 +371,8 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     return model_->forward(tokens, positions, kv_caches, params);
   }
 
-  const uint32_t token_stride = params_single.is_spec_verify
-                                    ? static_cast<uint32_t>(std::max<int64_t>(
-                                          options_.num_decoding_tokens(), 1))
-                                    : 1;
+  const uint32_t token_stride = static_cast<uint32_t>(
+      std::max<int64_t>(options_.num_decoding_tokens(), 1));
   if (params_single.is_spec_verify && token_stride > 1 &&
       graph_num_tokens % token_stride != 0) {
     LOG_FIRST_N(WARNING, 1)
@@ -526,10 +524,8 @@ uint64_t AclGraphExecutorImpl::get_graph_key(
     uint32_t bucket_num_tokens,
     const ModelInputParams& params) const {
   uint64_t key = bucket_num_tokens;
-  const uint64_t token_stride = params.is_spec_verify
-                                    ? static_cast<uint64_t>(std::max<int64_t>(
-                                          options_.num_decoding_tokens(), 1))
-                                    : 1;
+  const uint64_t token_stride = static_cast<uint64_t>(
+      std::max<int64_t>(options_.num_decoding_tokens(), 1));
   key |= token_stride << 32;
   if (params.is_spec_verify) {
     key |= uint64_t{1} << 48;

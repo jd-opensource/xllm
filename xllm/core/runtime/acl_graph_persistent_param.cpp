@@ -584,26 +584,37 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     bool return_capture_params) {
   CHECK_GT(padded_num_tokens, 0) << "padded_num_tokens must be > 0";
   const uint32_t actual_num_tokens = tokens.size(0);
+  const bool is_decode = params.meta.batch_forward_type.is_decode();
+  const int64_t decode_tokens =
+      is_decode ? std::max<int64_t>(options_.num_decoding_tokens(), 1) : 1;
+  if (is_decode) {
+    CHECK_EQ(actual_num_tokens % decode_tokens, 0)
+        << "actual num tokens must be divisible by num_decoding_tokens for "
+           "ACL graph decode";
+    CHECK_EQ(padded_num_tokens % decode_tokens, 0)
+        << "padded num tokens must be divisible by num_decoding_tokens for "
+           "ACL graph decode";
+  }
   int64_t actual_batch_size = infer_actual_batch_size(params);
   const bool is_chunked_prefill =
       params.meta.batch_forward_type.is_chunked_prefill();
   if (is_chunked_prefill && params.meta.num_sequences > 0) {
     actual_batch_size = params.meta.num_sequences;
-  } else if (params.meta.batch_forward_type.is_decode()) {
+  } else if (is_decode) {
     if (params.meta.num_sequences == 0) {
       actual_batch_size = 0;
     } else {
-      const int64_t decode_tokens =
-          std::max<int64_t>(options_.num_decoding_tokens(), 1);
       actual_batch_size = actual_num_tokens / decode_tokens;
     }
   }
+  const int64_t padding_q_len =
+      is_chunked_prefill ? std::max<int32_t>(params.meta.q_max_seq_len, 1)
+                         : decode_tokens;
+  const int64_t batch_token_stride =
+      is_chunked_prefill ? padding_q_len : decode_tokens;
+  CHECK_GT(batch_token_stride, 0) << "batch token stride must be positive";
   const int64_t padded_batch_size =
-      is_chunked_prefill
-          ? (padded_num_tokens +
-             std::max<int32_t>(params.meta.q_max_seq_len, 1) - 1) /
-                std::max<int32_t>(params.meta.q_max_seq_len, 1)
-          : padded_num_tokens;
+      (padded_num_tokens + batch_token_stride - 1) / batch_token_stride;
 
   // Copy data from input parameters to persistent graph tensors
   if (actual_num_tokens > 0) {
@@ -668,9 +679,6 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     }
   }
   if (padded_batch_size > actual_batch_size) {
-    const int32_t padding_q_len =
-        is_chunked_prefill ? std::max<int32_t>(params.meta.q_max_seq_len, 1)
-                           : 1;
     q_seq_lens_
         .slice(/*dim=*/0,
                /*start=*/actual_batch_size,
@@ -841,11 +849,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       int32_t offset = static_cast<int32_t>(actual_num_tokens);
       std::vector<int32_t> padded_q_cu_seq_lens;
       padded_q_cu_seq_lens.reserve(padded_batch_size - actual_batch_size);
-      const int32_t padding_q_len =
-          is_chunked_prefill ? std::max<int32_t>(params.meta.q_max_seq_len, 1)
-                             : 1;
       for (int64_t i = actual_batch_size; i < padded_batch_size; ++i) {
-        offset += padding_q_len;
+        offset += static_cast<int32_t>(padding_q_len);
         padded_q_cu_seq_lens.emplace_back(offset);
       }
       const int64_t padding_start =
@@ -884,8 +889,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
   }
   for (int64_t i = actual_batch_size; i < padded_batch_size; ++i) {
     padded_q_seq_lens_vec[static_cast<size_t>(i)] =
-        is_chunked_prefill ? std::max<int32_t>(params.meta.q_max_seq_len, 1)
-                           : 1;
+        static_cast<int32_t>(padding_q_len);
   }
   const bool use_expanded_spec_decode_attention =
       params.is_spec_verify && is_chunked_prefill &&
