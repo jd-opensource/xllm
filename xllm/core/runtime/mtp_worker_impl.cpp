@@ -326,12 +326,18 @@ std::tuple<int64_t, int64_t> MTPWorkerImpl::estimate_kv_cache_capacity() {
 
   const ModelArgs& target_model_args = impl_->context_.get_model_args();
   const ModelArgs& draft_model_args = draft_impl_->context_.get_model_args();
-  KVCacheEstimateOptions target_options = make_kv_cache_estimate_options(
-      target_model_args, MTPTargetOptions(options_), parallel_args_, dtype_,
-      cache_size_in_bytes);
-  const KVCacheEstimateOptions draft_options = make_kv_cache_estimate_options(
-      draft_model_args, MTPDraftOptions(options_), parallel_args_, dtype_,
-      cache_size_in_bytes);
+  KVCacheEstimateOptions target_options =
+      make_kv_cache_estimate_options(target_model_args,
+                                     MTPTargetOptions(options_),
+                                     parallel_args_,
+                                     dtype_,
+                                     cache_size_in_bytes);
+  const KVCacheEstimateOptions draft_options =
+      make_kv_cache_estimate_options(draft_model_args,
+                                     MTPDraftOptions(options_),
+                                     parallel_args_,
+                                     dtype_,
+                                     cache_size_in_bytes);
   target_options.draft_model_args = &draft_model_args;
   target_options.draft_options = &draft_options;
 

@@ -102,7 +102,6 @@ int64_t infer_actual_batch_size(const ModelInputParams& params) {
 }
 }  // namespace
 
-
 bool AclGraph::capture(CausalLM* model,
                        const runtime::Options& options,
                        const torch::Tensor& tokens,
@@ -146,10 +145,10 @@ bool AclGraph::capture(CausalLM* model,
   CHECK(graph_params.has_value())
       << "update() should return ModelInputParams when "
          "return_capture_params=true";
-  prepare_model_graph_metadata(model,
-                               persistent_param_.persistent_positions(
-                                   num_tokens_),
-                               graph_params.value());
+  prepare_model_graph_metadata(
+      model,
+      persistent_param_.persistent_positions(num_tokens_),
+      graph_params.value());
 
   // Synchronize stream to ensure all data is copied to graph persistent buffers
   aclrtSynchronizeStream(stream);
@@ -273,10 +272,10 @@ ModelOutput AclGraph::replay(CausalLM* model,
     CHECK(graph_params.has_value())
         << "update() should return ModelInputParams when graph metadata is "
            "required";
-    prepare_model_graph_metadata(model,
-                                 persistent_param_.persistent_positions(
-                                     num_tokens_),
-                                 graph_params.value());
+    prepare_model_graph_metadata(
+        model,
+        persistent_param_.persistent_positions(num_tokens_),
+        graph_params.value());
   }
 
   // Replay captured graph - NPUGraph mempool reuses temporary tensors

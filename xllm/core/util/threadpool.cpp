@@ -43,8 +43,8 @@ ThreadPool::ThreadPool(size_t num_threads,
 ThreadPool::ThreadPool(size_t num_threads,
                        Runnable init_func,
                        bool cpu_binding,
-                      //  const char* fn,
-                      //  int32_t ln,
+                       //  const char* fn,
+                       //  int32_t ln,
                        const std::string& pool_name)
     : queues_(num_threads), pool_name_(pool_name) {
   log_threadpool_creation(

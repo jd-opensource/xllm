@@ -518,9 +518,9 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .max_seqs_per_batch(options_.max_seqs_per_batch())
       .max_concurrent_requests(
           ::xllm::ServiceConfig::get_instance().max_concurrent_requests());
-  if (util::is_target_model_type(
-          args_.model_type(), /*target_type=*/"deepseek_v4",
-          /*match_mtp=*/true)) {
+  if (util::is_target_model_type(args_.model_type(),
+                                 /*target_type=*/"deepseek_v4",
+                                 /*match_mtp=*/true)) {
     constexpr uint32_t kManagerTypeBlockManagerImpl = 0;
     constexpr uint32_t kManagerTypeSlidingWindowBlockManager = 1;
 

@@ -601,8 +601,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       actual_batch_size = actual_num_tokens / decode_tokens;
     }
   }
-  const int32_t q_max_seq_len =
-      std::max<int32_t>(params.meta.q_max_seq_len, 1);
+  const int32_t q_max_seq_len = std::max<int32_t>(params.meta.q_max_seq_len, 1);
   const int64_t padded_batch_size =
       is_chunked_prefill
           ? (padded_num_tokens + q_max_seq_len - 1) / q_max_seq_len
@@ -640,8 +639,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       q_seq_lens_default_.sizes() == q_seq_lens_.sizes()) {
     q_seq_lens_.copy_(q_seq_lens_default_, /*non_blocking=*/true);
   }
-  if (actual_num_tokens > 0 &&
-      params.attention.device.q_seq_lens.defined() &&
+  if (actual_num_tokens > 0 && params.attention.device.q_seq_lens.defined() &&
       params.attention.device.q_seq_lens.dim() >= 1 &&
       params.attention.device.q_seq_lens.numel() > 0) {
     const int64_t q_copy_len = std::min<int64_t>(
@@ -658,8 +656,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       kv_seq_lens_default_.sizes() == kv_seq_lens_.sizes()) {
     kv_seq_lens_.copy_(kv_seq_lens_default_, /*non_blocking=*/true);
   }
-  if (actual_num_tokens > 0 &&
-      params.attention.device.kv_seq_lens.defined() &&
+  if (actual_num_tokens > 0 && params.attention.device.kv_seq_lens.defined() &&
       params.attention.device.kv_seq_lens.dim() >= 1 &&
       params.attention.device.kv_seq_lens.numel() > 0) {
     const int64_t kv_copy_len = std::min<int64_t>(

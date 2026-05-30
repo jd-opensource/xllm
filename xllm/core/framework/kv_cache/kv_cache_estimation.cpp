@@ -65,9 +65,8 @@ Dsv4KVCacheEstimateCost estimate_dsv4_kv_cache_cost(
       ++cache_cost.n_c128_layers;
     }
   }
-  const int64_t n_c1_layers = model_args.n_layers() -
-                              cache_cost.n_c4_layers -
-                              cache_cost.n_c128_layers;
+  const int64_t n_c1_layers =
+      model_args.n_layers() - cache_cost.n_c4_layers - cache_cost.n_c128_layers;
 
   const int64_t swa_bytes_per_c1_layer =
       cache_cost.swa_count * block_size * head_dim * dtype_size;
@@ -101,8 +100,7 @@ Dsv4KVCacheEstimateCost estimate_dsv4_kv_cache_cost(
         cache_cost.n_c128_layers * bytes_per_c128_block;
     cache_cost.manager_blocks_per_unit = 128;
   } else if (cache_cost.n_c4_layers > 0) {
-    cache_cost.token_unit_bytes =
-        cache_cost.n_c4_layers * bytes_per_c4_block;
+    cache_cost.token_unit_bytes = cache_cost.n_c4_layers * bytes_per_c4_block;
     cache_cost.manager_blocks_per_unit = 4;
   } else if (cache_cost.n_c128_layers > 0) {
     cache_cost.token_unit_bytes =
@@ -219,9 +217,8 @@ LinearAttentionCacheSizing get_linear_attention_cache_sizing(
       (head_k_dim * options.n_local_linear_k_heads * 2 +
        head_v_dim * options.n_local_linear_v_heads) *
       sizing.conv_state_len;
-  sizing.slot_size =
-      linear_conv_slot_size +
-      linear_ssm_slot_size * sizing.ssm_checkpoint_stride;
+  sizing.slot_size = linear_conv_slot_size +
+                     linear_ssm_slot_size * sizing.ssm_checkpoint_stride;
   return sizing;
 }
 
@@ -244,13 +241,13 @@ void init_dsv4_counts(const ModelArgs& model_args,
         << "DSV4 MTP kv cache estimation only supports DeepSeek V4 draft";
     const Dsv4KVCacheEstimateCost draft_cost = estimate_dsv4_kv_cache_cost(
         *options.draft_model_args, *options.draft_options);
-    const int64_t constant_bytes = cache_cost.constant_swa_bytes +
-                                   draft_cost.constant_swa_bytes;
+    const int64_t constant_bytes =
+        cache_cost.constant_swa_bytes + draft_cost.constant_swa_bytes;
     CHECK_GT(kv_cache_cap->cache_size_in_bytes(), constant_bytes)
         << "no memory left for mtp target/draft fixed kv cache allocation";
 
-    const int64_t token_unit_bytes = cache_cost.token_unit_bytes +
-                                    draft_cost.token_unit_bytes;
+    const int64_t token_unit_bytes =
+        cache_cost.token_unit_bytes + draft_cost.token_unit_bytes;
     CHECK_GT(token_unit_bytes, 0)
         << "mtp target and draft token unit bytes must be positive";
     const int64_t token_unit_count =
@@ -396,9 +393,9 @@ const KVCacheEstimateStrategy& select_kv_cache_estimate_strategy(
     const ModelArgs& model_args) {
   static const StandardKVCacheEstimateStrategy kStandardStrategy;
   static const Dsv4KVCacheEstimateStrategy kDsv4Strategy;
-  if (util::is_target_model_type(
-          model_args.model_type(), /*target_type=*/"deepseek_v4",
-          /*match_mtp=*/true)) {
+  if (util::is_target_model_type(model_args.model_type(),
+                                 /*target_type=*/"deepseek_v4",
+                                 /*match_mtp=*/true)) {
     return kDsv4Strategy;
   }
   return kStandardStrategy;
@@ -417,9 +414,9 @@ KVCacheCapacity estimate_kv_cache_capacity(
   CHECK_GT(kv_cache_cap.cache_size_in_bytes(), 0)
       << "Available kv cache size must be greater than 0";
   if (options.draft_model_args != nullptr) {
-    CHECK(util::is_target_model_type(
-        model_args.model_type(), /*target_type=*/"deepseek_v4",
-        /*match_mtp=*/true))
+    CHECK(util::is_target_model_type(model_args.model_type(),
+                                     /*target_type=*/"deepseek_v4",
+                                     /*match_mtp=*/true))
         << "DSV4 MTP kv cache estimation only supports DeepSeek V4 target";
   }
 
