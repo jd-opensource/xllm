@@ -20,6 +20,11 @@ limitations under the License.
 #include "models/model_registry.h"
 #include "models/vlm/mposition/mposition.h"
 #include "models/vlm/qwen3_vl_base.h"
+#include "processors/multimodal_processor.h"
+#include "processors/qwen2_vl_image_processor.h"
+#include "processors/qwen2_vl_prompt_processor.h"
+#include "processors/qwen2_vl_video_processor.h"
+#include "processors/qwen3_vl_video_processor.h"
 
 #if defined(USE_NPU)
 #include "models/llm/qwen3_5.h"
@@ -27,11 +32,9 @@ limitations under the License.
 #elif defined(USE_MLU)
 #include "core/layers/common/qwen3_next_rms_norm.h"
 #include "core/layers/common/rms_norm.h"
-#include "core/layers/qwen3_5_decoder_layer.h"
+#include "core/layers/mlu/qwen3_5_decoder_layer.h"
 #include "core/layers/qwen3_vision_layer.h"
 #include "models/llm/llm_model_base.h"
-#include "processors/input_processor.h"
-#include "processors/qwen2_vl_image_processor.h"
 #include "qwen3_vl.h"
 #endif
 
@@ -305,21 +308,15 @@ TORCH_MODULE(Qwen3_5ForConditionalGeneration);
     return args->mm_hidden_size() / args->mm_num_attention_heads();            \
   })
 
-#if defined(USE_NPU)
-using Qwen3_5InputProcessor = Qwen3_VLInputProcessor;
-using Qwen3_5ImageProcessor = Qwen3VLImageProcessor;
-#else
-using Qwen3_5InputProcessor = Qwen2_5_VLInputProcessor;
-using Qwen3_5ImageProcessor = Qwen2VLImageProcessor;
-#endif
-
 // qwen3_5/qwen3_5_moe are multimodal entry points. On NPU, text-only serving
 // uses qwen3_5_text/qwen3_5_moe_text from llm/qwen3_5.h because the VLM
 // request protocol currently requires array-form chat content.
-REGISTER_INPUT_PROCESSOR(qwen3_5, Qwen3_5InputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_5, Qwen3_5ForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(qwen3_5, Qwen3_5ImageProcessor);
 REGISTER_MPOSITION_GENERATOR(qwen3_5, Qwen3VLMPositionGenerator);
+using Qwen35MultimodalProcessor = MultimodalProcessor<Qwen2VLPromptProcessor,
+                                                      Qwen2VLImageProcessor,
+                                                      Qwen3VLVideoProcessor>;
+REGISTER_MULTIMODAL_PROCESSOR(qwen3_5, Qwen35MultimodalProcessor);
 REGISTER_MODEL_ARGS(qwen3_5, [&] {
   LOAD_QWEN3_5_COMMON_ARGS();
   LOAD_QWEN3_5_VISION_ARGS();
@@ -332,14 +329,12 @@ REGISTER_MODEL_ARGS(qwen3_5, [&] {
           std::unordered_set<int32_t>({args->eos_token_id(), 248046}));
 });
 
-REGISTER_INPUT_PROCESSOR(qwen3_5_moe, Qwen3_5InputProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen3_5_moe, Qwen3_5ForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(qwen3_5_moe, Qwen3_5ImageProcessor);
 REGISTER_MPOSITION_GENERATOR(qwen3_5_moe, Qwen3VLMPositionGenerator);
+REGISTER_MULTIMODAL_PROCESSOR(qwen3_5_moe, Qwen35MultimodalProcessor);
 REGISTER_MODEL_ARGS(qwen3_5_moe, [&] {
   LOAD_QWEN3_5_COMMON_ARGS();
   LOAD_QWEN3_5_VISION_ARGS();
-
   LOAD_ARG_OR(decoder_sparse_step, "text_config.decoder_sparse_step", 1);
   LOAD_ARG_OR(moe_intermediate_size, "text_config.moe_intermediate_size", 512);
   LOAD_ARG_OR(num_experts, "text_config.num_experts", 512);

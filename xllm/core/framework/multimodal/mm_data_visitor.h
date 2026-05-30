@@ -102,6 +102,26 @@ class EncoderOutputScatterVisitor : public MMDataItem::IVisitor {
   int32_t audio_idx = 0;
 };
 
+struct PreprocessedMMItems {
+  std::vector<MMDataItem> image_items;
+  std::vector<MMDataItem> video_items;
+  std::vector<MMDataItem> audio_items;
+};
+
+class PreprocessOutputScatterVisitor : public MMDataItem::IVisitor {
+ public:
+  explicit PreprocessOutputScatterVisitor(const PreprocessedMMItems& items)
+      : items_(items) {}
+
+  bool visit(MMDataItem& item) override;
+  bool finish() const;
+
+ public:
+  const PreprocessedMMItems& items_;
+  int32_t image_idx = 0;
+  int32_t video_idx = 0;
+};
+
 class EncoderEmbeddingGatherVisitor : public MMDataItem::IVisitor {
  public:
   EncoderEmbeddingGatherVisitor(const torch::Device& device,

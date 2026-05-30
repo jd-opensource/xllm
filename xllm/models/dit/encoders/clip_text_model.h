@@ -33,9 +33,7 @@ limitations under the License.
 #include "core/layers/npu/npu_siglip_encoder_layer_impl.h"
 #endif
 #include "models/model_registry.h"
-#include "processors/clip_image_processor.h"
-#include "processors/clip_input_processor.h"
-#include "processors/pywarpper_image_processor.h"
+#include "processors/clip_prompt_processor.h"
 #include "xllm/core/layers/common/add_matmul.h"
 #if defined(USE_NPU)
 #include "xllm_atb_layers/core/include/atb_speed/log.h"

@@ -35,7 +35,7 @@ limitations under the License.
 #include "models/vlm/mposition/mposition.h"
 #include "models/vlm/utils/multimodal_utils.h"
 #include "processors/glm4v_image_processor.h"
-#include "processors/glm4v_input_processor.h"
+#include "processors/glm4v_video_processor.h"
 
 namespace xllm::npu::model {
 
@@ -200,9 +200,11 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Glm4vMoeForConditionalGeneration);
 
-REGISTER_INPUT_PROCESSOR(glm4v_moe, GLM4VInputProcessor);
+using Glm4vMoeMultimodalProcessor = MultimodalProcessor<GLM4VPromptProcessor,
+                                                        Glm4VImageProcessor,
+                                                        Glm4VVideoProcessor>;
+REGISTER_MULTIMODAL_PROCESSOR(glm4v_moe, Glm4vMoeMultimodalProcessor);
 REGISTER_CAUSAL_VLM_MODEL(glm4v_moe, Glm4vMoeForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(glm4v_moe, Glm4VImageProcessor);
 REGISTER_MPOSITION_GENERATOR(glm4v_moe, xllm::Glm4VMPositionGenerator);
 // register the model args
 REGISTER_MODEL_ARGS(glm4v_moe, [&] {

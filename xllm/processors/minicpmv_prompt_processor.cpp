@@ -13,19 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "processors/minicpmv_input_processor.h"
-
-#include <glog/logging.h>
-#include <torch/torch.h>
+#include "processors/minicpmv_prompt_processor.h"
 
 #include <algorithm>
+#include <cassert>
+#include <cstdint>
 #include <regex>
 
 #include "processors/minicpmv_image_processor.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
-MiniCPMInputProcessor::MiniCPMInputProcessor(const ModelArgs& args) {
+MiniCPMPromptProcessor::MiniCPMPromptProcessor(const ModelArgs& args) {
   image_feature_size_ = args.mm_image_feature_size();
   max_slice_nums_ = args.vision_max_slice_nums();
   slice_mode_ = args.mm_slice_mode();
@@ -33,16 +32,14 @@ MiniCPMInputProcessor::MiniCPMInputProcessor(const ModelArgs& args) {
   scale_resolution_ = args.mm_scale_resolution();
 }
 
-void MiniCPMInputProcessor::process(std::string& prompt,
-                                    const MMData& mm_data) {
+void MiniCPMPromptProcessor::process(std::string& prompt,
+                                     const MMData& mm_data) {
   std::vector<torch::Tensor> image_sizes;
   mm_data.get("image_sizes", image_sizes);
 
   const std::regex pattern(R"(\(<image>[\s\S]*?</image>\))");
-
   std::sregex_iterator image_tag_begin(prompt.begin(), prompt.end(), pattern);
   std::sregex_iterator image_tag_end;
-
   if (image_tag_begin == image_tag_end) {
     return;
   }
@@ -52,9 +49,8 @@ void MiniCPMInputProcessor::process(std::string& prompt,
   for (auto& image_size : image_sizes) {
     if (image_size.dim() != 1 || image_size.size(0) != 2) {
       const auto& sizes = image_size.sizes();
-      LOG(FATAL) << "image_size must be a 1D tensor with 2 "
-                    "elements representing height and width;"
-                    "now sizes: "
+      LOG(FATAL) << "image_size must be a 1D tensor with 2 elements "
+                    "representing height and width; now sizes: "
                  << sizes;
     }
     image_size_list.emplace_back(std::make_pair(image_size[0].item<int32_t>(),
@@ -63,35 +59,33 @@ void MiniCPMInputProcessor::process(std::string& prompt,
 
   std::vector<std::string> text_chunks;
   size_t last_pos = 0;
-
   for (auto it = image_tag_begin; it != image_tag_end; ++it) {
     auto match = *it;
     text_chunks.push_back(prompt.substr(last_pos, match.position() - last_pos));
     last_pos = match.position() + match.length();
   }
-
   text_chunks.push_back(prompt.substr(last_pos));
 
   std::string new_prompt;
-  for (int32_t i = 0; i < static_cast<int32_t>(image_size_list.size()); ++i) {
+  for (size_t i = 0; i < image_size_list.size(); ++i) {
     new_prompt += text_chunks[i];
     new_prompt += get_slice_image_placeholder(image_size_list[i], i);
   }
-
   new_prompt += text_chunks.back();
-  prompt = new_prompt;
+  prompt = std::move(new_prompt);
 }
 
-void MiniCPMInputProcessor::find_mm_spans(const std::vector<int>& prompt,
-                                          MMData& mm_data) {
+void MiniCPMPromptProcessor::find_mm_spans(
+    const std::vector<int32_t>& token_ids,
+    MMData& mm_data) {
   int32_t global_mm_index = 0;
   int32_t offset = 0;
   auto& mm_items = mm_data.items<MMItemVec>();
   bool in_image = false;
   std::vector<int32_t> span_tokens;
-  size_t tokens_num = prompt.size();
+  const size_t tokens_num = token_ids.size();
   for (size_t idx = 0; idx < tokens_num; ++idx) {
-    auto token = prompt[idx];
+    int32_t token = token_ids[idx];
     if (token == im_start_id_) {
       in_image = true;
       offset = static_cast<int32_t>(idx) + 1;
@@ -130,26 +124,24 @@ void MiniCPMInputProcessor::find_mm_spans(const std::vector<int>& prompt,
   }
 }
 
-std::string MiniCPMInputProcessor::get_image_id_placeholder(int32_t idx) const {
+std::string MiniCPMPromptProcessor::get_image_id_placeholder(
+    int32_t idx) const {
   return im_id_start_ + std::to_string(idx) + im_id_end_;
 }
 
-std::string MiniCPMInputProcessor::get_grid_placeholder(
+std::string MiniCPMPromptProcessor::get_grid_placeholder(
     const std::pair<int32_t, int32_t>& grid) const {
   if (grid.first == 0 || grid.second == 0) {
     return "";
   }
 
   std::string slice_placeholder = slice_start_token_;
-
   for (int32_t i = 0; i < image_feature_size_; ++i) {
     slice_placeholder += unk_token_;
   }
-
   slice_placeholder += slice_end_token_;
 
   std::string grid_placeholder;
-
   for (int32_t i = 0; i < grid.second; ++i) {
     for (int32_t j = 0; j < grid.first; ++j) {
       grid_placeholder += slice_placeholder;
@@ -162,7 +154,7 @@ std::string MiniCPMInputProcessor::get_grid_placeholder(
   return grid_placeholder;
 }
 
-std::string MiniCPMInputProcessor::get_slice_image_placeholder(
+std::string MiniCPMPromptProcessor::get_slice_image_placeholder(
     const std::pair<int32_t, int32_t>& image_size,
     int32_t image_idx,
     int32_t max_slice_nums,
@@ -174,21 +166,17 @@ std::string MiniCPMInputProcessor::get_slice_image_placeholder(
   bool use_image_id =
       use_image_id_opt.has_value() ? use_image_id_opt.value() : use_image_id_;
 
-  assert(max_slice_nums > 0);
-
+  CHECK_GE(max_slice_nums, 0);
   auto grid = MiniCPMVImageProcessor::get_sliced_grid(
       image_size, max_slice_nums, scale_resolution_);
 
   std::string image_placeholder = im_start_token_;
-
-  for (int i = 0; i < image_feature_size_; ++i) {
+  for (int32_t i = 0; i < image_feature_size_; ++i) {
     image_placeholder += unk_token_;
   }
-
   image_placeholder += im_end_token_;
 
   std::string final_placeholder;
-
   if (use_image_id) {
     final_placeholder = get_image_id_placeholder(image_idx) + image_placeholder;
   } else {
@@ -202,4 +190,4 @@ std::string MiniCPMInputProcessor::get_slice_image_placeholder(
   return final_placeholder;
 }
 
-}  // namespace xllm
+}  // namespace xllm::npu::model

@@ -15,36 +15,20 @@ limitations under the License.
 
 #pragma once
 
-#include <torch/torch.h>
+#include <vector>
 
-#include <string>
-
+#include "core/framework/model/model_args.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "core/framework/multimodal/mm_input.h"
 
 namespace xllm {
 
-class InputProcessor {
+class PyWarpperInputProcessor {
  public:
-  virtual ~InputProcessor() = default;
+  explicit PyWarpperInputProcessor(const ModelArgs&);
+  ~PyWarpperInputProcessor() = default;
 
-  virtual void process(std::string& prompt, const MMData& mm_data) = 0;
-  virtual void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) {
-  };
-  void hash_mm_items(MMInput& mm_input, MMData& mm_data) {
-    const auto& mm_input_items = mm_input.items();
-    auto& mm_items = mm_data.items<MMItemVec>();
-    size_t size = mm_input_items.size();
-    for (size_t idx = 0; idx < size; ++idx) {
-      auto data = mm_input_items[idx].raw_data;
-      if (!data.empty()) {
-        auto mm_hash = hash_string(data);
-        auto& schedule_data =
-            mm_items[idx].mutable_state().mutable_schedule_data();
-        schedule_data.key = mm_hash;
-      }
-    }
-  }
+  bool process(const MMInput& mm_inputs, MMData& mm_datas);
 };
 
 }  // namespace xllm

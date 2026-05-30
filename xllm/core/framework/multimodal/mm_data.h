@@ -68,6 +68,7 @@ class MMData {
 
   bool has(const MMKey& key) const;
   bool valid() const { return type_ != MMType::NONE; }
+  bool empty() const { return size() == 0; }
 
   uint32_t type() const { return type_; }
   size_t size() const;

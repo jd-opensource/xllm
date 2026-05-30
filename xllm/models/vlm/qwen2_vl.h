@@ -23,7 +23,7 @@ limitations under the License.
 #include "models/model_registry.h"
 #include "models/vlm/mposition/mposition.h"
 #include "processors/qwen2_vl_image_processor.h"
-#include "processors/qwen2_vl_input_processor.h"
+#include "processors/qwen2_vl_video_processor.h"
 #include "qwen2_5_vl.h"
 
 namespace xllm {
@@ -543,9 +543,11 @@ class Qwen2_VLForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(Qwen2_VLForConditionalGeneration);
 
-REGISTER_INPUT_PROCESSOR(qwen2_vl, Qwen2_5_VLInputProcessor);
+using Qwen2VLMultimodalProcessor = MultimodalProcessor<Qwen2VLPromptProcessor,
+                                                       Qwen2VLImageProcessor,
+                                                       Qwen2VLVideoProcessor>;
+REGISTER_MULTIMODAL_PROCESSOR(qwen2_vl, Qwen2VLMultimodalProcessor);
 REGISTER_CAUSAL_VLM_MODEL(qwen2_vl, Qwen2_VLForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(qwen2_vl, Qwen2VLImageProcessor);
 REGISTER_MPOSITION_GENERATOR(qwen2_vl, QwenVLMPositionGenerator);
 
 REGISTER_MODEL_ARGS(qwen2_vl, [&] {

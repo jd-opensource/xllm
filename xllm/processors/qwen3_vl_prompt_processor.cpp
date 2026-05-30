@@ -13,16 +13,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "processors/qwen3_vl_input_processor.h"
+#include "processors/qwen3_vl_prompt_processor.h"
 
 #include <torch/torch.h>
 
 #include <algorithm>
 #include <cassert>
+#include <cstdio>
 
 namespace xllm {
 
-Qwen3_VLInputProcessor::Qwen3_VLInputProcessor(const ModelArgs& args) {
+Qwen3VLPromptProcessor::Qwen3VLPromptProcessor(const ModelArgs& args) {
   merge_size_ = args.mm_image_merge_size();
   vision_start_token_id_ = args.vision_start_token_id();
   vision_end_token_id_ = args.vision_end_token_id();
@@ -31,7 +32,7 @@ Qwen3_VLInputProcessor::Qwen3_VLInputProcessor(const ModelArgs& args) {
   temporal_patch_size_ = args.mm_temporal_patch_size();
 }
 
-void Qwen3_VLInputProcessor::process(std::string& prompt,
+void Qwen3VLPromptProcessor::process(std::string& prompt,
                                      const MMData& mm_data) {
   torch::Tensor image_grid_thw;
   if (auto res = mm_data.get<torch::Tensor>("image_grid_thw"))
@@ -136,7 +137,7 @@ void Qwen3_VLInputProcessor::process(std::string& prompt,
       ++video_index;
       begin = replace_end;
     } else {
-      assert(false);
+      LOG(FATAL) << "Unexpected token type encountered.";
     }
 
     pair = find_vision_token(prompt, begin);
@@ -146,9 +147,10 @@ void Qwen3_VLInputProcessor::process(std::string& prompt,
   prompt = std::move(data);
 }
 
-void Qwen3_VLInputProcessor::find_mm_spans(const std::vector<int32_t>& prompt,
-                                           MMData& mm_data) {
-  auto start = prompt.begin();
+void Qwen3VLPromptProcessor::find_mm_spans(
+    const std::vector<int32_t>& token_ids,
+    MMData& mm_data) {
+  auto start = token_ids.begin();
   int32_t global_mm_index = 0;
   int32_t offset = 0;
   int32_t length = 0;
@@ -167,15 +169,15 @@ void Qwen3_VLInputProcessor::find_mm_spans(const std::vector<int32_t>& prompt,
 
   while (true) {
     auto vision_start_it =
-        std::find(start, prompt.end(), vision_start_token_id_);
-    if (vision_start_it == prompt.end()) {
+        std::find(start, token_ids.end(), vision_start_token_id_);
+    if (vision_start_it == token_ids.end()) {
       break;
     }
     auto vision_end_it =
-        std::find(vision_start_it + 1, prompt.end(), vision_end_token_id_);
-    CHECK(vision_end_it != prompt.end());
+        std::find(vision_start_it + 1, token_ids.end(), vision_end_token_id_);
+    CHECK(vision_end_it != token_ids.end());
 
-    offset = std::distance(prompt.begin(), vision_start_it);
+    offset = std::distance(token_ids.begin(), vision_start_it);
     length = std::distance(vision_start_it + 1, vision_end_it);
 
     int32_t first_token = *(vision_start_it + 1);
@@ -235,8 +237,8 @@ void Qwen3_VLInputProcessor::find_mm_spans(const std::vector<int32_t>& prompt,
   }
 }
 
-std::pair<Qwen3_VLInputProcessor::TokenType, size_t>
-Qwen3_VLInputProcessor::find_vision_token(const std::string& prompt,
+std::pair<Qwen3VLPromptProcessor::TokenType, size_t>
+Qwen3VLPromptProcessor::find_vision_token(const std::string& prompt,
                                           size_t begin) {
   auto img_pos = prompt.find(image_token_, begin);
   auto vid_pos = prompt.find(video_token_, begin);
@@ -252,7 +254,7 @@ Qwen3_VLInputProcessor::find_vision_token(const std::string& prompt,
                              : std::make_pair(TokenType::VIDEO, vid_pos);
 }
 
-std::vector<double> Qwen3_VLInputProcessor::build_timestamps(
+std::vector<double> Qwen3VLPromptProcessor::build_timestamps(
     const std::vector<double>& timestamps,
     size_t num_frames,
     int32_t merge_size) {
@@ -285,7 +287,7 @@ std::vector<double> Qwen3_VLInputProcessor::build_timestamps(
   return out;
 }
 
-std::string Qwen3_VLInputProcessor::format_timestamp_str(double timestamp) {
+std::string Qwen3VLPromptProcessor::format_timestamp_str(double timestamp) {
   char buffer[32];
   snprintf(buffer, sizeof(buffer), "<%.1f seconds>", timestamp);
   return buffer;

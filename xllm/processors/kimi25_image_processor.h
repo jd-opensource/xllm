@@ -15,13 +15,18 @@ limitations under the License.
 
 #pragma once
 
+#include <torch/torch.h>
+
 #include <cstdint>
-#include <tuple>
-#include <unordered_map>
+#include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "core/framework/model/model_args.h"
-#include "image_processor.h"
+#include "processors/image_processor.h"
+#include "processors/prompt_processor.h"
+#include "processors/video_processor.h"
 
 namespace xllm {
 
@@ -29,9 +34,8 @@ struct VideoChunkMetadata {
   int32_t chunk_id;
   double start_timestamp;
   int32_t num_frames;
-  std::vector<int> frame_indices;
+  std::vector<int64_t> frame_indices;
   std::string timestamp_text;
-  std::string prompt;
 };
 
 struct NavitResizeResult {
@@ -68,46 +72,84 @@ struct KimiK25MediaConfig {
   int32_t resample = 3;
 };
 
-class KimiK25ImageProcessor : public ImageProcessor {
+class KimiK25ImageProcessor final : public ImageProcessor {
  public:
-  KimiK25ImageProcessor(const ModelArgs& args);
+  explicit KimiK25ImageProcessor(const ModelArgs& args);
   ~KimiK25ImageProcessor() override = default;
 
-  bool process(const MMInput& mm_inputs, MMData& mm_datas) override;
-
-  std::vector<VideoChunkMetadata> split_video_chunks(
-      const VideoMetadata& video_meta);
+  bool process(const std::vector<torch::Tensor>& images,
+               std::vector<MMDataItem>& output_items) const override;
 
  private:
-  bool process_images(std::vector<torch::Tensor> images, MMData& mm_datas);
   bool process_image(torch::Tensor image,
                      torch::Tensor& pixel_values,
-                     torch::Tensor& thw);
-
-  bool process_videos(std::vector<torch::Tensor> videos,
-                      std::vector<VideoMetadata> video_meta_list,
-                      MMData& mm_datas);
-  bool process_video_chunk(torch::Tensor video_chunk,
-                           const VideoMetadata& video_meta,
-                           torch::Tensor& pixel_values,
-                           torch::Tensor& thw);
-
-  torch::Tensor sample_frames(const VideoMetadata& metadata);
-  std::string timestamp_as_str(double timestamp,
-                               const std::string& timestamp_mode);
-  std::string make_chunk_prompt(const std::string& timestamp_text);
-  std::optional<NavitResizeResult> navit_resize(int height,
-                                                int width,
-                                                bool is_video,
-                                                int nframes = 1,
-                                                double avg_fps = 24.0);
-  std::pair<torch::Tensor, torch::Tensor> navit_patchify(torch::Tensor pixels);
-  torch::Tensor km_normalize(const torch::Tensor& image,
-                             const std::vector<double>& mean,
-                             const std::vector<double>& std);
+                     torch::Tensor& thw) const;
 
  private:
   KimiK25MediaConfig config_;
+};
+
+class KimiK25VideoProcessor final : public VideoProcessor {
+ public:
+  explicit KimiK25VideoProcessor(const ModelArgs& args);
+  ~KimiK25VideoProcessor() override = default;
+
+  bool process(const torch::Tensor& origin_video,
+               const VideoMetadata& metadata,
+               MMDataItem& output_item) const override;
+
+ private:
+  std::vector<VideoChunkMetadata> split_video_chunks(
+      const VideoMetadata& video_meta) const;
+  bool process_video_chunk(torch::Tensor video_chunk,
+                           const VideoMetadata& video_meta,
+                           torch::Tensor& pixel_values,
+                           torch::Tensor& thw) const;
+
+  torch::Tensor sample_frames(const VideoMetadata& metadata) const;
+  std::string timestamp_as_str(double timestamp,
+                               const std::string& timestamp_mode) const;
+
+ private:
+  KimiK25MediaConfig config_;
+};
+
+class KimiK25PromptProcessor final : public PromptProcessor {
+  enum class TokenType {
+    INVALID,
+    IMAGE,
+    VIDEO,
+  };
+
+ public:
+  explicit KimiK25PromptProcessor(const ModelArgs& args);
+  ~KimiK25PromptProcessor() override = default;
+
+  void process(std::string& prompt, const MMData& mm_data) override;
+  void find_mm_spans(const std::vector<int32_t>& token_ids,
+                     MMData& mm_data) override;
+
+ private:
+  std::vector<int32_t> get_media_token_counts(
+      const torch::Tensor& grid_thw) const;
+  std::pair<TokenType, size_t> find_media_prompt(const std::string& prompt,
+                                                 size_t begin) const;
+
+ private:
+  const std::string media_pad_token_ = "<|media_pad|>";
+  const std::string media_prompt_suffix_ = "<|media_end|>";
+  const std::string image_prompt_prefix_ =
+      "<|media_begin|>image<|media_content|>";
+  const std::string video_prompt_prefix_ =
+      "<|media_begin|>video<|media_content|>";
+  const std::string image_prompt_ =
+      "<|media_begin|>image<|media_content|><|media_pad|><|media_end|>";
+  const std::string video_prompt_ =
+      "<|media_begin|>video<|media_content|><|media_pad|><|media_end|>";
+  int32_t vision_start_token_id_ = 0;
+  int32_t vision_token_id_ = 0;
+  int32_t vision_end_token_id_ = 0;
+  int32_t merge_size_ = 0;
 };
 
 }  // namespace xllm

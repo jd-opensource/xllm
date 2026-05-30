@@ -29,8 +29,7 @@ limitations under the License.
 #include "core/framework/tokenizer/tokenizer_args.h"
 #include "core/util/json_reader.h"
 #include "core/util/type_traits.h"  // IWYU pragma: keep
-#include "processors/image_processor.h"
-#include "processors/input_processor.h"
+#include "processors/multimodal_processor.h"
 
 namespace xllm {
 
@@ -46,11 +45,11 @@ using CausalVLMFactory =
 using DiTModelFactory =
     std::function<std::unique_ptr<DiTModel>(const DiTModelContext& context)>;
 
-using InputProcessorFactory =
-    std::function<std::unique_ptr<InputProcessor>(const ModelArgs& args)>;
-
-using ImageProcessorFactory =
-    std::function<std::unique_ptr<ImageProcessor>(const ModelArgs& args)>;
+using MultimodalProcessorFactory =
+    std::function<std::unique_ptr<MultimodalProcessorBase>(
+        const ModelArgs& model_args,
+        const TokenizerArgs& tokenizer_args,
+        std::shared_ptr<Tokenizer> tokenizer)>;
 
 using ModelArgsLoader =
     std::function<bool(const JsonReader& json, ModelArgs* args)>;
@@ -67,8 +66,7 @@ struct ModelMeta {
   RecModelFactory rec_model_factory;
   CausalVLMFactory causal_vlm_factory;
   DiTModelFactory dit_model_factory;
-  InputProcessorFactory input_processor_factory;
-  ImageProcessorFactory image_processor_factory;
+  MultimodalProcessorFactory multimodal_processor_factory;
   ModelArgsLoader model_args_loader;
   QuantArgsLoader quant_args_loader;
   TokenizerArgsLoader tokenizer_args_loader;
@@ -101,10 +99,9 @@ class ModelRegistry {
   static void register_tokenizer_args_loader(const std::string& name,
                                              TokenizerArgsLoader loader);
 
-  static void register_input_processor_factory(const std::string& name,
-                                               InputProcessorFactory factory);
-  static void register_image_processor_factory(const std::string& name,
-                                               ImageProcessorFactory factory);
+  static void register_multimodal_processor_factory(
+      const std::string& name,
+      MultimodalProcessorFactory factory);
 
   static CausalLMFactory get_causallm_factory(const std::string& name);
 
@@ -120,10 +117,7 @@ class ModelRegistry {
 
   static TokenizerArgsLoader get_tokenizer_args_loader(const std::string& name);
 
-  static InputProcessorFactory get_input_processor_factory(
-      const std::string& name);
-
-  static ImageProcessorFactory get_image_processor_factory(
+  static MultimodalProcessorFactory get_multimodal_processor_factory(
       const std::string& name);
 
   static bool has_dit_model_factory(const std::string& name);
@@ -214,33 +208,23 @@ std::unique_ptr<DiTModel> create_dit_model(const DiTModelContext& context);
 #define REGISTER_DIT_MODEL(ModelType, ModelClass) \
   REGISTER_DIT_MODEL_WITH_VARNAME(ModelType, ModelType, ModelClass)
 
-#define REGISTER_INPUT_PROCESSOR_WITH_VARNAME(                \
-    VarName, ModelType, InputProcessorClass)                  \
-  const bool VarName##_input_processor_registered = []() {    \
-    ModelRegistry::register_input_processor_factory(          \
-        #ModelType, [](const ModelArgs& args) {               \
-          return std::make_unique<InputProcessorClass>(args); \
-        });                                                   \
-    return true;                                              \
+#define REGISTER_MULTIMODAL_PROCESSOR_WITH_VARNAME(              \
+    VarName, ModelType, ProcessorClass)                          \
+  const bool VarName##_multimodal_processor_registered = []() {  \
+    ModelRegistry::register_multimodal_processor_factory(        \
+        #ModelType,                                              \
+        [](const ModelArgs& model_args,                          \
+           const TokenizerArgs& tokenizer_args,                  \
+           std::shared_ptr<Tokenizer> tokenizer) {               \
+          return std::make_unique<ProcessorClass>(               \
+              model_args, tokenizer_args, std::move(tokenizer)); \
+        });                                                      \
+    return true;                                                 \
   }()
 
-#define REGISTER_INPUT_PROCESSOR(ModelType, InputProcessorClass) \
-  REGISTER_INPUT_PROCESSOR_WITH_VARNAME(                         \
-      ModelType, ModelType, InputProcessorClass)
-
-#define REGISTER_IMAGE_PROCESSOR_WITH_VARNAME(                \
-    VarName, ModelType, ImageProcessorClass)                  \
-  const bool VarName##_image_processor_registered = []() {    \
-    ModelRegistry::register_image_processor_factory(          \
-        #ModelType, [](const ModelArgs& args) {               \
-          return std::make_unique<ImageProcessorClass>(args); \
-        });                                                   \
-    return true;                                              \
-  }()
-
-#define REGISTER_IMAGE_PROCESSOR(ModelType, ImageProcessorClass) \
-  REGISTER_IMAGE_PROCESSOR_WITH_VARNAME(                         \
-      ModelType, ModelType, ImageProcessorClass)
+#define REGISTER_MULTIMODAL_PROCESSOR(ModelType, ProcessorClass) \
+  REGISTER_MULTIMODAL_PROCESSOR_WITH_VARNAME(                    \
+      ModelType, ModelType, ProcessorClass)
 
 // Macro to register a model args loader with the ModelRegistry
 #define REGISTER_MODEL_ARGS_LOADER_WITH_VARNAME(VarName, ModelType, Loader) \

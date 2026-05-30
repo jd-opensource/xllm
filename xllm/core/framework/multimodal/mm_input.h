@@ -127,6 +127,9 @@ class MMInput {
 
     for (const auto& item : items_) {
       if (item.has_type(type)) {
+        if (item.is_embedding()) {
+          continue;
+        }
         auto t = item.get_decode_data(type);
         if (t) {
           vec.emplace_back(*t);
@@ -140,7 +143,7 @@ class MMInput {
     std::vector<VideoMetadata> metas;
     metas.reserve(items_.size());
     for (const auto& item : items_) {
-      if (item.has_type(MMType::VIDEO)) {
+      if (item.has_type(MMType::VIDEO) && !item.is_embedding()) {
         metas.push_back(item.video_meta);
       }
     }

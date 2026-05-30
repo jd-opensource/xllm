@@ -29,17 +29,16 @@ limitations under the License.
 #include "common/types.h"
 #include "core/framework/multimodal/mm_input.h"
 #include "engine.h"
-#include "framework/chat_template/jinja_chat_template.h"
 #include "framework/request/request_output.h"
 #include "framework/request/request_params.h"
+#include "framework/tokenizer/tokenizer.h"
 #include "master.h"
 #include "scheduler/continuous_scheduler.h"
-#include "xllm/processors/input_processor.h"
+#include "xllm/processors/multimodal_processor.h"
 
 namespace xllm {
 
 struct MMData;
-class ImageProcessor;
 
 class VLMMaster : public Master {
  public:
@@ -86,6 +85,10 @@ class VLMMaster : public Master {
 
  private:
   using Task = folly::Function<void()>;
+  std::shared_ptr<Request> build_request(PreprocessOutput output,
+                                         RequestParams sp,
+                                         OutputCallback callback);
+
   std::shared_ptr<Request> generate_request(std::string prompt,
                                             MMData mm_data,
                                             RequestParams sp,
@@ -96,9 +99,6 @@ class VLMMaster : public Master {
                                             std::string payload,
                                             OutputCallback callback);
 
-  bool build_mm_data_from_image_urls(const std::vector<std::string>& image_urls,
-                                     MMData& mm_data);
-
   std::unique_ptr<Scheduler> scheduler_;
 
   // model args
@@ -107,17 +107,8 @@ class VLMMaster : public Master {
   // thread pool for handling requests
   std::unique_ptr<ThreadPool> threadpool_;
 
-  // we don't know if tokenizer is thread safe, so we create one for each thread
-  // for now
-  std::unique_ptr<Tokenizer> tokenizer_;
-
-  // chat template instance
-  std::unique_ptr<JinjaChatTemplate> chat_template_;
-
-  // input processor for vlm
-  std::unique_ptr<InputProcessor> input_processor_;
-
-  std::unique_ptr<ImageProcessor> image_processor_;
+  std::unique_ptr<MultimodalProcessorBase> multimodal_processor_;
+  std::shared_ptr<Tokenizer> tokenizer_;
 
   // thread for moving forward the scheduler
   std::thread loop_thread_;

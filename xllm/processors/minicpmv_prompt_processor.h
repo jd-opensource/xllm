@@ -19,27 +19,29 @@ limitations under the License.
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "core/framework/model/model_args.h"
-#include "core/framework/multimodal/mm_data.h"
-#include "processors/input_processor.h"
+#include "processors/prompt_processor.h"
 
-namespace xllm {
+namespace xllm::npu::model {
 
-class MiniCPMInputProcessor : public InputProcessor {
+class MiniCPMPromptProcessor final : public PromptProcessor {
  public:
-  explicit MiniCPMInputProcessor(const ModelArgs& args);
+  explicit MiniCPMPromptProcessor(const ModelArgs& args);
 
   void process(std::string& prompt, const MMData& mm_data) override;
-  void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) override;
+  void find_mm_spans(const std::vector<int32_t>& token_ids,
+                     MMData& mm_data) override;
 
  private:
-  std::string get_image_id_placeholder(int idx) const;
-  std::string get_grid_placeholder(const std::pair<int, int>& grid) const;
+  std::string get_image_id_placeholder(int32_t idx) const;
+  std::string get_grid_placeholder(
+      const std::pair<int32_t, int32_t>& grid) const;
   std::string get_slice_image_placeholder(
-      const std::pair<int, int>& image_size,
-      int image_idx = 0,
-      int max_slice_nums = -1,
+      const std::pair<int32_t, int32_t>& image_size,
+      int32_t image_idx = 0,
+      int32_t max_slice_nums = -1,
       std::optional<bool> use_image_id_opt = std::nullopt) const;
 
   const std::string im_start_token_ = "<image>";
@@ -61,4 +63,4 @@ class MiniCPMInputProcessor : public InputProcessor {
   int32_t scale_resolution_;
 };
 
-}  // namespace xllm
+}  // namespace xllm::npu::model

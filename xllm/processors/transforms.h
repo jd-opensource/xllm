@@ -15,35 +15,26 @@ limitations under the License.
 
 #pragma once
 
+#include <torch/torch.h>
+
 #include <cstdint>
-#include <string>
 #include <utility>
+#include <vector>
 
-#include "core/framework/model/model_args.h"
-#include "core/framework/multimodal/mm_data.h"
-#include "processors/input_processor.h"
+namespace xllm::transforms {
 
-namespace xllm {
+torch::Tensor resize(const torch::Tensor& image,
+                     const std::vector<int64_t>& size,
+                     int32_t resample,
+                     bool antialias = true);
 
-class CLIPVLInputProcessor : public InputProcessor {
-  enum class TokenType {
-    INVALID,
-    IMAGE,
-    VIDEO,
-  };
+torch::Tensor center_crop(const torch::Tensor& image,
+                          const std::pair<int32_t, int32_t>& crop_size);
 
- public:
-  explicit CLIPVLInputProcessor(const ModelArgs& args);
+torch::Tensor rescale(const torch::Tensor& image, double scale);
 
-  void process(std::string& prompt, const MMData& mm_data) override;
+torch::Tensor normalize(const torch::Tensor& image,
+                        const torch::Tensor& mean,
+                        const torch::Tensor& std);
 
- private:
-  std::pair<TokenType, size_t> find_vision_token(const std::string& prompt,
-                                                 size_t begin);
-
-  const std::string image_token_ = "<|image_pad|>";
-  const std::string video_token_ = "<|video_pad|>";
-  int32_t merge_size_ = 0;
-};
-
-}  // namespace xllm
+}  // namespace xllm::transforms

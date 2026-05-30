@@ -17,40 +17,33 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <array>
 #include <cstdint>
+#include <map>
 #include <vector>
-
-#include "core/framework/model/model_args.h"
-#include "processors/image_processor.h"
 
 namespace xllm {
 
-class Glm4VImageProcessor final : public ImageProcessor {
- public:
-  explicit Glm4VImageProcessor(const ModelArgs& args);
+using ImageShape = std::array<int64_t, 3>;
 
-  bool process(const std::vector<torch::Tensor>& images,
-               std::vector<MMDataItem>& output_items) const override;
-
- private:
-  bool do_convert_rgb_ = true;
-  bool do_normalize_ = true;
-  bool do_rescale_ = true;
-  bool do_resize_ = true;
-
-  torch::Tensor image_mean_;
-  torch::Tensor image_std_;
-
-  int32_t max_pixels_ = 12845056;
-  int32_t min_pixels_ = 3136;
-
-  int32_t merge_size_ = 2;
-  int32_t patch_size_ = 14;
-
-  int32_t resample_ = 3;
-  double rescale_factor_ = 0.00392156862745098;
-
-  int32_t temporal_patch_size_ = 2;
+struct ImageBatchBucket {
+  std::vector<size_t> indices;
+  std::vector<torch::Tensor> images;
 };
+
+inline std::map<ImageShape, ImageBatchBucket> group_images_by_shape(
+    const std::vector<torch::Tensor>& images) {
+  std::map<ImageShape, ImageBatchBucket> buckets;
+  const size_t image_size = images.size();
+  for (size_t index = 0; index < image_size; ++index) {
+    const torch::Tensor& image = images[index];
+    const auto sizes = image.sizes();
+    ImageShape shape = {sizes[0], sizes[1], sizes[2]};
+    ImageBatchBucket& bucket = buckets[shape];
+    bucket.indices.push_back(index);
+    bucket.images.push_back(image);
+  }
+  return buckets;
+}
 
 }  // namespace xllm

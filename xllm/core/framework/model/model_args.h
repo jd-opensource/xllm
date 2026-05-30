@@ -167,6 +167,9 @@ struct ModelArgs {
   PROPERTY(float, hc_eps) = 1e-6f;
   PROPERTY(int64_t, max_batch_size) = 0;
   PROPERTY(int64_t, max_seq_len) = 0;
+  PROPERTY(bool, supports_image_input) = false;
+  PROPERTY(bool, supports_video_input) = false;
+  PROPERTY(bool, supports_audio_input) = false;
 
   PROPERTY(int32_t, vision_start_token_id) = 0;
   PROPERTY(int32_t, vision_end_token_id) = 0;

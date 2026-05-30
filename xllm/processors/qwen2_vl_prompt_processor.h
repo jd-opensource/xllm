@@ -18,15 +18,13 @@ limitations under the License.
 #include <cstdint>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "core/framework/model/model_args.h"
-#include "core/framework/multimodal/mm_data.h"
-#include "processors/input_processor.h"
+#include "processors/prompt_processor.h"
 
 namespace xllm {
 
-class GLM4VInputProcessor : public InputProcessor {
+class Qwen2VLPromptProcessor final : public PromptProcessor {
   enum class TokenType {
     INVALID,
     IMAGE,
@@ -34,28 +32,22 @@ class GLM4VInputProcessor : public InputProcessor {
   };
 
  public:
-  explicit GLM4VInputProcessor(const ModelArgs& args);
+  explicit Qwen2VLPromptProcessor(const ModelArgs& args);
 
   void process(std::string& prompt, const MMData& mm_data) override;
-  void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) override;
+  void find_mm_spans(const std::vector<int32_t>& token_ids,
+                     MMData& mm_data) override;
 
  private:
   std::pair<TokenType, size_t> find_vision_token(const std::string& prompt,
                                                  size_t begin);
-  std::vector<double> build_timestamps(const std::vector<double>& timestamps,
-                                       size_t num_frames);
-  std::string format_timestamp_str(double timestamp);
 
-  const std::string image_token_ = "<|image|>";
-  const std::string video_token_ = "<|video|>";
-  const std::string begin_of_image_token_ = "<|begin_of_image|>";
-  const std::string end_of_image_token_ = "<|end_of_image|>";
-
-  int32_t image_start_token_id_;
-  int32_t image_end_token_id_;
-  int32_t video_start_token_id_;
-  int32_t video_end_token_id_;
+  const std::string image_token_ = "<|image_pad|>";
+  const std::string video_token_ = "<|video_pad|>";
+  int32_t vision_start_token_id_;
+  int32_t vision_end_token_id_;
   int32_t image_token_id_;
+  int32_t video_token_id_;
   int32_t merge_size_ = 0;
 };
 

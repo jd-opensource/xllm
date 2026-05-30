@@ -17,34 +17,24 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include <cstdint>
-#include <vector>
+#include "core/common/macros.h"
+#include "core/framework/multimodal/mm_data.h"
+#include "core/framework/multimodal/mm_input.h"
 
-#include "core/framework/model/model_args.h"
 namespace xllm {
 
-class CLIPImageProcessor {
+class AudioProcessor {
  public:
-  explicit CLIPImageProcessor(const ModelArgs& args);
+  virtual ~AudioProcessor() = default;
 
-  torch::Tensor process_images(const torch::Tensor& images) const;
-
- private:
-  std::vector<int64_t> get_resize_output_image_size(
-      const torch::Tensor& image,
-      int32_t shortest_edge) const;
-
- private:
-  bool do_resize_;
-  bool do_center_crop_;
-  bool do_rescale_;
-  bool do_normalize_;
-  int32_t shortest_edge_;
-  int32_t resample_;
-  double rescale_factor_;
-  std::pair<int32_t, int32_t> crop_size_;
-  torch::Tensor image_mean_;
-  torch::Tensor image_std_;
+  virtual bool process(const torch::Tensor& origin_audio,
+                       const AudioMetadata& metadata,
+                       MMDataItem& output_item) const {
+    UNUSED_PARAMETER(origin_audio);
+    UNUSED_PARAMETER(metadata);
+    UNUSED_PARAMETER(output_item);
+    return false;
+  }
 };
 
 }  // namespace xllm

@@ -17,24 +17,37 @@ limitations under the License.
 
 #include <torch/torch.h>
 
+#include <cstdint>
+#include <string>
 #include <vector>
 
-#include "core/framework/model/model_args.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "core/framework/multimodal/mm_input.h"
+#include "core/util/hash_util.h"
 
 namespace xllm {
 
-class ImageProcessor {
+class PromptProcessor {
  public:
-  virtual ~ImageProcessor() = default;
+  virtual ~PromptProcessor() = default;
 
-  virtual bool process(const std::vector<torch::Tensor>& images,
-                       std::vector<MMDataItem>& output_items) const = 0;
-
-  virtual MMDict process_embedding(const EmbeddingOutput& embedding) const {
-    return MMDict{};
+  virtual void process(std::string& prompt, const MMData& mm_data) = 0;
+  void hash_mm_items(MMInput& mm_input, MMData& mm_data) {
+    const auto& mm_input_items = mm_input.items();
+    auto& mm_items = mm_data.items<MMItemVec>();
+    size_t size = mm_input_items.size();
+    for (size_t idx = 0; idx < size; ++idx) {
+      const std::string& data = mm_input_items[idx].raw_data;
+      if (!data.empty()) {
+        XXH3Key mm_hash = hash_string(data);
+        auto& schedule_data =
+            mm_items[idx].mutable_state().mutable_schedule_data();
+        schedule_data.key = mm_hash;
+      }
+    }
   }
+  virtual void find_mm_spans(const std::vector<int32_t>& token_ids,
+                             MMData& mm_data) {};
 };
 
 }  // namespace xllm

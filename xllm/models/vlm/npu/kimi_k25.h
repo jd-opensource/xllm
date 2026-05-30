@@ -32,8 +32,8 @@ limitations under the License.
 #include "core/layers/npu/npu_rms_norm_impl.h"
 #include "models/llm/npu/deepseek_v3.h"
 #include "models/model_registry.h"
-#include "processors/input_processor.h"
 #include "processors/kimi25_image_processor.h"
+#include "processors/multimodal_processor.h"
 #include "xllm_atb_layers/core/include/atb_speed/log.h"
 
 namespace xllm {
@@ -108,241 +108,6 @@ void load_layernorm_if_defined(const StateDict& state_dict,
                          layernorm_name + ".bias");
 }
 }  // namespace
-
-class KimiK2_5_VLInputProcessor : public InputProcessor {
-  enum class TokenType {
-    INVALID,
-    IMAGE,
-    VIDEO,
-  };
-
- public:
-  KimiK2_5_VLInputProcessor(const ModelArgs& args) {
-    merge_size_ = args.mm_image_merge_size() > 0
-                      ? args.mm_image_merge_size()
-                      : std::max<int32_t>(args.mm_spatial_merge_size(), 2);
-    vision_start_token_id_ = args.vision_start_token_id();
-    vision_token_id_ = args.vision_token_id();
-    vision_end_token_id_ = args.vision_end_token_id();
-    image_token_id_ = args.image_token_id();
-    video_token_id_ = args.video_token_id();
-  }
-
-  void process(std::string& prompt, const MMData& mm_data) override {
-    // prompt = update_raw_text(prompt, mm_data); TODO: video logic
-
-    torch::Tensor image_grid_thw;
-    if (auto res = mm_data.get<torch::Tensor>("image_grid_thw"))
-      image_grid_thw = res.value();
-
-    torch::Tensor video_grid_thw;
-    if (auto res = mm_data.get<torch::Tensor>("video_grid_thw"))
-      video_grid_thw = res.value();
-
-    if (!image_grid_thw.defined() && !video_grid_thw.defined()) return;
-
-    auto image_token_counts = get_media_token_counts(image_grid_thw);
-    auto video_token_counts = get_media_token_counts(video_grid_thw);
-
-    int total_image_token = 0;
-    for (int token_count : image_token_counts) {
-      total_image_token += token_count;
-    }
-    int total_video_token = 0;
-    for (int token_count : video_token_counts) {
-      total_video_token += token_count;
-    }
-
-    size_t total_token_len =
-        (total_image_token + total_video_token) * media_pad_token_.size();
-    std::string data;
-    data.reserve(prompt.size() + total_token_len);
-
-    int image_index = 0;
-    int video_index = 0;
-
-    int* index = 0;
-    const std::vector<int>* token_counts = nullptr;
-    std::string prefix;
-
-    size_t begin = 0;
-    auto pair = find_media_prompt(prompt, begin);
-
-    while (pair.second != std::string::npos) {
-      data.append(prompt, begin, pair.second - begin);
-
-      if (pair.first == TokenType::IMAGE) {
-        token_counts = &image_token_counts;
-        index = &image_index;
-        prefix = image_prompt_prefix_;
-      } else if (pair.first == TokenType::VIDEO) {
-        token_counts = &video_token_counts;
-        index = &video_index;
-        prefix = video_prompt_prefix_;
-      } else {
-        assert(false);
-      }
-
-      CHECK(token_counts != nullptr);
-      CHECK_LT(*index, token_counts->size())
-          << "media placeholder count does not match processed media count";
-
-      data.append(prefix);
-      auto token_num = (*token_counts)[*index];
-      while (token_num--) data.append(media_pad_token_);
-      data.append(media_prompt_suffix_);
-
-      ++(*index);
-      begin =
-          pair.second + (pair.first == TokenType::IMAGE ? image_prompt_.size()
-                                                        : video_prompt_.size());
-      pair = find_media_prompt(prompt, begin);
-    }
-
-    if (begin < prompt.size()) data.append(prompt, begin, std::string::npos);
-
-    prompt = std::move(data);
-  }
-
-  void find_mm_spans(const std::vector<int>& prompt, MMData& mm_data) {
-    auto start = prompt.begin();
-    uint32_t global_mm_index = 0;
-    auto& mm_items = mm_data.items<MMItemVec>();
-    while (true) {
-      auto vision_start_it =
-          std::find(start, prompt.end(), vision_start_token_id_);
-      if (vision_start_it == prompt.end()) {
-        break;
-      }
-
-      auto vision_content_it =
-          std::find(vision_start_it, prompt.end(), vision_token_id_);
-      CHECK(vision_content_it != prompt.end())
-          << "missing media content token after media begin";
-      auto vision_end_it =
-          std::find(vision_content_it, prompt.end(), vision_end_token_id_);
-      CHECK(vision_end_it != prompt.end())
-          << "missing media end token after media content";
-      auto media_pad_begin = std::next(vision_content_it);
-      int32_t offset =
-          static_cast<int32_t>(std::distance(prompt.begin(), media_pad_begin));
-      int32_t length =
-          static_cast<int32_t>(std::distance(media_pad_begin, vision_end_it));
-
-      CHECK_LT(global_mm_index, mm_items.size())
-          << "media span count exceeds mm item count";
-      auto& item = mm_items[global_mm_index];
-      item.mutable_state().mutable_token_pos() = {offset, length};
-      global_mm_index++;
-      start = std::next(vision_end_it);
-    }
-  }
-
- private:
-  std::vector<int> get_media_token_counts(const torch::Tensor& grid_thw) const {
-    std::vector<int> token_counts;
-    if (!grid_thw.defined()) {
-      return token_counts;
-    }
-
-    auto merge_length = merge_size_ * merge_size_;
-    CHECK_GT(merge_length, 0)
-        << "merge_length must be positive, merge_size_=" << merge_size_;
-    auto count = grid_thw.sizes()[0];
-    token_counts.reserve(count);
-    for (int idx = 0; idx < count; ++idx) {
-      token_counts.push_back(grid_thw[idx].prod().item<int>() / merge_length);
-    }
-    return token_counts;
-  }
-
-  /*std::string update_raw_text(const std::string& prompt,
-                              const MMData& mm_data) const {
-    if (!mm_data.valid() || !mm_data.hold<MMItemVec>()) {
-      return prompt;
-    }
-
-    std::vector<std::string> video_prompts;
-    const auto& mm_items = mm_data.items<MMItemVec>();
-    for (const auto& item : mm_items) {
-      if (!item.is_type(MMType::VIDEO)) {
-        continue;
-      }
-      if (auto res = item.get<std::vector<std::string>>("video_prompts")) {
-        std::string merged_video_prompt;
-        for (const auto& video_prompt : res.value()) {
-          merged_video_prompt.append(video_prompt);
-        }
-        video_prompts.push_back(std::move(merged_video_prompt));
-      }
-    }
-
-    int video_count = 0;
-    size_t begin = 0;
-    while ((begin = prompt.find(video_placeholder_, begin)) !=
-           std::string::npos) {
-      ++video_count;
-      begin += video_placeholder_.size();
-    }
-    if (video_count == 0) {
-      return prompt;
-    }
-
-    CHECK_EQ(video_count, video_prompts.size())
-        << "video placeholder count does not match processed video prompts";
-
-    std::string updated_prompt;
-    updated_prompt.reserve(prompt.size());
-    size_t prompt_begin = 0;
-    int video_index = 0;
-    while (true) {
-      auto placeholder_pos = prompt.find(video_placeholder_, prompt_begin);
-      if (placeholder_pos == std::string::npos) {
-        break;
-      }
-      updated_prompt.append(prompt, prompt_begin, placeholder_pos -
-  prompt_begin); updated_prompt.append(video_prompts[video_index++]);
-      prompt_begin = placeholder_pos + video_placeholder_.size();
-    }
-    updated_prompt.append(prompt, prompt_begin, std::string::npos);
-    return updated_prompt;
-  }*/
-
-  std::pair<TokenType, size_t> find_media_prompt(const std::string& prompt,
-                                                 size_t begin) const {
-    auto img_pos = prompt.find(image_prompt_, begin);
-    auto vid_pos = prompt.find(video_prompt_, begin);
-
-    if (img_pos == std::string::npos && vid_pos == std::string::npos)
-      return {TokenType::INVALID, std::string::npos};
-    else if (vid_pos == std::string::npos)
-      return {TokenType::IMAGE, img_pos};
-    else if (img_pos == std::string::npos)
-      return {TokenType::VIDEO, vid_pos};
-    else
-      return img_pos < vid_pos ? std::make_pair(TokenType::IMAGE, img_pos)
-                               : std::make_pair(TokenType::VIDEO, vid_pos);
-  }
-
- private:
-  const std::string media_pad_token_ = "<|media_pad|>";
-  const std::string media_prompt_suffix_ = "<|media_end|>";
-  const std::string image_prompt_prefix_ =
-      "<|media_begin|>image<|media_content|>";
-  const std::string video_prompt_prefix_ =
-      "<|media_begin|>video<|media_content|>";
-  const std::string image_prompt_ =
-      "<|media_begin|>image<|media_content|><|media_pad|><|media_end|>";
-  const std::string video_prompt_ =
-      "<|media_begin|>video<|media_content|><|media_pad|><|media_end|>";
-  const std::string video_placeholder_ = "<|kimi_k25_video_placeholder|>";
-  int32_t vision_start_token_id_;
-  int32_t vision_token_id_;
-  int32_t vision_end_token_id_;
-  int32_t image_token_id_;
-  int32_t video_token_id_;
-  int32_t merge_size_ = 0;
-};
 
 class KimiK2_5_VisionBlockImpl : public torch::nn::Module {
  public:
@@ -1266,9 +1031,11 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(KimiK2_5_VLForConditionalGeneration);
 
-REGISTER_INPUT_PROCESSOR(kimi_k25, KimiK2_5_VLInputProcessor);
+using KimiK25MultimodalProcessor = MultimodalProcessor<KimiK25PromptProcessor,
+                                                       KimiK25ImageProcessor,
+                                                       KimiK25VideoProcessor>;
+REGISTER_MULTIMODAL_PROCESSOR(kimi_k25, KimiK25MultimodalProcessor);
 REGISTER_CAUSAL_VLM_MODEL(kimi_k25, KimiK2_5_VLForConditionalGeneration);
-REGISTER_IMAGE_PROCESSOR(kimi_k25, KimiK25ImageProcessor);
 
 REGISTER_MODEL_ARGS(kimi_k25, [&] {
   // text config (Kimi-K2.5): args are under text_config.* in HF config.

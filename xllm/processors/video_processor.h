@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -15,20 +15,20 @@ limitations under the License.
 
 #pragma once
 
-#include <vector>
+#include <torch/torch.h>
 
-#include "image_processor.h"
+#include "core/framework/multimodal/mm_data.h"
+#include "core/framework/multimodal/mm_input.h"
 
 namespace xllm {
 
-struct MMData;
-
-class PyWarpperImageProcessor : public ImageProcessor {
+class VideoProcessor {
  public:
-  PyWarpperImageProcessor(const ModelArgs&);
-  ~PyWarpperImageProcessor() override = default;
+  virtual ~VideoProcessor() = default;
 
-  bool process(const MMInput& mm_inputs, MMData& mm_datas) override;
+  virtual bool process(const torch::Tensor& origin_video,
+                       const VideoMetadata& metadata,
+                       MMDataItem& output_item) const = 0;
 };
 
 }  // namespace xllm
