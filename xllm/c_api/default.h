@@ -47,7 +47,7 @@ const XLLM_InitOptions XLLM_INIT_LLM_OPTIONS_DEFAULT = {
     .server_idx = 0,
     .max_memory_utilization = 0.9,
     .flashinfer_workspace_buffer_size = 134217728,
-
+    .request_queue_size = 0,
     .task = "generate",
     .communication_backend = "lccl",
     .instance_role = "DEFAULT",
@@ -101,7 +101,7 @@ const XLLM_InitOptions XLLM_INIT_REC_OPTIONS_DEFAULT = {
     .block_size = 128,
     .max_cache_size = UINT32_MAX,
     .max_tokens_per_batch = 4096,
-    .max_seqs_per_batch = 4,
+    .max_seqs_per_batch = 2,
     .max_tokens_per_chunk_for_prefill = 0,
     .num_speculative_tokens = 0,
     .num_request_handling_threads = 4,
@@ -112,7 +112,7 @@ const XLLM_InitOptions XLLM_INIT_REC_OPTIONS_DEFAULT = {
     .max_token_per_req = 1000,
     .max_memory_utilization = 0.55,
     .flashinfer_workspace_buffer_size = 134217728,
-
+    .request_queue_size = 16,
     .task = "generate",
     .communication_backend = "lccl",
     .instance_role = "DEFAULT",

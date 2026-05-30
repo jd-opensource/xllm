@@ -200,6 +200,10 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     FLAGS_total_conversion_threshold =
         xllm_init_options.total_conversion_threshold;
 
+    if (xllm_init_options.request_queue_size > 0) {
+      FLAGS_request_queue_size = xllm_init_options.request_queue_size;
+    }
+
     auto model_loader = xllm::ModelLoader::create(model_path);
     if (model_loader == nullptr) {
       LOG(ERROR) << "Failed to create model loader for path: " << model_path;
