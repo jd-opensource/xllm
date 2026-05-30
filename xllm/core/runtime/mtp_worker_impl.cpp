@@ -333,9 +333,13 @@ std::tuple<int64_t, int64_t> MTPWorkerImpl::estimate_kv_cache_capacity() {
       draft_model_args, MTPDraftOptions(options_), parallel_args_, dtype_,
       cache_size_in_bytes);
 
-  CHECK(util::is_deepseek_v4_model_type(target_model_args.model_type()))
+  CHECK(util::is_target_model_type(target_model_args.model_type(),
+                                   "deepseek_v4",
+                                   /*match_mtp=*/true))
       << "MTP joint kv cache estimation only supports DeepSeek V4";
-  CHECK(util::is_deepseek_v4_model_type(draft_model_args.model_type()))
+  CHECK(util::is_target_model_type(draft_model_args.model_type(),
+                                   "deepseek_v4",
+                                   /*match_mtp=*/true))
       << "MTP joint kv cache estimation only supports DeepSeek V4 draft";
 
   const Dsv4KVCacheEstimateCost target_cost =

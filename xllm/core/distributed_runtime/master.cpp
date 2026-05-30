@@ -153,7 +153,8 @@ Master::Master(const Options& options, EngineType type)
       std::filesystem::path(options_.model_path()).lexically_normal();
   if (options_.enable_prefix_cache() && options_.backend() == "llm") {
     const std::string model_type = util::get_model_type(model_path);
-    if (util::is_deepseek_v4_model_type(model_type)) {
+    if (util::is_target_model_type(
+            model_type, "deepseek_v4", /*match_mtp=*/false)) {
       LOG(WARNING) << model_type
                    << " does not support prefix cache with "
                       "CompositeBlockManager yet, fallback to "

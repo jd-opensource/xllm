@@ -90,7 +90,8 @@ namespace {
 
 bool is_cpp_chat_template_supported_model(const std::string& model_type) {
   return model_type == "deepseek_v32" ||
-         util::is_deepseek_v4_model_type(model_type);
+         util::is_target_model_type(
+             model_type, "deepseek_v4", /*match_mtp=*/true);
 }
 
 }  // namespace
