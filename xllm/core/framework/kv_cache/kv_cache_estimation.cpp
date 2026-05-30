@@ -351,7 +351,8 @@ const KVCacheEstimateStrategy& select_kv_cache_estimate_strategy(
   static const StandardKVCacheEstimateStrategy kStandardStrategy;
   static const Dsv4KVCacheEstimateStrategy kDsv4Strategy;
   if (util::is_target_model_type(
-          model_args.model_type(), "deepseek_v4", /*match_mtp=*/true)) {
+          model_args.model_type(), /*target_type=*/"deepseek_v4",
+          /*match_mtp=*/true)) {
     return kDsv4Strategy;
   }
   return kStandardStrategy;
