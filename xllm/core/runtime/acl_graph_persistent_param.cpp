@@ -584,6 +584,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     bool return_capture_params) {
   CHECK_GT(padded_num_tokens, 0) << "padded_num_tokens must be > 0";
   const uint32_t actual_num_tokens = tokens.size(0);
+  CHECK(params.meta.batch_forward_type.is_decode())
+      << "ACL graph persistent param only supports decode";
   const bool is_decode = params.meta.batch_forward_type.is_decode();
   const int64_t decode_tokens =
       is_decode ? std::max<int64_t>(options_.num_decoding_tokens(), 1) : 1;
