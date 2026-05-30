@@ -143,7 +143,11 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   // Get bucket num_tokens for given num_tokens
   // For num_tokens < 8: use 1, 2, 4, 8
   // For num_tokens >= 8: use multiples of 8
-  uint32_t get_bucket_num_tokens(uint32_t num_tokens) const;
+  uint32_t get_bucket_num_tokens(uint32_t num_tokens,
+                                 uint32_t token_stride = 1) const;
+
+  uint64_t get_graph_key(uint32_t bucket_num_tokens,
+                         const ModelInputParams& params) const;
 };
 REGISTER_EXECUTOR("npu", AclGraphExecutorImpl);
 }  // namespace xllm::npu

@@ -371,7 +371,23 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     return model_->forward(tokens, positions, kv_caches, params);
   }
 
-  const uint32_t bucket_num_tokens = get_bucket_num_tokens(graph_num_tokens);
+  const uint32_t token_stride = params_single.is_spec_verify
+                                    ? static_cast<uint32_t>(std::max<int64_t>(
+                                          options_.num_decoding_tokens(), 1))
+                                    : 1;
+  if (params_single.is_spec_verify && token_stride > 1 &&
+      graph_num_tokens % token_stride != 0) {
+    LOG_FIRST_N(WARNING, 1)
+        << "Falling back to eager mode because spec verify graph tokens ("
+        << graph_num_tokens << ") is not divisible by num_decoding_tokens ("
+        << token_stride << "). This message is logged only once. "
+        << "Monitor counter 'num_model_execution_total_eager' for frequency.";
+    COUNTER_INC(num_model_execution_total_eager);
+    return model_->forward(tokens, positions, kv_caches, params);
+  }
+
+  const uint32_t bucket_num_tokens =
+      get_bucket_num_tokens(graph_num_tokens, token_stride);
 
   // Check if conditions are suitable for graph execution (replay or capture)
   const auto max_seq_len = args_.max_position_embeddings();
@@ -393,8 +409,10 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     return model_->forward(tokens, positions, kv_caches, params);
   }
 
+  const uint64_t graph_key = get_graph_key(bucket_num_tokens, params_single);
+
   // Check if captured graph exists for this bucket num_tokens
-  auto it = graphs_.find(bucket_num_tokens);
+  auto it = graphs_.find(graph_key);
   if (it != graphs_.end()) {
     // Replay the existing graph
     VLOG(kGraphExecutorLogVerboseLevel)
@@ -439,12 +457,11 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
               << ") done";
 
     // Save the graph for future reuse
-    graphs_[bucket_num_tokens] = std::move(graph);
+    graphs_[graph_key] = std::move(graph);
 
     // Return the output from capture (no need to replay since capture
     // already executed)
-    auto hidden_states =
-        graphs_[bucket_num_tokens]->get_hidden_states(n_tokens);
+    auto hidden_states = graphs_[graph_key]->get_hidden_states(n_tokens);
     if (options_.enable_graph_aux_hidden_states()) {
       auto aux_hidden_states = persistent_param_->aux_hidden_states(n_tokens);
       if (aux_hidden_states.defined() && aux_hidden_states.numel() > 0) {
@@ -483,7 +500,9 @@ void AclGraph::print_graph_tensors() const {
 
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
 uint32_t AclGraphExecutorImpl::get_bucket_num_tokens(
-    uint32_t num_tokens) const {
+    uint32_t num_tokens,
+    uint32_t token_stride) const {
+  token_stride = std::max<uint32_t>(token_stride, 1);
   if (::xllm::ExecutionConfig::get_instance()
           .enable_graph_mode_decode_no_padding()) {
     return num_tokens;
@@ -491,15 +510,37 @@ uint32_t AclGraphExecutorImpl::get_bucket_num_tokens(
   if (num_tokens <= 1) {
     return 1;
   } else if (num_tokens <= 2) {
-    return 2;
+    return token_stride > 2 ? token_stride : 2;
   } else if (num_tokens <= 4) {
-    return 4;
+    return token_stride > 4 ? token_stride : 4;
   } else if (num_tokens <= 8) {
-    return 8;
+    return ((8 + token_stride - 1) / token_stride) * token_stride;
   } else {
-    // For num_tokens > 16, use multiples of 16
-    return ((num_tokens + 15) / 16) * 16;
+    const uint32_t bucket_num_tokens = ((num_tokens + 15) / 16) * 16;
+    return ((bucket_num_tokens + token_stride - 1) / token_stride) *
+           token_stride;
   }
+}
+
+uint64_t AclGraphExecutorImpl::get_graph_key(
+    uint32_t bucket_num_tokens,
+    const ModelInputParams& params) const {
+  uint64_t key = bucket_num_tokens;
+  const uint64_t token_stride = params.is_spec_verify
+                                    ? static_cast<uint64_t>(std::max<int64_t>(
+                                          options_.num_decoding_tokens(), 1))
+                                    : 1;
+  key |= token_stride << 32;
+  if (params.is_spec_verify) {
+    key |= uint64_t{1} << 48;
+  }
+  if (options_.enable_speculative_decode()) {
+    key |= uint64_t{1} << 49;
+  }
+  if (options_.is_draft_engine()) {
+    key |= uint64_t{1} << 50;
+  }
+  return key;
 }
 
 }  // namespace xllm::npu
