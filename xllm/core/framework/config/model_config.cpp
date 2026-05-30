@@ -19,7 +19,6 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/framework/config/config_json_utils.h"
-#include "util/utils.h"
 
 DEFINE_string(model_id, "", "hf model name.");
 
@@ -89,9 +88,7 @@ namespace xllm {
 namespace {
 
 bool is_cpp_chat_template_supported_model(const std::string& model_type) {
-  return model_type == "deepseek_v32" ||
-         util::is_target_model_type(
-             model_type, /*target_type=*/"deepseek_v4", /*match_mtp=*/true);
+  return model_type == "deepseek_v32" || model_type == "deepseek_v4";
 }
 
 }  // namespace

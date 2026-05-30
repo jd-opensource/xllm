@@ -147,6 +147,12 @@ inline bool is_target_mtp_model_type(std::string_view model_type,
          has_mtp_model_type_marker(model_type);
 }
 
+inline bool is_deepseek_v4_model_type(std::string_view model_type) {
+  constexpr std::string_view kTargetModelType = "deepseek_v4";
+  return model_type == kTargetModelType ||
+         is_target_mtp_model_type(model_type, kTargetModelType);
+}
+
 inline bool is_target_model_type(std::string_view model_type,
                                  std::string_view target_model_type,
                                  bool match_mtp) {

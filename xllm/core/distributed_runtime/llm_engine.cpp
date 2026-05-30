@@ -518,9 +518,7 @@ bool LLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .max_seqs_per_batch(options_.max_seqs_per_batch())
       .max_concurrent_requests(
           ::xllm::ServiceConfig::get_instance().max_concurrent_requests());
-  if (util::is_target_model_type(args_.model_type(),
-                                 /*target_type=*/"deepseek_v4",
-                                 /*match_mtp=*/true)) {
+  if (util::is_deepseek_v4_model_type(args_.model_type())) {
     constexpr uint32_t kManagerTypeBlockManagerImpl = 0;
     constexpr uint32_t kManagerTypeSlidingWindowBlockManager = 1;
 
@@ -1088,7 +1086,7 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
         args_, threadpool_.get(), cp_size_)));
     dp_global_token_nums[dp_rank] =
         static_cast<int32_t>(batched_inputs[dp_rank].host_token_ids().numel());
-    if (args_.model_type() == "deepseek_v4") {
+    if (util::is_deepseek_v4_model_type(args_.model_type())) {
       const int64_t actual_scheduled_tokens = static_cast<int64_t>(
           batched_inputs[dp_rank].host_token_ids().numel());
       const int64_t max_tokens_per_batch =

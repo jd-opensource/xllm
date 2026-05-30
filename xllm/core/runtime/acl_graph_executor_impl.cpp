@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+﻿/* Copyright 2025 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,9 +23,6 @@ limitations under the License.
 #include <torch_npu/torch_npu.h>
 
 #include <algorithm>
-#include <cmath>
-#include <limits>
-#include <numeric>
 
 #include "core/common/global_flags.h"
 #include "core/framework/config/execution_config.h"
@@ -40,20 +37,11 @@ limitations under the License.
 #include "core/util/utils.h"
 #include "platform/npu/device_capture_lock.h"
 
-// ATB includes
-#include <atb/atb_infer.h>
-#include <atb/context.h>
-#include <atb/operation.h>
-#include <customize/custom_paged_attention_function.h>
-#include <customize/customize_op_params.h>
-
-#include "pytorch/adapter/utils/utils.h"
-
 namespace xllm::npu {
 
 namespace {
-constexpr int32_t kPaddingSeqLen = 0;
-constexpr int32_t kPaddingLinearStateId = 0;
+constexpr uint64_t kSpecVerifyGraphKeyMask = 1ull << 63;
+constexpr uint64_t kSpecVerifyQMaxSeqLenShift = 32;
 
 std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
     const std::vector<KVCache>& kv_caches) {
@@ -159,9 +147,8 @@ bool AclGraph::capture(CausalLM* model,
   auto device_idx = tensor_options.device().index();
   Device::empty_cache(device_idx);
 
-  // Use cached capture stream for graph capture
-  // capture_stream_ is initialized in constructor
   bool need_restore_stream = false;
+  graph_stream_ = stream;
 
   // capture lock scope
   {
@@ -173,6 +160,7 @@ bool AclGraph::capture(CausalLM* model,
         c10_npu::getDefaultNPUStream(device_idx)) {
       c10_npu::setCurrentNPUStream(capture_stream_.value());
       aclrtSynchronizeStream(capture_stream_.value().stream());
+      graph_stream_ = capture_stream_.value().stream();
       need_restore_stream = true;
     }
     LOG(INFO) << "capture begin, bucket_num_tokens: " << bucket_num_tokens
@@ -203,15 +191,26 @@ bool AclGraph::capture(CausalLM* model,
     }
   }
   // Synchronize and test replay to verify graph capture
+  aclrtSynchronizeStream(graph_stream_);
   aclrtSynchronizeStream(stream);
 
   graph_.replay();
 
-  // aclrtSynchronizeStream(stream);
+  make_current_stream_wait_for_graph(stream);
   return true;
 }
 
-AclGraph::~AclGraph() = default;
+AclGraph::~AclGraph() {
+  if (graph_stream_ != nullptr) {
+    aclrtSynchronizeStream(graph_stream_);
+  } else if (capture_stream_.has_value()) {
+    aclrtSynchronizeStream(capture_stream_.value().stream());
+  }
+  if (replay_done_event_ != nullptr) {
+    aclrtDestroyEvent(replay_done_event_);
+    replay_done_event_ = nullptr;
+  }
+}
 
 void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
   // Get a secondary stream from high-priority pool for graph capture.
@@ -220,9 +219,25 @@ void AclGraph::initialize_capture_stream(c10::DeviceIndex device_index) {
   // torch_npu/csrc/core/npu/NPUGraph.cpp:159).
   capture_stream_ = c10_npu::getStreamFromPool(true, device_index);
   device_index_ = device_index;
+  CHECK_EQ(aclrtCreateEventWithFlag(&replay_done_event_, ACL_EVENT_SYNC),
+           ACL_SUCCESS)
+      << "Failed to create ACL graph replay completion event";
   LOG(INFO) << "Initialized capture_stream: " << capture_stream_.value()
             << ", id: " << capture_stream_.value().id()
             << ", device_index: " << device_index;
+}
+
+void AclGraph::make_current_stream_wait_for_graph(aclrtStream current_stream) {
+  CHECK_NE(graph_stream_, nullptr) << "graph_stream is not initialized";
+  CHECK_NE(replay_done_event_, nullptr)
+      << "replay_done_event is not initialized";
+  CHECK_EQ(aclrtRecordEvent(replay_done_event_, graph_stream_), ACL_SUCCESS)
+      << "aclrtRecordEvent(replay_done_event) failed";
+  if (current_stream != graph_stream_) {
+    CHECK_EQ(aclrtStreamWaitEvent(current_stream, replay_done_event_),
+             ACL_SUCCESS)
+        << "aclrtStreamWaitEvent(current_stream, replay_done_event) failed";
+  }
 }
 
 void AclGraph::prepare_model_graph_metadata(CausalLM* model,
@@ -284,10 +299,7 @@ ModelOutput AclGraph::replay(CausalLM* model,
 
   graph_.replay();
 
-  // this is necessary to ensure the graph replay is completed
-  // aclError st = aclrtSynchronizeStream(stream);
-  // CHECK_EQ(st, ACL_SUCCESS)
-  // << "aclrtSynchronizeStream failed, error code: " << st;
+  make_current_stream_wait_for_graph(stream);
 
   // Return the actual num_tokens portion of ModelOutput
   // Note: aux_hidden_states handling is done in AclGraphExecutorImpl::run()
@@ -370,21 +382,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     return model_->forward(tokens, positions, kv_caches, params);
   }
 
-  const uint32_t token_stride = static_cast<uint32_t>(
-      std::max<int64_t>(options_.num_decoding_tokens(), 1));
-  if (params_single.is_spec_verify && token_stride > 1 &&
-      graph_num_tokens % token_stride != 0) {
-    LOG_FIRST_N(WARNING, 1)
-        << "Falling back to eager mode because spec verify graph tokens ("
-        << graph_num_tokens << ") is not divisible by num_decoding_tokens ("
-        << token_stride << "). This message is logged only once. "
-        << "Monitor counter 'num_model_execution_total_eager' for frequency.";
-    COUNTER_INC(num_model_execution_total_eager);
-    return model_->forward(tokens, positions, kv_caches, params);
-  }
-
-  const uint32_t bucket_num_tokens =
-      get_bucket_num_tokens(graph_num_tokens, token_stride);
+  const uint32_t bucket_num_tokens = get_bucket_num_tokens(graph_num_tokens);
 
   // Check if conditions are suitable for graph execution (replay or capture)
   const auto max_seq_len = args_.max_position_embeddings();
@@ -497,9 +495,7 @@ void AclGraph::print_graph_tensors() const {
 
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
 uint32_t AclGraphExecutorImpl::get_bucket_num_tokens(
-    uint32_t num_tokens,
-    uint32_t token_stride) const {
-  token_stride = std::max<uint32_t>(token_stride, 1);
+    uint32_t num_tokens) const {
   if (::xllm::ExecutionConfig::get_instance()
           .enable_graph_mode_decode_no_padding()) {
     return num_tokens;
@@ -507,35 +503,28 @@ uint32_t AclGraphExecutorImpl::get_bucket_num_tokens(
   if (num_tokens <= 1) {
     return 1;
   } else if (num_tokens <= 2) {
-    return token_stride > 2 ? token_stride : 2;
+    return 2;
   } else if (num_tokens <= 4) {
-    return token_stride > 4 ? token_stride : 4;
+    return 4;
   } else if (num_tokens <= 8) {
-    return ((8 + token_stride - 1) / token_stride) * token_stride;
+    return 8;
   } else {
-    const uint32_t bucket_num_tokens = ((num_tokens + 15) / 16) * 16;
-    return ((bucket_num_tokens + token_stride - 1) / token_stride) *
-           token_stride;
+    // For num_tokens > 16, use multiples of 16
+    return ((num_tokens + 15) / 16) * 16;
   }
 }
 
 uint64_t AclGraphExecutorImpl::get_graph_key(
     uint32_t bucket_num_tokens,
     const ModelInputParams& params) const {
-  uint64_t key = bucket_num_tokens;
-  const uint64_t token_stride = static_cast<uint64_t>(
-      std::max<int64_t>(options_.num_decoding_tokens(), 1));
-  key |= token_stride << 32;
-  if (params.is_spec_verify) {
-    key |= uint64_t{1} << 48;
+  if (params.is_spec_verify &&
+      params.meta.batch_forward_type.is_chunked_prefill()) {
+    const uint64_t q_max_seq_len =
+        static_cast<uint64_t>(std::max<int32_t>(params.meta.q_max_seq_len, 1));
+    return static_cast<uint64_t>(bucket_num_tokens) | kSpecVerifyGraphKeyMask |
+           (q_max_seq_len << kSpecVerifyQMaxSeqLenShift);
   }
-  if (options_.enable_speculative_decode()) {
-    key |= uint64_t{1} << 49;
-  }
-  if (options_.is_draft_engine()) {
-    key |= uint64_t{1} << 50;
-  }
-  return key;
+  return static_cast<uint64_t>(bucket_num_tokens);
 }
 
 }  // namespace xllm::npu
