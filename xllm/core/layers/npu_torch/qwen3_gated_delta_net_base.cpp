@@ -18,6 +18,7 @@ limitations under the License.
 #include <tuple>
 #include <vector>
 
+#include "xllm/core/framework/kv_cache/kv_cache_utils.h"
 #include "xllm/core/kernels/ops_api.h"
 
 namespace xllm {
@@ -322,18 +323,46 @@ torch::Tensor run_spec_verify_conv(const torch::Tensor& mixed_qkv,
   CHECK_EQ(expanded_state_len, conv_kernel_size - 1 + seq_len - 1)
       << "unexpected speculative conv cache len, expected "
       << (conv_kernel_size - 1 + seq_len - 1) << ", got " << expanded_state_len;
-  CHECK_EQ(num_accepted_tokens.size(), static_cast<size_t>(batch_size))
-      << "num_accepted_tokens must be per sequence.";
 
   std::vector<int64_t> linear_state_indices(linear_state_ids.begin(),
                                             linear_state_ids.end());
+  if (linear_state_indices.size() < static_cast<size_t>(batch_size)) {
+    linear_state_indices.resize(batch_size, kPaddingLinearStateId);
+  }
+  CHECK_EQ(linear_state_indices.size(), static_cast<size_t>(batch_size))
+      << "linear_state_indices must be per sequence.";
+
+  const std::vector<int64_t>* query_start_loc_ptr = &query_start_loc;
+  std::vector<int64_t> padded_query_start_loc;
+  const size_t target_qsl_size = static_cast<size_t>(batch_size + 1);
+  if (query_start_loc.size() < target_qsl_size) {
+    padded_query_start_loc = query_start_loc;
+    CHECK(!padded_query_start_loc.empty())
+        << "query_start_loc must not be empty.";
+    int64_t offset = padded_query_start_loc.back();
+    padded_query_start_loc.reserve(target_qsl_size);
+    while (padded_query_start_loc.size() < target_qsl_size) {
+      offset += seq_len;
+      padded_query_start_loc.emplace_back(offset);
+    }
+    query_start_loc_ptr = &padded_query_start_loc;
+  }
+  CHECK_EQ(query_start_loc_ptr->size(), target_qsl_size)
+      << "query_start_loc must match the padded speculative batch.";
+
+  if (num_accepted_tokens.size() < static_cast<size_t>(batch_size)) {
+    num_accepted_tokens.resize(batch_size, 1);
+  }
+  CHECK_EQ(num_accepted_tokens.size(), static_cast<size_t>(batch_size))
+      << "num_accepted_tokens must be per sequence.";
+
   torch::IntArrayRef has_initial_state;
   torch::Tensor conv_output =
       xllm::kernel::causal_conv1d(mixed_qkv,
                                   conv_weight,
                                   conv_cache,
                                   std::optional<torch::Tensor>(),
-                                  torch::IntArrayRef(query_start_loc),
+                                  torch::IntArrayRef(*query_start_loc_ptr),
                                   torch::IntArrayRef(linear_state_indices),
                                   has_initial_state,
                                   torch::IntArrayRef(num_accepted_tokens),
