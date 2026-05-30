@@ -41,6 +41,8 @@ struct KVCacheEstimateOptions {
   int64_t max_concurrent_requests = 0;
   bool is_draft_engine = false;
   bool enable_prefix_cache = false;
+  const ModelArgs* draft_model_args = nullptr;
+  const KVCacheEstimateOptions* draft_options = nullptr;
 };
 
 struct Dsv4KVCacheEstimateCost {

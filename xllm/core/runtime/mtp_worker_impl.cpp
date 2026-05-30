@@ -23,11 +23,11 @@ limitations under the License.
 #if defined(USE_MLU)
 #include "framework/kv_cache_transfer/mooncake_kv_cache_transfer.h"
 #endif
+#include "core/framework/block/block_utils.h"
 #include "core/framework/config/disagg_pd_config.h"
 #include "core/framework/config/kernel_config.h"
 #include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/speculative_config.h"
-#include "core/framework/block/block_utils.h"
 #include "core/framework/kv_cache/kv_cache_estimation.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "spec_input_builder.h"
@@ -326,57 +326,18 @@ std::tuple<int64_t, int64_t> MTPWorkerImpl::estimate_kv_cache_capacity() {
 
   const ModelArgs& target_model_args = impl_->context_.get_model_args();
   const ModelArgs& draft_model_args = draft_impl_->context_.get_model_args();
-  const KVCacheEstimateOptions target_options = make_kv_cache_estimate_options(
+  KVCacheEstimateOptions target_options = make_kv_cache_estimate_options(
       target_model_args, MTPTargetOptions(options_), parallel_args_, dtype_,
       cache_size_in_bytes);
   const KVCacheEstimateOptions draft_options = make_kv_cache_estimate_options(
       draft_model_args, MTPDraftOptions(options_), parallel_args_, dtype_,
       cache_size_in_bytes);
+  target_options.draft_model_args = &draft_model_args;
+  target_options.draft_options = &draft_options;
 
-  CHECK(util::is_target_model_type(target_model_args.model_type(),
-                                   /*target_type=*/"deepseek_v4",
-                                   /*match_mtp=*/true))
-      << "MTP joint kv cache estimation only supports DeepSeek V4";
-  CHECK(util::is_target_model_type(draft_model_args.model_type(),
-                                   /*target_type=*/"deepseek_v4",
-                                   /*match_mtp=*/true))
-      << "MTP joint kv cache estimation only supports DeepSeek V4 draft";
-
-  const Dsv4KVCacheEstimateCost target_cost =
-      estimate_dsv4_kv_cache_cost(target_model_args, target_options);
-  const Dsv4KVCacheEstimateCost draft_cost =
-      estimate_dsv4_kv_cache_cost(draft_model_args, draft_options);
-  const int64_t constant_bytes = target_cost.constant_swa_bytes +
-                                 draft_cost.constant_swa_bytes;
-  CHECK_GT(cache_size_in_bytes, constant_bytes)
-      << "no memory left for mtp target/draft fixed kv cache allocation";
-
-  const int64_t token_unit_bytes = target_cost.token_unit_bytes +
-                                  draft_cost.token_unit_bytes;
-  CHECK_GT(token_unit_bytes, 0)
-      << "mtp target and draft token unit bytes must be positive";
-  const int64_t token_unit_count =
-      (cache_size_in_bytes - constant_bytes) / token_unit_bytes;
-  CHECK_GT(token_unit_count, 0)
-      << "no memory left for mtp target/draft kv cache token blocks";
-
-  const int64_t adjusted_cache_size_in_bytes =
-      target_cost.constant_swa_bytes +
-      token_unit_count * target_cost.token_unit_bytes;
-  CHECK_GT(adjusted_cache_size_in_bytes, 0)
-      << "no memory left for mtp target/draft kv cache allocation";
-
-  LOG(INFO) << "mtp kv cache capacity adjusted from "
-            << readable_size(cache_size_in_bytes) << " to "
-            << readable_size(adjusted_cache_size_in_bytes)
-            << ", target_constant_bytes="
-            << target_cost.constant_swa_bytes
-            << ", draft_constant_bytes=" << draft_cost.constant_swa_bytes
-            << ", target_token_unit_bytes="
-            << target_cost.token_unit_bytes
-            << ", draft_token_unit_bytes=" << draft_cost.token_unit_bytes
-            << ", token_unit_count=" << token_unit_count;
-  return {adjusted_cache_size_in_bytes, total_memory};
+  KVCacheCapacity kv_cache_cap =
+      ::xllm::estimate_kv_cache_capacity(target_model_args, target_options);
+  return {kv_cache_cap.cache_size_in_bytes(), total_memory};
 }
 
 int64_t MTPWorkerImpl::get_embedding_placeholder_size() {
