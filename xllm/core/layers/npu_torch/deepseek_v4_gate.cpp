@@ -84,8 +84,7 @@ DeepseekV4GateImpl::DeepseekV4GateImpl(const ModelArgs& args,
   n_routed_experts_ = args.n_routed_experts();
   topk_ = args.n_activated_experts();
   n_hash_layers_ = args.n_hash_layers();
-  route_scale_ =
-      1.0;  // args.routed_scaling_factor(); # TODO: add param for dsv4
+  route_scale_ = args.routed_scaling_factor();
   score_func_ = args.scoring_func();
   hash_layer_ = layer_id >= 0 && layer_id < n_hash_layers_;
 
@@ -101,9 +100,10 @@ DeepseekV4GateImpl::DeepseekV4GateImpl(const ModelArgs& args,
       << "n_routed_experts, got topk=" << topk_
       << ", n_routed_experts=" << n_routed_experts_;
 
+  auto gate_options = options.dtype(torch::kFloat32);
   weight_ = register_parameter(
       "weight",
-      torch::empty({n_routed_experts_, hidden_size_}, options),
+      torch::empty({n_routed_experts_, hidden_size_}, gate_options),
       /*requires_grad=*/false);
 
   weight_.set_data(
@@ -137,7 +137,11 @@ std::tuple<torch::Tensor, torch::Tensor> DeepseekV4GateImpl::forward(
       << "DeepseekV4Gate::forward hidden_states last dim mismatch, expected "
       << hidden_size_ << " got " << hidden_states.size(-1);
 
-  auto logits = torch::matmul(hidden_states, weight_.transpose(0, 1));
+  auto gate_input = hidden_states;
+  if (gate_input.scalar_type() != torch::kFloat32) {
+    gate_input = gate_input.to(torch::kFloat32);
+  }
+  auto logits = torch::matmul(gate_input, weight_.transpose(0, 1));
 
   constexpr bool renormalize = true;
   const int64_t norm_type = score_func_to_norm_type(score_func_);
@@ -182,14 +186,6 @@ std::tuple<torch::Tensor, torch::Tensor> DeepseekV4GateImpl::forward(
       kernel::moe_gating_top_k_hash(gate_params);
   (void)score_out;
 
-  if (gate_params.norm_type == 0 && renormalize) {
-    topk_weights = renormalize_topk_weights(topk_weights);
-  }
-
-  if (gate_params.norm_type == 2) {
-    topk_weights = renormalize_topk_weights(topk_weights);
-  }
-
   return std::make_tuple(topk_weights, topk_idx.to(torch::kInt32));
 }
 
@@ -227,9 +223,7 @@ DeepseekV4GateImpl::select_experts_native(
 
   auto gather_idx = topk_idx.to(torch::kLong);
   auto topk_weights = original_scores.gather(-1, gather_idx);
-  auto denom = topk_weights.sum(-1, true);
-  denom = torch::clamp_min(denom, 1e-20);
-  topk_weights = topk_weights / denom;
+  topk_weights = renormalize_topk_weights(topk_weights);
   topk_weights = topk_weights * route_scale_;
 
   return std::make_tuple(topk_weights, gather_idx.to(torch::kInt32));
