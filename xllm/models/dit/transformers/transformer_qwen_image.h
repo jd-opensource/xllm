@@ -39,6 +39,7 @@ limitations under the License.
 #include "framework/parallel_state/parallel_state.h"
 #include "models/dit/utils/dit_parallel_linear.h"
 #include "models/dit/utils/sequence_parallel_pad_manager.h"
+#include "models/dit/utils/sequence_parallel_split_manager.h"
 #include "models/model_registry.h"
 
 #ifdef TORCH_HIGHER_THAN_PTA6
@@ -695,43 +696,6 @@ class FeedForwardImpl final : public torch::nn::Module {
 TORCH_MODULE(FeedForward);
 
 }  // namespace qwenimage
-
-inline torch::Tensor gather_sequence(const torch::Tensor& input_,
-                                     int64_t dim,
-                                     ProcessGroup* pg) {
-  int32_t group_size = pg->world_size();
-  auto input = input_.contiguous();
-  if (group_size == 1) {
-    return input;
-  }
-
-  // all gather
-  auto tensor_list = parallel_state::gather(input, pg, dim);
-
-  // concat
-  auto output = torch::cat(tensor_list, dim);
-
-  return output;
-}
-
-inline torch::Tensor split_sequence(const torch::Tensor& input,
-                                    int64_t dim,
-                                    ProcessGroup* pg) {
-  auto group_size = pg->world_size();
-  auto rank = pg->rank();
-
-  if (group_size == 1) {
-    return input;
-  }
-
-  torch::Tensor input_ = input;
-
-  int64_t dim_size = input_.size(dim);
-
-  auto tensor_list = torch::split(input_, dim_size / group_size, dim);
-  auto output = tensor_list[rank].contiguous();
-  return output;
-}
 
 // TODO: This class should be extracted from dit class and integrated into a
 // common class.

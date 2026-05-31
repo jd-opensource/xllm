@@ -27,7 +27,7 @@ limitations under the License.
 
 namespace xllm {
 
-class VAEImageProcessorImpl final : public torch::nn::Module {
+class VAEImageProcessorImpl : public torch::nn::Module {
  public:
   explicit VAEImageProcessorImpl(
       ModelContext context,
