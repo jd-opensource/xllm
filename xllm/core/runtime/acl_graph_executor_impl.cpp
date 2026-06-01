@@ -45,8 +45,7 @@ constexpr uint64_t kSpecVerifyQMaxSeqLenShift = 32;
 
 bool is_qwen3_5_model_type(const std::string& model_type) {
   return model_type == "qwen3_5" || model_type == "qwen3_5_moe" ||
-         model_type == "qwen3_5_text" || model_type == "qwen3_5_moe_text" ||
-         model_type.rfind("qwen3_5_", 0) == 0;
+         model_type == "qwen3_5_text" || model_type.rfind("qwen3_5_", 0) == 0;
 }
 
 std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
