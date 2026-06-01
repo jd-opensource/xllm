@@ -62,38 +62,6 @@ std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
   return {torch::Tensor(), torch::Tensor()};
 }
 
-int64_t infer_actual_batch_size(const ModelInputParams& params) {
-  if (params.meta.actual_num_sequences > 0) {
-    return params.meta.actual_num_sequences;
-  }
-  if (params.meta.num_sequences > 0) {
-    return params.meta.num_sequences;
-  }
-  if (!params.attention.host.kv_seq_lens.empty()) {
-    return static_cast<int64_t>(params.attention.host.kv_seq_lens.size());
-  }
-  if (!params.attention.host.q_seq_lens.empty()) {
-    return static_cast<int64_t>(params.attention.host.q_seq_lens.size());
-  }
-  if (params.attention.device.kv_seq_lens.defined() &&
-      params.attention.device.kv_seq_lens.dim() >= 1) {
-    return params.attention.device.kv_seq_lens.size(0);
-  }
-  if (params.attention.device.q_seq_lens.defined() &&
-      params.attention.device.q_seq_lens.dim() >= 1) {
-    return params.attention.device.q_seq_lens.size(0);
-  }
-  if (params.attention.device.block_tables.defined() &&
-      params.attention.device.block_tables.dim() >= 2) {
-    return params.attention.device.block_tables.size(0);
-  }
-  for (const torch::Tensor& block_table : params.multi_block_tables) {
-    if (block_table.defined() && block_table.dim() >= 2) {
-      return block_table.size(0);
-    }
-  }
-  return 0;
-}
 }  // namespace
 
 bool AclGraph::capture(CausalLM* model,

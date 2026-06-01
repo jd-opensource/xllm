@@ -183,32 +183,6 @@ bool enable_qwen3_5_spec_verify(const ModelArgs& model_args,
          is_qwen3_5_target_model_type(model_args.model_type());
 }
 
-int64_t qwen3_5_num_speculative_tokens(
-    const ModelArgs& model_args,
-    const KVCacheEstimateOptions& options) {
-  return enable_qwen3_5_spec_verify(model_args, options)
-             ? options.num_speculative_tokens
-             : 0;
-}
-
-int64_t linear_conv_state_len(const ModelArgs& model_args,
-                              const KVCacheEstimateOptions& options) {
-  if (model_args.linear_num_value_heads() <= 0) {
-    return 0;
-  }
-  return model_args.linear_conv_kernel_dim() - 1 +
-         qwen3_5_num_speculative_tokens(model_args, options);
-}
-
-int64_t linear_ssm_checkpoint_stride(
-    const ModelArgs& model_args,
-    const KVCacheEstimateOptions& options) {
-  if (model_args.linear_num_value_heads() <= 0) {
-    return 1;
-  }
-  return qwen3_5_num_speculative_tokens(model_args, options) + 1;
-}
-
 int64_t linear_slot_size(const ModelArgs& model_args,
                          const KVCacheEstimateOptions& options,
                          int64_t dtype_size) {
@@ -220,6 +194,13 @@ int64_t linear_slot_size(const ModelArgs& model_args,
   const int64_t head_v_dim = model_args.linear_value_head_dim();
   const int64_t ssm_dtype_size =
       resolve_ssm_dtype_size(model_args.mamba_ssm_dtype(), dtype_size);
+  const int64_t num_speculative_tokens =
+      enable_qwen3_5_spec_verify(model_args, options)
+          ? options.num_speculative_tokens
+          : 0;
+  const int64_t conv_state_len =
+      model_args.linear_conv_kernel_dim() - 1 + num_speculative_tokens;
+  const int64_t ssm_checkpoint_stride = num_speculative_tokens + 1;
 
   const int64_t linear_ssm_slot_size =
       ssm_dtype_size * options.n_local_linear_v_heads * head_k_dim * head_v_dim;
@@ -227,10 +208,8 @@ int64_t linear_slot_size(const ModelArgs& model_args,
       dtype_size *
       (head_k_dim * options.n_local_linear_k_heads * 2 +
        head_v_dim * options.n_local_linear_v_heads) *
-      linear_conv_state_len(model_args, options);
-  return linear_conv_slot_size +
-         linear_ssm_slot_size * linear_ssm_checkpoint_stride(model_args,
-                                                             options);
+      conv_state_len;
+  return linear_conv_slot_size + linear_ssm_slot_size * ssm_checkpoint_stride;
 }
 
 void init_dsv4_counts(const ModelArgs& model_args,
@@ -398,13 +377,23 @@ KVCacheCapacity estimate_kv_cache_capacity(
   const int64_t cache_dtype_size =
       kv_cache_dtype_size(options.kv_cache_dtype, dtype_size);
 
+  const int64_t num_speculative_tokens =
+      enable_qwen3_5_spec_verify(model_args, options)
+          ? options.num_speculative_tokens
+          : 0;
+  const int64_t linear_conv_state_len =
+      model_args.linear_num_value_heads() > 0
+          ? model_args.linear_conv_kernel_dim() - 1 + num_speculative_tokens
+          : 0;
+  const int64_t linear_ssm_checkpoint_stride =
+      model_args.linear_num_value_heads() > 0 ? num_speculative_tokens + 1 : 1;
+
   kv_cache_cap.slot_size(kv_slot_size(model_args, options, cache_dtype_size))
       .index_slot_size(index_slot_size(model_args, dtype_size))
       .scale_slot_size(scale_slot_size(model_args, options))
       .linear_slot_size(linear_slot_size(model_args, options, dtype_size))
-      .linear_conv_state_len(linear_conv_state_len(model_args, options))
-      .linear_ssm_checkpoint_stride(
-          linear_ssm_checkpoint_stride(model_args, options))
+      .linear_conv_state_len(linear_conv_state_len)
+      .linear_ssm_checkpoint_stride(linear_ssm_checkpoint_stride)
       .n_layers(model_args.n_layers())
       .block_size(options.block_size);
 #if !defined(USE_NPU)
