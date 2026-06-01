@@ -1359,8 +1359,8 @@ struct FusedSigmoidGatingDeltaRuleUpdateParams {
   torch::Tensor cu_seqlens;
   std::optional<float> scale = std::nullopt;
   bool use_qk_l2norm_in_kernel = false;
-  float softplus_beta = 1.0f;
-  float softplus_threshold = 20.0f;
+  float beta = 1.0f;
+  float threshold = 20.0f;
 };
 
 // NPU Causal Conv1d Update parameters
