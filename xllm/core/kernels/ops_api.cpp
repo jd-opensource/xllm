@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "ops_api.h"
 
+#include <sstream>
+
 #if defined(USE_MLU)
 #include "mlu/mlu_ops_api.h"
 #elif defined(USE_NPU)
@@ -846,21 +848,67 @@ std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
 torch::Tensor fused_sigmoid_gating_delta_rule_update(
     FusedSigmoidGatingDeltaRuleUpdateParams& params) {
 #if defined(USE_NPU)
-  return npu::npu_fused_sigmoid_gating_delta_rule_update(
+  constexpr int64_t kTokenPadding = 64;
+
+  const auto& indices = params.initial_state_indices;
+  const auto& cu = params.cu_seqlens;
+  const int64_t num_seqs = indices.size(0);
+  const int64_t total_tokens = cu.size(0) - 1;
+
+  // Pad q/k/v token dim to total_tokens + kTokenPadding.
+  const int64_t padded_tokens = total_tokens + kTokenPadding;
+  auto q = params.q;
+  auto k = params.k;
+  auto v = params.v;
+  torch::Tensor q_padded, k_padded, v_padded;
+  bool needs_token_pad = q.size(0) < padded_tokens;
+  if (needs_token_pad) {
+    q_padded = torch::zeros({padded_tokens, q.size(1), q.size(2)},
+                            q.options());
+    q_padded.narrow(0, 0, total_tokens).copy_(q.narrow(0, 0, total_tokens));
+    k_padded = torch::zeros({padded_tokens, k.size(1), k.size(2)},
+                            k.options());
+    k_padded.narrow(0, 0, total_tokens).copy_(k.narrow(0, 0, total_tokens));
+    v_padded = torch::zeros({padded_tokens, v.size(1), v.size(2)},
+                            v.options());
+    v_padded.narrow(0, 0, total_tokens).copy_(v.narrow(0, 0, total_tokens));
+  } else {
+    q_padded = q;
+    k_padded = k;
+    v_padded = v;
+  }
+
+  // A_log/dt_bias/init_state are float32; others are bf16 — kernel handles
+  // mixed dtype natively.
+  auto init_state_small = torch::index_select(
+      params.initial_state_source, 0, indices);
+  auto indices_remapped =
+      torch::arange(num_seqs, torch::dtype(torch::kInt32)
+                                  .device(indices.device()));
+
+  auto [out, final_state] = npu::tilelang::fused_sigmoid_gating_delta_rule(
       params.A_log,
       params.a,
       params.dt_bias,
-      params.q,
-      params.k,
-      params.v,
+      q_padded,
+      k_padded,
+      v_padded,
       params.b,
-      params.initial_state_source,
-      params.initial_state_indices,
-      params.cu_seqlens,
+      init_state_small,
+      indices_remapped,
+      cu,
       params.scale,
       params.use_qk_l2norm_in_kernel,
-      params.softplus_beta,
-      params.softplus_threshold);
+      params.beta,
+      params.threshold);
+
+  // Write valid final states back to original ssm cache.
+  params.initial_state_source.index_put_(
+      {indices},
+      final_state.narrow(0, 0, num_seqs)
+          .to(params.initial_state_source.scalar_type()));
+
+  return needs_token_pad ? out.narrow(0, 0, total_tokens) : out;
 #else
   NOT_IMPLEMENTED();
 #endif
