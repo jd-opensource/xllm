@@ -88,9 +88,8 @@ void ServiceConfig::append_config_json(
     nlohmann::ordered_json& config_json) const {
   const ServiceConfig default_config;
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, host);
-  // don't dump rank-related config
-  //  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config,
-  //  port);
+  // only dump rank-0 port
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, port);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, rpc_idle_timeout_s);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

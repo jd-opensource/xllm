@@ -29,7 +29,7 @@ Documentation = "https://docs.xllm-ai.com/"
 Repository = "https://github.com/jd-opensource/xllm"
 
 [project.scripts]
-xllm = "xllm.launch_xllm:launch_xllm"
+xllm = "xllm.launch_server:main"
 
 [tool.setuptools.dynamic]
 readme = { file = ["README.md"], content-type = "text/markdown" }

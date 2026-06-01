@@ -409,11 +409,6 @@ class BuildDistWheel(bdist_wheel):
         if torch_version:
             name += f"_torch{torch_version}"
 
-        if get_cxx_abi():
-            name += "_cxx11_abi"
-        else:
-            name += "_no_cxx11_abi"
-
         self.distribution.metadata.name = name
         super().finalize_options()
 
@@ -720,9 +715,9 @@ if __name__ == "__main__":
                   "test": test_cmd,
                   'bdist_wheel': BuildDistWheel},
         options=options,
-        packages=find_namespace_packages(include=["scripts.build_support"]),
+        packages=find_namespace_packages(include=["scripts", "scripts.*"]),
         zip_safe=False,
-        py_modules=["xllm/launch_xllm", "xllm/__init__",
+        py_modules=["xllm/launch_server", "xllm/__init__",
                     "xllm/pybind/llm", "xllm/pybind/vlm",
                     "xllm/pybind/embedding", "xllm/pybind/utils",
                     "xllm/pybind/args", "xllm/pybind/params",
