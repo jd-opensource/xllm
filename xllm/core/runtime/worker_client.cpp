@@ -181,6 +181,14 @@ folly::SemiFuture<bool> WorkerClient::wakeup_async(
   return worker_->wakeup_async(options);
 }
 
+folly::SemiFuture<bool> WorkerClient::start_profile_async() {
+  return worker_->start_profile_async();
+}
+
+folly::SemiFuture<bool> WorkerClient::stop_profile_async() {
+  return worker_->stop_profile_async();
+}
+
 const torch::Device& WorkerClient::device() const { return worker_->device(); }
 
 folly::SemiFuture<std::optional<RawForwardOutput>>

@@ -351,4 +351,6 @@ service DistributeWorker {
   rpc PrefetchFromStorage(BlockTransferInfos) returns (Status) {}
   rpc Sleep (SleepRequest)  returns (Status);
   rpc Wakeup (WakeupRequest) returns (Status);
+  rpc StartProfile (Empty) returns (Status);
+  rpc StopProfile (Empty) returns (Status);
 }

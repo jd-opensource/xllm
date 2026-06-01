@@ -222,6 +222,8 @@ nav:
       - MoE Optimization:
         - features/moe_params.md
         - features/eplb.md
+      - Profiling:
+        - features/online_profiling.md
       - Advanced Guides:
         - Speculative Inference: features/mtp.md
         - GraphMode: features/graph_mode.md

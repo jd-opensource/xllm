@@ -229,4 +229,26 @@ folly::SemiFuture<bool> Worker::wakeup_async(const WakeupOptions& options) {
   });
   return future;
 }
+
+bool Worker::start_profile() { return impl_->start_profile(); }
+
+bool Worker::stop_profile() { return impl_->stop_profile(); }
+
+folly::SemiFuture<bool> Worker::start_profile_async() {
+  folly::Promise<bool> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
+    promise.setValue(this->start_profile());
+  });
+  return future;
+}
+
+folly::SemiFuture<bool> Worker::stop_profile_async() {
+  folly::Promise<bool> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
+    promise.setValue(this->stop_profile());
+  });
+  return future;
+}
 }  // namespace xllm

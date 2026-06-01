@@ -374,4 +374,32 @@ folly::SemiFuture<bool> RemoteWorker::wakeup_async(
   return future;
 }
 
+folly::SemiFuture<bool> RemoteWorker::start_profile_async() {
+  folly::Promise<bool> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
+    if (!channel_->start_profile()) {
+      LOG(ERROR) << "StartProfile failed";
+      promise.setValue(false);
+    } else {
+      promise.setValue(true);
+    }
+  });
+  return future;
+}
+
+folly::SemiFuture<bool> RemoteWorker::stop_profile_async() {
+  folly::Promise<bool> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
+    if (!channel_->stop_profile()) {
+      LOG(ERROR) << "StopProfile failed";
+      promise.setValue(false);
+    } else {
+      promise.setValue(true);
+    }
+  });
+  return future;
+}
+
 }  // namespace xllm

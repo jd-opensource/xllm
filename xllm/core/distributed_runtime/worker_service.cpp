@@ -591,6 +591,32 @@ void WorkerService::Wakeup(::google::protobuf::RpcController* controller,
   return;
 }
 
+void WorkerService::StartProfile(::google::protobuf::RpcController* controller,
+                                 const proto::Empty* req,
+                                 proto::Status* resp,
+                                 ::google::protobuf::Closure* done) {
+  threadpool_->schedule([this, controller, req, resp, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    bool status = worker_->start_profile();
+    resp->set_ok(status);
+  });
+
+  return;
+}
+
+void WorkerService::StopProfile(::google::protobuf::RpcController* controller,
+                                const proto::Empty* req,
+                                proto::Status* resp,
+                                ::google::protobuf::Closure* done) {
+  threadpool_->schedule([this, controller, req, resp, done]() mutable {
+    brpc::ClosureGuard done_guard(done);
+    bool status = worker_->stop_profile();
+    resp->set_ok(status);
+  });
+
+  return;
+}
+
 void WorkerService::ExecuteModel(::google::protobuf::RpcController* controller,
                                  const proto::ForwardInput* pb_forward_input,
                                  proto::ForwardOutput* pb_forward_output,

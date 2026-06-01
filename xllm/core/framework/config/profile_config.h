@@ -18,6 +18,7 @@ limitations under the License.
 #include <cstdint>
 #include <limits>
 #include <nlohmann/json_fwd.hpp>
+#include <string>
 
 #include "core/common/macros.h"
 #include "core/framework/config/option_category.h"
@@ -49,7 +50,10 @@ class ProfileConfig final {
          "max_global_tpot_ms",
          "enable_profile_kv_blocks",
          "disable_ttft_profiling",
-         "enable_forward_interruption"}};
+         "enable_forward_interruption",
+         "enable_online_profile",
+         "profile_backend",
+         "profile_dir"}};
     return kOptionCategory;
   }
 
@@ -70,6 +74,22 @@ class ProfileConfig final {
   PROPERTY(bool, disable_ttft_profiling) = false;
 
   PROPERTY(bool, enable_forward_interruption) = false;
+
+  // Whether to enable the online timeline profiling endpoints
+  // (/start_profile and /stop_profile). CUDA only for now.
+  PROPERTY(bool, enable_online_profile) = false;
+
+  // Online profiling backend. "torch" (default) records CPU+CUDA activities
+  // in-process via libtorch's Kineto profiler and writes a Chrome trace on
+  // /stop_profile, no external profiler required (mirrors vLLM's default).
+  // "cuda" only toggles the CUDA profiler capture range
+  // (cudaProfilerStart/Stop) and requires launching the server under nsys with
+  // --capture-range=cudaProfilerApi to record a trace.
+  PROPERTY(std::string, profile_backend) = "torch";
+
+  // Directory the "torch" backend writes timeline traces to. Empty means the
+  // current working directory. Mirrors vLLM's torch_profiler_dir.
+  PROPERTY(std::string, profile_dir) = "";
 };
 
 }  // namespace xllm

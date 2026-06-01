@@ -37,6 +37,7 @@ limitations under the License.
 #include "core/distributed_runtime/rec_master.h"
 #include "core/distributed_runtime/vlm_master.h"
 #include "core/framework/config/distributed_config.h"
+#include "core/framework/config/profile_config.h"
 #include "core/util/closure_guard.h"
 #include "embedding.pb.h"
 #include "image_generation.pb.h"
@@ -1204,6 +1205,78 @@ void APIService::WakeupHttp(::google::protobuf::RpcController* controller,
   if (!do_wakeup(*req_pb, &error_message)) {
     ctrl->SetFailed(error_message);
   }
+  // Success: return HTTP 200 with empty body
+}
+
+void APIService::StartProfileHttp(::google::protobuf::RpcController* controller,
+                                  const proto::HttpRequest* request,
+                                  proto::HttpResponse* response,
+                                  ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  if (!ProfileConfig::get_instance().enable_online_profile()) {
+    LOG(ERROR) << "Profiling is disabled. Start the server with "
+                  "--enable_online_profile=true to use /start_profile.";
+    ctrl->SetFailed(
+        "Profiling is disabled. Start the server with "
+        "--enable_online_profile=true.");
+    return;
+  }
+  if (master_ == nullptr) {
+    LOG(ERROR) << "No master available to start profiling.";
+    ctrl->SetFailed("No master available to start profiling.");
+    return;
+  }
+
+  LOG(INFO) << "Starting profiler.";
+  if (!master_->start_profile()) {
+    LOG(ERROR) << "Failed to start profiler.";
+    ctrl->SetFailed("Failed to start profiler.");
+    return;
+  }
+  LOG(INFO) << "Profiler started.";
+  // Success: return HTTP 200 with empty body
+}
+
+void APIService::StopProfileHttp(::google::protobuf::RpcController* controller,
+                                 const proto::HttpRequest* request,
+                                 proto::HttpResponse* response,
+                                 ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "brpc request | respose | controller is null";
+    return;
+  }
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  if (!ProfileConfig::get_instance().enable_online_profile()) {
+    LOG(ERROR) << "Profiling is disabled. Start the server with "
+                  "--enable_online_profile=true to use /stop_profile.";
+    ctrl->SetFailed(
+        "Profiling is disabled. Start the server with "
+        "--enable_online_profile=true.");
+    return;
+  }
+  if (master_ == nullptr) {
+    LOG(ERROR) << "No master available to stop profiling.";
+    ctrl->SetFailed("No master available to stop profiling.");
+    return;
+  }
+
+  LOG(INFO) << "Stopping profiler.";
+  if (!master_->stop_profile()) {
+    LOG(ERROR) << "Failed to stop profiler.";
+    ctrl->SetFailed("Failed to stop profiler.");
+    return;
+  }
+  LOG(INFO) << "Profiler stopped.";
   // Success: return HTTP 200 with empty body
 }
 

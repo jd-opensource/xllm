@@ -47,6 +47,16 @@ class Master {
     return false;
   }
 
+  // Start/stop online timeline profiling on all workers. Forwards to the
+  // engine, which broadcasts to every worker. CUDA only for now.
+  virtual bool start_profile() {
+    return engine_ ? engine_->start_profile() : false;
+  }
+
+  virtual bool stop_profile() {
+    return engine_ ? engine_->stop_profile() : false;
+  }
+
   virtual bool unlink_d2d(const std::vector<std::string>& remote_addrs) {
     return false;
   }

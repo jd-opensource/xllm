@@ -116,6 +116,10 @@ class CommChannel {
 
   virtual bool wakeup(const WakeupOptions& options);
 
+  virtual bool start_profile();
+
+  virtual bool stop_profile();
+
  protected:
   bool execute_model_with_brpc(
       const ForwardInput& input,

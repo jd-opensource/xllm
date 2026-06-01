@@ -1187,6 +1187,54 @@ bool LLMEngine::sleep(MasterStatus master_status) {
   return true;
 }
 
+bool LLMEngine::start_profile() {
+  LOG(INFO) << "Starting profiler on " << worker_clients_num_ << " worker(s).";
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "No worker clients available to start profiling.";
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+  for (auto& worker : worker_clients_) {
+    futures.push_back(worker->start_profile_async());
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Start profile failed on a worker.";
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool LLMEngine::stop_profile() {
+  LOG(INFO) << "Stopping profiler on " << worker_clients_num_ << " worker(s).";
+  if (worker_clients_.empty()) {
+    LOG(ERROR) << "No worker clients available to stop profiling.";
+    return false;
+  }
+
+  std::vector<folly::SemiFuture<bool>> futures;
+  futures.reserve(worker_clients_num_);
+  for (auto& worker : worker_clients_) {
+    futures.push_back(worker->stop_profile_async());
+  }
+
+  auto results = folly::collectAll(futures).get();
+  for (const auto& result : results) {
+    if (!result.value()) {
+      LOG(ERROR) << "Stop profile failed on a worker.";
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool LLMEngine::wakeup(const WakeupOptions& options) {
   // sleep/wakeup/fork_master requires
   // ::xllm::KVCacheConfig::get_instance().enable_xtensor()

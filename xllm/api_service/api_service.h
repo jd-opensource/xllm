@@ -178,6 +178,16 @@ class APIService : public proto::XllmAPIService {
                   proto::HttpResponse* response,
                   ::google::protobuf::Closure* done) override;
 
+  void StartProfileHttp(::google::protobuf::RpcController* controller,
+                        const proto::HttpRequest* request,
+                        proto::HttpResponse* response,
+                        ::google::protobuf::Closure* done) override;
+
+  void StopProfileHttp(::google::protobuf::RpcController* controller,
+                       const proto::HttpRequest* request,
+                       proto::HttpResponse* response,
+                       ::google::protobuf::Closure* done) override;
+
   void LinkD2D(::google::protobuf::RpcController* controller,
                const proto::D2DLinkRequest* request,
                proto::Status* response,

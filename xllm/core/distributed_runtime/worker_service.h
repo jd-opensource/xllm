@@ -135,6 +135,16 @@ class WorkerService : public proto::DistributeWorker {
               proto::Status* resp,
               ::google::protobuf::Closure* done) override;
 
+  void StartProfile(::google::protobuf::RpcController* controller,
+                    const proto::Empty* req,
+                    proto::Status* resp,
+                    ::google::protobuf::Closure* done) override;
+
+  void StopProfile(::google::protobuf::RpcController* controller,
+                   const proto::Empty* req,
+                   proto::Status* resp,
+                   ::google::protobuf::Closure* done) override;
+
  private:
   void step(ForwardInput& fwd_input,
             torch::Tensor& next_tokens,

@@ -380,6 +380,32 @@ bool CommChannel::wakeup(const WakeupOptions& options) {
   return true;
 }
 
+bool CommChannel::start_profile() {
+  proto::Empty req;
+  proto::Status s;
+  brpc::Controller cntl;
+
+  stub_->StartProfile(&cntl, &req, &s, nullptr);
+  if (cntl.Failed() || !s.ok()) {
+    LOG(ERROR) << "StartProfile failed: " << cntl.ErrorText();
+    return false;
+  }
+  return true;
+}
+
+bool CommChannel::stop_profile() {
+  proto::Empty req;
+  proto::Status s;
+  brpc::Controller cntl;
+
+  stub_->StopProfile(&cntl, &req, &s, nullptr);
+  if (cntl.Failed() || !s.ok()) {
+    LOG(ERROR) << "StopProfile failed: " << cntl.ErrorText();
+    return false;
+  }
+  return true;
+}
+
 class ClientStreamReceiver : public brpc::StreamInputHandler {
  private:
   std::shared_ptr<std::atomic<int32_t>> termination_flag_;

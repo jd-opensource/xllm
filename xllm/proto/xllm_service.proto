@@ -92,6 +92,9 @@ service XllmAPIService {
   rpc Wakeup (MasterInfos) returns (Status);
   rpc WakeupHttp (HttpRequest) returns (HttpResponse);
 
+  rpc StartProfileHttp (HttpRequest) returns (HttpResponse);
+  rpc StopProfileHttp (HttpRequest) returns (HttpResponse);
+
   rpc LinkD2D (D2DLinkRequest) returns (Status);
   rpc LinkD2DHttp (HttpRequest) returns (HttpResponse);
 

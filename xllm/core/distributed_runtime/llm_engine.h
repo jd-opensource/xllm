@@ -123,6 +123,10 @@ class LLMEngine : public Engine {
 
   bool wakeup(const WakeupOptions& options) override;
 
+  bool start_profile() override;
+
+  bool stop_profile() override;
+
   // XTensor mode: get GlobalXTensor offsets for allocated blocks via RPC
   // Calls worker in the specified DP group to compute offsets
   bool get_xtensor_offsets_for_blocks(

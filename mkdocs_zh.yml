@@ -224,6 +224,8 @@ nav:
       - MoE优化:
         - features/moe_params.md
         - features/eplb.md
+      - 性能采集:
+        - features/online_profiling.md
       - 进阶指南:
         - 投机推理: features/mtp.md
         - GraphMode: features/graph_mode.md

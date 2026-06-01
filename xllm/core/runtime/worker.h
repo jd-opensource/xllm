@@ -54,6 +54,15 @@ class Worker {
 
   folly::SemiFuture<bool> wakeup_async(const WakeupOptions& options);
 
+  // Start/stop online timeline profiling on this worker's device.
+  bool start_profile();
+
+  bool stop_profile();
+
+  folly::SemiFuture<bool> start_profile_async();
+
+  folly::SemiFuture<bool> stop_profile_async();
+
   std::tuple<int64_t, int64_t> estimate_kv_cache_capacity();
 
   // allocate kv cache. blocking call

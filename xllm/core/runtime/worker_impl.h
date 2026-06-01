@@ -141,6 +141,12 @@ class WorkerImpl {
 
   virtual bool wakeup(const WakeupOptions& options);
 
+  // Start/stop online timeline profiling on this worker's device. CUDA only
+  // for now; on other backends these are no-ops returning false.
+  virtual bool start_profile();
+
+  virtual bool stop_profile();
+
   virtual folly::SemiFuture<bool> pull_kv_blocks_async(
       uint64_t src_cluster_id,
       const std::string& src_addr,

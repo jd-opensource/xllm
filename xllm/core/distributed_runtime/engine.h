@@ -155,6 +155,17 @@ class Engine {
     return false;
   };
 
+  // Start/stop online timeline profiling on all workers. CUDA only for now.
+  virtual bool start_profile() {
+    LOG(ERROR) << "start_profile is not implemented for this engine!";
+    return false;
+  };
+
+  virtual bool stop_profile() {
+    LOG(ERROR) << "stop_profile is not implemented for this engine!";
+    return false;
+  };
+
   // XTensor mode: get GlobalXTensor offsets for allocated blocks
   // Returns per-layer K/V offsets for each block
   // Output: offsets[layer_id] = {k_offsets, v_offsets}
