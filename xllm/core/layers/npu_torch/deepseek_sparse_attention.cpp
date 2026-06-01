@@ -606,7 +606,8 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
                          torch::Tensor& hidden_states,
                          KVCache& kv_cache,
                          KVState& kv_state,
-                         bool isprefill,
+                         bool is_prefill,
+                         bool is_chunked_prefill,
                          std::string layer_name,
                          const std::tuple<torch::Tensor,
                                           torch::Tensor,
@@ -705,13 +706,14 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
   }
 
   // 5) Prepare ori_kv for attention.
-  // Prefill packs the current KV into temporary PA_ND blocks, matching
-  // vllm-ascend and avoiding SWA ring-buffer overwrite during attention.
-  // Decode reads the persistent SWA cache after writing the current token.
+  // Full prefill can read a temporary PA_ND cache built from current KV.
+  // Chunked prefill needs prefix KV, so it reads the persistent SWA cache.
   torch::Tensor ori_kv_for_attn;
   torch::Tensor ori_block_table_for_attn = ori_block_table;
   const std::string ori_kv_layout = "PA_ND";
-  if (isprefill) {
+  const bool use_prefill_attn = is_prefill || is_chunked_prefill;
+  const bool use_temporary_prefill_kv = is_prefill && !is_chunked_prefill;
+  if (use_temporary_prefill_kv) {
     const int64_t block_size =
         ori_kv.defined() && ori_kv.dim() > 1 ? ori_kv.size(1) : 128;
     std::tie(ori_kv_for_attn, ori_block_table_for_attn) =
@@ -773,7 +775,7 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
         build_indexer_attention_metadata(attn_metadata,
                                          index_block_table,
                                          index_slot,
-                                         isprefill,
+                                         use_prefill_attn,
                                          attn_metadata.max_query_len,
                                          attn_metadata.max_seq_len);
     CHECK(qli_metadata.defined()) << "DSAttention requires precomputed "
@@ -793,7 +795,7 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
                              attn_metadata.actual_seq_lengths_query,
                              attn_metadata.actual_seq_lengths_kv,
                              qli_metadata_opt,
-                             isprefill,
+                             use_prefill_attn,
                              &indexer_states,
                              &indexer_block_tables);
     CHECK(compress_topk_idxs.defined())
@@ -816,9 +818,8 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
       << compress_ratio_i;
 
   std::optional<torch::Tensor> cu_seqlens_ori_kv_for_attn = std::nullopt;
-  if (isprefill) {
-    // Prefill packs ori_kv into temporary PA_ND blocks; pass the same
-    // cu-seqlens shape used by vllm-ascend and the precomputed metadata.
+  if (use_prefill_attn) {
+    // Prefill-style sparse metadata uses query cu-seqlens for ori_kv.
     cu_seqlens_ori_kv_for_attn =
         as_optional(attn_metadata.actual_seq_lengths_query);
   }
@@ -851,10 +852,8 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
       /*layout_kv=*/ori_kv_layout,
       /*return_softmax_lse=*/false);
 
-  // 8) Deferred cache write for prefill.
-  // In prefill mode the cache write was intentionally skipped above to
-  // avoid ring-buffer overwrites. Perform it now, after attention is done.
-  if (isprefill) {
+  // 8) Deferred cache write for full prefill.
+  if (use_temporary_prefill_kv) {
     scatter_by_slot(ori_kv, ori_slot, kv);
   }
 

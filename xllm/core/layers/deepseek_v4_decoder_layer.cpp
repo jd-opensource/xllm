@@ -156,14 +156,15 @@ torch::Tensor DeepseekV4DecoderLayerImpl::forward(
                    kv_cache.get_compress_score_state(),
                    kv_cache.get_compress_index_kv_state(),
                    kv_cache.get_compress_index_score_state()};
-  auto [attn_output, attn_lse] = attention_->forward(
-      dsa,
-      attn_input,
-      kv_cache,
-      kv_state,
-      attn_metadata.is_prefill || attn_metadata.is_chunked_prefill,
-      std::to_string(dsa.layer_id),
-      compress_metadata);
+  auto [attn_output, attn_lse] =
+      attention_->forward(dsa,
+                          attn_input,
+                          kv_cache,
+                          kv_state,
+                          attn_metadata.is_prefill,
+                          attn_metadata.is_chunked_prefill,
+                          std::to_string(dsa.layer_id),
+                          compress_metadata);
   (void)attn_lse;
   attn_input = attn_output;
   x = hc_post(attn_input, residual_attn, post_attn, comb_attn);
