@@ -210,7 +210,6 @@ def build_split_qkv_rmsnorm_mrope_kernel(
 
     acc_dtype = "float32"
     input_dtype = "bfloat16"
-    reduce_tmp_dtype = "uint8"
     task_num = _select_task_num(
         max_num_tokens=max_num_tokens, vec_core_num=vec_core_num
     )
@@ -225,19 +224,17 @@ def build_split_qkv_rmsnorm_mrope_kernel(
         square_ub,
         rms_vec_ub,
         rms_vec_2d_ub,
-        bcast_tmp_ub,
-        reduce_tmp_ub,
         weight_2d_fp32_ub,
         num_heads,
         eps,
     ):
         T.tile.cast(heads_fp32_ub, heads_half_ub, "CAST_NONE", num_heads * head_size)
         T.tile.mul(square_ub, heads_fp32_ub, heads_fp32_ub)
-        T.reduce_sum(square_ub, rms_vec_ub, reduce_tmp_ub, dim=-1)
+        T.reduce_sum(square_ub, rms_vec_ub, dim=-1)
         T.tile.mul(rms_vec_ub, rms_vec_ub, 1.0 / head_size)
         T.tile.add(rms_vec_ub, rms_vec_ub, eps)
         T.tile.rsqrt(rms_vec_ub, rms_vec_ub)
-        T.tile.broadcast(rms_vec_2d_ub, rms_vec_ub, bcast_tmp_ub)
+        T.tile.broadcast(rms_vec_2d_ub, rms_vec_ub)
         T.tile.mul(heads_fp32_ub, heads_fp32_ub, rms_vec_2d_ub)
         T.tile.mul(heads_fp32_ub, heads_fp32_ub, weight_2d_fp32_ub)
 
@@ -282,10 +279,9 @@ def build_split_qkv_rmsnorm_mrope_kernel(
         rope_swapped_ub,
         rope_cos_2d_ub,
         rope_sin_2d_ub,
-        bcast_tmp_ub,
     ):
-        T.tile.broadcast(rope_cos_2d_ub, cos_full_ub, bcast_tmp_ub)
-        T.tile.broadcast(rope_sin_2d_ub, sin_signed_ub, bcast_tmp_ub)
+        T.tile.broadcast(rope_cos_2d_ub, cos_full_ub)
+        T.tile.broadcast(rope_sin_2d_ub, sin_signed_ub)
         for head_idx in T.serial(num_heads):
             T.copy(heads_fp32_ub[head_idx, 0], rope_orig_ub[head_idx, :])
             T.copy(
@@ -345,18 +341,12 @@ def build_split_qkv_rmsnorm_mrope_kernel(
                 q_square_ub = T.alloc_shared((num_q_heads, head_size), acc_dtype)
                 q_rms_vec_ub = T.alloc_shared((num_q_heads, 1), acc_dtype)
                 q_rms_vec_2d_ub = T.alloc_shared((num_q_heads, head_size), acc_dtype)
-                q_reduce_tmp_ub = T.alloc_shared(
-                    num_q_heads * head_size, reduce_tmp_dtype
-                )
 
                 k_heads_half_ub = T.alloc_shared((num_kv_heads, head_size), input_dtype)
                 k_heads_fp32_ub = T.alloc_shared((num_kv_heads, head_size), acc_dtype)
                 k_square_ub = T.alloc_shared((num_kv_heads, head_size), acc_dtype)
                 k_rms_vec_ub = T.alloc_shared((num_kv_heads, 1), acc_dtype)
                 k_rms_vec_2d_ub = T.alloc_shared((num_kv_heads, head_size), acc_dtype)
-                k_reduce_tmp_ub = T.alloc_shared(
-                    num_kv_heads * head_size, reduce_tmp_dtype
-                )
 
                 # Separate passthrough buffers for gate and V. Keeping these
                 # independent from q/k_heads_half_ub lets MTE2 issue their
@@ -368,12 +358,6 @@ def build_split_qkv_rmsnorm_mrope_kernel(
                 )
                 v_heads_half_ub = T.alloc_shared(
                     (num_kv_heads, head_size), input_dtype
-                )
-
-                # Shared uint8 tmp buffer for T.tile.broadcast operations.
-                # Sized to the largest broadcast target (Q RMSNorm 2D buffer).
-                bcast_tmp_ub = T.alloc_shared(
-                    num_q_heads * head_size, reduce_tmp_dtype
                 )
 
                 # Gather buffers for merged cos+sin assembly.
@@ -403,8 +387,8 @@ def build_split_qkv_rmsnorm_mrope_kernel(
                 v_wait_mte2(E.INIT_WEIGHTS)
                 T.tile.cast(q_weight_fp32_ub, q_weight_half_ub, "CAST_NONE", head_size)
                 T.tile.cast(k_weight_fp32_ub, k_weight_half_ub, "CAST_NONE", head_size)
-                T.tile.broadcast(q_weight_2d_fp32_ub, q_weight_fp32_ub, bcast_tmp_ub)
-                T.tile.broadcast(k_weight_2d_fp32_ub, k_weight_fp32_ub, bcast_tmp_ub)
+                T.tile.broadcast(q_weight_2d_fp32_ub, q_weight_fp32_ub)
+                T.tile.broadcast(k_weight_2d_fp32_ub, k_weight_fp32_ub)
 
                 for row_local in T.serial(num_rows_per_vec):
                     row = row_start + row_local
@@ -493,8 +477,6 @@ def build_split_qkv_rmsnorm_mrope_kernel(
                         q_square_ub,
                         q_rms_vec_ub,
                         q_rms_vec_2d_ub,
-                        bcast_tmp_ub,
-                        q_reduce_tmp_ub,
                         q_weight_2d_fp32_ub,
                         num_q_heads,
                         eps,
@@ -508,7 +490,6 @@ def build_split_qkv_rmsnorm_mrope_kernel(
                         q_rope_swapped_ub,
                         q_rope_cos_2d_ub,
                         q_rope_sin_2d_ub,
-                        bcast_tmp_ub,
                     )
                     T.tile.cast(q_heads_half_ub, q_heads_fp32_ub, "CAST_RINT", q_size)
                     v_notify_mte3(E.Q_CAST)
@@ -521,8 +502,6 @@ def build_split_qkv_rmsnorm_mrope_kernel(
                         k_square_ub,
                         k_rms_vec_ub,
                         k_rms_vec_2d_ub,
-                        bcast_tmp_ub,
-                        k_reduce_tmp_ub,
                         k_weight_2d_fp32_ub,
                         num_kv_heads,
                         eps,
@@ -536,7 +515,6 @@ def build_split_qkv_rmsnorm_mrope_kernel(
                         k_rope_swapped_ub,
                         k_rope_cos_2d_ub,
                         k_rope_sin_2d_ub,
-                        bcast_tmp_ub,
                     )
                     T.tile.cast(k_heads_half_ub, k_heads_fp32_ub, "CAST_RINT", kv_size)
                     v_notify_mte3(E.K_CAST)
