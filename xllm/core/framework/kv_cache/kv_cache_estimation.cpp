@@ -101,9 +101,8 @@ bool enable_qwen3_5_spec_verify(const ModelArgs& model_args,
          is_qwen3_5_target_model_type(model_args.model_type());
 }
 
-int64_t qwen3_5_num_speculative_tokens(
-    const ModelArgs& model_args,
-    const KVCacheEstimateOptions& options) {
+int64_t qwen3_5_num_speculative_tokens(const ModelArgs& model_args,
+                                       const KVCacheEstimateOptions& options) {
   return enable_qwen3_5_spec_verify(model_args, options)
              ? options.num_speculative_tokens
              : 0;
@@ -118,9 +117,8 @@ int64_t linear_conv_state_len(const ModelArgs& model_args,
          qwen3_5_num_speculative_tokens(model_args, options);
 }
 
-int64_t linear_ssm_checkpoint_stride(
-    const ModelArgs& model_args,
-    const KVCacheEstimateOptions& options) {
+int64_t linear_ssm_checkpoint_stride(const ModelArgs& model_args,
+                                     const KVCacheEstimateOptions& options) {
   if (model_args.linear_num_value_heads() <= 0) {
     return 1;
   }
@@ -147,8 +145,8 @@ int64_t linear_slot_size(const ModelArgs& model_args,
        head_v_dim * options.n_local_linear_v_heads) *
       linear_conv_state_len(model_args, options);
   return linear_conv_slot_size +
-         linear_ssm_slot_size * linear_ssm_checkpoint_stride(model_args,
-                                                             options);
+         linear_ssm_slot_size *
+             linear_ssm_checkpoint_stride(model_args, options);
 }
 
 Dsv4KVCacheEstimateCost estimate_dsv4_kv_cache_cost(
@@ -386,10 +384,10 @@ KVCacheCapacity estimate_kv_cache_capacity(
       .block_size(options.block_size);
   CHECK_GT(kv_cache_cap.cache_size_in_bytes(), 0)
       << "Available kv cache size must be greater than 0";
-  const bool enable_dsv4_estimation = util::is_target_model_type(
-      model_args.model_type(),
-      /*target_type=*/"deepseek_v4",
-      /*match_mtp=*/true);
+  const bool enable_dsv4_estimation =
+      util::is_target_model_type(model_args.model_type(),
+                                 /*target_type=*/"deepseek_v4",
+                                 /*match_mtp=*/true);
   if (options.draft_model_args != nullptr) {
     CHECK(enable_dsv4_estimation)
         << "DSV4 MTP kv cache estimation only supports DeepSeek V4 target";
@@ -406,8 +404,8 @@ KVCacheCapacity estimate_kv_cache_capacity(
       .linear_slot_size(linear_slot_size(model_args, options, dtype_size))
       .n_layers(model_args.n_layers())
       .block_size(options.block_size);
-  kv_cache_cap.linear_conv_state_len(linear_conv_state_len(model_args,
-                                                           options));
+  kv_cache_cap.linear_conv_state_len(
+      linear_conv_state_len(model_args, options));
   kv_cache_cap.linear_ssm_checkpoint_stride(
       linear_ssm_checkpoint_stride(model_args, options));
 #if !defined(USE_NPU)

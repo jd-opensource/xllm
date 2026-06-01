@@ -223,7 +223,8 @@ void AclGraph::prepare_model_graph_metadata(CausalLM* model,
   if (!model_graph_metadata_state_) {
     model_graph_metadata_state_ = model->create_graph_forward_metadata_state();
     CHECK(model_graph_metadata_state_)
-        << "ACL graph metadata state must be initialized during capture";}
+        << "ACL graph metadata state must be initialized during capture";
+  }
   model->prepare_graph_forward_metadata(
       model_graph_metadata_state_.get(), positions, params);
   CHECK(params.attn_metadata)

@@ -836,12 +836,10 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
     auto& dsa = *(attn_metadata.dsa_metadata);
     dsa.layer_id = layer_id;
 
-    const int32_t layer_compress_ratio =
-        deepseek_v4_normalize_compress_ratio(
-            (layer_id <
-             static_cast<int32_t>(model_args_.compress_ratios().size()))
-                ? model_args_.compress_ratios()[static_cast<size_t>(layer_id)]
-                : 1);
+    const int32_t layer_compress_ratio = deepseek_v4_normalize_compress_ratio(
+        (layer_id < static_cast<int32_t>(model_args_.compress_ratios().size()))
+            ? model_args_.compress_ratios()[static_cast<size_t>(layer_id)]
+            : 1);
 
     if (layer_compress_ratio == 4 && dsa.c4_cos.defined()) {
       dsa.cos = dsa.c4_cos;
@@ -858,9 +856,9 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
       size_t attn_cache_idx = 0;
       if (layer_id < static_cast<int32_t>(caches_info_.size())) {
         const auto& layer_caches = caches_info_[layer_id];
-        for (size_t cache_idx = 0; cache_idx < layer_caches.size(); ++cache_idx) {
-          if (layer_caches[cache_idx].type ==
-              DSACacheType::SLIDING_WINDOW) {
+        for (size_t cache_idx = 0; cache_idx < layer_caches.size();
+             ++cache_idx) {
+          if (layer_caches[cache_idx].type == DSACacheType::SLIDING_WINDOW) {
             attn_cache_idx = cache_idx;
             break;
           }
@@ -869,8 +867,7 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
 
       if (attn_cache_idx < dsa.block_tables[layer_id].size() &&
           dsa.block_tables[layer_id][attn_cache_idx].defined()) {
-        attn_metadata.block_table =
-            dsa.block_tables[layer_id][attn_cache_idx];
+        attn_metadata.block_table = dsa.block_tables[layer_id][attn_cache_idx];
       }
       if (attn_cache_idx < dsa.slot_mappings[layer_id].size() &&
           dsa.slot_mappings[layer_id][attn_cache_idx].defined()) {
@@ -912,9 +909,8 @@ class DeepseekV4MtpForCausalLMImpl final
   explicit DeepseekV4MtpForCausalLMImpl(const ModelContext& context)
       : LlmForCausalLMImplBase<DeepseekV4MtpModel>(context) {}
 
-  void load_model(
-      std::unique_ptr<ModelLoader> loader,
-      std::string prefix = "model.") override {
+  void load_model(std::unique_ptr<ModelLoader> loader,
+                  std::string prefix = "model.") override {
     for (const auto& state_dict : loader->get_state_dicts()) {
       model_->load_state_dict(state_dict->get_dict_with_prefix(prefix));
       lm_head_->load_state_dict(
