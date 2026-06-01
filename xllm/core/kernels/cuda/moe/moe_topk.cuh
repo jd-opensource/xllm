@@ -79,14 +79,14 @@ struct TopKRedType {
         reinterpret_cast<typename cub::Traits<T>::UnsignedBits&>(val));
 #else
     UnsignedBits valueBits = reinterpret_cast<UnsignedBits&>(val);
-    constexpr UnsignedBits signMask =
+    constexpr UnsignedBits kSignMask =
         static_cast<UnsignedBits>(UnsignedBits{1} << (sizeof(T) * 8 - 1));
     if constexpr (std::is_same_v<T, int>) {
-      valueBits = static_cast<UnsignedBits>(valueBits ^ signMask);
+      valueBits = static_cast<UnsignedBits>(valueBits ^ kSignMask);
     } else {
-      valueBits = (valueBits & signMask)
+      valueBits = (valueBits & kSignMask)
                       ? static_cast<UnsignedBits>(~valueBits)
-                      : static_cast<UnsignedBits>(valueBits ^ signMask);
+                      : static_cast<UnsignedBits>(valueBits ^ kSignMask);
     }
 #endif
     TypeCmp compactTmp = valueBits;
@@ -109,13 +109,13 @@ struct TopKRedType {
         reinterpret_cast<typename cub::Traits<T>::UnsignedBits&>(compactTmp));
 #else
     UnsignedBits valueBits = static_cast<UnsignedBits>(compactTmp);
-    constexpr UnsignedBits signMask =
+    constexpr UnsignedBits kSignMask =
         static_cast<UnsignedBits>(UnsignedBits{1} << (sizeof(T) * 8 - 1));
     if constexpr (std::is_same_v<T, int>) {
-      valueBits = static_cast<UnsignedBits>(valueBits ^ signMask);
+      valueBits = static_cast<UnsignedBits>(valueBits ^ kSignMask);
     } else {
-      valueBits = (valueBits & signMask)
-                      ? static_cast<UnsignedBits>(valueBits ^ signMask)
+      valueBits = (valueBits & kSignMask)
+                      ? static_cast<UnsignedBits>(valueBits ^ kSignMask)
                       : static_cast<UnsignedBits>(~valueBits);
     }
 #endif
@@ -297,22 +297,22 @@ __forceinline__ __device__ void reduceTopK(
     reduceTopKFunc<K, Type, N>(
         warp, out, outIdx, value, idx, minValue, actualK);
   } else {
-    constexpr int numLoops = N / 4;
-    constexpr int numResults = (numLoops * K - 1) / kWarpSize + 1;
+    constexpr int kNumLoops = N / 4;
+    constexpr int kNumResults = (kNumLoops * K - 1) / kWarpSize + 1;
 
-    Type topKBufferValue[numResults];
-    int32_t topKBufferIdx[numResults];
+    Type topKBufferValue[kNumResults];
+    int32_t topKBufferIdx[kNumResults];
     int32_t laneIdx = threadIdx.x % kWarpSize;
 
     // Sentinel index must be in [0, kMaxIdx] to survive makeCmpVal pack/unpack
     // (kMaxIdx - idx is stored in 16 bits; -1 would become 0 and unpack to
     // 65535). Use kMaxIdx so sentinel slots have smallest compValIdx for
     // minValue and lose to any real candidate.
-    for (int ii = 0; ii < numResults; ++ii) {
+    for (int ii = 0; ii < kNumResults; ++ii) {
       topKBufferValue[ii] = minValue;
       topKBufferIdx[ii] = RedType::kMaxIdx;
     }
-    for (int loop = 0; loop < numLoops; ++loop) {
+    for (int loop = 0; loop < kNumLoops; ++loop) {
       int start = loop * 4;
       Type topKValue[K];
       int32_t topKIdx[K];
@@ -329,13 +329,13 @@ __forceinline__ __device__ void reduceTopK(
         topKBufferValue[0] = topKValue[inOffset];
         topKBufferIdx[0] = topKIdx[inOffset];
       }
-      if (loop == numLoops - 1 && (laneIdx < (numLoops * K - kWarpSize))) {
+      if (loop == kNumLoops - 1 && (laneIdx < (kNumLoops * K - kWarpSize))) {
         topKBufferValue[1] = topKValue[inOffset];
         topKBufferIdx[1] = topKIdx[inOffset];
       }
     }
 
-    reduceTopKFunc<K, Type, numResults>(
+    reduceTopKFunc<K, Type, kNumResults>(
         warp, out, outIdx, topKBufferValue, topKBufferIdx, minValue, actualK);
   }
 };

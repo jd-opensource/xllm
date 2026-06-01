@@ -977,6 +977,10 @@ uint32_t DcuGraphExecutorImpl::get_bucket_num_tokens(
 
 uint32_t DcuGraphExecutorImpl::get_graph_max_seq_len(
     uint32_t kv_max_seq_len) const {
+  constexpr uint32_t kSmallSeqLenThreshold = 4096;
+  constexpr uint32_t kSmallSeqLenStep = 1024;
+  constexpr uint32_t kLargeSeqLenStep = 4096;
+
   const uint32_t max_seq_len =
       static_cast<uint32_t>(args_.max_position_embeddings());
   if (kv_max_seq_len == 0 || kv_max_seq_len >= max_seq_len) {
@@ -985,7 +989,9 @@ uint32_t DcuGraphExecutorImpl::get_graph_max_seq_len(
 
   // Keep early decode reasonably tight, but avoid repeatedly recapturing long
   // CoT generations every 128 tokens.
-  const uint32_t graph_seq_len_step = kv_max_seq_len <= 4096 ? 1024 : 4096;
+  const uint32_t graph_seq_len_step = kv_max_seq_len <= kSmallSeqLenThreshold
+                                          ? kSmallSeqLenStep
+                                          : kLargeSeqLenStep;
   const uint32_t bucket =
       ((kv_max_seq_len + graph_seq_len_step - 1) / graph_seq_len_step) *
       graph_seq_len_step;
