@@ -112,12 +112,6 @@ Dsv4KVCacheEstimateCost estimate_dsv4_kv_cache_cost(
 
 namespace {
 
-struct LinearAttentionCacheSizing {
-  int64_t conv_state_len = 0;
-  int64_t ssm_checkpoint_stride = 1;
-  int64_t slot_size = 0;
-};
-
 constexpr int32_t kNzAlignment = 16;
 
 int64_t kv_cache_dtype_size(const std::string& kv_cache_dtype,
@@ -189,37 +183,54 @@ bool enable_qwen3_5_spec_verify(const ModelArgs& model_args,
          is_qwen3_5_target_model_type(model_args.model_type());
 }
 
-LinearAttentionCacheSizing get_linear_attention_cache_sizing(
+int64_t qwen3_5_num_speculative_tokens(
     const ModelArgs& model_args,
-    const KVCacheEstimateOptions& options,
-    int64_t dtype_size) {
-  LinearAttentionCacheSizing sizing;
+    const KVCacheEstimateOptions& options) {
+  return enable_qwen3_5_spec_verify(model_args, options)
+             ? options.num_speculative_tokens
+             : 0;
+}
+
+int64_t linear_conv_state_len(const ModelArgs& model_args,
+                              const KVCacheEstimateOptions& options) {
   if (model_args.linear_num_value_heads() <= 0) {
-    return sizing;
+    return 0;
+  }
+  return model_args.linear_conv_kernel_dim() - 1 +
+         qwen3_5_num_speculative_tokens(model_args, options);
+}
+
+int64_t linear_ssm_checkpoint_stride(
+    const ModelArgs& model_args,
+    const KVCacheEstimateOptions& options) {
+  if (model_args.linear_num_value_heads() <= 0) {
+    return 1;
+  }
+  return qwen3_5_num_speculative_tokens(model_args, options) + 1;
+}
+
+int64_t linear_slot_size(const ModelArgs& model_args,
+                         const KVCacheEstimateOptions& options,
+                         int64_t dtype_size) {
+  if (model_args.linear_num_value_heads() <= 0) {
+    return 0;
   }
 
-  const int64_t num_speculative_tokens =
-      enable_qwen3_5_spec_verify(model_args, options)
-          ? options.num_speculative_tokens
-          : 0;
   const int64_t head_k_dim = model_args.linear_key_head_dim();
   const int64_t head_v_dim = model_args.linear_value_head_dim();
   const int64_t ssm_dtype_size =
       resolve_ssm_dtype_size(model_args.mamba_ssm_dtype(), dtype_size);
 
-  sizing.conv_state_len =
-      model_args.linear_conv_kernel_dim() - 1 + num_speculative_tokens;
-  sizing.ssm_checkpoint_stride = num_speculative_tokens + 1;
   const int64_t linear_ssm_slot_size =
       ssm_dtype_size * options.n_local_linear_v_heads * head_k_dim * head_v_dim;
   const int64_t linear_conv_slot_size =
       dtype_size *
       (head_k_dim * options.n_local_linear_k_heads * 2 +
        head_v_dim * options.n_local_linear_v_heads) *
-      sizing.conv_state_len;
-  sizing.slot_size = linear_conv_slot_size +
-                     linear_ssm_slot_size * sizing.ssm_checkpoint_stride;
-  return sizing;
+      linear_conv_state_len(model_args, options);
+  return linear_conv_slot_size +
+         linear_ssm_slot_size * linear_ssm_checkpoint_stride(model_args,
+                                                             options);
 }
 
 void init_dsv4_counts(const ModelArgs& model_args,
@@ -363,44 +374,6 @@ void init_standard_counts(const ModelArgs& model_args,
   CHECK_GT(kv_cache_cap->n_blocks(), 0) << "no n_blocks for kv cache";
 }
 
-class KVCacheEstimateStrategy {
- public:
-  virtual ~KVCacheEstimateStrategy() = default;
-  virtual void init_counts(const ModelArgs& model_args,
-                           const KVCacheEstimateOptions& options,
-                           KVCacheCapacity* kv_cache_cap) const = 0;
-};
-
-class StandardKVCacheEstimateStrategy final : public KVCacheEstimateStrategy {
- public:
-  void init_counts(const ModelArgs& model_args,
-                   const KVCacheEstimateOptions& options,
-                   KVCacheCapacity* kv_cache_cap) const override {
-    init_standard_counts(model_args, options, kv_cache_cap);
-  }
-};
-
-class Dsv4KVCacheEstimateStrategy final : public KVCacheEstimateStrategy {
- public:
-  void init_counts(const ModelArgs& model_args,
-                   const KVCacheEstimateOptions& options,
-                   KVCacheCapacity* kv_cache_cap) const override {
-    init_dsv4_counts(model_args, options, kv_cache_cap);
-  }
-};
-
-const KVCacheEstimateStrategy& select_kv_cache_estimate_strategy(
-    const ModelArgs& model_args) {
-  static const StandardKVCacheEstimateStrategy kStandardStrategy;
-  static const Dsv4KVCacheEstimateStrategy kDsv4Strategy;
-  if (util::is_target_model_type(model_args.model_type(),
-                                 /*target_type=*/"deepseek_v4",
-                                 /*match_mtp=*/true)) {
-    return kDsv4Strategy;
-  }
-  return kStandardStrategy;
-}
-
 }  // namespace
 
 KVCacheCapacity estimate_kv_cache_capacity(
@@ -424,15 +397,14 @@ KVCacheCapacity estimate_kv_cache_capacity(
       torch::scalarTypeToTypeMeta(options.dtype).itemsize());
   const int64_t cache_dtype_size =
       kv_cache_dtype_size(options.kv_cache_dtype, dtype_size);
-  const LinearAttentionCacheSizing linear_sizing =
-      get_linear_attention_cache_sizing(model_args, options, dtype_size);
 
   kv_cache_cap.slot_size(kv_slot_size(model_args, options, cache_dtype_size))
       .index_slot_size(index_slot_size(model_args, dtype_size))
       .scale_slot_size(scale_slot_size(model_args, options))
-      .linear_slot_size(linear_sizing.slot_size)
-      .linear_conv_state_len(linear_sizing.conv_state_len)
-      .linear_ssm_checkpoint_stride(linear_sizing.ssm_checkpoint_stride)
+      .linear_slot_size(linear_slot_size(model_args, options, dtype_size))
+      .linear_conv_state_len(linear_conv_state_len(model_args, options))
+      .linear_ssm_checkpoint_stride(
+          linear_ssm_checkpoint_stride(model_args, options))
       .n_layers(model_args.n_layers())
       .block_size(options.block_size);
 #if !defined(USE_NPU)
@@ -441,9 +413,13 @@ KVCacheCapacity estimate_kv_cache_capacity(
   }
 #endif
 
-  const KVCacheEstimateStrategy& strategy =
-      select_kv_cache_estimate_strategy(model_args);
-  strategy.init_counts(model_args, options, &kv_cache_cap);
+  if (util::is_target_model_type(model_args.model_type(),
+                                 /*target_type=*/"deepseek_v4",
+                                 /*match_mtp=*/true)) {
+    init_dsv4_counts(model_args, options, &kv_cache_cap);
+  } else {
+    init_standard_counts(model_args, options, &kv_cache_cap);
+  }
   return kv_cache_cap;
 }
 

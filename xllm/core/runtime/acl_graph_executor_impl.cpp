@@ -43,6 +43,12 @@ namespace {
 constexpr uint64_t kSpecVerifyGraphKeyMask = 1ull << 63;
 constexpr uint64_t kSpecVerifyQMaxSeqLenShift = 32;
 
+bool is_qwen3_5_model_type(const std::string& model_type) {
+  return model_type == "qwen3_5" || model_type == "qwen3_5_moe" ||
+         model_type == "qwen3_5_text" || model_type == "qwen3_5_moe_text" ||
+         model_type.rfind("qwen3_5_", 0) == 0;
+}
+
 std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
     const std::vector<KVCache>& kv_caches) {
   for (const auto& cache : kv_caches) {
@@ -312,9 +318,9 @@ AclGraphExecutorImpl::AclGraphExecutorImpl(CausalLM* model,
                                            const torch::Device& device,
                                            const runtime::Options& options)
     : model_(model), args_(args), device_(device), options_(options) {
-  // Create single persistent parameter object shared by all AclGraph instances
-  persistent_param_ =
-      std::make_unique<GraphPersistentParam>(args_, device_, options_);
+  const bool need_update_attn_mask = is_qwen3_5_model_type(args.model_type());
+  persistent_param_ = std::make_unique<GraphPersistentParam>(
+      args_, device_, options_, need_update_attn_mask);
 }
 
 ForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
@@ -337,19 +343,29 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   const ModelInputParams& params_single = params;
   const bool in_decoding_phase =
       params_single.meta.batch_forward_type.is_decode();
+  const bool in_spec_verify_phase =
+      params_single.is_spec_verify &&
+      params_single.meta.batch_forward_type.is_chunked_prefill();
   VLOG(50) << "in_decoding_phase: " << in_decoding_phase
+           << " in_spec_verify_phase: " << in_spec_verify_phase
            << " q_max_seq_len: " << params_single.meta.q_max_seq_len
            << " n_layers: " << args_.n_layers();
-  // If not in decode phase, use eager mode directly without acl graph
-  // TODO: fix mtp model support.
-  if (!in_decoding_phase || args_.n_layers() == 1) {
+  if ((!in_decoding_phase && !in_spec_verify_phase) || args_.n_layers() == 1) {
     VLOG(kGraphExecutorLogVerboseLevel)
         << "AclGraphExecutorImpl::run() in eager mode";
     COUNTER_INC(num_model_execution_total_eager);
     return model_->forward(tokens, positions, kv_caches, params);
   }
+  if (in_spec_verify_phase && !is_qwen3_5_model_type(args_.model_type())) {
+    LOG_FIRST_N(WARNING, 1)
+        << "Falling back to eager mode for spec verify because the "
+           "chunked-prefill validate graph path is currently only adapted for "
+           "Qwen3.5.";
+    COUNTER_INC(num_model_execution_total_eager);
+    return model_->forward(tokens, positions, kv_caches, params);
+  }
 
-  // Only use acl graph in decode phase for performance optimization.
+  // Only use acl graph in decode or qwen3.5 spec verify phase for optimization.
   // For DP, decode graph bucket should be based on global max tokens across DP
   // groups; local shard can be empty on some ranks.
   uint32_t graph_num_tokens = tokens_tensor.size(/*dim=*/0);
