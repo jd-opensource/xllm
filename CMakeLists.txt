@@ -324,19 +324,14 @@ endif()
 # before including libtorch, as doing so afterwards may lead to
 # unexpected linker errors.
 if(USE_DCU)
-  find_package(Python COMPONENTS Interpreter REQUIRED)
-  execute_process(
-    COMMAND ${Python_EXECUTABLE} -c "import torch; print(torch.utils.cmake_prefix_path)"
-    OUTPUT_VARIABLE TORCH_CMAKE_PREFIX
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
+  if(NOT DEFINED TORCH_CMAKE_PREFIX OR "${TORCH_CMAKE_PREFIX}" STREQUAL "")
+    message(FATAL_ERROR "TORCH_CMAKE_PREFIX is required for DCU build.")
+  endif()
   list(PREPEND CMAKE_PREFIX_PATH "${TORCH_CMAKE_PREFIX}")
 
-  execute_process(
-    COMMAND "${Python_EXECUTABLE}" -c "import os, torch; print(os.path.dirname(torch.__file__))"
-    OUTPUT_VARIABLE TORCH_PKG_DIR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-  )
+  if(NOT DEFINED TORCH_PKG_DIR OR "${TORCH_PKG_DIR}" STREQUAL "")
+    message(FATAL_ERROR "TORCH_PKG_DIR is required for DCU build.")
+  endif()
 
   set(TORCH_LIB_DIR "${TORCH_PKG_DIR}/lib")
   get_filename_component(_TORCH_PARENT "${TORCH_PKG_DIR}" DIRECTORY)

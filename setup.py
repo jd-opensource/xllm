@@ -33,6 +33,8 @@ from scripts.build_support.utils import (
     get_cpu_arch,
     get_device_type,
     get_python_version,
+    get_torch_cmake_prefix_path,
+    get_torch_package_dir,
     get_torch_version,
     get_version,
     pre_build,
@@ -114,7 +116,7 @@ def _stage_triton_npu_runtime_binaries(base_dir: str, extdir: str, device: str) 
         raise RuntimeError(
             f"No Triton NPU runtime binaries were found under: {source_dir}"
         )
-    print(f"[INFO] staged {copied_count} Triton NPU runtime asset(s) into {dest_dir}")
+    logger.info(f"Staged {copied_count} Triton NPU runtime asset(s) into {dest_dir}")
 
 class CMakeExtension(Extension):
     def __init__(self, name: str, path: str, sourcedir: str = "") -> None:
@@ -237,6 +239,8 @@ class ExtBuild(build_ext):
                 cmake_args += [
                     "-DUSE_DCU=ON",
                     f"-DROCM_PATH={os.getenv('DCU_PATH', '/opt/dtk')}",
+                    f"-DTORCH_CMAKE_PREFIX={get_torch_cmake_prefix_path()}",
+                    f"-DTORCH_PKG_DIR={get_torch_package_dir()}",
                 ]
                 if dcu_arch:
                     cmake_args += [f"-DCMAKE_HIP_ARCHITECTURES={dcu_arch}"]
@@ -323,7 +327,7 @@ class ExtBuild(build_ext):
                 os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"),
             )
         else:
-            print(f"Skip copying product because it was not built: {product_path}")
+            logger.warning(f"Skip copying product because it was not built: {product_path}")
 
         if BUILD_EXPORT:
             build_args = base_build_args + ["--target", "export_module"]
