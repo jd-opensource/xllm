@@ -325,6 +325,38 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     return model_->forward(tokens, positions, kv_caches, params);
   }
 
+  if (in_decoding_phase &&
+      params_single.parallel.dp_global_token_nums.size() > 1) {
+    if (params_single.parallel.dp_is_decode.size() !=
+        params_single.parallel.dp_global_token_nums.size()) {
+      LOG_FIRST_N(WARNING, 1)
+          << "Falling back to eager mode because dp_is_decode size ("
+          << params_single.parallel.dp_is_decode.size()
+          << ") does not match dp_global_token_nums size ("
+          << params_single.parallel.dp_global_token_nums.size()
+          << "); ACL graph decode requires valid DP forward metadata. "
+          << "dp_global_token_nums="
+          << params_single.parallel.dp_global_token_nums
+          << ", dp_is_decode=" << params_single.parallel.dp_is_decode;
+      COUNTER_INC(num_model_execution_total_eager);
+      return model_->forward(tokens, positions, kv_caches, params);
+    }
+
+    if (std::find(params_single.parallel.dp_is_decode.begin(),
+                  params_single.parallel.dp_is_decode.end(),
+                  0) != params_single.parallel.dp_is_decode.end()) {
+      LOG_FIRST_N(WARNING, 1)
+          << "Falling back to eager mode because not all DP ranks are in "
+             "decode phase; ACL graph decode requires all DP ranks to be "
+             "decode to avoid using prefill or chunked-prefill token counts "
+             "as graph bucket size. dp_global_token_nums="
+          << params_single.parallel.dp_global_token_nums
+          << ", dp_is_decode=" << params_single.parallel.dp_is_decode;
+      COUNTER_INC(num_model_execution_total_eager);
+      return model_->forward(tokens, positions, kv_caches, params);
+    }
+  }
+
   // Only use acl graph in decode phase for performance optimization
   // For DP, decode graph bucket should be based on global max tokens across dp
   // groups; local shard can be empty on some ranks.
