@@ -189,27 +189,27 @@ void FlashAttentionImpl::prefill_forward(const AttentionMetadata& attn_metadata,
   c10::optional<at::Tensor> cu_seqlens_k_opt = c10::nullopt;
   c10::optional<at::Tensor> alibi_opt = c10::nullopt;
 
-  std::vector<at::Tensor> result =
-      prefix_prefill_varlen_fwd(query,
-                                k_cache,
-                                v_cache,
-                                out_opt,
-                                cu_seqlens_q,
-                                cu_seqlens_k_opt,
-                                kv_seq_lens,
-                                alibi_opt,
-                                block_table,
-                                static_cast<int>(attn_metadata.max_query_len),
-                                static_cast<int>(attn_metadata.max_seq_len),
-                                0.0f,  // p_dropout
-                                scale_,
-                                false,  // zero_tensors
-                                attn_metadata.is_causal,
-                                sliding_window_,
-                                -1,     // window_size_left, window_size_right
-                                0.0f,   // softcap
-                                false,  // return_softmax
-                                1);     // layout = packed (BSHD)
+  std::vector<at::Tensor> result = prefix_prefill_varlen_fwd(
+      query,
+      k_cache,
+      v_cache,
+      out_opt,
+      cu_seqlens_q,
+      cu_seqlens_k_opt,
+      kv_seq_lens,
+      alibi_opt,
+      block_table,
+      /*max_seqlen_q=*/static_cast<int>(attn_metadata.max_query_len),
+      /*max_seqlen_k=*/static_cast<int>(attn_metadata.max_seq_len),
+      /*p_dropout=*/0.0f,
+      /*softmax_scale=*/scale_,
+      /*zero_tensors=*/false,
+      /*is_causal=*/attn_metadata.is_causal,
+      /*window_size_left=*/sliding_window_,
+      /*window_size_right=*/-1,
+      /*softcap=*/0.0f,
+      /*return_softmax=*/false,
+      /*layout=*/1);
 
   // Output is already packed [total_tokens, nh, hd], matching query shape.
   output.copy_(result[0]);
@@ -260,27 +260,27 @@ void FlashAttentionImpl::paged_forward(const AttentionMetadata& attn_metadata,
   c10::optional<at::Tensor> cu_seqlens_k_opt = c10::nullopt;
   c10::optional<at::Tensor> alibi_opt = c10::nullopt;
 
-  std::vector<at::Tensor> result = prefix_decode_varlen_fwd(
-      query,
-      k_cache,
-      v_cache,
-      out_opt,
-      cu_seqlens_q,
-      cu_seqlens_k_opt,
-      kv_seq_lens,
-      alibi_opt,
-      block_table,
-      max_q_len,
-      static_cast<int>(max_kv_len),
-      0.0f,  // p_dropout
-      scale_,
-      false,  // zero_tensors
-      attn_metadata.is_causal,
-      window_left,
-      window_right,  // window_size_left, window_size_right
-      0.0f,          // softcap
-      false,         // return_softmax
-      1);            // layout = packed (BSHD)
+  std::vector<at::Tensor> result =
+      prefix_decode_varlen_fwd(query,
+                               k_cache,
+                               v_cache,
+                               out_opt,
+                               cu_seqlens_q,
+                               cu_seqlens_k_opt,
+                               kv_seq_lens,
+                               alibi_opt,
+                               block_table,
+                               /*max_seqlen_q=*/max_q_len,
+                               /*max_seqlen_k=*/static_cast<int>(max_kv_len),
+                               /*p_dropout=*/0.0f,
+                               /*softmax_scale=*/scale_,
+                               /*zero_tensors=*/false,
+                               /*is_causal=*/attn_metadata.is_causal,
+                               /*window_size_left=*/window_left,
+                               /*window_size_right=*/window_right,
+                               /*softcap=*/0.0f,
+                               /*return_softmax=*/false,
+                               /*layout=*/1);
 
   // Output is already packed, matching query shape.
   output.copy_(result[0]);

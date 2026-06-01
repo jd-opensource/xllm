@@ -27,17 +27,13 @@ include(cc_library)
 #   - Environment variable: export FLASH_ATTENTION_LIB=/path/to/dir
 #   - CMake argument:       cmake -DFLASH_ATTENTION_LIB=/path/to/dir ...
 if(NOT TARGET flash_attention)
-  set(FLASH_ATTENTION_LIB
-      "$ENV{FLASH_ATTENTION_LIB}"
-      CACHE PATH "Directory containing libflash_attention.so")
-
   if(NOT FLASH_ATTENTION_LIB)
-    message(FATAL_ERROR
-      "FLASH_ATTENTION_LIB is not set.\n"
-      "  Option 1: export FLASH_ATTENTION_LIB=/path/to/dir\n"
-      "  Option 2: cmake -DFLASH_ATTENTION_LIB=/path/to/dir ...\n"
-      "The directory should contain libflash_attention.so.")
+    set(FLASH_ATTENTION_LIB "/opt/dtk/lib")
   endif()
+
+  set(FLASH_ATTENTION_LIB
+      "${FLASH_ATTENTION_LIB}"
+      CACHE PATH "Directory containing libflash_attention.so")
 
   find_library(
     _flash_attn_lib_path flash_attention

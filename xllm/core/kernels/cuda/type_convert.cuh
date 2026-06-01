@@ -56,9 +56,7 @@ class _typeConvert<float> {
   }
 };
 
-#if !defined(USE_DCU)
-
-#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12000)
+#if defined(USE_DCU) || (defined(CUDA_VERSION) && (CUDA_VERSION >= 12000))
 // CUDA < 12.0 runs into issues with packed type conversion
 template <>
 class _typeConvert<c10::Half> {
@@ -80,62 +78,9 @@ class _typeConvert<c10::Half> {
     return __float22half2_rn(x);
   }
 };
+#endif  // defined(USE_DCU) || CUDA_VERSION >= 12000
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
-// CUDA_ARCH < 800 does not have BF16 support
-// ROCm 7.0+ supports bfloat16
-template <>
-class _typeConvert<c10::BFloat16> {
- public:
-  static constexpr bool exists = true;
-  using hip_type = __nv_bfloat16;
-  using packed_hip_type = __nv_bfloat162;
-
-  __device__ static __forceinline__ float convert(hip_type x) {
-    return __bfloat162float(x);
-  }
-  __device__ static __forceinline__ float2 convert(packed_hip_type x) {
-    return __bfloat1622float2(x);
-  }
-  __device__ static __forceinline__ hip_type convert(float x) {
-    return __float2bfloat16(x);
-  }
-  __device__ static __forceinline__ packed_hip_type convert(float2 x) {
-    return __float22bfloat162_rn(x);
-  }
-};
-#endif  // defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
-#endif  // defined(CUDA_VERSION) && (CUDA_VERSION >= 12000)
-
-/* Vector helper to generate vectorized and packed FP16/BF16 ops
-   for appropriate specializations of fused_add_rms_norm_kernel.
-   Only functions that are necessary in that kernel are implemented.
-   Alignment to 16 bytes is required to use 128-bit global memory ops.
- */
-
-#else  // USE_DCU
-
-template <>
-class _typeConvert<c10::Half> {
- public:
-  static constexpr bool exists = true;
-  using hip_type = __half;
-  using packed_hip_type = __half2;
-
-  __device__ static __forceinline__ float convert(hip_type x) {
-    return __half2float(x);
-  }
-  __device__ static __forceinline__ float2 convert(packed_hip_type x) {
-    return __half22float2(x);
-  }
-  __device__ static __forceinline__ hip_type convert(float x) {
-    return __float2half_rn(x);
-  }
-  __device__ static __forceinline__ packed_hip_type convert(float2 x) {
-    return __float22half2_rn(x);
-  }
-};
-
+#if defined(USE_DCU)
 template <>
 class _typeConvert<c10::BFloat16> {
  public:
@@ -156,8 +101,37 @@ class _typeConvert<c10::BFloat16> {
     return __float22bfloat162_rn(x);
   }
 };
+#elif defined(CUDA_VERSION) && (CUDA_VERSION >= 12000) && \
+    defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
 
-#endif  // USE_DCU
+// CUDA_ARCH < 800 does not have BF16 support.
+template <>
+class _typeConvert<c10::BFloat16> {
+ public:
+  static constexpr bool exists = true;
+  using hip_type = __nv_bfloat16;
+  using packed_hip_type = __nv_bfloat162;
+
+  __device__ static __forceinline__ float convert(hip_type x) {
+    return __bfloat162float(x);
+  }
+  __device__ static __forceinline__ float2 convert(packed_hip_type x) {
+    return __bfloat1622float2(x);
+  }
+  __device__ static __forceinline__ hip_type convert(float x) {
+    return __float2bfloat16(x);
+  }
+  __device__ static __forceinline__ packed_hip_type convert(float2 x) {
+    return __float22bfloat162_rn(x);
+  }
+};
+#endif
+
+/* Vector helper to generate vectorized and packed FP16/BF16 ops
+   for appropriate specializations of fused_add_rms_norm_kernel.
+   Only functions that are necessary in that kernel are implemented.
+   Alignment to 16 bytes is required to use 128-bit global memory ops.
+ */
 
 template <typename scalar_t, int width>
 class alignas(16) _f16Vec {

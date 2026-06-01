@@ -208,7 +208,7 @@ std::optional<ModelInputParams> DcuGraphPersistentParam::update(
     CHECK(params_for_capture.has_value())
         << "params_for_capture should exist when return_capture_params=true";
 
-    params_for_capture->enable_cuda_graph = true;
+    params_for_capture->enable_graph = true;
     params_for_capture->attn_metadata = attn_metadata;
 
     params_for_capture->attention.device.q_seq_lens =
@@ -559,7 +559,7 @@ ModelInputParams DcuGraphPersistentParam::init_decode_params(
   update_decode_input_buffer(tokens, positions, params, padded_num_tokens);
 
   ModelInputParams decode_params = params;
-  decode_params.enable_cuda_graph = true;
+  decode_params.enable_graph = true;
   decode_params.attention.device.q_seq_lens = q_seq_lens(padded_num_tokens + 1);
   decode_params.attention.device.kv_seq_lens =
       kv_seq_lens(padded_num_tokens + 1);
