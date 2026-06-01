@@ -19,6 +19,8 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <cstdint>
+
 #include "framework/kv_cache/kv_cache.h"
 #include "kernels/dcu/attention_runner.h"
 #include "kernels/dcu/dcu_ops_api.h"
@@ -40,56 +42,56 @@ limitations under the License.
 //
 // prefix_prefill_varlen_fwd is used for the prefill phase.
 // Q may contain many tokens per sequence. Uses the general fwd kernel.
-std::vector<at::Tensor> prefix_prefill_varlen_fwd(
-    const at::Tensor& q,
-    const at::Tensor& k,
-    const at::Tensor& v,
-    c10::optional<at::Tensor>& out_,
-    const at::Tensor& cu_seqlens_q,
-    c10::optional<at::Tensor>& cu_seqlens_k,
-    at::Tensor& seqused_k,
-    c10::optional<at::Tensor>& alibi_slopes_,
-    at::Tensor& block_table,
-    const int max_seqlen_q,
-    const int max_seqlen_k,
+std::vector<torch::Tensor> prefix_prefill_varlen_fwd(
+    const torch::Tensor& q,
+    const torch::Tensor& k,
+    const torch::Tensor& v,
+    at::optional<torch::Tensor>& out_,
+    const torch::Tensor& cu_seqlens_q,
+    at::optional<torch::Tensor>& cu_seqlens_k,
+    torch::Tensor& seqused_k,
+    at::optional<torch::Tensor>& alibi_slopes_,
+    torch::Tensor& block_table,
+    const int32_t max_seqlen_q,
+    const int32_t max_seqlen_k,
     const float p_dropout,
     const float softmax_scale,
     const bool zero_tensors,
     const bool is_causal,
-    int window_size_left,
-    int window_size_right,
+    int32_t window_size_left,
+    int32_t window_size_right,
     const float softcap,
     const bool return_softmax,
-    const int layout,
-    c10::optional<at::Tensor> scales_q_ = c10::nullopt,
-    c10::optional<at::Tensor> scales_k_ = c10::nullopt,
-    c10::optional<at::Tensor> scales_v_ = c10::nullopt,
+    const int32_t layout,
+    at::optional<torch::Tensor> scales_q_ = c10::nullopt,
+    at::optional<torch::Tensor> scales_k_ = c10::nullopt,
+    at::optional<torch::Tensor> scales_v_ = c10::nullopt,
     const bool is_bf16_output = false);
 
 // prefix_decode_varlen_fwd is used for the decode phase and chunked prefill.
 // Q is typically short (often 1 token per sequence). Uses the KV-cache kernel
 // with GQA to MQA ngroups optimization and split parallelism for small batches.
-std::vector<at::Tensor> prefix_decode_varlen_fwd(
-    at::Tensor& q,
-    const at::Tensor& k,
-    const at::Tensor& v,
-    c10::optional<at::Tensor>& out_,
-    const at::Tensor& cu_seqlens_q,
-    c10::optional<at::Tensor>& cu_seqlens_k,
-    at::Tensor& seqused_k,
-    c10::optional<at::Tensor>& alibi_slopes_,
-    at::Tensor& block_table,
-    const int max_seqlen_q,
-    const int max_seqlen_k,
+std::vector<torch::Tensor> prefix_decode_varlen_fwd(
+    torch::Tensor& q,
+    const torch::Tensor& k,
+    const torch::Tensor& v,
+    at::optional<torch::Tensor>& out_,
+    const torch::Tensor& cu_seqlens_q,
+    at::optional<torch::Tensor>& cu_seqlens_k,
+    torch::Tensor& seqused_k,
+    at::optional<torch::Tensor>& alibi_slopes_,
+    torch::Tensor& block_table,
+    const int32_t max_seqlen_q,
+    const int32_t max_seqlen_k,
     const float p_dropout,
     const float softmax_scale,
     const bool zero_tensors,
     const bool is_causal,
-    int window_size_left,
-    int window_size_right,
+    int32_t window_size_left,
+    int32_t window_size_right,
     const float softcap,
     const bool return_softmax,
-    const int layout);
+    const int32_t layout);
 
 namespace xllm {
 namespace layer {
@@ -185,11 +187,11 @@ void FlashAttentionImpl::prefill_forward(const AttentionMetadata& attn_metadata,
   torch::Tensor cu_seqlens_q =
       attn_metadata.q_cu_seq_lens.to(torch::kInt32).contiguous();
 
-  c10::optional<at::Tensor> out_opt = c10::nullopt;
-  c10::optional<at::Tensor> cu_seqlens_k_opt = c10::nullopt;
-  c10::optional<at::Tensor> alibi_opt = c10::nullopt;
+  at::optional<torch::Tensor> out_opt = c10::nullopt;
+  at::optional<torch::Tensor> cu_seqlens_k_opt = c10::nullopt;
+  at::optional<torch::Tensor> alibi_opt = c10::nullopt;
 
-  std::vector<at::Tensor> result = prefix_prefill_varlen_fwd(
+  std::vector<torch::Tensor> result = prefix_prefill_varlen_fwd(
       query,
       k_cache,
       v_cache,
@@ -199,8 +201,8 @@ void FlashAttentionImpl::prefill_forward(const AttentionMetadata& attn_metadata,
       kv_seq_lens,
       alibi_opt,
       block_table,
-      /*max_seqlen_q=*/static_cast<int>(attn_metadata.max_query_len),
-      /*max_seqlen_k=*/static_cast<int>(attn_metadata.max_seq_len),
+      /*max_seqlen_q=*/static_cast<int32_t>(attn_metadata.max_query_len),
+      /*max_seqlen_k=*/static_cast<int32_t>(attn_metadata.max_seq_len),
       /*p_dropout=*/0.0f,
       /*softmax_scale=*/scale_,
       /*zero_tensors=*/false,
@@ -233,10 +235,10 @@ void FlashAttentionImpl::paged_forward(const AttentionMetadata& attn_metadata,
   // [0, 1, 2, ..., B].
   // For chunked prefill, Q is packed [total_tokens, nh, hd] from q_cu_seq_lens.
   torch::Tensor cu_seqlens_q;
-  int max_q_len;
+  int64_t max_q_len;
   if (is_chunked_prefill) {
     cu_seqlens_q = attn_metadata.q_cu_seq_lens.to(torch::kInt32).contiguous();
-    max_q_len = static_cast<int>(attn_metadata.max_query_len);
+    max_q_len = attn_metadata.max_query_len;
   } else {
     cu_seqlens_q = torch::arange(
         0,
@@ -252,35 +254,34 @@ void FlashAttentionImpl::paged_forward(const AttentionMetadata& attn_metadata,
   //   - window_right = 0 with window_left < 0 produces is_causal = true
   // The "both negative" special case (line 3621 of flash_api.cpp) skips causal
   // entirely, so we must ensure window_right is not negative for causal decode.
-  int window_left =
-      sliding_window_ > 0 ? static_cast<int>(sliding_window_) : -1;
-  int window_right = attn_metadata.is_causal ? 0 : -1;
+  int64_t window_left = sliding_window_ > 0 ? sliding_window_ : -1;
+  int64_t window_right = attn_metadata.is_causal ? 0 : -1;
 
-  c10::optional<at::Tensor> out_opt = c10::nullopt;
-  c10::optional<at::Tensor> cu_seqlens_k_opt = c10::nullopt;
-  c10::optional<at::Tensor> alibi_opt = c10::nullopt;
+  at::optional<torch::Tensor> out_opt = c10::nullopt;
+  at::optional<torch::Tensor> cu_seqlens_k_opt = c10::nullopt;
+  at::optional<torch::Tensor> alibi_opt = c10::nullopt;
 
-  std::vector<at::Tensor> result =
-      prefix_decode_varlen_fwd(query,
-                               k_cache,
-                               v_cache,
-                               out_opt,
-                               cu_seqlens_q,
-                               cu_seqlens_k_opt,
-                               kv_seq_lens,
-                               alibi_opt,
-                               block_table,
-                               /*max_seqlen_q=*/max_q_len,
-                               /*max_seqlen_k=*/static_cast<int>(max_kv_len),
-                               /*p_dropout=*/0.0f,
-                               /*softmax_scale=*/scale_,
-                               /*zero_tensors=*/false,
-                               /*is_causal=*/attn_metadata.is_causal,
-                               /*window_size_left=*/window_left,
-                               /*window_size_right=*/window_right,
-                               /*softcap=*/0.0f,
-                               /*return_softmax=*/false,
-                               /*layout=*/1);
+  std::vector<torch::Tensor> result = prefix_decode_varlen_fwd(
+      query,
+      k_cache,
+      v_cache,
+      out_opt,
+      cu_seqlens_q,
+      cu_seqlens_k_opt,
+      kv_seq_lens,
+      alibi_opt,
+      block_table,
+      /*max_seqlen_q=*/static_cast<int32_t>(max_q_len),
+      /*max_seqlen_k=*/static_cast<int32_t>(max_kv_len),
+      /*p_dropout=*/0.0f,
+      /*softmax_scale=*/scale_,
+      /*zero_tensors=*/false,
+      /*is_causal=*/attn_metadata.is_causal,
+      /*window_size_left=*/static_cast<int32_t>(window_left),
+      /*window_size_right=*/static_cast<int32_t>(window_right),
+      /*softcap=*/0.0f,
+      /*return_softmax=*/false,
+      /*layout=*/1);
 
   // Output is already packed, matching query shape.
   output.copy_(result[0]);
@@ -293,7 +294,7 @@ FlashAttentionImpl::forward(const AttentionMetadata& attn_metadata,
                             torch::Tensor& value,
                             torch::Tensor& output,
                             KVCache& kv_cache) {
-  std::optional<at::Tensor> output_lse = std::nullopt;
+  std::optional<torch::Tensor> output_lse = std::nullopt;
 
   if (attn_metadata.max_seq_len == 0) {
     output = output.view({-1, num_heads_ * head_size_});
