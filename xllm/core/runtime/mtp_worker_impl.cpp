@@ -326,6 +326,13 @@ std::tuple<int64_t, int64_t> MTPWorkerImpl::estimate_kv_cache_capacity() {
 
   const ModelArgs& target_model_args = impl_->context_.get_model_args();
   const ModelArgs& draft_model_args = draft_impl_->context_.get_model_args();
+  if (!util::is_target_model_type(target_model_args.model_type(),
+                                  /*target_model_type=*/"deepseek_v4",
+                                  /*match_mtp=*/true)) {
+    return {cache_size_in_bytes, total_memory};
+  }
+
+  // use for DSv4
   KVCacheEstimateOptions target_options =
       make_kv_cache_estimate_options(target_model_args,
                                      MTPTargetOptions(options_),

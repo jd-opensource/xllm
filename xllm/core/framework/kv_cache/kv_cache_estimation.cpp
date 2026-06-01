@@ -386,10 +386,12 @@ KVCacheCapacity estimate_kv_cache_capacity(
       .block_size(options.block_size);
   CHECK_GT(kv_cache_cap.cache_size_in_bytes(), 0)
       << "Available kv cache size must be greater than 0";
+  const bool enable_dsv4_estimation = util::is_target_model_type(
+      model_args.model_type(),
+      /*target_type=*/"deepseek_v4",
+      /*match_mtp=*/true);
   if (options.draft_model_args != nullptr) {
-    CHECK(util::is_target_model_type(model_args.model_type(),
-                                     /*target_type=*/"deepseek_v4",
-                                     /*match_mtp=*/true))
+    CHECK(enable_dsv4_estimation)
         << "DSV4 MTP kv cache estimation only supports DeepSeek V4 target";
   }
 
@@ -414,9 +416,7 @@ KVCacheCapacity estimate_kv_cache_capacity(
   }
 #endif
 
-  if (util::is_target_model_type(model_args.model_type(),
-                                 /*target_type=*/"deepseek_v4",
-                                 /*match_mtp=*/true)) {
+  if (enable_dsv4_estimation) {
     init_dsv4_counts(model_args, options, &kv_cache_cap);
   } else {
     init_standard_counts(model_args, options, &kv_cache_cap);

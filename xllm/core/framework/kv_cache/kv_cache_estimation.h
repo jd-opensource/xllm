@@ -54,10 +54,6 @@ struct Dsv4KVCacheEstimateCost {
   int64_t manager_blocks_per_unit = 1;
 };
 
-Dsv4KVCacheEstimateCost estimate_dsv4_kv_cache_cost(
-    const ModelArgs& model_args,
-    const KVCacheEstimateOptions& options);
-
 KVCacheCapacity estimate_kv_cache_capacity(
     const ModelArgs& model_args,
     const KVCacheEstimateOptions& options);
