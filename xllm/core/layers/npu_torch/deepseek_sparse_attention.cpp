@@ -608,13 +608,10 @@ DSAttentionImpl::forward(const DSAMetadata& attn_metadata,
                          KVState& kv_state,
                          bool is_prefill,
                          bool is_chunked_prefill,
-                         std::string layer_name,
                          const std::tuple<torch::Tensor,
                                           torch::Tensor,
                                           torch::Tensor,
                                           torch::Tensor>& compress_metadata) {
-  (void)layer_name;
-
   auto [c1_metadata, c4_metadata, c128_metadata, qli_metadata] =
       compress_metadata;
   auto cos = attn_metadata.cos;

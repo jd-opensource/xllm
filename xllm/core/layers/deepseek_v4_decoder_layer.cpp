@@ -163,7 +163,6 @@ torch::Tensor DeepseekV4DecoderLayerImpl::forward(
                           kv_state,
                           attn_metadata.is_prefill,
                           attn_metadata.is_chunked_prefill,
-                          std::to_string(dsa.layer_id),
                           compress_metadata);
   (void)attn_lse;
   attn_input = attn_output;
