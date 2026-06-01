@@ -23,6 +23,7 @@ limitations under the License.
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -353,20 +354,20 @@ class DeepseekV4MtpModelImpl final : public torch::nn::Module {
   }
 
  private:
-  static c10::optional<torch::Tensor> as_optional_tensor(
+  static std::optional<torch::Tensor> as_optional_tensor(
       const torch::Tensor& tensor) {
     if (tensor.defined() && tensor.numel() > 0) {
-      return c10::optional<torch::Tensor>(tensor);
+      return std::optional<torch::Tensor>(tensor);
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
-  static c10::optional<torch::Tensor> as_empty_int32_tensor(
+  static std::optional<torch::Tensor> as_empty_int32_tensor(
       const torch::Tensor& reference) {
     if (!reference.defined()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
-    return c10::optional<torch::Tensor>(torch::empty(
+    return std::optional<torch::Tensor>(torch::empty(
         {0}, torch::dtype(torch::kInt32).device(reference.device())));
   }
 
