@@ -126,6 +126,31 @@ class ScopedAtenLoadThreads {
   bool active_ = false;
 };
 
+void move_tensor_to_device_if_needed(torch::Tensor& tensor,
+                                     const torch::Device& device) {
+  if (tensor.defined() && tensor.device() != device) {
+    tensor = tensor.to(device, /*non_blocking=*/false).contiguous();
+  }
+}
+
+// ForwardInput::to(device) returns early when device_tensors_ready is set.
+// Nested step_async (e.g. MTP target/draft) can leave CP-remapped control
+// tensors on CPU while model tensors are already on NPU.
+void ensure_forward_input_device_tensors(ForwardInput& input,
+                                         const torch::Device& device) {
+  move_tensor_to_device_if_needed(input.token_ids, device);
+  move_tensor_to_device_if_needed(input.positions, device);
+  move_tensor_to_device_if_needed(
+      input.input_params.embedding.mtp_shifted_token_ids, device);
+  move_tensor_to_device_if_needed(input.sampling_params.selected_token_idxes,
+                                  device);
+  move_tensor_to_device_if_needed(input.sampling_params.sample_idxes, device);
+  move_tensor_to_device_if_needed(
+      input.decoder_sampling_params.selected_token_idxes, device);
+  move_tensor_to_device_if_needed(input.decoder_sampling_params.sample_idxes,
+                                  device);
+}
+
 #if defined(USE_NPU)
 void prepare_input_params_for_linear_attention(ModelInputParams& input_params) {
   const std::vector<int32_t>& host_q_seq_lens =
@@ -528,13 +553,17 @@ torch::Tensor WorkerImpl::recompute_new_cache_slots(const ForwardInput& input) {
 
   torch::Tensor new_cache_slots = torch::full_like(old_cache_slots, -1);
   if (valid_indices.numel() > 0) {
+    const torch::Device slots_device = old_cache_slots.device();
+    torch::Tensor valid_indices_on_device =
+        valid_indices.to(slots_device, /*non_blocking=*/false);
     torch::Tensor old_slotid =
-        old_cache_slots.index_select(0, valid_indices).to(torch::kInt);
+        old_cache_slots.index_select(0, valid_indices_on_device)
+            .to(torch::kInt);
     torch::Tensor block_id = torch::floor_divide(old_slotid, block_size_total);
     torch::Tensor block_offset_mod = old_slotid % options_.block_size();
     torch::Tensor new_slotid =
         block_id * options_.block_size() + block_offset_mod;
-    new_cache_slots.index_put_({valid_indices},
+    new_cache_slots.index_put_({valid_indices_on_device},
                                new_slotid.to(new_cache_slots.scalar_type()));
   }
   return new_cache_slots;
@@ -704,16 +733,28 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
       needs_cp_prefill_side ? *cp_input : input;
 
 #if defined(USE_NPU)
-  const bool needs_kv_split_prep =
-      needs_cp_prefill_side && util::enable_kvcache_split();
+  // recompute_new_cache_slots / compute_in_prefix_slots are CP prefill-side
+  // prepares that must run EXACTLY ONCE, on the first (outer) pass that owns
+  // the partition. They both remap slots from the BlockManager logical space
+  // (stride block_size * kv_split_size) into this rank's local physical space,
+  // an operation that is NOT idempotent for kv_split_size > 1. Nested MTP
+  // target/draft sub-workers re-enter prepare_work_before_execute on the
+  // already-partitioned input (cp_partitioned == true) whose new_cache_slots
+  // were already remapped by the outer pass; recomputing again would double
+  // remap and corrupt the KV slots. Gate on !input.cp_partitioned just like
+  // prepare_cp_prefill_inputs below.
+  const bool needs_kv_split_prep = needs_cp_prefill_side &&
+                                   !input.cp_partitioned &&
+                                   util::enable_kvcache_split();
   const bool have_prefix_slots =
-      needs_cp_prefill_side &&
+      needs_cp_prefill_side && !input.cp_partitioned &&
       (::xllm::KVCacheConfig::get_instance().enable_prefix_cache() ||
        ::xllm::SchedulerConfig::get_instance().enable_chunked_prefill());
 #endif
 
   auto prepare_device_on_stream = [&]() {
     processed_input = prep_for_device.to(device_, dtype_);
+    ensure_forward_input_device_tensors(processed_input, device_);
 
 #if defined(USE_NPU)
     CpPrefillInputs tmp_cp_inputs;

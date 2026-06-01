@@ -176,6 +176,15 @@ struct SampleOutput {
   // [num_seq, ..., embed_dim] FloatTensor
   torch::Tensor embeddings;
 
+  // Per-sequence selected target hidden states for speculative decoding. Under
+  // context parallelism the prefill `embeddings` above holds the full LOCAL
+  // hidden shard (rows = local token count) for the draft input_embedding,
+  // whose rows cannot be indexed by the CP all-gather-space selected indices.
+  // This field carries the already-gathered per-sequence hidden (rows =
+  // num_seq) produced by the LmHead, so the embedding cache can store it
+  // directly without re-selecting. Only set on the CP target prefill path.
+  torch::Tensor selected_embeddings;
+
   // each element is a FloatTensor
   std::vector<torch::Tensor> mm_embeddings;
 };

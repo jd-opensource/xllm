@@ -174,11 +174,18 @@ void cp_partition_inplace(ForwardInput& input,
   old_seq_offsets.reserve(num_sequences + 1);
   old_seq_offsets.push_back(0);
 
+  // Per-sequence chunk length used by the token gather below. The
+  // selected_token_idxes remap MUST reuse the exact same chunk lengths so its
+  // per-rank token layout matches the gathered / CP all-gather hidden states.
+  std::vector<int64_t> seq_chunk_lens;
+  seq_chunk_lens.reserve(num_sequences);
+
   for (int32_t seq_idx = 0; seq_idx < num_sequences; ++seq_idx) {
     const int32_t input_len = std::max(0, input_lens[seq_idx]);
     const int64_t seq_start = old_seq_offsets.back();
     const int64_t chunk_len =
         (input_len + num_chunks - 1) / static_cast<int64_t>(num_chunks);
+    seq_chunk_lens.push_back(chunk_len);
 
     auto range_len = [&](int64_t local_start, int64_t local_end) -> int64_t {
       local_start = std::max<int64_t>(0, local_start);
@@ -262,9 +269,24 @@ void cp_partition_inplace(ForwardInput& input,
     const int64_t selected_num = selected_cpu.numel();
 
     const int64_t num_chunks_i64 = static_cast<int64_t>(cp_size) * 2;
-    std::vector<int64_t> seq_context_lens(num_sequences, 0);
-    std::vector<int64_t> selected_seq_idx(selected_num, 0);
 
+    // Build the per-rank token layout from `seq_chunk_lens` (the padded
+    // q_seq_len based chunk sizes used by the token gather), NOT from the
+    // selected token positions. Deriving chunk_len from the selected positions
+    // assigned chunk_len=1 to sequences without a selected token, which made
+    // token_num_per_rank / seq_prefix_per_rank diverge from the gathered and
+    // CP all-gather hidden-states layout and produced out-of-range
+    // selected_token_idxes in the draft LmHead gather.
+    std::vector<int64_t> seq_prefix_per_rank(num_sequences, 0);
+    int64_t token_num_per_rank = 0;
+    for (int32_t seq_idx = 0; seq_idx < num_sequences; ++seq_idx) {
+      seq_prefix_per_rank[seq_idx] = token_num_per_rank;
+      token_num_per_rank +=
+          (seq_chunk_lens[seq_idx] * num_chunks_i64) / cp_size;
+    }
+
+    std::vector<int32_t> remapped;
+    remapped.reserve(selected_num);
     for (int64_t i = 0; i < selected_num; ++i) {
       const int64_t old_idx = static_cast<int64_t>(selected_data[i]);
       auto upper = std::upper_bound(
@@ -274,42 +296,15 @@ void cp_partition_inplace(ForwardInput& input,
       seq_idx = std::max<int64_t>(
           0,
           std::min<int64_t>(seq_idx, static_cast<int64_t>(num_sequences) - 1));
-      selected_seq_idx[i] = seq_idx;
 
       const int64_t seq_start = old_seq_offsets[seq_idx];
-      const int64_t seq_end = old_seq_offsets[seq_idx + 1];
-      const int64_t seq_len = std::max<int64_t>(0, seq_end - seq_start);
-      const int64_t context_len = std::max<int64_t>(
-          1, std::min<int64_t>(old_idx - seq_start + 1, seq_len));
-      seq_context_lens[seq_idx] =
-          std::max(seq_context_lens[seq_idx], context_len);
-    }
-
-    std::vector<int64_t> chunk_lens(num_sequences, 1);
-    std::vector<int64_t> seq_prefix_per_rank(num_sequences, 0);
-    int64_t token_num_per_rank = 0;
-
-    for (int32_t seq_idx = 0; seq_idx < num_sequences; ++seq_idx) {
-      int64_t chunk_len =
-          (seq_context_lens[seq_idx] + num_chunks_i64 - 1) / num_chunks_i64;
-      chunk_len = std::max<int64_t>(1, chunk_len);
-      chunk_lens[seq_idx] = chunk_len;
-      seq_prefix_per_rank[seq_idx] = token_num_per_rank;
-      token_num_per_rank += (chunk_len * num_chunks_i64) / cp_size;
-    }
-
-    std::vector<int32_t> remapped;
-    remapped.reserve(selected_num);
-    for (int64_t i = 0; i < selected_num; ++i) {
-      const int64_t old_idx = static_cast<int64_t>(selected_data[i]);
-      const int64_t seq_idx = selected_seq_idx[i];
-      const int64_t seq_start = old_seq_offsets[seq_idx];
-      const int64_t seq_context_len = seq_context_lens[seq_idx];
-      const int64_t chunk_len = chunk_lens[seq_idx];
+      const int64_t seq_len =
+          std::max<int64_t>(0, old_seq_offsets[seq_idx + 1] - seq_start);
+      const int64_t chunk_len = std::max<int64_t>(1, seq_chunk_lens[seq_idx]);
 
       int64_t token_pos = old_idx - seq_start;
-      token_pos = std::max<int64_t>(
-          0, std::min<int64_t>(token_pos, seq_context_len - 1));
+      token_pos =
+          std::max<int64_t>(0, std::min<int64_t>(token_pos, seq_len - 1));
       const int64_t chunk_id = token_pos / chunk_len;
       const int64_t offset = token_pos % chunk_len;
       const int64_t rank_id =

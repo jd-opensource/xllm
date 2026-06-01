@@ -143,13 +143,20 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   torch::Tensor logits;
   torch::Tensor selected_hidden_from_lm_head;
   if (sampling_params.selected_token_idxes.defined()) {
+    torch::Tensor selected_token_idxes = sampling_params.selected_token_idxes;
+    if (model_output.hidden_states.defined() &&
+        selected_token_idxes.device() != model_output.hidden_states.device()) {
+      selected_token_idxes = selected_token_idxes
+                                 .to(model_output.hidden_states.device(),
+                                     /*non_blocking=*/false)
+                                 .contiguous();
+    }
     if (options_.cp_size() > 1) {
       logits = model_->logits(model_output.hidden_states,
-                              sampling_params.selected_token_idxes,
+                              selected_token_idxes,
                               selected_hidden_from_lm_head);
     } else {
-      logits = model_->logits(model_output.hidden_states,
-                              sampling_params.selected_token_idxes);
+      logits = model_->logits(model_output.hidden_states, selected_token_idxes);
     }
   }
 
@@ -222,7 +229,16 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     }
     if (!input.input_params.meta.batch_forward_type.is_decode() &&
         !is_spec_draft_) {
+      // Target prefill keeps the full hidden in `embeddings` for the draft
+      // input_embedding. Under CP this is the LOCAL token shard, whose rows
+      // cannot be indexed by the CP all-gather-space selected_token_idxes.
+      // Expose the LmHead-gathered per-sequence hidden (rows = num_seq)
+      // separately so the embedding cache stores it without re-selecting on
+      // the local shard.
       output.sample_output.embeddings = embeddings;
+      if (options_.cp_size() > 1 && selected_hidden_from_lm_head.defined()) {
+        output.sample_output.selected_embeddings = selected_hidden_from_lm_head;
+      }
     } else if (sampling_params.selected_token_idxes.defined()) {
       if (options_.cp_size() > 1) {
         CHECK(selected_hidden_from_lm_head.defined())

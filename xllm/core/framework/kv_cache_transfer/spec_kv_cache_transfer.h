@@ -79,11 +79,6 @@ class SpecKVCacheTransfer : public LlmDataDistTransfer {
       int32_t kv_split_rank = 0,
       int32_t kv_split_size = 1);
 
-  void merge_kv_blocks(
-      std::unordered_map<std::string, KVCacheInfo>& merged_kv_infos,
-      const std::vector<TransferKVInfo>& transfer_kv_infos,
-      const ParallelArgs& parallel_args) override;
-
  private:
   LayerRegisteredCaches spec_layer_registered_caches_;
 };
