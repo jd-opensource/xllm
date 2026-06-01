@@ -43,11 +43,6 @@ namespace {
 constexpr uint64_t kSpecVerifyGraphKeyMask = 1ull << 63;
 constexpr uint64_t kSpecVerifyQMaxSeqLenShift = 32;
 
-bool is_qwen3_5_model_type(const std::string& model_type) {
-  return model_type == "qwen3_5" || model_type == "qwen3_5_moe" ||
-         model_type == "qwen3_5_text" || model_type.rfind("qwen3_5_", 0) == 0;
-}
-
 std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
     const std::vector<KVCache>& kv_caches) {
   for (const auto& cache : kv_caches) {
@@ -59,6 +54,11 @@ std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
     }
   }
   return {torch::Tensor(), torch::Tensor()};
+}
+
+bool is_qwen3_5_model_type(const std::string& model_type) {
+  return model_type == "qwen3_5" || model_type == "qwen3_5_moe" ||
+         model_type == "qwen3_5_text" || model_type.rfind("qwen3_5_", 0) == 0;
 }
 
 }  // namespace
@@ -223,8 +223,7 @@ void AclGraph::prepare_model_graph_metadata(CausalLM* model,
   if (!model_graph_metadata_state_) {
     model_graph_metadata_state_ = model->create_graph_forward_metadata_state();
     CHECK(model_graph_metadata_state_)
-        << "model requires graph forward metadata but did not create state";
-  }
+        << "ACL graph metadata state must be initialized during capture";}
   model->prepare_graph_forward_metadata(
       model_graph_metadata_state_.get(), positions, params);
   CHECK(params.attn_metadata)
@@ -258,8 +257,7 @@ ModelOutput AclGraph::replay(CausalLM* model,
                                needs_graph_metadata);
   if (needs_graph_metadata) {
     CHECK(graph_params.has_value())
-        << "update() should return ModelInputParams when graph metadata is "
-           "required";
+        << "ACL graph replay requires persistent params for graph metadata";
     prepare_model_graph_metadata(
         model,
         persistent_param_.persistent_positions(num_tokens_),
