@@ -138,11 +138,6 @@ tilelang_register_runtime_kernel(
   WRAPPER_SRCS split_qkv_rmsnorm_mrope_wrapper.cpp
 )
 
-tilelang_register_runtime_kernel(
-  NAME chunk_gated_delta_rule_fwd_h
-  WRAPPER_SRCS chunk_gated_delta_rule_fwd_h_wrapper.cpp
-)
-
 cc_library(
   NAME
     tilelang_kernels
@@ -204,18 +199,6 @@ cc_test(
     split_qkv_rmsnorm_mrope_wrapper_test
   SRCS
     split_qkv_rmsnorm_mrope_wrapper_test.cpp
-  DEPS
-    :tilelang_kernels
-    torch
-    GTest::gtest_main
-    glog::glog
-)
-
-cc_test(
-  NAME
-    chunk_gated_delta_rule_fwd_h_wrapper_test
-  SRCS
-    chunk_gated_delta_rule_fwd_h_wrapper_test.cpp
   DEPS
     :tilelang_kernels
     torch
