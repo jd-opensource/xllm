@@ -315,9 +315,14 @@ void SpeculativeWorkerImpl::prepare_work_before_execute(
 
 folly::SemiFuture<std::optional<ForwardOutput>>
 SpeculativeWorkerImpl::step_async(const ForwardInput& input) {
+  ForwardInput input_on_device;
+  prepare_work_before_execute(input, input_on_device);
+
   folly::Promise<std::optional<ForwardOutput>> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule([this, input, promise = std::move(promise)]() mutable {
+  threadpool_.schedule([this,
+                        input = std::move(input_on_device),
+                        promise = std::move(promise)]() mutable {
     ForwardInput step_input = input;
     if (enable_schedule_overlap() && last_step_output_valid_ &&
         step_input.token_ids.numel() > 0 &&

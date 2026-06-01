@@ -567,7 +567,8 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
       }
     }
 
-    if (has_linear_attention_layers(context_.get_model_args())) {
+    if (has_linear_attention_layers(context_.get_model_args()) &&
+        linear_state_checkpoint_mgr_ != nullptr) {
       prepare_input_params_for_linear_attention(processed_input.input_params);
       linear_state_checkpoint_mgr_->evict(
           processed_input.input_params.linear_state_evict_prefix_hashes);
