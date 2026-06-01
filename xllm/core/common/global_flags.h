@@ -41,6 +41,8 @@ DECLARE_string(task);
 
 DECLARE_string(devices);
 
+DECLARE_int32(device_id);
+
 DECLARE_int32(limit_image_per_prompt);
 
 // --- kvcache config ---

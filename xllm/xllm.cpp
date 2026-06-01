@@ -484,9 +484,8 @@ int main(int argc, char** argv) {
   FLAGS_alsologtostderr = true;
   FLAGS_minloglevel = 0;
   google::ParseCommandLineFlags(&argc, &argv, true);
-  initialize_configs();
-
   google::InitGoogleLogging("xllm");
+  initialize_configs();
 
   // Check if model path is provided
   if (::xllm::ModelConfig::get_instance().model().empty()) {

@@ -20,23 +20,32 @@ limitations under the License.
 #include <absl/strings/str_split.h>
 #include <glog/logging.h>
 
+#include <cstdint>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
 #include "platform/device.h"
 
 namespace xllm {
+
+std::string DeviceNameUtils::to_device_string(int32_t device_id) {
+  return Device::type_str() + ":" + std::to_string(device_id);
+}
 
 std::vector<torch::Device> DeviceNameUtils::parse_devices(
     const std::string& device_str) {
   std::vector<torch::Device> devices;
   if (device_str == "auto" || device_str.empty()) {
     // use all available devices if any
-    const auto num_devices = Device::device_count();
+    const int32_t num_devices = static_cast<int32_t>(Device::device_count());
     if (num_devices == 0) {
       LOG(INFO) << "no devices found, using cpu.";
       return {torch::kCPU};
     }
     devices.reserve(num_devices);
-    for (int i = 0; i < num_devices; ++i) {
-      std::string device_name = Device::type_str() + ":" + std::to_string(i);
+    for (int32_t i = 0; i < num_devices; ++i) {
+      std::string device_name = to_device_string(i);
       devices.emplace_back(torch::Device(device_name));
     }
     return devices;
@@ -52,7 +61,7 @@ std::vector<torch::Device> DeviceNameUtils::parse_devices(
     CHECK(parts[0] == Device::type_str())
         << "Unsupported device type: " << parts[0];
 
-    int device_index;
+    int32_t device_index = 0;
     CHECK(absl::SimpleAtoi(parts[1], &device_index))
         << "Invalid device index: " << parts[1];
 

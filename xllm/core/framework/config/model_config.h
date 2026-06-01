@@ -46,6 +46,7 @@ class ModelConfig final {
          "model",
          "backend",
          "task",
+         "device_id",
          "devices",
          "limit_image_per_prompt",
          "max_encoder_cache_size",
@@ -67,7 +68,9 @@ class ModelConfig final {
 
   PROPERTY(std::string, task) = "generate";
 
-  PROPERTY(std::string, devices) = "npu:0";
+  PROPERTY(int32_t, device_id) = -1;
+
+  PROPERTY(std::string, devices) = "";
 
   PROPERTY(int32_t, limit_image_per_prompt) = 8;
 

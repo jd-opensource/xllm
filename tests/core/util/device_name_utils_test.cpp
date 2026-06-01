@@ -1,5 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
-Copyright 2024 The ScaleLLM Authors. All Rights Reserved.
+/* Copyright 2026 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,37 +13,32 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#pragma once
+#include "core/util/device_name_utils.h"
 
-#include <torch/torch.h>
+#include <gtest/gtest.h>
 
-#include <cstdint>
-#include <sstream>
 #include <string>
 #include <vector>
 
+#include "core/platform/device.h"
+
 namespace xllm {
+namespace {
 
-class DeviceNameUtils {
- public:
-  static std::string to_device_string(int32_t device_id);
+TEST(DeviceNameUtilsTest, ToDeviceStringUsesCompiledDeviceType) {
+  const std::string device_string = DeviceNameUtils::to_device_string(3);
 
-  static std::vector<torch::Device> parse_devices(
-      const std::string& device_str);
+  EXPECT_EQ(device_string, Device::type_str() + ":3");
+}
 
-  template <typename T>
-  static std::string to_string(const std::vector<T>& items) {
-    std::stringstream ss;
-    for (size_t i = 0; i < items.size(); ++i) {
-      const auto& item = items[i];
-      if (i == 0) {
-        ss << item;
-      } else {
-        ss << "," << item;
-      }
-    }
-    return ss.str();
-  }
-};
+TEST(DeviceNameUtilsTest, ParseGeneratedDeviceString) {
+  const std::vector<torch::Device> devices =
+      DeviceNameUtils::parse_devices(DeviceNameUtils::to_device_string(2));
 
+  ASSERT_EQ(devices.size(), 1);
+  EXPECT_EQ(devices[0].type(), Device::type_torch());
+  EXPECT_EQ(devices[0].index(), 2);
+}
+
+}  // namespace
 }  // namespace xllm

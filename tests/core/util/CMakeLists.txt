@@ -5,6 +5,7 @@ cc_test(
     util_test
   SRCS
     blocking_counter_test.cpp
+    device_name_utils_test.cpp
     suffix_decoding_cache_test.cpp
     threadpool_test.cpp
   DEPS

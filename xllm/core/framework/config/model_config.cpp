@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/framework/config/config_json_utils.h"
+#include "core/util/device_name_utils.h"
 
 DEFINE_string(model_id, "", "hf model name.");
 
@@ -35,8 +36,11 @@ DEFINE_string(task,
               "The task to use the model for(e.g. generate, embed, mm_embed).");
 
 DEFINE_string(devices,
-              "npu:0",
-              "Devices to run the model on, e.g. npu:0, npu:0,npu:1.");
+              "",
+              "Deprecated. Use --device_id instead. Devices to run the model "
+              "on, e.g. npu:0, npu:0,npu:1.");
+
+DEFINE_int32(device_id, -1, "Device id to run the model on, e.g. 0.");
 
 DEFINE_int32(limit_image_per_prompt,
              8,
@@ -91,6 +95,14 @@ bool is_cpp_chat_template_supported_model(const std::string& model_type) {
   return model_type == "deepseek_v32" || model_type == "deepseek_v4";
 }
 
+bool is_flag_specified(const std::string& flag_name) {
+  google::CommandLineFlagInfo flag_info;
+  if (!google::GetCommandLineFlagInfo(flag_name.c_str(), &flag_info)) {
+    return false;
+  }
+  return !flag_info.is_default;
+}
+
 }  // namespace
 
 void ModelConfig::from_flags() {
@@ -98,7 +110,19 @@ void ModelConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(model);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(backend);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(task);
-  XLLM_CONFIG_ASSIGN_FROM_FLAG(devices);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(device_id);
+  const bool devices_specified = is_flag_specified("devices");
+  const bool device_id_specified = is_flag_specified("device_id");
+  if (devices_specified) {
+    LOG(WARNING) << "--devices is deprecated and will be removed in a future "
+                    "release. Use --device_id instead.";
+  }
+  if (devices_specified && !device_id_specified) {
+    XLLM_CONFIG_ASSIGN_FROM_FLAG(devices);
+  } else {
+    CHECK(device_id() >= 0) << "--device_id must be >= 0.";
+    devices(DeviceNameUtils::to_device_string(device_id()));
+  }
   XLLM_CONFIG_ASSIGN_FROM_FLAG(limit_image_per_prompt);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(max_encoder_cache_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(reasoning_parser);
@@ -130,6 +154,7 @@ void ModelConfig::from_json(const JsonReader& json) {
   XLLM_CONFIG_ASSIGN_FROM_JSON(backend);
   XLLM_CONFIG_ASSIGN_FROM_JSON(task);
   // don't read rank-related config
+  // XLLM_CONFIG_ASSIGN_FROM_JSON(device_id);
   // XLLM_CONFIG_ASSIGN_FROM_JSON(devices);
   XLLM_CONFIG_ASSIGN_FROM_JSON(limit_image_per_prompt);
   XLLM_CONFIG_ASSIGN_FROM_JSON(max_encoder_cache_size);
@@ -151,6 +176,8 @@ void ModelConfig::append_config_json(
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, backend);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config, task);
   // don't dump rank-related config
+  //  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config,
+  //  device_id);
   //  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(config_json, default_config,
   //  devices);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
