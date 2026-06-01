@@ -22,7 +22,7 @@ class ArgumentParser:
         self.parser.add_argument('--devices', type=str, default='npu:0', help='Devices to run the model on, e.g. npu:0,npu:1.')
         self.parser.add_argument('--draft_model', type=str, default='', help='draft hf model path to the model file.')
         self.parser.add_argument('--draft_devices', type=str, default='npu:0', help='Devices to run the draft model on, e.g. npu:0,npu:1.')
-        self.parser.add_argument('--limit_image_per_prompt', type=int, default=4, help='Maximum number of images per prompt.')
+        self.parser.add_argument('--limit_image_per_prompt', type=int, default=8, help='Maximum number of images per prompt.')
         self.parser.add_argument('--block_size', type=int, default=128, help='Number of slots per kv cache block. Default is 128.')
         self.parser.add_argument('--max_cache_size', type=int, default=0, help='Max gpu memory size for kv cache. Default is 0, which means cache size is caculated by available memory.')
         self.parser.add_argument('--max_memory_utilization', type=float, default=0.8, help='The fraction of GPU memory to be used for model inference, including model weights and kv cache.')

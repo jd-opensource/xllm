@@ -22,6 +22,7 @@ limitations under the License.
 
 #include "common/macros.h"
 #include "executor_impl_factory.h"
+#include "framework/encoder_cache/encoder_cache.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/causal_vlm.h"
@@ -56,6 +57,7 @@ class VlmExecutorImpl : public ExecutorImpl {
   torch::Device device_;
   runtime::Options options_;
   std::unique_ptr<ExecutorImpl> llm_executor_;
+  std::unique_ptr<EncoderCache> encoder_cache_;
 };
 // Q: backend device ?
 REGISTER_EXECUTOR("vlm", VlmExecutorImpl);

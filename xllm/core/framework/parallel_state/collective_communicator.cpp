@@ -292,15 +292,35 @@ CollectiveCommunicator::CollectiveCommunicator(int global_rank,
 void CollectiveCommunicator::create_process_groups(
     const std::string& master_addr,
     const torch::Device& device) {
-  int global_rank = parallel_args_->rank();
-  int world_size = parallel_args_->world_size();
-  int dp_size = parallel_args_->dp_size();
-  int ep_size = parallel_args_->ep_size();
-  int cp_size = parallel_args_->cp_size();
+  int32_t global_rank = parallel_args_->rank();
+  int32_t world_size = parallel_args_->world_size();
+  int32_t dp_size = parallel_args_->dp_size();
+  int32_t ep_size = parallel_args_->ep_size();
+  int32_t cp_size = parallel_args_->cp_size();
 
   std::string host;
-  int port;
+  int32_t port;
   net::parse_host_port_from_addr(master_addr, host, port);
+
+  int32_t port_offset = 0;
+
+  // Encoder DP is used by multi-modal models to parallelize vision encoder
+  // work inside each language-model TP group. The rank set matches the TP
+  // group, but each rank runs a full encoder on different multi-modal items.
+  if (::xllm::ParallelConfig::get_instance().enable_mm_encoder_dp()) {
+    const int32_t encoder_dp_size = world_size / dp_size;
+    port_offset = global_rank / encoder_dp_size + 1;
+    encoder_dp_group_ = create_process_group(global_rank,
+                                             world_size,
+                                             encoder_dp_size,
+                                             port + port_offset,
+                                             false,
+                                             host,
+                                             "encoder_dp_group",
+                                             device);
+    parallel_args_->encoder_dp_group_ = encoder_dp_group_.get();
+    port += dp_size;
+  }
 
 #if defined(USE_NPU)
   if (::xllm::KernelConfig::get_instance().npu_kernel_backend() == "ATB") {
@@ -318,9 +338,9 @@ void CollectiveCommunicator::create_process_groups(
                                         device);
   parallel_args_->process_group_ = process_group_.get();
 
-  int tp_size = world_size / dp_size;
+  int32_t tp_size = world_size / dp_size;
   CHECK_EQ(tp_size * dp_size, world_size);
-  int port_offset = global_rank / tp_size + 1;
+  port_offset = global_rank / tp_size + 1;
   std::string tp_host = host;
 #if defined(USE_NPU)
   if (::xllm::KernelConfig::get_instance().npu_kernel_backend() == "TORCH" &&

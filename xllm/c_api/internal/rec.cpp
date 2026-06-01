@@ -35,79 +35,13 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "core/framework/model_loader.h"
 #include "core/util/cpu_affinity.h"
-#include "core/util/rec_model_utils.h"
 #include "helper.h"
-
-namespace {
-
-const char* get_rec_pipeline_name(xllm::RecPipelineType pipeline_type) {
-  switch (pipeline_type) {
-    case xllm::RecPipelineType::kLlmRecDefault:
-      return "LlmRecEnginePipeline";
-    case xllm::RecPipelineType::kLlmRecWithMmData:
-      return "LlmRecWithMmData";
-    case xllm::RecPipelineType::kLlmRecMultiRoundPipeline:
-      return "RecMultiRoundEnginePipeline";
-    case xllm::RecPipelineType::kOneRecDefault:
-      return "OneRecPrefillOnlyEnginePipeline";
-    case xllm::RecPipelineType::kOneRecXAttentionPipeline:
-      return "OneRecXAttentionEnginePipeline";
-    default:
-      return "UnknownRecPipeline";
-  }
-}
-
-void reset_pipeline_runtime_toggles() {
-  xllm::RecConfig::get_instance()
-      .enable_rec_fast_sampler(false)
-      .enable_xattention_one_stage(false)
-      .enable_rec_prefill_only(false)
-      .enable_constrained_decoding(false);
-  xllm::ExecutionConfig::get_instance()
-      .enable_prefill_piecewise_graph(false)
-      .enable_graph_mode_decode_no_padding(false);
-  xllm::BeamSearchConfig::get_instance().enable_topk_sorted(false);
-}
-
-void apply_multi_round_pipeline_toggles() {
-  xllm::RecConfig::get_instance()
-      .enable_rec_fast_sampler(true)
-      .enable_xattention_one_stage(false);
-  xllm::ExecutionConfig::get_instance()
-      .enable_prefill_piecewise_graph(true)
-      .enable_graph_mode_decode_no_padding(true);
-  xllm::BeamSearchConfig::get_instance().enable_topk_sorted(false);
-}
-
-void apply_onerec_pipeline_toggles(xllm::Options* options) {
-  const bool enable_onerec_xattention =
-      ::xllm::RecConfig::get_instance().max_decode_rounds() > 0;
-  xllm::RecConfig::get_instance()
-      .enable_rec_prefill_only(!enable_onerec_xattention)
-      .enable_constrained_decoding(true);
-  xllm::KVCacheConfig::get_instance().enable_prefix_cache(false);
-  xllm::SchedulerConfig::get_instance()
-      .enable_schedule_overlap(false)
-      .enable_chunked_prefill(false);
-
-  options->enable_prefix_cache(false)
-      .enable_schedule_overlap(false)
-      .enable_chunked_prefill(false);
-
-  if (!enable_onerec_xattention) {
-    // Legacy OneRec keeps the historical fixed decode-step behavior.
-    xllm::RecConfig::get_instance().max_decode_rounds(0);
-  }
-}
-
-}  // namespace
 
 XLLM_CAPI_EXPORT XLLM_REC_Handler* xllm_rec_create(void) {
   XLLM_REC_Handler* handler = new XLLM_REC_Handler();
   CHECK(nullptr != handler);
 
   handler->initialized = false;
-  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
 
   return handler;
 }
@@ -118,7 +52,6 @@ XLLM_CAPI_EXPORT void xllm_rec_destroy(XLLM_REC_Handler* handler) {
   handler->master.reset();
   handler->executor.reset();
   handler->model_ids.clear();
-  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
   handler->initialized = false;
 
   delete handler;
@@ -216,10 +149,14 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     }
     xllm::BeamSearchConfig::get_instance()
         .beam_width(xllm_init_options.beam_width)
-        .enable_block_copy_kernel(xllm_init_options.enable_block_copy_kernel);
+        .enable_block_copy_kernel(xllm_init_options.enable_block_copy_kernel)
+        .enable_topk_sorted(xllm_init_options.enable_topk_sorted);
     xllm::RecConfig::get_instance()
         .max_decode_rounds(xllm_init_options.max_decode_rounds)
         .enable_rec_prefill_only(xllm_init_options.enable_rec_prefill_only)
+        .enable_rec_fast_sampler(xllm_init_options.enable_rec_fast_sampler)
+        .enable_xattention_one_stage(
+            xllm_init_options.enable_xattention_one_stage)
         .rec_worker_max_concurrency(
             xllm_init_options.rec_worker_max_concurrency);
     xllm::SchedulerConfig::get_instance()
@@ -235,41 +172,12 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     xllm::ModelConfig::get_instance().flashinfer_workspace_buffer_size(
         static_cast<int32_t>(
             xllm_init_options.flashinfer_workspace_buffer_size));
-    xllm::ExecutionConfig::get_instance().enable_graph(
-        xllm_init_options.enable_graph);
-    auto model_loader = xllm::ModelLoader::create(model_path);
-    if (model_loader == nullptr) {
-      LOG(ERROR) << "Failed to create model loader for path: " << model_path;
-      return false;
-    }
-    const auto& model_args = model_loader->model_args();
-    const xllm::RecModelKind rec_model_kind =
-        xllm::get_rec_model_kind(model_args.model_type());
-    if (rec_model_kind == xllm::RecModelKind::kNone) {
-      LOG(ERROR) << "Unsupported rec model_type: " << model_args.model_type();
-      return false;
-    }
-    const xllm::RecPipelineType pipeline_type =
-        xllm::get_rec_pipeline_type(rec_model_kind);
-
-    // Pipeline-specific runtime toggles in the REC so path.
-    reset_pipeline_runtime_toggles();
-    switch (pipeline_type) {
-      case xllm::RecPipelineType::kLlmRecMultiRoundPipeline:
-        apply_multi_round_pipeline_toggles();
-        break;
-      case xllm::RecPipelineType::kOneRecDefault:
-      case xllm::RecPipelineType::kOneRecXAttentionPipeline:
-        apply_onerec_pipeline_toggles(&options);
-        break;
-      case xllm::RecPipelineType::kLlmRecDefault:
-      case xllm::RecPipelineType::kLlmRecWithMmData:
-        break;
-      default:
-        LOG(ERROR) << "Unsupported rec pipeline type: "
-                   << static_cast<int32_t>(pipeline_type);
-        return false;
-    }
+    xllm::ExecutionConfig::get_instance()
+        .enable_graph(xllm_init_options.enable_graph)
+        .enable_prefill_piecewise_graph(
+            xllm_init_options.enable_prefill_piecewise_graph)
+        .enable_graph_mode_decode_no_padding(
+            xllm_init_options.enable_graph_mode_decode_no_padding);
 
 #if !defined(USE_NPU) && !defined(USE_CUDA)
     xllm::BeamSearchConfig::get_instance().enable_block_copy_kernel(false);
@@ -280,9 +188,7 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
         .rec_worker_max_concurrency(
             ::xllm::RecConfig::get_instance().rec_worker_max_concurrency());
     LOG(INFO)
-        << "REC C API selected pipeline="
-        << get_rec_pipeline_name(pipeline_type)
-        << ", model_type=" << model_args.model_type()
+        << "REC C API runtime config:"
         << ", enable_rec_prefill_only="
         << ::xllm::RecConfig::get_instance().enable_rec_prefill_only()
         << ", enable_constrained_decoding="
@@ -301,10 +207,13 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     handler->master = std::make_unique<xllm::RecMaster>(options);
     handler->master->run();
 
-    size_t cpu_cores = std::thread::hardware_concurrency();
-    size_t thread_num = std::clamp((cpu_cores == 0) ? 8 : cpu_cores / 2,
-                                   static_cast<size_t>(8),
-                                   static_cast<size_t>(16));
+    size_t available_cpu_cores_count =
+        static_cast<size_t>(xllm::CpuAffinity::get_available_cpu_cores_count());
+    LOG(INFO) << "Available CPU cores count " << available_cpu_cores_count;
+    size_t thread_num = std::clamp(
+        (available_cpu_cores_count == 0) ? 8 : available_cpu_cores_count / 2,
+        static_cast<size_t>(8),
+        static_cast<size_t>(16));
 
     auto thread_factory = std::make_shared<xllm::CpuAffinityThreadFactory>(
         /*prefix=*/"XllmRecExec");
@@ -323,7 +232,6 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
     }
     handler->model_ids.clear();
     handler->model_ids.emplace_back(model_id);
-    handler->pipeline_type = pipeline_type;
 
     handler->initialized = true;
 
@@ -335,7 +243,6 @@ XLLM_CAPI_EXPORT bool xllm_rec_initialize(
   handler->master.reset();
   handler->executor.reset();
   handler->model_ids.clear();
-  handler->pipeline_type = xllm::RecPipelineType::kLlmRecDefault;
   handler->initialized = false;
 
   return false;

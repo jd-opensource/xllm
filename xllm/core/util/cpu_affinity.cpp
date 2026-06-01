@@ -165,6 +165,24 @@ void CpuAffinity::set_cpu_affinity(const std::string& cpu_affinity) {
   next_index_ = 0;
 }
 
+int32_t CpuAffinity::get_available_cpu_cores_count() {
+  return CPU_COUNT(&initial_process_cpu_set());
+}
+
+std::vector<int32_t> CpuAffinity::get_available_cpu_ids() {
+  std::vector<int32_t> cpu_ids;
+  cpu_ids.reserve(CPU_SETSIZE);
+
+  auto cpu_set = initial_process_cpu_set();
+  for (int32_t i = 0; i < CPU_SETSIZE; ++i) {
+    if (CPU_ISSET(i, &cpu_set)) {
+      cpu_ids.push_back(i);
+    }
+  }
+
+  return cpu_ids;
+}
+
 void CpuAffinity::clear_cpu_affinity() {
   std::lock_guard<std::mutex> lock(mu_);
 

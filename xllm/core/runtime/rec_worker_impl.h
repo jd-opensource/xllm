@@ -64,7 +64,7 @@ class RecWorkerImpl : public LLMWorkerImpl {
       const ForwardInput& input);
 
  protected:
-  std::shared_ptr<ThreadPool> input_builder_thread_pool_;
+  std::shared_ptr<MPMCThreadPool> input_builder_thread_pool_;
 
  private:
   struct RecPipelineRuntime {

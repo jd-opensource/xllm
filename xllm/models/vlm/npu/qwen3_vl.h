@@ -17,14 +17,20 @@ limitations under the License.
 
 #include <atb/atb_infer.h>
 
+#include <string>
+
+#include "core/common/global_flags.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model/model_output.h"
 #include "core/layers/npu/npu_lm_head_impl.h"
 #include "core/layers/npu/npu_qwen3_vision_encoder_layer_impl.h"
 #include "core/layers/npu/npu_rms_norm_impl.h"
+#include "core/platform/device.h"
+#include "core/util/timer.h"
 #include "models/llm/npu/qwen3.h"
 #include "models/model_registry.h"
+#include "models/vlm/utils/multimodal_utils.h"
 #include "processors/qwen3_vl_image_processor.h"
 #include "processors/qwen3_vl_input_processor.h"
 #include "qwen2_5_vl.h"
@@ -100,15 +106,9 @@ class Qwen3_VisionBlockImpl : public torch::nn::Module {
                         torch::Tensor& m_sin_pos,
                         torch::Tensor& cu_seq_len,
                         std::vector<int>& cu_seq_len_vec,
-                        ModelInputParams& input_params,
                         int node_id) {
-    return encoder_layer_(x,
-                          m_cos_pos,
-                          m_sin_pos,
-                          cu_seq_len,
-                          cu_seq_len_vec,
-                          input_params,
-                          node_id);
+    return encoder_layer_(
+        x, m_cos_pos, m_sin_pos, cu_seq_len, cu_seq_len_vec, node_id);
   }
 
   // load the weight from the checkpoint
@@ -482,8 +482,8 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor hidden_states,
-                        torch::Tensor grid_thw,  // [batch,thw]
-                        const ModelInputParams& input_params) {
+                        torch::Tensor grid_thw  // [batch,thw]
+  ) {
     hidden_states = patch_embed_(hidden_states);
     auto pos_embeds = fast_pos_embed_interpolate(grid_thw);
     hidden_states = hidden_states + pos_embeds;
@@ -507,8 +507,6 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     m_sin = rotary_pos_emb.sin().type_as(hidden_states);
     m_sin = m_sin.repeat({1, 2});
 
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
     std::vector<int> cu_seqlens_vec(
         cu_seqlens_cpu.data_ptr<int>(),  // full seqlen vec
@@ -516,13 +514,8 @@ class Qwen3_VisionTransformerImpl : public torch::nn::Module {
     std::vector<torch::Tensor> deepstack_feature_lists;
     deepstack_feature_lists.reserve(deepstack_visual_indexes_.size());
     for (int idx = 0; idx < blocks_->size(); ++idx) {
-      hidden_states = layers_[idx](hidden_states,
-                                   m_cos,
-                                   m_sin,
-                                   cu_seqlens,
-                                   cu_seqlens_vec,
-                                   input_params_new,
-                                   idx);
+      hidden_states = layers_[idx](
+          hidden_states, m_cos, m_sin, cu_seqlens, cu_seqlens_vec, idx);
       auto it = std::find(deepstack_visual_indexes_.begin(),
                           deepstack_visual_indexes_.end(),
                           idx);
@@ -637,7 +630,17 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
   Qwen3_VLForConditionalGenerationImpl(const ModelContext& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
-    visual_ = register_module("visual", Qwen3_VisionTransformer(context));
+    encoder_dp_group_ = context.get_parallel_args().encoder_dp_group_;
+    use_encoder_dp_ =
+        encoder_dp_group_ != nullptr && encoder_dp_group_->world_size() > 1;
+    if (use_encoder_dp_) {
+      ModelContext visual_context = context.with_parallel_args(ParallelArgs(
+          /*rank=*/0, /*world_size=*/1, /*process_group=*/nullptr));
+      visual_ =
+          register_module("visual", Qwen3_VisionTransformer(visual_context));
+    } else {
+      visual_ = register_module("visual", Qwen3_VisionTransformer(context));
+    }
     language_model_ =
         register_module("language_model", QWen3ForCausalLM(context));
   }
@@ -675,42 +678,40 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
     prepare_encoder_input(input_params, image_input, video_input);
 
     MMDict multimodal_embeds;
-    auto merge_size = model_args_.mm_image_merge_size();
     if (image_input) {
-      auto image_embeds =
-          visual_(image_input->pixel_values.to(options_),
-                  image_input->image_grid_thw.to(options_.device()),
-                  input_params);
-
-      auto image_tokens =
-          (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
-              .cpu()
-              .contiguous()
-              .to(torch::kLong);
-
-      std::vector<int64_t> image_tokens_vec(
-          image_tokens.data_ptr<int64_t>(),
-          image_tokens.data_ptr<int64_t>() + image_tokens.numel());
-      multimodal_embeds["image|embedding"] =
-          image_embeds.split(image_tokens_vec, /*dim=*/0);
+      torch::Tensor image_pixels = image_input->pixel_values.to(options_);
+      torch::Tensor image_grid =
+          image_input->image_grid_thw.to(options_.device());
+      std::vector<int32_t> image_token_nums =
+          get_mm_token_nums(input_params.multimodal.mm_data, MMType::IMAGE);
+      if (!use_encoder_dp_) {
+        auto image_embeds = visual_(image_pixels, image_grid);
+        multimodal_embeds["image|embedding"] =
+            split_by_token_nums(image_embeds, image_token_nums);
+      } else {
+        const int32_t image_feature_dim =
+            model_args_.mm_projection_dim() *
+            static_cast<int32_t>(
+                model_args_.mm_deepstack_visual_indexes().size() + 1);
+        multimodal_embeds["image|embedding"] =
+            run_dp_encoder(visual_,
+                           image_pixels,
+                           image_grid,
+                           image_token_nums,
+                           image_feature_dim,
+                           encoder_dp_group_);
+      }
     }
     if (video_input) {
-      auto video_embeds =
-          visual_(video_input->pixel_values_videos.to(options_),
-                  video_input->video_grid_thw.to(options_.device()),
-                  input_params);
-
-      auto video_tokens =
-          (video_input->video_grid_thw.prod(-1) / merge_size / merge_size)
-              .cpu()
-              .contiguous()
-              .to(torch::kLong);
-
-      std::vector<int64_t> video_tokens_vec(
-          video_tokens.data_ptr<int64_t>(),
-          video_tokens.data_ptr<int64_t>() + video_tokens.numel());
+      torch::Tensor video_pixels =
+          video_input->pixel_values_videos.to(options_);
+      torch::Tensor video_grid =
+          video_input->video_grid_thw.to(options_.device());
+      std::vector<int32_t> video_token_nums =
+          get_mm_token_nums(input_params.multimodal.mm_data, MMType::VIDEO);
+      auto video_embeds = visual_(video_pixels, video_grid);
       multimodal_embeds["video|embedding"] =
-          video_embeds.split(video_tokens_vec, /*dim=*/0);
+          split_by_token_nums(video_embeds, video_token_nums);
     }
     return multimodal_embeds;
   }
@@ -823,6 +824,8 @@ class Qwen3_VLForConditionalGenerationImpl : public torch::nn::Module {
  private:
   ModelArgs model_args_;
   torch::TensorOptions options_;
+  ProcessGroup* encoder_dp_group_ = nullptr;
+  bool use_encoder_dp_ = false;
 
   Qwen3_VisionTransformer visual_{nullptr};
   QWen3ForCausalLM language_model_{nullptr};

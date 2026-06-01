@@ -27,6 +27,7 @@ cc_library(
   DEPS
     common
     util
+    encoder_cache
     glog::glog
     absl::strings
     absl::time

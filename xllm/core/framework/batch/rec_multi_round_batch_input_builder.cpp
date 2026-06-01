@@ -78,7 +78,7 @@ RecMultiRoundBatchInputBuilder::RecMultiRoundBatchInputBuilder(
     const uint64_t batch_id,
     const ModelArgs* args,
     BatchForwardType batch_forward_type,
-    ThreadPool* thread_pool)
+    MPMCThreadPool* thread_pool)
     : allowed_max_tokens_(allowed_max_tokens),
       input_embeddings_vec_(input_embeddings_vec),
       mm_data_vec_(mm_data_vec),
@@ -207,13 +207,6 @@ void RecMultiRoundBatchInputBuilder::extract_tokens_and_positions(
     // skip prompt tokens except the last one
     if (j + 1 < n_tokens) continue;
     ++adjusted_token_to_count_map[token_ids[j]];
-  }
-
-  // Handle MRope positions
-  if (use_mrope_) {
-    const auto& args = *args_;
-    MPositionHelper helper(*sequence, args);
-    base_state.mrope_positions_vec.push_back(helper.get_positions());
   }
 
   // Process each token

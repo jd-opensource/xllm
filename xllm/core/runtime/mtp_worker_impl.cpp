@@ -23,12 +23,17 @@ limitations under the License.
 #if defined(USE_MLU)
 #include "framework/kv_cache_transfer/mooncake_kv_cache_transfer.h"
 #endif
+#include "core/framework/block/block_utils.h"
 #include "core/framework/config/disagg_pd_config.h"
 #include "core/framework/config/kernel_config.h"
+#include "core/framework/config/kv_cache_config.h"
 #include "core/framework/config/speculative_config.h"
+#include "core/framework/kv_cache/kv_cache_estimation.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "spec_input_builder.h"
+#include "util/env_var.h"
 #include "util/json_reader.h"
+#include "util/pretty_print.h"
 #include "util/slice.h"
 #include "util/timer.h"
 #include "util/utils.h"
@@ -37,6 +42,49 @@ namespace xllm {
 constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
 
 namespace {
+
+int64_t get_dp_local_tp_size(const ParallelArgs& parallel_args) {
+  const int64_t dp_size = std::max<int64_t>(parallel_args.dp_size(), 1);
+  const int64_t cp_size = std::max<int64_t>(parallel_args.cp_size(), 1);
+  return std::max<int64_t>(parallel_args.world_size() / dp_size / cp_size, 1);
+}
+
+KVCacheEstimateOptions make_kv_cache_estimate_options(
+    const ModelArgs& model_args,
+    const runtime::Options& options,
+    const ParallelArgs& parallel_args,
+    torch::ScalarType dtype,
+    int64_t cache_size_in_bytes) {
+  const int64_t dp_local_tp_size = get_dp_local_tp_size(parallel_args);
+  const int64_t n_heads = model_args.n_heads();
+  const int64_t n_kv_heads = model_args.n_kv_heads().value_or(n_heads);
+
+  KVCacheEstimateOptions estimate_options;
+  estimate_options.dtype = dtype;
+  estimate_options.kv_cache_dtype = options.kv_cache_dtype();
+  estimate_options.cache_size_in_bytes = cache_size_in_bytes;
+  estimate_options.block_size = options.block_size();
+  estimate_options.world_size = dp_local_tp_size;
+  estimate_options.n_local_kv_heads =
+      std::max<int64_t>(n_kv_heads / dp_local_tp_size, 1);
+  if (has_linear_attention_layers(model_args)) {
+    estimate_options.n_local_linear_k_heads = std::max<int64_t>(
+        model_args.linear_num_key_heads() / dp_local_tp_size, 1);
+    estimate_options.n_local_linear_v_heads = std::max<int64_t>(
+        model_args.linear_num_value_heads() / dp_local_tp_size, 1);
+  }
+  estimate_options.max_seqs_per_batch =
+      static_cast<int64_t>(options.max_seqs_per_batch());
+  estimate_options.num_speculative_tokens =
+      static_cast<int64_t>(options.num_speculative_tokens());
+  estimate_options.max_tokens_per_batch =
+      static_cast<int64_t>(options.max_tokens_per_batch());
+  estimate_options.is_draft_engine = options.is_draft_engine();
+  estimate_options.enable_prefix_cache =
+      ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
+  return estimate_options;
+}
+
 torch::Tensor make_cpu_int_tensor(const std::vector<int32_t>& values) {
   return torch::tensor(values,
                        torch::TensorOptions()
@@ -139,7 +187,6 @@ runtime::Options MTPDraftOptions(const runtime::Options& options) {
   auto opts = options;
   opts.enable_schedule_overlap(false)
       .is_draft_engine(true)
-      .enable_graph(/*enable_graph=*/false)
       .num_decoding_tokens(1)
       .num_speculative_tokens(0);
   return opts;
@@ -147,7 +194,8 @@ runtime::Options MTPDraftOptions(const runtime::Options& options) {
 
 bool is_qwen3_5_target_model_type(const std::string& model_type) {
   return model_type == "qwen3_5" || model_type == "qwen3_5_moe" ||
-         model_type == "qwen3_5_text" || model_type.rfind("qwen3_5_", 0) == 0;
+         model_type == "qwen3_5_text" || model_type == "qwen3_5_moe_text" ||
+         model_type.rfind("qwen3_5_", 0) == 0;
 }
 
 #if defined(USE_NPU)
@@ -261,6 +309,48 @@ bool MTPWorkerImpl::init_model(const std::string& model_weights_path,
   }
 #endif
   return result;
+}
+
+std::tuple<int64_t, int64_t> MTPWorkerImpl::estimate_kv_cache_capacity() {
+  CHECK(impl_ != nullptr);
+  CHECK(draft_impl_ != nullptr);
+
+  const std::tuple<int64_t, int64_t> target_memory =
+      impl_->estimate_kv_cache_capacity();
+  const std::tuple<int64_t, int64_t> draft_memory =
+      draft_impl_->estimate_kv_cache_capacity();
+  const int64_t cache_size_in_bytes =
+      std::min(std::get<0>(target_memory), std::get<0>(draft_memory));
+  const int64_t total_memory =
+      std::min(std::get<1>(target_memory), std::get<1>(draft_memory));
+
+  const ModelArgs& target_model_args = impl_->context_.get_model_args();
+  const ModelArgs& draft_model_args = draft_impl_->context_.get_model_args();
+  if (!util::is_target_model_type(target_model_args.model_type(),
+                                  /*target_model_type=*/"deepseek_v4",
+                                  /*match_mtp=*/true)) {
+    return {cache_size_in_bytes, total_memory};
+  }
+
+  // use for DSv4
+  KVCacheEstimateOptions target_options =
+      make_kv_cache_estimate_options(target_model_args,
+                                     MTPTargetOptions(options_),
+                                     parallel_args_,
+                                     dtype_,
+                                     cache_size_in_bytes);
+  const KVCacheEstimateOptions draft_options =
+      make_kv_cache_estimate_options(draft_model_args,
+                                     MTPDraftOptions(options_),
+                                     parallel_args_,
+                                     dtype_,
+                                     cache_size_in_bytes);
+  target_options.draft_model_args = &draft_model_args;
+  target_options.draft_options = &draft_options;
+
+  KVCacheCapacity kv_cache_cap =
+      ::xllm::estimate_kv_cache_capacity(target_model_args, target_options);
+  return {kv_cache_cap.cache_size_in_bytes(), total_memory};
 }
 
 int64_t MTPWorkerImpl::get_embedding_placeholder_size() {
@@ -540,7 +630,7 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
     CHECK(draft_output_opt.has_value())
         << "draft output is empty in speculative step";
 
-    draft_outputs.push_back(std::move(draft_output_opt.value()));
+    draft_outputs.emplace_back(std::move(draft_output_opt.value()));
     process_draft_sample_output(draft_outputs.back().sample_output);
     if (draft_idx == num_speculative_tokens - 1) {
       continue;
@@ -750,9 +840,6 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
   const int32_t num_val_tokens = num_speculative_tokens + 1;
   const int32_t total_num_val_tokens = num_sequences * num_val_tokens;
   const int32_t block_size = options_.block_size();
-  const bool use_atb_spec_kernel =
-      ::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel() ||
-      use_qwen3_5_spec_verify_path();
   specBuilder::DecodeRowContext row_ctx =
       specBuilder::make_decode_row_context(input);
   Slice<int32_t> token_ids = {
@@ -762,6 +849,9 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
       input.positions_host.data_ptr<int32_t>(),
       static_cast<size_t>(input.positions_host.numel())};
   Slice<int32_t> kv_seq_lens = input.input_params.attention.host.kv_seq_lens;
+  const bool use_atb_spec_kernel =
+      ::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel() ||
+      use_qwen3_5_spec_verify_path();
   specBuilder::DecodeBuildBuffers buf;
   buf.out_token_ids.reserve(total_num_val_tokens);
   buf.out_positions.reserve(total_num_val_tokens);
@@ -937,7 +1027,6 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
       row.seq_id = seq_id;
       row.token_id = token_id >= 0 ? token_id : 0;
       row.position_offset = position_offset;
-      row.append_kv_len = !use_chunked_prefill;
       row.append_q_len_one = !use_chunked_prefill;
       row.append_block_table = !use_chunked_prefill;
       specBuilder::append_decode_row(row_ctx, row, block_size, buf);
@@ -1145,8 +1234,8 @@ SampleOutput MTPWorkerImpl::validate(
   draft_token_ids_steps.reserve(draft_outputs.size());
   draft_probs_steps.reserve(draft_outputs.size());
   for (const auto& draft_output : draft_outputs) {
-    draft_token_ids_steps.push_back(draft_output.sample_output.next_tokens);
-    draft_probs_steps.push_back(draft_output.sample_output.probs);
+    draft_token_ids_steps.emplace_back(draft_output.sample_output.next_tokens);
+    draft_probs_steps.emplace_back(draft_output.sample_output.probs);
   }
 
   auto [draft_token_ids, draft_probs] =

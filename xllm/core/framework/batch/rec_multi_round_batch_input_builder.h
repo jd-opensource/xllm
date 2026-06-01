@@ -46,7 +46,7 @@ class RecMultiRoundBatchInputBuilder : public RecBatchInputBuilder {
       const uint64_t batch_id,
       const ModelArgs* args,
       BatchForwardType batch_forward_type,
-      ThreadPool* thread_pool = nullptr);
+      MPMCThreadPool* thread_pool = nullptr);
 
   ~RecMultiRoundBatchInputBuilder() override = default;
 
@@ -184,7 +184,7 @@ class RecMultiRoundBatchInputBuilder : public RecBatchInputBuilder {
   std::vector<BlockTransferInfo>* swap_block_transfer_infos_ = nullptr;
 
   // thread pool for potential future multithreaded processing, not owned
-  ThreadPool* thread_pool_ = nullptr;
+  MPMCThreadPool* thread_pool_ = nullptr;
   uint64_t batch_id_ = 0;
 
   // whether prepare draft input for MTP(EAGLE) at Decode phase.

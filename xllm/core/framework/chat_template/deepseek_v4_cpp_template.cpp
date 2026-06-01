@@ -25,6 +25,7 @@ limitations under the License.
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace xllm {
@@ -148,6 +149,7 @@ constexpr const char* kRoleUser = "user";
 constexpr const char* kRoleTool = "tool";
 constexpr const char* kRoleAssistant = "assistant";
 constexpr const char* kRoleLatestReminder = "latest_reminder";
+constexpr const char* kRoleDirectSearchResults = "direct_search_results";
 
 // ============================================================
 // Utility Functions
@@ -166,6 +168,23 @@ std::string to_json(const nlohmann::ordered_json& value) {
         /*indent_char=*/' ',
         /*ensure_ascii=*/true,
         nlohmann::json::error_handler_t::replace);
+  }
+}
+
+nlohmann::ordered_json parse_json_object_or_empty(const std::string& text) {
+  if (text.empty()) {
+    return nlohmann::ordered_json::object();
+  }
+  try {
+    nlohmann::ordered_json parsed = nlohmann::json::parse(text);
+    if (parsed.is_object()) {
+      return parsed;
+    }
+    return nlohmann::ordered_json::object();
+  } catch (const std::exception&) {
+    nlohmann::ordered_json fallback = nlohmann::ordered_json::object();
+    fallback["arguments"] = text;
+    return fallback;
   }
 }
 
@@ -201,17 +220,10 @@ std::vector<nlohmann::ordered_json> tool_calls_from_openai_format(
   std::vector<nlohmann::ordered_json> out;
   out.reserve(tool_calls.size());
   for (const Message::ToolCall& tc : tool_calls) {
-    nlohmann::ordered_json args = nlohmann::json::object();
-    if (!tc.function.arguments.empty()) {
-      try {
-        args = nlohmann::json::parse(tc.function.arguments);
-      } catch (const std::exception&) {
-        args = nlohmann::json::object();
-      }
-    }
     nlohmann::ordered_json item;
+    item["id"] = tc.id;
     item["name"] = tc.function.name;
-    item["arguments"] = args;
+    item["arguments"] = parse_json_object_or_empty(tc.function.arguments);
     out.emplace_back(std::move(item));
   }
   return out;
@@ -223,11 +235,7 @@ std::string encode_arguments_to_dsml(const nlohmann::ordered_json& tool_call) {
   if (tool_call.contains("arguments")) {
     arguments = tool_call["arguments"];
     if (arguments.is_string()) {
-      try {
-        arguments = nlohmann::json::parse(arguments.get<std::string>());
-      } catch (const std::exception&) {
-        arguments = nlohmann::json::object();
-      }
+      arguments = parse_json_object_or_empty(arguments.get<std::string>());
     }
   }
   bool first = true;
@@ -436,7 +444,8 @@ nlohmann::ordered_json drop_thinking_messages(
   for (int32_t idx = 0; idx < static_cast<int32_t>(messages.size()); ++idx) {
     std::string role = messages[idx].value("role", "");
     if (role == kRoleUser || role == kRoleSystem || role == kRoleTool ||
-        role == kRoleLatestReminder || idx >= last_user_idx) {
+        role == kRoleLatestReminder || role == kRoleDirectSearchResults ||
+        idx >= last_user_idx) {
       result.emplace_back(messages[idx]);
     } else if (role == kRoleAssistant) {
       nlohmann::ordered_json copied = messages[idx];

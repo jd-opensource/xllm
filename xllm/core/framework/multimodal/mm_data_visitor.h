@@ -18,6 +18,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <unordered_set>
+#include <vector>
 
 #include "mm_batch_data.h"
 #include "mm_data.h"
@@ -60,6 +61,19 @@ class CollectMMDataTensorVisitor : public MMData::IVisitor {
   std::unordered_map<MMKey, std::vector<torch::Tensor>> datas_;
 
   CollectItemTensorVisitor item_visitor_;
+};
+
+class MMTokenNumVisitor final : public MMDataItem::IVisitor {
+ public:
+  explicit MMTokenNumVisitor(MMType type) : type_(type) {}
+
+  bool visit(MMDataItem& item) override;
+
+  const std::vector<int32_t>& token_nums() const { return token_nums_; }
+
+ private:
+  MMType type_;
+  std::vector<int32_t> token_nums_;
 };
 
 class EncoderInputGatherVisitor : public MMDataItem::IVisitor {
@@ -127,6 +141,26 @@ class UpdateMMItemScheduleStateVisitor : public MMDataItem::IVisitor {
   int32_t computed_token_num_ = 0;
   int32_t q_seq_len_ = 0;
   int32_t seq_idx_ = 0;
+};
+
+class EncoderCache;
+
+class EncoderCacheLookupVisitor : public MMDataItem::IVisitor {
+ public:
+  explicit EncoderCacheLookupVisitor(EncoderCache* cache);
+  bool visit(MMDataItem& item) override;
+
+ private:
+  EncoderCache* cache_;
+};
+
+class EncoderCacheInsertVisitor : public MMDataItem::IVisitor {
+ public:
+  explicit EncoderCacheInsertVisitor(EncoderCache* cache);
+  bool visit(MMDataItem& item) override;
+
+ private:
+  EncoderCache* cache_;
 };
 
 }  // namespace xllm

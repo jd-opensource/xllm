@@ -19,6 +19,7 @@ limitations under the License.
 
 #include "core/framework/config/model_config.h"
 #include "framework/chat_template/deepseek_v32_cpp_template.h"
+#include "framework/chat_template/deepseek_v4_cpp_template.h"
 #include "framework/chat_template/jinja_chat_template.h"
 
 namespace xllm {
@@ -49,6 +50,33 @@ TEST(ChatTemplateFactory, DeepseekV32FallsBackToJinjaWhenFlagDisabled) {
   ASSERT_TRUE(impl != nullptr);
   EXPECT_NE(dynamic_cast<JinjaChatTemplate*>(impl.get()), nullptr);
   EXPECT_EQ(dynamic_cast<DeepseekV32CppTemplate*>(impl.get()), nullptr);
+  EXPECT_EQ(dynamic_cast<DeepseekV4CppTemplate*>(impl.get()), nullptr);
+}
+
+TEST(ChatTemplateFactory, DeepseekV4FallsBackToJinjaWhenFlagDisabled) {
+  ScopedUseCppChatTemplate scoped_flag(/*enabled=*/false);
+  TokenizerArgs args;
+
+  std::unique_ptr<ChatTemplate> impl =
+      ChatTemplate::create(args, /*model_type=*/"deepseek_v4");
+
+  ASSERT_TRUE(impl != nullptr);
+  EXPECT_NE(dynamic_cast<JinjaChatTemplate*>(impl.get()), nullptr);
+  EXPECT_EQ(dynamic_cast<DeepseekV32CppTemplate*>(impl.get()), nullptr);
+  EXPECT_EQ(dynamic_cast<DeepseekV4CppTemplate*>(impl.get()), nullptr);
+}
+
+TEST(ChatTemplateFactory, DeepseekV4UsesCppTemplateWhenFlagEnabled) {
+  ScopedUseCppChatTemplate scoped_flag(/*enabled=*/true);
+  TokenizerArgs args;
+
+  std::unique_ptr<ChatTemplate> impl =
+      ChatTemplate::create(args, /*model_type=*/"deepseek_v4");
+
+  ASSERT_TRUE(impl != nullptr);
+  EXPECT_EQ(dynamic_cast<JinjaChatTemplate*>(impl.get()), nullptr);
+  EXPECT_EQ(dynamic_cast<DeepseekV32CppTemplate*>(impl.get()), nullptr);
+  EXPECT_NE(dynamic_cast<DeepseekV4CppTemplate*>(impl.get()), nullptr);
 }
 
 TEST(ChatTemplateFactory, NonDeepseekModelUsesJinjaWhenFlagEnabled) {
@@ -62,6 +90,7 @@ TEST(ChatTemplateFactory, NonDeepseekModelUsesJinjaWhenFlagEnabled) {
   ASSERT_TRUE(impl != nullptr);
   EXPECT_NE(dynamic_cast<JinjaChatTemplate*>(impl.get()), nullptr);
   EXPECT_EQ(dynamic_cast<DeepseekV32CppTemplate*>(impl.get()), nullptr);
+  EXPECT_EQ(dynamic_cast<DeepseekV4CppTemplate*>(impl.get()), nullptr);
 }
 
 }  // namespace

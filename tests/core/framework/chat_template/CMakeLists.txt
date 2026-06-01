@@ -10,6 +10,7 @@ cc_test (
     :chat_template
     :jinja_chat_template
     :deepseek_v32_cpp_template
+    :deepseek_v4_cpp_template
     GTest::gtest_main
 )
 
@@ -42,4 +43,3 @@ cc_test (
     :deepseek_v4_cpp_template
     GTest::gtest_main
 )
-

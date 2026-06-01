@@ -356,8 +356,7 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
   }
 
   torch::Tensor forward(torch::Tensor hidden_states,
-                        torch::Tensor grid_thw,  // [batch,thw]
-                        const ModelInputParams& input_params) {
+                        torch::Tensor grid_thw) {  // [batch,thw]
     // patchify
     // hidden_states = x.to(device=self.device, dtype=self.dtype);
     hidden_states = patch_embed_(hidden_states);
@@ -401,8 +400,6 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
 
     m_cos = m_cos.repeat({1, 2});
     m_sin = m_sin.repeat({1, 2});
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
     torch::Tensor cu_window_seqlens_cpu = cu_window_seqlens.cpu();
     std::vector<int> cu_seqlens_vec(
@@ -421,13 +418,8 @@ class Qwen2_5_VisionTransformerImpl : public torch::nn::Module {
         cu_seqlens_now = cu_window_seqlens;
         cu_seqlens_now_vec = cu_w_seqlens_vec;
       }
-      hidden_states = layers_[idx](hidden_states,
-                                   m_cos,
-                                   m_sin,
-                                   cu_seqlens_now,
-                                   cu_seqlens_now_vec,
-                                   input_params_new,
-                                   idx);
+      hidden_states = layers_[idx](
+          hidden_states, m_cos, m_sin, cu_seqlens_now, cu_seqlens_now_vec, idx);
     }
     // adapter
     hidden_states = merger_(hidden_states);
@@ -534,8 +526,7 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     if (image_input) {
       // visual
       auto image_embeds = visual_(image_input->pixel_values.to(options_),
-                                  image_input->image_grid_thw,
-                                  input_params);
+                                  image_input->image_grid_thw);
       auto image_tokens =
           (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
               .cpu()
@@ -551,8 +542,7 @@ class Qwen2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
     if (video_input) {
       // visual
       auto video_embeds = visual_(video_input->pixel_values_videos.to(options_),
-                                  video_input->video_grid_thw,
-                                  input_params);
+                                  video_input->video_grid_thw);
       auto video_tokens =
           (video_input->video_grid_thw.prod(-1) / merge_size / merge_size)
               .cpu()

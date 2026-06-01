@@ -408,9 +408,7 @@ class OxygenVisionTransformerImpl : public torch::nn::Module {
     return std::make_tuple(rotary_pos_emb, pos_ids);
   }
 
-  torch::Tensor forward(torch::Tensor hidden_states,
-                        torch::Tensor grid_thw,
-                        const ModelInputParams& input_params) {
+  torch::Tensor forward(torch::Tensor hidden_states, torch::Tensor grid_thw) {
     hidden_states = patch_embed_(hidden_states);
     hidden_states = std::get<0>(post_conv_layernorm_(hidden_states));
 
@@ -452,21 +450,14 @@ class OxygenVisionTransformerImpl : public torch::nn::Module {
                                 grid_thw,
                                 image_type_ids.select(1, 0),
                                 image_type_ids.select(1, 1));
-    ModelInputParams& input_params_new =
-        const_cast<ModelInputParams&>(input_params);
     torch::Tensor cu_seqlens_cpu = cu_seqlens.cpu();
     std::vector<int> cu_seqlens_vec(
         cu_seqlens_cpu.data_ptr<int>(),
         cu_seqlens_cpu.data_ptr<int>() + cu_seqlens_cpu.numel());
     cu_seqlens = cu_seqlens.to(hidden_states.device());
     for (int idx = 0; idx < blocks_->size(); ++idx) {
-      hidden_states = layers_[idx](hidden_states,
-                                   m_cos,
-                                   m_sin,
-                                   cu_seqlens,
-                                   cu_seqlens_vec,
-                                   input_params_new,
-                                   idx);
+      hidden_states = layers_[idx](
+          hidden_states, m_cos, m_sin, cu_seqlens, cu_seqlens_vec, idx);
     }
     hidden_states = std::get<0>(post_layernorm_(hidden_states));
     hidden_states = hidden_states.view(
@@ -606,8 +597,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
     if (image_input) {
       // visual
       auto image_embeds = visual_(image_input->pixel_values.to(options_),
-                                  image_input->image_grid_thw,
-                                  input_params);
+                                  image_input->image_grid_thw);
       auto image_tokens =
           (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
               .cpu()
@@ -633,8 +623,7 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
       auto flatten_video_grid_thw = torch::cat(temp_frames_hw, 0);
       // visual
       auto video_embeds = visual_(video_input->pixel_values_videos.to(options_),
-                                  flatten_video_grid_thw,
-                                  input_params);
+                                  flatten_video_grid_thw);
       // Split based on original video count, not frame count
       // video_grid_thw has shape [num_videos, 3], video_embeds is flattened
       // We need to split video_embeds back to match num_videos

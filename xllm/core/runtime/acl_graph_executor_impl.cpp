@@ -1,4 +1,4 @@
-/* Copyright 2025 The xLLM Authors. All Rights Reserved.
+﻿/* Copyright 2025 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -106,17 +106,10 @@ bool AclGraph::capture(CausalLM* model,
   CHECK(graph_params.has_value())
       << "update() should return ModelInputParams when "
          "return_capture_params=true";
-
-  if (model->requires_graph_forward_metadata()) {
-    if (!model_graph_metadata_state_) {
-      model_graph_metadata_state_ =
-          model->create_graph_forward_metadata_state();
-    }
-    model->prepare_graph_forward_metadata(
-        model_graph_metadata_state_.get(),
-        persistent_param_.persistent_positions(num_tokens_),
-        graph_params.value());
-  }
+  prepare_model_graph_metadata(
+      model,
+      persistent_param_.persistent_positions(num_tokens_),
+      graph_params.value());
 
   // Synchronize stream to ensure all data is copied to graph persistent buffers
   aclrtSynchronizeStream(stream);
@@ -220,6 +213,24 @@ void AclGraph::make_current_stream_wait_for_graph(aclrtStream current_stream) {
   }
 }
 
+void AclGraph::prepare_model_graph_metadata(CausalLM* model,
+                                            const torch::Tensor& positions,
+                                            ModelInputParams& params) {
+  CHECK(model != nullptr) << "ACL graph model must not be null";
+  if (!model->requires_graph_forward_metadata()) {
+    return;
+  }
+  if (!model_graph_metadata_state_) {
+    model_graph_metadata_state_ = model->create_graph_forward_metadata_state();
+    CHECK(model_graph_metadata_state_)
+        << "ACL graph metadata state must be initialized during capture";
+  }
+  model->prepare_graph_forward_metadata(
+      model_graph_metadata_state_.get(), positions, params);
+  CHECK(params.attn_metadata)
+      << "model graph metadata preparation did not populate attn_metadata";
+}
+
 ModelOutput AclGraph::replay(CausalLM* model,
                              const torch::Tensor& tokens,
                              const torch::Tensor& positions,
@@ -236,21 +247,20 @@ ModelOutput AclGraph::replay(CausalLM* model,
   // be updated when Full Attention layers are involved, which is determined
   // by k_cache being valid and non-empty
   auto [k_cache, v_cache] = find_attention_plan_kv_cache(kv_cache);
-  auto graph_params =
+  const bool needs_graph_metadata = model->requires_graph_forward_metadata();
+  std::optional<ModelInputParams> graph_params =
       persistent_param_.update(tokens,
                                k_cache,
                                v_cache,
                                positions,
                                params,
                                num_tokens_,
-                               model->requires_graph_forward_metadata());
-  if (model->requires_graph_forward_metadata()) {
+                               needs_graph_metadata);
+  if (needs_graph_metadata) {
     CHECK(graph_params.has_value())
         << "ACL graph replay requires persistent params for graph metadata";
-    CHECK(model_graph_metadata_state_)
-        << "ACL graph metadata state must be initialized during capture";
-    model->prepare_graph_forward_metadata(
-        model_graph_metadata_state_.get(),
+    prepare_model_graph_metadata(
+        model,
         persistent_param_.persistent_positions(num_tokens_),
         graph_params.value());
   }
@@ -261,15 +271,12 @@ ModelOutput AclGraph::replay(CausalLM* model,
 
   graph_.replay();
 
-  // NPUGraph replays on its capture stream. Add a device-side dependency so
-  // the current/default stream only observes completed outputs.
   make_current_stream_wait_for_graph(stream);
 
   // Return the actual num_tokens portion of ModelOutput
   // Note: aux_hidden_states handling is done in AclGraphExecutorImpl::run()
   // since replay() doesn't have access to options
-  auto hidden_states = get_hidden_states(actual_num_tokens);
-  return ModelOutput(hidden_states);
+  return ModelOutput(get_hidden_states(actual_num_tokens));
 }
 
 AclGraphExecutorImpl::AclGraphExecutorImpl(CausalLM* model,
@@ -277,7 +284,6 @@ AclGraphExecutorImpl::AclGraphExecutorImpl(CausalLM* model,
                                            const torch::Device& device,
                                            const runtime::Options& options)
     : model_(model), args_(args), device_(device), options_(options) {
-  // Create single persistent parameter object shared by all AclGraph instances
   const bool need_update_attn_mask = is_qwen3_5_model_type(args.model_type());
   persistent_param_ = std::make_unique<GraphPersistentParam>(
       args_, device_, options_, need_update_attn_mask);
@@ -391,7 +397,6 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   }
 
   const uint32_t bucket_num_tokens = get_bucket_num_tokens(graph_num_tokens);
-  const uint64_t graph_key = get_graph_key(bucket_num_tokens, params_single);
 
   // Check if conditions are suitable for graph execution (replay or capture)
   const auto max_seq_len = args_.max_position_embeddings();
@@ -412,6 +417,8 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     COUNTER_INC(num_model_execution_total_eager);
     return model_->forward(tokens, positions, kv_caches, params);
   }
+
+  const uint64_t graph_key = get_graph_key(bucket_num_tokens, params_single);
 
   // Check if captured graph exists for this bucket num_tokens
   auto it = graphs_.find(graph_key);

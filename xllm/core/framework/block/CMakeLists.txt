@@ -40,6 +40,7 @@ cc_library(
     $<$<BOOL:${USE_NPU}>:graph>
     :request
     :common
+    :prefix_cache
     glog::glog
     Boost::serialization
     SMHasherSupport

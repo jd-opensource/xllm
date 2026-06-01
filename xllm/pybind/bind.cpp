@@ -51,6 +51,8 @@ PYBIND11_MODULE(xllm_export, m) {
       .def_readwrite("max_memory_utilization",
                      &Options::max_memory_utilization_)
       .def_readwrite("enable_prefix_cache", &Options::enable_prefix_cache_)
+      .def_readwrite("max_encoder_cache_size",
+                     &Options::max_encoder_cache_size_)
       .def_readwrite("max_tokens_per_batch", &Options::max_tokens_per_batch_)
       .def_readwrite("max_seqs_per_batch", &Options::max_seqs_per_batch_)
       .def_readwrite("max_tokens_per_chunk_for_prefill",

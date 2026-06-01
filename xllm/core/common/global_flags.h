@@ -51,6 +51,8 @@ DECLARE_string(kv_cache_dtype);
 
 DECLARE_bool(enable_prefix_cache);
 
+DECLARE_int64(max_encoder_cache_size);
+
 DECLARE_uint32(xxh3_128bits_seed);
 
 DECLARE_int32(max_tokens_per_batch);
@@ -102,6 +104,8 @@ DECLARE_int64(sp_size);
 DECLARE_int64(cfg_size);
 
 DECLARE_bool(enable_prefill_sp);
+
+DECLARE_bool(enable_mm_encoder_dp);
 
 DECLARE_bool(enable_multi_stream_parallel);
 

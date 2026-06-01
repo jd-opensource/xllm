@@ -32,6 +32,7 @@ limitations under the License.
 #include "glm4v.h"
 #include "models/llm/npu/glm4_moe.h"
 #include "models/model_registry.h"
+#include "models/vlm/utils/multimodal_utils.h"
 #include "processors/glm4v_image_processor.h"
 #include "processors/glm4v_input_processor.h"
 
@@ -42,10 +43,11 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
   Glm4vMoeForConditionalGenerationImpl(const ModelContext& context)
       : model_args_(context.get_model_args()),
         options_(context.get_tensor_options()) {
-    ModelContext vision_context(ParallelArgs(0, 1, nullptr),
-                                model_args_,
-                                context.get_quant_args(),
-                                options_);
+    encoder_dp_group_ = context.get_parallel_args().encoder_dp_group_;
+    use_encoder_dp_ =
+        encoder_dp_group_ != nullptr && encoder_dp_group_->world_size() > 1;
+    ModelContext vision_context = context.with_parallel_args(ParallelArgs(
+        /*rank=*/0, /*world_size=*/1, /*process_group=*/nullptr));
     visual_ = register_module("visual", Glm4VisionTransformer(vision_context));
 
     language_model_ =
@@ -84,52 +86,37 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
     std::optional<Glm4VVideoInputs> video_input;
     prepare_encoder_input(input_params, image_input, video_input);
 
-    auto merge_size = model_args_.mm_image_merge_size();
     MMDict multimodal_embeds;
     if (image_input) {
-      // visual
-      auto image_embeds = visual_(image_input->pixel_values.to(options_),
-                                  image_input->image_grid_thw,
-                                  input_params);
-      auto image_tokens =
-          (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
-              .cpu()
-              .contiguous()
-              .to(torch::kLong);
-
-      std::vector<int64_t> image_tokens_vec(
-          image_tokens.data_ptr<int64_t>(),
-          image_tokens.data_ptr<int64_t>() + image_tokens.numel());
-      multimodal_embeds["image|embedding"] =
-          image_embeds.split(image_tokens_vec, /*dim=*/0);
+      torch::Tensor image_pixels = image_input->pixel_values.to(options_);
+      torch::Tensor image_grid =
+          image_input->image_grid_thw.to(options_.device());
+      std::vector<int32_t> image_token_nums =
+          get_mm_token_nums(input_params.multimodal.mm_data, MMType::IMAGE);
+      if (!use_encoder_dp_) {
+        auto image_embeds = visual_(image_pixels, image_grid);
+        multimodal_embeds["image|embedding"] =
+            split_by_token_nums(image_embeds, image_token_nums);
+      } else {
+        multimodal_embeds["image|embedding"] =
+            run_dp_encoder(visual_,
+                           image_pixels,
+                           image_grid,
+                           image_token_nums,
+                           model_args_.mm_projection_dim(),
+                           encoder_dp_group_);
+      }
     }
     if (video_input) {
-      std::vector<torch::Tensor> temp_frames_hw;
-      for (int i = 0; i < video_input->video_grid_thw.size(0); ++i) {
-        auto t = video_input->video_grid_thw[i][0].item<int32_t>();
-        auto h = video_input->video_grid_thw[i][1].item<int32_t>();
-        auto w = video_input->video_grid_thw[i][2].item<int32_t>();
-        auto repeated_row =
-            torch::tensor({1, h, w}).unsqueeze(0).repeat({t, 1});
-        temp_frames_hw.push_back(repeated_row);
-      }
-      auto flatten_video_grid_thw = torch::cat(temp_frames_hw, 0);
-      // visual
-      auto video_embeds = visual_(video_input->pixel_values_videos.to(options_),
-                                  flatten_video_grid_thw,
-                                  input_params);
-      auto t = video_input->video_grid_thw.index({torch::indexing::Slice(), 0});
-      auto video_tokens =
-          ((video_input->video_grid_thw.prod(-1) / merge_size / merge_size) / t)
-              .cpu()
-              .contiguous()
-              .to(torch::kLong);
-      std::vector<int64_t> video_tokens_vec(
-          video_tokens.data_ptr<int64_t>(),
-          video_tokens.data_ptr<int64_t>() + video_tokens.numel());
-
+      torch::Tensor video_pixels =
+          video_input->pixel_values_videos.to(options_);
+      torch::Tensor video_grid =
+          video_input->video_grid_thw.to(options_.device());
+      std::vector<int32_t> video_token_nums =
+          get_mm_token_nums(input_params.multimodal.mm_data, MMType::VIDEO);
+      auto video_embeds = visual_(video_pixels, video_grid);
       multimodal_embeds["video|embedding"] =
-          video_embeds.split(video_tokens_vec, /*dim=*/0);
+          split_by_token_nums(video_embeds, video_token_nums);
     }
     return multimodal_embeds;
   }
@@ -205,6 +192,8 @@ class Glm4vMoeForConditionalGenerationImpl : public torch::nn::Module {
  private:
   ModelArgs model_args_;
   torch::TensorOptions options_;
+  ProcessGroup* encoder_dp_group_ = nullptr;
+  bool use_encoder_dp_ = false;
   Glm4VisionTransformer visual_{nullptr};
   Glm4MoeForCausalLM language_model_{nullptr};
 };

@@ -78,8 +78,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
     if (image_input) {
       auto image_embeds =
           visual_(image_input->pixel_values.to(options_),
-                  image_input->image_grid_thw.to(options_.device()),
-                  input_params);
+                  image_input->image_grid_thw.to(options_.device()));
 
       auto image_tokens =
           (image_input->image_grid_thw.prod(-1) / merge_size / merge_size)
@@ -96,8 +95,7 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
     if (video_input) {
       auto video_embeds =
           visual_(video_input->pixel_values_videos.to(options_),
-                  video_input->video_grid_thw.to(options_.device()),
-                  input_params);
+                  video_input->video_grid_thw.to(options_.device()));
 
       auto video_tokens =
           (video_input->video_grid_thw.prod(-1) / merge_size / merge_size)

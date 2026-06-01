@@ -34,6 +34,7 @@ limitations under the License.
 #include "core/distributed_runtime/master.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/service_config.h"
 #include "framework/kv_cache/kv_cache_estimation.h"
 #include "framework/kv_cache/kv_cache_shape.h"
 #include "framework/model/model_args.h"
@@ -209,6 +210,8 @@ bool VLMEngine::init_model() {
 KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
   const int64_t max_cache_size = options_.max_cache_size();
   const double max_memory_utilization = options_.max_memory_utilization();
+  const int64_t encoder_cache_reserved_bytes =
+      options_.max_encoder_cache_size() * 1024 * 1024;
 
   std::vector<folly::SemiFuture<std::tuple<int64_t, int64_t>>> futures;
   futures.reserve(worker_clients_num_);
@@ -229,7 +232,9 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
               << ": available memory: " << readable_size(available_memory)
               << ", total memory: " << readable_size(total_memory)
               << ". Using max_memory_utilization: " << max_memory_utilization
-              << ", max_cache_size: " << readable_size(max_cache_size);
+              << ", max_cache_size: " << readable_size(max_cache_size)
+              << ", encoder_cache_reserved: "
+              << readable_size(encoder_cache_reserved_bytes);
     GAUGE_SET(weight_size_in_kilobytes,
               (total_memory - available_memory) / 1024);
     GAUGE_SET(total_memory_size_in_kilobytes, total_memory / 1024);
@@ -242,6 +247,9 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
     if (max_cache_size > 0) {
       available_memory = std::min(available_memory, max_cache_size);
     }
+
+    available_memory -= encoder_cache_reserved_bytes;
+
     cache_size_in_bytes = std::min(cache_size_in_bytes, available_memory);
   }
 
@@ -256,6 +264,8 @@ KVCacheCapacity VLMEngine::estimate_kv_cache_capacity() {
   estimate_options.n_local_linear_v_heads = n_local_linear_v_heads_;
   estimate_options.max_seqs_per_batch =
       static_cast<int64_t>(options_.max_seqs_per_batch());
+  estimate_options.max_concurrent_requests = static_cast<int64_t>(
+      ::xllm::ServiceConfig::get_instance().max_concurrent_requests());
   estimate_options.is_draft_engine = options_.is_draft_engine();
   estimate_options.enable_prefix_cache =
       ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
@@ -302,7 +312,9 @@ bool VLMEngine::allocate_kv_cache(const KVCacheCapacity& kv_cache_cap) {
       .enable_prefix_cache(options_.enable_prefix_cache())
       .enable_disagg_pd(options_.enable_disagg_pd())
       .enable_cache_upload(options_.enable_cache_upload())
-      .hasher_type(BlockHasherType::MM);
+      .hasher_type(BlockHasherType::MM)
+      .max_concurrent_requests(
+          ::xllm::ServiceConfig::get_instance().max_concurrent_requests());
   kv_cache_manager_ = std::make_unique<BlockManagerPool>(options, dp_size_);
 
   // init kv cache for each worker in parallel

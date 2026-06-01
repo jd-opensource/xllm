@@ -43,13 +43,21 @@ struct MMItemState {
   const torch::Tensor& mm_token_mask() const { return mm_token_mask_; }
   torch::Tensor& mutable_mm_token_mask() { return mm_token_mask_; }
 
+  int32_t mm_token_num() const { return mm_token_num_; }
+  int32_t& mutable_mm_token_num() { return mm_token_num_; }
+
   const ScheduleData& schedule_data() const { return schedule_data_; }
   ScheduleData& mutable_schedule_data() { return schedule_data_; }
+
+  int32_t seq_index() const { return seq_index_; }
+  int32_t& mutable_seq_index() { return seq_index_; }
 
  private:
   TokenPos token_pos_;
   torch::Tensor mm_token_mask_;
+  int32_t mm_token_num_ = 0;
   ScheduleData schedule_data_;
+  int32_t seq_index_ = -1;
 };
 
 }  // namespace xllm

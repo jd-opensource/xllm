@@ -48,7 +48,7 @@ class RecBatchInputBuilder {
       uint64_t batch_id,
       const ModelArgs* args,
       BatchForwardType batch_forward_type,
-      ThreadPool* thread_pool = nullptr);
+      MPMCThreadPool* thread_pool = nullptr);
 };
 
 }  // namespace xllm

@@ -258,9 +258,14 @@ inline size_t get_mm_item_size(const MMDataItem& mm_item) {
 
   // token_pos
   total += type_size<int32_t> * 2;
+  // mm_token_num
+  total += type_size<int32_t>;
 
   // mm_token_mask
   total += get_tensor_size(mm_item.state().mm_token_mask());
+
+  // seq_index
+  total += type_size<int32_t>;
 
   // schedule_data
   total += XXH3_128BITS_HASH_VALUE_LEN;
@@ -867,12 +872,13 @@ inline void write_mm_dict(RawInputSerializeContext& context,
 inline void write_mm_item(char*& buffer, const MMDataItem& item) {
   write_data(buffer, item.type());
   write_mm_dict(buffer, item.data());
-  write_data(buffer, item.seq_index());
 
   const auto& state = item.state();
+  write_data(buffer, state.seq_index());
   // write token_pos
   write_data(buffer, state.token_pos().offset);
   write_data(buffer, state.token_pos().length);
+  write_data(buffer, state.mm_token_num());
 
   // write mm_token_mask
   write_tensor(buffer, state.mm_token_mask());
@@ -888,14 +894,13 @@ inline void write_mm_item(RawInputSerializeContext& context,
                           const MMDataItem& item) {
   write_data(context.descriptor, item.type());
   write_mm_dict(context, item.data());
-  write_data(context.descriptor, item.seq_index());
 
   const auto& state = item.state();
+  write_data(context.descriptor, state.seq_index());
   write_data(context.descriptor, state.token_pos().offset);
   write_data(context.descriptor, state.token_pos().length);
-
+  write_data(context.descriptor, state.mm_token_num());
   write_tensor(context, state.mm_token_mask());
-
   write_bytes(context.descriptor,
               state.schedule_data().key.data,
               XXH3_128BITS_HASH_VALUE_LEN);
@@ -1736,14 +1741,13 @@ inline void read_mm_item(const char*& buffer,
   read_mm_dict(buffer, dict, device_buffer);
   auto mm_type_value = static_cast<MMType::Value>(type);
   item = std::move(MMDataItem(mm_type_value, dict));
-  int32_t seq_index;
-  read_data(buffer, seq_index, device_buffer);
-  item.set_seq_index(seq_index);
   auto& state = item.mutable_state();
+  read_data(buffer, state.mutable_seq_index(), device_buffer);
 
   // read token_pos
   read_data(buffer, state.mutable_token_pos().offset, device_buffer);
   read_data(buffer, state.mutable_token_pos().length, device_buffer);
+  read_data(buffer, state.mutable_mm_token_num(), device_buffer);
 
   // read mm_token_mask
   read_tensor(buffer, state.mutable_mm_token_mask(), device_buffer);
@@ -1765,13 +1769,12 @@ inline void read_mm_item(ReadContext& context, MMDataItem& item) {
   read_mm_dict(context, dict);
   auto mm_type_value = static_cast<MMType::Value>(type);
   item = std::move(MMDataItem(mm_type_value, dict));
-  int32_t seq_index;
-  read_data(context, seq_index);
-  item.set_seq_index(seq_index);
   auto& state = item.mutable_state();
+  read_data(context, state.mutable_seq_index());
 
   read_data(context, state.mutable_token_pos().offset);
   read_data(context, state.mutable_token_pos().length);
+  read_data(context, state.mutable_mm_token_num());
 
   read_tensor(context, state.mutable_mm_token_mask());
 

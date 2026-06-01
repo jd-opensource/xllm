@@ -66,8 +66,7 @@ class Qwen2_5_VLForMMEmbeddingImpl : public torch::nn::Module {
 
     CHECK(image_inputs.has_value());
     auto image_embeds = visual_(image_inputs->pixel_values.to(options_),
-                                image_inputs->image_grid_thw,
-                                input_params);
+                                image_inputs->image_grid_thw);
 
     std::vector<torch::Tensor> mm_embeddings;
 

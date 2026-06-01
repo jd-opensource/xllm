@@ -241,7 +241,9 @@ TEST(BlockManagerPoolTest, AllocateAssignsSingleBlockWhenEnabled) {
   Sequence seq = MakeSequence(0, /*prompt_tokens=*/{1, 2, 3});
   EXPECT_TRUE(pool.allocate(&seq));
   EXPECT_TRUE(HasSingleBlockIdOrFail(seq));
-  EXPECT_GE(GetSingleBlockIdOrFail(seq), 0);
+  // id 0 is the reserved padding slot, so a real assignment is strictly
+  // positive.
+  EXPECT_GT(GetSingleBlockIdOrFail(seq), 0);
 }
 
 TEST(BlockManagerPoolTest, DeallocateReleasesSingleBlockId) {

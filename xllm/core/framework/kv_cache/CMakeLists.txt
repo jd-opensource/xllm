@@ -17,6 +17,7 @@ cc_library(
   SRCS
     kv_cache_estimation.cpp
   DEPS
+    :common
     :deepseek_v4_cache_policy
     :block_utils
     glog::glog

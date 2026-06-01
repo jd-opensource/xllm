@@ -39,9 +39,14 @@ DEFINE_string(devices,
               "Devices to run the model on, e.g. npu:0, npu:0,npu:1.");
 
 DEFINE_int32(limit_image_per_prompt,
-             4,
+             8,
              "Maximum number of image per prompt. Only applicable for "
              "multimodal models.");
+
+DEFINE_int64(max_encoder_cache_size,
+             0,
+             "Max gpu/npu memory size in MB for encoder cache per worker. "
+             "Default is 0, which disables encoder cache.");
 
 DEFINE_string(reasoning_parser,
               "",
@@ -53,7 +58,7 @@ DEFINE_string(tool_call_parser,
               "",
               "Specify the parser for handling tool-call interactions(e.g. "
               "auto, qwen25, qwen3, qwen35, qwen3_coder, kimi_k2, "
-              "deepseekv3, glm45, glm47, glm5).");
+              "deepseekv3, deepseekv32, deepseekv4, glm45, glm47, glm5).");
 
 DEFINE_bool(enable_qwen3_reranker, false, "Whether to enable qwen3 reranker.");
 
@@ -76,7 +81,7 @@ DEFINE_bool(
 DEFINE_bool(use_cpp_chat_template,
             true,
             "Use native C++ chat template for supported models "
-            "(e.g. deepseek_v32) instead of Jinja. "
+            "(e.g. deepseek_v32, deepseek_v4) instead of Jinja. "
             "Set to false to fallback to Jinja for debugging.");
 
 namespace xllm {
@@ -95,6 +100,7 @@ void ModelConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(task);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(devices);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(limit_image_per_prompt);
+  XLLM_CONFIG_ASSIGN_FROM_FLAG(max_encoder_cache_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(reasoning_parser);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(tool_call_parser);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(enable_qwen3_reranker);
@@ -126,6 +132,7 @@ void ModelConfig::from_json(const JsonReader& json) {
   // don't read rank-related config
   // XLLM_CONFIG_ASSIGN_FROM_JSON(devices);
   XLLM_CONFIG_ASSIGN_FROM_JSON(limit_image_per_prompt);
+  XLLM_CONFIG_ASSIGN_FROM_JSON(max_encoder_cache_size);
   XLLM_CONFIG_ASSIGN_FROM_JSON(reasoning_parser);
   XLLM_CONFIG_ASSIGN_FROM_JSON(tool_call_parser);
   XLLM_CONFIG_ASSIGN_FROM_JSON(enable_qwen3_reranker);
@@ -148,6 +155,8 @@ void ModelConfig::append_config_json(
   //  devices);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, limit_image_per_prompt);
+  APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
+      config_json, default_config, max_encoder_cache_size);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(
       config_json, default_config, reasoning_parser);
   APPEND_CONFIG_JSON_VALUE_IF_NOT_DEFAULT(

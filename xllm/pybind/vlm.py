@@ -20,11 +20,12 @@ class VLM:
         devices: str = 'npu:0',
         draft_model: Optional[str] = '',
         draft_devices: Optional[str] = 'npu:0',
-        limit_image_per_prompt: int = 4,
+        limit_image_per_prompt: int = 8,
         block_size: int = 128,
         max_cache_size: int = 0,
         max_memory_utilization: float = 0.8,
         enable_prefix_cache: bool = True,
+        max_encoder_cache_size: int = 0,
         max_tokens_per_batch: int = 10240,
         max_seqs_per_batch: int = 1024,
         max_tokens_per_chunk_for_prefill: int = -1,
@@ -81,6 +82,7 @@ class VLM:
         options.max_cache_size = max_cache_size
         options.max_memory_utilization = max_memory_utilization
         options.enable_prefix_cache = enable_prefix_cache
+        options.max_encoder_cache_size = max_encoder_cache_size
         options.max_tokens_per_batch = max_tokens_per_batch
         options.max_seqs_per_batch = max_seqs_per_batch
         options.max_tokens_per_chunk_for_prefill = max_tokens_per_chunk_for_prefill
