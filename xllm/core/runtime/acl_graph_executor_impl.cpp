@@ -332,8 +332,8 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     return model_->forward(tokens, positions, kv_caches, params);
   }
 
-  // Only use acl graph in decode or qwen3.5 spec verify phase for optimization.
-  // For DP, decode graph bucket should be based on global max tokens across DP
+  // Only use acl graph in decode phase for performance optimization.
+  // For DP, decode graph bucket should be based on global max tokens across dp
   // groups; local shard can be empty on some ranks.
   uint32_t graph_num_tokens = tokens_tensor.size(/*dim=*/0);
   if (params_single.parallel.dp_global_token_nums.size() > 1) {
