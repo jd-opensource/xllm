@@ -18,7 +18,7 @@ limitations under the License.
 #include <limits>
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 
 DEFINE_bool(enable_profile_step_time,
             false,

@@ -16,7 +16,7 @@ limitations under the License.
 #include "core/framework/config/beam_search_config.h"
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 
 DEFINE_bool(enable_beam_search_kernel,
             false,

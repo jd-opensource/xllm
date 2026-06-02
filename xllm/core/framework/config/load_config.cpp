@@ -16,7 +16,7 @@ limitations under the License.
 #include "core/framework/config/load_config.h"
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 
 DEFINE_bool(enable_manual_loader,
             false,

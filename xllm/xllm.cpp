@@ -34,7 +34,7 @@ limitations under the License.
 #include "core/distributed_runtime/master.h"
 #include "core/distributed_runtime/vlm_master.h"
 #include "core/framework/config/beam_search_config.h"
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 #include "core/framework/config/disagg_pd_config.h"
 #include "core/framework/config/distributed_config.h"
 #include "core/framework/config/dit_config.h"
@@ -121,7 +121,6 @@ Options create_options(const std::string& instance_name, bool is_local) {
       .task_type(model_config.task())
       .devices(model_config.devices())
       .draft_model_path(speculative_config.draft_model())
-      .draft_devices(speculative_config.draft_devices())
       .backend(model_config.backend())
       .limit_image_per_prompt(model_config.limit_image_per_prompt())
       .max_encoder_cache_size(model_config.max_encoder_cache_size())
@@ -227,6 +226,14 @@ Options create_options(const std::string& instance_name, bool is_local) {
       .rec_worker_max_concurrency(
           static_cast<int32_t>(rec_config.rec_worker_max_concurrency()))
       .is_local(is_local);
+
+  if (speculative_config.num_speculative_tokens() > 0) {
+    const std::string draft_devices = speculative_config.draft_devices().empty()
+                                          ? model_config.devices()
+                                          : speculative_config.draft_devices();
+    options.draft_devices(draft_devices);
+  }
+
   return options;
 }
 

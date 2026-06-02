@@ -18,7 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 #include "core/framework/config/eplb_config.h"
 
 #if defined(USE_NPU)

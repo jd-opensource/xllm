@@ -16,7 +16,7 @@ limitations under the License.
 #include "core/framework/config/dit_config.h"
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 
 DEFINE_int32(max_requests_per_batch, 1, "Max number of request per batch.");
 

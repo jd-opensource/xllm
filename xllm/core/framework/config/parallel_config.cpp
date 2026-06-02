@@ -16,7 +16,7 @@ limitations under the License.
 #include "core/framework/config/parallel_config.h"
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 
 DEFINE_int32(dp_size, 1, "Data parallel size for MLA attention.");
 

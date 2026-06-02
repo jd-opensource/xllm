@@ -16,7 +16,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 
 DEFINE_int32(max_tokens_per_batch, 10240, "Max number of tokens per batch.");
 

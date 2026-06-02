@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
@@ -154,6 +154,14 @@ JsonReader parse_json_string(std::string_view config_json) {
     reader.parse_text(std::string(config_json));
   }
   return reader;
+}
+
+bool is_flag_specified(const char* flag_name) {
+  google::CommandLineFlagInfo flag_info;
+  if (!google::GetCommandLineFlagInfo(flag_name, &flag_info)) {
+    return false;
+  }
+  return !flag_info.is_default;
 }
 
 const std::optional<JsonReader>& get_parsed_json_config() {

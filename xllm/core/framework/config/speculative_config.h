@@ -58,7 +58,7 @@ class SpeculativeConfig final {
 
   PROPERTY(std::string, draft_model);
 
-  PROPERTY(std::string, draft_devices) = "npu:0";
+  PROPERTY(std::string, draft_devices) = "";
 
   PROPERTY(int32_t, num_speculative_tokens) = 0;
 

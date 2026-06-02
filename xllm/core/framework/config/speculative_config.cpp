@@ -15,14 +15,18 @@ limitations under the License.
 
 #include "core/framework/config/speculative_config.h"
 
+#include <glog/logging.h>
+
 #include "core/common/global_flags.h"
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 
 DEFINE_string(draft_model, "", "draft hf model path to the model file.");
 
 DEFINE_string(draft_devices,
-              "npu:0",
-              "Devices to run the draft model on, e.g. npu:0, npu:0,npu:1.");
+              "",
+              "Devices to run the draft model on, e.g. npu:0, npu:0,npu:1. "
+              "If omitted, uses the target model devices when speculative "
+              "decoding is enabled.");
 
 DEFINE_int32(num_speculative_tokens, 0, "Number of speculative tokens.");
 
@@ -71,6 +75,10 @@ namespace xllm {
 
 void SpeculativeConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(draft_model);
+  if (config::is_flag_specified("draft_devices")) {
+    LOG(WARNING) << "--draft_devices is deprecated and will be removed in a "
+                    "future release. Because it's same as --devices.";
+  }
   XLLM_CONFIG_ASSIGN_FROM_FLAG(draft_devices);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(num_speculative_tokens);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(speculative_algorithm);

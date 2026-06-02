@@ -31,6 +31,8 @@ JsonReader parse_json_string(std::string_view config_json);
 
 const std::optional<JsonReader>& get_parsed_json_config();
 
+bool is_flag_specified(const char* flag_name);
+
 void dump_startup_config();
 
 }  // namespace xllm::config

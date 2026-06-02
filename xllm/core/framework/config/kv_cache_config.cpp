@@ -16,7 +16,7 @@ limitations under the License.
 #include "core/framework/config/kv_cache_config.h"
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 
 DEFINE_int32(block_size,
              128,

@@ -18,7 +18,7 @@ limitations under the License.
 #include <glog/logging.h>
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 #include "core/util/device_name_utils.h"
 
 DEFINE_string(model_id, "", "hf model name.");
@@ -95,14 +95,6 @@ bool is_cpp_chat_template_supported_model(const std::string& model_type) {
   return model_type == "deepseek_v32" || model_type == "deepseek_v4";
 }
 
-bool is_flag_specified(const std::string& flag_name) {
-  google::CommandLineFlagInfo flag_info;
-  if (!google::GetCommandLineFlagInfo(flag_name.c_str(), &flag_info)) {
-    return false;
-  }
-  return !flag_info.is_default;
-}
-
 }  // namespace
 
 void ModelConfig::from_flags() {
@@ -111,8 +103,8 @@ void ModelConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(backend);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(task);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(device_id);
-  const bool devices_specified = is_flag_specified("devices");
-  const bool device_id_specified = is_flag_specified("device_id");
+  const bool devices_specified = config::is_flag_specified("devices");
+  const bool device_id_specified = config::is_flag_specified("device_id");
   if (devices_specified) {
     LOG(WARNING) << "--devices is deprecated and will be removed in a future "
                     "release. Use --device_id instead.";

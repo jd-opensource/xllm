@@ -16,7 +16,7 @@ limitations under the License.
 #include "core/framework/config/distributed_config.h"
 
 #include "core/common/global_flags.h"
-#include "core/framework/config/config_json_utils.h"
+#include "core/framework/config/config_utils.h"
 
 DEFINE_string(master_node_addr,
               "127.0.0.1:19888",
