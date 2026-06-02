@@ -58,6 +58,17 @@ ceil_div(T a, T b) {
   return (a + b - 1) / b;
 }
 
+#if defined(__CUDACC__) || defined(_NVHPC_CUDA) || defined(__HIPCC__)
+template <typename T>
+DEVICE_INLINE T xllm_ldg(const T* ptr) {
+#if defined(USE_DCU)
+  return *ptr;
+#else
+  return __ldg(ptr);
+#endif
+}
+#endif
+
 enum class ActivationType : int8_t {
   GELU = 0,
   RELU = 1,

@@ -70,18 +70,6 @@ __inline__ __device__ T warp_reduce_sum(T val) {
   return val;
 }
 
-#if defined(USE_DCU)
-template <typename T>
-__device__ __forceinline__ T xllm_ldg(const T* ptr) {
-  return *ptr;
-}
-#else
-template <typename T>
-__device__ __forceinline__ T xllm_ldg(const T* ptr) {
-  return __ldg(ptr);
-}
-#endif
-
 template <typename T>
 inline __device__ __host__ T div_up(T m, T n) {
   return (m + n - 1) / n;
