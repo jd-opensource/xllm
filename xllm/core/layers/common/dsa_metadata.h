@@ -117,6 +117,11 @@ struct DSAMetadata {
   //   prefill: pad(cumsum(context_length), (1,0), 0)
   //   decode:  pad(cumsum(ones(batch_size)), (1,0), 0)
   torch::Tensor actual_seq_lengths_query;
+  // kv_cu_seq_lens: (batch_size+1,) — pad(cumsum(actual_seq_lengths_kv),
+  // (1,0)). Built once per forward and reused by all layers so the per-layer
+  // indexer metadata builder does not recompute a host-side cumsum on every DSA
+  // layer.
+  torch::Tensor kv_cu_seq_lens;
   // max_seqlen_kv / max_seqlen_q: max sequence lengths
   torch::Tensor max_seqlen_kv;
   torch::Tensor max_seqlen_q;

@@ -628,6 +628,18 @@ void DSAMetadataBuilder::build_seq_lengths(const ModelInputParams& params,
       torch::cat({torch::zeros({1}, int_options), cumsum});
   dsa_metadata.seq_lens_q = q_lens;
 
+  // Precompute the kv cumulative sequence lengths once per forward so the
+  // per-layer indexer metadata builder can reuse it instead of running a
+  // host-side cumsum on every DSA layer (kv_lens is identical across layers
+  // within one forward).
+  if (kv_lens.numel() > 0) {
+    torch::Tensor kv_lens_i32 = kv_lens.to(torch::kInt32);
+    torch::Tensor kv_cumsum =
+        torch::cumsum(kv_lens_i32, /*dim=*/0, /*dtype=*/torch::kInt32);
+    dsa_metadata.kv_cu_seq_lens =
+        torch::cat({torch::zeros({1}, int_options), kv_cumsum});
+  }
+
   if (kv_lens.numel() > 0) {
     dsa_metadata.max_seqlen_kv = torch::max(kv_lens).to(torch::kInt32);
   } else {
