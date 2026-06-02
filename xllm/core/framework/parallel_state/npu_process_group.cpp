@@ -170,9 +170,10 @@ ProcessGroupImpl::ProcessGroupImpl(int32_t global_rank,
 // Destructor.
 ProcessGroupImpl::~ProcessGroupImpl() {
   if (pg_) {
-    pg_->shutdown();
-  } else {
+    shutdown_backend();
+  } else if (comm_ != nullptr) {
     HCCLCHECK(HcclCommDestroy(comm_));
+    comm_ = nullptr;
   }
   Device::empty_cache(device().index());
 }

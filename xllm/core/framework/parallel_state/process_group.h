@@ -43,7 +43,7 @@ class ProcessGroup {
   ProcessGroup(int32_t rank, int32_t world_size, const torch::Device& device)
       : rank_(rank), world_size_(world_size), device_(device) {}
 
-  virtual ~ProcessGroup() = default;
+  virtual ~ProcessGroup();
 
   int32_t rank() const {
     if (pg_ == nullptr) {
@@ -114,6 +114,8 @@ class ProcessGroup {
   torch::Device device_;
 
  protected:
+  void shutdown_backend();
+
 #if defined(USE_NPU) &&         \
     (TORCH_VERSION_MAJOR < 2 || \
      (TORCH_VERSION_MAJOR == 2 && TORCH_VERSION_MINOR < 7))

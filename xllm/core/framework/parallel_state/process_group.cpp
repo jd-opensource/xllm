@@ -58,6 +58,16 @@ std::vector<int64_t> get_gather_shape(int32_t world_size,
 
 namespace xllm {
 
+ProcessGroup::~ProcessGroup() { shutdown_backend(); }
+
+void ProcessGroup::shutdown_backend() {
+  if (pg_ == nullptr) {
+    return;
+  }
+  pg_->shutdown();
+  pg_.reset();
+}
+
 std::pair<int, std::vector<uint64_t>> get_group_rank(int world_size,
                                                      int global_rank,
                                                      int split_size,
