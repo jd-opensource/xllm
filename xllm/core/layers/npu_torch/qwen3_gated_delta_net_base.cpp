@@ -573,57 +573,6 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
 
     mixed_qkv = reshape_qkvz_with_pad(attn_metadata, mixed_qkv);
     mixed_qkv = mixed_qkv.transpose(1, 2);
-  } else if (!use_spec_verify && !is_any_prefill && checkpoint_stride == 1) {
-    torch::IntArrayRef num_accepted_tokens_opt;
-    torch::IntArrayRef has_initial_state;
-    std::vector<int64_t> linear_state_indices_vec(
-        input_params.embedding.linear_state_ids.begin(),
-        input_params.embedding.linear_state_ids.end());
-    torch::Tensor mixed_qkv_input = mixed_qkv;
-    std::vector<int64_t> query_start_loc_decode;
-    std::vector<int64_t> linear_state_indices_vec_decode;
-    if (mixed_qkv.dim() == 3) {
-      const int64_t num_tokens = batch_size * seq_len;
-      mixed_qkv_input = mixed_qkv.view({num_tokens, mixed_qkv.size(-1)});
-
-      query_start_loc_decode.reserve(static_cast<size_t>(num_tokens + 1));
-      for (int64_t i = 0; i <= num_tokens; ++i) {
-        query_start_loc_decode.emplace_back(i);
-      }
-
-      linear_state_indices_vec_decode.reserve(static_cast<size_t>(num_tokens));
-      for (int64_t i = 0; i < batch_size; ++i) {
-        for (int64_t j = 0; j < seq_len; ++j) {
-          linear_state_indices_vec_decode.emplace_back(
-              linear_state_indices_vec[i]);
-        }
-      }
-    }
-
-    const std::vector<int64_t>& query_start_loc_to_use =
-        !query_start_loc_decode.empty() ? query_start_loc_decode
-                                        : input_params.parallel.query_start_loc;
-    const std::vector<int64_t>& linear_state_indices_to_use =
-        !linear_state_indices_vec_decode.empty()
-            ? linear_state_indices_vec_decode
-            : linear_state_indices_vec;
-    mixed_qkv = xllm::kernel::causal_conv1d(
-        mixed_qkv_input,
-        conv_weight,
-        conv_cache,
-        std::optional<torch::Tensor>(),  // bias (no bias for qwen3)
-        torch::IntArrayRef(query_start_loc_to_use),
-        torch::IntArrayRef(linear_state_indices_to_use),
-        has_initial_state,
-        num_accepted_tokens_opt,
-        1,   // activation_mode
-        -1,  // pad_slot_id
-        1    // run mode  0:fn, 1:update
-    );
-
-    mixed_qkv =
-        mixed_qkv.view({batch_size, -1, mixed_qkv.size(-1)}).contiguous();
-    mixed_qkv = mixed_qkv.transpose(1, 2);
   } else if (use_spec_verify) {
     CHECK(input_params.num_accepted_tokens.defined())
         << "num_accepted_tokens must be populated for Qwen3.5 spec verify";
