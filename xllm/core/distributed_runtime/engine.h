@@ -134,13 +134,13 @@ class Engine {
     return false;
   };
 
-  // D2D link for weight transfer - each worker links to one remote addr.
-  virtual bool link_d2d(const std::vector<std::string>& remote_addrs) {
+  // P2P link for weight transfer - each worker links to one remote addr.
+  virtual bool link_p2p(const std::vector<std::string>& remote_addrs) {
     NOT_IMPLEMENTED();
     return false;
   };
 
-  virtual bool unlink_d2d(const std::vector<std::string>& remote_addrs) {
+  virtual bool unlink_p2p(const std::vector<std::string>& remote_addrs) {
     NOT_IMPLEMENTED();
     return false;
   };

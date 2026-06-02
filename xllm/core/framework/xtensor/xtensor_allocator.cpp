@@ -638,7 +638,7 @@ void XTensorAllocator::record_weight_allocation(const std::string& model_id,
   tensors.using_weight_xtensor = false;
   tensors.weight_xtensor.reset();
 
-  // Populate weight_segments for D2D transfer support
+  // Populate weight_segments for P2P transfer support
   size_t page_size = global_xtensor.page_size();
   tensors.weight_segments.clear();
   tensors.weight_segments.push_back(
@@ -676,7 +676,7 @@ void XTensorAllocator::record_weight_fallback_allocation(
   tensors.weight_current_offset = 0;
   tensors.weight_start_page_id = -1;  // Not applicable for non-contiguous
 
-  // Populate weight_segments for D2D transfer support
+  // Populate weight_segments for P2P transfer support
   // Merge adjacent page_ids into contiguous segments
   size_t page_size = GlobalXTensor::get_instance().page_size();
   tensors.weight_segments.clear();

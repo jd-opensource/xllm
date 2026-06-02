@@ -528,25 +528,25 @@ void WorkerService::UnlinkCluster(::google::protobuf::RpcController* controller,
   return;
 }
 
-void WorkerService::LinkD2D(::google::protobuf::RpcController* controller,
-                            const proto::D2DLinkWorkerRequest* req,
+void WorkerService::LinkP2P(::google::protobuf::RpcController* controller,
+                            const proto::P2PLinkWorkerRequest* req,
                             proto::Status* resp,
                             ::google::protobuf::Closure* done) {
   threadpool_->schedule([this, controller, req, resp, done]() mutable {
     brpc::ClosureGuard done_guard(done);
-    bool status = worker_->link_d2d(req->remote_addr());
+    bool status = worker_->link_p2p(req->remote_addr());
     resp->set_ok(status);
   });
   return;
 }
 
-void WorkerService::UnlinkD2D(::google::protobuf::RpcController* controller,
-                              const proto::D2DLinkWorkerRequest* req,
+void WorkerService::UnlinkP2P(::google::protobuf::RpcController* controller,
+                              const proto::P2PLinkWorkerRequest* req,
                               proto::Status* resp,
                               ::google::protobuf::Closure* done) {
   threadpool_->schedule([this, controller, req, resp, done]() mutable {
     brpc::ClosureGuard done_guard(done);
-    bool status = worker_->unlink_d2d(req->remote_addr());
+    bool status = worker_->unlink_p2p(req->remote_addr());
     resp->set_ok(status);
   });
   return;

@@ -47,8 +47,8 @@ class WorkerRendezvous final {
                       const std::vector<std::string>& addrs,
                       const std::vector<uint16_t>& ports);
 
-  bool link_d2d(const std::string& remote_addr);
-  bool unlink_d2d(const std::string& remote_addr);
+  bool link_p2p(const std::string& remote_addr);
+  bool unlink_p2p(const std::string& remote_addr);
 
  private:
   bool validate_cluster_endpoints(const std::vector<uint64_t>& cluster_ids,

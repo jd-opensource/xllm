@@ -43,7 +43,7 @@ class Master {
 
   virtual bool wakeup(const WakeupOptions& options) { return false; }
 
-  virtual bool link_d2d(const std::vector<std::string>& remote_addrs) {
+  virtual bool link_p2p(const std::vector<std::string>& remote_addrs) {
     return false;
   }
 
@@ -57,7 +57,7 @@ class Master {
     return engine_ ? engine_->stop_profile() : false;
   }
 
-  virtual bool unlink_d2d(const std::vector<std::string>& remote_addrs) {
+  virtual bool unlink_p2p(const std::vector<std::string>& remote_addrs) {
     return false;
   }
 

@@ -835,7 +835,7 @@ bool LLMEngine::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return true;
 }
 
-bool LLMEngine::link_d2d(const std::vector<std::string>& remote_addrs) {
+bool LLMEngine::link_p2p(const std::vector<std::string>& remote_addrs) {
   if (remote_addrs.size() != worker_clients_num_) {
     LOG(ERROR) << "remote_addrs size " << remote_addrs.size()
                << " != worker_clients_num " << worker_clients_num_;
@@ -854,7 +854,7 @@ bool LLMEngine::link_d2d(const std::vector<std::string>& remote_addrs) {
                                 promise = std::move(promise),
                                 worker_rank,
                                 remote_addr]() mutable {
-      promise.setValue(worker_clients_[worker_rank]->link_d2d(remote_addr));
+      promise.setValue(worker_clients_[worker_rank]->link_p2p(remote_addr));
     });
     futures.emplace_back(std::move(future));
   }
@@ -862,14 +862,14 @@ bool LLMEngine::link_d2d(const std::vector<std::string>& remote_addrs) {
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
     if (!result.value()) {
-      LOG(ERROR) << "Link D2D failed.";
+      LOG(ERROR) << "Link P2P failed.";
       return false;
     }
   }
   return true;
 }
 
-bool LLMEngine::unlink_d2d(const std::vector<std::string>& remote_addrs) {
+bool LLMEngine::unlink_p2p(const std::vector<std::string>& remote_addrs) {
   if (remote_addrs.size() != worker_clients_num_) {
     LOG(ERROR) << "remote_addrs size " << remote_addrs.size()
                << " != worker_clients_num " << worker_clients_num_;
@@ -888,7 +888,7 @@ bool LLMEngine::unlink_d2d(const std::vector<std::string>& remote_addrs) {
                                 promise = std::move(promise),
                                 worker_rank,
                                 remote_addr]() mutable {
-      promise.setValue(worker_clients_[worker_rank]->unlink_d2d(remote_addr));
+      promise.setValue(worker_clients_[worker_rank]->unlink_p2p(remote_addr));
     });
     futures.emplace_back(std::move(future));
   }
@@ -896,7 +896,7 @@ bool LLMEngine::unlink_d2d(const std::vector<std::string>& remote_addrs) {
   auto results = folly::collectAll(futures).get();
   for (const auto& result : results) {
     if (!result.value()) {
-      LOG(ERROR) << "Unlink D2D failed.";
+      LOG(ERROR) << "Unlink P2P failed.";
       return false;
     }
   }
@@ -1266,7 +1266,7 @@ bool LLMEngine::wakeup(const WakeupOptions& options) {
 
   if (!options.remote_addrs.empty() &&
       options.remote_addrs.size() == worker_clients_num_) {
-    // D2D mode with TP: each worker pulls only from its corresponding source
+    // P2P mode with TP: each worker pulls only from its corresponding source
     for (size_t i = 0; i < worker_clients_num_; ++i) {
       WakeupOptions per_worker_options;
       per_worker_options.master_status = options.master_status;

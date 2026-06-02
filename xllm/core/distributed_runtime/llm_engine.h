@@ -112,10 +112,10 @@ class LLMEngine : public Engine {
                       const int32_t src_dp_size,
                       const int32_t src_kv_split_size = 1) override;
 
-  // D2D link for weight transfer - each worker links to one remote addr
-  bool link_d2d(const std::vector<std::string>& remote_addrs) override;
+  // P2P link for weight transfer - each worker links to one remote addr
+  bool link_p2p(const std::vector<std::string>& remote_addrs) override;
 
-  bool unlink_d2d(const std::vector<std::string>& remote_addrs) override;
+  bool unlink_p2p(const std::vector<std::string>& remote_addrs) override;
 
   std::shared_ptr<DistManager> get_dist_manager() { return dist_manager_; };
 

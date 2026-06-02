@@ -106,12 +106,12 @@ bool Worker::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return impl_->unlink_cluster(cluster_ids, addrs, ports);
 }
 
-bool Worker::link_d2d(const std::string& remote_addr) {
-  return impl_->link_d2d(remote_addr);
+bool Worker::link_p2p(const std::string& remote_addr) {
+  return impl_->link_p2p(remote_addr);
 }
 
-bool Worker::unlink_d2d(const std::string& remote_addr) {
-  return impl_->unlink_d2d(remote_addr);
+bool Worker::unlink_p2p(const std::string& remote_addr) {
+  return impl_->unlink_p2p(remote_addr);
 }
 
 std::tuple<int64_t, int64_t> Worker::estimate_kv_cache_capacity() {

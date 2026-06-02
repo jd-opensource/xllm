@@ -384,7 +384,7 @@ void BaseLoader::reload_weights() {
 void BaseLoader::reload_weights_from_device() {
   CHECK(mode_ == LoadMode::kManual)
       << "reload_weights_from_device is only valid in manual loader mode";
-  // D2D path: weights already transferred to GlobalXTensor weight region.
+  // P2P path: weights already transferred to GlobalXTensor weight region.
   // Call allocate_weight to get the pointer into the pre-allocated region.
   allocate_device_storage();
   init_device_at_weights();

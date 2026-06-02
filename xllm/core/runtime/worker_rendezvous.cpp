@@ -83,28 +83,28 @@ bool WorkerRendezvous::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return true;
 }
 
-bool WorkerRendezvous::link_d2d(const std::string& remote_addr) {
+bool WorkerRendezvous::link_p2p(const std::string& remote_addr) {
 #if defined(USE_NPU)
   if (!weight_transfer_) {
     LOG(ERROR) << "MooncakeWeightTransfer not initialized";
     return false;
   }
-  return weight_transfer_->link_d2d(remote_addr);
+  return weight_transfer_->link_p2p(remote_addr);
 #else
-  LOG(ERROR) << "link_d2d requires USE_NPU build";
+  LOG(ERROR) << "link_p2p requires USE_NPU build";
   return false;
 #endif
 }
 
-bool WorkerRendezvous::unlink_d2d(const std::string& remote_addr) {
+bool WorkerRendezvous::unlink_p2p(const std::string& remote_addr) {
 #if defined(USE_NPU)
   if (!weight_transfer_) {
     LOG(ERROR) << "MooncakeWeightTransfer not initialized";
     return false;
   }
-  return weight_transfer_->unlink_d2d(remote_addr);
+  return weight_transfer_->unlink_p2p(remote_addr);
 #else
-  LOG(ERROR) << "unlink_d2d requires USE_NPU build";
+  LOG(ERROR) << "unlink_p2p requires USE_NPU build";
   return false;
 #endif
 }

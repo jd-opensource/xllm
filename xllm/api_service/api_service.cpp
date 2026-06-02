@@ -1280,8 +1280,8 @@ void APIService::StopProfileHttp(::google::protobuf::RpcController* controller,
   // Success: return HTTP 200 with empty body
 }
 
-void APIService::LinkD2D(::google::protobuf::RpcController* controller,
-                         const proto::D2DLinkRequest* request,
+void APIService::LinkP2P(::google::protobuf::RpcController* controller,
+                         const proto::P2PLinkRequest* request,
                          proto::Status* response,
                          ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
@@ -1296,12 +1296,12 @@ void APIService::LinkD2D(::google::protobuf::RpcController* controller,
     response->set_ok(false);
     return;
   }
-  bool status = master->link_d2d(
+  bool status = master->link_p2p(
       {request->remote_addrs().begin(), request->remote_addrs().end()});
   response->set_ok(status);
 }
 
-void APIService::LinkD2DHttp(::google::protobuf::RpcController* controller,
+void APIService::LinkP2PHttp(::google::protobuf::RpcController* controller,
                              const proto::HttpRequest* request,
                              proto::HttpResponse* response,
                              ::google::protobuf::Closure* done) {
@@ -1313,7 +1313,7 @@ void APIService::LinkD2DHttp(::google::protobuf::RpcController* controller,
 
   auto arena = response->GetArena();
   auto req_pb =
-      google::protobuf::Arena::CreateMessage<proto::D2DLinkRequest>(arena);
+      google::protobuf::Arena::CreateMessage<proto::P2PLinkRequest>(arena);
   auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
@@ -1335,7 +1335,7 @@ void APIService::LinkD2DHttp(::google::protobuf::RpcController* controller,
     ctrl->SetFailed("Master for model not found");
     return;
   }
-  bool status = master->link_d2d(
+  bool status = master->link_p2p(
       {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()});
   resp_pb->set_ok(status);
 
@@ -1350,8 +1350,8 @@ void APIService::LinkD2DHttp(::google::protobuf::RpcController* controller,
   }
 }
 
-void APIService::UnlinkD2D(::google::protobuf::RpcController* controller,
-                           const proto::D2DLinkRequest* request,
+void APIService::UnlinkP2P(::google::protobuf::RpcController* controller,
+                           const proto::P2PLinkRequest* request,
                            proto::Status* response,
                            ::google::protobuf::Closure* done) {
   brpc::ClosureGuard done_guard(done);
@@ -1366,12 +1366,12 @@ void APIService::UnlinkD2D(::google::protobuf::RpcController* controller,
     response->set_ok(false);
     return;
   }
-  bool status = master->unlink_d2d(
+  bool status = master->unlink_p2p(
       {request->remote_addrs().begin(), request->remote_addrs().end()});
   response->set_ok(status);
 }
 
-void APIService::UnlinkD2DHttp(::google::protobuf::RpcController* controller,
+void APIService::UnlinkP2PHttp(::google::protobuf::RpcController* controller,
                                const proto::HttpRequest* request,
                                proto::HttpResponse* response,
                                ::google::protobuf::Closure* done) {
@@ -1383,7 +1383,7 @@ void APIService::UnlinkD2DHttp(::google::protobuf::RpcController* controller,
 
   auto arena = response->GetArena();
   auto req_pb =
-      google::protobuf::Arena::CreateMessage<proto::D2DLinkRequest>(arena);
+      google::protobuf::Arena::CreateMessage<proto::P2PLinkRequest>(arena);
   auto resp_pb = google::protobuf::Arena::CreateMessage<proto::Status>(arena);
 
   auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
@@ -1405,7 +1405,7 @@ void APIService::UnlinkD2DHttp(::google::protobuf::RpcController* controller,
     ctrl->SetFailed("Master for model not found");
     return;
   }
-  bool status = master->unlink_d2d(
+  bool status = master->unlink_p2p(
       {req_pb->remote_addrs().begin(), req_pb->remote_addrs().end()});
   resp_pb->set_ok(status);
 
@@ -1418,6 +1418,128 @@ void APIService::UnlinkD2DHttp(::google::protobuf::RpcController* controller,
     LOG(ERROR) << "proto to json failed: " << err_msg;
     return;
   }
+}
+
+// ============== Async RL training support: Pause/Resume ==============
+void APIService::Pause(::google::protobuf::RpcController* controller,
+                       const proto::PauseRequest* request,
+                       proto::PauseResponse* response,
+                       ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "Pause: request/response/controller is null";
+    return;
+  }
+
+  auto* llm_master = dynamic_cast<LLMMaster*>(master_);
+  if (!llm_master) {
+    LOG(ERROR) << "Master is not an LLMMaster";
+    response->set_status("error: not an LLMMaster");
+    return;
+  }
+
+  const std::string& mode = request->mode();
+  llm_master->pause_scheduler(mode);
+
+  response->set_status("paused");
+  LOG(INFO) << "Pause completed successfully (mode="
+            << (mode.empty() ? "keep" : mode) << ")";
+}
+
+void APIService::PauseHttp(::google::protobuf::RpcController* controller,
+                           const proto::HttpRequest* request,
+                           proto::HttpResponse* response,
+                           ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "PauseHttp: request/response/controller is null";
+    return;
+  }
+
+  auto arena = response->GetArena();
+  auto req_pb =
+      google::protobuf::Arena::CreateMessage<proto::PauseRequest>(arena);
+  auto resp_pb =
+      google::protobuf::Arena::CreateMessage<proto::PauseResponse>(arena);
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  // Parse JSON request (if body provided, otherwise use defaults)
+  if (ctrl->request_attachment().size() > 0) {
+    std::string error;
+    json2pb::Json2PbOptions options;
+    butil::IOBuf& buf = ctrl->request_attachment();
+    butil::IOBufAsZeroCopyInputStream iobuf_stream(buf);
+    auto st =
+        json2pb::JsonToProtoMessage(&iobuf_stream, req_pb, options, &error);
+    if (!st) {
+      ctrl->SetFailed(error);
+      LOG(ERROR) << "PauseHttp: parse json to proto failed: " << error;
+      return;
+    }
+  }
+
+  // Call Pause
+  Pause(controller, req_pb, resp_pb, nullptr);
+
+  // Convert response to JSON
+  std::string json_output;
+  json2pb::ProtoMessageToJson(*resp_pb, &json_output, nullptr);
+  ctrl->response_attachment().append(json_output);
+}
+
+void APIService::Resume(::google::protobuf::RpcController* controller,
+                        const proto::ResumeRequest* request,
+                        proto::ResumeResponse* response,
+                        ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "Resume: request/response/controller is null";
+    return;
+  }
+
+  auto* llm_master = dynamic_cast<LLMMaster*>(master_);
+  if (!llm_master) {
+    LOG(ERROR) << "Master is not an LLMMaster";
+    response->set_status("error: not an LLMMaster");
+    return;
+  }
+
+  llm_master->resume_scheduler();
+
+  response->set_status("running");
+  LOG(INFO) << "Resume completed successfully";
+}
+
+void APIService::ResumeHttp(::google::protobuf::RpcController* controller,
+                            const proto::HttpRequest* request,
+                            proto::HttpResponse* response,
+                            ::google::protobuf::Closure* done) {
+  brpc::ClosureGuard done_guard(done);
+
+  if (!request || !response || !controller) {
+    LOG(ERROR) << "ResumeHttp: request/response/controller is null";
+    return;
+  }
+
+  auto arena = response->GetArena();
+  auto req_pb =
+      google::protobuf::Arena::CreateMessage<proto::ResumeRequest>(arena);
+  auto resp_pb =
+      google::protobuf::Arena::CreateMessage<proto::ResumeResponse>(arena);
+
+  auto ctrl = reinterpret_cast<brpc::Controller*>(controller);
+
+  // Call Resume (no request body needed)
+  Resume(controller, req_pb, resp_pb, nullptr);
+
+  // Convert response to JSON
+  std::string json_output;
+  json2pb::ProtoMessageToJson(*resp_pb, &json_output, nullptr);
+  ctrl->response_attachment().append(json_output);
 }
 
 }  // namespace xllm

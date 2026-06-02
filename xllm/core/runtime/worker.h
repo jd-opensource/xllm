@@ -78,9 +78,9 @@ class Worker {
                       const std::vector<std::string>& addrs,
                       const std::vector<uint16_t>& ports);
 
-  // D2D link for weight transfer
-  bool link_d2d(const std::string& remote_addr);
-  bool unlink_d2d(const std::string& remote_addr);
+  // P2P link for weight transfer
+  bool link_p2p(const std::string& remote_addr);
+  bool unlink_p2p(const std::string& remote_addr);
 
   const bool is_driver();
 

@@ -100,13 +100,13 @@ class WorkerService : public proto::DistributeWorker {
                      proto::Status* resp,
                      ::google::protobuf::Closure* done) override;
 
-  void LinkD2D(::google::protobuf::RpcController* controller,
-               const proto::D2DLinkWorkerRequest* req,
+  void LinkP2P(::google::protobuf::RpcController* controller,
+               const proto::P2PLinkWorkerRequest* req,
                proto::Status* resp,
                ::google::protobuf::Closure* done) override;
 
-  void UnlinkD2D(::google::protobuf::RpcController* controller,
-                 const proto::D2DLinkWorkerRequest* req,
+  void UnlinkP2P(::google::protobuf::RpcController* controller,
+                 const proto::P2PLinkWorkerRequest* req,
                  proto::Status* resp,
                  ::google::protobuf::Closure* done) override;
 

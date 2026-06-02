@@ -55,9 +55,9 @@ class CommChannel {
                               const std::vector<std::string>& addrs,
                               const std::vector<uint16_t>& ports);
 
-  // D2D link for weight transfer
-  virtual bool link_d2d(const std::string& remote_addr);
-  virtual bool unlink_d2d(const std::string& remote_addr);
+  // P2P link for weight transfer
+  virtual bool link_p2p(const std::string& remote_addr);
+  virtual bool unlink_p2p(const std::string& remote_addr);
 
   virtual bool init_model(const std::string& model_weights_path,
                           int32_t random_seed,

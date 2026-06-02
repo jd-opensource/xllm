@@ -209,7 +209,7 @@ struct RecItemInfo {
   std::string type;
 };
 
-// Weight segment info for D2D transfer (supports non-contiguous allocation)
+// Weight segment info for P2P transfer (supports non-contiguous allocation)
 // Forward declaration needed by InstanceInfo
 struct WeightSegment {
   uint64_t offset;  // Offset from GlobalXTensor base address

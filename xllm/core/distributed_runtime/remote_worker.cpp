@@ -96,12 +96,12 @@ bool RemoteWorker::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return channel_->unlink_cluster(cluster_ids, addrs, ports);
 }
 
-bool RemoteWorker::link_d2d(const std::string& remote_addr) {
-  return channel_->link_d2d(remote_addr);
+bool RemoteWorker::link_p2p(const std::string& remote_addr) {
+  return channel_->link_p2p(remote_addr);
 }
 
-bool RemoteWorker::unlink_d2d(const std::string& remote_addr) {
-  return channel_->unlink_d2d(remote_addr);
+bool RemoteWorker::unlink_p2p(const std::string& remote_addr) {
+  return channel_->unlink_p2p(remote_addr);
 }
 
 bool RemoteWorker::init_model(const std::string& model_weights_path,

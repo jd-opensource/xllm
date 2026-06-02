@@ -160,31 +160,31 @@ bool CommChannel::unlink_cluster(const std::vector<uint64_t>& cluster_ids,
   return true;
 }
 
-bool CommChannel::link_d2d(const std::string& remote_addr) {
-  proto::D2DLinkWorkerRequest req;
+bool CommChannel::link_p2p(const std::string& remote_addr) {
+  proto::P2PLinkWorkerRequest req;
   req.set_remote_addr(remote_addr);
 
   proto::Status s;
   brpc::Controller cntl;
-  stub_->LinkD2D(&cntl, &req, &s, nullptr);
+  stub_->LinkP2P(&cntl, &req, &s, nullptr);
 
   if (cntl.Failed() || !s.ok()) {
-    LOG(ERROR) << "LinkD2D failed: " << cntl.ErrorText();
+    LOG(ERROR) << "LinkP2P failed: " << cntl.ErrorText();
     return false;
   }
   return true;
 }
 
-bool CommChannel::unlink_d2d(const std::string& remote_addr) {
-  proto::D2DLinkWorkerRequest req;
+bool CommChannel::unlink_p2p(const std::string& remote_addr) {
+  proto::P2PLinkWorkerRequest req;
   req.set_remote_addr(remote_addr);
 
   proto::Status s;
   brpc::Controller cntl;
-  stub_->UnlinkD2D(&cntl, &req, &s, nullptr);
+  stub_->UnlinkP2P(&cntl, &req, &s, nullptr);
 
   if (cntl.Failed() || !s.ok()) {
-    LOG(ERROR) << "UnlinkD2D failed: " << cntl.ErrorText();
+    LOG(ERROR) << "UnlinkP2P failed: " << cntl.ErrorText();
     return false;
   }
   return true;
