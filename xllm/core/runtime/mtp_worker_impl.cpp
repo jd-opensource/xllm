@@ -1143,9 +1143,7 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
 
   const bool dp_enabled = parallel_args_.dp_size() > 1;
   const bool use_chunked_prefill =
-      (::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel() ||
-       use_qwen3_5_spec_verify_path()) &&
-      use_qwen3_5_spec_verify_path();
+      ::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel();
   CHECK_EQ(last_states.size(), static_cast<size_t>(num_sequences))
       << "draft extend state count mismatch";
 
@@ -1194,6 +1192,7 @@ void MTPWorkerImpl::prepare_draft_extend_inputs(
       row.seq_id = seq_id;
       row.token_id = token_id >= 0 ? token_id : 0;
       row.position_offset = position_offset;
+      row.append_kv_len = !use_chunked_prefill;
       row.append_q_len_one = !use_chunked_prefill;
       row.append_block_table = !use_chunked_prefill;
       specBuilder::append_decode_row(row_ctx, row, block_size, buf);
