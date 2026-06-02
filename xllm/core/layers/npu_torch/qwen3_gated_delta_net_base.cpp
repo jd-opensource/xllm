@@ -546,43 +546,6 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
 
     mixed_qkv = reshape_qkvz_with_pad(attn_metadata, mixed_qkv);
     mixed_qkv = mixed_qkv.transpose(1, 2);
-  } else if (!use_spec_verify && !is_any_prefill && checkpoint_stride == 1) {
-    torch::IntArrayRef num_accepted_tokens_opt;
-    torch::IntArrayRef has_initial_state;
-    std::vector<int64_t> linear_state_indices_vec(
-        input_params.linear_state_ids.begin(),
-        input_params.linear_state_ids.end());
-    const std::vector<int64_t>* qsl_ptr = &input_params.query_start_loc;
-    std::vector<int64_t> padded_query_start_loc;
-    const int64_t actual_qsl_size =
-        static_cast<int64_t>(input_params.query_start_loc.size());
-    const int64_t target_qsl_size = batch_size + 1;
-    if (actual_qsl_size < target_qsl_size) {
-      padded_query_start_loc = input_params.query_start_loc;
-      const int64_t last_val = padded_query_start_loc.back();
-      for (int64_t i = actual_qsl_size; i < target_qsl_size; ++i) {
-        padded_query_start_loc.push_back(last_val + (i - actual_qsl_size + 1));
-      }
-      qsl_ptr = &padded_query_start_loc;
-    }
-
-    mixed_qkv = xllm::kernel::causal_conv1d(
-        mixed_qkv,
-        conv_weight,
-        conv_cache,
-        std::optional<torch::Tensor>(),  // bias (no bias for qwen3)
-        torch::IntArrayRef(*qsl_ptr),
-        torch::IntArrayRef(linear_state_indices_vec),
-        has_initial_state,
-        num_accepted_tokens_opt,
-        1,   // activation_mode
-        -1,  // pad_slot_id
-        1    // run mode  0:fn, 1:update
-    );
-
-    mixed_qkv =
-        mixed_qkv.view({batch_size, -1, mixed_qkv.size(-1)}).contiguous();
-    mixed_qkv = mixed_qkv.transpose(1, 2);
   } else if (use_spec_verify) {
     CHECK(input_params.num_accepted_tokens.defined())
         << "num_accepted_tokens must be populated for Qwen3.5 spec verify";
@@ -602,7 +565,7 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
         conv_weight.transpose(0, 1).contiguous();
     xllm::kernel::CausalConv1dUpdateParams conv1d_params;
     conv1d_params.x = mixed_qkv.reshape({-1, mixed_qkv.size(-1)});
-    conv1d_params.conv_state = conv_cache;
+    conv1d_params.conv_state = conv_cache.transpose(1, 2);
     conv1d_params.weight = conv_weight_for_update;
     conv1d_params.conv_state_indices = logical_state_indices;
     conv1d_params.block_idx_last_scheduled_token =
