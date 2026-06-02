@@ -520,11 +520,11 @@ bool MTPWorkerImpl::init_model(const std::string& model_weights_path,
 }
 
 std::tuple<int64_t, int64_t> MTPWorkerImpl::estimate_kv_cache_capacity() {
-  CHECK(impl_ != nullptr);
+  CHECK(target_impl_ != nullptr);
   CHECK(draft_impl_ != nullptr);
 
   const std::tuple<int64_t, int64_t> target_memory =
-      impl_->estimate_kv_cache_capacity();
+      target_impl_->estimate_kv_cache_capacity();
   const std::tuple<int64_t, int64_t> draft_memory =
       draft_impl_->estimate_kv_cache_capacity();
   const int64_t cache_size_in_bytes =
@@ -532,7 +532,7 @@ std::tuple<int64_t, int64_t> MTPWorkerImpl::estimate_kv_cache_capacity() {
   const int64_t total_memory =
       std::min(std::get<1>(target_memory), std::get<1>(draft_memory));
 
-  const ModelArgs& target_model_args = impl_->context_.get_model_args();
+  const ModelArgs& target_model_args = target_impl_->context_.get_model_args();
   const ModelArgs& draft_model_args = draft_impl_->context_.get_model_args();
   if (!util::is_target_model_type(target_model_args.model_type(),
                                   /*target_model_type=*/"deepseek_v4",
