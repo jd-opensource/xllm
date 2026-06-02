@@ -66,8 +66,8 @@ namespace reduce_topk {
 
 namespace air_topk_stable {
 using WideT = float4;
-constexpr int VECTORIZED_READ_SIZE = 16;
-constexpr int WARP_SIZE = 32;
+constexpr int kVectorizedReadSize = 16;
+constexpr int kWarpSize = 32;
 
 // constexpr unsigned FULL_WARP_MASK = 0xffffffff;
 
@@ -256,8 +256,8 @@ __device__ void vectorized_process(size_t thread_rank,
       }
     }
 
-    static_assert(WARP_SIZE >= kItemsPerScalar);
-    // and because kItemsPerScalar > skip_cnt, WARP_SIZE > skip_cnt
+    static_assert(kWarpSize >= kItemsPerScalar);
+    // and because kItemsPerScalar > skip_cnt, kWarpSize > skip_cnt
     // no need to use loop
     if (thread_rank < skip_cnt) {
       f(in[thread_rank], thread_rank);
@@ -266,7 +266,7 @@ __device__ void vectorized_process(size_t thread_rank,
     // len_cast * kItemsPerScalar + kItemsPerScalar > len - skip_cnt;
     // and so
     // len - (skip_cnt + len_cast * kItemsPerScalar) < kItemsPerScalar <=
-    // WARP_SIZE no need to use loop
+    // kWarpSize no need to use loop
     const IdxT remain_i = skip_cnt + len_cast * kItemsPerScalar + thread_rank;
     if (remain_i < len) {
       f(in[remain_i], remain_i);
@@ -274,7 +274,7 @@ __device__ void vectorized_process(size_t thread_rank,
   }
 }
 
-// sync_width should >= WARP_SIZE
+// sync_width should >= kWarpSize
 template <typename T, typename IdxT, typename Func>
 __device__ void vectorized_process(T const* in,
                                    IdxT len,
@@ -320,9 +320,9 @@ __device__ void vectorized_process(T const* in,
       }
     }
 
-    static_assert(WARP_SIZE >= kItemsPerScalar);
+    static_assert(kWarpSize >= kItemsPerScalar);
     // need at most one warp for skipped and remained elements,
-    // and sync_width >= WARP_SIZE
+    // and sync_width >= kWarpSize
     if (tid < sync_width) {
       bool valid = tid < skip_cnt;
       T value = valid ? in[tid] : T();
@@ -941,7 +941,7 @@ __global__ void radix_kernel(T const* in,
 
 template <typename T, typename IdxT, int BitsPerPass, int BlockSize>
 unsigned calc_grid_dim(int batch_size, IdxT len, int sm_cnt) {
-  static_assert(VECTORIZED_READ_SIZE / sizeof(T) >= 1);
+  static_assert(kVectorizedReadSize / sizeof(T) >= 1);
 
   int active_blocks;
   cudaOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -954,14 +954,14 @@ unsigned calc_grid_dim(int batch_size, IdxT len, int sm_cnt) {
   IdxT best_num_blocks = 0;
   float best_tail_wave_penalty = 1.0f;
   const IdxT max_num_blocks =
-      ceildiv<IdxT>(len, VECTORIZED_READ_SIZE / sizeof(T) * BlockSize);
+      ceildiv<IdxT>(len, kVectorizedReadSize / sizeof(T) * BlockSize);
   for (int num_waves = 1;; ++num_waves) {
     IdxT num_blocks = std::min(
         max_num_blocks,
         static_cast<IdxT>(std::max(num_waves * active_blocks / batch_size, 1)));
     IdxT items_per_thread = ceildiv<IdxT>(len, num_blocks * BlockSize);
     items_per_thread =
-        alignTo<IdxT>(items_per_thread, VECTORIZED_READ_SIZE / sizeof(T));
+        alignTo<IdxT>(items_per_thread, kVectorizedReadSize / sizeof(T));
     num_blocks = ceildiv<IdxT>(len, items_per_thread * BlockSize);
     float actual_num_waves =
         static_cast<float>(num_blocks) * batch_size / active_blocks;
@@ -2048,20 +2048,20 @@ size_t invokeComputeTopkLastDimWorkspaceSize(SizeType32 batchSize,
       batchSize, inputLength, k, is_largest, true);
 }
 
-#define INSTANTIATE_COMPUTE_TOPK_LastDim_WORKSPACE_SIZE_DATA_TYPE(T) \
-  template size_t invokeComputeTopkLastDimWorkspaceSize<T>(          \
-      SizeType32 batchSize,                                          \
-      SizeType32 inputLength,                                        \
-      SizeType32 k,                                                  \
+#define INSTANTIATE_COMPUTE_TOPK_LAST_DIM_WORKSPACE_SIZE_DATA_TYPE(T) \
+  template size_t invokeComputeTopkLastDimWorkspaceSize<T>(           \
+      SizeType32 batchSize,                                           \
+      SizeType32 inputLength,                                         \
+      SizeType32 k,                                                   \
       bool is_largest)
 
-INSTANTIATE_COMPUTE_TOPK_LastDim_WORKSPACE_SIZE_DATA_TYPE(int);
-INSTANTIATE_COMPUTE_TOPK_LastDim_WORKSPACE_SIZE_DATA_TYPE(float);
-INSTANTIATE_COMPUTE_TOPK_LastDim_WORKSPACE_SIZE_DATA_TYPE(half);
+INSTANTIATE_COMPUTE_TOPK_LAST_DIM_WORKSPACE_SIZE_DATA_TYPE(int);
+INSTANTIATE_COMPUTE_TOPK_LAST_DIM_WORKSPACE_SIZE_DATA_TYPE(float);
+INSTANTIATE_COMPUTE_TOPK_LAST_DIM_WORKSPACE_SIZE_DATA_TYPE(half);
 #ifdef ENABLE_BF16
-INSTANTIATE_COMPUTE_TOPK_LastDim_WORKSPACE_SIZE_DATA_TYPE(__nv_bfloat16);
+INSTANTIATE_COMPUTE_TOPK_LAST_DIM_WORKSPACE_SIZE_DATA_TYPE(__nv_bfloat16);
 #endif
-#undef INSTANTIATE_COMPUTE_TOPK_LastDim_WORKSPACE_SIZE_DATA_TYPE
+#undef INSTANTIATE_COMPUTE_TOPK_LAST_DIM_WORKSPACE_SIZE_DATA_TYPE
 
 // Might need FP8 in the future.
 
@@ -2137,7 +2137,7 @@ void invokeTopkLastDim(SizeType32 batchSize,
                        true);
 }
 
-#define INSTANTIATE_TOPK_LastDim_DATA_TYPE(T)                        \
+#define INSTANTIATE_TOPK_LAST_DIM_DATA_TYPE(T)                       \
   template void invokeTopkLastDim<T>(SizeType32 batchSize,           \
                                      SizeType32 inputLength,         \
                                      SizeType32 k,                   \
@@ -2148,13 +2148,13 @@ void invokeTopkLastDim(SizeType32 batchSize,
                                      void* workspace,                \
                                      cudaStream_t stream)
 
-INSTANTIATE_TOPK_LastDim_DATA_TYPE(int);
-INSTANTIATE_TOPK_LastDim_DATA_TYPE(float);
-INSTANTIATE_TOPK_LastDim_DATA_TYPE(half);
+INSTANTIATE_TOPK_LAST_DIM_DATA_TYPE(int);
+INSTANTIATE_TOPK_LAST_DIM_DATA_TYPE(float);
+INSTANTIATE_TOPK_LAST_DIM_DATA_TYPE(half);
 #ifdef ENABLE_BF16
-INSTANTIATE_TOPK_LastDim_DATA_TYPE(__nv_bfloat16);
+INSTANTIATE_TOPK_LAST_DIM_DATA_TYPE(__nv_bfloat16);
 #endif
-#undef INSTANTIATE_TOPK_LastDim_DATA_TYPE
+#undef INSTANTIATE_TOPK_LAST_DIM_DATA_TYPE
 
 }  // namespace reduce_topk
 

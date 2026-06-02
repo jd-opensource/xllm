@@ -119,9 +119,10 @@ __launch_bounds__(TPB) __global__
 }
 
 namespace moe {
-struct TopKPair {
-  static const int PAIR = 2;
-  static const int MAX_INDEX = 0;
+class TopKPair {
+ public:
+  static constexpr int kPair = 2;
+  static constexpr int kMaxIndex = 0;
   cub_kvp max;
   cub_kvp secondMax;
 
@@ -130,7 +131,8 @@ struct TopKPair {
       : max(max), secondMax(secondMax) {}
 };
 
-struct TopKPairArgMax {
+class TopKPairArgMax {
+ public:
   __device__ TopKPairArgMax() {}
   __device__ __forceinline__ TopKPair
   operator()(const TopKPair& candidate1, const TopKPair& candidate2) const {
@@ -185,7 +187,7 @@ __launch_bounds__(TPB) __global__
   float row_sum_for_renormalize = 0;
   // Each loop finds the top 2 elements,
   // thus requiring only ceil(k / 2) loops (calculated as (k + 1) / 2).
-  for (int k_idx = 0; k_idx < (k + TopKPair::PAIR - 1) / TopKPair::PAIR;
+  for (int k_idx = 0; k_idx < (k + TopKPair::kPair - 1) / TopKPair::kPair;
        ++k_idx) {
     // Initializing the top 2 elements by the minimum value.
     thread_pair.max.key = 0;
@@ -213,9 +215,11 @@ __launch_bounds__(TPB) __global__
     if (threadIdx.x == 0) {
 #pragma unroll
       // updating 2 elements to the result.
-      for (int i = 0; i < TopKPair::PAIR; i++) {
-        if (k_idx * 2 + i >= k) break;
-        cub_kvp result = (i == TopKPair::MAX_INDEX) ? result_pair.max
+      for (int i = 0; i < TopKPair::kPair; i++) {
+        if (k_idx * 2 + i >= k) {
+          break;
+        }
+        cub_kvp result = (i == TopKPair::kMaxIndex) ? result_pair.max
                                                     : result_pair.secondMax;
         int expert = result.key;
         bool node_uses_expert = expert >= start_expert && expert < end_expert;
