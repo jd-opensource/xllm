@@ -43,6 +43,17 @@ cc_test(
 
 cc_test(
   NAME
+    usage_json_test
+  SRCS
+    usage_json_test.cpp
+  DEPS
+    api_service
+    GTest::gtest_main
+    nlohmann_json::nlohmann_json
+)
+
+cc_test(
+  NAME
     sample_service_impl_test
   SRCS
     sample_service_impl_test.cpp

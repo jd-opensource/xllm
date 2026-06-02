@@ -101,7 +101,7 @@ void Request::log_statistic(double total_latency) {
               << "finish_reason: "
               << seq->finish_reason().to_string().value_or("") << ", "
               << "prompt_tokens: " << seq->num_prompt_tokens() << ", "
-              << "cached_tokens: " << seq->num_cached_tokens() << ", "
+              << "num_prefix_cache_tokens: " << num_prefix_cache_tokens_ << ", "
               << "generated_tokens: " << gen_tokens << ", " << std::fixed
               << std::setprecision(1) << "ttft: " << ttft * 1000 << "ms, "
               << "total_latency: " << total_latency * 1000 << "ms, "
@@ -158,18 +158,16 @@ RequestOutput Request::generate_output(const Tokenizer& tokenizer,
   // summarize statistics for all sequences
   Usage usage;
   usage.num_prompt_tokens = state_.prompt_tokens.size();
-  size_t num_cached_tokens = 0;
   for (const auto& seq : sequences()) {
     usage.num_generated_tokens += seq->num_generated_tokens();
-    num_cached_tokens = std::max(num_cached_tokens, seq->num_cached_tokens());
     // NOTE: Avoid counting the extra execution step in overlap scenario.
     if (state_.enable_schedule_overlap) {
       usage.num_generated_tokens--;
     }
   }
-  CHECK_LE(num_cached_tokens,
+  CHECK_LE(num_prefix_cache_tokens_,
            static_cast<size_t>(std::numeric_limits<int32_t>::max()));
-  usage.num_cached_tokens = static_cast<int32_t>(num_cached_tokens);
+  usage.num_cached_tokens = static_cast<int32_t>(num_prefix_cache_tokens_);
   usage.num_total_tokens = usage.num_prompt_tokens + usage.num_generated_tokens;
 
   RequestOutput output;
@@ -182,6 +180,14 @@ RequestOutput Request::generate_output(const Tokenizer& tokenizer,
   output.cancelled = cancelled();
   sequences_group_->generate_outputs(output.outputs, tokenizer, thread_pool);
   return output;
+}
+
+void Request::record_num_prefix_cache_tokens() {
+  size_t current_max = 0;
+  for (const auto& seq : sequences()) {
+    current_max = std::max(current_max, seq->num_prefix_cache_tokens());
+  }
+  num_prefix_cache_tokens_ = std::max(num_prefix_cache_tokens_, current_max);
 }
 
 void Request::update_connection_status() {

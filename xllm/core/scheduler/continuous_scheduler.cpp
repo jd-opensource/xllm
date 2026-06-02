@@ -522,6 +522,7 @@ void ContinuousScheduler::handle_prefill_requests(
     estimate_latency += allocated_estimate_latency;
     waiting_priority_queue->pop_top();
     running_requests_.emplace_back(request);
+    request->record_num_prefix_cache_tokens();
     running_sequences_.insert(running_sequences_.end(),
                               prefill_sequences.begin(),
                               prefill_sequences.end());

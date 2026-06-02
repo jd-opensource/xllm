@@ -24,6 +24,28 @@ cc_test(
 
 cc_test(
   NAME
+    request_prefix_cache_tokens_test
+  SRCS
+    request_prefix_cache_tokens_test.cpp
+  DEPS
+    :block
+    :config
+    :request
+    GTest::gtest_main
+)
+target_link_libraries(request_prefix_cache_tokens_test
+                      PUBLIC
+                      Python::Python
+                      $<$<BOOL:${USE_NPU}>:ascendcl>
+                      $<$<BOOL:${USE_NPU}>:hccl>
+                      $<$<BOOL:${USE_NPU}>:c_sec>
+                      $<$<BOOL:${USE_NPU}>:nnopbase>)
+target_link_options(request_prefix_cache_tokens_test
+                    PRIVATE
+                    $<$<BOOL:${USE_MLU}>:-Wl,--no-as-needed>)
+
+cc_test(
+  NAME
     sequence_kv_state_test
   SRCS
     sequence_kv_state_test.cpp

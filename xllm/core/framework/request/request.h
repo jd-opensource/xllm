@@ -157,6 +157,10 @@ class Request : public RequestBase {
     return sequences_group_->is_chunked_prefill_stage();
   }
 
+  void record_num_prefix_cache_tokens();
+
+  size_t num_prefix_cache_tokens() const { return num_prefix_cache_tokens_; }
+
  private:
   RequestState state_;
   // list of sequences to generate completions for the prompt
@@ -174,7 +178,8 @@ class Request : public RequestBase {
 
   bool starved_ = false;
 
- private:
+  size_t num_prefix_cache_tokens_ = 0;
+
   void create_sequences_group();
 };
 
