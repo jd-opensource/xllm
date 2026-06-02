@@ -81,6 +81,34 @@ sudo docker run -it \
 /bin/bash
 ```
 
+### DCU
+
+Below are our pre-built dev image.
+```bash
+docker pull harbor.sourcefind.cn:5443/dcu/admin/base/custom:xllm-dev-dcu-x86-20260602
+```
+
+Container startup command:
+```bash
+docker run -it \
+--ipc=host \
+-u 0 \
+--name xllm-dcu \
+--privileged \
+--network=host \
+--shm-size 256g \
+--device=/dev/kfd \
+--device=/dev/dri \
+--device=/dev/mkfd \
+--security-opt seccomp=unconfined \
+--group-add video \
+-v /opt/hyhal:/opt/hyhal \
+-v $HOME:$HOME \
+-w $HOME \
+<docker_image_name> \
+/bin/bash
+```
+
 ## Build xllm
 
 If you download a release image, i.e., an image with a version number in the tag, you can skip this step because the release image comes with a pre-compiled xllm binary, located at `/usr/local/bin/xllm`.

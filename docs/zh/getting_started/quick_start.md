@@ -81,6 +81,34 @@ sudo docker run -it \
 /bin/bash
 ```
 
+### DCU
+
+下面是我们构建好的开发镜像。
+```bash
+docker pull harbor.sourcefind.cn:5443/dcu/admin/base/custom:xllm-dev-dcu-x86-20260602
+```
+
+容器启动命令如下：
+```bash
+docker run -it \
+--ipc=host \
+-u 0 \
+--name xllm-dcu \
+--privileged \
+--network=host \
+--shm-size 256g \
+--device=/dev/kfd \
+--device=/dev/dri \
+--device=/dev/mkfd \
+--security-opt seccomp=unconfined \
+--group-add video \
+-v /opt/hyhal:/opt/hyhal \
+-v $HOME:$HOME \
+-w $HOME \
+<docker_image_name> \
+/bin/bash
+```
+
 ## 编译xllm
 
 如果下载的是release镜像，即tag中带有版本号的镜像，可以跳过此步，因为release镜像自带编译好的xllm二进制文件，路径为`/usr/local/bin/xllm`。
