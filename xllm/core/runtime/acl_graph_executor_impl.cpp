@@ -598,9 +598,6 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     if (params.num_accepted_tokens.defined()) {
       params_for_capture->num_accepted_tokens =
           persistent_num_accepted_tokens(padded_batch_size);
-      params_for_capture->num_accepted_tokens_vec =
-          params.num_accepted_tokens_vec;
-      params_for_capture->num_accepted_tokens_vec.resize(padded_batch_size, 1);
     }
     if (use_expanded_spec_decode_attention) {
       params_for_capture->graph_buffer

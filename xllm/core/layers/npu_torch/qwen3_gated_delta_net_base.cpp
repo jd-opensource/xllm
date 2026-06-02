@@ -16,7 +16,6 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <tuple>
-#include <vector>
 
 #include "xllm/core/kernels/ops_api.h"
 
@@ -297,51 +296,40 @@ torch::Tensor build_linear_state_base_indices(
   return logical_state_indices * checkpoint_stride;
 }
 
-std::vector<int64_t> tensor_to_int64_vector(const torch::Tensor& tensor,
-                                            int64_t expected_size,
-                                            const char* name) {
-  CHECK(tensor.defined()) << name << " must be defined.";
-  torch::Tensor cpu_tensor = tensor.to(torch::kCPU, torch::kInt64).contiguous();
-  CHECK_EQ(cpu_tensor.numel(), expected_size)
-      << name << " size mismatch, expected " << expected_size << ", got "
-      << cpu_tensor.numel();
-  const int64_t* data = cpu_tensor.data_ptr<int64_t>();
-  return std::vector<int64_t>(data, data + cpu_tensor.numel());
-}
-
 torch::Tensor run_spec_verify_conv(const torch::Tensor& mixed_qkv,
                                    const torch::Tensor& conv_cache,
-                                   const std::vector<int32_t>& linear_state_ids,
-                                   const std::vector<int64_t>& query_start_loc,
-                                   std::vector<int64_t> num_accepted_tokens,
+                                   const torch::Tensor& logical_state_indices,
+                                   const torch::Tensor& num_accepted_tokens,
+                                   const torch::Tensor& q_cu_seq_lens,
                                    const torch::Tensor& conv_weight,
                                    int32_t conv_kernel_size) {
   const int64_t batch_size = mixed_qkv.size(0);
-  const int64_t seq_len = mixed_qkv.size(1);
+  const int64_t seq_len = mixed_qkv.size(2);
   const int64_t expanded_state_len = conv_cache.size(1);
   CHECK_EQ(expanded_state_len, conv_kernel_size - 1 + seq_len - 1)
       << "unexpected speculative conv cache len, expected "
       << (conv_kernel_size - 1 + seq_len - 1) << ", got " << expanded_state_len;
-  CHECK_EQ(num_accepted_tokens.size(), static_cast<size_t>(batch_size))
-      << "num_accepted_tokens must be per sequence.";
 
-  std::vector<int64_t> linear_state_indices(linear_state_ids.begin(),
-                                            linear_state_ids.end());
-  torch::IntArrayRef has_initial_state;
+  xllm::kernel::CausalConv1dUpdateParams conv1d_params;
+  conv1d_params.x = mixed_qkv.transpose(1, 2)
+                        .reshape({batch_size * seq_len, mixed_qkv.size(1)})
+                        .contiguous();
+  conv1d_params.conv_state = conv_cache.transpose(1, 2);
+  conv1d_params.weight = conv_weight;
+  conv1d_params.activation = true;
+  conv1d_params.conv_state_indices = logical_state_indices.contiguous();
+  conv1d_params.num_accepted_tokens =
+      num_accepted_tokens.to(mixed_qkv.device(), torch::kInt32).contiguous();
+  conv1d_params.query_start_loc = q_cu_seq_lens;
+  conv1d_params.max_query_len = static_cast<int32_t>(seq_len);
+
   torch::Tensor conv_output =
-      xllm::kernel::causal_conv1d(mixed_qkv,
-                                  conv_weight,
-                                  conv_cache,
-                                  std::optional<torch::Tensor>(),
-                                  torch::IntArrayRef(query_start_loc),
-                                  torch::IntArrayRef(linear_state_indices),
-                                  has_initial_state,
-                                  torch::IntArrayRef(num_accepted_tokens),
-                                  1,
-                                  -1,
-                                  1);
+      xllm::kernel::causal_conv1d_update(conv1d_params)
+          .view({batch_size, seq_len, mixed_qkv.size(1)})
+          .transpose(1, 2)
+          .contiguous();
 
-  return conv_output.view({batch_size, -1, conv_output.size(-1)}).contiguous();
+  return conv_output;
 }
 
 torch::Tensor run_spec_verify_gated_delta_rule(
@@ -598,22 +586,17 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::forward(
   } else if (use_spec_verify) {
     CHECK(input_params.num_accepted_tokens.defined())
         << "num_accepted_tokens must be populated for Qwen3.5 spec verify";
-    std::vector<int64_t> num_accepted_tokens =
-        input_params.num_accepted_tokens_vec;
-    if (num_accepted_tokens.empty()) {
-      num_accepted_tokens = tensor_to_int64_vector(
-          input_params.num_accepted_tokens, batch_size, "num_accepted_tokens");
-    }
-    mixed_qkv = run_spec_verify_conv(mixed_qkv,
-                                     conv_cache,
-                                     input_params.linear_state_ids,
-                                     input_params.query_start_loc,
-                                     std::move(num_accepted_tokens),
-                                     conv_weight,
-                                     conv_kernel_size_);
-    // run_spec_verify_conv returns [B, T, C]; convert to [B, C, T] to
-    // align with the other conv branches before process_mixed_qkv.
-    mixed_qkv = mixed_qkv.transpose(1, 2).contiguous();
+    torch::Tensor conv_weight_for_update =
+        conv_weight.transpose(0, 1).contiguous();
+    torch::Tensor pre_conv_mixed_qkv = mixed_qkv.transpose(1, 2);
+    mixed_qkv =
+        run_spec_verify_conv(pre_conv_mixed_qkv,
+                             conv_cache,
+                             logical_state_indices,
+                             input_params.num_accepted_tokens.to(device),
+                             attn_metadata.q_cu_seq_lens,
+                             conv_weight_for_update,
+                             conv_kernel_size_);
   } else {
     torch::Tensor conv_weight_for_update =
         conv_weight.transpose(0, 1).contiguous();
@@ -940,7 +923,6 @@ torch::Tensor Qwen3GatedDeltaNetBaseImpl::reshape_qkvz_with_pad(
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor>
 Qwen3GatedDeltaNetBaseImpl::process_mixed_qkv(torch::Tensor& mixed_qkv) const {
-  // Caller guarantees mixed_qkv is in [B, C, T] layout after conv path.
   mixed_qkv = mixed_qkv.transpose(1, 2);
   int64_t batch_size = mixed_qkv.size(0);
   int64_t seq_len = mixed_qkv.size(1);
