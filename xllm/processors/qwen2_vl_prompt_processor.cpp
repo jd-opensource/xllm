@@ -135,6 +135,7 @@ void Qwen2VLPromptProcessor::find_mm_spans(
           {length},
           torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
       item.mutable_state().mutable_mm_token_mask() = mask;
+      item.mutable_state().mutable_mm_token_num() = length;
     }
     ++global_mm_index;
     start = std::next(vision_end_it);

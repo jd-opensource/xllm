@@ -19,7 +19,6 @@ limitations under the License.
 #include <pybind11/pybind11.h>
 #include <signal.h>
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <memory>
@@ -104,9 +103,10 @@ VLMMaster::VLMMaster(const Options& options)
     XServiceClient::get_instance()->register_instance(instance_info);
   }
 
+  chat_template_ =
+      std::make_unique<JinjaChatTemplate>(engine_->tokenizer_args());
   tokenizer_ = engine_->tokenizer()->clone();
-  multimodal_processor_ = create_multimodal_processor(
-      model_args_, engine_->tokenizer_args(), tokenizer_);
+  processor_ = create_multimodal_processor(model_args_, tokenizer_);
 
   threadpool_ = std::make_unique<ThreadPool>(
       /*num_threads=*/options_.num_request_handling_threads(),
@@ -310,27 +310,34 @@ std::shared_ptr<Request> VLMMaster::generate_request(std::string prompt,
     return nullptr;
   }
 
-  PreprocessOutput output;
-  if (!multimodal_processor_->preprocess(prompt, std::move(mm_data), output)) {
-    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, output.error_message);
+  std::vector<int32_t> prompt_tokens;
+  if (!processor_->process_prompt(prompt, mm_data, prompt_tokens)) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "Failed to process prompt.");
     return nullptr;
   }
 
-  return build_request(std::move(output), std::move(sp), std::move(callback));
+  return build_request(std::move(prompt),
+                       std::move(prompt_tokens),
+                       std::move(mm_data),
+                       std::move(sp),
+                       std::move(callback));
 }
 
-std::shared_ptr<Request> VLMMaster::build_request(PreprocessOutput output,
-                                                  RequestParams sp,
-                                                  OutputCallback callback) {
+std::shared_ptr<Request> VLMMaster::build_request(
+    std::string prompt,
+    std::vector<int32_t> prompt_tokens,
+    MMData mm_data,
+    RequestParams sp,
+    OutputCallback callback) {
   const int32_t max_context_len = model_args_.max_position_embeddings();
   int32_t prompt_token_limit = max_context_len;
   if (!options_.enable_chunked_prefill()) {
     prompt_token_limit =
         std::min(prompt_token_limit, options_.max_tokens_per_batch());
   }
-  if (output.prompt_tokens.size() >=
-      static_cast<size_t>(prompt_token_limit)) {
-    LOG(ERROR) << "Prompt is too long: " << output.prompt_tokens.size();
+  if (prompt_tokens.size() >= static_cast<size_t>(prompt_token_limit)) {
+    LOG(ERROR) << "Prompt is too long: " << prompt_tokens.size();
     CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, "Prompt is too long");
     return nullptr;
   }
@@ -343,7 +350,7 @@ std::shared_ptr<Request> VLMMaster::build_request(PreprocessOutput output,
 
   // allocate enough capacity for prompt tokens, max tokens, and speculative
   // tokens, TODO: add image token size as well.
-  const size_t capacity = output.prompt_tokens.size() + max_tokens + 1;
+  const size_t capacity = prompt_tokens.size() + max_tokens + 1;
   const size_t best_of = sp.best_of.value_or(sp.n);
 
   RequestSamplingParam sampling_param;
@@ -396,9 +403,9 @@ std::shared_ptr<Request> VLMMaster::build_request(PreprocessOutput output,
     stream = false;
   }
 
-  RequestState req_state(std::move(output.prompt),
-                         std::move(output.prompt_tokens),
-                         std::move(output.mm_data),
+  RequestState req_state(std::move(prompt),
+                         std::move(prompt_tokens),
+                         std::move(mm_data),
                          std::move(sampling_param),
                          std::move(stopping_checker),
                          capacity,
@@ -427,14 +434,40 @@ std::shared_ptr<Request> VLMMaster::generate_request(
     RequestParams sp,
     std::string payload,
     OutputCallback callback) {
-  PreprocessOutput output;
-  if (!multimodal_processor_->preprocess(
-          messages, sp.tools, sp.chat_template_kwargs, payload, output)) {
-    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, output.error_message);
+  static MMInputTransfer mm_input_transfer;
+
+  MMInput mm_inputs(std::move(payload));
+  MMErrCode code = mm_input_transfer.trans(messages, mm_inputs);
+  if (code != MMErrCode::SUCCESS) {
+    std::string error_message = MMErrToString(code);
+    LOG(ERROR) << error_message;
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, error_message);
     return nullptr;
   }
 
-  return build_request(std::move(output), std::move(sp), std::move(callback));
+  MMData mm_data;
+  if (!mm_inputs.empty() &&
+      !processor_->process_multimodal(mm_inputs, mm_data)) {
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT,
+                        "Failed to process multimodal input.");
+    return nullptr;
+  }
+
+  Timer timer;
+  std::optional<std::string> prompt =
+      chat_template_->apply(messages, sp.tools, sp.chat_template_kwargs);
+  if (!prompt.has_value()) {
+    std::string error_message = "Failed to construct prompt from messages";
+    LOG(ERROR) << error_message;
+    CALLBACK_WITH_ERROR(StatusCode::INVALID_ARGUMENT, error_message);
+    return nullptr;
+  }
+  COUNTER_ADD(chat_template_latency_seconds, timer.elapsed_seconds());
+
+  return generate_request(std::move(prompt.value()),
+                          std::move(mm_data),
+                          std::move(sp),
+                          std::move(callback));
 }
 
 volatile bool VLMAssistantMaster::running_ = false;

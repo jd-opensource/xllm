@@ -188,6 +188,7 @@ void Qwen3VLPromptProcessor::find_mm_spans(
       item.mutable_state().mutable_mm_token_mask() = torch::ones(
           {length},
           torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
+      item.mutable_state().mutable_mm_token_num() = length;
       ++global_mm_index;
 
     } else if (first_token == video_token_id_) {
@@ -227,6 +228,9 @@ void Qwen3VLPromptProcessor::find_mm_spans(
                 {static_cast<int64_t>(video_mask.size())},
                 torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU))
                 .clone();
+        const torch::Tensor& mask = item.state().mm_token_mask();
+        item.mutable_state().mutable_mm_token_num() =
+            static_cast<int32_t>(mask.sum().item<int64_t>());
 
         ++global_mm_index;
         ++video_index;

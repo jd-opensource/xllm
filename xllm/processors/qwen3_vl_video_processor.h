@@ -18,7 +18,6 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -31,8 +30,6 @@ namespace xllm {
 
 class Qwen3VLVideoProcessor final : public VideoProcessor {
  public:
-  using Size = std::pair<int32_t, int32_t>;
-
   explicit Qwen3VLVideoProcessor(const ModelArgs& args);
 
   bool process(const torch::Tensor& origin_video,
@@ -44,14 +41,6 @@ class Qwen3VLVideoProcessor final : public VideoProcessor {
                      VideoMetadata& metadata,
                      torch::Tensor& pixel_values,
                      torch::Tensor& thw) const;
-
-  std::optional<Size> smart_resize(int32_t num_frames,
-                                   int32_t height,
-                                   int32_t width,
-                                   int32_t temporal_factor,
-                                   int32_t factor,
-                                   int32_t min_pixels,
-                                   int32_t max_pixels) const;
 
   torch::Tensor sample_frames(const VideoMetadata& metadata,
                               int32_t min_frames,

@@ -96,6 +96,15 @@ MMPayload slice_payload(const MMContent& item, MMPayload& payload) {
 
 }  // namespace
 
+bool MMInput::foreach (MMInputItem::IVisitor& v) const {
+  for (const MMInputItem& item : items_) {
+    if (!v.visit(item)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 MMInputTransfer::MMInputTransfer() {
   mm_handlers_ = std::make_unique<MMHandlerSet>();
   threadpool_ = std::make_unique<ThreadPool>(/*num_threads=*/16,

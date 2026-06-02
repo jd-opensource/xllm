@@ -15,13 +15,13 @@ limitations under the License.
 
 #pragma once
 
+#include <glog/logging.h>
 #include <torch/torch.h>
 
 #include <vector>
 
 #include "core/framework/model/model_args.h"
 #include "core/framework/multimodal/mm_data.h"
-#include "core/framework/multimodal/mm_input.h"
 
 namespace xllm {
 
@@ -31,9 +31,17 @@ class ImageProcessor {
 
   virtual bool process(const std::vector<torch::Tensor>& images,
                        std::vector<MMDataItem>& output_items) const = 0;
+};
 
-  virtual MMDict process_embedding(const EmbeddingOutput& embedding) const {
-    return MMDict{};
+class ImageNoneProcessor final : public ImageProcessor {
+ public:
+  ImageNoneProcessor() = default;
+  explicit ImageNoneProcessor(const ModelArgs&) {}
+
+  bool process(const std::vector<torch::Tensor>& images,
+               std::vector<MMDataItem>& output_items) const override {
+    LOG(ERROR) << "Image processor is not configured.";
+    return false;
   }
 };
 

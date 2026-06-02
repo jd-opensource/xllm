@@ -19,7 +19,7 @@ limitations under the License.
 
 #include "core/util/tensor_helper.h"
 #include "core/util/utils.h"
-#include "mm_data_visitor.h"
+#include "mm_visitor.h"
 
 namespace xllm {
 

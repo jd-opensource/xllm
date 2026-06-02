@@ -1106,7 +1106,6 @@ REGISTER_MODEL_ARGS(minicpmv, [&] {
   LOAD_ARG_OR(dtype, "torch_dtype", "");
   LOAD_ARG_OR(vision_custom_adapter, "vision_adapter_type", "");
   LOAD_ARG_OR(vision_max_slice_nums, "slice_config.max_slice_nums", 9);
-
   LOAD_ARG_OR(hidden_size, "hidden_size", 3584);
   LOAD_ARG_OR(n_heads, "num_attention_heads", 28);
   LOAD_ARG_OR(n_layers, "num_hidden_layers", 28);

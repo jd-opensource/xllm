@@ -109,8 +109,10 @@ Glm4VImageProcessor::Glm4VImageProcessor(const ModelArgs& args) {
   }
 }
 
-bool Glm4VImageProcessor::process(const std::vector<torch::Tensor>& images,
-                                  std::vector<MMDataItem>& output_items) const {
+bool Glm4VImageProcessor::process_image(
+    const std::vector<torch::Tensor>& images,
+    std::vector<torch::Tensor>& pixel_values,
+    std::vector<torch::Tensor>& thw) const {
   torch::Tensor batch_images = torch::stack(images);
   const auto shape = batch_images.sizes();
   const int64_t batch_size = shape[0];
@@ -174,8 +176,19 @@ bool Glm4VImageProcessor::process(const std::vector<torch::Tensor>& images,
                                 .repeat({batch_size, 1})
                                 .reshape({batch_size, 1, 3});
 
-  std::vector<torch::Tensor> pixel_values = batch_pixel_values.unbind(0);
-  std::vector<torch::Tensor> thw = batch_thw.unbind(0);
+  pixel_values = batch_pixel_values.unbind(0);
+  thw = batch_thw.unbind(0);
+  return true;
+}
+
+bool Glm4VImageProcessor::process(const std::vector<torch::Tensor>& images,
+                                  std::vector<MMDataItem>& output_items) const {
+  std::vector<torch::Tensor> pixel_values;
+  std::vector<torch::Tensor> thw;
+  if (!process_image(images, pixel_values, thw)) {
+    return false;
+  }
+
   output_items.clear();
   output_items.reserve(images.size());
   const size_t image_size = images.size();
@@ -184,7 +197,6 @@ bool Glm4VImageProcessor::process(const std::vector<torch::Tensor>& images,
                               MMDict{{"pixel_values", pixel_values[index]},
                                      {"image_grid_thw", thw[index]}});
   }
-
   return true;
 }
 

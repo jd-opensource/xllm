@@ -15,8 +15,10 @@ limitations under the License.
 
 #pragma once
 
+#include <glog/logging.h>
 #include <torch/torch.h>
 
+#include "core/framework/model/model_args.h"
 #include "core/framework/multimodal/mm_data.h"
 #include "core/framework/multimodal/mm_input.h"
 
@@ -29,6 +31,19 @@ class VideoProcessor {
   virtual bool process(const torch::Tensor& origin_video,
                        const VideoMetadata& metadata,
                        MMDataItem& output_item) const = 0;
+};
+
+class VideoNoneProcessor final : public VideoProcessor {
+ public:
+  VideoNoneProcessor() = default;
+  explicit VideoNoneProcessor(const ModelArgs&) {}
+
+  bool process(const torch::Tensor& origin_video,
+               const VideoMetadata& metadata,
+               MMDataItem& output_item) const override {
+    LOG(ERROR) << "Video processor is not configured.";
+    return false;
+  }
 };
 
 }  // namespace xllm

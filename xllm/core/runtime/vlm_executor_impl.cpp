@@ -20,7 +20,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "core/framework/config/execution_config.h"
-#include "core/framework/multimodal/mm_data_visitor.h"
+#include "core/framework/multimodal/mm_visitor.h"
 #include "platform/device.h"
 
 namespace xllm {

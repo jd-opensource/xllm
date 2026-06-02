@@ -115,20 +115,42 @@ KimiK25ImageProcessor::KimiK25ImageProcessor(const ModelArgs& args)
 KimiK25VideoProcessor::KimiK25VideoProcessor(const ModelArgs& args)
     : config_(make_kimi_k25_media_config(args)) {}
 
+bool KimiK25ImageProcessor::process_image(
+    const std::vector<torch::Tensor>& images,
+    std::vector<torch::Tensor>& pixel_values,
+    std::vector<torch::Tensor>& thw) const {
+  pixel_values.clear();
+  thw.clear();
+  pixel_values.reserve(images.size());
+  thw.reserve(images.size());
+  for (const torch::Tensor& image : images) {
+    torch::Tensor image_pixel_values;
+    torch::Tensor image_thw;
+    if (!process_image(image, image_pixel_values, image_thw)) {
+      return false;
+    }
+    pixel_values.push_back(std::move(image_pixel_values));
+    thw.push_back(std::move(image_thw));
+  }
+  return true;
+}
+
 bool KimiK25ImageProcessor::process(
     const std::vector<torch::Tensor>& images,
     std::vector<MMDataItem>& output_items) const {
+  std::vector<torch::Tensor> pixel_values;
+  std::vector<torch::Tensor> thw;
+  if (!process_image(images, pixel_values, thw)) {
+    return false;
+  }
+
   output_items.clear();
   output_items.reserve(images.size());
-  for (const torch::Tensor& image : images) {
-    torch::Tensor pixel_values;
-    torch::Tensor thw;
-    if (!process_image(image, pixel_values, thw)) {
-      return false;
-    }
-    output_items.emplace_back(
-        MMType::IMAGE,
-        MMDict{{"pixel_values", pixel_values}, {"image_grid_thw", thw}});
+  const size_t image_size = images.size();
+  for (size_t index = 0; index < image_size; ++index) {
+    output_items.emplace_back(MMType::IMAGE,
+                              MMDict{{"pixel_values", pixel_values[index]},
+                                     {"image_grid_thw", thw[index]}});
   }
   return true;
 }

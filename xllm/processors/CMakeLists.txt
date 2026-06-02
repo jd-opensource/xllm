@@ -2,6 +2,7 @@ include(cc_library)
 
 # Define the base dependencies
 set(BASE_DEPS
+  :multimodal
   :common
   :kv_cache
   :prefix_cache

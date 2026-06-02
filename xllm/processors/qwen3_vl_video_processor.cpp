@@ -17,37 +17,24 @@ limitations under the License.
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <tuple>
 
 #include "processors/transforms.h"
 
 namespace xllm {
 
-Qwen3VLVideoProcessor::Qwen3VLVideoProcessor(const ModelArgs& args) {
-  image_mean_ = torch::tensor(args.mm_image_normalize_mean(),
-                              torch::dtype(torch::kFloat32));
-  image_std_ = torch::tensor(args.mm_image_normalize_std(),
-                             torch::dtype(torch::kFloat32));
-  patch_size_ = args.mm_image_patch_size();
-  temporal_patch_size_ = args.mm_image_temporal_patch_size();
-  merge_size_ = args.mm_image_merge_size();
-  size_ = {{"longest_edge", 12845056}, {"shortest_edge", 3136}};
+namespace {
 
-  if (do_rescale_ && do_normalize_) {
-    image_mean_.mul_(1.0 / rescale_factor_);
-    image_std_.mul_(1.0 / rescale_factor_);
-    do_rescale_ = false;
-  }
-}
+using Size = std::pair<int32_t, int32_t>;
 
-std::optional<Qwen3VLVideoProcessor::Size> Qwen3VLVideoProcessor::smart_resize(
-    int32_t num_frames,
-    int32_t height,
-    int32_t width,
-    int32_t temporal_factor,
-    int32_t factor,
-    int32_t min_pixels,
-    int32_t max_pixels) const {
+std::optional<Size> smart_resize(int32_t num_frames,
+                                 int32_t height,
+                                 int32_t width,
+                                 int32_t temporal_factor,
+                                 int32_t factor,
+                                 int32_t min_pixels,
+                                 int32_t max_pixels) {
   if (height < factor || width < factor) {
     LOG(ERROR) << "height:" << height << " or width:" << width
                << " must be larger than factor:" << factor;
@@ -99,6 +86,25 @@ std::optional<Qwen3VLVideoProcessor::Size> Qwen3VLVideoProcessor::smart_resize(
   }
 
   return std::make_pair(h_bar, w_bar);
+}
+
+}  // namespace
+
+Qwen3VLVideoProcessor::Qwen3VLVideoProcessor(const ModelArgs& args) {
+  image_mean_ = torch::tensor(args.mm_image_normalize_mean(),
+                              torch::dtype(torch::kFloat32));
+  image_std_ = torch::tensor(args.mm_image_normalize_std(),
+                             torch::dtype(torch::kFloat32));
+  patch_size_ = args.mm_image_patch_size();
+  temporal_patch_size_ = args.mm_image_temporal_patch_size();
+  merge_size_ = args.mm_image_merge_size();
+  size_ = {{"longest_edge", 12845056}, {"shortest_edge", 3136}};
+
+  if (do_rescale_ && do_normalize_) {
+    image_mean_.mul_(1.0 / rescale_factor_);
+    image_std_.mul_(1.0 / rescale_factor_);
+    do_rescale_ = false;
+  }
 }
 
 torch::Tensor Qwen3VLVideoProcessor::sample_frames(

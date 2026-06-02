@@ -13,9 +13,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "mm_data_visitor.h"
+#include "mm_visitor.h"
 
 #include <absl/strings/match.h>
+#include <glog/logging.h>
 
 #include <numeric>
 #include <optional>
@@ -26,6 +27,15 @@ limitations under the License.
 namespace xllm {
 
 namespace {
+MMDict build_embedding_data(MMType type, const EmbeddingOutput& embedding) {
+  MMDict data;
+  data[get_embedding_key(type)] = embedding.embedding;
+  for (const auto& [key, value] : embedding.metadata) {
+    data[key] = value;
+  }
+  return data;
+}
+
 std::pair<int32_t, int32_t> compute_emb_range(int32_t start_pos,
                                               int32_t end_pos,
                                               const torch::Tensor& mask) {
@@ -58,6 +68,73 @@ std::vector<int32_t> normalize_to_per_seq_lens(
 #endif
 }
 }  // namespace
+
+bool MMInputGatherVisitor::visit(const MMInputItem& item) {
+  if (item.has_type(MMType::IMAGE)) {
+    data_type_ |= MMType::IMAGE;
+    if (item.is_embedding()) {
+      item_types_.push_back(MMType::IMAGE | MMType::EMBEDDING);
+      MMDataItem data_item(MMType::IMAGE);
+      data_item.set_data(build_embedding_data(MMType::IMAGE, item.embedding));
+      image_embedding_items_.push_back(std::move(data_item));
+    } else {
+      item_types_.push_back(MMType::IMAGE);
+      images_.push_back(item.decode_image);
+    }
+  }
+  if (item.has_type(MMType::VIDEO)) {
+    data_type_ |= MMType::VIDEO;
+    item_types_.push_back(MMType::VIDEO);
+    videos_.push_back(item.decode_video);
+    video_metadata_.push_back(item.video_meta);
+  }
+  if (item.has_type(MMType::AUDIO)) {
+    data_type_ |= MMType::AUDIO;
+    item_types_.push_back(MMType::AUDIO);
+    audios_.push_back(item.decode_audio);
+    audio_metadata_.push_back(item.audio_meta);
+  }
+  return true;
+}
+
+MMItemVec MMInputGatherVisitor::finish(std::vector<MMDataItem>& image_items,
+                                       std::vector<MMDataItem>& video_items,
+                                       std::vector<MMDataItem>& audio_items) {
+  size_t image_embedding_idx = 0;
+  size_t image_idx = 0;
+  size_t video_idx = 0;
+  size_t audio_idx = 0;
+  MMItemVec output_items;
+
+  auto take_next = [&output_items](std::vector<MMDataItem>& items,
+                                   size_t& index) {
+    CHECK(index < items.size())
+        << "Multimodal item count does not match input.";
+    output_items.push_back(std::move(items[index]));
+    ++index;
+  };
+
+  output_items.reserve(item_types_.size());
+  for (uint32_t item_type : item_types_) {
+    if ((item_type & MMType::IMAGE) && (item_type & MMType::EMBEDDING)) {
+      take_next(image_embedding_items_, image_embedding_idx);
+    } else if (item_type & MMType::IMAGE) {
+      take_next(image_items, image_idx);
+    } else if (item_type & MMType::VIDEO) {
+      take_next(video_items, video_idx);
+    } else if (item_type & MMType::AUDIO) {
+      take_next(audio_items, audio_idx);
+    } else {
+      LOG(FATAL) << "Invalid multimodal item type: " << item_type;
+    }
+  }
+
+  CHECK(image_embedding_idx == image_embedding_items_.size() &&
+        image_idx == image_items.size() && video_idx == video_items.size() &&
+        audio_idx == audio_items.size())
+      << "Multimodal item count does not match input.";
+  return output_items;
+}
 
 bool CollectItemTensorVisitor::visit(MMDataItem& item) {
   for (const auto& pair : item.data()) {

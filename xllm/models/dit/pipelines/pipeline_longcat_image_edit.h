@@ -399,10 +399,13 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
     } else {
       img = img.clamp(0.0f, 255.0f);
     }
-    torch::Tensor pixel_values;
-    torch::Tensor image_grid_thw;
-    CHECK(vl_image_processor_.process(img, pixel_values, image_grid_thw))
+    std::vector<torch::Tensor> pixel_values_list;
+    std::vector<torch::Tensor> image_grid_thw_list;
+    CHECK(vl_image_processor_.process_image(
+        {img}, pixel_values_list, image_grid_thw_list))
         << "VL image processor failed";
+    torch::Tensor pixel_values = pixel_values_list[0];
+    torch::Tensor image_grid_thw = image_grid_thw_list[0];
 
     int64_t num_image_tokens =
         image_grid_thw.prod().item<int64_t>() / merge_length;

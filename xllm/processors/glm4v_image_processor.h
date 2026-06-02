@@ -32,6 +32,10 @@ class Glm4VImageProcessor final : public ImageProcessor {
   bool process(const std::vector<torch::Tensor>& images,
                std::vector<MMDataItem>& output_items) const override;
 
+  bool process_image(const std::vector<torch::Tensor>& images,
+                     std::vector<torch::Tensor>& pixel_values,
+                     std::vector<torch::Tensor>& thw) const;
+
  private:
   bool do_convert_rgb_ = true;
   bool do_normalize_ = true;

@@ -81,6 +81,10 @@ class KimiK25ImageProcessor final : public ImageProcessor {
                std::vector<MMDataItem>& output_items) const override;
 
  private:
+  bool process_image(const std::vector<torch::Tensor>& images,
+                     std::vector<torch::Tensor>& pixel_values,
+                     std::vector<torch::Tensor>& thw) const;
+
   bool process_image(torch::Tensor image,
                      torch::Tensor& pixel_values,
                      torch::Tensor& thw) const;

@@ -22,8 +22,7 @@ limitations under the License.
 #include "models/vlm/qwen3_vl_base.h"
 #include "processors/multimodal_processor.h"
 #include "processors/qwen2_vl_image_processor.h"
-#include "processors/qwen2_vl_prompt_processor.h"
-#include "processors/qwen2_vl_video_processor.h"
+#include "processors/qwen3_vl_prompt_processor.h"
 #include "processors/qwen3_vl_video_processor.h"
 
 #if defined(USE_NPU)
@@ -32,7 +31,7 @@ limitations under the License.
 #elif defined(USE_MLU)
 #include "core/layers/common/qwen3_next_rms_norm.h"
 #include "core/layers/common/rms_norm.h"
-#include "core/layers/mlu/qwen3_5_decoder_layer.h"
+#include "core/layers/qwen3_5_decoder_layer.h"
 #include "core/layers/qwen3_vision_layer.h"
 #include "models/llm/llm_model_base.h"
 #include "qwen3_vl.h"
@@ -313,7 +312,7 @@ TORCH_MODULE(Qwen3_5ForConditionalGeneration);
 // request protocol currently requires array-form chat content.
 REGISTER_CAUSAL_VLM_MODEL(qwen3_5, Qwen3_5ForConditionalGeneration);
 REGISTER_MPOSITION_GENERATOR(qwen3_5, Qwen3VLMPositionGenerator);
-using Qwen35MultimodalProcessor = MultimodalProcessor<Qwen2VLPromptProcessor,
+using Qwen35MultimodalProcessor = MultimodalProcessor<Qwen3VLPromptProcessor,
                                                       Qwen2VLImageProcessor,
                                                       Qwen3VLVideoProcessor>;
 REGISTER_MULTIMODAL_PROCESSOR(qwen3_5, Qwen35MultimodalProcessor);

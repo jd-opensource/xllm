@@ -709,10 +709,9 @@ class OxygenvlmForConditionalGenerationImpl : public torch::nn::Module {
 };
 TORCH_MODULE(OxygenvlmForConditionalGeneration);
 
-using OxygenVLMultimodalProcessor =
-    MultimodalProcessor<Qwen2VLPromptProcessor,
-                        Qwen2VLImageProcessor,
-                        Qwen2VLVideoProcessor>;
+using OxygenVLMultimodalProcessor = MultimodalProcessor<Qwen2VLPromptProcessor,
+                                                        Qwen2VLImageProcessor,
+                                                        Qwen2VLVideoProcessor>;
 REGISTER_MULTIMODAL_PROCESSOR(oxygenvlm, OxygenVLMultimodalProcessor);
 REGISTER_CAUSAL_VLM_MODEL(oxygenvlm, OxygenvlmForConditionalGeneration);
 REGISTER_MPOSITION_GENERATOR(oxygenvlm, QwenVLMPositionGenerator);

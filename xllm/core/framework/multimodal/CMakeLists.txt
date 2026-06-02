@@ -8,7 +8,7 @@ cc_library(
     mm_codec.h
     mm_data.h
     mm_data_item.h
-    mm_data_visitor.h
+    mm_visitor.h
     embedding_output.h
     mm_embedding_handler.h
     mm_handler.h
@@ -20,7 +20,7 @@ cc_library(
     mm_codec.cpp
     mm_data.cpp
     mm_data_item.cpp
-    mm_data_visitor.cpp
+    mm_visitor.cpp
     mm_embedding_handler.cpp
     mm_handler.cpp
     mm_input.cpp

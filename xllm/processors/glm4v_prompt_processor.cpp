@@ -154,6 +154,8 @@ void GLM4VPromptProcessor::find_mm_spans(const std::vector<int32_t>& token_ids,
                 torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU))
                 .clone();
         item.mutable_state().mutable_mm_token_mask() = mask;
+        item.mutable_state().mutable_mm_token_num() =
+            static_cast<int32_t>(mask.sum().item<int64_t>());
       }
       is_video = false;
       continue;
@@ -175,6 +177,7 @@ void GLM4VPromptProcessor::find_mm_spans(const std::vector<int32_t>& token_ids,
           {image_span_length},
           torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU));
       item.mutable_state().mutable_mm_token_mask() = mask;
+      item.mutable_state().mutable_mm_token_num() = image_span_length;
       image_span_length = 0;
     }
   }

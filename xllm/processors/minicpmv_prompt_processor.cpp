@@ -101,6 +101,7 @@ void MiniCPMPromptProcessor::find_mm_spans(
       auto& item = mm_items[global_mm_index++];
       item.mutable_state().mutable_token_pos() = {offset, length};
       if (length == 0) {
+        item.mutable_state().mutable_mm_token_num() = 0;
         continue;
       }
       std::vector<uint8_t> mask_vec;
@@ -115,6 +116,8 @@ void MiniCPMPromptProcessor::find_mm_spans(
               torch::TensorOptions().dtype(torch::kBool).device(torch::kCPU))
               .clone();
       item.mutable_state().mutable_mm_token_mask() = mask;
+      item.mutable_state().mutable_mm_token_num() =
+          static_cast<int32_t>(mask.sum().item<int64_t>());
       continue;
     }
     if (!in_image) {

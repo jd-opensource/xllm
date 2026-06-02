@@ -20,7 +20,7 @@ limitations under the License.
 #include <algorithm>
 #include <numeric>
 
-#include "core/framework/multimodal/mm_data_visitor.h"
+#include "core/framework/multimodal/mm_visitor.h"
 
 namespace xllm {
 

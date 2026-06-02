@@ -22,8 +22,28 @@ limitations under the License.
 
 #include "mm_batch_data.h"
 #include "mm_data.h"
+#include "mm_input.h"
 
 namespace xllm {
+
+class MMInputGatherVisitor final : public MMInputItem::IVisitor {
+ public:
+  MMInputGatherVisitor() = default;
+
+  bool visit(const MMInputItem& item) override;
+  MMItemVec finish(std::vector<MMDataItem>& image_items,
+                   std::vector<MMDataItem>& video_items,
+                   std::vector<MMDataItem>& audio_items);
+
+  uint32_t data_type_ = MMType::NONE;
+  std::vector<uint32_t> item_types_;
+  std::vector<torch::Tensor> images_;
+  std::vector<torch::Tensor> videos_;
+  std::vector<torch::Tensor> audios_;
+  std::vector<VideoMetadata> video_metadata_;
+  std::vector<AudioMetadata> audio_metadata_;
+  std::vector<MMDataItem> image_embedding_items_;
+};
 
 class CollectItemTensorVisitor : public MMData::IItemVisitor {
  public:
@@ -100,26 +120,6 @@ class EncoderOutputScatterVisitor : public MMDataItem::IVisitor {
   int32_t image_idx = 0;
   int32_t video_idx = 0;
   int32_t audio_idx = 0;
-};
-
-struct PreprocessedMMItems {
-  std::vector<MMDataItem> image_items;
-  std::vector<MMDataItem> video_items;
-  std::vector<MMDataItem> audio_items;
-};
-
-class PreprocessOutputScatterVisitor : public MMDataItem::IVisitor {
- public:
-  explicit PreprocessOutputScatterVisitor(const PreprocessedMMItems& items)
-      : items_(items) {}
-
-  bool visit(MMDataItem& item) override;
-  bool finish() const;
-
- public:
-  const PreprocessedMMItems& items_;
-  int32_t image_idx = 0;
-  int32_t video_idx = 0;
 };
 
 class EncoderEmbeddingGatherVisitor : public MMDataItem::IVisitor {

@@ -30,6 +30,12 @@ namespace xllm {
 using EmbeddingInput = EmbeddingOutput;
 
 struct MMInputItem {
+  class IVisitor {
+   public:
+    virtual ~IVisitor() = default;
+    virtual bool visit(const MMInputItem& item) = 0;
+  };
+
   void clear() {
     type = MMType::NONE;
     raw_data.clear();
@@ -100,24 +106,6 @@ class MMInput {
 
   const std::vector<MMInputItem>& items() const { return items_; }
 
-  std::vector<MMInputItem>::iterator begin() { return items_.begin(); }
-
-  std::vector<MMInputItem>::iterator end() { return items_.end(); }
-
-  std::vector<MMInputItem>::const_iterator begin() const {
-    return items_.begin();
-  }
-
-  std::vector<MMInputItem>::const_iterator end() const { return items_.end(); }
-
-  std::vector<MMInputItem>::const_iterator cbegin() const {
-    return items_.cbegin();
-  }
-
-  std::vector<MMInputItem>::const_iterator cend() const {
-    return items_.cend();
-  }
-
   void insert(const std::vector<MMInputItem>& inputs) {
     items_.insert(items_.end(), inputs.begin(), inputs.end());
   }
@@ -139,16 +127,7 @@ class MMInput {
     return vec;
   }
 
-  std::vector<VideoMetadata> get_video_metadata() const {
-    std::vector<VideoMetadata> metas;
-    metas.reserve(items_.size());
-    for (const auto& item : items_) {
-      if (item.has_type(MMType::VIDEO) && !item.is_embedding()) {
-        metas.push_back(item.video_meta);
-      }
-    }
-    return metas;
-  }
+  bool foreach (MMInputItem::IVisitor& v) const;
 
   MMPayload& payload() { return payload_; }
   const MMPayload& payload() const { return payload_; }
