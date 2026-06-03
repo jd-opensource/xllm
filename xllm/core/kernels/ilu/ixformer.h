@@ -103,6 +103,14 @@ void rms_norm(torch::Tensor& input,
               const std::optional<torch::Tensor>& fused_bias,
               double eps);
 
+void rms_norm_qk(torch::Tensor& input_q,
+                 torch::Tensor& input_k,
+                 torch::Tensor& weight_q,
+                 torch::Tensor& weight_k,
+                 torch::Tensor& output_q,
+                 torch::Tensor& output_k,
+                 double eps);
+
 void topk_softmax(torch::Tensor& topk_weights,
                   torch::Tensor& topk_indices,
                   torch::Tensor& token_expert_indices,

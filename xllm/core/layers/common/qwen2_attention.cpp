@@ -19,8 +19,12 @@ limitations under the License.
 
 #include <tuple>
 
+#include "util/tensor_helper.h"
+
 #if defined(USE_CUDA)
 #include "kernels/cuda/cuda_ops_api.h"
+#elif defined(USE_ILU)
+#include "kernels/ilu/ilu_ops_api.h"
 #endif
 namespace {
 inline bool is_qwen3_model(const std::string& model_type) {
@@ -29,7 +33,7 @@ inline bool is_qwen3_model(const std::string& model_type) {
   return qwen3_type_set.contains(model_type);
 }
 
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) || defined(USE_ILU)
 inline bool supports_fused_qk_norm_rope_head_dim(int64_t head_dim) {
   return head_dim == 64 || head_dim == 128 || head_dim == 256;
 }
@@ -72,6 +76,10 @@ Qwen2AttentionImpl::Qwen2AttentionImpl(const ModelContext& context) {
   // Fused QKNorm+RoPE currently only supports:
   // 1) non-MRoPE models (positions must be 1D),
   // 2) head_dim in {64, 128, 256}.
+  can_use_fused_qk_norm_rope_ = is_qwen3_style_ &&
+                                args.rope_scaling_mrope_section().empty() &&
+                                supports_fused_qk_norm_rope_head_dim(head_dim_);
+#elif defined(USE_ILU)
   can_use_fused_qk_norm_rope_ = is_qwen3_style_ &&
                                 args.rope_scaling_mrope_section().empty() &&
                                 supports_fused_qk_norm_rope_head_dim(head_dim_);
@@ -168,8 +176,29 @@ torch::Tensor Qwen2AttentionImpl::forward(
     k = qkv.slice(/*dim=*/-1, q_size_, q_size_ + kv_size_);
     fused_qk_norm_rope_applied = true;
   }
+#elif defined(USE_ILU)
+  if (can_use_fused_qk_norm_rope_ && positions.dim() == 1) {
+    auto q_weight = q_norm_->weight();
+    auto k_weight = k_norm_->weight();
+    auto eps = q_norm_->eps();
+    auto cos_sin_cache = rotary_emb_->precomputed_cos_sin_cache();
+    auto position_ids = positions.to(torch::kInt64).contiguous();
+    xllm::kernel::ilu::fused_qk_norm_rope(qkv,
+                                          num_heads_,
+                                          num_kv_heads_,
+                                          num_kv_heads_,
+                                          head_dim_,
+                                          eps,
+                                          q_weight,
+                                          k_weight,
+                                          cos_sin_cache,
+                                          false,
+                                          position_ids);
+    q = qkv.slice(/*dim=*/-1, 0, q_size_);
+    k = qkv.slice(/*dim=*/-1, q_size_, q_size_ + kv_size_);
+    fused_qk_norm_rope_applied = true;
+  }
 #endif
-
   if (is_qwen3_style_ && !fused_qk_norm_rope_applied) {
     // 2. q-norm
     q = std::get<0>(q_norm_->forward(q));
@@ -185,9 +214,7 @@ torch::Tensor Qwen2AttentionImpl::forward(
   q = q.view({T, q_size_});
   k = k.view({T, kv_size_});
 
-  // 5. store k/v cache and do attention
   auto out = std::get<0>(attn_->forward(attn_metadata, q, k, v, kv_cache));
-
   // 6. output projection
   return o_proj_->forward(out);
 }

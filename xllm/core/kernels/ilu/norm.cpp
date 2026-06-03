@@ -48,4 +48,13 @@ void rms_norm(torch::Tensor& output,
   infer::rms_norm(input, weight, output, fused_bias, eps);
 }
 
+void fused_qk_norm(torch::Tensor& q,
+                   torch::Tensor& k,
+                   torch::Tensor& q_weight,
+                   torch::Tensor& k_weight,
+                   torch::Tensor& output_q,
+                   torch::Tensor& output_k,
+                   double eps) {
+  infer::rms_norm_qk(q, k, q_weight, k_weight, output_q, output_k, eps);
+}
 }  // namespace xllm::kernel::ilu

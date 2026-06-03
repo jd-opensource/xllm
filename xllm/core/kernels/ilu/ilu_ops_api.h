@@ -119,6 +119,26 @@ void rms_norm(torch::Tensor& output,
               torch::Tensor& weight,
               double eps);
 
+void fused_qk_norm(torch::Tensor& q,
+                   torch::Tensor& k,
+                   torch::Tensor& q_weight,
+                   torch::Tensor& k_weight,
+                   torch::Tensor& output_q,
+                   torch::Tensor& output_k,
+                   double eps);
+
+void fused_qk_norm_rope(torch::Tensor& qkv,
+                        int64_t num_heads_q,
+                        int64_t num_heads_k,
+                        int64_t num_heads_v,
+                        int64_t head_dim,
+                        double eps,
+                        const torch::Tensor& q_weight,
+                        const torch::Tensor& k_weight,
+                        const torch::Tensor& cos_sin_cache,
+                        bool interleaved,
+                        const torch::Tensor& position_ids);
+
 torch::Tensor matmul(torch::Tensor a,
                      torch::Tensor b,
                      std::optional<torch::Tensor> bias);
