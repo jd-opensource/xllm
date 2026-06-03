@@ -311,11 +311,9 @@ TEST(DcuGraphExecutorTest, DecodeCaptureAndReplay) {
   }
 
   const bool old_enable_graph = FLAGS_enable_graph;
-  const bool old_enable_graph_vmm_pool = FLAGS_enable_graph_vmm_pool;
   const bool old_decode_no_padding = FLAGS_enable_graph_mode_decode_no_padding;
 
   FLAGS_enable_graph = true;
-  FLAGS_enable_graph_vmm_pool = false;
   FLAGS_enable_graph_mode_decode_no_padding = true;
 
   const torch::Device device = InitXllmDcuDeviceForTest(0);
@@ -361,7 +359,6 @@ TEST(DcuGraphExecutorTest, DecodeCaptureAndReplay) {
       << "DCU graph capture and replay outputs should match";
 
   FLAGS_enable_graph = old_enable_graph;
-  FLAGS_enable_graph_vmm_pool = old_enable_graph_vmm_pool;
   FLAGS_enable_graph_mode_decode_no_padding = old_decode_no_padding;
 }
 
@@ -371,10 +368,8 @@ TEST(DcuGraphExecutorTest, PrefillFallsBackToEager) {
   }
 
   const bool old_enable_graph = FLAGS_enable_graph;
-  const bool old_enable_graph_vmm_pool = FLAGS_enable_graph_vmm_pool;
 
   FLAGS_enable_graph = true;
-  FLAGS_enable_graph_vmm_pool = false;
 
   const torch::Device device = InitXllmDcuDeviceForTest(0);
 
@@ -415,68 +410,6 @@ TEST(DcuGraphExecutorTest, PrefillFallsBackToEager) {
       << "DCU prefill path should fallback to eager and match eager output";
 
   FLAGS_enable_graph = old_enable_graph;
-  FLAGS_enable_graph_vmm_pool = old_enable_graph_vmm_pool;
-}
-
-TEST(DcuGraphExecutorTest, DecodeVmmPoolEnabledCorrectness) {
-  if (!IsDcuAvailable()) {
-    GTEST_SKIP() << "DCU/HIP is not available at runtime.";
-  }
-
-  const bool old_enable_graph = FLAGS_enable_graph;
-  const bool old_enable_graph_vmm_pool = FLAGS_enable_graph_vmm_pool;
-  const bool old_decode_no_padding = FLAGS_enable_graph_mode_decode_no_padding;
-
-  FLAGS_enable_graph = true;
-  FLAGS_enable_graph_vmm_pool = true;
-  FLAGS_enable_graph_mode_decode_no_padding = true;
-
-  const torch::Device device = InitXllmDcuDeviceForTest(0);
-
-  ModelArgs args = MakeFakeModelArgs(64);
-  runtime::Options options = MakeRuntimeOptions(8);
-
-  auto model = std::make_unique<FakeSimpleCausalLM>(args, device);
-  auto graph_exec = std::make_unique<runtime::dcu::DcuGraphExecutorImpl>(
-      model.get(), args, device, options);
-
-  auto iopt = torch::TensorOptions().dtype(torch::kInt32).device(device);
-
-  auto all_tokens = torch::arange(1, 9, iopt);
-  auto all_positions = torch::arange(0, 8, iopt);
-
-  auto kv = MakeKvCaches(device,
-                         /*num_pages=*/64,
-                         /*page_size=*/1,
-                         /*num_kv_heads=*/1,
-                         /*head_dim=*/64);
-
-  for (int32_t num_tokens : {1, 2, 4, 8}) {
-    auto tokens = all_tokens.slice(0, 0, num_tokens);
-    auto positions = all_positions.slice(0, 0, num_tokens);
-    auto params = MakeDecodeParams(device, num_tokens);
-
-    auto eager_out =
-        model->forward(tokens, positions, kv, params).hidden_states.clone();
-    DcuSynchronize();
-
-    auto graph_out =
-        graph_exec->run(tokens, positions, kv, params).hidden_states.clone();
-    DcuSynchronize();
-
-    EXPECT_TRUE(
-        torch::isfinite(graph_out.to(torch::kFloat32)).all().item<bool>())
-        << "graph output contains non-finite values at num_tokens="
-        << num_tokens;
-
-    EXPECT_TRUE(AllCloseBf16(graph_out, eager_out))
-        << "With enable_graph_vmm_pool=true, DCU graph output should match "
-        << "eager output at num_tokens=" << num_tokens;
-  }
-
-  FLAGS_enable_graph = old_enable_graph;
-  FLAGS_enable_graph_vmm_pool = old_enable_graph_vmm_pool;
-  FLAGS_enable_graph_mode_decode_no_padding = old_decode_no_padding;
 }
 
 }  // namespace

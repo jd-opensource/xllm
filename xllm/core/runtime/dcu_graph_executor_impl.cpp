@@ -37,9 +37,6 @@ namespace xllm::runtime::dcu {
 
 namespace {
 
-constexpr uint32_t kPhysicalPoolIdDecode = 1;
-constexpr uint32_t kPhysicalPoolIdPrefill = 2;
-
 torch::Tensor make_int_tensor_on_device(const std::vector<int32_t>& values,
                                         const torch::TensorOptions& options) {
   return torch::tensor(values, options);
@@ -668,7 +665,6 @@ bool DcuGraph::capture(CausalLM* model,
                        std::vector<KVCache>& kv_cache,
                        uint32_t bucket_num_tokens,
                        const at::hip::MempoolId_t& pool,
-                       TorchMemPool* pool_ptr,
                        bool use_piecewise,
                        uint32_t graph_max_seq_len) {
   padded_num_tokens_ = bucket_num_tokens;
@@ -712,7 +708,6 @@ bool DcuGraph::capture(CausalLM* model,
   VLOG(1) << "DCU graph capture begin, bucket_num_tokens=" << bucket_num_tokens
           << ", actual_num_tokens=" << actual_num_tokens
           << ", graph_max_seq_len=" << graph_max_seq_len
-          << ", vmm_pool=" << (pool_ptr != nullptr)
           << ", piecewise=" << is_piecewise_;
 
   if (is_piecewise_) {
@@ -810,12 +805,6 @@ ModelOutput DcuGraph::replay(const torch::Tensor& tokens,
   return ModelOutput(get_hidden_states(actual_num_tokens));
 }
 
-struct DcuGraphExecutorImpl::VmmPoolState {
-  std::unique_ptr<xllm::SharedVMMAllocator> allocator;
-  std::unique_ptr<xllm::VMMTorchAllocator> torch_allocator;
-  std::unordered_map<uint32_t, std::unique_ptr<TorchMemPool>> mempools_by_shape;
-};
-
 DcuGraphExecutorImpl::DcuGraphExecutorImpl(CausalLM* model,
                                            const ModelArgs& args,
                                            const torch::Device& device,
@@ -844,103 +833,6 @@ DcuGraphExecutorImpl::DcuGraphExecutorImpl(CausalLM* model,
 DcuGraphExecutorImpl::~DcuGraphExecutorImpl() {
   prefill_graphs_.clear();
   graphs_.clear();
-  vmm_pools_.clear();
-}
-
-DcuGraphExecutorImpl::VmmPoolState&
-DcuGraphExecutorImpl::get_or_create_vmm_pool_state(uint32_t physical_pool_id) {
-  std::lock_guard<std::mutex> lock(vmm_mutex_);
-
-  auto& slot = vmm_pools_[physical_pool_id];
-  if (!slot) {
-    auto state = std::make_unique<VmmPoolState>();
-
-    state->allocator = std::make_unique<xllm::SharedVMMAllocator>();
-    state->allocator->init(device_.index());
-
-    state->torch_allocator =
-        std::make_unique<xllm::VMMTorchAllocator>(state->allocator.get());
-
-    slot = std::move(state);
-
-    VLOG(1) << "Created DCU VMM pool state for executor " << this
-            << ", device=" << device_.index()
-            << ", physical_pool_id=" << physical_pool_id;
-  }
-
-  return *slot;
-}
-
-TorchMemPool* DcuGraphExecutorImpl::get_or_create_vmm_mempool(
-    uint32_t physical_pool_id,
-    uint32_t shape_id) {
-  VmmPoolState& state = get_or_create_vmm_pool_state(physical_pool_id);
-
-  std::lock_guard<std::mutex> lock(vmm_mutex_);
-
-  auto& mempools = state.mempools_by_shape;
-  auto it = mempools.find(shape_id);
-  if (it != mempools.end()) {
-    return it->second.get();
-  }
-
-  auto pool = std::make_unique<TorchMemPool>(state.torch_allocator.get(),
-                                             /*is_user_created=*/true);
-
-  TorchMemPool* ptr = pool.get();
-  mempools[shape_id] = std::move(pool);
-
-  VLOG(1) << "Created DCU per-shape VMM MemPool for executor " << this
-          << ", device=" << device_.index()
-          << ", physical_pool_id=" << physical_pool_id
-          << ", shape_id=" << shape_id << ", pool_id={" << ptr->id().first
-          << ", " << ptr->id().second << "}";
-
-  return ptr;
-}
-
-TorchMemPool* DcuGraphExecutorImpl::get_vmm_mempool(uint32_t physical_pool_id,
-                                                    uint32_t shape_id) {
-  std::lock_guard<std::mutex> lock(vmm_mutex_);
-
-  auto it = vmm_pools_.find(physical_pool_id);
-  if (it == vmm_pools_.end() || !it->second) {
-    return nullptr;
-  }
-
-  auto& mempools = it->second->mempools_by_shape;
-  auto it_pool = mempools.find(shape_id);
-  if (it_pool == mempools.end()) {
-    return nullptr;
-  }
-
-  return it_pool->second.get();
-}
-
-void DcuGraphExecutorImpl::reset_vmm_allocator_offset(
-    uint32_t physical_pool_id) {
-  auto& state = get_or_create_vmm_pool_state(physical_pool_id);
-
-  state.allocator->switch_to_new_virtual_space();
-
-  VLOG(1) << "Reset DCU VMM allocator for device=" << device_.index()
-          << ", physical_pool_id=" << physical_pool_id;
-}
-
-at::hip::MempoolId_t DcuGraphExecutorImpl::get_mem_pool(
-    uint32_t physical_pool_id,
-    uint32_t shape_id) {
-  if (!::xllm::ExecutionConfig::get_instance().enable_graph_vmm_pool()) {
-    return graph_pool_;
-  }
-
-  TorchMemPool* pool = get_vmm_mempool(physical_pool_id, shape_id);
-  CHECK(pool != nullptr)
-      << "DCU VMM MemPool for shape_id=" << shape_id
-      << ", physical_pool_id=" << physical_pool_id
-      << " not found; get_or_create_vmm_mempool must be called before capture";
-
-  return pool->id();
 }
 
 ForwardInput DcuGraphExecutorImpl::prepare_inputs(Batch& batch) {
@@ -1111,18 +1003,6 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
                                    device_.index(),
                                    get_capture_stream(device_.index()));
 
-    TorchMemPool* pool_ptr = nullptr;
-
-    if (::xllm::ExecutionConfig::get_instance().enable_graph_vmm_pool()) {
-      reset_vmm_allocator_offset(kPhysicalPoolIdPrefill);
-
-      const uint32_t shape_id = bucket_num_tokens;
-      pool_ptr = get_or_create_vmm_mempool(kPhysicalPoolIdPrefill, shape_id);
-    }
-
-    const at::hip::MempoolId_t mem_pool =
-        get_mem_pool(kPhysicalPoolIdPrefill, bucket_num_tokens);
-
     const bool capture_success = graph->capture(model_,
                                                 options_,
                                                 tokens,
@@ -1130,8 +1010,7 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
                                                 params,
                                                 kv_caches,
                                                 bucket_num_tokens,
-                                                mem_pool,
-                                                pool_ptr,
+                                                graph_pool_,
                                                 /*use_piecewise=*/true);
 
     if (!capture_success) {
@@ -1203,18 +1082,6 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
   auto graph = std::make_unique<DcuGraph>(
       *persistent_param_, device_.index(), get_capture_stream(device_.index()));
 
-  TorchMemPool* pool_ptr = nullptr;
-
-  if (::xllm::ExecutionConfig::get_instance().enable_graph_vmm_pool()) {
-    reset_vmm_allocator_offset(kPhysicalPoolIdDecode);
-
-    const uint32_t shape_id = graph_shape_id;
-    pool_ptr = get_or_create_vmm_mempool(kPhysicalPoolIdDecode, shape_id);
-  }
-
-  const at::hip::MempoolId_t mem_pool =
-      get_mem_pool(kPhysicalPoolIdDecode, graph_shape_id);
-
   const bool capture_success = graph->capture(model_,
                                               options_,
                                               tokens,
@@ -1222,8 +1089,7 @@ ModelOutput DcuGraphExecutorImpl::run(const torch::Tensor& tokens,
                                               params,
                                               kv_caches,
                                               bucket_num_tokens,
-                                              mem_pool,
-                                              pool_ptr,
+                                              graph_pool_,
                                               /*use_piecewise=*/false,
                                               graph_max_seq_len);
 

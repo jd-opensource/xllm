@@ -34,20 +34,17 @@ DEFINE_bool(enable_graph_mode_decode_no_padding,
 
 DEFINE_bool(enable_prefill_piecewise_graph,
             false,
-            "Whether to enable piecewise CUDA graph for prefill phase. "
-            "When enabled, attention operations use eager mode while other "
-            "operations are captured in CUDA graphs.");
+            "Whether to enable piecewise graph execution for prefill phase "
+            "when graph mode is enabled. When enabled, attention operations "
+            "use eager mode while other operations are captured in device "
+            "graphs.");
 
-#if defined(USE_DCU)
-constexpr bool kEnableGraphVmmPoolDefault = false;
-#else
 constexpr bool kEnableGraphVmmPoolDefault = true;
-#endif
 
 DEFINE_bool(enable_graph_vmm_pool,
             kEnableGraphVmmPoolDefault,
             "Whether to enable VMM-backed graph memory pool for multi-shape "
-            "graph memory reuse. Defaults to false on DCU.");
+            "graph memory reuse.");
 
 DEFINE_int32(max_tokens_for_graph_mode,
              2048,

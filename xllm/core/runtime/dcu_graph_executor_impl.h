@@ -26,7 +26,6 @@ limitations under the License.
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <thread>
 #include <unordered_map>
@@ -36,8 +35,6 @@ limitations under the License.
 #include "core/framework/model/causal_lm.h"
 #include "core/framework/model/model_args.h"
 #include "core/framework/model/model_input_params.h"
-#include "core/platform/shared_vmm_allocator.h"
-#include "core/platform/vmm_torch_allocator.h"
 #include "core/runtime/executor_impl.h"
 #include "core/runtime/executor_impl_factory.h"
 #include "core/runtime/options.h"
@@ -46,7 +43,6 @@ limitations under the License.
 namespace xllm::runtime::dcu {
 
 using DcuStream = c10::hip::HIPStream;
-using TorchMemPool = c10::hip::MemPool;
 
 class DcuGraphPersistentParam final {
  public:
@@ -204,7 +200,6 @@ class DcuGraph final {
                std::vector<KVCache>& kv_cache,
                uint32_t bucket_num_tokens,
                const at::hip::MempoolId_t& pool,
-               TorchMemPool* pool_ptr,
                bool use_piecewise,
                uint32_t graph_max_seq_len = 0);
 
@@ -260,20 +255,6 @@ class DcuGraphExecutorImpl final : public ExecutorImpl {
 
   static DcuStream get_capture_stream(c10::DeviceIndex device_index);
 
-  struct VmmPoolState;
-
-  VmmPoolState& get_or_create_vmm_pool_state(uint32_t physical_pool_id);
-
-  TorchMemPool* get_or_create_vmm_mempool(uint32_t physical_pool_id,
-                                          uint32_t shape_id);
-
-  TorchMemPool* get_vmm_mempool(uint32_t physical_pool_id, uint32_t shape_id);
-
-  at::hip::MempoolId_t get_mem_pool(uint32_t physical_pool_id = 0,
-                                    uint32_t shape_id = 0);
-
-  void reset_vmm_allocator_offset(uint32_t physical_pool_id);
-
  private:
   CausalLM* model_;  // not owned
 
@@ -288,9 +269,6 @@ class DcuGraphExecutorImpl final : public ExecutorImpl {
   std::unique_ptr<DcuGraphPersistentParam> persistent_param_;
 
   at::hip::MempoolId_t graph_pool_;
-
-  std::mutex vmm_mutex_;
-  std::unordered_map<uint32_t, std::unique_ptr<VmmPoolState>> vmm_pools_;
 
   int64_t max_tokens_for_graph_mode_ = 0;
 };
