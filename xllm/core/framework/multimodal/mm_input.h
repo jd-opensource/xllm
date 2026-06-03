@@ -22,6 +22,7 @@ limitations under the License.
 
 #include "core/common/message.h"
 #include "core/common/types.h"
+#include "core/framework/multimodal/embedding_output.h"
 #include "mm_type.h"
 
 namespace xllm {

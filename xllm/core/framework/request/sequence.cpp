@@ -35,6 +35,7 @@ limitations under the License.
 #include "core/framework/config/disagg_pd_config.h"
 #include "core/framework/config/execution_config.h"
 #include "core/framework/config/rec_config.h"
+#include "core/framework/multimodal/embedding_output.h"
 #include "core/framework/multimodal/mm_data_visitor.h"
 #include "core/framework/tokenizer/rec_tokenizer.h"
 #include "core/framework/tokenizer/tokenizer.h"

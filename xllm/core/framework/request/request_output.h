@@ -24,6 +24,7 @@ limitations under the License.
 #include <vector>
 
 #include "core/common/types.h"
+#include "core/framework/multimodal/embedding_output.h"
 
 namespace xllm {
 struct Usage {

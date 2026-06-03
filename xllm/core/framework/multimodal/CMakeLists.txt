@@ -9,6 +9,7 @@ cc_library(
     mm_data.h
     mm_data_item.h
     mm_data_visitor.h
+    embedding_output.h
     mm_embedding_handler.h
     mm_handler.h
     mm_input.h
