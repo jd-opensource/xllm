@@ -114,6 +114,21 @@ void record_speculative_metrics_from_output(const torch::Tensor& next_tokens,
               num_draft_tokens - rejected_count);
 }
 
+torch::Tensor clone_cpu_tensor_view(const torch::Tensor& tensor) {
+  if (!tensor.defined()) {
+    return tensor;
+  }
+  CHECK(tensor.device().is_cpu()) << "expected a CPU tensor view";
+  return tensor.contiguous().clone();
+}
+
+void stabilize_schedule_overlap_host_views(ForwardInput& input) {
+  input.token_ids_host = clone_cpu_tensor_view(input.token_ids_host);
+  input.positions_host = clone_cpu_tensor_view(input.positions_host);
+  input.input_params.attention.host.block_tables =
+      clone_cpu_tensor_view(input.input_params.attention.host.block_tables);
+}
+
 }  // namespace
 
 WorkerService::WorkerService(runtime::Options options,
@@ -168,6 +183,9 @@ void WorkerService::step(ForwardInput& fwd_input,
                          torch::Tensor& out_logprobs) {
   const bool use_default_stream =
       !options_.enable_schedule_overlap() && options_.backend() == "llm";
+  if (options_.enable_schedule_overlap()) {
+    stabilize_schedule_overlap_host_views(fwd_input);
+  }
   // execute model
   auto future = worker_->step_async(fwd_input);
   if (!options_.enable_schedule_overlap()) {
