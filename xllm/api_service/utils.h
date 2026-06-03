@@ -29,7 +29,7 @@ limitations under the License.
 #include "chat.pb.h"
 #include "common.pb.h"
 #include "core/common/types.h"
-#include "core/framework/request/request_output.h"
+#include "core/framework/request/usage.h"
 #include "function_call/function_call.h"
 
 namespace xllm {

@@ -12,6 +12,7 @@ cc_library(
     request.h
     dit_request.h
     request_output.h
+    usage.h
     dit_request_output.h
     dit_request_params.h
     request_params.h
