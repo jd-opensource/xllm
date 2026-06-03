@@ -45,6 +45,24 @@ limitations under the License.
 
 namespace xllm {
 
+namespace {
+
+void wait_input_ready_events(const ForwardInput& input, const Stream& stream) {
+  CHECK(stream.wait_event(input.metadata_ready_event))
+      << "failed to wait ForwardInput metadata ready event";
+}
+
+StreamEventPtr record_current_stream_event(const Device& device) {
+  std::unique_ptr<Stream> stream = device.current_stream();
+  StreamEventPtr event = stream->record_event();
+  if (event == nullptr) {
+    stream->synchronize();
+  }
+  return event;
+}
+
+}  // namespace
+
 LLMWorkerImpl::LLMWorkerImpl(const ParallelArgs& parallel_args,
                              const torch::Device& device,
                              const runtime::Options& options)
@@ -80,6 +98,43 @@ bool LLMWorkerImpl::init_model(ModelContext& context) {
   return true;
 }
 
+std::optional<ForwardOutput> LLMWorkerImpl::step_no_sync(
+    const ForwardInput& input) {
+  ForwardInput input_on_device;
+  prepare_work_before_execute(input, input_on_device);
+  std::unique_ptr<Stream> current_stream = device_.current_stream();
+  return execute_no_sync_on_stream(input_on_device, *current_stream);
+}
+
+std::optional<ForwardOutput> LLMWorkerImpl::execute_no_sync_on_stream(
+    const ForwardInput& input,
+    Stream& compute_stream) {
+  const ForwardSyncPolicy sync_policy = ForwardSyncPolicy::NO_SYNC;
+  c10::StreamGuard stream_guard = compute_stream.set_stream_guard();
+  if (::xllm::LoadConfig::get_instance().enable_manual_loader()) {
+#if defined(USE_NPU)
+    if (!enable_schedule_overlap() && options_.backend() == "llm") {
+      aclrtStream current_acl_stream =
+          c10_npu::getCurrentNPUStream(device_.index()).stream();
+      atb::Context* atb_context =
+          const_cast<atb::Context*>(context_.get_atb_context());
+      atb_context->SetExecuteStream(current_acl_stream);
+      wait_input_ready_events(input, compute_stream);
+      return step_internal(input, sync_policy);
+    } else {
+      SET_ATB_EXECUTE_STREAM((&compute_stream), device_, context_);
+      wait_input_ready_events(input, compute_stream);
+      return step_internal(input, sync_policy);
+    }
+#else
+    wait_input_ready_events(input, compute_stream);
+    return step_internal(input, sync_policy);
+#endif
+  }
+  wait_input_ready_events(input, compute_stream);
+  return step_internal(input, sync_policy);
+}
+
 std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
   if (::xllm::LoadConfig::get_instance().enable_manual_loader()) {
 #if defined(USE_NPU)
@@ -89,17 +144,65 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
       atb::Context* atb_context =
           const_cast<atb::Context*>(context_.get_atb_context());
       atb_context->SetExecuteStream(current_stream);
+      std::unique_ptr<Stream> stream = device_.current_stream();
+      wait_input_ready_events(input, *stream);
+      return step_internal(input, ForwardSyncPolicy::LEGACY);
     } else {
       SET_ATB_EXECUTE_STREAM(compute_stream_, device_, context_);
+      wait_input_ready_events(input, *compute_stream_);
+      return step_internal(input, ForwardSyncPolicy::LEGACY);
     }
+#else
+    std::unique_ptr<Stream> stream = device_.current_stream();
+    wait_input_ready_events(input, *stream);
+    return step_internal(input, ForwardSyncPolicy::LEGACY);
 #endif
-    return step_internal(input);
   }
-  return step_internal(input);
+  std::unique_ptr<Stream> stream = device_.current_stream();
+  wait_input_ready_events(input, *stream);
+  return step_internal(input, ForwardSyncPolicy::LEGACY);
+}
+
+folly::SemiFuture<std::optional<ForwardOutput>>
+LLMWorkerImpl::step_async_no_sync(const ForwardInput& input) {
+  CHECK(!enable_schedule_overlap())
+      << "step_async_no_sync is only supported for non-overlap workers";
+  ForwardInput input_on_device;
+
+  prepare_work_before_execute(input, input_on_device);
+
+  folly::Promise<std::optional<ForwardOutput>> promise;
+  auto future = promise.getSemiFuture();
+  threadpool_.schedule([this,
+                        input = std::move(input_on_device),
+                        promise = std::move(promise)]() mutable {
+    if (hierarchy_kv_cache_transfer_ != nullptr) {
+      hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
+    }
+
+    const auto output = this->step_no_sync(input);
+    promise.setValue(output);
+  });
+  return future;
+}
+
+std::optional<ForwardOutput> LLMWorkerImpl::step_for_schedule_overlap(
+    const ForwardInput& input) {
+  return execute_no_sync_on_stream(input, *compute_stream_);
+}
+
+ForwardInput
+LLMWorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
+    ForwardInput& input) {
+  c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
+  CHECK(compute_stream_->wait_event(last_step_output_.ready_event))
+      << "failed to wait last step output ready event";
+  return update_input_by_last_step_output(input);
 }
 
 std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
-    const ForwardInput& input) {
+    const ForwardInput& input,
+    ForwardSyncPolicy sync_policy) {
   MULTI_MODEL_STEP_LOCK(::xllm::KVCacheConfig::get_instance().enable_xtensor());
 
   Timer timer;
@@ -172,6 +275,9 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   if (!enable_schedule_overlap() && !driver_ && !dp_driver_ &&
       !options_.enable_speculative_decode()) {
     MULTI_MODEL_STEP_UNLOCK();
+    if (sync_policy == ForwardSyncPolicy::NO_SYNC) {
+      return std::nullopt;
+    }
     auto ret = device_.synchronize_default_stream();
     // in p-d disaggregation scene, all micro batches should be in same
     // prefill/decode stage, so, to judge transfer_kv_infos.empty,
@@ -253,6 +359,13 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   }
 
   MULTI_MODEL_STEP_UNLOCK();
+  if (sync_policy == ForwardSyncPolicy::NO_SYNC) {
+    output.retained_input = std::make_shared<ForwardInput>(input);
+    if (enable_schedule_overlap()) {
+      output.ready_event = record_current_stream_event(device_);
+    }
+    return output;
+  }
   auto ret = device_.synchronize_default_stream();
 
   if (options_.kv_cache_transfer_mode() == "PUSH" &&

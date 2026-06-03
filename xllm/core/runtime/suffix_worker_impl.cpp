@@ -423,13 +423,6 @@ SampleOutput SuffixWorkerImpl::validate(
   sample_output.embeddings =
       embeddings.view({batch_size, num_val_tokens, embeddings.size(-1)});
 
-  torch::Tensor mask = (sample_output.next_tokens == -1).to(torch::kInt64);
-  size_t count = mask.sum().item<int64_t>();
-  size_t num_draft_tokens =
-      static_cast<size_t>(batch_size) * options_.num_speculative_tokens();
-  COUNTER_ADD(speculative_num_draft_tokens_total, num_draft_tokens);
-  COUNTER_ADD(speculative_num_accepted_tokens_total, num_draft_tokens - count);
-
   return sample_output;
 }
 

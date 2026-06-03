@@ -76,7 +76,8 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
 
   void fill_validate_input_from_draft_outputs(
       const std::vector<ForwardOutput>& draft_outputs,
-      ForwardInput& validate_input);
+      ForwardInput& validate_input,
+      Stream& compute_stream);
   std::optional<ForwardOutput> run_validate(
       const ForwardInput& input,
       const std::vector<ForwardOutput>& draft_outputs,
@@ -124,7 +125,6 @@ class MTPWorkerImpl : public SpeculativeWorkerImpl {
 
   void write_target_context_to_cache(const ForwardInput& input,
                                      const SampleOutput& validate_output);
-  void record_validate_metrics(const SampleOutput& validate_output) const;
 
  protected:
   // Draft model worker

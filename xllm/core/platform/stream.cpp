@@ -13,11 +13,37 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "stream.h"
+#include "core/platform/stream.h"
 
+#include <glog/logging.h>
+
+#include <exception>
+#include <memory>
 #include <ostream>
 
 namespace xllm {
+
+namespace {
+
+#if defined(USE_NPU)
+c10::Stream to_c10_stream(const c10_npu::NPUStream& stream) {
+  return stream.unwrap();
+}
+#elif defined(USE_MLU)
+c10::Stream to_c10_stream(const torch_mlu::MLUStream& stream) {
+  return stream.unwrap();
+}
+#elif defined(USE_CUDA) || defined(USE_ILU)
+c10::Stream to_c10_stream(const c10::cuda::CUDAStream& stream) {
+  return stream;
+}
+#elif defined(USE_MUSA)
+c10::Stream to_c10_stream(const c10::musa::MUSAStream& stream) {
+  return stream;
+}
+#endif
+
+}  // namespace
 
 #if defined(USE_NPU)
 Stream::Stream(const int32_t timeout)
@@ -72,17 +98,88 @@ c10::StreamGuard Stream::set_stream_guard() const {
 
 void Stream::wait_stream(const Stream& other_stream) {
   // get the c10::Stream objects for the current stream and the other stream
-#if defined(USE_CUDA) || defined(USE_ILU)
-  const c10::Stream& current_c10_stream = this->stream_;
-  const c10::Stream& target_c10_stream = other_stream.stream_;
-#else
-  c10::Stream current_c10_stream = this->stream_.unwrap();
-  c10::Stream target_c10_stream = other_stream.stream_.unwrap();
-#endif
+  c10::Stream current_c10_stream = to_c10_stream(stream_);
+  c10::Stream target_c10_stream = to_c10_stream(other_stream.stream_);
 
   c10::Event event(current_c10_stream.device_type());
   event.record(target_c10_stream);
   event.block(current_c10_stream);
+}
+
+StreamEventPtr Stream::record_event() const {
+#if defined(USE_NPU)
+  aclrtEvent event = nullptr;
+  aclError ret = aclrtCreateEventWithFlag(&event, ACL_EVENT_SYNC);
+  if (ret != ACL_SUCCESS) {
+    ret = aclrtCreateEvent(&event);
+  }
+  if (ret != ACL_SUCCESS) {
+    LOG(ERROR) << "Failed to create NPU stream event: " << ret;
+    return nullptr;
+  }
+
+  ret = aclrtRecordEvent(event, stream_.stream());
+  if (ret != ACL_SUCCESS) {
+    LOG(ERROR) << "Failed to record NPU stream event: " << ret;
+    aclrtDestroyEvent(event);
+    return nullptr;
+  }
+  return std::make_shared<StreamEvent>(event);
+#else
+  try {
+    c10::Stream current_c10_stream = to_c10_stream(stream_);
+    StreamEventPtr event =
+        std::make_shared<StreamEvent>(current_c10_stream.device_type());
+    event->c10_event().record(current_c10_stream);
+    return event;
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Failed to record stream event: " << e.what();
+  } catch (...) {
+    LOG(ERROR) << "Failed to record stream event: unknown exception";
+  }
+  return nullptr;
+#endif
+}
+
+bool Stream::wait_event(const StreamEventPtr& event) const {
+  if (event == nullptr) {
+    return true;
+  }
+#if defined(USE_NPU)
+  aclError ret = aclrtStreamWaitEvent(stream_.stream(), event->npu_event());
+  if (ret == ACL_SUCCESS) {
+    return true;
+  }
+  LOG(ERROR) << "Failed to wait NPU stream event: " << ret
+             << "; falling back to event synchronize.";
+  ret = aclrtSynchronizeEvent(event->npu_event());
+  if (ret == ACL_SUCCESS) {
+    return true;
+  }
+  LOG(ERROR) << "Failed to synchronize NPU stream event: " << ret;
+  return false;
+#else
+  try {
+    event->c10_event().block(to_c10_stream(stream_));
+    return true;
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Failed to wait stream event: " << e.what()
+               << "; falling back to event synchronize.";
+  } catch (...) {
+    LOG(ERROR) << "Failed to wait stream event: unknown exception; falling "
+                  "back to event synchronize.";
+  }
+
+  try {
+    event->c10_event().synchronize();
+    return true;
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Failed to synchronize stream event: " << e.what();
+  } catch (...) {
+    LOG(ERROR) << "Failed to synchronize stream event: unknown exception";
+  }
+  return false;
+#endif
 }
 
 std::ostream& operator<<(std::ostream& os, const Stream& stream) {

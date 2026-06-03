@@ -238,7 +238,7 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   device_.init_device_context();
   threadpool_.schedule([this]() mutable { device_.set_device(); });
   prepare_stream_ = device_.get_stream_from_pool();
-  compute_stream_ = device_.get_stream_from_pool();
+  compute_stream_ = device_.current_stream();
   sampler_ = std::make_unique<Sampler>();
 
 #if !defined(USE_NPU) && !defined(USE_CUDA)
@@ -533,6 +533,16 @@ ForwardInput WorkerImpl::update_input_by_last_step_output(
   return inputs;
 }
 
+std::optional<ForwardOutput> WorkerImpl::step_for_schedule_overlap(
+    const ForwardInput& input) {
+  return step(input);
+}
+
+ForwardInput WorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
+    ForwardInput& input) {
+  return update_input_by_last_step_output(input);
+}
+
 #if defined(USE_NPU)
 torch::Tensor WorkerImpl::recompute_new_cache_slots(const ForwardInput& input) {
   auto old_cache_slots = input.input_params.attention.device.new_cache_slots;
@@ -647,6 +657,14 @@ torch::Tensor WorkerImpl::compute_in_prefix_slots(const ForwardInput& input) {
 
 void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
                                              ForwardInput& processed_input) {
+  prepare_work_before_execute_on_stream(
+      input, processed_input, *prepare_stream_);
+}
+
+void WorkerImpl::prepare_work_before_execute_on_stream(
+    const ForwardInput& input,
+    ForwardInput& processed_input,
+    Stream& prepare_stream) {
 #if defined(USE_NPU)
   // Without device_capture_lock, ACL graph capture will be interrupted by the
   // synchronization H2D of data update streams asynchronously scheduled by
@@ -665,9 +683,9 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
     lock_guard.emplace(capture_lock);
   }
 #endif
-
-  const bool use_default_stream =
-      !enable_schedule_overlap() && options_.backend() == "llm";
+  c10::StreamGuard stream_guard = prepare_stream.set_stream_guard();
+  CHECK(prepare_stream.wait_event(input.metadata_ready_event))
+      << "failed to wait input metadata ready event on worker prepare stream";
 
   // CP partition is now done worker-side (formerly engine-side in
   // LLMEngine::step). torch::Tensor fields are handles, so assigning new
@@ -864,16 +882,13 @@ void WorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 #endif
   };
 
-  if (use_default_stream) {
-    prepare_device_on_stream();
-  } else {
-    c10::StreamGuard stream_guard = prepare_stream_->set_stream_guard();
-    prepare_device_on_stream();
-  }
+  prepare_device_on_stream();
 
-  if (!use_default_stream) {
-    prepare_stream_->synchronize();
+  StreamEventPtr event = prepare_stream.record_event();
+  if (event == nullptr) {
+    prepare_stream.synchronize();
   }
+  processed_input.metadata_ready_event = event;
 }
 
 void WorkerImpl::apply_kv_block_swaps(const ModelInputParams& input_params) {
@@ -1020,10 +1035,10 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
       if (last_step_output_valid_ && input.token_ids.numel() > 0 &&
           input.input_params.meta.batch_forward_type.has_decode()) {
         // replace step i model input with true output of step i-1
-        input = update_input_by_last_step_output(input);
+        input = update_input_by_last_step_output_for_schedule_overlap(input);
       }
 
-      const auto output = this->step(input);
+      const auto output = this->step_for_schedule_overlap(input);
       if (output.has_value()) {
         if (is_driver() || ::xllm::EPLBConfig::get_instance().enable_eplb()) {
           std::unique_lock<std::mutex> lock(mtx_);

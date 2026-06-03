@@ -19,6 +19,7 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <algorithm>
 #include <boost/algorithm/string.hpp>
 #include <vector>
 
@@ -55,6 +56,62 @@ int32_t get_num_decode_seqs_for_schedule_overlap(const ForwardInput& input) {
   }
   return static_cast<int32_t>(
       unpacked_input.sampling_params.sample_idxes.size(0));
+}
+
+template <typename T>
+int64_t count_negative_tokens(const torch::Tensor& tokens) {
+  const T* data = tokens.const_data_ptr<T>();
+  const int64_t numel = tokens.numel();
+  int64_t count = 0;
+  for (int64_t i = 0; i < numel; ++i) {
+    if (data[i] < static_cast<T>(0)) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+void record_speculative_metrics_from_output(const torch::Tensor& next_tokens,
+                                            const runtime::Options& options) {
+  if (!options.enable_speculative_decode() || !next_tokens.defined() ||
+      next_tokens.dim() != 2 || next_tokens.numel() == 0) {
+    return;
+  }
+
+  const int64_t batch_size = next_tokens.size(0);
+  const int64_t token_width = next_tokens.size(1);
+  const int64_t num_speculative_tokens = options.num_speculative_tokens();
+  if (num_speculative_tokens <= 0 ||
+      token_width != num_speculative_tokens + 1) {
+    return;
+  }
+
+  torch::Tensor tokens = next_tokens.contiguous();
+  int64_t rejected_count = 0;
+  switch (tokens.scalar_type()) {
+    case torch::kInt64:
+      rejected_count = count_negative_tokens<int64_t>(tokens);
+      break;
+    case torch::kInt32:
+      rejected_count = count_negative_tokens<int32_t>(tokens);
+      break;
+    case torch::kInt16:
+      rejected_count = count_negative_tokens<int16_t>(tokens);
+      break;
+    case torch::kInt8:
+      rejected_count = count_negative_tokens<int8_t>(tokens);
+      break;
+    default:
+      LOG(WARNING) << "Unsupported speculative next_tokens dtype for metrics: "
+                   << tokens.scalar_type();
+      return;
+  }
+
+  const int64_t num_draft_tokens = batch_size * num_speculative_tokens;
+  rejected_count = std::min(rejected_count, num_draft_tokens);
+  COUNTER_ADD(speculative_num_draft_tokens_total, num_draft_tokens);
+  COUNTER_ADD(speculative_num_accepted_tokens_total,
+              num_draft_tokens - rejected_count);
 }
 
 }  // namespace
@@ -123,8 +180,9 @@ void WorkerService::step(ForwardInput& fwd_input,
           forward_outputs.value().beam_search_output;
       const auto& dit_forward_output =
           forward_outputs.value().dit_forward_output;
-      expert_load_data =
-          safe_to(forward_outputs.value().expert_load_data, torch::kCPU, true);
+      expert_load_data = safe_to(forward_outputs.value().expert_load_data,
+                                 torch::kCPU,
+                                 /*non_blocking=*/true);
       prepared_layer_id = forward_outputs.value().prepared_layer_id;
 
       {
@@ -134,52 +192,62 @@ void WorkerService::step(ForwardInput& fwd_input,
           embeddings =
               safe_to(sample_output.embeddings,
                       torch::dtype(torch::kFloat32).device(torch::kCPU),
-                      true);
+                      /*non_blocking=*/true);
 
           mm_embeddings.clear();
           mm_embeddings.reserve(sample_output.mm_embeddings.size());
           for (auto mm_embedding : sample_output.mm_embeddings) {
             mm_embeddings.emplace_back(
-                safe_to(mm_embedding, torch::kCPU, true));
+                safe_to(mm_embedding, torch::kCPU, /*non_blocking=*/true));
           }
 
           dit_images.clear();
           dit_images.reserve(dit_forward_output.tensors.size());
           for (auto dit_image : dit_forward_output.tensors) {
-            dit_images.emplace_back(safe_to(dit_image, torch::kCPU, true));
+            dit_images.emplace_back(
+                safe_to(dit_image, torch::kCPU, /*non_blocking=*/true));
           }
 
           // [num_seq]
-          next_tokens = safe_to(sample_output.next_tokens, torch::kCPU, true);
+          next_tokens = safe_to(sample_output.next_tokens,
+                                torch::kCPU,
+                                /*non_blocking=*/true);
           if (next_tokens.defined()) {
             // [num_seq]
-            logprobs = safe_to(sample_output.logprobs, torch::kCPU, true);
+            logprobs = safe_to(sample_output.logprobs,
+                               torch::kCPU,
+                               /*non_blocking=*/true);
 
             if (!beam_search_output.src_seq_idxes.defined()) {
               // beam search kernel will provide final tokens/logprobs in beam
               // search output, so keep top_tokens/top_logprobs undefined to
               // avoid returning them.
               // [num_seq, topk]
-              top_tokens = safe_to(sample_output.top_tokens, torch::kCPU, true);
+              top_tokens = safe_to(sample_output.top_tokens,
+                                   torch::kCPU,
+                                   /*non_blocking=*/true);
               // [num_seq, topk]
-              top_logprobs =
-                  safe_to(sample_output.top_logprobs, torch::kCPU, true);
+              top_logprobs = safe_to(sample_output.top_logprobs,
+                                     torch::kCPU,
+                                     /*non_blocking=*/true);
             }
           }
 
           // beam search output
           // [num_seq]
-          src_seq_idxes =
-              safe_to(beam_search_output.src_seq_idxes, torch::kCPU, true);
+          src_seq_idxes = safe_to(beam_search_output.src_seq_idxes,
+                                  torch::kCPU,
+                                  /*non_blocking=*/true);
           if (src_seq_idxes.defined()) {
             // [num_seq]
-            out_tokens =
-                safe_to(beam_search_output.out_tokens, torch::kCPU, true);
+            out_tokens = safe_to(beam_search_output.out_tokens,
+                                 torch::kCPU,
+                                 /*non_blocking=*/true);
             // [num_seq]
             out_logprobs =
                 safe_to(beam_search_output.out_logprobs,
                         torch::dtype(torch::kFloat32).device(torch::kCPU),
-                        true);
+                        /*non_blocking=*/true);
           }
         };
         if (use_default_stream) {
@@ -193,6 +261,7 @@ void WorkerService::step(ForwardInput& fwd_input,
         } else {
           stream_->synchronize();
         }
+        record_speculative_metrics_from_output(next_tokens, options_);
       }
     }
   } else {
@@ -694,12 +763,11 @@ void WorkerService::GetLastStepResult(
         auto future = worker_->get_last_step_result_async();
         auto forward_outputs = std::move(future).get();
         if (forward_outputs) {
-          const auto& sample_output = forward_outputs.value().sample_output;
-          const auto& expert_load_data = safe_to(
-              forward_outputs.value().expert_load_data, torch::kCPU, true);
-          int32_t prepared_layer_id = forward_outputs.value().prepared_layer_id;
-          const auto& beam_search_output =
-              forward_outputs.value().beam_search_output;
+          const ForwardOutput& forward_output = forward_outputs.value();
+          const auto& sample_output = forward_output.sample_output;
+          int32_t prepared_layer_id = forward_output.prepared_layer_id;
+          const auto& beam_search_output = forward_output.beam_search_output;
+          torch::Tensor expert_load_data;
           torch::Tensor embeddings;
           torch::Tensor next_tokens;
           torch::Tensor logprobs;
@@ -710,39 +778,59 @@ void WorkerService::GetLastStepResult(
           torch::Tensor out_logprobs;
           std::vector<torch::Tensor> dit_images;
           auto copy_output_to_host = [&]() {
+            if (options_.enable_schedule_overlap()) {
+              CHECK(stream_->wait_event(forward_output.ready_event))
+                  << "failed to wait forward output ready event";
+            }
+            expert_load_data = safe_to(forward_output.expert_load_data,
+                                       torch::kCPU,
+                                       /*non_blocking=*/true);
+
             // [num_seq, ..., embed_dim]
-            embeddings = safe_to(sample_output.embeddings, torch::kCPU, true);
-            embeddings = safe_to(embeddings, torch::kFloat32, true);
+            embeddings = safe_to(sample_output.embeddings,
+                                 torch::kCPU,
+                                 /*non_blocking=*/true);
+            embeddings = safe_to(embeddings,
+                                 torch::kFloat32,
+                                 /*non_blocking=*/true);
 
             dit_images.reserve(
-                forward_outputs.value().dit_forward_output.tensors.size());
-            for (auto image :
-                 forward_outputs.value().dit_forward_output.tensors) {
+                forward_output.dit_forward_output.tensors.size());
+            for (auto image : forward_output.dit_forward_output.tensors) {
               dit_images.emplace_back(image);
             }
 
             // [num_seq]
-            next_tokens = safe_to(sample_output.next_tokens, torch::kCPU, true);
+            next_tokens = safe_to(sample_output.next_tokens,
+                                  torch::kCPU,
+                                  /*non_blocking=*/true);
             if (next_tokens.defined() ||
                 ::xllm::EPLBConfig::get_instance().enable_eplb()) {
               // [num_seq] FloatTensor
-              logprobs = safe_to(sample_output.logprobs, torch::kCPU, true);
+              logprobs = safe_to(sample_output.logprobs,
+                                 torch::kCPU,
+                                 /*non_blocking=*/true);
               // [num_seq, topk]
-              top_tokens = safe_to(sample_output.top_tokens, torch::kCPU, true);
+              top_tokens = safe_to(sample_output.top_tokens,
+                                   torch::kCPU,
+                                   /*non_blocking=*/true);
               // [num_seq, topk]
-              top_logprobs =
-                  safe_to(sample_output.top_logprobs, torch::kCPU, true);
+              top_logprobs = safe_to(sample_output.top_logprobs,
+                                     torch::kCPU,
+                                     /*non_blocking=*/true);
               // [num_seq]
-              src_seq_idxes =
-                  safe_to(beam_search_output.src_seq_idxes, torch::kCPU, true);
+              src_seq_idxes = safe_to(beam_search_output.src_seq_idxes,
+                                      torch::kCPU,
+                                      /*non_blocking=*/true);
               // [num_seq]
-              out_tokens =
-                  safe_to(beam_search_output.out_tokens, torch::kCPU, true);
+              out_tokens = safe_to(beam_search_output.out_tokens,
+                                   torch::kCPU,
+                                   /*non_blocking=*/true);
               // [num_seq]
               out_logprobs =
                   safe_to(beam_search_output.out_logprobs,
                           torch::dtype(torch::kFloat32).device(torch::kCPU),
-                          true);
+                          /*non_blocking=*/true);
             }
           };
 
@@ -757,6 +845,7 @@ void WorkerService::GetLastStepResult(
           } else {
             stream_->synchronize();
           }
+          record_speculative_metrics_from_output(next_tokens, options_);
 
           if (next_tokens.defined() ||
               ::xllm::EPLBConfig::get_instance().enable_eplb()) {

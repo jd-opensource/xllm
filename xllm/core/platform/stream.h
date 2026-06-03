@@ -21,7 +21,6 @@ limitations under the License.
 #endif
 // clang-format on
 
-#include <c10/core/Event.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 
@@ -37,6 +36,8 @@ limitations under the License.
 #elif defined(USE_MUSA)
 #include <c10/musa/MUSAGuard.h>
 #endif
+
+#include "core/platform/stream_event.h"
 
 namespace xllm {
 
@@ -68,8 +69,14 @@ class Stream {
   torch_mlu::MLUStream* get_stream() { return &stream_; }
 #elif defined(USE_CUDA)
   c10::cuda::CUDAStream* get_stream() { return &stream_; }
+#elif defined(USE_ILU)
+  c10::cuda::CUDAStream* get_stream() { return &stream_; }
+#elif defined(USE_MUSA)
+  c10::musa::MUSAStream* get_stream() { return &stream_; }
 #endif
   void wait_stream(const Stream& other_stream);
+  StreamEventPtr record_event() const;
+  bool wait_event(const StreamEventPtr& event) const;
 
   // Support for LOG(INFO) output
   friend std::ostream& operator<<(std::ostream& os, const Stream& stream);

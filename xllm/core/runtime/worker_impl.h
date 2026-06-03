@@ -111,6 +111,9 @@ class WorkerImpl {
   // prepare work before model execution
   virtual void prepare_work_before_execute(const ForwardInput& inputs,
                                            ForwardInput& processed_inputs);
+  void prepare_work_before_execute_on_stream(const ForwardInput& input,
+                                             ForwardInput& processed_input,
+                                             Stream& prepare_stream);
 
   // Internal helper shared by worker pipelines before model execution.
   virtual void apply_kv_block_swaps(const ModelInputParams& input_params);
@@ -199,6 +202,10 @@ class WorkerImpl {
 
  protected:
   void update_last_step_output(const std::optional<ForwardOutput>& output);
+  virtual std::optional<ForwardOutput> step_for_schedule_overlap(
+      const ForwardInput& input);
+  virtual ForwardInput update_input_by_last_step_output_for_schedule_overlap(
+      ForwardInput& input);
   // Only used for deepseek chunked prefill ops on npu device
   void prepare_mla_prefixcache_inputs(ModelInputParams& input_params);
 

@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <cstring>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <numeric>
 #include <optional>
@@ -599,6 +600,11 @@ struct ForwardInput {
 
   // True once cp::cp_partition_inplace has produced the per-CP-rank slice.
   bool cp_partitioned = false;
+
+  // Device-side readiness dependencies for inputs prepared on a different
+  // stream. These are local runtime handles and are intentionally not included
+  // in proto or shared-memory transport.
+  StreamEventPtr metadata_ready_event;
 };
 
 #if 0  // Legacy engine-side CP partition; superseded by
@@ -896,6 +902,12 @@ struct ForwardOutput {
   // max number of top logprobs in the batch
   int64_t max_top_logprobs = 0;
   SampleOutput sample_output;
+  // Keep no-sync input tensor handles alive until downstream consumers finish
+  // using outputs on the same compute stream.
+  std::shared_ptr<ForwardInput> retained_input;
+  // Device-side readiness dependency for no-sync outputs. This local runtime
+  // handle is intentionally not included in proto or shared-memory transport.
+  StreamEventPtr ready_event;
   torch::Tensor logits;
   torch::Tensor embedding;
 
