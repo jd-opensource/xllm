@@ -48,7 +48,6 @@ std::string get_local_ip_addr() {
     LOG(ERROR) << "gethostname failed";
     return "";
   }
-  VLOG(1) << "get_local_ip_addr hostname: " << hostname;
   struct addrinfo* info = nullptr;
   struct addrinfo hints;
   memset(&hints, 0, sizeof(hints));
