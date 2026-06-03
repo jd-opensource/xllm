@@ -234,7 +234,7 @@ TransferKVInfo BatchInputBuilder::build_step_transfer_info(
       static_cast<size_t>(util::ceil_div(seq_len, block_size));
   const size_t map_end = std::min(win_end, local_size);
   const size_t remote_stride =
-      static_cast<size_t>(util::kv_split_stride_for_kv_transfer());
+      static_cast<size_t>(util::kv_split_size_effective());
   const size_t remote_end = map_end * remote_stride;
   CHECK_GE(util::align_up(remote_size, remote_stride), remote_end)
       << "remote block coverage shortage, request_id=" << full_info.request_id

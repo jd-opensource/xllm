@@ -329,6 +329,9 @@ InstanceInfo XServiceClient::get_instance_info(
     result.addrs.emplace_back(addr);
   }
   result.dp_size = resp.dp_size();
+  if (resp.kv_split_size() > 0) {
+    result.kv_split_size = resp.kv_split_size();
+  }
   for (auto& port : resp.ports()) {
     result.ports.emplace_back(port);
   }

@@ -31,13 +31,6 @@ DEFINE_int32(kv_split_size,
              "AllGather); other K (K divides cp_size) means KV is sharded "
              "across K ranks while token-CP still uses cp_size.");
 
-DEFINE_int32(prefill_kv_split_size,
-             1,
-             "KV-cache split width of the remote prefill instance. Set on "
-             "decode nodes in PD mode so D can match P logical block layout "
-             "(link_cluster stride and remote_blocks_ids expansion). 0 falls "
-             "back to local cp_size.");
-
 DEFINE_int64(tp_size, 1, "Tensor parallelism size, only used for DiT model.");
 
 DEFINE_int64(sp_size, 1, "Sequence parallelism size, only used for DiT model.");
@@ -83,7 +76,6 @@ void ParallelConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(ep_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(cp_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(kv_split_size);
-  XLLM_CONFIG_ASSIGN_FROM_FLAG(prefill_kv_split_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(tp_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(sp_size);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(cfg_size);

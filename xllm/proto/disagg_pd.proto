@@ -239,6 +239,8 @@ message InstanceClusterInfo {
   repeated string addrs = 3;
   repeated uint32 ports = 5;
   int32 dp_size = 6;
+  // Prefill-side effective KV-split width for link_cluster on decode.
+  int32 kv_split_size = 7;
 }
 
 service DisaggPDService {

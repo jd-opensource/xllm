@@ -87,13 +87,15 @@ class DisaggPDScheduler : public ChunkedPrefillScheduler {
                      const std::vector<uint64_t>& cluster_ids,
                      const std::vector<std::string>& addrs,
                      const std::vector<uint16_t>& ports,
-                     const int32_t dp_size);
+                     const int32_t dp_size,
+                     const int32_t src_kv_split_size);
 
   bool unlink_instance(const std::string& instance_name,
                        const std::vector<uint64_t>& cluster_ids,
                        const std::vector<std::string>& addrs,
                        const std::vector<uint16_t>& ports,
-                       const int32_t dp_size);
+                       const int32_t dp_size,
+                       const int32_t src_kv_split_size);
 
  protected:
   // Pre-execute prefill requests of different lengths at startup and obtain the

@@ -28,6 +28,7 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
+#include "core/common/types.h"
 #include "core/framework/config/disagg_pd_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/util/json_reader.h"
@@ -211,19 +212,6 @@ inline bool should_enable_mla(
 
 inline int32_t kv_split_size_effective(void) {
   return ParallelConfig::get_instance().kv_split_size_effective();
-}
-
-inline int32_t prefill_kv_split_size_effective(void) {
-  return ParallelConfig::get_instance().prefill_kv_split_size_effective();
-}
-
-// PD KV transfer: P uses local kv_split; D uses prefill_kv_split_size only.
-inline int32_t kv_split_stride_for_kv_transfer() {
-  if (DisaggPDConfig::get_instance().enable_disagg_pd() &&
-      DisaggPDConfig::get_instance().instance_role() == "DECODE") {
-    return prefill_kv_split_size_effective();
-  }
-  return kv_split_size_effective();
 }
 
 inline bool enable_kvcache_split(void) { return kv_split_size_effective() > 1; }

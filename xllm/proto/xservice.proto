@@ -34,6 +34,7 @@ message InstanceMetaInfo {
   repeated uint32 ports = 10;
   string incarnation_id = 11;
   uint64 register_ts_ms = 12;
+  int32 kv_split_size = 13;
 }
 
 message KvCacheEvent {
