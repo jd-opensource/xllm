@@ -18,6 +18,7 @@ except ModuleNotFoundError:
 
 from scripts.build_support.env import (
     get_cxx_abi,
+    get_torch_root_path,
     set_cuda_envs,
     set_ilu_envs,
     set_mlu_envs,
@@ -34,7 +35,6 @@ from scripts.build_support.utils import (
     get_device_type,
     get_python_version,
     get_torch_cmake_prefix_path,
-    get_torch_package_dir,
     get_torch_version,
     get_version,
     pre_build,
@@ -236,11 +236,14 @@ class ExtBuild(build_ext):
 
             if getattr(torch.version, "hip", None):
                 dcu_arch = os.getenv("PYTORCH_ROCM_ARCH") or os.getenv("CMAKE_HIP_ARCHITECTURES")
+                torch_root = get_torch_root_path()
+                if not torch_root:
+                    raise RuntimeError("Unable to locate PyTorch package directory.")
                 cmake_args += [
                     "-DUSE_DCU=ON",
                     f"-DROCM_PATH={os.getenv('DCU_PATH', '/opt/dtk')}",
                     f"-DTORCH_CMAKE_PREFIX={get_torch_cmake_prefix_path()}",
-                    f"-DTORCH_PKG_DIR={get_torch_package_dir()}",
+                    f"-DTORCH_PKG_DIR={torch_root}",
                 ]
                 if dcu_arch:
                     cmake_args += [f"-DCMAKE_HIP_ARCHITECTURES={dcu_arch}"]

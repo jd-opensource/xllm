@@ -118,11 +118,6 @@ def get_torch_cmake_prefix_path() -> str:
 
     return torch.utils.cmake_prefix_path
 
-def get_torch_package_dir() -> str:
-    import torch
-
-    return os.path.dirname(torch.__file__)
-
 def get_version() -> str:
     # first read from environment variable
     version: Optional[str] = os.getenv("XLLM_VERSION")
