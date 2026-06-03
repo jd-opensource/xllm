@@ -16,25 +16,22 @@ limitations under the License.
 #include <c10/cuda/CUDAStream.h>
 
 #include "cuda_ops_api.h"
+#include "device_utils.cuh"
 
 namespace xllm::kernel::cuda {
 
 template <typename T>
-__global__ void
-#if defined(USE_DCU)
-__launch_bounds__(1024, 1)
-#endif
-    reshape_paged_cache_kernel(
-        const int* __restrict__ slot_ids,  // [n_tokens]
-        const T* __restrict__ keys,        // [n_tokens, n_heads, head_dim]
-        const T* __restrict__ values,      // [n_tokens, n_heads, head_dim]
-        T* __restrict__ key_cache,
-        T* __restrict__ value_cache,
-        int64_t k_stride,
-        int64_t v_stride,
-        int64_t n_kv_heads,
-        int64_t head_dim,
-        int64_t block_size) {
+__global__ void XLLM_KERNEL_ATTR(1024) reshape_paged_cache_kernel(
+    const int* __restrict__ slot_ids,  // [n_tokens]
+    const T* __restrict__ keys,        // [n_tokens, n_heads, head_dim]
+    const T* __restrict__ values,      // [n_tokens, n_heads, head_dim]
+    T* __restrict__ key_cache,
+    T* __restrict__ value_cache,
+    int64_t k_stride,
+    int64_t v_stride,
+    int64_t n_kv_heads,
+    int64_t head_dim,
+    int64_t block_size) {
   // block/token index
   const int64_t bid = blockIdx.x;
   // which slot to write to

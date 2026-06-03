@@ -20,6 +20,7 @@ limitations under the License.
 #include <cub/cub.cuh>
 
 #include "cuda_ops_api.h"
+#include "device_utils.cuh"
 #include "fp8_quant_utils.cuh"
 #include "type_convert.cuh"
 
@@ -40,18 +41,14 @@ namespace {
 using namespace xllm::kernel::cuda;
 
 template <typename scalar_t>
-__global__
-#if defined(USE_DCU)
-__launch_bounds__(1024, 1)
-#endif
-    void rms_norm_kernel(
-        scalar_t* __restrict__ out,          // [..., hidden_size]
-        const scalar_t* __restrict__ input,  // [..., hidden_size]
-        const int64_t input_stride,
-        const scalar_t* __restrict__ weight,  // [hidden_size]
-        const float epsilon,
-        const int num_tokens,
-        const int hidden_size) {
+__global__ void XLLM_KERNEL_ATTR(1024)
+    rms_norm_kernel(scalar_t* __restrict__ out,          // [..., hidden_size]
+                    const scalar_t* __restrict__ input,  // [..., hidden_size]
+                    const int64_t input_stride,
+                    const scalar_t* __restrict__ weight,  // [hidden_size]
+                    const float epsilon,
+                    const int num_tokens,
+                    const int hidden_size) {
   __shared__ float s_variance;
   float variance = 0.0f;
 
@@ -81,19 +78,15 @@ __launch_bounds__(1024, 1)
    packed and vectorized operations, which help with the
    memory latency bottleneck. */
 template <typename scalar_t, int width>
-__global__
-#if defined(USE_DCU)
-__launch_bounds__(1024, 1)
-#endif
-    std::
-        enable_if_t<(width > 0) && _typeConvert<scalar_t>::exists> fused_add_rms_norm_kernel(
-            scalar_t* __restrict__ input,  // [..., hidden_size]
-            const int64_t input_stride,
-            scalar_t* __restrict__ residual,      // [..., hidden_size]
-            const scalar_t* __restrict__ weight,  // [hidden_size]
-            const float epsilon,
-            const int num_tokens,
-            const int hidden_size) {
+__global__ std::enable_if_t<(width > 0) && _typeConvert<scalar_t>::exists>
+XLLM_KERNEL_ATTR(1024) fused_add_rms_norm_kernel(
+    scalar_t* __restrict__ input,  // [..., hidden_size]
+    const int64_t input_stride,
+    scalar_t* __restrict__ residual,      // [..., hidden_size]
+    const scalar_t* __restrict__ weight,  // [hidden_size]
+    const float epsilon,
+    const int num_tokens,
+    const int hidden_size) {
   // Sanity checks on our vector struct and type-punned pointer arithmetic
   static_assert(std::is_pod_v<_f16Vec<scalar_t, width>>);
   static_assert(sizeof(_f16Vec<scalar_t, width>) == sizeof(scalar_t) * width);
@@ -145,17 +138,14 @@ __launch_bounds__(1024, 1)
  */
 template <typename scalar_t, int width>
 __global__ std::enable_if_t<(width == 0) || !_typeConvert<scalar_t>::exists>
-#if defined(USE_DCU)
-__launch_bounds__(1024, 1)
-#endif
-    fused_add_rms_norm_kernel(
-        scalar_t* __restrict__ input,  // [..., hidden_size]
-        const int64_t input_stride,
-        scalar_t* __restrict__ residual,      // [..., hidden_size]
-        const scalar_t* __restrict__ weight,  // [hidden_size]
-        const float epsilon,
-        const int num_tokens,
-        const int hidden_size) {
+XLLM_KERNEL_ATTR(1024) fused_add_rms_norm_kernel(
+    scalar_t* __restrict__ input,  // [..., hidden_size]
+    const int64_t input_stride,
+    scalar_t* __restrict__ residual,      // [..., hidden_size]
+    const scalar_t* __restrict__ weight,  // [hidden_size]
+    const float epsilon,
+    const int num_tokens,
+    const int hidden_size) {
   __shared__ float s_variance;
   float variance = 0.0f;
 

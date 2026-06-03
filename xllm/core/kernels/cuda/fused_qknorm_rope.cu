@@ -26,6 +26,7 @@ limitations under the License.
 #else
 #include "dcu_ops_api.h"
 #endif
+#include "device_utils.cuh"
 #include "type_convert.cuh"
 #include "utils.h"
 

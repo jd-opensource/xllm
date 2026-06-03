@@ -28,8 +28,10 @@ namespace cub = hipcub;
 namespace xllm::kernel::cuda {
 #if !defined(USE_DCU)
 #define WARP_SIZE 32
+#define XLLM_KERNEL_ATTR(MAX_THREADS)
 #else
 #define WARP_SIZE 64
+#define XLLM_KERNEL_ATTR(MAX_THREADS) __launch_bounds__(MAX_THREADS, 1)
 #endif
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -48,6 +50,15 @@ class alignas(Alignment) AlignedArray {
   __shfl_xor_sync((mask), (var), (lane_mask))
 #define XLLM_SHFL_XOR_SYNC_WIDTH(mask, var, lane_mask, width) \
   __shfl_xor_sync((mask), (var), (lane_mask), (width))
+
+template <typename T>
+__device__ __forceinline__ T xllm_ldg(const T* ptr) {
+#if defined(USE_DCU)
+  return *ptr;
+#else
+  return __ldg(ptr);
+#endif
+}
 
 // Define reduction operators based on CUDA version
 // CUDA 13 (12.9+) deprecated cub::Max/Min in favor of cuda::maximum/minimum

@@ -18,6 +18,7 @@ limitations under the License.
 #include <cstdint>
 
 #include "cuda_ops_api.h"
+#include "device_utils.cuh"
 
 // ref to:
 // https://github.com/vllm-project/vllm/blob/main/csrc/activation_kernels.cu
@@ -57,10 +58,7 @@ __device__ __forceinline__ bool is_16byte_aligned(const void* ptr) {
 template <typename scalar_t,
           scalar_t (*ACT_FN)(const scalar_t&),
           bool act_first>
-__global__ void
-#if defined(USE_DCU)
-__launch_bounds__(1024, 1)
-#endif
+__global__ void XLLM_KERNEL_ATTR(1024)
     act_and_mul_kernel(scalar_t* __restrict__ out,          // [..., d]
                        const scalar_t* __restrict__ input,  // [..., 2, d]
                        const int d) {
