@@ -15,6 +15,8 @@ limitations under the License.
 
 #include "qwen3_decoder_loader.h"
 
+#include "core/framework/config/kernel_config.h"
+#include "core/framework/config/parallel_config.h"
 #include "qwen_loader_constants.h"
 
 namespace xllm {
@@ -76,6 +78,11 @@ void Qwen3DecoderLoader::verify_loaded_weights() const {
 
 void Qwen3DecoderLoader::merge_host_at_weights() {
   auto& t = working_tensors();
+  const bool enable_mc2 =
+      ::xllm::KernelConfig::get_instance().enable_fused_mc2() > 0 &&
+      ::xllm::ParallelConfig::get_instance().communication_backend() ==
+          "hccl" &&
+      quantize_type_.empty();
 
   if (quantize_type_.compare("w8a8") == 0) {
     t[IN_ATTENTION_OUT_DEQSCALE] =
@@ -136,15 +143,19 @@ void Qwen3DecoderLoader::merge_host_at_weights() {
                   .transpose(0, 1),
               IN_Q_WEIGHT);
 
-  t[IN_ATTENTION_OUT_WEIGHT] = cast_nz(
-      t[IN_ATTENTION_OUT_WEIGHT].transpose(0, 1), IN_ATTENTION_OUT_WEIGHT);
+  t[IN_ATTENTION_OUT_WEIGHT] =
+      enable_mc2 ? t[IN_ATTENTION_OUT_WEIGHT].transpose(0, 1).contiguous()
+                 : cast_nz(t[IN_ATTENTION_OUT_WEIGHT].transpose(0, 1),
+                           IN_ATTENTION_OUT_WEIGHT);
 
   t[IN_MLP_W2_WEIGHT] = cast_nz(
       torch::cat({t[IN_MLP_W2_WEIGHT], t[IN_MLP_W1_WEIGHT]}, 0).transpose(0, 1),
       IN_MLP_W2_WEIGHT);
 
   t[IN_MLP_CPROJ_WEIGHT] =
-      cast_nz(t[IN_MLP_CPROJ_WEIGHT].transpose(0, 1), IN_MLP_CPROJ_WEIGHT);
+      enable_mc2 ? t[IN_MLP_CPROJ_WEIGHT].transpose(0, 1).contiguous()
+                 : cast_nz(t[IN_MLP_CPROJ_WEIGHT].transpose(0, 1),
+                           IN_MLP_CPROJ_WEIGHT);
 
   for (auto idx :
        {IN_MLP_W1_WEIGHT, IN_K_WEIGHT, IN_V_WEIGHT, IN_K_BIAS, IN_V_BIAS}) {

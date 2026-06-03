@@ -46,8 +46,8 @@ class KernelConfig final {
          "enable_fused_mc2",
          "enable_interlayer_addnorm",
          "enable_split_rmsnorm_rope",
-         "enable_qwen3_dense_aclnn_matmul",
-         "enable_qwen3_dense_aclnn_swiglu"}};
+         "enable_aclnn_matmul",
+         "enable_aclnn_swiglu"}};
     return kOptionCategory;
   }
 
@@ -64,9 +64,9 @@ class KernelConfig final {
 
   PROPERTY(bool, enable_split_rmsnorm_rope) = false;
 
-  PROPERTY(bool, enable_qwen3_dense_aclnn_matmul) = false;
+  PROPERTY(bool, enable_aclnn_matmul) = false;
 
-  PROPERTY(bool, enable_qwen3_dense_aclnn_swiglu) = false;
+  PROPERTY(bool, enable_aclnn_swiglu) = false;
 #endif
 };
 
