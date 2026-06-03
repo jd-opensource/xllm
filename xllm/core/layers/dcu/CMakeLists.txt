@@ -1,31 +1,5 @@
-#
-# Copyright 2026 The xLLM Authors. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     https://github.com/jd-opensource/xllm/blob/main/LICENSE
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
-# ==============================================================================
-
 include(cc_library)
 
-# libflash_attention - pre-built shared library for prefix prefill/decode.
-#
-# FLASH_ATTENTION_LIB: directory containing libflash_attention.so.
-# No headers are needed. The caller (flash_attention.cpp) provides its own
-# forward declarations for prefix_prefill_varlen_fwd / prefix_decode_varlen_fwd.
-#
-# Configure via:
-#   - Environment variable: export FLASH_ATTENTION_LIB=/path/to/dir
-#   - CMake argument:       cmake -DFLASH_ATTENTION_LIB=/path/to/dir ...
 if(NOT TARGET flash_attention)
   if(NOT FLASH_ATTENTION_LIB)
     set(FLASH_ATTENTION_LIB "/opt/dtk/lib")
