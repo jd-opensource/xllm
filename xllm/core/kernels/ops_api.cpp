@@ -956,24 +956,250 @@ std::tuple<torch::Tensor, torch::Tensor> fused_add_rms_norm_static_fp8_quant(
 
 torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params) {
 #if defined(USE_NPU)
-  if (params.conv_state_indices.has_value()) {
-    CHECK(params.conv_state_indices.value().is_contiguous())
-        << "causal_conv1d_update: conv_state_indices must be contiguous.";
-  }
-  return npu::npu_causal_conv1d_update_v2(params.x,
-                                          params.conv_state,
-                                          params.weight,
-                                          params.activation,
-                                          params.bias,
-                                          params.conv_state_indices,
-                                          params.query_start_loc,
-                                          params.max_query_len,
-                                          params.pad_slot_id,
-                                          params.block_idx_last_scheduled_token,
-                                          params.initial_state_idx,
-                                          params.validate_data,
-                                          params.num_accepted_tokens);
+  auto original_dtype = params.x.scalar_type();
+  const bool has_silu = params.activation;
+  const bool need_bf16_cast = (original_dtype == c10::ScalarType::Half);
 
+  // --- dtype conversion: fp16 → bf16 (TileLang kernel requires bf16) ---
+  auto x_work = params.x.contiguous();
+  auto weight_work = params.weight.contiguous();
+  // Clone conv_state for fp16 conversion (.to creates a new tensor anyway),
+  // but for bf16 input keep the original so kernel in-place writeback
+  // propagates directly to params.conv_state without an extra copy.
+  auto conv_state_work = need_bf16_cast ? params.conv_state.contiguous().clone()
+                                        : params.conv_state.contiguous();
+
+  if (need_bf16_cast) {
+    x_work = x_work.to(torch::kBFloat16);
+    weight_work = weight_work.to(torch::kBFloat16);
+    conv_state_work = conv_state_work.to(torch::kBFloat16);
+  }
+
+  const int32_t dim = static_cast<int32_t>(x_work.size(1));
+
+  // --- bias ---
+  auto bias_work = params.bias.has_value() && params.bias.value().defined()
+                       ? params.bias.value().contiguous()
+                       : torch::zeros({dim}, x_work.options());
+  if (need_bf16_cast && bias_work.scalar_type() != c10::ScalarType::BFloat16) {
+    bias_work = bias_work.to(torch::kBFloat16);
+  }
+
+  // --- kernel-native layout: weight [width, dim], conv_state [CL, SL, D] ---
+  // KV cache stores conv_state as [CL, SL, D] and model weight
+  // (after load_common_state_dict transpose) is [width, dim].
+  // Both are already in kernel-native format; pass through directly.
+  // The reshape for weight ensures [width, dim] regardless of input order.
+  auto conv_state_t = conv_state_work;
+  const int64_t weight_elems = weight_work.numel();
+  const int32_t weight_width =
+      static_cast<int32_t>(weight_elems / static_cast<int64_t>(dim));
+  auto weight_t = weight_work.reshape({weight_width, dim}).contiguous();
+
+  // --- cu_seqlens ---
+  auto cu_seqlens =
+      params.query_start_loc.has_value()
+          ? params.query_start_loc.value().to(torch::kInt32).contiguous()
+          : torch::arange(0,
+                          x_work.size(0) + 1,
+                          std::max(params.max_query_len, int32_t{1}),
+                          torch::TensorOptions()
+                              .dtype(torch::kInt32)
+                              .device(x_work.device()));
+
+  int64_t batch = cu_seqlens.size(0) - 1;
+  if (batch <= 0) {
+    return x_work;
+  }
+
+  auto i32_opts =
+      torch::TensorOptions().dtype(torch::kInt32).device(x_work.device());
+
+  // --- init_indices / current_indices ---
+  torch::Tensor init_indices;
+  torch::Tensor current_indices;
+  if (params.conv_state_indices.has_value()) {
+    auto ci = params.conv_state_indices.value().to(torch::kInt32).contiguous();
+    if (ci.dim() == 1) {
+      init_indices = ci;
+      current_indices = ci;
+    } else {
+      auto ci_0 = ci.select(1, 0);
+      auto ci_1 = ci.select(1, 1);
+      if (params.initial_state_idx.has_value()) {
+        auto isi =
+            params.initial_state_idx.value().to(torch::kInt32).contiguous();
+        init_indices = torch::where(isi == 0, ci_0, ci_1);
+      } else {
+        init_indices = ci_0;
+      }
+      if (params.block_idx_last_scheduled_token.has_value()) {
+        auto bilt = params.block_idx_last_scheduled_token.value()
+                        .to(torch::kInt32)
+                        .contiguous();
+        current_indices = torch::where(bilt == 0, ci_0, ci_1);
+      } else {
+        current_indices = ci_0;
+      }
+    }
+  } else {
+    init_indices = torch::arange(batch, i32_opts);
+    current_indices = init_indices;
+  }
+
+  // --- initial_state_mode ---
+  torch::Tensor initial_state_mode;
+  if (params.initial_state_mode.has_value()) {
+    initial_state_mode =
+        params.initial_state_mode.value().to(torch::kInt32).contiguous();
+  } else {
+    initial_state_mode = torch::ones({batch}, i32_opts);
+  }
+
+  torch::Tensor y;
+
+  auto writeback_bf16 = [&]() {
+    if (need_bf16_cast) {
+      params.conv_state.copy_(conv_state_t.to(original_dtype));
+      y = y.to(original_dtype);
+    }
+  };
+
+  // --- per-batch tiling ---
+  //
+  // Fast path for contiguous single-token batches (decode mode):
+  // x_work has one token per batch, cu_seqlens = {0, 1, ..., batch}.
+  // Avoid .item() and host-to-device copies for graph-capture compatibility.
+  const int64_t total_tokens = x_work.size(0);
+  if (total_tokens == batch) {
+    // x_work may be 3D [B, D, T] when called from decode path
+    // (e.g. Qwen3.5 passes mixed_qkv as [B, qkv_dim, 1]).
+    // TileLang kernel expects 2D [B, D]; flatten if needed.
+    const bool is_3d = (x_work.dim() == 3);
+    auto x_flat = is_3d ? x_work.reshape({-1, dim}).contiguous() : x_work;
+
+    // Try the dedicated decode kernel first: single launch for all batches,
+    // no pipeline overhead, much faster than per-batch prefill kernel loop.
+    if (npu::tilelang::has_causal_conv1d_decode_specialization(batch, dim)) {
+      auto conv_state_t_nonconst = conv_state_t;
+      auto y_decode = npu::tilelang::causal_conv1d_decode(
+          /*conv_state=*/conv_state_t_nonconst,
+          /*x=*/x_flat,
+          /*weight=*/weight_t,
+          /*bias=*/bias_work,
+          /*init_indices=*/init_indices,
+          /*current_indices=*/current_indices,
+          /*initial_state_mode=*/initial_state_mode,
+          /*has_silu=*/has_silu);
+
+      if (is_3d) {
+        y = y_decode.view(x_work.sizes());
+      } else {
+        y = y_decode;
+      }
+
+      writeback_bf16();
+      return y;
+    }
+
+    // Fallback: per-batch loop using prefill kernel (batch_size=1).
+    y = torch::empty({x_work.size(0), dim}, x_work.options());
+    torch::Tensor x_input = x_flat;
+    auto y_flat = y;
+    if (is_3d) {
+      y_flat = y.reshape({-1, dim});
+    }
+
+    // cu_b = {0, 1} on device for all batches, derived from cu_seqlens
+    auto cu_b = cu_seqlens.slice(/*dim=*/0, /*start=*/0, /*end=*/2);
+    for (int64_t b = 0; b < batch; ++b) {
+      auto x_b = x_input.slice(0, b, b + 1);
+      auto init_b = init_indices.slice(0, b, b + 1);
+      auto curr_b = current_indices.slice(0, b, b + 1);
+      auto ism_b = initial_state_mode.slice(0, b, b + 1);
+
+      auto conv_state_t_nonconst = conv_state_t;
+      auto y_b = npu::tilelang::causal_conv1d(
+          /*conv_state=*/conv_state_t_nonconst,
+          /*x=*/x_b,
+          /*weight=*/weight_t,
+          /*bias=*/bias_work,
+          /*cu_seqlens=*/cu_b,
+          /*init_indices=*/init_b,
+          /*current_indices=*/curr_b,
+          /*initial_state_mode=*/ism_b,
+          /*has_silu=*/has_silu);
+
+      y_flat.slice(0, b, b + 1).copy_(y_b);
+    }
+    if (is_3d) {
+      y = y.view(x_work.sizes());
+    }
+
+    writeback_bf16();
+    return y;
+  }
+
+  // General path: variable-length batches (prefill / chunked prefill).
+  // Try the pipeline prefill kernel first: single launch for all batches,
+  // much faster than per-batch loop due to multi-core parallelism and
+  // software pipeline.
+  if (npu::tilelang::has_causal_conv1d_prefill_specialization(
+          batch, dim, has_silu)) {
+    auto conv_state_t_nonconst = conv_state_t;
+    auto y_prefill = npu::tilelang::causal_conv1d_prefill(
+        /*conv_state=*/conv_state_t_nonconst,
+        /*x=*/x_work,
+        /*weight=*/weight_t,
+        /*bias=*/bias_work,
+        /*cu_seqlens=*/cu_seqlens,
+        /*init_indices=*/init_indices,
+        /*current_indices=*/current_indices,
+        /*initial_state_mode=*/initial_state_mode,
+        /*has_silu=*/has_silu);
+
+    y = y_prefill;
+
+    writeback_bf16();
+    return y;
+  }
+
+  // Fallback: per-batch loop using old prefill kernel.
+  // .item() and host-to-device copies are safe here because this path
+  // only runs in eager mode, never during graph capture.
+  y = torch::empty({x_work.size(0), dim}, x_work.options());
+  for (int64_t b = 0; b < batch; ++b) {
+    int64_t seq_start = cu_seqlens[b].item<int64_t>();
+    int64_t seq_end = cu_seqlens[b + 1].item<int64_t>();
+    int64_t sb_len = seq_end - seq_start;
+    if (sb_len <= 0) {
+      continue;
+    }
+
+    auto cu_b =
+        torch::tensor({int32_t{0}, static_cast<int32_t>(sb_len)}, i32_opts);
+    auto x_b = x_work.slice(0, seq_start, seq_end);
+    auto init_b = init_indices.slice(0, b, b + 1);
+    auto curr_b = current_indices.slice(0, b, b + 1);
+    auto ism_b = initial_state_mode.slice(0, b, b + 1);
+
+    auto conv_state_t_nonconst = conv_state_t;
+    auto y_b = npu::tilelang::causal_conv1d(
+        /*conv_state=*/conv_state_t_nonconst,
+        /*x=*/x_b,
+        /*weight=*/weight_t,
+        /*bias=*/bias_work,
+        /*cu_seqlens=*/cu_b,
+        /*init_indices=*/init_b,
+        /*current_indices=*/curr_b,
+        /*initial_state_mode=*/ism_b,
+        /*has_silu=*/has_silu);
+
+    y.slice(0, seq_start, seq_end).copy_(y_b);
+  }
+
+  writeback_bf16();
+  return y;
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -1208,17 +1434,119 @@ torch::Tensor causal_conv1d(const torch::Tensor& x,
                             int64_t pad_slot_id,
                             int64_t run_mode) {
 #if defined(USE_NPU)
-  return npu::causal_conv1d(x,
-                            weight,
-                            conv_state,
-                            bias_opt,
-                            query_start_loc_opt,
-                            cache_indices_opt,
-                            initial_state_mode_opt,
-                            num_accepted_tokens_opt,
-                            activation_mode,
-                            pad_slot_id,
-                            run_mode);
+  if (run_mode == 0) {
+    return npu::causal_conv1d(x,
+                              weight,
+                              conv_state,
+                              bias_opt,
+                              query_start_loc_opt,
+                              cache_indices_opt,
+                              initial_state_mode_opt,
+                              num_accepted_tokens_opt,
+                              activation_mode,
+                              pad_slot_id,
+                              run_mode);
+  }
+
+  auto device = x.device();
+
+  const auto i32_dev_opts =
+      torch::TensorOptions().dtype(torch::kInt32).device(device);
+
+  auto is_contiguous_from = [](const torch::IntArrayRef& arr,
+                               int64_t start) -> bool {
+    if (arr.empty()) {
+      return true;
+    }
+    if (arr[0] != start) {
+      return false;
+    }
+    for (size_t i = 1; i < arr.size(); ++i) {
+      if (arr[i] != arr[i - 1] + 1) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  auto is_constant = [](const torch::IntArrayRef& arr) -> bool {
+    if (arr.size() <= 1) {
+      return true;
+    }
+    for (size_t i = 1; i < arr.size(); ++i) {
+      if (arr[i] != arr[0]) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const int64_t qsl_size = query_start_loc_opt.size();
+  torch::Tensor qsl_tensor;
+  if (qsl_size > 0 && is_contiguous_from(query_start_loc_opt, 0)) {
+    qsl_tensor = torch::arange(int64_t{0}, qsl_size, i32_dev_opts);
+  } else {
+    qsl_tensor =
+        torch::from_blob(const_cast<int64_t*>(query_start_loc_opt.data()),
+                         {qsl_size},
+                         torch::TensorOptions().dtype(torch::kInt64))
+            .to(device, torch::kInt32);
+  }
+
+  torch::Tensor cache_indices_tensor;
+  if (!cache_indices_opt.empty()) {
+    const int64_t ci_size = cache_indices_opt.size();
+    if (is_contiguous_from(cache_indices_opt, cache_indices_opt[0])) {
+      cache_indices_tensor = torch::arange(
+          cache_indices_opt[0], cache_indices_opt[0] + ci_size, i32_dev_opts);
+    } else {
+      cache_indices_tensor =
+          torch::from_blob(const_cast<int64_t*>(cache_indices_opt.data()),
+                           {ci_size},
+                           torch::TensorOptions().dtype(torch::kInt64))
+              .to(device, torch::kInt32);
+    }
+  }
+
+  torch::Tensor init_state_mode_tensor;
+  if (!initial_state_mode_opt.empty()) {
+    const int64_t ism_size = initial_state_mode_opt.size();
+    if (is_constant(initial_state_mode_opt)) {
+      init_state_mode_tensor =
+          torch::full({ism_size}, initial_state_mode_opt[0], i32_dev_opts);
+    } else {
+      init_state_mode_tensor =
+          torch::from_blob(const_cast<int64_t*>(initial_state_mode_opt.data()),
+                           {ism_size},
+                           torch::TensorOptions().dtype(torch::kInt64))
+              .to(device, torch::kInt32);
+    }
+  }
+
+  auto conv_work = conv_state;
+
+  CausalConv1dUpdateParams params;
+  params.x = x.dim() == 3 ? x.reshape({-1, x.size(-1)}) : x;
+  params.conv_state = conv_work;
+  params.weight = weight;
+  params.activation = (activation_mode == 1);
+  params.bias = bias_opt;
+  if (!cache_indices_opt.empty()) {
+    params.conv_state_indices = cache_indices_tensor;
+  }
+  params.query_start_loc = qsl_tensor;
+  params.max_query_len = 0;
+
+  if (!initial_state_mode_opt.empty()) {
+    params.initial_state_mode = init_state_mode_tensor;
+  }
+
+  if (query_start_loc_opt.size() >= 2) {
+    int64_t first_len = query_start_loc_opt[1] - query_start_loc_opt[0];
+    params.max_query_len = static_cast<int32_t>(first_len);
+  }
+
+  return causal_conv1d_update(params);
 #else
   NOT_IMPLEMENTED();
 #endif

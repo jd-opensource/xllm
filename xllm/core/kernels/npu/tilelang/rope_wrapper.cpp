@@ -23,8 +23,8 @@ limitations under the License.
 #include <limits>
 
 #include "acl/acl.h"
-#include "dispatch_registry.h"
-#include "tilelang_ops_api.h"
+#include "core/kernels/npu/tilelang/dispatch_registry.h"
+#include "core/kernels/npu/tilelang/tilelang_ops_api.h"
 
 #ifndef XLLM_TL_ROPE_REGISTRY_INC
 #error "XLLM_TL_ROPE_REGISTRY_INC is not defined"

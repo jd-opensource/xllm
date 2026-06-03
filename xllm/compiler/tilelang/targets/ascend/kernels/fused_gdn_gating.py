@@ -296,7 +296,7 @@ def build_fused_gdn_gating_kernel(
                             1.0 / softplus_beta,
                         )
                         T.tile.select(
-                            beta_x_ub,
+                            x_ub,
                             softplus_cmp_mask_ub,
                             x_ub,
                             beta_x_ub,
@@ -393,7 +393,7 @@ def build_fused_gdn_gating_kernel(
                             1.0 / softplus_beta,
                         )
                         T.tile.select(
-                            beta_x_ub,
+                            x_ub,
                             softplus_cmp_mask_ub,
                             x_ub,
                             beta_x_ub,

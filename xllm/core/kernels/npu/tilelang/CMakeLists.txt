@@ -143,6 +143,21 @@ tilelang_register_runtime_kernel(
   WRAPPER_SRCS chunk_gated_delta_rule_fwd_h_wrapper.cpp
 )
 
+tilelang_register_runtime_kernel(
+  NAME causal_conv1d
+  WRAPPER_SRCS causal_conv1d_wrapper.cpp
+)
+
+tilelang_register_runtime_kernel(
+  NAME causal_conv1d_decode
+  WRAPPER_SRCS causal_conv1d_decode_wrapper.cpp
+)
+
+tilelang_register_runtime_kernel(
+  NAME causal_conv1d_prefill
+  WRAPPER_SRCS causal_conv1d_prefill_wrapper.cpp
+)
+
 cc_library(
   NAME
     tilelang_kernels
@@ -216,6 +231,18 @@ cc_test(
     chunk_gated_delta_rule_fwd_h_wrapper_test
   SRCS
     chunk_gated_delta_rule_fwd_h_wrapper_test.cpp
+  DEPS
+    :tilelang_kernels
+    torch
+    GTest::gtest_main
+    glog::glog
+)
+
+cc_test(
+  NAME
+    causal_conv1d_wrapper_test
+  SRCS
+    causal_conv1d_wrapper_test.cpp
   DEPS
     :tilelang_kernels
     torch
