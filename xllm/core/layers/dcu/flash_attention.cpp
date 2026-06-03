@@ -15,11 +15,11 @@ limitations under the License.
 
 #include "layers/dcu/flash_attention.h"
 
-#include <c10/util/Optional.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
 
 #include <cstdint>
+#include <optional>
 
 #include "framework/kv_cache/kv_cache.h"
 #include "kernels/dcu/attention_runner.h"
@@ -46,11 +46,11 @@ std::vector<torch::Tensor> prefix_prefill_varlen_fwd(
     const torch::Tensor& q,
     const torch::Tensor& k,
     const torch::Tensor& v,
-    at::optional<torch::Tensor>& out_,
+    std::optional<torch::Tensor>& out_,
     const torch::Tensor& cu_seqlens_q,
-    at::optional<torch::Tensor>& cu_seqlens_k,
+    std::optional<torch::Tensor>& cu_seqlens_k,
     torch::Tensor& seqused_k,
-    at::optional<torch::Tensor>& alibi_slopes_,
+    std::optional<torch::Tensor>& alibi_slopes_,
     torch::Tensor& block_table,
     const int32_t max_seqlen_q,
     const int32_t max_seqlen_k,
@@ -63,9 +63,9 @@ std::vector<torch::Tensor> prefix_prefill_varlen_fwd(
     const float softcap,
     const bool return_softmax,
     const int32_t layout,
-    at::optional<torch::Tensor> scales_q_ = c10::nullopt,
-    at::optional<torch::Tensor> scales_k_ = c10::nullopt,
-    at::optional<torch::Tensor> scales_v_ = c10::nullopt,
+    std::optional<torch::Tensor> scales_q_ = std::nullopt,
+    std::optional<torch::Tensor> scales_k_ = std::nullopt,
+    std::optional<torch::Tensor> scales_v_ = std::nullopt,
     const bool is_bf16_output = false);
 
 // prefix_decode_varlen_fwd is used for the decode phase and chunked prefill.
@@ -75,11 +75,11 @@ std::vector<torch::Tensor> prefix_decode_varlen_fwd(
     torch::Tensor& q,
     const torch::Tensor& k,
     const torch::Tensor& v,
-    at::optional<torch::Tensor>& out_,
+    std::optional<torch::Tensor>& out_,
     const torch::Tensor& cu_seqlens_q,
-    at::optional<torch::Tensor>& cu_seqlens_k,
+    std::optional<torch::Tensor>& cu_seqlens_k,
     torch::Tensor& seqused_k,
-    at::optional<torch::Tensor>& alibi_slopes_,
+    std::optional<torch::Tensor>& alibi_slopes_,
     torch::Tensor& block_table,
     const int32_t max_seqlen_q,
     const int32_t max_seqlen_k,
@@ -187,9 +187,9 @@ void FlashAttentionImpl::prefill_forward(const AttentionMetadata& attn_metadata,
   torch::Tensor cu_seqlens_q =
       attn_metadata.q_cu_seq_lens.to(torch::kInt32).contiguous();
 
-  at::optional<torch::Tensor> out_opt = c10::nullopt;
-  at::optional<torch::Tensor> cu_seqlens_k_opt = c10::nullopt;
-  at::optional<torch::Tensor> alibi_opt = c10::nullopt;
+  std::optional<torch::Tensor> out_opt = std::nullopt;
+  std::optional<torch::Tensor> cu_seqlens_k_opt = std::nullopt;
+  std::optional<torch::Tensor> alibi_opt = std::nullopt;
 
   std::vector<torch::Tensor> result = prefix_prefill_varlen_fwd(
       query,
@@ -257,9 +257,9 @@ void FlashAttentionImpl::paged_forward(const AttentionMetadata& attn_metadata,
   int64_t window_left = sliding_window_ > 0 ? sliding_window_ : -1;
   int64_t window_right = attn_metadata.is_causal ? 0 : -1;
 
-  at::optional<torch::Tensor> out_opt = c10::nullopt;
-  at::optional<torch::Tensor> cu_seqlens_k_opt = c10::nullopt;
-  at::optional<torch::Tensor> alibi_opt = c10::nullopt;
+  std::optional<torch::Tensor> out_opt = std::nullopt;
+  std::optional<torch::Tensor> cu_seqlens_k_opt = std::nullopt;
+  std::optional<torch::Tensor> alibi_opt = std::nullopt;
 
   std::vector<torch::Tensor> result = prefix_decode_varlen_fwd(
       query,
