@@ -85,7 +85,8 @@ BlockManagerPool::BlockManagerPool(const Options& options, int32_t dp_size)
     } else if (!options_.manager_types().empty()) {
       block_managers_.emplace_back(
           std::make_unique<CompositeBlockManager>(block_options));
-    } else if (options_.enable_disagg_pd() || options_.enable_kvcache_store()) {
+    } else if (options.enable_disagg_pd() || options_.enable_kvcache_store() ||
+               options_.host_num_blocks() > 0) {
       block_managers_.emplace_back(
           std::make_unique<ConcurrentBlockManagerImpl>(block_options));
     } else {
@@ -247,7 +248,7 @@ bool BlockManagerPool::allocate(Sequence* sequence, size_t num_tokens) {
 
   // first try to allocate shared blocks
   if (started_empty) {
-    BlockManagerPool::allocate_shared(sequence);
+    allocate_shared(sequence);
   }
 
   const size_t num_blocks = sequence->kv_state().num_kv_blocks();

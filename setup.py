@@ -137,6 +137,7 @@ class ExtBuild(build_ext):
         ("device=", None, "target device type (npu or mlu or cuda or ilu or musa)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("generate-so=", None, "generate so or binary"),
+        ("enable-ha=", None, "enable Mooncake HA(high availability) build flags"),
     ]
 
     def initialize_options(self) -> None:
@@ -145,6 +146,7 @@ class ExtBuild(build_ext):
         self.device: Optional[str] = None
         self.arch: Optional[str] = None
         self.generate_so: bool = False
+        self.enable_ha: bool = False
 
     def finalize_options(self) -> None:
         build_ext.finalize_options(self)
@@ -222,6 +224,7 @@ class ExtBuild(build_ext):
             f"-DXLLM_ATB_LAYERS_SOURCE_DIR={os.path.join(self.base_dir, 'third_party', 'xllm_atb_layers')}",
             f"-DCMAKE_JOB_POOLS=archive={archive_jobs}",
         ]
+        cmake_args += [f"-DENABLE_HA={'ON' if self.enable_ha else 'OFF'}"]
 
         if self.device == "npu":
             cmake_args += ["-DUSE_NPU=ON"]
@@ -601,6 +604,7 @@ class SingleTest(Command):
         ("device=", None, "target device type (npu or mlu or cuda or ilu)"),
         ("arch=", None, "target arch type (x86 or arm)"),
         ("generate-so=", None, "generate so or binary"),
+        ("enable-ha=", None, "enable Mooncake HA(high availability) build flags"),
     ]
 
     def initialize_options(self) -> None:
@@ -608,6 +612,7 @@ class SingleTest(Command):
         self.device: Optional[str] = None
         self.arch: Optional[str] = None
         self.generate_so: bool = False
+        self.enable_ha: bool = False
 
     def finalize_options(self) -> None:
         if not self.test_name:
@@ -621,6 +626,7 @@ class SingleTest(Command):
         build_ext.device = self.device
         build_ext.arch = self.arch
         build_ext.generate_so = self.generate_so
+        build_ext.enable_ha = self.enable_ha
         build_ext.finalize_options()
 
         # Ensure extension modules are set
@@ -660,6 +666,14 @@ def parse_arguments() -> dict[str, Any]:
     )
 
     parser.add_argument(
+        '--enable-ha',
+        type=str.lower,
+        choices=['true', 'false', '1', '0', 'yes', 'no', 'y', 'n', 'on', 'off'],
+        default='false',
+        help='Whether to enable Mooncake HA(high availability) build flags'
+    )
+    
+    parser.add_argument(
         '--test-name',
         type=str,
         default=None,
@@ -671,10 +685,12 @@ def parse_arguments() -> dict[str, Any]:
     sys.argv = [sys.argv[0]] + args.setup_args
 
     generate_so = args.generate_so.lower() in ('true', '1', 'yes', 'y', 'on')
+    enable_ha = args.enable_ha.lower() in ('true', '1', 'yes', 'y', 'on')
 
     return {
         'device': args.device,
         'generate_so': generate_so,
+        'enable_ha': enable_ha,
         'test_name': args.test_name,
     }
 
@@ -686,11 +702,12 @@ if __name__ == "__main__":
     if device == 'auto':
         device = get_device_type()
     target_platform = get_ascend_platform() if device == "npu" else None
-    logger.info(f"🚀 Build xllm with CPU arch: {arch} and target device: {device}")
+    enable_ha = config.get('enable_ha', False)
+    logger.info(f"🚀 Build xllm with CPU arch: {arch}, target device: {device}, enable_ha: {enable_ha}")
 
     if device == "npu":
         _ensure_tilelang_ascend_ready(target_platform, arch)
-    pre_build(device)
+    pre_build(device, enable_ha)
 
     generate_so = config['generate_so']
     test_name = config.get('test_name')
@@ -710,7 +727,8 @@ if __name__ == "__main__":
         'build_ext': {
             'device': device,
             'arch': arch,
-            'generate_so': generate_so
+            'generate_so': generate_so,
+            'enable_ha': enable_ha,
         },
         'bdist_wheel': {
             'device': device,
@@ -722,6 +740,7 @@ if __name__ == "__main__":
             'device': device,
             'arch': arch,
             'generate_so': generate_so,
+            'enable_ha': enable_ha,
             'test_name': test_name,
         }
 

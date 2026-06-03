@@ -575,6 +575,8 @@ void WorkerService::PrefetchFromStorage(
         break;
       }
     }
+
+    brpc::StreamClose(stream_id);
   });
 
   resp->set_ok(true);

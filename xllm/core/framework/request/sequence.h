@@ -309,7 +309,7 @@ class Sequence final {
     return &prefetch_results_;
   }
 
-  bool update_prefetch_result(uint32_t timeout, uint32_t& success_cnt);
+  bool update_prefetch_result(const uint32_t timeout, uint32_t& success_cnt);
 
   void reset();
 

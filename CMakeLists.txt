@@ -7,6 +7,7 @@ option(USE_ILU "Enable ILU support" OFF)
 option(USE_CUDA "Enable CUDA support" OFF)
 option(USE_MUSA "Enable MUSA support" OFF)
 option(USE_DCU "Enable DCU support" OFF)
+option(ENABLE_HA "Enable Mooncake etcd-based HA support" OFF)
 add_compile_definitions(YLT_ENABLE_IBV)
 add_definitions(-DYLT_ENABLE_IBV)
 set(YLT_ENABLE_IBV ON)
@@ -16,10 +17,22 @@ if(DEVICE_ARCH STREQUAL "ARM")
     set(RUST_TARGET aarch64-unknown-linux-gnu)
 endif()
 
+if(ENABLE_HA)
+  set(USE_ETCD ON CACHE BOOL "Enable Mooncake transfer-engine etcd backend" FORCE)
+  set(STORE_USE_ETCD ON CACHE BOOL "Enable Mooncake store etcd backend" FORCE)
+  add_definitions(-DUSE_ETCD)
+  add_definitions(-DSTORE_USE_ETCD)
+  message(STATUS "ENABLE_HA=ON, Mooncake high availability mode enabled")
+endif()
+
 if(USE_NPU)
   # Override Mooncake option for mooncake transfer engine
   # CANN 8.5+ migration: ascend_direct_transport replaces ascend_transport
   set(USE_ASCEND_DIRECT ON CACHE BOOL "Enable ADXL engine for Ascend NPU" FORCE)
+  add_definitions(-DBUILD_SHARED_LIBS=ON)
+  add_compile_definitions(USE_UB)
+  add_definitions(-DUSE_UB)
+  set(USE_UB ON)
 
   execute_process(
     COMMAND git -c "safe.directory=${CMAKE_SOURCE_DIR}/third_party/xllm_ops" -C "${CMAKE_SOURCE_DIR}/third_party/xllm_ops" rev-parse HEAD

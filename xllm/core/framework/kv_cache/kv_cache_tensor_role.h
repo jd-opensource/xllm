@@ -28,6 +28,7 @@ class KVCacheTensorRole {
     INDEX = 2,
     CONV = 3,
     SSM = 4,
+    SWA = 5,
     INVALID = -1,
   };
 
@@ -43,6 +44,8 @@ class KVCacheTensorRole {
       value_ = CONV;
     } else if (str == "SSM" || str == "ssm") {
       value_ = SSM;
+    } else if (str == "SWA" || str == "swa") {
+      value_ = SWA;
     } else {
       value_ = INVALID;
     }
@@ -69,6 +72,8 @@ class KVCacheTensorRole {
       return "conv";
     } else if (this->value_ == SSM) {
       return "ssm";
+    } else if (this->value_ == SWA) {
+      return "swa";
     } else {
       return "invalid";
     }

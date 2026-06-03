@@ -867,6 +867,15 @@ bool DisaggPDScheduler::decode_recv_first_generation(
                 absl::Seconds(time_to_first_token_latency_seconds));
 
   // TODO: we only support one sequence for currently.
+  kv_cache_manager_->cache(request->sequences()[0].get());
+  size_t shared_num =
+      request->sequences()[0]->kv_state().shared_kv_blocks_num();
+  size_t prefilled_blocks_num =
+      request->sequences()[0]->kv_state().num_kv_blocks() - shared_num;
+  if (prefilled_blocks_num > 1) {
+    request->sequences()[0]->kv_state().incr_shared_kv_blocks_num(
+        prefilled_blocks_num - 1);
+  }
   if (enable_schedule_overlap()) {
     Token fake_token(-1);
     sequence->append_token(fake_token);
