@@ -30,6 +30,7 @@ cc_library(
     $<$<BOOL:${USE_CUDA}>:torch_profiler.cpp>
     $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_DCU}>>:numa_utils.cpp>
   DEPS
+    :config
     torch
     glog::glog
     $<$<BOOL:${USE_NPU}>:torch_npu>
@@ -46,7 +47,3 @@ cc_library(
     $<$<BOOL:${USE_DCU}>:hip::host>
 
 )
-
-if(USE_DCU)
-    target_compile_definitions(platform PUBLIC _GLIBCXX_USE_CXX11_ABI=${USE_CXX11_ABI})
-endif()
