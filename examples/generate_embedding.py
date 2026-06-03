@@ -1,4 +1,4 @@
-# python examples/generate_embedding.py --model='/path/models/Qwen3-8B' --devices='npu:0' --runner pooling
+# python examples/generate_embedding.py --model='/path/models/Qwen3-8B' --device_id=0 --runner pooling
 # python generate_embedding.py --model='/path/models/Qwen3-8B' --devices='npu:0,npu:1'
 
 from xllm import ArgumentParser, LLM, PoolingParams
@@ -27,4 +27,3 @@ for i, output in enumerate(outputs):
     print(f"Input: {input_str!r}, Generated embedding: {generated_embedding!r}")
 
 llm.finish()
-

@@ -13,7 +13,7 @@ class Embedding:
     def __init__(
         self,
         model: str,
-        devices: str = 'npu:0',
+        devices: Optional[str] = None,
         limit_image_per_prompt: int = 8,
         block_size: int = 128,
         max_cache_size: int = 0,
@@ -44,6 +44,7 @@ class Embedding:
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
         use_cpp_chat_template: bool = True,
+        device_id: int = 0,
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -57,11 +58,12 @@ class Embedding:
             raise ValueError(f"model {model} not exists")
 
         model_type = utils._infer_model_type(model)
+        resolved_devices = utils._resolve_devices(devices, device_id)
 
         options = Options()
         options.model_path = model
         options.task_type = "embed"
-        options.devices = devices
+        options.devices = resolved_devices
         options.draft_model_path = None
         options.draft_devices = None
         options.backend = "llm"

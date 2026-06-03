@@ -19,6 +19,7 @@ from typing import Dict, Optional, Tuple, Union
 
 import psutil
 import xllm_export
+from scripts.logger import logger
 
 
 def terminate_process(pid: int, timeout: Union[int, float] = 30) -> None:
@@ -109,3 +110,54 @@ def _configure_cpp_chat_template(
             "Please rebuild xllm_export."
         )
     configure(use_cpp_chat_template, model_type)
+
+
+def _to_device_string(device_id: int) -> str:
+    to_device_string = getattr(xllm_export, "to_device_string", None)
+    if not callable(to_device_string):
+        raise ValueError(
+            "xllm_export.to_device_string is not available. "
+            "Please rebuild xllm_export."
+        )
+    return str(to_device_string(device_id))
+
+
+def _resolve_devices(
+    devices: Optional[str],
+    device_id: Optional[int],
+) -> str:
+    if devices is not None and device_id is not None:
+        raise ValueError("Cannot specify both 'devices' and 'device_id'.")
+
+    if devices is not None:
+        logger.warning(
+            "--devices is deprecated and will be removed in a future "
+            "release. Use device_id instead."
+        )
+
+    if device_id is None:
+        if devices is not None:
+            return devices
+
+    if device_id < 0:
+        raise ValueError("device_id must be >= 0")
+    return _to_device_string(device_id)
+
+
+def _resolve_draft_devices(
+    draft_devices: Optional[str],
+    devices: str,
+    num_speculative_tokens: int,
+) -> Optional[str]:
+    if num_speculative_tokens <= 0:
+        return None
+
+    if draft_devices is not None:
+        logger.warning(
+            "--draft_devices is deprecated and will be removed in a future "
+            "release. The draft model will use the same devices as the target model by default."
+        )
+        if draft_devices:
+            return draft_devices
+
+    return devices

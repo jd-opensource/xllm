@@ -29,6 +29,7 @@ limitations under the License.
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "common/metrics.h"
 #include "common/types.h"
@@ -276,8 +277,13 @@ Master::Master(const Options& options, EngineType type)
     const bool use_suffix_spec = options_.speculative_algorithm() == "Suffix";
     CHECK(use_suffix_spec || !draft_model_path.empty())
         << "draft model path is required unless --speculative_algorithm=Suffix";
-    const auto draft_devices = DeviceNameUtils::parse_devices(
-        options_.draft_devices().value_or("auto"));
+    std::vector<torch::Device> draft_devices;
+    if (options_.draft_devices().value_or("").empty()) {
+      draft_devices = devices;
+    } else {
+      draft_devices =
+          DeviceNameUtils::parse_devices(options_.draft_devices().value());
+    }
     LOG(INFO) << "Using draft devices: "
               << DeviceNameUtils::to_string(draft_devices);
     runtime::Options spec_options;

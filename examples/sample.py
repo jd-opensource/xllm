@@ -1,4 +1,4 @@
-# python examples/sample.py --model='/path/models/Qwen3-8B' --devices='npu:0'
+# python examples/sample.py --model='/path/models/Qwen3-8B' --device_id=0
 # python examples/sample.py --model='/path/models/Qwen3-8B' --devices='npu:0,npu:1'
 
 from xllm import ArgumentParser, LLM, RequestParams

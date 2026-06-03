@@ -77,7 +77,8 @@ void SpeculativeConfig::from_flags() {
   XLLM_CONFIG_ASSIGN_FROM_FLAG(draft_model);
   if (config::is_flag_specified("draft_devices")) {
     LOG(WARNING) << "--draft_devices is deprecated and will be removed in a "
-                    "future release. Because it's same as --devices.";
+                    "future release. The draft model will use the same devices "
+                    "as the target model by default.";
   }
   XLLM_CONFIG_ASSIGN_FROM_FLAG(draft_devices);
   XLLM_CONFIG_ASSIGN_FROM_FLAG(num_speculative_tokens);

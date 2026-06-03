@@ -1,4 +1,4 @@
-# python generate_vlm.py --model /path/to/Qwen2.5-VL-7B-Instruct/ --max_seqs_per_batch 4 --devices='npu:0' --enable_shm
+# python generate_vlm.py --model /path/to/Qwen2.5-VL-7B-Instruct/ --max_seqs_per_batch 4 --device_id=0 --enable_shm
 
 from xllm import ArgumentParser, SamplingParams
 from xllm import LLM

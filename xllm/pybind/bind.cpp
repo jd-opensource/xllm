@@ -29,6 +29,7 @@ limitations under the License.
 #include "core/framework/request/request_output.h"
 #include "core/framework/request/request_params.h"
 #include "core/framework/request/sample_slot.h"
+#include "core/util/device_name_utils.h"
 #include "models/model_registry.h"
 
 namespace xllm {
@@ -373,6 +374,9 @@ PYBIND11_MODULE(xllm_export, m) {
       },
       py::arg("use_cpp_chat_template"),
       py::arg("model_type"));
+  m.def("to_device_string",
+        &DeviceNameUtils::to_device_string,
+        py::arg("device_id"));
 }
 
 }  // namespace xllm

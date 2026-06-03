@@ -17,9 +17,9 @@ class VLM:
         self,
         model: str,
         task: str = "generate",
-        devices: str = 'npu:0',
+        devices: Optional[str] = None,
         draft_model: Optional[str] = '',
-        draft_devices: Optional[str] = 'npu:0',
+        draft_devices: Optional[str] = None,
         limit_image_per_prompt: int = 8,
         block_size: int = 128,
         max_cache_size: int = 0,
@@ -56,6 +56,7 @@ class VLM:
         input_shm_size: int = 1024,
         output_shm_size: int = 128,
         use_cpp_chat_template: bool = True,
+        device_id: int = 0,
         **kwargs: Any,
     ) -> None:
         signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
@@ -69,14 +70,20 @@ class VLM:
             raise ValueError(f"model {model} not exists")
         self.model = model
         model_type = utils._infer_model_type(model)
+        resolved_devices = utils._resolve_devices(devices, device_id)
+        resolved_draft_devices = utils._resolve_draft_devices(
+            draft_devices,
+            resolved_devices,
+            num_speculative_tokens,
+        )
 
         options = Options()
         options.model_path = model
         options.task_type = task
-        options.devices = devices
+        options.devices = resolved_devices
         options.draft_model_path = draft_model
-        options.draft_devices = draft_devices
-        options.backend ="vlm"
+        options.draft_devices = resolved_draft_devices
+        options.backend = "vlm"
         options.limit_image_per_prompt = limit_image_per_prompt
         options.block_size = block_size
         options.max_cache_size = max_cache_size

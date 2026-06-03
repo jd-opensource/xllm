@@ -13,7 +13,7 @@ LLM Beam Search 示例：[:simple-github: https://github.com/jd-opensource/xllm/
 ```python
 from xllm import BeamSearchParams, LLM
 
-llm = LLM(model="/path/models/Qwen2-7B-Instruct", devices="npu:0")
+llm = LLM(model="/path/models/Qwen2-7B-Instruct", device_id=0)
 params = BeamSearchParams(
     beam_width=2,
     top_logprobs=4,

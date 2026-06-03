@@ -1,4 +1,4 @@
-# python examples/generate_beam_search.py --model='/path/models/Qwen2-7B-Instruct' --devices='npu:0'
+# python examples/generate_beam_search.py --model='/path/models/Qwen2-7B-Instruct' --device_id=0
 # python generate_beam_search.py --model='/path/models/Qwen2-7B-Instruct' --devices='npu:0,npu:1'
 
 from xllm import ArgumentParser, BeamSearchParams, LLM
