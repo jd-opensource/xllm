@@ -102,7 +102,3 @@ target_include_directories(dcu_kernels
   PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}/..
 )
-
-target_compile_definitions(dcu_kernels PRIVATE
-  _GLIBCXX_USE_CXX11_ABI=${USE_CXX11_ABI}
-)

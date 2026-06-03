@@ -12,4 +12,3 @@ cc_test(
     torch
     GTest::gtest_main
 )
-target_compile_definitions(activation_layer_dcu_test PRIVATE _GLIBCXX_USE_CXX11_ABI=${USE_CXX11_ABI})
