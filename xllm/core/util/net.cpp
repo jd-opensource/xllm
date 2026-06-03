@@ -131,7 +131,6 @@ std::pair<std::string, uint16_t> convert_uint64_to_ip_port(uint64_t input) {
 
 // input example: 127.0.0.1:18889
 std::string extract_ip(const std::string& input) {
-  VLOG(1) << "extract_ip input: " << input;
   std::istringstream stream(input);
   std::string ip;
 
@@ -139,7 +138,6 @@ std::string extract_ip(const std::string& input) {
   if (ip == "127.0.0.1" || ip == "0.0.0.0" || ip == "localhost") {
     ip = get_local_ip_addr();
   }
-  VLOG(1) << "extract_ip output ip: " << ip;
   return ip;
 }
 
