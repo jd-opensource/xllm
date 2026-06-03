@@ -25,21 +25,8 @@ limitations under the License.
 
 namespace {
 
-#if defined(USE_DCU)
-template <typename T>
-__device__ __forceinline__ T xllm_ldg(const T* ptr) {
-  return *ptr;
-}
-template <>
-__device__ __forceinline__ c10::Half xllm_ldg<c10::Half>(const c10::Half* ptr) {
-  return *ptr;
-}
-#define XLLM_LDG(arg) xllm_ldg(arg)
-#else
+using ::xllm::kernel::cuda::xllm_ldg;
 
-// Use read-only cache load for CUDA kernels.
-#define XLLM_LDG(arg) __ldg(arg)
-#endif
 template <typename scalar_t,
           scalar_t (*ACT_FN)(const scalar_t&),
           bool act_first>
@@ -82,7 +69,7 @@ __global__ void XLLM_KERNEL_ATTR(1024)
     const int vec_end = num_vecs * kVecSize;
 
     for (int i = threadIdx.x; i < num_vecs; i += blockDim.x) {
-      int4 x = XLLM_LDG(&x_vec[i]), y = XLLM_LDG(&y_vec[i]), r;
+      int4 x = xllm_ldg(&x_vec[i]), y = xllm_ldg(&y_vec[i]), r;
       auto* xp = reinterpret_cast<scalar_t*>(&x);
       auto* yp = reinterpret_cast<scalar_t*>(&y);
       auto* rp = reinterpret_cast<scalar_t*>(&r);
@@ -94,14 +81,14 @@ __global__ void XLLM_KERNEL_ATTR(1024)
     }
     // Scalar cleanup for remaining elements
     for (int i = vec_end + threadIdx.x; i < d; i += blockDim.x) {
-      out_ptr[i] = compute<scalar_t, ACT_FN, act_first>(XLLM_LDG(&x_ptr[i]),
-                                                        XLLM_LDG(&y_ptr[i]));
+      out_ptr[i] = compute<scalar_t, ACT_FN, act_first>(xllm_ldg(&x_ptr[i]),
+                                                        xllm_ldg(&y_ptr[i]));
     }
   } else {
     // Scalar fallback for unaligned data or small d
     for (int64_t idx = threadIdx.x; idx < d; idx += blockDim.x) {
-      const scalar_t x = XLLM_LDG(&x_ptr[idx]);
-      const scalar_t y = XLLM_LDG(&y_ptr[idx]);
+      const scalar_t x = xllm_ldg(&x_ptr[idx]);
+      const scalar_t y = xllm_ldg(&y_ptr[idx]);
       out_ptr[idx] = compute<scalar_t, ACT_FN, act_first>(x, y);
     }
   }

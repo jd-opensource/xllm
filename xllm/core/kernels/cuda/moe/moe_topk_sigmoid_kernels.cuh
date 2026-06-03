@@ -589,9 +589,8 @@ void topk_sigmoid(torch::Tensor& topk_weights,   // [num_tokens, topk]
         bias_ptr,
         stream);
   } else if (dtype == at::ScalarType::BFloat16) {
-#if defined(USE_DCU)
-    topk_gating_sigmoid_kernel_launcher<hip_bfloat16>(
-        reinterpret_cast<const hip_bfloat16*>(
+    topk_gating_sigmoid_kernel_launcher<BFloat16Type>(
+        reinterpret_cast<const BFloat16Type*>(
             gating_output.data_ptr<at::BFloat16>()),
         topk_weights.data_ptr<float>(),
         topk_indices.data_ptr<int>(),
@@ -602,20 +601,6 @@ void topk_sigmoid(torch::Tensor& topk_weights,   // [num_tokens, topk]
         renormalize,
         bias_ptr,
         stream);
-#else
-    topk_gating_sigmoid_kernel_launcher<__nv_bfloat16>(
-        reinterpret_cast<const __nv_bfloat16*>(
-            gating_output.data_ptr<at::BFloat16>()),
-        topk_weights.data_ptr<float>(),
-        topk_indices.data_ptr<int>(),
-        sigmoid_workspace.data_ptr<float>(),
-        num_tokens,
-        num_experts,
-        topk,
-        renormalize,
-        bias_ptr,
-        stream);
-#endif
   } else {
     LOG(FATAL) << "Unsupported gating_output dtype: " << dtype;
   }

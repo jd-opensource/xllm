@@ -27,9 +27,13 @@ namespace cub = hipcub;
 
 namespace xllm::kernel::cuda {
 #if !defined(USE_DCU)
+using BFloat16Type = __nv_bfloat16;
+
 #define WARP_SIZE 32
 #define XLLM_KERNEL_ATTR(MAX_THREADS)
 #else
+using BFloat16Type = hip_bfloat16;
+
 #define WARP_SIZE 64
 #define XLLM_KERNEL_ATTR(MAX_THREADS) __launch_bounds__(MAX_THREADS, 1)
 #endif

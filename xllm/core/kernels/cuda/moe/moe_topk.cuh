@@ -38,6 +38,8 @@
 #include <hip/hip_fp16.h>
 #endif
 
+#include "core/kernels/cuda/device_utils.cuh"
+
 namespace xllm::kernel::cuda {
 namespace reduce_topk {
 namespace cg = cooperative_groups;
@@ -51,17 +53,10 @@ static constexpr bool kTllmGenHasFastRedux = false;
 template <typename T_>
 struct TopKRedType {
   using T = T_;
-#if !defined(USE_DCU)
   static_assert(
       std::is_same_v<T, float> || std::is_same_v<T, half> ||
-          std::is_same_v<T, __nv_bfloat16> || std::is_same_v<T, int>,
+          std::is_same_v<T, BFloat16Type> || std::is_same_v<T, int>,
       "Top K reduction only implemented for int, float, float16 and bfloat16");
-#else
-  static_assert(
-      std::is_same_v<T, float> || std::is_same_v<T, half> ||
-          std::is_same_v<T, hip_bfloat16> || std::is_same_v<T, int>,
-      "Top K reduction only implemented for int, float, float16 and bfloat16");
-#endif
 
   using TypeCmp = std::conditional_t<sizeof(T) == 4, uint64_t, uint32_t>;
   using IdxT = std::conditional_t<sizeof(T) == 4, int32_t, int16_t>;
