@@ -15,7 +15,6 @@ limitations under the License.
 
 #include "attention.h"
 
-#include "core/framework/config/speculative_config.h"
 #include "kernels/npu/npu_ops_api.h"
 #include "kernels/ops_api.h"
 
@@ -110,9 +109,7 @@ void AttentionImpl::prefill_forward(torch::Tensor& query,
         "TND");
     output.copy_(std::get<0>(fia_result).view_as(output));
   } else if (attn_metadata.is_chunked_prefill) {
-    const bool speculative_enabled =
-        ::xllm::SpeculativeConfig::get_instance().num_speculative_tokens() > 0;
-    if (speculative_enabled) {
+    if (attn_metadata.is_spec_verify) {
       torch::Tensor kv_seq_lens = attn_metadata.kv_seq_lens_host.defined()
                                       ? attn_metadata.kv_seq_lens_host
                                       : attn_metadata.kv_seq_lens;

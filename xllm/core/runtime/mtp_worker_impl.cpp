@@ -1064,6 +1064,32 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
   }
 
   input_params.attention.rebuild_device_buffer(device_);
+  if (use_qwen3_5_spec_verify_path() && use_atb_spec_kernel) {
+    CHECK(input_params.attention.device.block_tables.defined())
+        << "spec verify expanded decode requires block tables";
+    std::vector<int32_t> expanded_kv_seq_lens;
+    expanded_kv_seq_lens.reserve(total_num_val_tokens);
+    const auto& q_seq_lens = input_params.attention.host.q_seq_lens;
+    const auto& kv_seq_lens_after = input_params.attention.host.kv_seq_lens;
+    CHECK_EQ(q_seq_lens.size(), static_cast<size_t>(num_sequences));
+    CHECK_EQ(kv_seq_lens_after.size(), static_cast<size_t>(num_sequences));
+    for (int32_t seq_id = 0; seq_id < num_sequences; ++seq_id) {
+      const int32_t q_len = q_seq_lens[seq_id];
+      const int32_t kv_len = kv_seq_lens_after[seq_id];
+      CHECK_EQ(q_len, num_val_tokens);
+      CHECK_GE(kv_len, q_len);
+      for (int32_t token_idx = 0; token_idx < q_len; ++token_idx) {
+        expanded_kv_seq_lens.emplace_back(kv_len - q_len + token_idx + 1);
+      }
+    }
+    input_params.graph.use_expanded_decode_for_spec_verify_attention = true;
+    input_params.graph.expanded_kv_seq_lens =
+        torch::tensor(expanded_kv_seq_lens, token_options);
+    input_params.graph.expanded_kv_seq_lens_vec = expanded_kv_seq_lens;
+    input_params.graph.expanded_block_tables =
+        input_params.attention.device.block_tables.repeat_interleave(
+            /*repeats=*/num_val_tokens, /*dim=*/0);
+  }
   validate_input.device_tensors_ready = true;
   prepare_stream_->synchronize();
 }
