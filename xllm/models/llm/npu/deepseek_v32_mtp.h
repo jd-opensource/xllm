@@ -52,6 +52,32 @@ class DeepseekV32MtpModelImpl
         model_args.rope_scaling_mscale_all_dim(),
         options);
   }
+
+ protected:
+  void forward_layer(DeepseekV32DecoderLayer& layer,
+                     torch::Tensor& h,
+                     torch::Tensor& cos_pos,
+                     torch::Tensor& sin_pos,
+                     torch::Tensor& attn_mask,
+                     KVCache& kv_cache,
+                     const ModelInputParams& input_params,
+                     torch::Tensor& topk_indices,
+                     int32_t layer_index,
+                     aclrtEvent* event,
+                     std::atomic<bool>* event_flag) override {
+    layer->forward_with_mtp_topk(h,
+                                 cos_pos,
+                                 sin_pos,
+                                 attn_mask,
+                                 kv_cache,
+                                 input_params,
+                                 topk_indices,
+                                 index_topk_,
+                                 device_,
+                                 layer_index,
+                                 event,
+                                 event_flag);
+  }
 };
 TORCH_MODULE(DeepseekV32MtpModel);
 
@@ -104,6 +130,11 @@ REGISTER_MODEL_ARGS(deepseek_v32_mtp, [&] {
   LOAD_ARG_OR(index_head_dim, "index_head_dim", 128);
   LOAD_ARG_OR(index_n_heads, "index_n_heads", 64);
   LOAD_ARG_OR(index_topk, "index_topk", 2048);
+  LOAD_ARG_OR(index_topk_freq, "index_topk_freq", 1);
+  LOAD_ARG_OR(index_topk_pattern, "index_topk_pattern", "");
+  LOAD_ARG_OR(index_skip_topk_offset, "index_skip_topk_offset", 0);
+  LOAD_ARG_OR(
+      index_share_for_mtp_iteration, "index_share_for_mtp_iteration", false);
 
   LOAD_ARG_OR_FUNC(head_dim, "head_dim", [&] {
     return 256;  // args->qk_nope_head_dim() + args->qk_rope_head_dim();
