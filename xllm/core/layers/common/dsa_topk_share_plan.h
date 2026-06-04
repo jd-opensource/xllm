@@ -55,9 +55,9 @@ inline bool should_skip_topk_from_freq(int32_t freq,
   CHECK_GT(freq, 1) << "DSA top-k sharing freq must be greater than 1.";
   CHECK_GE(offset, 0) << "DSA top-k sharing offset must be non-negative.";
   if (offset > 0) {
-    return std::max(layer_id - offset + 1, 0) % freq != 0;
+    return std::max<int32_t>(layer_id - offset + 1, 0) % freq != 0;
   }
-  return std::max(layer_id - 1, 0) % freq != 0;
+  return std::max<int32_t>(layer_id - 1, 0) % freq != 0;
 }
 
 inline bool should_next_layer_skip_topk_from_freq(int32_t freq,
@@ -66,7 +66,7 @@ inline bool should_next_layer_skip_topk_from_freq(int32_t freq,
   CHECK_GT(freq, 1) << "DSA top-k sharing freq must be greater than 1.";
   CHECK_GE(offset, 0) << "DSA top-k sharing offset must be non-negative.";
   if (offset > 0) {
-    return std::max(layer_id - offset + 2, 0) % freq != 0;
+    return std::max<int32_t>(layer_id - offset + 2, 0) % freq != 0;
   }
   return layer_id % freq != 0;
 }
