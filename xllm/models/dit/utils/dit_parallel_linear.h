@@ -258,12 +258,11 @@ class DiTParallelLinearImpl : public torch::nn::Module {
     // Defer weight dtype decision to load_tp_weights: only layers that
     // resolve to w8a8_dynamic get int8 weight. Register as the original
     // dtype here and convert when the quant method is confirmed.
-    auto weight_dtype = tensor_options_.dtype();
     if (tp.column_parallel) {
       int64_t out_per_partition = out_features_ / tp.tp_size();
       tp_weight_ = register_parameter(
           "weight",
-          torch::empty({out_per_partition, in_features_}, weight_dtype),
+          torch::empty({out_per_partition, in_features_}, tensor_options_),
           /*is_buffer=*/false);
       if (has_bias_) {
         tp_bias_ = register_parameter(
@@ -291,7 +290,7 @@ class DiTParallelLinearImpl : public torch::nn::Module {
       int64_t in_per_partition = in_features_ / tp.tp_size();
       tp_weight_ = register_parameter(
           "weight",
-          torch::empty({out_features_, in_per_partition}, weight_dtype),
+          torch::empty({out_features_, in_per_partition}, tensor_options_),
           /*is_buffer=*/false);
       if (has_bias_) {
         tp_bias_ =
