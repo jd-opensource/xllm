@@ -25,85 +25,43 @@ namespace xllm {
 
 namespace {
 
-#if defined(USE_NPU)
-c10::Stream to_c10_stream(const c10_npu::NPUStream& stream) {
+c10::Stream to_c10_stream(const PlatformStream& stream) {
   return stream.unwrap();
+}
+
+#if defined(USE_NPU)
+PlatformStream get_stream_from_pool() {
+  return c10_npu::getNPUStreamFromPool();
 }
 #elif defined(USE_MLU)
-c10::Stream to_c10_stream(const torch_mlu::MLUStream& stream) {
-  return stream.unwrap();
-}
+PlatformStream get_stream_from_pool() { return torch_mlu::getStreamFromPool(); }
 #elif defined(USE_CUDA) || defined(USE_ILU)
-c10::Stream to_c10_stream(const c10::cuda::CUDAStream& stream) {
-  return stream;
-}
+PlatformStream get_stream_from_pool() { return c10::cuda::getStreamFromPool(); }
 #elif defined(USE_MUSA)
-c10::Stream to_c10_stream(const c10::musa::MUSAStream& stream) {
-  return stream;
-}
+PlatformStream get_stream_from_pool() { return c10::musa::getStreamFromPool(); }
 #elif defined(USE_DCU)
-c10::Stream to_c10_stream(const c10::hip::HIPStream& stream) { return stream; }
+PlatformStream get_stream_from_pool() { return c10::hip::getStreamFromPool(); }
 #endif
 
 }  // namespace
 
-#if defined(USE_NPU)
 Stream::Stream(const int32_t timeout)
-    : stream_(c10_npu::getNPUStreamFromPool()), timeout_(timeout) {}
-#elif defined(USE_MLU)
-Stream::Stream(const int32_t timeout)
-    : stream_(torch_mlu::getStreamFromPool()), timeout_(timeout) {}
-#elif defined(USE_CUDA) || defined(USE_ILU)
-Stream::Stream(const int32_t timeout)
-    : stream_(c10::cuda::getStreamFromPool()), timeout_(timeout) {}
-#elif defined(USE_MUSA)
-Stream::Stream(const int32_t timeout)
-    : stream_(c10::musa::getStreamFromPool()), timeout_(timeout) {}
-#elif defined(USE_DCU)
-Stream::Stream(const int32_t timeout)
-    : stream_(c10::hip::getStreamFromPool()), timeout_(timeout) {}
-#endif
+    : stream_(get_stream_from_pool()), timeout_(timeout) {}
 
-#if defined(USE_NPU)
-Stream::Stream(c10_npu::NPUStream stream, const int32_t timeout)
+Stream::Stream(PlatformStream stream, const int32_t timeout)
     : stream_(stream), timeout_(timeout) {}
-#elif defined(USE_MLU)
-Stream::Stream(torch_mlu::MLUStream stream, const int32_t timeout)
-    : stream_(stream), timeout_(timeout) {}
-#elif defined(USE_CUDA) || defined(USE_ILU)
-Stream::Stream(c10::cuda::CUDAStream stream, const int32_t timeout)
-    : stream_(stream), timeout_(timeout) {}
-#elif defined(USE_MUSA)
-Stream::Stream(c10::musa::MUSAStream stream, const int32_t timeout)
-    : stream_(stream), timeout_(timeout) {}
-#elif defined(USE_DCU)
-Stream::Stream(c10::hip::HIPStream stream, const int32_t timeout)
-    : stream_(stream), timeout_(timeout) {}
-#endif
 
 int Stream::synchronize() const {
 #if defined(USE_NPU)
   return aclrtSynchronizeStreamWithTimeout(stream_.stream(), timeout_);
-#elif defined(USE_MLU)
-  stream_.unwrap().synchronize();
-  return 0;
-#elif defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA) || \
-    defined(USE_DCU)
+#else
   stream_.synchronize();
   return 0;
-#else
-  LOG(FATAL) << "Not supported backend, currently we support 'npu', 'cuda', "
-                "'mlu', 'musa','dcu'.";
 #endif
 }
 
 c10::StreamGuard Stream::set_stream_guard() const {
-#if defined(USE_CUDA) || defined(USE_ILU) || defined(USE_MUSA) || \
-    defined(USE_DCU)
-  return c10::StreamGuard(stream_);
-#else
-  return c10::StreamGuard(stream_.unwrap());
-#endif
+  return c10::StreamGuard(to_c10_stream(stream_));
 }
 
 void Stream::wait_stream(const Stream& other_stream) {
