@@ -636,13 +636,8 @@ AnthropicServiceImpl::AnthropicServiceImpl(
       tool_call_parser_format_(
           master->options().tool_call_parser().value_or("")),
       reasoning_parser_format_(
-<<<<<<< HEAD
           master->options().reasoning_parser().value_or("")) {}
-=======
-          master_->options().reasoning_parser().value_or("")) {
-  CHECK(master_ != nullptr);
-}
->>>>>>> adb3147c (feat: template support vlm mtp.)
+
 
 void AnthropicServiceImpl::process_async_impl(
     std::shared_ptr<AnthropicCall> call) {

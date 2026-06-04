@@ -460,7 +460,7 @@ int run() {
   if (options.node_rank() != 0) {
     if (model_config.backend() == "dit") {
       master = std::make_unique<DiTAssistantMaster>(options);
-    } else if (FLAGS_backend == "vlm") {
+    } else if (model_config.backend() == "vlm") {
       master = std::make_unique<VLMAssistantMaster>(options);
     } else {
       master = std::make_unique<LLMAssistantMaster>(options);
