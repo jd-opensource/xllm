@@ -62,6 +62,7 @@ class MtpModelImplBase : public torch::nn::Module {
     dp_rank_ = parallel_args.rank() / dp_local_tp_size_;
     rank_ = parallel_args.rank();
     num_experts_per_tok_ = model_args.num_experts_per_tok();
+    index_topk_ = model_args.index_topk();
 
     embed_tokens_ =
         register_module("embed_tokens", layer::NpuWordEmbedding(context));
@@ -174,6 +175,7 @@ class MtpModelImplBase : public torch::nn::Module {
         const_cast<ModelInputParams&>(input_params);
     input_params_new.expert.expert_array = expert_array;
 
+    torch::Tensor prev_topk_indices = input_params_new.dsa_topk_indices;
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
@@ -187,24 +189,30 @@ class MtpModelImplBase : public torch::nn::Module {
       }
 
       auto& layer = layers_[i];
+      const int32_t layer_index = static_cast<int32_t>(i);
 
       if (layer_forward_interrupted_) {
         LOG(INFO) << "Forward interrupted at layer: " << i;
         return ModelOutput();
       }
 
-      layer(h,
-            cos_pos,
-            sin_pos,
-            attn_mask,
-            kv_caches[i],
-            input_params_new,
-            event,
-            event_flag);
+      forward_layer(layer,
+                    h,
+                    cos_pos,
+                    sin_pos,
+                    attn_mask,
+                    kv_caches[i],
+                    input_params_new,
+                    prev_topk_indices,
+                    layer_index,
+                    event,
+                    event_flag);
     }
 
     auto hidden_states = final_norm_(h, 0);
-    return ModelOutput(hidden_states);
+    ModelOutput output(hidden_states);
+    output.dsa_topk_indices = prev_topk_indices;
+    return output;
   }
 
   // load the weight from the checkpoint
@@ -266,6 +274,27 @@ class MtpModelImplBase : public torch::nn::Module {
   }
 
  protected:
+  virtual void forward_layer(DecoderLayerType& layer,
+                             torch::Tensor& h,
+                             torch::Tensor& cos_pos,
+                             torch::Tensor& sin_pos,
+                             torch::Tensor& attn_mask,
+                             KVCache& kv_cache,
+                             const ModelInputParams& input_params,
+                             torch::Tensor&,
+                             int32_t,
+                             aclrtEvent* event,
+                             std::atomic<bool>* event_flag) {
+    layer(h,
+          cos_pos,
+          sin_pos,
+          attn_mask,
+          kv_cache,
+          input_params,
+          event,
+          event_flag);
+  }
+
   int32_t dp_rank_;
   int32_t rank_;
   int32_t dp_size_;
@@ -289,10 +318,11 @@ class MtpModelImplBase : public torch::nn::Module {
 
   bool layer_forward_interrupted_ = false;
   bool enable_rot_ = false;
+  torch::Device device_;
+  int32_t index_topk_ = 0;
 
  private:
   std::string model_type_;
-  torch::Device device_;
 };
 
 template <typename MtpModelType>

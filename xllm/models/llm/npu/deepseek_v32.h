@@ -76,6 +76,70 @@ class DeepseekV32DecoderLayerImpl : public torch::nn::Module {
                                              event_flag);
   }
 
+  void forward_with_mtp_topk(torch::Tensor& x,
+                             torch::Tensor& cos_pos,
+                             torch::Tensor& sin_pos,
+                             torch::Tensor& attn_mask,
+                             KVCache& kv_cache,
+                             const ModelInputParams& input_params,
+                             torch::Tensor& topk_indices,
+                             int32_t index_topk,
+                             const torch::Device& device,
+                             int32_t layer_index,
+                             aclrtEvent* event,
+                             std::atomic<bool>* event_flag) {
+    const bool topk_sharing_enabled = is_topk_sharing_enabled();
+    const bool should_skip_topk = skip_topk();
+    const bool should_output_topk = output_topk();
+    torch::Tensor current_topk_indices;
+    torch::Tensor shared_topk_indices;
+    torch::Tensor* output_topk_indices = nullptr;
+    if (topk_sharing_enabled) {
+      if (should_skip_topk) {
+        CHECK(topk_indices.defined())
+            << "DSA top-k sharing requires previous top-k indices at MTP layer "
+            << layer_index;
+        shared_topk_indices = topk_indices;
+      }
+      if (should_output_topk) {
+        torch::Tensor index_cache = kv_cache.get_index_cache();
+        CHECK(index_cache.defined())
+            << "DSA top-k sharing requires index cache at MTP layer "
+            << layer_index;
+        current_topk_indices = torch::empty(
+            std::vector<int64_t>{x.size(0),
+                                 index_cache.size(2),
+                                 static_cast<int64_t>(index_topk)},
+            torch::TensorOptions().device(device).dtype(torch::kInt32));
+        output_topk_indices = &current_topk_indices;
+      }
+    }
+    if (topk_sharing_enabled) {
+      forward_with_topk(x,
+                        cos_pos,
+                        sin_pos,
+                        attn_mask,
+                        kv_cache,
+                        input_params,
+                        shared_topk_indices,
+                        output_topk_indices,
+                        event,
+                        event_flag);
+    } else {
+      forward(x,
+              cos_pos,
+              sin_pos,
+              attn_mask,
+              kv_cache,
+              input_params,
+              event,
+              event_flag);
+    }
+    if (should_output_topk) {
+      topk_indices = current_topk_indices;
+    }
+  }
+
   bool is_topk_sharing_enabled() const {
     return decoder_layer_->is_topk_sharing_enabled();
   }
@@ -243,10 +307,9 @@ class DeepseekV32ModelImpl : public torch::nn::Module {
               << "DSA top-k sharing requires index cache at layer "
               << layer_index;
           current_topk_indices = torch::empty(
-              std::vector<int64_t>{
-                  h.size(0),
-                  index_cache.size(2),
-                  static_cast<int64_t>(index_topk_)},
+              std::vector<int64_t>{h.size(0),
+                                   index_cache.size(2),
+                                   static_cast<int64_t>(index_topk_)},
               torch::TensorOptions().device(device_).dtype(torch::kInt32));
           output_topk_indices = &current_topk_indices;
         }

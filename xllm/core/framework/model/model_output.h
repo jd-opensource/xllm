@@ -28,6 +28,8 @@ struct ModelOutput {
   torch::Tensor residual;
   // [num_tokens, ...]
   torch::Tensor aux_hidden_states;
+  // DSA top-k indices reused across MTP draft forwards.
+  torch::Tensor dsa_topk_indices;
 
   ModelOutput() = default;
 
