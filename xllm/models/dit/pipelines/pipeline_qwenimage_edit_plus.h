@@ -583,9 +583,6 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
 
     unpacked_latents = unpacked_latents / latents_std + latents_mean;
     output_image = vae_->decode(unpacked_latents).sample.squeeze(2);
-    torch::save(output_image,
-                "/export/home/weinan5/zhubowei/qwen_image_edit/xllm/"
-                "vae_decode_output.pt");
     output_image = vae_image_processor_->postprocess(output_image);
     auto output = std::vector<torch::Tensor>{{output_image}};
     DiTForwardOutput out;
