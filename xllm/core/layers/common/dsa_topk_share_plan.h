@@ -15,6 +15,7 @@ limitations under the License.
 
 #pragma once
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <string>
@@ -35,8 +36,8 @@ inline bool has_dsa_indexer(const ModelArgs& args) {
          args.index_topk() > 0;
 }
 
-inline bool should_compute_topk_from_pattern(const std::string& pattern,
-                                             int32_t layer_id) {
+inline bool should_skip_topk_from_pattern(const std::string& pattern,
+                                          int32_t layer_id) {
   CHECK_GE(layer_id, 0) << "DSA top-k sharing layer id must be non-negative.";
   CHECK_LT(layer_id, static_cast<int32_t>(pattern.size()))
       << "DSA top-k sharing pattern is shorter than num_hidden_layers.";
@@ -45,7 +46,29 @@ inline bool should_compute_topk_from_pattern(const std::string& pattern,
           pattern[static_cast<size_t>(layer_id)])));
   CHECK(symbol == 'F' || symbol == 'S')
       << "DSA top-k sharing pattern only supports F/S, got " << symbol;
-  return symbol == 'F';
+  return symbol == 'S';
+}
+
+inline bool should_skip_topk_from_freq(int32_t freq,
+                                       int32_t offset,
+                                       int32_t layer_id) {
+  CHECK_GT(freq, 1) << "DSA top-k sharing freq must be greater than 1.";
+  CHECK_GE(offset, 0) << "DSA top-k sharing offset must be non-negative.";
+  if (offset > 0) {
+    return std::max(layer_id - offset + 1, 0) % freq != 0;
+  }
+  return std::max(layer_id - 1, 0) % freq != 0;
+}
+
+inline bool should_next_layer_skip_topk_from_freq(int32_t freq,
+                                                  int32_t offset,
+                                                  int32_t layer_id) {
+  CHECK_GT(freq, 1) << "DSA top-k sharing freq must be greater than 1.";
+  CHECK_GE(offset, 0) << "DSA top-k sharing offset must be non-negative.";
+  if (offset > 0) {
+    return std::max(layer_id - offset + 2, 0) % freq != 0;
+  }
+  return layer_id % freq != 0;
 }
 
 inline DsaTopkShareDecision get_dsa_topk_share_decision(
@@ -59,20 +82,24 @@ inline DsaTopkShareDecision get_dsa_topk_share_decision(
     return decision;
   }
 
-  bool compute_topk = true;
+  bool skip_topk = false;
+  bool next_skip_topk = false;
   if (!args.index_topk_pattern().empty()) {
-    compute_topk =
-        should_compute_topk_from_pattern(args.index_topk_pattern(), layer_id);
+    const std::string& pattern = args.index_topk_pattern();
+    skip_topk = should_skip_topk_from_pattern(pattern, layer_id);
+    if (layer_id + 1 < static_cast<int32_t>(pattern.size())) {
+      next_skip_topk = should_skip_topk_from_pattern(pattern, layer_id + 1);
+    }
   } else {
     const int32_t freq = args.index_topk_freq();
-    CHECK_GT(freq, 1) << "DSA top-k sharing freq must be greater than 1.";
     const int32_t offset = args.index_skip_topk_offset();
-    CHECK_GE(offset, 0) << "DSA top-k sharing offset must be non-negative.";
-    compute_topk = layer_id <= offset || (layer_id - offset) % freq == 0;
+    skip_topk = should_skip_topk_from_freq(freq, offset, layer_id);
+    next_skip_topk =
+        should_next_layer_skip_topk_from_freq(freq, offset, layer_id);
   }
 
-  decision.reuse_topk = !compute_topk;
-  decision.output_topk = compute_topk;
+  decision.reuse_topk = skip_topk;
+  decision.output_topk = !skip_topk && next_skip_topk;
   return decision;
 }
 
