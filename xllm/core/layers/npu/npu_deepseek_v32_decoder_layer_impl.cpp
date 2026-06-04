@@ -30,6 +30,7 @@ limitations under the License.
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
 #include "core/framework/config/scheduler_config.h"
+#include "core/layers/common/dsa_topk_share_plan.h"
 #include "framework/parallel_state/npu_cp_prepare.h"
 #include "layers/common/rotary_embedding_util.h"
 #include "loader/deepseek_v32_decoder_loader.h"
@@ -199,6 +200,10 @@ NpuDeepseekV32DecoderLayerImpl::NpuDeepseekV32DecoderLayerImpl(
   auto parallel_args = context.get_parallel_args();
   auto model_args = context.get_model_args();
   auto options = context.get_tensor_options();
+  const DsaTopkShareDecision topk_decision =
+      get_dsa_topk_share_decision(model_args, layer_id_);
+  skip_topk_ = topk_decision.reuse_topk;
+  output_topk_ = topk_decision.output_topk;
 
   rank_ = parallel_args.rank();
   first_k_dense_replace_ = model_args.first_k_dense_replace();
@@ -397,6 +402,8 @@ void NpuDeepseekV32DecoderLayerImpl::initialize_attention_parameters(
   param.index_head_dim = args.index_head_dim();
   param.index_n_heads = args.index_n_heads();
   param.index_topk = args.index_topk();
+  param.skipTopk = skip_topk_;
+  param.outputTopk = output_topk_;
 }
 
 void NpuDeepseekV32DecoderLayerImpl::initialize_mlp_parameters(
@@ -772,11 +779,14 @@ int64_t NpuDeepseekV32DecoderLayerImpl::init_node(
   }
   node.inTensors.resize(node.operation->GetInputNum());
 
+  size_t out_tensor_num = 1;
   if (eplb_enabled) {
-    node.outTensors.resize(2);
-  } else {
-    node.outTensors.resize(1);
+    ++out_tensor_num;
   }
+  if (param.outputTopk) {
+    ++out_tensor_num;
+  }
+  node.outTensors.resize(out_tensor_num);
 
   size_t inTensorId = 1;
 
@@ -788,15 +798,8 @@ int64_t NpuDeepseekV32DecoderLayerImpl::init_node(
   node.variantPack.inTensors.reserve(node.inTensors.size());
   node.variantPack.inTensors.resize(node.inTensors.size());
 
-  // eplb used in decode stage, while multi stream parallel used in prefill
-  // stage
-  if (eplb_enabled) {
-    node.variantPack.outTensors.reserve(2);
-    node.variantPack.outTensors.resize(2);  // TODO
-  } else {
-    node.variantPack.outTensors.reserve(1);
-    node.variantPack.outTensors.resize(1);
-  }
+  node.variantPack.outTensors.reserve(out_tensor_num);
+  node.variantPack.outTensors.resize(out_tensor_num);
   return atb::NO_ERROR;
 }
 
@@ -807,6 +810,33 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
     const ModelInputParams& input_params,
+    aclrtEvent* event,
+    std::atomic<bool>* event_flag,
+    int node_id) {
+  CHECK(!is_topk_sharing_enabled())
+      << "DSA top-k sharing layer requires forward_with_topk.";
+  return forward_with_topk(x,
+                           cos_pos,
+                           sin_pos,
+                           attn_mask,
+                           kv_cache,
+                           input_params,
+                           torch::Tensor(),
+                           nullptr,
+                           event,
+                           event_flag,
+                           node_id);
+}
+
+torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward_with_topk(
+    torch::Tensor& x,
+    torch::Tensor& cos_pos,
+    torch::Tensor& sin_pos,
+    torch::Tensor& attn_mask,
+    KVCache& kv_cache,
+    const ModelInputParams& input_params,
+    const torch::Tensor& shared_topk_indices,
+    torch::Tensor* output_topk_indices,
     aclrtEvent* event,
     std::atomic<bool>* event_flag,
     int node_id) {
@@ -821,7 +851,9 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
                             attn_mask,
                             kv_cache,
                             input_params_new,
-                            false);
+                            false,
+                            shared_topk_indices,
+                            output_topk_indices);
     st = execute_node(decode_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "execute prefill layer fail, error code: " << st;
@@ -833,7 +865,9 @@ torch::Tensor NpuDeepseekV32DecoderLayerImpl::forward(
                             attn_mask,
                             kv_cache,
                             input_params_new,
-                            true);
+                            true,
+                            shared_topk_indices,
+                            output_topk_indices);
     st = execute_node(prefill_node_, node_id, event, event_flag);
     LOG_IF(FATAL, st != 0) << model_name_
                            << "execute prefill layer fail, error code: " << st;
@@ -849,7 +883,9 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
     torch::Tensor& attn_mask,
     KVCache& kv_cache,
     ModelInputParams& input_params,
-    bool is_prefill) {
+    bool is_prefill,
+    const torch::Tensor& shared_topk_indices,
+    torch::Tensor* output_topk_indices) {
   internal_tensor_ = atb_speed::Utils::AtTensor2Tensor(x);
   // final_hidden_states_ = torch::zeros_like(x);
   int32_t input_idx = 0;
@@ -1023,6 +1059,18 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
         atb_speed::Utils::AtTensor2Tensor(int_tensor_placeholder_);
   }
 
+  if (skip_topk_ || output_topk_) {
+    // TODO: support DSA top-k sharing for CP prefill.
+    CHECK(!(cp_size_ > 1 && is_prefill))
+        << "DSA top-k sharing does not support CP prefill yet.";
+    if (skip_topk_) {
+      CHECK(shared_topk_indices.defined())
+          << "DSA top-k sharing requires previous top-k indices.";
+      node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 32) =
+          atb_speed::Utils::AtTensor2Tensor(shared_topk_indices);
+    }
+  }
+
   if (cp_size_ > 1 && is_prefill) {
     node.variantPack.inTensors.at(WEIGHT_COUNT_PER_LAYER + 32) =
         atb_speed::Utils::AtTensor2Tensor(cp_inputs.cp_o_recover_idx);
@@ -1055,6 +1103,12 @@ void NpuDeepseekV32DecoderLayerImpl::build_node_variant_pack(
   }
 
   node.variantPack.outTensors.at(0) = internal_tensor_;
+  if (output_topk_) {
+    CHECK(output_topk_indices != nullptr && output_topk_indices->defined())
+        << "DSA top-k sharing output tensor is not initialized.";
+    node.variantPack.outTensors.at(node.variantPack.outTensors.size() - 1) =
+        atb_speed::Utils::AtTensor2Tensor(*output_topk_indices);
+  }
 }
 
 }  // namespace layer

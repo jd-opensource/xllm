@@ -98,6 +98,7 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
           num_speculative_tokens_ + 1, dtype_, device_);
     }
 
+    torch::Tensor prev_topk_indices;
     RollingLayerGuard rolling_guard(rolling_mgr_);
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
@@ -112,16 +113,56 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
       }
 
       auto& layer = layers_[i];
-      const int32_t layer_index = i;
+      const int32_t layer_index = static_cast<int32_t>(i);
+      const bool topk_sharing_enabled = layer->is_topk_sharing_enabled();
+      const bool skip_topk = layer->skip_topk();
+      const bool output_topk = layer->output_topk();
+      torch::Tensor current_topk_indices;
+      torch::Tensor shared_topk_indices;
+      torch::Tensor* output_topk_indices = nullptr;
+      if (topk_sharing_enabled) {
+        if (skip_topk) {
+          CHECK(prev_topk_indices.defined())
+              << "DSA top-k sharing requires previous top-k indices at layer "
+              << layer_index;
+          shared_topk_indices = prev_topk_indices;
+        }
+        if (output_topk) {
+          torch::Tensor index_cache = kv_caches[i].get_index_cache();
+          CHECK(index_cache.defined())
+              << "DSA top-k sharing requires index cache at layer "
+              << layer_index;
+          current_topk_indices = torch::empty(
+              {h.size(0), index_cache.size(2), model_args.index_topk()},
+              torch::TensorOptions().device(device_).dtype(torch::kInt32));
+          output_topk_indices = &current_topk_indices;
+        }
+      }
       rolling_guard.before_layer(layer_index);
-      layer(h,
-            cos_pos,
-            sin_pos,
-            attn_mask,
-            kv_caches[i],
-            input_params,
-            event,
-            event_flag);
+      if (topk_sharing_enabled) {
+        layer->forward_with_topk(h,
+                                 cos_pos,
+                                 sin_pos,
+                                 attn_mask,
+                                 kv_caches[i],
+                                 input_params,
+                                 shared_topk_indices,
+                                 output_topk_indices,
+                                 event,
+                                 event_flag);
+      } else {
+        layer(h,
+              cos_pos,
+              sin_pos,
+              attn_mask,
+              kv_caches[i],
+              input_params,
+              event,
+              event_flag);
+      }
+      if (output_topk) {
+        prev_topk_indices = current_topk_indices;
+      }
       rolling_guard.after_layer(layer_index);
     }
     return ModelOutput(norm_(h, 0));
@@ -313,6 +354,9 @@ REGISTER_MODEL_ARGS(glm_moe_dsa, [&] {
   LOAD_ARG_OR(index_head_dim, "index_head_dim", 128);
   LOAD_ARG_OR(index_n_heads, "index_n_heads", 0);
   LOAD_ARG_OR(index_topk, "index_topk", 2048);
+  LOAD_ARG_OR(index_topk_freq, "index_topk_freq", 1);
+  LOAD_ARG_OR(index_topk_pattern, "index_topk_pattern", "");
+  LOAD_ARG_OR(index_skip_topk_offset, "index_skip_topk_offset", 0);
 
   LOAD_ARG_OR(use_qk_norm, "use_qk_norm", true);
   LOAD_ARG_OR(rope_theta, "rope_theta", 1000000.0f);
