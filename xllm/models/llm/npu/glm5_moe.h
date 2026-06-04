@@ -37,6 +37,7 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
     device_ = options.device();
     dtype_ = options.dtype().toScalarType();
     num_speculative_tokens_ = model_args.num_speculative_tokens();
+    index_topk_ = model_args.index_topk();
 
     npu_embed_tokens_ =
         register_module("npu_embed_tokens", layer::NpuWordEmbedding(context));
@@ -133,7 +134,10 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
               << "DSA top-k sharing requires index cache at layer "
               << layer_index;
           current_topk_indices = torch::empty(
-              {h.size(0), index_cache.size(2), model_args.index_topk()},
+              std::vector<int64_t>{
+                  h.size(0),
+                  index_cache.size(2),
+                  static_cast<int64_t>(index_topk_)},
               torch::TensorOptions().device(device_).dtype(torch::kInt32));
           output_topk_indices = &current_topk_indices;
         }
@@ -277,6 +281,7 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
   nlohmann::json mapping_data_;
   int32_t num_experts_per_tok_;
   int32_t num_speculative_tokens_ = 0;
+  int32_t index_topk_ = 0;
   at::Device device_;
   torch::Dtype dtype_;
   layer::NpuWordEmbedding npu_embed_tokens_{nullptr};
