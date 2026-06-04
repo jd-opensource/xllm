@@ -313,32 +313,28 @@ class ExtBuild(build_ext):
         cmake_dir = get_cmake_dir()
         subprocess.check_call(["cmake", self.base_dir] + cmake_args, cwd=cmake_dir, env=env)
 
-        base_build_args = list(build_args)
-        build_args = base_build_args + ["--target", ext.name, "xllm"]
+        base_build_args = build_args
+        # add build target to speed up the build process
+        build_args += ["--target", ext.name, "xllm"]
         subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
+
+        os.makedirs(os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"), exist_ok=True)
+        shutil.copy(
+            os.path.join(extdir, product),
+            os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"),
+        )
 
         _stage_triton_npu_runtime_binaries(self.base_dir, extdir, self.device)
 
         if BUILD_EXPORT:
             # build export module
             build_args = base_build_args + ["--target export_module"]
-        product_path = os.path.join(extdir, product)
-        if os.path.exists(product_path):
-            os.makedirs(os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"), exist_ok=True)
-            shutil.copy(
-                product_path,
-                os.path.join(os.path.dirname(cmake_dir), "xllm/core/server/"),
-            )
-        else:
-            logger.warning(f"Skip copying product because it was not built: {product_path}")
-
-        if BUILD_EXPORT:
-            build_args = base_build_args + ["--target", "export_module"]
-            subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir,)
+            subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
 
         if BUILD_TEST_FILE:
-            build_args = base_build_args + ["--target", "all_tests"]
-            subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir,)
+            # build tests target
+            build_args = base_build_args + ["--target all_tests"]
+            subprocess.check_call(["cmake", "--build", ".", "--verbose"] + build_args, cwd=cmake_dir)
 
 class ExtBuildSingleTest(ExtBuild):
     """Inherit ExtBuild, used to build and run a single test"""
