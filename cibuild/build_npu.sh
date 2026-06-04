@@ -6,7 +6,7 @@ function error() {
   exit 1
 }
 
-IMAGE="quay.io/jd_xllm/xllm-ai:xllm-dev-a2-x86-20260429"
+IMAGE="quay.io/jd_xllm/xllm-ai:xllm-dev-a2-x86-cann9-20260605"
 
 XLLM_OPS_CACHE="/export/home/npu_xllm_ops_build_cache"
 mkdir -p "${XLLM_OPS_CACHE}"

@@ -98,7 +98,7 @@ target_link_libraries(xllm PRIVATE glog::glog brpc leveldb::leveldb protobuf::li
 add_dependencies(xllm brpc-static)
 
 if(USE_NPU)
-  set(COMMON_LIBS torch_npu torch_python Python::Python ascendcl atb_customize hccl c_sec nnopbase ms_tools_ext)
+  set(COMMON_LIBS torch_npu torch_python Python::Python ascendcl atb_customize unified_dlog hccl c_sec nnopbase ms_tools_ext)
 elseif(USE_MLU)
   set(COMMON_LIBS Python::Python)
 endif()

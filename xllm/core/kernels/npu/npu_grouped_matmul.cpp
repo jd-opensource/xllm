@@ -165,7 +165,11 @@ std::vector<torch::Tensor> apply_npu_grouped_matmul(
       resolved_group_list_type,
       resolved_act_type,
       resolved_tuning_config,
-      resolved_output_dtype);
+      ::std::optional<int64_t>{static_cast<int64_t>(resolved_output_dtype)},
+      c10::nullopt,
+      c10::nullopt,
+      c10::nullopt,
+      c10::nullopt);
 }
 
 }  // namespace xllm::kernel::npu

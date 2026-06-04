@@ -12,9 +12,9 @@ from .common.toolchain import find_installed_tilelang_root, prepare_tilelang_imp
 PREPARE_ASCEND_COMMAND = "python xllm/compiler/tilelang_launcher.py prepare-ascend --target-platform <a2|a3|a5> --arch <arm|x86>"
 
 TILELANG_ASCEND_WHEELS: dict[tuple[str, str], str] = {
-    ("a2", "arm"): "https://gitcode.com/xLLM-AI/tilelang-ascend/releases/download/v0.1.0-pre-release/tilelang-master.56d3f9b8.a2.cann850-cp311-cp311-linux_aarch64.whl",
-    ("a2", "x86"): "https://gitcode.com/xLLM-AI/tilelang-ascend/releases/download/v0.1.0-pre-release/tilelang-master.56d3f9b8.a2.cann850-cp311-cp311-linux_x86_64.whl",
-    ("a3", "arm"): "https://gitcode.com/xLLM-AI/tilelang-ascend/releases/download/v0.1.0-pre-release/tilelang-master.56d3f9b8.a3.cann850-cp311-cp311-linux_aarch64.whl",
+    ("a2", "arm"): "https://gitcode.com/xLLM-AI/tilelang-ascend/releases/download/v0.1.1.010-release/tilelang-0.1.0%2Bascendc_pto.56d3f9b8.a2.cann850-cp311-cp311-linux_aarch64.whl",
+    ("a2", "x86"): "https://gitcode.com/xLLM-AI/tilelang-ascend/releases/download/v0.1.1.010-release/tilelang-0.1.0%2Bascendc_pto.56d3f9b8.a2.cann850-cp311-cp311-linux_x86_64.whl",
+    ("a3", "arm"): "https://gitcode.com/xLLM-AI/tilelang-ascend/releases/download/v0.1.1.010-release/tilelang-0.1.0%2Bascendc_pto.56d3f9b8.a3.cann850-cp311-cp311-linux_aarch64.whl",
 }
 
 
