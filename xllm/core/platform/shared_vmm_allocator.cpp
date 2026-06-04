@@ -19,10 +19,10 @@ limitations under the License.
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdlib>
 #include <type_traits>
 
 #include "common/global_flags.h"
+#include "core/util/env_var.h"
 #include "device.h"
 
 namespace xllm {
@@ -112,16 +112,14 @@ void SharedVMMAllocator::init(int32_t device_id, size_t reserve_size) {
     int64_t total_mem = device.total_memory();
 
 #if defined(USE_DCU)
-    size_t reserve_mb = 64;
-
-    if (const char* env = std::getenv("XLLM_DCU_VMM_RESERVE_MB")) {
-      const unsigned long long parsed = std::strtoull(env, nullptr, 10);
-      if (parsed > 0) {
-        reserve_mb = parsed;
-      }
+    constexpr int64_t kDefaultDcuVmmReserveMb = 64;
+    int64_t reserve_mb =
+        util::get_int_env("XLLM_DCU_VMM_RESERVE_MB", kDefaultDcuVmmReserveMb);
+    if (reserve_mb <= 0) {
+      reserve_mb = kDefaultDcuVmmReserveMb;
     }
 
-    reserve_size = reserve_mb * 1024ULL * 1024ULL;
+    reserve_size = static_cast<size_t>(reserve_mb) * 1024ULL * 1024ULL;
     reserve_size =
         std::min<size_t>(static_cast<size_t>(total_mem), reserve_size);
 #else

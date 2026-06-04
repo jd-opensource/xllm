@@ -10,7 +10,6 @@ cc_library(
     closure_guard.h
     concurrentqueue.h
     cpu_affinity.h
-    device_name_utils.h
     double_buffer.h
     env_var.h
     hash_util.h
@@ -37,7 +36,6 @@ cc_library(
     shared_memory_manager.h
   SRCS
     cpu_affinity.cpp
-    device_name_utils.cpp
     env_var.cpp
     hash_util.cpp
     http_downloader.cpp
@@ -69,7 +67,6 @@ cc_library(
     absl::synchronization
     ${Python_LIBRARIES}
     proto::xllm_proto
-    :platform
     SMHasherSupport
     xxHash
     spdlog::spdlog

@@ -29,6 +29,7 @@ limitations under the License.
 
 #include "api_service/call.h"
 #include "common/metrics.h"
+#include "core/platform/device_name_utils.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
 #include "models/model_registry.h"
@@ -36,7 +37,6 @@ limitations under the License.
 #include "scheduler/scheduler_factory.h"
 #include "server/xllm_server_registry.h"
 #include "speculative_engine.h"
-#include "util/device_name_utils.h"
 #include "util/net.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"

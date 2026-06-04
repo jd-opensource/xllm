@@ -10,6 +10,7 @@ cc_library(
   HDRS
     stream.h
     device.h
+    device_name_utils.h
     vmm_api.h
     shared_vmm_allocator.h
     vmm_torch_allocator.h
@@ -22,6 +23,7 @@ cc_library(
   SRCS
     stream.cpp
     device.cpp
+    device_name_utils.cpp
     vmm_api.cpp
     shared_vmm_allocator.cpp
     $<$<BOOL:${USE_MLU}>:mlu/mlu_layer_synchronizer.cpp>
@@ -31,8 +33,10 @@ cc_library(
     $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_DCU}>>:numa_utils.cpp>
   DEPS
     :config
+    absl::strings
     torch
     glog::glog
+    :util
     $<$<BOOL:${USE_NPU}>:torch_npu>
     $<$<BOOL:${USE_NPU}>:ascendcl>
     $<$<BOOL:${USE_MLU}>:torch_mlu>
@@ -45,5 +49,4 @@ cc_library(
     $<$<BOOL:${USE_MUSA}>:musart>
     $<$<BOOL:${USE_NPU}>:platform_npu>
     $<$<BOOL:${USE_DCU}>:hip::host>
-
 )

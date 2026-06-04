@@ -47,5 +47,6 @@ cc_library(
     gflags::gflags
     glog::glog
     nlohmann_json::nlohmann_json
+    :platform
     :util
 )

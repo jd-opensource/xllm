@@ -10,6 +10,7 @@ cc_test(
     threadpool_test.cpp
   DEPS
     util
+    :platform
     absl::synchronization
     absl::time
     GTest::gtest_main

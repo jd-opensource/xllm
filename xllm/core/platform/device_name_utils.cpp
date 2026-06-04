@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "device_name_utils.h"
+#include "core/platform/device_name_utils.h"
 
 #include <absl/strings/numbers.h>
 #include <absl/strings/str_split.h>
@@ -25,7 +25,7 @@ limitations under the License.
 #include <unordered_set>
 #include <vector>
 
-#include "platform/device.h"
+#include "core/platform/device.h"
 
 namespace xllm {
 

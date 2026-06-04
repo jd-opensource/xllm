@@ -912,7 +912,7 @@ __global__ void radix_kernel(T const* in,
     //                                           counter, select_min, pass);
     //     }
     // }
-    if (pass == num_passes - 1) {
+    if (pass == kNumPasses - 1) {
       const volatile IdxT num_of_kth_needed = counter->k;
       for (IdxT i = threadIdx.x; i < num_of_kth_needed; i += blockDim.x) {
 #if defined(USE_DCU)
@@ -1228,7 +1228,7 @@ __global__ void radix_topk_one_block_kernel(T const* in,
     }
     __syncthreads();
 
-    if ((pass == num_passes - 1)) {
+    if ((pass == kNumPasses - 1)) {
       if constexpr (prioritize_smaller_indice) {
         const IdxT num_of_kth_needed = counter.k;
         for (IdxT i = threadIdx.x; i < num_of_kth_needed; i += blockDim.x) {

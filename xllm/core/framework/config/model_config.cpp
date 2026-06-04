@@ -19,7 +19,7 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/framework/config/config_utils.h"
-#include "core/util/device_name_utils.h"
+#include "core/platform/device_name_utils.h"
 
 DEFINE_string(model_id, "", "hf model name.");
 

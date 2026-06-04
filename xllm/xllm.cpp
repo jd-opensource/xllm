@@ -55,7 +55,7 @@ limitations under the License.
 #include "core/framework/xtensor/global_xtensor.h"
 #include "core/framework/xtensor/options.h"
 #include "core/framework/xtensor/xtensor_allocator.h"
-#include "core/util/device_name_utils.h"
+#include "core/platform/device_name_utils.h"
 #include "core/util/net.h"
 #include "core/util/utils.h"
 #include "function_call/function_call_parser.h"

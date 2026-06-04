@@ -28,11 +28,11 @@ limitations under the License.
 
 #include "api_service/call.h"
 #include "common/metrics.h"
+#include "core/platform/device_name_utils.h"
 #include "dit_engine.h"
 #include "framework/request/dit_request.h"
 #include "models/model_registry.h"
 #include "scheduler/scheduler_factory.h"
-#include "util/device_name_utils.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
 

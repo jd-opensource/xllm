@@ -41,6 +41,7 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "framework/parallel_state/npu_rank_table_env.h"
 #endif
+#include "core/platform/device_name_utils.h"
 #include "framework/model/model_args.h"
 #include "framework/request/request.h"
 #include "llm_engine.h"
@@ -49,7 +50,6 @@ limitations under the License.
 #include "rec_engine.h"
 #include "rec_master.h"
 #include "speculative_engine.h"
-#include "util/device_name_utils.h"
 #include "util/model_config_utils.h"
 #include "util/scope_guard.h"
 #include "util/timer.h"
