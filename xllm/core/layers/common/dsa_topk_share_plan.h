@@ -15,12 +15,12 @@ limitations under the License.
 
 #pragma once
 
+#include <glog/logging.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <string>
-
-#include <glog/logging.h>
 
 #include "core/framework/model/model_args.h"
 
@@ -41,9 +41,8 @@ inline bool should_skip_topk_from_pattern(const std::string& pattern,
   CHECK_GE(layer_id, 0) << "DSA top-k sharing layer id must be non-negative.";
   CHECK_LT(layer_id, static_cast<int32_t>(pattern.size()))
       << "DSA top-k sharing pattern is shorter than num_hidden_layers.";
-  const char symbol =
-      static_cast<char>(std::toupper(static_cast<unsigned char>(
-          pattern[static_cast<size_t>(layer_id)])));
+  const char symbol = static_cast<char>(std::toupper(
+      static_cast<unsigned char>(pattern[static_cast<size_t>(layer_id)])));
   CHECK(symbol == 'F' || symbol == 'S')
       << "DSA top-k sharing pattern only supports F/S, got " << symbol;
   return symbol == 'S';
@@ -71,9 +70,8 @@ inline bool should_next_layer_skip_topk_from_freq(int32_t freq,
   return layer_id % freq != 0;
 }
 
-inline DsaTopkShareDecision get_dsa_topk_share_decision(
-    const ModelArgs& args,
-    int32_t layer_id) {
+inline DsaTopkShareDecision get_dsa_topk_share_decision(const ModelArgs& args,
+                                                        int32_t layer_id) {
   DsaTopkShareDecision decision;
   if (!has_dsa_indexer(args)) {
     return decision;
