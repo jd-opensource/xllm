@@ -96,6 +96,26 @@ void EmbeddingCache::write_prefill_target_context(
   }
 }
 
+void EmbeddingCache::write_mtp_bootstrap_context(
+    int32_t embedding_id,
+    const std::string& request_id,
+    int32_t token_id,
+    const torch::Tensor& embedding) {
+  CHECK(embedding.defined()) << "MTP bootstrap embedding is undefined";
+  CHECK_GE(token_id, 0) << "MTP bootstrap token should be valid";
+
+  DecodeState state;
+  state.valid = true;
+  state.request_id = request_id;
+  state.all_draft_accepted = false;
+  state.token_id = token_id;
+  state.position_offset = 0;
+  state.embedding = embedding.detach().clone();
+
+  DecodeState& tail = mutable_tail(embedding_id);
+  tail = std::move(state);
+}
+
 void EmbeddingCache::write_target_context(
     const std::vector<int32_t>& ids,
     const std::vector<std::string>& request_ids,

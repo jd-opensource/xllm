@@ -74,6 +74,12 @@ class EmbeddingCache final {
       const torch::Tensor& embeddings,
       const torch::Tensor& selected_token_idxes = torch::Tensor());
 
+  // Writes PD handoff bootstrap target context for the first MTP decode step.
+  void write_mtp_bootstrap_context(int32_t embedding_id,
+                                   const std::string& request_id,
+                                   int32_t token_id,
+                                   const torch::Tensor& embedding);
+
   // Writes target validate output after rejection sampling. accepted_tokens is
   // a contiguous accepted prefix padded by -1; accepted_embeddings keeps the
   // corresponding target hidden states for the next draft extend input.
