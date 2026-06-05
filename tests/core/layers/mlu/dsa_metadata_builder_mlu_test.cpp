@@ -213,6 +213,57 @@ TEST(DSAMetadataBuilderMluTest, ExpandsBlockTablesAndSlotMappings) {
             std::vector<int64_t>({123, 124, 167}));
 }
 
+TEST(DSAMetadataBuilderMluTest, SwaSlotsUseAbsoluteBlockColumns) {
+  ModelInputParams params =
+      make_params(BatchForwardType::CHUNKED_PREFILL, {0, 1}, {0, 24});
+  params.multi_block_tables = {
+      torch::tensor({10, 11}, torch::kInt32).view({1, 2})};
+  std::vector<DSAGroupInfo> group_infos = {
+      {DSACacheType::SLIDING_WINDOW, 1, 4}};
+  std::vector<std::vector<DSACacheInfo>> caches_info = {
+      {{0, DSACacheType::SLIDING_WINDOW, 1, 4}}};
+
+  AttentionMetadata metadata =
+      DSAMetadataBuilderMlu::build(params,
+                                   torch::tensor({23}, torch::kInt32),
+                                   caches_info,
+                                   group_infos,
+                                   /*window_size=*/4);
+  const DSAMetadata& dsa = *metadata.dsa_metadata;
+
+  ASSERT_EQ(dsa.block_tables.size(), 1);
+  ASSERT_EQ(dsa.block_tables[0].size(), 1);
+  EXPECT_EQ(tensor_vec(dsa.block_tables[0][0].flatten()),
+            std::vector<int64_t>({10, 11, 0, 0, 0, 0}));
+  EXPECT_EQ(tensor_vec(dsa.slot_mappings[0][0]), std::vector<int64_t>({-1}));
+}
+
+TEST(DSAMetadataBuilderMluTest, SwaKeepsSparseAbsoluteReadTable) {
+  ModelInputParams params =
+      make_params(BatchForwardType::CHUNKED_PREFILL, {0, 2, 5}, {0, 24, 43});
+  params.multi_block_tables = {torch::tensor(
+      {{-1, -1, -1, -1, -1, 50}, {-1, -1, -1, -1, 60, -1}}, torch::kInt32)};
+  std::vector<DSAGroupInfo> group_infos = {
+      {DSACacheType::SLIDING_WINDOW, 1, 4}};
+  std::vector<std::vector<DSACacheInfo>> caches_info = {
+      {{0, DSACacheType::SLIDING_WINDOW, 1, 4}}};
+
+  AttentionMetadata metadata = DSAMetadataBuilderMlu::build(
+      params,
+      torch::tensor({22, 23, 16, 17, 18}, torch::kInt32),
+      caches_info,
+      group_infos,
+      /*window_size=*/4);
+  const DSAMetadata& dsa = *metadata.dsa_metadata;
+
+  ASSERT_EQ(dsa.block_tables.size(), 1);
+  ASSERT_EQ(dsa.block_tables[0].size(), 1);
+  EXPECT_EQ(tensor_vec(dsa.block_tables[0][0].flatten()),
+            std::vector<int64_t>({0, 0, 0, 0, 0, 50, 0, 0, 0, 0, 60, 0}));
+  EXPECT_EQ(tensor_vec(dsa.slot_mappings[0][0]),
+            std::vector<int64_t>({202, 203, 240, 241, 242}));
+}
+
 TEST(DSAMetadataBuilderMluTest, BuildsC128AttentionMetadata) {
   ModelInputParams params =
       make_params(BatchForwardType::DECODE, {0, 1}, {0, 128});

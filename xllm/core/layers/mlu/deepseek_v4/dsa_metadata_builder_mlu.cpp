@@ -21,7 +21,6 @@ limitations under the License.
 #include <cmath>
 #include <cstdint>
 #include <memory>
-#include <unordered_set>
 #include <vector>
 
 #include "framework/model/model_input_params.h"
@@ -35,35 +34,6 @@ namespace xllm::layer {
 namespace {
 
 constexpr int64_t kIndexC4Ratio = 4;
-
-void mask_stale_swa_slots(torch::Tensor& slots,
-                          const std::vector<int32_t>& ctx_lens,
-                          const std::vector<int32_t>& q_lens,
-                          int32_t batch_size) {
-  auto slots_acc = slots.accessor<int32_t, 1>();
-  int64_t start_idx = 0;
-  for (int32_t seq = 0; seq < batch_size; ++seq) {
-    const int64_t ctx_len = static_cast<int64_t>(ctx_lens[seq]);
-    const int64_t q_len =
-        std::clamp<int64_t>(static_cast<int64_t>(q_lens[seq]), 0, ctx_len);
-    std::unordered_set<int32_t> seen_slots;
-    seen_slots.reserve(static_cast<size_t>(q_len));
-
-    for (int64_t i = q_len; i > 0; --i) {
-      const int64_t slot_idx = start_idx + i - 1;
-      const int32_t slot = slots_acc[slot_idx];
-      if (slot < 0) {
-        continue;
-      }
-      auto inserted = seen_slots.emplace(slot);
-      if (!inserted.second) {
-        slots_acc[slot_idx] = -1;
-      }
-    }
-
-    start_idx += q_len;
-  }
-}
 
 std::vector<int32_t> tensor_to_vec(const torch::Tensor& tensor,
                                    const char* name) {
@@ -79,6 +49,13 @@ std::vector<int32_t> tensor_to_vec(const torch::Tensor& tensor,
     values.emplace_back(tensor_acc[idx]);
   }
   return values;
+}
+
+torch::Tensor sanitize_block_table(const torch::Tensor& table) {
+  if (!table.defined()) {
+    return table;
+  }
+  return torch::where(table.lt(0), torch::zeros_like(table), table);
 }
 
 void sync_dsa_seq_metadata(AttentionMetadata& attn_metadata,
@@ -239,6 +216,7 @@ void DSAMetadataBuilderMlu::build_dsa_fields(
                     total_tokens,
                     proc_bt[m],
                     proc_slots[m]);
+      proc_bt[m] = sanitize_block_table(proc_bt[m]);
     }
 
     build_c128_meta(dsa, proc_bt, group_infos, batch_size);
@@ -482,6 +460,9 @@ void DSAMetadataBuilderMlu::process_swa_group(
                           << block_size;
   CHECK_EQ(raw_bt.dim(), 2)
       << "process_swa_group requires raw_bt dim == 2, got " << raw_bt.dim();
+  CHECK_GE(raw_bt.size(0), batch_size)
+      << "process_swa_group requires raw_bt rows >= batch_size, got "
+      << raw_bt.size(0) << " vs " << batch_size;
 
   int64_t query_total_tokens = 0;
   for (int32_t seq = 0; seq < batch_size; ++seq) {
@@ -496,14 +477,17 @@ void DSAMetadataBuilderMlu::process_swa_group(
       torch::full({query_total_tokens}, -1, raw_bt.options());
   auto out_slots_acc = out_slots_tensor.accessor<int32_t, 1>();
   auto raw_bt_acc = raw_bt.accessor<int32_t, 2>();
-  const int64_t max_blocks = raw_bt.size(1);
+  const int64_t current_cols = raw_bt.size(1);
   const int64_t block_size_i64 = static_cast<int64_t>(block_size);
 
   auto slot_for_position = [&](int32_t seq, int64_t pos) -> int32_t {
-    if (max_blocks <= 0) {
+    if (current_cols <= 0) {
       return -1;
     }
-    const int64_t block_idx = (pos / block_size_i64) % max_blocks;
+    const int64_t block_idx = pos / block_size_i64;
+    if (block_idx >= current_cols) {
+      return -1;
+    }
     const int32_t block_id = raw_bt_acc[seq][block_idx];
     if (block_id < 0) {
       return -1;
@@ -524,31 +508,29 @@ void DSAMetadataBuilderMlu::process_swa_group(
     }
   }
 
-  mask_stale_swa_slots(out_slots_tensor, ctx_lens, q_lens, batch_size);
   out_slots = out_slots_tensor;
 
-  int32_t current_cols = raw_bt.size(1);
   int32_t max_dst_len = 0;
-  std::vector<int32_t> dst_lens(batch_size);
   for (int32_t s = 0; s < batch_size; ++s) {
-    dst_lens[s] = static_cast<int32_t>(
+    const int32_t dst_len = static_cast<int32_t>(
         std::ceil(static_cast<double>(ctx_lens[s]) / block_size));
-    max_dst_len = std::max(max_dst_len, dst_lens[s]);
+    max_dst_len = std::max(max_dst_len, dst_len);
   }
-  max_dst_len = std::max(max_dst_len, current_cols);
+  max_dst_len = std::max(max_dst_len, static_cast<int32_t>(current_cols));
 
-  auto new_bt = torch::full({batch_size, max_dst_len}, -1, raw_bt.options());
+  if (current_cols >= max_dst_len && raw_bt.size(0) == batch_size) {
+    out_bt = raw_bt;
+    return;
+  }
+
+  torch::Tensor new_bt =
+      torch::full({batch_size, max_dst_len}, -1, raw_bt.options());
   auto new_acc = new_bt.accessor<int32_t, 2>();
   auto old_acc = raw_bt.accessor<int32_t, 2>();
 
   for (int32_t s = 0; s < batch_size; ++s) {
-    const int32_t retained_cols = std::min(current_cols, dst_lens[s]);
-    const int32_t start_col = dst_lens[s] - retained_cols;
-    for (int32_t j = 0; j < retained_cols; ++j) {
-      const int32_t logical_col = start_col + j;
-      // Keep the read-side block table aligned with slot_for_position().
-      const int32_t physical_col = logical_col % current_cols;
-      new_acc[s][logical_col] = old_acc[s][physical_col];
+    for (int64_t col = 0; col < current_cols; ++col) {
+      new_acc[s][col] = old_acc[s][col];
     }
   }
   out_bt = new_bt;

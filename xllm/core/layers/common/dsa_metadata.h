@@ -68,6 +68,8 @@ struct DSAMetadata {
   // cos_table / sin_table: base RoPE cos/sin tables
   torch::Tensor cos_table;
   torch::Tensor sin_table;
+  // inverse_sin_table: precomputed -sin_table for inverse RoPE.
+  torch::Tensor inverse_sin_table;
 
   // ===== DSA-specific fields =====
   // layer_id: current layer (Python per-layer, C++ shared across layers)
@@ -178,6 +180,8 @@ struct DSAMetadata {
   // MLU-only RoPE cos/sin tables (shared across all layers, set per forward).
   torch::Tensor compressed_cos_table;
   torch::Tensor compressed_sin_table;
+  // compressed_inverse_sin_table: precomputed -compressed_sin_table.
+  torch::Tensor compressed_inverse_sin_table;
 
   // Cache spec per layer
   // caches_info[layer_id][cache_idx] = {group_id, type, ratio, block_size}
