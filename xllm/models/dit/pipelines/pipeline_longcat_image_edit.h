@@ -401,11 +401,16 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
     }
     std::vector<torch::Tensor> pixel_values_list;
     std::vector<torch::Tensor> image_grid_thw_list;
-    CHECK(vl_image_processor_.process_image(
-        {img}, pixel_values_list, image_grid_thw_list))
+
+    std::vector<MMDataItem> mm_items;
+
+    CHECK(vl_image_processor_.process({img}, mm_items))
         << "VL image processor failed";
-    torch::Tensor pixel_values = pixel_values_list[0];
-    torch::Tensor image_grid_thw = image_grid_thw_list[0];
+
+    torch::Tensor pixel_values =
+        mm_items[0].get<torch::Tensor>("pixel_values").value();
+    torch::Tensor image_grid_thw =
+        mm_items[0].get<torch::Tensor>("image_grid_thw").value();
 
     int64_t num_image_tokens =
         image_grid_thw.prod().item<int64_t>() / merge_length;
@@ -528,11 +533,13 @@ class LongCatImageEditPipelineImpl : public torch::nn::Module {
 
     torch::Tensor tokens_flat = input_ids.view({-1});
     torch::Tensor positions_2d = build_qwen2_5_vl_mrope_positions(
-        input_ids, attention_mask, *image_grid_thw);
+        input_ids, attention_mask, image_grid_thw);
     torch::Tensor positions_3d =
         positions_2d.view({3, batch_size, total_seq_len}).to(torch::kLong);
 
     std::vector<KVCache> kv_caches(text_encoder_args.n_layers());
+    MMData mm_data;
+    mm_data.set(MMType::IMAGE, std::move(mm_items));
     std::vector<MMData> mm_data_list(static_cast<size_t>(batch_size), mm_data);
     MMBatchData mm_batch(std::move(mm_data_list));
     ModelInputParams input_params = build_longcat_input_params(
