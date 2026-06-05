@@ -374,6 +374,15 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   }
 
   MULTI_MODEL_STEP_UNLOCK();
+  bool should_sync_default_stream = true;
+#if defined(USE_NPU)
+  should_sync_default_stream =
+      !(FLAGS_enable_graph && enable_schedule_overlap() &&
+        options_.backend() == "llm" &&
+        input.input_params.meta.batch_forward_type.is_decode() &&
+        options_.kv_cache_transfer_mode() != "PUSH" &&
+        !options_.enable_speculative_decode());
+#endif
   if (sync_policy == ForwardSyncPolicy::NO_SYNC) {
     output.retained_input = std::make_shared<ForwardInput>(input);
     if (enable_schedule_overlap()) {
@@ -381,7 +390,10 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
     }
     return output;
   }
-  auto ret = device_.synchronize_default_stream();
+  if (should_sync_default_stream) {
+    auto ret = device_.synchronize_default_stream();
+    CHECK_EQ(ret, 0) << "synchronize_default_stream failed";
+  }
 
   if (options_.kv_cache_transfer_mode() == "PUSH" &&
       !input.transfer_kv_infos.empty()) {
@@ -397,8 +409,10 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   }
 
   COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
-  DeviceMonitor::get_instance().update_active_activation_memory(
-      device_.index());
+  if (should_sync_default_stream) {
+    DeviceMonitor::get_instance().update_active_activation_memory(
+        device_.index());
+  }
 
   return output;
 }
