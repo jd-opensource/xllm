@@ -85,16 +85,23 @@ def _stage_triton_npu_runtime_binaries(base_dir: str, extdir: str, device: str) 
     if device != "npu":
         return
 
-    source_dir = os.path.join(
-        base_dir,
-        "third_party",
-        "torch_npu_ops",
-        "triton_npu",
-        "binary",
-    )
+    env_path = os.environ.get("TRITON_BINARY_PATH")
+    if env_path and os.path.isdir(env_path):
+        source_dir = env_path
+    else:
+        source_dir = os.path.join(
+            get_cmake_dir(),
+            "third_party",
+            "torch_npu_ops",
+            "triton_npu",
+            "binary",
+        )
+
     if not os.path.isdir(source_dir):
         raise RuntimeError(
-            f"Triton NPU binary directory does not exist: {source_dir}"
+            f"Triton NPU binary directory does not exist: {source_dir}\n"
+            "Hint: Ensure the CMake build completed successfully, or set "
+            "TRITON_BINARY_PATH to a directory containing pre-built binaries."
         )
 
     dest_dir = os.path.join(extdir, "triton_npu", "binary")
