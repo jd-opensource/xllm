@@ -56,6 +56,7 @@ cc_library(
     shm_channel.cpp
   DEPS
     :api_service
+    :c_api_infer_timing
     :runtime
     :util
     glog::glog

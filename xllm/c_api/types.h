@@ -491,6 +491,38 @@ typedef struct XLLM_CAPI_EXPORT XLLM_RecOutputs {
 #define XLLM_ERROR_INFO_MAX_LEN 512
 
 /**
+ * @brief Per-request inference timing breakdown (microseconds).
+ *
+ * Populated by the embedded REC C API path (keyed by request_id across
+ * worker threads) and retrieved via xllm_rec_take_last_infer_timing().
+ */
+typedef struct XLLM_CAPI_EXPORT XLLM_InferTimingDetail {
+  /** Request id aligned with XLLM_Response::id. */
+  char request_id[XLLM_META_STRING_FIELD_MAX_LEN];
+
+  /** convert_c_infer_input_tensors_to_onerec_mm_data in rec.cpp. */
+  int64_t convert_input_tensors_us;
+
+  /** RecMaster request-handling threadpool queue wait. */
+  int64_t threadpool_wait_us;
+
+  /** verify_params + generate_request + add_request before scheduler runs. */
+  int64_t build_request_us;
+
+  /**
+   * Request created -> process_completed start; matches request.cpp
+   * total_latency.
+   */
+  int64_t scheduler_infer_us;
+
+  /** generate_output in AsyncResponseProcessor. */
+  int64_t generate_output_us;
+
+  /** build_success_response + populate_raw_output_tensors in C API callback. */
+  int64_t build_response_us;
+} XLLM_InferTimingDetail;
+
+/**
  * @brief Inference response structure
  */
 typedef struct XLLM_CAPI_EXPORT XLLM_Response {

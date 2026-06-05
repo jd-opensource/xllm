@@ -351,6 +351,17 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_chat_completions(
  */
 XLLM_CAPI_EXPORT void xllm_rec_free_response(XLLM_Response* resp);
 
+/**
+ * @brief Take the timing breakdown for a completed synchronous REC request.
+ * @param request_id Request id aligned with XLLM_Response::id (must not be
+ * NULL/empty).
+ * @param out Output buffer (must not be NULL).
+ * @return true when @p out is populated; false when no timing is available.
+ */
+XLLM_CAPI_EXPORT bool xllm_rec_take_last_infer_timing(
+    const char* request_id,
+    XLLM_InferTimingDetail* out);
+
 #ifdef __cplusplus
 }
 #endif

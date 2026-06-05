@@ -1,7 +1,17 @@
 include(cc_binary)
+include(cc_library)
 include(cc_shared_library)
 
 include_directories(.)
+
+cc_library(
+  NAME
+    c_api_infer_timing
+  HDRS
+    c_api/internal/infer_timing.h
+  SRCS
+    c_api/internal/infer_timing.cpp
+)
 
 # Generate build-time version header from version.txt.
 file(READ "${CMAKE_SOURCE_DIR}/version.txt" XLLM_BUILD_VERSION_RAW)
@@ -60,6 +70,7 @@ if(GENERATE_SO)
       c_api/internal/rec.cpp
       c_api/internal/helper.cpp
     DEPS
+      :c_api_infer_timing
       :flags
       :master
       absl::strings

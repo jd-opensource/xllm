@@ -21,6 +21,7 @@ limitations under the License.
 
 #include <memory>
 
+#include "c_api/internal/infer_timing.h"
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "framework/request/finish_reason.h"
@@ -28,6 +29,7 @@ limitations under the License.
 #include "framework/request/sequence.h"
 #include "util/blocking_counter.h"
 #include "util/env_var.h"
+#include "util/timer.h"
 
 namespace xllm {
 
@@ -85,11 +87,18 @@ void AsyncResponseProcessor::process_completed_request(
     AUTO_COUNTER(responsing_latency_seconds_non_stream);
 
     double end_2_end_latency_seconds = request->elapsed_seconds();
+    c_api_infer_timing::set_scheduler_infer_us(
+        request->request_id(),
+        static_cast<int64_t>(end_2_end_latency_seconds * 1'000'000.0));
     // update the metrics for the request
     HISTOGRAM_OBSERVE(end_2_end_latency_milliseconds,
                       static_cast<int64_t>(end_2_end_latency_seconds * 1000.0));
+    Timer generate_output_timer;
     RequestOutput req_output =
         request->generate_output(*tokenizer_, &generate_output_threadpool_);
+    c_api_infer_timing::set_generate_output_us(
+        request->request_id(),
+        static_cast<int64_t>(generate_output_timer.elapsed_microseconds()));
     request->log_statistic(end_2_end_latency_seconds);
     request->state().output_func(req_output);
   };

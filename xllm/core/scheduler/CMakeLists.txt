@@ -37,6 +37,7 @@ cc_library(
     fixed_steps_scheduler.cpp
   DEPS
     :batch
+    :c_api_infer_timing
     :request
     :runtime
     :profile

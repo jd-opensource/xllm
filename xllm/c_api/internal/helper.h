@@ -159,6 +159,11 @@ void xllm_free_response(XLLM_Response* resp);
  */
 std::string generate_request_id();
 
+/**
+ * @brief Resolve request id from params or generate a new one.
+ */
+std::string resolve_request_id(const XLLM_RequestParams* request_params);
+
 torch::ScalarType xllm_dtype_to_torch_scalar_type(XLLM_DataType dtype);
 
 torch::Tensor convert_xllm_tensor_to_torch(const XLLM_Tensor& xllm_tensor);

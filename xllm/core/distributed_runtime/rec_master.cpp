@@ -22,11 +22,13 @@ limitations under the License.
 #include <pybind11/pybind11.h>
 #include <torch/torch.h>
 
+#include <chrono>
 #include <limits>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
+#include "c_api/internal/infer_timing.h"
 #include "common/macros.h"
 #include "common/metrics.h"
 #include "common/types.h"
@@ -48,6 +50,13 @@ constexpr int32_t kDefaultPlaceholderToken = 20152019;
 constexpr const char* kOneRecSparseEmbeddingName = "sparse_embedding";
 constexpr const char* kOneRecDecoderContextEmbeddingName =
     "decoder_context_embedding";
+constexpr int32_t kRecSchedulerStepSleepTimeMs = 5;
+
+int64_t steady_clock_now_us() {
+  return std::chrono::duration_cast<std::chrono::microseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
 
 std::string format_tensor_shape(const proto::InferInputTensor& tensor) {
   std::vector<std::string> dims;
@@ -768,7 +777,7 @@ void RecMaster::run() {
   }
   running_.store(true, std::memory_order_relaxed);
   loop_thread_ = std::thread([this]() {
-    const auto timeout = absl::Milliseconds(5);
+    const auto timeout = absl::Milliseconds(kRecSchedulerStepSleepTimeMs);
     while (!stopped_.load(std::memory_order_relaxed)) {
       // move scheduler forward
       scheduler_->step(timeout);
@@ -915,14 +924,20 @@ void RecMaster::schedule_request(RequestParams sp,
     output.log_request_status();
     return callback(output);
   };
+  const int64_t submitted_at_us = steady_clock_now_us();
   threadpool_->schedule([this,
                          sp = std::move(sp),
                          callback = std::move(cb),
-                         build_request = std::move(build_request)]() mutable {
+                         build_request = std::move(build_request),
+                         submitted_at_us]() mutable {
     AUTO_COUNTER(request_handling_latency_seconds_completion);
 
     SCOPE_GUARD([this] { scheduler_->decr_pending_requests(); });
 
+    c_api_infer_timing::set_threadpool_wait_us(
+        sp.request_id, steady_clock_now_us() - submitted_at_us);
+
+    const int64_t build_request_start_us = steady_clock_now_us();
     Timer timer;
     if (!sp.verify_params(callback)) {
       return;
@@ -937,6 +952,8 @@ void RecMaster::schedule_request(RequestParams sp,
       CALLBACK_WITH_ERROR(StatusCode::RESOURCE_EXHAUSTED,
                           "No available resources to schedule request");
     }
+    c_api_infer_timing::set_build_request_us(
+        sp.request_id, steady_clock_now_us() - build_request_start_us);
   });
 }
 
