@@ -139,7 +139,8 @@ void SingleBlockManager::deallocate(const Slice<Block>& blocks) {
 std::vector<Block> SingleBlockManager::allocate_shared(
     const Slice<int32_t>& /*token_ids*/,
     const Slice<Block>& /*existed_shared_blocks*/,
-    const MMData& /*mm_data*/) {
+    const MMData& /*mm_data*/,
+    const Slice<XXH3Key>& /*block_hashes*/) {
   // Prefix cache is disabled in this manager. Keep it substitutable with
   // BlockManager behavior under enable_prefix_cache=false.
   return {};
@@ -148,7 +149,8 @@ std::vector<Block> SingleBlockManager::allocate_shared(
 void SingleBlockManager::cache(const Slice<int32_t>& /*token_ids*/,
                                std::vector<Block>& /*blocks*/,
                                size_t /*existed_shared_blocks_num*/,
-                               const MMData& /*mm_data*/) {
+                               const MMData& /*mm_data*/,
+                               const Slice<XXH3Key>& /*block_hashes*/) {
   // Prefix cache is disabled in this manager: no-op.
 }
 

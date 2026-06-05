@@ -28,6 +28,7 @@ limitations under the License.
 
 #include "core/common/types.h"
 #include "core/framework/multimodal/mm_data.h"
+#include "core/framework/prefix_cache/block_hasher.h"
 #include "core/framework/sampling/sampling_params.h"
 #include "core/framework/tokenizer/tokenizer.h"
 #include "core/util/slice.h"
@@ -206,6 +207,16 @@ class Sequence final {
   void add_host_kv_blocks(const std::vector<Block>& blocks);
   void add_shared_kv_blocks(std::vector<Block>&& blocks);
   void add_shared_host_kv_blocks(std::vector<Block>&& blocks);
+
+  // Precomputed chained block hashes used by the prefix cache. Covers all full
+  // blocks of the current tokens; reused by match()/insert() so the hash is
+  // computed once per sequence instead of recomputed on every call.
+  Slice<XXH3Key> block_hashes() const { return block_hashes_; }
+
+  // Extend `block_hashes_` to cover any newly completed full blocks. Cheap
+  // (no-op) when no new full block is available, so it is safe to call before
+  // every match()/cache().
+  void update_block_hashes(uint32_t block_size, BlockHasherType hasher_type);
 
   // whether the prefill stage has been cached.
   bool if_cache_block_for_prefill() {
@@ -408,6 +419,10 @@ class Sequence final {
  private:
   void record_first_token(const Token& token);
 
+  // Drop cached block hashes that may be stale after the token at
+  // `token_index` was rewritten (beam search / speculative / disagg PD).
+  void invalidate_block_hashes_from(size_t token_index);
+
   SequenceOutputType output_type();
   void generate_embeddings_output(SequenceOutput& output);
   void generate_mm_embeddings_output(SequenceOutput& output);
@@ -481,6 +496,13 @@ class Sequence final {
 
   // the length of the prompt tokens
   size_t num_prompt_tokens_ = 0;
+
+  // Precomputed chained block hashes covering all full blocks of `tokens_`.
+  // Extended incrementally; consumed by the prefix cache.
+  std::vector<XXH3Key> block_hashes_;
+
+  // Block size used to compute `block_hashes_` (0 until first computed).
+  uint32_t hash_block_size_ = 0;
 
   std::optional<OneRecState> onerec_state_;
 

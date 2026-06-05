@@ -65,13 +65,15 @@ class XTensorBlockManagerImpl : public BlockManager {
   std::vector<Block> allocate_shared(
       const Slice<int32_t>& token_ids,
       const Slice<Block>& existed_shared_blocks = {},
-      const MMData& mm_data = MMData()) override;
+      const MMData& mm_data = MMData(),
+      const Slice<XXH3Key>& block_hashes = {}) override;
 
   // Cache blocks (prefix cache not supported)
   void cache(const Slice<int32_t>& token_ids,
              std::vector<Block>& blocks,
              size_t existed_shared_blocks_num = 0,
-             const MMData& mm_data = MMData()) override;
+             const MMData& mm_data = MMData(),
+             const Slice<XXH3Key>& block_hashes = {}) override;
   void cache(const std::vector<Block>& blocks) override;
 
   // Get merged KV cache event

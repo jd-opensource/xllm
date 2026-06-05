@@ -24,11 +24,92 @@ limitations under the License.
 #include <iostream>
 #include <iterator>
 #include <random>
+#include <unordered_map>
 #include <vector>
 
 #include "framework/block/block_manager_impl.h"
 #include "prefix_cache.h"
+#include "util/hash_util.h"
 using namespace xllm;
+
+// ============================================================================
+// Helpers shared by the linear-vs-binary prefix-match probe benchmarks.
+//
+// `match` already early-breaks on the first miss, so the linear path does
+// exactly `hit_len + 1` hash-table probes while binary search does O(log n).
+// Both must still collect `hit_len` blocks afterwards, so the ONLY thing that
+// differs between the two strategies is the boundary-finding probes isolated
+// below. These helpers therefore measure just the probe cost.
+// ============================================================================
+
+namespace {
+
+using HitMap = std::
+    unordered_map<XXH3Key, int32_t, FixedStringKeyHash, FixedStringKeyEqual>;
+
+// Build the chained block hashes for `tokens`, identical to the chain produced
+// by xxh3_128bits_hash() in prefix_cache.cpp.
+std::vector<XXH3Key> build_chained_hashes(const std::vector<int32_t>& tokens,
+                                          uint32_t block_size) {
+  const size_t n_blocks = tokens.size() / block_size;
+  std::vector<XXH3Key> hashes;
+  hashes.reserve(n_blocks);
+  const Slice<int32_t> slice(tokens);
+  for (size_t b = 0; b < n_blocks; ++b) {
+    XXH3Key key;
+    const uint8_t* pre = (b == 0) ? nullptr : hashes.back().data;
+    xxh3_128bits_hash(
+        pre, slice.slice(b * block_size, (b + 1) * block_size), key.data);
+    hashes.emplace_back(key);
+  }
+  return hashes;
+}
+
+// Populate a cache that holds the first `hit_len` blocks of the chain. This
+// models the prefix-closed invariant guaranteed by the LRU (suffix-first)
+// eviction: if block i is cached, every block < i is cached too.
+HitMap make_cache(const std::vector<XXH3Key>& hashes, size_t hit_len) {
+  HitMap cache;
+  cache.reserve(hit_len * 2);
+  for (size_t i = 0; i < hit_len; ++i) {
+    cache.emplace(hashes[i], 1);
+  }
+  return cache;
+}
+
+// Current strategy: probe from the front, stop at the first miss.
+size_t find_hit_len_linear(const HitMap& cache,
+                           const std::vector<XXH3Key>& hashes) {
+  size_t k = 0;
+  for (; k < hashes.size(); ++k) {
+    if (cache.find(hashes[k]) == cache.end()) {
+      break;
+    }
+  }
+  return k;
+}
+
+// Binary search for the longest hit, relying on the prefix-closed invariant.
+size_t find_hit_len_binary(const HitMap& cache,
+                           const std::vector<XXH3Key>& hashes) {
+  if (hashes.empty() || cache.find(hashes[0]) == cache.end()) {
+    return 0;
+  }
+  // Invariant: hashes[lo] is present, hashes[hi + 1] is absent.
+  size_t lo = 0;
+  size_t hi = hashes.size() - 1;
+  while (lo < hi) {
+    const size_t mid = (lo + hi + 1) / 2;
+    if (cache.find(hashes[mid]) != cache.end()) {
+      lo = mid;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return lo + 1;
+}
+
+}  // namespace
 
 // ============================================================================
 // Existing prefix-cache benchmark
@@ -237,6 +318,82 @@ BENCHMARK(BM_XXH3_128_Chain)
     ->Args({16, 32})
     ->Args({16, 128})
     ->Args({16, 512})
+    ->Unit(benchmark::TimeUnit::kNanosecond);
+
+// ============================================================================
+// Linear vs binary prefix-match probing.
+// Args: {n_blocks, hit_percent}  (hit_len = n_blocks * hit_percent / 100)
+//
+// Reading the numbers:
+//   - hit_percent = 100 (full hit): linear does n_blocks probes, binary does
+//     ~log2(n_blocks); binary should win and the gap grows with n_blocks.
+//   - hit_percent small: linear early-breaks after hit_len+1 probes, so binary
+//     (always ~log2(n_blocks)) can be equal or SLOWER. This is the case that
+//     shows binary is not a free win.
+// ============================================================================
+
+namespace {
+
+struct ProbeFixture {
+  std::vector<int32_t> tokens;
+  std::vector<XXH3Key> hashes;
+  HitMap cache;
+};
+
+ProbeFixture make_probe_fixture(size_t n_blocks, int64_t hit_percent) {
+  constexpr uint32_t kBlockSize = 16;
+  const size_t hit_len = n_blocks * static_cast<size_t>(hit_percent) / 100;
+
+  std::mt19937 gen(12345);
+  std::uniform_int_distribution<int32_t> dist(0, 65535);
+  ProbeFixture fixture;
+  fixture.tokens.resize(n_blocks * kBlockSize);
+  std::generate(fixture.tokens.begin(), fixture.tokens.end(), [&]() {
+    return dist(gen);
+  });
+  fixture.hashes = build_chained_hashes(fixture.tokens, kBlockSize);
+  fixture.cache = make_cache(fixture.hashes, hit_len);
+  return fixture;
+}
+
+}  // namespace
+
+static void BM_MatchProbe_Linear(benchmark::State& state) {
+  const ProbeFixture fixture =
+      make_probe_fixture(state.range(0), state.range(1));
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(
+        find_hit_len_linear(fixture.cache, fixture.hashes));
+  }
+}
+
+static void BM_MatchProbe_Binary(benchmark::State& state) {
+  const ProbeFixture fixture =
+      make_probe_fixture(state.range(0), state.range(1));
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(
+        find_hit_len_binary(fixture.cache, fixture.hashes));
+  }
+}
+
+// Sweep sequence length (n_blocks) at full / half / short / zero hit ratios.
+// At block_size=16, n_blocks=1024 ~= 16K-token sequence.
+BENCHMARK(BM_MatchProbe_Linear)
+    ->Args({64, 100})
+    ->Args({256, 100})
+    ->Args({1024, 100})
+    ->Args({1024, 50})
+    ->Args({1024, 10})
+    ->Args({1024, 0})
+    ->Unit(benchmark::TimeUnit::kNanosecond);
+
+BENCHMARK(BM_MatchProbe_Binary)
+    ->Args({64, 100})
+    ->Args({256, 100})
+    ->Args({1024, 100})
+    ->Args({1024, 50})
+    ->Args({1024, 10})
+    ->Args({1024, 0})
     ->Unit(benchmark::TimeUnit::kNanosecond);
 
 BENCHMARK_MAIN();

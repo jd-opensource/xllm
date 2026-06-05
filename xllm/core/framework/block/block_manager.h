@@ -71,12 +71,14 @@ class BlockManager {
   virtual std::vector<Block> allocate_shared(
       const Slice<int32_t>& token_ids,
       const Slice<Block>& existed_shared_blocks = {},
-      const MMData& mm_data = MMData()) = 0;
+      const MMData& mm_data = MMData(),
+      const Slice<XXH3Key>& block_hashes = {}) = 0;
 
   virtual void cache(const Slice<int32_t>& token_ids,
                      std::vector<Block>& blocks,
                      size_t existed_shared_blocks_num = 0,
-                     const MMData& mm_data = MMData()) = 0;
+                     const MMData& mm_data = MMData(),
+                     const Slice<XXH3Key>& block_hashes = {}) = 0;
   virtual void cache(const std::vector<Block>& blocks) = 0;
 
   // get merged all dp rank KVCacheEvent

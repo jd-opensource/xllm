@@ -20,7 +20,8 @@ class PrefixCacheWithUpload final : public PrefixCache {
   size_t insert(const Slice<int32_t>& token_ids,
                 std::vector<Block>& blocks,
                 size_t existed_shared_blocks_num = 0,
-                const MMData& mm_data = MMData()) override;
+                const MMData& mm_data = MMData(),
+                const Slice<XXH3Key>& block_hashes = {}) override;
 
   // insert the blocks with hash key into the prefix tree
   size_t insert(const std::vector<Block>& blocks) override;

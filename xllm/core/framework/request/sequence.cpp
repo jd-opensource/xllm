@@ -289,6 +289,8 @@ Sequence::Sequence(const Sequence& other)
       num_tokens_(other.num_tokens_),
       token_to_count_map_(other.token_to_count_map_),
       num_prompt_tokens_(other.num_prompt_tokens_),
+      block_hashes_(other.block_hashes_),
+      hash_block_size_(other.hash_block_size_),
       onerec_state_(other.onerec_state_),
       volatile_num_prompt_tokens_(other.volatile_num_prompt_tokens_),
       request_id_(other.request_id_),
@@ -392,6 +394,9 @@ void Sequence::update_last_step_token(const Token& token, size_t token_offset) {
 
   const int32_t token_id = static_cast<int32_t>(token.id);
   tokens_[cur_generated_token_idx_] = token_id;
+  // Overlap/MTP may rewrite tokens at decode positions; drop any cached block
+  // hash from this position onward so it is recomputed when next needed.
+  invalidate_block_hashes_from(cur_generated_token_idx_);
   if (need_unique_tokens_) {
     token_to_count_map_[token_id]++;
   }
@@ -414,6 +419,9 @@ void Sequence::update_token(size_t index, const Token& token) {
   const int32_t origin_token_id = tokens_[index];
   const int32_t token_id = static_cast<int32_t>(token.id);
   tokens_[index] = token_id;
+  // A rewritten token invalidates the cached hash of its block and all
+  // subsequent blocks; recompute lazily on the next update_block_hashes().
+  invalidate_block_hashes_from(index);
   if (need_unique_tokens_) {
     --token_to_count_map_[origin_token_id];
     ++token_to_count_map_[token_id];
@@ -706,6 +714,47 @@ void Sequence::add_shared_kv_blocks(std::vector<Block>&& blocks) {
 
 void Sequence::add_shared_host_kv_blocks(std::vector<Block>&& blocks) {
   host_kv_state_.add_shared_kv_blocks(std::move(blocks), num_tokens_);
+}
+
+void Sequence::update_block_hashes(uint32_t block_size,
+                                   BlockHasherType hasher_type) {
+  if (block_size == 0) {
+    return;
+  }
+  hash_block_size_ = block_size;
+
+  const size_t n_full_blocks = num_tokens_ / block_size;
+  if (n_full_blocks <= block_hashes_.size()) {
+    return;
+  }
+
+  const Slice<int32_t> tokens = this->tokens();
+  const size_t start_block = block_hashes_.size();
+  // Resume the chain from the last already-hashed block (its hash is the
+  // parent of the next block).
+  XXH3Key prev_key = start_block == 0 ? XXH3Key{} : block_hashes_.back();
+  auto hasher =
+      BlockHasher::create(hasher_type, mm_data_, start_block * block_size);
+
+  block_hashes_.reserve(n_full_blocks);
+  for (size_t b = start_block; b < n_full_blocks; ++b) {
+    const size_t i = b * block_size;
+    const uint8_t* pre_hash_value = (b == 0) ? nullptr : prev_key.data;
+    XXH3Key key;
+    hasher->compute(tokens, i, i + block_size, pre_hash_value, key);
+    block_hashes_.emplace_back(key);
+    prev_key = key;
+  }
+}
+
+void Sequence::invalidate_block_hashes_from(size_t token_index) {
+  if (block_hashes_.empty() || hash_block_size_ == 0) {
+    return;
+  }
+  const size_t first_stale_block = token_index / hash_block_size_;
+  if (first_stale_block < block_hashes_.size()) {
+    block_hashes_.resize(first_stale_block);
+  }
 }
 
 bool Sequence::finished() const {
