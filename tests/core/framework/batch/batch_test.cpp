@@ -78,12 +78,14 @@ bool equal(const torch::Tensor& t, const std::vector<T>& d) {
 RawSampleOutput make_raw_sample_output(int64_t token_id,
                                        std::optional<float> logprob,
                                        std::vector<int64_t> top_tokens = {},
-                                       std::vector<float> top_logprobs = {}) {
+                                       std::vector<float> top_logprobs = {},
+                                       std::vector<float> embeddings = {}) {
   RawToken raw_token;
   raw_token.id = token_id;
   raw_token.logprob = logprob;
   raw_token.top_tokens = std::move(top_tokens);
   raw_token.top_logprobs = std::move(top_logprobs);
+  raw_token.embeddings = std::move(embeddings);
 
   RawSampleOutput raw_output;
   raw_output.tokens.push_back(std::move(raw_token));
@@ -115,6 +117,31 @@ void expect_blocks(const TransferKVInfo& info,
   EXPECT_EQ(info.remote_blocks_ids, remote_block_ids);
   EXPECT_EQ(info.request_id, "req_0");
   EXPECT_EQ(info.dp_rank, 3);
+}
+
+Sequence make_basic_sequence(const std::vector<int32_t>& prompt_token_ids) {
+  static RequestSamplingParam sampling_param;
+  static StoppingChecker stopping_checker;
+
+  SequenceParams seq_params;
+  seq_params.seq_capacity = prompt_token_ids.size() + 8;
+  seq_params.stopping_checker = &stopping_checker;
+  seq_params.sampling_param = &sampling_param;
+  seq_params.skip_special_tokens = true;
+  seq_params.echo = false;
+  seq_params.logprobs = false;
+  seq_params.enable_schedule_overlap = false;
+
+  IncrementalDecoder decoder(/*prompt=*/"",
+                             /*num_prompt_tokens=*/prompt_token_ids.size(),
+                             /*echo=*/false,
+                             /*skip_special_tokens=*/true);
+  return Sequence(/*index=*/0,
+                  prompt_token_ids,
+                  /*input_embedding=*/torch::Tensor(),
+                  /*mm_data=*/MMData(),
+                  decoder,
+                  seq_params);
 }
 
 }  // namespace
@@ -264,6 +291,56 @@ TEST(BatchInputBuilderTest, RemoteCoverageShortageDies) {
         (void)info;
       },
       "remote");
+}
+
+TEST(BatchTest, ProcessSampleOutputStoresMtpBootstrapEmbedding) {
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+
+  Sequence sequence = make_basic_sequence({1, 2, 3});
+  sequence.add_kv_blocks(manager.allocate(1));
+
+  Batch batch(&sequence);
+  (void)batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+
+  SampleOutput output;
+  output.next_tokens = torch::tensor({42}, torch::kInt);
+  output.embeddings = torch::tensor({{3.0f, 4.0f}});
+
+  batch.process_sample_output(output, /*replace_fake_token=*/false);
+
+  torch::Tensor stored = sequence.get_mtp_bootstrap_embedding();
+  ASSERT_TRUE(stored.defined());
+  EXPECT_TRUE(torch::equal(stored, output.embeddings[0]));
+
+  output.embeddings.fill_(9.0f);
+  EXPECT_TRUE(torch::equal(sequence.get_mtp_bootstrap_embedding(),
+                           torch::tensor({3.0f, 4.0f})));
+}
+
+TEST(BatchTest, ProcessRawOutputStoresMtpBootstrapEmbedding) {
+  BlockManager::Options options;
+  options.num_blocks(8).block_size(4);
+  BlockManagerImpl manager(options);
+
+  Sequence sequence = make_basic_sequence({1, 2, 3});
+  sequence.add_kv_blocks(manager.allocate(1));
+
+  Batch batch(&sequence);
+  (void)batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+
+  RawForwardOutput raw_output;
+  raw_output.outputs.push_back(make_raw_sample_output(
+      42, std::nullopt, {}, {}, /*embeddings=*/{3.0f, 4.0f}));
+
+  batch.process_sample_output(raw_output, /*replace_fake_token=*/false);
+
+  torch::Tensor stored = sequence.get_mtp_bootstrap_embedding();
+  ASSERT_TRUE(stored.defined());
+  EXPECT_TRUE(torch::equal(stored, torch::tensor({3.0f, 4.0f})));
 }
 
 TEST(BatchTest, Basic) {

@@ -287,6 +287,7 @@ Sequence::Sequence(const Sequence& other)
       mm_data_(other.mm_data_),
       mrope_position_delta_(other.mrope_position_delta_),
       output_embedding_(other.output_embedding_),
+      mtp_bootstrap_embedding_(other.mtp_bootstrap_embedding_),
       num_tokens_(other.num_tokens_),
       token_to_count_map_(other.token_to_count_map_),
       num_prompt_tokens_(other.num_prompt_tokens_),
@@ -459,6 +460,12 @@ void Sequence::update_embeddings(const torch::Tensor& embeddings) {
     if (output_embedding_.dim() == 1) {
       output_embedding_ = output_embedding_.unsqueeze(0);
     }
+  }
+}
+
+void Sequence::update_mtp_bootstrap_embedding(const torch::Tensor& embedding) {
+  if (embedding.defined()) {
+    mtp_bootstrap_embedding_ = embedding.detach().clone();
   }
 }
 

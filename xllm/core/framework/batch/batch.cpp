@@ -540,6 +540,7 @@ void Batch::process_sample_output(const RawForwardOutput& raw_output,
       if (!raw_token.embeddings.empty()) {
         torch::Tensor embeddings = torch::tensor(raw_token.embeddings);
         seq->update_embeddings(embeddings);
+        seq->update_mtp_bootstrap_embedding(embeddings);
       }
       // Speculative decoding may append an EOS token at the beginning,
       // followed by bonus tokens, causing the sequence stopping check to fail.
@@ -640,6 +641,7 @@ void Batch::process_sample_output(const SampleOutput& sample_output,
       auto cur_seq_embed =
           safe_to(sample_output.embeddings[output_idx++], torch::kFloat32);
       seq->update_embeddings(cur_seq_embed);
+      seq->update_mtp_bootstrap_embedding(cur_seq_embed);
     }
   }
 

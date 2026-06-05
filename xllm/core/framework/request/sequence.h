@@ -192,6 +192,13 @@ class Sequence final {
   void update_mm_embeddings(const std::vector<torch::Tensor>& mm_embeddings);
   // update embeddings to the sequence
   void update_embeddings(const torch::Tensor& embedding);
+  void update_mtp_bootstrap_embedding(const torch::Tensor& embedding);
+  torch::Tensor get_mtp_bootstrap_embedding() const {
+    return mtp_bootstrap_embedding_;
+  }
+  void clear_mtp_bootstrap_embedding() {
+    mtp_bootstrap_embedding_ = torch::Tensor();
+  }
   bool has_single_block_id() const { return single_block_.is_valid(); }
   int32_t get_single_block_id() const {
     return has_single_block_id() ? single_block_.id() : -1;
@@ -473,6 +480,9 @@ class Sequence final {
 
   // embeddings of the sequence
   torch::Tensor output_embedding_;
+
+  // temporary PD handoff bootstrap hidden state for first MTP decode.
+  torch::Tensor mtp_bootstrap_embedding_;
 
   // number of tokens in the sequence
   size_t num_tokens_ = 0;
