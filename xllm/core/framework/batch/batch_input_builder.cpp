@@ -168,6 +168,18 @@ torch::Tensor build_pinned_int_tensor(const std::vector<int32_t>& values) {
                            .pinned_memory(true));
 }
 
+torch::Tensor normalize_mtp_bootstrap(const torch::Tensor& embedding) {
+  CHECK(embedding.defined()) << "MTP bootstrap embedding is undefined";
+  if (embedding.dim() == 1) {
+    return embedding.unsqueeze(0);
+  }
+  CHECK_EQ(embedding.dim(), 2)
+      << "MTP bootstrap embedding should be [hidden] or [1, hidden]";
+  CHECK_EQ(embedding.size(0), 1)
+      << "MTP bootstrap embedding should contain one sequence";
+  return embedding;
+}
+
 }  // namespace
 
 BatchInputBuilder::BatchInputBuilder(
@@ -199,6 +211,7 @@ BatchInputBuilder::BatchInputBuilder(
   state_.block_tables_vec.reserve(sequences.size());
   state_.acc_logprob_vec.reserve(sequences.size());
   state_.mtp_shifted_token_ids.reserve(reserve_size);
+  state_.mtp_bootstrap_embeddings.reserve(sequences.size());
   if (args_ != nullptr) {
     use_mrope_ = (args_->rope_scaling_rope_type() == "mrope");
   }
@@ -420,6 +433,8 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.new_token_slot_ids.insert(state_.new_token_slot_ids.end(),
                                      state.new_token_slot_ids.begin(),
                                      state.new_token_slot_ids.end());
+    const int32_t row_offset =
+        static_cast<int32_t>(state_.embedding_ids.size());
     state_.embedding_ids.insert(state_.embedding_ids.end(),
                                 state.embedding_ids.begin(),
                                 state.embedding_ids.end());
@@ -435,6 +450,13 @@ void BatchInputBuilder::process_sequences_multithreaded() {
     state_.mtp_shifted_token_ids.insert(state_.mtp_shifted_token_ids.end(),
                                         state.mtp_shifted_token_ids.begin(),
                                         state.mtp_shifted_token_ids.end());
+    for (int32_t row_idx : state.mtp_bootstrap_row_idxes) {
+      state_.mtp_bootstrap_row_idxes.emplace_back(row_offset + row_idx);
+    }
+    state_.mtp_bootstrap_embeddings.insert(
+        state_.mtp_bootstrap_embeddings.end(),
+        state.mtp_bootstrap_embeddings.begin(),
+        state.mtp_bootstrap_embeddings.end());
     state_.transfer_kv_infos.insert(state_.transfer_kv_infos.end(),
                                     state.transfer_kv_infos.begin(),
                                     state.transfer_kv_infos.end());
@@ -619,6 +641,17 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
     state.extra_token_ids.emplace_back(-1);
     state.embedding_ids.emplace_back(sequence->get_single_block_id());
     state.request_ids.emplace_back(sequence->request_id());
+    torch::Tensor mtp_bootstrap = sequence->get_mtp_bootstrap_embedding();
+    if (state.batch_forward_type.is_decode() && mtp_bootstrap.defined()) {
+      CHECK_LT(n_kv_cache_tokens, seq_len)
+          << "MTP bootstrap decode input must contain current token";
+      const int32_t token_id = token_ids[n_kv_cache_tokens];
+      CHECK_GE(token_id, 0) << "MTP bootstrap token should be valid";
+      state.mtp_bootstrap_row_idxes.emplace_back(
+          static_cast<int32_t>(state.embedding_ids.size() - 1));
+      state.mtp_bootstrap_embeddings.emplace_back(
+          normalize_mtp_bootstrap(mtp_bootstrap));
+    }
   } else {
     extra_token_id = token_ids[seq_len];
     state.extra_token_ids.emplace_back(extra_token_id);
@@ -926,6 +959,17 @@ ForwardInput BatchInputBuilder::state_to_forward_input() {
     auto mtp_tensor = torch::tensor(state_.mtp_shifted_token_ids, torch::kInt);
     input_params.embedding.mtp_shifted_token_ids = mtp_tensor;
     input_params.mtp_shifted_token_ids = mtp_tensor;
+  }
+  if (!state_.mtp_bootstrap_embeddings.empty()) {
+    CHECK_EQ(state_.mtp_bootstrap_row_idxes.size(),
+             state_.mtp_bootstrap_embeddings.size());
+    input_params.embedding.mtp_bootstrap_row_idxes =
+        std::move(state_.mtp_bootstrap_row_idxes);
+    input_params.embedding.mtp_bootstrap_embeddings =
+        torch::cat(state_.mtp_bootstrap_embeddings, /*dim=*/0);
+    for (Sequence* sequence : sequences_) {
+      sequence->clear_mtp_bootstrap_embedding();
+    }
   }
   input_params.meta.batch_id = batch_id_;
 

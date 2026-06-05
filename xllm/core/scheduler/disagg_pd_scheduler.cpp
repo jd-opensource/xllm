@@ -21,6 +21,7 @@ limitations under the License.
 #include <brpc/server.h>
 #include <glog/logging.h>
 
+#include <limits>
 #include <random>
 
 #include "common/global_flags.h"
@@ -631,6 +632,16 @@ void DisaggPDScheduler::prefill_send_first_generation() {
                                 requests = std::move(requests)]() mutable {
     // send request first token to remote instance
     // TODO: here we only support one sequence for now.
+    auto fail_request = [this](const std::shared_ptr<Request>& request,
+                               Status status) {
+      response_processor_->process_failed_request(request, status);
+      {
+        std::lock_guard<std::mutex> lock(req_to_channel_map_mutex_);
+        req_to_channel_map_.erase(request->request_id());
+      }
+      response_processor_->wait_completion();
+      kv_cache_manager_->deallocate(request.get());
+    };
     for (auto& request : requests) {
       // TODO: support batch request later
       proto::DisaggGenerationsRequests gens;
@@ -680,6 +691,29 @@ void DisaggPDScheduler::prefill_send_first_generation() {
             request->sequences()[0]->get_single_block_id());
         gen->set_dp_size(instance_info_.dp_size);
         gen->set_dp_rank(request->sequences()[0]->dp_rank());
+      }
+      if (options_.num_speculative_tokens() > 0) {
+        torch::Tensor embedding =
+            request->sequences()[0]->get_mtp_bootstrap_embedding();
+        if (!embedding.defined()) {
+          LOG(ERROR) << "Missing MTP bootstrap embedding, request_id: "
+                     << request->request_id();
+          fail_request(
+              request,
+              {StatusCode::UNKNOWN, "Missing MTP bootstrap embedding"});
+          continue;
+        }
+        torch::Tensor embedding_cpu = safe_to(embedding, torch::kCPU);
+        if (!util::torch_to_proto(embedding_cpu,
+                                  gen->mutable_mtp_bootstrap_embedding())) {
+          LOG(ERROR) << "Failed to serialize MTP bootstrap embedding, "
+                     << "request_id: " << request->request_id();
+          fail_request(request,
+                       {StatusCode::UNKNOWN,
+                        "Failed to serialize MTP bootstrap embedding"});
+          continue;
+        }
+        request->sequences()[0]->clear_mtp_bootstrap_embedding();
       }
 
       // send first gens to remote instance
@@ -755,7 +789,8 @@ bool DisaggPDScheduler::decode_recv_first_generation(
     std::vector<uint64_t> src_block_ids,
     int32_t src_linear_state_id,
     int32_t src_dp_size,
-    int32_t src_dp_rank) {
+    int32_t src_dp_rank,
+    torch::Tensor mtp_bootstrap_embedding) {
   // push to request_queue_, and will be executed by engine.
   std::shared_ptr<Request> request = nullptr;
   {
@@ -774,6 +809,30 @@ bool DisaggPDScheduler::decode_recv_first_generation(
       request_to_instance_map_.erase(inst_it);
     }
   }
+  Sequence* sequence = request->sequences()[0].get();
+  const bool need_mtp_bootstrap = options_.num_speculative_tokens() > 0;
+  if (need_mtp_bootstrap) {
+    const int32_t slot_id = sequence->get_single_block_id();
+    if (slot_id < 0) {
+      LOG(ERROR) << "Invalid MTP bootstrap slot, request_id: " << req_id;
+      kv_cache_manager_->deallocate(request.get());
+      return false;
+    }
+    if (token_id < 0 ||
+        token_id > static_cast<int64_t>(std::numeric_limits<int32_t>::max())) {
+      LOG(ERROR) << "Invalid MTP bootstrap token, request_id: " << req_id
+                 << ", token_id: " << token_id;
+      kv_cache_manager_->deallocate(request.get());
+      return false;
+    }
+    if (!mtp_bootstrap_embedding.defined()) {
+      LOG(ERROR) << "Missing MTP bootstrap embedding, request_id: " << req_id;
+      kv_cache_manager_->deallocate(request.get());
+      return false;
+    }
+
+    sequence->update_mtp_bootstrap_embedding(mtp_bootstrap_embedding);
+  }
 
   Token first_token(token_id);
   if (has_logprob) {
@@ -787,29 +846,28 @@ bool DisaggPDScheduler::decode_recv_first_generation(
   }
   // Enable checking whether to skip the prefill token
   if (request->state().stream) {
-    request->sequences()[0]->enable_checking_prefill_token();
+    sequence->enable_checking_prefill_token();
   }
 
   // update latency metrics
-  request->sequences()[0]->set_time_to_first_token_latency_seconds(
+  sequence->set_time_to_first_token_latency_seconds(
       time_to_first_token_latency_seconds);
   // update latest_generate_time_ for sequence
-  request->sequences()[0]->tbt(
-      request->created_time() +
-      absl::Seconds(time_to_first_token_latency_seconds));
+  sequence->tbt(request->created_time() +
+                absl::Seconds(time_to_first_token_latency_seconds));
 
   // TODO: we only support one sequence for currently.
   if (enable_schedule_overlap()) {
     Token fake_token(-1);
-    request->sequences()[0]->append_token(fake_token);
-    request->sequences()[0]->update_last_step_token(first_token);
+    sequence->append_token(fake_token);
+    sequence->update_last_step_token(first_token);
   } else {
-    request->sequences()[0]->append_token(first_token);
+    sequence->append_token(first_token);
   }
 
   // pull kv cache
   if (kv_cache_transfer_mode == "PULL") {
-    const auto blocks = request->sequences()[0]->kv_state().kv_blocks();
+    const auto blocks = sequence->kv_state().kv_blocks();
     std::vector<uint64_t> dst_block_ids;
     dst_block_ids.reserve(blocks.size());
     for (const auto& block : blocks) {
@@ -817,26 +875,33 @@ bool DisaggPDScheduler::decode_recv_first_generation(
     }
     std::vector<uint64_t> src_linear_state_ids;
     std::vector<uint64_t> dst_linear_state_ids;
-    if (src_linear_state_id >= 0 &&
-        request->sequences()[0]->get_single_block_id() >= 0) {
+    if (src_linear_state_id >= 0 && sequence->get_single_block_id() >= 0) {
       src_linear_state_ids.emplace_back(src_linear_state_id);
-      dst_linear_state_ids.emplace_back(
-          request->sequences()[0]->get_single_block_id());
+      dst_linear_state_ids.emplace_back(sequence->get_single_block_id());
     }
 
-    int32_t dst_dp_rank = request->sequences()[0]->dp_rank();
-    engine_->pull_kv_blocks(src_dp_size,
-                            src_dp_rank,
-                            src_cluster_ids,
-                            src_addrs,
-                            src_block_ids,
-                            dst_dp_rank,
-                            dst_block_ids,
-                            src_linear_state_ids,
-                            dst_linear_state_ids);
+    int32_t dst_dp_rank = sequence->dp_rank();
+    const bool pulled = engine_->pull_kv_blocks(src_dp_size,
+                                                src_dp_rank,
+                                                src_cluster_ids,
+                                                src_addrs,
+                                                src_block_ids,
+                                                dst_dp_rank,
+                                                dst_block_ids,
+                                                src_linear_state_ids,
+                                                dst_linear_state_ids);
+    if (!pulled) {
+      LOG(ERROR) << "Failed to pull KV blocks, request_id: " << req_id;
+      kv_cache_manager_->deallocate(request.get());
+      return false;
+    }
   }
 
-  request_queue_.write(request);
+  if (!request_queue_.write(request)) {
+    LOG(ERROR) << "Failed to enqueue decode request, request_id: " << req_id;
+    kv_cache_manager_->deallocate(request.get());
+    return false;
+  }
   return true;
 }
 
