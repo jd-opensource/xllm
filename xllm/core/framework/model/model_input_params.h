@@ -723,6 +723,10 @@ struct ModelEmbeddingInput {
   // Precomputed shifted token ids for MTP prefill, aligned with tokens.
   torch::Tensor mtp_shifted_token_ids;
 
+  // Pending PD handoff bootstrap rows for the first MTP decode step.
+  std::vector<int32_t> mtp_bootstrap_row_idxes;
+  torch::Tensor mtp_bootstrap_embeddings;
+
   ModelEmbeddingInput to(const torch::Device& device) const {
     ModelEmbeddingInput out;
     out.input_embedding = safe_to(input_embedding, device);
@@ -732,6 +736,9 @@ struct ModelEmbeddingInput {
     out.request_ids = request_ids;
     out.extra_token_ids = extra_token_ids;
     out.mtp_shifted_token_ids = safe_to(mtp_shifted_token_ids, device, true);
+    out.mtp_bootstrap_row_idxes = mtp_bootstrap_row_idxes;
+    out.mtp_bootstrap_embeddings =
+        safe_to(mtp_bootstrap_embeddings, device, true);
     return out;
   }
 };

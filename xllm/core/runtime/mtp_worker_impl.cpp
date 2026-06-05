@@ -842,6 +842,46 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
   ForwardInput current_draft_input, validate_input, next_step_input;
   Timer timer;
 
+  CHECK(embedding_cache_ != nullptr) << "MTP embedding cache is not allocated";
+
+  const auto& embedding = input.input_params.embedding;
+  if (embedding.mtp_bootstrap_embeddings.defined()) {
+    CHECK(input.token_ids_host.defined())
+        << "MTP bootstrap requires host token ids";
+    CHECK(input.token_ids_host.device().is_cpu())
+        << "MTP bootstrap host token ids must be on CPU";
+    CHECK_EQ(input.token_ids_host.scalar_type(), torch::kInt)
+        << "MTP bootstrap host token ids must be int32";
+
+    torch::Tensor bootstrap_embeddings =
+        safe_to(embedding.mtp_bootstrap_embeddings,
+                torch::dtype(dtype_).device(device_));
+    CHECK_EQ(bootstrap_embeddings.size(0),
+             static_cast<int64_t>(embedding.mtp_bootstrap_row_idxes.size()))
+        << "MTP bootstrap row count mismatch";
+
+    Slice<int32_t> token_ids = {
+        input.token_ids_host.data_ptr<int32_t>(),
+        static_cast<size_t>(input.token_ids_host.numel())};
+    for (int32_t i = 0;
+         i < static_cast<int32_t>(embedding.mtp_bootstrap_row_idxes.size());
+         ++i) {
+      const int32_t row_idx = embedding.mtp_bootstrap_row_idxes[i];
+      CHECK_GE(row_idx, 0) << "MTP bootstrap row index should be valid";
+      CHECK_LT(row_idx, static_cast<int32_t>(embedding.embedding_ids.size()))
+          << "MTP bootstrap row index exceeds embedding ids";
+      CHECK_LT(row_idx, static_cast<int32_t>(embedding.request_ids.size()))
+          << "MTP bootstrap row index exceeds request ids";
+      CHECK_LT(static_cast<int64_t>(row_idx), input.token_ids_host.numel())
+          << "MTP bootstrap row index exceeds token ids";
+      embedding_cache_->write_mtp_bootstrap_context(
+          embedding.embedding_ids[row_idx],
+          embedding.request_ids[row_idx],
+          token_ids[row_idx],
+          bootstrap_embeddings[i]);
+    }
+  }
+
   // Get decode state of last step
   std::vector<EmbeddingCache::DecodeState> last_states =
       embedding_cache_->read_decode_states(
