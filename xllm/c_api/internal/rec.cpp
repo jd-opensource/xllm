@@ -22,16 +22,19 @@ limitations under the License.
 #include <pthread.h>
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <exception>
 #include <filesystem>
 #include <limits>
 #include <stdexcept>
 
+#include "c_api/internal/infer_timing.h"
 #include "core/framework/model_loader.h"
 #include "core/util/cpu_affinity.h"
 #include "core/util/rec_model_utils.h"
 #include "helper.h"
+#include "util/timer.h"
 
 namespace {
 
@@ -433,8 +436,13 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_input_tensors_completions(
         "Invalid input parameters for xllm_rec_input_tensors_completions");
   }
 
+  const std::string request_id =
+      xllm::helper::resolve_request_id(request_params);
+  xllm::c_api_infer_timing::begin_request(request_id);
+
   xllm::MMData input_mm_data;
   std::string error_info;
+  xllm::Timer convert_timer;
   if (!xllm::helper::convert_c_infer_input_tensors_to_onerec_mm_data(
           tensors, tensor_count, &input_mm_data, &error_info)) {
     return xllm::helper::build_error_response(
@@ -444,6 +452,19 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_input_tensors_completions(
                              "failed"
                            : error_info);
   }
+  xllm::c_api_infer_timing::set_convert_input_tensors_us(
+      request_id, static_cast<int64_t>(convert_timer.elapsed_microseconds()));
+
+  XLLM_RequestParams local_request_params;
+  if (request_params != nullptr) {
+    local_request_params = *request_params;
+  } else {
+    xllm_rec_request_params_default(&local_request_params);
+  }
+  std::snprintf(local_request_params.request_id,
+                sizeof(local_request_params.request_id),
+                "%s",
+                request_id.c_str());
 
   return xllm::helper::handle_inference_request(
       handler,
@@ -452,7 +473,16 @@ XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_input_tensors_completions(
       input_mm_data,
       nullptr,
       timeout_ms,
-      request_params);
+      &local_request_params);
+}
+
+XLLM_CAPI_EXPORT bool xllm_rec_take_last_infer_timing(
+    const char* request_id,
+    XLLM_InferTimingDetail* out) {
+  if (request_id == nullptr || *request_id == '\0' || out == nullptr) {
+    return false;
+  }
+  return xllm::c_api_infer_timing::take(request_id, out);
 }
 
 XLLM_CAPI_EXPORT XLLM_Response* xllm_rec_chat_completions(

@@ -21,12 +21,14 @@ limitations under the License.
 #include <limits>
 #include <string>
 
+#include "c_api/internal/infer_timing.h"
 #include "completion.pb.h"
 #include "core/common/global_flags.h"
 #include "core/util/env_var.h"
 #include "core/util/rec_model_utils.h"
 #include "core/util/utils.h"
 #include "core/util/uuid.h"
+#include "util/timer.h"
 
 namespace xllm {
 namespace helper {
@@ -267,6 +269,14 @@ bool populate_raw_output_tensors(const InferenceType inference_type,
 std::string generate_request_id() {
   return "xllm-" + InstanceName::name()->get_name_hash() + "-" +
          short_uuid.random();
+}
+
+std::string resolve_request_id(const XLLM_RequestParams* request_params) {
+  if (request_params != nullptr &&
+      std::strlen(request_params->request_id) > 0) {
+    return request_params->request_id;
+  }
+  return generate_request_id();
 }
 
 void init_log(const std::string& log_dir) {
@@ -563,12 +573,7 @@ XLLM_Response* handle_inference_request(
     const XLLM_RequestParams* request_params) {
   CHECK(nullptr != handler);
 
-  std::string request_id;
-  if (nullptr != request_params && strlen(request_params->request_id) > 0) {
-    request_id = request_params->request_id;
-  } else {
-    request_id = generate_request_id();
-  }
+  const std::string request_id = resolve_request_id(request_params);
 
   if (!handler->initialized) {
     return build_error_response(
@@ -597,6 +602,10 @@ XLLM_Response* handle_inference_request(
 
   const int64_t created_time = absl::ToUnixSeconds(absl::Now());
 
+  if constexpr (std::is_same_v<HandlerType, XLLM_REC_Handler>) {
+    xllm::c_api_infer_timing::ensure_request(request_id);
+  }
+
   try {
     auto promise_ptr = std::make_shared<folly::Promise<XLLM_Response*>>();
     auto future = promise_ptr->getSemiFuture();
@@ -612,6 +621,7 @@ XLLM_Response* handle_inference_request(
         try {
           if (req_output.status.has_value()) {
             if (req_output.status.value().ok()) {
+              xllm::Timer build_response_timer;
               XLLM_Response* response =
                   build_success_response(inference_type,
                                          req_output,
@@ -629,6 +639,12 @@ XLLM_Response* handle_inference_request(
                 // RepeatedField round trip.
                 populate_raw_output_tensors(
                     inference_type, req_output, response);
+              }
+              if (inference_type == InferenceType::REC_COMPLETIONS) {
+                xllm::c_api_infer_timing::set_build_response_us(
+                    request_id,
+                    static_cast<int64_t>(
+                        build_response_timer.elapsed_microseconds()));
               }
 
               locked_promise->setValue(response);
