@@ -134,10 +134,9 @@ class GlmMoeDsaModelImpl : public torch::nn::Module {
               << "DSA top-k sharing requires index cache at layer "
               << layer_index;
           current_topk_indices = torch::empty(
-              std::vector<int64_t>{
-                  h.size(0),
-                  index_cache.size(2),
-                  static_cast<int64_t>(index_topk_)},
+              std::vector<int64_t>{h.size(0),
+                                   index_cache.size(2),
+                                   static_cast<int64_t>(index_topk_)},
               torch::TensorOptions().device(device_).dtype(torch::kInt32));
           output_topk_indices = &current_topk_indices;
         }
