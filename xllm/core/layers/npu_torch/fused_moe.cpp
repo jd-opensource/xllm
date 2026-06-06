@@ -212,6 +212,15 @@ bool has_w_style_shared_expert_weights(const StateDict& state_dict) {
   return false;
 }
 
+bool use_shared_expert_gate(const ModelArgs& model_args) {
+  return model_args.model_type() != "minimax_m3_vl" &&
+         model_args.model_type() != "minimax_m3";
+}
+
+bool is_minimax_m3_model_type(const std::string& model_type) {
+  return model_type == "minimax_m3_vl" || model_type == "minimax_m3";
+}
+
 // Qwen3.5-MoE fused checkpoint fallback helpers.
 bool load_fused_gate_up_fallback(const StateDict& state_dict,
                                  int64_t rank,
@@ -365,6 +374,7 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       is_gated_(moe_args.is_gated),
       skip_gate_load_(moe_args.skip_gate_load),
       is_deepseek_v4_(util::is_deepseek_v4_model_type(model_args.model_type())),
+      is_minimax_m3_(is_minimax_m3_model_type(model_args.model_type())),
       renormalize_(model_args.norm_topk_prob() ? 1 : 0),
       swiglu_limit_(static_cast<double>(model_args.swiglu_limit())),
       hidden_act_(model_args.hidden_act()),
@@ -403,13 +413,20 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   }
 
   if (topk_method == "noaux_tc") {
-    e_score_correction_bias_ = register_parameter(
-        "e_score_correction_bias", torch::empty({num_experts}, options), false);
+    const torch::TensorOptions gate_options =
+        is_minimax_m3_ ? options.dtype(torch::kFloat32) : options;
+    e_score_correction_bias_ =
+        register_parameter("e_score_correction_bias",
+                           torch::empty({num_experts}, gate_options),
+                           false);
   }
 
+  const torch::TensorOptions gate_options =
+      is_minimax_m3_ ? options.dtype(torch::kFloat32) : options;
   gate_ = register_module(
       "gate_proj",
-      ReplicatedLinear(hidden_size_, num_experts, false, quant_args, options));
+      ReplicatedLinear(
+          hidden_size_, num_experts, false, quant_args, gate_options));
   act_ =
       register_module("act", Activation(hidden_act_, is_gated_, swiglu_limit_));
   if (n_shared_experts_ > 0) {
@@ -433,12 +450,14 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
                                  options,
                                  /*module_prefix=*/"",
                                  swiglu_limit_));
-    shared_expert_gate_ = register_module(
-        "shared_expert_gate",
-        torch::nn::Linear(
-            torch::nn::LinearOptions(hidden_size_, 1).bias(false)));
-    shared_expert_gate_->weight.set_data(
-        shared_expert_gate_->weight.to(options));
+    if (use_shared_expert_gate(model_args)) {
+      shared_expert_gate_ = register_module(
+          "shared_expert_gate",
+          torch::nn::Linear(
+              torch::nn::LinearOptions(hidden_size_, 1).bias(false)));
+      shared_expert_gate_->weight.set_data(
+          shared_expert_gate_->weight.to(options));
+    }
   }
 
   // create weight buffer
@@ -1078,6 +1097,9 @@ torch::Tensor FusedMoEImpl::forward_expert(
   moe_combine_params.gather_ids = selected_expert_info.combine_idx;
   torch::Tensor final_hidden_states =
       xllm::kernel::moe_combine_result(moe_combine_params);
+  if (is_deepseek_v4_ || is_minimax_m3_) {
+    final_hidden_states = final_hidden_states * route_scale_;
+  }
   // reshape the final hidden states to the original shape
   final_hidden_states = final_hidden_states.reshape(hidden_states_shape);
 
@@ -1123,7 +1145,8 @@ torch::Tensor FusedMoEImpl::forward(const torch::Tensor& hidden_states,
       }
     }
   }
-  auto router_logits = gate_(input);
+  torch::Tensor gate_input = is_minimax_m3_ ? input.to(torch::kFloat32) : input;
+  auto router_logits = gate_(gate_input);
   auto output = forward_expert(input, router_logits, shared_output);
 
   if (need_slice) {
@@ -1923,7 +1946,7 @@ void FusedMoEImpl::load_state_dict(const StateDict& state_dict) {
     if (!weight.defined()) {
       weight = state_dict.get_tensor("shared_experts_gate.weight");
     }
-    if (weight.defined()) {
+    if (weight.defined() && shared_expert_gate_) {
       weight = weight.reshape({weight.size(0), -1});
       DCHECK_EQ(shared_expert_gate_->weight.sizes(), weight.sizes())
           << "proj weight size mismatch for " << name();
