@@ -549,6 +549,9 @@ RequestParams::RequestParams(const proto::AnthropicMessagesRequest& request,
     stop = std::vector<std::string>(request.stop_sequences().begin(),
                                     request.stop_sequences().end());
   }
+  if (request.has_ignore_eos()) {
+    ignore_eos = request.ignore_eos();
+  }
   tool_choice = std::move(handle_tool_choice(request));
   tools = std::move(handle_tools(request));
 }

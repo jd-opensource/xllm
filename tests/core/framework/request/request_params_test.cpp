@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <gtest/gtest.h>
 
+#include "anthropic.pb.h"
 #include "chat.pb.h"
 #include "completion.pb.h"
 
@@ -98,6 +99,17 @@ TEST(RequestParamsTest, ChatBeamSearchKeepsExplicitZeroTopLogprobs) {
 
   EXPECT_TRUE(params.logprobs);
   EXPECT_EQ(params.top_logprobs, 0);
+}
+
+TEST(RequestParamsTest, AnthropicPreservesIgnoreEos) {
+  proto::AnthropicMessagesRequest request;
+  request.set_model("claude-3");
+  request.set_max_tokens(16);
+  request.set_ignore_eos(true);
+
+  RequestParams params(request, "", "");
+
+  EXPECT_TRUE(params.ignore_eos);
 }
 
 }  // namespace

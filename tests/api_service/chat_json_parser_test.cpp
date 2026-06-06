@@ -15,9 +15,12 @@ limitations under the License.
 
 #include "api_service/chat_json_parser.h"
 
+#include <google/protobuf/util/json_util.h>
 #include <gtest/gtest.h>
 
 #include <nlohmann/json.hpp>
+
+#include "anthropic.pb.h"
 
 namespace xllm {
 
@@ -383,6 +386,31 @@ TEST_F(PreprocessChatJsonTest, AnthropicPreservesOtherFields) {
   })";
   AnthropicChatJsonParser parser;
   expect_success(input, parser, expected);
+}
+
+TEST_F(PreprocessChatJsonTest, AnthropicIgnoreEosParsedAfterRemap) {
+  std::string input = R"({
+    "model": "claude-3",
+    "max_tokens": 1024,
+    "ignore_eos": true,
+    "messages": [{"role": "user", "content": "Hello"}]
+  })";
+
+  AnthropicChatJsonParser parser;
+  auto [status, processed_json] = parser.preprocess(input);
+  ASSERT_TRUE(status.ok()) << "Unexpected error: " << status.message();
+
+  proto::AnthropicMessagesRequest request;
+  google::protobuf::util::JsonParseOptions options;
+  options.ignore_unknown_fields = true;
+  auto parse_status = google::protobuf::util::JsonStringToMessage(
+      processed_json, &request, options);
+  ASSERT_TRUE(parse_status.ok()) << parse_status.ToString();
+
+  EXPECT_TRUE(request.has_ignore_eos());
+  EXPECT_TRUE(request.ignore_eos());
+  ASSERT_EQ(request.messages_size(), 1);
+  EXPECT_EQ(request.messages(0).content_string(), "Hello");
 }
 
 }  // namespace xllm

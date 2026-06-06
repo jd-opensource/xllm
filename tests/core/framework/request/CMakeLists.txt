@@ -24,6 +24,16 @@ cc_test(
 
 cc_test(
   NAME
+    stopping_checker_test
+  SRCS
+    stopping_checker_test.cpp
+  DEPS
+    :request
+    GTest::gtest_main
+)
+
+cc_test(
+  NAME
     request_prefix_cache_tokens_test
   SRCS
     request_prefix_cache_tokens_test.cpp

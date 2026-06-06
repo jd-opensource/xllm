@@ -144,6 +144,9 @@ message AnthropicMessagesRequest {
 
   // Top-P (nucleus) sampling (optional)
   optional float top_p = 13;
+
+  // Whether to ignore the end of sequence token. xLLM extension.
+  optional bool ignore_eos = 14;
 }
 
 message AnthropicDelta {
