@@ -109,14 +109,15 @@ void PrefillOnlyScheduler::handle_prefill_requests(
         continue;
       }
 
-      // FIXME: use actual num_tokens to handle
-      // Currently overestimating the number of tokens actually processed when
-      // enable prefix cache
-      // size_t num_tokens = prefill_sequence->num_need_compute_tokens();
-      size_t num_tokens = std::min(prefill_sequence->num_need_compute_tokens(),
-                                   remaining_token_budget);
+      // Match prefix cache first so that num_need_compute_tokens() reflects
+      // the cached prefix length.
+      kv_cache_manager_->allocate_shared(prefill_sequence.get());
+      size_t num_need_compute = prefill_sequence->num_need_compute_tokens();
+      size_t num_tokens = std::min(num_need_compute, remaining_token_budget);
       if (remaining_token_budget < allocated_tokens + num_tokens ||
           remaining_seq_budget < allocated_seqs + 1) {
+        // release shared prefix blocks allocated above
+        kv_cache_manager_->deallocate(prefill_sequence.get());
         can_schedule = false;
         budget_exhausted = true;
         break;
@@ -125,7 +126,9 @@ void PrefillOnlyScheduler::handle_prefill_requests(
       // preempt offline decode
       const size_t kv_cache_tokens_num =
           prefill_sequence->kv_state().kv_cache_tokens_num();
-      if (!kv_cache_manager_->allocate(prefill_sequence.get())) {
+      const size_t max_handle_num_tokens = kv_cache_tokens_num + num_tokens;
+      if (!kv_cache_manager_->allocate(prefill_sequence.get(),
+                                       max_handle_num_tokens)) {
         can_schedule = false;
         if (options_.enable_online_preempt_offline() && !request->offline() &&
             !running_queue_offline_->empty()) {
@@ -433,6 +436,7 @@ void PrefillOnlyScheduler::handle_last_step_prefill_requests(
 
 std::vector<Batch> PrefillOnlyScheduler::prepare_batch() {
   Timer timer;
+
   // propogate new requests to waiting_priority_queue_
   // Include those requests that are preempted by others.
   std::shared_ptr<Request> request;
