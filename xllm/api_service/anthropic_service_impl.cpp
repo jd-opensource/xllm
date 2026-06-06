@@ -52,7 +52,8 @@ std::string convert_finish_reason_to_anthropic(
     return "end_turn";
   } else if (finish_reason == "length") {
     return "max_tokens";
-  } else if (finish_reason == "function_call") {
+  } else if (finish_reason == "function_call" ||
+             finish_reason == "tool_calls") {
     return "tool_use";
   }
   return "end_turn";
@@ -349,6 +350,7 @@ bool start_new_content_block(std::shared_ptr<AnthropicCall> call,
   } else if (curr_content_block_type == "tool_use") {
     content_block->set_id(content_block_info.function_calls[0].id);
     content_block->set_name(content_block_info.function_calls[0].name);
+    content_block->mutable_input();
   } else {
     LOG(FATAL) << "Unknown content block type: " << curr_content_block_type;
   }
@@ -390,11 +392,12 @@ bool send_content_block_delta(std::shared_ptr<AnthropicCall> call,
     delta->set_type("text_delta");
     delta->set_text(content_block_info.normal_text);
   } else if (delta_type == "tool_use_delta") {
-    delta->set_type("input_json_delta");
-    if (!content_block_info.function_calls.empty() &&
-        !content_block_info.function_calls[0].arguments.empty()) {
-      delta->set_partial_json(content_block_info.function_calls[0].arguments);
+    if (content_block_info.function_calls.empty() ||
+        content_block_info.function_calls[0].arguments.empty()) {
+      return true;
     }
+    delta->set_type("input_json_delta");
+    delta->set_partial_json(content_block_info.function_calls[0].arguments);
   } else {
     LOG(FATAL) << "Unknown delta type: " << delta_type;
   }
@@ -480,6 +483,7 @@ bool send_delta_to_client(
   }
 
   std::string finish_reason = "";
+  bool has_tool_call = false;
   for (const auto& seq_output : output.outputs) {
     const auto& index = seq_output.index;
     std::string cur_text = seq_output.text;
@@ -533,6 +537,10 @@ bool send_delta_to_client(
       }
     }
 
+    if (stream_parser && stream_parser->get_has_tool_call(index)) {
+      has_tool_call = true;
+    }
+
     // Handle finish reason
     if (seq_output.finish_reason.has_value()) {
       // Check for unstreamed tool args before sending finish reason
@@ -564,7 +572,9 @@ bool send_delta_to_client(
   // last `content_block_stop` and `message_delta` event
   if (output.finished || output.cancelled) {
     if (output.finished) {
-      finish_reason = convert_finish_reason_to_anthropic(finish_reason);
+      finish_reason = has_tool_call
+                          ? "tool_use"
+                          : convert_finish_reason_to_anthropic(finish_reason);
     } else {
       finish_reason = "stop";
     }

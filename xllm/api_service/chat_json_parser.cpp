@@ -161,6 +161,27 @@ std::pair<Status, std::string> AnthropicChatJsonParser::preprocess(
           msg["content_string"] = content.get<std::string>();
           msg.erase("content");
         } else if (content.is_array()) {
+          for (auto& block : content) {
+            if (!block.is_object() ||
+                block.value("type", "") != "tool_result") {
+              continue;
+            }
+            if (block.contains("tool_use_id") && !block.contains("id")) {
+              block["id"] = block["tool_use_id"];
+            }
+            block.erase("tool_use_id");
+            if (!block.contains("content")) {
+              continue;
+            }
+            auto& tool_content = block["content"];
+            if (tool_content.is_string()) {
+              block["content_string"] = tool_content.get<std::string>();
+              block.erase("content");
+            } else if (tool_content.is_array()) {
+              block["content_list"] = {{"items", tool_content}};
+              block.erase("content");
+            }
+          }
           nlohmann::json content_blocks;
           content_blocks["blocks"] = content;
           msg["content_blocks"] = content_blocks;
