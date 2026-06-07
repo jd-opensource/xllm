@@ -270,6 +270,10 @@ REGISTER_MODEL_ARGS(minimax_m3_vl, [&] {
   LOAD_ARG_OR(bos_token_id, "text_config.bos_token_id", 200019);
   LOAD_ARG_OR(eos_token_id, "text_config.eos_token_id", 200020);
   LOAD_ARG_OR(pad_token_id, "text_config.pad_token_id", 200000);
+  LOAD_ARG_OR(vision_start_token_id, "vision_start_token_id", 200029);
+  LOAD_ARG_OR(vision_end_token_id, "vision_end_token_id", 200030);
+  LOAD_ARG_OR(image_token_id, "image_token_index", 200025);
+  LOAD_ARG_OR(video_token_id, "video_token_index", 200026);
   LOAD_ARG_OR(head_dim, "text_config.head_dim", 128);
   LOAD_ARG_OR(rotary_dim, "text_config.rotary_dim", 64);
   LOAD_ARG_OR(hidden_act, "text_config.hidden_act", "swiglu");
@@ -302,6 +306,40 @@ REGISTER_MODEL_ARGS(minimax_m3_vl, [&] {
   LOAD_ARG_OR(vocab_size, "text_config.vocab_size", 200064);
   LOAD_ARG_OR(
       mlp_only_layers, "text_config.mlp_only_layers", std::vector<int32_t>());
+
+  LOAD_ARG_OR(mm_hidden_act, "vision_config.hidden_act", "gelu");
+  LOAD_ARG_OR(mm_hidden_size, "vision_config.hidden_size", 1280);
+  LOAD_ARG_OR(mm_intermediate_size, "vision_config.intermediate_size", 5120);
+  LOAD_ARG_OR(mm_num_attention_heads, "vision_config.num_attention_heads", 16);
+  LOAD_ARG_OR(mm_num_channels, "vision_config.num_channels", 3);
+  LOAD_ARG_OR(mm_num_hidden_layers, "vision_config.num_hidden_layers", 32);
+  LOAD_ARG_OR(mm_image_size, "vision_config.image_size", 2016);
+  LOAD_ARG_OR(mm_layer_norm_eps, "vision_config.layer_norm_eps", 1e-5f);
+  LOAD_ARG_OR(mm_patch_size, "vision_config.patch_size", 14);
+  LOAD_ARG_OR(mm_projection_dim, "vision_config.projection_dim", 6144);
+  LOAD_ARG_OR(mm_projector_hidden_size, "projector_hidden_size", 6144);
+  LOAD_ARG_OR(mm_projector_hidden_act, "projector_hidden_act", "gelu");
+  LOAD_ARG_OR(mm_spatial_merge_size,
+              "vision_config.img_token_compression_config.spatial_merge_size",
+              2);
+  LOAD_ARG_OR(mm_temporal_patch_size,
+              "vision_config.img_token_compression_config.temporal_patch_size",
+              2);
+  LOAD_ARG_OR(mm_image_patch_size, "vision_config.patch_size", 14);
+  LOAD_ARG_OR(mm_image_merge_size,
+              "vision_config.img_token_compression_config.spatial_merge_size",
+              2);
+  LOAD_ARG_OR(mm_image_temporal_patch_size,
+              "vision_config.img_token_compression_config.temporal_patch_size",
+              2);
+  LOAD_ARG_OR(mm_image_min_pixels, "min_pixels", 3136);
+  LOAD_ARG_OR(mm_image_max_pixels, "max_pixels", 451584);
+  SET_ARG(mm_image_normalize_mean,
+          std::vector<double>({0.48145466, 0.4578275, 0.40821073}));
+  SET_ARG(mm_image_normalize_std,
+          std::vector<double>({0.26862954, 0.26130258, 0.27577711}));
+  SET_ARG(mm_head_dim, args->mm_hidden_size() / args->mm_num_attention_heads());
+
   LOAD_ARG_OR(first_k_dense_replace, "text_config.first_k_dense_replace", 3);
   LOAD_ARG_OR(use_sparse_attention,
               "text_config.sparse_attention_config.use_sparse_attention",
