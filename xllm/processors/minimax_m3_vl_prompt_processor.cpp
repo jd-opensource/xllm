@@ -72,6 +72,9 @@ void MiniMaxM3VLPromptProcessor::process(std::string& prompt,
     image_pos = find_image_token(prompt, begin);
   }
 
+  CHECK_EQ(image_index, image_count)
+      << "Fewer MiniMax-M3 image tokens than processed images.";
+
   if (begin < prompt.size()) {
     data.append(prompt, begin, std::string::npos);
   }

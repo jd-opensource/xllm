@@ -1011,11 +1011,11 @@ void BatchInputBuilder::process_swap_block_infos(ForwardInput& forward_input) {
               [](const BlockTransferInfo& a, const BlockTransferInfo& b) {
                 return a.src_block_id < b.src_block_id;
               });
-#if defined(USE_CUDA)
     input_params.block_copy.swap_blocks.insert(
         input_params.block_copy.swap_blocks.end(),
         swap_blocks.begin(),
         swap_blocks.end());
+#if defined(USE_CUDA)
     const BlockCopyKernelInputData kernel_input =
         build_block_copy_kernel_input_data(swap_blocks,
                                            /*detect_overlap=*/true);

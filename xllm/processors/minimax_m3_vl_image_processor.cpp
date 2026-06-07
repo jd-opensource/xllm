@@ -27,9 +27,16 @@ namespace {
 using Size = std::pair<int32_t, int32_t>;
 
 int32_t round_by_factor(int32_t number, int32_t factor) {
-  return static_cast<int32_t>(
-             std::round(number / static_cast<double>(factor))) *
-         factor;
+  const int32_t quotient = number / factor;
+  const int32_t remainder = number % factor;
+  const int32_t doubled_remainder = remainder * 2;
+  if (doubled_remainder < factor) {
+    return quotient * factor;
+  }
+  if (doubled_remainder > factor) {
+    return (quotient + 1) * factor;
+  }
+  return (quotient % 2 == 0) ? quotient * factor : (quotient + 1) * factor;
 }
 
 int32_t ceil_by_factor(double number, int32_t factor) {
