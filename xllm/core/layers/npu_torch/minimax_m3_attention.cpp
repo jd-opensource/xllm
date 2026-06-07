@@ -19,6 +19,7 @@ limitations under the License.
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "core/layers/common/rotary_embedding_util.h"
@@ -702,26 +703,31 @@ torch::Tensor MiniMaxM3AttentionImpl::forward(
   torch::Tensor v_flat = v_heads.reshape({num_tokens, kv_size_}).contiguous();
 
   if (use_sparse_attention_) {
-    torch::Tensor index_q = index_q_proj_->forward(hidden_states);
     torch::Tensor index_k = index_k_proj_->forward(hidden_states);
-    torch::Tensor index_q_heads = index_q.view(
-        {num_tokens, total_sparse_index_heads_, sparse_index_dim_});
     torch::Tensor index_k_heads =
         index_k.view({num_tokens, 1, sparse_index_dim_});
-    index_q_heads = std::get<0>(index_q_norm_->forward(index_q_heads));
     index_k_heads = std::get<0>(index_k_norm_->forward(index_k_heads));
+
+    if (max_seq_len_from_metadata(attn_metadata) <= sparse_count_) {
+      std::tuple<torch::Tensor, torch::Tensor> rotated_index_k =
+          rotary_emb_->forward(index_k_heads, index_k_heads, positions);
+      index_k_heads = std::get<1>(rotated_index_k).contiguous();
+      write_index_cache(index_k_heads, kv_cache, attn_metadata);
+      torch::Tensor out = std::get<0>(
+          attn_->forward(attn_metadata, q_flat, k_flat, v_flat, kv_cache));
+      return o_proj_->forward(out);
+    }
+
+    torch::Tensor index_q = index_q_proj_->forward(hidden_states);
+    torch::Tensor index_q_heads = index_q.view(
+        {num_tokens, total_sparse_index_heads_, sparse_index_dim_});
+    index_q_heads = std::get<0>(index_q_norm_->forward(index_q_heads));
     std::tie(index_q_heads, index_k_heads) =
         rotary_emb_->forward(index_q_heads, index_k_heads, positions);
     index_q_heads = select_local_sparse_index_heads(index_q_heads);
     index_k_heads = index_k_heads.contiguous();
 
     write_index_cache(index_k_heads, kv_cache, attn_metadata);
-    if (max_seq_len_from_metadata(attn_metadata) <= sparse_count_) {
-      torch::Tensor out = std::get<0>(
-          attn_->forward(attn_metadata, q_flat, k_flat, v_flat, kv_cache));
-      return o_proj_->forward(out);
-    }
-
     write_kv_cache(k_flat, v_flat, kv_cache, attn_metadata);
     torch::Tensor sparse_out = sparse_attention_forward(q_heads,
                                                         k_heads,
