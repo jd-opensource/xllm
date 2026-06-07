@@ -303,9 +303,38 @@ REGISTER_MODEL_ARGS(minimax_m3_vl, [&] {
   LOAD_ARG_OR(
       mlp_only_layers, "text_config.mlp_only_layers", std::vector<int32_t>());
   LOAD_ARG_OR(first_k_dense_replace, "text_config.first_k_dense_replace", 3);
+  LOAD_ARG_OR(use_sparse_attention,
+              "text_config.sparse_attention_config.use_sparse_attention",
+              false);
+  LOAD_ARG_OR(sparse_index_dim,
+              "text_config.sparse_attention_config.sparse_index_dim",
+              128);
+  LOAD_ARG_OR(sparse_num_index_heads,
+              "text_config.sparse_attention_config.sparse_num_index_heads",
+              4);
+  LOAD_ARG_OR(sparse_topk_blocks,
+              "text_config.sparse_attention_config.sparse_topk_blocks",
+              16);
+  LOAD_ARG_OR(sparse_block_size,
+              "text_config.sparse_attention_config.sparse_block_size",
+              128);
+  LOAD_ARG_OR(sparse_init_block,
+              "text_config.sparse_attention_config.sparse_init_block",
+              0);
+  LOAD_ARG_OR(sparse_local_block,
+              "text_config.sparse_attention_config.sparse_local_block",
+              1);
+  LOAD_ARG_OR(sparse_attention_freq,
+              "text_config.sparse_attention_config.sparse_attention_freq",
+              std::vector<int32_t>());
 
   SET_ARG(stop_token_ids, std::unordered_set<int32_t>({args->eos_token_id()}));
   SET_ARG(topk_method, "noaux_tc");
+  if (args->use_sparse_attention()) {
+    SET_ARG(index_head_dim, args->sparse_index_dim());
+    SET_ARG(index_n_heads, args->sparse_num_index_heads());
+    SET_ARG(index_topk, args->sparse_topk_blocks());
+  }
 });
 
 }  // namespace xllm::npu::model

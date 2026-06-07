@@ -224,7 +224,8 @@ MiniMaxM3DecoderLayerImpl::MiniMaxM3DecoderLayerImpl(
 
   is_moe_layer_ = is_moe_layer(model_args, layer_id);
 
-  attention_ = register_module("self_attn", MiniMaxM3Attention(context));
+  attention_ =
+      register_module("self_attn", MiniMaxM3Attention(context, layer_id));
   input_norm_ = register_module(
       "input_layernorm",
       layer::Qwen3NextRMSNorm(
