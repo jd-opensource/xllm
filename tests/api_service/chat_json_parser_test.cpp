@@ -368,6 +368,53 @@ TEST_F(PreprocessChatJsonTest, AnthropicToolResultRemapped) {
   EXPECT_EQ(blocks[0].content_string(), "total 1\nfile.txt");
 }
 
+TEST_F(PreprocessChatJsonTest, AnthropicToolResultListRemapped) {
+  std::string input = R"({
+    "messages": [{
+      "role": "user",
+      "content": [{
+        "type": "tool_result",
+        "tool_use_id": "call_123",
+        "content": [
+          {"type": "text", "text": "total 1"},
+          {"type": "text", "text": "file.txt"}
+        ]
+      }]
+    }]
+  })";
+
+  AnthropicChatJsonParser parser;
+  auto [status, processed_json] = parser.preprocess(input);
+  ASSERT_TRUE(status.ok()) << "Unexpected error: " << status.message();
+
+  nlohmann::json processed = nlohmann::json::parse(processed_json);
+  const nlohmann::json& block =
+      processed["messages"][0]["content_blocks"]["blocks"][0];
+  const nlohmann::json& items = block["content_list"]["items"];
+  ASSERT_TRUE(items.is_array());
+  ASSERT_EQ(items.size(), 2);
+  EXPECT_EQ(items[0]["type"], "text");
+  EXPECT_EQ(items[0]["text"], "total 1");
+  EXPECT_EQ(items[1]["type"], "text");
+  EXPECT_EQ(items[1]["text"], "file.txt");
+
+  proto::AnthropicMessagesRequest request;
+  google::protobuf::util::JsonParseOptions options;
+  options.ignore_unknown_fields = true;
+  auto parse_status = google::protobuf::util::JsonStringToMessage(
+      processed_json, &request, options);
+  ASSERT_TRUE(parse_status.ok()) << parse_status.ToString();
+
+  ASSERT_EQ(request.messages_size(), 1);
+  const auto& blocks = request.messages(0).content_blocks().blocks();
+  ASSERT_EQ(blocks.size(), 1);
+  EXPECT_EQ(blocks[0].type(), "tool_result");
+  ASSERT_TRUE(blocks[0].has_id());
+  EXPECT_EQ(blocks[0].id(), "call_123");
+  ASSERT_TRUE(blocks[0].has_content_list());
+  ASSERT_EQ(blocks[0].content_list().items_size(), 2);
+}
+
 TEST_F(PreprocessChatJsonTest, AnthropicSystemStringRemapped) {
   std::string input = R"({
     "system": "You are helpful.",

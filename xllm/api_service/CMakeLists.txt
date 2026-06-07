@@ -12,6 +12,7 @@ cc_library(
     rec_completion_service_impl.h
     chat_service_impl.h
     anthropic_service_impl.h
+    anthropic_stream_utils.h
     sample_service_impl.h
     embedding_service_impl.h
     audio_generation_service_impl.h
@@ -37,6 +38,7 @@ cc_library(
     rec_completion_service_impl.cpp
     chat_service_impl.cpp
     anthropic_service_impl.cpp
+    anthropic_stream_utils.cpp
     sample_service_impl.cpp
     embedding_service_impl.cpp
     audio_generation_service_impl.cpp

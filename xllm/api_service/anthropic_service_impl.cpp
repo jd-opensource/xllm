@@ -21,9 +21,11 @@ limitations under the License.
 #include <google/protobuf/util/json_util.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_set>
 
+#include "api_service/anthropic_stream_utils.h"
 #include "api_service/stream_output_parser.h"
 #include "api_service/utils.h"
 #include "core/common/types.h"
@@ -45,19 +47,6 @@ struct ContentBlockInfo {
   std::string normal_text = "";
   std::vector<FunctionCallInfo> function_calls;
 };
-
-std::string convert_finish_reason_to_anthropic(
-    const std::string& finish_reason) {
-  if (finish_reason == "stop") {
-    return "end_turn";
-  } else if (finish_reason == "length") {
-    return "max_tokens";
-  } else if (finish_reason == "function_call" ||
-             finish_reason == "tool_calls") {
-    return "tool_use";
-  }
-  return "end_turn";
-}
 
 // Build messages from Anthropic protobuf request
 std::vector<Message> build_messages(
@@ -283,8 +272,9 @@ bool send_result_to_client(std::shared_ptr<AnthropicCall> call,
 
     // set stop_reason
     if (choice.has_finish_reason()) {
-      anthropic_response.set_stop_reason(std::move(
-          convert_finish_reason_to_anthropic(choice.finish_reason())));
+      anthropic_response.set_stop_reason(
+          std::move(api_service::convert_finish_reason_to_anthropic(
+              choice.finish_reason())));
     }
 
     // Add text content block
@@ -392,12 +382,21 @@ bool send_content_block_delta(std::shared_ptr<AnthropicCall> call,
     delta->set_type("text_delta");
     delta->set_text(content_block_info.normal_text);
   } else if (delta_type == "tool_use_delta") {
-    if (content_block_info.function_calls.empty() ||
-        content_block_info.function_calls[0].arguments.empty()) {
+    if (content_block_info.function_calls.empty()) {
       return true;
     }
-    delta->set_type("input_json_delta");
-    delta->set_partial_json(content_block_info.function_calls[0].arguments);
+    std::optional<proto::AnthropicStreamEvent> event =
+        api_service::make_input_json_delta_event(
+            static_cast<int32_t>(content_block_index),
+            content_block_info.function_calls[0].arguments);
+    if (!event.has_value()) {
+      return true;
+    }
+    if (!call->write(event->type(), event.value())) {
+      LOG(ERROR) << "Failed to send content_block_delta event";
+      return false;
+    }
+    return true;
   } else {
     LOG(FATAL) << "Unknown delta type: " << delta_type;
   }
@@ -571,13 +570,8 @@ bool send_delta_to_client(
   // 4) finish request, we need to send the
   // last `content_block_stop` and `message_delta` event
   if (output.finished || output.cancelled) {
-    if (output.finished) {
-      finish_reason = has_tool_call
-                          ? "tool_use"
-                          : convert_finish_reason_to_anthropic(finish_reason);
-    } else {
-      finish_reason = "stop";
-    }
+    finish_reason = api_service::get_stream_stop_reason(
+        output.finished, has_tool_call, finish_reason);
 
     // if content_block_index < 0, means no content block started
     // so we don't need to send content_block_stop event

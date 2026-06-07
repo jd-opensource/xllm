@@ -54,6 +54,17 @@ cc_test(
 
 cc_test(
   NAME
+    anthropic_stream_utils_test
+  SRCS
+    anthropic_stream_utils_test.cpp
+    ../../xllm/api_service/anthropic_stream_utils.cpp
+  DEPS
+    proto::xllm_proto
+    GTest::gtest_main
+)
+
+cc_test(
+  NAME
     usage_json_test
   SRCS
     usage_json_test.cpp

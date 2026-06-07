@@ -113,6 +113,49 @@ TEST(RequestParamsTest, AnthropicPreservesIgnoreEos) {
   EXPECT_TRUE(params.ignore_eos);
 }
 
+TEST(RequestParamsTest, AnthropicToolChoiceDefaults) {
+  proto::AnthropicMessagesRequest request;
+  request.set_model("claude-3");
+  request.set_max_tokens(16);
+
+  RequestParams no_tool_params(request, "", "");
+  EXPECT_EQ(no_tool_params.tool_choice, "");
+
+  auto* tool = request.add_tools();
+  tool->set_name("list_files");
+
+  RequestParams auto_params(request, "", "");
+  EXPECT_EQ(auto_params.tool_choice, "auto");
+
+  request.mutable_tool_choice()->set_type("any");
+  RequestParams required_params(request, "", "");
+  EXPECT_EQ(required_params.tool_choice, "required");
+
+  request.mutable_tool_choice()->set_type("tool");
+  request.mutable_tool_choice()->clear_name();
+  RequestParams fallback_params(request, "", "");
+  EXPECT_EQ(fallback_params.tool_choice, "auto");
+
+  request.mutable_tool_choice()->set_type("unknown");
+  RequestParams unknown_params(request, "", "");
+  EXPECT_EQ(unknown_params.tool_choice, "auto");
+}
+
+TEST(RequestParamsTest, AnthropicToolWithoutSchemaUsesEmptyJson) {
+  proto::AnthropicMessagesRequest request;
+  request.set_model("claude-3");
+  request.set_max_tokens(16);
+
+  auto* tool = request.add_tools();
+  tool->set_name("list_files");
+
+  RequestParams params(request, "", "");
+
+  ASSERT_EQ(params.tools.size(), 1);
+  EXPECT_TRUE(params.tools[0].function.parameters.is_object());
+  EXPECT_TRUE(params.tools[0].function.parameters.empty());
+}
+
 TEST(RequestParamsTest, AnthropicToolSchemaUsesPlainJson) {
   proto::AnthropicMessagesRequest request;
   request.set_model("claude-3");
