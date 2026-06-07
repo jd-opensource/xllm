@@ -155,7 +155,6 @@ TEST(AnthropicJsonTest, KeepsEmptyToolUseInputObject) {
   const nlohmann::json& input = parsed["content_block"]["input"];
   ASSERT_TRUE(input.is_object());
   EXPECT_TRUE(input.empty());
-  EXPECT_FALSE(input.contains("fields"));
 }
 
 }  // namespace

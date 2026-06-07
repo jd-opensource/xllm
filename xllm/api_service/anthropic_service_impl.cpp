@@ -37,6 +37,11 @@ limitations under the License.
 namespace xllm {
 namespace {
 
+LLMMaster* check_master(LLMMaster* master) {
+  CHECK(master != nullptr);
+  return master;
+}
+
 struct FunctionCallInfo {
   std::string id = "";
   std::string name = "";
@@ -359,10 +364,15 @@ bool send_content_block_delta(std::shared_ptr<AnthropicCall> call,
                               const std::string& delta_type,
                               const ContentBlockInfo& content_block_info,
                               int& content_block_index) {
+  bool is_tool_use_delta = delta_type == "tool_use_delta";
+  if (is_tool_use_delta && content_block_info.function_calls.empty()) {
+    return true;
+  }
+
   // counter new block or tool function call, we need a new content block
   // <content_block_start> ... <content_block_stop>
   if (last_content_block_type != curr_content_block_type ||
-      (delta_type == "tool_use_delta" &&
+      (is_tool_use_delta &&
        !content_block_info.function_calls[0].name.empty())) {
     // try to create new content block
     if (!start_new_content_block(call,
@@ -381,10 +391,7 @@ bool send_content_block_delta(std::shared_ptr<AnthropicCall> call,
   if (delta_type == "text_delta") {
     delta->set_type("text_delta");
     delta->set_text(content_block_info.normal_text);
-  } else if (delta_type == "tool_use_delta") {
-    if (content_block_info.function_calls.empty()) {
-      return true;
-    }
+  } else if (is_tool_use_delta) {
     std::optional<proto::AnthropicStreamEvent> event =
         api_service::make_input_json_delta_event(
             static_cast<int32_t>(content_block_index),
@@ -625,13 +632,11 @@ AnthropicServiceImpl::AnthropicServiceImpl(
     LLMMaster* master,
     const std::vector<std::string>& models)
     : APIServiceImpl(models),
-      master_(master),
+      master_(check_master(master)),
       tool_call_parser_format_(
           master_->options().tool_call_parser().value_or("")),
       reasoning_parser_format_(
-          master_->options().reasoning_parser().value_or("")) {
-  CHECK(master_ != nullptr);
-}
+          master_->options().reasoning_parser().value_or("")) {}
 
 void AnthropicServiceImpl::process_async_impl(
     std::shared_ptr<AnthropicCall> call) {
@@ -643,7 +648,6 @@ void AnthropicServiceImpl::process_async_impl(
     return;
   }
 
-  CHECK(master_ != nullptr);
   // Check rate limit
   if (master_->get_rate_limiter()->is_limited()) {
     call->finish_with_error(
@@ -668,7 +672,6 @@ void AnthropicServiceImpl::process_async_impl(
                                              tool_call_parser_format_,
                                              reasoning_parser_format_,
                                              false /*is_force_reasoning_*/);
-    CHECK(stream_parser != nullptr) << "create StreamOutputParser failed!";
   }
 
   auto saved_streaming = request_params.streaming;
