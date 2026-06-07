@@ -31,6 +31,7 @@ namespace layer {
 namespace {
 
 constexpr char kQuantMethodMxfp8[] = "mxfp8";
+constexpr int64_t kSparseAttentionQueryChunkSize = 256;
 
 bool is_load_time_dequant_method(const std::string& quant_method) {
   return quant_method == kQuantMethodFp8 || quant_method == kQuantMethodMxfp8;
@@ -520,23 +521,41 @@ torch::Tensor MiniMaxM3AttentionImpl::apply_sparse_attention_for_index_head(
     const torch::Tensor& query_positions) const {
   const int64_t q_len = query.size(0);
   const int64_t seq_len = key_seq.size(0);
-  torch::Tensor valid = (token_indices >= 0) & (token_indices < seq_len);
-  valid = valid & (token_indices <= query_positions.view({-1, 1}));
-  torch::Tensor safe_idx =
-      token_indices.clamp(0, std::max<int64_t>(seq_len - 1, 0))
-          .to(torch::kInt64);
-  torch::Tensor flat_idx = safe_idx.reshape({-1});
-  torch::Tensor k_selected =
-      key_seq.index_select(/*dim=*/0, flat_idx).view({q_len, -1, head_dim_});
-  torch::Tensor v_selected =
-      value_seq.index_select(/*dim=*/0, flat_idx).view({q_len, -1, head_dim_});
-  torch::Tensor scores =
-      torch::einsum("qhd,qkd->qhk", {query, k_selected}).to(torch::kFloat32);
-  scores = scores * scaling_;
-  scores = scores.masked_fill(~valid.unsqueeze(1), -1.0e30f);
-  torch::Tensor probs = torch::softmax(scores, /*dim=*/-1);
-  return torch::einsum("qhk,qkd->qhd",
-                       {probs.to(v_selected.scalar_type()), v_selected});
+  torch::Tensor output = torch::empty_like(query);
+  for (int64_t q_start = 0; q_start < q_len;
+       q_start += kSparseAttentionQueryChunkSize) {
+    const int64_t q_end =
+        std::min(q_start + kSparseAttentionQueryChunkSize, q_len);
+    torch::Tensor query_chunk = query.slice(/*dim=*/0, q_start, q_end);
+    torch::Tensor token_indices_chunk =
+        token_indices.slice(/*dim=*/0, q_start, q_end);
+    torch::Tensor query_positions_chunk =
+        query_positions.slice(/*dim=*/0, q_start, q_end);
+    const int64_t q_chunk_len = q_end - q_start;
+
+    torch::Tensor valid =
+        (token_indices_chunk >= 0) & (token_indices_chunk < seq_len);
+    valid =
+        valid & (token_indices_chunk <= query_positions_chunk.view({-1, 1}));
+    torch::Tensor safe_idx =
+        token_indices_chunk.clamp(0, std::max<int64_t>(seq_len - 1, 0))
+            .to(torch::kInt64);
+    torch::Tensor flat_idx = safe_idx.reshape({-1});
+    torch::Tensor k_selected = key_seq.index_select(/*dim=*/0, flat_idx)
+                                   .view({q_chunk_len, -1, head_dim_});
+    torch::Tensor v_selected = value_seq.index_select(/*dim=*/0, flat_idx)
+                                   .view({q_chunk_len, -1, head_dim_});
+    torch::Tensor scores =
+        torch::einsum("qhd,qkd->qhk", {query_chunk, k_selected})
+            .to(torch::kFloat32);
+    scores = scores * scaling_;
+    scores = scores.masked_fill(~valid.unsqueeze(1), -1.0e30f);
+    torch::Tensor probs = torch::softmax(scores, /*dim=*/-1);
+    output.slice(/*dim=*/0, q_start, q_end)
+        .copy_(torch::einsum("qhk,qkd->qhd",
+                             {probs.to(v_selected.scalar_type()), v_selected}));
+  }
+  return output;
 }
 
 torch::Tensor MiniMaxM3AttentionImpl::apply_full_attention_for_sequence(
@@ -588,7 +607,6 @@ torch::Tensor MiniMaxM3AttentionImpl::sparse_attention_forward(
   torch::Tensor v_cache = kv_cache.get_v_cache();
   torch::Tensor index_cache = kv_cache.get_index_cache();
   torch::Tensor block_table = attn_metadata.block_table;
-  const bool use_direct_prefill = attn_metadata.is_prefill;
 
   int64_t q_start = 0;
   for (int64_t seq_idx = 0; seq_idx < static_cast<int64_t>(seq_lens.size());
@@ -599,12 +617,14 @@ torch::Tensor MiniMaxM3AttentionImpl::sparse_attention_forward(
       continue;
     }
 
+    const int64_t query_len = q_end - q_start;
     int64_t seq_len = seq_lens[seq_offset];
     torch::Tensor k_seq;
     torch::Tensor v_seq;
     torch::Tensor index_k_seq;
+    const bool use_direct_prefill =
+        attn_metadata.is_prefill && seq_len == query_len;
     if (use_direct_prefill) {
-      seq_len = q_end - q_start;
       k_seq = key.slice(/*dim=*/0, q_start, q_end).select(/*dim=*/1, 0);
       v_seq = value.slice(/*dim=*/0, q_start, q_end).select(/*dim=*/1, 0);
       index_k_seq =
