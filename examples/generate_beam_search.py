@@ -27,5 +27,5 @@ outputs = llm.beam_search(
 for output in outputs:
     generated_text = output.sequences[0].text
     print(f"Generated text: {generated_text!r}")
-
+ 
 llm.finish()
