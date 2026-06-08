@@ -159,11 +159,6 @@ TEST(EmbeddingCacheTest, WriteMtpBootstrapContextStoresExactDecodeState) {
   EXPECT_FALSE(states[0].all_draft_accepted);
   EXPECT_TRUE(tensor_equal(states[0].embedding, embedding));
 
-  embedding.fill_(9.0f);
-  states = cache.read_decode_states({1}, {"req_bootstrap"});
-  EXPECT_TRUE(
-      tensor_equal(states[0].embedding, torch::tensor({1.0f, 2.0f, 3.0f})));
-
   cache.clear({1});
   states = cache.read_decode_states({1}, {"req_bootstrap"});
   EXPECT_FALSE(states[0].valid);

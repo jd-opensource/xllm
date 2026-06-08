@@ -110,7 +110,7 @@ void EmbeddingCache::write_mtp_bootstrap_context(
   state.all_draft_accepted = false;
   state.token_id = token_id;
   state.position_offset = 0;
-  state.embedding = embedding.detach().clone();
+  state.embedding = embedding.detach();
 
   DecodeState& tail = mutable_tail(embedding_id);
   tail = std::move(state);

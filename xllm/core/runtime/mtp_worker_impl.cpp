@@ -762,7 +762,7 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_prefill(
       bootstrap_embeddings =
           bootstrap_embeddings.index_select(/*dim=*/0, bootstrap_idxes);
     }
-    output.sample_output.embeddings = bootstrap_embeddings.detach().clone();
+    output.sample_output.embeddings = bootstrap_embeddings.detach();
     embedding_cache_->write_prefill_target_context(
         input.input_params.embedding.embedding_ids,
         input.input_params.embedding.request_ids,
