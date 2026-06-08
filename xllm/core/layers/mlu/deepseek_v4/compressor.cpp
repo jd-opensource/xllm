@@ -95,27 +95,6 @@ torch::Tensor empty_output(const torch::Tensor& hidden_states,
   return torch::empty({0, head_dim}, hidden_states.options());
 }
 
-torch::Tensor make_compress_slots(const torch::Tensor& block_table,
-                                  int64_t batch_size,
-                                  int64_t seq_len,
-                                  int64_t block_size,
-                                  const torch::Device& device) {
-  torch::Tensor positions = torch::arange(
-      seq_len, torch::TensorOptions().dtype(torch::kInt64).device(device));
-  torch::Tensor block_col = torch::floor_divide(positions, block_size);
-  torch::Tensor block_offset = positions - block_col * block_size;
-  torch::Tensor bt_i64 = block_table.to(torch::kInt64);
-  torch::Tensor idx = block_col.unsqueeze(0)
-                          .expand({batch_size, -1})
-                          .to(bt_i64.device())
-                          .to(torch::kInt32);
-  torch::Tensor block_ids = bt_i64.gather(/*dim=*/1, idx);
-  return (block_ids * block_size + block_offset.unsqueeze(0))
-      .to(torch::kInt32)
-      .reshape({-1})
-      .contiguous();
-}
-
 PrefillPadPlan make_prefill_pad_plan(
     const xllm::layer::AttentionMetadata& attn_metadata,
     int64_t compress_ratio,
@@ -320,29 +299,18 @@ torch::Tensor CompressorImpl::forward_prefill(
   torch::Tensor& score_block_table = std::get<1>(block_tables);
   const int64_t batch_size =
       static_cast<int64_t>(attn_metadata.kv_seq_lens.size(0));
-  auto kv_slots = make_compress_slots(kv_block_table,
-                                      batch_size,
-                                      compress_len_,
-                                      kv_state.size(1),
-                                      hidden_states.device());
-  auto score_slots = make_compress_slots(score_block_table,
-                                         batch_size,
-                                         compress_len_,
-                                         score_state.size(1),
-                                         hidden_states.device());
 
-  auto kv_state_flat =
-      kv_state.view({kv_state.size(0) * kv_state.size(1), kv_state.size(2)});
+  int64_t cache_len = batch_size * compress_len_;
   auto new_kv_state =
-      kv_state_flat.index_select(/*dim=*/0, kv_slots.to(torch::kLong));
-  new_kv_state = new_kv_state.view({-1, compress_len_, kv_state.size(2)});
-
-  auto score_state_flat = score_state.view(
-      {score_state.size(0) * score_state.size(1), score_state.size(2)});
+      kv_state.view({kv_state.size(0) * kv_state.size(1), kv_state.size(2)})
+          .slice(0, 0, cache_len)
+          .view({batch_size, compress_len_, kv_state.size(2)});
   auto new_score_state =
-      score_state_flat.index_select(/*dim=*/0, score_slots.to(torch::kLong));
-  new_score_state =
-      new_score_state.view({-1, compress_len_, score_state.size(2)});
+      score_state
+          .view(
+              {score_state.size(0) * score_state.size(1), score_state.size(2)})
+          .slice(0, 0, cache_len)
+          .view({batch_size, compress_len_, score_state.size(2)});
 
   PrefillPadPlan pad_plan =
       make_prefill_pad_plan(attn_metadata, compress_ratio_, coff_);
@@ -388,14 +356,6 @@ torch::Tensor CompressorImpl::forward_prefill(
         compressed_kv, pad_plan, hidden_states.options(), head_dim_);
   }
 
-  auto score_state_cache = score_state.unsqueeze(1);
-  auto kv_state_cache = kv_state.unsqueeze(1);
-  write_cache(new_score_state.view({-1, 1, score_state.size(2)}),
-              score_state_cache,
-              score_slots);
-  write_cache(
-      new_kv_state.view({-1, 1, kv_state.size(2)}), kv_state_cache, kv_slots);
-
   if (slot_mapping.numel() == 0) {
     return empty_output(hidden_states, head_dim_);
   }
@@ -437,28 +397,17 @@ torch::Tensor CompressorImpl::forward_decode(
   torch::Tensor kv_pack = wkv_->forward(hidden_states);
   torch::Tensor score_pack = wgate_->forward(hidden_states);
 
-  torch::Tensor kv_slots = make_compress_slots(kv_block_table,
-                                               batch_size,
-                                               compress_len_,
-                                               kv_state.size(1),
-                                               hidden_states.device());
-  torch::Tensor score_slots = make_compress_slots(score_block_table,
-                                                  batch_size,
-                                                  compress_len_,
-                                                  score_state.size(1),
-                                                  hidden_states.device());
-  torch::Tensor kv_state_flat =
-      kv_state.view({kv_state.size(0) * kv_state.size(1), kv_state.size(2)});
-  torch::Tensor new_kv_state =
-      kv_state_flat.index_select(/*dim=*/0, kv_slots.to(torch::kLong));
-  new_kv_state = new_kv_state.view({-1, compress_len_, kv_state.size(2)});
-
-  torch::Tensor score_state_flat = score_state.view(
-      {score_state.size(0) * score_state.size(1), score_state.size(2)});
-  torch::Tensor new_score_state =
-      score_state_flat.index_select(/*dim=*/0, score_slots.to(torch::kLong));
-  new_score_state =
-      new_score_state.view({-1, compress_len_, score_state.size(2)});
+  int64_t cache_len = batch_size * compress_len_;
+  auto new_kv_state =
+      kv_state.view({kv_state.size(0) * kv_state.size(1), kv_state.size(2)})
+          .slice(0, 0, cache_len)
+          .view({batch_size, compress_len_, kv_state.size(2)});
+  auto new_score_state =
+      score_state
+          .view(
+              {score_state.size(0) * score_state.size(1), score_state.size(2)})
+          .slice(0, 0, cache_len)
+          .view({batch_size, compress_len_, score_state.size(2)});
 
   if (kv_pack.dim() == 2) {
     kv_pack = kv_pack.unsqueeze(/*dim=*/1);
@@ -503,13 +452,6 @@ torch::Tensor CompressorImpl::forward_decode(
                                               std::nullopt,
                                               /*mtp_token_num=*/0);
 
-  auto score_state_cache = score_state.unsqueeze(1);
-  auto kv_state_cache = kv_state.unsqueeze(1);
-  write_cache(new_score_state.view({-1, 1, score_state.size(2)}),
-              score_state_cache,
-              score_slots);
-  write_cache(
-      new_kv_state.view({-1, 1, kv_state.size(2)}), kv_state_cache, kv_slots);
   return empty_output(hidden_states, head_dim_);
 }
 

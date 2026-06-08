@@ -586,7 +586,7 @@ void DSAMetadataBuilderMlu::process_swa_group(
 
   // To adapt to the fused_compress_single_kv and fused_compress_multi_kv
   // operators, the input cache tensor must have a shape of [bs, compress_len,
-  // dim]. So the max_dst_len can not be less than compress_len.
+  // dim]. So the max_dst_len can not be less than C128 compress_len.
   int32_t min_compress_len = 128 / block_size;
   max_dst_len = std::max(max_dst_len, min_compress_len);
 
