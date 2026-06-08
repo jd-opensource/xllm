@@ -634,9 +634,9 @@ AnthropicServiceImpl::AnthropicServiceImpl(
     : APIServiceImpl(models),
       master_(check_master(master)),
       tool_call_parser_format_(
-          master_->options().tool_call_parser().value_or("")),
+          master->options().tool_call_parser().value_or("")),
       reasoning_parser_format_(
-          master_->options().reasoning_parser().value_or("")) {}
+          master->options().reasoning_parser().value_or("")) {}
 
 void AnthropicServiceImpl::process_async_impl(
     std::shared_ptr<AnthropicCall> call) {
