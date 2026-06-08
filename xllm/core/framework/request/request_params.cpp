@@ -530,7 +530,19 @@ RequestParams::RequestParams(const proto::AnthropicMessagesRequest& request,
   request_id = generate_anthropic_chat_request_id();
   x_request_id = x_rid;
   x_request_time = x_rtime;
+  if (x_request_id.empty() && request.has_x_request_id()) {
+    x_request_id = request.x_request_id();
+  }
+  if (x_request_time.empty() && request.has_x_request_time()) {
+    x_request_time = request.x_request_time();
+  }
 
+  if (request.has_service_request_id()) {
+    service_request_id = request.service_request_id();
+  }
+  if (request.has_source_xservice_addr()) {
+    source_xservice_addr = request.source_xservice_addr();
+  }
   max_tokens = static_cast<uint32_t>(request.max_tokens());
   if (request.has_stream()) {
     streaming = request.stream();
