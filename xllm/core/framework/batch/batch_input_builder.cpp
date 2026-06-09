@@ -168,18 +168,6 @@ torch::Tensor build_pinned_int_tensor(const std::vector<int32_t>& values) {
                            .pinned_memory(true));
 }
 
-torch::Tensor normalize_mtp_bootstrap(const torch::Tensor& embedding) {
-  CHECK(embedding.defined()) << "MTP bootstrap embedding is undefined";
-  if (embedding.dim() == 1) {
-    return embedding.unsqueeze(0);
-  }
-  CHECK_EQ(embedding.dim(), 2)
-      << "MTP bootstrap embedding should be [hidden] or [1, hidden]";
-  CHECK_EQ(embedding.size(0), 1)
-      << "MTP bootstrap embedding should contain one sequence";
-  return embedding;
-}
-
 }  // namespace
 
 BatchInputBuilder::BatchInputBuilder(
@@ -649,8 +637,13 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
       CHECK_GE(token_id, 0) << "MTP bootstrap token should be valid";
       state.mtp_bootstrap_row_idxes.emplace_back(
           static_cast<int32_t>(state.embedding_ids.size() - 1));
-      state.mtp_bootstrap_embeddings.emplace_back(
-          normalize_mtp_bootstrap(mtp_bootstrap));
+      if (mtp_bootstrap.dim() == 1) {
+        state.mtp_bootstrap_embeddings.emplace_back(mtp_bootstrap.unsqueeze(0));
+      } else {
+        CHECK(mtp_bootstrap.dim() == 2 && mtp_bootstrap.size(0) == 1)
+            << "MTP bootstrap embedding should be [hidden] or [1, hidden]";
+        state.mtp_bootstrap_embeddings.emplace_back(mtp_bootstrap);
+      }
     }
   } else {
     extra_token_id = token_ids[seq_len];
