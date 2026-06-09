@@ -75,6 +75,13 @@ class NpuLmHeadImpl : public BaseLayer {
                                const torch::Tensor& hidden_states,
                                const torch::Tensor& seleted_idxes);
 
+  bool can_reuse_decode_setup(const torch::Tensor& hidden_states,
+                              const torch::Tensor& seleted_idxes) const;
+  void update_decode_setup_cache(const torch::Tensor& hidden_states,
+                                 const torch::Tensor& seleted_idxes);
+  atb::Status execute_node_without_setup(atb_speed::Model::Node& node,
+                                         int nodeId);
+
   atb_speed::Model::Node lm_head_node_prefill_;
   atb_speed::Model::Node lm_head_node_decode_;
 
@@ -93,6 +100,9 @@ class NpuLmHeadImpl : public BaseLayer {
 
   int64_t vocab_size_ = -1;
   int64_t padded_vocab_size_ = -1;
+  bool decode_setup_cache_valid_ = false;
+  std::vector<int64_t> decode_hidden_shape_;
+  std::vector<int64_t> decode_selected_shape_;
 };
 TORCH_MODULE(NpuLmHead);
 

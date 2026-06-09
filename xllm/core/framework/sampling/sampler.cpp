@@ -19,12 +19,27 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <cstdlib>
+#include <string>
+
 #include "common/global_flags.h"
 #include "core/framework/config/model_config.h"
+#include "core/framework/config/speculative_config.h"
+#if defined(USE_NPU)
+#include "core/kernels/npu/npu_ops_api.h"
+#endif
 #include "logits_utils.h"
 #include "sampling_params.h"
 
 namespace xllm {
+namespace {
+
+bool enable_npu_greedy_argmax_int32() {
+  const char* env = std::getenv("XLLM_ENABLE_NPU_GREEDY_ARGMAX_INT32");
+  return env != nullptr && std::string(env) == "1";
+}
+
+}  // namespace
 
 SampleOutput Sampler::forward(torch::Tensor& logits,
                               const SamplingParameters& params,
@@ -77,6 +92,23 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
         << filter_mask.size(1)
         << ", sample_logits.size(1)=" << sample_logits.size(1);
     sample_logits = sample_logits + filter_mask;
+  }
+
+  const bool can_greedy_from_logits =
+      params.all_greedy_sample && !params.logprobs &&
+      ::xllm::SpeculativeConfig::get_instance().num_speculative_tokens() == 0;
+  if (can_greedy_from_logits) {
+#if defined(USE_NPU)
+    if (enable_npu_greedy_argmax_int32() &&
+        sample_logits.device().is_privateuseone() &&
+        sample_logits.is_contiguous()) {
+      output.next_tokens =
+          xllm::kernel::npu::argmax_int32(sample_logits, /*dim=*/-1);
+      return output;
+    }
+#endif
+    output.next_tokens = sample_logits.argmax(/*dim=*/-1);
+    return output;
   }
 
   // apply temperatures, top-k and top-p

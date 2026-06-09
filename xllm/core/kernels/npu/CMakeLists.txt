@@ -13,6 +13,7 @@ cc_library(
   SRCS
     active.cpp
     attention.cpp
+    argmax.cpp
     fused_layernorm.cpp
     matmul.cpp
     npu_causal_conv1d.cpp

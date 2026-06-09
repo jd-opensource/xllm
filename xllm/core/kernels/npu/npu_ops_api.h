@@ -91,6 +91,8 @@ torch::Tensor matmul(const torch::Tensor& a,
 
 torch::Tensor active(const torch::Tensor& input, const std::string& act_mode);
 
+torch::Tensor argmax_int32(const torch::Tensor& input, int64_t dim);
+
 torch::Tensor rms_norm(const torch::Tensor& input,
                        const torch::Tensor& weight,
                        double eps,
