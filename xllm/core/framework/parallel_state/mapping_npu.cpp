@@ -209,12 +209,10 @@ void MappingNPU::parse_parallel_info() {
     attn_cp_.group_size(options_.cp_size());
   }
 
-  // kv split: fall back to cp_size when unset so that the kvSplit JSON group
-  // mirrors attnCp byte-for-byte (legacy behavior, no extra HCCL domain).
   const int32_t cp_group_size =
       attn_cp_.group_size() > 0 ? attn_cp_.group_size() : 1;
   const int32_t kv_split_group_size =
-      options_.kv_split_size() > 0 ? options_.kv_split_size() : cp_group_size;
+      options_.kv_split_size() > 0 ? options_.kv_split_size() : 1;
   attn_kv_split_.group_size(kv_split_group_size);
   attn_kv_split_.backend("hccl");
 

@@ -141,18 +141,15 @@ struct ParallelArgs {
     return kv_split_size_ > 0 ? kv_split_size_ : cp_size_;
   }
 
-  // KV-split rank of the current process. Under the default round-robin
-  // contract documented in `cp_kv_split.md`, when kv_split_size matches
-  // cp_size this aliases `cp_rank()`. For kv_split_size != cp_size the actual
-  // mapping is filled in by S2 (mapping_npu kvSplit group); until then we
-  // conservatively project cp_rank into the smaller group via modulo so single-
-  // rank deployments stay correct (kv_split_size==1 → rank 0).
+  // KV-split rank: global rank block index over world_size / kv_split_size.
+  // Aligns with MappingNPU::get_kv_split_group (get_dp_group stride) and ATB
+  // kvSplitInfo.rankIds ordering used by the prefix AllGather.
   [[nodiscard]] int32_t kv_split_rank() const noexcept {
     const int32_t kv = kv_split_size_effective();
     if (kv <= 1) {
       return 0;
     }
-    return cp_rank() % kv;
+    return rank_ / (world_size_ / kv);
   }
 
   // tp size

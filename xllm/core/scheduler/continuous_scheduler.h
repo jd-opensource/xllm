@@ -238,6 +238,8 @@ class ContinuousScheduler : public Scheduler {
   // ABORT mode: cancel all running requests; they are not rescheduled.
   void abort_all_running_requests();
 
+  void clear_mtp_bootstrap(Request* request);
+
  protected:
   const Options options_;
 

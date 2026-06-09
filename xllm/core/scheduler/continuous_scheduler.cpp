@@ -350,6 +350,18 @@ bool ContinuousScheduler::check_if_enough_to_evict(
   return false;
 }
 
+void ContinuousScheduler::clear_mtp_bootstrap(Request* request) {
+  if (!options_.enable_disagg_pd() || options_.num_speculative_tokens() <= 0 ||
+      request == nullptr || request->sequences().empty()) {
+    return;
+  }
+  Sequence* sequence = request->sequences()[0].get();
+  if (sequence == nullptr) {
+    return;
+  }
+  sequence->clear_mtp_bootstrap_embedding();
+}
+
 void ContinuousScheduler::handle_prefill_requests(
     double& latency_budget,
     double& estimate_latency,
@@ -387,6 +399,7 @@ void ContinuousScheduler::handle_prefill_requests(
 
     std::shared_ptr<Request> request(waiting_priority_queue->top());
     if (request->finished() || request->cancelled()) {
+      clear_mtp_bootstrap(request.get());
       kv_cache_manager_->deallocate(request.get());
       // release the ownership of the request
       finished_requests.emplace_back(request);
@@ -461,6 +474,7 @@ void ContinuousScheduler::handle_prefill_requests(
               std::shared_ptr<Request> request_to_preempt =
                   running_queue_offline_->back();
               ++num_online_prefill_preempt_offline_requests;
+              clear_mtp_bootstrap(request_to_preempt.get());
               kv_cache_manager_->deallocate(request_to_preempt.get());
               running_queue_offline_->pop_back();
               // add preemptable request to request priority queue
@@ -538,6 +552,7 @@ void ContinuousScheduler::handle_prefill_requests(
       running_queue_->empty()) {
     std::shared_ptr<Request> request(waiting_priority_queue->top());
     waiting_priority_queue->pop_top();
+    clear_mtp_bootstrap(request.get());
     kv_cache_manager_->deallocate(request.get());
     if (blocks_exhausted) {
       LOG(ERROR) << "Request prompt is too long, no enough memory to schedule "
@@ -684,6 +699,7 @@ void ContinuousScheduler::handle_decode_requests(
                      << ", beam=" << request->check_beam_search();
           // Fallback to full request deallocation to avoid inconsistent
           // per-sequence states.
+          clear_mtp_bootstrap(request.get());
           kv_cache_manager_->deallocate(request.get());
           running_queue->pop_top();
           request->set_preempted();
@@ -798,6 +814,7 @@ void ContinuousScheduler::handle_decode_requests(
       std::shared_ptr<Request> request_to_preempt =
           running_queue_offline_->back();
       ++num_online_decode_preempt_offline_requests;
+      clear_mtp_bootstrap(request_to_preempt.get());
       kv_cache_manager_->deallocate(request_to_preempt.get());
       running_queue_offline_->pop_back();
       // add preemptable request to waiting priority queue
@@ -808,6 +825,7 @@ void ContinuousScheduler::handle_decode_requests(
       std::shared_ptr<Request> request_to_preempt = running_queue->back();
       if (request_to_preempt.get() != request.get()) {
         // TO IMPROVE: kv cache offload to cpu
+        clear_mtp_bootstrap(request_to_preempt.get());
         kv_cache_manager_->deallocate(request_to_preempt.get());
         running_queue->pop_back();
         // add preemptable request to waiting priority queue
@@ -895,6 +913,7 @@ void ContinuousScheduler::handle_abnormal_request(
 
     // request is too long, budget or memory no enough.
     running_queue->pop_top();
+    clear_mtp_bootstrap(request.get());
     kv_cache_manager_->deallocate(request.get());
     response_processor_->process_failed_request(
         request,
@@ -977,6 +996,7 @@ std::vector<Batch> ContinuousScheduler::prepare_batch() {
     std::shared_ptr<Request> request = *it;
     request->update_connection_status();
     if (request->finished() || request->cancelled()) {
+      clear_mtp_bootstrap(request.get());
       kv_cache_manager_->deallocate(request.get());
       // release the ownership of the request
       finished_requests.emplace_back(request);
@@ -1670,6 +1690,7 @@ void ContinuousScheduler::preempt_all_running_requests() {
     }
 
     // Deallocate KV cache blocks (critical for RL weight updates)
+    clear_mtp_bootstrap(request.get());
     kv_cache_manager_->deallocate(request.get());
 
     // Mark as preempted
@@ -1735,6 +1756,7 @@ void ContinuousScheduler::abort_all_running_requests() {
       return;
     }
 
+    clear_mtp_bootstrap(request.get());
     kv_cache_manager_->deallocate(request.get());
     request->set_cancel();
     response_processor_->process_failed_request(

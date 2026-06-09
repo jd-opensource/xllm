@@ -5,6 +5,7 @@ package xllm.proto;
 option cc_generic_services = true;
 
 import "common.proto";
+import "tensor.proto";
 
 message ClusterInfos {
   repeated uint64 cluster_ids = 1;
@@ -227,6 +228,8 @@ message DisaggGenerationsRequest {
   string x_request_time = 12;
   // Sequence-scoped cache row used by linear attention caches.
   int32 linear_state_id = 13;
+  // MTP bootstrap state for the first decode draft extend.
+  Tensor mtp_bootstrap_embedding = 14;
 }
 
 message DisaggGenerationsRequests {

@@ -29,6 +29,7 @@ limitations under the License.
 #include "core/framework/config/scheduler_config.h"
 #include "framework/block/block.h"
 #include "framework/block/block_manager_impl.h"
+#include "framework/block/block_manager_pool.h"
 #include "framework/config/beam_search_config.h"
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
@@ -341,6 +342,61 @@ TEST(BatchTest, ProcessRawOutputStoresMtpBootstrapEmbedding) {
   torch::Tensor stored = sequence.get_mtp_bootstrap_embedding();
   ASSERT_TRUE(stored.defined());
   EXPECT_TRUE(torch::equal(stored, torch::tensor({3.0f, 4.0f})));
+}
+
+TEST(BatchTest, DecodeForwardInputConsumesMtpBootstrap) {
+  BlockManagerPool::Options options;
+  options.num_blocks(8).block_size(4).enable_disagg_pd(true);
+  BlockManagerPool manager(options, /*dp_size=*/1);
+
+  Sequence sequence = make_basic_sequence({1, 2, 3});
+  ASSERT_TRUE(manager.allocate(&sequence));
+  ASSERT_GE(sequence.get_single_block_id(), 0);
+  sequence.kv_state().set_kv_cache_tokens_num(sequence.num_prompt_tokens());
+  sequence.append_token(Token(42));
+
+  torch::Tensor embedding = torch::tensor({3.0f, 4.0f});
+  sequence.update_mtp_bootstrap_embedding(embedding);
+
+  Batch batch(&sequence);
+  ForwardInput forward_input = batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+
+  const auto& embed_params = forward_input.input_params.embedding;
+  EXPECT_EQ(embed_params.mtp_bootstrap_row_idxes, std::vector<int32_t>{0});
+  ASSERT_TRUE(embed_params.mtp_bootstrap_embeddings.defined());
+  EXPECT_TRUE(torch::equal(embed_params.mtp_bootstrap_embeddings,
+                           embedding.unsqueeze(0)));
+  EXPECT_FALSE(sequence.get_mtp_bootstrap_embedding().defined());
+}
+
+TEST(BatchTest, DecodeForwardInputMapsSparseMtpBootstrapRows) {
+  BlockManagerPool::Options options;
+  options.num_blocks(8).block_size(4).enable_disagg_pd(true);
+  BlockManagerPool manager(options, /*dp_size=*/1);
+
+  Sequence first = make_basic_sequence({1, 2, 3});
+  ASSERT_TRUE(manager.allocate(&first));
+  first.kv_state().set_kv_cache_tokens_num(first.num_prompt_tokens());
+  first.append_token(Token(41));
+
+  Sequence second = make_basic_sequence({4, 5, 6});
+  ASSERT_TRUE(manager.allocate(&second));
+  second.kv_state().set_kv_cache_tokens_num(second.num_prompt_tokens());
+  second.append_token(Token(42));
+
+  torch::Tensor embedding = torch::tensor({3.0f, 4.0f});
+  second.update_mtp_bootstrap_embedding(embedding);
+
+  Batch batch({&first, &second});
+  ForwardInput forward_input = batch.prepare_forward_input(
+      /*num_decoding_tokens=*/1, /*min_decoding_batch_size=*/0, ModelArgs());
+
+  const auto& embed_params = forward_input.input_params.embedding;
+  EXPECT_EQ(embed_params.mtp_bootstrap_row_idxes, std::vector<int32_t>{1});
+  ASSERT_TRUE(embed_params.mtp_bootstrap_embeddings.defined());
+  EXPECT_TRUE(torch::equal(embed_params.mtp_bootstrap_embeddings,
+                           embedding.unsqueeze(0)));
 }
 
 TEST(BatchTest, Basic) {
@@ -820,6 +876,9 @@ TEST(BatchTest, ForwardInputPackedRoundTripPreservesTransportFields) {
   ForwardInput input =
       builder.build_forward_input(/*num_decoding_tokens=*/1,
                                   /*min_decoding_batch_size=*/0);
+  input.input_params.embedding.mtp_bootstrap_row_idxes = {0};
+  input.input_params.embedding.mtp_bootstrap_embeddings =
+      torch::tensor({{3.0f, 4.0f}});
   bool is_creator = false;
   auto shm_name =
       ForwardSharedMemoryManager::create_unique_name("batch_test_forward_input",
@@ -844,6 +903,11 @@ TEST(BatchTest, ForwardInputPackedRoundTripPreservesTransportFields) {
             (std::vector<uint64_t>{1}));
   EXPECT_EQ(round_trip.transfer_kv_infos[0].remote_blocks_ids,
             (std::vector<uint64_t>{100}));
+  EXPECT_EQ(round_trip.input_params.embedding.mtp_bootstrap_row_idxes,
+            std::vector<int32_t>{0});
+  EXPECT_TRUE(
+      torch::equal(round_trip.input_params.embedding.mtp_bootstrap_embeddings,
+                   torch::tensor({{3.0f, 4.0f}})));
 }
 
 TEST(BatchTest, ForwardInputBlockCopyKernelFieldsMatchExpectedLayout) {

@@ -23,6 +23,7 @@ limitations under the License.
 #include "distributed_runtime/llm_engine.h"
 #include "framework/request/request_output.h"
 #include "scheduler/disagg_pd_scheduler.h"
+#include "util/utils.h"
 
 namespace xllm {
 
@@ -241,6 +242,11 @@ void DisaggPDServiceImpl::decode_recv_first_generation(
     std::vector<uint64_t> block_ids(gen.block_ids().begin(),
                                     gen.block_ids().end());
     int32_t linear_state_id = gen.linear_state_id();
+    torch::Tensor mtp_bootstrap_embedding;
+    if (gen.has_mtp_bootstrap_embedding()) {
+      mtp_bootstrap_embedding =
+          util::proto_to_torch(gen.mtp_bootstrap_embedding());
+    }
 
     bool success = scheduler_->decode_recv_first_generation(
         gen.req_id(),
@@ -256,7 +262,8 @@ void DisaggPDServiceImpl::decode_recv_first_generation(
         std::move(block_ids),
         linear_state_id,
         gen.dp_size(),
-        gen.dp_rank());
+        gen.dp_rank(),
+        mtp_bootstrap_embedding);
     if (!success) {
       response->set_ok(false);
       return;
