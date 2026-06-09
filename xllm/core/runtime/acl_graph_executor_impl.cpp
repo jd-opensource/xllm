@@ -23,6 +23,8 @@ limitations under the License.
 #include <torch_npu/torch_npu.h>
 
 #include <algorithm>
+#include <cstdlib>
+#include <string>
 
 #include "core/common/global_flags.h"
 #include "core/framework/config/execution_config.h"
@@ -42,6 +44,10 @@ namespace xllm::npu {
 namespace {
 constexpr uint64_t kSpecVerifyGraphKeyMask = 1ull << 63;
 constexpr uint64_t kSpecVerifyQMaxSeqLenShift = 32;
+bool graph_direct_next_token_input_enabled() {
+  const char* env = std::getenv("XLLM_ENABLE_GRAPH_DIRECT_NEXT_TOKEN_INPUT");
+  return env != nullptr && std::string(env) == "1";
+}
 
 std::pair<torch::Tensor, torch::Tensor> find_attention_plan_kv_cache(
     const std::vector<KVCache>& kv_caches) {
@@ -166,7 +172,6 @@ bool AclGraph::capture(CausalLM* model,
   // Synchronize and test replay to verify graph capture
   aclrtSynchronizeStream(graph_stream_);
   aclrtSynchronizeStream(stream);
-
   graph_.replay();
 
   make_current_stream_wait_for_graph(stream);
@@ -204,13 +209,14 @@ void AclGraph::make_current_stream_wait_for_graph(aclrtStream current_stream) {
   CHECK_NE(graph_stream_, nullptr) << "graph_stream is not initialized";
   CHECK_NE(replay_done_event_, nullptr)
       << "replay_done_event is not initialized";
+  if (current_stream == graph_stream_) {
+    return;
+  }
   CHECK_EQ(aclrtRecordEvent(replay_done_event_, graph_stream_), ACL_SUCCESS)
       << "aclrtRecordEvent(replay_done_event) failed";
-  if (current_stream != graph_stream_) {
-    CHECK_EQ(aclrtStreamWaitEvent(current_stream, replay_done_event_),
-             ACL_SUCCESS)
-        << "aclrtStreamWaitEvent(current_stream, replay_done_event) failed";
-  }
+  CHECK_EQ(aclrtStreamWaitEvent(current_stream, replay_done_event_),
+           ACL_SUCCESS)
+      << "aclrtStreamWaitEvent(current_stream, replay_done_event) failed";
 }
 
 void AclGraph::prepare_model_graph_metadata(CausalLM* model,
@@ -293,6 +299,50 @@ ForwardInput AclGraphExecutorImpl::prepare_inputs(Batch& batch) {
   // Prepare inputs for workers
   return batch.prepare_forward_input(
       options_.num_decoding_tokens(), 0, args_, options_.cp_size());
+}
+
+bool AclGraphExecutorImpl::try_update_graph_input_tokens(
+    ForwardInput& input,
+    const torch::Tensor& next_tokens) {
+  if (!graph_direct_next_token_input_enabled() ||
+      !input.input_params.meta.batch_forward_type.is_decode() ||
+      !next_tokens.defined() || !next_tokens.is_contiguous() ||
+      !next_tokens.device().is_privateuseone() || !input.token_ids.defined() ||
+      input.token_ids.numel() != next_tokens.numel()) {
+    return false;
+  }
+
+  auto& params = input.input_params;
+  uint32_t graph_num_tokens = static_cast<uint32_t>(input.token_ids.size(0));
+  if (params.parallel.dp_global_token_nums.size() > 1) {
+    graph_num_tokens = util::max(params.parallel.dp_global_token_nums);
+  }
+  const uint32_t global_batch_size =
+      graph_num_tokens / options_.num_decoding_tokens();
+  const uint32_t decode_batch_size_limit = static_cast<uint32_t>(
+      std::max<int32_t>(1,
+                        ::xllm::ExecutionConfig::get_instance()
+                            .acl_graph_decode_batch_size_limit()));
+  if (global_batch_size > decode_batch_size_limit ||
+      params.meta.kv_max_seq_len > args_.max_position_embeddings()) {
+    return false;
+  }
+
+  const uint32_t bucket_num_tokens = get_bucket_num_tokens(graph_num_tokens);
+  const uint64_t graph_key = get_graph_key(bucket_num_tokens, params);
+  if (graphs_.find(graph_key) == graphs_.end()) {
+    return false;
+  }
+
+  if (!persistent_param_->update_persistent_tokens_direct(next_tokens)) {
+    return false;
+  }
+  params.graph.persistent_tokens_already_updated = true;
+  LOG_FIRST_N(WARNING, 1)
+      << "XLLM_ENABLE_GRAPH_DIRECT_NEXT_TOKEN_INPUT enabled: write "
+         "schedule-overlap next_tokens directly into ACL graph persistent "
+         "tokens";
+  return true;
 }
 
 // Main execution method with graph optimization for decode phase

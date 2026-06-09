@@ -43,6 +43,13 @@ class ExecutorImpl {
                           const torch::Tensor& positions,
                           std::vector<KVCache>& kv_caches,
                           const ModelInputParams& params) = 0;
+
+  virtual bool try_update_graph_input_tokens(ForwardInput& input,
+                                             const torch::Tensor& next_tokens) {
+    UNUSED_PARAMETER(input);
+    UNUSED_PARAMETER(next_tokens);
+    return false;
+  }
 };
 
 }  // namespace xllm

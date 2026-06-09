@@ -70,6 +70,7 @@ class GraphPersistentParam final {
     }
     return persistent_tokens_;
   }
+  bool update_persistent_tokens_direct(const torch::Tensor& tokens);
   torch::Tensor persistent_positions(uint32_t actual_tokens = 0) const {
     if (actual_tokens > 0) {
       int32_t slice_dim = use_mrope_ ? 1 : 0;
@@ -189,6 +190,21 @@ class GraphPersistentParam final {
                                    const torch::Tensor& block_tables,
                                    const ModelInputParams& input_params,
                                    aclrtStream stream);
+  bool try_replay_cached_paged_attention_tiling(
+      int64_t padded_batch_size,
+      int64_t padded_num_tokens,
+      int64_t block_table_cols,
+      const std::vector<int32_t>& kv_seq_lens,
+      const std::vector<int32_t>& q_seq_lens,
+      aclrtStream stream);
+  void update_paged_attention_tiling_cache(
+      int64_t padded_batch_size,
+      int64_t padded_num_tokens,
+      int64_t block_table_cols,
+      const std::vector<int32_t>& kv_seq_lens,
+      const std::vector<int32_t>& q_seq_lens,
+      const void* tiling_buffer,
+      size_t tiling_buffer_size);
 
   std::vector<int32_t> update_expanded_spec_decode_attention(
       const ModelInputParams& input_params,
@@ -207,6 +223,13 @@ class GraphPersistentParam final {
   torch::Tensor persistent_block_tables_;
   torch::Tensor persistent_new_cache_slots_default_;
   torch::Tensor persistent_block_tables_default_;
+  int64_t cached_token_active_tokens_ = 0;
+  int64_t cached_position_active_tokens_ = 0;
+  int64_t cached_new_cache_slot_active_tokens_ = 0;
+  std::vector<int32_t> cached_block_table_values_;
+  int64_t cached_block_table_rows_ = 0;
+  int64_t cached_block_table_cols_ = 0;
+  int64_t cached_block_table_padded_rows_ = 0;
   torch::Tensor persistent_expanded_block_tables_;
   // When q_seq_lens contains values greater than 1(chunked prefill mode or
   // speculative decode mode), the mask needs to be passed to the attention
@@ -230,6 +253,9 @@ class GraphPersistentParam final {
   torch::Tensor persistent_embedding_;
   torch::Tensor persistent_linear_state_indices_;
   torch::Tensor persistent_num_accepted_tokens_;
+  std::vector<int32_t> cached_linear_state_values_;
+  int64_t cached_linear_state_active_rows_ = 0;
+  int64_t cached_num_accepted_active_rows_ = 0;
 
   // for mrope (multimodal rotary position embedding)
   bool use_mrope_ = false;
@@ -244,6 +270,15 @@ class GraphPersistentParam final {
 
   // Persistent paged attention tiling tensor on device
   torch::Tensor tiling_data_;
+  struct PagedAttentionTilingCacheEntry {
+    std::vector<uint8_t> buffer;
+    std::vector<int32_t> kv_seq_lens;
+    std::vector<int32_t> q_seq_lens;
+    int64_t batch_size = 0;
+    int64_t num_tokens = 0;
+    int64_t block_table_cols = 0;
+  };
+  std::vector<PagedAttentionTilingCacheEntry> tiling_cache_entries_;
 
   // Cached attention parameters
   int32_t num_head_;
