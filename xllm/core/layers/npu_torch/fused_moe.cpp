@@ -19,6 +19,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdint>
 #include <numeric>
 #include <string>
@@ -111,6 +112,31 @@ bool is_supported_dynamic_moe_quant_method(
     const std::optional<std::string>& quant_method) {
   return is_w8a8_dynamic_quant_method(quant_method) ||
          is_w4a8_dynamic_quant_method(quant_method);
+}
+
+bool has_effective_swiglu_limit(double swiglu_limit) {
+  return std::isfinite(swiglu_limit) && swiglu_limit > 0.0 &&
+         swiglu_limit < 1000000.0;
+}
+
+torch::ScalarType dynamic_quant_supported_dtype(
+    torch::ScalarType preferred_dtype) {
+  return (preferred_dtype == torch::kFloat16 ||
+          preferred_dtype == torch::kBFloat16)
+             ? preferred_dtype
+             : torch::kBFloat16;
+}
+
+void apply_ds_v4_dequant_swiglu_quant_v2_params(
+    xllm::kernel::DequantSwigluQuantParams& params,
+    double swiglu_limit) {
+  if (!has_effective_swiglu_limit(swiglu_limit)) {
+    return;
+  }
+  params.swiglu_mode = 1;
+  params.clamp_limit = swiglu_limit;
+  params.glu_alpha = 1.0;
+  params.glu_bias = 0.0;
 }
 
 torch::Tensor convert_fp32_scale_to_int64(const torch::Tensor& scale) {
@@ -334,13 +360,13 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
       topk_(model_args.num_experts_per_tok()),
       num_expert_group_(model_args.n_group()),
       topk_group_(model_args.topk_group()),
-      route_scale_(model_args.routed_scaling_factor()),
       hidden_size_(model_args.hidden_size()),
       n_shared_experts_(model_args.n_shared_experts()),
       is_gated_(moe_args.is_gated),
       skip_gate_load_(moe_args.skip_gate_load),
       is_deepseek_v4_(util::is_deepseek_v4_model_type(model_args.model_type())),
       renormalize_(model_args.norm_topk_prob() ? 1 : 0),
+      swiglu_limit_(static_cast<double>(model_args.swiglu_limit())),
       hidden_act_(model_args.hidden_act()),
       scoring_func_(model_args.scoring_func().empty()
                         ? std::string("softmax")
@@ -384,6 +410,8 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
   gate_ = register_module(
       "gate_proj",
       ReplicatedLinear(hidden_size_, num_experts, false, quant_args, options));
+  act_ =
+      register_module("act", Activation(hidden_act_, is_gated_, swiglu_limit_));
   if (n_shared_experts_ > 0) {
     /*
     The shared_experts are usually implemented using the RowParallelLinear
@@ -402,7 +430,9 @@ FusedMoEImpl::FusedMoEImpl(const ModelArgs& model_args,
                                  /*enable_result_reduction=*/false,
                                  quant_args,
                                  tp_pg_,
-                                 options));
+                                 options,
+                                 /*module_prefix=*/"",
+                                 swiglu_limit_));
     shared_expert_gate_ = register_module(
         "shared_expert_gate",
         torch::nn::Linear(
@@ -881,6 +911,7 @@ torch::Tensor FusedMoEImpl::forward_expert(
     params.group_index = selected_expert_info.token_count_slice;
     params.activate_left = true;
     params.quant_mode = 1;
+    apply_ds_v4_dequant_swiglu_quant_v2_params(params, swiglu_limit_);
     std::tie(act_quantized, act_scale) =
         xllm::kernel::dequant_swiglu_quant(params);
 
@@ -963,13 +994,12 @@ torch::Tensor FusedMoEImpl::forward_expert(
     }
 
     torch::Tensor act_out;
-    xllm::kernel::ActivationParams activation_params;
-    activation_params.input = gemm1_out;
-    activation_params.output = act_out;
-    activation_params.act_mode = hidden_act_;
-    activation_params.is_gated = is_gated_;
-    xllm::kernel::active(activation_params);
-    act_out = activation_params.output;
+    act_->forward(gemm1_out, act_out);
+    const auto w4a8_quant_input_dtype =
+        dynamic_quant_supported_dtype(w4a8_group_gemm_output_dtype);
+    if (act_out.scalar_type() != w4a8_quant_input_dtype) {
+      act_out = act_out.to(w4a8_quant_input_dtype);
+    }
 
     torch::Tensor act_quantized;
     std::optional<torch::Tensor> act_scale;
@@ -1021,14 +1051,7 @@ torch::Tensor FusedMoEImpl::forward_expert(
 
     // Step 5: activation
     torch::Tensor act_out;
-
-    xllm::kernel::ActivationParams activation_params;
-    activation_params.input = gemm1_out;
-    activation_params.output = act_out;
-    activation_params.act_mode = hidden_act_;
-    activation_params.is_gated = is_gated_;
-    xllm::kernel::active(activation_params);
-    act_out = activation_params.output;
+    act_->forward(gemm1_out, act_out);
 
     // Step 6: group gemm 2
     {
@@ -1055,9 +1078,6 @@ torch::Tensor FusedMoEImpl::forward_expert(
   moe_combine_params.gather_ids = selected_expert_info.combine_idx;
   torch::Tensor final_hidden_states =
       xllm::kernel::moe_combine_result(moe_combine_params);
-  if (is_deepseek_v4_) {
-    final_hidden_states = final_hidden_states * route_scale_;
-  }
   // reshape the final hidden states to the original shape
   final_hidden_states = final_hidden_states.reshape(hidden_states_shape);
 
@@ -1288,7 +1308,7 @@ torch::Tensor FusedMoEImpl::forward_with_dispatch_ffn_combine(
   params.probs = weights_2d;
   params.group = get_moe_ep_group_name();
   params.max_output_size = 65536;
-  params.swiglu_limit = is_deepseek_v4_ ? 10.0 : 0.0;
+  params.swiglu_limit = swiglu_limit_;
   params.output = torch::empty_like(input_2d);
   params.expert_token_nums = torch::empty(
       {num_experts_per_rank_}, ids_2d.options().dtype(torch::kInt32));
@@ -1298,9 +1318,6 @@ torch::Tensor FusedMoEImpl::forward_with_dispatch_ffn_combine(
   std::tie(final_hidden_states_2d, expert_token_nums) =
       xllm::kernel::dispatch_ffn_combine(params);
   (void)expert_token_nums;
-  if (is_deepseek_v4_) {
-    final_hidden_states_2d = final_hidden_states_2d * route_scale_;
-  }
   return final_hidden_states_2d.reshape(hidden_states_shape);
 }
 
@@ -1337,9 +1354,6 @@ torch::Tensor FusedMoEImpl::forward_with_dispatch_gmm_combine_decode(
   std::tie(final_hidden_states_2d, expert_token_nums) =
       xllm::kernel::dispatch_gmm_combine_decode(params);
   (void)expert_token_nums;
-  if (is_deepseek_v4_) {
-    final_hidden_states_2d = final_hidden_states_2d * route_scale_;
-  }
   return final_hidden_states_2d.reshape(hidden_states_shape);
 }
 
@@ -1446,12 +1460,13 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
 
     torch::Tensor act_quantized;
     torch::Tensor act_scale;
+    auto group_list_i64 = group_list.to(torch::kInt64);
     std::vector<torch::Tensor> x_list = {quantized_expand_hidden_states};
     std::vector<torch::Tensor> weight_list = {w13_};
     xllm::kernel::GroupGemmParams group_gemm_params;
     group_gemm_params.x_list = torch::TensorList(x_list);
     group_gemm_params.weight_list = torch::TensorList(weight_list);
-    group_gemm_params.group_list = group_list.to(torch::kInt64);
+    group_gemm_params.group_list = group_list_i64;
     group_gemm_params.split_item = 2;
     group_gemm_params.group_type = 0;
     group_gemm_params.group_list_type = 1;
@@ -1462,9 +1477,10 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
     params.x = gemm1_out;
     params.weight_scale = w13_scale_;
     params.activation_scale = pertoken_scale.value();
-    params.group_index = group_list.to(torch::kInt64);
+    params.group_index = group_list_i64;
     params.activate_left = true;
     params.quant_mode = 1;
+    apply_ds_v4_dequant_swiglu_quant_v2_params(params, swiglu_limit_);
     std::tie(act_quantized, act_scale) =
         xllm::kernel::dequant_swiglu_quant(params);
 
@@ -1484,7 +1500,7 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
       group_gemm_params.scale_list = torch::TensorList(scale_list);
       group_gemm_params.per_token_scale_list =
           torch::TensorList(per_token_scale_list);
-      group_gemm_params.group_list = group_list.to(torch::kInt64);
+      group_gemm_params.group_list = group_list_i64;
       group_gemm_params.split_item = 2;
       group_gemm_params.group_type = 0;
       group_gemm_params.group_list_type = 1;
@@ -1509,13 +1525,7 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
     }
 
     torch::Tensor act_out;
-    xllm::kernel::ActivationParams activation_params;
-    activation_params.input = gemm1_out;
-    activation_params.output = act_out;
-    activation_params.act_mode = hidden_act_;
-    activation_params.is_gated = is_gated_;
-    xllm::kernel::active(activation_params);
-    act_out = activation_params.output;
+    act_->forward(gemm1_out, act_out);
 
     {
       xllm::kernel::GroupGemmParams group_gemm_params;
@@ -1554,9 +1564,6 @@ torch::Tensor FusedMoEImpl::forward_with_selected_experts_ep2(
   combine_params.global_bs = global_bs;
   auto final_hidden_states_2d =
       xllm::kernel::moe_distribute_combine_v2(combine_params);
-  if (is_deepseek_v4_) {
-    final_hidden_states_2d = final_hidden_states_2d * route_scale_;
-  }
 
   return final_hidden_states_2d.reshape(hidden_states_shape);
 }

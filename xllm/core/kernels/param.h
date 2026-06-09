@@ -465,6 +465,14 @@ struct DequantSwigluQuantParams {
   bool activate_left = true;
   // Quantization mode: 0 static quant, 1 dynamic quant.
   int64_t quant_mode = 1;
+  // V2-only SwiGLU mode. Mode 1 matches DeepSeek V4 clamp semantics.
+  int64_t swiglu_mode = 0;
+  // V2-only clamp limit. A positive value is required for swiglu_mode 1.
+  double clamp_limit = 0.0;
+  // V2-only SwiGLU alpha. DeepSeek V4 uses standard SiLU alpha 1.0.
+  double glu_alpha = 1.0;
+  // V2-only bias applied to the up branch. DeepSeek V4 expects no bias.
+  double glu_bias = 0.0;
 };
 
 // Ascend W4A8_DYNAMIC MoE weight post-load processing for version 1.0.0.
