@@ -200,6 +200,7 @@ BatchInputBuilder::BatchInputBuilder(
   state_.acc_logprob_vec.reserve(sequences.size());
   state_.mtp_shifted_token_ids.reserve(reserve_size);
   state_.mtp_bootstrap_embeddings.reserve(sequences.size());
+  state_.mtp_bootstrap_row_idxes.reserve(sequences.size());
   if (args_ != nullptr) {
     use_mrope_ = (args_->rope_scaling_rope_type() == "mrope");
   }

@@ -809,6 +809,16 @@ bool DisaggPDScheduler::decode_recv_first_generation(
       request_to_instance_map_.erase(inst_it);
     }
   }
+  auto& sequences = request->sequences();
+  if (sequences.empty() || sequences[0] == nullptr) {
+    LOG(ERROR) << "Request has no valid sequences, request_id: " << req_id;
+    for (auto& sequence : sequences) {
+      if (sequence != nullptr) {
+        kv_cache_manager_->deallocate(sequence.get());
+      }
+    }
+    return false;
+  }
   Sequence* sequence = request->sequences()[0].get();
   const bool need_mtp_bootstrap = options_.num_speculative_tokens() > 0;
   if (need_mtp_bootstrap) {

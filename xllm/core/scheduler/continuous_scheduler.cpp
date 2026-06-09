@@ -356,6 +356,9 @@ void ContinuousScheduler::clear_mtp_bootstrap(Request* request) {
     return;
   }
   Sequence* sequence = request->sequences()[0].get();
+  if (sequence == nullptr) {
+    return;
+  }
   sequence->clear_mtp_bootstrap_embedding();
 }
 
