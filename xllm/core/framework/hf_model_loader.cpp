@@ -134,8 +134,10 @@ bool try_load_compressed_tensors_quant_cfg(const JsonReader& reader,
         !is_compressed_tensors_fp8_scheme(*input_activations_it)) {
       // Check for INT8 W8A8 (compressed-tensors int quantized)
       if (Device::type_str() == "dcu" &&
-          is_compressed_tensors_int8_scheme(*weights_it, false) &&
-          is_compressed_tensors_int8_scheme(*input_activations_it, true)) {
+          is_compressed_tensors_int8_scheme(*weights_it,
+                                            /*expected_dynamic=*/false) &&
+          is_compressed_tensors_int8_scheme(*input_activations_it,
+                                            /*expected_dynamic=*/true)) {
         quant_args.bits() = 8;
         quant_args.moe_weight_bits() = 8;
         quant_args.activation_dynamic() = true;

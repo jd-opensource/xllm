@@ -21,7 +21,7 @@ limitations under the License.
 
 #include <mutex>
 
-#include "dcu_ops_api.h"
+#include "core/kernels/dcu/dcu_ops_api.h"
 
 namespace xllm::kernel::dcu {
 
@@ -33,7 +33,7 @@ void check_hipblaslt_status(hipblasStatus_t status, const char* op) {
 }
 
 // Per-device hipBLASLt handle singleton, matching lmslim's BlasltHandle.
-class BlasltHandle {
+class BlasltHandle final {
  public:
   static hipblasLtHandle_t get() {
     int32_t dev;
@@ -89,10 +89,10 @@ hipblasLtMatmulDesc_t create_matmul_desc() {
 }
 
 hipDataType scalar_type_to_hip_type(torch::ScalarType dt) {
-  if (dt == at::ScalarType::Half) {
+  if (dt == torch::kHalf) {
     return HIP_R_16F;
   }
-  if (dt == at::ScalarType::BFloat16) {
+  if (dt == torch::kBFloat16) {
     return HIP_R_16BF;
   }
   return HIP_R_32F;
@@ -252,7 +252,7 @@ torch::Tensor scaled_matmul(const torch::Tensor& a,
                                       mat_c_layout,
                                       output_layout,
                                       pref,
-                                      1,
+                                      /*requestedAlgoCount=*/1,
                                       &heuristic,
                                       &returned_algo_count);
 

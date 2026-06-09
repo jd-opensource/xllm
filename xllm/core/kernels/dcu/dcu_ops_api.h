@@ -67,7 +67,7 @@ std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
     const std::string& act_mode,
     double active_coef,
     bool is_gated,
-    at::ScalarType quant_type);
+    torch::ScalarType quant_type);
 
 // W8A8: INT8 x INT8 scaled matmul via hipBLASLt.
 // Equivalent to lmslim's hipblaslt_w8a8_gemm.

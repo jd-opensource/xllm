@@ -20,7 +20,7 @@ limitations under the License.
 
 #include <cstdint>
 
-#include "dcu_ops_api.h"
+#include "core/kernels/dcu/dcu_ops_api.h"
 
 namespace xllm::kernel::dcu {
 
@@ -235,35 +235,35 @@ per_token_int8_quantize_vec_kernel(
   }
 }
 
-int32_t select_specialized_k(int32_t K) {
-  if (K == 2560 || K == 4096 || K == 5120 || K == 7168) {
-    return K;
+int32_t select_specialized_k(int32_t k) {
+  if (k == 2560 || k == 4096 || k == 5120 || k == 7168) {
+    return k;
   }
   return 0;
 }
 
-bool use_vectorized_kernel(int64_t M, int32_t K) {
-  return select_specialized_k(K) != 0 && M >= 512;
+bool use_vectorized_kernel(int64_t m, int32_t k) {
+  return select_specialized_k(k) != 0 && m >= 512;
 }
 
-int32_t select_block_size(int64_t M, int64_t K) {
-  if (M <= 16 || (K >= 5120 && M <= 128)) {
+int32_t select_block_size(int64_t m, int64_t k) {
+  if (m <= 16 || (k >= 5120 && m <= 128)) {
     return 1024;
   }
-  if (K >= 5120 && M >= 1024 && M < 4096) {
+  if (k >= 5120 && m >= 1024 && m < 4096) {
     return 1024;
   }
-  if (M >= 256 && M <= 1024) {
+  if (m >= 256 && m <= 1024) {
     return 256;
   }
   return 512;
 }
 
-int32_t select_vectorized_block_size(int64_t M, int64_t K) {
-  if (K >= 7168 && M >= 8192) {
+int32_t select_vectorized_block_size(int64_t m, int64_t k) {
+  if (k >= 7168 && m >= 8192) {
     return 1024;
   }
-  return select_block_size(M, K);
+  return select_block_size(m, k);
 }
 
 template <typename ScalarT, int32_t BlockSize, int32_t KSize>
@@ -453,11 +453,11 @@ std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
 
   hipStream_t stream = c10::hip::getCurrentHIPStream();
 
-  if (x.scalar_type() == at::ScalarType::Half) {
+  if (x.scalar_type() == torch::kHalf) {
     dispatch_per_token_int8_quantize_kernel<at::Half>(
         x, x_q, out_scales, M, K, stream);
   } else {
-    CHECK(x.scalar_type() == at::ScalarType::BFloat16)
+    CHECK(x.scalar_type() == torch::kBFloat16)
         << "scaled_quantize only supports half or bfloat16 input";
     dispatch_per_token_int8_quantize_kernel<at::BFloat16>(
         x, x_q, out_scales, M, K, stream);
