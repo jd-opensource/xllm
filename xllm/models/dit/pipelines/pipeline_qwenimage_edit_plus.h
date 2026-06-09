@@ -605,7 +605,7 @@ class QwenImageEditPlusPipelineImpl : public torch::nn::Module {
     vae_->load_model(std::move(vae_loader));
     vae_->to(options_.device(), dtype_);
     transformer_->load_model(std::move(transformer_loader));
-    transformer_->to(options_.device(), dtype_);
+    transformer_->to(options_.device());
   }
 
  private:
