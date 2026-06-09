@@ -45,38 +45,39 @@ __device__ __forceinline__ uint32_t pack_int8x4(int8_t x0,
 // Each DCU block handles one row (token). Two passes over the row:
 //   Pass 1: compute per-row absmax
 //   Pass 2: quantize to INT8 using the computed scale
-template <typename scalar_t, int32_t BLOCK_SIZE, int32_t K_SIZE = 0>
-__global__ void __launch_bounds__(BLOCK_SIZE)
+template <typename ScalarT, int32_t BlockSize, int32_t KSize = 0>
+__global__ void __launch_bounds__(BlockSize)
 per_token_int8_quantize_kernel(
-    const scalar_t* __restrict__ x,
+    const ScalarT* __restrict__ x,
     int8_t* __restrict__ output,
     float* __restrict__ scales,
     int64_t M,
     int32_t K) {
-  const int32_t row_size = (K_SIZE > 0) ? K_SIZE : K;
+  const int32_t row_size = (KSize > 0) ? KSize : K;
   const int64_t row = blockIdx.x;
   if (row >= M) {
     return;
   }
 
   const int64_t row_offset = row * static_cast<int64_t>(row_size);
-  const scalar_t* x_row = x + row_offset;
+  const ScalarT* x_row = x + row_offset;
   int8_t* out_row = output + row_offset;
 
   float thread_max = 0.0f;
-  for (int32_t col = threadIdx.x; col < row_size; col += BLOCK_SIZE) {
+  for (int32_t col = threadIdx.x; col < row_size; col += BlockSize) {
     const float val = static_cast<float>(x_row[col]);
     thread_max = fmaxf(thread_max, fabsf(val));
   }
 
-  for (int32_t mask = warpSize / 2; mask > 0; mask >>= 1) {
+  constexpr int32_t kDcuWarpSize = 64;
+  for (int32_t mask = kDcuWarpSize / 2; mask > 0; mask >>= 1) {
     thread_max = fmaxf(thread_max, __shfl_xor(thread_max, mask));
   }
 
-  constexpr int32_t kMaxWarps = BLOCK_SIZE / warpSize;
+  constexpr int32_t kMaxWarps = BlockSize / kDcuWarpSize;
   __shared__ float smem[kMaxWarps + 1];
-  const int32_t warp_id = threadIdx.x / warpSize;
-  const int32_t lane_id = threadIdx.x % warpSize;
+  const int32_t warp_id = threadIdx.x / kDcuWarpSize;
+  const int32_t lane_id = threadIdx.x % kDcuWarpSize;
 
   if (lane_id == 0) {
     smem[warp_id] = thread_max;
@@ -85,7 +86,7 @@ per_token_int8_quantize_kernel(
 
   if (warp_id == 0) {
     float v = (lane_id < kMaxWarps) ? smem[lane_id] : 0.0f;
-    for (int32_t mask = warpSize / 2; mask > 0; mask >>= 1) {
+    for (int32_t mask = kDcuWarpSize / 2; mask > 0; mask >>= 1) {
       v = fmaxf(v, __shfl_xor(v, mask));
     }
     if (lane_id == 0) {
@@ -97,7 +98,7 @@ per_token_int8_quantize_kernel(
   const float row_max = smem[kMaxWarps];
   const float inv_scale = (row_max > 1e-10f) ? 127.0f / row_max : 0.0f;
 
-  for (int32_t col = threadIdx.x; col < row_size; col += BLOCK_SIZE) {
+  for (int32_t col = threadIdx.x; col < row_size; col += BlockSize) {
     const float val = static_cast<float>(x_row[col]);
     out_row[col] = quantize_to_int8(val, inv_scale);
   }
@@ -107,26 +108,26 @@ per_token_int8_quantize_kernel(
   }
 }
 
-template <typename scalar_t, int32_t BLOCK_SIZE, int32_t K_SIZE>
-__global__ void __launch_bounds__(BLOCK_SIZE)
+template <typename ScalarT, int32_t BlockSize, int32_t KSize>
+__global__ void __launch_bounds__(BlockSize)
 per_token_int8_quantize_vec_kernel(
-    const scalar_t* __restrict__ x,
+    const ScalarT* __restrict__ x,
     int8_t* __restrict__ output,
     float* __restrict__ scales,
     int64_t M) {
   constexpr int32_t kVecSize = 16;
-  constexpr int32_t kVecCount = K_SIZE / kVecSize;
+  constexpr int32_t kVecCount = KSize / kVecSize;
   const int64_t row = blockIdx.x;
   if (row >= M) {
     return;
   }
 
-  const int64_t row_offset = row * static_cast<int64_t>(K_SIZE);
-  const scalar_t* x_row = x + row_offset;
+  const int64_t row_offset = row * static_cast<int64_t>(KSize);
+  const ScalarT* x_row = x + row_offset;
   int8_t* out_row = output + row_offset;
 
   float thread_max = 0.0f;
-  for (int32_t vec = threadIdx.x; vec < kVecCount; vec += BLOCK_SIZE) {
+  for (int32_t vec = threadIdx.x; vec < kVecCount; vec += BlockSize) {
     const int32_t col = vec * kVecSize;
     const float v0 = static_cast<float>(x_row[col]);
     const float v1 = static_cast<float>(x_row[col + 1]);
@@ -162,14 +163,15 @@ per_token_int8_quantize_vec_kernel(
     thread_max = fmaxf(thread_max, fabsf(v15));
   }
 
-  for (int32_t mask = warpSize / 2; mask > 0; mask >>= 1) {
+  constexpr int32_t kDcuWarpSize = 64;
+  for (int32_t mask = kDcuWarpSize / 2; mask > 0; mask >>= 1) {
     thread_max = fmaxf(thread_max, __shfl_xor(thread_max, mask));
   }
 
-  constexpr int32_t kMaxWarps = BLOCK_SIZE / warpSize;
+  constexpr int32_t kMaxWarps = BlockSize / kDcuWarpSize;
   __shared__ float smem[kMaxWarps + 1];
-  const int32_t warp_id = threadIdx.x / warpSize;
-  const int32_t lane_id = threadIdx.x % warpSize;
+  const int32_t warp_id = threadIdx.x / kDcuWarpSize;
+  const int32_t lane_id = threadIdx.x % kDcuWarpSize;
 
   if (lane_id == 0) {
     smem[warp_id] = thread_max;
@@ -178,7 +180,7 @@ per_token_int8_quantize_vec_kernel(
 
   if (warp_id == 0) {
     float v = (lane_id < kMaxWarps) ? smem[lane_id] : 0.0f;
-    for (int32_t mask = warpSize / 2; mask > 0; mask >>= 1) {
+    for (int32_t mask = kDcuWarpSize / 2; mask > 0; mask >>= 1) {
       v = fmaxf(v, __shfl_xor(v, mask));
     }
     if (lane_id == 0) {
@@ -191,7 +193,7 @@ per_token_int8_quantize_vec_kernel(
   const float inv_scale = (row_max > 1e-10f) ? 127.0f / row_max : 0.0f;
   uint32_t* out_vec = reinterpret_cast<uint32_t*>(out_row);
 
-  for (int32_t vec = threadIdx.x; vec < kVecCount; vec += BLOCK_SIZE) {
+  for (int32_t vec = threadIdx.x; vec < kVecCount; vec += BlockSize) {
     const int32_t col = vec * kVecSize;
     const float v0 = static_cast<float>(x_row[col]);
     const float v1 = static_cast<float>(x_row[col + 1]);
@@ -264,38 +266,38 @@ int32_t select_vectorized_block_size(int64_t M, int64_t K) {
   return select_block_size(M, K);
 }
 
-template <typename scalar_t, int32_t BLOCK_SIZE, int32_t K_SIZE>
+template <typename ScalarT, int32_t BlockSize, int32_t KSize>
 void launch_per_token_int8_quantize_vec_kernel(const torch::Tensor& x,
                                                torch::Tensor& x_q,
                                                torch::Tensor& out_scales,
                                                int64_t M,
                                                hipStream_t stream) {
-  per_token_int8_quantize_vec_kernel<scalar_t, BLOCK_SIZE, K_SIZE>
-      <<<M, BLOCK_SIZE, 0, stream>>>(x.data_ptr<scalar_t>(),
+  per_token_int8_quantize_vec_kernel<ScalarT, BlockSize, KSize>
+      <<<M, BlockSize, 0, stream>>>(x.data_ptr<ScalarT>(),
                                      x_q.data_ptr<int8_t>(),
                                      out_scales.data_ptr<float>(),
                                      M);
 }
 
-template <typename scalar_t, int32_t BLOCK_SIZE, int32_t K_SIZE>
+template <typename ScalarT, int32_t BlockSize, int32_t KSize>
 void launch_per_token_int8_quantize_kernel(const torch::Tensor& x,
                                            torch::Tensor& x_q,
                                            torch::Tensor& out_scales,
                                            int64_t M,
                                            int32_t K,
                                            hipStream_t stream) {
-  per_token_int8_quantize_kernel<scalar_t, BLOCK_SIZE, K_SIZE><<<M,
-                                                                 BLOCK_SIZE,
+  per_token_int8_quantize_kernel<ScalarT, BlockSize, KSize><<<M,
+                                                                 BlockSize,
                                                                  0,
                                                                  stream>>>(
-      x.data_ptr<scalar_t>(),
+      x.data_ptr<ScalarT>(),
       x_q.data_ptr<int8_t>(),
       out_scales.data_ptr<float>(),
       M,
       K);
 }
 
-template <typename scalar_t, int32_t BLOCK_SIZE>
+template <typename ScalarT, int32_t BlockSize>
 bool launch_specialized_vec_kernel(const torch::Tensor& x,
                                    torch::Tensor& x_q,
                                    torch::Tensor& out_scales,
@@ -303,29 +305,29 @@ bool launch_specialized_vec_kernel(const torch::Tensor& x,
                                    int32_t K,
                                    hipStream_t stream) {
   if (K == 2560) {
-    launch_per_token_int8_quantize_vec_kernel<scalar_t, BLOCK_SIZE, 2560>(
+    launch_per_token_int8_quantize_vec_kernel<ScalarT, BlockSize, 2560>(
         x, x_q, out_scales, M, stream);
     return true;
   }
   if (K == 4096) {
-    launch_per_token_int8_quantize_vec_kernel<scalar_t, BLOCK_SIZE, 4096>(
+    launch_per_token_int8_quantize_vec_kernel<ScalarT, BlockSize, 4096>(
         x, x_q, out_scales, M, stream);
     return true;
   }
   if (K == 5120) {
-    launch_per_token_int8_quantize_vec_kernel<scalar_t, BLOCK_SIZE, 5120>(
+    launch_per_token_int8_quantize_vec_kernel<ScalarT, BlockSize, 5120>(
         x, x_q, out_scales, M, stream);
     return true;
   }
   if (K == 7168) {
-    launch_per_token_int8_quantize_vec_kernel<scalar_t, BLOCK_SIZE, 7168>(
+    launch_per_token_int8_quantize_vec_kernel<ScalarT, BlockSize, 7168>(
         x, x_q, out_scales, M, stream);
     return true;
   }
   return false;
 }
 
-template <typename scalar_t, int32_t BLOCK_SIZE>
+template <typename ScalarT, int32_t BlockSize>
 bool launch_specialized_scalar_kernel(const torch::Tensor& x,
                                       torch::Tensor& x_q,
                                       torch::Tensor& out_scales,
@@ -333,29 +335,29 @@ bool launch_specialized_scalar_kernel(const torch::Tensor& x,
                                       int32_t K,
                                       hipStream_t stream) {
   if (K == 2560) {
-    launch_per_token_int8_quantize_kernel<scalar_t, BLOCK_SIZE, 2560>(
+    launch_per_token_int8_quantize_kernel<ScalarT, BlockSize, 2560>(
         x, x_q, out_scales, M, K, stream);
     return true;
   }
   if (K == 4096) {
-    launch_per_token_int8_quantize_kernel<scalar_t, BLOCK_SIZE, 4096>(
+    launch_per_token_int8_quantize_kernel<ScalarT, BlockSize, 4096>(
         x, x_q, out_scales, M, K, stream);
     return true;
   }
   if (K == 5120) {
-    launch_per_token_int8_quantize_kernel<scalar_t, BLOCK_SIZE, 5120>(
+    launch_per_token_int8_quantize_kernel<ScalarT, BlockSize, 5120>(
         x, x_q, out_scales, M, K, stream);
     return true;
   }
   if (K == 7168) {
-    launch_per_token_int8_quantize_kernel<scalar_t, BLOCK_SIZE, 7168>(
+    launch_per_token_int8_quantize_kernel<ScalarT, BlockSize, 7168>(
         x, x_q, out_scales, M, K, stream);
     return true;
   }
   return false;
 }
 
-template <typename scalar_t>
+template <typename ScalarT>
 void dispatch_per_token_int8_quantize_kernel(const torch::Tensor& x,
                                              torch::Tensor& x_q,
                                              torch::Tensor& out_scales,
@@ -366,41 +368,41 @@ void dispatch_per_token_int8_quantize_kernel(const torch::Tensor& x,
   if (use_vectorized_kernel(M, K)) {
     const int32_t block_size = select_vectorized_block_size(M, K);
     if (block_size == 256 &&
-        launch_specialized_vec_kernel<scalar_t, 256>(
+        launch_specialized_vec_kernel<ScalarT, 256>(
             x, x_q, out_scales, M, specialized_k, stream)) {
       return;
     }
     if (block_size == 512 &&
-        launch_specialized_vec_kernel<scalar_t, 512>(
+        launch_specialized_vec_kernel<ScalarT, 512>(
             x, x_q, out_scales, M, specialized_k, stream)) {
       return;
     }
     if (block_size == 1024 &&
-        launch_specialized_vec_kernel<scalar_t, 1024>(
+        launch_specialized_vec_kernel<ScalarT, 1024>(
             x, x_q, out_scales, M, specialized_k, stream)) {
       return;
     }
   }
   const int32_t block_size = select_block_size(M, K);
   if (block_size == 256) {
-    launch_per_token_int8_quantize_kernel<scalar_t, 256, 0>(
+    launch_per_token_int8_quantize_kernel<ScalarT, 256, 0>(
         x, x_q, out_scales, M, K, stream);
     return;
   }
   if (block_size == 1024) {
-    if (launch_specialized_scalar_kernel<scalar_t, 1024>(
+    if (launch_specialized_scalar_kernel<ScalarT, 1024>(
             x, x_q, out_scales, M, specialized_k, stream)) {
       return;
     }
-    launch_per_token_int8_quantize_kernel<scalar_t, 1024, 0>(
+    launch_per_token_int8_quantize_kernel<ScalarT, 1024, 0>(
         x, x_q, out_scales, M, K, stream);
     return;
   }
-  if (launch_specialized_scalar_kernel<scalar_t, 512>(
+  if (launch_specialized_scalar_kernel<ScalarT, 512>(
           x, x_q, out_scales, M, specialized_k, stream)) {
     return;
   }
-  launch_per_token_int8_quantize_kernel<scalar_t, 512, 0>(
+  launch_per_token_int8_quantize_kernel<ScalarT, 512, 0>(
       x, x_q, out_scales, M, K, stream);
 }
 
