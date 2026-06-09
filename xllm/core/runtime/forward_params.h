@@ -908,6 +908,10 @@ struct ForwardOutput {
   // Device-side readiness dependency for no-sync outputs. This local runtime
   // handle is intentionally not included in proto or shared-memory transport.
   StreamEventPtr ready_event;
+  // Optional schedule-overlap fast path: next_tokens copied to pinned host
+  // memory on a side stream before GetLastStepResult asks for host output.
+  torch::Tensor async_host_next_tokens;
+  StreamEventPtr async_host_next_tokens_ready_event;
   torch::Tensor logits;
   torch::Tensor embedding;
 

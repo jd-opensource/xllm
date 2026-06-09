@@ -17,9 +17,13 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <atomic>
+#include <cstdlib>
 #include <exception>
 #include <memory>
 #include <ostream>
+#include <string>
+#include <vector>
 
 namespace xllm {
 
@@ -30,6 +34,50 @@ c10::Stream to_c10_stream(const PlatformStream& stream) {
 }
 
 #if defined(USE_NPU)
+bool enable_stream_event_ring() {
+  const char* env = std::getenv("XLLM_ENABLE_STREAM_EVENT_RING");
+  return env != nullptr && std::string(env) == "1";
+}
+
+class StreamEventRing {
+ public:
+  StreamEventRing() {
+    events_.resize(kPoolSize, nullptr);
+    for (auto& event : events_) {
+      aclError ret = aclrtCreateEventWithFlag(&event, ACL_EVENT_SYNC);
+      if (ret != ACL_SUCCESS) {
+        ret = aclrtCreateEvent(&event);
+      }
+      CHECK_EQ(ret, ACL_SUCCESS) << "Failed to create stream event ring event";
+    }
+  }
+
+  ~StreamEventRing() {
+    for (auto event : events_) {
+      if (event != nullptr) {
+        aclrtDestroyEvent(event);
+      }
+    }
+  }
+
+  aclrtEvent next() {
+    const size_t index =
+        next_index_.fetch_add(1, std::memory_order_relaxed) % events_.size();
+    return events_[index];
+  }
+
+ private:
+  static constexpr size_t kPoolSize = 8192;
+
+  std::atomic<size_t> next_index_{0};
+  std::vector<aclrtEvent> events_;
+};
+
+StreamEventRing& stream_event_ring() {
+  static StreamEventRing ring;
+  return ring;
+}
+
 PlatformStream get_stream_from_pool() {
   return c10_npu::getNPUStreamFromPool();
 }
@@ -76,6 +124,16 @@ void Stream::wait_stream(const Stream& other_stream) {
 
 StreamEventPtr Stream::record_event() const {
 #if defined(USE_NPU)
+  if (enable_stream_event_ring()) {
+    aclrtEvent event = stream_event_ring().next();
+    aclError ret = aclrtRecordEvent(event, stream_.stream());
+    if (ret != ACL_SUCCESS) {
+      LOG(ERROR) << "Failed to record NPU stream ring event: " << ret;
+      return nullptr;
+    }
+    return std::make_shared<StreamEvent>(event, /*owns_event=*/false);
+  }
+
   aclrtEvent event = nullptr;
   aclError ret = aclrtCreateEventWithFlag(&event, ACL_EVENT_SYNC);
   if (ret != ACL_SUCCESS) {

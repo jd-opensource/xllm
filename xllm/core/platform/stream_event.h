@@ -30,10 +30,11 @@ namespace xllm {
 class StreamEvent final {
  public:
 #if defined(USE_NPU)
-  explicit StreamEvent(aclrtEvent event) : npu_event_(event) {}
+  explicit StreamEvent(aclrtEvent event, bool owns_event = true)
+      : npu_event_(event), owns_event_(owns_event) {}
 
   ~StreamEvent() {
-    if (npu_event_ != nullptr) {
+    if (owns_event_ && npu_event_ != nullptr) {
       aclrtDestroyEvent(npu_event_);
     }
   }
@@ -50,6 +51,7 @@ class StreamEvent final {
  private:
 #if defined(USE_NPU)
   aclrtEvent npu_event_ = nullptr;
+  bool owns_event_ = true;
 #else
   c10::Event c10_event_;
 #endif

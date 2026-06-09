@@ -21,9 +21,16 @@ limitations under the License.
 
 #include <algorithm>
 #include <boost/algorithm/string.hpp>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
+#if defined(USE_NPU)
+#include <acl/acl.h>
+#endif
+
 #include "common/global_flags.h"
+#include "common/macros.h"
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/distributed_runtime/comm_channel.h"
@@ -38,6 +45,111 @@ limitations under the License.
 
 namespace xllm {
 namespace {
+
+bool direct_next_token_d2h_enabled() {
+  const char* env = std::getenv("XLLM_ENABLE_DIRECT_NEXT_TOKEN_D2H");
+  return env != nullptr && std::string(env) == "1";
+}
+
+bool is_empty_tensor(const torch::Tensor& tensor) {
+  return !tensor.defined() || tensor.numel() == 0;
+}
+
+bool can_use_direct_next_token_d2h(const ForwardOutput& output) {
+#if defined(USE_NPU)
+  const auto& sample_output = output.sample_output;
+  const auto& beam_output = output.beam_search_output;
+  return sample_output.next_tokens.defined() &&
+         sample_output.next_tokens.is_contiguous() &&
+         sample_output.next_tokens.device().is_privateuseone() &&
+         (sample_output.next_tokens.scalar_type() == torch::kInt64 ||
+          sample_output.next_tokens.scalar_type() == torch::kInt32) &&
+         is_empty_tensor(sample_output.logprobs) &&
+         is_empty_tensor(sample_output.top_tokens) &&
+         is_empty_tensor(sample_output.top_logprobs) &&
+         is_empty_tensor(sample_output.embeddings) &&
+         sample_output.mm_embeddings.empty() &&
+         output.dit_forward_output.tensors.empty() &&
+         is_empty_tensor(output.expert_load_data) &&
+         is_empty_tensor(beam_output.src_seq_idxes) &&
+         is_empty_tensor(beam_output.out_tokens) &&
+         is_empty_tensor(beam_output.out_logprobs) &&
+         !::xllm::EPLBConfig::get_instance().enable_eplb();
+#else
+  UNUSED_PARAMETER(output);
+  return false;
+#endif
+}
+
+template <typename T>
+void fill_token_only_proto_from_cpu(const torch::Tensor& cpu_tokens,
+                                    proto::ForwardOutput* pb_forward_output) {
+  const T* tokens = cpu_tokens.const_data_ptr<T>();
+  const int64_t dim = cpu_tokens.dim();
+  const int64_t num_seqs = dim == 2 ? cpu_tokens.size(0) : cpu_tokens.numel();
+  const int64_t token_width = dim == 2 ? cpu_tokens.size(1) : 1;
+  pb_forward_output->mutable_outputs()->Reserve(num_seqs);
+  for (int64_t seq_idx = 0; seq_idx < num_seqs; ++seq_idx) {
+    proto::SquenceOutput pb_seq_out;
+    pb_seq_out.mutable_tokens()->Reserve(token_width);
+    for (int64_t token_idx = 0; token_idx < token_width; ++token_idx) {
+      const int64_t flat_idx = seq_idx * token_width + token_idx;
+      const int64_t token_id = static_cast<int64_t>(tokens[flat_idx]);
+      if (token_id == -1) {
+        break;
+      }
+      proto::Token pb_token;
+      pb_token.set_id(token_id);
+      pb_token.set_empty(true);
+      *pb_seq_out.mutable_tokens()->Add() = pb_token;
+    }
+    *pb_forward_output->mutable_outputs()->Add() = pb_seq_out;
+  }
+}
+
+bool fill_async_host_next_token_to_proto(
+    const ForwardOutput& output,
+    proto::ForwardOutput* pb_forward_output,
+    torch::Tensor* copied_host_tokens = nullptr) {
+#if defined(USE_NPU)
+  const torch::Tensor& host_tokens = output.async_host_next_tokens;
+  if (!host_tokens.defined() || host_tokens.numel() == 0 ||
+      !host_tokens.device().is_cpu() ||
+      (output.async_host_next_tokens_ready_event == nullptr &&
+       output.ready_event == nullptr)) {
+    return false;
+  }
+  if (output.async_host_next_tokens_ready_event != nullptr) {
+    CHECK_ACL_SUCCESS(
+        aclrtSynchronizeEvent(
+            output.async_host_next_tokens_ready_event->npu_event()),
+        "aclrtSynchronizeEvent for async schedule-overlap next_tokens D2H");
+  } else {
+    CHECK_ACL_SUCCESS(
+        aclrtSynchronizeEvent(output.ready_event->npu_event()),
+        "aclrtSynchronizeEvent for compute-stream schedule-overlap "
+        "next_tokens D2H");
+  }
+  if (host_tokens.scalar_type() == torch::kInt64) {
+    fill_token_only_proto_from_cpu<int64_t>(host_tokens, pb_forward_output);
+  } else if (host_tokens.scalar_type() == torch::kInt32) {
+    fill_token_only_proto_from_cpu<int32_t>(host_tokens, pb_forward_output);
+  } else {
+    return false;
+  }
+  if (copied_host_tokens != nullptr) {
+    *copied_host_tokens = host_tokens;
+  }
+  LOG_FIRST_N(WARNING, 1)
+      << "XLLM_ENABLE_ASYNC_DIRECT_NEXT_TOKEN_D2H enabled: using pre-copied "
+         "host next_tokens for schedule-overlap output";
+  return true;
+#else
+  UNUSED_PARAMETER(output);
+  UNUSED_PARAMETER(pb_forward_output);
+  return false;
+#endif
+}
 
 int32_t get_num_decode_seqs_for_schedule_overlap(const ForwardInput& input) {
   if (input.sampling_params.sample_idxes.defined()) {
@@ -785,6 +897,17 @@ void WorkerService::GetLastStepResult(
           const auto& sample_output = forward_output.sample_output;
           int32_t prepared_layer_id = forward_output.prepared_layer_id;
           const auto& beam_search_output = forward_output.beam_search_output;
+          if (options_.enable_schedule_overlap() &&
+              direct_next_token_d2h_enabled() &&
+              can_use_direct_next_token_d2h(forward_output)) {
+            torch::Tensor host_next_tokens;
+            if (fill_async_host_next_token_to_proto(
+                    forward_output, pb_forward_output, &host_next_tokens)) {
+              record_speculative_metrics_from_output(host_next_tokens,
+                                                     options_);
+              return;
+            }
+          }
           torch::Tensor expert_load_data;
           torch::Tensor embeddings;
           torch::Tensor next_tokens;
