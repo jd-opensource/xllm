@@ -675,6 +675,19 @@ std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
                               params.active_coef,
                               params.is_gated,
                               params.quant_type);
+#elif defined(USE_DCU)
+  return dcu::scaled_quantize(params.x,
+                              params.smooth,
+                              params.zero,
+                              params.token_count,
+                              params.gather_index,
+                              params.gather_index_start_position,
+                              params.output,
+                              params.output_scale,
+                              params.act_mode,
+                              params.active_coef,
+                              params.is_gated,
+                              params.quant_type);
 #else
   NOT_IMPLEMENTED();
 #endif
@@ -683,6 +696,23 @@ std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
 torch::Tensor scaled_matmul(ScaledMatmulParams& params) {
 #if defined(USE_MLU)
   return mlu::scaled_matmul(params.a,
+                            params.b,
+                            params.a_scale,
+                            params.b_scale,
+                            params.output_dtype,
+                            params.bias,
+                            params.c,
+                            params.act_mode,
+                            params.quant_bit_size,
+                            params.alpha,
+                            params.beta,
+                            params.use_hp_active,
+                            params.a_quant_bit_size,
+                            params.a_calib,
+                            params.b_calib,
+                            params.output);
+#elif defined(USE_DCU)
+  return dcu::scaled_matmul(params.a,
                             params.b,
                             params.a_scale,
                             params.b_scale,

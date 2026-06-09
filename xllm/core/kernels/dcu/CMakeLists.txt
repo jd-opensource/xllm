@@ -41,6 +41,8 @@ list(REMOVE_DUPLICATES DCU_CUDA_KERNEL_HEADERS)
 
 set(DCU_LOCAL_HIP_SOURCES
   ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/matmul.cpp
+  ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/scaled_quantize.hip
+  ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/scaled_matmul.cpp
   ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/build_block_table_from_paged_kv.hip
   ${CMAKE_SOURCE_DIR}/xllm/core/kernels/dcu/random_sample.hip
 
@@ -72,7 +74,9 @@ cc_library(
     ${DCU_SOURCE_FILES}
   DEPS
     hip::host
+    hipblaslt
     torch
+    glog::glog
     :platform
 )
 

@@ -284,4 +284,87 @@ TEST(HFModelLoaderTest, Qwen35MtpModelArgsFromMoeConfig) {
 }
 #endif
 
+#if defined(USE_DCU)
+TEST(HFModelLoaderTest, LoadCompressedTensorsInt8Scheme) {
+  struct TestCase {
+    const char* name;
+    const char* config;
+    bool is_w8a8_dynamic;
+  };
+  const TestCase test_cases[] = {
+      {"dynamic_activation",
+       R"json(
+         {
+           "quantization_config": {
+             "config_groups": {
+               "group_0": {
+                 "input_activations": {
+                   "dynamic": true,
+                   "num_bits": 8,
+                   "type": "int"
+                 },
+                 "weights": {
+                   "dynamic": false,
+                   "num_bits": 8,
+                   "type": "int"
+                 }
+               }
+             },
+             "ignore": [
+               "lm_head",
+               "model.layers.0.self_attn.o_proj"
+             ],
+             "quant_method": "compressed-tensors"
+           }
+         }
+       )json",
+       true},
+      {"static_activation",
+       R"json(
+         {
+           "quantization_config": {
+             "config_groups": {
+               "group_0": {
+                 "input_activations": {
+                   "dynamic": false,
+                   "num_bits": 8,
+                   "type": "int"
+                 },
+                 "weights": {
+                   "dynamic": false,
+                   "num_bits": 8,
+                   "type": "int"
+                 }
+               }
+             },
+             "quant_method": "compressed-tensors"
+           }
+         }
+       )json",
+       false},
+  };
+
+  for (const TestCase& test_case : test_cases) {
+    SCOPED_TRACE(test_case.name);
+    JsonReader reader;
+    ASSERT_TRUE(reader.parse_text(test_case.config));
+
+    QuantArgs quant_args;
+    ASSERT_TRUE(load_quant_cfg(reader, quant_args));
+    EXPECT_EQ(quant_args.quant_method(), "compressed-tensors");
+    EXPECT_EQ(quant_args.is_compressed_tensors_w8a8_dynamic(),
+              test_case.is_w8a8_dynamic);
+    if (test_case.is_w8a8_dynamic) {
+      EXPECT_EQ(quant_args.bits(), 8);
+      EXPECT_EQ(quant_args.moe_weight_bits(), 8);
+      EXPECT_TRUE(quant_args.activation_dynamic());
+      ASSERT_EQ(quant_args.ignored_modules().size(), 2);
+      EXPECT_EQ(quant_args.ignored_modules()[0], "lm_head");
+      EXPECT_EQ(quant_args.ignored_modules()[1],
+                "model.layers.0.self_attn.o_proj");
+    }
+  }
+}
+#endif
+
 }  // namespace xllm

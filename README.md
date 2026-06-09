@@ -87,6 +87,7 @@ limitations under the License. -->
 | MLU      |         |                 |
 | ILU      | BI150   |                 |
 | MUSA     | S5000   |                 |
+| DCU      | BW1000  |                 |
 
 Besides, please check the supported models on different hardwares at [Supported Models List](docs/en/supported_models.md).
 

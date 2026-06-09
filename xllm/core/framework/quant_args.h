@@ -62,6 +62,10 @@ struct QuantArgs {
   // whether activation scheme is dynamic
   PROPERTY(bool, activation_dynamic) = true;
 
+  // whether weights use compressed-tensors W8A8 dynamic key naming convention
+  // (weight/weight_scale instead of qweight/per_channel_scale, no smooth)
+  PROPERTY(bool, is_compressed_tensors_w8a8_dynamic) = false;
+
   // FP8 format : e4m3, e5m2
   PROPERTY(std::string, fmt) = "e4m3";
 
@@ -103,6 +107,7 @@ struct QuantArgs {
     QuantArgs local_args = *this;
     if (should_ignore_module(module_name)) {
       local_args.quant_method().clear();
+      local_args.is_compressed_tensors_w8a8_dynamic() = false;
     }
     return local_args;
   }

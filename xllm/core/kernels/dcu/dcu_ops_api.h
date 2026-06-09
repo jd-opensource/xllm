@@ -52,4 +52,40 @@ torch::Tensor build_block_table_from_paged_kv_cuda(
     const torch::Tensor& paged_kv_indices);
 torch::Tensor random_sample(const torch::Tensor& probs);
 
+// DCU W8A8 dynamic activation quantization.
+// Current DCU implementation supports only no-smooth per-token INT8
+// quantization and returns one fp32 scale per token row.
+std::tuple<torch::Tensor, torch::Tensor> scaled_quantize(
+    const torch::Tensor& x,
+    const torch::Tensor& smooth,
+    const std::optional<torch::Tensor>& zero,
+    const std::optional<torch::Tensor>& token_count,
+    const std::optional<torch::Tensor>& gather_index,
+    const std::optional<torch::Tensor>& gather_index_start_position,
+    const std::optional<torch::Tensor>& output,
+    const std::optional<torch::Tensor>& output_scale,
+    const std::string& act_mode,
+    double active_coef,
+    bool is_gated,
+    at::ScalarType quant_type);
+
+// W8A8: INT8 x INT8 scaled matmul via hipBLASLt.
+// Equivalent to lmslim's hipblaslt_w8a8_gemm.
+torch::Tensor scaled_matmul(const torch::Tensor& a,
+                            const torch::Tensor& b,
+                            const std::optional<torch::Tensor>& a_scale,
+                            const torch::Tensor& b_scale,
+                            torch::ScalarType output_dtype,
+                            const std::optional<torch::Tensor>& bias,
+                            const std::optional<torch::Tensor>& c,
+                            const std::string& act_mode,
+                            int64_t quant_bit_size,
+                            double alpha,
+                            double beta,
+                            bool use_hp_active,
+                            int64_t a_quant_bit_size,
+                            const std::optional<torch::Tensor>& a_calib,
+                            const std::optional<torch::Tensor>& b_calib,
+                            const std::optional<torch::Tensor>& output);
+
 }  // namespace xllm::kernel::dcu
