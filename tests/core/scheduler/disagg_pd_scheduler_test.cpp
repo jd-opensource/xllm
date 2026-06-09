@@ -16,6 +16,7 @@ limitations under the License.
 #include "scheduler/disagg_pd_scheduler.h"
 
 #include <gtest/gtest.h>
+#include <torch/torch.h>
 
 #include <cstdint>
 #include <memory>
@@ -108,6 +109,10 @@ class TestDisaggPDScheduler final : public DisaggPDScheduler {
   void cache_prefill_blocks_for_test(Request* request) {
     cache_prefill_blocks(request);
   }
+
+  bool pop_decode_request_for_test(std::shared_ptr<Request>* request) {
+    return request_queue_.read(*request);
+  }
 };
 
 DisaggPDScheduler::Options make_options() {
@@ -120,6 +125,12 @@ DisaggPDScheduler::Options make_options() {
       .max_seqs_per_batch(4)
       .max_tokens_per_chunk_for_prefill(32)
       .dp_size(1);
+  return options;
+}
+
+DisaggPDScheduler::Options make_mtp_decode_options() {
+  DisaggPDScheduler::Options options = make_options();
+  options.instance_role(InstanceRole::DECODE).num_speculative_tokens(1);
   return options;
 }
 
@@ -182,6 +193,26 @@ void release_prefix_cache(BlockManagerPool* block_manager) {
   EXPECT_EQ(first_cache_size(*block_manager), 0u);
 }
 
+bool recv_first_generation(DisaggPDScheduler* scheduler,
+                           const torch::Tensor& mtp_embedding) {
+  return scheduler->decode_recv_first_generation(
+      "req",
+      /*token_id=*/42,
+      /*has_logprob=*/false,
+      /*logprob=*/0.0f,
+      /*time_to_first_token_latency_seconds=*/0.1,
+      /*top_tokens=*/{},
+      /*top_logprobs=*/{},
+      /*kv_cache_transfer_mode=*/"PUSH",
+      /*src_cluster_ids=*/{},
+      /*src_addrs=*/{},
+      /*src_block_ids=*/{},
+      /*src_linear_state_id=*/-1,
+      /*src_dp_size=*/1,
+      /*src_dp_rank=*/0,
+      mtp_embedding);
+}
+
 }  // namespace
 
 TEST(DisaggPDSchedulerTest, CachesPrefillBlocksBeforeRelease) {
@@ -237,6 +268,40 @@ TEST(DisaggPDSchedulerTest, CacheSkipsExistingSharedBlocks) {
   block_manager->deallocate(extended_request.get());
   EXPECT_EQ(first_cache_size(*block_manager), 3u);
   release_prefix_cache(block_manager);
+}
+
+TEST(DisaggPDSchedulerTest, MtpFirstGenerationRequiresBootstrapBeforeQueue) {
+  FakeEngine engine(/*num_blocks=*/8, /*block_size=*/2);
+  TestDisaggPDScheduler scheduler(&engine, make_mtp_decode_options());
+  std::shared_ptr<Request> request = make_request({1, 2, 3, 4});
+  ASSERT_TRUE(
+      engine.block_manager_pool()->allocate(request->sequences()[0].get()));
+  ASSERT_TRUE(scheduler.decode_schedule(request, "prefill"));
+
+  EXPECT_FALSE(recv_first_generation(&scheduler, torch::Tensor()));
+  std::shared_ptr<Request> queued;
+  EXPECT_FALSE(scheduler.pop_decode_request_for_test(&queued));
+}
+
+TEST(DisaggPDSchedulerTest, MtpFirstGenerationStoresBootstrapThenQueues) {
+  FakeEngine engine(/*num_blocks=*/8, /*block_size=*/2);
+  TestDisaggPDScheduler scheduler(&engine, make_mtp_decode_options());
+  std::shared_ptr<Request> request = make_request({1, 2, 3, 4});
+  Sequence* sequence = request->sequences()[0].get();
+  ASSERT_TRUE(engine.block_manager_pool()->allocate(sequence));
+  sequence->kv_state().set_kv_cache_tokens_num(sequence->num_prompt_tokens());
+  ASSERT_GE(sequence->get_single_block_id(), 0);
+  ASSERT_TRUE(scheduler.decode_schedule(request, "prefill"));
+
+  torch::Tensor embedding = torch::tensor({1.0f, 2.0f});
+  EXPECT_TRUE(recv_first_generation(&scheduler, embedding));
+
+  std::shared_ptr<Request> queued;
+  ASSERT_TRUE(scheduler.pop_decode_request_for_test(&queued));
+  EXPECT_EQ(queued->request_id(), "req");
+  EXPECT_EQ(queued->sequences()[0]->tokens().back(), 42);
+  EXPECT_TRUE(torch::equal(
+      queued->sequences()[0]->get_mtp_bootstrap_embedding(), embedding));
 }
 
 }  // namespace xllm

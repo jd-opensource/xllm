@@ -19,11 +19,11 @@ limitations under the License.
 
 namespace xllm::kernel::npu {
 
-std::tuple<at::Tensor, at::Tensor, at::Tensor> hc_pre(
-    const at::Tensor& x,
-    const at::Tensor& hc_fn,
-    const at::Tensor& hc_scale,
-    const at::Tensor& hc_base,
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> hc_pre(
+    const torch::Tensor& x,
+    const torch::Tensor& hc_fn,
+    const torch::Tensor& hc_scale,
+    const torch::Tensor& hc_base,
     int64_t hc_mult,
     int64_t hc_sinkhorn_iters,
     double norm_eps,
@@ -33,17 +33,26 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> hc_pre(
               x.dim(),
               ".");
 
-  auto original_type = x.dtype();
-  auto x_bf16 = x;
-  if (x_bf16.dtype() != at::kBFloat16) {
-    x_bf16 = x_bf16.to(at::kBFloat16);
+  c10::ScalarType original_type = x.dtype();
+  torch::Tensor x_bf16 = x;
+  if (x_bf16.dtype() != torch::kBFloat16) {
+    x_bf16 = x_bf16.to(torch::kBFloat16);
   }
 
-  auto rsqrt = hc_pre_inv_rms(x_bf16, norm_eps);
-  at::Tensor x_float = x_bf16.to(at::kFloat);
-  at::Tensor x_flattened =
-      x.dim() == 4 ? x_float.flatten(2, -1) : x_float.flatten(1, -1);
-  auto mixes = at::linear(x_flattened, hc_fn);
+  torch::Tensor rsqrt = hc_pre_inv_rms(x_bf16, norm_eps);
+  // Run the gating projection on the BF16 cube (the cube accumulates in FP32
+  // internally), then cast the result back to FP32 which hc_pre_sinkhorn
+  // requires. The original FP32 cube path was the single largest decode
+  // hotspot (~8% of device time); the K=16384 reduction is safe in BF16
+  // because the accumulator stays FP32 and the downstream sinkhorn
+  // renormalizes the logits.
+  torch::Tensor hc_fn_bf16 = hc_fn.scalar_type() == torch::kBFloat16
+                                 ? hc_fn
+                                 : hc_fn.to(torch::kBFloat16);
+  torch::Tensor x_flattened =
+      x.dim() == 4 ? x_bf16.flatten(2, -1) : x_bf16.flatten(1, -1);
+  torch::Tensor mixes =
+      torch::linear(x_flattened, hc_fn_bf16).to(torch::kFloat);
 
   auto output = hc_pre_sinkhorn(mixes,
                                 rsqrt,
@@ -54,7 +63,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> hc_pre(
                                 hc_sinkhorn_iters,
                                 hc_eps);
 
-  at::Tensor y = std::get<0>(output).to(original_type);
+  torch::Tensor y = std::get<0>(output).to(original_type);
   return std::make_tuple(y, std::get<1>(output), std::get<2>(output));
 }
 

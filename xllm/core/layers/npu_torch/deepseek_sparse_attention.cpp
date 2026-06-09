@@ -424,7 +424,13 @@ AttentionMetadata build_indexer_attention_metadata(
     metadata.q_seq_lens = attn_metadata.seq_lens_q;
   }
 
-  if (metadata.kv_seq_lens.defined()) {
+  if (attn_metadata.kv_cu_seq_lens.defined() &&
+      attn_metadata.kv_cu_seq_lens.numel() > 0) {
+    // Reuse the kv cumulative sequence lengths computed once per forward in
+    // DSAMetadataBuilder, avoiding a redundant host-side cumsum on every DSA
+    // layer.
+    metadata.kv_cu_seq_lens = attn_metadata.kv_cu_seq_lens;
+  } else if (metadata.kv_seq_lens.defined()) {
     auto kv_seq_lens = metadata.kv_seq_lens.to(torch::kInt32);
     auto kv_cumsum = torch::cumsum(kv_seq_lens, /*dim=*/0);
     metadata.kv_cu_seq_lens =
