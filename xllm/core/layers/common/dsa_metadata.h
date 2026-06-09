@@ -166,10 +166,9 @@ struct DSAMetadata {
   int64_t swa_max_history_len = 0;
   int64_t swa_max_context_len = 0;
 
-  // MLU-only canonical sequence lengths consumed by DSA operators.
-  // q_cu_seq_lens / kv_cu_seq_lens: (batch_size+1,) with leading 0.
+  // MLU-only canonical query sequence lengths consumed by DSA operators.
+  // q_cu_seq_lens: (batch_size+1,) with leading 0.
   torch::Tensor q_cu_seq_lens;
-  torch::Tensor kv_cu_seq_lens;
   // kv_seq_lens / q_seq_lens: (batch_size,) per-sequence lengths.
   torch::Tensor kv_seq_lens;
   torch::Tensor q_seq_lens;

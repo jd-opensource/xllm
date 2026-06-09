@@ -33,7 +33,7 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> hc_pre(
               x.dim(),
               ".");
 
-  c10::ScalarType original_type = x.dtype();
+  c10::ScalarType original_type = x.scalar_type();
   torch::Tensor x_bf16 = x;
   if (x_bf16.dtype() != torch::kBFloat16) {
     x_bf16 = x_bf16.to(torch::kBFloat16);
