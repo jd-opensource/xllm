@@ -20,6 +20,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -118,7 +119,7 @@ class AclGraph {
   c10::DeviceIndex device_index_;
   std::shared_ptr<AclGraphTaskUpdateContext> graph_task_context_;
   std::optional<c10_npu::NPUStream> update_stream_;
-  bool replay_inputs_prepared_ = false;
+  std::atomic<bool> replay_inputs_prepared_{false};
 };
 
 // Executor implementation using ACL graph optimization

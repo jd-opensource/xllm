@@ -79,8 +79,8 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
     sample_logits = sample_logits + filter_mask;
   }
 
-  if (params.all_greedy_sample && !params.logprobs && !use_sample_indices &&
-      !filter_mask.defined()) {
+  if (params.all_greedy_sample && !params.logprobs && !params.return_probs &&
+      !use_sample_indices && !filter_mask.defined()) {
     output.next_tokens = greedy_sample(sample_logits).to(torch::kLong);
     return output;
   }

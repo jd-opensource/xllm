@@ -496,6 +496,20 @@ ForwardInput WorkerImpl::prepare_inputs(Batch& batch) {
   return model_executor_->prepare_inputs(batch);
 }
 
+bool WorkerImpl::can_overlap_npu_graph_decode(
+    const ModelInputParams& input_params) const {
+#if defined(USE_NPU)
+  return FLAGS_enable_graph && enable_schedule_overlap() &&
+         options_.backend() == "llm" &&
+         input_params.meta.batch_forward_type.is_decode() &&
+         options_.kv_cache_transfer_mode() != "PUSH" &&
+         !options_.enable_speculative_decode();
+#else
+  (void)input_params;
+  return false;
+#endif
+}
+
 folly::SemiFuture<std::tuple<int64_t, int64_t>>
 WorkerImpl::estimate_kv_cache_capacity_async() {
   folly::Promise<std::tuple<int64_t, int64_t>> promise;
@@ -523,9 +537,7 @@ void WorkerImpl::update_last_step_output(
 ForwardInput WorkerImpl::update_input_by_last_step_output(
     ForwardInput& inputs) {
 #if defined(USE_NPU)
-  if (FLAGS_enable_graph && enable_schedule_overlap() &&
-      options_.backend() == "llm" &&
-      inputs.input_params.meta.batch_forward_type.has_decode()) {
+  if (can_overlap_npu_graph_decode(inputs.input_params)) {
     xllm::kernel::npu::replace_token(
         inputs.token_ids,
         last_step_output_.sample_output.next_tokens,
@@ -903,9 +915,7 @@ void WorkerImpl::prepare_work_before_execute_on_stream(
       prepare_input_params_for_linear_attention(processed_input.input_params);
     }
 
-    if (FLAGS_enable_graph && enable_schedule_overlap() &&
-        options_.backend() == "llm" &&
-        input_params.meta.batch_forward_type.has_decode()) {
+    if (can_overlap_npu_graph_decode(input_params)) {
       model_executor_->prepare_graph_input(processed_input.token_ids,
                                            processed_input.positions,
                                            kv_caches_,

@@ -312,8 +312,10 @@ ModelOutput AclGraph::replay(CausalLM* model,
   // by k_cache being valid and non-empty
   const bool needs_graph_metadata = model->requires_graph_forward_metadata() ||
                                     model->is_hybrid_linear_attention();
+  const bool replay_inputs_prepared =
+      replay_inputs_prepared_.exchange(false, std::memory_order_acq_rel);
   const bool can_use_prepared_inputs =
-      replay_inputs_prepared_ && params.graph.input_tokens_override.defined() &&
+      replay_inputs_prepared && params.graph.input_tokens_override.defined() &&
       !needs_graph_metadata;
   std::optional<ModelInputParams> graph_params;
   if (can_use_prepared_inputs) {
@@ -337,7 +339,6 @@ ModelOutput AclGraph::replay(CausalLM* model,
           graph_params.value());
     }
   }
-  replay_inputs_prepared_ = false;
 
   // Replay captured graph - NPUGraph mempool reuses temporary tensors
   // Get current NPU stream from libtorch NPU API
@@ -374,7 +375,7 @@ void AclGraph::prepare_replay_inputs(const torch::Tensor& tokens,
                            num_tokens_,
                            /*return_capture_params=*/false,
                            /*skip_token_update=*/true);
-  replay_inputs_prepared_ = true;
+  replay_inputs_prepared_.store(true, std::memory_order_release);
 }
 
 AclGraphExecutorImpl::AclGraphExecutorImpl(CausalLM* model,
@@ -588,8 +589,8 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
 
     // Return the output from capture (no need to replay since capture
     // already executed)
-    auto hidden_states = active_slot.graphs[graph_key]->get_hidden_states(
-        n_tokens);
+    auto hidden_states =
+        active_slot.graphs[graph_key]->get_hidden_states(n_tokens);
     if (options_.enable_graph_aux_hidden_states()) {
       auto aux_hidden_states =
           active_persistent_param.aux_hidden_states(n_tokens);
@@ -607,14 +608,14 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   return model_->forward(tokens, positions, kv_caches, params);
 }
 
-void AclGraphExecutorImpl::prepare_graph_input(
-    const torch::Tensor& tokens,
-    const torch::Tensor& positions,
-    std::vector<KVCache>& kv_caches,
-    const ModelInputParams& params) {
+void AclGraphExecutorImpl::prepare_graph_input(const torch::Tensor& tokens,
+                                               const torch::Tensor& positions,
+                                               std::vector<KVCache>& kv_caches,
+                                               const ModelInputParams& params) {
   const bool in_decoding_phase = params.meta.batch_forward_type.is_decode();
   const bool in_spec_verify_phase =
-      params.is_spec_verify && params.meta.batch_forward_type.is_chunked_prefill();
+      params.is_spec_verify &&
+      params.meta.batch_forward_type.is_chunked_prefill();
   if ((!in_decoding_phase && !in_spec_verify_phase) || args_.n_layers() == 1) {
     return;
   }

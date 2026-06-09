@@ -377,11 +377,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   bool should_sync_default_stream = true;
 #if defined(USE_NPU)
   should_sync_default_stream =
-      !(FLAGS_enable_graph && enable_schedule_overlap() &&
-        options_.backend() == "llm" &&
-        input.input_params.meta.batch_forward_type.is_decode() &&
-        options_.kv_cache_transfer_mode() != "PUSH" &&
-        !options_.enable_speculative_decode());
+      !can_overlap_npu_graph_decode(input.input_params);
 #endif
   if (sync_policy == ForwardSyncPolicy::NO_SYNC) {
     output.retained_input = std::make_shared<ForwardInput>(input);
