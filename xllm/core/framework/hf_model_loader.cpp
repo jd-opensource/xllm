@@ -79,6 +79,20 @@ bool is_compressed_tensors_fp8_scheme(const nlohmann::json& config) {
          num_bits_it->get<int64_t>() == 8;
 }
 
+bool is_compressed_tensors_int8_scheme(const nlohmann::json& config,
+                                       bool expected_dynamic) {
+  auto type_it = config.find("type");
+  auto num_bits_it = config.find("num_bits");
+  auto dynamic_it = config.find("dynamic");
+  const bool dynamic = dynamic_it != config.end() && !dynamic_it->is_null()
+                           ? dynamic_it->get<bool>()
+                           : false;
+  return type_it != config.end() && !type_it->is_null() &&
+         num_bits_it != config.end() && !num_bits_it->is_null() &&
+         boost::iequals(type_it->get<std::string>(), "int") &&
+         num_bits_it->get<int64_t>() == 8 && dynamic == expected_dynamic;
+}
+
 bool try_load_compressed_tensors_quant_cfg(const JsonReader& reader,
                                            QuantArgs& quant_args) {
   const auto quant_method =
@@ -118,6 +132,21 @@ bool try_load_compressed_tensors_quant_cfg(const JsonReader& reader,
 
     if (!is_compressed_tensors_fp8_scheme(*weights_it) ||
         !is_compressed_tensors_fp8_scheme(*input_activations_it)) {
+      // Check for INT8 W8A8 (compressed-tensors int quantized)
+      if (Device::type_str() == "dcu" &&
+          is_compressed_tensors_int8_scheme(*weights_it, false) &&
+          is_compressed_tensors_int8_scheme(*input_activations_it, true)) {
+        quant_args.bits() = 8;
+        quant_args.moe_weight_bits() = 8;
+        quant_args.activation_dynamic() = true;
+        quant_args.is_compressed_tensors_w8a8_dynamic() = true;
+        if (const auto ignore = reader.value<std::vector<std::string>>(
+                "quantization_config.ignore");
+            ignore.has_value()) {
+          quant_args.ignored_modules() = *ignore;
+        }
+        return true;
+      }
       continue;
     }
 
@@ -358,10 +387,10 @@ bool load_quant_cfg(const JsonReader& reader, QuantArgs& quant_args) {
   if (auto v = reader.value<std::string>("quantization_config.quant_method")) {
     quant_args.quant_method() = v.value();
   }
-  // Only CUDA currently adapts this compressed-tensors JSON layout.
+  // Only CUDA and DCU currently adapts this compressed-tensors JSON layout.
   // For other backends, skip this special parsing path and continue with the
   // generic quantization config parsing path.
-  if (Device::type_str() == "cuda" &&
+  if ((Device::type_str() == "cuda" || Device::type_str() == "dcu") &&
       try_load_compressed_tensors_quant_cfg(reader, quant_args)) {
     return true;
   }
