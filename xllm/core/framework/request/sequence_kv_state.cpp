@@ -70,8 +70,9 @@ void KVCacheState::set_slice_window_size(uint32_t size) {
 void KVCacheState::update_slice_window_pos() {
   if (slice_window_size_ > 0) {
     if (slice_window_pos_ >= slice_window_buffer_) {
-      // Keep SWA physical block order stable. DSA metadata maps logical
-      // positions to physical blocks with modulo arithmetic.
+      // Preserve the legacy cursor contract for non-composite block managers.
+      // CompositeBlockManager exposes DSA SWA tables as absolute logical
+      // columns instead.
       slice_window_pos_ = slice_window_pos_ % slice_window_size_;
     }
   }

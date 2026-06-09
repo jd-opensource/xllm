@@ -14,6 +14,7 @@ cc_library(
     deepseek_v4/dsa_metadata_builder_mlu.h
     deepseek_v4/deepseek_v4_indexer.h
     deepseek_v4/deepseek_v4_attention.h
+    deepseek_v4/deepseek_v4_decoder_layer.h
     deepseek_v4/hyper_connection.h
     deepseek_v32_sp_context.h
     deepseek_v32_sp_plan.h
@@ -34,6 +35,7 @@ cc_library(
     deepseek_v4/dsa_metadata_builder_mlu.cpp
     deepseek_v4/deepseek_v4_indexer.cpp
     deepseek_v4/deepseek_v4_attention.cpp
+    deepseek_v4/deepseek_v4_decoder_layer.cpp
     deepseek_v4/hyper_connection.cpp
     moe_gate.cpp
     fused_moe.cpp

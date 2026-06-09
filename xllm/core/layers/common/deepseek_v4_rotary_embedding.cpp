@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "deepseek_v4_rotary_embedding.h"
+#include "layers/common/deepseek_v4_rotary_embedding.h"
 
 #include <glog/logging.h>
 #include <torch/nn/functional/embedding.h>

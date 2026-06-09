@@ -8,6 +8,7 @@ cc_library(
     qwen2_attention.h
     qwen2_vision_attention.h
     qwen3_next_rms_norm.h
+    deepseek_v4_rotary_embedding.h
     partial_rotary_embedding.h
     rms_norm_gated.h
     rms_norm.h
@@ -32,6 +33,7 @@ cc_library(
     qwen2_attention.cpp
     qwen2_vision_attention.cpp
     qwen3_next_rms_norm.cpp
+    deepseek_v4_rotary_embedding.cpp
     partial_rotary_embedding.cpp
     rms_norm_gated.cpp
     rms_norm.cpp
