@@ -35,11 +35,13 @@ cc_library(
     base_attention_impl.h
     torch_attention.h
     flash_attention.h
+    fused_moe.h
   SRCS
     attention.cpp
     base_attention_impl.cpp
     torch_attention.cpp
     flash_attention.cpp
+    fused_moe.cpp
   DEPS
     :common_layers
     flash_attention

@@ -159,6 +159,7 @@ inline void deepseek_v4_collect_cpu_metadata_tensors(
       dsa.actual_seq_lengths_query, runtime_device, specs);
   deepseek_v4_add_packed_tensor(
       dsa.actual_seq_lengths_kv, runtime_device, specs);
+  deepseek_v4_add_packed_tensor(dsa.kv_cu_seq_lens, runtime_device, specs);
   deepseek_v4_add_packed_tensor(dsa.max_seqlen_q, runtime_device, specs);
   deepseek_v4_add_packed_tensor(dsa.max_seqlen_kv, runtime_device, specs);
   deepseek_v4_add_packed_tensor(dsa.input_positions, runtime_device, specs);
@@ -239,6 +240,7 @@ inline void deepseek_v4_move_dsa_metadata_to_device(
       maybe_to_device(dsa.actual_seq_lengths_query, runtime_device);
   dsa.actual_seq_lengths_kv =
       maybe_to_device(dsa.actual_seq_lengths_kv, runtime_device);
+  dsa.kv_cu_seq_lens = maybe_to_device(dsa.kv_cu_seq_lens, runtime_device);
   dsa.max_seqlen_q = maybe_to_device(dsa.max_seqlen_q, runtime_device);
   dsa.max_seqlen_kv = maybe_to_device(dsa.max_seqlen_kv, runtime_device);
   dsa.input_positions = maybe_to_device(dsa.input_positions, runtime_device);
@@ -1047,13 +1049,21 @@ class DeepseekV4ModelImpl
                                .dtype(torch::kInt32)
                                .device(torch::kCPU)
                                .pinned_memory(true);
+    // The DSA sparse-attention/indexer metadata kernels are configured with a
+    // fixed sparse top-k (index_topk_) and sliding-window size. A dummy/empty
+    // DP rank that reports a kv length of 1 makes cmp_topk/sparse_count far
+    // exceed the kv length, which the SparseAttnSharedkvMetadata /
+    // QuantLightningIndexer AICPU kernels reject as invalid parameters. Pad the
+    // dummy kv length so it can hold the configured sparse top-k and window.
+    const int32_t dummy_kv_len =
+        static_cast<int32_t>(std::max<int64_t>({index_topk_, window_size_, 1}));
     params.meta.num_sequences = 1;
     params.meta.actual_num_sequences = 1;
     params.meta.kv_max_seq_len =
-        std::max<int32_t>(params.meta.kv_max_seq_len, 1);
+        std::max<int32_t>(params.meta.kv_max_seq_len, dummy_kv_len);
     params.meta.q_max_seq_len = 1;
     params.meta.batch_forward_type = BatchForwardType::DECODE;
-    params.attention.host.kv_seq_lens = {1};
+    params.attention.host.kv_seq_lens = {dummy_kv_len};
     params.attention.host.q_seq_lens = {1};
     params.attention.host.q_cu_seq_lens = {1};
     params.attention.device.kv_seq_lens =
@@ -1093,20 +1103,26 @@ class DeepseekV4ModelImpl
     params.attn_metadata = nullptr;
     const int64_t metadata_batch_size =
         std::max<int64_t>(params.meta.num_sequences, 1);
+    // See fill_empty_dp_rank_input_params: the dummy kv length must be able to
+    // hold the configured sparse top-k / sliding window, otherwise the DSA
+    // metadata AICPU kernels reject cmp_topk/sparse_count > kv_len.
+    const int32_t dummy_kv_len =
+        static_cast<int32_t>(std::max<int64_t>({index_topk_, window_size_, 1}));
     params.meta.num_sequences = static_cast<int32_t>(metadata_batch_size);
     params.meta.kv_max_seq_len =
-        std::max<int32_t>(params.meta.kv_max_seq_len, 1);
+        std::max<int32_t>(params.meta.kv_max_seq_len, dummy_kv_len);
     params.meta.q_max_seq_len = 1;
     params.meta.batch_forward_type = BatchForwardType::DECODE;
 
-    auto pad_lens_vec = [metadata_batch_size](std::vector<int32_t>& lens) {
-      lens.resize(static_cast<size_t>(metadata_batch_size), 1);
-      for (auto& len : lens) {
-        len = std::max<int32_t>(len, 1);
+    auto pad_lens_vec = [metadata_batch_size](std::vector<int32_t>& lens,
+                                              int32_t fill_value) {
+      lens.resize(static_cast<size_t>(metadata_batch_size), fill_value);
+      for (int32_t& len : lens) {
+        len = std::max<int32_t>(len, fill_value);
       }
     };
-    pad_lens_vec(params.attention.host.kv_seq_lens);
-    pad_lens_vec(params.attention.host.q_seq_lens);
+    pad_lens_vec(params.attention.host.kv_seq_lens, dummy_kv_len);
+    pad_lens_vec(params.attention.host.q_seq_lens, 1);
 
     const int32_t manager_num = static_cast<int32_t>(group_infos_.size());
     bool has_full_multi_block_tables =
@@ -1311,6 +1327,7 @@ class DeepseekV4ModelImpl
         maybe_to_device(dsa.actual_seq_lengths_query, metadata_device);
     dsa.actual_seq_lengths_kv =
         maybe_to_device(dsa.actual_seq_lengths_kv, metadata_device);
+    dsa.kv_cu_seq_lens = maybe_to_device(dsa.kv_cu_seq_lens, metadata_device);
     dsa.seq_lens_q = maybe_to_device(dsa.seq_lens_q, metadata_device);
     dsa.seq_lens = maybe_to_device(dsa.seq_lens, metadata_device);
     dsa.max_seqlen_q = maybe_to_device(dsa.max_seqlen_q, metadata_device);

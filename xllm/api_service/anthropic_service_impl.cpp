@@ -678,10 +678,20 @@ void AnthropicServiceImpl::process_async_impl(
   auto message_id = request_params.request_id;
   auto saved_tools = request_params.tools;
 
+  std::optional<std::vector<int>> prompt_tokens = std::nullopt;
+  if (rpc_request.has_routing()) {
+    prompt_tokens = std::vector<int>{};
+    prompt_tokens->reserve(rpc_request.token_ids_size());
+    for (int32_t i = 0; i < rpc_request.token_ids_size(); ++i) {
+      prompt_tokens->emplace_back(rpc_request.token_ids(i));
+    }
+    request_params.decode_address = rpc_request.routing().decode_name();
+  }
+
   // Handle request
   master_->handle_request(
       std::move(messages),
-      std::nullopt,
+      std::move(prompt_tokens),
       std::move(request_params),
       call.get(),
       [call,

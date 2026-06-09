@@ -55,6 +55,13 @@ if(USE_NPU)
     if(NOT XLLM_OPS_RESULT EQUAL 0)
       message(FATAL_ERROR "Failed to precompile xllm ops, error code: ${XLLM_OPS_RESULT}")
     endif()
+
+    ## Adapt to the modification in DeekSeekV4 where the installation path of xllm_ops has been changed to custom_xllm_math
+    if(EXISTS "$ENV{NPU_HOME_PATH}/opp/vendors/custom_xllm_math/op_api/include/aclnnop")
+      set(XLLM_OPS_MARKER_PATH "$ENV{ASCEND_OPP_PATH}/vendors/custom_xllm_math/.xllm_ops_git_head")
+    endif()
+    message(STATUS "XLLM_OPS_MARKER_PATH: ${XLLM_OPS_MARKER_PATH}")
+
     set(XLLM_OPS_GIT_HEAD_CACHED "${XLLM_OPS_GIT_HEAD}" CACHE INTERNAL "" FORCE)
     get_filename_component(XLLM_OPS_MARKER_DIR "${XLLM_OPS_MARKER_PATH}" DIRECTORY)
     file(MAKE_DIRECTORY "${XLLM_OPS_MARKER_DIR}")
@@ -414,9 +421,21 @@ if(USE_NPU)
       $ENV{PYTORCH_INSTALL_PATH}/include/torch/csrc/distributed
       $ENV{NPU_HOME_PATH}/include
       $ENV{ATB_HOME_PATH}/include
-      $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/include/
       ${CMAKE_CURRENT_SOURCE_DIR}/third_party/torch_npu_ops/
   )
+  ## Adapt to the modification in DeekSeekV4 where the installation path of xllm_ops has been changed to custom_xllm_math
+  if(EXISTS "$ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/include")
+    include_directories(SYSTEM
+      $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/include/
+    )
+  endif()
+
+  if(EXISTS "$ENV{NPU_HOME_PATH}/opp/vendors/custom_xllm_math/op_api/include/aclnnop")
+    include_directories(SYSTEM
+        $ENV{NPU_HOME_PATH}/opp/vendors/custom_xllm_math/op_api/include/aclnnop
+    )
+  endif()
+
   # Keep third-party warnings suppressed while providing headers expected by
   # legacy includes like "atb_speed/log.h" from xllm_atb_layers.
   include_directories(SYSTEM
@@ -430,8 +449,14 @@ if(USE_NPU)
       $ENV{NPU_HOME_PATH}/lib64
       $ENV{ATB_HOME_PATH}/lib
       $ENV{NPU_TOOLKIT_HOME}/lib64
-      $ENV{NPU_HOME_PATH}/opp/vendors/xllm/op_api/lib/
   )
+  ## Adapt to the modification in DeekSeekV4 where the installation path of xllm_ops has been changed to custom_xllm_math
+  if(EXISTS "$ENV{NPU_HOME_PATH}/opp/vendors/custom_xllm_math/op_api/lib")
+    link_directories(
+        $ENV{NPU_HOME_PATH}/opp/vendors/custom_xllm_math/op_api/lib/
+    )
+  endif()
+
   link_libraries(cust_opapi)
   # avoid conflicts with xllm libruntime.a
   find_library(
