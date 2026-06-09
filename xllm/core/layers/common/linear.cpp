@@ -689,7 +689,7 @@ torch::Tensor ColumnParallelLinearImpl::forward(torch::Tensor input) {
 #if defined(USE_DCU)
     output = dcu_w8a8_dynamic_linear_forward(
         input, weight_, weight_scale.value(), bias, output_dtype_);
-#else
+#elif defined(USE_NPU)
     output = npu_w8a8_dynamic_linear_forward(
         input, weight_, weight_scale.value(), bias, output_dtype_);
 #endif
@@ -1118,7 +1118,7 @@ torch::Tensor QKVParallelLinearImpl::forward(torch::Tensor input) {
 #if defined(USE_DCU)
     output = dcu_w8a8_dynamic_linear_forward(
         input, weight_, weight_scale.value(), bias, output_dtype_);
-#else
+#elif defined(USE_NPU)
     output = npu_w8a8_dynamic_linear_forward(
         input, weight_, weight_scale.value(), bias, output_dtype_);
 #endif
@@ -1493,7 +1493,7 @@ torch::Tensor RowParallelLinearImpl::forward(torch::Tensor input) {
 #if defined(USE_DCU)
     output = dcu_w8a8_dynamic_linear_forward(
         input, weight_, weight_scale.value(), bias, output_dtype_);
-#else
+#elif defined(USE_NPU)
     output = npu_w8a8_dynamic_linear_forward(
         input, weight_, weight_scale.value(), bias, output_dtype_);
 #endif
@@ -1648,7 +1648,7 @@ torch::Tensor ReplicatedLinearImpl::forward(torch::Tensor input) {
 #if defined(USE_DCU)
     return dcu_w8a8_dynamic_linear_forward(
         input, weight_, weight_scale.value(), bias, input.scalar_type());
-#else
+#elif defined(USE_NPU)
     return npu_w8a8_dynamic_linear_forward(
         input, weight_, weight_scale.value(), bias, input.scalar_type());
 #endif
