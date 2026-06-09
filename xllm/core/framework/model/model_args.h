@@ -132,6 +132,7 @@ struct ModelArgs {
   PROPERTY(int32_t, n_group) = 0;
   PROPERTY(int32_t, topk_group) = 0;
   PROPERTY(std::string, scoring_func);
+  PROPERTY(float, swiglu_limit) = 0.0f;
   // deepseek v2/v3 MLA
   PROPERTY(bool, enable_mla) = false;
   PROPERTY(int32_t, qk_nope_head_dim) = 0;

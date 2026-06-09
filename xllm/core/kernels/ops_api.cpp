@@ -452,7 +452,11 @@ std::tuple<torch::Tensor, torch::Tensor> dequant_swiglu_quant(
                                    params.quant_offset,
                                    params.group_index,
                                    params.activate_left,
-                                   params.quant_mode);
+                                   params.quant_mode,
+                                   params.swiglu_mode,
+                                   params.clamp_limit,
+                                   params.glu_alpha,
+                                   params.glu_bias);
 #else
   NOT_IMPLEMENTED();
 #endif

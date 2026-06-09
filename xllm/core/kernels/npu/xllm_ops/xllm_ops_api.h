@@ -137,7 +137,11 @@ std::tuple<at::Tensor, at::Tensor> dequant_swiglu_quant(
     const c10::optional<at::Tensor>& quant_offset,
     const c10::optional<at::Tensor>& group_index,
     bool activate_left,
-    int64_t quant_mode);
+    int64_t quant_mode,
+    int64_t swiglu_mode,
+    double clamp_limit,
+    double glu_alpha,
+    double glu_bias);
 
 at::Tensor hc_post(const at::Tensor& x,
                    const at::Tensor& residual,

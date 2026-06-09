@@ -1647,6 +1647,7 @@ inline void load_deepseek_v4_model_args(const JsonReader& json,
   LOAD_ARG_OR(n_hash_layers, "num_hash_layers", 3);
   LOAD_ARG_OR(routed_scaling_factor, "routed_scaling_factor", 1.5f);
   LOAD_ARG_OR(scoring_func, "scoring_func", "sqrtsoftplus");
+  LOAD_ARG_OR(swiglu_limit, "swiglu_limit", 10.0f);
 
   // Indexer
   LOAD_ARG_OR(index_head_dim, "index_head_dim", 128);
@@ -1772,6 +1773,9 @@ inline void validate_deepseek_v4_args(const ModelArgs& args,
       << "deepseek_v4 config routed_scaling_factor/route_scale must be > 0, "
          "got "
       << args.routed_scaling_factor();
+  CHECK_GT(args.swiglu_limit(), 0.0f)
+      << "deepseek_v4 config swiglu_limit must be > 0, got "
+      << args.swiglu_limit();
   CHECK(!args.scoring_func().empty())
       << "deepseek_v4 config scoring_func/score_func must not be empty";
   {

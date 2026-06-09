@@ -16,14 +16,10 @@ limitations under the License.
 #include "deepseek_v4_gate.h"
 
 #include <glog/logging.h>
+#include <torch_npu/csrc/aten/CustomFunctions.h>
 
 #include <algorithm>
 #include <cctype>
-#ifdef TORCH_HIGHER_THAN_PTA6
-#include <torch_npu/csrc/core/npu/NPUFormat.h>
-#else
-#include <torch_npu/csrc/aten/NPUNativeFunctions.h>
-#endif
 
 #include "kernels/ops_api.h"
 
@@ -106,9 +102,6 @@ DeepseekV4GateImpl::DeepseekV4GateImpl(const ModelArgs& args,
       torch::empty({n_routed_experts_, hidden_size_}, gate_options),
       /*requires_grad=*/false);
 
-  weight_.set_data(
-      at_npu::native::npu_format_cast(weight_, ACL_FORMAT_FRACTAL_NZ));
-
   if (hash_layer_) {
     const int64_t vocab_size = args.vocab_size();
     CHECK_GT(vocab_size, 0)
@@ -141,7 +134,7 @@ std::tuple<torch::Tensor, torch::Tensor> DeepseekV4GateImpl::forward(
   if (gate_input.scalar_type() != torch::kFloat32) {
     gate_input = gate_input.to(torch::kFloat32);
   }
-  auto logits = torch::matmul(gate_input, weight_.transpose(0, 1));
+  auto logits = at_npu::native::custom_ops::npu_linear(gate_input, weight_);
 
   constexpr bool renormalize = true;
   const int64_t norm_type = score_func_to_norm_type(score_func_);

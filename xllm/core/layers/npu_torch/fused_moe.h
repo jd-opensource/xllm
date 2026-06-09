@@ -27,6 +27,7 @@ limitations under the License.
 #include "framework/quant_args.h"
 #include "framework/state_dict/state_dict.h"
 #include "framework/state_dict/utils.h"
+#include "layers/common/activation.h"
 #include "layers/common/dense_mlp.h"
 #include "layers/common/fused_moe_base.h"
 #include "layers/common/linear.h"
@@ -76,7 +77,6 @@ class FusedMoEImpl : public torch::nn::Module {
   int64_t topk_;
   int64_t num_expert_group_;
   int64_t topk_group_;
-  double route_scale_;
   int64_t hidden_size_;
   int64_t n_shared_experts_;
   bool is_gated_;
@@ -87,6 +87,7 @@ class FusedMoEImpl : public torch::nn::Module {
   bool is_deepseek_v4_ = false;
   bool shared_expert_gate_is_loaded_ = false;
   int64_t renormalize_;
+  double swiglu_limit_ = 0.0;
   std::string hidden_act_;
   std::string scoring_func_;
   bool is_smoothquant_;
@@ -101,6 +102,7 @@ class FusedMoEImpl : public torch::nn::Module {
   bool w2_group_gemm_layout_prepared_ = false;
 
   ReplicatedLinear gate_{nullptr};
+  Activation act_{nullptr};
   DenseMLP shared_experts_{nullptr};
   torch::nn::Linear shared_expert_gate_{nullptr};
   QuantArgs quant_args_;
