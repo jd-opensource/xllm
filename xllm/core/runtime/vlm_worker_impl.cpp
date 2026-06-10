@@ -35,6 +35,24 @@ limitations under the License.
 
 namespace xllm {
 
+namespace {
+
+void wait_input_ready_events(const ForwardInput& input, const Stream& stream) {
+  CHECK(stream.wait_event(input.metadata_ready_event))
+      << "failed to wait ForwardInput metadata ready event";
+}
+
+StreamEventPtr record_current_stream_event(const Device& device) {
+  std::unique_ptr<Stream> stream = device.current_stream();
+  StreamEventPtr event = stream->record_event();
+  if (event == nullptr) {
+    stream->synchronize();
+  }
+  return event;
+}
+
+}  // namespace
+
 VLMWorkerImpl::VLMWorkerImpl(const ParallelArgs& parallel_args,
                              const torch::Device& device,
                              const runtime::Options& options)
@@ -114,6 +132,71 @@ std::optional<ForwardOutput> VLMWorkerImpl::step(const ForwardInput& input) {
   }
 
   auto ret = device_.synchronize_default_stream();
+  return output;
+}
+
+std::optional<ForwardOutput> VLMWorkerImpl::execute_no_sync_on_stream(
+    const ForwardInput& input,
+    Stream& compute_stream) {
+  c10::StreamGuard stream_guard = compute_stream.set_stream_guard();
+  wait_input_ready_events(input, compute_stream);
+
+  Timer timer;
+  const bool empty_shard =
+      input.input_params.meta.num_sequences == 0 &&
+      (!input.token_ids.defined() || input.token_ids.numel() == 0);
+  if (empty_shard) {
+    return ForwardOutput{};
+  }
+
+  auto model_output = model_executor_->forward(
+      input.token_ids, input.positions, kv_caches_, input.input_params);
+  auto& sampling_params = input.sampling_params;
+  torch::Tensor logits;
+  if (sampling_params.selected_token_idxes.defined()) {
+    logits = model_->logits(model_output.hidden_states,
+                            sampling_params.selected_token_idxes);
+  }
+
+  COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
+
+  if (!enable_schedule_overlap() && !driver_ && !dp_driver_ &&
+      !options_.enable_speculative_decode()) {
+    return std::nullopt;
+  }
+
+  ForwardOutput output;
+  if (sampling_params.selected_token_idxes.defined()) {
+    auto sample_output = sampler_->forward(logits, sampling_params);
+    output.logits = logits;
+    COUNTER_ADD(execution_latency_seconds_sampling, timer.elapsed_seconds());
+
+    output.sample_output = sample_output;
+    output.do_sample = sampling_params.do_sample;
+    output.logprobs = sampling_params.logprobs;
+    output.max_top_logprobs = sampling_params.max_top_logprobs;
+  }
+
+  if (options_.enable_speculative_decode()) {
+    torch::Tensor embeddings;
+    if (model_output.aux_hidden_states.defined()) {
+      embeddings = model_output.aux_hidden_states;
+    } else {
+      embeddings = model_output.hidden_states;
+    }
+    if (!input.input_params.meta.batch_forward_type.is_decode() &&
+        !is_spec_draft_) {
+      output.sample_output.embeddings = embeddings;
+    } else if (sampling_params.selected_token_idxes.defined()) {
+      output.sample_output.embeddings = embeddings.index_select(
+          /*dim=*/0, sampling_params.selected_token_idxes);
+    }
+  }
+
+  output.retained_input = std::make_shared<ForwardInput>(input);
+  if (enable_schedule_overlap()) {
+    output.ready_event = record_current_stream_event(device_);
+  }
   return output;
 }
 

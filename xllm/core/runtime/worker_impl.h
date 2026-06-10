@@ -120,6 +120,10 @@ class WorkerImpl {
 
   virtual std::optional<ForwardOutput> step(const ForwardInput& inputs) = 0;
 
+  virtual std::optional<ForwardOutput> execute_no_sync_on_stream(
+      const ForwardInput& input,
+      Stream& compute_stream);
+
   virtual void process_group_test();
 
   virtual ForwardInput update_input_by_last_step_output(ForwardInput& inputs);
