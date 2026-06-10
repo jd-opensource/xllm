@@ -347,7 +347,11 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InferOutputTensor {
   /** Raw row-major tensor buffer. Owned by XLLM_Response. */
   const void* data;
 
-  /** Number of elements (product of shape, == byte_size / element_size). */
+  /**
+   * Number of elements (product of shape). For numeric dtypes this equals the
+   * element count. For STRING tensors (proto DataType::STRING) this is the
+   * number of strings; data is a packed buffer of [uint32_t len][bytes] chunks.
+   */
   size_t num_elements;
 } XLLM_InferOutputTensor;
 
@@ -469,6 +473,18 @@ typedef struct XLLM_CAPI_EXPORT XLLM_RecOutput {
 
   /** Number of item ids in the item_ids array */
   size_t item_ids_size;
+
+  /**
+   * Extended item DID strings, parallel to item_ids (length == item_ids_size).
+   * Populated when enable_extended_item_info is true.
+   */
+  char** item_dids;
+
+  /**
+   * Extended item type strings, parallel to item_ids (length == item_ids_size).
+   * Populated when enable_extended_item_info is true.
+   */
+  char** item_types;
 
   /** Token-aligned REC/OneRec logprobs for this choice */
   float* rec_token_logprobs;
