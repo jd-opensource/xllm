@@ -55,6 +55,159 @@ void set_completion_logprobs(
   }
 }
 
+struct RecEmitRecord {
+  int32_t output_index = 0;
+  int64_t item_id = 0;
+  std::optional<RecItemInfo> item_info;
+};
+
+std::vector<RecEmitRecord> collect_rec_emit_records(
+    const RequestOutput& req_output) {
+  std::vector<RecEmitRecord> emitted_items;
+  emitted_items.reserve(req_output.outputs.size());
+  const int32_t total_threshold = FLAGS_total_conversion_threshold;
+  for (int32_t i = 0; i < static_cast<int32_t>(req_output.outputs.size());
+       ++i) {
+    const auto& output = req_output.outputs[i];
+    if (!output.item_ids_list.empty()) {
+      const bool has_item_infos =
+          output.item_infos_list.size() == output.item_ids_list.size();
+      for (size_t item_idx = 0; item_idx < output.item_ids_list.size();
+           ++item_idx) {
+        if (static_cast<int32_t>(emitted_items.size()) >= total_threshold) {
+          break;
+        }
+        std::optional<RecItemInfo> item_info;
+        if (has_item_infos) {
+          item_info = output.item_infos_list[item_idx];
+        }
+        RecEmitRecord emitted_item;
+        emitted_item.output_index = i;
+        emitted_item.item_id = output.item_ids_list[item_idx];
+        emitted_item.item_info = std::move(item_info);
+        emitted_items.emplace_back(std::move(emitted_item));
+      }
+    } else if (output.item_ids.has_value() &&
+               static_cast<int32_t>(emitted_items.size()) < total_threshold) {
+      RecEmitRecord emitted_item;
+      emitted_item.output_index = i;
+      emitted_item.item_id = output.item_ids.value();
+      emitted_item.item_info = output.item_info;
+      emitted_items.emplace_back(std::move(emitted_item));
+    }
+    if (static_cast<int32_t>(emitted_items.size()) >= total_threshold) {
+      break;
+    }
+  }
+  return emitted_items;
+}
+
+char* duplicate_c_string(const std::string& value) {
+  char* out = new char[value.size() + 1];
+  std::memcpy(out, value.c_str(), value.size() + 1);
+  return out;
+}
+
+void copy_rec_output_extended_strings(XLLM_RecOutput* rec_output,
+                                      const SequenceOutput& seq_output,
+                                      size_t copied_item_count) {
+  if (rec_output == nullptr || copied_item_count == 0 ||
+      !FLAGS_enable_extended_item_info) {
+    return;
+  }
+
+  rec_output->item_dids = new char*[copied_item_count]();
+  rec_output->item_types = new char*[copied_item_count]();
+  CHECK(nullptr != rec_output->item_dids);
+  CHECK(nullptr != rec_output->item_types);
+
+  if (!seq_output.item_infos_list.empty() &&
+      seq_output.item_infos_list.size() == seq_output.item_ids_list.size()) {
+    for (size_t j = 0; j < copied_item_count; ++j) {
+      const RecItemInfo& info = seq_output.item_infos_list[j];
+      rec_output->item_dids[j] = duplicate_c_string(info.did);
+      rec_output->item_types[j] = duplicate_c_string(info.type);
+    }
+    return;
+  }
+
+  if (copied_item_count == 1 && seq_output.item_info.has_value()) {
+    rec_output->item_dids[0] = duplicate_c_string(seq_output.item_info->did);
+    rec_output->item_types[0] = duplicate_c_string(seq_output.item_info->type);
+  }
+}
+
+char* duplicate_tensor_name(const char* name) {
+  const size_t name_len = std::strlen(name);
+  char* name_buf = new char[name_len + 1];
+  CHECK(nullptr != name_buf);
+  std::memcpy(name_buf, name, name_len + 1);
+  return name_buf;
+}
+
+XLLM_InferOutputTensor make_int64_output_tensor(
+    const char* name,
+    const std::vector<int64_t>& values) {
+  auto* shape = new int64_t[1];
+  CHECK(nullptr != shape);
+  shape[0] = static_cast<int64_t>(values.size());
+
+  XLLM_InferOutputTensor tensor{};
+  tensor.name = duplicate_tensor_name(name);
+  tensor.data_type = static_cast<int32_t>(proto::DataType::INT64);
+  tensor.shape = shape;
+  tensor.shape_len = 1;
+  tensor.num_elements = values.size();
+  if (!values.empty()) {
+    auto* data = new char[values.size() * sizeof(int64_t)];
+    CHECK(nullptr != data);
+    std::memcpy(data, values.data(), values.size() * sizeof(int64_t));
+    tensor.data = data;
+  } else {
+    tensor.data = nullptr;
+  }
+  return tensor;
+}
+
+XLLM_InferOutputTensor make_string_output_tensor(
+    const char* name,
+    const std::vector<std::string>& values) {
+  auto* shape = new int64_t[1];
+  CHECK(nullptr != shape);
+  shape[0] = static_cast<int64_t>(values.size());
+
+  XLLM_InferOutputTensor tensor{};
+  tensor.name = duplicate_tensor_name(name);
+  tensor.data_type = static_cast<int32_t>(proto::DataType::STRING);
+  tensor.shape = shape;
+  tensor.shape_len = 1;
+  tensor.num_elements = values.size();
+
+  size_t packed_size = 0;
+  for (const std::string& value : values) {
+    packed_size += sizeof(uint32_t) + value.size();
+  }
+  if (packed_size == 0) {
+    tensor.data = nullptr;
+    return tensor;
+  }
+
+  auto* data = new char[packed_size];
+  CHECK(nullptr != data);
+  size_t offset = 0;
+  for (const std::string& value : values) {
+    const uint32_t length = static_cast<uint32_t>(value.size());
+    std::memcpy(data + offset, &length, sizeof(length));
+    offset += sizeof(length);
+    if (!value.empty()) {
+      std::memcpy(data + offset, value.data(), value.size());
+      offset += value.size();
+    }
+  }
+  tensor.data = data;
+  return tensor;
+}
+
 // Populate the raw (proto-free) output_tensors view on XLLM_Response from
 // RequestOutput. Mirrors the intent of serialize_completion_response_proto for
 // the rec_result tensor, but emits a single contiguous host buffer per tensor
@@ -63,12 +216,11 @@ void set_completion_logprobs(
 //
 // Layout / dtype:
 //   - FLAGS_enable_convert_tokens_to_item == true
-//       name        = "rec_result"
-//       data_type   = proto::DataType::INT64
-//       shape       = {#valid_items}   // outputs without item_ids are skipped
-//       num_elements= #valid_items
-//       data        = req_output.outputs[i].item_ids (one per choice that has
-//       it)
+//       rec_result  = INT64[item_count]
+//       item_did    = STRING[item_count] (when enable_extended_item_info)
+//       item_type   = STRING[item_count] (when enable_extended_item_info)
+//       item_count follows total_conversion_threshold aggregation, aligned
+//       with RecCompletionServiceImpl.
 //   - FLAGS_enable_convert_tokens_to_item == false
 //       name        = "rec_result"
 //       data_type   = proto::DataType::INT32
@@ -100,79 +252,75 @@ bool populate_raw_output_tensors(const InferenceType inference_type,
   }
 
   const bool convert_to_item = FLAGS_enable_convert_tokens_to_item;
-
   const size_t num_outputs = req_output.outputs.size();
-  size_t rank = 0;
-  // alloc_elems: upper bound used to size the data buffer. May exceed the
-  // final num_elements when fewer than num_outputs outputs carry item_ids.
-  size_t alloc_elems = 0;
-  size_t token_dim = 0;
-  int32_t data_type = 0;
-  size_t elem_size = 0;
 
   if (convert_to_item) {
-    rank = 1;
-    alloc_elems = num_outputs;
-    data_type = static_cast<int32_t>(proto::DataType::INT64);
-    elem_size = sizeof(int64_t);
-  } else {
-    rank = 2;
-    token_dim = req_output.outputs.front().token_ids.size();
-    alloc_elems = num_outputs * token_dim;
-    data_type = static_cast<int32_t>(proto::DataType::INT32);
-    elem_size = sizeof(int32_t);
+    const std::vector<RecEmitRecord> emitted_items =
+        collect_rec_emit_records(req_output);
+    const size_t tensor_count = FLAGS_enable_extended_item_info ? 3U : 1U;
+    auto* entries = new XLLM_InferOutputTensor[tensor_count]();
+
+    std::vector<int64_t> item_ids;
+    item_ids.reserve(emitted_items.size());
+    for (const RecEmitRecord& emitted_item : emitted_items) {
+      item_ids.emplace_back(emitted_item.item_id);
+    }
+    entries[0] = make_int64_output_tensor("rec_result", item_ids);
+
+    if (FLAGS_enable_extended_item_info) {
+      std::vector<std::string> item_dids;
+      std::vector<std::string> item_types;
+      item_dids.reserve(emitted_items.size());
+      item_types.reserve(emitted_items.size());
+      for (const RecEmitRecord& emitted_item : emitted_items) {
+        if (emitted_item.item_info.has_value()) {
+          item_dids.emplace_back(emitted_item.item_info->did);
+          item_types.emplace_back(emitted_item.item_info->type);
+        } else {
+          item_dids.emplace_back("");
+          item_types.emplace_back("");
+        }
+      }
+      entries[1] = make_string_output_tensor("item_did", item_dids);
+      entries[2] = make_string_output_tensor("item_type", item_types);
+    }
+
+    response->output_tensors.entries = entries;
+    response->output_tensors.entries_size = tensor_count;
+    return true;
   }
 
+  const size_t token_dim = req_output.outputs.front().token_ids.size();
+  const size_t alloc_elems = num_outputs * token_dim;
   auto* entries = new XLLM_InferOutputTensor[1]();
   CHECK(nullptr != entries);
-  auto* shape = new int64_t[rank]();
+  auto* shape = new int64_t[2]();
   CHECK(nullptr != shape);
-  auto* data = alloc_elems > 0 ? new char[alloc_elems * elem_size]() : nullptr;
+  auto* data =
+      alloc_elems > 0 ? new char[alloc_elems * sizeof(int32_t)]() : nullptr;
   if (alloc_elems > 0) {
     CHECK(nullptr != data);
   }
-  constexpr const char* kRecResultName = "rec_result";
-  auto* name_buf = new char[std::strlen(kRecResultName) + 1];
-  CHECK(nullptr != name_buf);
-  std::memcpy(name_buf, kRecResultName, std::strlen(kRecResultName) + 1);
 
-  size_t actual_elems = 0;
-  if (convert_to_item) {
-    auto* dst = reinterpret_cast<int64_t*>(data);
-    size_t written = 0;
-    for (size_t i = 0; i < num_outputs; ++i) {
-      const auto& seq_output = req_output.outputs[i];
-      if (seq_output.item_ids.has_value()) {
-        dst[written++] = seq_output.item_ids.value();
-      }
+  shape[0] = static_cast<int64_t>(num_outputs);
+  shape[1] = static_cast<int64_t>(token_dim);
+  auto* dst = reinterpret_cast<int32_t*>(data);
+  for (size_t i = 0; i < num_outputs; ++i) {
+    const auto& seq_output = req_output.outputs[i];
+    const size_t row = std::min(token_dim, seq_output.token_ids.size());
+    if (row > 0) {
+      std::memcpy(dst + i * token_dim,
+                  seq_output.token_ids.data(),
+                  row * sizeof(int32_t));
     }
-    // Keep shape and num_elements consistent. Empty (written == 0) is a
-    // valid state - downstream gets an empty [0]-shaped int64 tensor.
-    shape[0] = static_cast<int64_t>(written);
-    actual_elems = written;
-  } else {
-    shape[0] = static_cast<int64_t>(num_outputs);
-    shape[1] = static_cast<int64_t>(token_dim);
-    auto* dst = reinterpret_cast<int32_t*>(data);
-    for (size_t i = 0; i < num_outputs; ++i) {
-      const auto& seq_output = req_output.outputs[i];
-      // Defensive: clamp to the row width so we never overrun.
-      const size_t row = std::min(token_dim, seq_output.token_ids.size());
-      if (row > 0) {
-        std::memcpy(dst + i * token_dim,
-                    seq_output.token_ids.data(),
-                    row * sizeof(int32_t));
-      }
-    }
-    actual_elems = alloc_elems;
   }
 
-  entries[0].name = name_buf;
-  entries[0].data_type = data_type;
+  entries[0].name = duplicate_tensor_name("rec_result");
+  entries[0].data_type = static_cast<int32_t>(proto::DataType::INT32);
   entries[0].shape = shape;
-  entries[0].shape_len = rank;
+  entries[0].shape_len = 2;
   entries[0].data = data;
-  entries[0].num_elements = actual_elems;
+  entries[0].num_elements = alloc_elems;
 
   response->output_tensors.entries = entries;
   response->output_tensors.entries_size = 1;
@@ -522,6 +670,8 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
           for (size_t j = 0; j < copied_item_count; ++j) {
             rec_output->item_ids[j] = seq_output.item_ids_list[j];
           }
+          copy_rec_output_extended_strings(
+              rec_output, seq_output, copied_item_count);
           total_item_count += static_cast<int32_t>(copied_item_count);
         }
       } else if (seq_output.item_ids.has_value() &&
@@ -530,6 +680,7 @@ XLLM_Response* build_success_response(const InferenceType& inference_type,
         rec_output->item_ids = new int64_t[1];
         CHECK(nullptr != rec_output->item_ids);
         rec_output->item_ids[0] = seq_output.item_ids.value();
+        copy_rec_output_extended_strings(rec_output, seq_output, 1);
         ++total_item_count;
       }
     }
@@ -810,6 +961,25 @@ void xllm_free_response(XLLM_Response* resp) {
   if (nullptr != resp->rec_outputs.entries) {
     for (size_t i = 0; i < resp->rec_outputs.entries_size; ++i) {
       XLLM_RecOutput& rec_output = resp->rec_outputs.entries[i];
+      const size_t item_count = rec_output.item_ids_size;
+      if (nullptr != rec_output.item_dids) {
+        for (size_t j = 0; j < item_count; ++j) {
+          if (nullptr != rec_output.item_dids[j]) {
+            delete[] rec_output.item_dids[j];
+          }
+        }
+        delete[] rec_output.item_dids;
+        rec_output.item_dids = nullptr;
+      }
+      if (nullptr != rec_output.item_types) {
+        for (size_t j = 0; j < item_count; ++j) {
+          if (nullptr != rec_output.item_types[j]) {
+            delete[] rec_output.item_types[j];
+          }
+        }
+        delete[] rec_output.item_types;
+        rec_output.item_types = nullptr;
+      }
       if (nullptr != rec_output.item_ids) {
         delete[] rec_output.item_ids;
         rec_output.item_ids = nullptr;
