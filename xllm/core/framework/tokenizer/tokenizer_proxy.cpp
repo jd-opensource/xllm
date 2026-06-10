@@ -52,6 +52,12 @@ bool TokenizerProxy::decode(const Slice<int32_t>& token_ids,
   return get_tls_tokenizer()->decode(token_ids, skip_special_tokens, item_ids);
 }
 
+bool TokenizerProxy::decode_item_infos(
+    const Slice<int32_t>& token_ids,
+    std::vector<RecItemInfo>* item_infos) const {
+  return get_tls_tokenizer()->decode_item_infos(token_ids, item_infos);
+}
+
 std::optional<int32_t> TokenizerProxy::token_to_id(
     const std::string_view& token) const {
   return get_tls_tokenizer()->token_to_id(token);

@@ -128,23 +128,21 @@ void Sequence::generate_onerec_output(const Slice<int32_t>& ids,
       output.token_ids.size() == rec_token_size) {
     const Slice<int32_t> token_slice{output.token_ids.data(),
                                      output.token_ids.size()};
-    if (FLAGS_enable_extended_item_info) {
-      const auto* rec_tokenizer = dynamic_cast<const RecTokenizer*>(&tokenizer);
-      if (rec_tokenizer != nullptr) {
-        std::vector<RecItemInfo> item_infos;
-        const bool ok =
-            rec_tokenizer->decode_item_infos(token_slice, &item_infos);
-        if (ok && !item_infos.empty()) {
-          output.item_infos_list = normalize_rec_item_infos(item_infos, index_);
-          output.item_ids_list.reserve(output.item_infos_list.size());
-          for (const RecItemInfo& item_info : output.item_infos_list) {
-            output.item_ids_list.emplace_back(item_info.item_id);
-          }
-          if (!output.item_infos_list.empty()) {
-            output.item_ids = output.item_ids_list.front();
-            output.item_info = output.item_infos_list.front();
-          }
-        }
+    std::vector<RecItemInfo> item_infos;
+    const auto* rec_tokenizer = dynamic_cast<const RecTokenizer*>(&tokenizer);
+    const bool decoded_item_infos =
+        rec_tokenizer != nullptr
+            ? rec_tokenizer->decode_item_infos(token_slice, &item_infos)
+            : tokenizer.decode_item_infos(token_slice, &item_infos);
+    if (decoded_item_infos && !item_infos.empty()) {
+      output.item_infos_list = normalize_rec_item_infos(item_infos, index_);
+      output.item_ids_list.reserve(output.item_infos_list.size());
+      for (const RecItemInfo& item_info : output.item_infos_list) {
+        output.item_ids_list.emplace_back(item_info.item_id);
+      }
+      if (!output.item_infos_list.empty()) {
+        output.item_ids = output.item_ids_list.front();
+        output.item_info = output.item_infos_list.front();
       }
     } else {
       std::vector<int64_t> item_ids;
