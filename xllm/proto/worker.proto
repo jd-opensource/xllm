@@ -80,13 +80,16 @@ message PullKVCacheRequest {
 enum TransferType {
   G2H = 0;
   H2D = 1;
-  D2G = 2;
+  D2H2G = 2;
+  D2G = 3;
+  G2D = 4;
 }
 
 message BlockTransferInfo {
   int32 src_block_id = 1;
   int32 dst_block_id = 2;
   bytes hash_key = 3;
+  int32 group = 4;
 }
 
 message BlockTransferInfos {

@@ -209,7 +209,9 @@ class WorkerImpl {
   // Only used for deepseek chunked prefill ops on npu device
   void prepare_mla_prefixcache_inputs(ModelInputParams& input_params);
 
-  void init_hierarchy_kv_cache_transfer();
+  void init_hierarchy_kv_cache_transfer(
+      const KVCacheShape& kv_cache_shape,
+      const KVCacheCreateOptions& kv_cache_create_options);
 
   bool allocate_kv_cache_storage(const KVCacheShape& kv_cache_shape,
                                  bool use_huge_page_allocator = false,

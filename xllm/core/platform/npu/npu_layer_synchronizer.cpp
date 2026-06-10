@@ -18,6 +18,8 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch_npu/csrc/core/npu/NPUStream.h>
 
+#include "platform/stream.h"
+
 namespace xllm {
 
 NPULayerSynchronizerImpl::NPULayerSynchronizerImpl(const int64_t num_layers,
@@ -61,6 +63,20 @@ bool NPULayerSynchronizerImpl::record_event(const int64_t layer_index,
                                             const int32_t device_index) {
   aclrtStream stream = c10_npu::getCurrentNPUStream(device_index).stream();
   auto ret = aclrtRecordEvent(events_[layer_index], stream);
+  if (ret != ACL_SUCCESS) {
+    LOG(ERROR) << "Record event failed: " << ret;
+    return false;
+  }
+  event_record_flags_[layer_index].store(true, std::memory_order_release);
+  return true;
+}
+
+bool NPULayerSynchronizerImpl::record_stream(const int64_t layer_index,
+                                             Stream* stream) {
+  CHECK(stream != nullptr) << "stream must not be null.";
+  auto* npu_stream = stream->get_stream();
+  CHECK(npu_stream != nullptr) << "NPU stream must not be null.";
+  auto ret = aclrtRecordEvent(events_[layer_index], npu_stream->stream());
   if (ret != ACL_SUCCESS) {
     LOG(ERROR) << "Record event failed: " << ret;
     return false;

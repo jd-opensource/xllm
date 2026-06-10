@@ -37,6 +37,9 @@ class KVCache final {
   KVCache(const KVCacheShape& kv_cache_shape,
           const KVCacheCreateOptions& create_options,
           int64_t layer_id);
+  KVCache(const KVCacheShape& kv_cache_shape,
+          const KVCacheCreateOptions& create_options,
+          PrefixCacheGroup group);
   KVCache(const KVCache&) = delete;
   KVCache& operator=(const KVCache&) = delete;
   KVCache(KVCache&&) noexcept = default;
@@ -59,6 +62,10 @@ class KVCache final {
   torch::Tensor get_compress_score_state() const;
   torch::Tensor get_compress_index_kv_state() const;
   torch::Tensor get_compress_index_score_state() const;
+  PrefixCacheTensorMap get_prefix_cache_tensors(PrefixCacheGroup group,
+                                                int64_t index) const;
+  const std::vector<HostPageAlignedRegion>& get_host_page_aligned_regions()
+      const;
   std::vector<std::vector<int64_t>> get_shapes();
 
   bool empty() const;

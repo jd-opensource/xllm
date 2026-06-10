@@ -32,6 +32,9 @@ class KVCacheImpl {
   explicit KVCacheImpl(const KVCacheTensors& tensors);
   KVCacheImpl(const KVCacheShape& kv_cache_shape,
               const KVCacheCreateOptions& create_options);
+  KVCacheImpl(const KVCacheShape& kv_cache_shape,
+              const KVCacheCreateOptions& create_options,
+              PrefixCacheGroup group);
 
   virtual ~KVCacheImpl() = default;
 
@@ -49,6 +52,13 @@ class KVCacheImpl {
   virtual torch::Tensor get_compress_index_kv_state() const;
   virtual torch::Tensor get_compress_index_score_state() const;
 
+  virtual PrefixCacheTensorMap get_prefix_cache_tensors(
+      PrefixCacheGroup group) const;
+  virtual PrefixCacheTensorMap get_prefix_cache_tensors(PrefixCacheGroup group,
+                                                        int64_t index) const;
+  virtual const std::vector<HostPageAlignedRegion>&
+  get_host_page_aligned_regions() const;
+
   virtual bool empty() const;
 
   virtual std::vector<std::vector<int64_t>> get_shapes() const;
@@ -57,6 +67,11 @@ class KVCacheImpl {
                            torch::Tensor& dst_tensor);
 
  protected:
+  void create_host_tensor(const std::vector<int64_t>& dims,
+                          torch::ScalarType dtype,
+                          torch::Tensor* tensor,
+                          std::vector<int64_t>* shape);
+  std::vector<HostPageAlignedRegion> host_page_aligned_regions_;
   torch::Tensor key_cache_;
   torch::Tensor value_cache_;
   std::vector<int64_t> key_cache_shape_;

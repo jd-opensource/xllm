@@ -28,6 +28,9 @@ class KVCacheShape;
 class DeepSeekV4KVCacheImpl final : public KVCacheImpl {
  public:
   explicit DeepSeekV4KVCacheImpl(const DeepSeekV4KVCacheTensors& tensors);
+  DeepSeekV4KVCacheImpl(const KVCacheShape& kv_cache_shape,
+                        const KVCacheCreateOptions& create_options,
+                        PrefixCacheGroup group);
 
   torch::Tensor get_k_cache() const override;
   torch::Tensor get_index_cache() const override;
@@ -37,6 +40,8 @@ class DeepSeekV4KVCacheImpl final : public KVCacheImpl {
   torch::Tensor get_compress_score_state() const override;
   torch::Tensor get_compress_index_kv_state() const override;
   torch::Tensor get_compress_index_score_state() const override;
+  PrefixCacheTensorMap get_prefix_cache_tensors(
+      PrefixCacheGroup group) const override;
 
   bool empty() const override;
 

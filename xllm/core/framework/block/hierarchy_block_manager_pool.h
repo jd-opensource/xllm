@@ -24,10 +24,10 @@ namespace xllm {
 class Engine;
 
 struct OffloadBlockPair {
-  OffloadBlockPair(Block& s, Block& d) : src(s), dst(d) {}
-
   OffloadBlockPair(Block&& s, Block&& d)
       : src(std::move(s)), dst(std::move(d)) {}
+
+  OffloadBlockPair(Block& s, Block&& d) : src(s), dst(std::move(d)) {}
 
   OffloadBlockPair(Block& s) : src(s) {}
 

@@ -48,6 +48,9 @@ class KVCacheShape final {
   bool has_conv_cache_shape() const;
   bool has_ssm_cache_shape() const;
 
+  void set_cache_shape(KVCacheTensorRole::Value role,
+                       std::vector<int64_t> shape);
+
   void print_shapes() const;
 
   void to_proto(proto::KVCacheShape* proto_shape) const;

@@ -76,6 +76,32 @@ std::unique_ptr<KVCacheImpl> create_kv_cache_impl(
   return std::make_unique<KVCacheImpl>(kv_cache_shape, create_options);
 }
 
+std::unique_ptr<KVCacheImpl> create_host_kv_cache_impl(
+    const KVCacheShape& kv_cache_shape,
+    const KVCacheCreateOptions& create_options,
+    PrefixCacheGroup group) {
+  if (util::is_deepseek_v4_model_type(create_options.model_type())) {
+    return std::make_unique<DeepSeekV4KVCacheImpl>(
+        kv_cache_shape, create_options, group);
+  }
+
+  switch (group) {
+    case PrefixCacheGroup::SINGLE:
+      return std::make_unique<LinearAttentionKVCacheImpl>(
+          kv_cache_shape, create_options, group);
+    case PrefixCacheGroup::C1:
+      if (create_options.enable_lighting_indexer()) {
+        return std::make_unique<IndexedKVCacheImpl>(
+            kv_cache_shape, create_options, group);
+      }
+      return std::make_unique<KVCacheImpl>(
+          kv_cache_shape, create_options, group);
+    default:
+      LOG(FATAL) << "Unsupported non-DSV4 host prefix cache group: "
+                 << group.to_string();
+  }
+}
+
 std::string int32_vector_string(const std::vector<int32_t>& values) {
   std::ostringstream oss;
   oss << "[";
@@ -112,6 +138,11 @@ KVCache::KVCache(const KVCacheShape& kv_cache_shape,
                  const KVCacheCreateOptions& create_options,
                  int64_t layer_id)
     : impl_(create_kv_cache_impl(kv_cache_shape, create_options, layer_id)) {}
+
+KVCache::KVCache(const KVCacheShape& kv_cache_shape,
+                 const KVCacheCreateOptions& create_options,
+                 PrefixCacheGroup group)
+    : impl_(create_host_kv_cache_impl(kv_cache_shape, create_options, group)) {}
 
 torch::Tensor KVCache::get_k_cache() const { return impl_->get_k_cache(); }
 
@@ -187,6 +218,16 @@ torch::Tensor KVCache::get_compress_index_kv_state() const {
 
 torch::Tensor KVCache::get_compress_index_score_state() const {
   return impl_->get_compress_index_score_state();
+}
+
+PrefixCacheTensorMap KVCache::get_prefix_cache_tensors(PrefixCacheGroup group,
+                                                       int64_t index) const {
+  return impl_->get_prefix_cache_tensors(group, index);
+}
+
+const std::vector<HostPageAlignedRegion>&
+KVCache::get_host_page_aligned_regions() const {
+  return impl_->get_host_page_aligned_regions();
 }
 
 std::vector<std::vector<int64_t>> KVCache::get_shapes() {

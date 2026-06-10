@@ -45,6 +45,7 @@ cc_library(
   DEPS
     :common
     :kv_cache
+    :platform
     :push_route
     :xtensor
     $<$<BOOL:${USE_NPU}>:graph>

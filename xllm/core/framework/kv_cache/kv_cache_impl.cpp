@@ -15,11 +15,27 @@ limitations under the License.
 
 #include "framework/kv_cache/kv_cache_impl.h"
 
+#include <utility>
+
 #include "framework/kv_cache/kv_cache_shape.h"
+#include "framework/kv_cache/kv_cache_tensor_group.h"
 #include "framework/kv_cache/kv_cache_utils.h"
 #include "util/tensor_helper.h"
 
 namespace xllm {
+
+void KVCacheImpl::create_host_tensor(const std::vector<int64_t>& dims,
+                                     torch::ScalarType dtype,
+                                     torch::Tensor* tensor,
+                                     std::vector<int64_t>* shape) {
+  CHECK(tensor != nullptr) << "tensor must not be null.";
+  HostPageAlignedRegion region;
+  create_host_page_aligned_tensor(dims, dtype, tensor, &region);
+  host_page_aligned_regions_.emplace_back(std::move(region));
+  if (shape != nullptr) {
+    *shape = dims;
+  }
+}
 
 KVCacheImpl::KVCacheImpl(const KVCacheTensors& tensors)
     : key_cache_(tensors.key_cache),
@@ -33,6 +49,36 @@ KVCacheImpl::KVCacheImpl(const KVCacheShape& kv_cache_shape,
   key_cache_shape_ = kv_cache_shape.key_cache_shape();
   if (kv_cache_shape.has_value_cache_shape()) {
     value_cache_shape_ = kv_cache_shape.value_cache_shape();
+  }
+}
+
+KVCacheImpl::KVCacheImpl(const KVCacheShape& kv_cache_shape,
+                         const KVCacheCreateOptions& create_options,
+                         PrefixCacheGroup group) {
+  const int64_t layer_count =
+      resolve_host_group_layer_count(group, create_options);
+  host_page_aligned_regions_.clear();
+  host_page_aligned_regions_.reserve(2);
+
+  if (kv_cache_shape.has_key_cache_shape()) {
+    key_cache_ = torch::Tensor();
+    create_host_tensor(
+        build_host_group_tensor_shape(kv_cache_shape.key_cache_shape(),
+                                      create_options.host_blocks_factor(),
+                                      layer_count),
+        create_options.dtype(),
+        &key_cache_,
+        &key_cache_shape_);
+  }
+  if (kv_cache_shape.has_value_cache_shape()) {
+    value_cache_ = torch::Tensor();
+    create_host_tensor(
+        build_host_group_tensor_shape(kv_cache_shape.value_cache_shape(),
+                                      create_options.host_blocks_factor(),
+                                      layer_count),
+        create_options.dtype(),
+        &value_cache_,
+        &value_cache_shape_);
   }
 }
 
@@ -74,6 +120,45 @@ torch::Tensor KVCacheImpl::get_compress_index_kv_state() const {
 
 torch::Tensor KVCacheImpl::get_compress_index_score_state() const {
   return torch::Tensor();
+}
+
+PrefixCacheTensorMap KVCacheImpl::get_prefix_cache_tensors(
+    PrefixCacheGroup group) const {
+  PrefixCacheTensorMap tensor_map;
+  if (group != PrefixCacheGroup::C1) {
+    return tensor_map;
+  }
+
+  if (key_cache_.defined() && key_cache_.numel() > 0) {
+    tensor_map.emplace(KVCacheTensorRole::KEY, key_cache_);
+  }
+  if (value_cache_.defined() && value_cache_.numel() > 0) {
+    tensor_map.emplace(KVCacheTensorRole::VALUE, value_cache_);
+  }
+  return tensor_map;
+}
+
+PrefixCacheTensorMap KVCacheImpl::get_prefix_cache_tensors(
+    PrefixCacheGroup group,
+    int64_t index) const {
+  PrefixCacheTensorMap indexed_tensor_map;
+  PrefixCacheTensorMap tensor_map = get_prefix_cache_tensors(group);
+  for (auto& item : tensor_map) {
+    const torch::Tensor& tensor = item.second;
+    CHECK(tensor.defined()) << "prefix cache tensor is undefined.";
+    CHECK_GT(tensor.dim(), 0) << "prefix cache tensor must have dim > 0.";
+    CHECK_GE(index, 0) << "prefix cache index must be non-negative.";
+    CHECK_LT(index, tensor.size(0))
+        << "prefix cache index out of range, index=" << index
+        << ", dim0=" << tensor.size(0);
+    indexed_tensor_map.emplace(item.first, tensor[index]);
+  }
+  return indexed_tensor_map;
+}
+
+const std::vector<HostPageAlignedRegion>&
+KVCacheImpl::get_host_page_aligned_regions() const {
+  return host_page_aligned_regions_;
 }
 
 bool KVCacheImpl::empty() const {

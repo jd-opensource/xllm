@@ -25,9 +25,14 @@ class LinearAttentionKVCacheImpl final : public KVCacheImpl {
       const LinearAttentionKVCacheTensors& tensors);
   LinearAttentionKVCacheImpl(const KVCacheShape& kv_cache_shape,
                              const KVCacheCreateOptions& create_options);
+  LinearAttentionKVCacheImpl(const KVCacheShape& kv_cache_shape,
+                             const KVCacheCreateOptions& create_options,
+                             PrefixCacheGroup group);
 
   torch::Tensor get_conv_cache() const override;
   torch::Tensor get_ssm_cache() const override;
+  PrefixCacheTensorMap get_prefix_cache_tensors(
+      PrefixCacheGroup group) const override;
 
   bool empty() const override;
 

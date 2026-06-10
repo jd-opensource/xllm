@@ -280,6 +280,8 @@ bool WorkerImpl::allocate_kv_cache_storage(const KVCacheShape& kv_cache_shape,
                                            bool enable_raw_device_allocator) {
   CHECK(model_ != nullptr) << "Model is not initialized.";
   CHECK(kv_caches_.empty()) << "KV caches are already initialized.";
+  CHECK(hierarchy_kv_cache_transfer_ == nullptr)
+      << "Hierarchy KV cache transfer is already initialized.";
   const auto& args = context_.get_model_args();
   const bool enable_linear_attention = has_linear_attention_layers(args);
   const bool enable_lighting_indexer = args.index_n_heads() > 0;
@@ -320,6 +322,7 @@ bool WorkerImpl::allocate_kv_cache_storage(const KVCacheShape& kv_cache_shape,
   create_options.device(device_)
       .dtype(dtype_)
       .ssm_dtype(ssm_dtype)
+      .host_blocks_factor(options_.host_blocks_factor())
       .num_layers(num_layers)
       .full_attention_interval(args.full_attention_interval())
       .model_id(options_.model_id())
@@ -339,6 +342,7 @@ bool WorkerImpl::allocate_kv_cache_storage(const KVCacheShape& kv_cache_shape,
 #endif
 
   allocate_kv_caches(kv_caches_, kv_cache_shape, create_options);
+  init_hierarchy_kv_cache_transfer(kv_cache_shape, create_options);
 
 #if defined(USE_CUDA) || defined(USE_DCU)
   refresh_cuda_block_copy_runtime_state();
@@ -352,7 +356,6 @@ bool WorkerImpl::allocate_kv_cache(const KVCacheShape& kv_cache_shape) {
     return false;
   }
 
-  init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;
   return true;
 }
@@ -381,8 +384,6 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
       enable_lighting_indexer,
       context_.get_model_args().model_type(),
       options_.model_id());
-
-  init_hierarchy_kv_cache_transfer();
 
   status_ = Status::READY;
   return true;
@@ -414,7 +415,6 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   kv_cache_transfer_->register_kv_cache(kv_caches_, kv_cache_shape, dtype_);
 #endif
 
-  init_hierarchy_kv_cache_transfer();
   status_ = Status::READY;
   return true;
 }
@@ -1524,23 +1524,34 @@ int64_t WorkerImpl::get_active_activation_memory() {
       .active_activation_memory;
 }
 
-void WorkerImpl::init_hierarchy_kv_cache_transfer() {
-  if (options_.host_blocks_factor() > 1 || options_.enable_kvcache_store()) {
+void WorkerImpl::init_hierarchy_kv_cache_transfer(
+    const KVCacheShape& kv_cache_shape,
+    const KVCacheCreateOptions& kv_cache_create_options) {
+  if (options_.host_blocks_factor() > 1.0 || options_.enable_kvcache_store()) {
+    CHECK(kv_caches_.size() > 0) << "kv_caches is not initialized.";
+    CHECK(hierarchy_kv_cache_transfer_ == nullptr)
+        << "Hierarchy KV cache transfer is already initialized.";
     HierarchyKVCacheTransfer::Options transfer_options;
     transfer_options
         .tp_rank(options_.dp_size() > 1
                      ? options_.node_rank() % options_.dp_size()
                      : options_.node_rank())
+        .tp_size(options_.world_size() / options_.dp_size())
         .layers(context_.get_model_args().n_layers())
         .host_blocks_factor(options_.host_blocks_factor())
         .layers_wise_copy_batchs(options_.layers_wise_copy_batchs())
+        .enable_mla(options_.enable_mla())
         .enable_kvcache_store(options_.enable_kvcache_store())
         .store_protocol(options_.store_protocol())
         .store_master_server_address(options_.store_master_server_address())
         .store_metadata_server(options_.store_metadata_server())
         .store_local_hostname(options_.store_local_hostname());
-    hierarchy_kv_cache_transfer_ = std::make_unique<HierarchyKVCacheTransfer>(
-        transfer_options, device_, &kv_caches_);
+    hierarchy_kv_cache_transfer_ =
+        std::make_unique<HierarchyKVCacheTransfer>(transfer_options,
+                                                   device_,
+                                                   &kv_caches_,
+                                                   kv_cache_shape,
+                                                   kv_cache_create_options);
   }
 }
 void WorkerImpl::prepare_mla_prefixcache_inputs(

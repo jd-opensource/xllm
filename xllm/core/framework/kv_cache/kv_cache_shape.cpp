@@ -147,6 +147,30 @@ bool KVCacheShape::has_ssm_cache_shape() const {
   return ssm_cache_shape_.has_value();
 }
 
+void KVCacheShape::set_cache_shape(KVCacheTensorRole::Value role,
+                                   std::vector<int64_t> shape) {
+  switch (role) {
+    case KVCacheTensorRole::KEY:
+      key_cache_shape_ = std::move(shape);
+      return;
+    case KVCacheTensorRole::VALUE:
+      value_cache_shape_ = std::move(shape);
+      return;
+    case KVCacheTensorRole::INDEX:
+      index_cache_shape_ = std::move(shape);
+      return;
+    case KVCacheTensorRole::CONV:
+      conv_cache_shape_ = std::move(shape);
+      return;
+    case KVCacheTensorRole::SSM:
+      ssm_cache_shape_ = std::move(shape);
+      return;
+    default:
+      LOG(FATAL) << "Unsupported KVCacheTensorRole: "
+                 << static_cast<int32_t>(role);
+  }
+}
+
 void KVCacheShape::print_shapes() const {
   if (shape_kind_ == ShapeKind::DSV4_POOL) {
     print_dsv4_pool_shape();

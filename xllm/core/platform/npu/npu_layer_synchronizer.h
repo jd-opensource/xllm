@@ -20,9 +20,13 @@ limitations under the License.
 #include <atomic>
 #include <vector>
 
+#include "platform/layer_synchronizer.h"
+
 namespace xllm {
 
-class NPULayerSynchronizerImpl {
+class Stream;
+
+class NPULayerSynchronizerImpl : public LayerSynchronizer {
  public:
   NPULayerSynchronizerImpl(const int64_t num_layers,
                            const int32_t timeout = -1);
@@ -30,9 +34,11 @@ class NPULayerSynchronizerImpl {
 
   aclrtEvent* get_event(const int64_t layer_index);
   std::atomic<bool>* get_event_flag(const int64_t layer_index);
-  bool synchronize_layer(const int64_t layer_index);
+  bool synchronize_layer(const int64_t layer_index) override;
   bool record_event(const int64_t layer_index, const int32_t device_index);
+  bool record_stream(const int64_t layer_index, Stream* stream) override;
   uint32_t get_event_size() { return events_.size(); };
+  uint32_t size() const override { return events_.size(); }
 
  private:
   std::vector<aclrtEvent> events_;

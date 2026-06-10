@@ -8,9 +8,11 @@ cc_library(
   NAME
     platform
   HDRS
+    batch_memcpy.h
     stream.h
     device.h
     device_name_utils.h
+    layer_synchronizer.h
     vmm_api.h
     shared_vmm_allocator.h
     vmm_torch_allocator.h
@@ -21,9 +23,11 @@ cc_library(
     $<$<BOOL:${USE_CUDA}>:torch_profiler.h>
     $<$<OR:$<BOOL:${USE_CUDA}>,$<BOOL:${USE_MLU}>,$<BOOL:${USE_DCU}>>:numa_utils.h>
   SRCS
+    batch_memcpy.cpp
     stream.cpp
     device.cpp
     device_name_utils.cpp
+    layer_synchronizer.cpp
     vmm_api.cpp
     shared_vmm_allocator.cpp
     $<$<BOOL:${USE_MLU}>:mlu/mlu_layer_synchronizer.cpp>

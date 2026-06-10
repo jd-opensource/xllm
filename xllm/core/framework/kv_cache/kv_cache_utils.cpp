@@ -16,22 +16,33 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache_utils.h"
 
 #include <glog/logging.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
+#include <algorithm>
+#include <cerrno>
+#include <cstring>
 #include <limits>
 
 #include "core/framework/config/kv_cache_config.h"
 #include "framework/kv_cache/kv_cache_shape.h"
+#include "util/utils.h"
 #if defined(USE_MLU)
 #include "platform/mlu/mlu_tensor_alloc.h"
 #endif
 #if defined(USE_NPU)
-#include "acl/acl.h"
+#include "acl/acl_rt.h"
+
+extern "C" aclError aclrtHostRegister(void* ptr,
+                                      uint64_t size,
+                                      aclrtHostRegisterType type,
+                                      void** devPtr);
+extern "C" aclError aclrtHostUnregister(void* ptr);
 #endif
 
 namespace xllm {
 namespace {
 
-#if defined(USE_NPU)
 size_t get_tensor_nbytes(const std::vector<int64_t>& dims,
                          torch::ScalarType dtype) {
   size_t count = 1;
@@ -51,6 +62,22 @@ size_t get_tensor_nbytes(const std::vector<int64_t>& dims,
   return count * elem_size;
 }
 
+size_t get_host_page_size() {
+  const long page_size = sysconf(_SC_PAGESIZE);
+  CHECK_GT(page_size, 0) << "sysconf(_SC_PAGESIZE) failed.";
+  return static_cast<size_t>(page_size);
+}
+
+size_t get_page_aligned_bytes(size_t bytes) {
+  CHECK_GT(bytes, static_cast<size_t>(0))
+      << "page-aligned host memory bytes must be positive.";
+  const size_t page_size = get_host_page_size();
+  CHECK_LE(bytes, std::numeric_limits<size_t>::max() - (page_size - 1))
+      << "host memory byte size overflow during page alignment.";
+  return ((bytes + page_size - 1) / page_size) * page_size;
+}
+
+#if defined(USE_NPU)
 void free_acl_tensor(void* ptr) {
   if (ptr == nullptr) {
     return;
@@ -93,6 +120,81 @@ torch::Tensor alloc_npu_huge_page_tensor(const std::vector<int64_t>& dims,
 
 }  // namespace
 
+HostPageAlignedRegion::HostPageAlignedRegion(size_t bytes) {
+  total_bytes = get_page_aligned_bytes(bytes);
+  void* ptr = mmap(nullptr,
+                   total_bytes,
+                   PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS,
+                   -1,
+                   0);
+  CHECK(ptr != MAP_FAILED)
+      << "Failed to allocate page-aligned host memory region.";
+
+  if (mlock(ptr, total_bytes) != 0) {
+    const int err = errno;
+    munmap(ptr, total_bytes);
+    LOG(FATAL) << "Failed to lock page-aligned host memory region, errno="
+               << err << " (" << strerror(err) << ")";
+  }
+
+#if defined(USE_NPU)
+  void* mapped_ptr = nullptr;
+  const aclError ret = aclrtHostRegister(
+      ptr, total_bytes, ACL_HOST_REGISTER_MAPPED, &mapped_ptr);
+  if (ret != ACL_SUCCESS) {
+    munlock(ptr, total_bytes);
+    munmap(ptr, total_bytes);
+  }
+  CHECK_EQ(ret, ACL_SUCCESS) << "aclrtHostRegister fail: " << ret;
+#endif
+
+  base_ptr = ptr;
+}
+
+HostPageAlignedRegion::HostPageAlignedRegion(
+    HostPageAlignedRegion&& other) noexcept
+    : base_ptr(other.base_ptr), total_bytes(other.total_bytes) {
+  other.base_ptr = nullptr;
+  other.total_bytes = 0;
+}
+
+namespace {
+
+void release_host_page_aligned_region(void*& base_ptr, size_t& total_bytes) {
+  if (base_ptr == nullptr || total_bytes == 0) {
+    base_ptr = nullptr;
+    total_bytes = 0;
+    return;
+  }
+#if defined(USE_NPU)
+  aclrtHostUnregister(base_ptr);
+#endif
+  munlock(base_ptr, total_bytes);
+  munmap(base_ptr, total_bytes);
+  base_ptr = nullptr;
+  total_bytes = 0;
+}
+
+}  // namespace
+
+HostPageAlignedRegion& HostPageAlignedRegion::operator=(
+    HostPageAlignedRegion&& other) noexcept {
+  if (this == &other) {
+    return *this;
+  }
+  release_host_page_aligned_region(base_ptr, total_bytes);
+  base_ptr = other.base_ptr;
+  total_bytes = other.total_bytes;
+  other.base_ptr = nullptr;
+  other.total_bytes = 0;
+  return *this;
+}
+
+HostPageAlignedRegion::~HostPageAlignedRegion() {
+  release_host_page_aligned_region(base_ptr, total_bytes);
+}
+
 bool is_linear_attention_layer(int64_t layer_idx,
                                int64_t full_attention_interval) {
   if (full_attention_interval <= 1) {
@@ -104,6 +206,67 @@ bool is_linear_attention_layer(int64_t layer_idx,
 bool use_npu_nz_kv_cache_layout(const std::string& model_type) {
   return (model_type == "deepseek_v3" || model_type == "deepseek_v3_mtp") &&
          ::xllm::KVCacheConfig::get_instance().enable_prefix_cache();
+}
+
+int64_t scale_host_block_count(int64_t block_count, double host_blocks_factor) {
+  CHECK_GT(block_count, 0) << "block_count must be positive.";
+  const double factor = std::max(host_blocks_factor, 1.0);
+  return std::max<int64_t>(block_count,
+                           static_cast<int64_t>(block_count * factor));
+}
+
+std::vector<int64_t> build_host_tensor_shape(
+    const std::vector<int64_t>& base_shape,
+    double host_blocks_factor) {
+  CHECK(!base_shape.empty()) << "base_shape must not be empty.";
+  std::vector<int64_t> host_shape = base_shape;
+  host_shape[0] = scale_host_block_count(host_shape[0], host_blocks_factor);
+  return host_shape;
+}
+
+std::vector<int64_t> build_host_group_tensor_shape(
+    const std::vector<int64_t>& base_shape,
+    double host_blocks_factor,
+    int64_t layer_count) {
+  CHECK_GT(layer_count, 0) << "layer_count must be positive.";
+  std::vector<int64_t> host_shape =
+      build_host_tensor_shape(base_shape, host_blocks_factor);
+  host_shape.insert(host_shape.begin() + 1, layer_count);
+  return host_shape;
+}
+
+int64_t resolve_host_group_layer_count(PrefixCacheGroup group,
+                                       const KVCacheCreateOptions& options) {
+  CHECK_GT(options.num_layers(), 0) << "num_layers must be positive.";
+  int64_t layer_count = 0;
+  switch (group) {
+    case PrefixCacheGroup::C1:
+      if (!options.enable_linear_attention()) {
+        return options.num_layers();
+      }
+      for (int64_t layer_idx = 0; layer_idx < options.num_layers();
+           ++layer_idx) {
+        if (!is_linear_attention_layer(layer_idx,
+                                       options.full_attention_interval())) {
+          ++layer_count;
+        }
+      }
+      return layer_count;
+    case PrefixCacheGroup::SINGLE:
+      CHECK(options.enable_linear_attention())
+          << "SINGLE host group requires linear attention to be enabled.";
+      for (int64_t layer_idx = 0; layer_idx < options.num_layers();
+           ++layer_idx) {
+        if (is_linear_attention_layer(layer_idx,
+                                      options.full_attention_interval())) {
+          ++layer_count;
+        }
+      }
+      return layer_count;
+    default:
+      LOG(FATAL) << "Unsupported non-DSV4 host prefix cache group: "
+                 << group.to_string();
+  }
 }
 
 KVCacheTensors create_kv_cache_tensors(
@@ -290,6 +453,25 @@ LinearAttentionKVCacheTensors create_linear_attention_kv_cache_tensors(
 #endif
 
   return tensors;
+}
+
+void create_host_page_aligned_tensor(const std::vector<int64_t>& dims,
+                                     torch::ScalarType dtype,
+                                     torch::Tensor* tensor,
+                                     HostPageAlignedRegion* region) {
+  CHECK(tensor != nullptr) << "tensor must not be null.";
+  CHECK(region != nullptr) << "region must not be null.";
+  const size_t tensor_bytes = get_tensor_nbytes(dims, dtype);
+  CHECK_GT(tensor_bytes, static_cast<size_t>(0))
+      << "host cache tensor bytes must be positive.";
+
+  *region = HostPageAlignedRegion(tensor_bytes);
+  std::memset(region->base_ptr, 0, region->total_bytes);
+  *tensor = torch::from_blob(
+      region->base_ptr,
+      dims,
+      torch::TensorOptions().dtype(dtype).device(torch::Device(torch::kCPU)));
+  CHECK(tensor->is_contiguous()) << "host cache tensor must be contiguous.";
 }
 
 #if defined(USE_NPU)

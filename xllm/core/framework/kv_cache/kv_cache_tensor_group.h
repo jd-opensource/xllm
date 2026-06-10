@@ -18,72 +18,59 @@ limitations under the License.
 #include <cstdint>
 #include <map>
 #include <string>
-#include <unordered_set>
 
 #include "kv_cache_tensor_role.h"
 
 namespace xllm {
 
-class KVCacheTensorGroup {
+class PrefixCacheGroup {
  public:
   enum Value : int8_t {
     C1 = 0,
     SINGLE = 1,
+    C4 = 2,
+    C128 = 3,
     INVALID = -1,
   };
 
-  constexpr KVCacheTensorGroup(Value v) : value_(v) {}
-  KVCacheTensorGroup(const std::string& str) {
+  constexpr PrefixCacheGroup(Value v) : value_(v) {}
+  PrefixCacheGroup(const std::string& str) {
     if (str == "C1" || str == "c1") {
       value_ = C1;
     } else if (str == "SINGLE" || str == "single") {
       value_ = SINGLE;
+    } else if (str == "C4" || str == "c4") {
+      value_ = C4;
+    } else if (str == "C128" || str == "c128") {
+      value_ = C128;
     } else {
       value_ = INVALID;
     }
   }
 
-  KVCacheTensorGroup() = delete;
+  PrefixCacheGroup() = delete;
 
   constexpr operator Value() const { return value_; }
   explicit operator bool() = delete;
 
-  constexpr bool operator==(KVCacheTensorGroup rhs) const {
+  constexpr bool operator==(PrefixCacheGroup rhs) const {
     return value_ == rhs.value_;
   }
-  constexpr bool operator!=(KVCacheTensorGroup rhs) const {
+  constexpr bool operator!=(PrefixCacheGroup rhs) const {
     return value_ != rhs.value_;
   }
   constexpr bool operator==(Value rhs) const { return value_ == rhs; }
   constexpr bool operator!=(Value rhs) const { return value_ != rhs; }
-
-  bool contains(KVCacheTensorRole role) const {
-    static const std::map<Value, std::unordered_set<KVCacheTensorRole::Value>>
-        kGroupRoles = {
-            {C1,
-             {KVCacheTensorRole::KEY,
-              KVCacheTensorRole::VALUE,
-              KVCacheTensorRole::INDEX}},
-            {SINGLE,
-             {KVCacheTensorRole::CONV,
-              KVCacheTensorRole::SSM,
-              KVCacheTensorRole::SWA}},
-        };
-
-    const auto group_it = kGroupRoles.find(value_);
-    if (group_it == kGroupRoles.end()) {
-      return false;
-    }
-
-    return group_it->second.find(static_cast<KVCacheTensorRole::Value>(role)) !=
-           group_it->second.end();
-  }
 
   constexpr const char* to_string() const {
     if (value_ == C1) {
       return "c1";
     } else if (value_ == SINGLE) {
       return "single";
+    } else if (value_ == C4) {
+      return "c4";
+    } else if (value_ == C128) {
+      return "c128";
     } else {
       return "invalid";
     }
@@ -92,5 +79,7 @@ class KVCacheTensorGroup {
  private:
   Value value_;
 };
+
+using KVCacheTensorGroup = PrefixCacheGroup;
 
 }  // namespace xllm

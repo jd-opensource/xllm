@@ -26,6 +26,7 @@ limitations under the License.
 #include <variant>
 
 #include "common/types.h"
+#include "platform/layer_synchronizer.h"
 #if defined(USE_NPU)
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif
@@ -34,6 +35,7 @@ limitations under the License.
 #endif
 #include "core/framework/multimodal/mm_batch_data.h"
 #include "framework/batch/batch_forward_type.h"
+#include "framework/kv_cache/kv_cache_tensor_group.h"
 #include "framework/parallel_state/npu_cp_ep_padding.h"
 #include "framework/parallel_state/npu_cp_prepare.h"
 #include "framework/parallel_state/npu_dp_ep_padding.h"
@@ -621,34 +623,45 @@ struct AttentionInput {
 };
 
 enum class TransferType : uint8_t {
-  G2H = 0,  // global memory(KVCache store) to host memory(DRAM)
-  H2D = 1,  // host memory(DRAM) to device memory(HBM)
-  D2G = 2,  // host memory(DRAM) to global memory(KVCache store)
-  G2D = 3   // global memory(KVCache store) to device memory(HBM)
+  G2H = 0,    // global memory(KVCache store) to host memory(DRAM)
+  H2D = 1,    // host memory(DRAM) to device memory(HBM)
+  D2H2G = 2,  // device memory(HBM) to host memory(DRAM) to global
+              // memory(KVCache store)
+  D2G = 3,    // device memory(HBM) to global memory(KVCache store)
+  G2D = 4     // global memory(KVCache store) to device memory(HBM)
 };
 
 struct BlockTransferInfo {
   int32_t src_block_id = -1;
   int32_t dst_block_id = -1;
   uint8_t hash_key[XXH3_128BITS_HASH_VALUE_LEN];
+  PrefixCacheGroup group = PrefixCacheGroup::INVALID;
   TransferType transfer_type;
 
-  BlockTransferInfo(int32_t src_block_id, int32_t dst_block_id) {
+  BlockTransferInfo(int32_t src_block_id,
+                    int32_t dst_block_id,
+                    PrefixCacheGroup group = PrefixCacheGroup::INVALID) {
     this->src_block_id = src_block_id;
     this->dst_block_id = dst_block_id;
+    this->group = group;
   }
 
   BlockTransferInfo(int32_t src_id,
                     int32_t dst_id,
                     const uint8_t* key,
-                    TransferType type)
-      : src_block_id(src_id), dst_block_id(dst_id), transfer_type(type) {
+                    TransferType type,
+                    PrefixCacheGroup group = PrefixCacheGroup::INVALID)
+      : src_block_id(src_id),
+        dst_block_id(dst_id),
+        group(group),
+        transfer_type(type) {
     memcpy(hash_key, key, XXH3_128BITS_HASH_VALUE_LEN);
   }
 
   BlockTransferInfo(const BlockTransferInfo& other)
       : src_block_id(other.src_block_id),
         dst_block_id(other.dst_block_id),
+        group(other.group),
         transfer_type(other.transfer_type) {
     memcpy(hash_key, other.hash_key, XXH3_128BITS_HASH_VALUE_LEN);
   }
@@ -656,6 +669,7 @@ struct BlockTransferInfo {
   BlockTransferInfo(BlockTransferInfo&& other)
       : src_block_id(other.src_block_id),
         dst_block_id(other.dst_block_id),
+        group(other.group),
         transfer_type(other.transfer_type) {
     memcpy(hash_key, other.hash_key, XXH3_128BITS_HASH_VALUE_LEN);
 
@@ -666,6 +680,7 @@ struct BlockTransferInfo {
   BlockTransferInfo& operator=(const BlockTransferInfo& other) {
     src_block_id = other.src_block_id;
     dst_block_id = other.dst_block_id;
+    group = other.group;
     transfer_type = other.transfer_type;
     memcpy(hash_key, other.hash_key, XXH3_128BITS_HASH_VALUE_LEN);
     return *this;
@@ -674,6 +689,7 @@ struct BlockTransferInfo {
   BlockTransferInfo& operator=(BlockTransferInfo&& other) {
     src_block_id = other.src_block_id;
     dst_block_id = other.dst_block_id;
+    group = other.group;
     transfer_type = other.transfer_type;
     memcpy(hash_key, other.hash_key, XXH3_128BITS_HASH_VALUE_LEN);
 
@@ -688,7 +704,8 @@ struct BlockTransferInfo {
       rt += std::to_string(int64_t(hash_key[i])) + " ";
     }
     return std::to_string(src_block_id) + "->" + std::to_string(dst_block_id) +
-           ", " + std::to_string(uint32_t(transfer_type)) + rt;
+           ", group: " + std::string(group.to_string()) + ", " +
+           std::to_string(uint32_t(transfer_type)) + rt;
   }
 };
 
@@ -791,12 +808,11 @@ struct ParallelInput {
   std::shared_ptr<MLULayerSynchronizerImpl> layer_synchronizer = nullptr;
 #elif defined(USE_NPU)
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
-  uint32_t layers_per_bacth_copy = std::numeric_limits<uint32_t>::max();
-  std::shared_ptr<NPULayerSynchronizerImpl> layer_wise_load_synchronizer =
-      nullptr;
   std::vector<int64_t> query_start_loc;
   std::vector<int64_t> has_initial_state;
 #endif
+  uint32_t layers_per_bacth_copy = std::numeric_limits<uint32_t>::max();
+  std::shared_ptr<LayerSynchronizer> layer_wise_load_synchronizer = nullptr;
 
   ParallelInput to(const torch::Device& device) const {
     ParallelInput out;

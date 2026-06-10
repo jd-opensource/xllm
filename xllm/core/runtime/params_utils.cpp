@@ -277,7 +277,9 @@ uint64_t proto_to_block_transfer_info(
         pb_block_transfer_info.transfer_infos(i).dst_block_id(),
         reinterpret_cast<const uint8_t*>(
             pb_block_transfer_info.transfer_infos(i).hash_key().data()),
-        TransferType(pb_block_transfer_info.transfer_type()));
+        TransferType(pb_block_transfer_info.transfer_type()),
+        PrefixCacheGroup(static_cast<PrefixCacheGroup::Value>(
+            pb_block_transfer_info.transfer_infos(i).group())));
   }
 
   return pb_block_transfer_info.batch_id();
@@ -302,6 +304,7 @@ bool block_transfer_info_to_proto(
     pb_cache.set_src_block_id(info.src_block_id);
     pb_cache.set_dst_block_id(info.dst_block_id);
     pb_cache.set_hash_key(info.hash_key, XXH3_128BITS_HASH_VALUE_LEN);
+    pb_cache.set_group(static_cast<int32_t>(info.group));
 
     *pb_block_transfer_info->mutable_transfer_infos()->Add() =
         std::move(pb_cache);

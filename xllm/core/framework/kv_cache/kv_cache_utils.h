@@ -19,6 +19,7 @@ limitations under the License.
 #include <torch/torch.h>
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -37,12 +38,12 @@ limitations under the License.
 #endif
 #endif
 
+#include "framework/kv_cache/kv_cache_tensor_group.h"
 #include "framework/kv_cache/kv_cache_tensor_role.h"
 
 namespace xllm {
 
 class KVCacheShape;
-
 struct KVCacheCapacity {
   PROPERTY(int64_t, n_blocks) = 0;
   PROPERTY(int64_t, cache_size_in_bytes) = 0;
@@ -78,6 +79,7 @@ struct KVCacheCreateOptions {
   PROPERTY(torch::ScalarType, dtype) = torch::kBFloat16;
   // ssm dtype for linear attention layers
   PROPERTY(torch::ScalarType, ssm_dtype) = torch::kBFloat16;
+  PROPERTY(double, host_blocks_factor) = 0.0;
   PROPERTY(int64_t, num_layers) = 0;
   // full attention interval for linear attention layers
   PROPERTY(int64_t, full_attention_interval) = 1;
@@ -127,6 +129,8 @@ struct KVCacheTensor {
   torch::Tensor tensor;
 };
 
+using PrefixCacheTensorMap = std::map<KVCacheTensorRole::Value, torch::Tensor>;
+
 struct DeepSeekV4KVCacheTensors {
   torch::Tensor key_cache;
   torch::Tensor index_cache;
@@ -136,6 +140,19 @@ struct DeepSeekV4KVCacheTensors {
   torch::Tensor compress_score_state;
   torch::Tensor compress_index_kv_state;
   torch::Tensor compress_index_score_state;
+};
+
+struct HostPageAlignedRegion {
+  void* base_ptr = nullptr;
+  size_t total_bytes = 0;
+
+  HostPageAlignedRegion() = default;
+  explicit HostPageAlignedRegion(size_t bytes);
+  HostPageAlignedRegion(const HostPageAlignedRegion&) = delete;
+  HostPageAlignedRegion& operator=(const HostPageAlignedRegion&) = delete;
+  HostPageAlignedRegion(HostPageAlignedRegion&& other) noexcept;
+  HostPageAlignedRegion& operator=(HostPageAlignedRegion&& other) noexcept;
+  ~HostPageAlignedRegion();
 };
 
 // for qwen3.5
@@ -160,6 +177,25 @@ QuantizedKVCacheTensors create_quantized_kv_cache_tensors(
 LinearAttentionKVCacheTensors create_linear_attention_kv_cache_tensors(
     const KVCacheShape& kv_cache_shape,
     const KVCacheCreateOptions& create_options);
+
+void create_host_page_aligned_tensor(const std::vector<int64_t>& dims,
+                                     torch::ScalarType dtype,
+                                     torch::Tensor* tensor,
+                                     HostPageAlignedRegion* region);
+
+int64_t scale_host_block_count(int64_t block_count, double host_blocks_factor);
+
+std::vector<int64_t> build_host_tensor_shape(
+    const std::vector<int64_t>& base_shape,
+    double host_blocks_factor);
+
+std::vector<int64_t> build_host_group_tensor_shape(
+    const std::vector<int64_t>& base_shape,
+    double host_blocks_factor,
+    int64_t layer_count);
+
+int64_t resolve_host_group_layer_count(PrefixCacheGroup group,
+                                       const KVCacheCreateOptions& options);
 
 #if defined(USE_NPU)
 aclFormat get_npu_kv_cache_format(const std::string& model_type);

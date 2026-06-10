@@ -15,70 +15,356 @@ limitations under the License.
 
 #include "framework/kv_cache_transfer/hierarchy_kv_cache_transfer.h"
 
-#include <folly/futures/Future.h>
-#include <sys/mman.h>
-
-#include <cerrno>
-#include <cstring>
+#include <algorithm>
+#include <array>
 #include <memory>
+#include <vector>
 
 #include "framework/kv_cache_transfer/kv_cache_store.h"
-namespace xllm {
 
-constexpr uint64_t MBUF_SIZE = 128 * 1024 * 1024;
-constexpr uint32_t BATCH_COPY_MAX_SIZE = 4096;
-constexpr uint32_t TIMEOUT_S = 60;      // second
-constexpr uint32_t TIMEOUT_MS = 60000;  // millisecond
+namespace xllm {
+namespace {
+
+constexpr uint32_t TIMEOUT_MS = 60000;
+constexpr std::array<PrefixCacheGroup, 4> kAllPrefixCacheGroups = {
+    PrefixCacheGroup::C1,
+    PrefixCacheGroup::SINGLE,
+    PrefixCacheGroup::C4,
+    PrefixCacheGroup::C128,
+};
+
+std::vector<HierarchyKVCacheTransfer::LayerBatchRange> build_layer_batch_ranges(
+    int64_t num_layers,
+    uint32_t requested_batches) {
+  std::vector<HierarchyKVCacheTransfer::LayerBatchRange> ranges;
+  if (num_layers <= 0) {
+    return ranges;
+  }
+
+  uint32_t layers_per_batch =
+      requested_batches == 0
+          ? static_cast<uint32_t>(num_layers)
+          : static_cast<uint32_t>(num_layers) / requested_batches;
+  layers_per_batch = std::max<uint32_t>(layers_per_batch, 1);
+
+  for (int64_t begin = 0; begin < num_layers; begin += layers_per_batch) {
+    ranges.push_back(
+        {begin, std::min<int64_t>(begin + layers_per_batch, num_layers)});
+  }
+  return ranges;
+}
+
+torch::Tensor select_host_layer_slot(const torch::Tensor& host_tensor,
+                                     int64_t layer_slot) {
+  CHECK(host_tensor.defined()) << "host tensor must be defined.";
+  CHECK_GT(host_tensor.dim(), 0) << "host tensor dim must be > 0.";
+  CHECK_GE(layer_slot, 0) << "layer_slot must be non-negative.";
+  CHECK_LT(layer_slot, host_tensor.size(0))
+      << "layer_slot out of range, layer_slot=" << layer_slot
+      << ", dim0=" << host_tensor.size(0);
+  return host_tensor[layer_slot];
+}
+
+bool has_tensor(const torch::Tensor& tensor) {
+  return tensor.defined() && tensor.numel() > 0;
+}
+
+void emplace_prefix_tensor(PrefixCacheTensorMap* tensor_map,
+                           KVCacheTensorRole::Value role,
+                           const torch::Tensor& tensor) {
+  CHECK(tensor_map != nullptr) << "tensor_map must not be null.";
+  if (has_tensor(tensor)) {
+    tensor_map->emplace(role, tensor);
+  }
+}
+
+PrefixCacheTensorMap build_prefix_tensor_map(const KVCache& kv_cache,
+                                             PrefixCacheGroup group) {
+  PrefixCacheTensorMap tensor_map;
+
+  const torch::Tensor key_cache = kv_cache.get_k_cache();
+  const torch::Tensor value_cache = kv_cache.get_v_cache();
+  const torch::Tensor index_cache = kv_cache.get_index_cache();
+  const torch::Tensor conv_cache = kv_cache.get_conv_cache();
+  const torch::Tensor ssm_cache = kv_cache.get_ssm_cache();
+  const torch::Tensor swa_cache = kv_cache.get_swa_cache();
+
+  const bool has_key = has_tensor(key_cache);
+  const bool has_value = has_tensor(value_cache);
+  const bool has_index = has_tensor(index_cache);
+  const bool has_conv = has_tensor(conv_cache);
+  const bool has_ssm = has_tensor(ssm_cache);
+  const bool has_swa = has_tensor(swa_cache);
+
+  switch (group) {
+    case PrefixCacheGroup::C1:
+      if (has_conv || has_ssm || has_swa) {
+        return tensor_map;
+      }
+      emplace_prefix_tensor(&tensor_map, KVCacheTensorRole::KEY, key_cache);
+      emplace_prefix_tensor(&tensor_map, KVCacheTensorRole::VALUE, value_cache);
+      emplace_prefix_tensor(&tensor_map, KVCacheTensorRole::INDEX, index_cache);
+      return tensor_map;
+    case PrefixCacheGroup::SINGLE:
+      emplace_prefix_tensor(&tensor_map, KVCacheTensorRole::CONV, conv_cache);
+      emplace_prefix_tensor(&tensor_map, KVCacheTensorRole::SSM, ssm_cache);
+      emplace_prefix_tensor(&tensor_map, KVCacheTensorRole::SWA, swa_cache);
+      return tensor_map;
+    case PrefixCacheGroup::C4:
+      if (!has_swa || has_value || !has_key || !has_index) {
+        return tensor_map;
+      }
+      emplace_prefix_tensor(&tensor_map, KVCacheTensorRole::KEY, key_cache);
+      emplace_prefix_tensor(&tensor_map, KVCacheTensorRole::INDEX, index_cache);
+      return tensor_map;
+    case PrefixCacheGroup::C128:
+      if (!has_swa || has_value || !has_key || has_index) {
+        return tensor_map;
+      }
+      emplace_prefix_tensor(&tensor_map, KVCacheTensorRole::KEY, key_cache);
+      return tensor_map;
+    default:
+      return tensor_map;
+  }
+}
+
+}  // namespace
 
 HierarchyKVCacheTransfer::HierarchyKVCacheTransfer(
     const Options& options,
     const torch::Device& device,
-    std::vector<xllm::KVCache>* kv_caches_ptr)
-    : options_(options), device_(device), kv_caches_ptr_(kv_caches_ptr) {
+    std::vector<xllm::KVCache>* kv_caches_ptr,
+    const KVCacheShape& kv_cache_shape,
+    const KVCacheCreateOptions& create_options)
+    : options_(options),
+      device_(device),
+      kv_caches_ptr_(kv_caches_ptr),
+      kv_cache_shape_(kv_cache_shape),
+      create_options_(create_options) {
+  CHECK(kv_caches_ptr_ != nullptr) << "kv_caches_ptr must not be null.";
+
   device_.set_device();
   device_.init_device_context();
-  h2d_threadpool_ = std::make_unique<ThreadPool>(
+  load_threadpool_ = std::make_unique<ThreadPool>(
       /*num_threads=*/2,
       /*init_func=*/[this]() mutable { device_.set_device(); },
       /*cpu_binding=*/false,
       /*pool_name=*/"HierarchyKVCacheTransfer.h2d");
-  d2h_threadpool_ = std::make_unique<ThreadPool>(
+  offload_threadpool_ = std::make_unique<ThreadPool>(
       /*num_threads=*/5,
       /*init_func=*/[this]() mutable { device_.set_device(); },
       /*cpu_binding=*/false,
       /*pool_name=*/"HierarchyKVCacheTransfer.d2h");
-  for (int i = 0; i < h2d_threadpool_->size() + d2h_threadpool_->size(); i++) {
+  for (int i = 0; i < load_threadpool_->size() + offload_threadpool_->size();
+       ++i) {
     copy_stream_.enqueue(device_.get_stream_from_pool(TIMEOUT_MS));
   }
 
-  if (options_.host_blocks_factor() > 1) {
-    create_page_aligned_host_cache();
+  build_device_prefix_cache_map();
+  layer_batch_ranges_ = build_layer_batch_ranges(
+      options_.layers(), options_.layers_wise_copy_batchs());
+
+  const bool requires_host_staging =
+      options_.host_blocks_factor() > 1.0 || options_.enable_kvcache_store();
+  if (requires_host_staging) {
+    CHECK_GT(options_.host_blocks_factor(), 1.0)
+        << "HierarchyKVCacheTransfer currently requires host staging when "
+           "KVCacheStore is enabled.";
+    batch_memcpy_ = create_batch_memcpy(device_);
+    create_host_prefix_cache();
   }
 
   if (options_.enable_kvcache_store()) {
+    CHECK(!host_kv_caches_.empty())
+        << "KVCacheStore currently requires host prefix caches.";
     KVCacheStoreInitConfig config;
     config.localhost_name = options_.store_local_hostname();
     config.protocol = options_.store_protocol();
     config.metadata_server = options_.store_metadata_server();
     config.master_server_address = options_.store_master_server_address();
-    config.tp_rank = options_.tp_rank();
-    config.total_size = page_aligned_data_size_;
-    config.tensor_data = page_aligned_data_;
-
-    if (!KVCacheStore::get_instance().init(config, &host_kv_caches_)) {
+    config.tp_rank = options_.enable_mla() ? 0 : options_.tp_rank();
+    config.tp_size = options_.enable_mla() ? 1 : options_.tp_size();
+    StoreGroupedPrefixCaches store_caches;
+    for (const auto& item : host_kv_caches_) {
+      store_caches[item.first].push_back(item.second.get());
+    }
+    if (!KVCacheStore::get_instance().init(config, store_caches)) {
       LOG(FATAL) << "Init KVCacheStore fail!";
     }
   }
 }
 
-HierarchyKVCacheTransfer::~HierarchyKVCacheTransfer() {
-  if (page_aligned_data_ != nullptr) {
-#if defined(USE_NPU)
-    aclrtHostUnregister(page_aligned_data_);
-#endif
-    munlock(page_aligned_data_, page_aligned_data_size_);
-    munmap(page_aligned_data_, page_aligned_data_size_);
+void HierarchyKVCacheTransfer::build_device_prefix_cache_map() {
+  device_kv_caches_.clear();
+  device_group_layer_ids_.clear();
+
+  for (int64_t layer_id = 0;
+       layer_id < static_cast<int64_t>(kv_caches_ptr_->size());
+       ++layer_id) {
+    KVCache& kv_cache = kv_caches_ptr_->at(static_cast<size_t>(layer_id));
+    for (PrefixCacheGroup group : kAllPrefixCacheGroups) {
+      PrefixCacheTensorMap tensor_map =
+          build_prefix_tensor_map(kv_cache, group);
+      if (!tensor_map.empty()) {
+        device_kv_caches_[static_cast<PrefixCacheGroup::Value>(group)]
+            .push_back(&kv_cache);
+        device_group_layer_ids_[static_cast<PrefixCacheGroup::Value>(group)]
+            .push_back(layer_id);
+      }
+    }
   }
+}
+
+std::vector<PrefixCacheGroup> HierarchyKVCacheTransfer::resolve_groups(
+    PrefixCacheGroup group) const {
+  std::vector<PrefixCacheGroup> groups;
+  if (group == PrefixCacheGroup::INVALID) {
+    groups.reserve(kAllPrefixCacheGroups.size());
+    for (PrefixCacheGroup candidate : kAllPrefixCacheGroups) {
+      if (device_kv_caches_.find(static_cast<PrefixCacheGroup::Value>(
+              candidate)) != device_kv_caches_.end()) {
+        groups.emplace_back(candidate);
+      }
+    }
+    return groups;
+  }
+
+  if (device_kv_caches_.find(static_cast<PrefixCacheGroup::Value>(group)) !=
+      device_kv_caches_.end()) {
+    groups.emplace_back(group);
+  }
+  return groups;
+}
+
+void HierarchyKVCacheTransfer::create_host_prefix_cache() {
+  CHECK(!device_kv_caches_.empty())
+      << "device prefix caches must not be empty.";
+
+  for (const auto& item : device_kv_caches_) {
+    const PrefixCacheGroup group(item.first);
+    const auto& group_caches = item.second;
+    const auto& layer_ids = device_group_layer_ids_.at(item.first);
+    CHECK_EQ(group_caches.size(), layer_ids.size())
+        << "group caches size must match layer id size.";
+
+    PrefixCacheTensorMap first_group_tensors =
+        build_prefix_tensor_map(*group_caches.front(), group);
+    CHECK(!first_group_tensors.empty()) << "group tensors must not be empty.";
+    const int64_t group_layer_count = static_cast<int64_t>(group_caches.size());
+    KVCacheCreateOptions host_create_options = create_options_;
+    host_create_options.device(torch::Device(torch::kCPU))
+        .enable_xtensor(false)
+        .enable_raw_device_allocator(false)
+        .host_blocks_factor(options_.host_blocks_factor())
+        .enable_kv_cache_huge_page_allocator(false);
+    host_kv_caches_[item.first] =
+        std::make_unique<KVCache>(kv_cache_shape_, host_create_options, group);
+
+    const std::vector<std::vector<int64_t>> host_shapes =
+        host_kv_caches_[item.first]->get_shapes();
+    for (const std::vector<int64_t>& shape : host_shapes) {
+      if (shape.empty()) {
+        continue;
+      }
+      CHECK_GT(shape.size(), static_cast<size_t>(1))
+          << "host prefix cache tensor must contain a layer dimension.";
+      CHECK_EQ(shape[1], group_layer_count)
+          << "host prefix cache layer count mismatch for group "
+          << group.to_string();
+    }
+  }
+}
+
+HierarchyKVCacheTransfer::PrefixCacheCopyPlan
+HierarchyKVCacheTransfer::build_copy_plan(
+    const std::vector<BlockTransferInfo>& block_transfer_info,
+    const LayerBatchRange& layer_batch_range) const {
+  PrefixCacheCopyPlan plan;
+  CHECK(!block_transfer_info.empty())
+      << "block_transfer_info must not be empty.";
+
+  const TransferType transfer_type = block_transfer_info.front().transfer_type;
+  for (const auto& info : block_transfer_info) {
+    for (PrefixCacheGroup group : resolve_groups(info.group)) {
+      const auto device_group_it =
+          device_kv_caches_.find(static_cast<PrefixCacheGroup::Value>(group));
+      const auto layer_ids_it = device_group_layer_ids_.find(
+          static_cast<PrefixCacheGroup::Value>(group));
+      const auto host_group_it =
+          host_kv_caches_.find(static_cast<PrefixCacheGroup::Value>(group));
+      CHECK(device_group_it != device_kv_caches_.end())
+          << "Missing device group for " << group.to_string();
+      CHECK(layer_ids_it != device_group_layer_ids_.end())
+          << "Missing device layer ids for " << group.to_string();
+      CHECK(host_group_it != host_kv_caches_.end())
+          << "Missing host group for " << group.to_string();
+
+      const auto& group_caches = device_group_it->second;
+      const auto& layer_ids = layer_ids_it->second;
+      const KVCache* host_group_cache = host_group_it->second.get();
+      CHECK(host_group_cache != nullptr)
+          << "Missing host cache instance for " << group.to_string();
+      int32_t host_block_id = -1;
+      int32_t device_block_id = -1;
+      switch (transfer_type) {
+        case TransferType::H2D:
+          CHECK_GE(info.src_block_id, 0)
+              << "Host-staging load requires src_block_id >= 0.";
+          CHECK_GE(info.dst_block_id, 0)
+              << "Host-staging load requires dst_block_id >= 0.";
+          host_block_id = info.src_block_id;
+          device_block_id = info.dst_block_id;
+          break;
+        case TransferType::D2H2G:
+          CHECK_GE(info.src_block_id, 0)
+              << "Host-staging offload requires src_block_id >= 0.";
+          CHECK_GE(info.dst_block_id, 0)
+              << "Host-staging offload requires dst_block_id >= 0.";
+          host_block_id = info.dst_block_id;
+          device_block_id = info.src_block_id;
+          break;
+        case TransferType::D2G:
+        default:
+          LOG(FATAL) << "Unsupported transfer type for copy plan: "
+                     << static_cast<uint32_t>(transfer_type);
+      }
+      CHECK_GE(host_block_id, 0) << "host block id must be non-negative.";
+      PrefixCacheTensorMap host_block =
+          host_group_cache->get_prefix_cache_tensors(group, host_block_id);
+      CHECK(!host_block.empty())
+          << "host prefix cache block is empty, group=" << group.to_string()
+          << ", host_block_id=" << host_block_id;
+      for (size_t layer_slot = 0; layer_slot < group_caches.size();
+           ++layer_slot) {
+        const int64_t absolute_layer_id = layer_ids[layer_slot];
+        if (absolute_layer_id < layer_batch_range.begin_layer ||
+            absolute_layer_id >= layer_batch_range.end_layer) {
+          continue;
+        }
+
+        PrefixCacheTensorMap device_rows =
+            group_caches[layer_slot]->get_prefix_cache_tensors(group,
+                                                               device_block_id);
+        for (const auto& device_item : device_rows) {
+          const auto host_it = host_block.find(device_item.first);
+          CHECK(host_it != host_block.end())
+              << "missing host tensor for role "
+              << static_cast<int32_t>(device_item.first);
+          torch::Tensor host_row = select_host_layer_slot(
+              host_it->second, static_cast<int64_t>(layer_slot));
+          if (transfer_type == TransferType::H2D) {
+            plan.src_tensors.emplace_back(host_row);
+            plan.dst_tensors.emplace_back(device_item.second);
+          } else {
+            plan.src_tensors.emplace_back(device_item.second);
+            plan.dst_tensors.emplace_back(host_row);
+          }
+        }
+      }
+    }
+  }
+
+  return plan;
 }
 
 uint32_t HierarchyKVCacheTransfer::transfer_kv_blocks(
@@ -87,478 +373,144 @@ uint32_t HierarchyKVCacheTransfer::transfer_kv_blocks(
   CHECK(!block_transfer_info.empty());
 
   switch (block_transfer_info[0].transfer_type) {
+    case TransferType::D2H2G:
+      return offload(block_transfer_info);
     case TransferType::H2D: {
-      h2d_threadpool_->schedule(
+      load_threadpool_->schedule(
           [this,
-           batch_id = batch_id,
+           batch_id,
            block_transfer_info = std::move(block_transfer_info)]() mutable {
-            Slice<BlockTransferInfo> info_slice{block_transfer_info};
-            h2d_batch_copy(batch_id, info_slice);
+            load_from_host(batch_id, block_transfer_info);
           });
-      break;
+      return 0;
     }
-    case TransferType::D2G:
-      return offload_kv_blocks(std::move(block_transfer_info));
-    case TransferType::G2D: {
-      // TODO load_kv_blocks async
-      LOG(ERROR) << "Unsupport copy type G2D.";
-      break;
-    }
+    case TransferType::G2H:
+      return KVCacheStore::get_instance().batch_get(block_transfer_info);
     default:
       LOG(ERROR) << "Unsupport copy type: "
-                 << uint32_t(block_transfer_info[0].transfer_type);
-      break;
+                 << static_cast<uint32_t>(block_transfer_info[0].transfer_type);
+      return 0;
   }
-  return 0;
 }
 
 uint32_t HierarchyKVCacheTransfer::transfer_kv_blocks(
-    const uint64_t batch_id,
+    const uint64_t /*batch_id*/,
     Slice<BlockTransferInfo>& block_transfer_info) {
   CHECK(!block_transfer_info.empty());
-
   switch (block_transfer_info[0].transfer_type) {
     case TransferType::G2H:
-      return load_from_store(block_transfer_info);
+      return KVCacheStore::get_instance().batch_get(block_transfer_info);
     default:
       LOG(ERROR) << "Unsupport copy type: "
-                 << uint32_t(block_transfer_info[0].transfer_type);
-      break;
+                 << static_cast<uint32_t>(block_transfer_info[0].transfer_type);
+      return 0;
   }
-  return 0;
 }
 
 void HierarchyKVCacheTransfer::set_layer_synchronizer(
     ModelInputParams& params) {
-#if defined(USE_NPU)
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (layer_wise_load_synchronizer_.count(params.meta.batch_id) != 0) {
-      params.parallel.layer_wise_load_synchronizer =
-          layer_wise_load_synchronizer_[params.meta.batch_id];
-      layer_wise_load_synchronizer_.erase(params.meta.batch_id);
-      uint32_t event_cnt =
-          params.parallel.layer_wise_load_synchronizer->get_event_size();
-      params.parallel.layers_per_bacth_copy =
-          (options_.layers() + event_cnt - 1) / event_cnt;
-    }
+  std::lock_guard<std::mutex> lock(mutex_);
+  const auto it = layer_wise_load_synchronizer_.find(params.meta.batch_id);
+  if (it == layer_wise_load_synchronizer_.end()) {
+    return;
   }
-#endif
+  auto event_cnt = it->second->size();
+  auto layers_per_bacth_copy = (options_.layers() + event_cnt - 1) / event_cnt;
+  params.parallel.layer_wise_load_synchronizer = it->second;
+  params.parallel.layers_per_bacth_copy = layers_per_bacth_copy;
+  layer_wise_load_synchronizer_.erase(it);
 }
 
-uint32_t HierarchyKVCacheTransfer::offload_kv_blocks(
+uint32_t HierarchyKVCacheTransfer::offload(
     const std::vector<BlockTransferInfo>& block_transfer_info) {
   if (block_transfer_info.empty()) {
     return 0;
   }
 
-  const int64_t num_layers = options_.layers();
-  uint32_t max_blocks_per_batch =
-      BATCH_COPY_MAX_SIZE / (cache_tensor_cnt_ * num_layers);
-  uint32_t total_slice =
-      (block_transfer_info.size() + max_blocks_per_batch - 1) /
-      max_blocks_per_batch;
-
-  Slice transfer_info_slice(block_transfer_info);
-  std::vector<folly::SemiFuture<bool>> futures;
-  futures.reserve(total_slice);
-
-  for (size_t i = 0; i < block_transfer_info.size();
-       i += max_blocks_per_batch) {
-    folly::Promise<bool> promise;
-    auto future = promise.getSemiFuture();
-    auto slice = transfer_info_slice.slice(
-        i, std::min(i + max_blocks_per_batch, block_transfer_info.size()));
-
-    d2h_threadpool_->schedule([this,
-                               promise = std::move(promise),
-                               slice = std::move(slice)]() mutable {
-      bool ret = d2h_batch_copy(slice);
-      auto success_cnt = offload_to_store(slice);
-      if (success_cnt != slice.size()) {
-        LOG(WARNING) << "KVCacheStore not all put success: " << success_cnt
-                     << "/" << slice.size();
-      }
-      promise.setValue(ret);
-    });
-
-    futures.emplace_back(std::move(future));
+  Slice<BlockTransferInfo> slice(block_transfer_info);
+  if (!host_kv_caches_.empty()) {
+    if (!offload_to_host(slice)) {
+      LOG(ERROR) << "Offload to host fail!";
+      return 0;
+    }
   }
 
-  if (!futures.empty()) {
-    try {
-      // TODO(kangmeng): add timeout
-      auto all_results = folly::collect(futures).get();
-      if (!std::all_of(all_results.begin(), all_results.end(), [](bool result) {
-            return result;
-          })) {
-        LOG(FATAL) << "Not all D2H copy returned true";
-      }
-    } catch (const std::exception& e) {
-      LOG(FATAL) << "Future execution failed: " << e.what();
+  if (options_.enable_kvcache_store() &&
+      (!options_.enable_mla() || options_.tp_rank() == 0)) {
+    const uint32_t success_cnt = KVCacheStore::get_instance().batch_put(slice);
+    if (success_cnt != slice.size()) {
+      LOG(WARNING) << "KVCacheStore not all put success: " << success_cnt << "/"
+                   << slice.size();
     }
   }
 
   return block_transfer_info.size();
 }
 
-bool HierarchyKVCacheTransfer::d2h_batch_copy(
+bool HierarchyKVCacheTransfer::offload_to_host(
     Slice<BlockTransferInfo>& block_transfer_info) {
-#if defined(USE_NPU)
-  const int64_t num_layers = options_.layers();
-  uint32_t num_batches =
-      block_transfer_info.size() * num_layers * cache_tensor_cnt_;
-  void** srcs = new void*[num_batches];
-  void** dsts = new void*[num_batches];
-  size_t* copy_size = new size_t[num_batches];
-  aclrtMemcpyBatchAttr attrs[1] = {d2h_attrs_};
-  size_t attrs_indexes[1] = {0};
-  size_t fail_index;
-  uint32_t curr_index = 0;
-
-  for (const auto& info : block_transfer_info) {
-    auto dst_k_cache = host_kv_caches_.at(info.dst_block_id).get_k_cache();
-    auto dst_v_cache = host_kv_caches_.at(info.dst_block_id).get_v_cache();
-    auto dst_index_cache =
-        host_kv_caches_.at(info.dst_block_id).get_index_cache();
-
-    for (int layer_id = 0; layer_id < num_layers; layer_id++) {
-      auto src_k_cache = kv_caches_ptr_->at(layer_id).get_k_cache();
-      srcs[curr_index] = src_k_cache[info.src_block_id].data_ptr();
-      dsts[curr_index] = dst_k_cache[layer_id].data_ptr();
-      copy_size[curr_index] = cache_size_per_layer_[0];
-      curr_index++;
-
-      if (cache_size_per_layer_[1] != 0) {
-        auto src_v_cache = kv_caches_ptr_->at(layer_id).get_v_cache();
-        srcs[curr_index] = src_v_cache[info.src_block_id].data_ptr();
-        dsts[curr_index] = dst_v_cache[layer_id].data_ptr();
-        copy_size[curr_index] = cache_size_per_layer_[1];
-        curr_index++;
-      }
-
-      if (cache_size_per_layer_[2] != 0) {
-        auto src_index_cache = kv_caches_ptr_->at(layer_id).get_index_cache();
-        srcs[curr_index] = src_index_cache[info.src_block_id].data_ptr();
-        dsts[curr_index] = dst_index_cache[layer_id].data_ptr();
-        copy_size[curr_index] = cache_size_per_layer_[2];
-        curr_index++;
-      }
-    }
-  }
-
-  std::unique_ptr<Stream> stream;
-  copy_stream_.wait_dequeue(stream);
-  c10::StreamGuard streamGuard = stream->set_stream_guard();
-
-  // TODO(kangmeng): change to async API
-  aclError ret = aclrtMemcpyBatch(dsts,
-                                  copy_size,
-                                  srcs,
-                                  copy_size,
-                                  num_batches,
-                                  attrs,
-                                  attrs_indexes,
-                                  1,
-                                  &fail_index);
-  if (ret != 0 || fail_index != SIZE_MAX) {
-    LOG(ERROR) << "aclrtMemcpyBatch error: " << ret
-               << ", fail_index:" << fail_index;
-    copy_stream_.enqueue(std::move(stream));
-    return false;
-  }
-
-  if (stream->synchronize() != 0) {
-    LOG(ERROR) << "d2h_batch_copy timeout!";
-    copy_stream_.enqueue(std::move(stream));
-    return false;
-  }
-
-  copy_stream_.enqueue(std::move(stream));
-
-  delete[] dsts;
-  delete[] srcs;
-  delete[] copy_size;
-#endif
-  return true;
-}
-
-bool HierarchyKVCacheTransfer::h2d_batch_copy(
-    const uint64_t batch_id,
-    Slice<BlockTransferInfo>& block_transfer_info) {
-#if defined(USE_NPU)
-  CHECK(block_transfer_info.size() < BATCH_COPY_MAX_SIZE / cache_tensor_cnt_)
-      << "h2d_batch_copy support copy blocks less than "
-      << BATCH_COPY_MAX_SIZE / cache_tensor_cnt_ << ", but got "
-      << block_transfer_info.size();
-
   if (block_transfer_info.empty()) {
     return true;
   }
 
-  const int64_t num_layers = options_.layers();
-  uint32_t layers_per_bacth_copy =
-      num_layers / options_.layers_wise_copy_batchs();
-  uint32_t num_batches = block_transfer_info.size() * cache_tensor_cnt_;
-  while (num_batches * layers_per_bacth_copy > BATCH_COPY_MAX_SIZE) {
-    layers_per_bacth_copy--;
+  CHECK(!host_kv_caches_.empty()) << "host prefix caches must be initialized.";
+  CHECK(batch_memcpy_ != nullptr) << "batch memcpy must be initialized.";
+  std::unique_ptr<Stream> stream;
+  copy_stream_.wait_dequeue(stream);
+  bool success = true;
+  for (const auto& range : layer_batch_ranges_) {
+    PrefixCacheCopyPlan plan = build_copy_plan(
+        static_cast<std::vector<BlockTransferInfo>>(block_transfer_info),
+        range);
+    if (!batch_memcpy_->copy_d2h(
+            plan.src_tensors, plan.dst_tensors, stream.get())) {
+      success = false;
+      break;
+    }
+  }
+  copy_stream_.enqueue(std::move(stream));
+  return success;
+}
+
+bool HierarchyKVCacheTransfer::load_from_host(
+    uint64_t batch_id,
+    const std::vector<BlockTransferInfo>& block_transfer_info) {
+  if (block_transfer_info.empty()) {
+    return true;
   }
 
-  uint32_t copy_cnt =
-      (num_layers + layers_per_bacth_copy - 1) / layers_per_bacth_copy;
-  auto synchronizer = std::make_shared<NPULayerSynchronizerImpl>(copy_cnt);
+  auto synchronizer = create_layer_synchronizer(
+      static_cast<int64_t>(layer_batch_ranges_.size()));
+  CHECK(synchronizer != nullptr) << "layer synchronizer must not be null.";
+  CHECK_EQ(synchronizer->size(), layer_batch_ranges_.size())
+      << "layer synchronizer size mismatch.";
+  CHECK(batch_memcpy_ != nullptr) << "batch memcpy must be initialized.";
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (layer_wise_load_synchronizer_.count(batch_id) != 0) {
-      LOG(FATAL) << "Batch id already exists!";
-    }
     layer_wise_load_synchronizer_[batch_id] = synchronizer;
   }
 
-  aclrtMemcpyBatchAttr attrs[1] = {h2d_attrs_};
-  size_t attrs_indexes[1] = {0};
-
   std::unique_ptr<Stream> stream;
   copy_stream_.wait_dequeue(stream);
-  c10::StreamGuard streamGuard = stream->set_stream_guard();
-  aclError ret = 0;
-
-  void** srcs = new void*[num_batches * layers_per_bacth_copy];
-  void** dsts = new void*[num_batches * layers_per_bacth_copy];
-  size_t* copy_size = new size_t[num_batches * layers_per_bacth_copy];
-
-  for (int index = 0; index < copy_cnt; index++) {
-    int layer_id = index * layers_per_bacth_copy;
-    size_t fail_index = 0;
-    uint32_t curr_index = 0;
-    uint32_t layer_cnt = 0;
-
-    while (layer_id < (index + 1) * layers_per_bacth_copy &&
-           layer_id < num_layers) {
-      auto dst_k_cache = kv_caches_ptr_->at(layer_id).get_k_cache();
-      auto dst_v_cache = kv_caches_ptr_->at(layer_id).get_v_cache();
-      auto dst_index_cache = kv_caches_ptr_->at(layer_id).get_index_cache();
-
-      for (const auto& info : block_transfer_info) {
-        auto src_k_cache = host_kv_caches_.at(info.src_block_id).get_k_cache();
-        srcs[curr_index] = src_k_cache[layer_id].data_ptr();
-        dsts[curr_index] = dst_k_cache[info.dst_block_id].data_ptr();
-        copy_size[curr_index] = cache_size_per_layer_[0];
-        curr_index++;
-
-        if (cache_size_per_layer_[1] != 0) {
-          auto src_v_cache =
-              host_kv_caches_.at(info.src_block_id).get_v_cache();
-          srcs[curr_index] = src_v_cache[layer_id].data_ptr();
-          dsts[curr_index] = dst_v_cache[info.dst_block_id].data_ptr();
-          copy_size[curr_index] = cache_size_per_layer_[1];
-          curr_index++;
-        }
-
-        if (cache_size_per_layer_[2] != 0) {
-          auto src_index_cache =
-              host_kv_caches_.at(info.src_block_id).get_index_cache();
-          srcs[curr_index] = src_index_cache[layer_id].data_ptr();
-          dsts[curr_index] = dst_index_cache[info.dst_block_id].data_ptr();
-          copy_size[curr_index] = cache_size_per_layer_[2];
-          curr_index++;
-        }
-      }
-      layer_id++;
-      layer_cnt++;
+  bool success = true;
+  for (size_t range_idx = 0; range_idx < layer_batch_ranges_.size();
+       ++range_idx) {
+    PrefixCacheCopyPlan plan =
+        build_copy_plan(block_transfer_info, layer_batch_ranges_[range_idx]);
+    if (!batch_memcpy_->copy_h2d(
+            plan.src_tensors, plan.dst_tensors, stream.get())) {
+      success = false;
+      break;
     }
-
-    ret = aclrtMemcpyBatch(dsts,
-                           copy_size,
-                           srcs,
-                           copy_size,
-                           num_batches * layer_cnt,
-                           attrs,
-                           attrs_indexes,
-                           1,
-                           &fail_index);
-
-    if (ret != 0 || fail_index != SIZE_MAX) {
-      LOG(ERROR) << "aclrtMemcpyBatch error: " << ret
-                 << ", fail_index:" << fail_index;
-    } else {
-      auto* event = synchronizer->get_event(index);
-      ret = aclrtRecordEvent(*event, stream->get_stream()->stream());
-      if (ret != 0) {
-        LOG(ERROR) << "aclrtRecordEvent error: " << ret;
-      }
+    if (!synchronizer->record_stream(static_cast<int64_t>(range_idx),
+                                     stream.get())) {
+      success = false;
+      break;
     }
-    auto* event_flag = synchronizer->get_event_flag(index);
-    event_flag->store(true, std::memory_order_release);
-    if (ret != 0) break;
-  }
-
-  if (stream->synchronize() != 0) {
-    LOG(ERROR) << "h2d_batch_copy timeout!";
-    copy_stream_.enqueue(std::move(stream));
-    return false;
   }
 
   copy_stream_.enqueue(std::move(stream));
-
-  delete[] dsts;
-  delete[] srcs;
-  delete[] copy_size;
-#endif
-  return true;
-}
-
-uint32_t HierarchyKVCacheTransfer::offload_to_store(
-    Slice<BlockTransferInfo>& block_transfer_info) {
-  if (!options_.enable_kvcache_store()) {
-    return block_transfer_info.size();
-  }
-
-  return KVCacheStore::get_instance().batch_put(block_transfer_info);
-}
-
-uint32_t HierarchyKVCacheTransfer::load_from_store(
-    Slice<BlockTransferInfo>& block_transfer_info) {
-  if (!options_.enable_kvcache_store()) {
-    return 0;
-  }
-  return KVCacheStore::get_instance().batch_get(block_transfer_info);
-}
-
-void HierarchyKVCacheTransfer::create_page_aligned_host_cache() {
-  CHECK(kv_caches_ptr_->size() > 0) << "hbm kv cache size should > 0.";
-  CHECK(options_.host_blocks_factor() > 1) << "host_blocks_factor should > 1.";
-
-  std::vector<std::vector<int64_t>> tensor_shapes =
-      kv_caches_ptr_->at(0).get_shapes();
-
-  CHECK(!tensor_shapes[0].empty()) << "k cache should not be empty!";
-
-#if defined(USE_NPU)
-  int32_t device_id = device_.index();
-  h2d_attrs_.dstLoc.id = device_id;
-  h2d_attrs_.dstLoc.type = aclrtMemLocationType::ACL_MEM_LOCATION_TYPE_DEVICE;
-  h2d_attrs_.srcLoc.id = device_id;
-  h2d_attrs_.srcLoc.type = aclrtMemLocationType::ACL_MEM_LOCATION_TYPE_HOST;
-  memset(h2d_attrs_.rsv, 0, 16);
-
-  d2h_attrs_.dstLoc.id = device_id;
-  d2h_attrs_.dstLoc.type = aclrtMemLocationType::ACL_MEM_LOCATION_TYPE_HOST;
-  d2h_attrs_.srcLoc.id = device_id;
-  d2h_attrs_.srcLoc.type = aclrtMemLocationType::ACL_MEM_LOCATION_TYPE_DEVICE;
-  memset(d2h_attrs_.rsv, 0, 16);
-#endif
-
-  cache_size_per_layer_.resize(3, 0);
-  cache_size_per_layer_[0] =
-      kv_caches_ptr_->at(0).get_k_cache()[0].numel() *
-      kv_caches_ptr_->at(0).get_k_cache()[0].element_size();
-
-  if (!tensor_shapes[1].empty()) {
-    cache_size_per_layer_[1] =
-        kv_caches_ptr_->at(0).get_v_cache()[0].numel() *
-        kv_caches_ptr_->at(0).get_v_cache()[0].element_size();
-    cache_tensor_cnt_++;
-  }
-
-  if (!tensor_shapes[2].empty()) {
-    cache_size_per_layer_[2] =
-        kv_caches_ptr_->at(0).get_index_cache()[0].numel() *
-        kv_caches_ptr_->at(0).get_index_cache()[0].element_size();
-    cache_tensor_cnt_++;
-  }
-
-  auto dtype = kv_caches_ptr_->at(0).get_k_cache().dtype();
-  uint64_t num_blocks = tensor_shapes[0][0] * options_.host_blocks_factor();
-  std::vector<uint64_t> cache_size_per_tensor(3, 0);
-
-  for (size_t i = 0; i < tensor_shapes.size(); i++) {
-    if (!tensor_shapes[i].empty()) {
-      tensor_shapes[i][0] = options_.layers();
-      cache_size_per_tensor[i] = cache_size_per_layer_[i] * options_.layers();
-      page_aligned_data_size_ += num_blocks * cache_size_per_tensor[i];
-    }
-  }
-
-  size_t page_size = sysconf(_SC_PAGESIZE);
-  page_aligned_data_size_ =
-      ((page_aligned_data_size_ + page_size - 1) / page_size) * page_size;
-
-  page_aligned_data_ = mmap(nullptr,
-                            page_aligned_data_size_,
-                            PROT_READ | PROT_WRITE,
-                            MAP_PRIVATE | MAP_ANONYMOUS,
-                            -1,
-                            0);
-
-  if (page_aligned_data_ == MAP_FAILED) {
-    LOG(FATAL) << "Failed to allocate aligned memory pool!";
-  }
-
-  if (mlock(page_aligned_data_, page_aligned_data_size_) != 0) {
-    int err = errno;
-    munmap(page_aligned_data_, page_aligned_data_size_);
-    uint64_t limit_kb = (page_aligned_data_size_ + 1023) / 1024;
-    LOG(FATAL) << "Failed to lock memory pool! mlock errno=" << err << " ("
-               << strerror(err) << "), size=" << page_aligned_data_size_
-               << " bytes (~" << (page_aligned_data_size_ >> 20) << " MiB). "
-               << "Run: ulimit -l " << limit_kb << " (or ulimit -l unlimited) "
-               << "then restart the process.";
-  }
-
-#if defined(USE_NPU)
-  auto ret = aclrtHostRegister(page_aligned_data_,
-                               page_aligned_data_size_,
-                               aclrtHostRegisterType::ACL_HOST_REGISTER_MAPPED,
-                               &mapped_ptr_);
-  if (ret != 0) {
-    LOG(FATAL) << "aclrtHostRegister fail: " << ret;
-  }
-#endif
-
-  size_t current_offset = 0;
-  auto options = torch::TensorOptions().dtype(dtype).device(torch::kCPU);
-  host_kv_caches_.reserve(num_blocks);
-
-  for (size_t i = 0; i < num_blocks; ++i) {
-    torch::Tensor key_cache, value_cache, index_cache;
-    void* k_tensor_ptr =
-        static_cast<char*>(page_aligned_data_) + current_offset;
-    key_cache = torch::from_blob(k_tensor_ptr, tensor_shapes[0], options);
-    current_offset += cache_size_per_tensor[0];
-
-    if (!tensor_shapes[1].empty()) {
-      void* v_tensor_ptr =
-          static_cast<char*>(page_aligned_data_) + current_offset;
-      value_cache = torch::from_blob(v_tensor_ptr, tensor_shapes[1], options);
-      current_offset += cache_size_per_tensor[1];
-    }
-
-    if (!tensor_shapes[2].empty()) {
-      void* index_tensor_ptr =
-          static_cast<char*>(page_aligned_data_) + current_offset;
-      index_cache =
-          torch::from_blob(index_tensor_ptr, tensor_shapes[2], options);
-      current_offset += cache_size_per_tensor[2];
-    }
-
-    if (index_cache.defined()) {
-      host_kv_caches_.emplace_back(IndexedKVCacheTensors{
-          KVCacheTensors{key_cache, value_cache}, index_cache});
-      continue;
-    }
-
-    host_kv_caches_.emplace_back(KVCacheTensors{key_cache, value_cache});
-  }
-
-  LOG(INFO) << "host k cache shape: "
-            << host_kv_caches_[0].get_k_cache().sizes();
-  LOG(INFO) << "host v cache shape: "
-            << host_kv_caches_[0].get_v_cache().sizes();
-  LOG(INFO) << "host index cache shape: "
-            << host_kv_caches_[0].get_index_cache().sizes();
-
-  LOG(INFO) << "Host block init finish, total size: " << num_blocks;
+  return success;
 }
 
 }  // namespace xllm

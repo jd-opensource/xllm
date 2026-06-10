@@ -24,8 +24,13 @@ class IndexedKVCacheImpl final : public KVCacheImpl {
   explicit IndexedKVCacheImpl(const IndexedKVCacheTensors& tensors);
   IndexedKVCacheImpl(const KVCacheShape& kv_cache_shape,
                      const KVCacheCreateOptions& create_options);
+  IndexedKVCacheImpl(const KVCacheShape& kv_cache_shape,
+                     const KVCacheCreateOptions& create_options,
+                     PrefixCacheGroup group);
 
   torch::Tensor get_index_cache() const override;
+  PrefixCacheTensorMap get_prefix_cache_tensors(
+      PrefixCacheGroup group) const override;
 
   bool empty() const override;
 
