@@ -149,6 +149,11 @@ struct ModelArgs {
   PROPERTY(int32_t, index_n_heads) = 0;
   PROPERTY(int32_t, index_topk) = 0;
   PROPERTY(bool, indexer_rope_interleave) = false;
+  // IndexCache: https://arxiv.org/abs/2603.12201
+  PROPERTY(int32_t, index_topk_freq) = 1;
+  PROPERTY(std::string, index_topk_pattern);
+  PROPERTY(int32_t, index_skip_topk_offset) = 0;
+  PROPERTY(bool, index_share_for_mtp_iteration) = false;
 
   // deepseek v4
   PROPERTY(int32_t, rope_head_dim) = 0;

@@ -23,6 +23,7 @@ cc_library(
     attention_metadata_builder.h
     dsa_metadata.h
     dsa_metadata_builder.h
+    dsa_topk_share_plan.h
     dp_utils.h
     add_matmul.h
     moe_fused_topk.h

@@ -131,6 +131,22 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
     release_blocks = std::min(skipped_blocks, swa_blocks.size());
   }
 
+  if (release_blocks > 0) {
+    std::vector<Block> blocks_to_release;
+    blocks_to_release.reserve(release_blocks);
+    for (size_t j = 0; j < release_blocks; ++j) {
+      if (swa_blocks[j].is_valid()) {
+        blocks_to_release.emplace_back(std::move(swa_blocks[j]));
+      }
+    }
+    if (!blocks_to_release.empty()) {
+      sub_managers_[0]->deallocate(blocks_to_release);
+      // Drop the last Block references so released ids re-enter the pool
+      // before this allocation grows the next chunk.
+      blocks_to_release.clear();
+    }
+  }
+
   const size_t swa_blocks_needed = (num_tokens + block_size - 1) / block_size;
   if (swa_blocks.size() < swa_blocks_needed) {
     const size_t old_size = swa_blocks.size();
@@ -163,18 +179,6 @@ bool CompositeBlockManager::allocate_for_sequence(Sequence* seq,
 
     composite->at(i).insert(
         composite->at(i).end(), blocks.begin(), blocks.end());
-  }
-  if (release_blocks > 0) {
-    std::vector<Block> blocks_to_release;
-    blocks_to_release.reserve(release_blocks);
-    for (size_t j = 0; j < release_blocks; ++j) {
-      if (swa_blocks[j].is_valid()) {
-        blocks_to_release.emplace_back(std::move(swa_blocks[j]));
-      }
-    }
-    if (!blocks_to_release.empty()) {
-      sub_managers_[0]->deallocate(blocks_to_release);
-    }
   }
   return true;
 }

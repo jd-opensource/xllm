@@ -224,6 +224,9 @@ REGISTER_MODEL_ARGS(deepseek_v32, [&] {
   LOAD_ARG_OR(index_head_dim, "index_head_dim", 128);
   LOAD_ARG_OR(index_n_heads, "index_n_heads", 64);
   LOAD_ARG_OR(index_topk, "index_topk", 2048);
+  LOAD_ARG_OR(index_topk_freq, "index_topk_freq", 1);
+  LOAD_ARG_OR(index_topk_pattern, "index_topk_pattern", "");
+  LOAD_ARG_OR(index_skip_topk_offset, "index_skip_topk_offset", 0);
 
   // extra parameters to adopt with other models
   SET_ARG(indexer_rope_interleave, false);

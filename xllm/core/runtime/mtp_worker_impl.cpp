@@ -136,6 +136,11 @@ void clear_ready_events(ForwardInput& input) {
   input.metadata_ready_event.reset();
 }
 
+bool should_reuse_mtp_topk_indices(const ModelArgs& model_args) {
+  return model_args.index_share_for_mtp_iteration() &&
+         model_args.index_n_heads() > 0 && model_args.index_topk() > 0;
+}
+
 std::optional<ForwardOutput> run_llm_no_sync_impl(LLMWorkerImpl& worker,
                                                   const ForwardInput& input,
                                                   Stream& prepare_stream,
@@ -907,7 +912,13 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
   update_decode_step_input(input, last_states);
   prepare_draft_extend_inputs(input, last_states, current_draft_input);
   draft_outputs.reserve(num_speculative_tokens);
+  const bool reuse_mtp_topk_indices =
+      should_reuse_mtp_topk_indices(draft_impl_->context_.get_model_args());
+  torch::Tensor mtp_topk_indices;
   for (int32_t draft_idx = 0; draft_idx < num_speculative_tokens; ++draft_idx) {
+    if (reuse_mtp_topk_indices) {
+      current_draft_input.input_params.dsa_topk_indices = mtp_topk_indices;
+    }
     std::optional<ForwardOutput> draft_output_opt = run_llm_no_sync_impl(
         *draft_impl_, current_draft_input, *prepare_stream_, *compute_stream_);
 
@@ -922,6 +933,9 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
         << "draft output is empty in speculative step";
 
     draft_outputs.emplace_back(std::move(draft_output_opt.value()));
+    if (reuse_mtp_topk_indices) {
+      mtp_topk_indices = draft_outputs.back().dsa_topk_indices;
+    }
     process_draft_sample_output(draft_outputs.back().sample_output);
     if (draft_idx == num_speculative_tokens - 1) {
       continue;

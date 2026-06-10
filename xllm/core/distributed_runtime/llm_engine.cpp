@@ -1111,9 +1111,6 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
     if (batch_forward_type.is_empty() &&
         !current_batch_forward_type.is_empty()) {
       batch_forward_type = current_batch_forward_type;
-      if (batch_forward_type.is_chunked_prefill()) {
-        batch_forward_type = BatchForwardType::PREFILL;
-      }
     }
     dp_is_decode[dp_rank] =
         current_batch_forward_type.is_decode() &&
@@ -1124,6 +1121,18 @@ std::vector<ForwardInput> LLMEngine::prepare_inputs(std::vector<Batch>& batch) {
   EplbInfo eplb_info;
   if (::xllm::EPLBConfig::get_instance().enable_eplb()) {
     eplb_info = eplb_manager_->get_eplb_info();
+  }
+
+  // Empty DP ranks inherit decode below and use fake inputs in WorkerImpl.
+  if (::xllm::ExecutionConfig::get_instance().enable_graph() &&
+      batch_forward_type.is_decode()) {
+    for (int32_t dp_rank = 0; dp_rank < dp_size_; ++dp_rank) {
+      if (batched_inputs[dp_rank]
+              .input_params.meta.batch_forward_type.is_empty() &&
+          dp_global_token_nums[dp_rank] == 0) {
+        dp_is_decode[dp_rank] = 1;
+      }
+    }
   }
 
   // update dp_global_token_nums and batch_forward_type
