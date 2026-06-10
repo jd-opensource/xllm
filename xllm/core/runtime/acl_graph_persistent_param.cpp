@@ -610,8 +610,15 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
       is_chunked_prefill
           ? (padded_num_tokens + q_max_seq_len - 1) / q_max_seq_len
           : padded_num_tokens;
+  const bool is_empty_dp_decode_rank =
+      is_decode && params.meta.num_sequences == 0 && actual_num_tokens > 0 &&
+      params.parallel.dp_global_token_nums.size() > 1 &&
+      params.attention.host.kv_seq_lens.empty() &&
+      params.attention.host.q_seq_lens.empty();
   const int64_t actual_seq_len_rows =
-      is_chunked_prefill ? actual_batch_size : actual_num_tokens;
+      is_empty_dp_decode_rank
+          ? 0
+          : (is_chunked_prefill ? actual_batch_size : actual_num_tokens);
 
   // Copy data from input parameters to persistent graph tensors
   if (actual_num_tokens > 0) {
@@ -846,7 +853,8 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
                  /*non_blocking=*/true);
     }
     if (padded_batch_size > actual_seq_len_rows) {
-      int32_t offset = static_cast<int32_t>(actual_num_tokens);
+      int32_t offset =
+          is_empty_dp_decode_rank ? 0 : static_cast<int32_t>(actual_num_tokens);
       std::vector<int32_t> padded_q_cu_seq_lens;
       padded_q_cu_seq_lens.reserve(padded_batch_size - actual_seq_len_rows);
       const int32_t padding_q_len = is_chunked_prefill ? q_max_seq_len : 1;
@@ -962,7 +970,7 @@ std::optional<ModelInputParams> GraphPersistentParam::update(
     params_for_capture->attention.device.q_seq_lens =
         q_seq_lens(static_cast<uint32_t>(padded_batch_size));
     params_for_capture->meta.actual_num_sequences =
-        static_cast<int32_t>(actual_num_tokens);
+        is_empty_dp_decode_rank ? 0 : static_cast<int32_t>(actual_num_tokens);
     params_for_capture->attention.host.kv_seq_lens = padded_kv_seq_lens_vec;
     params_for_capture->attention.host.q_seq_lens = padded_q_seq_lens_vec;
     params_for_capture->meta.num_sequences =
