@@ -20,6 +20,7 @@ limitations under the License.
 #include <algorithm>
 #include <cctype>
 #include <memory>
+#include <sstream>
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
@@ -193,6 +194,163 @@ torch::Tensor to_cpu_int_tensor_for_read(const torch::Tensor& values) {
       .contiguous();
 }
 
+std::string summarize_int32_values(const int32_t* values,
+                                   size_t size,
+                                   size_t limit) {
+  std::ostringstream oss;
+  oss << "[";
+  const size_t print_size = std::min(size, limit);
+  for (size_t i = 0; i < print_size; ++i) {
+    if (i > 0) {
+      oss << ", ";
+    }
+    oss << values[i];
+  }
+  if (size > limit) {
+    oss << ", ...";
+  }
+  oss << "]";
+  return oss.str();
+}
+
+std::string summarize_int32_vector(const std::vector<int32_t>& values,
+                                   size_t limit = 32) {
+  return summarize_int32_values(values.data(), values.size(), limit);
+}
+
+std::string summarize_string_vector(const std::vector<std::string>& values,
+                                    size_t limit = 8) {
+  std::ostringstream oss;
+  oss << "[";
+  const size_t print_size = std::min(values.size(), limit);
+  for (size_t i = 0; i < print_size; ++i) {
+    if (i > 0) {
+      oss << ", ";
+    }
+    oss << values[i];
+  }
+  if (values.size() > limit) {
+    oss << ", ...";
+  }
+  oss << "]";
+  return oss.str();
+}
+
+std::string summarize_int_tensor(const torch::Tensor& tensor,
+                                 size_t limit = 64) {
+  if (!tensor.defined()) {
+    return "undefined";
+  }
+  torch::Tensor flat = to_cpu_int_tensor_for_read(tensor);
+  std::ostringstream oss;
+  oss << "sizes=" << tensor.sizes() << ", values="
+      << summarize_int32_values(flat.const_data_ptr<int32_t>(),
+                                static_cast<size_t>(flat.numel()),
+                                limit);
+  return oss.str();
+}
+
+std::string summarize_decode_states(
+    const std::vector<EmbeddingCache::DecodeState>& states,
+    size_t limit = 16) {
+  std::ostringstream oss;
+  oss << "[";
+  const size_t print_size = std::min(states.size(), limit);
+  for (size_t i = 0; i < print_size; ++i) {
+    if (i > 0) {
+      oss << ", ";
+    }
+    const auto& state = states[i];
+    oss << "{idx=" << i << ", valid=" << state.valid
+        << ", token_id=" << state.token_id
+        << ", position_offset=" << state.position_offset
+        << ", prev_token_id=" << state.prev_token_id
+        << ", all_draft_accepted=" << state.all_draft_accepted << "}";
+  }
+  if (states.size() > limit) {
+    oss << ", ...";
+  }
+  oss << "]";
+  return oss.str();
+}
+
+bool has_accepted_prefix_longer_than_one(const torch::Tensor& accepted_tokens) {
+  if (!accepted_tokens.defined() || accepted_tokens.dim() != 2) {
+    return false;
+  }
+  torch::Tensor flat = to_cpu_int_tensor_for_read(accepted_tokens);
+  const int32_t* data = flat.const_data_ptr<int32_t>();
+  const int64_t rows = accepted_tokens.size(0);
+  const int64_t width = accepted_tokens.size(1);
+  for (int64_t row = 0; row < rows; ++row) {
+    int32_t accepted_len = 0;
+    for (int64_t col = 0; col < width; ++col) {
+      if (data[row * width + col] < 0) {
+        break;
+      }
+      ++accepted_len;
+    }
+    if (accepted_len > 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string summarize_accepted_tokens(const torch::Tensor& accepted_tokens,
+                                      size_t max_rows = 8,
+                                      size_t max_width = 8) {
+  if (!accepted_tokens.defined()) {
+    return "undefined";
+  }
+  if (accepted_tokens.dim() != 2) {
+    return summarize_int_tensor(accepted_tokens);
+  }
+  torch::Tensor flat = to_cpu_int_tensor_for_read(accepted_tokens);
+  const int32_t* data = flat.const_data_ptr<int32_t>();
+  const int64_t rows = accepted_tokens.size(0);
+  const int64_t width = accepted_tokens.size(1);
+
+  std::ostringstream oss;
+  oss << "sizes=" << accepted_tokens.sizes() << ", rows=[";
+  const int64_t print_rows =
+      std::min<int64_t>(rows, static_cast<int64_t>(max_rows));
+  for (int64_t row = 0; row < print_rows; ++row) {
+    if (row > 0) {
+      oss << ", ";
+    }
+    int32_t accepted_len = 0;
+    int32_t last_token = -1;
+    for (int64_t col = 0; col < width; ++col) {
+      const int32_t token = data[row * width + col];
+      if (token < 0) {
+        break;
+      }
+      last_token = token;
+      ++accepted_len;
+    }
+    oss << "{row=" << row << ", accepted_len=" << accepted_len
+        << ", last_token=" << last_token << ", tokens=[";
+    const int64_t print_width =
+        std::min<int64_t>(width, static_cast<int64_t>(max_width));
+    for (int64_t col = 0; col < print_width; ++col) {
+      if (col > 0) {
+        oss << ", ";
+      }
+      oss << data[row * width + col];
+    }
+    if (width > print_width) {
+      oss << ", ...";
+    }
+    oss << "]}";
+  }
+  if (rows > print_rows) {
+    oss << ", ...";
+  }
+  oss << "]";
+  return oss.str();
+}
+
 bool has_mtp_prefill_placeholder_extra_token(
     const std::vector<int32_t>& extra_token_ids,
     int32_t placeholder) {
@@ -225,6 +383,18 @@ void check_mtp_decode_states(
     CHECK(state.embedding.defined())
         << "MTP decode target state embedding is undefined, request_id="
         << request_ids[i];
+    if (state.token_id != token_id) {
+      LOG(ERROR) << "[MTP_DECODE_STATE_MISMATCH] seq_id=" << i
+                 << ", request_id=" << request_ids[i]
+                 << ", input_token_id=" << token_id
+                 << ", cached_token_id=" << state.token_id
+                 << ", cached_position_offset=" << state.position_offset
+                 << ", cached_prev_token_id=" << state.prev_token_id
+                 << ", all_draft_accepted=" << state.all_draft_accepted
+                 << ", token_ids_host="
+                 << summarize_int_tensor(token_ids_host)
+                 << ", decode_states=" << summarize_decode_states(states);
+    }
     if (token_id < 0) {
       CHECK(allow_overlap_fake_token)
           << "MTP decode fake token is only allowed with schedule overlap, "
@@ -915,6 +1085,23 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_decode(
   CHECK_EQ(last_states.size(),
            input.input_params.embedding.embedding_ids.size())
       << "decode target state count mismatch";
+  VLOG(1) << "[MTP_DECODE_INPUT] num_sequences="
+          << input.input_params.meta.num_sequences
+          << ", token_ids_host=" << summarize_int_tensor(input.token_ids_host)
+          << ", q_seq_lens="
+          << summarize_int32_vector(
+                 input.input_params.attention.host.q_seq_lens)
+          << ", kv_seq_lens="
+          << summarize_int32_vector(
+                 input.input_params.attention.host.kv_seq_lens)
+          << ", embedding_ids="
+          << summarize_int32_vector(
+                 input.input_params.embedding.embedding_ids)
+          << ", request_ids="
+          << summarize_string_vector(
+                 input.input_params.embedding.request_ids);
+  VLOG(1) << "[MTP_DECODE_CACHE] states="
+          << summarize_decode_states(last_states);
   check_mtp_decode_states(last_states,
                           input.input_params.embedding.request_ids,
                           input.token_ids_host,
@@ -1047,6 +1234,23 @@ void MTPWorkerImpl::write_target_context_to_cache(
       << "embedding_cache_ must be initialized before target cache write";
   CHECK(!input.input_params.embedding.embedding_ids.empty())
       << "target context cache write requires embedding ids";
+  const bool has_multi_token_accept =
+      has_accepted_prefix_longer_than_one(validate_output.next_tokens);
+  if (has_multi_token_accept) {
+    LOG(INFO) << "[MTP_ACCEPTED_PREFIX] multi-token accepted prefix detected, "
+              << "num_speculative_tokens=" << options_.num_speculative_tokens()
+              << ", embedding_ids="
+              << summarize_int32_vector(
+                     input.input_params.embedding.embedding_ids)
+              << ", request_ids="
+              << summarize_string_vector(
+                     input.input_params.embedding.request_ids)
+              << ", accepted_tokens="
+              << summarize_accepted_tokens(validate_output.next_tokens);
+  } else {
+    VLOG(1) << "[MTP_ACCEPTED_PREFIX] accepted_tokens="
+            << summarize_accepted_tokens(validate_output.next_tokens);
+  }
   embedding_cache_->write_target_context(
       input.input_params.embedding.embedding_ids,
       input.input_params.embedding.request_ids,
@@ -1217,6 +1421,15 @@ void MTPWorkerImpl::prepare_validate_inputs(const ForwardInput& input,
   const bool use_atb_spec_kernel =
       ::xllm::SpeculativeConfig::get_instance().enable_atb_spec_kernel() ||
       use_qwen3_5_spec_verify_path();
+  LOG_FIRST_N(INFO, 4)
+      << "[MTP_VALIDATE_LAYOUT] use_atb_spec_kernel=" << use_atb_spec_kernel
+      << ", original_num_sequences=" << num_sequences
+      << ", num_speculative_tokens=" << num_speculative_tokens
+      << ", num_val_tokens=" << num_val_tokens
+      << ", total_num_val_tokens=" << total_num_val_tokens
+      << ", layout="
+      << (use_atb_spec_kernel ? "chunked_prefill_rows"
+                              : "expanded_decode_rows");
   specBuilder::DecodeBuildBuffers buf;
   buf.out_token_ids.reserve(total_num_val_tokens);
   buf.out_positions.reserve(input.positions_host.dim() == 2
