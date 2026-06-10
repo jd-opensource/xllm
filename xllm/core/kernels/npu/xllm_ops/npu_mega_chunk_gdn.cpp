@@ -85,7 +85,7 @@ std::pair<torch::Tensor, torch::Tensor> npu_mega_chunk_gdn(
   auto q_fp16 = q_normalized.to(torch::kFloat16);
   auto k_fp16 = k_normalized.to(torch::kFloat16);
   auto v_fp16 = v.to(torch::kFloat16);
-  auto g_fp16 = g.to(torch::kFloat16);
+  auto g_fp32 = g.to(torch::kFloat32);
   auto beta_fp16 = beta.to(torch::kFloat16);
 
   torch::Tensor cu_seqlens_int32;
@@ -128,18 +128,15 @@ std::pair<torch::Tensor, torch::Tensor> npu_mega_chunk_gdn(
   auto opts_fp32 = torch::TensorOptions(q.device()).dtype(torch::kFloat32);
 
   auto out = torch::empty({B, T, H, V}, opts_fp16);
-  auto g_sum = torch::empty({B, T, H}, opts_fp16);
-  auto g_t = torch::empty({B, num_chunks, H, kMegaChunkSize}, opts_fp16);
-  auto beta_t = torch::empty({B, num_chunks, H, kMegaChunkSize}, opts_fp16);
-  auto a = torch::empty({B, num_chunks, H, kMegaChunkSize, kMegaChunkSize},
-                        opts_fp16);
-  auto a_inv_f32 = torch::empty(
-      {B, num_chunks, H, kMegaChunkSize, kMegaChunkSize}, opts_fp32);
-  auto a_inv = torch::empty({B, num_chunks, H, kMegaChunkSize, kMegaChunkSize},
-                            opts_fp16);
-  auto w = torch::empty({B, num_chunks, H, K, V}, opts_fp16);
-  auto u = torch::empty({B, num_chunks, H, V}, opts_fp16);
-  auto h = torch::empty({B, num_chunks, H, K, V}, opts_fp16);
+  auto g_sum = torch::empty({B, T, H}, opts_fp32);
+  auto g_t = torch::empty({H, T}, opts_fp32);
+  auto beta_t = torch::empty({H, T}, opts_fp16);
+  auto a = torch::zeros({B, T, H, kMegaChunkSize}, opts_fp16);
+  auto a_inv_f32 = torch::zeros({B, T, H, kMegaChunkSize}, opts_fp32);
+  auto a_inv = torch::zeros({B, T, H, kMegaChunkSize}, opts_fp16);
+  auto w = torch::empty({B, T, H, V}, opts_fp16);
+  auto u = torch::empty({B, T, H, V}, opts_fp16);
+  auto h = torch::zeros({num_matrices, K, V}, opts_fp16);
   auto v_new = torch::empty({B, T, H, V}, opts_fp16);
 
   torch::Tensor initial_state_arg;
@@ -151,19 +148,21 @@ std::pair<torch::Tensor, torch::Tensor> npu_mega_chunk_gdn(
     initial_state_arg = torch::zeros({num_sequences, H, K, V}, opts_fp16);
   }
 
-  auto final_state = torch::empty({num_sequences, H, K, V}, opts_fp32);
+  auto final_state = torch::zeros({num_sequences * H, K, V}, opts_fp16);
 
   EXEC_NPU_CMD(aclnnMegaChunkGdn,
                q_fp16,
                k_fp16,
                v_fp16,
-               g_fp16,
+               g_fp32,
                beta_fp16,
                masks.mask_lower,
                masks.mask_full,
                masks.minus_identity,
                cu_seqlens_int32,
                initial_state_arg,
+               num_matrices,
+               has_initial_state,
                out,
                g_sum,
                g_t,
@@ -175,15 +174,14 @@ std::pair<torch::Tensor, torch::Tensor> npu_mega_chunk_gdn(
                u,
                h,
                v_new,
-               final_state,
-               num_matrices,
-               has_initial_state);
+               final_state);
 
   auto output = (out * scale_value).to(input_dtype);
 
   torch::Tensor final_state_out;
   if (output_final_state) {
-    final_state_out = final_state.to(torch::kFloat32);
+    final_state_out =
+        final_state.view({num_sequences, H, K, V}).to(torch::kFloat32);
   }
 
   return {output, final_state_out};
