@@ -1044,6 +1044,8 @@ class DeepseekV4ModelImpl
   void fill_empty_dp_rank_input_params(
       ModelInputParams& params,
       const std::vector<KVCache>* kv_caches = nullptr) const {
+    const bool is_chunked_prefill =
+        params.meta.batch_forward_type.is_chunked_prefill();
     params.attn_metadata = nullptr;
     auto cpu_int_options = torch::TensorOptions()
                                .dtype(torch::kInt32)
@@ -1062,7 +1064,9 @@ class DeepseekV4ModelImpl
     params.meta.kv_max_seq_len =
         std::max<int32_t>(params.meta.kv_max_seq_len, dummy_kv_len);
     params.meta.q_max_seq_len = 1;
-    params.meta.batch_forward_type = BatchForwardType::DECODE;
+    params.meta.batch_forward_type =
+        is_chunked_prefill ? BatchForwardType::CHUNKED_PREFILL
+                           : BatchForwardType::DECODE;
     params.attention.host.kv_seq_lens = {dummy_kv_len};
     params.attention.host.q_seq_lens = {1};
     params.attention.host.q_cu_seq_lens = {1};
