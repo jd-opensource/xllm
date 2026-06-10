@@ -85,6 +85,20 @@ SampleOutput Sampler::forward(torch::Tensor& logits,
     return output;
   }
 
+  if (params.all_greedy_sample && !params.logprobs && params.return_probs &&
+      !use_sample_indices && !filter_mask.defined()) {
+    auto sample_indices = greedy_sample(sample_logits).to(torch::kLong);
+    auto selected_logits =
+        sample_logits.gather(/*dim=*/-1, sample_indices.view({-1, 1}))
+            .to(torch::kFloat32);
+    auto log_probs = selected_logits - torch::logsumexp(sample_logits,
+                                                        /*dim=*/-1,
+                                                        /*keepdim=*/true);
+    output.next_tokens = sample_indices;
+    output.probs = log_probs.exp().view({-1}).to(logits.dtype());
+    return output;
+  }
+
   // apply temperatures, top-k and top-p
   apply_top_k_top_p(
       sample_logits, sample_temperatures, sample_top_k, sample_top_p);
