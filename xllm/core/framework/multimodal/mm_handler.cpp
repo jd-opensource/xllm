@@ -98,10 +98,12 @@ MMErrCode MMHandlerBase::load_from_local(const std::string& url,
   return MMErrCode::SUCCESS;
 }
 
-MMErrCode MMHandlerBase::load_from_http(const std::string& url,
-                                        std::string& data) {
+MMErrCode MMHandlerBase::load_from_http(
+    const std::string& url,
+    std::string& data,
+    const std::unordered_map<std::string, std::string>& headers) {
   BRpcDownloader helper_;
-  if (!helper_.fetch_data(url, data)) {
+  if (!helper_.fetch_data(url, data, headers)) {
     return MMErrCode::LOAD_HTTP_ERR;
   }
   return MMErrCode::SUCCESS;
@@ -124,7 +126,7 @@ MMErrCode ImageHandler::load(const MMContent& content,
              0) {  // http url
 
     input.type = MMType::IMAGE;
-    return this->load_from_http(url, input.raw_data);
+    return this->load_from_http(url, input.raw_data, content.image_url.headers);
   } else {
     // treat as local path or file:// url
     input.type = MMType::IMAGE;
@@ -161,7 +163,7 @@ MMErrCode VideoHandler::load(const MMContent& content,
              0) {  // http url
 
     input.type = MMType::VIDEO;
-    return this->load_from_http(url, input.raw_data);
+    return this->load_from_http(url, input.raw_data, content.video_url.headers);
   } else {
     LOG(ERROR) << " video url is invalid, url is " << url;
     return MMErrCode::INVALID_URL_ERR;
@@ -204,7 +206,7 @@ MMErrCode AudioHandler::load(const MMContent& content,
              0) {  // http url
 
     input.type = MMType::AUDIO;
-    return this->load_from_http(url, input.raw_data);
+    return this->load_from_http(url, input.raw_data, content.audio_url.headers);
   } else {
     LOG(ERROR) << " audio url is invalid, url is " << url;
     return MMErrCode::INVALID_URL_ERR;

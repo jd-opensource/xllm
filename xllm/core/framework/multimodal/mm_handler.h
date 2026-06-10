@@ -50,7 +50,10 @@ class MMHandlerBase {
 
   MMErrCode load_from_local(const std::string& url, std::string& data);
 
-  MMErrCode load_from_http(const std::string& url, std::string& data);
+  MMErrCode load_from_http(
+      const std::string& url,
+      std::string& data,
+      const std::unordered_map<std::string, std::string>& headers = {});
 
  protected:
   std::string httpurl_prefix_{"http"};

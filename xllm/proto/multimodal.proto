@@ -10,14 +10,17 @@ import "embedding_data.proto";
 
 message ImageURL {
   string url = 1;
+  map<string, string> headers = 2;
 }
 
 message VideoURL {
   string url = 1;
+  map<string, string> headers = 2;
 }
 
 message AudioURL {
   string url = 1;
+  map<string, string> headers = 2;
 }
 
 message MMInputData {

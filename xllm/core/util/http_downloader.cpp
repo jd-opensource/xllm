@@ -19,13 +19,16 @@ limitations under the License.
 
 namespace xllm {
 
-bool HttpDownloader::fetch_data(const std::string& url, std::string& data) {
+bool HttpDownloader::fetch_data(
+    const std::string& url,
+    std::string& data,
+    const std::unordered_map<std::string, std::string>& headers) {
   std::string host;
   if (!parse_url(url, host)) {
     return false;
   }
 
-  return download(host, url, data);
+  return download(host, url, data, headers);
 }
 
 bool HttpDownloader::parse_url(const std::string& url, std::string& host) {
@@ -77,11 +80,16 @@ std::shared_ptr<brpc::Channel> BRpcDownloader::get_channel(
   return channel;
 }
 
-bool BRpcDownloader::download(const std::string& host,
-                              const std::string& url,
-                              std::string& data) {
+bool BRpcDownloader::download(
+    const std::string& host,
+    const std::string& url,
+    std::string& data,
+    const std::unordered_map<std::string, std::string>& headers) {
   brpc::Controller cntl;
   cntl.http_request().uri() = url;
+  for (const auto& [k, v] : headers) {
+    cntl.http_request().SetHeader(k, v);
+  }
   cntl.set_timeout_ms(2000);
   auto channel = get_channel(host);
   if (!channel) {

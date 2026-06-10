@@ -47,16 +47,25 @@ bool build_messages(const google::protobuf::RepeatedPtrField<
       } else if (item.type() == "image_url") {
         ImageURL image_url;
         image_url.url = std::move(*item.mutable_image_url()->release_url());
+        for (const auto& [k, v] : item.image_url().headers()) {
+          image_url.headers[k] = v;
+        }
         contents.emplace_back(item.type(), image_url);
 
       } else if (item.type() == "video_url") {
         VideoURL video_url;
         video_url.url = std::move(*item.mutable_video_url()->release_url());
+        for (const auto& [k, v] : item.video_url().headers()) {
+          video_url.headers[k] = v;
+        }
         contents.emplace_back(item.type(), video_url);
 
       } else if (item.type() == "audio_url") {
         AudioURL audio_url;
         audio_url.url = std::move(*item.mutable_audio_url()->release_url());
+        for (const auto& [k, v] : item.audio_url().headers()) {
+          audio_url.headers[k] = v;
+        }
         contents.emplace_back(item.type(), audio_url);
       } else if (item.type() == "image_embedding") {
         contents.emplace_back("image_embedding", item.image_embedding());
