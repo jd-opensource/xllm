@@ -1064,9 +1064,9 @@ class DeepseekV4ModelImpl
     params.meta.kv_max_seq_len =
         std::max<int32_t>(params.meta.kv_max_seq_len, dummy_kv_len);
     params.meta.q_max_seq_len = 1;
-    params.meta.batch_forward_type =
-        is_chunked_prefill ? BatchForwardType::CHUNKED_PREFILL
-                           : BatchForwardType::DECODE;
+    params.meta.batch_forward_type = is_chunked_prefill
+                                         ? BatchForwardType::CHUNKED_PREFILL
+                                         : BatchForwardType::DECODE;
     params.attention.host.kv_seq_lens = {dummy_kv_len};
     params.attention.host.q_seq_lens = {1};
     params.attention.host.q_cu_seq_lens = {1};
