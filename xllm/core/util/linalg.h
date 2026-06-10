@@ -17,7 +17,7 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-namespace xllm::layer::mlu {
+namespace xllm::util {
 
 torch::Tensor create_hadamard_matrix(int64_t dim,
                                      torch::Dtype dtype,
@@ -30,4 +30,4 @@ torch::Tensor hadamard_transform(const torch::Tensor& input,
 torch::Tensor rotate_activation(const torch::Tensor& input,
                                 const torch::Tensor& hadamard_matrix);
 
-}  // namespace xllm::layer::mlu
+}  // namespace xllm::util

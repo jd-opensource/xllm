@@ -40,6 +40,7 @@ cc_test(
     :mlu_layers
     :common_layers
     :block
+    :util
     :parallel_state
     :model
     :model_context

@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "layers/mlu/deepseek_v4/indexer.h"
+#include "layers/mlu/deepseek_v4/deepseek_v4_indexer.h"
 
 #include <glog/logging.h>
 
@@ -25,7 +25,7 @@ limitations under the License.
 
 #include "common/global_flags.h"
 #include "kernels/ops_api.h"
-#include "layers/mlu/linalg.h"
+#include "util/linalg.h"
 
 namespace {
 
@@ -130,10 +130,10 @@ DeepseekV4IndexerImpl::DeepseekV4IndexerImpl(
   const double log_dim = std::ceil(std::log2(static_cast<double>(head_dim_)));
   const int64_t padded_dim =
       static_cast<int64_t>(1ull << static_cast<uint64_t>(log_dim));
-  hadamard_matrix_ = mlu::create_hadamard_matrix(padded_dim,
-                                                 torch::kFloat32,
-                                                 torch::Device(torch::kCPU),
-                                                 /*normalize=*/true);
+  hadamard_matrix_ = util::create_hadamard_matrix(padded_dim,
+                                                  torch::kFloat32,
+                                                  torch::Device(torch::kCPU),
+                                                  /*normalize=*/true);
   hadamard_matrix_ =
       hadamard_matrix_.to(options.device(), options.dtype().toScalarType());
 }
@@ -150,7 +150,7 @@ torch::Tensor DeepseekV4IndexerImpl::preprocess_q(
                       compressed_cos_table,
                       dsa.input_positions,
                       rope_head_dim_);
-  q = mlu::rotate_activation(q, hadamard_matrix_);
+  q = util::rotate_activation(q, hadamard_matrix_);
   return q;
 }
 

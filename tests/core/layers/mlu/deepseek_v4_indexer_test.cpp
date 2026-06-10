@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "layers/mlu/deepseek_v4/deepseek_v4_indexer.h"
+
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
@@ -29,11 +31,10 @@ limitations under the License.
 #include "framework/model/model_input_params.h"
 #include "framework/state_dict/state_dict.h"
 #include "layers/mlu/deepseek_v4/dsa_metadata_builder_mlu.h"
-#include "layers/mlu/deepseek_v4/indexer.h"
 #include "layers/mlu/deepseek_v4_ref_utils.h"
-#include "layers/mlu/linalg.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "util/linalg.h"
 
 namespace xllm {
 namespace layer {
@@ -620,10 +621,10 @@ class DeepseekV4IndexerTest : public ::testing::Test {
       const std::vector<torch::Tensor>& history_kv = {}) {
     const DSAMetadata& dsa = *metadata.dsa_metadata;
     torch::Tensor hadamard =
-        mlu::create_hadamard_matrix(config_.index_head_dim,
-                                    torch::kFloat32,
-                                    torch::Device(torch::kCPU),
-                                    true)
+        util::create_hadamard_matrix(config_.index_head_dim,
+                                     torch::kFloat32,
+                                     torch::Device(torch::kCPU),
+                                     /*normalize=*/true)
             .to(torch::kBFloat16);
     torch::Tensor q =
         torch::nn::functional::linear(qr, weights.at("wq_b.weight"))
@@ -643,7 +644,7 @@ class DeepseekV4IndexerTest : public ::testing::Test {
                                 input_sin.to(torch::kBFloat16),
                                 input_cos.to(torch::kBFloat16),
                                 config_.rope_head_dim);
-    q = mlu::rotate_activation(q.to(torch::kBFloat16), hadamard);
+    q = util::rotate_activation(q.to(torch::kBFloat16), hadamard);
     torch::Tensor c4_positions = dsa.c4_pad_positions.cpu().to(torch::kLong);
     torch::Tensor c4_sin =
         c4_positions.numel() == 0

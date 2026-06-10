@@ -23,7 +23,7 @@ limitations under the License.
 #include <limits>
 #include <numeric>
 
-#include "layers/mlu/linalg.h"
+#include "util/linalg.h"
 
 namespace {
 
@@ -373,7 +373,7 @@ Dsv4CompressorRefResult dsv4_compressor_ref(
         output, norm_weight, config.norm_eps, hidden_states.scalar_type());
     apply_dsv4_rotary_ref(output, sin, cos, config.rope_head_dim);
     if (config.rotate) {
-      output = mlu::rotate_activation(output, hadamard);
+      output = util::rotate_activation(output, hadamard);
     }
   }
   return {output, kv_state, score_state};
@@ -535,8 +535,11 @@ Dsv4AttentionRefResult dsv4_attention_ref(
                             config.compress_ratio);
 
     if (config.compress_ratio == 4) {
-      torch::Tensor hadamard = mlu::create_hadamard_matrix(
-          config.index_head_dim, torch::kFloat32, hidden_states.device(), true);
+      torch::Tensor hadamard =
+          util::create_hadamard_matrix(config.index_head_dim,
+                                       torch::kFloat32,
+                                       hidden_states.device(),
+                                       /*normalize=*/true);
       index_q = linear_ref(qr, weights.indexer.wq_b)
                     .view({hidden_states.size(0),
                            config.index_n_heads,
@@ -545,7 +548,7 @@ Dsv4AttentionRefResult dsv4_attention_ref(
                             input_compressed_sin,
                             input_compressed_cos,
                             config.rope_head_dim);
-      index_q = mlu::rotate_activation(index_q.to(dtype), hadamard.to(dtype));
+      index_q = util::rotate_activation(index_q.to(dtype), hadamard.to(dtype));
       Dsv4CompressorRefConfig index_config{config.compress_ratio,
                                            config.index_head_dim,
                                            config.rope_head_dim,

@@ -13,6 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
+#include "layers/mlu/deepseek_v4/deepseek_v4_attention.h"
+
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
@@ -29,7 +31,6 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/state_dict/state_dict.h"
-#include "layers/mlu/deepseek_v4/attention.h"
 #include "layers/mlu/deepseek_v4/dsa_cache_mapping.h"
 #include "layers/mlu/deepseek_v4_ref_utils.h"
 #include "layers/mlu/tests_utils.h"

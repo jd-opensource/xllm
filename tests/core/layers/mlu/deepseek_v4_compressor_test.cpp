@@ -29,9 +29,9 @@ limitations under the License.
 #include "layers/common/dsa_metadata.h"
 #include "layers/mlu/deepseek_v4/compressor.h"
 #include "layers/mlu/deepseek_v4_ref_utils.h"
-#include "layers/mlu/linalg.h"
 #include "layers/mlu/tests_utils.h"
 #include "platform/device.h"
+#include "util/linalg.h"
 
 namespace xllm {
 namespace layer {
@@ -420,10 +420,10 @@ class DeepseekV4CompressorTest : public ::testing::Test {
 
     torch::Tensor hadamard;
     if (rotate) {
-      hadamard = mlu::create_hadamard_matrix(config_.head_dim,
-                                             torch::kFloat32,
-                                             torch::Device(torch::kCPU),
-                                             true)
+      hadamard = util::create_hadamard_matrix(config_.head_dim,
+                                              torch::kFloat32,
+                                              torch::Device(torch::kCPU),
+                                              /*normalize=*/true)
                      .to(options_.device(), options_.dtype().toScalarType());
     }
     test::Dsv4CompressorRefWeights ref_weights{weights["wkv.weight"],

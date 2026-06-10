@@ -21,7 +21,7 @@ limitations under the License.
 
 #include "core/framework/config/kv_cache_config.h"
 #include "kernels/ops_api.h"
-#include "layers/mlu/linalg.h"
+#include "util/linalg.h"
 
 namespace xllm {
 namespace layer {
@@ -84,10 +84,10 @@ IndexerImpl::IndexerImpl(int64_t dim,
   // Construct the Hadamard matrix on CPU with float32, then cast to target
   // dtype and device set normalize=true is equivalent to scale=hidden_size **
   // -0.5
-  hadamard_matrix_ = mlu::create_hadamard_matrix(head_dim_padded,
-                                                 torch::kFloat32,
-                                                 torch::Device(torch::kCPU),
-                                                 /*normalize=*/true);
+  hadamard_matrix_ = util::create_hadamard_matrix(head_dim_padded,
+                                                  torch::kFloat32,
+                                                  torch::Device(torch::kCPU),
+                                                  /*normalize=*/true);
   hadamard_matrix_ =
       hadamard_matrix_.to(options.device(), options.dtype().toScalarType());
 
@@ -102,7 +102,7 @@ torch::Tensor IndexerImpl::rotate_activation(
   // Ensure the input is bfloat16 as per interface contract
   CHECK(input.dtype() == torch::kBFloat16)
       << "rotate_activation: input must be bfloat16";
-  return mlu::rotate_activation(input, hadamard_matrix);
+  return util::rotate_activation(input, hadamard_matrix);
 }
 
 IndexerRuntimeContext IndexerImpl::prepare_runtime_context(

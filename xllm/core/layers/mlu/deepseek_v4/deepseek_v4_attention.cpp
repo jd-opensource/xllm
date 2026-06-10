@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "layers/mlu/deepseek_v4/attention.h"
+#include "layers/mlu/deepseek_v4/deepseek_v4_attention.h"
 
 #include <glog/logging.h>
 

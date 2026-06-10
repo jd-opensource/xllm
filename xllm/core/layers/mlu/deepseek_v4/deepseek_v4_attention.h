@@ -29,8 +29,8 @@ limitations under the License.
 #include "layers/common/linear.h"
 #include "layers/common/rms_norm.h"
 #include "layers/mlu/deepseek_v4/compressor.h"
+#include "layers/mlu/deepseek_v4/deepseek_v4_indexer.h"
 #include "layers/mlu/deepseek_v4/dsa_cache_mapping.h"
-#include "layers/mlu/deepseek_v4/indexer.h"
 
 namespace xllm {
 namespace layer {

@@ -13,11 +13,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "layers/mlu/linalg.h"
+#include "util/linalg.h"
 
 #include <glog/logging.h>
 
 #include <cmath>
+#include <vector>
 
 namespace {
 
@@ -33,7 +34,7 @@ int64_t next_power_of_two(int64_t dim) {
 
 }  // namespace
 
-namespace xllm::layer::mlu {
+namespace xllm::util {
 
 torch::Tensor create_hadamard_matrix(int64_t dim,
                                      torch::Dtype dtype,
@@ -90,4 +91,4 @@ torch::Tensor rotate_activation(const torch::Tensor& input,
   return hadamard_transform(input, hadamard_matrix);
 }
 
-}  // namespace xllm::layer::mlu
+}  // namespace xllm::util

@@ -25,7 +25,7 @@ limitations under the License.
 
 #include "kernels/mlu/mlu_ops_api.h"
 #include "kernels/ops_api.h"
-#include "layers/mlu/linalg.h"
+#include "util/linalg.h"
 
 namespace {
 
@@ -292,10 +292,10 @@ CompressorImpl::CompressorImpl(int64_t compress_ratio,
     const double log_dim = std::ceil(std::log2(static_cast<double>(head_dim_)));
     const int64_t padded_dim =
         static_cast<int64_t>(1ull << static_cast<uint64_t>(log_dim));
-    hadamard_matrix_ = mlu::create_hadamard_matrix(padded_dim,
-                                                   torch::kFloat32,
-                                                   torch::Device(torch::kCPU),
-                                                   /*normalize=*/true);
+    hadamard_matrix_ = util::create_hadamard_matrix(padded_dim,
+                                                    torch::kFloat32,
+                                                    torch::Device(torch::kCPU),
+                                                    /*normalize=*/true);
     hadamard_matrix_ =
         hadamard_matrix_.to(options.device(), options.dtype().toScalarType());
   }
@@ -409,7 +409,7 @@ torch::Tensor CompressorImpl::forward_prefill(
                compressed_positions(dsa, compress_ratio_),
                rope_head_dim_);
   if (rotate_) {
-    output = mlu::rotate_activation(output, hadamard_matrix_);
+    output = util::rotate_activation(output, hadamard_matrix_);
   }
 
   write_cache(output.unsqueeze(1), kv_cache, slot_mapping);
