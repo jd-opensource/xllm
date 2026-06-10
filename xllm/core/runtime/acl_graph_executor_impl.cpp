@@ -523,7 +523,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
   const uint64_t graph_key = get_graph_key(bucket_num_tokens, params_single);
 
   // Check if captured graph exists for this bucket num_tokens
-  int slot_idx = 0;
+  int32_t slot_idx = 0;
   AclGraph* replay_graph = nullptr;
   {
     std::lock_guard<std::mutex> lock(graph_slots_mutex_);
@@ -531,6 +531,7 @@ ModelOutput AclGraphExecutorImpl::run(const torch::Tensor& tokens,
     next_replay_slot_ = 1 - next_replay_slot_;
     last_started_replay_slot_ = slot_idx;
     auto& slot = graph_slots_[slot_idx];
+    slot.is_prepared = false;
     auto it = slot.graphs.find(graph_key);
     if (it != slot.graphs.end()) {
       replay_graph = it->second.get();
@@ -656,13 +657,17 @@ void AclGraphExecutorImpl::prepare_graph_input(const torch::Tensor& tokens,
     if (last_started_replay_slot_ < 0) {
       return;
     }
-    const int prepare_slot = 1 - last_started_replay_slot_;
+    const int32_t prepare_slot = 1 - last_started_replay_slot_;
     auto& slot = graph_slots_[prepare_slot];
+    if (slot.is_prepared) {
+      return;
+    }
     auto it = slot.graphs.find(graph_key);
     if (it == slot.graphs.end()) {
       return;
     }
     graph = it->second.get();
+    slot.is_prepared = true;
   }
   graph->prepare_replay_inputs(tokens, positions, kv_caches, params);
 }

@@ -157,11 +157,12 @@ class AclGraphExecutorImpl : public ExecutorImpl {
   struct GraphSlot {
     std::unique_ptr<GraphPersistentParam> persistent_param;
     absl::flat_hash_map<uint64_t, std::unique_ptr<AclGraph>> graphs;
+    bool is_prepared = false;
   };
   std::array<GraphSlot, 2> graph_slots_;
   std::mutex graph_slots_mutex_;
-  int next_replay_slot_ = 0;
-  int last_started_replay_slot_ = -1;
+  int32_t next_replay_slot_ = 0;
+  int32_t last_started_replay_slot_ = -1;
 
   // Get bucket num_tokens for given num_tokens
   // For num_tokens < 8: use 1, 2, 4, 8
