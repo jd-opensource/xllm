@@ -356,4 +356,16 @@ void npu_inplace_partial_rotary_mul(torch::Tensor& x,
 void scatter_nd_update(torch::Tensor& var,
                        const torch::Tensor& indices,
                        const torch::Tensor& updates);
+
+std::pair<torch::Tensor, torch::Tensor> npu_mega_chunk_gdn(
+    torch::Tensor& q,
+    torch::Tensor& k,
+    torch::Tensor& v,
+    torch::Tensor& g,
+    torch::Tensor& beta,
+    const std::optional<float>& scale = std::nullopt,
+    const std::optional<torch::Tensor>& initial_state = std::nullopt,
+    bool output_final_state = false,
+    const std::optional<torch::Tensor>& cu_seqlens = std::nullopt,
+    bool use_qk_l2norm_in_kernel = false);
 }  // namespace xllm::kernel::npu

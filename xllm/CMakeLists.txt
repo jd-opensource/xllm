@@ -24,6 +24,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(
     $<$<COMPILE_LANGUAGE:CXX>:-Werror>
     $<$<COMPILE_LANGUAGE:C>:-Werror>
+    # Downgrade -Wmaybe-uninitialized from error to warning.
+    # Triggered by third-party header ylt/coro_rpc/impl/coro_rpc_client.hpp.
+    $<$<COMPILE_LANGUAGE:CXX>:-Wno-error=maybe-uninitialized>
+    $<$<COMPILE_LANGUAGE:C>:-Wno-error=maybe-uninitialized>
   )
 
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
