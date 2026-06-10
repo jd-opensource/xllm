@@ -43,6 +43,19 @@ limitations under the License.
 
 namespace xllm {
 
+using dit::DiagonalGaussianDistribution;
+
+struct AutoencoderKLOutput {
+  DiagonalGaussianDistribution latent_dist;
+  AutoencoderKLOutput(DiagonalGaussianDistribution dist)
+      : latent_dist(std::move(dist)) {}
+};
+
+struct DecoderOutput {
+  torch::Tensor sample;
+  DecoderOutput(torch::Tensor sample) : sample(std::move(sample)) {}
+};
+
 class AttentionImpl : public torch::nn::Module {
  public:
   explicit AttentionImpl(ModelContext context) {
@@ -706,8 +719,6 @@ class UpDecoderBlock2DImpl : public torch::nn::Module {
   bool add_upsample_ = false;
 };
 TORCH_MODULE(UpDecoderBlock2D);
-
-using dit::DiagonalGaussianDistribution;
 
 // VAE standard encoder implementation
 // This class is used to encode images into latent representations.

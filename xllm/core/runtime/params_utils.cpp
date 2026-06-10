@@ -372,8 +372,6 @@ bool dit_forward_input_to_proto(const DiTForwardInput& dit_inputs,
                                pb_dit_inputs->mutable_latents());
   torch_tensor_to_proto_tensor(dit_inputs.last_images,
                                pb_dit_inputs->mutable_last_images());
-  torch_tensor_to_proto_tensor(dit_inputs.image_embeds,
-                               pb_dit_inputs->mutable_image_embeds());
 
   torch_tensor_to_proto_tensor(dit_inputs.prompt_audio,
                                pb_dit_inputs->mutable_prompt_audio());
@@ -500,10 +498,6 @@ bool proto_to_dit_forward_input(const proto::DiTForwardInput& pb_dit_inputs,
   }
   if (pb_dit_inputs.has_last_images()) {
     dit_inputs.last_images = util::proto_to_torch(pb_dit_inputs.last_images());
-  }
-  if (pb_dit_inputs.has_image_embeds()) {
-    dit_inputs.image_embeds =
-        util::proto_to_torch(pb_dit_inputs.image_embeds());
   }
 
   if (!proto_to_generation_params(pb_dit_inputs.generation_params(),

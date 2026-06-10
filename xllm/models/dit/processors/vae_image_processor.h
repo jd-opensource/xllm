@@ -27,7 +27,7 @@ limitations under the License.
 
 namespace xllm {
 
-class VAEImageProcessorImpl final : public torch::nn::Module {
+class VAEImageProcessorImpl : public torch::nn::Module {
  public:
   explicit VAEImageProcessorImpl(
       ModelContext context,
@@ -102,13 +102,17 @@ class VAEImageProcessorImpl final : public torch::nn::Module {
       } else if (resize_mode == "default") {
         processed = resize(processed,
                            {target_h, target_w},
-                           /*resample=*/3,  // BICUBIC (approximate LANCZOS)
+                           /*resample=*/3,  // BICUBIC
                            /*antialias=*/true);
+      } else if (resize_mode == "bicubic_no_aa") {
+        processed = resize(processed,
+                           {target_h, target_w},
+                           /*resample=*/3,  // BICUBIC
+                           /*antialias=*/false);
       } else {
-        LOG(FATAL)
-            << "Currently only support two resize methods, 'lanczos' and "
-               "'default'"
-            << ", but got: " << resize_mode;
+        LOG(FATAL) << "Currently only support three resize methods, 'lanczos', "
+                      "'default', and 'bicubic_no_aa'"
+                   << ", but got: " << resize_mode;
       }
     }
 

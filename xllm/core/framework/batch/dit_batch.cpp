@@ -63,11 +63,9 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
   std::vector<torch::Tensor> images;
   std::vector<torch::Tensor> mask_images;
   std::vector<torch::Tensor> control_images;
-  std::vector<torch::Tensor> condition_images;
   std::vector<torch::Tensor> latents;
   std::vector<torch::Tensor> masked_image_latents;
   std::vector<torch::Tensor> last_images;
-  std::vector<torch::Tensor> image_embeds;
   const auto batch_size = request_vec_.size();
   prompt_embeds.reserve(batch_size);
   pooled_prompt_embeds.reserve(batch_size);
@@ -76,11 +74,9 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
   images.reserve(batch_size);
   mask_images.reserve(batch_size);
   control_images.reserve(batch_size);
-  condition_images.reserve(batch_size);
   latents.reserve(batch_size);
   masked_image_latents.reserve(batch_size);
   last_images.reserve(batch_size);
-  image_embeds.reserve(batch_size);
 
   std::vector<torch::Tensor> images_list;
   size_t images_size = request_vec_[0]->state().input_params().images.size();
@@ -117,9 +113,7 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
     images.emplace_back(input_params.image);
     mask_images.emplace_back(input_params.mask_image);
     control_images.emplace_back(input_params.control_image);
-    condition_images.emplace_back(input_params.condition_image);
     last_images.emplace_back(input_params.last_image);
-    image_embeds.emplace_back(input_params.image_embeds);
 
     if (input_params.images.size() != images_size) {
       images_size_valid = false;
@@ -187,10 +181,6 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
     input.control_image = torch::stack(control_images);
   }
 
-  if (check_tensors_valid(condition_images)) {
-    input.condition_images = torch::stack(condition_images);
-  }
-
   if (check_tensors_valid(prompt_embeds)) {
     input.prompt_embeds = torch::stack(prompt_embeds);
   }
@@ -220,9 +210,6 @@ DiTForwardInput DiTBatch::prepare_forward_input() {
     input.last_images = torch::stack(last_images);
   }
 
-  if (check_tensors_valid(image_embeds)) {
-    input.image_embeds = torch::stack(image_embeds);
-  }
   return input;
 }
 

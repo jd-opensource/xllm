@@ -823,9 +823,6 @@ REGISTER_MODEL_ARGS(UniPCMultistepScheduler, [&] {
   LOAD_ARG_OR(rescale_betas_zero_snr, "rescale_betas_zero_snr", false);
   LOAD_ARG_OR(use_dynamic_shifting, "use_dynamic_shifting", false);
   LOAD_ARG_OR(time_shift_type, "time_shift_type", "exponential");
-  LOAD_ARG_OR(sigma_min, "sigma_min", 0.0f);
-  LOAD_ARG_OR(sigma_max, "sigma_max", 0.0f);
-  LOAD_ARG_OR(shift_terminal, "shift_terminal", false);
 });
 
 }  // namespace xllm

@@ -34,11 +34,6 @@ std::string generate_request_id(const std::string& prefix) {
          short_uuid.random();
 }
 
-std::string generate_audio_generation_request_id() {
-  return "audiogen-" + InstanceName::name()->get_name_hash() + "-" +
-         short_uuid.random();
-}
-
 // Decode a base64-encoded WAV/audio blob into a float32 CPU tensor of shape
 // (1, num_samples) at the given sample rate (mono).
 // Returns true on success and writes to `out`; logs ERROR and returns false
@@ -94,10 +89,10 @@ bool decode_base64_image(const std::string& base64, torch::Tensor& out) {
   return true;
 }
 
-// Shared helper: populate DiTInputParams from an image-like input proto.
+// Shared helper: populate DiTInputParams fields common to Image and Video
+// input.
 template <typename InputProto>
 void fill_input_params(DiTInputParams& input_params, const InputProto& input) {
-  // Fields common to both proto::Input and proto::VideoInput
   input_params.prompt = input.prompt();
   if (input.has_negative_prompt()) {
     input_params.negative_prompt = input.negative_prompt();
@@ -112,9 +107,51 @@ void fill_input_params(DiTInputParams& input_params, const InputProto& input) {
   if (input.has_image()) {
     decode_base64_image(input.image(), input_params.image);
   }
+}
 
-  // Image-only fields (proto::Input)
-  if constexpr (std::is_same_v<InputProto, proto::Input>) {
+// Shared helper: populate generation params common to Image and Video
+// parameters.
+template <typename ParamsProto>
+void fill_generation_params(DiTGenerationParams& generation_params,
+                            const ParamsProto& params) {
+  if (params.has_size()) {
+    auto [w, h] = split_resolution(params.size());
+    generation_params.width = w;
+    generation_params.height = h;
+  }
+  if (params.has_num_inference_steps()) {
+    generation_params.num_inference_steps = params.num_inference_steps();
+  }
+  if (params.has_true_cfg_scale()) {
+    generation_params.true_cfg_scale = params.true_cfg_scale();
+  }
+  if (params.has_guidance_scale()) {
+    generation_params.guidance_scale = params.guidance_scale();
+  }
+  if (params.has_seed()) {
+    generation_params.seed = params.seed();
+  }
+  if (params.has_max_sequence_length()) {
+    generation_params.max_sequence_length = params.max_sequence_length();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Image generation constructor
+// ---------------------------------------------------------------------------
+DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
+                                   const std::string& x_rid,
+                                   const std::string& x_rtime) {
+  request_id = request.has_request_id() ? request.request_id()
+                                        : generate_request_id("imggen-");
+  x_request_id = x_rid;
+  x_request_time = x_rtime;
+  model = request.model();
+
+  if (request.has_input()) {
+    const auto& input = request.input();
+    fill_input_params(input_params, input);
+    // Image-only input fields
     if (input.has_prompt_2()) {
       input_params.prompt_2 = input.prompt_2();
     }
@@ -147,75 +184,9 @@ void fill_input_params(DiTInputParams& input_params, const InputProto& input) {
       }
       input_params.images.emplace_back(std::move(tensor));
     }
-    if (input.has_condition_image()) {
-      decode_base64_image(input.condition_image(),
-                          input_params.condition_image);
-    }
     if (input.has_control_image()) {
       decode_base64_image(input.control_image(), input_params.control_image);
     }
-  }
-
-  // Video-only fields (proto::VideoInput)
-  if constexpr (std::is_same_v<InputProto, proto::VideoInput>) {
-    if (input.has_last_image()) {
-      decode_base64_image(input.last_image(), input_params.last_image);
-    }
-    if (input.has_image_embeds()) {
-      input_params.image_embeds = util::proto_to_torch(input.image_embeds());
-    }
-  }
-}
-
-// Shared helper: populate generation params from a parameters proto.
-// Both ImageParameters and VideoParameters share most fields.
-template <typename ParamsProto>
-void fill_generation_params(DiTGenerationParams& generation_params,
-                            const ParamsProto& params) {
-  if (params.has_size()) {
-    auto [w, h] = split_resolution(params.size());
-    generation_params.width = w;
-    generation_params.height = h;
-  }
-  if (params.has_num_inference_steps()) {
-    generation_params.num_inference_steps = params.num_inference_steps();
-  }
-  if (params.has_true_cfg_scale()) {
-    generation_params.true_cfg_scale = params.true_cfg_scale();
-  }
-  if (params.has_guidance_scale()) {
-    generation_params.guidance_scale = params.guidance_scale();
-  }
-  if (params.has_seed()) {
-    generation_params.seed = params.seed();
-  }
-  if (params.has_max_sequence_length()) {
-    generation_params.max_sequence_length = params.max_sequence_length();
-  }
-  if constexpr (std::is_same_v<ParamsProto, proto::Parameters>) {
-    if (params.has_enable_cfg_renorm()) {
-      generation_params.enable_cfg_renorm = params.enable_cfg_renorm();
-    }
-    if (params.has_cfg_renorm_min()) {
-      generation_params.cfg_renorm_min = params.cfg_renorm_min();
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Image generation constructor
-// ---------------------------------------------------------------------------
-DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
-                                   const std::string& x_rid,
-                                   const std::string& x_rtime) {
-  request_id = request.has_request_id() ? request.request_id()
-                                        : generate_request_id("imggen-");
-  x_request_id = x_rid;
-  x_request_time = x_rtime;
-  model = request.model();
-
-  if (request.has_input()) {
-    fill_input_params(input_params, request.input());
   }
 
   generation_params.num_images_per_prompt = 1;
@@ -225,6 +196,13 @@ DiTRequestParams::DiTRequestParams(const proto::ImageGenerationRequest& request,
     if (params.has_num_images_per_prompt()) {
       generation_params.num_images_per_prompt =
           static_cast<uint32_t>(params.num_images_per_prompt());
+    }
+    // Image-only generation fields
+    if (params.has_enable_cfg_renorm()) {
+      generation_params.enable_cfg_renorm = params.enable_cfg_renorm();
+    }
+    if (params.has_cfg_renorm_min()) {
+      generation_params.cfg_renorm_min = params.cfg_renorm_min();
     }
   }
 }
@@ -238,7 +216,7 @@ DiTRequestParams::DiTRequestParams(const proto::AudioGenerationRequest& request,
   if (request.has_request_id()) {
     request_id = request.request_id();
   } else {
-    request_id = generate_audio_generation_request_id();
+    request_id = generate_request_id("audiogen-");
   }
   x_request_id = x_rid;
   x_request_time = x_rtime;
@@ -298,7 +276,12 @@ DiTRequestParams::DiTRequestParams(const proto::VideoGenerationRequest& request,
   generation_params.force_video_output = true;
 
   if (request.has_input()) {
-    fill_input_params(input_params, request.input());
+    const auto& input = request.input();
+    fill_input_params(input_params, input);
+    // Video-only input fields
+    if (input.has_last_image()) {
+      decode_base64_image(input.last_image(), input_params.last_image);
+    }
   }
 
   if (request.has_parameters()) {

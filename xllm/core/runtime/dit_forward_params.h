@@ -29,9 +29,7 @@ namespace xllm {
 struct DiTForwardInput {
   bool valid() const {
     return prompts.size() > 0 || prompt_embeds.defined() ||
-           pooled_prompt_embeds.defined() || images.defined() ||
-           last_images.defined() || image_embeds.defined() ||
-           condition_images.defined();
+           pooled_prompt_embeds.defined();
   }
 
   void save_with_prefix(std::string prefix) const {
@@ -109,13 +107,6 @@ struct DiTForwardInput {
       os << "undefined" << std::endl;
     }
 
-    os << "condition_images: ";
-    if (condition_images.defined()) {
-      os << condition_images.sizes() << std::endl;
-    } else {
-      os << "undefined" << std::endl;
-    }
-
     os << "masked_image_latents: ";
     if (masked_image_latents.defined()) {
       os << masked_image_latents.sizes() << std::endl;
@@ -161,13 +152,6 @@ struct DiTForwardInput {
     os << "last_images: ";
     if (last_images.defined()) {
       os << last_images.sizes() << std::endl;
-    } else {
-      os << "undefined" << std::endl;
-    }
-
-    os << "image_embeds: ";
-    if (image_embeds.defined()) {
-      os << image_embeds.sizes() << std::endl;
     } else {
       os << "undefined" << std::endl;
     }
@@ -235,15 +219,8 @@ struct DiTForwardInput {
       input.control_image = control_image.to(device, dtype);
     }
 
-    if (condition_images.defined()) {
-      input.condition_images = condition_images.to(device, dtype);
-    }
-
     if (last_images.defined()) {
       input.last_images = last_images.to(device, dtype);
-    }
-    if (image_embeds.defined()) {
-      input.image_embeds = image_embeds.to(device, dtype);
     }
     if (prompt_audio.defined()) {
       input.prompt_audio = prompt_audio.to(device, torch::kFloat32);
@@ -273,8 +250,6 @@ struct DiTForwardInput {
 
   torch::Tensor control_image;
 
-  torch::Tensor condition_images;
-
   torch::Tensor masked_image_latents;
 
   torch::Tensor prompt_embeds;
@@ -289,9 +264,6 @@ struct DiTForwardInput {
 
   // Last images for video generation
   torch::Tensor last_images;
-
-  // Image embeddings for video generation
-  torch::Tensor image_embeds;
 
   // Optional prompt audio for voice cloning (LongCat-AudioDiT)
   // Shape: (batch, 1, num_samples) at 24kHz

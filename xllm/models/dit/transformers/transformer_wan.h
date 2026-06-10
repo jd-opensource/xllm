@@ -38,7 +38,7 @@ using xllm::dit::DiTParallelLinear;
 using xllm::dit::LinearType;
 using xllm::dit::TpOptions;
 #include "framework/model_context.h"
-#include "models/dit/transformer_flux.h"
+#include "models/dit/transformers/transformer_flux.h"
 #include "models/model_registry.h"
 #if defined(USE_NPU)
 #include "torch_npu/csrc/aten/CustomFunctions.h"
@@ -1481,46 +1481,10 @@ class WanTransformer3DModelImpl : public torch::nn::Module {
 };
 TORCH_MODULE(WanTransformer3DModel);
 
-class Wan22DiTModelImpl final : public torch::nn::Module {
- public:
-  explicit Wan22DiTModelImpl(const ModelContext& context)
-      : options_(context.get_tensor_options()) {
-    wan2_2_transformer_ =
-        register_module("wan2_2_transformer", WanTransformer3DModel(context));
-  }
-  torch::Tensor forward(
-      const torch::Tensor& hidden_states,
-      const torch::Tensor& timestep,
-      const torch::Tensor& encoder_hidden_states,
-      const torch::Tensor& encoder_hidden_states_image = torch::Tensor()) {
-    return wan2_2_transformer_->forward(hidden_states,
-                                        timestep,
-                                        encoder_hidden_states,
-                                        encoder_hidden_states_image);
-  }
-
-  int64_t in_channels() { return wan2_2_transformer_->in_channels(); }
-  bool guidance_embeds() { return wan2_2_transformer_->guidance_embeds(); }
-  const std::vector<int64_t>& patch_size() {
-    return wan2_2_transformer_->patch_size();
-  }
-
-  void load_model(std::unique_ptr<DiTFolderLoader> loader) {
-    wan2_2_transformer_->load_model(std::move(loader));
-    wan2_2_transformer_->verify_loaded_weights("");
-  }
-
- private:
-  WanTransformer3DModel wan2_2_transformer_{nullptr};
-  torch::TensorOptions options_;
-};
-TORCH_MODULE(Wan22DiTModel);
-
 REGISTER_MODEL_ARGS(WanTransformer3DModel, [&] {
   LOAD_ARG_OR(dtype, "dtype", "bfloat16");
   LOAD_ARG_OR(head_dim, "attention_head_dim", 128);
   LOAD_ARG_OR(cross_attn_norm, "cross_attn_norm", true);
-  LOAD_ARG_OR(eps, "eps", 1e-6);
   LOAD_ARG_OR(ffn_dim, "ffn_dim", 13824);
   LOAD_ARG_OR(time_freq_dim, "freq_dim", 256);
   LOAD_ARG_OR(dit_in_channels, "in_channels", 36);

@@ -333,177 +333,91 @@ std::string resolve_text_encoder_tokenizer_path(
   }
   return "";
 }
-
-// Load tokenizer args from an arbitrary directory (used for HF cache fallback).
-// Probes SentencePiece vocab filenames first when tokenizer_config.json
-// indicates a SentencePiece-based tokenizer class (e.g. T5Tokenizer), then
-// falls back to tokenizer.json (fast tokenizer).
-bool load_tokenizer_args_from_dir(const std::string& dir, TokenizerArgs& args) {
-  // Check tokenizer_config.json to determine the correct tokenizer type.
-  // T5Tokenizer and UMT5Tokenizer use SentencePiece (spiece.model), not the
-  // fast tokenizer (tokenizer.json). Prefer SentencePiece in that case.
-  bool prefer_sentencepiece = false;
-  const std::string cfg_path = dir + "/tokenizer_config.json";
-  if (std::filesystem::exists(cfg_path)) {
-    JsonReader r;
-    if (r.parse(cfg_path)) {
-      if (auto v = r.value<std::string>("tokenizer_class")) {
-        const std::string& cls = v.value();
-        if (cls == "T5Tokenizer" || cls == "T5TokenizerFast" ||
-            cls.find("T5") != std::string::npos) {
-          prefer_sentencepiece = true;
-        }
-      }
-    }
-  }
-
-  if (!prefer_sentencepiece) {
-    // fast tokenizer
-    const std::string tokenizer_json = dir + "/tokenizer.json";
-    if (std::filesystem::exists(tokenizer_json)) {
-      args.tokenizer_type() = "fast";
-      args.vocab_file() = tokenizer_json;
-      return true;
-    }
-  }
-
-  // SentencePiece vocab
-  for (const auto& candidate : {"spiece.model", "tokenizer.model"}) {
-    const std::string vocab_path = dir + "/" + candidate;
-    if (std::filesystem::exists(vocab_path)) {
-      args.tokenizer_type() = "sentencepiece";
-      args.vocab_file() = vocab_path;
-      // Also parse tokenizer_config.json for bos/eos/pad tokens if present.
-      if (std::filesystem::exists(cfg_path)) {
-        JsonReader r;
-        if (r.parse(cfg_path)) {
-          if (auto v = r.value<bool>("add_bos_token")) {
-            args.add_bos_token() = v.value();
-          }
-          if (auto v = r.value<bool>("add_eos_token")) {
-            args.add_eos_token() = v.value();
-          }
-          if (auto v = r.value<std::string>("tokenizer_class")) {
-            args.tokenizer_class() = v.value();
-          }
-          if (auto v = r.value<std::string>("bos_token.content")) {
-            args.bos_token() = v.value();
-          } else if (auto v = r.value<std::string>("bos_token")) {
-            args.bos_token() = v.value();
-          }
-          if (auto v = r.value<std::string>("eos_token.content")) {
-            args.eos_token() = v.value();
-          } else if (auto v = r.value<std::string>("eos_token")) {
-            args.eos_token() = v.value();
-          }
-          if (auto v = r.value<std::string>("pad_token.content")) {
-            args.pad_token() = v.value();
-          } else if (auto v = r.value<std::string>("pad_token")) {
-            args.pad_token() = v.value();
-          }
-        }
-      }
-      return true;
-    }
-  }
-  return false;
-}
-
 }  // namespace
 
 bool DiTFolderLoader::load_tokenizer_args(
     const std::string& model_weights_path) {
   // tokenizer args from tokenizer_config.json
+  std::string path = model_weights_path;
+  std::string tokenizer_args_path = path + "/tokenizer_config.json";
+
+  if (!std::filesystem::exists(tokenizer_args_path) &&
+      !text_encoder_model_.empty()) {
+    LOG(WARNING)
+        << "Tokenizer fallback to text_encoder_model '" << text_encoder_model_
+        << "' specified in config.json. "
+        << "Please download the tokenizer to the model directory or ensure "
+        << "the HuggingFace cache is populated (e.g. run the official "
+        << "inference script once to cache '" << text_encoder_model_ << "').";
+
+    path = resolve_text_encoder_tokenizer_path(text_encoder_model_);
+    if (path.empty()) {
+      LOG(ERROR) << "Failed to resolve text encoder model tokenizer path for "
+                 << text_encoder_model_;
+      return false;
+    }
+  }
+
   JsonReader tokenizer_reader;
-  const std::string tokenizer_args_file_path =
-      model_weights_path_ + "/tokenizer_config.json";
+  tokenizer_args_path = path + "/tokenizer_config.json";
+
+  if (!tokenizer_reader.parse(tokenizer_args_path)) {
+    return true;
+  }
+
+  bool prefer_sentencepiece = false;
+  if (auto v = tokenizer_reader.value<std::string>("tokenizer_class")) {
+    const std::string& cls = v.value();
+    if (cls == "T5Tokenizer" || cls == "T5TokenizerFast" ||
+        cls.find("T5") != std::string::npos) {
+      prefer_sentencepiece = true;
+    }
+  }
 
   // Check tokenizer.json; but prefer SentencePiece when tokenizer_class is
   // T5Tokenizer (e.g. UMT5), because the fast tokenizer produces different
   // token IDs from the SentencePiece tokenizer used during training.
-  const std::string tokenizer_json_path =
-      model_weights_path + "/tokenizer.json";
-  if (std::filesystem::exists(tokenizer_json_path)) {
-    // Peek at tokenizer_config.json to see if this is a T5-family model.
-    bool is_t5 = false;
-    const std::string cfg_peek = model_weights_path_ + "/tokenizer_config.json";
-    if (std::filesystem::exists(cfg_peek)) {
-      JsonReader pr;
-      if (pr.parse(cfg_peek)) {
-        if (auto v = pr.value<std::string>("tokenizer_class")) {
-          const std::string& cls = v.value();
-          if (cls.find("T5") != std::string::npos) {
-            is_t5 = true;
-          }
-        }
-      }
-    }
-    if (!is_t5) {
-      tokenizer_args_.tokenizer_type() = "fast";
-      tokenizer_args_.vocab_file() = tokenizer_json_path;
-    }
+  const std::string tokenizer_json_path = path + "/tokenizer.json";
+  if (std::filesystem::exists(tokenizer_json_path) && !prefer_sentencepiece) {
+    tokenizer_args_.tokenizer_type() = "fast";
+    tokenizer_args_.vocab_file() = tokenizer_json_path;
+  } else if (std::filesystem::exists(path + "/spiece.model")) {
+    tokenizer_args_.tokenizer_type() = "sentencepiece";
+    tokenizer_args_.vocab_file() = path + "/spiece.model";
+  } else if (std::filesystem::exists(path + "/tokenizer.model")) {
+    tokenizer_args_.tokenizer_type() = "sentencepiece";
+    tokenizer_args_.vocab_file() = path + "/tokenizer.model";
+  } else {
+    LOG(ERROR) << "No tokenizer files found in directory: " << path;
+    return false;
   }
 
-  if (!std::filesystem::exists(tokenizer_args_file_path)) {
-    // No tokenizer_config.json in this directory.
-    // 1. Probe known vocab filenames in the current directory.
-    for (const auto& candidate : {"spiece.model", "tokenizer.model"}) {
-      const std::string candidate_path = model_weights_path_ + "/" + candidate;
-      if (std::filesystem::exists(candidate_path)) {
-        tokenizer_args_.tokenizer_type() = "sentencepiece";
-        tokenizer_args_.vocab_file() = candidate;
-        return true;
-      }
-    }
-    // 2. Fall back to text_encoder_model path (mirrors what official inference
-    //    code does: AutoTokenizer.from_pretrained(config.text_encoder_model)).
-    if (!text_encoder_model_.empty()) {
-      const std::string resolved =
-          resolve_text_encoder_tokenizer_path(text_encoder_model_);
-      if (!resolved.empty()) {
-        LOG(INFO) << "Tokenizer not found in model directory, loading from "
-                  << "text_encoder_model path: " << resolved;
-        if (load_tokenizer_args_from_dir(resolved, tokenizer_args_)) {
-          return true;
-        }
-      }
-      LOG(WARNING)
-          << "text_encoder_model '" << text_encoder_model_
-          << "' specified in config.json but no tokenizer files found. "
-          << "Please download the tokenizer to the model directory or ensure "
-          << "the HuggingFace cache is populated (e.g. run the official "
-          << "inference script once to cache '" << text_encoder_model_ << "').";
-    }
-    return true;
+  if (auto v = tokenizer_reader.value<bool>("add_bos_token")) {
+    tokenizer_args_.add_bos_token() = v.value();
   }
-  if (tokenizer_reader.parse(tokenizer_args_file_path)) {
-    if (auto v = tokenizer_reader.value<bool>("add_bos_token")) {
-      tokenizer_args_.add_bos_token() = v.value();
-    }
-    if (auto v = tokenizer_reader.value<bool>("add_eos_token")) {
-      tokenizer_args_.add_eos_token() = v.value();
-    }
-    if (auto v = tokenizer_reader.value<std::string>("tokenizer_class")) {
-      tokenizer_args_.tokenizer_class() = v.value();
-    }
-    // read bos_token
-    if (auto v = tokenizer_reader.value<std::string>("bos_token.content")) {
-      tokenizer_args_.bos_token() = v.value();
-    } else if (auto v = tokenizer_reader.value<std::string>("bos_token")) {
-      tokenizer_args_.bos_token() = v.value();
-    }
-    // read eos_token
-    if (auto v = tokenizer_reader.value<std::string>("eos_token.content")) {
-      tokenizer_args_.eos_token() = v.value();
-    } else if (auto v = tokenizer_reader.value<std::string>("eos_token")) {
-      tokenizer_args_.eos_token() = v.value();
-    }
-    // read pad_token
-    if (auto v = tokenizer_reader.value<std::string>("pad_token.content")) {
-      tokenizer_args_.pad_token() = v.value();
-    } else if (auto v = tokenizer_reader.value<std::string>("pad_token")) {
-      tokenizer_args_.pad_token() = v.value();
-    }
+  if (auto v = tokenizer_reader.value<bool>("add_eos_token")) {
+    tokenizer_args_.add_eos_token() = v.value();
+  }
+  if (auto v = tokenizer_reader.value<std::string>("tokenizer_class")) {
+    tokenizer_args_.tokenizer_class() = v.value();
+  }
+  // read bos_token
+  if (auto v = tokenizer_reader.value<std::string>("bos_token.content")) {
+    tokenizer_args_.bos_token() = v.value();
+  } else if (auto v = tokenizer_reader.value<std::string>("bos_token")) {
+    tokenizer_args_.bos_token() = v.value();
+  }
+  // read eos_token
+  if (auto v = tokenizer_reader.value<std::string>("eos_token.content")) {
+    tokenizer_args_.eos_token() = v.value();
+  } else if (auto v = tokenizer_reader.value<std::string>("eos_token")) {
+    tokenizer_args_.eos_token() = v.value();
+  }
+  // read pad_token
+  if (auto v = tokenizer_reader.value<std::string>("pad_token.content")) {
+    tokenizer_args_.pad_token() = v.value();
+  } else if (auto v = tokenizer_reader.value<std::string>("pad_token")) {
+    tokenizer_args_.pad_token() = v.value();
   }
 
   return true;
@@ -562,6 +476,11 @@ DiTModelLoader::DiTModelLoader(const std::string& model_root_path)
   // parse model_index.json & initialize model_loader
   for (const auto& [json_key, json_value] : root_json.items()) {
     if (!json_value.is_array() || json_value.size() != 2) {
+      continue;
+    }
+
+    if (json_value[1].is_null()) {
+      LOG(INFO) << "Skipping null component: " << json_key;
       continue;
     }
 

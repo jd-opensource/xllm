@@ -33,6 +33,7 @@ limitations under the License.
 #include "core/framework/state_dict/state_dict.h"
 #include "core/layers/common/add_matmul.h"
 #include "framework/model_context.h"
+#include "models/dit/autoencoders/autoencoder_kl.h"
 #include "models/dit/utils/diagonal_gaussian_distribution.h"
 #include "models/dit/utils/util.h"
 #include "models/model_registry.h"
@@ -1365,19 +1366,6 @@ class QwenImageDecoder3dImpl : public torch::nn::Module {
 };
 
 TORCH_MODULE(QwenImageDecoder3d);
-
-using dit::DiagonalGaussianDistribution;
-
-struct AutoencoderKLOutput {
-  DiagonalGaussianDistribution latent_dist;
-  AutoencoderKLOutput(DiagonalGaussianDistribution dist)
-      : latent_dist(std::move(dist)) {}
-};
-
-struct DecoderOutput {
-  torch::Tensor sample;
-  DecoderOutput(torch::Tensor sample) : sample(std::move(sample)) {}
-};
 
 class AutoencoderKLQwenImageImpl : public torch::nn::Module {
  public:

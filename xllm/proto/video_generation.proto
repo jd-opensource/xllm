@@ -25,9 +25,6 @@ message VideoInput {
 
   // Last image (base64 encoded)
   optional string last_image = 6;
-
-  // Image embeddings for image-to-video generation
-  optional Tensor image_embeds = 7;
 }
 
 // Generation parameters container

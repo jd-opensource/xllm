@@ -41,17 +41,17 @@ namespace xllm {
 class T5LayerNormImpl : public torch::nn::Module {
  public:
   explicit T5LayerNormImpl(ModelContext context)
-      : device_(context.get_tensor_options().device()),
-        dtype_(context.get_tensor_options().dtype().toScalarType()) {
+      : device_(context.get_tensor_options().device()) {
     ModelArgs model_args = context.get_model_args();
     int64_t hidden_size = model_args.d_model();
     variance_epsilon_ = model_args.layer_norm_eps();
+    auto dtype = context.get_tensor_options().dtype().toScalarType();
     weight_ = register_parameter(
-        "weight", torch::ones({hidden_size}).to(device_).to(dtype_));
+        "weight", torch::ones({hidden_size}).to(device_).to(dtype));
   }
 
   torch::Tensor forward(torch::Tensor hidden_states) {
-    auto variance = hidden_states.to(dtype_).pow(2).mean(-1, true);
+    auto variance = hidden_states.to(torch::kFloat32).pow(2).mean(-1, true);
     hidden_states = hidden_states * torch::rsqrt(variance + variance_epsilon_);
     if (weight_.dtype() == torch::kFloat16 ||
         weight_.dtype() == torch::kBFloat16) {
@@ -72,7 +72,6 @@ class T5LayerNormImpl : public torch::nn::Module {
   bool weight_is_loaded_ = false;
   double variance_epsilon_;
   torch::Device device_;
-  torch::ScalarType dtype_;
 };
 TORCH_MODULE(T5LayerNorm);
 

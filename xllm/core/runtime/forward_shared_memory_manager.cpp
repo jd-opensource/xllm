@@ -365,7 +365,6 @@ inline size_t get_dit_forward_input_size(const DiTForwardInput& input) {
   size += get_tensor_size(input.negative_pooled_prompt_embeds);
   size += get_tensor_size(input.latents);
   size += get_tensor_size(input.last_images);
-  size += get_tensor_size(input.image_embeds);
 
   // Generation params
   size += get_dit_generation_params_size(input.generation_params);
@@ -1044,7 +1043,6 @@ inline void write_dit_forward_input(char*& buffer,
   write_tensor(buffer, input.negative_pooled_prompt_embeds);
   write_tensor(buffer, input.latents);
   write_tensor(buffer, input.last_images);
-  write_tensor(buffer, input.image_embeds);
 
   write_dit_generation_params(buffer, input.generation_params);
 }
@@ -1955,7 +1953,6 @@ inline void read_dit_forward_input(const char*& buffer,
   read_tensor(buffer, input.negative_pooled_prompt_embeds);
   read_tensor(buffer, input.latents);
   read_tensor(buffer, input.last_images);
-  read_tensor(buffer, input.image_embeds);
 
   read_dit_generation_params(buffer, input.generation_params);
 }

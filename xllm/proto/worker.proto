@@ -239,18 +239,14 @@ message DiTForwardInput {
   Tensor negative_prompt_embeds = 13;
   Tensor negative_pooled_prompt_embeds = 14;
   Tensor latents = 15;
+  // generation params
+  DiTGenerationParams generation_params = 16;
+
   Tensor last_images = 17;
-  Tensor image_embeds = 18;
 
   // Voice cloning fields (LongCat-AudioDiT)
   optional Tensor prompt_audio = 19;
   optional string audio_prompt_text = 20;
-
-  // Conditional image generation
-  Tensor condition_images = 21;
-
-  // generation params
-  DiTGenerationParams generation_params = 16;
 }
 
 message DiTForwardOutput {
