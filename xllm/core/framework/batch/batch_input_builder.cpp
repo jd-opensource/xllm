@@ -29,6 +29,7 @@ limitations under the License.
 #include "common/global_flags.h"
 #include "common/metrics.h"
 #include "core/framework/config/beam_search_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/framework/multimodal/mm_visitor.h"
 #include "framework/model/model_args.h"
 #include "framework/model/model_input_params.h"
@@ -635,15 +636,24 @@ void BatchInputBuilder::extract_tokens_and_positions(Sequence* sequence,
       CHECK_LT(n_kv_cache_tokens, seq_len)
           << "MTP bootstrap decode input must contain current token";
       const int32_t token_id = token_ids[n_kv_cache_tokens];
-      CHECK_GE(token_id, 0) << "MTP bootstrap token should be valid";
-      state.mtp_bootstrap_row_idxes.emplace_back(
-          static_cast<int32_t>(state.embedding_ids.size() - 1));
-      if (mtp_bootstrap.dim() == 1) {
-        state.mtp_bootstrap_embeddings.emplace_back(mtp_bootstrap.unsqueeze(0));
+      const bool is_fake_token = token_id < 0;
+      const bool allow_fake_token =
+          ::xllm::SchedulerConfig::get_instance().enable_schedule_overlap();
+      if (is_fake_token) {
+        CHECK(allow_fake_token)
+            << "MTP bootstrap fake token is only allowed with schedule "
+            << "overlap";
       } else {
-        CHECK(mtp_bootstrap.dim() == 2 && mtp_bootstrap.size(0) == 1)
-            << "MTP bootstrap embedding should be [hidden] or [1, hidden]";
-        state.mtp_bootstrap_embeddings.emplace_back(mtp_bootstrap);
+        state.mtp_bootstrap_row_idxes.emplace_back(
+            static_cast<int32_t>(state.embedding_ids.size() - 1));
+        if (mtp_bootstrap.dim() == 1) {
+          state.mtp_bootstrap_embeddings.emplace_back(
+              mtp_bootstrap.unsqueeze(0));
+        } else {
+          CHECK(mtp_bootstrap.dim() == 2 && mtp_bootstrap.size(0) == 1)
+              << "MTP bootstrap embedding should be [hidden] or [1, hidden]";
+          state.mtp_bootstrap_embeddings.emplace_back(mtp_bootstrap);
+        }
       }
     }
   } else {
