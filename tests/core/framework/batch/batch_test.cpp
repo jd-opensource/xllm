@@ -905,9 +905,12 @@ TEST(BatchTest, ForwardInputPackedRoundTripPreservesTransportFields) {
             (std::vector<uint64_t>{100}));
   EXPECT_EQ(round_trip.input_params.embedding.mtp_bootstrap_row_idxes,
             std::vector<int32_t>{0});
-  EXPECT_TRUE(
-      torch::equal(round_trip.input_params.embedding.mtp_bootstrap_embeddings,
-                   torch::tensor({{3.0f, 4.0f}})));
+  ASSERT_TRUE(
+      round_trip.input_params.embedding.mtp_bootstrap_embeddings.defined());
+  EXPECT_TRUE(torch::equal(
+      round_trip.input_params.embedding.mtp_bootstrap_embeddings.to(
+          torch::kCPU),
+      torch::tensor({{3.0f, 4.0f}})));
 }
 
 TEST(BatchTest, ForwardInputBlockCopyKernelFieldsMatchExpectedLayout) {
