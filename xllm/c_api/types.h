@@ -145,6 +145,9 @@ typedef struct XLLM_CAPI_EXPORT XLLM_InitOptions {
   /** FlashInfer attention workspace buffer size in bytes. */
   uint32_t flashinfer_workspace_buffer_size;
 
+  /** Maximum number of requests in the request queue */
+  uint32_t request_queue_size;
+
   /** Model task type (generate/embed) */
   char task[XLLM_META_STRING_FIELD_MAX_LEN];
 
