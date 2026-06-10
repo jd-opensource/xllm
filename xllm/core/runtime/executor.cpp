@@ -43,4 +43,9 @@ ModelOutput Executor::forward(const torch::Tensor& tokens,
   return impl_->run(tokens, positions, kv_caches, params);
 }
 
+bool Executor::try_update_graph_input_tokens(ForwardInput& input,
+                                             const torch::Tensor& next_tokens) {
+  return impl_->try_update_graph_input_tokens(input, next_tokens);
+}
+
 }  // namespace xllm

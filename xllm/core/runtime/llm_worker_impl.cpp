@@ -21,11 +21,20 @@ limitations under the License.
 #include <glog/logging.h>
 #include <torch/torch.h>
 
+#include <cstdlib>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
+#include <vector>
+
+#if defined(USE_NPU)
+#include <acl/acl.h>
+#include <torch_npu/torch_npu.h>
+#endif
 
 #include "common/device_monitor.h"
+#include "common/macros.h"
 #include "common/metrics.h"
 #include "common/types.h"
 #include "core/common/global_flags.h"
@@ -52,6 +61,50 @@ void wait_input_ready_events(const ForwardInput& input, const Stream& stream) {
       << "failed to wait ForwardInput metadata ready event";
 }
 
+bool async_direct_next_token_d2h_enabled() {
+  const char* env = std::getenv("XLLM_ENABLE_ASYNC_DIRECT_NEXT_TOKEN_D2H");
+  return env != nullptr && std::string(env) == "1";
+}
+
+#if defined(USE_NPU)
+class AsyncNextTokenD2HCopyStream {
+ public:
+  AsyncNextTokenD2HCopyStream() {
+    CHECK_ACL_SUCCESS(aclrtCreateStream(&stream_),
+                      "aclrtCreateStream for async next-token D2H");
+    events_.resize(kRingSize, nullptr);
+    for (auto& event : events_) {
+      CHECK_ACL_SUCCESS(aclrtCreateEventWithFlag(&event, ACL_EVENT_SYNC),
+                        "aclrtCreateEventWithFlag for async next-token D2H");
+    }
+  }
+
+  ~AsyncNextTokenD2HCopyStream() {
+    for (auto event : events_) {
+      if (event != nullptr) {
+        aclrtDestroyEvent(event);
+      }
+    }
+    if (stream_ != nullptr) {
+      aclrtDestroyStream(stream_);
+    }
+  }
+
+  aclrtStream get() const { return stream_; }
+
+  aclrtEvent next_event() {
+    const size_t index = next_event_index_++ % events_.size();
+    return events_[index];
+  }
+
+ private:
+  static constexpr size_t kRingSize = 64;
+  aclrtStream stream_ = nullptr;
+  size_t next_event_index_ = 0;
+  std::vector<aclrtEvent> events_;
+};
+#endif
+
 StreamEventPtr record_current_stream_event(const Device& device) {
   std::unique_ptr<Stream> stream = device.current_stream();
   StreamEventPtr event = stream->record_event();
@@ -60,6 +113,91 @@ StreamEventPtr record_current_stream_event(const Device& device) {
   }
   return event;
 }
+
+#if defined(USE_NPU)
+bool can_async_copy_next_tokens_to_host(const ForwardOutput& output) {
+  const auto& sample_output = output.sample_output;
+  const auto& beam_output = output.beam_search_output;
+  return async_direct_next_token_d2h_enabled() &&
+         sample_output.next_tokens.defined() &&
+         sample_output.next_tokens.is_contiguous() &&
+         sample_output.next_tokens.device().is_privateuseone() &&
+         (sample_output.next_tokens.scalar_type() == torch::kInt64 ||
+          sample_output.next_tokens.scalar_type() == torch::kInt32) &&
+         (!sample_output.logprobs.defined() ||
+          sample_output.logprobs.numel() == 0) &&
+         (!sample_output.top_tokens.defined() ||
+          sample_output.top_tokens.numel() == 0) &&
+         (!sample_output.top_logprobs.defined() ||
+          sample_output.top_logprobs.numel() == 0) &&
+         sample_output.embeddings.numel() == 0 &&
+         sample_output.mm_embeddings.empty() &&
+         output.dit_forward_output.tensors.empty() &&
+         (!output.expert_load_data.defined() ||
+          output.expert_load_data.numel() == 0) &&
+         (!beam_output.src_seq_idxes.defined() ||
+          beam_output.src_seq_idxes.numel() == 0) &&
+         (!beam_output.out_tokens.defined() ||
+          beam_output.out_tokens.numel() == 0) &&
+         (!beam_output.out_logprobs.defined() ||
+          beam_output.out_logprobs.numel() == 0) &&
+         !::xllm::EPLBConfig::get_instance().enable_eplb();
+}
+
+torch::Tensor allocate_async_host_next_tokens(
+    const torch::Tensor& device_tokens) {
+  static thread_local std::vector<torch::Tensor> host_token_ring;
+  static thread_local size_t next_host_token_index = 0;
+  constexpr size_t kHostTokenRingSize = 64;
+  if (host_token_ring.empty()) {
+    host_token_ring.resize(kHostTokenRingSize);
+  }
+  torch::Tensor& host_tokens =
+      host_token_ring[next_host_token_index++ % host_token_ring.size()];
+  if (!host_tokens.defined() || host_tokens.sizes() != device_tokens.sizes() ||
+      host_tokens.scalar_type() != device_tokens.scalar_type()) {
+    host_tokens = torch::empty(device_tokens.sizes(),
+                               torch::TensorOptions()
+                                   .device(torch::kCPU)
+                                   .dtype(device_tokens.scalar_type())
+                                   .pinned_memory(true));
+  }
+  return host_tokens;
+}
+
+void maybe_start_async_next_token_d2h(ForwardOutput& output) {
+  if (!can_async_copy_next_tokens_to_host(output) ||
+      output.ready_event == nullptr) {
+    return;
+  }
+  const torch::Tensor& device_tokens = output.sample_output.next_tokens;
+  torch::Tensor host_tokens = allocate_async_host_next_tokens(device_tokens);
+
+  static thread_local AsyncNextTokenD2HCopyStream copy_stream;
+  aclrtStream stream = copy_stream.get();
+  CHECK_ACL_SUCCESS(
+      aclrtStreamWaitEvent(stream, output.ready_event->npu_event()),
+      "aclrtStreamWaitEvent for async next-token D2H");
+  const size_t bytes = static_cast<size_t>(device_tokens.numel()) *
+                       static_cast<size_t>(device_tokens.element_size());
+  CHECK_ACL_SUCCESS(aclrtMemcpyAsync(host_tokens.data_ptr(),
+                                     bytes,
+                                     device_tokens.const_data_ptr(),
+                                     bytes,
+                                     ACL_MEMCPY_DEVICE_TO_HOST,
+                                     stream),
+                    "aclrtMemcpyAsync for async next-token D2H");
+  output.async_host_next_tokens = host_tokens;
+  aclrtEvent done_event = copy_stream.next_event();
+  CHECK_ACL_SUCCESS(aclrtRecordEvent(done_event, stream),
+                    "aclrtRecordEvent for async next-token D2H");
+  output.async_host_next_tokens_ready_event =
+      std::make_shared<StreamEvent>(done_event, /*owns_event=*/false);
+  LOG_FIRST_N(WARNING, 1)
+      << "XLLM_ENABLE_ASYNC_DIRECT_NEXT_TOKEN_D2H enabled: pre-copy "
+         "schedule-overlap next_tokens to pinned host memory";
+}
+#endif
 
 }  // namespace
 
@@ -195,8 +333,10 @@ ForwardInput
 LLMWorkerImpl::update_input_by_last_step_output_for_schedule_overlap(
     ForwardInput& input) {
   c10::StreamGuard stream_guard = compute_stream_->set_stream_guard();
-  CHECK(compute_stream_->wait_event(last_step_output_.ready_event))
-      << "failed to wait last step output ready event";
+  // step_for_schedule_overlap records last_step_output_.ready_event on this
+  // same compute_stream_.  The stream order already guarantees that the token
+  // replacement below is queued after the previous step's sampling kernels, so
+  // an extra StreamWaitEvent here only adds host/runtime overhead.
   return update_input_by_last_step_output(input);
 }
 
@@ -362,7 +502,12 @@ std::optional<ForwardOutput> LLMWorkerImpl::step_internal(
   if (sync_policy == ForwardSyncPolicy::NO_SYNC) {
     output.retained_input = std::make_shared<ForwardInput>(input);
     if (enable_schedule_overlap()) {
+#if defined(USE_NPU)
       output.ready_event = record_current_stream_event(device_);
+      maybe_start_async_next_token_d2h(output);
+#else
+      output.ready_event = record_current_stream_event(device_);
+#endif
     }
     return output;
   }

@@ -46,6 +46,9 @@ class Executor final {
                       std::vector<KVCache>& kv_caches,
                       const ModelInputParams& params);
 
+  bool try_update_graph_input_tokens(ForwardInput& input,
+                                     const torch::Tensor& next_tokens);
+
  private:
   std::unique_ptr<ExecutorImpl> impl_;
 };

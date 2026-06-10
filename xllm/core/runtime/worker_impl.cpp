@@ -515,8 +515,11 @@ void WorkerImpl::update_last_step_output(
 ForwardInput WorkerImpl::update_input_by_last_step_output(
     ForwardInput& inputs) {
 #if defined(USE_NPU)
-  xllm::kernel::npu::replace_token(inputs.token_ids,
-                                   last_step_output_.sample_output.next_tokens);
+  auto& next_tokens = last_step_output_.sample_output.next_tokens;
+  if (model_executor_->try_update_graph_input_tokens(inputs, next_tokens)) {
+    return inputs;
+  }
+  xllm::kernel::npu::replace_token(inputs.token_ids, next_tokens);
 #else
   auto& flatten_tokens = inputs.token_ids;
   auto neg_mask = (flatten_tokens < 0);

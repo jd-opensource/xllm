@@ -90,7 +90,6 @@ class AclGraph {
   void prepare_model_graph_metadata(CausalLM* model,
                                     const torch::Tensor& positions,
                                     ModelInputParams& params);
-
   // NPUGraph with mempool for managing temporary tensors during forward pass
   c10_npu::NPUGraph graph_;
   uint32_t num_tokens_;
@@ -125,6 +124,9 @@ class AclGraphExecutorImpl : public ExecutorImpl {
                   const torch::Tensor& positions,
                   std::vector<KVCache>& kv_caches,
                   const ModelInputParams& params) override;
+
+  bool try_update_graph_input_tokens(ForwardInput& input,
+                                     const torch::Tensor& next_tokens) override;
 
  private:
   // not own

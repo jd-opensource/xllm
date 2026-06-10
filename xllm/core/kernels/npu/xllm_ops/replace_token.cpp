@@ -29,6 +29,7 @@ limitations under the License.
 
 #include "acl/acl.h"
 #include "aclnn_replace_token.h"
+#include "aclnnop/aclnn_cast.h"
 #include "core/common/macros.h"
 #include "core/kernels/npu/utils.h"
 #include "xllm_ops_api.h"
@@ -49,8 +50,43 @@ void replace_token(torch::Tensor& dst, torch::Tensor& src) {
   aclTensor* src_ids = nullptr;
   int32_t device_id = dst.device().index();
   aclrtStream stream = c10_npu::getCurrentNPUStream(device_id).stream();
+  if (dst.numel() == src.numel() && dst.scalar_type() == src.scalar_type() &&
+      dst.is_contiguous() && src.is_contiguous() &&
+      dst.device() == src.device()) {
+    const size_t bytes = static_cast<size_t>(dst.numel()) * dst.element_size();
+    CHECK_ACL_SUCCESS(aclrtMemcpyAsync(dst.data_ptr(),
+                                       bytes,
+                                       src.data_ptr(),
+                                       bytes,
+                                       ACL_MEMCPY_DEVICE_TO_DEVICE,
+                                       stream),
+                      "replace_token: failed to copy token");
+    return;
+  }
+  if (dst.numel() == src.numel() && dst.scalar_type() == torch::kInt &&
+      src.scalar_type() == torch::kLong && dst.is_contiguous() &&
+      src.is_contiguous() && dst.device() == src.device()) {
+    create_acltensor(&dst_ids, dst);
+    create_acltensor(&src_ids, src);
+    uint64_t workspace_size = 0;
+    aclOpExecutor* executor = nullptr;
+    CHECK_ACL_SUCCESS(
+        aclnnCastGetWorkspaceSize(
+            src_ids, ACL_INT32, dst_ids, &workspace_size, &executor),
+        "replace_token: failed to get cast workspace size");
+    CHECK_ACL_SUCCESS(aclnnCast(nullptr, workspace_size, executor, stream),
+                      "replace_token: failed to cast token");
+    aclDestroyTensor(dst_ids);
+    aclDestroyTensor(src_ids);
+    return;
+  }
+  torch::Tensor src_for_replace = src;
+  if (dst.scalar_type() == torch::kInt && src.scalar_type() == torch::kInt &&
+      dst.device() == src.device()) {
+    src_for_replace = src.to(torch::kLong);
+  }
   create_acltensor(&dst_ids, dst);
-  create_acltensor(&src_ids, src);
+  create_acltensor(&src_ids, src_for_replace);
   uint64_t workspace_size = 0;
   aclOpExecutor* executor;
   CHECK_ACL_SUCCESS(aclnnReplaceTokenGetWorkspaceSize(

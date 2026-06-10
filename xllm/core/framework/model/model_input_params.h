@@ -857,6 +857,7 @@ struct GraphInput {
   torch::Tensor attn_mask;
   torch::Tensor tiling_data;
   bool use_expanded_decode_for_spec_verify_attention = false;
+  bool persistent_tokens_already_updated = false;
   torch::Tensor expanded_kv_seq_lens;
   torch::Tensor expanded_block_tables;
   torch::Tensor expanded_tiling_data;
@@ -868,6 +869,7 @@ struct GraphInput {
     out.tiling_data = safe_to(tiling_data, device, true);
     out.use_expanded_decode_for_spec_verify_attention =
         use_expanded_decode_for_spec_verify_attention;
+    out.persistent_tokens_already_updated = persistent_tokens_already_updated;
     out.expanded_kv_seq_lens = safe_to(expanded_kv_seq_lens, device, true);
     out.expanded_block_tables = safe_to(expanded_block_tables, device, true);
     out.expanded_tiling_data = safe_to(expanded_tiling_data, device, true);

@@ -17,11 +17,34 @@ limitations under the License.
 
 #include <glog/logging.h>
 
+#include <cstdlib>
+#include <string>
+
 #include "core/framework/config/load_config.h"
 #include "core/framework/config/parallel_config.h"
 
 namespace xllm {
 namespace layer {
+namespace {
+
+bool enable_lmhead_decode_node() {
+  const char* env = std::getenv("XLLM_ENABLE_NPU_LMHEAD_DECODE_NODE");
+  return env != nullptr && std::string(env) == "1";
+}
+
+bool enable_lmhead_decode_setup_cache() {
+  const char* env = std::getenv("XLLM_ENABLE_NPU_LMHEAD_DECODE_SETUP_CACHE");
+  return env != nullptr && std::string(env) == "1";
+}
+
+bool looks_like_decode_lmhead(const torch::Tensor& hidden_states,
+                              const torch::Tensor& selected_idxes) {
+  return hidden_states.defined() && selected_idxes.defined() &&
+         hidden_states.dim() >= 2 && selected_idxes.dim() == 1 &&
+         hidden_states.size(0) == selected_idxes.size(0);
+}
+
+}  // namespace
 
 void NpuLmHeadImpl::param_from_args(atb_speed::common::LmHeadParam& param,
                                     const ModelArgs& args,
@@ -172,8 +195,26 @@ torch::Tensor NpuLmHeadImpl::forward_with_hidden(
     torch::Tensor& out_hidden,
     int nodeId) {
   atb::Status st;
-  build_node_variant_pack(lm_head_node_prefill_, hidden_states, seleted_idxes);
-  st = execute_node(lm_head_node_prefill_, nodeId);
+  atb_speed::Model::Node& node =
+      enable_lmhead_decode_node() &&
+              looks_like_decode_lmhead(hidden_states, seleted_idxes)
+          ? lm_head_node_decode_
+          : lm_head_node_prefill_;
+  const bool use_decode_setup_cache =
+      enable_lmhead_decode_setup_cache() && (&node == &lm_head_node_decode_);
+  build_node_variant_pack(node, hidden_states, seleted_idxes);
+  if (use_decode_setup_cache &&
+      can_reuse_decode_setup(hidden_states, seleted_idxes)) {
+    st = execute_node_without_setup(node, nodeId);
+  } else {
+    st = execute_node(node, nodeId);
+    if (st == atb::NO_ERROR && use_decode_setup_cache) {
+      update_decode_setup_cache(hidden_states, seleted_idxes);
+      LOG_FIRST_N(WARNING, 1)
+          << "XLLM_ENABLE_NPU_LMHEAD_DECODE_SETUP_CACHE enabled: reusing "
+             "LmHead decode setup for stable shapes";
+    }
+  }
   LOG_IF(FATAL, st != 0) << model_name_
                          << "execute lmhead node fail, error code: " << st;
   torch::Tensor output = atOutTensors_[0];
@@ -239,6 +280,34 @@ void NpuLmHeadImpl::build_node_variant_pack(
     node.variantPack.outTensors.at(i) =
         atb_speed::Utils::AtTensor2Tensor(atOutTensors_.at(i));
   }
+}
+
+bool NpuLmHeadImpl::can_reuse_decode_setup(
+    const torch::Tensor& hidden_states,
+    const torch::Tensor& seleted_idxes) const {
+  return decode_setup_cache_valid_ &&
+         hidden_states.sizes().vec() == decode_hidden_shape_ &&
+         seleted_idxes.sizes().vec() == decode_selected_shape_;
+}
+
+void NpuLmHeadImpl::update_decode_setup_cache(
+    const torch::Tensor& hidden_states,
+    const torch::Tensor& seleted_idxes) {
+  decode_setup_cache_valid_ = true;
+  decode_hidden_shape_ = hidden_states.sizes().vec();
+  decode_selected_shape_ = seleted_idxes.sizes().vec();
+}
+
+atb::Status NpuLmHeadImpl::execute_node_without_setup(
+    atb_speed::Model::Node& node,
+    int nodeId) {
+  if (node.workspaceSize > 0 && node.workspace == nullptr) {
+    node.workspace = work_space_->get_workspace_buffer(node.workspaceSize);
+  }
+  run_task_func_(name_ + std::to_string(nodeId), [=, this]() {
+    return execute_plan(node, name_ + std::to_string(nodeId), nullptr, nullptr);
+  });
+  return atb::NO_ERROR;
 }
 
 }  // namespace layer
