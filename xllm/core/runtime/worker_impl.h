@@ -83,7 +83,7 @@ class WorkerImpl {
   virtual bool allocate_kv_cache_with_transfer(
       const KVCacheShape& kv_cache_shape);
 
-#if defined(USE_NPU) || defined(USE_MLU)
+#if defined(USE_NPU) || defined(USE_MLU) || defined(USE_DCU)
   virtual bool allocate_kv_cache_with_transfer(
       std::shared_ptr<KVCacheTransfer> kv_cache_transfer,
       const KVCacheShape& kv_cache_shape);

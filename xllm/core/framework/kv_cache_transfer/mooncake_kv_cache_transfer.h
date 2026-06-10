@@ -25,7 +25,7 @@ namespace xllm {
 class MooncakeKVCacheTransferBase : public KVCacheTransfer {
  public:
   MooncakeKVCacheTransferBase(const int32_t device_id,
-                              const int16_t listen_port,
+                              const uint16_t listen_port,
                               const torch::Device& device,
                               std::unique_ptr<MooncakeTransferEngine> engine);
   ~MooncakeKVCacheTransferBase() override = default;
@@ -46,7 +46,7 @@ class MooncakeKVCacheTransferBase : public KVCacheTransfer {
  protected:
   std::string addr_;
   uint64_t cluster_id_;
-  int16_t listen_port_;
+  uint16_t listen_port_;
   int32_t device_id_;
   torch::Device device_;
   int64_t num_layers_ = 0;
@@ -59,7 +59,7 @@ class MooncakeKVCacheTransferDefault final
     : public MooncakeKVCacheTransferBase {
  public:
   MooncakeKVCacheTransferDefault(const int32_t device_id,
-                                 const int16_t listen_port,
+                                 const uint16_t listen_port,
                                  const torch::Device& device,
                                  const std::string& model_type);
 
@@ -138,7 +138,7 @@ class MooncakeKVCacheTransferXTensor final
     : public MooncakeKVCacheTransferBase {
  public:
   MooncakeKVCacheTransferXTensor(const int32_t device_id,
-                                 const int16_t listen_port,
+                                 const uint16_t listen_port,
                                  const torch::Device& device);
 
   void set_model_id(const std::string& model_id) { model_id_ = model_id; }

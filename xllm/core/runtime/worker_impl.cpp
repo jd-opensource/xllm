@@ -388,7 +388,7 @@ bool WorkerImpl::allocate_kv_cache_with_transfer(
   return true;
 }
 
-#if defined(USE_NPU) || defined(USE_MLU)
+#if defined(USE_NPU) || defined(USE_MLU) || defined(USE_DCU)
 bool WorkerImpl::allocate_kv_cache_with_transfer(
     std::shared_ptr<KVCacheTransfer> kv_cache_transfer,
     const KVCacheShape& kv_cache_shape) {
@@ -425,7 +425,7 @@ void WorkerImpl::get_cache_info(uint64_t& cluster_id,
                                 uint16_t& port) {
   cluster_id = 0;
   addr.clear();
-#if defined(USE_NPU) || defined(USE_MLU)
+#if defined(USE_NPU) || defined(USE_MLU) || defined(USE_DCU)
   if (kv_cache_transfer_) {
     kv_cache_transfer_->get_cache_info(cluster_id, addr);
   }
@@ -1485,7 +1485,7 @@ folly::SemiFuture<bool> WorkerImpl::pull_kv_blocks_async(
     const std::vector<uint64_t>& dst_blocks,
     const std::vector<uint64_t>& src_linear_state_ids,
     const std::vector<uint64_t>& dst_linear_state_ids) {
-#if defined(USE_NPU)
+#if defined(USE_NPU) || defined(USE_DCU)
   return kv_cache_transfer_->pull_kv_blocks_async(src_cluster_id,
                                                   src_addr,
                                                   src_blocks,

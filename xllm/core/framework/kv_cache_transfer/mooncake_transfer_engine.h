@@ -44,7 +44,7 @@ class MooncakeTransferEngineCore {
   }
 
   // Initialize the shared core. Only the first call takes effect.
-  bool initialize(int16_t listen_port, const torch::Device& device);
+  bool initialize(uint16_t listen_port, const torch::Device& device);
 
   TransferEngine* engine() { return engine_.get(); }
 
@@ -78,7 +78,7 @@ class MooncakeTransferEngineCore {
   std::string addr_;
   std::string host_ip_;
   int32_t rpc_port_ = 0;
-  int16_t listen_port_ = 0;
+  uint16_t listen_port_ = 0;
 
   std::unique_ptr<TransferEngine> engine_;
   brpc::Server server_;
@@ -98,7 +98,7 @@ class MooncakeTransferEngine final {
  public:
   enum class MoveOpcode { READ = 0, WRITE = 1 };
 
-  MooncakeTransferEngine(const int16_t listen_port,
+  MooncakeTransferEngine(const uint16_t listen_port,
                          const torch::Device& device);
   virtual ~MooncakeTransferEngine() = default;
 
@@ -139,7 +139,7 @@ class MooncakeTransferEngine final {
       uint64_t cluster_id);
 
  private:
-  int16_t listen_port_;
+  uint16_t listen_port_;
   std::vector<uint64_t> buf_bytes_;
   Device device_;
   MooncakeTransferEngineCore& core_;

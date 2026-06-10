@@ -93,7 +93,7 @@ MooncakeTransferEngineCore::~MooncakeTransferEngineCore() {
   }
 }
 
-bool MooncakeTransferEngineCore::initialize(int16_t listen_port,
+bool MooncakeTransferEngineCore::initialize(uint16_t listen_port,
                                             const torch::Device& device) {
   std::lock_guard<std::mutex> lock(mutex_);
 
@@ -178,7 +178,9 @@ bool MooncakeTransferEngineCore::open_session(const uint64_t cluster_id,
 
     LOG(INFO) << "OpenSession RPC to " << remote_addr
               << ", local_addr=" << addr_;
+#if !defined(USE_DCU)
     return true;
+#endif
   }
 
   Transport::SegmentHandle handle = engine_->openSegment(remote_addr);
@@ -214,7 +216,21 @@ bool MooncakeTransferEngineCore::close_session(const uint64_t cluster_id,
         return true;
       }
     }
+#if defined(USE_DCU)
+    if (!close_remote_session(this, cluster_id)) {
+      return false;
+    }
+    if (it != handles_.end()) {
+      Transport::SegmentHandle handle = it->second.handle;
+      if (handle != static_cast<Transport::SegmentHandle>(-1)) {
+        engine_->closeSegment(handle);
+      }
+      handles_.erase(it);
+    }
+    return true;
+#else
     return close_remote_session(this, cluster_id);
+#endif
   }
 
   if (it == handles_.end()) {
@@ -287,7 +303,7 @@ MooncakeTransferEngineCore::get_or_create_stub_locked(uint64_t cluster_id) {
 // MooncakeTransferEngine
 // ============================================================================
 
-MooncakeTransferEngine::MooncakeTransferEngine(const int16_t listen_port,
+MooncakeTransferEngine::MooncakeTransferEngine(const uint16_t listen_port,
                                                const torch::Device& device)
     : listen_port_(listen_port),
       device_(device),
@@ -484,23 +500,34 @@ bool MooncakeTransferEngine::move_memory_blocks(
       uint64_t src_block_id = merged_src_blocks[i];
       uint64_t dst_block_id = merged_dst_blocks[i];
       uint64_t block_length = block_lengths[i];
+      uint64_t local_block_id = src_block_id;
+      uint64_t remote_block_id = dst_block_id;
+#if defined(USE_DCU)
+      if (move_opcode == MoveOpcode::READ) {
+        local_block_id = dst_block_id;
+        remote_block_id = src_block_id;
+      }
+#endif
       if (!check_buf_range(
-              local_buf_len, buf_bytes, src_block_id, block_length, buf_id) ||
-          !check_buf_range(
-              remote_buf_len, buf_bytes, dst_block_id, block_length, buf_id)) {
+              local_buf_len, buf_bytes, local_block_id, block_length, buf_id) ||
+          !check_buf_range(remote_buf_len,
+                           buf_bytes,
+                           remote_block_id,
+                           block_length,
+                           buf_id)) {
         return false;
       }
 
-      uint64_t src_bias = src_block_id * buf_bytes;
-      uint64_t dst_bias = dst_block_id * buf_bytes;
+      uint64_t local_bias = local_block_id * buf_bytes;
+      uint64_t remote_bias = remote_block_id * buf_bytes;
       uint64_t len = block_length * buf_bytes;
 
       TransferRequest entry;
       entry.opcode = opcode;
       entry.length = len;
-      entry.source = reinterpret_cast<void*>(local_base + src_bias);
+      entry.source = reinterpret_cast<void*>(local_base + local_bias);
       entry.target_id = remote_handle;
-      entry.target_offset = remote_base + dst_bias;
+      entry.target_offset = remote_base + remote_bias;
       entry.advise_retry_cnt = 0;
       entries.push_back(entry);
     }
@@ -521,10 +548,16 @@ bool MooncakeTransferEngine::move_memory_blocks(
 
   TransferStatus status;
   bool completed = false;
+#if defined(USE_DCU)
+  bool transfer_success = true;
+#endif
   while (!completed) {
     s = engine->getBatchTransferStatus(batch_id, status);
     if (!s.ok()) {
       LOG(ERROR) << "getBatchTransferStatus not ok";
+#if defined(USE_DCU)
+      transfer_success = false;
+#endif
       completed = true;
     }
 
@@ -532,9 +565,15 @@ bool MooncakeTransferEngine::move_memory_blocks(
       completed = true;
     } else if (status.s == TransferStatusEnum::FAILED) {
       LOG(ERROR) << "getBatchTransferStatus failed";
+#if defined(USE_DCU)
+      transfer_success = false;
+#endif
       completed = true;
     } else if (status.s == TransferStatusEnum::TIMEOUT) {
       LOG(ERROR) << "Sync data transfer timeout";
+#if defined(USE_DCU)
+      transfer_success = false;
+#endif
       completed = true;
     }
   }
@@ -545,7 +584,11 @@ bool MooncakeTransferEngine::move_memory_blocks(
     return false;
   }
 
+#if defined(USE_DCU)
+  return transfer_success;
+#else
   return true;
+#endif
 }
 
 bool MooncakeTransferEngine::move_memory_by_global_offsets(

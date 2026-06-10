@@ -32,6 +32,10 @@ limitations under the License.
 #if defined(USE_MLU)
 #include "platform/mlu/mlu_layer_synchronizer.h"
 #endif
+#if defined(USE_DCU)
+#include "platform/dcu/dcu_layer_synchronizer.h"
+#endif
+
 #include "core/framework/multimodal/mm_batch_data.h"
 #include "framework/batch/batch_forward_type.h"
 #include "framework/parallel_state/npu_cp_ep_padding.h"
@@ -789,6 +793,8 @@ struct ParallelInput {
 
 #if defined(USE_MLU)
   std::shared_ptr<MLULayerSynchronizerImpl> layer_synchronizer = nullptr;
+#elif defined(USE_DCU)
+  std::shared_ptr<DCULayerSynchronizerImpl> layer_synchronizer = nullptr;
 #elif defined(USE_NPU)
   std::shared_ptr<NPULayerSynchronizerImpl> layer_synchronizer = nullptr;
   uint32_t layers_per_bacth_copy = std::numeric_limits<uint32_t>::max();
@@ -826,7 +832,7 @@ struct ParallelInput {
         .moe_idx(safe_to(cp_ep_padding_data.moe_idx(), device, true))
         .expert_array(safe_to(cp_ep_padding_data.expert_array(), device, true));
     out.cp_prefill_inputs = cp_prefill_inputs.to(device);
-#if defined(USE_NPU) || defined(USE_MLU)
+#if defined(USE_NPU) || defined(USE_MLU) || defined(USE_DCU)
     out.layer_synchronizer = layer_synchronizer;
 #endif
 #if defined(USE_NPU)
@@ -987,7 +993,7 @@ struct ModelInputParams {
   }
 
   bool record_layer(uint32_t layer_idx, const torch::Device& device) const {
-#if defined(USE_MLU)
+#if defined(USE_MLU) || defined(USE_DCU)
     if (parallel.layer_synchronizer != nullptr) {
       return parallel.layer_synchronizer->record_current(layer_idx,
                                                          device.index());
