@@ -21,6 +21,7 @@ limitations under the License.
 #include <string>
 #include <vector>
 
+#include "common/types.h"
 #include "core/util/slice.h"
 
 namespace xllm {
@@ -60,6 +61,15 @@ class Tokenizer {
   virtual bool decode(const Slice<int32_t>& token_ids,
                       bool skip_special_tokens,
                       std::vector<int64_t>* item_ids) const {
+    return false;
+  }
+
+  // Only for generative recommendation. RecTokenizer overrides this to attach
+  // extended fields (did/type). Non-REC tokenizers leave this unimplemented.
+  virtual bool decode_item_infos(const Slice<int32_t>& token_ids,
+                                 std::vector<RecItemInfo>* item_infos) const {
+    (void)token_ids;
+    (void)item_infos;
     return false;
   }
 

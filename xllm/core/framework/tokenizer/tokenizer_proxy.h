@@ -38,6 +38,9 @@ class TokenizerProxy : public Tokenizer {
               bool skip_special_tokens,
               std::vector<int64_t>* item_ids) const override;
 
+  bool decode_item_infos(const Slice<int32_t>& token_ids,
+                         std::vector<RecItemInfo>* item_infos) const override;
+
   std::optional<int32_t> token_to_id(
       const std::string_view& token) const override;
 

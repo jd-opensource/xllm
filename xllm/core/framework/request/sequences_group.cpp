@@ -403,35 +403,33 @@ void SequencesGroup::generate_multi_round_output(
       const size_t token_count = out.token_ids.size();
       if (triple_size > 0 && token_count >= triple_size &&
           token_count % triple_size == 0) {
-        if (FLAGS_enable_extended_item_info) {
-          const auto* rec_tokenizer =
-              dynamic_cast<const RecTokenizer*>(&tokenizer);
-          if (rec_tokenizer != nullptr) {
-            std::vector<RecItemInfo> aggregated_infos;
-            aggregated_infos.reserve(token_count / triple_size);
-            for (size_t off = 0; off < token_count; off += triple_size) {
-              const Slice<int32_t> triple{out.token_ids.data() + off,
-                                          triple_size};
-              std::vector<RecItemInfo> infos;
-              if (rec_tokenizer->decode_item_infos(triple, &infos) &&
-                  !infos.empty()) {
-                aggregated_infos.insert(aggregated_infos.end(),
-                                        std::make_move_iterator(infos.begin()),
-                                        std::make_move_iterator(infos.end()));
-              }
-            }
-            if (!aggregated_infos.empty()) {
-              out.item_infos_list =
-                  normalize_rec_item_infos(aggregated_infos, i);
-              out.item_ids_list.reserve(out.item_infos_list.size());
-              for (const RecItemInfo& info : out.item_infos_list) {
-                out.item_ids_list.emplace_back(info.item_id);
-              }
-              if (!out.item_infos_list.empty()) {
-                out.item_ids = out.item_infos_list.front().item_id;
-                out.item_info = out.item_infos_list.front();
-              }
-            }
+        std::vector<RecItemInfo> aggregated_infos;
+        aggregated_infos.reserve(token_count / triple_size);
+        bool decoded_item_infos = false;
+        const auto* rec_tokenizer =
+            dynamic_cast<const RecTokenizer*>(&tokenizer);
+        for (size_t off = 0; off < token_count; off += triple_size) {
+          const Slice<int32_t> triple{out.token_ids.data() + off, triple_size};
+          std::vector<RecItemInfo> infos;
+          const bool ok = rec_tokenizer != nullptr
+                              ? rec_tokenizer->decode_item_infos(triple, &infos)
+                              : tokenizer.decode_item_infos(triple, &infos);
+          if (ok && !infos.empty()) {
+            decoded_item_infos = true;
+            aggregated_infos.insert(aggregated_infos.end(),
+                                    std::make_move_iterator(infos.begin()),
+                                    std::make_move_iterator(infos.end()));
+          }
+        }
+        if (decoded_item_infos && !aggregated_infos.empty()) {
+          out.item_infos_list = normalize_rec_item_infos(aggregated_infos, i);
+          out.item_ids_list.reserve(out.item_infos_list.size());
+          for (const RecItemInfo& info : out.item_infos_list) {
+            out.item_ids_list.emplace_back(info.item_id);
+          }
+          if (!out.item_infos_list.empty()) {
+            out.item_ids = out.item_infos_list.front().item_id;
+            out.item_info = out.item_infos_list.front();
           }
         } else {
           std::vector<int64_t> aggregated_ids;
