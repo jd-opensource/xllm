@@ -1848,6 +1848,24 @@ std::pair<torch::Tensor, torch::Tensor> chunk_gated_delta_rule(
 #endif
 }
 
+std::pair<torch::Tensor, torch::Tensor> mega_chunk_gdn(
+    MegaChunkGdnParams& params) {
+#if defined(USE_NPU)
+  return npu::npu_mega_chunk_gdn(params.q,
+                                 params.k,
+                                 params.v,
+                                 params.g,
+                                 params.beta,
+                                 params.scale,
+                                 params.initial_state,
+                                 params.output_final_state,
+                                 params.cu_seqlens,
+                                 params.use_qk_l2norm_in_kernel);
+#else
+  NOT_IMPLEMENTED();
+#endif
+}
+
 void npu_inplace_partial_rotary_mul(NpuInplacePartialRotaryMulParams& params) {
 #if defined(USE_NPU)
   npu::npu_inplace_partial_rotary_mul(params.x,
