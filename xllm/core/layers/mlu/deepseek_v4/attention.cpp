@@ -286,9 +286,9 @@ torch::Tensor DeepseekV4AttentionImpl::project_q(torch::Tensor& hidden_states,
                                      std::nullopt,
                                      mode,
                                      eps_,
-                                     false,
-                                     false,
-                                     false);
+                                     /*store_output_before_norm=*/false,
+                                     /*store_output_after_norm=*/false,
+                                     /*dynamic_quant=*/false);
   return output;
 }
 

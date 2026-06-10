@@ -292,8 +292,10 @@ CompressorImpl::CompressorImpl(int64_t compress_ratio,
     const double log_dim = std::ceil(std::log2(static_cast<double>(head_dim_)));
     const int64_t padded_dim =
         static_cast<int64_t>(1ull << static_cast<uint64_t>(log_dim));
-    hadamard_matrix_ = mlu::create_hadamard_matrix(
-        padded_dim, torch::kFloat32, torch::Device(torch::kCPU), true);
+    hadamard_matrix_ = mlu::create_hadamard_matrix(padded_dim,
+                                                   torch::kFloat32,
+                                                   torch::Device(torch::kCPU),
+                                                   /*normalize=*/true);
     hadamard_matrix_ =
         hadamard_matrix_.to(options.device(), options.dtype().toScalarType());
   }
