@@ -166,7 +166,7 @@ void beam_search_rec(const torch::Tensor& logprobs,
     LOG(FATAL) << "beam_search_rec: top_tokens must be at least 2D, got "
                << top_tokens.sizes();
   }
-  const int64_t top_k = top_tokens.size(-1);
+  const int64_t top_k = top_tokens.size(1);
 
   aclTensor* logprobs_ids = nullptr;
   aclTensor* top_tokens_ids = nullptr;
