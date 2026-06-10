@@ -288,6 +288,21 @@ void validate_config(const std::string& model_type) {
   }
 #endif
 
+#if defined(USE_DCU)
+  if (disagg_pd_config.enable_disagg_pd()) {
+    if (scheduler_config.enable_schedule_overlap()) {
+      LOG(WARNING) << "enable_schedule_overlap is not supported for "
+                      "disaggregated PD on DCU backend. "
+                   << "Disabling enable_schedule_overlap.";
+      scheduler_config.enable_schedule_overlap(false);
+    }
+    if (model_config.backend() != "llm") {
+      LOG(FATAL) << "DCU disaggregated PD only supports backend=llm.";
+    }
+    disagg_pd_config.normalize_dcu(scheduler_config);
+  }
+#endif
+
 #if defined(USE_NPU)
   // enable_xtensor / enable_rolling_load imply enable_manual_loader
   if ((kv_cache_config.enable_xtensor() || load_config.enable_rolling_load()) &&

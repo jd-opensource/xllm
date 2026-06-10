@@ -155,4 +155,30 @@ void DisaggPDConfig::normalize_mlu(KVCacheConfig& kv_cache_config,
   }
 }
 
+void DisaggPDConfig::normalize_dcu(SchedulerConfig& scheduler_config) {
+  if (kv_cache_transfer_type() != "Mooncake") {
+    LOG(WARNING) << "DCU disaggregated PD requires "
+                 << "kv_cache_transfer_type=Mooncake; forcing from "
+                 << kv_cache_transfer_type() << " to Mooncake.";
+    kv_cache_transfer_type("Mooncake");
+  }
+  if (kv_cache_transfer_mode() != "PUSH" &&
+      kv_cache_transfer_mode() != "PULL") {
+    LOG(WARNING) << "DCU disaggregated PD supports "
+                 << "kv_cache_transfer_mode=PUSH or PULL; forcing from "
+                 << kv_cache_transfer_mode() << " to PUSH.";
+    kv_cache_transfer_mode("PUSH");
+  }
+  if (scheduler_config.enable_schedule_overlap()) {
+    LOG(WARNING) << "DCU disaggregated PD does not support schedule overlap; "
+                 << "forcing enable_schedule_overlap=false.";
+    scheduler_config.enable_schedule_overlap(false);
+  }
+  if (enable_pd_ooc()) {
+    LOG(WARNING) << "DCU disaggregated PD does not support pd_ooc; "
+                 << "forcing enable_pd_ooc=false.";
+    enable_pd_ooc(false);
+  }
+}
+
 }  // namespace xllm

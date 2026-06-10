@@ -41,6 +41,7 @@ class DisaggPDConfig final {
   void initialize();
   void normalize_mlu(KVCacheConfig& kv_cache_config,
                      SchedulerConfig& scheduler_config);
+  void normalize_dcu(SchedulerConfig& scheduler_config);
 
   [[nodiscard]] static const OptionCategory& option_category() {
     static const OptionCategory kOptionCategory = {
