@@ -677,8 +677,8 @@ void MTPWorkerImpl::prepare_work_before_execute(const ForwardInput& input,
 std::optional<ForwardOutput> MTPWorkerImpl::step_empty(
     const ForwardInput& input) {
   if (!input.input_params.meta.batch_forward_type.is_decode()) {
-    auto output =
-        run_llm_no_sync_impl(*impl_, input, *prepare_stream_, *compute_stream_);
+    auto output = run_llm_no_sync_impl(
+        *target_impl_, input, *prepare_stream_, *compute_stream_);
     auto draft_output = run_llm_no_sync_impl(
         *draft_impl_, input, *prepare_stream_, *compute_stream_);
     (void)draft_output;
@@ -711,7 +711,7 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_empty(
     }
     ForwardOutput output =
         run_llm_no_sync_impl(
-            *impl_, new_input, *prepare_stream_, *compute_stream_)
+            *target_impl_, new_input, *prepare_stream_, *compute_stream_)
             .value();
     clear_all_output_embeddings(output);
     return output;
@@ -723,7 +723,8 @@ std::optional<ForwardOutput> MTPWorkerImpl::step_prefill(
   Timer timer;
   // run the target model to get first token and hidden states
   ForwardOutput output =
-      run_llm_no_sync_impl(*impl_, input, *prepare_stream_, *compute_stream_)
+      run_llm_no_sync_impl(
+          *target_impl_, input, *prepare_stream_, *compute_stream_)
           .value();
   COUNTER_ADD(speculative_execution_latency_seconds_target,
               timer.elapsed_seconds());
@@ -1014,7 +1015,7 @@ std::optional<ForwardOutput> MTPWorkerImpl::run_validate(
       draft_outputs, validate_input, *compute_stream_);
   ForwardOutput target_output =
       run_llm_no_sync_impl(
-          *impl_, validate_input, *prepare_stream_, *compute_stream_)
+          *target_impl_, validate_input, *prepare_stream_, *compute_stream_)
           .value();
   COUNTER_ADD(speculative_execution_latency_seconds_target,
               timer.elapsed_seconds());
