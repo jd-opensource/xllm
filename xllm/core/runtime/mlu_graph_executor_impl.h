@@ -18,6 +18,8 @@ limitations under the License.
 #include <framework/graphs/MLUGraph.h>
 #include <torch/torch.h>
 
+#include <cstddef>
+
 #include "executor_impl.h"
 #include "executor_impl_factory.h"
 #include "framework/kv_cache/kv_cache.h"
@@ -45,6 +47,8 @@ class GraphPersistentParam {
                            const torch::Tensor& positions,
                            const ModelInputParams& params,
                            uint32_t padding_needed);
+
+  std::size_t get_persistent_tensor_bytes() const;
 
   // input tensors
   torch::Tensor tokens_;
@@ -80,7 +84,7 @@ class MluGraph {
   // Capture computation graph for given bucket num_tokens
   void capture(CausalLM* model,
                std::vector<KVCache>& kv_cache,
-               torch_mlu::MempoolId_t& pool,
+               const torch_mlu::MempoolId_t& pool,
                const runtime::Options& options);
 
   // Replay captured graph with new input data
@@ -125,13 +129,15 @@ class MluGraphExecutorImpl : public ExecutorImpl {
                         std::vector<KVCache>& kv_caches,
                         const ModelInputParams& params);
   void init_param_once();
+  void log_memory_after_capture();
 
   CausalLM* model_;  // not owned
   ModelArgs args_;
   torch::Device device_;
   runtime::Options options_;
-  torch_mlu::MempoolId_t pool_;
+  torch_mlu::MempoolId_t graph_pool_;
   int64_t max_tokens_for_graph_mode_ = 0;
+  std::size_t last_logged_executor_total_bytes_ = 0;
 
   std::unordered_map<uint32_t, std::unique_ptr<MluGraph>> graphs_;
   std::unique_ptr<GraphPersistentParam> persistent_param_;

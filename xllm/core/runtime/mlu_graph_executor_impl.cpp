@@ -16,10 +16,16 @@ limitations under the License.
 #include "mlu_graph_executor_impl.h"
 
 #include <cnrt.h>
+#include <framework/core/caching_allocator.h>
 #include <framework/core/stream_guard.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <exception>
+#include <iomanip>
+#include <sstream>
+#include <string>
 
 #include "common/global_flags.h"
 #include "common/metrics.h"
@@ -29,6 +35,58 @@ limitations under the License.
 #include "vlm_executor_impl.h"
 
 namespace {
+struct GraphPoolMemoryUsage {
+  std::size_t reserved_bytes = 0;
+  std::size_t allocated_bytes = 0;
+  std::size_t active_bytes = 0;
+};
+
+std::size_t tensor_bytes(const torch::Tensor& tensor) {
+  if (!tensor.defined()) {
+    return 0;
+  }
+
+  return static_cast<std::size_t>(tensor.numel()) * tensor.element_size();
+}
+
+std::string format_memory_size(std::size_t bytes) {
+  if (bytes < 1024) {
+    return std::to_string(bytes) + " B";
+  }
+
+  double value = static_cast<double>(bytes) / 1024.0;
+  std::string unit = " KiB";
+  if (value >= 1024.0) {
+    value /= 1024.0;
+    unit = " MiB";
+  }
+  if (value >= 1024.0) {
+    value /= 1024.0;
+    unit = " GiB";
+  }
+
+  std::ostringstream oss;
+  oss << std::fixed << std::setprecision(2) << value << unit;
+  return oss.str();
+}
+
+GraphPoolMemoryUsage get_graph_pool_usage(
+    c10::DeviceIndex device_index,
+    const torch_mlu::MempoolId_t& pool_id) {
+  GraphPoolMemoryUsage usage;
+  const auto snapshot = torch_mlu::MLUCachingAllocator::snapshot();
+  for (const auto& segment : snapshot.segments) {
+    if (segment.device != device_index ||
+        segment.owner_private_pool_id != pool_id) {
+      continue;
+    }
+    usage.reserved_bytes += segment.total_size;
+    usage.allocated_bytes += segment.allocated_size;
+    usage.active_bytes += segment.active_size;
+  }
+  return usage;
+}
+
 // bucket will be [1, 2, 4, 8, 16, 32, 48, 64, ..., max_seqs_per_batch]
 uint32_t get_bucket_num_tokens(uint32_t num_tokens) {
   if (::xllm::ExecutionConfig::get_instance()
@@ -322,6 +380,22 @@ void GraphPersistentParam::update_input_buffer(const torch::Tensor& tokens,
   }
 }
 
+std::size_t GraphPersistentParam::get_persistent_tensor_bytes() const {
+  std::size_t total = 0;
+
+  total += tensor_bytes(output_);
+  total += tensor_bytes(positions_);
+  total += tensor_bytes(tokens_);
+  total += tensor_bytes(new_cache_slots_);
+  total += tensor_bytes(block_table_);
+  total += tensor_bytes(q_seq_lens_);
+  total += tensor_bytes(kv_seq_lens_);
+  total += tensor_bytes(input_embeds_);
+  total += tensor_bytes(aux_hidden_states_);
+
+  return total;
+}
+
 MluGraph::MluGraph(GraphPersistentParam* persistent_param,
                    uint32_t padding_num_tokens)
     : persistent_param_(persistent_param),
@@ -329,7 +403,7 @@ MluGraph::MluGraph(GraphPersistentParam* persistent_param,
 
 void MluGraph::capture(CausalLM* model,
                        std::vector<KVCache>& kv_cache,
-                       torch_mlu::MempoolId_t& pool,
+                       const torch_mlu::MempoolId_t& pool,
                        const runtime::Options& options) {
   int32_t slice_dim = persistent_param_->use_mrope_ ? 1 : 0;
   torch_mlu::synchronize();
@@ -365,7 +439,6 @@ void MluGraph::capture(CausalLM* model,
   torch_mlu::setCurrentMLUStream(prev_stream);
   torch_mlu::synchronize();
   graph_.replay();
-  pool = graph_.pool();
 }
 
 ModelOutput MluGraph::replay() {
@@ -396,7 +469,7 @@ MluGraphExecutorImpl::MluGraphExecutorImpl(CausalLM* model,
       args_(args),
       device_(device),
       options_(options),
-      pool_(torch_mlu::MempoolId_t{0, 0}) {
+      graph_pool_(torch_mlu::graph_pool_handle()) {
   max_tokens_for_graph_mode_ =
       ::xllm::ExecutionConfig::get_instance().max_tokens_for_graph_mode();
   if (max_tokens_for_graph_mode_ < options_.max_seqs_per_batch()) {
@@ -441,6 +514,41 @@ void MluGraphExecutorImpl::init_param_once() {
     persistent_param_ =
         std::make_unique<GraphPersistentParam>(args_, device_, options_);
   }
+}
+
+void MluGraphExecutorImpl::log_memory_after_capture() {
+  std::size_t reserved_bytes = 0;
+  std::size_t allocated_bytes = 0;
+  std::size_t active_bytes = 0;
+
+  try {
+    const GraphPoolMemoryUsage usage =
+        get_graph_pool_usage(device_.index(), graph_pool_);
+    reserved_bytes = usage.reserved_bytes;
+    allocated_bytes = usage.allocated_bytes;
+    active_bytes = usage.active_bytes;
+  } catch (const std::exception& e) {
+    VLOG(1) << "Skip MLU graph memory usage log: " << e.what();
+  } catch (...) {
+    VLOG(1) << "Skip MLU graph memory usage log: unknown allocator error";
+  }
+
+  const std::size_t persistent_param_bytes =
+      persistent_param_ ? persistent_param_->get_persistent_tensor_bytes() : 0;
+  const std::size_t executor_total_bytes =
+      reserved_bytes + persistent_param_bytes;
+  if (executor_total_bytes <= last_logged_executor_total_bytes_) {
+    return;
+  }
+  last_logged_executor_total_bytes_ = executor_total_bytes;
+
+  LOG(INFO) << "MluGraphExecutorMemory Usage:"
+            << " executor_total_memory="
+            << format_memory_size(executor_total_bytes) << " persistent_param="
+            << format_memory_size(persistent_param_bytes)
+            << " allocated_pool_memory=" << format_memory_size(allocated_bytes)
+            << " active_pool_memory=" << format_memory_size(active_bytes)
+            << " pool_high_water_mark=" << format_memory_size(allocated_bytes);
 }
 
 // Main execution method with graph optimization for decode phase
@@ -503,7 +611,8 @@ ModelOutput MluGraphExecutorImpl::run(const torch::Tensor& tokens,
   std::unique_ptr<MluGraph> graph =
       std::make_unique<MluGraph>(persistent_param_.get(), graph_tokens);
   graph->update_input_buffer(tokens, positions, graph_params, true);
-  graph->capture(model_, kv_caches, pool_, options_);
+  graph->capture(model_, kv_caches, graph_pool_, options_);
+  log_memory_after_capture();
   graphs_[graph_tokens] = std::move(graph);
   // Return the output from capture
   auto hidden_states = persistent_param_->output_.slice(0, 0, actual_tokens);

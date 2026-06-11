@@ -18,6 +18,7 @@ limitations under the License.
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -418,6 +419,20 @@ TEST_F(MluGraphExecutorTest, OverConfiguredTokenLimitFallsBackToEager) {
   EXPECT_TRUE(torch::allclose(first_output, second_output, 1e-5, 1e-6));
   EXPECT_EQ(model_->forward_cnt(), start_cnt + 2);
   EXPECT_EQ(model_->last_tokens_size(), batch_size);
+}
+
+TEST_F(MluGraphExecutorTest, PersistentTensorBytesIncludeLazyAux) {
+  ::xllm::mlu::GraphPersistentParam param(
+      model_args_, tensor_options_.device(), options_);
+  const std::size_t output_bytes =
+      static_cast<std::size_t>(param.output_.numel()) *
+      param.output_.element_size();
+  const std::size_t base_bytes = param.get_persistent_tensor_bytes();
+
+  param.aux_hidden_states_ = torch::zeros_like(param.output_);
+
+  EXPECT_GT(base_bytes, output_bytes);
+  EXPECT_EQ(param.get_persistent_tensor_bytes(), base_bytes + output_bytes);
 }
 
 TEST_F(MluGraphExecutorTest, PrefillThenDecodeCapturesAndReplays) {
