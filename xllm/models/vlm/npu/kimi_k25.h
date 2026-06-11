@@ -944,18 +944,24 @@ class KimiK2_5_VLForConditionalGenerationImpl : public torch::nn::Module {
   torch::Tensor get_input_embeddings(const torch::Tensor input_ids,
                                      const ModelInputParams& input_params) {
     const auto& mm_data = input_params.multimodal.mm_data;
-    torch::Tensor multimodal_embeds;
-    if (const auto& emb = mm_data.get<torch::Tensor>("embedding")) {
-      multimodal_embeds = emb.value();
-    }
-    auto inputs_embeds =
+    torch::Tensor inputs_embeds =
         language_model_->get_npu_word_embedding()(input_ids, 0);
-    if (!multimodal_embeds.defined()) {
-      return inputs_embeds;
-    }
-    auto is_multimodal = generate_multimodal_mask(input_ids);
-    inputs_embeds = merge_multimodal_embeddings(
-        inputs_embeds, multimodal_embeds, is_multimodal);
+    auto merge_modality = [&](const std::string& embed_key,
+                              const std::string& mask_key) {
+      auto emb = mm_data.get<torch::Tensor>(embed_key);
+      if (!emb.has_value() || !emb.value().defined()) {
+        return;
+      }
+      auto mask = mm_data.get<torch::Tensor>(mask_key);
+      if (!mask.has_value() || !mask.value().defined()) {
+        return;
+      }
+      inputs_embeds =
+          merge_multimodal_embeddings(inputs_embeds, emb.value(), mask.value());
+    };
+
+    merge_modality("image|embedding", "image|mask");
+    merge_modality("video|embedding", "video|mask");
     return inputs_embeds;
   }
 
