@@ -492,6 +492,9 @@ class WanAttentionImpl : public torch::nn::Module {
     }
     LinearType linear_type =
         FLAGS_tp_size > 1 ? LinearType::TensorParallel : LinearType::Default;
+    // ===== TP OPTIONS: to_q/to_k use gather_output=false for TP-RMSNorm =====
+    // gather_output=false → Q/K stay sharded, no AllGather
+    // tp_rms_norm() handles RMSNorm on sharded tensor with scalar AR (~6KB)
     std::optional<TpOptions> tp_options_qk = std::nullopt;
     std::optional<TpOptions> tp_options_v = std::nullopt;
     if (FLAGS_tp_size > 1) {
@@ -499,7 +502,7 @@ class WanAttentionImpl : public torch::nn::Module {
           /*column_parallel=*/true,
           /*tp_rank=*/parallel_args_.dit_tp_group_->rank(),
           /*tp_size=*/FLAGS_tp_size,
-          /*gather_output=*/true,
+          /*gather_output=*/false,
           /*need_scatter=*/false,
           /*process_group=*/parallel_args_.dit_tp_group_);
       tp_options_v = TpOptions(
@@ -660,14 +663,13 @@ class WanAttentionImpl : public torch::nn::Module {
     torch::Tensor query = to_q_->forward(hidden_states);
     torch::Tensor key = to_k_->forward(encoder_hidden_states_text);
     torch::Tensor value = to_v_->forward(encoder_hidden_states_text);
-    query = std::get<0>(norm_q_->forward(query));
-    key = std::get<0>(norm_k_->forward(key));
 
     if (FLAGS_tp_size > 1) {
-      query = parallel_state::scatter(
-          query, parallel_args_.dit_tp_group_, /*dim=*/-1);
-      key = parallel_state::scatter(
-          key, parallel_args_.dit_tp_group_, /*dim=*/-1);
+      query = dit::tp_rms_norm(query, norm_q_, parallel_args_.dit_tp_group_);
+      key = dit::tp_rms_norm(key, norm_k_, parallel_args_.dit_tp_group_);
+    } else {
+      query = std::get<0>(norm_q_->forward(query));
+      key = std::get<0>(norm_k_->forward(key));
     }
 
     int64_t batch_size = query.size(0);
@@ -691,11 +693,11 @@ class WanAttentionImpl : public torch::nn::Module {
       torch::Tensor key_img = add_k_proj_->forward(encoder_hidden_states_img);
       torch::Tensor value_img = add_v_proj_->forward(encoder_hidden_states_img);
 
-      key_img = std::get<0>(norm_added_k_->forward(key_img));
-
       if (FLAGS_tp_size > 1) {
-        key_img = parallel_state::scatter(
-            key_img, parallel_args_.dit_tp_group_, /*dim=*/-1);
+        key_img = dit::tp_rms_norm(
+            key_img, norm_added_k_, parallel_args_.dit_tp_group_);
+      } else {
+        key_img = std::get<0>(norm_added_k_->forward(key_img));
       }
 
       key_img = key_img.view({batch_size, -1, n_heads, dim_head_});
