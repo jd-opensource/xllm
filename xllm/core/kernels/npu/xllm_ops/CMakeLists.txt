@@ -13,6 +13,20 @@ cc_library(
     quantize.cpp
     quant_dynamic.cpp
     dequant_swiglu_quant.cpp
+    compressor.cpp
+    hc_post.cpp
+    quant_lightning_indexer.cpp
+    hc_pre_inv_rms.cpp
+    hc_pre_sinkhorn.cpp
+    hc_pre.cpp
+    quant_lightning_indexer_metadata.cpp
+    sparse_attn_sharedkv_metadata.cpp
+    npu_inplace_partial_rotary_mul.cpp
+    scatter_nd_update.cpp
+    moe_gating_top_k_hash.cpp
+    sparse_attn_sharedkv.cpp
+    sparse_flash_attention.cpp
+    mla_preprocess.cpp
     ../utils.cpp
     beam_search.cpp
     select_unshared_kv.cpp
@@ -24,6 +38,7 @@ cc_library(
     ${PROJECT_SOURCE_DIR}/third_party/xllm_ops/build/autogen
   DEPS
     atb
+    Python::Python
     torch_npu
     gflags::gflags
     nlohmann_json::nlohmann_json

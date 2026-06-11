@@ -32,11 +32,13 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
                            const QuantArgs& quant_args,
                            ProcessGroup* process_group,
                            const torch::TensorOptions& options,
-                           const std::string& module_prefix)
+                           const std::string& module_prefix,
+                           double swiglu_limit)
     : is_gated_(is_gated),
       intermediate_size_(intermediate_size),
       process_group_(process_group),
-      hidden_act_(hidden_act) {
+      hidden_act_(hidden_act),
+      swiglu_limit_(swiglu_limit) {
   // Check if using w8a8 smoothquant quantization
   is_smoothquant_ = quant_args.quant_method() == kQuantMethodSmoothquant;
 
@@ -71,7 +73,8 @@ DenseMLPImpl::DenseMLPImpl(int64_t hidden_size,
                                            options,
                                            gate_up_proj_extra_args));
 
-  act_ = register_module("act", Activation(hidden_act_, is_gated_));
+  act_ =
+      register_module("act", Activation(hidden_act_, is_gated_, swiglu_limit_));
 
   // 2. down
   const auto down_proj_quant_args =

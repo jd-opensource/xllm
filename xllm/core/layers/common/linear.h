@@ -81,6 +81,9 @@ class ColumnParallelLinearImpl : public torch::nn::Module {
   }
   torch::Tensor per_channel_scale() const { return per_channel_scale_; }
   torch::Tensor weight_scale() const { return weight_scale_; }
+  bool uses_w8a8_dynamic_quant() const;
+  torch::Tensor w8a8_dynamic_weight_scale() const;
+  std::optional<torch::Tensor> bias() const;
   ProcessGroup* process_group() const { return process_group_; }
   std::optional<torch::Tensor> smooth() const {
     if (smooth_is_loaded_) {
@@ -329,6 +332,10 @@ class ReplicatedLinearImpl : public torch::nn::Module {
 
   // return the weight (for testing)
   torch::Tensor weight() const { return weight_; }
+  bool uses_w8a8_dynamic_quant() const;
+  torch::Tensor w8a8_dynamic_weight_scale() const;
+  at::ScalarType output_dtype() const;
+  std::optional<torch::Tensor> bias() const;
 
  private:
   // parameter members, must be registered
@@ -345,6 +352,7 @@ class ReplicatedLinearImpl : public torch::nn::Module {
   DEFINE_WEIGHT(weight_offset);  // Dynamic W8A8 checkpoint parity placeholder.
   QuantArgs quant_args_;
   torch::TensorOptions options_;
+  at::ScalarType output_dtype_;
   std::optional<std::string> resolved_weight_quant_method_;
 };
 TORCH_MODULE(ReplicatedLinear);

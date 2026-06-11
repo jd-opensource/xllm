@@ -42,6 +42,9 @@ void dequant_from_paged_cache(ReshapeFromCacheParams& params);
 
 void fused_layernorm(FusedLayerNormParams& params);
 
+std::tuple<torch::Tensor, torch::Tensor> rms_norm_dynamic_quant(
+    RmsNormDynamicQuantParams& params);
+
 torch::Tensor matmul(MatmulParams& params);
 
 torch::Tensor quant_matmul(QuantMatmulParams& params);
@@ -120,6 +123,29 @@ torch::Tensor l2_norm(torch::Tensor& x, double eps = 1e-6);
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 moe_init_routing_v2(MoeInitRoutingV2Params& params);
 
+std::tuple<torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor>
+moe_distribute_dispatch_v2(MoeDistributeDispatchV2Params& params);
+
+torch::Tensor moe_distribute_combine_v2(MoeDistributeCombineV2Params& params);
+
+bool has_moe_distribute_dispatch_combine_v2();
+
+std::tuple<torch::Tensor, torch::Tensor> dispatch_ffn_combine(
+    DispatchFFNCombineParams& params);
+
+bool has_dispatch_ffn_combine();
+
+std::tuple<torch::Tensor, torch::Tensor> dispatch_gmm_combine_decode(
+    DispatchGmmCombineDecodeParams& params);
+
+bool has_dispatch_gmm_combine_decode();
+
 // FP8 scaled quantize: quantizes input tensor to FP8 e4m3 format
 // Returns: (quantized_output, scale)
 std::tuple<torch::Tensor, torch::Tensor> fp8_scaled_quantize(
@@ -152,12 +178,50 @@ std::pair<torch::Tensor, torch::Tensor> fused_gdn_gating(
 std::pair<torch::Tensor, torch::Tensor> fused_recurrent_gated_delta_rule(
     FusedRecurrentGatedDeltaRuleParams& params);
 
+torch::Tensor fused_sigmoid_gating_delta_rule_update(
+    FusedSigmoidGatingDeltaRuleUpdateParams& params);
+
 torch::Tensor causal_conv1d_update(CausalConv1dUpdateParams& params);
 
 torch::Tensor gated_layer_norm(GatedLayerNormParams& params);
 
 std::pair<torch::Tensor, torch::Tensor> partial_rotary_embedding(
     PartialRotaryEmbeddingParams& params);
+torch::Tensor hc_post(HcPostParams& params);
+
+std::tuple<torch::Tensor, torch::Tensor> quant_lightning_indexer(
+    QuantLightningIndexerParams& params);
+
+torch::Tensor hc_pre_inv_rms(HcPreInvRmsParams& params);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> hc_pre_sinkhorn(
+    HcPreSinkhornParams& params);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> hc_pre(
+    HcPreParams& params);
+
+std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> moe_gating_top_k_hash(
+    MoeGatingTopKHashParams& params);
+
+std::tuple<torch::Tensor, torch::Tensor> sparse_attn_sharedkv(
+    SparseAttnSharedkvParams& params);
+
+torch::Tensor sparse_flash_attention(SparseFlashAttentionParams& params);
+
+std::tuple<torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor,
+           torch::Tensor>
+compressor(CompressorParams& params);
+
+torch::Tensor quant_lightning_indexer_metadata(
+    QuantLightningIndexerMetadataParams& params);
+
+torch::Tensor sparse_attn_sharedkv_metadata(
+    SparseAttnSharedkvMetadataParams& params);
+
+void npu_inplace_partial_rotary_mul(NpuInplacePartialRotaryMulParams& params);
 
 std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
 fused_qkvzba_split_reshape_cat(FusedQkvzbaSplitReshapeParams& params);

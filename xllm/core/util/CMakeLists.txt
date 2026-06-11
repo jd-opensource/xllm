@@ -9,7 +9,7 @@ cc_library(
     blockingconcurrentqueue.h
     closure_guard.h
     concurrentqueue.h
-    device_name_utils.h
+    cpu_affinity.h
     double_buffer.h
     env_var.h
     hash_util.h
@@ -35,8 +35,9 @@ cc_library(
     uuid.h
     shared_memory_manager.h
   SRCS
-    device_name_utils.cpp
+    cpu_affinity.cpp
     env_var.cpp
+    hash_util.cpp
     http_downloader.cpp
     # TODO. add following at next pr.
     json_reader.cpp
@@ -51,6 +52,7 @@ cc_library(
     uuid.cpp
     shared_memory_manager.cpp
   DEPS
+    Folly::folly
     torch
     brpc
     OpenSSL::SSL
@@ -65,7 +67,6 @@ cc_library(
     absl::synchronization
     ${Python_LIBRARIES}
     proto::xllm_proto
-    :platform
     SMHasherSupport
     xxHash
     spdlog::spdlog

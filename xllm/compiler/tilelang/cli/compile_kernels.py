@@ -23,7 +23,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--device",
-        choices=["a2", "a3"],
+        choices=["a2", "a3", "a5"],
         default=None,
         help="Ascend device type used to resolve build-time toolchain settings.",
     )
@@ -47,9 +47,11 @@ def main(argv: list[str] | None = None) -> None:
     output_root.mkdir(parents=True, exist_ok=True)
 
     if args.target == "ascend":
-        from ..bootstrap import prepare_ascend
+        from ..bootstrap import ensure_ascend_ready
 
-        prepare_ascend()
+        if args.device is None:
+            raise ValueError("--device is required for Ascend TileLang kernel compilation.")
+        ensure_ascend_ready()
         from ..targets.ascend.build import build_kernels
 
         manifests = build_kernels(

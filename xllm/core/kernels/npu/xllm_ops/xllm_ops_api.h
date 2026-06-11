@@ -32,6 +32,8 @@ limitations under the License.
 #include <vector>
 
 namespace xllm::kernel::npu {
+inline constexpr int64_t kDsaMetadataBufferElements = 1024;
+
 namespace op_infer {
 constexpr int32_t N = 32;
 // npu tensor max size
@@ -135,7 +137,11 @@ std::tuple<at::Tensor, at::Tensor> dequant_swiglu_quant(
     const c10::optional<at::Tensor>& quant_offset,
     const c10::optional<at::Tensor>& group_index,
     bool activate_left,
-    int64_t quant_mode);
+    int64_t quant_mode,
+    int64_t swiglu_mode,
+    double clamp_limit,
+    double glu_alpha,
+    double glu_bias);
 
 std::pair<torch::Tensor, torch::Tensor> npu_mega_chunk_gdn(
     torch::Tensor& q,
@@ -148,4 +154,222 @@ std::pair<torch::Tensor, torch::Tensor> npu_mega_chunk_gdn(
     bool output_final_state = false,
     const std::optional<torch::Tensor>& cu_seqlens = std::nullopt,
     bool use_qk_l2norm_in_kernel = false);
+
+at::Tensor hc_post(const at::Tensor& x,
+                   const at::Tensor& residual,
+                   const at::Tensor& post,
+                   const at::Tensor& comb);
+
+std::tuple<at::Tensor, at::Tensor> quant_lightning_indexer(
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& weights,
+    const at::Tensor& query_dequant_scale,
+    const at::Tensor& key_dequant_scale,
+    int64_t query_quant_mode,
+    int64_t key_quant_mode,
+    const c10::optional<at::Tensor>& actual_seq_lengths_query,
+    const c10::optional<at::Tensor>& actual_seq_lengths_key,
+    const c10::optional<at::Tensor>& block_table,
+    const c10::optional<at::Tensor>& metadata,
+    c10::string_view layout_query,
+    c10::string_view layout_key,
+    int64_t sparse_count,
+    int64_t sparse_mode,
+    int64_t pre_tokens,
+    int64_t next_tokens,
+    int64_t cmp_ratio,
+    bool return_value);
+at::Tensor hc_pre_inv_rms(const at::Tensor& x, double epsilon);
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor> hc_pre_sinkhorn(
+    const at::Tensor& mixes,
+    const at::Tensor& rsqrt,
+    const at::Tensor& hc_scale,
+    const at::Tensor& hc_base,
+    const at::Tensor& x,
+    int64_t hc_mult,
+    int64_t hc_sinkhorn_iters,
+    double hc_eps);
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor> hc_pre(
+    const at::Tensor& x,
+    const at::Tensor& hc_fn,
+    const at::Tensor& hc_scale,
+    const at::Tensor& hc_base,
+    int64_t hc_mult,
+    int64_t hc_sinkhorn_iters,
+    double norm_eps,
+    double hc_eps);
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor> moe_gating_top_k_hash(
+    const at::Tensor& x,
+    int64_t k,
+    const c10::optional<at::Tensor>& bias,
+    const c10::optional<at::Tensor>& input_ids,
+    const c10::optional<at::Tensor>& tid2eid,
+    int64_t k_group,
+    int64_t group_count,
+    double routed_scaling_factor,
+    double eps,
+    int64_t group_select_mode,
+    int64_t renorm,
+    int64_t norm_type,
+    bool out_flag);
+
+std::tuple<at::Tensor, at::Tensor> sparse_attn_sharedkv(
+    const at::Tensor& q,
+    const c10::optional<at::Tensor>& ori_kv,
+    const c10::optional<at::Tensor>& cmp_kv,
+    const c10::optional<at::Tensor>& ori_sparse_indices,
+    const c10::optional<at::Tensor>& cmp_sparse_indices,
+    const c10::optional<at::Tensor>& ori_block_table,
+    const c10::optional<at::Tensor>& cmp_block_table,
+    const c10::optional<at::Tensor>& cu_seqlens_q,
+    const c10::optional<at::Tensor>& cu_seqlens_ori_kv,
+    const c10::optional<at::Tensor>& cu_seqlens_cmp_kv,
+    const c10::optional<at::Tensor>& seqused_q,
+    const c10::optional<at::Tensor>& seqused_kv,
+    const c10::optional<at::Tensor>& sinks,
+    const c10::optional<at::Tensor>& metadata,
+    double softmax_scale,
+    int64_t cmp_ratio,
+    int64_t ori_mask_mode,
+    int64_t cmp_mask_mode,
+    int64_t ori_win_left,
+    int64_t ori_win_right,
+    c10::string_view layout_q,
+    c10::string_view layout_kv,
+    bool return_softmax_lse);
+
+at::Tensor sparse_flash_attention(
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const at::Tensor& sparse_indices,
+    const c10::optional<at::Tensor>& block_table,
+    const c10::optional<at::Tensor>& actual_seq_lengths_query,
+    const c10::optional<at::Tensor>& actual_seq_lengths_kv,
+    const c10::optional<at::Tensor>& query_rope,
+    const c10::optional<at::Tensor>& key_rope,
+    double scale_value,
+    int64_t sparse_block_size,
+    c10::string_view layout_query,
+    c10::string_view layout_kv,
+    int64_t sparse_mode);
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> mla_preprocess(
+    const at::Tensor& input,
+    const at::Tensor& gamma0,
+    const at::Tensor& beta0,
+    const at::Tensor& quant_scale0,
+    const at::Tensor& quant_offset0,
+    const at::Tensor& wdqkv,
+    const at::Tensor& descale0,
+    const at::Tensor& bias0,
+    const at::Tensor& gamma1,
+    const at::Tensor& beta1,
+    const at::Tensor& quant_scale1,
+    const at::Tensor& quant_offset1,
+    const at::Tensor& wuq,
+    const at::Tensor& descale1,
+    const at::Tensor& bias1,
+    const at::Tensor& gamma2,
+    const at::Tensor& cos,
+    const at::Tensor& sin,
+    const at::Tensor& wuk,
+    const at::Tensor& kv_cache,
+    const at::Tensor& kv_cache_rope,
+    const at::Tensor& slot_mapping,
+    const at::Tensor& ctkv_scale,
+    const at::Tensor& q_nope_scale,
+    int64_t wdq_dim,
+    int64_t q_rope_dim,
+    int64_t k_rope_dim,
+    double epsilon,
+    int64_t q_rotary_coeff,
+    int64_t k_rotary_coeff,
+    bool transepose_wdq,
+    bool transepose_wuq,
+    bool transepose_wuk,
+    int64_t cache_mode,
+    int64_t quant_mode,
+    bool do_rms_norm,
+    int64_t wdkv_split_count);
+
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor, at::Tensor>
+compressor(const at::Tensor& x,
+           const at::Tensor& wkv,
+           const at::Tensor& wgate,
+           at::Tensor& kv_state,
+           at::Tensor& score_state,
+           const at::Tensor& ape,
+           const at::Tensor& norm_weight,
+           const at::Tensor& rope_sin,
+           const at::Tensor& rope_cos,
+           const c10::optional<at::Tensor>& kv_block_table,
+           const c10::optional<at::Tensor>& score_block_table,
+           const c10::optional<at::Tensor>& cu_seqlens,
+           const c10::optional<at::Tensor>& seqused,
+           const c10::optional<at::Tensor>& start_pos,
+           int64_t rope_head_dim,
+           int64_t cmp_ratio,
+           int64_t coff,
+           double norm_eps,
+           int64_t rotary_mode,
+           bool enable_grad);
+
+at::Tensor quant_lightning_indexer_metadata(
+    int64_t num_heads_q,
+    int64_t num_heads_k,
+    int64_t head_dim,
+    int64_t query_quant_mode,
+    int64_t key_quant_mode,
+    const c10::optional<at::Tensor>& actual_seq_lengths_query,
+    const c10::optional<at::Tensor>& actual_seq_lengths_key,
+    int64_t batch_size,
+    int64_t max_seqlen_q,
+    int64_t max_seqlen_k,
+    const c10::string_view layout_query,
+    c10::string_view layout_key,
+    int64_t sparse_count,
+    int64_t sparse_mode,
+    int64_t pre_tokens,
+    int64_t next_tokens,
+    int64_t cmp_ratio,
+    const c10::string_view device);
+
+at::Tensor sparse_attn_sharedkv_metadata(
+    int64_t num_heads_q,
+    int64_t num_heads_kv,
+    int64_t head_dim,
+    const c10::optional<at::Tensor>& cu_seqlens_q,
+    const c10::optional<at::Tensor>& cu_seqlens_ori_kv,
+    const c10::optional<at::Tensor>& cu_seqlens_cmp_kv,
+    const c10::optional<at::Tensor>& seqused_q,
+    const c10::optional<at::Tensor>& seqused_kv,
+    int64_t batch_size,
+    int64_t max_seqlen_q,
+    int64_t max_seqlen_kv,
+    int64_t ori_topk,
+    int64_t cmp_topk,
+    int64_t cmp_ratio,
+    int64_t ori_mask_mode,
+    int64_t cmp_mask_mode,
+    int64_t ori_win_left,
+    int64_t ori_win_right,
+    c10::string_view layout_q,
+    c10::string_view layout_kv,
+    bool has_ori_kv,
+    bool has_cmp_kv);
+
+void npu_inplace_partial_rotary_mul(torch::Tensor& x,
+                                    const torch::Tensor& r1,
+                                    const torch::Tensor& r2,
+                                    c10::string_view rotary_mode,
+                                    at::IntArrayRef partial_slice);
+
+void scatter_nd_update(torch::Tensor& var,
+                       const torch::Tensor& indices,
+                       const torch::Tensor& updates);
 }  // namespace xllm::kernel::npu

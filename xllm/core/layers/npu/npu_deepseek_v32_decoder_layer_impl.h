@@ -62,6 +62,22 @@ class NpuDeepseekV32DecoderLayerImpl : public BaseLayer {
                         std::atomic<bool>* event_flag = nullptr,
                         int node_id = 0);
 
+  torch::Tensor forward_with_topk(torch::Tensor& x,
+                                  torch::Tensor& cos_pos,
+                                  torch::Tensor& sin_pos,
+                                  torch::Tensor& attn_mask,
+                                  KVCache& kv_cache,
+                                  const ModelInputParams& input_params,
+                                  const torch::Tensor& shared_topk_indices,
+                                  torch::Tensor* output_topk_indices,
+                                  aclrtEvent* event = nullptr,
+                                  std::atomic<bool>* event_flag = nullptr,
+                                  int node_id = 0);
+
+  bool is_topk_sharing_enabled() const { return skip_topk_ || output_topk_; }
+  bool skip_topk() const { return skip_topk_; }
+  bool output_topk() const { return output_topk_; }
+
  private:
   struct ShardingConfig {
     bool is_sharded;
@@ -126,7 +142,9 @@ class NpuDeepseekV32DecoderLayerImpl : public BaseLayer {
                                torch::Tensor& attn_mask,
                                KVCache& kv_cache,
                                ModelInputParams& input_params,
-                               bool is_prefill);
+                               bool is_prefill,
+                               const torch::Tensor& shared_topk_indices,
+                               torch::Tensor* output_topk_indices);
 
   torch::Tensor block_tables_placeholder_;
   std::string model_name_;
@@ -138,6 +156,8 @@ class NpuDeepseekV32DecoderLayerImpl : public BaseLayer {
   int32_t v_head_dim_;
   int32_t kv_lora_rank_;
   int32_t qk_rope_head_dim_;
+  bool skip_topk_ = false;
+  bool output_topk_ = false;
 
   int32_t rank_;
   int32_t first_k_dense_replace_;

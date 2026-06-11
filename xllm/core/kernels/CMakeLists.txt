@@ -26,6 +26,10 @@ if(USE_ILU)
   add_subdirectory(ilu)
 endif()
 
+if(USE_DCU)
+  add_subdirectory(dcu)
+endif()
+
 cc_library(
   NAME
     kernels
@@ -43,4 +47,5 @@ cc_library(
     $<$<BOOL:${USE_MUSA}>:musa_kernels>
     $<$<BOOL:${USE_CUDA}>:cuda_kernels>
     $<$<BOOL:${USE_ILU}>:ilu_kernels>
+    $<$<BOOL:${USE_DCU}>:dcu_kernels>
 )

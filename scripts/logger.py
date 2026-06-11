@@ -50,8 +50,11 @@ class _GlogStyleFormatter(logging.Formatter):
 
 logger = logging.getLogger("xllm")
 logger.setLevel(logging.INFO)
+# don't propagate to root logger
+logger.propagate = False
 
-_handler = logging.StreamHandler()
-_handler.setFormatter(_GlogStyleFormatter())
-
-logger.addHandler(_handler)
+if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+    # add stream handler if not already added
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(_GlogStyleFormatter())
+    logger.addHandler(_handler)

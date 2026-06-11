@@ -26,6 +26,8 @@ limitations under the License.
 
 #include "core/common/global_flags.h"
 #include "core/common/interruption_bus.h"
+#include "core/framework/config/kv_cache_config.h"
+#include "core/framework/config/scheduler_config.h"
 #include "core/framework/kv_cache/kv_cache.h"
 #include "core/framework/model/model_input_params.h"
 #include "core/framework/model_context.h"
@@ -60,6 +62,7 @@ class MtpModelImplBase : public torch::nn::Module {
     dp_rank_ = parallel_args.rank() / dp_local_tp_size_;
     rank_ = parallel_args.rank();
     num_experts_per_tok_ = model_args.num_experts_per_tok();
+    index_topk_ = model_args.index_topk();
 
     embed_tokens_ =
         register_module("embed_tokens", layer::NpuWordEmbedding(context));
@@ -101,7 +104,7 @@ class MtpModelImplBase : public torch::nn::Module {
 
     torch::Tensor h = embed_tokens_(tokens, 0);
     torch::Tensor enorm = enorm_(h, 0);
-    torch::Tensor input_embedding = input_params.input_embedding;
+    torch::Tensor input_embedding = input_params.embedding.input_embedding;
     if (input_embedding.defined()) {
       h = input_embedding;
     }
@@ -126,19 +129,19 @@ class MtpModelImplBase : public torch::nn::Module {
 
     torch::Tensor attn_mask;
     // TODO(liangzhiwei20): support prefix cache for deepseek .
-    if (FLAGS_enable_chunked_prefill) {
-      int num_sequences = input_params.num_sequences;
+    if (::xllm::SchedulerConfig::get_instance().enable_chunked_prefill()) {
+      int num_sequences = input_params.meta.num_sequences;
       if (num_sequences > 0) {
         std::vector<torch::Tensor> req_mask_vec;
         req_mask_vec.reserve(num_sequences);
 
         for (int j = 0; j < num_sequences; j++) {
-          auto mask =
-              attn_mask_.gen_append_mask(input_params.q_seq_lens_vec[j],
-                                         input_params.kv_seq_lens_vec[j],
-                                         input_params.kv_max_seq_len,
-                                         h.dtype().toScalarType(),
-                                         h.device());
+          auto mask = attn_mask_.gen_append_mask(
+              input_params.attention.host.q_seq_lens[j],
+              input_params.attention.host.kv_seq_lens[j],
+              input_params.meta.kv_max_seq_len,
+              h.dtype().toScalarType(),
+              h.device());
           req_mask_vec.emplace_back(mask);
         }
         attn_mask = torch::cat(req_mask_vec, 0);
@@ -147,8 +150,9 @@ class MtpModelImplBase : public torch::nn::Module {
         attn_mask =
             attn_mask_.get_attn_mask(128, h.dtype().toScalarType(), h.device());
       }
-    } else if (model_type_ == "deepseek_v3" && FLAGS_enable_prefix_cache &&
-               !input_params.batch_forward_type.is_decode()) {
+    } else if (model_type_ == "deepseek_v3" &&
+               ::xllm::KVCacheConfig::get_instance().enable_prefix_cache() &&
+               !input_params.meta.batch_forward_type.is_decode()) {
       attn_mask =
           attn_mask_.get_attn_mask(512, h.dtype().toScalarType(), h.device());
     } else {
@@ -163,44 +167,52 @@ class MtpModelImplBase : public torch::nn::Module {
         torch::TensorOptions().dtype(torch::kInt32).device(tokens.device()));
 
     // TODO(liangzhiwei20): MTP need more support for layer wise copy.
-    if (input_params.layer_wise_load_synchronizer != nullptr) {
+    if (input_params.parallel.layer_wise_load_synchronizer != nullptr) {
       LOG(FATAL) << "MTP not support layer wise copy!";
     }
 
     ModelInputParams& input_params_new =
         const_cast<ModelInputParams&>(input_params);
-    input_params_new.expert_array = expert_array;
+    input_params_new.expert.expert_array = expert_array;
 
+    torch::Tensor prev_topk_indices = input_params_new.dsa_topk_indices;
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
-      if (input_params.layer_synchronizer != nullptr) {
-        event = input_params.layer_synchronizer->get_event(i);
-        event_flag = input_params.layer_synchronizer->get_event_flag(i);
+      if (input_params.parallel.layer_synchronizer != nullptr) {
+        event = input_params.parallel.layer_synchronizer->get_event(i);
+        event_flag =
+            input_params.parallel.layer_synchronizer->get_event_flag(i);
       }
       if (!input_params.synchronize_layer(i)) {
         return ModelOutput();
       }
 
       auto& layer = layers_[i];
+      const int32_t layer_index = static_cast<int32_t>(i);
 
       if (layer_forward_interrupted_) {
         LOG(INFO) << "Forward interrupted at layer: " << i;
         return ModelOutput();
       }
 
-      layer(h,
-            cos_pos,
-            sin_pos,
-            attn_mask,
-            kv_caches[i],
-            input_params_new,
-            event,
-            event_flag);
+      forward_layer(layer,
+                    h,
+                    cos_pos,
+                    sin_pos,
+                    attn_mask,
+                    kv_caches[i],
+                    input_params_new,
+                    prev_topk_indices,
+                    layer_index,
+                    event,
+                    event_flag);
     }
 
     auto hidden_states = final_norm_(h, 0);
-    return ModelOutput(hidden_states);
+    ModelOutput output(hidden_states);
+    output.dsa_topk_indices = prev_topk_indices;
+    return output;
   }
 
   // load the weight from the checkpoint
@@ -262,6 +274,27 @@ class MtpModelImplBase : public torch::nn::Module {
   }
 
  protected:
+  virtual void forward_layer(DecoderLayerType& layer,
+                             torch::Tensor& h,
+                             torch::Tensor& cos_pos,
+                             torch::Tensor& sin_pos,
+                             torch::Tensor& attn_mask,
+                             KVCache& kv_cache,
+                             const ModelInputParams& input_params,
+                             torch::Tensor&,
+                             int32_t,
+                             aclrtEvent* event,
+                             std::atomic<bool>* event_flag) {
+    layer(h,
+          cos_pos,
+          sin_pos,
+          attn_mask,
+          kv_cache,
+          input_params,
+          event,
+          event_flag);
+  }
+
   int32_t dp_rank_;
   int32_t rank_;
   int32_t dp_size_;
@@ -285,10 +318,11 @@ class MtpModelImplBase : public torch::nn::Module {
 
   bool layer_forward_interrupted_ = false;
   bool enable_rot_ = false;
+  torch::Device device_;
+  int32_t index_topk_ = 0;
 
  private:
   std::string model_type_;
-  torch::Device device_;
 };
 
 template <typename MtpModelType>
@@ -318,6 +352,17 @@ class MtpForCausalLMImplBase : public torch::nn::Module {
   virtual torch::Tensor logits(const torch::Tensor& hidden_states,
                                const torch::Tensor& seleted_idxes) {
     return lm_head_(hidden_states, seleted_idxes, 0);
+  }
+
+  // hidden_states: [num_tokens, hidden_size]
+  // seleted_idxes: [num_tokens]
+  // out_hidden: [num_seqs, hidden_size]
+  // returns: [num_tokens, vocab_size]
+  virtual torch::Tensor logits(const torch::Tensor& hidden_states,
+                               const torch::Tensor& seleted_idxes,
+                               torch::Tensor& out_hidden) {
+    return lm_head_->forward_with_hidden(
+        hidden_states, seleted_idxes, out_hidden, 0);
   }
 
   // hidden_states: [num_tokens, hidden_size]
